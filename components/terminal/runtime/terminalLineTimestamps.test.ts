@@ -302,6 +302,25 @@ const createFakeTerm = (options: {
       (term as { cols: number }).cols = Math.max(1, nextCols);
       (term as { rows: number }).rows = Math.max(1, nextRows);
     },
+    reset() {
+      // Mirror xterm term.reset(): dispose live markers with the old buffer and
+      // return to a blank normal-screen viewport. Bare ledger stamps must not
+      // survive via numeric lines that still fit rows.
+      for (const marker of [...liveMarkers]) {
+        if (!marker.isDisposed) marker.dispose();
+      }
+      normalState.absoluteCursorLine = 0;
+      normalState.baseY = 0;
+      normalState.column = 0;
+      normalState.lineText.clear();
+      altState.absoluteCursorLine = 0;
+      altState.baseY = 0;
+      altState.column = 0;
+      altState.lineText.clear();
+      screen = "normal";
+      cursorLine = 0;
+      viewportYOverride = null;
+    },
     write(data: string, callback?: () => void) {
       writes.push(data);
       for (let index = 0; index < data.length; index += 1) {
@@ -981,6 +1000,50 @@ test("full-buffer scrollback trim rebases ledger and drops lines past the top", 
   for (const row of painted) {
     assert.match(row.label, /^12:00:\d{2}$/);
   }
+});
+
+test("term.reset clears saturated bare ledger stamps", async () => {
+  // Saturated mode copies marker.line onto bare ledger entries and releases
+  // anchors. xterm.reset only disposes live markers; without a reset hook,
+  // rebase keeps bare lines that still fit the fresh viewport and paints old
+  // times onto post-reset / snapshot rows.
+  const fake = createFakeTerm({ rows: 4, scrollback: 4, circularTrim: true });
+  const { term } = fake;
+
+  for (let second = 0; second < 20; second += 1) {
+    writeTerminalDataWithLineTimestamps(
+      term as never,
+      `seed-${second}\r\n`,
+      () => {},
+      { timestampDate: new Date(2026, 5, 6, 12, 0, second % 60) },
+    );
+  }
+  assert.equal(isTerminalScrollbackSaturated(term as never), true);
+  await new Promise((resolve) => { setTimeout(resolve, 0); });
+  const ledgerBefore = getTerminalLineTimestampLedgerCount(term as never);
+  assert.ok(ledgerBefore > 1, "expected a populated saturated ledger");
+
+  (term as { reset: () => void }).reset();
+
+  assert.equal(
+    getTerminalLineTimestampLedgerCount(term as never),
+    0,
+    "buffer reset must wipe bare ledger stamps with the disposed markers",
+  );
+  assert.deepEqual(
+    getVisibleTerminalLineTimestampRows(term as never),
+    [],
+    "gutter must not paint pre-reset labels onto the cleared buffer",
+  );
+
+  writeTerminalDataWithLineTimestamps(
+    term as never,
+    "after-reset\r\n",
+    () => {},
+    { timestampDate: new Date(2026, 5, 6, 13, 0, 0) },
+  );
+  const painted = getVisibleTerminalLineTimestampRows(term as never);
+  assert.deepEqual(painted, [{ row: 0, label: "13:00:00" }]);
 });
 
 test("saturated scrollback keeps ledger stamps without attaching new live markers", async () => {

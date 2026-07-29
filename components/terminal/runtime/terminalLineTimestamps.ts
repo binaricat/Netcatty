@@ -92,6 +92,8 @@ type TimestampStore = {
   lastSeenCols: number | null;
   /** True after term.resize is wrapped to rematerialize anchors before reflow. */
   reflowHookInstalled?: boolean;
+  /** True after term.reset is wrapped to clear bare ledger stamps with the buffer. */
+  resetHookInstalled?: boolean;
   /** @deprecated materialize path removed; always false. */
   ledgerMaterialized: boolean;
   /**
@@ -537,6 +539,7 @@ const getTimestampStore = (term: XTerm): TimestampStore => {
     });
     stores.set(term, created);
     installReflowMaterializeHook(term, created);
+    installBufferResetHook(term, created);
     store = created;
   }
   return store;
@@ -575,6 +578,25 @@ const installReflowMaterializeHook = (term: XTerm, store: TimestampStore): void 
       materializeTimestampLedgerToMarkers(term);
     }
     originalResize.call(this, cols, rows);
+  };
+};
+
+/**
+ * Clear the timestamp store when xterm replaces its buffer. Saturated mode
+ * releases live markers and keeps bare line numbers; after term.reset() (or
+ * RIS → onRequestReset) xterm only disposes markers, so rebase would keep
+ * bare entries whose lines still fit the fresh viewport and paint old times
+ * onto snapshot / post-reset rows.
+ */
+const installBufferResetHook = (term: XTerm, store: TimestampStore): void => {
+  if (store.resetHookInstalled) return;
+  store.resetHookInstalled = true;
+  const termWithReset = term as XTerm & { reset?: () => void };
+  const originalReset = termWithReset.reset;
+  if (typeof originalReset !== "function") return;
+  termWithReset.reset = function resetWithTimestampClear(this: XTerm): void {
+    originalReset.call(this);
+    resetTimestampStore(store);
   };
 };
 
