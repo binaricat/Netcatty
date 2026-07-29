@@ -884,6 +884,21 @@ const clearTrimSentinel = (store: TimestampStore): void => {
 };
 
 /**
+ * True when trimSentinelLine is set but the live marker no longer matches
+ * (moved or disposed). True-flood writes skip ledger maintenance, so a prior
+ * saturated sentinel can go stale across flood output.
+ */
+const isTrimSentinelStale = (store: TimestampStore): boolean => {
+  if (store.trimSentinelLine === null) return false;
+  const sentinel = store.trimSentinel;
+  if (!sentinel || sentinel.isDisposed) return true;
+  if (typeof sentinel.line !== "number" || !Number.isFinite(sentinel.line)) {
+    return true;
+  }
+  return sentinel.line !== store.trimSentinelLine;
+};
+
+/**
  * Keep one cursor-pinned marker while saturated so the next circular recycle
  * remains observable after ledger anchors are retired.
  */
@@ -1816,6 +1831,18 @@ const writeTerminalDataWithSecondLedger = (
   };
   const columns = _getTerminalColumnCount(term);
   const capacity = resolveTerminalLineTimestampCapacity(term);
+  // Saturated + missing/stale trim sentinel: rebase/clear and re-arm *before*
+  // recording stamps. True-flood writes can move or dispose an existing
+  // sentinel without updating trimSentinelLine; stamping first lets the
+  // post-write rebase apply the whole flood-era delta to the new entry.
+  // Also covers the no-sentinel case (flood fill with no prior sentinel).
+  if (
+    isTerminalScrollbackSaturated(term)
+    && (store.trimSentinelLine === null || isTrimSentinelStale(store))
+  ) {
+    rebaseLedgerForScrollback(term, store);
+    maintainTrimSentinel(term, store);
+  }
   let ledgerChanged = false;
   const pendingAnchors: TimestampLedgerEntry[] = [];
   for (const segment of segments) {
@@ -1842,15 +1869,6 @@ const writeTerminalDataWithSecondLedger = (
       segment.data,
       columns,
     );
-  }
-
-  // When already saturated with no trim sentinel (e.g. after a true-flood fill),
-  // rebase and arm *before* write so this write's circular recycle can shift
-  // bare pending stamps. Waiting until the post-write callback leaves the first
-  // later stamp one line too low.
-  if (isTerminalScrollbackSaturated(term) && store.trimSentinelLine === null) {
-    rebaseLedgerForScrollback(term, store);
-    maintainTrimSentinel(term, store);
   }
 
   const writeStartedAt = shouldMeasureDiagnostics ? performance.now() : 0;

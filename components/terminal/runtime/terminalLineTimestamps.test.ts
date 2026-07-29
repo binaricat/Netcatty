@@ -1133,6 +1133,58 @@ test("flood fill then first saturated stamp keeps gutter aligned after circular 
   resetTerminalOutputPressure(term as never);
 });
 
+test("armed sentinel then flood keeps first later stamp on its row", async () => {
+  // Saturated writes arm a trim sentinel. True-flood then moves/disposes it
+  // without ledger sync; the first later stamp must rebase that stale
+  // sentinel *before* recording, or the flood-era delta lands on the new entry.
+  const fake = createFakeTerm({ rows: 4, scrollback: 4, circularTrim: true });
+  const { term } = fake;
+
+  for (let second = 0; second < 20; second += 1) {
+    writeTerminalDataWithLineTimestamps(
+      term as never,
+      `seed-${second}\r\n`,
+      () => {},
+      { timestampDate: new Date(2026, 5, 6, 12, 0, second % 60) },
+    );
+  }
+  assert.equal(isTerminalScrollbackSaturated(term as never), true);
+  assert.ok(getTerminalLineTimestampLedgerCount(term as never) > 0);
+
+  setTerminalOutputPressureLargeOutput(term as never, true);
+  for (let index = 0; index < 16; index += 1) {
+    writeTerminalDataWithLineTimestamps(term as never, `flood-${index}\r\n`, () => {});
+  }
+  setTerminalOutputPressureLargeOutput(term as never, false);
+
+  writeTerminalDataWithLineTimestamps(
+    term as never,
+    "target-line\r\n",
+    () => {},
+    { timestampDate: new Date(2026, 5, 6, 12, 3, 0) },
+  );
+
+  await new Promise((resolve) => { setTimeout(resolve, 0); });
+  fake.setViewportY(Math.max(0, fake.getAbsoluteCursorLine() - (term.rows - 1)));
+  const painted = getVisibleTerminalLineTimestampRows(term as never);
+  const stamp = painted.find((row) => row.label === "12:03:00");
+  assert.ok(stamp, `expected post-flood stamp in gutter, got ${JSON.stringify(painted)}`);
+
+  const viewportY = (term.buffer.active as { viewportY: number }).viewportY;
+  const stampedText = (
+    term.buffer.active.getLine(viewportY + stamp.row) as {
+      translateToString: (trimRight?: boolean) => string;
+    }
+  ).translateToString(true);
+  assert.equal(
+    stampedText,
+    "target-line",
+    `gutter stamp must sit on target-line after stale-sentinel flood, got ${JSON.stringify({ stampedText, painted })}`,
+  );
+
+  resetTerminalOutputPressure(term as never);
+});
+
 
 test("simple ASCII control text gate matches seq-style floods", () => {
   assert.equal(isSimpleAsciiControlText("1\n2\n3\n"), true);
