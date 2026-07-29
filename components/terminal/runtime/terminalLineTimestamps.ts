@@ -524,10 +524,10 @@ const isPartialScrollingRegionBounds = (
 
 /**
  * Saturated bare ledger must rematerialize before local row edits, erase-display,
- * linefeeds / IND / NEL that will scroll inside a (possibly just-established)
- * DECSTBM region, or reverse-index (always an in-place splice like CSI T).
- * Walks `data` so DECSTBM in the same write as a following scroll control is
- * detected — the terminal's pre-write region alone would miss that case.
+ * linefeeds (LF / VT / FF) / IND / NEL that will scroll inside a (possibly
+ * just-established) DECSTBM region, or reverse-index (always an in-place splice
+ * like CSI T). Walks `data` so DECSTBM in the same write as a following scroll
+ * control is detected — the terminal's pre-write region alone would miss that case.
  */
 const dataRequiresSaturatedAnchorRematerialize = (
   term: XTerm,
@@ -538,8 +538,15 @@ const dataRequiresSaturatedAnchorRematerialize = (
   let scrollBottom = initialBottom;
   for (let index = 0; index < data.length;) {
     const char = data[index];
-    // LF and C1 IND/NEL scroll a partial DECSTBM region in-place (no circular trim).
-    if (char === "\n" || char === C1_IND || char === C1_NEL) {
+    // LF / VT / FF and C1 IND/NEL scroll a partial DECSTBM region in-place
+    // (no circular trim). xterm routes VT and FF through the same lineFeed path.
+    if (
+      char === "\n"
+      || char === "\x0b"
+      || char === "\x0c"
+      || char === C1_IND
+      || char === C1_NEL
+    ) {
       if (isPartialScrollingRegionBounds(scrollTop, scrollBottom, rows)) {
         return true;
       }
@@ -1046,10 +1053,20 @@ export const applyAltScreenAction = (
   return { ...cursor, altActive: false };
 };
 
+/** Index of the next ESC or 8-bit C1 CSI at/after `from`, or -1 if none. */
+const nextEscapeOrC1CsiIndex = (data: string, from: number): number => {
+  const nextEsc = data.indexOf("\x1b", from);
+  const nextC1 = data.indexOf(C1_CSI, from);
+  if (nextEsc === -1) return nextC1;
+  if (nextC1 === -1) return nextEsc;
+  return Math.min(nextEsc, nextC1);
+};
+
 /**
  * Walk a data segment for stamp line estimates: honor soft-wrap on the normal
  * buffer, ignore visual rows while the alternate screen is active (vim/less),
  * and toggle alt on enter/leave CSI so post-TUI stamps are not inflated.
+ * Treats 7-bit ESC and 8-bit C1 CSI as sequence boundaries (xterm accepts both).
  */
 const advanceStampCursorThroughData = (
   term: XTerm,
@@ -1059,14 +1076,15 @@ const advanceStampCursorThroughData = (
 ): StampCursorEstimate => {
   let { absoluteLine, column, wraparoundMode, altActive } = cursor;
   for (let index = 0; index < data.length;) {
-    if (data[index] === "\x1b") {
+    const char = data[index];
+    if (char === "\x1b" || char === C1_CSI) {
       const sequence = readEscapeSequence(data, index);
       if (!sequence) {
         index += 1;
         continue;
       }
       if (!sequence.complete) {
-        // Incomplete ESC at chunk end — segmenter holds it; do not invent rows.
+        // Incomplete ESC/C1 CSI at chunk end — segmenter holds it; do not invent rows.
         break;
       }
       const altAction = getAlternateScreenAction(sequence.sequence);
@@ -1085,24 +1103,24 @@ const advanceStampCursorThroughData = (
     }
 
     if (altActive) {
-      const nextEsc = data.indexOf("\x1b", index + 1);
-      index = nextEsc === -1 ? data.length : nextEsc;
+      const next = nextEscapeOrC1CsiIndex(data, index + 1);
+      index = next === -1 ? data.length : next;
       continue;
     }
 
-    const nextEsc = data.indexOf("\x1b", index);
-    const end = nextEsc === -1 ? data.length : nextEsc;
-    if (end > index) {
+    const end = nextEscapeOrC1CsiIndex(data, index);
+    const spanEnd = end === -1 ? data.length : end;
+    if (spanEnd > index) {
       ({ absoluteLine, column, wraparoundMode } = advanceStampCursorByData(
         term,
         absoluteLine,
         column,
-        data.slice(index, end),
+        data.slice(index, spanEnd),
         columns,
         wraparoundMode,
       ));
     }
-    index = end;
+    index = spanEnd;
   }
   return { absoluteLine, column, wraparoundMode, altActive };
 };
@@ -2390,7 +2408,7 @@ const writeTerminalDataWithSecondLedger = (
   }
   // Saturated mode releases live anchors for trim perf. CSI L/M/S/T (7-bit ESC[
   // or 8-bit C1 CSI), erase-display (CSI J), reverse-index (ESC M / C1 RI), and
-  // LF/IND/NEL inside a DECSTBM region move/dispose buffer rows without a
+  // LF/VT/FF/IND/NEL inside a DECSTBM region move/dispose buffer rows without a
   // global circular-trim delta — rematerialize first so xterm can shift or
   // dispose those markers, then release copies the updated lines. Scan the
   // prefix-joined stream so IL/DL/SU/SD/ED/RI and same-chunk DECSTBM+LF/IND
@@ -2439,16 +2457,18 @@ const writeTerminalDataWithSecondLedger = (
   const advanceDataHandlingResets = (segmentData: string): void => {
     let index = 0;
     while (index < segmentData.length) {
-      if (segmentData[index] !== "\x1b") {
-        const nextEsc = segmentData.indexOf("\x1b", index);
-        const end = nextEsc === -1 ? segmentData.length : nextEsc;
+      const char = segmentData[index];
+      // 7-bit ESC and 8-bit C1 CSI both introduce sequences (alt-screen, RIS, …).
+      if (char !== "\x1b" && char !== C1_CSI) {
+        const end = nextEscapeOrC1CsiIndex(segmentData, index);
+        const spanEnd = end === -1 ? segmentData.length : end;
         stampCursor = advanceStampCursorThroughData(
           term,
           stampCursor,
-          segmentData.slice(index, end),
+          segmentData.slice(index, spanEnd),
           columns,
         );
-        index = end;
+        index = spanEnd;
         continue;
       }
       const sequence = readEscapeSequence(segmentData, index);

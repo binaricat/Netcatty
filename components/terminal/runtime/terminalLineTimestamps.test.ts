@@ -750,7 +750,8 @@ const createFakeTerm = (options: {
           applyIndexControl(char === "\x84" ? "ind" : char === "\x85" ? "nel" : "ri");
           continue;
         }
-        if (char === "\n") {
+        // LF / VT / FF — xterm routes all three through the same lineFeed path.
+        if (char === "\n" || char === "\x0b" || char === "\x0c") {
           const relativeY = state.absoluteCursorLine - state.baseY;
           const partialRegion = scrollTop > 0 || scrollBottom < rows - 1;
           // Inside a DECSTBM region, LF at the bottom splices rows in-place
@@ -1207,6 +1208,23 @@ test("alt-screen newlines do not inflate post-exit stamp anchor lines", () => {
     liveMarkers[0]?.line,
     0,
     `expected stamp on restored normal buffer line 0, got ${liveMarkers[0]?.line}`,
+  );
+});
+
+test("C1 CSI alt-screen newlines do not inflate post-exit stamp anchor lines", () => {
+  // 8-bit CSI (\x9b?1049h/l) must freeze the stamp walker like ESC[?1049h/l.
+  const { term, liveMarkers } = createFakeTerm({ rows: 24, scrollback: 1000 });
+  const payload = `\x9b?1049h${"frame\n".repeat(30)}\x9b?1049lprompt\r\n`;
+  writeTerminalDataWithLineTimestamps(term as never, payload, () => {}, {
+    timestampDate: new Date(2026, 5, 6, 12, 0, 0),
+  });
+
+  assert.equal(getTerminalLineTimestampLedgerCount(term as never), 1);
+  assert.equal(liveMarkers.length, 1);
+  assert.equal(
+    liveMarkers[0]?.line,
+    0,
+    `expected stamp on restored normal buffer line 0 after C1 alt, got ${liveMarkers[0]?.line}`,
   );
 });
 
@@ -2476,6 +2494,116 @@ test("saturated DECSTBM linefeed rematerializes anchors inside the scroll region
       row.label,
       expected,
       `stamp must follow content after DECSTBM LF, got ${JSON.stringify({ text, row, painted, regionTopText, viewportY })}`,
+    );
+  }
+});
+
+test("saturated DECSTBM VT rematerializes anchors inside the scroll region", async () => {
+  // C0 VT (\x0b) shares xterm's lineFeed path with LF; saturated bare ledger
+  // must rematerialize before the in-place DECSTBM splice.
+  const fake = createFakeTerm({ rows: 4, scrollback: 4, circularTrim: true, cols: 80 });
+  const { term } = fake;
+
+  for (let second = 0; second < 20; second += 1) {
+    writeTerminalDataWithLineTimestamps(
+      term as never,
+      `seed-${second}\r\n`,
+      () => {},
+      { timestampDate: new Date(2026, 5, 6, 12, 0, second % 60) },
+    );
+  }
+  assert.equal(isTerminalScrollbackSaturated(term as never), true);
+  await new Promise((resolve) => { setTimeout(resolve, 0); });
+
+  writeTerminalDataWithLineTimestamps(term as never, "\x1b[2;4r", () => {});
+  const baseY = (term.buffer.active as { baseY: number }).baseY;
+  (term.buffer.active as { cursorY: number }).cursorY = 3;
+  const regionTopText = (
+    term.buffer.active.getLine(baseY + 1) as {
+      translateToString: (trimRight?: boolean) => string;
+    }
+  ).translateToString(true);
+
+  writeTerminalDataWithLineTimestamps(
+    term as never,
+    "\x0bregion-tail\r",
+    () => {},
+    { timestampDate: new Date(2026, 5, 6, 12, 0, 40) },
+  );
+
+  fake.setViewportY(baseY);
+  const painted = getVisibleTerminalLineTimestampRows(term as never);
+  const viewportY = (term.buffer.active as { viewportY: number }).viewportY;
+
+  for (const row of painted) {
+    const text = (
+      term.buffer.active.getLine(viewportY + row.row) as {
+        translateToString: (trimRight?: boolean) => string;
+      }
+    ).translateToString(true);
+    if (!text || text === regionTopText || text === "region-tail") continue;
+    const match = /^seed-(\d+)$/.exec(text);
+    if (!match) continue;
+    const second = Number(match[1]) % 60;
+    const expected = `12:00:${String(second).padStart(2, "0")}`;
+    assert.equal(
+      row.label,
+      expected,
+      `stamp must follow content after DECSTBM VT, got ${JSON.stringify({ text, row, painted, regionTopText, viewportY })}`,
+    );
+  }
+});
+
+test("saturated DECSTBM+FF in one write rematerializes using in-chunk region", async () => {
+  // Same-chunk DECSTBM + C0 FF (\x0c) must rematerialize like DECSTBM+LF.
+  const fake = createFakeTerm({ rows: 4, scrollback: 4, circularTrim: true, cols: 80 });
+  const { term } = fake;
+
+  for (let second = 0; second < 20; second += 1) {
+    writeTerminalDataWithLineTimestamps(
+      term as never,
+      `seed-${second}\r\n`,
+      () => {},
+      { timestampDate: new Date(2026, 5, 6, 12, 0, second % 60) },
+    );
+  }
+  assert.equal(isTerminalScrollbackSaturated(term as never), true);
+  await new Promise((resolve) => { setTimeout(resolve, 0); });
+
+  const baseY = (term.buffer.active as { baseY: number }).baseY;
+  (term.buffer.active as { cursorY: number }).cursorY = 3;
+  const regionTopText = (
+    term.buffer.active.getLine(baseY + 1) as {
+      translateToString: (trimRight?: boolean) => string;
+    }
+  ).translateToString(true);
+
+  writeTerminalDataWithLineTimestamps(
+    term as never,
+    "\x1b[2;4r\x0cregion-tail\r",
+    () => {},
+    { timestampDate: new Date(2026, 5, 6, 12, 0, 40) },
+  );
+
+  fake.setViewportY(baseY);
+  const painted = getVisibleTerminalLineTimestampRows(term as never);
+  const viewportY = (term.buffer.active as { viewportY: number }).viewportY;
+
+  for (const row of painted) {
+    const text = (
+      term.buffer.active.getLine(viewportY + row.row) as {
+        translateToString: (trimRight?: boolean) => string;
+      }
+    ).translateToString(true);
+    if (!text || text === regionTopText || text === "region-tail") continue;
+    const match = /^seed-(\d+)$/.exec(text);
+    if (!match) continue;
+    const second = Number(match[1]) % 60;
+    const expected = `12:00:${String(second).padStart(2, "0")}`;
+    assert.equal(
+      row.label,
+      expected,
+      `stamp must follow content after same-write DECSTBM+FF, got ${JSON.stringify({ text, row, painted, regionTopText, viewportY })}`,
     );
   }
 });
