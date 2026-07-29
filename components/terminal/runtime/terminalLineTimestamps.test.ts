@@ -284,9 +284,31 @@ const createFakeTerm = (options: {
     cursorLine = normalState.absoluteCursorLine;
   };
 
+  const resetBuffer = () => {
+    // Mirror CoreBrowserTerminal.reset / BufferService.reset: dispose live
+    // markers with the old buffer and return to a blank normal-screen viewport.
+    // Bare ledger stamps must not survive via numeric lines that still fit rows.
+    for (const marker of [...liveMarkers]) {
+      if (!marker.isDisposed) marker.dispose();
+    }
+    normalState.absoluteCursorLine = 0;
+    normalState.baseY = 0;
+    normalState.column = 0;
+    normalState.lineText.clear();
+    altState.absoluteCursorLine = 0;
+    altState.baseY = 0;
+    altState.column = 0;
+    altState.lineText.clear();
+    screen = "normal";
+    cursorLine = 0;
+    viewportYOverride = null;
+  };
+
   const term = {
     _core: {
       unicodeService,
+      // Real xterm: public Terminal.reset and RIS→onRequestReset both call here.
+      reset: resetBuffer,
     },
     buffer: {
       active: activeBuffer,
@@ -303,23 +325,8 @@ const createFakeTerm = (options: {
       (term as { rows: number }).rows = Math.max(1, nextRows);
     },
     reset() {
-      // Mirror xterm term.reset(): dispose live markers with the old buffer and
-      // return to a blank normal-screen viewport. Bare ledger stamps must not
-      // survive via numeric lines that still fit rows.
-      for (const marker of [...liveMarkers]) {
-        if (!marker.isDisposed) marker.dispose();
-      }
-      normalState.absoluteCursorLine = 0;
-      normalState.baseY = 0;
-      normalState.column = 0;
-      normalState.lineText.clear();
-      altState.absoluteCursorLine = 0;
-      altState.baseY = 0;
-      altState.column = 0;
-      altState.lineText.clear();
-      screen = "normal";
-      cursorLine = 0;
-      viewportYOverride = null;
+      // Mirror public Terminal.reset → _core.reset (RIS skips this wrapper).
+      term._core.reset();
     },
     write(data: string, callback?: () => void) {
       writes.push(data);
@@ -1044,6 +1051,51 @@ test("term.reset clears saturated bare ledger stamps", async () => {
   );
   const painted = getVisibleTerminalLineTimestampRows(term as never);
   assert.deepEqual(painted, [{ row: 0, label: "13:00:00" }]);
+});
+
+test("parser-driven _core.reset clears saturated bare ledger stamps", async () => {
+  // RIS (ESC c) fires InputHandler.onRequestReset → CoreBrowserTerminal.reset,
+  // which never touches the public Terminal.reset wrapper. Stamps must clear
+  // via the _core.reset hook, not only direct term.reset() calls.
+  const fake = createFakeTerm({ rows: 4, scrollback: 4, circularTrim: true });
+  const { term } = fake;
+
+  for (let second = 0; second < 20; second += 1) {
+    writeTerminalDataWithLineTimestamps(
+      term as never,
+      `seed-${second}\r\n`,
+      () => {},
+      { timestampDate: new Date(2026, 5, 6, 12, 0, second % 60) },
+    );
+  }
+  assert.equal(isTerminalScrollbackSaturated(term as never), true);
+  await new Promise((resolve) => { setTimeout(resolve, 0); });
+  assert.ok(getTerminalLineTimestampLedgerCount(term as never) > 1);
+
+  // Simulate RIS: call core.reset without going through public term.reset.
+  (term as { _core: { reset: () => void } })._core.reset();
+
+  assert.equal(
+    getTerminalLineTimestampLedgerCount(term as never),
+    0,
+    "RIS/_core.reset must wipe bare ledger stamps like public term.reset",
+  );
+  assert.deepEqual(
+    getVisibleTerminalLineTimestampRows(term as never),
+    [],
+    "gutter must not paint pre-RIS labels onto the cleared buffer",
+  );
+
+  writeTerminalDataWithLineTimestamps(
+    term as never,
+    "after-ris\r\n",
+    () => {},
+    { timestampDate: new Date(2026, 5, 6, 14, 0, 0) },
+  );
+  assert.deepEqual(
+    getVisibleTerminalLineTimestampRows(term as never),
+    [{ row: 0, label: "14:00:00" }],
+  );
 });
 
 test("saturated scrollback keeps ledger stamps without attaching new live markers", async () => {

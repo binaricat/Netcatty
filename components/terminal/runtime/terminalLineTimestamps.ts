@@ -587,16 +587,37 @@ const installReflowMaterializeHook = (term: XTerm, store: TimestampStore): void 
  * RIS → onRequestReset) xterm only disposes markers, so rebase would keep
  * bare entries whose lines still fit the fresh viewport and paint old times
  * onto snapshot / post-reset rows.
+ *
+ * RIS is important: InputHandler.fullReset fires onRequestReset, and
+ * CoreBrowserTerminal handles that via its own reset() — not the public
+ * Terminal.reset wrapper — so wrapping only term.reset misses parser-driven
+ * buffer clears. Hook _core.reset (shared by both paths) when present.
  */
 const installBufferResetHook = (term: XTerm, store: TimestampStore): void => {
   if (store.resetHookInstalled) return;
   store.resetHookInstalled = true;
+
+  const clearAfter = (invokeOriginal: () => void): void => {
+    invokeOriginal();
+    resetTimestampStore(store);
+  };
+
+  // Parser-driven RIS / DECCOLM and public Terminal.reset both end here.
+  const core = (term as XTerm & { _core?: { reset?: () => void } })._core;
+  if (core && typeof core.reset === "function") {
+    const originalCoreReset = core.reset;
+    core.reset = function resetCoreWithTimestampClear(this: unknown): void {
+      clearAfter(() => originalCoreReset.call(this));
+    };
+    return;
+  }
+
+  // Fakes / stubs without a core reset still expose the public API.
   const termWithReset = term as XTerm & { reset?: () => void };
   const originalReset = termWithReset.reset;
   if (typeof originalReset !== "function") return;
   termWithReset.reset = function resetWithTimestampClear(this: XTerm): void {
-    originalReset.call(this);
-    resetTimestampStore(store);
+    clearAfter(() => originalReset.call(this));
   };
 };
 
