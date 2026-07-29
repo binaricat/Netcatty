@@ -210,6 +210,41 @@ const createFakeTerm = (options: {
           }
         }
       }
+    } else if (final === "J") {
+      // Erase in display: clear cells and dispose markers on affected rows
+      // (in-place erase; mirrors xterm when scrollOnEraseInDisplay is off).
+      const state = currentState();
+      const rawParams = params.startsWith("?") ? params.slice(1) : params;
+      const mode = Number.parseInt(rawParams.split(";")[0] || "0", 10);
+      const viewportTop = state.baseY;
+      const viewportBottom = state.baseY + rows - 1;
+      let clearFrom = viewportTop;
+      let clearTo = viewportBottom;
+      if (mode === 0) {
+        clearFrom = state.absoluteCursorLine;
+        clearTo = viewportBottom;
+      } else if (mode === 1) {
+        clearFrom = viewportTop;
+        clearTo = state.absoluteCursorLine;
+      } else if (mode === 2) {
+        clearFrom = viewportTop;
+        clearTo = viewportBottom;
+      } else if (mode === 3) {
+        clearFrom = 0;
+        clearTo = Math.max(-1, state.baseY - 1);
+      } else {
+        return;
+      }
+      if (clearTo < clearFrom) return;
+      for (let line = clearFrom; line <= clearTo; line += 1) {
+        state.lineText.delete(line);
+      }
+      for (const marker of liveMarkers) {
+        if (marker.isDisposed || marker.attachedScreen !== screen) continue;
+        if (marker.line >= clearFrom && marker.line <= clearTo) {
+          marker.dispose();
+        }
+      }
     }
   };
   const unicodeService = {
@@ -2222,6 +2257,132 @@ test("saturated DECSTBM linefeed rematerializes anchors inside the scroll region
       expected,
       `stamp must follow content after DECSTBM LF, got ${JSON.stringify({ text, row, painted, regionTopText, viewportY })}`,
     );
+  }
+});
+
+test("saturated DECSTBM+LF in one write rematerializes using in-chunk region", async () => {
+  // DECSTBM and the following LF share one write. Pre-write region is still
+  // full-screen; rematerialize must parse the in-chunk CSI r.
+  const fake = createFakeTerm({ rows: 4, scrollback: 4, circularTrim: true, cols: 80 });
+  const { term } = fake;
+
+  for (let second = 0; second < 20; second += 1) {
+    writeTerminalDataWithLineTimestamps(
+      term as never,
+      `seed-${second}\r\n`,
+      () => {},
+      { timestampDate: new Date(2026, 5, 6, 12, 0, second % 60) },
+    );
+  }
+  assert.equal(isTerminalScrollbackSaturated(term as never), true);
+  await new Promise((resolve) => { setTimeout(resolve, 0); });
+
+  const baseY = (term.buffer.active as { baseY: number }).baseY;
+  (term.buffer.active as { cursorY: number }).cursorY = 3;
+  const regionTopText = (
+    term.buffer.active.getLine(baseY + 1) as {
+      translateToString: (trimRight?: boolean) => string;
+    }
+  ).translateToString(true);
+
+  writeTerminalDataWithLineTimestamps(
+    term as never,
+    "\x1b[2;4r\nregion-tail\r",
+    () => {},
+    { timestampDate: new Date(2026, 5, 6, 12, 0, 40) },
+  );
+
+  fake.setViewportY(baseY);
+  const painted = getVisibleTerminalLineTimestampRows(term as never);
+  const viewportY = (term.buffer.active as { viewportY: number }).viewportY;
+
+  for (const row of painted) {
+    const text = (
+      term.buffer.active.getLine(viewportY + row.row) as {
+        translateToString: (trimRight?: boolean) => string;
+      }
+    ).translateToString(true);
+    if (!text || text === regionTopText || text === "region-tail") continue;
+    const match = /^seed-(\d+)$/.exec(text);
+    if (!match) continue;
+    const second = Number(match[1]) % 60;
+    const expected = `12:00:${String(second).padStart(2, "0")}`;
+    assert.equal(
+      row.label,
+      expected,
+      `stamp must follow content after same-write DECSTBM+LF, got ${JSON.stringify({ text, row, painted, regionTopText, viewportY })}`,
+    );
+  }
+});
+
+test("saturated CSI 2 J rematerializes anchors so erased viewport stamps drop", async () => {
+  // With clearWipesScrollback disabled, CSI 2 J clears viewport rows and
+  // disposes markers on those rows. Saturated bare ledger must rematerialize
+  // first or stamps for erased content linger beside the blank viewport.
+  const fake = createFakeTerm({ rows: 4, scrollback: 4, circularTrim: true, cols: 80 });
+  const { term } = fake;
+
+  for (let second = 0; second < 20; second += 1) {
+    writeTerminalDataWithLineTimestamps(
+      term as never,
+      `seed-${second}\r\n`,
+      () => {},
+      { timestampDate: new Date(2026, 5, 6, 12, 0, second % 60) },
+    );
+  }
+  assert.equal(isTerminalScrollbackSaturated(term as never), true);
+  await new Promise((resolve) => { setTimeout(resolve, 0); });
+
+  const baseY = (term.buffer.active as { baseY: number }).baseY;
+  const ledgerBefore = getTerminalLineTimestampLedgerCount(term as never);
+  const disposedBefore = fake.disposedMarkerLines.length;
+
+  // Capture a viewport line that still has seed text + a gutter stamp.
+  const viewportSeedLine = baseY + 1;
+  const viewportSeedText = (
+    term.buffer.active.getLine(viewportSeedLine) as {
+      translateToString: (trimRight?: boolean) => string;
+    }
+  ).translateToString(true);
+  assert.match(viewportSeedText, /^seed-\d+$/);
+
+  writeTerminalDataWithLineTimestamps(term as never, "\x1b[2J", () => {});
+
+  assert.ok(
+    fake.disposedMarkerLines.length > disposedBefore,
+    "CSI 2 J must dispose rematerialized markers on erased viewport rows",
+  );
+  assert.ok(
+    getTerminalLineTimestampLedgerCount(term as never) < ledgerBefore,
+    "erased viewport stamps must drop from the saturated ledger",
+  );
+
+  const cleared = (
+    term.buffer.active.getLine(viewportSeedLine) as {
+      translateToString: (trimRight?: boolean) => string;
+    }
+  ).translateToString(true);
+  assert.equal(cleared, "", "CSI 2 J must clear viewport cell text");
+
+  fake.setViewportY(baseY);
+  const painted = getVisibleTerminalLineTimestampRows(term as never);
+  const viewportY = (term.buffer.active as { viewportY: number }).viewportY;
+  for (const row of painted) {
+    const text = (
+      term.buffer.active.getLine(viewportY + row.row) as {
+        translateToString: (trimRight?: boolean) => string;
+      }
+    ).translateToString(true);
+    // Blank erased viewport rows must not keep the seed stamp that lived there.
+    if (!text && viewportY + row.row >= baseY) {
+      const seedSecond = Number(/^seed-(\d+)$/.exec(viewportSeedText)?.[1] ?? -1) % 60;
+      const stale = `12:00:${String(seedSecond).padStart(2, "0")}`;
+      assert.notEqual(
+        row.label,
+        stale,
+        `blank viewport must not keep erased stamp ${stale}, got ${JSON.stringify({ row, painted, viewportSeedText })}`,
+      );
+    }
   }
 });
 

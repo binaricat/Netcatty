@@ -410,8 +410,85 @@ const isLocalLineEditSequence = (sequence: string): boolean => {
   return true;
 };
 
-const dataContainsLocalLineEditSequence = (data: string): boolean => {
+/** CSI Ps J — erase in display (incl. selective CSI ? J); clears cells / disposes row markers. */
+const isEraseDisplaySequence = (sequence: string): boolean => getCsiFinal(sequence) === "J";
+
+/**
+ * DECSTBM (CSI Pt ; Pb r). Returns null for non-DECSTBM CSI. Empty params reset
+ * to the full viewport (xterm default).
+ */
+const parseDecstbmScrollingRegion = (
+  sequence: string,
+  rows: number,
+): { scrollTop: number; scrollBottom: number } | null => {
+  const final = getCsiFinal(sequence);
+  if (final !== "r") return null;
+  const params = sequence.slice(2, -1);
+  if (params.startsWith("?")) return null;
+  if (rows <= 0) return { scrollTop: 0, scrollBottom: 0 };
+  if (!params) return { scrollTop: 0, scrollBottom: rows - 1 };
+  const parts = params.split(";");
+  const top = Number.parseInt(parts[0] || "1", 10);
+  const bottom = Number.parseInt(parts[1] || String(rows), 10);
+  const nextTop = Math.max(0, (Number.isFinite(top) && top > 0 ? top : 1) - 1);
+  const nextBottom = Math.min(
+    rows - 1,
+    (Number.isFinite(bottom) && bottom > 0 ? bottom : rows) - 1,
+  );
+  if (nextTop > nextBottom) return { scrollTop: 0, scrollBottom: rows - 1 };
+  return { scrollTop: nextTop, scrollBottom: nextBottom };
+};
+
+const readTerminalScrollingRegion = (
+  term: XTerm,
+): { scrollTop: number; scrollBottom: number; rows: number } => {
+  const rows = Number.isFinite(term.rows) && term.rows > 0 ? term.rows : 0;
+  const core = (term as XTerm & {
+    _core?: { buffer?: { scrollTop?: number; scrollBottom?: number } };
+  })._core;
+  const scrollTop = core?.buffer?.scrollTop;
+  const scrollBottom = core?.buffer?.scrollBottom;
+  if (
+    !Number.isFinite(scrollTop)
+    || !Number.isFinite(scrollBottom)
+    || rows <= 0
+  ) {
+    return { scrollTop: 0, scrollBottom: Math.max(0, rows - 1), rows };
+  }
+  return {
+    scrollTop: Number(scrollTop),
+    scrollBottom: Number(scrollBottom),
+    rows,
+  };
+};
+
+const isPartialScrollingRegionBounds = (
+  scrollTop: number,
+  scrollBottom: number,
+  rows: number,
+): boolean => rows > 0 && (scrollTop > 0 || scrollBottom < rows - 1);
+
+/**
+ * Saturated bare ledger must rematerialize before local row edits, erase-display,
+ * or linefeeds that will scroll inside a (possibly just-established) DECSTBM region.
+ * Walks `data` so DECSTBM in the same write as a following LF is detected — the
+ * terminal's pre-write region alone would miss that case.
+ */
+const dataRequiresSaturatedAnchorRematerialize = (
+  term: XTerm,
+  data: string,
+): boolean => {
+  const { scrollTop: initialTop, scrollBottom: initialBottom, rows } = readTerminalScrollingRegion(term);
+  let scrollTop = initialTop;
+  let scrollBottom = initialBottom;
   for (let index = 0; index < data.length;) {
+    if (data[index] === "\n") {
+      if (isPartialScrollingRegionBounds(scrollTop, scrollBottom, rows)) {
+        return true;
+      }
+      index += 1;
+      continue;
+    }
     if (data[index] !== "\x1b") {
       index += 1;
       continue;
@@ -421,7 +498,17 @@ const dataContainsLocalLineEditSequence = (data: string): boolean => {
       index += 1;
       continue;
     }
-    if (isLocalLineEditSequence(sequence.sequence)) return true;
+    if (
+      isLocalLineEditSequence(sequence.sequence)
+      || isEraseDisplaySequence(sequence.sequence)
+    ) {
+      return true;
+    }
+    const region = parseDecstbmScrollingRegion(sequence.sequence, rows);
+    if (region) {
+      scrollTop = region.scrollTop;
+      scrollBottom = region.scrollBottom;
+    }
     index = sequence.endIndex + 1;
   }
   return false;
@@ -1749,20 +1836,8 @@ const _getTerminalWraparoundMode = (term: XTerm): boolean => (
  * history and evict still-valid scrollback timestamps.
  */
 export const hasPartialScrollingRegion = (term: XTerm): boolean => {
-  const core = (term as XTerm & {
-    _core?: { buffer?: { scrollTop?: number; scrollBottom?: number } };
-  })._core;
-  const scrollTop = core?.buffer?.scrollTop;
-  const scrollBottom = core?.buffer?.scrollBottom;
-  const rows = Number.isFinite(term.rows) && term.rows > 0 ? term.rows : 0;
-  if (
-    !Number.isFinite(scrollTop)
-    || !Number.isFinite(scrollBottom)
-    || rows <= 0
-  ) {
-    return false;
-  }
-  return Number(scrollTop) > 0 || Number(scrollBottom) < rows - 1;
+  const { scrollTop, scrollBottom, rows } = readTerminalScrollingRegion(term);
+  return isPartialScrollingRegionBounds(scrollTop, scrollBottom, rows);
 };
 
 const isUnsafeGraphemeSequenceCodePoint = (codePoint: number): boolean => (
@@ -2241,22 +2316,17 @@ const writeTerminalDataWithSecondLedger = (
     rebaseLedgerForScrollback(term, store);
     maintainTrimSentinel(term, store);
   }
-  // Saturated mode releases live anchors for trim perf. CSI L/M/S/T and
-  // linefeeds inside a DECSTBM region move/dispose buffer rows without a
-  // global circular-trim delta — rematerialize first so xterm can shift those
-  // markers, then release copies the updated lines.
-  // Scan the prefix-joined stream so IL/DL/SU/SD split across IPC chunks still hit.
+  // Saturated mode releases live anchors for trim perf. CSI L/M/S/T, erase-display
+  // (CSI J), and linefeeds inside a DECSTBM region move/dispose buffer rows
+  // without a global circular-trim delta — rematerialize first so xterm can
+  // shift or dispose those markers, then release copies the updated lines.
+  // Scan the prefix-joined stream so IL/DL/SU/SD/ED and same-chunk DECSTBM+LF
+  // still hit even when the terminal's pre-write region is still full-screen.
   if (
     isTerminalScrollbackSaturated(term)
     && !isAlternateBufferActive(term)
     && store.ledger.length > 0
-    && (
-      dataContainsLocalLineEditSequence(dataForTimestamps)
-      || (
-        hasPartialScrollingRegion(term)
-        && dataForTimestamps.includes("\n")
-      )
-    )
+    && dataRequiresSaturatedAnchorRematerialize(term, dataForTimestamps)
   ) {
     rebaseLedgerForScrollback(term, store);
     materializeTimestampLedgerToMarkers(term);
