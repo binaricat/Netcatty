@@ -185,6 +185,67 @@ test("does not treat an empty buffer as scrollback-saturated", () => {
   resetTerminalOutputPressure(term);
 });
 
+test("arms large-output for sustained moderate log streams below the byte flood gate", () => {
+  // tail -f style: many short lines over time, far under 16KB/100ms.
+  // Without this gate, keyword highlight runs on every write for minutes (#2599).
+  const term = createFakeTerm({
+    rows: 24,
+    options: { scrollback: 10000 },
+    buffer: { active: { length: 200, baseY: 0 } },
+  });
+  const originalNow = performance.now.bind(performance);
+  let now = 30_000;
+
+  Object.defineProperty(performance, "now", {
+    configurable: true,
+    value: () => now,
+  });
+
+  try {
+    for (let index = 0; index < 12; index += 1) {
+      noteTerminalOutputPressureData(term, `2026-07-29 INFO event-${index}\n`);
+      now += 100;
+    }
+    assert.equal(getTerminalOutputPressure(term).largeOutput, true);
+    assert.equal(shouldDegradeTerminalSideWork(term), true);
+    // Sustained line streams must not suppress per-line gutter timestamps.
+    assert.equal(shouldSkipTerminalLineTimestamps(term), false);
+  } finally {
+    Object.defineProperty(performance, "now", {
+      configurable: true,
+      value: originalNow,
+    });
+    resetTerminalOutputPressure(term);
+  }
+});
+
+test("does not arm large-output for sparse interactive newlines", () => {
+  const term = createFakeTerm();
+  const originalNow = performance.now.bind(performance);
+  let now = 40_000;
+
+  Object.defineProperty(performance, "now", {
+    configurable: true,
+    value: () => now,
+  });
+
+  try {
+    noteTerminalOutputPressureData(term, "ls\n");
+    now += 800;
+    noteTerminalOutputPressureData(term, "file-a\nfile-b\n");
+    now += 800;
+    noteTerminalOutputPressureData(term, "pwd\n");
+    assert.equal(getTerminalOutputPressure(term).largeOutput, false);
+    assert.equal(shouldDegradeTerminalSideWork(term), false);
+  } finally {
+    Object.defineProperty(performance, "now", {
+      configurable: true,
+      value: originalNow,
+    });
+    resetTerminalOutputPressure(term);
+  }
+});
+
 test("saturated multi-line degrades side work but keeps line timestamps", () => {
   const term = createFakeTerm({
     rows: 24,

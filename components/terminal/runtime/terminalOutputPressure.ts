@@ -24,6 +24,11 @@ type OutputRateSample = {
   bytes: number;
 };
 
+type LineRateSample = {
+  at: number;
+  lines: number;
+};
+
 type TerminalOutputPressureState = {
   background: boolean;
   largeOutput: boolean;
@@ -39,6 +44,9 @@ type TerminalOutputPressureState = {
   /** True rolling window samples for high-rate small-chunk detection. */
   recentSamples: OutputRateSample[];
   recentSampleBytes: number;
+  /** Rolling newline counts for sustained log-follow streams (tail -f). */
+  recentLineSamples: LineRateSample[];
+  recentLineCount: number;
 };
 
 /**
@@ -52,6 +60,15 @@ type TerminalOutputPressureState = {
 const LARGE_OUTPUT_RATE_WINDOW_MS = 100;
 /** Lower than a full 128KB xterm shard so pressure leads the first write batch. */
 const LARGE_OUTPUT_RATE_BYTES = 16 * 1024;
+/**
+ * Sustained line-oriented streams (`tail -f`, journalctl -f) often stay well
+ * under the byte flood gate while still filling scrollback for minutes and
+ * driving keyword/timestamp work on every write (#2599). A longer, lower
+ * line-rate window catches that path without treating sparse interactive
+ * Enter/echo as bulk output.
+ */
+const SUSTAINED_LINE_WINDOW_MS = 1500;
+const SUSTAINED_LINE_RATE = 8;
 /**
  * Only skip line-timestamp markers at true flood rates. Early large-output
  * (16KB) and saturated multi-line still degrade highlight/prep, but keep the
@@ -78,6 +95,8 @@ const getOrCreateState = (term: XTerm): TerminalOutputPressureState => {
       consecutiveUnbrokenBytes: 0,
       recentSamples: [],
       recentSampleBytes: 0,
+      recentLineSamples: [],
+      recentLineCount: 0,
     };
     pressureStates.set(term, state);
   }
@@ -98,6 +117,32 @@ const noteRecentOutputRate = (
   }
   if (state.recentSampleBytes < 0) state.recentSampleBytes = 0;
   return state.recentSampleBytes;
+};
+
+const countNewlines = (data: string): number => {
+  let count = 0;
+  for (let index = 0; index < data.length; index += 1) {
+    if (data[index] === "\n") count += 1;
+  }
+  return count;
+};
+
+const noteRecentLineRate = (
+  state: TerminalOutputPressureState,
+  now: number,
+  lines: number,
+): number => {
+  if (lines > 0) {
+    state.recentLineSamples.push({ at: now, lines });
+    state.recentLineCount += lines;
+  }
+  const cutoff = now - SUSTAINED_LINE_WINDOW_MS;
+  while (state.recentLineSamples.length > 0 && state.recentLineSamples[0]!.at < cutoff) {
+    const dropped = state.recentLineSamples.shift()!;
+    state.recentLineCount -= dropped.lines;
+  }
+  if (state.recentLineCount < 0) state.recentLineCount = 0;
+  return state.recentLineCount;
 };
 
 const LINE_BREAK_SCAN = /[\n\r]/g;
@@ -200,7 +245,9 @@ export const noteTerminalOutputPressureData = (
   const quietMs = resolveLargeOutputQuietMs(scrollbackSaturated);
 
   const recentBytes = noteRecentOutputRate(state, now, data.length);
-  const hasLineBreak = data.includes("\n") || data.includes("\r");
+  const newlineCount = countNewlines(data);
+  const recentLines = noteRecentLineRate(state, now, newlineCount);
+  const hasLineBreak = newlineCount > 0 || data.includes("\r");
   // Full scrollback + multi-line (seq/logs) or a modest plain chunk → bulk.
   // Tiny single-key echoes without newlines stay on the normal path.
   const saturatedBulkChunk = scrollbackSaturated
@@ -208,6 +255,8 @@ export const noteTerminalOutputPressureData = (
       hasLineBreak
       || data.length >= SATURATED_SCROLLBACK_BULK_MIN_BYTES
     );
+  // Continuous log follow: enough newlines over ~1.5s, even when each chunk is tiny.
+  const sustainedLineStream = recentLines >= SUSTAINED_LINE_RATE;
 
   const trueFlood = data.length >= TERMINAL_LONG_LINE_PRESSURE_BYTES
     || recentBytes >= TIMESTAMP_SKIP_RATE_BYTES;
@@ -216,6 +265,7 @@ export const noteTerminalOutputPressureData = (
     data.length >= TERMINAL_LONG_LINE_PRESSURE_BYTES
     || recentBytes >= LARGE_OUTPUT_RATE_BYTES
     || saturatedBulkChunk
+    || sustainedLineStream
   ) {
     markLargeOutput(state, now, quietMs);
   } else if (now >= state.largeOutputUntil) {
