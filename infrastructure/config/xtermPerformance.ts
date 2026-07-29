@@ -130,6 +130,10 @@ export const XTERM_PERFORMANCE_CONFIG = {
     // Longer quiet window lets xterm paint bulk dumps (cat/yes/tail) without
     // competing decoration scans every few hundred ms.
     largeOutputQuietMs: 480,
+    // Full scrollback + steady log tails (tail -f) often arrive with 1–3s gaps.
+    // Keep bulk degrade armed across those gaps so trim/marker/highlight work
+    // does not reopen between lines and leave the session sticky-laggy.
+    largeOutputQuietMsSaturated: 4000,
     // Give interactive typing priority over keyword highlight catch-up.
     inputQuietMs: 180,
     // Extra debounce while large-output / long-line pressure is active.

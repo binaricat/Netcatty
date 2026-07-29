@@ -158,11 +158,51 @@ test("arms large-output early on multi-line writes when scrollback is saturated"
     assert.equal(getTerminalOutputPressure(term).mode, "large-output");
 
     // Quiet window is extended while saturated so prompt-echo gaps do not
-    // reopen the expensive timestamp/highlight path before a second dump.
+    // reopen the expensive timestamp/highlight path between steady log lines.
+    const saturatedQuietMs = XTERM_PERFORMANCE_CONFIG.highlighting.largeOutputQuietMsSaturated;
     now += XTERM_PERFORMANCE_CONFIG.highlighting.largeOutputQuietMs + 1;
     assert.equal(getTerminalOutputPressure(term).largeOutput, true);
-    now += XTERM_PERFORMANCE_CONFIG.highlighting.largeOutputQuietMs + 1;
+    now += Math.max(0, saturatedQuietMs - XTERM_PERFORMANCE_CONFIG.highlighting.largeOutputQuietMs - 2);
+    assert.equal(getTerminalOutputPressure(term).largeOutput, true);
+    now += 3;
     assert.equal(getTerminalOutputPressure(term).largeOutput, false);
+  } finally {
+    Object.defineProperty(performance, "now", {
+      configurable: true,
+      value: originalNow,
+    });
+    resetTerminalOutputPressure(term);
+  }
+});
+
+test("keeps large-output armed across multi-second log gaps on a full scrollback", () => {
+  // Mimic tail -f: scrollback already full, one short line every ~2s.
+  const term = createFakeTerm({
+    rows: 24,
+    options: { scrollback: 1000 },
+    buffer: { active: { length: 1020, baseY: 996 } },
+  });
+  const originalNow = performance.now.bind(performance);
+  let now = 30_000;
+
+  Object.defineProperty(performance, "now", {
+    configurable: true,
+    value: () => now,
+  });
+
+  try {
+    noteTerminalOutputPressureData(term, "2026-07-29 ERROR still running\n");
+    assert.equal(shouldDegradeTerminalSideWork(term), true);
+
+    now += 2_000;
+    noteTerminalOutputPressureData(term, "2026-07-29 INFO next line\n");
+    assert.equal(shouldDegradeTerminalSideWork(term), true);
+
+    now += 2_000;
+    assert.equal(shouldDegradeTerminalSideWork(term), true);
+
+    now += XTERM_PERFORMANCE_CONFIG.highlighting.largeOutputQuietMsSaturated;
+    assert.equal(shouldDegradeTerminalSideWork(term), false);
   } finally {
     Object.defineProperty(performance, "now", {
       configurable: true,

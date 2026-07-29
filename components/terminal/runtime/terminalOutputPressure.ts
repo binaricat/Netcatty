@@ -165,7 +165,9 @@ export const isTerminalScrollbackSaturated = (term: XTerm): boolean => {
     if (length <= 0) return false;
     // Treat "within one viewport of full" as saturated — cheap, stable, and
     // matches when xterm starts trimming aggressively on multi-line floods.
-    const slack = Math.max(rows, 8);
+    // Never let slack exceed the scrollback itself (tiny histories would
+    // otherwise look "full" from the first line).
+    const slack = Math.min(Math.max(rows, 8), scrollback);
     return length >= maxLines - slack;
   } catch {
     return false;
@@ -183,10 +185,13 @@ const markLargeOutput = (
 
 const resolveLargeOutputQuietMs = (scrollbackSaturated: boolean): number => {
   const base = XTERM_PERFORMANCE_CONFIG.highlighting.largeOutputQuietMs;
-  // Full buffers stay expensive after the dump ends (trim/marker churn). Keep
-  // bulk side-work off a bit longer so a second dump does not reopen the
-  // expensive path between prompt echoes.
-  return scrollbackSaturated ? Math.max(base, base * 2) : base;
+  if (!scrollbackSaturated) return base;
+  // Full buffers stay expensive after each log line (trim/marker/highlight churn).
+  // Steady tails often arrive with multi-second gaps; keep bulk side-work off
+  // across those gaps so the session does not feel sticky-laggy after minutes
+  // of `tail -f`.
+  const saturated = XTERM_PERFORMANCE_CONFIG.highlighting.largeOutputQuietMsSaturated;
+  return Math.max(base, Number.isFinite(saturated) ? saturated : base * 8);
 };
 
 export const noteTerminalOutputPressureData = (

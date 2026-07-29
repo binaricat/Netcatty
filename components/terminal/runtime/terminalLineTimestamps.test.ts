@@ -17,6 +17,7 @@ import {
   writeTerminalDataWithLineTimestamps,
   type StampCursorEstimate,
 } from "./terminalLineTimestamps.ts";
+import { isTerminalScrollbackSaturated } from "./terminalOutputPressure.ts";
 import { MAX_INCOMPLETE_TERMINAL_CONTROL_SEQUENCE_CHARS } from "./terminalControlSequenceLimits.ts";
 
 const createFakeTerm = (options: {
@@ -937,6 +938,63 @@ test("full-buffer scrollback trim rebases ledger and drops lines past the top", 
   for (const row of painted) {
     assert.match(row.label, /^12:00:\d{2}$/);
   }
+});
+
+test("saturated scrollback keeps ledger stamps without attaching new live markers", async () => {
+  // Once the buffer is full, every new line trims scrollback and xterm updates
+  // every live marker. Steady log tails must keep bare ledger lines only.
+  const fake = createFakeTerm({ rows: 24, scrollback: 40 });
+  const { term, liveMarkers } = fake;
+  // maxLines=64; saturated when length >= 64-24=40.
+
+  for (let second = 0; second < 30; second += 1) {
+    writeTerminalDataWithLineTimestamps(
+      term as never,
+      `seed-${second}\r\n`,
+      () => {},
+      { timestampDate: new Date(2026, 5, 6, 12, 0, second) },
+    );
+  }
+  assert.equal(isTerminalScrollbackSaturated(term as never), false);
+  assert.ok(liveMarkers.some((marker) => !marker.isDisposed));
+
+  for (let second = 30; second < 50; second += 1) {
+    writeTerminalDataWithLineTimestamps(
+      term as never,
+      `fill-${second}\r\n`,
+      () => {},
+      { timestampDate: new Date(2026, 5, 6, 12, 0, second) },
+    );
+  }
+  assert.equal(isTerminalScrollbackSaturated(term as never), true);
+
+  const markersBefore = liveMarkers.length;
+  const ledgerBefore = getTerminalLineTimestampLedgerCount(term as never);
+  writeTerminalDataWithLineTimestamps(
+    term as never,
+    "steady-log-line\r\n",
+    () => {},
+    { timestampDate: new Date(2026, 5, 6, 12, 1, 0) },
+  );
+  assert.equal(liveMarkers.length, markersBefore, "must not registerMarker while saturated");
+  assert.ok(getTerminalLineTimestampLedgerCount(term as never) >= ledgerBefore);
+
+  // Existing anchors are retired on an amortized drain so trim stays cheap.
+  await new Promise((resolve) => { setTimeout(resolve, 0); });
+  assert.equal(
+    liveMarkers.filter((marker) => !marker.isDisposed).length,
+    0,
+    "saturated writes should release live ledger markers",
+  );
+
+  // Fake term keeps viewport at baseY=0 until trim; pin to the bottom so paint
+  // covers the latest bare-line stamp.
+  fake.setViewportY(Math.max(0, fake.getAbsoluteCursorLine() - (term.rows - 1)));
+  const painted = getVisibleTerminalLineTimestampRows(term as never);
+  assert.ok(
+    painted.some((row) => row.label === "12:01:00"),
+    `expected saturated bare-line stamp in gutter, got ${JSON.stringify(painted)}`,
+  );
 });
 
 

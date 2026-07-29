@@ -1,6 +1,6 @@
 import type { Terminal as XTerm } from "@xterm/xterm";
 
-import { shouldSkipTerminalLineTimestamps } from "./terminalOutputPressure";
+import { shouldSkipTerminalLineTimestamps, isTerminalScrollbackSaturated } from "./terminalOutputPressure";
 import { canRetainIncompleteTerminalControlSequence } from "./terminalControlSequenceLimits";
 
 export type TerminalLineTimestampSegment =
@@ -760,6 +760,10 @@ const pushLedgerStamp = (
 /**
  * After term.write, pin new stamps to sparse xterm markers so reflow and
  * scrollback trim keep line anchors accurate (still ≤1 marker/second).
+ *
+ * When the buffer is already full, skip new markers: every trimmed row makes
+ * xterm walk the live marker list, so steady `tail -f` becomes O(markers) per
+ * line. Bare ledger lines still rebase correctly while saturated.
  */
 const attachLedgerAnchors = (
   term: XTerm,
@@ -767,6 +771,7 @@ const attachLedgerAnchors = (
   pending: readonly TimestampLedgerEntry[],
 ): void => {
   if (pending.length === 0) return;
+  if (isTerminalScrollbackSaturated(term)) return;
   const registerMarker = (
     term as XTerm & { registerMarker?: (offset: number) => TimestampMarker | undefined }
   ).registerMarker;
@@ -995,6 +1000,30 @@ const enqueueOrphanedMarker = (
 ): void => {
   if (marker.isDisposed) return;
   store.orphanedMarkers.push(marker);
+};
+
+/**
+ * Retire live ledger markers while scrollback is saturated so continuous log
+ * tails do not pay O(markers) on every trim. Keep bare line numbers; rebase
+ * already handles full-buffer baseY growth.
+ */
+const releaseLedgerMarkersWhileSaturated = (
+  term: XTerm,
+  store: TimestampStore,
+): void => {
+  if (!isTerminalScrollbackSaturated(term) || store.ledger.length === 0) return;
+  let released = false;
+  for (const entry of store.ledger) {
+    const marker = entry.marker;
+    if (!marker) continue;
+    entry.marker = undefined;
+    if (marker.isDisposed) continue;
+    enqueueOrphanedMarker(store, marker);
+    released = true;
+  }
+  if (released) {
+    drainOrphanedMarkers(store);
+  }
 };
 
 /**
@@ -1715,6 +1744,9 @@ const writeTerminalDataWithSecondLedger = (
 
   const writeStartedAt = shouldMeasureDiagnostics ? performance.now() : 0;
   term.write(data, () => {
+    // Full scrollback: drop live anchors (amortized) and skip new ones so
+    // continuous log tails are not O(markers) per trimmed line.
+    releaseLedgerMarkersWhileSaturated(term, store);
     attachLedgerAnchors(term, store, pendingAnchors);
     rebaseLedgerForScrollback(term, store);
     if (ledgerChanged) {
