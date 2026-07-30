@@ -92,6 +92,8 @@ export const ScriptCodeEditor = React.forwardRef<ScriptCodeEditorHandle, ScriptC
   const handlePaste = useCallback(async () => {
     const editor = editorRef.current;
     if (!editor || !editor.hasTextFocus()) return;
+    const initialSelections = editor.getSelections();
+    if (!initialSelections || initialSelections.length === 0) return;
 
     const text = await readClipboardTextWithFallbacks({
       readNavigator: navigator.clipboard?.readText
@@ -111,7 +113,14 @@ export const ScriptCodeEditor = React.forwardRef<ScriptCodeEditorHandle, ScriptC
     if (!text) return;
 
     const selections = editor.getSelections();
-    if (!selections || selections.length === 0) return;
+    if (!selections || selections.length !== initialSelections.length || selections.some((selection, index) => {
+      const initial = initialSelections[index];
+      return !initial
+        || selection.startLineNumber !== initial.startLineNumber
+        || selection.startColumn !== initial.startColumn
+        || selection.endLineNumber !== initial.endLineNumber
+        || selection.endColumn !== initial.endColumn;
+    })) return;
     const pasteOnNewLine = copiedWholeLineText === text
       && text.endsWith('\n');
     const multicursorText = copiedMulticursor?.text === text
