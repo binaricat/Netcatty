@@ -110,6 +110,11 @@ export const XTERM_PERFORMANCE_CONFIG = {
     immediateMinIntervalMs: 16,
     // Number of unique line scan results to keep cached.
     cacheEntries: 1200,
+    // Retain matched-line markers across nearby scrollback without allowing a
+    // broad rule to register unbounded xterm trim listeners.
+    persistentDecorationViewports: 20,
+    minPersistentDecorationLines: 200,
+    maxPersistentDecorationLines: 1200,
     // Keep decorations for lines just outside the viewport so small scrolls
     // don't constantly dispose/recreate them. Scales with current terminal rows.
     overscanViewportRatio: 2.0,
@@ -124,8 +129,6 @@ export const XTERM_PERFORMANCE_CONFIG = {
     writeRefreshBudgetMs: 4,
     // Process dirty contiguous lines in chunks so budget checks can preempt.
     dirtySegmentChunkSize: 48,
-    // User-scroll catch-up should be almost invisible to the renderer.
-    scrollSettleDebounceMs: 120,
     // Keep highlighting deprioritized briefly after a large output burst.
     // Longer quiet window lets xterm paint bulk dumps (cat/yes/tail) without
     // competing decoration scans every few hundred ms.
