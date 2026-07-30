@@ -390,8 +390,13 @@ function translateOpenCodeEvent(event, emitter, state = {}) {
       const callId = part.callID || part.id || "";
       const toolName = part.tool || "tool";
       // question is completed through question.asked + the reply API; emitting a
-      // tool-call row leaves a non-interactive spinner (issue #2585).
+      // tool-call row leaves a non-interactive spinner (issue #2585). Still surface
+      // validation/tool failures when OpenCode marks the part as error.
       if (toolName === "question") {
+        if (part.state?.status === "error") {
+          emitter.emitError(part.state.error || "OpenCode tool failed");
+          return { idle: false, error: true, content: false };
+        }
         return { idle: false, error: false, content: false };
       }
       const input = part.state?.input || {};

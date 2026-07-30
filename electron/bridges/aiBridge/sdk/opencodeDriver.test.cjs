@@ -1203,3 +1203,30 @@ test("translateOpenCodeEvent does not emit a stuck spinner tool-call for questio
   );
   assert.deepEqual(events, []);
 });
+
+test("translateOpenCodeEvent surfaces error status for failed question tools", () => {
+  const { events, emitter } = collector();
+  const result = translateOpenCodeEvent(
+    {
+      payload: {
+        type: "message.part.updated",
+        properties: {
+          part: {
+            type: "tool",
+            callID: "q-bad",
+            tool: "question",
+            state: {
+              status: "error",
+              error: "Invalid question payload",
+              input: { questions: [] },
+            },
+          },
+        },
+      },
+    },
+    emitter,
+    {},
+  );
+  assert.equal(result.error, true);
+  assert.deepEqual(events, [{ k: "error", m: "Invalid question payload" }]);
+});
