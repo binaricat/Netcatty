@@ -3,8 +3,24 @@
 const {
   FLOW_HIGH_WATER_MARK,
   FLOW_LOW_WATER_MARK,
+  LOCAL_FLOW_HIGH_WATER_MARK,
+  LOCAL_FLOW_LOW_WATER_MARK,
 } = require("../../infrastructure/config/terminalFlowConstants.cjs");
 const { logTerminalOutputPerf } = require("./terminalPerformanceDiagnostics.cjs");
+
+// A local shell has no network to overwhelm and its source blocks on write when
+// the pipe fills, so the tight SSH watermark only serves to throttle it. Give
+// local sessions a much higher (still bounded) ceiling; every other kind keeps
+// the default. Matches the renderer-side gate in terminalSessionAttachment.
+function isLocalSession(session) {
+  return session?.protocol === "local" || session?.type === "local";
+}
+function highWaterFor(session) {
+  return isLocalSession(session) ? LOCAL_FLOW_HIGH_WATER_MARK : FLOW_HIGH_WATER_MARK;
+}
+function lowWaterFor(session) {
+  return isLocalSession(session) ? LOCAL_FLOW_LOW_WATER_MARK : FLOW_LOW_WATER_MARK;
+}
 
 function getFlowTarget(session) {
   return session?.stream || session?.proc || session?.socket || session?.serialPort || null;
@@ -36,7 +52,7 @@ function ensureFlowState(session) {
   state.lastPerfAckLogAt = Number.isFinite(state.lastPerfAckLogAt) ? Math.max(0, state.lastPerfAckLogAt) : 0;
   state.sessionId = typeof state.sessionId === "string" && state.sessionId ? state.sessionId : null;
   if (typeof state.outputPaused !== "boolean") {
-    state.outputPaused = state.appliedPause && (state.rendererPaused || state.unackedBytes >= FLOW_HIGH_WATER_MARK);
+    state.outputPaused = state.appliedPause && (state.rendererPaused || state.unackedBytes >= highWaterFor(session));
   }
   return session.flowState;
 }
@@ -71,8 +87,8 @@ function getFlowPerfDetails(session, extra = {}) {
     appliedPause: state.appliedPause,
     unackedBytes: state.unackedBytes,
     bufferedBytes: state.bufferedBytes,
-    highWaterMark: FLOW_HIGH_WATER_MARK,
-    lowWaterMark: FLOW_LOW_WATER_MARK,
+    highWaterMark: highWaterFor(session),
+    lowWaterMark: lowWaterFor(session),
     ...extra,
   };
 }
@@ -95,15 +111,17 @@ function reconcileSessionFlow(session) {
   const target = getFlowTarget(session);
   if (!target) return;
 
-  if (!state.outputPaused && (state.rendererPaused || state.unackedBytes >= FLOW_HIGH_WATER_MARK)) {
+  const highWaterMark = highWaterFor(session);
+  const lowWaterMark = lowWaterFor(session);
+  if (!state.outputPaused && (state.rendererPaused || state.unackedBytes >= highWaterMark)) {
     state.outputPaused = true;
-  } else if (state.outputPaused && !state.rendererPaused && state.unackedBytes <= FLOW_LOW_WATER_MARK) {
+  } else if (state.outputPaused && !state.rendererPaused && state.unackedBytes <= lowWaterMark) {
     state.outputPaused = false;
   }
 
   const pendingBytes = state.unackedBytes + state.bufferedBytes;
-  const shouldPause = state.outputPaused || pendingBytes >= FLOW_HIGH_WATER_MARK;
-  const shouldResume = !state.outputPaused && pendingBytes <= FLOW_LOW_WATER_MARK;
+  const shouldPause = state.outputPaused || pendingBytes >= highWaterMark;
+  const shouldResume = !state.outputPaused && pendingBytes <= lowWaterMark;
 
   if (!state.appliedPause && shouldPause) {
     logTerminalOutputPerf("backend-flow-pause", getFlowPerfDetails(session, { pendingBytes }));

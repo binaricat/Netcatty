@@ -202,6 +202,7 @@ const SYNCABLE_TERMINAL_KEYS = [
   'scrollback', 'drawBoldInBrightColors', 'terminalEmulationType',
   'fontLigatures', 'fontSmoothing', 'fontWeight', 'fontWeightBold', 'fallbackFont',
   'linePadding', 'cursorShape', 'cursorBlink', 'minimumContrastRatio',
+  'allowTransparency',
   'altAsMeta', 'optionArrowWordJump', 'shiftEnterNewlineEnabled', 'shiftEnterNewlineText',
   'kittyKeyboardProtocolEnabled',
   'scrollOnInput', 'scrollOnOutput', 'scrollOnKeyPress', 'scrollOnPaste',

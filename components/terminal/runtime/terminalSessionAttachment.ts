@@ -49,6 +49,12 @@ import {
 } from "./terminalSyncBlockFilter";
 import { appendEraseScrollbackAfterFullErases } from "../clearTerminalViewport";
 import {
+  apportionFrameGateIngress,
+  collapseAndSplit,
+  endsWithSyncOpenerPrefix,
+  makesFullRepaint,
+} from "./terminalFrameGate";
+import {
   type CoalescedTerminalWriteOptions,
   enqueueCoalescedTerminalWrite,
   flushTerminalWriteCoalescer,
@@ -69,6 +75,8 @@ import {
 import {
   FLOW_HIGH_WATER_MARK,
   FLOW_LOW_WATER_MARK,
+  LOCAL_FLOW_HIGH_WATER_MARK,
+  LOCAL_FLOW_LOW_WATER_MARK,
   XTERM_WRITE_CALLBACK_BATCH_BYTES,
   XTERM_WRITE_CALLBACK_FAST_PATH_MAX_BYTES,
 } from "./terminalFlowConstants";
@@ -374,9 +382,24 @@ export const getFlowController = (
 ): OutputFlowController => {
   let controller = terminalFlowControllers.get(term);
   if (!controller) {
+    // A local shell needs no output back-pressure: there is no network to
+    // overwhelm, and the source (a local process) blocks on its own write
+    // when the pipe fills. The 1 MB watermark meant for SSH otherwise pauses
+    // the PTY several times a second under a full-screen animated TUI, which
+    // throttles its frame loop far below what the renderer can paint. Give
+    // local sessions a much higher ceiling so the pause is rare; SSH keeps the
+    // tight default. The ceiling still bounds memory — it does not disable
+    // back-pressure, only relaxes it where a flood cannot originate.
+    const isLocal = (ctx.hostRef?.current ?? ctx.host)?.protocol === "local";
+    const highWaterMark = isLocal
+      ? Math.max(FLOW_HIGH_WATER_MARK, LOCAL_FLOW_HIGH_WATER_MARK)
+      : FLOW_HIGH_WATER_MARK;
+    const lowWaterMark = isLocal
+      ? Math.max(FLOW_LOW_WATER_MARK, LOCAL_FLOW_LOW_WATER_MARK)
+      : FLOW_LOW_WATER_MARK;
     controller = createOutputFlowController({
-      highWaterMark: FLOW_HIGH_WATER_MARK,
-      lowWaterMark: FLOW_LOW_WATER_MARK,
+      highWaterMark,
+      lowWaterMark,
       onPause: () => {
         const id = ctx.sessionRef.current;
         if (id) ctx.terminalBackend.setSessionFlowPaused?.(id, true);
@@ -446,7 +469,194 @@ export const writeTerminalLine = (
   flushTerminalWritesForBackgroundOutput(term);
 };
 
+/**
+ * Backlog (unacknowledged bytes awaiting xterm) below which the frame gate
+ * forwards frames straight through — a few frames deep, enough to keep xterm
+ * fed at full rate without starving. Above it the gate drops superseded frames
+ * instead of letting the backlog (and the latency riding behind it) grow.
+ */
+const FRAME_GATE_FORWARD_BACKLOG = 512 * 1024;
+/** Retry cadence for draining held *complete* output when the backlog clears. */
+const FRAME_GATE_FLUSH_MS = 8;
+/**
+ * Fail-open ceiling for the held buffer. Releasing at once past this keeps the
+ * gate from withholding output unboundedly and, kept below the SSH flow
+ * watermark, avoids deadlocking on a frame larger than that watermark (the
+ * backend would pause before the withheld closer could arrive).
+ */
+const FRAME_GATE_MAX_HELD_BYTES = 512 * 1024;
+/**
+ * How long a lone trailing partial (an opener with no closer) may be held before
+ * it is released to xterm. Long enough not to fire during normal frame assembly,
+ * short enough that a process killed mid-frame does not leave its prompt hidden.
+ */
+const FRAME_GATE_PARTIAL_FAILOPEN_MS = 200;
+
+type FrameGateState = {
+  buffer: string;
+  /**
+   * Flow-control ingress bytes attributable to `buffer`. Tracked separately
+   * from `buffer.length` because plugin processing can make a chunk's ingress
+   * differ from its rendered length; it is apportioned exactly (via complements)
+   * as bytes are forwarded, dropped or held so the backend is neither over- nor
+   * under-acknowledged.
+   */
+  ingress: number;
+  meta?: TerminalSessionDataMeta;
+  flushTimer?: ReturnType<typeof setTimeout>;
+};
+const frameGateStates = new WeakMap<XTerm, FrameGateState>();
+
+const getFrameGateState = (term: XTerm): FrameGateState => {
+  let state = frameGateStates.get(term);
+  if (!state) {
+    state = { buffer: "", ingress: 0 };
+    frameGateStates.set(term, state);
+  }
+  return state;
+};
+
+export const resetFrameGate = (
+  term: XTerm,
+  onHeld?: (buffer: string, ingress: number) => void,
+): void => {
+  const state = frameGateStates.get(term);
+  if (!state) return;
+  if (state.flushTimer !== undefined) clearTimeout(state.flushTimer);
+  // Never silently drop held output before its state is deleted: a reset racing
+  // an incomplete frame (hibernation, detach) would otherwise lose the buffered
+  // bytes and leave their ingress unacknowledged to the backend. The caller
+  // decides how to release it — forward it where a write context exists,
+  // acknowledge its ingress where only the backend is available.
+  if (state.buffer) onHeld?.(state.buffer, state.ingress);
+  frameGateStates.delete(term);
+};
+
+/**
+ * Drain as much of the gate's held buffer as the current backlog allows,
+ * collapsing superseded frames first. Held frames that cannot be forwarded yet
+ * stay buffered so the next arrival (or flush) collapses them against newer
+ * ones instead of letting them pile up.
+ */
+const drainFrameGate = (
+  ctx: TerminalSessionStartersContext,
+  term: XTerm,
+): void => {
+  const state = getFrameGateState(term);
+  if (state.flushTimer !== undefined) {
+    clearTimeout(state.flushTimer);
+    state.flushTimer = undefined;
+  }
+  if (!state.buffer) return;
+
+  // Drop a frame only when its successor demonstrably repaints the whole
+  // viewport (proven by simulating the writes and counting covered cells), never
+  // on raw payload length, which SGR escapes inflate.
+  const { complete, partial, dropped } = collapseAndSplit(
+    state.buffer,
+    (content) => makesFullRepaint(content, term.cols, term.rows),
+  );
+
+  // Apportion the buffered ingress across forwarded / dropped / held so the
+  // backend is acknowledged in its own units, not rendered-string lengths.
+  const {
+    forward: ingressComplete,
+    dropped: ingressDropped,
+    held: ingressPartial,
+  } = apportionFrameGateIngress(
+    state.ingress,
+    state.buffer.length,
+    complete.length,
+    dropped,
+    partial.length,
+  );
+
+  state.buffer = partial;
+  state.ingress = ingressPartial;
+  if (dropped > 0) acknowledgeDroppedTerminalDisplayBytes(ctx, ingressDropped);
+
+  let heldComplete = false;
+  if (complete) {
+    const backlog = getFlowControllerForTerm(term)?.pendingBytes() ?? 0;
+    if (backlog < FRAME_GATE_FORWARD_BACKLOG) {
+      forwardSessionData(ctx, term, complete, ingressComplete, state.meta);
+    } else {
+      // xterm is still behind: keep the collapsed complete run buffered ahead of
+      // the trailing partial so newer frames supersede it rather than queue up.
+      state.buffer = complete + state.buffer;
+      state.ingress += ingressComplete;
+      heldComplete = true;
+    }
+  }
+
+  if (!state.buffer) return;
+
+  // Fail-open: never withhold output indefinitely. A held buffer past the cap
+  // (e.g. a frame larger than the SSH flow watermark, which would otherwise
+  // deadlock) is released at once.
+  if (state.buffer.length >= FRAME_GATE_MAX_HELD_BYTES) {
+    forwardSessionData(ctx, term, state.buffer, state.ingress, state.meta);
+    state.buffer = "";
+    state.ingress = 0;
+    return;
+  }
+
+  // Held *complete* output is released by a clearing backlog, so poll quickly.
+  // A lone trailing partial can only be completed by new session data (which
+  // calls drainFrameGate itself); poll it only on a longer one-shot that
+  // fail-opens if it fires — so a process killed mid-frame never leaves its
+  // prompt hidden, yet a stalled session never busy-polls.
+  if (state.flushTimer === undefined) {
+    const delay = heldComplete ? FRAME_GATE_FLUSH_MS : FRAME_GATE_PARTIAL_FAILOPEN_MS;
+    state.flushTimer = setTimeout(() => {
+      state.flushTimer = undefined;
+      if (heldComplete) {
+        drainFrameGate(ctx, term);
+        return;
+      }
+      // Fired with no intervening drain: the partial is stuck — release it.
+      const stuck = getFrameGateState(term);
+      if (stuck.buffer) {
+        forwardSessionData(ctx, term, stuck.buffer, stuck.ingress, stuck.meta);
+        stuck.buffer = "";
+        stuck.ingress = 0;
+      }
+    }, delay);
+  }
+};
+
+/**
+ * Entry point for PTY output. When a full-screen animation is in flight (a DEC
+ * 2026 frame is present or already buffered) it runs through the frame gate,
+ * which caps the display/keyboard latency by dropping superseded frames. All
+ * other output takes the direct path unchanged.
+ */
 export const writeSessionData = (
+  ctx: TerminalSessionStartersContext,
+  term: XTerm,
+  data: string,
+  ingressBytes: number = data.length,
+  meta?: TerminalSessionDataMeta,
+) => {
+  const state = frameGateStates.get(term);
+  // Engage on a complete opener, on already-buffered output, or on a trailing
+  // split opener (`ESC[?2026h` cut across PTY chunks) so an aligned stream can
+  // never bypass the gate by landing the opener on a chunk boundary.
+  const engaged = (state && state.buffer.length > 0)
+    || data.includes("\x1b[?2026h")
+    || endsWithSyncOpenerPrefix(data);
+  if (!engaged) {
+    forwardSessionData(ctx, term, data, ingressBytes, meta);
+    return;
+  }
+  const gate = getFrameGateState(term);
+  gate.buffer += data;
+  gate.ingress += ingressBytes;
+  gate.meta = meta;
+  drainFrameGate(ctx, term);
+};
+
+const forwardSessionData = (
   ctx: TerminalSessionStartersContext,
   term: XTerm,
   data: string,
@@ -792,6 +1002,14 @@ export const releaseTerminalFlowBeforeHibernate = (
   setTerminalWriteCoalescerFlushGate(term);
   pendingTimestampSecondByTerm.delete(term);
   resetDeferredTerminalWriteAck(term);
+  // Only the backend is in scope here; acknowledge held ingress so hibernation
+  // does not leave the source paused on bytes that will never be written.
+  resetFrameGate(term, (_buffer, ingress) => {
+    if (ingress > 0) {
+      ackTerminalSessionFlow(backend, sessionId, ingress);
+      flushTerminalSessionFlowAck(sessionId);
+    }
+  });
   terminalFlowControllers.delete(term);
 };
 
@@ -841,6 +1059,11 @@ export const attachSessionToTerminal = (
   teardownTerminalOutputPipeline(ctx, term, id, flow);
   flushTerminalWriteCoalescer(term);
   resetTerminalSyncBlockFilter(term);
+  // A write context exists here, so flush any held output to xterm rather than
+  // dropping it (forwardSessionData also acknowledges its ingress).
+  resetFrameGate(term, (buffer, ingress) => {
+    forwardSessionData(ctx, term, buffer, ingress);
+  });
   resetTerminalLineTimestamps(term);
   resetTerminalOutputPressure(term);
   ctx.onSessionAttached?.(id);

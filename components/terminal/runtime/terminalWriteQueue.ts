@@ -12,6 +12,24 @@ export const MAX_WRITE_QUEUE_BYTES = 512 * 1024;
  */
 export const WRITE_QUEUE_TURN_BUDGET_MS = 10;
 
+/**
+ * How long an active queue item may make no progress, with nothing scheduled to
+ * make any, before it is force-completed.
+ *
+ * The completion of an item depends on its write closure invoking the callback
+ * it is handed, which in the real pipeline is wired to xterm's
+ * `term.write(data, cb)`. A lost `cb` — xterm accepting and parsing a write yet
+ * never firing its callback — would otherwise wedge the queue permanently.
+ *
+ * Set above any legitimate single-write callback latency (a callback fires
+ * within a frame or two) yet short enough that a recovered stall reads as a
+ * brief hitch rather than a second-long freeze. The watchdog additionally fires
+ * only when nothing is scheduled, so a slow-but-progressing queue is never
+ * disturbed. Aligned with {@link LARGE_WRITE_FLUSH_WATCHDOG_MS} in the session
+ * write path, which guards the same kind of stuck-write condition.
+ */
+export const WRITE_QUEUE_STALL_TIMEOUT_MS = 250;
+
 export type TerminalWriteQueueOptions = {
   onDropped?: (bytes: number) => void;
   dropBytes?: number;
@@ -49,6 +67,8 @@ type TerminalWriteQueue = {
   drainTimer?: ReturnType<typeof setTimeout>;
   stepTimer?: ReturnType<typeof setTimeout>;
   stepContinuation?: () => void;
+  stallWatchdog?: ReturnType<typeof setTimeout>;
+  progressSeq: number;
 };
 
 const terminalWriteQueues = new WeakMap<XTerm, TerminalWriteQueue>();
@@ -65,6 +85,7 @@ const getOrCreateQueue = (term: XTerm): TerminalWriteQueue => {
       floodMode: false,
       turnStartedAt: 0,
       onDropped: terminalWriteQueueDropHandlers.get(term),
+      progressSeq: 0,
     };
     terminalWriteQueues.set(term, queue);
   }
@@ -84,6 +105,68 @@ const endQueueTurn = (queue: TerminalWriteQueue): void => {
 const isQueueTurnBudgetExceeded = (queue: TerminalWriteQueue): boolean => {
   if (queue.turnStartedAt <= 0) return false;
   return performance.now() - queue.turnStartedAt >= WRITE_QUEUE_TURN_BUDGET_MS;
+};
+
+const clearStallWatchdog = (queue: TerminalWriteQueue): void => {
+  if (queue.stallWatchdog !== undefined) {
+    clearTimeout(queue.stallWatchdog);
+    queue.stallWatchdog = undefined;
+  }
+};
+
+/**
+ * Unacknowledged bytes of a stalled item: the dispatched-but-uncompleted step
+ * and everything after it. Steps before it already fired their callbacks (and
+ * with them `flow.written`), so counting the whole item would double-ack them.
+ * `nextIndex` points one past the dispatched step, hence `nextIndex - 1`.
+ */
+const unackedBytesOf = (item: QueuedWrite): number => {
+  const from = Math.max(0, item.nextIndex - 1);
+  const remaining = item.steps
+    .slice(from)
+    .reduce((sum, step) => sum + step.dropBytes, 0);
+  return remaining > 0 ? remaining : item.dropBytes;
+};
+
+/**
+ * Arm a watchdog against a lost write callback wedging the queue. It fires only
+ * when the same item is still active, has made no progress since it was armed,
+ * and has nothing scheduled to advance it — a genuine stall, never a
+ * slow-but-progressing drain. On fire it acknowledges the item's unacked bytes
+ * (so flow control resumes) and advances the queue.
+ */
+const armStallWatchdog = (
+  term: XTerm,
+  queue: TerminalWriteQueue,
+  item: QueuedWrite,
+): void => {
+  clearStallWatchdog(queue);
+  const progressAtArm = queue.progressSeq;
+  queue.stallWatchdog = setTimeout(() => {
+    queue.stallWatchdog = undefined;
+    if (terminalWriteQueues.get(term) !== queue) return;
+    if (
+      queue.active !== item
+      || item.cancelled
+      || queue.progressSeq !== progressAtArm
+      || queue.stepTimer !== undefined
+      || queue.stepContinuation !== undefined
+      || queue.drainTimer !== undefined
+    ) {
+      // Either the item advanced/completed, or something is scheduled to make
+      // it advance. Not a stall — leave it be.
+      return;
+    }
+    const unacked = unackedBytesOf(item);
+    // Mark cancelled so a late real callback becomes a no-op, then advance.
+    item.cancelled = true;
+    queue.active = undefined;
+    queue.drainBytes = 0;
+    if (unacked > 0) {
+      queue.onDropped?.(unacked);
+    }
+    scheduleQueueDrain(term, queue, true);
+  }, WRITE_QUEUE_STALL_TIMEOUT_MS);
 };
 
 const scheduleQueueDrain = (
@@ -109,6 +192,8 @@ const scheduleNextTerminalWrite = (term: XTerm, queue: TerminalWriteQueue) => {
     queue.writing = false;
     queue.drainBytes = 0;
     queue.floodMode = false;
+    queue.active = undefined;
+    clearStallWatchdog(queue);
     endQueueTurn(queue);
     if (terminalWriteQueues.get(term) === queue) {
       terminalWriteQueues.delete(term);
@@ -137,10 +222,12 @@ const scheduleNextTerminalWrite = (term: XTerm, queue: TerminalWriteQueue) => {
   if (queue.pendingBytes < 0) queue.pendingBytes = 0;
   queue.writing = true;
   queue.active = next;
+  armStallWatchdog(term, queue, next);
   runQueuedWrite(next, () => {
     if (queue.active !== next) {
       return;
     }
+    clearStallWatchdog(queue);
     queue.drainBytes += next.bytes;
     if (queue.active === next) {
       queue.active = undefined;
@@ -166,6 +253,13 @@ const scheduleNextTerminalWrite = (term: XTerm, queue: TerminalWriteQueue) => {
     }, 0);
     queue.stepTimer = timer;
     queue.stepContinuation = continuation;
+  }, () => {
+    // Step progress: advance the sequence and re-arm the watchdog so a stall on
+    // a later step of a multi-step item is covered as well as the first.
+    if (queue.active === next) {
+      queue.progressSeq += 1;
+      armStallWatchdog(term, queue, next);
+    }
   });
 };
 
@@ -182,6 +276,7 @@ const runQueuedWrite = (
   item: QueuedWrite,
   done: () => void,
   deferStep: (continuation: () => void) => void,
+  onStepProgress?: () => void,
 ): void => {
   let index = 0;
   let completed = false;
@@ -226,6 +321,10 @@ const runQueuedWrite = (
     let callbackCalledSynchronously = false;
     let insideWrite = true;
     const continueAfterStep = (): void => {
+      // A completed step is progress: re-arm the stall watchdog against the new
+      // step so a lost callback on a *later* step of a multi-step item is
+      // covered too, not only the first.
+      onStepProgress?.();
       currentDrainBytes += step.bytes;
       // Inter-step yields honor per-step flags only. item.yieldAfter applies
       // after the whole item finishes (see scheduleNextTerminalWrite), so that
@@ -462,6 +561,7 @@ export const abortTerminalWriteQueue = (
     queue.stepTimer = undefined;
   }
   queue.stepContinuation = undefined;
+  clearStallWatchdog(queue);
   terminalWriteQueues.delete(term);
 
   if (droppedBytes > 0) {

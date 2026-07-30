@@ -8,6 +8,11 @@ import terminalFlowConstants from "../../../infrastructure/config/terminalFlowCo
  */
 export const FLOW_HIGH_WATER_MARK = terminalFlowConstants.FLOW_HIGH_WATER_MARK;
 export const FLOW_LOW_WATER_MARK = terminalFlowConstants.FLOW_LOW_WATER_MARK;
+// Relaxed watermarks for local shells, which have no network to overwhelm.
+export const LOCAL_FLOW_HIGH_WATER_MARK =
+  terminalFlowConstants.LOCAL_FLOW_HIGH_WATER_MARK;
+export const LOCAL_FLOW_LOW_WATER_MARK =
+  terminalFlowConstants.LOCAL_FLOW_LOW_WATER_MARK;
 export const FLOW_CHAR_COUNT_ACK_SIZE = terminalFlowConstants.FLOW_CHAR_COUNT_ACK_SIZE;
 export const MAX_PENDING_WRITE_COALESCE_BYTES =
   terminalFlowConstants.MAX_PENDING_WRITE_COALESCE_BYTES;

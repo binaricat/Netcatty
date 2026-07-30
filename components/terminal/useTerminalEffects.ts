@@ -968,6 +968,8 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
         terminalSettings.drawBoldInBrightColors;
       termRef.current.options.minimumContrastRatio =
         terminalSettings.minimumContrastRatio;
+      termRef.current.options.allowTransparency =
+        terminalSettings.allowTransparency;
       termRef.current.options.smoothScrollDuration =
         terminalSettings.smoothScrolling
           ? XTERM_PERFORMANCE_CONFIG.rendering.smoothScrollDuration

@@ -152,7 +152,20 @@ const splitPendingMarkerSuffix = (input: string): { emit: string; pending: strin
 
   // Only suffixes that start with ESC can qualify; skip other start positions
   // with a charCode probe so no substring is allocated for them.
-  for (let length = input.length; length > 0; length -= 1) {
+  //
+  // Scan SHORTEST suffix first (from the end of the chunk backwards).
+  // `isIncompleteEscapePrefix` walks forward across *complete* sequences and
+  // only reports the incomplete one it eventually reaches, so it also answers
+  // `true` for every longer suffix that merely contains the incomplete tail —
+  // including the one starting at the chunk's first ESC. Scanning longest-first
+  // therefore held back everything from that first ESC onwards instead of just
+  // the split sequence. On escape-dense output (a 60fps TUI painting per-cell
+  // truecolor backgrounds) the first ESC sits within a few bytes of the chunk
+  // start, so whole chunks were withheld and `state.pending` grew across chunks
+  // until one happened to end on a clean boundary — xterm then received nothing
+  // for hundreds of ms followed by a ~1MB burst. The last ESC in the chunk is
+  // the real split point: an incomplete CSI cannot contain a further ESC.
+  for (let length = 1; length <= input.length; length += 1) {
     if (input.charCodeAt(input.length - length) !== 0x1b) {
       continue;
     }

@@ -74,6 +74,13 @@ export interface TerminalSettings {
   // Accessibility
   minimumContrastRatio: number; // Minimum contrast ratio (1-21)
 
+  // Rendering
+  // Rasterise glyphs onto a transparent tile instead of onto their background
+  // colour. The WebGL glyph cache is keyed on the background, so baking it in
+  // makes every glyph over a per-cell background (animated backgrounds,
+  // heatmaps, ANSI art) a cache miss and a fresh rasterisation on every frame.
+  allowTransparency: boolean;
+
   // Keyboard
   altAsMeta: boolean; // Use ⌥ as the Meta key
   optionArrowWordJump: boolean; // macOS: Option+←/→ send Meta-b/f for word jump
@@ -415,6 +422,7 @@ const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
   cursorShape: 'block',
   cursorBlink: true,
   minimumContrastRatio: 1,
+  allowTransparency: false,
   altAsMeta: false,
   optionArrowWordJump: false,
   shiftEnterNewlineEnabled: true,

@@ -1055,6 +1055,15 @@ function SettingsTerminalTab(props: {
           />
         </SettingRow>
         <SettingRow
+          label={t("settings.terminal.rendering.allowTransparency")}
+          description={t("settings.terminal.rendering.allowTransparency.desc")}
+        >
+          <Toggle
+            checked={terminalSettings.allowTransparency}
+            onChange={(v) => updateTerminalSetting("allowTransparency", v)}
+          />
+        </SettingRow>
+        <SettingRow
           label={t("settings.terminal.rendering.hibernateHiddenTabs")}
           description={t("settings.terminal.rendering.hibernateHiddenTabs.desc")}
         >

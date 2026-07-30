@@ -8,6 +8,7 @@ import {
   MAX_TERMINAL_WRITE_QUEUE_DRAIN_BYTES,
 } from "./terminalFlowConstants";
 import { shouldDegradeTerminalSideWork } from "./terminalOutputPressure";
+import { frameSafeSliceEnd } from "./syncFrameBoundary";
 import {
   createWriteCoalescer,
   type WriteCoalesceScheduleMode,
@@ -507,6 +508,13 @@ const writeLargeTerminalBatch = (
         }
       }
     }
+    // Never cut inside a DEC 2026 synchronized-output frame: a shard that ends
+    // mid-frame is handed to xterm across a setTimeout gap, and if the frame's
+    // close arrives after xterm's sync timeout the display tears. Applied last,
+    // and only ever extends the end, so it does not fight the boundary rules
+    // above. Bounded: it extends at most to this frame's close (or, for an
+    // unterminated trailing frame, holds it whole for the next write).
+    end = frameSafeSliceEnd(data, offset, end);
     const slice = data.slice(offset, end);
     const sliceIngress = end >= data.length
       ? remainingIngressBytes

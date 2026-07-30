@@ -242,3 +242,53 @@ test("isTerminalViewportScrolledUp is false on alternate screen", () => {
 test("isTerminalViewportScrolledUp is false when buffer is missing", () => {
   assert.equal(isTerminalViewportScrolledUp({ rows: 24 } as never), false);
 });
+
+/**
+ * Chunk boundaries that land mid-escape must hold back only the split
+ * sequence. Scanning longest-suffix-first held back everything from the
+ * chunk's *first* ESC, so escape-dense frames (60fps TUI, per-cell truecolor
+ * backgrounds) starved xterm for whole chunks at a time and released ~1MB
+ * bursts once a chunk happened to end cleanly.
+ */
+const escapeDenseFrame = (cells: number): string => {
+  let out = SYNC_START + "\x1b[1;1H";
+  for (let i = 0; i < cells; i += 1) {
+    out += `\x1b[0m\x1b[38;5;245m\x1b[48;2;${i % 256};128;200m#`;
+  }
+  return out + SYNC_END;
+};
+
+test("a mid-escape chunk boundary holds back only the split sequence", () => {
+  const state = createSyncBlockFilterState();
+  const frame = escapeDenseFrame(4000);
+  // Split inside the trailing `\x1b[48;2;...m` of some cell.
+  const cut = frame.lastIndexOf("\x1b[48;2;", frame.length - 40) + 6;
+  const emitted = filterSyncBlockClears(frame.slice(0, cut), state);
+
+  assert.ok(
+    state.pending.length < 32,
+    `pending should hold one partial sequence, held ${state.pending.length} bytes`,
+  );
+  assert.equal(emitted + state.pending, frame.slice(0, cut));
+});
+
+test("escape-dense frames stream through without withholding whole chunks", () => {
+  const state = createSyncBlockFilterState();
+  const stream = escapeDenseFrame(4000) + escapeDenseFrame(4000);
+  const CHUNK = 8192;
+  let emitted = "";
+  let emptyEmits = 0;
+
+  for (let i = 0; i < stream.length; i += CHUNK) {
+    const output = filterSyncBlockClears(stream.slice(i, i + CHUNK), state);
+    if (output.length === 0) emptyEmits += 1;
+    emitted += output;
+    assert.ok(
+      state.pending.length < CHUNK,
+      `pending must not accumulate across chunks, reached ${state.pending.length} bytes`,
+    );
+  }
+
+  assert.equal(emptyEmits, 0, "every chunk should release data to xterm");
+  assert.equal(emitted + state.pending, stream);
+});
