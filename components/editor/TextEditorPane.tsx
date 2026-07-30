@@ -25,7 +25,6 @@ loader.config({ paths: { vs: monacoBasePath } });
 import { useI18n } from '../../application/i18n/I18nProvider';
 import { useClipboardBackend } from '../../application/state/useClipboardBackend';
 import { HotkeyScheme, KeyBinding, matchesKeyBinding } from '../../domain/models';
-import { attachMonacoClipboardMetadataCapture } from '../../infrastructure/monaco/monacoClipboardPaste';
 import { useNetcattyMonacoTheme } from '../../infrastructure/monaco/useNetcattyMonacoTheme';
 import { getLanguageName, getSupportedLanguages } from '../../lib/sftpFileUtils';
 import { Button } from '../ui/button';
@@ -162,18 +161,12 @@ const TextEditorPaneInner: React.FC<TextEditorPaneProps> = ({
   const monaco = useMonaco();
   const customThemeName = useNetcattyMonacoTheme(monaco);
   const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
-  const clipboardCaptureDisposableRef = useRef<{ dispose: () => void } | null>(null);
 
   // Ref to store the latest save function to avoid stale closure in keyboard shortcut
   const handleSaveRef = useRef<() => void>(() => {});
   const handleCloseRef = useRef<(() => void) | null>(null);
   const handlePasteRef = useRef<() => Promise<void>>(() => Promise.resolve());
   const readClipboardTextRef = useRef<() => Promise<string | null>>(() => Promise.resolve(null));
-
-  useEffect(() => () => {
-    clipboardCaptureDisposableRef.current?.dispose();
-    clipboardCaptureDisposableRef.current = null;
-  }, []);
 
   const closeTabBinding = useMemo(
     () => keyBindings.find((binding) => binding.action === 'closeTab'),
@@ -263,10 +256,6 @@ const TextEditorPaneInner: React.FC<TextEditorPaneProps> = ({
     editorRef.current = editor;
 
     if (initialViewState) editor.restoreViewState(initialViewState);
-
-    // Share whole-line / multicursor copy metadata with other Monaco surfaces.
-    clipboardCaptureDisposableRef.current?.dispose();
-    clipboardCaptureDisposableRef.current = attachMonacoClipboardMetadataCapture(editor);
 
     // Add save shortcut - use ref to avoid stale closure
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {

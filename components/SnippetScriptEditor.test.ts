@@ -46,35 +46,11 @@ test('visual placeholder is hidden from assistive technology', () => {
   assert.match(codeEditorSource, /<span\s+aria-hidden/);
 });
 
-test('script code editor restores Electron clipboard paste for Cmd/Ctrl+V and right-click', () => {
+test('script code editor restores Electron clipboard paste for Cmd/Ctrl+V and native right-click', () => {
   assert.match(codeEditorSource, /useClipboardBackend/);
   assert.match(codeEditorSource, /readClipboardTextWithFallbacks/);
   assert.match(codeEditorSource, /buildMonacoPasteEdits/);
   assert.match(codeEditorSource, /KeyMod\.CtrlCmd \| monacoInstance\.KeyCode\.KeyV/);
-  assert.match(codeEditorSource, /contextmenu:\s*true/);
-  assert.match(codeEditorSource, /Paste from System Clipboard/);
-  assert.match(codeEditorSource, /execCommand\('paste'\)/);
-});
-
-test('script paste binding is editor-scoped, disposable, and skips find-widget text focus', () => {
-  assert.match(codeEditorSource, /editor\.addAction\(/);
-  assert.match(codeEditorSource, /netcatty\.scriptCodeEditor\.pasteFromSystemClipboard/);
-  assert.match(codeEditorSource, /contextMenuGroupId:\s*'9_cutcopypaste'/);
-  assert.match(codeEditorSource, /precondition:\s*'editorTextFocus'/);
-  assert.match(codeEditorSource, /pasteBindingDisposableRef/);
-  assert.match(codeEditorSource, /pasteBindingDisposableRef\.current\?\.dispose\(\)/);
-  assert.match(codeEditorSource, /if \(editorRef\.current !== editor \|\| !editor\.hasTextFocus\(\)\) return/);
-  assert.equal(codeEditorSource.match(/editor\.pushUndoStop\(\)/g)?.length, 2);
-  assert.match(codeEditorSource, /resolveMonacoPasteClipboardMetadata/);
-  assert.match(codeEditorSource, /attachMonacoClipboardMetadataCapture/);
-  assert.match(codeEditorSource, /editor\.hasTextFocus\(\)/);
-  assert.match(codeEditorSource, /const initialSelections = editor\.getSelections\(\)/);
-  assert.doesNotMatch(
-    codeEditorSource,
-    /let copiedWholeLineText/,
-  );
-  assert.doesNotMatch(
-    codeEditorSource,
-    /addCommand\(\s*monacoInstance\.KeyMod\.CtrlCmd \| monacoInstance\.KeyCode\.KeyV/,
-  );
+  assert.match(codeEditorSource, /contextmenu:\s*false/);
+  assert.match(codeEditorSource, /editor\.action\.clipboardPasteAction/);
 });

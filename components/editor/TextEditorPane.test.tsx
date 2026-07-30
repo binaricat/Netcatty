@@ -1,7 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import React from "react";
-import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import {
@@ -49,10 +48,4 @@ test("renders the promote button disabled while a save is running", () => {
 test("counts editor content without allocating line arrays", () => {
   assert.deepEqual(getTextEditorContentStats(""), { lineCount: 1, charCount: 0 });
   assert.deepEqual(getTextEditorContentStats("one\ntwo\n"), { lineCount: 3, charCount: 8 });
-});
-
-test("text editor pane shares Monaco clipboard metadata capture with other editors", () => {
-  const source = readFileSync(new URL("./TextEditorPane.tsx", import.meta.url), "utf8");
-  assert.match(source, /attachMonacoClipboardMetadataCapture/);
-  assert.match(source, /clipboardCaptureDisposableRef/);
 });
