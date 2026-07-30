@@ -5,7 +5,6 @@ import { useClipboardBackend } from '@/application/state/useClipboardBackend';
 import {
   buildMonacoPasteEdits,
   readClipboardTextWithFallbacks,
-  registerBridgePasteForEditor,
 } from '@/infrastructure/monaco/monacoClipboardPaste';
 import { useNetcattyMonacoTheme } from '@/infrastructure/monaco/useNetcattyMonacoTheme';
 import { registerNctMonacoCompletionProvider } from '@/infrastructure/scripts/nctMonacoCompletion.ts';
@@ -76,6 +75,7 @@ export const ScriptCodeEditor = React.forwardRef<ScriptCodeEditorHandle, ScriptC
     completionDisposableRef.current = null;
     pasteBindingDisposableRef.current?.dispose();
     pasteBindingDisposableRef.current = null;
+    editorRef.current = null;
   }, []);
 
   useEffect(() => {
@@ -97,9 +97,11 @@ export const ScriptCodeEditor = React.forwardRef<ScriptCodeEditorHandle, ScriptC
       readBridge: readClipboardTextFromBridge,
     });
 
+    // Clipboard reads are async; the editor can unmount while awaiting them.
+    if (editorRef.current !== editor) return;
+
     if (text === null) {
-      // Clipboard read unavailable. Prefer execCommand over triggering
-      // clipboardPasteAction — we route that command through this handler.
+      // Clipboard read unavailable. Use Monaco's native browser fallback.
       editor.getContainerDomNode().ownerDocument.execCommand('paste');
       return;
     }
@@ -128,33 +130,21 @@ export const ScriptCodeEditor = React.forwardRef<ScriptCodeEditorHandle, ScriptC
         () => onSubmitShortcutRef.current?.(),
       );
     }
-    // Fallback paste for Electron. Prefer addAction over addCommand so the
-    // keybinding is editorId-scoped and disposable (shared standalone service).
-    // precondition editorTextFocus skips find/replace inputs so native paste works.
-    // Do not add a second context-menu Paste — route Monaco's built-in command instead.
+    // Add a bridge-backed context menu action only while this editor has text focus.
+    // Monaco's native Paste remains available to other editors and find/replace inputs.
     pasteBindingDisposableRef.current?.dispose();
-    const keybindingDisposable = editor.addAction({
-      id: 'netcatty.scriptCodeEditor.clipboardPaste',
-      label: 'Paste',
+    const pasteBindingDisposable = editor.addAction({
+      id: 'netcatty.scriptCodeEditor.pasteFromSystemClipboard',
+      label: 'Paste from System Clipboard',
       keybindings: [monacoInstance.KeyMod.CtrlCmd | monacoInstance.KeyCode.KeyV],
+      contextMenuGroupId: '9_cutcopypaste',
+      contextMenuOrder: 4,
       precondition: 'editorTextFocus',
       run: () => {
         void handlePasteRef.current();
       },
     });
-    const commandDisposable = registerBridgePasteForEditor(
-      monacoInstance.editor,
-      editor.getId(),
-      () => {
-        void handlePasteRef.current();
-      },
-    );
-    pasteBindingDisposableRef.current = {
-      dispose: () => {
-        keybindingDisposable.dispose();
-        commandDisposable.dispose();
-      },
-    };
+    pasteBindingDisposableRef.current = pasteBindingDisposable;
     requestAnimationFrame(() => editor.layout());
     if (autoFocus) editor.focus();
   }, [autoFocus, language, onSubmitShortcut]);
@@ -176,7 +166,7 @@ export const ScriptCodeEditor = React.forwardRef<ScriptCodeEditorHandle, ScriptC
           </div>
         )}
         options={{
-          // Keep Monaco's menu; built-in Paste is routed via registerBridgePasteForEditor.
+          // Keep Monaco's native context menu and its other editing actions.
           contextmenu: true,
           minimap: { enabled: minimap },
           fontSize: 13,
