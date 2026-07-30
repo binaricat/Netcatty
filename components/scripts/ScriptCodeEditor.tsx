@@ -110,7 +110,9 @@ export const ScriptCodeEditor = React.forwardRef<ScriptCodeEditorHandle, ScriptC
     const selections = editor.getSelections();
     if (!selections || selections.length === 0) return;
 
+    editor.pushUndoStop();
     editor.executeEdits('netcatty-paste', buildMonacoPasteEdits(text, selections));
+    editor.pushUndoStop();
     editor.focus();
   }, [readClipboardTextFromBridge]);
 

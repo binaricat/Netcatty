@@ -29,6 +29,15 @@ test('buildMonacoPasteEdits spreads one line per cursor when counts match', () =
   assert.equal(edits[1]?.text, 'two');
 });
 
+test('buildMonacoPasteEdits ignores one trailing newline when spreading', () => {
+  const edits = buildMonacoPasteEdits('one\ntwo\n', [
+    { startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 1 },
+    { startLineNumber: 2, startColumn: 1, endLineNumber: 2, endColumn: 1 },
+  ]);
+  assert.equal(edits[0]?.text, 'one');
+  assert.equal(edits[1]?.text, 'two');
+});
+
 test('buildMonacoPasteEdits does not spread when line and cursor counts differ', () => {
   const edits = buildMonacoPasteEdits('only-one-line', [
     { startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 1 },
@@ -36,6 +45,13 @@ test('buildMonacoPasteEdits does not spread when line and cursor counts differ',
   ]);
   assert.equal(edits[0]?.text, 'only-one-line');
   assert.equal(edits[1]?.text, 'only-one-line');
+});
+
+test('buildMonacoPasteEdits preserves trailing newlines when not spreading', () => {
+  const edits = buildMonacoPasteEdits('one\ntwo\n', [
+    { startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 1 },
+  ]);
+  assert.equal(edits[0]?.text, 'one\ntwo\n');
 });
 
 test('buildMonacoPasteEdits returns empty when there are no selections', () => {

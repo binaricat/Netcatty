@@ -26,7 +26,7 @@ export function buildMonacoPasteEdits(
 ): MonacoPasteEdit[] {
   if (selections.length === 0) return [];
 
-  const lines = text.split(/\r\n|\n/);
+  const lines = text.replace(/\r?\n$/, '').split(/\r\n|\n/);
   const distribute = selections.length > 1 && lines.length === selections.length;
 
   return selections.map((selection, i) => ({
