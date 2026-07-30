@@ -19,6 +19,18 @@ test('buildMonacoPasteEdits pastes full text at a single cursor', () => {
   ]);
 });
 
+test('buildMonacoPasteEdits inserts a copied whole line at column one', () => {
+  const edits = buildMonacoPasteEdits('copied line\n', [
+    { startLineNumber: 2, startColumn: 4, endLineNumber: 2, endColumn: 4 },
+  ], true);
+  assert.deepEqual(edits[0]?.range, {
+    startLineNumber: 2,
+    startColumn: 1,
+    endLineNumber: 2,
+    endColumn: 1,
+  });
+});
+
 test('buildMonacoPasteEdits spreads one line per cursor when counts match', () => {
   const edits = buildMonacoPasteEdits('one\ntwo', [
     { startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 1 },

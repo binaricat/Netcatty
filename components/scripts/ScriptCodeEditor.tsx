@@ -65,6 +65,7 @@ export const ScriptCodeEditor = React.forwardRef<ScriptCodeEditorHandle, ScriptC
   const onSubmitShortcutRef = useRef(onSubmitShortcut);
   onSubmitShortcutRef.current = onSubmitShortcut;
   const handlePasteRef = useRef<() => Promise<void>>(() => Promise.resolve());
+  const copiedWholeLineTextRef = useRef<string | null>(null);
 
   useImperativeHandle(forwardedRef, () => ({
     focus: () => editorRef.current?.focus(),
@@ -109,9 +110,15 @@ export const ScriptCodeEditor = React.forwardRef<ScriptCodeEditorHandle, ScriptC
 
     const selections = editor.getSelections();
     if (!selections || selections.length === 0) return;
+    const pasteOnNewLine = copiedWholeLineTextRef.current === text
+      && text.endsWith('\n')
+      && selections.every((selection) => selection.isEmpty());
 
     editor.pushUndoStop();
-    editor.executeEdits('netcatty-paste', buildMonacoPasteEdits(text, selections));
+    editor.executeEdits(
+      'netcatty-paste',
+      buildMonacoPasteEdits(text, selections, pasteOnNewLine),
+    );
     editor.pushUndoStop();
     editor.focus();
   }, [readClipboardTextFromBridge]);
@@ -135,6 +142,13 @@ export const ScriptCodeEditor = React.forwardRef<ScriptCodeEditorHandle, ScriptC
     // Add a bridge-backed context menu action only while this editor has text focus.
     // Monaco's native Paste remains available to other editors and find/replace inputs.
     pasteBindingDisposableRef.current?.dispose();
+    const handleCopy = (event: ClipboardEvent) => {
+      const selections = editor.getSelections();
+      copiedWholeLineTextRef.current = selections?.every((selection) => selection.isEmpty())
+        ? event.clipboardData?.getData('text/plain') || null
+        : null;
+    };
+    editor.getContainerDomNode().addEventListener('copy', handleCopy);
     const pasteBindingDisposable = editor.addAction({
       id: 'netcatty.scriptCodeEditor.pasteFromSystemClipboard',
       label: 'Paste from System Clipboard',
@@ -146,7 +160,12 @@ export const ScriptCodeEditor = React.forwardRef<ScriptCodeEditorHandle, ScriptC
         void handlePasteRef.current();
       },
     });
-    pasteBindingDisposableRef.current = pasteBindingDisposable;
+    pasteBindingDisposableRef.current = {
+      dispose: () => {
+        editor.getContainerDomNode().removeEventListener('copy', handleCopy);
+        pasteBindingDisposable.dispose();
+      },
+    };
     requestAnimationFrame(() => editor.layout());
     if (autoFocus) editor.focus();
   }, [autoFocus, language, onSubmitShortcut]);

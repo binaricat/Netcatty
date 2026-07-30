@@ -65,6 +65,8 @@ test('script paste binding is editor-scoped, disposable, and skips find-widget t
   assert.match(codeEditorSource, /pasteBindingDisposableRef\.current\?\.dispose\(\)/);
   assert.match(codeEditorSource, /if \(editorRef\.current !== editor\) return/);
   assert.equal(codeEditorSource.match(/editor\.pushUndoStop\(\)/g)?.length, 2);
+  assert.match(codeEditorSource, /const pasteOnNewLine = copiedWholeLineTextRef\.current === text/);
+  assert.match(codeEditorSource, /addEventListener\('copy', handleCopy\)/);
   assert.doesNotMatch(
     codeEditorSource,
     /addCommand\(\s*monacoInstance\.KeyMod\.CtrlCmd \| monacoInstance\.KeyCode\.KeyV/,
