@@ -14,7 +14,9 @@ const {
   mapOpenCodeModels,
   normalizeOpenCodeQuestions,
   OPENCODE_LIST_SERVER_IDLE_MS,
+  OPENCODE_QUESTION_REJECT_TIMEOUT_MS,
   parseOpenCodeModel,
+  rejectOpenCodeQuestionHttp,
   resetOpenCodeListServerPool,
   resolveUsableOpenCodeBinPath,
   runOpenCodeTurn,
@@ -644,6 +646,92 @@ test("runOpenCodeTurn returns promptly when aborted while the event stream is qu
   assert.equal(abortCount, 1);
   assert.equal(closeCount >= 1, true);
   assert.equal(events.some((event) => event.k === "done"), false);
+});
+
+test("rejectOpenCodeQuestionHttp forwards an abort signal to fetch", async () => {
+  const controller = new AbortController();
+  let sawSignal = null;
+  await rejectOpenCodeQuestionHttp({
+    baseUrl: "http://127.0.0.1:4096",
+    requestId: "req-1",
+    signal: controller.signal,
+    fetchImpl: async (_url, init) => {
+      sawSignal = init?.signal;
+      return { ok: true };
+    },
+  });
+  assert.equal(sawSignal, controller.signal);
+});
+
+test("runOpenCodeTurn does not hang cleanup when pending question reject HTTP stalls", async () => {
+  const { events, emitter } = collector();
+  const abortController = new AbortController();
+  let settled = null;
+  let sawRejectSignal = false;
+  let rejectSignalAborted = false;
+  const stream = {
+    async *[Symbol.asyncIterator]() {
+      yield {
+        payload: {
+          type: "question.asked",
+          properties: {
+            id: "req-hang",
+            sessionID: "sess-1",
+            questions: [{ header: "Pick", question: "Continue?", options: [{ label: "Yes", description: "" }] }],
+          },
+        },
+      };
+      yield {
+        payload: {
+          type: "message.part.updated",
+          properties: { part: { type: "text", sessionID: "sess-1", id: "p1", text: "hi" }, delta: "hi" },
+        },
+      };
+      yield { payload: { type: "session.idle", properties: { sessionID: "sess-1" } } };
+    },
+  };
+  const client = {
+    global: { event: async () => ({ stream }) },
+    session: {
+      create: async () => ({ data: { id: "sess-1" } }),
+      promptAsync: async () => ({ data: true }),
+    },
+  };
+
+  const running = runOpenCodeTurn({
+    prompt: "hello",
+    model: "openai/gpt-5.1",
+    emitter,
+    abortController,
+    onQuestionSettled: (payload) => { settled = payload; },
+    fetchImpl: (_url, init) => {
+      sawRejectSignal = Boolean(init?.signal);
+      if (init?.signal) {
+        init.signal.addEventListener("abort", () => { rejectSignalAborted = true; }, { once: true });
+      }
+      return new Promise(() => {});
+    },
+    openCodeFactory: async () => ({
+      client,
+      server: { url: "http://127.0.0.1:4096", close() {} },
+    }),
+  });
+
+  const result = await Promise.race([
+    running,
+    new Promise((resolve) => setTimeout(
+      () => resolve("timed-out"),
+      OPENCODE_QUESTION_REJECT_TIMEOUT_MS + 1000,
+    )),
+  ]);
+
+  assert.notEqual(result, "timed-out");
+  assert.deepEqual(result, { sessionId: "sess-1" });
+  assert.equal(sawRejectSignal, true);
+  assert.equal(rejectSignalAborted, true);
+  assert.deepEqual(settled, { requestId: "req-hang", sessionId: "sess-1", status: "rejected" });
+  assert.equal(events.some((event) => event.k === "questionAsk"), true);
+  assert.equal(events.some((event) => event.k === "done"), true);
 });
 
 test("runOpenCodeTurn passes an explicit non-default port to the OpenCode SDK factory", async () => {

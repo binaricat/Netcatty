@@ -12,6 +12,8 @@ const {
 
 const OPENCODE_IMAGE_MEDIA_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
 const DEFAULT_OPENCODE_PORT = 4096;
+/** Best-effort question reject during abort/finally must not hang turn cleanup. */
+const OPENCODE_QUESTION_REJECT_TIMEOUT_MS = 2000;
 
 function resolveUsableOpenCodeBinPath(binPath, env) {
   const candidates = [];
@@ -130,7 +132,7 @@ async function replyOpenCodeQuestionHttp({
 }
 
 async function rejectOpenCodeQuestionHttp({
-  baseUrl, requestId, directory, sessionId, version, fetchImpl,
+  baseUrl, requestId, directory, sessionId, version, fetchImpl, signal,
 } = {}) {
   const fetchFn = fetchImpl || fetch;
   const response = await fetchFn(buildOpenCodeQuestionReplyUrl({
@@ -142,12 +144,41 @@ async function rejectOpenCodeQuestionHttp({
     action: "reject",
   }), {
     method: "POST",
+    signal,
   });
   if (!response?.ok) {
     const text = typeof response?.text === "function" ? await response.text().catch(() => "") : "";
     throw new Error(text || `OpenCode question reject failed (${response?.status || "unknown"})`);
   }
   return true;
+}
+
+function createTimeoutSignal(ms) {
+  if (typeof AbortSignal.timeout === "function") {
+    return AbortSignal.timeout(ms);
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => {
+    try { controller.abort(); } catch { /* ignore */ }
+  }, ms);
+  if (typeof timer.unref === "function") timer.unref();
+  return controller.signal;
+}
+
+/** Bound a best-effort promise even if the callee ignores AbortSignal. */
+function raceWithTimeout(promise, ms) {
+  let timer;
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      timer = setTimeout(() => {
+        reject(new Error(`timed out after ${ms}ms`));
+      }, ms);
+      if (typeof timer.unref === "function") timer.unref();
+    }),
+  ]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
 }
 
 function buildOpenCodeConfig({ model, injectedMcpServers, toolIntegrationMode, skillsPathAllowlist } = {}) {
@@ -707,14 +738,19 @@ async function runOpenCodeTurn({
     pendingQuestions.clear();
     await Promise.all(pending.map(async ([requestId, meta]) => {
       try {
-        await rejectOpenCodeQuestionHttp({
-          baseUrl: serverUrl,
-          requestId,
-          sessionId: meta?.sessionId || sessionId || undefined,
-          version: meta?.version,
-          directory: cwd || undefined,
-          fetchImpl,
-        });
+        const signal = createTimeoutSignal(OPENCODE_QUESTION_REJECT_TIMEOUT_MS);
+        await raceWithTimeout(
+          rejectOpenCodeQuestionHttp({
+            baseUrl: serverUrl,
+            requestId,
+            sessionId: meta?.sessionId || sessionId || undefined,
+            version: meta?.version,
+            directory: cwd || undefined,
+            fetchImpl,
+            signal,
+          }),
+          OPENCODE_QUESTION_REJECT_TIMEOUT_MS,
+        );
       } catch { /* best-effort cleanup */ }
       try {
         onQuestionSettled?.({ requestId, sessionId: meta?.sessionId || sessionId, status: "rejected" });
@@ -1107,5 +1143,6 @@ module.exports = {
   runOpenCodeTurn,
   toOpenCodeMcpConfig,
   translateOpenCodeEvent,
+  OPENCODE_QUESTION_REJECT_TIMEOUT_MS,
   OPENCODE_LIST_SERVER_IDLE_MS,
 };
