@@ -36,7 +36,8 @@ export function buildMonacoPasteEdits(
     : selections;
 
   return orderedSelections.map((selection, i) => ({
-    range: pasteOnNewLine
+    range: pasteOnNewLine && selection.startLineNumber === selection.endLineNumber
+      && selection.startColumn === selection.endColumn
       ? {
         startLineNumber: selection.startLineNumber,
         startColumn: 1,

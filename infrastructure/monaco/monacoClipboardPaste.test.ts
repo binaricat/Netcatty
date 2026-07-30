@@ -31,6 +31,20 @@ test('buildMonacoPasteEdits inserts a copied whole line at column one', () => {
   });
 });
 
+test('buildMonacoPasteEdits preserves non-empty selections during whole-line paste', () => {
+  const edits = buildMonacoPasteEdits('copied line\n', [
+    { startLineNumber: 2, startColumn: 4, endLineNumber: 2, endColumn: 4 },
+    { startLineNumber: 3, startColumn: 2, endLineNumber: 3, endColumn: 5 },
+  ], true);
+  assert.equal(edits[0]?.range.startColumn, 1);
+  assert.deepEqual(edits[1]?.range, {
+    startLineNumber: 3,
+    startColumn: 2,
+    endLineNumber: 3,
+    endColumn: 5,
+  });
+});
+
 test('buildMonacoPasteEdits spreads one line per cursor when counts match', () => {
   const edits = buildMonacoPasteEdits('one\ntwo', [
     { startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 1 },
