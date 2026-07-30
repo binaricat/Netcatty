@@ -63,7 +63,7 @@ test('script paste binding is editor-scoped, disposable, and skips find-widget t
   assert.match(codeEditorSource, /precondition:\s*'editorTextFocus'/);
   assert.match(codeEditorSource, /pasteBindingDisposableRef/);
   assert.match(codeEditorSource, /pasteBindingDisposableRef\.current\?\.dispose\(\)/);
-  assert.match(codeEditorSource, /if \(editorRef\.current !== editor\) return/);
+  assert.match(codeEditorSource, /if \(editorRef\.current !== editor \|\| !editor\.hasTextFocus\(\)\) return/);
   assert.equal(codeEditorSource.match(/editor\.pushUndoStop\(\)/g)?.length, 2);
   assert.match(codeEditorSource, /const pasteOnNewLine = copiedWholeLineText === text/);
   assert.match(codeEditorSource, /editor\.hasTextFocus\(\)/);

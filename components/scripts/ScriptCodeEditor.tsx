@@ -91,7 +91,7 @@ export const ScriptCodeEditor = React.forwardRef<ScriptCodeEditorHandle, ScriptC
 
   const handlePaste = useCallback(async () => {
     const editor = editorRef.current;
-    if (!editor) return;
+    if (!editor || !editor.hasTextFocus()) return;
 
     const text = await readClipboardTextWithFallbacks({
       readNavigator: navigator.clipboard?.readText
@@ -101,7 +101,7 @@ export const ScriptCodeEditor = React.forwardRef<ScriptCodeEditorHandle, ScriptC
     });
 
     // Clipboard reads are async; the editor can unmount while awaiting them.
-    if (editorRef.current !== editor) return;
+    if (editorRef.current !== editor || !editor.hasTextFocus()) return;
 
     if (text === null) {
       // Clipboard read unavailable. Use Monaco's native browser fallback.
@@ -113,8 +113,7 @@ export const ScriptCodeEditor = React.forwardRef<ScriptCodeEditorHandle, ScriptC
     const selections = editor.getSelections();
     if (!selections || selections.length === 0) return;
     const pasteOnNewLine = copiedWholeLineText === text
-      && text.endsWith('\n')
-      && selections.every((selection) => selection.isEmpty());
+      && text.endsWith('\n');
     const multicursorText = copiedMulticursor?.text === text
       ? copiedMulticursor.values
       : null;
@@ -159,14 +158,13 @@ export const ScriptCodeEditor = React.forwardRef<ScriptCodeEditorHandle, ScriptC
       const orderedSelections = selections?.toSorted((a, b) => (
         a.startLineNumber - b.startLineNumber || a.startColumn - b.startColumn
       ));
-      const selectedLines = new Set(
-        orderedSelections?.filter((selection) => !selection.isEmpty()).map((selection) => selection.startLineNumber),
-      );
       copiedMulticursor = copiedText && orderedSelections && orderedSelections.length > 1 && model
         ? {
           text: copiedText,
           values: orderedSelections
-            .filter((selection) => !selection.isEmpty() || !selectedLines.has(selection.startLineNumber))
+            .filter((selection, index) => !selection.isEmpty()
+              || index === 0
+              || orderedSelections[index - 1]?.startLineNumber !== selection.startLineNumber)
             .map((selection) => selection.isEmpty()
             ? model.getLineContent(selection.startLineNumber)
             : model.getValueInRange(selection)),

@@ -29,8 +29,9 @@ export function buildMonacoPasteEdits(
   if (selections.length === 0) return [];
 
   const lines = text.replace(/\r?\n$/, '').split(/\r\n|\n/);
+  const hasMulticursorText = multicursorText?.length === selections.length;
   const distribute = !pasteOnNewLine && selections.length > 1
-    && (multicursorText?.length === selections.length || lines.length === selections.length);
+    && (hasMulticursorText || lines.length === selections.length);
   const orderedSelections = distribute
     ? [...selections].sort((a, b) => a.startLineNumber - b.startLineNumber || a.startColumn - b.startColumn)
     : selections;
@@ -45,7 +46,7 @@ export function buildMonacoPasteEdits(
         endColumn: 1,
       }
       : selection,
-    text: distribute ? multicursorText?.[i] ?? lines[i]! : text,
+    text: distribute ? (hasMulticursorText ? multicursorText[i]! : lines[i]!) : text,
     forceMoveMarkers: true as const,
   }));
 }
