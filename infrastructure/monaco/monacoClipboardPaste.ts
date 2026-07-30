@@ -28,8 +28,11 @@ export function buildMonacoPasteEdits(
 
   const lines = text.replace(/\r?\n$/, '').split(/\r\n|\n/);
   const distribute = selections.length > 1 && lines.length === selections.length;
+  const orderedSelections = distribute
+    ? [...selections].sort((a, b) => a.startLineNumber - b.startLineNumber || a.startColumn - b.startColumn)
+    : selections;
 
-  return selections.map((selection, i) => ({
+  return orderedSelections.map((selection, i) => ({
     range: selection,
     text: distribute ? lines[i]! : text,
     forceMoveMarkers: true as const,

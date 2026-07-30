@@ -38,6 +38,17 @@ test('buildMonacoPasteEdits ignores one trailing newline when spreading', () => 
   assert.equal(edits[1]?.text, 'two');
 });
 
+test('buildMonacoPasteEdits assigns spread lines in document order', () => {
+  const edits = buildMonacoPasteEdits('one\ntwo', [
+    { startLineNumber: 2, startColumn: 1, endLineNumber: 2, endColumn: 1 },
+    { startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 1 },
+  ]);
+  assert.equal(edits[0]?.range.startLineNumber, 1);
+  assert.equal(edits[0]?.text, 'one');
+  assert.equal(edits[1]?.range.startLineNumber, 2);
+  assert.equal(edits[1]?.text, 'two');
+});
+
 test('buildMonacoPasteEdits does not spread when line and cursor counts differ', () => {
   const edits = buildMonacoPasteEdits('only-one-line', [
     { startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 1 },
