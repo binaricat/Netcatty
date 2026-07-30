@@ -28,6 +28,7 @@ import {
   getEffectivePortForwardingRulesForSync,
   hasCloudSyncEntityData,
   hasMeaningfulCloudSyncData,
+  sanitizeHostsForSync,
   sanitizePortForwardingRulesForSync,
   shouldPromptCloudVaultRecovery,
 } from '../syncPayload';
@@ -113,7 +114,7 @@ const isRestoreInProgress = (): boolean => {
 
 const getSyncPayloadDataHash = (payload: SyncPayload): string => {
   return JSON.stringify({
-    hosts: payload.hosts,
+    hosts: sanitizeHostsForSync(payload.hosts),
     keys: payload.keys,
     identities: payload.identities,
     proxyProfiles: payload.proxyProfiles,
@@ -213,7 +214,7 @@ export const useAutoSync = (config: AutoSyncConfig) => {
 
   const getSyncSnapshot = useCallback(() => {
     return {
-      hosts: config.hosts,
+      hosts: sanitizeHostsForSync(config.hosts),
       keys: config.keys,
       identities: config.identities,
       proxyProfiles: config.proxyProfiles,
