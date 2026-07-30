@@ -61,6 +61,15 @@ test('buildMonacoPasteEdits assigns spread lines in document order', () => {
   assert.equal(edits[1]?.text, 'two');
 });
 
+test('buildMonacoPasteEdits preserves multicursor selection boundaries', () => {
+  const edits = buildMonacoPasteEdits('a\nb\nc', [
+    { startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 1 },
+    { startLineNumber: 2, startColumn: 1, endLineNumber: 2, endColumn: 1 },
+  ], false, ['a\nb', 'c']);
+  assert.equal(edits[0]?.text, 'a\nb');
+  assert.equal(edits[1]?.text, 'c');
+});
+
 test('buildMonacoPasteEdits does not spread when line and cursor counts differ', () => {
   const edits = buildMonacoPasteEdits('only-one-line', [
     { startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 1 },

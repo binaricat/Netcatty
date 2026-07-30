@@ -66,6 +66,7 @@ export const ScriptCodeEditor = React.forwardRef<ScriptCodeEditorHandle, ScriptC
   onSubmitShortcutRef.current = onSubmitShortcut;
   const handlePasteRef = useRef<() => Promise<void>>(() => Promise.resolve());
   const copiedWholeLineTextRef = useRef<string | null>(null);
+  const copiedMulticursorTextRef = useRef<readonly string[] | null>(null);
 
   useImperativeHandle(forwardedRef, () => ({
     focus: () => editorRef.current?.focus(),
@@ -112,12 +113,13 @@ export const ScriptCodeEditor = React.forwardRef<ScriptCodeEditorHandle, ScriptC
     if (!selections || selections.length === 0) return;
     const pasteOnNewLine = copiedWholeLineTextRef.current === text
       && text.endsWith('\n')
+      && selections.length === 1
       && selections.every((selection) => selection.isEmpty());
 
     editor.pushUndoStop();
     editor.executeEdits(
       'netcatty-paste',
-      buildMonacoPasteEdits(text, selections, pasteOnNewLine),
+      buildMonacoPasteEdits(text, selections, pasteOnNewLine, copiedMulticursorTextRef.current),
     );
     editor.pushUndoStop();
     editor.focus();
@@ -144,8 +146,13 @@ export const ScriptCodeEditor = React.forwardRef<ScriptCodeEditorHandle, ScriptC
     pasteBindingDisposableRef.current?.dispose();
     const handleCopy = (event: ClipboardEvent) => {
       const selections = editor.getSelections();
-      copiedWholeLineTextRef.current = selections?.every((selection) => selection.isEmpty())
-        ? event.clipboardData?.getData('text/plain') || null
+      const copiedText = event.clipboardData?.getData('text/plain') || null;
+      copiedWholeLineTextRef.current = selections?.length === 1 && selections[0]?.isEmpty()
+        ? copiedText
+        : null;
+      const model = editor.getModel();
+      copiedMulticursorTextRef.current = copiedText && selections && selections.length > 1 && model
+        ? selections.map((selection) => model.getValueInRange(selection))
         : null;
     };
     editor.getContainerDomNode().addEventListener('copy', handleCopy);
