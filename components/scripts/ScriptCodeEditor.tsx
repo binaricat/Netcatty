@@ -162,7 +162,7 @@ export const ScriptCodeEditor = React.forwardRef<ScriptCodeEditorHandle, ScriptC
         ? {
           text: copiedText,
           values: orderedSelections.map((selection) => selection.isEmpty()
-            ? `${model.getLineContent(selection.startLineNumber)}${model.getEOL()}`
+            ? model.getLineContent(selection.startLineNumber)
             : model.getValueInRange(selection)),
         }
         : null;
