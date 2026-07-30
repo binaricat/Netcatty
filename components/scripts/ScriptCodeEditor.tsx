@@ -15,6 +15,9 @@ const monacoBasePath = viteEnv.DEV
   : `${viteEnv.BASE_URL}monaco/vs`;
 loader.config({ paths: { vs: monacoBasePath } });
 
+let copiedWholeLineText: string | null = null;
+let copiedMulticursor: { text: string; values: readonly string[] } | null = null;
+
 export interface ScriptCodeEditorProps {
   value: string;
   onChange: (value: string) => void;
@@ -65,8 +68,6 @@ export const ScriptCodeEditor = React.forwardRef<ScriptCodeEditorHandle, ScriptC
   const onSubmitShortcutRef = useRef(onSubmitShortcut);
   onSubmitShortcutRef.current = onSubmitShortcut;
   const handlePasteRef = useRef<() => Promise<void>>(() => Promise.resolve());
-  const copiedWholeLineTextRef = useRef<string | null>(null);
-  const copiedMulticursorRef = useRef<{ text: string; values: readonly string[] } | null>(null);
 
   useImperativeHandle(forwardedRef, () => ({
     focus: () => editorRef.current?.focus(),
@@ -111,11 +112,11 @@ export const ScriptCodeEditor = React.forwardRef<ScriptCodeEditorHandle, ScriptC
 
     const selections = editor.getSelections();
     if (!selections || selections.length === 0) return;
-    const pasteOnNewLine = copiedWholeLineTextRef.current === text
+    const pasteOnNewLine = copiedWholeLineText === text
       && text.endsWith('\n')
       && selections.every((selection) => selection.isEmpty());
-    const multicursorText = copiedMulticursorRef.current?.text === text
-      ? copiedMulticursorRef.current.values
+    const multicursorText = copiedMulticursor?.text === text
+      ? copiedMulticursor.values
       : null;
 
     editor.pushUndoStop();
@@ -151,17 +152,22 @@ export const ScriptCodeEditor = React.forwardRef<ScriptCodeEditorHandle, ScriptC
 
       const selections = editor.getSelections();
       const copiedText = event.clipboardData?.getData('text/plain') || null;
-      copiedWholeLineTextRef.current = selections?.length === 1 && selections[0]?.isEmpty()
+      copiedWholeLineText = selections?.length === 1 && selections[0]?.isEmpty()
         ? copiedText
         : null;
       const model = editor.getModel();
       const orderedSelections = selections?.toSorted((a, b) => (
         a.startLineNumber - b.startLineNumber || a.startColumn - b.startColumn
       ));
-      copiedMulticursorRef.current = copiedText && orderedSelections && orderedSelections.length > 1 && model
+      const selectedLines = new Set(
+        orderedSelections?.filter((selection) => !selection.isEmpty()).map((selection) => selection.startLineNumber),
+      );
+      copiedMulticursor = copiedText && orderedSelections && orderedSelections.length > 1 && model
         ? {
           text: copiedText,
-          values: orderedSelections.map((selection) => selection.isEmpty()
+          values: orderedSelections
+            .filter((selection) => !selection.isEmpty() || !selectedLines.has(selection.startLineNumber))
+            .map((selection) => selection.isEmpty()
             ? model.getLineContent(selection.startLineNumber)
             : model.getValueInRange(selection)),
         }
