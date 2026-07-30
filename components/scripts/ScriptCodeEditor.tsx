@@ -66,7 +66,7 @@ export const ScriptCodeEditor = React.forwardRef<ScriptCodeEditorHandle, ScriptC
   onSubmitShortcutRef.current = onSubmitShortcut;
   const handlePasteRef = useRef<() => Promise<void>>(() => Promise.resolve());
   const copiedWholeLineTextRef = useRef<string | null>(null);
-  const copiedMulticursorTextRef = useRef<readonly string[] | null>(null);
+  const copiedMulticursorRef = useRef<{ text: string; values: readonly string[] } | null>(null);
 
   useImperativeHandle(forwardedRef, () => ({
     focus: () => editorRef.current?.focus(),
@@ -114,11 +114,14 @@ export const ScriptCodeEditor = React.forwardRef<ScriptCodeEditorHandle, ScriptC
     const pasteOnNewLine = copiedWholeLineTextRef.current === text
       && text.endsWith('\n')
       && selections.every((selection) => selection.isEmpty());
+    const multicursorText = copiedMulticursorRef.current?.text === text
+      ? copiedMulticursorRef.current.values
+      : null;
 
     editor.pushUndoStop();
     editor.executeEdits(
       'netcatty-paste',
-      buildMonacoPasteEdits(text, selections, pasteOnNewLine, copiedMulticursorTextRef.current),
+      buildMonacoPasteEdits(text, selections, pasteOnNewLine, multicursorText),
     );
     editor.pushUndoStop();
     editor.focus();
@@ -152,9 +155,16 @@ export const ScriptCodeEditor = React.forwardRef<ScriptCodeEditorHandle, ScriptC
         ? copiedText
         : null;
       const model = editor.getModel();
-      copiedMulticursorTextRef.current = copiedText && selections && selections.length > 1
-        && !selections.every((selection) => selection.isEmpty()) && model
-        ? selections.map((selection) => model.getValueInRange(selection))
+      const orderedSelections = selections?.toSorted((a, b) => (
+        a.startLineNumber - b.startLineNumber || a.startColumn - b.startColumn
+      ));
+      copiedMulticursorRef.current = copiedText && orderedSelections && orderedSelections.length > 1 && model
+        ? {
+          text: copiedText,
+          values: orderedSelections.map((selection) => selection.isEmpty()
+            ? `${model.getLineContent(selection.startLineNumber)}${model.getEOL()}`
+            : model.getValueInRange(selection)),
+        }
         : null;
     };
     editor.getContainerDomNode().addEventListener('copy', captureClipboardMetadata);
