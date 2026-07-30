@@ -2,9 +2,27 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  attachMonacoClipboardMetadataCapture,
   buildMonacoPasteEdits,
+  captureMonacoClipboardMetadata,
   readClipboardTextWithFallbacks,
+  resolveMonacoPasteClipboardMetadata,
 } from './monacoClipboardPaste.ts';
+
+function selection(
+  startLineNumber: number,
+  startColumn: number,
+  endLineNumber = startLineNumber,
+  endColumn = startColumn,
+) {
+  return {
+    startLineNumber,
+    startColumn,
+    endLineNumber,
+    endColumn,
+    isEmpty: () => startLineNumber === endLineNumber && startColumn === endColumn,
+  };
+}
 
 test('buildMonacoPasteEdits pastes full text at a single cursor', () => {
   const edits = buildMonacoPasteEdits('hello\nworld', [
@@ -134,4 +152,95 @@ test('readClipboardTextWithFallbacks returns null when both paths fail', async (
     },
   });
   assert.equal(text, null);
+});
+
+test('captureMonacoClipboardMetadata records whole-line copies for pasteOnNewLine', () => {
+  captureMonacoClipboardMetadata({
+    copiedText: 'copied line\n',
+    selections: [selection(3, 1)],
+    model: {
+      getLineContent: () => 'copied line',
+      getValueInRange: () => '',
+    },
+  });
+  assert.deepEqual(resolveMonacoPasteClipboardMetadata('copied line\n'), {
+    pasteOnNewLine: true,
+    multicursorText: null,
+  });
+});
+
+test('captureMonacoClipboardMetadata records multicursor copy boundaries', () => {
+  captureMonacoClipboardMetadata({
+    copiedText: 'a\nb\nc',
+    selections: [
+      selection(2, 1, 2, 2),
+      selection(1, 1, 1, 4),
+    ],
+    model: {
+      getLineContent: () => '',
+      getValueInRange: (range) => (
+        range.startLineNumber === 1 ? 'a\nb' : 'c'
+      ),
+    },
+  });
+  assert.deepEqual(resolveMonacoPasteClipboardMetadata('a\nb\nc'), {
+    pasteOnNewLine: false,
+    multicursorText: ['a\nb', 'c'],
+  });
+});
+
+test('captureMonacoClipboardMetadata clears stale metadata for ordinary selection copies', () => {
+  captureMonacoClipboardMetadata({
+    copiedText: 'copied line\n',
+    selections: [selection(1, 1)],
+    model: {
+      getLineContent: () => 'copied line',
+      getValueInRange: () => '',
+    },
+  });
+  captureMonacoClipboardMetadata({
+    copiedText: 'plain',
+    selections: [selection(1, 1, 1, 6)],
+    model: {
+      getLineContent: () => 'plain',
+      getValueInRange: () => 'plain',
+    },
+  });
+  assert.deepEqual(resolveMonacoPasteClipboardMetadata('plain'), {
+    pasteOnNewLine: false,
+    multicursorText: null,
+  });
+});
+
+test('attachMonacoClipboardMetadataCapture listens for copy and cut while focused', () => {
+  const listeners = new Map<string, EventListener>();
+  const node = {
+    addEventListener(type: string, listener: EventListener) {
+      listeners.set(type, listener);
+    },
+    removeEventListener(type: string, listener: EventListener) {
+      if (listeners.get(type) === listener) listeners.delete(type);
+    },
+  };
+  const editor = {
+    hasTextFocus: () => true,
+    getSelections: () => [selection(1, 1)],
+    getModel: () => ({
+      getLineContent: () => 'line',
+      getValueInRange: () => '',
+    }),
+    getContainerDomNode: () => node as unknown as HTMLElement,
+  };
+
+  const disposable = attachMonacoClipboardMetadataCapture(editor);
+  assert.equal(listeners.has('copy'), true);
+  assert.equal(listeners.has('cut'), true);
+
+  listeners.get('copy')?.({
+    clipboardData: { getData: () => 'line\n' },
+  } as unknown as ClipboardEvent);
+  assert.equal(resolveMonacoPasteClipboardMetadata('line\n').pasteOnNewLine, true);
+
+  disposable.dispose();
+  assert.equal(listeners.size, 0);
 });

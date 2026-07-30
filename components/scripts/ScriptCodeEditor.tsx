@@ -3,8 +3,10 @@ import { Loader2 } from 'lucide-react';
 import React, { useCallback, useEffect, useImperativeHandle, useRef } from 'react';
 import { useClipboardBackend } from '@/application/state/useClipboardBackend';
 import {
+  attachMonacoClipboardMetadataCapture,
   buildMonacoPasteEdits,
   readClipboardTextWithFallbacks,
+  resolveMonacoPasteClipboardMetadata,
 } from '@/infrastructure/monaco/monacoClipboardPaste';
 import { useNetcattyMonacoTheme } from '@/infrastructure/monaco/useNetcattyMonacoTheme';
 import { registerNctMonacoCompletionProvider } from '@/infrastructure/scripts/nctMonacoCompletion.ts';
@@ -14,9 +16,6 @@ const monacoBasePath = viteEnv.DEV
   ? './node_modules/monaco-editor/min/vs'
   : `${viteEnv.BASE_URL}monaco/vs`;
 loader.config({ paths: { vs: monacoBasePath } });
-
-let copiedWholeLineText: string | null = null;
-let copiedMulticursor: { text: string; values: readonly string[] } | null = null;
 
 export interface ScriptCodeEditorProps {
   value: string;
@@ -121,11 +120,7 @@ export const ScriptCodeEditor = React.forwardRef<ScriptCodeEditorHandle, ScriptC
         || selection.endLineNumber !== initial.endLineNumber
         || selection.endColumn !== initial.endColumn;
     })) return;
-    const pasteOnNewLine = copiedWholeLineText === text
-      && text.endsWith('\n');
-    const multicursorText = copiedMulticursor?.text === text
-      ? copiedMulticursor.values
-      : null;
+    const { pasteOnNewLine, multicursorText } = resolveMonacoPasteClipboardMetadata(text);
 
     editor.pushUndoStop();
     editor.executeEdits(
@@ -155,33 +150,7 @@ export const ScriptCodeEditor = React.forwardRef<ScriptCodeEditorHandle, ScriptC
     // Add a bridge-backed context menu action only while this editor has text focus.
     // Monaco's native Paste remains available to other editors and find/replace inputs.
     pasteBindingDisposableRef.current?.dispose();
-    const captureClipboardMetadata = (event: ClipboardEvent) => {
-      if (!editor.hasTextFocus()) return;
-
-      const selections = editor.getSelections();
-      const copiedText = event.clipboardData?.getData('text/plain') || null;
-      copiedWholeLineText = selections?.length === 1 && selections[0]?.isEmpty()
-        ? copiedText
-        : null;
-      const model = editor.getModel();
-      const orderedSelections = selections?.toSorted((a, b) => (
-        a.startLineNumber - b.startLineNumber || a.startColumn - b.startColumn
-      ));
-      copiedMulticursor = copiedText && orderedSelections && orderedSelections.length > 1 && model
-        ? {
-          text: copiedText,
-          values: orderedSelections
-            .filter((selection, index) => !selection.isEmpty()
-              || index === 0
-              || orderedSelections[index - 1]?.startLineNumber !== selection.startLineNumber)
-            .map((selection) => selection.isEmpty()
-            ? model.getLineContent(selection.startLineNumber)
-            : model.getValueInRange(selection)),
-        }
-        : null;
-    };
-    editor.getContainerDomNode().addEventListener('copy', captureClipboardMetadata);
-    editor.getContainerDomNode().addEventListener('cut', captureClipboardMetadata);
+    const clipboardCaptureDisposable = attachMonacoClipboardMetadataCapture(editor);
     const pasteBindingDisposable = editor.addAction({
       id: 'netcatty.scriptCodeEditor.pasteFromSystemClipboard',
       label: 'Paste from System Clipboard',
@@ -195,8 +164,7 @@ export const ScriptCodeEditor = React.forwardRef<ScriptCodeEditorHandle, ScriptC
     });
     pasteBindingDisposableRef.current = {
       dispose: () => {
-        editor.getContainerDomNode().removeEventListener('copy', captureClipboardMetadata);
-        editor.getContainerDomNode().removeEventListener('cut', captureClipboardMetadata);
+        clipboardCaptureDisposable.dispose();
         pasteBindingDisposable.dispose();
       },
     };

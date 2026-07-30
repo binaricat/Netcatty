@@ -1,6 +1,10 @@
 /**
  * Shared Monaco paste helpers for Electron, where Monaco's built-in
  * clipboardPasteAction often cannot read the OS clipboard.
+ *
+ * Whole-line / multicursor copy metadata is shared across Monaco editor
+ * surfaces (ScriptCodeEditor, TextEditorPane) so paste can restore
+ * pasteOnNewLine and multicursor boundaries after an async clipboard read.
  */
 
 export type MonacoPasteRange = {
@@ -15,6 +19,94 @@ export type MonacoPasteEdit = {
   text: string;
   forceMoveMarkers: true;
 };
+
+export type MonacoClipboardSelection = MonacoPasteRange & {
+  isEmpty(): boolean;
+};
+
+export type MonacoClipboardModel = {
+  getLineContent(lineNumber: number): string;
+  getValueInRange(range: MonacoPasteRange): string;
+};
+
+export type MonacoClipboardMetadataEditor = {
+  hasTextFocus(): boolean;
+  getSelections(): readonly MonacoClipboardSelection[] | null;
+  getModel(): MonacoClipboardModel | null;
+  getContainerDomNode(): HTMLElement;
+};
+
+let copiedWholeLineText: string | null = null;
+let copiedMulticursor: { text: string; values: readonly string[] } | null = null;
+
+/**
+ * Record whole-line / multicursor copy shape from a Monaco copy or cut event.
+ */
+export function captureMonacoClipboardMetadata(input: {
+  copiedText: string | null;
+  selections: readonly MonacoClipboardSelection[] | null | undefined;
+  model: MonacoClipboardModel | null;
+}): void {
+  const { copiedText, selections, model } = input;
+  copiedWholeLineText = selections?.length === 1 && selections[0]?.isEmpty()
+    ? copiedText
+    : null;
+  const orderedSelections = selections?.toSorted((a, b) => (
+    a.startLineNumber - b.startLineNumber || a.startColumn - b.startColumn
+  ));
+  copiedMulticursor = copiedText && orderedSelections && orderedSelections.length > 1 && model
+    ? {
+      text: copiedText,
+      values: orderedSelections
+        .filter((selection, index) => !selection.isEmpty()
+          || index === 0
+          || orderedSelections[index - 1]?.startLineNumber !== selection.startLineNumber)
+        .map((selection) => selection.isEmpty()
+          ? model.getLineContent(selection.startLineNumber)
+          : model.getValueInRange(selection)),
+    }
+    : null;
+}
+
+/**
+ * Resolve paste behavior from the last Monaco-wide copy/cut metadata.
+ */
+export function resolveMonacoPasteClipboardMetadata(text: string): {
+  pasteOnNewLine: boolean;
+  multicursorText: readonly string[] | null;
+} {
+  return {
+    pasteOnNewLine: copiedWholeLineText === text && text.endsWith('\n'),
+    multicursorText: copiedMulticursor?.text === text
+      ? copiedMulticursor.values
+      : null,
+  };
+}
+
+/**
+ * Listen for copy/cut on a Monaco editor and update the shared metadata store.
+ */
+export function attachMonacoClipboardMetadataCapture(
+  editor: MonacoClipboardMetadataEditor,
+): { dispose: () => void } {
+  const captureClipboardMetadata = (event: ClipboardEvent) => {
+    if (!editor.hasTextFocus()) return;
+    captureMonacoClipboardMetadata({
+      copiedText: event.clipboardData?.getData('text/plain') || null,
+      selections: editor.getSelections(),
+      model: editor.getModel(),
+    });
+  };
+  const node = editor.getContainerDomNode();
+  node.addEventListener('copy', captureClipboardMetadata);
+  node.addEventListener('cut', captureClipboardMetadata);
+  return {
+    dispose: () => {
+      node.removeEventListener('copy', captureClipboardMetadata);
+      node.removeEventListener('cut', captureClipboardMetadata);
+    },
+  };
+}
 
 /**
  * Build executeEdits payloads matching Monaco multicursorPaste:'spread':
