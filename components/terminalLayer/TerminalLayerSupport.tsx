@@ -90,6 +90,11 @@ export type SnippetExecutor = (
     multiLineRunMode?: Snippet["multiLineRunMode"];
     /** When false, do not steal keyboard focus (multi-tab fan-out). Default true. */
     focus?: boolean;
+    /**
+     * Called after a successful write that was not aimed at a password/sensitive
+     * prompt. Used to persist compose-bar history without storing secrets.
+     */
+    onCommandSent?: (command: string) => void;
   },
   /**
    * Returns true when the command was written to the session. False means the

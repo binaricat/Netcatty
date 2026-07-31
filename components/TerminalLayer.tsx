@@ -1512,7 +1512,10 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   const handleSnippetClickForFocusedSession = useCallback(async (
     command: string,
     noAutoRun?: boolean,
-    options?: { multiLineRunMode?: Snippet["multiLineRunMode"] },
+    options?: {
+      multiLineRunMode?: Snippet["multiLineRunMode"];
+      onCommandSent?: (command: string) => void;
+    },
   ): Promise<boolean> => {
     const sessionId = activeWorkspaceRef.current?.focusedSessionId ?? activeSessionRef.current?.id;
     if (!sessionId) return false;
@@ -1532,15 +1535,17 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     })
       ? AUTO_RUN_SNIPPET_LINE_DELAY_MS
       : undefined;
+    const sensitive = isTerminalSensitiveInputActive(sessionId);
     terminalBackend.writeToSession(sessionId, data, {
       automated: true,
-      sensitive: isTerminalSensitiveInputActive(sessionId),
+      sensitive,
       ...(lineDelayMs ? { lineDelayMs } : {}),
     });
     // Re-focus the terminal so the user can interact immediately
     const pane = document.querySelector(`[data-session-id="${sessionId}"]`);
     const textarea = pane?.querySelector('textarea.xterm-helper-textarea') as HTMLTextAreaElement | null;
     textarea?.focus();
+    if (!sensitive) options?.onCommandSent?.(command);
     return true;
   }, [terminalBackend]);
 
@@ -1574,10 +1579,10 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     }
     const command = await resolveSnippetCommand(snippet);
     if (command === null) return;
-    const sent = await handleSnippetClickForFocusedSession(command, snippet.noAutoRun, {
+    await handleSnippetClickForFocusedSession(command, snippet.noAutoRun, {
       multiLineRunMode: snippet.multiLineRunMode,
+      onCommandSent,
     });
-    if (sent) onCommandSent?.(command);
   }, [getActiveTerminalSessionId, handleSnippetClickForFocusedSession, hosts, t]);
 
   const handleRunScriptFromPanel = useCallback(async (snippet: Snippet) => {
@@ -1789,7 +1794,10 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     toast.info(t('scripts.recording.started'));
   }, [getActiveTerminalSessionId, t]);
 
-  const handleComposeSend = useCallback((text: string) => {
+  const handleComposeSend = useCallback((
+    text: string,
+    onCommandSent?: (command: string) => void,
+  ) => {
     const activeWorkspace = activeWorkspaceRef.current;
     if (!activeWorkspace) return;
     const payload = text + '\r';
@@ -1814,6 +1822,8 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
           terminalBackend.writeToSession(sid, payload, { sensitive: false });
         }
       }
+      // Focused pane was not on a password prompt; safe to recall later.
+      onCommandSent?.(text);
     } else {
       const workspaceSessions = sessionsRef.current.filter((session) => session.workspaceId === activeWorkspace.id);
       const validFocusedId = focusedSessionId && workspaceSessions.some((session) => session.id === focusedSessionId)
@@ -1823,13 +1833,14 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       if (targetId) {
         const executor = snippetExecutorsRef.current.get(targetId);
         if (executor) {
-          executor(text, false);
+          // Executor gates onCommandSent on write-time sensitivity.
+          executor(text, false, { onCommandSent });
         } else {
           const session = sessionsRef.current.find((candidate) => candidate.id === targetId);
           if (!session || !canUseDirectSessionWriteFallback(session)) return;
-          terminalBackend.writeToSession(targetId, payload, {
-            sensitive: isTerminalSensitiveInputActive(targetId),
-          });
+          const sensitive = isTerminalSensitiveInputActive(targetId);
+          terminalBackend.writeToSession(targetId, payload, { sensitive });
+          if (!sensitive) onCommandSent?.(text);
         }
       }
     }

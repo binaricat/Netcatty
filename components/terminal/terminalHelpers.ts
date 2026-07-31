@@ -220,6 +220,7 @@ export interface TerminalProps {
         broadcast?: boolean;
         multiLineRunMode?: Snippet["multiLineRunMode"];
         focus?: boolean;
+        onCommandSent?: (command: string) => void;
       },
     ) => boolean | Promise<boolean>) | null,
   ) => void;

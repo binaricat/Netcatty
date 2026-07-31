@@ -1044,9 +1044,9 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
         {/* Compose Bar (solo sessions only; workspace uses TerminalLayer's global bar) */}
         {isComposeBarOpen && !inWorkspace && (
           <TerminalComposeBar
-            onSend={(text) => {
+            onSend={(text, onCommandSent) => {
               if (sessionRef.current) {
-                executeSnippetCommand(text, false);
+                void executeSnippetCommand(text, false, { onCommandSent });
               }
             }}
             onSnippetClick={(snippet, onCommandSent) => void executeSnippet(snippet, onCommandSent)}

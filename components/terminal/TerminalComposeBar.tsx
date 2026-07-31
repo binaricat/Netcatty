@@ -333,7 +333,7 @@ const ComposeBarSnippetManagePopover = memo(function ComposeBarSnippetManagePopo
 });
 
 export interface TerminalComposeBarProps {
-  onSend: (text: string) => void;
+  onSend: (text: string, onCommandSent?: (command: string) => void) => void;
   onClose: () => void;
   onSnippetClick?: (snippet: Snippet, onCommandSent?: (command: string) => void) => void;
   snippets?: Snippet[];
@@ -430,8 +430,8 @@ export const TerminalComposeBar: React.FC<TerminalComposeBarProps> = ({
     if (!el) return;
     const text = el.value;
     if (!text) return;
-    recordHistory(text);
-    onSend(text);
+    // Parent records history only after a non-sensitive write succeeds.
+    onSend(text, recordHistory);
     el.value = '';
     el.focus();
   }, [onSend, recordHistory]);
@@ -452,8 +452,7 @@ export const TerminalComposeBar: React.FC<TerminalComposeBarProps> = ({
       } else {
         const command = await resolveSnippetCommand(snippet);
         if (command !== null) {
-          recordHistory(command);
-          onSend(command);
+          onSend(command, recordHistory);
         }
       }
       return;

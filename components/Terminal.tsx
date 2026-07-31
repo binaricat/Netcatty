@@ -2768,6 +2768,8 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       multiLineRunMode?: Snippet["multiLineRunMode"];
       /** When false, skip term.focus() so multi-tab fan-out does not steal focus. */
       focus?: boolean;
+      /** Invoked only after a successful non-sensitive write (compose-bar history). */
+      onCommandSent?: (command: string) => void;
     },
   ): Promise<boolean> => {
     // Hidden-tab hibernation clears termRef. Wake via the *connected* path so
@@ -2839,6 +2841,9 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     if (options?.focus !== false) {
       term.focus();
     }
+    // Capture sensitivity at write time so compose-bar history never stores
+    // password/sudo replies even if the prompt clears before the caller resumes.
+    if (!sensitive) options?.onCommandSent?.(command);
     return true;
   }, [prepareProgrammaticSudoInput, scrollToBottomAfterProgrammaticInput, terminalBackend, sessionId]);
 
@@ -2866,10 +2871,10 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     }
     const command = await resolveSnippetCommand(snippet);
     if (command === null) return;
-    const sent = await executeSnippetCommand(command, snippet.noAutoRun, {
+    await executeSnippetCommand(command, snippet.noAutoRun, {
       multiLineRunMode: snippet.multiLineRunMode,
+      onCommandSent,
     });
-    if (sent) onCommandSent?.(command);
   }, [executeSnippetCommand, host.hostname, host.username, scriptSessionName, sessionId, t]);
 
   const onSnippetShortkeyRef = useRef(executeSnippet);
