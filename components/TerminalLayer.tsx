@@ -1509,21 +1509,20 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   }, [handleCloseSidePanel, handleSwitchSidePanelTab]);
 
   // Execute snippet on the focused terminal session
-  const handleSnippetClickForFocusedSession = useCallback((
+  const handleSnippetClickForFocusedSession = useCallback(async (
     command: string,
     noAutoRun?: boolean,
     options?: { multiLineRunMode?: Snippet["multiLineRunMode"] },
-  ) => {
+  ): Promise<boolean> => {
     const sessionId = activeWorkspaceRef.current?.focusedSessionId ?? activeSessionRef.current?.id;
-    if (!sessionId) return;
+    if (!sessionId) return false;
     const executor = snippetExecutorsRef.current.get(sessionId);
     if (executor) {
-      executor(command, noAutoRun, options);
-      return;
+      return executor(command, noAutoRun, options);
     }
 
     const session = sessionsRef.current.find((candidate) => candidate.id === sessionId);
-    if (!session || !canUseDirectSessionWriteFallback(session)) return;
+    if (!session || !canUseDirectSessionWriteFallback(session)) return false;
 
     let data = normalizeLineEndings(command);
     if (!noAutoRun) data = `${data}\r`;
@@ -1542,6 +1541,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     const pane = document.querySelector(`[data-session-id="${sessionId}"]`);
     const textarea = pane?.querySelector('textarea.xterm-helper-textarea') as HTMLTextAreaElement | null;
     textarea?.focus();
+    return true;
   }, [terminalBackend]);
 
   const handleHistoryPaste = useCallback(
@@ -1553,7 +1553,10 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     [handleSnippetClickForFocusedSession],
   );
 
-  const handleSnippetFromPanel = useCallback(async (snippet: Snippet) => {
+  const handleSnippetFromPanel = useCallback(async (
+    snippet: Snippet,
+    onCommandSent?: (command: string) => void,
+  ) => {
     const sessionId = getActiveTerminalSessionId();
     if (!sessionId) return;
     if (isScriptSnippet(snippet)) {
@@ -1571,9 +1574,10 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     }
     const command = await resolveSnippetCommand(snippet);
     if (command === null) return;
-    handleSnippetClickForFocusedSession(command, snippet.noAutoRun, {
+    const sent = await handleSnippetClickForFocusedSession(command, snippet.noAutoRun, {
       multiLineRunMode: snippet.multiLineRunMode,
     });
+    if (sent) onCommandSent?.(command);
   }, [getActiveTerminalSessionId, handleSnippetClickForFocusedSession, hosts, t]);
 
   const handleRunScriptFromPanel = useCallback(async (snippet: Snippet) => {

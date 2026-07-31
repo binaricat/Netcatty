@@ -2842,7 +2842,10 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     return true;
   }, [prepareProgrammaticSudoInput, scrollToBottomAfterProgrammaticInput, terminalBackend, sessionId]);
 
-  const executeSnippet = useCallback(async (snippet: Snippet) => {
+  const executeSnippet = useCallback(async (
+    snippet: Snippet,
+    onCommandSent?: (command: string) => void,
+  ) => {
     if (isScriptSnippet(snippet)) {
       try {
         await runAutomationScript({
@@ -2863,9 +2866,10 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     }
     const command = await resolveSnippetCommand(snippet);
     if (command === null) return;
-    executeSnippetCommand(command, snippet.noAutoRun, {
+    const sent = await executeSnippetCommand(command, snippet.noAutoRun, {
       multiLineRunMode: snippet.multiLineRunMode,
     });
+    if (sent) onCommandSent?.(command);
   }, [executeSnippetCommand, host.hostname, host.username, scriptSessionName, sessionId, t]);
 
   const onSnippetShortkeyRef = useRef(executeSnippet);

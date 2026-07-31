@@ -44,7 +44,9 @@ export function canNavigateComposeBarHistory(
   value: string,
   selectionStart: number,
   direction: ComposeBarHistoryDirection,
+  selectionEnd = selectionStart,
 ): boolean {
+  if (selectionStart !== selectionEnd) return false;
   const cursor = Math.max(0, Math.min(selectionStart, value.length));
   if (direction === 'up') {
     return !value.slice(0, cursor).includes('\n');

@@ -284,7 +284,7 @@ function TerminalLayerWorkspaceSectionInner({ ctx }: { ctx: WorkspaceContext }) 
       {activeWorkspace && isComposeBarOpen && (
         <TerminalComposeBar
           onSend={handleComposeSend}
-          onSnippetClick={(snippet) => void handleSnippetFromPanel(snippet)}
+          onSnippetClick={(snippet, onCommandSent) => void handleSnippetFromPanel(snippet, onCommandSent)}
           snippets={snippets}
           onClose={() => {
             setIsComposeBarOpen(false);

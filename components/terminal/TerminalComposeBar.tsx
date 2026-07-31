@@ -10,7 +10,6 @@ import { useComposeBarHistory } from '../../application/state/useComposeBarHisto
 import { useComposeBarPinnedSnippets } from '../../application/state/useComposeBarPinnedSnippets';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import {
-  appendComposeBarHistory,
   canNavigateComposeBarHistory,
   navigateComposeBarHistory,
 } from '../../domain/composeBarHistory';
@@ -28,6 +27,67 @@ import {
 
 const SNIPPET_STRIP_HEIGHT = 30;
 const RESIZE_HANDLE_HEIGHT = 6;
+
+function isAtTextareaVisualBoundary(
+  textarea: HTMLTextAreaElement,
+  direction: 'up' | 'down',
+): boolean {
+  // A logical newline is not enough here: a long single line can occupy many
+  // visual rows, and Up/Down must remain available for those rows.
+  if (!textarea.clientWidth || typeof document === 'undefined') return true;
+
+  const computed = window.getComputedStyle(textarea);
+  const mirror = document.createElement('div');
+  const startMarker = document.createElement('span');
+  const cursorMarker = document.createElement('span');
+  const endMarker = document.createElement('span');
+  const markerStyle = 'display:inline-block;width:0;height:1px;padding:0;margin:0;border:0;';
+
+  mirror.style.position = 'absolute';
+  mirror.style.left = '-100000px';
+  mirror.style.top = '0';
+  mirror.style.visibility = 'hidden';
+  mirror.style.pointerEvents = 'none';
+  const paddingWidth = (parseFloat(computed.paddingLeft) || 0) + (parseFloat(computed.paddingRight) || 0);
+  // clientWidth excludes the vertical scrollbar, so this matches the actual
+  // text-wrap width on platforms that reserve scrollbar space.
+  mirror.style.width = `${Math.max(0, textarea.clientWidth - paddingWidth)}px`;
+  mirror.style.boxSizing = 'content-box';
+  mirror.style.whiteSpace = computed.whiteSpace;
+  mirror.style.overflowWrap = computed.overflowWrap;
+  mirror.style.wordBreak = computed.wordBreak;
+  mirror.style.font = computed.font;
+  mirror.style.letterSpacing = computed.letterSpacing;
+  mirror.style.wordSpacing = computed.wordSpacing;
+  mirror.style.lineHeight = computed.lineHeight;
+  mirror.style.textTransform = computed.textTransform;
+  mirror.style.textIndent = computed.textIndent;
+  mirror.style.tabSize = computed.tabSize;
+  mirror.style.padding = computed.padding;
+  mirror.style.border = computed.border;
+
+  startMarker.style.cssText = markerStyle;
+  cursorMarker.style.cssText = markerStyle;
+  endMarker.style.cssText = markerStyle;
+  const cursor = Math.max(0, Math.min(textarea.selectionStart, textarea.value.length));
+  mirror.append(
+    startMarker,
+    document.createTextNode(textarea.value.slice(0, cursor)),
+    cursorMarker,
+    document.createTextNode(textarea.value.slice(cursor)),
+    endMarker,
+  );
+  document.body.appendChild(mirror);
+
+  const startTop = startMarker.getBoundingClientRect().top;
+  const cursorTop = cursorMarker.getBoundingClientRect().top;
+  const endTop = endMarker.getBoundingClientRect().top;
+  mirror.remove();
+
+  const atStart = Math.abs(cursorTop - startTop) <= 1;
+  const atEnd = Math.abs(cursorTop - endTop) <= 1;
+  return direction === 'up' ? atStart : atEnd;
+}
 
 type ComposeBarTheme = {
   resolvedBg: string;
@@ -275,7 +335,7 @@ const ComposeBarSnippetManagePopover = memo(function ComposeBarSnippetManagePopo
 export interface TerminalComposeBarProps {
   onSend: (text: string) => void;
   onClose: () => void;
-  onSnippetClick?: (snippet: Snippet) => void;
+  onSnippetClick?: (snippet: Snippet, onCommandSent?: (command: string) => void) => void;
   snippets?: Snippet[];
   isBroadcastEnabled?: boolean;
   themeColors?: {
@@ -350,6 +410,12 @@ export const TerminalComposeBar: React.FC<TerminalComposeBarProps> = ({
     historyDraftRef.current = '';
   }, []);
 
+  const recordHistory = useCallback((command: string) => {
+    // Keep the ref current before React re-renders so Up can recall immediately.
+    historyEntriesRef.current = pushHistory(command);
+    resetHistoryCursor();
+  }, [pushHistory, resetHistoryCursor]);
+
   const applyHistoryValue = useCallback((value: string) => {
     const el = textareaRef.current;
     if (!el) return;
@@ -364,30 +430,31 @@ export const TerminalComposeBar: React.FC<TerminalComposeBarProps> = ({
     if (!el) return;
     const text = el.value;
     if (!text) return;
-    // Keep the ref current before React re-renders so Up can recall immediately.
-    historyEntriesRef.current = appendComposeBarHistory(historyEntriesRef.current, text);
-    pushHistory(text);
-    resetHistoryCursor();
+    recordHistory(text);
     onSend(text);
     el.value = '';
     el.focus();
-  }, [onSend, pushHistory, resetHistoryCursor]);
+  }, [onSend, recordHistory]);
 
   const insertCommand = useCallback((command: string) => {
     const el = textareaRef.current;
     if (!el) return;
     const prefix = el.value && !el.value.endsWith('\n') ? '\n' : '';
     el.value = el.value ? `${el.value}${prefix}${command}` : command;
+    resetHistoryCursor();
     el.focus();
-  }, []);
+  }, [resetHistoryCursor]);
 
   const handleSnippetActivate = useCallback(async (snippet: Snippet, sendImmediately: boolean) => {
     if (sendImmediately) {
       if (onSnippetClick) {
-        onSnippetClick(snippet);
+        onSnippetClick(snippet, recordHistory);
       } else {
         const command = await resolveSnippetCommand(snippet);
-        if (command !== null) onSend(command);
+        if (command !== null) {
+          recordHistory(command);
+          onSend(command);
+        }
       }
       return;
     }
@@ -395,7 +462,7 @@ export const TerminalComposeBar: React.FC<TerminalComposeBarProps> = ({
     const command = await resolveSnippetCommand(snippet);
     if (command === null) return;
     insertCommand(command);
-  }, [insertCommand, onSend, onSnippetClick]);
+  }, [insertCommand, onSend, onSnippetClick, recordHistory]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey && !isComposingRef.current) {
@@ -409,11 +476,24 @@ export const TerminalComposeBar: React.FC<TerminalComposeBarProps> = ({
       return;
     }
     if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
-    if (isComposingRef.current) return;
+    if (
+      isComposingRef.current
+      || e.nativeEvent.isComposing
+      || e.shiftKey
+      || e.altKey
+      || e.ctrlKey
+      || e.metaKey
+    ) return;
 
     const el = e.currentTarget;
     const direction = e.key === 'ArrowUp' ? 'up' : 'down';
-    if (!canNavigateComposeBarHistory(el.value, el.selectionStart, direction)) return;
+    if (!canNavigateComposeBarHistory(
+      el.value,
+      el.selectionStart,
+      direction,
+      el.selectionEnd,
+    )) return;
+    if (!isAtTextareaVisualBoundary(el, direction)) return;
 
     const next = navigateComposeBarHistory(
       {

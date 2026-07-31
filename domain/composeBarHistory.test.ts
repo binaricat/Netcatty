@@ -50,6 +50,7 @@ test('canNavigateComposeBarHistory only steals arrows at first/last line', () =>
   assert.equal(canNavigateComposeBarHistory(multi, 6, 'down'), false);
   assert.equal(canNavigateComposeBarHistory('single', 3, 'up'), true);
   assert.equal(canNavigateComposeBarHistory('single', 3, 'down'), true);
+  assert.equal(canNavigateComposeBarHistory(multi, 0, 'up', 6), false);
 });
 
 test('navigateComposeBarHistory walks older/newer entries and restores the draft', () => {
