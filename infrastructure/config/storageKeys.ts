@@ -66,6 +66,8 @@ export const STORAGE_KEY_SCRIPT_EDITOR_HEIGHT = 'netcatty_script_editor_height_v
 export const STORAGE_KEY_COMPOSE_BAR_HEIGHT = 'netcatty_compose_bar_height_v1';
 /** Snippet IDs pinned to the terminal compose bar quick strip. */
 export const STORAGE_KEY_COMPOSE_BAR_PINNED_SNIPPETS = 'netcatty_compose_bar_pinned_snippets_v1';
+/** Commands previously sent from the terminal compose bar (Up/Down recall). */
+export const STORAGE_KEY_COMPOSE_BAR_HISTORY = 'netcatty_compose_bar_history_v1';
 export const STORAGE_KEY_VAULT_KNOWN_HOSTS_VIEW_MODE = 'netcatty_vault_known_hosts_view_mode_v1';
 /** Device-local: silently import system OpenSSH known_hosts on Vault load (default true). */
 export const STORAGE_KEY_AUTO_IMPORT_SYSTEM_KNOWN_HOSTS = 'netcatty_auto_import_system_known_hosts_v1';
