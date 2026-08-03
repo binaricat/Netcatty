@@ -11,6 +11,7 @@ export type AIProviderId =
   | 'google'
   | 'ollama'
   | 'openrouter'
+  | 'atlas'
   | 'qwen'
   | 'deepseek'
   | 'kimi'
@@ -406,6 +407,12 @@ export const PROVIDER_PRESETS: Record<AIProviderId, ProviderPreset> = {
   google: { name: 'Google AI', defaultBaseURL: 'https://generativelanguage.googleapis.com/v1beta' },
   ollama: { name: 'Ollama', defaultBaseURL: 'http://localhost:11434/v1', modelsEndpoint: '/models' },
   openrouter: { name: 'OpenRouter', defaultBaseURL: 'https://openrouter.ai/api/v1', modelsEndpoint: '/models' },
+  atlas: {
+    name: 'Atlas Cloud',
+    defaultBaseURL: 'https://api.atlascloud.ai/v1',
+    modelsEndpoint: '/models',
+    defaultModels: ['deepseek-ai/deepseek-v4-pro'],
+  },
   qwen: {
     name: 'Qwen',
     defaultBaseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',

@@ -17,7 +17,7 @@ test("resolveProviderStyle falls back to providerId for google", () => {
 });
 
 test("resolveProviderStyle treats every other providerId as the OpenAI-compatible family", () => {
-  for (const providerId of ["openai", "ollama", "openrouter", "qwen", "deepseek", "kimi", "zhipu", "doubao", "mimo", "custom"] as const) {
+  for (const providerId of ["openai", "ollama", "openrouter", "atlas", "qwen", "deepseek", "kimi", "zhipu", "doubao", "mimo", "custom"] as const) {
     assert.equal(resolveProviderStyle({ providerId }), "openai", `expected openai for ${providerId}`);
   }
 });
@@ -35,6 +35,12 @@ test("openrouter keeps dynamic model discovery instead of a static preset list",
   assert.equal(PROVIDER_PRESETS.openrouter.defaultBaseURL, "https://openrouter.ai/api/v1");
   assert.equal(PROVIDER_PRESETS.openrouter.modelsEndpoint, "/models");
   assert.equal(PROVIDER_PRESETS.openrouter.defaultModels, undefined);
+});
+
+test("atlas cloud exposes an OpenAI-compatible preset and default model", () => {
+  assert.equal(PROVIDER_PRESETS.atlas.defaultBaseURL, "https://api.atlascloud.ai/v1");
+  assert.equal(PROVIDER_PRESETS.atlas.modelsEndpoint, "/models");
+  assert.deepEqual(PROVIDER_PRESETS.atlas.defaultModels, ["deepseek-ai/deepseek-v4-pro"]);
 });
 
 test("domestic provider presets expose provider-specific model suggestions", () => {
