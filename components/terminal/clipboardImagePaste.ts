@@ -7,7 +7,7 @@ type ClipboardImageFile = {
   size?: number;
 };
 
-type RemoteClipboardImageBridge = Pick<
+export type RemoteClipboardImageBridge = Pick<
   NetcattyBridge,
   "readClipboardImage" | "openSftpForSession" | "startStreamTransfer"
 > & Pick<Partial<NetcattyBridge>, "closeSftp" | "deleteTempFile">;

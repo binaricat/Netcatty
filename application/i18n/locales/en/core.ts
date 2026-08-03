@@ -574,6 +574,9 @@ Highlight the focused split pane:
   'settings.terminal.behavior.bracketedPaste': 'Bracketed paste mode',
   'settings.terminal.behavior.bracketedPaste.desc':
     'Wrap pasted text with escape sequences so the shell can distinguish paste from typed input. Disable if you see ^[[200~ artifacts.',
+  'settings.terminal.behavior.autoUploadClipboardImage': 'Auto-upload clipboard images on paste',
+  'settings.terminal.behavior.autoUploadClipboardImage.desc':
+    'When the clipboard holds an image, pasting in a remote session uploads it via SFTP to .netcatty-paste-images/ under the remote working directory and inserts the remote path instead of pasting text.',
   'settings.terminal.behavior.shiftEnterNewline': 'Shift+Enter text',
   'settings.terminal.behavior.shiftEnterNewline.desc':
     'Send configured text instead of normal Enter when pressing Shift+Enter in the terminal.',

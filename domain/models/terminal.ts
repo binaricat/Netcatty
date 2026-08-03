@@ -141,6 +141,11 @@ export interface TerminalSettings {
   // Paste
   disableBracketedPaste: boolean; // Disable bracketed paste mode (avoid ^[[200~ artifacts)
 
+  // When true, pasting while the clipboard holds an image automatically runs
+  // the "Upload clipboard image" action (SFTP upload + remote-path paste)
+  // instead of falling back to a text paste. Remote SSH sessions only.
+  autoUploadClipboardImageOnPaste: boolean;
+
   // Shell `clear` command behavior — controls whether CSI 3 J (erase scrollback)
   // from the shell is honored. Default true matches POSIX/ncurses since 2013:
   // `clear` clears both visible screen and scrollback. Disable to keep history
@@ -466,6 +471,7 @@ const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
   systemManagerDockerListRefreshInterval: 5,
   systemManagerDockerStatsRefreshInterval: 3,
   disableBracketedPaste: false, // Bracketed paste enabled by default
+  autoUploadClipboardImageOnPaste: false, // Opt-in: image in clipboard auto-uploads on paste (remote sessions)
   clearWipesScrollback: true, // POSIX-standard: shell `clear` clears scrollback too
   preserveSelectionOnInput: false, // Opt-in: keep selection alive when typing
   forcePromptNewLine: false, // Opt-in: keep the next shell prompt visually separated from unterminated final output lines

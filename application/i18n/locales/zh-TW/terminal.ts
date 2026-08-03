@@ -307,6 +307,9 @@ export const zhTWTerminalMessages: Messages = {
   'settings.terminal.behavior.bracketedPaste': '括號貼上模式',
   'settings.terminal.behavior.bracketedPaste.desc':
     '貼上文字時使用轉義序列包裹，以便終端區分貼上和鍵入。如果出現 ^[[200~ 字樣請關閉此選項。',
+  'settings.terminal.behavior.autoUploadClipboardImage': '貼上時自動上傳剪貼簿圖片',
+  'settings.terminal.behavior.autoUploadClipboardImage.desc':
+    '當剪貼簿包含圖片時，在遠端工作階段中貼上會透過 SFTP 將圖片上傳到遠端目前目錄的 .netcatty-paste-images/ 資料夾，並在終端輸入遠端路徑，而不是貼上文字。',
   'settings.terminal.behavior.shiftEnterNewline': 'Shift+Enter 傳送文字',
   'settings.terminal.behavior.shiftEnterNewline.desc':
     '在終端中按 Shift+Enter 時傳送設定的文字，而不是普通 Enter。',

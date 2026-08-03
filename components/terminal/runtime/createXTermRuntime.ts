@@ -1494,6 +1494,15 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
               break;
             }
             case "paste": {
+              const autoImagePaste =
+                ctx.terminalSettingsRef.current?.autoUploadClipboardImageOnPaste === true;
+              if (autoImagePaste) {
+                // onPaste (shared with the context menu) auto-uploads a
+                // clipboard image via SFTP for remote sessions and falls
+                // back to a regular text paste when there is no image.
+                void ctx.terminalContextActionsRef?.current?.onPaste?.();
+                break;
+              }
               navigator.clipboard.readText().then((text) => {
                 const id = ctx.sessionRef.current;
                 if (id) {

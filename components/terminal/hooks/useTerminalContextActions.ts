@@ -53,6 +53,7 @@ export const useTerminalContextActions = ({
   passwordPromptActiveRef,
   isLocalConnection,
   supportsRemoteImagePaste,
+  autoUploadClipboardImageOnPasteRef,
   clearWipesScrollbackRef,
   normalizeTextOnCopyRef,
   terminalBackend,
@@ -70,6 +71,8 @@ export const useTerminalContextActions = ({
   passwordPromptActiveRef?: RefObject<boolean | undefined>;
   isLocalConnection: boolean;
   supportsRemoteImagePaste: boolean;
+  /** When true, paste auto-uploads a clipboard image (remote sessions only). */
+  autoUploadClipboardImageOnPasteRef?: RefObject<boolean | undefined>;
   clearWipesScrollbackRef?: RefObject<boolean | undefined>;
   /** When false, copy uses raw getSelection(). Default true when unset. */
   normalizeTextOnCopyRef?: RefObject<boolean | undefined>;
@@ -110,12 +113,18 @@ export const useTerminalContextActions = ({
       const bridge = netcattyBridge.get();
       await handleTerminalClipboardPaste({
         bridge,
+        autoUploadClipboardImage:
+          supportsRemoteImagePaste && autoUploadClipboardImageOnPasteRef?.current === true,
+        clipboardImageBridge: bridge ?? undefined,
+        getRemoteCwd,
         isLocalConnection,
         isSensitiveInput: () => passwordPromptActiveRef?.current === true,
+        onClipboardImageUploadResult,
         readClipboardText: () => navigator.clipboard.readText(),
         scrollOnPaste: scrollOnPasteRef?.current ?? false,
         onPasteData: broadcastUserPasteData,
         sessionId: sessionRef.current,
+        scrollToBottomAfterProgrammaticInput,
         terminalBackend,
         term,
       });
@@ -123,12 +132,17 @@ export const useTerminalContextActions = ({
       logger.warn("Failed to paste from clipboard", err);
     }
   }, [
+    autoUploadClipboardImageOnPasteRef,
     broadcastUserPasteData,
+    getRemoteCwd,
     isLocalConnection,
+    onClipboardImageUploadResult,
     passwordPromptActiveRef,
     sessionRef,
+    supportsRemoteImagePaste,
     termRef,
     scrollOnPasteRef,
+    scrollToBottomAfterProgrammaticInput,
     terminalBackend,
   ]);
 

@@ -535,6 +535,9 @@ export const ruCoreMessages: Messages = {
   'settings.terminal.behavior.bracketedPaste': 'Режим bracketed paste',
   'settings.terminal.behavior.bracketedPaste.desc':
     'Оборачивать вставляемый текст escape-последовательностями, чтобы оболочка отличала вставку от обычного ввода. Отключите, если видите артефакты вида ^[[200~.',
+  'settings.terminal.behavior.autoUploadClipboardImage': 'Авто-загрузка изображений буфера обмена при вставке',
+  'settings.terminal.behavior.autoUploadClipboardImage.desc':
+    'Когда в буфере обмена есть изображение, вставка в удалённой сессии загружает его по SFTP в каталог .netcatty-paste-images/ в текущем удалённом каталоге и вводит удалённый путь вместо вставки текста.',
   'settings.terminal.behavior.shiftEnterNewline': 'Текст для Shift+Enter',
   'settings.terminal.behavior.shiftEnterNewline.desc':
     'Отправлять настроенный текст вместо обычного Enter при нажатии Shift+Enter в терминале.',

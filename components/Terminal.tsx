@@ -2724,6 +2724,8 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   clearWipesScrollbackRef.current = terminalSettings?.clearWipesScrollback ?? true;
   const normalizeTextOnCopyRef = useRef(terminalSettings?.normalizeTextOnCopy ?? true);
   normalizeTextOnCopyRef.current = terminalSettings?.normalizeTextOnCopy ?? true;
+  const autoUploadClipboardImageOnPasteRef = useRef(terminalSettings?.autoUploadClipboardImageOnPaste ?? false);
+  autoUploadClipboardImageOnPasteRef.current = terminalSettings?.autoUploadClipboardImageOnPaste ?? false;
 
   const scrollToBottomAfterProgrammaticInput = useCallback((data: string) => {
     if (!termRef.current) return;
@@ -2889,6 +2891,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     passwordPromptActiveRef,
     isLocalConnection,
     supportsRemoteImagePaste,
+    autoUploadClipboardImageOnPasteRef,
     terminalBackend,
     getRemoteCwd: () => resolveSftpInitialPath({ preferFreshBackend: true }),
     scrollToBottomAfterProgrammaticInput,
@@ -3309,6 +3312,10 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     onPasteData: broadcastUserPasteData,
     scrollToBottomAfterProgrammaticInput,
     containerRef,
+    autoUploadClipboardImage:
+      supportsRemoteImagePaste && terminalSettings?.autoUploadClipboardImageOnPaste === true,
+    getRemoteCwd: () => resolveSftpInitialPath({ preferFreshBackend: true }),
+    onClipboardImageUploadResult: handleClipboardImageUploadResult,
   });
 
   const handleToggleSessionLog = useCallback(async () => {

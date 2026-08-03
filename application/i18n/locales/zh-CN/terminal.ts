@@ -307,6 +307,9 @@ export const zhCNTerminalMessages: Messages = {
   'settings.terminal.behavior.bracketedPaste': '括号粘贴模式',
   'settings.terminal.behavior.bracketedPaste.desc':
     '粘贴文本时使用转义序列包裹，以便终端区分粘贴和键入。如果出现 ^[[200~ 字样请关闭此选项。',
+  'settings.terminal.behavior.autoUploadClipboardImage': '粘贴时自动上传剪贴板图片',
+  'settings.terminal.behavior.autoUploadClipboardImage.desc':
+    '当剪贴板包含图片时，在远程会话中粘贴会通过 SFTP 将图片上传到远端当前目录的 .netcatty-paste-images/ 文件夹，并在终端输入远端路径，而不是粘贴文本。',
   'settings.terminal.behavior.shiftEnterNewline': 'Shift+Enter 发送文本',
   'settings.terminal.behavior.shiftEnterNewline.desc':
     '在终端中按 Shift+Enter 时发送配置的文本，而不是普通回车。',

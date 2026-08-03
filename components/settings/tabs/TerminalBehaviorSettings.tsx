@@ -128,6 +128,16 @@ export const TerminalBehaviorSettings: React.FC<TerminalBehaviorSettingsProps> =
         </SettingRow>
 
         <SettingRow
+          label={t("settings.terminal.behavior.autoUploadClipboardImage")}
+          description={t("settings.terminal.behavior.autoUploadClipboardImage.desc")}
+        >
+          <Toggle
+            checked={terminalSettings.autoUploadClipboardImageOnPaste ?? false}
+            onChange={(v) => updateTerminalSetting("autoUploadClipboardImageOnPaste", v)}
+          />
+        </SettingRow>
+
+        <SettingRow
           label={t("settings.terminal.behavior.shiftEnterNewline")}
           description={t("settings.terminal.behavior.shiftEnterNewline.desc")}
         >
