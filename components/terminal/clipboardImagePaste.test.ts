@@ -239,6 +239,27 @@ test("remote clipboard image upload reports transfer failures without inserting 
   assert.deepEqual(result, { ok: false, reason: "upload-failed" });
 });
 
+test("remote clipboard image upload treats clipboard read failures as no image", async () => {
+  const result = await handleRemoteClipboardImageUpload({
+    bridge: {
+      readClipboardImage: async () => {
+        throw new Error("clipboard unavailable");
+      },
+      openSftpForSession: async () => {
+        assert.fail("should not open SFTP without an image");
+      },
+      startStreamTransfer: async (options) => ({ transferId: options.transferId }),
+    },
+    getRemoteCwd: async () => "/home/alice",
+    sessionId: "session-1",
+    terminalBackend: {
+      writeToSession: () => assert.fail("should not paste without an image"),
+    },
+  });
+
+  assert.deepEqual(result, { ok: false, reason: "no-image" });
+});
+
 test("remote clipboard image upload result maps to user-facing message keys", () => {
   assert.equal(
     getRemoteClipboardImageUploadErrorMessageKey({

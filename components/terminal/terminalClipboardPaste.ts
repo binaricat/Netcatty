@@ -74,7 +74,12 @@ export async function handleTerminalClipboardPaste({
         return;
       }
     } catch {
-      // Fall through to text/file paste.
+      // The clipboard image was already read successfully above, so any throw
+      // here means the upload itself failed (e.g. SFTP cannot be opened for
+      // the session). Surface the same error as the context-menu action
+      // instead of silently pasting unrelated clipboard content.
+      onClipboardImageUploadResult?.({ ok: false, reason: "upload-failed" });
+      return;
     }
   }
 

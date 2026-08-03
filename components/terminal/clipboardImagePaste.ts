@@ -94,7 +94,14 @@ export async function handleRemoteClipboardImageUpload({
     return { ok: false, reason: "unsupported" };
   }
 
-  const image: ClipboardImageFile | null = await bridge.readClipboardImage();
+  let image: ClipboardImageFile | null;
+  try {
+    image = await bridge.readClipboardImage();
+  } catch {
+    // A clipboard read failure is indistinguishable from an empty clipboard —
+    // treat it as "no image" so callers can fall back to a normal paste.
+    return { ok: false, reason: "no-image" };
+  }
   if (!image?.path || !image.name) return { ok: false, reason: "no-image" };
 
   let sftpId: string | undefined;

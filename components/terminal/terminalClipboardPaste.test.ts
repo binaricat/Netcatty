@@ -189,6 +189,49 @@ test("terminal user paste reports failed uploads instead of pasting text", async
   assert.deepEqual(readTextCalls, []);
 });
 
+test("terminal user paste reports thrown upload failures instead of pasting text", async () => {
+  const results: unknown[] = [];
+  const readTextCalls: string[] = [];
+  const image = {
+    path: "/tmp/netcatty/shot.png",
+    name: "shot.png",
+    mediaType: "image/png",
+    size: 12,
+  };
+
+  await handleTerminalClipboardPaste({
+    bridge: {
+      readClipboardFiles: async () => [],
+    },
+    autoUploadClipboardImage: true,
+    clipboardImageBridge: {
+      readClipboardImage: async () => image,
+      openSftpForSession: async () => {
+        throw new Error("SFTP unavailable");
+      },
+      startStreamTransfer: async (options) => ({ transferId: options.transferId }),
+    },
+    getRemoteCwd: async () => "/home/alice",
+    isLocalConnection: false,
+    onClipboardImageUploadResult: (result) => results.push(result),
+    readClipboardText: async () => {
+      readTextCalls.push("read");
+      return "hello";
+    },
+    sessionId: "session-1",
+    terminalBackend: {
+      writeToSession: () => assert.fail("thrown upload failure must not paste anything"),
+    },
+    term: {
+      paste: () => assert.fail("thrown upload failure must not paste text"),
+      scrollToBottom: () => {},
+    },
+  });
+
+  assert.deepEqual(results, [{ ok: false, reason: "upload-failed" }]);
+  assert.deepEqual(readTextCalls, []);
+});
+
 test("terminal user paste keeps local file path paste even with auto-upload enabled", async () => {
   const writes: Array<{ data: string }> = [];
 
