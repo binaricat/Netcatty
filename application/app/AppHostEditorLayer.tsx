@@ -92,7 +92,7 @@ interface AppHostEditorLayerProps {
   onCreateGroup: (groupPath: string) => void;
   onImportOrReuseKey: (draft: Partial<SSHKey>) => SSHKey;
   onUpdateSnippets: (snippets: Snippet[]) => void;
-  onUpdateHosts?: (hosts: Host[]) => void;
+  onUpdateHosts?: (hosts: Host[] | ((prev: Host[]) => Host[])) => void;
 }
 
 export const AppHostEditorLayer: React.FC<AppHostEditorLayerProps> = ({

@@ -239,6 +239,20 @@ test('syncSnippetsForHostConnectQueueSave preserves concurrent non-onConnect tri
   assert.deepEqual(connectScriptIds, []);
 });
 
+test('syncSnippetsForHostConnectQueueSave preserves concurrent target removals', () => {
+  const baseline = [script({ id: 'run', trigger: 'onConnect', targets: ['host-a', 'host-b'] })];
+  const unlinked = [script({ id: 'run', trigger: 'onConnect', targets: ['host-b'] })];
+  const { snippets: next, connectScriptIds } = syncSnippetsForHostConnectQueueSave(
+    unlinked,
+    'host-a',
+    ['run'],
+    ['run'],
+    { baselineSnippets: baseline },
+  );
+  assert.deepEqual(next[0].targets, ['host-b']);
+  assert.deepEqual(connectScriptIds, []);
+});
+
 test('syncSnippetsForHostConnectQueueSave syncs other targeted hosts after promote', () => {
   const hostB: Host = {
     id: 'host-b',

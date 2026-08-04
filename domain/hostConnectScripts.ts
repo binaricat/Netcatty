@@ -336,6 +336,19 @@ export function syncSnippetsForHostConnectQueueSave(
     }
     if (
       !newlyAdded
+      && baselineItem
+      && isScriptSnippet(baselineItem)
+      && baselineItem.trigger === 'onConnect'
+      && item.trigger === 'onConnect'
+      && (Boolean(baselineItem.targetsAllHosts) || snippetAppliesToHost(baselineItem, hostId))
+      && !(Boolean(item.targetsAllHosts) || snippetAppliesToHost(item, hostId))
+    ) {
+      // Concurrent target removal for this host: do not re-link on save.
+      demotedDropIds.add(scriptId);
+      continue;
+    }
+    if (
+      !newlyAdded
       && baselineTrigger
       && baselineTrigger !== 'onConnect'
       && item.trigger !== baselineTrigger

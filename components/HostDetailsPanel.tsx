@@ -110,7 +110,7 @@ interface HostDetailsPanelProps {
   onImportKey?: (draft: Partial<SSHKey>) => SSHKey;
   snippets?: Snippet[];
   onSnippetsChange?: (snippets: Snippet[]) => void;
-  onHostsChange?: (hosts: Host[]) => void;
+  onHostsChange?: (hosts: Host[] | ((prev: Host[]) => Host[])) => void;
   className?: string;
 }
 
@@ -636,16 +636,32 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
             return original !== undefined && original !== host;
           });
           if (peerChanged) {
-            // Persist peers + the edited host together so a following onSave
-            // cannot rebuild from a stale hosts snapshot and drop peer queues.
-            const nextHosts = allHosts.map((host) => {
-              if (host.id === cleaned.id) return cleaned;
-              return synced.hosts.find((entry) => entry.id === host.id) ?? host;
+            // Apply only edited-host + peer-queue deltas onto the latest vault
+            // state so concurrent host updates are not reverted.
+            onHostsChange((prevHosts) => {
+              const syncedPeerById = new Map(
+                synced.hosts
+                  .filter((host) => host.id !== cleaned.id)
+                  .filter((host) => {
+                    const snapshot = allHosts.find((entry) => entry.id === host.id);
+                    return snapshot !== undefined && snapshot !== host;
+                  })
+                  .map((host) => [host.id, host] as const),
+              );
+              const nextHosts = prevHosts.map((host) => {
+                if (host.id === cleaned.id) return cleaned;
+                const syncedPeer = syncedPeerById.get(host.id);
+                if (!syncedPeer) return host;
+                return {
+                  ...host,
+                  connectScriptIds: syncedPeer.connectScriptIds,
+                };
+              });
+              if (!nextHosts.some((host) => host.id === cleaned.id)) {
+                nextHosts.push(cleaned);
+              }
+              return nextHosts;
             });
-            if (!nextHosts.some((host) => host.id === cleaned.id)) {
-              nextHosts.push(cleaned);
-            }
-            onHostsChange(nextHosts);
           }
         }
       }
