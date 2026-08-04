@@ -134,15 +134,20 @@ export function useWorkSurfaceHostEditor({
 
   const save = useCallback((draft: Host) => {
     if (!target) return;
-    const nextHosts = saveWorkSurfaceHostDraft(hosts, target, draft);
-    if (!nextHosts) {
+    let saved = false;
+    onUpdateHosts((prevHosts) => {
+      const nextHosts = saveWorkSurfaceHostDraft(prevHosts, target, draft);
+      if (!nextHosts) return prevHosts;
+      saved = true;
+      return nextHosts;
+    });
+    if (!saved) {
       close();
       return;
     }
-    onUpdateHosts(nextHosts);
     onSaved?.(target.mode);
     close();
-  }, [close, hosts, onSaved, onUpdateHosts, target]);
+  }, [close, onSaved, onUpdateHosts, target]);
 
   useEffect(() => {
     if (shouldCloseDeletedWorkSurfaceHost(hosts, target)) {

@@ -1384,7 +1384,7 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
                     openedHost: editingHost,
                     latestHost,
                   });
-                  onUpdateHosts(upsertHostById(hosts, nextHost));
+                  onUpdateHosts((prevHosts) => upsertHostById(prevHosts, nextHost));
                   setIsHostPanelOpen(false);
                   setEditingHost(null);
                   setNewHostGroupPath(null);

@@ -632,10 +632,16 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
           return original !== undefined && original !== host;
         });
         if (peerChanged) {
-          onHostsChange(allHosts.map((host) => {
-            if (host.id === cleaned.id) return host;
+          // Persist peers + the edited host together so a following onSave
+          // cannot rebuild from a stale hosts snapshot and drop peer queues.
+          const nextHosts = allHosts.map((host) => {
+            if (host.id === cleaned.id) return cleaned;
             return synced.hosts.find((entry) => entry.id === host.id) ?? host;
-          }));
+          });
+          if (!nextHosts.some((host) => host.id === cleaned.id)) {
+            nextHosts.push(cleaned);
+          }
+          onHostsChange(nextHosts);
         }
       }
     }
