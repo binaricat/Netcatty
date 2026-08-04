@@ -602,46 +602,51 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
     }
     if (onSnippetsChange || onHostsChange) {
       const hostId = cleaned.id;
-      const savedQueueIds = initialData
-        ? getEditableHostConnectScriptIds(initialData, snippets)
-        : [];
-      const finalQueueIds = getEditableHostConnectScriptIds(cleaned, snippets);
-      const synced = syncSnippetsForHostConnectQueueSave(
-        snippets,
-        hostId,
-        savedQueueIds,
-        finalQueueIds,
-        {
-          baselineSnippets: baselineSnippetsRef.current,
-          hosts: allHosts,
-        },
-      );
-      cleaned = {
-        ...cleaned,
-        connectScriptIds: synced.connectScriptIds.length > 0
-          ? synced.connectScriptIds
-          : undefined,
-      };
-      if (synced.changed && onSnippetsChange) {
-        onSnippetsChange(synced.snippets);
-      }
-      if (onHostsChange && synced.hosts.length > 0) {
-        const peerChanged = synced.hosts.some((host) => {
-          if (host.id === cleaned.id) return false;
-          const original = allHosts.find((entry) => entry.id === host.id);
-          return original !== undefined && original !== host;
-        });
-        if (peerChanged) {
-          // Persist peers + the edited host together so a following onSave
-          // cannot rebuild from a stale hosts snapshot and drop peer queues.
-          const nextHosts = allHosts.map((host) => {
-            if (host.id === cleaned.id) return cleaned;
-            return synced.hosts.find((entry) => entry.id === host.id) ?? host;
+      if (snippets.length === 0) {
+        // Vault may publish hosts before snippets hydrate. Do not wipe unresolved
+        // connectScriptIds while the script catalog is still empty.
+      } else {
+        const savedQueueIds = initialData
+          ? getEditableHostConnectScriptIds(initialData, snippets)
+          : [];
+        const finalQueueIds = getEditableHostConnectScriptIds(cleaned, snippets);
+        const synced = syncSnippetsForHostConnectQueueSave(
+          snippets,
+          hostId,
+          savedQueueIds,
+          finalQueueIds,
+          {
+            baselineSnippets: baselineSnippetsRef.current,
+            hosts: allHosts,
+          },
+        );
+        cleaned = {
+          ...cleaned,
+          connectScriptIds: synced.connectScriptIds.length > 0
+            ? synced.connectScriptIds
+            : undefined,
+        };
+        if (synced.changed && onSnippetsChange) {
+          onSnippetsChange(synced.snippets);
+        }
+        if (onHostsChange && synced.hosts.length > 0) {
+          const peerChanged = synced.hosts.some((host) => {
+            if (host.id === cleaned.id) return false;
+            const original = allHosts.find((entry) => entry.id === host.id);
+            return original !== undefined && original !== host;
           });
-          if (!nextHosts.some((host) => host.id === cleaned.id)) {
-            nextHosts.push(cleaned);
+          if (peerChanged) {
+            // Persist peers + the edited host together so a following onSave
+            // cannot rebuild from a stale hosts snapshot and drop peer queues.
+            const nextHosts = allHosts.map((host) => {
+              if (host.id === cleaned.id) return cleaned;
+              return synced.hosts.find((entry) => entry.id === host.id) ?? host;
+            });
+            if (!nextHosts.some((host) => host.id === cleaned.id)) {
+              nextHosts.push(cleaned);
+            }
+            onHostsChange(nextHosts);
           }
-          onHostsChange(nextHosts);
         }
       }
     }
