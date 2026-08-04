@@ -338,8 +338,6 @@ export function syncSnippetsForHostConnectQueueSave(
       !newlyAdded
       && baselineItem
       && isScriptSnippet(baselineItem)
-      && baselineItem.trigger === 'onConnect'
-      && item.trigger === 'onConnect'
       && (Boolean(baselineItem.targetsAllHosts) || snippetAppliesToHost(baselineItem, hostId))
       && !(Boolean(item.targetsAllHosts) || snippetAppliesToHost(item, hostId))
     ) {

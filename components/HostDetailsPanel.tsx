@@ -628,9 +628,9 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
     }
     if (onSnippetsChange || onHostsChange) {
       const hostId = cleaned.id;
-      if (snippets.length === 0) {
+      if (snippets.length === 0 && !baselineHydratedRef.current) {
         // Vault may publish hosts before snippets hydrate. Do not wipe unresolved
-        // connectScriptIds while the script catalog is still empty.
+        // connectScriptIds while the script catalog is still incomplete.
       } else {
         const savedQueueIds = openingQueueIdsRef.current;
         const finalQueueIds = getEditableHostConnectScriptIds(cleaned, snippets);
