@@ -237,8 +237,9 @@ export function prepareSnippetForHostConnectQueue(snippet: Snippet, hostId: stri
 
 function connectQueueSnippetNeedsPromote(snippet: Snippet, hostId: string): boolean {
   if (!isScriptSnippet(snippet)) return false;
+  // Never demote vault-wide onConnect scripts just because they appear in a host queue.
+  if (snippet.targetsAllHosts) return false;
   if (snippet.trigger !== 'onConnect') return true;
-  if (snippet.targetsAllHosts) return true;
   return !snippetAppliesToHost(snippet, hostId);
 }
 
