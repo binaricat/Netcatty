@@ -326,13 +326,21 @@ export function syncSnippetsForHostConnectQueueSave(
 
     const newlyAdded = !previousSet.has(scriptId);
     const baselineItem = baseline.find((entry) => entry.id === scriptId);
-    const wasOnConnectAtBaseline = Boolean(
-      baselineItem
-      && isScriptSnippet(baselineItem)
-      && baselineItem.trigger === 'onConnect',
-    );
-    if (!newlyAdded && wasOnConnectAtBaseline) {
+    const baselineTrigger = baselineItem && isScriptSnippet(baselineItem)
+      ? baselineItem.trigger
+      : undefined;
+    if (!newlyAdded && baselineTrigger === 'onConnect' && item.trigger !== 'onConnect') {
       // Concurrent demotion while the editor stayed open: keep demotion, drop stale queue id.
+      demotedDropIds.add(scriptId);
+      continue;
+    }
+    if (
+      !newlyAdded
+      && baselineTrigger
+      && baselineTrigger !== 'onConnect'
+      && item.trigger !== baselineTrigger
+    ) {
+      // Concurrent non-onConnect trigger edit (e.g. manual -> onOutput): do not overwrite.
       demotedDropIds.add(scriptId);
       continue;
     }

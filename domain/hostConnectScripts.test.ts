@@ -224,6 +224,21 @@ test('syncSnippetsForHostConnectQueueSave does not re-promote concurrently demot
   assert.deepEqual(connectScriptIds, []);
 });
 
+test('syncSnippetsForHostConnectQueueSave preserves concurrent non-onConnect trigger edits', () => {
+  const baseline = [script({ id: 'run', trigger: 'manual', targets: ['host-a'] })];
+  const retargeted = [script({ id: 'run', trigger: 'onOutput', triggerPattern: 'ERR', targets: ['host-a'] })];
+  const { snippets: next, connectScriptIds } = syncSnippetsForHostConnectQueueSave(
+    retargeted,
+    'host-a',
+    ['run'],
+    ['run'],
+    { baselineSnippets: baseline },
+  );
+  assert.equal(next[0].trigger, 'onOutput');
+  assert.equal(next[0].triggerPattern, 'ERR');
+  assert.deepEqual(connectScriptIds, []);
+});
+
 test('syncSnippetsForHostConnectQueueSave syncs other targeted hosts after promote', () => {
   const hostB: Host = {
     id: 'host-b',
