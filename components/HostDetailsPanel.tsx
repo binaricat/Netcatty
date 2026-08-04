@@ -153,6 +153,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
   const { checkSshAgent } = useApplicationBackend();
   const baselineSnippetsRef = useRef(snippets);
   const baselineHydratedRef = useRef(snippets.length > 0);
+  const openingQueueIdsRef = useRef<string[]>([]);
   const [form, setForm] = useState<Host>(
     () =>
       (initialData ? normalizePrimaryTelnetState(initialData) : null) ||
@@ -243,6 +244,15 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
   useEffect(() => {
     baselineSnippetsRef.current = snippets;
     baselineHydratedRef.current = snippets.length > 0;
+    if (!initialData) {
+      openingQueueIdsRef.current = [];
+    } else {
+      const normalized = normalizePrimaryTelnetState(initialData);
+      const ensured = snippets.length > 0
+        ? ensureHostConnectScriptIds(normalized, snippets)
+        : normalized;
+      openingQueueIdsRef.current = getEditableHostConnectScriptIds(ensured, snippets);
+    }
     // Snapshot only when opening/reopening a host editor, not on live snippet edits.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialHostId]);
@@ -254,7 +264,12 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
     if (snippets.length === 0) return;
     baselineSnippetsRef.current = snippets;
     baselineHydratedRef.current = true;
-  }, [snippets]);
+    if (initialData) {
+      const normalized = normalizePrimaryTelnetState(initialData);
+      const ensured = ensureHostConnectScriptIds(normalized, snippets);
+      openingQueueIdsRef.current = getEditableHostConnectScriptIds(ensured, snippets);
+    }
+  }, [initialData, snippets]);
 
   useEffect(() => {
     if (!initialData) return;
@@ -617,9 +632,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
         // Vault may publish hosts before snippets hydrate. Do not wipe unresolved
         // connectScriptIds while the script catalog is still empty.
       } else {
-        const savedQueueIds = initialData
-          ? getEditableHostConnectScriptIds(initialData, snippets)
-          : [];
+        const savedQueueIds = openingQueueIdsRef.current;
         const finalQueueIds = getEditableHostConnectScriptIds(cleaned, snippets);
         const synced = syncSnippetsForHostConnectQueueSave(
           snippets,
@@ -647,8 +660,8 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
             return original !== undefined && original !== host;
           });
           if (peerChanged) {
-            // Append only the script IDs this save newly queued onto each peer,
-            // preserving concurrent peer-queue edits against the latest state.
+            // Append only the script IDs this save newly queued onto each peer.
+            // Leave the edited host alone so onSave can three-way merge it.
             onHostsChange((prevHosts) => {
               const peerAdds = new Map<string, string[]>();
               for (const syncedHost of synced.hosts) {
@@ -661,8 +674,8 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
                 );
                 if (addedIds.length > 0) peerAdds.set(syncedHost.id, addedIds);
               }
-              const nextHosts = prevHosts.map((host) => {
-                if (host.id === cleaned.id) return cleaned;
+              return prevHosts.map((host) => {
+                if (host.id === cleaned.id) return host;
                 const addedIds = peerAdds.get(host.id);
                 if (!addedIds || addedIds.length === 0) return host;
                 const currentIds = host.connectScriptIds ?? [];
@@ -678,10 +691,6 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
                 }
                 return { ...host, connectScriptIds: mergedIds };
               });
-              if (!nextHosts.some((host) => host.id === cleaned.id)) {
-                nextHosts.push(cleaned);
-              }
-              return nextHosts;
             });
           }
         }
