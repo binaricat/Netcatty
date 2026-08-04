@@ -649,6 +649,11 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
           connectScriptIds: synced.connectScriptIds.length > 0
             ? synced.connectScriptIds
             : undefined,
+          // sanitizeHost reconstitutes connectScriptIds from loginScriptId when
+          // the explicit queue is absent; clear the legacy field when emptied.
+          ...(synced.connectScriptIds.length === 0
+            ? { loginScriptId: undefined }
+            : {}),
         };
         if (synced.changed && onSnippetsChange) {
           onSnippetsChange(synced.snippets);
