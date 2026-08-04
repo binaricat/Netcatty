@@ -152,6 +152,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
   };
   const { checkSshAgent } = useApplicationBackend();
   const baselineSnippetsRef = useRef(snippets);
+  const baselineHydratedRef = useRef(snippets.length > 0);
   const [form, setForm] = useState<Host>(
     () =>
       (initialData ? normalizePrimaryTelnetState(initialData) : null) ||
@@ -241,9 +242,19 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
 
   useEffect(() => {
     baselineSnippetsRef.current = snippets;
+    baselineHydratedRef.current = snippets.length > 0;
     // Snapshot only when opening/reopening a host editor, not on live snippet edits.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialHostId]);
+
+  useEffect(() => {
+    // If the editor opened before snippets hydrated, capture the first non-empty
+    // catalog as baseline so concurrent-edit guards still have a reference.
+    if (baselineHydratedRef.current) return;
+    if (snippets.length === 0) return;
+    baselineSnippetsRef.current = snippets;
+    baselineHydratedRef.current = true;
+  }, [snippets]);
 
   useEffect(() => {
     if (!initialData) return;
@@ -636,26 +647,36 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
             return original !== undefined && original !== host;
           });
           if (peerChanged) {
-            // Apply only edited-host + peer-queue deltas onto the latest vault
-            // state so concurrent host updates are not reverted.
+            // Append only the script IDs this save newly queued onto each peer,
+            // preserving concurrent peer-queue edits against the latest state.
             onHostsChange((prevHosts) => {
-              const syncedPeerById = new Map(
-                synced.hosts
-                  .filter((host) => host.id !== cleaned.id)
-                  .filter((host) => {
-                    const snapshot = allHosts.find((entry) => entry.id === host.id);
-                    return snapshot !== undefined && snapshot !== host;
-                  })
-                  .map((host) => [host.id, host] as const),
-              );
+              const peerAdds = new Map<string, string[]>();
+              for (const syncedHost of synced.hosts) {
+                if (syncedHost.id === cleaned.id) continue;
+                const snapshot = allHosts.find((entry) => entry.id === syncedHost.id);
+                if (!snapshot || snapshot === syncedHost) continue;
+                const snapshotIds = snapshot.connectScriptIds ?? [];
+                const addedIds = (syncedHost.connectScriptIds ?? []).filter(
+                  (id) => !snapshotIds.includes(id),
+                );
+                if (addedIds.length > 0) peerAdds.set(syncedHost.id, addedIds);
+              }
               const nextHosts = prevHosts.map((host) => {
                 if (host.id === cleaned.id) return cleaned;
-                const syncedPeer = syncedPeerById.get(host.id);
-                if (!syncedPeer) return host;
-                return {
-                  ...host,
-                  connectScriptIds: syncedPeer.connectScriptIds,
-                };
+                const addedIds = peerAdds.get(host.id);
+                if (!addedIds || addedIds.length === 0) return host;
+                const currentIds = host.connectScriptIds ?? [];
+                const mergedIds = [...currentIds];
+                for (const id of addedIds) {
+                  if (!mergedIds.includes(id)) mergedIds.push(id);
+                }
+                if (
+                  mergedIds.length === currentIds.length
+                  && mergedIds.every((id, index) => id === currentIds[index])
+                ) {
+                  return host;
+                }
+                return { ...host, connectScriptIds: mergedIds };
               });
               if (!nextHosts.some((host) => host.id === cleaned.id)) {
                 nextHosts.push(cleaned);
