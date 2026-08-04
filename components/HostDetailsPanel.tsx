@@ -591,9 +591,11 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
     if ((cleaned.protocol && cleaned.protocol !== "ssh") || cleaned.moshEnabled || cleaned.etEnabled) {
       delete cleaned.x11Forwarding;
     }
-    if (onSnippetsChange && initialData) {
+    if (onSnippetsChange) {
       const hostId = cleaned.id;
-      const savedQueueIds = getEditableHostConnectScriptIds(initialData, snippets);
+      const savedQueueIds = initialData
+        ? getEditableHostConnectScriptIds(initialData, snippets)
+        : [];
       const finalQueueIds = getEditableHostConnectScriptIds(cleaned, snippets);
       const synced = syncSnippetsForHostConnectQueueSave(
         snippets,
