@@ -15,6 +15,7 @@ import {
   shouldMarkConnectAutomationConsumed,
   shouldUseFreshSshConnectionForAutomation,
   syncHostsForSnippetTargetChange,
+  syncSnippetsForHostConnectQueueSave,
 } from './hostConnectScripts.ts';
 
 const host: Host = {
@@ -156,6 +157,23 @@ test('ensureHostConnectScriptIds preserves pending manual queue entries while ed
   assert.deepEqual(ensured.connectScriptIds, ['reset']);
   assert.deepEqual(getEditableHostConnectScriptIds(ensured, snippets), ['reset']);
   assert.deepEqual(getHostConnectScriptIds(ensured, snippets), []);
+});
+
+test('syncSnippetsForHostConnectQueueSave promotes already-persisted manual queue entries', () => {
+  const snippets = [
+    script({ id: 'reset', trigger: 'manual', targets: [] }),
+    script({ id: 'ready', trigger: 'onConnect', targets: ['host-a'] }),
+  ];
+  const { snippets: next, changed } = syncSnippetsForHostConnectQueueSave(
+    snippets,
+    'host-a',
+    ['reset', 'ready'],
+    ['reset', 'ready'],
+  );
+  assert.equal(changed, true);
+  assert.equal(next.find((item) => item.id === 'reset')?.trigger, 'onConnect');
+  assert.deepEqual(next.find((item) => item.id === 'reset')?.targets, ['host-a']);
+  assert.equal(next.find((item) => item.id === 'ready'), snippets[1]);
 });
 
 test('syncHostsForSnippetTargetChange appends and removes queue entries', () => {

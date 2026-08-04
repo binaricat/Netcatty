@@ -70,7 +70,7 @@ import {
 } from "./host-details";
 import { HostNotesEditor } from "./host/HostNotesEditor";
 import { HostDetailsScriptsSection } from "./host/HostDetailsScriptsSection";
-import { ensureHostConnectScriptIds, getHostConnectScriptIds, prepareSnippetForHostConnectQueue } from "@/domain/hostConnectScripts.ts";
+import { ensureHostConnectScriptIds, getEditableHostConnectScriptIds, syncSnippetsForHostConnectQueueSave } from "@/domain/hostConnectScripts.ts";
 import { isScriptSnippet } from "@/domain/snippetScript.ts";
 import { unlinkHostFromScripts } from "@/domain/snippetTargets.ts";
 import {
@@ -595,34 +595,16 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
     }
     if (onSnippetsChange && initialData) {
       const hostId = cleaned.id;
-      const savedQueueIds = initialData.connectScriptIds ?? getHostConnectScriptIds(initialData, snippets);
-      const finalQueueIds = cleaned.connectScriptIds ?? getHostConnectScriptIds(cleaned, snippets);
-      const savedSet = new Set(savedQueueIds);
-      const finalSet = new Set(finalQueueIds);
-      let nextSnippets = snippets;
-      let changed = false;
-
-      for (const scriptId of finalQueueIds) {
-        if (!savedSet.has(scriptId)) {
-          nextSnippets = nextSnippets.map((item) => (
-            item.id === scriptId && isScriptSnippet(item)
-              ? prepareSnippetForHostConnectQueue(item, hostId)
-              : item
-          ));
-          changed = true;
-        }
-      }
-      for (const scriptId of savedQueueIds) {
-        if (!finalSet.has(scriptId)) {
-          const unlinked = unlinkHostFromScripts(nextSnippets, hostId, scriptId);
-          if (unlinked !== nextSnippets) {
-            nextSnippets = unlinked;
-            changed = true;
-          }
-        }
-      }
-      if (changed) {
-        onSnippetsChange(nextSnippets);
+      const savedQueueIds = getEditableHostConnectScriptIds(initialData, snippets);
+      const finalQueueIds = getEditableHostConnectScriptIds(cleaned, snippets);
+      const synced = syncSnippetsForHostConnectQueueSave(
+        snippets,
+        hostId,
+        savedQueueIds,
+        finalQueueIds,
+      );
+      if (synced.changed) {
+        onSnippetsChange(synced.snippets);
       }
     }
     onSave(stripBuiltInConnectionFieldsForPluginHost(cleaned));

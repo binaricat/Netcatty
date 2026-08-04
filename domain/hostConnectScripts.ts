@@ -4,6 +4,7 @@ import {
   getScriptsLinkedToHost,
   linkHostToScript,
   snippetAppliesToHost,
+  unlinkHostFromScripts,
 } from './snippetTargets.ts';
 import { sortByVaultOrder } from './vaultOrder.ts';
 
@@ -232,6 +233,49 @@ export function prepareSnippetForHostConnectQueue(snippet: Snippet, hostId: stri
     ...linkHostToScript(snippet, hostId),
     trigger: 'onConnect',
   };
+}
+
+function connectQueueSnippetNeedsPromote(snippet: Snippet, hostId: string): boolean {
+  if (!isScriptSnippet(snippet)) return false;
+  if (snippet.trigger !== 'onConnect') return true;
+  if (snippet.targetsAllHosts) return true;
+  return !snippetAppliesToHost(snippet, hostId);
+}
+
+/**
+ * Sync script metadata when saving a host connect queue.
+ * Promotes every queued script to onConnect + host target, including IDs that
+ * were already persisted as draft/manual entries before this save.
+ */
+export function syncSnippetsForHostConnectQueueSave(
+  snippets: Snippet[],
+  hostId: string,
+  previousQueueIds: string[],
+  nextQueueIds: string[],
+): { snippets: Snippet[]; changed: boolean } {
+  const nextSet = new Set(nextQueueIds);
+  let nextSnippets = snippets;
+  let changed = false;
+
+  for (const scriptId of nextQueueIds) {
+    nextSnippets = nextSnippets.map((item) => {
+      if (item.id !== scriptId || !isScriptSnippet(item)) return item;
+      if (!connectQueueSnippetNeedsPromote(item, hostId)) return item;
+      changed = true;
+      return prepareSnippetForHostConnectQueue(item, hostId);
+    });
+  }
+
+  for (const scriptId of previousQueueIds) {
+    if (nextSet.has(scriptId)) continue;
+    const unlinked = unlinkHostFromScripts(nextSnippets, hostId, scriptId);
+    if (unlinked !== nextSnippets) {
+      nextSnippets = unlinked;
+      changed = true;
+    }
+  }
+
+  return { snippets: nextSnippets, changed };
 }
 
 export function syncHostsForSnippetTargetChange(
