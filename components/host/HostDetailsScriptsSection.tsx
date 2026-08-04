@@ -3,8 +3,8 @@ import React, { useCallback, useMemo, useState, type DragEvent } from 'react';
 import type { Host, Snippet } from '@/domain/models';
 import {
   appendHostConnectScript,
+  getEditableHostConnectScriptIds,
   getGlobalConnectScripts,
-  getHostConnectScriptIds,
   removeHostConnectScript,
   reorderHostConnectScript,
 } from '@/domain/hostConnectScripts.ts';
@@ -60,7 +60,7 @@ export const HostDetailsScriptsSection: React.FC<HostDetailsScriptsSectionProps>
     [snippets],
   );
   const queueIds = useMemo(
-    () => getHostConnectScriptIds(host, snippets),
+    () => getEditableHostConnectScriptIds(host, snippets),
     [host, snippets],
   );
   const queuedScripts = useMemo(
@@ -71,15 +71,16 @@ export const HostDetailsScriptsSection: React.FC<HostDetailsScriptsSectionProps>
   );
   const linkableScripts = useMemo(
     () => scripts.filter((script) => {
+      if (!script.id) return false;
       if (script.targetsAllHosts) return false;
-      if (script.id && queueIds.includes(script.id)) return false;
+      if (queueIds.includes(script.id)) return false;
       return true;
     }),
     [queueIds, scripts],
   );
   const linkOptions = useMemo(
     () => linkableScripts.map((script) => ({
-      value: script.id,
+      value: script.id!,
       label: script.label || t('scripts.running.unnamed'),
     })),
     [linkableScripts, t],

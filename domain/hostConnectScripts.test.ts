@@ -3,6 +3,8 @@ import test from 'node:test';
 import type { Host, Snippet } from './models';
 import {
   appendHostConnectScript,
+  ensureHostConnectScriptIds,
+  getEditableHostConnectScriptIds,
   getGlobalConnectScripts,
   getHostConnectScriptIds,
   hasHostConnectAutomation,
@@ -129,6 +131,31 @@ test('append updates host connectScriptIds order', () => {
   let next = appendHostConnectScript(host, 'a', snippets);
   next = appendHostConnectScript(next, 'b', snippets);
   assert.deepEqual(getHostConnectScriptIds(next, snippets), ['a', 'b']);
+});
+
+test('append keeps default manual scripts in the editable host queue', () => {
+  const snippets = [
+    script({ id: 'reset', label: '重置密码', trigger: 'manual' }),
+    script({ id: 'teest', label: 'teest', trigger: 'manual' }),
+  ];
+
+  let next = appendHostConnectScript(host, 'reset', snippets);
+  assert.deepEqual(getEditableHostConnectScriptIds(next, snippets), ['reset']);
+  // Runtime still ignores non-onConnect until host save promotes the trigger.
+  assert.deepEqual(getHostConnectScriptIds(next, snippets), []);
+
+  next = appendHostConnectScript(next, 'teest', snippets);
+  assert.deepEqual(getEditableHostConnectScriptIds(next, snippets), ['reset', 'teest']);
+  assert.deepEqual(next.connectScriptIds, ['reset', 'teest']);
+});
+
+test('ensureHostConnectScriptIds preserves pending manual queue entries while editing', () => {
+  const snippets = [script({ id: 'reset', trigger: 'manual' })];
+  const draft = { ...host, connectScriptIds: ['reset', 'missing'] };
+  const ensured = ensureHostConnectScriptIds(draft, snippets);
+  assert.deepEqual(ensured.connectScriptIds, ['reset']);
+  assert.deepEqual(getEditableHostConnectScriptIds(ensured, snippets), ['reset']);
+  assert.deepEqual(getHostConnectScriptIds(ensured, snippets), []);
 });
 
 test('syncHostsForSnippetTargetChange appends and removes queue entries', () => {

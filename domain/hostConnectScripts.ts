@@ -28,6 +28,23 @@ function pruneConnectScriptIds(ids: string[], snippets: Snippet[]): string[] {
   return result;
 }
 
+/**
+ * Draft/edit queue prune: keep any existing script IDs.
+ * Host save promotes non-onConnect scripts via prepareSnippetForHostConnectQueue.
+ */
+function pruneEditableConnectScriptIds(ids: string[], snippets: Snippet[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const id of ids) {
+    if (!id || seen.has(id)) continue;
+    const snippet = scriptById(snippets, id);
+    if (!snippet) continue;
+    seen.add(id);
+    result.push(id);
+  }
+  return result;
+}
+
 /** Global onConnect scripts (targetsAllHosts), sorted by vault order. */
 export function getGlobalConnectScripts(snippets: Snippet[]): Snippet[] {
   return sortByVaultOrder(
@@ -77,9 +94,20 @@ export function getHostConnectScriptIds(host: Host, snippets: Snippet[]): string
   return migrateHostConnectScriptIds(host, snippets);
 }
 
+/**
+ * Host-details draft queue: includes scripts pending promote-to-onConnect on save.
+ * Runtime connect still uses getHostConnectScriptIds (onConnect only).
+ */
+export function getEditableHostConnectScriptIds(host: Host, snippets: Snippet[]): string[] {
+  if (host.connectScriptIds !== undefined) {
+    return pruneEditableConnectScriptIds(host.connectScriptIds, snippets);
+  }
+  return migrateHostConnectScriptIds(host, snippets);
+}
+
 export function ensureHostConnectScriptIds(host: Host, snippets: Snippet[]): Host {
   if (host.connectScriptIds !== undefined) {
-    const pruned = pruneConnectScriptIds(host.connectScriptIds, snippets);
+    const pruned = pruneEditableConnectScriptIds(host.connectScriptIds, snippets);
     if (pruned.length === host.connectScriptIds.length
       && pruned.every((id, index) => id === host.connectScriptIds![index])) {
       return host;
@@ -164,7 +192,7 @@ export function shouldMarkConnectAutomationConsumed(options: {
 export function appendHostConnectScript(host: Host, scriptId: string, snippets: Snippet[]): Host {
   const snippet = scriptById(snippets, scriptId);
   if (!snippet) return host;
-  const current = getHostConnectScriptIds(host, snippets);
+  const current = getEditableHostConnectScriptIds(host, snippets);
   if (current.includes(scriptId)) {
     return { ...host, connectScriptIds: current };
   }
@@ -172,7 +200,7 @@ export function appendHostConnectScript(host: Host, scriptId: string, snippets: 
 }
 
 export function removeHostConnectScript(host: Host, scriptId: string, snippets: Snippet[]): Host {
-  const current = getHostConnectScriptIds(host, snippets);
+  const current = getEditableHostConnectScriptIds(host, snippets);
   const next = current.filter((id) => id !== scriptId);
   return { ...host, connectScriptIds: next };
 }
@@ -185,7 +213,7 @@ export function reorderHostConnectScript(
   snippets: Snippet[],
 ): Host {
   if (draggedScriptId === targetScriptId) return host;
-  const current = [...getHostConnectScriptIds(host, snippets)];
+  const current = [...getEditableHostConnectScriptIds(host, snippets)];
   const fromIndex = current.indexOf(draggedScriptId);
   const targetIndex = current.indexOf(targetScriptId);
   if (fromIndex === -1 || targetIndex === -1) return host;
