@@ -71,8 +71,6 @@ import {
 import { HostNotesEditor } from "./host/HostNotesEditor";
 import { HostDetailsScriptsSection } from "./host/HostDetailsScriptsSection";
 import { ensureHostConnectScriptIds, getEditableHostConnectScriptIds, syncSnippetsForHostConnectQueueSave } from "@/domain/hostConnectScripts.ts";
-import { isScriptSnippet } from "@/domain/snippetScript.ts";
-import { unlinkHostFromScripts } from "@/domain/snippetTargets.ts";
 import {
   isPluginHostProtocol,
   sanitizePluginConnection,
