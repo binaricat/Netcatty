@@ -1373,6 +1373,7 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
                 groupConfigs={groupConfigs}
                 snippets={snippets}
                 onSnippetsChange={onUpdateSnippets}
+                onHostsChange={onUpdateHosts}
                 onImportKey={onImportOrReuseKey}
                 onSave={(host) => {
                   const latestHost = hosts.find(

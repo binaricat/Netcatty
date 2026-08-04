@@ -136,7 +136,7 @@ test('append updates host connectScriptIds order', () => {
 
 test('append keeps default manual scripts in the editable host queue', () => {
   const snippets = [
-    script({ id: 'reset', label: '重置密码', trigger: 'manual' }),
+    script({ id: 'reset', label: 'reset-password', trigger: 'manual' }),
     script({ id: 'teest', label: 'teest', trigger: 'manual' }),
   ];
 
@@ -164,7 +164,7 @@ test('syncSnippetsForHostConnectQueueSave promotes already-persisted manual queu
     script({ id: 'reset', trigger: 'manual', targets: [] }),
     script({ id: 'ready', trigger: 'onConnect', targets: ['host-a'] }),
   ];
-  const { snippets: next, changed } = syncSnippetsForHostConnectQueueSave(
+  const { snippets: next, changed, connectScriptIds } = syncSnippetsForHostConnectQueueSave(
     snippets,
     'host-a',
     ['reset', 'ready'],
@@ -174,11 +174,12 @@ test('syncSnippetsForHostConnectQueueSave promotes already-persisted manual queu
   assert.equal(next.find((item) => item.id === 'reset')?.trigger, 'onConnect');
   assert.deepEqual(next.find((item) => item.id === 'reset')?.targets, ['host-a']);
   assert.equal(next.find((item) => item.id === 'ready'), snippets[1]);
+  assert.deepEqual(connectScriptIds, ['reset', 'ready']);
 });
 
 test('syncSnippetsForHostConnectQueueSave leaves global onConnect scripts untouched', () => {
   const global = script({ id: 'both', targetsAllHosts: true, targets: ['host-a'] });
-  const { snippets: next, changed } = syncSnippetsForHostConnectQueueSave(
+  const { snippets: next, changed, connectScriptIds } = syncSnippetsForHostConnectQueueSave(
     [global],
     'host-a',
     ['both'],
@@ -187,6 +188,67 @@ test('syncSnippetsForHostConnectQueueSave leaves global onConnect scripts untouc
   assert.equal(changed, false);
   assert.equal(next[0], global);
   assert.equal(next[0].targetsAllHosts, true);
+  assert.deepEqual(connectScriptIds, ['both']);
+});
+
+test('syncSnippetsForHostConnectQueueSave promotes global manual without clearing targetsAllHosts', () => {
+  const globalManual = script({
+    id: 'everywhere',
+    trigger: 'manual',
+    targetsAllHosts: true,
+  });
+  const { snippets: next, changed, connectScriptIds } = syncSnippetsForHostConnectQueueSave(
+    [globalManual],
+    'host-a',
+    ['everywhere'],
+    ['everywhere'],
+  );
+  assert.equal(changed, true);
+  assert.equal(next[0].trigger, 'onConnect');
+  assert.equal(next[0].targetsAllHosts, true);
+  assert.deepEqual(connectScriptIds, ['everywhere']);
+});
+
+test('syncSnippetsForHostConnectQueueSave does not re-promote concurrently demoted scripts', () => {
+  const baseline = [script({ id: 'run', trigger: 'onConnect', targets: ['host-a'] })];
+  const demoted = [script({ id: 'run', trigger: 'manual', targets: ['host-a'] })];
+  const { snippets: next, changed, connectScriptIds } = syncSnippetsForHostConnectQueueSave(
+    demoted,
+    'host-a',
+    ['run'],
+    ['run'],
+    { baselineSnippets: baseline },
+  );
+  assert.equal(changed, true);
+  assert.equal(next[0].trigger, 'manual');
+  assert.deepEqual(connectScriptIds, []);
+});
+
+test('syncSnippetsForHostConnectQueueSave syncs other targeted hosts after promote', () => {
+  const hostB: Host = {
+    id: 'host-b',
+    label: 'B',
+    hostname: 'b.example',
+    username: 'root',
+    os: 'linux',
+    protocol: 'ssh',
+    tags: [],
+    connectScriptIds: [],
+  };
+  const snippets = [
+    script({ id: 'shared', trigger: 'manual', targets: ['host-b'] }),
+  ];
+  const { snippets: next, hosts, changed } = syncSnippetsForHostConnectQueueSave(
+    snippets,
+    'host-a',
+    [],
+    ['shared'],
+    { hosts: [host, hostB] },
+  );
+  assert.equal(changed, true);
+  assert.equal(next[0].trigger, 'onConnect');
+  assert.deepEqual(next[0].targets, ['host-b', 'host-a']);
+  assert.deepEqual(hosts?.find((item) => item.id === 'host-b')?.connectScriptIds, ['shared']);
 });
 
 test('syncHostsForSnippetTargetChange appends and removes queue entries', () => {

@@ -92,6 +92,7 @@ interface AppHostEditorLayerProps {
   onCreateGroup: (groupPath: string) => void;
   onImportOrReuseKey: (draft: Partial<SSHKey>) => SSHKey;
   onUpdateSnippets: (snippets: Snippet[]) => void;
+  onUpdateHosts?: (hosts: Host[]) => void;
 }
 
 export const AppHostEditorLayer: React.FC<AppHostEditorLayerProps> = ({
@@ -117,6 +118,7 @@ export const AppHostEditorLayer: React.FC<AppHostEditorLayerProps> = ({
   onCreateGroup,
   onImportOrReuseKey,
   onUpdateSnippets,
+  onUpdateHosts,
 }) => {
   const { t } = useI18n();
   const derivedSurfaceVisible = useWorkSurfaceVisible({
@@ -189,6 +191,7 @@ export const AppHostEditorLayer: React.FC<AppHostEditorLayerProps> = ({
             groupConfigs={groupConfigs}
             snippets={snippets}
             onSnippetsChange={onUpdateSnippets}
+            onHostsChange={onUpdateHosts}
             onImportKey={onImportOrReuseKey}
             onSave={onSave}
             onCancel={onCancel}

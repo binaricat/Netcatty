@@ -345,6 +345,7 @@ function AppViewInner({ domains }: AppViewProps) {
           onCreateGroup={handleCreateWorkSurfaceHostGroup}
           onImportOrReuseKey={importOrReuseKey}
           onUpdateSnippets={updateSnippets}
+          onUpdateHosts={updateHosts}
         />
 
         <VaultViewContainer appThemeStyle={appThemeStyle}>

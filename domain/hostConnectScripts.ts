@@ -229,6 +229,11 @@ export function reorderHostConnectScript(
 
 export function prepareSnippetForHostConnectQueue(snippet: Snippet, hostId: string): Snippet {
   if (!isScriptSnippet(snippet)) return snippet;
+  if (snippet.targetsAllHosts) {
+    return snippet.trigger === 'onConnect'
+      ? snippet
+      : { ...snippet, trigger: 'onConnect' };
+  }
   return {
     ...linkHostToScript(snippet, hostId),
     trigger: 'onConnect',
@@ -237,38 +242,127 @@ export function prepareSnippetForHostConnectQueue(snippet: Snippet, hostId: stri
 
 function connectQueueSnippetNeedsPromote(snippet: Snippet, hostId: string): boolean {
   if (!isScriptSnippet(snippet)) return false;
-  // Never demote vault-wide onConnect scripts just because they appear in a host queue.
-  if (snippet.targetsAllHosts) return false;
   if (snippet.trigger !== 'onConnect') return true;
+  if (snippet.targetsAllHosts) return false;
   return !snippetAppliesToHost(snippet, hostId);
 }
 
+function snippetTargetsEqual(left: Snippet, right: Snippet): boolean {
+  if (Boolean(left.targetsAllHosts) !== Boolean(right.targetsAllHosts)) return false;
+  const leftTargets = left.targets ?? [];
+  const rightTargets = right.targets ?? [];
+  if (leftTargets.length !== rightTargets.length) return false;
+  return leftTargets.every((id, index) => id === rightTargets[index]);
+}
+
+/**
+ * After promoting a script to onConnect, ensure every remaining target host with an
+ * explicit connectScriptIds queue includes it. Hosts without an explicit queue still
+ * pick the script up via migrateHostConnectScriptIds.
+ */
+export function ensureTargetHostsHaveConnectScript(
+  hosts: Host[],
+  snippet: Snippet,
+  snippets: Snippet[],
+  excludeHostId?: string,
+): Host[] {
+  if (!snippet.id || !isScriptSnippet(snippet) || snippet.trigger !== 'onConnect') return hosts;
+  if (snippet.targetsAllHosts) return hosts;
+  const targetIds = new Set(snippet.targets ?? []);
+  if (targetIds.size === 0) return hosts;
+
+  let changed = false;
+  const nextHosts = hosts.map((host) => {
+    if (host.id === excludeHostId) return host;
+    if (!targetIds.has(host.id)) return host;
+    if (host.connectScriptIds === undefined) return host;
+    const updated = appendHostConnectScript(host, snippet.id!, snippets);
+    if (updated !== host) changed = true;
+    return updated;
+  });
+  return changed ? nextHosts : hosts;
+}
+
+export type SyncHostConnectQueueSaveOptions = {
+  /** Snippets snapshot from when the host editor opened (detect concurrent demotion). */
+  baselineSnippets?: Snippet[];
+  /** When provided, promote also syncs other hosts that remain in targets. */
+  hosts?: Host[];
+};
+
 /**
  * Sync script metadata when saving a host connect queue.
- * Promotes every queued script to onConnect + host target, including IDs that
- * were already persisted as draft/manual entries before this save.
+ * Promotes draft/manual queue entries, preserves global onConnect scripts,
+ * drops concurrently demoted entries, and optionally syncs peer host queues.
  */
 export function syncSnippetsForHostConnectQueueSave(
   snippets: Snippet[],
   hostId: string,
   previousQueueIds: string[],
   nextQueueIds: string[],
-): { snippets: Snippet[]; changed: boolean } {
-  const nextSet = new Set(nextQueueIds);
+  options: SyncHostConnectQueueSaveOptions = {},
+): {
+  snippets: Snippet[];
+  hosts: Host[];
+  connectScriptIds: string[];
+  changed: boolean;
+} {
+  const previousSet = new Set(previousQueueIds);
+  const baseline = options.baselineSnippets ?? snippets;
   let nextSnippets = snippets;
+  let nextHosts = options.hosts ?? [];
   let changed = false;
+  const retainedIds: string[] = [];
+  const demotedDropIds = new Set<string>();
 
   for (const scriptId of nextQueueIds) {
-    nextSnippets = nextSnippets.map((item) => {
-      if (item.id !== scriptId || !isScriptSnippet(item)) return item;
-      if (!connectQueueSnippetNeedsPromote(item, hostId)) return item;
+    const item = nextSnippets.find((entry) => entry.id === scriptId && isScriptSnippet(entry));
+    if (!item) continue;
+
+    if (!connectQueueSnippetNeedsPromote(item, hostId)) {
+      retainedIds.push(scriptId);
+      continue;
+    }
+
+    const newlyAdded = !previousSet.has(scriptId);
+    const baselineItem = baseline.find((entry) => entry.id === scriptId);
+    const wasOnConnectAtBaseline = Boolean(
+      baselineItem
+      && isScriptSnippet(baselineItem)
+      && baselineItem.trigger === 'onConnect',
+    );
+    if (!newlyAdded && wasOnConnectAtBaseline) {
+      // Concurrent demotion while the editor stayed open: keep demotion, drop stale queue id.
+      demotedDropIds.add(scriptId);
+      continue;
+    }
+
+    const prepared = prepareSnippetForHostConnectQueue(item, hostId);
+    if (
+      prepared.trigger !== item.trigger
+      || !snippetTargetsEqual(prepared, item)
+    ) {
+      nextSnippets = nextSnippets.map((entry) => (entry.id === scriptId ? prepared : entry));
       changed = true;
-      return prepareSnippetForHostConnectQueue(item, hostId);
-    });
+      if (options.hosts) {
+        const syncedHosts = ensureTargetHostsHaveConnectScript(
+          nextHosts,
+          prepared,
+          nextSnippets,
+          hostId,
+        );
+        if (syncedHosts !== nextHosts) {
+          nextHosts = syncedHosts;
+          changed = true;
+        }
+      }
+    }
+    retainedIds.push(scriptId);
   }
 
   for (const scriptId of previousQueueIds) {
-    if (nextSet.has(scriptId)) continue;
+    if (retainedIds.includes(scriptId)) continue;
+    if (demotedDropIds.has(scriptId)) continue;
     const unlinked = unlinkHostFromScripts(nextSnippets, hostId, scriptId);
     if (unlinked !== nextSnippets) {
       nextSnippets = unlinked;
@@ -276,7 +370,19 @@ export function syncSnippetsForHostConnectQueueSave(
     }
   }
 
-  return { snippets: nextSnippets, changed };
+  if (
+    retainedIds.length !== nextQueueIds.length
+    || retainedIds.some((id, index) => id !== nextQueueIds[index])
+  ) {
+    changed = true;
+  }
+
+  return {
+    snippets: nextSnippets,
+    hosts: nextHosts,
+    connectScriptIds: retainedIds,
+    changed,
+  };
 }
 
 export function syncHostsForSnippetTargetChange(

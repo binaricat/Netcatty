@@ -9,7 +9,7 @@ import {
   Tag,
   X,
 } from "lucide-react";
-import React, { useEffect, useMemo, useState, useCallback } from "react";
+import React, { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { useI18n } from "../application/i18n/I18nProvider";
 import { useApplicationBackend, type SshAgentStatus } from "../application/state/useApplicationBackend";
 import { applyGroupDefaults, resolveGroupDefaults, resolveGroupTerminalThemeId } from "../domain/groupConfig";
@@ -110,6 +110,7 @@ interface HostDetailsPanelProps {
   onImportKey?: (draft: Partial<SSHKey>) => SSHKey;
   snippets?: Snippet[];
   onSnippetsChange?: (snippets: Snippet[]) => void;
+  onHostsChange?: (hosts: Host[]) => void;
   className?: string;
 }
 
@@ -137,6 +138,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
   onImportKey,
   snippets = [],
   onSnippetsChange,
+  onHostsChange,
   className,
   resizable,
   persistWidthStorageKey,
@@ -149,6 +151,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
     resizeAriaLabel,
   };
   const { checkSshAgent } = useApplicationBackend();
+  const baselineSnippetsRef = useRef(snippets);
   const [form, setForm] = useState<Host>(
     () =>
       (initialData ? normalizePrimaryTelnetState(initialData) : null) ||
@@ -235,6 +238,12 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
   const [groupInputValue, setGroupInputValue] = useState(form.group || "");
 
   const initialHostId = initialData?.id;
+
+  useEffect(() => {
+    baselineSnippetsRef.current = snippets;
+    // Snapshot only when opening/reopening a host editor, not on live snippet edits.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialHostId]);
 
   useEffect(() => {
     if (!initialData) return;
@@ -591,7 +600,7 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
     if ((cleaned.protocol && cleaned.protocol !== "ssh") || cleaned.moshEnabled || cleaned.etEnabled) {
       delete cleaned.x11Forwarding;
     }
-    if (onSnippetsChange) {
+    if (onSnippetsChange || onHostsChange) {
       const hostId = cleaned.id;
       const savedQueueIds = initialData
         ? getEditableHostConnectScriptIds(initialData, snippets)
@@ -602,9 +611,32 @@ const HostDetailsPanel: React.FC<HostDetailsPanelPropsWithResize> = ({
         hostId,
         savedQueueIds,
         finalQueueIds,
+        {
+          baselineSnippets: baselineSnippetsRef.current,
+          hosts: allHosts,
+        },
       );
-      if (synced.changed) {
+      cleaned = {
+        ...cleaned,
+        connectScriptIds: synced.connectScriptIds.length > 0
+          ? synced.connectScriptIds
+          : undefined,
+      };
+      if (synced.changed && onSnippetsChange) {
         onSnippetsChange(synced.snippets);
+      }
+      if (onHostsChange && synced.hosts.length > 0) {
+        const peerChanged = synced.hosts.some((host) => {
+          if (host.id === cleaned.id) return false;
+          const original = allHosts.find((entry) => entry.id === host.id);
+          return original !== undefined && original !== host;
+        });
+        if (peerChanged) {
+          onHostsChange(allHosts.map((host) => {
+            if (host.id === cleaned.id) return host;
+            return synced.hosts.find((entry) => entry.id === host.id) ?? host;
+          }));
+        }
       }
     }
     onSave(stripBuiltInConnectionFieldsForPluginHost(cleaned));
