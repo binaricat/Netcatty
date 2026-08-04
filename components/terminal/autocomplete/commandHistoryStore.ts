@@ -137,6 +137,25 @@ export function recordCommand(
   saveStore(store);
 }
 
+/** Remove one command from autocomplete history for a specific host. */
+export function removeCommandHistoryEntry(command: string, hostId: string): boolean {
+  const trimmed = command.trim();
+  if (!trimmed) return false;
+
+  const store = loadStore();
+  const nextEntries = store.entries.filter(
+    (entry) => entry.command !== trimmed || entry.hostId !== hostId,
+  );
+  if (nextEntries.length === store.entries.length) return false;
+
+  store.entries = nextEntries;
+  if (saveTimer) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+  }
+  return persistStoreNow(store);
+}
+
 /**
  * Score an entry for ranking at a specific timestamp.
  * Caches Date.now() at query boundaries to avoid repeated syscalls during sort.

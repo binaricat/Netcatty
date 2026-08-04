@@ -51,7 +51,11 @@ import {
   STORAGE_KEY_TERM_SETTINGS,
 } from "../../infrastructure/config/storageKeys";
 import { localStorageAdapter, LOCAL_STORAGE_ADAPTER_CHANGED_EVENT } from "../../infrastructure/persistence/localStorageAdapter";
-import { mergeGlobalHistoryOnAppend, sanitizeGlobalHistoryEntries } from "../../domain/globalHistory";
+import {
+  mergeGlobalHistoryOnAppend,
+  removeGlobalHistoryEntry,
+  sanitizeGlobalHistoryEntries,
+} from "../../domain/globalHistory";
 import {
   buildTerminalDataMapFromLogs,
   mergeConnectionLogsFromStorage,
@@ -844,6 +848,16 @@ export const useVaultState = () => {
     publishShellHistorySnapshot([]);
   }, []);
 
+  const removeShellHistoryEntry = useCallback((entryId: string) => {
+    setShellHistory((prev) => {
+      const updated = removeGlobalHistoryEntry(prev, entryId);
+      if (updated === prev) return prev;
+      localStorageAdapter.write(STORAGE_KEY_SHELL_HISTORY, updated);
+      publishShellHistorySnapshot(updated);
+      return updated;
+    });
+  }, []);
+
   // Connection logs management
   const addConnectionLog = useCallback(
     (log: Omit<ConnectionLog, "id">) => {
@@ -1619,6 +1633,7 @@ export const useVaultState = () => {
     updateGroupConfigs,
     addShellHistoryEntry,
     clearShellHistory,
+    removeShellHistoryEntry,
     addConnectionLog,
     updateConnectionLog,
     toggleConnectionLogSaved,

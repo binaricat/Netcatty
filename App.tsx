@@ -248,6 +248,7 @@ function App({ settings }: { settings: SettingsState }) {
     updateKnownHosts,
     updateManagedSources,
     addShellHistoryEntry,
+    removeShellHistoryEntry,
     addConnectionLog,
     updateConnectionLog,
     toggleConnectionLogSaved,
@@ -1697,6 +1698,7 @@ function App({ settings }: { settings: SettingsState }) {
 
   const appVaultDomain = useMemo(() => ({
     addShellHistoryEntry,
+    removeShellHistoryEntry,
     commitPluginImporterData,
     commitVaultImportTransaction,
     connectionLogs,
@@ -1742,7 +1744,7 @@ function App({ settings }: { settings: SettingsState }) {
     updateSnippetPackages,
     updateSnippets,
     vaultFocusRequest,
-  }), [addShellHistoryEntry, commitPluginImporterData, commitVaultImportTransaction, connectionLogs, convertKnownHostToHost, customGroups, deepLinkHostDraft, effectiveKnownHosts, groupConfigs, handleAddKnownHost, handleDeleteHost, handleOpenHostFromVaultNote, handleOpenVaultHostFromChat, handleOpenVaultNoteFromChat, handleOpenVaultSectionFromChat, handleOpenVaultSnippetFromChat, hosts, identities, importOrReuseKey, keys, managedSources, navigateToSection, noteGroups, notes, proxyProfiles, readPersistedHosts, readPersistedManagedSources, setDeepLinkHostDraft, setNavigateToSection, setVaultFocusRequest, snippetPackages, snippets, unmanageSource, updateCustomGroups, updateGroupConfigs, updateHosts, updateIdentities, updateKeys, updateKnownHosts, updateManagedSources, updateNoteGroups, updateNotes, updateProxyProfiles, updateSnippetPackages, updateSnippets, vaultFocusRequest]);
+  }), [addShellHistoryEntry, commitPluginImporterData, commitVaultImportTransaction, connectionLogs, convertKnownHostToHost, customGroups, deepLinkHostDraft, effectiveKnownHosts, groupConfigs, handleAddKnownHost, handleDeleteHost, handleOpenHostFromVaultNote, handleOpenVaultHostFromChat, handleOpenVaultNoteFromChat, handleOpenVaultSectionFromChat, handleOpenVaultSnippetFromChat, hosts, identities, importOrReuseKey, keys, managedSources, navigateToSection, noteGroups, notes, proxyProfiles, readPersistedHosts, readPersistedManagedSources, removeShellHistoryEntry, setDeepLinkHostDraft, setNavigateToSection, setVaultFocusRequest, snippetPackages, snippets, unmanageSource, updateCustomGroups, updateGroupConfigs, updateHosts, updateIdentities, updateKeys, updateKnownHosts, updateManagedSources, updateNoteGroups, updateNotes, updateProxyProfiles, updateSnippetPackages, updateSnippets, vaultFocusRequest]);
 
   const appTerminalDomain = useMemo(() => ({
     addSessionToWorkspace,

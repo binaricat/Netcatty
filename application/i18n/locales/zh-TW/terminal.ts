@@ -52,6 +52,7 @@ export const zhTWTerminalMessages: Messages = {
   'history.action.paste': '貼上到終端',
   'history.action.run': '在終端執行',
   'history.action.saveAsSnippet': '儲存為程式碼片段',
+  'history.action.delete': '從歷史記錄中刪除',
   // SFTP File Opener
   'sftp.context.copyPath': '複製檔案路徑',
   'sftp.context.openWith': '開啟方式...',

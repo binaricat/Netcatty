@@ -34,6 +34,7 @@ export const enTerminalMessages: Messages = {
   'history.action.paste': 'Paste to terminal',
   'history.action.run': 'Run in terminal',
   'history.action.saveAsSnippet': 'Save as snippet',
+  'history.action.delete': 'Delete from history',
   'terminal.toolbar.library': 'Library',
   'terminal.toolbar.noSnippets': 'No snippets available',
   'terminal.toolbar.terminalSettings': 'Terminal settings',

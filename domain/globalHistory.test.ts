@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 
 import {
   mergeGlobalHistoryOnAppend,
+  removeGlobalHistoryEntry,
   sanitizeGlobalHistoryEntries,
+  shouldRemoveAutocompleteHistoryEntry,
   shouldRecordGlobalHistoryCommand,
   toGlobalHistoryDisplayEntries,
 } from './globalHistory.ts';
@@ -87,6 +89,32 @@ test('toGlobalHistoryDisplayEntries: maps host labels', () => {
     baseEntry({ command: 'htop', hostLabel: 'prod' }),
   ]);
   assert.deepEqual(out, [
-    { id: 'id-1', command: 'htop', timestamp: 1000, hostLabel: 'prod' },
+    { id: 'id-1', command: 'htop', hostId: 'host-1', timestamp: 1000, hostLabel: 'prod' },
   ]);
+});
+
+test('removeGlobalHistoryEntry: removes only the requested record', () => {
+  const entries = [
+    baseEntry({ id: 'first', command: 'bad-command' }),
+    baseEntry({ id: 'second', command: 'keep-command' }),
+  ];
+
+  assert.deepEqual(
+    removeGlobalHistoryEntry(entries, 'first').map((entry) => entry.id),
+    ['second'],
+  );
+  assert.equal(removeGlobalHistoryEntry(entries, 'missing'), entries);
+});
+
+test('shouldRemoveAutocompleteHistoryEntry: keeps autocomplete while a duplicate row remains', () => {
+  const entries = [
+    baseEntry({ id: 'first', command: 'bad-command' }),
+    baseEntry({ id: 'second', command: 'bad-command' }),
+    baseEntry({ id: 'other-host', command: 'bad-command', hostId: 'host-2' }),
+  ];
+
+  assert.equal(shouldRemoveAutocompleteHistoryEntry(entries, 'first'), false);
+  assert.equal(shouldRemoveAutocompleteHistoryEntry(entries, 'second'), false);
+  assert.equal(shouldRemoveAutocompleteHistoryEntry(entries, 'other-host'), true);
+  assert.equal(shouldRemoveAutocompleteHistoryEntry(entries, 'missing'), false);
 });

@@ -18,11 +18,16 @@ import {
   RefreshCw,
   Search,
   Terminal as TerminalIcon,
+  Trash2,
 } from 'lucide-react';
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useI18n } from '../application/i18n/I18nProvider';
-import { toGlobalHistoryDisplayEntries } from '../domain/globalHistory';
+import {
+  shouldRemoveAutocompleteHistoryEntry,
+  toGlobalHistoryDisplayEntries,
+} from '../domain/globalHistory';
 import type { Host, RemoteHistoryEntry, ShellHistoryEntry } from '../domain/models';
+import { removeCommandHistoryEntry } from './terminal/autocomplete/commandHistoryStore';
 import { cn } from '../lib/utils';
 import type { RemoteHistoryHostState } from '../application/state/useRemoteHistoryState';
 import {
@@ -40,6 +45,7 @@ export interface HistorySidePanelProps {
   state: RemoteHistoryHostState;
   globalEntries: ShellHistoryEntry[];
   onFetch: (sessionId: string, hostId: string) => void;
+  onDeleteGlobalEntry?: (entryId: string) => void;
   /** Paste into the terminal without executing (no trailing Enter). */
   onPasteToTerminal: (command: string) => void;
   /** Write to the terminal and execute (append Enter). */
@@ -60,6 +66,7 @@ const DETAIL_ACTIONS_HEIGHT = 24;
 interface HistoryPanelEntry {
   id: string;
   command: string;
+  hostId?: string;
   timestamp?: number;
   hostLabel?: string;
 }
@@ -107,6 +114,7 @@ const HistorySidePanelInner: React.FC<HistorySidePanelProps> = ({
   state,
   globalEntries,
   onFetch,
+  onDeleteGlobalEntry,
   onPasteToTerminal,
   onRunInTerminal,
   isVisible = true,
@@ -185,6 +193,21 @@ const HistorySidePanelInner: React.FC<HistorySidePanelProps> = ({
     );
   }, []);
 
+  const handleDeleteGlobalEntry = useCallback((entryId: string) => {
+    if (scope !== 'global' || !onDeleteGlobalEntry) return;
+    const entry = sourceEntries.find((candidate) => candidate.id === entryId);
+    if (!entry) return;
+    // Always remove the global row; only touch autocomplete when host is known.
+    if (
+      entry.hostId
+      && shouldRemoveAutocompleteHistoryEntry(globalEntries, entryId)
+    ) {
+      removeCommandHistoryEntry(entry.command, entry.hostId);
+    }
+    onDeleteGlobalEntry(entryId);
+    setSelectedEntryId(null);
+  }, [globalEntries, onDeleteGlobalEntry, scope, sourceEntries]);
+
   const handleRowClick = useCallback((entryId: string) => {
     setSelectedEntryId((current) => {
       const next = current === entryId ? null : entryId;
@@ -216,6 +239,7 @@ const HistorySidePanelInner: React.FC<HistorySidePanelProps> = ({
       paste: t('history.action.paste'),
       run: t('history.action.run'),
       save: t('history.action.saveAsSnippet'),
+      delete: t('history.action.delete'),
     }),
     [t],
   );
@@ -358,6 +382,11 @@ const HistorySidePanelInner: React.FC<HistorySidePanelProps> = ({
                     onRun={() => onRunInTerminal(row.entry.command)}
                     onPaste={() => onPasteToTerminal(row.entry.command)}
                     onSave={() => handleSaveAsSnippet(row.entry)}
+                    onDelete={
+                      scope === 'global' && onDeleteGlobalEntry
+                        ? () => handleDeleteGlobalEntry(row.entry.id)
+                        : undefined
+                    }
                   />
                 );
               }
@@ -371,6 +400,11 @@ const HistorySidePanelInner: React.FC<HistorySidePanelProps> = ({
                   onRun={() => onRunInTerminal(row.entry.command)}
                   onPaste={() => onPasteToTerminal(row.entry.command)}
                   onSave={() => handleSaveAsSnippet(row.entry)}
+                  onDelete={
+                    scope === 'global' && onDeleteGlobalEntry
+                      ? () => handleDeleteGlobalEntry(row.entry.id)
+                      : undefined
+                  }
                 />
               );
             }}
@@ -416,14 +450,15 @@ const EmptyState: React.FC<{ message: string }> = ({ message }) => (
 
 interface HistoryDetailStripProps {
   entry: HistoryPanelEntry;
-  labels: { paste: string; run: string; save: string };
+  labels: { paste: string; run: string; save: string; delete: string };
   onRun: () => void;
   onPaste: () => void;
   onSave: () => void;
+  onDelete?: () => void;
 }
 
 const HistoryDetailStrip: React.FC<HistoryDetailStripProps> = memo(
-  ({ entry, labels, onRun, onPaste, onSave }) => (
+  ({ entry, labels, onRun, onPaste, onSave, onDelete }) => (
     <div
       className="border-b border-border/40 bg-muted/20 px-3 py-1.5"
       data-section="history-detail"
@@ -456,6 +491,11 @@ const HistoryDetailStrip: React.FC<HistoryDetailStripProps> = memo(
         <IconButton title={labels.save} onClick={onSave}>
           <FileCode size={12} />
         </IconButton>
+        {onDelete ? (
+          <IconButton title={labels.delete} onClick={onDelete}>
+            <Trash2 size={12} />
+          </IconButton>
+        ) : null}
       </div>
     </div>
   ),
@@ -466,15 +506,16 @@ interface HistoryRowProps {
   entry: HistoryPanelEntry;
   isSelected: boolean;
   showHostLabel: boolean;
-  labels: { paste: string; run: string; save: string };
+  labels: { paste: string; run: string; save: string; delete: string };
   onSelect: () => void;
   onRun: () => void;
   onPaste: () => void;
   onSave: () => void;
+  onDelete?: () => void;
 }
 
 const HistoryRow: React.FC<HistoryRowProps> = memo(
-  ({ entry, isSelected, showHostLabel, labels, onSelect, onRun, onPaste, onSave }) => {
+  ({ entry, isSelected, showHostLabel, labels, onSelect, onRun, onPaste, onSave, onDelete }) => {
     const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
       if (event.target !== event.currentTarget) return;
       if (event.key !== 'Enter' && event.key !== ' ') return;
@@ -531,6 +572,11 @@ const HistoryRow: React.FC<HistoryRowProps> = memo(
           <IconButton title={labels.save} onClick={onSave}>
             <FileCode size={12} />
           </IconButton>
+          {onDelete ? (
+            <IconButton title={labels.delete} onClick={onDelete}>
+              <Trash2 size={12} />
+            </IconButton>
+          ) : null}
         </div>
       </div>
     );

@@ -26,6 +26,29 @@ export function sanitizeGlobalHistoryEntries(
   return entries.filter((entry) => shouldRecordGlobalHistoryCommand(entry.command));
 }
 
+/** Remove one persisted global history record by its stable id. */
+export function removeGlobalHistoryEntry(
+  entries: ShellHistoryEntry[],
+  entryId: string,
+): ShellHistoryEntry[] {
+  if (!entries.some((entry) => entry.id === entryId)) return entries;
+  return entries.filter((entry) => entry.id !== entryId);
+}
+
+/** True when deleting a global row should also remove its autocomplete entry. */
+export function shouldRemoveAutocompleteHistoryEntry(
+  entries: ShellHistoryEntry[],
+  entryId: string,
+): boolean {
+  const entry = entries.find((candidate) => candidate.id === entryId);
+  if (!entry) return false;
+  return !entries.some((candidate) => (
+    candidate.id !== entryId
+    && candidate.command === entry.command
+    && candidate.hostId === entry.hostId
+  ));
+}
+
 /**
  * Append one command to global history: trim, drop noise, and de-dupe the most
  * recent identical command by bumping its timestamp instead of adding a row.
@@ -63,6 +86,7 @@ export function mergeGlobalHistoryOnAppend(
 export interface GlobalHistoryDisplayEntry {
   id: string;
   command: string;
+  hostId: string;
   timestamp: number;
   hostLabel?: string;
 }
@@ -74,6 +98,7 @@ export function toGlobalHistoryDisplayEntries(
   return sanitizeGlobalHistoryEntries(entries).map((entry) => ({
     id: entry.id,
     command: entry.command,
+    hostId: entry.hostId,
     timestamp: entry.timestamp,
     hostLabel: entry.hostLabel,
   }));

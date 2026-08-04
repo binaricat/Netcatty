@@ -447,6 +447,7 @@ function SidePanelHistorySlotInner({
   const {
     HistorySidePanel,
     handleHistoryPaste,
+    handleHistoryDelete,
     handleHistoryRun,
   } = ctx;
 
@@ -460,6 +461,7 @@ function SidePanelHistorySlotInner({
         state={remoteHistory.getState(live.focusedHost?.id, live.historySessionId)}
         globalEntries={shellHistory as import('../../domain/models').ShellHistoryEntry[]}
         onFetch={remoteHistory.fetch}
+        onDeleteGlobalEntry={handleHistoryDelete}
         onPasteToTerminal={handleHistoryPaste}
         onRunInTerminal={handleHistoryRun}
         isVisible

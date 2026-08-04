@@ -102,7 +102,11 @@ Object.defineProperty(globalThis, "window", {
 });
 
 const { getCompletions } = await import("./autocomplete/completionEngine.ts");
-const { clearHistory, recordCommand } = await import("./autocomplete/commandHistoryStore.ts");
+const {
+  clearHistory,
+  recordCommand,
+  removeCommandHistoryEntry,
+} = await import("./autocomplete/commandHistoryStore.ts");
 const {
   normalizePathTokenForLookup,
   shouldPreferRemoteShellCwd,
@@ -148,6 +152,51 @@ test("getCompletions does not treat generator-only spec args as path contexts", 
   assert.equal(completions[0]?.source, "history");
   assert.equal(completions[0]?.text, "story pick package-choice");
   assert.equal(completions.some((entry) => entry.source === "path"), false);
+});
+
+test("removeCommandHistoryEntry removes only the matching host's autocomplete record", async () => {
+  recordCommand("bad-command --flag", "host-1");
+  recordCommand("bad-command --flag", "host-2");
+
+  removeCommandHistoryEntry("bad-command --flag", "host-1");
+
+  const completions = await getCompletions("bad-command", {
+    hostId: "host-1",
+    historyScope: "global",
+    protocol: "local",
+    cwd: "/repo",
+  });
+  assert.equal(
+    completions.some((entry) => entry.source === "history" && entry.text === "bad-command --flag"),
+    true,
+  );
+
+  const hostOnlyCompletions = await getCompletions("bad-command", {
+    hostId: "host-1",
+    historyScope: "host",
+    protocol: "local",
+    cwd: "/repo",
+  });
+  assert.equal(
+    hostOnlyCompletions.some((entry) => entry.source === "history" && entry.text === "bad-command --flag"),
+    false,
+  );
+});
+
+test("removeCommandHistoryEntry trims command text like recordCommand", async () => {
+  recordCommand("padded-cmd", "host-trim");
+  assert.equal(removeCommandHistoryEntry("  padded-cmd  ", "host-trim"), true);
+
+  const hostOnlyCompletions = await getCompletions("padded", {
+    hostId: "host-trim",
+    historyScope: "host",
+    protocol: "local",
+    cwd: "/repo",
+  });
+  assert.equal(
+    hostOnlyCompletions.some((entry) => entry.source === "history" && entry.text === "padded-cmd"),
+    false,
+  );
 });
 
 test("getCompletions uses the remote shell cwd for relative path arguments instead of stale home", async () => {

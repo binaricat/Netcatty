@@ -52,6 +52,7 @@ export const zhCNTerminalMessages: Messages = {
   'history.action.paste': '粘贴到终端',
   'history.action.run': '在终端执行',
   'history.action.saveAsSnippet': '保存为代码片段',
+  'history.action.delete': '从历史记录中删除',
   // SFTP File Opener
   'sftp.context.copyPath': '复制文件路径',
   'sftp.context.openWith': '打开方式...',

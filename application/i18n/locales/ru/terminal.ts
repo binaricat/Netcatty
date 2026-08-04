@@ -55,6 +55,7 @@ export const ruTerminalMessages: Messages = {
   'history.action.paste': 'Вставить в терминал',
   'history.action.run': 'Выполнить в терминале',
   'history.action.saveAsSnippet': 'Сохранить как сниппет',
+  'history.action.delete': 'Удалить из истории',
   'terminal.toolbar.library': 'Библиотека',
   'terminal.toolbar.noSnippets': 'Нет доступных сниппетов',
   'terminal.toolbar.terminalSettings': 'Настройки терминала',
