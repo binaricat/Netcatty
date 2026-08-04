@@ -176,6 +176,19 @@ test('syncSnippetsForHostConnectQueueSave promotes already-persisted manual queu
   assert.equal(next.find((item) => item.id === 'ready'), snippets[1]);
 });
 
+test('syncSnippetsForHostConnectQueueSave leaves global onConnect scripts untouched', () => {
+  const global = script({ id: 'both', targetsAllHosts: true, targets: ['host-a'] });
+  const { snippets: next, changed } = syncSnippetsForHostConnectQueueSave(
+    [global],
+    'host-a',
+    ['both'],
+    ['both'],
+  );
+  assert.equal(changed, false);
+  assert.equal(next[0], global);
+  assert.equal(next[0].targetsAllHosts, true);
+});
+
 test('syncHostsForSnippetTargetChange appends and removes queue entries', () => {
   const snippets = [script({ id: 'run', targets: ['host-a'], trigger: 'onConnect' })];
   const hosts = syncHostsForSnippetTargetChange(
