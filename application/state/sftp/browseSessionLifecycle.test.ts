@@ -50,6 +50,26 @@ test("parks browse only when the interactive surface hides and not already parke
   }), false);
 });
 
+test("keeps a hidden SFTP owner live while an external editor temp file is open", () => {
+  const interactive = isBrowseSessionInteractive({
+    surfaceVisible: false,
+    hasOwnedEditorTab: false,
+    hasActiveExternalEdit: true,
+  });
+
+  assert.equal(interactive, true);
+  assert.equal(shouldParkBrowseSessions({
+    interactive: false,
+    browseParked: false,
+    activeExternalEditCount: 1,
+  }), false);
+  assert.equal(shouldParkBrowseSessions({
+    interactive: false,
+    browseParked: false,
+    activeExternalEditCount: 0,
+  }), true);
+});
+
 test("restores browse when the surface becomes interactive again after park", () => {
   assert.equal(shouldRestoreBrowseSessions({ interactive: true, browseParked: true }), true);
   assert.equal(shouldRestoreBrowseSessions({ interactive: true, browseParked: false }), false);

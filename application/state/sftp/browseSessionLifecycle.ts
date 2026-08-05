@@ -9,8 +9,12 @@
 export function isBrowseSessionInteractive(params: {
   surfaceVisible: boolean;
   hasOwnedEditorTab: boolean;
+  /** External editor temp files (Notepad++ etc.) still need the browse session. */
+  hasActiveExternalEdit?: boolean;
 }): boolean {
-  return params.surfaceVisible || params.hasOwnedEditorTab;
+  return params.surfaceVisible
+    || params.hasOwnedEditorTab
+    || !!params.hasActiveExternalEdit;
 }
 
 export function listRemoteBrowseConnectionIds(
@@ -49,8 +53,14 @@ export function shouldParkBrowseSessions(params: {
   browseParked: boolean;
   /** Defer park while unfinished transfers may still use browse sessions pre-lease. */
   activeTransfersCount?: number;
+  /**
+   * Defer park while an external editor still holds a downloaded temp file.
+   * Parking calls closeSftp, which deletes those temps and breaks save/sync.
+   */
+  activeExternalEditCount?: number;
 }): boolean {
   if (params.activeTransfersCount && params.activeTransfersCount > 0) return false;
+  if (params.activeExternalEditCount && params.activeExternalEditCount > 0) return false;
   return !params.interactive && !params.browseParked;
 }
 

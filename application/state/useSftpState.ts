@@ -567,6 +567,7 @@ export const useSftpState = (
     cancelExternalUpload,
     selectApplication,
     activeFileWatchCountRef,
+    activeExternalEditCount,
     releaseExternalFileWatches,
     uploadConflicts,
     resolveUploadConflict,
@@ -666,6 +667,7 @@ export const useSftpState = (
         interactive,
         browseParked: browseParkedRef.current,
         activeTransfersCount: Math.max(activeTransfersCount, centerActive ? 1 : 0),
+        activeExternalEditCount,
       })) {
         return;
       }
@@ -737,6 +739,7 @@ export const useSftpState = (
   }, [
     interactive,
     activeTransfersCount,
+    activeExternalEditCount,
     clearCacheForConnection,
     connect,
     getActivePane,
@@ -911,6 +914,7 @@ export const useSftpState = (
     rightTabs,
     transfers,
     activeTransfersCount,
+    activeExternalEditCount,
     conflicts,
     hostKeyVerification,
 
@@ -932,6 +936,7 @@ export const useSftpState = (
     rightTabs,
     transfers,
     activeTransfersCount,
+    activeExternalEditCount,
     conflicts,
     hostKeyVerification,
     stableMethods,

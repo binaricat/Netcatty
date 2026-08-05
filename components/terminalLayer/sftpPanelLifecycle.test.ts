@@ -183,6 +183,7 @@ test("terminal side panel reports transfer activity and uses store-backed retain
   assert.match(panelSource, /surfaceVisible:\s*isVisible/);
   assert.match(panelSource, /useEditorTabPresenceRevision\(\)/);
   assert.match(panelSource, /hasOwnedEditorTab/);
+  assert.match(panelSource, /hasActiveExternalEdit/);
   assert.match(slotsSource, /onActiveTransfersChange=\{handleActiveTransfersChange\}/);
   assert.match(layerSource, /resolveTabActiveTransfersCount/);
   assert.match(layerSource, /terminalSftpTransferOwnerId/);
@@ -191,7 +192,9 @@ test("terminal side panel reports transfer activity and uses store-backed retain
   assert.match(layerSource, /sftpRetainedAfterCloseTabIdsRef/);
   assert.match(layerSource, /sftpRetainedCleanupTimersRef/);
   // Hidden UI parks browse channels; transfers keep pool / leased sessions.
+  // External editor temps must also block park (closeSftp deletes those files).
   assert.match(stateSource, /shouldParkBrowseSessions/);
+  assert.match(stateSource, /activeExternalEditCount/);
   assert.match(stateSource, /takeBrowseSessionsForClose/);
   assert.match(stateSource, /shouldRestoreBrowseSessions/);
 });

@@ -215,6 +215,7 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
 
   const ownedEditorSessionIdsRef = useRef<ReadonlySet<string>>(new Set());
   const ownedEditorSftpTabIdsRef = useRef<ReadonlySet<string>>(new Set());
+  const activeExternalEditCountRef = useRef(0);
   // Re-render on tab open/close/session remap only — not on every editor keystroke.
   useEditorTabPresenceRevision();
   const hasOwnedEditorTab = editorTabStore.hasOwnedEditorForSftpOwner({
@@ -230,9 +231,12 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
     surfaceVisible: isVisible,
     // A promoted editor still saves through this owner after the side panel
     // becomes hidden, so its browse channel must stay alive until the editor closes.
+    // External editor temps (Notepad++ etc.) likewise need the session: parking
+    // calls closeSftp which deletes those local files.
     interactive: isBrowseSessionInteractive({
       surfaceVisible: isVisible,
       hasOwnedEditorTab,
+      hasActiveExternalEdit: activeExternalEditCountRef.current > 0,
     }),
     useCompressedUpload: sftpUseCompressedUpload,
     defaultShowHiddenFiles: sftpShowHiddenFiles,
@@ -257,6 +261,7 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
   ]);
 
   const sftp = useSftpState(hosts, keys, identities, sftpOptions);
+  activeExternalEditCountRef.current = sftp.activeExternalEditCount ?? 0;
   ownedEditorSessionIdsRef.current = new Set(
     listRemoteBrowseConnectionIds([
       ...sftp.leftTabs.tabs,
@@ -474,7 +479,8 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
 
     const s = sftpRef.current;
     const hasActiveWork = interactiveWorkActive
-      || (s.activeFileWatchCountRef?.current ?? 0) > 0;
+      || (s.activeFileWatchCountRef?.current ?? 0) > 0
+      || (s.activeExternalEditCount ?? 0) > 0;
 
     const proto = activeHost.protocol;
     if (proto === 'serial' || activeHost.id?.startsWith('serial-')) {
@@ -1159,7 +1165,8 @@ const SftpSidePanelInteractiveBody: React.FC<SftpSidePanelInteractiveBodyProps> 
   }, [followTerminalCwdHost, onGetTerminalCwd]);
 
   const hasActiveWork = showTextEditor || !!permissionsState || showFileOpenerDialog
-    || (sftp.activeFileWatchCountRef?.current ?? 0) > 0;
+    || (sftp.activeFileWatchCountRef?.current ?? 0) > 0
+    || (sftp.activeExternalEditCount ?? 0) > 0;
 
   const blockedFollowRef = useRef<SftpFollowTerminalCwdBlock | null>(null);
   const handledFollowRef = useRef<SftpFollowTerminalCwdBlock | null>(null);

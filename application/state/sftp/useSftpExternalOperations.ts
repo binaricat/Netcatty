@@ -175,11 +175,31 @@ export const useSftpExternalOperations = (
     activeCountRef: activeFileWatchCountRef,
     captureGeneration: captureExternalFileWatchGeneration,
     remember: rememberExternalFileWatch,
-    releaseAll: releaseExternalFileWatches,
+    releaseAll: releaseExternalFileWatchesBase,
   } = useExternalFileWatchLifecycle(
     stopExternalFileWatch,
     subscribeExternalFileWatchStopped,
   );
+  // Temp files downloaded for external editors (even without auto-sync watches).
+  // Parking browse sessions calls closeSftp, which deletes these paths.
+  const externalEditTempPathsRef = useRef<Set<string>>(new Set());
+  const [activeExternalEditCount, setActiveExternalEditCount] = useState(0);
+  const rememberExternalEditTemp = useCallback((localPath: string) => {
+    if (!localPath || externalEditTempPathsRef.current.has(localPath)) return;
+    externalEditTempPathsRef.current.add(localPath);
+    setActiveExternalEditCount(externalEditTempPathsRef.current.size);
+  }, []);
+  const forgetExternalEditTemp = useCallback((localPath: string) => {
+    if (!localPath || !externalEditTempPathsRef.current.delete(localPath)) return;
+    setActiveExternalEditCount(externalEditTempPathsRef.current.size);
+  }, []);
+  const releaseExternalFileWatches = useCallback(async (cleanupTempFiles = false) => {
+    await releaseExternalFileWatchesBase(cleanupTempFiles);
+    if (cleanupTempFiles && externalEditTempPathsRef.current.size > 0) {
+      externalEditTempPathsRef.current.clear();
+      setActiveExternalEditCount(0);
+    }
+  }, [releaseExternalFileWatchesBase]);
   const [uploadConflicts, setUploadConflicts] = useState<FileConflict[]>([]);
   const uploadConflictResolversRef = useRef<Map<string, UploadConflictResolver>>(new Map());
   /** Maps conflict id → owning UploadController so cancel A never stops B's prompts. */
@@ -483,6 +503,7 @@ export const useSftpExternalOperations = (
       if (bridge.registerTempFile) {
         try {
           await bridge.registerTempFile(sftpId, localTempPath);
+          rememberExternalEditTemp(localTempPath);
         } catch (err) {
           console.warn("[SFTP] Failed to register temp file for cleanup:", err);
         }
@@ -490,7 +511,7 @@ export const useSftpExternalOperations = (
 
       return { localTempPath, sftpId, externalTransferId };
     },
-    [getActivePane, isTransferCancelled, ownerId, sftpSessionsRef],
+    [getActivePane, isTransferCancelled, ownerId, rememberExternalEditTemp, sftpSessionsRef],
   );
 
   const downloadToTempAndOpen = useCallback(
@@ -525,6 +546,7 @@ export const useSftpExternalOperations = (
         await bridge.openWithApplication(localTempPath, appPath);
       } catch (err) {
         await cleanupFailedExternalOpenTemp(bridge, sftpId, localTempPath).catch(() => {});
+        forgetExternalEditTemp(localTempPath);
         if (externalTransferId) {
           sftpTransferCenterStore.patchTask(externalTransferId, {
             status: "failed" as TransferStatus,
@@ -555,7 +577,13 @@ export const useSftpExternalOperations = (
 
       return { localTempPath, watchId };
     },
-    [captureExternalFileWatchGeneration, downloadToTemp, getActivePane, rememberExternalFileWatch],
+    [
+      captureExternalFileWatchGeneration,
+      downloadToTemp,
+      forgetExternalEditTemp,
+      getActivePane,
+      rememberExternalFileWatch,
+    ],
   );
 
   const openWithSystemDefault = useCallback(
@@ -590,12 +618,14 @@ export const useSftpExternalOperations = (
         } catch (error) {
           if (!pane.connection.isLocal) {
             await cleanupFailedExternalOpenTemp(bridgeMethods, sftpId, localTempPath).catch(() => {});
+            forgetExternalEditTemp(localTempPath);
           }
           throw error;
         }
         if (!result.success) {
           if (!pane.connection.isLocal) {
             await cleanupFailedExternalOpenTemp(bridgeMethods, sftpId, localTempPath).catch(() => {});
+            forgetExternalEditTemp(localTempPath);
           }
           if (externalTransferId) {
             sftpTransferCenterStore.patchTask(externalTransferId, {
@@ -627,7 +657,13 @@ export const useSftpExternalOperations = (
         notify.error(err instanceof Error ? err.message : String(err), "SFTP");
       }
     },
-    [captureExternalFileWatchGeneration, downloadToTemp, getActivePane, rememberExternalFileWatch],
+    [
+      captureExternalFileWatchGeneration,
+      downloadToTemp,
+      forgetExternalEditTemp,
+      getActivePane,
+      rememberExternalFileWatch,
+    ],
   );
 
   // Create upload callbacks that translate to TransferTask updates
@@ -1491,6 +1527,7 @@ export const useSftpExternalOperations = (
     cancelExternalUpload,
     selectApplication,
     activeFileWatchCountRef,
+    activeExternalEditCount,
     releaseExternalFileWatches,
     uploadConflicts,
     resolveUploadConflict,
