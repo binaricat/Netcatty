@@ -35,3 +35,9 @@ test("terminal settings expose the host information bar toggle", () => {
   assert.match(source, /checked=\{terminalSettings\.showHostInfoBar\}/);
   assert.match(source, /updateTerminalSetting\("showHostInfoBar", v\)/);
 });
+
+test("terminal settings expose host information title mode when the bar is shown", () => {
+  assert.match(source, /terminalSettings\.showHostInfoBar && \(/);
+  assert.match(source, /updateTerminalSetting\("hostInfoBarTitleMode"/);
+  assert.match(source, /settings\.terminal\.hostInfoBar\.titleMode/);
+});

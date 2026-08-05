@@ -135,6 +135,22 @@ test("normalizeTerminalSettings preserves a hidden host information bar", () => 
   assert.equal(normalizeTerminalSettings({ showHostInfoBar: false }).showHostInfoBar, false);
 });
 
+test("normalizeTerminalSettings defaults host info bar title mode to address", () => {
+  assert.equal(normalizeTerminalSettings().hostInfoBarTitleMode, "address");
+});
+
+test("normalizeTerminalSettings preserves supported host info bar title modes", () => {
+  assert.equal(normalizeTerminalSettings({ hostInfoBarTitleMode: "label" }).hostInfoBarTitleMode, "label");
+  assert.equal(normalizeTerminalSettings({ hostInfoBarTitleMode: "address" }).hostInfoBarTitleMode, "address");
+});
+
+test("normalizeTerminalSettings falls back for unsupported host info bar title modes", () => {
+  assert.equal(
+    normalizeTerminalSettings({ hostInfoBarTitleMode: "both" as never }).hostInfoBarTitleMode,
+    "address",
+  );
+});
+
 test("normalizeTerminalSettings disables hibernate for hidden tabs by default", () => {
   assert.equal(normalizeTerminalSettings().hibernateHiddenTabs, false);
   assert.equal(normalizeTerminalSettings().hibernateHiddenTabsDelaySec, 5);

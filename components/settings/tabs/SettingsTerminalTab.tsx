@@ -3,6 +3,7 @@ import { AlertCircle, Import, Minus, Palette, Pencil, Plus, Trash2 } from "lucid
 import type {
   AutocompleteHistoryScope,
   CursorShape,
+  HostInfoBarTitleMode,
   PasswordPromptAssistMode,
   TerminalEmulationType,
   TerminalSettings,
@@ -924,6 +925,22 @@ function SettingsTerminalTab(props: {
             onChange={(v) => updateTerminalSetting("showHostInfoBar", v)}
           />
         </SettingRow>
+        {terminalSettings.showHostInfoBar && (
+          <SettingRow
+            label={t("settings.terminal.hostInfoBar.titleMode")}
+            description={t("settings.terminal.hostInfoBar.titleMode.desc")}
+          >
+            <Select
+              value={terminalSettings.hostInfoBarTitleMode ?? "address"}
+              options={[
+                { value: "address", label: t("settings.terminal.hostInfoBar.titleMode.address") },
+                { value: "label", label: t("settings.terminal.hostInfoBar.titleMode.label") },
+              ]}
+              onChange={(v) => updateTerminalSetting("hostInfoBarTitleMode", v as HostInfoBarTitleMode)}
+              className="w-44"
+            />
+          </SettingRow>
+        )}
         <SettingRow
           label={t("settings.terminal.serverStats.show")}
           description={t("settings.terminal.serverStats.show.desc")}

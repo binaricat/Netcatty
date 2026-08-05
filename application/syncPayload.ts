@@ -217,7 +217,7 @@ const SYNCABLE_TERMINAL_KEYS = [
   'autoUploadClipboardImageOnPaste',
   'preserveSelectionOnInput', 'forcePromptNewLine', 'osc52Clipboard', 'dynamicTabTitleMode',
   'autoCloseOnExit',
-  'showHostInfoBar', 'showServerStats',
+  'showHostInfoBar', 'hostInfoBarTitleMode', 'showServerStats',
   'serverStatsRefreshInterval',
   'systemManagerProcessRefreshInterval', 'systemManagerTmuxRefreshInterval',
   'systemManagerDockerListRefreshInterval', 'systemManagerDockerStatsRefreshInterval',

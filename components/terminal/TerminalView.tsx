@@ -4,6 +4,7 @@ import { ChevronsLeft, GripVertical, Network, X as XIcon } from 'lucide-react';
 
 import { resolveEffectiveTerminalProtocol } from '../../domain/terminalProtocol';
 import { classifyDistroId } from '../../domain/host';
+import type { HostInfoBarTitleMode } from '../../domain/models';
 import { useNetworkDeviceModeSuggestion } from '../../application/state/useNetworkDeviceModeSuggestion';
 import { isPluginHostProtocol } from '../../domain/pluginConnection';
 import { OSC7_SETUP_TARGETS } from './osc7Setup';
@@ -167,8 +168,26 @@ export function formatTerminalTitleConnectionAddress(host?: TerminalTitleAddress
   return `${username}${host.hostname}${port}`;
 }
 
-/** Host info bar label: vault server name plus user@host when both are available. */
+/** Host info bar label: vault name or user@host, based on settings. */
 export function formatTerminalHostInfoBarTitle({
+  serverName,
+  connectionAddress,
+  mode = "address",
+}: {
+  serverName?: string | null;
+  connectionAddress?: string | null;
+  mode?: HostInfoBarTitleMode;
+}): string {
+  const name = (serverName || "").trim();
+  const address = (connectionAddress || "").trim();
+  if (mode === "label") {
+    return name || address;
+  }
+  return address || name;
+}
+
+/** Hover tooltip can show both name and address without consuming bar width. */
+export function formatTerminalHostInfoBarTooltip({
   serverName,
   connectionAddress,
 }: {
@@ -383,8 +402,14 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
   const titleConnectionAddress = formatTerminalTitleConnectionAddress(host);
   // Prefer vault host.label over sessionDisplayName so dynamic tab titles
   // (cwd / coding-cli) do not replace the stable server name in this bar.
+  const hostInfoBarServerName = host.label || sessionDisplayName;
   const hostInfoBarTitle = formatTerminalHostInfoBarTitle({
-    serverName: host.label || sessionDisplayName,
+    serverName: hostInfoBarServerName,
+    connectionAddress: titleConnectionAddress,
+    mode: terminalSettings?.hostInfoBarTitleMode ?? "address",
+  });
+  const hostInfoBarTooltip = formatTerminalHostInfoBarTooltip({
+    serverName: hostInfoBarServerName,
     connectionAddress: titleConnectionAddress,
   });
   const hasBlockingReconnectOverlay = Boolean(osc52ReadPromptVisible || osc7SetupOpen || scriptExecutionOverlay || zmodem.active || zmodem.overwriteRequest);
@@ -552,7 +577,7 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
                     data-terminal-detach-drag-handle={inWorkspace && onDetachPointerDown ? "true" : undefined}
                     onPointerDown={onDetachPointerDown}
                   >
-                    <span className="whitespace-nowrap truncate min-w-0 max-w-[18rem]" title={hostInfoBarTitle}>
+                    <span className="whitespace-nowrap truncate min-w-0 max-w-[18rem]" title={hostInfoBarTooltip || hostInfoBarTitle}>
                       {hostInfoBarTitle}
                     </span>
                   </div>}

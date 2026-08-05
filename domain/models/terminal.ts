@@ -23,6 +23,12 @@ export type LinkModifier = 'none' | 'ctrl' | 'alt' | 'meta';
 export type TerminalEmulationType = 'xterm-256color' | 'xterm-16color' | 'xterm';
 export type DynamicTabTitleMode = 'off' | 'agent' | 'all';
 /**
+ * What the terminal host info bar shows as its primary title (#2708).
+ * - address: user@host:port when available (historical default)
+ * - label: vault host label / display name
+ */
+export type HostInfoBarTitleMode = 'address' | 'label';
+/**
  * How to assist when a sudo/su password prompt appears (#2156).
  * - off: no assist
  * - hint: ghost "press Enter" fill of the host session password
@@ -129,6 +135,8 @@ export interface TerminalSettings {
 
   // Server Stats Display (Linux only)
   showHostInfoBar: boolean; // Show host identity and server stats above the terminal
+  /** Primary title in the host info bar: connection address or vault label. */
+  hostInfoBarTitleMode: HostInfoBarTitleMode;
   showServerStats: boolean; // Show CPU/Memory/Disk in terminal statusbar
   serverStatsRefreshInterval: number; // Seconds between stats refresh (default: 30)
 
@@ -336,6 +344,11 @@ const isDynamicTabTitleMode = (value: unknown): value is DynamicTabTitleMode => 
   value === 'all'
 );
 
+const isHostInfoBarTitleMode = (value: unknown): value is HostInfoBarTitleMode => (
+  value === 'address' ||
+  value === 'label'
+);
+
 const isPasswordPromptAssistMode = (value: unknown): value is PasswordPromptAssistMode => (
   value === 'off' ||
   value === 'hint' ||
@@ -367,6 +380,9 @@ export const normalizeTerminalSettings = (
     dynamicTabTitleMode: isDynamicTabTitleMode(settings?.dynamicTabTitleMode)
       ? settings.dynamicTabTitleMode
       : DEFAULT_TERMINAL_SETTINGS.dynamicTabTitleMode,
+    hostInfoBarTitleMode: isHostInfoBarTitleMode(settings?.hostInfoBarTitleMode)
+      ? settings.hostInfoBarTitleMode
+      : DEFAULT_TERMINAL_SETTINGS.hostInfoBarTitleMode,
     passwordPromptAssist: isPasswordPromptAssistMode(settings?.passwordPromptAssist)
       ? settings.passwordPromptAssist
       : DEFAULT_TERMINAL_SETTINGS.passwordPromptAssist,
@@ -464,6 +480,7 @@ const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
   x11Display: '', // Empty = use DISPLAY/default local X server
   moshClientPath: '', // Legacy mosh-client override; normal UI uses bundled mosh-client
   showHostInfoBar: true, // Preserve the existing host information bar by default
+  hostInfoBarTitleMode: 'address', // Historical default: prefer user@host:port
   showServerStats: true, // Show server stats by default
   serverStatsRefreshInterval: 5, // Refresh every 5 seconds
   systemManagerProcessRefreshInterval: 3,

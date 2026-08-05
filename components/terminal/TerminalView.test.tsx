@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 
 import {
   formatTerminalHostInfoBarTitle,
+  formatTerminalHostInfoBarTooltip,
   formatTerminalTitleConnectionAddress,
   getLineTimestampToggleHostUpdate,
   resolveNetworkDeviceTipRightInset,
@@ -162,25 +163,36 @@ test("terminal title formats the connection address for remote sessions", () => 
   }), null);
 });
 
-test("host info bar title includes server name with connection address", () => {
+test("host info bar title follows address or label mode", () => {
   assert.equal(
     formatTerminalHostInfoBarTitle({
       serverName: "prod-web",
       connectionAddress: "root@10.1.2.34:2222",
+      mode: "address",
     }),
-    "prod-web · root@10.1.2.34:2222",
+    "root@10.1.2.34:2222",
+  );
+  assert.equal(
+    formatTerminalHostInfoBarTitle({
+      serverName: "prod-web",
+      connectionAddress: "root@10.1.2.34:2222",
+      mode: "label",
+    }),
+    "prod-web",
   );
   assert.equal(
     formatTerminalHostInfoBarTitle({
       serverName: "  prod-web  ",
       connectionAddress: " root@10.1.2.34:2222 ",
+      mode: "label",
     }),
-    "prod-web · root@10.1.2.34:2222",
+    "prod-web",
   );
   assert.equal(
     formatTerminalHostInfoBarTitle({
       serverName: "",
       connectionAddress: "root@10.1.2.34:2222",
+      mode: "label",
     }),
     "root@10.1.2.34:2222",
   );
@@ -188,15 +200,16 @@ test("host info bar title includes server name with connection address", () => {
     formatTerminalHostInfoBarTitle({
       serverName: "Local Terminal",
       connectionAddress: null,
+      mode: "address",
     }),
     "Local Terminal",
   );
   assert.equal(
-    formatTerminalHostInfoBarTitle({
-      serverName: "root@10.1.2.34:2222",
+    formatTerminalHostInfoBarTooltip({
+      serverName: "prod-web",
       connectionAddress: "root@10.1.2.34:2222",
     }),
-    "root@10.1.2.34:2222",
+    "prod-web · root@10.1.2.34:2222",
   );
 });
 
