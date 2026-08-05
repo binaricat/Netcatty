@@ -103,7 +103,7 @@ test("un-droppable payload: side-effecting sequences are rejected", () => {
 // ---- viewportRepaintCoverage / makesFullRepaint ---------------------------
 
 test("coverage counts distinct written cells, with wrap", () => {
-  // Paints only count after an origin reset (CUP/ED2).
+  // Paints only count after an origin reset (CUP/home — not ED2 alone).
   assert.equal(viewportRepaintCoverage(`${HOME}abcd`, 4, 1), 4);
   assert.equal(viewportRepaintCoverage(`${HOME}abcd`, 2, 2), 4); // wraps to second row
   assert.equal(viewportRepaintCoverage(`${HOME}ab`, 4, 1), 2);
@@ -113,6 +113,12 @@ test("coverage counts distinct written cells, with wrap", () => {
 test("coverage honors cursor positioning and erases", () => {
   // ED2 is not coverage — may be stripped later when scrolled up.
   assert.equal(viewportRepaintCoverage("\x1b[2J", 4, 2), 0, "ED2 grants no coverage credit");
+  // ED2 does not home the cursor; paints after ED2 without CUP stay uncounted.
+  assert.equal(
+    viewportRepaintCoverage(`\x1b[2J${"z".repeat(8)}`, 4, 2),
+    0,
+    "ED2 alone is not a known origin",
+  );
   assert.equal(viewportRepaintCoverage("\x1b[1;1H\x1b[K", 4, 2), 4, "erase-line covers one row");
   // CUP to row 2 then one char covers a single cell there.
   assert.equal(viewportRepaintCoverage("\x1b[2;3Hx", 4, 2), 1);

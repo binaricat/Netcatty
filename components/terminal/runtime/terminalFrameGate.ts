@@ -176,9 +176,9 @@ export const viewportRepaintCoverage = (
   const covered = new Set<number>();
   let row = 0;
   let col = 0;
-  // Only count cells painted after an explicit origin reset (CUP/ED2). A late
+  // Only count cells painted after an explicit origin reset (CUP/home). A late
   // CSI H at the end of a frame must not retroactively validate paints from
-  // the simulated (0,0) start (Codex P2 on 6b54464a).
+  // the simulated (0,0) start. ED2 alone is not an origin (Codex P2).
   let originKnown = false;
   const clampRow = () => { row = row < 0 ? 0 : row >= rows ? rows - 1 : row; };
   const clampCol = () => { col = col < 0 ? 0 : col >= cols ? cols - 1 : col; };
@@ -228,9 +228,10 @@ export const viewportRepaintCoverage = (
     else if (final === "d") { row = (n0 ?? 1) - 1; clampRow(); }
     else if (final === "J") {
       const p = n0 ?? 0;
-      // ED2 establishes a known origin (cursor typically homes) but must NOT
-      // count cells as coverage — scrolled-up filter may strip ED2 later.
-      if (p === 2) { originKnown = true; }
+      // ED2 clears the display but does NOT move the cursor (xterm). Do not
+      // treat it as a known origin — only CUP/home does. ED2 also grants no
+      // coverage credit (scrolled-up filter may strip it later) (Codex P2).
+      if (p === 2) { /* no originKnown; no coverage */ }
       // ED0/ED1 still mark the cells they clear (not stripped by that filter).
       else if (p === 0) { markRange(row, col, cols - 1); for (let r = row + 1; r < rows; r++) markRange(r, 0, cols - 1); }
       else if (p === 1) { for (let r = 0; r < row; r++) markRange(r, 0, cols - 1); markRange(row, 0, col); }
@@ -314,16 +315,13 @@ export const viewportRepaintCoverage = (
 const FULL_REPAINT_COVERAGE = 0.99;
 
 /**
- * True when the frame establishes a known cursor origin (home / ED2) so
- * coverage starting at (0,0) matches where xterm will actually paint. Without
- * this, a screenful of cells written from a non-home cursor is miscounted as a
- * full repaint (Codex P2 on 6e927291).
+ * True when the frame establishes a known cursor origin via CUP/home.
+ * ED2 clears the display but does not home the cursor in xterm, so it is not
+ * a known origin by itself (Codex P2).
  */
 export const hasKnownCursorOrigin = (content: string): boolean => {
   if (
-    content.includes("\x1b[2J")
-    || content.includes("\x9b2J")
-    || content.includes("\x1b[H")
+    content.includes("\x1b[H")
     || content.includes("\x1b[f")
     || content.includes("\x1b[1;1H")
     || content.includes("\x1b[1;1f")
@@ -341,7 +339,7 @@ export const hasKnownCursorOrigin = (content: string): boolean => {
 /** A successor frame that demonstrably repaints (almost) the whole viewport. */
 export const makesFullRepaint = (content: string, cols: number, rows: number): boolean => {
   if (cols <= 0 || rows <= 0) return false;
-  // Coverage only counts cells after an in-order origin reset (CUP/ED2).
+  // Coverage only counts cells after an in-order CUP/home origin reset.
   const total = cols * rows;
   const covered = viewportRepaintCoverage(content, cols, rows);
   // Exact full coverage, or near-full (>= 99%) so tiny clamp/wrap off-by-ones
