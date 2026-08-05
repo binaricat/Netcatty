@@ -107,7 +107,8 @@ test("coverage counts distinct written cells, with wrap", () => {
 });
 
 test("coverage honors cursor positioning and erases", () => {
-  assert.equal(viewportRepaintCoverage("\x1b[2J", 4, 2), 8, "erase-all covers the grid");
+  // ED2 is not coverage — may be stripped later when scrolled up.
+  assert.equal(viewportRepaintCoverage("\x1b[2J", 4, 2), 0, "ED2 grants no coverage credit");
   assert.equal(viewportRepaintCoverage("\x1b[1;1H\x1b[K", 4, 2), 4, "erase-line covers one row");
   // CUP to row 2 then one char covers a single cell there.
   assert.equal(viewportRepaintCoverage("\x1b[2;3Hx", 4, 2), 1);
@@ -134,8 +135,8 @@ test("makesFullRepaint rejects partial paints even when well above 40% coverage"
   // 98% is still short of the 0.99 bar (must not drop prior frames).
   const almost = `${HOME}${"z".repeat(98)}`;
   assert.equal(makesFullRepaint(almost, cols, rows), false);
-  // ED2 clear still counts as a full repaint.
-  assert.equal(makesFullRepaint("\x1b[2J", cols, rows), true);
+  // ED2 alone is not a full repaint (may be stripped when scrolled up).
+  assert.equal(makesFullRepaint("\x1b[2J", cols, rows), false);
   // Near-full (>= 99%) is accepted: 99 of 100 cells.
   const nearFull = `${HOME}${"z".repeat(99)}`;
   assert.equal(makesFullRepaint(nearFull, cols, rows), true);

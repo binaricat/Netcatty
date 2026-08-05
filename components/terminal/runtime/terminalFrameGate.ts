@@ -207,12 +207,13 @@ export const viewportRepaintCoverage = (
     else if (final === "d") { row = (n0 ?? 1) - 1; clampRow(); }
     else if (final === "J") {
       const p = n0 ?? 0;
-      // ED2 (p=2) clears the whole viewport and counts as coverage. ED3 (p=3)
-      // clears saved scrollback only — it must not mark viewport cells, or
-      // makesFullRepaint would let collapseAndSplit drop a prior visual frame
-      // whose content the ED3 successor never repaints.
-      if (p === 2) { for (let r = 0; r < rows; r++) markRange(r, 0, cols - 1); }
-      else if (p === 0) { markRange(row, col, cols - 1); for (let r = row + 1; r < rows; r++) markRange(r, 0, cols - 1); }
+      // ED2 (p=2) must NOT count as full coverage here: when the user is
+      // scrolled up, filterTerminalSessionData may strip CSI 2 J from DEC 2026
+      // blocks after this gate runs. Crediting the clear would let us drop a
+      // prior frame that the stripped successor never repaints (Codex P2 on
+      // fcd6bbfa). ED3 clears scrollback only and likewise grants no coverage.
+      // ED0/ED1 still mark the cells they clear (not stripped by that filter).
+      if (p === 0) { markRange(row, col, cols - 1); for (let r = row + 1; r < rows; r++) markRange(r, 0, cols - 1); }
       else if (p === 1) { for (let r = 0; r < row; r++) markRange(r, 0, cols - 1); markRange(row, 0, col); }
     } else if (final === "K") {
       const p = n0 ?? 0;
