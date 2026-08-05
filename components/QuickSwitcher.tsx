@@ -230,12 +230,18 @@ const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
     if (!isOpen) return;
 
     const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target;
+      if (!(target instanceof Node)) return;
+      if (containerRef.current?.contains(target)) return;
+      // ContextMenuContent portals to #netcatty-context-menu-root; treat those
+      // clicks as inside so Connect / Edit host can run before unmount.
       if (
-        containerRef.current &&
-        !containerRef.current.contains(e.target as Node)
+        target instanceof Element &&
+        target.closest("#netcatty-context-menu-root")
       ) {
-        onClose();
+        return;
       }
+      onClose();
     };
 
     document.addEventListener("mousedown", handleClickOutside);

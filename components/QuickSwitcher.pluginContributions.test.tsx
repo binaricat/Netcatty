@@ -24,6 +24,7 @@ test('host rows expose optional edit-host context menu', () => {
   assert.match(source, /onEditHost\?: \(host: Host\) => void/);
   assert.match(source, /terminal\.layer\.hostTree\.editHost/);
   assert.match(source, /ContextMenuTrigger asChild/);
+  assert.match(source, /#netcatty-context-menu-root/);
 });
 
 test('pointer hover never rewrites the keyboard selection', () => {
