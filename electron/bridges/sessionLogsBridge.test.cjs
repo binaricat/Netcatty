@@ -240,6 +240,59 @@ test("clearSessionLogsDir preserves active auto-save stream files and host dirs"
   }
 });
 
+test("clearSessionLogsDir preserves snapshot-only host dirs before the first file exists", async () => {
+  const directory = path.join(TEMP_ROOT, `clear-snap-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  const sessionId = `session-snap-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const { clearSessionLogsDir } = loadBridgeWithDialog({});
+  const sessionLogStreamManager = require("./sessionLogStreamManager.cjs");
+
+  try {
+    // txt streams keep renderer state in memory and only materialize the file
+    // on snapshot flush — clear-all must still treat the registered path as live.
+    const startToken = sessionLogStreamManager.startStream(sessionId, {
+      hostLabel: "snap-host",
+      hostname: "snap.example",
+      directory,
+      format: "txt",
+      startTime: Date.UTC(2026, 0, 4, 5, 6, 7),
+    });
+    assert.ok(startToken);
+
+    const activePaths = sessionLogStreamManager.getActiveLogPaths();
+    assert.equal(activePaths.length, 1);
+    const activePath = activePaths[0];
+    const hostDir = path.dirname(activePath);
+    assert.equal(path.basename(hostDir), "snap-host");
+    assert.equal(fs.existsSync(activePath), false, "snapshot file must not exist yet");
+
+    // Sibling inactive log would make the host dir look like a pure log folder
+    // if we only inspected readdir and missed the not-yet-created active path.
+    fs.writeFileSync(path.join(hostDir, "2026-01-01T00-00-00.txt"), "stale\n");
+    const staleHostDir = path.join(directory, "stale-snap-host");
+    fs.mkdirSync(staleHostDir, { recursive: true });
+    fs.writeFileSync(path.join(staleHostDir, "2026-01-03T00-00-00.txt"), "old\n");
+
+    const result = await clearSessionLogsDir(null, { directory });
+
+    assert.equal(result.success, true);
+    assert.equal(result.failedCount, 0);
+    assert.equal(result.deletedCount, 2); // stale sibling + pure stale host
+    assert.deepEqual(fs.readdirSync(directory).sort(), ["snap-host"]);
+    assert.ok(fs.existsSync(hostDir), "active snapshot host dir must survive clear-all");
+    assert.deepEqual(fs.readdirSync(hostDir), []);
+
+    // Stream must still be able to write its first snapshot after clear-all.
+    sessionLogStreamManager.appendData(sessionId, "first snapshot body\n");
+    const stoppedPath = await sessionLogStreamManager.stopStream(sessionId, startToken);
+    assert.equal(path.resolve(stoppedPath), path.resolve(activePath));
+    await waitForPath(activePath);
+    assert.match(fs.readFileSync(activePath, "utf8"), /first snapshot body/);
+  } finally {
+    await sessionLogStreamManager.cleanupAll();
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("clearSessionLogsDir leaves unrelated empty or non-log folders alone", async () => {
   const directory = path.join(TEMP_ROOT, `clear-unrelated-${Date.now()}-${Math.random().toString(16).slice(2)}`);
   const { clearSessionLogsDir } = loadBridgeWithDialog({});

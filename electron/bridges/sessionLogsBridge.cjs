@@ -339,6 +339,17 @@ async function clearSessionLogsDir(event, payload = {}) {
         const logFiles = [];
         let hasNonLogEntry = false;
         let hasActiveLog = false;
+        const resolvedEntryPath = path.resolve(entryPath);
+
+        // txt/html streams may not create a file until the first snapshot flush, so
+        // the active path may be absent from readdir. Any registered active path
+        // whose parent is this host dir still counts as live work.
+        for (const activePath of activeLogPaths) {
+          if (path.dirname(activePath) === resolvedEntryPath) {
+            hasActiveLog = true;
+            break;
+          }
+        }
 
         for (const nestedEntry of nested) {
           const nestedPath = path.join(entryPath, nestedEntry.name);
