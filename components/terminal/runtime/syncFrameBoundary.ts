@@ -21,6 +21,17 @@
 
 const SYNC_OPEN = "\x1b[?2026h";
 const SYNC_CLOSE = "\x1b[?2026l";
+/** 8-bit C1 CSI form of the same markers (`CSI` = 0x9B). xterm accepts both. */
+const SYNC_OPEN_C1 = "\x9b?2026h";
+const SYNC_CLOSE_C1 = "\x9b?2026l";
+
+const indexOfSyncMarkerPrefix = (data: string, from: number): number => {
+  const a = data.indexOf("\x1b[?2026", from);
+  const b = data.indexOf("\x9b?2026", from);
+  if (a === -1) return b;
+  if (b === -1) return a;
+  return Math.min(a, b);
+};
 
 /**
  * Sync-block nesting state at `to`, scanning `data` from `from`.
@@ -28,31 +39,34 @@ const SYNC_CLOSE = "\x1b[?2026l";
  * DEC 2026 does not nest in practice (a frame is one open/close pair), so this
  * tracks "open" as a boolean latched by the most recent marker rather than a
  * depth count. Returns whether an open block is still unclosed at `to`.
+ * Recognizes both 7-bit ESC CSI and 8-bit C1 CSI forms (Codex P2).
  */
 export function isInsideSyncBlockAt(data: string, from: number, to: number): boolean {
   let open = false;
-  let i = data.indexOf("\x1b[?2026", from);
+  let i = indexOfSyncMarkerPrefix(data, from);
   while (i !== -1 && i < to) {
-    if (data.startsWith(SYNC_OPEN, i)) {
+    if (data.startsWith(SYNC_OPEN, i) || data.startsWith(SYNC_OPEN_C1, i)) {
+      const len = data.startsWith(SYNC_OPEN, i) ? SYNC_OPEN.length : SYNC_OPEN_C1.length;
       // Only latch open once the whole opener is before `to`. A cut mid-open
       // leaves the block not yet entered for this scan.
-      if (i + SYNC_OPEN.length > to) break;
+      if (i + len > to) break;
       open = true;
-      i += SYNC_OPEN.length;
-    } else if (data.startsWith(SYNC_CLOSE, i)) {
+      i += len;
+    } else if (data.startsWith(SYNC_CLOSE, i) || data.startsWith(SYNC_CLOSE_C1, i)) {
+      const len = data.startsWith(SYNC_CLOSE, i) ? SYNC_CLOSE.length : SYNC_CLOSE_C1.length;
       // Only latch closed once the whole closer is before `to`. `startsWith`
       // matches against full `data`, so a mid-close cut would otherwise see
       // the complete marker and report "outside" while the trailing `l` is
       // still past `to` — splitting the close sequence itself.
-      if (i + SYNC_CLOSE.length > to) break;
+      if (i + len > to) break;
       open = false;
-      i += SYNC_CLOSE.length;
+      i += len;
     } else {
       // A different `?2026` sequence (e.g. a DECRQM query `\x1b[?2026$p`) — not
-      // a frame boundary; step past this ESC and keep scanning.
+      // a frame boundary; step past this ESC/C1 and keep scanning.
       i += 1;
     }
-    i = data.indexOf("\x1b[?2026", i);
+    i = indexOfSyncMarkerPrefix(data, i);
   }
   return open;
 }
@@ -76,11 +90,13 @@ function extendPastCloseMarkerIfSplit(
   // pos is strictly inside SYNC_CLOSE when some candidateStart < pos and
   // candidateStart + SYNC_CLOSE.length > pos, and data starts with SYNC_CLOSE
   // there. Check each proper prefix length that ends at pos.
-  for (let k = 1; k < SYNC_CLOSE.length; k++) {
-    const candidateStart = pos - k;
-    if (candidateStart < offset) break;
-    if (data.startsWith(SYNC_CLOSE, candidateStart)) {
-      return candidateStart + SYNC_CLOSE.length;
+  for (const closer of [SYNC_CLOSE, SYNC_CLOSE_C1]) {
+    for (let k = 1; k < closer.length; k++) {
+      const candidateStart = pos - k;
+      if (candidateStart < offset) break;
+      if (data.startsWith(closer, candidateStart)) {
+        return candidateStart + closer.length;
+      }
     }
   }
   return pos;

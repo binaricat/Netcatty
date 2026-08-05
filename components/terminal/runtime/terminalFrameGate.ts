@@ -31,15 +31,23 @@
 
 const SYNC_ON = "\x1b[?2026h";
 const SYNC_OFF = "\x1b[?2026l";
+const SYNC_ON_C1 = "\x9b?2026h";
+const SYNC_OFF_C1 = "\x9b?2026l";
 
 /** Length of a trailing run of `s` that is a proper (non-empty) prefix of the
- * sync opener — i.e. a `ESC[?2026h` split at a chunk boundary. 0 when none. */
+ * sync opener — 7-bit ESC CSI or 8-bit C1 CSI form. 0 when none. */
 const trailingSyncOpenerPrefixLen = (s: string): number => {
-  const max = Math.min(SYNC_ON.length - 1, s.length);
-  for (let k = max; k >= 1; k--) {
-    if (s.endsWith(SYNC_ON.slice(0, k))) return k;
+  let best = 0;
+  for (const opener of [SYNC_ON, SYNC_ON_C1]) {
+    const max = Math.min(opener.length - 1, s.length);
+    for (let k = max; k >= 1; k--) {
+      if (s.endsWith(opener.slice(0, k))) {
+        best = Math.max(best, k);
+        break;
+      }
+    }
   }
-  return 0;
+  return best;
 };
 
 /** True when `s` ends with a split sync opener (a proper prefix of `ESC[?2026h`). */
@@ -334,14 +342,30 @@ export const collapseAndSplit = (
   const frames: Frame[] = [];
   let cursor = 0;
   let partialStart = buffer.length;
+  const nextOpen = (from: number): { at: number; len: number } | null => {
+    const a = buffer.indexOf(SYNC_ON, from);
+    const b = buffer.indexOf(SYNC_ON_C1, from);
+    if (a < 0 && b < 0) return null;
+    if (a < 0) return { at: b, len: SYNC_ON_C1.length };
+    if (b < 0) return { at: a, len: SYNC_ON.length };
+    return a <= b ? { at: a, len: SYNC_ON.length } : { at: b, len: SYNC_ON_C1.length };
+  };
+  const nextClose = (from: number): { at: number; len: number } | null => {
+    const a = buffer.indexOf(SYNC_OFF, from);
+    const b = buffer.indexOf(SYNC_OFF_C1, from);
+    if (a < 0 && b < 0) return null;
+    if (a < 0) return { at: b, len: SYNC_OFF_C1.length };
+    if (b < 0) return { at: a, len: SYNC_OFF.length };
+    return a <= b ? { at: a, len: SYNC_OFF.length } : { at: b, len: SYNC_OFF_C1.length };
+  };
   while (true) {
-    const on = buffer.indexOf(SYNC_ON, cursor);
-    if (on < 0) break;
-    const contentStart = on + SYNC_ON.length;
-    const off = buffer.indexOf(SYNC_OFF, contentStart);
-    if (off < 0) { partialStart = on; break; }
-    const end = off + SYNC_OFF.length;
-    frames.push({ start: on, end, content: buffer.slice(contentStart, off) });
+    const open = nextOpen(cursor);
+    if (!open) break;
+    const contentStart = open.at + open.len;
+    const close = nextClose(contentStart);
+    if (!close) { partialStart = open.at; break; }
+    const end = close.at + close.len;
+    frames.push({ start: open.at, end, content: buffer.slice(contentStart, close.at) });
     cursor = end;
   }
 
