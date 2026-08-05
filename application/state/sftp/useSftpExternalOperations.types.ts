@@ -70,6 +70,8 @@ export interface SftpExternalOperationsResult {
   activeFileWatchCountRef: React.MutableRefObject<number>;
   /** Remote temps opened in an external editor; keeps browse sessions from parking. */
   activeExternalEditCount: number;
+  /** Drop retainers after closeSftp deletes that session's registered temps. */
+  forgetExternalEditTempsForSftp: (sftpId: string) => void;
   releaseExternalFileWatches: (cleanupTempFiles?: boolean) => Promise<void>;
   uploadExternalFiles: (
     side: "left" | "right",

@@ -55,6 +55,7 @@ export async function releaseSftpTabConnection(params: {
   connectionCacheKeys: Map<string, string>;
   clearCacheForConnection: (connectionId: string) => void;
   closeSftp: (sftpId: string) => Promise<unknown>;
+  onRemoteSessionClosed?: (sftpId: string) => void;
 }): Promise<void> {
   await releaseSftpConnectionMetadata(params);
 }
@@ -66,6 +67,7 @@ export const useSftpState = (
   options?: SftpStateOptions
 ) => {
   const transferOwnerIdRef = useRef(options?.transferOwnerId ?? crypto.randomUUID());
+  const forgetExternalEditTempsForSftpRef = useRef<(sftpId: string) => void>(() => {});
   const createPane = useCallback(
     (id?: string, showHiddenFiles = options?.defaultShowHiddenFiles ?? false) =>
       createEmptyPane(id, showHiddenFiles),
@@ -241,6 +243,7 @@ export const useSftpState = (
         connectionCacheKeys: connectionCacheKeyMapRef.current,
         clearCacheForConnection,
         closeSftp: async (sftpId) => netcattyBridge.get()?.closeSftp(sftpId),
+        onRemoteSessionClosed: (sftpId) => forgetExternalEditTempsForSftpRef.current(sftpId),
       });
     }
     closeTab(side, tabId);
@@ -253,6 +256,7 @@ export const useSftpState = (
       connectionCacheKeys: connectionCacheKeyMapRef.current,
       clearCacheForConnection,
       closeSftp: async (sftpId) => netcattyBridge.get()?.closeSftp(sftpId),
+      onRemoteSessionClosed: (sftpId) => forgetExternalEditTempsForSftpRef.current(sftpId),
     });
   }, [clearCacheForConnection]);
 
@@ -444,6 +448,7 @@ export const useSftpState = (
     clearCacheForConnection,
     createEmptyPane: createPane,
     autoConnectLocalOnMount: options?.autoConnectLocalOnMount,
+    onRemoteSessionClosed: (sftpId) => forgetExternalEditTempsForSftpRef.current(sftpId),
   });
 
   const {
@@ -568,6 +573,7 @@ export const useSftpState = (
     selectApplication,
     activeFileWatchCountRef,
     activeExternalEditCount,
+    forgetExternalEditTempsForSftp,
     releaseExternalFileWatches,
     uploadConflicts,
     resolveUploadConflict,
@@ -628,6 +634,7 @@ export const useSftpState = (
     useCompressedUpload: options?.useCompressedUpload,
     isTransferCancelled,
   });
+  forgetExternalEditTempsForSftpRef.current = forgetExternalEditTempsForSftp;
 
   const conflicts = useMemo(
     () => [...transferConflicts, ...uploadConflicts],
@@ -686,6 +693,7 @@ export const useSftpState = (
         } catch {
           // best-effort — session may already be gone
         }
+        forgetExternalEditTempsForSftpRef.current(sftpId);
       }));
     };
 

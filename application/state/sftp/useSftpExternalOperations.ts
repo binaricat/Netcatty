@@ -41,6 +41,7 @@ import {
   cleanupFailedExternalOpenTemp,
   useExternalFileWatchLifecycle,
 } from "./externalFileWatchLifecycle";
+import { createExternalEditTempRetention } from "./externalEditTempRetention";
 import {
   cancelExternalUploadRuntime,
   getExternalUploadController,
@@ -181,22 +182,25 @@ export const useSftpExternalOperations = (
     subscribeExternalFileWatchStopped,
   );
   // Temp files downloaded for external editors (even without auto-sync watches).
-  // Parking browse sessions calls closeSftp, which deletes these paths.
-  const externalEditTempPathsRef = useRef<Set<string>>(new Set());
+  // Parking / disconnect / reconnect call closeSftp, which deletes these paths —
+  // forget matching retainers so hasActiveWork does not stick after cleanup.
+  const externalEditTempsRef = useRef(createExternalEditTempRetention());
   const [activeExternalEditCount, setActiveExternalEditCount] = useState(0);
-  const rememberExternalEditTemp = useCallback((localPath: string) => {
-    if (!localPath || externalEditTempPathsRef.current.has(localPath)) return;
-    externalEditTempPathsRef.current.add(localPath);
-    setActiveExternalEditCount(externalEditTempPathsRef.current.size);
+  const rememberExternalEditTemp = useCallback((sftpId: string, localPath: string) => {
+    if (!externalEditTempsRef.current.remember(sftpId, localPath)) return;
+    setActiveExternalEditCount(externalEditTempsRef.current.size);
   }, []);
   const forgetExternalEditTemp = useCallback((localPath: string) => {
-    if (!localPath || !externalEditTempPathsRef.current.delete(localPath)) return;
-    setActiveExternalEditCount(externalEditTempPathsRef.current.size);
+    if (!externalEditTempsRef.current.forgetPath(localPath)) return;
+    setActiveExternalEditCount(externalEditTempsRef.current.size);
+  }, []);
+  const forgetExternalEditTempsForSftp = useCallback((sftpId: string) => {
+    if (!externalEditTempsRef.current.forgetSftp(sftpId)) return;
+    setActiveExternalEditCount(externalEditTempsRef.current.size);
   }, []);
   const releaseExternalFileWatches = useCallback(async (cleanupTempFiles = false) => {
     await releaseExternalFileWatchesBase(cleanupTempFiles);
-    if (cleanupTempFiles && externalEditTempPathsRef.current.size > 0) {
-      externalEditTempPathsRef.current.clear();
+    if (externalEditTempsRef.current.clear()) {
       setActiveExternalEditCount(0);
     }
   }, [releaseExternalFileWatchesBase]);
@@ -503,7 +507,7 @@ export const useSftpExternalOperations = (
       if (bridge.registerTempFile) {
         try {
           await bridge.registerTempFile(sftpId, localTempPath);
-          rememberExternalEditTemp(localTempPath);
+          rememberExternalEditTemp(sftpId, localTempPath);
         } catch (err) {
           console.warn("[SFTP] Failed to register temp file for cleanup:", err);
         }
@@ -1528,6 +1532,7 @@ export const useSftpExternalOperations = (
     selectApplication,
     activeFileWatchCountRef,
     activeExternalEditCount,
+    forgetExternalEditTempsForSftp,
     releaseExternalFileWatches,
     uploadConflicts,
     resolveUploadConflict,

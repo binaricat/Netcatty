@@ -41,6 +41,8 @@ interface UseSftpConnectionsParams {
   clearCacheForConnection: (connectionId: string) => void;
   createEmptyPane: (id?: string, showHiddenFiles?: boolean) => SftpPane;
   autoConnectLocalOnMount?: boolean;
+  /** Fired after a browse SFTP id is closed so renderer retainers can drop. */
+  onRemoteSessionClosed?: (sftpId: string) => void;
 }
 
 export interface SftpConnectOptions {
@@ -82,6 +84,7 @@ export async function releaseSftpConnectionMetadata(params: {
   connectionCacheKeys: Map<string, string>;
   clearCacheForConnection: (connectionId: string) => void;
   closeSftp: (sftpId: string) => Promise<unknown>;
+  onRemoteSessionClosed?: (sftpId: string) => void;
 }): Promise<void> {
   const sftpId = takeSftpConnectionMetadataForClose(params);
   if (params.isLocal || !sftpId) return;
@@ -90,6 +93,7 @@ export async function releaseSftpConnectionMetadata(params: {
   } catch {
     // Best-effort: backend owner cleanup remains the final safety net.
   }
+  params.onRemoteSessionClosed?.(sftpId);
 }
 
 export function createSftpConnectionId(
@@ -240,7 +244,13 @@ export const useSftpConnections = ({
   clearCacheForConnection,
   createEmptyPane,
   autoConnectLocalOnMount = true,
+  onRemoteSessionClosed,
 }: UseSftpConnectionsParams): UseSftpConnectionsResult => {
+  const onRemoteSessionClosedRef = useRef(onRemoteSessionClosed);
+  onRemoteSessionClosedRef.current = onRemoteSessionClosed;
+  const notifyRemoteSessionClosed = useCallback((sftpId: string | undefined) => {
+    if (sftpId) onRemoteSessionClosedRef.current?.(sftpId);
+  }, []);
   const getHostCredentials = useSftpHostCredentials({ hosts, keys, identities, knownHosts, terminalSettings });
   const { listLocalFiles, listRemoteFiles } = useSftpDirectoryListing();
   const [hostKeyVerification, setHostKeyVerification] = useState<SftpHostKeyVerificationState | null>(null);
@@ -450,6 +460,7 @@ export const useSftpConnections = ({
           connectionCacheKeys: connectionCacheKeyMapRef.current,
           clearCacheForConnection,
           closeSftp: async (sftpId) => netcattyBridge.get()?.closeSftp(sftpId),
+          onRemoteSessionClosed: (sftpId) => notifyRemoteSessionClosed(sftpId),
         });
       };
 
@@ -491,6 +502,7 @@ export const useSftpConnections = ({
             } catch {
               // Ignore errors when closing stale SFTP sessions
             }
+            notifyRemoteSessionClosed(oldSftpId);
           }
         }
       }
@@ -966,6 +978,7 @@ export const useSftpConnections = ({
           } catch {
             // Ignore errors when closing SFTP session during disconnect
           }
+          notifyRemoteSessionClosed(sftpId);
         }
       }
 

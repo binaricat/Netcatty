@@ -157,6 +157,23 @@ test("release metadata closes the backend before a failed connection is retained
   assert.equal(cacheKeys.size, 0);
 });
 
+test("releaseSftpConnectionMetadata notifies after a remote session closes", async () => {
+  const sessions = new Map([["connection-1", "sftp-1"]]);
+  const cacheKeys = new Map([["connection-1", "cache-1"]]);
+  const notified: string[] = [];
+
+  await releaseSftpConnectionMetadata({
+    connectionId: "connection-1",
+    sftpSessions: sessions,
+    connectionCacheKeys: cacheKeys,
+    clearCacheForConnection: () => {},
+    closeSftp: async () => {},
+    onRemoteSessionClosed: (sftpId) => { notified.push(sftpId); },
+  });
+
+  assert.deepEqual(notified, ["sftp-1"]);
+});
+
 test("resolvePinnedReconnectSide follows a tab moved to the other side", () => {
   assert.equal(
     resolvePinnedReconnectSide("left", "tab-1", [], [{ id: "tab-1" }]),
