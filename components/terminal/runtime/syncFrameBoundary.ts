@@ -125,7 +125,23 @@ export function frameSafeSliceEnd(
   // the block is already considered closed at desiredEnd.
   const end = extendPastCloseMarkerIfSplit(data, offset, desiredEnd);
   if (!isInsideSyncBlockAt(data, offset, end)) return end;
-  const close = data.indexOf(SYNC_CLOSE, end);
+  const closeA = data.indexOf(SYNC_CLOSE, end);
+  const closeB = data.indexOf(SYNC_CLOSE_C1, end);
+  let close = -1;
+  let closeLen = SYNC_CLOSE.length;
+  if (closeA === -1) {
+    close = closeB;
+    closeLen = SYNC_CLOSE_C1.length;
+  } else if (closeB === -1) {
+    close = closeA;
+    closeLen = SYNC_CLOSE.length;
+  } else if (closeA <= closeB) {
+    close = closeA;
+    closeLen = SYNC_CLOSE.length;
+  } else {
+    close = closeB;
+    closeLen = SYNC_CLOSE_C1.length;
+  }
   if (close === -1) return data.length;
-  return close + SYNC_CLOSE.length;
+  return close + closeLen;
 }

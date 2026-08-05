@@ -571,31 +571,48 @@ registerFrameGateHibernateHooks({
     return Boolean(state?.buffer);
   },
   flushToTerm: (term) => {
-    resetFrameGate(term, (buffer, ingress) => {
-      if (buffer) {
-        try {
-          // Route through the same scrollback-safe filter as live writes so a
-          // held HOME+CSI 2 J full redraw does not yank scrollback on hibernate
-          // (Codex P2 on e8c49563).
-          const filtered = filterTerminalSessionData(term, buffer);
-          if (filtered) term.write(filtered);
-        } catch {
-          try {
-            term.write(buffer);
-          } catch {
-            // ignore write failures during teardown
-          }
+    const state = frameGateStates.get(term);
+    if (!state) return;
+    if (state.flushTimer !== undefined) {
+      clearTimeout(state.flushTimer);
+      state.flushTimer = undefined;
+    }
+    if (!state.buffer) return;
+    const buffer = state.buffer;
+    const ingress = state.ingress;
+    // Clear held buffer so hasHeld is false, but keep gate state deleted so
+    // subsequent writes re-evaluate engagement cleanly.
+    frameGateStates.delete(term);
+    try {
+      // Route through the same scrollback-safe filter as live writes so a
+      // held HOME+CSI 2 J full redraw does not yank scrollback on hibernate
+      // (Codex P2 on e8c49563).
+      const filtered = filterTerminalSessionData(term, buffer);
+      if (filtered) term.write(filtered);
+    } catch {
+      try {
+        term.write(buffer);
+      } catch {
+        // ignore write failures during teardown
+      }
+    }
+    // Preserve ingress for releaseTerminalFlowBeforeHibernate; also try to ACK
+    // immediately via the session drop path if a flow controller is attached
+    // so non-hibernate flushPending callers do not leave an unacked floor.
+    if (ingress > 0) {
+      frameGateHibernateFlushedIngress.set(
+        term,
+        (frameGateHibernateFlushedIngress.get(term) ?? 0) + ingress,
+      );
+      try {
+        const flow = terminalFlowControllers.get(term);
+        if (flow) {
+          flow.written(ingress);
         }
+      } catch {
+        // ignore
       }
-      // Preserve ingress for releaseTerminalFlowBeforeHibernate so the backend
-      // is not left paused on flushed-but-unacked frame-gate bytes (Codex P2).
-      if (ingress > 0) {
-        frameGateHibernateFlushedIngress.set(
-          term,
-          (frameGateHibernateFlushedIngress.get(term) ?? 0) + ingress,
-        );
-      }
-    });
+    }
   },
 });
 
