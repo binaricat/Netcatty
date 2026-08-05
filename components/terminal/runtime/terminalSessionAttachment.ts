@@ -43,6 +43,7 @@ import {
 } from "./terminalSudoAutofill";
 import {
   filterTerminalSessionData,
+  flushTerminalSyncBlockFilterPending,
   isTerminalSyncBlockOpen,
   resetTerminalSyncBlockFilter,
 } from "./terminalSyncBlockFilter";
@@ -586,9 +587,12 @@ registerFrameGateHibernateHooks({
     try {
       // Route through the same scrollback-safe filter as live writes so a
       // held HOME+CSI 2 J full redraw does not yank scrollback on hibernate
-      // (Codex P2 on e8c49563).
+      // (Codex P2 on e8c49563). Then force-release any filter-pending ESC
+      // suffix/cursor-home so snapshot drains do not drop them.
       const filtered = filterTerminalSessionData(term, buffer);
-      if (filtered) term.write(filtered);
+      const pending = flushTerminalSyncBlockFilterPending(term);
+      const toWrite = `${filtered || ""}${pending || ""}`;
+      if (toWrite) term.write(toWrite);
     } catch {
       try {
         term.write(buffer);

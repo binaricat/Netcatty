@@ -73,3 +73,22 @@ export const filterTerminalSessionData = (term: XTerm, data: string): string => 
 
   return output;
 };
+
+/**
+ * Force-release pending filter held bytes (split ESC sequences / cursor-home)
+ * so hibernate/snapshot drains do not lose output that was retained in filter
+ * state after the frame-gate buffer was written (Codex P2 on 741a911e).
+ */
+export const flushTerminalSyncBlockFilterPending = (term: XTerm): string => {
+  const state = getSyncBlockFilterState(term);
+  let released = "";
+  if (state.pending) {
+    released += state.pending;
+    state.pending = "";
+  }
+  if (state.pendingCursorHome) {
+    released += state.pendingCursorHome;
+    state.pendingCursorHome = null;
+  }
+  return released;
+};
