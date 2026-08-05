@@ -268,6 +268,69 @@ function isSessionLogArtifactName(name) {
 }
 
 /**
+ * Live write targets from this process's sessionLogStreamManager.
+ * Main and terminal worker each own a separate module instance.
+ * @returns {string[]}
+ */
+function getLocalActiveLogPaths() {
+  const sessionLogStreamManager = require("./sessionLogStreamManager.cjs");
+  if (typeof sessionLogStreamManager.getActiveLogPaths !== "function") return [];
+  return sessionLogStreamManager.getActiveLogPaths()
+    .filter((p) => typeof p === "string" && p.length > 0)
+    .map((p) => path.resolve(p));
+}
+
+/**
+ * True when the terminal worker process is already running (or the manager
+ * does not expose a probe — unit-test mocks that only provide request()).
+ * Avoids cold-starting the utilityProcess solely for clear-all.
+ * @param {object|null} terminalWorkerManager
+ * @returns {boolean}
+ */
+function isTerminalWorkerRunning(terminalWorkerManager) {
+  if (!terminalWorkerManager) return false;
+  if (typeof terminalWorkerManager.isRunning === "function") {
+    return Boolean(terminalWorkerManager.isRunning());
+  }
+  // Mocks that only supply request() — treat as queryable.
+  return typeof terminalWorkerManager.request === "function";
+}
+
+/**
+ * Union of active log paths from the main process and the terminal worker.
+ * Worker-owned auto-save streams are invisible to the main-process manager.
+ * @param {object|null} terminalWorkerManager
+ * @returns {Promise<Set<string>>}
+ */
+async function collectActiveLogPaths(terminalWorkerManager = null) {
+  const activeLogPaths = new Set(getLocalActiveLogPaths());
+
+  if (!isTerminalWorkerRunning(terminalWorkerManager)) {
+    return activeLogPaths;
+  }
+
+  try {
+    const result = await terminalWorkerManager.request(
+      "netcatty:sessionLogs:getActivePaths",
+      {},
+      {},
+    );
+    const workerPaths = Array.isArray(result)
+      ? result
+      : (Array.isArray(result?.paths) ? result.paths : []);
+    for (const p of workerPaths) {
+      if (typeof p === "string" && p.length > 0) {
+        activeLogPaths.add(path.resolve(p));
+      }
+    }
+  } catch {
+    // Worker unavailable or channel missing — main-process paths only.
+  }
+
+  return activeLogPaths;
+}
+
+/**
  * Delete known session-log artifacts inside the configured save directory
  * (used by the "clear all logs" action in Settings).
  *
@@ -280,9 +343,11 @@ function isSessionLogArtifactName(name) {
  * when the user pointed the save directory at a shared folder).
  *
  * Active auto-save / continuous-log write targets are skipped so clear-all
- * never unlinks a live stream (orphan inode / silent stop).
+ * never unlinks a live stream (orphan inode / silent stop). Paths include
+ * both main-process streams and worker-owned streams when a terminal worker
+ * is running.
  */
-async function clearSessionLogsDir(event, payload = {}) {
+async function clearSessionLogsDir(event, payload = {}, terminalWorkerManager = null) {
   const { directory } = payload;
 
   if (!directory) {
@@ -292,14 +357,8 @@ async function clearSessionLogsDir(event, payload = {}) {
   let deletedCount = 0;
   let failedCount = 0;
 
-  // Live write targets from sessionLogStreamManager — skip these paths.
-  const sessionLogStreamManager = require("./sessionLogStreamManager.cjs");
-  const activeLogPaths = new Set(
-    (typeof sessionLogStreamManager.getActiveLogPaths === "function"
-      ? sessionLogStreamManager.getActiveLogPaths()
-      : []
-    ).map((p) => path.resolve(p)),
-  );
+  // Live write targets (main + worker) — skip these paths.
+  const activeLogPaths = await collectActiveLogPaths(terminalWorkerManager);
   const isActiveLogPath = (filePath) => activeLogPaths.has(path.resolve(filePath));
 
   try {
@@ -538,14 +597,29 @@ async function getManualSessionLogStatus(event, payload = {}) {
 }
 
 /**
+ * Worker-side handlers only. The terminal utilityProcess has its own
+ * sessionLogStreamManager instance; main queries these paths before clear-all.
+ */
+function registerWorkerHandlers(ipcMain) {
+  ipcMain.handle("netcatty:sessionLogs:getActivePaths", async () => getLocalActiveLogPaths());
+}
+
+/**
  * Register IPC handlers for session logs operations
  */
 function registerHandlers(ipcMain, options = {}) {
+  const terminalWorkerManager = options.terminalWorkerManager || null;
+
   ipcMain.handle("netcatty:sessionLogs:export", exportSessionLog);
   ipcMain.handle("netcatty:sessionLogs:selectDir", selectSessionLogsDir);
   ipcMain.handle("netcatty:sessionLogs:autoSave", autoSaveSessionLog);
   ipcMain.handle("netcatty:sessionLogs:openDir", openSessionLogsDir);
-  ipcMain.handle("netcatty:sessionLogs:clear", clearSessionLogsDir);
+  ipcMain.handle(
+    "netcatty:sessionLogs:clear",
+    (event, payload) => clearSessionLogsDir(event, payload, terminalWorkerManager),
+  );
+  // Main can also answer this (manual / script streams) for symmetry / tests.
+  ipcMain.handle("netcatty:sessionLogs:getActivePaths", async () => getLocalActiveLogPaths());
   ipcMain.handle("netcatty:sessionLog:manualStart", startManualSessionLog);
   ipcMain.handle("netcatty:sessionLog:manualStop", stopManualSessionLog);
   ipcMain.handle("netcatty:sessionLog:manualStatus", getManualSessionLogStatus);
@@ -559,7 +633,7 @@ function registerHandlers(ipcMain, options = {}) {
   // mirrors every output chunk to the main process for script output buffers;
   // feed that same stream into the main-process log streams. appendData() is
   // a no-op for sessions without an active main-process stream.
-  options.terminalWorkerManager?.addOutputTap?.((sessionId, data) => {
+  terminalWorkerManager?.addOutputTap?.((sessionId, data) => {
     if (typeof data !== "string" || data.length === 0) return;
     require("./sessionLogStreamManager.cjs").appendData(sessionId, data);
   });
@@ -567,11 +641,14 @@ function registerHandlers(ipcMain, options = {}) {
 
 module.exports = {
   registerHandlers,
+  registerWorkerHandlers,
   exportSessionLog,
   selectSessionLogsDir,
   autoSaveSessionLog,
   openSessionLogsDir,
   clearSessionLogsDir,
+  collectActiveLogPaths,
+  getLocalActiveLogPaths,
   isSessionLogArtifactName,
   startManualSessionLog,
   stopManualSessionLog,

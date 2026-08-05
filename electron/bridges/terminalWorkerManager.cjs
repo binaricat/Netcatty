@@ -1980,6 +1980,10 @@ function createTerminalWorkerManager(options = {}) {
 
   return {
     ensureStarted,
+    /** True when the utilityProcess child is currently alive. */
+    isRunning() {
+      return Boolean(child);
+    },
     request,
     send,
     startExternalSession,

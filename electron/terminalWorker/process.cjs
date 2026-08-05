@@ -298,6 +298,9 @@ function main() {
         parentPort,
         sessionLogStreamManager,
       });
+      // Expose worker-owned active log paths so main-process clear-all can
+      // skip live auto-save streams (separate module instance from main).
+      require("../bridges/sessionLogsBridge.cjs").registerWorkerHandlers(ipcMain);
       const { createSystemManagerBridge } = require("../bridges/systemManagerBridge.cjs");
       createSystemManagerBridge({
         getSessions: () => sessions,

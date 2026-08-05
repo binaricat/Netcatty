@@ -240,6 +240,74 @@ test("clearSessionLogsDir preserves active auto-save stream files and host dirs"
   }
 });
 
+test("clearSessionLogsDir unions worker-owned active paths with main-process streams", async () => {
+  const directory = path.join(TEMP_ROOT, `clear-worker-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  const { clearSessionLogsDir } = loadBridgeWithDialog({});
+
+  try {
+    const hostDir = path.join(directory, "worker-host");
+    fs.mkdirSync(hostDir, { recursive: true });
+    // Simulate a live worker-owned auto-save file (invisible to main manager).
+    const workerLivePath = path.join(hostDir, "2026-01-05T06-07-08.log");
+    fs.writeFileSync(workerLivePath, "worker live body\n");
+    // Stale sibling in the same host dir should still be cleared.
+    fs.writeFileSync(path.join(hostDir, "2026-01-01T00-00-00.log"), "stale\n");
+    // Unrelated pure host folder still cleared.
+    const staleHostDir = path.join(directory, "stale-worker-host");
+    fs.mkdirSync(staleHostDir, { recursive: true });
+    fs.writeFileSync(path.join(staleHostDir, "2026-01-03T00-00-00.txt"), "old\n");
+
+    let requestedChannel = null;
+    const terminalWorkerManager = {
+      isRunning: () => true,
+      request: async (channel) => {
+        requestedChannel = channel;
+        return [workerLivePath];
+      },
+    };
+
+    const result = await clearSessionLogsDir(null, { directory }, terminalWorkerManager);
+
+    assert.equal(requestedChannel, "netcatty:sessionLogs:getActivePaths");
+    assert.equal(result.success, true);
+    assert.equal(result.failedCount, 0);
+    assert.equal(result.deletedCount, 2); // stale sibling + pure stale host
+    assert.deepEqual(fs.readdirSync(directory).sort(), ["worker-host"]);
+    assert.ok(fs.existsSync(workerLivePath), "worker-owned active stream must survive clear-all");
+    assert.deepEqual(fs.readdirSync(hostDir), [path.basename(workerLivePath)]);
+    assert.equal(fs.readFileSync(workerLivePath, "utf8"), "worker live body\n");
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("clearSessionLogsDir does not cold-start a stopped terminal worker", async () => {
+  const directory = path.join(TEMP_ROOT, `clear-no-worker-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  const { clearSessionLogsDir } = loadBridgeWithDialog({});
+
+  try {
+    fs.mkdirSync(directory, { recursive: true });
+    fs.writeFileSync(path.join(directory, "host_2026-01-01T00-00-00.txt"), "export\n");
+
+    let requestCalls = 0;
+    const terminalWorkerManager = {
+      isRunning: () => false,
+      request: async () => {
+        requestCalls += 1;
+        return [];
+      },
+    };
+
+    const result = await clearSessionLogsDir(null, { directory }, terminalWorkerManager);
+
+    assert.equal(requestCalls, 0, "must not request worker paths when worker is stopped");
+    assert.equal(result.success, true);
+    assert.equal(result.deletedCount, 1);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("clearSessionLogsDir preserves snapshot-only host dirs before the first file exists", async () => {
   const directory = path.join(TEMP_ROOT, `clear-snap-${Date.now()}-${Math.random().toString(16).slice(2)}`);
   const sessionId = `session-snap-${Date.now()}-${Math.random().toString(16).slice(2)}`;
