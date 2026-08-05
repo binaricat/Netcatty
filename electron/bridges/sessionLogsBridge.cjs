@@ -278,6 +278,9 @@ function isSessionLogArtifactName(name) {
  *
  * Never deletes unrelated top-level files/folders (e.g. Documents/Downloads
  * when the user pointed the save directory at a shared folder).
+ *
+ * Active auto-save / continuous-log write targets are skipped so clear-all
+ * never unlinks a live stream (orphan inode / silent stop).
  */
 async function clearSessionLogsDir(event, payload = {}) {
   const { directory } = payload;
@@ -288,6 +291,16 @@ async function clearSessionLogsDir(event, payload = {}) {
 
   let deletedCount = 0;
   let failedCount = 0;
+
+  // Live write targets from sessionLogStreamManager — skip these paths.
+  const sessionLogStreamManager = require("./sessionLogStreamManager.cjs");
+  const activeLogPaths = new Set(
+    (typeof sessionLogStreamManager.getActiveLogPaths === "function"
+      ? sessionLogStreamManager.getActiveLogPaths()
+      : []
+    ).map((p) => path.resolve(p)),
+  );
+  const isActiveLogPath = (filePath) => activeLogPaths.has(path.resolve(filePath));
 
   try {
     const entries = await fs.promises.readdir(directory, { withFileTypes: true });
@@ -315,6 +328,7 @@ async function clearSessionLogsDir(event, payload = {}) {
       try {
         if (isFile) {
           if (!isSessionLogArtifactName(entry.name)) continue;
+          if (isActiveLogPath(entryPath)) continue;
           await fs.promises.rm(entryPath, { force: true });
           deletedCount++;
           continue;
@@ -324,6 +338,7 @@ async function clearSessionLogsDir(event, payload = {}) {
         const nested = await fs.promises.readdir(entryPath, { withFileTypes: true });
         const logFiles = [];
         let hasNonLogEntry = false;
+        let hasActiveLog = false;
 
         for (const nestedEntry of nested) {
           const nestedPath = path.join(entryPath, nestedEntry.name);
@@ -342,23 +357,27 @@ async function clearSessionLogsDir(event, payload = {}) {
             }
           }
           if (nestedIsFile && isSessionLogArtifactName(nestedEntry.name)) {
-            logFiles.push(nestedPath);
+            if (isActiveLogPath(nestedPath)) {
+              hasActiveLog = true;
+            } else {
+              logFiles.push(nestedPath);
+            }
           } else {
             hasNonLogEntry = true;
           }
         }
 
-        if (logFiles.length === 0) {
+        if (logFiles.length === 0 && !hasActiveLog) {
           // Not an app host-log folder (or empty / only non-log content) — leave it alone.
           continue;
         }
 
-        if (!hasNonLogEntry) {
-          // Pure session-log host folder: remove the whole directory as one artifact.
+        if (!hasNonLogEntry && !hasActiveLog) {
+          // Pure session-log host folder with no live streams: remove as one artifact.
           await fs.promises.rm(entryPath, { recursive: true, force: true });
           deletedCount++;
         } else {
-          // Mixed directory: only delete known log files; keep the rest.
+          // Mixed directory and/or active streams: only delete inactive known log files.
           for (const logPath of logFiles) {
             try {
               await fs.promises.rm(logPath, { force: true });

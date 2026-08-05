@@ -484,6 +484,20 @@ function hasStream(sessionId) {
 }
 
 /**
+ * Absolute paths of files currently open by active log streams.
+ * Used by clear-all so it never unlinks a live write target.
+ * @returns {string[]}
+ */
+function getActiveLogPaths() {
+  const paths = [];
+  for (const entry of activeStreams.values()) {
+    if (!entry?.filePath || entry.disabled) continue;
+    paths.push(path.resolve(entry.filePath));
+  }
+  return paths;
+}
+
+/**
  * Cleanup all active streams (called on app quit).
  */
 async function cleanupAll() {
@@ -500,5 +514,6 @@ module.exports = {
   registerProgrammaticCommandLogRewrite,
   stopStream,
   hasStream,
+  getActiveLogPaths,
   cleanupAll,
 };

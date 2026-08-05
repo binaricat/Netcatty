@@ -6,6 +6,15 @@ const Module = require("node:module");
 
 const TEMP_ROOT = path.join(__dirname, ".tmp-session-logs-bridge-tests");
 
+async function waitForPath(targetPath, { timeoutMs = 2000 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (fs.existsSync(targetPath)) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`Timed out waiting for path: ${targetPath}`);
+}
+
 function loadBridgeWithDialog(dialogMock) {
   const originalLoad = Module._load;
   Module._load = function patchedLoad(request, parent, isMain) {
@@ -170,6 +179,63 @@ test("clearSessionLogsDir only removes log files inside mixed host directories",
     assert.deepEqual(fs.readdirSync(hostDir), ["user-notes.md"]);
     assert.equal(fs.readFileSync(path.join(hostDir, "user-notes.md"), "utf8"), "do not delete\n");
   } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("clearSessionLogsDir preserves active auto-save stream files and host dirs", async () => {
+  const directory = path.join(TEMP_ROOT, `clear-active-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  const sessionId = `session-active-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const { clearSessionLogsDir } = loadBridgeWithDialog({});
+  const sessionLogStreamManager = require("./sessionLogStreamManager.cjs");
+
+  try {
+    const startToken = sessionLogStreamManager.startStream(sessionId, {
+      hostLabel: "live-host",
+      hostname: "live.example",
+      directory,
+      format: "raw",
+      startTime: Date.UTC(2026, 0, 2, 3, 4, 5),
+    });
+    assert.ok(startToken);
+    sessionLogStreamManager.appendData(sessionId, "live body\n");
+
+    // Prefer stream manager paths: createWriteStream open is async, so the
+    // file may not appear in readdir until the open/write settles.
+    const activePaths = sessionLogStreamManager.getActiveLogPaths();
+    assert.equal(activePaths.length, 1);
+    const activePath = activePaths[0];
+    const hostDir = path.dirname(activePath);
+    assert.equal(path.basename(hostDir), "live-host");
+
+    // Wait for the live target to materialize on disk (async open).
+    await waitForPath(activePath);
+    // Stale sibling log in the same host folder should still be cleared.
+    fs.writeFileSync(path.join(hostDir, "2026-01-01T00-00-00.log"), "stale\n");
+    // Inactive pure host folder should still be removed.
+    const staleHostDir = path.join(directory, "stale-host");
+    fs.mkdirSync(staleHostDir, { recursive: true });
+    fs.writeFileSync(path.join(staleHostDir, "2026-01-03T00-00-00.txt"), "old\n");
+
+    const result = await clearSessionLogsDir(null, { directory });
+
+    assert.equal(result.success, true);
+    assert.equal(result.failedCount, 0);
+    assert.equal(result.deletedCount, 2); // stale sibling log + pure stale-host folder
+    assert.deepEqual(fs.readdirSync(directory).sort(), ["live-host"]);
+    assert.ok(fs.existsSync(activePath), "active stream path must survive clear-all");
+    assert.deepEqual(fs.readdirSync(hostDir), [path.basename(activePath)]);
+
+    // Stream must still accept writes after clear-all (not unlinked/orphaned).
+    sessionLogStreamManager.appendData(sessionId, "after clear\n");
+    assert.equal(sessionLogStreamManager.hasStream(sessionId), true);
+    const stoppedPath = await sessionLogStreamManager.stopStream(sessionId, startToken);
+    assert.equal(path.resolve(stoppedPath), path.resolve(activePath));
+    const content = fs.readFileSync(activePath, "utf8");
+    assert.match(content, /live body/);
+    assert.match(content, /after clear/);
+  } finally {
+    await sessionLogStreamManager.cleanupAll();
     fs.rmSync(directory, { recursive: true, force: true });
   }
 });
