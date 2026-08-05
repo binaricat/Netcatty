@@ -78,6 +78,7 @@ function SidePanelSftpSlotInner({
     handleSftpInitialLocationApplied,
     handleSftpCurrentPathChange,
     handleSftpActiveTransfersChange,
+    handleSftpActiveExternalEditsChange,
     handlePendingUploadHandled,
     sftpDoubleClickBehavior,
     sftpAutoSync,
@@ -157,6 +158,13 @@ function SidePanelSftpSlotInner({
     [handleSftpActiveTransfersChange, tabId],
   );
 
+  const handleActiveExternalEditsChange = useCallback(
+    (count: number) => {
+      handleSftpActiveExternalEditsChange(tabId, count);
+    },
+    [handleSftpActiveExternalEditsChange, tabId],
+  );
+
   return (
     <div className={sidePanelHiddenPanelClassName(!isVisible)}>
       <SftpSidePanel
@@ -176,6 +184,7 @@ function SidePanelSftpSlotInner({
         onInitialLocationApplied={handleInitialLocationApplied}
         onCurrentPathChange={handleCurrentPathChange}
         onActiveTransfersChange={handleActiveTransfersChange}
+        onActiveExternalEditsChange={handleActiveExternalEditsChange}
         showWorkspaceHostHeader={isVisible && !!live.activeWorkspace}
         isVisible={isVisible}
         renderOverlays={isVisible}

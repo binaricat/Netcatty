@@ -55,25 +55,52 @@ function task(
 }
 
 test("closing the panel keeps SFTP mounted while a transfer is active", () => {
-  assert.equal(shouldKeepSftpMountedAfterClose(1), true);
-  assert.equal(shouldKeepSftpMountedAfterClose(3), true);
+  assert.equal(shouldKeepSftpMountedAfterClose({ activeTransfersCount: 1 }), true);
+  assert.equal(shouldKeepSftpMountedAfterClose({ activeTransfersCount: 3 }), true);
+});
+
+test("closing the panel keeps SFTP mounted while an external editor temp is open", () => {
+  assert.equal(shouldKeepSftpMountedAfterClose({
+    activeTransfersCount: 0,
+    activeExternalEditCount: 1,
+  }), true);
+  assert.equal(shouldKeepSftpMountedAfterClose({
+    activeTransfersCount: 0,
+    activeExternalEditCount: 0,
+  }), false);
 });
 
 test("closing an idle panel still releases its SFTP state", () => {
-  assert.equal(shouldKeepSftpMountedAfterClose(0), false);
+  assert.equal(shouldKeepSftpMountedAfterClose({ activeTransfersCount: 0 }), false);
 });
 
 test("a transfer retained by close keeps its history after completion", () => {
   assert.equal(shouldClearSftpPanelAfterTransferChange({
     activeTransfersCount: 0,
+    activeExternalEditCount: 0,
     panelOpen: false,
     retainedAfterClose: true,
   }), false);
   assert.equal(shouldScheduleSftpRetainedPanelCleanup({
     activeTransfersCount: 0,
+    activeExternalEditCount: 0,
     retainedAfterClose: true,
   }), true);
   assert.ok(SFTP_TRANSFER_HISTORY_RETENTION_MS > 0);
+});
+
+test("retained cleanup waits while an external editor temp is still open", () => {
+  assert.equal(shouldClearSftpPanelAfterTransferChange({
+    activeTransfersCount: 0,
+    activeExternalEditCount: 1,
+    panelOpen: false,
+    retainedAfterClose: false,
+  }), false);
+  assert.equal(shouldScheduleSftpRetainedPanelCleanup({
+    activeTransfersCount: 0,
+    activeExternalEditCount: 1,
+    retainedAfterClose: true,
+  }), false);
 });
 
 test("retained cleanup is scheduled even if close state has not committed yet", () => {
@@ -108,6 +135,7 @@ test("closing a terminal tab keeps its hidden SFTP owner mounted until active tr
 test("a reopening panel is not cleared before its open state commits", () => {
   assert.equal(shouldClearSftpPanelAfterTransferChange({
     activeTransfersCount: 0,
+    activeExternalEditCount: 0,
     panelOpen: true,
     retainedAfterClose: false,
   }), false);
@@ -116,6 +144,7 @@ test("a reopening panel is not cleared before its open state commits", () => {
 test("an unretained hidden idle panel can be released", () => {
   assert.equal(shouldClearSftpPanelAfterTransferChange({
     activeTransfersCount: 0,
+    activeExternalEditCount: 0,
     panelOpen: false,
     retainedAfterClose: false,
   }), true);
@@ -141,9 +170,13 @@ test("store unfinished tasks retain the owner even when the panel report is stil
     storeTasks,
     ownerId,
   }), 1);
-  assert.equal(shouldKeepSftpMountedAfterClose(
-    resolveSftpActiveTransfersCount({ reportedCount: 0, storeTasks, ownerId }),
-  ), true);
+  assert.equal(shouldKeepSftpMountedAfterClose({
+    activeTransfersCount: resolveSftpActiveTransfersCount({
+      reportedCount: 0,
+      storeTasks,
+      ownerId,
+    }),
+  }), true);
 });
 
 test("paused and failed top-level tasks still retain the hidden SFTP owner", () => {
@@ -185,10 +218,14 @@ test("terminal side panel reports transfer activity and uses store-backed retain
   assert.match(panelSource, /hasOwnedEditorTab/);
   assert.match(panelSource, /hasActiveExternalEdit/);
   assert.match(slotsSource, /onActiveTransfersChange=\{handleActiveTransfersChange\}/);
+  assert.match(slotsSource, /onActiveExternalEditsChange=\{handleActiveExternalEditsChange\}/);
+  assert.match(panelSource, /onActiveExternalEditsChange/);
   assert.match(layerSource, /resolveTabActiveTransfersCount/);
   assert.match(layerSource, /terminalSftpTransferOwnerId/);
   assert.match(layerSource, /listTerminalTabIdsWithRetainingTransfers/);
-  assert.match(layerSource, /shouldKeepSftpMountedAfterClose\(activeTransfersCount\)/);
+  assert.match(layerSource, /shouldKeepSftpMountedAfterClose\(\{/);
+  assert.match(layerSource, /activeExternalEditCount/);
+  assert.match(layerSource, /sftpActiveExternalEditsByTabRef/);
   assert.match(layerSource, /sftpRetainedAfterCloseTabIdsRef/);
   assert.match(layerSource, /sftpRetainedCleanupTimersRef/);
   // Hidden UI parks browse channels; transfers keep pool / leased sessions.

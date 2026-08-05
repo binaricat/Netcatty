@@ -260,6 +260,7 @@ const SIDE_PANEL_STABLE_CTX_KEYS = [
   'sftpPendingUploadsForTab',
   'handleSftpCurrentPathChange',
   'handleSftpActiveTransfersChange',
+  'handleSftpActiveExternalEditsChange',
   'sftpDoubleClickBehavior',
   'sftpAutoSync',
   'sftpShowHiddenFiles',

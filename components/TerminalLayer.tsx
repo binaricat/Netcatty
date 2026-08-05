@@ -579,6 +579,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   const sftpHostForTabRef = useRef(sftpHostForTab);
   sftpHostForTabRef.current = sftpHostForTab;
   const sftpActiveTransfersByTabRef = useRef<Map<string, number>>(new Map());
+  const sftpActiveExternalEditsByTabRef = useRef<Map<string, number>>(new Map());
   const sftpRetainedAfterCloseTabIdsRef = useRef<Set<string>>(new Set());
   const sftpOpeningTabIdsRef = useRef<Set<string>>(new Set());
   const sftpRetainedCleanupTimersRef = useRef<Map<string, number>>(new Map());
@@ -613,6 +614,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       sftpRetainedCleanupTimersRef.current.delete(tabId);
     }
     sftpActiveTransfersByTabRef.current.delete(tabId);
+    sftpActiveExternalEditsByTabRef.current.delete(tabId);
     sftpRetainedAfterCloseTabIdsRef.current.delete(tabId);
     sftpOpeningTabIdsRef.current.delete(tabId);
     setSftpHostForTab(prev => {
@@ -645,20 +647,26 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     });
   }, []);
 
-  const handleSftpActiveTransfersChange = useCallback((tabId: string, count: number) => {
-    const activeTransfersCount = resolveTabActiveTransfersCount(tabId, Math.max(0, count));
-    if (activeTransfersCount > 0) {
+  const resolveTabActiveExternalEditCount = useCallback((tabId: string, reportedCount?: number) => {
+    return Math.max(0, reportedCount ?? sftpActiveExternalEditsByTabRef.current.get(tabId) ?? 0);
+  }, []);
+
+  const evaluateSftpPanelRetentionAfterActivity = useCallback((tabId: string, params: {
+    activeTransfersCount: number;
+    activeExternalEditCount: number;
+  }) => {
+    const { activeTransfersCount, activeExternalEditCount } = params;
+    if (activeTransfersCount > 0 || activeExternalEditCount > 0) {
       const cleanupTimer = sftpRetainedCleanupTimersRef.current.get(tabId);
       if (cleanupTimer !== undefined) {
         window.clearTimeout(cleanupTimer);
         sftpRetainedCleanupTimersRef.current.delete(tabId);
       }
-      sftpActiveTransfersByTabRef.current.set(tabId, activeTransfersCount);
       return;
     }
-    sftpActiveTransfersByTabRef.current.delete(tabId);
     const lifecycle = {
       activeTransfersCount,
+      activeExternalEditCount,
       panelOpen: sidePanelOpenTabsRef.current.has(tabId) || sftpOpeningTabIdsRef.current.has(tabId),
       retainedAfterClose: sftpRetainedAfterCloseTabIdsRef.current.has(tabId),
     };
@@ -669,15 +677,18 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     if (
       shouldScheduleSftpRetainedPanelCleanup({
         activeTransfersCount: lifecycle.activeTransfersCount,
+        activeExternalEditCount: lifecycle.activeExternalEditCount,
         retainedAfterClose: lifecycle.retainedAfterClose,
       })
       && !sftpRetainedCleanupTimersRef.current.has(tabId)
     ) {
       const cleanupTimer = window.setTimeout(() => {
         sftpRetainedCleanupTimersRef.current.delete(tabId);
-        const currentCount = resolveTabActiveTransfersCount(tabId);
+        const currentTransfers = resolveTabActiveTransfersCount(tabId);
+        const currentExternalEdits = resolveTabActiveExternalEditCount(tabId);
         if (
-          currentCount <= 0
+          currentTransfers <= 0
+          && currentExternalEdits <= 0
           && !sidePanelOpenTabsRef.current.has(tabId)
           && !sftpOpeningTabIdsRef.current.has(tabId)
           && sftpRetainedAfterCloseTabIdsRef.current.has(tabId)
@@ -687,7 +698,46 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       }, SFTP_TRANSFER_HISTORY_RETENTION_MS);
       sftpRetainedCleanupTimersRef.current.set(tabId, cleanupTimer);
     }
-  }, [clearSftpPanelState, resolveTabActiveTransfersCount, sidePanelOpenTabsRef]);
+  }, [
+    clearSftpPanelState,
+    resolveTabActiveExternalEditCount,
+    resolveTabActiveTransfersCount,
+    sidePanelOpenTabsRef,
+  ]);
+
+  const handleSftpActiveTransfersChange = useCallback((tabId: string, count: number) => {
+    const activeTransfersCount = resolveTabActiveTransfersCount(tabId, Math.max(0, count));
+    if (activeTransfersCount > 0) {
+      sftpActiveTransfersByTabRef.current.set(tabId, activeTransfersCount);
+    } else {
+      sftpActiveTransfersByTabRef.current.delete(tabId);
+    }
+    evaluateSftpPanelRetentionAfterActivity(tabId, {
+      activeTransfersCount,
+      activeExternalEditCount: resolveTabActiveExternalEditCount(tabId),
+    });
+  }, [
+    evaluateSftpPanelRetentionAfterActivity,
+    resolveTabActiveExternalEditCount,
+    resolveTabActiveTransfersCount,
+  ]);
+
+  const handleSftpActiveExternalEditsChange = useCallback((tabId: string, count: number) => {
+    const activeExternalEditCount = resolveTabActiveExternalEditCount(tabId, Math.max(0, count));
+    if (activeExternalEditCount > 0) {
+      sftpActiveExternalEditsByTabRef.current.set(tabId, activeExternalEditCount);
+    } else {
+      sftpActiveExternalEditsByTabRef.current.delete(tabId);
+    }
+    evaluateSftpPanelRetentionAfterActivity(tabId, {
+      activeTransfersCount: resolveTabActiveTransfersCount(tabId),
+      activeExternalEditCount,
+    });
+  }, [
+    evaluateSftpPanelRetentionAfterActivity,
+    resolveTabActiveExternalEditCount,
+    resolveTabActiveTransfersCount,
+  ]);
 
   const closeTerminalSidePanelTab = useCallback((tabId: string) => {
     setSidePanelOpenTabs((previous) => {
@@ -697,9 +747,15 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     });
     sftpOpeningTabIdsRef.current.delete(tabId);
     const activeTransfersCount = resolveTabActiveTransfersCount(tabId);
-    if (shouldKeepSftpMountedAfterClose(activeTransfersCount)) {
+    const activeExternalEditCount = resolveTabActiveExternalEditCount(tabId);
+    if (shouldKeepSftpMountedAfterClose({ activeTransfersCount, activeExternalEditCount })) {
       sftpRetainedAfterCloseTabIdsRef.current.add(tabId);
-      sftpActiveTransfersByTabRef.current.set(tabId, activeTransfersCount);
+      if (activeTransfersCount > 0) {
+        sftpActiveTransfersByTabRef.current.set(tabId, activeTransfersCount);
+      }
+      if (activeExternalEditCount > 0) {
+        sftpActiveExternalEditsByTabRef.current.set(tabId, activeExternalEditCount);
+      }
     } else {
       clearSftpPanelState(tabId);
     }
@@ -714,7 +770,12 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       return next;
     });
     notesReturnTabRef.current.delete(tabId);
-  }, [clearSftpPanelState, resolveTabActiveTransfersCount, setSidePanelOpenTabs]);
+  }, [
+    clearSftpPanelState,
+    resolveTabActiveExternalEditCount,
+    resolveTabActiveTransfersCount,
+    setSidePanelOpenTabs,
+  ]);
 
   const handleToggleWorkspaceComposeBar = useCallback(() => {
     setIsComposeBarOpen(prev => !prev);
@@ -1100,8 +1161,11 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     const storeActiveTransferTabIds = listTerminalTabIdsWithRetainingTransfers(
       sftpTransferCenterStore.getSnapshot().tasks,
     );
+    // Keep owners with unfinished transfers or external-editor temps mounted
+    // even after the terminal tab id drops out of the valid set.
     const activeTransferTabIds = new Set([
       ...sftpActiveTransfersByTabRef.current.keys(),
+      ...sftpActiveExternalEditsByTabRef.current.keys(),
       ...storeActiveTransferTabIds,
     ]);
     const invalidTabIds = listInvalidSftpPanelTabIds({
@@ -1968,6 +2032,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     handleSessionExit,
     handleSftpCurrentPathChange,
     handleSftpActiveTransfersChange,
+    handleSftpActiveExternalEditsChange,
     handleSftpInitialLocationApplied,
     persistSidePanelWidth,
     handleSnippetClickForFocusedSession,

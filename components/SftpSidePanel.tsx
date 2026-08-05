@@ -10,7 +10,16 @@
  * Used in TerminalLayer to provide SFTP alongside terminal sessions.
  */
 
-import React, { memo, useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
+import React, {
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MutableRefObject,
+} from "react";
 import { SftpSidePanelDeferredMount } from "./SftpSidePanelDeferredMount";
 import { TERMINAL_SIDE_PANEL_INNER_HEADER_CLASS } from "./terminalLayer/terminalSidePanelChrome";
 import { formatHostPort } from "../domain/host";
@@ -103,6 +112,8 @@ interface SftpSidePanelProps {
   onInitialLocationApplied?: (location: { hostId: string; path: string }) => void;
   onCurrentPathChange?: (location: { hostId: string; connectionKey: string; path: string }) => void;
   onActiveTransfersChange?: (count: number) => void;
+  /** External-editor temps that must keep this owner mounted after panel close. */
+  onActiveExternalEditsChange?: (count: number) => void;
   showWorkspaceHostHeader?: boolean;
   isVisible?: boolean;
   renderOverlays?: boolean;
@@ -150,6 +161,7 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
   onInitialLocationApplied,
   onCurrentPathChange,
   onActiveTransfersChange,
+  onActiveExternalEditsChange,
   showWorkspaceHostHeader = false,
   isVisible = true,
   renderOverlays = true,
@@ -404,6 +416,14 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
     activeTransfersCount: sftp.activeTransfersCount,
     onActiveTransfersChange,
   });
+
+  // Parent retain-on-close only sees transfers unless we also publish external
+  // editor temp activity (closeSftp deletes those files on unmount).
+  const onActiveExternalEditsChangeRef = useRef(onActiveExternalEditsChange);
+  onActiveExternalEditsChangeRef.current = onActiveExternalEditsChange;
+  useLayoutEffect(() => {
+    onActiveExternalEditsChangeRef.current?.(sftp.activeExternalEditCount ?? 0);
+  }, [sftp.activeExternalEditCount]);
 
   // Register this instance's writeTextFileByConnection with the editor bridge
   // so editor tabs promoted from SFTP files opened in a terminal side panel
@@ -1730,6 +1750,7 @@ const sidePanelAreEqual = (prev: SftpSidePanelProps, next: SftpSidePanelProps): 
   prev.onRequestTerminalFocus === next.onRequestTerminalFocus &&
   prev.onCurrentPathChange === next.onCurrentPathChange &&
   prev.onActiveTransfersChange === next.onActiveTransfersChange &&
+  prev.onActiveExternalEditsChange === next.onActiveExternalEditsChange &&
   prev.initialLocation?.hostId === next.initialLocation?.hostId &&
   prev.initialLocation?.path === next.initialLocation?.path &&
   // Only the keepalive fields of terminalSettings affect SFTP connection

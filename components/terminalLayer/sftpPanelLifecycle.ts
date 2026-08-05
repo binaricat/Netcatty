@@ -56,8 +56,13 @@ export function listTerminalTabIdsWithRetainingTransfers(
   return [...tabIds];
 }
 
-export function shouldKeepSftpMountedAfterClose(activeTransfersCount: number): boolean {
-  return activeTransfersCount > 0;
+export function shouldKeepSftpMountedAfterClose(params: {
+  activeTransfersCount: number;
+  /** External-editor temps still need the browse session (closeSftp deletes them). */
+  activeExternalEditCount?: number;
+}): boolean {
+  return params.activeTransfersCount > 0
+    || (params.activeExternalEditCount ?? 0) > 0;
 }
 
 export function shouldCloseSftpSidePanel(params: {
@@ -74,19 +79,23 @@ export function shouldCloseSftpSidePanel(params: {
 
 export function shouldClearSftpPanelAfterTransferChange(params: {
   activeTransfersCount: number;
+  activeExternalEditCount?: number;
   panelOpen: boolean;
   retainedAfterClose: boolean;
 }): boolean {
   return params.activeTransfersCount <= 0
+    && (params.activeExternalEditCount ?? 0) <= 0
     && !params.panelOpen
     && !params.retainedAfterClose;
 }
 
 export function shouldScheduleSftpRetainedPanelCleanup(params: {
   activeTransfersCount: number;
+  activeExternalEditCount?: number;
   retainedAfterClose: boolean;
 }): boolean {
   return params.activeTransfersCount <= 0
+    && (params.activeExternalEditCount ?? 0) <= 0
     && params.retainedAfterClose;
 }
 
