@@ -560,6 +560,9 @@ export const resetFrameGate = (
   frameGateStates.delete(term);
 };
 
+/** Ingress flushed to xterm during hibernate before release can ACK it. */
+const frameGateHibernateFlushedIngress = new WeakMap<XTerm, number>();
+
 // Wire hibernate/close drains to write held DEC 2026 buffers into xterm before
 // serialization (avoids circular import with terminalUnfocusedRepaint).
 registerFrameGateHibernateHooks({
@@ -568,13 +571,21 @@ registerFrameGateHibernateHooks({
     return Boolean(state?.buffer);
   },
   flushToTerm: (term) => {
-    resetFrameGate(term, (buffer) => {
+    resetFrameGate(term, (buffer, ingress) => {
       if (buffer) {
         try {
           term.write(buffer);
         } catch {
           // ignore write failures during teardown
         }
+      }
+      // Preserve ingress for releaseTerminalFlowBeforeHibernate so the backend
+      // is not left paused on flushed-but-unacked frame-gate bytes (Codex P2).
+      if (ingress > 0) {
+        frameGateHibernateFlushedIngress.set(
+          term,
+          (frameGateHibernateFlushedIngress.get(term) ?? 0) + ingress,
+        );
       }
     });
   },
@@ -1061,12 +1072,16 @@ export const releaseTerminalFlowBeforeHibernate = (
   resetDeferredTerminalWriteAck(term);
   // Only the backend is in scope here; acknowledge held ingress so hibernation
   // does not leave the source paused on bytes that will never be written.
+  // Also ACK any ingress already flushed to xterm by the hibernate drain hook.
+  let hibernateIngress = frameGateHibernateFlushedIngress.get(term) ?? 0;
+  frameGateHibernateFlushedIngress.delete(term);
   resetFrameGate(term, (_buffer, ingress) => {
-    if (ingress > 0) {
-      ackTerminalSessionFlow(backend, sessionId, ingress);
-      flushTerminalSessionFlowAck(sessionId);
-    }
+    hibernateIngress += ingress;
   });
+  if (hibernateIngress > 0) {
+    ackTerminalSessionFlow(backend, sessionId, hibernateIngress);
+    flushTerminalSessionFlowAck(sessionId);
+  }
   terminalFlowControllers.delete(term);
 };
 
