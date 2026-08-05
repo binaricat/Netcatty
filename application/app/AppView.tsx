@@ -23,6 +23,7 @@ import { toast } from '../../components/ui/toast';
 import { AppHostTreeLayer } from './AppHostTreeLayer';
 import { AppHostEditorLayer } from './AppHostEditorLayer';
 import { AppPluginKeybindingHost } from './AppPluginKeybindingHost';
+import { shouldOpenHostEditOnWorkSurface } from './workTabSurface';
 import { getUiThemeById } from '../../infrastructure/config/uiThemes';
 import { buildAppThemeCssVars } from '../state/settingsStateDefaults';
 import { useMainWindowInputFocusRecovery } from '../state/useMainWindowInputFocusRecovery';
@@ -182,6 +183,21 @@ function AppViewInner({ domains }: AppViewProps) {
     onUpdateHosts: updateHosts,
     onSaved: handleWorkSurfaceHostSaved,
   });
+  const openWorkSurfaceHostEdit = workSurfaceHostEditor.openEdit;
+  const handleEditHostFromOverlay = useCallback((host: (typeof hosts)[number]) => {
+    if (shouldOpenHostEditOnWorkSurface(activeTabStore.getActiveTabId())) {
+      openWorkSurfaceHostEdit(host);
+      return;
+    }
+    setDeepLinkHostDraft(host);
+    setNavigateToSection('hosts');
+    setActiveTabId('vault');
+  }, [
+    openWorkSurfaceHostEdit,
+    setActiveTabId,
+    setDeepLinkHostDraft,
+    setNavigateToSection,
+  ]);
   const handleCreateWorkSurfaceHostGroup = useCallback((groupPath: string) => {
     updateCustomGroups(Array.from(new Set([...customGroups, groupPath])));
   }, [customGroups, updateCustomGroups]);
@@ -272,6 +288,7 @@ function AppViewInner({ domains }: AppViewProps) {
         onRenameSession={startSessionRename}
         onCopySession={copySessionWithCurrentShell}
         onCopySessionToNewWindow={copySessionToNewWindowWithCurrentShell}
+        onEditHost={handleEditHostFromOverlay}
         onRenameWorkspace={startWorkspaceRename}
         onCopyWorkspace={copyWorkspaceWithCurrentShell}
         onCloseWorkspace={closeWorkspace}
@@ -667,6 +684,11 @@ function AppViewInner({ domains }: AppViewProps) {
               showSftpTab={settings.showSftpTab}
               onQueryChange={setQuickSearch}
               onSelect={handleHostConnectWithProtocolCheck}
+              onEditHost={(host) => {
+                setIsQuickSwitcherOpen(false);
+                setQuickSearch('');
+                handleEditHostFromOverlay(host);
+              }}
               onSelectTab={(tabId) => {
                 setActiveTabId(tabId);
                 setIsQuickSwitcherOpen(false);

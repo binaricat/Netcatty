@@ -9,6 +9,7 @@ import {
   reorderWorkTabIds,
   resolveWorkTabActiveHostId,
   resolveWorkTabHostTreeTheme,
+  shouldOpenHostEditOnWorkSurface,
 } from './workTabSurface';
 import type { EditorTab } from '../state/editorTabStore';
 import type { Host, TerminalSession, TerminalTheme, Workspace } from '../../types';
@@ -75,6 +76,15 @@ test('root pages are not work tab surfaces', () => {
   assert.equal(isRootPageTabId('vault'), true);
   assert.equal(isRootPageTabId('sftp'), true);
   assert.equal(isRootPageTabId('session-1'), false);
+});
+
+test('host edit overlay prefers work-surface editor except on vault/sftp/plugin tabs', () => {
+  assert.equal(shouldOpenHostEditOnWorkSurface('session-1'), true);
+  assert.equal(shouldOpenHostEditOnWorkSurface('workspace-1'), true);
+  assert.equal(shouldOpenHostEditOnWorkSurface('editor:file-1'), true);
+  assert.equal(shouldOpenHostEditOnWorkSurface('vault'), false);
+  assert.equal(shouldOpenHostEditOnWorkSurface('sftp'), false);
+  assert.equal(shouldOpenHostEditOnWorkSurface('plugin-view:demo'), false);
 });
 
 test('shared host tree is visible for editor, log, session, and workspace tabs', () => {

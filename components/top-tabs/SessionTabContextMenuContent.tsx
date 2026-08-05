@@ -1,7 +1,7 @@
 import React from 'react';
 
 import type { useI18n } from '../../application/i18n/I18nProvider';
-import type { TerminalSession } from '../../types';
+import type { Host, TerminalSession } from '../../types';
 import { ContextMenuContent, ContextMenuItem } from '../ui/context-menu';
 
 type TranslateFn = ReturnType<typeof useI18n>['t'];
@@ -15,6 +15,9 @@ interface SessionTabContextMenuContentProps {
   onReconnectSession: (sessionId: string) => void;
   sessionStatus: TerminalSession['status'];
   onRenameSession: (sessionId: string) => void;
+  /** Vault host for this session; omit edit when missing (e.g. local shell). */
+  editHost?: Host;
+  onEditHost?: (host: Host) => void;
   renderBulkCloseItems?: (anchorId: string) => React.ReactNode;
   t: TranslateFn;
 }
@@ -28,6 +31,8 @@ export function SessionTabContextMenuContent({
   onReconnectSession,
   sessionStatus,
   onRenameSession,
+  editHost,
+  onEditHost,
   renderBulkCloseItems,
   t,
 }: SessionTabContextMenuContentProps) {
@@ -42,6 +47,11 @@ export function SessionTabContextMenuContent({
       <ContextMenuItem onClick={() => onRenameSession(sessionId)}>
         {t('common.rename')}
       </ContextMenuItem>
+      {editHost && onEditHost && (
+        <ContextMenuItem onClick={() => onEditHost(editHost)}>
+          {t('terminal.layer.hostTree.editHost')}
+        </ContextMenuItem>
+      )}
       {onCopySession && (
         <ContextMenuItem onClick={() => onCopySession(sessionId)}>
           {t('tabs.copyTab')}

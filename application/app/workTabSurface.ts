@@ -23,6 +23,14 @@ export function isRootPageTabId(activeTabId: string): boolean {
   return activeTabId === 'vault' || activeTabId === 'sftp';
 }
 
+/**
+ * Host edit from overlays (Quick Switcher): use the terminal work-surface
+ * HostDetailsPanel when a work tab is active; otherwise deep-link into Vault.
+ */
+export function shouldOpenHostEditOnWorkSurface(activeTabId: string): boolean {
+  return !isRootPageTabId(activeTabId) && !isPluginViewTabId(activeTabId);
+}
+
 export function buildOrderedWorkTabIds(
   tabOrder: readonly string[],
   allTabIds: readonly string[],

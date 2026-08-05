@@ -19,6 +19,13 @@ test('keeps the new workspace action outside the scrollable results', () => {
   assert.match(source, /VariableSizeVirtualList/);
 });
 
+test('host rows expose optional edit-host context menu', () => {
+  const source = readFileSync(new URL('./QuickSwitcher.tsx', import.meta.url), 'utf8');
+  assert.match(source, /onEditHost\?: \(host: Host\) => void/);
+  assert.match(source, /terminal\.layer\.hostTree\.editHost/);
+  assert.match(source, /ContextMenuTrigger asChild/);
+});
+
 test('pointer hover never rewrites the keyboard selection', () => {
   const quickSwitcherSource = readFileSync(new URL('./QuickSwitcher.tsx', import.meta.url), 'utf8');
   const workspacePickerSource = readFileSync(new URL('./workspace/AddToWorkspaceDialog.tsx', import.meta.url), 'utf8');

@@ -131,6 +131,7 @@ interface TopTabsProps {
   onRenameSession: (sessionId: string) => void;
   onCopySession: (sessionId: string) => void;
   onCopySessionToNewWindow: (sessionId: string) => void;
+  onEditHost?: (host: Host) => void;
   onRenameWorkspace: (workspaceId: string) => void;
   onCopyWorkspace: (workspaceId: string) => void;
   onCloseWorkspace: (workspaceId: string) => void;
@@ -177,6 +178,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
   onRenameSession,
   onCopySession,
   onCopySessionToNewWindow,
+  onEditHost,
   onRenameWorkspace,
   onCopyWorkspace,
   onCloseWorkspace,
@@ -804,6 +806,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
             onRenameSession={onRenameSession}
             onCopySession={onCopySession}
             onCopySessionToNewWindow={onCopySessionToNewWindow}
+            onEditHost={onEditHost}
             renderBulkCloseItems={renderBulkCloseItems}
             dynamicTabTitleMode={dynamicTabTitleMode}
             t={t}
@@ -1170,6 +1173,7 @@ export const topTabsAreEqual = (prev: TopTabsProps, next: TopTabsProps): boolean
     prev.isMacClient === next.isMacClient &&
     prev.onCopySession === next.onCopySession &&
     prev.onCopySessionToNewWindow === next.onCopySessionToNewWindow &&
+    prev.onEditHost === next.onEditHost &&
     prev.onCopyWorkspace === next.onCopyWorkspace &&
     prev.onOpenSettings === next.onOpenSettings &&
     prev.externalMcpEnabled === next.externalMcpEnabled &&
