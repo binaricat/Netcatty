@@ -678,7 +678,7 @@ Highlight the focused split pane:
   'settings.terminal.rendering.renderer.desc': 'Choose the terminal rendering technology. Auto will use DOM on low-memory devices. Changes take effect on new terminal sessions.',
   'settings.terminal.rendering.auto': 'Auto',
   'settings.terminal.rendering.allowTransparency': 'Allow transparency',
-  'settings.terminal.rendering.allowTransparency.desc': 'Rasterise glyphs onto a transparent tile rather than onto their background colour. Costs a little quality on low-DPI displays, but lets one cached glyph serve every background it is drawn over — which keeps content that changes the background per cell (animated backgrounds, heatmaps, ANSI art) from re-rasterising every glyph on every frame.',
+  'settings.terminal.rendering.allowTransparency.desc': 'Rasterise glyphs onto a transparent tile rather than onto their background colour. Costs a little quality on low-DPI displays, but lets one cached glyph serve every background it is drawn over — which keeps content that changes the background per cell (animated backgrounds, heatmaps, ANSI art) from re-rasterising every glyph on every frame. Takes effect on new terminal sessions only (xterm cannot change this after open).',
   'settings.terminal.rendering.hibernateHiddenTabs': 'Hibernate hidden tabs',
   'settings.terminal.rendering.hibernateHiddenTabs.desc': 'Dispose the terminal renderer for off-screen tabs to save memory while keeping the SSH session connected. Skipped during file transfers.',
   'settings.terminal.rendering.hibernateHiddenTabsDelay': 'Hibernate delay',

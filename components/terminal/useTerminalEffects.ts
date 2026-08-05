@@ -959,8 +959,9 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
         terminalSettings.drawBoldInBrightColors;
       termRef.current.options.minimumContrastRatio =
         terminalSettings.minimumContrastRatio;
-      termRef.current.options.allowTransparency =
-        terminalSettings.allowTransparency;
+      // allowTransparency is construction-time only (xterm: must be set before
+      // Terminal.open()). Do not assign here — the renderer/glyph atlas keeps
+      // the open-time mode until a new terminal session is created (Codex P2).
       termRef.current.options.smoothScrollDuration =
         terminalSettings.smoothScrolling
           ? XTERM_PERFORMANCE_CONFIG.rendering.smoothScrollDuration
