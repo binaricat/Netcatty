@@ -19,7 +19,12 @@ export type StopExternalFileWatch = (
 ) => void | Promise<unknown>;
 
 export type SubscribeExternalFileWatchStopped = (
-  callback: (payload: { watchId: string }) => void,
+  callback: (payload: {
+    watchId: string;
+    localPath?: string;
+    remotePath?: string;
+    sftpId?: string;
+  }) => void,
 ) => (() => void) | void;
 
 export interface ExternalFileWatchLifecycle {
@@ -32,16 +37,19 @@ export interface ExternalFileWatchLifecycle {
 export function useExternalFileWatchLifecycle(
   stopWatch: StopExternalFileWatch,
   subscribeStopped?: SubscribeExternalFileWatchStopped,
+  onStoppedLocalPath?: (localPath: string) => void,
 ): ExternalFileWatchLifecycle {
   const watchIdsRef = useRef<Set<string>>(new Set());
   const activeCountRef = useRef(0);
   const stopWatchRef = useRef(stopWatch);
   const subscribeStoppedRef = useRef(subscribeStopped);
+  const onStoppedLocalPathRef = useRef(onStoppedLocalPath);
   const disposedRef = useRef(false);
   const generationRef = useRef(0);
   const invalidatedCleanupTempFilesRef = useRef(false);
   stopWatchRef.current = stopWatch;
   subscribeStoppedRef.current = subscribeStopped;
+  onStoppedLocalPathRef.current = onStoppedLocalPath;
 
   const captureGeneration = useCallback(() => generationRef.current, []);
 
@@ -86,9 +94,10 @@ export function useExternalFileWatchLifecycle(
     };
   }, [releaseAll]);
 
-  useEffect(() => subscribeStoppedRef.current?.(({ watchId }) => {
+  useEffect(() => subscribeStoppedRef.current?.(({ watchId, localPath }) => {
     if (!watchId || !watchIdsRef.current.delete(watchId)) return;
     activeCountRef.current = watchIdsRef.current.size;
+    if (localPath) onStoppedLocalPathRef.current?.(localPath);
   }), []);
 
   return { activeCountRef, captureGeneration, remember, releaseAll };

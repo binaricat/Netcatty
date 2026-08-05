@@ -138,9 +138,13 @@ test("release invalidates pending watch starts while a new generation remains us
 
 test("backend session cleanup removes a stopped watch from renderer ownership", async () => {
   const stopped: Array<{ watchId: string; cleanupTempFile: boolean }> = [];
-  let onBackendStopped: ((payload: { watchId: string }) => void) | null = null;
+  let onBackendStopped: ((payload: {
+    watchId: string;
+    localPath?: string;
+  }) => void) | null = null;
   let lifecycle: ExternalFileWatchLifecycle | null = null;
   let renderer: ReactTestRenderer | null = null;
+  const forgottenPaths: string[] = [];
 
   function Probe() {
     lifecycle = useExternalFileWatchLifecycle(
@@ -151,6 +155,7 @@ test("backend session cleanup removes a stopped watch from renderer ownership", 
         onBackendStopped = callback;
         return () => { onBackendStopped = null; };
       },
+      (localPath) => { forgottenPaths.push(localPath); },
     );
     return null;
   }
@@ -162,9 +167,13 @@ test("backend session cleanup removes a stopped watch from renderer ownership", 
   assert.equal(lifecycle!.activeCountRef.current, 1);
 
   await act(async () => {
-    onBackendStopped?.({ watchId: "watch-closed-with-session" });
+    onBackendStopped?.({
+      watchId: "watch-closed-with-session",
+      localPath: "/tmp/externally-deleted.txt",
+    });
   });
   assert.equal(lifecycle!.activeCountRef.current, 0);
+  assert.deepEqual(forgottenPaths, ["/tmp/externally-deleted.txt"]);
 
   await act(async () => renderer!.unmount());
   await new Promise((resolve) => setImmediate(resolve));

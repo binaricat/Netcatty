@@ -164,23 +164,6 @@ export const useSftpExternalOperations = (
     },
   }), [registerUploadController]);
 
-  // Track every renderer-owned watch id so duplicate opens stay deduplicated
-  // and panel/window teardown releases the worker-side polling resources.
-  const stopExternalFileWatch = useCallback(async (watchId: string, cleanupTempFile: boolean) => {
-    await netcattyBridge.get()?.stopFileWatch?.(watchId, cleanupTempFile);
-  }, []);
-  const subscribeExternalFileWatchStopped = useCallback((
-    callback: (payload: { watchId: string }) => void,
-  ) => netcattyBridge.get()?.onFileWatchStopped?.(callback), []);
-  const {
-    activeCountRef: activeFileWatchCountRef,
-    captureGeneration: captureExternalFileWatchGeneration,
-    remember: rememberExternalFileWatch,
-    releaseAll: releaseExternalFileWatchesBase,
-  } = useExternalFileWatchLifecycle(
-    stopExternalFileWatch,
-    subscribeExternalFileWatchStopped,
-  );
   // Temp files downloaded for external editors (even without auto-sync watches).
   // Parking / disconnect / reconnect call closeSftp, which deletes these paths —
   // forget matching retainers so hasActiveWork does not stick after cleanup.
@@ -198,6 +181,26 @@ export const useSftpExternalOperations = (
     if (!externalEditTempsRef.current.forgetSftp(sftpId)) return;
     setActiveExternalEditCount(externalEditTempsRef.current.size);
   }, []);
+
+  // Track every renderer-owned watch id so duplicate opens stay deduplicated
+  // and panel/window teardown releases the worker-side polling resources.
+  const stopExternalFileWatch = useCallback(async (watchId: string, cleanupTempFile: boolean) => {
+    await netcattyBridge.get()?.stopFileWatch?.(watchId, cleanupTempFile);
+  }, []);
+  const subscribeExternalFileWatchStopped = useCallback((
+    callback: (payload: { watchId: string; localPath?: string }) => void,
+  ) => netcattyBridge.get()?.onFileWatchStopped?.(callback), []);
+  const {
+    activeCountRef: activeFileWatchCountRef,
+    captureGeneration: captureExternalFileWatchGeneration,
+    remember: rememberExternalFileWatch,
+    releaseAll: releaseExternalFileWatchesBase,
+  } = useExternalFileWatchLifecycle(
+    stopExternalFileWatch,
+    subscribeExternalFileWatchStopped,
+    // Force-stop (temp deleted / session cleanup) includes localPath — drop retainer.
+    forgetExternalEditTemp,
+  );
   const releaseExternalFileWatches = useCallback(async (cleanupTempFiles = false) => {
     await releaseExternalFileWatchesBase(cleanupTempFiles);
     if (externalEditTempsRef.current.clear()) {
