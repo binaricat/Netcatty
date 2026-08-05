@@ -167,6 +167,22 @@ export function formatTerminalTitleConnectionAddress(host?: TerminalTitleAddress
   return `${username}${host.hostname}${port}`;
 }
 
+/** Host info bar label: vault server name plus user@host when both are available. */
+export function formatTerminalHostInfoBarTitle({
+  serverName,
+  connectionAddress,
+}: {
+  serverName?: string | null;
+  connectionAddress?: string | null;
+}): string {
+  const name = (serverName || "").trim();
+  const address = (connectionAddress || "").trim();
+  if (name && address && name !== address) {
+    return `${name} · ${address}`;
+  }
+  return name || address;
+}
+
 /** Height (px) of the one-line "enable Network Device Mode" tip strip. */
 export const NETWORK_DEVICE_TIP_HEIGHT = 28;
 
@@ -365,6 +381,12 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
     });
   }, [host.id, onUpdateHost, showLineTimestampGutter]);
   const titleConnectionAddress = formatTerminalTitleConnectionAddress(host);
+  // Prefer vault host.label over sessionDisplayName so dynamic tab titles
+  // (cwd / coding-cli) do not replace the stable server name in this bar.
+  const hostInfoBarTitle = formatTerminalHostInfoBarTitle({
+    serverName: host.label || sessionDisplayName,
+    connectionAddress: titleConnectionAddress,
+  });
   const hasBlockingReconnectOverlay = Boolean(osc52ReadPromptVisible || osc7SetupOpen || scriptExecutionOverlay || zmodem.active || zmodem.overwriteRequest);
   const showEnterReconnectHint = shouldReconnectTerminalOnEnterKey({
     key: "Enter",
@@ -530,8 +552,8 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
                     data-terminal-detach-drag-handle={inWorkspace && onDetachPointerDown ? "true" : undefined}
                     onPointerDown={onDetachPointerDown}
                   >
-                    <span className="whitespace-nowrap truncate min-w-0 max-w-[18rem]" title={titleConnectionAddress || sessionDisplayName || host.label}>
-                      {titleConnectionAddress || sessionDisplayName || host.label}
+                    <span className="whitespace-nowrap truncate min-w-0 max-w-[18rem]" title={hostInfoBarTitle}>
+                      {hostInfoBarTitle}
                     </span>
                   </div>}
                   {host.protocol !== "local" && host.hostname && host.hostname !== "localhost" && (
