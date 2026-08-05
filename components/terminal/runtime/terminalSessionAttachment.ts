@@ -709,8 +709,11 @@ export const writeSessionData = (
   // Engage on a complete opener, on already-buffered output, or on a trailing
   // split opener (`ESC[?2026h` cut across PTY chunks) so an aligned stream can
   // never bypass the gate by landing the opener on a chunk boundary.
+  // Include 8-bit C1 CSI opener (`\x9b?2026h`) so C1 animated streams enter the
+  // collapse/drop gate the same way as ESC CSI (Codex P2 on 3690e6e4).
   const engaged = (state && state.buffer.length > 0)
     || data.includes("\x1b[?2026h")
+    || data.includes("\x9b?2026h")
     || endsWithSyncOpenerPrefix(data);
   if (!engaged) {
     forwardSessionData(ctx, term, data, ingressBytes, meta);
