@@ -107,6 +107,9 @@ test('ordinary shell commands ending with a colon are not untrusted input prompt
   assert.equal(isUntrustedTerminalInputPrompt('router> show ip:'), true);
   // Mid-label `#` is not a prompt boundary (no whitespace after `#`).
   assert.equal(isUntrustedTerminalInputPrompt('Challenge #1:'), true);
+  // Markers inside English challenge labels must not look like a shell PS1.
+  assert.equal(isUntrustedTerminalInputPrompt('Challenge # 1:'), true);
+  assert.equal(isUntrustedTerminalInputPrompt('Account $ code:'), true);
   // Standalone auth-shaped lines without a confirmed shell prompt still fail closed.
   assert.equal(isUntrustedTerminalInputPrompt('Please authenticate: '), true);
   assert.equal(isUntrustedTerminalInputPrompt('Token: '), true);

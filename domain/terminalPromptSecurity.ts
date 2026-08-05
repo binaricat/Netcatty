@@ -135,12 +135,28 @@ export function shouldUsePluginTerminalCompletionProvider(input: {
 }
 
 /**
+ * Body text before a `$` / `#` / `%` terminator that is plausible as a shell
+ * PS1 (bare marker, user@host, path, shell-version, or lowercase identity).
+ * Rejects English challenge labels that only happen to end with those markers
+ * (`Challenge #`, `Account $`).
+ */
+function isPlausibleShellPromptBody(body: string): boolean {
+  const trimmed = body.trim();
+  if (!trimmed) return true;
+  if (/@|[/\\~:]/u.test(trimmed)) return true;
+  if (/^(?:bash|zsh|sh|fish|ksh|csh|tcsh|dash)(?:-[\d.]+)?$/iu.test(trimmed)) return true;
+  // Single lowercase identity token: root, ubuntu, pi — not Title-Case labels.
+  return /^[a-z0-9_.-]+$/u.test(trimmed);
+}
+
+/**
  * True when a confirmed shell/device prompt is followed by typed text on the
  * same logical line (e.g. `user@host:~$ lsof -i:`). Trailing `:` / `>` in that
  * typed text is ordinary command input, not an authentication boundary.
  *
  * Requires a real prompt boundary (terminator + whitespace) so mid-label
- * shapes like `Challenge #1:` stay fail-closed.
+ * shapes like `Challenge #1:` stay fail-closed. For `$`/`#`/`%`, also requires
+ * a plausible PS1 body so `Challenge # 1:` / `Account $ code:` stay untrusted.
  */
 function hasTypedInputAfterConfirmedPrompt(
   line: string,
@@ -154,7 +170,12 @@ function hasTypedInputAfterConfirmedPrompt(
     const rest = line.slice(i + 1);
     // Prompt terminators are followed by whitespace before typed input.
     if (!/^\s+\S/u.test(rest)) continue;
-    if (isConfirmedTerminalShellPrompt(line.slice(0, i + 1), options)) return true;
+    const candidate = line.slice(0, i + 1);
+    if (!isConfirmedTerminalShellPrompt(candidate, options)) continue;
+    if ((ch === '$' || ch === '#' || ch === '%') && !isPlausibleShellPromptBody(candidate.slice(0, -1))) {
+      continue;
+    }
+    return true;
   }
   return false;
 }
