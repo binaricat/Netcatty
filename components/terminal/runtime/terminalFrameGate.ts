@@ -54,8 +54,14 @@ const DROPPABLE_CSI_FINALS = new Set([
   "J", "K", // erase in display / line
   "S", "T", // scroll up / down
 ]);
-/** C0 controls that only move the cursor. */
-const DROPPABLE_C0 = new Set(["\r", "\n", "\t", "\b"]);
+/**
+ * C0 controls that only move the cursor without mutating scrollback.
+ * LF (`\n`) is intentionally excluded: on the normal buffer with the cursor on
+ * the bottom row, xterm scrolls and can add a history line. Dropping such a
+ * frame before xterm sees it loses scrollback that a later full repaint cannot
+ * restore (while the backend has already been acked).
+ */
+const DROPPABLE_C0 = new Set(["\r", "\t", "\b"]);
 
 /**
  * True when every byte of `content` is a cursor move, SGR, erase, or cell text

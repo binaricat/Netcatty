@@ -81,7 +81,9 @@ test("does not drop a frame whose payload is not purely visual", () => {
 
 test("droppable payload: cursor moves, SGR, erase and text are allowed", () => {
   assert.equal(isDroppableVisualPayload("\x1b[1;1H\x1b[38;5;5mabc\x1b[K"), true);
-  assert.equal(isDroppableVisualPayload("\r\n\tplain text"), true);
+  assert.equal(isDroppableVisualPayload("\r\tplain text"), true);
+  assert.equal(isDroppableVisualPayload("\nrepaint"), false, "LF can scroll scrollback");
+  assert.equal(isDroppableVisualPayload("\r\n\tplain text"), false, "LF not droppable");
   assert.equal(isDroppableVisualPayload("\x1b[2Jfull"), true);
 });
 
