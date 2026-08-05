@@ -52,7 +52,9 @@ const DROPPABLE_CSI_FINALS = new Set([
   "d", "`", // line / column position (VPA / HPA)
   "m", // SGR
   "J", "K", // erase in display / line
-  "S", "T", // scroll up / down
+  // SU/SD (S/T) intentionally omitted: they scroll the buffer/region and can
+  // mutate history; a later full repaint restores cells but not lost scroll
+  // (Codex P2 on d2e6999e).
 ]);
 /**
  * C0 controls that only move the cursor without mutating scrollback.

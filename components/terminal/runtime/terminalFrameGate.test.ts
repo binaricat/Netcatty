@@ -96,6 +96,8 @@ test("un-droppable payload: side-effecting sequences are rejected", () => {
   assert.equal(isDroppableVisualPayload("\x1b[?1049h"), false, "alt-screen");
   assert.equal(isDroppableVisualPayload("\x1bP1;2q\x1b\\"), false, "DCS");
   assert.equal(isDroppableVisualPayload("\x1b[c"), false, "device attributes");
+  assert.equal(isDroppableVisualPayload("\x1b[1S"), false, "SU scrolls buffer");
+  assert.equal(isDroppableVisualPayload("\x1b[1T"), false, "SD scrolls buffer");
 });
 
 // ---- viewportRepaintCoverage / makesFullRepaint ---------------------------
