@@ -85,3 +85,30 @@ test('unknown prompt-shaped authentication boundaries fail closed', () => {
   assert.equal(isUntrustedTerminalInputPrompt('router> ', { allowHostStyleGreaterThan: true }), false);
   assert.equal(isUntrustedTerminalInputPrompt('router> '), true);
 });
+
+test('ordinary shell commands ending with a colon are not untrusted input prompts (#2709)', () => {
+  // Broadcast pauses while passwordPromptActive is sticky. Typing `lsof -i:`
+  // must not trip the fail-closed colon heuristic, or peers miss the rest.
+  const commandLines = [
+    'user@host:~$ lsof -i:',
+    'bash-5.2$ lsof -i:',
+    'root# lsof -i:',
+    'PS C:\\Users\\alice> lsof -i:',
+    'C:\\Users\\alice> lsof -i:',
+  ];
+  for (const line of commandLines) {
+    assert.equal(isUntrustedTerminalInputPrompt(line), false, line);
+  }
+  assert.equal(
+    isUntrustedTerminalInputPrompt('router> show ip:', { allowHostStyleGreaterThan: true }),
+    false,
+  );
+  // Bare host-style prompts stay fail-closed unless explicitly allowed.
+  assert.equal(isUntrustedTerminalInputPrompt('router> show ip:'), true);
+  // Mid-label `#` is not a prompt boundary (no whitespace after `#`).
+  assert.equal(isUntrustedTerminalInputPrompt('Challenge #1:'), true);
+  // Standalone auth-shaped lines without a confirmed shell prompt still fail closed.
+  assert.equal(isUntrustedTerminalInputPrompt('Please authenticate: '), true);
+  assert.equal(isUntrustedTerminalInputPrompt('Token: '), true);
+  assert.equal(isUntrustedTerminalInputPrompt('Password: '), true);
+});

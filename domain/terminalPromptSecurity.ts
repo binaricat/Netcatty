@@ -135,6 +135,31 @@ export function shouldUsePluginTerminalCompletionProvider(input: {
 }
 
 /**
+ * True when a confirmed shell/device prompt is followed by typed text on the
+ * same logical line (e.g. `user@host:~$ lsof -i:`). Trailing `:` / `>` in that
+ * typed text is ordinary command input, not an authentication boundary.
+ *
+ * Requires a real prompt boundary (terminator + whitespace) so mid-label
+ * shapes like `Challenge #1:` stay fail-closed.
+ */
+function hasTypedInputAfterConfirmedPrompt(
+  line: string,
+  options: ConfirmedPromptOptions = {},
+): boolean {
+  for (let i = 0; i < line.length - 1; i += 1) {
+    const ch = line[i];
+    // Only terminators that can end a confirmed prompt without relying on a
+    // glyph appearing later in the typed command.
+    if (ch !== '$' && ch !== '#' && ch !== '%' && ch !== '>') continue;
+    const rest = line.slice(i + 1);
+    // Prompt terminators are followed by whitespace before typed input.
+    if (!/^\s+\S/u.test(rest)) continue;
+    if (isConfirmedTerminalShellPrompt(line.slice(0, i + 1), options)) return true;
+  }
+  return false;
+}
+
+/**
  * Fail closed for prompt-shaped input boundaries that are not positively
  * identified as an ordinary shell/device prompt. This protects custom PAM,
  * bastion, and appliance challenges whose labels contain no known vocabulary.
@@ -147,6 +172,9 @@ export function isUntrustedTerminalInputPrompt(
   if (!prompt) return false;
   if (isSensitiveTerminalChallenge(prompt)) return true;
   if (!/[:：>›»]\s*$/u.test(prompt)) return false;
+  // Mid-command punctuation after a real shell prompt must keep broadcasting
+  // (#2709). Standalone `Label:` / `Custom>` challenges still fail closed.
+  if (hasTypedInputAfterConfirmedPrompt(prompt, options)) return false;
   return !isConfirmedTerminalShellPrompt(prompt, options);
 }
 
