@@ -8,6 +8,7 @@ import {
   isDroppableVisualPayload,
   makesFullRepaint,
   payloadContainsSgr,
+  payloadMayAutowrapScroll,
   viewportRepaintCoverage,
 } from "./terminalFrameGate.ts";
 
@@ -289,4 +290,16 @@ test("endsWithSyncOpenerPrefix detects a split opener tail", () => {
   assert.equal(endsWithSyncOpenerPrefix("abc\x1b"), true);
   assert.equal(endsWithSyncOpenerPrefix("abc\x1b[?2026h"), false, "complete opener is not a prefix hold");
   assert.equal(endsWithSyncOpenerPrefix("plain"), false);
+});
+
+test("payloadMayAutowrapScroll detects wrap past bottom-right", () => {
+  const cols = 4;
+  const rows = 2;
+  // Exact fill of viewport from home: last cell sets wrap pending, no scroll yet.
+  const exact = `\x1b[H${"x".repeat(cols * rows)}`;
+  assert.equal(payloadMayAutowrapScroll(exact, cols, rows), false);
+  // One more cell after last: delayed autowrap scrolls.
+  const overflow = `\x1b[H${"x".repeat(cols * rows + 1)}`;
+  assert.equal(payloadMayAutowrapScroll(overflow, cols, rows), true);
+  assert.equal(payloadMayAutowrapScroll("x".repeat(cols * rows + 1), cols, rows), true);
 });

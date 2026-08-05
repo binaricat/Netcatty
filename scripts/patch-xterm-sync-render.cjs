@@ -69,6 +69,12 @@ for (const { file, from, to } of TARGETS) {
     already++;
     continue;
   }
+  // Upstream (or a prior unmarked apply) already has the widened ternary —
+  // treat as already fixed so postinstall does not fail (Codex P3).
+  if (src.includes(to)) {
+    already++;
+    continue;
+  }
   if (src.split(from).length - 1 === 1) {
     fs.writeFileSync(abs, src.replace(from, withMarker), "utf8");
     patched++;

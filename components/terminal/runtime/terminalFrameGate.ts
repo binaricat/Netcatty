@@ -167,6 +167,100 @@ export const isDroppableVisualPayload = (content: string): boolean => {
  * movement, cell output and erases against a `cols`×`rows` grid. Used to prove a
  * frame repaints (nearly) the whole screen before an earlier frame is dropped.
  */
+/**
+ * True when writing `content` from the default (0,0) cursor can trigger xterm
+ * delayed autowrap into a scroll (past the bottom-right cell). Such frames must
+ * not be dropped: the successor full-repaint restores cells but not scrollback
+ * history lines created by the wrap (Codex P2).
+ */
+export const payloadMayAutowrapScroll = (
+  content: string,
+  cols: number,
+  rows: number,
+): boolean => {
+  if (cols <= 0 || rows <= 0) return true;
+  let row = 0;
+  let col = 0;
+  let wrapPending = false;
+  const applyCsi = (paramStart: number): number => {
+    let j = paramStart;
+    let params = "";
+    while (j < content.length) {
+      const c = content.charCodeAt(j);
+      if (c >= 0x30 && c <= 0x3f) { params += content[j]; j++; } else break;
+    }
+    while (j < content.length && content.charCodeAt(j) >= 0x20 && content.charCodeAt(j) <= 0x2f) j++;
+    const final = content[j];
+    const nums = params.split(";").map((p) => (p === "" ? undefined : parseInt(p, 10)));
+    const n0 = nums[0];
+    if (final === "H" || final === "f") {
+      row = Math.max(0, Math.min(rows - 1, (n0 ?? 1) - 1));
+      col = Math.max(0, Math.min(cols - 1, (nums[1] ?? 1) - 1));
+      wrapPending = false;
+    } else if (final === "A") { row = Math.max(0, row - (n0 ?? 1)); wrapPending = false; }
+    else if (final === "B" || final === "E") { row = Math.min(rows - 1, row + (n0 ?? 1)); wrapPending = false; }
+    else if (final === "C") { col = Math.min(cols - 1, col + (n0 ?? 1)); wrapPending = false; }
+    else if (final === "D") { col = Math.max(0, col - (n0 ?? 1)); wrapPending = false; }
+    else if (final === "G" || final === "`") { col = Math.max(0, Math.min(cols - 1, (n0 ?? 1) - 1)); wrapPending = false; }
+    else if (final === "d") { row = Math.max(0, Math.min(rows - 1, (n0 ?? 1) - 1)); wrapPending = false; }
+    return final === undefined ? content.length : j + 1;
+  };
+  let i = 0;
+  while (i < content.length) {
+    const ch = content[i];
+    const code = content.charCodeAt(i);
+    if (ch === "\x1b") {
+      if (content[i + 1] === "[") {
+        i = applyCsi(i + 2);
+        continue;
+      }
+      i += content[i + 1] === undefined ? 1 : 2;
+      continue;
+    }
+    if (code === 0x9b) {
+      i = applyCsi(i + 1);
+      continue;
+    }
+    if (code < 0x20) {
+      if (ch === "\n") {
+        wrapPending = false;
+        row += 1;
+        if (row >= rows) return true;
+        col = 0;
+      } else if (ch === "\r") {
+        col = 0;
+        wrapPending = false;
+      } else if (ch === "\b") {
+        col = Math.max(0, col - 1);
+        wrapPending = false;
+      } else if (ch === "\t") {
+        col = Math.min(cols - 1, (Math.floor(col / 8) + 1) * 8);
+        wrapPending = false;
+      }
+      i++;
+      continue;
+    }
+    if (code === 0x7f || (code >= 0x80 && code <= 0x9f)) {
+      i++;
+      continue;
+    }
+    if (wrapPending) {
+      wrapPending = false;
+      col = 0;
+      row += 1;
+      if (row >= rows) return true;
+    }
+    if (col >= cols - 1) {
+      wrapPending = true;
+      col = cols - 1;
+    } else {
+      col += 1;
+    }
+    i++;
+  }
+  return false;
+};
+
 export const viewportRepaintCoverage = (
   content: string,
   cols: number,
@@ -371,6 +465,7 @@ export type FrameGateSplit = { complete: string; partial: string; dropped: numbe
 export const collapseAndSplit = (
   buffer: string,
   isFullRepaint: (content: string) => boolean,
+  viewport?: { cols: number; rows: number },
 ): FrameGateSplit => {
   const frames: Frame[] = [];
   let cursor = 0;
@@ -427,6 +522,11 @@ export const collapseAndSplit = (
       && isDroppableVisualPayload(cur.content)
       && isFullRepaint(next.content)
       && (!payloadContainsSgr(cur.content) || payloadContainsSgr(next.content))
+      // Reject predecessors that can autowrap-scroll (Codex P2).
+      && !(
+        viewport
+        && payloadMayAutowrapScroll(cur.content, viewport.cols, viewport.rows)
+      )
     ) {
       drop[i] = true;
     }

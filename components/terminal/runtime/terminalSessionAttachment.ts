@@ -641,8 +641,9 @@ const drainFrameGate = (
   // viewport (proven by simulating the writes and counting covered cells), never
   // on raw payload length, which SGR escapes inflate.
   const { complete, partial, dropped } = collapseAndSplit(
-    state.buffer,
+    gate.buffer,
     (content) => makesFullRepaint(content, term.cols, term.rows),
+    { cols: term.cols, rows: term.rows },
   );
 
   // Apportion the buffered ingress across forwarded / dropped / held so the
