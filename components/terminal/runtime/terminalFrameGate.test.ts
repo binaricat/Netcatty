@@ -103,9 +103,11 @@ test("un-droppable payload: side-effecting sequences are rejected", () => {
 // ---- viewportRepaintCoverage / makesFullRepaint ---------------------------
 
 test("coverage counts distinct written cells, with wrap", () => {
-  assert.equal(viewportRepaintCoverage("abcd", 4, 1), 4);
-  assert.equal(viewportRepaintCoverage("abcd", 2, 2), 4); // wraps to second row
-  assert.equal(viewportRepaintCoverage("ab", 4, 1), 2);
+  // Paints only count after an origin reset (CUP/ED2).
+  assert.equal(viewportRepaintCoverage(`${HOME}abcd`, 4, 1), 4);
+  assert.equal(viewportRepaintCoverage(`${HOME}abcd`, 2, 2), 4); // wraps to second row
+  assert.equal(viewportRepaintCoverage(`${HOME}ab`, 4, 1), 2);
+  assert.equal(viewportRepaintCoverage("abcd", 4, 1), 0, "no origin → no coverage");
 });
 
 test("coverage honors cursor positioning and erases", () => {
@@ -250,8 +252,8 @@ test("coverage ignores OSC/DCS control-string payloads (not cell paints)", () =>
   // C1 forms: OSC (0x9D) + BEL, DCS (0x90) + C1 ST (0x9C).
   assert.equal(viewportRepaintCoverage("\x9d0;title\x07", cols, rows), 0, "C1 OSC");
   assert.equal(viewportRepaintCoverage("\x90data\x9c", cols, rows), 0, "C1 DCS");
-  // Real cell writes after OSC still count; OSC itself does not inflate.
-  assert.equal(viewportRepaintCoverage(`${oscBel}ab`, cols, rows), 2, "cells after OSC still count");
+  // Real cell writes after origin + OSC still count; OSC itself does not inflate.
+  assert.equal(viewportRepaintCoverage(`${HOME}${oscBel}ab`, cols, rows), 2, "cells after OSC still count");
   // A short paint padded with OSC must not pass the full-repaint bar.
   const shortPlusOsc = `${HOME}z${oscBel}`;
   assert.equal(makesFullRepaint(shortPlusOsc, cols, rows), false, "OSC must not inflate partial paint");
@@ -260,6 +262,12 @@ test("coverage ignores OSC/DCS control-string payloads (not cell paints)", () =>
   const oscOnly = frame(oscBel);
   const pred = (c: string) => makesFullRepaint(c, cols, rows);
   assert.equal(collapseAndSplit(stale + oscOnly, pred).dropped, 0, "OSC successor must not drop prior frame");
+  // CSI H only after paints must not retroactively validate those paints.
+  assert.equal(
+    viewportRepaintCoverage(`ab${HOME}`, cols, rows),
+    0,
+    "origin at end does not count preceding cells",
+  );
 });
 
 test("holds back a split sync opener as partial", () => {

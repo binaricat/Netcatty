@@ -176,9 +176,14 @@ export const viewportRepaintCoverage = (
   const covered = new Set<number>();
   let row = 0;
   let col = 0;
+  // Only count cells painted after an explicit origin reset (CUP/ED2). A late
+  // CSI H at the end of a frame must not retroactively validate paints from
+  // the simulated (0,0) start (Codex P2 on 6b54464a).
+  let originKnown = false;
   const clampRow = () => { row = row < 0 ? 0 : row >= rows ? rows - 1 : row; };
   const clampCol = () => { col = col < 0 ? 0 : col >= cols ? cols - 1 : col; };
   const mark = (r: number, c: number) => {
+    if (!originKnown) return;
     if (r >= 0 && r < rows && c >= 0 && c < cols) covered.add(r * cols + c);
   };
   const markRange = (r: number, from: number, to: number) => {
@@ -208,8 +213,14 @@ export const viewportRepaintCoverage = (
     const final = content[j];
     const nums = params.split(";").map((p) => (p === "" ? undefined : parseInt(p, 10)));
     const n0 = nums[0];
-    if (final === "H" || final === "f") { row = (n0 ?? 1) - 1; col = (nums[1] ?? 1) - 1; clampRow(); clampCol(); }
-    else if (final === "A") { row -= n0 ?? 1; clampRow(); }
+    if (final === "H" || final === "f") {
+      row = (n0 ?? 1) - 1;
+      col = (nums[1] ?? 1) - 1;
+      clampRow();
+      clampCol();
+      // CUP establishes a known origin for subsequent paints only.
+      originKnown = true;
+    } else if (final === "A") { row -= n0 ?? 1; clampRow(); }
     else if (final === "B" || final === "E") { row += n0 ?? 1; clampRow(); }
     else if (final === "C") { col += n0 ?? 1; clampCol(); }
     else if (final === "D") { col -= n0 ?? 1; clampCol(); }
@@ -217,13 +228,11 @@ export const viewportRepaintCoverage = (
     else if (final === "d") { row = (n0 ?? 1) - 1; clampRow(); }
     else if (final === "J") {
       const p = n0 ?? 0;
-      // ED2 (p=2) must NOT count as full coverage here: when the user is
-      // scrolled up, filterTerminalSessionData may strip CSI 2 J from DEC 2026
-      // blocks after this gate runs. Crediting the clear would let us drop a
-      // prior frame that the stripped successor never repaints (Codex P2 on
-      // fcd6bbfa). ED3 clears scrollback only and likewise grants no coverage.
+      // ED2 establishes a known origin (cursor typically homes) but must NOT
+      // count cells as coverage — scrolled-up filter may strip ED2 later.
+      if (p === 2) { originKnown = true; }
       // ED0/ED1 still mark the cells they clear (not stripped by that filter).
-      if (p === 0) { markRange(row, col, cols - 1); for (let r = row + 1; r < rows; r++) markRange(r, 0, cols - 1); }
+      else if (p === 0) { markRange(row, col, cols - 1); for (let r = row + 1; r < rows; r++) markRange(r, 0, cols - 1); }
       else if (p === 1) { for (let r = 0; r < row; r++) markRange(r, 0, cols - 1); markRange(row, 0, col); }
     } else if (final === "K") {
       const p = n0 ?? 0;
@@ -332,7 +341,7 @@ export const hasKnownCursorOrigin = (content: string): boolean => {
 /** A successor frame that demonstrably repaints (almost) the whole viewport. */
 export const makesFullRepaint = (content: string, cols: number, rows: number): boolean => {
   if (cols <= 0 || rows <= 0) return false;
-  if (!hasKnownCursorOrigin(content)) return false;
+  // Coverage only counts cells after an in-order origin reset (CUP/ED2).
   const total = cols * rows;
   const covered = viewportRepaintCoverage(content, cols, rows);
   // Exact full coverage, or near-full (>= 99%) so tiny clamp/wrap off-by-ones
