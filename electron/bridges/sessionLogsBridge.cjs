@@ -253,9 +253,31 @@ async function openSessionLogsDir(event, payload) {
   }
 }
 
+// Auto-save writes `{hostDir}/{YYYY-MM-DDTHH-MM-SS}.{txt|log|html}`.
+// Manual export / continuous logs commonly write `{label}_{YYYY-MM-DDTHH-MM-SS}.{ext}`.
+const SESSION_LOG_TIMESTAMP_FILE = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.(txt|log|html)$/i;
+const SESSION_LOG_LABELED_FILE = /^.+_\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.(txt|log|html)$/i;
+
 /**
- * Delete all files and host subdirectories inside the configured session
- * logs directory (used by the "clear all logs" action in Settings).
+ * True when a basename matches a Netcatty session-log artifact filename.
+ * Used so "clear all" never wipes unrelated files in a shared save directory.
+ */
+function isSessionLogArtifactName(name) {
+  const base = path.basename(String(name || ""));
+  return SESSION_LOG_TIMESTAMP_FILE.test(base) || SESSION_LOG_LABELED_FILE.test(base);
+}
+
+/**
+ * Delete known session-log artifacts inside the configured save directory
+ * (used by the "clear all logs" action in Settings).
+ *
+ * Only removes:
+ * - Top-level files matching session-log filename patterns
+ * - Host subdirectories that exclusively contain session-log files
+ * - Session-log files inside mixed host subdirectories (other entries kept)
+ *
+ * Never deletes unrelated top-level files/folders (e.g. Documents/Downloads
+ * when the user pointed the save directory at a shared folder).
  */
 async function clearSessionLogsDir(event, payload = {}) {
   const { directory } = payload;
@@ -268,15 +290,88 @@ async function clearSessionLogsDir(event, payload = {}) {
   let failedCount = 0;
 
   try {
-    const entries = await fs.promises.readdir(directory);
+    const entries = await fs.promises.readdir(directory, { withFileTypes: true });
     for (const entry of entries) {
-      const entryPath = path.join(directory, entry);
+      const entryPath = path.join(directory, entry.name);
+
+      // Skip anything that is not a plain file or directory (symlinks, sockets, …).
+      // Use dirent type when available; fall back to lstat for exotic FS entries.
+      let isFile = entry.isFile();
+      let isDirectory = entry.isDirectory();
+      if ((!isFile && !isDirectory) || entry.isSymbolicLink()) {
+        // Dirent may report the target type for some platforms; re-check with lstat
+        // so we never follow or delete symlink targets outside the save directory.
+        try {
+          const st = await fs.promises.lstat(entryPath);
+          if (st.isSymbolicLink()) continue;
+          isFile = st.isFile();
+          isDirectory = st.isDirectory();
+        } catch {
+          continue;
+        }
+      }
+      if (!isFile && !isDirectory) continue;
+
       try {
-        await fs.promises.rm(entryPath, { recursive: true, force: true });
-        deletedCount++;
+        if (isFile) {
+          if (!isSessionLogArtifactName(entry.name)) continue;
+          await fs.promises.rm(entryPath, { force: true });
+          deletedCount++;
+          continue;
+        }
+
+        // Host subdirectory created by auto-save: only touch known log files.
+        const nested = await fs.promises.readdir(entryPath, { withFileTypes: true });
+        const logFiles = [];
+        let hasNonLogEntry = false;
+
+        for (const nestedEntry of nested) {
+          const nestedPath = path.join(entryPath, nestedEntry.name);
+          let nestedIsFile = nestedEntry.isFile();
+          if (nestedEntry.isSymbolicLink() || (!nestedIsFile && !nestedEntry.isDirectory())) {
+            try {
+              const st = await fs.promises.lstat(nestedPath);
+              if (st.isSymbolicLink() || !st.isFile()) {
+                hasNonLogEntry = true;
+                continue;
+              }
+              nestedIsFile = true;
+            } catch {
+              hasNonLogEntry = true;
+              continue;
+            }
+          }
+          if (nestedIsFile && isSessionLogArtifactName(nestedEntry.name)) {
+            logFiles.push(nestedPath);
+          } else {
+            hasNonLogEntry = true;
+          }
+        }
+
+        if (logFiles.length === 0) {
+          // Not an app host-log folder (or empty / only non-log content) — leave it alone.
+          continue;
+        }
+
+        if (!hasNonLogEntry) {
+          // Pure session-log host folder: remove the whole directory as one artifact.
+          await fs.promises.rm(entryPath, { recursive: true, force: true });
+          deletedCount++;
+        } else {
+          // Mixed directory: only delete known log files; keep the rest.
+          for (const logPath of logFiles) {
+            try {
+              await fs.promises.rm(logPath, { force: true });
+              deletedCount++;
+            } catch (err) {
+              failedCount++;
+              console.error(`[SessionLogs] Could not delete ${path.basename(logPath)}:`, err.message);
+            }
+          }
+        }
       } catch (err) {
         failedCount++;
-        console.error(`[SessionLogs] Could not delete ${entry}:`, err.message);
+        console.error(`[SessionLogs] Could not delete ${entry.name}:`, err.message);
       }
     }
     return { success: true, deletedCount, failedCount };
@@ -447,6 +542,7 @@ module.exports = {
   autoSaveSessionLog,
   openSessionLogsDir,
   clearSessionLogsDir,
+  isSessionLogArtifactName,
   startManualSessionLog,
   stopManualSessionLog,
   getManualSessionLogStatus,

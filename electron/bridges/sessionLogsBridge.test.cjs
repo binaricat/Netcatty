@@ -107,7 +107,21 @@ test("auto-save host directory falls back when the sanitized host label is empty
   }
 });
 
-test("clearSessionLogsDir deletes host subdirectories and files from the save directory", async () => {
+test("isSessionLogArtifactName matches auto-save and labeled export filenames", () => {
+  const { isSessionLogArtifactName } = loadBridgeWithDialog({});
+
+  assert.equal(isSessionLogArtifactName("2026-01-01T00-00-00.txt"), true);
+  assert.equal(isSessionLogArtifactName("2026-01-01T00-00-00.log"), true);
+  assert.equal(isSessionLogArtifactName("2026-01-01T00-00-00.html"), true);
+  assert.equal(isSessionLogArtifactName("my-host_2026-01-01T00-00-00.txt"), true);
+  assert.equal(isSessionLogArtifactName("生产_服务器_2026-08-05T15-33-00.log"), true);
+  assert.equal(isSessionLogArtifactName("stray.log"), false);
+  assert.equal(isSessionLogArtifactName("notes.txt"), false);
+  assert.equal(isSessionLogArtifactName("2026-01-01.txt"), false);
+  assert.equal(isSessionLogArtifactName("readme.md"), false);
+});
+
+test("clearSessionLogsDir deletes host log folders and labeled exports only", async () => {
   const directory = path.join(TEMP_ROOT, `clear-${Date.now()}-${Math.random().toString(16).slice(2)}`);
   const { clearSessionLogsDir } = loadBridgeWithDialog({});
 
@@ -115,14 +129,66 @@ test("clearSessionLogsDir deletes host subdirectories and files from the save di
     const hostDir = path.join(directory, "my-host");
     fs.mkdirSync(hostDir, { recursive: true });
     fs.writeFileSync(path.join(hostDir, "2026-01-01T00-00-00.txt"), "hello\n");
+    fs.writeFileSync(path.join(hostDir, "2026-01-02T12-30-00.log"), "raw\n");
+    // Labeled export-style artifact at the save-dir root (manual export / continuous log).
+    fs.writeFileSync(path.join(directory, "my-host_2026-01-03T01-02-03.txt"), "export\n");
+    // Unrelated user content in a shared save directory must survive clear-all.
     fs.writeFileSync(path.join(directory, "stray.log"), "stray\n");
+    fs.writeFileSync(path.join(directory, "notes.txt"), "keep me\n");
+    fs.mkdirSync(path.join(directory, "Photos"), { recursive: true });
+    fs.writeFileSync(path.join(directory, "Photos", "vacation.jpg"), "jpeg");
 
     const result = await clearSessionLogsDir(null, { directory });
 
     assert.equal(result.success, true);
-    assert.equal(result.deletedCount, 2);
+    assert.equal(result.deletedCount, 2); // pure host folder + labeled export file
     assert.equal(result.failedCount, 0);
-    assert.deepEqual(fs.readdirSync(directory), []);
+    assert.deepEqual(fs.readdirSync(directory).sort(), ["Photos", "notes.txt", "stray.log"]);
+    assert.equal(fs.readFileSync(path.join(directory, "stray.log"), "utf8"), "stray\n");
+    assert.equal(fs.readFileSync(path.join(directory, "Photos", "vacation.jpg"), "utf8"), "jpeg");
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("clearSessionLogsDir only removes log files inside mixed host directories", async () => {
+  const directory = path.join(TEMP_ROOT, `clear-mixed-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  const { clearSessionLogsDir } = loadBridgeWithDialog({});
+
+  try {
+    const hostDir = path.join(directory, "shared-host-folder");
+    fs.mkdirSync(hostDir, { recursive: true });
+    fs.writeFileSync(path.join(hostDir, "2026-01-01T00-00-00.txt"), "log\n");
+    fs.writeFileSync(path.join(hostDir, "user-notes.md"), "do not delete\n");
+
+    const result = await clearSessionLogsDir(null, { directory });
+
+    assert.equal(result.success, true);
+    assert.equal(result.deletedCount, 1);
+    assert.equal(result.failedCount, 0);
+    assert.deepEqual(fs.readdirSync(directory), ["shared-host-folder"]);
+    assert.deepEqual(fs.readdirSync(hostDir), ["user-notes.md"]);
+    assert.equal(fs.readFileSync(path.join(hostDir, "user-notes.md"), "utf8"), "do not delete\n");
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("clearSessionLogsDir leaves unrelated empty or non-log folders alone", async () => {
+  const directory = path.join(TEMP_ROOT, `clear-unrelated-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  const { clearSessionLogsDir } = loadBridgeWithDialog({});
+
+  try {
+    fs.mkdirSync(path.join(directory, "empty-folder"), { recursive: true });
+    fs.mkdirSync(path.join(directory, "docs"), { recursive: true });
+    fs.writeFileSync(path.join(directory, "docs", "readme.md"), "hi\n");
+
+    const result = await clearSessionLogsDir(null, { directory });
+
+    assert.equal(result.success, true);
+    assert.equal(result.deletedCount, 0);
+    assert.equal(result.failedCount, 0);
+    assert.deepEqual(fs.readdirSync(directory).sort(), ["docs", "empty-folder"]);
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }
