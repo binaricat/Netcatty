@@ -182,28 +182,45 @@ const clearStallWatchdog = (queue: TerminalWriteQueue): void => {
 };
 
 /**
- * Claim and sum unacknowledged dropBytes of a stalled item: the
- * dispatched-but-uncompleted step and everything after it. Steps before it
- * already claimed via their write closures, so counting the whole item would
- * double-ack them. `nextIndex` points one past the dispatched step, hence
- * `nextIndex - 1`. Claiming here makes a late real callback's
+ * Claim dropBytes only for the currently dispatched step of a stalled item.
+ * Flood merges put many unstarted steps after `nextIndex`; those have never
+ * been written to xterm and must not be ACKed as dropped (Codex P1).
+ * `nextIndex` points one past the dispatched step, hence `nextIndex - 1`.
+ * Claiming here makes a late real callback's
  * {@link TerminalWriteSignal.tryClaimFlowAck} return false.
  */
-const claimUnackedBytesOf = (item: QueuedWrite): number => {
+const claimDispatchedStepBytesOf = (item: QueuedWrite): number => {
   const from = Math.max(0, item.nextIndex - 1);
-  const steps = item.steps.slice(from);
-  if (steps.length === 0) {
-    // No step slots (shouldn't happen for a real item); fall back to item total
-    // only when nothing has been claimed yet via steps.
+  const step = item.steps[from];
+  if (!step) {
     return item.dropBytes;
   }
-  let unacked = 0;
-  for (const step of steps) {
-    if (tryClaimStepFlowAck(step)) {
-      unacked += step.dropBytes;
-    }
+  return tryClaimStepFlowAck(step) ? step.dropBytes : 0;
+};
+
+/**
+ * Requeue steps that have not been written yet after a stall recovery on a
+ * flood-merged item, so remaining chunks still reach xterm.
+ */
+const requeueUnstartedTail = (queue: TerminalWriteQueue, item: QueuedWrite): void => {
+  const tail = item.steps.slice(item.nextIndex);
+  if (tail.length === 0) return;
+  let bytes = 0;
+  let dropBytes = 0;
+  for (const step of tail) {
+    bytes += step.bytes;
+    dropBytes += step.dropBytes;
   }
-  return unacked;
+  queue.pending.unshift({
+    bytes,
+    dropBytes,
+    steps: tail,
+    nextIndex: 0,
+    cancelled: false,
+    yieldAfter: item.yieldAfter,
+    maxDrainBytes: item.maxDrainBytes,
+  });
+  queue.pendingBytes += bytes;
 };
 
 /**
@@ -211,8 +228,9 @@ const claimUnackedBytesOf = (item: QueuedWrite): number => {
  * when the same item is still active, has made no progress since it was armed,
  * has nothing scheduled to advance it, *and* xterm's write buffer is idle — a
  * genuine lost-callback stall, never a slow-but-progressing parse. On fire it
- * claims the item's unacked bytes (so flow control resumes once, not twice when
- * a late callback arrives) and advances the queue.
+ * claims only the dispatched step's unacked bytes (so flow control resumes once,
+ * not twice when a late callback arrives), requeues any unstarted merged tail,
+ * and advances the queue.
  */
 const armStallWatchdog = (
   term: XTerm,
@@ -243,9 +261,11 @@ const armStallWatchdog = (
       return;
     }
     // Mark cancelled so a late real callback becomes a queue no-op, claim flow
-    // ack so the late path cannot double-ack, then advance.
+    // ack only for the dispatched step, requeue unstarted flood-merge tail, then
+    // advance.
     item.cancelled = true;
-    const unacked = claimUnackedBytesOf(item);
+    const unacked = claimDispatchedStepBytesOf(item);
+    requeueUnstartedTail(queue, item);
     queue.active = undefined;
     queue.drainBytes = 0;
     if (unacked > 0) {

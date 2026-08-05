@@ -167,6 +167,30 @@ test("late callback after watchdog cannot re-claim flow ack (no double-ack)", as
   assert.deepEqual(dropped, [4096], "no second onDropped from late done");
 });
 
+test("watchdog requeues unstarted flood-merged steps instead of ACKing them", async () => {
+  const term = makeTerm();
+  const dropped: number[] = [];
+  const ran: number[] = [];
+  setTerminalWriteQueueDropHandler(term, (bytes) => dropped.push(bytes));
+
+  // Flood merge into one active multi-step item: stall on step 0, keep steps 1-2
+  // unwritten. Watchdog must ACK only step 0 and requeue the rest.
+  for (let i = 0; i < 3; i += 1) {
+    enqueueTerminalWrite(term, 100, (done) => {
+      ran.push(i);
+      if (i === 0) return; // lost callback on first step only
+      setTimeout(done, 0);
+    }, { dropBytes: 100 });
+  }
+
+  await settle(50);
+  assert.deepEqual(ran, [0], "only the first merged step has started");
+
+  await settle(WRITE_QUEUE_STALL_TIMEOUT_MS + 300);
+  assert.deepEqual(dropped, [100], "only the dispatched step is flow-acked");
+  assert.deepEqual(ran, [0, 1, 2], "unstarted tail is requeued and still runs");
+});
+
 test("watchdog does not force-complete while xterm write buffer is still busy", async () => {
   const term = makeBusyTerm(8192);
   assert.equal(isXtermWriteBufferIdle(term), false);
