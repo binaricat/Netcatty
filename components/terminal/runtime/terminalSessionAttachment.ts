@@ -96,6 +96,7 @@ import {
 } from "./terminalOutputPipeline";
 import {
   hasPendingTerminalWrites,
+  registerFrameGateHibernateHooks,
   maybeFlushTerminalWriteCoalescerWhenUnfocused,
   scheduleTerminalRepaintWhenUnfocused,
   shouldFlushTerminalWritesForBackgroundOutput,
@@ -558,6 +559,26 @@ export const resetFrameGate = (
   if (state.buffer) onHeld?.(state.buffer, state.ingress);
   frameGateStates.delete(term);
 };
+
+// Wire hibernate/close drains to write held DEC 2026 buffers into xterm before
+// serialization (avoids circular import with terminalUnfocusedRepaint).
+registerFrameGateHibernateHooks({
+  hasHeld: (term) => {
+    const state = frameGateStates.get(term);
+    return Boolean(state?.buffer);
+  },
+  flushToTerm: (term) => {
+    resetFrameGate(term, (buffer) => {
+      if (buffer) {
+        try {
+          term.write(buffer);
+        } catch {
+          // ignore write failures during teardown
+        }
+      }
+    });
+  },
+});
 
 /**
  * Drain as much of the gate's held buffer as the current backlog allows,

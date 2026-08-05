@@ -85,11 +85,27 @@ function getPendingTerminalWriteBufferBytes(term: XTerm): number {
   return bytes;
 }
 
+/**
+ * Optional frame-gate hooks registered from terminalSessionAttachment to avoid
+ * a circular import. Hibernate/close drains must write held DEC 2026 buffers
+ * into xterm before serialization, not only ACK their ingress.
+ */
+type FrameGateHibernateHooks = {
+  hasHeld: (term: XTerm) => boolean;
+  flushToTerm: (term: XTerm) => void;
+};
+let frameGateHibernateHooks: FrameGateHibernateHooks | null = null;
+
+export const registerFrameGateHibernateHooks = (hooks: FrameGateHibernateHooks): void => {
+  frameGateHibernateHooks = hooks;
+};
+
 export function hasPendingTerminalWrites(term: XTerm): boolean {
   return (
     getTerminalWriteCoalescerPendingBytes(term) > 0
     || hasPendingTerminalWriteQueueWork(term)
     || getPendingTerminalWriteBufferBytes(term) > 0
+    || Boolean(frameGateHibernateHooks?.hasHeld(term))
   );
 }
 
@@ -181,6 +197,8 @@ export async function flushPendingTerminalWritesBeforeHibernate(
 ): Promise<boolean> {
   const deadline = Date.now() + Math.max(0, timeoutMs);
   while (true) {
+    // Release held DEC 2026 frames into xterm before snapshotting (Codex P2).
+    frameGateHibernateHooks?.flushToTerm(term);
     flushTerminalWriteCoalescer(term);
     flushTerminalWriteQueueBypassingTimers(term);
 
@@ -193,6 +211,7 @@ export async function flushPendingTerminalWritesBeforeHibernate(
     await waitForTerminalWriteCallbacks(Math.min(TERMINAL_WRITE_SETTLE_POLL_MS, remainingMs));
   }
 
+  frameGateHibernateHooks?.flushToTerm(term);
   flushTerminalWriteCoalescer(term);
   flushTerminalWriteQueueBypassingTimers(term);
   return !hasPendingTerminalWrites(term);
