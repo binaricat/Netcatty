@@ -574,9 +574,17 @@ registerFrameGateHibernateHooks({
     resetFrameGate(term, (buffer, ingress) => {
       if (buffer) {
         try {
-          term.write(buffer);
+          // Route through the same scrollback-safe filter as live writes so a
+          // held HOME+CSI 2 J full redraw does not yank scrollback on hibernate
+          // (Codex P2 on e8c49563).
+          const filtered = filterTerminalSessionData(term, buffer);
+          if (filtered) term.write(filtered);
         } catch {
-          // ignore write failures during teardown
+          try {
+            term.write(buffer);
+          } catch {
+            // ignore write failures during teardown
+          }
         }
       }
       // Preserve ingress for releaseTerminalFlowBeforeHibernate so the backend
