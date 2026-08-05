@@ -304,9 +304,35 @@ export const viewportRepaintCoverage = (
  */
 const FULL_REPAINT_COVERAGE = 0.99;
 
+/**
+ * True when the frame establishes a known cursor origin (home / ED2) so
+ * coverage starting at (0,0) matches where xterm will actually paint. Without
+ * this, a screenful of cells written from a non-home cursor is miscounted as a
+ * full repaint (Codex P2 on 6e927291).
+ */
+export const hasKnownCursorOrigin = (content: string): boolean => {
+  if (
+    content.includes("\x1b[2J")
+    || content.includes("\x9b2J")
+    || content.includes("\x1b[H")
+    || content.includes("\x1b[f")
+    || content.includes("\x1b[1;1H")
+    || content.includes("\x1b[1;1f")
+    || content.includes("\x1b[;1H")
+    || content.includes("\x9bH")
+    || content.includes("\x9bf")
+    || content.includes("\x9b1;1H")
+    || content.includes("\x9b1;1f")
+  ) {
+    return true;
+  }
+  return false;
+};
+
 /** A successor frame that demonstrably repaints (almost) the whole viewport. */
 export const makesFullRepaint = (content: string, cols: number, rows: number): boolean => {
   if (cols <= 0 || rows <= 0) return false;
+  if (!hasKnownCursorOrigin(content)) return false;
   const total = cols * rows;
   const covered = viewportRepaintCoverage(content, cols, rows);
   // Exact full coverage, or near-full (>= 99%) so tiny clamp/wrap off-by-ones
