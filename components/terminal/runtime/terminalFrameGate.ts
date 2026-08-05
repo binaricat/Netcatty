@@ -64,6 +64,38 @@ const DROPPABLE_CSI_FINALS = new Set([
 const DROPPABLE_C0 = new Set(["\r", "\t", "\b"]);
 
 /**
+ * True when `content` contains at least one CSI SGR (`…m`) sequence.
+ * Used so a frame that only changes rendition is not dropped unless its
+ * successor also re-establishes SGR (otherwise xterm keeps pre-drop colors).
+ */
+export const payloadContainsSgr = (content: string): boolean => {
+  let i = 0;
+  while (i < content.length) {
+    if (content[i] === "\x1b" && content[i + 1] === "[") {
+      let j = i + 2;
+      while (j < content.length) {
+        const c = content.charCodeAt(j);
+        if (c >= 0x30 && c <= 0x3f) {
+          j++;
+          continue;
+        }
+        if (c >= 0x20 && c <= 0x2f) {
+          j++;
+          continue;
+        }
+        if (content[j] === "m") return true;
+        i = j + 1;
+        break;
+      }
+      if (j >= content.length) return false;
+      continue;
+    }
+    i++;
+  }
+  return false;
+};
+
+/**
  * True when every byte of `content` is a cursor move, SGR, erase, or cell text
  * — i.e. dropping the frame loses nothing but pixels a full repaint overwrites.
  * Anything else (BEL, device query/report, OSC, DCS/APC/PM/SOS, a private-mode
@@ -327,10 +359,14 @@ export const collapseAndSplit = (
   for (let i = 0; i < frames.length - 1; i++) {
     const cur = frames[i];
     const next = frames[i + 1];
+    // If the dropped frame carried SGR, the successor must re-establish
+    // rendition state (any CSI … m). Otherwise xterm keeps pre-drop colors
+    // when the successor omits redundant SGR (Codex P2 on dd606f39).
     if (
       next.start === cur.end
       && isDroppableVisualPayload(cur.content)
       && isFullRepaint(next.content)
+      && (!payloadContainsSgr(cur.content) || payloadContainsSgr(next.content))
     ) {
       drop[i] = true;
     }

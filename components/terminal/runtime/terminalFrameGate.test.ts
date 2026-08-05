@@ -7,6 +7,7 @@ import {
   endsWithSyncOpenerPrefix,
   isDroppableVisualPayload,
   makesFullRepaint,
+  payloadContainsSgr,
   viewportRepaintCoverage,
 } from "./terminalFrameGate.ts";
 
@@ -141,6 +142,19 @@ test("makesFullRepaint rejects partial paints even when well above 40% coverage"
   // Exact full coverage is accepted.
   const full = `${HOME}${"z".repeat(100)}`;
   assert.equal(makesFullRepaint(full, cols, rows), true);
+});
+
+test("collapse keeps SGR-bearing frames when the successor has no SGR", () => {
+  const sgrOnly = `${ON}${HOME}\x1b[31m${OFF}`;
+  // Full-viewport successor without SGR would otherwise drop the SGR frame and
+  // leave xterm on the previous color/style for the plain paint.
+  const plainFull = `${ON}${HOME}${"x".repeat(8)}${OFF}`;
+  const buffer = sgrOnly + plainFull;
+  const result = collapseAndSplit(buffer, (content) => makesFullRepaint(content, 4, 2));
+  assert.equal(result.dropped, 0, "must not drop SGR when successor omits SGR");
+  assert.ok(result.complete.includes("\x1b[31m"));
+  assert.equal(payloadContainsSgr("\x1b[1;1H\x1b[31mtext"), true);
+  assert.equal(payloadContainsSgr("\x1b[1;1Hplain"), false);
 });
 
 test("collapse drops only when coverage proves a full repaint", () => {
