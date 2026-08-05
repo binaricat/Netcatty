@@ -97,6 +97,7 @@ declare global {
       directory: string;
     }): Promise<{ success: boolean; error?: string; filePath?: string }>;
     openSessionLogsDir?(directory: string): Promise<{ success: boolean; error?: string }>;
+    clearSessionLogsDir?(directory: string): Promise<{ success: boolean; deletedCount: number; failedCount: number; error?: string }>;
     startManualSessionLog?(payload: {
       sessionId: string;
       sessionName?: string;

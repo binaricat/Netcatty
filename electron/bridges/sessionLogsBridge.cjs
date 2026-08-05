@@ -253,6 +253,42 @@ async function openSessionLogsDir(event, payload) {
   }
 }
 
+/**
+ * Delete all files and host subdirectories inside the configured session
+ * logs directory (used by the "clear all logs" action in Settings).
+ */
+async function clearSessionLogsDir(event, payload = {}) {
+  const { directory } = payload;
+
+  if (!directory) {
+    return { success: false, deletedCount: 0, failedCount: 0, error: "No directory specified" };
+  }
+
+  let deletedCount = 0;
+  let failedCount = 0;
+
+  try {
+    const entries = await fs.promises.readdir(directory);
+    for (const entry of entries) {
+      const entryPath = path.join(directory, entry);
+      try {
+        await fs.promises.rm(entryPath, { recursive: true, force: true });
+        deletedCount++;
+      } catch (err) {
+        failedCount++;
+        console.error(`[SessionLogs] Could not delete ${entry}:`, err.message);
+      }
+    }
+    return { success: true, deletedCount, failedCount };
+  } catch (err) {
+    if (err?.code === "ENOENT") {
+      return { success: true, deletedCount: 0, failedCount: 0 };
+    }
+    console.error("[SessionLogs] Failed to clear session logs directory:", err);
+    return { success: false, deletedCount, failedCount, error: err.message };
+  }
+}
+
 async function startManualSessionLog(event, payload = {}) {
   const sessionLogStreamManager = require("./sessionLogStreamManager.cjs");
   const { sessionId, sessionName, preferredDirectory, initialLine } = payload;
@@ -384,6 +420,7 @@ function registerHandlers(ipcMain, options = {}) {
   ipcMain.handle("netcatty:sessionLogs:selectDir", selectSessionLogsDir);
   ipcMain.handle("netcatty:sessionLogs:autoSave", autoSaveSessionLog);
   ipcMain.handle("netcatty:sessionLogs:openDir", openSessionLogsDir);
+  ipcMain.handle("netcatty:sessionLogs:clear", clearSessionLogsDir);
   ipcMain.handle("netcatty:sessionLog:manualStart", startManualSessionLog);
   ipcMain.handle("netcatty:sessionLog:manualStop", stopManualSessionLog);
   ipcMain.handle("netcatty:sessionLog:manualStatus", getManualSessionLogStatus);
@@ -409,6 +446,7 @@ module.exports = {
   selectSessionLogsDir,
   autoSaveSessionLog,
   openSessionLogsDir,
+  clearSessionLogsDir,
   startManualSessionLog,
   stopManualSessionLog,
   getManualSessionLogStatus,

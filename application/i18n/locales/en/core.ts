@@ -197,6 +197,9 @@ export const enCoreMessages: Messages = {
   'settings.sessionLogs.timestamps': 'Add timestamps',
   'settings.sessionLogs.timestampsDesc': 'Prefix each line in plain text and HTML logs with the local time.',
   'settings.sessionLogs.hint': 'Session logs capture all terminal output for troubleshooting and auditing purposes.',
+  'settings.sessionLogs.clearAll': 'Clear all logs',
+  'settings.sessionLogs.clearAllDesc': 'Delete all saved session log files and host subdirectories from the save directory.',
+  'settings.sessionLogs.clearConfirm': 'This will permanently delete all session log files in the save directory. This cannot be undone. Continue?',
 
   // Settings > SSH Debug Logs
   'settings.sshDebugLogs.title': 'SSH Debug Logs',

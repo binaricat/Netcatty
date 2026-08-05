@@ -194,6 +194,9 @@ export const zhTWCoreMessages: Messages = {
   'settings.sessionLogs.timestamps': '新增時間戳',
   'settings.sessionLogs.timestampsDesc': '為純文字和 HTML 日誌的每一行新增本機時間。',
   'settings.sessionLogs.hint': '工作階段日誌用於記錄終端輸出，便於故障排查和審計。',
+  'settings.sessionLogs.clearAll': '清空所有日誌',
+  'settings.sessionLogs.clearAllDesc': '刪除儲存目錄中所有工作階段日誌檔案及主機子目錄。',
+  'settings.sessionLogs.clearConfirm': '此操作將永久刪除儲存目錄中的所有工作階段日誌檔案，且無法復原，是否繼續？',
 
   // Settings > SSH Debug Logs
   'settings.sshDebugLogs.title': 'SSH 除錯日誌',

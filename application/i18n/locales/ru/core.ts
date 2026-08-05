@@ -185,6 +185,9 @@ export const ruCoreMessages: Messages = {
   'settings.sessionLogs.timestamps': 'Добавлять метки времени',
   'settings.sessionLogs.timestampsDesc': 'Добавлять локальное время в начало каждой строки в текстовых и HTML-журналах.',
   'settings.sessionLogs.hint': 'Журналы сессий сохраняют весь вывод терминала для диагностики и аудита.',
+  'settings.sessionLogs.clearAll': 'Очистить все журналы',
+  'settings.sessionLogs.clearAllDesc': 'Удалить все сохранённые файлы журналов сессий и вложенные папки хостов из папки сохранения.',
+  'settings.sessionLogs.clearConfirm': 'Это приведёт к безвозвратному удалению всех файлов журналов сессий в папке сохранения. Это действие нельзя отменить. Продолжить?',
 
   // Settings > SSH Debug Logs
   'settings.sshDebugLogs.title': 'Отладочные журналы SSH',

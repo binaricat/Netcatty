@@ -175,6 +175,8 @@ const SettingsSystemTab: React.FC<SettingsSystemTabProps> = ({
   const [crashLogClearResult, setCrashLogClearResult] = useState<{ deletedCount: number } | null>(null);
   const [sshDebugLogInfo, setSshDebugLogInfo] = useState<SshDebugLogInfo | null>(null);
   const [isLoadingSshDebugLogInfo, setIsLoadingSshDebugLogInfo] = useState(false);
+  const [isClearingSessionLogs, setIsClearingSessionLogs] = useState(false);
+  const [sessionLogsClearResult, setSessionLogsClearResult] = useState<{ deletedCount: number; failedCount: number } | null>(null);
 
   const [appVersion, setAppVersion] = useState('');
 
@@ -354,6 +356,25 @@ const SettingsSystemTab: React.FC<SettingsSystemTabProps> = ({
       console.error("[SettingsSystemTab] Failed to open directory:", err);
     }
   }, [sessionLogsDir]);
+
+  const handleClearSessionLogs = useCallback(async () => {
+    const bridge = netcattyBridge.get();
+    if (!sessionLogsDir || !bridge?.clearSessionLogsDir) return;
+    if (!window.confirm(t("settings.sessionLogs.clearConfirm"))) return;
+
+    setIsClearingSessionLogs(true);
+    setSessionLogsClearResult(null);
+    try {
+      const result = await bridge.clearSessionLogsDir(sessionLogsDir);
+      if (result.success) {
+        setSessionLogsClearResult({ deletedCount: result.deletedCount, failedCount: result.failedCount });
+      }
+    } catch (err) {
+      console.error("[SettingsSystemTab] Failed to clear session logs:", err);
+    } finally {
+      setIsClearingSessionLogs(false);
+    }
+  }, [sessionLogsDir, t]);
 
   const handleOpenSshDebugLogDir = useCallback(async () => {
     const bridge = netcattyBridge.get();
@@ -984,6 +1005,34 @@ const SettingsSystemTab: React.FC<SettingsSystemTabProps> = ({
                   onChange={setSessionLogsTimestampsEnabled}
                 />
               </SettingRow>
+
+              {/* Clear All Logs */}
+              <div className="space-y-2 pt-2 border-t border-border/60">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <p className="text-sm font-medium">{t("settings.sessionLogs.clearAll")}</p>
+                    <p className="text-xs text-muted-foreground">{t("settings.sessionLogs.clearAllDesc")}</p>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleClearSessionLogs}
+                    disabled={isClearingSessionLogs || !sessionLogsDir}
+                    className="gap-1.5 shrink-0 text-destructive hover:text-destructive hover:bg-destructive/10"
+                  >
+                    <Trash2 size={14} />
+                    {isClearingSessionLogs ? t("settings.system.clearing") : t("settings.sessionLogs.clearAll")}
+                  </Button>
+                </div>
+                {sessionLogsClearResult && (
+                  <p className="text-sm text-muted-foreground">
+                    {t("settings.system.clearResult", {
+                      deleted: sessionLogsClearResult.deletedCount,
+                      failed: sessionLogsClearResult.failedCount,
+                    })}
+                  </p>
+                )}
+              </div>
             </SettingCard>
 
             <p className="text-xs text-muted-foreground">

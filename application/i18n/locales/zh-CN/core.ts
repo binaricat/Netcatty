@@ -194,6 +194,9 @@ export const zhCNCoreMessages: Messages = {
   'settings.sessionLogs.timestamps': '添加时间戳',
   'settings.sessionLogs.timestampsDesc': '为纯文本和 HTML 日志的每一行添加本地时间。',
   'settings.sessionLogs.hint': '会话日志用于记录终端输出，便于故障排查和审计。',
+  'settings.sessionLogs.clearAll': '清空所有日志',
+  'settings.sessionLogs.clearAllDesc': '删除保存目录中所有会话日志文件及主机子目录。',
+  'settings.sessionLogs.clearConfirm': '此操作将永久删除保存目录中的所有会话日志文件，且无法撤销，是否继续？',
 
   // Settings > SSH Debug Logs
   'settings.sshDebugLogs.title': 'SSH 调试日志',

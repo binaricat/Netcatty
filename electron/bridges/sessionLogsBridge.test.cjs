@@ -107,6 +107,47 @@ test("auto-save host directory falls back when the sanitized host label is empty
   }
 });
 
+test("clearSessionLogsDir deletes host subdirectories and files from the save directory", async () => {
+  const directory = path.join(TEMP_ROOT, `clear-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  const { clearSessionLogsDir } = loadBridgeWithDialog({});
+
+  try {
+    const hostDir = path.join(directory, "my-host");
+    fs.mkdirSync(hostDir, { recursive: true });
+    fs.writeFileSync(path.join(hostDir, "2026-01-01T00-00-00.txt"), "hello\n");
+    fs.writeFileSync(path.join(directory, "stray.log"), "stray\n");
+
+    const result = await clearSessionLogsDir(null, { directory });
+
+    assert.equal(result.success, true);
+    assert.equal(result.deletedCount, 2);
+    assert.equal(result.failedCount, 0);
+    assert.deepEqual(fs.readdirSync(directory), []);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("clearSessionLogsDir is a no-op when the directory does not exist", async () => {
+  const directory = path.join(TEMP_ROOT, `clear-missing-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  const { clearSessionLogsDir } = loadBridgeWithDialog({});
+
+  const result = await clearSessionLogsDir(null, { directory });
+
+  assert.deepEqual(result, { success: true, deletedCount: 0, failedCount: 0 });
+});
+
+test("clearSessionLogsDir reports an error when no directory is specified", async () => {
+  const { clearSessionLogsDir } = loadBridgeWithDialog({});
+
+  const result = await clearSessionLogsDir(null, {});
+
+  assert.equal(result.success, false);
+  assert.equal(result.deletedCount, 0);
+  assert.equal(result.failedCount, 0);
+  assert.ok(result.error);
+});
+
 test("manual session logs survive tokenless stale stops and stop through the bridge", async () => {
   const directory = path.join(TEMP_ROOT, `manual-token-${Date.now()}-${Math.random().toString(16).slice(2)}`);
   const filePath = path.join(directory, "manual.log");
