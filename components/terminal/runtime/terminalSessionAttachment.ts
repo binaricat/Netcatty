@@ -446,13 +446,21 @@ export const resetTerminalLineTimestampState = resetTerminalLineTimestamps;
 export const acknowledgeDroppedTerminalDisplayBytes = (
   ctx: TerminalSessionStartersContext,
   bytes: number,
+  term?: XTerm,
 ): void => {
   if (bytes <= 0) return;
   const sessionId = ctx.sessionRef.current;
   ackTerminalSessionFlow(ctx.terminalBackend, sessionId, bytes);
   if (sessionId) {
     flushTerminalSessionFlowAck(sessionId);
-    ctx.terminalBackend.setSessionFlowPaused?.(sessionId, false);
+    // Dropped frames free backend ingress, but the renderer flow controller may
+    // still be above its high-water mark on forwarded writes. Only force-resume
+    // when it is not paused; otherwise the controller resumes when pending
+    // drains (Codex P2 on efe412a6).
+    const flow = term ? getFlowControllerForTerm(term) : undefined;
+    if (!flow?.isPaused?.()) {
+      ctx.terminalBackend.setSessionFlowPaused?.(sessionId, false);
+    }
   }
 };
 
@@ -478,10 +486,13 @@ export const writeTerminalLine = (
   // Keep lifecycle/control lines ordered after all preceding PTY output.
   flushPendingTerminalOutputNow(term);
   const lineData = `${data}\r\n`;
+  // dropBytes: 0 — lifecycle banners never called flow.received(); if the
+  // stall watchdog recovered them with display-length dropBytes it would
+  // under-count real session backlog and resume SSH too early (Codex P2).
   enqueueTerminalWrite(term, lineData.length, (done) => {
     ctx.onTerminalLogData?.(lineData);
     term.write(lineData, done);
-  });
+  }, { dropBytes: 0 });
   flushTerminalWritesForBackgroundOutput(term);
 };
 
@@ -589,7 +600,7 @@ const drainFrameGate = (
 
   state.buffer = partial;
   state.ingress = ingressPartial;
-  if (dropped > 0) acknowledgeDroppedTerminalDisplayBytes(ctx, ingressDropped);
+  if (dropped > 0) acknowledgeDroppedTerminalDisplayBytes(ctx, ingressDropped, term);
 
   let heldComplete = false;
   if (complete) {
