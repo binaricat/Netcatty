@@ -213,8 +213,8 @@ test("ED3 does not count as viewport coverage for full-repaint drops", () => {
   // ED3 alone must not mark any viewport cells.
   assert.equal(viewportRepaintCoverage("\x1b[3J", cols, rows), 0, "ED3 covers zero viewport cells");
   assert.equal(makesFullRepaint("\x1b[3J", cols, rows), false, "ED3 is not a full viewport repaint");
-  // ED2 still covers the whole grid.
-  assert.equal(viewportRepaintCoverage("\x1b[2J", cols, rows), cols * rows, "ED2 covers the grid");
+  // ED2 also grants no coverage (may be stripped when scrolled up).
+  assert.equal(viewportRepaintCoverage("\x1b[2J", cols, rows), 0, "ED2 grants no coverage credit");
   // A successor that only does ED3 must not justify dropping a prior visual frame.
   const stale = frame("AAAAAAAA");
   const ed3Only = frame("\x1b[3J");
