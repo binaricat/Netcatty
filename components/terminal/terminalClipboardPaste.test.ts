@@ -43,6 +43,7 @@ test("terminal user paste still inserts local clipboard file paths", async () =>
         { path: "/Users/alice/shot.png", name: "shot.png", isDirectory: false },
         { path: "/Users/alice/report.txt", name: "report.txt", isDirectory: false },
       ],
+      hasClipboardImage: async () => assert.fail("local file paste must not probe clipboard images"),
     },
     isLocalConnection: true,
     isSensitiveInput: () => true,

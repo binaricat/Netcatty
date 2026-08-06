@@ -7,6 +7,7 @@ import {
 } from "./clipboardImagePaste";
 import { extractRootPathsFromClipboardFiles } from "./terminalHelpers";
 import { pasteTextIntoTerminal } from "./runtime/terminalUserPaste";
+import { logger } from "../../lib/logger";
 
 /** ASCII Ctrl+V - forwarded so nested TUIs can run their own image-paste bindings. */
 export const LOCAL_CLIPBOARD_IMAGE_CTRL_V = "\u0016";
@@ -113,9 +114,10 @@ export async function handleTerminalClipboardPaste({
   let text = "";
   try {
     text = await readClipboardText();
-  } catch {
+  } catch (error) {
     // Text read failed (permissions / image-only clipboard quirks). Treat as
     // empty so local image probe can still forward Ctrl+V.
+    logger.warn("Failed to read clipboard text for terminal paste", error);
   }
   // Prefer real text paste. Whitespace-only is deferred until after the local
   // image probe so screenshot clipboards that also carry blank text/plain can
