@@ -212,7 +212,7 @@ test("hasClipboardImage is true when native clipboard holds an image", () => {
       clipboard: {
         readImage: () => ({
           isEmpty: () => false,
-          toPNG: () => Buffer.from("png"),
+          getSize: () => ({ width: 10, height: 8 }),
         }),
       },
     }),
@@ -232,13 +232,30 @@ test("hasClipboardImage is true when availableFormats lists an image type", () =
   );
 });
 
+test("hasClipboardImage falls back to readImage when availableFormats throws", () => {
+  assert.equal(
+    hasClipboardImage({
+      clipboard: {
+        availableFormats: () => {
+          throw new Error("formats unavailable");
+        },
+        readImage: () => ({
+          isEmpty: () => false,
+          getSize: () => ({ width: 1, height: 1 }),
+        }),
+      },
+    }),
+    true,
+  );
+});
+
 test("hasClipboardImage is false when native clipboard image is empty", () => {
   assert.equal(
     hasClipboardImage({
       clipboard: {
         readImage: () => ({
           isEmpty: () => true,
-          toPNG: () => Buffer.from("png"),
+          getSize: () => ({ width: 10, height: 8 }),
         }),
       },
     }),
@@ -246,7 +263,32 @@ test("hasClipboardImage is false when native clipboard image is empty", () => {
   );
 });
 
-test("hasClipboardImage is false when clipboard image cannot encode PNG", () => {
+test("hasClipboardImage is false when clipboard image has no measurable size", () => {
+  assert.equal(
+    hasClipboardImage({
+      clipboard: {
+        readImage: () => ({
+          isEmpty: () => false,
+          getSize: () => ({ width: 0, height: 0 }),
+        }),
+      },
+    }),
+    false,
+  );
+});
+
+test("hasClipboardImage falls back to toPNG when getSize is unavailable", () => {
+  assert.equal(
+    hasClipboardImage({
+      clipboard: {
+        readImage: () => ({
+          isEmpty: () => false,
+          toPNG: () => Buffer.from("png"),
+        }),
+      },
+    }),
+    true,
+  );
   assert.equal(
     hasClipboardImage({
       clipboard: {

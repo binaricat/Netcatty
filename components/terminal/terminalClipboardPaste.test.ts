@@ -368,6 +368,52 @@ test("local paste treats whitespace-only clipboard text as empty for image forwa
   assert.deepEqual(writes, ["\u0016"]);
 });
 
+test("local paste keeps whitespace-only clipboard text when no image is present", async () => {
+  const pasted: string[] = [];
+
+  await handleTerminalClipboardPaste({
+    bridge: {
+      readClipboardFiles: async () => [],
+      hasClipboardImage: async () => false,
+    },
+    isLocalConnection: true,
+    readClipboardText: async () => " \n\t",
+    sessionId: "session-1",
+    terminalBackend: {
+      writeToSession: () => assert.fail("whitespace paste should use xterm paste"),
+    },
+    term: {
+      paste: (text) => pasted.push(text),
+      scrollToBottom: () => {},
+    },
+  });
+
+  assert.deepEqual(pasted, [" \n\t"]);
+});
+
+test("remote paste keeps whitespace-only clipboard text", async () => {
+  const pasted: string[] = [];
+
+  await handleTerminalClipboardPaste({
+    bridge: {
+      readClipboardFiles: async () => [],
+      hasClipboardImage: async () => assert.fail("remote paste must not probe clipboard images"),
+    },
+    isLocalConnection: false,
+    readClipboardText: async () => "\t",
+    sessionId: "session-1",
+    terminalBackend: {
+      writeToSession: () => assert.fail("remote whitespace paste should use xterm paste"),
+    },
+    term: {
+      paste: (text) => pasted.push(text),
+      scrollToBottom: () => {},
+    },
+  });
+
+  assert.deepEqual(pasted, ["\t"]);
+});
+
 test("local paste does not write when clipboard has neither text nor image", async () => {
   await handleTerminalClipboardPaste({
     bridge: {

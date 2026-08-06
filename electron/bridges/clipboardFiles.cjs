@@ -212,14 +212,22 @@ function hasClipboardImage({ clipboard } = {}) {
   if (!clipboard || typeof clipboard.readImage !== "function") return false;
   try {
     if (typeof clipboard.availableFormats === "function") {
-      const formats = clipboard.availableFormats();
-      if (Array.isArray(formats) && formats.some((format) => typeof format === "string" && format.startsWith("image/"))) {
-        return true;
+      try {
+        const formats = clipboard.availableFormats();
+        if (Array.isArray(formats) && formats.some((format) => typeof format === "string" && format.startsWith("image/"))) {
+          return true;
+        }
+      } catch {
+        // Fall through to readImage when format probing fails.
       }
     }
     const image = clipboard.readImage();
     if (!image) return false;
     if (typeof image.isEmpty === "function" && image.isEmpty()) return false;
+    if (typeof image.getSize === "function") {
+      const size = image.getSize();
+      return Boolean(size && size.width > 0 && size.height > 0);
+    }
     if (typeof image.toPNG !== "function") return false;
     const content = image.toPNG();
     return Buffer.isBuffer(content) && content.length > 0;

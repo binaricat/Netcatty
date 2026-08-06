@@ -117,6 +117,9 @@ export async function handleTerminalClipboardPaste({
     // Text read failed (permissions / image-only clipboard quirks). Treat as
     // empty so local image probe can still forward Ctrl+V.
   }
+  // Prefer real text paste. Whitespace-only is deferred until after the local
+  // image probe so screenshot clipboards that also carry blank text/plain can
+  // still forward Ctrl+V for nested TUIs.
   if (text.trim() && sessionId) {
     pasteTextIntoTerminal(term, text, {
       scrollOnPaste,
@@ -137,9 +140,19 @@ export async function handleTerminalClipboardPaste({
         });
         scrollToBottomAfterProgrammaticInput?.(LOCAL_CLIPBOARD_IMAGE_CTRL_V);
         term.focus?.();
+        return;
       }
     } catch {
-      // Clipboard probe failed; leave the session unchanged.
+      // Clipboard probe failed; fall through to whitespace text paste if any.
     }
+  }
+
+  // Preserve intentional whitespace-only pastes (indent / newline) when no
+  // local clipboard image is present.
+  if (text && sessionId) {
+    pasteTextIntoTerminal(term, text, {
+      scrollOnPaste,
+      onPasteData,
+    });
   }
 }
