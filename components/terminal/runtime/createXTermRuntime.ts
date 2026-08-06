@@ -1494,24 +1494,10 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
               break;
             }
             case "paste": {
-              const autoImagePaste =
-                ctx.terminalSettingsRef.current?.autoUploadClipboardImageOnPaste === true;
-              if (autoImagePaste) {
-                // onPaste (shared with the context menu) auto-uploads a
-                // clipboard image via SFTP for remote sessions and falls
-                // back to a regular text paste when there is no image.
-                void ctx.terminalContextActionsRef?.current?.onPaste?.();
-                break;
-              }
-              navigator.clipboard.readText().then((text) => {
-                const id = ctx.sessionRef.current;
-                if (id) {
-                  pasteTextIntoTerminal(term, text, {
-                    scrollOnPaste: shouldScrollOnTerminalPaste(ctx.terminalSettingsRef.current),
-                    onPasteData: broadcastUserPasteData,
-                  });
-                }
-              });
+              // Always share the context-menu paste path so local image-only
+              // clipboard can forward Ctrl+V, and remote auto-upload stays
+              // gated inside handleTerminalClipboardPaste.
+              void ctx.terminalContextActionsRef?.current?.onPaste?.();
               break;
             }
             case "pasteSelection": {

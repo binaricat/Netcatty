@@ -212,7 +212,20 @@ test("hasClipboardImage is true when native clipboard holds an image", () => {
       clipboard: {
         readImage: () => ({
           isEmpty: () => false,
+          toPNG: () => Buffer.from("png"),
         }),
+      },
+    }),
+    true,
+  );
+});
+
+test("hasClipboardImage is true when availableFormats lists an image type", () => {
+  assert.equal(
+    hasClipboardImage({
+      clipboard: {
+        availableFormats: () => ["text/plain", "image/png"],
+        readImage: () => assert.fail("formats probe should short-circuit"),
       },
     }),
     true,
@@ -225,6 +238,20 @@ test("hasClipboardImage is false when native clipboard image is empty", () => {
       clipboard: {
         readImage: () => ({
           isEmpty: () => true,
+          toPNG: () => Buffer.from("png"),
+        }),
+      },
+    }),
+    false,
+  );
+});
+
+test("hasClipboardImage is false when clipboard image cannot encode PNG", () => {
+  assert.equal(
+    hasClipboardImage({
+      clipboard: {
+        readImage: () => ({
+          isEmpty: () => false,
         }),
       },
     }),

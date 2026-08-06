@@ -53,7 +53,9 @@ export function useTerminalFilePaste({
 
       const wantsImageUpload =
         autoUploadClipboardImage && !isLocalConnection && !!bridge?.readClipboardImage;
-      if (!wantsImageUpload && (!isLocalConnection || !bridge?.readClipboardFiles)) return;
+      const canHandleLocalPaste =
+        isLocalConnection && !!(bridge?.readClipboardFiles || bridge?.hasClipboardImage);
+      if (!wantsImageUpload && !canHandleLocalPaste) return;
 
       // ⚡ Must call preventDefault SYNCHRONOUSLY — the event lifecycle
       // is synchronous; calling it after an await is too late and the

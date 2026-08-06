@@ -110,8 +110,14 @@ export async function handleTerminalClipboardPaste({
     }
   }
 
-  const text = await readClipboardText();
-  if (text && sessionId) {
+  let text = "";
+  try {
+    text = await readClipboardText();
+  } catch {
+    // Text read failed (permissions / image-only clipboard quirks). Treat as
+    // empty so local image probe can still forward Ctrl+V.
+  }
+  if (text.trim() && sessionId) {
     pasteTextIntoTerminal(term, text, {
       scrollOnPaste,
       onPasteData,
@@ -129,6 +135,7 @@ export async function handleTerminalClipboardPaste({
         terminalBackend.writeToSession(sessionId, LOCAL_CLIPBOARD_IMAGE_CTRL_V, {
           sensitive: isSensitiveInput?.() === true,
         });
+        scrollToBottomAfterProgrammaticInput?.(LOCAL_CLIPBOARD_IMAGE_CTRL_V);
         term.focus?.();
       }
     } catch {

@@ -259,6 +259,7 @@ test("terminal user paste keeps local file path paste even with auto-upload enab
 
 test("local paste forwards Ctrl+V when clipboard holds only an image", async () => {
   const writes: Array<{ data: string; sensitive?: boolean }> = [];
+  const scrolled: string[] = [];
   let focused = false;
 
   await handleTerminalClipboardPaste({
@@ -270,6 +271,7 @@ test("local paste forwards Ctrl+V when clipboard holds only an image", async () 
     isSensitiveInput: () => true,
     readClipboardText: async () => "",
     sessionId: "session-1",
+    scrollToBottomAfterProgrammaticInput: (data) => scrolled.push(data),
     terminalBackend: {
       writeToSession: (_sessionId, data, options) => writes.push({
         data,
@@ -286,6 +288,7 @@ test("local paste forwards Ctrl+V when clipboard holds only an image", async () 
   });
 
   assert.deepEqual(writes, [{ data: "\u0016", sensitive: true }]);
+  assert.deepEqual(scrolled, ["\u0016"]);
   assert.equal(focused, true);
 });
 
@@ -315,6 +318,73 @@ test("local paste prefers clipboard text over forwarding Ctrl+V for images", asy
 
   assert.deepEqual(pasted, ["hello"]);
   assert.equal(hasImageCalls, 0);
+});
+
+test("local paste forwards Ctrl+V when clipboard text read fails but an image is present", async () => {
+  const writes: string[] = [];
+
+  await handleTerminalClipboardPaste({
+    bridge: {
+      readClipboardFiles: async () => [],
+      hasClipboardImage: async () => true,
+    },
+    isLocalConnection: true,
+    readClipboardText: async () => {
+      throw new Error("clipboard text unavailable");
+    },
+    sessionId: "session-1",
+    terminalBackend: {
+      writeToSession: (_sessionId, data) => writes.push(data),
+    },
+    term: {
+      paste: () => assert.fail("failed text read must not use xterm paste"),
+      scrollToBottom: () => {},
+    },
+  });
+
+  assert.deepEqual(writes, ["\u0016"]);
+});
+
+test("local paste treats whitespace-only clipboard text as empty for image forwarding", async () => {
+  const writes: string[] = [];
+
+  await handleTerminalClipboardPaste({
+    bridge: {
+      readClipboardFiles: async () => [],
+      hasClipboardImage: async () => true,
+    },
+    isLocalConnection: true,
+    readClipboardText: async () => " \n\t",
+    sessionId: "session-1",
+    terminalBackend: {
+      writeToSession: (_sessionId, data) => writes.push(data),
+    },
+    term: {
+      paste: () => assert.fail("whitespace-only text must not use xterm paste"),
+      scrollToBottom: () => {},
+    },
+  });
+
+  assert.deepEqual(writes, ["\u0016"]);
+});
+
+test("local paste does not write when clipboard has neither text nor image", async () => {
+  await handleTerminalClipboardPaste({
+    bridge: {
+      readClipboardFiles: async () => [],
+      hasClipboardImage: async () => false,
+    },
+    isLocalConnection: true,
+    readClipboardText: async () => "",
+    sessionId: "session-1",
+    terminalBackend: {
+      writeToSession: () => assert.fail("empty local clipboard must not write"),
+    },
+    term: {
+      paste: () => assert.fail("empty local clipboard must not use xterm paste"),
+      scrollToBottom: () => {},
+    },
+  });
 });
 
 test("remote paste does not forward Ctrl+V for clipboard images", async () => {

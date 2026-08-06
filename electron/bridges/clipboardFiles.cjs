@@ -211,10 +211,18 @@ async function readClipboardImage({
 function hasClipboardImage({ clipboard } = {}) {
   if (!clipboard || typeof clipboard.readImage !== "function") return false;
   try {
+    if (typeof clipboard.availableFormats === "function") {
+      const formats = clipboard.availableFormats();
+      if (Array.isArray(formats) && formats.some((format) => typeof format === "string" && format.startsWith("image/"))) {
+        return true;
+      }
+    }
     const image = clipboard.readImage();
     if (!image) return false;
     if (typeof image.isEmpty === "function" && image.isEmpty()) return false;
-    return true;
+    if (typeof image.toPNG !== "function") return false;
+    const content = image.toPNG();
+    return Buffer.isBuffer(content) && content.length > 0;
   } catch {
     return false;
   }
