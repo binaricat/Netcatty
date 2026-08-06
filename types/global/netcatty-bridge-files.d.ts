@@ -119,6 +119,7 @@ declare global {
     writeClipboardText?(text: string): Promise<boolean>;
     readClipboardFiles?(): Promise<Array<{ path: string; name: string; isDirectory: boolean; size?: number }>>;
     readClipboardImage?(): Promise<{ path: string; name: string; mediaType: string; size?: number } | null>;
+    hasClipboardImage?(): Promise<boolean>;
 
     // Credential encryption (field-level safeStorage for sensitive data at rest)
     credentialsAvailable?(): Promise<boolean>;

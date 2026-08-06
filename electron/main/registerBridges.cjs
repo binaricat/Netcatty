@@ -2,7 +2,7 @@
 
 let bridgesRegistered = false;
 let cloudSyncSessionPassword = null;
-const { readClipboardFiles, readClipboardImage } = require("../bridges/clipboardFiles.cjs");
+const { readClipboardFiles, readClipboardImage, hasClipboardImage } = require("../bridges/clipboardFiles.cjs");
 
 const excludedFigSpecPrefixes = ["aws", "gcloud", "az"];
 
@@ -872,6 +872,10 @@ function createBridgeRegistrar(context) {
 
     ipcMain.handle("netcatty:clipboard:readImage", async () => {
       return readClipboardImage({ clipboard, fsImpl: fs, tempDirBridge });
+    });
+
+    ipcMain.handle("netcatty:clipboard:hasImage", async () => {
+      return hasClipboardImage({ clipboard });
     });
   
     // Select an application from system file picker

@@ -202,10 +202,29 @@ async function readClipboardImage({
   }
 }
 
+/**
+ * Peek whether the OS clipboard currently holds an image without writing a
+ * temp file. Used by local terminal paste to decide whether to forward Ctrl+V
+ * to nested TUIs (e.g. Claude Code image paste) after Electron's Edit>Paste
+ * turns the chord into a clipboard paste event.
+ */
+function hasClipboardImage({ clipboard } = {}) {
+  if (!clipboard || typeof clipboard.readImage !== "function") return false;
+  try {
+    const image = clipboard.readImage();
+    if (!image) return false;
+    if (typeof image.isEmpty === "function" && image.isEmpty()) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 module.exports = {
   createClipboardImageFileName,
   decodeWindowsHDrop,
   decodeWindowsFileNameW,
+  hasClipboardImage,
   parseClipboardTextFilePaths,
   readClipboardFiles,
   readClipboardImage,

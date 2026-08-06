@@ -8,7 +8,13 @@ import {
 import { extractRootPathsFromClipboardFiles } from "./terminalHelpers";
 import { pasteTextIntoTerminal } from "./runtime/terminalUserPaste";
 
-type ClipboardFileBridge = Pick<Partial<NetcattyBridge>, "readClipboardFiles">;
+/** ASCII Ctrl+V — forwarded so nested TUIs can run their own image-paste bindings. */
+export const LOCAL_CLIPBOARD_IMAGE_CTRL_V = "\u0016";
+
+type ClipboardFileBridge = Pick<
+  Partial<NetcattyBridge>,
+  "readClipboardFiles" | "hasClipboardImage"
+>;
 
 type TerminalClipboardPasteOptions = {
   bridge?: ClipboardFileBridge;
@@ -110,5 +116,23 @@ export async function handleTerminalClipboardPaste({
       scrollOnPaste,
       onPasteData,
     });
+    return;
+  }
+
+  // Local image-only clipboard: Electron's Edit>Paste turns Ctrl+V into a
+  // paste event, so TUI apps (Claude Code chat:imagePaste, etc.) never see
+  // the chord. Forward raw Ctrl+V; the app can then read the OS clipboard
+  // via xclip/wl-paste. Skip remote sessions — the image is not on the host.
+  if (isLocalConnection && sessionId && bridge?.hasClipboardImage) {
+    try {
+      if (await bridge.hasClipboardImage()) {
+        terminalBackend.writeToSession(sessionId, LOCAL_CLIPBOARD_IMAGE_CTRL_V, {
+          sensitive: isSensitiveInput?.() === true,
+        });
+        term.focus?.();
+      }
+    } catch {
+      // Clipboard probe failed; leave the session unchanged.
+    }
   }
 }

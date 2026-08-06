@@ -256,3 +256,82 @@ test("terminal user paste keeps local file path paste even with auto-upload enab
 
   assert.deepEqual(writes, [{ data: "/Users/alice/shot.png" }]);
 });
+
+test("local paste forwards Ctrl+V when clipboard holds only an image", async () => {
+  const writes: Array<{ data: string; sensitive?: boolean }> = [];
+  let focused = false;
+
+  await handleTerminalClipboardPaste({
+    bridge: {
+      readClipboardFiles: async () => [],
+      hasClipboardImage: async () => true,
+    },
+    isLocalConnection: true,
+    isSensitiveInput: () => true,
+    readClipboardText: async () => "",
+    sessionId: "session-1",
+    terminalBackend: {
+      writeToSession: (_sessionId, data, options) => writes.push({
+        data,
+        sensitive: options?.sensitive,
+      }),
+    },
+    term: {
+      focus: () => {
+        focused = true;
+      },
+      paste: () => assert.fail("image-only local paste must not use xterm paste"),
+      scrollToBottom: () => {},
+    },
+  });
+
+  assert.deepEqual(writes, [{ data: "\u0016", sensitive: true }]);
+  assert.equal(focused, true);
+});
+
+test("local paste prefers clipboard text over forwarding Ctrl+V for images", async () => {
+  const pasted: string[] = [];
+  let hasImageCalls = 0;
+
+  await handleTerminalClipboardPaste({
+    bridge: {
+      readClipboardFiles: async () => [],
+      hasClipboardImage: async () => {
+        hasImageCalls += 1;
+        return true;
+      },
+    },
+    isLocalConnection: true,
+    readClipboardText: async () => "hello",
+    sessionId: "session-1",
+    terminalBackend: {
+      writeToSession: () => assert.fail("text paste should not write Ctrl+V"),
+    },
+    term: {
+      paste: (text) => pasted.push(text),
+      scrollToBottom: () => {},
+    },
+  });
+
+  assert.deepEqual(pasted, ["hello"]);
+  assert.equal(hasImageCalls, 0);
+});
+
+test("remote paste does not forward Ctrl+V for clipboard images", async () => {
+  await handleTerminalClipboardPaste({
+    bridge: {
+      readClipboardFiles: async () => [],
+      hasClipboardImage: async () => assert.fail("remote paste must not probe clipboard images"),
+    },
+    isLocalConnection: false,
+    readClipboardText: async () => "",
+    sessionId: "session-1",
+    terminalBackend: {
+      writeToSession: () => assert.fail("remote empty paste must not write Ctrl+V"),
+    },
+    term: {
+      paste: () => assert.fail("empty remote paste must not call xterm paste"),
+      scrollToBottom: () => {},
+    },
+  });
+});

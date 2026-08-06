@@ -1457,6 +1457,9 @@ function createPreloadApi(ctx) {
   readClipboardImage: async () => {
     return ipcRenderer.invoke("netcatty:clipboard:readImage");
   },
+  hasClipboardImage: async () => {
+    return ipcRenderer.invoke("netcatty:clipboard:hasImage");
+  },
 
   // Credential encryption (field-level safeStorage)
   credentialsAvailable: () => ipcRenderer.invoke("netcatty:credentials:available"),

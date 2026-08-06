@@ -7,6 +7,7 @@ const {
   createClipboardImageFileName,
   decodeWindowsHDrop,
   decodeWindowsFileNameW,
+  hasClipboardImage,
   parseClipboardTextFilePaths,
   readClipboardFiles,
   readClipboardImage,
@@ -203,4 +204,35 @@ test("returns null when clipboard image is empty", async () => {
   });
 
   assert.equal(result, null);
+});
+
+test("hasClipboardImage is true when native clipboard holds an image", () => {
+  assert.equal(
+    hasClipboardImage({
+      clipboard: {
+        readImage: () => ({
+          isEmpty: () => false,
+        }),
+      },
+    }),
+    true,
+  );
+});
+
+test("hasClipboardImage is false when native clipboard image is empty", () => {
+  assert.equal(
+    hasClipboardImage({
+      clipboard: {
+        readImage: () => ({
+          isEmpty: () => true,
+        }),
+      },
+    }),
+    false,
+  );
+});
+
+test("hasClipboardImage is false when clipboard API is unavailable", () => {
+  assert.equal(hasClipboardImage({ clipboard: null }), false);
+  assert.equal(hasClipboardImage({ clipboard: {} }), false);
 });
