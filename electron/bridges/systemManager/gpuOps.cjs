@@ -51,7 +51,11 @@ const ACCELERATOR_COLLECT_INNER = [
   "fi; ",
   'if command -v npu-smi >/dev/null 2>&1; then ',
   'printf "%s\\n" "__NC_NPU_BEGIN__"; ',
+  // Prefer info -l; fall back to info -m (SwanLab / Ascend mapping table).
   "ids=$(npu-smi info -l 2>/dev/null | sed -n 's/^[[:space:]]*NPU ID[[:space:]]*:[[:space:]]*\\([0-9][0-9]*\\).*/\\1/p'); ",
+  'if [ -z "$ids" ]; then ',
+  "ids=$(npu-smi info -m 2>/dev/null | awk 'NR>1 && $1 ~ /^[0-9]+$/ {print $1}' | sort -nu); ",
+  "fi; ",
   'if [ -n "$ids" ]; then ',
   'for id in $ids; do ',
   'printf "%s\\n" "__NC_NPU_DEVICE__=$id"; ',
@@ -60,10 +64,11 @@ const ACCELERATOR_COLLECT_INNER = [
   'npu-smi info -t usages -i "$id" 2>/dev/null || true; ',
   'npu-smi info -t memory -i "$id" 2>/dev/null || true; ',
   "done; ",
-  "else ",
+  "fi; ",
+  // Always keep the summary table; typed queries can be empty on ModelArts /
+  // containers, and Windows collectors only emit this dump.
   'printf "%s\\n" "__NC_NPU_INFO__"; ',
   "npu-smi info 2>/dev/null || true; ",
-  "fi; ",
   'printf "%s\\n" "__NC_NPU_PROCS__"; ',
   "npu-smi info -t proc-mem 2>/dev/null || true; ",
   'printf "%s\\n" "__NC_NPU_END__"; ',
@@ -243,48 +248,118 @@ function parseAscendDeviceBlock(index, block) {
   };
 }
 
+/**
+ * Parse `npu-smi info` summary tables.
+ *
+ * Modern CANN (24.x+) rows look like nputop's fixture:
+ *   | 6     910B1 | OK | 100.8  33  0 / 0 |
+ *   | 0           | 0000:01:00.0 | 0  0 / 0  3384 / 65536 |
+ * Chip-ID on the second row is NOT the NPU ID — attach metrics to the
+ * preceding NPU summary row (same approach as youyve/nputop libascend).
+ */
 function parseAscendInfoTable(sectionText) {
   const devices = [];
   const lines = String(sectionText || "").split("\n");
-  for (const line of lines) {
-    // | 0     910B3                   | OK              | 71.8       42                             |
-    const match = line.match(
-      /^\|\s*(\d+)\s+(\S+(?:\s+\S+)*?)\s+\|\s*(\S+)\s+\|\s*([0-9.]+)\s+([0-9.]+)\s*\|/,
-    );
-    if (!match) continue;
-    const index = Number.parseInt(match[1], 10);
-    if (!Number.isFinite(index)) continue;
-    if (devices.some((d) => d.index === index)) continue;
-    devices.push({
-      vendor: "ascend",
-      index,
-      uuid: "",
-      name: match[2].trim(),
-      utilizationPercent: null,
-      memoryUsedMb: null,
-      memoryTotalMb: null,
-      temperatureC: parseCsvNumber(match[5]),
-      powerDrawW: parseCsvNumber(match[4]),
-      powerLimitW: null,
-      fanPercent: null,
-      driverVersion: null,
-      health: match[3].trim(),
-    });
-  }
 
-  // Chip rows: | 0      0        0               12          1234 / 32768        0 / 32768     |
-  for (const line of lines) {
-    const chip = line.match(
-      /^\|\s*(\d+)\s+\d+\s+\d+\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)/,
-    );
-    if (!chip) continue;
-    const index = Number.parseInt(chip[1], 10);
-    const device = devices.find((d) => d.index === index);
-    if (!device) continue;
-    device.utilizationPercent = parseCsvNumber(chip[2]);
-    // Prefer HBM pair (last) when present
-    device.memoryUsedMb = parseCsvNumber(chip[5]);
-    device.memoryTotalMb = parseCsvNumber(chip[6]);
+  // Summary: NPU ID, Name, Health, Power, Temp — tolerate Hugepages column after Temp.
+  // Power may be "NA" / "-"; Name is a single token like 910B1 / 910B3.
+  const summaryRe =
+    /^\|\s*(\d+)\s+(\S+)\s+\|\s*(\S+)\s+\|\s*(\S+)\s+(\d+(?:\.\d+)?)\b/;
+  // Bus-Id chip row (CANN 24.x): | ChipID [PhyID] | Bus-Id | AICore(%) ... mem pairs ... |
+  const busChipRe =
+    /^\|\s*(\d+)\s*(\d*)\s*\|\s*([0-9A-Fa-f:.]+|NA)\s*\|\s*(\d+(?:\.\d+)?)\b/;
+  // Legacy whitespace chip row: | NPU Chip Logic AICore Mem/Tot HBM/Tot |
+  const legacyChipRe =
+    /^\|\s*(\d+)\s+\d+\s+\d+\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)/;
+
+  let lastDevice = null;
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i].trim();
+    if (!line.startsWith("|")) continue;
+
+    const summary = line.match(summaryRe);
+    if (summary) {
+      const index = Number.parseInt(summary[1], 10);
+      if (!Number.isFinite(index)) continue;
+      // Skip header-ish rows that reuse the same shape poorly; require a real name token.
+      const name = summary[2].trim();
+      if (!name || /^(?:NPU|Chip|Name)$/i.test(name)) continue;
+      let device = devices.find((d) => d.index === index);
+      if (!device) {
+        device = {
+          vendor: "ascend",
+          index,
+          uuid: "",
+          name,
+          utilizationPercent: null,
+          memoryUsedMb: null,
+          memoryTotalMb: null,
+          temperatureC: parseCsvNumber(summary[5]),
+          powerDrawW: parseCsvNumber(summary[4]),
+          powerLimitW: null,
+          fanPercent: null,
+          driverVersion: null,
+          health: summary[3].trim(),
+        };
+        devices.push(device);
+      } else {
+        if (!device.name) device.name = name;
+        if (device.temperatureC == null) device.temperatureC = parseCsvNumber(summary[5]);
+        if (device.powerDrawW == null) device.powerDrawW = parseCsvNumber(summary[4]);
+        if (!device.health) device.health = summary[3].trim();
+      }
+      lastDevice = device;
+
+      // Prefer pairing with the immediate next chip line (nputop style).
+      const next = (lines[i + 1] || "").trim();
+      const busChip = next.match(busChipRe);
+      if (busChip) {
+        i += 1;
+        if (device.utilizationPercent == null) {
+          device.utilizationPercent = parseCsvNumber(busChip[4]);
+        }
+        const pairs = [...next.matchAll(/(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)/g)];
+        if (pairs.length > 0) {
+          const hbm = pairs[pairs.length - 1];
+          device.memoryUsedMb = parseCsvNumber(hbm[1]);
+          device.memoryTotalMb = parseCsvNumber(hbm[2]);
+        }
+        continue;
+      }
+      const legacyNext = next.match(legacyChipRe);
+      if (legacyNext) {
+        i += 1;
+        device.utilizationPercent = parseCsvNumber(legacyNext[2]);
+        device.memoryUsedMb = parseCsvNumber(legacyNext[5]);
+        device.memoryTotalMb = parseCsvNumber(legacyNext[6]);
+      }
+      continue;
+    }
+
+    // Orphan legacy chip row: match by NPU index when possible, else last summary.
+    const legacy = line.match(legacyChipRe);
+    if (legacy) {
+      const index = Number.parseInt(legacy[1], 10);
+      const device = devices.find((d) => d.index === index) || lastDevice;
+      if (!device) continue;
+      device.utilizationPercent = parseCsvNumber(legacy[2]);
+      device.memoryUsedMb = parseCsvNumber(legacy[5]);
+      device.memoryTotalMb = parseCsvNumber(legacy[6]);
+      continue;
+    }
+
+    const busChip = line.match(busChipRe);
+    if (busChip && lastDevice) {
+      if (lastDevice.utilizationPercent == null) {
+        lastDevice.utilizationPercent = parseCsvNumber(busChip[4]);
+      }
+      const pairs = [...line.matchAll(/(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)/g)];
+      if (pairs.length > 0) {
+        const hbm = pairs[pairs.length - 1];
+        lastDevice.memoryUsedMb = parseCsvNumber(hbm[1]);
+        lastDevice.memoryTotalMb = parseCsvNumber(hbm[2]);
+      }
+    }
   }
   return devices;
 }
@@ -383,12 +458,39 @@ function parseAcceleratorSnapshot(stdout) {
   const nvidiaProcesses = parseNvidiaProcesses(nvidiaProcessesText, nvidiaDevices);
 
   let ascendDevices = parseAscendTypedSections(npuSection);
+  const infoDump = sliceMarkedSection(npuSection, "__NC_NPU_INFO__", [
+    "__NC_NPU_PROCS__",
+    "__NC_NPU_END__",
+  ]);
+  const tableDevices = parseAscendInfoTable(infoDump || npuSection);
   if (ascendDevices.length === 0) {
-    const infoDump = sliceMarkedSection(npuSection, "__NC_NPU_INFO__", [
-      "__NC_NPU_PROCS__",
-      "__NC_NPU_END__",
-    ]);
-    ascendDevices = parseAscendInfoTable(infoDump || npuSection);
+    ascendDevices = tableDevices;
+  } else if (tableDevices.length > 0) {
+    // Fill gaps when typed -t queries returned stubs but the summary table is rich.
+    const byIndex = new Map(ascendDevices.map((d) => [d.index, d]));
+    for (const tableDevice of tableDevices) {
+      const existing = byIndex.get(tableDevice.index);
+      if (!existing) {
+        ascendDevices.push(tableDevice);
+        byIndex.set(tableDevice.index, tableDevice);
+        continue;
+      }
+      if (!existing.name || /^Ascend NPU\b/i.test(existing.name)) {
+        existing.name = tableDevice.name;
+      }
+      for (const key of [
+        "utilizationPercent",
+        "memoryUsedMb",
+        "memoryTotalMb",
+        "temperatureC",
+        "powerDrawW",
+        "health",
+      ]) {
+        if (existing[key] == null && tableDevice[key] != null) {
+          existing[key] = tableDevice[key];
+        }
+      }
+    }
   }
   const ascendProcText = sliceMarkedSection(npuSection, "__NC_NPU_PROCS__", [
     "__NC_NPU_END__",

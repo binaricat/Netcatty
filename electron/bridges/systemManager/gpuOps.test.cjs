@@ -97,6 +97,10 @@ test("POSIX accelerator collector keeps sed quotes inside JSON-wrapped sh -c", (
   assert.match(ACCELERATOR_COLLECT_SCRIPT, /sed -n '/);
   // Outer wrapper must not use raw single quotes around the whole script body.
   assert.doesNotMatch(ACCELERATOR_COLLECT_SCRIPT, /^exec sh -c '/);
+  // Always dump npu-smi info; discover IDs via info -l then info -m.
+  assert.match(ACCELERATOR_COLLECT_SCRIPT, /__NC_NPU_INFO__/);
+  assert.match(ACCELERATOR_COLLECT_SCRIPT, /npu-smi info -m/);
+  assert.match(ACCELERATOR_COLLECT_SCRIPT, /npu-smi info 2>\/dev\/null/);
 });
 
 test("POSIX accelerator collector is syntactically valid for sh -c", () => {
@@ -152,6 +156,52 @@ test("parseAscendInfoTable reads summary and chip rows", () => {
   assert.equal(devices[0].temperatureC, 42);
 });
 
+test("parseAscendInfoTable reads CANN 24.x Bus-Id table with Hugepages column", () => {
+  // Fixture from GitHub issue #2811 (ModelArts / Ascend 910B1, npu-smi 24.1.rc2).
+  // Chip row Chip-ID is 0 while NPU ID is 6; metrics must attach to the NPU row.
+  const devices = parseAscendInfoTable(`
++------------------------------------------------------------------------------------------------+
+| npu-smi 24.1.rc2                       Version: 24.1.rc2                                       |
++---------------------------+---------------+----------------------------------------------------+
+| NPU   Name                | Health          | Power(W)    Temp(C)           Hugepages-Usage(page)|
+| Chip                      | Bus-Id          | AICore(%)   Memory-Usage(MB)  HBM-Usage(MB)        |
++===========================+===============+====================================================+
+| 6     910B1               | OK            | 100.8       33                0    / 0             |
+| 0                         | 0000:01:00.0  | 0           0    / 0          3384 / 65536         |
++===========================+===============+====================================================+
+| No running processes found in NPU 6                                                            |
++===========================+===============+====================================================+
+`);
+  assert.equal(devices.length, 1);
+  assert.equal(devices[0].index, 6);
+  assert.equal(devices[0].name, "910B1");
+  assert.equal(devices[0].health, "OK");
+  assert.equal(devices[0].powerDrawW, 100.8);
+  assert.equal(devices[0].temperatureC, 33);
+  assert.equal(devices[0].utilizationPercent, 0);
+  assert.equal(devices[0].memoryUsedMb, 3384);
+  assert.equal(devices[0].memoryTotalMb, 65536);
+});
+
+test("parseAcceleratorSnapshot falls back to modern npu-smi info table", () => {
+  const snapshot = parseAcceleratorSnapshot(`
+__NC_ACCEL_BEGIN__
+__NC_NPU_BEGIN__
+__NC_NPU_INFO__
+| NPU   Name                | Health          | Power(W)    Temp(C)           Hugepages-Usage(page)|
+| Chip                      | Bus-Id          | AICore(%)   Memory-Usage(MB)  HBM-Usage(MB)        |
+| 6     910B1               | OK            | 100.8       33                0    / 0             |
+| 0                         | 0000:01:00.0  | 0           0    / 0          3384 / 65536         |
+__NC_NPU_PROCS__
+__NC_NPU_END__
+__NC_ACCEL_END__
+`);
+  assert.equal(snapshot.devices.length, 1);
+  assert.equal(snapshot.devices[0].vendor, "ascend");
+  assert.equal(snapshot.devices[0].index, 6);
+  assert.equal(snapshot.devices[0].memoryTotalMb, 65536);
+});
+
 test("parseAcceleratorSnapshot merges nvidia and ascend marked sections", () => {
   const snapshot = parseAcceleratorSnapshot(`
 __NC_ACCEL_BEGIN__
@@ -176,4 +226,27 @@ __NC_ACCEL_END__
   assert.equal(snapshot.devices[1].vendor, "nvidia");
   assert.equal(snapshot.processes.length, 1);
   assert.equal(snapshot.nvidiaDriverVersion, "550.54");
+});
+
+test("parseAcceleratorSnapshot enriches typed Ascend stubs from info table", () => {
+  const snapshot = parseAcceleratorSnapshot(`
+__NC_ACCEL_BEGIN__
+__NC_NPU_BEGIN__
+__NC_NPU_DEVICE__=6
+__NC_NPU_INFO__
+| NPU   Name                | Health          | Power(W)    Temp(C)           Hugepages-Usage(page)|
+| Chip                      | Bus-Id          | AICore(%)   Memory-Usage(MB)  HBM-Usage(MB)        |
+| 6     910B1               | OK            | 100.8       33                0    / 0             |
+| 0                         | 0000:01:00.0  | 0           0    / 0          3384 / 65536         |
+__NC_NPU_PROCS__
+__NC_NPU_END__
+__NC_ACCEL_END__
+`);
+  assert.equal(snapshot.devices.length, 1);
+  assert.equal(snapshot.devices[0].index, 6);
+  assert.equal(snapshot.devices[0].name, "910B1");
+  assert.equal(snapshot.devices[0].memoryUsedMb, 3384);
+  assert.equal(snapshot.devices[0].memoryTotalMb, 65536);
+  assert.equal(snapshot.devices[0].temperatureC, 33);
+  assert.equal(snapshot.devices[0].powerDrawW, 100.8);
 });
