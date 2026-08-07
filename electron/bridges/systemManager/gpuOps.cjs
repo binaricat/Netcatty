@@ -80,9 +80,49 @@ const ACCELERATOR_COLLECT_SCRIPT = `exec sh -c ${JSON.stringify(ACCELERATOR_COLL
 
 function parseCsvNumber(raw) {
   const text = String(raw ?? "").trim();
-  if (!text || /^\[?n\/?a\]?$/i.test(text) || /^not\s+supported$/i.test(text)) return null;
+  if (
+    !text
+    || text === "-"
+    || /^\[?n\/?a\]?$/i.test(text)
+    || /^not\s+supported$/i.test(text)
+  ) {
+    return null;
+  }
   const n = Number.parseFloat(text.replace(/[,%]/g, ""));
   return Number.isFinite(n) ? n : null;
+}
+
+function extractAscendDriverVersion(text) {
+  const match = String(text || "").match(
+    /\|\s*npu-smi\s+(\S+)\s+.*?Version:\s*(\S+)/i,
+  );
+  if (!match) return null;
+  const version = (match[2] || match[1] || "").replace(/\|/g, "").trim();
+  return version || null;
+}
+
+function applyMemPair(device, used, total, { aggregate = false } = {}) {
+  const usedN = parseCsvNumber(used);
+  const totalN = parseCsvNumber(total);
+  if (!Number.isFinite(usedN) && !Number.isFinite(totalN)) return;
+  if (
+    aggregate
+    && Number.isFinite(device.memoryUsedMb)
+    && Number.isFinite(usedN)
+  ) {
+    device.memoryUsedMb = Number(device.memoryUsedMb) + usedN;
+    device.memoryTotalMb = Number(device.memoryTotalMb || 0)
+      + (Number.isFinite(totalN) ? totalN : 0);
+    return;
+  }
+  if (Number.isFinite(usedN)) device.memoryUsedMb = usedN;
+  if (Number.isFinite(totalN)) device.memoryTotalMb = totalN;
+}
+
+function maxFinite(current, next) {
+  if (!Number.isFinite(next)) return current;
+  if (!Number.isFinite(current)) return next;
+  return Math.max(current, next);
 }
 
 function parseCsvFields(line) {
@@ -254,15 +294,19 @@ function parseAscendDeviceBlock(index, block) {
  * Modern CANN (24.x+) rows look like nputop's fixture:
  *   | 6     910B1 | OK | 100.8  33  0 / 0 |
  *   | 0           | 0000:01:00.0 | 0  0 / 0  3384 / 65536 |
- * Chip-ID on the second row is NOT the NPU ID — attach metrics to the
+ * Chip-ID on the second row is NOT the NPU ID; attach metrics to the
  * preceding NPU summary row (same approach as youyve/nputop libascend).
+ *
+ * Multi-chip cards (Atlas A3 / 310P) repeat the NPU summary once per chip.
+ * Sidebar shows one row per NPU ID and aggregates chip memory / util.
  */
 function parseAscendInfoTable(sectionText) {
   const devices = [];
   const lines = String(sectionText || "").split("\n");
+  const driverVersion = extractAscendDriverVersion(sectionText);
 
-  // Summary: NPU ID, Name, Health, Power, Temp — tolerate Hugepages column after Temp.
-  // Power may be "NA" / "-"; Name is a single token like 910B1 / 910B3.
+  // Summary: NPU ID, Name, Health, Power, Temp; tolerate Hugepages column after Temp.
+  // Power may be "NA" / "-"; Name is a single token like 910B1 / Ascend910.
   const summaryRe =
     /^\|\s*(\d+)\s+(\S+)\s+\|\s*(\S+)\s+\|\s*(\S+)\s+(\d+(?:\.\d+)?)\b/;
   // Bus-Id chip row (CANN 24.x): | ChipID [PhyID] | Bus-Id | AICore(%) ... mem pairs ... |
@@ -281,10 +325,10 @@ function parseAscendInfoTable(sectionText) {
     if (summary) {
       const index = Number.parseInt(summary[1], 10);
       if (!Number.isFinite(index)) continue;
-      // Skip header-ish rows that reuse the same shape poorly; require a real name token.
       const name = summary[2].trim();
       if (!name || /^(?:NPU|Chip|Name)$/i.test(name)) continue;
       let device = devices.find((d) => d.index === index);
+      const isNew = !device;
       if (!device) {
         device = {
           vendor: "ascend",
@@ -298,68 +342,83 @@ function parseAscendInfoTable(sectionText) {
           powerDrawW: parseCsvNumber(summary[4]),
           powerLimitW: null,
           fanPercent: null,
-          driverVersion: null,
+          driverVersion,
           health: summary[3].trim(),
+          _chipCount: 0,
         };
         devices.push(device);
       } else {
         if (!device.name) device.name = name;
-        if (device.temperatureC == null) device.temperatureC = parseCsvNumber(summary[5]);
+        device.temperatureC = maxFinite(device.temperatureC, parseCsvNumber(summary[5]));
         if (device.powerDrawW == null) device.powerDrawW = parseCsvNumber(summary[4]);
-        if (!device.health) device.health = summary[3].trim();
+        if (!device.health || /^ok$/i.test(device.health)) {
+          const health = summary[3].trim();
+          if (health) device.health = health;
+        }
+        if (!device.driverVersion && driverVersion) device.driverVersion = driverVersion;
       }
       lastDevice = device;
 
-      // Prefer pairing with the immediate next chip line (nputop style).
       const next = (lines[i + 1] || "").trim();
       const busChip = next.match(busChipRe);
       if (busChip) {
         i += 1;
-        if (device.utilizationPercent == null) {
-          device.utilizationPercent = parseCsvNumber(busChip[4]);
-        }
+        const util = parseCsvNumber(busChip[4]);
+        device.utilizationPercent = maxFinite(device.utilizationPercent, util);
         const pairs = [...next.matchAll(/(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)/g)];
         if (pairs.length > 0) {
           const hbm = pairs[pairs.length - 1];
-          device.memoryUsedMb = parseCsvNumber(hbm[1]);
-          device.memoryTotalMb = parseCsvNumber(hbm[2]);
+          applyMemPair(device, hbm[1], hbm[2], { aggregate: !isNew && device._chipCount > 0 });
         }
+        device._chipCount = (device._chipCount || 0) + 1;
         continue;
       }
       const legacyNext = next.match(legacyChipRe);
       if (legacyNext) {
         i += 1;
-        device.utilizationPercent = parseCsvNumber(legacyNext[2]);
-        device.memoryUsedMb = parseCsvNumber(legacyNext[5]);
-        device.memoryTotalMb = parseCsvNumber(legacyNext[6]);
+        device.utilizationPercent = maxFinite(
+          device.utilizationPercent,
+          parseCsvNumber(legacyNext[2]),
+        );
+        applyMemPair(device, legacyNext[5], legacyNext[6], {
+          aggregate: !isNew && device._chipCount > 0,
+        });
+        device._chipCount = (device._chipCount || 0) + 1;
       }
       continue;
     }
 
-    // Orphan legacy chip row: match by NPU index when possible, else last summary.
     const legacy = line.match(legacyChipRe);
     if (legacy) {
       const index = Number.parseInt(legacy[1], 10);
       const device = devices.find((d) => d.index === index) || lastDevice;
       if (!device) continue;
-      device.utilizationPercent = parseCsvNumber(legacy[2]);
-      device.memoryUsedMb = parseCsvNumber(legacy[5]);
-      device.memoryTotalMb = parseCsvNumber(legacy[6]);
+      device.utilizationPercent = maxFinite(
+        device.utilizationPercent,
+        parseCsvNumber(legacy[2]),
+      );
+      applyMemPair(device, legacy[5], legacy[6], { aggregate: (device._chipCount || 0) > 0 });
+      device._chipCount = (device._chipCount || 0) + 1;
       continue;
     }
 
     const busChip = line.match(busChipRe);
     if (busChip && lastDevice) {
-      if (lastDevice.utilizationPercent == null) {
-        lastDevice.utilizationPercent = parseCsvNumber(busChip[4]);
-      }
+      const util = parseCsvNumber(busChip[4]);
+      lastDevice.utilizationPercent = maxFinite(lastDevice.utilizationPercent, util);
       const pairs = [...line.matchAll(/(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)/g)];
       if (pairs.length > 0) {
         const hbm = pairs[pairs.length - 1];
-        lastDevice.memoryUsedMb = parseCsvNumber(hbm[1]);
-        lastDevice.memoryTotalMb = parseCsvNumber(hbm[2]);
+        applyMemPair(lastDevice, hbm[1], hbm[2], {
+          aggregate: (lastDevice._chipCount || 0) > 0,
+        });
       }
+      lastDevice._chipCount = (lastDevice._chipCount || 0) + 1;
     }
+  }
+
+  for (const device of devices) {
+    delete device._chipCount;
   }
   return devices;
 }
@@ -383,8 +442,11 @@ function parseAscendTypedSections(sectionText) {
 function parseAscendProcesses(sectionText) {
   const processes = [];
   for (const line of String(sectionText || "").split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || /no running processes/i.test(trimmed)) continue;
+
     // Common proc-mem lines include NPU/Chip/Pid/Name/Memory
-    const match = line.match(
+    const match = trimmed.match(
       /(?:NPU|Device)?\s*I?D?\s*[:=]?\s*(\d+).*?\b(?:PID|Pid)\s*[:=]?\s*(\d+).*?\b(?:Name|Process)\s*[:=]?\s*(\S+).*?(?:Memory|Mem)\s*[:=]?\s*(\d+(?:\.\d+)?)/i,
     );
     if (match) {
@@ -398,8 +460,24 @@ function parseAscendProcesses(sectionText) {
       continue;
     }
 
+    // nputop / npu-smi info process table:
+    // | 0       0                 | 124528        | python3.8                | 17400                   |
+    const infoProc = trimmed.match(
+      /^\|\s*(\d+)\s+(\d+)\s+\|\s+(\d+)\s+\|\s*([^|]+?)\s*\|\s*(\d+(?:\.\d+)?)/,
+    );
+    if (infoProc) {
+      processes.push({
+        vendor: "ascend",
+        gpuIndex: Number.parseInt(infoProc[1], 10) || 0,
+        pid: Number.parseInt(infoProc[3], 10),
+        processName: infoProc[4].trim(),
+        memoryUsedMb: parseCsvNumber(infoProc[5]),
+      });
+      continue;
+    }
+
     // Pipe-separated: | 0 | 0 | 12345 | python | 1024 |
-    const pipeTable = line.match(
+    const pipeTable = trimmed.match(
       /^\|\s*(\d+)\s*\|\s*\d+\s*\|\s*(\d+)\s*\|\s*([^|]+?)\s*\|\s*(\d+(?:\.\d+)?)/,
     );
     if (pipeTable) {
@@ -414,7 +492,7 @@ function parseAscendProcesses(sectionText) {
     }
 
     // Whitespace-delimited inside one outer |: | 0 0 12345 python 1024 |
-    const wsTable = line.match(
+    const wsTable = trimmed.match(
       /^\|\s*(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s+(\d+(?:\.\d+)?)\s*\|?\s*$/,
     );
     if (!wsTable) continue;
@@ -427,6 +505,18 @@ function parseAscendProcesses(sectionText) {
     });
   }
   return processes.filter((p) => Number.isFinite(p.pid) && p.pid > 0);
+}
+
+function dedupeAcceleratorProcesses(processes) {
+  const seen = new Set();
+  const out = [];
+  for (const processInfo of processes) {
+    const key = `${processInfo.vendor}:${processInfo.gpuIndex}:${processInfo.pid}:${processInfo.processName}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(processInfo);
+  }
+  return out;
 }
 
 function sliceMarkedSection(text, beginMarker, endMarkers) {
@@ -495,7 +585,18 @@ function parseAcceleratorSnapshot(stdout) {
   const ascendProcText = sliceMarkedSection(npuSection, "__NC_NPU_PROCS__", [
     "__NC_NPU_END__",
   ]);
-  const ascendProcesses = parseAscendProcesses(ascendProcText);
+  // Processes often live in the `npu-smi info` dump (nputop fixtures), not only -t proc-mem.
+  const ascendProcesses = dedupeAcceleratorProcesses([
+    ...parseAscendProcesses(ascendProcText),
+    ...parseAscendProcesses(infoDump || npuSection),
+  ]);
+
+  const ascendDriverVersion = extractAscendDriverVersion(infoDump || npuSection);
+  if (ascendDriverVersion) {
+    for (const device of ascendDevices) {
+      if (!device.driverVersion) device.driverVersion = ascendDriverVersion;
+    }
+  }
 
   const devices = [...nvidiaDevices, ...ascendDevices].sort((a, b) => {
     if (a.vendor !== b.vendor) return a.vendor.localeCompare(b.vendor);

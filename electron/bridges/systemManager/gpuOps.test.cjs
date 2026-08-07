@@ -250,3 +250,107 @@ __NC_ACCEL_END__
   assert.equal(snapshot.devices[0].temperatureC, 33);
   assert.equal(snapshot.devices[0].powerDrawW, 100.8);
 });
+
+// Fixtures adapted from youyve/nputop tests/test_libascend.py (Apache-2.0).
+// Valuable because we do not have Ascend hardware in CI.
+
+test("parseAscendInfoTable reads nputop 910B2C dual-NPU fixture", () => {
+  const devices = parseAscendInfoTable(`
++------------------------------------------------------------------------------------------------+
+| npu-smi 23.0.2.1                 Version: 23.0.2.1                                             |
++---------------------------+---------------+----------------------------------------------------+
+| NPU   Name                | Health        | Power(W)    Temp(C)           Hugepages-Usage(page)|
+| Chip                      | Bus-Id        | AICore(%)   Memory-Usage(MB)  HBM-Usage(MB)        |
++===========================+===============+====================================================+
+| 0     910B2C              | OK            | 88.6        51                0    / 0             |
+| 0                         | 0000:5A:00.0  | 0           0    / 0          20701/ 65536         |
++===========================+===============+====================================================+
+| 1     910B2C              | OK            | 99.6        50                0    / 0             |
+| 0                         | 0000:19:00.0  | 0           0    / 0          20687/ 65536         |
++===========================+===============+====================================================+
+`);
+  assert.equal(devices.length, 2);
+  assert.equal(devices[0].name, "910B2C");
+  assert.equal(devices[0].memoryUsedMb, 20701);
+  assert.equal(devices[0].memoryTotalMb, 65536);
+  assert.equal(devices[0].powerDrawW, 88.6);
+  assert.equal(devices[0].driverVersion, "23.0.2.1");
+  assert.equal(devices[1].memoryUsedMb, 20687);
+});
+
+test("parseAscendInfoTable reads nputop 310B4 no-HBM column fixture", () => {
+  const devices = parseAscendInfoTable(`
+| npu-smi 23.0.0                                   Version: 23.0.0                                       |
+| NPU     Name                  | Health          | Power(W)     Temp(C)           Hugepages-Usage(page) |
+| Chip    Device                | Bus-Id          | AICore(%)    Memory-Usage(MB)                        |
+| 0       310B4                 | Alarm           | 0.0          65                15    / 15            |
+| 0       0                     | NA              | 0            3628 / 15609                            |
+`);
+  assert.equal(devices.length, 1);
+  assert.equal(devices[0].name, "310B4");
+  assert.equal(devices[0].health, "Alarm");
+  assert.equal(devices[0].memoryUsedMb, 3628);
+  assert.equal(devices[0].memoryTotalMb, 15609);
+  assert.equal(devices[0].temperatureC, 65);
+});
+
+test("parseAscendInfoTable aggregates Atlas A3 multi-chip NPU rows", () => {
+  const devices = parseAscendInfoTable(`
+| npu-smi 25.2.0                   Version: 25.2.0                                               |
+| NPU   Name                | Health        | Power(W)    Temp(C)           Hugepages-Usage(page)|
+| Chip  Phy-ID              | Bus-Id        | AICore(%)   Memory-Usage(MB)  HBM-Usage(MB)        |
+| 0     Ascend910           | OK            | 162.8       37                0    / 0             |
+| 0     0                   | 0000:9C:00.0  | 0           0    / 0          3133 / 65536         |
+| 0     Ascend910           | OK            | -           37                0    / 0             |
+| 1     1                   | 0000:9E:00.0  | 0           0    / 0          2876 / 65536         |
+| 1     Ascend910           | OK            | 167.1       38                0    / 0             |
+| 0     2                   | 0000:37:00.0  | 0           0    / 0          3116 / 65536         |
+| 1     Ascend910           | OK            | -           38                0    / 0             |
+| 1     3                   | 0000:39:00.0  | 0           0    / 0          10568/ 65536         |
+`);
+  assert.equal(devices.length, 2);
+  assert.equal(devices[0].name, "Ascend910");
+  assert.equal(devices[0].powerDrawW, 162.8);
+  assert.equal(devices[0].memoryUsedMb, 3133 + 2876);
+  assert.equal(devices[0].memoryTotalMb, 65536 + 65536);
+  assert.equal(devices[1].memoryUsedMb, 3116 + 10568);
+  assert.equal(devices[1].powerDrawW, 167.1);
+});
+
+test("parseAcceleratorSnapshot reads nputop 310P3 processes from info dump", () => {
+  const snapshot = parseAcceleratorSnapshot(`
+__NC_ACCEL_BEGIN__
+__NC_NPU_BEGIN__
+__NC_NPU_INFO__
+| npu-smi 24.1.0.1                                 Version: 24.1.0.1                                     |
+| NPU     Name                  | Health          | Power(W)     Temp(C)           Hugepages-Usage(page) |
+| Chip    Device                | Bus-Id          | AICore(%)    Memory-Usage(MB)                        |
+| 1       310P3                 | OK              | NA           62                7210  / 7210          |
+| 0       0                     | 0000:01:00.0    | 0            16302/ 44280                            |
+| 1       310P3                 | OK              | NA           62                7210  / 7210          |
+| 1       1                     | 0000:01:00.0    | 0            15543/ 43693                            |
+| 2       310P3                 | OK              | NA           61                17057 / 17057         |
+| 0       2                     | 0000:02:00.0    | 0            35563/ 44280                            |
+| 2       310P3                 | OK              | NA           61                16823 / 16823         |
+| 1       3                     | 0000:02:00.0    | 0            35204/ 43693                            |
+| NPU     Chip                  | Process id      | Process name             | Process memory(MB)        |
+| 1       0                     | 3277562         | mindie_llm_back          | 14513                     |
+| 1       1                     | 3277565         | mindie_llm_back          | 14513                     |
+| 2       0                     | 3034986         | mindie_llm_back          | 34207                     |
+| 2       1                     | 3034989         | mindie_llm_back          | 33740                     |
+__NC_NPU_PROCS__
+__NC_NPU_END__
+__NC_ACCEL_END__
+`);
+  assert.equal(snapshot.devices.length, 2);
+  assert.equal(snapshot.devices[0].index, 1);
+  assert.equal(snapshot.devices[0].name, "310P3");
+  assert.equal(snapshot.devices[0].memoryUsedMb, 16302 + 15543);
+  assert.equal(snapshot.devices[0].powerDrawW, null);
+  assert.equal(snapshot.devices[0].driverVersion, "24.1.0.1");
+  assert.equal(snapshot.processes.length, 4);
+  assert.equal(snapshot.processes[0].pid, 3277562);
+  assert.equal(snapshot.processes[0].processName, "mindie_llm_back");
+  assert.equal(snapshot.processes[0].memoryUsedMb, 14513);
+  assert.equal(snapshot.processes[0].gpuIndex, 1);
+});

@@ -27,3 +27,18 @@ test("gpu tab passes null utilization to ResourceBar instead of zero", () => {
   assert.doesNotMatch(source, /value=\{util \?\? 0\}/);
   assert.doesNotMatch(source, /value=\{memPct \?\? 0\}/);
 });
+
+test("gpu tab keeps a compact sparkline history like overview/nvtop charts", () => {
+  const source = readFileSync(new URL("./GpuManagerTab.tsx", import.meta.url), "utf8");
+  assert.match(source, /HISTORY_LIMIT/);
+  assert.match(source, /GpuSparkline/);
+  assert.match(source, /historyByDevice/);
+  assert.match(source, /setHistoryByDevice/);
+});
+
+test("resource bar animates width and uses load-aware tones", () => {
+  const source = readFileSync(new URL("./ResourceBar.tsx", import.meta.url), "utf8");
+  assert.match(source, /transition-\[width,background-color\]/);
+  assert.match(source, /bg-amber-500/);
+  assert.match(source, /bg-destructive/);
+});
