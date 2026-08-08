@@ -27,12 +27,18 @@ export const AI_SETTINGS_SUB_TAB_IDS = [
 
 export type AISettingsSubTabId = (typeof AI_SETTINGS_SUB_TAB_IDS)[number];
 
+export const SYNC_SETTINGS_SUB_TAB_IDS = ["providers", "status"] as const;
+
+export type SyncSettingsSubTabId = (typeof SYNC_SETTINGS_SUB_TAB_IDS)[number];
+
 export type SettingsSearchEntry = {
   /** Stable id; also used as `data-settings-anchor` on the target element. */
   id: string;
   tab: SettingsTabId;
   /** Nested AI settings tab when `tab === "ai"`. */
   aiSubTab?: AISettingsSubTabId;
+  /** Nested Sync settings tab when `tab === "sync"`. */
+  syncSubTab?: SyncSettingsSubTabId;
   /** Primary label i18n key. */
   labelKey: string;
   /** Optional description i18n key (indexed for search). */
@@ -724,24 +730,28 @@ export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
   {
     id: "sync-providers",
     tab: "sync",
+    syncSubTab: "providers",
     labelKey: "cloudSync.providers.title",
     keywords: ["github", "webdav", "s3", "onedrive", "google", "同步"],
   },
   {
     id: "sync-auto-sync",
     tab: "sync",
+    syncSubTab: "status",
     labelKey: "cloudSync.autoSync.title",
     descriptionKey: "cloudSync.autoSync.desc",
   },
   {
     id: "sync-strategy",
     tab: "sync",
+    syncSubTab: "status",
     labelKey: "cloudSync.strategy.title",
     descriptionKey: "cloudSync.strategy.desc",
   },
   {
     id: "sync-local-backups",
     tab: "sync",
+    syncSubTab: "status",
     labelKey: "cloudSync.localBackups.title",
     descriptionKey: "cloudSync.localBackups.desc",
     keywords: ["backup", "备份"],
@@ -749,6 +759,7 @@ export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
   {
     id: "sync-clear-local",
     tab: "sync",
+    syncSubTab: "status",
     labelKey: "cloudSync.clearLocal.title",
     descriptionKey: "cloudSync.clearLocal.desc",
   },

@@ -1,5 +1,5 @@
 import { Search, X } from "lucide-react";
-import React, { useEffect, useId, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useI18n } from "../../application/i18n/I18nProvider";
 import { filterSettingsSearchCatalog, type SettingsSearchHit } from "../../domain/settingsSearch";
 import { cn } from "../../lib/utils";
@@ -16,36 +16,55 @@ export function SettingsSearchControl({
   className,
 }: SettingsSearchControlProps) {
   const { t } = useI18n();
-  const { requestFocus } = useSettingsFocus();
+  const { requestFocus, registerOpenSearch } = useSettingsFocus();
   const listId = useId();
+  const optionIdPrefix = useId();
   const rootRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const openButtonRef = useRef<HTMLButtonElement>(null);
   const [expanded, setExpanded] = useState(false);
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
+  const [restoreOpenFocus, setRestoreOpenFocus] = useState(false);
 
   const hits = useMemo(
     () => filterSettingsSearchCatalog(query, t, { includePlugins, limit: 12 }),
     [query, t, includePlugins],
   );
 
+  const collapseSearch = useCallback((restoreFocus = false) => {
+    setExpanded(false);
+    setQuery("");
+    if (restoreFocus) setRestoreOpenFocus(true);
+  }, []);
+
   useEffect(() => {
     setActiveIndex(0);
   }, [query, hits.length]);
 
   useEffect(() => {
+    const open = () => {
+      setExpanded(true);
+      window.requestAnimationFrame(() => {
+        inputRef.current?.focus();
+        inputRef.current?.select();
+      });
+    };
+    registerOpenSearch(open);
+    return () => registerOpenSearch(null);
+  }, [registerOpenSearch]);
+
+  useEffect(() => {
     if (!expanded) return;
     const handlePointerDown = (event: MouseEvent) => {
       if (!rootRef.current?.contains(event.target as Node)) {
-        setExpanded(false);
-        setQuery("");
+        collapseSearch(false);
       }
     };
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
-        setExpanded(false);
-        setQuery("");
+        collapseSearch(true);
       }
     };
     document.addEventListener("mousedown", handlePointerDown);
@@ -54,22 +73,27 @@ export function SettingsSearchControl({
       document.removeEventListener("mousedown", handlePointerDown);
       document.removeEventListener("keydown", handleKeyDown);
     };
-  }, [expanded]);
+  }, [expanded, collapseSearch]);
 
   useEffect(() => {
     if (expanded) {
       inputRef.current?.focus();
+      return;
     }
-  }, [expanded]);
+    if (restoreOpenFocus) {
+      openButtonRef.current?.focus();
+      setRestoreOpenFocus(false);
+    }
+  }, [expanded, restoreOpenFocus]);
 
   const selectHit = (hit: SettingsSearchHit) => {
     requestFocus({
       tab: hit.entry.tab,
       aiSubTab: hit.entry.aiSubTab,
+      syncSubTab: hit.entry.syncSubTab,
       anchorId: hit.entry.id,
     });
-    setExpanded(false);
-    setQuery("");
+    collapseSearch(false);
   };
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
@@ -92,11 +116,16 @@ export function SettingsSearchControl({
     }
   };
 
+  const activeOptionId = hits[activeIndex]
+    ? `${optionIdPrefix}-${hits[activeIndex].entry.id}`
+    : undefined;
+
   if (!expanded) {
     return (
       <div className={cn("px-0 pb-2", className)} ref={rootRef}>
         <button
           id="settings-search-open"
+          ref={openButtonRef}
           type="button"
           onClick={() => setExpanded(true)}
           className={cn(
@@ -130,15 +159,14 @@ export function SettingsSearchControl({
           aria-controls={listId}
           aria-expanded={true}
           aria-autocomplete="list"
+          aria-haspopup="listbox"
+          aria-activedescendant={activeOptionId}
           role="combobox"
           className="h-9 pl-8 pr-8 text-sm"
         />
         <button
           type="button"
-          onClick={() => {
-            setExpanded(false);
-            setQuery("");
-          }}
+          onClick={() => collapseSearch(true)}
           className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-sm p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
           aria-label={t("common.close")}
         >
@@ -164,6 +192,7 @@ export function SettingsSearchControl({
             return (
               <button
                 key={hit.entry.id}
+                id={`${optionIdPrefix}-${hit.entry.id}`}
                 type="button"
                 role="option"
                 aria-selected={index === activeIndex}

@@ -300,7 +300,7 @@ const SettingsSyncTabWithVault: React.FC<{ onSettingsApplied?: () => void }> = (
 
 const SettingsPageContent: React.FC<{ settings: SettingsState }> = ({ settings }) => {
     const { t } = useI18n();
-    const { request, clearFocus } = useSettingsFocus();
+    const { request, clearFocus, openSearch } = useSettingsFocus();
     const { notifyRendererReady, closeSettingsWindow, onWindowCommandCloseRequested } = useWindowControls();
     const { updateState, checkNow, installUpdate, openReleasePage, startDownload, isUpdateDemoMode } = useUpdateCheck({
         autoUpdateEnabled: settings.autoUpdateEnabled,
@@ -320,15 +320,12 @@ const SettingsPageContent: React.FC<{ settings: SettingsState }> = ({ settings }
         const onKeyDown = (event: KeyboardEvent) => {
             const isFind = (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f";
             if (!isFind) return;
-            const target = event.target as HTMLElement | null;
-            const tag = target?.tagName?.toLowerCase();
-            if (tag === "input" || tag === "textarea" || target?.isContentEditable) return;
             event.preventDefault();
-            document.getElementById("settings-search-open")?.click();
+            openSearch();
         };
         window.addEventListener("keydown", onKeyDown);
         return () => window.removeEventListener("keydown", onKeyDown);
-    }, []);
+    }, [openSearch]);
 
     useEffect(() => {
         return setupMcpApprovalBridge();
@@ -358,18 +355,21 @@ const SettingsPageContent: React.FC<{ settings: SettingsState }> = ({ settings }
             setActiveTab(request.tab);
             return;
         }
-        // Keep the focus request briefly so nested tabs (e.g. AI sub-tabs) can
-        // switch before we scroll; focusSettingsAnchor itself retries for lazy mounts.
-        const focusDelayMs = request.aiSubTab ? 80 : 40;
+        // Nested tabs (AI / Sync) read `request` to switch sub-tabs. Keep it until
+        // scroll succeeds (or retries are exhausted) so lazy mounts still see it.
+        let cancelled = false;
+        const nestedDelayMs = (request.aiSubTab || request.syncSubTab) ? 80 : 40;
         const focusHandle = window.setTimeout(() => {
-            focusSettingsAnchor(request.anchorId);
-        }, focusDelayMs);
-        const clearHandle = window.setTimeout(() => {
-            clearFocus();
-        }, 900);
+            void focusSettingsAnchor(request.anchorId, {
+                attempts: 48,
+                delayMs: 50,
+            }).finally(() => {
+                if (!cancelled) clearFocus();
+            });
+        }, nestedDelayMs);
         return () => {
+            cancelled = true;
             window.clearTimeout(focusHandle);
-            window.clearTimeout(clearHandle);
         };
     }, [request, activeTab, clearFocus]);
 

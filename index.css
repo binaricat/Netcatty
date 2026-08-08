@@ -201,6 +201,14 @@ html.platform-win32 {
   animation: settings-search-highlight 1.6s ease-out;
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .settings-search-highlight {
+    animation: none;
+    background-color: hsl(var(--primary) / 0.14);
+    box-shadow: 0 0 0 1px hsl(var(--primary) / 0.28);
+  }
+}
+
 .top-tab-root-label {
   display: inline-block;
   overflow: hidden;

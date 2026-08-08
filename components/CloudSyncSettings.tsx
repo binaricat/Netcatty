@@ -17,6 +17,7 @@ import {
     withRestoreBarrier,
 } from '../application/localVaultBackups';
 import { useI18n } from '../application/i18n/I18nProvider';
+import { useOptionalSettingsFocus } from './settings/SettingsFocusContext';
 import {
     findSyncPayloadEncryptedCredentialPaths,
     stripSyncPayloadEncryptedCredentials,
@@ -273,6 +274,15 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
     // Active tab state — lets the banner's "Restore" button switch to the
     // local-backups tab without a separate DOM query.
     const [activeTab, setActiveTab] = useState<'providers' | 'status'>('providers');
+    const settingsFocus = useOptionalSettingsFocus();
+
+    useEffect(() => {
+        const request = settingsFocus?.request;
+        if (request?.tab !== 'sync' || !request.syncSubTab) return;
+        if (request.syncSubTab === 'providers' || request.syncSubTab === 'status') {
+            setActiveTab(request.syncSubTab);
+        }
+    }, [settingsFocus?.request]);
 
     const [preparedConvergentMigration, setPreparedConvergentMigration] = useState<PreparedConvergentMigration | null>(null);
     const [convergentPreview, setConvergentPreview] = useState<ConvergentMigrationPreview | null>(null);

@@ -78,3 +78,10 @@ test("AI safety entries retain aiSubTab for navigation", () => {
   assert.ok(safety);
   assert.equal(safety?.entry.aiSubTab, "safety");
 });
+
+test("Sync status entries retain syncSubTab for navigation", () => {
+  const hits = filterSettingsSearchCatalog("backup", tEn);
+  const backups = hits.find((hit) => hit.entry.id === "sync-local-backups");
+  assert.ok(backups);
+  assert.equal(backups?.entry.syncSubTab, "status");
+});
