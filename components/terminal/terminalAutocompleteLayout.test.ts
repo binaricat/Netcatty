@@ -341,7 +341,8 @@ test("resolveAutocompleteCursorPosition wraps echo-lagged input onto the next ro
 
 test("resolveAutocompleteCursorPosition wraps from the soft-wrap start row", () => {
   const promptText = "$ ";
-  const resolvedInput = "abcdefghijKLMNOPQRST"; // 22 chars; prompt+input = 24 → 2 full rows @ 12 cols
+  // 20 chars; prompt+input = 22 → row offset 1, column 10 @ 12 cols (not exact fill).
+  const resolvedInput = "abcdefghijKLMNOPQRST";
   const cols = 12;
   const term = {
     cols,
@@ -372,12 +373,43 @@ test("resolveAutocompleteCursorPosition wraps from the soft-wrap start row", () 
   };
 
   const totalCells = promptText.length + resolvedInput.length;
+  assert.notEqual(totalCells % cols, 0, "fixture should not be an exact row boundary");
   const position = resolveAutocompleteCursorPosition(term as never, {
     promptText,
     userInput: resolvedInput,
   });
   assert.equal(position.column, totalCells % cols);
   assert.equal(position.row, 10 + Math.floor(totalCells / cols));
+});
+
+test("resolveAutocompleteCursorPosition preserves xterm pending-wrap on exact fill", () => {
+  const promptText = "$ ";
+  const cols = 10;
+  // prompt (2) + input (8) = 10 → exactly one full row.
+  const resolvedInput = "abcdefgh";
+  const term = {
+    cols,
+    rows: 24,
+    buffer: {
+      active: {
+        // Echo lag: only the prompt is visible; cursor still at column 2.
+        cursorX: promptText.length,
+        cursorY: 5,
+        baseY: 0,
+        getLine: () => ({
+          isWrapped: false,
+          translateToString: () => promptText,
+        }),
+      },
+    },
+  };
+
+  const position = resolveAutocompleteCursorPosition(term as never, {
+    promptText,
+    userInput: resolvedInput,
+  });
+  assert.equal(position.column, cols);
+  assert.equal(position.row, 5);
 });
 
 test("resolveAutocompleteAnchorInViewport honors an explicit wrapped cursor row", () => {

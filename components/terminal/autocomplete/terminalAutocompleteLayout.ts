@@ -416,8 +416,20 @@ export function resolveAutocompleteCursorPosition(
 
   const fromPromptCells = prompt.promptText.length + prompt.userInput.length;
   const totalCells = Math.max(fromLineCells, fromPromptCells);
-  const column = totalCells % cols;
-  const row = Math.min(rows - 1, Math.max(0, startRow + Math.floor(totalCells / cols)));
+  // xterm keeps a pending wrap when the line fills exactly: cursorX === cols on
+  // the filled row, and only advances on the next printable character. Naïve
+  // modulo/floor maps that boundary to column 0 of the next row and drops the
+  // autocomplete popup one row too low under echo lag.
+  let column: number;
+  let rowOffset: number;
+  if (totalCells > 0 && totalCells % cols === 0) {
+    column = cols;
+    rowOffset = totalCells / cols - 1;
+  } else {
+    column = totalCells % cols;
+    rowOffset = Math.floor(totalCells / cols);
+  }
+  const row = Math.min(rows - 1, Math.max(0, startRow + rowOffset));
   return { column, row };
 }
 
