@@ -31,7 +31,7 @@ import {
   areSubDirPanelsEqual,
   areSuggestionsEqual,
   resolveAutocompleteAnchorInViewport,
-  resolveAutocompleteCursorColumn,
+  resolveAutocompleteCursorPosition,
   resolveAutocompleteCwdWithSource,
   resolvePreservedSuggestionIndex,
 } from "./terminalAutocompleteLayout";
@@ -39,6 +39,7 @@ import { handleTerminalAutocompleteInput } from "./terminalAutocompleteInput";
 import { handleTerminalAutocompleteKeyEvent } from "./terminalAutocompleteKeyEvent";
 import {
   computeAutocompleteAcceptWrite,
+  isSameAutocompleteQuery,
   resolveAutocompleteQueryInput,
 } from "./terminalAutocompletePrompt";
 import { isTerminalAlternateScreenActive } from "../terminalHibernateRuntime";
@@ -378,18 +379,22 @@ export function useTerminalAutocomplete(
         typedBufferReliableRef.current,
       );
       // Anchor from the echo-lag-aware query input so a lagging remote echo
-      // cannot leave the popup several cells behind the typed command.
-      const cursorColumn = prompt.isAtPrompt && queryInput !== null
-        ? resolveAutocompleteCursorColumn(term, {
+      // cannot leave the popup several cells/rows behind the typed command.
+      const cursor = prompt.isAtPrompt && queryInput !== null
+        ? resolveAutocompleteCursorPosition(term, {
           promptText: prompt.promptText,
           userInput: queryInput,
         })
-        : term.buffer.active.cursorX;
+        : {
+          column: term.buffer.active.cursorX,
+          row: term.buffer.active.cursorY,
+        };
       const anchor = resolveAutocompleteAnchorInViewport(
         term,
         containerRef.current,
         prev.suggestions.length,
-        cursorColumn,
+        cursor.column,
+        cursor.row,
       );
 
       // Force a re-render even when the relative cursor cell hasn't changed.
@@ -820,8 +825,9 @@ export function useTerminalAutocomplete(
         }
         // Anchor with the same resolved query input used for matching. Under
         // SSH echo lag, currentPrompt.userInput / xterm cursor can still be a
-        // short prefix while `input` already holds the full typed buffer.
-        const cursorColumn = resolveAutocompleteCursorColumn(term, {
+        // short prefix while `input` already holds the full typed buffer —
+        // including when that buffer soft-wraps onto later rows.
+        const cursor = resolveAutocompleteCursorPosition(term, {
           promptText: currentPrompt.promptText,
           userInput: input,
         });
@@ -829,7 +835,8 @@ export function useTerminalAutocomplete(
           term,
           containerRef.current,
           completions.length,
-          cursorColumn,
+          cursor.column,
+          cursor.row,
         );
         startTransition(() => {
           setState((prev) => {
@@ -908,7 +915,15 @@ export function useTerminalAutocomplete(
         typedInputBufferRef.current,
         typedBufferReliableRef.current,
       );
-      if (!currentPrompt.isAtPrompt || currentInput !== input) {
+      if (
+        !currentPrompt.isAtPrompt
+        || !isSameAutocompleteQuery({
+          queryInput: input,
+          currentInput,
+          previewActive: previewActiveRef.current,
+          previewBaseline: previewBaselineRef.current,
+        })
+      ) {
         return null;
       }
       return currentPrompt;

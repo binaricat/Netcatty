@@ -76,6 +76,24 @@ export function resolveAutocompleteQueryInput(
 }
 
 /**
+ * Whether an in-flight completion result still belongs to the active query.
+ *
+ * Live preview rewrites the typed buffer to the highlighted candidate, so a
+ * naive `currentInput === queryInput` check would drop late path listings
+ * while a preview row remains selected.
+ */
+export function isSameAutocompleteQuery(options: {
+  queryInput: string;
+  currentInput: string | null;
+  previewActive: boolean;
+  previewBaseline: string;
+}): boolean {
+  if (options.currentInput === null) return false;
+  if (options.currentInput === options.queryInput) return true;
+  return options.previewActive && options.previewBaseline === options.queryInput;
+}
+
+/**
  * Keystrokes that rewrite the remote command line to `candidate`.
  *
  * Must use the same echo-lag-aware baseline as suggestion matching: the remote

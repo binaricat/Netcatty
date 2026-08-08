@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   computeAutocompleteAcceptWrite,
+  isSameAutocompleteQuery,
   resolveAutocompleteQueryInput,
 } from "./autocomplete/terminalAutocompletePrompt.ts";
 import type { PromptDetectionResult } from "./autocomplete/promptDetector.ts";
@@ -15,6 +16,38 @@ function atPrompt(userInput: string, promptText = "$ "): PromptDetectionResult {
     cursorOffset: userInput.length,
   };
 }
+
+test("isSameAutocompleteQuery keeps late paths alive during live preview", () => {
+  // Highlighting a candidate rewrites typedInputBuffer to the preview text.
+  // Late path listings for the original query must still apply.
+  assert.equal(
+    isSameAutocompleteQuery({
+      queryInput: "cd /u",
+      currentInput: "cd /usr/",
+      previewActive: true,
+      previewBaseline: "cd /u",
+    }),
+    true,
+  );
+  assert.equal(
+    isSameAutocompleteQuery({
+      queryInput: "cd /u",
+      currentInput: "cd /var/",
+      previewActive: false,
+      previewBaseline: "cd /u",
+    }),
+    false,
+  );
+  assert.equal(
+    isSameAutocompleteQuery({
+      queryInput: "cd /u",
+      currentInput: "cd /usr/",
+      previewActive: true,
+      previewBaseline: "ls /u",
+    }),
+    false,
+  );
+});
 
 test("resolveAutocompleteQueryInput prefers reliable typed buffer when remote echo lags", () => {
   assert.equal(

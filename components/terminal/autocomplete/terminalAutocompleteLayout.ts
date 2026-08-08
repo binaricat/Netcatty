@@ -366,37 +366,66 @@ function shouldExpandAutocompleteUpward(
   return cursorY > 2 && spaceAbovePx >= spaceBelowPx;
 }
 
+export interface AutocompleteCursorPosition {
+  column: number;
+  row: number;
+}
+
 /**
- * Best-effort cursor column for popup anchoring. xterm's helper textarea and
- * buffer.cursorX can lag behind the keystroke that triggered completion, so
- * derive the column from the aligned prompt when the command still fits on one
- * row.
+ * Best-effort cursor cell for popup anchoring. xterm's helper textarea and
+ * buffer cursor can lag behind the keystroke that triggered completion, so
+ * derive the cell from the aligned prompt + resolved input.
+ *
+ * Soft-wraps across `term.cols` so a long echo-lagged command anchors on the
+ * row where the caret will land — not only a horizontal column that can exceed
+ * the current row width.
  *
  * Callers under SSH echo lag should pass the same resolved query input used
  * for completion matching (not the lagging echoed `prompt.userInput`).
  */
+export function resolveAutocompleteCursorPosition(
+  term: XTerm,
+  prompt: Pick<PromptDetectionResult, "promptText" | "userInput">,
+): AutocompleteCursorPosition {
+  const buffer = term.buffer.active;
+  const cols = Math.max(1, term.cols);
+  const rows = Math.max(1, term.rows);
+
+  // Walk up soft-wrapped continuation rows to the prompt/start row.
+  let startRow = buffer.cursorY;
+  while (startRow > 0) {
+    const line = buffer.getLine(startRow + buffer.baseY);
+    if (!line?.isWrapped) break;
+    startRow -= 1;
+  }
+
+  const liveCells = (buffer.cursorY - startRow) * cols + buffer.cursorX;
+  let fromLineCells = liveCells;
+  // When the live cursor is still on the unwrapped prompt row, prefer the
+  // trimmed line end over a lagging cursorX (same heuristic as before).
+  if (buffer.cursorY === startRow) {
+    const line = buffer.getLine(startRow + buffer.baseY);
+    if (line && !line.isWrapped) {
+      const lineText = line.translateToString(false);
+      const tail = lineText.substring(buffer.cursorX).trimEnd();
+      if (tail.length === 0) {
+        fromLineCells = Math.max(buffer.cursorX, lineText.trimEnd().length);
+      }
+    }
+  }
+
+  const fromPromptCells = prompt.promptText.length + prompt.userInput.length;
+  const totalCells = Math.max(fromLineCells, fromPromptCells);
+  const column = totalCells % cols;
+  const row = Math.min(rows - 1, Math.max(0, startRow + Math.floor(totalCells / cols)));
+  return { column, row };
+}
+
 export function resolveAutocompleteCursorColumn(
   term: XTerm,
   prompt: Pick<PromptDetectionResult, "promptText" | "userInput">,
 ): number {
-  const buffer = term.buffer.active;
-  const absY = buffer.cursorY + buffer.baseY;
-  const line = buffer.getLine(absY);
-  if (line?.isWrapped) {
-    return buffer.cursorX;
-  }
-
-  let fromLine = buffer.cursorX;
-  if (line) {
-    const lineText = line.translateToString(false);
-    const tail = lineText.substring(buffer.cursorX).trimEnd();
-    if (tail.length === 0) {
-      fromLine = Math.max(buffer.cursorX, lineText.trimEnd().length);
-    }
-  }
-
-  const fromPrompt = prompt.promptText.length + prompt.userInput.length;
-  return Math.max(fromLine, fromPrompt);
+  return resolveAutocompleteCursorPosition(term, prompt).column;
 }
 
 /** Clamp autocomplete popups to the active terminal screen in split workspaces.
@@ -444,6 +473,7 @@ export function resolveAutocompleteAnchorInViewport(
   container: HTMLElement | null,
   itemCount: number,
   cursorColumn = term.buffer.active.cursorX,
+  cursorRow = term.buffer.active.cursorY,
 ): AutocompleteViewportAnchor {
   const empty: AutocompleteViewportAnchor = {
     anchorLeft: 0,
@@ -453,8 +483,7 @@ export function resolveAutocompleteAnchorInViewport(
   };
   if (!container || !term.element) return empty;
 
-  const buffer = term.buffer.active;
-  const cursorY = buffer.cursorY;
+  const cursorY = cursorRow;
   const rows = Math.max(1, term.rows);
   const estimatedPopupHeight = estimatePopupHeight(itemCount);
   const dims = getXTermCellDimensions(term);

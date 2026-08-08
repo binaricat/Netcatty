@@ -7,6 +7,7 @@ import {
   resolveAutocompleteAnchorInViewport,
   resolveAutocompleteClampViewport,
   resolveAutocompleteCursorColumn,
+  resolveAutocompleteCursorPosition,
   resolvePreservedSuggestionIndex,
   type PopupPlacementInput,
 } from "./autocomplete/terminalAutocompleteLayout.ts";
@@ -256,6 +257,8 @@ test("resolveAutocompleteAnchorInViewport uses the xterm screen rect in split pa
 
 test("resolveAutocompleteCursorColumn prefers prompt-aligned column when xterm lags", () => {
   const term = {
+    cols: 80,
+    rows: 24,
     buffer: {
       active: {
         cursorX: 0,
@@ -281,6 +284,8 @@ test("resolveAutocompleteCursorColumn uses resolved input ahead of echoed prefix
   const echoedPrefix = "git s";
   const resolvedInput = "git status";
   const term = {
+    cols: 80,
+    rows: 24,
     buffer: {
       active: {
         cursorX: promptText.length + echoedPrefix.length,
@@ -299,6 +304,136 @@ test("resolveAutocompleteCursorColumn uses resolved input ahead of echoed prefix
     userInput: resolvedInput,
   });
   assert.equal(column, promptText.length + resolvedInput.length);
+});
+
+test("resolveAutocompleteCursorPosition wraps echo-lagged input onto the next row", () => {
+  // Narrow terminal: resolved command wraps, but SSH echo is still on the
+  // prompt row. Anchor must advance both column (modulo cols) and row.
+  const promptText = "root@host:~# ";
+  const echoedPrefix = "git ";
+  const resolvedInput = "status --porcelain --branch --untracked-files=all";
+  const cols = 40;
+  const totalCells = promptText.length + resolvedInput.length;
+  const term = {
+    cols,
+    rows: 24,
+    buffer: {
+      active: {
+        cursorX: promptText.length + echoedPrefix.length,
+        cursorY: 10,
+        baseY: 0,
+        getLine: () => ({
+          isWrapped: false,
+          translateToString: () => `${promptText}${echoedPrefix}`,
+        }),
+      },
+    },
+  };
+
+  const position = resolveAutocompleteCursorPosition(term as never, {
+    promptText,
+    userInput: resolvedInput,
+  });
+  assert.equal(position.column, totalCells % cols);
+  assert.equal(position.row, 10 + Math.floor(totalCells / cols));
+  assert.ok(position.row > 10, "wrapped echo-lag anchor must leave the prompt row");
+});
+
+test("resolveAutocompleteCursorPosition wraps from the soft-wrap start row", () => {
+  const promptText = "$ ";
+  const resolvedInput = "abcdefghijKLMNOPQRST"; // 22 chars; prompt+input = 24 → 2 full rows @ 12 cols
+  const cols = 12;
+  const term = {
+    cols,
+    rows: 24,
+    buffer: {
+      active: {
+        // Echo already wrapped once but still lags the full typed buffer.
+        cursorX: 4,
+        cursorY: 11,
+        baseY: 0,
+        getLine: (absY: number) => {
+          if (absY === 11) {
+            return {
+              isWrapped: true,
+              translateToString: () => "KLMN",
+            };
+          }
+          if (absY === 10) {
+            return {
+              isWrapped: false,
+              translateToString: () => "$ abcdefghij",
+            };
+          }
+          return { isWrapped: false, translateToString: () => "" };
+        },
+      },
+    },
+  };
+
+  const totalCells = promptText.length + resolvedInput.length;
+  const position = resolveAutocompleteCursorPosition(term as never, {
+    promptText,
+    userInput: resolvedInput,
+  });
+  assert.equal(position.column, totalCells % cols);
+  assert.equal(position.row, 10 + Math.floor(totalCells / cols));
+});
+
+test("resolveAutocompleteAnchorInViewport honors an explicit wrapped cursor row", () => {
+  const cellWidth = 8;
+  const cellHeight = 16;
+  const screen = {
+    clientWidth: 320,
+    clientHeight: 384,
+    getBoundingClientRect: () => ({
+      left: 0,
+      top: 0,
+      right: 320,
+      bottom: 384,
+      width: 320,
+      height: 384,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    }),
+  };
+  const container = {
+    querySelector: (selector: string) => (selector === ".xterm-screen" ? screen : null),
+  } as unknown as HTMLElement;
+  const term = {
+    element: { querySelector: () => null },
+    cols: 40,
+    rows: 24,
+    buffer: {
+      active: {
+        cursorX: 5,
+        cursorY: 10,
+        baseY: 0,
+        getLine: () => ({ isWrapped: false }),
+      },
+    },
+    _core: {
+      _renderService: {
+        dimensions: {
+          css: {
+            cell: { width: cellWidth, height: cellHeight },
+          },
+        },
+      },
+    },
+  };
+
+  const anchor = resolveAutocompleteAnchorInViewport(
+    term as never,
+    container,
+    3,
+    15,
+    12,
+  );
+  assert.equal(anchor.anchorLeft, 15 * cellWidth);
+  assert.equal(anchor.anchorTop, 12 * cellHeight);
+  assert.equal(anchor.anchorBottom, 13 * cellHeight);
 });
 
 test("short popup flips upward when the cursor is at the bottom of the screen", () => {
