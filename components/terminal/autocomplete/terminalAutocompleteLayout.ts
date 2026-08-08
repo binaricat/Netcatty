@@ -112,6 +112,34 @@ export function areSuggestionsEqual(
   return true;
 }
 
+/**
+ * Keep a popup highlight across a same-query list refresh (e.g. late path
+ * suggestions). Match the previously selected row by stable identity; if a
+ * late path replaces a same-text history/plugin entry, fall back to text.
+ */
+export function resolvePreservedSuggestionIndex(
+  previousSuggestions: CompletionSuggestion[],
+  previousSelectedIndex: number,
+  nextSuggestions: CompletionSuggestion[],
+): number {
+  if (previousSelectedIndex < 0 || previousSelectedIndex >= previousSuggestions.length) {
+    return -1;
+  }
+  const selected = previousSuggestions[previousSelectedIndex];
+  if (!selected) return -1;
+
+  const exactIndex = nextSuggestions.findIndex(
+    (candidate) =>
+      candidate.text === selected.text &&
+      candidate.source === selected.source &&
+      candidate.displayText === selected.displayText &&
+      candidate.fileType === selected.fileType,
+  );
+  if (exactIndex >= 0) return exactIndex;
+
+  return nextSuggestions.findIndex((candidate) => candidate.text === selected.text);
+}
+
 export function areSubDirPanelsEqual(left: SubDirPanel[], right: SubDirPanel[]): boolean {
   if (left.length !== right.length) return false;
   for (let i = 0; i < left.length; i++) {

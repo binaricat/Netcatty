@@ -33,6 +33,7 @@ import {
   resolveAutocompleteAnchorInViewport,
   resolveAutocompleteCursorColumn,
   resolveAutocompleteCwdWithSource,
+  resolvePreservedSuggestionIndex,
 } from "./terminalAutocompleteLayout";
 import { handleTerminalAutocompleteInput } from "./terminalAutocompleteInput";
 import { handleTerminalAutocompleteKeyEvent } from "./terminalAutocompleteKeyEvent";
@@ -812,9 +813,20 @@ export function useTerminalAutocomplete(
           setState((prev) => {
             if (version !== fetchVersionRef.current) return prev;
 
+            // Late path merges refresh this list without a new keystroke. Keep
+            // the user's highlight so Enter/Tab still accept what they chose
+            // while the soft-budget listing was still in flight.
+            const selectedIndex = prev.popupVisible
+              ? resolvePreservedSuggestionIndex(
+                prev.suggestions,
+                prev.selectedIndex,
+                completions,
+              )
+              : -1;
+
             const nextState: AutocompleteState = {
               suggestions: completions,
-              selectedIndex: -1,
+              selectedIndex,
               popupVisible: true,
               popupAnchorViewport: {
                 left: anchor.anchorLeft,

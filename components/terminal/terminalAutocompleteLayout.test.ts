@@ -7,8 +7,10 @@ import {
   resolveAutocompleteAnchorInViewport,
   resolveAutocompleteClampViewport,
   resolveAutocompleteCursorColumn,
+  resolvePreservedSuggestionIndex,
   type PopupPlacementInput,
 } from "./autocomplete/terminalAutocompleteLayout.ts";
+import type { CompletionSuggestion } from "./autocomplete/completionEngine.ts";
 
 const baseInput: PopupPlacementInput = {
   anchorTop: 100,
@@ -500,4 +502,35 @@ test("resolveAutocompleteAnchorInViewport ignores the helper textarea horizontal
   );
   assert.equal(anchor.anchorLeft, 640 + cellWidth * cursorColumn);
   assert.notEqual(anchor.anchorLeft, textarea.getBoundingClientRect().left);
+});
+
+function suggestion(
+  partial: Pick<CompletionSuggestion, "text" | "source"> &
+    Partial<CompletionSuggestion>,
+): CompletionSuggestion {
+  return {
+    displayText: partial.displayText ?? partial.text,
+    score: partial.score ?? 1,
+    ...partial,
+  };
+}
+
+test("resolvePreservedSuggestionIndex keeps highlight after late path reorder", () => {
+  const previous = [
+    suggestion({ text: "alpha", source: "history", score: 900 }),
+    suggestion({ text: "bravo/", source: "history", score: 800 }),
+  ];
+  const next = [
+    suggestion({ text: "bravo/", source: "path", score: 750, fileType: "directory" }),
+    suggestion({ text: "alpha", source: "history", score: 900 }),
+    suggestion({ text: "charlie", source: "path", score: 700, fileType: "file" }),
+  ];
+  assert.equal(resolvePreservedSuggestionIndex(previous, 1, next), 0);
+});
+
+test("resolvePreservedSuggestionIndex returns -1 when selection is absent or dropped", () => {
+  const previous = [suggestion({ text: "gone", source: "history" })];
+  const next = [suggestion({ text: "kept", source: "path", fileType: "file" })];
+  assert.equal(resolvePreservedSuggestionIndex(previous, -1, next), -1);
+  assert.equal(resolvePreservedSuggestionIndex(previous, 0, next), -1);
 });
