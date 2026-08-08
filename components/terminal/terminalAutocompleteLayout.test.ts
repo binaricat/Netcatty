@@ -276,6 +276,31 @@ test("resolveAutocompleteCursorColumn prefers prompt-aligned column when xterm l
   assert.equal(column, "root@host:~# ".length + 1);
 });
 
+test("resolveAutocompleteCursorColumn uses resolved input ahead of echoed prefix", () => {
+  const promptText = "root@host:~# ";
+  const echoedPrefix = "git s";
+  const resolvedInput = "git status";
+  const term = {
+    buffer: {
+      active: {
+        cursorX: promptText.length + echoedPrefix.length,
+        cursorY: 22,
+        baseY: 0,
+        getLine: () => ({
+          isWrapped: false,
+          translateToString: () => `${promptText}${echoedPrefix}`,
+        }),
+      },
+    },
+  };
+
+  const column = resolveAutocompleteCursorColumn(term as never, {
+    promptText,
+    userInput: resolvedInput,
+  });
+  assert.equal(column, promptText.length + resolvedInput.length);
+});
+
 test("short popup flips upward when the cursor is at the bottom of the screen", () => {
   // Regression for issue #1710: a *short* suggestion list must flip up when
   // the anchor line is the last visible row, even if there is a tiny positive

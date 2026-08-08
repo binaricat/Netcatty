@@ -371,6 +371,9 @@ function shouldExpandAutocompleteUpward(
  * buffer.cursorX can lag behind the keystroke that triggered completion, so
  * derive the column from the aligned prompt when the command still fits on one
  * row.
+ *
+ * Callers under SSH echo lag should pass the same resolved query input used
+ * for completion matching (not the lagging echoed `prompt.userInput`).
  */
 export function resolveAutocompleteCursorColumn(
   term: XTerm,

@@ -372,8 +372,18 @@ export function useTerminalAutocomplete(
     setState((prev) => {
       if (!prev.popupVisible || prev.suggestions.length === 0) return prev;
       const { prompt } = getAlignedPrompt(term, typedInputBufferRef.current, typedBufferReliableRef.current);
-      const cursorColumn = prompt.isAtPrompt
-        ? resolveAutocompleteCursorColumn(term, prompt)
+      const queryInput = resolveAutocompleteQueryInput(
+        prompt,
+        typedInputBufferRef.current,
+        typedBufferReliableRef.current,
+      );
+      // Anchor from the echo-lag-aware query input so a lagging remote echo
+      // cannot leave the popup several cells behind the typed command.
+      const cursorColumn = prompt.isAtPrompt && queryInput !== null
+        ? resolveAutocompleteCursorColumn(term, {
+          promptText: prompt.promptText,
+          userInput: queryInput,
+        })
         : term.buffer.active.cursorX;
       const anchor = resolveAutocompleteAnchorInViewport(
         term,
@@ -783,6 +793,7 @@ export function useTerminalAutocomplete(
     const applyCompletions = (
       completions: CompletionSuggestion[],
       currentPrompt: ReturnType<typeof getAlignedPrompt>["prompt"],
+      options?: { preserveSelection?: boolean },
     ) => {
       if (settingsRef.current.showGhostText) {
         const ghost = ghostAddonRef.current;
@@ -802,7 +813,13 @@ export function useTerminalAutocomplete(
         // Live-preview baseline: the typed input these suggestions completed.
         previewBaselineRef.current = input;
         previewActiveRef.current = false;
-        const cursorColumn = resolveAutocompleteCursorColumn(term, currentPrompt);
+        // Anchor with the same resolved query input used for matching. Under
+        // SSH echo lag, currentPrompt.userInput / xterm cursor can still be a
+        // short prefix while `input` already holds the full typed buffer.
+        const cursorColumn = resolveAutocompleteCursorColumn(term, {
+          promptText: currentPrompt.promptText,
+          userInput: input,
+        });
         const anchor = resolveAutocompleteAnchorInViewport(
           term,
           containerRef.current,
@@ -813,10 +830,10 @@ export function useTerminalAutocomplete(
           setState((prev) => {
             if (version !== fetchVersionRef.current) return prev;
 
-            // Late path merges refresh this list without a new keystroke. Keep
-            // the user's highlight so Enter/Tab still accept what they chose
-            // while the soft-budget listing was still in flight.
-            const selectedIndex = prev.popupVisible
+            // Only late-path refreshes for *this* query preserve highlight.
+            // Ordinary keystroke-driven queries must reset selection; otherwise
+            // preview-off Enter can accept a stale row that still matches.
+            const selectedIndex = options?.preserveSelection && prev.popupVisible
               ? resolvePreservedSuggestionIndex(
                 prev.suggestions,
                 prev.selectedIndex,
@@ -918,7 +935,7 @@ export function useTerminalAutocomplete(
           }
           const next = mergeLatePathSuggestions(settledCompletions, latePathSuggestions);
           settledCompletions = next;
-          applyCompletions(next, currentPrompt);
+          applyCompletions(next, currentPrompt, { preserveSelection: true });
         },
       });
     } finally {
