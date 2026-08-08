@@ -18,6 +18,7 @@ import { netcattyBridge } from "../../infrastructure/services/netcattyBridge";
 import {
   clearReconnectTimer,
   getActiveConnection,
+  getPortForwardRuntimeAuthority,
   initReconnectCancelListener,
   reconcileWithBackend,
   startPortForward,
@@ -98,7 +99,8 @@ export interface UsePortForwardingStateResult {
 // Global Store State
 let globalRules: PortForwardingRule[] = [];
 let isInitialized = false;
-let snapshotAvailable = true;
+// Until the first successful authoritative snapshot, treat runtime as unknown.
+let snapshotAvailable = false;
 const listeners = new Set<(rules: PortForwardingRule[]) => void>();
 
 // Store Actions
@@ -285,7 +287,10 @@ const applyRuntimeSnapshotProjection = (
   });
   if (havePortForwardingRuntimeStatesChanged(globalRules, normalizedRules)) {
     setRuntimeProjection(normalizedRules);
-  } else {
+  } else if (hasPortForwardingRuntimePresenceChanged({
+    gone: [...goneRuleIds],
+    appeared: [],
+  })) {
     globalRules = normalizedRules;
     notifyListeners();
   }
@@ -297,6 +302,7 @@ const initializeStore = async () => {
   isInitialized = true;
 
   await syncWithBackend();
+  snapshotAvailable = getPortForwardRuntimeAuthority().available;
 
   const saved = localStorageAdapter.read<PortForwardingRule[]>(
     STORAGE_KEY_PORT_FORWARDING,
@@ -305,7 +311,9 @@ const initializeStore = async () => {
     // Hydrate config from storage, then overlay the live runtime projection.
     // Do not re-persist — that would churn storage with migrated status fields.
     const migrated = migratePortForwardingRulesFromStorage(saved);
-    setRuntimeProjection(normalizeRulesWithConnections(migrated));
+    setRuntimeProjection(normalizeRulesWithConnections(migrated, {
+      snapshotAvailable,
+    }));
   }
 };
 
@@ -319,6 +327,15 @@ const subscribeToPortForwardRuntime = (): (() => void) => {
   let unsubscribeEvent: (() => void) | undefined;
   let observedEpoch: string | undefined;
   let observedRevision = -1;
+  let syncChain: Promise<void> = Promise.resolve();
+
+  const enqueueRuntimeSync = (task: () => Promise<void>) => {
+    syncChain = syncChain.then(async () => {
+      if (disposed) return;
+      await task();
+    }).catch(() => undefined);
+    return syncChain;
+  };
 
   const resyncFromSnapshot = async () => {
     try {
@@ -326,9 +343,15 @@ const subscribeToPortForwardRuntime = (): (() => void) => {
       if (disposed) return;
       observedEpoch = snapshot.epoch;
       observedRevision = snapshot.revision;
-      snapshotAvailable = true;
-      await syncWithBackend();
-      applyRuntimeSnapshotProjection(new Set(), true);
+      // Reconcile (not sync-only) so tunnels absent after an epoch change are pruned.
+      const reconciliation = await reconcileWithBackend();
+      if (disposed) return;
+      snapshotAvailable = reconciliation.snapshotAvailable;
+      if (!reconciliation.snapshotAvailable) {
+        applyRuntimeSnapshotProjection(new Set(), false);
+        return;
+      }
+      applyRuntimeSnapshotProjection(new Set(reconciliation.gone), true);
     } catch {
       if (disposed) return;
       snapshotAvailable = false;
@@ -339,23 +362,28 @@ const subscribeToPortForwardRuntime = (): (() => void) => {
   unsubscribeEvent = bridge.onPortForwardRuntime((event) => {
     if (disposed) return;
     if (observedEpoch && event.epoch !== observedEpoch) {
-      void resyncFromSnapshot();
+      void enqueueRuntimeSync(resyncFromSnapshot);
       return;
     }
     if (observedRevision >= 0 && event.revision > observedRevision + 1) {
-      void resyncFromSnapshot();
+      void enqueueRuntimeSync(resyncFromSnapshot);
       return;
     }
     observedEpoch = event.epoch;
     observedRevision = event.revision;
-    snapshotAvailable = true;
-    void (async () => {
-      await reconcileWithBackend();
-      applyRuntimeSnapshotProjection(new Set(), true);
-    })();
+    void enqueueRuntimeSync(async () => {
+      const reconciliation = await reconcileWithBackend();
+      if (disposed) return;
+      snapshotAvailable = reconciliation.snapshotAvailable;
+      if (!reconciliation.snapshotAvailable) {
+        applyRuntimeSnapshotProjection(new Set(), false);
+        return;
+      }
+      applyRuntimeSnapshotProjection(new Set(reconciliation.gone), true);
+    });
   });
 
-  void resyncFromSnapshot();
+  void enqueueRuntimeSync(resyncFromSnapshot);
 
   return () => {
     disposed = true;

@@ -123,9 +123,20 @@ test("legacy cross-window active status is migrated away on config sync", (t) =>
   } as StorageEvent);
 
   assert.equal(snapshots.length, 1);
-  // Runtime is no longer trusted from storage; absence of a local connection
-  // means inactive after a successful authority baseline (default true in tests).
-  assert.equal(snapshots[0]?.[0]?.status, "inactive");
+  // Runtime is no longer trusted from storage. Before an authoritative snapshot
+  // succeeds, the projection must be unknown — never a false inactive.
+  assert.equal(snapshots[0]?.[0]?.status, "unknown");
+});
+
+test("normalizeRulesWithConnections stays inactive only after authority succeeds", () => {
+  const normalized = normalizeRulesWithConnections([{
+    ...rule,
+    id: "authority-ok-rule",
+    status: "active",
+  }], {
+    snapshotAvailable: true,
+  });
+  assert.equal(normalized[0]?.status, "inactive");
 });
 
 test("cross-window stale status cannot override a known live tunnel", async (t) => {
@@ -164,6 +175,16 @@ test("same-window synchronization preserves an error without a runtime tunnel", 
     status: "error",
     error: "Host not found",
   }]));
+  // Authority already confirmed — diagnostic error may remain without a tunnel.
+  const normalized = normalizeRulesWithConnections([{
+    ...rule,
+    id: "failed-start-rule",
+    status: "error",
+    error: "Host not found",
+  }], { snapshotAvailable: true });
+  assert.equal(normalized[0]?.status, "error");
+  assert.equal(normalized[0]?.error, "Host not found");
+
   const snapshots: PortForwardingRule[][] = [];
   const handlers = createPortForwardingStorageSyncHandlers({
     onRules: (rules) => snapshots.push(rules),
@@ -174,8 +195,8 @@ test("same-window synchronization preserves an error without a runtime tunnel", 
     detail: { key: STORAGE_KEY_PORT_FORWARDING },
   } as unknown as CustomEvent<{ key: string }>);
 
-  assert.equal(snapshots[0]?.[0]?.status, "error");
-  assert.equal(snapshots[0]?.[0]?.error, "Host not found");
+  // Without a successful snapshot in this module, storage sync projects unknown.
+  assert.equal(snapshots[0]?.[0]?.status, "unknown");
 });
 
 test("heartbeat normalization preserves an error without a runtime tunnel", () => {
@@ -184,7 +205,7 @@ test("heartbeat normalization preserves an error without a runtime tunnel", () =
     id: "heartbeat-error-rule",
     status: "error",
     error: "Authentication failed",
-  }]);
+  }], { snapshotAvailable: true });
 
   assert.equal(normalized[0]?.status, "error");
   assert.equal(normalized[0]?.error, "Authentication failed");
@@ -196,7 +217,10 @@ test("heartbeat normalization clears an error for a reconciled-away tunnel", () 
     id: "cleanup-error-rule",
     status: "error",
     error: "Failed to stop tunnel",
-  }], new Set(["cleanup-error-rule"]));
+  }], {
+    reconciledGoneRuleIds: new Set(["cleanup-error-rule"]),
+    snapshotAvailable: true,
+  });
 
   assert.equal(normalized[0]?.status, "inactive");
   assert.equal(normalized[0]?.error, undefined);

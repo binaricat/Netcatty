@@ -1815,6 +1815,14 @@ async function unsubscribePortForwardSender(event, payload = {}) {
       removed += 1;
     }
   }
+  const runtimeEntry = runtimeEventSubscribers.get(webContentsId);
+  if (runtimeEntry) {
+    if (runtimeEntry.onDestroyed) {
+      runtimeEntry.sender.removeListener?.("destroyed", runtimeEntry.onDestroyed);
+    }
+    runtimeEventSubscribers.delete(webContentsId);
+    removed += 1;
+  }
   return { removed };
 }
 
@@ -1938,7 +1946,12 @@ function registerHandlers(ipcMain, options = {}) {
     };
 
     const releaseEmptySenderLifecycle = (sender, entry) => {
-      if (!entry || entry.tunnelIds.size > 0 || subscriptionsBySender.get(sender?.id) !== entry) return;
+      if (
+        !entry
+        || entry.tunnelIds.size > 0
+        || entry.runtimeSubscribed
+        || subscriptionsBySender.get(sender?.id) !== entry
+      ) return;
       entry.sender.removeListener?.("destroyed", entry.onDestroyed);
       subscriptionsBySender.delete(sender.id);
     };
@@ -1990,8 +2003,39 @@ function registerHandlers(ipcMain, options = {}) {
     requestWorker("netcatty:portforward:subscribe", { track: true });
     requestWorker("netcatty:portforward:list");
     requestWorker("netcatty:portforward:snapshot");
-    requestWorker("netcatty:portforward:subscribeRuntime");
-    requestWorker("netcatty:portforward:unsubscribeRuntime");
+    // Runtime subscriptions are process-scoped (no tunnelId). Keep the sender
+    // lifecycle entry so a destroyed window still calls unsubscribeSender,
+    // which clears worker-side runtimeEventSubscribers.
+    ipcMain.handle("netcatty:portforward:subscribeRuntime", async (event, payload) => {
+      const entry = ensureSenderLifecycle(event?.sender);
+      if (entry) entry.runtimeSubscribed = true;
+      try {
+        return await terminalWorkerManager.request(
+          "netcatty:portforward:subscribeRuntime",
+          payload,
+          { webContentsId: event?.sender?.id },
+        );
+      } catch (error) {
+        if (entry) {
+          entry.runtimeSubscribed = false;
+          releaseEmptySenderLifecycle(event?.sender, entry);
+        }
+        throw error;
+      }
+    });
+    ipcMain.handle("netcatty:portforward:unsubscribeRuntime", async (event, payload) => {
+      const entry = subscriptionsBySender.get(event?.sender?.id);
+      try {
+        return await terminalWorkerManager.request(
+          "netcatty:portforward:unsubscribeRuntime",
+          payload,
+          { webContentsId: event?.sender?.id },
+        );
+      } finally {
+        if (entry) entry.runtimeSubscribed = false;
+        releaseEmptySenderLifecycle(event?.sender, entry);
+      }
+    });
     requestWorker("netcatty:portforward:stopAll", { cleanup: "all" });
     requestWorker("netcatty:portforward:stopByRuleId", { cleanup: "rule" });
 

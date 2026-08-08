@@ -414,9 +414,15 @@ const TrayPanelContent: React.FC<TrayPanelContentProps> = ({ terminalSettings })
             <div className="px-2 py-1 text-xs text-muted-foreground">{t("tray.portForwarding")}</div>
             <div className="space-y-1">
               {portForwardingRules.map((rule) => {
-                const isConnecting = rule.status === "connecting" || rule.status === "unknown";
+                const isUnknown = rule.status === "unknown";
+                const isConnecting = rule.status === "connecting";
                 const isActive = rule.status === "active";
-                const isStoppable = isConnecting || isActive || hasRuntimeTunnel(rule.id);
+                // unknown/stale: neither Start nor Stop until authority recovers,
+                // unless this window already holds a live runtime tunnel.
+                const isStoppable = !isUnknown && (
+                  isConnecting || isActive || hasRuntimeTunnel(rule.id)
+                );
+                const isActionDisabled = isConnecting || (isUnknown && !hasRuntimeTunnel(rule.id));
                 const label = rule.label || (rule.type === "dynamic"
                   ? `SOCKS:${rule.localPort}`
                   : `${rule.localPort} → ${rule.remoteHost}:${rule.remotePort}`);
@@ -425,8 +431,9 @@ const TrayPanelContent: React.FC<TrayPanelContentProps> = ({ terminalSettings })
                   <Tooltip key={rule.id}>
                     <TooltipTrigger asChild>
                       <button
-                        disabled={isConnecting}
+                        disabled={isActionDisabled}
                         onClick={() => {
+                          if (isUnknown && !hasRuntimeTunnel(rule.id)) return;
                           const rawHost = rule.hostId ? hosts.find((h) => h.id === rule.hostId) : undefined;
                           if (!rawHost) {
                             toast.error(t("pf.error.hostNotFound"));
@@ -451,7 +458,7 @@ const TrayPanelContent: React.FC<TrayPanelContentProps> = ({ terminalSettings })
                         }}
                         className={cn(
                           "w-full text-left px-2 py-1.5 rounded hover:bg-muted flex items-center justify-between",
-                          isConnecting ? "opacity-60" : "",
+                          isActionDisabled ? "opacity-60" : "",
                         )}
                       >
                         <span className="flex items-center gap-2 min-w-0">
@@ -459,13 +466,13 @@ const TrayPanelContent: React.FC<TrayPanelContentProps> = ({ terminalSettings })
                             status={
                               rule.status === "active"
                                 ? "success"
-                                : rule.status === "connecting"
+                                : rule.status === "connecting" || rule.status === "unknown"
                                   ? "warning"
                                   : rule.status === "error"
                                     ? "error"
                                     : "neutral"
                             }
-                            spinning={rule.status === "connecting"}
+                            spinning={rule.status === "connecting" || rule.status === "unknown"}
                           />
                           <span className="truncate">{label}</span>
                         </span>
