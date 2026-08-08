@@ -812,7 +812,12 @@ export function useTerminalAutocomplete(
       if (settingsRef.current.showPopupMenu && completions.length > 0) {
         // Live-preview baseline: the typed input these suggestions completed.
         previewBaselineRef.current = input;
-        previewActiveRef.current = false;
+        // Ordinary new queries clear preview; same-query late-path refreshes
+        // keep it so Escape can still restore the typed baseline after a
+        // highlight that remains written into the shell line.
+        if (!options?.preserveSelection) {
+          previewActiveRef.current = false;
+        }
         // Anchor with the same resolved query input used for matching. Under
         // SSH echo lag, currentPrompt.userInput / xterm cursor can still be a
         // short prefix while `input` already holds the full typed buffer.
