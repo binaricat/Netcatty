@@ -17,7 +17,7 @@ import { toast } from "./ui/toast";
 import { SettingsTabContent } from "./settings/settings-ui";
 import { SettingsFocusProvider, useSettingsFocus } from "./settings/SettingsFocusContext";
 import { SettingsSearchControl } from "./settings/SettingsSearchControl";
-import { focusSettingsAnchor } from "./settings/settingsFocus";
+import { cancelSettingsFocus, focusSettingsAnchor } from "./settings/settingsFocus";
 import { Tabs, TabsList, TabsTrigger } from "./ui/tabs";
 import { LazyLoadBoundary } from "./ui/lazy-load-boundary";
 import { ExternalMcpApprovalsHost } from "./ai/ExternalMcpApprovalsHost";
@@ -370,8 +370,16 @@ const SettingsPageContent: React.FC<{ settings: SettingsState }> = ({ settings }
         return () => {
             cancelled = true;
             window.clearTimeout(focusHandle);
+            cancelSettingsFocus();
         };
     }, [request, activeTab, clearFocus]);
+
+    const handleTabChange = useCallback((tab: string) => {
+        // Manual sidebar navigation should cancel any pending search jump.
+        cancelSettingsFocus();
+        clearFocus();
+        setActiveTab(tab);
+    }, [clearFocus]);
 
     const handleClose = useCallback(() => {
         closeSettingsWindow();
@@ -403,7 +411,7 @@ const SettingsPageContent: React.FC<{ settings: SettingsState }> = ({ settings }
 
             <Tabs
                 value={activeTab}
-                onValueChange={setActiveTab}
+                onValueChange={handleTabChange}
                 orientation="vertical"
                 className="flex-1 flex overflow-hidden"
             >

@@ -13,6 +13,11 @@ export type SettingsFocusTarget = {
 let focusGeneration = 0;
 let highlightClearTimer: number | null = null;
 
+/** Cancel any in-flight focusSettingsAnchor retries / scroll. */
+export function cancelSettingsFocus(): void {
+  focusGeneration += 1;
+}
+
 function isAnchorVisible(el: HTMLElement): boolean {
   if (el.closest("[hidden]")) return false;
   if (typeof el.checkVisibility === "function") {
