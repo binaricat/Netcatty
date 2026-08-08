@@ -2,7 +2,7 @@ import type { Terminal as XTerm } from "@xterm/xterm";
 import type { CompletionSuggestion } from "./completionEngine";
 import type { PromptDetectionResult } from "./promptDetector";
 import type { SubDirPanel } from "./useTerminalAutocomplete";
-import { getXTermCellDimensions } from "./xtermUtils";
+import { getXTermCellDimensions, stringCellWidth } from "./xtermUtils";
 
 export function resolveAutocompleteCwd(
   promptText: string,
@@ -409,12 +409,17 @@ export function resolveAutocompleteCursorPosition(
       const lineText = line.translateToString(false);
       const tail = lineText.substring(buffer.cursorX).trimEnd();
       if (tail.length === 0) {
-        fromLineCells = Math.max(buffer.cursorX, lineText.trimEnd().length);
+        // Line text may include wide glyphs; measure cells, not code units.
+        fromLineCells = Math.max(buffer.cursorX, stringCellWidth(lineText.trimEnd()));
       }
     }
   }
 
-  const fromPromptCells = prompt.promptText.length + prompt.userInput.length;
+  // Prompt + resolved input must use display-cell widths: CJK/fullwidth
+  // glyphs occupy two xterm columns, and combining marks occupy zero.
+  // String length under-counts wraps and can anchor the popup one row early.
+  const fromPromptCells =
+    stringCellWidth(prompt.promptText) + stringCellWidth(prompt.userInput);
   const totalCells = Math.max(fromLineCells, fromPromptCells);
   // xterm keeps a pending wrap when the line fills exactly: cursorX === cols on
   // the filled row, and only advances on the next printable character. Naïve

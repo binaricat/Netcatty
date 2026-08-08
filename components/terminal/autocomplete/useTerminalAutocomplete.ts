@@ -783,9 +783,11 @@ export function useTerminalAutocomplete(
         merged.push(suggestion);
       }
       merged.sort((left, right) => right.score - left.score);
-      // Match getCompletions' path-active result floor so late paths are not
-      // trimmed more aggressively than an in-budget listing would be.
-      const limit = Math.max(settingsRef.current.maxSuggestions, 24);
+      // Cap to the configured popup limit. provideTerminalCompletions already
+      // slices built-in+plugin results to request.maximum; late path merges
+      // bypass that path and must honor the same user setting (including when
+      // it is below getCompletions' internal path-active floor of 24).
+      const limit = Math.max(1, settingsRef.current.maxSuggestions);
       const limited = merged.slice(0, limit);
       if (!settingsRef.current.allowLineReplacement) {
         return limited.filter((completion) =>

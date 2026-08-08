@@ -12,6 +12,7 @@ import {
   type PopupPlacementInput,
 } from "./autocomplete/terminalAutocompleteLayout.ts";
 import type { CompletionSuggestion } from "./autocomplete/completionEngine.ts";
+import { stringCellWidth } from "./autocomplete/xtermUtils.ts";
 
 const baseInput: PopupPlacementInput = {
   anchorTop: 100,
@@ -410,6 +411,44 @@ test("resolveAutocompleteCursorPosition preserves xterm pending-wrap on exact fi
   });
   assert.equal(position.column, cols);
   assert.equal(position.row, 5);
+});
+
+test("resolveAutocompleteCursorPosition wraps using display cells for wide glyphs", () => {
+  // Narrow terminal + CJK prompt: string length under-counts cells and would
+  // leave the anchor on the prompt row while the command has already wrapped.
+  const promptText = "用户@主机:~$ ";
+  const echoedPrefix = "cat ";
+  const resolvedInput = "README.md";
+  const cols = 20;
+  const totalCells = stringCellWidth(promptText) + stringCellWidth(resolvedInput);
+  assert.ok(totalCells > cols, "fixture must wrap when measured in cells");
+  assert.ok(
+    promptText.length + resolvedInput.length <= cols,
+    "fixture must NOT wrap when measured in code units (the old bug)",
+  );
+  const term = {
+    cols,
+    rows: 24,
+    buffer: {
+      active: {
+        cursorX: stringCellWidth(promptText) + stringCellWidth(echoedPrefix),
+        cursorY: 8,
+        baseY: 0,
+        getLine: () => ({
+          isWrapped: false,
+          translateToString: () => `${promptText}${echoedPrefix}`,
+        }),
+      },
+    },
+  };
+
+  const position = resolveAutocompleteCursorPosition(term as never, {
+    promptText,
+    userInput: resolvedInput,
+  });
+  assert.equal(position.column, totalCells % cols);
+  assert.equal(position.row, 8 + Math.floor(totalCells / cols));
+  assert.ok(position.row > 8, "wide-glyph wrap must leave the prompt row");
 });
 
 test("resolveAutocompleteAnchorInViewport honors an explicit wrapped cursor row", () => {

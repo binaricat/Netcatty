@@ -87,3 +87,69 @@ function measureCellFromDOM(term: XTerm): CellDimensions {
 export function invalidateCellDimensionCache(): void {
   cachedDims = null;
 }
+
+/**
+ * Minimal East-Asian-Width-style classifier: returns 2 for wide glyphs
+ * (CJK ideographs, fullwidth forms, most emoji, hangul syllables), 0 for
+ * common combining/format marks, and 1 otherwise. Not full wcwidth — just
+ * enough to keep column math from drifting by one cell per CJK char.
+ */
+export function codePointCellWidth(cp: number): number {
+  // Combining marks / zero-width format characters (not full Mn/Me coverage).
+  if (
+    (cp >= 0x0300 && cp <= 0x036f) || // Combining Diacritical Marks
+    (cp >= 0x0483 && cp <= 0x0489) ||
+    (cp >= 0x0591 && cp <= 0x05bd) ||
+    cp === 0x05bf ||
+    (cp >= 0x05c1 && cp <= 0x05c2) ||
+    (cp >= 0x05c4 && cp <= 0x05c5) ||
+    cp === 0x05c7 ||
+    (cp >= 0x0610 && cp <= 0x061a) ||
+    (cp >= 0x064b && cp <= 0x065f) ||
+    cp === 0x0670 ||
+    (cp >= 0x06d6 && cp <= 0x06dc) ||
+    (cp >= 0x06df && cp <= 0x06e4) ||
+    (cp >= 0x06e7 && cp <= 0x06e8) ||
+    (cp >= 0x06ea && cp <= 0x06ed) ||
+    (cp >= 0x20d0 && cp <= 0x20f0) || // Combining Diacritical Marks for Symbols
+    (cp >= 0xfe00 && cp <= 0xfe0f) || // Variation Selectors
+    (cp >= 0xfe20 && cp <= 0xfe2f) || // Combining Half Marks
+    cp === 0x200b || // Zero Width Space
+    cp === 0x200c || // ZWNJ
+    cp === 0x200d || // ZWJ
+    cp === 0xfeff || // BOM / ZWNBSP
+    (cp >= 0x1ab0 && cp <= 0x1aff) ||
+    (cp >= 0x1dc0 && cp <= 0x1dff) ||
+    (cp >= 0xe0100 && cp <= 0xe01ef)
+  ) {
+    return 0;
+  }
+  if (
+    (cp >= 0x1100 && cp <= 0x115f) || // Hangul Jamo
+    (cp >= 0x2e80 && cp <= 0x303e) || // CJK Radicals, Kangxi
+    (cp >= 0x3041 && cp <= 0x33ff) || // Hiragana, Katakana, CJK Compat
+    (cp >= 0x3400 && cp <= 0x4dbf) || // CJK Extension A
+    (cp >= 0x4e00 && cp <= 0x9fff) || // CJK Unified Ideographs
+    (cp >= 0xa000 && cp <= 0xa4cf) || // Yi
+    (cp >= 0xac00 && cp <= 0xd7a3) || // Hangul Syllables
+    (cp >= 0xf900 && cp <= 0xfaff) || // CJK Compat Ideographs
+    (cp >= 0xfe30 && cp <= 0xfe4f) || // CJK Compat Forms
+    (cp >= 0xff00 && cp <= 0xff60) || // Fullwidth forms
+    (cp >= 0xffe0 && cp <= 0xffe6) || // Fullwidth signs
+    (cp >= 0x1f300 && cp <= 0x1faff) || // Emoji blocks
+    (cp >= 0x20000 && cp <= 0x3fffd) // CJK Extension B-F, G
+  ) {
+    return 2;
+  }
+  return 1;
+}
+
+/** Sum of {@link codePointCellWidth} over each code point in `s`. */
+export function stringCellWidth(s: string): number {
+  let w = 0;
+  for (const ch of s) {
+    const cp = ch.codePointAt(0) ?? 0;
+    w += codePointCellWidth(cp);
+  }
+  return w;
+}
