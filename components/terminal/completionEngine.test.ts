@@ -297,6 +297,36 @@ test("getCompletions does not reuse cached remote relative listings after cwd ch
   assert.equal(completions[0]?.text, "cat worktree.txt");
 });
 
+test("getCompletions does not reuse in-flight remote relative listings after cwd changes", async () => {
+  bridgeState.remoteDelayMs = 150;
+  bridgeState.remoteEntriesByPath.set(".", [{ name: "home-only.txt", type: "file" }]);
+
+  const first = getCompletions("cat ", {
+    hostId: "host-1",
+    os: "linux",
+    protocol: "ssh",
+    sessionId: "session-inflight-cwd",
+    pathBudgetMs: Infinity,
+  });
+
+  // First listing must be in flight before the shell cwd listing changes.
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  bridgeState.remoteEntriesByPath.set(".", [{ name: "worktree.txt", type: "file" }]);
+
+  const second = await getCompletions("cat wo", {
+    hostId: "host-1",
+    os: "linux",
+    protocol: "ssh",
+    sessionId: "session-inflight-cwd",
+    pathBudgetMs: Infinity,
+  });
+  await first;
+
+  assert.equal(bridgeState.remoteCalls.length, 2);
+  assert.equal(second[0]?.text, "cat worktree.txt");
+  assert.equal(second.some((entry) => entry.text === "cat home-only.txt"), false);
+});
+
 test("getCompletions returns local history before a slow remote path listing finishes", async () => {
   recordCommand("cat worktree.txt", "host-1");
   bridgeState.remoteDelayMs = 250;
