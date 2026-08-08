@@ -56,10 +56,12 @@ const bridgeState: {
   localEntries: MockDirEntry[];
   remoteEntriesByPath: Map<string, MockDirEntry[]>;
   remoteCalls: string[];
+  remoteDelayMs: number;
 } = {
   localEntries: [],
   remoteEntriesByPath: new Map(),
   remoteCalls: [],
+  remoteDelayMs: 0,
 };
 
 Object.defineProperty(globalThis, "window", {
@@ -88,6 +90,9 @@ Object.defineProperty(globalThis, "window", {
         limit?: number,
       ) => {
         bridgeState.remoteCalls.push(path);
+        if (bridgeState.remoteDelayMs > 0) {
+          await new Promise((resolve) => setTimeout(resolve, bridgeState.remoteDelayMs));
+        }
         const prefix = (filterPrefix ?? "").toLowerCase();
         const remoteEntries = bridgeState.remoteEntriesByPath.get(path) ?? [];
         const entries = remoteEntries
@@ -118,6 +123,7 @@ test.beforeEach(() => {
   bridgeState.localEntries = [{ name: "package.json", type: "file" }];
   bridgeState.remoteEntriesByPath = new Map();
   bridgeState.remoteCalls = [];
+  bridgeState.remoteDelayMs = 0;
 });
 
 test("getCompletions prioritizes spec-driven path suggestions over history", async () => {
@@ -286,6 +292,29 @@ test("getCompletions does not reuse cached remote relative listings after cwd ch
 
   assert.equal(bridgeState.remoteCalls.length, 2);
   assert.equal(completions[0]?.text, "cat worktree.txt");
+});
+
+test("getCompletions returns local history before a slow remote path listing finishes", async () => {
+  recordCommand("cat worktree.txt", "host-1");
+  bridgeState.remoteDelayMs = 250;
+  bridgeState.remoteEntriesByPath.set(".", [{ name: "worktree.txt", type: "file" }]);
+
+  const started = Date.now();
+  const completions = await getCompletions("cat wo", {
+    hostId: "host-1",
+    os: "linux",
+    protocol: "ssh",
+    sessionId: "session-slow-path",
+    cwd: "~",
+    pathBudgetMs: 40,
+  });
+  const elapsed = Date.now() - started;
+
+  assert.ok(elapsed < 200, `expected local suggestions within budget, took ${elapsed}ms`);
+  assert.ok(
+    completions.some((entry) => entry.source === "history" && entry.text === "cat worktree.txt"),
+  );
+  assert.equal(completions.some((entry) => entry.source === "path"), false);
 });
 
 test("getCompletions includes other hosts' history when historyScope is global", async () => {

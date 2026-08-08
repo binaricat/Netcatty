@@ -37,6 +37,7 @@ import {
 } from "./terminalAutocompleteLayout";
 import { handleTerminalAutocompleteInput } from "./terminalAutocompleteInput";
 import { handleTerminalAutocompleteKeyEvent } from "./terminalAutocompleteKeyEvent";
+import { resolveAutocompleteQueryInput } from "./terminalAutocompletePrompt";
 import { isTerminalAlternateScreenActive } from "../terminalHibernateRuntime";
 
 export interface AutocompleteSettings {
@@ -165,7 +166,10 @@ export interface TerminalAutocompleteHandle {
   hideSudoHint: () => void;
 }
 
-export { getCommandToRecordOnEnter } from "./terminalAutocompletePrompt";
+export {
+  getCommandToRecordOnEnter,
+  resolveAutocompleteQueryInput,
+} from "./terminalAutocompletePrompt";
 
 export function useTerminalAutocomplete(
   options: UseTerminalAutocompleteOptions,
@@ -675,7 +679,14 @@ export function useTerminalAutocomplete(
     const { prompt } = getAlignedPrompt(term, typedInputBufferRef.current, typedBufferReliableRef.current);
     lastPromptRef.current = prompt;
 
-    if (!prompt.isAtPrompt || prompt.userInput.length < settingsRef.current.minChars) {
+    // Prefer the reliable keystroke buffer when remote echo lags (#2830).
+    // getAlignedPrompt intentionally stays stricter for Enter recording.
+    const input = resolveAutocompleteQueryInput(
+      prompt,
+      typedInputBufferRef.current,
+      typedBufferReliableRef.current,
+    );
+    if (!prompt.isAtPrompt || input === null || input.length < settingsRef.current.minChars) {
       clearState();
       return;
     }
@@ -689,8 +700,6 @@ export function useTerminalAutocomplete(
       clearState();
       return;
     }
-
-    const input = prompt.userInput;
     const parsedInput = parseCommandLine(input);
     const cwdResolution = resolveAutocompleteCwdWithSource(
       prompt.promptText,
@@ -739,9 +748,16 @@ export function useTerminalAutocomplete(
     }
 
     // Discard stale results: if the user kept typing while getCompletions was running,
-    // the current prompt input will have changed. Re-detect and compare.
+    // the current prompt input will have changed. Re-detect and compare. Use the same
+    // echo-lag-aware resolver as the query so catching-up remote echo alone does not
+    // drop local matches (#2830).
     const { prompt: currentPrompt } = getAlignedPrompt(term, typedInputBufferRef.current, typedBufferReliableRef.current);
-    if (!currentPrompt.isAtPrompt || currentPrompt.userInput !== input) {
+    const currentInput = resolveAutocompleteQueryInput(
+      currentPrompt,
+      typedInputBufferRef.current,
+      typedBufferReliableRef.current,
+    );
+    if (!currentPrompt.isAtPrompt || currentInput !== input) {
       return; // Input changed — these completions are stale
     }
 

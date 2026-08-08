@@ -47,6 +47,33 @@ function hasThemedPromptDecorationInInput(prompt: PromptDetectionResult): boolea
   return hasThemedPromptMarker && /\S+\s+\S/.test(prompt.userInput);
 }
 
+/**
+ * Command-line text used for autocomplete matching (popup / ghost).
+ *
+ * Enter recording keeps a stricter echo-alignment policy so short lagging
+ * prefixes are not committed as history. Autocomplete can safely prefer the
+ * reliable keystroke buffer when it is ahead of the remote shell echo —
+ * otherwise high-latency SSH drops local history/fig matches until the user
+ * pauses and the echo catches up (#2830).
+ */
+export function resolveAutocompleteQueryInput(
+  prompt: PromptDetectionResult,
+  typedBuffer: string,
+  typedBufferReliable: boolean,
+): string | null {
+  if (!prompt.isAtPrompt) return null;
+
+  if (
+    typedBufferReliable &&
+    typedBuffer.length > 0 &&
+    typedBuffer.startsWith(prompt.userInput)
+  ) {
+    return typedBuffer;
+  }
+
+  return prompt.userInput;
+}
+
 export function getCommandToRecordOnEnter(
   livePrompt: PromptDetectionResult,
   alignedTyped: string | null,

@@ -73,6 +73,39 @@ export interface CompletionContext {
   isOptionArg: boolean;
 }
 
+/**
+ * Soft wait for remote/local path listings. History, fig specs, and snippets are
+ * local and should paint without waiting on high-latency SSH exec (#2830).
+ * Timed-out listings still finish in the background to warm the shared cache.
+ */
+export const PATH_COMPLETION_BUDGET_MS = 150;
+
+type PathSuggestionEntry = { name: string; type: "file" | "directory" | "symlink" };
+
+async function getPathSuggestionsWithinBudget(
+  pathPromise: Promise<PathSuggestionEntry[]>,
+  budgetMs: number,
+): Promise<PathSuggestionEntry[]> {
+  if (!Number.isFinite(budgetMs) || budgetMs < 0) {
+    return pathPromise;
+  }
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const raced = await Promise.race([
+      pathPromise.then((entries) => ({ kind: "entries" as const, entries })),
+      new Promise<{ kind: "timeout" }>((resolve) => {
+        timeoutId = setTimeout(() => resolve({ kind: "timeout" }), budgetMs);
+      }),
+    ]);
+    if (raced.kind === "entries") return raced.entries;
+    // Keep the listing in flight so a later keystroke can hit cache.
+    void pathPromise.catch(() => {});
+    return [];
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
+  }
+}
+
 interface SpecSuggestionResult {
   suggestions: CompletionSuggestion[];
   pathArgs?: FigSubcommand["args"];
@@ -180,9 +213,16 @@ export async function getCompletions(
     snippets?: Snippet[];
     /** Which history pool to query (default: current host only). */
     historyScope?: AutocompleteHistoryScope;
+    /**
+     * Soft budget for path listings (ms). Local suggestions return when this
+     * elapses even if remote `find` is still running. Use `Infinity` in tests
+     * that need the full remote listing.
+     */
+    pathBudgetMs?: number;
   } = {},
 ): Promise<CompletionSuggestion[]> {
   const { hostId, maxResults = 15, historyScope = "host" } = options;
+  const pathBudgetMs = options.pathBudgetMs ?? PATH_COMPLETION_BUDGET_MS;
 
   if (!input || input.trim().length === 0) return [];
 
@@ -250,14 +290,17 @@ export async function getCompletions(
   const canQueryPaths = options.protocol === "local" || options.sessionId !== undefined;
 
   const pathEntries = canQueryPaths && pathCheck.shouldComplete
-    ? await getPathSuggestions(ctx, {
-      sessionId: options.sessionId,
-      protocol: options.protocol,
-      os: options.os,
-      cwd: options.cwd,
-      cwdSource: options.cwdSource,
-      foldersOnly: pathCheck.foldersOnly,
-    })
+    ? await getPathSuggestionsWithinBudget(
+      getPathSuggestions(ctx, {
+        sessionId: options.sessionId,
+        protocol: options.protocol,
+        os: options.os,
+        cwd: options.cwd,
+        cwdSource: options.cwdSource,
+        foldersOnly: pathCheck.foldersOnly,
+      }),
+      pathBudgetMs,
+    )
     : [];
 
   for (const suggestion of specResult.suggestions) {
