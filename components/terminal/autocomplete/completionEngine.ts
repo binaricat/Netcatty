@@ -82,7 +82,8 @@ export const PATH_COMPLETION_BUDGET_MS = 150;
 
 type PathSuggestionEntry = { name: string; type: "file" | "directory" | "symlink" };
 
-async function getPathSuggestionsWithinBudget(
+/** @internal Exported for unit tests covering the soft path-listing budget. */
+export async function getPathSuggestionsWithinBudget(
   pathPromise: Promise<PathSuggestionEntry[]>,
   budgetMs: number,
 ): Promise<PathSuggestionEntry[]> {
@@ -92,7 +93,12 @@ async function getPathSuggestionsWithinBudget(
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
   try {
     const raced = await Promise.race([
-      pathPromise.then((entries) => ({ kind: "entries" as const, entries })),
+      // Settle rejections here so a late failure after timeout cannot surface
+      // as an unhandled rejection from the losing Promise.race branch.
+      pathPromise.then(
+        (entries) => ({ kind: "entries" as const, entries }),
+        () => ({ kind: "entries" as const, entries: [] as PathSuggestionEntry[] }),
+      ),
       new Promise<{ kind: "timeout" }>((resolve) => {
         timeoutId = setTimeout(() => resolve({ kind: "timeout" }), budgetMs);
       }),

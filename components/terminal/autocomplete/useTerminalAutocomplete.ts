@@ -27,7 +27,6 @@ import {
   shouldPreferRemoteShellCwd,
 } from "./remotePathCompleter";
 import { decideGhostSuggestion } from "./ghostSuggestionPolicy";
-import { computeLivePreviewWrite } from "./livePreviewSequence";
 import {
   areSubDirPanelsEqual,
   areSuggestionsEqual,
@@ -37,7 +36,10 @@ import {
 } from "./terminalAutocompleteLayout";
 import { handleTerminalAutocompleteInput } from "./terminalAutocompleteInput";
 import { handleTerminalAutocompleteKeyEvent } from "./terminalAutocompleteKeyEvent";
-import { resolveAutocompleteQueryInput } from "./terminalAutocompletePrompt";
+import {
+  computeAutocompleteAcceptWrite,
+  resolveAutocompleteQueryInput,
+} from "./terminalAutocompletePrompt";
 import { isTerminalAlternateScreenActive } from "../terminalHibernateRuntime";
 
 export interface AutocompleteSettings {
@@ -167,6 +169,7 @@ export interface TerminalAutocompleteHandle {
 }
 
 export {
+  computeAutocompleteAcceptWrite,
   getCommandToRecordOnEnter,
   resolveAutocompleteQueryInput,
 } from "./terminalAutocompletePrompt";
@@ -422,8 +425,15 @@ export function useTerminalAutocomplete(
       typedBufferReliableRef.current,
     );
     const activePrompt = livePrompt.isAtPrompt ? livePrompt : lastPromptRef.current;
-    const activeWord = activePrompt?.isAtPrompt
-      ? parseCommandLine(activePrompt.userInput).currentWord
+    const activeLine = activePrompt
+      ? resolveAutocompleteQueryInput(
+        activePrompt,
+        typedInputBufferRef.current,
+        typedBufferReliableRef.current,
+      )
+      : null;
+    const activeWord = activeLine !== null
+      ? parseCommandLine(activeLine).currentWord
       : parseCommandLine(item.text).currentWord;
     const cwdResolution = resolveAutocompleteCwdWithSource(
       activePrompt?.promptText ?? "",
@@ -565,8 +575,13 @@ export function useTerminalAutocomplete(
     const { prompt } = getAlignedPrompt(
       term, typedInputBufferRef.current, typedBufferReliableRef.current,
     );
-    if (!prompt.isAtPrompt) return;
-    const parsed = parseCommandLine(prompt.userInput);
+    const line = resolveAutocompleteQueryInput(
+      prompt,
+      typedInputBufferRef.current,
+      typedBufferReliableRef.current,
+    );
+    if (line === null) return;
+    const parsed = parseCommandLine(line);
     const cmdPrefix = parsed.tokens.slice(0, parsed.wordIndex).join(" ")
       + (parsed.wordIndex > 0 ? " " : "");
     const currentToken = parsed.currentWord;
@@ -577,8 +592,12 @@ export function useTerminalAutocomplete(
     const entryName = quotePrefix || !/[\\$'"|!<>;#~` ]/.test(entry.name)
       ? entry.name : shellEscape(entry.name);
     const newCommand = cmdPrefix + `${quotePrefix}${panel.dirPath}${entryName}${suffix}${quoteSuffix}`;
-    const seq = computeLivePreviewWrite({
-      currentLine: prompt.userInput, candidate: newCommand, os: hostOsRef.current,
+    const seq = computeAutocompleteAcceptWrite({
+      prompt,
+      typedBuffer: typedInputBufferRef.current,
+      typedBufferReliable: typedBufferReliableRef.current,
+      candidate: newCommand,
+      os: hostOsRef.current,
     });
     if (seq) writeToTerminal(seq);
     typedInputBufferRef.current = newCommand;
@@ -598,15 +617,21 @@ export function useTerminalAutocomplete(
     const panel = s.subDirPanels[level];
     if (!panel) return;
 
-    // Get current prompt to know what command prefix to keep (e.g., "cd ").
     // getAlignedPrompt handles robbyrussell-style themes by trimming the
     // cwd marker out of userInput when the typed buffer is aligned (#806).
+    // Mutation baseline still prefers the reliable typed buffer when echo lags
+    // (#2830), matching suggestion matching / live-preview.
     const { prompt } = getAlignedPrompt(term, typedInputBufferRef.current, typedBufferReliableRef.current);
-    if (!prompt.isAtPrompt) return;
+    const line = resolveAutocompleteQueryInput(
+      prompt,
+      typedInputBufferRef.current,
+      typedBufferReliableRef.current,
+    );
+    if (line === null) return;
 
     // Find the command part (everything before the path argument)
     // e.g., userInput = "cd /usr/" → command prefix = "cd ", we replace the whole path
-    const parsedPrompt = parseCommandLine(prompt.userInput);
+    const parsedPrompt = parseCommandLine(line);
     const cmdPrefix = parsedPrompt.tokens
       .slice(0, parsedPrompt.wordIndex)
       .join(" ") + (parsedPrompt.wordIndex > 0 ? " " : "");
@@ -621,14 +646,16 @@ export function useTerminalAutocomplete(
       : shellEscape(entry.name);
     const fullPath = panel.dirPath + entryName + suffix;
     const replacementPath = `${quotePrefix}${fullPath}${quoteSuffix}`;
-
-    // Clear current input and write: cmdPrefix + fullPath
-    const isWindows = hostOsRef.current === "windows";
-    const clearSeq = isWindows
-      ? "\b".repeat(prompt.userInput.length)
-      : "\x15";
     const newCommand = cmdPrefix + replacementPath;
-    writeToTerminal(clearSeq + newCommand);
+    const payload = computeAutocompleteAcceptWrite({
+      prompt,
+      typedBuffer: typedInputBufferRef.current,
+      typedBufferReliable: typedBufferReliableRef.current,
+      candidate: newCommand,
+      os: hostOsRef.current,
+    });
+    if (payload === null) return;
+    if (payload) writeToTerminal(payload);
     // Sub-dir selection rewrote the whole command line; re-align the
     // keystroke buffer so the next Enter records the executed command
     // instead of whatever partial input we had before (P2 from #814).
@@ -911,12 +938,14 @@ export function useTerminalAutocomplete(
       typedInputBufferRef.current,
       typedBufferReliableRef.current,
     );
-    if (!prompt.isAtPrompt) return;
-    const seq = computeLivePreviewWrite({
-      currentLine: prompt.userInput,
+    const seq = computeAutocompleteAcceptWrite({
+      prompt,
+      typedBuffer: typedInputBufferRef.current,
+      typedBufferReliable: typedBufferReliableRef.current,
       candidate,
       os: hostOsRef.current,
     });
+    if (seq === null) return;
     if (seq) writeToTerminal(seq);
     typedInputBufferRef.current = candidate;
     typedBufferReliableRef.current = true;
@@ -937,10 +966,15 @@ export function useTerminalAutocomplete(
     const term = termRef.current;
     if (term) {
       const { prompt } = getAlignedPrompt(term, typedInputBufferRef.current, typedBufferReliableRef.current);
-      if (prompt.isAtPrompt && prompt.userInput.length > 0) {
+      const line = resolveAutocompleteQueryInput(
+        prompt,
+        typedInputBufferRef.current,
+        typedBufferReliableRef.current,
+      );
+      if (line !== null && line.length > 0) {
         if (!settingsRef.current.allowLineReplacement) return false;
         const clearSequence = hostOsRef.current === "windows"
-          ? "\b".repeat(prompt.userInput.length)
+          ? "\b".repeat(line.length)
           : "\x15"; // Ctrl+U (readline kill-line)
         writeToTerminal(clearSequence);
       }
@@ -964,26 +998,18 @@ export function useTerminalAutocomplete(
 
       // Always use real-time prompt detection — lastPromptRef may be stale
       // if the user typed more characters after suggestions were fetched.
+      // Accept writes must use the echo-lag-aware line baseline (#2830).
       const { prompt } = getAlignedPrompt(term, typedInputBufferRef.current, typedBufferReliableRef.current);
-      if (!prompt.isAtPrompt) return false;
-
-      // If suggestion starts with the current input, insert only the remaining part.
-      // Otherwise (fuzzy match), clear the line first and write the full suggestion.
-      let payload: string;
-      if (suggestion.text.startsWith(prompt.userInput)) {
-        const textToInsert = suggestion.text.substring(prompt.userInput.length);
-        payload = execute ? textToInsert + "\r" : textToInsert;
-      } else {
-        if (!settingsRef.current.allowLineReplacement) return false;
-        // Fuzzy match: clear current input, then write full command.
-        // Ctrl+U works on POSIX shells (bash/zsh/fish).
-        // On Windows (cmd.exe/PowerShell), use backspaces to erase instead.
-        const isWindows = hostOsRef.current === "windows";
-        const clearSequence = isWindows
-          ? "\b".repeat(prompt.userInput.length) // Backspace to erase
-          : "\x15"; // Ctrl+U (readline kill-line)
-        payload = clearSequence + suggestion.text + (execute ? "\r" : "");
-      }
+      const payload = computeAutocompleteAcceptWrite({
+        prompt,
+        typedBuffer: typedInputBufferRef.current,
+        typedBufferReliable: typedBufferReliableRef.current,
+        candidate: suggestion.text,
+        os: hostOsRef.current,
+        execute,
+        allowLineReplacement: settingsRef.current.allowLineReplacement,
+      });
+      if (payload === null) return false;
 
       if (payload) {
         writeToTerminal(payload);

@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { resolveAutocompleteQueryInput } from "./autocomplete/terminalAutocompletePrompt.ts";
+import {
+  computeAutocompleteAcceptWrite,
+  resolveAutocompleteQueryInput,
+} from "./autocomplete/terminalAutocompletePrompt.ts";
 import type { PromptDetectionResult } from "./autocomplete/promptDetector.ts";
 
 function atPrompt(userInput: string, promptText = "$ "): PromptDetectionResult {
@@ -55,5 +58,45 @@ test("resolveAutocompleteQueryInput does not invent input from an unrelated type
   assert.equal(
     resolveAutocompleteQueryInput(atPrompt("echo hello"), "sudo", true),
     "echo hello",
+  );
+});
+
+test("computeAutocompleteAcceptWrite uses typed buffer under echo lag so accept does not duplicate keystrokes", () => {
+  // Remote shell already has the full typed command; only the local echo lags.
+  // Accept/preview must extend from the typed buffer, not the short echoed prefix.
+  assert.equal(
+    computeAutocompleteAcceptWrite({
+      prompt: atPrompt("s"),
+      typedBuffer: "systemctl",
+      typedBufferReliable: true,
+      candidate: "systemctl restart nginx",
+      os: "linux",
+    }),
+    " restart nginx",
+  );
+  assert.equal(
+    computeAutocompleteAcceptWrite({
+      prompt: atPrompt(""),
+      typedBuffer: "systemctl",
+      typedBufferReliable: true,
+      candidate: "systemctl status",
+      os: "linux",
+      execute: true,
+    }),
+    " status\r",
+  );
+});
+
+test("computeAutocompleteAcceptWrite refuses line replacement when disabled", () => {
+  assert.equal(
+    computeAutocompleteAcceptWrite({
+      prompt: atPrompt("dock"),
+      typedBuffer: "dock",
+      typedBufferReliable: true,
+      candidate: "systemctl status",
+      os: "linux",
+      allowLineReplacement: false,
+    }),
+    null,
   );
 });

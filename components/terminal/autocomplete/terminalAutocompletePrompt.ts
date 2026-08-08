@@ -3,6 +3,7 @@ import {
   reconcilePromptWithExternalCommand,
   type PromptDetectionResult,
 } from "./promptDetector";
+import { computeLivePreviewWrite } from "./livePreviewSequence";
 
 const THEMED_PROMPT_MARKERS = /[❯❮→➜➤⟩»›]/;
 
@@ -72,6 +73,47 @@ export function resolveAutocompleteQueryInput(
   }
 
   return prompt.userInput;
+}
+
+/**
+ * Keystrokes that rewrite the remote command line to `candidate`.
+ *
+ * Must use the same echo-lag-aware baseline as suggestion matching: the remote
+ * shell already has the typed buffer, even when local echo still shows a short
+ * prefix. Using lagging `prompt.userInput` here would append a duplicate tail
+ * (e.g. typed `systemctl` + echo `s` + accept → send `ystemctl …`).
+ */
+export function computeAutocompleteAcceptWrite(options: {
+  prompt: PromptDetectionResult;
+  typedBuffer: string;
+  typedBufferReliable: boolean;
+  candidate: string;
+  os: string;
+  execute?: boolean;
+  allowLineReplacement?: boolean;
+}): string | null {
+  const currentLine = resolveAutocompleteQueryInput(
+    options.prompt,
+    options.typedBuffer,
+    options.typedBufferReliable,
+  );
+  if (currentLine === null) return null;
+
+  const allowLineReplacement = options.allowLineReplacement !== false;
+  if (
+    !options.candidate.startsWith(currentLine) &&
+    !allowLineReplacement
+  ) {
+    return null;
+  }
+
+  const body = computeLivePreviewWrite({
+    currentLine,
+    candidate: options.candidate,
+    os: options.os,
+  });
+  if (!options.execute) return body;
+  return body ? `${body}\r` : "\r";
 }
 
 export function getCommandToRecordOnEnter(

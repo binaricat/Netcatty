@@ -106,7 +106,10 @@ Object.defineProperty(globalThis, "window", {
   configurable: true,
 });
 
-const { getCompletions } = await import("./autocomplete/completionEngine.ts");
+const {
+  getCompletions,
+  getPathSuggestionsWithinBudget,
+} = await import("./autocomplete/completionEngine.ts");
 const {
   clearHistory,
   recordCommand,
@@ -315,6 +318,25 @@ test("getCompletions returns local history before a slow remote path listing fin
     completions.some((entry) => entry.source === "history" && entry.text === "cat worktree.txt"),
   );
   assert.equal(completions.some((entry) => entry.source === "path"), false);
+});
+
+test("getPathSuggestionsWithinBudget ignores late rejections after the soft timeout", async () => {
+  const unhandled: unknown[] = [];
+  const onUnhandled = (reason: unknown) => {
+    unhandled.push(reason);
+  };
+  process.on("unhandledRejection", onUnhandled);
+  try {
+    const pathPromise = new Promise<{ name: string; type: "file" }[]>((_resolve, reject) => {
+      setTimeout(() => reject(new Error("late path failure")), 80);
+    });
+    const entries = await getPathSuggestionsWithinBudget(pathPromise, 20);
+    assert.deepEqual(entries, []);
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    assert.equal(unhandled.length, 0);
+  } finally {
+    process.off("unhandledRejection", onUnhandled);
+  }
 });
 
 test("getCompletions includes other hosts' history when historyScope is global", async () => {
