@@ -186,6 +186,21 @@ html.platform-win32 {
   cursor: pointer;
 }
 
+@keyframes settings-search-highlight {
+  0% {
+    background-color: hsl(var(--primary) / 0.22);
+    box-shadow: 0 0 0 1px hsl(var(--primary) / 0.35);
+  }
+  100% {
+    background-color: transparent;
+    box-shadow: 0 0 0 1px transparent;
+  }
+}
+
+.settings-search-highlight {
+  animation: settings-search-highlight 1.6s ease-out;
+}
+
 .top-tab-root-label {
   display: inline-block;
   overflow: hidden;

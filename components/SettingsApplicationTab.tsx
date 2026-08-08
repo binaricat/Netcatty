@@ -7,7 +7,7 @@ import { cn } from "../lib/utils";
 import { useApplicationBackend } from "../application/state/useApplicationBackend";
 import type { UpdateState, UseUpdateCheckResult } from "../application/state/useUpdateCheck";
 import { useI18n } from "../application/i18n/I18nProvider";
-import { SettingsTabContent } from "./settings/settings-ui";
+import { SettingsAnchor, SettingsTabContent } from "./settings/settings-ui";
 import { toast } from "./ui/toast";
 
 type AppInfo = {
@@ -204,7 +204,7 @@ export default function SettingsApplicationTab({ updateState, checkNow, openRele
             </div>
           </div>
 
-          <div className="mt-6">
+          <SettingsAnchor anchorId="application-check-updates" className="mt-6">
             <Button
               variant="secondary"
               className="gap-2"
@@ -223,35 +223,43 @@ export default function SettingsApplicationTab({ updateState, checkNow, openRele
                 : t("settings.application.checkUpdates")
               }
             </Button>
-          </div>
+          </SettingsAnchor>
         </div>
 
         <div className="flex-1">
           <div className="space-y-2">
-            <ActionRow
-              icon={<Bug size={18} />}
-              title={t("settings.application.reportProblem")}
-              subtitle={t("settings.application.reportProblem.subtitle")}
-              onClick={() => void handleOpenExternal(issueUrl)}
-            />
-            <ActionRow
-              icon={<MessageCircle size={18} />}
-              title={t("settings.application.community")}
-              subtitle={t("settings.application.community.subtitle")}
-              onClick={() => void handleOpenExternal(discussionsUrl)}
-            />
-            <ActionRow
-              icon={<Github size={18} />}
-              title="GitHub"
-              subtitle={t("settings.application.github.subtitle")}
-              onClick={() => void handleOpenExternal(REPO_URL)}
-            />
-            <ActionRow
-              icon={<Newspaper size={18} />}
-              title={t("settings.application.whatsNew")}
-              subtitle={t("settings.application.whatsNew.subtitle")}
-              onClick={() => void handleOpenExternal(releasesUrl)}
-            />
+            <SettingsAnchor anchorId="application-report-problem">
+              <ActionRow
+                icon={<Bug size={18} />}
+                title={t("settings.application.reportProblem")}
+                subtitle={t("settings.application.reportProblem.subtitle")}
+                onClick={() => void handleOpenExternal(issueUrl)}
+              />
+            </SettingsAnchor>
+            <SettingsAnchor anchorId="application-community">
+              <ActionRow
+                icon={<MessageCircle size={18} />}
+                title={t("settings.application.community")}
+                subtitle={t("settings.application.community.subtitle")}
+                onClick={() => void handleOpenExternal(discussionsUrl)}
+              />
+            </SettingsAnchor>
+            <SettingsAnchor anchorId="application-github">
+              <ActionRow
+                icon={<Github size={18} />}
+                title="GitHub"
+                subtitle={t("settings.application.github.subtitle")}
+                onClick={() => void handleOpenExternal(REPO_URL)}
+              />
+            </SettingsAnchor>
+            <SettingsAnchor anchorId="application-whats-new">
+              <ActionRow
+                icon={<Newspaper size={18} />}
+                title={t("settings.application.whatsNew")}
+                subtitle={t("settings.application.whatsNew.subtitle")}
+                onClick={() => void handleOpenExternal(releasesUrl)}
+              />
+            </SettingsAnchor>
           </div>
         </div>
       </div>

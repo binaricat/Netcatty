@@ -4,7 +4,7 @@ import type { AIPermissionMode } from "../../../../infrastructure/ai/types";
 import { DEFAULT_COMMAND_BLOCKLIST, MAX_COMMAND_TIMEOUT_SECONDS } from "../../../../infrastructure/ai/types";
 import { useI18n } from "../../../../application/i18n/I18nProvider";
 import { Button } from "../../../ui/button";
-import { Select, SettingCard, SettingRow, SettingsSection } from "../../settings-ui";
+import { Select, SettingCard, SettingRow, SettingsAnchor, SettingsSection } from "../../settings-ui";
 
 export const SafetySettings: React.FC<{
   globalPermissionMode: AIPermissionMode;
@@ -72,6 +72,7 @@ export const SafetySettings: React.FC<{
       <div className="flex flex-col gap-4">
         <SettingCard divided>
         <SettingRow
+          anchorId="ai-safety-permission-mode"
           label={t('ai.safety.permissionMode')}
           description={t('ai.safety.permissionMode.description')}
         >
@@ -84,6 +85,7 @@ export const SafetySettings: React.FC<{
         </SettingRow>
 
         <SettingRow
+          anchorId="ai-safety-command-timeout"
           label={t('ai.safety.commandTimeout')}
           description={t('ai.safety.commandTimeout.description')}
         >
@@ -122,6 +124,7 @@ export const SafetySettings: React.FC<{
         </SettingCard>
 
       {/* Command Blocklist */}
+      <SettingsAnchor anchorId="ai-safety-blocklist">
       <SettingCard padded className="space-y-3">
         <div className="flex items-center justify-between">
           <div>
@@ -191,6 +194,7 @@ export const SafetySettings: React.FC<{
           {t('ai.safety.blocklist.add')}
         </Button>
       </SettingCard>
+      </SettingsAnchor>
 
         <p className="text-xs text-muted-foreground">
           {t('ai.safety.note')}

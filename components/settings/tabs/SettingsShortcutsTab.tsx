@@ -5,7 +5,7 @@ import { keyEventToString } from "../../../domain/models";
 import { useI18n } from "../../../application/i18n/I18nProvider";
 import { cn } from "../../../lib/utils";
 import { Button } from "../../ui/button";
-import { SectionHeader, Select, SettingsTabContent, SettingRow, Toggle } from "../settings-ui";
+import { SectionHeader, Select, SettingsAnchor, SettingsTabContent, SettingRow, Toggle } from "../settings-ui";
 
 export default function SettingsShortcutsTab(props: {
   hotkeyScheme: HotkeyScheme;
@@ -130,6 +130,7 @@ export default function SettingsShortcutsTab(props: {
       <SectionHeader title={t("settings.shortcuts.section.scheme")} />
       <div className="space-y-0 divide-y divide-border rounded-lg border bg-card px-4">
         <SettingRow
+          anchorId="shortcuts-scheme"
           label={t("settings.shortcuts.scheme.label")}
           description={t("settings.shortcuts.scheme.desc")}
         >
@@ -145,6 +146,7 @@ export default function SettingsShortcutsTab(props: {
           />
         </SettingRow>
         <SettingRow
+          anchorId="shortcuts-disable-terminal-font-zoom"
           label={t("settings.shortcuts.disableTerminalFontZoom.label")}
           description={t("settings.shortcuts.disableTerminalFontZoom.desc")}
         >
@@ -154,6 +156,7 @@ export default function SettingsShortcutsTab(props: {
           />
         </SettingRow>
         <SettingRow
+          anchorId="shortcuts-shell-only-tab-numbers"
           label={t("settings.shortcuts.shellOnlyTabNumberShortcuts.label")}
           description={t("settings.shortcuts.shellOnlyTabNumberShortcuts.desc")}
         >
@@ -167,7 +170,11 @@ export default function SettingsShortcutsTab(props: {
       {hotkeyScheme !== "disabled" && (
         <>
           <div className="flex items-center justify-between">
-            <SectionHeader title={t("settings.shortcuts.section.custom")} className="mb-0" />
+            <SectionHeader
+              title={t("settings.shortcuts.section.custom")}
+              className="mb-0"
+              anchorId="shortcuts-section-custom"
+            />
             <Button
               variant="ghost"
               size="sm"
@@ -277,6 +284,9 @@ export default function SettingsShortcutsTab(props: {
             );
           })}
         </>
+      )}
+      {hotkeyScheme === "disabled" && (
+        <SettingsAnchor anchorId="shortcuts-section-custom" />
       )}
     </SettingsTabContent>
   );

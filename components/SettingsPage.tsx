@@ -15,6 +15,9 @@ import { I18nProvider, useI18n } from "../application/i18n/I18nProvider";
 import { sanitizePortForwardingRulesForSync } from "../application/syncPayload";
 import { toast } from "./ui/toast";
 import { SettingsTabContent } from "./settings/settings-ui";
+import { SettingsFocusProvider, useSettingsFocus } from "./settings/SettingsFocusContext";
+import { SettingsSearchControl } from "./settings/SettingsSearchControl";
+import { focusSettingsAnchor } from "./settings/settingsFocus";
 import { Tabs, TabsList, TabsTrigger } from "./ui/tabs";
 import { LazyLoadBoundary } from "./ui/lazy-load-boundary";
 import { ExternalMcpApprovalsHost } from "./ai/ExternalMcpApprovalsHost";
@@ -297,6 +300,7 @@ const SettingsSyncTabWithVault: React.FC<{ onSettingsApplied?: () => void }> = (
 
 const SettingsPageContent: React.FC<{ settings: SettingsState }> = ({ settings }) => {
     const { t } = useI18n();
+    const { request, clearFocus } = useSettingsFocus();
     const { notifyRendererReady, closeSettingsWindow, onWindowCommandCloseRequested } = useWindowControls();
     const { updateState, checkNow, installUpdate, openReleasePage, startDownload, isUpdateDemoMode } = useUpdateCheck({
         autoUpdateEnabled: settings.autoUpdateEnabled,
@@ -311,6 +315,20 @@ const SettingsPageContent: React.FC<{ settings: SettingsState }> = ({ settings }
     useEffect(() => {
         notifyRendererReady();
     }, [notifyRendererReady]);
+
+    useEffect(() => {
+        const onKeyDown = (event: KeyboardEvent) => {
+            const isFind = (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f";
+            if (!isFind) return;
+            const target = event.target as HTMLElement | null;
+            const tag = target?.tagName?.toLowerCase();
+            if (tag === "input" || tag === "textarea" || target?.isContentEditable) return;
+            event.preventDefault();
+            document.getElementById("settings-search-open")?.click();
+        };
+        window.addEventListener("keydown", onKeyDown);
+        return () => window.removeEventListener("keydown", onKeyDown);
+    }, []);
 
     useEffect(() => {
         return setupMcpApprovalBridge();
@@ -333,6 +351,27 @@ const SettingsPageContent: React.FC<{ settings: SettingsState }> = ({ settings }
             return next;
         });
     }, [activeTab]);
+
+    useEffect(() => {
+        if (!request) return;
+        if (activeTab !== request.tab) {
+            setActiveTab(request.tab);
+            return;
+        }
+        // Keep the focus request briefly so nested tabs (e.g. AI sub-tabs) can
+        // switch before we scroll; focusSettingsAnchor itself retries for lazy mounts.
+        const focusDelayMs = request.aiSubTab ? 80 : 40;
+        const focusHandle = window.setTimeout(() => {
+            focusSettingsAnchor(request.anchorId);
+        }, focusDelayMs);
+        const clearHandle = window.setTimeout(() => {
+            clearFocus();
+        }, 900);
+        return () => {
+            window.clearTimeout(focusHandle);
+            window.clearTimeout(clearHandle);
+        };
+    }, [request, activeTab, clearFocus]);
 
     const handleClose = useCallback(() => {
         closeSettingsWindow();
@@ -369,6 +408,7 @@ const SettingsPageContent: React.FC<{ settings: SettingsState }> = ({ settings }
                 className="flex-1 flex overflow-hidden"
             >
                 <div className="w-56 border-r border-border flex flex-col shrink-0 px-3 py-3">
+                    <SettingsSearchControl includePlugins={pluginRuntimeAvailable} />
                     <TabsList className="flex flex-col h-auto bg-transparent gap-1 p-0 justify-start">
                         <TabsTrigger
                             value="application"
@@ -416,7 +456,7 @@ const SettingsPageContent: React.FC<{ settings: SettingsState }> = ({ settings }
                             className={settingsTabTriggerClassName}
                         >
                             <Sparkles size={14} className={settingsTabIconClassName} />
-                            <span className={settingsTabLabelClassName}>AI</span>
+                            <span className={settingsTabLabelClassName}>{t("settings.tab.ai")}</span>
                         </TabsTrigger>
                         <TabsTrigger
                             value="sync"
@@ -615,7 +655,9 @@ export default function SettingsPage() {
 
     return (
         <I18nProvider locale={settings.uiLanguage}>
-            <SettingsPageContent settings={settings} />
+            <SettingsFocusProvider>
+                <SettingsPageContent settings={settings} />
+            </SettingsFocusProvider>
         </I18nProvider>
     );
 }

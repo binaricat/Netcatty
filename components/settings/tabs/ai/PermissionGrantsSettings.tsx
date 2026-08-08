@@ -111,7 +111,7 @@ export const PermissionGrantsSettings: React.FC<{
   }, [importGrants]);
 
   return (
-    <SettingsSection title={t('ai.safety.grants.title')}>
+    <SettingsSection title={t('ai.safety.grants.title')} anchorId="ai-safety-grants">
       <SettingCard padded className="space-y-3 min-w-0 max-w-full overflow-hidden">
         <div className="space-y-3">
           <div className="min-w-0">

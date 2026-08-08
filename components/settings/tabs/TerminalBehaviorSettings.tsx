@@ -3,7 +3,7 @@ import { DEFAULT_TERMINAL_WORD_SEPARATORS } from "../../../domain/models";
 import type { DynamicTabTitleMode, LinkModifier, MiddleClickBehavior, RightClickBehavior, TerminalSettings } from "../../../domain/models";
 import { Input } from "../../ui/input";
 import { Label } from "../../ui/label";
-import { SectionHeader, Select, SettingRow, Toggle } from "../settings-ui";
+import { SectionHeader, Select, SettingsAnchor, SettingRow, Toggle } from "../settings-ui";
 
 type Translate = (key: string) => string;
 
@@ -40,6 +40,7 @@ export const TerminalBehaviorSettings: React.FC<TerminalBehaviorSettingsProps> =
       <SectionHeader title={t("settings.terminal.section.behavior")} />
       <div className="space-y-0 divide-y divide-border rounded-lg border bg-card px-4">
         <SettingRow
+          anchorId="terminal-auto-close-on-exit"
           label={t("settings.terminal.behavior.autoCloseOnExit")}
           description={t("settings.terminal.behavior.autoCloseOnExit.desc")}
         >
@@ -50,6 +51,7 @@ export const TerminalBehaviorSettings: React.FC<TerminalBehaviorSettingsProps> =
         </SettingRow>
 
         <SettingRow
+          anchorId="terminal-right-click"
           label={t("settings.terminal.behavior.rightClick")}
           description={t("settings.terminal.behavior.rightClick.desc")}
         >
@@ -76,6 +78,7 @@ export const TerminalBehaviorSettings: React.FC<TerminalBehaviorSettingsProps> =
         </SettingRow>
 
         <SettingRow
+          anchorId="terminal-copy-on-select"
           label={t("settings.terminal.behavior.copyOnSelect")}
           description={t("settings.terminal.behavior.copyOnSelect.desc")}
         >
@@ -83,6 +86,7 @@ export const TerminalBehaviorSettings: React.FC<TerminalBehaviorSettingsProps> =
         </SettingRow>
 
         <SettingRow
+          anchorId="terminal-normalize-text-on-copy"
           label={t("settings.terminal.behavior.normalizeTextOnCopy")}
           description={t("settings.terminal.behavior.normalizeTextOnCopy.desc")}
         >
@@ -93,6 +97,7 @@ export const TerminalBehaviorSettings: React.FC<TerminalBehaviorSettingsProps> =
         </SettingRow>
 
         <SettingRow
+          anchorId="terminal-middle-click"
           label={t("settings.terminal.behavior.middleClick")}
           description={t("settings.terminal.behavior.middleClick.desc")}
         >
@@ -108,6 +113,7 @@ export const TerminalBehaviorSettings: React.FC<TerminalBehaviorSettingsProps> =
         </SettingRow>
 
         <SettingRow
+          anchorId="terminal-word-separators"
           label={t("settings.terminal.behavior.wordSeparators")}
           description={t("settings.terminal.behavior.wordSeparators.desc")}
         >
@@ -121,6 +127,7 @@ export const TerminalBehaviorSettings: React.FC<TerminalBehaviorSettingsProps> =
         </SettingRow>
 
         <SettingRow
+          anchorId="terminal-bracketed-paste"
           label={t("settings.terminal.behavior.bracketedPaste")}
           description={t("settings.terminal.behavior.bracketedPaste.desc")}
         >
@@ -128,6 +135,7 @@ export const TerminalBehaviorSettings: React.FC<TerminalBehaviorSettingsProps> =
         </SettingRow>
 
         <SettingRow
+          anchorId="terminal-auto-upload-clipboard-image"
           label={t("settings.terminal.behavior.autoUploadClipboardImage")}
           description={t("settings.terminal.behavior.autoUploadClipboardImage.desc")}
         >
@@ -138,6 +146,7 @@ export const TerminalBehaviorSettings: React.FC<TerminalBehaviorSettingsProps> =
         </SettingRow>
 
         <SettingRow
+          anchorId="terminal-shift-enter-newline"
           label={t("settings.terminal.behavior.shiftEnterNewline")}
           description={t("settings.terminal.behavior.shiftEnterNewline.desc")}
         >
@@ -158,6 +167,7 @@ export const TerminalBehaviorSettings: React.FC<TerminalBehaviorSettingsProps> =
         </SettingRow>
 
         <SettingRow
+          anchorId="terminal-clear-wipes-scrollback"
           label={t("settings.terminal.behavior.clearWipesScrollback")}
           description={t("settings.terminal.behavior.clearWipesScrollback.desc")}
         >
@@ -179,6 +189,7 @@ export const TerminalBehaviorSettings: React.FC<TerminalBehaviorSettingsProps> =
         </SettingRow>
 
         <SettingRow
+          anchorId="terminal-dynamic-tab-title"
           label={t("settings.terminal.behavior.dynamicTabTitle")}
           description={t("settings.terminal.behavior.dynamicTabTitle.desc")}
         >
@@ -194,6 +205,7 @@ export const TerminalBehaviorSettings: React.FC<TerminalBehaviorSettingsProps> =
         </SettingRow>
 
         <SettingRow
+          anchorId="terminal-osc52-clipboard"
           label={t("settings.terminal.behavior.osc52Clipboard")}
           description={t("settings.terminal.behavior.osc52Clipboard.desc")}
         >
@@ -264,7 +276,7 @@ export const TerminalBehaviorSettings: React.FC<TerminalBehaviorSettingsProps> =
       </div>
 
       <SectionHeader title={t("settings.terminal.section.scrollback")} />
-      <div className="rounded-lg border bg-card p-4">
+      <SettingsAnchor anchorId="terminal-scrollback-rows" className="rounded-lg border bg-card p-4">
         <p className="text-sm text-muted-foreground mb-3">
           {t("settings.terminal.scrollback.desc")}
         </p>
@@ -284,10 +296,10 @@ export const TerminalBehaviorSettings: React.FC<TerminalBehaviorSettingsProps> =
             className="w-full"
           />
         </div>
-      </div>
+      </SettingsAnchor>
 
       <SectionHeader title={t("settings.terminal.section.startupCommand")} />
-      <div className="rounded-lg border bg-card p-4">
+      <SettingsAnchor anchorId="terminal-startup-command-delay" className="rounded-lg border bg-card p-4">
         <p className="text-sm text-muted-foreground mb-3">
           {t("settings.terminal.startupCommandDelay.desc")}
         </p>
@@ -307,6 +319,6 @@ export const TerminalBehaviorSettings: React.FC<TerminalBehaviorSettingsProps> =
             className="w-full"
           />
         </div>
-      </div>
+      </SettingsAnchor>
   </>
 );

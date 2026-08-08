@@ -23,7 +23,8 @@ import { PROVIDER_PRESETS } from "../../../infrastructure/ai/types";
 import { useI18n } from "../../../application/i18n/I18nProvider";
 import { Button } from "../../ui/button";
 import { ConfirmDialog } from "../../ui/confirm-dialog";
-import { Select, SettingCard, SettingsSection, SettingsTabContent, SettingRow, Toggle } from "../settings-ui";
+import { Select, SettingCard, SettingsAnchor, SettingsSection, SettingsTabContent, SettingRow, Toggle } from "../settings-ui";
+import { useOptionalSettingsFocus } from "../SettingsFocusContext";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../ui/tabs";
 import { AgentIconBadge } from "../../ai/AgentIconBadge";
 import { canSendWithAgent } from "../../ai/agentSendEligibility";
@@ -232,6 +233,7 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
   const [codexCustomPath, setCodexCustomPath] = useState(() => initialManagedPathsRef.current?.codex ?? "");
   const [isResolvingCodex, setIsResolvingCodex] = useState(false);
   const [activeSubTab, setActiveSubTab] = useState<AISettingsSubTab>("providers");
+  const settingsFocus = useOptionalSettingsFocus();
 
   const [claudePathInfo, setClaudePathInfo] = useState<AgentPathInfo | null>(
     () => getSavedManagedAgentPathInfo(externalAgents, "claude"),
@@ -943,6 +945,13 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
   }, [t]);
 
   useEffect(() => {
+    const request = settingsFocus?.request;
+    if (request?.tab === "ai" && request.aiSubTab) {
+      setActiveSubTab(request.aiSubTab as AISettingsSubTab);
+    }
+  }, [settingsFocus?.request]);
+
+  useEffect(() => {
     if (activeSubTab !== "tools") return;
     if (userSkillsLoadedRef.current) return;
     return scheduleAfterFirstPaint(() => {
@@ -990,6 +999,7 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
 
         <TabsContent value="providers" className="m-0 space-y-6">
           <SettingsSection
+            anchorId="ai-providers"
             title={t('ai.providers')}
             actions={<AddProviderDropdown onAdd={handleAddProvider} />}
           >
@@ -1051,6 +1061,7 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
 
         <TabsContent value="agents" className="m-0 space-y-6">
           <SettingsSection
+            anchorId="ai-codex"
             title={t('ai.codex')}
             leading={<AgentIconBadge agent={{ id: "codex", icon: "openai", name: "Codex CLI" }} variant="plain" className="h-5 w-5 text-muted-foreground/90" />}
           >
@@ -1078,6 +1089,7 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
           </SettingsSection>
 
           <SettingsSection
+            anchorId="ai-claude"
             title={t('ai.claude.title')}
             leading={<AgentIconBadge agent={{ id: "claude", icon: "claude", name: "Claude Code" }} variant="plain" className="h-5 w-5 text-muted-foreground/90" />}
           >
@@ -1098,6 +1110,7 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
           </SettingsSection>
 
           <SettingsSection
+            anchorId="ai-copilot"
             title={t('ai.copilot.title')}
             leading={<AgentIconBadge agent={{ id: "copilot", icon: "copilot", name: "GitHub Copilot CLI" }} variant="plain" className="h-5 w-5 text-muted-foreground/90" />}
           >
@@ -1112,6 +1125,7 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
           </SettingsSection>
 
           <SettingsSection
+            anchorId="ai-cursor"
             title={t('ai.cursor.title')}
             leading={<AgentIconBadge agent={{ id: "cursor", icon: "cursor", name: "Cursor" }} variant="plain" className="h-5 w-5 text-muted-foreground/90" />}
           >
@@ -1127,6 +1141,7 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
           </SettingsSection>
 
           <SettingsSection
+            anchorId="ai-codebuddy"
             title={t('ai.codebuddy.title')}
             leading={<AgentIconBadge agent={{ id: "codebuddy", icon: "codebuddy", name: "CodeBuddy Code" }} variant="plain" className="h-5 w-5 text-muted-foreground/90" />}
           >
@@ -1182,8 +1197,8 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
             />
           </SettingsSection>
 
-          {agentOptions.length > 1 && (
-            <SettingsSection title={t('ai.defaultAgent')}>
+          {agentOptions.length > 1 ? (
+            <SettingsSection anchorId="ai-default-agent" title={t('ai.defaultAgent')}>
               <SettingCard>
                 <SettingRow description={t('ai.defaultAgent.description')}>
                   <Select
@@ -1195,6 +1210,8 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
                 </SettingRow>
               </SettingCard>
             </SettingsSection>
+          ) : (
+            <SettingsAnchor anchorId="ai-default-agent" />
           )}
         </TabsContent>
 
@@ -1202,6 +1219,7 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
           <SettingsSection title={t('ai.chatShortcuts.title')}>
             <SettingCard divided>
               <SettingRow
+                anchorId="ai-chat-shortcuts-selection"
                 label={t('ai.chatShortcuts.selectionAction')}
                 description={t('ai.chatShortcuts.selectionAction.description')}
               >
@@ -1214,7 +1232,10 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
             </SettingCard>
           </SettingsSection>
 
-          <SettingsSection title={t('ai.toolAccess.title')}>
+          <SettingsSection
+            anchorId="ai-tool-access-mode"
+            title={t('ai.toolAccess.title')}
+          >
             <SettingCard>
               <SettingRow description={t('ai.toolAccess.description')}>
                 <Select
@@ -1230,11 +1251,12 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
             </SettingCard>
           </SettingsSection>
 
-          <SettingsSection title={t('ai.externalMcp.title')}>
+          <SettingsSection anchorId="ai-external-mcp" title={t('ai.externalMcp.title')}>
             <ExternalMcpCard />
           </SettingsSection>
 
           <SettingsSection
+            anchorId="ai-user-skills"
             title={t('ai.userSkills.title')}
             actions={(
               <>

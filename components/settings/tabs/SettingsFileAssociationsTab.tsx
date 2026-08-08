@@ -115,7 +115,10 @@ export default function SettingsFileAssociationsTab() {
     <SettingsTabContent value="file-associations">
       <SectionHeader title={t('settings.sftp.doubleClickBehavior')} />
       <SettingCard>
-        <SettingRow description={t('settings.sftp.doubleClickBehavior.desc')}>
+        <SettingRow
+          anchorId="sftp-double-click"
+          description={t('settings.sftp.doubleClickBehavior.desc')}
+        >
           <Select
             value={sftpDoubleClickBehavior}
             options={[
@@ -130,7 +133,10 @@ export default function SettingsFileAssociationsTab() {
 
       <SectionHeader title={t('settings.sftp.defaultViewMode')} />
       <SettingCard>
-        <SettingRow description={t('settings.sftp.defaultViewMode.desc')}>
+        <SettingRow
+          anchorId="sftp-default-view-mode"
+          description={t('settings.sftp.defaultViewMode.desc')}
+        >
           <Select
             value={sftpDefaultViewMode}
             options={[
@@ -146,6 +152,7 @@ export default function SettingsFileAssociationsTab() {
       <SectionHeader title={t('settings.sftp.showHiddenFiles')} />
       <SettingCard>
         <SettingRow
+          anchorId="sftp-show-hidden-files"
           label={t('settings.sftp.showHiddenFiles.enable')}
           description={t('settings.sftp.showHiddenFiles.enableDesc')}
         >
@@ -156,6 +163,7 @@ export default function SettingsFileAssociationsTab() {
       <SectionHeader title={t('settings.sftp.autoSync')} />
       <SettingCard>
         <SettingRow
+          anchorId="sftp-auto-sync"
           label={t('settings.sftp.autoSync.enable')}
           description={t('settings.sftp.autoSync.enableDesc')}
         >
@@ -176,6 +184,7 @@ export default function SettingsFileAssociationsTab() {
       <SectionHeader title={t('settings.sftp.followTerminalCwd')} />
       <SettingCard>
         <SettingRow
+          anchorId="sftp-follow-terminal-cwd"
           label={t('settings.sftp.followTerminalCwd.enable')}
           description={t('settings.sftp.followTerminalCwd.enableDesc')}
         >
@@ -186,6 +195,7 @@ export default function SettingsFileAssociationsTab() {
       <SectionHeader title={t('settings.sftp.autoOpenSidebar')} />
       <SettingCard>
         <SettingRow
+          anchorId="sftp-auto-open-sidebar"
           label={t('settings.sftp.autoOpenSidebar.enable')}
           description={t('settings.sftp.autoOpenSidebar.enableDesc')}
         >
@@ -195,7 +205,10 @@ export default function SettingsFileAssociationsTab() {
 
       <SectionHeader title={t('settings.sftp.transferConcurrency')} />
       <SettingCard>
-        <SettingRow description={t('settings.sftp.transferConcurrency.desc')}>
+        <SettingRow
+          anchorId="sftp-transfer-concurrency"
+          description={t('settings.sftp.transferConcurrency.desc')}
+        >
           <div className="flex items-center gap-2">
             <input
               type="range"
@@ -237,7 +250,10 @@ export default function SettingsFileAssociationsTab() {
 
       <SectionHeader title={t('settings.sftp.defaultOpener')} />
       <SettingCard>
-        <SettingRow description={t('settings.sftp.defaultOpener.desc')}>
+        <SettingRow
+          anchorId="sftp-default-opener"
+          description={t('settings.sftp.defaultOpener.desc')}
+        >
           <div className="flex flex-col items-end gap-2">
             <Select
               value={defaultOpenerValue}
@@ -270,7 +286,10 @@ export default function SettingsFileAssociationsTab() {
         </SettingRow>
       </SettingCard>
 
-      <SectionHeader title={t('settings.sftpFileAssociations.title')} />
+      <SectionHeader
+        title={t('settings.sftpFileAssociations.title')}
+        anchorId="sftp-file-associations-list"
+      />
       <p className="text-xs text-muted-foreground -mt-3 mb-1">
         {t('settings.sftpFileAssociations.desc')}
       </p>

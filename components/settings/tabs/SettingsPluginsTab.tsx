@@ -6,7 +6,7 @@ import { usePluginContributions } from '../../../application/state/usePluginCont
 import { useI18n } from '../../../application/i18n/I18nProvider';
 import { Button } from '../../ui/button';
 import { Input } from '../../ui/input';
-import { SettingsTabContent } from '../settings-ui';
+import { SettingsAnchor, SettingsTabContent } from '../settings-ui';
 import { requestOpenPluginView } from '../../plugins/PluginContributionHost';
 import { parsePluginStructuredSettingValue } from './pluginSettingValues';
 import { PluginStructuredSettingEditor } from './PluginStructuredSettingEditor';
@@ -302,7 +302,7 @@ export default function SettingsPluginsTab() {
 
   return (
     <SettingsTabContent value="plugins">
-      <div className="mx-auto w-full max-w-3xl space-y-6 px-8 py-8">
+      <SettingsAnchor anchorId="plugins-root" className="mx-auto w-full max-w-3xl space-y-6 px-8 py-8">
         <div>
           <h2 className="text-xl font-semibold">{t('settings.plugins.title')}</h2>
           <p className="mt-1 text-sm text-muted-foreground">{t('settings.plugins.description')}</p>
@@ -368,7 +368,7 @@ export default function SettingsPluginsTab() {
         {!contributions.loading && contributions.available && !hasVisibleContributions && (
           <p className="text-sm text-muted-foreground">{t('settings.plugins.empty')}</p>
         )}
-      </div>
+      </SettingsAnchor>
     </SettingsTabContent>
   );
 }

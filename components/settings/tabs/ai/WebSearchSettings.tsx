@@ -117,6 +117,7 @@ export const WebSearchSettings: React.FC<{
     <SettingsSection title={t("ai.webSearch.title")}>
       <SettingCard divided>
         <SettingRow
+          anchorId="ai-web-search-enable"
           label={t("ai.webSearch.enable")}
           description={t("ai.webSearch.enable.description")}
         >
@@ -128,6 +129,7 @@ export const WebSearchSettings: React.FC<{
 
         {/* Provider */}
         <SettingRow
+          anchorId="ai-web-search-provider"
           label={t("ai.webSearch.provider")}
           description={t("ai.webSearch.provider.description")}
         >

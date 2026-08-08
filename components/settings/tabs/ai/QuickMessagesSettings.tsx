@@ -155,6 +155,7 @@ export const QuickMessagesSettings: React.FC<QuickMessagesSettingsProps> = ({
 
   return (
     <SettingsSection
+      anchorId="ai-quick-messages"
       title={t("ai.quickMessages.title")}
       actions={(
         <Button variant="outline" size="sm" onClick={beginCreate} disabled={showEditor}>

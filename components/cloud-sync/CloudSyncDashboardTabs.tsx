@@ -25,6 +25,7 @@ import { toast } from '../ui/toast';
 import { GoogleDriveIcon, OneDriveIcon, ProviderCard, Toggle } from './CloudSyncControls';
 import { LocalBackupsPanel } from './CloudSyncLocalBackupsPanel';
 import { ConvergentSyncPanel } from './ConvergentSyncPanel';
+import { SettingsAnchor } from '../settings/settings-ui';
 
 type SyncController = ReturnType<typeof useCloudSync>;
 type Translate = (key: string, values?: Record<string, string | number>) => string;
@@ -291,6 +292,7 @@ export const CloudSyncDashboardTabs: React.FC<CloudSyncDashboardTabsProps> = ({
                 </TabsList>
 
                 <TabsContent value="providers" className="space-y-3">
+                    <SettingsAnchor anchorId="sync-providers" className="space-y-3">
                     <ProviderCard
                         provider="github"
                         name="GitHub Gist"
@@ -498,6 +500,7 @@ export const CloudSyncDashboardTabs: React.FC<CloudSyncDashboardTabsProps> = ({
                         </DialogFooter>
                       </DialogContent>
                     </Dialog>
+                    </SettingsAnchor>
                 </TabsContent>
 
                 <TabsContent value="status" className="space-y-4">
@@ -516,7 +519,7 @@ export const CloudSyncDashboardTabs: React.FC<CloudSyncDashboardTabsProps> = ({
                         onDowngrade={onDowngradeConvergent}
                     />
 
-                    <div className="p-4 rounded-lg border bg-card">
+                    <SettingsAnchor anchorId="sync-auto-sync" className="p-4 rounded-lg border bg-card">
                         <div className="flex items-center justify-between">
                             <div>
                                 <div className="text-sm font-medium">{t('cloudSync.autoSync.title')}</div>
@@ -530,9 +533,9 @@ export const CloudSyncDashboardTabs: React.FC<CloudSyncDashboardTabsProps> = ({
                                 disabled={!sync.hasAnyConnectedProvider}
                             />
                         </div>
-                    </div>
+                    </SettingsAnchor>
 
-                    <div className="p-4 rounded-lg border bg-card space-y-3">
+                    <SettingsAnchor anchorId="sync-strategy" className="p-4 rounded-lg border bg-card space-y-3">
                         <div>
                             <div className="text-sm font-medium">{t('cloudSync.strategy.title')}</div>
                             <div className="text-xs text-muted-foreground">
@@ -580,7 +583,7 @@ export const CloudSyncDashboardTabs: React.FC<CloudSyncDashboardTabsProps> = ({
                                 </SelectItem>
                             </SelectContent>
                         </Select>
-                    </div>
+                    </SettingsAnchor>
 
                     {sync.hasAnyConnectedProvider && (
                         <div className="space-y-3">
@@ -655,14 +658,16 @@ export const CloudSyncDashboardTabs: React.FC<CloudSyncDashboardTabsProps> = ({
                         </div>
                     )}
 
+                    <SettingsAnchor anchorId="sync-local-backups">
                     <div ref={localBackupsRef}>
                         <LocalBackupsPanel
                             onApplyPayload={onApplyLocalPayload ?? onApplyPayload}
                         />
                     </div>
+                    </SettingsAnchor>
 
                     {/* Clear Local Data */}
-                    <div className="p-4 rounded-lg border border-destructive/30 bg-destructive/5">
+                    <SettingsAnchor anchorId="sync-clear-local" className="p-4 rounded-lg border border-destructive/30 bg-destructive/5">
                         <div className="flex items-center justify-between">
                             <div>
                                 <div className="text-sm font-medium">{t('cloudSync.clearLocal.title')}</div>
@@ -679,7 +684,7 @@ export const CloudSyncDashboardTabs: React.FC<CloudSyncDashboardTabsProps> = ({
                                 {t('cloudSync.clearLocal.button')}
                             </Button>
                         </div>
-                    </div>
+                    </SettingsAnchor>
                 </TabsContent>
             </Tabs>
   );

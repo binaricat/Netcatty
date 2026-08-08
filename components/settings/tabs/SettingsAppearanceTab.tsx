@@ -12,7 +12,7 @@ import { STORAGE_KEY_AUTO_IMPORT_SYSTEM_KNOWN_HOSTS } from "../../../infrastruct
 import { resolveAppIconVariant, type AppIconVariant } from "../../../domain/appIconVariant";
 import { DEFAULT_AUTO_IMPORT_SYSTEM_KNOWN_HOSTS } from "../../../domain/systemKnownHostsAutoImport";
 import { cn } from "../../../lib/utils";
-import { SectionHeader, SettingsTabContent, SettingRow, Toggle, Select } from "../settings-ui";
+import { SectionHeader, SettingsAnchor, SettingsTabContent, SettingRow, Toggle, Select } from "../settings-ui";
 import { FontSelect } from "../FontSelect";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../ui/tooltip";
 import {
@@ -200,6 +200,7 @@ function SettingsAppearanceTab(props: {
       <SectionHeader title={t("settings.appearance.language")} />
       <div className="space-y-0 divide-y divide-border rounded-lg border bg-card px-4">
         <SettingRow
+          anchorId="appearance-language"
           label={t("settings.appearance.language")}
           description={t("settings.appearance.language.desc")}
         >
@@ -211,6 +212,7 @@ function SettingsAppearanceTab(props: {
           />
         </SettingRow>
         <SettingRow
+          anchorId="appearance-ui-font"
           label={t("settings.appearance.uiFont")}
           description={t("settings.appearance.uiFont.desc")}
         >
@@ -227,6 +229,7 @@ function SettingsAppearanceTab(props: {
       <SectionHeader title={t("settings.appearance.windowOpacity")} />
       <div className="space-y-0 divide-y divide-border rounded-lg border bg-card px-4">
         <SettingRow
+          anchorId="appearance-window-opacity"
           label={t("settings.appearance.windowOpacity")}
           description={t("settings.appearance.windowOpacity.desc")}
         >
@@ -268,7 +271,7 @@ function SettingsAppearanceTab(props: {
 
       <SectionHeader title={t("settings.appearance.uiTheme")} />
       <div className="space-y-0 divide-y divide-border rounded-lg border bg-card px-4">
-        <SettingRow label={t("settings.appearance.theme")}>
+        <SettingRow anchorId="appearance-theme" label={t("settings.appearance.theme")}>
           <div className="flex items-center rounded-lg border border-border bg-muted/50 p-0.5">
             {THEME_OPTIONS.map((opt) => (
               <button
@@ -287,15 +290,18 @@ function SettingsAppearanceTab(props: {
             ))}
           </div>
         </SettingRow>
-        <div className="flex items-start justify-between gap-4 py-3">
-          <div className="shrink-0 pt-0.5 text-sm font-medium">
-            {resolvedTheme === "dark"
-              ? t("settings.appearance.themeColor.dark")
-              : t("settings.appearance.themeColor.light")}
+        <SettingsAnchor anchorId="appearance-theme-color">
+          <div className="flex items-start justify-between gap-4 py-3">
+            <div className="shrink-0 pt-0.5 text-sm font-medium">
+              {resolvedTheme === "dark"
+                ? t("settings.appearance.themeColor.dark")
+                : t("settings.appearance.themeColor.light")}
+            </div>
+            {renderThemeSwatches(visibleUiThemes, visibleUiThemeId, setVisibleUiThemeId)}
           </div>
-          {renderThemeSwatches(visibleUiThemes, visibleUiThemeId, setVisibleUiThemeId)}
-        </div>
+        </SettingsAnchor>
         <SettingRow
+          anchorId="appearance-accent-mode"
           label={t("settings.appearance.accentColor.mode")}
           description={t("settings.appearance.accentColor.mode.desc")}
         >
@@ -360,7 +366,7 @@ function SettingsAppearanceTab(props: {
       </div>
 
       <SectionHeader title={t("settings.appearance.appIcon")} />
-      <div className="rounded-lg border bg-card px-4 py-3 space-y-4">
+      <SettingsAnchor anchorId="appearance-app-icon" className="rounded-lg border bg-card px-4 py-3 space-y-4">
         <p className="text-xs text-muted-foreground">
           {t("settings.appearance.appIcon.desc")}
         </p>
@@ -403,17 +409,19 @@ function SettingsAppearanceTab(props: {
             </div>
           ))}
         </div>
-      </div>
+      </SettingsAnchor>
 
       <SectionHeader title={t("settings.vault.title")} />
       <div className="space-y-0 divide-y divide-border rounded-lg border bg-card px-4">
         <SettingRow
+          anchorId="appearance-vault-show-recent"
           label={t('settings.vault.showRecentHosts')}
           description={t('settings.vault.showRecentHostsDesc')}
         >
           <Toggle checked={showRecentHosts} onChange={setShowRecentHosts} />
         </SettingRow>
         <SettingRow
+          anchorId="appearance-vault-select-before-connect"
           label={t('settings.vault.selectBeforeConnect')}
           description={t('settings.vault.selectBeforeConnectDesc')}
         >
@@ -423,6 +431,7 @@ function SettingsAppearanceTab(props: {
           />
         </SettingRow>
         <SettingRow
+          anchorId="appearance-vault-ungrouped-root"
           label={t('settings.vault.showOnlyUngroupedHostsInRoot')}
           description={t('settings.vault.showOnlyUngroupedHostsInRootDesc')}
         >
@@ -432,18 +441,21 @@ function SettingsAppearanceTab(props: {
           />
         </SettingRow>
         <SettingRow
+          anchorId="appearance-vault-show-sftp-tab"
           label={t('settings.vault.showSftpTab')}
           description={t('settings.vault.showSftpTabDesc')}
         >
           <Toggle checked={showSftpTab} onChange={setShowSftpTab} />
         </SettingRow>
         <SettingRow
+          anchorId="appearance-vault-host-tree"
           label={t('settings.vault.showHostTreeSidebar')}
           description={t('settings.vault.showHostTreeSidebarDesc')}
         >
           <Toggle checked={showHostTreeSidebar} onChange={setShowHostTreeSidebar} />
         </SettingRow>
         <SettingRow
+          anchorId="appearance-vault-auto-import-known-hosts"
           label={t('settings.vault.autoImportSystemKnownHosts')}
           description={t('settings.vault.autoImportSystemKnownHostsDesc')}
         >
@@ -454,32 +466,34 @@ function SettingsAppearanceTab(props: {
         </SettingRow>
       </div>
 
-      <div className="mb-3 flex items-center gap-1.5">
-        <h3 className="text-sm font-semibold text-foreground">
-          {t("settings.appearance.customCss")}
-        </h3>
-        <button
-          type="button"
-          className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-          aria-label={t("settings.appearance.customCss.help.ariaLabel")}
-          onClick={() => setCustomCssHelpOpen(true)}
-        >
-          <HelpCircle size={13} />
-        </button>
-      </div>
-      <div className="space-y-2">
-        <p className="text-xs text-muted-foreground">
-          {t("settings.appearance.customCss.desc")}
-        </p>
-        <DebouncedTextarea
-          value={customCSS}
-          onCommit={setCustomCSS}
-          onDraftChange={applyCustomCssToDocument}
-          placeholder={t("settings.appearance.customCss.placeholder")}
-          className="w-full h-32 px-3 py-2 text-xs font-mono bg-muted/50 border border-border rounded-lg resize-y focus:outline-none focus:ring-2 focus:ring-primary/50"
-          spellCheck={false}
-        />
-      </div>
+      <SettingsAnchor anchorId="appearance-custom-css">
+        <div className="mb-3 flex items-center gap-1.5">
+          <h3 className="text-sm font-semibold text-foreground">
+            {t("settings.appearance.customCss")}
+          </h3>
+          <button
+            type="button"
+            className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+            aria-label={t("settings.appearance.customCss.help.ariaLabel")}
+            onClick={() => setCustomCssHelpOpen(true)}
+          >
+            <HelpCircle size={13} />
+          </button>
+        </div>
+        <div className="space-y-2">
+          <p className="text-xs text-muted-foreground">
+            {t("settings.appearance.customCss.desc")}
+          </p>
+          <DebouncedTextarea
+            value={customCSS}
+            onCommit={setCustomCSS}
+            onDraftChange={applyCustomCssToDocument}
+            placeholder={t("settings.appearance.customCss.placeholder")}
+            className="w-full h-32 px-3 py-2 text-xs font-mono bg-muted/50 border border-border rounded-lg resize-y focus:outline-none focus:ring-2 focus:ring-primary/50"
+            spellCheck={false}
+          />
+        </div>
+      </SettingsAnchor>
 
       <Dialog open={customCssHelpOpen} onOpenChange={setCustomCssHelpOpen}>
         <DialogContent className="flex max-h-[80vh] flex-col overflow-hidden sm:max-w-[600px]">

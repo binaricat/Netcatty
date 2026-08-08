@@ -11,7 +11,7 @@ import { SessionLogFormat, keyEventToString } from "../../../domain/models";
 import type { HttpNetworkProxyMode, HttpNetworkProxySettings } from "../../../domain/httpNetworkProxy";
 import { Button } from "../../ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../ui/tooltip";
-import { Toggle, Select, SettingRow, SectionHeader, SettingCard, SettingsTabContent } from "../settings-ui";
+import { Toggle, Select, SettingRow, SectionHeader, SettingCard, SettingsAnchor, SettingsTabContent } from "../settings-ui";
 import { cn } from "../../../lib/utils";
 
 interface CrashLogFile {
@@ -440,7 +440,7 @@ const SettingsSystemTab: React.FC<SettingsSystemTabProps> = ({
 
   return (
     <SettingsTabContent value="system">
-          <SectionHeader title={t('settings.update.title')} />
+          <SectionHeader title={t('settings.update.title')} anchorId="system-update" />
             <SettingCard className="space-y-3 py-4">
               {/* Current version */}
               <div className="flex items-center justify-between">
@@ -555,6 +555,7 @@ const SettingsSystemTab: React.FC<SettingsSystemTabProps> = ({
                 )}
               </div>
               <SettingRow
+                anchorId="system-auto-update"
                 label={t('settings.update.autoUpdateEnabled')}
                 description={t('settings.update.autoUpdateEnabledDesc')}
               >
@@ -578,6 +579,7 @@ const SettingsSystemTab: React.FC<SettingsSystemTabProps> = ({
           <SectionHeader title={t("settings.system.networkProxy.title")} />
             <SettingCard className="space-y-4 py-4">
               <SettingRow
+                anchorId="system-network-proxy-mode"
                 label={t("settings.system.networkProxy.mode")}
                 description={t("settings.system.networkProxy.description")}
               >
@@ -638,6 +640,7 @@ const SettingsSystemTab: React.FC<SettingsSystemTabProps> = ({
             </p>
 
           <SectionHeader title={t("settings.system.credentials.title")} />
+            <SettingsAnchor anchorId="system-credentials">
             <SettingCard className="space-y-3 py-4">
               <div className="flex items-start justify-between gap-4">
                 <div>
@@ -682,8 +685,10 @@ const SettingsSystemTab: React.FC<SettingsSystemTabProps> = ({
                 {t("settings.system.credentials.portabilityHint")}
               </p>
             </SettingCard>
+            </SettingsAnchor>
 
           <SectionHeader title={t("settings.system.crashLogs.title")} />
+            <SettingsAnchor anchorId="system-crash-logs">
             <SettingCard className="space-y-3 py-4">
               <p className="text-sm text-muted-foreground">
                 {t("settings.system.crashLogs.description")}
@@ -826,8 +831,10 @@ const SettingsSystemTab: React.FC<SettingsSystemTabProps> = ({
             <p className="text-xs text-muted-foreground">
               {t("settings.system.crashLogs.hint")}
             </p>
+            </SettingsAnchor>
 
           <SectionHeader title={t("settings.system.tempDirectory")} />
+            <SettingsAnchor anchorId="system-temp-directory">
             <SettingCard className="space-y-3 py-4">
               {/* Path */}
               <div className="flex items-start justify-between gap-4">
@@ -907,10 +914,12 @@ const SettingsSystemTab: React.FC<SettingsSystemTabProps> = ({
             <p className="text-xs text-muted-foreground">
               {t("settings.system.tempDirectoryHint")}
             </p>
+            </SettingsAnchor>
 
           <SectionHeader title={t("settings.sessionRestore.title")} />
             <SettingCard className="space-y-4 py-4">
               <SettingRow
+                anchorId="system-session-restore"
                 label={t("settings.sessionRestore.restorePreviousSession")}
                 description={t("settings.sessionRestore.restorePreviousSessionDesc")}
               >
@@ -920,6 +929,7 @@ const SettingsSystemTab: React.FC<SettingsSystemTabProps> = ({
                 />
               </SettingRow>
               <SettingRow
+                anchorId="system-restore-terminal-cwd"
                 label={t("settings.sessionRestore.restoreTerminalCwd")}
                 description={t("settings.sessionRestore.restoreTerminalCwdDesc")}
               >
@@ -934,6 +944,7 @@ const SettingsSystemTab: React.FC<SettingsSystemTabProps> = ({
             <SettingCard className="space-y-4 py-4">
               {/* Enable Toggle */}
               <SettingRow
+                anchorId="system-session-logs-enable"
                 label={t("settings.sessionLogs.enableAutoSave")}
                 description={t("settings.sessionLogs.enableAutoSaveDesc")}
               >
@@ -1042,6 +1053,7 @@ const SettingsSystemTab: React.FC<SettingsSystemTabProps> = ({
           <SectionHeader title={t('settings.sshDeepLink.title')} />
             <SettingCard>
               <SettingRow
+                anchorId="system-ssh-deep-link"
                 label={t('settings.sshDeepLink.enable')}
                 description={t('settings.sshDeepLink.enableDesc')}
               >
@@ -1056,6 +1068,7 @@ const SettingsSystemTab: React.FC<SettingsSystemTabProps> = ({
           <SectionHeader title={t('settings.jmsDeepLink.title')} />
             <SettingCard>
               <SettingRow
+                anchorId="system-jms-deep-link"
                 label={t('settings.jmsDeepLink.enable')}
                 description={t('settings.jmsDeepLink.enableDesc')}
               >
@@ -1067,11 +1080,12 @@ const SettingsSystemTab: React.FC<SettingsSystemTabProps> = ({
               </SettingRow>
             </SettingCard>
 
-          {explorerContextMenuSupported && (
+          {explorerContextMenuSupported ? (
             <>
               <SectionHeader title={t('settings.explorerContextMenu.title')} />
               <SettingCard>
                 <SettingRow
+                  anchorId="system-explorer-context-menu"
                   label={t('settings.explorerContextMenu.enable')}
                   description={t('settings.explorerContextMenu.enableDesc')}
                 >
@@ -1083,11 +1097,14 @@ const SettingsSystemTab: React.FC<SettingsSystemTabProps> = ({
                 </SettingRow>
               </SettingCard>
             </>
+          ) : (
+            <SettingsAnchor anchorId="system-explorer-context-menu" />
           )}
 
           <SectionHeader title={t("settings.sshDebugLogs.title")} />
             <SettingCard className="min-w-0 max-w-full overflow-hidden space-y-4 py-4">
               <SettingRow
+                anchorId="system-ssh-debug-logs"
                 label={t("settings.sshDebugLogs.enable")}
                 description={t("settings.sshDebugLogs.enableDesc")}
               >
@@ -1152,6 +1169,7 @@ const SettingsSystemTab: React.FC<SettingsSystemTabProps> = ({
             <SettingCard className="space-y-4 py-4">
               {/* Enable/Disable Global Hotkey */}
               <SettingRow
+                anchorId="system-global-hotkey-enabled"
                 label={t('settings.globalHotkey.enabled')}
                 description={t('settings.globalHotkey.enabledDesc')}
               >
@@ -1164,6 +1182,7 @@ const SettingsSystemTab: React.FC<SettingsSystemTabProps> = ({
               <div className={cn(!globalHotkeyEnabled && "opacity-50 pointer-events-none")}>
                 {/* Toggle Window Hotkey */}
                 <SettingRow
+                  anchorId="system-global-hotkey-toggle"
                   label={t("settings.globalHotkey.toggleWindow")}
                   description={t("settings.globalHotkey.toggleWindowDesc")}
                 >
@@ -1206,6 +1225,7 @@ const SettingsSystemTab: React.FC<SettingsSystemTabProps> = ({
 
               {/* Close to Tray */}
               <SettingRow
+                anchorId="system-close-to-tray"
                 label={t("settings.globalHotkey.closeToTray")}
                 description={t("settings.globalHotkey.closeToTrayDesc")}
               >

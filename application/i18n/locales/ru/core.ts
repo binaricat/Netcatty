@@ -88,8 +88,12 @@ export const ruCoreMessages: Messages = {
   'settings.tab.appearance': 'Внешний вид',
   'settings.tab.terminal': 'Терминал',
   'settings.tab.shortcuts': 'Горячие клавиши',
+  'settings.tab.ai': 'AI',
   'settings.tab.syncCloud': 'Синхронизация и облако',
   'settings.tab.system': 'Система',
+  'settings.search.open': 'Поиск настроек',
+  'settings.search.placeholder': 'Искать настройки…',
+  'settings.search.noResults': 'Совпадений не найдено',
 
   // Settings > System
   'settings.system.title': 'Система',
