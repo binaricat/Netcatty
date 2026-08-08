@@ -14,6 +14,7 @@ import {
   LOCAL_STORAGE_ADAPTER_CHANGED_EVENT,
   localStorageAdapter,
 } from "../../infrastructure/persistence/localStorageAdapter";
+import { netcattyBridge } from "../../infrastructure/services/netcattyBridge";
 import {
   clearReconnectTimer,
   getActiveConnection,
@@ -309,7 +310,7 @@ const initializeStore = async () => {
 };
 
 const subscribeToPortForwardRuntime = (): (() => void) => {
-  const bridge = typeof window !== "undefined" ? window.netcatty : undefined;
+  const bridge = netcattyBridge.get();
   if (!bridge?.subscribePortForwardRuntime || !bridge.onPortForwardRuntime) {
     return () => undefined;
   }
