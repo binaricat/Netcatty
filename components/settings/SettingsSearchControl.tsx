@@ -62,6 +62,7 @@ export function SettingsSearchControl({
       }
     };
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.isComposing) return;
       if (event.key === "Escape") {
         event.preventDefault();
         collapseSearch(true);
@@ -97,6 +98,8 @@ export function SettingsSearchControl({
   };
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    // Avoid stealing IME candidate navigation / composition confirm (CJK).
+    if (event.nativeEvent.isComposing || event.keyCode === 229) return;
     if (event.key === "ArrowDown") {
       event.preventDefault();
       if (hits.length === 0) return;
