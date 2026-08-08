@@ -749,11 +749,21 @@ export function useTerminalAutocomplete(
       latePathSuggestions: CompletionSuggestion[],
     ): CompletionSuggestion[] => {
       const withoutPaths = base.filter((entry) => entry.source !== "path");
-      const seen = new Set(withoutPaths.map((entry) => entry.text));
+      const indexByText = new Map<string, number>();
       const merged = [...withoutPaths];
+      for (let index = 0; index < withoutPaths.length; index++) {
+        indexByText.set(withoutPaths[index].text, index);
+      }
       for (const suggestion of latePathSuggestions) {
-        if (seen.has(suggestion.text)) continue;
-        seen.add(suggestion.text);
+        const existingIndex = indexByText.get(suggestion.text);
+        if (existingIndex !== undefined) {
+          // Prefer late path over duplicate history/plugin text so directory
+          // candidates keep fileType for cascading path panels (matches
+          // in-budget score-sort + dedup where path at 750 beats recent history).
+          merged[existingIndex] = suggestion;
+          continue;
+        }
+        indexByText.set(suggestion.text, merged.length);
         merged.push(suggestion);
       }
       merged.sort((left, right) => right.score - left.score);
