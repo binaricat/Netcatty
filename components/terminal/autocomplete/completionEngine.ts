@@ -76,7 +76,9 @@ export interface CompletionContext {
 /**
  * Soft wait for remote/local path listings. History, fig specs, and snippets are
  * local and should paint without waiting on high-latency SSH exec (#2830).
- * Timed-out listings still finish in the background to warm the shared cache.
+ * Timed-out listings still finish in the background: cacheable paths warm the
+ * shared cache, and cache-bypassed relative SSH paths notify via onLateResult
+ * so the UI can merge path suggestions when the listing finally resolves.
  */
 export const PATH_COMPLETION_BUDGET_MS = 150;
 
@@ -86,6 +88,7 @@ type PathSuggestionEntry = { name: string; type: "file" | "directory" | "symlink
 export async function getPathSuggestionsWithinBudget(
   pathPromise: Promise<PathSuggestionEntry[]>,
   budgetMs: number,
+  onLateResult?: (entries: PathSuggestionEntry[]) => void,
 ): Promise<PathSuggestionEntry[]> {
   if (!Number.isFinite(budgetMs) || budgetMs < 0) {
     return pathPromise;
@@ -104,12 +107,45 @@ export async function getPathSuggestionsWithinBudget(
       }),
     ]);
     if (raced.kind === "entries") return raced.entries;
-    // Keep the listing in flight so a later keystroke can hit cache.
-    void pathPromise.catch(() => {});
+    // Keep the listing in flight. Cacheable paths warm the shared cache for a
+    // later keystroke; bypassed relative SSH paths have no cache, so surface
+    // the late result to the caller instead of discarding it.
+    void pathPromise.then(
+      (entries) => {
+        if (entries.length > 0) onLateResult?.(entries);
+      },
+      () => {},
+    );
     return [];
   } finally {
     if (timeoutId !== undefined) clearTimeout(timeoutId);
   }
+}
+
+function buildPathCompletionSuggestions(
+  ctx: CompletionContext,
+  pathEntries: PathSuggestionEntry[],
+  cwd: string | undefined,
+): CompletionSuggestion[] {
+  if (pathEntries.length === 0) return [];
+  const { pathPrefix, quoteSuffix } = resolvePathComponents(ctx.currentWord, cwd);
+  const isQuotedPath = ctx.currentWord.startsWith('"') || ctx.currentWord.startsWith("'");
+  const suggestions: CompletionSuggestion[] = [];
+  for (const entry of pathEntries) {
+    const insertName = isQuotedPath || !/[\\$'"|!<>;#~` ]/.test(entry.name)
+      ? entry.name
+      : shellEscape(entry.name);
+    const suffix = entry.type === "directory" ? "/" : "";
+    const fullPath = pathPrefix + insertName + suffix + quoteSuffix;
+    suggestions.push({
+      text: rebuildCommand(ctx.tokens, ctx.wordIndex, fullPath),
+      displayText: entry.name + suffix,
+      source: "path",
+      score: 750,
+      fileType: entry.type,
+    });
+  }
+  return suggestions;
 }
 
 interface SpecSuggestionResult {
@@ -225,6 +261,12 @@ export async function getCompletions(
      * that need the full remote listing.
      */
     pathBudgetMs?: number;
+    /**
+     * Invoked when a path listing finishes after the soft budget elapsed.
+     * Needed for cache-bypassed relative SSH cwd lookups, which cannot warm
+     * the shared directory cache for a later keystroke.
+     */
+    onLatePathSuggestions?: (suggestions: CompletionSuggestion[]) => void;
   } = {},
 ): Promise<CompletionSuggestion[]> {
   const { hostId, maxResults = 15, historyScope = "host" } = options;
@@ -306,6 +348,17 @@ export async function getCompletions(
         foldersOnly: pathCheck.foldersOnly,
       }),
       pathBudgetMs,
+      (lateEntries) => {
+        if (!options.onLatePathSuggestions) return;
+        const latePathSuggestions = buildPathCompletionSuggestions(
+          ctx,
+          lateEntries,
+          options.cwd,
+        );
+        if (latePathSuggestions.length > 0) {
+          options.onLatePathSuggestions(latePathSuggestions);
+        }
+      },
     )
     : [];
 
@@ -314,25 +367,9 @@ export async function getCompletions(
     seenSuggestionTexts.add(suggestion.text);
   }
 
-  if (pathEntries.length > 0) {
-    const { pathPrefix, quoteSuffix } = resolvePathComponents(ctx.currentWord, options.cwd);
-    const isQuotedPath = ctx.currentWord.startsWith('"') || ctx.currentWord.startsWith("'");
-    for (const entry of pathEntries) {
-      const insertName = isQuotedPath || !/[\\$'"|!<>;#~` ]/.test(entry.name)
-        ? entry.name
-        : shellEscape(entry.name);
-      const suffix = entry.type === "directory" ? "/" : "";
-      const fullPath = pathPrefix + insertName + suffix + quoteSuffix;
-      const suggestion = {
-        text: rebuildCommand(ctx.tokens, ctx.wordIndex, fullPath),
-        displayText: entry.name + suffix,
-        source: "path",
-        score: 750,
-        fileType: entry.type,
-      } satisfies CompletionSuggestion;
-      suggestions.push(suggestion);
-      seenSuggestionTexts.add(suggestion.text);
-    }
+  for (const suggestion of buildPathCompletionSuggestions(ctx, pathEntries, options.cwd)) {
+    suggestions.push(suggestion);
+    seenSuggestionTexts.add(suggestion.text);
   }
 
   // 3. Fuzzy history fallback (if prefix match yields few results)

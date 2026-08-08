@@ -320,6 +320,39 @@ test("getCompletions returns local history before a slow remote path listing fin
   assert.equal(completions.some((entry) => entry.source === "path"), false);
 });
 
+test("getCompletions surfaces late path suggestions for cache-bypassed relative SSH cwd", async () => {
+  recordCommand("cat worktree.txt", "host-1");
+  bridgeState.remoteDelayMs = 250;
+  bridgeState.remoteEntriesByPath.set(".", [{ name: "worktree.txt", type: "file" }]);
+
+  let latePathSuggestions: Awaited<ReturnType<typeof getCompletions>> | null = null;
+  const latePathPromise = new Promise<void>((resolve) => {
+    void getCompletions("cat wo", {
+      hostId: "host-1",
+      os: "linux",
+      protocol: "ssh",
+      sessionId: "session-late-path",
+      cwd: "/stale-fallback",
+      cwdSource: "fallback",
+      pathBudgetMs: 40,
+      onLatePathSuggestions: (suggestions) => {
+        latePathSuggestions = suggestions;
+        resolve();
+      },
+    }).then((completions) => {
+      assert.equal(completions.some((entry) => entry.source === "path"), false);
+      assert.ok(
+        completions.some((entry) => entry.source === "history" && entry.text === "cat worktree.txt"),
+      );
+    });
+  });
+
+  await latePathPromise;
+  assert.ok(latePathSuggestions);
+  assert.equal(latePathSuggestions![0]?.source, "path");
+  assert.equal(latePathSuggestions![0]?.text, "cat worktree.txt");
+});
+
 test("getPathSuggestionsWithinBudget ignores late rejections after the soft timeout", async () => {
   const unhandled: unknown[] = [];
   const onUnhandled = (reason: unknown) => {
@@ -337,6 +370,19 @@ test("getPathSuggestionsWithinBudget ignores late rejections after the soft time
   } finally {
     process.off("unhandledRejection", onUnhandled);
   }
+});
+
+test("getPathSuggestionsWithinBudget delivers late entries after the soft timeout", async () => {
+  const pathPromise = new Promise<{ name: string; type: "file" }[]>((resolve) => {
+    setTimeout(() => resolve([{ name: "late.txt", type: "file" }]), 80);
+  });
+  let lateEntries: { name: string; type: "file" }[] | null = null;
+  const entries = await getPathSuggestionsWithinBudget(pathPromise, 20, (late) => {
+    lateEntries = late as { name: string; type: "file" }[];
+  });
+  assert.deepEqual(entries, []);
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  assert.deepEqual(lateEntries, [{ name: "late.txt", type: "file" }]);
 });
 
 test("getCompletions includes other hosts' history when historyScope is global", async () => {

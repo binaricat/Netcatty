@@ -739,6 +739,137 @@ export function useTerminalAutocomplete(
     completionAbortRef.current?.abort();
     const completionController = new AbortController();
     completionAbortRef.current = completionController;
+    // Retain the first (budgeted) result so a late path listing for cache-bypassed
+    // relative SSH cwd can merge path suggestions without another IPC round-trip.
+    let settledCompletions: CompletionSuggestion[] | null = null;
+    let pendingLatePathSuggestions: CompletionSuggestion[] | null = null;
+
+    const mergeLatePathSuggestions = (
+      base: CompletionSuggestion[],
+      latePathSuggestions: CompletionSuggestion[],
+    ): CompletionSuggestion[] => {
+      const withoutPaths = base.filter((entry) => entry.source !== "path");
+      const seen = new Set(withoutPaths.map((entry) => entry.text));
+      const merged = [...withoutPaths];
+      for (const suggestion of latePathSuggestions) {
+        if (seen.has(suggestion.text)) continue;
+        seen.add(suggestion.text);
+        merged.push(suggestion);
+      }
+      merged.sort((left, right) => right.score - left.score);
+      // Match getCompletions' path-active result floor so late paths are not
+      // trimmed more aggressively than an in-budget listing would be.
+      const limit = Math.max(settingsRef.current.maxSuggestions, 24);
+      const limited = merged.slice(0, limit);
+      if (!settingsRef.current.allowLineReplacement) {
+        return limited.filter((completion) =>
+          completion.source !== "snippet" && completion.text.startsWith(input),
+        );
+      }
+      return limited;
+    };
+
+    const applyCompletions = (
+      completions: CompletionSuggestion[],
+      currentPrompt: ReturnType<typeof getAlignedPrompt>["prompt"],
+    ) => {
+      if (settingsRef.current.showGhostText) {
+        const ghost = ghostAddonRef.current;
+        const activeSuggestion = ghost?.isActive() ? ghost.getSuggestion() : null;
+        // Snippets are popup-only — never used as inline ghost text.
+        const nextSuggestion = completions.find((c) => c.source !== "snippet")?.text ?? null;
+        const ghostDecision = decideGhostSuggestion(activeSuggestion, input, nextSuggestion);
+        if (ghostDecision.type === "show") {
+          ghost?.show(ghostDecision.suggestion, input);
+        } else if (ghostDecision.type === "hide") {
+          ghost?.hide();
+        }
+      }
+
+      // Popup
+      if (settingsRef.current.showPopupMenu && completions.length > 0) {
+        // Live-preview baseline: the typed input these suggestions completed.
+        previewBaselineRef.current = input;
+        previewActiveRef.current = false;
+        const cursorColumn = resolveAutocompleteCursorColumn(term, currentPrompt);
+        const anchor = resolveAutocompleteAnchorInViewport(
+          term,
+          containerRef.current,
+          completions.length,
+          cursorColumn,
+        );
+        startTransition(() => {
+          setState((prev) => {
+            if (version !== fetchVersionRef.current) return prev;
+
+            const nextState: AutocompleteState = {
+              suggestions: completions,
+              selectedIndex: -1,
+              popupVisible: true,
+              popupAnchorViewport: {
+                left: anchor.anchorLeft,
+                top: anchor.anchorTop,
+                bottom: anchor.anchorBottom,
+              },
+              expandUpward: anchor.expandUpward,
+              subDirPanels: [],
+              subDirFocusLevel: -1,
+            };
+
+            if (
+              prev.popupVisible &&
+              prev.selectedIndex === nextState.selectedIndex &&
+              prev.expandUpward === nextState.expandUpward &&
+              prev.popupAnchorViewport.left === nextState.popupAnchorViewport.left &&
+              prev.popupAnchorViewport.top === nextState.popupAnchorViewport.top &&
+              prev.popupAnchorViewport.bottom === nextState.popupAnchorViewport.bottom &&
+              prev.subDirFocusLevel === -1 &&
+              prev.subDirPanels.length === 0 &&
+              areSuggestionsEqual(prev.suggestions, nextState.suggestions)
+            ) {
+              return prev;
+            }
+
+            return nextState;
+          });
+        });
+      } else {
+        startTransition(() => {
+          setState((prev) =>
+            prev.popupVisible || prev.suggestions.length > 0
+              ? { ...EMPTY_STATE }
+              : prev,
+          );
+        });
+      }
+    };
+
+    const isCurrentQueryStillActive = (): ReturnType<typeof getAlignedPrompt>["prompt"] | null => {
+      if (disposedRef.current || version !== fetchVersionRef.current) return null;
+      if (isTerminalAlternateScreenActive(term)) {
+        clearState();
+        return null;
+      }
+      // Discard stale results: if the user kept typing while getCompletions was running,
+      // the current prompt input will have changed. Re-detect and compare. Use the same
+      // echo-lag-aware resolver as the query so catching-up remote echo alone does not
+      // drop local matches (#2830).
+      const { prompt: currentPrompt } = getAlignedPrompt(
+        term,
+        typedInputBufferRef.current,
+        typedBufferReliableRef.current,
+      );
+      const currentInput = resolveAutocompleteQueryInput(
+        currentPrompt,
+        typedInputBufferRef.current,
+        typedBufferReliableRef.current,
+      );
+      if (!currentPrompt.isAtPrompt || currentInput !== input) {
+        return null;
+      }
+      return currentPrompt;
+    };
+
     let completions: CompletionSuggestion[];
     try {
       completions = await provideCompletionsRef.current(input, {
@@ -753,6 +884,20 @@ export function useTerminalAutocomplete(
         snippets: snippetsRef.current,
         promptText: prompt.promptText,
         signal: completionController.signal,
+        onLatePathSuggestions: (latePathSuggestions) => {
+          if (completionController.signal.aborted) return;
+          const currentPrompt = isCurrentQueryStillActive();
+          if (!currentPrompt) return;
+          // Plugin merge may still be in flight after built-in getCompletions
+          // returns; hold late paths until the first settled result arrives.
+          if (settledCompletions === null) {
+            pendingLatePathSuggestions = latePathSuggestions;
+            return;
+          }
+          const next = mergeLatePathSuggestions(settledCompletions, latePathSuggestions);
+          settledCompletions = next;
+          applyCompletions(next, currentPrompt);
+        },
       });
     } finally {
       if (completionAbortRef.current === completionController) completionAbortRef.current = null;
@@ -764,102 +909,21 @@ export function useTerminalAutocomplete(
       );
     }
 
-    if (disposedRef.current || version !== fetchVersionRef.current) return;
-
     // Recheck after the async lookup: the terminal may have entered the alternate
     // screen while completions were pending (e.g. launching codex/vim). Drop any
     // result that would paint popup/ghost over a TUI. Same unconditional policy. #2530
-    if (isTerminalAlternateScreenActive(term)) {
-      clearState();
-      return;
-    }
+    const currentPrompt = isCurrentQueryStillActive();
+    if (!currentPrompt) return;
 
-    // Discard stale results: if the user kept typing while getCompletions was running,
-    // the current prompt input will have changed. Re-detect and compare. Use the same
-    // echo-lag-aware resolver as the query so catching-up remote echo alone does not
-    // drop local matches (#2830).
-    const { prompt: currentPrompt } = getAlignedPrompt(term, typedInputBufferRef.current, typedBufferReliableRef.current);
-    const currentInput = resolveAutocompleteQueryInput(
-      currentPrompt,
-      typedInputBufferRef.current,
-      typedBufferReliableRef.current,
-    );
-    if (!currentPrompt.isAtPrompt || currentInput !== input) {
-      return; // Input changed — these completions are stale
+    if (pendingLatePathSuggestions) {
+      completions = mergeLatePathSuggestions(completions, pendingLatePathSuggestions);
+      pendingLatePathSuggestions = null;
     }
-
+    settledCompletions = completions;
     // Ghost text: keep the active prediction stable while the user's
     // input still fits within it. Only swap to a fresh prediction once
     // the current one no longer matches the typed prefix.
-    if (settingsRef.current.showGhostText) {
-      const ghost = ghostAddonRef.current;
-      const activeSuggestion = ghost?.isActive() ? ghost.getSuggestion() : null;
-      // Snippets are popup-only — never used as inline ghost text.
-      const nextSuggestion = completions.find((c) => c.source !== "snippet")?.text ?? null;
-      const ghostDecision = decideGhostSuggestion(activeSuggestion, input, nextSuggestion);
-      if (ghostDecision.type === "show") {
-        ghost?.show(ghostDecision.suggestion, input);
-      } else if (ghostDecision.type === "hide") {
-        ghost?.hide();
-      }
-    }
-
-    // Popup
-    if (settingsRef.current.showPopupMenu && completions.length > 0) {
-      // Live-preview baseline: the typed input these suggestions completed.
-      previewBaselineRef.current = input;
-      previewActiveRef.current = false;
-      const cursorColumn = resolveAutocompleteCursorColumn(term, currentPrompt);
-      const anchor = resolveAutocompleteAnchorInViewport(
-        term,
-        containerRef.current,
-        completions.length,
-        cursorColumn,
-      );
-      startTransition(() => {
-        setState((prev) => {
-          if (version !== fetchVersionRef.current) return prev;
-
-          const nextState: AutocompleteState = {
-            suggestions: completions,
-            selectedIndex: -1,
-            popupVisible: true,
-            popupAnchorViewport: {
-              left: anchor.anchorLeft,
-              top: anchor.anchorTop,
-              bottom: anchor.anchorBottom,
-            },
-            expandUpward: anchor.expandUpward,
-            subDirPanels: [],
-            subDirFocusLevel: -1,
-          };
-
-          if (
-            prev.popupVisible &&
-            prev.selectedIndex === nextState.selectedIndex &&
-            prev.expandUpward === nextState.expandUpward &&
-            prev.popupAnchorViewport.left === nextState.popupAnchorViewport.left &&
-            prev.popupAnchorViewport.top === nextState.popupAnchorViewport.top &&
-            prev.popupAnchorViewport.bottom === nextState.popupAnchorViewport.bottom &&
-            prev.subDirFocusLevel === -1 &&
-            prev.subDirPanels.length === 0 &&
-            areSuggestionsEqual(prev.suggestions, nextState.suggestions)
-          ) {
-            return prev;
-          }
-
-          return nextState;
-        });
-      });
-    } else {
-      startTransition(() => {
-        setState((prev) =>
-          prev.popupVisible || prev.suggestions.length > 0
-            ? { ...EMPTY_STATE }
-            : prev,
-        );
-      });
-    }
+    applyCompletions(completions, currentPrompt);
   }, [termRef, clearState, containerRef]);
 
   // Keep ref in sync so handleSubDirSelect can call it

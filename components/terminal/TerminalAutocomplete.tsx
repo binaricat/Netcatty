@@ -118,6 +118,7 @@ export function TerminalAutocomplete({
       maximum: options.maxResults ?? 15,
       historyScope: options.historyScope ?? settings?.historyScope,
       signal: options.signal,
+      onLatePathSuggestions: options.onLatePathSuggestions,
     });
   }, [allowHostStyleGreaterThanPrompt, hostId, hostOs, isPluginCompletionProviderAvailable, protocol, sensitiveInputActiveRef, sessionId, settings?.historyScope, status, workspaceId]);
   const autocomplete = useTerminalAutocomplete({
