@@ -252,12 +252,51 @@ declare global {
     error?: string;
   }
 
+  type PortForwardRuntimePhase =
+    | 'connecting'
+    | 'active'
+    | 'stopping'
+    | 'error'
+    | 'inactive';
+
+  interface PortForwardRuntimeRecord {
+    ruleId?: string;
+    tunnelId: string;
+    phase: PortForwardRuntimePhase | string;
+    error?: string;
+    cleanupRequired?: boolean;
+    revision: number;
+    updatedAt: number;
+  }
+
+  interface PortForwardRuntimeSnapshot {
+    epoch: string;
+    revision: number;
+    records: PortForwardRuntimeRecord[];
+  }
+
+  type PortForwardRuntimeEvent =
+    | {
+        epoch: string;
+        revision: number;
+        kind: 'upsert';
+        record: PortForwardRuntimeRecord;
+      }
+    | {
+        epoch: string;
+        revision: number;
+        kind: 'remove';
+        tunnelId: string;
+        ruleId?: string;
+      };
+
   interface NetcattyWindowsPtyInfo {
     backend: 'conpty' | 'winpty';
     buildNumber?: number;
   }
 
   type PortForwardStatusCallback = (status: 'inactive' | 'connecting' | 'active' | 'error', error?: string) => void;
+  type PortForwardRuntimeEventCallback = (event: PortForwardRuntimeEvent) => void;
 
   interface NetcattyPluginRuntimeStatus {
     available: boolean;

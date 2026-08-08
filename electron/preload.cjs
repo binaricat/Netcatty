@@ -712,6 +712,7 @@ ipcRenderer.on("netcatty:plugins:contributions-changed", (_event, payload) => {
 
 // Port forwarding status listeners
 const portForwardStatusListeners = new Map();
+const portForwardRuntimeListeners = new Set();
 
 ipcRenderer.on("netcatty:portforward:status", (_event, payload) => {
   const { tunnelId, status, error } = payload;
@@ -725,6 +726,16 @@ ipcRenderer.on("netcatty:portforward:status", (_event, payload) => {
       }
     });
   }
+});
+
+ipcRenderer.on("netcatty:portforward:runtime", (_event, payload) => {
+  portForwardRuntimeListeners.forEach((cb) => {
+    try {
+      cb(payload);
+    } catch (err) {
+      console.error("Port forward runtime callback failed", err);
+    }
+  });
 });
 
 // File watcher listeners (for auto-sync feature)
@@ -815,6 +826,7 @@ const api = createPreloadApi({
   updateNeedsSaveListeners,
   terminalPopupConfigState,
   portForwardStatusListeners,
+  portForwardRuntimeListeners,
   fileWatchSyncedListeners,
   fileWatchErrorListeners,
   fileWatchStoppedListeners,

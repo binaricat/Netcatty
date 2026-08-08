@@ -2,12 +2,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import type { Host, PortForwardingRule } from "../../domain/models.ts";
+import { toPersistedPortForwardingRules } from "../../domain/portForwardingPersistence.ts";
 import { STORAGE_KEY_PORT_FORWARDING } from "../../infrastructure/config/storageKeys.ts";
 import {
   startPortForward,
   stopAndCleanupRuleAndWait,
 } from "../../infrastructure/services/portForwardingService.ts";
 import {
+  applyPortForwardingRuntimeStatus,
   createPortForwardingStorageSyncHandlers,
   havePortForwardingRuntimeStatesChanged,
   hasPortForwardingRuntimePresenceChanged,
@@ -25,6 +27,7 @@ const rule: PortForwardingRule = {
   autoStart: true,
   createdAt: 1,
   status: "inactive",
+  bindAddress: "127.0.0.1",
 };
 
 const host: Host = {
@@ -80,32 +83,27 @@ function installEnvironment() {
   };
 }
 
-test("same-window auto-start status writes refresh the visible rule from the live tunnel", async (t) => {
+test("runtime status updates refresh the visible rule without writing storage", async (t) => {
   const env = installEnvironment();
   t.after(async () => {
     await stopAndCleanupRuleAndWait(rule.id);
     env.restore();
   });
 
-  env.storage.setItem(STORAGE_KEY_PORT_FORWARDING, JSON.stringify([rule]));
+  env.storage.setItem(
+    STORAGE_KEY_PORT_FORWARDING,
+    JSON.stringify(toPersistedPortForwardingRules([rule])),
+  );
   await startPortForward(rule, host, [host], [], [], () => undefined, true);
   env.emitStatus("active");
+  applyPortForwardingRuntimeStatus(rule.id, "active");
 
-  const snapshots: PortForwardingRule[][] = [];
-  const handlers = createPortForwardingStorageSyncHandlers({
-    onRules: (rules) => snapshots.push(rules),
-  });
-
-  handlers.handleAdapterChange({
-    type: "netcatty:local-storage-adapter-changed",
-    detail: { key: STORAGE_KEY_PORT_FORWARDING },
-  } as unknown as CustomEvent<{ key: string }>);
-
-  assert.equal(snapshots.length, 1);
-  assert.equal(snapshots[0]?.[0]?.status, "active");
+  const stored = JSON.parse(env.storage.getItem(STORAGE_KEY_PORT_FORWARDING) || "[]") as PortForwardingRule[];
+  assert.equal(stored[0]?.status, "inactive");
+  assert.equal(stored[0]?.error, undefined);
 });
 
-test("cross-window status writes stay active before this window discovers the tunnel", (t) => {
+test("legacy cross-window active status is migrated away on config sync", (t) => {
   const env = installEnvironment();
   t.after(() => env.restore());
 
@@ -125,7 +123,9 @@ test("cross-window status writes stay active before this window discovers the tu
   } as StorageEvent);
 
   assert.equal(snapshots.length, 1);
-  assert.equal(snapshots[0]?.[0]?.status, "active");
+  // Runtime is no longer trusted from storage; absence of a local connection
+  // means inactive after a successful authority baseline (default true in tests).
+  assert.equal(snapshots[0]?.[0]?.status, "inactive");
 });
 
 test("cross-window stale status cannot override a known live tunnel", async (t) => {
@@ -200,6 +200,18 @@ test("heartbeat normalization clears an error for a reconciled-away tunnel", () 
 
   assert.equal(normalized[0]?.status, "inactive");
   assert.equal(normalized[0]?.error, undefined);
+});
+
+test("snapshot failure projects unknown instead of inactive", () => {
+  const normalized = normalizeRulesWithConnections([{
+    ...rule,
+    id: "stale-rule",
+    status: "inactive",
+  }], {
+    snapshotAvailable: false,
+  });
+
+  assert.equal(normalized[0]?.status, "unknown");
 });
 
 test("heartbeat writes only when a visible runtime state changes", () => {

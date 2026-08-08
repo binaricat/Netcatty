@@ -414,7 +414,7 @@ const TrayPanelContent: React.FC<TrayPanelContentProps> = ({ terminalSettings })
             <div className="px-2 py-1 text-xs text-muted-foreground">{t("tray.portForwarding")}</div>
             <div className="space-y-1">
               {portForwardingRules.map((rule) => {
-                const isConnecting = rule.status === "connecting";
+                const isConnecting = rule.status === "connecting" || rule.status === "unknown";
                 const isActive = rule.status === "active";
                 const isStoppable = isConnecting || isActive || hasRuntimeTunnel(rule.id);
                 const label = rule.label || (rule.type === "dynamic"

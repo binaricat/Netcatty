@@ -27,6 +27,7 @@ import {
   type SyncPayload,
 } from '../domain/sync';
 import { migrateHostsFromLegacyLineTimestamps } from '../domain/host';
+import { toPersistedPortForwardingRules } from '../domain/portForwardingPersistence';
 import {
   nextCustomKeyBindingsSyncVersion,
   parseCustomKeyBindingsStorageRecord,
@@ -197,10 +198,10 @@ export function sanitizePortForwardingRulesForSync(
   rules: PortForwardingRule[] | undefined,
 ): PortForwardingRule[] | undefined {
   if (!rules) return rules;
-  return rules.map((rule) => ({
+  // Runtime phases are never part of vault/cloud sync. lastUsedAt is also
+  // stripped so runtime activity cannot churn sync hashes.
+  return toPersistedPortForwardingRules(rules).map((rule) => ({
     ...rule,
-    status: 'inactive' as const,
-    error: undefined,
     lastUsedAt: undefined,
   }));
 }

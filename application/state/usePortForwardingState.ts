@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Host, Identity, KnownHost, PortForwardingRule, SSHKey } from "../../domain/models";
+import {
+  migratePortForwardingRulesFromStorage,
+  toPersistedPortForwardingRules,
+} from "../../domain/portForwardingPersistence";
 import { getNextVaultOrder, normalizeVaultOrder, reorderVaultItems, sortByVaultOrder, type VaultOrderPosition } from "../../domain/vaultOrder";
 import {
   STORAGE_KEY_PF_PREFER_FORM_MODE,
@@ -32,6 +36,8 @@ let reconnectCancelListenerRefs = 0;
 let reconnectCancelCleanup: (() => void) | undefined;
 let heartbeatRefs = 0;
 let heartbeatIntervalId: ReturnType<typeof setInterval> | undefined;
+let runtimeSubscriptionRefs = 0;
+let runtimeSubscriptionCleanup: (() => void) | undefined;
 
 export type { ViewMode };
 
@@ -91,6 +97,7 @@ export interface UsePortForwardingStateResult {
 // Global Store State
 let globalRules: PortForwardingRule[] = [];
 let isInitialized = false;
+let snapshotAvailable = true;
 const listeners = new Set<(rules: PortForwardingRule[]) => void>();
 
 // Store Actions
@@ -98,16 +105,50 @@ const notifyListeners = () => {
   listeners.forEach((listener) => listener(globalRules));
 };
 
+const persistPortForwardingConfig = (rules: PortForwardingRule[]) => {
+  localStorageAdapter.write(
+    STORAGE_KEY_PORT_FORWARDING,
+    toPersistedPortForwardingRules(rules),
+  );
+};
+
+/** Persist configuration only — never write runtime phases to storage. */
 const setGlobalRules = (newRules: PortForwardingRule[]) => {
   globalRules = normalizeVaultOrder(newRules);
   notifyListeners();
-  localStorageAdapter.write(STORAGE_KEY_PORT_FORWARDING, globalRules);
+  persistPortForwardingConfig(globalRules);
 };
+
+/** Update the in-memory projection without touching localStorage. */
+const setRuntimeProjection = (newRules: PortForwardingRule[]) => {
+  globalRules = normalizeVaultOrder(newRules);
+  notifyListeners();
+};
+
+export type NormalizeRulesOptions = {
+  reconciledGoneRuleIds?: ReadonlySet<string>;
+  snapshotAvailable?: boolean;
+};
+
+const isGoneRuleIdSet = (
+  value: ReadonlySet<string> | NormalizeRulesOptions,
+): value is ReadonlySet<string> => (
+  typeof (value as ReadonlySet<string>).has === "function"
+  && !("snapshotAvailable" in (value as object))
+  && !("reconciledGoneRuleIds" in (value as object))
+);
 
 export const normalizeRulesWithConnections = (
   rules: PortForwardingRule[],
-  reconciledGoneRuleIds: ReadonlySet<string> = new Set(),
+  reconciledGoneRuleIdsOrOptions: ReadonlySet<string> | NormalizeRulesOptions = new Set(),
 ): PortForwardingRule[] => {
+  const options: NormalizeRulesOptions = isGoneRuleIdSet(reconciledGoneRuleIdsOrOptions)
+    ? { reconciledGoneRuleIds: reconciledGoneRuleIdsOrOptions }
+    : reconciledGoneRuleIdsOrOptions;
+
+  const reconciledGoneRuleIds = options.reconciledGoneRuleIds ?? new Set<string>();
+  const authorityAvailable = options.snapshotAvailable ?? snapshotAvailable;
+
   return rules.map((rule): PortForwardingRule => {
     const connection = getActiveConnection(rule.id);
     if (connection) {
@@ -123,6 +164,13 @@ export const normalizeRulesWithConnections = (
         ...rule,
         status: "inactive" as const,
         error: undefined,
+      };
+    }
+
+    if (!authorityAvailable) {
+      return {
+        ...rule,
+        status: "unknown" as const,
       };
     }
 
@@ -155,15 +203,42 @@ export const hasPortForwardingRuntimePresenceChanged = (reconciliation: {
 }): boolean => reconciliation.gone.length > 0 || reconciliation.appeared.length > 0;
 
 const mergeRulesWithKnownConnections = (rules: PortForwardingRule[]): PortForwardingRule[] => {
-  return rules.map((rule): PortForwardingRule => {
-    const connection = getActiveConnection(rule.id);
-    if (!connection) return rule;
+  return normalizeRulesWithConnections(
+    migratePortForwardingRulesFromStorage(rules),
+    { snapshotAvailable },
+  );
+};
+
+/**
+ * Apply a runtime status update to the in-memory projection only.
+ * Auto-start and reconnect paths use this instead of writing localStorage.
+ */
+export const applyPortForwardingRuntimeStatus = (
+  ruleId: string,
+  status: PortForwardingRule["status"],
+  error?: string,
+): void => {
+  if (globalRules.length === 0) {
+    const stored = localStorageAdapter.read<PortForwardingRule[]>(
+      STORAGE_KEY_PORT_FORWARDING,
+    );
+    if (stored && Array.isArray(stored)) {
+      globalRules = normalizeVaultOrder(
+        migratePortForwardingRulesFromStorage(stored),
+      );
+    }
+  }
+
+  const updated = globalRules.map((rule) => {
+    if (rule.id !== ruleId) return rule;
     return {
       ...rule,
-      status: connection.status,
-      error: connection.error,
+      status,
+      error,
+      lastUsedAt: status === "active" ? Date.now() : rule.lastUsedAt,
     };
   });
+  setRuntimeProjection(updated);
 };
 
 const isPortForwardingStorageEvent = (event: Event): boolean => {
@@ -199,6 +274,22 @@ export const createPortForwardingStorageSyncHandlers = ({
   };
 };
 
+const applyRuntimeSnapshotProjection = (
+  goneRuleIds: ReadonlySet<string> = new Set(),
+  authorityAvailable = snapshotAvailable,
+) => {
+  const normalizedRules = normalizeRulesWithConnections(globalRules, {
+    reconciledGoneRuleIds: goneRuleIds,
+    snapshotAvailable: authorityAvailable,
+  });
+  if (havePortForwardingRuntimeStatesChanged(globalRules, normalizedRules)) {
+    setRuntimeProjection(normalizedRules);
+  } else {
+    globalRules = normalizedRules;
+    notifyListeners();
+  }
+};
+
 // Initialization Logic
 const initializeStore = async () => {
   if (isInitialized) return;
@@ -210,8 +301,66 @@ const initializeStore = async () => {
     STORAGE_KEY_PORT_FORWARDING,
   );
   if (saved && Array.isArray(saved)) {
-    setGlobalRules(normalizeRulesWithConnections(saved));
+    // Hydrate config from storage, then overlay the live runtime projection.
+    // Do not re-persist — that would churn storage with migrated status fields.
+    const migrated = migratePortForwardingRulesFromStorage(saved);
+    setRuntimeProjection(normalizeRulesWithConnections(migrated));
   }
+};
+
+const subscribeToPortForwardRuntime = (): (() => void) => {
+  const bridge = typeof window !== "undefined" ? window.netcatty : undefined;
+  if (!bridge?.subscribePortForwardRuntime || !bridge.onPortForwardRuntime) {
+    return () => undefined;
+  }
+
+  let disposed = false;
+  let unsubscribeEvent: (() => void) | undefined;
+  let observedEpoch: string | undefined;
+  let observedRevision = -1;
+
+  const resyncFromSnapshot = async () => {
+    try {
+      const snapshot = await bridge.subscribePortForwardRuntime!();
+      if (disposed) return;
+      observedEpoch = snapshot.epoch;
+      observedRevision = snapshot.revision;
+      snapshotAvailable = true;
+      await syncWithBackend();
+      applyRuntimeSnapshotProjection(new Set(), true);
+    } catch {
+      if (disposed) return;
+      snapshotAvailable = false;
+      applyRuntimeSnapshotProjection(new Set(), false);
+    }
+  };
+
+  unsubscribeEvent = bridge.onPortForwardRuntime((event) => {
+    if (disposed) return;
+    if (observedEpoch && event.epoch !== observedEpoch) {
+      void resyncFromSnapshot();
+      return;
+    }
+    if (observedRevision >= 0 && event.revision > observedRevision + 1) {
+      void resyncFromSnapshot();
+      return;
+    }
+    observedEpoch = event.epoch;
+    observedRevision = event.revision;
+    snapshotAvailable = true;
+    void (async () => {
+      await reconcileWithBackend();
+      applyRuntimeSnapshotProjection(new Set(), true);
+    })();
+  });
+
+  void resyncFromSnapshot();
+
+  return () => {
+    disposed = true;
+    unsubscribeEvent?.();
+    void bridge.unsubscribePortForwardRuntime?.();
+  };
 };
 
 export const usePortForwardingState = (): UsePortForwardingStateResult => {
@@ -253,9 +402,9 @@ export const usePortForwardingState = (): UsePortForwardingStateResult => {
     };
   }, [rules]);
 
-  // Listen for both browser storage events (other windows) and adapter
-  // events (this window). Auto-start writes statuses outside this hook, so
-  // relying on the browser event alone leaves the launching window stale.
+  // Config sync across windows. Runtime phases are no longer written to
+  // storage, so these handlers only refresh rule configuration and overlay
+  // whatever live tunnels this window already knows about.
   useEffect(() => {
     const target = globalThis as typeof globalThis & {
       addEventListener?: (type: string, listener: EventListener) => void;
@@ -303,6 +452,22 @@ export const usePortForwardingState = (): UsePortForwardingStateResult => {
     };
   }, []);
 
+  // Authoritative runtime subscription (snapshot + ordered events). Heartbeat
+  // below remains as a recovery fallback for revision gaps / missed events.
+  useEffect(() => {
+    runtimeSubscriptionRefs++;
+    if (runtimeSubscriptionRefs === 1) {
+      runtimeSubscriptionCleanup = subscribeToPortForwardRuntime();
+    }
+    return () => {
+      runtimeSubscriptionRefs--;
+      if (runtimeSubscriptionRefs === 0 && runtimeSubscriptionCleanup) {
+        runtimeSubscriptionCleanup();
+        runtimeSubscriptionCleanup = undefined;
+      }
+    };
+  }, []);
+
   // Periodic heartbeat: reconcile renderer state with the backend every 4s.
   // Ref-counted — same pattern as the reconnect cancel listener.
   useEffect(() => {
@@ -313,19 +478,24 @@ export const usePortForwardingState = (): UsePortForwardingStateResult => {
 
       const tick = async () => {
         const reconciliation = await reconcileWithBackend();
-        if (!reconciliation.snapshotAvailable) return;
-        // Always re-derive the visible state. This also repairs a stale
-        // cross-window storage write when the backend map itself did not change.
+        snapshotAvailable = reconciliation.snapshotAvailable;
+        if (!reconciliation.snapshotAvailable) {
+          // Snapshot failure must surface as unknown/stale — never as inactive.
+          applyRuntimeSnapshotProjection(new Set(), false);
+          return;
+        }
+        // Always re-derive the visible state from the live connection map.
+        // Runtime phases stay in memory only.
         const normalizedRules = normalizeRulesWithConnections(
           globalRules,
-          new Set(reconciliation.gone),
+          {
+            reconciledGoneRuleIds: new Set(reconciliation.gone),
+            snapshotAvailable: true,
+          },
         );
         if (havePortForwardingRuntimeStatesChanged(globalRules, normalizedRules)) {
-          setGlobalRules(normalizedRules);
+          setRuntimeProjection(normalizedRules);
         } else if (hasPortForwardingRuntimePresenceChanged(reconciliation)) {
-          // Runtime presence affects Start/Stop actions even when the visible
-          // status and error already match. Notify React without rewriting the
-          // unchanged persisted configuration.
           globalRules = normalizedRules;
           notifyListeners();
         }
@@ -470,21 +640,14 @@ export const usePortForwardingState = (): UsePortForwardingStateResult => {
         stopAndCleanupRule(existing.id);
       }
     }
-    setGlobalRules(normalizeRulesWithConnections(newRules));
+    setGlobalRules(normalizeRulesWithConnections(
+      migratePortForwardingRulesFromStorage(newRules),
+    ));
   }, []);
 
   const setRuleStatus = useCallback(
     (id: string, status: PortForwardingRule["status"], error?: string) => {
-      const updated = globalRules.map((r) => {
-        if (r.id !== id) return r;
-        return {
-          ...r,
-          status,
-          error,
-          lastUsedAt: status === "active" ? Date.now() : r.lastUsedAt,
-        };
-      });
-      setGlobalRules(updated);
+      applyPortForwardingRuntimeStatus(id, status, error);
     },
     [],
   );

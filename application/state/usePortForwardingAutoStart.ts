@@ -18,6 +18,7 @@ import {
   syncWithBackend,
 } from "../../infrastructure/services/portForwardingService";
 import { logger } from "../../lib/logger";
+import { applyPortForwardingRuntimeStatus } from "./usePortForwardingState";
 
 export interface UsePortForwardingAutoStartOptions {
   enabled?: boolean;
@@ -328,24 +329,12 @@ export const usePortForwardingAutoStart = ({
     [resolveEffectiveHost],
   );
 
+  // Runtime phases stay in the in-memory projection only (#2288). Writing
+  // active/connecting/error into localStorage would churn sync hashes and
+  // fight the main-process authority model.
   const updateStoredRuleStatus = useCallback(
     (ruleId: string, status: PortForwardingRule["status"], error?: string) => {
-      const currentRules = localStorageAdapter.read<PortForwardingRule[]>(
-        STORAGE_KEY_PORT_FORWARDING,
-      ) ?? [];
-
-      const updatedRules = currentRules.map((rule) =>
-        rule.id === ruleId
-          ? {
-              ...rule,
-              status,
-              error,
-              lastUsedAt: status === "active" ? Date.now() : rule.lastUsedAt,
-            }
-          : rule,
-      );
-
-      localStorageAdapter.write(STORAGE_KEY_PORT_FORWARDING, updatedRules);
+      applyPortForwardingRuntimeStatus(ruleId, status, error);
     },
     [],
   );

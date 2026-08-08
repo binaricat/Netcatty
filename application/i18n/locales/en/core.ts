@@ -234,6 +234,7 @@ export const enCoreMessages: Messages = {
   'tray.status.active': 'Active',
   'tray.status.inactive': 'Inactive',
   'tray.status.error': 'Error',
+  'tray.status.unknown': 'Unknown',
   'tray.recentHosts': 'Recent Hosts',
   'tray.empty.title': 'Nothing here yet',
   'tray.empty.subtitle': 'Go connect to a server, they miss you 🚀',

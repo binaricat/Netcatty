@@ -435,8 +435,91 @@ const resolveBackendRuleId = (tunnel: { ruleId?: string; tunnelId: string }): st
 };
 
 const resolveBackendStatus = (status: string): PortForwardingConnection['status'] => {
-  if (status === 'active' || status === 'connecting' || status === 'error') return status;
+  if (status === 'active') return 'active';
+  if (status === 'connecting' || status === 'stopping') return 'connecting';
+  if (status === 'error') return 'error';
+  if (status === 'inactive') return 'inactive';
   return 'connecting';
+};
+
+export type PortForwardRuntimeAuthority = {
+  available: boolean;
+  epoch?: string;
+  revision?: number;
+};
+
+let lastRuntimeAuthority: PortForwardRuntimeAuthority = { available: false };
+
+export const getPortForwardRuntimeAuthority = (): PortForwardRuntimeAuthority => lastRuntimeAuthority;
+
+/**
+ * Prefer the authoritative snapshot protocol (#2288). Fall back to list() for
+ * older bridges so tests and transitional builds keep working.
+ */
+export const fetchPortForwardSnapshot = async (): Promise<{
+  available: boolean;
+  epoch?: string;
+  revision?: number;
+  records: Array<{
+    ruleId?: string;
+    tunnelId: string;
+    status: string;
+    error?: string;
+    cleanupRequired?: boolean;
+  }>;
+}> => {
+  const bridge = netcattyBridge.get();
+  if (bridge?.getPortForwardSnapshot) {
+    try {
+      const snapshot = await bridge.getPortForwardSnapshot();
+      lastRuntimeAuthority = {
+        available: true,
+        epoch: snapshot.epoch,
+        revision: snapshot.revision,
+      };
+      return {
+        available: true,
+        epoch: snapshot.epoch,
+        revision: snapshot.revision,
+        records: snapshot.records.map((record) => ({
+          ruleId: record.ruleId,
+          tunnelId: record.tunnelId,
+          status: record.phase,
+          error: record.error,
+          cleanupRequired: record.cleanupRequired,
+        })),
+      };
+    } catch (err) {
+      lastRuntimeAuthority = { available: false };
+      logger.warn('[PortForwardingService] Snapshot failed:', err);
+      return { available: false, records: [] };
+    }
+  }
+
+  if (!bridge?.listPortForwards) {
+    lastRuntimeAuthority = { available: false };
+    return { available: false, records: [] };
+  }
+
+  try {
+    const tunnels = await bridge.listPortForwards();
+    lastRuntimeAuthority = { available: true, epoch: 'legacy', revision: 0 };
+    return {
+      available: true,
+      epoch: 'legacy',
+      revision: 0,
+      records: tunnels.map((tunnel) => ({
+        ruleId: tunnel.ruleId,
+        tunnelId: tunnel.tunnelId,
+        status: tunnel.status,
+        error: tunnel.error,
+      })),
+    };
+  } catch (err) {
+    lastRuntimeAuthority = { available: false };
+    logger.warn('[PortForwardingService] Legacy list snapshot failed:', err);
+    return { available: false, records: [] };
+  }
 };
 
 /**
@@ -560,17 +643,22 @@ export const syncWithBackend = async (
 ): Promise<void> => {
   rememberBackendSyncOptions(options);
   const bridge = netcattyBridge.get();
-  
-  if (!bridge?.listPortForwards) {
+
+  if (!bridge?.getPortForwardSnapshot && !bridge?.listPortForwards) {
     logger.warn('[PortForwardingService] Backend not available for sync');
+    lastRuntimeAuthority = { available: false };
     return;
   }
-  
+
   try {
-    const activeTunnels = await bridge.listPortForwards();
-    logger.info(`[PortForwardingService] Backend reports ${activeTunnels.length} active tunnels`);
-    
-    for (const tunnel of activeTunnels) {
+    const snapshot = await fetchPortForwardSnapshot();
+    if (!snapshot.available) {
+      logger.warn('[PortForwardingService] Backend snapshot unavailable during sync');
+      return;
+    }
+    logger.info(`[PortForwardingService] Backend reports ${snapshot.records.length} active tunnels`);
+
+    for (const tunnel of snapshot.records) {
       const ruleId = resolveBackendRuleId(tunnel);
       if (ruleId) {
         const existing = activeConnections.get(ruleId);
@@ -591,11 +679,12 @@ export const syncWithBackend = async (
         activeConnections.set(ruleId, connection);
 
         if (!await subscribeSyncedConnection(ruleId, connection)) continue;
-        
+
         logger.info(`[PortForwardingService] Synced active tunnel for rule ${ruleId}`);
       }
     }
   } catch (err) {
+    lastRuntimeAuthority = { available: false };
     logger.error('[PortForwardingService] Failed to sync with backend:', err);
   }
 };
@@ -614,24 +703,31 @@ export const syncWithBackend = async (
  */
 export const reconcileWithBackend = async (): Promise<{
   snapshotAvailable: boolean;
+  epoch?: string;
+  revision?: number;
   gone: string[];
   appeared: string[];
 }> => {
   const result = {
     snapshotAvailable: false,
+    epoch: undefined as string | undefined,
+    revision: undefined as number | undefined,
     gone: [] as string[],
     appeared: [] as string[],
   };
   const bridge = netcattyBridge.get();
 
-  if (!bridge?.listPortForwards) return result;
+  if (!bridge?.getPortForwardSnapshot && !bridge?.listPortForwards) return result;
 
   try {
-    const backendTunnels = await bridge.listPortForwards();
+    const snapshot = await fetchPortForwardSnapshot();
+    if (!snapshot.available) return result;
     result.snapshotAvailable = true;
+    result.epoch = snapshot.epoch;
+    result.revision = snapshot.revision;
     const backendRuleIds = new Set<string>();
 
-    for (const tunnel of backendTunnels) {
+    for (const tunnel of snapshot.records) {
       const ruleId = resolveBackendRuleId(tunnel);
       if (ruleId) {
         backendRuleIds.add(ruleId);
@@ -708,6 +804,7 @@ export const reconcileWithBackend = async (): Promise<{
       );
     }
   } catch (err) {
+    lastRuntimeAuthority = { available: false };
     logger.warn('[PortForwardingService] Reconcile failed:', err);
   }
 

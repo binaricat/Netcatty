@@ -222,6 +222,7 @@ export const ruCoreMessages: Messages = {
   'tray.status.active': 'Активно',
   'tray.status.inactive': 'Неактивно',
   'tray.status.error': 'Ошибка',
+  'tray.status.unknown': 'Неизвестно',
   'tray.recentHosts': 'Недавние хосты',
   'tray.empty.title': 'Пока здесь ничего нет',
   'tray.empty.subtitle': 'Подключитесь к серверу, они по вам скучают 🚀',

@@ -46,6 +46,130 @@ const {
 // Active port forwarding tunnels
 const portForwardingTunnels = new Map();
 
+// Process-scoped authority metadata for renderer projections (#2288).
+// Epoch changes whenever this module (main or terminal worker) boots.
+const PROCESS_EPOCH = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+let runtimeRevision = 0;
+/** @type {Map<number, { sender: any, onDestroyed?: () => void }>} */
+const runtimeEventSubscribers = new Map();
+
+function bumpRuntimeRevision() {
+  runtimeRevision += 1;
+  return runtimeRevision;
+}
+
+function resolveRuntimePhase(tunnel) {
+  if (!tunnel) return "inactive";
+  if (tunnel.cleanupInProgress) return "stopping";
+  if (tunnel.status === "connecting") return "connecting";
+  if (tunnel.status === "error") return "error";
+  if (tunnel.status === "active") return "active";
+  if (tunnel.status === "inactive") return "inactive";
+  return tunnel.status || "active";
+}
+
+function toRuntimeRecord(tunnelId, tunnel, revision = runtimeRevision) {
+  return {
+    ruleId: tunnel?.ruleId,
+    tunnelId,
+    phase: resolveRuntimePhase(tunnel),
+    ...(tunnel?.error ? { error: tunnel.error } : {}),
+    cleanupRequired: Boolean(tunnel?.cleanupFailed),
+    revision,
+    updatedAt: tunnel?.updatedAt || Date.now(),
+  };
+}
+
+function getPortForwardSnapshot() {
+  const records = [];
+  for (const [tunnelId, tunnel] of portForwardingTunnels) {
+    records.push(toRuntimeRecord(tunnelId, tunnel));
+  }
+  return {
+    epoch: PROCESS_EPOCH,
+    revision: runtimeRevision,
+    records,
+  };
+}
+
+function publishRuntimeEvent(event) {
+  const payload = {
+    epoch: PROCESS_EPOCH,
+    revision: runtimeRevision,
+    ...event,
+  };
+  for (const [subscriberId, entry] of runtimeEventSubscribers) {
+    const sender = entry?.sender;
+    if (sender?.isDestroyed?.()) {
+      runtimeEventSubscribers.delete(subscriberId);
+      continue;
+    }
+    safeSend(sender, "netcatty:portforward:runtime", payload);
+  }
+  return payload;
+}
+
+function publishRuntimeUpsert(tunnelId, tunnel) {
+  const revision = bumpRuntimeRevision();
+  if (tunnel) tunnel.updatedAt = Date.now();
+  return publishRuntimeEvent({
+    kind: "upsert",
+    record: toRuntimeRecord(tunnelId, tunnel, revision),
+  });
+}
+
+function publishRuntimeRemove(tunnelId, ruleId) {
+  bumpRuntimeRevision();
+  return publishRuntimeEvent({
+    kind: "remove",
+    tunnelId,
+    ruleId,
+  });
+}
+
+function subscribePortForwardRuntime(event) {
+  const sender = event?.sender;
+  if (sender && Number.isSafeInteger(sender.id) && !sender.isDestroyed?.()) {
+    const existing = runtimeEventSubscribers.get(sender.id);
+    if (existing?.onDestroyed) {
+      existing.sender.removeListener?.("destroyed", existing.onDestroyed);
+    }
+    const onDestroyed = () => {
+      runtimeEventSubscribers.delete(sender.id);
+    };
+    runtimeEventSubscribers.set(sender.id, { sender, onDestroyed });
+    sender.once?.("destroyed", onDestroyed);
+  }
+  // Atomic subscribe + snapshot from the same revision.
+  return getPortForwardSnapshot();
+}
+
+function unsubscribePortForwardRuntime(event) {
+  const sender = event?.sender;
+  if (!sender || !Number.isSafeInteger(sender.id)) {
+    return { success: true };
+  }
+  const existing = runtimeEventSubscribers.get(sender.id);
+  if (existing?.onDestroyed) {
+    existing.sender.removeListener?.("destroyed", existing.onDestroyed);
+  }
+  runtimeEventSubscribers.delete(sender.id);
+  return { success: true };
+}
+
+function resetPortForwardRuntimeMetaForTests() {
+  runtimeRevision = 0;
+  runtimeEventSubscribers.clear();
+}
+
+function seedPortForwardTunnelForTests(tunnelId, tunnel) {
+  portForwardingTunnels.set(tunnelId, tunnel);
+}
+
+function clearPortForwardTunnelsForTests() {
+  portForwardingTunnels.clear();
+}
+
 function buildPortForwardEndpoint(options = {}) {
   return buildConnectionReuseEndpoint({
     ...options,
@@ -771,6 +895,8 @@ function publishTunnelStatus(tunnelId, tunnel, status, error = null) {
   if (!tunnel) return;
   tunnel.status = status;
   tunnel.error = error || undefined;
+  tunnel.updatedAt = Date.now();
+  const runtimeEvent = publishRuntimeUpsert(tunnelId, tunnel);
   const subscribers = tunnel.subscribers instanceof Map
     ? Array.from(tunnel.subscribers.entries())
     : [];
@@ -779,7 +905,15 @@ function publishTunnelStatus(tunnelId, tunnel, status, error = null) {
       tunnel.subscribers.delete(subscriberId);
       continue;
     }
-    safeSend(subscriber, "netcatty:portforward:status", { tunnelId, status, error });
+    safeSend(subscriber, "netcatty:portforward:status", {
+      tunnelId,
+      status,
+      error,
+      ruleId: tunnel.ruleId,
+      epoch: runtimeEvent.epoch,
+      revision: runtimeEvent.revision,
+      cleanupRequired: Boolean(tunnel.cleanupFailed),
+    });
   }
 }
 
@@ -956,7 +1090,11 @@ async function cancelTunnel(tunnelId, tunnel, sendStatus, { deleteEntry = false 
   tunnel.cleanupInProgress = false;
   sendStatus?.('inactive');
   if (deleteEntry) {
+    const ruleId = tunnel.ruleId;
     portForwardingTunnels.delete(tunnelId);
+    // Removal is a distinct revision after the inactive upsert so subscribers
+    // can detect delete vs retained error records (cleanupRequired).
+    publishRuntimeRemove(tunnelId, ruleId);
   }
 }
 
@@ -1851,10 +1989,21 @@ function registerHandlers(ipcMain, options = {}) {
     requestWorker("netcatty:portforward:status");
     requestWorker("netcatty:portforward:subscribe", { track: true });
     requestWorker("netcatty:portforward:list");
+    requestWorker("netcatty:portforward:snapshot");
+    requestWorker("netcatty:portforward:subscribeRuntime");
+    requestWorker("netcatty:portforward:unsubscribeRuntime");
     requestWorker("netcatty:portforward:stopAll", { cleanup: "all" });
     requestWorker("netcatty:portforward:stopByRuleId", { cleanup: "rule" });
 
     terminalWorkerManager.onWorkerRendererEvent?.((message) => {
+      if (message?.channel === "netcatty:portforward:runtime") {
+        // Runtime events are already targeted at subscribed renderers by the
+        // worker; main only needs to forget tunnel tracking on remove.
+        if (message.payload?.kind === "remove") {
+          forgetTunnel(message.payload?.tunnelId);
+        }
+        return;
+      }
       if (message?.channel !== "netcatty:portforward:status") return;
       if (message.payload?.status === "inactive" || message.payload?.status === "error") {
         forgetTunnel(message.payload?.tunnelId);
@@ -1884,6 +2033,9 @@ function registerHandlers(ipcMain, options = {}) {
   ipcMain.handle("netcatty:portforward:status", getPortForwardStatus);
   ipcMain.handle("netcatty:portforward:subscribe", subscribePortForward);
   ipcMain.handle("netcatty:portforward:list", listPortForwards);
+  ipcMain.handle("netcatty:portforward:snapshot", () => getPortForwardSnapshot());
+  ipcMain.handle("netcatty:portforward:subscribeRuntime", subscribePortForwardRuntime);
+  ipcMain.handle("netcatty:portforward:unsubscribeRuntime", unsubscribePortForwardRuntime);
   ipcMain.handle("netcatty:portforward:stopAll", () => stopAllPortForwards());
   ipcMain.handle("netcatty:portforward:stopByRuleId", stopPortForwardByRuleId);
   ipcMain.handle("netcatty:portforward:unsubscribeSender", unsubscribePortForwardSender);
@@ -1897,6 +2049,9 @@ module.exports = {
   subscribePortForward,
   unsubscribePortForwardSender,
   listPortForwards,
+  getPortForwardSnapshot,
+  subscribePortForwardRuntime,
+  unsubscribePortForwardRuntime,
   stopAllPortForwards,
   stopPortForwardByRuleId,
   cancelTunnel,
@@ -1905,6 +2060,9 @@ module.exports = {
   isReusableTunnelStatus,
   buildPortForwardEndpoint,
   buildPortForwardEndpointFromStartPayload,
+  _resetPortForwardRuntimeMetaForTests: resetPortForwardRuntimeMetaForTests,
+  _seedPortForwardTunnelForTests: seedPortForwardTunnelForTests,
+  _clearPortForwardTunnelsForTests: clearPortForwardTunnelsForTests,
   _bindPortForwardChannelsForTests: bindPortForwardChannels,
   _trackTunnelPipeForTests: trackTunnelPipe,
   _attachTunnelPipeStreamForTests: attachTunnelPipeStream,

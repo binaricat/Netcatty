@@ -303,7 +303,14 @@ test("port forwarding can be stopped while waiting for a key passphrase", async 
     tunnelId,
     success: true,
   });
-  assert.deepEqual(adoptedStatuses, [{ tunnelId, status: "inactive", error: null }]);
+  assert.equal(adoptedStatuses.length, 1);
+  assert.equal(adoptedStatuses[0].tunnelId, tunnelId);
+  assert.equal(adoptedStatuses[0].status, "inactive");
+  assert.equal(adoptedStatuses[0].error, null);
+  assert.equal(adoptedStatuses[0].ruleId, "rule-cancel-1");
+  assert.equal(typeof adoptedStatuses[0].epoch, "string");
+  assert.equal(typeof adoptedStatuses[0].revision, "number");
+  assert.equal(adoptedStatuses[0].cleanupRequired, false);
   assert.deepEqual(await getPortForwardStatus(event, { tunnelId }), {
     tunnelId,
     status: "inactive",

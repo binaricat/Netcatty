@@ -50,6 +50,9 @@ test("worker mode routes every port-forward operation through the terminal worke
     "netcatty:portforward:status",
     "netcatty:portforward:subscribe",
     "netcatty:portforward:list",
+    "netcatty:portforward:snapshot",
+    "netcatty:portforward:subscribeRuntime",
+    "netcatty:portforward:unsubscribeRuntime",
     "netcatty:portforward:stopAll",
     "netcatty:portforward:stopByRuleId",
   ];

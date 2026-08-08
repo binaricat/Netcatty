@@ -231,6 +231,7 @@ export const zhTWCoreMessages: Messages = {
   'tray.status.active': '已啟用',
   'tray.status.inactive': '未啟用',
   'tray.status.error': '錯誤',
+  'tray.status.unknown': '未知',
   'tray.recentHosts': '最近連線的主機',
   'tray.empty.title': '一切都很安靜',
   'tray.empty.subtitle': '去連線個伺服器吧，它們想念你了 🚀',

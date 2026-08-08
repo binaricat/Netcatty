@@ -121,6 +121,8 @@ test("reconcileWithBackend reports an unavailable snapshot on query failure", as
 
   assert.deepEqual(await reconcileWithBackend(), {
     snapshotAvailable: false,
+    epoch: undefined,
+    revision: undefined,
     gone: [],
     appeared: [],
   });

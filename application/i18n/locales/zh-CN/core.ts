@@ -231,6 +231,7 @@ export const zhCNCoreMessages: Messages = {
   'tray.status.active': '已启用',
   'tray.status.inactive': '未启用',
   'tray.status.error': '错误',
+  'tray.status.unknown': '未知',
   'tray.recentHosts': '最近连接的主机',
   'tray.empty.title': '一切都很安静',
   'tray.empty.subtitle': '去连接个服务器吧，它们想念你了 🚀',
