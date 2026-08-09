@@ -198,6 +198,22 @@ test("selection markdown serialization scopes bold and link formatting", () => {
     }),
     "**Hello \\*world\\***",
   );
+  // Literal backslash before punctuation must escape too (`a\*b` → `a\\\*b`).
+  assert.equal(
+    serializeLexicalSelectionAsMarkdown("a\\*b", {
+      hasFormat: (type) => type === "bold",
+      anchor: plainAnchor,
+    }),
+    "**a\\\\\\*b**",
+  );
+  // Literal backslash before a list opener must round-trip (`\- item` → `\\\- item`).
+  assert.equal(
+    serializeLexicalSelectionAsMarkdown("\\- item", {
+      hasFormat: () => false,
+      anchor: plainAnchor,
+    }),
+    "\\\\\\- item",
+  );
   assert.equal(
     serializeLexicalSelectionAsMarkdown("**Hello**", {
       hasFormat: () => false,
@@ -425,6 +441,56 @@ test("selection markdown serialization scopes bold and link formatting", () => {
       getNodes: () => [headingOne, headingOneText, headingTwo, headingTwoText],
     }),
     "# Heading One\n\n## Heading Two",
+  );
+
+  // Range selections that include a thematic-break decorator must keep `***`
+  // between blocks; dropping it misclassifies identical paste as a no-op.
+  const paragraphA = {
+    getType: () => "paragraph",
+    getKey: () => "p-a",
+    getTextContent: () => "A",
+    getParent: () => null,
+  };
+  const paragraphB = {
+    getType: () => "paragraph",
+    getKey: () => "p-b",
+    getTextContent: () => "B",
+    getParent: () => null,
+  };
+  const paragraphAText = {
+    getType: () => "text",
+    getKey: () => "t-a",
+    getTextContent: () => "A",
+    hasFormat: () => false,
+    getParent: () => paragraphA,
+  };
+  const paragraphBText = {
+    getType: () => "text",
+    getKey: () => "t-b",
+    getTextContent: () => "B",
+    hasFormat: () => false,
+    getParent: () => paragraphB,
+  };
+  const thematicBreak = {
+    getType: () => "horizontalrule",
+    getKey: () => "hr-1",
+    getParent: () => null,
+  };
+  assert.equal(
+    serializeLexicalSelectionAsMarkdown("A\n\nB", {
+      hasFormat: () => false,
+      anchor: { getNode: () => paragraphAText, offset: 0, type: "text" },
+      focus: { getNode: () => paragraphBText, offset: 1, type: "text" },
+      isBackward: () => false,
+      getNodes: () => [
+        paragraphA,
+        paragraphAText,
+        thematicBreak,
+        paragraphB,
+        paragraphBText,
+      ],
+    }),
+    "A\n\n***\n\nB",
   );
 
   // Adjacent list items must stay single-newline joined (`- one\n- two`), not
@@ -1353,6 +1419,16 @@ test("unchanged insert recovery skips identical replacements but recovers lost-s
       { getType: () => "horizontalrule", getParent: () => null },
     ]),
     "***",
+  );
+  // Range selection across a thematic break must suppress identical-replace recovery.
+  assert.equal(
+    shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
+      beforeMarkdown: "A\n\n***\n\nB",
+      clipboardText: "A\n\n***\n\nB",
+      selectedText: "A\n\nB",
+      selectedMarkdown: "A\n\n***\n\nB",
+    }),
+    false,
   );
   assert.equal(
     shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({

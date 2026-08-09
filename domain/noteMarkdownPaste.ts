@@ -120,12 +120,19 @@ const getLexicalInlineMarkdownFormatStack = (
  * (`#`, `>`, `-`, `+`, ordered `1.` / `1)`) so literal `# Heading` / `- item` /
  * `1. item` serialize as `\# Heading` / `\- item` / `1\. item`. (`*` list
  * openers are already covered by the phrasing `*` escape.)
+ *
+ * Literal backslashes are escaped first so source `**a\\\*b**` (bold `a\*b`)
+ * round-trips as `**a\\\*b**`, not `**a\\*b**`.
  */
 const escapeNoteMarkdownPhrasingText = (text: string): string => {
-  const escaped = text.replace(/([`*_\[\]~])/g, "\\$1");
+  const escaped = text
+    .replace(/\\/g, "\\\\")
+    .replace(/([`*_\[\]~])/g, "\\$1");
+  // After doubling backslashes, a line-leading opener may sit after `\\` runs
+  // (`\- item` → `\\- item`); still escape the opener (`\\\- item`).
   return escaped
-    .replace(/(^|\n)( {0,3})([#>+-])/g, "$1$2\\$3")
-    .replace(/(^|\n)( {0,3})(\d+)([.)])/g, "$1$2$3\\$4");
+    .replace(/(^|\n)( {0,3})((?:\\\\)*)([#>+-])/g, "$1$2$3\\$4")
+    .replace(/(^|\n)( {0,3})((?:\\\\)*)(\d+)([.)])/g, "$1$2$3$4\\$5");
 };
 
 /** Prefer a fence longer than any run of backticks inside the value. */
@@ -574,20 +581,50 @@ const serializeLexicalSelectionNodesAsMarkdown = (
   const nodes = selection.getNodes();
   if (nodes.length === 0) return null;
 
-  const blocks: Array<{ block: NoteMarkdownPasteSelectionNode; key: string }> = [];
+  // Preserve document order: ordinary blocks and supported decorators (HR /
+  // table) both appear in RangeSelection.getNodes() when a range spans them.
+  type SelectionPart =
+    | { kind: "block"; block: NoteMarkdownPasteSelectionNode; key: string }
+    | { kind: "decorator"; markdown: string };
+  const selectionParts: SelectionPart[] = [];
   const seenBlockKeys = new Set<string>();
+  const seenDecoratorKeys = new Set<string>();
   for (const node of nodes) {
+    const nodeType = node.getType();
+    // Supported decorators are not block ancestors; serialize them in place so
+    // A + thematic-break + B round-trips as `A\n\n***\n\nB`.
+    if (nodeType === "horizontalrule" || nodeType === "table") {
+      const decoratorMarkdown = serializeLexicalDecoratorNodeAsMarkdown(node);
+      // Failed table/HR evidence must not silently drop the decorator.
+      if (decoratorMarkdown === null) return null;
+      const decoratorKey = getLexicalNodeKey(
+        node,
+        `${nodeType}:${selectionParts.length}`,
+      );
+      if (seenDecoratorKeys.has(decoratorKey)) continue;
+      seenDecoratorKeys.add(decoratorKey);
+      selectionParts.push({ kind: "decorator", markdown: decoratorMarkdown });
+      continue;
+    }
     const block = findLexicalAncestorByTypes(node, NOTE_MARKDOWN_PASTE_BLOCK_TYPES);
     if (!block) continue;
-    const key = getLexicalNodeKey(block, `${block.getType()}:${blocks.length}`);
+    const key = getLexicalNodeKey(block, `${block.getType()}:${selectionParts.length}`);
     if (seenBlockKeys.has(key)) continue;
     seenBlockKeys.add(key);
-    blocks.push({ block, key });
+    selectionParts.push({ kind: "block", block, key });
   }
-  if (blocks.length === 0) return null;
+  if (selectionParts.length === 0) return null;
 
-  const parts: Array<{ block: NoteMarkdownPasteSelectionNode; markdown: string }> = [];
-  for (const { block, key } of blocks) {
+  const parts: Array<{
+    block: NoteMarkdownPasteSelectionNode | null;
+    markdown: string;
+  }> = [];
+  for (const part of selectionParts) {
+    if (part.kind === "decorator") {
+      parts.push({ block: null, markdown: part.markdown });
+      continue;
+    }
+    const { block, key } = part;
     const inline = serializeLexicalBlockInlineMarkdown(block, key, nodes, selection);
     if (!inline) continue;
     const quotePrefix = getEnclosingLexicalQuoteMarkerPrefix(block, nodes, selection);
@@ -599,11 +636,14 @@ const serializeLexicalSelectionNodesAsMarkdown = (
   if (parts.length === 0) return null;
   // Same-list / nested list items stay tight (`- a\n- b`, `- p\n  - c`);
   // adjacent distinct lists keep a blank line like MDXEditor serialization.
+  // Decorators always use a blank line (same as node-selection joins).
   let joined = parts[0].markdown;
   for (let i = 1; i < parts.length; i += 1) {
     const prev = parts[i - 1].block;
     const next = parts[i].block;
-    const sameListRun = areLexicalListItemsInSameTightRun(prev, next);
+    const sameListRun = prev !== null
+      && next !== null
+      && areLexicalListItemsInSameTightRun(prev, next);
     joined += `${sameListRun ? "\n" : "\n\n"}${parts[i].markdown}`;
   }
   return joined;
@@ -725,8 +765,28 @@ export const serializeMdastTableAsMarkdown = (
 };
 
 /**
+ * Markdown for one supported Lexical decorator (thematic break / table).
+ * Returns null for unsupported types so callers can fall through.
+ */
+const serializeLexicalDecoratorNodeAsMarkdown = (
+  node: NoteMarkdownPasteSelectionNode,
+): string | null => {
+  const type = node.getType();
+  if (type === "horizontalrule") {
+    // mdast-util-to-markdown / MDXEditor default thematic break form.
+    return "***";
+  }
+  if (type === "table") {
+    if (typeof node.getMdastNode !== "function") return null;
+    return serializeMdastTableAsMarkdown(node.getMdastNode());
+  }
+  return null;
+};
+
+/**
  * Markdown for a Lexical NodeSelection (decorator blocks such as thematic
- * breaks and tables). Range selections use serializeLexicalSelectionAsMarkdown.
+ * breaks and tables). Range selections that include these decorators are
+ * handled in serializeLexicalSelectionNodesAsMarkdown.
  */
 export const serializeLexicalNodeSelectionAsMarkdown = (
   nodes: readonly NoteMarkdownPasteSelectionNode[],
@@ -734,21 +794,10 @@ export const serializeLexicalNodeSelectionAsMarkdown = (
   if (nodes.length === 0) return null;
   const parts: string[] = [];
   for (const node of nodes) {
-    const type = node.getType();
-    if (type === "horizontalrule") {
-      // mdast-util-to-markdown / MDXEditor default thematic break form.
-      parts.push("***");
-      continue;
-    }
-    if (type === "table") {
-      if (typeof node.getMdastNode !== "function") return null;
-      const tableMarkdown = serializeMdastTableAsMarkdown(node.getMdastNode());
-      if (tableMarkdown === null) return null;
-      parts.push(tableMarkdown);
-      continue;
-    }
+    const markdown = serializeLexicalDecoratorNodeAsMarkdown(node);
     // Unknown decorator / block node: no selection-scoped equivalence evidence.
-    return null;
+    if (markdown === null) return null;
+    parts.push(markdown);
   }
   return parts.join("\n\n");
 };
