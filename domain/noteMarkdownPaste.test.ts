@@ -173,6 +173,17 @@ test("markdown equivalence normalizes underscore emphasis to serializer form", (
     normalizeNoteMarkdownForEquivalence("A | B\n--- | ---\nC | D"),
     "| A | B |\n| --- | --- |\n| C | D |",
   );
+  // Harmless intraword \_ escapes match unescaped clipboard spelling.
+  assert.equal(
+    normalizeNoteMarkdownForEquivalence("# foo\\_bar"),
+    normalizeNoteMarkdownForEquivalence("# foo_bar"),
+  );
+  assert.equal(normalizeNoteMarkdownForEquivalence("# foo\\_bar"), "# foo_bar");
+  // Intentional escaped emphasis delimiters must stay inequivalent to real marks.
+  assert.notEqual(
+    normalizeNoteMarkdownForEquivalence("\\_foo\\_"),
+    normalizeNoteMarkdownForEquivalence("_foo_"),
+  );
 });
 
 test("selection markdown serialization scopes bold and link formatting", () => {
@@ -650,6 +661,16 @@ test("selection markdown serialization scopes bold and link formatting", () => {
       clipboardText: "* one\n* two",
       selectedText: "one\ntwo",
       selectedMarkdown: "- one\n- two",
+    }),
+    false,
+  );
+  // Serializer escapes intraword `_`; clipboard often omits the backslash.
+  assert.equal(
+    shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
+      beforeMarkdown: "# foo\\_bar",
+      clipboardText: "# foo_bar",
+      selectedText: "foo_bar",
+      selectedMarkdown: "# foo\\_bar",
     }),
     false,
   );
@@ -1613,5 +1634,28 @@ test("didNoteMarkdownPasteApply distinguishes paste success from concurrent edit
       selectedMarkdown: "",
     }),
     true,
+  );
+  // Successful paste plus typing during the recovery frames must not look like
+  // a failed insert (document-append would then duplicate the fragment).
+  assert.equal(
+    didNoteMarkdownPasteApply({
+      beforeMarkdown: "A **x** B",
+      afterMarkdown: "A **x****x**! B",
+      clipboardText: "**x**",
+      selectedText: "",
+      selectedMarkdown: "",
+    }),
+    true,
+  );
+  // Typing alone (no paste) is still not success.
+  assert.equal(
+    didNoteMarkdownPasteApply({
+      beforeMarkdown: "A **x** B",
+      afterMarkdown: "A **x** B!",
+      clipboardText: "**x**",
+      selectedText: "",
+      selectedMarkdown: "",
+    }),
+    false,
   );
 });

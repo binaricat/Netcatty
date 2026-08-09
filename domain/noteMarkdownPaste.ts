@@ -295,9 +295,15 @@ const getSelectedLexicalBlockPlainText = (
   blockKey: string,
   nodes: NoteMarkdownPasteSelectionNode[],
   selection: NoteMarkdownPasteSelection,
+  /**
+   * When set, phrasing for this block was pre-grouped; still filter via
+   * doesLexicalNodeBelongToBlock for quote containers that own nested blocks.
+   */
+  blockNodes?: readonly NoteMarkdownPasteSelectionNode[],
 ): string => {
   let plain = "";
-  for (const node of nodes) {
+  const scan = blockNodes ?? nodes;
+  for (const node of scan) {
     const type = node.getType();
     if (type === "linebreak") {
       if (doesLexicalNodeBelongToBlock(node, block, blockKey)) plain += "\n";
@@ -370,10 +376,14 @@ export const doesSelectionEncompassLexicalBlock = (
   blockKey: string,
   nodes: NoteMarkdownPasteSelectionNode[],
   selection: NoteMarkdownPasteSelection,
+  blockNodes?: readonly NoteMarkdownPasteSelectionNode[],
 ): boolean => {
   if (typeof block.getTextContent !== "function") return true;
   const blockText = getLexicalBlockComparablePlainText(block);
-  if (getSelectedLexicalBlockPlainText(block, blockKey, nodes, selection) !== blockText) {
+  if (
+    getSelectedLexicalBlockPlainText(block, blockKey, nodes, selection, blockNodes)
+    !== blockText
+  ) {
     return false;
   }
 
@@ -396,6 +406,8 @@ export const doesSelectionEncompassLexicalBlock = (
 /**
  * `> ` markers for quote ancestors that the selection fully encompasses.
  * Needed because selected blocks resolve to nested paragraphs, not the quote.
+ * Quote checks still scan all selected nodes: phrasing is indexed under nested
+ * paragraph/listitem keys, not the quote container.
  */
 const getEnclosingLexicalQuoteMarkerPrefix = (
   block: NoteMarkdownPasteSelectionNode,
@@ -457,8 +469,6 @@ const getLexicalNodeKey = (
 ): string => (typeof node.getKey === "function" ? node.getKey() : fallback);
 
 const serializeLexicalBlockInlineMarkdown = (
-  block: NoteMarkdownPasteSelectionNode,
-  blockKey: string,
   nodes: NoteMarkdownPasteSelectionNode[],
   selection: NoteMarkdownPasteSelection,
 ): string => {
@@ -501,13 +511,10 @@ const serializeLexicalBlockInlineMarkdown = (
     linkBuffer = null;
   };
 
+  // `nodes` is already scoped to this block (see indexLexicalSelectionNodesByBlockKey).
   for (const node of nodes) {
     const type = node.getType();
     if (type === "linebreak") {
-      // Hard breaks are inline to their owning block; skip when serializing a
-      // sibling block from a multi-block selection (same filter as text nodes).
-      const nodeBlock = findLexicalAncestorByTypes(node, NOTE_MARKDOWN_PASTE_BLOCK_TYPES);
-      if (!nodeBlock || getLexicalNodeKey(nodeBlock, "") !== blockKey) continue;
       // Close formats before the break so `**A**  \n**B**` stays the canonical
       // form for identical-replace checks (clipboard often splits markers).
       flushLink();
@@ -517,8 +524,6 @@ const serializeLexicalBlockInlineMarkdown = (
       continue;
     }
     if (type !== "text" || typeof node.hasFormat !== "function") continue;
-    const nodeBlock = findLexicalAncestorByTypes(node, NOTE_MARKDOWN_PASTE_BLOCK_TYPES);
-    if (!nodeBlock || getLexicalNodeKey(nodeBlock, "") !== blockKey) continue;
 
     const text = getSelectedLexicalTextNodeContent(node, selection);
     if (!text) continue;
@@ -583,10 +588,13 @@ const serializeLexicalSelectionNodesAsMarkdown = (
 
   // Preserve document order: ordinary blocks and supported decorators (HR /
   // table) both appear in RangeSelection.getNodes() when a range spans them.
+  // Group phrasing under each block key in this same pass so serialization is
+  // linear in selected nodes (not O(blocks×nodes)).
   type SelectionPart =
     | { kind: "block"; block: NoteMarkdownPasteSelectionNode; key: string }
     | { kind: "decorator"; markdown: string };
   const selectionParts: SelectionPart[] = [];
+  const nodesByBlockKey = new Map<string, NoteMarkdownPasteSelectionNode[]>();
   const seenBlockKeys = new Set<string>();
   const seenDecoratorKeys = new Set<string>();
   for (const node of nodes) {
@@ -609,6 +617,11 @@ const serializeLexicalSelectionNodesAsMarkdown = (
     const block = findLexicalAncestorByTypes(node, NOTE_MARKDOWN_PASTE_BLOCK_TYPES);
     if (!block) continue;
     const key = getLexicalNodeKey(block, `${block.getType()}:${selectionParts.length}`);
+    if (nodeType === "text" || nodeType === "linebreak") {
+      const group = nodesByBlockKey.get(key);
+      if (group) group.push(node);
+      else nodesByBlockKey.set(key, [node]);
+    }
     if (seenBlockKeys.has(key)) continue;
     seenBlockKeys.add(key);
     selectionParts.push({ kind: "block", block, key });
@@ -625,10 +638,17 @@ const serializeLexicalSelectionNodesAsMarkdown = (
       continue;
     }
     const { block, key } = part;
-    const inline = serializeLexicalBlockInlineMarkdown(block, key, nodes, selection);
+    const blockNodes = nodesByBlockKey.get(key) ?? [];
+    const inline = serializeLexicalBlockInlineMarkdown(blockNodes, selection);
     if (!inline) continue;
     const quotePrefix = getEnclosingLexicalQuoteMarkerPrefix(block, nodes, selection);
-    const marker = doesSelectionEncompassLexicalBlock(block, key, nodes, selection)
+    const marker = doesSelectionEncompassLexicalBlock(
+      block,
+      key,
+      nodes,
+      selection,
+      blockNodes,
+    )
       ? getLexicalBlockMarkerPrefix(block)
       : "";
     parts.push({ block, markdown: `${quotePrefix}${marker}${inline}` });
@@ -1160,10 +1180,23 @@ const normalizeNoteMarkdownGfmTableRows = (text: string): string => {
  * checks are not tripped by serializer vs clipboard marker differences
  * (`**Hello**` vs `__Hello__`, `*Hi*` vs `_Hi_`, `* item` vs `- item`).
  */
+/**
+ * Drop backslash escapes that CommonMark treats as equivalent to the bare
+ * character (e.g. intraword `foo\_bar` ≡ `foo_bar`). Leave escapes that change
+ * emphasis parsing (`\_foo\_` vs `_foo_`) alone.
+ */
+const canonicalizeNoteMarkdownHarmlessPunctuationEscapes = (text: string): string => (
+  // Intraword underscore: MDXEditor/mdast often emit `\_` while clipboards omit it.
+  text.replace(/(\w)\\_(\w)/g, "$1_$2")
+);
+
 export const normalizeNoteMarkdownForEquivalence = (markdown: string): string => {
   const text = markdown.replace(/\r\n?/g, "\n");
   return mapNoteMarkdownOutsideProtectedRegions(text, (exposed) => {
     let next = exposed;
+    // Harmless punctuation escapes before emphasis rewrites so `foo\_bar` and
+    // `foo_bar` compare equal for identical-replace / paste-success checks.
+    next = canonicalizeNoteMarkdownHarmlessPunctuationEscapes(next);
     // Strong emphasis: __x__ → **x** (serializer canonical form).
     next = next.replace(/(__)(?=\S)([\s\S]*?\S)\1/g, "**$2**");
     // Emphasis: _x_ → *x* (avoid matching inside identifiers / already-normalized **).
@@ -1264,6 +1297,21 @@ export const shouldRecoverNoteMarkdownPasteAfterUnchangedInsert = (input: {
 };
 
 /**
+ * True when `extended` can be obtained from `base` by only inserting characters
+ * (order-preserving subsequence). Used to accept paste success plus concurrent
+ * typing during the recovery animation frames.
+ */
+const isNoteMarkdownInsertionExtension = (base: string, extended: string): boolean => {
+  if (extended === base) return true;
+  if (extended.length < base.length) return false;
+  let i = 0;
+  for (let j = 0; j < extended.length && i < base.length; j += 1) {
+    if (extended[j] === base[i]) i += 1;
+  }
+  return i === base.length;
+};
+
+/**
  * True when insertMarkdown (or an equivalent in-editor replace) already applied
  * the clipboard to the document. Used so concurrent draft/editor updates are
  * not mistaken for paste success, and so identical node replaces can be
@@ -1287,7 +1335,12 @@ export const didNoteMarkdownPasteApply = (input: {
   );
   if (!clipboardNorm) return afterNorm !== beforeNorm;
 
-  // Select-all style replace.
+  const matchesPasteResult = (expected: string): boolean => (
+    afterNorm === expected || isNoteMarkdownInsertionExtension(expected, afterNorm)
+  );
+
+  // Select-all style replace. Paste-then-type is covered below when the
+  // selection markdown equals the whole document (expected === clipboardNorm).
   if (afterNorm === clipboardNorm) return true;
 
   const selectedMarkdown = input.selectedMarkdown?.replace(/\r\n?/g, "\n") ?? null;
@@ -1300,19 +1353,20 @@ export const didNoteMarkdownPasteApply = (input: {
       const index = beforeNorm.indexOf(selectedNorm, searchFrom);
       if (index === -1) break;
       const expected = `${beforeNorm.slice(0, index)}${clipboardNorm}${beforeNorm.slice(index + selectedNorm.length)}`;
-      if (afterNorm === expected) return true;
+      if (matchesPasteResult(expected)) return true;
       searchFrom = index + 1;
     }
   }
 
   // Collapsed caret: walk every insert index so a successful in-place paste
   // still counts when the clipboard fragment already existed elsewhere
-  // (`A **x** B` + paste `**x**` → `A **x** **x** B`).
+  // (`A **x** B` + paste `**x**` → `A **x** **x** B`), including when the user
+  // types during the two recovery animation frames.
   const caretSelection = selectedMarkdown === null || selectedMarkdown.length === 0;
   if (caretSelection) {
     for (let index = 0; index <= beforeNorm.length; index += 1) {
       const expected = `${beforeNorm.slice(0, index)}${clipboardNorm}${beforeNorm.slice(index)}`;
-      if (afterNorm === expected) return true;
+      if (matchesPasteResult(expected)) return true;
     }
   }
 
@@ -1321,9 +1375,9 @@ export const didNoteMarkdownPasteApply = (input: {
     return true;
   }
 
-  return afterNorm === normalizeNoteMarkdownForEquivalence(
+  return matchesPasteResult(normalizeNoteMarkdownForEquivalence(
     mergeNoteMarkdownDocumentPaste(before, input.clipboardText),
-  );
+  ));
 };
 
 /**
