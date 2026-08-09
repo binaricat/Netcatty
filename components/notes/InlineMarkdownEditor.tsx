@@ -285,6 +285,26 @@ export const mergeNoteMarkdownDocumentPaste = (
 };
 
 /**
+ * Approximate Lexical selection.getTextContent() for clipboard markdown so
+ * equivalent pastes (bold Hello vs **Hello**) can be compared as plain text.
+ */
+export const noteMarkdownClipboardToPlainText = (markdown: string): string => {
+  let text = markdown.replace(/\r\n?/g, "\n");
+  // Fenced code: keep inner content (drop the fence lines).
+  text = text.replace(/^ {0,3}(?:```|~~~)[^\n]*\n([\s\S]*?)^ {0,3}(?:```|~~~)[ \t]*$/gm, "$1");
+  text = text.replace(/!\[([^\]]*)\]\([^)]+\)/g, "$1");
+  text = text.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
+  text = text.replace(/(\*\*|__)(?=\S)([\s\S]*?\S)\1/g, "$2");
+  text = text.replace(/(\*|_)(?=\S)([\s\S]*?\S)\1/g, "$2");
+  text = text.replace(/`([^`\n]+)`/g, "$1");
+  text = text.replace(/^ {0,3}#{1,6}\s+/gm, "");
+  text = text.replace(/^ {0,3}(?:[-+*]|\d+[.)])\s+/gm, "");
+  text = text.replace(/^ {0,3}>\s?/gm, "");
+  text = text.replace(/^ {0,3}[-*_](?:\s*[-*_]){2,}\s*$/gm, "");
+  return text;
+};
+
+/**
  * After insertMarkdown, an unchanged document is either a successful identical
  * replace or a lost-selection no-op. Only the latter should fall back to
  * document-append recovery.
@@ -298,9 +318,13 @@ export const shouldRecoverNoteMarkdownPasteAfterUnchangedInsert = (input: {
   const clipboard = input.clipboardText.replace(/\r\n?/g, "\n");
   // Select All + paste of the same body: serialization stays equal on success.
   if (clipboard === before) return false;
-  // Partial identical replace: selected plain text matches the clipboard.
-  if (input.selectedText !== null && input.selectedText.replace(/\r\n?/g, "\n") === clipboard) {
-    return false;
+  // Partial identical / markdown-equivalent replace: Lexical selection text is
+  // plain (bold Hello → "Hello") while the clipboard may still be "**Hello**".
+  if (input.selectedText !== null) {
+    const selected = input.selectedText.replace(/\r\n?/g, "\n");
+    if (selected === clipboard || selected === noteMarkdownClipboardToPlainText(clipboard)) {
+      return false;
+    }
   }
   return true;
 };

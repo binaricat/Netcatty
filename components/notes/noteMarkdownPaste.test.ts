@@ -4,6 +4,7 @@ import test from "node:test";
 
 import {
   mergeNoteMarkdownDocumentPaste,
+  noteMarkdownClipboardToPlainText,
   shouldInterceptNoteMarkdownPaste,
   shouldRecoverNoteMarkdownPasteAfterUnchangedInsert,
 } from "./InlineMarkdownEditor.tsx";
@@ -67,6 +68,12 @@ test("document markdown paste merge preserves leading indentation on the first c
   );
 });
 
+test("clipboard markdown plain-text approx matches Lexical selection text", () => {
+  assert.equal(noteMarkdownClipboardToPlainText("**Hello**"), "Hello");
+  assert.equal(noteMarkdownClipboardToPlainText("[docs](https://example.com)"), "docs");
+  assert.equal(noteMarkdownClipboardToPlainText("- item"), "item");
+});
+
 test("unchanged insert recovery skips identical replacements but recovers lost-selection no-ops", () => {
   assert.equal(
     shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
@@ -76,10 +83,12 @@ test("unchanged insert recovery skips identical replacements but recovers lost-s
     }),
     false,
   );
+  // Structured markdown that would pass shouldInsertClipboardTextAsMarkdown:
+  // selecting rendered bold "Hello" and pasting **Hello** must not append.
   assert.equal(
     shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
-      beforeMarkdown: "# Note\n\nHello world",
-      clipboardText: "Hello",
+      beforeMarkdown: "# Note\n\n**Hello** world",
+      clipboardText: "**Hello**",
       selectedText: "Hello",
     }),
     false,
@@ -87,7 +96,7 @@ test("unchanged insert recovery skips identical replacements but recovers lost-s
   assert.equal(
     shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
       beforeMarkdown: "# Note\n\nHello",
-      clipboardText: "Goodbye",
+      clipboardText: "**Goodbye**",
       selectedText: "Hello",
     }),
     true,
