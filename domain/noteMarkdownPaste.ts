@@ -1,0 +1,508 @@
+export type NoteEditorMode = "edit" | "preview";
+
+const PASTED_MARKDOWN_PATTERNS = [
+  /^ {0,3}#{1,6}\s+\S/m,
+  /^ {0,3}(?:[-+*]|\d+[.)])\s+\S/m,
+  /^ {0,3}>\s+\S/m,
+  /^ {0,3}(?:```|~~~)/m,
+  /^ {0,3}[-*_](?:\s*[-*_]){2,}\s*$/m,
+  /^ {0,3}\|?.+\|.+\n {0,3}\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/m,
+  /(^|[^!])\[[^\]\n]+\]\([^) \n]+(?:\s+"[^"\n]*")?\)/,
+  /(^|[\s([{])(?:\*\*|__)\S[\s\S]*?\S(?:\*\*|__)(?=$|[\s\])}.,;:!?])/,
+  /(^|[\s([{])`[^`\n]+`(?=$|[\s\])}.,;:!?])/,
+];
+
+export const shouldInsertClipboardTextAsMarkdown = (text: string): boolean => {
+  const markdown = text.replace(/\r\n?/g, "\n").trim();
+  if (!markdown) return false;
+  return PASTED_MARKDOWN_PATTERNS.some((pattern) => pattern.test(markdown));
+};
+
+export type NoteMarkdownPasteSelectionNode = {
+  getType: () => string;
+  getParent: () => NoteMarkdownPasteSelectionNode | null;
+  getKey?: () => string;
+  getURL?: () => string;
+  getTitle?: () => string | null;
+  getTag?: () => string;
+  getListType?: () => "bullet" | "number" | "check" | string;
+  getValue?: () => number;
+  getChecked?: () => boolean | undefined;
+  getTextContent?: () => string;
+  hasFormat?: (type: "bold" | "italic" | "code") => boolean;
+};
+
+export type NoteMarkdownPasteSelection = {
+  hasFormat: (type: "bold" | "italic" | "code") => boolean;
+  anchor: {
+    getNode: () => NoteMarkdownPasteSelectionNode;
+    offset?: number;
+    type?: string;
+  };
+  focus?: {
+    getNode: () => NoteMarkdownPasteSelectionNode;
+    offset?: number;
+    type?: string;
+  };
+  getNodes?: () => NoteMarkdownPasteSelectionNode[];
+  isBackward?: () => boolean;
+};
+
+const NOTE_MARKDOWN_PASTE_BLOCK_TYPES = new Set([
+  "heading",
+  "paragraph",
+  "listitem",
+  "quote",
+]);
+
+const isLexicalLinkNode = (
+  node: NoteMarkdownPasteSelectionNode,
+): node is NoteMarkdownPasteSelectionNode & { getURL: () => string } => (
+  (node.getType() === "link" || node.getType() === "autolink")
+  && typeof node.getURL === "function"
+);
+
+const applyLexicalInlineMarkdownFormats = (
+  text: string,
+  formatSource: { hasFormat: (type: "bold" | "italic" | "code") => boolean },
+): string => {
+  if (!text) return text;
+  // Code fences out other emphasis markers in CommonMark-style paste.
+  if (formatSource.hasFormat("code")) return `\`${text}\``;
+  const bold = formatSource.hasFormat("bold");
+  const italic = formatSource.hasFormat("italic");
+  if (bold && italic) return `***${text}***`;
+  if (bold) return `**${text}**`;
+  if (italic) return `*${text}*`;
+  return text;
+};
+
+const formatLexicalLinkMarkdown = (
+  label: string,
+  url: string,
+  title?: string | null,
+): string => {
+  if (title) {
+    return `[${label}](${url} "${title.replace(/"/g, '\\"')}")`;
+  }
+  return `[${label}](${url})`;
+};
+
+const getLexicalListNestingDepth = (listItem: NoteMarkdownPasteSelectionNode): number => {
+  let depth = 0;
+  let current: NoteMarkdownPasteSelectionNode | null = listItem.getParent();
+  while (current) {
+    if (current.getType() === "list") depth += 1;
+    current = current.getParent();
+  }
+  return Math.max(depth, 1);
+};
+
+const findLexicalAncestorByTypes = (
+  node: NoteMarkdownPasteSelectionNode,
+  types: ReadonlySet<string>,
+): NoteMarkdownPasteSelectionNode | null => {
+  let current: NoteMarkdownPasteSelectionNode | null = node;
+  while (current) {
+    if (types.has(current.getType())) return current;
+    current = current.getParent();
+  }
+  return null;
+};
+
+const findLexicalLinkAncestor = (
+  node: NoteMarkdownPasteSelectionNode,
+): (NoteMarkdownPasteSelectionNode & { getURL: () => string }) | null => {
+  let current: NoteMarkdownPasteSelectionNode | null = node;
+  while (current) {
+    if (isLexicalLinkNode(current)) return current;
+    current = current.getParent();
+  }
+  return null;
+};
+
+const getCheckListMarker = (listItem: NoteMarkdownPasteSelectionNode): string => {
+  const checked = typeof listItem.getChecked === "function"
+    ? Boolean(listItem.getChecked())
+    : false;
+  return `- [${checked ? "x" : " "}]`;
+};
+
+const getLexicalBlockMarkerPrefix = (block: NoteMarkdownPasteSelectionNode): string => {
+  const type = block.getType();
+  if (type === "listitem") {
+    const parent = block.getParent();
+    const listType = parent?.getType() === "list" && typeof parent.getListType === "function"
+      ? parent.getListType()
+      : "bullet";
+    const listIndent = Math.max(getLexicalListNestingDepth(block) - 1, 0) * 2;
+    if (listType === "number") {
+      const value = typeof block.getValue === "function" ? block.getValue() : 1;
+      return `${" ".repeat(listIndent)}${value}. `;
+    }
+    if (listType === "check") {
+      return `${" ".repeat(listIndent)}${getCheckListMarker(block)} `;
+    }
+    return `${" ".repeat(listIndent)}- `;
+  }
+  if (type === "heading" && typeof block.getTag === "function") {
+    const level = Number(block.getTag().replace(/^h/iu, "")) || 1;
+    return `${"#".repeat(Math.min(Math.max(level, 1), 6))} `;
+  }
+  if (type === "quote") {
+    return "> ";
+  }
+  return "";
+};
+
+/** Plain selected text inside one block (no markdown markers). */
+const getSelectedLexicalBlockPlainText = (
+  block: NoteMarkdownPasteSelectionNode,
+  blockKey: string,
+  nodes: NoteMarkdownPasteSelectionNode[],
+  selection: NoteMarkdownPasteSelection,
+): string => {
+  let plain = "";
+  for (const node of nodes) {
+    const type = node.getType();
+    if (type === "linebreak") {
+      const nodeBlock = findLexicalAncestorByTypes(node, NOTE_MARKDOWN_PASTE_BLOCK_TYPES);
+      if (nodeBlock && getLexicalNodeKey(nodeBlock, "") === blockKey) plain += "\n";
+      continue;
+    }
+    if (type !== "text") continue;
+    const nodeBlock = findLexicalAncestorByTypes(node, NOTE_MARKDOWN_PASTE_BLOCK_TYPES);
+    if (!nodeBlock || getLexicalNodeKey(nodeBlock, "") !== blockKey) continue;
+    plain += getSelectedLexicalTextNodeContent(node, nodes, selection);
+  }
+  return plain;
+};
+
+/**
+ * Heading/list/quote markers belong only on whole-block selections. Partial
+ * inline ranges (e.g. bold "Hello" inside `# **Hello** world`) serialize as
+ * inline markdown only so identical-replace recovery stays accurate.
+ */
+export const doesSelectionEncompassLexicalBlock = (
+  block: NoteMarkdownPasteSelectionNode,
+  blockKey: string,
+  nodes: NoteMarkdownPasteSelectionNode[],
+  selection: NoteMarkdownPasteSelection,
+): boolean => {
+  if (typeof block.getTextContent !== "function") return true;
+  const blockText = block.getTextContent();
+  return getSelectedLexicalBlockPlainText(block, blockKey, nodes, selection) === blockText;
+};
+
+const getSelectedLexicalTextNodeContent = (
+  node: NoteMarkdownPasteSelectionNode,
+  nodes: NoteMarkdownPasteSelectionNode[],
+  selection: NoteMarkdownPasteSelection,
+): string => {
+  const fullText = typeof node.getTextContent === "function" ? node.getTextContent() : "";
+  const firstNode = nodes[0];
+  const lastNode = nodes[nodes.length - 1];
+  const anchor = selection.anchor;
+  const focus = selection.focus ?? selection.anchor;
+  const anchorOffset = typeof anchor.offset === "number" ? anchor.offset : 0;
+  const focusOffset = typeof focus.offset === "number" ? focus.offset : fullText.length;
+  const isBefore = typeof selection.isBackward === "function"
+    ? !selection.isBackward()
+    : true;
+  const startOffset = isBefore ? anchorOffset : focusOffset;
+  const endOffset = isBefore ? focusOffset : anchorOffset;
+
+  if (node === firstNode && node === lastNode) {
+    if (anchor.type === "element" && focus.type === "element" && anchorOffset === focusOffset) {
+      return fullText;
+    }
+    return startOffset < endOffset
+      ? fullText.slice(startOffset, endOffset)
+      : fullText.slice(endOffset, startOffset);
+  }
+  if (node === firstNode) return fullText.slice(startOffset);
+  if (node === lastNode) return fullText.slice(0, endOffset);
+  return fullText;
+};
+
+const getLexicalNodeKey = (
+  node: NoteMarkdownPasteSelectionNode,
+  fallback: string,
+): string => (typeof node.getKey === "function" ? node.getKey() : fallback);
+
+const serializeLexicalBlockInlineMarkdown = (
+  block: NoteMarkdownPasteSelectionNode,
+  blockKey: string,
+  nodes: NoteMarkdownPasteSelectionNode[],
+  selection: NoteMarkdownPasteSelection,
+): string => {
+  let markdown = "";
+  let linkBuffer: {
+    linkKey: string;
+    link: NoteMarkdownPasteSelectionNode & { getURL: () => string };
+    label: string;
+  } | null = null;
+
+  const flushLink = () => {
+    if (!linkBuffer) return;
+    const title = typeof linkBuffer.link.getTitle === "function"
+      ? linkBuffer.link.getTitle()
+      : null;
+    markdown += formatLexicalLinkMarkdown(linkBuffer.label, linkBuffer.link.getURL(), title);
+    linkBuffer = null;
+  };
+
+  for (const node of nodes) {
+    const type = node.getType();
+    if (type === "linebreak") {
+      flushLink();
+      markdown += "\n";
+      continue;
+    }
+    if (type !== "text" || typeof node.hasFormat !== "function") continue;
+    const nodeBlock = findLexicalAncestorByTypes(node, NOTE_MARKDOWN_PASTE_BLOCK_TYPES);
+    if (!nodeBlock || getLexicalNodeKey(nodeBlock, "") !== blockKey) continue;
+
+    const text = getSelectedLexicalTextNodeContent(node, nodes, selection);
+    if (!text) continue;
+    const formatted = applyLexicalInlineMarkdownFormats(text, node);
+    const link = findLexicalLinkAncestor(node);
+    if (!link) {
+      flushLink();
+      markdown += formatted;
+      continue;
+    }
+    const linkKey = getLexicalNodeKey(link, link.getURL());
+    if (linkBuffer && linkBuffer.linkKey !== linkKey) flushLink();
+    if (!linkBuffer) linkBuffer = { linkKey, link, label: formatted };
+    else linkBuffer.label += formatted;
+  }
+  flushLink();
+  return markdown;
+};
+
+const serializeLexicalSelectionNodesAsMarkdown = (
+  selection: NoteMarkdownPasteSelection,
+): string | null => {
+  if (typeof selection.getNodes !== "function") return null;
+  const nodes = selection.getNodes();
+  if (nodes.length === 0) return null;
+
+  const blocks: Array<{ block: NoteMarkdownPasteSelectionNode; key: string }> = [];
+  const seenBlockKeys = new Set<string>();
+  for (const node of nodes) {
+    const block = findLexicalAncestorByTypes(node, NOTE_MARKDOWN_PASTE_BLOCK_TYPES);
+    if (!block) continue;
+    const key = getLexicalNodeKey(block, `${block.getType()}:${blocks.length}`);
+    if (seenBlockKeys.has(key)) continue;
+    seenBlockKeys.add(key);
+    blocks.push({ block, key });
+  }
+  if (blocks.length === 0) return null;
+
+  const parts: string[] = [];
+  for (const { block, key } of blocks) {
+    const inline = serializeLexicalBlockInlineMarkdown(block, key, nodes, selection);
+    if (!inline) continue;
+    const marker = doesSelectionEncompassLexicalBlock(block, key, nodes, selection)
+      ? getLexicalBlockMarkerPrefix(block)
+      : "";
+    parts.push(`${marker}${inline}`);
+  }
+  if (parts.length === 0) return null;
+  return parts.join("\n\n");
+};
+
+/**
+ * Best-effort markdown for the active Lexical range (combined text formats,
+ * link URL/title, and per-block markers). Used to scope paste-equivalence
+ * checks to the selection, not the whole document.
+ */
+export const serializeLexicalSelectionAsMarkdown = (
+  selectedText: string,
+  selection: NoteMarkdownPasteSelection,
+): string => {
+  const fromNodes = serializeLexicalSelectionNodesAsMarkdown(selection);
+  if (fromNodes !== null) return fromNodes;
+
+  // Fallback when getNodes() is unavailable (unit mocks): single-anchor path.
+  let markdown = applyLexicalInlineMarkdownFormats(selectedText, selection);
+  let linkUrl: string | null = null;
+  let linkTitle: string | null = null;
+  let headingTag: string | null = null;
+  let listMarker: string | null = null;
+  let listIndent = 0;
+  let isQuote = false;
+
+  let current: NoteMarkdownPasteSelectionNode | null = selection.anchor.getNode();
+  while (current) {
+    const type = current.getType();
+    if (!linkUrl && isLexicalLinkNode(current)) {
+      linkUrl = current.getURL();
+      linkTitle = typeof current.getTitle === "function" ? current.getTitle() : null;
+    }
+    if (!headingTag && type === "heading" && typeof current.getTag === "function") {
+      headingTag = current.getTag();
+    }
+    if (listMarker === null && type === "listitem") {
+      const parent = current.getParent();
+      const listType = parent?.getType() === "list" && typeof parent.getListType === "function"
+        ? parent.getListType()
+        : "bullet";
+      listIndent = Math.max(getLexicalListNestingDepth(current) - 1, 0) * 2;
+      if (listType === "number") {
+        const value = typeof current.getValue === "function" ? current.getValue() : 1;
+        listMarker = `${value}.`;
+      } else if (listType === "check") {
+        listMarker = getCheckListMarker(current);
+      } else {
+        listMarker = "-";
+      }
+    }
+    if (!isQuote && type === "quote") {
+      isQuote = true;
+    }
+    current = current.getParent();
+  }
+
+  if (linkUrl) {
+    markdown = formatLexicalLinkMarkdown(markdown, linkUrl, linkTitle);
+  }
+  if (selectedText.length === 0) return markdown;
+
+  // Fallback path: omit block markers when the selected text is clearly a
+  // partial slice of the surrounding block (getTextContent available).
+  let blockText: string | null = null;
+  let blockProbe: NoteMarkdownPasteSelectionNode | null = selection.anchor.getNode();
+  while (blockProbe) {
+    if (NOTE_MARKDOWN_PASTE_BLOCK_TYPES.has(blockProbe.getType())) {
+      blockText = typeof blockProbe.getTextContent === "function"
+        ? blockProbe.getTextContent()
+        : null;
+      break;
+    }
+    blockProbe = blockProbe.getParent();
+  }
+  const includeBlockMarker = blockText === null || blockText === selectedText;
+
+  if (includeBlockMarker && listMarker !== null) {
+    return `${" ".repeat(listIndent)}${listMarker} ${markdown}`;
+  }
+  if (includeBlockMarker && headingTag) {
+    const level = Number(headingTag.replace(/^h/iu, "")) || 1;
+    return `${"#".repeat(Math.min(Math.max(level, 1), 6))} ${markdown}`;
+  }
+  if (includeBlockMarker && isQuote) {
+    return `> ${markdown}`;
+  }
+  return markdown;
+};
+
+/**
+ * Merge a markdown paste when Lexical selection is missing or insertMarkdown
+ * no-ops. Prefer insertMarkdown whenever a selection exists so caret/replace
+ * semantics stay intact (including Select All + Paste).
+ */
+export const mergeNoteMarkdownDocumentPaste = (
+  currentMarkdown: string,
+  clipboardText: string,
+): string => {
+  const current = currentMarkdown.replace(/\s+$/u, "");
+  // Strip leading blank lines only — keep indentation on the first content line
+  // (nested list markers, fenced code, etc.).
+  const pasted = clipboardText
+    .replace(/\r\n?/g, "\n")
+    .replace(/^(?:[^\S\n]*\n)+/u, "")
+    .replace(/\s+$/u, "");
+  if (!pasted) return currentMarkdown;
+  if (!current) return pasted;
+  return `${current}\n\n${pasted}`;
+};
+
+/**
+ * Approximate Lexical selection.getTextContent() for clipboard markdown so
+ * equivalent pastes (bold Hello vs **Hello**) can be compared as plain text.
+ */
+export const noteMarkdownClipboardToPlainText = (markdown: string): string => {
+  let text = markdown.replace(/\r\n?/g, "\n");
+  // Fenced code: keep inner content (drop the fence lines).
+  text = text.replace(/^ {0,3}(?:```|~~~)[^\n]*\n([\s\S]*?)^ {0,3}(?:```|~~~)[ \t]*$/gm, "$1");
+  text = text.replace(/!\[([^\]]*)\]\([^)]+\)/g, "$1");
+  text = text.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
+  text = text.replace(/(\*\*|__)(?=\S)([\s\S]*?\S)\1/g, "$2");
+  text = text.replace(/(\*|_)(?=\S)([\s\S]*?\S)\1/g, "$2");
+  text = text.replace(/`([^`\n]+)`/g, "$1");
+  text = text.replace(/^ {0,3}#{1,6}\s+/gm, "");
+  // Task-list markers before ordinary list bullets so `- [ ] task` → `task`.
+  text = text.replace(/^ {0,3}[-+*]\s+\[[ xX]\]\s+/gm, "");
+  text = text.replace(/^ {0,3}(?:[-+*]|\d+[.)])\s+/gm, "");
+  text = text.replace(/^ {0,3}>\s?/gm, "");
+  text = text.replace(/^ {0,3}[-*_](?:\s*[-*_]){2,}\s*$/gm, "");
+  return text;
+};
+
+/**
+ * After insertMarkdown, an unchanged document is either a successful identical
+ * replace or a lost-selection no-op. Only the latter should fall back to
+ * document-append recovery.
+ *
+ * Lexical selection text is plain (bold/link label only). Do not treat
+ * plain-text equality alone as a successful replace — pasting `**Hello**` over
+ * plain `Hello`, or the same link label with a different URL, must still
+ * recover when the insert no-ops. Suppress recovery only when the clipboard
+ * markdown matches the active selection's own markdown (not merely when the
+ * same clipboard substring exists elsewhere in the document).
+ */
+export const shouldRecoverNoteMarkdownPasteAfterUnchangedInsert = (input: {
+  beforeMarkdown: string;
+  clipboardText: string;
+  selectedText: string | null;
+  /** Selection-scoped markdown; required to suppress structured identical replaces. */
+  selectedMarkdown?: string | null;
+}): boolean => {
+  const before = input.beforeMarkdown.replace(/\r\n?/g, "\n");
+  const clipboard = input.clipboardText.replace(/\r\n?/g, "\n");
+  // Select All + paste of the same body: serialization stays equal on success.
+  if (clipboard === before) return false;
+  if (input.selectedText !== null) {
+    const selected = input.selectedText.replace(/\r\n?/g, "\n");
+    // Exact plain clipboard match (no markdown markers to apply).
+    if (selected === clipboard) return false;
+    // Structured clipboard: skip recovery only when the selection itself is
+    // already that markdown (identical formatted/link replace at this range).
+    if (selected === noteMarkdownClipboardToPlainText(clipboard)) {
+      const selectedMarkdown = input.selectedMarkdown?.replace(/\r\n?/g, "\n") ?? null;
+      if (selectedMarkdown !== null && selectedMarkdown === clipboard) {
+        return false;
+      }
+    }
+  }
+  return true;
+};
+
+/**
+ * Decide whether markdown paste should call preventDefault.
+ * Selection is optional on the Lexical content surface: when the caret is gone
+ * (common after a prior insertMarkdown), the handler recovers via document
+ * setMarkdown merge instead of letting preventDefault + a no-op Lexical insert
+ * swallow the clipboard. Dialog/toolbar inputs are never intercepted.
+ */
+export const shouldInterceptNoteMarkdownPaste = (input: {
+  editorMode: NoteEditorMode;
+  pasteInsideCodeBlock: boolean;
+  clipboardText: string;
+  /** True when paste targets Lexical contenteditable (not dialog/toolbar). */
+  pasteInsideLexicalContentSurface: boolean;
+  /**
+   * Strategy hint for insertMarkdown vs document merge after intercept.
+   * Kept on the input for callers; intercept itself keys off the content surface.
+   */
+  canInsertMarkdownAtSelection: boolean;
+}): boolean => {
+  if (input.editorMode !== "edit") return false;
+  if (input.pasteInsideCodeBlock) return false;
+  // Restrict intercept (including no-selection recovery) to the Lexical editing
+  // surface so link dialog / toolbar pastes keep native input behavior.
+  if (!input.pasteInsideLexicalContentSurface) return false;
+  return shouldInsertClipboardTextAsMarkdown(input.clipboardText);
+};

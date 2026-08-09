@@ -122,7 +122,13 @@ test("note editor exposes preview and edit modes with a markdown toolbar in edit
   const source = readFileSync(new URL("./InlineMarkdownEditor.tsx", import.meta.url), "utf8");
   const managerSource = readFileSync(new URL("./NotesManager.tsx", import.meta.url), "utf8");
 
-  assert.match(source, /type NoteEditorMode = "edit" \| "preview"/);
+  assert.match(source, /type NoteEditorMode/);
+  assert.match(source, /from "\.\.\/\.\.\/domain\/noteMarkdownPaste"/);
+  const domainPasteSource = readFileSync(
+    new URL("../../domain/noteMarkdownPaste.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(domainPasteSource, /export type NoteEditorMode = "edit" \| "preview"/);
   assert.match(source, /toolbarPlugin\(\{\s*toolbarContents:/s);
   assert.match(source, /readOnly=\{editorMode === "preview"\}/);
   assert.match(source, /<BlockTypeSelect \/>/);
@@ -203,15 +209,25 @@ test("preview mode only intercepts links netcatty can open", () => {
 });
 
 test("pasting inside code blocks keeps CodeMirror in control", () => {
-  const source = readFileSync(new URL("./InlineMarkdownEditor.tsx", import.meta.url), "utf8");
+  const editorSource = readFileSync(new URL("./InlineMarkdownEditor.tsx", import.meta.url), "utf8");
+  const lexicalSource = readFileSync(
+    new URL("./noteMarkdownPasteLexical.ts", import.meta.url),
+    "utf8",
+  );
+  const hookSource = readFileSync(
+    new URL("../../application/state/useNoteMarkdownPaste.ts", import.meta.url),
+    "utf8",
+  );
 
-  assert.match(source, /export const isNotePasteInsideCodeBlock/);
-  assert.match(source, /element\?\.closest/);
-  assert.match(source, /\.cm-editor/);
-  assert.match(source, /_codeMirrorWrapper_/);
+  assert.match(editorSource, /isNotePasteInsideCodeBlock/);
+  assert.match(editorSource, /from "\.\/noteMarkdownPasteLexical"/);
+  assert.match(lexicalSource, /export const isNotePasteInsideCodeBlock/);
+  assert.match(lexicalSource, /element\?\.closest/);
+  assert.match(lexicalSource, /\.cm-editor/);
+  assert.match(lexicalSource, /_codeMirrorWrapper_/);
   assert.match(
-    source,
-    /pasteInsideCodeBlock:\s*isNotePasteInsideCodeBlock\(event\.target\)/,
+    hookSource,
+    /pasteInsideCodeBlock:\s*adapters\.isPasteInsideCodeBlock\(event\.target\)/,
   );
 });
 
