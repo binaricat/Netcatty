@@ -905,6 +905,60 @@ test("selection markdown serialization scopes bold and link formatting", () => {
     false,
   );
 
+  // Whole blockquote: MDXEditor nests quote → paragraph → text. Nearest-block
+  // lookup hits the paragraph, so serialization must still preserve the quote
+  // marker when the quote node is part of the selection.
+  const quoteBlock = {
+    getType: () => "quote",
+    getKey: () => "quote",
+    getTextContent: () => "quote",
+    getParent: () => null,
+  };
+  const quoteParagraph = {
+    getType: () => "paragraph",
+    getKey: () => "quote-p",
+    getTextContent: () => "quote",
+    getParent: () => quoteBlock,
+  };
+  const quoteText = {
+    getType: () => "text",
+    getKey: () => "quote-t",
+    getTextContent: () => "quote",
+    hasFormat: () => false,
+    getParent: () => quoteParagraph,
+  };
+  assert.equal(
+    serializeLexicalSelectionAsMarkdown("quote", {
+      hasFormat: () => false,
+      anchor: { getNode: () => quoteText, offset: 0, type: "text" },
+      focus: { getNode: () => quoteText, offset: 5, type: "text" },
+      isBackward: () => false,
+      getNodes: () => [quoteBlock, quoteParagraph, quoteText],
+    }),
+    "> quote",
+  );
+  // Text-only coverage inside a quote omits the marker (same sole-content rule
+  // as headings) so pasting plain `quote` is not treated as a no-op recovery.
+  assert.equal(
+    serializeLexicalSelectionAsMarkdown("quote", {
+      hasFormat: () => false,
+      anchor: { getNode: () => quoteText, offset: 0, type: "text" },
+      focus: { getNode: () => quoteText, offset: 5, type: "text" },
+      isBackward: () => false,
+      getNodes: () => [quoteText],
+    }),
+    "quote",
+  );
+  assert.equal(
+    shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
+      beforeMarkdown: "> quote",
+      clipboardText: "> quote",
+      selectedText: "quote",
+      selectedMarkdown: "> quote",
+    }),
+    false,
+  );
+
   const checkList = {
     getType: () => "list",
     getListType: () => "check" as const,

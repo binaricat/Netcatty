@@ -260,6 +260,27 @@ const getLexicalBlockMarkerPrefix = (block: NoteMarkdownPasteSelectionNode): str
   return "";
 };
 
+/**
+ * Whether selected phrasing under `node` belongs to `block`. Quote containers
+ * nest paragraph/heading/listitem children, so nearest-block matching alone
+ * never attributes text to the quote itself.
+ */
+const doesLexicalNodeBelongToBlock = (
+  node: NoteMarkdownPasteSelectionNode,
+  block: NoteMarkdownPasteSelectionNode,
+  blockKey: string,
+): boolean => {
+  const nearest = findLexicalAncestorByTypes(node, NOTE_MARKDOWN_PASTE_BLOCK_TYPES);
+  if (nearest && getLexicalNodeKey(nearest, "") === blockKey) return true;
+  if (block.getType() !== "quote") return false;
+  let current: NoteMarkdownPasteSelectionNode | null = nearest ?? node;
+  while (current) {
+    if (current === block || getLexicalNodeKey(current, "") === blockKey) return true;
+    current = current.getParent();
+  }
+  return false;
+};
+
 /** Plain selected text inside one block (no markdown markers). */
 const getSelectedLexicalBlockPlainText = (
   block: NoteMarkdownPasteSelectionNode,
@@ -271,13 +292,11 @@ const getSelectedLexicalBlockPlainText = (
   for (const node of nodes) {
     const type = node.getType();
     if (type === "linebreak") {
-      const nodeBlock = findLexicalAncestorByTypes(node, NOTE_MARKDOWN_PASTE_BLOCK_TYPES);
-      if (nodeBlock && getLexicalNodeKey(nodeBlock, "") === blockKey) plain += "\n";
+      if (doesLexicalNodeBelongToBlock(node, block, blockKey)) plain += "\n";
       continue;
     }
     if (type !== "text") continue;
-    const nodeBlock = findLexicalAncestorByTypes(node, NOTE_MARKDOWN_PASTE_BLOCK_TYPES);
-    if (!nodeBlock || getLexicalNodeKey(nodeBlock, "") !== blockKey) continue;
+    if (!doesLexicalNodeBelongToBlock(node, block, blockKey)) continue;
     plain += getSelectedLexicalTextNodeContent(node, selection);
   }
   return plain;
@@ -331,10 +350,12 @@ const areLexicalListItemsInSameTightRun = (
  * inline ranges (e.g. bold "Hello" inside `# **Hello** world`) serialize as
  * inline markdown only so identical-replace recovery stays accurate.
  *
- * Covering every character of the block is not enough: a heading/list whose
- * sole content is the selected text still has a structural marker outside the
- * text range. Require the block node in getNodes() or an element-type
- * anchor/focus on that block.
+ * Covering every character of the block is not enough: a heading/list/quote
+ * whose sole content is the selected text still has a structural marker outside
+ * the text range. Require the block node in getNodes() or an element-type
+ * anchor/focus on that block. Quote text lives in nested paragraph blocks, so
+ * callers also apply enclosing quote markers via
+ * getEnclosingLexicalQuoteMarkerPrefix.
  */
 export const doesSelectionEncompassLexicalBlock = (
   block: NoteMarkdownPasteSelectionNode,
@@ -362,6 +383,30 @@ export const doesSelectionEncompassLexicalBlock = (
     return pointNode === block || getLexicalNodeKey(pointNode, "") === blockKey;
   };
   return isElementBoundaryOnBlock(anchor) || isElementBoundaryOnBlock(focus);
+};
+
+/**
+ * `> ` markers for quote ancestors that the selection fully encompasses.
+ * Needed because selected blocks resolve to nested paragraphs, not the quote.
+ */
+const getEnclosingLexicalQuoteMarkerPrefix = (
+  block: NoteMarkdownPasteSelectionNode,
+  nodes: NoteMarkdownPasteSelectionNode[],
+  selection: NoteMarkdownPasteSelection,
+): string => {
+  const markers: string[] = [];
+  let current = block.getParent();
+  while (current) {
+    if (current.getType() === "quote") {
+      const quoteKey = getLexicalNodeKey(current, `quote:${markers.length}`);
+      if (!doesSelectionEncompassLexicalBlock(current, quoteKey, nodes, selection)) {
+        break;
+      }
+      markers.push("> ");
+    }
+    current = current.getParent();
+  }
+  return markers.join("");
 };
 
 const getSelectedLexicalTextNodeContent = (
@@ -544,10 +589,11 @@ const serializeLexicalSelectionNodesAsMarkdown = (
   for (const { block, key } of blocks) {
     const inline = serializeLexicalBlockInlineMarkdown(block, key, nodes, selection);
     if (!inline) continue;
+    const quotePrefix = getEnclosingLexicalQuoteMarkerPrefix(block, nodes, selection);
     const marker = doesSelectionEncompassLexicalBlock(block, key, nodes, selection)
       ? getLexicalBlockMarkerPrefix(block)
       : "";
-    parts.push({ block, markdown: `${marker}${inline}` });
+    parts.push({ block, markdown: `${quotePrefix}${marker}${inline}` });
   }
   if (parts.length === 0) return null;
   // Same-list / nested list items stay tight (`- a\n- b`, `- p\n  - c`);
