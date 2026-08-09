@@ -115,13 +115,14 @@ const getLexicalInlineMarkdownFormatStack = (
  * Escape phrasing punctuation so Lexical rendered text round-trips to source
  * Markdown (`**Hello \*world\***`, not `**Hello *world***`). Mirrors the
  * always-on mdast-util-to-markdown phrasing unsafe set (`*`, `_`, `` ` ``, `[`,
- * and GFM `~`), plus line-leading block openers (`#`, `>`, `-`, `+`, ordered
- * `1.` / `1)`) so literal `# Heading` / `- item` / `1. item` serialize as
- * `\# Heading` / `\- item` / `1\. item`. (`*` list openers are already covered
- * by the phrasing `*` escape.)
+ * and GFM `~`), plus `]` so link labels with a literal bracket serialize as
+ * `[a\]b](url)` (not broken `[a]b](url)`), plus line-leading block openers
+ * (`#`, `>`, `-`, `+`, ordered `1.` / `1)`) so literal `# Heading` / `- item` /
+ * `1. item` serialize as `\# Heading` / `\- item` / `1\. item`. (`*` list
+ * openers are already covered by the phrasing `*` escape.)
  */
 const escapeNoteMarkdownPhrasingText = (text: string): string => {
-  const escaped = text.replace(/([`*_\[~])/g, "\\$1");
+  const escaped = text.replace(/([`*_\[\]~])/g, "\\$1");
   return escaped
     .replace(/(^|\n)( {0,3})([#>+-])/g, "$1$2\\$3")
     .replace(/(^|\n)( {0,3})(\d+)([.)])/g, "$1$2$3\\$4");
@@ -1034,6 +1035,77 @@ const protectMarkdownLinkDestinations = (
   return out;
 };
 
+const NOTE_MARKDOWN_GFM_TABLE_SEPARATOR_RE =
+  /^\|?(?:\s*:?-+:?\s*\|)+(?:\s*:?-+:?\s*)\|?\s*$/;
+
+const isNoteMarkdownGfmTableSeparatorLine = (line: string): boolean =>
+  NOTE_MARKDOWN_GFM_TABLE_SEPARATOR_RE.test(line.trim());
+
+const isNoteMarkdownGfmTableDataRowLine = (line: string): boolean => {
+  const trimmed = line.trim();
+  if (!trimmed || isNoteMarkdownGfmTableSeparatorLine(trimmed)) return false;
+  return trimmed.includes("|");
+};
+
+const canonicalizeNoteMarkdownGfmTableSeparatorLine = (line: string): string => {
+  const cells = line
+    .trim()
+    .replace(/^\|/, "")
+    .replace(/\|$/, "")
+    .split("|")
+    .map((cell) => {
+      const trimmed = cell.trim();
+      const left = trimmed.startsWith(":");
+      const right = trimmed.endsWith(":");
+      if (left && right) return ":---:";
+      if (right) return "---:";
+      if (left) return ":---";
+      return "---";
+    });
+  return `| ${cells.join(" | ")} |`;
+};
+
+const canonicalizeNoteMarkdownGfmTableDataRowLine = (line: string): string => {
+  const cells = line
+    .trim()
+    .replace(/^\|/, "")
+    .replace(/\|$/, "")
+    .split("|")
+    .map((cell) => cell.trim());
+  return `| ${cells.join(" | ")} |`;
+};
+
+/**
+ * Canonicalize a GFM pipe table block (header + separator + body) so optional
+ * outer pipes and separator dash runs match MDXEditor's serializer form.
+ */
+const normalizeNoteMarkdownGfmTableRows = (text: string): string => {
+  const lines = text.split("\n");
+  const out: string[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    const header = lines[i] ?? "";
+    const separator = lines[i + 1];
+    if (
+      separator !== undefined
+      && isNoteMarkdownGfmTableDataRowLine(header)
+      && isNoteMarkdownGfmTableSeparatorLine(separator)
+    ) {
+      out.push(canonicalizeNoteMarkdownGfmTableDataRowLine(header));
+      out.push(canonicalizeNoteMarkdownGfmTableSeparatorLine(separator));
+      i += 2;
+      while (i < lines.length && isNoteMarkdownGfmTableDataRowLine(lines[i] ?? "")) {
+        out.push(canonicalizeNoteMarkdownGfmTableDataRowLine(lines[i] ?? ""));
+        i += 1;
+      }
+      continue;
+    }
+    out.push(header);
+    i += 1;
+  }
+  return out.join("\n");
+};
+
 /**
  * Canonicalize semantically equivalent Markdown spelling so identical-replace
  * checks are not tripped by serializer vs clipboard marker differences
@@ -1059,27 +1131,9 @@ export const normalizeNoteMarkdownForEquivalence = (markdown: string): string =>
     // Unordered / task-list markers: MDXEditor defaults to `*`, serializer uses `-`.
     // Require trailing whitespace so `*Hi*` / `***` stay untouched.
     next = next.replace(/^(\s*)[-+*](\s+)/gm, "$1-$2");
-    // GFM table separator dash runs: `| - |` / `| :---: |` stay align-canonical.
-    next = next.replace(
-      /^\|?(?:\s*:?-+:?\s*\|)+(?:\s*:?-+:?\s*)\|?\s*$/gm,
-      (line) => {
-        const cells = line
-          .trim()
-          .replace(/^\|/, "")
-          .replace(/\|$/, "")
-          .split("|")
-          .map((cell) => {
-            const trimmed = cell.trim();
-            const left = trimmed.startsWith(":");
-            const right = trimmed.endsWith(":");
-            if (left && right) return ":---:";
-            if (right) return "---:";
-            if (left) return ":---";
-            return "---";
-          });
-        return `| ${cells.join(" | ")} |`;
-      },
-    );
+    // GFM tables: optional outer pipes + separator dash runs → serializer form
+    // (`A | B` / `--- | ---` → `| A | B |` / `| --- | --- |`).
+    next = normalizeNoteMarkdownGfmTableRows(next);
     // Hard breaks: backslash form → two-trailing-spaces (serializer form).
     next = next.replace(/\\\n/g, "  \n");
     // Collapse 3+ trailing spaces before a newline to the canonical two-space break.

@@ -23,6 +23,8 @@ test("useNoteMarkdownPaste owns paste intercept and recovery orchestration", () 
   assert.match(source, /didNoteMarkdownPasteApply/);
   assert.match(source, /editor\.setMarkdown\(next\)/);
   assert.match(source, /editor\.insertMarkdown\(markdown\)/);
+  // Root focus steals nested Lexical editors (table cells) before insertMarkdown.
+  assert.doesNotMatch(source, /editor\.focus\(\)/);
   assert.match(
     source,
     /if\s*\(\s*!canInsertAtSelection\s*\)\s*\{\s*(?:\/\/[^\n]*\n\s*)*applyDocumentPaste\(\)/,

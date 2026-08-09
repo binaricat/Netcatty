@@ -84,7 +84,9 @@ export function useNoteMarkdownPaste({
     } else {
       const before = getLatestMarkdown();
       const pasteSelection = adapters.getActiveLexicalPasteSelection(event.target);
-      editor.focus();
+      // Keep the nested Lexical editor (e.g. table cell) active. Root
+      // MDXEditorMethods.focus() restores a root selection and can move the
+      // insert outside the cell or no-op into document-append recovery.
       editor.insertMarkdown(markdown);
       // insertMarkdown's Lexical update is deferred; if selection was lost the
       // insert no-ops after our preventDefault. Recover on the next frames.

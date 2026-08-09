@@ -164,6 +164,15 @@ test("markdown equivalence normalizes underscore emphasis to serializer form", (
     normalizeNoteMarkdownForEquivalence("-_*"),
     normalizeNoteMarkdownForEquivalence("***"),
   );
+  // GFM tables without outer pipes match the serializer's piped form.
+  assert.equal(
+    normalizeNoteMarkdownForEquivalence("A | B\n--- | ---\nC | D"),
+    normalizeNoteMarkdownForEquivalence("| A | B |\n| --- | --- |\n| C | D |"),
+  );
+  assert.equal(
+    normalizeNoteMarkdownForEquivalence("A | B\n--- | ---\nC | D"),
+    "| A | B |\n| --- | --- |\n| C | D |",
+  );
 });
 
 test("selection markdown serialization scopes bold and link formatting", () => {
@@ -607,6 +616,46 @@ test("selection markdown serialization scopes bold and link formatting", () => {
       getNodes: () => [linkNode, linkText],
     }),
     '[docs](https://a.example "API")',
+  );
+
+  // Literal `]` in link labels must escape so identical-replace checks see
+  // `[a\]b](url)`, not a broken `[a]b](url)` wrapper.
+  const bracketParagraph = {
+    getType: () => "paragraph",
+    getKey: () => "bracket-p",
+    getParent: () => null,
+  };
+  const bracketLink = {
+    getType: () => "link",
+    getURL: () => "https://example.test",
+    getKey: () => "bracket-link",
+    getParent: () => bracketParagraph,
+  };
+  const bracketLinkText = {
+    getType: () => "text",
+    getKey: () => "bracket-t",
+    getTextContent: () => "a]b",
+    hasFormat: () => false,
+    getParent: () => bracketLink,
+  };
+  assert.equal(
+    serializeLexicalSelectionAsMarkdown("a]b", {
+      hasFormat: () => false,
+      anchor: { getNode: () => bracketLinkText, offset: 0, type: "text" },
+      focus: { getNode: () => bracketLinkText, offset: 3, type: "text" },
+      isBackward: () => false,
+      getNodes: () => [bracketLink, bracketLinkText],
+    }),
+    "[a\\]b](https://example.test)",
+  );
+  assert.equal(
+    shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
+      beforeMarkdown: "see [a\\]b](https://example.test) end",
+      clipboardText: "[a\\]b](https://example.test)",
+      selectedText: "a]b",
+      selectedMarkdown: "[a\\]b](https://example.test)",
+    }),
+    false,
   );
 
   // Lexical linebreak nodes are Markdown hard breaks (two trailing spaces).
@@ -1370,6 +1419,16 @@ test("unchanged insert recovery skips identical replacements but recovers lost-s
     shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
       beforeMarkdown: `intro\n\n${tableMarkdown}\n\noutro`,
       clipboardText: "| A | B |\n| - | - |\n| 1 | 2 |",
+      selectedText: noteMarkdownClipboardToPlainText(tableMarkdown ?? ""),
+      selectedMarkdown: tableMarkdown,
+    }),
+    false,
+  );
+  // Valid GFM without outer pipes must not append a duplicate after identical replace.
+  assert.equal(
+    shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
+      beforeMarkdown: `intro\n\n${tableMarkdown}\n\noutro`,
+      clipboardText: "A | B\n--- | ---\n1 | 2",
       selectedText: noteMarkdownClipboardToPlainText(tableMarkdown ?? ""),
       selectedMarkdown: tableMarkdown,
     }),
