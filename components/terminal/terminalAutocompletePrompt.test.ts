@@ -85,6 +85,19 @@ test("resolveAutocompleteQueryInput preserves a reliably tracked empty line unde
   );
 });
 
+test("resolveAutocompleteQueryInput prefers reliable typed buffer after partial backspace under echo lag", () => {
+  // User typed `git` then backspaced to `gi`; remote echo still shows `git`.
+  // Completions/accept must track the shorter reliable buffer, not the stale echo.
+  assert.equal(
+    resolveAutocompleteQueryInput(atPrompt("git"), "gi", true),
+    "gi",
+  );
+  assert.equal(
+    resolveAutocompleteQueryInput(atPrompt("git status"), "git ", true),
+    "git ",
+  );
+});
+
 test("computeAutocompleteAcceptWrite does not reinsert deleted text from a lagging echo", () => {
   assert.equal(
     computeAutocompleteAcceptWrite({
@@ -95,6 +108,18 @@ test("computeAutocompleteAcceptWrite does not reinsert deleted text from a laggi
       os: "linux",
     }),
     "git status",
+  );
+  // Partial delete: typed `gi`, echo still `git`, accept `git status` must
+  // only send the missing suffix — never ` status` onto a truncated line.
+  assert.equal(
+    computeAutocompleteAcceptWrite({
+      prompt: atPrompt("git"),
+      typedBuffer: "gi",
+      typedBufferReliable: true,
+      candidate: "git status",
+      os: "linux",
+    }),
+    "t status",
   );
 });
 

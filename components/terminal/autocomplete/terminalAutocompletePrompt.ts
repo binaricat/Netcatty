@@ -64,16 +64,19 @@ export function resolveAutocompleteQueryInput(
 ): string | null {
   if (!prompt.isAtPrompt) return null;
 
-  // Prefer the keystroke buffer when it is reliably ahead of (or equal to)
-  // the remote echo — including the empty line after the user deleted
-  // everything. Without the empty case, a lagging echo of the deleted
-  // text would keep driving completions/accept until the shell catches up.
-  // An unreliable empty buffer is different: history recall / cursor moves
-  // clear the buffer without meaning the line is empty, so fall through to
-  // prompt.userInput there.
+  // Prefer the keystroke buffer when it is reliably aligned with the remote
+  // echo as a shared prefix in either direction:
+  // - buffer ahead of echo (typing faster than SSH echo)
+  // - echo ahead of buffer (partial/full backspace while echo still lags)
+  // Without the second case, a lagging echo of deleted characters would keep
+  // driving completions/accept (e.g. typed `gi` + echo `git` → accept
+  // ` status` → remote `gi status`). An unreliable empty buffer is different:
+  // history recall / cursor moves clear the buffer without meaning the line
+  // is empty, so fall through to prompt.userInput there.
   if (
     typedBufferReliable &&
-    (typedBuffer.length === 0 || typedBuffer.startsWith(prompt.userInput))
+    (typedBuffer.startsWith(prompt.userInput) ||
+      prompt.userInput.startsWith(typedBuffer))
   ) {
     return typedBuffer;
   }
