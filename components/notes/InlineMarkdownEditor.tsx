@@ -30,6 +30,7 @@ import {
   $createRangeSelection,
   $getNearestNodeFromDOMNode,
   $getSelection,
+  $isRangeSelection,
   $isTextNode,
   $setSelection,
   getNearestEditorFromDOMNode,
@@ -242,6 +243,26 @@ export const hasActiveLexicalTextSelection = (target: EventTarget | null): boole
   return hasSelection;
 };
 
+/** Plain text of the active Lexical range, or null when insertMarkdown cannot target it. */
+export const getActiveLexicalSelectedText = (target: EventTarget | null): string | null => {
+  if (typeof Element === "undefined" || typeof Node === "undefined") return null;
+  const element = target instanceof Element
+    ? target
+    : target instanceof Node
+      ? target.parentElement
+      : null;
+  if (!element) return null;
+  const lexicalEditor = getNearestEditorFromDOMNode(element);
+  if (!lexicalEditor) return null;
+  let selectedText: string | null = null;
+  lexicalEditor.getEditorState().read(() => {
+    const selection = $getSelection();
+    if (!$isRangeSelection(selection)) return;
+    selectedText = selection.getTextContent();
+  });
+  return selectedText;
+};
+
 /**
  * Merge a markdown paste when Lexical selection is missing or insertMarkdown
  * no-ops. Prefer insertMarkdown whenever a selection exists so caret/replace
@@ -252,10 +273,36 @@ export const mergeNoteMarkdownDocumentPaste = (
   clipboardText: string,
 ): string => {
   const current = currentMarkdown.replace(/\s+$/u, "");
-  const pasted = clipboardText.replace(/\r\n?/g, "\n").replace(/^\s+/u, "").replace(/\s+$/u, "");
+  // Strip leading blank lines only — keep indentation on the first content line
+  // (nested list markers, fenced code, etc.).
+  const pasted = clipboardText
+    .replace(/\r\n?/g, "\n")
+    .replace(/^(?:[^\S\n]*\n)+/u, "")
+    .replace(/\s+$/u, "");
   if (!pasted) return currentMarkdown;
   if (!current) return pasted;
   return `${current}\n\n${pasted}`;
+};
+
+/**
+ * After insertMarkdown, an unchanged document is either a successful identical
+ * replace or a lost-selection no-op. Only the latter should fall back to
+ * document-append recovery.
+ */
+export const shouldRecoverNoteMarkdownPasteAfterUnchangedInsert = (input: {
+  beforeMarkdown: string;
+  clipboardText: string;
+  selectedText: string | null;
+}): boolean => {
+  const before = input.beforeMarkdown.replace(/\r\n?/g, "\n");
+  const clipboard = input.clipboardText.replace(/\r\n?/g, "\n");
+  // Select All + paste of the same body: serialization stays equal on success.
+  if (clipboard === before) return false;
+  // Partial identical replace: selected plain text matches the clipboard.
+  if (input.selectedText !== null && input.selectedText.replace(/\r\n?/g, "\n") === clipboard) {
+    return false;
+  }
+  return true;
 };
 
 /**
@@ -964,6 +1011,7 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
       applyDocumentPaste();
     } else {
       const before = latestMarkdownRef.current;
+      const selectedText = getActiveLexicalSelectedText(event.target);
       editor.focus();
       editor.insertMarkdown(markdown);
       // insertMarkdown's Lexical update is deferred; if selection was lost the
@@ -974,6 +1022,13 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
           const current = editor.getMarkdown();
           if (current !== before) {
             commitMarkdown(current);
+            return;
+          }
+          if (!shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
+            beforeMarkdown: before,
+            clipboardText: markdown,
+            selectedText,
+          })) {
             return;
           }
           applyDocumentPaste();
