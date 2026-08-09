@@ -465,6 +465,47 @@ test("selection markdown serialization scopes bold and link formatting", () => {
     "**A**  \n**B**",
   );
 
+  // Outer bold spanning a bold+strikethrough Lexical split must coalesce.
+  const coalesceParagraph = {
+    getType: () => "paragraph",
+    getKey: () => "coalesce-p",
+    getTextContent: () => "Hello world",
+    getParent: () => null,
+  };
+  const coalesceHello = {
+    getType: () => "text",
+    getKey: () => "coalesce-hello",
+    getTextContent: () => "Hello ",
+    hasFormat: (type: string) => type === "bold",
+    getParent: () => coalesceParagraph,
+  };
+  const coalesceWorld = {
+    getType: () => "text",
+    getKey: () => "coalesce-world",
+    getTextContent: () => "world",
+    hasFormat: (type: string) => type === "bold" || type === "strikethrough",
+    getParent: () => coalesceParagraph,
+  };
+  assert.equal(
+    serializeLexicalSelectionAsMarkdown("Hello world", {
+      hasFormat: () => false,
+      anchor: { getNode: () => coalesceHello, offset: 0, type: "text" },
+      focus: { getNode: () => coalesceWorld, offset: 5, type: "text" },
+      isBackward: () => false,
+      getNodes: () => [coalesceHello, coalesceWorld],
+    }),
+    "**Hello ~~world~~**",
+  );
+  assert.equal(
+    shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
+      beforeMarkdown: "prefix **Hello ~~world~~** suffix",
+      clipboardText: "**Hello ~~world~~**",
+      selectedText: "Hello world",
+      selectedMarkdown: "**Hello ~~world~~**",
+    }),
+    false,
+  );
+
   // A hard break belongs to one block only; multi-block serialization must not
   // replay it into every selected block (or identical paste recovers a duplicate).
   const hardBreakSibling = {
@@ -792,6 +833,17 @@ test("unchanged insert recovery skips identical replacements but recovers lost-s
       clipboardText: "**Hello**",
       selectedText: "Hello",
       selectedMarkdown: "Hello",
+    }),
+    true,
+  );
+  // Literal visible `**Hello**` (source `\*\*Hello\*\*`) equals clipboard
+  // `**Hello**` as plain strings, but is not an identical markdown replace.
+  assert.equal(
+    shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
+      beforeMarkdown: "# Note\n\n\\*\\*Hello\\*\\*",
+      clipboardText: "**Hello**",
+      selectedText: "**Hello**",
+      selectedMarkdown: "\\*\\*Hello\\*\\*",
     }),
     true,
   );

@@ -64,22 +64,81 @@ const isLexicalLinkNode = (
   && typeof node.getURL === "function"
 );
 
+type NoteMarkdownPasteInlineFormatStackItem =
+  | "code"
+  | "bold"
+  | "italic"
+  | "strikethrough";
+
+const NOTE_MARKDOWN_PASTE_INLINE_FORMAT_MARKERS: Record<
+  NoteMarkdownPasteInlineFormatStackItem,
+  { open: string; close: string }
+> = {
+  code: { open: "`", close: "`" },
+  bold: { open: "**", close: "**" },
+  italic: { open: "*", close: "*" },
+  strikethrough: { open: "~~", close: "~~" },
+};
+
+/**
+ * Stable outer→inner open order so adjacent Lexical text nodes that share an
+ * outer format (bold "Hello " + bold+strike "world") serialize as one wrapper
+ * (`**Hello ~~world~~**`) instead of `**Hello ****~~world~~**`.
+ */
+const getLexicalInlineMarkdownFormatStack = (
+  formatSource: { hasFormat: (type: NoteMarkdownPasteTextFormat) => boolean },
+): NoteMarkdownPasteInlineFormatStackItem[] => {
+  // Code fences out other emphasis markers in CommonMark-style paste.
+  if (formatSource.hasFormat("code")) return ["code"];
+  const stack: NoteMarkdownPasteInlineFormatStackItem[] = [];
+  if (formatSource.hasFormat("bold")) stack.push("bold");
+  if (formatSource.hasFormat("italic")) stack.push("italic");
+  // Strike innermost so bold+strike matches clipboard `**~~…~~**`.
+  if (formatSource.hasFormat("strikethrough")) stack.push("strikethrough");
+  return stack;
+};
+
 const applyLexicalInlineMarkdownFormats = (
   text: string,
   formatSource: { hasFormat: (type: NoteMarkdownPasteTextFormat) => boolean },
 ): string => {
   if (!text) return text;
-  // Code fences out other emphasis markers in CommonMark-style paste.
-  if (formatSource.hasFormat("code")) return `\`${text}\``;
-  // Strike innermost so bold+strike matches clipboard `**~~…~~**`.
+  const stack = getLexicalInlineMarkdownFormatStack(formatSource);
   let formatted = text;
-  if (formatSource.hasFormat("strikethrough")) formatted = `~~${formatted}~~`;
-  const bold = formatSource.hasFormat("bold");
-  const italic = formatSource.hasFormat("italic");
-  if (bold && italic) return `***${formatted}***`;
-  if (bold) return `**${formatted}**`;
-  if (italic) return `*${formatted}*`;
+  for (let i = stack.length - 1; i >= 0; i -= 1) {
+    const markers = NOTE_MARKDOWN_PASTE_INLINE_FORMAT_MARKERS[stack[i]];
+    formatted = `${markers.open}${formatted}${markers.close}`;
+  }
   return formatted;
+};
+
+const longestCommonInlineFormatPrefixLength = (
+  current: readonly NoteMarkdownPasteInlineFormatStackItem[],
+  desired: readonly NoteMarkdownPasteInlineFormatStackItem[],
+): number => {
+  const max = Math.min(current.length, desired.length);
+  let i = 0;
+  while (i < max && current[i] === desired[i]) i += 1;
+  return i;
+};
+
+/** Close/open format markers so `output` reflects `desired` relative to `stack`. */
+const syncLexicalInlineMarkdownFormatStack = (
+  stack: NoteMarkdownPasteInlineFormatStackItem[],
+  desired: readonly NoteMarkdownPasteInlineFormatStackItem[],
+  output: { text: string },
+): void => {
+  const common = longestCommonInlineFormatPrefixLength(stack, desired);
+  while (stack.length > common) {
+    const closed = stack.pop();
+    if (!closed) break;
+    output.text += NOTE_MARKDOWN_PASTE_INLINE_FORMAT_MARKERS[closed].close;
+  }
+  for (let i = stack.length; i < desired.length; i += 1) {
+    const format = desired[i];
+    stack.push(format);
+    output.text += NOTE_MARKDOWN_PASTE_INLINE_FORMAT_MARKERS[format].open;
+  }
 };
 
 const formatLexicalLinkMarkdown = (
@@ -267,14 +326,37 @@ const serializeLexicalBlockInlineMarkdown = (
   selection: NoteMarkdownPasteSelection,
 ): string => {
   let markdown = "";
+  const formatStack: NoteMarkdownPasteInlineFormatStackItem[] = [];
   let linkBuffer: {
     linkKey: string;
     link: NoteMarkdownPasteSelectionNode & { getURL: () => string };
     label: string;
   } | null = null;
 
+  // Mutable bags so format sync can append into the outer buffer or the
+  // in-progress link label without duplicating close/open logic.
+  const outerOutput = {
+    get text() { return markdown; },
+    set text(value: string) { markdown = value; },
+  };
+  const labelOutput = {
+    get text() { return linkBuffer?.label ?? ""; },
+    set text(value: string) {
+      if (linkBuffer) linkBuffer.label = value;
+    },
+  };
+
+  const closeInlineFormats = () => {
+    syncLexicalInlineMarkdownFormatStack(
+      formatStack,
+      [],
+      linkBuffer ? labelOutput : outerOutput,
+    );
+  };
+
   const flushLink = () => {
     if (!linkBuffer) return;
+    closeInlineFormats();
     const title = typeof linkBuffer.link.getTitle === "function"
       ? linkBuffer.link.getTitle()
       : null;
@@ -289,7 +371,10 @@ const serializeLexicalBlockInlineMarkdown = (
       // sibling block from a multi-block selection (same filter as text nodes).
       const nodeBlock = findLexicalAncestorByTypes(node, NOTE_MARKDOWN_PASTE_BLOCK_TYPES);
       if (!nodeBlock || getLexicalNodeKey(nodeBlock, "") !== blockKey) continue;
+      // Close formats before the break so `**A**  \n**B**` stays the canonical
+      // form for identical-replace checks (clipboard often splits markers).
       flushLink();
+      closeInlineFormats();
       // CommonMark hard break (Lexical LineBreakNode), not a block separator.
       markdown += "  \n";
       continue;
@@ -300,19 +385,32 @@ const serializeLexicalBlockInlineMarkdown = (
 
     const text = getSelectedLexicalTextNodeContent(node, selection);
     if (!text) continue;
-    const formatted = applyLexicalInlineMarkdownFormats(text, node);
     const link = findLexicalLinkAncestor(node);
     if (!link) {
       flushLink();
-      markdown += formatted;
+      syncLexicalInlineMarkdownFormatStack(
+        formatStack,
+        getLexicalInlineMarkdownFormatStack(node),
+        outerOutput,
+      );
+      markdown += text;
       continue;
     }
     const linkKey = getLexicalNodeKey(link, link.getURL());
     if (linkBuffer && linkBuffer.linkKey !== linkKey) flushLink();
-    if (!linkBuffer) linkBuffer = { linkKey, link, label: formatted };
-    else linkBuffer.label += formatted;
+    if (!linkBuffer) {
+      closeInlineFormats();
+      linkBuffer = { linkKey, link, label: "" };
+    }
+    syncLexicalInlineMarkdownFormatStack(
+      formatStack,
+      getLexicalInlineMarkdownFormatStack(node),
+      labelOutput,
+    );
+    linkBuffer.label += text;
   }
   flushLink();
+  closeInlineFormats();
   return markdown;
 };
 
@@ -693,8 +791,13 @@ export const shouldRecoverNoteMarkdownPasteAfterUnchangedInsert = (input: {
   }
   if (input.selectedText !== null) {
     const selected = input.selectedText.replace(/\r\n?/g, "\n");
-    // Exact plain clipboard match (no markdown markers to apply).
-    if (selected === clipboard) return false;
+    const clipboardPlain = noteMarkdownClipboardToPlainText(clipboard);
+    // Exact plain clipboard match (no markdown markers to apply). Do not use
+    // selected===clipboard alone: selecting literal punctuation rendered from
+    // `\*\*Hello\*\*` yields selected `**Hello**`, which equals clipboard
+    // `**Hello**` as strings even though selection markdown differs and the
+    // paste still needs recovery after a lost-selection insert no-op.
+    if (selected === clipboard && clipboard === clipboardPlain) return false;
     // Structured clipboard: skip recovery only when the selection itself is
     // already that markdown (identical formatted/link replace at this range).
     // Compare normalized structure so `__Hello__` matches serializer `**Hello**`.
@@ -702,7 +805,7 @@ export const shouldRecoverNoteMarkdownPasteAfterUnchangedInsert = (input: {
     // newline between blocks while clipboard Markdown keeps a blank line.
     if (
       normalizePlainSelectionBlockSeparators(selected)
-      === normalizePlainSelectionBlockSeparators(noteMarkdownClipboardToPlainText(clipboard))
+      === normalizePlainSelectionBlockSeparators(clipboardPlain)
     ) {
       const selectedMarkdown = input.selectedMarkdown?.replace(/\r\n?/g, "\n") ?? null;
       if (
