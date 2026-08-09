@@ -11,9 +11,16 @@ import type { Terminal as XTerm, IDisposable } from "@xterm/xterm";
 import {
   getXTermCellDimensions,
   invalidateCellDimensionCache,
+  removeLastCodePoint,
   stringCellWidth,
 } from "./xtermUtils";
 import { lineHasUntrackedTrailingInput } from "./ghostTextConsistency";
+
+/** Optional logical caret for show() when SSH echo lags the typed buffer. */
+export type GhostTextAnchor = {
+  cursorX: number;
+  cursorY: number;
+};
 
 function commonPrefixLength(a: string, b: string): number {
   const max = Math.min(a.length, b.length);
@@ -51,6 +58,12 @@ export class GhostTextAddon implements IDisposable {
    *  by (newInput.length - anchorInputLength) cells without having to
    *  re-read xterm's cursorX (which hasn't advanced yet at keystroke time). */
   private anchorInputLength = 0;
+  /**
+   * When true, show() received an explicit logical caret (echo-lag aware).
+   * Skip the live-cursor self-heal so a lagging remote echo cannot pull the
+   * ghost back onto the short prefix and drop the unechoed middle.
+   */
+  private anchorIsLogical = false;
   private disposed = false;
   private disposables: IDisposable[] = [];
   private lastLeft = -1;
@@ -154,8 +167,15 @@ export class GhostTextAddon implements IDisposable {
    * Show ghost text suggestion.
    * @param fullSuggestion The complete suggested command
    * @param currentInput The text the user has typed so far
+   * @param anchor Optional logical caret. Under SSH echo lag, pass the same
+   *   resolved cursor used for the popup so the suffix paints ahead of the
+   *   lagging live xterm cursor instead of after the short echoed prefix.
    */
-  show(fullSuggestion: string, currentInput: string): void {
+  show(
+    fullSuggestion: string,
+    currentInput: string,
+    anchor?: GhostTextAnchor,
+  ): void {
     if (this.disposed || !this.ghostElement || !this.term) return;
 
     const ghostText = fullSuggestion.startsWith(currentInput)
@@ -169,8 +189,15 @@ export class GhostTextAddon implements IDisposable {
 
     this.currentSuggestion = fullSuggestion;
     this.currentInput = currentInput;
-    this.anchorCursorX = this.term.buffer.active.cursorX;
-    this.anchorCursorY = this.term.buffer.active.cursorY;
+    if (anchor) {
+      this.anchorCursorX = anchor.cursorX;
+      this.anchorCursorY = anchor.cursorY;
+      this.anchorIsLogical = true;
+    } else {
+      this.anchorCursorX = this.term.buffer.active.cursorX;
+      this.anchorCursorY = this.term.buffer.active.cursorY;
+      this.anchorIsLogical = false;
+    }
     this.anchorInputLength = currentInput.length;
     // Force position recalc since the text also changed.
     this.lastLeft = -1;
@@ -192,6 +219,7 @@ export class GhostTextAddon implements IDisposable {
     this.currentSuggestion = "";
     this.currentInput = "";
     this.anchorInputLength = 0;
+    this.anchorIsLogical = false;
   }
 
   /** Show a read-only inline hint at the cursor (e.g. a sudo password prompt
@@ -285,7 +313,9 @@ export class GhostTextAddon implements IDisposable {
     let nextInput: string;
     if (data === "\x7f" || data === "\b") {
       if (this.currentInput.length === 0) return;
-      nextInput = this.currentInput.slice(0, -1);
+      // Match typed-buffer Backspace: drop one Unicode code point, not a
+      // single UTF-16 unit (supplementary-plane emoji is two units).
+      nextInput = removeLastCodePoint(this.currentInput);
     } else if (data === "\x17") {
       const erased = this.currentInput.replace(/\s*\S+\s*$/, "");
       if (erased === this.currentInput) return;
@@ -367,12 +397,16 @@ export class GhostTextAddon implements IDisposable {
   private updatePosition(): void {
     if (!this.term || !this.ghostElement) return;
 
-    // Self-heal a stale anchor: when show() fires during the SSH
-    // keystroke→echo gap, cursorX captured there is still the
-    // pre-echo column. While no adjustToInput has moved us from the
-    // show-time baseline, re-read live cursor on each render tick so
-    // the anchor snaps to the echoed position once it arrives.
-    if (this.currentInput.length === this.anchorInputLength) {
+    // Self-heal a stale live-cursor anchor: when show() captured xterm's
+    // cursor during the SSH keystroke→echo gap, re-read live cursor on
+    // each render while the tracked input is unchanged so the ghost snaps
+    // forward once echo arrives. Skip when show() already received an
+    // echo-lag-aware logical caret — healing would pull the suffix back
+    // onto the short prefix and drop the unechoed middle.
+    if (
+      !this.anchorIsLogical &&
+      this.currentInput.length === this.anchorInputLength
+    ) {
       this.anchorCursorX = this.term.buffer.active.cursorX;
       this.anchorCursorY = this.term.buffer.active.cursorY;
     }

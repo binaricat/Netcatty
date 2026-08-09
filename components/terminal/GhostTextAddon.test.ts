@@ -274,6 +274,66 @@ test("self-heals a stale anchor on render while no adjustToInput has fired", () 
   }
 });
 
+test("anchors ghost at an explicit logical cursor under SSH echo lag", () => {
+  // High-latency SSH: resolved typed input is already "systemctl" while
+  // xterm's live cursor is still after the echoed prefix "s". Ghost text
+  // must stay the true suffix (" restart…") and paint at the logical
+  // caret — not drop the unechoed middle and paint after the prefix.
+  const restoreDocument = installFakeDocument();
+  const { term, ghostElement, fireRender } = createFakeTerm();
+  const addon = new GhostTextAddon();
+
+  try {
+    term.buffer.active.cursorX = 2; // still after echoed "s" (+ prompt offset)
+    term.buffer.active.cursorY = 0;
+    addon.activate(term as never);
+    addon.show("systemctl restart", "systemctl", {
+      cursorX: 10,
+      cursorY: 0,
+    });
+
+    const ghost = ghostElement();
+    assert.ok(ghost);
+    assert.equal(ghost.textContent, " restart");
+    // Logical column 10 × 9px — not live cursorX=2 → 18px.
+    assert.equal(ghost.style.left, "90px");
+    assert.equal(ghost.style.top, "0px");
+
+    // Explicit logical anchors must not self-heal back to the lagging
+    // live cursor on render while the tracked input is unchanged.
+    fireRender();
+    assert.equal(ghost.style.left, "90px");
+    assert.equal(ghost.textContent, " restart");
+  } finally {
+    addon.dispose();
+    restoreDocument();
+  }
+});
+
+test("applyKeystroke: backspace removes a full supplementary-plane code point", () => {
+  const restoreDocument = installFakeDocument();
+  const { term, ghostElement } = createFakeTerm();
+  const addon = new GhostTextAddon();
+
+  try {
+    addon.activate(term as never);
+    // U+1F600 is two UTF-16 code units; Backspace must drop the whole
+    // code point so the unreliable-buffer path matches typed-buffer edits.
+    addon.show("hi😀bye", "hi😀");
+    const ghost = ghostElement();
+    assert.ok(ghost);
+    assert.equal(ghost.textContent, "bye");
+
+    addon.applyKeystroke("\x7f");
+
+    assert.equal(ghost.textContent, "😀bye");
+    assert.equal(addon.isActive(), true);
+  } finally {
+    addon.dispose();
+    restoreDocument();
+  }
+});
+
 test("wraps the ghost to the previous row when deletion crosses a row boundary", () => {
   const restoreDocument = installFakeDocument();
   const { term, ghostElement } = createFakeTerm();

@@ -802,6 +802,14 @@ export function useTerminalAutocomplete(
       currentPrompt: ReturnType<typeof getAlignedPrompt>["prompt"],
       options?: { preserveSelection?: boolean },
     ) => {
+      // Echo-lag-aware logical caret: resolved `input` can be ahead of the
+      // live xterm cursor / currentPrompt.userInput. Popup and ghost both
+      // need this so suffixes don't paint after the short echoed prefix.
+      const logicalCursor = resolveAutocompleteCursorPosition(term, {
+        promptText: currentPrompt.promptText,
+        userInput: input,
+      });
+
       if (settingsRef.current.showGhostText) {
         const ghost = ghostAddonRef.current;
         const activeSuggestion = ghost?.isActive() ? ghost.getSuggestion() : null;
@@ -809,7 +817,10 @@ export function useTerminalAutocomplete(
         const nextSuggestion = completions.find((c) => c.source !== "snippet")?.text ?? null;
         const ghostDecision = decideGhostSuggestion(activeSuggestion, input, nextSuggestion);
         if (ghostDecision.type === "show") {
-          ghost?.show(ghostDecision.suggestion, input);
+          ghost?.show(ghostDecision.suggestion, input, {
+            cursorX: logicalCursor.column,
+            cursorY: logicalCursor.row,
+          });
         } else if (ghostDecision.type === "hide") {
           ghost?.hide();
         }
@@ -825,20 +836,12 @@ export function useTerminalAutocomplete(
         if (!options?.preserveSelection) {
           previewActiveRef.current = false;
         }
-        // Anchor with the same resolved query input used for matching. Under
-        // SSH echo lag, currentPrompt.userInput / xterm cursor can still be a
-        // short prefix while `input` already holds the full typed buffer —
-        // including when that buffer soft-wraps onto later rows.
-        const cursor = resolveAutocompleteCursorPosition(term, {
-          promptText: currentPrompt.promptText,
-          userInput: input,
-        });
         const anchor = resolveAutocompleteAnchorInViewport(
           term,
           containerRef.current,
           completions.length,
-          cursor.column,
-          cursor.row,
+          logicalCursor.column,
+          logicalCursor.row,
         );
         startTransition(() => {
           setState((prev) => {
