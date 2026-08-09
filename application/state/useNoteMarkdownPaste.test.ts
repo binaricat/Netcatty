@@ -40,5 +40,14 @@ test("useNoteMarkdownPaste owns paste intercept and recovery orchestration", () 
     source,
     /applyDocumentPaste\(\s*editorMarkdown\s*!==\s*before\s*\?\s*editorMarkdown\s*:\s*undefined\s*,?\s*\)/,
   );
+  // While two-frame recovery is pending, a second paste must not mutate the
+  // document first (otherwise A-then-B becomes B-then-A).
+  assert.match(source, /pasteSerialQueueRef/);
+  assert.match(source, /pasteBusyRef/);
+  assert.match(source, /enqueueNoteMarkdownPaste/);
+  assert.match(
+    source,
+    /enqueueNoteMarkdownPaste\(\s*\(release\)\s*=>\s*\{[\s\S]*?requestAnimationFrame[\s\S]*?release\(\)/,
+  );
   assert.doesNotMatch(source, /shouldUseDocumentNoteMarkdownPaste/);
 });

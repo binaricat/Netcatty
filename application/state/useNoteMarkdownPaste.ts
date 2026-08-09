@@ -1,4 +1,4 @@
-import { useCallback, type ClipboardEvent } from "react";
+import { useCallback, useRef, type ClipboardEvent } from "react";
 
 import {
   didNoteMarkdownPasteApply,
@@ -46,6 +46,33 @@ export function useNoteMarkdownPaste({
 }): {
   handlePasteCapture: (event: ClipboardEvent<HTMLElement>) => void;
 } {
+  // Serialize pastes across the two-frame insertMarkdown recovery window so a
+  // later no-selection append cannot land before an earlier recovery merge.
+  const pasteSerialQueueRef = useRef<Array<() => void>>([]);
+  const pasteBusyRef = useRef(false);
+
+  const pumpPasteSerialQueue = useCallback(() => {
+    if (pasteBusyRef.current) return;
+    const next = pasteSerialQueueRef.current.shift();
+    if (!next) return;
+    pasteBusyRef.current = true;
+    next();
+  }, []);
+
+  const enqueueNoteMarkdownPaste = useCallback((run: (release: () => void) => void) => {
+    pasteSerialQueueRef.current.push(() => {
+      let released = false;
+      const release = () => {
+        if (released) return;
+        released = true;
+        pasteBusyRef.current = false;
+        pumpPasteSerialQueue();
+      };
+      run(release);
+    });
+    pumpPasteSerialQueue();
+  }, [pumpPasteSerialQueue]);
+
   const handlePasteCapture = useCallback((event: ClipboardEvent<HTMLElement>) => {
     const markdown = event.clipboardData.getData("text/plain");
     const editor = getEditor();
@@ -81,10 +108,14 @@ export function useNoteMarkdownPaste({
       commitMarkdown(next);
     };
 
-    if (!canInsertAtSelection) {
-      // No caret/range: append via document merge instead of a no-op insert.
-      applyDocumentPaste();
-    } else {
+    enqueueNoteMarkdownPaste((release) => {
+      if (!canInsertAtSelection) {
+        // No caret/range: append via document merge instead of a no-op insert.
+        applyDocumentPaste();
+        release();
+        return;
+      }
+
       const before = getLatestMarkdown();
       const pasteSelection = adapters.getActiveLexicalPasteSelection(event.target);
       // Keep the nested Lexical editor (e.g. table cell) active. Root
@@ -106,6 +137,7 @@ export function useNoteMarkdownPaste({
           // Identical replace (including node selections): never append a duplicate,
           // even when another edit raced before these frames ran.
           if (!shouldRecoverNoteMarkdownPasteAfterUnchangedInsert(recoverInput)) {
+            release();
             return;
           }
           if (didNoteMarkdownPasteApply({
@@ -116,6 +148,7 @@ export function useNoteMarkdownPaste({
             if (getLatestMarkdown() === before && editorMarkdown !== before) {
               commitMarkdown(editorMarkdown);
             }
+            release();
             return;
           }
           // insertMarkdown no-oped; concurrent typing may already be in the
@@ -124,15 +157,17 @@ export function useNoteMarkdownPaste({
           applyDocumentPaste(
             editorMarkdown !== before ? editorMarkdown : undefined,
           );
+          release();
         });
       });
-    }
+    });
 
     onAfterPaste?.();
   }, [
     adapters,
     commitMarkdown,
     editorMode,
+    enqueueNoteMarkdownPaste,
     getEditor,
     getLatestMarkdown,
     onAfterPaste,
