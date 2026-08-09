@@ -1167,6 +1167,16 @@ export const mergeNoteMarkdownDocumentPaste = (
 };
 
 /**
+ * True when `text[index]` is preceded by an odd number of backslashes
+ * (CommonMark escaped punctuation).
+ */
+const isNoteMarkdownIndexEscaped = (text: string, index: number): boolean => {
+  let bars = 0;
+  for (let i = index - 1; i >= 0 && text[i] === "\\"; i -= 1) bars += 1;
+  return bars % 2 === 1;
+};
+
+/**
  * Replace `[label](destination)` / `![alt](destination)` with the label/alt,
  * allowing balanced parentheses inside the destination
  * (e.g. `[docs](https://example.test/a_(b))` → `docs`).
@@ -1199,6 +1209,8 @@ const replaceMarkdownLinksWithLabels = (text: string, images: boolean): string =
     for (let j = labelEnd + 2; j < text.length; j += 1) {
       const ch = text[j];
       if (ch === "\n") break;
+      // Escaped `\(` / `\)` are literal destination characters, not nesting.
+      if (isNoteMarkdownIndexEscaped(text, j)) continue;
       if (ch === "(") depth += 1;
       else if (ch === ")") {
         depth -= 1;
@@ -1321,6 +1333,8 @@ const protectMarkdownLinkDestinations = (
     for (let j = labelEnd + 2; j < text.length; j += 1) {
       const ch = text[j];
       if (ch === "\n") break;
+      // Escaped `\(` / `\)` are literal destination characters, not nesting.
+      if (isNoteMarkdownIndexEscaped(text, j)) continue;
       if (ch === "(") depth += 1;
       else if (ch === ")") {
         depth -= 1;
@@ -1415,21 +1429,6 @@ const normalizeNoteMarkdownGfmTableRows = (text: string): string => {
 };
 
 /**
- * Canonicalize semantically equivalent Markdown spelling so identical-replace
- * checks are not tripped by serializer vs clipboard marker differences
- * (`**Hello**` vs `__Hello__`, `*Hi*` vs `_Hi_`, `* item` vs `- item`).
- */
-/**
- * True when `text[index]` is preceded by an odd number of backslashes
- * (CommonMark escaped punctuation).
- */
-const isNoteMarkdownIndexEscaped = (text: string, index: number): boolean => {
-  let bars = 0;
-  for (let i = index - 1; i >= 0 && text[i] === "\\"; i -= 1) bars += 1;
-  return bars % 2 === 1;
-};
-
-/**
  * Drop backslash escapes that CommonMark treats as equivalent to the bare
  * character (e.g. intraword `foo\_bar` ≡ `foo_bar`). Leave escapes that change
  * emphasis parsing (`\_foo\_` vs `_foo_`, `__x\__` vs `__x__`) alone.
@@ -1454,6 +1453,11 @@ const canonicalizeNoteMarkdownStrongEmphasis = (text: string): string => (
   )
 );
 
+/**
+ * Canonicalize semantically equivalent Markdown spelling so identical-replace
+ * checks are not tripped by serializer vs clipboard marker differences
+ * (`**Hello**` vs `__Hello__`, `*Hi*` vs `_Hi_`, `* item` vs `- item`).
+ */
 export const normalizeNoteMarkdownForEquivalence = (markdown: string): string => {
   const text = markdown.replace(/\r\n?/g, "\n");
   return mapNoteMarkdownOutsideProtectedRegions(text, (exposed) => {

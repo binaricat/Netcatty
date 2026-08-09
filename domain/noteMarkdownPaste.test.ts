@@ -133,6 +133,16 @@ test("markdown equivalence normalizes underscore emphasis to serializer form", (
     normalizeNoteMarkdownForEquivalence("[label](https://example.com/__path__)"),
     "[label](https://example.com/__path__)",
   );
+  // Escaped `\)` must not end the destination early or `__id__` leaks into
+  // emphasis canonicalization and looks identical to `**id**`.
+  assert.equal(
+    normalizeNoteMarkdownForEquivalence("[x](https://host/a\\)b/__id__)"),
+    "[x](https://host/a\\)b/__id__)",
+  );
+  assert.notEqual(
+    normalizeNoteMarkdownForEquivalence("[x](https://host/a\\)b/__id__)"),
+    normalizeNoteMarkdownForEquivalence("[x](https://host/a\\)b/**id**)"),
+  );
   // Labels still canonicalize; only destinations are protected.
   assert.equal(
     normalizeNoteMarkdownForEquivalence("[__x__](https://example.com/__path__)"),
@@ -940,6 +950,16 @@ test("selection markdown serialization scopes bold and link formatting", () => {
       selectedMarkdown: "[x](https://example.test/a\\)b)",
     }),
     false,
+  );
+  // Escaped `\)` before underscore runs: different destinations must recover.
+  assert.equal(
+    shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
+      beforeMarkdown: "see [x](https://host/a\\)b/__id__) end",
+      clipboardText: "[x](https://host/a\\)b/**id**)",
+      selectedText: "x",
+      selectedMarkdown: "[x](https://host/a\\)b/__id__)",
+    }),
+    true,
   );
   // Balanced destination parentheses stay bare (clipboard / MDXEditor form).
   const balancedDestLink = {
