@@ -340,6 +340,53 @@ test("resolveAutocompleteCursorPosition wraps echo-lagged input onto the next ro
   assert.ok(position.row > 10, "wrapped echo-lag anchor must leave the prompt row");
 });
 
+test("resolveAutocompleteCursorPosition prefers resolved caret behind stale echoed deletions", () => {
+  // Typed `git status`, then Ctrl+W / backspace to `git `; SSH echo still
+  // shows the deleted tail and may still sit on a wrapped continuation row.
+  // Anchoring must follow the shorter resolved buffer, not max(echo, local).
+  const promptText = "$ ";
+  const echoedInput = "git status --porcelain";
+  const resolvedInput = "git ";
+  const cols = 12;
+  const echoedCells = promptText.length + echoedInput.length;
+  const resolvedCells = promptText.length + resolvedInput.length;
+  assert.ok(echoedCells > cols, "fixture echo must wrap");
+  assert.ok(resolvedCells < cols, "fixture resolved caret must stay on prompt row");
+  const term = {
+    cols,
+    rows: 24,
+    buffer: {
+      active: {
+        cursorX: echoedCells % cols,
+        cursorY: 11,
+        baseY: 0,
+        getLine: (absY: number) => {
+          if (absY === 11) {
+            return {
+              isWrapped: true,
+              translateToString: () => echoedInput.slice(cols - promptText.length),
+            };
+          }
+          if (absY === 10) {
+            return {
+              isWrapped: false,
+              translateToString: () => `${promptText}${echoedInput.slice(0, cols - promptText.length)}`,
+            };
+          }
+          return { isWrapped: false, translateToString: () => "" };
+        },
+      },
+    },
+  };
+
+  const position = resolveAutocompleteCursorPosition(term as never, {
+    promptText,
+    userInput: resolvedInput,
+  });
+  assert.equal(position.column, resolvedCells);
+  assert.equal(position.row, 10);
+});
+
 test("resolveAutocompleteCursorPosition wraps from the soft-wrap start row", () => {
   const promptText = "$ ";
   // 20 chars; prompt+input = 22 → row offset 1, column 10 @ 12 cols (not exact fill).

@@ -381,7 +381,10 @@ export interface AutocompleteCursorPosition {
  * the current row width.
  *
  * Callers under SSH echo lag should pass the same resolved query input used
- * for completion matching (not the lagging echoed `prompt.userInput`).
+ * for completion matching (not the lagging echoed `prompt.userInput`). The
+ * resolved caret is authoritative in both directions: ahead of a lagging echo
+ * while typing, and behind a stale echoed line after Backspace / Ctrl+W.
+ * Never max with the live buffer line — that re-anchors onto deleted glyphs.
  */
 export function resolveAutocompleteCursorPosition(
   term: XTerm,
@@ -399,28 +402,11 @@ export function resolveAutocompleteCursorPosition(
     startRow -= 1;
   }
 
-  const liveCells = (buffer.cursorY - startRow) * cols + buffer.cursorX;
-  let fromLineCells = liveCells;
-  // When the live cursor is still on the unwrapped prompt row, prefer the
-  // trimmed line end over a lagging cursorX (same heuristic as before).
-  if (buffer.cursorY === startRow) {
-    const line = buffer.getLine(startRow + buffer.baseY);
-    if (line && !line.isWrapped) {
-      const lineText = line.translateToString(false);
-      const tail = lineText.substring(buffer.cursorX).trimEnd();
-      if (tail.length === 0) {
-        // Line text may include wide glyphs; measure cells, not code units.
-        fromLineCells = Math.max(buffer.cursorX, stringCellWidth(lineText.trimEnd(), term));
-      }
-    }
-  }
-
   // Prompt + resolved input must use display-cell widths: CJK/fullwidth
   // glyphs occupy two xterm columns, and combining marks occupy zero.
   // String length under-counts wraps and can anchor the popup one row early.
-  const fromPromptCells =
+  const totalCells =
     stringCellWidth(prompt.promptText, term) + stringCellWidth(prompt.userInput, term);
-  const totalCells = Math.max(fromLineCells, fromPromptCells);
   // xterm keeps a pending wrap when the line fills exactly: cursorX === cols on
   // the filled row, and only advances on the next printable character. Naïve
   // modulo/floor maps that boundary to column 0 of the next row and drops the
