@@ -116,30 +116,67 @@ const getLexicalInlineMarkdownFormatStack = (
  * Markdown (`**Hello \*world\***`, not `**Hello *world***`). Mirrors the
  * always-on mdast-util-to-markdown phrasing unsafe set (`*`, `_`, `` ` ``, `[`,
  * and GFM `~`), plus `]` so link labels with a literal bracket serialize as
- * `[a\]b](url)` (not broken `[a]b](url)`), plus line-leading block openers
- * (`#`, `>`, `-`, `+`, ordered `1.` / `1)`) so literal `# Heading` / `- item` /
- * `1. item` serialize as `\# Heading` / `\- item` / `1\. item`. (`*` list
- * openers are already covered by the phrasing `*` escape.)
+ * `[a\]b](url)` (not broken `[a]b](url)`).
  *
  * Literal backslashes are escaped first so source `**a\\\*b**` (bold `a\*b`)
  * round-trips as `**a\\\*b**`, not `**a\\*b**`.
  */
-const escapeNoteMarkdownPhrasingText = (text: string): string => {
-  const escaped = text
+const escapeNoteMarkdownPhrasingPunctuation = (text: string): string => (
+  text
     .replace(/\\/g, "\\\\")
-    .replace(/([`*_\[\]~])/g, "\\$1");
+    .replace(/([`*_\[\]~])/g, "\\$1")
+);
+
+/**
+ * Escape line-leading block openers (`#`, `>`, `-`, `+`, ordered `1.` / `1)`)
+ * so literal `# Heading` / `- item` / `1. item` serialize as `\# Heading` /
+ * `\- item` / `1\. item`. (`*` list openers are already covered by the phrasing
+ * `*` escape.)
+ *
+ * `atLineStart` is relative to the assembled Markdown stream (not each Lexical
+ * text node): a formatting boundary mid-line must not be treated as `^`, or
+ * `A **# B**` incorrectly becomes `A **\# B**`.
+ */
+const escapeNoteMarkdownBlockOpeners = (
+  text: string,
+  atLineStart: boolean,
+): string => {
   // After doubling backslashes, a line-leading opener may sit after `\\` runs
   // (`\- item` → `\\- item`); still escape the opener (`\\\- item`).
-  return escaped
-    .replace(/(^|\n)( {0,3})((?:\\\\)*)([#>+-])/g, "$1$2$3\\$4")
-    .replace(/(^|\n)( {0,3})((?:\\\\)*)(\d+)([.)])/g, "$1$2$3$4\\$5");
+  if (atLineStart) {
+    return text
+      .replace(/(^|\n)( {0,3})((?:\\\\)*)([#>+-])/g, "$1$2$3\\$4")
+      .replace(/(^|\n)( {0,3})((?:\\\\)*)(\d+)([.)])/g, "$1$2$3$4\\$5");
+  }
+  return text
+    .replace(/(\n)( {0,3})((?:\\\\)*)([#>+-])/g, "$1$2$3\\$4")
+    .replace(/(\n)( {0,3})((?:\\\\)*)(\d+)([.)])/g, "$1$2$3$4\\$5");
 };
+
+const isAssembledMarkdownLineStart = (markdown: string): boolean => (
+  markdown.length === 0 || markdown.endsWith("\n")
+);
+
+const escapeNoteMarkdownPhrasingText = (
+  text: string,
+  options?: { atLineStart?: boolean },
+): string => (
+  escapeNoteMarkdownBlockOpeners(
+    escapeNoteMarkdownPhrasingPunctuation(text),
+    options?.atLineStart ?? true,
+  )
+);
 
 /** Prefer a fence longer than any run of backticks inside the value. */
 const formatMdastInlineCode = (value: string): string => {
   let fence = "`";
   while (value.includes(fence)) fence += "`";
-  const pad = value.startsWith("`") || value.endsWith("`") || value.includes("\n")
+  // CommonMark strips one leading and trailing space when both sides are
+  // spaced and the value is not all spaces; pad so ` foo ` survives.
+  const pad = value.startsWith("`")
+    || value.endsWith("`")
+    || value.includes("\n")
+    || (value.startsWith(" ") && value.endsWith(" ") && value.trim() !== "")
     ? " "
     : "";
   return `${fence}${pad}${value}${pad}${fence}`;
@@ -153,12 +190,14 @@ const applyLexicalInlineMarkdownFormats = (
   const stack = getLexicalInlineMarkdownFormatStack(formatSource);
   // Code spans use a safe fence; emphasis markers wrap escaped text.
   if (stack[0] === "code") return formatMdastInlineCode(text);
-  let formatted = escapeNoteMarkdownPhrasingText(text);
+  // Phrasing first, then wrap, then block openers on the assembled markers so
+  // `**# B**` keeps an unescaped `#` (line starts with `*`, not `#`).
+  let formatted = escapeNoteMarkdownPhrasingPunctuation(text);
   for (let i = stack.length - 1; i >= 0; i -= 1) {
     const markers = NOTE_MARKDOWN_PASTE_INLINE_FORMAT_MARKERS[stack[i]];
     formatted = `${markers.open}${formatted}${markers.close}`;
   }
-  return formatted;
+  return escapeNoteMarkdownBlockOpeners(formatted, true);
 };
 
 const longestCommonInlineFormatPrefixLength = (
@@ -699,16 +738,19 @@ const serializeLexicalBlockInlineMarkdown = (
       linkBuffer.label += codeMarkdown;
       continue;
     }
-    const escapedText = escapeNoteMarkdownPhrasingText(text);
     const link = findLexicalLinkAncestor(node);
     if (!link) {
       flushLink();
+      // Open markers before escaping so line-start is relative to assembled
+      // output (`A **` + `# B`, not a fresh text-node `^` on `#`).
       syncLexicalInlineMarkdownFormatStack(
         outerFormatStack,
         desiredFormats,
         outerOutput,
       );
-      markdown += escapedText;
+      markdown += escapeNoteMarkdownPhrasingText(text, {
+        atLineStart: isAssembledMarkdownLineStart(markdown),
+      });
       continue;
     }
     const linkKey = getLexicalNodeKey(link, link.getURL());
@@ -725,7 +767,8 @@ const serializeLexicalBlockInlineMarkdown = (
       getLexicalLinkLabelFormatStack(desiredFormats, linkBuffer.inheritedFormats),
       labelOutput,
     );
-    linkBuffer.label += escapedText;
+    // Link labels are never Markdown line starts (`[# x](url)`, not `\#`).
+    linkBuffer.label += escapeNoteMarkdownPhrasingText(text, { atLineStart: false });
   }
   flushLink();
   closeOuterFormats();
@@ -854,11 +897,16 @@ const isMdastRecord = (
  * Serialize MDAST phrasing (table cells, etc.) so inline marks survive for
  * selection-scoped identical-replace checks.
  */
-const serializeMdastPhrasingAsMarkdown = (nodes: readonly unknown[]): string => {
+const serializeMdastPhrasingAsMarkdown = (
+  nodes: readonly unknown[],
+  options?: { atLineStart?: boolean },
+): string => {
   let markdown = "";
+  let atLineStart = options?.atLineStart ?? true;
   for (const node of nodes) {
     if (typeof node === "string") {
-      markdown += escapeNoteMarkdownPhrasingText(node);
+      markdown += escapeNoteMarkdownPhrasingText(node, { atLineStart });
+      atLineStart = isAssembledMarkdownLineStart(markdown);
       continue;
     }
     if (!isMdastRecord(node)) continue;
@@ -867,46 +915,56 @@ const serializeMdastPhrasingAsMarkdown = (nodes: readonly unknown[]): string => 
     if (type === "text") {
       markdown += escapeNoteMarkdownPhrasingText(
         typeof node.value === "string" ? node.value : "",
+        { atLineStart },
       );
+      atLineStart = isAssembledMarkdownLineStart(markdown);
       continue;
     }
     if (type === "strong") {
-      markdown += `**${serializeMdastPhrasingAsMarkdown(children)}**`;
+      markdown += `**${serializeMdastPhrasingAsMarkdown(children, { atLineStart: false })}**`;
+      atLineStart = isAssembledMarkdownLineStart(markdown);
       continue;
     }
     if (type === "emphasis") {
-      markdown += `*${serializeMdastPhrasingAsMarkdown(children)}*`;
+      markdown += `*${serializeMdastPhrasingAsMarkdown(children, { atLineStart: false })}*`;
+      atLineStart = isAssembledMarkdownLineStart(markdown);
       continue;
     }
     if (type === "delete") {
-      markdown += `~~${serializeMdastPhrasingAsMarkdown(children)}~~`;
+      markdown += `~~${serializeMdastPhrasingAsMarkdown(children, { atLineStart: false })}~~`;
+      atLineStart = isAssembledMarkdownLineStart(markdown);
       continue;
     }
     if (type === "inlineCode") {
       markdown += formatMdastInlineCode(
         typeof node.value === "string" ? node.value : "",
       );
+      atLineStart = isAssembledMarkdownLineStart(markdown);
       continue;
     }
     if (type === "link" && typeof node.url === "string") {
       const title = typeof node.title === "string" ? node.title : null;
       markdown += formatLexicalLinkMarkdown(
-        serializeMdastPhrasingAsMarkdown(children),
+        serializeMdastPhrasingAsMarkdown(children, { atLineStart: false }),
         node.url,
         title,
       );
+      atLineStart = isAssembledMarkdownLineStart(markdown);
       continue;
     }
     if (type === "break") {
       markdown += "  \n";
+      atLineStart = true;
       continue;
     }
     if (typeof node.value === "string") {
-      markdown += escapeNoteMarkdownPhrasingText(node.value);
+      markdown += escapeNoteMarkdownPhrasingText(node.value, { atLineStart });
+      atLineStart = isAssembledMarkdownLineStart(markdown);
       continue;
     }
     if (children.length > 0) {
-      markdown += serializeMdastPhrasingAsMarkdown(children);
+      markdown += serializeMdastPhrasingAsMarkdown(children, { atLineStart });
+      atLineStart = isAssembledMarkdownLineStart(markdown);
     }
   }
   return markdown;
@@ -1555,15 +1613,26 @@ export const didNoteMarkdownPasteApply = (input: {
     }
   }
 
-  // Collapsed caret: walk every insert index so a successful in-place paste
-  // still counts when the clipboard fragment already existed elsewhere
-  // (`A **x** B` + paste `**x**` → `A **x** **x** B`), including when the user
-  // types during the two recovery animation frames.
+  // Collapsed caret: a successful in-place paste still counts when the
+  // clipboard fragment already existed elsewhere (`A **x** B` + paste `**x**`
+  // → `A **x****x** B`), including concurrent typing during recovery frames.
+  // Find contiguous clipboard occurrences in `after` and test whether removing
+  // one yields `before` (or an insertion-extension). Avoids rebuilding a
+  // full-document candidate at every caret index (quadratic in note length).
   const caretSelection = selectedMarkdown === null || selectedMarkdown.length === 0;
   if (caretSelection) {
-    for (let index = 0; index <= beforeNorm.length; index += 1) {
-      const expected = `${beforeNorm.slice(0, index)}${clipboardNorm}${beforeNorm.slice(index)}`;
-      if (matchesPasteResult(expected)) return true;
+    let searchFrom = 0;
+    while (searchFrom <= afterNorm.length) {
+      const index = afterNorm.indexOf(clipboardNorm, searchFrom);
+      if (index === -1) break;
+      const withoutClipboard = `${afterNorm.slice(0, index)}${afterNorm.slice(index + clipboardNorm.length)}`;
+      if (
+        withoutClipboard === beforeNorm
+        || isNoteMarkdownInsertionExtension(beforeNorm, withoutClipboard)
+      ) {
+        return true;
+      }
+      searchFrom = index + 1;
     }
   }
 

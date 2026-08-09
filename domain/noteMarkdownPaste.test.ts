@@ -921,6 +921,72 @@ test("selection markdown serialization scopes bold and link formatting", () => {
     }),
     "``a`b``",
   );
+
+  // Mid-line formatting boundaries are not Markdown line starts: `A **# B**`
+  // must not escape `#` (MDXEditor serializes without `\#`).
+  const midLineHashParagraph = {
+    getType: () => "paragraph",
+    getKey: () => "mid-hash-p",
+    getTextContent: () => "A # B",
+    getParent: () => null,
+  };
+  const midLineHashPlain = {
+    getType: () => "text",
+    getKey: () => "mid-hash-plain",
+    getTextContent: () => "A ",
+    hasFormat: () => false,
+    getParent: () => midLineHashParagraph,
+  };
+  const midLineHashBold = {
+    getType: () => "text",
+    getKey: () => "mid-hash-bold",
+    getTextContent: () => "# B",
+    hasFormat: (type: string) => type === "bold",
+    getParent: () => midLineHashParagraph,
+  };
+  assert.equal(
+    serializeLexicalSelectionAsMarkdown("A # B", {
+      hasFormat: () => false,
+      anchor: { getNode: () => midLineHashPlain, offset: 0, type: "text" },
+      focus: { getNode: () => midLineHashBold, offset: 3, type: "text" },
+      isBackward: () => false,
+      getNodes: () => [midLineHashPlain, midLineHashBold],
+    }),
+    "A **# B**",
+  );
+  // Bold-only `# Heading` at line start still keeps `#` unescaped after markers.
+  assert.equal(
+    serializeLexicalSelectionAsMarkdown("# Heading", {
+      hasFormat: (type) => type === "bold",
+      anchor: plainAnchor,
+    }),
+    "**# Heading**",
+  );
+
+  // Inline code with both-end spaces needs pad spaces so CommonMark keeps them.
+  const spacedCodeParagraph = {
+    getType: () => "paragraph",
+    getKey: () => "spaced-code-p",
+    getTextContent: () => " foo ",
+    getParent: () => null,
+  };
+  const spacedCodeText = {
+    getType: () => "text",
+    getKey: () => "spaced-code-text",
+    getTextContent: () => " foo ",
+    hasFormat: (type: string) => type === "code",
+    getParent: () => spacedCodeParagraph,
+  };
+  assert.equal(
+    serializeLexicalSelectionAsMarkdown(" foo ", {
+      hasFormat: () => false,
+      anchor: { getNode: () => spacedCodeText, offset: 0, type: "text" },
+      focus: { getNode: () => spacedCodeText, offset: 5, type: "text" },
+      isBackward: () => false,
+      getNodes: () => [spacedCodeText],
+    }),
+    "`  foo  `",
+  );
   assert.equal(
     shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
       beforeMarkdown: "prefix **Hello ~~world~~** suffix",
@@ -1929,5 +1995,18 @@ test("didNoteMarkdownPasteApply distinguishes paste success from concurrent edit
       selectedMarkdown: "",
     }),
     false,
+  );
+  // Paste-at-end on a long note must stay linear (not a per-index rebuild).
+  const longBefore = `${"word ".repeat(4000)}end`;
+  const longClipboard = "**pasted**";
+  assert.equal(
+    didNoteMarkdownPasteApply({
+      beforeMarkdown: longBefore,
+      afterMarkdown: `${longBefore}${longClipboard}`,
+      clipboardText: longClipboard,
+      selectedText: "",
+      selectedMarkdown: "",
+    }),
+    true,
   );
 });
