@@ -190,15 +190,61 @@ const syncLexicalInlineMarkdownFormatStack = (
   }
 };
 
+/**
+ * Serialize a decoded link URL (Lexical `getURL()` / MDAST `url`) into a
+ * Markdown destination. Decoded values may contain `)` that must be escaped
+ * (`…/a)b` → `…/a\)b`); leaving them bare reconstructs a different link and
+ * makes an identical replace look like a failed insert. Balanced `(…)` stay
+ * unescaped so clipboard forms like `a_(b)` still match equivalence checks.
+ * Control characters / ASCII whitespace use angle-bracket destinations.
+ */
+const formatNoteMarkdownLinkDestination = (url: string): string => {
+  if (/[\0- \u007F]/.test(url)) {
+    const escaped = url.replace(/\\/g, "\\\\").replace(/[<>]/g, "\\$&");
+    return `<${escaped}>`;
+  }
+
+  let out = "";
+  let depth = 0;
+  for (let i = 0; i < url.length; i += 1) {
+    const ch = url[i];
+    if (ch === "\\") {
+      out += "\\\\";
+      continue;
+    }
+    if (ch === "(") {
+      depth += 1;
+      out += "(";
+      continue;
+    }
+    if (ch === ")") {
+      if (depth > 0) {
+        depth -= 1;
+        out += ")";
+      } else {
+        out += "\\)";
+      }
+      continue;
+    }
+    out += ch;
+  }
+  if (depth === 0) return out;
+
+  // Unbalanced '(': angle brackets are unambiguous without rewriting opens.
+  const literal = url.replace(/\\/g, "\\\\").replace(/[<>]/g, "\\$&");
+  return `<${literal}>`;
+};
+
 const formatLexicalLinkMarkdown = (
   label: string,
   url: string,
   title?: string | null,
 ): string => {
+  const destination = formatNoteMarkdownLinkDestination(url);
   if (title) {
-    return `[${label}](${url} "${title.replace(/"/g, '\\"')}")`;
+    return `[${label}](${destination} "${title.replace(/"/g, '\\"')}")`;
   }
-  return `[${label}](${url})`;
+  return `[${label}](${destination})`;
 };
 
 const getLexicalListNestingDepth = (listItem: NoteMarkdownPasteSelectionNode): number => {

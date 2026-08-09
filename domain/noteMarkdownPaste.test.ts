@@ -745,6 +745,70 @@ test("selection markdown serialization scopes bold and link formatting", () => {
     false,
   );
 
+  // Decoded destinations with an unmatched `)` must re-escape so identical
+  // paste of `[x](https://example.test/a\)b)` is not misclassified as failed.
+  const parenDestParagraph = {
+    getType: () => "paragraph",
+    getKey: () => "paren-dest-p",
+    getParent: () => null,
+  };
+  const parenDestLink = {
+    getType: () => "link",
+    getURL: () => "https://example.test/a)b",
+    getKey: () => "paren-dest-link",
+    getParent: () => parenDestParagraph,
+  };
+  const parenDestText = {
+    getType: () => "text",
+    getKey: () => "paren-dest-t",
+    getTextContent: () => "x",
+    hasFormat: () => false,
+    getParent: () => parenDestLink,
+  };
+  assert.equal(
+    serializeLexicalSelectionAsMarkdown("x", {
+      hasFormat: () => false,
+      anchor: { getNode: () => parenDestText, offset: 0, type: "text" },
+      focus: { getNode: () => parenDestText, offset: 1, type: "text" },
+      isBackward: () => false,
+      getNodes: () => [parenDestLink, parenDestText],
+    }),
+    "[x](https://example.test/a\\)b)",
+  );
+  assert.equal(
+    shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
+      beforeMarkdown: "see [x](https://example.test/a\\)b) end",
+      clipboardText: "[x](https://example.test/a\\)b)",
+      selectedText: "x",
+      selectedMarkdown: "[x](https://example.test/a\\)b)",
+    }),
+    false,
+  );
+  // Balanced destination parentheses stay bare (clipboard / MDXEditor form).
+  const balancedDestLink = {
+    getType: () => "link",
+    getURL: () => "https://example.test/a_(b)",
+    getKey: () => "balanced-dest-link",
+    getParent: () => parenDestParagraph,
+  };
+  const balancedDestText = {
+    getType: () => "text",
+    getKey: () => "balanced-dest-t",
+    getTextContent: () => "docs",
+    hasFormat: () => false,
+    getParent: () => balancedDestLink,
+  };
+  assert.equal(
+    serializeLexicalSelectionAsMarkdown("docs", {
+      hasFormat: () => false,
+      anchor: { getNode: () => balancedDestText, offset: 0, type: "text" },
+      focus: { getNode: () => balancedDestText, offset: 4, type: "text" },
+      isBackward: () => false,
+      getNodes: () => [balancedDestLink, balancedDestText],
+    }),
+    "[docs](https://example.test/a_(b))",
+  );
+
   // Lexical linebreak nodes are Markdown hard breaks (two trailing spaces).
   const hardBreakParagraph = {
     getType: () => "paragraph",
