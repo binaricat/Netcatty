@@ -903,6 +903,66 @@ test("selection markdown serialization scopes bold and link formatting", () => {
     false,
   );
 
+  // Outer bold that ends inside a link label must close before `[`, not wrap the
+  // whole link (`**A **[**B** C](url)`, not `**A [B C](url)**`).
+  const partialLinkParagraph = {
+    getType: () => "paragraph",
+    getKey: () => "partial-link-p",
+    getTextContent: () => "A B C",
+    getParent: () => null,
+  };
+  const partialLink = {
+    getType: () => "link",
+    getURL: () => "https://x.test",
+    getKey: () => "partial-link",
+    getParent: () => partialLinkParagraph,
+  };
+  const partialLinkBefore = {
+    getType: () => "text",
+    getKey: () => "partial-link-a",
+    getTextContent: () => "A ",
+    hasFormat: (type: string) => type === "bold",
+    getParent: () => partialLinkParagraph,
+  };
+  const partialLinkBoldLabel = {
+    getType: () => "text",
+    getKey: () => "partial-link-b",
+    getTextContent: () => "B",
+    hasFormat: (type: string) => type === "bold",
+    getParent: () => partialLink,
+  };
+  const partialLinkPlainLabel = {
+    getType: () => "text",
+    getKey: () => "partial-link-c",
+    getTextContent: () => " C",
+    hasFormat: () => false,
+    getParent: () => partialLink,
+  };
+  assert.equal(
+    serializeLexicalSelectionAsMarkdown("A B C", {
+      hasFormat: () => false,
+      anchor: { getNode: () => partialLinkBefore, offset: 0, type: "text" },
+      focus: { getNode: () => partialLinkPlainLabel, offset: 2, type: "text" },
+      isBackward: () => false,
+      getNodes: () => [
+        partialLinkBefore,
+        partialLink,
+        partialLinkBoldLabel,
+        partialLinkPlainLabel,
+      ],
+    }),
+    "**A **[**B** C](https://x.test)",
+  );
+  assert.equal(
+    shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
+      beforeMarkdown: "**A **[**B** C](https://x.test)",
+      clipboardText: "**A **[**B** C](https://x.test)",
+      selectedText: "A B C",
+      selectedMarkdown: "**A **[**B** C](https://x.test)",
+    }),
+    false,
+  );
+
   // Multi-paragraph blockquote: blank separator stays quoted (`> A\n>\n> B`)
   // like MDXEditor, not an unquoted gap (`> A\n\n> B`).
   const multiQuote = {

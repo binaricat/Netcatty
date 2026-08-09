@@ -513,6 +513,39 @@ const getLexicalLinkLabelFormatStack = (
   return desired.filter((format) => !inherited.includes(format));
 };
 
+/**
+ * Formats present on every selected non-code text node inside `linkKey`.
+ * Outer markers may wrap a link only when they span the whole label; a format
+ * that ends mid-label must close before `[`.
+ */
+const getLexicalFormatsSpanningLinkLabel = (
+  nodes: readonly NoteMarkdownPasteSelectionNode[],
+  selection: NoteMarkdownPasteSelection,
+  linkKey: string,
+): NoteMarkdownPasteInlineFormatStackItem[] => {
+  let spanning: NoteMarkdownPasteInlineFormatStackItem[] | null = null;
+  for (const node of nodes) {
+    if (node.getType() !== "text" || typeof node.hasFormat !== "function") continue;
+    const text = getSelectedLexicalTextNodeContent(node, selection);
+    if (!text) continue;
+    const link = findLexicalLinkAncestor(node);
+    if (!link) continue;
+    if (getLexicalNodeKey(link, link.getURL()) !== linkKey) continue;
+    const formats = getLexicalInlineMarkdownFormatStack(node);
+    // Code spans break emphasis continuity through the label.
+    const emphasisFormats = formats[0] === "code" ? [] : formats;
+    if (spanning === null) {
+      spanning = [...emphasisFormats];
+      continue;
+    }
+    spanning = spanning.slice(
+      0,
+      longestCommonInlineFormatPrefixLength(spanning, emphasisFormats),
+    );
+  }
+  return spanning ?? [];
+};
+
 const serializeLexicalBlockInlineMarkdown = (
   nodes: NoteMarkdownPasteSelectionNode[],
   selection: NoteMarkdownPasteSelection,
@@ -553,17 +586,18 @@ const serializeLexicalBlockInlineMarkdown = (
   const beginLinkBuffer = (
     link: NoteMarkdownPasteSelectionNode & { getURL: () => string },
     linkKey: string,
-    desiredFormats: readonly NoteMarkdownPasteInlineFormatStackItem[],
+    spanningFormats: readonly NoteMarkdownPasteInlineFormatStackItem[],
   ) => {
-    // Keep formats that continue into the link open outside; close the rest
-    // before `[` so only true label-local marks land inside the label.
+    // Inherit only formats that span the entire link label. A mark that ends
+    // mid-label cannot stay open outside (`**A **[**B** C](url)`, not
+    // `**A [B C](url)**`).
     const shared = longestCommonInlineFormatPrefixLength(
       outerFormatStack,
-      desiredFormats,
+      spanningFormats,
     );
     syncLexicalInlineMarkdownFormatStack(
       outerFormatStack,
-      desiredFormats.slice(0, shared),
+      spanningFormats.slice(0, shared),
       outerOutput,
     );
     linkBuffer = {
@@ -633,7 +667,13 @@ const serializeLexicalBlockInlineMarkdown = (
     }
     const linkKey = getLexicalNodeKey(link, link.getURL());
     if (linkBuffer && linkBuffer.linkKey !== linkKey) flushLink();
-    if (!linkBuffer) beginLinkBuffer(link, linkKey, desiredFormats);
+    if (!linkBuffer) {
+      beginLinkBuffer(
+        link,
+        linkKey,
+        getLexicalFormatsSpanningLinkLabel(nodes, selection, linkKey),
+      );
+    }
     syncLexicalInlineMarkdownFormatStack(
       labelFormatStack,
       getLexicalLinkLabelFormatStack(desiredFormats, linkBuffer.inheritedFormats),
