@@ -641,7 +641,7 @@ const protectMarkdownLinkDestinations = (
 /**
  * Canonicalize semantically equivalent Markdown spelling so identical-replace
  * checks are not tripped by serializer vs clipboard marker differences
- * (`**Hello**` vs `__Hello__`, `*Hi*` vs `_Hi_`).
+ * (`**Hello**` vs `__Hello__`, `*Hi*` vs `_Hi_`, `* item` vs `- item`).
  */
 export const normalizeNoteMarkdownForEquivalence = (markdown: string): string => {
   const text = markdown.replace(/\r\n?/g, "\n");
@@ -654,6 +654,9 @@ export const normalizeNoteMarkdownForEquivalence = (markdown: string): string =>
       /(^|[^\\*\w])_(\S[\s\S]*?\S)_(?=$|[^\\*\w])/g,
       "$1*$2*",
     );
+    // Unordered / task-list markers: MDXEditor defaults to `*`, serializer uses `-`.
+    // Require trailing whitespace so `*Hi*` / `***` stay untouched.
+    next = next.replace(/^(\s*)[-+*](\s+)/gm, "$1-$2");
     // Hard breaks: backslash form → two-trailing-spaces (serializer form).
     next = next.replace(/\\\n/g, "  \n");
     // Collapse 3+ trailing spaces before a newline to the canonical two-space break.

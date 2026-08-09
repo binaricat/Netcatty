@@ -135,6 +135,22 @@ test("markdown equivalence normalizes underscore emphasis to serializer form", (
     normalizeNoteMarkdownForEquivalence("[__x__](https://example.com/__path__)"),
     "[**x**](https://example.com/__path__)",
   );
+  // MDXEditor emits `*` list markers; our selection serializer uses `-`.
+  assert.equal(
+    normalizeNoteMarkdownForEquivalence("* one\n* two"),
+    normalizeNoteMarkdownForEquivalence("- one\n- two"),
+  );
+  assert.equal(
+    normalizeNoteMarkdownForEquivalence("+ one\n  + nested"),
+    normalizeNoteMarkdownForEquivalence("- one\n  - nested"),
+  );
+  assert.equal(
+    normalizeNoteMarkdownForEquivalence("* [ ] task\n* [x] done"),
+    normalizeNoteMarkdownForEquivalence("- [ ] task\n- [x] done"),
+  );
+  // Emphasis / code must not be rewritten as list markers.
+  assert.equal(normalizeNoteMarkdownForEquivalence("*Hi*"), "*Hi*");
+  assert.equal(normalizeNoteMarkdownForEquivalence("`* not a list`"), "`* not a list`");
 });
 
 test("selection markdown serialization scopes bold and link formatting", () => {
@@ -366,6 +382,16 @@ test("selection markdown serialization scopes bold and link formatting", () => {
     shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
       beforeMarkdown: "- one\n- two",
       clipboardText: "- one\n- two",
+      selectedText: "one\ntwo",
+      selectedMarkdown: "- one\n- two",
+    }),
+    false,
+  );
+  // Clipboard / MDXEditor `*` markers must match serializer `-` without append recovery.
+  assert.equal(
+    shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
+      beforeMarkdown: "Intro\n\n* one\n* two\n\nOutro",
+      clipboardText: "* one\n* two",
       selectedText: "one\ntwo",
       selectedMarkdown: "- one\n- two",
     }),
