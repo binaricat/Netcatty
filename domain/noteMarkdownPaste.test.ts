@@ -397,6 +397,104 @@ test("selection markdown serialization scopes bold and link formatting", () => {
     }),
     "- one\n- two",
   );
+  // Adjacent but distinct lists (ul then ol) keep a blank line between runs.
+  const numberList = {
+    getType: () => "list",
+    getListType: () => "number" as const,
+    getParent: () => null,
+  };
+  const numberOne = {
+    getType: () => "listitem",
+    getKey: () => "li-num",
+    getValue: () => 1,
+    getTextContent: () => "one",
+    getParent: () => numberList,
+  };
+  const numberOneText = {
+    getType: () => "text",
+    getKey: () => "t-num",
+    getTextContent: () => "one",
+    hasFormat: () => false,
+    getParent: () => numberOne,
+  };
+  assert.equal(
+    serializeLexicalSelectionAsMarkdown("two\none", {
+      hasFormat: () => false,
+      anchor: { getNode: () => bulletTwoText, offset: 0, type: "text" },
+      focus: { getNode: () => numberOneText, offset: 3, type: "text" },
+      isBackward: () => false,
+      getNodes: () => [bulletTwo, bulletTwoText, numberOne, numberOneText],
+    }),
+    "- two\n\n1. one",
+  );
+  // Nested list: parent getTextContent includes child text; still emit parent marker
+  // and keep a single newline so identical-replace recovery stays accurate.
+  type NestedPasteNode = {
+    getType: () => string;
+    getKey: () => string;
+    getTextContent: () => string;
+    getParent: () => NestedPasteNode | null;
+    getChildren?: () => NestedPasteNode[];
+    getListType?: () => "bullet";
+    hasFormat?: () => boolean;
+  };
+  const nestOuterList: NestedPasteNode = {
+    getType: () => "list",
+    getKey: () => "list-outer",
+    getListType: () => "bullet",
+    getTextContent: () => "parent\nchild",
+    getParent: () => null,
+  };
+  const nestParentItem: NestedPasteNode = {
+    getType: () => "listitem",
+    getKey: () => "li-parent",
+    getTextContent: () => "parent\nchild",
+    getParent: () => nestOuterList,
+  };
+  const nestParentText: NestedPasteNode = {
+    getType: () => "text",
+    getKey: () => "t-parent",
+    getTextContent: () => "parent",
+    hasFormat: () => false,
+    getParent: () => nestParentItem,
+  };
+  const nestInnerList: NestedPasteNode = {
+    getType: () => "list",
+    getKey: () => "list-inner",
+    getListType: () => "bullet",
+    getTextContent: () => "child",
+    getParent: () => nestParentItem,
+  };
+  const nestChildItem: NestedPasteNode = {
+    getType: () => "listitem",
+    getKey: () => "li-child",
+    getTextContent: () => "child",
+    getParent: () => nestInnerList,
+  };
+  const nestChildText: NestedPasteNode = {
+    getType: () => "text",
+    getKey: () => "t-child",
+    getTextContent: () => "child",
+    hasFormat: () => false,
+    getParent: () => nestChildItem,
+  };
+  nestParentItem.getChildren = () => [nestParentText, nestInnerList];
+  nestChildItem.getChildren = () => [nestChildText];
+  assert.equal(
+    serializeLexicalSelectionAsMarkdown("parent\nchild", {
+      hasFormat: () => false,
+      anchor: { getNode: () => nestParentText, offset: 0, type: "text" },
+      focus: { getNode: () => nestChildText, offset: 5, type: "text" },
+      isBackward: () => false,
+      getNodes: () => [
+        nestParentItem,
+        nestParentText,
+        nestChildItem,
+        nestChildText,
+      ],
+    }),
+    "- parent\n  - child",
+  );
   assert.equal(
     shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
       beforeMarkdown: "- one\n- two",
@@ -779,6 +877,27 @@ test("unchanged insert recovery skips identical replacements but recovers lost-s
       beforeMarkdown: "# Note\n\nHello",
       clipboardText: "# Note\n\nHello",
       selectedText: "Note\n\nHello",
+    }),
+    false,
+  );
+  // Clipboard equals the full note but only a partial range was selected: if
+  // insertMarkdown no-ops after preventDefault, recovery must still append.
+  assert.equal(
+    shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
+      beforeMarkdown: "# A\n\nB",
+      clipboardText: "# A\n\nB",
+      selectedText: "B",
+      selectedMarkdown: "B",
+    }),
+    true,
+  );
+  // Select-all evidence via selection-scoped markdown still suppresses recovery.
+  assert.equal(
+    shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
+      beforeMarkdown: "# A\n\nB",
+      clipboardText: "# A\n\nB",
+      selectedText: "A\n\nB",
+      selectedMarkdown: "# A\n\nB",
     }),
     false,
   );

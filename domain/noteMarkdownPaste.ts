@@ -40,6 +40,8 @@ export type NoteMarkdownPasteSelectionNode = {
   getValue?: () => number;
   getChecked?: () => boolean | undefined;
   getTextContent?: () => string;
+  /** Lexical ElementNode children; used to exclude nested list text. */
+  getChildren?: () => NoteMarkdownPasteSelectionNode[];
   hasFormat?: (type: NoteMarkdownPasteTextFormat) => boolean;
   /** MDXEditor table decorator nodes expose the backing MDAST table. */
   getMdastNode?: () => NoteMarkdownPasteMdastTable;
@@ -264,6 +266,49 @@ const getSelectedLexicalBlockPlainText = (
 };
 
 /**
+ * Block plain text used for whole-block selection checks. List items exclude
+ * nested list descendants so parent markers are not dropped when a nested list
+ * is selected (`- parent\n  - child`).
+ */
+const getLexicalBlockComparablePlainText = (
+  block: NoteMarkdownPasteSelectionNode,
+): string => {
+  if (typeof block.getTextContent !== "function") return "";
+  if (block.getType() !== "listitem" || typeof block.getChildren !== "function") {
+    return block.getTextContent();
+  }
+  let plain = "";
+  for (const child of block.getChildren()) {
+    // Nested lists contribute their own listitem blocks; skip their text here.
+    if (child.getType() === "list") continue;
+    if (typeof child.getTextContent === "function") plain += child.getTextContent();
+  }
+  return plain;
+};
+
+/** True when two list items share a parent list or one is nested under the other. */
+const areLexicalListItemsInSameTightRun = (
+  prev: NoteMarkdownPasteSelectionNode,
+  next: NoteMarkdownPasteSelectionNode,
+): boolean => {
+  if (prev.getType() !== "listitem" || next.getType() !== "listitem") return false;
+  const prevParent = prev.getParent();
+  const nextParent = next.getParent();
+  if (prevParent && prevParent === nextParent) return true;
+  let walk: NoteMarkdownPasteSelectionNode | null = next.getParent();
+  while (walk) {
+    if (walk === prev) return true;
+    walk = walk.getParent();
+  }
+  walk = prev.getParent();
+  while (walk) {
+    if (walk === next) return true;
+    walk = walk.getParent();
+  }
+  return false;
+};
+
+/**
  * Heading/list/quote markers belong only on whole-block selections. Partial
  * inline ranges (e.g. bold "Hello" inside `# **Hello** world`) serialize as
  * inline markdown only so identical-replace recovery stays accurate.
@@ -280,7 +325,7 @@ export const doesSelectionEncompassLexicalBlock = (
   selection: NoteMarkdownPasteSelection,
 ): boolean => {
   if (typeof block.getTextContent !== "function") return true;
-  const blockText = block.getTextContent();
+  const blockText = getLexicalBlockComparablePlainText(block);
   if (getSelectedLexicalBlockPlainText(block, blockKey, nodes, selection) !== blockText) {
     return false;
   }
@@ -468,13 +513,13 @@ const serializeLexicalSelectionNodesAsMarkdown = (
     parts.push({ block, markdown: `${marker}${inline}` });
   }
   if (parts.length === 0) return null;
-  // Adjacent list items stay tight (`- a\n- b`); other block boundaries keep a
-  // blank line so identical-replace equivalence matches clipboard Markdown.
+  // Same-list / nested list items stay tight (`- a\n- b`, `- p\n  - c`);
+  // adjacent distinct lists keep a blank line like MDXEditor serialization.
   let joined = parts[0].markdown;
   for (let i = 1; i < parts.length; i += 1) {
     const prev = parts[i - 1].block;
     const next = parts[i].block;
-    const sameListRun = prev.getType() === "listitem" && next.getType() === "listitem";
+    const sameListRun = areLexicalListItemsInSameTightRun(prev, next);
     joined += `${sameListRun ? "\n" : "\n\n"}${parts[i].markdown}`;
   }
   return joined;
@@ -990,18 +1035,32 @@ export const shouldRecoverNoteMarkdownPasteAfterUnchangedInsert = (input: {
 }): boolean => {
   const before = input.beforeMarkdown.replace(/\r\n?/g, "\n");
   const clipboard = input.clipboardText.replace(/\r\n?/g, "\n");
-  // Select All + paste of the same body: serialization stays equal on success.
-  if (normalizeNoteMarkdownForEquivalence(clipboard)
-    === normalizeNoteMarkdownForEquivalence(before)) {
+  const selectedMarkdown = input.selectedMarkdown?.replace(/\r\n?/g, "\n") ?? null;
+  const beforeNorm = normalizeNoteMarkdownForEquivalence(before);
+  const clipboardNorm = normalizeNoteMarkdownForEquivalence(clipboard);
+  // Clipboard equals the document: Select All identical replace stays suppressed,
+  // but a partial selection must still recover if insertMarkdown no-ops.
+  if (clipboardNorm === beforeNorm) {
+    const selected = input.selectedText?.replace(/\r\n?/g, "\n") ?? null;
+    const beforePlain = noteMarkdownClipboardToPlainText(beforeNorm);
+    const wholeDocByMarkdown = selectedMarkdown !== null
+      && normalizeNoteMarkdownForEquivalence(selectedMarkdown) === beforeNorm;
+    const wholeDocByPlain = selected !== null
+      && (selected === before || selected === beforePlain);
+    if (wholeDocByMarkdown || wholeDocByPlain) return false;
+    const partialMarkdown = selectedMarkdown !== null
+      && normalizeNoteMarkdownForEquivalence(selectedMarkdown) !== beforeNorm;
+    const partialPlain = selected !== null
+      && selected !== before
+      && selected !== beforePlain;
+    if (partialMarkdown || partialPlain) return true;
     return false;
   }
-  const selectedMarkdown = input.selectedMarkdown?.replace(/\r\n?/g, "\n") ?? null;
   // Selection-scoped markdown match is sufficient to suppress recovery for
   // identical replaces (including Lexical node selections with empty plain text).
   if (
     selectedMarkdown !== null
-    && normalizeNoteMarkdownForEquivalence(selectedMarkdown)
-      === normalizeNoteMarkdownForEquivalence(clipboard)
+    && normalizeNoteMarkdownForEquivalence(selectedMarkdown) === clipboardNorm
   ) {
     return false;
   }
@@ -1009,9 +1068,7 @@ export const shouldRecoverNoteMarkdownPasteAfterUnchangedInsert = (input: {
     const selected = input.selectedText.replace(/\r\n?/g, "\n");
     // Normalize first so table separators / thematic-break spellings project
     // to the same plain form as selection-scoped markdown evidence.
-    const clipboardPlain = noteMarkdownClipboardToPlainText(
-      normalizeNoteMarkdownForEquivalence(clipboard),
-    );
+    const clipboardPlain = noteMarkdownClipboardToPlainText(clipboardNorm);
     // Exact plain clipboard match (no markdown markers to apply). Do not use
     // selected===clipboard alone: selecting literal punctuation rendered from
     // `\*\*Hello\*\*` yields selected `**Hello**`, which equals clipboard
