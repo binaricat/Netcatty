@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  doesSelectionEncompassLexicalBlock,
   mergeNoteMarkdownDocumentPaste,
   noteMarkdownClipboardToPlainText,
+  normalizeNoteMarkdownForEquivalence,
   serializeLexicalSelectionAsMarkdown,
   shouldInterceptNoteMarkdownPaste,
   shouldRecoverNoteMarkdownPasteAfterUnchangedInsert,
@@ -88,6 +90,15 @@ test("clipboard markdown plain-text approx matches Lexical selection text", () =
   assert.equal(noteMarkdownClipboardToPlainText("- item"), "item");
   assert.equal(noteMarkdownClipboardToPlainText("- [ ] task"), "task");
   assert.equal(noteMarkdownClipboardToPlainText("- [x] task"), "task");
+});
+
+test("markdown equivalence normalizes underscore emphasis to serializer form", () => {
+  assert.equal(normalizeNoteMarkdownForEquivalence("__Hello__"), "**Hello**");
+  assert.equal(normalizeNoteMarkdownForEquivalence("_Hi_"), "*Hi*");
+  assert.equal(
+    normalizeNoteMarkdownForEquivalence("__Hello__"),
+    normalizeNoteMarkdownForEquivalence("**Hello**"),
+  );
 });
 
 test("selection markdown serialization scopes bold and link formatting", () => {
@@ -321,6 +332,8 @@ test("selection markdown serialization scopes bold and link formatting", () => {
     }),
     "**Hello**",
   );
+  // Text-only coverage of the full block still omits the marker; Lexical
+  // whole-block selections include the heading element in getNodes().
   assert.equal(
     serializeLexicalSelectionAsMarkdown("Hello world", {
       hasFormat: () => false,
@@ -329,11 +342,96 @@ test("selection markdown serialization scopes bold and link formatting", () => {
       isBackward: () => false,
       getNodes: () => [helloText, worldText],
     }),
+    "**Hello** world",
+  );
+  assert.equal(
+    serializeLexicalSelectionAsMarkdown("Hello world", {
+      hasFormat: () => false,
+      anchor: { getNode: () => helloText, offset: 0, type: "text" },
+      focus: { getNode: () => worldText, offset: 6, type: "text" },
+      isBackward: () => false,
+      getNodes: () => [partialHeading, helloText, worldText],
+    }),
     "# **Hello** world",
   );
   assert.equal(
     shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
       beforeMarkdown: "# **Hello** world",
+      clipboardText: "**Hello**",
+      selectedText: "Hello",
+      selectedMarkdown: "**Hello**",
+    }),
+    false,
+  );
+
+  // Sole-content heading: selecting bold "Hello" is not a whole-block selection.
+  const soleHeading = {
+    getType: () => "heading",
+    getTag: () => "h1",
+    getKey: () => "sole",
+    getTextContent: () => "Hello",
+    getParent: () => null,
+  };
+  const soleHelloText = {
+    getType: () => "text",
+    getKey: () => "sole-hello",
+    getTextContent: () => "Hello",
+    hasFormat: (type: string) => type === "bold",
+    getParent: () => soleHeading,
+  };
+  assert.equal(
+    serializeLexicalSelectionAsMarkdown("Hello", {
+      hasFormat: () => false,
+      anchor: { getNode: () => soleHelloText, offset: 0, type: "text" },
+      focus: { getNode: () => soleHelloText, offset: 5, type: "text" },
+      isBackward: () => false,
+      getNodes: () => [soleHelloText],
+    }),
+    "**Hello**",
+  );
+  assert.equal(
+    doesSelectionEncompassLexicalBlock(
+      soleHeading,
+      "sole",
+      [soleHelloText],
+      {
+        hasFormat: () => false,
+        anchor: { getNode: () => soleHelloText, offset: 0, type: "text" },
+        focus: { getNode: () => soleHelloText, offset: 5, type: "text" },
+        isBackward: () => false,
+        getNodes: () => [soleHelloText],
+      },
+    ),
+    false,
+  );
+  assert.equal(
+    serializeLexicalSelectionAsMarkdown("Hello", {
+      hasFormat: () => false,
+      anchor: { getNode: () => soleHelloText, offset: 0, type: "text" },
+      focus: { getNode: () => soleHelloText, offset: 5, type: "text" },
+      isBackward: () => false,
+      getNodes: () => [soleHeading, soleHelloText],
+    }),
+    "# **Hello**",
+  );
+  assert.equal(
+    doesSelectionEncompassLexicalBlock(
+      soleHeading,
+      "sole",
+      [soleHelloText],
+      {
+        hasFormat: () => false,
+        anchor: { getNode: () => soleHeading, offset: 0, type: "element" },
+        focus: { getNode: () => soleHeading, offset: 1, type: "element" },
+        isBackward: () => false,
+        getNodes: () => [soleHelloText],
+      },
+    ),
+    true,
+  );
+  assert.equal(
+    shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
+      beforeMarkdown: "# **Hello**",
       clipboardText: "**Hello**",
       selectedText: "Hello",
       selectedMarkdown: "**Hello**",
@@ -411,6 +509,16 @@ test("unchanged insert recovery skips identical replacements but recovers lost-s
     shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
       beforeMarkdown: "# Note\n\n**Hello** world",
       clipboardText: "**Hello**",
+      selectedText: "Hello",
+      selectedMarkdown: "**Hello**",
+    }),
+    false,
+  );
+  // Underscore bold is equivalent to serializer `**…**`; do not append a duplicate.
+  assert.equal(
+    shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
+      beforeMarkdown: "# Note\n\n**Hello** world",
+      clipboardText: "__Hello__",
       selectedText: "Hello",
       selectedMarkdown: "**Hello**",
     }),

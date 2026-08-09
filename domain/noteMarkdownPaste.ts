@@ -182,6 +182,11 @@ const getSelectedLexicalBlockPlainText = (
  * Heading/list/quote markers belong only on whole-block selections. Partial
  * inline ranges (e.g. bold "Hello" inside `# **Hello** world`) serialize as
  * inline markdown only so identical-replace recovery stays accurate.
+ *
+ * Covering every character of the block is not enough: a heading/list whose
+ * sole content is the selected text still has a structural marker outside the
+ * text range. Require the block node in getNodes() or an element-type
+ * anchor/focus on that block.
  */
 export const doesSelectionEncompassLexicalBlock = (
   block: NoteMarkdownPasteSelectionNode,
@@ -191,7 +196,24 @@ export const doesSelectionEncompassLexicalBlock = (
 ): boolean => {
   if (typeof block.getTextContent !== "function") return true;
   const blockText = block.getTextContent();
-  return getSelectedLexicalBlockPlainText(block, blockKey, nodes, selection) === blockText;
+  if (getSelectedLexicalBlockPlainText(block, blockKey, nodes, selection) !== blockText) {
+    return false;
+  }
+
+  for (const node of nodes) {
+    if (node === block || getLexicalNodeKey(node, "") === blockKey) return true;
+  }
+
+  const anchor = selection.anchor;
+  const focus = selection.focus ?? selection.anchor;
+  const isElementBoundaryOnBlock = (
+    point: { getNode: () => NoteMarkdownPasteSelectionNode; type?: string },
+  ): boolean => {
+    if (point.type !== "element") return false;
+    const pointNode = point.getNode();
+    return pointNode === block || getLexicalNodeKey(pointNode, "") === blockKey;
+  };
+  return isElementBoundaryOnBlock(anchor) || isElementBoundaryOnBlock(focus);
 };
 
 const getSelectedLexicalTextNodeContent = (
@@ -204,6 +226,11 @@ const getSelectedLexicalTextNodeContent = (
   const lastNode = nodes[nodes.length - 1];
   const anchor = selection.anchor;
   const focus = selection.focus ?? selection.anchor;
+  // Element-type points use child-index offsets, not character offsets. Text
+  // nodes present in getNodes() for an element-bounded range are fully selected.
+  if (anchor.type === "element" || focus.type === "element") {
+    return fullText;
+  }
   const anchorOffset = typeof anchor.offset === "number" ? anchor.offset : 0;
   const focusOffset = typeof focus.offset === "number" ? focus.offset : fullText.length;
   const isBefore = typeof selection.isBackward === "function"
@@ -213,9 +240,6 @@ const getSelectedLexicalTextNodeContent = (
   const endOffset = isBefore ? focusOffset : anchorOffset;
 
   if (node === firstNode && node === lastNode) {
-    if (anchor.type === "element" && focus.type === "element" && anchorOffset === focusOffset) {
-      return fullText;
-    }
     return startOffset < endOffset
       ? fullText.slice(startOffset, endOffset)
       : fullText.slice(endOffset, startOffset);
@@ -370,20 +394,19 @@ export const serializeLexicalSelectionAsMarkdown = (
   }
   if (selectedText.length === 0) return markdown;
 
-  // Fallback path: omit block markers when the selected text is clearly a
-  // partial slice of the surrounding block (getTextContent available).
-  let blockText: string | null = null;
+  // Fallback (no getNodes): include block markers only when block plain text
+  // is unknown. Text equality alone cannot prove the structural marker was
+  // selected (sole-content heading/list item).
+  let blockTextKnown = false;
   let blockProbe: NoteMarkdownPasteSelectionNode | null = selection.anchor.getNode();
   while (blockProbe) {
     if (NOTE_MARKDOWN_PASTE_BLOCK_TYPES.has(blockProbe.getType())) {
-      blockText = typeof blockProbe.getTextContent === "function"
-        ? blockProbe.getTextContent()
-        : null;
+      blockTextKnown = typeof blockProbe.getTextContent === "function";
       break;
     }
     blockProbe = blockProbe.getParent();
   }
-  const includeBlockMarker = blockText === null || blockText === selectedText;
+  const includeBlockMarker = !blockTextKnown;
 
   if (includeBlockMarker && listMarker !== null) {
     return `${" ".repeat(listIndent)}${listMarker} ${markdown}`;
@@ -442,6 +465,23 @@ export const noteMarkdownClipboardToPlainText = (markdown: string): string => {
 };
 
 /**
+ * Canonicalize semantically equivalent Markdown spelling so identical-replace
+ * checks are not tripped by serializer vs clipboard marker differences
+ * (`**Hello**` vs `__Hello__`, `*Hi*` vs `_Hi_`).
+ */
+export const normalizeNoteMarkdownForEquivalence = (markdown: string): string => {
+  let text = markdown.replace(/\r\n?/g, "\n");
+  // Strong emphasis: __x__ → **x** (serializer canonical form).
+  text = text.replace(/(__)(?=\S)([\s\S]*?\S)\1/g, "**$2**");
+  // Emphasis: _x_ → *x* (avoid matching inside identifiers / already-normalized **).
+  text = text.replace(
+    /(^|[^\\*\w])_(\S[\s\S]*?\S)_(?=$|[^\\*\w])/g,
+    "$1*$2*",
+  );
+  return text;
+};
+
+/**
  * After insertMarkdown, an unchanged document is either a successful identical
  * replace or a lost-selection no-op. Only the latter should fall back to
  * document-append recovery.
@@ -463,16 +503,24 @@ export const shouldRecoverNoteMarkdownPasteAfterUnchangedInsert = (input: {
   const before = input.beforeMarkdown.replace(/\r\n?/g, "\n");
   const clipboard = input.clipboardText.replace(/\r\n?/g, "\n");
   // Select All + paste of the same body: serialization stays equal on success.
-  if (clipboard === before) return false;
+  if (normalizeNoteMarkdownForEquivalence(clipboard)
+    === normalizeNoteMarkdownForEquivalence(before)) {
+    return false;
+  }
   if (input.selectedText !== null) {
     const selected = input.selectedText.replace(/\r\n?/g, "\n");
     // Exact plain clipboard match (no markdown markers to apply).
     if (selected === clipboard) return false;
     // Structured clipboard: skip recovery only when the selection itself is
     // already that markdown (identical formatted/link replace at this range).
+    // Compare normalized structure so `__Hello__` matches serializer `**Hello**`.
     if (selected === noteMarkdownClipboardToPlainText(clipboard)) {
       const selectedMarkdown = input.selectedMarkdown?.replace(/\r\n?/g, "\n") ?? null;
-      if (selectedMarkdown !== null && selectedMarkdown === clipboard) {
+      if (
+        selectedMarkdown !== null
+        && normalizeNoteMarkdownForEquivalence(selectedMarkdown)
+          === normalizeNoteMarkdownForEquivalence(clipboard)
+      ) {
         return false;
       }
     }
