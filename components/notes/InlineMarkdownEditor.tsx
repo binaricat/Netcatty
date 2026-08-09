@@ -246,31 +246,70 @@ export const hasActiveLexicalTextSelection = (target: EventTarget | null): boole
 type NoteMarkdownPasteSelectionNode = {
   getType: () => string;
   getParent: () => NoteMarkdownPasteSelectionNode | null;
+  getKey?: () => string;
   getURL?: () => string;
+  getTitle?: () => string | null;
   getTag?: () => string;
   getListType?: () => "bullet" | "number" | "check" | string;
   getValue?: () => number;
+  getTextContent?: () => string;
+  hasFormat?: (type: "bold" | "italic" | "code") => boolean;
 };
+
+type NoteMarkdownPasteSelection = {
+  hasFormat: (type: "bold" | "italic" | "code") => boolean;
+  anchor: {
+    getNode: () => NoteMarkdownPasteSelectionNode;
+    offset?: number;
+    type?: string;
+  };
+  focus?: {
+    getNode: () => NoteMarkdownPasteSelectionNode;
+    offset?: number;
+    type?: string;
+  };
+  getNodes?: () => NoteMarkdownPasteSelectionNode[];
+  isBackward?: () => boolean;
+};
+
+const NOTE_MARKDOWN_PASTE_BLOCK_TYPES = new Set([
+  "heading",
+  "paragraph",
+  "listitem",
+  "quote",
+]);
 
 const isLexicalLinkNode = (
   node: NoteMarkdownPasteSelectionNode,
 ): node is NoteMarkdownPasteSelectionNode & { getURL: () => string } => (
-  node.getType() === "link" && typeof node.getURL === "function"
+  (node.getType() === "link" || node.getType() === "autolink")
+  && typeof node.getURL === "function"
 );
 
 const applyLexicalInlineMarkdownFormats = (
   text: string,
-  selection: { hasFormat: (type: "bold" | "italic" | "code") => boolean },
+  formatSource: { hasFormat: (type: "bold" | "italic" | "code") => boolean },
 ): string => {
   if (!text) return text;
   // Code fences out other emphasis markers in CommonMark-style paste.
-  if (selection.hasFormat("code")) return `\`${text}\``;
-  const bold = selection.hasFormat("bold");
-  const italic = selection.hasFormat("italic");
+  if (formatSource.hasFormat("code")) return `\`${text}\``;
+  const bold = formatSource.hasFormat("bold");
+  const italic = formatSource.hasFormat("italic");
   if (bold && italic) return `***${text}***`;
   if (bold) return `**${text}**`;
   if (italic) return `*${text}*`;
   return text;
+};
+
+const formatLexicalLinkMarkdown = (
+  label: string,
+  url: string,
+  title?: string | null,
+): string => {
+  if (title) {
+    return `[${label}](${url} "${title.replace(/"/g, '\\"')}")`;
+  }
+  return `[${label}](${url})`;
 };
 
 const getLexicalListNestingDepth = (listItem: NoteMarkdownPasteSelectionNode): number => {
@@ -283,20 +322,186 @@ const getLexicalListNestingDepth = (listItem: NoteMarkdownPasteSelectionNode): n
   return Math.max(depth, 1);
 };
 
+const findLexicalAncestorByTypes = (
+  node: NoteMarkdownPasteSelectionNode,
+  types: ReadonlySet<string>,
+): NoteMarkdownPasteSelectionNode | null => {
+  let current: NoteMarkdownPasteSelectionNode | null = node;
+  while (current) {
+    if (types.has(current.getType())) return current;
+    current = current.getParent();
+  }
+  return null;
+};
+
+const findLexicalLinkAncestor = (
+  node: NoteMarkdownPasteSelectionNode,
+): (NoteMarkdownPasteSelectionNode & { getURL: () => string }) | null => {
+  let current: NoteMarkdownPasteSelectionNode | null = node;
+  while (current) {
+    if (isLexicalLinkNode(current)) return current;
+    current = current.getParent();
+  }
+  return null;
+};
+
+const getLexicalBlockMarkerPrefix = (block: NoteMarkdownPasteSelectionNode): string => {
+  const type = block.getType();
+  if (type === "listitem") {
+    const parent = block.getParent();
+    const listType = parent?.getType() === "list" && typeof parent.getListType === "function"
+      ? parent.getListType()
+      : "bullet";
+    const listIndent = Math.max(getLexicalListNestingDepth(block) - 1, 0) * 2;
+    if (listType === "number") {
+      const value = typeof block.getValue === "function" ? block.getValue() : 1;
+      return `${" ".repeat(listIndent)}${value}. `;
+    }
+    // bullet / check — MDXEditor exports unchecked items as "- ".
+    return `${" ".repeat(listIndent)}- `;
+  }
+  if (type === "heading" && typeof block.getTag === "function") {
+    const level = Number(block.getTag().replace(/^h/iu, "")) || 1;
+    return `${"#".repeat(Math.min(Math.max(level, 1), 6))} `;
+  }
+  if (type === "quote") {
+    return "> ";
+  }
+  return "";
+};
+
+const getSelectedLexicalTextNodeContent = (
+  node: NoteMarkdownPasteSelectionNode,
+  nodes: NoteMarkdownPasteSelectionNode[],
+  selection: NoteMarkdownPasteSelection,
+): string => {
+  const fullText = typeof node.getTextContent === "function" ? node.getTextContent() : "";
+  const firstNode = nodes[0];
+  const lastNode = nodes[nodes.length - 1];
+  const anchor = selection.anchor;
+  const focus = selection.focus ?? selection.anchor;
+  const anchorOffset = typeof anchor.offset === "number" ? anchor.offset : 0;
+  const focusOffset = typeof focus.offset === "number" ? focus.offset : fullText.length;
+  const isBefore = typeof selection.isBackward === "function"
+    ? !selection.isBackward()
+    : true;
+  const startOffset = isBefore ? anchorOffset : focusOffset;
+  const endOffset = isBefore ? focusOffset : anchorOffset;
+
+  if (node === firstNode && node === lastNode) {
+    if (anchor.type === "element" && focus.type === "element" && anchorOffset === focusOffset) {
+      return fullText;
+    }
+    return startOffset < endOffset
+      ? fullText.slice(startOffset, endOffset)
+      : fullText.slice(endOffset, startOffset);
+  }
+  if (node === firstNode) return fullText.slice(startOffset);
+  if (node === lastNode) return fullText.slice(0, endOffset);
+  return fullText;
+};
+
+const getLexicalNodeKey = (
+  node: NoteMarkdownPasteSelectionNode,
+  fallback: string,
+): string => (typeof node.getKey === "function" ? node.getKey() : fallback);
+
+const serializeLexicalBlockInlineMarkdown = (
+  block: NoteMarkdownPasteSelectionNode,
+  blockKey: string,
+  nodes: NoteMarkdownPasteSelectionNode[],
+  selection: NoteMarkdownPasteSelection,
+): string => {
+  let markdown = "";
+  let linkBuffer: {
+    linkKey: string;
+    link: NoteMarkdownPasteSelectionNode & { getURL: () => string };
+    label: string;
+  } | null = null;
+
+  const flushLink = () => {
+    if (!linkBuffer) return;
+    const title = typeof linkBuffer.link.getTitle === "function"
+      ? linkBuffer.link.getTitle()
+      : null;
+    markdown += formatLexicalLinkMarkdown(linkBuffer.label, linkBuffer.link.getURL(), title);
+    linkBuffer = null;
+  };
+
+  for (const node of nodes) {
+    const type = node.getType();
+    if (type === "linebreak") {
+      flushLink();
+      markdown += "\n";
+      continue;
+    }
+    if (type !== "text" || typeof node.hasFormat !== "function") continue;
+    const nodeBlock = findLexicalAncestorByTypes(node, NOTE_MARKDOWN_PASTE_BLOCK_TYPES);
+    if (!nodeBlock || getLexicalNodeKey(nodeBlock, "") !== blockKey) continue;
+
+    const text = getSelectedLexicalTextNodeContent(node, nodes, selection);
+    if (!text) continue;
+    const formatted = applyLexicalInlineMarkdownFormats(text, node);
+    const link = findLexicalLinkAncestor(node);
+    if (!link) {
+      flushLink();
+      markdown += formatted;
+      continue;
+    }
+    const linkKey = getLexicalNodeKey(link, link.getURL());
+    if (linkBuffer && linkBuffer.linkKey !== linkKey) flushLink();
+    if (!linkBuffer) linkBuffer = { linkKey, link, label: formatted };
+    else linkBuffer.label += formatted;
+  }
+  flushLink();
+  return markdown;
+};
+
+const serializeLexicalSelectionNodesAsMarkdown = (
+  selection: NoteMarkdownPasteSelection,
+): string | null => {
+  if (typeof selection.getNodes !== "function") return null;
+  const nodes = selection.getNodes();
+  if (nodes.length === 0) return null;
+
+  const blocks: Array<{ block: NoteMarkdownPasteSelectionNode; key: string }> = [];
+  const seenBlockKeys = new Set<string>();
+  for (const node of nodes) {
+    const block = findLexicalAncestorByTypes(node, NOTE_MARKDOWN_PASTE_BLOCK_TYPES);
+    if (!block) continue;
+    const key = getLexicalNodeKey(block, `${block.getType()}:${blocks.length}`);
+    if (seenBlockKeys.has(key)) continue;
+    seenBlockKeys.add(key);
+    blocks.push({ block, key });
+  }
+  if (blocks.length === 0) return null;
+
+  const parts: string[] = [];
+  for (const { block, key } of blocks) {
+    const inline = serializeLexicalBlockInlineMarkdown(block, key, nodes, selection);
+    if (!inline) continue;
+    parts.push(`${getLexicalBlockMarkerPrefix(block)}${inline}`);
+  }
+  if (parts.length === 0) return null;
+  return parts.join("\n\n");
+};
+
 /**
  * Best-effort markdown for the active Lexical range (combined text formats,
- * link URL, and block markers). Used to scope paste-equivalence checks to the
- * selection, not the whole document.
+ * link URL/title, and per-block markers). Used to scope paste-equivalence
+ * checks to the selection, not the whole document.
  */
 export const serializeLexicalSelectionAsMarkdown = (
   selectedText: string,
-  selection: {
-    hasFormat: (type: "bold" | "italic" | "code") => boolean;
-    anchor: { getNode: () => NoteMarkdownPasteSelectionNode };
-  },
+  selection: NoteMarkdownPasteSelection,
 ): string => {
+  const fromNodes = serializeLexicalSelectionNodesAsMarkdown(selection);
+  if (fromNodes !== null) return fromNodes;
+
+  // Fallback when getNodes() is unavailable (unit mocks): single-anchor path.
   let markdown = applyLexicalInlineMarkdownFormats(selectedText, selection);
   let linkUrl: string | null = null;
+  let linkTitle: string | null = null;
   let headingTag: string | null = null;
   let listMarker: string | null = null;
   let listIndent = 0;
@@ -307,6 +512,7 @@ export const serializeLexicalSelectionAsMarkdown = (
     const type = current.getType();
     if (!linkUrl && isLexicalLinkNode(current)) {
       linkUrl = current.getURL();
+      linkTitle = typeof current.getTitle === "function" ? current.getTitle() : null;
     }
     if (!headingTag && type === "heading" && typeof current.getTag === "function") {
       headingTag = current.getTag();
@@ -332,7 +538,7 @@ export const serializeLexicalSelectionAsMarkdown = (
   }
 
   if (linkUrl) {
-    markdown = `[${markdown}](${linkUrl})`;
+    markdown = formatLexicalLinkMarkdown(markdown, linkUrl, linkTitle);
   }
   if (selectedText.length === 0) return markdown;
   if (listMarker !== null) {

@@ -117,6 +117,20 @@ test("selection markdown serialization scopes bold and link formatting", () => {
     "[docs](https://a.example)",
   );
   assert.equal(
+    serializeLexicalSelectionAsMarkdown("docs", {
+      hasFormat: () => false,
+      anchor: {
+        getNode: () => ({
+          getType: () => "link",
+          getURL: () => "https://a.example",
+          getTitle: () => "API",
+          getParent: () => null,
+        }),
+      },
+    }),
+    '[docs](https://a.example "API")',
+  );
+  assert.equal(
     serializeLexicalSelectionAsMarkdown("Title", {
       hasFormat: () => false,
       anchor: {
@@ -150,6 +164,73 @@ test("selection markdown serialization scopes bold and link formatting", () => {
       },
     }),
     "- **item**",
+  );
+
+  const headingOne = {
+    getType: () => "heading",
+    getTag: () => "h1",
+    getKey: () => "h1",
+    getParent: () => null,
+  };
+  const headingTwo = {
+    getType: () => "heading",
+    getTag: () => "h2",
+    getKey: () => "h2",
+    getParent: () => null,
+  };
+  const headingOneText = {
+    getType: () => "text",
+    getKey: () => "t1",
+    getTextContent: () => "Heading One",
+    hasFormat: () => false,
+    getParent: () => headingOne,
+  };
+  const headingTwoText = {
+    getType: () => "text",
+    getKey: () => "t2",
+    getTextContent: () => "Heading Two",
+    hasFormat: () => false,
+    getParent: () => headingTwo,
+  };
+  assert.equal(
+    serializeLexicalSelectionAsMarkdown("Heading One\n\nHeading Two", {
+      hasFormat: () => false,
+      anchor: { getNode: () => headingOneText, offset: 0, type: "text" },
+      focus: { getNode: () => headingTwoText, offset: 11, type: "text" },
+      isBackward: () => false,
+      getNodes: () => [headingOne, headingOneText, headingTwo, headingTwoText],
+    }),
+    "# Heading One\n\n## Heading Two",
+  );
+
+  const paragraphNode = {
+    getType: () => "paragraph",
+    getKey: () => "p",
+    getParent: () => null,
+  };
+  const linkNode = {
+    getType: () => "link",
+    getURL: () => "https://a.example",
+    getTitle: () => "API",
+    getKey: () => "link",
+    getParent: () => paragraphNode,
+  };
+  const linkText = {
+    getType: () => "text",
+    getKey: () => "lt",
+    getTextContent: () => "docs",
+    hasFormat: () => false,
+    getParent: () => linkNode,
+  };
+  assert.equal(
+    serializeLexicalSelectionAsMarkdown("docs", {
+      hasFormat: () => false,
+      anchor: { getNode: () => linkText, offset: 0, type: "text" },
+      focus: { getNode: () => linkText, offset: 4, type: "text" },
+      isBackward: () => false,
+      getNodes: () => [linkNode, linkText],
+    }),
+    '[docs](https://a.example "API")',
   );
 });
 
@@ -231,6 +312,27 @@ test("unchanged insert recovery skips identical replacements but recovers lost-s
       clipboardText: "[docs](https://a.example)",
       selectedText: "docs",
       selectedMarkdown: "[docs](https://a.example)",
+    }),
+    false,
+  );
+  // Link title must be part of selection markdown; otherwise an identical
+  // titled-link replace is misclassified as a lost-selection no-op.
+  assert.equal(
+    shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
+      beforeMarkdown: 'see [docs](https://a.example "API") end',
+      clipboardText: '[docs](https://a.example "API")',
+      selectedText: "docs",
+      selectedMarkdown: '[docs](https://a.example "API")',
+    }),
+    false,
+  );
+  // Multi-block identical replace (two headings) must not append a duplicate.
+  assert.equal(
+    shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
+      beforeMarkdown: "intro\n\n# Heading One\n\n## Heading Two\n\noutro",
+      clipboardText: "# Heading One\n\n## Heading Two",
+      selectedText: "Heading One\n\nHeading Two",
+      selectedMarkdown: "# Heading One\n\n## Heading Two",
     }),
     false,
   );
