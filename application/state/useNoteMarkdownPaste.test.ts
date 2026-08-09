@@ -34,5 +34,11 @@ test("useNoteMarkdownPaste owns paste intercept and recovery orchestration", () 
     source,
     /if\s*\(\s*getLatestMarkdown\(\)\s*!==\s*before\s*\)\s*return/,
   );
+  // Recovery after a no-op insert must merge from the editor snapshot when it
+  // diverged (typed during rAF) so a lagging draft ref cannot wipe that input.
+  assert.match(
+    source,
+    /applyDocumentPaste\(\s*editorMarkdown\s*!==\s*before\s*\?\s*editorMarkdown\s*:\s*undefined\s*,?\s*\)/,
+  );
   assert.doesNotMatch(source, /shouldUseDocumentNoteMarkdownPaste/);
 });

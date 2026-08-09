@@ -70,8 +70,11 @@ export function useNoteMarkdownPaste({
     event.stopPropagation();
     event.nativeEvent.stopImmediatePropagation?.();
 
-    const applyDocumentPaste = () => {
-      const next = mergeNoteMarkdownDocumentPaste(getLatestMarkdown(), markdown);
+    const applyDocumentPaste = (baseMarkdown?: string) => {
+      const next = mergeNoteMarkdownDocumentPaste(
+        baseMarkdown ?? getLatestMarkdown(),
+        markdown,
+      );
       // setMarkdown mutes MDXEditor onChange; commit the draft ourselves so
       // autosave still sees the pasted body.
       editor.setMarkdown(next);
@@ -115,7 +118,12 @@ export function useNoteMarkdownPaste({
             }
             return;
           }
-          applyDocumentPaste();
+          // insertMarkdown no-oped; concurrent typing may already be in the
+          // editor while getLatestMarkdown() still lags. Prefer that snapshot
+          // so setMarkdown does not erase the raced input.
+          applyDocumentPaste(
+            editorMarkdown !== before ? editorMarkdown : undefined,
+          );
         });
       });
     }
