@@ -173,7 +173,7 @@ const getSelectedLexicalBlockPlainText = (
     if (type !== "text") continue;
     const nodeBlock = findLexicalAncestorByTypes(node, NOTE_MARKDOWN_PASTE_BLOCK_TYPES);
     if (!nodeBlock || getLexicalNodeKey(nodeBlock, "") !== blockKey) continue;
-    plain += getSelectedLexicalTextNodeContent(node, nodes, selection);
+    plain += getSelectedLexicalTextNodeContent(node, selection);
   }
   return plain;
 };
@@ -218,34 +218,35 @@ export const doesSelectionEncompassLexicalBlock = (
 
 const getSelectedLexicalTextNodeContent = (
   node: NoteMarkdownPasteSelectionNode,
-  nodes: NoteMarkdownPasteSelectionNode[],
   selection: NoteMarkdownPasteSelection,
 ): string => {
   const fullText = typeof node.getTextContent === "function" ? node.getTextContent() : "";
-  const firstNode = nodes[0];
-  const lastNode = nodes[nodes.length - 1];
   const anchor = selection.anchor;
   const focus = selection.focus ?? selection.anchor;
-  // Element-type points use child-index offsets, not character offsets. Text
-  // nodes present in getNodes() for an element-bounded range are fully selected.
-  if (anchor.type === "element" || focus.type === "element") {
-    return fullText;
-  }
-  const anchorOffset = typeof anchor.offset === "number" ? anchor.offset : 0;
-  const focusOffset = typeof focus.offset === "number" ? focus.offset : fullText.length;
   const isBefore = typeof selection.isBackward === "function"
     ? !selection.isBackward()
     : true;
-  const startOffset = isBefore ? anchorOffset : focusOffset;
-  const endOffset = isBefore ? focusOffset : anchorOffset;
+  const startPoint = isBefore ? anchor : focus;
+  const endPoint = isBefore ? focus : anchor;
+  // Element-type points use child-index offsets, not character offsets. Only
+  // text-typed endpoints contribute character slices; the element-bounded side
+  // treats every text node present in getNodes() as fully selected.
+  const startTextNode = startPoint.type === "text" ? startPoint.getNode() : null;
+  const endTextNode = endPoint.type === "text" ? endPoint.getNode() : null;
+  const startOffset = startPoint.type === "text" && typeof startPoint.offset === "number"
+    ? startPoint.offset
+    : 0;
+  const endOffset = endPoint.type === "text" && typeof endPoint.offset === "number"
+    ? endPoint.offset
+    : fullText.length;
 
-  if (node === firstNode && node === lastNode) {
+  if (startTextNode && endTextNode && node === startTextNode && node === endTextNode) {
     return startOffset < endOffset
       ? fullText.slice(startOffset, endOffset)
       : fullText.slice(endOffset, startOffset);
   }
-  if (node === firstNode) return fullText.slice(startOffset);
-  if (node === lastNode) return fullText.slice(0, endOffset);
+  if (startTextNode && node === startTextNode) return fullText.slice(startOffset);
+  if (endTextNode && node === endTextNode) return fullText.slice(0, endOffset);
   return fullText;
 };
 
@@ -287,7 +288,7 @@ const serializeLexicalBlockInlineMarkdown = (
     const nodeBlock = findLexicalAncestorByTypes(node, NOTE_MARKDOWN_PASTE_BLOCK_TYPES);
     if (!nodeBlock || getLexicalNodeKey(nodeBlock, "") !== blockKey) continue;
 
-    const text = getSelectedLexicalTextNodeContent(node, nodes, selection);
+    const text = getSelectedLexicalTextNodeContent(node, selection);
     if (!text) continue;
     const formatted = applyLexicalInlineMarkdownFormats(text, node);
     const link = findLexicalLinkAncestor(node);
@@ -464,6 +465,10 @@ export const noteMarkdownClipboardToPlainText = (markdown: string): string => {
   return text;
 };
 
+/** Collapse block separators so Lexical plain selection matches Markdown plain text. */
+const normalizePlainSelectionBlockSeparators = (text: string): string =>
+  text.replace(/\n+/g, "\n");
+
 /**
  * Canonicalize semantically equivalent Markdown spelling so identical-replace
  * checks are not tripped by serializer vs clipboard marker differences
@@ -514,7 +519,12 @@ export const shouldRecoverNoteMarkdownPasteAfterUnchangedInsert = (input: {
     // Structured clipboard: skip recovery only when the selection itself is
     // already that markdown (identical formatted/link replace at this range).
     // Compare normalized structure so `__Hello__` matches serializer `**Hello**`.
-    if (selected === noteMarkdownClipboardToPlainText(clipboard)) {
+    // Also normalize block separators: Lexical selection plain text uses one
+    // newline between blocks while clipboard Markdown keeps a blank line.
+    if (
+      normalizePlainSelectionBlockSeparators(selected)
+      === normalizePlainSelectionBlockSeparators(noteMarkdownClipboardToPlainText(clipboard))
+    ) {
       const selectedMarkdown = input.selectedMarkdown?.replace(/\r\n?/g, "\n") ?? null;
       if (
         selectedMarkdown !== null

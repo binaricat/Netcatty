@@ -90,6 +90,10 @@ test("clipboard markdown plain-text approx matches Lexical selection text", () =
   assert.equal(noteMarkdownClipboardToPlainText("- item"), "item");
   assert.equal(noteMarkdownClipboardToPlainText("- [ ] task"), "task");
   assert.equal(noteMarkdownClipboardToPlainText("- [x] task"), "task");
+  assert.equal(
+    noteMarkdownClipboardToPlainText("# Heading One\n\n## Heading Two"),
+    "Heading One\n\nHeading Two",
+  );
 });
 
 test("markdown equivalence normalizes underscore emphasis to serializer form", () => {
@@ -259,7 +263,7 @@ test("selection markdown serialization scopes bold and link formatting", () => {
     getParent: () => headingTwo,
   };
   assert.equal(
-    serializeLexicalSelectionAsMarkdown("Heading One\n\nHeading Two", {
+    serializeLexicalSelectionAsMarkdown("Heading One\nHeading Two", {
       hasFormat: () => false,
       anchor: { getNode: () => headingOneText, offset: 0, type: "text" },
       focus: { getNode: () => headingTwoText, offset: 11, type: "text" },
@@ -331,6 +335,27 @@ test("selection markdown serialization scopes bold and link formatting", () => {
       getNodes: () => [helloText],
     }),
     "**Hello**",
+  );
+  // Mixed element/text endpoints: element side is fully selected, text side
+  // still honors the character offset (prefix of bold "Hello").
+  assert.equal(
+    serializeLexicalSelectionAsMarkdown("Hel", {
+      hasFormat: () => false,
+      anchor: { getNode: () => partialHeading, offset: 0, type: "element" },
+      focus: { getNode: () => helloText, offset: 3, type: "text" },
+      isBackward: () => false,
+      getNodes: () => [partialHeading, helloText],
+    }),
+    "**Hel**",
+  );
+  assert.equal(
+    shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
+      beforeMarkdown: "# **Hello** world",
+      clipboardText: "**Hel**",
+      selectedText: "Hel",
+      selectedMarkdown: "**Hel**",
+    }),
+    false,
   );
   // Text-only coverage of the full block still omits the marker; Lexical
   // whole-block selections include the heading element in getNodes().
@@ -597,11 +622,12 @@ test("unchanged insert recovery skips identical replacements but recovers lost-s
     false,
   );
   // Multi-block identical replace (two headings) must not append a duplicate.
+  // Lexical getTextContent() joins blocks with one newline, not Markdown's blank line.
   assert.equal(
     shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
       beforeMarkdown: "intro\n\n# Heading One\n\n## Heading Two\n\noutro",
       clipboardText: "# Heading One\n\n## Heading Two",
-      selectedText: "Heading One\n\nHeading Two",
+      selectedText: "Heading One\nHeading Two",
       selectedMarkdown: "# Heading One\n\n## Heading Two",
     }),
     false,
