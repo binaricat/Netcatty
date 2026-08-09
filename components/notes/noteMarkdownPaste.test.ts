@@ -16,6 +16,7 @@ test("markdown paste intercepts structured clipboard text in edit mode even with
       editorMode: "edit",
       pasteInsideCodeBlock: false,
       clipboardText: "# Heading\n\n- item",
+      pasteInsideLexicalContentSurface: true,
       canInsertMarkdownAtSelection: true,
     }),
     true,
@@ -27,15 +28,28 @@ test("markdown paste intercepts structured clipboard text in edit mode even with
       editorMode: "edit",
       pasteInsideCodeBlock: false,
       clipboardText: "# Heading\n\n- item",
+      pasteInsideLexicalContentSurface: true,
       canInsertMarkdownAtSelection: false,
     }),
     true,
+  );
+  // Link dialog / toolbar inputs are outside the Lexical content surface.
+  assert.equal(
+    shouldInterceptNoteMarkdownPaste({
+      editorMode: "edit",
+      pasteInsideCodeBlock: false,
+      clipboardText: "# Heading\n\n- item",
+      pasteInsideLexicalContentSurface: false,
+      canInsertMarkdownAtSelection: false,
+    }),
+    false,
   );
   assert.equal(
     shouldInterceptNoteMarkdownPaste({
       editorMode: "preview",
       pasteInsideCodeBlock: false,
       clipboardText: "# Heading\n\n- item",
+      pasteInsideLexicalContentSurface: true,
       canInsertMarkdownAtSelection: true,
     }),
     false,
@@ -232,6 +246,59 @@ test("selection markdown serialization scopes bold and link formatting", () => {
     }),
     '[docs](https://a.example "API")',
   );
+
+  // Partial selection inside a heading must omit the heading marker so pasting
+  // identical `**Hello**` is not misclassified as a lost-selection no-op.
+  const partialHeading = {
+    getType: () => "heading",
+    getTag: () => "h1",
+    getKey: () => "ph",
+    getTextContent: () => "Hello world",
+    getParent: () => null,
+  };
+  const helloText = {
+    getType: () => "text",
+    getKey: () => "hello",
+    getTextContent: () => "Hello",
+    hasFormat: (type: string) => type === "bold",
+    getParent: () => partialHeading,
+  };
+  const worldText = {
+    getType: () => "text",
+    getKey: () => "world",
+    getTextContent: () => " world",
+    hasFormat: () => false,
+    getParent: () => partialHeading,
+  };
+  assert.equal(
+    serializeLexicalSelectionAsMarkdown("Hello", {
+      hasFormat: () => false,
+      anchor: { getNode: () => helloText, offset: 0, type: "text" },
+      focus: { getNode: () => helloText, offset: 5, type: "text" },
+      isBackward: () => false,
+      getNodes: () => [helloText],
+    }),
+    "**Hello**",
+  );
+  assert.equal(
+    serializeLexicalSelectionAsMarkdown("Hello world", {
+      hasFormat: () => false,
+      anchor: { getNode: () => helloText, offset: 0, type: "text" },
+      focus: { getNode: () => worldText, offset: 6, type: "text" },
+      isBackward: () => false,
+      getNodes: () => [helloText, worldText],
+    }),
+    "# **Hello** world",
+  );
+  assert.equal(
+    shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
+      beforeMarkdown: "# **Hello** world",
+      clipboardText: "**Hello**",
+      selectedText: "Hello",
+      selectedMarkdown: "**Hello**",
+    }),
+    false,
+  );
 });
 
 test("unchanged insert recovery skips identical replacements but recovers lost-selection no-ops", () => {
@@ -360,11 +427,21 @@ test("InlineMarkdownEditor only preventDefaults markdown paste after a successfu
   const source = readFileSync(new URL("./InlineMarkdownEditor.tsx", import.meta.url), "utf8");
 
   assert.match(source, /shouldInterceptNoteMarkdownPaste/);
+  assert.match(source, /isNotePasteInsideLexicalContentSurface/);
   assert.match(source, /hasActiveLexicalTextSelection/);
   assert.match(source, /getActiveLexicalPasteSelection/);
   assert.match(source, /mergeNoteMarkdownDocumentPaste/);
   assert.match(source, /shouldRecoverNoteMarkdownPasteAfterUnchangedInsert/);
+  assert.match(source, /doesSelectionEncompassLexicalBlock/);
   assert.match(source, /setMarkdown\(/);
+  assert.match(
+    source,
+    /pasteInsideLexicalContentSurface:\s*isNotePasteInsideLexicalContentSurface\(event\.target\)/,
+  );
+  assert.match(
+    source,
+    /if\s*\(\s*!input\.pasteInsideLexicalContentSurface\s*\)\s*return\s*false/,
+  );
   assert.match(
     source,
     /shouldInterceptNoteMarkdownPaste\([\s\S]*?\)[\s\S]*?event\.preventDefault\(\)/,

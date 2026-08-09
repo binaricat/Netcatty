@@ -225,6 +225,27 @@ export const isNotePasteInsideCodeBlock = (target: EventTarget | null): boolean 
   return Boolean(element?.closest(".cm-editor, [class*=\"_codeMirrorWrapper_\"]"));
 };
 
+/**
+ * True when the paste event originates from the Lexical contenteditable surface
+ * (`.netcatty-mdx-content`). Dialog/toolbar form fields live under the MDX root
+ * portal but outside that surface and must keep native paste.
+ */
+export const isNotePasteInsideLexicalContentSurface = (
+  target: EventTarget | null,
+): boolean => {
+  if (typeof Element === "undefined") return false;
+  const element = target instanceof Element
+    ? target
+    : typeof Node !== "undefined" && target instanceof Node
+      ? target.parentElement
+      : null;
+  if (!element) return false;
+  // Explicit form controls are never the Lexical editing surface.
+  if (element.closest("input, textarea, select")) return false;
+  if (element.closest(".netcatty-note-markdown-toolbar")) return false;
+  return Boolean(element.closest(".netcatty-mdx-content"));
+};
+
 /** True when Lexical currently has a selection that insertMarkdown can target. */
 export const hasActiveLexicalTextSelection = (target: EventTarget | null): boolean => {
   if (typeof Element === "undefined" || typeof Node === "undefined") return false;
@@ -370,6 +391,45 @@ const getLexicalBlockMarkerPrefix = (block: NoteMarkdownPasteSelectionNode): str
   return "";
 };
 
+/** Plain selected text inside one block (no markdown markers). */
+const getSelectedLexicalBlockPlainText = (
+  block: NoteMarkdownPasteSelectionNode,
+  blockKey: string,
+  nodes: NoteMarkdownPasteSelectionNode[],
+  selection: NoteMarkdownPasteSelection,
+): string => {
+  let plain = "";
+  for (const node of nodes) {
+    const type = node.getType();
+    if (type === "linebreak") {
+      const nodeBlock = findLexicalAncestorByTypes(node, NOTE_MARKDOWN_PASTE_BLOCK_TYPES);
+      if (nodeBlock && getLexicalNodeKey(nodeBlock, "") === blockKey) plain += "\n";
+      continue;
+    }
+    if (type !== "text") continue;
+    const nodeBlock = findLexicalAncestorByTypes(node, NOTE_MARKDOWN_PASTE_BLOCK_TYPES);
+    if (!nodeBlock || getLexicalNodeKey(nodeBlock, "") !== blockKey) continue;
+    plain += getSelectedLexicalTextNodeContent(node, nodes, selection);
+  }
+  return plain;
+};
+
+/**
+ * Heading/list/quote markers belong only on whole-block selections. Partial
+ * inline ranges (e.g. bold "Hello" inside `# **Hello** world`) serialize as
+ * inline markdown only so identical-replace recovery stays accurate.
+ */
+const doesSelectionEncompassLexicalBlock = (
+  block: NoteMarkdownPasteSelectionNode,
+  blockKey: string,
+  nodes: NoteMarkdownPasteSelectionNode[],
+  selection: NoteMarkdownPasteSelection,
+): boolean => {
+  if (typeof block.getTextContent !== "function") return true;
+  const blockText = block.getTextContent();
+  return getSelectedLexicalBlockPlainText(block, blockKey, nodes, selection) === blockText;
+};
+
 const getSelectedLexicalTextNodeContent = (
   node: NoteMarkdownPasteSelectionNode,
   nodes: NoteMarkdownPasteSelectionNode[],
@@ -480,7 +540,10 @@ const serializeLexicalSelectionNodesAsMarkdown = (
   for (const { block, key } of blocks) {
     const inline = serializeLexicalBlockInlineMarkdown(block, key, nodes, selection);
     if (!inline) continue;
-    parts.push(`${getLexicalBlockMarkerPrefix(block)}${inline}`);
+    const marker = doesSelectionEncompassLexicalBlock(block, key, nodes, selection)
+      ? getLexicalBlockMarkerPrefix(block)
+      : "";
+    parts.push(`${marker}${inline}`);
   }
   if (parts.length === 0) return null;
   return parts.join("\n\n");
@@ -541,14 +604,30 @@ export const serializeLexicalSelectionAsMarkdown = (
     markdown = formatLexicalLinkMarkdown(markdown, linkUrl, linkTitle);
   }
   if (selectedText.length === 0) return markdown;
-  if (listMarker !== null) {
+
+  // Fallback path: omit block markers when the selected text is clearly a
+  // partial slice of the surrounding block (getTextContent available).
+  let blockText: string | null = null;
+  let blockProbe: NoteMarkdownPasteSelectionNode | null = selection.anchor.getNode();
+  while (blockProbe) {
+    if (NOTE_MARKDOWN_PASTE_BLOCK_TYPES.has(blockProbe.getType())) {
+      blockText = typeof blockProbe.getTextContent === "function"
+        ? blockProbe.getTextContent()
+        : null;
+      break;
+    }
+    blockProbe = blockProbe.getParent();
+  }
+  const includeBlockMarker = blockText === null || blockText === selectedText;
+
+  if (includeBlockMarker && listMarker !== null) {
     return `${" ".repeat(listIndent)}${listMarker} ${markdown}`;
   }
-  if (headingTag) {
+  if (includeBlockMarker && headingTag) {
     const level = Number(headingTag.replace(/^h/iu, "")) || 1;
     return `${"#".repeat(Math.min(Math.max(level, 1), 6))} ${markdown}`;
   }
-  if (isQuote) {
+  if (includeBlockMarker && isQuote) {
     return `> ${markdown}`;
   }
   return markdown;
@@ -666,19 +745,28 @@ export const shouldRecoverNoteMarkdownPasteAfterUnchangedInsert = (input: {
 
 /**
  * Decide whether markdown paste should call preventDefault.
- * Selection is optional: when the caret is gone (common after a prior
- * insertMarkdown), the handler recovers via document setMarkdown merge instead
- * of letting preventDefault + a no-op Lexical insert swallow the clipboard.
+ * Selection is optional on the Lexical content surface: when the caret is gone
+ * (common after a prior insertMarkdown), the handler recovers via document
+ * setMarkdown merge instead of letting preventDefault + a no-op Lexical insert
+ * swallow the clipboard. Dialog/toolbar inputs are never intercepted.
  */
 export const shouldInterceptNoteMarkdownPaste = (input: {
   editorMode: NoteEditorMode;
   pasteInsideCodeBlock: boolean;
   clipboardText: string;
-  /** Strategy hint for insertMarkdown vs document merge; not required to intercept. */
+  /** True when paste targets Lexical contenteditable (not dialog/toolbar). */
+  pasteInsideLexicalContentSurface: boolean;
+  /**
+   * Strategy hint for insertMarkdown vs document merge after intercept.
+   * Kept on the input for callers; intercept itself keys off the content surface.
+   */
   canInsertMarkdownAtSelection: boolean;
 }): boolean => {
   if (input.editorMode !== "edit") return false;
   if (input.pasteInsideCodeBlock) return false;
+  // Restrict intercept (including no-selection recovery) to the Lexical editing
+  // surface so link dialog / toolbar pastes keep native input behavior.
+  if (!input.pasteInsideLexicalContentSurface) return false;
   return shouldInsertClipboardTextAsMarkdown(input.clipboardText);
 };
 
@@ -1346,6 +1434,7 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
         editorMode,
         pasteInsideCodeBlock: isNotePasteInsideCodeBlock(event.target),
         clipboardText: markdown,
+        pasteInsideLexicalContentSurface: isNotePasteInsideLexicalContentSurface(event.target),
         canInsertMarkdownAtSelection: canInsertAtSelection,
       })
     ) {
