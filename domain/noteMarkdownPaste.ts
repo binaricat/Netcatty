@@ -1352,13 +1352,38 @@ const normalizeNoteMarkdownGfmTableRows = (text: string): string => {
  * (`**Hello**` vs `__Hello__`, `*Hi*` vs `_Hi_`, `* item` vs `- item`).
  */
 /**
+ * True when `text[index]` is preceded by an odd number of backslashes
+ * (CommonMark escaped punctuation).
+ */
+const isNoteMarkdownIndexEscaped = (text: string, index: number): boolean => {
+  let bars = 0;
+  for (let i = index - 1; i >= 0 && text[i] === "\\"; i -= 1) bars += 1;
+  return bars % 2 === 1;
+};
+
+/**
  * Drop backslash escapes that CommonMark treats as equivalent to the bare
  * character (e.g. intraword `foo\_bar` ≡ `foo_bar`). Leave escapes that change
- * emphasis parsing (`\_foo\_` vs `_foo_`) alone.
+ * emphasis parsing (`\_foo\_` vs `_foo_`, `__x\__` vs `__x__`) alone.
+ * Use ASCII alphanumerics only — `\w` includes `_`, which would strip the
+ * escape from an escaped closing strong-emphasis delimiter (`x\__` → `x__`).
  */
 const canonicalizeNoteMarkdownHarmlessPunctuationEscapes = (text: string): string => (
   // Intraword underscore: MDXEditor/mdast often emit `\_` while clipboards omit it.
-  text.replace(/(\w)\\_(\w)/g, "$1_$2")
+  text.replace(/([A-Za-z0-9])\\_([A-Za-z0-9])/g, "$1_$2")
+);
+
+/** Strong emphasis: __x__ → **x**; both delimiter runs must be unescaped. */
+const canonicalizeNoteMarkdownStrongEmphasis = (text: string): string => (
+  text.replace(
+    /(__)(?=\S)([\s\S]*?\S)\1/g,
+    (match, _delim: string, content: string, offset: number, source: string) => {
+      if (isNoteMarkdownIndexEscaped(source, offset)) return match;
+      const closeOffset = offset + 2 + content.length;
+      if (isNoteMarkdownIndexEscaped(source, closeOffset)) return match;
+      return `**${content}**`;
+    },
+  )
 );
 
 export const normalizeNoteMarkdownForEquivalence = (markdown: string): string => {
@@ -1369,7 +1394,7 @@ export const normalizeNoteMarkdownForEquivalence = (markdown: string): string =>
     // `foo_bar` compare equal for identical-replace / paste-success checks.
     next = canonicalizeNoteMarkdownHarmlessPunctuationEscapes(next);
     // Strong emphasis: __x__ → **x** (serializer canonical form).
-    next = next.replace(/(__)(?=\S)([\s\S]*?\S)\1/g, "**$2**");
+    next = canonicalizeNoteMarkdownStrongEmphasis(next);
     // Emphasis: _x_ → *x* (avoid matching inside identifiers / already-normalized **).
     next = next.replace(
       /(^|[^\\*\w])_(\S[\s\S]*?\S)_(?=$|[^\\*\w])/g,
@@ -1382,8 +1407,9 @@ export const normalizeNoteMarkdownForEquivalence = (markdown: string): string =>
       "***",
     );
     // Unordered / task-list markers: MDXEditor defaults to `*`, serializer uses `-`.
-    // Require trailing whitespace so `*Hi*` / `***` stay untouched.
-    next = next.replace(/^(\s*)[-+*](\s+)/gm, "$1-$2");
+    // Allow optional blockquote prefixes (`> * one` ≡ `> - one`). Require trailing
+    // whitespace so `*Hi*` / `***` stay untouched.
+    next = next.replace(/^((?: {0,3}>\s?)*)(\s*)[-+*](\s+)/gm, "$1$2-$3");
     // GFM tables: optional outer pipes + separator dash runs → serializer form
     // (`A | B` / `--- | ---` → `| A | B |` / `| --- | --- |`).
     next = normalizeNoteMarkdownGfmTableRows(next);

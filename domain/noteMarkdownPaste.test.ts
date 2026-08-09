@@ -184,6 +184,25 @@ test("markdown equivalence normalizes underscore emphasis to serializer form", (
     normalizeNoteMarkdownForEquivalence("\\_foo\\_"),
     normalizeNoteMarkdownForEquivalence("_foo_"),
   );
+  // Escaped closing strong delimiter must not canonicalize to **x** (would
+  // suppress recovery when insertMarkdown no-ops over a bold selection).
+  assert.notEqual(
+    normalizeNoteMarkdownForEquivalence("__x\\__"),
+    normalizeNoteMarkdownForEquivalence("**x**"),
+  );
+  // List markers inside blockquotes match serializer `-` form.
+  assert.equal(
+    normalizeNoteMarkdownForEquivalence("> * one\n> * two"),
+    normalizeNoteMarkdownForEquivalence("> - one\n> - two"),
+  );
+  assert.equal(
+    normalizeNoteMarkdownForEquivalence(">> * nested"),
+    normalizeNoteMarkdownForEquivalence(">> - nested"),
+  );
+  assert.equal(
+    normalizeNoteMarkdownForEquivalence("> * [ ] task"),
+    normalizeNoteMarkdownForEquivalence("> - [ ] task"),
+  );
 });
 
 test("selection markdown serialization scopes bold and link formatting", () => {
@@ -1431,6 +1450,26 @@ test("unchanged insert recovery skips identical replacements but recovers lost-s
       clipboardText: "__Hello__",
       selectedText: "Hello",
       selectedMarkdown: "**Hello**",
+    }),
+    false,
+  );
+  // Escaped closing `__` is not real strong emphasis; lost-selection no-op must recover.
+  assert.equal(
+    shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
+      beforeMarkdown: "**x**",
+      clipboardText: "__x\\__",
+      selectedText: "x",
+      selectedMarkdown: "**x**",
+    }),
+    true,
+  );
+  // Quoted list marker spelling (`*` vs `-`) is an identical replace, not a no-op.
+  assert.equal(
+    shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
+      beforeMarkdown: "> - one",
+      clipboardText: "> * one",
+      selectedText: "one",
+      selectedMarkdown: "> - one",
     }),
     false,
   );
