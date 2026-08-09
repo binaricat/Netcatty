@@ -108,6 +108,14 @@ export function useNoteMarkdownPaste({
       commitMarkdown(next);
     };
 
+    // Capture selection evidence at event time. The serial queue may delay the
+    // insert until a prior two-frame recovery finishes; reading selection then
+    // would see a caret moved by intervening typing (paste A, paste B, type C
+    // → recovery scoped to the post-C selection instead of B's target).
+    const pasteSelection = canInsertAtSelection
+      ? adapters.getActiveLexicalPasteSelection(event.target)
+      : null;
+
     enqueueNoteMarkdownPaste((release) => {
       if (!canInsertAtSelection) {
         // No caret/range: append via document merge instead of a no-op insert.
@@ -117,7 +125,6 @@ export function useNoteMarkdownPaste({
       }
 
       const before = getLatestMarkdown();
-      const pasteSelection = adapters.getActiveLexicalPasteSelection(event.target);
       // Keep the nested Lexical editor (e.g. table cell) active. Root
       // MDXEditorMethods.focus() restores a root selection and can move the
       // insert outside the cell or no-op into document-append recovery.

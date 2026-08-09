@@ -119,8 +119,13 @@ const getLexicalInlineMarkdownFormatStack = (
  * Escape phrasing punctuation so Lexical rendered text round-trips to source
  * Markdown (`**Hello \*world\***`, not `**Hello *world***`). Mirrors the
  * always-on mdast-util-to-markdown phrasing unsafe set (`*`, `_`, `` ` ``, `[`,
- * and GFM `~`), plus `]` so link labels with a literal bracket serialize as
- * `[a\]b](url)` (not broken `[a]b](url)`).
+ * `<`, and GFM `~`), plus `]` so link labels with a literal bracket serialize
+ * as `[a\]b](url)` (not broken `[a]b](url)`).
+ *
+ * `<` must be escaped so a fully selected heading whose Lexical text is
+ * `<tag>` reconstructs as `# \<tag>` (matching source `# \<tag>`), not
+ * `# <tag>` which parsers treat as an HTML node and break identical-replace
+ * recovery into a duplicate append.
  *
  * Literal backslashes are escaped first so source `**a\\\*b**` (bold `a\*b`)
  * round-trips as `**a\\\*b**`, not `**a\\*b**`.
@@ -128,7 +133,7 @@ const getLexicalInlineMarkdownFormatStack = (
 const escapeNoteMarkdownPhrasingPunctuation = (text: string): string => (
   text
     .replace(/\\/g, "\\\\")
-    .replace(/([`*_\[\]~])/g, "\\$1")
+    .replace(/([`*_\[\]~<])/g, "\\$1")
 );
 
 /**

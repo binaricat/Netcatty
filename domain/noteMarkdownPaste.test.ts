@@ -293,6 +293,15 @@ test("selection markdown serialization scopes bold and link formatting", () => {
     }),
     "\\# Heading",
   );
+  // Literal HTML openers must escape so a heading whose Lexical text is `<tag>`
+  // reconstructs as `# \<tag>` (source spelling), not `# <tag>` (HTML node).
+  assert.equal(
+    serializeLexicalSelectionAsMarkdown("<tag>", {
+      hasFormat: () => false,
+      anchor: plainAnchor,
+    }),
+    "\\<tag>",
+  );
   assert.equal(
     serializeLexicalSelectionAsMarkdown("> quote", {
       hasFormat: () => false,
@@ -556,6 +565,33 @@ test("selection markdown serialization scopes bold and link formatting", () => {
       getNodes: () => [headingOne, headingOneText, headingTwo, headingTwoText],
     }),
     "# Heading One\n\n## Heading Two",
+  );
+
+  // Whole-heading selection with HTML-looking Lexical text must escape `<`
+  // so identical-replace evidence matches source `# \<tag>`.
+  const htmlHeading = {
+    getType: () => "heading",
+    getTag: () => "h1",
+    getKey: () => "h-html",
+    getTextContent: () => "<tag>",
+    getParent: () => null,
+  };
+  const htmlHeadingText = {
+    getType: () => "text",
+    getKey: () => "t-html",
+    getTextContent: () => "<tag>",
+    hasFormat: () => false,
+    getParent: () => htmlHeading,
+  };
+  assert.equal(
+    serializeLexicalSelectionAsMarkdown("<tag>", {
+      hasFormat: () => false,
+      anchor: { getNode: () => htmlHeadingText, offset: 0, type: "text" },
+      focus: { getNode: () => htmlHeadingText, offset: 5, type: "text" },
+      isBackward: () => false,
+      getNodes: () => [htmlHeading, htmlHeadingText],
+    }),
+    "# \\<tag>",
   );
 
   // Range selections that include a thematic-break decorator must keep `***`
@@ -1846,6 +1882,27 @@ test("unchanged insert recovery skips identical replacements but recovers lost-s
       clipboardText: "# Hello",
       selectedText: "Hello",
       selectedMarkdown: "Hello",
+    }),
+    true,
+  );
+  // Fully selected heading whose Lexical text is `<tag>` must match source
+  // `# \<tag>` so identical paste does not append a duplicate via recovery.
+  assert.equal(
+    shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
+      beforeMarkdown: "# \\<tag>",
+      clipboardText: "# \\<tag>",
+      selectedText: "<tag>",
+      selectedMarkdown: "# \\<tag>",
+    }),
+    false,
+  );
+  assert.equal(
+    shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
+      beforeMarkdown: "# \\<tag>",
+      clipboardText: "# \\<tag>",
+      selectedText: "<tag>",
+      // Unescaped reconstruction parses as HTML and must not suppress recovery.
+      selectedMarkdown: "# <tag>",
     }),
     true,
   );

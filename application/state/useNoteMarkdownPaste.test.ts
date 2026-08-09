@@ -49,5 +49,15 @@ test("useNoteMarkdownPaste owns paste intercept and recovery orchestration", () 
     source,
     /enqueueNoteMarkdownPaste\(\s*\(release\)\s*=>\s*\{[\s\S]*?requestAnimationFrame[\s\S]*?release\(\)/,
   );
+  // Selection evidence is captured at ClipboardEvent time, before the serial
+  // queue may delay insert/recovery past intervening typing.
+  assert.match(
+    source,
+    /getActiveLexicalPasteSelection\(\s*event\.target\s*\)[\s\S]*?enqueueNoteMarkdownPaste\(/,
+  );
+  assert.doesNotMatch(
+    source,
+    /enqueueNoteMarkdownPaste\(\s*\(release\)\s*=>\s*\{[\s\S]*?getActiveLexicalPasteSelection\(/,
+  );
   assert.doesNotMatch(source, /shouldUseDocumentNoteMarkdownPaste/);
 });
