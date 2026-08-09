@@ -281,7 +281,8 @@ const serializeLexicalBlockInlineMarkdown = (
     const type = node.getType();
     if (type === "linebreak") {
       flushLink();
-      markdown += "\n";
+      // CommonMark hard break (Lexical LineBreakNode), not a block separator.
+      markdown += "  \n";
       continue;
     }
     if (type !== "text" || typeof node.hasFormat !== "function") continue;
@@ -444,6 +445,59 @@ export const mergeNoteMarkdownDocumentPaste = (
 };
 
 /**
+ * Replace `[label](destination)` / `![alt](destination)` with the label/alt,
+ * allowing balanced parentheses inside the destination
+ * (e.g. `[docs](https://example.test/a_(b))` → `docs`).
+ */
+const replaceMarkdownLinksWithLabels = (text: string, images: boolean): string => {
+  let out = "";
+  let i = 0;
+  while (i < text.length) {
+    const open = text.indexOf(images ? "![" : "[", i);
+    if (open === -1) {
+      out += text.slice(i);
+      break;
+    }
+    if (!images && open > 0 && text[open - 1] === "!") {
+      // Image marker belongs to the image pass; keep "[" for later.
+      out += text.slice(i, open + 1);
+      i = open + 1;
+      continue;
+    }
+    out += text.slice(i, open);
+    const labelStart = open + (images ? 2 : 1);
+    const labelEnd = text.indexOf("]", labelStart);
+    if (labelEnd === -1 || text[labelEnd + 1] !== "(") {
+      out += text.slice(open, open + (images ? 2 : 1));
+      i = open + (images ? 2 : 1);
+      continue;
+    }
+    let depth = 1;
+    let destEnd = -1;
+    for (let j = labelEnd + 2; j < text.length; j += 1) {
+      const ch = text[j];
+      if (ch === "\n") break;
+      if (ch === "(") depth += 1;
+      else if (ch === ")") {
+        depth -= 1;
+        if (depth === 0) {
+          destEnd = j;
+          break;
+        }
+      }
+    }
+    if (destEnd === -1) {
+      out += text.slice(open, open + (images ? 2 : 1));
+      i = open + (images ? 2 : 1);
+      continue;
+    }
+    out += text.slice(labelStart, labelEnd);
+    i = destEnd + 1;
+  }
+  return out;
+};
+
+/**
  * Approximate Lexical selection.getTextContent() for clipboard markdown so
  * equivalent pastes (bold Hello vs **Hello**) can be compared as plain text.
  */
@@ -451,8 +505,8 @@ export const noteMarkdownClipboardToPlainText = (markdown: string): string => {
   let text = markdown.replace(/\r\n?/g, "\n");
   // Fenced code: keep inner content (drop the fence lines).
   text = text.replace(/^ {0,3}(?:```|~~~)[^\n]*\n([\s\S]*?)^ {0,3}(?:```|~~~)[ \t]*$/gm, "$1");
-  text = text.replace(/!\[([^\]]*)\]\([^)]+\)/g, "$1");
-  text = text.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
+  text = replaceMarkdownLinksWithLabels(text, true);
+  text = replaceMarkdownLinksWithLabels(text, false);
   text = text.replace(/(\*\*|__)(?=\S)([\s\S]*?\S)\1/g, "$2");
   text = text.replace(/(\*|_)(?=\S)([\s\S]*?\S)\1/g, "$2");
   text = text.replace(/`([^`\n]+)`/g, "$1");
@@ -462,6 +516,9 @@ export const noteMarkdownClipboardToPlainText = (markdown: string): string => {
   text = text.replace(/^ {0,3}(?:[-+*]|\d+[.)])\s+/gm, "");
   text = text.replace(/^ {0,3}>\s?/gm, "");
   text = text.replace(/^ {0,3}[-*_](?:\s*[-*_]){2,}\s*$/gm, "");
+  // Hard breaks → plain newlines (Lexical selection text has no marker spaces).
+  text = text.replace(/ {2,}\n/g, "\n");
+  text = text.replace(/\\\n/g, "\n");
   return text;
 };
 
@@ -483,6 +540,10 @@ export const normalizeNoteMarkdownForEquivalence = (markdown: string): string =>
     /(^|[^\\*\w])_(\S[\s\S]*?\S)_(?=$|[^\\*\w])/g,
     "$1*$2*",
   );
+  // Hard breaks: backslash form → two-trailing-spaces (serializer form).
+  text = text.replace(/\\\n/g, "  \n");
+  // Collapse 3+ trailing spaces before a newline to the canonical two-space break.
+  text = text.replace(/ {3,}\n/g, "  \n");
   return text;
 };
 

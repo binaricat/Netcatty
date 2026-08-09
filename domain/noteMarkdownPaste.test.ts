@@ -87,6 +87,11 @@ test("document markdown paste merge preserves leading indentation on the first c
 test("clipboard markdown plain-text approx matches Lexical selection text", () => {
   assert.equal(noteMarkdownClipboardToPlainText("**Hello**"), "Hello");
   assert.equal(noteMarkdownClipboardToPlainText("[docs](https://example.com)"), "docs");
+  // Destinations with balanced parentheses must not leave a trailing ")".
+  assert.equal(
+    noteMarkdownClipboardToPlainText("[docs](https://example.test/a_(b))"),
+    "docs",
+  );
   assert.equal(noteMarkdownClipboardToPlainText("- item"), "item");
   assert.equal(noteMarkdownClipboardToPlainText("- [ ] task"), "task");
   assert.equal(noteMarkdownClipboardToPlainText("- [x] task"), "task");
@@ -94,6 +99,9 @@ test("clipboard markdown plain-text approx matches Lexical selection text", () =
     noteMarkdownClipboardToPlainText("# Heading One\n\n## Heading Two"),
     "Heading One\n\nHeading Two",
   );
+  // Hard-break markers become a plain newline (Lexical selection text).
+  assert.equal(noteMarkdownClipboardToPlainText("**A**  \n**B**"), "A\nB");
+  assert.equal(noteMarkdownClipboardToPlainText("**A**\\\n**B**"), "A\nB");
 });
 
 test("markdown equivalence normalizes underscore emphasis to serializer form", () => {
@@ -102,6 +110,11 @@ test("markdown equivalence normalizes underscore emphasis to serializer form", (
   assert.equal(
     normalizeNoteMarkdownForEquivalence("__Hello__"),
     normalizeNoteMarkdownForEquivalence("**Hello**"),
+  );
+  // Hard breaks: backslash and two-trailing-spaces forms are equivalent.
+  assert.equal(
+    normalizeNoteMarkdownForEquivalence("**A**\\\n**B**"),
+    normalizeNoteMarkdownForEquivalence("**A**  \n**B**"),
   );
 });
 
@@ -301,6 +314,43 @@ test("selection markdown serialization scopes bold and link formatting", () => {
       getNodes: () => [linkNode, linkText],
     }),
     '[docs](https://a.example "API")',
+  );
+
+  // Lexical linebreak nodes are Markdown hard breaks (two trailing spaces).
+  const hardBreakParagraph = {
+    getType: () => "paragraph",
+    getKey: () => "hb-p",
+    getTextContent: () => "AB",
+    getParent: () => null,
+  };
+  const hardBreakA = {
+    getType: () => "text",
+    getKey: () => "hb-a",
+    getTextContent: () => "A",
+    hasFormat: (type: string) => type === "bold",
+    getParent: () => hardBreakParagraph,
+  };
+  const hardBreakNode = {
+    getType: () => "linebreak",
+    getKey: () => "hb-br",
+    getParent: () => hardBreakParagraph,
+  };
+  const hardBreakB = {
+    getType: () => "text",
+    getKey: () => "hb-b",
+    getTextContent: () => "B",
+    hasFormat: (type: string) => type === "bold",
+    getParent: () => hardBreakParagraph,
+  };
+  assert.equal(
+    serializeLexicalSelectionAsMarkdown("A\nB", {
+      hasFormat: () => false,
+      anchor: { getNode: () => hardBreakA, offset: 0, type: "text" },
+      focus: { getNode: () => hardBreakB, offset: 1, type: "text" },
+      isBackward: () => false,
+      getNodes: () => [hardBreakA, hardBreakNode, hardBreakB],
+    }),
+    "**A**  \n**B**",
   );
 
   // Partial selection inside a heading must omit the heading marker so pasting
@@ -607,6 +657,36 @@ test("unchanged insert recovery skips identical replacements but recovers lost-s
       clipboardText: "[docs](https://a.example)",
       selectedText: "docs",
       selectedMarkdown: "[docs](https://a.example)",
+    }),
+    false,
+  );
+  // Link destinations with balanced parentheses must not trip plain-text
+  // comparison into duplicate-append recovery.
+  assert.equal(
+    shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
+      beforeMarkdown: "see [docs](https://example.test/a_(b)) end",
+      clipboardText: "[docs](https://example.test/a_(b))",
+      selectedText: "docs",
+      selectedMarkdown: "[docs](https://example.test/a_(b))",
+    }),
+    false,
+  );
+  // Identical hard-break fragment must not append a duplicate.
+  assert.equal(
+    shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
+      beforeMarkdown: "intro\n\n**A**  \n**B**\n\noutro",
+      clipboardText: "**A**  \n**B**",
+      selectedText: "A\nB",
+      selectedMarkdown: "**A**  \n**B**",
+    }),
+    false,
+  );
+  assert.equal(
+    shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
+      beforeMarkdown: "intro\n\n**A**  \n**B**\n\noutro",
+      clipboardText: "**A**\\\n**B**",
+      selectedText: "A\nB",
+      selectedMarkdown: "**A**  \n**B**",
     }),
     false,
   );
