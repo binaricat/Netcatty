@@ -178,20 +178,13 @@ const graphemeSegmenter =
     : null;
 
 /**
- * Drop the last user-perceived character (grapheme cluster), matching how
- * modern shells erase with Backspace. Falls back to one Unicode code point
- * when `Intl.Segmenter` is unavailable — still avoids leaving a dangling
- * UTF-16 surrogate after deleting non-BMP input.
+ * Drop the last Unicode code point, matching Bash/readline Backspace
+ * (skin-tone / ZWJ tails erase one code point at a time). Prefer this over
+ * `String.prototype.slice(0, -1)`, which can leave a dangling UTF-16
+ * surrogate after a supplementary-plane emoji.
  */
-export function removeLastGrapheme(s: string): string {
+export function removeLastCodePoint(s: string): string {
   if (!s) return "";
-  if (graphemeSegmenter) {
-    let lastIndex = -1;
-    for (const { index } of graphemeSegmenter.segment(s)) {
-      lastIndex = index;
-    }
-    return lastIndex >= 0 ? s.slice(0, lastIndex) : "";
-  }
   const codePoints = Array.from(s);
   codePoints.pop();
   return codePoints.join("");

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   codePointCellWidth,
-  removeLastGrapheme,
+  removeLastCodePoint,
   stringCellWidth,
 } from "./xtermUtils.ts";
 
@@ -39,9 +39,11 @@ test("stringCellWidth treats emoji presentation selectors as wide graphemes", ()
   assert.equal(stringCellWidth("1\uFE0F\u20E3"), 2);
 });
 
-test("removeLastGrapheme erases a full non-BMP emoji, not one UTF-16 unit", () => {
-  assert.equal(removeLastGrapheme("hello\u{1F600}"), "hello");
-  assert.equal(removeLastGrapheme("a\u{1F44D}\u{1F3FD}"), "a");
-  assert.equal(removeLastGrapheme("x"), "");
-  assert.equal(removeLastGrapheme(""), "");
+test("removeLastCodePoint erases one code point, matching Bash/readline Backspace", () => {
+  // Non-BMP emoji is one code point spanning two UTF-16 units.
+  assert.equal(removeLastCodePoint("hello\u{1F600}"), "hello");
+  // Skin-tone modifier is a separate code point; readline leaves the base.
+  assert.equal(removeLastCodePoint("a\u{1F44D}\u{1F3FD}"), "a\u{1F44D}");
+  assert.equal(removeLastCodePoint("x"), "");
+  assert.equal(removeLastCodePoint(""), "");
 });
