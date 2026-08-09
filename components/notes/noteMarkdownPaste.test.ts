@@ -4,9 +4,7 @@ import test from "node:test";
 
 import {
   mergeNoteMarkdownDocumentPaste,
-  NOTE_MARKDOWN_DOCUMENT_PASTE_MIN_CHARS,
   shouldInterceptNoteMarkdownPaste,
-  shouldUseDocumentNoteMarkdownPaste,
 } from "./InlineMarkdownEditor.tsx";
 
 test("markdown paste intercepts structured clipboard text in edit mode even without a Lexical selection", () => {
@@ -41,11 +39,7 @@ test("markdown paste intercepts structured clipboard text in edit mode even with
   );
 });
 
-test("long markdown pastes prefer a document setMarkdown merge over Lexical insertMarkdown", () => {
-  const longNote = `${"# Runbook\n\n"}${"- step with details for the pasted note body\n".repeat(40)}`;
-  assert.ok(longNote.length >= NOTE_MARKDOWN_DOCUMENT_PASTE_MIN_CHARS);
-  assert.equal(shouldUseDocumentNoteMarkdownPaste(longNote), true);
-  assert.equal(shouldUseDocumentNoteMarkdownPaste("# short\n\n- item"), false);
+test("document markdown paste merge appends when recovering without a selection", () => {
   assert.equal(
     mergeNoteMarkdownDocumentPaste("Existing note", "# Pasted\n\n- item"),
     "Existing note\n\n# Pasted\n\n- item",
@@ -61,7 +55,6 @@ test("InlineMarkdownEditor only preventDefaults markdown paste after a successfu
 
   assert.match(source, /shouldInterceptNoteMarkdownPaste/);
   assert.match(source, /hasActiveLexicalTextSelection/);
-  assert.match(source, /shouldUseDocumentNoteMarkdownPaste/);
   assert.match(source, /mergeNoteMarkdownDocumentPaste/);
   assert.match(source, /setMarkdown\(/);
   assert.match(
@@ -71,5 +64,12 @@ test("InlineMarkdownEditor only preventDefaults markdown paste after a successfu
   assert.match(
     source,
     /if \(\s*!shouldInterceptNoteMarkdownPaste\([\s\S]*?\)\s*\{\s*return;\s*\}/,
+  );
+  // Document merge is reserved for missing selection / insert no-op recovery —
+  // never forced solely by clipboard length while a selection exists.
+  assert.doesNotMatch(source, /shouldUseDocumentNoteMarkdownPaste/);
+  assert.match(
+    source,
+    /if\s*\(\s*!canInsertAtSelection\s*\)\s*\{\s*(?:\/\/[^\n]*\n\s*)*applyDocumentPaste\(\)/,
   );
 });

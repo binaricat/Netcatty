@@ -243,18 +243,10 @@ export const hasActiveLexicalTextSelection = (target: EventTarget | null): boole
 };
 
 /**
- * Long note pastes go through setMarkdown instead of insertMarkdown.
- * MDXEditor's insertMarkdown schedules a Lexical update that no-ops when the
- * selection is cleared mid-flight — common after repeated large pastes.
+ * Merge a markdown paste when Lexical selection is missing or insertMarkdown
+ * no-ops. Prefer insertMarkdown whenever a selection exists so caret/replace
+ * semantics stay intact (including Select All + Paste).
  */
-export const NOTE_MARKDOWN_DOCUMENT_PASTE_MIN_CHARS = 1200;
-
-export const shouldUseDocumentNoteMarkdownPaste = (clipboardText: string): boolean => {
-  return clipboardText.replace(/\r\n?/g, "\n").trim().length
-    >= NOTE_MARKDOWN_DOCUMENT_PASTE_MIN_CHARS;
-};
-
-/** Merge a recovered/long markdown paste into the current document body. */
 export const mergeNoteMarkdownDocumentPaste = (
   currentMarkdown: string,
   clipboardText: string,
@@ -967,7 +959,8 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
       commitMarkdown(next);
     };
 
-    if (!canInsertAtSelection || shouldUseDocumentNoteMarkdownPaste(markdown)) {
+    if (!canInsertAtSelection) {
+      // No caret/range: append via document merge instead of a no-op insert.
       applyDocumentPaste();
     } else {
       const before = latestMarkdownRef.current;
