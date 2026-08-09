@@ -1566,16 +1566,18 @@ export const normalizeNoteMarkdownForEquivalence = (markdown: string): string =>
     next = canonicalizeNoteMarkdownHarmlessPunctuationEscapes(next);
     // Strong emphasis: __x__ → **x** (serializer canonical form).
     next = canonicalizeNoteMarkdownStrongEmphasis(next);
-    // Emphasis: _x_ → *x* (avoid matching inside identifiers / already-normalized **).
-    next = next.replace(
-      /(^|[^\\*\w])_(\S[\s\S]*?\S)_(?=$|[^\\*\w])/g,
-      "$1*$2*",
-    );
-    // Thematic breaks: --- / ___ / * * * → *** (same marker only; mixed `-_*`
-    // is not a thematic break and must stay inequivalent to a real rule).
+    // Thematic breaks before italic `_…_`: otherwise `___` is eaten as `*_*`
+    // once single-character underscore emphasis is allowed. Same-marker only;
+    // mixed `-_*` is not a thematic break and must stay inequivalent.
     next = next.replace(
       /^ {0,3}(?:(?:-[ \t]*){2,}-|(?:_[ \t]*){2,}_|(?:\*[ \t]*){2,}\*)[ \t]*$/gm,
       "***",
+    );
+    // Emphasis: _x_ → *x* (single non-whitespace content allowed; avoid matching
+    // inside identifiers / already-normalized **).
+    next = next.replace(
+      /(^|[^\\*\w])_(?=\S)([\s\S]*?\S)_(?=$|[^\\*\w])/g,
+      "$1*$2*",
     );
     // Unordered / task-list markers: MDXEditor defaults to `*`, serializer uses `-`.
     // Allow optional blockquote prefixes (`> * one` ≡ `> - one`). Require trailing

@@ -115,6 +115,12 @@ test("clipboard markdown plain-text approx matches Lexical selection text", () =
 test("markdown equivalence normalizes underscore emphasis to serializer form", () => {
   assert.equal(normalizeNoteMarkdownForEquivalence("__Hello__"), "**Hello**");
   assert.equal(normalizeNoteMarkdownForEquivalence("_Hi_"), "*Hi*");
+  // Single-character underscore emphasis must canonicalize (MDXEditor → *x*).
+  assert.equal(normalizeNoteMarkdownForEquivalence("_x_"), "*x*");
+  assert.equal(
+    normalizeNoteMarkdownForEquivalence("# T\n\n_x_"),
+    normalizeNoteMarkdownForEquivalence("# T\n\n*x*"),
+  );
   assert.equal(
     normalizeNoteMarkdownForEquivalence("__Hello__"),
     normalizeNoteMarkdownForEquivalence("**Hello**"),
@@ -1796,6 +1802,16 @@ test("unchanged insert recovery skips identical replacements but recovers lost-s
       clipboardText: "__Hello__",
       selectedText: "Hello",
       selectedMarkdown: "**Hello**",
+    }),
+    false,
+  );
+  // Single-character underscore italic ≡ serializer `*x*`; do not append a duplicate.
+  assert.equal(
+    shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
+      beforeMarkdown: "# T\n\n*x*",
+      clipboardText: "# T\n\n_x_",
+      selectedText: "T\nx",
+      selectedMarkdown: "# T\n\n*x*",
     }),
     false,
   );
