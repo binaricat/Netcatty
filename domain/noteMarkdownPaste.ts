@@ -280,6 +280,10 @@ const serializeLexicalBlockInlineMarkdown = (
   for (const node of nodes) {
     const type = node.getType();
     if (type === "linebreak") {
+      // Hard breaks are inline to their owning block; skip when serializing a
+      // sibling block from a multi-block selection (same filter as text nodes).
+      const nodeBlock = findLexicalAncestorByTypes(node, NOTE_MARKDOWN_PASTE_BLOCK_TYPES);
+      if (!nodeBlock || getLexicalNodeKey(nodeBlock, "") !== blockKey) continue;
       flushLink();
       // CommonMark hard break (Lexical LineBreakNode), not a block separator.
       markdown += "  \n";
@@ -326,17 +330,26 @@ const serializeLexicalSelectionNodesAsMarkdown = (
   }
   if (blocks.length === 0) return null;
 
-  const parts: string[] = [];
+  const parts: Array<{ block: NoteMarkdownPasteSelectionNode; markdown: string }> = [];
   for (const { block, key } of blocks) {
     const inline = serializeLexicalBlockInlineMarkdown(block, key, nodes, selection);
     if (!inline) continue;
     const marker = doesSelectionEncompassLexicalBlock(block, key, nodes, selection)
       ? getLexicalBlockMarkerPrefix(block)
       : "";
-    parts.push(`${marker}${inline}`);
+    parts.push({ block, markdown: `${marker}${inline}` });
   }
   if (parts.length === 0) return null;
-  return parts.join("\n\n");
+  // Adjacent list items stay tight (`- a\n- b`); other block boundaries keep a
+  // blank line so identical-replace equivalence matches clipboard Markdown.
+  let joined = parts[0].markdown;
+  for (let i = 1; i < parts.length; i += 1) {
+    const prev = parts[i - 1].block;
+    const next = parts[i].block;
+    const sameListRun = prev.getType() === "listitem" && next.getType() === "listitem";
+    joined += `${sameListRun ? "\n" : "\n\n"}${parts[i].markdown}`;
+  }
+  return joined;
 };
 
 /**

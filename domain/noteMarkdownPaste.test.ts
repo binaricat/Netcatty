@@ -286,6 +286,59 @@ test("selection markdown serialization scopes bold and link formatting", () => {
     "# Heading One\n\n## Heading Two",
   );
 
+  // Adjacent list items must stay single-newline joined (`- one\n- two`), not
+  // blank-line separated, or identical paste recovery appends a duplicate.
+  const bulletList = {
+    getType: () => "list",
+    getListType: () => "bullet" as const,
+    getParent: () => null,
+  };
+  const bulletOne = {
+    getType: () => "listitem",
+    getKey: () => "li-one",
+    getTextContent: () => "one",
+    getParent: () => bulletList,
+  };
+  const bulletTwo = {
+    getType: () => "listitem",
+    getKey: () => "li-two",
+    getTextContent: () => "two",
+    getParent: () => bulletList,
+  };
+  const bulletOneText = {
+    getType: () => "text",
+    getKey: () => "t-one",
+    getTextContent: () => "one",
+    hasFormat: () => false,
+    getParent: () => bulletOne,
+  };
+  const bulletTwoText = {
+    getType: () => "text",
+    getKey: () => "t-two",
+    getTextContent: () => "two",
+    hasFormat: () => false,
+    getParent: () => bulletTwo,
+  };
+  assert.equal(
+    serializeLexicalSelectionAsMarkdown("one\ntwo", {
+      hasFormat: () => false,
+      anchor: { getNode: () => bulletOneText, offset: 0, type: "text" },
+      focus: { getNode: () => bulletTwoText, offset: 3, type: "text" },
+      isBackward: () => false,
+      getNodes: () => [bulletOne, bulletOneText, bulletTwo, bulletTwoText],
+    }),
+    "- one\n- two",
+  );
+  assert.equal(
+    shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
+      beforeMarkdown: "- one\n- two",
+      clipboardText: "- one\n- two",
+      selectedText: "one\ntwo",
+      selectedMarkdown: "- one\n- two",
+    }),
+    false,
+  );
+
   const paragraphNode = {
     getType: () => "paragraph",
     getKey: () => "p",
@@ -351,6 +404,38 @@ test("selection markdown serialization scopes bold and link formatting", () => {
       getNodes: () => [hardBreakA, hardBreakNode, hardBreakB],
     }),
     "**A**  \n**B**",
+  );
+
+  // A hard break belongs to one block only; multi-block serialization must not
+  // replay it into every selected block (or identical paste recovers a duplicate).
+  const hardBreakSibling = {
+    getType: () => "paragraph",
+    getKey: () => "hb-sib",
+    getTextContent: () => "C",
+    getParent: () => null,
+  };
+  const hardBreakSiblingText = {
+    getType: () => "text",
+    getKey: () => "hb-c",
+    getTextContent: () => "C",
+    hasFormat: () => false,
+    getParent: () => hardBreakSibling,
+  };
+  assert.equal(
+    serializeLexicalSelectionAsMarkdown("A\nB\nC", {
+      hasFormat: () => false,
+      anchor: { getNode: () => hardBreakA, offset: 0, type: "text" },
+      focus: { getNode: () => hardBreakSiblingText, offset: 1, type: "text" },
+      isBackward: () => false,
+      getNodes: () => [
+        hardBreakA,
+        hardBreakNode,
+        hardBreakB,
+        hardBreakSibling,
+        hardBreakSiblingText,
+      ],
+    }),
+    "**A**  \n**B**\n\nC",
   );
 
   // Partial selection inside a heading must omit the heading marker so pasting
