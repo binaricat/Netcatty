@@ -308,6 +308,13 @@ export const noteMarkdownClipboardToPlainText = (markdown: string): string => {
  * After insertMarkdown, an unchanged document is either a successful identical
  * replace or a lost-selection no-op. Only the latter should fall back to
  * document-append recovery.
+ *
+ * Lexical selection text is plain (bold/link label only). Do not treat
+ * plain-text equality alone as a successful replace — pasting `**Hello**` over
+ * plain `Hello`, or the same link label with a different URL, must still
+ * recover when the insert no-ops. Suppress recovery only when the clipboard
+ * markdown (formatting / link destination included) is already present in the
+ * document and matches the selection's rendered text.
  */
 export const shouldRecoverNoteMarkdownPasteAfterUnchangedInsert = (input: {
   beforeMarkdown: string;
@@ -318,11 +325,17 @@ export const shouldRecoverNoteMarkdownPasteAfterUnchangedInsert = (input: {
   const clipboard = input.clipboardText.replace(/\r\n?/g, "\n");
   // Select All + paste of the same body: serialization stays equal on success.
   if (clipboard === before) return false;
-  // Partial identical / markdown-equivalent replace: Lexical selection text is
-  // plain (bold Hello → "Hello") while the clipboard may still be "**Hello**".
   if (input.selectedText !== null) {
     const selected = input.selectedText.replace(/\r\n?/g, "\n");
-    if (selected === clipboard || selected === noteMarkdownClipboardToPlainText(clipboard)) {
+    // Exact plain clipboard match (no markdown markers to apply).
+    if (selected === clipboard) return false;
+    // Structured clipboard: only skip recovery when that markdown already
+    // exists in the doc (identical formatted/link replace), not merely when
+    // the rendered labels match.
+    if (
+      selected === noteMarkdownClipboardToPlainText(clipboard)
+      && before.includes(clipboard)
+    ) {
       return false;
     }
   }

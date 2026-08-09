@@ -93,6 +93,33 @@ test("unchanged insert recovery skips identical replacements but recovers lost-s
     }),
     false,
   );
+  // Plain Hello + paste **Hello** is a formatting change; if insert no-ops,
+  // recover so preventDefault does not drop the clipboard.
+  assert.equal(
+    shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
+      beforeMarkdown: "# Note\n\nHello",
+      clipboardText: "**Hello**",
+      selectedText: "Hello",
+    }),
+    true,
+  );
+  // Same link label, different URL must recover when insert leaves the doc unchanged.
+  assert.equal(
+    shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
+      beforeMarkdown: "see [docs](https://a.example) end",
+      clipboardText: "[docs](https://b.example)",
+      selectedText: "docs",
+    }),
+    true,
+  );
+  assert.equal(
+    shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
+      beforeMarkdown: "see [docs](https://a.example) end",
+      clipboardText: "[docs](https://a.example)",
+      selectedText: "docs",
+    }),
+    false,
+  );
   assert.equal(
     shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
       beforeMarkdown: "# Note\n\nHello",
