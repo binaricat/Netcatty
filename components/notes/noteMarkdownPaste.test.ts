@@ -91,6 +91,13 @@ test("selection markdown serialization scopes bold and link formatting", () => {
   );
   assert.equal(
     serializeLexicalSelectionAsMarkdown("Hello", {
+      hasFormat: (type) => type === "bold" || type === "italic",
+      anchor: plainAnchor,
+    }),
+    "***Hello***",
+  );
+  assert.equal(
+    serializeLexicalSelectionAsMarkdown("Hello", {
       hasFormat: () => false,
       anchor: plainAnchor,
     }),
@@ -108,6 +115,41 @@ test("selection markdown serialization scopes bold and link formatting", () => {
       },
     }),
     "[docs](https://a.example)",
+  );
+  assert.equal(
+    serializeLexicalSelectionAsMarkdown("Title", {
+      hasFormat: () => false,
+      anchor: {
+        getNode: () => ({
+          getType: () => "text",
+          getParent: () => ({
+            getType: () => "heading",
+            getTag: () => "h2",
+            getParent: () => null,
+          }),
+        }),
+      },
+    }),
+    "## Title",
+  );
+  assert.equal(
+    serializeLexicalSelectionAsMarkdown("item", {
+      hasFormat: (type) => type === "bold",
+      anchor: {
+        getNode: () => ({
+          getType: () => "text",
+          getParent: () => ({
+            getType: () => "listitem",
+            getParent: () => ({
+              getType: () => "list",
+              getListType: () => "bullet",
+              getParent: () => null,
+            }),
+          }),
+        }),
+      },
+    }),
+    "- **item**",
   );
 });
 
@@ -128,6 +170,26 @@ test("unchanged insert recovery skips identical replacements but recovers lost-s
       clipboardText: "**Hello**",
       selectedText: "Hello",
       selectedMarkdown: "**Hello**",
+    }),
+    false,
+  );
+  // Combined bold+italic must serialize both markers; otherwise identical
+  // ***Hello*** paste is misclassified as a lost-selection no-op.
+  assert.equal(
+    shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
+      beforeMarkdown: "# Note\n\n***Hello*** world",
+      clipboardText: "***Hello***",
+      selectedText: "Hello",
+      selectedMarkdown: "***Hello***",
+    }),
+    false,
+  );
+  assert.equal(
+    shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
+      beforeMarkdown: "# Note\n\n## Title",
+      clipboardText: "## Title",
+      selectedText: "Title",
+      selectedMarkdown: "## Title",
     }),
     false,
   );

@@ -247,6 +247,9 @@ type NoteMarkdownPasteSelectionNode = {
   getType: () => string;
   getParent: () => NoteMarkdownPasteSelectionNode | null;
   getURL?: () => string;
+  getTag?: () => string;
+  getListType?: () => "bullet" | "number" | "check" | string;
+  getValue?: () => number;
 };
 
 const isLexicalLinkNode = (
@@ -255,9 +258,35 @@ const isLexicalLinkNode = (
   node.getType() === "link" && typeof node.getURL === "function"
 );
 
+const applyLexicalInlineMarkdownFormats = (
+  text: string,
+  selection: { hasFormat: (type: "bold" | "italic" | "code") => boolean },
+): string => {
+  if (!text) return text;
+  // Code fences out other emphasis markers in CommonMark-style paste.
+  if (selection.hasFormat("code")) return `\`${text}\``;
+  const bold = selection.hasFormat("bold");
+  const italic = selection.hasFormat("italic");
+  if (bold && italic) return `***${text}***`;
+  if (bold) return `**${text}**`;
+  if (italic) return `*${text}*`;
+  return text;
+};
+
+const getLexicalListNestingDepth = (listItem: NoteMarkdownPasteSelectionNode): number => {
+  let depth = 0;
+  let current: NoteMarkdownPasteSelectionNode | null = listItem.getParent();
+  while (current) {
+    if (current.getType() === "list") depth += 1;
+    current = current.getParent();
+  }
+  return Math.max(depth, 1);
+};
+
 /**
- * Best-effort markdown for the active Lexical range (link URL / text formats).
- * Used to scope paste-equivalence checks to the selection, not the whole document.
+ * Best-effort markdown for the active Lexical range (combined text formats,
+ * link URL, and block markers). Used to scope paste-equivalence checks to the
+ * selection, not the whole document.
  */
 export const serializeLexicalSelectionAsMarkdown = (
   selectedText: string,
@@ -266,19 +295,57 @@ export const serializeLexicalSelectionAsMarkdown = (
     anchor: { getNode: () => NoteMarkdownPasteSelectionNode };
   },
 ): string => {
+  let markdown = applyLexicalInlineMarkdownFormats(selectedText, selection);
+  let linkUrl: string | null = null;
+  let headingTag: string | null = null;
+  let listMarker: string | null = null;
+  let listIndent = 0;
+  let isQuote = false;
+
   let current: NoteMarkdownPasteSelectionNode | null = selection.anchor.getNode();
   while (current) {
-    if (isLexicalLinkNode(current)) {
-      return `[${selectedText}](${current.getURL()})`;
+    const type = current.getType();
+    if (!linkUrl && isLexicalLinkNode(current)) {
+      linkUrl = current.getURL();
+    }
+    if (!headingTag && type === "heading" && typeof current.getTag === "function") {
+      headingTag = current.getTag();
+    }
+    if (listMarker === null && type === "listitem") {
+      const parent = current.getParent();
+      const listType = parent?.getType() === "list" && typeof parent.getListType === "function"
+        ? parent.getListType()
+        : "bullet";
+      listIndent = Math.max(getLexicalListNestingDepth(current) - 1, 0) * 2;
+      if (listType === "number") {
+        const value = typeof current.getValue === "function" ? current.getValue() : 1;
+        listMarker = `${value}.`;
+      } else {
+        // bullet / check — MDXEditor exports unchecked items as "- ".
+        listMarker = "-";
+      }
+    }
+    if (!isQuote && type === "quote") {
+      isQuote = true;
     }
     current = current.getParent();
   }
-  if (selectedText.length > 0) {
-    if (selection.hasFormat("code")) return `\`${selectedText}\``;
-    if (selection.hasFormat("bold")) return `**${selectedText}**`;
-    if (selection.hasFormat("italic")) return `*${selectedText}*`;
+
+  if (linkUrl) {
+    markdown = `[${markdown}](${linkUrl})`;
   }
-  return selectedText;
+  if (selectedText.length === 0) return markdown;
+  if (listMarker !== null) {
+    return `${" ".repeat(listIndent)}${listMarker} ${markdown}`;
+  }
+  if (headingTag) {
+    const level = Number(headingTag.replace(/^h/iu, "")) || 1;
+    return `${"#".repeat(Math.min(Math.max(level, 1), 6))} ${markdown}`;
+  }
+  if (isQuote) {
+    return `> ${markdown}`;
+  }
+  return markdown;
 };
 
 /** Active Lexical range plain text + selection-scoped markdown, or null when unavailable. */
