@@ -7,17 +7,19 @@ import {
   stringCellWidth,
 } from "./xtermUtils.ts";
 
-test("stringCellWidth treats emoji modifier sequences as one wide glyph", () => {
-  // 👍🏽 = thumbs-up + medium skin tone. Code-point sum is 4; xterm 15-graphemes
-  // renders the cluster as a single 2-cell glyph.
+test("stringCellWidth matches xterm 15-graphemes skin-tone joins", () => {
+  // Lone thumbs-up is narrow in the provider table; the skin-tone modifier
+  // adds a second cell (getStringCellWidth → 2).
   const thumbs = "\u{1F44D}\u{1F3FD}";
-  assert.equal(codePointCellWidth(0x1f44d) + codePointCellWidth(0x1f3fd), 4);
+  assert.equal(codePointCellWidth(0x1f44d), 1);
+  assert.equal(stringCellWidth("\u{1F44D}"), 1);
   assert.equal(stringCellWidth(thumbs), 2);
 });
 
-test("stringCellWidth treats ZWJ emoji families as one wide glyph", () => {
+test("stringCellWidth matches xterm 15-graphemes ZWJ family widths", () => {
+  // Provider sums the four emoji bases (ZWJ is zero-width in cluster math).
   const family = "\u{1F468}\u200D\u{1F469}\u200D\u{1F467}\u200D\u{1F466}";
-  assert.equal(stringCellWidth(family), 2);
+  assert.equal(stringCellWidth(family), 4);
 });
 
 test("stringCellWidth keeps regional-indicator flags at two cells", () => {
@@ -50,6 +52,15 @@ test("stringCellWidth counts legacy emoji-presentation characters as wide", () =
   assert.equal(codePointCellWidth(0x2600), 1); // ☀
   assert.equal(stringCellWidth("\u2600"), 1);
   assert.equal(stringCellWidth("\u2600\uFE0F"), 2);
+});
+
+test("stringCellWidth matches xterm widths for assigned wide/narrow edge cases", () => {
+  // Broad block ranges previously got these wrong vs 15-graphemes:
+  // U+2329 / U+FE10 are wide; U+1F004 (mahjong) is narrow in the table.
+  assert.equal(codePointCellWidth(0x2329), 2);
+  assert.equal(codePointCellWidth(0xfe10), 2);
+  assert.equal(codePointCellWidth(0x1f004), 1);
+  assert.equal(stringCellWidth("\u2329\uFE10\u{1F004}"), 5);
 });
 
 test("removeLastCodePoint erases one code point, matching Bash/readline Backspace", () => {

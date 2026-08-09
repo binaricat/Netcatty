@@ -187,18 +187,27 @@ export class GhostTextAddon implements IDisposable {
       return;
     }
 
+    // Ctrl/Alt+Right refreshes call show() without an anchor. Under SSH echo
+    // lag that must not replace an existing logical caret with xterm's lagging
+    // cursor — keep the prior logical origin and let updatePosition advance it
+    // via the unchanged anchorInputLength → currentInput cell delta.
+    const preserveLogicalAnchor =
+      !anchor && this.anchorIsLogical && this.isActive();
+
     this.currentSuggestion = fullSuggestion;
     this.currentInput = currentInput;
     if (anchor) {
       this.anchorCursorX = anchor.cursorX;
       this.anchorCursorY = anchor.cursorY;
       this.anchorIsLogical = true;
-    } else {
+      this.anchorInputLength = currentInput.length;
+    } else if (!preserveLogicalAnchor) {
       this.anchorCursorX = this.term.buffer.active.cursorX;
       this.anchorCursorY = this.term.buffer.active.cursorY;
       this.anchorIsLogical = false;
+      this.anchorInputLength = currentInput.length;
     }
-    this.anchorInputLength = currentInput.length;
+    // else: keep prior logical origin + anchorInputLength for cellDelta.
     // Force position recalc since the text also changed.
     this.lastLeft = -1;
     this.lastTop = -1;

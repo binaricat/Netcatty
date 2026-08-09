@@ -133,14 +133,9 @@ function isBmpEmojiPresentation(cp: number): boolean {
 }
 
 /**
- * Minimal East-Asian-Width-style classifier: returns 2 for wide glyphs
- * (CJK ideographs, fullwidth forms, most emoji, hangul syllables), 0 for
- * common combining/format marks, and 1 otherwise. Not full wcwidth — just
- * enough to keep column math from drifting by one cell per CJK char.
- *
- * Prefer {@link stringCellWidth} for user-visible strings: xterm's
- * UnicodeGraphemesAddon measures grapheme clusters, so summing this per
- * code point over-counts emoji modifiers and ZWJ sequences.
+ * East-Asian / emoji width classifier aligned with xterm's `15-graphemes`
+ * UnicodeProperties table (CHARWIDTH_WIDE → 2, ambiguous emoji → 1 unless
+ * joined). Prefer {@link stringCellWidth} for user-visible strings.
  */
 export function codePointCellWidth(cp: number): number {
   // Combining marks / zero-width format characters (not full Mn/Me coverage).
@@ -164,7 +159,7 @@ export function codePointCellWidth(cp: number): number {
     (cp >= 0xfe20 && cp <= 0xfe2f) || // Combining Half Marks
     cp === 0x200b || // Zero Width Space
     cp === 0x200c || // ZWNJ
-    cp === 0x200d || // ZWJ
+    cp === 0x200d || // ZWJ (zero in cluster sums; matches getStringCellWidth families)
     cp === 0xfeff || // BOM / ZWNBSP
     (cp >= 0x1ab0 && cp <= 0x1aff) ||
     (cp >= 0x1dc0 && cp <= 0x1dff) ||
@@ -181,11 +176,13 @@ export function codePointCellWidth(cp: number): number {
     (cp >= 0xa000 && cp <= 0xa4cf) || // Yi
     (cp >= 0xac00 && cp <= 0xd7a3) || // Hangul Syllables
     (cp >= 0xf900 && cp <= 0xfaff) || // CJK Compat Ideographs
+    (cp >= 0xfe10 && cp <= 0xfe19) || // Vertical Forms (﹐︵ …) — wide in 15-graphemes
     (cp >= 0xfe30 && cp <= 0xfe4f) || // CJK Compat Forms
     (cp >= 0xff00 && cp <= 0xff60) || // Fullwidth forms
     (cp >= 0xffe0 && cp <= 0xffe6) || // Fullwidth signs
+    cp === 0x2329 || // Left-pointing angle bracket
+    cp === 0x232a || // Right-pointing angle bracket
     isBmpEmojiPresentation(cp) || // Legacy emoji presentation (✅ ⚡ ⌚ …)
-    (cp >= 0x1f000 && cp <= 0x1faff) || // Misc Symbols/Pictographs + emoji
     (cp >= 0x20000 && cp <= 0x3fffd) // CJK Extension B-F, G
   ) {
     return 2;
@@ -196,25 +193,31 @@ export function codePointCellWidth(cp: number): number {
 const isRegionalIndicator = (cp: number): boolean =>
   cp >= 0x1f1e6 && cp <= 0x1f1ff;
 
-/** Cell width of one grapheme cluster, matching xterm 15-graphemes join rules. */
+/**
+ * Cell width of one grapheme cluster, matching xterm 15-graphemes join rules
+ * closely enough for autocomplete column math.
+ *
+ * Supplementary-plane emoji are typically narrow (1) per code point in the
+ * provider table; skin-tone / ZWJ clusters sum those cells, and FE0F / RI
+ * pairs widen to 2 — not a blanket "all emoji are 2".
+ */
 function graphemeCellWidth(grapheme: string): number {
-  let max = 0;
+  let sum = 0;
   let regionalCount = 0;
   let hasEmojiPresentation = false;
   for (const ch of grapheme) {
     const cp = ch.codePointAt(0) ?? 0;
     if (isRegionalIndicator(cp)) regionalCount += 1;
     if (cp === 0xfe0f) hasEmojiPresentation = true;
-    const w = codePointCellWidth(cp);
-    if (w > max) max = w;
+    sum += codePointCellWidth(cp);
   }
   // xterm forces regional-indicator pairs (flags) to width 2 even though each
   // indicator is typically a narrow code point on its own.
   if (regionalCount >= 2) return 2;
   // Emoji presentation selector promotes its joined base to a wide glyph
   // (e.g. U+263A + U+FE0F → ☺️ is 2 cells, not 1+0).
-  if (hasEmojiPresentation) return Math.max(max, 2);
-  return max;
+  if (hasEmojiPresentation) return Math.max(sum, 2);
+  return sum;
 }
 
 const graphemeSegmenter =
@@ -236,11 +239,8 @@ export function removeLastCodePoint(s: string): string {
 }
 
 /**
- * Display-cell width of `s`, grapheme-aware like xterm's UnicodeGraphemesAddon.
- *
- * Emoji modifiers and ZWJ sequences form one wide glyph (2 cells), not a sum
- * of each emoji code point. Falls back to per-code-point widths only when
- * `Intl.Segmenter` is unavailable.
+ * Display-cell width of `s`, grapheme-aware like xterm's UnicodeGraphemesAddon
+ * `15-graphemes` getStringCellWidth (see {@link codePointCellWidth}).
  */
 export function stringCellWidth(s: string): number {
   if (!s) return 0;

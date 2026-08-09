@@ -802,12 +802,22 @@ export function useTerminalAutocomplete(
       currentPrompt: ReturnType<typeof getAlignedPrompt>["prompt"],
       options?: { preserveSelection?: boolean },
     ) => {
-      // Echo-lag-aware logical caret: resolved `input` can be ahead of the
-      // live xterm cursor / currentPrompt.userInput. Popup and ghost both
-      // need this so suffixes don't paint after the short echoed prefix.
+      // Echo-lag-aware logical caret: resolved query `input` can be ahead of
+      // the live xterm cursor / currentPrompt.userInput. When a late path
+      // refresh lands while live-preview has already rewritten the shell line,
+      // anchor from that resolved command line instead — keep `input` only for
+      // query-staleness checks above.
+      const caretUserInput =
+        options?.preserveSelection && previewActiveRef.current
+          ? (resolveAutocompleteQueryInput(
+            currentPrompt,
+            typedInputBufferRef.current,
+            typedBufferReliableRef.current,
+          ) ?? typedInputBufferRef.current)
+          : input;
       const logicalCursor = resolveAutocompleteCursorPosition(term, {
         promptText: currentPrompt.promptText,
-        userInput: input,
+        userInput: caretUserInput,
       });
 
       if (settingsRef.current.showGhostText) {
@@ -815,9 +825,13 @@ export function useTerminalAutocomplete(
         const activeSuggestion = ghost?.isActive() ? ghost.getSuggestion() : null;
         // Snippets are popup-only — never used as inline ghost text.
         const nextSuggestion = completions.find((c) => c.source !== "snippet")?.text ?? null;
-        const ghostDecision = decideGhostSuggestion(activeSuggestion, input, nextSuggestion);
+        const ghostDecision = decideGhostSuggestion(
+          activeSuggestion,
+          caretUserInput,
+          nextSuggestion,
+        );
         if (ghostDecision.type === "show") {
-          ghost?.show(ghostDecision.suggestion, input, {
+          ghost?.show(ghostDecision.suggestion, caretUserInput, {
             cursorX: logicalCursor.column,
             cursorY: logicalCursor.row,
           });
