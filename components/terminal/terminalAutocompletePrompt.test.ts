@@ -71,6 +71,33 @@ test("resolveAutocompleteQueryInput keeps echoed input when the typed buffer is 
   );
 });
 
+test("resolveAutocompleteQueryInput preserves a reliably tracked empty line under echo lag", () => {
+  // User typed then deleted everything; remote echo still shows the old char.
+  // Autocomplete must not keep matching / accepting against the stale echo.
+  assert.equal(
+    resolveAutocompleteQueryInput(atPrompt("g"), "", true),
+    "",
+  );
+  // Unreliable empty buffer (history recall / cursor move) still trusts echo.
+  assert.equal(
+    resolveAutocompleteQueryInput(atPrompt("git status"), "", false),
+    "git status",
+  );
+});
+
+test("computeAutocompleteAcceptWrite does not reinsert deleted text from a lagging echo", () => {
+  assert.equal(
+    computeAutocompleteAcceptWrite({
+      prompt: atPrompt("g"),
+      typedBuffer: "",
+      typedBufferReliable: true,
+      candidate: "git status",
+      os: "linux",
+    }),
+    "git status",
+  );
+});
+
 test("resolveAutocompleteQueryInput returns null when not at a prompt", () => {
   assert.equal(
     resolveAutocompleteQueryInput(
