@@ -428,12 +428,13 @@ export class GhostTextAddon implements IDisposable {
     // advance by 2 cells instead of 1. Backspace / Ctrl-W produces a
     // negative delta by shrinking currentInput below anchorInputLength.
     const cellDelta = this.currentInput.length >= this.anchorInputLength
-      ? stringCellWidth(this.currentInput.slice(this.anchorInputLength))
+      ? stringCellWidth(this.currentInput.slice(this.anchorInputLength), this.term)
       : -stringCellWidth(
           // currentSuggestion[0..anchorInputLength] equals what was typed
           // when show() fired (prefix-match invariant), so its slice gives
           // the correct cell widths for the deleted glyphs.
           this.currentSuggestion.slice(this.currentInput.length, this.anchorInputLength),
+          this.term,
         );
     const cols = Math.max(1, this.term.cols);
     const targetCol = this.anchorCursorX + cellDelta;
@@ -460,9 +461,16 @@ export class GhostTextAddon implements IDisposable {
         col += cols;
       }
     }
-    // Clamp to the visible top row so a runaway negative delta (e.g.
-    // deleted past the prompt) doesn't render above the terminal.
-    const top = Math.max(0, this.anchorCursorY + rowOffset) * dims.height;
+    // Clamp to the visible viewport. Negative deltas (deleted past the
+    // prompt) must not paint above row 0. Forward wraps past the bottom
+    // row also need clamping: with an explicit logical anchor, SSH echo
+    // lag can keep us on the last row while typed input wraps — xterm
+    // scrolls and keeps the caret on the bottom visible row, but our
+    // logical Y never self-heals, so row === term.rows would place the
+    // overlay just outside the overflow:hidden container and hide it.
+    const maxRow = Math.max(0, this.term.rows - 1);
+    const row = Math.min(maxRow, Math.max(0, this.anchorCursorY + rowOffset));
+    const top = row * dims.height;
     const left = col * dims.width;
 
     // Skip DOM writes if position hasn't changed (avoids unnecessary style recalc)

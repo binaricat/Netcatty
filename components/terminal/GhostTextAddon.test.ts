@@ -428,6 +428,42 @@ test("applyKeystroke: backspace removes a full supplementary-plane code point", 
   }
 });
 
+test("clamps a bottom-row wrap to the last visible row under logical echo lag", () => {
+  // Explicit logical anchor on the last row + typed wrap → predicted Y
+  // would be term.rows (off-screen). xterm scrolls and keeps the caret on
+  // the bottom visible row; the ghost must do the same or overflow:hidden
+  // clips it entirely.
+  const restoreDocument = installFakeDocument();
+  const { term, ghostElement } = createFakeTerm();
+  const addon = new GhostTextAddon();
+
+  try {
+    term.cols = 10;
+    term.rows = 5;
+    term.buffer.active.cursorX = 2;
+    term.buffer.active.cursorY = 4;
+    addon.activate(term as never);
+    addon.show("abcdefghij", "ab", {
+      cursorX: 8,
+      cursorY: 4,
+    });
+
+    const ghost = ghostElement();
+    assert.ok(ghost);
+
+    // Anchor 8 + 3 typed cells = 11 → wraps to col 1 on logical row 5,
+    // which must clamp to the last visible row (4).
+    addon.adjustToInput("abcde");
+
+    assert.equal(ghost.textContent, "fghij");
+    assert.equal(ghost.style.left, "9px");
+    assert.equal(ghost.style.top, `${4 * 18}px`);
+  } finally {
+    addon.dispose();
+    restoreDocument();
+  }
+});
+
 test("wraps the ghost to the previous row when deletion crosses a row boundary", () => {
   const restoreDocument = installFakeDocument();
   const { term, ghostElement } = createFakeTerm();

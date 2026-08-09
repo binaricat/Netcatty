@@ -133,38 +133,63 @@ function isBmpEmojiPresentation(cp: number): boolean {
 }
 
 /**
+ * Unicode Mark (Mn/Mc/Me), matching xterm `15-graphemes` Extend + SpacingMark
+ * joins for cluster math. Prefer this over a hand-maintained block list —
+ * Devanagari SpacingMarks such as U+093F are Mc and were previously missed.
+ */
+const unicodeMarkPattern = /\p{M}/u;
+
+type UnicodeWidthService = {
+  wcwidth: (codepoint: number) => 0 | 1 | 2;
+  getStringCellWidth: (s: string) => number;
+};
+
+function getTermUnicodeWidthService(
+  term: XTerm | null | undefined,
+): UnicodeWidthService | null {
+  if (!term) return null;
+  const service = (
+    term as XTerm & { _core?: { unicodeService?: UnicodeWidthService } }
+  )._core?.unicodeService;
+  if (
+    typeof service?.wcwidth !== "function" ||
+    typeof service?.getStringCellWidth !== "function"
+  ) {
+    return null;
+  }
+  return service;
+}
+
+/**
  * East-Asian / emoji width classifier aligned with xterm's `15-graphemes`
  * UnicodeProperties table (CHARWIDTH_WIDE → 2, ambiguous emoji → 1 unless
  * joined). Prefer {@link stringCellWidth} for user-visible strings.
+ *
+ * When `term` exposes the live `15-graphemes` unicodeService, widths come
+ * straight from xterm; otherwise fall back to the grapheme-aware tables.
  */
-export function codePointCellWidth(cp: number): number {
-  // Combining marks / zero-width format characters (not full Mn/Me coverage).
+export function codePointCellWidth(
+  cp: number,
+  term?: XTerm | null,
+): number {
+  const service = getTermUnicodeWidthService(term);
+  if (service) return service.wcwidth(cp);
+
+  // Format / join controls (Cf) that must stay zero in cluster sums even
+  // though they are not General_Category=Mark.
   if (
-    (cp >= 0x0300 && cp <= 0x036f) || // Combining Diacritical Marks
-    (cp >= 0x0483 && cp <= 0x0489) ||
-    (cp >= 0x0591 && cp <= 0x05bd) ||
-    cp === 0x05bf ||
-    (cp >= 0x05c1 && cp <= 0x05c2) ||
-    (cp >= 0x05c4 && cp <= 0x05c5) ||
-    cp === 0x05c7 ||
-    (cp >= 0x0610 && cp <= 0x061a) ||
-    (cp >= 0x064b && cp <= 0x065f) ||
-    cp === 0x0670 ||
-    (cp >= 0x06d6 && cp <= 0x06dc) ||
-    (cp >= 0x06df && cp <= 0x06e4) ||
-    (cp >= 0x06e7 && cp <= 0x06e8) ||
-    (cp >= 0x06ea && cp <= 0x06ed) ||
-    (cp >= 0x20d0 && cp <= 0x20f0) || // Combining Diacritical Marks for Symbols
-    (cp >= 0xfe00 && cp <= 0xfe0f) || // Variation Selectors (FE0F promoted in graphemeCellWidth)
-    (cp >= 0xfe20 && cp <= 0xfe2f) || // Combining Half Marks
     cp === 0x200b || // Zero Width Space
     cp === 0x200c || // ZWNJ
     cp === 0x200d || // ZWJ (zero in cluster sums; matches getStringCellWidth families)
     cp === 0xfeff || // BOM / ZWNBSP
-    (cp >= 0x1ab0 && cp <= 0x1aff) ||
-    (cp >= 0x1dc0 && cp <= 0x1dff) ||
+    (cp >= 0xfe00 && cp <= 0xfe0f) || // Variation Selectors (FE0F promoted in graphemeCellWidth)
     (cp >= 0xe0100 && cp <= 0xe01ef)
   ) {
+    return 0;
+  }
+  // All Marks (including SpacingMarks / Mc) contribute 0 cells inside a
+  // grapheme — same net effect as xterm's getStringCellWidth join rules.
+  if (cp > 0 && unicodeMarkPattern.test(String.fromCodePoint(cp))) {
     return 0;
   }
   if (
@@ -241,9 +266,14 @@ export function removeLastCodePoint(s: string): string {
 /**
  * Display-cell width of `s`, grapheme-aware like xterm's UnicodeGraphemesAddon
  * `15-graphemes` getStringCellWidth (see {@link codePointCellWidth}).
+ *
+ * Pass the live terminal when available so widths come from xterm's active
+ * unicode provider (SpacingMark joins, emoji, etc.).
  */
-export function stringCellWidth(s: string): number {
+export function stringCellWidth(s: string, term?: XTerm | null): number {
   if (!s) return 0;
+  const service = getTermUnicodeWidthService(term);
+  if (service) return service.getStringCellWidth(s);
   if (!graphemeSegmenter) {
     let w = 0;
     for (const ch of s) {

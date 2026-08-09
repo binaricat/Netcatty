@@ -410,7 +410,7 @@ export function resolveAutocompleteCursorPosition(
       const tail = lineText.substring(buffer.cursorX).trimEnd();
       if (tail.length === 0) {
         // Line text may include wide glyphs; measure cells, not code units.
-        fromLineCells = Math.max(buffer.cursorX, stringCellWidth(lineText.trimEnd()));
+        fromLineCells = Math.max(buffer.cursorX, stringCellWidth(lineText.trimEnd(), term));
       }
     }
   }
@@ -419,7 +419,7 @@ export function resolveAutocompleteCursorPosition(
   // glyphs occupy two xterm columns, and combining marks occupy zero.
   // String length under-counts wraps and can anchor the popup one row early.
   const fromPromptCells =
-    stringCellWidth(prompt.promptText) + stringCellWidth(prompt.userInput);
+    stringCellWidth(prompt.promptText, term) + stringCellWidth(prompt.userInput, term);
   const totalCells = Math.max(fromLineCells, fromPromptCells);
   // xterm keeps a pending wrap when the line fills exactly: cursorX === cols on
   // the filled row, and only advances on the next printable character. Naïve

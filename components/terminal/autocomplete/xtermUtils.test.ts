@@ -33,6 +33,15 @@ test("stringCellWidth still counts CJK and ASCII by display cells", () => {
   assert.equal(stringCellWidth("e\u0301"), 1);
 });
 
+test("stringCellWidth matches xterm 15-graphemes Devanagari SpacingMark joins", () => {
+  // U+093F is SpacingMark (Mc). The old hand-maintained zero-width ranges
+  // missed it (width 1), so कि summed to 2 cells; xterm joins the cluster to 1.
+  // Fallback cluster math treats Marks as 0 so the grapheme is 1 cell.
+  assert.equal(codePointCellWidth(0x93f), 0);
+  assert.equal(stringCellWidth("\u0915"), 1);
+  assert.equal(stringCellWidth("\u0915\u093F"), 1);
+});
+
 test("stringCellWidth treats emoji presentation selectors as wide graphemes", () => {
   // ☺️ / keycap digit: xterm 15-graphemes promotes U+FE0F to width 2 when it
   // joins its base, so the cluster is two cells (not narrow base + zero VS).
