@@ -248,10 +248,10 @@ test("wraps the ghost to the next row when the predicted column crosses cols", (
   }
 });
 
-test("preserves pending-wrap when an explicit logical anchor is at cols", () => {
-  // Echo-lagged prompt+input can fill a row exactly. resolveAutocomplete
-  // CursorPosition returns cursorX === cols on that row; ghost must keep
-  // that pending-wrap column instead of modulo-wrapping to the next row.
+test("places ghost on next row when logical anchor is at pending-wrap cols", () => {
+  // Echo-lagged prompt+input can fill a row exactly. The popup caret keeps
+  // cursorX === cols (pending wrap), but the ghost overlay must start at
+  // column 0 of the next row — otherwise overflow:hidden clips the suffix.
   const restoreDocument = installFakeDocument();
   const { term, ghostElement } = createFakeTerm();
   const addon = new GhostTextAddon();
@@ -269,17 +269,16 @@ test("preserves pending-wrap when an explicit logical anchor is at cols", () => 
     const ghost = ghostElement();
     assert.ok(ghost);
     assert.equal(ghost.textContent, "ij more");
-    // Pending wrap: column cols on the filled row (10 * 9 = 90px), not
-    // column 0 of row 4.
-    assert.equal(ghost.style.left, "90px");
-    assert.equal(ghost.style.top, "54px");
+    // First printable ghost cell at column 0 of the following row.
+    assert.equal(ghost.style.left, "0px");
+    assert.equal(ghost.style.top, "72px");
   } finally {
     addon.dispose();
     restoreDocument();
   }
 });
 
-test("preserves pending-wrap when typed delta lands exactly on cols", () => {
+test("places ghost on next row when typed delta lands exactly on cols", () => {
   const restoreDocument = installFakeDocument();
   const { term, ghostElement } = createFakeTerm();
   const addon = new GhostTextAddon();
@@ -293,12 +292,12 @@ test("preserves pending-wrap when typed delta lands exactly on cols", () => {
     const ghost = ghostElement();
     assert.ok(ghost);
 
-    // Anchor 8 + 2 typed cells = 10 → exact fill, stay on row 2 at col 10.
+    // Anchor 8 + 2 typed cells = 10 → exact fill; ghost starts on next row.
     addon.adjustToInput("abcd");
 
     assert.equal(ghost.textContent, "efghij");
-    assert.equal(ghost.style.left, "90px");
-    assert.equal(ghost.style.top, "36px");
+    assert.equal(ghost.style.left, "0px");
+    assert.equal(ghost.style.top, "54px");
   } finally {
     addon.dispose();
     restoreDocument();

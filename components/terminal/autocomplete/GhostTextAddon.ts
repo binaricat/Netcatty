@@ -432,17 +432,18 @@ export class GhostTextAddon implements IDisposable {
     // directions — the real xterm cursor wraps to the next row once it
     // *crosses* cols forward, and to the previous row when a deletion
     // crosses back past column 0. Exact fill (targetCol % cols === 0) is
-    // xterm's pending-wrap state: cursorX stays at cols on the filled
-    // row until the next printable character. Naïve modulo/floor would
-    // map that to column 0 of the next row and paint the ghost one row
-    // too low — same rule as resolveAutocompleteCursorPosition.
+    // xterm's pending-wrap state: the caret stays at cols on the filled
+    // row (see resolveAutocompleteCursorPosition for the popup). The ghost
+    // overlay cannot sit at that column — white-space:pre inside an
+    // overflow:hidden container clips the suffix at the right edge — so
+    // paint the first printable ghost cell at column 0 of the next row.
     // JS `%` returns negative for negative dividends, so normalize both
     // col and rowOffset explicitly when not on that boundary.
     let col: number;
     let rowOffset: number;
     if (targetCol > 0 && targetCol % cols === 0) {
-      col = cols;
-      rowOffset = targetCol / cols - 1;
+      col = 0;
+      rowOffset = targetCol / cols;
     } else {
       col = targetCol % cols;
       rowOffset = Math.floor(targetCol / cols);
