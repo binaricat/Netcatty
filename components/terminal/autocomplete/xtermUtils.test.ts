@@ -1,7 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { codePointCellWidth, stringCellWidth } from "./xtermUtils.ts";
+import {
+  codePointCellWidth,
+  removeLastGrapheme,
+  stringCellWidth,
+} from "./xtermUtils.ts";
 
 test("stringCellWidth treats emoji modifier sequences as one wide glyph", () => {
   // 👍🏽 = thumbs-up + medium skin tone. Code-point sum is 4; xterm 15-graphemes
@@ -25,4 +29,19 @@ test("stringCellWidth still counts CJK and ASCII by display cells", () => {
   assert.equal(stringCellWidth("中"), 2);
   assert.equal(stringCellWidth("cat "), 4);
   assert.equal(stringCellWidth("e\u0301"), 1);
+});
+
+test("stringCellWidth treats emoji presentation selectors as wide graphemes", () => {
+  // ☺️ / keycap digit: xterm 15-graphemes promotes U+FE0F to width 2 when it
+  // joins its base, so the cluster is two cells (not narrow base + zero VS).
+  assert.equal(codePointCellWidth(0xfe0f), 0);
+  assert.equal(stringCellWidth("\u263A\uFE0F"), 2);
+  assert.equal(stringCellWidth("1\uFE0F\u20E3"), 2);
+});
+
+test("removeLastGrapheme erases a full non-BMP emoji, not one UTF-16 unit", () => {
+  assert.equal(removeLastGrapheme("hello\u{1F600}"), "hello");
+  assert.equal(removeLastGrapheme("a\u{1F44D}\u{1F3FD}"), "a");
+  assert.equal(removeLastGrapheme("x"), "");
+  assert.equal(removeLastGrapheme(""), "");
 });

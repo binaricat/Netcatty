@@ -116,7 +116,7 @@ export function codePointCellWidth(cp: number): number {
     (cp >= 0x06e7 && cp <= 0x06e8) ||
     (cp >= 0x06ea && cp <= 0x06ed) ||
     (cp >= 0x20d0 && cp <= 0x20f0) || // Combining Diacritical Marks for Symbols
-    (cp >= 0xfe00 && cp <= 0xfe0f) || // Variation Selectors
+    (cp >= 0xfe00 && cp <= 0xfe0f) || // Variation Selectors (FE0F promoted in graphemeCellWidth)
     (cp >= 0xfe20 && cp <= 0xfe2f) || // Combining Half Marks
     cp === 0x200b || // Zero Width Space
     cp === 0x200c || // ZWNJ
@@ -155,15 +155,20 @@ const isRegionalIndicator = (cp: number): boolean =>
 function graphemeCellWidth(grapheme: string): number {
   let max = 0;
   let regionalCount = 0;
+  let hasEmojiPresentation = false;
   for (const ch of grapheme) {
     const cp = ch.codePointAt(0) ?? 0;
     if (isRegionalIndicator(cp)) regionalCount += 1;
+    if (cp === 0xfe0f) hasEmojiPresentation = true;
     const w = codePointCellWidth(cp);
     if (w > max) max = w;
   }
   // xterm forces regional-indicator pairs (flags) to width 2 even though each
   // indicator is typically a narrow code point on its own.
   if (regionalCount >= 2) return 2;
+  // Emoji presentation selector promotes its joined base to a wide glyph
+  // (e.g. U+263A + U+FE0F → ☺️ is 2 cells, not 1+0).
+  if (hasEmojiPresentation) return Math.max(max, 2);
   return max;
 }
 
@@ -171,6 +176,26 @@ const graphemeSegmenter =
   typeof Intl !== "undefined" && typeof Intl.Segmenter === "function"
     ? new Intl.Segmenter("en", { granularity: "grapheme" })
     : null;
+
+/**
+ * Drop the last user-perceived character (grapheme cluster), matching how
+ * modern shells erase with Backspace. Falls back to one Unicode code point
+ * when `Intl.Segmenter` is unavailable — still avoids leaving a dangling
+ * UTF-16 surrogate after deleting non-BMP input.
+ */
+export function removeLastGrapheme(s: string): string {
+  if (!s) return "";
+  if (graphemeSegmenter) {
+    let lastIndex = -1;
+    for (const { index } of graphemeSegmenter.segment(s)) {
+      lastIndex = index;
+    }
+    return lastIndex >= 0 ? s.slice(0, lastIndex) : "";
+  }
+  const codePoints = Array.from(s);
+  codePoints.pop();
+  return codePoints.join("");
+}
 
 /**
  * Display-cell width of `s`, grapheme-aware like xterm's UnicodeGraphemesAddon.

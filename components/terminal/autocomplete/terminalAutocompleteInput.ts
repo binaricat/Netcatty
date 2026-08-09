@@ -5,6 +5,7 @@ import type { AutocompleteSettings } from "./useTerminalAutocomplete";
 import { getAlignedPrompt } from "./promptDetector";
 import { recordCommand } from "./commandHistoryStore";
 import { getCommandToRecordOnEnter } from "./terminalAutocompletePrompt";
+import { removeLastGrapheme } from "./xtermUtils";
 
 interface TerminalAutocompleteInputContext {
   settingsRef: MutableRefObject<AutocompleteSettings>;
@@ -102,10 +103,11 @@ export function handleTerminalAutocompleteInput(
     return;
   }
 
-  // Backspace / DEL: drop the last typed char so the buffer stays aligned
-  // with what the shell actually holds.
+  // Backspace / DEL: drop the last grapheme (not one UTF-16 unit) so a
+  // supplementary-plane emoji cannot leave a dangling surrogate that still
+  // looks like a reliable prefix of the echoed line.
   if (data === "\x7f" || data === "\b") {
-    typedInputBufferRef.current = typedInputBufferRef.current.slice(0, -1);
+    typedInputBufferRef.current = removeLastGrapheme(typedInputBufferRef.current);
   } else if (data === "\x17") {
     // Ctrl+W: word-erase — kill the trailing whitespace + word.
     typedInputBufferRef.current = typedInputBufferRef.current.replace(/\s*\S+\s*$/, "");
