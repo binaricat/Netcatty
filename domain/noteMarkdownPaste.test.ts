@@ -2,11 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  didNoteMarkdownPasteApply,
   doesSelectionEncompassLexicalBlock,
   mergeNoteMarkdownDocumentPaste,
   noteMarkdownClipboardToPlainText,
   normalizeNoteMarkdownForEquivalence,
+  serializeLexicalNodeSelectionAsMarkdown,
   serializeLexicalSelectionAsMarkdown,
+  serializeMdastTableAsMarkdown,
   shouldInterceptNoteMarkdownPaste,
   shouldRecoverNoteMarkdownPasteAfterUnchangedInsert,
 } from "./noteMarkdownPaste";
@@ -973,6 +976,127 @@ test("unchanged insert recovery skips identical replacements but recovers lost-s
       clipboardText: "- [x] task",
       selectedText: "task",
       selectedMarkdown: "- [ ] task",
+    }),
+    true,
+  );
+  // Node selection: identical thematic-break replace must not append a duplicate.
+  assert.equal(
+    serializeLexicalNodeSelectionAsMarkdown([
+      { getType: () => "horizontalrule", getParent: () => null },
+    ]),
+    "***",
+  );
+  assert.equal(
+    shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
+      beforeMarkdown: "intro\n\n---\n\noutro",
+      clipboardText: "---",
+      selectedText: noteMarkdownClipboardToPlainText("***"),
+      selectedMarkdown: "***",
+    }),
+    false,
+  );
+  assert.equal(
+    shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
+      beforeMarkdown: "intro\n\n***\n\noutro",
+      clipboardText: "***",
+      selectedText: "",
+      selectedMarkdown: "***",
+    }),
+    false,
+  );
+  // Node selection: identical table replace must not append a duplicate.
+  const tableMarkdown = serializeMdastTableAsMarkdown({
+    children: [
+      {
+        children: [
+          { children: [{ type: "text", value: "A" }] },
+          { children: [{ type: "text", value: "B" }] },
+        ],
+      },
+      {
+        children: [
+          { children: [{ type: "text", value: "1" }] },
+          { children: [{ type: "text", value: "2" }] },
+        ],
+      },
+    ],
+  });
+  assert.equal(tableMarkdown, "| A | B |\n| --- | --- |\n| 1 | 2 |");
+  assert.equal(
+    serializeLexicalNodeSelectionAsMarkdown([
+      {
+        getType: () => "table",
+        getParent: () => null,
+        getMdastNode: () => ({
+          children: [
+            {
+              children: [
+                { children: [{ type: "text", value: "A" }] },
+                { children: [{ type: "text", value: "B" }] },
+              ],
+            },
+            {
+              children: [
+                { children: [{ type: "text", value: "1" }] },
+                { children: [{ type: "text", value: "2" }] },
+              ],
+            },
+          ],
+        }),
+      },
+    ]),
+    tableMarkdown,
+  );
+  assert.equal(
+    shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
+      beforeMarkdown: `intro\n\n${tableMarkdown}\n\noutro`,
+      clipboardText: "| A | B |\n| - | - |\n| 1 | 2 |",
+      selectedText: noteMarkdownClipboardToPlainText(tableMarkdown ?? ""),
+      selectedMarkdown: tableMarkdown,
+    }),
+    false,
+  );
+});
+
+test("didNoteMarkdownPasteApply distinguishes paste success from concurrent edits", () => {
+  assert.equal(
+    didNoteMarkdownPasteApply({
+      beforeMarkdown: "# Note\n\nHello",
+      afterMarkdown: "# Note\n\nHello",
+      clipboardText: "**World**",
+      selectedText: "",
+      selectedMarkdown: "",
+    }),
+    false,
+  );
+  assert.equal(
+    didNoteMarkdownPasteApply({
+      beforeMarkdown: "# Note\n\nHello",
+      afterMarkdown: "# Note\n\n**World**",
+      clipboardText: "**World**",
+      selectedText: "Hello",
+      selectedMarkdown: "Hello",
+    }),
+    true,
+  );
+  // Concurrent typing without the clipboard fragment is not paste success.
+  assert.equal(
+    didNoteMarkdownPasteApply({
+      beforeMarkdown: "# Note\n\nHello",
+      afterMarkdown: "# Note\n\nHello!",
+      clipboardText: "**World**",
+      selectedText: "",
+      selectedMarkdown: "",
+    }),
+    false,
+  );
+  assert.equal(
+    didNoteMarkdownPasteApply({
+      beforeMarkdown: "intro\n\n---\n\noutro",
+      afterMarkdown: "intro\n\n***\n\noutro",
+      clipboardText: "---",
+      selectedText: "",
+      selectedMarkdown: "***",
     }),
     true,
   );

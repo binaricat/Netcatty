@@ -20,11 +20,17 @@ test("useNoteMarkdownPaste owns paste intercept and recovery orchestration", () 
   );
   assert.match(source, /mergeNoteMarkdownDocumentPaste/);
   assert.match(source, /shouldRecoverNoteMarkdownPasteAfterUnchangedInsert/);
+  assert.match(source, /didNoteMarkdownPasteApply/);
   assert.match(source, /editor\.setMarkdown\(next\)/);
   assert.match(source, /editor\.insertMarkdown\(markdown\)/);
   assert.match(
     source,
     /if\s*\(\s*!canInsertAtSelection\s*\)\s*\{\s*(?:\/\/[^\n]*\n\s*)*applyDocumentPaste\(\)/,
+  );
+  // Concurrent draft changes must not short-circuit recovery by themselves.
+  assert.doesNotMatch(
+    source,
+    /if\s*\(\s*getLatestMarkdown\(\)\s*!==\s*before\s*\)\s*return/,
   );
   assert.doesNotMatch(source, /shouldUseDocumentNoteMarkdownPaste/);
 });

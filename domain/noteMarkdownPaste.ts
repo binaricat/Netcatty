@@ -20,6 +20,15 @@ export const shouldInsertClipboardTextAsMarkdown = (text: string): boolean => {
 
 export type NoteMarkdownPasteTextFormat = "bold" | "italic" | "code" | "strikethrough";
 
+export type NoteMarkdownPasteMdastTable = {
+  align?: Array<"left" | "right" | "center" | null> | null;
+  children?: Array<{
+    children?: Array<{
+      children?: unknown[];
+    }>;
+  }>;
+};
+
 export type NoteMarkdownPasteSelectionNode = {
   getType: () => string;
   getParent: () => NoteMarkdownPasteSelectionNode | null;
@@ -32,6 +41,8 @@ export type NoteMarkdownPasteSelectionNode = {
   getChecked?: () => boolean | undefined;
   getTextContent?: () => string;
   hasFormat?: (type: NoteMarkdownPasteTextFormat) => boolean;
+  /** MDXEditor table decorator nodes expose the backing MDAST table. */
+  getMdastNode?: () => NoteMarkdownPasteMdastTable;
 };
 
 export type NoteMarkdownPasteSelection = {
@@ -455,6 +466,82 @@ const serializeLexicalSelectionNodesAsMarkdown = (
   return joined;
 };
 
+const flattenMdastPlainText = (node: unknown): string => {
+  if (node == null) return "";
+  if (typeof node === "string") return node;
+  if (typeof node !== "object") return "";
+  const record = node as { value?: unknown; children?: unknown };
+  if (typeof record.value === "string") return record.value;
+  if (!Array.isArray(record.children)) return "";
+  return record.children.map(flattenMdastPlainText).join("");
+};
+
+/**
+ * Serialize an MDXEditor/MDAST table node to GFM pipe table markdown for
+ * selection-scoped identical-replace checks.
+ */
+export const serializeMdastTableAsMarkdown = (
+  table: NoteMarkdownPasteMdastTable | null | undefined,
+): string | null => {
+  const rows = (table?.children ?? [])
+    .map((row) => (row.children ?? []).map((cell) => {
+      const text = flattenMdastPlainText(cell).replace(/\r\n?/g, "\n").replace(/\|/g, "\\|");
+      // Pipe tables are single-line cells in the clipboard form we accept.
+      return text.replace(/\n+/g, " ").trim();
+    }))
+    .filter((row) => row.length > 0);
+  if (rows.length === 0) return null;
+  const colCount = Math.max(...rows.map((row) => row.length));
+  if (colCount === 0) return null;
+  const pad = (row: string[]): string[] => Array.from(
+    { length: colCount },
+    (_, index) => row[index] ?? "",
+  );
+  const align = table?.align ?? [];
+  const separator = Array.from({ length: colCount }, (_, index) => {
+    const value = align[index];
+    if (value === "center") return ":---:";
+    if (value === "right") return "---:";
+    if (value === "left") return ":---";
+    return "---";
+  });
+  const lines = [
+    `| ${pad(rows[0]).join(" | ")} |`,
+    `| ${separator.join(" | ")} |`,
+    ...rows.slice(1).map((row) => `| ${pad(row).join(" | ")} |`),
+  ];
+  return lines.join("\n");
+};
+
+/**
+ * Markdown for a Lexical NodeSelection (decorator blocks such as thematic
+ * breaks and tables). Range selections use serializeLexicalSelectionAsMarkdown.
+ */
+export const serializeLexicalNodeSelectionAsMarkdown = (
+  nodes: readonly NoteMarkdownPasteSelectionNode[],
+): string | null => {
+  if (nodes.length === 0) return null;
+  const parts: string[] = [];
+  for (const node of nodes) {
+    const type = node.getType();
+    if (type === "horizontalrule") {
+      // mdast-util-to-markdown / MDXEditor default thematic break form.
+      parts.push("***");
+      continue;
+    }
+    if (type === "table") {
+      if (typeof node.getMdastNode !== "function") return null;
+      const tableMarkdown = serializeMdastTableAsMarkdown(node.getMdastNode());
+      if (tableMarkdown === null) return null;
+      parts.push(tableMarkdown);
+      continue;
+    }
+    // Unknown decorator / block node: no selection-scoped equivalence evidence.
+    return null;
+  }
+  return parts.join("\n\n");
+};
+
 /**
  * Best-effort markdown for the active Lexical range (combined text formats,
  * link URL/title, and per-block markers). Used to scope paste-equivalence
@@ -623,6 +710,8 @@ export const noteMarkdownClipboardToPlainText = (markdown: string): string => {
   text = text.replace(/^ {0,3}(?:```|~~~)[^\n]*\n([\s\S]*?)^ {0,3}(?:```|~~~)[ \t]*$/gm, "$1");
   text = replaceMarkdownLinksWithLabels(text, true);
   text = replaceMarkdownLinksWithLabels(text, false);
+  // Thematic breaks before emphasis: otherwise `***` is eaten as italic `*…*`.
+  text = text.replace(/^ {0,3}[-*_](?:\s*[-*_]){2,}\s*$/gm, "");
   text = text.replace(/(\*\*|__)(?=\S)([\s\S]*?\S)\1/g, "$2");
   text = text.replace(/(\*|_)(?=\S)([\s\S]*?\S)\1/g, "$2");
   // GFM strikethrough after bold/italic so `**~~Hello~~**` / `~~**Hello**~~` → Hello.
@@ -633,7 +722,6 @@ export const noteMarkdownClipboardToPlainText = (markdown: string): string => {
   text = text.replace(/^ {0,3}[-+*]\s+\[[ xX]\]\s+/gm, "");
   text = text.replace(/^ {0,3}(?:[-+*]|\d+[.)])\s+/gm, "");
   text = text.replace(/^ {0,3}>\s?/gm, "");
-  text = text.replace(/^ {0,3}[-*_](?:\s*[-*_]){2,}\s*$/gm, "");
   // Hard breaks → plain newlines (Lexical selection text has no marker spaces).
   text = text.replace(/ {2,}\n/g, "\n");
   text = text.replace(/\\\n/g, "\n");
@@ -752,9 +840,35 @@ export const normalizeNoteMarkdownForEquivalence = (markdown: string): string =>
       /(^|[^\\*\w])_(\S[\s\S]*?\S)_(?=$|[^\\*\w])/g,
       "$1*$2*",
     );
+    // Thematic breaks: --- / ___ / * * * → *** (node-selection identical replace).
+    next = next.replace(
+      /^ {0,3}(?:[-*_]\s*){2,}[-*_]\s*$/gm,
+      "***",
+    );
     // Unordered / task-list markers: MDXEditor defaults to `*`, serializer uses `-`.
     // Require trailing whitespace so `*Hi*` / `***` stay untouched.
     next = next.replace(/^(\s*)[-+*](\s+)/gm, "$1-$2");
+    // GFM table separator dash runs: `| - |` / `| :---: |` stay align-canonical.
+    next = next.replace(
+      /^\|?(?:\s*:?-+:?\s*\|)+(?:\s*:?-+:?\s*)\|?\s*$/gm,
+      (line) => {
+        const cells = line
+          .trim()
+          .replace(/^\|/, "")
+          .replace(/\|$/, "")
+          .split("|")
+          .map((cell) => {
+            const trimmed = cell.trim();
+            const left = trimmed.startsWith(":");
+            const right = trimmed.endsWith(":");
+            if (left && right) return ":---:";
+            if (right) return "---:";
+            if (left) return ":---";
+            return "---";
+          });
+        return `| ${cells.join(" | ")} |`;
+      },
+    );
     // Hard breaks: backslash form → two-trailing-spaces (serializer form).
     next = next.replace(/\\\n/g, "  \n");
     // Collapse 3+ trailing spaces before a newline to the canonical two-space break.
@@ -789,35 +903,78 @@ export const shouldRecoverNoteMarkdownPasteAfterUnchangedInsert = (input: {
     === normalizeNoteMarkdownForEquivalence(before)) {
     return false;
   }
+  const selectedMarkdown = input.selectedMarkdown?.replace(/\r\n?/g, "\n") ?? null;
+  // Selection-scoped markdown match is sufficient to suppress recovery for
+  // identical replaces (including Lexical node selections with empty plain text).
+  if (
+    selectedMarkdown !== null
+    && normalizeNoteMarkdownForEquivalence(selectedMarkdown)
+      === normalizeNoteMarkdownForEquivalence(clipboard)
+  ) {
+    return false;
+  }
   if (input.selectedText !== null) {
     const selected = input.selectedText.replace(/\r\n?/g, "\n");
-    const clipboardPlain = noteMarkdownClipboardToPlainText(clipboard);
+    // Normalize first so table separators / thematic-break spellings project
+    // to the same plain form as selection-scoped markdown evidence.
+    const clipboardPlain = noteMarkdownClipboardToPlainText(
+      normalizeNoteMarkdownForEquivalence(clipboard),
+    );
     // Exact plain clipboard match (no markdown markers to apply). Do not use
     // selected===clipboard alone: selecting literal punctuation rendered from
     // `\*\*Hello\*\*` yields selected `**Hello**`, which equals clipboard
     // `**Hello**` as strings even though selection markdown differs and the
     // paste still needs recovery after a lost-selection insert no-op.
     if (selected === clipboard && clipboard === clipboardPlain) return false;
-    // Structured clipboard: skip recovery only when the selection itself is
-    // already that markdown (identical formatted/link replace at this range).
-    // Compare normalized structure so `__Hello__` matches serializer `**Hello**`.
-    // Also normalize block separators: Lexical selection plain text uses one
-    // newline between blocks while clipboard Markdown keeps a blank line.
-    if (
-      normalizePlainSelectionBlockSeparators(selected)
-      === normalizePlainSelectionBlockSeparators(clipboardPlain)
-    ) {
-      const selectedMarkdown = input.selectedMarkdown?.replace(/\r\n?/g, "\n") ?? null;
-      if (
-        selectedMarkdown !== null
-        && normalizeNoteMarkdownForEquivalence(selectedMarkdown)
-          === normalizeNoteMarkdownForEquivalence(clipboard)
-      ) {
-        return false;
-      }
-    }
   }
   return true;
+};
+
+/**
+ * True when insertMarkdown (or an equivalent in-editor replace) already applied
+ * the clipboard to the document. Used so concurrent draft/editor updates are
+ * not mistaken for paste success, and so identical node replaces can be
+ * distinguished from lost-selection no-ops.
+ */
+export const didNoteMarkdownPasteApply = (input: {
+  beforeMarkdown: string;
+  afterMarkdown: string;
+  clipboardText: string;
+  selectedText: string | null;
+  selectedMarkdown?: string | null;
+}): boolean => {
+  const before = input.beforeMarkdown.replace(/\r\n?/g, "\n");
+  const after = input.afterMarkdown.replace(/\r\n?/g, "\n");
+  if (after === before) return false;
+
+  const beforeNorm = normalizeNoteMarkdownForEquivalence(before);
+  const afterNorm = normalizeNoteMarkdownForEquivalence(after);
+  const clipboardNorm = normalizeNoteMarkdownForEquivalence(
+    input.clipboardText.replace(/\r\n?/g, "\n"),
+  );
+  if (!clipboardNorm) return afterNorm !== beforeNorm;
+
+  // Select-all style replace.
+  if (afterNorm === clipboardNorm) return true;
+
+  const selectedMarkdown = input.selectedMarkdown?.replace(/\r\n?/g, "\n") ?? null;
+  if (selectedMarkdown !== null && selectedMarkdown.length > 0) {
+    const selectedNorm = normalizeNoteMarkdownForEquivalence(selectedMarkdown);
+    const index = beforeNorm.indexOf(selectedNorm);
+    if (index !== -1) {
+      const expected = `${beforeNorm.slice(0, index)}${clipboardNorm}${beforeNorm.slice(index + selectedNorm.length)}`;
+      if (afterNorm === expected) return true;
+    }
+  }
+
+  // Caret / append insert: clipboard fragment became present.
+  if (!beforeNorm.includes(clipboardNorm) && afterNorm.includes(clipboardNorm)) {
+    return true;
+  }
+
+  return afterNorm === normalizeNoteMarkdownForEquivalence(
+    mergeNoteMarkdownDocumentPaste(before, input.clipboardText),
+  );
 };
 
 /**

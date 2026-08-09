@@ -1,10 +1,16 @@
 import {
   $getSelection,
+  $isNodeSelection,
   $isRangeSelection,
   getNearestEditorFromDOMNode,
 } from "lexical";
 
-import { serializeLexicalSelectionAsMarkdown } from "../../domain/noteMarkdownPaste";
+import {
+  noteMarkdownClipboardToPlainText,
+  normalizeNoteMarkdownForEquivalence,
+  serializeLexicalNodeSelectionAsMarkdown,
+  serializeLexicalSelectionAsMarkdown,
+} from "../../domain/noteMarkdownPaste";
 
 export const isNotePasteInsideCodeBlock = (target: EventTarget | null): boolean => {
   if (typeof Element === "undefined") return false;
@@ -55,7 +61,7 @@ export const hasActiveLexicalTextSelection = (target: EventTarget | null): boole
   return hasSelection;
 };
 
-/** Active Lexical range plain text + selection-scoped markdown, or null when unavailable. */
+/** Active Lexical range/node plain text + selection-scoped markdown, or null. */
 export const getActiveLexicalPasteSelection = (
   target: EventTarget | null,
 ): { text: string; markdown: string } | null => {
@@ -71,12 +77,27 @@ export const getActiveLexicalPasteSelection = (
   let pasteSelection: { text: string; markdown: string } | null = null;
   lexicalEditor.getEditorState().read(() => {
     const selection = $getSelection();
-    if (!$isRangeSelection(selection)) return;
-    const text = selection.getTextContent();
-    pasteSelection = {
-      text,
-      markdown: serializeLexicalSelectionAsMarkdown(text, selection),
-    };
+    if ($isRangeSelection(selection)) {
+      const text = selection.getTextContent();
+      pasteSelection = {
+        text,
+        markdown: serializeLexicalSelectionAsMarkdown(text, selection),
+      };
+      return;
+    }
+    if ($isNodeSelection(selection)) {
+      const nodes = selection.getNodes();
+      const markdown = serializeLexicalNodeSelectionAsMarkdown(nodes);
+      if (markdown === null) return;
+      // Decorator nodes (HR) expose "\n" via getTextContent; project through the
+      // same plain-text rules as clipboard markdown so identical replaces match.
+      pasteSelection = {
+        text: noteMarkdownClipboardToPlainText(
+          normalizeNoteMarkdownForEquivalence(markdown),
+        ),
+        markdown,
+      };
+    }
   });
   return pasteSelection;
 };

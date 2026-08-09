@@ -28,8 +28,10 @@ test("InlineMarkdownEditor paste handler stays view glue over domain + applicati
   assert.doesNotMatch(editorSource, /doesSelectionEncompassLexicalBlock/);
 
   assert.match(domainSource, /export const serializeLexicalSelectionAsMarkdown/);
+  assert.match(domainSource, /export const serializeLexicalNodeSelectionAsMarkdown/);
   assert.match(domainSource, /export const mergeNoteMarkdownDocumentPaste/);
   assert.match(domainSource, /export const shouldRecoverNoteMarkdownPasteAfterUnchangedInsert/);
+  assert.match(domainSource, /export const didNoteMarkdownPasteApply/);
   assert.match(domainSource, /export const doesSelectionEncompassLexicalBlock/);
   assert.match(domainSource, /getChecked/);
   assert.match(
@@ -40,6 +42,7 @@ test("InlineMarkdownEditor paste handler stays view glue over domain + applicati
   assert.match(hookSource, /shouldInterceptNoteMarkdownPaste/);
   assert.match(hookSource, /mergeNoteMarkdownDocumentPaste/);
   assert.match(hookSource, /shouldRecoverNoteMarkdownPasteAfterUnchangedInsert/);
+  assert.match(hookSource, /didNoteMarkdownPasteApply/);
   assert.match(hookSource, /event\.preventDefault\(\)/);
   assert.match(
     hookSource,
@@ -53,4 +56,6 @@ test("InlineMarkdownEditor paste handler stays view glue over domain + applicati
   assert.match(lexicalSource, /hasActiveLexicalTextSelection/);
   assert.match(lexicalSource, /getActiveLexicalPasteSelection/);
   assert.match(lexicalSource, /serializeLexicalSelectionAsMarkdown/);
+  assert.match(lexicalSource, /serializeLexicalNodeSelectionAsMarkdown/);
+  assert.match(lexicalSource, /\$isNodeSelection/);
 });

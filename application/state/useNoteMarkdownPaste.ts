@@ -1,6 +1,7 @@
 import { useCallback, type ClipboardEvent } from "react";
 
 import {
+  didNoteMarkdownPasteApply,
   mergeNoteMarkdownDocumentPaste,
   shouldInterceptNoteMarkdownPaste,
   shouldRecoverNoteMarkdownPasteAfterUnchangedInsert,
@@ -87,20 +88,29 @@ export function useNoteMarkdownPaste({
       editor.insertMarkdown(markdown);
       // insertMarkdown's Lexical update is deferred; if selection was lost the
       // insert no-ops after our preventDefault. Recover on the next frames.
+      // Do not treat an unrelated draft/editor change as proof the paste landed.
       window.requestAnimationFrame(() => {
         window.requestAnimationFrame(() => {
-          if (getLatestMarkdown() !== before) return;
-          const current = editor.getMarkdown();
-          if (current !== before) {
-            commitMarkdown(current);
-            return;
-          }
-          if (!shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
+          const editorMarkdown = editor.getMarkdown();
+          const recoverInput = {
             beforeMarkdown: before,
             clipboardText: markdown,
             selectedText: pasteSelection?.text ?? null,
             selectedMarkdown: pasteSelection?.markdown ?? null,
+          };
+          // Identical replace (including node selections): never append a duplicate,
+          // even when another edit raced before these frames ran.
+          if (!shouldRecoverNoteMarkdownPasteAfterUnchangedInsert(recoverInput)) {
+            return;
+          }
+          if (didNoteMarkdownPasteApply({
+            ...recoverInput,
+            afterMarkdown: editorMarkdown,
           })) {
+            // insertMarkdown updated the editor but onChange may still lag.
+            if (getLatestMarkdown() === before && editorMarkdown !== before) {
+              commitMarkdown(editorMarkdown);
+            }
             return;
           }
           applyDocumentPaste();
