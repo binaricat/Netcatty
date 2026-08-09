@@ -18,6 +18,8 @@ export const shouldInsertClipboardTextAsMarkdown = (text: string): boolean => {
   return PASTED_MARKDOWN_PATTERNS.some((pattern) => pattern.test(markdown));
 };
 
+export type NoteMarkdownPasteTextFormat = "bold" | "italic" | "code" | "strikethrough";
+
 export type NoteMarkdownPasteSelectionNode = {
   getType: () => string;
   getParent: () => NoteMarkdownPasteSelectionNode | null;
@@ -29,11 +31,11 @@ export type NoteMarkdownPasteSelectionNode = {
   getValue?: () => number;
   getChecked?: () => boolean | undefined;
   getTextContent?: () => string;
-  hasFormat?: (type: "bold" | "italic" | "code") => boolean;
+  hasFormat?: (type: NoteMarkdownPasteTextFormat) => boolean;
 };
 
 export type NoteMarkdownPasteSelection = {
-  hasFormat: (type: "bold" | "italic" | "code") => boolean;
+  hasFormat: (type: NoteMarkdownPasteTextFormat) => boolean;
   anchor: {
     getNode: () => NoteMarkdownPasteSelectionNode;
     offset?: number;
@@ -64,17 +66,20 @@ const isLexicalLinkNode = (
 
 const applyLexicalInlineMarkdownFormats = (
   text: string,
-  formatSource: { hasFormat: (type: "bold" | "italic" | "code") => boolean },
+  formatSource: { hasFormat: (type: NoteMarkdownPasteTextFormat) => boolean },
 ): string => {
   if (!text) return text;
   // Code fences out other emphasis markers in CommonMark-style paste.
   if (formatSource.hasFormat("code")) return `\`${text}\``;
+  // Strike innermost so bold+strike matches clipboard `**~~…~~**`.
+  let formatted = text;
+  if (formatSource.hasFormat("strikethrough")) formatted = `~~${formatted}~~`;
   const bold = formatSource.hasFormat("bold");
   const italic = formatSource.hasFormat("italic");
-  if (bold && italic) return `***${text}***`;
-  if (bold) return `**${text}**`;
-  if (italic) return `*${text}*`;
-  return text;
+  if (bold && italic) return `***${formatted}***`;
+  if (bold) return `**${formatted}**`;
+  if (italic) return `*${formatted}*`;
+  return formatted;
 };
 
 const formatLexicalLinkMarkdown = (
@@ -522,6 +527,8 @@ export const noteMarkdownClipboardToPlainText = (markdown: string): string => {
   text = replaceMarkdownLinksWithLabels(text, false);
   text = text.replace(/(\*\*|__)(?=\S)([\s\S]*?\S)\1/g, "$2");
   text = text.replace(/(\*|_)(?=\S)([\s\S]*?\S)\1/g, "$2");
+  // GFM strikethrough after bold/italic so `**~~Hello~~**` / `~~**Hello**~~` → Hello.
+  text = text.replace(/~~(?=\S)([\s\S]*?\S)~~/g, "$1");
   text = text.replace(/`([^`\n]+)`/g, "$1");
   text = text.replace(/^ {0,3}#{1,6}\s+/gm, "");
   // Task-list markers before ordinary list bullets so `- [ ] task` → `task`.
@@ -539,25 +546,120 @@ export const noteMarkdownClipboardToPlainText = (markdown: string): string => {
 const normalizePlainSelectionBlockSeparators = (text: string): string =>
   text.replace(/\n+/g, "\n");
 
+const MARKDOWN_EQUIVALENCE_PROTECT_PREFIX = "\u0000MDPROT:";
+const MARKDOWN_EQUIVALENCE_PROTECT_SUFFIX = "\u0000";
+
+/**
+ * Run a transform only on Markdown that is safe to rewrite for emphasis
+ * equivalence. Inline/fenced code and link/image destinations keep literal
+ * underscores (e.g. `` `__x__` `` must not become `` `**x**` ``).
+ */
+const mapNoteMarkdownOutsideProtectedRegions = (
+  text: string,
+  transform: (exposed: string) => string,
+): string => {
+  const saved: string[] = [];
+  const stash = (chunk: string): string => {
+    const id = saved.length;
+    saved.push(chunk);
+    return `${MARKDOWN_EQUIVALENCE_PROTECT_PREFIX}${id}${MARKDOWN_EQUIVALENCE_PROTECT_SUFFIX}`;
+  };
+
+  let working = text;
+  working = working.replace(
+    /^ {0,3}(?:```|~~~)[^\n]*\n[\s\S]*?^ {0,3}(?:```|~~~)[ \t]*$/gm,
+    (chunk) => stash(chunk),
+  );
+  working = working.replace(/`[^`\n]+`/g, (chunk) => stash(chunk));
+  working = protectMarkdownLinkDestinations(working, stash);
+  working = transform(working);
+  return working.replace(
+    new RegExp(
+      `${MARKDOWN_EQUIVALENCE_PROTECT_PREFIX}(\\d+)${MARKDOWN_EQUIVALENCE_PROTECT_SUFFIX}`,
+      "g",
+    ),
+    (_match, id: string) => saved[Number(id)] ?? "",
+  );
+};
+
+/** Keep `[label](dest)` / `![alt](dest)` wrappers; stash only the `(dest)` segment. */
+const protectMarkdownLinkDestinations = (
+  text: string,
+  stash: (chunk: string) => string,
+): string => {
+  let out = "";
+  let i = 0;
+  while (i < text.length) {
+    const img = text.indexOf("![", i);
+    const link = text.indexOf("[", i);
+    let open = -1;
+    let images = false;
+    if (img !== -1 && (link === -1 || img <= link)) {
+      open = img;
+      images = true;
+    } else if (link !== -1) {
+      open = link;
+    } else {
+      out += text.slice(i);
+      break;
+    }
+    out += text.slice(i, open);
+    const labelStart = open + (images ? 2 : 1);
+    const labelEnd = text.indexOf("]", labelStart);
+    if (labelEnd === -1 || text[labelEnd + 1] !== "(") {
+      out += text.slice(open, open + (images ? 2 : 1));
+      i = open + (images ? 2 : 1);
+      continue;
+    }
+    let depth = 1;
+    let destEnd = -1;
+    for (let j = labelEnd + 2; j < text.length; j += 1) {
+      const ch = text[j];
+      if (ch === "\n") break;
+      if (ch === "(") depth += 1;
+      else if (ch === ")") {
+        depth -= 1;
+        if (depth === 0) {
+          destEnd = j;
+          break;
+        }
+      }
+    }
+    if (destEnd === -1) {
+      out += text.slice(open, open + (images ? 2 : 1));
+      i = open + (images ? 2 : 1);
+      continue;
+    }
+    // Label stays exposed (emphasis may canonicalize); destination is literal.
+    out += text.slice(open, labelEnd + 1);
+    out += stash(text.slice(labelEnd + 1, destEnd + 1));
+    i = destEnd + 1;
+  }
+  return out;
+};
+
 /**
  * Canonicalize semantically equivalent Markdown spelling so identical-replace
  * checks are not tripped by serializer vs clipboard marker differences
  * (`**Hello**` vs `__Hello__`, `*Hi*` vs `_Hi_`).
  */
 export const normalizeNoteMarkdownForEquivalence = (markdown: string): string => {
-  let text = markdown.replace(/\r\n?/g, "\n");
-  // Strong emphasis: __x__ → **x** (serializer canonical form).
-  text = text.replace(/(__)(?=\S)([\s\S]*?\S)\1/g, "**$2**");
-  // Emphasis: _x_ → *x* (avoid matching inside identifiers / already-normalized **).
-  text = text.replace(
-    /(^|[^\\*\w])_(\S[\s\S]*?\S)_(?=$|[^\\*\w])/g,
-    "$1*$2*",
-  );
-  // Hard breaks: backslash form → two-trailing-spaces (serializer form).
-  text = text.replace(/\\\n/g, "  \n");
-  // Collapse 3+ trailing spaces before a newline to the canonical two-space break.
-  text = text.replace(/ {3,}\n/g, "  \n");
-  return text;
+  const text = markdown.replace(/\r\n?/g, "\n");
+  return mapNoteMarkdownOutsideProtectedRegions(text, (exposed) => {
+    let next = exposed;
+    // Strong emphasis: __x__ → **x** (serializer canonical form).
+    next = next.replace(/(__)(?=\S)([\s\S]*?\S)\1/g, "**$2**");
+    // Emphasis: _x_ → *x* (avoid matching inside identifiers / already-normalized **).
+    next = next.replace(
+      /(^|[^\\*\w])_(\S[\s\S]*?\S)_(?=$|[^\\*\w])/g,
+      "$1*$2*",
+    );
+    // Hard breaks: backslash form → two-trailing-spaces (serializer form).
+    next = next.replace(/\\\n/g, "  \n");
+    // Collapse 3+ trailing spaces before a newline to the canonical two-space break.
+    next = next.replace(/ {3,}\n/g, "  \n");
+    return next;
+  });
 };
 
 /**

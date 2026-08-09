@@ -102,6 +102,10 @@ test("clipboard markdown plain-text approx matches Lexical selection text", () =
   // Hard-break markers become a plain newline (Lexical selection text).
   assert.equal(noteMarkdownClipboardToPlainText("**A**  \n**B**"), "A\nB");
   assert.equal(noteMarkdownClipboardToPlainText("**A**\\\n**B**"), "A\nB");
+  // Strikethrough (and bold+strike) must match Lexical plain selection text.
+  assert.equal(noteMarkdownClipboardToPlainText("~~Hello~~"), "Hello");
+  assert.equal(noteMarkdownClipboardToPlainText("**~~Hello~~**"), "Hello");
+  assert.equal(noteMarkdownClipboardToPlainText("~~**Hello**~~"), "Hello");
 });
 
 test("markdown equivalence normalizes underscore emphasis to serializer form", () => {
@@ -115,6 +119,21 @@ test("markdown equivalence normalizes underscore emphasis to serializer form", (
   assert.equal(
     normalizeNoteMarkdownForEquivalence("**A**\\\n**B**"),
     normalizeNoteMarkdownForEquivalence("**A**  \n**B**"),
+  );
+  // Code spans / link destinations keep literal underscores (not **).
+  assert.equal(normalizeNoteMarkdownForEquivalence("`__x__`"), "`__x__`");
+  assert.notEqual(
+    normalizeNoteMarkdownForEquivalence("`__x__`"),
+    normalizeNoteMarkdownForEquivalence("`**x**`"),
+  );
+  assert.equal(
+    normalizeNoteMarkdownForEquivalence("[label](https://example.com/__path__)"),
+    "[label](https://example.com/__path__)",
+  );
+  // Labels still canonicalize; only destinations are protected.
+  assert.equal(
+    normalizeNoteMarkdownForEquivalence("[__x__](https://example.com/__path__)"),
+    "[**x**](https://example.com/__path__)",
   );
 });
 
@@ -138,6 +157,20 @@ test("selection markdown serialization scopes bold and link formatting", () => {
       anchor: plainAnchor,
     }),
     "***Hello***",
+  );
+  assert.equal(
+    serializeLexicalSelectionAsMarkdown("Hello", {
+      hasFormat: (type) => type === "strikethrough",
+      anchor: plainAnchor,
+    }),
+    "~~Hello~~",
+  );
+  assert.equal(
+    serializeLexicalSelectionAsMarkdown("Hello", {
+      hasFormat: (type) => type === "bold" || type === "strikethrough",
+      anchor: plainAnchor,
+    }),
+    "**~~Hello~~**",
   );
   assert.equal(
     serializeLexicalSelectionAsMarkdown("Hello", {
@@ -683,6 +716,27 @@ test("unchanged insert recovery skips identical replacements but recovers lost-s
       selectedMarkdown: "**Hello**",
     }),
     false,
+  );
+  // Bold+strikethrough identical replace must not append a duplicate fragment.
+  assert.equal(
+    shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
+      beforeMarkdown: "prefix **~~Hello~~** suffix",
+      clipboardText: "**~~Hello~~**",
+      selectedText: "Hello",
+      selectedMarkdown: "**~~Hello~~**",
+    }),
+    false,
+  );
+  // Select-all code-span content change (`__x__` → `**x**`) must recover; do
+  // not treat protected underscores inside backticks as equivalent emphasis.
+  assert.equal(
+    shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
+      beforeMarkdown: "`__x__`",
+      clipboardText: "`**x**`",
+      selectedText: "__x__",
+      selectedMarkdown: "`__x__`",
+    }),
+    true,
   );
   // Combined bold+italic must serialize both markers; otherwise identical
   // ***Hello*** paste is misclassified as a lost-selection no-op.
