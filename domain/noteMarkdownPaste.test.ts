@@ -236,6 +236,34 @@ test("markdown equivalence normalizes underscore emphasis to serializer form", (
     normalizeNoteMarkdownForEquivalence("> * [ ] task"),
     normalizeNoteMarkdownForEquivalence("> - [ ] task"),
   );
+  // Ordered `1)` matches serializer / MDXEditor `1.` form.
+  assert.equal(
+    normalizeNoteMarkdownForEquivalence("1) item\n2) next"),
+    normalizeNoteMarkdownForEquivalence("1. item\n2. next"),
+  );
+  assert.equal(normalizeNoteMarkdownForEquivalence("1) item"), "1. item");
+  assert.equal(
+    normalizeNoteMarkdownForEquivalence("> 1) quoted"),
+    normalizeNoteMarkdownForEquivalence("> 1. quoted"),
+  );
+  // Tilde fences match serializer backtick fences (same info / body).
+  assert.equal(
+    normalizeNoteMarkdownForEquivalence("~~~\ncode\n~~~"),
+    normalizeNoteMarkdownForEquivalence("```\ncode\n```"),
+  );
+  assert.equal(
+    normalizeNoteMarkdownForEquivalence("~~~js\nx = 1\n~~~"),
+    normalizeNoteMarkdownForEquivalence("```js\nx = 1\n```"),
+  );
+  assert.equal(
+    normalizeNoteMarkdownForEquivalence("~~~js\nx = 1\n~~~"),
+    "```js\nx = 1\n```",
+  );
+  // Fence body is not emphasis-rewritten; only the fence marker spelling changes.
+  assert.equal(
+    normalizeNoteMarkdownForEquivalence("~~~\n__x__\n~~~"),
+    "```\n__x__\n```",
+  );
 });
 
 test("selection markdown serialization scopes bold and link formatting", () => {
@@ -1791,6 +1819,26 @@ test("unchanged insert recovery skips identical replacements but recovers lost-s
     }),
     false,
   );
+  // Ordered `1)` clipboard vs serializer `1.` must not append a duplicate list.
+  assert.equal(
+    shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
+      beforeMarkdown: "1. item\n2. next",
+      clipboardText: "1) item\n2) next",
+      selectedText: "item\nnext",
+      selectedMarkdown: "1. item\n2. next",
+    }),
+    false,
+  );
+  // Tilde-fenced clipboard vs backtick selection must not append a duplicate block.
+  assert.equal(
+    shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
+      beforeMarkdown: "A\n\n```js\nx = 1\n```\n\nB",
+      clipboardText: "~~~js\nx = 1\n~~~",
+      selectedText: "x = 1",
+      selectedMarkdown: "```js\nx = 1\n```",
+    }),
+    false,
+  );
   // Bold+strikethrough identical replace must not append a duplicate fragment.
   assert.equal(
     shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
@@ -2355,4 +2403,20 @@ test("didNoteMarkdownPasteApply distinguishes paste success from concurrent edit
     }),
     true,
   );
+  // Failed paste + concurrent typing over many repeated fragments must not
+  // rebuild/rescan a full document per occurrence (UI-blocking on large notes).
+  const repeated = "**x** ".repeat(10_000);
+  const typedAfter = `${repeated}typed!`;
+  const started = Date.now();
+  assert.equal(
+    didNoteMarkdownPasteApply({
+      beforeMarkdown: repeated,
+      afterMarkdown: typedAfter,
+      clipboardText: "**x**",
+      selectedText: "",
+      selectedMarkdown: "",
+    }),
+    false,
+  );
+  assert.ok(Date.now() - started < 500);
 });

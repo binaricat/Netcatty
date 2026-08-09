@@ -1329,6 +1329,31 @@ const MARKDOWN_EQUIVALENCE_PROTECT_PREFIX = "\u0000MDPROT:";
 const MARKDOWN_EQUIVALENCE_PROTECT_SUFFIX = "\u0000";
 
 /**
+ * Rewrite opening/closing tilde fences to backtick fences of the same length so
+ * clipboard `~~~js` compares equal to the serializer's ` ```js ` form.
+ */
+const canonicalizeNoteMarkdownFencedCodeFenceLines = (chunk: string): string => {
+  const firstBreak = chunk.indexOf("\n");
+  if (firstBreak === -1) return chunk;
+  const lastBreak = chunk.lastIndexOf("\n");
+  const rewriteFenceLine = (line: string): string => (
+    line.replace(
+      /^([ \t]{0,3})(~{3,})(.*)$/,
+      (
+        _match,
+        indent: string,
+        fence: string,
+        rest: string,
+      ) => `${indent}${"`".repeat(fence.length)}${rest}`,
+    )
+  );
+  if (lastBreak === firstBreak) {
+    return `${rewriteFenceLine(chunk.slice(0, firstBreak))}\n${rewriteFenceLine(chunk.slice(firstBreak + 1))}`;
+  }
+  return `${rewriteFenceLine(chunk.slice(0, firstBreak))}\n${chunk.slice(firstBreak + 1, lastBreak)}\n${rewriteFenceLine(chunk.slice(lastBreak + 1))}`;
+};
+
+/**
  * Run a transform only on Markdown that is safe to rewrite for emphasis
  * equivalence. Inline/fenced code and link/image destinations keep literal
  * underscores (e.g. `` `__x__` `` must not become `` `**x**` ``).
@@ -1347,7 +1372,9 @@ const mapNoteMarkdownOutsideProtectedRegions = (
   let working = text;
   working = working.replace(
     /^ {0,3}(?:```|~~~)[^\n]*\n[\s\S]*?^ {0,3}(?:```|~~~)[ \t]*$/gm,
-    (chunk) => stash(chunk),
+    // Tilde and backtick fences are equivalent; stash the serializer's backtick
+    // spelling so clipboard `~~~js` matches selection/MDXEditor ` ```js `.
+    (chunk) => stash(canonicalizeNoteMarkdownFencedCodeFenceLines(chunk)),
   );
   working = working.replace(/`[^`\n]+`/g, (chunk) => stash(chunk));
   working = protectMarkdownLinkDestinations(working, stash);
@@ -1554,6 +1581,8 @@ export const normalizeNoteMarkdownForEquivalence = (markdown: string): string =>
     // Allow optional blockquote prefixes (`> * one` ≡ `> - one`). Require trailing
     // whitespace so `*Hi*` / `***` stay untouched.
     next = next.replace(/^((?: {0,3}>\s?)*)(\s*)[-+*](\s+)/gm, "$1$2-$3");
+    // Ordered list markers: `1)` → `1.` (MDXEditor / selection serializer form).
+    next = next.replace(/^((?: {0,3}>\s?)*)(\s*)(\d+)\)(\s+)/gm, "$1$2$3.$4");
     // GFM tables: optional outer pipes + separator dash runs → serializer form
     // (`A | B` / `--- | ---` → `| A | B |` / `| --- | --- |`).
     next = normalizeNoteMarkdownGfmTableRows(next);
@@ -1653,6 +1682,46 @@ const isNoteMarkdownInsertionExtension = (base: string, extended: string): boole
 };
 
 /**
+ * `left[j]` = how much of `base`'s prefix can be matched in `extended[0:j)`.
+ */
+const buildNoteMarkdownLeftMatched = (base: string, extended: string): Int32Array => {
+  const left = new Int32Array(extended.length + 1);
+  let i = 0;
+  for (let j = 0; j < extended.length; j += 1) {
+    if (i < base.length && extended[j] === base[i]) i += 1;
+    left[j + 1] = i;
+  }
+  return left;
+};
+
+/**
+ * `right[j]` = how much of `base`'s suffix can be matched in `extended[j:]`.
+ */
+const buildNoteMarkdownRightMatched = (base: string, extended: string): Int32Array => {
+  const right = new Int32Array(extended.length + 1);
+  let i = 0;
+  for (let j = extended.length - 1; j >= 0; j -= 1) {
+    if (i < base.length && extended[j] === base[base.length - 1 - i]) i += 1;
+    right[j] = i;
+  }
+  return right;
+};
+
+/**
+ * True when `base` is a subsequence of `extended` with `[holeStart, holeEnd)`
+ * removed. Uses precomputed left/right match depths so each hole is O(1).
+ */
+const isNoteMarkdownSubsequenceAcrossHole = (
+  baseLength: number,
+  leftMatched: Int32Array,
+  rightMatched: Int32Array,
+  holeStart: number,
+  holeEnd: number,
+): boolean => (
+  leftMatched[holeStart] + rightMatched[holeEnd] >= baseLength
+);
+
+/**
  * True when insertMarkdown (or an equivalent in-editor replace) already applied
  * the clipboard to the document. Used so concurrent draft/editor updates are
  * not mistaken for paste success, and so identical node replaces can be
@@ -1702,23 +1771,33 @@ export const didNoteMarkdownPasteApply = (input: {
   // Collapsed caret: a successful in-place paste still counts when the
   // clipboard fragment already existed elsewhere (`A **x** B` + paste `**x**`
   // → `A **x****x** B`), including concurrent typing during recovery frames.
-  // Find contiguous clipboard occurrences in `after` and test whether removing
-  // one yields `before` (or an insertion-extension). Avoids rebuilding a
-  // full-document candidate at every caret index (quadratic in note length).
+  // Precompute prefix/suffix subsequence depths once, then test each clipboard
+  // occurrence in O(1) (no per-candidate document rebuild or full rescan).
   const caretSelection = selectedMarkdown === null || selectedMarkdown.length === 0;
   if (caretSelection) {
-    let searchFrom = 0;
-    while (searchFrom <= afterNorm.length) {
-      const index = afterNorm.indexOf(clipboardNorm, searchFrom);
-      if (index === -1) break;
-      const withoutClipboard = `${afterNorm.slice(0, index)}${afterNorm.slice(index + clipboardNorm.length)}`;
-      if (
-        withoutClipboard === beforeNorm
-        || isNoteMarkdownInsertionExtension(beforeNorm, withoutClipboard)
-      ) {
-        return true;
+    const clipLen = clipboardNorm.length;
+    if (afterNorm.length >= beforeNorm.length + clipLen) {
+      const leftMatched = buildNoteMarkdownLeftMatched(beforeNorm, afterNorm);
+      if (leftMatched[afterNorm.length] >= beforeNorm.length) {
+        const rightMatched = buildNoteMarkdownRightMatched(beforeNorm, afterNorm);
+        let searchFrom = 0;
+        while (searchFrom <= afterNorm.length) {
+          const index = afterNorm.indexOf(clipboardNorm, searchFrom);
+          if (index === -1) break;
+          if (
+            isNoteMarkdownSubsequenceAcrossHole(
+              beforeNorm.length,
+              leftMatched,
+              rightMatched,
+              index,
+              index + clipLen,
+            )
+          ) {
+            return true;
+          }
+          searchFrom = index + 1;
+        }
       }
-      searchFrom = index + 1;
     }
   }
 
