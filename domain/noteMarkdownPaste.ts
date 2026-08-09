@@ -281,19 +281,52 @@ const formatLexicalLinkMarkdown = (
 ): string => {
   const destination = formatNoteMarkdownLinkDestination(url);
   if (title) {
-    return `[${label}](${destination} "${title.replace(/"/g, '\\"')}")`;
+    // Escape backslashes before quotes so a title containing `\"` still keeps
+    // the quote escaped (`\` + `"` → `\\"` would leave an unescaped `"`).
+    const escapedTitle = title.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+    return `[${label}](${destination} "${escapedTitle}")`;
   }
   return `[${label}](${destination})`;
 };
 
-const getLexicalListNestingDepth = (listItem: NoteMarkdownPasteSelectionNode): number => {
-  let depth = 0;
+const getCheckListMarker = (listItem: NoteMarkdownPasteSelectionNode): string => {
+  const checked = typeof listItem.getChecked === "function"
+    ? Boolean(listItem.getChecked())
+    : false;
+  return `- [${checked ? "x" : " "}]`;
+};
+
+/** Marker text after indent spaces (`1. `, `- `, `- [x] `). */
+const getLexicalListItemMarkerText = (listItem: NoteMarkdownPasteSelectionNode): string => {
+  const parent = listItem.getParent();
+  const listType = parent?.getType() === "list" && typeof parent.getListType === "function"
+    ? parent.getListType()
+    : "bullet";
+  if (listType === "number") {
+    const value = typeof listItem.getValue === "function" ? listItem.getValue() : 1;
+    return `${value}. `;
+  }
+  if (listType === "check") {
+    return `${getCheckListMarker(listItem)} `;
+  }
+  return "- ";
+};
+
+/**
+ * Indent spaces for a nested list item: sum of ancestor list-item marker widths.
+ * MDXEditor / CommonMark use marker width (`1. ` → 3, `10. ` → 4), not a fixed
+ * two spaces per nesting level.
+ */
+const getLexicalListItemIndentSpaces = (listItem: NoteMarkdownPasteSelectionNode): number => {
+  let indent = 0;
   let current: NoteMarkdownPasteSelectionNode | null = listItem.getParent();
   while (current) {
-    if (current.getType() === "list") depth += 1;
+    if (current.getType() === "listitem") {
+      indent += getLexicalListItemMarkerText(current).length;
+    }
     current = current.getParent();
   }
-  return Math.max(depth, 1);
+  return indent;
 };
 
 const findLexicalAncestorByTypes = (
@@ -319,29 +352,11 @@ const findLexicalLinkAncestor = (
   return null;
 };
 
-const getCheckListMarker = (listItem: NoteMarkdownPasteSelectionNode): string => {
-  const checked = typeof listItem.getChecked === "function"
-    ? Boolean(listItem.getChecked())
-    : false;
-  return `- [${checked ? "x" : " "}]`;
-};
-
 const getLexicalBlockMarkerPrefix = (block: NoteMarkdownPasteSelectionNode): string => {
   const type = block.getType();
   if (type === "listitem") {
-    const parent = block.getParent();
-    const listType = parent?.getType() === "list" && typeof parent.getListType === "function"
-      ? parent.getListType()
-      : "bullet";
-    const listIndent = Math.max(getLexicalListNestingDepth(block) - 1, 0) * 2;
-    if (listType === "number") {
-      const value = typeof block.getValue === "function" ? block.getValue() : 1;
-      return `${" ".repeat(listIndent)}${value}. `;
-    }
-    if (listType === "check") {
-      return `${" ".repeat(listIndent)}${getCheckListMarker(block)} `;
-    }
-    return `${" ".repeat(listIndent)}- `;
+    const listIndent = getLexicalListItemIndentSpaces(block);
+    return `${" ".repeat(listIndent)}${getLexicalListItemMarkerText(block)}`;
   }
   if (type === "heading" && typeof block.getTag === "function") {
     const level = Number(block.getTag().replace(/^h/iu, "")) || 1;
@@ -1064,6 +1079,10 @@ export const serializeLexicalSelectionAsMarkdown = (
   if (fromNodes !== null) return fromNodes;
 
   // Fallback when getNodes() is unavailable (unit mocks): single-anchor path.
+  // Collapsed carets must stay empty even inside a link — wrapping `[](url)`
+  // would look like a nonempty selection and skip caret paste-success checks.
+  if (selectedText.length === 0) return "";
+
   let markdown = applyLexicalInlineMarkdownFormats(selectedText, selection);
   let linkUrl: string | null = null;
   let linkTitle: string | null = null;
@@ -1083,19 +1102,11 @@ export const serializeLexicalSelectionAsMarkdown = (
       headingTag = current.getTag();
     }
     if (listMarker === null && type === "listitem") {
-      const parent = current.getParent();
-      const listType = parent?.getType() === "list" && typeof parent.getListType === "function"
-        ? parent.getListType()
-        : "bullet";
-      listIndent = Math.max(getLexicalListNestingDepth(current) - 1, 0) * 2;
-      if (listType === "number") {
-        const value = typeof current.getValue === "function" ? current.getValue() : 1;
-        listMarker = `${value}.`;
-      } else if (listType === "check") {
-        listMarker = getCheckListMarker(current);
-      } else {
-        listMarker = "-";
-      }
+      listIndent = getLexicalListItemIndentSpaces(current);
+      const markerText = getLexicalListItemMarkerText(current);
+      // Fallback joins as `${indent}${marker} ${markdown}`; trim trailing space
+      // from the shared marker helper (`1. ` / `- `).
+      listMarker = markerText.trimEnd();
     }
     if (!isQuote && type === "quote") {
       isQuote = true;
@@ -1106,7 +1117,6 @@ export const serializeLexicalSelectionAsMarkdown = (
   if (linkUrl) {
     markdown = formatLexicalLinkMarkdown(markdown, linkUrl, linkTitle);
   }
-  if (selectedText.length === 0) return markdown;
 
   // Fallback (no getNodes): include block markers only when block plain text
   // is unknown. Text equality alone cannot prove the structural marker was

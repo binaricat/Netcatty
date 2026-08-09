@@ -360,6 +360,58 @@ test("selection markdown serialization scopes bold and link formatting", () => {
     }),
     '[docs](https://a.example "API")',
   );
+  // Literal `\` before `"` in a title must escape the backslash first.
+  assert.equal(
+    serializeLexicalSelectionAsMarkdown("docs", {
+      hasFormat: () => false,
+      anchor: {
+        getNode: () => ({
+          getType: () => "link",
+          getURL: () => "https://a.example",
+          getTitle: () => 'say \\"hi\\"',
+          getParent: () => null,
+        }),
+      },
+    }),
+    '[docs](https://a.example "say \\\\\\\"hi\\\\\\"")',
+  );
+  // Collapsed caret inside a link must serialize as empty (not `[](url)`).
+  const caretLinkParagraph = {
+    getType: () => "paragraph",
+    getKey: () => "caret-p",
+    getParent: () => null as null,
+  };
+  const caretLink = {
+    getType: () => "link",
+    getURL: () => "https://x.test",
+    getKey: () => "caret-link",
+    getParent: () => caretLinkParagraph,
+  };
+  const caretLinkText = {
+    getType: () => "text",
+    getKey: () => "caret-lt",
+    getTextContent: () => "A",
+    hasFormat: () => false,
+    getParent: () => caretLink,
+  };
+  assert.equal(
+    serializeLexicalSelectionAsMarkdown("", {
+      hasFormat: () => false,
+      anchor: { getNode: () => caretLinkText, offset: 1, type: "text" },
+      focus: { getNode: () => caretLinkText, offset: 1, type: "text" },
+      isBackward: () => false,
+      getNodes: () => [caretLinkText],
+    }),
+    "",
+  );
+  // Fallback path (no getNodes): empty selectedText must not become `[](url)`.
+  assert.equal(
+    serializeLexicalSelectionAsMarkdown("", {
+      hasFormat: () => false,
+      anchor: { getNode: () => caretLinkText, offset: 1, type: "text" },
+    }),
+    "",
+  );
   assert.equal(
     serializeLexicalSelectionAsMarkdown("Title", {
       hasFormat: () => false,
@@ -663,6 +715,92 @@ test("selection markdown serialization scopes bold and link formatting", () => {
       ],
     }),
     "- parent\n  - child",
+  );
+  // Nested ordered lists indent by ancestor marker width (`1. ` → 3, `10. ` → 4).
+  type NestedOrderedPasteNode = {
+    getType: () => string;
+    getKey: () => string;
+    getTextContent: () => string;
+    getParent: () => NestedOrderedPasteNode | null;
+    getChildren?: () => NestedOrderedPasteNode[];
+    getListType?: () => "number";
+    getValue?: () => number;
+    hasFormat?: () => boolean;
+  };
+  const orderedOuterList: NestedOrderedPasteNode = {
+    getType: () => "list",
+    getKey: () => "ol-outer",
+    getListType: () => "number",
+    getTextContent: () => "parent\nchild",
+    getParent: () => null,
+  };
+  const orderedParentItem: NestedOrderedPasteNode = {
+    getType: () => "listitem",
+    getKey: () => "oli-parent",
+    getValue: () => 1,
+    getTextContent: () => "parent\nchild",
+    getParent: () => orderedOuterList,
+  };
+  const orderedParentText: NestedOrderedPasteNode = {
+    getType: () => "text",
+    getKey: () => "ot-parent",
+    getTextContent: () => "parent",
+    hasFormat: () => false,
+    getParent: () => orderedParentItem,
+  };
+  const orderedInnerList: NestedOrderedPasteNode = {
+    getType: () => "list",
+    getKey: () => "ol-inner",
+    getListType: () => "number",
+    getTextContent: () => "child",
+    getParent: () => orderedParentItem,
+  };
+  const orderedChildItem: NestedOrderedPasteNode = {
+    getType: () => "listitem",
+    getKey: () => "oli-child",
+    getValue: () => 1,
+    getTextContent: () => "child",
+    getParent: () => orderedInnerList,
+  };
+  const orderedChildText: NestedOrderedPasteNode = {
+    getType: () => "text",
+    getKey: () => "ot-child",
+    getTextContent: () => "child",
+    hasFormat: () => false,
+    getParent: () => orderedChildItem,
+  };
+  orderedParentItem.getChildren = () => [orderedParentText, orderedInnerList];
+  orderedChildItem.getChildren = () => [orderedChildText];
+  assert.equal(
+    serializeLexicalSelectionAsMarkdown("parent\nchild", {
+      hasFormat: () => false,
+      anchor: { getNode: () => orderedParentText, offset: 0, type: "text" },
+      focus: { getNode: () => orderedChildText, offset: 5, type: "text" },
+      isBackward: () => false,
+      getNodes: () => [
+        orderedParentItem,
+        orderedParentText,
+        orderedChildItem,
+        orderedChildText,
+      ],
+    }),
+    "1. parent\n   1. child",
+  );
+  orderedParentItem.getValue = () => 10;
+  assert.equal(
+    serializeLexicalSelectionAsMarkdown("parent\nchild", {
+      hasFormat: () => false,
+      anchor: { getNode: () => orderedParentText, offset: 0, type: "text" },
+      focus: { getNode: () => orderedChildText, offset: 5, type: "text" },
+      isBackward: () => false,
+      getNodes: () => [
+        orderedParentItem,
+        orderedParentText,
+        orderedChildItem,
+        orderedChildText,
+      ],
+    }),
+    "10. parent\n    1. child",
   );
   assert.equal(
     shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
@@ -1714,6 +1852,16 @@ test("unchanged insert recovery skips identical replacements but recovers lost-s
     }),
     false,
   );
+  // Titles with literal backslash+quote must round-trip after escaping.
+  assert.equal(
+    shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
+      beforeMarkdown: 'see [docs](https://a.example "say \\\\\\\"hi\\\\\\"") end',
+      clipboardText: '[docs](https://a.example "say \\\\\\\"hi\\\\\\"")',
+      selectedText: "docs",
+      selectedMarkdown: '[docs](https://a.example "say \\\\\\\"hi\\\\\\"")',
+    }),
+    false,
+  );
   // Multi-block identical replace (two headings) must not append a duplicate.
   // Lexical getTextContent() joins blocks with one newline, not Markdown's blank line.
   assert.equal(
@@ -1972,6 +2120,28 @@ test("didNoteMarkdownPasteApply distinguishes paste success from concurrent edit
       selectedMarkdown: "",
     }),
     true,
+  );
+  // Collapsed caret inside a link must use the caret branch (empty selectedMarkdown),
+  // not a nonempty `[](url)` serialization that rejects a successful insert.
+  assert.equal(
+    didNoteMarkdownPasteApply({
+      beforeMarkdown: "[A](https://x.test) / **x**",
+      afterMarkdown: "[A](https://x.test) / **x****x**",
+      clipboardText: "**x**",
+      selectedText: "",
+      selectedMarkdown: "",
+    }),
+    true,
+  );
+  assert.equal(
+    didNoteMarkdownPasteApply({
+      beforeMarkdown: "[A](https://x.test) / **x**",
+      afterMarkdown: "[A](https://x.test) / **x****x**",
+      clipboardText: "**x**",
+      selectedText: "",
+      selectedMarkdown: "[](https://x.test)",
+    }),
+    false,
   );
   // Successful paste plus typing during the recovery frames must not look like
   // a failed insert (document-append would then duplicate the fragment).
