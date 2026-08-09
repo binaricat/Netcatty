@@ -212,6 +212,36 @@ test("selection markdown serialization scopes bold and link formatting", () => {
     }),
     "\\> quote",
   );
+  // Literal list openers must escape so identical-replace checks see source
+  // spelling (`\- item` / `1\. item`), not a structural list.
+  assert.equal(
+    serializeLexicalSelectionAsMarkdown("- item", {
+      hasFormat: () => false,
+      anchor: plainAnchor,
+    }),
+    "\\- item",
+  );
+  assert.equal(
+    serializeLexicalSelectionAsMarkdown("+ item", {
+      hasFormat: () => false,
+      anchor: plainAnchor,
+    }),
+    "\\+ item",
+  );
+  assert.equal(
+    serializeLexicalSelectionAsMarkdown("1. item", {
+      hasFormat: () => false,
+      anchor: plainAnchor,
+    }),
+    "1\\. item",
+  );
+  assert.equal(
+    serializeLexicalSelectionAsMarkdown("2) item", {
+      hasFormat: () => false,
+      anchor: plainAnchor,
+    }),
+    "2\\) item",
+  );
   // Inline code with embedded backticks needs a longer safe fence.
   assert.equal(
     serializeLexicalSelectionAsMarkdown("a`b", {
@@ -1051,6 +1081,27 @@ test("unchanged insert recovery skips identical replacements but recovers lost-s
       clipboardText: "# Heading",
       selectedText: "# Heading",
       selectedMarkdown: "\\# Heading",
+    }),
+    true,
+  );
+  // Literal `- item` (source `\- item`) must recover when pasting a real list item.
+  assert.equal(
+    shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
+      beforeMarkdown: "# Note\n\n\\- item",
+      clipboardText: "- item",
+      selectedText: "- item",
+      selectedMarkdown: "\\- item",
+    }),
+    true,
+  );
+  // Single-block doc: selecting only rendered heading text must recover when
+  // pasting the full heading — plain-text strip of `# Hello` is also `Hello`.
+  assert.equal(
+    shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
+      beforeMarkdown: "# Hello",
+      clipboardText: "# Hello",
+      selectedText: "Hello",
+      selectedMarkdown: "Hello",
     }),
     true,
   );

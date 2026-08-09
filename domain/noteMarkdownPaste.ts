@@ -115,12 +115,16 @@ const getLexicalInlineMarkdownFormatStack = (
  * Escape phrasing punctuation so Lexical rendered text round-trips to source
  * Markdown (`**Hello \*world\***`, not `**Hello *world***`). Mirrors the
  * always-on mdast-util-to-markdown phrasing unsafe set (`*`, `_`, `` ` ``, `[`,
- * and GFM `~`), plus line-leading block openers (`#`, `>`) so literal
- * `# Heading` / `> quote` serialize as `\# Heading` / `\> quote`.
+ * and GFM `~`), plus line-leading block openers (`#`, `>`, `-`, `+`, ordered
+ * `1.` / `1)`) so literal `# Heading` / `- item` / `1. item` serialize as
+ * `\# Heading` / `\- item` / `1\. item`. (`*` list openers are already covered
+ * by the phrasing `*` escape.)
  */
 const escapeNoteMarkdownPhrasingText = (text: string): string => {
   const escaped = text.replace(/([`*_\[~])/g, "\\$1");
-  return escaped.replace(/(^|\n)( {0,3})([#>])/g, "$1$2\\$3");
+  return escaped
+    .replace(/(^|\n)( {0,3})([#>+-])/g, "$1$2\\$3")
+    .replace(/(^|\n)( {0,3})(\d+)([.)])/g, "$1$2$3\\$4");
 };
 
 /** Prefer a fence longer than any run of backticks inside the value. */
@@ -1067,17 +1071,24 @@ export const shouldRecoverNoteMarkdownPasteAfterUnchangedInsert = (input: {
   if (clipboardNorm === beforeNorm) {
     const selected = input.selectedText?.replace(/\r\n?/g, "\n") ?? null;
     const beforePlain = noteMarkdownClipboardToPlainText(beforeNorm);
-    const wholeDocByMarkdown = selectedMarkdown !== null
-      && normalizeNoteMarkdownForEquivalence(selectedMarkdown) === beforeNorm;
+    const selectedMarkdownNorm = selectedMarkdown !== null
+      ? normalizeNoteMarkdownForEquivalence(selectedMarkdown)
+      : null;
+    // Prefer selection markdown: stripping `# Hello` also yields plain `Hello`,
+    // so wholeDocByPlain must not override evidence that only `Hello` was selected.
+    if (selectedMarkdownNorm !== null && selectedMarkdownNorm !== beforeNorm) {
+      return true;
+    }
+    if (selectedMarkdownNorm !== null && selectedMarkdownNorm === beforeNorm) {
+      return false;
+    }
     const wholeDocByPlain = selected !== null
       && (selected === before || selected === beforePlain);
-    if (wholeDocByMarkdown || wholeDocByPlain) return false;
-    const partialMarkdown = selectedMarkdown !== null
-      && normalizeNoteMarkdownForEquivalence(selectedMarkdown) !== beforeNorm;
+    if (wholeDocByPlain) return false;
     const partialPlain = selected !== null
       && selected !== before
       && selected !== beforePlain;
-    if (partialMarkdown || partialPlain) return true;
+    if (partialPlain) return true;
     return false;
   }
   // Selection-scoped markdown match is sufficient to suppress recovery for
