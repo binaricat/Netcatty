@@ -115,10 +115,23 @@ const getLexicalInlineMarkdownFormatStack = (
  * Escape phrasing punctuation so Lexical rendered text round-trips to source
  * Markdown (`**Hello \*world\***`, not `**Hello *world***`). Mirrors the
  * always-on mdast-util-to-markdown phrasing unsafe set (`*`, `_`, `` ` ``, `[`,
- * and GFM `~`).
+ * and GFM `~`), plus line-leading block openers (`#`, `>`) so literal
+ * `# Heading` / `> quote` serialize as `\# Heading` / `\> quote`.
  */
-const escapeNoteMarkdownPhrasingText = (text: string): string =>
-  text.replace(/([`*_\[~])/g, "\\$1");
+const escapeNoteMarkdownPhrasingText = (text: string): string => {
+  const escaped = text.replace(/([`*_\[~])/g, "\\$1");
+  return escaped.replace(/(^|\n)( {0,3})([#>])/g, "$1$2\\$3");
+};
+
+/** Prefer a fence longer than any run of backticks inside the value. */
+const formatMdastInlineCode = (value: string): string => {
+  let fence = "`";
+  while (value.includes(fence)) fence += "`";
+  const pad = value.startsWith("`") || value.endsWith("`") || value.includes("\n")
+    ? " "
+    : "";
+  return `${fence}${pad}${value}${pad}${fence}`;
+};
 
 const applyLexicalInlineMarkdownFormats = (
   text: string,
@@ -126,8 +139,9 @@ const applyLexicalInlineMarkdownFormats = (
 ): string => {
   if (!text) return text;
   const stack = getLexicalInlineMarkdownFormatStack(formatSource);
-  // Code spans keep literal punctuation; emphasis markers wrap escaped text.
-  let formatted = stack[0] === "code" ? text : escapeNoteMarkdownPhrasingText(text);
+  // Code spans use a safe fence; emphasis markers wrap escaped text.
+  if (stack[0] === "code") return formatMdastInlineCode(text);
+  let formatted = escapeNoteMarkdownPhrasingText(text);
   for (let i = stack.length - 1; i >= 0; i -= 1) {
     const markers = NOTE_MARKDOWN_PASTE_INLINE_FORMAT_MARKERS[stack[i]];
     formatted = `${markers.open}${formatted}${markers.close}`;
@@ -452,9 +466,28 @@ const serializeLexicalBlockInlineMarkdown = (
     const text = getSelectedLexicalTextNodeContent(node, selection);
     if (!text) continue;
     const desiredFormats = getLexicalInlineMarkdownFormatStack(node);
-    const escapedText = desiredFormats[0] === "code"
-      ? text
-      : escapeNoteMarkdownPhrasingText(text);
+    // Emit a complete safe code span so values containing backticks stay valid
+    // Markdown (longer padded fence), not stack-wrapped single backticks.
+    if (desiredFormats[0] === "code") {
+      const codeMarkdown = formatMdastInlineCode(text);
+      const codeLink = findLexicalLinkAncestor(node);
+      if (!codeLink) {
+        flushLink();
+        closeInlineFormats();
+        markdown += codeMarkdown;
+        continue;
+      }
+      const codeLinkKey = getLexicalNodeKey(codeLink, codeLink.getURL());
+      if (linkBuffer && linkBuffer.linkKey !== codeLinkKey) flushLink();
+      if (!linkBuffer) {
+        closeInlineFormats();
+        linkBuffer = { linkKey: codeLinkKey, link: codeLink, label: "" };
+      }
+      closeInlineFormats();
+      linkBuffer.label += codeMarkdown;
+      continue;
+    }
+    const escapedText = escapeNoteMarkdownPhrasingText(text);
     const link = findLexicalLinkAncestor(node);
     if (!link) {
       flushLink();
@@ -534,16 +567,6 @@ const isMdastRecord = (
   title?: unknown;
   children?: unknown;
 } => typeof node === "object" && node !== null;
-
-const formatMdastInlineCode = (value: string): string => {
-  // Prefer a fence longer than any run of backticks inside the value.
-  let fence = "`";
-  while (value.includes(fence)) fence += "`";
-  const pad = value.startsWith("`") || value.endsWith("`") || value.includes("\n")
-    ? " "
-    : "";
-  return `${fence}${pad}${value}${pad}${fence}`;
-};
 
 /**
  * Serialize MDAST phrasing (table cells, etc.) so inline marks survive for
@@ -977,9 +1000,10 @@ export const normalizeNoteMarkdownForEquivalence = (markdown: string): string =>
       /(^|[^\\*\w])_(\S[\s\S]*?\S)_(?=$|[^\\*\w])/g,
       "$1*$2*",
     );
-    // Thematic breaks: --- / ___ / * * * → *** (node-selection identical replace).
+    // Thematic breaks: --- / ___ / * * * → *** (same marker only; mixed `-_*`
+    // is not a thematic break and must stay inequivalent to a real rule).
     next = next.replace(
-      /^ {0,3}(?:[-*_]\s*){2,}[-*_]\s*$/gm,
+      /^ {0,3}(?:(?:-[ \t]*){2,}-|(?:_[ \t]*){2,}_|(?:\*[ \t]*){2,}\*)[ \t]*$/gm,
       "***",
     );
     // Unordered / task-list markers: MDXEditor defaults to `*`, serializer uses `-`.
@@ -1118,6 +1142,17 @@ export const didNoteMarkdownPasteApply = (input: {
       const expected = `${beforeNorm.slice(0, index)}${clipboardNorm}${beforeNorm.slice(index + selectedNorm.length)}`;
       if (afterNorm === expected) return true;
       searchFrom = index + 1;
+    }
+  }
+
+  // Collapsed caret: walk every insert index so a successful in-place paste
+  // still counts when the clipboard fragment already existed elsewhere
+  // (`A **x** B` + paste `**x**` → `A **x** **x** B`).
+  const caretSelection = selectedMarkdown === null || selectedMarkdown.length === 0;
+  if (caretSelection) {
+    for (let index = 0; index <= beforeNorm.length; index += 1) {
+      const expected = `${beforeNorm.slice(0, index)}${clipboardNorm}${beforeNorm.slice(index)}`;
+      if (afterNorm === expected) return true;
     }
   }
 

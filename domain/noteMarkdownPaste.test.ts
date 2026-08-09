@@ -154,6 +154,16 @@ test("markdown equivalence normalizes underscore emphasis to serializer form", (
   // Emphasis / code must not be rewritten as list markers.
   assert.equal(normalizeNoteMarkdownForEquivalence("*Hi*"), "*Hi*");
   assert.equal(normalizeNoteMarkdownForEquivalence("`* not a list`"), "`* not a list`");
+  // Same-marker thematic breaks canonicalize; mixed marker runs do not.
+  assert.equal(normalizeNoteMarkdownForEquivalence("---"), "***");
+  assert.equal(normalizeNoteMarkdownForEquivalence("- - -"), "***");
+  assert.equal(normalizeNoteMarkdownForEquivalence("___"), "***");
+  assert.equal(normalizeNoteMarkdownForEquivalence("* * *"), "***");
+  assert.equal(normalizeNoteMarkdownForEquivalence("-_*"), "-_*");
+  assert.notEqual(
+    normalizeNoteMarkdownForEquivalence("-_*"),
+    normalizeNoteMarkdownForEquivalence("***"),
+  );
 });
 
 test("selection markdown serialization scopes bold and link formatting", () => {
@@ -185,6 +195,30 @@ test("selection markdown serialization scopes bold and link formatting", () => {
       anchor: plainAnchor,
     }),
     "\\*\\*Hello\\*\\*",
+  );
+  // Literal block-opening punctuation must escape so identical-replace checks
+  // see source spelling (`\# Heading`), not a structural heading.
+  assert.equal(
+    serializeLexicalSelectionAsMarkdown("# Heading", {
+      hasFormat: () => false,
+      anchor: plainAnchor,
+    }),
+    "\\# Heading",
+  );
+  assert.equal(
+    serializeLexicalSelectionAsMarkdown("> quote", {
+      hasFormat: () => false,
+      anchor: plainAnchor,
+    }),
+    "\\> quote",
+  );
+  // Inline code with embedded backticks needs a longer safe fence.
+  assert.equal(
+    serializeLexicalSelectionAsMarkdown("a`b", {
+      hasFormat: (type) => type === "code",
+      anchor: plainAnchor,
+    }),
+    "``a`b``",
   );
   assert.equal(
     serializeLexicalSelectionAsMarkdown("Hello", {
@@ -613,6 +647,31 @@ test("selection markdown serialization scopes bold and link formatting", () => {
     }),
     "**Hello ~~world~~**",
   );
+
+  // Inline-code selection with an embedded backtick uses a longer safe fence.
+  const codeParagraph = {
+    getType: () => "paragraph",
+    getKey: () => "code-p",
+    getTextContent: () => "a`b",
+    getParent: () => null,
+  };
+  const codeText = {
+    getType: () => "text",
+    getKey: () => "code-text",
+    getTextContent: () => "a`b",
+    hasFormat: (type: string) => type === "code",
+    getParent: () => codeParagraph,
+  };
+  assert.equal(
+    serializeLexicalSelectionAsMarkdown("a`b", {
+      hasFormat: () => false,
+      anchor: { getNode: () => codeText, offset: 0, type: "text" },
+      focus: { getNode: () => codeText, offset: 3, type: "text" },
+      isBackward: () => false,
+      getNodes: () => [codeText],
+    }),
+    "``a`b``",
+  );
   assert.equal(
     shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
       beforeMarkdown: "prefix **Hello ~~world~~** suffix",
@@ -985,6 +1044,26 @@ test("unchanged insert recovery skips identical replacements but recovers lost-s
     }),
     true,
   );
+  // Literal `# Heading` (source `\# Heading`) must recover when pasting a real heading.
+  assert.equal(
+    shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
+      beforeMarkdown: "# Note\n\n\\# Heading",
+      clipboardText: "# Heading",
+      selectedText: "# Heading",
+      selectedMarkdown: "\\# Heading",
+    }),
+    true,
+  );
+  // Mixed marker run is not a thematic break; do not treat it as identical to ***.
+  assert.equal(
+    shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
+      beforeMarkdown: "intro\n\n***\n\noutro",
+      clipboardText: "-_*",
+      selectedText: "",
+      selectedMarkdown: "***",
+    }),
+    true,
+  );
   // Clipboard markdown elsewhere in the doc must not suppress recovery for a
   // different plain selection of the same rendered text.
   assert.equal(
@@ -1280,6 +1359,18 @@ test("didNoteMarkdownPasteApply distinguishes paste success from concurrent edit
       clipboardText: "**new**",
       selectedText: "old",
       selectedMarkdown: "**old**",
+    }),
+    true,
+  );
+  // Collapsed caret insert still counts when the clipboard fragment already
+  // existed elsewhere (presence-only checks would miss this success).
+  assert.equal(
+    didNoteMarkdownPasteApply({
+      beforeMarkdown: "A **x** B",
+      afterMarkdown: "A **x****x** B",
+      clipboardText: "**x**",
+      selectedText: "",
+      selectedMarkdown: "",
     }),
     true,
   );
