@@ -93,6 +93,10 @@ export function invalidateCellDimensionCache(): void {
  * (CJK ideographs, fullwidth forms, most emoji, hangul syllables), 0 for
  * common combining/format marks, and 1 otherwise. Not full wcwidth — just
  * enough to keep column math from drifting by one cell per CJK char.
+ *
+ * Prefer {@link stringCellWidth} for user-visible strings: xterm's
+ * UnicodeGraphemesAddon measures grapheme clusters, so summing this per
+ * code point over-counts emoji modifiers and ZWJ sequences.
  */
 export function codePointCellWidth(cp: number): number {
   // Combining marks / zero-width format characters (not full Mn/Me coverage).
@@ -144,12 +148,49 @@ export function codePointCellWidth(cp: number): number {
   return 1;
 }
 
-/** Sum of {@link codePointCellWidth} over each code point in `s`. */
-export function stringCellWidth(s: string): number {
-  let w = 0;
-  for (const ch of s) {
+const isRegionalIndicator = (cp: number): boolean =>
+  cp >= 0x1f1e6 && cp <= 0x1f1ff;
+
+/** Cell width of one grapheme cluster, matching xterm 15-graphemes join rules. */
+function graphemeCellWidth(grapheme: string): number {
+  let max = 0;
+  let regionalCount = 0;
+  for (const ch of grapheme) {
     const cp = ch.codePointAt(0) ?? 0;
-    w += codePointCellWidth(cp);
+    if (isRegionalIndicator(cp)) regionalCount += 1;
+    const w = codePointCellWidth(cp);
+    if (w > max) max = w;
+  }
+  // xterm forces regional-indicator pairs (flags) to width 2 even though each
+  // indicator is typically a narrow code point on its own.
+  if (regionalCount >= 2) return 2;
+  return max;
+}
+
+const graphemeSegmenter =
+  typeof Intl !== "undefined" && typeof Intl.Segmenter === "function"
+    ? new Intl.Segmenter("en", { granularity: "grapheme" })
+    : null;
+
+/**
+ * Display-cell width of `s`, grapheme-aware like xterm's UnicodeGraphemesAddon.
+ *
+ * Emoji modifiers and ZWJ sequences form one wide glyph (2 cells), not a sum
+ * of each emoji code point. Falls back to per-code-point widths only when
+ * `Intl.Segmenter` is unavailable.
+ */
+export function stringCellWidth(s: string): number {
+  if (!s) return 0;
+  if (!graphemeSegmenter) {
+    let w = 0;
+    for (const ch of s) {
+      w += codePointCellWidth(ch.codePointAt(0) ?? 0);
+    }
+    return w;
+  }
+  let w = 0;
+  for (const { segment } of graphemeSegmenter.segment(s)) {
+    w += graphemeCellWidth(segment);
   }
   return w;
 }
