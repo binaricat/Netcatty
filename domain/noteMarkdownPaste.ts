@@ -378,6 +378,35 @@ const getLexicalBlockMarkerPrefix = (block: NoteMarkdownPasteSelectionNode): str
 };
 
 /**
+ * Prefix soft-break continuations so selection markdown matches MDXEditor
+ * (`> A\n> B`, `- A\n  B`, `> - A\n>   B`). Only the first line keeps the list /
+ * heading marker; later lines reuse quote markers and list indent spaces.
+ */
+const formatLexicalBlockMarkdownWithContainerPrefixes = (
+  inline: string,
+  quotePrefix: string,
+  marker: string,
+  blockType: string,
+): string => {
+  if (!inline.includes("\n")) return `${quotePrefix}${marker}${inline}`;
+  const needsContinuation = blockType === "listitem"
+    || blockType === "quote"
+    || quotePrefix.length > 0;
+  if (!needsContinuation) return `${quotePrefix}${marker}${inline}`;
+  const continuationPrefix = blockType === "listitem"
+    ? `${quotePrefix}${" ".repeat(marker.length)}`
+    : `${quotePrefix}${blockType === "quote" ? marker : ""}`;
+  return inline
+    .split("\n")
+    .map((line, index) => (
+      index === 0
+        ? `${quotePrefix}${marker}${line}`
+        : `${continuationPrefix}${line}`
+    ))
+    .join("\n");
+};
+
+/**
  * Whether selected phrasing under `node` belongs to `block`. Quote containers
  * nest paragraph/heading/listitem children, so nearest-block matching alone
  * never attributes text to the quote itself.
@@ -878,7 +907,12 @@ const serializeLexicalSelectionNodesAsMarkdown = (
       : "";
     parts.push({
       block,
-      markdown: `${quotePrefix}${marker}${inline}`,
+      markdown: formatLexicalBlockMarkdownWithContainerPrefixes(
+        inline,
+        quotePrefix,
+        marker,
+        block.getType(),
+      ),
       quotePrefix,
     });
   }
@@ -1354,6 +1388,27 @@ const canonicalizeNoteMarkdownFencedCodeFenceLines = (chunk: string): string => 
 };
 
 /**
+ * True when a fenced-code chunk uses the same fence character on both ends and
+ * the closer is at least as long as the opener (CommonMark). Mismatched markers
+ * (tilde open + backtick close) must not canonicalize into a valid fence.
+ */
+const hasMatchingNoteMarkdownFencedCodeDelimiters = (chunk: string): boolean => {
+  const firstBreak = chunk.indexOf("\n");
+  if (firstBreak === -1) return false;
+  const lastBreak = chunk.lastIndexOf("\n");
+  const openLine = chunk.slice(0, firstBreak);
+  const closeLine = lastBreak === firstBreak
+    ? chunk.slice(firstBreak + 1)
+    : chunk.slice(lastBreak + 1);
+  const openMatch = /^[ \t]{0,3}(`{3,}|~{3,})/.exec(openLine);
+  const closeMatch = /^[ \t]{0,3}(`{3,}|~{3,})[ \t]*$/.exec(closeLine);
+  if (!openMatch || !closeMatch) return false;
+  const openFence = openMatch[1] ?? "";
+  const closeFence = closeMatch[1] ?? "";
+  return openFence[0] === closeFence[0] && closeFence.length >= openFence.length;
+};
+
+/**
  * Run a transform only on Markdown that is safe to rewrite for emphasis
  * equivalence. Inline/fenced code and link/image destinations keep literal
  * underscores (e.g. `` `__x__` `` must not become `` `**x**` ``).
@@ -1371,10 +1426,15 @@ const mapNoteMarkdownOutsideProtectedRegions = (
 
   let working = text;
   working = working.replace(
-    /^ {0,3}(?:```|~~~)[^\n]*\n[\s\S]*?^ {0,3}(?:```|~~~)[ \t]*$/gm,
-    // Tilde and backtick fences are equivalent; stash the serializer's backtick
-    // spelling so clipboard `~~~js` matches selection/MDXEditor ` ```js `.
-    (chunk) => stash(canonicalizeNoteMarkdownFencedCodeFenceLines(chunk)),
+    /^ {0,3}(?:`{3,}|~{3,})[^\n]*\n[\s\S]*?^ {0,3}(?:`{3,}|~{3,})[ \t]*$/gm,
+    // Tilde and backtick fences are equivalent when delimiters match; stash the
+    // serializer's backtick spelling so clipboard `~~~js` matches selection /
+    // MDXEditor ` ```js `. Reject mismatched open/close markers.
+    (chunk) => (
+      hasMatchingNoteMarkdownFencedCodeDelimiters(chunk)
+        ? stash(canonicalizeNoteMarkdownFencedCodeFenceLines(chunk))
+        : chunk
+    ),
   );
   working = working.replace(/`[^`\n]+`/g, (chunk) => stash(chunk));
   working = protectMarkdownLinkDestinations(working, stash);

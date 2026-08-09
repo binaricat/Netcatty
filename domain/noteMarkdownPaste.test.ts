@@ -270,6 +270,17 @@ test("markdown equivalence normalizes underscore emphasis to serializer form", (
     normalizeNoteMarkdownForEquivalence("~~~\n__x__\n~~~"),
     "```\n__x__\n```",
   );
+  // Mismatched fence characters are not a valid block; do not treat them as
+  // equivalent to a matching backtick fence (would suppress paste recovery).
+  assert.notEqual(
+    normalizeNoteMarkdownForEquivalence("~~~js\nx\n```"),
+    normalizeNoteMarkdownForEquivalence("```js\nx\n```"),
+  );
+  // Closing fence may be longer than the opener when the character matches.
+  assert.equal(
+    normalizeNoteMarkdownForEquivalence("~~~\ncode\n~~~~"),
+    normalizeNoteMarkdownForEquivalence("```\ncode\n````"),
+  );
 });
 
 test("selection markdown serialization scopes bold and link formatting", () => {
@@ -1118,7 +1129,7 @@ test("selection markdown serialization scopes bold and link formatting", () => {
   const hardBreakParagraph = {
     getType: () => "paragraph",
     getKey: () => "hb-p",
-    getTextContent: () => "AB",
+    getTextContent: () => "A\nB",
     getParent: () => null,
   };
   const hardBreakA = {
@@ -1149,6 +1160,120 @@ test("selection markdown serialization scopes bold and link formatting", () => {
       getNodes: () => [hardBreakA, hardBreakNode, hardBreakB],
     }),
     "**A**\n**B**",
+  );
+
+  // Whole blockquote / listitem with a soft break keep container prefixes on
+  // continuation lines (`> A\n> B`, `- A\n  B`) like MDXEditor serialization.
+  const softBreakQuote = {
+    getType: () => "quote",
+    getKey: () => "sb-quote",
+    getTextContent: () => "A\nB",
+    getParent: () => null,
+  };
+  const softBreakQuoteParagraph = {
+    getType: () => "paragraph",
+    getKey: () => "sb-quote-p",
+    getTextContent: () => "A\nB",
+    getParent: () => softBreakQuote,
+  };
+  const softBreakQuoteA = {
+    getType: () => "text",
+    getKey: () => "sb-quote-a",
+    getTextContent: () => "A",
+    hasFormat: () => false,
+    getParent: () => softBreakQuoteParagraph,
+  };
+  const softBreakQuoteBr = {
+    getType: () => "linebreak",
+    getKey: () => "sb-quote-br",
+    getParent: () => softBreakQuoteParagraph,
+  };
+  const softBreakQuoteB = {
+    getType: () => "text",
+    getKey: () => "sb-quote-b",
+    getTextContent: () => "B",
+    hasFormat: () => false,
+    getParent: () => softBreakQuoteParagraph,
+  };
+  assert.equal(
+    serializeLexicalSelectionAsMarkdown("A\nB", {
+      hasFormat: () => false,
+      anchor: { getNode: () => softBreakQuoteA, offset: 0, type: "text" },
+      focus: { getNode: () => softBreakQuoteB, offset: 1, type: "text" },
+      isBackward: () => false,
+      getNodes: () => [
+        softBreakQuote,
+        softBreakQuoteParagraph,
+        softBreakQuoteA,
+        softBreakQuoteBr,
+        softBreakQuoteB,
+      ],
+    }),
+    "> A\n> B",
+  );
+  assert.equal(
+    shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
+      beforeMarkdown: "> A\n> B",
+      clipboardText: "> A\n> B",
+      selectedText: "A\nB",
+      selectedMarkdown: "> A\n> B",
+    }),
+    false,
+  );
+
+  const softBreakList = {
+    getType: () => "list",
+    getListType: () => "bullet" as const,
+    getParent: () => null,
+  };
+  const softBreakListItem = {
+    getType: () => "listitem",
+    getKey: () => "sb-li",
+    getTextContent: () => "A\nB",
+    getParent: () => softBreakList,
+  };
+  const softBreakListA = {
+    getType: () => "text",
+    getKey: () => "sb-li-a",
+    getTextContent: () => "A",
+    hasFormat: () => false,
+    getParent: () => softBreakListItem,
+  };
+  const softBreakListBr = {
+    getType: () => "linebreak",
+    getKey: () => "sb-li-br",
+    getParent: () => softBreakListItem,
+  };
+  const softBreakListB = {
+    getType: () => "text",
+    getKey: () => "sb-li-b",
+    getTextContent: () => "B",
+    hasFormat: () => false,
+    getParent: () => softBreakListItem,
+  };
+  assert.equal(
+    serializeLexicalSelectionAsMarkdown("A\nB", {
+      hasFormat: () => false,
+      anchor: { getNode: () => softBreakListA, offset: 0, type: "text" },
+      focus: { getNode: () => softBreakListB, offset: 1, type: "text" },
+      isBackward: () => false,
+      getNodes: () => [
+        softBreakListItem,
+        softBreakListA,
+        softBreakListBr,
+        softBreakListB,
+      ],
+    }),
+    "- A\n  B",
+  );
+  assert.equal(
+    shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
+      beforeMarkdown: "- A\n  B",
+      clipboardText: "- A\n  B",
+      selectedText: "A\nB",
+      selectedMarkdown: "- A\n  B",
+    }),
+    false,
   );
 
   // Outer bold spanning a bold+strikethrough Lexical split must coalesce.
