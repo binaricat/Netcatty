@@ -39,6 +39,19 @@ test("stringCellWidth treats emoji presentation selectors as wide graphemes", ()
   assert.equal(stringCellWidth("1\uFE0F\u20E3"), 2);
 });
 
+test("stringCellWidth counts legacy emoji-presentation characters as wide", () => {
+  // Outside the supplementary emoji blocks; xterm 15-graphemes still treats
+  // Emoji_Presentation=Yes BMP symbols as two cells without needing FE0F.
+  assert.equal(codePointCellWidth(0x2705), 2); // ✅
+  assert.equal(codePointCellWidth(0x26a1), 2); // ⚡
+  assert.equal(codePointCellWidth(0x231a), 2); // ⌚
+  assert.equal(stringCellWidth("✅⚡⌚"), 6);
+  // Text-default emoji stay narrow unless FE0F joins them.
+  assert.equal(codePointCellWidth(0x2600), 1); // ☀
+  assert.equal(stringCellWidth("\u2600"), 1);
+  assert.equal(stringCellWidth("\u2600\uFE0F"), 2);
+});
+
 test("removeLastCodePoint erases one code point, matching Bash/readline Backspace", () => {
   // Non-BMP emoji is one code point spanning two UTF-16 units.
   assert.equal(removeLastCodePoint("hello\u{1F600}"), "hello");
