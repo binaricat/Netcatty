@@ -243,8 +243,48 @@ export const hasActiveLexicalTextSelection = (target: EventTarget | null): boole
   return hasSelection;
 };
 
-/** Plain text of the active Lexical range, or null when insertMarkdown cannot target it. */
-export const getActiveLexicalSelectedText = (target: EventTarget | null): string | null => {
+type NoteMarkdownPasteSelectionNode = {
+  getType: () => string;
+  getParent: () => NoteMarkdownPasteSelectionNode | null;
+  getURL?: () => string;
+};
+
+const isLexicalLinkNode = (
+  node: NoteMarkdownPasteSelectionNode,
+): node is NoteMarkdownPasteSelectionNode & { getURL: () => string } => (
+  node.getType() === "link" && typeof node.getURL === "function"
+);
+
+/**
+ * Best-effort markdown for the active Lexical range (link URL / text formats).
+ * Used to scope paste-equivalence checks to the selection, not the whole document.
+ */
+export const serializeLexicalSelectionAsMarkdown = (
+  selectedText: string,
+  selection: {
+    hasFormat: (type: "bold" | "italic" | "code") => boolean;
+    anchor: { getNode: () => NoteMarkdownPasteSelectionNode };
+  },
+): string => {
+  let current: NoteMarkdownPasteSelectionNode | null = selection.anchor.getNode();
+  while (current) {
+    if (isLexicalLinkNode(current)) {
+      return `[${selectedText}](${current.getURL()})`;
+    }
+    current = current.getParent();
+  }
+  if (selectedText.length > 0) {
+    if (selection.hasFormat("code")) return `\`${selectedText}\``;
+    if (selection.hasFormat("bold")) return `**${selectedText}**`;
+    if (selection.hasFormat("italic")) return `*${selectedText}*`;
+  }
+  return selectedText;
+};
+
+/** Active Lexical range plain text + selection-scoped markdown, or null when unavailable. */
+export const getActiveLexicalPasteSelection = (
+  target: EventTarget | null,
+): { text: string; markdown: string } | null => {
   if (typeof Element === "undefined" || typeof Node === "undefined") return null;
   const element = target instanceof Element
     ? target
@@ -254,14 +294,22 @@ export const getActiveLexicalSelectedText = (target: EventTarget | null): string
   if (!element) return null;
   const lexicalEditor = getNearestEditorFromDOMNode(element);
   if (!lexicalEditor) return null;
-  let selectedText: string | null = null;
+  let pasteSelection: { text: string; markdown: string } | null = null;
   lexicalEditor.getEditorState().read(() => {
     const selection = $getSelection();
     if (!$isRangeSelection(selection)) return;
-    selectedText = selection.getTextContent();
+    const text = selection.getTextContent();
+    pasteSelection = {
+      text,
+      markdown: serializeLexicalSelectionAsMarkdown(text, selection),
+    };
   });
-  return selectedText;
+  return pasteSelection;
 };
+
+/** Plain text of the active Lexical range, or null when insertMarkdown cannot target it. */
+export const getActiveLexicalSelectedText = (target: EventTarget | null): string | null =>
+  getActiveLexicalPasteSelection(target)?.text ?? null;
 
 /**
  * Merge a markdown paste when Lexical selection is missing or insertMarkdown
@@ -313,13 +361,15 @@ export const noteMarkdownClipboardToPlainText = (markdown: string): string => {
  * plain-text equality alone as a successful replace — pasting `**Hello**` over
  * plain `Hello`, or the same link label with a different URL, must still
  * recover when the insert no-ops. Suppress recovery only when the clipboard
- * markdown (formatting / link destination included) is already present in the
- * document and matches the selection's rendered text.
+ * markdown matches the active selection's own markdown (not merely when the
+ * same clipboard substring exists elsewhere in the document).
  */
 export const shouldRecoverNoteMarkdownPasteAfterUnchangedInsert = (input: {
   beforeMarkdown: string;
   clipboardText: string;
   selectedText: string | null;
+  /** Selection-scoped markdown; required to suppress structured identical replaces. */
+  selectedMarkdown?: string | null;
 }): boolean => {
   const before = input.beforeMarkdown.replace(/\r\n?/g, "\n");
   const clipboard = input.clipboardText.replace(/\r\n?/g, "\n");
@@ -329,14 +379,13 @@ export const shouldRecoverNoteMarkdownPasteAfterUnchangedInsert = (input: {
     const selected = input.selectedText.replace(/\r\n?/g, "\n");
     // Exact plain clipboard match (no markdown markers to apply).
     if (selected === clipboard) return false;
-    // Structured clipboard: only skip recovery when that markdown already
-    // exists in the doc (identical formatted/link replace), not merely when
-    // the rendered labels match.
-    if (
-      selected === noteMarkdownClipboardToPlainText(clipboard)
-      && before.includes(clipboard)
-    ) {
-      return false;
+    // Structured clipboard: skip recovery only when the selection itself is
+    // already that markdown (identical formatted/link replace at this range).
+    if (selected === noteMarkdownClipboardToPlainText(clipboard)) {
+      const selectedMarkdown = input.selectedMarkdown?.replace(/\r\n?/g, "\n") ?? null;
+      if (selectedMarkdown !== null && selectedMarkdown === clipboard) {
+        return false;
+      }
     }
   }
   return true;
@@ -1048,7 +1097,7 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
       applyDocumentPaste();
     } else {
       const before = latestMarkdownRef.current;
-      const selectedText = getActiveLexicalSelectedText(event.target);
+      const pasteSelection = getActiveLexicalPasteSelection(event.target);
       editor.focus();
       editor.insertMarkdown(markdown);
       // insertMarkdown's Lexical update is deferred; if selection was lost the
@@ -1064,7 +1113,8 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
           if (!shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
             beforeMarkdown: before,
             clipboardText: markdown,
-            selectedText,
+            selectedText: pasteSelection?.text ?? null,
+            selectedMarkdown: pasteSelection?.markdown ?? null,
           })) {
             return;
           }

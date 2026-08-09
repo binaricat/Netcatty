@@ -5,6 +5,7 @@ import test from "node:test";
 import {
   mergeNoteMarkdownDocumentPaste,
   noteMarkdownClipboardToPlainText,
+  serializeLexicalSelectionAsMarkdown,
   shouldInterceptNoteMarkdownPaste,
   shouldRecoverNoteMarkdownPasteAfterUnchangedInsert,
 } from "./InlineMarkdownEditor.tsx";
@@ -74,6 +75,42 @@ test("clipboard markdown plain-text approx matches Lexical selection text", () =
   assert.equal(noteMarkdownClipboardToPlainText("- item"), "item");
 });
 
+test("selection markdown serialization scopes bold and link formatting", () => {
+  const plainAnchor = {
+    getNode: () => ({
+      getType: () => "text",
+      getParent: () => null,
+    }),
+  };
+  assert.equal(
+    serializeLexicalSelectionAsMarkdown("Hello", {
+      hasFormat: (type) => type === "bold",
+      anchor: plainAnchor,
+    }),
+    "**Hello**",
+  );
+  assert.equal(
+    serializeLexicalSelectionAsMarkdown("Hello", {
+      hasFormat: () => false,
+      anchor: plainAnchor,
+    }),
+    "Hello",
+  );
+  assert.equal(
+    serializeLexicalSelectionAsMarkdown("docs", {
+      hasFormat: () => false,
+      anchor: {
+        getNode: () => ({
+          getType: () => "link",
+          getURL: () => "https://a.example",
+          getParent: () => null,
+        }),
+      },
+    }),
+    "[docs](https://a.example)",
+  );
+});
+
 test("unchanged insert recovery skips identical replacements but recovers lost-selection no-ops", () => {
   assert.equal(
     shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
@@ -90,6 +127,7 @@ test("unchanged insert recovery skips identical replacements but recovers lost-s
       beforeMarkdown: "# Note\n\n**Hello** world",
       clipboardText: "**Hello**",
       selectedText: "Hello",
+      selectedMarkdown: "**Hello**",
     }),
     false,
   );
@@ -100,6 +138,18 @@ test("unchanged insert recovery skips identical replacements but recovers lost-s
       beforeMarkdown: "# Note\n\nHello",
       clipboardText: "**Hello**",
       selectedText: "Hello",
+      selectedMarkdown: "Hello",
+    }),
+    true,
+  );
+  // Clipboard markdown elsewhere in the doc must not suppress recovery for a
+  // different plain selection of the same rendered text.
+  assert.equal(
+    shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
+      beforeMarkdown: "**Hello** and Hello",
+      clipboardText: "**Hello**",
+      selectedText: "Hello",
+      selectedMarkdown: "Hello",
     }),
     true,
   );
@@ -109,6 +159,7 @@ test("unchanged insert recovery skips identical replacements but recovers lost-s
       beforeMarkdown: "see [docs](https://a.example) end",
       clipboardText: "[docs](https://b.example)",
       selectedText: "docs",
+      selectedMarkdown: "[docs](https://a.example)",
     }),
     true,
   );
@@ -117,6 +168,7 @@ test("unchanged insert recovery skips identical replacements but recovers lost-s
       beforeMarkdown: "see [docs](https://a.example) end",
       clipboardText: "[docs](https://a.example)",
       selectedText: "docs",
+      selectedMarkdown: "[docs](https://a.example)",
     }),
     false,
   );
@@ -125,6 +177,7 @@ test("unchanged insert recovery skips identical replacements but recovers lost-s
       beforeMarkdown: "# Note\n\nHello",
       clipboardText: "**Goodbye**",
       selectedText: "Hello",
+      selectedMarkdown: "Hello",
     }),
     true,
   );
@@ -133,6 +186,7 @@ test("unchanged insert recovery skips identical replacements but recovers lost-s
       beforeMarkdown: "# Note\n\nHello",
       clipboardText: "- item",
       selectedText: "",
+      selectedMarkdown: "",
     }),
     true,
   );
@@ -143,6 +197,7 @@ test("InlineMarkdownEditor only preventDefaults markdown paste after a successfu
 
   assert.match(source, /shouldInterceptNoteMarkdownPaste/);
   assert.match(source, /hasActiveLexicalTextSelection/);
+  assert.match(source, /getActiveLexicalPasteSelection/);
   assert.match(source, /mergeNoteMarkdownDocumentPaste/);
   assert.match(source, /shouldRecoverNoteMarkdownPasteAfterUnchangedInsert/);
   assert.match(source, /setMarkdown\(/);
