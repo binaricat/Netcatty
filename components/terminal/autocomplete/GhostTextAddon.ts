@@ -430,13 +430,25 @@ export class GhostTextAddon implements IDisposable {
     const targetCol = this.anchorCursorX + cellDelta;
     // Wrap the predicted cursor position across line boundaries in both
     // directions — the real xterm cursor wraps to the next row once it
-    // crosses cols forward, and to the previous row when a deletion
-    // crosses back past column 0. JS `%` returns negative for negative
-    // dividends, so normalize both col and rowOffset explicitly.
-    let col = targetCol % cols;
-    let rowOffset = Math.floor(targetCol / cols);
-    if (col < 0) {
-      col += cols;
+    // *crosses* cols forward, and to the previous row when a deletion
+    // crosses back past column 0. Exact fill (targetCol % cols === 0) is
+    // xterm's pending-wrap state: cursorX stays at cols on the filled
+    // row until the next printable character. Naïve modulo/floor would
+    // map that to column 0 of the next row and paint the ghost one row
+    // too low — same rule as resolveAutocompleteCursorPosition.
+    // JS `%` returns negative for negative dividends, so normalize both
+    // col and rowOffset explicitly when not on that boundary.
+    let col: number;
+    let rowOffset: number;
+    if (targetCol > 0 && targetCol % cols === 0) {
+      col = cols;
+      rowOffset = targetCol / cols - 1;
+    } else {
+      col = targetCol % cols;
+      rowOffset = Math.floor(targetCol / cols);
+      if (col < 0) {
+        col += cols;
+      }
     }
     // Clamp to the visible top row so a runaway negative delta (e.g.
     // deleted past the prompt) doesn't render above the terminal.
