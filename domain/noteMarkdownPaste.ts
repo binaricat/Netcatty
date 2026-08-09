@@ -403,6 +403,18 @@ export const doesSelectionEncompassLexicalBlock = (
   return isElementBoundaryOnBlock(anchor) || isElementBoundaryOnBlock(focus);
 };
 
+/** Nearest quote ancestor, or null when the block is not inside a quote. */
+const findNearestLexicalQuoteAncestor = (
+  block: NoteMarkdownPasteSelectionNode,
+): NoteMarkdownPasteSelectionNode | null => {
+  let current = block.getParent();
+  while (current) {
+    if (current.getType() === "quote") return current;
+    current = current.getParent();
+  }
+  return null;
+};
+
 /**
  * `> ` markers for quote ancestors that the selection fully encompasses.
  * Needed because selected blocks resolve to nested paragraphs, not the quote.
@@ -427,6 +439,23 @@ const getEnclosingLexicalQuoteMarkerPrefix = (
     current = current.getParent();
   }
   return markers.join("");
+};
+
+/**
+ * Blank line inside a multi-paragraph blockquote (`>\n`), matching MDXEditor.
+ * Distinct quotes keep an unquoted `\n\n` so they stay separate blocks.
+ */
+const getLexicalSameQuoteBlankSeparator = (
+  prev: NoteMarkdownPasteSelectionNode,
+  next: NoteMarkdownPasteSelectionNode,
+  prevQuotePrefix: string,
+  nextQuotePrefix: string,
+): string | null => {
+  if (!prevQuotePrefix || prevQuotePrefix !== nextQuotePrefix) return null;
+  const prevQuote = findNearestLexicalQuoteAncestor(prev);
+  const nextQuote = findNearestLexicalQuoteAncestor(next);
+  if (!prevQuote || prevQuote !== nextQuote) return null;
+  return prevQuotePrefix.trimEnd();
 };
 
 const getSelectedLexicalTextNodeContent = (
@@ -468,16 +497,36 @@ const getLexicalNodeKey = (
   fallback: string,
 ): string => (typeof node.getKey === "function" ? node.getKey() : fallback);
 
+/**
+ * Formats to emit inside a link label when `inherited` outer markers already
+ * wrap the link (`**A [B](url) C**`). Prefer the suffix beyond a shared prefix;
+ * if the label diverges, keep only formats not already inherited.
+ */
+const getLexicalLinkLabelFormatStack = (
+  desired: readonly NoteMarkdownPasteInlineFormatStackItem[],
+  inherited: readonly NoteMarkdownPasteInlineFormatStackItem[],
+): NoteMarkdownPasteInlineFormatStackItem[] => {
+  const common = longestCommonInlineFormatPrefixLength(inherited, desired);
+  if (common === inherited.length) {
+    return desired.slice(inherited.length);
+  }
+  return desired.filter((format) => !inherited.includes(format));
+};
+
 const serializeLexicalBlockInlineMarkdown = (
   nodes: NoteMarkdownPasteSelectionNode[],
   selection: NoteMarkdownPasteSelection,
 ): string => {
   let markdown = "";
-  const formatStack: NoteMarkdownPasteInlineFormatStackItem[] = [];
+  // Formats open in the outer markdown stream. Kept across link boundaries so
+  // shared marks wrap the link (`**A [B](url) C**`) instead of closing at `[`.
+  const outerFormatStack: NoteMarkdownPasteInlineFormatStackItem[] = [];
+  const labelFormatStack: NoteMarkdownPasteInlineFormatStackItem[] = [];
   let linkBuffer: {
     linkKey: string;
     link: NoteMarkdownPasteSelectionNode & { getURL: () => string };
     label: string;
+    inheritedFormats: NoteMarkdownPasteInlineFormatStackItem[];
   } | null = null;
 
   // Mutable bags so format sync can append into the outer buffer or the
@@ -493,17 +542,41 @@ const serializeLexicalBlockInlineMarkdown = (
     },
   };
 
-  const closeInlineFormats = () => {
-    syncLexicalInlineMarkdownFormatStack(
-      formatStack,
-      [],
-      linkBuffer ? labelOutput : outerOutput,
+  const closeOuterFormats = () => {
+    syncLexicalInlineMarkdownFormatStack(outerFormatStack, [], outerOutput);
+  };
+
+  const closeLabelFormats = () => {
+    syncLexicalInlineMarkdownFormatStack(labelFormatStack, [], labelOutput);
+  };
+
+  const beginLinkBuffer = (
+    link: NoteMarkdownPasteSelectionNode & { getURL: () => string },
+    linkKey: string,
+    desiredFormats: readonly NoteMarkdownPasteInlineFormatStackItem[],
+  ) => {
+    // Keep formats that continue into the link open outside; close the rest
+    // before `[` so only true label-local marks land inside the label.
+    const shared = longestCommonInlineFormatPrefixLength(
+      outerFormatStack,
+      desiredFormats,
     );
+    syncLexicalInlineMarkdownFormatStack(
+      outerFormatStack,
+      desiredFormats.slice(0, shared),
+      outerOutput,
+    );
+    linkBuffer = {
+      linkKey,
+      link,
+      label: "",
+      inheritedFormats: [...outerFormatStack],
+    };
   };
 
   const flushLink = () => {
     if (!linkBuffer) return;
-    closeInlineFormats();
+    closeLabelFormats();
     const title = typeof linkBuffer.link.getTitle === "function"
       ? linkBuffer.link.getTitle()
       : null;
@@ -518,7 +591,7 @@ const serializeLexicalBlockInlineMarkdown = (
       // Close formats before the break so `**A**  \n**B**` stays the canonical
       // form for identical-replace checks (clipboard often splits markers).
       flushLink();
-      closeInlineFormats();
+      closeOuterFormats();
       // CommonMark hard break (Lexical LineBreakNode), not a block separator.
       markdown += "  \n";
       continue;
@@ -535,17 +608,14 @@ const serializeLexicalBlockInlineMarkdown = (
       const codeLink = findLexicalLinkAncestor(node);
       if (!codeLink) {
         flushLink();
-        closeInlineFormats();
+        closeOuterFormats();
         markdown += codeMarkdown;
         continue;
       }
       const codeLinkKey = getLexicalNodeKey(codeLink, codeLink.getURL());
       if (linkBuffer && linkBuffer.linkKey !== codeLinkKey) flushLink();
-      if (!linkBuffer) {
-        closeInlineFormats();
-        linkBuffer = { linkKey: codeLinkKey, link: codeLink, label: "" };
-      }
-      closeInlineFormats();
+      if (!linkBuffer) beginLinkBuffer(codeLink, codeLinkKey, []);
+      closeLabelFormats();
       linkBuffer.label += codeMarkdown;
       continue;
     }
@@ -554,7 +624,7 @@ const serializeLexicalBlockInlineMarkdown = (
     if (!link) {
       flushLink();
       syncLexicalInlineMarkdownFormatStack(
-        formatStack,
+        outerFormatStack,
         desiredFormats,
         outerOutput,
       );
@@ -563,19 +633,16 @@ const serializeLexicalBlockInlineMarkdown = (
     }
     const linkKey = getLexicalNodeKey(link, link.getURL());
     if (linkBuffer && linkBuffer.linkKey !== linkKey) flushLink();
-    if (!linkBuffer) {
-      closeInlineFormats();
-      linkBuffer = { linkKey, link, label: "" };
-    }
+    if (!linkBuffer) beginLinkBuffer(link, linkKey, desiredFormats);
     syncLexicalInlineMarkdownFormatStack(
-      formatStack,
-      desiredFormats,
+      labelFormatStack,
+      getLexicalLinkLabelFormatStack(desiredFormats, linkBuffer.inheritedFormats),
       labelOutput,
     );
     linkBuffer.label += escapedText;
   }
   flushLink();
-  closeInlineFormats();
+  closeOuterFormats();
   return markdown;
 };
 
@@ -631,10 +698,11 @@ const serializeLexicalSelectionNodesAsMarkdown = (
   const parts: Array<{
     block: NoteMarkdownPasteSelectionNode | null;
     markdown: string;
+    quotePrefix: string;
   }> = [];
   for (const part of selectionParts) {
     if (part.kind === "decorator") {
-      parts.push({ block: null, markdown: part.markdown });
+      parts.push({ block: null, markdown: part.markdown, quotePrefix: "" });
       continue;
     }
     const { block, key } = part;
@@ -651,20 +719,37 @@ const serializeLexicalSelectionNodesAsMarkdown = (
     )
       ? getLexicalBlockMarkerPrefix(block)
       : "";
-    parts.push({ block, markdown: `${quotePrefix}${marker}${inline}` });
+    parts.push({
+      block,
+      markdown: `${quotePrefix}${marker}${inline}`,
+      quotePrefix,
+    });
   }
   if (parts.length === 0) return null;
   // Same-list / nested list items stay tight (`- a\n- b`, `- p\n  - c`);
   // adjacent distinct lists keep a blank line like MDXEditor serialization.
+  // Same blockquote paragraphs keep a quoted blank line (`> A\n>\n> B`).
   // Decorators always use a blank line (same as node-selection joins).
   let joined = parts[0].markdown;
   for (let i = 1; i < parts.length; i += 1) {
-    const prev = parts[i - 1].block;
-    const next = parts[i].block;
-    const sameListRun = prev !== null
-      && next !== null
-      && areLexicalListItemsInSameTightRun(prev, next);
-    joined += `${sameListRun ? "\n" : "\n\n"}${parts[i].markdown}`;
+    const prev = parts[i - 1];
+    const next = parts[i];
+    const sameListRun = prev.block !== null
+      && next.block !== null
+      && areLexicalListItemsInSameTightRun(prev.block, next.block);
+    let separator = "\n\n";
+    if (sameListRun) {
+      separator = "\n";
+    } else if (prev.block !== null && next.block !== null) {
+      const quoteBlank = getLexicalSameQuoteBlankSeparator(
+        prev.block,
+        next.block,
+        prev.quotePrefix,
+        next.quotePrefix,
+      );
+      if (quoteBlank !== null) separator = `\n${quoteBlank}\n`;
+    }
+    joined += `${separator}${next.markdown}`;
   }
   return joined;
 };

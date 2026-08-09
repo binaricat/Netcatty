@@ -848,6 +848,115 @@ test("selection markdown serialization scopes bold and link formatting", () => {
     false,
   );
 
+  // Outer bold spanning text before/inside/after a link must stay outside the
+  // link (`**A [B](url) C**`), not close at the link boundary.
+  const linkSpanParagraph = {
+    getType: () => "paragraph",
+    getKey: () => "link-span-p",
+    getTextContent: () => "A B C",
+    getParent: () => null,
+  };
+  const linkSpanLink = {
+    getType: () => "link",
+    getURL: () => "https://x.test",
+    getKey: () => "link-span-link",
+    getParent: () => linkSpanParagraph,
+  };
+  const linkSpanBefore = {
+    getType: () => "text",
+    getKey: () => "link-span-a",
+    getTextContent: () => "A ",
+    hasFormat: (type: string) => type === "bold",
+    getParent: () => linkSpanParagraph,
+  };
+  const linkSpanLabel = {
+    getType: () => "text",
+    getKey: () => "link-span-b",
+    getTextContent: () => "B",
+    hasFormat: (type: string) => type === "bold",
+    getParent: () => linkSpanLink,
+  };
+  const linkSpanAfter = {
+    getType: () => "text",
+    getKey: () => "link-span-c",
+    getTextContent: () => " C",
+    hasFormat: (type: string) => type === "bold",
+    getParent: () => linkSpanParagraph,
+  };
+  assert.equal(
+    serializeLexicalSelectionAsMarkdown("A B C", {
+      hasFormat: () => false,
+      anchor: { getNode: () => linkSpanBefore, offset: 0, type: "text" },
+      focus: { getNode: () => linkSpanAfter, offset: 2, type: "text" },
+      isBackward: () => false,
+      getNodes: () => [linkSpanBefore, linkSpanLink, linkSpanLabel, linkSpanAfter],
+    }),
+    "**A [B](https://x.test) C**",
+  );
+  assert.equal(
+    shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
+      beforeMarkdown: "**A [B](https://x.test) C**",
+      clipboardText: "**A [B](https://x.test) C**",
+      selectedText: "A B C",
+      selectedMarkdown: "**A [B](https://x.test) C**",
+    }),
+    false,
+  );
+
+  // Multi-paragraph blockquote: blank separator stays quoted (`> A\n>\n> B`)
+  // like MDXEditor, not an unquoted gap (`> A\n\n> B`).
+  const multiQuote = {
+    getType: () => "quote",
+    getKey: () => "multi-quote",
+    getTextContent: () => "AB",
+    getParent: () => null,
+  };
+  const multiQuoteP1 = {
+    getType: () => "paragraph",
+    getKey: () => "multi-quote-p1",
+    getTextContent: () => "A",
+    getParent: () => multiQuote,
+  };
+  const multiQuoteP2 = {
+    getType: () => "paragraph",
+    getKey: () => "multi-quote-p2",
+    getTextContent: () => "B",
+    getParent: () => multiQuote,
+  };
+  const multiQuoteT1 = {
+    getType: () => "text",
+    getKey: () => "multi-quote-t1",
+    getTextContent: () => "A",
+    hasFormat: () => false,
+    getParent: () => multiQuoteP1,
+  };
+  const multiQuoteT2 = {
+    getType: () => "text",
+    getKey: () => "multi-quote-t2",
+    getTextContent: () => "B",
+    hasFormat: () => false,
+    getParent: () => multiQuoteP2,
+  };
+  assert.equal(
+    serializeLexicalSelectionAsMarkdown("A\n\nB", {
+      hasFormat: () => false,
+      anchor: { getNode: () => multiQuoteT1, offset: 0, type: "text" },
+      focus: { getNode: () => multiQuoteT2, offset: 1, type: "text" },
+      isBackward: () => false,
+      getNodes: () => [multiQuote, multiQuoteP1, multiQuoteT1, multiQuoteP2, multiQuoteT2],
+    }),
+    "> A\n>\n> B",
+  );
+  assert.equal(
+    shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
+      beforeMarkdown: "> A\n>\n> B",
+      clipboardText: "> A\n>\n> B",
+      selectedText: "A\n\nB",
+      selectedMarkdown: "> A\n>\n> B",
+    }),
+    false,
+  );
+
   // A hard break belongs to one block only; multi-block serialization must not
   // replay it into every selected block (or identical paste recovers a duplicate).
   const hardBreakSibling = {
