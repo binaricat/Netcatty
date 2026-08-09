@@ -7,6 +7,7 @@ import {
   mergeNoteMarkdownDocumentPaste,
   noteMarkdownClipboardToPlainText,
   normalizeNoteMarkdownForEquivalence,
+  serializeLexicalCodeBlockAsMarkdown,
   serializeLexicalNodeSelectionAsMarkdown,
   serializeLexicalSelectionAsMarkdown,
   serializeMdastTableAsMarkdown,
@@ -118,11 +119,16 @@ test("markdown equivalence normalizes underscore emphasis to serializer form", (
     normalizeNoteMarkdownForEquivalence("__Hello__"),
     normalizeNoteMarkdownForEquivalence("**Hello**"),
   );
-  // Hard breaks: backslash and two-trailing-spaces forms are equivalent.
+  // Hard breaks: backslash / two-trailing-spaces / bare newline (MDXEditor) equate.
   assert.equal(
     normalizeNoteMarkdownForEquivalence("**A**\\\n**B**"),
     normalizeNoteMarkdownForEquivalence("**A**  \n**B**"),
   );
+  assert.equal(
+    normalizeNoteMarkdownForEquivalence("**A**  \n**B**"),
+    normalizeNoteMarkdownForEquivalence("**A**\n**B**"),
+  );
+  assert.equal(normalizeNoteMarkdownForEquivalence("**A**  \n**B**"), "**A**\n**B**");
   // Code spans / link destinations keep literal underscores (not **).
   assert.equal(normalizeNoteMarkdownForEquivalence("`__x__`"), "`__x__`");
   assert.notEqual(
@@ -585,6 +591,41 @@ test("selection markdown serialization scopes bold and link formatting", () => {
     "A\n\n***\n\nB",
   );
 
+  // Range selections that include a fenced codeblock decorator must keep the
+  // fence; dropping it misclassifies identical paste as a no-op.
+  const codeBlockNode = {
+    getType: () => "codeblock",
+    getKey: () => "cb-1",
+    getParent: () => null,
+    getCode: () => "x = 1",
+    getLanguage: () => "js",
+    getMeta: () => "",
+  };
+  assert.equal(
+    serializeLexicalCodeBlockAsMarkdown(codeBlockNode),
+    "```js\nx = 1\n```",
+  );
+  assert.equal(
+    serializeLexicalSelectionAsMarkdown("A\n\nx = 1\n\nB", {
+      hasFormat: () => false,
+      anchor: { getNode: () => paragraphAText, offset: 0, type: "text" },
+      focus: { getNode: () => paragraphBText, offset: 1, type: "text" },
+      isBackward: () => false,
+      getNodes: () => [
+        paragraphA,
+        paragraphAText,
+        codeBlockNode,
+        paragraphB,
+        paragraphBText,
+      ],
+    }),
+    "A\n\n```js\nx = 1\n```\n\nB",
+  );
+  assert.equal(
+    serializeLexicalNodeSelectionAsMarkdown([codeBlockNode]),
+    "```js\nx = 1\n```",
+  );
+
   // Adjacent list items must stay single-newline joined (`- one\n- two`), not
   // blank-line separated, or identical paste recovery appends a duplicate.
   const bulletList = {
@@ -986,7 +1027,7 @@ test("selection markdown serialization scopes bold and link formatting", () => {
     "[docs](https://example.test/a_(b))",
   );
 
-  // Lexical linebreak nodes are Markdown hard breaks (two trailing spaces).
+  // Lexical linebreak nodes match MDXEditor export (bare newline, not `  \n`).
   const hardBreakParagraph = {
     getType: () => "paragraph",
     getKey: () => "hb-p",
@@ -1020,7 +1061,7 @@ test("selection markdown serialization scopes bold and link formatting", () => {
       isBackward: () => false,
       getNodes: () => [hardBreakA, hardBreakNode, hardBreakB],
     }),
-    "**A**  \n**B**",
+    "**A**\n**B**",
   );
 
   // Outer bold spanning a bold+strikethrough Lexical split must coalesce.
@@ -1353,7 +1394,7 @@ test("selection markdown serialization scopes bold and link formatting", () => {
         hardBreakSiblingText,
       ],
     }),
-    "**A**  \n**B**\n\nC",
+    "**A**\n**B**\n\nC",
   );
 
   // Partial selection inside a heading must omit the heading marker so pasting
@@ -1842,22 +1883,32 @@ test("unchanged insert recovery skips identical replacements but recovers lost-s
     }),
     false,
   );
-  // Identical hard-break fragment must not append a duplicate.
+  // Identical hard-break fragment must not append a duplicate (MDXEditor bare
+  // newline, CommonMark two-space, and backslash forms are equivalent).
   assert.equal(
     shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
-      beforeMarkdown: "intro\n\n**A**  \n**B**\n\noutro",
-      clipboardText: "**A**  \n**B**",
+      beforeMarkdown: "intro\n\n**A**\n**B**\n\noutro",
+      clipboardText: "**A**\n**B**",
       selectedText: "A\nB",
-      selectedMarkdown: "**A**  \n**B**",
+      selectedMarkdown: "**A**\n**B**",
     }),
     false,
   );
   assert.equal(
     shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
-      beforeMarkdown: "intro\n\n**A**  \n**B**\n\noutro",
+      beforeMarkdown: "intro\n\n**A**\n**B**\n\noutro",
+      clipboardText: "**A**  \n**B**",
+      selectedText: "A\nB",
+      selectedMarkdown: "**A**\n**B**",
+    }),
+    false,
+  );
+  assert.equal(
+    shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
+      beforeMarkdown: "intro\n\n**A**\n**B**\n\noutro",
       clipboardText: "**A**\\\n**B**",
       selectedText: "A\nB",
-      selectedMarkdown: "**A**  \n**B**",
+      selectedMarkdown: "**A**\n**B**",
     }),
     false,
   );
@@ -1954,6 +2005,16 @@ test("unchanged insert recovery skips identical replacements but recovers lost-s
       clipboardText: "A\n\n***\n\nB",
       selectedText: "A\n\nB",
       selectedMarkdown: "A\n\n***\n\nB",
+    }),
+    false,
+  );
+  // Range selection across a codeblock must suppress identical-replace recovery.
+  assert.equal(
+    shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
+      beforeMarkdown: "A\n\n```js\nx = 1\n```\n\nB",
+      clipboardText: "A\n\n```js\nx = 1\n```\n\nB",
+      selectedText: "A\n\nx = 1\n\nB",
+      selectedMarkdown: "A\n\n```js\nx = 1\n```\n\nB",
     }),
     false,
   );

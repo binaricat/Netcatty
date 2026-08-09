@@ -45,6 +45,10 @@ export type NoteMarkdownPasteSelectionNode = {
   hasFormat?: (type: NoteMarkdownPasteTextFormat) => boolean;
   /** MDXEditor table decorator nodes expose the backing MDAST table. */
   getMdastNode?: () => NoteMarkdownPasteMdastTable;
+  /** MDXEditor codeblock decorator nodes. */
+  getCode?: () => string;
+  getLanguage?: () => string;
+  getMeta?: () => string;
 };
 
 export type NoteMarkdownPasteSelection = {
@@ -722,12 +726,12 @@ const serializeLexicalBlockInlineMarkdown = (
   for (const node of nodes) {
     const type = node.getType();
     if (type === "linebreak") {
-      // Close formats before the break so `**A**  \n**B**` stays the canonical
-      // form for identical-replace checks (clipboard often splits markers).
+      // Close formats before the break so `**A**\n**B**` matches MDXEditor's
+      // LexicalLinebreakVisitor (bare text newline, not a CommonMark hard break).
       flushLink();
       closeOuterFormats();
-      // CommonMark hard break (Lexical LineBreakNode), not a block separator.
-      markdown += "  \n";
+      // MDXEditor exports LineBreakNode as `{ type: "text", value: "\n" }`.
+      markdown += "\n";
       continue;
     }
     if (type !== "text" || typeof node.hasFormat !== "function") continue;
@@ -798,9 +802,9 @@ const serializeLexicalSelectionNodesAsMarkdown = (
   if (nodes.length === 0) return null;
 
   // Preserve document order: ordinary blocks and supported decorators (HR /
-  // table) both appear in RangeSelection.getNodes() when a range spans them.
-  // Group phrasing under each block key in this same pass so serialization is
-  // linear in selected nodes (not O(blocks×nodes)).
+  // table / codeblock) both appear in RangeSelection.getNodes() when a range
+  // spans them. Group phrasing under each block key in this same pass so
+  // serialization is linear in selected nodes (not O(blocks×nodes)).
   type SelectionPart =
     | { kind: "block"; block: NoteMarkdownPasteSelectionNode; key: string }
     | { kind: "decorator"; markdown: string };
@@ -812,9 +816,13 @@ const serializeLexicalSelectionNodesAsMarkdown = (
     const nodeType = node.getType();
     // Supported decorators are not block ancestors; serialize them in place so
     // A + thematic-break + B round-trips as `A\n\n***\n\nB`.
-    if (nodeType === "horizontalrule" || nodeType === "table") {
+    if (
+      nodeType === "horizontalrule"
+      || nodeType === "table"
+      || nodeType === "codeblock"
+    ) {
       const decoratorMarkdown = serializeLexicalDecoratorNodeAsMarkdown(node);
-      // Failed table/HR evidence must not silently drop the decorator.
+      // Failed decorator evidence must not silently drop the node.
       if (decoratorMarkdown === null) return null;
       const decoratorKey = getLexicalNodeKey(
         node,
@@ -1029,8 +1037,28 @@ export const serializeMdastTableAsMarkdown = (
 };
 
 /**
- * Markdown for one supported Lexical decorator (thematic break / table).
- * Returns null for unsupported types so callers can fall through.
+ * Fenced code matching mdast-util-to-markdown / MDXEditor CodeBlockVisitor
+ * (`lang` + optional `meta`, fence longer than any backtick run in the body).
+ */
+export const serializeLexicalCodeBlockAsMarkdown = (
+  node: NoteMarkdownPasteSelectionNode,
+): string | null => {
+  if (typeof node.getCode !== "function") return null;
+  const code = node.getCode();
+  if (typeof code !== "string") return null;
+  const language = typeof node.getLanguage === "function"
+    ? (node.getLanguage() ?? "")
+    : "";
+  const meta = typeof node.getMeta === "function" ? (node.getMeta() ?? "") : "";
+  let fence = "```";
+  while (code.includes(fence)) fence += "`";
+  const info = `${language}${meta ? ` ${meta}` : ""}`;
+  return `${fence}${info}\n${code}\n${fence}`;
+};
+
+/**
+ * Markdown for one supported Lexical decorator (thematic break / table /
+ * codeblock). Returns null for unsupported types so callers can fall through.
  */
 const serializeLexicalDecoratorNodeAsMarkdown = (
   node: NoteMarkdownPasteSelectionNode,
@@ -1044,13 +1072,16 @@ const serializeLexicalDecoratorNodeAsMarkdown = (
     if (typeof node.getMdastNode !== "function") return null;
     return serializeMdastTableAsMarkdown(node.getMdastNode());
   }
+  if (type === "codeblock") {
+    return serializeLexicalCodeBlockAsMarkdown(node);
+  }
   return null;
 };
 
 /**
  * Markdown for a Lexical NodeSelection (decorator blocks such as thematic
- * breaks and tables). Range selections that include these decorators are
- * handled in serializeLexicalSelectionNodesAsMarkdown.
+ * breaks, tables, and code blocks). Range selections that include these
+ * decorators are handled in serializeLexicalSelectionNodesAsMarkdown.
  */
 export const serializeLexicalNodeSelectionAsMarkdown = (
   nodes: readonly NoteMarkdownPasteSelectionNode[],
@@ -1485,10 +1516,10 @@ export const normalizeNoteMarkdownForEquivalence = (markdown: string): string =>
     // GFM tables: optional outer pipes + separator dash runs → serializer form
     // (`A | B` / `--- | ---` → `| A | B |` / `| --- | --- |`).
     next = normalizeNoteMarkdownGfmTableRows(next);
-    // Hard breaks: backslash form → two-trailing-spaces (serializer form).
-    next = next.replace(/\\\n/g, "  \n");
-    // Collapse 3+ trailing spaces before a newline to the canonical two-space break.
-    next = next.replace(/ {3,}\n/g, "  \n");
+    // Hard breaks → bare newline (MDXEditor LexicalLinebreakVisitor / serializer).
+    next = next.replace(/\\\n/g, "\n");
+    // Collapse 2+ trailing spaces before a newline (CommonMark hard break).
+    next = next.replace(/ {2,}\n/g, "\n");
     return next;
   });
 };
