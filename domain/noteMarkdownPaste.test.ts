@@ -206,6 +206,23 @@ test("markdown equivalence normalizes underscore emphasis to serializer form", (
     normalizeNoteMarkdownForEquivalence("__x\\__"),
     normalizeNoteMarkdownForEquivalence("**x**"),
   );
+  // Closing `__` followed by an alphanumeric is not a CommonMark delimiter;
+  // do not rewrite to `**` or identical-replace checks suppress recovery.
+  assert.equal(normalizeNoteMarkdownForEquivalence("__x__y"), "__x__y");
+  assert.notEqual(
+    normalizeNoteMarkdownForEquivalence("# T\n\n__x__y"),
+    normalizeNoteMarkdownForEquivalence("# T\n\n**x**y"),
+  );
+  // Escaped `]` in a link label must not end the label early or destination
+  // `__id__` leaks into emphasis canonicalization.
+  assert.equal(
+    normalizeNoteMarkdownForEquivalence("[a\\]b](https://x/__id__)"),
+    "[a\\]b](https://x/__id__)",
+  );
+  assert.notEqual(
+    normalizeNoteMarkdownForEquivalence("[a\\]b](https://x/__id__)"),
+    normalizeNoteMarkdownForEquivalence("[a\\]b](https://x/**id**)"),
+  );
   // List markers inside blockquotes match serializer `-` form.
   assert.equal(
     normalizeNoteMarkdownForEquivalence("> * one\n> * two"),
@@ -1850,6 +1867,27 @@ test("unchanged insert recovery skips identical replacements but recovers lost-s
       clipboardText: "**Hello**",
       selectedText: "Hello",
       selectedMarkdown: "Hello",
+    }),
+    true,
+  );
+  // Intraword `__…__` is not strong emphasis; pasting `**x**y` over `__x__y`
+  // must recover when insertMarkdown no-ops after losing selection.
+  assert.equal(
+    shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
+      beforeMarkdown: "# T\n\n__x__y",
+      clipboardText: "# T\n\n**x**y",
+      selectedText: "Txy",
+      selectedMarkdown: "# T\n\n__x__y",
+    }),
+    true,
+  );
+  // Escaped `]` in the label must keep destinations distinct for recovery.
+  assert.equal(
+    shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
+      beforeMarkdown: "see [a\\]b](https://x/__id__) end",
+      clipboardText: "[a\\]b](https://x/**id**)",
+      selectedText: "a]b",
+      selectedMarkdown: "[a\\]b](https://x/__id__)",
     }),
     true,
   );

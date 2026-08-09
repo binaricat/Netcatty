@@ -1207,6 +1207,32 @@ const isNoteMarkdownIndexEscaped = (text: string, index: number): boolean => {
   return bars % 2 === 1;
 };
 
+/** First unescaped `char` at or after `start`, or `-1`. */
+const findNoteMarkdownUnescapedIndex = (
+  text: string,
+  char: string,
+  start: number,
+): number => {
+  for (let i = start; i < text.length; i += 1) {
+    if (text[i] === char && !isNoteMarkdownIndexEscaped(text, i)) return i;
+  }
+  return -1;
+};
+
+/**
+ * Underscore emphasis cannot open/close inside words (CommonMark). Match the
+ * boundary class used by `_x_` → `*x*` (`[^\\*\w]` / start / end).
+ */
+const isNoteMarkdownUnderscoreEmphasisBoundaryBefore = (
+  text: string,
+  offset: number,
+): boolean => offset === 0 || !/[\\*\w]/.test(text[offset - 1] ?? "");
+
+const isNoteMarkdownUnderscoreEmphasisBoundaryAfter = (
+  text: string,
+  end: number,
+): boolean => end >= text.length || !/[\\*\w]/.test(text[end] ?? "");
+
 /**
  * Replace `[label](destination)` / `![alt](destination)` with the label/alt,
  * allowing balanced parentheses inside the destination
@@ -1229,7 +1255,7 @@ const replaceMarkdownLinksWithLabels = (text: string, images: boolean): string =
     }
     out += text.slice(i, open);
     const labelStart = open + (images ? 2 : 1);
-    const labelEnd = text.indexOf("]", labelStart);
+    const labelEnd = findNoteMarkdownUnescapedIndex(text, "]", labelStart);
     if (labelEnd === -1 || text[labelEnd + 1] !== "(") {
       out += text.slice(open, open + (images ? 2 : 1));
       i = open + (images ? 2 : 1);
@@ -1353,7 +1379,8 @@ const protectMarkdownLinkDestinations = (
     }
     out += text.slice(i, open);
     const labelStart = open + (images ? 2 : 1);
-    const labelEnd = text.indexOf("]", labelStart);
+    // Escaped `\]` is a literal label character, not the label terminator.
+    const labelEnd = findNoteMarkdownUnescapedIndex(text, "]", labelStart);
     if (labelEnd === -1 || text[labelEnd + 1] !== "(") {
       out += text.slice(open, open + (images ? 2 : 1));
       i = open + (images ? 2 : 1);
@@ -1471,7 +1498,10 @@ const canonicalizeNoteMarkdownHarmlessPunctuationEscapes = (text: string): strin
   text.replace(/([A-Za-z0-9])\\_([A-Za-z0-9])/g, "$1_$2")
 );
 
-/** Strong emphasis: __x__ → **x**; both delimiter runs must be unescaped. */
+/**
+ * Strong emphasis: __x__ → **x**; both delimiter runs must be unescaped and
+ * satisfy underscore flanking boundaries (so `__x__y` stays literal).
+ */
 const canonicalizeNoteMarkdownStrongEmphasis = (text: string): string => (
   text.replace(
     /(__)(?=\S)([\s\S]*?\S)\1/g,
@@ -1479,6 +1509,12 @@ const canonicalizeNoteMarkdownStrongEmphasis = (text: string): string => (
       if (isNoteMarkdownIndexEscaped(source, offset)) return match;
       const closeOffset = offset + 2 + content.length;
       if (isNoteMarkdownIndexEscaped(source, closeOffset)) return match;
+      if (!isNoteMarkdownUnderscoreEmphasisBoundaryBefore(source, offset)) {
+        return match;
+      }
+      if (!isNoteMarkdownUnderscoreEmphasisBoundaryAfter(source, closeOffset + 2)) {
+        return match;
+      }
       return `**${content}**`;
     },
   )
