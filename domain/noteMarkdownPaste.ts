@@ -109,13 +109,23 @@ const getLexicalInlineMarkdownFormatStack = (
   return stack;
 };
 
+/**
+ * Escape phrasing punctuation so Lexical rendered text round-trips to source
+ * Markdown (`**Hello \*world\***`, not `**Hello *world***`). Mirrors the
+ * always-on mdast-util-to-markdown phrasing unsafe set (`*`, `_`, `` ` ``, `[`,
+ * and GFM `~`).
+ */
+const escapeNoteMarkdownPhrasingText = (text: string): string =>
+  text.replace(/([`*_\[~])/g, "\\$1");
+
 const applyLexicalInlineMarkdownFormats = (
   text: string,
   formatSource: { hasFormat: (type: NoteMarkdownPasteTextFormat) => boolean },
 ): string => {
   if (!text) return text;
   const stack = getLexicalInlineMarkdownFormatStack(formatSource);
-  let formatted = text;
+  // Code spans keep literal punctuation; emphasis markers wrap escaped text.
+  let formatted = stack[0] === "code" ? text : escapeNoteMarkdownPhrasingText(text);
   for (let i = stack.length - 1; i >= 0; i -= 1) {
     const markers = NOTE_MARKDOWN_PASTE_INLINE_FORMAT_MARKERS[stack[i]];
     formatted = `${markers.open}${formatted}${markers.close}`;
@@ -396,15 +406,19 @@ const serializeLexicalBlockInlineMarkdown = (
 
     const text = getSelectedLexicalTextNodeContent(node, selection);
     if (!text) continue;
+    const desiredFormats = getLexicalInlineMarkdownFormatStack(node);
+    const escapedText = desiredFormats[0] === "code"
+      ? text
+      : escapeNoteMarkdownPhrasingText(text);
     const link = findLexicalLinkAncestor(node);
     if (!link) {
       flushLink();
       syncLexicalInlineMarkdownFormatStack(
         formatStack,
-        getLexicalInlineMarkdownFormatStack(node),
+        desiredFormats,
         outerOutput,
       );
-      markdown += text;
+      markdown += escapedText;
       continue;
     }
     const linkKey = getLexicalNodeKey(link, link.getURL());
@@ -415,10 +429,10 @@ const serializeLexicalBlockInlineMarkdown = (
     }
     syncLexicalInlineMarkdownFormatStack(
       formatStack,
-      getLexicalInlineMarkdownFormatStack(node),
+      desiredFormats,
       labelOutput,
     );
-    linkBuffer.label += text;
+    linkBuffer.label += escapedText;
   }
   flushLink();
   closeInlineFormats();
@@ -466,14 +480,96 @@ const serializeLexicalSelectionNodesAsMarkdown = (
   return joined;
 };
 
-const flattenMdastPlainText = (node: unknown): string => {
-  if (node == null) return "";
-  if (typeof node === "string") return node;
-  if (typeof node !== "object") return "";
-  const record = node as { value?: unknown; children?: unknown };
-  if (typeof record.value === "string") return record.value;
-  if (!Array.isArray(record.children)) return "";
-  return record.children.map(flattenMdastPlainText).join("");
+const isMdastRecord = (
+  node: unknown,
+): node is {
+  type?: unknown;
+  value?: unknown;
+  url?: unknown;
+  title?: unknown;
+  children?: unknown;
+} => typeof node === "object" && node !== null;
+
+const formatMdastInlineCode = (value: string): string => {
+  // Prefer a fence longer than any run of backticks inside the value.
+  let fence = "`";
+  while (value.includes(fence)) fence += "`";
+  const pad = value.startsWith("`") || value.endsWith("`") || value.includes("\n")
+    ? " "
+    : "";
+  return `${fence}${pad}${value}${pad}${fence}`;
+};
+
+/**
+ * Serialize MDAST phrasing (table cells, etc.) so inline marks survive for
+ * selection-scoped identical-replace checks.
+ */
+const serializeMdastPhrasingAsMarkdown = (nodes: readonly unknown[]): string => {
+  let markdown = "";
+  for (const node of nodes) {
+    if (typeof node === "string") {
+      markdown += escapeNoteMarkdownPhrasingText(node);
+      continue;
+    }
+    if (!isMdastRecord(node)) continue;
+    const type = typeof node.type === "string" ? node.type : "";
+    const children = Array.isArray(node.children) ? node.children : [];
+    if (type === "text") {
+      markdown += escapeNoteMarkdownPhrasingText(
+        typeof node.value === "string" ? node.value : "",
+      );
+      continue;
+    }
+    if (type === "strong") {
+      markdown += `**${serializeMdastPhrasingAsMarkdown(children)}**`;
+      continue;
+    }
+    if (type === "emphasis") {
+      markdown += `*${serializeMdastPhrasingAsMarkdown(children)}*`;
+      continue;
+    }
+    if (type === "delete") {
+      markdown += `~~${serializeMdastPhrasingAsMarkdown(children)}~~`;
+      continue;
+    }
+    if (type === "inlineCode") {
+      markdown += formatMdastInlineCode(
+        typeof node.value === "string" ? node.value : "",
+      );
+      continue;
+    }
+    if (type === "link" && typeof node.url === "string") {
+      const title = typeof node.title === "string" ? node.title : null;
+      markdown += formatLexicalLinkMarkdown(
+        serializeMdastPhrasingAsMarkdown(children),
+        node.url,
+        title,
+      );
+      continue;
+    }
+    if (type === "break") {
+      markdown += "  \n";
+      continue;
+    }
+    if (typeof node.value === "string") {
+      markdown += escapeNoteMarkdownPhrasingText(node.value);
+      continue;
+    }
+    if (children.length > 0) {
+      markdown += serializeMdastPhrasingAsMarkdown(children);
+    }
+  }
+  return markdown;
+};
+
+const serializeMdastTableCellAsMarkdown = (cell: unknown): string => {
+  if (!isMdastRecord(cell)) return "";
+  const children = Array.isArray(cell.children) ? cell.children : [];
+  const text = serializeMdastPhrasingAsMarkdown(children)
+    .replace(/\r\n?/g, "\n")
+    .replace(/\|/g, "\\|");
+  // Pipe tables are single-line cells in the clipboard form we accept.
+  return text.replace(/\n+/g, " ").trim();
 };
 
 /**
@@ -484,11 +580,7 @@ export const serializeMdastTableAsMarkdown = (
   table: NoteMarkdownPasteMdastTable | null | undefined,
 ): string | null => {
   const rows = (table?.children ?? [])
-    .map((row) => (row.children ?? []).map((cell) => {
-      const text = flattenMdastPlainText(cell).replace(/\r\n?/g, "\n").replace(/\|/g, "\\|");
-      // Pipe tables are single-line cells in the clipboard form we accept.
-      return text.replace(/\n+/g, " ").trim();
-    }))
+    .map((row) => (row.children ?? []).map((cell) => serializeMdastTableCellAsMarkdown(cell)))
     .filter((row) => row.length > 0);
   if (rows.length === 0) return null;
   const colCount = Math.max(...rows.map((row) => row.length));
@@ -960,10 +1052,15 @@ export const didNoteMarkdownPasteApply = (input: {
   const selectedMarkdown = input.selectedMarkdown?.replace(/\r\n?/g, "\n") ?? null;
   if (selectedMarkdown !== null && selectedMarkdown.length > 0) {
     const selectedNorm = normalizeNoteMarkdownForEquivalence(selectedMarkdown);
-    const index = beforeNorm.indexOf(selectedNorm);
-    if (index !== -1) {
+    // Walk every occurrence: the selection may be the 2nd/3rd match of the same
+    // fragment (`**old**` … `**old**`), and first-index replacement would miss.
+    let searchFrom = 0;
+    while (searchFrom <= beforeNorm.length) {
+      const index = beforeNorm.indexOf(selectedNorm, searchFrom);
+      if (index === -1) break;
       const expected = `${beforeNorm.slice(0, index)}${clipboardNorm}${beforeNorm.slice(index + selectedNorm.length)}`;
       if (afterNorm === expected) return true;
+      searchFrom = index + 1;
     }
   }
 

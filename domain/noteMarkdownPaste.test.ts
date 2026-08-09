@@ -170,6 +170,22 @@ test("selection markdown serialization scopes bold and link formatting", () => {
     }),
     "**Hello**",
   );
+  // Literal Markdown punctuation in Lexical text must be escaped so identical
+  // replace checks see source spelling (`\*world\*`), not rendered markers.
+  assert.equal(
+    serializeLexicalSelectionAsMarkdown("Hello *world*", {
+      hasFormat: (type) => type === "bold",
+      anchor: plainAnchor,
+    }),
+    "**Hello \\*world\\***",
+  );
+  assert.equal(
+    serializeLexicalSelectionAsMarkdown("**Hello**", {
+      hasFormat: () => false,
+      anchor: plainAnchor,
+    }),
+    "\\*\\*Hello\\*\\*",
+  );
   assert.equal(
     serializeLexicalSelectionAsMarkdown("Hello", {
       hasFormat: (type) => type === "bold" || type === "italic",
@@ -1056,6 +1072,42 @@ test("unchanged insert recovery skips identical replacements but recovers lost-s
     }),
     false,
   );
+  // Formatted / linked table cells must keep inline Markdown (not plain "A").
+  const formattedTableMarkdown = serializeMdastTableAsMarkdown({
+    children: [
+      {
+        children: [
+          { children: [{ type: "strong", children: [{ type: "text", value: "A" }] }] },
+          {
+            children: [{
+              type: "link",
+              url: "https://x.test",
+              children: [{ type: "text", value: "B" }],
+            }],
+          },
+        ],
+      },
+      {
+        children: [
+          { children: [{ type: "text", value: "1" }] },
+          { children: [{ type: "text", value: "2" }] },
+        ],
+      },
+    ],
+  });
+  assert.equal(
+    formattedTableMarkdown,
+    "| **A** | [B](https://x.test) |\n| --- | --- |\n| 1 | 2 |",
+  );
+  assert.equal(
+    shouldRecoverNoteMarkdownPasteAfterUnchangedInsert({
+      beforeMarkdown: `intro\n\n${formattedTableMarkdown}\n\noutro`,
+      clipboardText: "| **A** | [B](https://x.test) |\n| --- | --- |\n| 1 | 2 |",
+      selectedText: noteMarkdownClipboardToPlainText(formattedTableMarkdown ?? ""),
+      selectedMarkdown: formattedTableMarkdown,
+    }),
+    false,
+  );
 });
 
 test("didNoteMarkdownPasteApply distinguishes paste success from concurrent edits", () => {
@@ -1097,6 +1149,18 @@ test("didNoteMarkdownPasteApply distinguishes paste success from concurrent edit
       clipboardText: "---",
       selectedText: "",
       selectedMarkdown: "***",
+    }),
+    true,
+  );
+  // Replacing a later duplicate of the selected fragment must still count as
+  // success (first-occurrence rewrite would not match the editor result).
+  assert.equal(
+    didNoteMarkdownPasteApply({
+      beforeMarkdown: "**new** / **old** / **old**",
+      afterMarkdown: "**new** / **old** / **new**",
+      clipboardText: "**new**",
+      selectedText: "old",
+      selectedMarkdown: "**old**",
     }),
     true,
   );
