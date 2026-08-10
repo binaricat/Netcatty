@@ -516,7 +516,7 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                                         hostCardFocusClassName(viewMode, isHostFocusSelected(host.id)),
                                       )
                                       : cn(
-                                        "h-14 px-2 py-2 rounded-lg transition-colors",
+                                        "h-14 max-w-[480px] px-2 py-2 rounded-lg transition-colors",
                                         isHostFocusSelected(host.id)
                                           ? hostCardFocusClassName("list", true)
                                           : "hover:bg-secondary/60",
@@ -640,7 +640,7 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                                         hostCardFocusClassName(viewMode, isHostFocusSelected(host.id)),
                                       )
                                       : cn(
-                                        "h-14 px-2 py-2 rounded-lg transition-colors",
+                                        "h-14 max-w-[480px] px-2 py-2 rounded-lg transition-colors",
                                         isHostFocusSelected(host.id)
                                           ? hostCardFocusClassName("list", true)
                                           : "hover:bg-secondary/60",
@@ -777,7 +777,7 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                                     ),
                                   )
                                   : cn(
-                                    "h-14 px-2 py-2 rounded-lg transition-colors",
+                                    "h-14 max-w-[480px] px-2 py-2 rounded-lg transition-colors",
                                     isGroupFocusSelected(node.path) || multiSelectedGroupPaths.has(node.path)
                                       ? hostCardFocusClassName("list", true)
                                       : "hover:bg-secondary/60",
@@ -1005,7 +1005,7 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                                               hostCardFocusClassName(viewMode, isHostFocusSelected(host.id)),
                                             )
                                             : cn(
-                                              "h-14 px-2 py-2 rounded-lg transition-colors",
+                                              "h-14 max-w-[480px] px-2 py-2 rounded-lg transition-colors",
                                               isHostFocusSelected(host.id)
                                                 ? hostCardFocusClassName("list", true)
                                                 : "hover:bg-secondary/60",
@@ -1154,7 +1154,7 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                                         hostCardFocusClassName(viewMode, isHostFocusSelected(host.id)),
                                       )
                                       : cn(
-                                        "h-14 px-2 py-2 rounded-lg transition-colors",
+                                        "h-14 max-w-[480px] px-2 py-2 rounded-lg transition-colors",
                                         isHostFocusSelected(host.id)
                                           ? hostCardFocusClassName("list", true)
                                           : "hover:bg-secondary/60",
