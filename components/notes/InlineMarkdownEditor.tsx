@@ -32,6 +32,7 @@ import {
   $createRangeSelection,
   $getNearestNodeFromDOMNode,
   $getSelection,
+  $isRangeSelection,
   $isTextNode,
   $setSelection,
   getNearestEditorFromDOMNode,
@@ -237,6 +238,34 @@ export const hasActiveLexicalTextSelection = (target: EventTarget | null): boole
     hasSelection = $getSelection() !== null;
   });
   return hasSelection;
+};
+
+/**
+ * Last-resort caret paste after insertMarkdown no-ops (preventDefault already applied).
+ * Inserts clipboard text at the active Lexical range so non-empty notes are not discarded.
+ */
+export const insertClipboardTextAtActiveLexicalSelection = (
+  target: EventTarget | null,
+  text: string,
+): boolean => {
+  if (!text) return false;
+  if (typeof Element === "undefined" || typeof Node === "undefined") return false;
+  const element = target instanceof Element
+    ? target
+    : target instanceof Node
+      ? target.parentElement
+      : null;
+  if (!element) return false;
+  const lexicalEditor = getNearestEditorFromDOMNode(element);
+  if (!lexicalEditor) return false;
+  let didInsert = false;
+  lexicalEditor.update(() => {
+    const selection = $getSelection();
+    if (!$isRangeSelection(selection)) return;
+    selection.insertText(text);
+    didInsert = true;
+  });
+  return didInsert;
 };
 
 /**
@@ -1028,19 +1057,73 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
       const recoveryGeneration = ++pasteRecoveryGenerationRef.current;
       const maxAttempts = resolveNoteMarkdownPasteSettleAttempts(markdown.length);
       const emptyDoc = !before.replace(/\s+/g, "");
+      const pasteTarget = event.target;
+      // After the first insert is definitively unchanged, retry once at the
+      // selection — never mid-window (that can double-apply a merely-slow update).
+      const postFailureSettleAttempts = Math.max(
+        3,
+        Math.floor(NOTE_MARKDOWN_PASTE_SETTLE_MIN_ATTEMPTS / 2),
+      );
+
+      const recoverInterceptedPasteAtSelection = () => {
+        if (pasteRecoveryGenerationRef.current !== recoveryGeneration) return;
+        if (latestMarkdownRef.current !== before) return;
+        try {
+          editor.focus();
+          editor.insertMarkdown(markdown);
+        } catch {
+          // Fall through to Lexical text insert below after settle.
+        }
+        const tryCommitRecoveredPaste = (attempt: number) => {
+          if (pasteRecoveryGenerationRef.current !== recoveryGeneration) return;
+          if (latestMarkdownRef.current !== before) return;
+          let current = before;
+          try {
+            current = editor.getMarkdown();
+          } catch {
+            current = before;
+          }
+          if (current !== before) {
+            commitMarkdown(current);
+            return;
+          }
+          if (attempt < postFailureSettleAttempts) {
+            window.setTimeout(
+              () => tryCommitRecoveredPaste(attempt + 1),
+              NOTE_MARKDOWN_PASTE_SETTLE_POLL_MS,
+            );
+            return;
+          }
+          // insertMarkdown still no-op'd: keep caret locus via Lexical insertText.
+          if (!insertClipboardTextAtActiveLexicalSelection(pasteTarget, markdown)) return;
+          try {
+            const next = editor.getMarkdown();
+            if (next !== before) commitMarkdown(next);
+          } catch {
+            // Selection insert may not serialize; avoid discarding silently only
+            // when Lexical accepted the text (didInsert). Nothing more to commit.
+          }
+        };
+        window.setTimeout(
+          () => tryCommitRecoveredPaste(0),
+          NOTE_MARKDOWN_PASTE_SETTLE_POLL_MS,
+        );
+      };
+
       try {
         editor.focus();
         editor.insertMarkdown(markdown);
       } catch {
         // Only append when the document is empty — never jump mid-doc paste to EOF.
         if (emptyDoc) applyDocumentPaste();
+        else recoverInterceptedPasteAtSelection();
         setHostPicker((current) => ({ ...current, open: false, query: "", selectedIndex: 0 }));
         setLinkAction(null);
         return;
       }
       // insertMarkdown's Lexical update is deferred. Commit when settled; if it
-      // still no-ops after the settle window, re-try insert once, then append
-      // only for an empty document (preserve caret for non-empty notes).
+      // still no-ops after the settle window, recover at the selection (or append
+      // only for an empty document).
       const tryCommitSettledPaste = (attempt: number) => {
         if (pasteRecoveryGenerationRef.current !== recoveryGeneration) return;
         if (latestMarkdownRef.current !== before) return;
@@ -1049,22 +1132,16 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
           current = editor.getMarkdown();
         } catch {
           if (emptyDoc) applyDocumentPaste();
+          else recoverInterceptedPasteAtSelection();
           return;
         }
         if (current !== before) {
           commitMarkdown(current);
           return;
         }
-        if (attempt === Math.floor(maxAttempts / 2)) {
-          try {
-            editor.focus();
-            editor.insertMarkdown(markdown);
-          } catch {
-            // ignore; settle loop continues
-          }
-        }
         if (attempt >= maxAttempts) {
           if (emptyDoc) applyDocumentPaste();
+          else recoverInterceptedPasteAtSelection();
           return;
         }
         window.setTimeout(

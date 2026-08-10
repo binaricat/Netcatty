@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
+  insertClipboardTextAtActiveLexicalSelection,
   mergeNoteMarkdownDocumentPaste,
   NOTE_MARKDOWN_PASTE_INSERT_MAX_CHARS,
   resolveNoteMarkdownPasteSettleAttempts,
@@ -94,6 +95,11 @@ test("paste settle attempts scale with clipboard size", () => {
   assert.ok(resolveNoteMarkdownPasteSettleAttempts(100_000) >= 6);
 });
 
+test("selection paste recovery helper rejects empty text or missing target", () => {
+  assert.equal(insertClipboardTextAtActiveLexicalSelection(null, "# Heading"), false);
+  assert.equal(insertClipboardTextAtActiveLexicalSelection(null, ""), false);
+});
+
 test("InlineMarkdownEditor only preventDefaults markdown paste after a successful intercept guard", () => {
   const source = readFileSync(new URL("./InlineMarkdownEditor.tsx", import.meta.url), "utf8");
 
@@ -122,5 +128,16 @@ test("InlineMarkdownEditor only preventDefaults markdown paste after a successfu
   assert.match(
     source,
     /const currentMarkdown = editor\.getMarkdown\(\);[\s\S]*mergeNoteMarkdownDocumentPaste\(currentMarkdown, markdown\)/,
+  );
+  // Do not re-queue insertMarkdown at the settle midpoint (double-insert risk).
+  assert.doesNotMatch(
+    source,
+    /attempt === Math\.floor\(maxAttempts \/ 2\)/,
+  );
+  // Non-empty settle failure must recover at the selection, not discard after preventDefault.
+  assert.match(source, /recoverInterceptedPasteAtSelection/);
+  assert.match(
+    source,
+    /if \(attempt >= maxAttempts\)[\s\S]*emptyDoc[\s\S]*applyDocumentPaste[\s\S]*recoverInterceptedPasteAtSelection/,
   );
 });
