@@ -150,10 +150,16 @@ test("note editor enables image plugin for remote markdown images", () => {
 test("note editor exposes preview and edit modes with a markdown toolbar in edit mode", () => {
   const source = readFileSync(new URL("./InlineMarkdownEditor.tsx", import.meta.url), "utf8");
   const managerSource = readFileSync(new URL("./NotesManager.tsx", import.meta.url), "utf8");
+  const previewSource = readFileSync(new URL("./NoteMarkdownPreview.tsx", import.meta.url), "utf8");
 
   assert.match(source, /type NoteEditorMode = "edit" \| "preview"/);
   assert.match(source, /toolbarPlugin\(\{\s*toolbarContents:/s);
-  assert.match(source, /readOnly=\{editorMode === "preview"\}/);
+  // Preview is Streamdown (not MDX readOnly dual-mount).
+  assert.match(source, /NoteMarkdownPreview/);
+  assert.match(source, /editorMode === "preview"/);
+  assert.match(previewSource, /from "streamdown"/);
+  assert.match(previewSource, /mode="static"/);
+  assert.match(previewSource, /data-note-preview-engine="streamdown"/);
   assert.match(source, /<BlockTypeSelect \/>/);
   assert.match(source, /<BoldItalicUnderlineToggles /);
   assert.match(source, /<ListsToggle /);
@@ -349,19 +355,17 @@ test("annotateNoteCodeBlockCopyButtons adds a copy action to code blocks", () =>
   assert.match(source, /onCopy\(text\)/);
 });
 
-test("note code blocks expose a hover copy action only in preview mode", () => {
+test("note preview uses Streamdown code controls; edit keeps MDX code chrome", () => {
   const source = readFileSync(new URL("./InlineMarkdownEditor.tsx", import.meta.url), "utf8");
+  const previewSource = readFileSync(new URL("./NoteMarkdownPreview.tsx", import.meta.url), "utf8");
   const styles = readFileSync(new URL("../../index.css", import.meta.url), "utf8");
 
   assert.match(source, /removeNoteCodeBlockCopyButtons/);
-  // Preview-only copy buttons live in the coalesced decoration pass.
-  assert.match(
-    source,
-    /if \(editorMode === "preview"\) \{\s*\n\s*annotateCodeBlockCopyButtons\(\);\s*\n\s*\} else \{\s*\n\s*removeNoteCodeBlockCopyButtons/,
-  );
+  // Preview: Streamdown built-in copy; edit: strip CM copy chrome.
+  assert.match(previewSource, /code:\s*\{\s*copy:\s*true/);
+  assert.match(source, /if \(editorMode === "edit"\)/);
+  assert.match(source, /removeNoteCodeBlockCopyButtons\(container\)/);
   assert.match(source, /annotateNoteCodeBlockCopyButtons/);
-  assert.match(source, /notes\.codeBlock\.copied/);
-  assert.match(source, /copyFailedLabel/);
   assert.match(source, /MutationObserver/);
   assert.match(source, /setAttribute\("aria-label", copiedLabel\)/);
   assert.match(styles, /\.netcatty-note-code-copy/);

@@ -1815,20 +1815,33 @@ html[data-theme-transition] *::after {
 }
 
 /*
+ * Streamdown note preview: reuse MDX content image/prose rules via
+ * .netcatty-mdx-content; hide Streamdown download chrome we disable in controls.
+ */
+.netcatty-note-markdown-preview [data-streamdown="code-block-actions"] button[data-streamdown="download"],
+.netcatty-note-markdown-preview [data-streamdown="table-wrapper"] > div:first-child {
+  display: none !important;
+}
+
+/*
  * Preserve README-style center alignment from paste
  * (<div align="center"> / align=center / text-align:center).
  */
 .netcatty-mdx-content [align="center"],
 .netcatty-mdx-editor [align="center"],
+.netcatty-note-markdown-preview [align="center"],
 .netcatty-mdx-content [style*="text-align:center"],
 .netcatty-mdx-content [style*="text-align: center"],
 .netcatty-mdx-editor [style*="text-align:center"],
-.netcatty-mdx-editor [style*="text-align: center"] {
+.netcatty-mdx-editor [style*="text-align: center"],
+.netcatty-note-markdown-preview [style*="text-align:center"],
+.netcatty-note-markdown-preview [style*="text-align: center"] {
   text-align: center !important;
 }
 
 .netcatty-mdx-content [align="center"] img,
 .netcatty-mdx-editor [align="center"] img,
+.netcatty-note-markdown-preview [align="center"] img,
 .netcatty-mdx-content [align="center"] [class*="_imageWrapper_"],
 .netcatty-mdx-editor [align="center"] [class*="_imageWrapper_"],
 .netcatty-mdx-content [align="center"] [data-editor-block-type="image"],

@@ -37,11 +37,9 @@ import {
   $setSelection,
   getNearestEditorFromDOMNode,
 } from "lexical";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useI18n } from "../../application/i18n/I18nProvider";
+import React, { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { resolveRenderedMarkdownLinkHref } from "../../domain/notes";
 import { buildSshNoteLinkOpenHost } from "../../domain/sshDeepLink";
-import { copyToClipboard } from "../keychain/utils";
 import { toast } from "../ui/toast";
 import { cn } from "../../lib/utils";
 import { FixedSizeVirtualList, type FixedSizeVirtualListHandle } from "../ui/FixedSizeVirtualList";
@@ -51,6 +49,18 @@ import {
   shouldInsertClipboardTextAsMarkdown,
   shouldInterceptResolvedNotePaste,
 } from "./noteClipboardPaste";
+import { annotateNoteImageSizes } from "./noteImageLayout";
+
+export {
+  annotateNoteImageSizes,
+  isNoteSmallImageWidth,
+  NOTE_SMALL_IMAGE_MAX_WIDTH,
+} from "./noteImageLayout";
+
+/** Preview uses Streamdown (no Lexical). Lazy so edit path does not pay for it. */
+const NoteMarkdownPreview = lazy(() =>
+  import("./NoteMarkdownPreview").then((module) => ({ default: module.NoteMarkdownPreview })),
+);
 
 export {
   shouldInsertClipboardTextAsMarkdown,
@@ -441,54 +451,6 @@ export const linkActionStatesEqual = (
     && a.top === b.top;
 };
 
-/** Compact README-style icons (width ≤ 96). CSS uses data-note-img-size instead of :has(). */
-export const NOTE_SMALL_IMAGE_MAX_WIDTH = 96;
-
-export const isNoteSmallImageWidth = (widthRaw: string | number | null | undefined): boolean => {
-  const width = typeof widthRaw === "number" ? widthRaw : Number(String(widthRaw ?? "").trim());
-  return Number.isFinite(width) && width > 0 && width <= NOTE_SMALL_IMAGE_MAX_WIDTH;
-};
-
-/**
- * Mark compact images so CSS can lay out badge rows without hundreds of :has()
- * width selectors. Also enable lazy loading for remote images.
- */
-export const annotateNoteImageSizes = (container: HTMLElement): void => {
-  container.querySelectorAll("img").forEach((node) => {
-    if (!(node instanceof HTMLImageElement)) return;
-    const isSmall = isNoteSmallImageWidth(node.getAttribute("width"));
-
-    if (isSmall) {
-      node.dataset.noteImgSize = "sm";
-    } else {
-      delete node.dataset.noteImgSize;
-    }
-
-    // Prefer browser-native lazy decode for remote screenshots / badges.
-    if (node.getAttribute("src") && !node.getAttribute("loading")) {
-      node.loading = "lazy";
-    }
-    if (!node.getAttribute("decoding")) {
-      node.decoding = "async";
-    }
-
-    const wrappers: HTMLElement[] = [];
-    const block = node.closest<HTMLElement>("[data-editor-block-type=\"image\"]");
-    if (block) wrappers.push(block);
-    const imageWrapper = node.closest<HTMLElement>("[class*=\"_imageWrapper_\"]");
-    if (imageWrapper && imageWrapper !== block) wrappers.push(imageWrapper);
-    const parent = node.parentElement;
-    if (parent?.tagName === "P" && parent.childElementCount === 1) {
-      wrappers.push(parent);
-    }
-
-    for (const wrapper of wrappers) {
-      if (isSmall) wrapper.dataset.noteImgSize = "sm";
-      else delete wrapper.dataset.noteImgSize;
-    }
-  });
-};
-
 export const getHostPickerTriggerRange = (textBeforeCursor: string): {
   query: string;
   startOffset: number;
@@ -624,7 +586,6 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
   onOpenExternalLink,
   previewEmptyLabel,
 }: InlineMarkdownEditorProps) {
-  const { t } = useI18n();
   const editorRef = useRef<MDXEditorMethods>(null);
   const latestMarkdownRef = useRef(value);
   const syncedPropValueRef = useRef(value);
@@ -828,22 +789,9 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
     });
   }, []);
 
-  const annotateCodeBlockCopyButtons = useCallback(() => {
-    const container = containerRef.current;
-    if (!container) return;
-
-    annotateNoteCodeBlockCopyButtons(container, {
-      copyLabel: t("action.copy"),
-      copiedLabel: t("notes.codeBlock.copied"),
-      copyFailedLabel: t("notes.codeBlock.copyFailed"),
-      onCopy: copyToClipboard,
-    });
-  }, [t]);
-
-  // DOM decoration: host-link titles, compact image markers, preview copy buttons.
-  // - Preview: rAF-coalesce mutations (static doc, need CM/image mounts).
-  // - Edit: debounce mutations so Lexical keystrokes do not re-walk the tree every frame;
-  //   still re-annotates after paste / image / code-block mounts settle.
+  // DOM decoration: host-link titles, compact image markers, edit-mode code copy.
+  // - Preview (Streamdown): host-link titles only; code copy + images handled inside preview.
+  // - Edit (MDX/Lexical): debounce mutations so keystrokes do not re-walk every frame.
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -853,13 +801,11 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
     const EDIT_DECORATION_DEBOUNCE_MS = 180;
 
     const runDecorations = (includeHostLinks: boolean) => {
-      annotateNoteImageSizes(container);
-      if (includeHostLinks) annotateHostLinks();
-      if (editorMode === "preview") {
-        annotateCodeBlockCopyButtons();
-      } else {
+      if (editorMode === "edit") {
+        annotateNoteImageSizes(container);
         removeNoteCodeBlockCopyButtons(container);
       }
+      if (includeHostLinks) annotateHostLinks();
     };
 
     const scheduleFromMutation = () => {
@@ -867,13 +813,11 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
         if (frame) return;
         frame = window.requestAnimationFrame(() => {
           frame = 0;
-          // Preview: host links can appear when Lexical finishes mounting.
+          // Streamdown mounts anchors asynchronously; re-title host links.
           runDecorations(true);
         });
         return;
       }
-      // Edit: images/code blocks arrive in bursts (paste); host links only need a
-      // periodic pass — skip per-keystroke anchor resolution.
       if (debounceTimer) window.clearTimeout(debounceTimer);
       debounceTimer = window.setTimeout(() => {
         debounceTimer = 0;
@@ -881,7 +825,6 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
       }, EDIT_DECORATION_DEBOUNCE_MS);
     };
 
-    // Initial full pass (host links + sizes + preview chrome).
     runDecorations(true);
 
     const observer = new MutationObserver(scheduleFromMutation);
@@ -892,7 +835,7 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
       if (debounceTimer) window.clearTimeout(debounceTimer);
       removeNoteCodeBlockCopyButtons(container);
     };
-  }, [annotateCodeBlockCopyButtons, annotateHostLinks, editorMode]);
+  }, [annotateHostLinks, editorMode]);
 
   // Host list identity can change while a note stays open (vault refresh).
   useEffect(() => {
@@ -1339,19 +1282,33 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
             </div>
         </div>
       )}
-      {editorMode === "preview" && !value.trim() ? (
-        <div className="netcatty-note-preview-empty">
-          {previewEmptyLabel ?? placeholder}
-        </div>
+      {editorMode === "preview" ? (
+        !value.trim() ? (
+          <div className="netcatty-note-preview-empty">
+            {previewEmptyLabel ?? placeholder}
+          </div>
+        ) : (
+          <Suspense
+            fallback={(
+              <div
+                className="netcatty-mdx-content min-h-[12rem] whitespace-pre-wrap break-words text-[15px] leading-[1.75] text-foreground/90"
+                aria-hidden="true"
+              >
+                {value.slice(0, 2_000)}
+              </div>
+            )}
+          >
+            <NoteMarkdownPreview markdown={value} />
+          </Suspense>
+        )
       ) : (
         <MDXEditor
-          key={editorMode}
           ref={editorRef}
           markdown={value}
           placeholder={placeholder}
           plugins={plugins}
-          readOnly={editorMode === "preview"}
-          className={cn("netcatty-mdx-editor", editorMode === "preview" && "netcatty-mdx-editor--preview")}
+          readOnly={false}
+          className="netcatty-mdx-editor"
           contentEditableClassName="netcatty-mdx-content"
           onChange={commitMarkdown}
         />

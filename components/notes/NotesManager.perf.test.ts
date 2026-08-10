@@ -89,8 +89,13 @@ test("host-link annotation does not re-run on every markdown value keystroke", (
   );
   assert.match(
     editorSource,
-    /\[annotateCodeBlockCopyButtons, annotateHostLinks, editorMode\]/,
-    "DOM decoration is coalesced and independent of markdown value identity",
+    /\[annotateHostLinks, editorMode\]/,
+    "DOM decoration is independent of markdown value identity",
+  );
+  assert.match(
+    editorSource,
+    /NoteMarkdownPreview/,
+    "preview must not remount full MDXEditor/Lexical for read-only notes",
   );
   assert.match(
     editorSource,
@@ -110,10 +115,14 @@ test("link hover and small-image CSS avoid render thrash", () => {
   );
   const cssSource = readFileSync(new URL("../../index.css", import.meta.url), "utf8");
 
+  const imageLayoutSource = readFileSync(
+    new URL("./noteImageLayout.ts", import.meta.url),
+    "utf8",
+  );
   assert.match(editorSource, /linkActionStatesEqual/);
   assert.match(editorSource, /setLinkActionIfChanged/);
   assert.match(editorSource, /annotateNoteImageSizes/);
-  assert.match(editorSource, /data-note-img-size/);
+  assert.match(imageLayoutSource, /data-note-img-size/);
   // No combinatorial :has(img[width="N"]) matrix for small icons.
   assert.doesNotMatch(
     cssSource,
