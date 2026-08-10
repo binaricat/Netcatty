@@ -53,6 +53,12 @@ test("toggleTaskListItemAtIndex handles blockquote task lines", () => {
   assert.match(toggleTaskListItemAtIndex(src, 0), /^> - \[x\] quoted$/m);
 });
 
+test("toggleTaskListItemAtIndex recognizes parenthesized ordered markers", () => {
+  const src = "1) [ ] first\n2. [ ] second";
+  assert.equal(countTaskListItems(src), 2);
+  assert.match(toggleTaskListItemAtIndex(src, 0), /^1\) \[x\] first$/m);
+});
+
 test("isPointerOnTaskCheckbox only accepts the left hit box", () => {
   const rect = { left: 100, right: 400 };
   assert.equal(isPointerOnTaskCheckbox(rect, 100), true);

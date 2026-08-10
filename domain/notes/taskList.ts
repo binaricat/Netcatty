@@ -7,12 +7,12 @@
 import { maskCodeRegions, unmaskCodeRegions } from "./clipboardPaste";
 
 /**
- * Matches "- [ ]", "* [x]", "1. [X]", and optional blockquote prefixes
- * (`> - [ ]`) at line start. Code regions are masked before matching so fence
- * contents never steal a DOM checkbox index.
+ * Matches "- [ ]", "* [x]", "1. [X]", "1) [ ]", and optional blockquote
+ * prefixes (`> - [ ]`) at line start. Code regions are masked before matching
+ * so fence contents never steal a DOM checkbox index.
  */
 const TASK_LIST_ITEM_PATTERN =
-  "^([ \\t]*(?:>[ \\t]*)*(?:[-*+]|\\d+\\.)[ \\t]+)\\[([ xX])\\]";
+  "^([ \\t]*(?:>[ \\t]*)*(?:[-*+]|\\d+[.)])[ \\t]+)\\[([ xX])\\]";
 
 const createTaskListItemRe = (): RegExp => new RegExp(TASK_LIST_ITEM_PATTERN, "gm");
 

@@ -7,7 +7,9 @@ import {
   convertHtmlImgTagToMarkdownOrHtml,
   convertHtmlIslandsInMarkdown,
   decodeHtmlEntities,
+  maskCodeRegions,
   normalizeLinkedBadgeImages,
+  normalizeNotePublicAssetPaths,
   normalizePastedNoteMarkdown,
   plainMarkdownContainsHtml,
   resolveNoteClipboardPaste,
@@ -436,4 +438,46 @@ test("linked badge examples inside fenced code are not rewritten", () => {
   const md = normalizePastedNoteMarkdown(source);
   assert.match(md, /```md\n\[!\[shield\]\(http:\/\/img\.shields\.io/);
   assert.match(md, /!\[live\]\(https:\/\/img\.shields\.io/);
+});
+
+test("img getAttr prefers real src over data-src", () => {
+  const md = convertHtmlImgTagToMarkdownOrHtml(
+    '<img data-src="https://lazy.example/x.png" src="https://real.example/y.png" alt="pic" />',
+  );
+  assert.match(md, /real\.example\/y\.png/);
+  assert.doesNotMatch(md, /lazy\.example/);
+});
+
+test("normalizeNotePublicAssetPaths leaves public/ samples inside code alone", () => {
+  const source = [
+    "See `public/icon.png` and:",
+    "",
+    "```md",
+    "![x](public/icon.png)",
+    "```",
+    "",
+    "![live](public/icon.png)",
+  ].join("\n");
+  const md = normalizeNotePublicAssetPaths(source);
+  assert.match(md, /`public\/icon\.png`/);
+  assert.match(md, /```md\n!\[x\]\(public\/icon\.png\)/);
+  assert.match(md, /!\[live\]\(\/icon\.png\)/);
+});
+
+test("maskCodeRegions covers indented and blockquote fences", () => {
+  const source = [
+    "  ```md",
+    "  - [ ] fake",
+    "  ```",
+    "",
+    "> ```",
+    "> - [ ] quoted-fake",
+    "> ```",
+    "",
+    "- [ ] real",
+  ].join("\n");
+  const { text } = maskCodeRegions(source);
+  assert.doesNotMatch(text, /- \[ \] fake/);
+  assert.doesNotMatch(text, /- \[ \] quoted-fake/);
+  assert.match(text, /- \[ \] real/);
 });

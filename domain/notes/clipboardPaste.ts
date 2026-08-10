@@ -260,13 +260,16 @@ export const normalizeImageSrc = (src: string): string | null => {
  * Rewrite Vite public-dir URLs in markdown/HTML so the browser never requests /public/*.
  *   /public/foo.png → /foo.png
  *   public/foo.png  → /foo.png
+ * Only outside fenced/indented/inline code so docs samples stay literal.
  */
-export const normalizeNotePublicAssetPaths = (markdown: string): string => {
-  let body = markdown;
-  body = body.replace(/(\bsrc\s*=\s*["'])\/?public\//gi, "$1/");
-  body = body.replace(/\]\(\s*\/?public\//gi, "](/");
-  return body;
-};
+export const normalizeNotePublicAssetPaths = (markdown: string): string => (
+  mapOutsideCode(markdown, (plain) => {
+    let body = plain;
+    body = body.replace(/((?:^|\s)src\s*=\s*["'])\/?public\//gi, "$1/");
+    body = body.replace(/\]\(\s*\/?public\//gi, "](/");
+    return body;
+  })
+);
 
 const escapeHtmlAttr = (value: string): string => (
   value
@@ -370,8 +373,9 @@ export const convertHtmlImgTagToMarkdownOrHtml = (imgTag: string): string => {
   }
   const attrBlob = open.replace(/^<img\b/i, "").replace(/\/?>$/, "");
   const getAttr = (name: string): string => {
+    // Require a real attribute boundary so `data-src` does not match `src`.
     const re = new RegExp(
-      `\\b${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`,
+      `(?:^|[\\s"'/])${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`,
       "i",
     );
     const m = re.exec(attrBlob);
@@ -465,9 +469,10 @@ export const maskCodeRegions = (markdown: string): CodeMask => {
 
   let body = markdown;
 
-  // Fenced code: ``` or ~~~ with 3+ fence chars (GFM allows longer fences).
+  // Fenced code: ``` or ~~~ with 3+ fence chars. Allow up to 3 leading spaces
+  // and optional blockquote markers so nested/indented fences are protected.
   body = body.replace(
-    /(?<=^|\n)(`{3,}|~{3,})[^\n]*\n[\s\S]*?\n\1[ \t]*(?=\n|$)/g,
+    /(?<=^|\n)((?:[ \t]{0,3}>[ \t]?)?[ \t]{0,3})(`{3,}|~{3,})([^\n]*)\n([\s\S]*?)\n(?:(?:[ \t]{0,3}>[ \t]?)?[ \t]{0,3})\2[ \t]*(?=\n|$)/g,
     (match) => stash(match),
   );
 
