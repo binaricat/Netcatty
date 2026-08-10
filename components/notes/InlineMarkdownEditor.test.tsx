@@ -154,12 +154,12 @@ test("note editor exposes preview and edit modes with a markdown toolbar in edit
 
   assert.match(source, /type NoteEditorMode = "edit" \| "preview"/);
   assert.match(source, /toolbarPlugin\(\{\s*toolbarContents:/s);
-  // Preview is Streamdown (not MDX readOnly dual-mount).
+  // Preview is GitHub-style react-markdown (not MDX readOnly dual-mount).
   assert.match(source, /NoteMarkdownPreview/);
   assert.match(source, /editorMode === "preview"/);
-  assert.match(previewSource, /from "streamdown"/);
-  assert.match(previewSource, /mode="static"/);
-  assert.match(previewSource, /data-note-preview-engine="streamdown"/);
+  assert.match(previewSource, /from "react-markdown"/);
+  assert.match(previewSource, /github-markdown-css/);
+  assert.match(previewSource, /data-note-preview-engine="github-markdown"/);
   assert.match(source, /<BlockTypeSelect \/>/);
   assert.match(source, /<BoldItalicUnderlineToggles /);
   assert.match(source, /<ListsToggle /);
@@ -355,20 +355,21 @@ test("annotateNoteCodeBlockCopyButtons adds a copy action to code blocks", () =>
   assert.match(source, /onCopy\(text\)/);
 });
 
-test("note preview uses Streamdown code controls; edit keeps MDX code chrome", () => {
+test("note preview uses GitHub markdown body; edit keeps MDX code chrome", () => {
   const source = readFileSync(new URL("./InlineMarkdownEditor.tsx", import.meta.url), "utf8");
   const previewSource = readFileSync(new URL("./NoteMarkdownPreview.tsx", import.meta.url), "utf8");
   const styles = readFileSync(new URL("../../index.css", import.meta.url), "utf8");
 
   assert.match(source, /removeNoteCodeBlockCopyButtons/);
-  // Preview: Streamdown built-in copy; edit: strip CM copy chrome.
-  assert.match(previewSource, /code:\s*\{\s*copy:\s*true/);
+  assert.match(previewSource, /markdown-body/);
+  assert.match(previewSource, /react-markdown/);
   assert.match(source, /if \(editorMode === "edit"\)/);
   assert.match(source, /removeNoteCodeBlockCopyButtons\(container\)/);
   assert.match(source, /annotateNoteCodeBlockCopyButtons/);
   assert.match(source, /MutationObserver/);
   assert.match(source, /setAttribute\("aria-label", copiedLabel\)/);
   assert.match(styles, /\.netcatty-note-code-copy/);
+  assert.match(styles, /\.netcatty-note-github-preview\.markdown-body/);
   assert.match(
     styles,
     /\.netcatty-mdx-editor\s+\[class\*="_codeMirrorWrapper_"\]:hover\s+\.netcatty-note-code-copy/s,

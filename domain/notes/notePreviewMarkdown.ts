@@ -1,14 +1,14 @@
 /**
- * Prepare stored note markdown for Streamdown (remark) preview.
+ * Prepare stored vault-note markdown for GitHub-style static preview.
  *
- * Streamdown does not parse Markdown nested inside HTML blocks. Note paste
- * stores centered heroes as:
+ * CommonMark (and thus remark/react-markdown) does not parse Markdown nested
+ * inside HTML blocks. Note paste stores centered heroes as:
  *   <div align="center">\n\n# Title\n\n**x**\n\n[![badge](url)](href)\n\n</div>
- * which would otherwise render as raw source. We expand those islands by
- * rendering the inner Markdown to safe HTML (marked + GFM) before Streamdown.
+ * Expand those islands by rendering the inner Markdown to HTML (marked + GFM)
+ * before the preview engine runs.
  *
- * Relative image URLs also become Streamdown "Image blocked" chips; rewrite
- * them to plain alt text so preview stays clean under app CSP.
+ * Relative / non-https images cannot load under app CSP — drop them quietly
+ * (no "Image blocked" chips, no alt-as-title clutter).
  */
 
 import { marked } from "marked";
@@ -57,33 +57,27 @@ const renderMarkdownFragmentToHtml = (markdown: string): string => {
   }
 };
 
-/**
- * Relative / app-local image paths cannot load under Electron CSP / Streamdown
- * harden. Prefer https; drop or alt-only for the rest.
- */
+/** Only absolute https images are shown in note preview (CSP + remote badges). */
 export const isPreviewableImageSrc = (src: string): boolean => {
   const normalized = normalizeImageSrc(src);
   if (!normalized) return false;
   return /^https:\/\//i.test(normalized);
 };
 
-/** Rewrite markdown images with non-https src to alt text (avoid "Image blocked"). */
+/** Drop markdown images that cannot load; normalize http/protocol-relative → https. */
 export const rewriteUnpreviewableMarkdownImages = (markdown: string): string => (
   markdown.replace(
     /!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g,
-    (full, alt: string, src: string) => {
-      if (isPreviewableImageSrc(src)) {
-        const normalized = normalizeImageSrc(src) ?? src;
-        if (normalized === src) return full;
-        return `![${alt}](${normalized})`;
-      }
-      const label = (alt || "").trim();
-      return label ? `*${label}*` : "";
+    (full, _alt: string, src: string) => {
+      if (!isPreviewableImageSrc(src)) return "";
+      const normalized = normalizeImageSrc(src) ?? src;
+      if (normalized === src) return full;
+      return full.replace(src, normalized);
     },
   )
 );
 
-/** Drop or neutralize HTML <img> tags that Streamdown would block. */
+/** Drop HTML <img> tags that cannot load; normalize remaining https srcs. */
 export const rewriteUnpreviewableHtmlImages = (html: string): string => {
   let body = html;
   let i = 0;
@@ -104,26 +98,32 @@ export const rewriteUnpreviewableHtmlImages = (html: string): string => {
     const tag = body.slice(next, end + 1);
     const srcMatch = /\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i.exec(tag);
     const src = (srcMatch?.[1] ?? srcMatch?.[2] ?? srcMatch?.[3] ?? "").trim();
-    const altMatch = /\balt\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i.exec(tag);
-    const alt = (altMatch?.[1] ?? altMatch?.[2] ?? altMatch?.[3] ?? "").trim();
     if (isPreviewableImageSrc(src)) {
       const normalized = normalizeImageSrc(src) ?? src;
-      if (normalized === src) {
-        out += tag;
-      } else {
-        out += tag.replace(src, normalized);
-      }
-    } else if (alt) {
-      out += `<span class="note-preview-missing-image">${alt.replace(/</g, "&lt;")}</span>`;
+      out += normalized === src ? tag : tag.replace(src, normalized);
     }
+    // else: omit unpreviewable image entirely
     i = end + 1;
   }
   return out;
 };
 
+/** Remove empty markdown links left by turndown/badge debris: [](url). */
+export const stripEmptyMarkdownLinks = (markdown: string): string => (
+  markdown.replace(/\[\]\([^)\n]*\)/g, "")
+);
+
+/** Collapse empty or whitespace-only center wrappers after image drops. */
+export const stripEmptyCenteredHtmlBlocks = (markdown: string): string => (
+  markdown
+    .replace(/<div\s+align=["']?center["']?\s*>\s*<\/div>/gi, "")
+    .replace(/<p\s+align=["']?center["']?\s*>\s*<\/p>/gi, "")
+    .replace(/\n{3,}/g, "\n\n")
+);
+
 /**
  * Convert centered HTML wrappers that still embed Markdown source into
- * center wrappers around already-rendered HTML so Streamdown can display them.
+ * center wrappers around already-rendered HTML so remark can display them.
  */
 export const expandCenteredMarkdownHtmlIslands = (markdown: string): string => {
   const source = markdown.replace(/\r\n?/g, "\n");
@@ -146,13 +146,11 @@ export const expandCenteredMarkdownHtmlIslands = (markdown: string): string => {
 
     const { full, end, tag } = extracted;
     if (!htmlOpenTagIsCentered(full)) {
-      // Non-centered container: keep as-is (do not char-walk through the body).
       out += full;
       i = end;
       continue;
     }
 
-    // Self-closing / empty
     if (full.endsWith("/>") || new RegExp(`^<${tag}\\b[^>]*>\\s*</${tag}>$`, "i").test(full.trim())) {
       out += full;
       i = end;
@@ -167,9 +165,13 @@ export const expandCenteredMarkdownHtmlIslands = (markdown: string): string => {
     }
     const closeTag = `</${tag}>`;
     const inner = full.slice(openEnd + 1, full.length - closeTag.length);
+    const textOutsideTags = inner.replace(/<[^>]+>/g, "").trim();
+    // Pure HTML islands (e.g. <a><img>) keep as-is. Markdown or bare prose
+    // needs marked so center blocks get real <p>/<h1> instead of raw text nodes.
+    const needsMarkdownRender = plainTextLooksLikeMarkdown(inner)
+      || (textOutsideTags.length > 0 && !/^\s*</.test(inner));
 
-    if (!plainTextLooksLikeMarkdown(inner)) {
-      // Already HTML (badges as <a><img>, etc.) — keep wrapper.
+    if (!needsMarkdownRender) {
       out += full;
       i = end;
       continue;
@@ -182,7 +184,7 @@ export const expandCenteredMarkdownHtmlIslands = (markdown: string): string => {
       continue;
     }
 
-    // Prefer a stable center div so CSS [align=center] applies even if original was <p>.
+    // Stable center div so GitHub-style [align=center] CSS applies.
     out += `\n\n<div align="center">\n${rendered}\n</div>\n\n`;
     i = end;
   }
@@ -190,13 +192,18 @@ export const expandCenteredMarkdownHtmlIslands = (markdown: string): string => {
   return out;
 };
 
-/** Full preview pipeline for Streamdown static mode. */
-export const prepareNoteMarkdownForStreamdownPreview = (markdown: string): string => {
+/** Preferred name for the GitHub-style preview pipeline. */
+export const prepareNoteMarkdownForGithubPreview = (markdown: string): string => {
   let body = (markdown ?? "").replace(/\r\n?/g, "\n");
   if (!body.trim()) return "";
 
   body = expandCenteredMarkdownHtmlIslands(body);
   body = rewriteUnpreviewableMarkdownImages(body);
   body = rewriteUnpreviewableHtmlImages(body);
-  return body;
+  body = stripEmptyMarkdownLinks(body);
+  body = stripEmptyCenteredHtmlBlocks(body);
+  return body.trim();
 };
+
+/** @deprecated Use prepareNoteMarkdownForGithubPreview */
+export const prepareNoteMarkdownForStreamdownPreview = prepareNoteMarkdownForGithubPreview;

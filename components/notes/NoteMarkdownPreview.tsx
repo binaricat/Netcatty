@@ -1,45 +1,93 @@
 /**
- * Lightweight read-only note preview (Streamdown / remark) — no Lexical/MDXEditor.
- * Edit mode stays on MDXEditor; preview switches here for large-doc scroll/paint cost.
+ * GitHub-style read-only note preview (react-markdown + GFM + raw HTML).
+ * Edit mode stays on MDXEditor; preview is a static HTML path for large notes.
+ *
+ * Inspired by uiw/react-markdown-preview and github-markdown-css — not Streamdown
+ * (chat-oriented, Image blocked chrome, wrong layout for README heroes).
  */
-import { cjk } from "@streamdown/cjk";
-import { code } from "@streamdown/code";
 import React, { useEffect, useMemo, useRef } from "react";
-import { Streamdown } from "streamdown";
+import ReactMarkdown from "react-markdown";
+import rehypeRaw from "rehype-raw";
+import rehypeSanitize, { defaultSchema, type Options as SanitizeOptions } from "rehype-sanitize";
+import remarkGfm from "remark-gfm";
 
-import { prepareNoteMarkdownForStreamdownPreview } from "../../domain/notes/notePreviewMarkdown";
-import { createSafeCodeHighlighter } from "../ai-elements/streamdownCodeHighlighter";
+import { prepareNoteMarkdownForGithubPreview } from "../../domain/notes/notePreviewMarkdown";
 import { cn } from "../../lib/utils";
 import { annotateNoteImageSizes } from "./noteImageLayout";
 
-const safeCode = createSafeCodeHighlighter(code);
-const streamdownPlugins = { cjk, code: safeCode };
+import "github-markdown-css/github-markdown-dark.css";
 
 /**
- * Extra HTML allowed for vault-note paste islands (centered heroes, sized images).
- * Merged into Streamdown's rehype-sanitize schema when provided.
+ * Sanitize schema: GitHub README paste needs align on block tags and
+ * width/height/alt on images. Default rehype-sanitize strips those.
  */
-const NOTE_PREVIEW_ALLOWED_TAGS: Record<string, string[]> = {
-  div: ["align", "class", "style"],
-  span: ["class", "style"],
-  img: ["src", "alt", "title", "width", "height", "loading", "decoding", "class"],
-  a: ["href", "title", "name", "target", "rel", "class"],
-  br: [],
-  hr: [],
-  p: ["align", "class", "style"],
-  h1: ["align", "class", "style"],
-  h2: ["align", "class", "style"],
-  h3: ["align", "class", "style"],
-  h4: ["align", "class", "style"],
-  h5: ["align", "class", "style"],
-  h6: ["align", "class", "style"],
+export const NOTE_GITHUB_PREVIEW_SANITIZE_SCHEMA: SanitizeOptions = {
+  ...defaultSchema,
+  tagNames: [
+    ...(defaultSchema.tagNames ?? []),
+    "div",
+    "span",
+    "center",
+  ],
+  attributes: {
+    ...defaultSchema.attributes,
+    div: [
+      ...(defaultSchema.attributes?.div ?? []),
+      "align",
+      "className",
+      "class",
+      "style",
+    ],
+    p: [
+      ...(defaultSchema.attributes?.p ?? []),
+      "align",
+      "className",
+      "class",
+      "style",
+    ],
+    h1: [...(defaultSchema.attributes?.h1 ?? []), "align", "className", "class", "style"],
+    h2: [...(defaultSchema.attributes?.h2 ?? []), "align", "className", "class", "style"],
+    h3: [...(defaultSchema.attributes?.h3 ?? []), "align", "className", "class", "style"],
+    h4: [...(defaultSchema.attributes?.h4 ?? []), "align", "className", "class", "style"],
+    h5: [...(defaultSchema.attributes?.h5 ?? []), "align", "className", "class", "style"],
+    h6: [...(defaultSchema.attributes?.h6 ?? []), "align", "className", "class", "style"],
+    img: [
+      ...(defaultSchema.attributes?.img ?? []),
+      "alt",
+      "title",
+      "width",
+      "height",
+      "loading",
+      "decoding",
+      "className",
+      "class",
+    ],
+    a: [
+      ...(defaultSchema.attributes?.a ?? []),
+      "name",
+      "target",
+      "rel",
+      "className",
+      "class",
+      "title",
+    ],
+    span: [...(defaultSchema.attributes?.span ?? []), "className", "class", "style"],
+    td: [...(defaultSchema.attributes?.td ?? []), "align"],
+    th: [...(defaultSchema.attributes?.th ?? []), "align"],
+  },
+  protocols: {
+    ...defaultSchema.protocols,
+    href: [...(defaultSchema.protocols?.href ?? []), "ssh", "http", "https", "mailto"],
+    src: [...(defaultSchema.protocols?.src ?? []), "http", "https"],
+  },
 };
 
-const NOTE_PREVIEW_CONTROLS = {
-  code: { copy: true, download: false },
-  table: false,
-  mermaid: false,
-} as const;
+const remarkPlugins = [remarkGfm];
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- rehype plugin tuple typing varies by unified version
+const rehypePlugins: any[] = [
+  rehypeRaw,
+  [rehypeSanitize, NOTE_GITHUB_PREVIEW_SANITIZE_SCHEMA],
+];
 
 export type NoteMarkdownPreviewProps = {
   markdown: string;
@@ -52,7 +100,12 @@ export const NoteMarkdownPreview = React.memo(function NoteMarkdownPreview({
 }: NoteMarkdownPreviewProps) {
   const rootRef = useRef<HTMLDivElement>(null);
 
-  // Re-mark small-icon rows after Streamdown mounts images (badge walls).
+  const body = useMemo(
+    () => prepareNoteMarkdownForGithubPreview(markdown),
+    [markdown],
+  );
+
+  // Compact badge-row layout markers after images mount.
   useEffect(() => {
     const root = rootRef.current;
     if (!root) return;
@@ -74,43 +127,25 @@ export const NoteMarkdownPreview = React.memo(function NoteMarkdownPreview({
       observer.disconnect();
       if (frame) window.cancelAnimationFrame(frame);
     };
-  }, [markdown]);
-
-  // Expand center HTML islands that still contain Markdown, rewrite relative images.
-  const body = useMemo(
-    () => prepareNoteMarkdownForStreamdownPreview(markdown),
-    [markdown],
-  );
+  }, [body]);
 
   return (
     <div
       ref={rootRef}
       className={cn(
-        "netcatty-note-markdown-preview netcatty-mdx-editor netcatty-mdx-editor--preview",
+        "netcatty-note-markdown-preview netcatty-note-github-preview markdown-body",
         className,
       )}
-      data-note-preview-engine="streamdown"
+      data-note-preview-engine="github-markdown"
     >
-      <Streamdown
-        mode="static"
-        plugins={streamdownPlugins}
-        normalizeHtmlIndentation
-        // Parent InlineMarkdownEditor owns ssh/http link open via capture.
-        linkSafety={{ enabled: false }}
-        controls={NOTE_PREVIEW_CONTROLS}
-        allowedTags={NOTE_PREVIEW_ALLOWED_TAGS}
-        className={cn(
-          "netcatty-mdx-content",
-          // Match note editor typography; Streamdown default space-y-4 is a bit airy.
-          "space-y-0 text-[15px] leading-[1.75] text-foreground/90",
-          "[&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
-          "[&_a]:text-primary [&_a]:underline",
-          "[&_img]:max-w-full",
-          "[&_.note-preview-missing-image]:text-muted-foreground [&_.note-preview-missing-image]:text-sm",
-        )}
+      <ReactMarkdown
+        remarkPlugins={remarkPlugins}
+        rehypePlugins={rehypePlugins}
+        // Parent InlineMarkdownEditor owns ssh/http open via click capture.
+        urlTransform={(url) => url}
       >
         {body}
-      </Streamdown>
+      </ReactMarkdown>
     </div>
   );
 });
