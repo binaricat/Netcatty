@@ -113,7 +113,7 @@ const isNoteEditorMode = (value: string | null): value is NoteEditorMode =>
 
 const InlineMarkdownEditorFallback = () => (
   <div
-    className="netcatty-lazy-fade-in min-h-[420px]"
+    className="min-h-[420px] bg-background"
     data-notes-editor-loading="true"
     aria-hidden="true"
   />

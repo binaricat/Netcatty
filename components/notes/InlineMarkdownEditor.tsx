@@ -1493,8 +1493,9 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
       }}
     >
       {isContentSwapping && (
+        // Instant solid cover — no fade/opacity animation (composites poorly over Lexical).
         <div
-          className="netcatty-lazy-fade-in absolute inset-0 z-20 bg-background/80"
+          className="absolute inset-0 z-20 bg-background"
           data-notes-content-swapping="true"
           aria-hidden="true"
         />
