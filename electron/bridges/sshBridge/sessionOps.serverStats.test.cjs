@@ -101,6 +101,37 @@ function runStatsCommandWithBusyBoxSmpTop(command) {
   return spawnSync("sh", ["-c", script], { encoding: "utf8" });
 }
 
+// Proxmox LXC (CT) guests often expose ZFS datasets / host bind mounts as the
+// df "Filesystem" column instead of /dev/* block devices.
+function runStatsCommandWithPveCtDf(command) {
+  const script = [
+    "uname() { printf '%s\\n' Linux; }",
+    "nproc() { printf '%s\\n' 2; }",
+    "ps() { return 1; }",
+    "top() { return 1; }",
+    "df() {",
+    "  path=",
+    "  for a in \"$@\"; do",
+    "    case \"$a\" in /*) path=$a ;; esac",
+    "  done",
+    "  printf '%s\\n' 'Filesystem 1024-blocks Used Available Capacity Mounted on'",
+    "  if [ -n \"$path\" ]; then",
+    "    printf '%s\\n' 'rpool/data/subvol-101-disk-0 8388608 1048576 7340032 13% /'",
+    "    return 0",
+    "  fi",
+    "  printf '%s\\n' 'rpool/data/subvol-101-disk-0 8388608 1048576 7340032 13% /'",
+    "  printf '%s\\n' 'rpool/data/subvol-101-disk-1 20971520 5242880 15728640 25% /mnt/data'",
+    "  printf '%s\\n' '/tank/shared 104857600 52428800 52428800 50% /srv'",
+    "  printf '%s\\n' 'tmpfs 102400 100 102300 1% /run'",
+    "  printf '%s\\n' 'udev 1024652 0 1024652 0% /dev'",
+    "  printf '%s\\n' '/dev/loop0 131072 131072 0 100% /snap/example/1'",
+    "  printf '%s\\n' 'rpool/data/subvol-101-disk-2 4194304 1048576 3145728 - /mnt/scratch'",
+    "}",
+    command,
+  ].join("\n");
+  return spawnSync("sh", ["-c", script], { encoding: "utf8" });
+}
+
 test("getServerStats falls back to BusyBox tools and excludes loop-backed images", async () => {
   const sessions = new Map();
   sessions.set("sid", {
@@ -126,6 +157,35 @@ test("getServerStats falls back to BusyBox tools and excludes loop-backed images
     { mountPoint: "/", used: 0.25, total: 1, percent: 25, capacityKey: "overlayfs:/overlay" },
   ]);
   assert.equal(result.stats.diskPercent, 25);
+});
+
+test("getServerStats keeps PVE CT ZFS/bind mounts and recovers dash Capacity", async () => {
+  const sessions = new Map();
+  sessions.set("sid", {
+    type: "ssh",
+    _reuseEndpoint: { hostname: "ct.example.test", port: 22 },
+    conn: {
+      exec(command, cb) {
+        const execution = runStatsCommandWithPveCtDf(command);
+        assert.equal(execution.status, 0, execution.stderr);
+        cb(null, fakeStream(execution.stdout));
+      },
+    },
+  });
+
+  const api = makeSessionOps(sessions);
+  const result = await api.getServerStats({ sender: {} }, { sessionId: "sid" });
+
+  assert.equal(result.success, true);
+  assert.deepEqual(result.stats.disks, [
+    { mountPoint: "/", used: 1, total: 8, percent: 13, capacityKey: "rpool/data/subvol-101-disk-0" },
+    { mountPoint: "/mnt/data", used: 5, total: 20, percent: 25, capacityKey: "rpool/data/subvol-101-disk-1" },
+    { mountPoint: "/srv", used: 50, total: 100, percent: 50, capacityKey: "/tank/shared" },
+    { mountPoint: "/mnt/scratch", used: 1, total: 4, percent: 25, capacityKey: "rpool/data/subvol-101-disk-2" },
+  ]);
+  assert.equal(result.stats.diskPercent, 13);
+  assert.equal(result.stats.diskUsed, 1);
+  assert.equal(result.stats.diskTotal, 8);
 });
 
 test("getServerStats reads commands after BusyBox top's CPU column", async () => {
@@ -417,6 +477,25 @@ test("getServerStats includes host identity, load average, and uptime", async ()
   assert.equal(result.stats.kernelRelease, "6.8.0");
   assert.equal(result.stats.uptimeSeconds, 12345);
   assert.deepEqual(result.stats.loadAverage, [0.1, 0.2, 0.3]);
+});
+
+test("getServerStats derives disk percent when the Capacity field is non-numeric", async () => {
+  const sessions = new Map();
+  sessions.set("sid", {
+    type: "ssh",
+    conn: fakeConn(
+      "CPURAW:1000 900|CORES:4|PERCORERAW:|MEMINFO:8000 4000 100 900 0 0|PROCS:|DISKS:/:1:8:-:rpool/data/subvol-101-disk-0|NET:",
+    ),
+  });
+
+  const api = makeSessionOps(sessions);
+  const result = await api.getServerStats({ sender: {} }, { sessionId: "sid" });
+
+  assert.equal(result.success, true);
+  assert.deepEqual(result.stats.disks, [
+    { mountPoint: "/", used: 1, total: 8, percent: 13, capacityKey: "rpool/data/subvol-101-disk-0" },
+  ]);
+  assert.equal(result.stats.diskPercent, 13);
 });
 
 test("getServerStats keeps blank load average and uptime as missing data", async () => {

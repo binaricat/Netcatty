@@ -834,9 +834,14 @@ function createSessionOpsApi(ctx) {
         // GNU ps: ps -eo pid,%mem,comm --sort=-%mem
         // BusyBox fallback: top exposes %VSZ/%CPU; minimal builds without top use plain ps VSZ.
         `procs=$(if procraw=$(ps -eo pid,%mem,comm --sort=-%mem 2>/dev/null); then printf "%s\n" "$procraw" | awk 'NR>1 && NR<=11 {gsub(/;/, "_", $3); printf "%s;%.1f;%s,", $1, $2, $3}' | sed 's/,$//'; elif topraw=$(top -b -n 1 2>/dev/null); then printf "%s\n" "$topraw" | awk '$1 == "PID" {for(i=1;i<=NF;i++){if($i=="%VSZ") mem_col=i; else if($i=="COMMAND") cmd_col=i} next} $1 ~ /^[0-9]+$/ && mem_col && cmd_col {pct=$(mem_col); gsub(/%/, "", pct); cmd=$(cmd_col); gsub(/;/, "_", cmd); print pct ";" $1 ";" cmd}' | sort -t ';' -k1,1rn | head -10 | awk -F';' '{printf "%s;%.1f;%s,", $2, $1, $3}' | sed 's/,$//'; else ps ww 2>/dev/null | awk -v total=$(awk '/^MemTotal:/{print $2}' /proc/meminfo) '$1 ~ /^[0-9]+$/ {v=$3; unit=substr(v,length(v),1); mult=1; if(unit=="m"||unit=="M")mult=1024; else if(unit=="g"||unit=="G")mult=1048576; sub(/[mMgG]$/, "", v); pct=total>0?v*mult*100/total:0; cmd=$5; gsub(/;/, "_", cmd); print pct, $1, cmd}' | sort -rn | head -10 | awk '{printf "%s;%.1f;%s,", $2, $1, $3}' | sed 's/,$//'; fi)`,
-        // Get all mounted disk info. POSIX -kP is supported by GNU and BusyBox
-        // and preserves enough precision to aggregate several filesystems.
-        `disks=$(df -kP 2>/dev/null | awk 'NR>1 && $1 !~ /^\\/dev\\/loop/ && ($6 == "/" || ($1 ~ /^\\/dev/ && $6 !~ /^\\/(etc|proc|sys|dev)(\\/|$)/)) {total=$2/1048576; used=$3/1048576; pct=$5; gsub(/%/,"",pct); printf "%s:%.6f:%.6f:%s:%s,", $6, used, total, pct, $1}' | sed 's/,$//')`,
+        // Get mounted disk info. POSIX -kP works on GNU and BusyBox.
+        // PVE/LXC guests often expose ZFS datasets and host bind mounts without a
+        // /dev/* source, so keep non-pseudo filesystems (not only block devices).
+        // When Capacity is "-" (some CT/cgroup views), derive percent from used/total.
+        // If the full table yields nothing, fall back to df on "/" alone.
+        // Do not blanket-skip /run: udisks may mount real volumes under /run/media;
+        // tmpfs/udev/shm rows are dropped by filesystem-source checks instead.
+        `disks=$(df -kP 2>/dev/null | awk 'NR>1 && $1 !~ /^\\/dev\\/loop/ {mp=$6; fs=$1; if(mp!="/"&&mp~/^\\/(etc|proc|sys|dev|snap)(\\/|$)/) next; if(mp!="/"&&fs~/^(overlay|overlayfs)(\\/|$|:)/) next; if(mp!="/"&&fs~/^(tmpfs|shm|devtmpfs|udev|none|proc|sysfs|cgroup|cgroup2|devpts|mqueue|hugetlbfs|debugfs|tracefs|securityfs|pstore|bpf|fusectl|configfs|ramfs|rpc_pipefs|binfmt_misc|efivarfs)$/) next; total=$2/1048576; used=$3/1048576; if(total<=0) next; pct=$5; gsub(/%/,"",pct); if(pct!~/^[0-9]+$/) pct=int(used*100/total+0.5); printf "%s:%.6f:%.6f:%s:%s,", mp, used, total, pct, fs}' | sed 's/,$//'); [ -n "$disks" ] || disks=$(df -kP / 2>/dev/null | awk 'NR>1 {total=$2/1048576; used=$3/1048576; if(total<=0) next; pct=$5; gsub(/%/,"",pct); if(pct!~/^[0-9]+$/) pct=int(used*100/total+0.5); printf "%s:%.6f:%.6f:%s:%s,", $6, used, total, pct, $1}' | sed 's/,$//')`,
         // Get network interface stats from /proc/net/dev (interface:rx_bytes:tx_bytes), excluding lo and virtual interfaces
         `net=$(cat /proc/net/dev 2>/dev/null | awk 'NR>2 {gsub(/^[ \\t]+/, ""); split($0, a, ":"); iface=a[1]; if(iface != "lo" && iface !~ /^veth/ && iface !~ /^docker/ && iface !~ /^br-/) {split(a[2], b); printf "%s:%s:%s,", iface, b[1], b[9]}}' | sed 's/,$//' || echo "")`,
         `hostname_value=$(hostname 2>/dev/null || uname -n 2>/dev/null || echo "")`,
@@ -990,8 +995,11 @@ function createSessionOpsApi(ctx) {
                       const mountPoint = diskParts[0];
                       const used = parseFloat(diskParts[1]);
                       const total = parseFloat(diskParts[2]);
-                      const percent = parseInt(diskParts[3], 10);
-                      if (!isNaN(used) && !isNaN(total) && !isNaN(percent)) {
+                      let percent = parseInt(diskParts[3], 10);
+                      if (Number.isNaN(percent) && Number.isFinite(used) && Number.isFinite(total) && total > 0) {
+                        percent = Math.round((used / total) * 100);
+                      }
+                      if (!Number.isNaN(used) && !Number.isNaN(total) && !Number.isNaN(percent) && total > 0) {
                         const capacityKey = diskParts.slice(4).join(':').trim();
                         disks.push({
                           mountPoint,
