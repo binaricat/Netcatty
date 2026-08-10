@@ -481,3 +481,17 @@ test("maskCodeRegions covers indented and blockquote fences", () => {
   assert.doesNotMatch(text, /- \[ \] quoted-fake/);
   assert.match(text, /- \[ \] real/);
 });
+
+test("maskCodeRegions does not hide nested list tasks as indented code", () => {
+  const source = [
+    "- parent",
+    "    - [ ] child",
+    "- [ ] later",
+    "",
+    "    plain indented code",
+  ].join("\n");
+  const { text } = maskCodeRegions(source);
+  assert.match(text, / {4}- \[ \] child/);
+  assert.match(text, /- \[ \] later/);
+  assert.doesNotMatch(text, /plain indented code/);
+});

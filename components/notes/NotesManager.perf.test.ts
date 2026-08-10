@@ -84,7 +84,7 @@ test("note switches reuse MDX instance instead of key=noteId remount", () => {
     "utf8",
   );
   assert.match(editorSource, /noteId !== noteIdRef\.current/);
-  assert.match(editorSource, /setMarkdown\(scheduledMarkdown\)/);
+  assert.match(editorSource, /setMarkdown\(scheduled\.markdown\)/);
   assert.match(
     editorSource,
     /contentSwapFramesRef\.current\.outer = window\.requestAnimationFrame/,
@@ -111,6 +111,11 @@ test("note switches reuse MDX instance instead of key=noteId remount", () => {
     editorSource,
     /if \(contentSwapPendingRef\.current\) return;/,
     "stale onChange during the swap yield must not write the previous note into the new draft",
+  );
+  assert.match(
+    editorSource,
+    /contentSwapScheduledRef/,
+    "deferred import must refresh when the same note's value changes during the yield",
   );
   assert.match(
     editorSource,

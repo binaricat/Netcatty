@@ -59,6 +59,13 @@ test("toggleTaskListItemAtIndex recognizes parenthesized ordered markers", () =>
   assert.match(toggleTaskListItemAtIndex(src, 0), /^1\) \[x\] first$/m);
 });
 
+test("toggleTaskListItemAtIndex counts nested list tasks", () => {
+  const src = "- parent\n    - [ ] child\n- [ ] later";
+  assert.equal(countTaskListItems(src), 2);
+  assert.match(toggleTaskListItemAtIndex(src, 0), / {4}- \[x\] child/);
+  assert.match(toggleTaskListItemAtIndex(src, 1), /^- \[x\] later$/m);
+});
+
 test("isPointerOnTaskCheckbox only accepts the left hit box", () => {
   const rect = { left: 100, right: 400 };
   assert.equal(isPointerOnTaskCheckbox(rect, 100), true);

@@ -611,6 +611,12 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
   // Invalidates in-flight deferred setMarkdown when the user switches again.
   const contentSwapTokenRef = useRef(0);
   const contentSwapPendingRef = useRef(false);
+  /** Latest markdown the in-flight note-switch import should apply (refreshed on external value). */
+  const contentSwapScheduledRef = useRef<{
+    token: number;
+    noteId: string;
+    markdown: string;
+  } | null>(null);
   const contentSwapFramesRef = useRef<{ outer: number; inner: number }>({
     outer: 0,
     inner: 0,
@@ -719,7 +725,6 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
 
     if (noteChanged) {
       const scheduledNoteId = noteId;
-      const scheduledMarkdown = markdown;
       noteIdRef.current = noteId;
       pasteRecoveryGenerationRef.current += 1;
       // Keep both refs in displayMarkdown space so public-path normalization
@@ -737,6 +742,7 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
       const token = contentSwapTokenRef.current + 1;
       contentSwapTokenRef.current = token;
       contentSwapPendingRef.current = true;
+      contentSwapScheduledRef.current = { token, noteId: scheduledNoteId, markdown };
       setIsContentSwapping(true);
 
       contentSwapFramesRef.current.outer = window.requestAnimationFrame(() => {
@@ -744,30 +750,52 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
         contentSwapFramesRef.current.inner = window.requestAnimationFrame(() => {
           contentSwapFramesRef.current.inner = 0;
           if (token !== contentSwapTokenRef.current) return;
-          // Drop the import if the user already edited the new note.
-          if (
-            noteIdRef.current !== scheduledNoteId
-            || latestMarkdownRef.current !== scheduledMarkdown
-          ) {
+          const scheduled = contentSwapScheduledRef.current;
+          if (!scheduled || scheduled.token !== token) {
             contentSwapPendingRef.current = false;
             startTransition(() => setIsContentSwapping(false));
             return;
           }
+          // Drop the import if the user already edited away from the scheduled body.
+          if (
+            noteIdRef.current !== scheduled.noteId
+            || latestMarkdownRef.current !== scheduled.markdown
+          ) {
+            contentSwapPendingRef.current = false;
+            contentSwapScheduledRef.current = null;
+            startTransition(() => setIsContentSwapping(false));
+            return;
+          }
           try {
-            editorRef.current?.setMarkdown(scheduledMarkdown);
+            // Use scheduled.markdown (may have been refreshed during the yield).
+            editorRef.current?.setMarkdown(scheduled.markdown);
             clearLexicalHistory();
           } catch {
             // MDX may not be mounted yet (mode empty-preview); next mount gets markdown prop.
           }
           contentSwapPendingRef.current = false;
+          contentSwapScheduledRef.current = null;
           startTransition(() => setIsContentSwapping(false));
         });
       });
       return;
     }
 
-    // A deferred switch import is still pending — do not race it with external sync.
+    // Deferred switch still in flight: refresh the payload if the same note's
+    // external value changed (sync/publish), otherwise skip competing imports.
     if (contentSwapPendingRef.current) {
+      if (
+        noteId !== undefined
+        && noteId === noteIdRef.current
+        && contentSwapScheduledRef.current?.noteId === noteId
+      ) {
+        contentSwapScheduledRef.current = {
+          ...contentSwapScheduledRef.current,
+          markdown,
+        };
+        latestMarkdownRef.current = markdown;
+        syncedPropValueRef.current = markdown;
+      }
       return;
     }
 

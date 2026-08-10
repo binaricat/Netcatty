@@ -476,9 +476,11 @@ export const maskCodeRegions = (markdown: string): CodeMask => {
     (match) => stash(match),
   );
 
-  // Indented code blocks.
+  // Indented code blocks (4 spaces / tab), but not nested list items.
+  // GFM list nesting uses the same indent, e.g. `    - [ ] child` under a parent
+  // bullet — those must stay visible for task-index mapping.
   body = body.replace(
-    /(?<=^|\n)(?:(?: {4}|\t).*(?:\n(?: {4}|\t).*)*)/g,
+    /(?<=^|\n)(?:(?: {4}|\t)(?!(?:[-*+]|\d+[.)])\s).*(?:\n(?: {4}|\t)(?!(?:[-*+]|\d+[.)])\s).*)*)/g,
     (match) => stash(match),
   );
 
