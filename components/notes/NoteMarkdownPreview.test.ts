@@ -12,6 +12,7 @@ test("note preview is a static Streamdown path without MDXEditor", () => {
   assert.match(previewSource, /normalizeHtmlIndentation/);
   assert.match(previewSource, /allowedTags/);
   assert.match(previewSource, /annotateNoteImageSizes/);
+  assert.match(previewSource, /prepareNoteMarkdownForStreamdownPreview/);
   assert.doesNotMatch(previewSource, /from ["']@mdxeditor\/editor["']|from ["']lexical["']/);
   assert.doesNotMatch(previewSource, /<MDXEditor\b/);
 });

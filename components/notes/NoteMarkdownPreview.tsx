@@ -7,6 +7,7 @@ import { code } from "@streamdown/code";
 import React, { useEffect, useMemo, useRef } from "react";
 import { Streamdown } from "streamdown";
 
+import { prepareNoteMarkdownForStreamdownPreview } from "../../domain/notes/notePreviewMarkdown";
 import { createSafeCodeHighlighter } from "../ai-elements/streamdownCodeHighlighter";
 import { cn } from "../../lib/utils";
 import { annotateNoteImageSizes } from "./noteImageLayout";
@@ -75,7 +76,11 @@ export const NoteMarkdownPreview = React.memo(function NoteMarkdownPreview({
     };
   }, [markdown]);
 
-  const body = useMemo(() => markdown.replace(/\r\n?/g, "\n"), [markdown]);
+  // Expand center HTML islands that still contain Markdown, rewrite relative images.
+  const body = useMemo(
+    () => prepareNoteMarkdownForStreamdownPreview(markdown),
+    [markdown],
+  );
 
   return (
     <div
@@ -101,6 +106,7 @@ export const NoteMarkdownPreview = React.memo(function NoteMarkdownPreview({
           "[&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
           "[&_a]:text-primary [&_a]:underline",
           "[&_img]:max-w-full",
+          "[&_.note-preview-missing-image]:text-muted-foreground [&_.note-preview-missing-image]:text-sm",
         )}
       >
         {body}
