@@ -104,7 +104,7 @@ test("note switches reuse MDX instance instead of key=noteId remount", () => {
   assert.match(editorSource, /startTransition\(\(\) => setIsContentSwapping\(false\)\)/);
   assert.match(
     editorSource,
-    /latestMarkdownRef\.current !== scheduledMarkdown/,
+    /latestMarkdownRef\.current !== scheduled\.markdown/,
     "deferred setMarkdown must not clobber edits typed after the switch",
   );
   assert.match(
