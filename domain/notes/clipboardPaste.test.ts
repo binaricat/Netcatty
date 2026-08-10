@@ -68,11 +68,12 @@ test("island conversion keeps center on p align=center with image", () => {
   assert.match(md, /Netcatty/);
 });
 
-test("relative public/ image paths are kept (not silently dropped)", () => {
+test("relative public/ image paths map to Vite site root (not dropped)", () => {
   const md = convertHtmlIslandsInMarkdown(
     '<p align="center"><img src="public/icon.png" alt="Netcatty" width="128" height="128"></p>',
   );
-  assert.match(md, /src="public\/icon\.png"/);
+  // Vite serves public/ at / — store /icon.png so the browser does not request /public/...
+  assert.match(md, /src="\/icon\.png"/);
   assert.match(md, /width="128"/);
 });
 
@@ -151,7 +152,7 @@ test("serializeSafeHtmlImage keeps relative paths; rejects data/javascript", () 
   );
   assert.equal(
     serializeSafeHtmlImage({ src: "public/icon.png", alt: "logo" }),
-    "![logo](public/icon.png)",
+    "![logo](/icon.png)",
   );
   // Protocol-relative → https (covered more fully below; keep here as non-drop).
   assert.equal(

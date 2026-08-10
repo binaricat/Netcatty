@@ -212,11 +212,14 @@ export const decodeHtmlEntities = (value: string): string => (
 );
 
 /**
- * Normalize image src for note storage.
+ * Normalize image src for note storage / in-app load.
  * - https ok
  * - http → https (CSP blocks http images)
  * - //host → https://host (app:// base would otherwise break)
- * - relative kept (may 404; better than silent drop for README logos)
+ * - Vite/Electron: files under repo `public/` are served at site root, so
+ *   `public/icon.png` / `/public/icon.png` → `/icon.png` (avoids Vite
+ *   "use /icon.png instead of /public/icon.png" warnings)
+ * - other relative paths kept as-is (`./docs/...`, `/distro/foo.svg`)
  * - data:/javascript: rejected
  */
 export const normalizeImageSrc = (src: string): string | null => {
@@ -231,9 +234,14 @@ export const normalizeImageSrc = (src: string): string | null => {
     trimmed = `https://${trimmed.slice("http://".length)}`;
   }
   if (/^https:\/\//i.test(trimmed)) return trimmed;
+  // public/ is the Vite static root — never request /public/...
+  if (/^\/?public\//i.test(trimmed)) {
+    return `/${trimmed.replace(/^\/?public\//i, "")}`;
+  }
   if (trimmed.startsWith("/") || trimmed.startsWith("./") || trimmed.startsWith("../")) {
     return trimmed;
   }
+  // Bare relative like `public/icon.png` already handled; `docs/foo.png` keep.
   if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(trimmed)) return trimmed;
   return null;
 };

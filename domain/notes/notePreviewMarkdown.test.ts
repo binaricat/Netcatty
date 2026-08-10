@@ -3,14 +3,19 @@ import test from "node:test";
 
 import {
   expandCenteredMarkdownHtmlIslands,
+  isOversizedCenterInner,
   isPreviewableImageSrc,
   plainTextLooksLikeMarkdown,
   prepareNoteMarkdownForGithubPreview,
-  rewriteUnpreviewableHtmlImages,
-  rewriteUnpreviewableMarkdownImages,
+  resolveNoteImageSrc,
+  rewriteNoteHtmlImages,
+  rewriteNoteMarkdownImages,
   stripEmptyCenteredHtmlBlocks,
   stripEmptyMarkdownLinks,
+  unwrapOversizedCenteredHtmlBlocks,
 } from "./notePreviewMarkdown.ts";
+
+import { normalizeImageSrc } from "./clipboardPaste.ts";
 
 test("plainTextLooksLikeMarkdown detects headings links images emphasis", () => {
   assert.equal(plainTextLooksLikeMarkdown("# Title\n\n**x**"), true);
@@ -58,26 +63,37 @@ test("expand leaves pure HTML center badges alone", () => {
   assert.match(out, /align="center"/);
 });
 
-test("relative images are dropped silently; https kept", () => {
-  assert.equal(isPreviewableImageSrc("public/icon.png"), false);
+test("Vite public/ assets rewrite to site root; relative kept; https kept", () => {
+  assert.equal(normalizeImageSrc("public/icon.png"), "/icon.png");
+  assert.equal(normalizeImageSrc("/public/icon.png"), "/icon.png");
+  assert.equal(normalizeImageSrc("public/distro/ubuntu.svg"), "/distro/ubuntu.svg");
+  assert.equal(normalizeImageSrc("./docs/shot.png"), "./docs/shot.png");
+  assert.equal(normalizeImageSrc("/icon.png"), "/icon.png");
+  assert.equal(resolveNoteImageSrc("public/icon.png"), "/icon.png");
+  assert.equal(isPreviewableImageSrc("public/icon.png"), true);
   assert.equal(isPreviewableImageSrc("https://example.com/a.png"), true);
-  assert.equal(rewriteUnpreviewableMarkdownImages("![Netcatty](public/icon.png)"), "");
+
   assert.equal(
-    rewriteUnpreviewableMarkdownImages("![shot](https://example.com/a.png)"),
+    rewriteNoteMarkdownImages("![Netcatty](public/icon.png)"),
+    "![Netcatty](/icon.png)",
+  );
+  assert.equal(
+    rewriteNoteMarkdownImages("![shot](https://example.com/a.png)"),
     "![shot](https://example.com/a.png)",
   );
   assert.equal(
-    rewriteUnpreviewableMarkdownImages("![cdn](//cdn.example.com/a.png)"),
+    rewriteNoteMarkdownImages("![cdn](//cdn.example.com/a.png)"),
     "![cdn](https://cdn.example.com/a.png)",
   );
 });
 
-test("relative HTML img is removed (no alt-as-title clutter)", () => {
-  const out = rewriteUnpreviewableHtmlImages(
+test("HTML img public/ paths rewrite; not dropped", () => {
+  const out = rewriteNoteHtmlImages(
     '<img width="128" height="128" alt="Netcatty" src="public/icon.png" />',
   );
-  assert.equal(out.trim(), "");
-  assert.doesNotMatch(out, /Netcatty|public\/icon/);
+  assert.match(out, /src="\/icon\.png"/);
+  assert.match(out, /alt="Netcatty"/);
+  assert.doesNotMatch(out, /public\/icon/);
 });
 
 test("empty markdown links and empty center shells are stripped", () => {
@@ -86,6 +102,22 @@ test("empty markdown links and empty center shells are stripped", () => {
     stripEmptyCenteredHtmlBlocks('<div align="center">\n\n</div>\n\n# After').trim(),
     "# After",
   );
+});
+
+test("oversized center blocks with Features/lists are unwrapped", () => {
+  assert.equal(isOversizedCenterInner("<h2>Features</h2><ul><li>a</li><li>b</li><li>c</li><li>d</li></ul>"), true);
+  assert.equal(isOversizedCenterInner("<h1>Netcatty</h1><p>tagline</p>"), false);
+
+  const nested = [
+    '<div align="center">',
+    "<h1>Features</h1>",
+    "<h2>Vault</h2>",
+    "<ul><li>a</li><li>b</li><li>c</li><li>d</li></ul>",
+    "</div>",
+  ].join("\n");
+  const out = unwrapOversizedCenteredHtmlBlocks(nested);
+  assert.doesNotMatch(out, /align="center"/);
+  assert.match(out, /Features/);
 });
 
 test("prepareNoteMarkdownForGithubPreview end-to-end README head shape", () => {
@@ -117,10 +149,10 @@ test("prepareNoteMarkdownForGithubPreview end-to-end README head shape", () => {
   assert.match(out, /img\.shields\.io/);
   assert.match(out, /width="3142"/);
   assert.match(out, /# Body left aligned/);
+  // Logo kept as app-root path (Vite public/)
+  assert.match(out, /src="\/icon\.png"|!\[Netcatty\]\(\/icon\.png\)/);
   assert.doesNotMatch(out, /# Netcatty/);
-  assert.doesNotMatch(out, /!\[Netcatty\]/);
   assert.doesNotMatch(out, /public\/icon\.png/);
   assert.doesNotMatch(out, /\[\]\(/);
-  // No alt-as-title leftover from missing logo
-  assert.doesNotMatch(out, /note-preview-missing-image|\*Netcatty\*/);
+  assert.doesNotMatch(out, /raw\.githubusercontent\.com/);
 });
