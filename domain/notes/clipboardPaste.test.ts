@@ -519,3 +519,19 @@ test("linked badge anchors prefer real href over data-href", () => {
   assert.match(md, /right\.example/);
   assert.doesNotMatch(md, /wrong\.example/);
 });
+
+test("maskCodeRegions accepts longer closing fences", () => {
+  const source = [
+    "```md",
+    "![x](public/icon.png)",
+    "- [ ] fake",
+    "````",
+    "",
+    "- [ ] real",
+  ].join("\n");
+  const mask = maskCodeRegions(source);
+  assert.doesNotMatch(mask.text, /public\/icon\.png/);
+  assert.doesNotMatch(mask.text, /- \[ \] fake/);
+  assert.match(mask.text, /- \[ \] real/);
+  assert.equal(unmaskCodeRegions(mask.text, mask.slots, mask.sentinel), source);
+});

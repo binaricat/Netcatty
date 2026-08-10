@@ -478,6 +478,62 @@ const chooseCodeMaskSentinel = (markdown: string): string => {
   return sentinel;
 };
 
+/**
+ * Mask GFM fenced blocks. Closing fence may be longer than the opener
+ * (CommonMark: close with same char and length >= open).
+ */
+const maskFencedCodeBlocks = (
+  markdown: string,
+  stash: (chunk: string) => string,
+): string => {
+  const lines = markdown.split("\n");
+  const out: string[] = [];
+  let i = 0;
+  // Optional blockquote + up to 3 spaces, then fence of ` or ~ (3+).
+  const openRe = /^((?:[ \t]{0,3}>[ \t]?)?[ \t]{0,3})([`~]{3,})(.*)$/;
+
+  while (i < lines.length) {
+    const openMatch = openRe.exec(lines[i] ?? "");
+    if (!openMatch) {
+      out.push(lines[i] ?? "");
+      i += 1;
+      continue;
+    }
+    const fence = openMatch[2] ?? "";
+    const fenceChar = fence[0] ?? "`";
+    const fenceLen = fence.length;
+    // Info string may not contain the fence character (CommonMark).
+    const info = openMatch[3] ?? "";
+    if (info.includes(fenceChar)) {
+      out.push(lines[i] ?? "");
+      i += 1;
+      continue;
+    }
+
+    const block: string[] = [lines[i] ?? ""];
+    i += 1;
+    while (i < lines.length) {
+      const line = lines[i] ?? "";
+      // Closing fence: same indent budget, same char, length >= open, no info.
+      const closeMatch = /^((?:[ \t]{0,3}>[ \t]?)?[ \t]{0,3})([`~]+)[ \t]*$/.exec(line);
+      if (
+        closeMatch
+        && (closeMatch[2]?.[0] ?? "") === fenceChar
+        && (closeMatch[2]?.length ?? 0) >= fenceLen
+      ) {
+        block.push(line);
+        i += 1;
+        break;
+      }
+      block.push(line);
+      i += 1;
+    }
+    // Unclosed fence: still mask through EOF so trailing samples stay protected.
+    out.push(stash(block.join("\n")));
+  }
+  return out.join("\n");
+};
+
 /** Mask fenced (3+ ticks), indented, and inline code so cleanup won't touch them. */
 export const maskCodeRegions = (markdown: string): CodeMask => {
   const slots: string[] = [];
@@ -488,14 +544,7 @@ export const maskCodeRegions = (markdown: string): CodeMask => {
     return token;
   };
 
-  let body = markdown;
-
-  // Fenced code: ``` or ~~~ with 3+ fence chars. Allow up to 3 leading spaces
-  // and optional blockquote markers so nested/indented fences are protected.
-  body = body.replace(
-    /(?<=^|\n)((?:[ \t]{0,3}>[ \t]?)?[ \t]{0,3})(`{3,}|~{3,})([^\n]*)\n([\s\S]*?)\n(?:(?:[ \t]{0,3}>[ \t]?)?[ \t]{0,3})\2[ \t]*(?=\n|$)/g,
-    (match) => stash(match),
-  );
+  let body = maskFencedCodeBlocks(markdown, stash);
 
   // Indented code blocks (4 spaces / tab), but not nested list items.
   // GFM list nesting uses the same indent, e.g. `    - [ ] child` under a parent
