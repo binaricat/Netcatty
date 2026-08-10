@@ -1479,7 +1479,13 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
         handleKeyDownCapture(event);
       }}
       onKeyUpCapture={handleKeyUpCapture}
-      onMouseLeave={() => setLinkAction(null)}
+      onMouseLeave={() => {
+        if (mouseMoveFrameRef.current) {
+          window.cancelAnimationFrame(mouseMoveFrameRef.current);
+          mouseMoveFrameRef.current = 0;
+        }
+        setLinkActionIfChanged(null);
+      }}
       onMouseMoveCapture={handleMouseMoveCapture}
       onPasteCapture={(event) => {
         if (blockWhileContentSwapping(event)) return;

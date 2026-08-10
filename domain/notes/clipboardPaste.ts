@@ -324,7 +324,7 @@ export const trimBlankLinesOutsideCode = (value: string): string => {
   body = body.replace(/^\n+/, "").replace(/\n+$/, "");
   // Strip trailing spaces on blank-only lines, but keep "  \n" hard breaks on non-empty lines.
   body = body.replace(/^[ \t]+$/gm, "");
-  return unmaskCodeRegions(body, regions.slots);
+  return unmaskCodeRegions(body, regions.slots, regions.sentinel);
 };
 
 const trimBlankLines = trimBlankLinesOutsideCode;
@@ -433,7 +433,8 @@ export const normalizeLinkedBadgeImages = (markdown: string): string => {
   body = body.replace(
     /<a\b([^>]*)>\s*(<img\b[\s\S]*?>)\s*<\/a>/gi,
     (full, aAttrs: string, imgTag: string) => {
-      const hrefMatch = /\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i.exec(aAttrs);
+      // Require a real attribute boundary so `data-href` does not match `href`.
+      const hrefMatch = /(?:^|[\s"'/])href\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i.exec(aAttrs);
       const href = decodeHtmlEntities(
         (hrefMatch?.[1] ?? hrefMatch?.[2] ?? hrefMatch?.[3] ?? "").trim(),
       );
@@ -456,13 +457,33 @@ export const normalizeLinkedBadgeImages = (markdown: string): string => {
   return body;
 };
 
-type CodeMask = { text: string; slots: string[] };
+export type CodeMask = {
+  text: string;
+  slots: string[];
+  /** Unique prefix for this pass so user-authored sentinel text cannot collide. */
+  sentinel: string;
+};
+
+const escapeRegExp = (value: string): string => (
+  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+);
+
+const chooseCodeMaskSentinel = (markdown: string): string => {
+  let n = 0;
+  let sentinel = "@@NETCATTY_MD_CODE_";
+  while (markdown.includes(sentinel)) {
+    n += 1;
+    sentinel = `@@NETCATTY_MD_CODE_S${n}_`;
+  }
+  return sentinel;
+};
 
 /** Mask fenced (3+ ticks), indented, and inline code so cleanup won't touch them. */
 export const maskCodeRegions = (markdown: string): CodeMask => {
   const slots: string[] = [];
+  const sentinel = chooseCodeMaskSentinel(markdown);
   const stash = (chunk: string): string => {
-    const token = `@@NETCATTY_MD_CODE_${slots.length}@@`;
+    const token = `${sentinel}${slots.length}@@`;
     slots.push(chunk);
     return token;
   };
@@ -487,25 +508,28 @@ export const maskCodeRegions = (markdown: string): CodeMask => {
   // Inline code (single backticks, non-greedy, no newlines).
   body = body.replace(/`[^`\n]+`/g, (match) => stash(match));
 
-  return { text: body, slots };
+  return { text: body, slots, sentinel };
 };
 
-export const unmaskCodeRegions = (text: string, slots: string[]): string => (
-  text.replace(/@@NETCATTY_MD_CODE_(\d+)@@/g, (_, idx: string) => (
-    slots[Number(idx)] ?? ""
-  ))
-);
+export const unmaskCodeRegions = (
+  text: string,
+  slots: string[],
+  sentinel = "@@NETCATTY_MD_CODE_",
+): string => {
+  const re = new RegExp(`${escapeRegExp(sentinel)}(\\d+)@@`, "g");
+  return text.replace(re, (_, idx: string) => slots[Number(idx)] ?? "");
+};
 
 const stripOrphanLinkClosersOutsideCode = (markdown: string): string => {
-  const { text, slots } = maskCodeRegions(markdown);
+  const { text, slots, sentinel } = maskCodeRegions(markdown);
   const cleaned = text.replace(/^\s*\]\([^)\n]+\)\s*$/gm, "");
-  return unmaskCodeRegions(cleaned, slots);
+  return unmaskCodeRegions(cleaned, slots, sentinel);
 };
 
 /** Apply a transform only outside code regions. */
 const mapOutsideCode = (markdown: string, fn: (plain: string) => string): string => {
-  const { text, slots } = maskCodeRegions(markdown);
-  return unmaskCodeRegions(fn(text), slots);
+  const { text, slots, sentinel } = maskCodeRegions(markdown);
+  return unmaskCodeRegions(fn(text), slots, sentinel);
 };
 
 export const normalizePastedNoteMarkdown = (markdown: string): string => {
@@ -580,7 +604,7 @@ export const convertHtmlIslandsInMarkdown = (markdown: string): string => {
   }
 
   // Mask fenced + indented + inline code so HTML samples in code are not Turndown'd.
-  const { text: masked, slots } = maskCodeRegions(body);
+  const { text: masked, slots, sentinel } = maskCodeRegions(body);
   body = masked.replace(/<!--[\s\S]*?-->/g, "");
 
   // Walk left-to-right converting HTML islands with balanced matching.
@@ -647,7 +671,7 @@ export const convertHtmlIslandsInMarkdown = (markdown: string): string => {
     i = end;
   }
 
-  return normalizePastedNoteMarkdown(unmaskCodeRegions(out, slots));
+  return normalizePastedNoteMarkdown(unmaskCodeRegions(out, slots, sentinel));
 };
 
 /**

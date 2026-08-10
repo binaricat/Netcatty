@@ -29,7 +29,7 @@ export const countTaskListItems = (markdown: string): number => {
 export const toggleTaskListItemAtIndex = (markdown: string, index: number): string => {
   if (index < 0 || !Number.isFinite(index)) return markdown;
 
-  const { text, slots } = maskCodeRegions(markdown);
+  const { text, slots, sentinel } = maskCodeRegions(markdown);
   let seen = 0;
   let changed = false;
   const next = text.replace(createTaskListItemRe(), (full, prefix: string, mark: string) => {
@@ -39,7 +39,7 @@ export const toggleTaskListItemAtIndex = (markdown: string, index: number): stri
     return `${prefix}[${nextMark}]`;
   });
 
-  return changed ? unmaskCodeRegions(next, slots) : markdown;
+  return changed ? unmaskCodeRegions(next, slots, sentinel) : markdown;
 };
 
 /** Left-edge hit box for checklist toggles (checkbox + padding), in CSS px. */

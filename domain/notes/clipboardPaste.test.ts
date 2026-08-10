@@ -16,6 +16,7 @@ import {
   serializeSafeHtmlImage,
   shouldInterceptResolvedNotePaste,
   shouldInsertClipboardTextAsMarkdown,
+  unmaskCodeRegions,
 } from "./clipboardPaste.ts";
 
 const CATTY_PASTE = `---
@@ -494,4 +495,27 @@ test("maskCodeRegions does not hide nested list tasks as indented code", () => {
   assert.match(text, / {4}- \[ \] child/);
   assert.match(text, /- \[ \] later/);
   assert.doesNotMatch(text, /plain indented code/);
+});
+
+test("maskCodeRegions sentinels do not collide with user-authored tokens", () => {
+  const source = [
+    "keep @@NETCATTY_MD_CODE_0@@ literal",
+    "",
+    "```",
+    "code body",
+    "```",
+  ].join("\n");
+  const mask = maskCodeRegions(source);
+  assert.match(mask.text, /keep @@NETCATTY_MD_CODE_0@@ literal/);
+  assert.notEqual(mask.sentinel, "@@NETCATTY_MD_CODE_");
+  const restored = unmaskCodeRegions(mask.text, mask.slots, mask.sentinel);
+  assert.equal(restored, source);
+});
+
+test("linked badge anchors prefer real href over data-href", () => {
+  const md = normalizeLinkedBadgeImages(
+    '<a data-href="https://wrong.example" href="https://right.example"><img src="https://img.example/a.png" alt="a" /></a>',
+  );
+  assert.match(md, /right\.example/);
+  assert.doesNotMatch(md, /wrong\.example/);
 });
