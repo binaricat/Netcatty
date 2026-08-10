@@ -1829,6 +1829,8 @@ html[data-theme-transition] *::after {
   font-size: 15px;
   line-height: 1.7;
   font-family: inherit;
+  /* Body copy is left-aligned (match edit mode / GitHub README body). */
+  text-align: left !important;
 }
 
 .netcatty-note-github-preview.markdown-body > :first-child {
@@ -1854,6 +1856,10 @@ html[data-theme-transition] *::after {
   vertical-align: middle;
 }
 
+/*
+ * Only explicit center containers (README hero). Descendants inherit center
+ * from the container; everything else stays left via text-align on .markdown-body.
+ */
 .netcatty-note-github-preview.markdown-body [align="center"] {
   text-align: center !important;
 }
@@ -1861,6 +1867,22 @@ html[data-theme-transition] *::after {
 .netcatty-note-github-preview.markdown-body [align="center"] img {
   margin-left: auto;
   margin-right: auto;
+}
+
+/* Headings / lists / quotes outside center shells must not pick up stray center. */
+.netcatty-note-github-preview.markdown-body > h1,
+.netcatty-note-github-preview.markdown-body > h2,
+.netcatty-note-github-preview.markdown-body > h3,
+.netcatty-note-github-preview.markdown-body > h4,
+.netcatty-note-github-preview.markdown-body > h5,
+.netcatty-note-github-preview.markdown-body > h6,
+.netcatty-note-github-preview.markdown-body > p,
+.netcatty-note-github-preview.markdown-body > ul,
+.netcatty-note-github-preview.markdown-body > ol,
+.netcatty-note-github-preview.markdown-body > blockquote,
+.netcatty-note-github-preview.markdown-body > pre,
+.netcatty-note-github-preview.markdown-body > table {
+  text-align: left !important;
 }
 
 .netcatty-note-github-preview.markdown-body pre,

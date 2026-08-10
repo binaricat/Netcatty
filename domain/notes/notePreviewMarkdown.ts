@@ -143,23 +143,78 @@ export const stripEmptyCenteredHtmlBlocks = (markdown: string): string => (
 );
 
 /**
- * Body sections (Features, long lists, many headings) must not stay under
+ * Body sections (Catty, Features, long lists, many headings) must not stay under
  * align=center — edit mode left-aligns them; preview must match.
  */
 export const isOversizedCenterInner = (innerHtml: string): boolean => {
   const h2plus = (innerHtml.match(/<h[2-6]\b/gi) ?? []).length;
   const h1 = (innerHtml.match(/<h1\b/gi) ?? []).length;
   const listItems = (innerHtml.match(/<li\b/gi) ?? []).length;
+  const blockquotes = (innerHtml.match(/<blockquote\b/gi) ?? []).length;
   const plainLen = innerHtml.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().length;
   if (h2plus >= 1) return true;
   if (h1 >= 2) return true;
-  if (listItems >= 4) return true;
-  if (plainLen > 900) return true;
-  // Body-style headings that sometimes land inside a bad wrapper
-  if (/<h1[^>]*>\s*(Features|Contents|Screenshots|What is|Why |Getting Started)/i.test(innerHtml)) {
+  if (listItems >= 3) return true;
+  if (blockquotes >= 1 && plainLen > 80) return true;
+  if (plainLen > 500) return true;
+  // Body-style headings (README sections). Use word boundaries so "Netcatty"
+  // does not match "Catty".
+  if (
+    /<(?:h[1-6])[^>]*>[\s\S]{0,120}(?:Catty\s+Agent|\bFeatures\b|\bContents\b|\bScreenshots\b|What is\b|Why\s+Netcatty|Getting Started|Build\s*&\s*Package|Tech Stack|\bContribut|\bLicense\b|Star History)/i
+      .test(innerHtml)
+  ) {
+    return true;
+  }
+  // Markdown source still inside center (not yet HTML)
+  if (
+    /(?:^|\n)#{1,3}\s+.*(?:Catty\s+Agent|\bFeatures\b|\bContents\b|\bScreenshots\b|What is\b|Why\s+Netcatty)/im
+      .test(innerHtml)
+    || (/(?:^|\n)#{2,3}\s+\S/m.test(innerHtml) && /(?:^|\n)[-*+]\s+\S/m.test(innerHtml))
+  ) {
     return true;
   }
   return false;
+};
+
+/** Strip align=center / text-align:center from tags (body section only). */
+export const stripAllCenterAlignment = (text: string): string => (
+  text
+    .replace(/\s+align\s*=\s*(?:"|')?center(?:"|')?/gi, "")
+    .replace(/text-align\s*:\s*center\s*;?/gi, "")
+    .replace(/\s+style=(["'])\s*\1/gi, "")
+    .replace(/\s+style=(["'])\s*;\s*\1/gi, "")
+);
+
+/**
+ * Index where README-style hero ends and left-aligned body begins.
+ * Prefer first thematic break; else first known body heading / anchor.
+ */
+export const findNotePreviewBodyStartIndex = (markdown: string): number => {
+  const md = markdown.replace(/\r\n?/g, "\n");
+  // First thematic break after any non-empty hero band (logo/title/badges).
+  const hr = /\n---[ \t]*\n/.exec(md);
+  if (hr && hr.index != null && hr.index >= 20) {
+    return hr.index + hr[0].length;
+  }
+  const bodyMark = md.search(
+    /(?:^|\n)(?:<a\s+name=["'][^"']*["']\s*>\s*<\/a>\s*)?(?:#{1,3}\s+.*?(?:Catty Agent|Features|Contents|What is Netcatty|Why Netcatty|Screenshots|Getting Started|Supported Distros)\b)/im,
+  );
+  if (bodyMark >= 0) {
+    return bodyMark === 0 ? 0 : bodyMark;
+  }
+  return -1;
+};
+
+/**
+ * After the hero band, force left alignment by removing center attributes.
+ * Prevents Catty/Features blocks (often many small center divs) from inheriting center.
+ */
+export const stripCenterAlignmentInBodySection = (markdown: string): string => {
+  const bodyStart = findNotePreviewBodyStartIndex(markdown);
+  if (bodyStart < 0) return markdown;
+  const hero = markdown.slice(0, bodyStart);
+  const body = stripAllCenterAlignment(markdown.slice(bodyStart));
+  return `${hero}${body}`;
 };
 
 /**
@@ -230,7 +285,7 @@ export const expandCenteredMarkdownHtmlIslands = (markdown: string): string => {
 };
 
 /**
- * Unwrap remaining oversized center shells (already-HTML body nested under center).
+ * Unwrap remaining oversized center shells (div/p/headings with align=center).
  */
 export const unwrapOversizedCenteredHtmlBlocks = (markdown: string): string => {
   const source = markdown.replace(/\r\n?/g, "\n");
@@ -243,20 +298,28 @@ export const unwrapOversizedCenteredHtmlBlocks = (markdown: string): string => {
       continue;
     }
     const extracted = extractBalancedHtmlElement(source, i);
-    if (!extracted || extracted.tag !== "div" || !htmlOpenTagIsCentered(extracted.full)) {
+    if (
+      !extracted
+      || !CENTERABLE_TAGS.has(extracted.tag)
+      || !htmlOpenTagIsCentered(extracted.full)
+    ) {
       out += source[i];
       i += 1;
       continue;
     }
-    const { full, end } = extracted;
+    const { full, end, tag } = extracted;
     const openEnd = findHtmlTagEnd(full, 0);
     if (openEnd < 0) {
       out += full;
       i = end;
       continue;
     }
-    const inner = full.slice(openEnd + 1, full.length - "</div>".length);
-    if (isOversizedCenterInner(inner)) {
+    const closeTag = `</${tag}>`;
+    const inner = full.endsWith(closeTag) || full.toLowerCase().endsWith(closeTag)
+      ? full.slice(openEnd + 1, full.length - closeTag.length)
+      : full.slice(openEnd + 1);
+    // For pure-HTML small heroes keep center; body-like inners unwrap.
+    if (isOversizedCenterInner(inner) || isOversizedCenterInner(full)) {
       out += `\n\n${inner.trim()}\n\n`;
     } else {
       out += full;
@@ -273,6 +336,8 @@ export const prepareNoteMarkdownForGithubPreview = (markdown: string): string =>
 
   body = expandCenteredMarkdownHtmlIslands(body);
   body = unwrapOversizedCenteredHtmlBlocks(body);
+  // After hero (first --- / body heading), strip every remaining center hint.
+  body = stripCenterAlignmentInBodySection(body);
   body = rewriteNoteMarkdownImages(body);
   body = rewriteNoteHtmlImages(body);
   body = stripEmptyMarkdownLinks(body);

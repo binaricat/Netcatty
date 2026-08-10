@@ -19,6 +19,22 @@ test("note preview uses GitHub-style react-markdown stack, not Streamdown", () =
   assert.doesNotMatch(previewSource, /from ["']@mdxeditor\/editor["']/);
 });
 
+test("preview CSS forces left body alignment with center only on align=center", () => {
+  const css = readFileSync(new URL("../../index.css", import.meta.url), "utf8");
+  assert.match(
+    css,
+    /\.netcatty-note-github-preview\.markdown-body\s*\{[^}]*text-align:\s*left\s*!important/s,
+  );
+  assert.match(
+    css,
+    /\.netcatty-note-github-preview\.markdown-body\s+>\s+h1[\s\S]*?text-align:\s*left\s*!important/s,
+  );
+  assert.match(
+    css,
+    /\.netcatty-note-github-preview\.markdown-body\s+\[align="center"\]\s*\{[^}]*text-align:\s*center\s*!important/s,
+  );
+});
+
 test("InlineMarkdownEditor mounts GitHub preview only in preview mode", () => {
   assert.match(editorSource, /lazy\(\(\) =>\s*\n\s*import\("\.\/NoteMarkdownPreview"\)/);
   assert.match(editorSource, /editorMode === "preview"/);

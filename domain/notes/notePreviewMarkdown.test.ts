@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   expandCenteredMarkdownHtmlIslands,
+  findNotePreviewBodyStartIndex,
   isOversizedCenterInner,
   isPreviewableImageSrc,
   plainTextLooksLikeMarkdown,
@@ -10,6 +11,8 @@ import {
   resolveNoteImageSrc,
   rewriteNoteHtmlImages,
   rewriteNoteMarkdownImages,
+  stripAllCenterAlignment,
+  stripCenterAlignmentInBodySection,
   stripEmptyCenteredHtmlBlocks,
   stripEmptyMarkdownLinks,
   unwrapOversizedCenteredHtmlBlocks,
@@ -104,9 +107,13 @@ test("empty markdown links and empty center shells are stripped", () => {
   );
 });
 
-test("oversized center blocks with Features/lists are unwrapped", () => {
+test("oversized center blocks with Features/lists/Catty are unwrapped", () => {
   assert.equal(isOversizedCenterInner("<h2>Features</h2><ul><li>a</li><li>b</li><li>c</li><li>d</li></ul>"), true);
   assert.equal(isOversizedCenterInner("<h1>Netcatty</h1><p>tagline</p>"), false);
+  assert.equal(
+    isOversizedCenterInner("<h1>🔥 Catty Agent — Your IT Ops AI Partner</h1><blockquote>x</blockquote>"),
+    true,
+  );
 
   const nested = [
     '<div align="center">',
@@ -118,6 +125,33 @@ test("oversized center blocks with Features/lists are unwrapped", () => {
   const out = unwrapOversizedCenteredHtmlBlocks(nested);
   assert.doesNotMatch(out, /align="center"/);
   assert.match(out, /Features/);
+});
+
+test("body section after hero loses center attributes", () => {
+  const source = [
+    '<div align="center"><h1>Netcatty</h1></div>',
+    "",
+    "---",
+    "",
+    '<div align="center">',
+    "<h1>🔥 Catty Agent</h1>",
+    "<ul><li>one</li><li>two</li><li>three</li></ul>",
+    "</div>",
+    "",
+    '<p align="center">should not stay centered in body</p>',
+  ].join("\n");
+
+  assert.ok(findNotePreviewBodyStartIndex(source) > 0);
+  const stripped = stripCenterAlignmentInBodySection(source);
+  assert.match(stripped, /align="center"/); // hero may keep center
+  assert.doesNotMatch(stripped.slice(stripped.indexOf("---")), /align="center"/);
+  assert.equal(stripAllCenterAlignment('<p align="center" style="text-align: center">x</p>'), "<p>x</p>");
+
+  const prep = prepareNoteMarkdownForGithubPreview(source);
+  // Catty body must not remain under center
+  const cattyAt = prep.indexOf("Catty");
+  assert.ok(cattyAt >= 0);
+  assert.doesNotMatch(prep.slice(prep.indexOf("---")), /align="center"/);
 });
 
 test("prepareNoteMarkdownForGithubPreview end-to-end README head shape", () => {
