@@ -72,6 +72,23 @@ test("mode toggle flushes ref-only content drafts before remounting the editor",
   );
 });
 
+test("note switches reuse MDX instance instead of key=noteId remount", () => {
+  assert.match(managerSource, /noteId=\{selectedNoteView\.id\}/);
+  assert.doesNotMatch(
+    managerSource,
+    /<InlineMarkdownEditor[\s\S]{0,200}key=\{selectedNoteView\.id\}/,
+    "key=noteId forces full Lexical teardown on every note switch",
+  );
+  assert.match(
+    readFileSync(new URL("./InlineMarkdownEditor.tsx", import.meta.url), "utf8"),
+    /noteId !== noteIdRef\.current/,
+  );
+  assert.match(
+    readFileSync(new URL("./InlineMarkdownEditor.tsx", import.meta.url), "utf8"),
+    /setMarkdown\(markdown\)/,
+  );
+});
+
 test("host-link annotation does not re-run on every markdown value keystroke", () => {
   const editorSource = readFileSync(
     new URL("./InlineMarkdownEditor.tsx", import.meta.url),

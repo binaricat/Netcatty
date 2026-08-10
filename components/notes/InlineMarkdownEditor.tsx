@@ -71,6 +71,8 @@ export interface InlineMarkdownEditorProps {
   value: string;
   placeholder: string;
   onChange: (value: string) => void;
+  /** When set, note switches reuse the MDX instance via setMarkdown (no full remount). */
+  noteId?: string;
   hosts?: Host[];
   editorMode?: NoteEditorMode;
   onOpenHost?: (host: Host) => void;
@@ -578,6 +580,7 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
   value,
   placeholder,
   onChange,
+  noteId,
   hosts = [],
   editorMode: controlledEditorMode,
   onOpenHost,
@@ -588,6 +591,7 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
   const editorRef = useRef<MDXEditorMethods>(null);
   const latestMarkdownRef = useRef(value);
   const syncedPropValueRef = useRef(value);
+  const noteIdRef = useRef(noteId);
   // Bumped on unmount / external value sync so deferred paste recovery cannot
   // commit into a switched or unmounted note.
   const pasteRecoveryGenerationRef = useRef(0);
@@ -659,19 +663,48 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
     return filterHostPickerHosts(hostCandidates, hostPicker.query);
   }, [hostCandidates, hostPicker.query]);
 
+  // Swap note content without remounting MDX/Lexical (key=noteId was the main
+  // switch lag). Parent flushes drafts before changing noteId/value.
   useEffect(() => {
-    if (latestMarkdownRef.current === value) {
+    const markdown = displayMarkdown;
+    const noteChanged = noteId !== undefined && noteId !== noteIdRef.current;
+
+    if (noteChanged) {
+      noteIdRef.current = noteId;
+      pasteRecoveryGenerationRef.current += 1;
+      latestMarkdownRef.current = markdown;
+      syncedPropValueRef.current = value;
+      setHostPicker((current) => (
+        current.open
+          ? { ...current, open: false, query: "", selectedIndex: 0 }
+          : current
+      ));
+      setLinkActionIfChanged(null);
+      try {
+        editorRef.current?.setMarkdown(markdown);
+      } catch {
+        // MDX may not be mounted yet (mode empty-preview); next mount gets markdown prop.
+      }
+      return;
+    }
+
+    if (latestMarkdownRef.current === value || latestMarkdownRef.current === markdown) {
       syncedPropValueRef.current = value;
       return;
     }
+    // Local draft diverged from last external value — do not clobber.
     if (latestMarkdownRef.current !== syncedPropValueRef.current) {
       return;
     }
     pasteRecoveryGenerationRef.current += 1;
     syncedPropValueRef.current = value;
-    latestMarkdownRef.current = value;
-    editorRef.current?.setMarkdown(value);
-  }, [value]);
+    latestMarkdownRef.current = markdown;
+    try {
+      editorRef.current?.setMarkdown(markdown);
+    } catch {
+      // ignore
+    }
+  }, [noteId, value, displayMarkdown, setLinkActionIfChanged]);
 
   useEffect(() => () => {
     pasteRecoveryGenerationRef.current += 1;
