@@ -192,6 +192,18 @@ export const wrapCenteredMarkdown = (inner: string): string => {
   return `\n\n<div align="center">\n\n${body}\n\n</div>\n\n`;
 };
 
+/** Unicode scalar values accepted by String.fromCodePoint (rejects surrogates-only overflow). */
+const isValidUnicodeCodePoint = (code: number): boolean => (
+  Number.isFinite(code)
+  && Number.isInteger(code)
+  && code >= 0
+  && code <= 0x10FFFF
+);
+
+const codePointFromEntity = (code: number, fallback: string): string => (
+  isValidUnicodeCodePoint(code) ? String.fromCodePoint(code) : fallback
+);
+
 /** Decode common HTML entities (once) before re-escaping on serialize. */
 export const decodeHtmlEntities = (value: string): string => (
   value
@@ -201,14 +213,10 @@ export const decodeHtmlEntities = (value: string): string => (
     .replace(/&#x27;/gi, "'")
     .replace(/&lt;/gi, "<")
     .replace(/&gt;/gi, ">")
-    .replace(/&#(\d+);/g, (_, n: string) => {
-      const code = Number(n);
-      return Number.isFinite(code) ? String.fromCodePoint(code) : _;
-    })
-    .replace(/&#x([0-9a-f]+);/gi, (_, hex: string) => {
-      const code = Number.parseInt(hex, 16);
-      return Number.isFinite(code) ? String.fromCodePoint(code) : _;
-    })
+    .replace(/&#(\d+);/g, (_, n: string) => codePointFromEntity(Number(n), _))
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex: string) => (
+      codePointFromEntity(Number.parseInt(hex, 16), _)
+    ))
     // &amp; last so we don't re-expand decoded entities
     .replace(/&amp;/gi, "&")
 );
@@ -286,7 +294,9 @@ export const serializeSafeHtmlImage = (input: {
 
   if (!safeWidth && !safeHeight) {
     const titlePart = title ? ` "${title.replace(/"/g, '\\"')}"` : "";
-    return `![${alt}](${src}${titlePart})`;
+    // CommonMark: destinations with spaces/parens must be <angled> or they break.
+    const destination = /[\s()]/.test(src) ? `<${src.replace(/[<>]/g, "")}>` : src;
+    return `![${alt}](${destination}${titlePart})`;
   }
 
   const parts = [
@@ -492,19 +502,19 @@ const mapOutsideCode = (markdown: string, fn: (plain: string) => string): string
 };
 
 export const normalizePastedNoteMarkdown = (markdown: string): string => {
-  let body = normalizeLinkedBadgeImages(markdown);
-
-  body = mapOutsideCode(body, (plain) => (
-    plain.replace(/<a\b[^>]*>[\s\S]*?<\/a>|<img\b[\s\S]*?>/gi, (chunk) => {
+  // Badge + bare <img> cleanup only outside fenced/indented/inline code so
+  // samples like `[](https://…)` inside fences are not rewritten.
+  let body = mapOutsideCode(markdown, (plain) => {
+    let next = normalizeLinkedBadgeImages(plain);
+    next = next.replace(/<a\b[^>]*>[\s\S]*?<\/a>|<img\b[\s\S]*?>/gi, (chunk) => {
       if (/^<a\b/i.test(chunk)) return chunk;
       // Quote-aware img slice
       const end = findHtmlTagEnd(chunk.trim(), 0);
       const tag = end >= 0 ? chunk.trim().slice(0, end + 1) : chunk.trim();
       return convertHtmlImgTagToMarkdownOrHtml(tag) || "";
-    })
-  ));
-
-  body = normalizeLinkedBadgeImages(body);
+    });
+    return normalizeLinkedBadgeImages(next);
+  });
   body = stripOrphanLinkClosersOutsideCode(body);
   return trimBlankLines(body);
 };
@@ -562,27 +572,9 @@ export const convertHtmlIslandsInMarkdown = (markdown: string): string => {
     return normalizePastedNoteMarkdown(body);
   }
 
-  const fenceToken = (index: number) => `@@NETCATTY_MD_FENCE_${index}@@`;
-  const fences: string[] = [];
-  // Protect fences with 3+ fence chars
-  body = body.replace(
-    /(?:^|\n)(`{3,}|~{3,})[^\n]*\n[\s\S]*?\n\1[ \t]*(?=\n|$)/g,
-    (match) => {
-      const token = fenceToken(fences.length);
-      fences.push(match);
-      return token;
-    },
-  );
-
-  // Protect inline code
-  const inlineSlots: string[] = [];
-  body = body.replace(/`[^`\n]+`/g, (match) => {
-    const token = `@@NETCATTY_MD_INLINE_${inlineSlots.length}@@`;
-    inlineSlots.push(match);
-    return token;
-  });
-
-  body = body.replace(/<!--[\s\S]*?-->/g, "");
+  // Mask fenced + indented + inline code so HTML samples in code are not Turndown'd.
+  const { text: masked, slots } = maskCodeRegions(body);
+  body = masked.replace(/<!--[\s\S]*?-->/g, "");
 
   // Walk left-to-right converting HTML islands with balanced matching.
   let out = "";
@@ -648,15 +640,7 @@ export const convertHtmlIslandsInMarkdown = (markdown: string): string => {
     i = end;
   }
 
-  body = out;
-  body = body.replace(/@@NETCATTY_MD_INLINE_(\d+)@@/g, (_, idx: string) => (
-    inlineSlots[Number(idx)] ?? ""
-  ));
-  body = body.replace(/@@NETCATTY_MD_FENCE_(\d+)@@/g, (_, idx: string) => (
-    fences[Number(idx)] ?? ""
-  ));
-
-  return normalizePastedNoteMarkdown(body);
+  return normalizePastedNoteMarkdown(unmaskCodeRegions(out, slots));
 };
 
 /**

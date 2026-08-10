@@ -35,6 +35,7 @@ import {
   $isRangeSelection,
   $isTextNode,
   $setSelection,
+  CLEAR_HISTORY_COMMAND,
   getNearestEditorFromDOMNode,
 } from "lexical";
 import React, {
@@ -174,13 +175,6 @@ const noteCodeHighlightStyle = HighlightStyle.define([
 ]);
 
 const NOTE_CODE_MIRROR_EXTENSIONS = [syntaxHighlighting(noteCodeHighlightStyle)];
-
-/**
- * Note switches always yield a paint before setMarkdown so the tree selection
- * updates first. At or above this size we also show a blocking swap overlay —
- * Lexical markdown import is O(doc) and freezes the main thread while it runs.
- */
-export const NOTE_CONTENT_SWAP_LARGE_CHARS = 8_192;
 
 type RectLike = Pick<DOMRect, "bottom" | "height" | "left" | "top" | "width">;
 
@@ -690,17 +684,33 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
     return filterHostPickerHosts(hostCandidates, hostPicker.query);
   }, [hostCandidates, hostPicker.query]);
 
-  const cancelDeferredContentSwap = useCallback(() => {
+    const cancelDeferredContentSwap = useCallback(() => {
     const frames = contentSwapFramesRef.current;
     if (frames.outer) window.cancelAnimationFrame(frames.outer);
     if (frames.inner) window.cancelAnimationFrame(frames.inner);
     contentSwapFramesRef.current = { outer: 0, inner: 0 };
   }, []);
 
+  /** Clear shared Lexical undo/redo so Undo after a note switch cannot restore another note. */
+  const clearLexicalHistory = useCallback(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const editable = container.querySelector("[contenteditable]");
+    if (!(editable instanceof Element)) return;
+    const lexicalEditor = getNearestEditorFromDOMNode(editable);
+    if (!lexicalEditor) return;
+    try {
+      lexicalEditor.dispatchCommand(CLEAR_HISTORY_COMMAND, undefined);
+    } catch {
+      // History plugin may not be mounted yet.
+    }
+  }, []);
+
   // Swap note content without remounting MDX/Lexical (key=noteId was the main
   // switch lag). Parent flushes drafts before changing noteId/value.
   // Yield a paint (double rAF) before setMarkdown so the notes tree selection
-  // can commit first; large docs also get a blocking overlay while Lexical imports.
+  // can commit first; always show a blocking overlay while Lexical imports so
+  // toolbar/IME cannot mutate the previous note's tree.
   // Cancel pending frames via token/ref only on the next note switch or unmount —
   // not on effect re-runs for same-note value churn (that would drop the import).
   useEffect(() => {
@@ -726,16 +736,8 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
       cancelDeferredContentSwap();
       const token = contentSwapTokenRef.current + 1;
       contentSwapTokenRef.current = token;
-      // Always block input until import finishes (even without overlay) so keystrokes
-      // cannot land on the previous note's Lexical tree during the yield window.
       contentSwapPendingRef.current = true;
-
-      const isLarge = scheduledMarkdown.length >= NOTE_CONTENT_SWAP_LARGE_CHARS;
-      if (isLarge) {
-        setIsContentSwapping(true);
-      } else {
-        setIsContentSwapping(false);
-      }
+      setIsContentSwapping(true);
 
       contentSwapFramesRef.current.outer = window.requestAnimationFrame(() => {
         contentSwapFramesRef.current.outer = 0;
@@ -753,6 +755,7 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
           }
           try {
             editorRef.current?.setMarkdown(scheduledMarkdown);
+            clearLexicalHistory();
           } catch {
             // MDX may not be mounted yet (mode empty-preview); next mount gets markdown prop.
           }
@@ -782,10 +785,18 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
     latestMarkdownRef.current = markdown;
     try {
       editorRef.current?.setMarkdown(markdown);
+      clearLexicalHistory();
     } catch {
       // ignore
     }
-  }, [noteId, value, displayMarkdown, setLinkActionIfChanged, cancelDeferredContentSwap]);
+  }, [
+    noteId,
+    value,
+    displayMarkdown,
+    setLinkActionIfChanged,
+    cancelDeferredContentSwap,
+    clearLexicalHistory,
+  ]);
 
   useEffect(() => () => {
     pasteRecoveryGenerationRef.current += 1;
@@ -953,17 +964,24 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
         });
         return;
       }
+      // Debounced: still re-annotate host links after setMarkdown swaps in edit
+      // mode (childList) and after image width/height edits (attributes).
       if (debounceTimer) window.clearTimeout(debounceTimer);
       debounceTimer = window.setTimeout(() => {
         debounceTimer = 0;
-        runDecorations(false);
+        runDecorations(true);
       }, EDIT_DECORATION_DEBOUNCE_MS);
     };
 
     runDecorations(true);
 
     const observer = new MutationObserver(scheduleFromMutation);
-    observer.observe(container, { childList: true, subtree: true });
+    observer.observe(container, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["width", "height", "src", "href"],
+    });
     return () => {
       observer.disconnect();
       if (frame) window.cancelAnimationFrame(frame);
@@ -1402,32 +1420,41 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
     setLinkAction(null);
   }, [commitMarkdown, editorMode]);
 
+  const blockWhileContentSwapping = useCallback((event: React.SyntheticEvent) => {
+    if (!contentSwapPendingRef.current) return false;
+    event.preventDefault();
+    event.stopPropagation();
+    event.nativeEvent.stopImmediatePropagation?.();
+    return true;
+  }, []);
+
   return (
     <div
       ref={containerRef}
       className="relative flex h-full flex-col"
       aria-busy={isContentSwapping || undefined}
       onBlurCapture={handleBlurCapture}
-      onClickCapture={handleClickCapture}
-      onInputCapture={scheduleHostPickerUpdate}
+      onClickCapture={(event) => {
+        if (blockWhileContentSwapping(event)) return;
+        handleClickCapture(event);
+      }}
+      onPointerDownCapture={blockWhileContentSwapping}
+      onDragStartCapture={blockWhileContentSwapping}
+      onDropCapture={blockWhileContentSwapping}
+      onInputCapture={(event) => {
+        if (blockWhileContentSwapping(event)) return;
+        scheduleHostPickerUpdate();
+      }}
       onKeyDownCapture={(event) => {
-        // Block edits while a large-note Lexical import is deferred/running.
-        if (contentSwapPendingRef.current) {
-          event.preventDefault();
-          event.stopPropagation();
-          return;
-        }
+        // Block edits while Lexical import is deferred/running (toolbar/IME too).
+        if (blockWhileContentSwapping(event)) return;
         handleKeyDownCapture(event);
       }}
       onKeyUpCapture={handleKeyUpCapture}
       onMouseLeave={() => setLinkAction(null)}
       onMouseMoveCapture={handleMouseMoveCapture}
       onPasteCapture={(event) => {
-        if (contentSwapPendingRef.current) {
-          event.preventDefault();
-          event.stopPropagation();
-          return;
-        }
+        if (blockWhileContentSwapping(event)) return;
         handlePasteCapture(event);
       }}
     >

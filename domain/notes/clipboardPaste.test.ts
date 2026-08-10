@@ -6,6 +6,7 @@ import {
   convertClipboardHtmlToMarkdown,
   convertHtmlImgTagToMarkdownOrHtml,
   convertHtmlIslandsInMarkdown,
+  decodeHtmlEntities,
   normalizeLinkedBadgeImages,
   normalizePastedNoteMarkdown,
   plainMarkdownContainsHtml,
@@ -395,4 +396,44 @@ test("nested same-tag HTML islands convert without truncating outer close", () =
   assert.match(md, /inner/);
   assert.match(md, /after/);
   assert.match(md, /# Done/);
+});
+
+test("decodeHtmlEntities ignores out-of-range numeric entities", () => {
+  assert.equal(decodeHtmlEntities("ok &#65; end"), "ok A end");
+  assert.equal(decodeHtmlEntities("bad &#1114112; keep"), "bad &#1114112; keep");
+  assert.equal(decodeHtmlEntities("bad &#x110000; keep"), "bad &#x110000; keep");
+  assert.doesNotThrow(() => decodeHtmlEntities("&#x110000;&#1114112;"));
+});
+
+test("serializeSafeHtmlImage angles destinations that contain spaces", () => {
+  assert.equal(
+    serializeSafeHtmlImage({ src: "images/company logo.png", alt: "logo" }),
+    "![logo](<images/company logo.png>)",
+  );
+});
+
+test("indented code HTML samples are not converted as islands", () => {
+  const source = [
+    "Intro",
+    "",
+    "    <img src=\"https://example.com/code.png\" />",
+    "",
+    '<img src="https://example.com/real.png" />',
+  ].join("\n");
+  const md = convertHtmlIslandsInMarkdown(source);
+  assert.match(md, / {4}<img src="https:\/\/example\.com\/code\.png" \/>/);
+  assert.match(md, /!\[\]\(https:\/\/example\.com\/real\.png\)|src="https:\/\/example\.com\/real\.png"/);
+});
+
+test("linked badge examples inside fenced code are not rewritten", () => {
+  const source = [
+    "```md",
+    "[![shield](http://img.shields.io/badge/x-1-blue)](http://example.com)",
+    "```",
+    "",
+    "[![live](http://img.shields.io/badge/y-2-green)](http://example.com)",
+  ].join("\n");
+  const md = normalizePastedNoteMarkdown(source);
+  assert.match(md, /```md\n\[!\[shield\]\(http:\/\/img\.shields\.io/);
+  assert.match(md, /!\[live\]\(https:\/\/img\.shields\.io/);
 });

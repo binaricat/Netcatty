@@ -95,8 +95,12 @@ test("note switches reuse MDX instance instead of key=noteId remount", () => {
     /contentSwapFramesRef\.current\.inner = window\.requestAnimationFrame/,
     "inner rAF completes the double-yield before setMarkdown",
   );
-  assert.match(editorSource, /NOTE_CONTENT_SWAP_LARGE_CHARS/);
   assert.match(editorSource, /data-notes-content-swapping="true"/);
+  assert.match(editorSource, /setIsContentSwapping\(true\)/);
+  assert.match(editorSource, /CLEAR_HISTORY_COMMAND/);
+  assert.match(editorSource, /clearLexicalHistory/);
+  assert.match(editorSource, /attributeFilter:\s*\[\s*"width",\s*"height"/);
+  assert.match(editorSource, /onPointerDownCapture=\{blockWhileContentSwapping\}/);
   assert.match(editorSource, /startTransition\(\(\) => setIsContentSwapping\(false\)\)/);
   assert.match(
     editorSource,
@@ -112,6 +116,11 @@ test("note switches reuse MDX instance instead of key=noteId remount", () => {
     editorSource,
     /syncedPropValueRef\.current = markdown;/,
     "draft-clobber guard compares display-normalized values after note switch",
+  );
+  assert.match(
+    editorSource,
+    /runDecorations\(true\)/,
+    "edit-mode note swaps must re-annotate host links after setMarkdown",
   );
 });
 
