@@ -442,8 +442,6 @@ export const normalizeLinkedBadgeImages = (markdown: string): string => {
   return body;
 };
 
-export const collapseLinkedImagesToTextLinks = normalizeLinkedBadgeImages;
-
 type CodeMask = { text: string; slots: string[] };
 
 /** Mask fenced (3+ ticks), indented, and inline code so cleanup won't touch them. */

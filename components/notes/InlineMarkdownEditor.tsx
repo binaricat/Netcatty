@@ -607,8 +607,9 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
 }: InlineMarkdownEditorProps) {
   const { t } = useI18n();
   const editorRef = useRef<MDXEditorMethods>(null);
-  const latestMarkdownRef = useRef(value);
-  const syncedPropValueRef = useRef(value);
+  // Display-normalized space (same as setMarkdown / public-asset rewrite).
+  const latestMarkdownRef = useRef(normalizeNotePublicAssetPaths(value));
+  const syncedPropValueRef = useRef(normalizeNotePublicAssetPaths(value));
   const noteIdRef = useRef(noteId);
   // Bumped on unmount / external value sync so deferred paste recovery cannot
   // commit into a switched or unmounted note.
@@ -711,8 +712,10 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
       const scheduledMarkdown = markdown;
       noteIdRef.current = noteId;
       pasteRecoveryGenerationRef.current += 1;
+      // Keep both refs in displayMarkdown space so public-path normalization
+      // does not look like a divergent local draft.
       latestMarkdownRef.current = markdown;
-      syncedPropValueRef.current = value;
+      syncedPropValueRef.current = markdown;
       setHostPicker((current) => (
         current.open
           ? { ...current, open: false, query: "", selectedIndex: 0 }
@@ -766,7 +769,8 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
     }
 
     if (latestMarkdownRef.current === value || latestMarkdownRef.current === markdown) {
-      syncedPropValueRef.current = value;
+      latestMarkdownRef.current = markdown;
+      syncedPropValueRef.current = markdown;
       return;
     }
     // Local draft diverged from last external value — do not clobber.
@@ -774,7 +778,7 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
       return;
     }
     pasteRecoveryGenerationRef.current += 1;
-    syncedPropValueRef.current = value;
+    syncedPropValueRef.current = markdown;
     latestMarkdownRef.current = markdown;
     try {
       editorRef.current?.setMarkdown(markdown);
@@ -974,6 +978,9 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
   }, [annotateHostLinks, hosts]);
 
   const commitMarkdown = useCallback((markdown: string) => {
+    // Deferred note-switch still shows the previous Lexical tree; ignore muted
+    // or stale onChange so we never write note A's body into note B's draft.
+    if (contentSwapPendingRef.current) return;
     if (markdown === latestMarkdownRef.current) return;
     latestMarkdownRef.current = markdown;
     onChange(markdown);
@@ -1263,10 +1270,20 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
     if (strategy === "document-merge") {
       applyDocumentPaste();
     } else {
-      const before = latestMarkdownRef.current;
+      // Baseline the live Lexical export — after muted setMarkdown (note switch),
+      // latestMarkdownRef can still be the input string while getMarkdown() is the
+      // round-tripped export. Comparing against the ref alone can false-positive
+      // "paste applied" and drop the clipboard body after preventDefault.
+      const beforeLatest = latestMarkdownRef.current;
+      let beforeEditor = beforeLatest;
+      try {
+        beforeEditor = editor.getMarkdown();
+      } catch {
+        beforeEditor = beforeLatest;
+      }
       const recoveryGeneration = ++pasteRecoveryGenerationRef.current;
       const maxAttempts = resolveNoteMarkdownPasteSettleAttempts(markdown.length);
-      const emptyDoc = !before.replace(/\s+/g, "");
+      const emptyDoc = !beforeEditor.replace(/\s+/g, "");
       const pasteTarget = event.target;
       // After the first insert is definitively unchanged, retry once at the
       // selection — never mid-window (that can double-apply a merely-slow update).
@@ -1274,10 +1291,26 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
         3,
         Math.floor(NOTE_MARKDOWN_PASTE_SETTLE_MIN_ATTEMPTS / 2),
       );
+      const draftStillOurs = () => (
+        latestMarkdownRef.current === beforeLatest
+        || latestMarkdownRef.current === beforeEditor
+      );
 
       const recoverInterceptedPasteAtSelection = () => {
         if (pasteRecoveryGenerationRef.current !== recoveryGeneration) return;
-        if (latestMarkdownRef.current !== before) return;
+        if (!draftStillOurs()) return;
+        // First insert may still be in flight past the poll window — re-check
+        // before a second insertMarkdown to avoid double-applying a slow update.
+        let live = beforeEditor;
+        try {
+          live = editor.getMarkdown();
+        } catch {
+          live = beforeEditor;
+        }
+        if (live !== beforeEditor) {
+          commitMarkdown(live);
+          return;
+        }
         try {
           editor.focus();
           editor.insertMarkdown(markdown);
@@ -1286,14 +1319,14 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
         }
         const tryCommitRecoveredPaste = (attempt: number) => {
           if (pasteRecoveryGenerationRef.current !== recoveryGeneration) return;
-          if (latestMarkdownRef.current !== before) return;
-          let current = before;
+          if (!draftStillOurs()) return;
+          let current = beforeEditor;
           try {
             current = editor.getMarkdown();
           } catch {
-            current = before;
+            current = beforeEditor;
           }
-          if (current !== before) {
+          if (current !== beforeEditor) {
             commitMarkdown(current);
             return;
           }
@@ -1308,7 +1341,7 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
           if (!insertClipboardTextAtActiveLexicalSelection(pasteTarget, markdown)) return;
           try {
             const next = editor.getMarkdown();
-            if (next !== before) commitMarkdown(next);
+            if (next !== beforeEditor) commitMarkdown(next);
           } catch {
             // Selection insert may not serialize; avoid discarding silently only
             // when Lexical accepted the text (didInsert). Nothing more to commit.
@@ -1336,8 +1369,8 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
       // only for an empty document).
       const tryCommitSettledPaste = (attempt: number) => {
         if (pasteRecoveryGenerationRef.current !== recoveryGeneration) return;
-        if (latestMarkdownRef.current !== before) return;
-        let current = before;
+        if (!draftStillOurs()) return;
+        let current = beforeEditor;
         try {
           current = editor.getMarkdown();
         } catch {
@@ -1345,7 +1378,7 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
           else recoverInterceptedPasteAtSelection();
           return;
         }
-        if (current !== before) {
+        if (current !== beforeEditor) {
           commitMarkdown(current);
           return;
         }

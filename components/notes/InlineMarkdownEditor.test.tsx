@@ -219,10 +219,15 @@ test("preview mode opens links directly without showing the edit hover action", 
   const source = readFileSync(new URL("./InlineMarkdownEditor.tsx", import.meta.url), "utf8");
 
   assert.match(source, /const handleClickCapture = useCallback/);
-  assert.match(source, /if \(editorMode !== "preview"\) \{[\s\S]*scheduleHostPickerUpdate\(\);[\s\S]*return;/);
+  assert.match(
+    source,
+    /if \(editorMode === "preview"\) \{[\s\S]*toggleTaskListItemAtIndex[\s\S]*const handled = openLink\(href, label\);/,
+    "preview click path handles task toggles then openable links",
+  );
   assert.match(source, /const handled = openLink\(href, label\);[\s\S]*if \(!handled\) return;[\s\S]*event\.preventDefault\(\);/);
+  assert.match(source, /scheduleHostPickerUpdate\(\);\s*\n\s*\}, \[commitMarkdown, editorMode, openLink, scheduleHostPickerUpdate\]/);
   assert.match(source, /onClickCapture=\{handleClickCapture\}/);
-  assert.match(source, /if \(editorMode !== "edit"\) \{[\s\S]*setLinkAction\(null\);[\s\S]*return;/);
+  assert.match(source, /if \(editorMode !== "edit"\) \{[\s\S]*setLinkActionIfChanged\(null\);[\s\S]*return;/);
   assert.match(source, /\{editorMode === "edit" && linkAction && \(/);
 });
 

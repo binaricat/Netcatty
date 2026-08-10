@@ -32,6 +32,27 @@ test("toggleTaskListItemAtIndex preserves indentation and surrounding text", () 
   assert.equal(next, "  - [x] nested code `apt`\n- [x] done");
 });
 
+test("toggleTaskListItemAtIndex ignores checkboxes inside fenced code", () => {
+  const src = [
+    "- [ ] real",
+    "```",
+    "- [ ] fake",
+    "```",
+    "- [ ] second",
+  ].join("\n");
+  assert.equal(countTaskListItems(src), 2);
+  const next = toggleTaskListItemAtIndex(src, 1);
+  assert.match(next, /^- \[ \] real$/m);
+  assert.match(next, /^- \[ \] fake$/m);
+  assert.match(next, /^- \[x\] second$/m);
+});
+
+test("toggleTaskListItemAtIndex handles blockquote task lines", () => {
+  const src = "> - [ ] quoted\n- [ ] plain";
+  assert.equal(countTaskListItems(src), 2);
+  assert.match(toggleTaskListItemAtIndex(src, 0), /^> - \[x\] quoted$/m);
+});
+
 test("isPointerOnTaskCheckbox only accepts the left hit box", () => {
   const rect = { left: 100, right: 400 };
   assert.equal(isPointerOnTaskCheckbox(rect, 100), true);

@@ -20,7 +20,6 @@ export {
   findHtmlTagEnd,
   convertHtmlImgTagToMarkdownOrHtml,
   normalizeLinkedBadgeImages,
-  collapseLinkedImagesToTextLinks,
   maskCodeRegions,
   unmaskCodeRegions,
   normalizePastedNoteMarkdown,

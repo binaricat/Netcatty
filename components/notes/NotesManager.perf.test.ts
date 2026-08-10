@@ -103,6 +103,16 @@ test("note switches reuse MDX instance instead of key=noteId remount", () => {
     /latestMarkdownRef\.current !== scheduledMarkdown/,
     "deferred setMarkdown must not clobber edits typed after the switch",
   );
+  assert.match(
+    editorSource,
+    /if \(contentSwapPendingRef\.current\) return;/,
+    "stale onChange during the swap yield must not write the previous note into the new draft",
+  );
+  assert.match(
+    editorSource,
+    /syncedPropValueRef\.current = markdown;/,
+    "draft-clobber guard compares display-normalized values after note switch",
+  );
 });
 
 test("host-link annotation does not re-run on every markdown value keystroke", () => {

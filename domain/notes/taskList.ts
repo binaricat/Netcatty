@@ -4,33 +4,42 @@
  * reuses these pure transforms so checkboxes stay clickable.
  */
 
-/** Matches "- [ ]", "* [x]", "1. [X]" etc. at line start (indent allowed). */
-const TASK_LIST_ITEM_PATTERN = "^([ \\t]*(?:[-*+]|\\d+\\.)[ \\t]+)\\[([ xX])\\]";
+import { maskCodeRegions, unmaskCodeRegions } from "./clipboardPaste";
+
+/**
+ * Matches "- [ ]", "* [x]", "1. [X]", and optional blockquote prefixes
+ * (`> - [ ]`) at line start. Code regions are masked before matching so fence
+ * contents never steal a DOM checkbox index.
+ */
+const TASK_LIST_ITEM_PATTERN =
+  "^([ \\t]*(?:>[ \\t]*)*(?:[-*+]|\\d+\\.)[ \\t]+)\\[([ xX])\\]";
 
 const createTaskListItemRe = (): RegExp => new RegExp(TASK_LIST_ITEM_PATTERN, "gm");
 
 export const countTaskListItems = (markdown: string): number => {
-  const matches = markdown.match(createTaskListItemRe());
-  return matches?.length ?? 0;
+  const { text } = maskCodeRegions(markdown);
+  return text.match(createTaskListItemRe())?.length ?? 0;
 };
 
 /**
- * Toggle the Nth GFM task checkbox (0-based document order).
- * Returns the original string when the index is out of range.
+ * Toggle the Nth GFM task checkbox (0-based order among rendered tasks:
+ * outside fenced/indented/inline code). Returns the original string when the
+ * index is out of range.
  */
 export const toggleTaskListItemAtIndex = (markdown: string, index: number): string => {
   if (index < 0 || !Number.isFinite(index)) return markdown;
 
+  const { text, slots } = maskCodeRegions(markdown);
   let seen = 0;
   let changed = false;
-  const next = markdown.replace(createTaskListItemRe(), (full, prefix: string, mark: string) => {
+  const next = text.replace(createTaskListItemRe(), (full, prefix: string, mark: string) => {
     if (seen++ !== index) return full;
     changed = true;
     const nextMark = mark === " " ? "x" : " ";
     return `${prefix}[${nextMark}]`;
   });
 
-  return changed ? next : markdown;
+  return changed ? unmaskCodeRegions(next, slots) : markdown;
 };
 
 /** Left-edge hit box for checklist toggles (checkbox + padding), in CSS px. */
