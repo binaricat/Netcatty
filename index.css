@@ -1742,6 +1742,7 @@ html[data-theme-transition] *::after {
   border-radius: 0.375rem;
 }
 
+/* Width-only (or no size): keep aspect ratio via height:auto. */
 .netcatty-mdx-content img:not([height]),
 .netcatty-mdx-content img[width],
 .netcatty-mdx-editor [class*="_imageWrapper_"] img:not([height]),
@@ -1749,6 +1750,14 @@ html[data-theme-transition] *::after {
 .netcatty-mdx-editor img:not([height]),
 .netcatty-mdx-editor img[width] {
   height: auto !important;
+}
+
+/* Height-only: keep aspect ratio via width:auto (do not force height:auto above). */
+.netcatty-mdx-content img[height]:not([width]),
+.netcatty-mdx-editor [class*="_imageWrapper_"] img[height]:not([width]),
+.netcatty-mdx-editor img[height]:not([width]) {
+  width: auto !important;
+  max-width: 100% !important;
 }
 
 /* Cap MDX image chrome when ImageNode bakes large pixel widths into styles. */
@@ -1869,18 +1878,34 @@ html[data-theme-transition] *::after {
   margin: 0 !important;
 }
 
-/* Small-icon chrome: trash/settings only on hover so rows stay readable. */
+/* Small-icon chrome: trash/settings only on hover (all compact widths 16–96). */
 .netcatty-mdx-editor [data-editor-block-type="image"]:has(img[width="16"]) [class*="_editImageToolbar_"],
+.netcatty-mdx-editor [data-editor-block-type="image"]:has(img[width="20"]) [class*="_editImageToolbar_"],
 .netcatty-mdx-editor [data-editor-block-type="image"]:has(img[width="24"]) [class*="_editImageToolbar_"],
+.netcatty-mdx-editor [data-editor-block-type="image"]:has(img[width="28"]) [class*="_editImageToolbar_"],
 .netcatty-mdx-editor [data-editor-block-type="image"]:has(img[width="32"]) [class*="_editImageToolbar_"],
+.netcatty-mdx-editor [data-editor-block-type="image"]:has(img[width="36"]) [class*="_editImageToolbar_"],
+.netcatty-mdx-editor [data-editor-block-type="image"]:has(img[width="40"]) [class*="_editImageToolbar_"],
+.netcatty-mdx-editor [data-editor-block-type="image"]:has(img[width="44"]) [class*="_editImageToolbar_"],
 .netcatty-mdx-editor [data-editor-block-type="image"]:has(img[width="48"]) [class*="_editImageToolbar_"],
+.netcatty-mdx-editor [data-editor-block-type="image"]:has(img[width="56"]) [class*="_editImageToolbar_"],
 .netcatty-mdx-editor [data-editor-block-type="image"]:has(img[width="64"]) [class*="_editImageToolbar_"],
+.netcatty-mdx-editor [data-editor-block-type="image"]:has(img[width="72"]) [class*="_editImageToolbar_"],
+.netcatty-mdx-editor [data-editor-block-type="image"]:has(img[width="80"]) [class*="_editImageToolbar_"],
 .netcatty-mdx-editor [data-editor-block-type="image"]:has(img[width="96"]) [class*="_editImageToolbar_"],
 .netcatty-mdx-editor [class*="_imageWrapper_"]:has(img[width="16"]) [class*="_editImageToolbar_"],
+.netcatty-mdx-editor [class*="_imageWrapper_"]:has(img[width="20"]) [class*="_editImageToolbar_"],
 .netcatty-mdx-editor [class*="_imageWrapper_"]:has(img[width="24"]) [class*="_editImageToolbar_"],
+.netcatty-mdx-editor [class*="_imageWrapper_"]:has(img[width="28"]) [class*="_editImageToolbar_"],
 .netcatty-mdx-editor [class*="_imageWrapper_"]:has(img[width="32"]) [class*="_editImageToolbar_"],
+.netcatty-mdx-editor [class*="_imageWrapper_"]:has(img[width="36"]) [class*="_editImageToolbar_"],
+.netcatty-mdx-editor [class*="_imageWrapper_"]:has(img[width="40"]) [class*="_editImageToolbar_"],
+.netcatty-mdx-editor [class*="_imageWrapper_"]:has(img[width="44"]) [class*="_editImageToolbar_"],
 .netcatty-mdx-editor [class*="_imageWrapper_"]:has(img[width="48"]) [class*="_editImageToolbar_"],
+.netcatty-mdx-editor [class*="_imageWrapper_"]:has(img[width="56"]) [class*="_editImageToolbar_"],
 .netcatty-mdx-editor [class*="_imageWrapper_"]:has(img[width="64"]) [class*="_editImageToolbar_"],
+.netcatty-mdx-editor [class*="_imageWrapper_"]:has(img[width="72"]) [class*="_editImageToolbar_"],
+.netcatty-mdx-editor [class*="_imageWrapper_"]:has(img[width="80"]) [class*="_editImageToolbar_"],
 .netcatty-mdx-editor [class*="_imageWrapper_"]:has(img[width="96"]) [class*="_editImageToolbar_"] {
   opacity: 0;
   pointer-events: none;
@@ -1888,16 +1913,32 @@ html[data-theme-transition] *::after {
 }
 
 .netcatty-mdx-editor [data-editor-block-type="image"]:has(img[width="16"]):hover [class*="_editImageToolbar_"],
+.netcatty-mdx-editor [data-editor-block-type="image"]:has(img[width="20"]):hover [class*="_editImageToolbar_"],
 .netcatty-mdx-editor [data-editor-block-type="image"]:has(img[width="24"]):hover [class*="_editImageToolbar_"],
+.netcatty-mdx-editor [data-editor-block-type="image"]:has(img[width="28"]):hover [class*="_editImageToolbar_"],
 .netcatty-mdx-editor [data-editor-block-type="image"]:has(img[width="32"]):hover [class*="_editImageToolbar_"],
+.netcatty-mdx-editor [data-editor-block-type="image"]:has(img[width="36"]):hover [class*="_editImageToolbar_"],
+.netcatty-mdx-editor [data-editor-block-type="image"]:has(img[width="40"]):hover [class*="_editImageToolbar_"],
+.netcatty-mdx-editor [data-editor-block-type="image"]:has(img[width="44"]):hover [class*="_editImageToolbar_"],
 .netcatty-mdx-editor [data-editor-block-type="image"]:has(img[width="48"]):hover [class*="_editImageToolbar_"],
+.netcatty-mdx-editor [data-editor-block-type="image"]:has(img[width="56"]):hover [class*="_editImageToolbar_"],
 .netcatty-mdx-editor [data-editor-block-type="image"]:has(img[width="64"]):hover [class*="_editImageToolbar_"],
+.netcatty-mdx-editor [data-editor-block-type="image"]:has(img[width="72"]):hover [class*="_editImageToolbar_"],
+.netcatty-mdx-editor [data-editor-block-type="image"]:has(img[width="80"]):hover [class*="_editImageToolbar_"],
 .netcatty-mdx-editor [data-editor-block-type="image"]:has(img[width="96"]):hover [class*="_editImageToolbar_"],
 .netcatty-mdx-editor [class*="_imageWrapper_"]:has(img[width="16"]):hover [class*="_editImageToolbar_"],
+.netcatty-mdx-editor [class*="_imageWrapper_"]:has(img[width="20"]):hover [class*="_editImageToolbar_"],
 .netcatty-mdx-editor [class*="_imageWrapper_"]:has(img[width="24"]):hover [class*="_editImageToolbar_"],
+.netcatty-mdx-editor [class*="_imageWrapper_"]:has(img[width="28"]):hover [class*="_editImageToolbar_"],
 .netcatty-mdx-editor [class*="_imageWrapper_"]:has(img[width="32"]):hover [class*="_editImageToolbar_"],
+.netcatty-mdx-editor [class*="_imageWrapper_"]:has(img[width="36"]):hover [class*="_editImageToolbar_"],
+.netcatty-mdx-editor [class*="_imageWrapper_"]:has(img[width="40"]):hover [class*="_editImageToolbar_"],
+.netcatty-mdx-editor [class*="_imageWrapper_"]:has(img[width="44"]):hover [class*="_editImageToolbar_"],
 .netcatty-mdx-editor [class*="_imageWrapper_"]:has(img[width="48"]):hover [class*="_editImageToolbar_"],
+.netcatty-mdx-editor [class*="_imageWrapper_"]:has(img[width="56"]):hover [class*="_editImageToolbar_"],
 .netcatty-mdx-editor [class*="_imageWrapper_"]:has(img[width="64"]):hover [class*="_editImageToolbar_"],
+.netcatty-mdx-editor [class*="_imageWrapper_"]:has(img[width="72"]):hover [class*="_editImageToolbar_"],
+.netcatty-mdx-editor [class*="_imageWrapper_"]:has(img[width="80"]):hover [class*="_editImageToolbar_"],
 .netcatty-mdx-editor [class*="_imageWrapper_"]:has(img[width="96"]):hover [class*="_editImageToolbar_"] {
   opacity: 1;
   pointer-events: auto;

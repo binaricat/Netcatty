@@ -278,16 +278,16 @@ export const shouldInterceptNoteMarkdownPaste = (input: {
 };
 
 /**
- * Lexical `insertMarkdown` often no-ops or stalls on large structured markdown
- * after our capture-phase preventDefault. Above this size, prefer a document-
- * level setMarkdown merge so long paste is never silently swallowed.
+ * Long pastes still use insertMarkdown when a caret/selection exists so we do
+ * not jump content to the document end (document-merge appends).
+ * Settle attempts scale up for large payloads.
  */
 export const NOTE_MARKDOWN_PASTE_INSERT_MAX_CHARS = 4_000;
 
 /** Poll window for deferred insertMarkdown settlement before document recovery. */
 export const NOTE_MARKDOWN_PASTE_SETTLE_POLL_MS = 50;
 export const NOTE_MARKDOWN_PASTE_SETTLE_MIN_ATTEMPTS = 6;
-export const NOTE_MARKDOWN_PASTE_SETTLE_MAX_ATTEMPTS = 24;
+export const NOTE_MARKDOWN_PASTE_SETTLE_MAX_ATTEMPTS = 40;
 
 export type NoteMarkdownPasteStrategy = "document-merge" | "insert-at-selection";
 
@@ -295,17 +295,15 @@ export const resolveNoteMarkdownPasteStrategy = (input: {
   canInsertMarkdownAtSelection: boolean;
   clipboardText: string;
 }): NoteMarkdownPasteStrategy => {
+  // Only fall back to whole-document merge when Lexical has no caret/selection.
+  // Forcing document-merge on long pastes used to append at EOF and lose caret.
   if (!input.canInsertMarkdownAtSelection) return "document-merge";
-  // Long structured paste: skip Lexical insert (frequently no-ops / freezes UI).
-  if (input.clipboardText.length >= NOTE_MARKDOWN_PASTE_INSERT_MAX_CHARS) {
-    return "document-merge";
-  }
   return "insert-at-selection";
 };
 
 /** Scale settle polls with paste size so slow inserts are not treated as no-ops. */
 export const resolveNoteMarkdownPasteSettleAttempts = (clipboardLength: number): number => {
-  const scaled = Math.ceil(clipboardLength / 1_500);
+  const scaled = Math.ceil(clipboardLength / 1_200);
   return Math.min(
     NOTE_MARKDOWN_PASTE_SETTLE_MAX_ATTEMPTS,
     Math.max(NOTE_MARKDOWN_PASTE_SETTLE_MIN_ATTEMPTS, scaled),
@@ -1021,28 +1019,28 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
       clipboardText: markdown,
     });
 
-    // No caret, or long structured paste: document merge (setMarkdown + commit).
-    // insertMarkdown frequently no-ops / stalls on large markdown after preventDefault.
+    // Document merge (append) only when there is no caret. With a selection,
+    // always insertMarkdown and never fall back to EOF append.
     if (strategy === "document-merge") {
       applyDocumentPaste();
     } else {
       const before = latestMarkdownRef.current;
       const recoveryGeneration = ++pasteRecoveryGenerationRef.current;
       const maxAttempts = resolveNoteMarkdownPasteSettleAttempts(markdown.length);
+      const emptyDoc = !before.replace(/\s+/g, "");
       try {
         editor.focus();
         editor.insertMarkdown(markdown);
       } catch {
-        // Lexical/MDX can throw on pathological markdown; never swallow the paste.
-        applyDocumentPaste();
+        // Only append when the document is empty — never jump mid-doc paste to EOF.
+        if (emptyDoc) applyDocumentPaste();
         setHostPicker((current) => ({ ...current, open: false, query: "", selectedIndex: 0 }));
         setLinkAction(null);
         return;
       }
-      // insertMarkdown's Lexical update is deferred. If onChange is muted/missed but
-      // the document changed, commit; if it still no-ops after the settle window,
-      // recover via document merge (gated on generation + unchanged body so a late
-      // insert cannot double-apply).
+      // insertMarkdown's Lexical update is deferred. Commit when settled; if it
+      // still no-ops after the settle window, re-try insert once, then append
+      // only for an empty document (preserve caret for non-empty notes).
       const tryCommitSettledPaste = (attempt: number) => {
         if (pasteRecoveryGenerationRef.current !== recoveryGeneration) return;
         if (latestMarkdownRef.current !== before) return;
@@ -1050,15 +1048,23 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
         try {
           current = editor.getMarkdown();
         } catch {
-          applyDocumentPaste();
+          if (emptyDoc) applyDocumentPaste();
           return;
         }
         if (current !== before) {
           commitMarkdown(current);
           return;
         }
+        if (attempt === Math.floor(maxAttempts / 2)) {
+          try {
+            editor.focus();
+            editor.insertMarkdown(markdown);
+          } catch {
+            // ignore; settle loop continues
+          }
+        }
         if (attempt >= maxAttempts) {
-          applyDocumentPaste();
+          if (emptyDoc) applyDocumentPaste();
           return;
         }
         window.setTimeout(
