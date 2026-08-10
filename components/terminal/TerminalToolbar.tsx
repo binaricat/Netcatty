@@ -29,6 +29,7 @@ import type { ToolbarItemLayoutDefaults } from '../../domain/toolbarItemLayout';
 import { STORAGE_KEY_TERMINAL_TOOLBAR_LAYOUT } from '../../infrastructure/config/storageKeys';
 import { Host, Snippet } from '../../types';
 import { ScriptsSidePanel } from '../ScriptsSidePanel';
+import { VaultDeleteConfirmDialog } from '../vault/VaultDeleteConfirmDialog';
 import { Button } from '../ui/button';
 import { Popover, PopoverClose, PopoverContent, PopoverTrigger } from '../ui/popover';
 import { ToolbarCustomizeContextMenu } from '../ui/toolbar-item-layout';
@@ -90,6 +91,8 @@ export interface TerminalToolbarProps {
   snippets?: Snippet[];
   snippetPackages?: string[];
   onSnippetClick?: (snippet: Snippet) => void;
+  /** Popup vault mutation path — compact toolbar has no AppSideEffects listener. */
+  onDeleteSnippets?: (ids: ReadonlySet<string>) => void;
   onOpenSFTP: () => void;
   onSendYmodem?: () => void;
   onReceiveYmodem?: () => void;
@@ -127,6 +130,7 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
   snippets = [],
   snippetPackages = [],
   onSnippetClick,
+  onDeleteSnippets,
   onOpenSFTP,
   onSendYmodem,
   onReceiveYmodem,
@@ -179,6 +183,12 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
     .sort(comparePluginMenus);
   const [highlightPopoverOpen, setHighlightPopoverOpen] = useState(false);
   const [scriptsPopoverOpen, setScriptsPopoverOpen] = useState(false);
+  // Owned outside the scripts Popover so portalled Dialog focus cannot dismiss
+  // the menu and unmount ScriptsSidePanel before the user confirms.
+  const [pendingScriptDeleteIds, setPendingScriptDeleteIds] = useState<string[] | null>(null);
+  const pendingScriptDeleteCount = (pendingScriptDeleteIds ?? []).filter((id) =>
+    snippets.some((snippet) => snippet.id === id),
+  ).length;
   // Overflow popover + encoding submenu are both controlled so that
   // picking an encoding closes the whole chain, and so the parent popover
   // can ignore clicks that land in the submenu portal (otherwise the
@@ -379,6 +389,7 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
               snippets={snippets}
               packages={snippetPackages}
               isVisible={scriptsPopoverOpen}
+              onBulkDeleteRequest={setPendingScriptDeleteIds}
               onSnippetClick={(snippet) => {
                 onSnippetClick?.(snippet);
                 setScriptsPopoverOpen(false);
@@ -386,6 +397,29 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
             />
           </PopoverContent>
         </Popover>
+        <VaultDeleteConfirmDialog
+          open={Boolean(pendingScriptDeleteIds)}
+          title={t('snippets.selection.deleteConfirmTitle', {
+            count: pendingScriptDeleteCount,
+          })}
+          description={t('snippets.selection.deleteConfirmDesc')}
+          onOpenChange={(open) => {
+            if (!open) setPendingScriptDeleteIds(null);
+          }}
+          onConfirm={() => {
+            const ids = (pendingScriptDeleteIds ?? []).filter((id) =>
+              snippets.some((snippet) => snippet.id === id),
+            );
+            setPendingScriptDeleteIds(null);
+            if (ids.length === 0) return;
+            // Popup terminals own vault state locally (no AppSideEffects).
+            onDeleteSnippets?.(new Set(ids));
+            // Still emit so ScriptsSidePanel can clear multi-select in the popover.
+            window.dispatchEvent(
+              new CustomEvent('netcatty:snippets:delete', { detail: { ids } }),
+            );
+          }}
+        />
         </TooltipProvider>
       </div>
     );

@@ -246,6 +246,27 @@ function quoteRestoreCwdArgument(cwd: string): string {
   return quoteRestoreCwdForShell(cwd);
 }
 
+/** True when a path contains C0/DEL bytes that interactive readline would act on. */
+function pathHasInteractivePtyControlBytes(path: string): boolean {
+  for (let i = 0; i < path.length; i++) {
+    const code = path.charCodeAt(i);
+    if (code <= 0x1f || code === 0x7f) return true;
+  }
+  return false;
+}
+
+/** Build a user-initiated `cd` for an absolute/home path (SFTP -> terminal). */
+export function resolveInteractiveTerminalCdIntent(
+  cwd: string | null | undefined,
+): { cwd: string; command: string } | null {
+  // Eligibility uses a normalized view; keep the exact path for quoting so
+  // trailing whitespace in POSIX names is preserved.
+  if (!isRestoreCwdPathEligible(cwd)) return null;
+  // Shell quoting does not protect tab/ESC/Ctrl-U while readline processes keystrokes.
+  if (pathHasInteractivePtyControlBytes(cwd)) return null;
+  return { cwd, command: `cd -- ${quoteRestoreCwdArgument(cwd)}` };
+}
+
 export function resolveRestoreCwdIntent(options: {
   enabled: boolean;
   session: RestoreCwdSession;

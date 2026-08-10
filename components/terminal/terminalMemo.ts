@@ -15,6 +15,7 @@ export const terminalPropsAreEqual = (
   && prev.snippetPackages === next.snippetPackages
   && prev.compactToolbar === next.compactToolbar
   && prev.lineTimestampsAvailable === next.lineTimestampsAvailable
+  && prev.onDeleteSnippets === next.onDeleteSnippets
   && prev.chainHosts === next.chainHosts
   && themeFingerprint(prev.appearanceTheme ?? prev.terminalTheme) === themeFingerprint(next.appearanceTheme ?? next.terminalTheme)
   && prev.knownHosts === next.knownHosts

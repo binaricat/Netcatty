@@ -766,7 +766,9 @@ export const encodeKittyCompositionText = (
 ): string | null => {
   const flags = getKittyKeyboardModeFlags(state);
   if (!(flags & KITTY_KEYBOARD_REPORT_ALL_KEYS_AS_ESC_CODES)) return null;
-  if (!(flags & KITTY_KEYBOARD_REPORT_ASSOCIATED_TEXT)) return "\u001b[0u";
+  // Without associated text, CSI 0 u is unidentified and drops the glyph.
+  // Callers fall back to the literal committed text instead.
+  if (!(flags & KITTY_KEYBOARD_REPORT_ASSOCIATED_TEXT)) return null;
   const points = textCodePoints(text);
   return points.length > 0 ? `\u001b[0;;${points.join(":")}u` : null;
 };

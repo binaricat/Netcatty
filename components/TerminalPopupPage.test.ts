@@ -133,9 +133,12 @@ test('resolveTerminalPopupReuseId uses the explicit reuse id from the prepared s
 
 test('popup terminals resolve complete host config and pass jump hosts into Terminal', () => {
   assert.match(source, /proxyProfiles,\s+knownHosts,\s+snippets,\s+snippetPackages,\s+groupConfigs,/);
+  assert.match(source, /deleteSelectedSnippets,/);
   assert.match(source, /resolveTerminalPopupHost\(config,\s*hosts,\s*\{\s+groupConfigs,\s+proxyProfiles,/);
   assert.match(source, /resolveTerminalChainHosts\(\{\s+host,\s+hosts,\s+groupConfigs,\s+proxyProfiles,/);
   assert.match(source, /chainHosts=\{chainHosts\}/);
+  // Popup has no AppSideEffects listener; bulk delete must hit this vault instance.
+  assert.match(source, /onDeleteSnippets=\{deleteSelectedSnippets\}/);
 });
 
 test('popup provider tree mounts the plugin authentication host', () => {

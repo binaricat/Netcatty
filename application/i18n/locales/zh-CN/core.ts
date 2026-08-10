@@ -924,6 +924,7 @@ export const zhCNCoreMessages: Messages = {
   'sftp.transfers.dragToResize': '拖拽调整高度',
   'sftp.goUp': '上一级',
   'sftp.goToTerminalCwd': '定位到终端当前目录',
+  'sftp.locatePathInTerminal': '定位路径到终端',
   'sftp.followTerminalCwd': '追随终端目录',
   'sftp.followTerminalCwd.enable': '开启追随终端目录',
   'sftp.followTerminalCwd.disable': '关闭追随终端目录',

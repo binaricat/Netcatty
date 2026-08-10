@@ -82,6 +82,7 @@ import { useDiscoveredShells, resolveShellSetting } from '../../lib/useDiscovere
 import { Host, HostProtocol, KnownHost, SerialConfig, Snippet, SSHKey, TerminalSession } from '../../types';
 import { resolveSnippetCommand } from '../../components/SnippetExecutionProvider';
 import { isScriptSnippet } from '../../domain/snippetScript.ts';
+import { collectSnippetDeleteIds } from '../../domain/snippetSelection.ts';
 import { useAppStartupEffects } from './useAppStartupEffects';
 import { handleTrayJumpToSessionImpl, handleTrayTogglePortForwardImpl, handleTrayPanelConnectImpl, handleTrayPanelConnectRequestImpl, flushQueuedTrayPanelConnectHostsImpl, handleGlobalHotkeyKeyDownImpl, handleEscapeKeyDownImpl, handleKeyboardInteractiveSubmitImpl, handleKeyboardInteractiveCancelImpl, handlePassphraseSubmitImpl, handlePassphraseCancelImpl, handlePassphraseSkipImpl, createLocalTerminalWithCurrentShellImpl, splitSessionWithCurrentShellImpl, copySessionWithCurrentShellImpl, copyWorkspaceWithCurrentShellImpl, copySessionToNewWindowWithCurrentShellImpl, confirmIfBusyLocalTerminalImpl, closeTabsBatchImpl, executeHotkeyActionImpl, handleCreateLocalTerminalImpl, handleConnectToHostImpl, handleTerminalDataCaptureImpl, hasMultipleProtocolsImpl, handleHostConnectWithProtocolCheckImpl, handleProtocolSelectImpl, handleRootContextMenuImpl } from './AppHandlers';
 
@@ -184,6 +185,7 @@ export function AppSideEffects() {
     updateHosts,
     updateKeys,
     updateSnippets,
+    deleteSelectedSnippets,
     updateCustomGroups,
     updateKnownHosts,
     updateManagedSources,
@@ -1600,18 +1602,22 @@ export function AppSideEffects() {
     };
   }, [handleOpenSettings, t]);
 
-  // Delete-from-sidepanel plumbing: ScriptsSidePanel's right-click menu
-  // dispatches `netcatty:snippets:delete` with the snippet id. Handled here
-  // (rather than in QuickAddSnippetDialog) because delete needs no UI.
+  // Delete-from-sidepanel plumbing: ScriptsSidePanel dispatches
+  // `netcatty:snippets:delete` with `id` (single) or `ids` (bulk). Handled
+  // here (rather than in QuickAddSnippetDialog) because delete needs no UI.
+  // Goes through useVaultState.deleteSelectedSnippets so login/connect script
+  // bindings clear with the snippets (SnippetsManager parity) against the
+  // latest persisted vault snapshot under the shared cross-window lock.
   useEffect(() => {
     const handler = (e: Event) => {
-      const id = (e as CustomEvent<{ id?: string }>).detail?.id;
-      if (!id) return;
-      updateSnippets(snippets.filter((s) => s.id !== id));
+      const detail = (e as CustomEvent<{ id?: string; ids?: string[] }>).detail;
+      const ids = collectSnippetDeleteIds(detail);
+      if (ids.size === 0) return;
+      void deleteSelectedSnippets(ids);
     };
     window.addEventListener('netcatty:snippets:delete', handler);
     return () => window.removeEventListener('netcatty:snippets:delete', handler);
-  }, [snippets, updateSnippets]);
+  }, [deleteSelectedSnippets]);
 
   const handleEndSessionDrag = useCallback(() => {
     setDraggingSessionId(null);

@@ -5,6 +5,7 @@ const Module = require("node:module");
 
 const {
   createConnectionRef,
+  acquireConnectionRef,
   releaseConnectionRef,
   resetSshTransportRegistryForTests,
 } = require("./sshConnectionPool.cjs");
@@ -431,6 +432,9 @@ test("Copy Tab records a distinct remote shell for each shared terminal", async 
   const sessions = new Map();
   const sourceConn = makePidTrackingReusableConn();
   const source = makeSourceSession(sourceConn, { hostname: "10.0.0.1", username: "alice" });
+  // Live tabs normally already know their login shellPid (cwd / sessionOps).
+  // Copy Tab must not burn a discovery exec before opening the reused shell.
+  source.shellPid = "111";
   sessions.set("source", source);
 
   const start = registerStartHandler(bridge, sessions);
@@ -441,10 +445,12 @@ test("Copy Tab records a distinct remote shell for each shared terminal", async 
       hostname: "10.0.0.1",
       username: "alice",
       sourceSessionId: "source",
+      sshChannelOpenRateLimitBackoffMs: 1,
     },
   );
 
-  assert.deepEqual(sourceConn.shellPidSnapshots, [["111"], ["111", "222"]]);
+  assert.ok(sourceConn.shellPidSnapshots.length >= 1);
+  assert.deepEqual(sourceConn.shellPidSnapshots.at(-1), ["111", "222"]);
   assert.equal(source.shellPid, "111");
   assert.equal(sessions.get("copy").shellPid, "222");
 });
@@ -484,6 +490,7 @@ test("Copy Tab with jump hosts still discovers shell PIDs after a short delay", 
     username: "alice",
     jumpHosts,
   });
+  source.shellPid = "111";
   sessions.set("source", source);
 
   const start = registerStartHandler(bridge, sessions);
@@ -499,20 +506,20 @@ test("Copy Tab with jump hosts still discovers shell PIDs after a short delay", 
     },
   );
 
-  assert.ok(sourceConn.shellPidSnapshots.length >= 2, "jump-host reuse must still run discovery");
+  assert.ok(sourceConn.shellPidSnapshots.length >= 1, "jump-host reuse must still run post-open discovery");
   assert.equal(source.shellPid, "111");
   assert.equal(sessions.get("copy").shellPid, "222");
   assert.equal(sourceConn.openedShells.length, 1);
 });
 
-test("Copy Tab retries rate-limited pre-open shell PID discovery on jump hosts", async (t) => {
+test("Copy Tab retries rate-limited post-open shell PID discovery on jump hosts", async (t) => {
   const { bridge } = loadBridgeWithMockedSsh2(t);
   const sessions = new Map();
   const sourceConn = makeReusableConn();
   let execCalls = 0;
   sourceConn.exec = (_command, callback) => {
     execCalls += 1;
-    // First pre-open scan is rate-limited; later scans succeed.
+    // First post-open scan is rate-limited; later scans succeed.
     if (execCalls === 1) {
       callback(new Error("(SSH) Channel open failure: channelOpen too offen type=session"));
       return;
@@ -520,8 +527,7 @@ test("Copy Tab retries rate-limited pre-open shell PID discovery on jump hosts",
     const stream = new EventEmitter();
     stream.stderr = new EventEmitter();
     stream.close = () => {};
-    const snapshot = execCalls === 2 ? ["111"] : ["111", "222"];
-    const pids = `${snapshot.join("\n")}\n__NETCATTY_SHELL_SCAN_COMPLETE__\n`;
+    const pids = "111\n222\n__NETCATTY_SHELL_SCAN_COMPLETE__\n";
     setImmediate(() => {
       stream.emit("data", Buffer.from(pids));
       stream.emit("close", 0);
@@ -534,6 +540,7 @@ test("Copy Tab retries rate-limited pre-open shell PID discovery on jump hosts",
     username: "alice",
     jumpHosts,
   });
+  source.shellPid = "111";
   sessions.set("source", source);
 
   const start = registerStartHandler(bridge, sessions);
@@ -549,7 +556,7 @@ test("Copy Tab retries rate-limited pre-open shell PID discovery on jump hosts",
     },
   );
 
-  assert.ok(execCalls >= 3, "pre-open discovery must retry after channelOpen too offen");
+  assert.ok(execCalls >= 2, "post-open discovery must retry after channelOpen too offen");
   assert.equal(source.shellPid, "111");
   assert.equal(sessions.get("copy").shellPid, "222");
 });
@@ -561,7 +568,7 @@ test("Copy Tab retries rate-limited PID discovery for direct bastion targets", a
   let execCalls = 0;
   sourceConn.exec = (_command, callback) => {
     execCalls += 1;
-    // Direct bastion (no jumpHosts): first pre-open scan is rate-limited.
+    // Direct bastion (no jumpHosts): first post-open scan is rate-limited.
     if (execCalls === 1) {
       callback(new Error("(SSH) Channel open failure: channelOpen too offen type=session"));
       return;
@@ -569,18 +576,19 @@ test("Copy Tab retries rate-limited PID discovery for direct bastion targets", a
     const stream = new EventEmitter();
     stream.stderr = new EventEmitter();
     stream.close = () => {};
-    const snapshot = execCalls === 2 ? ["111"] : ["111", "222"];
-    const pids = `${snapshot.join("\n")}\n__NETCATTY_SHELL_SCAN_COMPLETE__\n`;
+    const pids = "111\n222\n__NETCATTY_SHELL_SCAN_COMPLETE__\n";
     setImmediate(() => {
       stream.emit("data", Buffer.from(pids));
       stream.emit("close", 0);
     });
     callback(null, stream);
   };
-  sessions.set("source", makeSourceSession(sourceConn, {
+  const source = makeSourceSession(sourceConn, {
     hostname: "bastion.example",
     username: "alice",
-  }));
+  });
+  source.shellPid = "111";
+  sessions.set("source", source);
 
   const start = registerStartHandler(bridge, sessions);
   await start(
@@ -594,27 +602,23 @@ test("Copy Tab retries rate-limited PID discovery for direct bastion targets", a
     },
   );
 
-  assert.ok(execCalls >= 3, "direct bastion reuse must retry rate-limited PID discovery");
+  assert.ok(execCalls >= 2, "direct bastion reuse must retry rate-limited PID discovery");
   assert.equal(sessions.get("source").shellPid, "111");
   assert.equal(sessions.get("copy").shellPid, "222");
 });
 
-test("Copy Tab retries rate-limited post-open shell PID discovery on jump hosts", async (t) => {
+test("Copy Tab claims an unambiguous leftover PID when the source never recorded one", async (t) => {
   const { bridge } = loadBridgeWithMockedSsh2(t);
   const sessions = new Map();
   const sourceConn = makeReusableConn();
   let execCalls = 0;
   sourceConn.exec = (_command, callback) => {
     execCalls += 1;
-    // Pre-open discovery (1) succeeds with the source shell. The first
-    // post-open discovery (2) is rate-limited; later attempts succeed.
-    if (execCalls === 2) {
-      callback(new Error("(SSH) Channel open failure: channelOpen too offen type=session"));
-      return;
-    }
     const stream = new EventEmitter();
     stream.stderr = new EventEmitter();
     stream.close = () => {};
+    // First post-open snapshot still only sees the source shell; later scans
+    // include the copied shell so waitForNewInteractiveShellPid can finish.
     const snapshot = execCalls === 1 ? ["111"] : ["111", "222"];
     const pids = `${snapshot.join("\n")}\n__NETCATTY_SHELL_SCAN_COMPLETE__\n`;
     setImmediate(() => {
@@ -623,12 +627,265 @@ test("Copy Tab retries rate-limited post-open shell PID discovery on jump hosts"
     });
     callback(null, stream);
   };
-  const jumpHosts = [{ hostname: "bastion.example", username: "jump", port: 22 }];
+  sessions.set("source", makeSourceSession(sourceConn, {
+    hostname: "10.0.0.1",
+    username: "alice",
+  }));
+
+  const start = registerStartHandler(bridge, sessions);
+  await start(
+    { sender: makeSender() },
+    {
+      sessionId: "copy",
+      hostname: "10.0.0.1",
+      username: "alice",
+      sourceSessionId: "source",
+      sshChannelOpenRateLimitBackoffMs: 1,
+    },
+  );
+
+  assert.ok(execCalls >= 2);
+  assert.equal(sessions.get("source").shellPid, "111");
+  assert.equal(sessions.get("copy").shellPid, "222");
+});
+
+test("Copy Tab waits before claiming a sole PID after the source closes", async (t) => {
+  const { bridge } = loadBridgeWithMockedSsh2(t);
+  const terminalBridge = require("./terminalBridge.cjs");
+  const sessions = new Map();
+  const sourceConn = makeDeferredShellConn();
+  let execCalls = 0;
+  sourceConn.exec = (_command, callback) => {
+    execCalls += 1;
+    const stream = new EventEmitter();
+    stream.stderr = new EventEmitter();
+    stream.close = () => {};
+    // Source tab already closed: early scans can still list the dying source
+    // shell before the copied shell is visible.
+    const snapshot = execCalls < 3 ? ["111"] : ["222"];
+    const pids = `${snapshot.join("\n")}\n__NETCATTY_SHELL_SCAN_COMPLETE__\n`;
+    setImmediate(() => {
+      stream.emit("data", Buffer.from(pids));
+      stream.emit("close", 0);
+    });
+    callback(null, stream);
+  };
   const source = makeSourceSession(sourceConn, {
     hostname: "10.0.0.1",
     username: "alice",
-    jumpHosts,
   });
+  sessions.set("source", source);
+
+  terminalBridge.init({ sessions, electronModule: {} });
+  const start = registerStartHandler(bridge, sessions);
+  const startPromise = start(
+    { sender: makeSender() },
+    {
+      sessionId: "copy",
+      hostname: "10.0.0.1",
+      username: "alice",
+      sourceSessionId: "source",
+      sshChannelOpenRateLimitBackoffMs: 1,
+    },
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+  terminalBridge.closeSession({ sender: {} }, { sessionId: "source" });
+  sourceConn.flushShell();
+  await startPromise;
+
+  assert.ok(execCalls >= 3, "must wait through the dying-source-only scans");
+  assert.equal(sessions.get("copy").shellPid, "222");
+});
+
+test("Copy Tab disambiguates a two-PID first scan when the source never recorded shellPid", async (t) => {
+  const { bridge } = loadBridgeWithMockedSsh2(t);
+  const sessions = new Map();
+  const sourceConn = makeReusableConn();
+  let execCalls = 0;
+  sourceConn.exec = (_command, callback) => {
+    execCalls += 1;
+    const stream = new EventEmitter();
+    stream.stderr = new EventEmitter();
+    stream.close = () => {};
+    // OSC 7 sources skip the cwd probe, so shellPid is unset. The copied shell
+    // is already visible in the first post-open scan — no gradual appearance.
+    // Ages (etimes seconds; higher = older) distinguish source from copy.
+    const pids = "111 40\n222 1\n__NETCATTY_SHELL_SCAN_COMPLETE__\n";
+    setImmediate(() => {
+      stream.emit("data", Buffer.from(pids));
+      stream.emit("close", 0);
+    });
+    callback(null, stream);
+  };
+  sessions.set("source", makeSourceSession(sourceConn, {
+    hostname: "10.0.0.1",
+    username: "alice",
+  }));
+
+  const start = registerStartHandler(bridge, sessions);
+  await start(
+    { sender: makeSender() },
+    {
+      sessionId: "copy",
+      hostname: "10.0.0.1",
+      username: "alice",
+      sourceSessionId: "source",
+      sshChannelOpenRateLimitBackoffMs: 1,
+    },
+  );
+
+  assert.equal(execCalls, 1, "must not require waitForNew retries once both PIDs are visible");
+  assert.equal(sessions.get("source").shellPid, "111");
+  assert.equal(sessions.get("copy").shellPid, "222");
+});
+
+test("Copy Tab uses process age when PID wrap makes the copy numerically smaller", async (t) => {
+  const { bridge } = loadBridgeWithMockedSsh2(t);
+  const sessions = new Map();
+  const sourceConn = makeReusableConn();
+  sourceConn.exec = (_command, callback) => {
+    const stream = new EventEmitter();
+    stream.stderr = new EventEmitter();
+    stream.close = () => {};
+    // After PID wrap the copied shell can receive a lower numeric PID while
+    // still being the younger process (etimes 1 vs 90).
+    const pids = "50 1\n4000 90\n__NETCATTY_SHELL_SCAN_COMPLETE__\n";
+    setImmediate(() => {
+      stream.emit("data", Buffer.from(pids));
+      stream.emit("close", 0);
+    });
+    callback(null, stream);
+  };
+  sessions.set("source", makeSourceSession(sourceConn, {
+    hostname: "10.0.0.1",
+    username: "alice",
+  }));
+
+  const start = registerStartHandler(bridge, sessions);
+  await start(
+    { sender: makeSender() },
+    {
+      sessionId: "copy",
+      hostname: "10.0.0.1",
+      username: "alice",
+      sourceSessionId: "source",
+      sshChannelOpenRateLimitBackoffMs: 1,
+    },
+  );
+
+  assert.equal(sessions.get("source").shellPid, "4000");
+  assert.equal(sessions.get("copy").shellPid, "50");
+});
+
+test("Copy Tab leaves PIDs unassigned when both shells share the same etimes second", async (t) => {
+  const { bridge } = loadBridgeWithMockedSsh2(t);
+  const sessions = new Map();
+  const sourceConn = makeReusableConn();
+  sourceConn.exec = (_command, callback) => {
+    const stream = new EventEmitter();
+    stream.stderr = new EventEmitter();
+    stream.close = () => {};
+    // Same whole-second etimes tick: age inequality cannot separate them, and
+    // numeric PID order is unsafe after wrap — leave both unassigned.
+    const pids = "111 1\n222 1\n__NETCATTY_SHELL_SCAN_COMPLETE__\n";
+    setImmediate(() => {
+      stream.emit("data", Buffer.from(pids));
+      stream.emit("close", 0);
+    });
+    callback(null, stream);
+  };
+  sessions.set("source", makeSourceSession(sourceConn, {
+    hostname: "10.0.0.1",
+    username: "alice",
+  }));
+
+  const start = registerStartHandler(bridge, sessions);
+  await start(
+    { sender: makeSender() },
+    {
+      sessionId: "copy",
+      hostname: "10.0.0.1",
+      username: "alice",
+      sourceSessionId: "source",
+      sshChannelOpenRateLimitBackoffMs: 1,
+    },
+  );
+
+  assert.equal(sessions.get("source").shellPid, undefined);
+  assert.equal(sessions.get("copy").shellPid, undefined);
+});
+
+test("Copy Tab leaves PIDs unassigned when remote ps lacks etimes", async (t) => {
+  const { bridge } = loadBridgeWithMockedSsh2(t);
+  const sessions = new Map();
+  const sourceConn = makeReusableConn();
+  sourceConn.exec = (_command, callback) => {
+    const stream = new EventEmitter();
+    stream.stderr = new EventEmitter();
+    stream.close = () => {};
+    // Age-less "pid" lines only — hosts without etimes. Do not guess via PID
+    // order; a wrap between source and copy would swap the assignment.
+    const pids = "111\n222\n__NETCATTY_SHELL_SCAN_COMPLETE__\n";
+    setImmediate(() => {
+      stream.emit("data", Buffer.from(pids));
+      stream.emit("close", 0);
+    });
+    callback(null, stream);
+  };
+  sessions.set("source", makeSourceSession(sourceConn, {
+    hostname: "10.0.0.1",
+    username: "alice",
+  }));
+
+  const start = registerStartHandler(bridge, sessions);
+  await start(
+    { sender: makeSender() },
+    {
+      sessionId: "copy",
+      hostname: "10.0.0.1",
+      username: "alice",
+      sourceSessionId: "source",
+      sshChannelOpenRateLimitBackoffMs: 1,
+    },
+  );
+
+  assert.equal(sessions.get("source").shellPid, undefined);
+  assert.equal(sessions.get("copy").shellPid, undefined);
+});
+
+test("Copy Tab reconciles an untracked source even when another sibling PID is known", async (t) => {
+  const { bridge } = loadBridgeWithMockedSsh2(t);
+  const sessions = new Map();
+  const sourceConn = makeReusableConn();
+  sourceConn.exec = (_command, callback) => {
+    const stream = new EventEmitter();
+    stream.stderr = new EventEmitter();
+    stream.close = () => {};
+    // Tracked sibling 100 plus untracked source 200 and new copy 300.
+    const pids = "100 120\n200 40\n300 1\n__NETCATTY_SHELL_SCAN_COMPLETE__\n";
+    setImmediate(() => {
+      stream.emit("data", Buffer.from(pids));
+      stream.emit("close", 0);
+    });
+    callback(null, stream);
+  };
+  const source = makeSourceSession(sourceConn, {
+    hostname: "10.0.0.1",
+    username: "alice",
+  });
+  const tracked = {
+    conn: sourceConn,
+    stream: makeStream(),
+    chainConnections: [],
+    webContentsId: 1,
+    zmodemSentry: { cancel() {} },
+    hostname: "10.0.0.1",
+    username: "alice",
+    _reuseEndpoint: source._reuseEndpoint,
+    shellPid: "100",
+  };
+  acquireConnectionRef(tracked, source.connRef);
+  sessions.set("tracked", tracked);
   sessions.set("source", source);
 
   const start = registerStartHandler(bridge, sessions);
@@ -639,14 +896,13 @@ test("Copy Tab retries rate-limited post-open shell PID discovery on jump hosts"
       hostname: "10.0.0.1",
       username: "alice",
       sourceSessionId: "source",
-      jumpHosts,
       sshChannelOpenRateLimitBackoffMs: 1,
     },
   );
 
-  assert.ok(execCalls >= 3, "post-open discovery must retry after channelOpen too offen");
-  assert.equal(source.shellPid, "111");
-  assert.equal(sessions.get("copy").shellPid, "222");
+  assert.equal(sessions.get("tracked").shellPid, "100");
+  assert.equal(sessions.get("source").shellPid, "200");
+  assert.equal(sessions.get("copy").shellPid, "300");
 });
 
 test("Copy Tab retries bastion channelOpen too offen before falling back", async (t) => {
@@ -692,11 +948,78 @@ test("Copy Tab retries bastion channelOpen too offen before falling back", async
   assert.equal(getConnectionReuseFallbackEvents(sender).length, 0);
 });
 
+test("Copy Tab opens the shell before PID discovery so bastion rate limits do not burn the session slot", async (t) => {
+  const { bridge, getClientConstructCount } = loadBridgeWithMockedSsh2(t);
+  const sessions = new Map();
+  const sourceConn = makeReusableConn();
+  const channelOrder = [];
+  let execCalls = 0;
+  sourceConn.exec = (_command, callback) => {
+    execCalls += 1;
+    channelOrder.push("exec");
+    // Bastions rate-limit rapid session channels. If discovery runs first it
+    // burns the budget and every subsequent shell open is rejected.
+    if (sourceConn.openedShells.length === 0) {
+      callback(new Error("(SSH) Channel open failure: channelOpen too offen type=session"));
+      return;
+    }
+    const stream = new EventEmitter();
+    stream.stderr = new EventEmitter();
+    stream.close = () => {};
+    const snapshot = ["111", "222"];
+    const pids = `${snapshot.join("\n")}\n__NETCATTY_SHELL_SCAN_COMPLETE__\n`;
+    setImmediate(() => {
+      stream.emit("data", Buffer.from(pids));
+      stream.emit("close", 0);
+    });
+    callback(null, stream);
+  };
+  sourceConn.shell = (_opts, _shellOpts, cb) => {
+    channelOrder.push("shell");
+    if (execCalls > 0 && sourceConn.openedShells.length === 0) {
+      setImmediate(() => cb(new Error("(SSH) Channel open failure: channelOpen too offen type=session")));
+      return;
+    }
+    const stream = makeStream();
+    sourceConn.openedShells.push(stream);
+    setImmediate(() => cb(null, stream));
+  };
+  const source = makeSourceSession(sourceConn, {
+    hostname: "bastion.example",
+    username: "alice",
+  });
+  source.shellPid = "111";
+  sessions.set("source", source);
+
+  const start = registerStartHandler(bridge, sessions);
+  const sender = makeSender();
+  const result = await start(
+    { sender },
+    {
+      sessionId: "copy",
+      hostname: "bastion.example",
+      username: "alice",
+      sourceSessionId: "source",
+      sshChannelOpenRateLimitBackoffMs: 1,
+    },
+  );
+
+  assert.equal(result.sessionId, "copy");
+  assert.equal(getClientConstructCount(), 0);
+  assert.equal(sourceConn.openedShells.length, 1);
+  assert.equal(channelOrder[0], "shell", "shell must open before any discovery exec");
+  assert.ok(execCalls >= 1, "PID discovery still runs after the shell opens");
+  assert.equal(sessions.get("copy").shellPid, "222");
+  assert.equal(getConnectionReuseFallbackEvents(sender).length, 0);
+});
+
 test("Copy Tab waits briefly when the new remote shell is not visible immediately", async (t) => {
   const { bridge } = loadBridgeWithMockedSsh2(t);
   const sessions = new Map();
   const sourceConn = makePidTrackingReusableConn({ delayFirstNewPid: true });
-  sessions.set("source", makeSourceSession(sourceConn, { hostname: "10.0.0.1", username: "alice" }));
+  const source = makeSourceSession(sourceConn, { hostname: "10.0.0.1", username: "alice" });
+  source.shellPid = "111";
+  sessions.set("source", source);
 
   const start = registerStartHandler(bridge, sessions);
   await start(
@@ -706,10 +1029,13 @@ test("Copy Tab waits briefly when the new remote shell is not visible immediatel
       hostname: "10.0.0.1",
       username: "alice",
       sourceSessionId: "source",
+      sshChannelOpenRateLimitBackoffMs: 1,
     },
   );
 
-  assert.deepEqual(sourceConn.shellPidSnapshots, [["111"], ["111"], ["111", "222"]]);
+  assert.ok(sourceConn.shellPidSnapshots.length >= 2);
+  assert.deepEqual(sourceConn.shellPidSnapshots[0], ["111"]);
+  assert.deepEqual(sourceConn.shellPidSnapshots.at(-1), ["111", "222"]);
   assert.equal(sessions.get("copy").shellPid, "222");
 });
 
@@ -760,17 +1086,31 @@ test("concurrent Copy Tab requests serialize shell discovery per connection", as
   const { bridge } = loadBridgeWithMockedSsh2(t);
   const sessions = new Map();
   const sourceConn = makePidTrackingReusableConn();
-  sessions.set("source", makeSourceSession(sourceConn, { hostname: "10.0.0.1", username: "alice" }));
+  const source = makeSourceSession(sourceConn, { hostname: "10.0.0.1", username: "alice" });
+  source.shellPid = "111";
+  sessions.set("source", source);
 
   const start = registerStartHandler(bridge, sessions);
   await Promise.all([
     start(
       { sender: makeSender() },
-      { sessionId: "copy-1", hostname: "10.0.0.1", username: "alice", sourceSessionId: "source" },
+      {
+        sessionId: "copy-1",
+        hostname: "10.0.0.1",
+        username: "alice",
+        sourceSessionId: "source",
+        sshChannelOpenRateLimitBackoffMs: 1,
+      },
     ),
     start(
       { sender: makeSender() },
-      { sessionId: "copy-2", hostname: "10.0.0.1", username: "alice", sourceSessionId: "source" },
+      {
+        sessionId: "copy-2",
+        hostname: "10.0.0.1",
+        username: "alice",
+        sourceSessionId: "source",
+        sshChannelOpenRateLimitBackoffMs: 1,
+      },
     ),
   ]);
 
@@ -803,11 +1143,23 @@ test("concurrent copies keep distinct shell IDs when the source closes immediate
   const copies = Promise.all([
     start(
       { sender: makeSender() },
-      { sessionId: "copy-1", hostname: "10.0.0.1", username: "alice", sourceSessionId: "source" },
+      {
+        sessionId: "copy-1",
+        hostname: "10.0.0.1",
+        username: "alice",
+        sourceSessionId: "source",
+        sshChannelOpenRateLimitBackoffMs: 1,
+      },
     ),
     start(
       { sender: makeSender() },
-      { sessionId: "copy-2", hostname: "10.0.0.1", username: "alice", sourceSessionId: "source" },
+      {
+        sessionId: "copy-2",
+        hostname: "10.0.0.1",
+        username: "alice",
+        sourceSessionId: "source",
+        sshChannelOpenRateLimitBackoffMs: 1,
+      },
     ),
   ]);
 

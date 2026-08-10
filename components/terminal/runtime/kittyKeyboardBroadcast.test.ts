@@ -456,8 +456,8 @@ test("broadcast composition text follows each target's negotiated mode", () => {
     urgentInterrupt: false,
   });
   assert.deepEqual(resolve(reportAll), {
-    data: "\u001b[0u",
-    kittyEncoded: true,
+    data: "你a",
+    kittyEncoded: false,
     urgentInterrupt: false,
   });
   assert.deepEqual(resolve(associatedText), {

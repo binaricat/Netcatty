@@ -95,6 +95,7 @@ export function TerminalAutocomplete({
   ) => {
     const normalizedProtocol: NetcattyTerminalSessionSnapshot['protocol'] = protocol ?? "ssh";
     const pluginRegistry = isPluginCompletionProviderAvailable?.() === false
+      || options.allowExternalProviders === false
       || !shouldUsePluginTerminalCompletionProvider({
         sensitiveInputActive: sensitiveInputActiveRef.current === true,
         promptText: options.promptText,

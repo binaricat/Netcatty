@@ -135,7 +135,7 @@ export interface FetchedModel {
 }
 
 export interface FetchBridge {
-  aiFetch?: (url: string, method?: string, headers?: Record<string, string>, body?: string, providerId?: string, skipHostCheck?: boolean, followRedirects?: boolean, skipTLSVerify?: boolean) => Promise<{ ok: boolean; data: string; error?: string }>;
+  aiFetch?: (url: string, method?: string, headers?: Record<string, string>, body?: string, providerId?: string, skipHostCheck?: boolean, followRedirects?: boolean, skipTLSVerify?: boolean) => Promise<{ ok: boolean; status?: number; data: string; error?: string }>;
   aiAllowlistAddHost?: (baseURL: string) => Promise<{ ok: boolean }>;
 }
 

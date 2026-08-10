@@ -46,3 +46,17 @@ test("no match returns empty; empty input returns empty", () => {
   assert.deepEqual(getSnippetSuggestions("zzz", [snip({})], {}), []);
   assert.deepEqual(getSnippetSuggestions("", [snip({})], {}), []);
 });
+
+test("matches Chinese labels by literal Chinese input", () => {
+  const s = snip({ id: "zh", label: "部署服务", command: "kubectl apply -f ." });
+  const out = getSnippetSuggestions("部署", [s], {});
+  assert.equal(out.length, 1);
+  assert.equal(out[0].snippet?.id, "zh");
+  assert.equal(out[0].displayText, "部署服务");
+});
+
+test("matches Chinese labels by pinyin and initials (smart suggest)", () => {
+  const s = snip({ id: "zh", label: "部署服务", command: "kubectl apply -f ." });
+  assert.equal(getSnippetSuggestions("bushu", [s], {})[0]?.snippet?.id, "zh");
+  assert.equal(getSnippetSuggestions("bsfw", [s], {})[0]?.snippet?.id, "zh");
+});

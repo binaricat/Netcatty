@@ -361,6 +361,7 @@ export const ruVaultMessages: Messages = {
   'sftp.transfers.dragToResize': 'Перетащите для изменения размера',
   'sftp.goUp': 'Наверх',
   'sftp.goToTerminalCwd': 'Перейти в каталог терминала',
+  'sftp.locatePathInTerminal': 'Открыть путь в терминале',
   'sftp.followTerminalCwd': 'Следовать за каталогом терминала',
   'sftp.followTerminalCwd.enable': 'Включить следование за каталогом терминала',
   'sftp.followTerminalCwd.disable': 'Отключить следование за каталогом терминала',

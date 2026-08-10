@@ -166,6 +166,84 @@ test("toolbar renders one view-mode toggle instead of separate list and tree but
   assert.match(markup, /aria-label="Bookmarked paths"/);
 });
 
+test("toolbar exposes locate-path-in-terminal when the callback is provided", () => {
+  const pane: SftpPane = {
+    id: "pane-1",
+    connection: {
+      id: "conn-1",
+      hostId: "host-1",
+      name: "Example",
+      currentPath: "/var/www/app",
+      homeDir: "/home/app",
+      isLocal: false,
+    },
+    files: [],
+    loading: false,
+    reconnecting: false,
+    error: null,
+    connectionLogs: [],
+    selectedFiles: new Set(),
+    filter: "",
+    filenameEncoding: "auto",
+    showHiddenFiles: false,
+    transferMutationToken: 0,
+  };
+
+  const markup = renderToStaticMarkup(
+    React.createElement(TooltipProvider, {
+      children: React.createElement(SftpPaneToolbar, {
+        t: (key: string) => ({
+          "sftp.locatePathInTerminal": "Open path in terminal",
+          "sftp.viewMode.switchToTree": "Switch to tree view",
+          "sftp.bookmark.add": "Bookmark current path",
+        }[key] ?? key),
+        pane,
+        onNavigateTo: () => {},
+        onSetFilter: () => {},
+        onSetFilenameEncoding: () => {},
+        onRefresh: () => {},
+        showFilterBar: false,
+        setShowFilterBar: () => {},
+        filterInputRef: { current: null },
+        isEditingPath: false,
+        editingPathValue: "",
+        setEditingPathValue: () => {},
+        setShowPathSuggestions: () => {},
+        showPathSuggestions: false,
+        setPathSuggestionIndex: () => {},
+        pathSuggestions: [],
+        pathSuggestionIndex: -1,
+        pathInputRef: { current: null },
+        pathDropdownRef: { current: null },
+        handlePathBlur: () => {},
+        handlePathKeyDown: () => {},
+        handlePathDoubleClick: () => {},
+        handlePathSubmit: () => {},
+        getNextUntitledName: () => "untitled",
+        setNewFileName: () => {},
+        setFileNameError: () => {},
+        setShowNewFileDialog: () => {},
+        setShowNewFolderDialog: () => {},
+        setNewFolderName: () => {},
+        bookmarks: [],
+        isCurrentPathBookmarked: false,
+        onToggleBookmark: () => {},
+        onAddGlobalBookmark: () => {},
+        isCurrentPathGlobalBookmarked: false,
+        onNavigateToBookmark: () => {},
+        onDeleteBookmark: () => {},
+        showHiddenFiles: false,
+        onToggleShowHiddenFiles: () => {},
+        onLocatePathInTerminal: () => {},
+        viewMode: "list",
+        onSetViewMode: () => {},
+      }),
+    }),
+  );
+
+  assert.match(markup, /aria-label="Open path in terminal"/);
+});
+
 test("toolbar exposes copy-current-path action for the active directory", () => {
   const pane: SftpPane = {
     id: "pane-1",

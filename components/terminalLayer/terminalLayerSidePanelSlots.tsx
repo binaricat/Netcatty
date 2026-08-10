@@ -187,6 +187,7 @@ function SidePanelSftpSlotInner({
         sftpDefaultViewMode={sftpDefaultViewMode}
         activeHost={panelActiveHost}
         activeSessionId={isVisible ? live.activeTerminalSessionIdForSftp : null}
+        focusedSessionId={isVisible ? live.focusedSessionId : null}
         initialLocation={isVisible ? (sftpInitialLocationForTab.get(tabId) ?? null) : null}
         onInitialLocationApplied={handleInitialLocationApplied}
         onCurrentPathChange={handleCurrentPathChange}

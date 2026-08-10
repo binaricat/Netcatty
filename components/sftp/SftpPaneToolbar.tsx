@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Bookmark, Check, ClipboardCopy, Eye, EyeOff, FilePlus, Folder, FolderPlus, FolderSync, Globe, Home, Languages, List, ListTree, RefreshCw, Search, TerminalSquare, Trash2, X } from "lucide-react";
+import { Bookmark, Check, ClipboardCopy, Eye, EyeOff, FilePlus, Folder, FolderPlus, FolderSync, Globe, Home, Languages, List, ListTree, RefreshCw, Search, Terminal, TerminalSquare, Trash2, X } from "lucide-react";
 import { useToolbarItemLayout } from "../../application/state/useToolbarItemLayout";
 import type { ToolbarItemLayoutDefaults } from "../../domain/toolbarItemLayout";
 import { STORAGE_KEY_SFTP_TOOLBAR_LAYOUT } from "../../infrastructure/config/storageKeys";
@@ -28,6 +28,7 @@ import { toast } from "../ui/toast";
 export const SFTP_TOOLBAR_ITEM_IDS = [
   "bookmark",
   "goToTerminalCwd",
+  "locatePathInTerminal",
   "followTerminalCwd",
   "copyPath",
   "viewMode",
@@ -46,6 +47,7 @@ export const SFTP_TOOLBAR_LAYOUT_DEFAULTS: ToolbarItemLayoutDefaults = {
   placement: {
     bookmark: "show",
     goToTerminalCwd: "show",
+    locatePathInTerminal: "show",
     followTerminalCwd: "show",
     copyPath: "show",
     viewMode: "show",
@@ -67,6 +69,7 @@ export const SFTP_TOOLBAR_LAYOUT_DEFAULTS: ToolbarItemLayoutDefaults = {
 export const SFTP_TOOLBAR_NARROW_INLINE_IDS = new Set<SftpToolbarItemId>([
   "bookmark",
   "goToTerminalCwd",
+  "locatePathInTerminal",
   "followTerminalCwd",
   "copyPath",
   "viewMode",
@@ -215,6 +218,7 @@ interface SftpPaneToolbarProps {
   showHiddenFiles: boolean;
   onToggleShowHiddenFiles?: () => void;
   onGoToTerminalCwd?: () => void;
+  onLocatePathInTerminal?: () => void;
   followTerminalCwd?: boolean;
   onToggleFollowTerminalCwd?: () => void;
   viewMode: SftpPaneViewMode;
@@ -323,6 +327,7 @@ export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = React.memo(({
   showHiddenFiles,
   onToggleShowHiddenFiles,
   onGoToTerminalCwd,
+  onLocatePathInTerminal,
   followTerminalCwd,
   onToggleFollowTerminalCwd,
   viewMode,
@@ -469,15 +474,17 @@ export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = React.memo(({
       "refresh",
     ];
     if (onGoToTerminalCwd) ids.push("goToTerminalCwd");
+    if (onLocatePathInTerminal) ids.push("locatePathInTerminal");
     if (onToggleFollowTerminalCwd) ids.push("followTerminalCwd");
     if (isRemote) ids.push("encoding");
     return ids;
-  }, [isRemote, onGoToTerminalCwd, onToggleFollowTerminalCwd]);
+  }, [isRemote, onGoToTerminalCwd, onLocatePathInTerminal, onToggleFollowTerminalCwd]);
 
   const itemLabels = useMemo(
     (): Record<SftpToolbarItemId, string> => ({
       bookmark: bookmarkButtonLabel,
       goToTerminalCwd: t("sftp.goToTerminalCwd"),
+      locatePathInTerminal: t("sftp.locatePathInTerminal"),
       followTerminalCwd: t("sftp.followTerminalCwd"),
       copyPath: t("sftp.copyCurrentPath"),
       viewMode: viewModeToggleLabel,
@@ -495,6 +502,7 @@ export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = React.memo(({
     (): Record<SftpToolbarItemId, React.ReactNode> => ({
       bookmark: <Bookmark size={14} />,
       goToTerminalCwd: <TerminalSquare size={14} />,
+      locatePathInTerminal: <Terminal size={14} />,
       followTerminalCwd: <FolderSync size={14} />,
       copyPath: <ClipboardCopy size={14} />,
       viewMode: viewMode === "list" ? <List size={14} /> : <ListTree size={14} />,
@@ -681,6 +689,24 @@ export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = React.memo(({
             <TooltipContent>{t("sftp.goToTerminalCwd")}</TooltipContent>
           </Tooltip>
         );
+      case "locatePathInTerminal":
+        if (!onLocatePathInTerminal) return null;
+        return (
+          <Tooltip key={id}>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6"
+                aria-label={t("sftp.locatePathInTerminal")}
+                onClick={onLocatePathInTerminal}
+              >
+                <Terminal size={14} />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{t("sftp.locatePathInTerminal")}</TooltipContent>
+          </Tooltip>
+        );
       case "followTerminalCwd":
         if (!onToggleFollowTerminalCwd) return null;
         return (
@@ -828,6 +854,14 @@ export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = React.memo(({
           <button key={id} type="button" className={menuItemClass} onClick={onGoToTerminalCwd}>
             <TerminalSquare size={14} className="shrink-0" />
             {t("sftp.goToTerminalCwd")}
+          </button>
+        );
+      case "locatePathInTerminal":
+        if (!onLocatePathInTerminal) return null;
+        return (
+          <button key={id} type="button" className={menuItemClass} onClick={onLocatePathInTerminal}>
+            <Terminal size={14} className="shrink-0" />
+            {t("sftp.locatePathInTerminal")}
           </button>
         );
       case "followTerminalCwd":

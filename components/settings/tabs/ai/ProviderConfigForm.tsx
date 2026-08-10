@@ -1,14 +1,19 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, ChevronDown, ChevronRight, Eye, EyeOff, Pencil, Upload, RotateCcw, X } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Eye, EyeOff, Pencil, Upload, RotateCcw, X, RefreshCw } from "lucide-react";
 import type { ProviderConfig, ProviderAdvancedParams, ProviderStyle } from "../../../../infrastructure/ai/types";
 import { PROVIDER_PRESETS, resolveProviderStyle } from "../../../../infrastructure/ai/types";
 import { sanitizeContextWindow } from "../../../../infrastructure/ai/contextCompaction";
+import {
+  probeProviderConnection,
+  validateProviderProbeInputs,
+  type ProviderProbeHealth,
+} from "../../../../infrastructure/ai/providerConnectionProbe";
 import { encryptField, decryptField } from "../../../../infrastructure/persistence/secureFieldAdapter";
 import { useI18n } from "../../../../application/i18n/I18nProvider";
 import { Button } from "../../../ui/button";
 import { cn } from "../../../../lib/utils";
 import type { BuiltinProviderIcon } from "./types";
-import { BUILTIN_PROVIDER_ICONS } from "./types";
+import { BUILTIN_PROVIDER_ICONS, getFetchBridge } from "./types";
 import type { ProviderFormState } from "./types";
 import { ModelSelector } from "./ModelSelector";
 import { mergeModelContextWindow } from "./modelMetadata";
@@ -77,6 +82,12 @@ export const ProviderConfigForm: React.FC<{
   const [iconError, setIconError] = useState<string | null>(null);
   const [contextWindowError, setContextWindowError] = useState<string | null>(null);
   const [apiKeySourceVersion, setApiKeySourceVersion] = useState(0);
+  const [isTesting, setIsTesting] = useState(false);
+  const [probeResult, setProbeResult] = useState<{
+    health: ProviderProbeHealth;
+    message: string;
+  } | null>(null);
+  const probeRequestIdRef = useRef(0);
 
   const preset = PROVIDER_PRESETS[provider.providerId];
   const resolvedStyle: ProviderStyle = form.style || resolveProviderStyle({ providerId: provider.providerId });
@@ -96,7 +107,22 @@ export const ProviderConfigForm: React.FC<{
     preset?.modelsEndpoint,
     resolvedStyle,
   ]);
+  const probeFingerprint = useMemo(() => JSON.stringify({
+    baseURL: form.baseURL || preset?.defaultBaseURL || "",
+    apiKey: form.apiKey,
+    style: resolvedStyle,
+    skipTLSVerify: form.skipTLSVerify,
+    modelsEndpoint: preset?.modelsEndpoint ?? "",
+  }), [
+    form.apiKey,
+    form.baseURL,
+    form.skipTLSVerify,
+    preset?.defaultBaseURL,
+    preset?.modelsEndpoint,
+    resolvedStyle,
+  ]);
   const modelMetadataSourceKeyRef = useRef<string | null>(null);
+  const probeFingerprintRef = useRef<string | null>(null);
   const previewProvider: Pick<ProviderConfig, "providerId" | "name" | "iconId" | "iconDataUrl"> = {
     providerId: provider.providerId,
     name: form.name,
@@ -132,6 +158,19 @@ export const ProviderConfigForm: React.FC<{
       ? { ...prev, modelContextWindows: {} }
       : prev);
   }, [modelMetadataSourceKey]);
+
+  useEffect(() => {
+    if (probeFingerprintRef.current == null) {
+      probeFingerprintRef.current = probeFingerprint;
+      return;
+    }
+    if (probeFingerprintRef.current === probeFingerprint) return;
+
+    probeFingerprintRef.current = probeFingerprint;
+    probeRequestIdRef.current += 1;
+    setProbeResult(null);
+    setIsTesting(false);
+  }, [probeFingerprint]);
 
   const [advancedParamRaw, setAdvancedParamRaw] = useState<Record<string, string>>({});
   const handleAdvancedParam = useCallback((key: keyof ProviderAdvancedParams, raw: string) => {
@@ -179,6 +218,90 @@ export const ProviderConfigForm: React.FC<{
     setApiKeySourceVersion((version) => version + 1);
     setForm((prev) => ({ ...prev, apiKey: value }));
   }, []);
+
+  const handleTestConnection = useCallback(async () => {
+    const baseURL = form.baseURL || preset?.defaultBaseURL || "";
+    const inputCheck = validateProviderProbeInputs({
+      baseURL,
+      apiKey: form.apiKey,
+      providerId: provider.providerId,
+    });
+    if (!inputCheck.ok) {
+      probeRequestIdRef.current += 1;
+      setIsTesting(false);
+      setProbeResult({
+        health: "error",
+        message: t(
+          inputCheck.reason === "missing_base_url"
+            ? "ai.providers.test.missingBaseUrl"
+            : "ai.providers.test.missingApiKey",
+        ),
+      });
+      return;
+    }
+
+    const requestId = ++probeRequestIdRef.current;
+    setIsTesting(true);
+    setProbeResult(null);
+    try {
+      const run = await probeProviderConnection({
+        bridge: getFetchBridge(),
+        baseURL,
+        apiKey: form.apiKey,
+        providerId: provider.providerId,
+        style: resolvedStyle,
+        presetModelsEndpoint: preset?.modelsEndpoint,
+        skipTLSVerify: form.skipTLSVerify,
+      });
+      if (probeRequestIdRef.current !== requestId) return;
+      if (!run.ok) {
+        setProbeResult({
+          health: "error",
+          message: t(
+            run.reason === "missing_base_url"
+              ? "ai.providers.test.missingBaseUrl"
+              : run.reason === "missing_api_key"
+                ? "ai.providers.test.missingApiKey"
+                : "ai.providers.test.unavailable",
+          ),
+        });
+        return;
+      }
+      const classified = run.classification;
+      const latency = String(classified.latencyMs);
+      if (classified.health === "ok") {
+        setProbeResult({
+          health: "ok",
+          message: t("ai.providers.test.ok", { latency }),
+        });
+      } else if (classified.health === "warn") {
+        const warnKey = classified.modelCount === 0 || classified.error
+          ? "ai.providers.test.warn"
+          : "ai.providers.test.warnSlow";
+        setProbeResult({
+          health: "warn",
+          message: t(warnKey, { latency }),
+        });
+      } else {
+        const detail = classified.error
+          || (classified.statusCode ? `HTTP ${classified.statusCode}` : "error");
+        setProbeResult({
+          health: "error",
+          message: t("ai.providers.test.error", { detail }),
+        });
+      }
+    } catch (err) {
+      if (probeRequestIdRef.current !== requestId) return;
+      setProbeResult({
+        health: "error",
+        message: t("ai.providers.test.error", {
+          detail: err instanceof Error ? err.message : String(err),
+        }),
+      });
+    } finally {
+      if (probeRequestIdRef.current === requestId) setIsTesting(false);
+    }
+  }, [form.apiKey, form.baseURL, form.skipTLSVerify, preset?.defaultBaseURL, preset?.modelsEndpoint, provider.providerId, resolvedStyle, t]);
 
   const handleSave = useCallback(async () => {
     const cleanedParams: ProviderAdvancedParams = {};
@@ -534,14 +657,40 @@ export const ProviderConfigForm: React.FC<{
       </div>
 
       {/* Actions */}
-      <div className="flex items-center gap-2 pt-1">
-        <Button variant="default" size="sm" onClick={() => void handleSave()}>
-          <Check size={14} className="mr-1.5" />
-          {t('common.save')}
-        </Button>
-        <Button variant="ghost" size="sm" onClick={onCancel}>
-          {t('common.cancel')}
-        </Button>
+      <div className="flex flex-col gap-2 pt-1">
+        <div className="flex items-center gap-2">
+          <Button variant="default" size="sm" onClick={() => void handleSave()}>
+            <Check size={14} className="mr-1.5" />
+            {t('common.save')}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void handleTestConnection()}
+            disabled={isTesting || isDecrypting}
+          >
+            <RefreshCw size={14} className={cn("mr-1.5", isTesting && "animate-spin")} />
+            {isTesting ? t('ai.providers.test.testing') : t('ai.providers.test')}
+          </Button>
+          <Button variant="ghost" size="sm" onClick={onCancel}>
+            {t('common.cancel')}
+          </Button>
+        </div>
+        {(isTesting || probeResult) && (
+          <p
+            className={cn(
+              "text-[11px]",
+              isTesting && "text-muted-foreground",
+              probeResult?.health === "ok" && "text-emerald-500",
+              probeResult?.health === "warn" && "text-amber-500",
+              probeResult?.health === "error" && "text-destructive",
+            )}
+            role="status"
+            aria-live="polite"
+          >
+            {isTesting ? t('ai.providers.test.testing') : probeResult?.message}
+          </p>
+        )}
       </div>
     </div>
   );

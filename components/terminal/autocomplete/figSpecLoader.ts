@@ -143,25 +143,29 @@ export async function hasSpec(commandName: string): Promise<boolean> {
 }
 
 /**
+ * Common shell commands preloaded when autocomplete is enabled.
+ * Includes local overrides under electron/specs/ (e.g. yum, dnf, awk).
+ */
+export const COMMON_FIG_SPECS = [
+  "git", "docker", "kubectl", "npm", "yarn", "pnpm",
+  "ls", "cd", "cat", "grep", "find", "ssh", "scp",
+  "curl", "wget", "tar", "zip", "unzip", "make",
+  "python", "python3", "pip", "pip3", "node",
+  "systemctl", "journalctl", "apt", "yum", "dnf", "brew",
+  "vim", "nano", "less", "head", "tail", "sort",
+  "awk", "sed", "chmod", "chown", "cp", "mv", "rm", "mkdir",
+] as const;
+
+/**
  * Preload commonly used specs in batches to avoid overwhelming IPC.
  * Only call this when autocomplete is enabled.
  */
 export function preloadCommonSpecs(): void {
-  const common = [
-    "git", "docker", "kubectl", "npm", "yarn", "pnpm",
-    "ls", "cd", "cat", "grep", "find", "ssh", "scp",
-    "curl", "wget", "tar", "zip", "unzip", "make",
-    "python", "python3", "pip", "pip3", "node",
-    "systemctl", "journalctl", "apt", "yum", "brew",
-    "vim", "nano", "less", "head", "tail", "sort",
-    "awk", "sed", "chmod", "chown", "cp", "mv", "rm", "mkdir",
-  ];
-
   const BATCH_SIZE = 8;
   let offset = 0;
 
   const loadBatch = () => {
-    const batch = common.slice(offset, offset + BATCH_SIZE);
+    const batch = COMMON_FIG_SPECS.slice(offset, offset + BATCH_SIZE);
     if (batch.length === 0) return;
 
     for (const name of batch) {
@@ -169,7 +173,7 @@ export function preloadCommonSpecs(): void {
     }
 
     offset += BATCH_SIZE;
-    if (offset < common.length) {
+    if (offset < COMMON_FIG_SPECS.length) {
       if (typeof requestIdleCallback === "function") {
         requestIdleCallback(() => loadBatch());
       } else {

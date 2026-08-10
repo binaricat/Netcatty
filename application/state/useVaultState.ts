@@ -64,6 +64,11 @@ import {
   type ConnectionLogTerminalDataMap,
 } from "../../domain/connectionLogTerminalData";
 import { getNextVaultOrder, normalizeVaultOrder } from "../../domain/vaultOrder";
+import {
+  deleteSelectedSnippetsFromVault,
+  pruneHostsStaleSnippetBindings,
+  rebaseSnippetVaultWrite,
+} from "../../domain/snippetSelection";
 import { loadSanitizedShellHistory } from "./shellHistoryPersistence";
 import {
   publishConnectionLogsSnapshot,
@@ -290,12 +295,14 @@ export const useVaultState = () => {
   const customGroupsRef = useRef<string[]>([]);
   const managedSourcesRef = useRef<ManagedSource[]>([]);
   const hostsRef = useRef<Host[]>([]);
+  const snippetsRef = useRef<Snippet[]>([]);
   const notesRef = useRef<VaultNote[]>([]);
   const noteGroupsRef = useRef<string[]>([]);
   const notesPersistFailureNotifiedAtRef = useRef(0);
   customGroupsRef.current = customGroups;
   managedSourcesRef.current = managedSources;
   hostsRef.current = hosts;
+  snippetsRef.current = snippets;
   notesRef.current = notes;
   noteGroupsRef.current = noteGroups;
 
@@ -307,6 +314,18 @@ export const useVaultState = () => {
   const identitiesWriteVersion = useRef(0);
   const proxyProfilesWriteVersion = useRef(0);
   const snippetsWriteVersion = useRef(0);
+  // Tracks the latest local updateSnippets schedule. Storage events also bump
+  // snippetsWriteVersion (to invalidate naive writers), so queued saves must
+  // key supersede checks off this owner instead of that shared counter.
+  const snippetsWriteOwnerRef = useRef(0);
+  // Last persisted ancestor for in-flight updateSnippets rebases. Superseded
+  // saves must not advance this to an optimistic in-memory array that never
+  // landed on disk — that would make a local add look like a concurrent delete.
+  const snippetsWriteBaseRef = useRef<Snippet[] | null>(null);
+  // Outstanding clear/restore/import replace must survive a superseding local
+  // save. Otherwise the later owner rebases additively against the old disk
+  // catalog and resurrects every pre-replacement snippet.
+  const snippetsWriteReplaceRef = useRef(false);
   const customGroupsWriteVersion = useRef(0);
   const groupConfigsWriteVersion = useRef(0);
   // Encrypt-phase promises can always be awaited, even under the vault lock.
@@ -320,6 +339,7 @@ export const useVaultState = () => {
   const keysWritePendingRef = useRef<Promise<unknown>>(Promise.resolve());
   const identitiesWritePendingRef = useRef<Promise<unknown>>(Promise.resolve());
   const groupConfigsWritePendingRef = useRef<Promise<unknown>>(Promise.resolve());
+  const snippetsWritePendingRef = useRef<Promise<unknown>>(Promise.resolve());
 
   const waitForPendingVaultWrites = useCallback(async () => {
     while (true) {
@@ -344,6 +364,7 @@ export const useVaultState = () => {
         keysWritePendingRef.current,
         identitiesWritePendingRef.current,
         groupConfigsWritePendingRef.current,
+        snippetsWritePendingRef.current,
       ];
       await Promise.all(writePending);
       if (
@@ -351,6 +372,7 @@ export const useVaultState = () => {
         && writePending[1] === keysWritePendingRef.current
         && writePending[2] === identitiesWritePendingRef.current
         && writePending[3] === groupConfigsWritePendingRef.current
+        && writePending[4] === snippetsWritePendingRef.current
         && encryptPending[0] === hostsEncryptPendingRef.current
         && encryptPending[1] === keysEncryptPendingRef.current
         && encryptPending[2] === identitiesEncryptPendingRef.current
@@ -451,6 +473,37 @@ export const useVaultState = () => {
     return mergeConnectionLogsFromStorage(prev, storedLogs, terminalDataMap);
   }, []);
 
+  // Encrypt outside the lock, then under the lock prune script bindings against
+  // the latest snippet catalog so a queued full-array write cannot restore
+  // login/connect ids cleared by a concurrent bulk-delete in another window.
+  const commitEncryptedHostsUnderVaultLock = useCallback(async (
+    ver: number,
+    hostsToPersist: Host[],
+    encrypted: Awaited<ReturnType<typeof encryptHosts>>,
+  ) => {
+    return withVaultImportLock("vault", async () => {
+      if (ver !== hostsWriteVersion.current) return "superseded" as const;
+      const latestSnippets = normalizeVaultOrder(
+        readStoredArray<Snippet>(
+          STORAGE_KEY_SNIPPETS,
+          localStorageAdapter.readString(STORAGE_KEY_SNIPPETS),
+        ),
+      );
+      const pruned = pruneHostsStaleSnippetBindings(hostsToPersist, latestSnippets);
+      let payload = encrypted;
+      if (pruned !== hostsToPersist) {
+        const normalized = normalizeVaultOrder(pruned);
+        payload = await encryptHosts(normalized);
+        if (ver !== hostsWriteVersion.current) return "superseded" as const;
+        hostsRef.current = normalized;
+        setHosts(normalized);
+      }
+      return localStorageAdapter.write(STORAGE_KEY_HOSTS, payload)
+        ? "written" as const
+        : "failed" as const;
+    });
+  }, []);
+
   const updateHosts = useCallback((data: Host[] | ((prev: Host[]) => Host[])) => {
     // Keep object identity for hosts that did not actually change. Callers that
     // do `hosts.map(h => h.id === id ? patch(h) : h)` already pass through
@@ -483,14 +536,11 @@ export const useVaultState = () => {
     hostsEncryptPendingRef.current = encryptPromise.then(() => undefined);
     const writePromise = encryptPromise.then(async (enc) => {
       if (ver !== hostsWriteVersion.current) return "superseded" as const;
-      return withVaultImportLock("vault", async () => {
-        if (ver !== hostsWriteVersion.current) return "superseded" as const;
-        return localStorageAdapter.write(STORAGE_KEY_HOSTS, enc);
-      });
+      return commitEncryptedHostsUnderVaultLock(ver, cleaned, enc);
     });
     hostsWritePendingRef.current = writePromise;
     return writePromise;
-  }, []);
+  }, [commitEncryptedHostsUnderVaultLock]);
 
   const readPersistedHosts = useCallback(async (): Promise<Host[]> => {
     // Always drain what is safe to wait for. Under the vault lock this is only
@@ -592,12 +642,165 @@ export const useVaultState = () => {
     });
   }, []);
 
-  const updateSnippets = useCallback((data: Snippet[]) => {
+  const updateSnippets = useCallback((
+    data: Snippet[],
+    options?: { replace?: boolean },
+  ) => {
+    // Capture the pre-update snapshot for a 3-way rebase once we hold the lock.
+    // Callers pass a full array derived from this window's view; a popup delete
+    // (or another window's import) may land on disk before our write runs.
+    // Keep the first outstanding ancestor across superseded local saves so a
+    // second edit does not rebase against the first save's optimistic memory.
+    const replace =
+      options?.replace === true || snippetsWriteReplaceRef.current;
+    const base = snippetsWriteBaseRef.current ?? snippetsRef.current;
+    if (options?.replace === true) {
+      snippetsWriteReplaceRef.current = true;
+    }
+    if (replace) {
+      // Restore/import/clear must not keep an additive ancestor — storage events
+      // would otherwise merge disk-only ids back into memory while replace waits.
+      // Keep this cleared when a later create/edit supersedes the replacement
+      // owner so that save stays in replace mode instead of capturing []/restored
+      // memory as an additive rebase base against the stale disk catalog.
+      snippetsWriteBaseRef.current = null;
+    } else if (snippetsWriteBaseRef.current === null) {
+      snippetsWriteBaseRef.current = base;
+    }
     const cleaned = normalizeVaultOrder(data);
-    ++snippetsWriteVersion.current;
+    const ver = ++snippetsWriteVersion.current;
+    snippetsWriteOwnerRef.current = ver;
+    // Keep live snapshot ahead of React commit so same-tick readers (delete,
+    // agent bridge) do not observe a stale pre-write array.
+    snippetsRef.current = cleaned;
     setSnippets(cleaned);
-    localStorageAdapter.write(STORAGE_KEY_SNIPPETS, cleaned);
+    // Serialize with deleteSelectedSnippets / plugin importer under the shared
+    // vault lock, then rebase onto the latest persisted snapshot so a queued
+    // full-array write cannot resurrect concurrently deleted snippets (or drop
+    // concurrent additions). Explicit replace (clear / sync restore / import)
+    // skips the additive rebase so a concurrent disk-only add cannot survive.
+    const writePromise = withVaultImportLock("vault", async () => {
+      if (snippetsWriteOwnerRef.current !== ver) return "superseded" as const;
+      const rebased = normalizeVaultOrder(
+        replace
+          ? cleaned
+          : rebaseSnippetVaultWrite({
+              base,
+              ours: cleaned,
+              theirs: normalizeVaultOrder(
+                readStoredArray<Snippet>(
+                  STORAGE_KEY_SNIPPETS,
+                  localStorageAdapter.readString(STORAGE_KEY_SNIPPETS),
+                ),
+              ),
+            }),
+      );
+      const persisted = localStorageAdapter.write(STORAGE_KEY_SNIPPETS, rebased);
+      if (!persisted) {
+        // Keep the pre-update ancestor. Clearing it here would make the next
+        // save rebase against the optimistic array while disk still lacks the
+        // add, so rebase would treat the add as a concurrent delete.
+        notify.error(
+          "Snippets could not be saved. Free some local storage space and try again.",
+          "Scripts",
+        );
+        return "failed" as const;
+      }
+      // Disk caught up; next save should treat this write as its ancestor.
+      snippetsWriteBaseRef.current = null;
+      snippetsWriteReplaceRef.current = false;
+      if (snippetsWriteOwnerRef.current === ver) {
+        snippetsRef.current = rebased;
+        setSnippets(rebased);
+      }
+      return "written" as const;
+    });
+    snippetsWritePendingRef.current = writePromise;
+    return writePromise;
   }, []);
+
+  // Cross-window safe: merge binding cleanup into the latest persisted
+  // hosts/snippets under the shared vault lock. Popup terminals own a separate
+  // useVaultState instance — writing hostsRef from that window can discard a
+  // main-window host edit, or a storage-event version bump can cancel the host
+  // write after snippets were already removed.
+  const deleteSelectedSnippets = useCallback(async (selectedSnippetIds: ReadonlySet<string>) => {
+    if (selectedSnippetIds.size === 0) {
+      return {
+        snippets: snippetsRef.current,
+        hosts: hostsRef.current,
+        deletedCount: 0,
+      };
+    }
+
+    while (true) {
+      await waitForPendingVaultWrites();
+      const attempt = await withVaultImportLock("vault", async () => {
+        const writeVersions = {
+          hosts: hostsWriteVersion.current,
+          snippets: snippetsWriteVersion.current,
+        };
+        const rawHosts = localStorageAdapter.readString(STORAGE_KEY_HOSTS);
+        const rawSnippets = localStorageAdapter.readString(STORAGE_KEY_SNIPPETS);
+        const storedHosts = readStoredArray<Host>(STORAGE_KEY_HOSTS, rawHosts);
+        const storedSnippets = readStoredArray<Snippet>(STORAGE_KEY_SNIPPETS, rawSnippets);
+        const latestHosts = normalizeVaultOrder(
+          (await decryptHosts(storedHosts)).map((host) => sanitizeHost(host)),
+        );
+        const latestSnippets = normalizeVaultOrder(storedSnippets);
+        const result = deleteSelectedSnippetsFromVault(
+          latestSnippets,
+          latestHosts,
+          selectedSnippetIds,
+        );
+        if (result.deletedCount === 0) return result;
+
+        const encryptedHosts = await encryptHosts(result.hosts);
+        const changedWhilePreparing = (
+          writeVersions.hosts !== hostsWriteVersion.current
+          || writeVersions.snippets !== snippetsWriteVersion.current
+          || localStorageAdapter.readString(STORAGE_KEY_HOSTS) !== rawHosts
+          || localStorageAdapter.readString(STORAGE_KEY_SNIPPETS) !== rawSnippets
+        );
+        if (changedWhilePreparing) return null;
+
+        ++hostsWriteVersion.current;
+        ++snippetsWriteVersion.current;
+        // Journaled pair write: a partial hosts/snippets persist would drop
+        // login/connect bindings on restart while leaving the snippets behind.
+        // Callers fire-and-forget this promise after closing the confirm dialog,
+        // so storage rejection must not become an unhandled rejection.
+        try {
+          commitPluginImporterTransaction(localStorageAdapter, [
+            [STORAGE_KEY_HOSTS, encryptedHosts],
+            [STORAGE_KEY_SNIPPETS, result.snippets],
+          ]);
+        } catch {
+          notify.error(
+            "Snippets could not be deleted. Free some local storage space and try again.",
+            "Scripts",
+          );
+          return {
+            snippets: latestSnippets,
+            hosts: latestHosts,
+            deletedCount: 0,
+          };
+        }
+        hostsRef.current = result.hosts;
+        snippetsRef.current = result.snippets;
+        // Persisted delete is the new ancestor; drop any stale rebase base from
+        // a superseded/queued updateSnippets that never landed.
+        snippetsWriteBaseRef.current = null;
+        snippetsWriteReplaceRef.current = false;
+        setHosts(result.hosts);
+        setSnippets(result.snippets);
+        hostsWritePendingRef.current = Promise.resolve("unchanged" as const);
+        snippetsWritePendingRef.current = Promise.resolve("unchanged" as const);
+        return result;
+      });
+      if (attempt !== null) return attempt;
+    }
+  }, [waitForPendingVaultWrites]);
 
   const updateSnippetPackages = useCallback((data: string[]) => {
     setSnippetPackages(data);
@@ -835,7 +1038,7 @@ export const useVaultState = () => {
     updateKeys([]);
     updateIdentities([]);
     updateProxyProfiles([]);
-    updateSnippets([]);
+    updateSnippets([], { replace: true });
     updateSnippetPackages([]);
     updateNotes([]);
     updateNoteGroups([]);
@@ -1026,17 +1229,14 @@ export const useVaultState = () => {
       hostsEncryptPendingRef.current = encryptPromise.then(() => undefined);
       const writePromise = encryptPromise.then(async (enc) => {
         if (ver !== hostsWriteVersion.current) return;
-        return withVaultImportLock("vault", async () => {
-          if (ver === hostsWriteVersion.current)
-            localStorageAdapter.write(STORAGE_KEY_HOSTS, enc);
-        });
+        return commitEncryptedHostsUnderVaultLock(ver, updated, enc);
       });
       hostsWritePendingRef.current = writePromise;
       return updated;
     });
 
     return newHost;
-  }, [hosts]);
+  }, [commitEncryptedHostsUnderVaultLock, hosts]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1062,15 +1262,21 @@ export const useVaultState = () => {
                 readLegacyLineTimestampsEnabled(),
               ),
             );
+            hostsRef.current = sanitized;
             setHosts(sanitized);
             // Always re-encrypt the batch. Stale enc:v1 placeholders are left
             // unchanged by encryptCredentialValue (no double-wrap); plaintext
             // siblings still need encryption when safeStorage was previously
-            // unavailable for some records.
-            encryptHosts(sanitized).then((enc) => {
-              if (ver === hostsWriteVersion.current)
-                localStorageAdapter.write(STORAGE_KEY_HOSTS, enc);
+            // unavailable for some records. Route through the locked writer so
+            // a concurrent snippet delete can prune login/connect bindings
+            // before this migration blob lands.
+            const encryptPromise = encryptHosts(sanitized);
+            hostsEncryptPendingRef.current = encryptPromise.then(() => undefined);
+            const writePromise = encryptPromise.then(async (enc) => {
+              if (ver !== hostsWriteVersion.current) return;
+              return commitEncryptedHostsUnderVaultLock(ver, sanitized, enc);
             });
+            hostsWritePendingRef.current = writePromise;
           }
         } else {
           updateHosts(INITIAL_HOSTS);
@@ -1163,8 +1369,43 @@ export const useVaultState = () => {
 
         if (savedSnippets) {
           const orderedSnippets = normalizeVaultOrder(savedSnippets);
+          snippetsRef.current = orderedSnippets;
           setSnippets(orderedSnippets);
-          localStorageAdapter.write(STORAGE_KEY_SNIPPETS, orderedSnippets);
+          // Persist order backfill only when fields changed. Never rewrite the
+          // pre-lock snapshot unlocked: another renderer can delete under the
+          // vault lock after this read and before this write, resurrecting
+          // snippets while host-binding cleanup stays committed. Re-normalize
+          // the live disk catalog under the same lock as deleteSelectedSnippets.
+          const needsOrderPersist = orderedSnippets.some(
+            (snippet, index) => snippet !== savedSnippets[index],
+          );
+          if (needsOrderPersist) {
+            const ver = ++snippetsWriteVersion.current;
+            snippetsWriteOwnerRef.current = ver;
+            const writePromise = withVaultImportLock("vault", async () => {
+              if (snippetsWriteOwnerRef.current !== ver) return "superseded" as const;
+              const latest = normalizeVaultOrder(
+                readStoredArray<Snippet>(
+                  STORAGE_KEY_SNIPPETS,
+                  localStorageAdapter.readString(STORAGE_KEY_SNIPPETS),
+                ),
+              );
+              const persisted = localStorageAdapter.write(STORAGE_KEY_SNIPPETS, latest);
+              if (!persisted) {
+                notify.error(
+                  "Snippets could not be saved. Free some local storage space and try again.",
+                  "Scripts",
+                );
+                return "failed" as const;
+              }
+              if (snippetsWriteOwnerRef.current === ver) {
+                snippetsRef.current = latest;
+                setSnippets(latest);
+              }
+              return "written" as const;
+            });
+            snippetsWritePendingRef.current = writePromise;
+          }
         }
         else updateSnippets(INITIAL_SNIPPETS);
 
@@ -1251,7 +1492,7 @@ export const useVaultState = () => {
     return () => {
       cancelled = true;
     };
-  }, [updateHosts, updateSnippets]);
+  }, [commitEncryptedHostsUnderVaultLock, updateHosts, updateSnippets]);
 
   useEffect(() => {
     if (!isInitialized) return;
@@ -1356,9 +1597,44 @@ export const useVaultState = () => {
       }
 
       if (key === STORAGE_KEY_SNIPPETS) {
-        const next = safeParse<Snippet[]>(event.newValue) ?? [];
+        // StorageEvent.newValue is the value at fire time. A peer write can be
+        // delivered only after this window's replace already committed and
+        // cleared snippetsWriteReplaceRef — adopting that older payload would
+        // resurrect the pre-replacement catalog in memory (and on the next edit).
+        if (event.newValue !== localStorageAdapter.readString(STORAGE_KEY_SNIPPETS)) {
+          return;
+        }
+        const next = normalizeVaultOrder(safeParse<Snippet[]>(event.newValue) ?? []);
+        // Invalidate write-version readers, but do not clear snippetsWriteOwnerRef:
+        // an in-flight updateSnippets rebases onto this disk snapshot under the
+        // vault lock instead of being cancelled (which would drop local edits).
         ++snippetsWriteVersion.current;
-        setSnippets(normalizeVaultOrder(next));
+        const pendingBase = snippetsWriteBaseRef.current;
+        if (pendingBase !== null) {
+          // A queued local save still owns an outstanding ancestor. Replacing
+          // optimistic state with the remote snapshot (and clearing that base)
+          // would make the next local edit derive from remote-only and drop the
+          // first mutation when it supersedes the queued owner.
+          const merged = normalizeVaultOrder(
+            rebaseSnippetVaultWrite({
+              base: pendingBase,
+              ours: snippetsRef.current,
+              theirs: next,
+            }),
+          );
+          snippetsRef.current = merged;
+          setSnippets(merged);
+          return;
+        }
+        if (snippetsWriteReplaceRef.current) {
+          // Clear/restore/import left base null while replace is outstanding.
+          // Adopting the remote catalog here would pollute memory; a later local
+          // edit would still run in replace mode and overwrite disk with the old
+          // catalog plus that edit.
+          return;
+        }
+        snippetsRef.current = next;
+        setSnippets(next);
         return;
       }
 
@@ -1473,15 +1749,12 @@ export const useVaultState = () => {
       hostsEncryptPendingRef.current = encryptPromise.then(() => undefined);
       const writePromise = encryptPromise.then(async (enc) => {
         if (ver !== hostsWriteVersion.current) return;
-        return withVaultImportLock("vault", async () => {
-          if (ver === hostsWriteVersion.current)
-            localStorageAdapter.write(STORAGE_KEY_HOSTS, enc);
-        });
+        return commitEncryptedHostsUnderVaultLock(ver, next, enc);
       });
       hostsWritePendingRef.current = writePromise;
       return next;
     });
-  }, []);
+  }, [commitEncryptedHostsUnderVaultLock]);
 
   const updateHostDistro = useCallback((hostId: string, distro: string) => {
     const normalized = normalizeDistroId(distro);
@@ -1494,15 +1767,12 @@ export const useVaultState = () => {
       hostsEncryptPendingRef.current = encryptPromise.then(() => undefined);
       const writePromise = encryptPromise.then(async (enc) => {
         if (ver !== hostsWriteVersion.current) return;
-        return withVaultImportLock("vault", async () => {
-          if (ver === hostsWriteVersion.current)
-            localStorageAdapter.write(STORAGE_KEY_HOSTS, enc);
-        });
+        return commitEncryptedHostsUnderVaultLock(ver, next, enc);
       });
       hostsWritePendingRef.current = writePromise;
       return next;
     });
-  }, []);
+  }, [commitEncryptedHostsUnderVaultLock]);
 
   const exportData = useCallback(
     (): ExportableVaultData => ({
@@ -1528,7 +1798,13 @@ export const useVaultState = () => {
       if (payload.keys) encryptedWrites.push(updateKeys(payload.keys));
       if (payload.identities) encryptedWrites.push(updateIdentities(payload.identities));
       if (Array.isArray(payload.proxyProfiles)) encryptedWrites.push(updateProxyProfiles(payload.proxyProfiles));
-      if (payload.snippets) updateSnippets(payload.snippets);
+      if (payload.snippets) {
+        // Full-snapshot restore/import must replace, not additive-rebase; otherwise
+        // a concurrent disk-only snippet survives and the restore looks incomplete.
+        encryptedWrites.push(
+          updateSnippets(payload.snippets, { replace: true }).then(() => undefined),
+        );
+      }
       if (payload.customGroups) updateCustomGroups(payload.customGroups);
       if (payload.snippetPackages) updateSnippetPackages(payload.snippetPackages);
       if (payload.notes) updateNotes(payload.notes);
@@ -1675,6 +1951,9 @@ export const useVaultState = () => {
           [STORAGE_KEY_GROUP_CONFIGS, encryptedGroupConfigs],
         ]);
         customGroupsRef.current = nextGroups;
+        snippetsRef.current = nextSnippets;
+        snippetsWriteBaseRef.current = null;
+        snippetsWriteReplaceRef.current = false;
         setHosts(nextHosts);
         setKeys(nextKeys);
         setIdentities(nextIdentities);
@@ -1720,6 +1999,7 @@ export const useVaultState = () => {
     updateIdentities,
     updateProxyProfiles,
     updateSnippets,
+    deleteSelectedSnippets,
     updateSnippetPackages,
     updateNotes,
     updateNoteGroups,

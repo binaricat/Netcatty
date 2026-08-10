@@ -2,10 +2,12 @@
  * Snippet completion source. Surfaces custom snippets in terminal autocomplete
  * when the user is typing the command name. Matches against the snippet label
  * and the first line of its command (case-insensitive; prefix matches rank
- * above substring matches). Each suggestion carries the full Snippet so the
- * accept path can run it through the canonical executeSnippetCommand.
+ * above substring matches). Chinese labels also match via pinyin / initials
+ * through the shared search matcher (#2813). Each suggestion carries the full
+ * Snippet so the accept path can run it through the canonical executeSnippetCommand.
  */
 import type { Snippet } from "../../../domain/models";
+import { matchesSearchQuery } from "../../../lib/searchMatcher";
 import type { CompletionSuggestion } from "./completionEngine";
 
 const SNIPPET_BASE_SCORE = 2000; // Above history (1000+freq) per "snippet > history".
@@ -34,7 +36,12 @@ export function getSnippetSuggestions(
     const firstLine = (snippet.command || "").split("\n")[0].trim().toLowerCase();
 
     const labelPrefix = label.startsWith(needle);
-    const matches = labelPrefix || label.includes(needle) || firstLine.startsWith(needle);
+    // Literal prefix/substring first (cheap); fall back to shared smart matcher
+    // so Chinese titles surface for pinyin / initials the same way host search does.
+    const matches = labelPrefix
+      || label.includes(needle)
+      || firstLine.startsWith(needle)
+      || matchesSearchQuery(needle, snippet.label, firstLine);
     if (!matches) continue;
 
     out.push({

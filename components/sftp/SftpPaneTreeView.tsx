@@ -9,7 +9,7 @@ import { useSftpPaneTreeRows } from './useSftpPaneTreeRows';
 import { SftpMoveToDialog } from './SftpMoveToDialog';
 import type { SftpFileEntry } from '../../types';
 import { getParentPath, isWindowsRoot, joinPath, resolveSftpWindowsPathOptions } from '../../application/state/sftp/utils';
-import { buildSftpColumnTemplate, filterHiddenFiles, isNavigableDirectory, isSftpColumnMenuKey, sortSftpEntries } from './utils';
+import { buildSftpColumnTemplate, filterHiddenFiles, filterSftpTreeEntriesByName, isNavigableDirectory, isSftpColumnMenuKey, sortSftpEntries } from './utils';
 import type { SftpTransferSource } from './SftpContext';
 import type { SftpPaneTreeViewProps } from './SftpPaneTreeView.types';
 import { sftpTreeSelectionStore, useSftpTreeSelectionState } from '../../application/state/sftp/sftpTreeSelectionStore';
@@ -225,10 +225,27 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
     childrenCacheRef.current.delete(targetPath);
     sortedChildrenCacheRef.current.delete(targetPath);
   }, []);
-  const prevSortKeyRef = useRef(`${sortField}:${sortOrder}:${directoriesFirst}:${pane.showHiddenFiles}`);
-  const sortKey = `${sortField}:${sortOrder}:${directoriesFirst}:${pane.showHiddenFiles}`;
+  const prevSortKeyRef = useRef(`${sortField}:${sortOrder}:${directoriesFirst}:${pane.showHiddenFiles}:${pane.filter}`);
+  const sortKey = `${sortField}:${sortOrder}:${directoriesFirst}:${pane.showHiddenFiles}:${pane.filter}`;
   if (prevSortKeyRef.current !== sortKey) {
     prevSortKeyRef.current = sortKey;
+    sortedChildrenCacheRef.current.clear();
+  }
+  // Ancestor keep decisions follow expand/load/error visibility; invalidate
+  // sorted snapshots when those states change which descendants the filter may use.
+  const prevExpandedPathsRef = useRef(expandedPaths);
+  if (prevExpandedPathsRef.current !== expandedPaths) {
+    prevExpandedPathsRef.current = expandedPaths;
+    sortedChildrenCacheRef.current.clear();
+  }
+  const prevLoadingPathsRef = useRef(loadingPaths);
+  if (prevLoadingPathsRef.current !== loadingPaths) {
+    prevLoadingPathsRef.current = loadingPaths;
+    sortedChildrenCacheRef.current.clear();
+  }
+  const prevErrorPathsRef = useRef(errorPaths);
+  if (prevErrorPathsRef.current !== errorPaths) {
+    prevErrorPathsRef.current = errorPaths;
     sortedChildrenCacheRef.current.clear();
   }
   useEffect(() => {
@@ -253,6 +270,9 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
         return false;
       }
       childrenCacheRef.current.set(entryPath, children);
+      // Ancestor visibility depends on loaded descendants, so drop every
+      // sorted/filtered snapshot (not only this path) before the next row build.
+      sortedChildrenCacheRef.current.clear();
       dispatchTreePaths({ type: 'FINISH_LOADING', path: entryPath });
       return true;
     } catch {
@@ -481,7 +501,30 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
       const cached = sortedChildrenCacheRef.current.get(parentPath);
       if (cached) return cached;
       const sorted = sortSftpEntries(
-        filterHiddenFiles(entries, pane.showHiddenFiles),
+        filterSftpTreeEntriesByName(
+          filterHiddenFiles(entries, pane.showHiddenFiles),
+          pane.filter,
+          {
+            parentPath,
+            joinPath,
+            isDirectory: isNavigableDirectory,
+            getChildren: (entryPath) => {
+              // Match buildTree visibility: collapsed, loading, and error paths
+              // do not render children, so cached descendants must not keep
+              // ancestors either (reload/failure would otherwise leave a
+              // nonmatching parent with only a spinner/error row).
+              if (!expandedPaths.has(entryPath)) return undefined;
+              if (loadingPaths.has(entryPath) || errorPaths.has(entryPath)) {
+                return undefined;
+              }
+              const children = childrenCacheRef.current.get(entryPath);
+              if (!children) return undefined;
+              // Match visible-row hidden policy so ancestor keep decisions
+              // cannot latch onto descendants the user cannot see.
+              return filterHiddenFiles(children, pane.showHiddenFiles);
+            },
+          },
+        ),
         sortField,
         sortOrder,
         directoriesFirst,
@@ -521,6 +564,7 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
     resolvedRootPath,
     pane.connection?.homeDir,
     pane.showHiddenFiles,
+    pane.filter,
     sortField,
     sortOrder,
     directoriesFirst,
@@ -662,7 +706,6 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
         sourceParent,
         cached.filter((entry) => !movedNameSet.has(entry.name)),
       );
-      sortedChildrenCacheRef.current.delete(sourceParent);
     }
     if (targetPath !== currentPath) {
       const targetCache = childrenCacheRef.current.get(targetPath);
@@ -674,9 +717,12 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
           }
         }
         childrenCacheRef.current.set(targetPath, next);
-        sortedChildrenCacheRef.current.delete(targetPath);
       }
     }
+    // Ancestor filter keep decisions depend on cached descendants; drop every
+    // sorted/filtered snapshot (not only source/target) so Move To / drag-move
+    // cannot leave stale parents visible or hide the new parent under search.
+    sortedChildrenCacheRef.current.clear();
   }, [pane.connection?.currentPath]);
   const executeMoveAction = useCallback(async (sourcePaths: string[], targetPath: string) => {
     try {

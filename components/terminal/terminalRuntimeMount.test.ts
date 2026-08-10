@@ -58,7 +58,7 @@ test('disabled or absent plugin hosts do not receive terminal completion request
   const autocompleteSource = readFileSync(new URL('./TerminalAutocomplete.tsx', import.meta.url), 'utf8');
   assert.match(
     autocompleteSource,
-    /const pluginRegistry = isPluginCompletionProviderAvailable\?\.\(\) === false[\s\S]*?shouldUsePluginTerminalCompletionProvider[\s\S]*?\? null\s*\n\s*: getWindowPluginTerminalProviderRegistry\(\)/,
+    /const pluginRegistry = isPluginCompletionProviderAvailable\?\.\(\) === false[\s\S]*?options\.allowExternalProviders === false[\s\S]*?shouldUsePluginTerminalCompletionProvider[\s\S]*?\? null\s*\n\s*: getWindowPluginTerminalProviderRegistry\(\)/,
   );
   assert.match(
     terminalSource,

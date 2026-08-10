@@ -325,6 +325,7 @@ export const enVaultMessages: Messages = {
   'sftp.transfers.dragToResize': 'Drag to resize',
   'sftp.goUp': 'Go up',
   'sftp.goToTerminalCwd': 'Go to terminal directory',
+  'sftp.locatePathInTerminal': 'Open path in terminal',
   'sftp.followTerminalCwd': 'Follow terminal directory',
   'sftp.followTerminalCwd.enable': 'Enable follow terminal directory',
   'sftp.followTerminalCwd.disable': 'Disable follow terminal directory',

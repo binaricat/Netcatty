@@ -7,6 +7,7 @@ import {
   quoteRestoreCwdForShell,
   resolveRestoredActiveTabId,
   resolveInheritedCwdIntent,
+  resolveInteractiveTerminalCdIntent,
   resolveRestoreCwdIntent,
   sanitizeSessionRestorePayload,
   shouldAttemptRestoreCwd,
@@ -678,6 +679,32 @@ test("quoteRestoreCwdForShell treats cwd as shell data", () => {
   assert.equal(quoteRestoreCwdForShell("/srv/app"), "'/srv/app'");
   assert.equal(quoteRestoreCwdForShell("/srv/app dir"), "'/srv/app dir'");
   assert.equal(quoteRestoreCwdForShell("/tmp/it's ok; $(rm -rf ~)"), "'/tmp/it'\\''s ok; $(rm -rf ~)'");
+});
+
+test("resolveInteractiveTerminalCdIntent quotes path-only cd without session transport checks", () => {
+  assert.deepEqual(resolveInteractiveTerminalCdIntent("/srv/app dir"), {
+    cwd: "/srv/app dir",
+    command: "cd -- '/srv/app dir'",
+  });
+  assert.deepEqual(resolveInteractiveTerminalCdIntent("/srv/project "), {
+    cwd: "/srv/project ",
+    command: "cd -- '/srv/project '",
+  });
+  assert.equal(resolveInteractiveTerminalCdIntent("C:\\Users\\alice"), null);
+});
+
+test("resolveInteractiveTerminalCdIntent rejects control bytes that readline would interpret", () => {
+  // Tab / ESC / Ctrl-U / newline / DEL must not be typed into an interactive PTY.
+  assert.equal(resolveInteractiveTerminalCdIntent("/srv/app\tdir"), null);
+  assert.equal(resolveInteractiveTerminalCdIntent("/srv/app\u001bdir"), null);
+  assert.equal(resolveInteractiveTerminalCdIntent("/srv/app\u0015dir"), null);
+  assert.equal(resolveInteractiveTerminalCdIntent("/srv/app\ndir"), null);
+  assert.equal(resolveInteractiveTerminalCdIntent("/srv/app\u007fdir"), null);
+  // Trailing spaces remain valid POSIX names and must still quote exactly.
+  assert.deepEqual(resolveInteractiveTerminalCdIntent("/srv/project "), {
+    cwd: "/srv/project ",
+    command: "cd -- '/srv/project '",
+  });
 });
 
 test("resolveRestoreCwdIntent captures a one-shot restore command", () => {

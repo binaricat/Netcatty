@@ -1,5 +1,5 @@
 /**
- * Ghost Text addon for xterm.js.
+ * GhostText addon for xterm.js.
  * Renders inline suggestion text after the cursor in a dimmed style,
  * similar to fish shell's autosuggestions.
  *
@@ -12,9 +12,9 @@ import {
   getXTermCellDimensions,
   invalidateCellDimensionCache,
   removeLastCodePoint,
-  stringCellWidth,
 } from "./xtermUtils";
 import { lineHasUntrackedTrailingInput } from "./ghostTextConsistency";
+import { stringCellWidth } from "./terminalStringCellWidth";
 
 /** Optional logical caret for show() when SSH echo lags the typed buffer. */
 export type GhostTextAnchor = {
@@ -29,6 +29,15 @@ function commonPrefixLength(a: string, b: string): number {
   return i;
 }
 
+/** Longest prefix of `input` that is already a suffix of `beforeCursor`. */
+function echoedInputPrefixLength(beforeCursor: string, input: string): number {
+  let n = Math.min(beforeCursor.length, input.length);
+  while (n > 0 && !beforeCursor.endsWith(input.slice(0, n))) {
+    n -= 1;
+  }
+  return n;
+}
+
 function hasVisibleGhostPrefix(ghostText: string, afterCursor: string): boolean {
   if (!ghostText || !afterCursor) return false;
   const visibleAfterCursor = afterCursor.trimEnd();
@@ -40,6 +49,55 @@ function hasVisibleGhostPrefix(ghostText: string, afterCursor: string): boolean 
     overlap === visibleAfterCursor.length ||
     afterCursor[overlap] === " "
   );
+}
+
+type BufferLineLike = {
+  isWrapped?: boolean;
+  translateToString?: (
+    trimRight?: boolean,
+    startColumn?: number,
+    endColumn?: number,
+  ) => string;
+};
+
+type ActiveBufferLike = {
+  baseY: number;
+  cursorY: number;
+  cursorX: number;
+  getLine?: (y: number) => BufferLineLike | undefined;
+};
+
+/**
+ * Text before the cursor across wrapped physical rows. `getLine` only returns
+ * one row, so a wrapped command's current row cannot end with the full
+ * `currentInput` — callers must reconstruct the logical line or they will
+ * treat already-echoed text as unechoed.
+ */
+function readBeforeCursorAcrossWraps(
+  buf: ActiveBufferLike,
+  cols: number,
+): string | null {
+  if (typeof buf.getLine !== "function") return null;
+  const absY = buf.baseY + buf.cursorY;
+  let line = buf.getLine(absY);
+  if (!line || typeof line.translateToString !== "function") return null;
+
+  // cursorX is a cell column, not a UTF-16 offset — slice() breaks on
+  // wide / multi-code-unit graphemes (emoji prompts, CJK).
+  let beforeCursor = line.translateToString(false, 0, buf.cursorX);
+  let y = absY;
+  while (line.isWrapped && y > 0) {
+    y -= 1;
+    line = buf.getLine(y);
+    if (!line || typeof line.translateToString !== "function") break;
+    // Keep wrap seams aligned with the terminal width (do not trimRight).
+    const rowCols = cols > 0 ? cols : undefined;
+    const rowText = rowCols === undefined
+      ? line.translateToString(false)
+      : line.translateToString(false, 0, rowCols);
+    beforeCursor = rowText + beforeCursor;
+  }
+  return beforeCursor;
 }
 
 export class GhostTextAddon implements IDisposable {
@@ -202,8 +260,36 @@ export class GhostTextAddon implements IDisposable {
       this.anchorIsLogical = true;
       this.anchorInputLength = currentInput.length;
     } else if (!preserveLogicalAnchor) {
-      this.anchorCursorX = this.term.buffer.active.cursorX;
-      this.anchorCursorY = this.term.buffer.active.cursorY;
+      const buf = this.term.buffer.active;
+      const liveX = buf.cursorX;
+      // When show() runs before the shell echoes `currentInput` (CJK IME /
+      // high-latency SSH), live cursorX is still at the prompt. Advance the
+      // anchor by the pending input's cell width so the ghost sits after it
+      // instead of painting over it. Skip the probe when getLine is unavailable
+      // (unit fakes) so those tests keep the legacy "cursor already at end"
+      // contract.
+      let anchorX = liveX;
+      if (
+        currentInput.length > 0 &&
+        typeof buf.getLine === "function"
+      ) {
+        const beforeCursor = readBeforeCursorAcrossWraps(
+          buf as ActiveBufferLike,
+          this.term.cols,
+        );
+        if (beforeCursor !== null && !beforeCursor.endsWith(currentInput)) {
+          // Shell may have echoed only a prefix (e.g. "$ doc" while
+          // currentInput is "docker"). Advance by the unechoed suffix only —
+          // adding the full input width on top of a partially-advanced liveX
+          // overshoots and Math.max self-heal cannot move the ghost left.
+          const unechoed = currentInput.slice(
+            echoedInputPrefixLength(beforeCursor, currentInput),
+          );
+          anchorX = liveX + stringCellWidth(unechoed, this.term);
+        }
+      }
+      this.anchorCursorX = anchorX;
+      this.anchorCursorY = buf.cursorY;
       this.anchorIsLogical = false;
       this.anchorInputLength = currentInput.length;
     }
@@ -412,12 +498,34 @@ export class GhostTextAddon implements IDisposable {
     // forward once echo arrives. Skip when show() already received an
     // echo-lag-aware logical caret — healing would pull the suffix back
     // onto the short prefix and drop the unechoed middle.
+    //
+    // For non-logical anchors (pre-echo probe path): use max on the same
+    // row so a cell-width-predicted pre-echo anchor is not collapsed back
+    // onto the prompt before echo arrives. When the live row advances, the
+    // predicted X may already encode a wrap (column >= cols); adopting the
+    // live X/Y pair avoids counting that wrap again in the modulo math
+    // below. When the predicted wrap happens on the bottom row, the echo
+    // scrolls the buffer and Y stays put — adopt live X/Y once it matches
+    // the normalized wrap column so Math.max cannot keep the unnormalized X.
     if (
       !this.anchorIsLogical &&
       this.currentInput.length === this.anchorInputLength
     ) {
-      this.anchorCursorX = this.term.buffer.active.cursorX;
-      this.anchorCursorY = this.term.buffer.active.cursorY;
+      const liveX = this.term.buffer.active.cursorX;
+      const liveY = this.term.buffer.active.cursorY;
+      const cols = Math.max(1, this.term.cols);
+      if (liveY !== this.anchorCursorY) {
+        this.anchorCursorX = liveX;
+        this.anchorCursorY = liveY;
+      } else if (
+        this.anchorCursorX >= cols &&
+        liveX === this.anchorCursorX % cols
+      ) {
+        this.anchorCursorX = liveX;
+        this.anchorCursorY = liveY;
+      } else {
+        this.anchorCursorX = Math.max(this.anchorCursorX, liveX);
+      }
     }
 
     const dims = getXTermCellDimensions(this.term);

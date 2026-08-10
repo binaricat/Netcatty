@@ -272,6 +272,7 @@ function TerminalPopupPageInner() {
     snippetPackages,
     groupConfigs,
     updateKnownHosts,
+    deleteSelectedSnippets,
   } = useVaultState();
   const [config, setConfig] = useState<TerminalPopupPayload | null>(null);
   const [terminalReady, setTerminalReady] = useState(false);
@@ -453,6 +454,7 @@ function TerminalPopupPageInner() {
               snippetPackages={snippetPackages}
               chainHosts={chainHosts}
               compactToolbar
+              onDeleteSnippets={deleteSelectedSnippets}
               lineTimestampsAvailable={false}
               knownHosts={effectiveKnownHosts}
               onAddKnownHost={handleAddKnownHost}

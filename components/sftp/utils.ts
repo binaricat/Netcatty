@@ -347,3 +347,63 @@ export const filterHiddenFiles = <T extends { name: string; hidden?: boolean }>(
     if (showHiddenFiles) return files;
     return files.filter((f) => !isHiddenFile(f));
 };
+
+/**
+ * Filter files by search term (case-insensitive substring match on name).
+ * Always preserves ".." parent directory entry. Empty/whitespace terms are no-ops.
+ */
+export const filterSftpEntriesByName = <T extends { name: string }>(
+    files: T[],
+    filter: string,
+): T[] => {
+    const term = filter.trim().toLowerCase();
+    if (!term) return files;
+    return files.filter(
+        (f) => f.name === ".." || f.name.toLowerCase().includes(term),
+    );
+};
+
+export type SftpTreeNameFilterOptions<T extends { name: string }> = {
+    parentPath: string;
+    joinPath: (parentPath: string, name: string) => string;
+    isDirectory: (entry: T) => boolean;
+    /** Loaded children for a directory path; undefined means not loaded yet. */
+    getChildren: (entryPath: string) => T[] | undefined;
+};
+
+/**
+ * Tree-aware name filter: keeps list-view match rules, and also keeps directory
+ * ancestors when an expanded loaded descendant matches. Collapsed, loading,
+ * error, and unloaded directories only appear when their own name matches
+ * (callers should treat those paths as unavailable in getChildren; no
+ * server-side recursive search).
+ */
+export const filterSftpTreeEntriesByName = <T extends { name: string }>(
+    files: T[],
+    filter: string,
+    options: SftpTreeNameFilterOptions<T>,
+): T[] => {
+    const term = filter.trim().toLowerCase();
+    if (!term) return files;
+
+    const subtreeHasMatch = (entries: T[], parentPath: string): boolean => {
+        for (const entry of entries) {
+            if (entry.name === "..") continue;
+            if (entry.name.toLowerCase().includes(term)) return true;
+            if (!options.isDirectory(entry)) continue;
+            const entryPath = options.joinPath(parentPath, entry.name);
+            const children = options.getChildren(entryPath);
+            if (children && subtreeHasMatch(children, entryPath)) return true;
+        }
+        return false;
+    };
+
+    return files.filter((entry) => {
+        if (entry.name === "..") return true;
+        if (entry.name.toLowerCase().includes(term)) return true;
+        if (!options.isDirectory(entry)) return false;
+        const entryPath = options.joinPath(options.parentPath, entry.name);
+        const children = options.getChildren(entryPath);
+        return Boolean(children && subtreeHasMatch(children, entryPath));
+    });
+};

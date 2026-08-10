@@ -464,6 +464,232 @@ test("clamps a bottom-row wrap to the last visible row under logical echo lag", 
   }
 });
 
+test("self-heal adopts live X/Y when echo wraps instead of double-counting", () => {
+  const restoreDocument = installFakeDocument();
+  const { term, ghostElement, fireRender } = createFakeTerm();
+  const addon = new GhostTextAddon();
+
+  try {
+    // Prompt ends at col 8; four pending cells predict X=12 on a 10-col
+    // terminal (wraps to col 2 / row 1). When echo lands there, Math.max
+    // on X alone would keep 12 and paint the ghost on row 2.
+    term.cols = 10;
+    term.buffer.active.cursorX = 8;
+    term.buffer.active.cursorY = 0;
+    term.buffer.active.baseY = 0;
+    term.buffer.active.getLine = () => ({
+      translateToString: () => "$       ",
+    });
+    addon.activate(term as never);
+    addon.show("abcdefghij", "abcd");
+    const ghost = ghostElement();
+    assert.ok(ghost);
+    // Predicted wrap: col 2 on row 1 → left 18px, top 18px.
+    assert.equal(ghost.style.left, "18px");
+    assert.equal(ghost.style.top, "18px");
+
+    term.buffer.active.cursorX = 2;
+    term.buffer.active.cursorY = 1;
+    term.buffer.active.getLine = () => ({
+      isWrapped: true,
+      translateToString: () => "abcd",
+    });
+    fireRender();
+
+    assert.equal(ghost.style.left, "18px");
+    assert.equal(ghost.style.top, "18px");
+  } finally {
+    restoreDocument();
+  }
+});
+
+test("self-heal adopts live X when a bottom-row wrap scrolls instead of changing Y", () => {
+  const restoreDocument = installFakeDocument();
+  const { term, ghostElement, fireRender } = createFakeTerm();
+  const addon = new GhostTextAddon();
+
+  try {
+    // Bottom-row prediction: prompt at col 8 + 4 pending cells → X=12.
+    // Echo scrolls the buffer so Y stays on the last row while live X
+    // becomes the normalized wrap column (2). Math.max would keep 12 and
+    // paint the ghost one row below the visible screen.
+    term.cols = 10;
+    term.rows = 24;
+    term.buffer.active.cursorX = 8;
+    term.buffer.active.cursorY = 23;
+    term.buffer.active.baseY = 0;
+    term.buffer.active.getLine = () => ({
+      translateToString: () => "$       ",
+    });
+    addon.activate(term as never);
+    addon.show("abcdefghij", "abcd");
+    const ghost = ghostElement();
+    assert.ok(ghost);
+    // Predicted wrap is col 2 / row 24, but paint clamps to the last visible
+    // row (23 → top 414px) so the overlay is not clipped by overflow:hidden.
+    assert.equal(ghost.style.left, "18px");
+    assert.equal(ghost.style.top, "414px");
+
+    term.buffer.active.cursorX = 2;
+    term.buffer.active.cursorY = 23;
+    term.buffer.active.getLine = () => ({
+      isWrapped: true,
+      translateToString: () => "abcd",
+    });
+    fireRender();
+
+    // Self-heal must adopt live X (2) instead of keeping unnormalized X=12,
+    // which would otherwise re-wrap past the bottom after Math.max.
+    assert.equal(ghost.style.left, "18px");
+    assert.equal(ghost.style.top, "414px");
+  } finally {
+    restoreDocument();
+  }
+});
+
+test("anchors ghost after wide pre-echo input when the line has not echoed yet", () => {
+  const restoreDocument = installFakeDocument();
+  const { term, ghostElement } = createFakeTerm();
+  const addon = new GhostTextAddon();
+
+  try {
+    term.buffer.active.baseY = 0;
+    term.buffer.active.getLine = () => ({
+      translateToString: () => "$ ",
+    });
+    addon.activate(term as never);
+    // Live cursor still at the prompt; typed "部署" is only in the keystroke buffer.
+    addon.show("部署脚本", "部署");
+    const ghost = ghostElement();
+    assert.ok(ghost);
+    assert.equal(ghost.textContent, "脚本");
+    // cursorX=2 + 4 wide cells → column 6 → left 54px.
+    assert.equal(ghost.style.left, "54px");
+  } finally {
+    restoreDocument();
+  }
+});
+
+test("anchors ghost using only the unechoed suffix after a partial shell echo", () => {
+  const restoreDocument = installFakeDocument();
+  const { term, ghostElement } = createFakeTerm();
+  const addon = new GhostTextAddon();
+
+  try {
+    // Shell has echoed "$ doc"; buffered input is still the full "docker".
+    term.buffer.active.cursorX = 5;
+    term.buffer.active.baseY = 0;
+    term.buffer.active.getLine = () => ({
+      translateToString: () => "$ doc",
+    });
+    addon.activate(term as never);
+    addon.show("docker compose", "docker");
+    const ghost = ghostElement();
+    assert.ok(ghost);
+    assert.equal(ghost.textContent, " compose");
+    // Unechoed "ker" is 3 cells → column 8 → left 72px (not 5+6=11).
+    assert.equal(ghost.style.left, "72px");
+  } finally {
+    restoreDocument();
+  }
+});
+
+test("anchors ghost by cell columns when the prompt is a multi-code-unit emoji", () => {
+  const restoreDocument = installFakeDocument();
+  const { term, ghostElement } = createFakeTerm();
+  const addon = new GhostTextAddon();
+
+  try {
+    // Family ZWJ emoji is many UTF-16 units but only 2 terminal cells.
+    // A UTF-16 slice(0, cursorX) would stop inside the emoji and treat the
+    // fully-echoed "docker" as unechoed, shifting the ghost right.
+    const emoji = "👨‍👩‍👧‍👦";
+    const cells: Array<{ chars: string; width: number }> = [
+      { chars: emoji, width: 2 },
+      { chars: " ", width: 1 },
+      { chars: "$", width: 1 },
+      { chars: " ", width: 1 },
+      ...Array.from("docker", (ch) => ({ chars: ch, width: 1 })),
+    ];
+    const totalCols = cells.reduce((sum, cell) => sum + cell.width, 0);
+    term.buffer.active.cursorX = totalCols;
+    term.buffer.active.baseY = 0;
+    term.buffer.active.getLine = () => ({
+      translateToString: (
+        _trimRight?: boolean,
+        startColumn = 0,
+        endColumn = totalCols,
+      ) => {
+        let col = 0;
+        let text = "";
+        for (const cell of cells) {
+          if (col >= endColumn) break;
+          if (col >= startColumn) text += cell.chars;
+          col += cell.width;
+        }
+        return text;
+      },
+    });
+    addon.activate(term as never);
+    addon.show("docker compose", "docker");
+    const ghost = ghostElement();
+    assert.ok(ghost);
+    assert.equal(ghost.textContent, " compose");
+    // Fully echoed → stay at live cursor (11 cells → 99px), not 11+6.
+    assert.equal(ghost.style.left, "99px");
+  } finally {
+    restoreDocument();
+  }
+});
+
+test("does not overshoot the ghost when the echoed command already wrapped", () => {
+  const restoreDocument = installFakeDocument();
+  const { term, ghostElement } = createFakeTerm();
+  const addon = new GhostTextAddon();
+
+  try {
+    // cols=10, prompt "$ " + "docker com" wraps; cursor sits on the
+    // continuation row after a fully-echoed "docker compose".
+    // Physical rows: "$ docker c" | "ompose|"
+    term.cols = 10;
+    term.buffer.active.baseY = 0;
+    term.buffer.active.cursorY = 1;
+    term.buffer.active.cursorX = 6;
+    const lines: Record<number, { isWrapped?: boolean; text: string }> = {
+      0: { text: "$ docker c" },
+      1: { isWrapped: true, text: "ompose" },
+    };
+    term.buffer.active.getLine = (y: number) => {
+      const row = lines[y];
+      if (!row) return undefined;
+      return {
+        isWrapped: row.isWrapped,
+        translateToString: (
+          _trimRight?: boolean,
+          startColumn?: number,
+          endColumn?: number,
+        ) => {
+          if (startColumn !== undefined && endColumn !== undefined) {
+            return row.text.padEnd(endColumn).slice(startColumn, endColumn);
+          }
+          return row.text;
+        },
+      };
+    };
+    addon.activate(term as never);
+    addon.show("docker compose up", "docker compose");
+    const ghost = ghostElement();
+    assert.ok(ghost);
+    assert.equal(ghost.textContent, " up");
+    // Fully echoed across the wrap → anchor stays at live cursor (col 6),
+    // not liveX + full input width.
+    assert.equal(ghost.style.left, "54px");
+    assert.equal(ghost.style.top, "18px");
+  } finally {
+    restoreDocument();
+  }
+});
+
 test("wraps the ghost to the previous row when deletion crosses a row boundary", () => {
   const restoreDocument = installFakeDocument();
   const { term, ghostElement } = createFakeTerm();

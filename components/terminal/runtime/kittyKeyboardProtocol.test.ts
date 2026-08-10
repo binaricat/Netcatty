@@ -688,8 +688,9 @@ test("associated text supports multiple code points and pure composition text", 
   assert.equal(encodeKittyCompositionText(state, "\n\u0085"), null);
 });
 
-test("report-all without associated text emits an unidentified CSI-u composition event", () => {
-  assert.equal(encodeKittyCompositionText(withFlags(8), "你"), "\u001b[0u");
+test("report-all without associated text leaves composition text for literal fallback", () => {
+  assert.equal(encodeKittyCompositionText(withFlags(8), "你"), null);
+  assert.equal(encodeKittyCompositionText(withFlags(8), "，"), null);
 });
 
 test("encodes the complete functional, keypad, media, and modifier ranges", () => {

@@ -108,6 +108,8 @@ export interface TerminalProps {
   compactToolbar?: boolean;
   /** Line timestamps are unavailable in popup terminals that stream shell output without timestamp metadata. */
   lineTimestampsAvailable?: boolean;
+  /** Compact/popup path: delete snippets against the caller's vault hook. */
+  onDeleteSnippets?: (ids: ReadonlySet<string>) => void;
   chainHosts?: Host[];
   appearanceTheme?: TerminalTheme;
   knownHosts?: KnownHost[];

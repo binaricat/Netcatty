@@ -191,16 +191,22 @@ function createStartSessionApi(ctx) {
   with (ctx) {
     const listInteractiveShellPids = async (conn) => {
       if (!conn || typeof conn.exec !== "function") {
-        return Promise.resolve({ available: false, pids: [] });
+        return Promise.resolve({ available: false, pids: [], ages: {} });
       }
 
       const scanCompleteMarker = "__NETCATTY_SHELL_SCAN_COMPLETE__";
+      // Emit "pid etimes" when possible. etimes (elapsed seconds) is a
+      // wrap-safe ordering key: higher means older. Plain "pid" remains valid
+      // for hosts that lack etimes.
       const script = `SELF=$$
-ps_output=$(ps -e -o pid=,ppid=,tty=,comm= 2>/dev/null) || exit 69
+ps_output=$(ps -e -o pid=,ppid=,tty=,comm=,etimes= 2>/dev/null) || ps_output=$(ps -e -o pid=,ppid=,tty=,comm= 2>/dev/null) || exit 69
 {
   printf '%s\n' "$ps_output" | awk -v pp="$PPID" -v self="$SELF" '
     function isshell(c) { sub(/^.*\\//, "", c); sub(/^-/, "", c); return c ~ /^(ba|z|fi|k|da|a|c|tc)?sh$/ }
-    $1 != self && $2 == pp && $3 !~ /^\\?+$/ && isshell($4) { print $1 }
+    $1 != self && $2 == pp && $3 !~ /^\\?+$/ && isshell($4) {
+      if (NF >= 5 && $5 ~ /^[0-9]+$/) print $1, $5+0
+      else print $1
+    }
   '
   if [ -r /proc/$SELF/environ ]; then
     conn=$(tr '\\0' '\\n' < /proc/$SELF/environ 2>/dev/null | sed -n 's/^SSH_CONNECTION=//p' | head -n1)
@@ -217,11 +223,16 @@ ps_output=$(ps -e -o pid=,ppid=,tty=,comm= 2>/dev/null) || exit 69
         pcomm=$(cat "/proc/$ppid/comm" 2>/dev/null)
         case "$pcomm" in sshd|dropbear|dropbearmulti) ;; *) continue ;; esac
         tty=$(ps -p "$pid" -o tty= 2>/dev/null | tr -d '[:space:]')
-        [ -n "$tty" ] && [ "$tty" != "?" ] && printf '%s\\n' "$pid"
+        [ -n "$tty" ] && [ "$tty" != "?" ] || continue
+        etimes=$(ps -p "$pid" -o etimes= 2>/dev/null | tr -d '[:space:]')
+        case "$etimes" in
+          ''|*[!0-9]*) printf '%s\\n' "$pid" ;;
+          *) printf '%s %s\\n' "$pid" "$etimes" ;;
+        esac
       done
     fi
   fi
-} | awk '/^[0-9]+$/ && !seen[$1]++ { print $1 }'
+} | awk '/^[0-9]+/ && !seen[$1]++ { print }'
 printf '%s\n' '${scanCompleteMarker}'`;
 
       try {
@@ -237,15 +248,24 @@ printf '%s\n' '${scanCompleteMarker}'`;
         const lines = result.stdout.split(/\r?\n/);
         const completed = lines.includes(scanCompleteMarker);
         const available = completed && (result.code === null || result.code === 0);
-        return {
-          available,
-          pids: available ? lines.filter((value) => /^\d+$/.test(value)) : [],
-        };
+        const pids = [];
+        const ages = {};
+        if (available) {
+          for (const line of lines) {
+            const match = /^(\d+)(?:\s+(\d+))?$/.exec(String(line || "").trim());
+            if (!match) continue;
+            const pid = match[1];
+            if (!pids.includes(pid)) pids.push(pid);
+            if (match[2] !== undefined) ages[pid] = Number(match[2]);
+          }
+        }
+        return { available, pids, ages };
       } catch (error) {
         return {
           available: false,
           rateLimited: isSshChannelOpenRateLimitedError(error),
           pids: [],
+          ages: {},
         };
       }
     };
@@ -700,48 +720,17 @@ printf '%s\n' '${scanCompleteMarker}'`;
       const rows = options.rows || 24;
       const sender = event.sender;
       const conn = sourceSession.conn;
-      let discoveryConnectionError = null;
-      const onDiscoveryConnectionError = (err) => {
-        discoveryConnectionError = err;
-      };
-      let shellDiscoveryBeforeOpen = { available: false, pids: [] };
-      // Bastions (whether configured as jumpHosts or used as the direct SSH
-      // target) often rate-limit rapid session channel opens ("channelOpen too
-      // offen"). Retry rate-limited PID scans on every Copy Tab reuse so a
-      // successful shell open still gets shellPid tracking. Only the optional
-      // pre-scan pause is jump-host specific to avoid delaying the happy path
-      // on ordinary direct hosts.
-      const hasJumpHosts = Array.isArray(options.jumpHosts) && options.jumpHosts.length > 0;
+      // Bastions (jumpHosts or direct targets) rate-limit rapid session channel
+      // opens ("channelOpen too offen"). Opening a discovery exec *before* the
+      // shell burns that budget and Copy Tab falls back to a fresh login
+      // (issue #2704). Open the shell first; discover shellPid afterwards.
       const configuredBackoffMs = Number(options.sshChannelOpenRateLimitBackoffMs);
       const discoveryBackoffMs = Number.isFinite(configuredBackoffMs) && configuredBackoffMs > 0
         ? configuredBackoffMs
         : 150;
-      if (!options.skipShellPidDiscovery) {
-        conn.once("error", onDiscoveryConnectionError);
-        shellDiscoveryBeforeOpen = await listInteractiveShellPidsResilient(conn, {
-          initialDelayMs: hasJumpHosts ? discoveryBackoffMs : 0,
-          attempts: 4,
-          backoffMs: discoveryBackoffMs,
-        });
-        conn.removeListener("error", onDiscoveryConnectionError);
-      }
-      const shellPidsBeforeOpen = shellDiscoveryBeforeOpen.pids;
-      if (discoveryConnectionError) {
-        releaseConnectionRef(refHolder);
-        throw discoveryConnectionError;
-      }
-      const assignedPids = new Set(
-        [...sessions.values()]
-          .filter((candidate) => candidate?.connRef === connRef && candidate.shellPid)
-          .map((candidate) => String(candidate.shellPid)),
-      );
-      const unclaimedPids = shellPidsBeforeOpen.filter((pid) => !assignedPids.has(pid));
-      const unassignedSessions = [...sessions.values()].filter(
-        (candidate) => candidate?.connRef === connRef && !candidate.shellPid,
-      );
-      if (unclaimedPids.length === 1 && unassignedSessions.length === 1) {
-        unassignedSessions[0].shellPid = unclaimedPids[0];
-      }
+      const shellPidsBeforeOpen = [...sessions.values()]
+        .filter((candidate) => candidate?.connRef === connRef && candidate.shellPid)
+        .map((candidate) => String(candidate.shellPid));
 
       log("reusing existing connection for new shell channel", {
         sessionId,
@@ -856,17 +845,119 @@ printf '%s\n' '${scanCompleteMarker}'`;
               } else {
                 refHolder.connRef = null;
               }
-              const newShellPidPromise = shellDiscoveryBeforeOpen.available
-                ? waitForNewInteractiveShellPid(
-                  conn,
-                  shellPidsBeforeOpen,
-                  {
-                    initialDelayMs: hasJumpHosts ? discoveryBackoffMs : 0,
+
+              const discoverCopiedShellPid = async () => {
+                if (options.skipShellPidDiscovery) return null;
+                const liveBaseline = () => [...sessions.values()]
+                  .filter((candidate) => (
+                    candidate?.connRef === connRef
+                    && candidate !== copiedSession
+                    && candidate.shellPid
+                  ))
+                  .map((candidate) => String(candidate.shellPid));
+                const listUnassignedSiblings = () => [...sessions.values()].filter(
+                  (candidate) => (
+                    candidate?.connRef === connRef
+                    && candidate !== copiedSession
+                    && !candidate.shellPid
+                  ),
+                );
+                // Prefer PIDs already recorded on sibling tabs of this shared
+                // transport. Fall back to the pre-shell snapshot when the source
+                // closed before discovery runs but had a known shellPid.
+                let baseline = liveBaseline();
+                if (baseline.length === 0) {
+                  baseline = shellPidsBeforeOpen;
+                }
+                // Also reconcile when some siblings are already tracked but the
+                // copy source (or another tab) still lacks shellPid — otherwise
+                // waitForNew sees multiple "new" PIDs and returns null.
+                const needsUntrackedReconcile = listUnassignedSiblings().length > 0;
+                if (baseline.length === 0 || needsUntrackedReconcile) {
+                  const discovery = await listInteractiveShellPidsResilient(conn, {
+                    initialDelayMs: discoveryBackoffMs,
+                    attempts: 4,
                     backoffMs: discoveryBackoffMs,
-                  },
-                )
-                : Promise.resolve(null);
-              void newShellPidPromise.then((newShellPid) => {
+                  });
+                  if (!discovery.available && !discovery.rateLimited) {
+                    // Discovery is permanently unavailable (not rate-limited).
+                    return null;
+                  }
+                  if (discovery.available && discovery.pids.length > 0) {
+                    const assignedPids = new Set(liveBaseline());
+                    for (const pid of baseline) assignedPids.add(String(pid));
+                    const unclaimed = discovery.pids.filter((pid) => !assignedPids.has(pid));
+                    const unassignedSiblings = listUnassignedSiblings();
+                    if (unclaimed.length === 1 && unassignedSiblings.length === 1) {
+                      unassignedSiblings[0].shellPid = unclaimed[0];
+                      baseline = liveBaseline();
+                    } else if (unassignedSiblings.length === 0 && unclaimed.length === 1) {
+                      // Sole unclaimed PID is ambiguous once the source tab is
+                      // gone: the closing source process may still be listed
+                      // while the copied shell has not appeared yet. Wait for a
+                      // PID beyond that candidate; if none appears and the
+                      // candidate remains the only unclaimed shell, it is the
+                      // copy (source process already exited).
+                      const candidatePid = String(unclaimed[0]);
+                      const waited = await waitForNewInteractiveShellPid(conn, [candidatePid], {
+                        initialDelayMs: discoveryBackoffMs,
+                        backoffMs: discoveryBackoffMs,
+                      });
+                      if (waited) return waited;
+                      const recheck = await listInteractiveShellPids(conn);
+                      if (!recheck.available) return null;
+                      const assigned = new Set(liveBaseline());
+                      const remaining = recheck.pids
+                        .map(String)
+                        .filter((pid) => !assigned.has(pid));
+                      if (remaining.length === 1) return remaining[0];
+                      return null;
+                    } else if (unassignedSiblings.length === 1 && unclaimed.length === 2) {
+                      // Source never recorded shellPid (e.g. OSC 7 cwd skipped
+                      // the probe), so the first post-open scan already lists
+                      // both shared shells. Reintroducing a pre-open exec would
+                      // burn bastion channel budget (#2704). Disambiguate by
+                      // process age (etimes): login shells on one transport are
+                      // created sequentially, so the copied shell is younger.
+                      // Numeric PID order is not a timestamp and fails when the
+                      // PID allocator wraps between source and copy.
+                      const ages = discovery.ages || {};
+                      const left = String(unclaimed[0]);
+                      const right = String(unclaimed[1]);
+                      const leftAge = ages[left];
+                      const rightAge = ages[right];
+                      if (
+                        Number.isFinite(leftAge)
+                        && Number.isFinite(rightAge)
+                        && leftAge !== rightAge
+                      ) {
+                        const older = leftAge > rightAge ? left : right;
+                        const newer = older === left ? right : left;
+                        unassignedSiblings[0].shellPid = older;
+                        return newer;
+                      }
+                      // Ages tied (same etimes second) or unavailable: refuse
+                      // numeric PID order — after wrap the lower PID can be the
+                      // copy. Leave the pair unassigned and keep only already-
+                      // tracked PIDs in the baseline so waitForNew can still
+                      // claim the copy if one of the two later disappears.
+                      baseline = [...assignedPids];
+                    } else if (assignedPids.size > 0) {
+                      baseline = [...assignedPids];
+                    }
+                  }
+                  // Empty successful scans (shell not visible yet) must not
+                  // abort — waitForNew retries until the new shell appears.
+                }
+                return waitForNewInteractiveShellPid(conn, baseline, {
+                  // Brief pause after the shell channel so bastion rate limits
+                  // have a chance to clear before the discovery exec.
+                  initialDelayMs: discoveryBackoffMs,
+                  backoffMs: discoveryBackoffMs,
+                });
+              };
+
+              void discoverCopiedShellPid().then((newShellPid) => {
                 // Bind PID only to the session this reuse opened. A higher
                 // bootEpoch reconnect may already own sessionId in the map.
                 const liveSession = sessions.get(sessionId);

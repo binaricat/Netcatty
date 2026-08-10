@@ -66,6 +66,14 @@ export interface AlignedPromptResult {
    * to record it as the executed command.
    */
   alignedTyped: string | null;
+  /**
+   * When false, `prompt.userInput` was filled from the keystroke buffer
+   * before any shell echo. Empty echo is also what echo-disabled password
+   * prompts look like, so callers must not surface or accept completions
+   * (built-in or external) and must not authorize history recording
+   * (`alignedTyped`). Omitted/true means the live line validated input.
+   */
+  allowExternalProviders?: boolean;
 }
 
 function getCursorLinePrefix(term: XTerm): string | null {
@@ -392,6 +400,10 @@ function canUseReliablePromptPrefix(
   raw: PromptDetectionResult,
   typedBuffer: string,
 ): boolean {
+  // Empty echo alone is not validation: echo-disabled prompts can look like
+  // a normal shell PS1 (e.g. `read -s -p '$ '`), and treating the keystroke
+  // buffer as alignedTyped would authorize history recording. Pre-echo
+  // autocomplete uses a separate path that keeps alignedTyped null.
   if (!raw.isAtPrompt || typedBuffer.length === 0 || raw.userInput.length === 0) {
     return false;
   }
@@ -907,6 +919,22 @@ export function getAlignedPrompt(
       return {
         prompt: withTypedUserInput(raw, typedBuffer),
         alignedTyped: typedBuffer,
+      };
+    }
+    // No echo yet (CJK IME / high-latency SSH): surface the keystroke buffer
+    // on prompts detectPrompt already recognizes (#2813), but do not set
+    // alignedTyped. Empty / whitespace-only echo is also what echo-disabled
+    // password prompts and padded themed PS1s look like, so this path must
+    // not authorize history recording, built-in suggestion acceptance, or
+    // third-party completion providers until echo validates the line.
+    if (
+      raw.userInput.trim().length === 0 &&
+      (allowsShortPromptEcho(raw.promptText) || isThemedPromptText(raw.promptText))
+    ) {
+      return {
+        prompt: withTypedUserInput(raw, typedBuffer),
+        alignedTyped: null,
+        allowExternalProviders: false,
       };
     }
   }
