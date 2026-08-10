@@ -206,15 +206,157 @@ export const findNotePreviewBodyStartIndex = (markdown: string): number => {
 };
 
 /**
- * After the hero band, force left alignment by removing center attributes.
- * Prevents Catty/Features blocks (often many small center divs) from inheriting center.
+ * Completely unwrap centered HTML containers (div/p/h1–h6) — emit inner only.
+ * Used on the body band so no leftover empty <div> still carries layout.
+ */
+export const unwrapAllCenteredHtmlBlocks = (markdown: string): string => {
+  let source = markdown.replace(/\r\n?/g, "\n");
+  // Multi-pass: nested center shells
+  for (let pass = 0; pass < 8; pass += 1) {
+    let changed = false;
+    let out = "";
+    let i = 0;
+    while (i < source.length) {
+      if (source[i] !== "<") {
+        out += source[i];
+        i += 1;
+        continue;
+      }
+      const extracted = extractBalancedHtmlElement(source, i);
+      if (
+        !extracted
+        || !CENTERABLE_TAGS.has(extracted.tag)
+        || !htmlOpenTagIsCentered(extracted.full)
+      ) {
+        out += source[i];
+        i += 1;
+        continue;
+      }
+      const { full, end, tag } = extracted;
+      const openEnd = findHtmlTagEnd(full, 0);
+      if (openEnd < 0) {
+        out += full;
+        i = end;
+        continue;
+      }
+      const closeTag = `</${tag}>`;
+      const closeLen = full.toLowerCase().endsWith(closeTag) ? closeTag.length : 0;
+      const inner = closeLen > 0
+        ? full.slice(openEnd + 1, full.length - closeLen)
+        : full.slice(openEnd + 1);
+      out += `\n\n${inner.trim()}\n\n`;
+      changed = true;
+      i = end;
+    }
+    source = out.replace(/\n{3,}/g, "\n\n");
+    if (!changed) break;
+  }
+  return source;
+};
+
+/**
+ * After the hero band, force left alignment:
+ * 1) unwrap every center shell
+ * 2) strip leftover align / text-align:center attributes
  */
 export const stripCenterAlignmentInBodySection = (markdown: string): string => {
   const bodyStart = findNotePreviewBodyStartIndex(markdown);
-  if (bodyStart < 0) return markdown;
+  if (bodyStart < 0) {
+    // No clear hero boundary — still unwrap oversized centers only (caller).
+    return markdown;
+  }
   const hero = markdown.slice(0, bodyStart);
-  const body = stripAllCenterAlignment(markdown.slice(bodyStart));
+  let body = markdown.slice(bodyStart);
+  body = unwrapAllCenteredHtmlBlocks(body);
+  body = stripAllCenterAlignment(body);
   return `${hero}${body}`;
+};
+
+/**
+ * When there is no --- / body heading marker, keep only the leading contiguous
+ * center-hero band; unwrap every later center shell (Catty etc.).
+ */
+export const keepOnlyLeadingHeroCenters = (markdown: string): string => {
+  const source = markdown.replace(/\r\n?/g, "\n");
+  let out = "";
+  let i = 0;
+  let seenNonCenterContent = false;
+
+  while (i < source.length) {
+    // Skip pure whitespace between blocks while still in hero band
+    if (!seenNonCenterContent && /\s/.test(source[i] ?? "")) {
+      out += source[i];
+      i += 1;
+      continue;
+    }
+
+    if (source[i] !== "<") {
+      // Markdown / text outside HTML — end of hero band
+      seenNonCenterContent = true;
+      out += source[i];
+      i += 1;
+      continue;
+    }
+
+    const extracted = extractBalancedHtmlElement(source, i);
+    if (!extracted) {
+      seenNonCenterContent = true;
+      out += source[i];
+      i += 1;
+      continue;
+    }
+
+    const { full, end, tag } = extracted;
+    const isCenter = CENTERABLE_TAGS.has(tag) && htmlOpenTagIsCentered(full);
+
+    if (!seenNonCenterContent && isCenter) {
+      // Still in leading hero: keep center (unless oversized body-like)
+      const openEnd = findHtmlTagEnd(full, 0);
+      const closeTag = `</${tag}>`;
+      const inner = openEnd >= 0
+        ? full.slice(openEnd + 1, full.toLowerCase().endsWith(closeTag) ? full.length - closeTag.length : undefined)
+        : full;
+      if (isOversizedCenterInner(inner || full)) {
+        out += `\n\n${(inner || "").trim()}\n\n`;
+        seenNonCenterContent = true;
+      } else {
+        out += full;
+      }
+      i = end;
+      continue;
+    }
+
+    if (isCenter) {
+      // Past hero: unwrap
+      const openEnd = findHtmlTagEnd(full, 0);
+      const closeTag = `</${tag}>`;
+      const inner = openEnd >= 0 && full.toLowerCase().endsWith(closeTag)
+        ? full.slice(openEnd + 1, full.length - closeTag.length)
+        : openEnd >= 0
+          ? full.slice(openEnd + 1)
+          : full;
+      out += `\n\n${inner.trim()}\n\n`;
+      i = end;
+      seenNonCenterContent = true;
+      continue;
+    }
+
+    // Non-center HTML block ends pure-hero phase (e.g. large screenshot img)
+    if (!isCenter && (tag === "img" || tag === "hr" || tag === "table" || tag === "pre")) {
+      // self-closing img: keep; still allow more hero centers after small imgs
+      out += full;
+      i = end;
+      if (tag !== "img") seenNonCenterContent = true;
+      continue;
+    }
+
+    out += full;
+    i = end;
+    // Substantial non-center block ends hero
+    if (!isCenter) seenNonCenterContent = true;
+  }
+
+  return out.replace(/\n{3,}/g, "\n\n");
 };
 
 /**
@@ -336,8 +478,17 @@ export const prepareNoteMarkdownForGithubPreview = (markdown: string): string =>
 
   body = expandCenteredMarkdownHtmlIslands(body);
   body = unwrapOversizedCenteredHtmlBlocks(body);
-  // After hero (first --- / body heading), strip every remaining center hint.
-  body = stripCenterAlignmentInBodySection(body);
+
+  // Hero keeps small center shells; everything after first --- / body heading
+  // is fully unwrapped + attrs stripped so Catty/Features cannot stay centered.
+  const bodyStart = findNotePreviewBodyStartIndex(body);
+  if (bodyStart >= 0) {
+    body = stripCenterAlignmentInBodySection(body);
+  } else {
+    // Partial paste without --- : only leading contiguous centers stay.
+    body = keepOnlyLeadingHeroCenters(body);
+  }
+
   body = rewriteNoteMarkdownImages(body);
   body = rewriteNoteHtmlImages(body);
   body = stripEmptyMarkdownLinks(body);

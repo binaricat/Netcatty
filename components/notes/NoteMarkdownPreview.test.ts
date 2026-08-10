@@ -25,13 +25,15 @@ test("preview CSS forces left body alignment with center only on align=center", 
     css,
     /\.netcatty-note-github-preview\.markdown-body\s*\{[^}]*text-align:\s*left\s*!important/s,
   );
+  // Nuclear: all descendants left by default
   assert.match(
     css,
-    /\.netcatty-note-github-preview\.markdown-body\s+>\s+h1[\s\S]*?text-align:\s*left\s*!important/s,
+    /\.netcatty-note-github-preview\.markdown-body\s+\*\s*\{[^}]*text-align:\s*left\s*!important/s,
   );
+  // Hero shells may re-enable center for themselves and descendants
   assert.match(
     css,
-    /\.netcatty-note-github-preview\.markdown-body\s+\[align="center"\]\s*\{[^}]*text-align:\s*center\s*!important/s,
+    /\.netcatty-note-github-preview\.markdown-body\s+\[align="center"\][\s\S]*?text-align:\s*center\s*!important/s,
   );
 });
 

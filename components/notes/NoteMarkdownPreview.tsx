@@ -133,10 +133,13 @@ export const NoteMarkdownPreview = React.memo(function NoteMarkdownPreview({
     <div
       ref={rootRef}
       className={cn(
-        "netcatty-note-markdown-preview netcatty-note-github-preview markdown-body",
+        "netcatty-note-markdown-preview netcatty-note-github-preview markdown-body text-left",
         className,
       )}
+      // Inline fallback so body copy cannot inherit a parent text-align:center.
+      style={{ textAlign: "left" }}
       data-note-preview-engine="github-markdown"
+      data-note-preview-align="start"
     >
       <ReactMarkdown
         remarkPlugins={remarkPlugins}
