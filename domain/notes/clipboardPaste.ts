@@ -729,6 +729,16 @@ export const extractBalancedHtmlElement = (
   }
   if (openTag.startsWith("</")) return null;
 
+  // Raw-text elements: body is not HTML — do not treat `<` inside as nested tags.
+  if (/^(?:script|style|textarea|title|xmp)$/i.test(tag)) {
+    const closeRe = new RegExp(`</${tag}\\s*>`, "i");
+    const rest = source.slice(openEnd + 1);
+    const closeMatch = closeRe.exec(rest);
+    if (!closeMatch) return null;
+    const end = openEnd + 1 + closeMatch.index + closeMatch[0].length;
+    return { full: source.slice(start, end), end, tag };
+  }
+
   let i = openEnd + 1;
   let depth = 1;
   while (i < source.length && depth > 0) {

@@ -73,6 +73,14 @@ test("toggleTaskListItemAtIndex ignores tasks without space after bracket", () =
   assert.match(toggleTaskListItemAtIndex(src, 0), /^- \[ \]foo$/m);
 });
 
+test("toggleTaskListItemAtIndex ignores tasks inside HTML comments", () => {
+  const src = "<!--\n- [ ] hidden\n-->\n- [ ] visible";
+  assert.equal(countTaskListItems(src), 1);
+  const next = toggleTaskListItemAtIndex(src, 0);
+  assert.match(next, /<!--\n- \[ \] hidden\n-->/);
+  assert.match(next, /^- \[x\] visible$/m);
+});
+
 test("isPointerOnTaskCheckbox only accepts the left hit box", () => {
   const rect = { left: 100, right: 400 };
   assert.equal(isPointerOnTaskCheckbox(rect, 100), true);

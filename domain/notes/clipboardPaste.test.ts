@@ -7,6 +7,7 @@ import {
   convertHtmlImgTagToMarkdownOrHtml,
   convertHtmlIslandsInMarkdown,
   decodeHtmlEntities,
+  extractBalancedHtmlElement,
   maskCodeRegions,
   normalizeLinkedBadgeImages,
   normalizeNotePublicAssetPaths,
@@ -580,4 +581,13 @@ test("maskCodeRegions masks multi-level blockquote fences", () => {
   const mask = maskCodeRegions(source);
   assert.doesNotMatch(mask.text, /public\/a\.png/);
   assert.match(mask.text, /after/);
+});
+
+test("extractBalancedHtmlElement handles raw-text script bodies with <", () => {
+  const source = '<script>if (a < b) alert(1)</script>\n# after';
+  const extracted = extractBalancedHtmlElement(source, 0);
+  assert.ok(extracted);
+  assert.equal(extracted?.tag, "script");
+  assert.match(extracted?.full ?? "", /if \(a < b\)/);
+  assert.equal(source.slice(extracted?.end ?? 0), "\n# after");
 });
