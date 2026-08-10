@@ -11,8 +11,9 @@ import { maskCodeRegions, unmaskCodeRegions } from "./clipboardPaste";
  * prefixes (`> - [ ]`) at line start. Code regions are masked before matching
  * so fence contents never steal a DOM checkbox index.
  */
+// Require whitespace (or EOL) after `]` so `- [ ]foo` is not treated as a task.
 const TASK_LIST_ITEM_PATTERN =
-  "^([ \\t]*(?:>[ \\t]*)*(?:[-*+]|\\d+[.)])[ \\t]+)\\[([ xX])\\]";
+  "^([ \\t]*(?:>[ \\t]*)*(?:[-*+]|\\d+[.)])[ \\t]+)\\[([ xX])\\](?=\\s|$)";
 
 const createTaskListItemRe = (): RegExp => new RegExp(TASK_LIST_ITEM_PATTERN, "gm");
 

@@ -66,6 +66,13 @@ test("toggleTaskListItemAtIndex counts nested list tasks", () => {
   assert.match(toggleTaskListItemAtIndex(src, 1), /^- \[x\] later$/m);
 });
 
+test("toggleTaskListItemAtIndex ignores tasks without space after bracket", () => {
+  const src = "- [ ]foo\n- [ ] real";
+  assert.equal(countTaskListItems(src), 1);
+  assert.match(toggleTaskListItemAtIndex(src, 0), /^- \[x\] real$/m);
+  assert.match(toggleTaskListItemAtIndex(src, 0), /^- \[ \]foo$/m);
+});
+
 test("isPointerOnTaskCheckbox only accepts the left hit box", () => {
   const rect = { left: 100, right: 400 };
   assert.equal(isPointerOnTaskCheckbox(rect, 100), true);

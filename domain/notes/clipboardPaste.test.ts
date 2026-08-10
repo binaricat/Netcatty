@@ -559,3 +559,25 @@ test("maskCodeRegions masks standalone indented task samples as code", () => {
   assert.doesNotMatch(mask.text, /- \[ \] sample/);
   assert.match(mask.text, /- \[ \] real/);
 });
+
+test("normalizeLinkedBadgeImages preserves angled destinations with spaces", () => {
+  const md = normalizeLinkedBadgeImages(
+    "[![logo](<images/company logo.png>)](https://example.com)",
+  );
+  assert.match(md, /company logo\.png|company%20logo\.png|company logo/);
+  assert.match(md, /example\.com/);
+  assert.doesNotMatch(md, /<images\/company(?! logo)/);
+});
+
+test("maskCodeRegions masks multi-level blockquote fences", () => {
+  const source = [
+    "> > ~~~md",
+    "> > ![x](public/a.png)",
+    "> > ~~~",
+    "",
+    "after",
+  ].join("\n");
+  const mask = maskCodeRegions(source);
+  assert.doesNotMatch(mask.text, /public\/a\.png/);
+  assert.match(mask.text, /after/);
+});

@@ -408,7 +408,16 @@ export const normalizeLinkedBadgeImages = (markdown: string): string => {
     /\[\s*!\[[^\]]*\]\(([^)]+)\)\s*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g,
     (full, imgSrc: string, href: string) => {
       const alt = extractMarkdownImageAlt(full);
-      const src = normalizeImageSrc((imgSrc || "").trim().split(/\s+/)[0] ?? "");
+      // Support angled destinations with spaces: <images/company logo.png>
+      const rawDest = (imgSrc || "").trim();
+      let dest = rawDest;
+      if (rawDest.startsWith("<")) {
+        const end = rawDest.indexOf(">");
+        dest = end > 0 ? rawDest.slice(1, end) : rawDest.slice(1);
+      } else {
+        dest = rawDest.split(/\s+/)[0] ?? "";
+      }
+      const src = normalizeImageSrc(dest);
       if (!src) return `[${alt}](${href})`;
       return `[![${alt}](${src})](${href})`;
     },
@@ -490,9 +499,9 @@ const maskFencedCodeBlocks = (
   const lines = markdown.split("\n");
   const out: string[] = [];
   let i = 0;
-  // Optional blockquote + up to 3 spaces, then homogeneous ``` or ~~~ (3+).
-  const openRe = /^((?:[ \t]{0,3}>[ \t]?)?[ \t]{0,3})(`{3,}|~{3,})(.*)$/;
-  const closeRe = /^((?:[ \t]{0,3}>[ \t]?)?[ \t]{0,3})(`{3,}|~{3,})[ \t]*$/;
+  // Any blockquote depth, then up to 3 spaces, then homogeneous ``` or ~~~ (3+).
+  const openRe = /^((?:[ \t]{0,3}>[ \t]?)*)[ \t]{0,3}(`{3,}|~{3,})(.*)$/;
+  const closeRe = /^((?:[ \t]{0,3}>[ \t]?)*)[ \t]{0,3}(`{3,}|~{3,})[ \t]*$/;
 
   while (i < lines.length) {
     const openMatch = openRe.exec(lines[i] ?? "");
