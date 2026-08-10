@@ -79,13 +79,29 @@ test("note switches reuse MDX instance instead of key=noteId remount", () => {
     /<InlineMarkdownEditor[\s\S]{0,200}key=\{selectedNoteView\.id\}/,
     "key=noteId forces full Lexical teardown on every note switch",
   );
+  const editorSource = readFileSync(
+    new URL("./InlineMarkdownEditor.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(editorSource, /noteId !== noteIdRef\.current/);
+  assert.match(editorSource, /setMarkdown\(scheduledMarkdown\)/);
   assert.match(
-    readFileSync(new URL("./InlineMarkdownEditor.tsx", import.meta.url), "utf8"),
-    /noteId !== noteIdRef\.current/,
+    editorSource,
+    /contentSwapFramesRef\.current\.outer = window\.requestAnimationFrame/,
+    "outer rAF yields a paint so the tree selection updates before Lexical import",
   );
   assert.match(
-    readFileSync(new URL("./InlineMarkdownEditor.tsx", import.meta.url), "utf8"),
-    /setMarkdown\(markdown\)/,
+    editorSource,
+    /contentSwapFramesRef\.current\.inner = window\.requestAnimationFrame/,
+    "inner rAF completes the double-yield before setMarkdown",
+  );
+  assert.match(editorSource, /NOTE_CONTENT_SWAP_LARGE_CHARS/);
+  assert.match(editorSource, /data-notes-content-swapping="true"/);
+  assert.match(editorSource, /startTransition\(\(\) => setIsContentSwapping\(false\)\)/);
+  assert.match(
+    editorSource,
+    /latestMarkdownRef\.current !== scheduledMarkdown/,
+    "deferred setMarkdown must not clobber edits typed after the switch",
   );
 });
 
