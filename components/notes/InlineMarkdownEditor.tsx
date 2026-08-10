@@ -37,31 +37,28 @@ import {
   $setSelection,
   getNearestEditorFromDOMNode,
 } from "lexical";
-import React, { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useI18n } from "../../application/i18n/I18nProvider";
 import { resolveRenderedMarkdownLinkHref } from "../../domain/notes";
 import { buildSshNoteLinkOpenHost } from "../../domain/sshDeepLink";
+import { copyToClipboard } from "../keychain/utils";
 import { toast } from "../ui/toast";
 import { cn } from "../../lib/utils";
 import { FixedSizeVirtualList, type FixedSizeVirtualListHandle } from "../ui/FixedSizeVirtualList";
 import type { Host } from "../../types";
 import {
+  normalizeNotePublicAssetPaths,
   resolveNoteClipboardPaste,
   shouldInsertClipboardTextAsMarkdown,
   shouldInterceptResolvedNotePaste,
 } from "./noteClipboardPaste";
 import { annotateNoteImageSizes } from "./noteImageLayout";
-import { normalizeNotePublicAssetPaths } from "../../domain/notes/notePreviewMarkdown";
 
 export {
   annotateNoteImageSizes,
   isNoteSmallImageWidth,
   NOTE_SMALL_IMAGE_MAX_WIDTH,
 } from "./noteImageLayout";
-
-/** Preview uses GitHub-style react-markdown (no Lexical). Lazy so edit path stays light. */
-const NoteMarkdownPreview = lazy(() =>
-  import("./NoteMarkdownPreview").then((module) => ({ default: module.NoteMarkdownPreview })),
-);
 
 export {
   shouldInsertClipboardTextAsMarkdown,
@@ -587,6 +584,7 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
   onOpenExternalLink,
   previewEmptyLabel,
 }: InlineMarkdownEditorProps) {
+  const { t } = useI18n();
   const editorRef = useRef<MDXEditorMethods>(null);
   const latestMarkdownRef = useRef(value);
   const syncedPropValueRef = useRef(value);
@@ -798,9 +796,19 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
     });
   }, []);
 
-  // DOM decoration: host-link titles, compact image markers, edit-mode code copy.
-  // - Preview (Streamdown): host-link titles only; code copy + images handled inside preview.
-  // - Edit (MDX/Lexical): debounce mutations so keystrokes do not re-walk every frame.
+  const annotateCodeBlockCopyButtons = useCallback(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    annotateNoteCodeBlockCopyButtons(container, {
+      copyLabel: t("action.copy"),
+      copiedLabel: t("notes.codeBlock.copied"),
+      copyFailedLabel: t("notes.codeBlock.copyFailed"),
+      onCopy: copyToClipboard,
+    });
+  }, [t]);
+
+  // DOM decoration: host links, image sizes, preview code-copy buttons.
+  // Preview observes mutations (MDX mounts); edit debounces to avoid per-keystroke walks.
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -810,11 +818,13 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
     const EDIT_DECORATION_DEBOUNCE_MS = 180;
 
     const runDecorations = (includeHostLinks: boolean) => {
-      if (editorMode === "edit") {
-        annotateNoteImageSizes(container);
+      annotateNoteImageSizes(container);
+      if (includeHostLinks) annotateHostLinks();
+      if (editorMode === "preview") {
+        annotateCodeBlockCopyButtons();
+      } else {
         removeNoteCodeBlockCopyButtons(container);
       }
-      if (includeHostLinks) annotateHostLinks();
     };
 
     const scheduleFromMutation = () => {
@@ -822,7 +832,6 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
         if (frame) return;
         frame = window.requestAnimationFrame(() => {
           frame = 0;
-          // Streamdown mounts anchors asynchronously; re-title host links.
           runDecorations(true);
         });
         return;
@@ -844,7 +853,7 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
       if (debounceTimer) window.clearTimeout(debounceTimer);
       removeNoteCodeBlockCopyButtons(container);
     };
-  }, [annotateHostLinks, editorMode]);
+  }, [annotateCodeBlockCopyButtons, annotateHostLinks, editorMode]);
 
   // Host list identity can change while a note stays open (vault refresh).
   useEffect(() => {
@@ -1291,33 +1300,22 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
             </div>
         </div>
       )}
-      {editorMode === "preview" ? (
-        !displayMarkdown.trim() ? (
-          <div className="netcatty-note-preview-empty">
-            {previewEmptyLabel ?? placeholder}
-          </div>
-        ) : (
-          <Suspense
-            fallback={(
-              <div
-                className="netcatty-mdx-content min-h-[12rem] whitespace-pre-wrap break-words text-[15px] leading-[1.75] text-foreground/90"
-                aria-hidden="true"
-              >
-                {displayMarkdown.slice(0, 2_000)}
-              </div>
-            )}
-          >
-            <NoteMarkdownPreview markdown={displayMarkdown} />
-          </Suspense>
-        )
+      {editorMode === "preview" && !displayMarkdown.trim() ? (
+        <div className="netcatty-note-preview-empty">
+          {previewEmptyLabel ?? placeholder}
+        </div>
       ) : (
         <MDXEditor
+          key={editorMode}
           ref={editorRef}
           markdown={displayMarkdown}
           placeholder={placeholder}
           plugins={plugins}
-          readOnly={false}
-          className="netcatty-mdx-editor"
+          readOnly={editorMode === "preview"}
+          className={cn(
+            "netcatty-mdx-editor",
+            editorMode === "preview" && "netcatty-mdx-editor--preview",
+          )}
           contentEditableClassName="netcatty-mdx-content"
           onChange={commitMarkdown}
         />

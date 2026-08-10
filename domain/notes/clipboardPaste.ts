@@ -248,6 +248,18 @@ export const normalizeImageSrc = (src: string): string | null => {
   return null;
 };
 
+/**
+ * Rewrite Vite public-dir URLs in markdown/HTML so the browser never requests /public/*.
+ *   /public/foo.png → /foo.png
+ *   public/foo.png  → /foo.png
+ */
+export const normalizeNotePublicAssetPaths = (markdown: string): string => {
+  let body = markdown;
+  body = body.replace(/(\bsrc\s*=\s*["'])\/?public\//gi, "$1/");
+  body = body.replace(/\]\(\s*\/?public\//gi, "](/");
+  return body;
+};
+
 const escapeHtmlAttr = (value: string): string => (
   value
     .replace(/&/g, "&amp;")

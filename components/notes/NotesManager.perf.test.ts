@@ -89,13 +89,13 @@ test("host-link annotation does not re-run on every markdown value keystroke", (
   );
   assert.match(
     editorSource,
-    /\[annotateHostLinks, editorMode\]/,
+    /\[annotateCodeBlockCopyButtons, annotateHostLinks, editorMode\]/,
     "DOM decoration is independent of markdown value identity",
   );
   assert.match(
     editorSource,
-    /NoteMarkdownPreview/,
-    "preview must not remount full MDXEditor/Lexical for read-only notes",
+    /readOnly=\{editorMode === "preview"\}/,
+    "preview reuses MDXEditor in read-only mode",
   );
   assert.match(
     editorSource,

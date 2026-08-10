@@ -150,16 +150,14 @@ test("note editor enables image plugin for remote markdown images", () => {
 test("note editor exposes preview and edit modes with a markdown toolbar in edit mode", () => {
   const source = readFileSync(new URL("./InlineMarkdownEditor.tsx", import.meta.url), "utf8");
   const managerSource = readFileSync(new URL("./NotesManager.tsx", import.meta.url), "utf8");
-  const previewSource = readFileSync(new URL("./NoteMarkdownPreview.tsx", import.meta.url), "utf8");
 
   assert.match(source, /type NoteEditorMode = "edit" \| "preview"/);
   assert.match(source, /toolbarPlugin\(\{\s*toolbarContents:/s);
-  // Preview is GitHub-style react-markdown (not MDX readOnly dual-mount).
-  assert.match(source, /NoteMarkdownPreview/);
-  assert.match(source, /editorMode === "preview"/);
-  assert.match(previewSource, /from "react-markdown"/);
-  assert.match(previewSource, /github-markdown-css/);
-  assert.match(previewSource, /data-note-preview-engine="github-markdown"/);
+  // Preview and edit both use MDXEditor (readOnly in preview).
+  assert.match(source, /readOnly=\{editorMode === "preview"\}/);
+  assert.match(source, /key=\{editorMode\}/);
+  assert.match(source, /netcatty-mdx-editor--preview/);
+  assert.doesNotMatch(source, /NoteMarkdownPreview|react-markdown|github-markdown/);
   assert.match(source, /<BlockTypeSelect \/>/);
   assert.match(source, /<BoldItalicUnderlineToggles /);
   assert.match(source, /<ListsToggle /);
@@ -355,21 +353,17 @@ test("annotateNoteCodeBlockCopyButtons adds a copy action to code blocks", () =>
   assert.match(source, /onCopy\(text\)/);
 });
 
-test("note preview uses GitHub markdown body; edit keeps MDX code chrome", () => {
+test("note preview uses MDX readOnly with code-copy chrome", () => {
   const source = readFileSync(new URL("./InlineMarkdownEditor.tsx", import.meta.url), "utf8");
-  const previewSource = readFileSync(new URL("./NoteMarkdownPreview.tsx", import.meta.url), "utf8");
   const styles = readFileSync(new URL("../../index.css", import.meta.url), "utf8");
 
   assert.match(source, /removeNoteCodeBlockCopyButtons/);
-  assert.match(previewSource, /markdown-body/);
-  assert.match(previewSource, /react-markdown/);
-  assert.match(source, /if \(editorMode === "edit"\)/);
-  assert.match(source, /removeNoteCodeBlockCopyButtons\(container\)/);
+  assert.match(source, /readOnly=\{editorMode === "preview"\}/);
+  assert.match(source, /annotateCodeBlockCopyButtons/);
   assert.match(source, /annotateNoteCodeBlockCopyButtons/);
   assert.match(source, /MutationObserver/);
   assert.match(source, /setAttribute\("aria-label", copiedLabel\)/);
   assert.match(styles, /\.netcatty-note-code-copy/);
-  assert.match(styles, /\.netcatty-note-github-preview\.markdown-body/);
   assert.match(
     styles,
     /\.netcatty-mdx-editor\s+\[class\*="_codeMirrorWrapper_"\]:hover\s+\.netcatty-note-code-copy/s,

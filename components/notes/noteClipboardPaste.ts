@@ -14,6 +14,7 @@ export {
   wrapCenteredMarkdown,
   decodeHtmlEntities,
   normalizeImageSrc,
+  normalizeNotePublicAssetPaths,
   serializeSafeHtmlImage,
   trimBlankLinesOutsideCode,
   findHtmlTagEnd,
