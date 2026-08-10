@@ -2,60 +2,79 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-test("InlineMarkdownEditor paste handler stays view glue over domain + application layers", () => {
-  const editorSource = readFileSync(new URL("./InlineMarkdownEditor.tsx", import.meta.url), "utf8");
-  const hookSource = readFileSync(
-    new URL("../../application/state/useNoteMarkdownPaste.ts", import.meta.url),
-    "utf8",
-  );
-  const domainSource = readFileSync(
-    new URL("../../domain/noteMarkdownPaste.ts", import.meta.url),
-    "utf8",
-  );
-  const lexicalSource = readFileSync(
-    new URL("./noteMarkdownPasteLexical.ts", import.meta.url),
-    "utf8",
-  );
+import {
+  mergeNoteMarkdownDocumentPaste,
+  shouldInterceptNoteMarkdownPaste,
+} from "./InlineMarkdownEditor.tsx";
 
-  assert.match(editorSource, /useNoteMarkdownPaste/);
-  assert.match(editorSource, /from "\.\/noteMarkdownPasteLexical"/);
-  assert.match(editorSource, /from "\.\.\/\.\.\/domain\/noteMarkdownPaste"/);
-  assert.match(editorSource, /onPasteCapture=\{handlePasteCapture\}/);
-  // Pure markdown/selection logic must not live in the presentation component.
-  assert.doesNotMatch(editorSource, /serializeLexicalSelectionAsMarkdown/);
-  assert.doesNotMatch(editorSource, /shouldRecoverNoteMarkdownPasteAfterUnchangedInsert/);
-  assert.doesNotMatch(editorSource, /mergeNoteMarkdownDocumentPaste/);
-  assert.doesNotMatch(editorSource, /doesSelectionEncompassLexicalBlock/);
+test("markdown paste intercepts structured clipboard text in edit mode even without a Lexical selection", () => {
+  assert.equal(
+    shouldInterceptNoteMarkdownPaste({
+      editorMode: "edit",
+      pasteInsideCodeBlock: false,
+      clipboardText: "# Heading\n\n- item",
+      canInsertMarkdownAtSelection: true,
+    }),
+    true,
+  );
+  // After a prior insertMarkdown clears the caret, continuous paste must still
+  // be recoverable via document setMarkdown rather than a swallowed preventDefault.
+  assert.equal(
+    shouldInterceptNoteMarkdownPaste({
+      editorMode: "edit",
+      pasteInsideCodeBlock: false,
+      clipboardText: "# Heading\n\n- item",
+      canInsertMarkdownAtSelection: false,
+    }),
+    true,
+  );
+  assert.equal(
+    shouldInterceptNoteMarkdownPaste({
+      editorMode: "preview",
+      pasteInsideCodeBlock: false,
+      clipboardText: "# Heading\n\n- item",
+      canInsertMarkdownAtSelection: true,
+    }),
+    false,
+  );
+});
 
-  assert.match(domainSource, /export const serializeLexicalSelectionAsMarkdown/);
-  assert.match(domainSource, /export const serializeLexicalNodeSelectionAsMarkdown/);
-  assert.match(domainSource, /export const mergeNoteMarkdownDocumentPaste/);
-  assert.match(domainSource, /export const shouldRecoverNoteMarkdownPasteAfterUnchangedInsert/);
-  assert.match(domainSource, /export const didNoteMarkdownPasteApply/);
-  assert.match(domainSource, /export const doesSelectionEncompassLexicalBlock/);
-  assert.match(domainSource, /getChecked/);
+test("document paste merge preserves first-line indentation and appends after current body", () => {
+  assert.equal(
+    mergeNoteMarkdownDocumentPaste("Existing note", "# Pasted\n\n- item"),
+    "Existing note\n\n# Pasted\n\n- item",
+  );
+  assert.equal(
+    mergeNoteMarkdownDocumentPaste("   ", "# Only paste"),
+    "# Only paste",
+  );
+  assert.equal(
+    mergeNoteMarkdownDocumentPaste("- parent", "  - child"),
+    "- parent\n\n  - child",
+  );
+  assert.equal(
+    mergeNoteMarkdownDocumentPaste("Existing", "\n\n# Pasted\n"),
+    "Existing\n\n# Pasted",
+  );
+});
+
+test("InlineMarkdownEditor only preventDefaults markdown paste after a successful intercept guard", () => {
+  const source = readFileSync(new URL("./InlineMarkdownEditor.tsx", import.meta.url), "utf8");
+
+  assert.match(source, /shouldInterceptNoteMarkdownPaste/);
+  assert.match(source, /hasActiveLexicalTextSelection/);
+  assert.match(source, /mergeNoteMarkdownDocumentPaste/);
+  assert.match(source, /setMarkdown\(/);
+  assert.match(source, /canInsertAtSelection/);
   assert.match(
-    domainSource,
-    /if\s*\(\s*!input\.pasteInsideLexicalContentSurface\s*\)\s*return\s*false/,
+    source,
+    /shouldInterceptNoteMarkdownPaste\([\s\S]*?\)[\s\S]*?event\.preventDefault\(\)/,
   );
-
-  assert.match(hookSource, /shouldInterceptNoteMarkdownPaste/);
-  assert.match(hookSource, /mergeNoteMarkdownDocumentPaste/);
-  assert.match(hookSource, /shouldRecoverNoteMarkdownPasteAfterUnchangedInsert/);
-  assert.match(hookSource, /didNoteMarkdownPasteApply/);
-  assert.match(hookSource, /event\.preventDefault\(\)/);
   assert.match(
-    hookSource,
-    /if\s*\(\s*!canInsertAtSelection\s*\)\s*\{\s*(?:\/\/[^\n]*\n\s*)*applyDocumentPaste\(\)/,
+    source,
+    /if \(\s*!shouldInterceptNoteMarkdownPaste\([\s\S]*?\)\s*\{\s*return;\s*\}/,
   );
-  assert.doesNotMatch(hookSource, /shouldUseDocumentNoteMarkdownPaste/);
-  assert.doesNotMatch(hookSource, /from ["']lexical["']/);
-  assert.doesNotMatch(hookSource, /@mdxeditor\/editor/);
-
-  assert.match(lexicalSource, /isNotePasteInsideLexicalContentSurface/);
-  assert.match(lexicalSource, /hasActiveLexicalTextSelection/);
-  assert.match(lexicalSource, /getActiveLexicalPasteSelection/);
-  assert.match(lexicalSource, /serializeLexicalSelectionAsMarkdown/);
-  assert.match(lexicalSource, /serializeLexicalNodeSelectionAsMarkdown/);
-  assert.match(lexicalSource, /\$isNodeSelection/);
+  // Live selection must keep insertMarkdown; document merge is the no-selection / recovery path.
+  assert.match(source, /if\s*\(\s*!canInsertAtSelection\s*\)\s*\{\s*applyDocumentPaste\(\);/);
+  assert.match(source, /editor\.insertMarkdown\(markdown\)/);
 });

@@ -29,17 +29,13 @@ import { ExternalLink } from "lucide-react";
 import {
   $createRangeSelection,
   $getNearestNodeFromDOMNode,
+  $getSelection,
   $isTextNode,
   $setSelection,
   getNearestEditorFromDOMNode,
 } from "lexical";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "../../application/i18n/I18nProvider";
-import { useNoteMarkdownPaste } from "../../application/state/useNoteMarkdownPaste";
-import {
-  shouldInsertClipboardTextAsMarkdown,
-  type NoteEditorMode,
-} from "../../domain/noteMarkdownPaste";
 import { resolveRenderedMarkdownLinkHref } from "../../domain/notes";
 import { buildSshNoteLinkOpenHost } from "../../domain/sshDeepLink";
 import { copyToClipboard } from "../keychain/utils";
@@ -47,12 +43,6 @@ import { toast } from "../ui/toast";
 import { cn } from "../../lib/utils";
 import { FixedSizeVirtualList, type FixedSizeVirtualListHandle } from "../ui/FixedSizeVirtualList";
 import type { Host } from "../../types";
-import {
-  getActiveLexicalPasteSelection,
-  hasActiveLexicalTextSelection,
-  isNotePasteInsideCodeBlock,
-  isNotePasteInsideLexicalContentSurface,
-} from "./noteMarkdownPasteLexical";
 
 export interface InlineMarkdownEditorProps {
   value: string;
@@ -65,8 +55,7 @@ export interface InlineMarkdownEditorProps {
   previewEmptyLabel?: string;
 }
 
-export type { NoteEditorMode };
-export { shouldInsertClipboardTextAsMarkdown };
+export type NoteEditorMode = "edit" | "preview";
 
 type HostPickerState = {
   open: boolean;
@@ -205,6 +194,88 @@ const getEstimatedHostPickerHeight = (availableHostCount: number): number => {
     ? availableHostCount * HOST_PICKER_ROW_HEIGHT + HOST_PICKER_LIST_VERTICAL_PADDING
     : HOST_PICKER_EMPTY_HEIGHT;
   return HOST_PICKER_HEADER_HEIGHT + Math.min(HOST_PICKER_LIST_MAX_HEIGHT, listHeight);
+};
+
+const PASTED_MARKDOWN_PATTERNS = [
+  /^ {0,3}#{1,6}\s+\S/m,
+  /^ {0,3}(?:[-+*]|\d+[.)])\s+\S/m,
+  /^ {0,3}>\s+\S/m,
+  /^ {0,3}(?:```|~~~)/m,
+  /^ {0,3}[-*_](?:\s*[-*_]){2,}\s*$/m,
+  /^ {0,3}\|?.+\|.+\n {0,3}\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/m,
+  /(^|[^!])\[[^\]\n]+\]\([^) \n]+(?:\s+"[^"\n]*")?\)/,
+  /(^|[\s([{])(?:\*\*|__)\S[\s\S]*?\S(?:\*\*|__)(?=$|[\s\])}.,;:!?])/,
+  /(^|[\s([{])`[^`\n]+`(?=$|[\s\])}.,;:!?])/,
+];
+
+export const shouldInsertClipboardTextAsMarkdown = (text: string): boolean => {
+  const markdown = text.replace(/\r\n?/g, "\n").trim();
+  if (!markdown) return false;
+  return PASTED_MARKDOWN_PATTERNS.some((pattern) => pattern.test(markdown));
+};
+
+export const isNotePasteInsideCodeBlock = (target: EventTarget | null): boolean => {
+  if (typeof Element === "undefined") return false;
+  const element = target instanceof Element
+    ? target
+    : typeof Node !== "undefined" && target instanceof Node
+      ? target.parentElement
+      : null;
+  return Boolean(element?.closest(".cm-editor, [class*=\"_codeMirrorWrapper_\"]"));
+};
+
+/** True when Lexical currently has a selection that insertMarkdown can target. */
+export const hasActiveLexicalTextSelection = (target: EventTarget | null): boolean => {
+  if (typeof Element === "undefined" || typeof Node === "undefined") return false;
+  const element = target instanceof Element
+    ? target
+    : target instanceof Node
+      ? target.parentElement
+      : null;
+  if (!element) return false;
+  const lexicalEditor = getNearestEditorFromDOMNode(element);
+  if (!lexicalEditor) return false;
+  let hasSelection = false;
+  lexicalEditor.getEditorState().read(() => {
+    hasSelection = $getSelection() !== null;
+  });
+  return hasSelection;
+};
+
+/**
+ * Merge a recovered markdown paste into the current document body.
+ * Used when Lexical has no caret (or insertMarkdown no-ops after preventDefault).
+ * Strips leading blank lines only — keep first-line indentation for nested lists.
+ */
+export const mergeNoteMarkdownDocumentPaste = (
+  currentMarkdown: string,
+  clipboardText: string,
+): string => {
+  const current = currentMarkdown.replace(/\s+$/u, "");
+  const pasted = clipboardText
+    .replace(/\r\n?/g, "\n")
+    .replace(/^\n+/u, "")
+    .replace(/\s+$/u, "");
+  if (!pasted) return currentMarkdown;
+  if (!current) return pasted;
+  return `${current}\n\n${pasted}`;
+};
+
+/**
+ * Decide whether markdown paste should call preventDefault.
+ * Selection is optional: when the caret is gone (common after a prior
+ * insertMarkdown), recover via document setMarkdown merge instead of letting
+ * preventDefault + a no-op Lexical insert swallow the clipboard.
+ */
+export const shouldInterceptNoteMarkdownPaste = (input: {
+  editorMode: NoteEditorMode;
+  pasteInsideCodeBlock: boolean;
+  clipboardText: string;
+  canInsertMarkdownAtSelection: boolean;
+}): boolean => {
+  if (input.editorMode !== "edit") return false;
+  if (input.pasteInsideCodeBlock) return false;
+  return shouldInsertClipboardTextAsMarkdown(input.clipboardText);
 };
 
 export const resolveHostPickerPopupPosition = ({
@@ -673,27 +744,6 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
     onChange(markdown);
   }, [onChange]);
 
-  const getPasteEditor = useCallback(() => editorRef.current, []);
-  const getLatestMarkdown = useCallback(() => latestMarkdownRef.current, []);
-  const noteMarkdownPasteAdapters = useMemo(() => ({
-    isPasteInsideCodeBlock: isNotePasteInsideCodeBlock,
-    isPasteInsideLexicalContentSurface: isNotePasteInsideLexicalContentSurface,
-    hasActiveLexicalTextSelection,
-    getActiveLexicalPasteSelection,
-  }), []);
-  const clearPasteTransientUi = useCallback(() => {
-    setHostPicker((current) => ({ ...current, open: false, query: "", selectedIndex: 0 }));
-    setLinkAction(null);
-  }, []);
-  const { handlePasteCapture } = useNoteMarkdownPaste({
-    editorMode,
-    getEditor: getPasteEditor,
-    getLatestMarkdown,
-    commitMarkdown,
-    adapters: noteMarkdownPasteAdapters,
-    onAfterPaste: clearPasteTransientUi,
-  });
-
   const insertHostLink = useCallback((host: Host) => {
     const link = `[${getHostLinkLabel(host)}](${formatSshDeepLinkForHost(host)})`;
     const editor = editorRef.current;
@@ -881,6 +931,62 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
     if (nextTarget instanceof Node && containerRef.current?.contains(nextTarget)) return;
     setHostPicker((current) => ({ ...current, open: false, query: "", selectedIndex: 0 }));
   }, []);
+
+  const handlePasteCapture = useCallback((event: React.ClipboardEvent<HTMLDivElement>) => {
+    const markdown = event.clipboardData.getData("text/plain");
+    const editor = editorRef.current;
+    const canInsertAtSelection = Boolean(editor)
+      && hasActiveLexicalTextSelection(event.target);
+    if (
+      !shouldInterceptNoteMarkdownPaste({
+        editorMode,
+        pasteInsideCodeBlock: isNotePasteInsideCodeBlock(event.target),
+        clipboardText: markdown,
+        canInsertMarkdownAtSelection: canInsertAtSelection,
+      })
+    ) {
+      return;
+    }
+    if (!editor) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    event.nativeEvent.stopImmediatePropagation?.();
+
+    const applyDocumentPaste = () => {
+      const next = mergeNoteMarkdownDocumentPaste(latestMarkdownRef.current, markdown);
+      // setMarkdown mutes MDXEditor onChange; commit the draft ourselves so
+      // autosave still sees the pasted body.
+      editor.setMarkdown(next);
+      commitMarkdown(next);
+    };
+
+    // Document merge only when Lexical has no caret. With a live selection,
+    // keep insertMarkdown so caret/replace semantics stay intact (incl. long pastes).
+    if (!canInsertAtSelection) {
+      applyDocumentPaste();
+    } else {
+      const before = latestMarkdownRef.current;
+      editor.focus();
+      editor.insertMarkdown(markdown);
+      // insertMarkdown's Lexical update is deferred; if selection was lost the
+      // insert no-ops after our preventDefault. Recover on the next frames.
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => {
+          if (latestMarkdownRef.current !== before) return;
+          const current = editor.getMarkdown();
+          if (current !== before) {
+            commitMarkdown(current);
+            return;
+          }
+          applyDocumentPaste();
+        });
+      });
+    }
+
+    setHostPicker((current) => ({ ...current, open: false, query: "", selectedIndex: 0 }));
+    setLinkAction(null);
+  }, [commitMarkdown, editorMode]);
 
   return (
     <div
