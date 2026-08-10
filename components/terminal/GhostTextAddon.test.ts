@@ -248,62 +248,6 @@ test("wraps the ghost to the next row when the predicted column crosses cols", (
   }
 });
 
-test("places ghost on next row when logical anchor is at pending-wrap cols", () => {
-  // Echo-lagged prompt+input can fill a row exactly. The popup caret keeps
-  // cursorX === cols (pending wrap), but the ghost overlay must start at
-  // column 0 of the next row — otherwise overflow:hidden clips the suffix.
-  const restoreDocument = installFakeDocument();
-  const { term, ghostElement } = createFakeTerm();
-  const addon = new GhostTextAddon();
-
-  try {
-    term.cols = 10;
-    term.buffer.active.cursorX = 2;
-    term.buffer.active.cursorY = 3;
-    addon.activate(term as never);
-    addon.show("abcdefghij more", "abcdefgh", {
-      cursorX: 10,
-      cursorY: 3,
-    });
-
-    const ghost = ghostElement();
-    assert.ok(ghost);
-    assert.equal(ghost.textContent, "ij more");
-    // First printable ghost cell at column 0 of the following row.
-    assert.equal(ghost.style.left, "0px");
-    assert.equal(ghost.style.top, "72px");
-  } finally {
-    addon.dispose();
-    restoreDocument();
-  }
-});
-
-test("places ghost on next row when typed delta lands exactly on cols", () => {
-  const restoreDocument = installFakeDocument();
-  const { term, ghostElement } = createFakeTerm();
-  const addon = new GhostTextAddon();
-
-  try {
-    term.cols = 10;
-    term.buffer.active.cursorX = 8;
-    term.buffer.active.cursorY = 2;
-    addon.activate(term as never);
-    addon.show("abcdefghij", "ab");
-    const ghost = ghostElement();
-    assert.ok(ghost);
-
-    // Anchor 8 + 2 typed cells = 10 → exact fill; ghost starts on next row.
-    addon.adjustToInput("abcd");
-
-    assert.equal(ghost.textContent, "efghij");
-    assert.equal(ghost.style.left, "0px");
-    assert.equal(ghost.style.top, "54px");
-  } finally {
-    addon.dispose();
-    restoreDocument();
-  }
-});
-
 test("self-heals a stale anchor on render while no adjustToInput has fired", () => {
   const restoreDocument = installFakeDocument();
   const { term, ghostElement, fireRender } = createFakeTerm();
@@ -326,140 +270,6 @@ test("self-heals a stale anchor on render while no adjustToInput has fired", () 
     // re-reads live cursor: new left = 5 * 9 = 45px.
     assert.equal(ghost.style.left, "45px");
   } finally {
-    restoreDocument();
-  }
-});
-
-test("anchors ghost at an explicit logical cursor under SSH echo lag", () => {
-  // High-latency SSH: resolved typed input is already "systemctl" while
-  // xterm's live cursor is still after the echoed prefix "s". Ghost text
-  // must stay the true suffix (" restart…") and paint at the logical
-  // caret — not drop the unechoed middle and paint after the prefix.
-  const restoreDocument = installFakeDocument();
-  const { term, ghostElement, fireRender } = createFakeTerm();
-  const addon = new GhostTextAddon();
-
-  try {
-    term.buffer.active.cursorX = 2; // still after echoed "s" (+ prompt offset)
-    term.buffer.active.cursorY = 0;
-    addon.activate(term as never);
-    addon.show("systemctl restart", "systemctl", {
-      cursorX: 10,
-      cursorY: 0,
-    });
-
-    const ghost = ghostElement();
-    assert.ok(ghost);
-    assert.equal(ghost.textContent, " restart");
-    // Logical column 10 × 9px — not live cursorX=2 → 18px.
-    assert.equal(ghost.style.left, "90px");
-    assert.equal(ghost.style.top, "0px");
-
-    // Explicit logical anchors must not self-heal back to the lagging
-    // live cursor on render while the tracked input is unchanged.
-    fireRender();
-    assert.equal(ghost.style.left, "90px");
-    assert.equal(ghost.textContent, " restart");
-  } finally {
-    addon.dispose();
-    restoreDocument();
-  }
-});
-
-test("preserves logical anchor across anchorless show refreshes", () => {
-  // Ctrl/Alt+Right calls show(full, live) then show(full, next) with no
-  // anchor. Echo still lagging behind the accepted word must not snap the
-  // remaining ghost onto the live cursor (painting over the echoed prefix).
-  const restoreDocument = installFakeDocument();
-  const { term, ghostElement } = createFakeTerm();
-  const addon = new GhostTextAddon();
-
-  try {
-    term.buffer.active.cursorX = 2;
-    term.buffer.active.cursorY = 0;
-    addon.activate(term as never);
-    addon.show("systemctl restart now", "systemctl", {
-      cursorX: 10,
-      cursorY: 0,
-    });
-
-    const ghost = ghostElement();
-    assert.ok(ghost);
-    assert.equal(ghost.style.left, "90px");
-
-    // Resync to the typed buffer (still unechoed), then accept one word —
-    // both refreshes omit the logical anchor argument.
-    addon.show("systemctl restart now", "systemctl");
-    assert.equal(ghost.style.left, "90px");
-    assert.equal(ghost.textContent, " restart now");
-
-    addon.show("systemctl restart now", "systemctl restart");
-    // Logical origin 10 + cell width of " restart" (8) = 18 → 162px.
-    assert.equal(ghost.textContent, " now");
-    assert.equal(ghost.style.left, "162px");
-    assert.equal(ghost.style.top, "0px");
-  } finally {
-    addon.dispose();
-    restoreDocument();
-  }
-});
-
-test("applyKeystroke: backspace removes a full supplementary-plane code point", () => {
-  const restoreDocument = installFakeDocument();
-  const { term, ghostElement } = createFakeTerm();
-  const addon = new GhostTextAddon();
-
-  try {
-    addon.activate(term as never);
-    // U+1F600 is two UTF-16 code units; Backspace must drop the whole
-    // code point so the unreliable-buffer path matches typed-buffer edits.
-    addon.show("hi😀bye", "hi😀");
-    const ghost = ghostElement();
-    assert.ok(ghost);
-    assert.equal(ghost.textContent, "bye");
-
-    addon.applyKeystroke("\x7f");
-
-    assert.equal(ghost.textContent, "😀bye");
-    assert.equal(addon.isActive(), true);
-  } finally {
-    addon.dispose();
-    restoreDocument();
-  }
-});
-
-test("clamps a bottom-row wrap to the last visible row under logical echo lag", () => {
-  // Explicit logical anchor on the last row + typed wrap → predicted Y
-  // would be term.rows (off-screen). xterm scrolls and keeps the caret on
-  // the bottom visible row; the ghost must do the same or overflow:hidden
-  // clips it entirely.
-  const restoreDocument = installFakeDocument();
-  const { term, ghostElement } = createFakeTerm();
-  const addon = new GhostTextAddon();
-
-  try {
-    term.cols = 10;
-    term.rows = 5;
-    term.buffer.active.cursorX = 2;
-    term.buffer.active.cursorY = 4;
-    addon.activate(term as never);
-    addon.show("abcdefghij", "ab", {
-      cursorX: 8,
-      cursorY: 4,
-    });
-
-    const ghost = ghostElement();
-    assert.ok(ghost);
-
-    // Anchor 8 + 3 typed cells = 11 → wraps to col 1 on logical row 5,
-    // which must clamp to the last visible row (4).
-    addon.adjustToInput("abcde");
-
-    assert.equal(ghost.textContent, "fghij");
-    assert.equal(ghost.style.left, "9px");
-    assert.equal(ghost.style.top, `${4 * 18}px`);
-  } finally {
-    addon.dispose();
     restoreDocument();
   }
 });
@@ -525,10 +335,9 @@ test("self-heal adopts live X when a bottom-row wrap scrolls instead of changing
     addon.show("abcdefghij", "abcd");
     const ghost = ghostElement();
     assert.ok(ghost);
-    // Predicted wrap is col 2 / row 24, but paint clamps to the last visible
-    // row (23 → top 414px) so the overlay is not clipped by overflow:hidden.
+    // Pre-echo: col 2 on predicted row 24 → top 24*18.
     assert.equal(ghost.style.left, "18px");
-    assert.equal(ghost.style.top, "414px");
+    assert.equal(ghost.style.top, "432px");
 
     term.buffer.active.cursorX = 2;
     term.buffer.active.cursorY = 23;
@@ -538,8 +347,6 @@ test("self-heal adopts live X when a bottom-row wrap scrolls instead of changing
     });
     fireRender();
 
-    // Self-heal must adopt live X (2) instead of keeping unnormalized X=12,
-    // which would otherwise re-wrap past the bottom after Math.max.
     assert.equal(ghost.style.left, "18px");
     assert.equal(ghost.style.top, "414px");
   } finally {

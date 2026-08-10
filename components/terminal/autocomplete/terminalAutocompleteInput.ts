@@ -5,7 +5,6 @@ import type { AutocompleteSettings } from "./useTerminalAutocomplete";
 import { getAlignedPrompt } from "./promptDetector";
 import { recordCommand } from "./commandHistoryStore";
 import { getCommandToRecordOnEnter } from "./terminalAutocompletePrompt";
-import { removeLastCodePoint } from "./xtermUtils";
 
 interface TerminalAutocompleteInputContext {
   settingsRef: MutableRefObject<AutocompleteSettings>;
@@ -103,12 +102,10 @@ export function handleTerminalAutocompleteInput(
     return;
   }
 
-  // Backspace / DEL: drop the last code point (not one UTF-16 unit, and not
-  // a full grapheme cluster). Bash/readline leaves the base emoji when
-  // erasing a skin-tone sequence (👍🏽 → 👍); grapheme erase would over-delete
-  // and desync the reliable buffer from the remote line under echo lag.
+  // Backspace / DEL: drop the last typed char so the buffer stays aligned
+  // with what the shell actually holds.
   if (data === "\x7f" || data === "\b") {
-    typedInputBufferRef.current = removeLastCodePoint(typedInputBufferRef.current);
+    typedInputBufferRef.current = typedInputBufferRef.current.slice(0, -1);
   } else if (data === "\x17") {
     // Ctrl+W: word-erase — kill the trailing whitespace + word.
     typedInputBufferRef.current = typedInputBufferRef.current.replace(/\s*\S+\s*$/, "");

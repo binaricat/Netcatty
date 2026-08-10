@@ -367,64 +367,6 @@ function shouldExpandAutocompleteUpward(
   return cursorY > 2 && spaceAbovePx >= spaceBelowPx;
 }
 
-export interface AutocompleteCursorPosition {
-  column: number;
-  row: number;
-}
-
-/**
- * Best-effort cursor cell for popup anchoring. xterm's helper textarea and
- * buffer cursor can lag behind the keystroke that triggered completion, so
- * derive the cell from the aligned prompt + resolved input.
- *
- * Soft-wraps across `term.cols` so a long echo-lagged command anchors on the
- * row where the caret will land — not only a horizontal column that can exceed
- * the current row width.
- *
- * Callers under SSH echo lag should pass the same resolved query input used
- * for completion matching (not the lagging echoed `prompt.userInput`). The
- * resolved caret is authoritative in both directions: ahead of a lagging echo
- * while typing, and behind a stale echoed line after Backspace / Ctrl+W.
- * Never max with the live buffer line — that re-anchors onto deleted glyphs.
- */
-export function resolveAutocompleteCursorPosition(
-  term: XTerm,
-  prompt: Pick<PromptDetectionResult, "promptText" | "userInput">,
-): AutocompleteCursorPosition {
-  const buffer = term.buffer.active;
-  const cols = Math.max(1, term.cols);
-  const rows = Math.max(1, term.rows);
-
-  // Walk up soft-wrapped continuation rows to the prompt/start row.
-  let startRow = buffer.cursorY;
-  while (startRow > 0) {
-    const line = buffer.getLine(startRow + buffer.baseY);
-    if (!line?.isWrapped) break;
-    startRow -= 1;
-  }
-
-  // Prompt + resolved input must use display-cell widths: CJK/fullwidth
-  // glyphs occupy two xterm columns, and combining marks occupy zero.
-  // String length under-counts wraps and can anchor the popup one row early.
-  const totalCells =
-    stringCellWidth(prompt.promptText, term) + stringCellWidth(prompt.userInput, term);
-  // xterm keeps a pending wrap when the line fills exactly: cursorX === cols on
-  // the filled row, and only advances on the next printable character. Naïve
-  // modulo/floor maps that boundary to column 0 of the next row and drops the
-  // autocomplete popup one row too low under echo lag.
-  let column: number;
-  let rowOffset: number;
-  if (totalCells > 0 && totalCells % cols === 0) {
-    column = cols;
-    rowOffset = totalCells / cols - 1;
-  } else {
-    column = totalCells % cols;
-    rowOffset = Math.floor(totalCells / cols);
-  }
-  const row = Math.min(rows - 1, Math.max(0, startRow + rowOffset));
-  return { column, row };
-}
-
 /** Predicted cursor cell for popup anchoring (column within the row + row). */
 export type AutocompleteCursorCell = {
   column: number;
@@ -497,7 +439,7 @@ export function resolveAutocompleteCursorColumn(
   term: XTerm,
   prompt: Pick<PromptDetectionResult, "promptText" | "userInput">,
 ): number {
-  return resolveAutocompleteCursorPosition(term, prompt).column;
+  return resolveAutocompleteCursorCell(term, prompt).column;
 }
 
 /** Clamp autocomplete popups to the active terminal screen in split workspaces.

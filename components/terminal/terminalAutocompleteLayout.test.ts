@@ -8,12 +8,9 @@ import {
   resolveAutocompleteClampViewport,
   resolveAutocompleteCursorCell,
   resolveAutocompleteCursorColumn,
-  resolveAutocompleteCursorPosition,
   resolvePreservedSuggestionIndex,
   type PopupPlacementInput,
 } from "./autocomplete/terminalAutocompleteLayout.ts";
-import type { CompletionSuggestion } from "./autocomplete/completionEngine.ts";
-import { stringCellWidth } from "./autocomplete/terminalStringCellWidth.ts";
 
 const baseInput: PopupPlacementInput = {
   anchorTop: 100,
@@ -259,8 +256,6 @@ test("resolveAutocompleteAnchorInViewport uses the xterm screen rect in split pa
 
 test("resolveAutocompleteCursorColumn prefers prompt-aligned column when xterm lags", () => {
   const term = {
-    cols: 80,
-    rows: 24,
     buffer: {
       active: {
         cursorX: 0,
@@ -279,33 +274,6 @@ test("resolveAutocompleteCursorColumn prefers prompt-aligned column when xterm l
     userInput: "d",
   });
   assert.equal(column, "root@host:~# ".length + 1);
-});
-
-test("resolveAutocompleteCursorColumn uses resolved input ahead of echoed prefix", () => {
-  const promptText = "root@host:~# ";
-  const echoedPrefix = "git s";
-  const resolvedInput = "git status";
-  const term = {
-    cols: 80,
-    rows: 24,
-    buffer: {
-      active: {
-        cursorX: promptText.length + echoedPrefix.length,
-        cursorY: 22,
-        baseY: 0,
-        getLine: () => ({
-          isWrapped: false,
-          translateToString: () => `${promptText}${echoedPrefix}`,
-        }),
-      },
-    },
-  };
-
-  const column = resolveAutocompleteCursorColumn(term as never, {
-    promptText,
-    userInput: resolvedInput,
-  });
-  assert.equal(column, promptText.length + resolvedInput.length);
 });
 
 test("resolveAutocompleteCursorColumn counts wide glyphs as two cells for pre-echo input", () => {
@@ -424,8 +392,6 @@ test("resolveAutocompleteCursorCell advances past a partial wrap using unechoed 
 
 test("resolveAutocompleteCursorColumn counts ZWJ emoji graphemes as one wide cluster", () => {
   const term = {
-    cols: 80,
-    rows: 24,
     buffer: {
       active: {
         cursorX: 2,
@@ -446,253 +412,6 @@ test("resolveAutocompleteCursorColumn counts ZWJ emoji graphemes as one wide clu
     userInput: "👨‍💻",
   });
   assert.equal(column, 4);
-});
-
-test("resolveAutocompleteCursorPosition wraps echo-lagged input onto the next row", () => {
-  // Narrow terminal: resolved command wraps, but SSH echo is still on the
-  // prompt row. Anchor must advance both column (modulo cols) and row.
-  const promptText = "root@host:~# ";
-  const echoedPrefix = "git ";
-  const resolvedInput = "status --porcelain --branch --untracked-files=all";
-  const cols = 40;
-  const totalCells = promptText.length + resolvedInput.length;
-  const term = {
-    cols,
-    rows: 24,
-    buffer: {
-      active: {
-        cursorX: promptText.length + echoedPrefix.length,
-        cursorY: 10,
-        baseY: 0,
-        getLine: () => ({
-          isWrapped: false,
-          translateToString: () => `${promptText}${echoedPrefix}`,
-        }),
-      },
-    },
-  };
-
-  const position = resolveAutocompleteCursorPosition(term as never, {
-    promptText,
-    userInput: resolvedInput,
-  });
-  assert.equal(position.column, totalCells % cols);
-  assert.equal(position.row, 10 + Math.floor(totalCells / cols));
-  assert.ok(position.row > 10, "wrapped echo-lag anchor must leave the prompt row");
-});
-
-test("resolveAutocompleteCursorPosition prefers resolved caret behind stale echoed deletions", () => {
-  // Typed `git status`, then Ctrl+W / backspace to `git `; SSH echo still
-  // shows the deleted tail and may still sit on a wrapped continuation row.
-  // Anchoring must follow the shorter resolved buffer, not max(echo, local).
-  const promptText = "$ ";
-  const echoedInput = "git status --porcelain";
-  const resolvedInput = "git ";
-  const cols = 12;
-  const echoedCells = promptText.length + echoedInput.length;
-  const resolvedCells = promptText.length + resolvedInput.length;
-  assert.ok(echoedCells > cols, "fixture echo must wrap");
-  assert.ok(resolvedCells < cols, "fixture resolved caret must stay on prompt row");
-  const term = {
-    cols,
-    rows: 24,
-    buffer: {
-      active: {
-        cursorX: echoedCells % cols,
-        cursorY: 11,
-        baseY: 0,
-        getLine: (absY: number) => {
-          if (absY === 11) {
-            return {
-              isWrapped: true,
-              translateToString: () => echoedInput.slice(cols - promptText.length),
-            };
-          }
-          if (absY === 10) {
-            return {
-              isWrapped: false,
-              translateToString: () => `${promptText}${echoedInput.slice(0, cols - promptText.length)}`,
-            };
-          }
-          return { isWrapped: false, translateToString: () => "" };
-        },
-      },
-    },
-  };
-
-  const position = resolveAutocompleteCursorPosition(term as never, {
-    promptText,
-    userInput: resolvedInput,
-  });
-  assert.equal(position.column, resolvedCells);
-  assert.equal(position.row, 10);
-});
-
-test("resolveAutocompleteCursorPosition wraps from the soft-wrap start row", () => {
-  const promptText = "$ ";
-  // 20 chars; prompt+input = 22 → row offset 1, column 10 @ 12 cols (not exact fill).
-  const resolvedInput = "abcdefghijKLMNOPQRST";
-  const cols = 12;
-  const term = {
-    cols,
-    rows: 24,
-    buffer: {
-      active: {
-        // Echo already wrapped once but still lags the full typed buffer.
-        cursorX: 4,
-        cursorY: 11,
-        baseY: 0,
-        getLine: (absY: number) => {
-          if (absY === 11) {
-            return {
-              isWrapped: true,
-              translateToString: () => "KLMN",
-            };
-          }
-          if (absY === 10) {
-            return {
-              isWrapped: false,
-              translateToString: () => "$ abcdefghij",
-            };
-          }
-          return { isWrapped: false, translateToString: () => "" };
-        },
-      },
-    },
-  };
-
-  const totalCells = promptText.length + resolvedInput.length;
-  assert.notEqual(totalCells % cols, 0, "fixture should not be an exact row boundary");
-  const position = resolveAutocompleteCursorPosition(term as never, {
-    promptText,
-    userInput: resolvedInput,
-  });
-  assert.equal(position.column, totalCells % cols);
-  assert.equal(position.row, 10 + Math.floor(totalCells / cols));
-});
-
-test("resolveAutocompleteCursorPosition preserves xterm pending-wrap on exact fill", () => {
-  const promptText = "$ ";
-  const cols = 10;
-  // prompt (2) + input (8) = 10 → exactly one full row.
-  const resolvedInput = "abcdefgh";
-  const term = {
-    cols,
-    rows: 24,
-    buffer: {
-      active: {
-        // Echo lag: only the prompt is visible; cursor still at column 2.
-        cursorX: promptText.length,
-        cursorY: 5,
-        baseY: 0,
-        getLine: () => ({
-          isWrapped: false,
-          translateToString: () => promptText,
-        }),
-      },
-    },
-  };
-
-  const position = resolveAutocompleteCursorPosition(term as never, {
-    promptText,
-    userInput: resolvedInput,
-  });
-  assert.equal(position.column, cols);
-  assert.equal(position.row, 5);
-});
-
-test("resolveAutocompleteCursorPosition wraps using display cells for wide glyphs", () => {
-  // Narrow terminal + CJK prompt: string length under-counts cells and would
-  // leave the anchor on the prompt row while the command has already wrapped.
-  const promptText = "用户@主机:~$ ";
-  const echoedPrefix = "cat ";
-  const resolvedInput = "README.md";
-  const cols = 20;
-  const totalCells = stringCellWidth(promptText) + stringCellWidth(resolvedInput);
-  assert.ok(totalCells > cols, "fixture must wrap when measured in cells");
-  assert.ok(
-    promptText.length + resolvedInput.length <= cols,
-    "fixture must NOT wrap when measured in code units (the old bug)",
-  );
-  const term = {
-    cols,
-    rows: 24,
-    buffer: {
-      active: {
-        cursorX: stringCellWidth(promptText) + stringCellWidth(echoedPrefix),
-        cursorY: 8,
-        baseY: 0,
-        getLine: () => ({
-          isWrapped: false,
-          translateToString: () => `${promptText}${echoedPrefix}`,
-        }),
-      },
-    },
-  };
-
-  const position = resolveAutocompleteCursorPosition(term as never, {
-    promptText,
-    userInput: resolvedInput,
-  });
-  assert.equal(position.column, totalCells % cols);
-  assert.equal(position.row, 8 + Math.floor(totalCells / cols));
-  assert.ok(position.row > 8, "wide-glyph wrap must leave the prompt row");
-});
-
-test("resolveAutocompleteAnchorInViewport honors an explicit wrapped cursor row", () => {
-  const cellWidth = 8;
-  const cellHeight = 16;
-  const screen = {
-    clientWidth: 320,
-    clientHeight: 384,
-    getBoundingClientRect: () => ({
-      left: 0,
-      top: 0,
-      right: 320,
-      bottom: 384,
-      width: 320,
-      height: 384,
-      x: 0,
-      y: 0,
-      toJSON: () => ({}),
-    }),
-  };
-  const container = {
-    querySelector: (selector: string) => (selector === ".xterm-screen" ? screen : null),
-  } as unknown as HTMLElement;
-  const term = {
-    element: { querySelector: () => null },
-    cols: 40,
-    rows: 24,
-    buffer: {
-      active: {
-        cursorX: 5,
-        cursorY: 10,
-        baseY: 0,
-        getLine: () => ({ isWrapped: false }),
-      },
-    },
-    _core: {
-      _renderService: {
-        dimensions: {
-          css: {
-            cell: { width: cellWidth, height: cellHeight },
-          },
-        },
-      },
-    },
-  };
-
-  const anchor = resolveAutocompleteAnchorInViewport(
-    term as never,
-    container,
-    3,
-    15,
-    12,
-  );
-  assert.equal(anchor.anchorLeft, 15 * cellWidth);
-  assert.equal(anchor.anchorTop, 12 * cellHeight);
-  assert.equal(anchor.anchorBottom, 13 * cellHeight);
 });
 
 test("short popup flips upward when the cursor is at the bottom of the screen", () => {
@@ -923,10 +642,13 @@ test("resolveAutocompleteAnchorInViewport ignores the helper textarea horizontal
   assert.notEqual(anchor.anchorLeft, textarea.getBoundingClientRect().left);
 });
 
-function suggestion(
-  partial: Pick<CompletionSuggestion, "text" | "source"> &
-    Partial<CompletionSuggestion>,
-): CompletionSuggestion {
+function suggestion(partial: {
+  text: string;
+  source: "history" | "path" | "snippet" | "fig";
+  score?: number;
+  displayText?: string;
+  fileType?: "file" | "directory" | "symlink";
+}) {
   return {
     displayText: partial.displayText ?? partial.text,
     score: partial.score ?? 1,

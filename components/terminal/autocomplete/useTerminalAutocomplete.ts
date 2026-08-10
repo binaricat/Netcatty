@@ -31,7 +31,7 @@ import {
   areSubDirPanelsEqual,
   areSuggestionsEqual,
   resolveAutocompleteAnchorInViewport,
-  resolveAutocompleteCursorPosition,
+  resolveAutocompleteCursorCell,
   resolveAutocompleteCwdWithSource,
   resolvePreservedSuggestionIndex,
 } from "./terminalAutocompleteLayout";
@@ -396,10 +396,10 @@ export function useTerminalAutocomplete(
         typedInputBufferRef.current,
         typedBufferReliableRef.current,
       );
-      // Anchor from the echo-lag-aware query input so a lagging remote echo
-      // cannot leave the popup several cells/rows behind the typed command.
-      const cursor = prompt.isAtPrompt && queryInput !== null
-        ? resolveAutocompleteCursorPosition(term, {
+      // Prefer resolved query input for anchoring so lagging remote echo does
+      // not leave the popup behind the typed command (main CursorCell helper).
+      const cursorCell = prompt.isAtPrompt && queryInput !== null
+        ? resolveAutocompleteCursorCell(term, {
           promptText: prompt.promptText,
           userInput: queryInput,
         })
@@ -411,8 +411,8 @@ export function useTerminalAutocomplete(
         term,
         containerRef.current,
         prev.suggestions.length,
-        cursor.column,
-        cursor.row,
+        cursorCell.column,
+        cursorCell.row,
       );
 
       // Force a re-render even when the relative cursor cell hasn't changed.
@@ -871,7 +871,7 @@ export function useTerminalAutocomplete(
             typedBufferReliableRef.current,
           ) ?? typedInputBufferRef.current)
           : input;
-      const logicalCursor = resolveAutocompleteCursorPosition(term, {
+      const cursorCell = resolveAutocompleteCursorCell(term, {
         promptText: currentPrompt.promptText,
         userInput: caretUserInput,
       });
@@ -887,10 +887,8 @@ export function useTerminalAutocomplete(
           nextSuggestion,
         );
         if (ghostDecision.type === "show") {
-          ghost?.show(ghostDecision.suggestion, caretUserInput, {
-            cursorX: logicalCursor.column,
-            cursorY: logicalCursor.row,
-          });
+          // Pre-echo probe in GhostTextAddon handles lagging SSH echo.
+          ghost?.show(ghostDecision.suggestion, caretUserInput);
         } else if (ghostDecision.type === "hide") {
           ghost?.hide();
         }
@@ -910,8 +908,8 @@ export function useTerminalAutocomplete(
           term,
           containerRef.current,
           completions.length,
-          logicalCursor.column,
-          logicalCursor.row,
+          cursorCell.column,
+          cursorCell.row,
         );
         startTransition(() => {
           setState((prev) => {

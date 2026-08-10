@@ -1,5 +1,5 @@
 /**
- * GhostText addon for xterm.js.
+ * Ghost Text addon for xterm.js.
  * Renders inline suggestion text after the cursor in a dimmed style,
  * similar to fish shell's autosuggestions.
  *
@@ -8,19 +8,9 @@
  */
 
 import type { Terminal as XTerm, IDisposable } from "@xterm/xterm";
-import {
-  getXTermCellDimensions,
-  invalidateCellDimensionCache,
-  removeLastCodePoint,
-} from "./xtermUtils";
+import { getXTermCellDimensions, invalidateCellDimensionCache } from "./xtermUtils";
 import { lineHasUntrackedTrailingInput } from "./ghostTextConsistency";
 import { stringCellWidth } from "./terminalStringCellWidth";
-
-/** Optional logical caret for show() when SSH echo lags the typed buffer. */
-export type GhostTextAnchor = {
-  cursorX: number;
-  cursorY: number;
-};
 
 function commonPrefixLength(a: string, b: string): number {
   const max = Math.min(a.length, b.length);
@@ -116,12 +106,6 @@ export class GhostTextAddon implements IDisposable {
    *  by (newInput.length - anchorInputLength) cells without having to
    *  re-read xterm's cursorX (which hasn't advanced yet at keystroke time). */
   private anchorInputLength = 0;
-  /**
-   * When true, show() received an explicit logical caret (echo-lag aware).
-   * Skip the live-cursor self-heal so a lagging remote echo cannot pull the
-   * ghost back onto the short prefix and drop the unechoed middle.
-   */
-  private anchorIsLogical = false;
   private disposed = false;
   private disposables: IDisposable[] = [];
   private lastLeft = -1;
@@ -225,15 +209,8 @@ export class GhostTextAddon implements IDisposable {
    * Show ghost text suggestion.
    * @param fullSuggestion The complete suggested command
    * @param currentInput The text the user has typed so far
-   * @param anchor Optional logical caret. Under SSH echo lag, pass the same
-   *   resolved cursor used for the popup so the suffix paints ahead of the
-   *   lagging live xterm cursor instead of after the short echoed prefix.
    */
-  show(
-    fullSuggestion: string,
-    currentInput: string,
-    anchor?: GhostTextAnchor,
-  ): void {
+  show(fullSuggestion: string, currentInput: string): void {
     if (this.disposed || !this.ghostElement || !this.term) return;
 
     const ghostText = fullSuggestion.startsWith(currentInput)
@@ -245,55 +222,39 @@ export class GhostTextAddon implements IDisposable {
       return;
     }
 
-    // Ctrl/Alt+Right refreshes call show() without an anchor. Under SSH echo
-    // lag that must not replace an existing logical caret with xterm's lagging
-    // cursor — keep the prior logical origin and let updatePosition advance it
-    // via the unchanged anchorInputLength → currentInput cell delta.
-    const preserveLogicalAnchor =
-      !anchor && this.anchorIsLogical && this.isActive();
-
     this.currentSuggestion = fullSuggestion;
     this.currentInput = currentInput;
-    if (anchor) {
-      this.anchorCursorX = anchor.cursorX;
-      this.anchorCursorY = anchor.cursorY;
-      this.anchorIsLogical = true;
-      this.anchorInputLength = currentInput.length;
-    } else if (!preserveLogicalAnchor) {
-      const buf = this.term.buffer.active;
-      const liveX = buf.cursorX;
-      // When show() runs before the shell echoes `currentInput` (CJK IME /
-      // high-latency SSH), live cursorX is still at the prompt. Advance the
-      // anchor by the pending input's cell width so the ghost sits after it
-      // instead of painting over it. Skip the probe when getLine is unavailable
-      // (unit fakes) so those tests keep the legacy "cursor already at end"
-      // contract.
-      let anchorX = liveX;
-      if (
-        currentInput.length > 0 &&
-        typeof buf.getLine === "function"
-      ) {
-        const beforeCursor = readBeforeCursorAcrossWraps(
-          buf as ActiveBufferLike,
-          this.term.cols,
+    const buf = this.term.buffer.active;
+    const liveX = buf.cursorX;
+    // When show() runs before the shell echoes `currentInput` (CJK IME /
+    // high-latency SSH), live cursorX is still at the prompt. Advance the
+    // anchor by the pending input's cell width so the ghost sits after it
+    // instead of painting over it. Skip the probe when getLine is unavailable
+    // (unit fakes) so those tests keep the legacy "cursor already at end"
+    // contract.
+    let anchorX = liveX;
+    if (
+      currentInput.length > 0 &&
+      typeof buf.getLine === "function"
+    ) {
+      const beforeCursor = readBeforeCursorAcrossWraps(
+        buf as ActiveBufferLike,
+        this.term.cols,
+      );
+      if (beforeCursor !== null && !beforeCursor.endsWith(currentInput)) {
+        // Shell may have echoed only a prefix (e.g. "$ doc" while
+        // currentInput is "docker"). Advance by the unechoed suffix only —
+        // adding the full input width on top of a partially-advanced liveX
+        // overshoots and Math.max self-heal cannot move the ghost left.
+        const unechoed = currentInput.slice(
+          echoedInputPrefixLength(beforeCursor, currentInput),
         );
-        if (beforeCursor !== null && !beforeCursor.endsWith(currentInput)) {
-          // Shell may have echoed only a prefix (e.g. "$ doc" while
-          // currentInput is "docker"). Advance by the unechoed suffix only —
-          // adding the full input width on top of a partially-advanced liveX
-          // overshoots and Math.max self-heal cannot move the ghost left.
-          const unechoed = currentInput.slice(
-            echoedInputPrefixLength(beforeCursor, currentInput),
-          );
-          anchorX = liveX + stringCellWidth(unechoed, this.term);
-        }
+        anchorX = liveX + stringCellWidth(unechoed, this.term);
       }
-      this.anchorCursorX = anchorX;
-      this.anchorCursorY = buf.cursorY;
-      this.anchorIsLogical = false;
-      this.anchorInputLength = currentInput.length;
     }
-    // else: keep prior logical origin + anchorInputLength for cellDelta.
+    this.anchorCursorX = anchorX;
+    this.anchorCursorY = buf.cursorY;
+    this.anchorInputLength = currentInput.length;
     // Force position recalc since the text also changed.
     this.lastLeft = -1;
     this.lastTop = -1;
@@ -314,7 +275,6 @@ export class GhostTextAddon implements IDisposable {
     this.currentSuggestion = "";
     this.currentInput = "";
     this.anchorInputLength = 0;
-    this.anchorIsLogical = false;
   }
 
   /** Show a read-only inline hint at the cursor (e.g. a sudo password prompt
@@ -408,9 +368,7 @@ export class GhostTextAddon implements IDisposable {
     let nextInput: string;
     if (data === "\x7f" || data === "\b") {
       if (this.currentInput.length === 0) return;
-      // Match typed-buffer Backspace: drop one Unicode code point, not a
-      // single UTF-16 unit (supplementary-plane emoji is two units).
-      nextInput = removeLastCodePoint(this.currentInput);
+      nextInput = this.currentInput.slice(0, -1);
     } else if (data === "\x17") {
       const erased = this.currentInput.replace(/\s*\S+\s*$/, "");
       if (erased === this.currentInput) return;
@@ -492,25 +450,19 @@ export class GhostTextAddon implements IDisposable {
   private updatePosition(): void {
     if (!this.term || !this.ghostElement) return;
 
-    // Self-heal a stale live-cursor anchor: when show() captured xterm's
-    // cursor during the SSH keystroke→echo gap, re-read live cursor on
-    // each render while the tracked input is unchanged so the ghost snaps
-    // forward once echo arrives. Skip when show() already received an
-    // echo-lag-aware logical caret — healing would pull the suffix back
-    // onto the short prefix and drop the unechoed middle.
-    //
-    // For non-logical anchors (pre-echo probe path): use max on the same
-    // row so a cell-width-predicted pre-echo anchor is not collapsed back
-    // onto the prompt before echo arrives. When the live row advances, the
-    // predicted X may already encode a wrap (column >= cols); adopting the
-    // live X/Y pair avoids counting that wrap again in the modulo math
-    // below. When the predicted wrap happens on the bottom row, the echo
-    // scrolls the buffer and Y stays put — adopt live X/Y once it matches
-    // the normalized wrap column so Math.max cannot keep the unnormalized X.
-    if (
-      !this.anchorIsLogical &&
-      this.currentInput.length === this.anchorInputLength
-    ) {
+    // Self-heal a stale anchor: when show() fired during the SSH
+    // keystroke→echo gap without a line probe, cursorX may still be the
+    // pre-echo column. While no adjustToInput has moved us from the
+    // show-time baseline, adopt a live cursor that has advanced (echo
+    // caught up). Use max on the same row so a cell-width-predicted
+    // pre-echo anchor is not collapsed back onto the prompt before echo
+    // arrives. When the live row advances, the predicted X may already
+    // encode a wrap (column >= cols); adopting the live X/Y pair avoids
+    // counting that wrap again in the modulo math below.
+    // When the predicted wrap happens on the bottom row, the echo scrolls
+    // the buffer and Y stays put — adopt live X/Y once it matches the
+    // normalized wrap column so Math.max cannot keep the unnormalized X.
+    if (this.currentInput.length === this.anchorInputLength) {
       const liveX = this.term.buffer.active.cursorX;
       const liveY = this.term.buffer.active.cursorY;
       const cols = Math.max(1, this.term.cols);
@@ -548,37 +500,17 @@ export class GhostTextAddon implements IDisposable {
     const targetCol = this.anchorCursorX + cellDelta;
     // Wrap the predicted cursor position across line boundaries in both
     // directions — the real xterm cursor wraps to the next row once it
-    // *crosses* cols forward, and to the previous row when a deletion
-    // crosses back past column 0. Exact fill (targetCol % cols === 0) is
-    // xterm's pending-wrap state: the caret stays at cols on the filled
-    // row (see resolveAutocompleteCursorPosition for the popup). The ghost
-    // overlay cannot sit at that column — white-space:pre inside an
-    // overflow:hidden container clips the suffix at the right edge — so
-    // paint the first printable ghost cell at column 0 of the next row.
-    // JS `%` returns negative for negative dividends, so normalize both
-    // col and rowOffset explicitly when not on that boundary.
-    let col: number;
-    let rowOffset: number;
-    if (targetCol > 0 && targetCol % cols === 0) {
-      col = 0;
-      rowOffset = targetCol / cols;
-    } else {
-      col = targetCol % cols;
-      rowOffset = Math.floor(targetCol / cols);
-      if (col < 0) {
-        col += cols;
-      }
+    // crosses cols forward, and to the previous row when a deletion
+    // crosses back past column 0. JS `%` returns negative for negative
+    // dividends, so normalize both col and rowOffset explicitly.
+    let col = targetCol % cols;
+    let rowOffset = Math.floor(targetCol / cols);
+    if (col < 0) {
+      col += cols;
     }
-    // Clamp to the visible viewport. Negative deltas (deleted past the
-    // prompt) must not paint above row 0. Forward wraps past the bottom
-    // row also need clamping: with an explicit logical anchor, SSH echo
-    // lag can keep us on the last row while typed input wraps — xterm
-    // scrolls and keeps the caret on the bottom visible row, but our
-    // logical Y never self-heals, so row === term.rows would place the
-    // overlay just outside the overflow:hidden container and hide it.
-    const maxRow = Math.max(0, this.term.rows - 1);
-    const row = Math.min(maxRow, Math.max(0, this.anchorCursorY + rowOffset));
-    const top = row * dims.height;
+    // Clamp to the visible top row so a runaway negative delta (e.g.
+    // deleted past the prompt) doesn't render above the terminal.
+    const top = Math.max(0, this.anchorCursorY + rowOffset) * dims.height;
     const left = col * dims.width;
 
     // Skip DOM writes if position hasn't changed (avoids unnecessary style recalc)
