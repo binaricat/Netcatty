@@ -6,6 +6,7 @@ import {
   findNotePreviewBodyStartIndex,
   isOversizedCenterInner,
   isPreviewableImageSrc,
+  normalizeNotePublicAssetPaths,
   plainTextLooksLikeMarkdown,
   prepareNoteMarkdownForGithubPreview,
   resolveNoteImageSrc,
@@ -87,6 +88,14 @@ test("Vite public/ assets rewrite to site root; relative kept; https kept", () =
   assert.equal(
     rewriteNoteMarkdownImages("![cdn](//cdn.example.com/a.png)"),
     "![cdn](https://cdn.example.com/a.png)",
+  );
+
+  // Existing notes already stored as /public/... (Vite warning source)
+  assert.equal(
+    normalizeNotePublicAssetPaths(
+      '<img src="/public/distro/fedora.svg" /><img src="public/icon.png" /> ![x](/public/icon.png)',
+    ),
+    '<img src="/distro/fedora.svg" /><img src="/icon.png" /> ![x](/icon.png)',
   );
 });
 

@@ -176,14 +176,37 @@ export const isOversizedCenterInner = (innerHtml: string): boolean => {
   return false;
 };
 
-/** Strip align=center / text-align:center from tags (body section only). */
+/** Strip align=center / text-align:center / text-center class from tags. */
 export const stripAllCenterAlignment = (text: string): string => (
   text
     .replace(/\s+align\s*=\s*(?:"|')?center(?:"|')?/gi, "")
     .replace(/text-align\s*:\s*center\s*;?/gi, "")
+    .replace(/\btext-center\b/gi, "")
+    .replace(/\s+class=(["'])\s*\1/gi, "")
     .replace(/\s+style=(["'])\s*\1/gi, "")
     .replace(/\s+style=(["'])\s*;\s*\1/gi, "")
 );
+
+/**
+ * Rewrite Vite public-dir URLs so the browser never requests /public/*.
+ * Applies to HTML src= and markdown ](url) image targets.
+ *   /public/foo.png → /foo.png
+ *   public/foo.png  → /foo.png
+ */
+export const normalizeNotePublicAssetPaths = (markdown: string): string => {
+  let body = markdown;
+  // HTML attribute src="/public/..." or src='public/...'
+  body = body.replace(
+    /(\bsrc\s*=\s*["'])\/?public\//gi,
+    "$1/",
+  );
+  // Markdown images: ](/public/...) or ](public/...)
+  body = body.replace(
+    /\]\(\s*\/?public\//gi,
+    "](/",
+  );
+  return body;
+};
 
 /**
  * Index where README-style hero ends and left-aligned body begins.
@@ -196,11 +219,19 @@ export const findNotePreviewBodyStartIndex = (markdown: string): number => {
   if (hr && hr.index != null && hr.index >= 20) {
     return hr.index + hr[0].length;
   }
-  const bodyMark = md.search(
-    /(?:^|\n)(?:<a\s+name=["'][^"']*["']\s*>\s*<\/a>\s*)?(?:#{1,3}\s+.*?(?:Catty Agent|Features|Contents|What is Netcatty|Why Netcatty|Screenshots|Getting Started|Supported Distros)\b)/im,
+  // Markdown ATX body headings
+  const mdBody = md.search(
+    /(?:^|\n)(?:<a\s+name=["'][^"']*["']\s*>\s*<\/a>\s*)?(?:#{1,3}\s+.*?(?:Catty\s+Agent|\bFeatures\b|\bContents\b|What is Netcatty|Why Netcatty|\bScreenshots\b|Getting Started|Supported Distros)\b)/im,
   );
-  if (bodyMark >= 0) {
-    return bodyMark === 0 ? 0 : bodyMark;
+  if (mdBody >= 0) {
+    return mdBody === 0 ? 0 : mdBody;
+  }
+  // MDX/HTML export: <h1>🔥 Catty Agent…</h1> without # markdown
+  const htmlBody = md.search(
+    /<(?:h[1-6])\b[^>]*>[\s\S]{0,100}(?:Catty\s+Agent|\bFeatures\b|\bContents\b|What is\b|Why\s+Netcatty|\bScreenshots\b|Getting Started)/im,
+  );
+  if (htmlBody >= 0) {
+    return htmlBody;
   }
   return -1;
 };
@@ -476,6 +507,9 @@ export const prepareNoteMarkdownForGithubPreview = (markdown: string): string =>
   let body = (markdown ?? "").replace(/\r\n?/g, "\n");
   if (!body.trim()) return "";
 
+  // Always fix /public/* before anything else (existing notes + edit path).
+  body = normalizeNotePublicAssetPaths(body);
+
   body = expandCenteredMarkdownHtmlIslands(body);
   body = unwrapOversizedCenteredHtmlBlocks(body);
 
@@ -489,8 +523,12 @@ export const prepareNoteMarkdownForGithubPreview = (markdown: string): string =>
     body = keepOnlyLeadingHeroCenters(body);
   }
 
+  // Final pass: any remaining center shell that is body-like (Catty, lists, …)
+  body = unwrapOversizedCenteredHtmlBlocks(body);
+
   body = rewriteNoteMarkdownImages(body);
   body = rewriteNoteHtmlImages(body);
+  body = normalizeNotePublicAssetPaths(body);
   body = stripEmptyMarkdownLinks(body);
   body = stripEmptyCenteredHtmlBlocks(body);
   return body.trim();

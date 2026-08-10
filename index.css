@@ -1833,9 +1833,10 @@ html[data-theme-transition] *::after {
 }
 
 /*
- * Nuclear left-align: every node defaults to start. Only [align=center] hero
- * shells (and their descendants) may center — matches GitHub README body.
- * Beats github-markdown-css and leftover inline styles from paste/MDX.
+ * Every node left by default. Do NOT set [align=center] * { center } — that
+ * re-centered whole body sections when a large shell still had align=center.
+ * Only the shell itself is text-align:center so inline badges/images center;
+ * block children (h1/ul/p) keep left via the * rule (higher than inheritance).
  */
 .netcatty-note-github-preview.markdown-body * {
   text-align: left !important;
@@ -1864,8 +1865,8 @@ html[data-theme-transition] *::after {
   vertical-align: middle;
 }
 
-.netcatty-note-github-preview.markdown-body [align="center"],
-.netcatty-note-github-preview.markdown-body [align="center"] * {
+/* Shell only — centers inline badges/imgs; block kids stay left via * above. */
+.netcatty-note-github-preview.markdown-body [align="center"] {
   text-align: center !important;
 }
 

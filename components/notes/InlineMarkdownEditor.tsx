@@ -50,6 +50,7 @@ import {
   shouldInterceptResolvedNotePaste,
 } from "./noteClipboardPaste";
 import { annotateNoteImageSizes } from "./noteImageLayout";
+import { normalizeNotePublicAssetPaths } from "../../domain/notes/notePreviewMarkdown";
 
 export {
   annotateNoteImageSizes,
@@ -57,7 +58,7 @@ export {
   NOTE_SMALL_IMAGE_MAX_WIDTH,
 } from "./noteImageLayout";
 
-/** Preview uses Streamdown (no Lexical). Lazy so edit path does not pay for it. */
+/** Preview uses GitHub-style react-markdown (no Lexical). Lazy so edit path stays light. */
 const NoteMarkdownPreview = lazy(() =>
   import("./NoteMarkdownPreview").then((module) => ({ default: module.NoteMarkdownPreview })),
 );
@@ -618,6 +619,14 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
     linkActionRef.current = next;
     setLinkAction(next);
   }, []);
+
+  // Rewrite /public/* → /* for Vite static root (edit + preview). Display only;
+  // onChange still receives editor output (paste path also normalizes).
+  const displayMarkdown = useMemo(
+    () => normalizeNotePublicAssetPaths(value),
+    [value],
+  );
+
   const plugins = useMemo(() => [
     headingsPlugin(),
     listsPlugin(),
@@ -1283,7 +1292,7 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
         </div>
       )}
       {editorMode === "preview" ? (
-        !value.trim() ? (
+        !displayMarkdown.trim() ? (
           <div className="netcatty-note-preview-empty">
             {previewEmptyLabel ?? placeholder}
           </div>
@@ -1294,17 +1303,17 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
                 className="netcatty-mdx-content min-h-[12rem] whitespace-pre-wrap break-words text-[15px] leading-[1.75] text-foreground/90"
                 aria-hidden="true"
               >
-                {value.slice(0, 2_000)}
+                {displayMarkdown.slice(0, 2_000)}
               </div>
             )}
           >
-            <NoteMarkdownPreview markdown={value} />
+            <NoteMarkdownPreview markdown={displayMarkdown} />
           </Suspense>
         )
       ) : (
         <MDXEditor
           ref={editorRef}
-          markdown={value}
+          markdown={displayMarkdown}
           placeholder={placeholder}
           plugins={plugins}
           readOnly={false}

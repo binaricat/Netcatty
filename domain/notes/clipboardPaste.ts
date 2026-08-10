@@ -178,6 +178,8 @@ export const isCenteredBlockElement = (node: HTMLElement | Element | null | unde
 export const htmlOpenTagIsCentered = (openTagOrFull: string): boolean => {
   if (/\balign\s*=\s*(?:"|')?center(?:"|')?/i.test(openTagOrFull)) return true;
   if (/text-align\s*:\s*center/i.test(openTagOrFull)) return true;
+  // MDX / Tailwind class-based centering
+  if (/\bclass(?:Name)?\s*=\s*["'][^"']*\btext-center\b/i.test(openTagOrFull)) return true;
   return false;
 };
 
