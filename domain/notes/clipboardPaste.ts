@@ -481,6 +481,7 @@ const chooseCodeMaskSentinel = (markdown: string): string => {
 /**
  * Mask GFM fenced blocks. Closing fence may be longer than the opener
  * (CommonMark: close with same char and length >= open).
+ * Fence run must be homogeneous (` or ~), not a mixed character class.
  */
 const maskFencedCodeBlocks = (
   markdown: string,
@@ -489,8 +490,9 @@ const maskFencedCodeBlocks = (
   const lines = markdown.split("\n");
   const out: string[] = [];
   let i = 0;
-  // Optional blockquote + up to 3 spaces, then fence of ` or ~ (3+).
-  const openRe = /^((?:[ \t]{0,3}>[ \t]?)?[ \t]{0,3})([`~]{3,})(.*)$/;
+  // Optional blockquote + up to 3 spaces, then homogeneous ``` or ~~~ (3+).
+  const openRe = /^((?:[ \t]{0,3}>[ \t]?)?[ \t]{0,3})(`{3,}|~{3,})(.*)$/;
+  const closeRe = /^((?:[ \t]{0,3}>[ \t]?)?[ \t]{0,3})(`{3,}|~{3,})[ \t]*$/;
 
   while (i < lines.length) {
     const openMatch = openRe.exec(lines[i] ?? "");
@@ -514,8 +516,7 @@ const maskFencedCodeBlocks = (
     i += 1;
     while (i < lines.length) {
       const line = lines[i] ?? "";
-      // Closing fence: same indent budget, same char, length >= open, no info.
-      const closeMatch = /^((?:[ \t]{0,3}>[ \t]?)?[ \t]{0,3})([`~]+)[ \t]*$/.exec(line);
+      const closeMatch = closeRe.exec(line);
       if (
         closeMatch
         && (closeMatch[2]?.[0] ?? "") === fenceChar
@@ -534,6 +535,110 @@ const maskFencedCodeBlocks = (
   return out.join("\n");
 };
 
+const isMarkdownListLine = (line: string): boolean => (
+  /^(?:[ \t]{0,3}>[ \t]?)*[ \t]*(?:[-*+]|\d+[.)])[ \t]+/.test(line)
+);
+
+/**
+ * Mask 4-space / tab indented code. Nested list items under a preceding list
+ * line stay unmasked so task indices match the preview DOM; standalone
+ * `    - [ ] sample` at document root remains code (no checkbox in preview).
+ */
+const maskIndentedCodeBlocks = (
+  markdown: string,
+  stash: (chunk: string) => string,
+): string => {
+  const lines = markdown.split("\n");
+  const out: string[] = [];
+  let i = 0;
+  const isBlank = (line: string) => /^[ \t]*$/.test(line);
+  const isIndented = (line: string) => /^(?: {4}|\t)/.test(line);
+
+  while (i < lines.length) {
+    const line = lines[i] ?? "";
+    if (!isIndented(line)) {
+      out.push(line);
+      i += 1;
+      continue;
+    }
+
+    let prev = i - 1;
+    while (prev >= 0 && isBlank(lines[prev] ?? "")) prev -= 1;
+    const inListContext = prev >= 0 && isMarkdownListLine(lines[prev] ?? "");
+    if (inListContext && isMarkdownListLine(line)) {
+      out.push(line);
+      i += 1;
+      continue;
+    }
+
+    const block: string[] = [];
+    while (i < lines.length && isIndented(lines[i] ?? "")) {
+      const cur = lines[i] ?? "";
+      // Nested list continuation inside an open list stays as list, not code.
+      if (inListContext && isMarkdownListLine(cur)) {
+        if (block.length > 0) out.push(stash(block.join("\n")));
+        block.length = 0;
+        out.push(cur);
+        i += 1;
+        continue;
+      }
+      block.push(cur);
+      i += 1;
+    }
+    if (block.length > 0) out.push(stash(block.join("\n")));
+  }
+  return out.join("\n");
+};
+
+/**
+ * Mask CommonMark inline code spans (`…`, `` … ` … ``, etc.).
+ * Content may include shorter backtick runs; close with the same length.
+ */
+const maskInlineCodeSpans = (
+  markdown: string,
+  stash: (chunk: string) => string,
+): string => {
+  let out = "";
+  let i = 0;
+  while (i < markdown.length) {
+    if (markdown[i] !== "`") {
+      out += markdown[i];
+      i += 1;
+      continue;
+    }
+    let j = i;
+    while (j < markdown.length && markdown[j] === "`") j += 1;
+    const n = j - i;
+    // Scan for a closing run of exactly n backticks (not part of a longer run).
+    let k = j;
+    let found = -1;
+    while (k < markdown.length) {
+      // Blank line ends an inline code attempt (CommonMark).
+      if (markdown[k] === "\n" && markdown[k + 1] === "\n") break;
+      if (markdown[k] !== "`") {
+        k += 1;
+        continue;
+      }
+      let m = k;
+      while (m < markdown.length && markdown[m] === "`") m += 1;
+      const run = m - k;
+      if (run === n) {
+        found = m;
+        break;
+      }
+      k = m;
+    }
+    if (found < 0) {
+      out += markdown[i];
+      i += 1;
+      continue;
+    }
+    out += stash(markdown.slice(i, found));
+    i = found;
+  }
+  return out;
+};
+
 /** Mask fenced (3+ ticks), indented, and inline code so cleanup won't touch them. */
 export const maskCodeRegions = (markdown: string): CodeMask => {
   const slots: string[] = [];
@@ -545,17 +650,8 @@ export const maskCodeRegions = (markdown: string): CodeMask => {
   };
 
   let body = maskFencedCodeBlocks(markdown, stash);
-
-  // Indented code blocks (4 spaces / tab), but not nested list items.
-  // GFM list nesting uses the same indent, e.g. `    - [ ] child` under a parent
-  // bullet — those must stay visible for task-index mapping.
-  body = body.replace(
-    /(?<=^|\n)(?:(?: {4}|\t)(?!(?:[-*+]|\d+[.)])\s).*(?:\n(?: {4}|\t)(?!(?:[-*+]|\d+[.)])\s).*)*)/g,
-    (match) => stash(match),
-  );
-
-  // Inline code (single backticks, non-greedy, no newlines).
-  body = body.replace(/`[^`\n]+`/g, (match) => stash(match));
+  body = maskIndentedCodeBlocks(body, stash);
+  body = maskInlineCodeSpans(body, stash);
 
   return { text: body, slots, sentinel };
 };

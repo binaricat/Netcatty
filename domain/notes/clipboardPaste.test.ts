@@ -535,3 +535,27 @@ test("maskCodeRegions accepts longer closing fences", () => {
   assert.match(mask.text, /- \[ \] real/);
   assert.equal(unmaskCodeRegions(mask.text, mask.slots, mask.sentinel), source);
 });
+
+test("maskCodeRegions keeps info strings starting with the other fence char", () => {
+  // Opening is three backticks; info may start with ~ without lengthening the fence.
+  const source = ["```~tip", "![x](public/a.png)", "```", "", "after"].join("\n");
+  const mask = maskCodeRegions(source);
+  assert.doesNotMatch(mask.text, /public\/a\.png/);
+  assert.match(mask.text, /after/);
+  assert.equal(unmaskCodeRegions(mask.text, mask.slots, mask.sentinel), source);
+});
+
+test("maskCodeRegions masks multi-backtick spans with inner shorter runs", () => {
+  const source = "Use ``a ` ![x](public/a.png) b`` end";
+  const mask = maskCodeRegions(source);
+  assert.doesNotMatch(mask.text, /public\/a\.png/);
+  assert.match(mask.text, / end$/);
+  assert.equal(unmaskCodeRegions(mask.text, mask.slots, mask.sentinel), source);
+});
+
+test("maskCodeRegions masks standalone indented task samples as code", () => {
+  const source = ["    - [ ] sample", "", "- [ ] real"].join("\n");
+  const mask = maskCodeRegions(source);
+  assert.doesNotMatch(mask.text, /- \[ \] sample/);
+  assert.match(mask.text, /- \[ \] real/);
+});
