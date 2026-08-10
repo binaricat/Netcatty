@@ -1311,6 +1311,82 @@ html[data-theme-transition] *::after {
   margin: 0.25rem 0;
 }
 
+/*
+ * GFM task lists (Lexical CheckListPlugin): default MDX styles pin the checkbox
+ * at top:0, which sits high against our 1.75 line-height. Re-center the box with
+ * the first text line, keep a solid hit target, and drop the hanging negative
+ * margin so label text lines up cleanly with the control.
+ */
+.netcatty-mdx-content ul:has(> li[role="checkbox"]),
+.netcatty-mdx-content ul:has(> li[aria-checked]) {
+  list-style: none;
+  padding-left: 0.15rem;
+  margin-left: 0;
+}
+
+.netcatty-mdx-content li[role="checkbox"],
+.netcatty-mdx-content li[aria-checked] {
+  position: relative;
+  list-style: none;
+  margin-left: 0 !important;
+  margin-inline-start: 0 !important;
+  padding-left: 1.75rem !important;
+  padding-right: 0 !important;
+  min-height: 1.75em;
+  line-height: 1.75;
+  cursor: default;
+}
+
+.netcatty-mdx-content li[role="checkbox"]::before,
+.netcatty-mdx-content li[aria-checked]::before {
+  content: "" !important;
+  box-sizing: border-box !important;
+  position: absolute !important;
+  /* Vertically center 1rem box in a 1.75em line: (1.75em - 1rem) / 2 */
+  top: calc((1.75em - 1rem) / 2) !important;
+  left: 0 !important;
+  width: 1rem !important;
+  height: 1rem !important;
+  margin: 0 !important;
+  cursor: pointer !important;
+  pointer-events: auto !important;
+  display: block !important;
+  background-size: cover !important;
+  border-radius: 3px !important;
+}
+
+.netcatty-mdx-content li[aria-checked="false"]::before,
+.netcatty-mdx-content li[role="checkbox"][aria-checked="false"]::before {
+  border: 1px solid hsl(var(--border)) !important;
+  background-color: transparent !important;
+}
+
+.netcatty-mdx-content li[aria-checked="true"]::before {
+  border: 1px solid hsl(var(--primary) / 0.7) !important;
+  background-color: hsl(var(--primary)) !important;
+}
+
+/* Checkmark glyph (MDX draws this with ::after) */
+.netcatty-mdx-content li[aria-checked="true"]::after {
+  top: calc((1.75em - 1rem) / 2 + 0.1rem) !important;
+  left: 0.35rem !important;
+  width: 0.28rem !important;
+  height: 0.55rem !important;
+  cursor: pointer !important;
+}
+
+/* Preview is readOnly — still show pointer on the control so it feels clickable. */
+.netcatty-mdx-editor--preview .netcatty-mdx-content li[role="checkbox"],
+.netcatty-mdx-editor--preview .netcatty-mdx-content li[aria-checked] {
+  cursor: default;
+}
+
+.netcatty-mdx-editor--preview .netcatty-mdx-content li[role="checkbox"]::before,
+.netcatty-mdx-editor--preview .netcatty-mdx-content li[aria-checked]::before,
+.netcatty-mdx-editor--preview .netcatty-mdx-content li[aria-checked="true"]::after {
+  cursor: pointer !important;
+}
+
 .netcatty-mdx-content code {
   border-radius: 4px;
   background: hsl(var(--secondary) / 0.8);

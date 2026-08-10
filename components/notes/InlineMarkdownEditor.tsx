@@ -47,6 +47,10 @@ import React, {
 } from "react";
 import { useI18n } from "../../application/i18n/I18nProvider";
 import { resolveRenderedMarkdownLinkHref } from "../../domain/notes";
+import {
+  isPointerOnTaskCheckbox,
+  toggleTaskListItemAtIndex,
+} from "../../domain/notes/taskList";
 import { buildSshNoteLinkOpenHost } from "../../domain/sshDeepLink";
 import { copyToClipboard } from "../keychain/utils";
 import { toast } from "../ui/toast";
@@ -1068,30 +1072,63 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
   }, [hosts, onOpenExternalLink, onOpenHost]);
 
   const handleClickCapture = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
-    if (editorMode !== "preview") {
-      scheduleHostPickerUpdate();
-      return;
-    }
+    if (contentSwapPendingRef.current) return;
 
     const target = event.target;
     if (!(target instanceof Element)) return;
-    const link = target.closest<HTMLAnchorElement>("a[href]");
-    const renderedHref = link?.getAttribute("href") || link?.href;
-    if (!link || !renderedHref || !containerRef.current?.contains(link)) return;
+    const container = containerRef.current;
+    if (!container?.contains(target)) return;
 
-    const label = link.textContent?.trim() || renderedHref;
-    const href = resolveRenderedMarkdownLinkHref(
-      latestMarkdownRef.current,
-      label,
-      renderedHref,
-    );
-    const handled = openLink(href, label);
-    if (!handled) return;
+    // Preview is readOnly — Lexical CheckListPlugin refuses toggles. Map the
+    // checkbox click back onto GFM markdown so todos stay interactive.
+    if (editorMode === "preview") {
+      const taskItem = target.closest<HTMLElement>("li[role='checkbox'], li[aria-checked]");
+      if (taskItem && container.contains(taskItem)) {
+        const itemRect = taskItem.getBoundingClientRect();
+        if (isPointerOnTaskCheckbox(itemRect, event.clientX)) {
+          const items = container.querySelectorAll<HTMLElement>(
+            "li[role='checkbox'], li[aria-checked]",
+          );
+          const index = Array.prototype.indexOf.call(items, taskItem);
+          if (index >= 0) {
+            const next = toggleTaskListItemAtIndex(latestMarkdownRef.current, index);
+            if (next !== latestMarkdownRef.current) {
+              event.preventDefault();
+              event.stopPropagation();
+              event.nativeEvent.stopImmediatePropagation?.();
+              commitMarkdown(next);
+              try {
+                editorRef.current?.setMarkdown(next);
+              } catch {
+                // ignore — next mount/sync will pick up value
+              }
+              return;
+            }
+          }
+        }
+      }
 
-    event.preventDefault();
-    event.stopPropagation();
-    event.nativeEvent.stopImmediatePropagation?.();
-  }, [editorMode, openLink, scheduleHostPickerUpdate]);
+      const link = target.closest<HTMLAnchorElement>("a[href]");
+      const renderedHref = link?.getAttribute("href") || link?.href;
+      if (!link || !renderedHref || !container.contains(link)) return;
+
+      const label = link.textContent?.trim() || renderedHref;
+      const href = resolveRenderedMarkdownLinkHref(
+        latestMarkdownRef.current,
+        label,
+        renderedHref,
+      );
+      const handled = openLink(href, label);
+      if (!handled) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      event.nativeEvent.stopImmediatePropagation?.();
+      return;
+    }
+
+    scheduleHostPickerUpdate();
+  }, [commitMarkdown, editorMode, openLink, scheduleHostPickerUpdate]);
 
   const activateLinkAction = useCallback((
     event: React.SyntheticEvent<HTMLElement>,
