@@ -428,6 +428,67 @@ export const isPointerInsideLinkActionHoverZone = (
     && y <= action.top + LINK_ACTION_SIZE + LINK_ACTION_HOVER_PADDING;
 };
 
+/** Avoid React re-renders when the open-link chip does not move. */
+export const linkActionStatesEqual = (
+  a: LinkActionState | null,
+  b: LinkActionState | null,
+): boolean => {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return a.href === b.href
+    && a.label === b.label
+    && a.left === b.left
+    && a.top === b.top;
+};
+
+/** Compact README-style icons (width ≤ 96). CSS uses data-note-img-size instead of :has(). */
+export const NOTE_SMALL_IMAGE_MAX_WIDTH = 96;
+
+export const isNoteSmallImageWidth = (widthRaw: string | number | null | undefined): boolean => {
+  const width = typeof widthRaw === "number" ? widthRaw : Number(String(widthRaw ?? "").trim());
+  return Number.isFinite(width) && width > 0 && width <= NOTE_SMALL_IMAGE_MAX_WIDTH;
+};
+
+/**
+ * Mark compact images so CSS can lay out badge rows without hundreds of :has()
+ * width selectors. Also enable lazy loading for remote images.
+ */
+export const annotateNoteImageSizes = (container: HTMLElement): void => {
+  container.querySelectorAll("img").forEach((node) => {
+    if (!(node instanceof HTMLImageElement)) return;
+    const isSmall = isNoteSmallImageWidth(node.getAttribute("width"));
+
+    if (isSmall) {
+      node.dataset.noteImgSize = "sm";
+    } else {
+      delete node.dataset.noteImgSize;
+    }
+
+    // Prefer browser-native lazy decode for remote screenshots / badges.
+    if (node.getAttribute("src") && !node.getAttribute("loading")) {
+      node.loading = "lazy";
+    }
+    if (!node.getAttribute("decoding")) {
+      node.decoding = "async";
+    }
+
+    const wrappers: HTMLElement[] = [];
+    const block = node.closest<HTMLElement>("[data-editor-block-type=\"image\"]");
+    if (block) wrappers.push(block);
+    const imageWrapper = node.closest<HTMLElement>("[class*=\"_imageWrapper_\"]");
+    if (imageWrapper && imageWrapper !== block) wrappers.push(imageWrapper);
+    const parent = node.parentElement;
+    if (parent?.tagName === "P" && parent.childElementCount === 1) {
+      wrappers.push(parent);
+    }
+
+    for (const wrapper of wrappers) {
+      if (isSmall) wrapper.dataset.noteImgSize = "sm";
+      else delete wrapper.dataset.noteImgSize;
+    }
+  });
+};
+
 export const getHostPickerTriggerRange = (textBeforeCursor: string): {
   query: string;
   startOffset: number;
@@ -582,9 +643,20 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
     top: 32,
   });
   const [linkAction, setLinkAction] = useState<LinkActionState | null>(null);
+  const linkActionRef = useRef<LinkActionState | null>(null);
+  linkActionRef.current = linkAction;
+  const mouseMoveFrameRef = useRef(0);
   const editorMode = controlledEditorMode ?? "edit";
   const hostPickerRangeRef = useRef<Range | null>(null);
   const hostPickerListRef = useRef<FixedSizeVirtualListHandle>(null);
+  const hostsRef = useRef(hosts);
+  hostsRef.current = hosts;
+
+  const setLinkActionIfChanged = useCallback((next: LinkActionState | null) => {
+    if (linkActionStatesEqual(linkActionRef.current, next)) return;
+    linkActionRef.current = next;
+    setLinkAction(next);
+  }, []);
   const plugins = useMemo(() => [
     headingsPlugin(),
     listsPlugin(),
@@ -635,6 +707,10 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
 
   useEffect(() => () => {
     pasteRecoveryGenerationRef.current += 1;
+    if (mouseMoveFrameRef.current) {
+      window.cancelAnimationFrame(mouseMoveFrameRef.current);
+      mouseMoveFrameRef.current = 0;
+    }
   }, []);
 
   useEffect(() => {
@@ -730,13 +806,14 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
   const annotateHostLinks = useCallback(() => {
     const container = containerRef.current;
     if (!container) return;
+    const hostsSnapshot = hostsRef.current;
 
     container.querySelectorAll<HTMLAnchorElement>(".netcatty-mdx-content a[href]").forEach((link) => {
       const renderedHref = link.getAttribute("href") || link.href;
       const label = link.textContent?.trim() || renderedHref;
       if (!renderedHref) return;
       const href = resolveRenderedMarkdownLinkHref(latestMarkdownRef.current, label, renderedHref);
-      const host = buildSshNoteLinkOpenHost(hosts, href, label, {
+      const host = buildSshNoteLinkOpenHost(hostsSnapshot, href, label, {
         id: "note-link-preview",
         now: 0,
       });
@@ -749,35 +826,7 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
         link.removeAttribute("title");
       }
     });
-  }, [hosts]);
-
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-
-    let frame = 0;
-    const schedule = () => {
-      if (frame) return;
-      frame = window.requestAnimationFrame(() => {
-        frame = 0;
-        annotateHostLinks();
-      });
-    };
-
-    schedule();
-    if (editorMode !== "preview") {
-      return () => {
-        if (frame) window.cancelAnimationFrame(frame);
-      };
-    }
-
-    const observer = new MutationObserver(schedule);
-    observer.observe(container, { childList: true, subtree: true });
-    return () => {
-      observer.disconnect();
-      if (frame) window.cancelAnimationFrame(frame);
-    };
-  }, [annotateHostLinks, editorMode]);
+  }, []);
 
   const annotateCodeBlockCopyButtons = useCallback(() => {
     const container = containerRef.current;
@@ -791,26 +840,64 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
     });
   }, [t]);
 
+  // DOM decoration: host-link titles, compact image markers, preview copy buttons.
+  // - Preview: rAF-coalesce mutations (static doc, need CM/image mounts).
+  // - Edit: debounce mutations so Lexical keystrokes do not re-walk the tree every frame;
+  //   still re-annotates after paste / image / code-block mounts settle.
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
-    if (editorMode !== "preview") {
-      removeNoteCodeBlockCopyButtons(container);
-      return;
-    }
+    let frame = 0;
+    let debounceTimer = 0;
+    const EDIT_DECORATION_DEBOUNCE_MS = 180;
 
-    annotateCodeBlockCopyButtons();
-    const observer = new MutationObserver(() => {
-      annotateCodeBlockCopyButtons();
-    });
+    const runDecorations = (includeHostLinks: boolean) => {
+      annotateNoteImageSizes(container);
+      if (includeHostLinks) annotateHostLinks();
+      if (editorMode === "preview") {
+        annotateCodeBlockCopyButtons();
+      } else {
+        removeNoteCodeBlockCopyButtons(container);
+      }
+    };
+
+    const scheduleFromMutation = () => {
+      if (editorMode === "preview") {
+        if (frame) return;
+        frame = window.requestAnimationFrame(() => {
+          frame = 0;
+          // Preview: host links can appear when Lexical finishes mounting.
+          runDecorations(true);
+        });
+        return;
+      }
+      // Edit: images/code blocks arrive in bursts (paste); host links only need a
+      // periodic pass — skip per-keystroke anchor resolution.
+      if (debounceTimer) window.clearTimeout(debounceTimer);
+      debounceTimer = window.setTimeout(() => {
+        debounceTimer = 0;
+        runDecorations(false);
+      }, EDIT_DECORATION_DEBOUNCE_MS);
+    };
+
+    // Initial full pass (host links + sizes + preview chrome).
+    runDecorations(true);
+
+    const observer = new MutationObserver(scheduleFromMutation);
     observer.observe(container, { childList: true, subtree: true });
-
     return () => {
       observer.disconnect();
+      if (frame) window.cancelAnimationFrame(frame);
+      if (debounceTimer) window.clearTimeout(debounceTimer);
       removeNoteCodeBlockCopyButtons(container);
     };
-  }, [annotateCodeBlockCopyButtons, editorMode, value]);
+  }, [annotateCodeBlockCopyButtons, annotateHostLinks, editorMode]);
+
+  // Host list identity can change while a note stays open (vault refresh).
+  useEffect(() => {
+    annotateHostLinks();
+  }, [annotateHostLinks, hosts]);
 
   const commitMarkdown = useCallback((markdown: string) => {
     if (markdown === latestMarkdownRef.current) return;
@@ -949,56 +1036,72 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
     }
     lastLinkActivationRef.current = { href: action.href, at: now };
     openLink(action.href, action.label);
-    setLinkAction(null);
-  }, [openLink]);
+    setLinkActionIfChanged(null);
+  }, [openLink, setLinkActionIfChanged]);
 
   const handleMouseMoveCapture = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     if (editorMode !== "edit") {
-      setLinkAction(null);
+      setLinkActionIfChanged(null);
       return;
     }
 
+    // Coalesce to one evaluation per frame while scrubbing links in large docs.
+    const clientX = event.clientX;
+    const clientY = event.clientY;
     const target = event.target;
-    if (!(target instanceof Element)) return;
-    if (target.closest("[data-note-link-action]")) return;
+    if (mouseMoveFrameRef.current) {
+      window.cancelAnimationFrame(mouseMoveFrameRef.current);
+    }
+    mouseMoveFrameRef.current = window.requestAnimationFrame(() => {
+      mouseMoveFrameRef.current = 0;
+      if (!(target instanceof Element)) return;
+      if (target.closest("[data-note-link-action]")) return;
 
-    const link = target.closest<HTMLAnchorElement>("a[href]");
-    const renderedHref = link?.getAttribute("href") || link?.href;
-    const container = containerRef.current;
-    if (!container) return;
-    const containerRect = container.getBoundingClientRect();
-    const pointerX = event.clientX - containerRect.left;
-    const pointerY = event.clientY - containerRect.top;
+      const link = target.closest<HTMLAnchorElement>("a[href]");
+      const renderedHref = link?.getAttribute("href") || link?.href;
+      const container = containerRef.current;
+      if (!container) return;
+      const containerRect = container.getBoundingClientRect();
+      const pointerX = clientX - containerRect.left;
+      const pointerY = clientY - containerRect.top;
 
-    if (!link || !renderedHref) {
-      if (!isPointerInsideLinkActionHoverZone(linkAction, pointerX, pointerY)) {
-        setLinkAction(null);
+      if (!link || !renderedHref) {
+        if (!isPointerInsideLinkActionHoverZone(linkActionRef.current, pointerX, pointerY)) {
+          setLinkActionIfChanged(null);
+        }
+        return;
       }
-      return;
-    }
 
-    const label = link.textContent?.trim() || renderedHref;
-    const href = resolveRenderedMarkdownLinkHref(
-      latestMarkdownRef.current,
-      label,
-      renderedHref,
-    );
-    const canOpenLink = Boolean(buildSshNoteLinkOpenHost(hosts, href, label, {
-      id: "note-link-hover",
-      now: 0,
-    })) || isSupportedNoteExternalHref(href);
-    if (!canOpenLink) {
-      setLinkAction(null);
-      return;
-    }
-    const linkRect = link.getBoundingClientRect();
-    setLinkAction({
-      href,
-      label,
-      left: Math.max(0, Math.min(containerRect.width - LINK_ACTION_SIZE - 6, linkRect.right - containerRect.left + 2)),
-      top: Math.max(0, linkRect.top - containerRect.top - 2),
+      const label = link.textContent?.trim() || renderedHref;
+      // Fast path: skip full-markdown scan when the rendered href is already openable.
+      let href = renderedHref;
+      if (
+        !isSupportedNoteExternalHref(renderedHref)
+        && !/^ssh:/i.test(renderedHref)
+      ) {
+        href = resolveRenderedMarkdownLinkHref(
+          latestMarkdownRef.current,
+          label,
+          renderedHref,
+        );
+      }
+      const canOpenLink = Boolean(buildSshNoteLinkOpenHost(hostsRef.current, href, label, {
+        id: "note-link-hover",
+        now: 0,
+      })) || isSupportedNoteExternalHref(href);
+      if (!canOpenLink) {
+        setLinkActionIfChanged(null);
+        return;
+      }
+      const linkRect = link.getBoundingClientRect();
+      setLinkActionIfChanged({
+        href,
+        label,
+        left: Math.max(0, Math.min(containerRect.width - LINK_ACTION_SIZE - 6, linkRect.right - containerRect.left + 2)),
+        top: Math.max(0, linkRect.top - containerRect.top - 2),
+      });
     });
-  }, [editorMode, hosts, linkAction]);
+  }, [editorMode, setLinkActionIfChanged]);
 
   const handleBlurCapture = useCallback((event: React.FocusEvent<HTMLDivElement>) => {
     const nextTarget = event.relatedTarget;

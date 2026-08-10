@@ -82,7 +82,16 @@ test("host-link annotation does not re-run on every markdown value keystroke", (
     /annotateHostLinks,\s*value\s*\]/,
     "value in annotateHostLinks effect deps walks the DOM on every keystroke",
   );
-  assert.match(editorSource, /\[annotateHostLinks, editorMode\]/);
+  assert.doesNotMatch(
+    editorSource,
+    /annotateCodeBlockCopyButtons,\s*editorMode,\s*value\s*\]/,
+    "value in code-copy effect deps re-walks every code block on each draft identity change",
+  );
+  assert.match(
+    editorSource,
+    /\[annotateCodeBlockCopyButtons, annotateHostLinks, editorMode\]/,
+    "DOM decoration is coalesced and independent of markdown value identity",
+  );
   assert.match(
     editorSource,
     /syncedPropValueRef/,
@@ -92,4 +101,23 @@ test("host-link annotation does not re-run on every markdown value keystroke", (
     editorSource,
     /latestMarkdownRef\.current !== syncedPropValueRef\.current/,
   );
+});
+
+test("link hover and small-image CSS avoid render thrash", () => {
+  const editorSource = readFileSync(
+    new URL("./InlineMarkdownEditor.tsx", import.meta.url),
+    "utf8",
+  );
+  const cssSource = readFileSync(new URL("../../index.css", import.meta.url), "utf8");
+
+  assert.match(editorSource, /linkActionStatesEqual/);
+  assert.match(editorSource, /setLinkActionIfChanged/);
+  assert.match(editorSource, /annotateNoteImageSizes/);
+  assert.match(editorSource, /data-note-img-size/);
+  // No combinatorial :has(img[width="N"]) matrix for small icons.
+  assert.doesNotMatch(
+    cssSource,
+    /:has\(img\[width="16"\]\).*?:has\(img\[width="20"\]/s,
+  );
+  assert.match(cssSource, /img\[data-note-img-size="sm"\]/);
 });
