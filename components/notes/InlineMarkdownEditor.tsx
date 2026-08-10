@@ -506,6 +506,9 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
   const editorRef = useRef<MDXEditorMethods>(null);
   const latestMarkdownRef = useRef(value);
   const syncedPropValueRef = useRef(value);
+  // Bumped on unmount / external value sync so deferred paste recovery cannot
+  // commit into a switched or unmounted note.
+  const pasteRecoveryGenerationRef = useRef(0);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const lastLinkActivationRef = useRef<{ href: string; at: number } | null>(null);
@@ -558,10 +561,15 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
     if (latestMarkdownRef.current !== syncedPropValueRef.current) {
       return;
     }
+    pasteRecoveryGenerationRef.current += 1;
     syncedPropValueRef.current = value;
     latestMarkdownRef.current = value;
     editorRef.current?.setMarkdown(value);
   }, [value]);
+
+  useEffect(() => () => {
+    pasteRecoveryGenerationRef.current += 1;
+  }, []);
 
   useEffect(() => {
     if (!hostPicker.open) return;
@@ -954,7 +962,10 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
     event.nativeEvent.stopImmediatePropagation?.();
 
     const applyDocumentPaste = () => {
-      const next = mergeNoteMarkdownDocumentPaste(latestMarkdownRef.current, markdown);
+      // Prefer live editor markdown: a prior insertMarkdown may have updated Lexical
+      // while onChange was muted, leaving latestMarkdownRef stale.
+      const currentMarkdown = editor.getMarkdown();
+      const next = mergeNoteMarkdownDocumentPaste(currentMarkdown, markdown);
       // setMarkdown mutes MDXEditor onChange; commit the draft ourselves so
       // autosave still sees the pasted body.
       editor.setMarkdown(next);
@@ -963,25 +974,29 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
 
     // Document merge only when Lexical has no caret. With a live selection,
     // keep insertMarkdown so caret/replace semantics stay intact (incl. long pastes).
+    // Do not fall back to document append after insertMarkdown: that races slow
+    // inserts (duplicate paste) and can write into a switched note after unmount.
     if (!canInsertAtSelection) {
       applyDocumentPaste();
     } else {
       const before = latestMarkdownRef.current;
+      const recoveryGeneration = ++pasteRecoveryGenerationRef.current;
       editor.focus();
       editor.insertMarkdown(markdown);
-      // insertMarkdown's Lexical update is deferred; if selection was lost the
-      // insert no-ops after our preventDefault. Recover on the next frames.
-      window.requestAnimationFrame(() => {
-        window.requestAnimationFrame(() => {
-          if (latestMarkdownRef.current !== before) return;
-          const current = editor.getMarkdown();
-          if (current !== before) {
-            commitMarkdown(current);
-            return;
-          }
-          applyDocumentPaste();
-        });
-      });
+      // insertMarkdown's Lexical update is deferred; if onChange is muted/missed
+      // but the document did change, poll briefly and commit the settled markdown.
+      const tryCommitSettledPaste = (attempt: number) => {
+        if (pasteRecoveryGenerationRef.current !== recoveryGeneration) return;
+        if (latestMarkdownRef.current !== before) return;
+        const current = editor.getMarkdown();
+        if (current !== before) {
+          commitMarkdown(current);
+          return;
+        }
+        if (attempt >= 4) return;
+        window.setTimeout(() => tryCommitSettledPaste(attempt + 1), 50);
+      };
+      window.setTimeout(() => tryCommitSettledPaste(0), 50);
     }
 
     setHostPicker((current) => ({ ...current, open: false, query: "", selectedIndex: 0 }));

@@ -74,7 +74,20 @@ test("InlineMarkdownEditor only preventDefaults markdown paste after a successfu
     source,
     /if \(\s*!shouldInterceptNoteMarkdownPaste\([\s\S]*?\)\s*\{\s*return;\s*\}/,
   );
-  // Live selection must keep insertMarkdown; document merge is the no-selection / recovery path.
+  // Live selection must keep insertMarkdown; document merge is the no-selection path only.
   assert.match(source, /if\s*\(\s*!canInsertAtSelection\s*\)\s*\{\s*applyDocumentPaste\(\);/);
   assert.match(source, /editor\.insertMarkdown\(markdown\)/);
+  assert.match(source, /pasteRecoveryGenerationRef/);
+  assert.match(source, /tryCommitSettledPaste/);
+  assert.match(source, /editor\.getMarkdown\(\)/);
+  // Selection-path recovery must not re-enter applyDocumentPaste (duplicate / stale-note risk).
+  assert.doesNotMatch(
+    source,
+    /insertMarkdown\(markdown\);[\s\S]*applyDocumentPaste\(\)/,
+  );
+  // Document merge must read live editor markdown, not only the possibly-stale ref.
+  assert.match(
+    source,
+    /const currentMarkdown = editor\.getMarkdown\(\);[\s\S]*mergeNoteMarkdownDocumentPaste\(currentMarkdown, markdown\)/,
+  );
 });
