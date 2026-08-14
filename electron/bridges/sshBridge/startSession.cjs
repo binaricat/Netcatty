@@ -51,10 +51,14 @@ function unregisterTestConnectionTransport(sessionId) {
 function cancelTestConnection(sessionId) {
   const transport = testConnectionTransports.get(sessionId);
   if (!transport) return { success: false, error: "Test connection not found" };
-  for (const chain of transport.chainConnections || []) {
-    try { chain.end(); } catch { /* ignore */ }
-  }
-  try { transport.conn.end(); } catch { /* ignore */ }
+  const end = (item) => {
+    try { item?.end?.(); } catch { /* ignore */ }
+    try { item?.destroy?.(); } catch { /* ignore */ }
+  };
+  for (const chain of transport.chainConnections || []) end(chain);
+  end(transport.pendingConn);
+  end(transport.socket);
+  end(transport.conn);
   return { success: true };
 }
 
@@ -1393,6 +1397,16 @@ function createStartSessionApi(ctx) {
         let chainConnections = [];
         let connectionSocket = null;
 
+        // Register the test transport BEFORE the chain/proxy dial so an
+        // in-flight bastion/proxy attempt can be cancelled. `connectThroughChain`
+        // updates `pendingConn` and `chainConnections` via `options._tunnelRef`
+        // as each hop/proxy socket is established.
+        let testTransport = null;
+        if (testMode) {
+          testTransport = { conn, socket: null, pendingConn: null, chainConnections };
+          registerTestConnectionTransport(sessionId, testTransport);
+        }
+
         // Determine if we have jump hosts
         const jumpHosts = options.jumpHosts || [];
         const hasJumpHosts = jumpHosts.length > 0;
@@ -2058,6 +2072,10 @@ function createStartSessionApi(ctx) {
           // Pass fetched keys to chain connection to avoid re-reading files
           options._defaultKeys = discoveredDefaultKeys;
           options._sshDiagnosticLogger = log;
+          if (testTransport) {
+            options._tunnelRef = testTransport;
+            options._connectionsRef = testTransport.chainConnections;
+          }
 
           const chainResult = await connectThroughChain(
             event,
@@ -2081,11 +2099,20 @@ function createStartSessionApi(ctx) {
             options.proxy,
             options.hostname,
             options.port || 22,
-            { timeoutMs: tcpConnectTimeoutMs }
+            {
+              timeoutMs: tcpConnectTimeoutMs,
+              ...(testTransport
+                ? { onSocket: (socket) => { testTransport.pendingConn = socket; } }
+                : {}),
+            }
           );
           connectOpts.sock = connectionSocket;
           delete connectOpts.host;
           delete connectOpts.port;
+          if (testTransport) {
+            testTransport.socket = connectionSocket;
+            testTransport.pendingConn = null;
+          }
         } else {
           // Direct connection (no jump hosts, no proxy)
           sendProgress(1, 1, options.hostname, 'connecting');
@@ -2649,9 +2676,8 @@ function createStartSessionApi(ctx) {
               : undefined,
           });
           conn.connect(connectOpts);
-          if (testMode) {
-            registerTestConnectionTransport(sessionId, { conn, chainConnections });
-          }
+          // The test transport was already registered before the dial; nothing
+          // to re-register here.
         }).catch((err) => {
           if (pendingDialCoordination && !options._deferPendingDialFailure) {
             failTransportDial(pendingDialCoordination, err);
@@ -2675,6 +2701,7 @@ function createStartSessionApi(ctx) {
           );
         }
         if (testMode) {
+          unregisterTestConnectionTransport(sessionId);
           sendConnectionTestResult(sender, sessionId, false, userVisibleSshErrorMessage(err, options));
         }
         throw err;

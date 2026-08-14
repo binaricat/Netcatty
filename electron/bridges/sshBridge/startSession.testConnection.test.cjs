@@ -13,7 +13,7 @@ const MUTED_CONSOLE = {
   info() {},
 };
 
-function createHarness({ onConnect } = {}) {
+function createHarness({ onConnect, chainDial } = {}) {
   const sent = [];
   const calls = {
     connectOptions: null,
@@ -73,9 +73,9 @@ function createHarness({ onConnect } = {}) {
     prepareSystemSshAgentForAuth: async () => null,
     loadFirstIdentityFileForAuth: async () => null,
     preparePrivateKeyForAuth: async () => null,
-    connectThroughChain: async () => {
+    connectThroughChain: chainDial ?? (async () => {
       throw new Error("unexpected chain connect");
-    },
+    }),
     createProxySocket: async () => {
       throw new Error("unexpected proxy connect");
     },
@@ -228,6 +228,43 @@ test("cancelTestConnection reports unknown session ids", () => {
     success: false,
     error: "Test connection not found",
   });
+});
+
+test("cancelTestConnection ends an in-flight chain hop registered before the dial", async () => {
+  const hopConns = [];
+  const { api, sender } = createHarness({
+    chainDial: (_event, options) => {
+      const conn = new EventEmitter();
+      conn.ended = false;
+      conn.destroyed = false;
+      conn.end = () => { conn.ended = true; };
+      conn.destroy = () => { conn.destroyed = true; };
+      hopConns.push(conn);
+      if (options._tunnelRef) {
+        options._tunnelRef.pendingConn = conn;
+        options._tunnelRef.chainConnections = options._connectionsRef || [];
+        (options._connectionsRef || []).push(conn);
+      }
+      // Never resolves — simulates a slow/unreachable bastion.
+      return new Promise(() => {});
+    },
+  });
+
+  void api.startSSHSession({ sender }, {
+    ...baseOptions(),
+    jumpHosts: [
+      { hostname: "jump.example.test", port: 22, username: "root", password: "jump-pass", authMethod: "password" },
+    ],
+  });
+
+  // Let the async body reach connectThroughChain and register the hop.
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  const result = cancelTestConnection("session-test");
+
+  assert.equal(result.success, true);
+  assert.ok(hopConns.length >= 1, "chain dial should have registered a hop conn");
+  assert.ok(hopConns[0].ended || hopConns[0].destroyed, "cancel should end the in-flight hop conn");
 });
 
 test("test mode pins authHandler to a minimal method list", async () => {
