@@ -171,7 +171,7 @@ test('OSC color query replies are filtered at the xterm input egress', () => {
   assert.match(xtermRuntimeSource, /import \{ stripOscColorQueryResponses \} from "\.\.\/\.\.\/\.\.\/domain\/terminalOscColorQuery";/);
   assert.match(
     xtermRuntimeSource,
-    /term\.onData\(\(rawData\) => \{[\s\S]*?stripOscColorQueryResponses\([\s\S]*?suppressOscColorQueryResponses === true[\s\S]*?if \(!data\) return;/,
+    /term\.onData\(\(data\) => \{[\s\S]*?stripOscColorQueryResponses\([\s\S]*?suppressOscColorQueryResponses === true[\s\S]*?if \(!data\) return;/,
   );
 });
 

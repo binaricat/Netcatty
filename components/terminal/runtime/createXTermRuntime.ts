@@ -1988,9 +1988,9 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   ctx.container.addEventListener("input", markKittyTextInput, true);
   textarea?.addEventListener("blur", clearKittyTransientInputState);
 
-  term.onData((rawData) => {
-    const data = stripOscColorQueryResponses(
-      rawData,
+  term.onData((data) => {
+    data = stripOscColorQueryResponses(
+      data,
       ctx.terminalSettingsRef.current?.suppressOscColorQueryResponses === true,
     );
     if (!data) return;
