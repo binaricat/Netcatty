@@ -173,7 +173,7 @@ export interface TerminalSettings {
 
   // Clipboard
   osc52Clipboard: 'off' | 'write-only' | 'read-write' | 'prompt'; // OSC-52 clipboard access: off, write-only (default), read-write, or prompt on read
-  /** 阻止 xterm.js 将 OSC 颜色查询响应写回远程 PTY，避免历史日志污染 Shell 输入。 */
+  /** Prevent xterm.js from writing OSC color query responses to the remote PTY after log replay. */
   suppressOscColorQueryResponses: boolean;
 
   // Tab titles
@@ -503,7 +503,7 @@ const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
   preserveSelectionOnInput: false, // Opt-in: keep selection alive when typing
   forcePromptNewLine: false, // Opt-in: keep the next shell prompt visually separated from unterminated final output lines
   osc52Clipboard: 'write-only', // OSC-52: allow remote programs to write clipboard by default
-  suppressOscColorQueryResponses: false, // 默认关闭，按需阻止重放日志产生的 OSC 颜色查询回包
+  suppressOscColorQueryResponses: false, // Disabled by default; suppress replies that can pollute input after log replay
   dynamicTabTitleMode: 'agent',
   rendererType: 'auto', // Auto-detect best renderer based on hardware
   hibernateHiddenTabs: false,
