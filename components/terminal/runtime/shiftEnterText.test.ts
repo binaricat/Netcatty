@@ -173,7 +173,7 @@ test("runtime routes Shift+Enter text through the shared input handler", () => {
   );
   assert.match(
     source,
-    /term\.onData\(\(data\) => \{[\s\S]*handleTerminalInputData\(data\);\s+\}\);/,
+    /term\.onData\(\(rawData\) => \{[\s\S]*handleTerminalInputData\(data\);\s+\}\);/,
   );
   assert.match(
     source,
