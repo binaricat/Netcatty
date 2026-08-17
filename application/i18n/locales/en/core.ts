@@ -617,6 +617,9 @@ Highlight the focused split pane:
   'settings.terminal.behavior.osc52Clipboard.writeOnly': 'Write only',
   'settings.terminal.behavior.osc52Clipboard.readWrite': 'Read & Write',
   'settings.terminal.behavior.osc52Clipboard.prompt': 'Write + Prompt on Read',
+  'settings.terminal.behavior.suppressOscColorQueryResponses': 'Suppress OSC color query responses',
+  'settings.terminal.behavior.suppressOscColorQueryResponses.desc':
+    'Prevent terminal color query replies from being sent to the remote PTY. This avoids rgb text leaking into prompts after replayed logs, but may affect theme detection in Vim and other TUIs.',
   'terminal.osc52.readPrompt.title': 'Clipboard Read Request',
   'terminal.osc52.readPrompt.desc': 'A remote program is requesting to read your clipboard. Allow?',
   'terminal.osc52.readPrompt.allow': 'Allow',

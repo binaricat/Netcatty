@@ -80,6 +80,18 @@ test("localized settings include terminal font weight option labels", () => {
   }
 });
 
+test("localized settings include OSC color query response suppression labels", () => {
+  const keys = [
+    "settings.terminal.behavior.suppressOscColorQueryResponses",
+    "settings.terminal.behavior.suppressOscColorQueryResponses.desc",
+  ];
+
+  for (const locale of LOCALIZED_SETTINGS_LOCALES) {
+    const missing = keys.filter((key) => !locale.messages[key]);
+    assert.deepEqual(missing, [], `${locale.name} is missing OSC color query labels`);
+  }
+});
+
 test("localized vault messages include host icon labels", () => {
   const keys = [
     "hostDetails.icon.title",

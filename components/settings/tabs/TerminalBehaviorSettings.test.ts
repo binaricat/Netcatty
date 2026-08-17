@@ -31,3 +31,12 @@ test("terminal behavior settings expose disabled auto-close", () => {
     /settings\.terminal\.behavior\.autoCloseOnExit[\s\S]*?role="switch" aria-checked="false"/,
   );
 });
+
+test("terminal behavior settings expose OSC color query response suppression", () => {
+  const markup = renderSettings(true);
+
+  assert.match(
+    markup,
+    /settings\.terminal\.behavior\.suppressOscColorQueryResponses[\s\S]*?role="switch" aria-checked="false"/,
+  );
+});

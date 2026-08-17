@@ -223,6 +223,17 @@ export const TerminalBehaviorSettings: React.FC<TerminalBehaviorSettingsProps> =
         </SettingRow>
 
         <SettingRow
+          anchorId="terminal-suppress-osc-color-query-responses"
+          label={t("settings.terminal.behavior.suppressOscColorQueryResponses")}
+          description={t("settings.terminal.behavior.suppressOscColorQueryResponses.desc")}
+        >
+          <Toggle
+            checked={terminalSettings.suppressOscColorQueryResponses}
+            onChange={(v) => updateTerminalSetting("suppressOscColorQueryResponses", v)}
+          />
+        </SettingRow>
+
+        <SettingRow
           label={t("settings.terminal.behavior.scrollOnInput")}
           description={t("settings.terminal.behavior.scrollOnInput.desc")}
         >

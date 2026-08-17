@@ -385,6 +385,13 @@ export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
     sectionKey: "settings.terminal.section.behavior",
   },
   {
+    id: "terminal-suppress-osc-color-query-responses",
+    tab: "terminal",
+    labelKey: "settings.terminal.behavior.suppressOscColorQueryResponses",
+    descriptionKey: "settings.terminal.behavior.suppressOscColorQueryResponses.desc",
+    sectionKey: "settings.terminal.section.behavior",
+  },
+  {
     id: "terminal-scrollback-rows",
     tab: "terminal",
     labelKey: "settings.terminal.scrollback.rows",

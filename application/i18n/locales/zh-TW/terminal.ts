@@ -345,6 +345,9 @@ export const zhTWTerminalMessages: Messages = {
   'settings.terminal.behavior.osc52Clipboard.writeOnly': '僅寫入',
   'settings.terminal.behavior.osc52Clipboard.readWrite': '讀寫',
   'settings.terminal.behavior.osc52Clipboard.prompt': '寫入 + 讀取時詢問',
+  'settings.terminal.behavior.suppressOscColorQueryResponses': '阻止 OSC 色彩查詢回應',
+  'settings.terminal.behavior.suppressOscColorQueryResponses.desc':
+    '阻止終端將色彩查詢回應傳送到遠端 PTY，避免重播日誌後 rgb 文字殘留在命令提示字元中。啟用後，Vim 等 TUI 可能無法自動識別終端主題。',
   'terminal.osc52.readPrompt.title': '剪貼簿讀取請求',
   'terminal.osc52.readPrompt.desc': '遠端程式正在請求讀取你的剪貼簿，是否允許？',
   'terminal.osc52.readPrompt.allow': '允許',

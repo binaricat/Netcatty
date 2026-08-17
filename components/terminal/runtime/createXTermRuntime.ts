@@ -35,6 +35,7 @@ import {
   shouldScrollOnTerminalPaste,
 } from "../../../domain/terminalScroll";
 import { resolveTerminalInlineImageAddonOptions } from "../../../domain/terminalInlineImages";
+import { stripOscColorQueryResponses } from "../../../domain/terminalOscColorQuery";
 import {
   resolveHostTerminalFontFamilyId,
   resolveHostTerminalFontSize,
@@ -1987,7 +1988,12 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   ctx.container.addEventListener("input", markKittyTextInput, true);
   textarea?.addEventListener("blur", clearKittyTransientInputState);
 
-  term.onData((data) => {
+  term.onData((rawData) => {
+    const data = stripOscColorQueryResponses(
+      rawData,
+      ctx.terminalSettingsRef.current?.suppressOscColorQueryResponses === true,
+    );
+    if (!data) return;
     if (kittyCompositionPending && !data.startsWith("\u001b")) {
       kittyCompositionPending = false;
       if (kittyCompositionClearTimer !== undefined) {

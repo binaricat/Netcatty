@@ -17,6 +17,28 @@ test("normalizeTerminalSettings disables prompt line breaks by default", () => {
   assert.equal(settings.forcePromptNewLine, false);
 });
 
+test("normalizeTerminalSettings disables OSC color query response suppression by default", () => {
+  assert.equal(normalizeTerminalSettings().suppressOscColorQueryResponses, false);
+});
+
+test("normalizeTerminalSettings preserves a valid OSC color query response suppression setting", () => {
+  assert.equal(
+    normalizeTerminalSettings({ suppressOscColorQueryResponses: true }).suppressOscColorQueryResponses,
+    true,
+  );
+  assert.equal(
+    normalizeTerminalSettings({ suppressOscColorQueryResponses: false }).suppressOscColorQueryResponses,
+    false,
+  );
+});
+
+test("normalizeTerminalSettings rejects invalid OSC color query response suppression values", () => {
+  assert.equal(
+    normalizeTerminalSettings({ suppressOscColorQueryResponses: "true" as never }).suppressOscColorQueryResponses,
+    false,
+  );
+});
+
 test("normalizeTerminalSettings defaults password prompt assist to hint", () => {
   assert.equal(normalizeTerminalSettings().passwordPromptAssist, "hint");
 });

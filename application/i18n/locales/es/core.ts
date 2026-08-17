@@ -617,6 +617,9 @@ Resalta el panel dividido enfocado:
   'settings.terminal.behavior.osc52Clipboard.writeOnly': 'Solo escritura',
   'settings.terminal.behavior.osc52Clipboard.readWrite': 'Lectura y escritura',
   'settings.terminal.behavior.osc52Clipboard.prompt': 'Escritura + pregunta al leer',
+  'settings.terminal.behavior.suppressOscColorQueryResponses': 'Suprimir respuestas de consultas de color OSC',
+  'settings.terminal.behavior.suppressOscColorQueryResponses.desc':
+    'Evita enviar respuestas de consultas de color al PTY remoto. Esto impide que el texto rgb aparezca en el prompt tras reproducir logs, pero puede afectar la detección de temas en Vim y otras TUI.',
   'terminal.osc52.readPrompt.title': 'Solicitud de lectura del portapapeles',
   'terminal.osc52.readPrompt.desc': 'Un programa remoto está solicitando leer tu portapapeles. ¿Permitir?',
   'terminal.osc52.readPrompt.allow': 'Permitir',

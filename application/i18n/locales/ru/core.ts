@@ -574,6 +574,9 @@ export const ruCoreMessages: Messages = {
   'settings.terminal.behavior.osc52Clipboard.writeOnly': 'Только запись',
   'settings.terminal.behavior.osc52Clipboard.readWrite': 'Чтение и запись',
   'settings.terminal.behavior.osc52Clipboard.prompt': 'Запись + запрос при чтении',
+  'settings.terminal.behavior.suppressOscColorQueryResponses': 'Подавлять ответы на запросы цвета OSC',
+  'settings.terminal.behavior.suppressOscColorQueryResponses.desc':
+    'Не отправлять ответы на запросы цвета в удалённый PTY. Это предотвращает появление текста rgb в приглашении после воспроизведения логов, но может повлиять на определение темы в Vim и других TUI.',
   'terminal.osc52.readPrompt.title': 'Запрос чтения буфера обмена',
   'terminal.osc52.readPrompt.desc': 'Удалённая программа запрашивает чтение вашего буфера обмена. Разрешить?',
   'terminal.osc52.readPrompt.allow': 'Разрешить',

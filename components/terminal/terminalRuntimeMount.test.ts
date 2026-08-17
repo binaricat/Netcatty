@@ -167,6 +167,14 @@ test('password-prompt input is consumed before every semantic command callback',
   );
 });
 
+test('OSC color query replies are filtered at the xterm input egress', () => {
+  assert.match(xtermRuntimeSource, /import \{ stripOscColorQueryResponses \} from "\.\.\/\.\.\/\.\.\/domain\/terminalOscColorQuery";/);
+  assert.match(
+    xtermRuntimeSource,
+    /term\.onData\(\(rawData\) => \{[\s\S]*?stripOscColorQueryResponses\([\s\S]*?suppressOscColorQueryResponses === true[\s\S]*?if \(!data\) return;/,
+  );
+});
+
 test('terminal output treats unknown prompt-shaped input boundaries as sensitive', () => {
   assert.match(terminalSource, /const promptSecurityOptions = \{ allowHostStyleGreaterThan: isNetworkDevice \};/);
   assert.match(terminalSource, /isUntrustedTerminalInputPrompt\([\s\S]*?promptSecurityOptions/);
