@@ -809,6 +809,26 @@ function createPreloadApi(ctx) {
     passphraseAuthFailedListeners.add(cb);
     return () => passphraseAuthFailedListeners.delete(cb);
   },
+  // FIDO2 PIN / touch presence prompts
+  onFidoPromptRequest: (cb) => {
+    fidoPromptListeners.add(cb);
+    return () => fidoPromptListeners.delete(cb);
+  },
+  respondFidoPrompt: async (requestId, response, cancelled = false) => {
+    return ipcRenderer.invoke("netcatty:fido-prompt:respond", {
+      requestId,
+      response,
+      cancelled,
+    });
+  },
+  onFidoPromptTimeout: (cb) => {
+    fidoPromptTimeoutListeners.add(cb);
+    return () => fidoPromptTimeoutListeners.delete(cb);
+  },
+  onFidoPromptCancelled: (cb) => {
+    fidoPromptCancelledListeners.add(cb);
+    return () => fidoPromptCancelledListeners.delete(cb);
+  },
   openSftp: async (options) => {
       const result = await ipcRenderer.invoke("netcatty:sftp:open", options);
       return result.sftpId;

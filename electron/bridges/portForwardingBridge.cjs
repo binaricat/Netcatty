@@ -1406,13 +1406,19 @@ async function startPortForward(event, payload) {
   let defaultKeys = [];
   let portForwardAuthPhase = { hadPartialSuccess: false, passwordAlreadySucceeded: false };
   let authBanner = "";
+  /** @type {(() => void)|null} */
+  let releasePreparedFidoAgent = null;
   try {
     const fallbackAgentSocket = useSshAgent === false
       ? null
       : useSshAgent === true
         ? undefined
         : await getAvailableAgentSocket(identityAgent, { hostname, port, username });
-    const systemAuthAgent = hasCertificate ? null : await prepareSystemSshAgentForAuth({
+    const {
+      enhanceAuthOptionsForFido,
+      looksLikeSkOpenSshMaterial,
+    } = require("./sshAuthHelper.cjs");
+    const prep = await enhanceAuthOptionsForFido({
       useSshAgent,
       agentPublicKeys,
       identityAgent,
@@ -1420,10 +1426,24 @@ async function startPortForward(event, payload) {
       identitiesOnly,
       addKeysToAgent,
       useKeychain,
+      privateKey,
+      certificate,
       hostname,
       port,
       username,
-    }, "[PortForward]");
+    }, sender);
+    const isFido = prep.useFidoAgent === true;
+    const systemAuthAgent = (hasCertificate && !isFido) ? null : await prepareSystemSshAgentForAuth(
+      prep,
+      "[PortForward]",
+    );
+    // Attach immediately so cancelTunnel ending `conn` during/after prepare
+    // still drops the owned FIDO agent + askpass lease. Also keep a direct
+    // handle for cancel-before-connect returns (close may have fired before
+    // this listener existed).
+    releasePreparedFidoAgent = systemAuthAgent
+      ? require("./attachFidoAgentRelease.cjs").attachFidoAgentRelease(conn, systemAuthAgent)
+      : null;
     const identityFile = !privateKey && !systemAuthAgent
       ? await loadFirstIdentityFileForAuth({
         sender,
@@ -1437,7 +1457,9 @@ async function startPortForward(event, payload) {
         },
       })
       : null;
-    const inlineKey = privateKey && !systemAuthAgent
+    const inlineKey = privateKey
+      && !systemAuthAgent
+      && !looksLikeSkOpenSshMaterial(privateKey)
       ? await preparePrivateKeyForAuth({
         sender,
         privateKey,
@@ -1453,6 +1475,7 @@ async function startPortForward(event, payload) {
     const effectivePassphrase = inlineKey?.passphrase || identityFile?.passphrase;
 
     if (isTunnelCancelled(tunnelState)) {
+      try { releasePreparedFidoAgent?.(); } catch { /* ignore */ }
       portForwardingTunnels.delete(tunnelId);
       abandonPendingDial("Port forward connection cancelled");
       return { tunnelId, success: false, cancelled: true };
@@ -1461,7 +1484,7 @@ async function startPortForward(event, payload) {
     if (systemAuthAgent) {
       connectOpts.agent = systemAuthAgent;
     }
-    if (hasCertificate) {
+    if (hasCertificate && !isFido) {
       connectOpts.agent = new NetcattyAgent({
         mode: "certificate",
         webContents: sender,
@@ -1472,7 +1495,7 @@ async function startPortForward(event, payload) {
           passphrase: effectivePassphrase,
         },
       });
-    } else if (effectivePrivateKey) {
+    } else if (effectivePrivateKey && !isFido) {
       connectOpts.privateKey = effectivePrivateKey;
       if (effectivePassphrase) {
         connectOpts.passphrase = effectivePassphrase;
@@ -1489,6 +1512,7 @@ async function startPortForward(event, payload) {
       ? []
       : discoveredDefaultKeys;
     if (isTunnelCancelled(tunnelState)) {
+      try { releasePreparedFidoAgent?.(); } catch { /* ignore */ }
       portForwardingTunnels.delete(tunnelId);
       abandonPendingDial("Port forward connection cancelled");
       return { tunnelId, success: false, cancelled: true };
@@ -1511,6 +1535,7 @@ async function startPortForward(event, payload) {
     applyAuthToConnOpts(connectOpts, authConfig);
     portForwardAuthPhase = authConfig.authPhase || portForwardAuthPhase;
     if (isTunnelCancelled(tunnelState)) {
+      try { releasePreparedFidoAgent?.(); } catch { /* ignore */ }
       portForwardingTunnels.delete(tunnelId);
       abandonPendingDial("Port forward connection cancelled");
       return { tunnelId, success: false, cancelled: true };
@@ -1557,6 +1582,7 @@ async function startPortForward(event, payload) {
       chainConnections = chainResult.connections;
       tunnelState.chainConnections = chainConnections;
       if (isTunnelCancelled(tunnelState)) {
+        try { releasePreparedFidoAgent?.(); } catch { /* ignore */ }
         cleanupChainConnections(chainConnections);
         if (!tunnelState.cleanupFailed) {
           portForwardingTunnels.delete(tunnelId);
@@ -1575,6 +1601,7 @@ async function startPortForward(event, payload) {
         },
       });
       if (isTunnelCancelled(tunnelState)) {
+        try { releasePreparedFidoAgent?.(); } catch { /* ignore */ }
         try { connectionSocket?.end?.(); } catch { /* ignore */ }
         try { connectionSocket?.destroy?.(); } catch { /* ignore */ }
         if (!tunnelState.cleanupFailed) {
@@ -1590,6 +1617,7 @@ async function startPortForward(event, payload) {
     }
   } catch (err) {
     if (isTunnelCancelled(tunnelState)) {
+      try { releasePreparedFidoAgent?.(); } catch { /* ignore */ }
       if (!tunnelState.cleanupFailed) {
         portForwardingTunnels.delete(tunnelId);
       }
@@ -1602,10 +1630,12 @@ async function startPortForward(event, payload) {
       } catch {
         /* best-effort cancel on passphrase cancel */
       }
+      try { releasePreparedFidoAgent?.(); } catch { /* ignore */ }
       abandonPendingDial(err);
       return { tunnelId, success: false, cancelled: true };
     }
     tunnelState.cancelled = true;
+    try { releasePreparedFidoAgent?.(); } catch { /* ignore */ }
     if (tunnelState.pendingConn) {
       try { tunnelState.pendingConn.end(); } catch { /* ignore */ }
     }

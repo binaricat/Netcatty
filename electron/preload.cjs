@@ -50,6 +50,9 @@ const passphraseListeners = new Set();
 const passphraseTimeoutListeners = new Set();
 const passphraseCancelledListeners = new Set();
 const passphraseAuthFailedListeners = new Set();
+const fidoPromptListeners = new Set();
+const fidoPromptTimeoutListeners = new Set();
+const fidoPromptCancelledListeners = new Set();
 const updateDownloadProgressListeners = new Set();
 const updateDownloadedListeners = new Set();
 const updateAvailableListeners = new Set();
@@ -642,6 +645,37 @@ ipcRenderer.on("netcatty:passphrase-auth-failed", (_event, payload) => {
   });
 });
 
+// FIDO2 PIN / touch presence prompts
+ipcRenderer.on("netcatty:fido-prompt-request", (_event, payload) => {
+  fidoPromptListeners.forEach((cb) => {
+    try {
+      cb(payload);
+    } catch (err) {
+      console.error("FIDO prompt request callback failed", err);
+    }
+  });
+});
+
+ipcRenderer.on("netcatty:fido-prompt-timeout", (_event, payload) => {
+  fidoPromptTimeoutListeners.forEach((cb) => {
+    try {
+      cb(payload);
+    } catch (err) {
+      console.error("FIDO prompt timeout callback failed", err);
+    }
+  });
+});
+
+ipcRenderer.on("netcatty:fido-prompt-cancelled", (_event, payload) => {
+  fidoPromptCancelledListeners.forEach((cb) => {
+    try {
+      cb(payload);
+    } catch (err) {
+      console.error("FIDO prompt cancelled callback failed", err);
+    }
+  });
+});
+
 // Auto-update events
 ipcRenderer.on("netcatty:update:update-available", (_event, payload) => {
   updateAvailableListeners.forEach((cb) => {
@@ -820,6 +854,9 @@ const api = createPreloadApi({
   passphraseTimeoutListeners,
   passphraseCancelledListeners,
   passphraseAuthFailedListeners,
+  fidoPromptListeners,
+  fidoPromptTimeoutListeners,
+  fidoPromptCancelledListeners,
   updateDownloadProgressListeners,
   updateDownloadedListeners,
   updateAvailableListeners,

@@ -4,6 +4,7 @@
 
 import { BadgeCheck, Key } from 'lucide-react';
 import React from 'react';
+import { detectFidoSshKeyType } from '../../domain/fidoSsh';
 import { logger } from '../../lib/logger';
 import { KeyType, SSHKey } from '../../types';
 
@@ -24,14 +25,34 @@ export const getKeyTypeDisplay = (key: SSHKey, isMac: boolean): string => {
 };
 
 /**
- * Detect key type from private key content
+ * Resolve vault KeyType from imported key material.
+ *
+ * Always prefer material detection over the import form's seeded default
+ * (`openImport` seeds `type: "ED25519"`). Real OpenSSH sk private PEMs only
+ * expose sk-* algorithms after base64 decode — handled by detectFidoSshKeyType.
  */
-export const detectKeyType = (privateKey: string): KeyType => {
-    const pk = privateKey.toLowerCase();
-    if (pk.includes('rsa')) return 'RSA';
-    if (pk.includes('ecdsa') || pk.includes('ec ')) return 'ECDSA';
+export const resolveImportedKeyType = (args: {
+    privateKey: string;
+    publicKey?: string;
+}): KeyType => {
+    const fidoType = detectFidoSshKeyType({
+        publicKey: args.publicKey,
+        privateKey: args.privateKey,
+    });
+    if (fidoType) return fidoType;
+
+    const pkLower = args.privateKey.toLowerCase();
+    if (pkLower.includes('rsa')) return 'RSA';
+    if (pkLower.includes('ecdsa') || pkLower.includes('ec ')) return 'ECDSA';
+    if (pkLower.includes('ed25519')) return 'ED25519';
     return 'ED25519';
 };
+
+/**
+ * Detect key type from private key content (file drop / paste helpers).
+ */
+export const detectKeyType = (privateKey: string): KeyType =>
+    resolveImportedKeyType({ privateKey });
 
 /**
  * Copy text to clipboard

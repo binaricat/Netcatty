@@ -2,6 +2,7 @@ import type { GroupConfig, Host, HostAuthMethod, Identity, SSHKey } from "./mode
 import { sanitizeCredentialValue } from "./credentials";
 import { applyGroupDefaults } from "./groupConfig";
 import { isSshAgentNoneValue } from "./sshAgentSettings";
+import { requiresFidoSshAgentAuth } from "./fidoSsh";
 
 type HostAuthOverride = {
   authMethod?: HostAuthMethod;
@@ -240,9 +241,29 @@ export const resolveBridgeKeyAuth = (args: {
   passphrase?: string;
 } => {
   const { key, fallbackIdentityFilePaths, passphrase } = args;
+  const isFidoSk = requiresFidoSshAgentAuth({
+    type: key?.type,
+    publicKey: key?.publicKey,
+    privateKey: key?.privateKey,
+  });
   const identityFilePaths = key?.source === "reference" && key.filePath
     ? [key.filePath]
     : fallbackIdentityFilePaths;
+
+  // SK private material is an OpenSSH key *handle*. Pass it through so the
+  // main process can load it into the system agent; never use it for local
+  // software signing (startSession routes SK handles to ssh-add).
+  if (isFidoSk) {
+    return {
+      privateKey: key?.source === "reference"
+        ? undefined
+        : sanitizeCredentialValue(key?.privateKey),
+      identityFilePaths: key?.source === "reference" && key.filePath
+        ? [key.filePath]
+        : identityFilePaths,
+      passphrase: sanitizeCredentialValue(passphrase ?? key?.passphrase),
+    };
+  }
 
   return {
     privateKey: key?.source === "reference" ? undefined : sanitizeCredentialValue(key?.privateKey),
@@ -251,9 +272,23 @@ export const resolveBridgeKeyAuth = (args: {
   };
 };
 
+/** Preferred agent identity blobs for IdentitiesOnly selection. */
+const resolveAgentPublicKeys = (
+  key?: Pick<SSHKey, "publicKey" | "certificate">,
+): string[] | undefined => {
+  const keys: string[] = [];
+  const publicKey = key?.publicKey?.trim();
+  const certificate = key?.certificate?.trim();
+  if (publicKey) keys.push(publicKey);
+  // ssh-add -L lists the bare key and certificate as distinct identities; when
+  // the vault stores them separately, both must be selectable under IdentitiesOnly.
+  if (certificate && certificate !== publicKey) keys.push(certificate);
+  return keys.length > 0 ? keys : undefined;
+};
+
 export const resolveBridgeSshAgentAuth = (
   host: Pick<Host, "authMethod" | "useSshAgent" | "identityAgent" | "identityFilePaths" | "identitiesOnly" | "addKeysToAgent" | "useKeychain" | "agentForwarding">,
-  key?: Pick<SSHKey, "certificate" | "publicKey" | "source" | "filePath">,
+  key?: Pick<SSHKey, "certificate" | "publicKey" | "source" | "filePath" | "type" | "privateKey">,
   authMethod?: HostAuthMethod,
 ): {
   useSshAgent?: boolean;
@@ -268,25 +303,70 @@ export const resolveBridgeSshAgentAuth = (
     && !isSshAgentNoneValue(host.identityAgent)
     ? { identityAgent: host.identityAgent }
     : {};
-  if (authMethod === "password" || authMethod === "certificate" || key?.certificate?.trim()) {
+
+  const isFidoSk = requiresFidoSshAgentAuth({
+    type: key?.type,
+    publicKey: key?.publicKey,
+    privateKey: key?.privateKey,
+  });
+
+  const hasAgentSelector = Boolean(
+    key?.publicKey?.trim()
+    || (key?.source === "reference" && key.filePath?.trim())
+    || host.identityFilePaths?.some((filePath) => filePath.trim())
+    // Inline imported sk private key handle still needs agent; selection uses
+    // the public key when present, otherwise the agent is used non-strictly.
+    || (isFidoSk && key?.privateKey?.trim()),
+  );
+
+  // FIDO2 SK keys always require the system agent (hardware signs via
+  // ssh-sk-helper), whether selected explicitly or via a CA certificate
+  // wrapping the SK public key.
+  const fidoAgentAuth = () => {
+    if (!hasAgentSelector && !key?.privateKey?.trim()) {
+      return { useSshAgent: false };
+    }
+    const agentPublicKeys = resolveAgentPublicKeys(key);
+    return {
+      useSshAgent: true,
+      identityAgent: host.identityAgent,
+      identitiesOnly: Boolean(key?.publicKey?.trim() || (key?.source === "reference" && key.filePath)),
+      addKeysToAgent: host.addKeysToAgent ?? "yes",
+      useKeychain: host.useKeychain,
+      ...(agentPublicKeys ? { agentPublicKeys } : {}),
+    };
+  };
+
+  if (authMethod === "password") {
     return { useSshAgent: false, ...forwardingAgent };
   }
-  if (authMethod === "key") {
-    const hasAgentSelector = Boolean(
-      key?.publicKey?.trim()
-      || (key?.source === "reference" && key.filePath?.trim())
-      || host.identityFilePaths?.some((filePath) => filePath.trim()),
-    );
+
+  if (authMethod === "certificate" || key?.certificate?.trim()) {
+    // A certificate over an SK public key still needs the agent for hardware
+    // signing; only non-FIDO certificate auth bypasses the agent entirely.
+    if (isFidoSk) {
+      return fidoAgentAuth();
+    }
+    return { useSshAgent: false, ...forwardingAgent };
+  }
+
+  if (authMethod === "key" || isFidoSk) {
+    // Explicit key auth without agent only works for soft keys; FIDO SK
+    // material is routed through the agent regardless of authMethod.
+    if (isFidoSk) {
+      return fidoAgentAuth();
+    }
     if (host.useSshAgent !== true || !hasAgentSelector) {
       return { useSshAgent: false, ...forwardingAgent };
     }
+    const agentPublicKeys = resolveAgentPublicKeys(key);
     return {
       useSshAgent: true,
       identityAgent: host.identityAgent,
       identitiesOnly: true,
       addKeysToAgent: host.addKeysToAgent,
       useKeychain: host.useKeychain,
-      ...(key?.publicKey?.trim() ? { agentPublicKeys: [key.publicKey] } : {}),
+      ...(agentPublicKeys ? { agentPublicKeys } : {}),
     };
   }
   if (host.useSshAgent !== true) {
@@ -294,13 +374,14 @@ export const resolveBridgeSshAgentAuth = (
       ? forwardingAgent
       : { useSshAgent: false, ...forwardingAgent };
   }
+  const agentPublicKeys = resolveAgentPublicKeys(key);
   return {
     useSshAgent: true,
     identityAgent: host.identityAgent,
     identitiesOnly: host.identitiesOnly,
     addKeysToAgent: host.addKeysToAgent,
     useKeychain: host.useKeychain,
-    ...(key?.publicKey?.trim() ? { agentPublicKeys: [key.publicKey] } : {}),
+    ...(agentPublicKeys ? { agentPublicKeys } : {}),
   };
 };
 

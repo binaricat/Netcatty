@@ -22,6 +22,7 @@ import { STORAGE_KEY_VAULT_KEYS_VIEW_MODE } from "../infrastructure/config/stora
 import { logger } from "../lib/logger";
 import { cn } from "../lib/utils";
 import { Host, Identity, KeyType, ProxyProfile, SSHKey } from "../types";
+import { resolveImportedKeyType } from "./keychain/utils";
 import { ManagedSource } from "../domain/models";
 import { useKeychainBackend } from "../application/state/useKeychainBackend";
 import SelectHostPanel from "./SelectHostPanel";
@@ -378,6 +379,12 @@ echo $3 >> "$FILE"`);
         type: keyType,
         bits: keySize,
         comment: `${draftKey.label.trim()}@netcatty`,
+        resident: keyType === "ED25519-SK" || keyType === "ECDSA-SK"
+          ? !!(draftKey as { resident?: boolean }).resident
+          : undefined,
+        verifyRequired: keyType === "ED25519-SK" || keyType === "ECDSA-SK"
+          ? !!(draftKey as { verifyRequired?: boolean }).verifyRequired
+          : undefined,
       });
       if (!result) {
         throw new Error(
@@ -388,15 +395,17 @@ echo $3 >> "$FILE"`);
         throw new Error(result.error || t("keychain.error.generateKeyPairFailed"));
       }
 
+      const resolvedType = (result.keyType as KeyType | undefined) || keyType;
+      const isFidoSk = resolvedType === "ED25519-SK" || resolvedType === "ECDSA-SK";
       const newKey: SSHKey = {
         id: crypto.randomUUID(),
         label: draftKey.label.trim(),
-        type: keyType,
-        keySize: keyType !== "ED25519" ? keySize : undefined,
+        type: resolvedType,
+        keySize: resolvedType === "ED25519" || isFidoSk ? undefined : keySize,
         privateKey: result.privateKey,
         publicKey: result.publicKey,
-        passphrase: draftKey.passphrase,
-        savePassphrase: draftKey.savePassphrase,
+        passphrase: isFidoSk ? undefined : draftKey.passphrase,
+        savePassphrase: isFidoSk ? undefined : draftKey.savePassphrase,
         source: "generated",
         category: "key",
         created: Date.now(),
@@ -421,17 +430,17 @@ echo $3 >> "$FILE"`);
       return;
     }
 
-    // Detect key type from private key content
-    let detectedType: KeyType = "ED25519";
-    const pk = draftKey.privateKey.toLowerCase();
-    if (pk.includes("rsa")) detectedType = "RSA";
-    else if (pk.includes("ecdsa") || pk.includes("ec ")) detectedType = "ECDSA";
-    else if (pk.includes("ed25519")) detectedType = "ED25519";
+    // Prefer material detection over the form's seeded type (openImport always
+    // seeds type: "ED25519", which would discard SK detection if used first).
+    const detectedType = resolveImportedKeyType({
+      privateKey: draftKey.privateKey,
+      publicKey: draftKey.publicKey,
+    });
 
     const newKey: SSHKey = {
       id: crypto.randomUUID(),
       label: draftKey.label.trim(),
-      type: (draftKey.type as KeyType) || detectedType,
+      type: detectedType,
       privateKey: draftKey.privateKey.trim(),
       publicKey: draftKey.publicKey?.trim() || undefined,
       certificate: draftKey.certificate?.trim() || undefined,
@@ -540,13 +549,10 @@ echo $3 >> "$FILE"`);
       reader.onload = (e) => {
         const content = e.target?.result as string;
         if (content) {
-          // Try to detect key type from content
-          let detectedType: KeyType = "ED25519";
-          const lc = content.toLowerCase();
-          if (lc.includes("rsa")) detectedType = "RSA";
-          else if (lc.includes("ecdsa") || lc.includes("ec private"))
-            detectedType = "ECDSA";
-          else if (lc.includes("ed25519")) detectedType = "ED25519";
+          const detectedType = resolveImportedKeyType({
+            privateKey: content.includes("PRIVATE KEY") ? content : content,
+            publicKey: content.includes("PRIVATE KEY") ? undefined : content,
+          });
 
           // Extract label from filename (remove extension)
           const label = file.name.replace(/\.(pem|key|pub|ppk)$/i, "");

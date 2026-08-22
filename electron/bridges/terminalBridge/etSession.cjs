@@ -159,39 +159,125 @@ main();
       return raw.toLowerCase().endsWith(".pub") ? raw : `${raw}.pub`;
     }
 
-    async function prepareEtSshAgentOptions(options) {
+    async function prepareEtSshAgentOptions(options, sender) {
+      const {
+        enhanceAuthOptionsForFido,
+        resolvePreparedAgentSocket,
+      } = require("../sshAuthHelper.cjs");
       const prepareOne = async (connectionOptions, logPrefix) => {
-        if (connectionOptions?.useSshAgent !== true && !connectionOptions?.agentForwarding) return connectionOptions;
+        const prepOptions = await enhanceAuthOptionsForFido(connectionOptions, sender);
+        const forceFido = prepOptions.useFidoAgent === true
+          && connectionOptions.authMethod !== "password";
+        if (connectionOptions?.useSshAgent !== true && !connectionOptions?.agentForwarding && !forceFido) {
+          return connectionOptions;
+        }
         let prepared = connectionOptions;
-        if (connectionOptions.useSshAgent === true) {
-          await prepareSystemSshAgentForAuth(connectionOptions, logPrefix);
-          const loginSocketPath = await getAvailableAgentSocket(connectionOptions.identityAgent, connectionOptions);
-          if (!loginSocketPath) {
-            throw new Error("System SSH agent is unavailable. Start or unlock it, or configure a valid agent socket.");
+        /** @type {(() => void)|null} */
+        let releasePreparedAgent = null;
+        try {
+          if (connectionOptions.useSshAgent === true || forceFido) {
+            const agent = await prepareSystemSshAgentForAuth(prepOptions, logPrefix);
+            if (typeof agent?._releaseNetcattyFidoAgent === "function") {
+              releasePreparedAgent = agent._releaseNetcattyFidoAgent;
+            }
+            const socketPath = resolvePreparedAgentSocket(agent, prepOptions)
+              || await getAvailableAgentSocket(connectionOptions.identityAgent, connectionOptions);
+            if (!socketPath) {
+              throw new Error(
+                forceFido
+                  ? "FIDO2 SSH agent is unavailable. Install OpenSSH with libfido2 and try again."
+                  : "System SSH agent is unavailable. Start or unlock it, or configure a valid agent socket.",
+              );
+            }
+            prepared = {
+              ...prepared,
+              useSshAgent: true,
+              _resolvedSshAgentSocket: socketPath,
+              ...(releasePreparedAgent
+                ? { _releaseNetcattyFidoAgent: releasePreparedAgent }
+                : {}),
+            };
           }
-          prepared = { ...prepared, _resolvedSshAgentSocket: loginSocketPath };
-        }
-        if (connectionOptions.agentForwarding) {
-          const forwardingSocketPath = await getAvailableForwardingAgentSocket(
-            connectionOptions.identityAgent,
-            connectionOptions,
-          );
-          if (forwardingSocketPath) {
-            prepared = { ...prepared, _resolvedForwardingAgentSocket: forwardingSocketPath };
+          if (connectionOptions.agentForwarding) {
+            // May throw (e.g. Windows Pageant/Cygwin rejected for native OpenSSH).
+            // Release this hop's already-acquired FIDO agent/askpass lease before
+            // rethrowing — preparedEntries only sees hops that return successfully.
+            const forwardingSocketPath = await getAvailableForwardingAgentSocket(
+              connectionOptions.identityAgent,
+              connectionOptions,
+            );
+            if (forwardingSocketPath) {
+              prepared = { ...prepared, _resolvedForwardingAgentSocket: forwardingSocketPath };
+            }
           }
+          return prepared;
+        } catch (error) {
+          if (typeof releasePreparedAgent === "function") {
+            try { releasePreparedAgent(); } catch { /* ignore */ }
+          }
+          throw error;
         }
-        return prepared;
       };
 
-      const preparedTarget = await prepareOne(options, "[ET]");
-      if (!Array.isArray(options.jumpHosts) || options.jumpHosts.length === 0) {
-        return preparedTarget;
+      // Track successfully prepared hops so a later prepareOne failure can release
+      // earlier FIDO agent/askpass leases (caller still has the no-op release).
+      const preparedEntries = [];
+      const releasePreparedEntries = () => {
+        const seen = new Set();
+        for (const entry of preparedEntries) {
+          const releaseFn = entry?._releaseNetcattyFidoAgent;
+          if (typeof releaseFn !== "function" || seen.has(releaseFn)) continue;
+          seen.add(releaseFn);
+          try { releaseFn(); } catch { /* ignore */ }
+        }
+      };
+
+      try {
+        const preparedTarget = await prepareOne(options, "[ET]");
+        preparedEntries.push(preparedTarget);
+        if (!Array.isArray(options.jumpHosts) || options.jumpHosts.length === 0) {
+          return preparedTarget;
+        }
+        const preparedJumpHosts = [];
+        for (let index = 0; index < options.jumpHosts.length; index += 1) {
+          const preparedJump = await prepareOne(
+            options.jumpHosts[index],
+            `[ET Chain] Hop ${index + 1}:`,
+          );
+          preparedEntries.push(preparedJump);
+          preparedJumpHosts.push(preparedJump);
+        }
+        return { ...preparedTarget, jumpHosts: preparedJumpHosts };
+      } catch (error) {
+        releasePreparedEntries();
+        throw error;
       }
-      const preparedJumpHosts = [];
-      for (let index = 0; index < options.jumpHosts.length; index += 1) {
-        preparedJumpHosts.push(await prepareOne(options.jumpHosts[index], `[ET Chain] Hop ${index + 1}:`));
+    }
+
+    function collectEtFidoAgentReleases(options) {
+      const releases = [];
+      if (typeof options?._releaseNetcattyFidoAgent === "function") {
+        releases.push(options._releaseNetcattyFidoAgent);
       }
-      return { ...preparedTarget, jumpHosts: preparedJumpHosts };
+      for (const jump of options?.jumpHosts || []) {
+        if (typeof jump?._releaseNetcattyFidoAgent === "function") {
+          releases.push(jump._releaseNetcattyFidoAgent);
+        }
+      }
+      return releases;
+    }
+
+    function createOneShotEtFidoAgentReleases(options) {
+      const pending = collectEtFidoAgentReleases(options);
+      if (pending.length === 0) return () => {};
+      const seen = new Set();
+      return () => {
+        for (const releaseFn of pending) {
+          if (seen.has(releaseFn)) continue;
+          seen.add(releaseFn);
+          try { releaseFn(); } catch { /* ignore */ }
+        }
+      };
     }
 
     function applyEtSshAgentEnvironment(env, options) {
@@ -1162,14 +1248,17 @@ main();
       }
 
       let sshEnvironment;
+      let releaseFidoAgents = () => {};
       try {
-        const preparedOptions = await prepareEtSshAgentOptions(options);
+        const preparedOptions = await prepareEtSshAgentOptions(options, event?.sender);
+        releaseFidoAgents = createOneShotEtFidoAgentReleases(preparedOptions);
         options = preparedOptions;
         if (options.agentForwarding && options._resolvedForwardingAgentSocket) {
           args.push("-f", "--ssh-socket", options._resolvedForwardingAgentSocket);
         }
         sshEnvironment = prepareEtSshEnvironment(sessionId, preparedOptions);
       } catch (err) {
+        releaseFidoAgents();
         throw new Error(err instanceof Error ? err.message : String(err));
       }
 
@@ -1282,6 +1371,9 @@ main();
           lastIdlePrompt: "",
           lastIdlePromptAt: 0,
           _promptTrackTail: "",
+          // Explicit close deletes the session before onExit; keep the one-shot
+          // release on the session so closeSession / quit cleanup can still run it.
+          releaseNetcattyFidoAgents: releaseFidoAgents,
         };
         {
           const { claimSessionSlot } = require("../sessionBootEpoch.cjs");
@@ -1289,6 +1381,7 @@ main();
           if (!claim.ok) {
             try { proc.kill(); } catch { /* ignore */ }
             cleanupSessionExternalAuthArtifacts(session);
+            releaseFidoAgents();
             const supersededError = new Error("Connection superseded by a newer reconnect");
             supersededError.code = "NETCATTY_BOOT_SUPERSEDED";
             throw supersededError;
@@ -1374,8 +1467,11 @@ main();
         proc.onExit((evt) => {
           flushEtPaced(() => {
             if (etExitFinalized) return;
-            if (sessions.get(sessionId) !== session) return;
             etExitFinalized = true;
+            // Release before the map check: explicit close already deleted the
+            // session entry, but the agent/askpass lease must still be dropped.
+            releaseFidoAgents();
+            if (sessions.get(sessionId) !== session) return;
             try { session.etStatsConn?.end(); } catch { /* ignore */ }
             cleanupSessionExternalAuthArtifacts(session);
             sessionLogStreamManager.stopStream(sessionId, session.logStreamToken);
@@ -1394,6 +1490,7 @@ main();
 
         return { sessionId };
       } catch (err) {
+        releaseFidoAgents();
         if (sshEnvironment?.artifacts) {
           cleanupSessionExternalAuthArtifacts({
             externalAuthArtifacts: sshEnvironment.artifacts,

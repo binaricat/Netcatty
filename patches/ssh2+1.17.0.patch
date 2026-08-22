@@ -1,8 +1,7 @@
 diff --git a/node_modules/ssh2/lib/agent.js b/node_modules/ssh2/lib/agent.js
-index bb495d1..c0d5def 100644
 --- a/node_modules/ssh2/lib/agent.js
 +++ b/node_modules/ssh2/lib/agent.js
-@@ -711,7 +711,10 @@ const AgentProtocol = (() => {
+@@ -711,7 +711,10 @@
                  hash: undefined,
                };
                let ctx;
@@ -14,7 +13,7 @@ index bb495d1..c0d5def 100644
                  if (flagsVal & SSH_AGENT_RSA_SHA2_256) {
                    ctx = 'rsa-sha2-256';
                    flags.hash = 'sha256';
-@@ -781,7 +784,11 @@ const AgentProtocol = (() => {
+@@ -781,7 +784,11 @@
        if (pubKey instanceof Error)
          throw new Error('Invalid public key argument');
  
@@ -28,10 +27,9 @@ index bb495d1..c0d5def 100644
            case 'sha256':
              flags = SSH_AGENT_RSA_SHA2_256;
 diff --git a/node_modules/ssh2/lib/client.js b/node_modules/ssh2/lib/client.js
-index 7291c2c..8943c9a 100644
 --- a/node_modules/ssh2/lib/client.js
 +++ b/node_modules/ssh2/lib/client.js
-@@ -2170,6 +2170,29 @@ function getKeyAlgos(client, key, serverSigAlgs) {
+@@ -2170,6 +2170,29 @@
            return [];
        }
        return [['ssh-rsa', 'sha1']];
@@ -62,19 +60,25 @@ index 7291c2c..8943c9a 100644
  }
  
 diff --git a/node_modules/ssh2/lib/protocol/Protocol.js b/node_modules/ssh2/lib/protocol/Protocol.js
-index 7302488..634acdd 100644
 --- a/node_modules/ssh2/lib/protocol/Protocol.js
 +++ b/node_modules/ssh2/lib/protocol/Protocol.js
-@@ -701,11 +701,19 @@ class Protocol {
+@@ -58,6 +58,7 @@
+ } = require('./kex.js');
+ const {
+   parseKey,
++  getOpenSSHCertSignatureAlgorithm,
+ } = require('./keyParser.js');
+ const MESSAGE_HANDLERS = require('./handlers.js');
+ const {
+@@ -701,11 +702,18 @@
        if (signature === false)
          throw new Error('Error while converting handshake signature');
  
 +      let sigAlgo = keyAlgo;
 +      if (signature && typeof signature === 'object' && signature._signatureAlgorithm)
 +        sigAlgo = signature._signatureAlgorithm;
-+      else if (typeof keyAlgo === 'string'
-+               && keyAlgo.endsWith('-cert-v01@openssh.com'))
-+        sigAlgo = keyAlgo.slice(0, -'-cert-v01@openssh.com'.length);
++      else
++        sigAlgo = getOpenSSHCertSignatureAlgorithm(keyAlgo);
 +
        const sigLen = signature.length;
 +      const sigAlgoLen = Buffer.byteLength(sigAlgo);
@@ -86,7 +90,7 @@ index 7302488..634acdd 100644
        );
  
        // TODO: simply copy from original "packet" to new `packet` to avoid
-@@ -729,12 +737,12 @@ class Protocol {
+@@ -729,12 +737,12 @@
        writeUInt32BE(packet, pubKeyLen, p += algoLen);
        packet.set(pubKey, p += 4);
  
@@ -103,16 +107,15 @@ index 7302488..634acdd 100644
        packet.set(signature, p += 4);
  
        // Servers shouldn't send packet type 60 in response to signed publickey
-@@ -810,19 +818,27 @@ class Protocol {
+@@ -810,19 +818,26 @@
        if (!signature)
          throw new Error('Error while converting handshake signature');
  
 +      let sigAlgo = keyAlgo;
 +      if (signature && typeof signature === 'object' && signature._signatureAlgorithm)
 +        sigAlgo = signature._signatureAlgorithm;
-+      else if (typeof keyAlgo === 'string'
-+               && keyAlgo.endsWith('-cert-v01@openssh.com'))
-+        sigAlgo = keyAlgo.slice(0, -'-cert-v01@openssh.com'.length);
++      else
++        sigAlgo = getOpenSSHCertSignatureAlgorithm(keyAlgo);
 +
        const sigLen = signature.length;
 +      const sigAlgoLen = Buffer.byteLength(sigAlgo);
@@ -136,7 +139,7 @@ index 7302488..634acdd 100644
        packet.set(signature, p += 4);
  
        this._authsQueue.push('hostbased');
-@@ -1916,7 +1932,10 @@ class Protocol {
+@@ -1916,7 +1931,10 @@
  }
  
  // SSH-protoversion-softwareversion (SP comments) CR LF
@@ -149,10 +152,9 @@ index 7302488..634acdd 100644
  // TODO: optimize this by starting n bytes from the end of this._buffer instead
  // of the beginning
 diff --git a/node_modules/ssh2/lib/protocol/SFTP.js b/node_modules/ssh2/lib/protocol/SFTP.js
-index 9f33c02..9751164 100644
 --- a/node_modules/ssh2/lib/protocol/SFTP.js
 +++ b/node_modules/ssh2/lib/protocol/SFTP.js
-@@ -117,6 +117,20 @@ const OPENSSH_MAX_PKT_LEN = 256 * 1024;
+@@ -117,6 +117,20 @@
  
  const bufferParser = makeBufferParser();
  
@@ -173,7 +175,7 @@ index 9f33c02..9751164 100644
  const fakeStderr = {
    readable: false,
    writable: false,
-@@ -155,6 +169,8 @@ class SFTP extends EventEmitter {
+@@ -155,6 +169,8 @@
      this._writeReqid = -1;
      this._requests = {};
      this._maxInPktLen = OPENSSH_MAX_PKT_LEN;
@@ -182,7 +184,7 @@ index 9f33c02..9751164 100644
      this._maxOutPktLen = 34000;
      this._maxReadLen =
        (this._isOpenSSH ? OPENSSH_MAX_PKT_LEN : 34000) - PKT_RW_OVERHEAD;
-@@ -196,6 +212,53 @@ class SFTP extends EventEmitter {
+@@ -196,6 +212,53 @@
        this.emit('end');
        return;
      }
@@ -236,7 +238,7 @@ index 9f33c02..9751164 100644
      /*
          uint32             length
          byte               type
-@@ -339,7 +402,7 @@ class SFTP extends EventEmitter {
+@@ -339,7 +402,7 @@
        uint32        pflags
        ATTRS         attrs
      */
@@ -245,7 +247,7 @@ index 9f33c02..9751164 100644
      let p = 9;
      const buf = Buffer.allocUnsafe(4 + 1 + 4 + 4 + pathLen + 4 + 4 + attrsLen);
  
-@@ -349,7 +412,7 @@ class SFTP extends EventEmitter {
+@@ -349,7 +412,7 @@
      writeUInt32BE(buf, reqid, 5);
  
      writeUInt32BE(buf, pathLen, p);
@@ -254,7 +256,7 @@ index 9f33c02..9751164 100644
      writeUInt32BE(buf, flags, p += pathLen);
      writeUInt32BE(buf, attrsFlags, p += 4);
      if (attrsLen) {
-@@ -734,7 +797,7 @@ class SFTP extends EventEmitter {
+@@ -734,7 +797,7 @@
        uint32     id
        string     filename
      */
@@ -263,7 +265,7 @@ index 9f33c02..9751164 100644
      let p = 9;
      const buf = Buffer.allocUnsafe(4 + 1 + 4 + 4 + fnameLen);
  
-@@ -744,7 +807,7 @@ class SFTP extends EventEmitter {
+@@ -744,7 +807,7 @@
      writeUInt32BE(buf, reqid, 5);
  
      writeUInt32BE(buf, fnameLen, p);
@@ -272,7 +274,7 @@ index 9f33c02..9751164 100644
  
      this._requests[reqid] = { cb };
  
-@@ -762,8 +825,8 @@ class SFTP extends EventEmitter {
+@@ -762,8 +825,8 @@
        string     oldpath
        string     newpath
      */
@@ -283,7 +285,7 @@ index 9f33c02..9751164 100644
      let p = 9;
      const buf = Buffer.allocUnsafe(4 + 1 + 4 + 4 + oldLen + 4 + newLen);
  
-@@ -773,9 +836,9 @@ class SFTP extends EventEmitter {
+@@ -773,9 +836,9 @@
      writeUInt32BE(buf, reqid, 5);
  
      writeUInt32BE(buf, oldLen, p);
@@ -295,7 +297,7 @@ index 9f33c02..9751164 100644
  
      this._requests[reqid] = { cb };
  
-@@ -806,7 +869,7 @@ class SFTP extends EventEmitter {
+@@ -806,7 +869,7 @@
        string     path
        ATTRS      attrs
      */
@@ -304,7 +306,7 @@ index 9f33c02..9751164 100644
      let p = 9;
      const buf = Buffer.allocUnsafe(4 + 1 + 4 + 4 + pathLen + 4 + attrsLen);
  
-@@ -816,7 +879,7 @@ class SFTP extends EventEmitter {
+@@ -816,7 +879,7 @@
      writeUInt32BE(buf, reqid, 5);
  
      writeUInt32BE(buf, pathLen, p);
@@ -313,7 +315,7 @@ index 9f33c02..9751164 100644
      writeUInt32BE(buf, flags, p += pathLen);
      if (attrsLen) {
        p += 4;
-@@ -844,7 +907,7 @@ class SFTP extends EventEmitter {
+@@ -844,7 +907,7 @@
        uint32     id
        string     path
      */
@@ -322,7 +324,7 @@ index 9f33c02..9751164 100644
      let p = 9;
      const buf = Buffer.allocUnsafe(4 + 1 + 4 + 4 + pathLen);
  
-@@ -854,7 +917,7 @@ class SFTP extends EventEmitter {
+@@ -854,7 +917,7 @@
      writeUInt32BE(buf, reqid, 5);
  
      writeUInt32BE(buf, pathLen, p);
@@ -331,7 +333,7 @@ index 9f33c02..9751164 100644
  
      this._requests[reqid] = { cb };
  
-@@ -987,7 +1050,7 @@ class SFTP extends EventEmitter {
+@@ -987,7 +1050,7 @@
        uint32     id
        string     path
      */
@@ -340,7 +342,7 @@ index 9f33c02..9751164 100644
      let p = 9;
      const buf = Buffer.allocUnsafe(4 + 1 + 4 + 4 + pathLen);
  
-@@ -997,7 +1060,7 @@ class SFTP extends EventEmitter {
+@@ -997,7 +1060,7 @@
      writeUInt32BE(buf, reqid, 5);
  
      writeUInt32BE(buf, pathLen, p);
@@ -349,7 +351,7 @@ index 9f33c02..9751164 100644
  
      this._requests[reqid] = { cb };
  
-@@ -1014,7 +1077,7 @@ class SFTP extends EventEmitter {
+@@ -1014,7 +1077,7 @@
        uint32     id
        string     path
      */
@@ -358,7 +360,7 @@ index 9f33c02..9751164 100644
      let p = 9;
      const buf = Buffer.allocUnsafe(4 + 1 + 4 + 4 + pathLen);
  
-@@ -1024,7 +1087,7 @@ class SFTP extends EventEmitter {
+@@ -1024,7 +1087,7 @@
      writeUInt32BE(buf, reqid, 5);
  
      writeUInt32BE(buf, pathLen, p);
@@ -367,7 +369,7 @@ index 9f33c02..9751164 100644
  
      this._requests[reqid] = { cb };
  
-@@ -1041,7 +1104,7 @@ class SFTP extends EventEmitter {
+@@ -1041,7 +1104,7 @@
        uint32     id
        string     path
      */
@@ -376,7 +378,7 @@ index 9f33c02..9751164 100644
      let p = 9;
      const buf = Buffer.allocUnsafe(4 + 1 + 4 + 4 + pathLen);
  
-@@ -1051,7 +1114,7 @@ class SFTP extends EventEmitter {
+@@ -1051,7 +1114,7 @@
      writeUInt32BE(buf, reqid, 5);
  
      writeUInt32BE(buf, pathLen, p);
@@ -385,7 +387,7 @@ index 9f33c02..9751164 100644
  
      this._requests[reqid] = { cb };
  
-@@ -1080,7 +1143,7 @@ class SFTP extends EventEmitter {
+@@ -1080,7 +1143,7 @@
        string     path
        ATTRS      attrs
      */
@@ -394,7 +396,7 @@ index 9f33c02..9751164 100644
      let p = 9;
      const buf = Buffer.allocUnsafe(4 + 1 + 4 + 4 + pathLen + 4 + attrsLen);
  
-@@ -1090,7 +1153,7 @@ class SFTP extends EventEmitter {
+@@ -1090,7 +1153,7 @@
      writeUInt32BE(buf, reqid, 5);
  
      writeUInt32BE(buf, pathLen, p);
@@ -403,7 +405,7 @@ index 9f33c02..9751164 100644
      writeUInt32BE(buf, flags, p += pathLen);
      if (attrsLen) {
        p += 4;
-@@ -1205,7 +1268,7 @@ class SFTP extends EventEmitter {
+@@ -1205,7 +1268,7 @@
        uint32     id
        string     path
      */
@@ -412,7 +414,7 @@ index 9f33c02..9751164 100644
      let p = 9;
      const buf = Buffer.allocUnsafe(4 + 1 + 4 + 4 + pathLen);
  
-@@ -1215,7 +1278,7 @@ class SFTP extends EventEmitter {
+@@ -1215,7 +1278,7 @@
      writeUInt32BE(buf, reqid, 5);
  
      writeUInt32BE(buf, pathLen, p);
@@ -421,7 +423,7 @@ index 9f33c02..9751164 100644
  
      this._requests[reqid] = {
        cb: (err, names) => {
-@@ -1243,8 +1306,8 @@ class SFTP extends EventEmitter {
+@@ -1243,8 +1306,8 @@
        string     linkpath
        string     targetpath
      */
@@ -432,7 +434,7 @@ index 9f33c02..9751164 100644
      let p = 9;
      const buf = Buffer.allocUnsafe(4 + 1 + 4 + 4 + linkLen + 4 + targetLen);
  
-@@ -1256,14 +1319,14 @@ class SFTP extends EventEmitter {
+@@ -1256,14 +1319,14 @@
      if (this._isOpenSSH) {
        // OpenSSH has linkpath and targetpath positions switched
        writeUInt32BE(buf, targetLen, p);
@@ -451,7 +453,7 @@ index 9f33c02..9751164 100644
      }
  
      this._requests[reqid] = { cb };
-@@ -1281,7 +1344,7 @@ class SFTP extends EventEmitter {
+@@ -1281,7 +1344,7 @@
        uint32     id
        string     path
      */
@@ -460,7 +462,7 @@ index 9f33c02..9751164 100644
      let p = 9;
      const buf = Buffer.allocUnsafe(4 + 1 + 4 + 4 + pathLen);
  
-@@ -1291,7 +1354,7 @@ class SFTP extends EventEmitter {
+@@ -1291,7 +1354,7 @@
      writeUInt32BE(buf, reqid, 5);
  
      writeUInt32BE(buf, pathLen, p);
@@ -469,7 +471,7 @@ index 9f33c02..9751164 100644
  
      this._requests[reqid] = {
        cb: (err, names) => {
-@@ -1325,8 +1388,8 @@ class SFTP extends EventEmitter {
+@@ -1325,8 +1388,8 @@
        string    oldpath
        string    newpath
      */
@@ -480,7 +482,7 @@ index 9f33c02..9751164 100644
      let p = 9;
      const buf =
        Buffer.allocUnsafe(4 + 1 + 4 + 4 + 24 + 4 + oldLen + 4 + newLen);
-@@ -1337,11 +1400,11 @@ class SFTP extends EventEmitter {
+@@ -1337,11 +1400,11 @@
      writeUInt32BE(buf, reqid, 5);
  
      writeUInt32BE(buf, 24, p);
@@ -495,7 +497,7 @@ index 9f33c02..9751164 100644
  
      this._requests[reqid] = { cb };
  
-@@ -1364,7 +1427,7 @@ class SFTP extends EventEmitter {
+@@ -1364,7 +1427,7 @@
        string    "statvfs@openssh.com"
        string    path
      */
@@ -504,7 +506,7 @@ index 9f33c02..9751164 100644
      let p = 9;
      const buf = Buffer.allocUnsafe(4 + 1 + 4 + 4 + 19 + 4 + pathLen);
  
-@@ -1374,9 +1437,9 @@ class SFTP extends EventEmitter {
+@@ -1374,9 +1437,9 @@
      writeUInt32BE(buf, reqid, 5);
  
      writeUInt32BE(buf, 19, p);
@@ -516,7 +518,7 @@ index 9f33c02..9751164 100644
  
      this._requests[reqid] = { extended: 'statvfs@openssh.com', cb };
  
-@@ -1411,7 +1474,7 @@ class SFTP extends EventEmitter {
+@@ -1411,7 +1474,7 @@
      writeUInt32BE(buf, reqid, 5);
  
      writeUInt32BE(buf, 20, p);
@@ -525,7 +527,7 @@ index 9f33c02..9751164 100644
      writeUInt32BE(buf, handleLen, p += 20);
      buf.set(handle, p += 4);
  
-@@ -1437,8 +1500,8 @@ class SFTP extends EventEmitter {
+@@ -1437,8 +1500,8 @@
        string    oldpath
        string    newpath
      */
@@ -536,7 +538,7 @@ index 9f33c02..9751164 100644
      let p = 9;
      const buf =
        Buffer.allocUnsafe(4 + 1 + 4 + 4 + 20 + 4 + oldLen + 4 + newLen);
-@@ -1449,11 +1512,11 @@ class SFTP extends EventEmitter {
+@@ -1449,11 +1512,11 @@
      writeUInt32BE(buf, reqid, 5);
  
      writeUInt32BE(buf, 20, p);
@@ -551,7 +553,7 @@ index 9f33c02..9751164 100644
  
      this._requests[reqid] = { cb };
  
-@@ -1488,7 +1551,7 @@ class SFTP extends EventEmitter {
+@@ -1488,7 +1551,7 @@
      writeUInt32BE(buf, reqid, 5);
  
      writeUInt32BE(buf, 17, p);
@@ -560,7 +562,7 @@ index 9f33c02..9751164 100644
      writeUInt32BE(buf, handleLen, p += 17);
      buf.set(handle, p += 4);
  
-@@ -1524,7 +1587,7 @@ class SFTP extends EventEmitter {
+@@ -1524,7 +1587,7 @@
        string    path
        ATTRS     attrs
      */
@@ -569,7 +571,7 @@ index 9f33c02..9751164 100644
      let p = 9;
      const buf =
        Buffer.allocUnsafe(4 + 1 + 4 + 4 + 20 + 4 + pathLen + 4 + attrsLen);
-@@ -1535,10 +1598,10 @@ class SFTP extends EventEmitter {
+@@ -1535,10 +1598,10 @@
      writeUInt32BE(buf, reqid, 5);
  
      writeUInt32BE(buf, 20, p);
@@ -582,7 +584,7 @@ index 9f33c02..9751164 100644
  
      writeUInt32BE(buf, flags, p += pathLen);
      if (attrsLen) {
-@@ -1573,7 +1636,7 @@ class SFTP extends EventEmitter {
+@@ -1573,7 +1636,7 @@
        string    "expand-path@openssh.com"
        string    path
      */
@@ -591,7 +593,7 @@ index 9f33c02..9751164 100644
      let p = 9;
      const buf = Buffer.allocUnsafe(4 + 1 + 4 + 4 + 23 + 4 + pathLen);
  
-@@ -1583,10 +1646,10 @@ class SFTP extends EventEmitter {
+@@ -1583,10 +1646,10 @@
      writeUInt32BE(buf, reqid, 5);
  
      writeUInt32BE(buf, 23, p);
@@ -604,7 +606,7 @@ index 9f33c02..9751164 100644
  
      this._requests[reqid] = {
        cb: (err, names) => {
-@@ -1653,7 +1716,7 @@ class SFTP extends EventEmitter {
+@@ -1653,7 +1716,7 @@
  
      writeUInt32BE(buf, 9, p);
      p += 4;
@@ -613,7 +615,7 @@ index 9f33c02..9751164 100644
      p += 9;
  
      writeUInt32BE(buf, srcHandle.length, p);
-@@ -1708,7 +1771,7 @@ class SFTP extends EventEmitter {
+@@ -1708,7 +1771,7 @@
        string    username
      */
      let p = 0;
@@ -622,7 +624,7 @@ index 9f33c02..9751164 100644
      const buf = Buffer.allocUnsafe(
        4 + 1
        + 4
-@@ -1728,12 +1791,12 @@ class SFTP extends EventEmitter {
+@@ -1728,12 +1791,12 @@
  
      writeUInt32BE(buf, 14, p);
      p += 4;
@@ -637,7 +639,7 @@ index 9f33c02..9751164 100644
      p += usernameLen;
  
      this._requests[reqid] = {
-@@ -1806,7 +1869,7 @@ class SFTP extends EventEmitter {
+@@ -1806,7 +1869,7 @@
  
      writeUInt32BE(buf, 30, p);
      p += 4;
@@ -646,7 +648,7 @@ index 9f33c02..9751164 100644
      p += 30;
  
      writeUInt32BE(buf, 4 * uids.length, p);
-@@ -1871,7 +1934,7 @@ class SFTP extends EventEmitter {
+@@ -1871,7 +1934,7 @@
  
      message || (message = '');
  
@@ -655,7 +657,7 @@ index 9f33c02..9751164 100644
      let p = 9;
      const buf = Buffer.allocUnsafe(4 + 1 + 4 + 4 + 4 + msgLen + 4);
  
-@@ -1884,7 +1947,7 @@ class SFTP extends EventEmitter {
+@@ -1884,7 +1947,7 @@
      writeUInt32BE(buf, msgLen, p += 4);
      p += 4;
      if (msgLen) {
@@ -664,7 +666,7 @@ index 9f33c02..9751164 100644
        p += msgLen;
      }
  
-@@ -1913,7 +1976,7 @@ class SFTP extends EventEmitter {
+@@ -1913,7 +1976,7 @@
      const dataLen = (
        isBuffer
        ? data.length
@@ -673,7 +675,7 @@ index 9f33c02..9751164 100644
      );
      let p = 9;
      const buf = Buffer.allocUnsafe(4 + 1 + 4 + 4 + dataLen);
-@@ -1927,7 +1990,7 @@ class SFTP extends EventEmitter {
+@@ -1927,7 +1990,7 @@
        if (isBuffer)
          buf.set(data, p += 4);
        else if (isUTF8)
@@ -682,7 +684,7 @@ index 9f33c02..9751164 100644
        else
          buf.write(data, p += 4, dataLen, encoding);
      }
-@@ -1959,13 +2022,13 @@ class SFTP extends EventEmitter {
+@@ -1959,13 +2022,13 @@
          ? ''
          : name.filename
        );
@@ -698,7 +700,7 @@ index 9f33c02..9751164 100644
  
        if (typeof name.attrs === 'object' && name.attrs !== null) {
          nameAttrs = attrsToBytes(name.attrs);
-@@ -2011,11 +2074,11 @@ class SFTP extends EventEmitter {
+@@ -2011,11 +2074,11 @@
            ? ''
            : name.filename
          );
@@ -712,7 +714,7 @@ index 9f33c02..9751164 100644
            p += len;
          }
        }
-@@ -2026,11 +2089,11 @@ class SFTP extends EventEmitter {
+@@ -2026,11 +2089,11 @@
            ? ''
            : name.longname
          );
@@ -726,7 +728,7 @@ index 9f33c02..9751164 100644
            p += len;
          }
        }
-@@ -2749,7 +2812,7 @@ function requestLimits(sftp, cb) {
+@@ -2749,7 +2812,7 @@
    writeUInt32BE(buf, reqid, 5);
  
    writeUInt32BE(buf, 18, p);
@@ -735,7 +737,7 @@ index 9f33c02..9751164 100644
  
    sftp._requests[reqid] = { extended: 'limits@openssh.com', cb };
  
-@@ -2953,18 +3016,28 @@ const CLIENT_HANDLERS = {
+@@ -2953,18 +3016,28 @@
          // spec not specifying an encoding because the specs for newer
          // versions of the protocol all explicitly specify UTF-8 for
          // filenames
@@ -768,10 +770,21 @@ index 9f33c02..9751164 100644
        if (names !== undefined) {
          sftp._debug && sftp._debug(
 diff --git a/node_modules/ssh2/lib/protocol/constants.js b/node_modules/ssh2/lib/protocol/constants.js
-index ad77592..4b3f71a 100644
 --- a/node_modules/ssh2/lib/protocol/constants.js
 +++ b/node_modules/ssh2/lib/protocol/constants.js
-@@ -160,6 +160,7 @@ const COMPAT = {
+@@ -73,7 +73,11 @@
+   DEFAULT_SERVER_HOST_KEY.unshift('ssh-ed25519');
+ const SUPPORTED_SERVER_HOST_KEY = DEFAULT_SERVER_HOST_KEY.concat([
+   'ssh-dss',
++  // FIDO/U2F security keys (client publickey auth / rare host keys).
++  'sk-ecdsa-sha2-nistp256@openssh.com',
+ ]);
++if (eddsaSupported)
++  SUPPORTED_SERVER_HOST_KEY.push('sk-ssh-ed25519@openssh.com');
+ 
+ 
+ const canUseCipher = (() => {
+@@ -160,6 +164,7 @@
    DYN_RPORT_BUG: 1 << 2,
    BUG_DHGEX_LARGE: 1 << 3,
    IMPLY_RSA_SHA2_SIGALGS: 1 << 4,
@@ -779,7 +792,7 @@ index ad77592..4b3f71a 100644
  };
  
  module.exports = {
-@@ -330,6 +331,7 @@ module.exports = {
+@@ -330,6 +335,7 @@
    COMPAT_CHECKS: [
      [ 'Cisco-1.25', COMPAT.BAD_DHGEX ],
      [ /^Cisco-1[.]/, COMPAT.BUG_DHGEX_LARGE ],
@@ -788,10 +801,9 @@ index ad77592..4b3f71a 100644
      [ /^OpenSSH_5[.][0-9]+/, COMPAT.DYN_RPORT_BUG ],
      [ /^OpenSSH_7[.]4/, COMPAT.IMPLY_RSA_SHA2_SIGALGS ],
 diff --git a/node_modules/ssh2/lib/protocol/kex.js b/node_modules/ssh2/lib/protocol/kex.js
-index 811e631..4b5f792 100644
 --- a/node_modules/ssh2/lib/protocol/kex.js
 +++ b/node_modules/ssh2/lib/protocol/kex.js
-@@ -1377,8 +1377,13 @@ const createKeyExchange = (() => {
+@@ -1377,8 +1377,13 @@
        this._generator = null;
        this._minBits = GEX_MIN_BITS;
        this._prefBits = dhEstimate(this.negotiated);
@@ -807,13 +819,291 @@ index 811e631..4b5f792 100644
      }
      start() {
 diff --git a/node_modules/ssh2/lib/protocol/keyParser.js b/node_modules/ssh2/lib/protocol/keyParser.js
-index a276c1a..df123fd 100644
 --- a/node_modules/ssh2/lib/protocol/keyParser.js
 +++ b/node_modules/ssh2/lib/protocol/keyParser.js
-@@ -1186,6 +1186,26 @@ function OpenSSH_Public(type, comment, pubPEM, pubSSH, algo) {
+@@ -35,6 +35,9 @@
+ const SYM_PUB_PEM = Symbol('Public key PEM');
+ const SYM_PUB_SSH = Symbol('Public key SSH');
+ const SYM_DECRYPTED = Symbol('Decrypted Key');
++const SYM_SK_APP = Symbol('SK Application');
++const SYM_SK_HANDLE = Symbol('SK Key Handle');
++const SYM_SK_FLAGS = Symbol('SK Flags');
+ 
+ // Create OpenSSL cipher name -> SSH cipher name conversion table
+ const CIPHER_INFO_OPENSSL = Object.create(null);
+@@ -258,6 +261,55 @@
+   return publicKey;
+ }
+ 
++// FIDO/U2F (security key) SSH wire-format public keys.
++// See OpenSSH's PROTOCOL.u2f.
++function genOpenSSHSKEdPub(pub, application) {
++  const typeName = 'sk-ssh-ed25519@openssh.com';
++  const total =
++    4 + typeName.length + 4 + pub.length + 4 + application.length;
++  const publicKey = Buffer.allocUnsafe(total);
++
++  let i = 0;
++  writeUInt32BE(publicKey, typeName.length, i);
++  publicKey.utf8Write(typeName, i += 4, typeName.length);
++  i += typeName.length;
++
++  writeUInt32BE(publicKey, pub.length, i);
++  publicKey.set(pub, i += 4);
++  i += pub.length;
++
++  writeUInt32BE(publicKey, application.length, i);
++  publicKey.utf8Write(application, i += 4, application.length);
++
++  return publicKey;
++}
++
++function genOpenSSHSKECDSAPub(Q, application) {
++  const typeName = 'sk-ecdsa-sha2-nistp256@openssh.com';
++  const curveName = 'nistp256';
++  const total = 4 + typeName.length + 4 + curveName.length + 4 + Q.length
++                + 4 + application.length;
++  const publicKey = Buffer.allocUnsafe(total);
++
++  let i = 0;
++  writeUInt32BE(publicKey, typeName.length, i);
++  publicKey.utf8Write(typeName, i += 4, typeName.length);
++  i += typeName.length;
++
++  writeUInt32BE(publicKey, curveName.length, i);
++  publicKey.utf8Write(curveName, i += 4, curveName.length);
++  i += curveName.length;
++
++  writeUInt32BE(publicKey, Q.length, i);
++  publicKey.set(Q, i += 4);
++  i += Q.length;
++
++  writeUInt32BE(publicKey, application.length, i);
++  publicKey.utf8Write(application, i += 4, application.length);
++
++  return publicKey;
++}
++
+ function genOpenSSLEdPriv(priv) {
+   const asnWriter = new Ber.Writer();
+   asnWriter.startSequence();
+@@ -451,6 +503,82 @@
+   },
+ };
+ 
++// Base for FIDO/U2F security key public keys (sk-ssh-ed25519@openssh.com,
++// sk-ecdsa-sha2-nistp256@openssh.com).
++//
++// Signing requires the actual hardware token (typically performed by
++// ssh-agent talking to libfido2), so sign() is not implemented locally.
++//
++// Verifying takes the original message ("data"); the SK signature blob
++// includes the device flags and counter that must be folded into the
++// signed payload as defined by OpenSSH PROTOCOL.u2f:
++//
++//     sha256(application) || flags || counter || sha256(message)
++const SKBaseKey = {
++  ...BaseKey,
++  sign: function sign() {
++    return new Error(
++      'Cannot sign locally with a security-key (SK) public key; '
++        + 'signing must be performed by the FIDO/U2F hardware token '
++        + '(e.g. via ssh-agent)'
++    );
++  },
++  verify: function verify(data, signature, algo) {
++    /*
++      The SK signature blob is:
++        string  raw_signature
++                  - sk-ssh-ed25519: 64 raw bytes
++                  - sk-ecdsa-sha2-nistp256: SSH ECDSA blob (string r, string s)
++        byte    flags
++        uint32  counter
++    */
++    const sigParser = makeBufferParser();
++    sigParser.init(signature, 0);
++    const rawSig = sigParser.readString();
++    if (rawSig === undefined) {
++      sigParser.clear();
++      return new Error('Malformed SK signature');
++    }
++    const pos = sigParser.pos();
++    sigParser.clear();
++    if (pos + 5 > signature.length)
++      return new Error('Malformed SK signature');
++    const flags = signature[pos];
++    const counter = readUInt32BE(signature, pos + 1);
++
++    const appHash = createHash('sha256').update(this[SYM_SK_APP]).digest();
++    const dataHash = createHash('sha256').update(data).digest();
++
++    const signedData = Buffer.allocUnsafe(
++      appHash.length + 1 + 4 + dataHash.length
++    );
++    let p = 0;
++    signedData.set(appHash, p);
++    p += appHash.length;
++    signedData[p++] = flags;
++    writeUInt32BE(signedData, counter, p);
++    p += 4;
++    signedData.set(dataHash, p);
++
++    let toVerify = rawSig;
++    if (this.type === 'sk-ecdsa-sha2-nistp256@openssh.com') {
++      // Convert SSH ECDSA r,s blob to ASN.1 for OpenSSL
++      const { sigSSHToASN1 } = require('./utils.js');
++      toVerify = sigSSHToASN1(rawSig, 'ecdsa-sha2-nistp256');
++      if (!toVerify)
++        return new Error('Malformed SK ECDSA signature');
++    }
++
++    return BaseKey.verify.call(this, signedData, toVerify, algo);
++  },
++  getApplication: function getApplication() {
++    return this[SYM_SK_APP];
++  },
++  getKeyHandle: function getKeyHandle() {
++    return this[SYM_SK_HANDLE];
++  },
++};
++
+ 
+ function OpenSSH_Private(type, comment, privPEM, pubPEM, pubSSH, algo,
+                          decrypted) {
+@@ -463,6 +591,26 @@
+   this[SYM_DECRYPTED] = decrypted;
+ }
+ OpenSSH_Private.prototype = BaseKey;
++
++// FIDO/U2F security key OpenSSH private-key entry. The "private" portion is
++// just the device key handle (used by the host to talk to the FIDO token);
++// the actual private key never leaves the hardware. Local sign() therefore
++// returns an error -- signing has to be performed by ssh-agent (or another
++// component talking to the device).
++function OpenSSH_SK_Private(type, comment, pubPEM, pubSSH, algo, decrypted,
++                            application, keyHandle, flags) {
++  this.type = type;
++  this.comment = comment;
++  this[SYM_PRIV_PEM] = null;
++  this[SYM_PUB_PEM] = pubPEM;
++  this[SYM_PUB_SSH] = pubSSH;
++  this[SYM_HASH_ALGO] = algo;
++  this[SYM_DECRYPTED] = decrypted;
++  this[SYM_SK_APP] = application;
++  this[SYM_SK_HANDLE] = keyHandle;
++  this[SYM_SK_FLAGS] = flags;
++}
++OpenSSH_SK_Private.prototype = SKBaseKey;
+ {
+   const regexp = /^-----BEGIN OPENSSH PRIVATE KEY-----(?:\r\n|\n)([\s\S]+)(?:\r\n|\n)-----END OPENSSH PRIVATE KEY-----$/;
+   OpenSSH_Private.parse = (str, passphrase) => {
+@@ -771,6 +919,87 @@
+           privPEM = genOpenSSLECDSAPriv(oid, ecpub, ecpriv);
+           break;
+         }
++        case 'sk-ssh-ed25519@openssh.com': {
++          if (!eddsaSupported)
++            return new Error(`Unsupported OpenSSH private key type: ${type}`);
++          /*
++            string  public key
++            string  application
++            uint8   flags
++            string  key_handle
++            string  reserved
++          */
++          const edpub = readString(data, data._pos);
++          if (edpub === undefined || edpub.length !== 32)
++            return new Error('Malformed OpenSSH SK private key');
++          const application = readString(data, data._pos, true);
++          if (application === undefined)
++            return new Error('Malformed OpenSSH SK private key');
++          if (data._pos >= data.length)
++            return new Error('Malformed OpenSSH SK private key');
++          const flagsByte = data[data._pos];
++          data._pos += 1;
++          const keyHandle = readString(data, data._pos);
++          if (keyHandle === undefined)
++            return new Error('Malformed OpenSSH SK private key');
++          const reserved = readString(data, data._pos);
++          if (reserved === undefined)
++            return new Error('Malformed OpenSSH SK private key');
++
++          pubPEM = genOpenSSLEdPub(edpub);
++          pubSSH = genOpenSSHSKEdPub(edpub, application);
++          algo = null;
++          const privComment = readString(data, data._pos, true);
++          if (privComment === undefined)
++            return new Error('Malformed OpenSSH SK private key');
++          const skKey = new OpenSSH_SK_Private(
++            type, privComment, pubPEM, pubSSH, algo, decrypted,
++            application, keyHandle, flagsByte
++          );
++          keys.push(skKey);
++          continue;
++        }
++        case 'sk-ecdsa-sha2-nistp256@openssh.com': {
++          /*
++            string  curve name ("nistp256")
++            string  Q -- public
++            string  application
++            uint8   flags
++            string  key_handle
++            string  reserved
++          */
++          if (!skipFields(data, 1)) // Skip curve name
++            return new Error('Malformed OpenSSH SK private key');
++          const ecpub = readString(data, data._pos);
++          if (ecpub === undefined)
++            return new Error('Malformed OpenSSH SK private key');
++          const application = readString(data, data._pos, true);
++          if (application === undefined)
++            return new Error('Malformed OpenSSH SK private key');
++          if (data._pos >= data.length)
++            return new Error('Malformed OpenSSH SK private key');
++          const flagsByte = data[data._pos];
++          data._pos += 1;
++          const keyHandle = readString(data, data._pos);
++          if (keyHandle === undefined)
++            return new Error('Malformed OpenSSH SK private key');
++          const reserved = readString(data, data._pos);
++          if (reserved === undefined)
++            return new Error('Malformed OpenSSH SK private key');
++
++          pubPEM = genOpenSSLECDSAPub('1.2.840.10045.3.1.7', ecpub);
++          pubSSH = genOpenSSHSKECDSAPub(ecpub, application);
++          algo = 'sha256';
++          const privComment = readString(data, data._pos, true);
++          if (privComment === undefined)
++            return new Error('Malformed OpenSSH SK private key');
++          const skKey = new OpenSSH_SK_Private(
++            type, privComment, pubPEM, pubSSH, algo, decrypted,
++            application, keyHandle, flagsByte
++          );
++          keys.push(skKey);
++          continue;
++        }
+         default:
+           return new Error(`Unsupported OpenSSH private key type: ${type}`);
+       }
+@@ -1186,31 +1415,97 @@
    this[SYM_DECRYPTED] = false;
  }
  OpenSSH_Public.prototype = BaseKey;
++
++// FIDO/U2F security key public key wrapper. See SKBaseKey.
++function OpenSSH_SK_Public(type, comment, pubPEM, pubSSH, algo, application) {
++  this.type = type;
++  this.comment = comment;
++  this[SYM_PRIV_PEM] = null;
++  this[SYM_PUB_PEM] = pubPEM;
++  this[SYM_PUB_SSH] = pubSSH;
++  this[SYM_HASH_ALGO] = algo;
++  this[SYM_DECRYPTED] = false;
++  this[SYM_SK_APP] = application;
++  this[SYM_SK_HANDLE] = null;
++  this[SYM_SK_FLAGS] = 0;
++}
++OpenSSH_SK_Public.prototype = SKBaseKey;
 +
 +function isOpenSSHCertType(type) {
 +  return (typeof type === 'string'
@@ -829,6 +1119,30 @@ index a276c1a..df123fd 100644
 +    case 'rsa-sha2-256':
 +    case 'rsa-sha2-512':
 +      return 'ssh-rsa';
++    // OpenSSH places `-cert-v01` before `@openssh.com` for SK certs
++    // (sk-ssh-ed25519-cert-v01@openssh.com), so strip leaves the bare algorithm.
++    case 'sk-ssh-ed25519':
++      return 'sk-ssh-ed25519@openssh.com';
++    case 'sk-ecdsa-sha2-nistp256':
++      return 'sk-ecdsa-sha2-nistp256@openssh.com';
++    default:
++      return baseType;
++  }
++}
++
++// Wire signature algorithm for a publickey/hostbased cert identity.
++// Unlike getOpenSSHCertBaseType, RSA SHA2 certs keep rsa-sha2-* (not ssh-rsa).
++// SK certs must restore the trailing @openssh.com required on the wire.
++function getOpenSSHCertSignatureAlgorithm(type) {
++  if (typeof type !== 'string' || !/-cert-v0[01]@openssh\.com$/.test(type))
++    return type;
++
++  const baseType = type.replace(/-cert-v0[01]@openssh\.com$/, '');
++  switch (baseType) {
++    case 'sk-ssh-ed25519':
++      return 'sk-ssh-ed25519@openssh.com';
++    case 'sk-ecdsa-sha2-nistp256':
++      return 'sk-ecdsa-sha2-nistp256@openssh.com';
 +    default:
 +      return baseType;
 +  }
@@ -836,9 +1150,38 @@ index a276c1a..df123fd 100644
 +
  {
    let regexp;
-   if (eddsaSupported)
-@@ -1210,7 +1230,13 @@ OpenSSH_Public.prototype = BaseKey;
-     if (type === undefined || type.indexOf(baseType) !== 0)
+-  if (eddsaSupported)
+-    regexp = /^(((?:ssh-(?:rsa|dss|ed25519))|ecdsa-sha2-nistp(?:256|384|521))(?:-cert-v0[01]@openssh.com)?) ([A-Z0-9a-z/+=]+)(?:$|\s+([\S].*)?)$/;
+-  else
+-    regexp = /^(((?:ssh-(?:rsa|dss))|ecdsa-sha2-nistp(?:256|384|521))(?:-cert-v0[01]@openssh.com)?) ([A-Z0-9a-z/+=]+)(?:$|\s+([\S].*)?)$/;
++  if (eddsaSupported) {
++    // SK cert names use `-cert-v01` before `@openssh.com`, unlike classic keys.
++    regexp = /^((((?:ssh-(?:rsa|dss|ed25519))|ecdsa-sha2-nistp(?:256|384|521))(?:-cert-v0[01]@openssh\.com)?)|(sk-(?:ssh-ed25519|ecdsa-sha2-nistp256)(?:-cert-v0[01])?@openssh\.com)) ([A-Z0-9a-z/+=]+)(?:$|\s+([\S].*)?)$/;
++  } else {
++    regexp = /^((((?:ssh-(?:rsa|dss))|ecdsa-sha2-nistp(?:256|384|521))(?:-cert-v0[01]@openssh\.com)?)|(sk-ecdsa-sha2-nistp256(?:-cert-v0[01])?@openssh\.com)) ([A-Z0-9a-z/+=]+)(?:$|\s+([\S].*)?)$/;
++  }
+   OpenSSH_Public.parse = (str) => {
+     const m = regexp.exec(str);
+     if (m === null)
+       return null;
+     // m[1] = full type
+-    // m[2] = base type
+-    // m[3] = base64-encoded public key
+-    // m[4] = comment
++    // m[5] = base64-encoded public key
++    // m[6] = comment
+ 
+     const fullType = m[1];
+-    const baseType = m[2];
+-    const data = Buffer.from(m[3], 'base64');
+-    const comment = (m[4] || '');
++    const baseType = getOpenSSHCertBaseType(fullType);
++    const data = Buffer.from(m[5], 'base64');
++    const comment = (m[6] || '');
+ 
+     const type = readString(data, data._pos, true);
+-    if (type === undefined || type.indexOf(baseType) !== 0)
++    if (type === undefined || getOpenSSHCertBaseType(type) !== baseType)
        return new Error('Malformed OpenSSH public key');
  
 -    return parseDER(data, baseType, comment, fullType);
@@ -852,7 +1195,7 @@ index a276c1a..df123fd 100644
    };
  }
  
-@@ -1309,7 +1335,7 @@ RFC4716_Public.prototype = BaseKey;
+@@ -1309,7 +1604,7 @@
  }
  
  
@@ -861,7 +1204,7 @@ index a276c1a..df123fd 100644
    if (!isSupportedKeyType(baseType))
      return new Error(`Unsupported OpenSSH public key type: ${baseType}`);
  
-@@ -1317,6 +1343,10 @@ function parseDER(data, baseType, comment, fullType) {
+@@ -1317,6 +1612,10 @@
    let oid;
    let pubPEM = null;
    let pubSSH = null;
@@ -872,7 +1215,60 @@ index a276c1a..df123fd 100644
  
    switch (baseType) {
      case 'ssh-rsa': {
-@@ -1387,7 +1417,13 @@ function parseDER(data, baseType, comment, fullType) {
+@@ -1383,11 +1682,66 @@
+       pubSSH = genOpenSSHECDSAPub(oid, ecpub);
+       break;
+     }
++    case 'sk-ssh-ed25519@openssh.com': {
++      /*
++        string  public key  (32 raw bytes)
++        string  application
++      */
++      const edpub = readString(data, data._pos || 0);
++      if (edpub === undefined || edpub.length !== 32)
++        return new Error('Malformed OpenSSH SK public key');
++      const application = readString(data, data._pos, true);
++      if (application === undefined)
++        return new Error('Malformed OpenSSH SK public key');
++      pubPEM = genOpenSSLEdPub(edpub);
++      pubSSH = genOpenSSHSKEdPub(edpub, application);
++      algo = null;
++      return new OpenSSH_SK_Public(
++        fullType,
++        comment,
++        pubPEM,
++        isCertificate ? Buffer.from(originalPubSSH || data) : pubSSH,
++        algo,
++        application
++      );
++    }
++    case 'sk-ecdsa-sha2-nistp256@openssh.com': {
++      /*
++        string  curve name ("nistp256")
++        string  Q -- public
++        string  application
++      */
++      if (!skipFields(data, 1)) // Skip curve name
++        return new Error('Malformed OpenSSH SK public key');
++      const ecpub = readString(data, data._pos || 0);
++      if (ecpub === undefined)
++        return new Error('Malformed OpenSSH SK public key');
++      const application = readString(data, data._pos, true);
++      if (application === undefined)
++        return new Error('Malformed OpenSSH SK public key');
++      pubPEM = genOpenSSLECDSAPub('1.2.840.10045.3.1.7', ecpub);
++      pubSSH = genOpenSSHSKECDSAPub(ecpub, application);
++      algo = 'sha256';
++      return new OpenSSH_SK_Public(
++        fullType,
++        comment,
++        pubPEM,
++        isCertificate ? Buffer.from(originalPubSSH || data) : pubSSH,
++        algo,
++        application
++      );
++    }
+     default:
        return new Error(`Unsupported OpenSSH public key type: ${baseType}`);
    }
  
@@ -887,7 +1283,18 @@ index a276c1a..df123fd 100644
  }
  
  function isSupportedKeyType(type) {
-@@ -1460,7 +1496,13 @@ function parseKey(data, passphrase) {
+@@ -1397,8 +1751,10 @@
+     case 'ecdsa-sha2-nistp256':
+     case 'ecdsa-sha2-nistp384':
+     case 'ecdsa-sha2-nistp521':
++    case 'sk-ecdsa-sha2-nistp256@openssh.com':
+       return true;
+     case 'ssh-ed25519':
++    case 'sk-ssh-ed25519@openssh.com':
+       if (eddsaSupported)
+         return true;
+     // FALLTHROUGH
+@@ -1460,7 +1816,13 @@
      if (type !== undefined) {
        data = binaryKeyParser.readRaw();
        if (data !== undefined) {
@@ -902,3 +1309,11 @@ index a276c1a..df123fd 100644
          // Ignore potentially useless errors in case the data was not actually
          // in the binary format
          if (ret instanceof Error)
+@@ -1479,6 +1841,7 @@
+ module.exports = {
+   isParsedKey,
+   isSupportedKeyType,
++  getOpenSSHCertSignatureAlgorithm,
+   parseDERKey: (data, type) => parseDER(data, type, '', type),
+   parseKey,
+ };

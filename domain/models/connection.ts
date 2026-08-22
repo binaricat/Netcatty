@@ -301,7 +301,8 @@ export interface Host {
   order?: number;
 }
 
-export type KeyType = 'RSA' | 'ECDSA' | 'ED25519';
+/** Software keys plus OpenSSH FIDO2 security-key types (agent + hardware only). */
+export type KeyType = 'RSA' | 'ECDSA' | 'ED25519' | 'ED25519-SK' | 'ECDSA-SK';
 type KeySource = 'generated' | 'imported' | 'reference';
 export type KeyCategory = 'key' | 'certificate' | 'identity';
 type IdentityAuthMethod = 'password' | 'key' | 'certificate';

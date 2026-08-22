@@ -297,6 +297,37 @@ test("Mosh explicitly disables native agent login after an opt-out", async () =>
   assert.equal(forwardingEnv.SSH_AUTH_SOCK, undefined);
 });
 
+test("Mosh releases prepared FIDO agent when forwarding-agent resolution fails", async () => {
+  let releaseCount = 0;
+  const api = createMoshSessionApi({
+    os,
+    path,
+    fs,
+    process,
+    randomUUID: () => "fixed",
+    prepareSystemSshAgentForAuth: async () => ({
+      _releaseNetcattyFidoAgent: () => { releaseCount += 1; },
+    }),
+    getAvailableAgentSocket: async () => "/tmp/login-agent.sock",
+    getAvailableForwardingAgentSocket: async () => {
+      const error = new Error(
+        "This SSH agent is available only to Netcatty's built-in SSH client.",
+      );
+      error.code = "ERR_SSH_AGENT_NATIVE_UNSUPPORTED";
+      throw error;
+    },
+  });
+
+  await assert.rejects(
+    () => api.prepareMoshSshAgentOptions({
+      useSshAgent: true,
+      agentForwarding: true,
+    }),
+    (error) => error?.code === "ERR_SSH_AGENT_NATIVE_UNSUPPORTED",
+  );
+  assert.equal(releaseCount, 1);
+});
+
 test("Mosh keeps its login agent separate from the discovered forwarding agent", async () => {
   const localAgent = "/private/tmp/com.apple.launchd.test/Listeners";
   const forwardingAgent = "/Users/alice/.bitwarden-ssh-agent.sock";
@@ -398,6 +429,44 @@ test("Mosh automatic mode discovers custom local keys in preferred order", async
     path.join(sshDir, "id_ed25519"),
     path.join(sshDir, "id_work"),
   ]);
+});
+
+test("startMoshSessionViaHandshake releases FIDO lease when auth setup fails", async () => {
+  let releaseCount = 0;
+  const moshHandshake = require("./moshHandshake.cjs");
+  const api = createMoshSessionApi({
+    os,
+    path,
+    fs,
+    process,
+    randomUUID: () => "fixed",
+    moshHandshake,
+    pty: {
+      spawn() {
+        throw new Error("pty.spawn should not run after auth setup failure");
+      },
+    },
+    tempDirBridge: {
+      getTempFilePath() {
+        throw new Error("temp unavailable");
+      },
+    },
+  });
+
+  await assert.rejects(
+    () => api.startMoshSessionViaHandshake(
+      { sender: { id: 1 } },
+      {
+        hostname: "host.example",
+        username: "alice",
+        privateKey: "-----BEGIN OPENSSH PRIVATE KEY-----\ntest\n-----END OPENSSH PRIVATE KEY-----",
+        _releaseNetcattyFidoAgent: () => { releaseCount += 1; },
+      },
+      { bareClient: "/tmp/mosh-client", sshExe: "/usr/bin/ssh" },
+    ),
+    /temp unavailable/,
+  );
+  assert.equal(releaseCount, 1);
 });
 
 test("removed Mosh client detection APIs are not exposed to the renderer", () => {

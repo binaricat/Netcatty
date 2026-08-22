@@ -15,6 +15,7 @@ const { Client: SSHClient, utils: sshUtils } = require("ssh2");
 const { NetcattyAgent } = require("./netcattyAgent.cjs");
 const keyboardInteractiveHandler = require("./keyboardInteractiveHandler.cjs");
 const passphraseHandler = require("./passphraseHandler.cjs");
+const fidoPromptHandler = require("./fidoPromptHandler.cjs");
 const hostKeyVerifier = require("./hostKeyVerifier.cjs");
 const { createProxySocket, runWhenProxyConnectionReady } = require("./proxyUtils.cjs");
 const { attachX11Forwarding } = require("./x11Forwarding.cjs");
@@ -43,6 +44,8 @@ const {
   loadFirstIdentityFileForAuth,
   hasUserConfiguredKey,
   isPasswordProvided,
+  looksLikeSkOpenSshMaterial,
+  identityFilesLookLikeSk,
   PassphraseCancelledError,
   isPassphraseCancelledError,
 } = require("./sshAuthHelper.cjs");
@@ -616,9 +619,38 @@ async function connectThroughChain(event, options, jumpHosts, targetHost, target
       const hasCertificate =
         typeof jump.certificate === "string" && jump.certificate.trim().length > 0;
 
-      const systemAuthAgent = hasCertificate
+      let isJumpFidoSk = looksLikeSkOpenSshMaterial(jump.privateKey)
+        || (Array.isArray(jump.agentPublicKeys)
+          && jump.agentPublicKeys.some((key) => looksLikeSkOpenSshMaterial(key)))
+        || jump.useFidoAgent === true;
+      if (!isJumpFidoSk && jump.authMethod !== "password"
+        && Array.isArray(jump.identityFilePaths)
+        && jump.identityFilePaths.length > 0) {
+        try {
+          isJumpFidoSk = await identityFilesLookLikeSk(jump.identityFilePaths);
+        } catch {
+          // ignore
+        }
+      }
+      const forceJumpFidoAgent = isJumpFidoSk && jump.authMethod !== "password";
+
+      // FIDO SK + certificate still needs the agent for hardware signing.
+      const systemAuthAgent = (hasCertificate && !forceJumpFidoAgent)
         ? null
-        : await prepareSystemSshAgentForAuth(jump, `[Chain] Hop ${i + 1}:`);
+        : await prepareSystemSshAgentForAuth({
+          ...jump,
+          useSshAgent: forceJumpFidoAgent ? true : jump.useSshAgent,
+          useFidoAgent: forceJumpFidoAgent || jump.useFidoAgent === true,
+          loadIdentityFilesIntoAgent: forceJumpFidoAgent || jump.loadIdentityFilesIntoAgent,
+          addKeysToAgent: jump.addKeysToAgent || (forceJumpFidoAgent ? "yes" : jump.addKeysToAgent),
+          resolveWebContents: () => {
+            try {
+              return sender && !sender.isDestroyed?.() ? sender : null;
+            } catch {
+              return null;
+            }
+          },
+        }, `[Chain] Hop ${i + 1}:`);
 
       const identityFile = !jump.privateKey && !systemAuthAgent
         ? await loadFirstIdentityFileForAuth({
@@ -647,7 +679,9 @@ async function connectThroughChain(event, options, jumpHosts, targetHost, target
           },
         })
         : null;
-      const inlineKey = jump.privateKey && !systemAuthAgent
+      const inlineKey = jump.privateKey
+        && !systemAuthAgent
+        && !looksLikeSkOpenSshMaterial(jump.privateKey)
         ? await preparePrivateKeyForAuth({
           sender,
           privateKey: jump.privateKey,
@@ -673,8 +707,9 @@ async function connectThroughChain(event, options, jumpHosts, targetHost, target
       let authAgent = null;
       if (systemAuthAgent) {
         connOpts.agent = systemAuthAgent;
+        require("./attachFidoAgentRelease.cjs").attachFidoAgentRelease(conn, systemAuthAgent);
       }
-      if (hasCertificate) {
+      if (hasCertificate && !forceJumpFidoAgent) {
         authAgent = new NetcattyAgent({
           mode: "certificate",
           webContents: event.sender,
@@ -686,7 +721,7 @@ async function connectThroughChain(event, options, jumpHosts, targetHost, target
           },
         });
         connOpts.agent = authAgent;
-      } else if (effectivePrivateKey) {
+      } else if (effectivePrivateKey && !forceJumpFidoAgent) {
         connOpts.privateKey = effectivePrivateKey;
         if (effectivePassphrase) {
           connOpts.passphrase = effectivePassphrase;
@@ -1009,6 +1044,25 @@ async function generateKeyPair(event, options) {
   const { type, bits, comment } = options;
 
   try {
+    // FIDO2 / security-key types require OpenSSH + libfido2 hardware interaction.
+    // Generate via ssh-keygen so the key handle is created on the token.
+    if (type === "ED25519-SK" || type === "ECDSA-SK") {
+      const { generateFidoSshKeyPair } = require("./fidoSshKeygen.cjs");
+      return await generateFidoSshKeyPair({
+        type,
+        comment: comment || "netcatty-fido-key",
+        resident: options?.resident === true,
+        verifyRequired: options?.verifyRequired === true,
+        resolveWebContents: () => {
+          try {
+            return event?.sender && !event.sender.isDestroyed?.() ? event.sender : null;
+          } catch {
+            return null;
+          }
+        },
+      });
+    }
+
     let keyType;
     let keyBits = bits;
 
@@ -1490,6 +1544,12 @@ function registerHandlers(ipcMain, options = {}) {
       "netcatty:host-key:respond",
       hostKeyVerifier,
     );
+    registerOwnedAuthResponseHandler(
+      ipcMain,
+      terminalWorkerManager,
+      "netcatty:fido-prompt:respond",
+      fidoPromptHandler,
+    );
     ipcMain.on("netcatty:zmodem:overwrite-response", (event, payload) => {
       terminalWorkerManager.send("netcatty:zmodem:overwrite-response", payload, {
         webContentsId: event?.sender?.id,
@@ -1513,6 +1573,8 @@ function registerHandlers(ipcMain, options = {}) {
     keyboardInteractiveHandler.registerHandler(ipcMain);
     // Register the passphrase response handler
     passphraseHandler.registerHandler(ipcMain);
+    // FIDO2 PIN / touch presence prompts (ssh-sk-helper / ssh-add / ssh-keygen)
+    fidoPromptHandler.registerHandler(ipcMain);
     // Register the SSH host key verification response handler
     hostKeyVerifier.registerHandler(ipcMain);
   }

@@ -471,6 +471,20 @@ export function handlePassphraseSkipImpl(getCtx: AppContextGetter, requestId: st
   }
 }
 
+export function handleFidoPromptSubmitImpl(getCtx: AppContextGetter, requestId: string, response: string) {
+  const { netcattyBridge, setFidoPromptQueue } = getCtx();
+  const bridge = netcattyBridge.get();
+  void bridge?.respondFidoPrompt?.(requestId, response, false);
+  setFidoPromptQueue((prev: { requestId: string }[]) => prev.filter((r) => r.requestId !== requestId));
+}
+
+export function handleFidoPromptCancelImpl(getCtx: AppContextGetter, requestId: string) {
+  const { netcattyBridge, setFidoPromptQueue } = getCtx();
+  const bridge = netcattyBridge.get();
+  void bridge?.respondFidoPrompt?.(requestId, '', true);
+  setFidoPromptQueue((prev: { requestId: string }[]) => prev.filter((r) => r.requestId !== requestId));
+}
+
 export function createLocalTerminalWithCurrentShellImpl(getCtx: AppContextGetter) {
   const { classifyLocalShellType, createLocalTerminal, discoveredShells, resolveShellSetting, terminalSettings } = getCtx();
 {

@@ -250,7 +250,15 @@ function createMoshStatsConnectionApi(ctx) {
       }
 
       if (!agent && auth.useSshAgent && typeof prepareSystemSshAgentForAuth === "function") {
-        connectOpts.agent = await prepareSystemSshAgentForAuth(auth, `[${label} Stats]`);
+        const prepared = await prepareSystemSshAgentForAuth(auth, `[${label} Stats]`);
+        connectOpts.agent = prepared;
+        if (typeof prepared?._releaseNetcattyFidoAgent === "function") {
+          // Surface the release hook on connectOpts so establishStatsConnection
+          // can drop the owned FIDO agent / askpass lease on close, error, or
+          // sessionGone — this consumer never attaches the agent to a long-lived
+          // SSHClient lifecycle helper.
+          connectOpts._releaseNetcattyFidoAgent = prepared._releaseNetcattyFidoAgent;
+        }
       }
 
       if (typeof auth.password === "string" && auth.password.length > 0) {
@@ -400,15 +408,30 @@ function createMoshStatsConnectionApi(ctx) {
         ...auth,
         webContents,
       }, opts.label);
+      const releaseStatsFidoAgent = (() => {
+        const releaseFn = connectOpts?._releaseNetcattyFidoAgent;
+        if (typeof releaseFn !== "function") return () => {};
+        let released = false;
+        return () => {
+          if (released) return;
+          released = true;
+          try { releaseFn(); } catch { /* ignore */ }
+        };
+      })();
+      // Do not forward the internal release hook into ssh2 connect options.
+      delete connectOpts._releaseNetcattyFidoAgent;
+
       if (!hasAnyAuth) {
         // Nothing we can authenticate with non-interactively (e.g. the user
         // typed a password into the Mosh handshake PTY that we never stored).
+        releaseStatsFidoAgent();
         session[opts.failedProp] = true;
         return null;
       }
 
       // The session may have been closed while we were reading identity files.
       if (sessionGone(session, sessionId)) {
+        releaseStatsFidoAgent();
         return null;
       }
 
@@ -449,6 +472,7 @@ function createMoshStatsConnectionApi(ctx) {
         // retry.
         const fail = (err, permanent) => {
           try { conn.end(); } catch { /* ignore */ }
+          releaseStatsFidoAgent();
           if (permanent) session[opts.failedProp] = true;
           finish(null);
         };
@@ -457,6 +481,7 @@ function createMoshStatsConnectionApi(ctx) {
           // The session may have been closed while we were connecting.
           if (sessionGone(session, sessionId)) {
             try { conn.end(); } catch { /* ignore */ }
+            releaseStatsFidoAgent();
             finish(null);
             return;
           }
@@ -481,6 +506,7 @@ function createMoshStatsConnectionApi(ctx) {
 
         conn.on("close", () => {
           if (session[opts.connProp] === conn) session[opts.connProp] = null;
+          releaseStatsFidoAgent();
           // If the socket closed mid-handshake without ever emitting "ready"
           // or "error", settle the attempt here so the awaiting getServerStats
           // call (and the in-flight promise on opts.promiseProp) don't hang

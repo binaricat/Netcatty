@@ -708,6 +708,122 @@ test("ET prepares target and jump agents before generating their host config", a
   assert.equal(fs.readFileSync(jumpSelectorMatch[1], "utf8"), "ssh-ed25519 AAAAJUMPSELECTED");
 });
 
+test("prepareEtSshAgentOptions releases earlier FIDO leases when a later hop fails", async (t) => {
+  let releaseCount = 0;
+  const { api } = makeApi(t, {
+    prepareSystemSshAgentForAuth: async (options) => {
+      if (options.hostname === "jump.example") {
+        const error = new Error("Identity selector unavailable");
+        error.code = "ERR_SSH_AGENT_IDENTITY_SELECTOR_UNAVAILABLE";
+        throw error;
+      }
+      return {
+        _releaseNetcattyFidoAgent: () => { releaseCount += 1; },
+      };
+    },
+    getAvailableAgentSocket: async (identityAgent) => identityAgent,
+  });
+
+  await assert.rejects(
+    () => api.prepareEtSshAgentOptions({
+      hostname: "dest.example",
+      username: "alice",
+      useSshAgent: true,
+      identityAgent: "/tmp/target.sock",
+      jumpHosts: [{
+        hostname: "jump.example",
+        username: "ops",
+        useSshAgent: true,
+        identityAgent: "/tmp/jump.sock",
+        identitiesOnly: true,
+        agentPublicKeys: ["ssh-ed25519 AAAAJUMPSELECTED"],
+      }],
+    }),
+    (error) => error?.code === "ERR_SSH_AGENT_IDENTITY_SELECTOR_UNAVAILABLE",
+  );
+  assert.equal(releaseCount, 1);
+});
+
+test("prepareEtSshAgentOptions releases the current hop FIDO agent when forwarding setup fails", async (t) => {
+  let releaseCount = 0;
+  const { api } = makeApi(t, {
+    prepareSystemSshAgentForAuth: async () => ({
+      _releaseNetcattyFidoAgent: () => { releaseCount += 1; },
+    }),
+    getAvailableAgentSocket: async () => "/tmp/login-agent.sock",
+    getAvailableForwardingAgentSocket: async () => {
+      const error = new Error(
+        "This SSH agent is available only to Netcatty's built-in SSH client.",
+      );
+      error.code = "ERR_SSH_AGENT_NATIVE_UNSUPPORTED";
+      throw error;
+    },
+  });
+
+  await assert.rejects(
+    () => api.prepareEtSshAgentOptions({
+      hostname: "dest.example",
+      username: "alice",
+      useSshAgent: true,
+      agentForwarding: true,
+    }),
+    (error) => error?.code === "ERR_SSH_AGENT_NATIVE_UNSUPPORTED",
+  );
+  assert.equal(releaseCount, 1);
+});
+
+test("startEtSession exposes a one-shot FIDO release that survives map deletion", async (t) => {
+  let releaseCount = 0;
+  let onExitHandler = null;
+  const flushCallbacks = [];
+  const proc = {
+    onData() {},
+    onExit(handler) { onExitHandler = handler; },
+    write() {},
+    kill() {},
+  };
+  const { api, sessions } = makeApi(t, {
+    bundledEtClient: () => "/fake/et",
+    prepareSystemSshAgentForAuth: async () => ({
+      _releaseNetcattyFidoAgent: () => { releaseCount += 1; },
+    }),
+    getAvailableAgentSocket: async () => "/tmp/login-agent.sock",
+    createPtyOutputBuffer: () => ({
+      bufferData() {},
+      flush() {},
+      flushPaced(cb) { flushCallbacks.push(cb); },
+      discard() {},
+    }),
+    pty: { spawn: () => proc },
+    electronModule: { webContents: { fromId: () => null } },
+    openTerminalOutputSession: () => {},
+    closeTerminalOutputSession: () => {},
+    selectZmodemUploadFiles: null,
+    selectZmodemDownloadDirectory: null,
+  });
+
+  await api.startEtSession({ sender: { id: 7 } }, {
+    sessionId: "sess-fido-close",
+    hostname: "host.example",
+    username: "alice",
+    useSshAgent: true,
+  });
+
+  const session = sessions.get("sess-fido-close");
+  assert.equal(typeof session.releaseNetcattyFidoAgents, "function");
+
+  // Explicit close deletes the session before PTY onExit runs.
+  sessions.delete("sess-fido-close");
+  assert.ok(onExitHandler);
+  onExitHandler({ exitCode: 0 });
+  for (const cb of flushCallbacks) cb();
+  assert.equal(releaseCount, 1);
+
+  // closeSession / quit may also invoke the session-stored one-shot release.
+  session.releaseNetcattyFidoAgents();
+  assert.equal(releaseCount, 1);
+});
+
 test("prepareEtSshEnvironment writes legacy algorithms to the ssh config file", (t) => {
   const { api } = makeApi(t);
   const env = api.prepareEtSshEnvironment("sess1", {

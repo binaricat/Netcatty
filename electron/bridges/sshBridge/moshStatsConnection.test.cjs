@@ -686,6 +686,70 @@ test("a connection that becomes ready after the session closed is discarded", as
   assert.equal(session.moshStatsConn, undefined);
 });
 
+test("releases FIDO agent resources when the stats companion closes", async () => {
+  let releaseCount = 0;
+  const { api, sessions } = makeApi({
+    prepareSystemSshAgentForAuth: async () => ({
+      _releaseNetcattyFidoAgent: () => { releaseCount += 1; },
+    }),
+  });
+  const session = {
+    moshStatsAuth: {
+      hostname: "h",
+      username: "u",
+      useSshAgent: true,
+    },
+  };
+  sessions.set("sid", session);
+
+  const pending = api.ensureMoshStatsConnection(session, "sid");
+  await tick();
+  await tick();
+  const client = FakeSSHClient.instances[0];
+  assert.ok(client.connectOpts.agent);
+  assert.equal(typeof client.connectOpts._releaseNetcattyFidoAgent, "undefined");
+  client.emitReady();
+  assert.equal(await pending, client);
+  assert.equal(releaseCount, 0);
+
+  client.emit("close");
+  assert.equal(releaseCount, 1);
+  // close/end fan-out must stay one-shot
+  client.emit("close");
+  assert.equal(releaseCount, 1);
+});
+
+test("releases FIDO agent resources when stats connect is abandoned via sessionGone", async () => {
+  let releaseCount = 0;
+  let resolvePrepare;
+  const prepareGate = new Promise((resolve) => { resolvePrepare = resolve; });
+  const { api, sessions } = makeApi({
+    prepareSystemSshAgentForAuth: async () => {
+      await prepareGate;
+      return {
+        _releaseNetcattyFidoAgent: () => { releaseCount += 1; },
+      };
+    },
+  });
+  const session = {
+    moshStatsAuth: {
+      hostname: "h",
+      username: "u",
+      useSshAgent: true,
+    },
+  };
+  sessions.set("sid", session);
+
+  const pending = api.ensureMoshStatsConnection(session, "sid");
+  await tick();
+  session.closed = true;
+  sessions.delete("sid");
+  resolvePrepare();
+  assert.equal(await pending, null);
+  assert.equal(releaseCount, 1);
+  assert.equal(FakeSSHClient.instances.length, 0);
+});
+
 test("honors host algorithm settings via buildAlgorithms", async () => {
   const calls = [];
   const { api, sessions } = makeApi({

@@ -26,6 +26,7 @@ const {
   annotateMacLocalNetworkErrorMessage,
   resolveFirstTcpEndpoint,
 } = require("../macLocalNetworkAccess.cjs");
+const { looksLikeSkOpenSshMaterial } = require("../sshAuthHelper.cjs");
 
 const SSH_TCP_CONNECT_TIMEOUT_MS = 20000;
 const SSH_AUTH_READY_TIMEOUT_MS = 120000;
@@ -117,6 +118,9 @@ function hasSelectedAgentIdentity(options) {
 
 function shouldOfferAgentForLogin(options, connectOpts) {
   const selectedMethod = options?.authMethod;
+  // Path/inline sk-* detection may set useFidoAgent after prepare; honor it for
+  // login auth even when the renderer still sent useSshAgent:false.
+  const forceFidoAgent = options?.useFidoAgent === true && selectedMethod !== "password";
   const hasRestrictedSelectedAgent = selectedMethod === "key"
     && options?.useSshAgent === true
     && options?.identitiesOnly === true
@@ -124,8 +128,8 @@ function shouldOfferAgentForLogin(options, connectOpts) {
   const isStrictMethod = selectedMethod === "password"
     || selectedMethod === "key"
     || selectedMethod === "certificate";
-  return (!isStrictMethod || hasRestrictedSelectedAgent)
-    && options?.useSshAgent !== false
+  return (!isStrictMethod || hasRestrictedSelectedAgent || forceFidoAgent)
+    && (options?.useSshAgent !== false || forceFidoAgent)
     && Boolean(connectOpts?.agent);
 }
 
@@ -1331,8 +1335,69 @@ function createStartSessionApi(ctx) {
         });
 
         let authAgent = null;
-        const systemAuthAgent = shouldPrepareSystemAgentForLogin(options)
-          ? await prepareSystemSshAgentForAuth(options, "[SSH]")
+        // FIDO2 sk-* handles cannot be used as ssh2 software privateKeys.
+        // Detect only from key material (public/private text), not path names —
+        // path heuristics false-positive soft keys like id_mask.
+        let isFidoSkAuth = looksLikeSkOpenSshMaterial(options.privateKey)
+          || (Array.isArray(options.agentPublicKeys)
+            && options.agentPublicKeys.some((key) => looksLikeSkOpenSshMaterial(key)))
+          || options.useFidoAgent === true;
+        // Path-only IdentityFile / reference keys may omit inline material and
+        // still be sk-* on disk — peek before choosing software-key auth.
+        if (!isFidoSkAuth && options.authMethod !== "password"
+          && Array.isArray(options.identityFilePaths)
+          && options.identityFilePaths.length > 0) {
+          try {
+            const { identityFilesLookLikeSk } = require("../sshAuthHelper.cjs");
+            isFidoSkAuth = await identityFilesLookLikeSk(options.identityFilePaths);
+          } catch {
+            // ignore probe failures; fall through to soft-key path
+          }
+        }
+        const forceSystemAgentForFido = isFidoSkAuth && options.authMethod !== "password";
+        // Propagate detected FIDO state onto options so shouldOfferAgentForLogin
+        // (and later auth decisions) see the same agent intent as preparation.
+        // Path-only IdentityFile SK picks often arrive with useSshAgent:false.
+        if (forceSystemAgentForFido) {
+          options.useSshAgent = true;
+          options.useFidoAgent = true;
+          options.identitiesOnly = options.identitiesOnly === true
+            || Boolean(
+              (Array.isArray(options.agentPublicKeys) && options.agentPublicKeys.length)
+              || (Array.isArray(options.identityFilePaths) && options.identityFilePaths.length),
+            );
+          options.addKeysToAgent = options.addKeysToAgent || "yes";
+          options.loadIdentityFilesIntoAgent = true;
+        }
+        const systemAuthAgent = (shouldPrepareSystemAgentForLogin(options) || forceSystemAgentForFido)
+          ? await prepareSystemSshAgentForAuth({
+            ...options,
+            // Only force the agent path when the caller already opted in or the
+            // key material requires hardware signing (FIDO). Automatic/password
+            // modes reach here via shouldPrepareSystemAgentForLogin's opportunistic
+            // check too; forcing useSshAgent:true unconditionally would make a
+            // missing system agent a hard failure for every "auto" connection
+            // instead of the no-op prepareSystemSshAgentForAuth already provides
+            // via its own useSshAgent !== true guard.
+            useSshAgent: options.useSshAgent === true || forceSystemAgentForFido,
+            useFidoAgent: forceSystemAgentForFido || options.useFidoAgent === true,
+            // Prefer loading the sk handle; keep identitiesOnly when a public
+            // key selector is available.
+            identitiesOnly: options.identitiesOnly === true
+              || (forceSystemAgentForFido && Boolean(
+                (Array.isArray(options.agentPublicKeys) && options.agentPublicKeys.length)
+                || (Array.isArray(options.identityFilePaths) && options.identityFilePaths.length),
+              )),
+            addKeysToAgent: options.addKeysToAgent || (forceSystemAgentForFido ? "yes" : options.addKeysToAgent),
+            loadIdentityFilesIntoAgent: forceSystemAgentForFido || options.loadIdentityFilesIntoAgent,
+            resolveWebContents: () => {
+              try {
+                return sender && !sender.isDestroyed?.() ? sender : null;
+              } catch {
+                return null;
+              }
+            },
+          }, "[SSH]")
           : null;
         // Kick off the default-key scan now so it overlaps the identity-file /
         // inline-key preparation below instead of running serially after it.
@@ -1364,7 +1429,10 @@ function createStartSessionApi(ctx) {
             },
           })
           : null;
-        const inlineKey = options.authMethod !== "password" && options.privateKey && !systemAuthAgent
+        const inlineKey = options.authMethod !== "password"
+          && options.privateKey
+          && !systemAuthAgent
+          && !looksLikeSkOpenSshMaterial(options.privateKey)
           ? await preparePrivateKeyForAuth({
             sender,
             privateKey: options.privateKey,
@@ -1389,9 +1457,12 @@ function createStartSessionApi(ctx) {
 
         if (systemAuthAgent) {
           connectOpts.agent = systemAuthAgent;
+          require("../attachFidoAgentRelease.cjs").attachFidoAgentRelease(conn, systemAuthAgent);
         }
 
-        if (hasCertificate) {
+        // Soft-key certificates use NetcattyAgent local signing. FIDO SK + cert
+        // must keep the system/owned agent (hardware signs via ssh-sk-helper).
+        if (hasCertificate && !forceSystemAgentForFido) {
           authAgent = new NetcattyAgent({
             mode: "certificate",
             webContents: event.sender,
@@ -1403,7 +1474,7 @@ function createStartSessionApi(ctx) {
             },
           });
           connectOpts.agent = authAgent;
-        } else if (effectivePrivateKey) {
+        } else if (effectivePrivateKey && !forceSystemAgentForFido) {
           connectOpts.privateKey = effectivePrivateKey;
           if (effectiveIdentityPassphrase) {
             connectOpts.passphrase = effectiveIdentityPassphrase;
