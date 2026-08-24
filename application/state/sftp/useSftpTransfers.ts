@@ -845,7 +845,14 @@ export const useSftpTransfers = ({
       // Try same-host directory optimization first; falls back to recursive transfer
       // if remote cp is unavailable (e.g. Windows SSH servers).
       let dirHandledBySameHost = false;
-      if (task.isDirectory && task.resumable === false && sameHost && encodingSafeForExec && sourceSftpId) {
+      if (
+        task.isDirectory
+        && !task.replaceExistingTarget
+        && task.resumable === false
+        && sameHost
+        && encodingSafeForExec
+        && sourceSftpId
+      ) {
         if (cancelledTasksRef.current.has(task.id)) {
           throw new Error("Transfer cancelled");
         }

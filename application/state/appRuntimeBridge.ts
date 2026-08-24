@@ -1,5 +1,6 @@
 import { createContext, useContext } from 'react';
 
+import type { useAppLockState } from './useAppLockState';
 import type { useSessionState } from './useSessionState';
 import type { useSettingsState } from './useSettingsState';
 import type { useVaultState } from './useVaultState';
@@ -7,6 +8,25 @@ import type { useVaultState } from './useVaultState';
 export type AppVaultRuntime = ReturnType<typeof useVaultState>;
 export type AppSessionRuntime = ReturnType<typeof useSessionState>;
 export type AppSettingsRuntime = ReturnType<typeof useSettingsState>;
+export type AppAppLockRuntime = ReturnType<typeof useAppLockState>;
+
+/**
+ * Narrow app-lock projection published on React context. The full runtime
+ * changes identity on every AppLockGate render; chrome consumers (TopTabs lock
+ * button, AppSideEffects deferral gates) only need these primitives, and
+ * imperative callers read the full runtime through `getAppAppLockRuntime()`.
+ */
+export type AppLockChromeValue = {
+  appLockEnabled: boolean;
+  locked: boolean;
+  initialized: boolean;
+};
+
+const DEFAULT_APP_LOCK_CHROME: AppLockChromeValue = {
+  appLockEnabled: false,
+  locked: false,
+  initialized: false,
+};
 
 /**
  * The slice of the vault runtime that `VaultPublisher` puts on the React
@@ -69,6 +89,7 @@ class RuntimeSlot<T> {
 const vaultSlot = new RuntimeSlot<AppVaultRuntime>();
 const sessionSlot = new RuntimeSlot<AppSessionRuntime>();
 const settingsSlot = new RuntimeSlot<AppSettingsRuntime>();
+const appLockSlot = new RuntimeSlot<AppAppLockRuntime>();
 
 export function registerAppVaultRuntime(runtime: AppVaultRuntime | null): void {
   vaultSlot.set(runtime);
@@ -106,9 +127,22 @@ export function subscribeAppSettingsRuntime(listener: Listener): () => void {
   return settingsSlot.subscribe(listener);
 }
 
+export function registerAppAppLockRuntime(runtime: AppAppLockRuntime | null): void {
+  appLockSlot.set(runtime);
+}
+
+export function getAppAppLockRuntime(): AppAppLockRuntime | null {
+  return appLockSlot.get();
+}
+
+export function subscribeAppAppLockRuntime(listener: Listener): () => void {
+  return appLockSlot.subscribe(listener);
+}
+
 export const AppVaultRuntimeContext = createContext<AppVaultContextValue | null>(null);
 export const AppSessionRuntimeContext = createContext<AppSessionRuntime | null>(null);
 export const AppSettingsRuntimeContext = createContext<AppSettingsRuntime | null>(null);
+export const AppLockChromeContext = createContext<AppLockChromeValue | null>(null);
 
 /** Read the vault runtime owned by `VaultPublisher`. */
 export function useAppVaultRuntime(): AppVaultContextValue {
@@ -135,4 +169,13 @@ export function useAppSettingsRuntime(): AppSettingsRuntime {
     throw new Error('useAppSettingsRuntime must be rendered inside <SettingsPublisher>');
   }
   return runtime;
+}
+
+/**
+ * Read the narrow app-lock chrome slice published by `AppLockRuntimePublisher`.
+ * Falls back to an "unlocked / disabled" default so windows without a
+ * publisher (isolated mounts, tests) behave as if App Lock is off.
+ */
+export function useAppLockChrome(): AppLockChromeValue {
+  return useContext(AppLockChromeContext) ?? DEFAULT_APP_LOCK_CHROME;
 }

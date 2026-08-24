@@ -453,7 +453,42 @@ test("runCursorTurn cancels a late Cursor run when aborted while sending", async
   assert.equal(cancelled, true);
 });
 
-test("mapCursorModels maps display names and variants", () => {
+test("mapCursorModels prefers advertised effort parameter values over fallbacks", () => {
+  assert.deepEqual(
+    mapCursorModels([
+      {
+        id: "custom-reasoner",
+        displayName: "Custom Reasoner",
+        parameters: [
+          { id: "effort", values: [{ value: "low" }, { value: "xhigh" }] },
+        ],
+      },
+      {
+        id: "gpt-5",
+        displayName: "GPT-5",
+        parameters: [
+          { id: "effort", values: [{ value: "low" }, { value: "high" }] },
+        ],
+      },
+    ]),
+    [
+      {
+        id: "custom-reasoner",
+        name: "Custom Reasoner",
+        thinkingLevels: ["low", "xhigh"],
+        defaultThinkingLevel: "low",
+      },
+      {
+        id: "gpt-5",
+        name: "GPT-5",
+        thinkingLevels: ["low", "high"],
+        defaultThinkingLevel: "low",
+      },
+    ],
+  );
+});
+
+test("mapCursorModels maps display names and effort variants into thinkingLevels", () => {
   assert.deepEqual(
     mapCursorModels([
       { id: "composer-2.5", displayName: "Composer 2.5", description: "Default" },
@@ -461,8 +496,53 @@ test("mapCursorModels maps display names and variants", () => {
     ]),
     [
       { id: "composer-2.5", name: "Composer 2.5", description: "Default" },
-      { id: "gpt-5", name: "GPT-5" },
-      { id: "gpt-5?effort=low", name: "GPT-5 - Fast" },
+      {
+        id: "gpt-5",
+        name: "GPT-5",
+        thinkingLevels: ["low", "medium", "high"],
+        defaultThinkingLevel: "medium",
+      },
     ],
   );
+});
+
+test("mapCursorModels keeps extra-param variants as separate models", () => {
+  const mapped = mapCursorModels([
+    {
+      id: "gpt-5",
+      displayName: "GPT-5",
+      variants: [
+        { displayName: "Fast", params: [{ id: "effort", value: "low" }] },
+        {
+          displayName: "Fast custom",
+          params: [{ id: "effort", value: "low" }, { id: "mode", value: "fast" }],
+        },
+      ],
+    },
+  ]);
+  assert.deepEqual(mapped, [
+    {
+      id: "gpt-5",
+      name: "GPT-5",
+      thinkingLevels: ["low", "medium", "high"],
+      defaultThinkingLevel: "medium",
+    },
+    {
+      id: "gpt-5?effort=low&mode=fast",
+      name: "GPT-5 - Fast custom",
+    },
+  ]);
+});
+
+test("parseCursorModelSelection accepts query and slash effort encodings", () => {
+  const { parseCursorModelSelection, encodeCursorCliModel } = require("./cursorDriver.cjs");
+  assert.deepEqual(parseCursorModelSelection("gpt-5/high"), {
+    id: "gpt-5",
+    params: [{ id: "effort", value: "high" }],
+  });
+  assert.deepEqual(parseCursorModelSelection("gpt-5?effort=low"), {
+    id: "gpt-5",
+    params: [{ id: "effort", value: "low" }],
+  });
+  assert.equal(encodeCursorCliModel("gpt-5/high"), "gpt-5?effort=high");
 });

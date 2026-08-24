@@ -180,6 +180,7 @@ function createScpBackend(deps = {}) {
       size: `${sizeNum} bytes`,
       lastModified: new Date(rec.modifyTime || Date.now()).toISOString(),
       permissions: rec.permissions,
+      ...(rec.owner ? { owner: rec.owner } : {}),
       // raw fields for internal use
       _size: sizeNum,
       _modifyTime: rec.modifyTime,

@@ -422,9 +422,30 @@ test("mapCodebuddyModels maps model ids and drops invalid entries", () => {
     { value: "cb-2", displayName: "CodeBuddy 2" },
     { name: "missing id" },
   ]), [
-    { id: "glm-5.1", name: "GLM-5.1", description: undefined },
-    { id: "cb-1", name: "CodeBuddy 1", description: "default" },
-    { id: "cb-2", name: "CodeBuddy 2", description: undefined },
+    {
+      id: "glm-5.1",
+      name: "GLM-5.1",
+      description: undefined,
+      thinkingLevels: ["low", "medium", "high", "xhigh"],
+      defaultThinkingLevel: "medium",
+      encodeDefaultThinking: false,
+    },
+    {
+      id: "cb-1",
+      name: "CodeBuddy 1",
+      description: "default",
+      thinkingLevels: ["low", "medium", "high", "xhigh"],
+      defaultThinkingLevel: "medium",
+      encodeDefaultThinking: false,
+    },
+    {
+      id: "cb-2",
+      name: "CodeBuddy 2",
+      description: undefined,
+      thinkingLevels: ["low", "medium", "high", "xhigh"],
+      defaultThinkingLevel: "medium",
+      encodeDefaultThinking: false,
+    },
   ]);
   assert.deepEqual(mapCodebuddyModels(null), []);
 });
@@ -474,6 +495,24 @@ test("buildCodebuddyQueryOptions does not set maxThinkingTokens (deprecated remo
   });
   assert.deepEqual(opts.thinking, { type: "enabled", budgetTokens: 8000 });
   assert.ok(!("maxThinkingTokens" in opts));
+});
+
+test("buildCodebuddyQueryOptions splits model/effort and prefers it over settings effort", () => {
+  const fromModel = buildCodebuddyQueryOptions({
+    cwd: "/tmp",
+    model: "glm-5.1/high",
+    effort: "low",
+  });
+  assert.equal(fromModel.model, "glm-5.1");
+  assert.equal(fromModel.effort, "high");
+
+  const fromSettings = buildCodebuddyQueryOptions({
+    cwd: "/tmp",
+    model: "glm-5.1",
+    effort: "low",
+  });
+  assert.equal(fromSettings.model, "glm-5.1");
+  assert.equal(fromSettings.effort, "low");
 });
 
 test("buildCodebuddyQueryOptions drops invalid numeric guardrails", () => {

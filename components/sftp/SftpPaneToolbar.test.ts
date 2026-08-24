@@ -19,6 +19,7 @@ import {
   SftpPaneToolbar,
 } from "./SftpPaneToolbar.tsx";
 import type { SftpPane } from "../../application/state/sftp/types.ts";
+import { Popover } from "../ui/popover.tsx";
 import { TooltipProvider } from "../ui/tooltip.tsx";
 
 const toolbarSource = fs.readFileSync(
@@ -495,14 +496,18 @@ test("bookmark list renders saved paths as selectable rows", () => {
     React.createElement(
       TooltipProvider,
       null,
-      React.createElement(SftpBookmarkList, {
-        bookmarks: [{ id: "bm-1", path: "/srv/www", label: "Web root" }],
-        onNavigateToBookmark: () => {},
-        onDeleteBookmark: () => {},
-        t: (key: string) => ({
-          "sftp.bookmark.remove": "Remove bookmark",
-        }[key] ?? key),
-      }),
+      React.createElement(
+        Popover,
+        null,
+        React.createElement(SftpBookmarkList, {
+          bookmarks: [{ id: "bm-1", path: "/srv/www", label: "Web root" }],
+          onNavigateToBookmark: () => {},
+          onDeleteBookmark: () => {},
+          t: (key: string) => ({
+            "sftp.bookmark.remove": "Remove bookmark",
+          }[key] ?? key),
+        }),
+      ),
     ),
   );
 

@@ -12,7 +12,7 @@ const {
 } = require("./sshAuthHelper.cjs");
 const passphraseHandler = require("./passphraseHandler.cjs");
 
-function createEncryptedKey(t) {
+function createKey(t, passphrase) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-identity-file-"));
   t.after(() => {
     fs.rmSync(dir, { recursive: true, force: true });
@@ -24,7 +24,7 @@ function createEncryptedKey(t) {
     "-t",
     "ed25519",
     "-N",
-    "secret",
+    passphrase,
     "-f",
     keyPath,
     "-C",
@@ -39,6 +39,10 @@ function createEncryptedKey(t) {
   return keyPath;
 }
 
+function createEncryptedKey(t) {
+  return createKey(t, "secret");
+}
+
 function createSender() {
   const events = [];
   return {
@@ -51,6 +55,79 @@ function createSender() {
     },
   };
 }
+
+test("loadIdentityFileForAuth accepts an unencrypted Ed25519 private key", async (t) => {
+  const keyPath = createKey(t, "");
+  if (!keyPath) return;
+
+  const identityFile = await loadIdentityFileForAuth({
+    keyPath,
+    hostname: "example.test",
+  });
+
+  assert.equal(identityFile.keyPath, keyPath);
+  assert.match(identityFile.privateKey, /BEGIN OPENSSH PRIVATE KEY/);
+});
+
+test("loadIdentityFileForAuth rejects a public-only identity file", async (t) => {
+  const keyPath = createKey(t, "");
+  if (!keyPath) return;
+
+  const publicKeyPath = `${keyPath}.pub`;
+  const publicKey = fs.readFileSync(publicKeyPath, "utf8");
+
+  await assert.rejects(
+    () => loadIdentityFileForAuth({
+      keyPath: publicKeyPath,
+      hostname: "example.test",
+    }),
+    (err) => {
+      assert.equal(err.code, "ERR_PRIVATE_KEY_INVALID");
+      assert.ok(err.message.includes(publicKeyPath));
+      assert.equal(err.message.includes(publicKey.trim()), false);
+      return true;
+    },
+  );
+});
+
+test("preparePrivateKeyForAuth rejects a public-only inline key", async (t) => {
+  const keyPath = createKey(t, "");
+  if (!keyPath) return;
+
+  const publicKey = fs.readFileSync(`${keyPath}.pub`, "utf8");
+
+  await assert.rejects(
+    () => preparePrivateKeyForAuth({
+      privateKey: publicKey,
+      keyName: "public-only",
+      hostname: "example.test",
+    }),
+    (err) => {
+      assert.equal(err.code, "ERR_PRIVATE_KEY_INVALID");
+      assert.equal(err.message.includes(publicKey.trim()), false);
+      return true;
+    },
+  );
+});
+
+test("loadIdentityFileForAuth rejects malformed key content without a raw fallback", async (t) => {
+  const keyPath = createKey(t, "");
+  if (!keyPath) return;
+  fs.writeFileSync(keyPath, "not a private key");
+
+  await assert.rejects(
+    () => loadIdentityFileForAuth({
+      keyPath,
+      hostname: "example.test",
+    }),
+    (err) => {
+      assert.equal(err.code, "ERR_PRIVATE_KEY_INVALID");
+      assert.ok(err.message.includes(keyPath));
+      assert.equal(err.message.includes("not a private key"), false);
+      return true;
+    },
+  );
+});
 
 test("loadIdentityFileForAuth uses a valid saved passphrase without prompting", async (t) => {
   const keyPath = createEncryptedKey(t);

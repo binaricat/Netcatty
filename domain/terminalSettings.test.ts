@@ -7,6 +7,28 @@ test("normalizeTerminalSettings disables cursor line highlight by default", () =
   assert.equal(normalizeTerminalSettings().highlightCursorLine, false);
 });
 
+test("normalizeTerminalSettings defaults disconnected sessions to a terminal notice", () => {
+  assert.equal(normalizeTerminalSettings().disconnectedNoticeMode, "terminal");
+});
+
+test("normalizeTerminalSettings preserves supported disconnected notice modes", () => {
+  assert.equal(
+    normalizeTerminalSettings({ disconnectedNoticeMode: "terminal" }).disconnectedNoticeMode,
+    "terminal",
+  );
+  assert.equal(
+    normalizeTerminalSettings({ disconnectedNoticeMode: "dialog" }).disconnectedNoticeMode,
+    "dialog",
+  );
+});
+
+test("normalizeTerminalSettings rejects unsupported disconnected notice modes", () => {
+  assert.equal(
+    normalizeTerminalSettings({ disconnectedNoticeMode: "toast" as never }).disconnectedNoticeMode,
+    "terminal",
+  );
+});
+
 test("normalizeTerminalSettings preserves enabled cursor line highlight", () => {
   assert.equal(normalizeTerminalSettings({ highlightCursorLine: true }).highlightCursorLine, true);
 });
@@ -103,6 +125,23 @@ test("normalizeTerminalSettings falls back for unsupported dynamic tab title mod
   assert.equal(
     normalizeTerminalSettings({ dynamicTabTitleMode: "legacy" as never }).dynamicTabTitleMode,
     "agent",
+  );
+});
+
+test("normalizeTerminalSettings enables OSC desktop notifications by default", () => {
+  assert.equal(normalizeTerminalSettings().oscNotifications, "always");
+});
+
+test("normalizeTerminalSettings preserves supported OSC notification modes", () => {
+  assert.equal(normalizeTerminalSettings({ oscNotifications: "off" }).oscNotifications, "off");
+  assert.equal(normalizeTerminalSettings({ oscNotifications: "unfocused" }).oscNotifications, "unfocused");
+  assert.equal(normalizeTerminalSettings({ oscNotifications: "always" }).oscNotifications, "always");
+});
+
+test("normalizeTerminalSettings falls back for unsupported OSC notification modes", () => {
+  assert.equal(
+    normalizeTerminalSettings({ oscNotifications: "legacy" as never }).oscNotifications,
+    "always",
   );
 });
 

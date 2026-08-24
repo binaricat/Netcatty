@@ -23,9 +23,11 @@ declare global {
     ): Promise<void>;
     renameSftp?(sftpId: string, oldPath: string, newPath: string, encoding?: SftpFilenameEncoding): Promise<void>;
     statSftp?(sftpId: string, path: string, encoding?: SftpFilenameEncoding): Promise<SftpStatResult>;
-    /** No-follow remote metadata for conflict detection (symlink vs target). */
-    lstatSftp?(sftpId: string, path: string, encoding?: SftpFilenameEncoding): Promise<SftpStatResult>;
+    /** No-follow remote metadata for conflict detection (symlink vs target). Missing path → null. */
+    lstatSftp?(sftpId: string, path: string, encoding?: SftpFilenameEncoding): Promise<SftpStatResult | null>;
     chmodSftp?(sftpId: string, path: string, mode: string, encoding?: SftpFilenameEncoding): Promise<void>;
+    /** Extract a remote archive into its parent directory via SSH exec. */
+    extractSftpArchive?(sftpId: string, path: string, encoding?: SftpFilenameEncoding): Promise<{ success: boolean }>;
     getSftpHomeDir?(sftpId: string, encoding?: SftpFilenameEncoding): Promise<{ success: boolean; homeDir?: string; error?: string }>;
 
     // Transfer with progress
@@ -148,6 +150,7 @@ declare global {
     writeLocalFile?(path: string, content: ArrayBuffer): Promise<void>;
     deleteLocalFile?(path: string, expectedType?: SftpStatResult["type"]): Promise<void>;
     renameLocalFile?(oldPath: string, newPath: string): Promise<void>;
+    extractLocalArchive?(path: string): Promise<{ success: boolean }>;
     mkdirLocal?(path: string): Promise<void>;
     statLocal?(path: string): Promise<SftpStatResult>;
     /** No-follow local metadata for conflict detection (symlink vs target). */

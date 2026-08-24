@@ -526,6 +526,7 @@ async function execRemoteShellCommand(sshClient, command, optionsOrSignal = null
     1,
     Number(options.maxOutputBytes) || REMOTE_DELETE_EXEC_MAX_OUTPUT_BYTES,
   );
+  const discardStdout = options.discardStdout === true;
   return await new Promise((resolve, reject) => {
     let settled = false;
     let streamRef = null;
@@ -575,6 +576,7 @@ async function execRemoteShellCommand(sshClient, command, optionsOrSignal = null
     const appendOutput = (target, chunk) => {
       if (settled) return;
       const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
+      if (target === "stdout" && discardStdout) return;
       outputBytes += buffer.length;
       if (outputBytes > maxOutputBytes) {
         finish(new Error(`Remote command output exceeded ${maxOutputBytes} bytes`));
@@ -2374,7 +2376,7 @@ const fileOpsApi = createFileOpsApi({
   requireSftpChannel, resolveEncodingForRequest, updateResolvedEncoding, encodePath, decodeName,
   detectEncodingFromList, statResultFromAttrs, normalizeRemotePathString, collectReadable, writeToWritable,
   throwIfAborted, pipeStreams, ensureRemoteDirForSession, removeRemotePathInternal, removeRemoteDirectory,
-  tryFastShellDirectoryDelete, renameRemotePath,
+  tryFastShellDirectoryDelete, execRemoteShellCommand, renameRemotePath,
   buildStagedRemotePath, buildBackupRemotePath,
   realpathAsync, statAsync, lstatAsync, readdirAsync, mkdirAsync, rmdirAsync, unlinkAsync, openFileAsync,
   writeFileChunkAsync, closeFileAsync, createAbortError, copySftpEncodingState, clearSftpEncodingState,
@@ -2395,6 +2397,7 @@ const {
   statSftp,
   lstatSftp,
   chmodSftp,
+  extractSftpArchive,
   getSftpHomeDir,
 } = fileOpsApi;
 
@@ -2590,6 +2593,7 @@ function registerHandlers(ipcMain, options = {}) {
       "netcatty:sftp:stat",
       "netcatty:sftp:lstat",
       "netcatty:sftp:chmod",
+      "netcatty:sftp:extract",
       "netcatty:sftp:homeDir",
     ].forEach((channel) => registerWorkerHandle(ipcMain, terminalWorkerManager, channel, ownership));
     return;
@@ -2612,6 +2616,7 @@ function registerHandlers(ipcMain, options = {}) {
     ["netcatty:sftp:stat", statSftp],
     ["netcatty:sftp:lstat", lstatSftp],
     ["netcatty:sftp:chmod", chmodSftp],
+    ["netcatty:sftp:extract", extractSftpArchive],
     ["netcatty:sftp:homeDir", getSftpHomeDir],
   ].forEach(([channel, handler]) => registerActivityHandle(ipcMain, channel, handler, ownership));
 }
@@ -2659,6 +2664,7 @@ module.exports = {
   statSftp,
   lstatSftp,
   chmodSftp,
+  extractSftpArchive,
   getSftpHomeDir,
   resolveEncodingForRequest,
   _execRemoteShellCommandForTests: execRemoteShellCommand,

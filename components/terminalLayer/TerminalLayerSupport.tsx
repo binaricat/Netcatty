@@ -49,12 +49,23 @@ import {
 import type { ResolvedAppearance, TerminalAppearanceHostScope } from '../../domain/terminalAppearanceRuntime';
 import type { TerminalSidePanelAutoOpenTab } from '../../domain/terminalSidePanelAutoOpen';
 import type { SidePanelTool } from '../../domain/sidePanelLayout';
+import {
+  resolvePaneMagnificationStyle,
+  type PaneMagnificationController,
+  type PaneMagnificationTarget,
+} from '../../domain/paneMagnification';
 
 export type SidePanelTab = SidePanelTool;
 
 const LazyAIChatSidePanel = lazy(() =>
   import('../AIChatSidePanel').then((module) => ({ default: module.AIChatSidePanel })),
 );
+
+if (typeof requestIdleCallback === 'function') {
+  requestIdleCallback(() => {
+    void import('../AIChatSidePanel');
+  });
+}
 
 const AIChatSidePanelFallback = memo(function AIChatSidePanelFallback() {
   return (
@@ -580,10 +591,14 @@ const AIChatPanelsHostInner: React.FC<AIChatPanelsHostProps> = ({
                     setAgentModel={aiConfig.setAgentModel}
                     agentProviderMap={aiConfig.agentProviderMap}
                     setAgentProvider={aiConfig.setAgentProvider}
+                    agentThinkingMap={aiConfig.agentThinkingMap}
+                    setAgentThinking={aiConfig.setAgentThinking}
+                    updateProvider={aiConfig.updateProvider}
                     globalPermissionMode={aiConfig.globalPermissionMode}
                     setGlobalPermissionMode={aiConfig.setGlobalPermissionMode}
                     commandBlocklist={aiConfig.commandBlocklist}
                     commandTimeout={aiConfig.commandTimeout}
+                    responseIdleTimeout={aiConfig.responseIdleTimeout}
                     maxIterations={aiConfig.maxIterations}
                     webSearchConfig={aiConfig.webSearchConfig}
                     quickMessages={aiConfig.quickMessages}
@@ -715,6 +730,7 @@ export interface TerminalLayerProps {
   showHostTreeSidebar?: boolean;
   toggleScriptsSidePanelRef?: React.MutableRefObject<(() => void) | null>;
   toggleSidePanelRef?: React.MutableRefObject<(() => void) | null>;
+  paneMagnificationRef?: React.MutableRefObject<PaneMagnificationController | null>;
   // Session rename
   onStartSessionRename?: (sessionId: string) => void;
   onSubmitSessionRename?: (sessionId?: string, name?: string) => void;
@@ -730,6 +746,9 @@ interface TerminalPaneProps {
   workspaceById: Map<string, Workspace>;
   workspaceRectsById: Map<string, Record<string, WorkspaceRect>>;
   isTerminalLayerVisible: boolean;
+  magnifiedPane: { tabId: string; target: PaneMagnificationTarget } | null;
+  onMagnifyTerminalPane: (tabId: string, sessionId: string) => void;
+  onTerminalPaneInteraction: (tabId: string, sessionId: string) => void;
   workspaceFocusHandlersRef: React.MutableRefObject<Map<string, () => void>>;
   workspaceBroadcastHandlersRef: React.MutableRefObject<Map<string, () => void>>;
   splitHorizontalHandlersRef: React.MutableRefObject<Map<string, () => void>>;
@@ -859,6 +878,9 @@ const terminalPanePropsAreEqual = (
   prev.workspaceById === next.workspaceById &&
   workspaceRectsEqual(getPaneRenderedWorkspaceRect(prev), getPaneRenderedWorkspaceRect(next)) &&
   prev.isTerminalLayerVisible === next.isTerminalLayerVisible &&
+  prev.magnifiedPane === next.magnifiedPane &&
+  prev.onMagnifyTerminalPane === next.onMagnifyTerminalPane &&
+  prev.onTerminalPaneInteraction === next.onTerminalPaneInteraction &&
   prev.workspaceFocusHandlersRef === next.workspaceFocusHandlersRef &&
   prev.workspaceBroadcastHandlersRef === next.workspaceBroadcastHandlersRef &&
   prev.splitHorizontalHandlersRef === next.splitHorizontalHandlersRef &&
@@ -1152,6 +1174,9 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
   workspaceById,
   workspaceRectsById,
   isTerminalLayerVisible,
+  magnifiedPane,
+  onMagnifyTerminalPane,
+  onTerminalPaneInteraction,
   workspaceFocusHandlersRef,
   workspaceBroadcastHandlersRef,
   splitHorizontalHandlersRef,
@@ -1310,7 +1335,47 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
   }, [deferPaneLayoutUpdate, isFocusedPane, isFocusMode, isSplitViewVisible, isVisible, livePaneLayoutKey]);
 
   const paneLayoutKey = paneLayoutKeyRef.current;
-  const style: React.CSSProperties = { ...layoutStyle };
+  const isMagnified = isVisible
+    && magnifiedPane?.target.kind === 'terminal'
+    && magnifiedPane.target.sessionId === session.id
+    && magnifiedPane.tabId === (activeWorkspaceId ?? session.id);
+  const isCoveredByMagnification = isVisible
+    && magnifiedPane?.tabId === (activeWorkspaceId ?? session.id)
+    && !isMagnified;
+  const [magnifiedSurfaceBounds, setMagnifiedSurfaceBounds] = useState<{
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+  } | null>(null);
+  useLayoutEffect(() => {
+    if (!isMagnified) {
+      setMagnifiedSurfaceBounds(null);
+      return undefined;
+    }
+    const pane = paneElementRef.current;
+    const surface = pane?.closest<HTMLElement>('[data-section="terminal-workspace"]');
+    if (!surface) return undefined;
+    const update = () => {
+      const bounds = surface.getBoundingClientRect();
+      setMagnifiedSurfaceBounds({
+        left: bounds.left,
+        top: bounds.top,
+        width: bounds.width,
+        height: bounds.height,
+      });
+    };
+    update();
+    if (typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver(update);
+    observer.observe(surface);
+    return () => observer.disconnect();
+  }, [isMagnified]);
+  const style: React.CSSProperties = resolvePaneMagnificationStyle(
+    layoutStyle,
+    isMagnified && !!magnifiedSurfaceBounds,
+    magnifiedSurfaceBounds,
+  );
 
   useLayoutEffect(() => {
     const element = paneElementRef.current;
@@ -1324,13 +1389,25 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
       return true;
     };
 
-    if (isVisible) {
+    // Only full-size layouts may feed the hidden-pane pinned size. Split rects
+    // must never be cached: after a split -> focus viewMode switch the cached
+    // fragment size would pin the hidden pane (and its PTY) narrow again,
+    // recreating the \r progress-refresh scrollback spam (#3046).
+    if (isVisible && !rect) {
       capturePaneSize();
       const observer = new ResizeObserver(() => {
         capturePaneSize();
       });
       observer.observe(element);
       return () => observer.disconnect();
+    }
+    if (isVisible) {
+      // A split-visible pane invalidates the cached full-size measurement:
+      // after an intervening viewport resize the stale pixels would pin later
+      // hidden full-size layouts at the wrong width (#3046). The hidden
+      // initialization below re-measures the current area instead.
+      lastVisiblePaneSizeRef.current = null;
+      return;
     }
 
     const initializeHiddenFullSize = !hibernateHiddenTabs
@@ -1367,11 +1444,11 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
     ));
   }
 
-  const workspaceFocusHandler = activeWorkspaceId
-    ? workspaceFocusHandlersRef.current.get(activeWorkspaceId)
-    : undefined;
   const workspaceBroadcastHandler = activeWorkspaceId
     ? workspaceBroadcastHandlersRef.current.get(activeWorkspaceId)
+    : undefined;
+  const workspaceFocusHandler = activeWorkspaceId
+    ? workspaceFocusHandlersRef.current.get(activeWorkspaceId)
     : undefined;
   const splitHorizontalHandler = splitHorizontalHandlersRef.current.get(session.id);
   const splitVerticalHandler = splitVerticalHandlersRef.current.get(session.id);
@@ -1384,10 +1461,21 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
   const sessionAppearanceTheme = sessionAppearance.theme;
 
   const handlePaneClick = useCallback(() => {
+    const tabId = activeWorkspaceId ?? session.id;
+    onTerminalPaneInteraction(tabId, session.id);
     if (activeWorkspaceId && !isFocusMode) {
       onSetWorkspaceFocusedSession?.(activeWorkspaceId, session.id);
     }
-  }, [activeWorkspaceId, isFocusMode, onSetWorkspaceFocusedSession, session.id]);
+  }, [activeWorkspaceId, isFocusMode, onSetWorkspaceFocusedSession, onTerminalPaneInteraction, session.id]);
+  const handleTogglePaneMagnification = useCallback(() => {
+    onMagnifyTerminalPane(activeWorkspaceId ?? session.id, session.id);
+  }, [activeWorkspaceId, onMagnifyTerminalPane, session.id]);
+  const handleExpandToFocus = useCallback(() => {
+    if (isMagnified) {
+      handleTogglePaneMagnification();
+    }
+    workspaceFocusHandler?.();
+  }, [handleTogglePaneMagnification, isMagnified, workspaceFocusHandler]);
   const handleOpenSystemForPane = useCallback(() => {
     if (activeWorkspaceId && !isFocusMode) {
       onSetWorkspaceFocusedSession?.(activeWorkspaceId, session.id);
@@ -1431,15 +1519,17 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
       data-session-id={session.id}
       data-section="terminal-split-pane"
       data-focused={isFocusedPane ? 'true' : undefined}
-      inert={isVisible ? undefined : true}
+      inert={isVisible && !isCoveredByMagnification ? undefined : true}
       className={cn(
         "absolute bg-background",
         inActiveWorkspace && "workspace-pane",
         isVisible && "z-10",
+        isMagnified && magnifiedSurfaceBounds && "animate-in fade-in zoom-in-95 duration-150",
       )}
       style={style}
       tabIndex={-1}
       onClick={handlePaneClick}
+      onFocusCapture={handlePaneClick}
     >
       <Terminal
         host={host}
@@ -1454,6 +1544,7 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
         inWorkspace={keepsWorkspacePresentation}
         isResizing={isResizing}
         isFocusMode={layoutWorkspace?.viewMode === 'focus'}
+        isPaneMagnified={isMagnified}
         isFocused={isFocusedPane}
         isFocusedPane={isSplitViewVisible ? isFocusedPane : undefined}
         fontFamilyId={terminalFontFamilyId}
@@ -1501,7 +1592,8 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
         onAddKnownHost={onAddKnownHost}
         onCommandExecuted={onCommandExecuted}
         onCommandSubmitted={onCommandSubmitted}
-        onExpandToFocus={inActiveWorkspace && !isFocusMode ? workspaceFocusHandler : undefined}
+        onExpandToFocus={inActiveWorkspace && !isFocusMode ? handleExpandToFocus : undefined}
+        onTogglePaneMagnification={inActiveWorkspace && (!isFocusMode || isMagnified) ? handleTogglePaneMagnification : undefined}
         onSplitHorizontal={onSplitSession ? splitHorizontalHandler : undefined}
         onSplitVertical={onSplitSession ? splitVerticalHandler : undefined}
         isBroadcastEnabled={broadcastEnabled}
@@ -1545,6 +1637,9 @@ interface TerminalPanesHostProps {
   workspaceById: Map<string, Workspace>;
   workspaceRectsById: Map<string, Record<string, WorkspaceRect>>;
   isTerminalLayerVisible: boolean;
+  magnifiedPane: { tabId: string; target: PaneMagnificationTarget } | null;
+  onMagnifyTerminalPane: (tabId: string, sessionId: string) => void;
+  onTerminalPaneInteraction: (tabId: string, sessionId: string) => void;
   workspaceFocusHandlersRef: React.MutableRefObject<Map<string, () => void>>;
   workspaceBroadcastHandlersRef: React.MutableRefObject<Map<string, () => void>>;
   splitHorizontalHandlersRef: React.MutableRefObject<Map<string, () => void>>;
@@ -1630,6 +1725,9 @@ const terminalPanesHostPropsAreEqual = (
   if (prev.resolvedSessionHostIds !== next.resolvedSessionHostIds) return false;
   if (prev.workspaceById !== next.workspaceById) return false;
   if (prev.isTerminalLayerVisible !== next.isTerminalLayerVisible) return false;
+  if (prev.magnifiedPane !== next.magnifiedPane) return false;
+  if (prev.onMagnifyTerminalPane !== next.onMagnifyTerminalPane) return false;
+  if (prev.onTerminalPaneInteraction !== next.onTerminalPaneInteraction) return false;
   if (prev.workspaceFocusHandlersRef !== next.workspaceFocusHandlersRef) return false;
   if (prev.workspaceBroadcastHandlersRef !== next.workspaceBroadcastHandlersRef) return false;
   if (prev.splitHorizontalHandlersRef !== next.splitHorizontalHandlersRef) return false;

@@ -28,9 +28,6 @@ export type TerminalPaneStyle = {
 
 export function shouldUseTerminalPaneSplitLayout({
   workspace,
-  sessionId,
-  isVisible,
-  hibernateHiddenTabs,
 }: {
   workspace: Workspace | undefined;
   sessionId: string;
@@ -39,14 +36,12 @@ export function shouldUseTerminalPaneSplitLayout({
 }): boolean {
   if (!workspace) return false;
   // Default viewMode is tiled split (including undefined from createWorkspaceFromSessions).
-  // Only focus mode uses a full-size focused pane; other panes keep split geometry while
-  // continuously rendered in the background.
-  if (workspace.viewMode === "focus") {
-    return !isVisible
-      && !hibernateHiddenTabs
-      && workspace.focusedSessionId !== sessionId;
-  }
-  return true;
+  // Focus mode never uses split geometry: every pane is viewed full-size, so hidden
+  // panes must keep full-size geometry too. Laying continuously rendered background
+  // panes out at their split rects shrank the live xterm and the remote PTY to a
+  // 1/N-width fragment, so \r-refresh progress output (e.g. rsync --info=progress2)
+  // soft-wrapped and left one scrollback line per refresh (#3046).
+  return workspace.viewMode !== "focus";
 }
 
 export function shouldMeasureTerminalLayerLayout({

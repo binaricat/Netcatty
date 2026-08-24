@@ -59,6 +59,18 @@ test('SFTP descending kind sorting keeps directories first when enabled', () => 
   assert.deepEqual(sorted.map(({ name }) => name), ['src', 'archive.zip', 'BUILD']);
 });
 
+test('SFTP owner sorting compares usernames and keeps directories first', () => {
+  const ownerEntries = [
+    { ...entry('www.log', 'file', 100), owner: 'www-data' },
+    { ...entry('root.txt', 'file', 100), owner: 'root' },
+    { ...entry('home', 'directory', 100), owner: 'alice' },
+  ];
+
+  const sorted = sortSftpEntries(ownerEntries, 'owner', 'asc', true);
+
+  assert.deepEqual(sorted.map(({ name }) => name), ['home', 'root.txt', 'www.log']);
+});
+
 test('SFTP kind sorting can mix files and directories when folders first is disabled', () => {
   const kindEntries = [
     entry('BUILD', 'file', 100),

@@ -384,13 +384,32 @@ export class KeywordHighlighter implements IDisposable {
     }
     // In-place CR / backspace / EL / ICH / DCH rewrite the current row.
     // `\r\n` is a line advance and must not restore/repaint the previous prompt.
-    const eraseInLine = typeof data === "string" && /\x1b\[[\d;]*[K@PMLGHf]/.test(data); // eslint-disable-line no-control-regex
-    const rewritesCurrentLine = typeof data === "string"
-      && (/\r(?!\n)/.test(data) || data.includes("\x08") || eraseInLine);
     const startsWithLineAdvance = typeof data === "string" && /^(?:\r\n|\n)/.test(data);
+    // CUU / CPL / CUP / VPA / DECSTBM (homes the cursor) / restore-cursor /
+    // RI / DECRC can move back onto rows the leading newline already left
+    // (multi-line progress redraws). Controls this heuristic misses are caught
+    // by the start-row fingerprint safety net below.
+    const movesCursorUp = typeof data === "string"
+      && (/\x1b(?:\[[\d;]*[AFHfudr]|M|8)/.test(data)); // eslint-disable-line no-control-regex
+    const eraseInLine = typeof data === "string" && /\x1b\[[\d;]*[K@PMLGHf]/.test(data); // eslint-disable-line no-control-regex
+    // A chunk that starts with a line advance leaves the cursor row before any
+    // later CR/EL can touch it (bash's bracketed-paste `\x1b[?2004l\r` arrives
+    // fused with the echoed newline). Restoring startY here would strip the
+    // previous prompt's highlight while the post-write repaint skips that row.
+    // Chunks that can climb back up keep the restore and repaint startY below.
+    const rewritesCurrentLine = typeof data === "string"
+      && (!startsWithLineAdvance || movesCursorUp)
+      && (/\r(?!\n)/.test(data) || data.includes("\x08") || eraseInLine);
     if (this.compiledPatterns.length > 0 && rewritesCurrentLine) {
       this.restorePhysicalLine(startY);
     }
+    const skipStartRow = startsWithLineAdvance && !movesCursorUp;
+    // Safety net for controls the backtracking heuristic does not enumerate
+    // (DECOM, DECCOLM, ...): if the skipped start row's text changed during
+    // the write, something climbed back onto it and it must be repainted.
+    const startRowTextBefore = skipStartRow
+      ? this.term.buffer.active.getLine(startY)?.translateToString(false)
+      : undefined;
     const writeMarker = this.term.registerMarker(0);
     return this.originalWrite(data, () => {
       const active = this.term.buffer.active;
@@ -402,7 +421,11 @@ export class KeywordHighlighter implements IDisposable {
             this.scheduleCatchUp();
           }
         } else {
-          const fromY = startsWithLineAdvance ? Math.min(endY, writeMarker.line + 1) : writeMarker.line;
+          const startRowMutated = startRowTextBefore !== undefined
+            && active.getLine(writeMarker.line)?.translateToString(false) !== startRowTextBefore;
+          const fromY = skipStartRow && !startRowMutated
+            ? Math.min(endY, writeMarker.line + 1)
+            : writeMarker.line;
           if (this.compiledPatterns.length === 0) {
             if (this.hasStoredOriginalsInRange(fromY, endY)) {
               this.markCatchUp(fromY);
@@ -590,10 +613,7 @@ export class KeywordHighlighter implements IDisposable {
           break;
         }
         const sliceEnd = Math.min(buffer.length - 1, nextY + RECOLOR_SLICE_LINES - 1);
-        const viewportStart = buffer.viewportY;
-        const viewportEnd = viewportStart + this.term.rows - 1;
-        const refresh = sliceEnd >= viewportStart && nextY <= viewportEnd;
-        this.recolorRange(nextY, sliceEnd, refresh, false);
+        this.recolorRange(nextY, sliceEnd, false, false);
         nextY = sliceEnd + 1;
         if (nextY >= buffer.length) {
           this.catchUpFrom = null;
@@ -616,6 +636,7 @@ export class KeywordHighlighter implements IDisposable {
         this.resolveCatchUp = null;
       } else if (this.resolveCatchUpY() === null) {
         this.catchUpCounted = false;
+        this.recolorVisible();
         this.resolveCatchUp?.();
         this.resolveCatchUp = null;
       } else if (pausedOnAlternate) {

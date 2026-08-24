@@ -231,9 +231,11 @@ test("buildSyncPayload includes AI configuration settings", () => {
   localStorage.setItem(storageKeys.STORAGE_KEY_AI_DEFAULT_AGENT, "codex");
   localStorage.setItem(storageKeys.STORAGE_KEY_AI_COMMAND_BLOCKLIST, JSON.stringify(["rm -rf"]));
   localStorage.setItem(storageKeys.STORAGE_KEY_AI_COMMAND_TIMEOUT, "120");
+  localStorage.setItem(storageKeys.STORAGE_KEY_AI_RESPONSE_IDLE_TIMEOUT, "600");
   localStorage.setItem(storageKeys.STORAGE_KEY_AI_MAX_ITERATIONS, "10");
   localStorage.setItem(storageKeys.STORAGE_KEY_AI_AGENT_MODEL_MAP, JSON.stringify({ codex: "gpt-test" }));
   localStorage.setItem(storageKeys.STORAGE_KEY_AI_AGENT_PROVIDER_MAP, JSON.stringify({ catty: "openai-main" }));
+  localStorage.setItem(storageKeys.STORAGE_KEY_AI_AGENT_THINKING_MAP, JSON.stringify({ catty: "high" }));
   localStorage.setItem(storageKeys.STORAGE_KEY_AI_WEB_SEARCH, JSON.stringify(webSearch));
   localStorage.setItem(storageKeys.STORAGE_KEY_AI_SHOW_TERMINAL_SELECTION_ACTION, "false");
 
@@ -251,9 +253,11 @@ test("buildSyncPayload includes AI configuration settings", () => {
     defaultAgentId: "codex",
     commandBlocklist: ["rm -rf"],
     commandTimeout: 120,
+    responseIdleTimeout: 600,
     maxIterations: 10,
     agentModelMap: { codex: "gpt-test" },
     agentProviderMap: { catty: "openai-main" },
+    agentThinkingMap: { catty: "high" },
     webSearchConfig: webSearchWithoutKey,
     showTerminalSelectionAction: false,
   });
@@ -263,6 +267,14 @@ test("terminal selection AI preference is syncable for auto-sync detection", () 
   assert.ok(
     (SYNCABLE_SETTING_STORAGE_KEYS as readonly string[]).includes(
       storageKeys.STORAGE_KEY_AI_SHOW_TERMINAL_SELECTION_ACTION,
+    ),
+  );
+});
+
+test("AI response wait time is syncable for auto-sync detection", () => {
+  assert.ok(
+    (SYNCABLE_SETTING_STORAGE_KEYS as readonly string[]).includes(
+      storageKeys.STORAGE_KEY_AI_RESPONSE_IDLE_TIMEOUT,
     ),
   );
 });
@@ -445,6 +457,7 @@ test("applySyncPayload restores AI configuration settings", async () => {
         defaultAgentId: "claude",
         commandBlocklist: ["shutdown"],
         commandTimeout: 30,
+        responseIdleTimeout: 900,
         maxIterations: 5,
         agentModelMap: { claude: "claude-test" },
         agentProviderMap: { catty: "anthropic-main" },
@@ -465,6 +478,7 @@ test("applySyncPayload restores AI configuration settings", async () => {
   assert.equal(localStorage.getItem(storageKeys.STORAGE_KEY_AI_DEFAULT_AGENT), "claude");
   assert.deepEqual(JSON.parse(localStorage.getItem(storageKeys.STORAGE_KEY_AI_COMMAND_BLOCKLIST)!), ["shutdown"]);
   assert.equal(localStorage.getItem(storageKeys.STORAGE_KEY_AI_COMMAND_TIMEOUT), "30");
+  assert.equal(localStorage.getItem(storageKeys.STORAGE_KEY_AI_RESPONSE_IDLE_TIMEOUT), "900");
   assert.equal(localStorage.getItem(storageKeys.STORAGE_KEY_AI_MAX_ITERATIONS), "5");
   assert.deepEqual(JSON.parse(localStorage.getItem(storageKeys.STORAGE_KEY_AI_AGENT_MODEL_MAP)!), { claude: "claude-test" });
   assert.deepEqual(JSON.parse(localStorage.getItem(storageKeys.STORAGE_KEY_AI_AGENT_PROVIDER_MAP)!), { catty: "anthropic-main" });
@@ -1283,6 +1297,26 @@ test("terminal auto-close preference survives sync round-trip", async () => {
 
   const restored = JSON.parse(localStorage.getItem(storageKeys.STORAGE_KEY_TERM_SETTINGS)!);
   assert.equal(restored.autoCloseOnExit, false);
+});
+
+test("terminal disconnected notice preference survives sync round-trip", async () => {
+  localStorage.setItem(
+    storageKeys.STORAGE_KEY_TERM_SETTINGS,
+    JSON.stringify({ disconnectedNoticeMode: "dialog" }),
+  );
+
+  const payload = buildSyncPayload(vault());
+  const termSettings = (payload.settings?.terminalSettings ?? {}) as Record<string, unknown>;
+  assert.equal(termSettings.disconnectedNoticeMode, "dialog");
+
+  localStorage.setItem(
+    storageKeys.STORAGE_KEY_TERM_SETTINGS,
+    JSON.stringify({ disconnectedNoticeMode: "terminal" }),
+  );
+  await applySyncPayload(payload, { importVaultData: () => {} });
+
+  const restored = JSON.parse(localStorage.getItem(storageKeys.STORAGE_KEY_TERM_SETTINGS)!);
+  assert.equal(restored.disconnectedNoticeMode, "dialog");
 });
 
 test("applySyncPayload restores the terminal host information bar preference", async () => {

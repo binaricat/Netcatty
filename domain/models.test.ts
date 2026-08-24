@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { keyEventToString, matchesKeyBinding, tabShortcutDigitFromEvent } from './models.ts';
+import { keyEventToString, keyStringToKeyboardEvent, matchesKeyBinding, tabShortcutDigitFromEvent } from './models.ts';
 
 const keyboardEvent = (
   key: string,
@@ -73,4 +73,18 @@ test('shifted digit ranges still match via physical Digit code', () => {
 test('tab shortcut digit falls back to e.key when code is missing', () => {
   assert.equal(tabShortcutDigitFromEvent({ key: '3', code: '' }), 3);
   assert.equal(tabShortcutDigitFromEvent({ key: '!', code: '' }), null);
+});
+
+test('stored shortcut strings rebuild matching keyboard events', () => {
+  const event = keyStringToKeyboardEvent('Ctrl + 1');
+  assert.ok(event);
+  assert.equal(event.key, '1');
+  assert.equal(event.ctrlKey, true);
+  assert.equal(matchesKeyBinding(event, 'Ctrl + [1...9]', false), true);
+
+  const macEvent = keyStringToKeyboardEvent('⌘ + B');
+  assert.ok(macEvent);
+  assert.equal(macEvent.key, 'b');
+  assert.equal(macEvent.metaKey, true);
+  assert.equal(matchesKeyBinding(macEvent, '⌘ + B', true), true);
 });

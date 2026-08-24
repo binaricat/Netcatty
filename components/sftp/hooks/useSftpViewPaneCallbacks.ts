@@ -90,6 +90,7 @@ export const useSftpViewPaneCallbacks = ({
               lastModified: ms,
               lastModifiedFormatted: formatDate(ms),
               permissions: f.permissions,
+              owner: f.owner,
               linkTarget: f.linkTarget as 'file' | 'directory' | null | undefined,
               hidden: f.hidden,
             };
@@ -154,6 +155,7 @@ export const useSftpViewPaneCallbacks = ({
       onOpenFileWith: fileOps.onOpenFileWithLeft,
       onDownloadFile: fileOps.onDownloadFileLeft,
       onDownloadFiles: fileOps.onDownloadFilesLeft,
+      onExtractArchive: fileOps.onExtractArchiveLeft,
       onUploadExternalFiles: fileOps.onUploadExternalFilesLeft,
       onUploadExternalFileList: fileOps.onUploadExternalFileListLeft,
       onUploadExternalFolder: fileOps.onUploadExternalFolderLeft,
@@ -196,6 +198,7 @@ export const useSftpViewPaneCallbacks = ({
       onOpenFileWith: fileOps.onOpenFileWithRight,
       onDownloadFile: fileOps.onDownloadFileRight,
       onDownloadFiles: fileOps.onDownloadFilesRight,
+      onExtractArchive: fileOps.onExtractArchiveRight,
       onUploadExternalFiles: fileOps.onUploadExternalFilesRight,
       onUploadExternalFileList: fileOps.onUploadExternalFileListRight,
       onUploadExternalFolder: fileOps.onUploadExternalFolderRight,

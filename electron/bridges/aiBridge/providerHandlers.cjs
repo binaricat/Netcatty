@@ -319,7 +319,14 @@ function registerProviderHandlers(ctx) {
   }
 
   // Start a streaming chat request (proxied through main process)
-  ipcMain.handle("netcatty:ai:chat:stream", async (event, { requestId, url, headers, body, providerId }) => {
+  ipcMain.handle("netcatty:ai:chat:stream", async (event, {
+    requestId,
+    url,
+    headers,
+    body,
+    providerId,
+    idleTimeoutMs,
+  }) => {
     // Validate IPC sender (Issue #17)
     if (!validateSender(event)) {
       return { ok: false, error: "Unauthorized IPC sender" };
@@ -346,7 +353,13 @@ function registerProviderHandlers(ctx) {
       }
 
       const skipTLS = shouldSkipTLSVerify(providerId);
-      const { statusCode, statusText } = await streamRequest(resolvedUrl, { method: "POST", headers: resolvedHeaders, body }, event, requestId, skipTLS);
+      const { statusCode, statusText } = await streamRequest(
+        resolvedUrl,
+        { method: "POST", headers: resolvedHeaders, body, idleTimeoutMs },
+        event,
+        requestId,
+        skipTLS,
+      );
       return { ok: true, statusCode, statusText };
     } catch (err) {
       if (err?.name === "AbortError") {
@@ -419,7 +432,11 @@ function registerProviderHandlers(ctx) {
         const isHttps = parsedUrl.protocol === "https:";
         const lib = isHttps ? https : http;
 
-        const fetchOpts = { method: method || "GET", headers: resolvedHeaders || {}, timeout: 30000 };
+        const fetchOpts = {
+          method: method || "GET",
+          headers: withContentLength(resolvedHeaders || {}, body),
+          timeout: 30000,
+        };
         if (skipTLS && isHttps) fetchOpts.rejectUnauthorized = false;
         if (proxyAgent) fetchOpts.agent = proxyAgent;
         const req = lib.request(parsedUrl, fetchOpts,

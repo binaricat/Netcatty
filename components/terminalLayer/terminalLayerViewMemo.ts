@@ -313,6 +313,8 @@ const SIDE_PANEL_STABLE_CTX_KEYS = [
   'handleOpenSystem',
   'handleCloseSidePanel',
   'handleFocusSidePanelPane',
+  'handleMagnifySidePanelPane',
+  'handleRestoreMagnifiedPane',
   'handleSplitSidePanelPane',
   'handleCloseSidePanelPane',
   'handleResizeSidePanelSplit',
@@ -320,6 +322,7 @@ const SIDE_PANEL_STABLE_CTX_KEYS = [
   'handleSftpInitialLocationApplied',
   'handlePendingUploadHandled',
   'validAIScopeTargetIds',
+  'magnifiedPane',
   'AISidePanelStateRoot',
   'NotesManager',
   // notes / noteGroups / updateNotes / updateNoteGroups come from notesStore.
@@ -331,7 +334,9 @@ const SIDE_PANEL_STABLE_CTX_KEYS = [
 ] as const;
 
 const WORKSPACE_CTX_KEYS = [
+  'activeTabId',
   'workspaceInnerRef',
+  'workspaceOuterRef',
   'workspaceOverlayRef',
   'draggingSessionId',
   'isFocusMode',
@@ -347,6 +352,10 @@ const WORKSPACE_CTX_KEYS = [
   'workspaceById',
   'workspaceRectsById',
   'isTerminalLayerVisible',
+  'magnifiedPane',
+  'handleMagnifyTerminalPane',
+  'handleTerminalPaneInteraction',
+  'handleRestoreMagnifiedPane',
   'workspaceFocusHandlersRef',
   'workspaceBroadcastHandlersRef',
   'splitHorizontalHandlersRef',

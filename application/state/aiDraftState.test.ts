@@ -18,7 +18,102 @@ import {
   setDraftView,
   setSessionView,
   updateDraftForScope,
+  draftsByScopeEqualIgnoringComposerText,
+  draftsByScopeEqualIgnoringAllComposerText,
 } from "./aiDraftState.ts";
+
+test("draftsByScopeEqualIgnoringComposerText ignores typing in the active scope", () => {
+  const base = createEmptyDraft("catty");
+  const prev = { "terminal:1": { ...base, text: "" } };
+  const next = { "terminal:1": { ...base, text: "你好", updatedAt: base.updatedAt + 1 } };
+  assert.equal(draftsByScopeEqualIgnoringComposerText(prev, next, "terminal:1"), true);
+  assert.equal(
+    draftsByScopeEqualIgnoringComposerText(
+      prev,
+      { "terminal:1": { ...base, text: "你好", attachments: [{ id: "a" } as never] } },
+      "terminal:1",
+    ),
+    false,
+  );
+  assert.equal(
+    draftsByScopeEqualIgnoringComposerText(
+      prev,
+      { "terminal:1": prev["terminal:1"], "workspace:2": base },
+      "terminal:1",
+    ),
+    true,
+  );
+  assert.equal(
+    draftsByScopeEqualIgnoringComposerText(
+      prev,
+      {
+        "terminal:1": prev["terminal:1"],
+        "workspace:2": { ...base, attachments: [{ id: "a" } as never] },
+      },
+      "terminal:1",
+    ),
+    false,
+  );
+});
+
+test("first composer draft is treated as text-only identity churn", () => {
+  const empty = createEmptyDraft("catty");
+  const created = { ...empty, text: "你" };
+  assert.equal(draftsByScopeEqualIgnoringAllComposerText({}, { "terminal:1": empty }), false);
+  assert.equal(draftsByScopeEqualIgnoringAllComposerText({}, { "terminal:1": created }), true);
+  assert.equal(
+    draftsByScopeEqualIgnoringComposerText({}, { "terminal:1": created }, "terminal:1"),
+    true,
+  );
+  assert.equal(
+    draftsByScopeEqualIgnoringAllComposerText(
+      { "terminal:1": empty },
+      { "terminal:1": created },
+    ),
+    true,
+  );
+  assert.equal(
+    draftsByScopeEqualIgnoringAllComposerText(
+      { "terminal:1": created },
+      { "terminal:1": empty },
+    ),
+    false,
+  );
+  assert.equal(
+    draftsByScopeEqualIgnoringAllComposerText(
+      {},
+      { "terminal:1": { ...created, attachments: [{ id: "a" } as never] } },
+    ),
+    false,
+  );
+});
+
+test("draftsByScopeEqualIgnoringAllComposerText ignores typing in every scope", () => {
+  const base = createEmptyDraft("catty");
+  const prev = {
+    "terminal:1": { ...base, text: "a" },
+    "terminal:2": { ...base, text: "b", attachments: [] },
+  };
+  const next = {
+    "terminal:1": { ...prev["terminal:1"], text: "aa", updatedAt: base.updatedAt + 1 },
+    "terminal:2": { ...prev["terminal:2"], text: "bb", updatedAt: base.updatedAt + 2 },
+  };
+  assert.equal(draftsByScopeEqualIgnoringAllComposerText(prev, next), true);
+  assert.equal(
+    draftsByScopeEqualIgnoringAllComposerText(prev, {
+      ...next,
+      "terminal:2": { ...next["terminal:2"], attachments: [{ id: "a" } as never] },
+    }),
+    false,
+  );
+});
+
+test("updateDraftForScope keeps the original map when the updater is a no-op", () => {
+  const draft = createEmptyDraft("catty");
+  const prev = { "terminal:1": draft };
+  const next = updateDraftForScope(prev, "terminal:1", "catty", (current) => current);
+  assert.equal(next, prev);
+});
 
 test("createEmptyDraft seeds selected agent and empty inputs", () => {
   const draft = createEmptyDraft("agent-alpha");

@@ -2,6 +2,20 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
+test("system setting hints sit below their cards with a shared top gap", () => {
+  const uiSource = readFileSync(new URL("./settings-ui.tsx", import.meta.url), "utf8");
+  const systemSource = readFileSync(new URL("./tabs/SettingsSystemTab.tsx", import.meta.url), "utf8");
+
+  assert.match(uiSource, /export const settingHintClassName = "mt-3 text-xs text-muted-foreground"/);
+  assert.match(uiSource, /export const SettingHint/);
+  assert.match(systemSource, /SettingHint/);
+  assert.match(systemSource, /settings\.system\.crashLogs\.hint/);
+  assert.doesNotMatch(
+    systemSource,
+    /<p className="text-xs text-muted-foreground">\s*\{t\("settings\.system\.crashLogs\.hint"\)\}/,
+  );
+});
+
 test("settings search focus scrolls the content pane, not the window viewport", () => {
   const source = readFileSync(new URL("./settingsFocus.ts", import.meta.url), "utf8");
   const uiSource = readFileSync(new URL("./settings-ui.tsx", import.meta.url), "utf8");

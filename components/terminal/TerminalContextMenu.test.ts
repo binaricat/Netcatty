@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import en from "../../application/i18n/locales/en.ts";
 import ru from "../../application/i18n/locales/ru.ts";
+import es from "../../application/i18n/locales/es.ts";
 import zhCN from "../../application/i18n/locales/zh-CN.ts";
 import { markMiddleClickContextMenuEvent } from "./runtime/middleClickBehavior.ts";
 import * as terminalContextMenu from "./TerminalContextMenu.tsx";
@@ -112,7 +113,7 @@ test("shows upload clipboard image context menu action when a handler exists", (
 });
 
 test("localizes the upload clipboard image context menu label", () => {
-  const locales = { en, ru, "zh-CN": zhCN };
+  const locales = { en, ru, es, "zh-CN": zhCN };
   const keys = [
     "terminal.menu.uploadClipboardImage",
     "terminal.clipboardImageUpload.noImage",
@@ -237,6 +238,26 @@ test("forceMenuInAlternateScreen opts out of alternate-screen suppression", () =
       isAlternateScreen: true,
       showReconnectAction: false,
       forceMenuInAlternateScreen: false,
+    }),
+    true,
+  );
+
+  assert.equal(
+    shouldSuppressMouseTrackingContextMenu({
+      isAlternateScreen: true,
+      showReconnectAction: false,
+      forceMenuInAlternateScreen: false,
+      isHistoryPreviewTarget: true,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldOpenTerminalContextMenu({
+      event: { shiftKey: false, nativeEvent: {} as MouseEvent },
+      rightClickBehavior: "paste",
+      isAlternateScreen: true,
+      showReconnectAction: false,
+      isHistoryPreviewTarget: true,
     }),
     true,
   );

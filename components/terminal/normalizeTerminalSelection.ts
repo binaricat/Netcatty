@@ -155,13 +155,11 @@ function buildLinearSelection(
     }
 
     const startCol = y === start.y ? start.x : 0;
-    // Match xterm: on multi-row selections the first row runs to the line end
-    // (undefined endCol → line length), not only to the selection's end.x.
-    const endCol = y === end.y ? end.x : undefined;
-    const rowText =
-      endCol === undefined
-        ? line.translateToString(true, startCol)
-        : line.translateToString(true, startCol, endCol);
+    // Always pass an exclusive end column. xterm.js 6 may serve a no-endCol
+    // translateToString(true) from its string cache via String.trimEnd(),
+    // which drops a wrap-boundary space (#3023).
+    const endCol = y === end.y ? end.x : line.length;
+    const rowText = line.translateToString(true, startCol, endCol);
 
     if (y === start.y) {
       current = rowText;

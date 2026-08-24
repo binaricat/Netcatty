@@ -28,6 +28,9 @@ const {
   buildRenameCommand,
   buildChmodCommand,
   parseListRecords,
+  parseLsLaOutput,
+  ownerFromSftpLongname,
+  resolveListingOwner,
   normalizeFileProtocol,
 } = require("./scpShell.cjs");
 
@@ -163,6 +166,56 @@ describe("scpShell quoting and commands", () => {
     const b64 = iconv.encode(name, "gb18030").toString("base64");
     const rows = parseListRecords(`f|-rw-r--r--|1|1700000000|${b64}\n`, "gb18030");
     assert.equal(rows[0]?.name, name);
+  });
+
+  it("parses optional owner from list records and ls -la fallback", () => {
+    const b64 = Buffer.from("notes.txt", "utf8").toString("base64");
+    const rows = parseListRecords(`f|-rw-r--r--|12|1700000000|${b64}|www-data\n`);
+    assert.equal(rows[0]?.owner, "www-data");
+
+    const legacy = parseListRecords(`f|-rw-r--r--|12|1700000000|${b64}\n`);
+    assert.equal(legacy[0]?.owner, undefined);
+
+    const lsRows = parseLsLaOutput(
+      "total 4\n-rw-r--r--  1 root  wheel  12 Jan  1 00:00 notes.txt\n",
+    );
+    assert.equal(lsRows[0]?.name, "notes.txt");
+    assert.equal(lsRows[0]?.owner, "root");
+
+    const aclRows = parseLsLaOutput(
+      "-rw-r--r--+ 1 alice staff 12 Jan  1 00:00 notes.txt\n",
+    );
+    assert.equal(aclRows[0]?.owner, "alice");
+  });
+
+  it("resolves listing owner from longname, then uid", () => {
+    assert.equal(
+      ownerFromSftpLongname("-rwxr-xr-x  1 alice  staff  4096 Jan  1 00:00 bin"),
+      "alice",
+    );
+    assert.equal(
+      resolveListingOwner({ longname: "drwxr-xr-x  2 www-data www-data 4096 Jan 1 00:00 html" }),
+      "www-data",
+    );
+    assert.equal(resolveListingOwner({ uid: 1000 }), "1000");
+    assert.equal(resolveListingOwner({ owner: "UNKNOWN", uid: 0 }), "0");
+    assert.equal(
+      ownerFromSftpLongname("-rw-r--r--+  1 alice  staff  12 Jan  1 00:00 notes.txt"),
+      "alice",
+    );
+    assert.equal(
+      ownerFromSftpLongname("-rw-r--r--@  1 alice  staff  12 Jan  1 00:00 notes.txt"),
+      "alice",
+    );
+    assert.equal(
+      ownerFromSftpLongname("-rw-r--r--.  1 alice  staff  12 Jan  1 00:00 notes.txt"),
+      "alice",
+    );
+  });
+
+  it("list command includes owner in the record", () => {
+    assert.match(buildListCommand("/tmp"), /awk '\{print \$3\}'/);
+    assert.match(buildListCommand("/tmp"), /%s\\|%s\\|%s\\|%s\\|%s\\|%s/);
   });
 
   it("list command keeps broken symlinks", () => {

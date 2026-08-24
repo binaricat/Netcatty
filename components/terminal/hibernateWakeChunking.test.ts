@@ -109,7 +109,7 @@ test("hibernate wake pauses flow before replay and resumes only after reattach",
 
   assert.match(
     terminalSource,
-    /takePendingBuffer:\s*\(\)\s*=>\s*\{\s*const pending = hibernatePendingBufferRef\.current;\s*hibernatePendingBufferRef\.current = "";\s*return pending;\s*\}/,
+    /takePendingBuffer:\s*\(\)\s*=>\s*\{\s*const pending = hibernatePendingBufferRef\.current \+ oscNotificationScannerRef\.current\.flush\(\);\s*hibernatePendingBufferRef\.current = "";\s*return pending;\s*\}/,
   );
   assert.match(
     terminalSource,
@@ -139,7 +139,7 @@ test("hibernate wake pauses flow before replay and resumes only after reattach",
   );
   assert.match(
     terminalSource,
-    /hibernatePendingCapDisabledRef\.current\s*\?\s*hibernatePendingBufferRef\.current \+ chunk/,
+    /hibernatePendingCapDisabledRef\.current\s*\?\s*hibernatePendingBufferRef\.current \+ scanned\.remainder/,
   );
   assert.match(
     terminalSource,

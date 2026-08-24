@@ -743,6 +743,11 @@ export const SessionTopTab: React.FC<SessionTopTabProps> = memo(({
 }) => {
   // Per-session presentation: sibling title/provider updates do not re-render this tab.
   const session = usePresentedSession(sessionProp);
+  const reconnectActive = React.useSyncExternalStore(
+    terminalReconnectRegistry.subscribe,
+    () => terminalReconnectRegistry.isActive(session.id),
+    () => false,
+  );
   const isActive = useIsTabActive(session.id);
   // Per-session store snapshot so sibling activity dots do not re-render this tab.
   const hasActivity = useSessionActivity(session.id);
@@ -866,6 +871,7 @@ export const SessionTopTab: React.FC<SessionTopTabProps> = memo(({
         onCopySessionToNewWindow={onCopySessionToNewWindow}
         onReconnectSession={terminalReconnectRegistry.request}
         sessionStatus={session.status}
+        reconnectActive={reconnectActive}
         onRenameSession={onRenameSession}
         editHost={host}
         onEditHost={onEditHost}

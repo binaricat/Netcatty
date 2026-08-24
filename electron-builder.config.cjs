@@ -54,6 +54,9 @@ module.exports = {
     files: [
         'dist/**/*',
         'electron/**/*',
+        // The Windows Hello helper is shipped once through win.extraResources.
+        // Exclude local per-arch build output from app.asar on every platform.
+        '!electron/bridges/windowsHelloHelper/build/**/*',
         // Runtime smoke fixtures are built test packages, not host resources.
         // Keep them out of production ASARs so no example plugin can be
         // mistaken for an installed or host-trusted package.
@@ -244,7 +247,15 @@ module.exports = {
         // missing (#2570). Keep official releases on pack:win-x64 until win32
         // arm64 bundled mosh/et + native rebuilds are ready.
         target: ['nsis', 'portable', 'zip'],
-        extraResources: [...moshExtraResources('win32'), ...etExtraResources('win32')]
+        extraResources: [
+            ...moshExtraResources('win32'),
+            ...etExtraResources('win32'),
+            {
+                from: 'electron/bridges/windowsHelloHelper/build/${arch}/NetcattyWindowsHello.exe',
+                to: 'windowsHello/NetcattyWindowsHello.exe',
+                filter: ['**/*']
+            }
+        ]
     },
     portable: {
         artifactName: '${productName}-${version}-portable-${os}-${arch}.${ext}',

@@ -11,11 +11,13 @@ import {
   STORAGE_KEY_AI_DEFAULT_AGENT,
   STORAGE_KEY_AI_COMMAND_BLOCKLIST,
   STORAGE_KEY_AI_COMMAND_TIMEOUT,
+  STORAGE_KEY_AI_RESPONSE_IDLE_TIMEOUT,
   STORAGE_KEY_AI_MAX_ITERATIONS,
   STORAGE_KEY_AI_SESSIONS,
   STORAGE_KEY_AI_ACTIVE_SESSION_MAP,
   STORAGE_KEY_AI_AGENT_MODEL_MAP,
   STORAGE_KEY_AI_AGENT_PROVIDER_MAP,
+  STORAGE_KEY_AI_AGENT_THINKING_MAP,
   STORAGE_KEY_AI_WEB_SEARCH,
   STORAGE_KEY_AI_QUICK_MESSAGES,
 } from '../../infrastructure/config/storageKeys';
@@ -37,11 +39,14 @@ import type {
 import {
   DEFAULT_COMMAND_BLOCKLIST,
   DEFAULT_COMMAND_TIMEOUT_SECONDS,
+  DEFAULT_RESPONSE_IDLE_TIMEOUT_SECONDS,
   normalizeCommandTimeoutSeconds,
+  normalizeResponseIdleTimeoutSeconds,
 } from '../../infrastructure/ai/types';
 import {
   activateDraftView,
   clearScopeDraftState,
+  draftsByScopeEqualIgnoringAllComposerText,
   ensureDraftForScopeState,
   pruneStaleSessionPanelViews,
   setDraftView,
@@ -78,6 +83,28 @@ import {
   retargetWorkspaceActiveChatAfterMemberLoss,
   seedWorkspaceAIActiveSessionFromMembers,
 } from '../../domain/workspaceAiScopeHandoff';
+
+function providerPatchIsNoop(
+  current: ProviderConfig,
+  updates: Partial<ProviderConfig>,
+): boolean {
+  for (const key of Object.keys(updates) as Array<keyof ProviderConfig>) {
+    const nextValue = updates[key];
+    const prevValue = current[key];
+    if (nextValue === prevValue) continue;
+    if (key === 'modelContextWindows') {
+      const prevWindows = (prevValue ?? {}) as Record<string, number>;
+      const nextWindows = (nextValue ?? {}) as Record<string, number>;
+      const nextKeys = Object.keys(nextWindows);
+      if (nextKeys.length !== Object.keys(prevWindows).length) return false;
+      if (nextKeys.some((modelId) => prevWindows[modelId] !== nextWindows[modelId])) return false;
+      continue;
+    }
+    return false;
+  }
+  return true;
+}
+
 export function useAIState() {
   // ── Provider Config ──
   const [providers, setProvidersRaw] = useState<ProviderConfig[]>(() =>
@@ -119,6 +146,12 @@ export function useAIState() {
   const [commandTimeout, setCommandTimeoutRaw] = useState<number>(() =>
     normalizeCommandTimeoutSeconds(
       localStorageAdapter.readNumber(STORAGE_KEY_AI_COMMAND_TIMEOUT) ?? DEFAULT_COMMAND_TIMEOUT_SECONDS,
+    )
+  );
+  const [responseIdleTimeout, setResponseIdleTimeoutRaw] = useState<number>(() =>
+    normalizeResponseIdleTimeoutSeconds(
+      localStorageAdapter.readNumber(STORAGE_KEY_AI_RESPONSE_IDLE_TIMEOUT)
+        ?? DEFAULT_RESPONSE_IDLE_TIMEOUT_SECONDS,
     )
   );
   const [maxIterations, setMaxIterationsRaw] = useState<number>(() =>
@@ -173,6 +206,9 @@ export function useAIState() {
   useEffect(() => {
     agentProviderMapRef.current = agentProviderMap;
   }, [agentProviderMap]);
+  const [agentThinkingMap, setAgentThinkingMapRaw] = useState<Record<string, string>>(() =>
+    localStorageAdapter.read<Record<string, string>>(STORAGE_KEY_AI_AGENT_THINKING_MAP) ?? {}
+  );
 
   // ── Web Search Config ──
   const [webSearchConfig, setWebSearchConfigRaw] = useState<WebSearchConfig | null>(() =>
@@ -269,6 +305,7 @@ export function useAIState() {
 
   const setAgentModel = useCallback((agentId: string, modelId: string) => {
     setAgentModelMapRaw(prev => {
+      if (prev[agentId] === modelId) return prev;
       const next = { ...prev, [agentId]: modelId };
       localStorageAdapter.write(STORAGE_KEY_AI_AGENT_MODEL_MAP, next);
       return next;
@@ -279,13 +316,32 @@ export function useAIState() {
     setAgentProviderMapRaw(prev => {
       // Empty string clears the per-agent override and lets the agent fall
       // back to the global `activeProviderId`.
-      const next = { ...prev };
       if (providerId) {
-        next[agentId] = providerId;
-      } else {
-        delete next[agentId];
+        if (prev[agentId] === providerId) return prev;
+        const next = { ...prev, [agentId]: providerId };
+        localStorageAdapter.write(STORAGE_KEY_AI_AGENT_PROVIDER_MAP, next);
+        return next;
       }
+      if (!(agentId in prev)) return prev;
+      const next = { ...prev };
+      delete next[agentId];
       localStorageAdapter.write(STORAGE_KEY_AI_AGENT_PROVIDER_MAP, next);
+      return next;
+    });
+  }, []);
+
+  const setAgentThinking = useCallback((agentId: string, thinkingLevel: string) => {
+    setAgentThinkingMapRaw((prev) => {
+      if (thinkingLevel) {
+        if (prev[agentId] === thinkingLevel) return prev;
+        const next = { ...prev, [agentId]: thinkingLevel };
+        localStorageAdapter.write(STORAGE_KEY_AI_AGENT_THINKING_MAP, next);
+        return next;
+      }
+      if (!(agentId in prev)) return prev;
+      const next = { ...prev };
+      delete next[agentId];
+      localStorageAdapter.write(STORAGE_KEY_AI_AGENT_THINKING_MAP, next);
       return next;
     });
   }, []);
@@ -313,6 +369,7 @@ export function useAIState() {
   const setProviders = useCallback((value: ProviderConfig[] | ((prev: ProviderConfig[]) => ProviderConfig[])) => {
     setProvidersRaw(prev => {
       const next = typeof value === 'function' ? value(prev) : value;
+      if (next === prev) return prev;
       localStorageAdapter.write(STORAGE_KEY_AI_PROVIDERS, next);
       return next;
     });
@@ -379,6 +436,12 @@ export function useAIState() {
     // Sync to MCP Server bridge
     const bridge = getAIBridge();
     bridge?.aiMcpSetCommandTimeout?.(normalizedValue);
+  }, []);
+
+  const setResponseIdleTimeout = useCallback((value: number) => {
+    const normalizedValue = normalizeResponseIdleTimeoutSeconds(value);
+    setResponseIdleTimeoutRaw(normalizedValue);
+    localStorageAdapter.writeNumber(STORAGE_KEY_AI_RESPONSE_IDLE_TIMEOUT, normalizedValue);
   }, []);
 
   const setMaxIterations = useCallback((value: number) => {
@@ -461,6 +524,16 @@ export function useAIState() {
             getAIBridge()?.aiMcpSetCommandTimeout?.(normalizedTimeout);
             break;
           }
+          case STORAGE_KEY_AI_RESPONSE_IDLE_TIMEOUT: {
+            const timeout = localStorageAdapter.readNumber(STORAGE_KEY_AI_RESPONSE_IDLE_TIMEOUT)
+              ?? DEFAULT_RESPONSE_IDLE_TIMEOUT_SECONDS;
+            if (!Number.isFinite(timeout)) {
+              console.warn('[useAIState] Cross-window sync: AI_RESPONSE_IDLE_TIMEOUT is not a finite number, skipping');
+              break;
+            }
+            setResponseIdleTimeoutRaw(normalizeResponseIdleTimeoutSeconds(timeout));
+            break;
+          }
           case STORAGE_KEY_AI_MAX_ITERATIONS: {
             const iters = localStorageAdapter.readNumber(STORAGE_KEY_AI_MAX_ITERATIONS) ?? 20;
             if (!Number.isFinite(iters)) {
@@ -491,6 +564,9 @@ export function useAIState() {
             break;
           case STORAGE_KEY_AI_AGENT_PROVIDER_MAP:
             setAgentProviderMapRaw(localStorageAdapter.read<Record<string, string>>(STORAGE_KEY_AI_AGENT_PROVIDER_MAP) ?? {});
+            break;
+          case STORAGE_KEY_AI_AGENT_THINKING_MAP:
+            setAgentThinkingMapRaw(localStorageAdapter.read<Record<string, string>>(STORAGE_KEY_AI_AGENT_THINKING_MAP) ?? {});
             break;
           case STORAGE_KEY_AI_ACTIVE_SESSION_MAP: {
             const nextActiveSessionIdMap =
@@ -786,18 +862,21 @@ export function useAIState() {
 
   const ensureDraftForScope = useCallback((scopeKey: string, agentId: string): void => {
     let nextDraftsByScope: DraftsByScope | null = null;
+    let textOnly = false;
 
     setDraftsByScopeRaw((prev) => {
       const next = ensureDraftForScopeState(prev, scopeKey, agentId);
       if (next === prev) return prev;
       nextDraftsByScope = next;
+      textOnly = draftsByScopeEqualIgnoringAllComposerText(prev, next);
       return next;
     });
 
     if (!nextDraftsByScope) return;
 
-    bumpDraftMutationVersion(scopeKey);
     setLatestAIDraftsByScopeSnapshot(nextDraftsByScope);
+    if (textOnly) return;
+    bumpDraftMutationVersion(scopeKey);
     emitAIStateChanged(AI_STATE_CHANGED_DRAFTS_BY_SCOPE);
   }, []);
 
@@ -806,52 +885,69 @@ export function useAIState() {
     fallbackAgentId: string,
     updater: (draft: AIDraft) => AIDraft,
   ): void => {
+    let nextDraftsByScope: DraftsByScope | null = null;
+    let textOnly = false;
+
     setDraftsByScopeRaw((prev) => {
       const next = updateDraftForScope(
         prev,
         scopeKey,
         fallbackAgentId,
         (draft) => {
+          const updated = updater(draft);
+          if (updated === draft) return draft;
           return {
-            ...updater(draft),
+            ...updated,
             updatedAt: Date.now(),
           };
         },
       );
-      setLatestAIDraftsByScopeSnapshot(next);
-      emitAIStateChanged(AI_STATE_CHANGED_DRAFTS_BY_SCOPE);
+      if (next === prev) return prev;
+      nextDraftsByScope = next;
+      textOnly = draftsByScopeEqualIgnoringAllComposerText(prev, next);
       return next;
     });
+
+    if (!nextDraftsByScope) return;
+    setLatestAIDraftsByScopeSnapshot(nextDraftsByScope);
+    if (textOnly) return;
     bumpDraftMutationVersion(scopeKey);
+    emitAIStateChanged(AI_STATE_CHANGED_DRAFTS_BY_SCOPE);
   }, []);
 
   const updateDraftIfPresent = useCallback((
     scopeKey: string,
     updater: (draft: AIDraft) => AIDraft,
   ): void => {
-    let updated = false;
+    let nextDraftsByScope: DraftsByScope | null = null;
+    let textOnly = false;
 
     setDraftsByScopeRaw((prev) => {
       const currentDraft = prev[scopeKey];
       if (!currentDraft) return prev;
 
-      const nextDraft = {
-        ...updater(currentDraft),
-        updatedAt: Date.now(),
-      };
+      const updated = updater(currentDraft);
+      const nextDraft = updated === currentDraft
+        ? currentDraft
+        : {
+          ...updated,
+          updatedAt: Date.now(),
+        };
+      if (nextDraft === currentDraft) return prev;
       const next = {
         ...prev,
         [scopeKey]: nextDraft,
       };
-      updated = true;
-      setLatestAIDraftsByScopeSnapshot(next);
-      emitAIStateChanged(AI_STATE_CHANGED_DRAFTS_BY_SCOPE);
+      nextDraftsByScope = next;
+      textOnly = draftsByScopeEqualIgnoringAllComposerText(prev, next);
       return next;
     });
 
-    if (updated) {
-      bumpDraftMutationVersion(scopeKey);
-    }
+    if (!nextDraftsByScope) return;
+    setLatestAIDraftsByScopeSnapshot(nextDraftsByScope);
+    if (textOnly) return;
+    bumpDraftMutationVersion(scopeKey);
+    emitAIStateChanged(AI_STATE_CHANGED_DRAFTS_BY_SCOPE);
   }, []);
 
   const showDraftView = useCallback((scopeKey: string) => {
@@ -1092,7 +1188,15 @@ export function useAIState() {
   }, [setProviders]);
 
   const updateProvider = useCallback((id: string, updates: Partial<ProviderConfig>) => {
-    setProviders(prev => prev.map(p => p.id === id ? { ...p, ...updates } : p));
+    setProviders((prev) => {
+      const index = prev.findIndex((provider) => provider.id === id);
+      if (index < 0) return prev;
+      const current = prev[index];
+      if (providerPatchIsNoop(current, updates)) return prev;
+      const next = prev.slice();
+      next[index] = { ...current, ...updates };
+      return next;
+    });
   }, [setProviders]);
 
   const removeProvider = useCallback((id: string) => {
@@ -1159,12 +1263,16 @@ export function useAIState() {
     setCommandBlocklist,
     commandTimeout,
     setCommandTimeout,
+    responseIdleTimeout,
+    setResponseIdleTimeout,
     maxIterations,
     setMaxIterations,
     agentModelMap,
     setAgentModel,
     agentProviderMap,
     setAgentProvider,
+    agentThinkingMap,
+    setAgentThinking,
     webSearchConfig,
     setWebSearchConfig,
     quickMessages,
@@ -1217,12 +1325,16 @@ export function useAIState() {
     setCommandBlocklist,
     commandTimeout,
     setCommandTimeout,
+    responseIdleTimeout,
+    setResponseIdleTimeout,
     maxIterations,
     setMaxIterations,
     agentModelMap,
     setAgentModel,
     agentProviderMap,
     setAgentProvider,
+    agentThinkingMap,
+    setAgentThinking,
     webSearchConfig,
     setWebSearchConfig,
     quickMessages,

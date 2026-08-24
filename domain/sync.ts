@@ -358,9 +358,11 @@ export interface SyncPayload {
       defaultAgentId?: string;
       commandBlocklist?: string[];
       commandTimeout?: number;
+      responseIdleTimeout?: number;
       maxIterations?: number;
       agentModelMap?: Record<string, string>;
       agentProviderMap?: Record<string, string>;
+      agentThinkingMap?: Record<string, string>;
       webSearchConfig?: Record<string, unknown> | null;
       quickMessages?: Array<Record<string, unknown>>;
       showTerminalSelectionAction?: boolean;

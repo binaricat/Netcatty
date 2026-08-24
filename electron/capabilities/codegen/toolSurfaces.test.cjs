@@ -11,7 +11,11 @@ const {
   CATTY_CAPABILITY_DENYLIST,
   isCattyEligible,
 } = require("./toolSurfaces.cjs");
-const { registerMcpTools, buildZodShapeObject } = require("./mcpToolRegistry.cjs");
+const { registerMcpTools, buildZodShapeObject, isEmptyMcpInputShape } = require("./mcpToolRegistry.cjs");
+
+function mcpToolHandler(schemaOrHandler, maybeHandler) {
+  return typeof schemaOrHandler === "function" ? schemaOrHandler : maybeHandler;
+}
 
 test("listCattyToolSpecs includes terminal long-running tools", () => {
   const specs = listCattyToolSpecs();
@@ -229,8 +233,8 @@ test("mcp registry builds zod shapes for every MCP tool", () => {
 test("registerMcpTools registers one handler per catalog MCP tool", () => {
   const registered = [];
   const fakeServer = {
-    tool(name, _description, _shape, handler) {
-      registered.push({ name, handler: typeof handler });
+    tool(name, _description, schemaOrHandler, maybeHandler) {
+      registered.push({ name, handler: typeof mcpToolHandler(schemaOrHandler, maybeHandler) });
     },
   };
   const count = registerMcpTools(fakeServer, {
@@ -243,12 +247,70 @@ test("registerMcpTools registers one handler per catalog MCP tool", () => {
   assert.equal(registered.length, listMcpTools().length);
 });
 
+test("no-arg MCP tools register without a params schema so omitted arguments are valid (#3049)", () => {
+  const registrations = [];
+  const fakeServer = {
+    tool(name, _description, schemaOrHandler, maybeHandler) {
+      registrations.push({
+        name,
+        hasSchema: typeof schemaOrHandler !== "function",
+        handler: mcpToolHandler(schemaOrHandler, maybeHandler),
+      });
+    },
+  };
+  registerMcpTools(fakeServer, {
+    rpcCall: async () => ({ ok: true }),
+    scopeParams: {},
+    guardWriteOperation: () => null,
+    catalogDescription: (_name, fallback) => fallback,
+  });
+
+  const noArgNames = listMcpTools()
+    .filter((tool) => isEmptyMcpInputShape(tool.inputShape))
+    .map((tool) => tool.mcpTool);
+  assert.ok(noArgNames.includes("get_environment"));
+  assert.ok(noArgNames.includes("list_attachments"));
+
+  for (const name of noArgNames) {
+    const registration = registrations.find((entry) => entry.name === name);
+    assert.equal(registration?.hasSchema, false, `${name} should omit the params schema`);
+  }
+
+  const execute = registrations.find((entry) => entry.name === "terminal_execute");
+  assert.equal(execute?.hasSchema, true);
+});
+
+test("get_environment handler runs when MCP arguments are omitted (#3049)", async () => {
+  let handler = null;
+  const fakeServer = {
+    tool(name, _description, schemaOrHandler, maybeHandler) {
+      if (name === "get_environment") handler = mcpToolHandler(schemaOrHandler, maybeHandler);
+    },
+  };
+  let rpcMethod = null;
+  registerMcpTools(fakeServer, {
+    rpcCall: async (method) => {
+      rpcMethod = method;
+      return { sessions: [] };
+    },
+    scopeParams: { chatSessionId: "chat-1" },
+    guardWriteOperation: () => null,
+    catalogDescription: (_name, fallback) => fallback,
+  });
+
+  assert.ok(handler, "get_environment handler registered");
+  const result = await handler();
+  assert.equal(result.isError, undefined);
+  assert.equal(rpcMethod, "netcatty/getContext");
+  assert.match(result.content?.[0]?.text || "", /sessions/);
+});
+
 test("session_close remains available as a cleanup action in observer mode", async () => {
   let handler = null;
   let guardCalls = 0;
   const fakeServer = {
-    tool(name, _description, _shape, candidate) {
-      if (name === "session_close") handler = candidate;
+    tool(name, _description, schemaOrHandler, maybeHandler) {
+      if (name === "session_close") handler = mcpToolHandler(schemaOrHandler, maybeHandler);
     },
   };
   registerMcpTools(fakeServer, {
@@ -269,8 +331,8 @@ test("session_close remains available as a cleanup action in observer mode", asy
 test("terminal_execute MCP response preserves stdout/exitCode on non-zero exit (#2718)", async () => {
   let handler = null;
   const fakeServer = {
-    tool(name, _description, _shape, candidate) {
-      if (name === "terminal_execute") handler = candidate;
+    tool(name, _description, schemaOrHandler, maybeHandler) {
+      if (name === "terminal_execute") handler = mcpToolHandler(schemaOrHandler, maybeHandler);
     },
   };
   registerMcpTools(fakeServer, {
@@ -297,8 +359,8 @@ test("terminal_execute MCP response preserves stdout/exitCode on non-zero exit (
 test("terminal_execute MCP response keeps operational failures as isError", async () => {
   let handler = null;
   const fakeServer = {
-    tool(name, _description, _shape, candidate) {
-      if (name === "terminal_execute") handler = candidate;
+    tool(name, _description, schemaOrHandler, maybeHandler) {
+      if (name === "terminal_execute") handler = mcpToolHandler(schemaOrHandler, maybeHandler);
     },
   };
   registerMcpTools(fakeServer, {
@@ -316,8 +378,8 @@ test("terminal_execute MCP response keeps operational failures as isError", asyn
 test("terminal_execute MCP response includes partial output on timeout", async () => {
   let handler = null;
   const fakeServer = {
-    tool(name, _description, _shape, candidate) {
-      if (name === "terminal_execute") handler = candidate;
+    tool(name, _description, schemaOrHandler, maybeHandler) {
+      if (name === "terminal_execute") handler = mcpToolHandler(schemaOrHandler, maybeHandler);
     },
   };
   registerMcpTools(fakeServer, {
@@ -344,8 +406,8 @@ test("terminal_execute MCP response includes partial output on timeout", async (
 test("terminal_execute MCP response uses neutral text for successful empty output (#2724)", async () => {
   let handler = null;
   const fakeServer = {
-    tool(name, _description, _shape, candidate) {
-      if (name === "terminal_execute") handler = candidate;
+    tool(name, _description, schemaOrHandler, maybeHandler) {
+      if (name === "terminal_execute") handler = mcpToolHandler(schemaOrHandler, maybeHandler);
     },
   };
   // Serial/network-device raw PTY success: ok true, empty streams, exitCode null.
@@ -370,8 +432,8 @@ test("terminal_execute MCP response uses neutral text for successful empty outpu
 test("terminal_execute MCP response keeps exit-only non-zero without isError", async () => {
   let handler = null;
   const fakeServer = {
-    tool(name, _description, _shape, candidate) {
-      if (name === "terminal_execute") handler = candidate;
+    tool(name, _description, schemaOrHandler, maybeHandler) {
+      if (name === "terminal_execute") handler = mcpToolHandler(schemaOrHandler, maybeHandler);
     },
   };
   registerMcpTools(fakeServer, {

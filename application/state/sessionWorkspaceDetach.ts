@@ -96,7 +96,24 @@ export function closeSessionWorkspaceLayoutState(
         return null;
       }
 
-      return { ...workspace, root: prunedRoot };
+      // Closing the focused session must hand focus to a remaining one, or a
+      // focus-mode workspace is left with a dangling focusedSessionId: no pane
+      // qualifies as visible and the continuously rendered hidden panes all
+      // paint on top of each other (#3046).
+      const nextFocusedSessionId =
+        workspace.focusedSessionId && !remainingSessionIds.includes(workspace.focusedSessionId)
+          ? remainingSessionIds[0]
+          : workspace.focusedSessionId;
+      const nextFocusSessionOrder = workspace.focusSessionOrder?.filter(
+        (candidateId) => remainingSessionIds.includes(candidateId),
+      );
+
+      return {
+        ...workspace,
+        root: prunedRoot,
+        focusedSessionId: nextFocusedSessionId,
+        focusSessionOrder: nextFocusSessionOrder,
+      };
     })
     .filter((workspace): workspace is Workspace => Boolean(workspace));
 

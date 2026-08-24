@@ -27,6 +27,15 @@ function createSftpReadTimeoutError(timeoutMs) {
   return error;
 }
 
+/** ssh2 / SCP absence — classify here so IPC cannot strip `code`. */
+function isMissingRemotePathError(error) {
+  const code = error?.code;
+  return code === 2
+    || code === "ENOENT"
+    || code === "NO_SUCH_FILE"
+    || code === "SSH_FX_NO_SUCH_FILE";
+}
+
 async function runBoundedSftpMemoryRead(payload, operation) {
   const requestedTimeout = Number(payload?.timeoutMs);
   const timeoutMs = Number.isFinite(requestedTimeout) && requestedTimeout > 0
@@ -191,6 +200,7 @@ function createFileOpsApi(ctx) {
                   size: `${rec.size || 0} bytes`,
                   lastModified: new Date(rec.modifyTime || Date.now()).toISOString(),
                   permissions: rec.permissions,
+                  ...(rec.owner ? { owner: rec.owner } : {}),
                 };
                 if (rec.type === "symlink") {
                   try {
@@ -276,6 +286,7 @@ function createFileOpsApi(ctx) {
       const resolvedEncoding = updateResolvedEncoding(payload.sftpId, requestedEncoding, detectedEncoding);
     
       // Process items and resolve symlinks
+      const { resolveListingOwner } = require("./scpShell.cjs");
       const results = await Promise.all(list.map(async (item) => {
         const filenameRaw = item.filenameRaw || (item.filename ? Buffer.from(item.filename, "utf8") : null);
         const longnameRaw = item.longnameRaw || (item.longname ? Buffer.from(item.longname, "utf8") : null);
@@ -330,6 +341,10 @@ function createFileOpsApi(ctx) {
         }
     
         const modifyTime = item.attrs?.mtime ? item.attrs.mtime * 1000 : Date.now();
+        const owner = resolveListingOwner({
+          longname,
+          uid: item.attrs?.uid,
+        });
         return {
           name,
           type,
@@ -337,6 +352,7 @@ function createFileOpsApi(ctx) {
           size: `${item.attrs?.size || 0} bytes`,
           lastModified: new Date(modifyTime).toISOString(),
           permissions,
+          ...(owner ? { owner } : {}),
         };
       }));
     
@@ -923,15 +939,20 @@ function createFileOpsApi(ctx) {
       if (isScpModeClient(client)) {
         // SCP shell stat already reports the link node (no follow).
         const encoding = resolveEncodingForRequest(payload.sftpId, payload.encoding);
-        const st = await getScpBackendForClient(client).stat(payload.path, {
-          encoding,
-          signal: payload?.abortSignal || null,
-        });
-        return formatSftpStatResult(
-          payload.path,
-          st,
-          st.mode ? (st.mode & 0o777).toString(8) : st.permissions,
-        );
+        try {
+          const st = await getScpBackendForClient(client).stat(payload.path, {
+            encoding,
+            signal: payload?.abortSignal || null,
+          });
+          return formatSftpStatResult(
+            payload.path,
+            st,
+            st.mode ? (st.mode & 0o777).toString(8) : st.permissions,
+          );
+        } catch (error) {
+          if (isMissingRemotePathError(error)) return null;
+          throw error;
+        }
       }
 
       const sftp = await requireSftpChannel(client);
@@ -949,6 +970,9 @@ function createFileOpsApi(ctx) {
       try {
         attrs = await lstatAsync(sftp, encodedPath);
       } catch (error) {
+        // Return null before throw so ipcRenderer.invoke cannot strip code 2
+        // and leave a localized "File not found" as a hard upload error.
+        if (isMissingRemotePathError(error)) return null;
         const code = error?.code;
         const lstatUnsupported = code === 8
           || code === "ENOTSUP"
@@ -997,6 +1021,64 @@ function createFileOpsApi(ctx) {
       const encodedPath = encodePath(payload.path, encoding);
       await client.chmod(encodedPath, parseInt(payload.mode, 8));
       return true;
+    }
+
+    /**
+     * Extract a remote archive into its parent directory via SSH exec.
+     */
+    async function extractSftpArchive(event, payload) {
+      const client = sftpClients.get(payload.sftpId);
+      if (!client) throw new Error("SFTP session not found");
+
+      const archivePath = payload.path;
+      if (typeof archivePath !== "string" || !archivePath) {
+        throw new Error("Archive path is required");
+      }
+
+      const {
+        buildExtractCommand,
+        computeExtractTimeoutMs,
+        EXTRACT_OPEN_TIMEOUT_MS,
+        EXTRACT_MAX_OUTPUT_BYTES,
+        getArchiveKind,
+      } = require("./archiveExtract.cjs");
+      if (!getArchiveKind(archivePath)) {
+        throw new Error(`Unsupported archive type: ${archivePath}`);
+      }
+
+      const encoding = resolveEncodingForRequest(payload.sftpId, payload.encoding);
+      const command = buildExtractCommand(archivePath, { encoding });
+      const signal = payload?.abortSignal || null;
+      throwIfAborted(signal);
+
+      const sshClient = client.client;
+      if (!sshClient || typeof sshClient.exec !== "function") {
+        throw new Error("SSH exec unavailable");
+      }
+      if (typeof execRemoteShellCommand !== "function") {
+        throw new Error("SSH exec unavailable");
+      }
+
+      let archiveSize = 0;
+      try {
+        if (!isScpModeClient(client) && typeof lstatAsync === "function") {
+          const sftp = await requireSftpChannel(client, { signal });
+          const encodedPath = encodePath(archivePath, encoding);
+          const attrs = await lstatAsync(sftp, encodedPath);
+          archiveSize = Number(attrs?.size) || 0;
+        }
+      } catch {
+        archiveSize = 0;
+      }
+
+      await execRemoteShellCommand(sshClient, command, {
+        signal,
+        openingTimeoutMs: EXTRACT_OPEN_TIMEOUT_MS,
+        runTimeoutMs: computeExtractTimeoutMs(archiveSize),
+        maxOutputBytes: EXTRACT_MAX_OUTPUT_BYTES,
+        discardStdout: true,
+      });
+      return { success: true };
     }
     
     /**
@@ -1130,6 +1212,7 @@ function createFileOpsApi(ctx) {
       statSftp,
       lstatSftp,
       chmodSftp,
+      extractSftpArchive,
       getSftpHomeDir,
     };
   }

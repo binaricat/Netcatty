@@ -28,6 +28,7 @@ export const useSftpDirectoryListing = () => {
           lastModifiedFormatted: formatDate(lastModified),
           linkTarget: f.linkTarget as "file" | "directory" | null | undefined,
           hidden: f.hidden,
+          owner: f.owner,
         };
       });
     },
@@ -50,6 +51,7 @@ export const useSftpDirectoryListing = () => {
           lastModified,
           lastModifiedFormatted: formatDate(lastModified),
           permissions: f.permissions,
+          owner: f.owner,
           linkTarget: f.linkTarget as "file" | "directory" | null | undefined,
         };
       });

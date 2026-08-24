@@ -20,6 +20,10 @@ const portForwardingAutoStartSource = readFileSync(
   new URL('../state/usePortForwardingAutoStart.ts', import.meta.url),
   'utf8',
 );
+const appLockBridgeSource = readFileSync(
+  new URL('../state/useAppLockBridge.ts', import.meta.url),
+  'utf8',
+);
 
 test('every renderer root mounts under StrictMode', () => {
   assert.match(indexSource, /import \{ StrictMode, Suspense, lazy \} from 'react'/);
@@ -58,10 +62,10 @@ test('clone-session payload is consumed once even if the effect re-runs', () => 
 });
 
 test('rendererReady is notified once per renderer process', () => {
-  assert.match(appSource, /^let rendererReadySent = false;$/m);
-  const guardAt = appSource.indexOf('if (!rendererReadySent) {');
+  assert.match(appLockBridgeSource, /^let rendererReadySent = false;$/m);
+  const guardAt = appLockBridgeSource.indexOf('if (rendererReadySent) return;');
   assert.notEqual(guardAt, -1);
-  const guarded = appSource.slice(guardAt, guardAt + 200);
+  const guarded = appLockBridgeSource.slice(guardAt, guardAt + 200);
   assert.match(guarded, /rendererReadySent = true;/);
   assert.match(guarded, /netcattyBridge\.get\(\)\?\.rendererReady\?\.\(\)/);
   assert.ok(

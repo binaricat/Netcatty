@@ -13,8 +13,10 @@ const {
   resetMcpMergeRefcountsForTests,
   resolveCursorCliExecMode,
   resolveCursorCliModel,
+  resolveCursorCliSpawnSpec,
   resolveCursorCliWorkspaceCwd,
   runCursorCliTurn,
+  spawnCursorCliProcess,
   stripCursorApiKeyFromEnv,
   translateCursorCliEvent,
 } = require("./cursorCliDriver.cjs");
@@ -38,6 +40,7 @@ test("resolveCursorCliModel defaults to auto", () => {
   assert.equal(resolveCursorCliModel(undefined), "auto");
   assert.equal(resolveCursorCliModel(""), "auto");
   assert.equal(resolveCursorCliModel("composer-2.5"), "composer-2.5");
+  assert.equal(resolveCursorCliModel("gpt-5/high"), "gpt-5?effort=high");
 });
 
 test("stripCursorApiKeyFromEnv removes CURSOR_API_KEY", () => {
@@ -585,6 +588,83 @@ test("runCursorCliTurn closes open reasoning before done", async () => {
     ["reasoningEnd"],
     ["done"],
   ]);
+});
+
+test("resolveCursorCliSpawnSpec keeps a native exe on argv without a shell", () => {
+  const exePath = process.platform === "win32"
+    ? "C:\\Users\\me\\AppData\\Local\\cursor-agent\\cursor-agent.exe"
+    : "/usr/local/bin/cursor-agent";
+  const args = ["--print", "--trust"];
+  const exe = resolveCursorCliSpawnSpec(exePath, args);
+  assert.equal(exe.shell, false);
+  assert.equal(exe.command, exePath);
+  assert.deepEqual(exe.args, args);
+});
+
+test("spawnCursorCliProcess launches the installer node+script with the prompt on argv", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-cursor-turn-spawn-"));
+  try {
+    const versionDir = path.join(tmp, "versions", "2026.06.01-abc");
+    fs.mkdirSync(versionDir, { recursive: true });
+    const nodeExe = path.join(versionDir, "node.exe");
+    const script = path.join(versionDir, "index.js");
+    fs.writeFileSync(nodeExe, "", "utf8");
+    fs.writeFileSync(script, "", "utf8");
+    const shimPath = path.join(tmp, "cursor-agent.cmd");
+    fs.writeFileSync(
+      shimPath,
+      `@ECHO off\r\n"%~dp0\\versions\\2026.06.01-abc\\node.exe" "%~dp0\\versions\\2026.06.01-abc\\index.js" %*\r\n`,
+      "utf8",
+    );
+
+    const prompt = 'review "%TEMP%" then run whoami';
+    const calls = [];
+    spawnCursorCliProcess(
+      (command, args, options) => {
+        calls.push({ command, args, options });
+        return { stdout: { on() {} }, stderr: { on() {} }, on() {}, kill() {} };
+      },
+      shimPath,
+      ["--print", "--trust", prompt],
+      { windowsHide: true },
+    );
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].command, nodeExe);
+    assert.deepEqual(calls[0].args, [script, "--print", "--trust", prompt]);
+    assert.equal(calls[0].options.shell, false);
+    assert.equal(String(calls[0].command).includes("cmd.exe"), false);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("spawnCursorCliProcess forwards shell from resolveCursorCliSpawnSpec", () => {
+  const calls = [];
+  const fakeChild = {
+    stdout: { on() {} },
+    stderr: { on() {} },
+    stdin: null,
+    on() {},
+    kill() {},
+  };
+  const cliPath = "/usr/local/bin/cursor-agent";
+  const child = spawnCursorCliProcess(
+    (command, args, options) => {
+      calls.push({ command, args, options });
+      return fakeChild;
+    },
+    cliPath,
+    ["models"],
+    { cwd: "/repo", windowsHide: true },
+  );
+  assert.equal(child, fakeChild);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].command, cliPath);
+  assert.deepEqual(calls[0].args, ["models"]);
+  assert.equal(calls[0].options.cwd, "/repo");
+  assert.equal(calls[0].options.windowsHide, true);
+  assert.equal(calls[0].options.shell, false);
 });
 
 test("listCursorCliModels parses agent models output and prefers auto", async () => {

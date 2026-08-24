@@ -1,11 +1,12 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { Activity, FolderTree, History, MessageSquare, NotebookText, Palette, PanelLeft, PanelRight, Play, SplitSquareHorizontal, SplitSquareVertical, X } from 'lucide-react';
+import { Activity, FolderTree, History, Maximize2, MessageSquare, Minimize2, NotebookText, Palette, PanelLeft, PanelRight, Play, SplitSquareHorizontal, SplitSquareVertical, X } from 'lucide-react';
 import {
   buildSidePanelChromeThemeFromTerminalTheme,
   buildTerminalSidePanelCssVars,
 } from '../../infrastructure/theme/terminalAppearanceTokens';
 import { injectTerminalLayerChromeSurfaceVars } from '../../infrastructure/theme/terminalAppearanceVars';
-import React, { memo, useCallback, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { createPortal } from 'react-dom';
 
 import { useActiveTabId } from '../../application/state/activeTabStore';
 import {
@@ -51,6 +52,7 @@ import {
 } from '../../domain/sidePanelLayout';
 import { terminalLayerSidePanelStableCtxEqual } from './terminalLayerViewMemo';
 import { SidePanelMountedContent } from './terminalLayerSidePanelSlots';
+import { getPaneMagnificationShortcutLabel } from '../../domain/paneMagnification';
 
 const MemoizedSidePanelMountedContent = memo(
   SidePanelMountedContent,
@@ -82,6 +84,15 @@ export function listenForSidePanelPaneFocus(
     target.removeEventListener('pointerdown', onFocus);
     target.removeEventListener('focusin', onFocus);
   };
+}
+
+export function resolveMagnifiedSidePanelHosts<K, T>(
+  paneHosts: ReadonlyMap<K, T>,
+  magnifiedPane: { tool: K } | null,
+  overlayHost: T | null,
+): ReadonlyMap<K, T> {
+  if (!magnifiedPane || !overlayHost) return paneHosts;
+  return new Map(paneHosts).set(magnifiedPane.tool, overlayHost);
 }
 
 function SidePanelPaneHost({
@@ -572,6 +583,8 @@ function TerminalLayerSidePanelInner({ ctx }: { ctx: SidePanelContext }) {
     handleOpenSystem,
     handleOpenTheme,
     handleFocusSidePanelPane,
+    handleMagnifySidePanelPane,
+    handleRestoreMagnifiedPane,
     handleSplitSidePanelPane,
     handleCloseSidePanelPane,
     handleResizeSidePanelSplit,
@@ -584,6 +597,9 @@ function TerminalLayerSidePanelInner({ ctx }: { ctx: SidePanelContext }) {
     sidePanelWidth,
     t,
     terminalTheme,
+    hotkeyScheme,
+    keyBindings,
+    magnifiedPane,
   } = ctx;
 
   // Live theme for chrome when panel is open and not follow-app — stable memo
@@ -607,6 +623,8 @@ function TerminalLayerSidePanelInner({ ctx }: { ctx: SidePanelContext }) {
   const availableSurfaceWidthRef = useRef(availableSurfaceWidth);
   const [paneHosts, setPaneHosts] = useState<Map<SidePanelTab, HTMLElement>>(new Map());
   const [parkingHost, setParkingHost] = useState<HTMLElement | null>(null);
+  const [overlayRoot, setOverlayRoot] = useState<HTMLElement | null>(null);
+  const [overlayHost, setOverlayHost] = useState<HTMLElement | null>(null);
   const parkingHostRef = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     setParkingHost(parkingHostRef.current);
@@ -619,6 +637,7 @@ function TerminalLayerSidePanelInner({ ctx }: { ctx: SidePanelContext }) {
     const shell = shellRef.current;
     const terminalLayer = shell?.parentElement;
     if (!terminalLayer) return undefined;
+    setOverlayRoot(terminalLayer);
 
     let observedFocusSidebar: Element | null = null;
     const resizeObserver = typeof ResizeObserver === 'undefined'
@@ -649,6 +668,7 @@ function TerminalLayerSidePanelInner({ ctx }: { ctx: SidePanelContext }) {
       resizeObserver?.disconnect();
       mutationObserver?.disconnect();
       observedFocusSidebar = null;
+      setOverlayRoot(null);
     };
   }, []);
   const handlePaneHostChange = useCallback((tool: SidePanelTab, host: HTMLElement | null) => {
@@ -863,6 +883,30 @@ function TerminalLayerSidePanelInner({ ctx }: { ctx: SidePanelContext }) {
     ? getFocusedSidePanelPane(activeSidePanelLayout)
     : null;
   const focusedPaneHost = focusedPane ? paneHosts.get(focusedPane.tool) ?? null : null;
+  const activeSidePanelPanes = useMemo(
+    () => activeSidePanelLayout ? collectSidePanelPanes(activeSidePanelLayout.root) : [],
+    [activeSidePanelLayout],
+  );
+  const activeMagnifiedPane = !!activeTabId && magnifiedPane?.tabId === activeTabId
+    ? magnifiedPane
+    : null;
+  const magnifiedSidePane = activeMagnifiedPane?.target.kind === 'side-panel'
+    ? activeSidePanelPanes.find((pane) => pane.id === activeMagnifiedPane.target.paneId) ?? null
+    : null;
+  const paneMagnificationShortcutLabel = getPaneMagnificationShortcutLabel(keyBindings, hotkeyScheme);
+  const [showMagnificationHint, setShowMagnificationHint] = useState(false);
+  useEffect(() => {
+    if (!magnifiedSidePane) {
+      setShowMagnificationHint(false);
+      return undefined;
+    }
+    setShowMagnificationHint(true);
+    const timerId = window.setTimeout(() => setShowMagnificationHint(false), 1800);
+    return () => window.clearTimeout(timerId);
+  }, [magnifiedSidePane]);
+  const panePortalHosts = useMemo(() => {
+    return resolveMagnifiedSidePanelHosts(paneHosts, magnifiedSidePane, overlayHost);
+  }, [magnifiedSidePane, overlayHost, paneHosts]);
   const [focusedPaneSplitAvailability, setFocusedPaneSplitAvailability] = useState({
     horizontal: false,
     vertical: false,
@@ -952,8 +996,10 @@ function TerminalLayerSidePanelInner({ ctx }: { ctx: SidePanelContext }) {
   );
 
   return (
+    <>
     <div
       ref={shellRef}
+      inert={activeMagnifiedPane ? true : undefined}
       style={{
         width: shellWidth,
         maxWidth: getTerminalSidePanelMaxWidth(availableSurfaceWidth),
@@ -1112,6 +1158,25 @@ function TerminalLayerSidePanelInner({ ctx }: { ctx: SidePanelContext }) {
                 </div>
               </ToolbarOverflowMenu>
               <div className="flex-1" />
+              {focusedPane && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Btn
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 rounded-md p-0 hover:bg-transparent"
+                      style={{ color: sidePanelTheme.mutedFg }}
+                      aria-label={t('terminal.paneMagnification.magnify')}
+                      onClick={() => handleMagnifySidePanelPane(focusedPane.id)}
+                    >
+                      <Maximize2 size={15} />
+                    </Btn>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">
+                    {t('terminal.paneMagnification.magnify')}
+                  </TooltipContent>
+                </Tooltip>
+              )}
               <SidePanelSplitMenu
                 direction="horizontal"
                 items={sidePanelTabItems}
@@ -1195,11 +1260,61 @@ function TerminalLayerSidePanelInner({ ctx }: { ctx: SidePanelContext }) {
           />
           <MemoizedSidePanelMountedContent
             ctx={ctx}
-            paneHosts={paneHosts}
+            paneHosts={panePortalHosts}
             parkingHost={parkingHost}
           />
         </div>
       </div>
     </div>
+    {overlayRoot && magnifiedSidePane && createPortal(
+      <div className="absolute inset-0 z-[70]" data-section="pane-magnification-overlay">
+        <div
+          className="absolute inset-0 bg-background/55 backdrop-blur-[1px]"
+          aria-hidden="true"
+          data-section="pane-magnification-backdrop"
+        />
+        <div
+          className="absolute inset-3 flex flex-col overflow-hidden rounded-md border bg-background shadow-2xl animate-in fade-in zoom-in-95 duration-150"
+          style={{
+            borderColor: sidePanelTheme.accent,
+            backgroundColor: sidePanelTheme.termBg,
+            color: sidePanelTheme.termFg,
+          }}
+        >
+          <div
+            className="flex h-8 items-center gap-2 border-b px-2"
+            style={{ borderColor: sidePanelTheme.separator }}
+          >
+            <span className="min-w-0 flex-1 truncate text-xs font-medium">
+              {sidePanelToolLabels.get(magnifiedSidePane.tool) ?? magnifiedSidePane.tool}
+            </span>
+            <button
+              type="button"
+              className="grid h-6 w-6 place-items-center rounded hover:bg-white/10"
+              aria-label={t('terminal.paneMagnification.restore')}
+              onClick={handleRestoreMagnifiedPane}
+            >
+              <Minimize2 size={14} />
+            </button>
+          </div>
+          <div
+            ref={setOverlayHost}
+            className="relative flex-1 min-h-0 overflow-hidden [contain:strict]"
+            data-section="pane-magnification-content"
+          />
+        </div>
+        {showMagnificationHint && (
+          <div
+            className="pointer-events-none absolute bottom-4 right-4 z-[80] rounded border border-border/70 bg-background/90 px-2 py-1 text-[10px] text-muted-foreground shadow-sm animate-in fade-in duration-150"
+            data-section="pane-magnification-hint"
+          >
+            {t('terminal.paneMagnification.hint')}: {sidePanelToolLabels.get(magnifiedSidePane.tool) ?? magnifiedSidePane.tool}
+            {paneMagnificationShortcutLabel ? ` · ${paneMagnificationShortcutLabel} / Esc` : ' · Esc'}
+          </div>
+        )}
+      </div>,
+      overlayRoot,
+    )}
+    </>
   );
 }

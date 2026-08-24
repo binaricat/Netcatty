@@ -1,4 +1,4 @@
-import { Folder, FolderLock, Menu, MoreHorizontal, Plus, Settings, Sparkles } from 'lucide-react';
+import { Folder, FolderLock, Lock, Menu, MoreHorizontal, Plus, Settings, Sparkles } from 'lucide-react';
 import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { fromEditorTabId, isEditorTabId, toEditorTabId, useActiveTabId } from '../application/state/activeTabStore';
 import { topTabsSessionsEqual } from '../domain/topTabsSessionsEqual';
@@ -147,6 +147,8 @@ interface TopTabsProps {
   onOpenQuickSwitcher: () => void;
   onThemeChange: (theme: 'dark' | 'light' | 'system') => void;
   onOpenSettings: () => void;
+  onLockApp?: () => void;
+  appLockEnabled?: boolean;
   externalMcpEnabled: boolean;
   onToggleExternalMcp: (enabled: boolean) => void;
   showExternalMcpToggle?: boolean;
@@ -196,6 +198,8 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
   onOpenQuickSwitcher,
   onThemeChange,
   onOpenSettings,
+  onLockApp,
+  appLockEnabled,
   externalMcpEnabled,
   onToggleExternalMcp,
   showExternalMcpToggle = true,
@@ -1198,6 +1202,22 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
             className="h-7 w-7 shrink-0 top-tab-utility-btn"
             style={{ color: 'var(--top-tabs-muted, hsl(var(--muted-foreground)))' }}
           />
+          {appLockEnabled && onLockApp && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 shrink-0 app-no-drag top-tab-utility-btn"
+                  style={{ color: 'var(--top-tabs-muted, hsl(var(--muted-foreground)))' }}
+                  onClick={onLockApp}
+                >
+                  <Lock size={16} />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{t('topTabs.lockApp')}</TooltipContent>
+            </Tooltip>
+          )}
           <TopTabsQuickControls
             theme={theme}
             themePreference={themePreference}
@@ -1209,6 +1229,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
             setWindowOpacity={setWindowOpacity}
             style={{ color: 'var(--top-tabs-muted, hsl(var(--muted-foreground)))' }}
           />
+
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -1259,6 +1280,8 @@ export const topTabsAreEqual = (prev: TopTabsProps, next: TopTabsProps): boolean
     prev.onAppendHostToWorkspace === next.onAppendHostToWorkspace &&
     prev.onCopyWorkspace === next.onCopyWorkspace &&
     prev.onOpenSettings === next.onOpenSettings &&
+    prev.onLockApp === next.onLockApp &&
+    prev.appLockEnabled === next.appLockEnabled &&
     prev.externalMcpEnabled === next.externalMcpEnabled &&
     prev.onToggleExternalMcp === next.onToggleExternalMcp &&
     prev.showExternalMcpToggle === next.showExternalMcpToggle &&

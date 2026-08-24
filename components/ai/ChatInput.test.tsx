@@ -62,6 +62,31 @@ test('expanded composer grows the text area while keeping controls at the bottom
   assert.doesNotMatch(source, /setExpanded/);
 });
 
+test('parked composer closes body-portaled menus', () => {
+  const source = readFileSync(new URL('./ChatInput.tsx', import.meta.url), 'utf8');
+  assert.match(source, /parked = false/);
+  assert.match(source, /if \(parked\) closeAllMenus\(\)/);
+  assert.match(source, /becameParked/);
+});
+
+test('first keystrokes stay local so IME and Chromium spellcheck cannot stall the composer', () => {
+  const source = readFileSync(new URL('./ChatInput.tsx', import.meta.url), 'utf8');
+  assert.match(source, /spellCheck=\{false\}/);
+  assert.match(source, /autoCorrect="off"/);
+  assert.match(source, /autoCapitalize="off"/);
+  assert.match(source, /nativeEvent\.isComposing/);
+  assert.match(source, /onCompositionEnd=/);
+  assert.match(source, /onBlur=\{\(\) => commitComposerText\(readComposerText\(\)\)\}/);
+  assert.match(source, /onChangeRef\.current\(textareaRef\.current\?\.value \?\? composerTextRef\.current\)/);
+  assert.doesNotMatch(source, /onSend\(\);\s*commitComposerText\(''\);/);
+  assert.match(source, /defaultValue=\{value\}/);
+  assert.match(source, /field-sizing-fixed/);
+  assert.doesNotMatch(source, /value=\{composerText\}/);
+  assert.match(source, /createComposerHasTextStore/);
+  assert.match(source, /ComposerSendUi/);
+  assert.match(source, /chatInputPropsAreEqual/);
+});
+
 test('composer resizing also ends when pointer capture is unexpectedly lost', () => {
   const source = readFileSync(new URL('./ChatInput.tsx', import.meta.url), 'utf8');
 
@@ -129,7 +154,7 @@ test('renders separate steer and stop actions for a running Codex App Server tur
   assert.match(html, /aria-label="ai\.codex\.steer\.addInstruction"/);
   assert.match(html, /placeholder="ai\.codex\.steer\.placeholder"/);
   assert.match(html, /aria-label="Stop"/);
-  assert.match(html, /disabled=""[^>]*aria-label="Select model"/);
+  assert.match(html, /disabled=""[^>]*aria-label="ai\.chat\.selectModel"/);
 });
 
 test('allows terminal-selection-only steering submissions', () => {
@@ -190,6 +215,113 @@ test('renders the Catty context usage ring after the model chip', () => {
   assert.match(html, /class="h-4 w-4"/);
   assert.doesNotMatch(html, /text-\[7px\]/);
   assert.match(html, /aria-valuenow="50"/);
+});
+
+test('slash picker system commands clear the local composer', () => {
+  const source = readFileSync(new URL('./ChatInput.tsx', import.meta.url), 'utf8');
+  assert.match(source, /if \(command === 'stop'\) onStop\?\.\(\);\s*commitComposerText\(''\);/s);
+});
+
+test('keeps thinking on a separate chip instead of mixing it into the model list', () => {
+  const html = renderToStaticMarkup(
+    <TooltipProvider>
+      <ChatInput
+        value=""
+        onChange={() => {}}
+        onSend={() => {}}
+        agentName="Codex"
+        modelPresets={[{
+          id: 'gpt-5.5',
+          name: 'GPT-5.5',
+          thinkingLevels: ['low', 'medium', 'high'],
+        }]}
+        selectedModelId="gpt-5.5/high"
+        onModelSelect={() => {}}
+      />
+    </TooltipProvider>,
+  );
+
+  assert.match(html, /aria-label="ai\.chat\.selectModel"/);
+  assert.match(html, /aria-label="ai\.chat\.thinkingLevel"/);
+  assert.match(html, />High</);
+  assert.doesNotMatch(html, /GPT-5\.5 \/ High/);
+});
+
+test('Catty composer exposes a provider switcher without a mixed thinking submenu', () => {
+  const source = readFileSync(new URL('./ChatInput.tsx', import.meta.url), 'utf8');
+  assert.match(source, /ComposerModelPicker/);
+  assert.match(source, /ComposerThinkingChip/);
+  assert.match(source, /cattyReasoningLevelsForSelection/);
+  assert.match(source, /if \(!thinkingLevel\) return;/);
+  assert.doesNotMatch(source, /showThinkingLevels/);
+});
+
+test('Catty thinking chip is hidden for OpenAI models that reject reasoningEffort', () => {
+  const openai = {
+    id: 'p1',
+    providerId: 'openai' as const,
+    name: 'OpenAI',
+    enabled: true,
+  };
+  const gpt4o = renderToStaticMarkup(
+    <TooltipProvider>
+      <ChatInput
+        value=""
+        onChange={() => {}}
+        onSend={() => {}}
+        agentName="Catty Agent"
+        thinkingLevel="high"
+        onThinkingLevelChange={() => {}}
+        providerSwitcher={{
+          providers: [openai],
+          selectedProviderId: 'p1',
+          selectedModelId: 'gpt-4o',
+          onSelect: () => {},
+        }}
+      />
+    </TooltipProvider>,
+  );
+  assert.doesNotMatch(gpt4o, /aria-label="ai\.chat\.thinkingLevel"/);
+
+  const gpt51Chat = renderToStaticMarkup(
+    <TooltipProvider>
+      <ChatInput
+        value=""
+        onChange={() => {}}
+        onSend={() => {}}
+        agentName="Catty Agent"
+        thinkingLevel="high"
+        onThinkingLevelChange={() => {}}
+        providerSwitcher={{
+          providers: [openai],
+          selectedProviderId: 'p1',
+          selectedModelId: 'gpt-5.1-chat-latest',
+          onSelect: () => {},
+        }}
+      />
+    </TooltipProvider>,
+  );
+  assert.doesNotMatch(gpt51Chat, /aria-label="ai\.chat\.thinkingLevel"/);
+
+  const gpt55 = renderToStaticMarkup(
+    <TooltipProvider>
+      <ChatInput
+        value=""
+        onChange={() => {}}
+        onSend={() => {}}
+        agentName="Catty Agent"
+        thinkingLevel="high"
+        onThinkingLevelChange={() => {}}
+        providerSwitcher={{
+          providers: [openai],
+          selectedProviderId: 'p1',
+          selectedModelId: 'gpt-5.5',
+          onSelect: () => {},
+        }}
+      />
+    </TooltipProvider>,
+  );
+  assert.match(gpt55, /aria-label="ai\.chat\.thinkingLevel"/);
 });
 
 test('ChatInput wires /compact through getSystemSlashCommand and canCompact', () => {

@@ -3,33 +3,29 @@ import { useLayoutEffect, type ReactNode } from 'react';
 import {
   AppSettingsRuntimeContext,
   registerAppSettingsRuntime,
+  type AppSettingsRuntime,
 } from '../../state/appRuntimeBridge';
-import { useSettingsState } from '../../state/useSettingsState';
 
 export type SettingsPublisherProps = {
-  /** Peer session windows must not drive the main window's settings IPC sync. */
-  enableSettingsSync: boolean;
-  /** Peer session windows must not re-apply OS-level system settings effects. */
-  enableSystemEffects: boolean;
+  /**
+   * Pre-built settings runtime owned by an ancestor. `AppLockGate` (index.tsx)
+   * owns `useSettingsState` so the lock overlay can render before app children
+   * mount; the publisher only binds the runtime slot and context.
+   */
+  settings: AppSettingsRuntime;
   children?: ReactNode;
 };
 
 /**
- * Owns `useSettingsState` and hands it to consumers the same way
- * `VaultPublisher` / `SessionPublisher` hand over their runtimes: a context for
- * render-time reads and the `appRuntimeBridge` slot for imperative callers.
+ * Publishes the gate-owned settings runtime the same way `VaultPublisher` /
+ * `SessionPublisher` hand over their runtimes: a context for render-time reads
+ * and the `appRuntimeBridge` slot for imperative callers.
  *
  * The store fan-out (`settingsChromeStore` / `appearanceChromeStore`) already
- * happens inside `useSettingsState`, so this publisher only relocates the hook
- * out of the component that also builds the shell's domain bags.
+ * happens inside `useSettingsState`, so this publisher only relocates the
+ * binding out of the component that also builds the shell's domain bags.
  */
-export function SettingsPublisher({
-  enableSettingsSync,
-  enableSystemEffects,
-  children,
-}: SettingsPublisherProps) {
-  const settings = useSettingsState({ enableSettingsSync, enableSystemEffects });
-
+export function SettingsPublisher({ settings, children }: SettingsPublisherProps) {
   useLayoutEffect(() => {
     registerAppSettingsRuntime(settings);
   }, [settings]);

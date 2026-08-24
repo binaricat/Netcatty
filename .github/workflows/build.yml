@@ -71,11 +71,13 @@ on:
       - "scripts/linux/**"
       - "scripts/mosh-extra-resources.cjs"
       - "scripts/nodePtyConptyPatch.cjs"
+      - "scripts/patch-xterm-macos-column-selection.cjs"
       - "scripts/patch-xterm-webgl-atlas.cjs"
       - "scripts/rebuildPatchedNodePty.cjs"
       - "scripts/resolve-et-bin-release.cjs"
       - "scripts/resolve-mosh-bin-release.cjs"
       - "scripts/verify-linux-*.sh"
+      - "scripts/xterm-macos-column-selection.live.test.cjs"
       - "skills/**"
 
 # A newer run for the same main push or PR cancels older in-progress work.
@@ -220,6 +222,12 @@ jobs:
           node-version: 22
           cache: npm
 
+      - name: Set up MSVC developer command prompt
+        if: matrix.name == 'windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
       - name: Restore Electron download cache
         uses: actions/cache@v6
         with:
@@ -236,6 +244,10 @@ jobs:
 
       - name: Install deps
         run: npm ci
+
+      - name: Test macOS Option column selection
+        if: matrix.name == 'macos'
+        run: npm run test:xterm-macos-selection
 
       - name: Compile ConPTY test helpers
         if: matrix.name == 'windows'

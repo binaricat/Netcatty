@@ -212,6 +212,51 @@ test("lstatSftp refuses followed STAT when LSTAT is unsupported", async () => {
   assert.equal(statCalls, 0, "must not classify via followed STAT");
 });
 
+test("lstatSftp returns null for SSH_FX_NO_SUCH_FILE even with a localized message", async () => {
+  const channel = { lstat() {} };
+  const api = createFileOpsApi({
+    sftpClients: new Map([["sftp-1", { sftp: channel }]]),
+    requireSftpChannel: async () => channel,
+    resolveEncodingForRequest: () => "utf-8",
+    encodePath: (remotePath) => remotePath,
+    lstatAsync: async () => {
+      const error = new Error("File not found");
+      error.code = 2;
+      throw error;
+    },
+  });
+
+  const result = await api.lstatSftp(null, {
+    sftpId: "sftp-1",
+    path: "/usr/local/bin/new-file.sh",
+  });
+  assert.equal(result, null);
+});
+
+test("lstatSftp still throws permission errors on an existing path", async () => {
+  const channel = { lstat() {} };
+  const api = createFileOpsApi({
+    sftpClients: new Map([["sftp-1", { sftp: channel }]]),
+    requireSftpChannel: async () => channel,
+    resolveEncodingForRequest: () => "utf-8",
+    encodePath: (remotePath) => remotePath,
+    lstatAsync: async () => {
+      const error = new Error("Permission denied");
+      error.code = "EACCES";
+      throw error;
+    },
+  });
+
+  await assert.rejects(
+    () => api.lstatSftp(null, { sftpId: "sftp-1", path: "/root/secret" }),
+    (error) => {
+      assert.equal(error.code, "EACCES");
+      assert.match(String(error.message), /Permission denied/);
+      return true;
+    },
+  );
+});
+
 test("lstatSftp refuses a channel without native LSTAT", async () => {
   const channel = { stat() {} };
   let lstatCalls = 0;
@@ -414,4 +459,56 @@ test("non-UTF-8 expected symlink delete stays non-recursive after the type check
 
   assert.equal(unlinkCalls, 1);
   assert.equal(removeCalls, 0);
+});
+
+test("listSftp includes owner from longname and falls back to uid", async () => {
+  const channel = {
+    readdir(_path, callback) {
+      callback(null, [
+        {
+          filename: "root.txt",
+          longname: "-rw-r--r--    1 root     root         12 Jan  1 00:00 root.txt",
+          attrs: {
+            size: 12,
+            mtime: 1700000000,
+            uid: 0,
+            mode: 0o100644,
+            isDirectory: () => false,
+            isSymbolicLink: () => false,
+          },
+        },
+        {
+          filename: "uid-only.bin",
+          longname: "",
+          attrs: {
+            size: 1,
+            mtime: 1700000000,
+            uid: 1000,
+            mode: 0o100644,
+            isDirectory: () => false,
+            isSymbolicLink: () => false,
+          },
+        },
+      ]);
+    },
+  };
+  const api = createFileOpsApi({
+    sftpClients: new Map([["sftp-1", { sftp: channel }]]),
+    path: require("node:path"),
+    normalizeEncoding: (value) => value || "utf-8",
+    resolveEncodingForRequest: () => "utf-8",
+    encodePath: (remotePath) => remotePath,
+    requireSftpChannel: async () => channel,
+    detectEncodingFromList: () => "utf-8",
+    updateResolvedEncoding: (_id, _req, detected) => detected,
+    decodeName: (raw) => (raw ? Buffer.from(raw).toString("utf8") : ""),
+    isAsciiString: () => true,
+    sftpEncodingState: new Map(),
+  });
+
+  const entries = await api.listSftp(null, { sftpId: "sftp-1", path: "/home" });
+  assert.equal(entries[0].name, "root.txt");
+  assert.equal(entries[0].owner, "root");
+  assert.equal(entries[1].name, "uid-only.bin");
+  assert.equal(entries[1].owner, "1000");
 });

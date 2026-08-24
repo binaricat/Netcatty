@@ -15,6 +15,7 @@ import {
   describeSftpIncomingKind,
   getSftpConflictTypeKey,
 } from "../domain/sftpConflict";
+import { isMissingStatError } from "../domain/sftpStatError";
 
 // ============================================================================
 // Types
@@ -36,16 +37,6 @@ import type { UploadBridge, UploadCallbacks, UploadConfig, UploadResult } from "
 
 const formatUploadError = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
-
-/** Only true absence may map to "no conflict"; ENOTSUP/etc. must not. */
-const isMissingStatError = (error: unknown): boolean => {
-  const code = (error as { code?: string | number } | null)?.code;
-  return code === 2
-    || code === "ENOENT"
-    || code === "NO_SUCH_FILE"
-    || code === "SSH_FX_NO_SUCH_FILE"
-    || String((error as { message?: string } | null)?.message || "").trim() === "ENOENT";
-};
 
 const getDropEntrySize = (entry: DropEntry): number => (
   entry.isDirectory ? 0 : entry.file?.size ?? entry.size ?? 0

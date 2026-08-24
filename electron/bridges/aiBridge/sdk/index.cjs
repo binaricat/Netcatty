@@ -358,12 +358,31 @@ const DRIVER_REGISTRY = {
       });
     },
     async listModels(ctx) {
-      return grok.listGrokModels({
+      const acpCatalog = await grokAcp.listGrokAcpModels({
         binPath: ctx.binPath,
         env: ctx.env,
         abortController: ctx.abortController,
         signal: ctx.signal || ctx.abortController?.signal,
       });
+      if (acpCatalog.models.length > 0) {
+        return acpCatalog;
+      }
+      const fallbackCatalog = await grok.listGrokModels({
+        binPath: ctx.binPath,
+        env: ctx.env,
+        abortController: ctx.abortController,
+        signal: ctx.signal || ctx.abortController?.signal,
+      });
+      const currentModelId = acpCatalog.currentModelId || fallbackCatalog.currentModelId;
+      const models = fallbackCatalog.models.length > 0
+        ? fallbackCatalog.models
+        : (currentModelId
+          ? [grok.applyGrokReasoningFallback({ id: currentModelId, name: currentModelId })]
+          : []);
+      return {
+        currentModelId: grok.resolveGrokCatalogCurrentModelId(models, currentModelId),
+        models,
+      };
     },
   },
 };

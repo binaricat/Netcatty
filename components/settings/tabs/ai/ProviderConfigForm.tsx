@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronDown, ChevronRight, Eye, EyeOff, Pencil, Upload, RotateCcw, X, RefreshCw } from "lucide-react";
-import type { ProviderConfig, ProviderAdvancedParams, ProviderStyle } from "../../../../infrastructure/ai/types";
-import { PROVIDER_PRESETS, resolveProviderStyle } from "../../../../infrastructure/ai/types";
+import type { ProviderConfig, ProviderAdvancedParams, OpenAIApiFormat, ProviderStyle } from "../../../../infrastructure/ai/types";
+import { PROVIDER_PRESETS, resolveOpenAIApi, resolveProviderStyle } from "../../../../infrastructure/ai/types";
+import { normalizeOllamaSdkBaseURL } from "../../../../infrastructure/ai/ollamaCompatBaseUrl";
 import { sanitizeContextWindow } from "../../../../infrastructure/ai/contextCompaction";
 import {
   probeProviderConnection,
@@ -53,6 +54,10 @@ async function compressIconFileToDataUrl(file: File): Promise<string> {
 }
 
 const STYLE_OPTIONS: ReadonlyArray<ProviderStyle> = ["anthropic", "openai", "google"];
+const OPENAI_API_OPTIONS: ReadonlyArray<OpenAIApiFormat> = ["chat", "responses"];
+
+/** Same box as the h-8 fields above. Transparent border keeps primary aligned with outline. */
+const PROVIDER_ACTION_CLASS = "box-border h-8 px-3 gap-1.5 text-sm font-medium leading-none";
 
 export const ProviderConfigForm: React.FC<{
   provider: ProviderConfig;
@@ -72,6 +77,7 @@ export const ProviderConfigForm: React.FC<{
     skipTLSVerify: provider.skipTLSVerify ?? false,
     advancedParams: provider.advancedParams ?? {},
     style: provider.style ?? "",
+    openaiApi: resolveOpenAIApi(provider),
     iconId: provider.iconId ?? "",
     iconDataUrl: provider.iconDataUrl ?? "",
   });
@@ -91,6 +97,9 @@ export const ProviderConfigForm: React.FC<{
 
   const preset = PROVIDER_PRESETS[provider.providerId];
   const resolvedStyle: ProviderStyle = form.style || resolveProviderStyle({ providerId: provider.providerId });
+  const resolvedBaseURL = provider.providerId === "ollama"
+    ? normalizeOllamaSdkBaseURL(form.baseURL || preset?.defaultBaseURL || "")
+    : (form.baseURL || preset?.defaultBaseURL || "");
   const modelMetadataSourceKey = useMemo(() => JSON.stringify({
     providerId: provider.providerId,
     baseURL: form.baseURL || preset?.defaultBaseURL || "",
@@ -220,7 +229,7 @@ export const ProviderConfigForm: React.FC<{
   }, []);
 
   const handleTestConnection = useCallback(async () => {
-    const baseURL = form.baseURL || preset?.defaultBaseURL || "";
+    const baseURL = resolvedBaseURL;
     const inputCheck = validateProviderProbeInputs({
       baseURL,
       apiKey: form.apiKey,
@@ -301,7 +310,7 @@ export const ProviderConfigForm: React.FC<{
     } finally {
       if (probeRequestIdRef.current === requestId) setIsTesting(false);
     }
-  }, [form.apiKey, form.baseURL, form.skipTLSVerify, preset?.defaultBaseURL, preset?.modelsEndpoint, provider.providerId, resolvedStyle, t]);
+  }, [form.apiKey, form.skipTLSVerify, preset?.modelsEndpoint, provider.providerId, resolvedBaseURL, resolvedStyle, t]);
 
   const handleSave = useCallback(async () => {
     const cleanedParams: ProviderAdvancedParams = {};
@@ -329,13 +338,16 @@ export const ProviderConfigForm: React.FC<{
 
     const updates: Partial<ProviderConfig> = {
       name: trimmedName || defaultName,
-      baseURL: form.baseURL || undefined,
+      baseURL: provider.providerId === "ollama"
+        ? resolvedBaseURL
+        : (form.baseURL || undefined),
       defaultModel: form.defaultModel || undefined,
       contextWindow: manualContextWindow,
       modelContextWindows: Object.keys(form.modelContextWindows).length > 0 ? form.modelContextWindows : undefined,
       skipTLSVerify: form.skipTLSVerify || undefined,
       advancedParams: Object.keys(cleanedParams).length > 0 ? cleanedParams : undefined,
       style: form.style || undefined,
+      openaiApi: resolvedStyle === "openai" && form.openaiApi === "responses" ? "responses" : undefined,
       iconId: form.iconId || undefined,
       iconDataUrl: form.iconDataUrl || undefined,
     };
@@ -348,7 +360,7 @@ export const ProviderConfigForm: React.FC<{
     }
 
     onSave(updates);
-  }, [form, onSave, provider.providerId, t]);
+  }, [form, onSave, provider.providerId, resolvedBaseURL, resolvedStyle, t]);
 
   return (
     <div className="mt-3 space-y-3 border-t border-border/40 pt-3">
@@ -475,6 +487,34 @@ export const ProviderConfigForm: React.FC<{
         <p className="text-[11px] text-muted-foreground/70">{t('ai.providers.style.help')}</p>
       </div>
 
+      {resolvedStyle === "openai" && (
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium text-muted-foreground">{t('ai.providers.openaiApi')}</label>
+          <div className="flex items-center gap-1.5">
+            {OPENAI_API_OPTIONS.map((format) => {
+              const isSelected = form.openaiApi === format;
+              return (
+                <button
+                  key={format}
+                  type="button"
+                  onClick={() => setForm((prev) => ({ ...prev, openaiApi: format }))}
+                  className={cn(
+                    "h-7 px-2.5 rounded-md text-xs border transition-colors",
+                    isSelected
+                      ? "border-primary/70 bg-primary/15 text-foreground"
+                      : "border-border/50 bg-background text-muted-foreground hover:text-foreground hover:bg-muted/40",
+                  )}
+                  aria-pressed={isSelected}
+                >
+                  {t(`ai.providers.openaiApi.${format}`)}
+                </button>
+              );
+            })}
+          </div>
+          <p className="text-[11px] text-muted-foreground/70">{t('ai.providers.openaiApi.help')}</p>
+        </div>
+      )}
+
       {/* API Key */}
       <div className="space-y-1.5">
         <label className="text-xs font-medium text-muted-foreground">{t('ai.providers.apiKey')}</label>
@@ -512,6 +552,9 @@ export const ProviderConfigForm: React.FC<{
         {resolvedStyle === "anthropic" ? (
           <p className="text-[11px] text-muted-foreground/70">{t('ai.providers.baseUrl.anthropicHelp')}</p>
         ) : null}
+        {provider.providerId === "ollama" ? (
+          <p className="text-[11px] text-muted-foreground/70">{t('ai.providers.baseUrl.ollamaHelp')}</p>
+        ) : null}
       </div>
 
       {/* Default Model */}
@@ -526,7 +569,7 @@ export const ProviderConfigForm: React.FC<{
               modelContextWindows: mergeModelContextWindow(prev.modelContextWindows, model.id, model.contextWindow) ?? prev.modelContextWindows,
             }));
           }}
-          baseURL={form.baseURL || preset?.defaultBaseURL || ""}
+          baseURL={resolvedBaseURL}
           modelsEndpoint={preset?.modelsEndpoint}
           presetModels={preset?.defaultModels}
           apiKey={form.apiKey}
@@ -662,20 +705,26 @@ export const ProviderConfigForm: React.FC<{
       {/* Actions */}
       <div className="flex flex-col gap-2 pt-1">
         <div className="flex items-center gap-2">
-          <Button variant="default" size="sm" onClick={() => void handleSave()}>
-            <Check size={14} className="mr-1.5" />
+          <Button
+            variant="default"
+            size="sm"
+            className={cn(PROVIDER_ACTION_CLASS, "border border-transparent")}
+            onClick={() => void handleSave()}
+          >
+            <Check size={14} className="size-3.5 shrink-0" />
             {t('common.save')}
           </Button>
           <Button
             variant="outline"
             size="sm"
+            className={PROVIDER_ACTION_CLASS}
             onClick={() => void handleTestConnection()}
             disabled={isTesting || isDecrypting}
           >
-            <RefreshCw size={14} className={cn("mr-1.5", isTesting && "animate-spin")} />
+            <RefreshCw size={14} className={cn("size-3.5 shrink-0", isTesting && "animate-spin")} />
             {isTesting ? t('ai.providers.test.testing') : t('ai.providers.test')}
           </Button>
-          <Button variant="ghost" size="sm" onClick={onCancel}>
+          <Button variant="ghost" size="sm" className={PROVIDER_ACTION_CLASS} onClick={onCancel}>
             {t('common.cancel')}
           </Button>
         </div>

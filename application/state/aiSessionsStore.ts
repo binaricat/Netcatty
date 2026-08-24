@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react';
 
 import type { AISession } from '../../infrastructure/ai/types';
+import { draftsByScopeEqualIgnoringAllComposerText } from './aiDraftState';
 import type { DraftsByScope, PanelViewByScope } from './aiStateSnapshots';
 
 type Listener = () => void;
@@ -50,7 +51,16 @@ class AISessionsStore {
     ) {
       return;
     }
+    const textOnlyDraftChange =
+      this.snapshot.sessions === next.sessions
+      && this.snapshot.activeSessionIdMap === next.activeSessionIdMap
+      && this.snapshot.panelViewByScope === next.panelViewByScope
+      && draftsByScopeEqualIgnoringAllComposerText(
+        this.snapshot.draftsByScope,
+        next.draftsByScope,
+      );
     this.snapshot = next;
+    if (textOnlyDraftChange) return;
     for (const listener of this.listeners) {
       listener();
     }

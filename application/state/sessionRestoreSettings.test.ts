@@ -111,6 +111,8 @@ test("session peer windows do not run main-window startup effects", () => {
   const autoSyncSource = readFileSync(new URL("./useAutoSync.ts", import.meta.url), "utf8");
   const startupEffectsSource = readFileSync(new URL("../app/useAppStartupEffects.ts", import.meta.url), "utf8");
   const updateCheckSource = readFileSync(new URL("./useUpdateCheck.ts", import.meta.url), "utf8");
+  const appLockGateSource = readFileSync(new URL("../../components/AppLockGate.tsx", import.meta.url), "utf8");
+  const indexSource = readFileSync(new URL("../../index.tsx", import.meta.url), "utf8");
   const settingsStateSource = readFileSync(new URL("./useSettingsState.ts", import.meta.url), "utf8");
   const settingsIpcSyncSource = readFileSync(new URL("./settingsIpcSync.ts", import.meta.url), "utf8");
   const storageSyncSource = readFileSync(new URL("./settingsStorageSync.ts", import.meta.url), "utf8");
@@ -119,12 +121,17 @@ test("session peer windows do not run main-window startup effects", () => {
   const trayPanelJumpIndex = appSource.indexOf("onTrayPanelJumpToSession");
 
   assert.match(appSource, /const isPeerSessionWindow = typeof window !== 'undefined' && window\.location\.hash\.startsWith\('#\/session-window'\)/);
-  // SettingsPublisher owns useSettingsState; App only forwards the peer-window
-  // flags to it.
-  assert.match(appRootSource, /<SettingsPublisher\s+enableSettingsSync=\{!isPeerSessionWindow\}\s+enableSystemEffects=\{!isPeerSessionWindow\}/s);
-  assert.match(
+  assert.match(appLockGateSource, /settingsOptions\?: Parameters<typeof useSettingsState>\[0\]/);
+  assert.match(appLockGateSource, /deps\.useSettingsState\(settingsOptions\)/);
+  assert.match(indexSource, /const isPeerSessionWindow = window\.location\.hash\.startsWith\('#\/session-window'\)/);
+  assert.match(indexSource, /const settingsOptions = isPeerSessionWindow\s*\?\s*\{ enableSettingsSync: false, enableSystemEffects: false \}/);
+  assert.match(indexSource, /<AppLockGate settingsOptions=\{settingsOptions\}>/);
+  // AppLockGate owns useSettingsState; App forwards the gate's instance into
+  // SettingsPublisher so the runtime slot/context still publish it.
+  assert.match(appRootSource, /<SettingsPublisher settings=\{settings\}>/);
+  assert.doesNotMatch(
     readFileSync(new URL("../app/publishers/SettingsPublisher.tsx", import.meta.url), "utf8"),
-    /useSettingsState\(\{ enableSettingsSync, enableSystemEffects \}\)/,
+    /useSettingsState\(/,
   );
   assert.match(appSource, /useAppStartupEffects\(\{[^}]*enabled: !isPeerSessionWindow/s);
   assert.match(appSource, /useUpdateCheck\(\{[^}]*enabled: !isPeerSessionWindow/s);

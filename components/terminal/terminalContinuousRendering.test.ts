@@ -26,7 +26,10 @@ test("renderer activity follows the hibernate setting instead of active-tab visi
 
 test("inactive terminal surfaces remain painted and non-interactive without hibernate", () => {
   assert.match(supportSource, /resolveTerminalHibernateEnabledForProtocol\(terminalSettings, host\.protocol\)/);
-  assert.match(supportSource, /inert=\{isVisible \? undefined : true\}/);
+  assert.match(
+    supportSource,
+    /inert=\{isVisible && !isCoveredByMagnification \? undefined : true\}/,
+  );
   assert.match(viewSource, /ctx\.hibernateHiddenTabs/);
   assert.match(viewSource, /inert=\{ctx\.isTerminalLayerVisible \? undefined : true\}/);
 });
@@ -57,9 +60,19 @@ test("background split workspaces keep their live geometry without hibernate", (
     supportSource,
     /const initializeHiddenFullSize = !hibernateHiddenTabs[\s\S]*&& !rect[\s\S]*&& !lastVisiblePaneSizeRef\.current;[\s\S]*bumpHiddenPaneSizeVersion/,
   );
+  // Split rects must never feed the hidden-pane pinned size, or a
+  // split -> focus viewMode switch pins hidden panes (and their PTYs) at the
+  // cached fragment width (#3046).
   assert.match(
     supportSource,
-    /if \(isVisible\) \{[\s\S]*const observer = new ResizeObserver\(\(\) => \{[\s\S]*capturePaneSize\(\)/,
+    /if \(isVisible && !rect\) \{[\s\S]*const observer = new ResizeObserver\(\(\) => \{[\s\S]*capturePaneSize\(\)/,
+  );
+  // A split-visible pane must drop the cached full-size measurement so a later
+  // hidden full-size layout re-measures the current area instead of pinning
+  // stale pixels (#3046).
+  assert.match(
+    supportSource,
+    /if \(isVisible\) \{[\s\S]{0,400}lastVisiblePaneSizeRef\.current = null;[\s\S]{0,20}return;/,
   );
   assert.match(
     layerEffectsSource,

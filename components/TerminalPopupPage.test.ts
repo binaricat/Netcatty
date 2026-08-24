@@ -149,7 +149,7 @@ test('popup provider tree mounts the plugin authentication host', () => {
   assert.match(source, /import \{ PluginAuthenticationHost \} from '\.\/plugins\/PluginAuthenticationHost';/);
   assert.match(
     source,
-    /<I18nProvider locale=\{settings\.uiLanguage\}>\s+<TerminalPopupPageInner \/>\s+<PluginAuthenticationHost \/>\s+<\/I18nProvider>/,
+    /<I18nProvider locale=\{settings\.uiLanguage\}>\s+<TerminalPopupPageInner\s+settings=\{settings\}\s+allowTerminalStart=\{allowTerminalStart\}\s+\/>\s+<PluginAuthenticationHost \/>\s+<\/I18nProvider>/,
   );
 });
 

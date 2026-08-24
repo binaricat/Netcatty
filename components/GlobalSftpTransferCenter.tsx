@@ -1,5 +1,6 @@
 import {
   AlertCircle,
+  AlertTriangle,
   ArrowDownToLine,
   ArrowDownUp,
   ArrowUpFromLine,
@@ -26,7 +27,7 @@ import {
 import { transferRuntime } from "../application/state/sftp/transferRuntime";
 import { useGlobalSftpTransferActions } from "../application/state/useGlobalSftpTransferActions";
 export { getGlobalTransferBatchEligibility } from "../domain/sftpTransferActions";
-import type { TransferTask } from "../domain/models";
+import type { FileConflictAction, TransferTask } from "../domain/models";
 import { canReplaceSftpConflict } from "../domain/sftpConflict";
 import { estimateTransferEtaSeconds, formatFileSize, formatTransferEta } from "../application/state/sftp/utils";
 import { cn } from "../lib/utils";
@@ -111,6 +112,18 @@ export function splitBackgroundTransfers(tasks: readonly TransferTask[]) {
 
 export function getGlobalTransferStatusOverride(task: Pick<TransferTask, "error" | "pauseUnavailableReason">) {
   return task.error || task.pauseUnavailableReason;
+}
+
+export function getGlobalConflictActionPresentation(
+  action: FileConflictAction,
+  destructiveDirectoryReplace: boolean,
+) {
+  const safeMerge = destructiveDirectoryReplace && action === "merge";
+  const destructiveReplace = destructiveDirectoryReplace && action === "replace";
+  return {
+    variant: safeMerge || (!destructiveDirectoryReplace && action === "replace") ? "default" : "outline",
+    destructiveReplace,
+  } as const;
 }
 
 const BUCKETS: readonly GlobalTransferBucket[] = ["all", "active", "queued", "paused", "attention", "completed"];
@@ -334,6 +347,7 @@ function TransferRow({
 }) {
   const { t } = useI18n();
   const [expanded, setExpanded] = useState(false);
+  const folderReplaceWarningId = React.useId();
   // Optimistic spinner from click until store status moves off paused/interrupted.
   const [resumeClicked, setResumeClicked] = useState(false);
   const isDirParent = isDirectoryParentTask(task);
@@ -671,6 +685,8 @@ function TransferRow({
       {task.status === "attention" && task.conflict && canControl && (() => {
         const conflict = task.conflict!;
         const canMerge = conflict.isDirectory && conflict.existingType === "directory";
+        const destructiveDirectoryReplace = canMerge;
+        const unresolvedFolderType = conflict.isDirectory && !conflict.existingType;
         const canReplace = canReplaceSftpConflict(conflict.isDirectory, conflict.existingType);
         const actions = [
           "stop",
@@ -685,30 +701,53 @@ function TransferRow({
           ...(canMerge ? (["merge"] as const) : []),
           ...(canReplace ? (["replace"] as const) : []),
         ] as const;
-        return (
-        <div className="mt-2 flex flex-wrap justify-end gap-1">
-          {actions.map((action) => (
+        const renderConflictAction = (action: FileConflictAction, applyToAll = false) => {
+          const presentation = getGlobalConflictActionPresentation(action, destructiveDirectoryReplace);
+          return (
             <Button
-              key={action}
-              variant={action === "replace" ? "default" : "outline"}
+              key={applyToAll ? `all-${action}` : action}
+              variant={presentation.variant}
               size="sm"
-              className="h-6 px-2 text-[10px]"
-              onClick={() => { void sftpTransferCenterStore.resolveConflict(task.id, action); }}
+              className={cn(
+                "h-6 px-2 text-[10px]",
+                presentation.destructiveReplace
+                  && "border-destructive/50 text-destructive hover:bg-destructive/10 hover:text-destructive",
+              )}
+              aria-describedby={presentation.destructiveReplace ? folderReplaceWarningId : undefined}
+              onClick={() => { void sftpTransferCenterStore.resolveConflict(task.id, action, applyToAll); }}
             >
               {t(`sftp.conflict.action.${action}`)}
+              {applyToAll && <> · {t("sftp.transferCenter.applyAll")}</>}
             </Button>
-          ))}
-          {(conflict.applyToAllCount ?? 0) > 1 && applyAllActions.map((action) => (
-            <Button
-              key={`all-${action}`}
-              variant="outline"
-              size="sm"
-              className="h-6 px-2 text-[10px]"
-              onClick={() => { void sftpTransferCenterStore.resolveConflict(task.id, action, true); }}
+          );
+        };
+        return (
+        <div className="mt-2 space-y-2">
+          {destructiveDirectoryReplace && (
+            <div
+              id={folderReplaceWarningId}
+              className="flex items-start gap-1.5 rounded border border-destructive/40 bg-destructive/10 px-2 py-1.5 text-[10px] leading-4"
             >
-              {t(`sftp.conflict.action.${action}`)} · {t("sftp.transferCenter.applyAll")}
-            </Button>
-          ))}
+              <AlertTriangle size={12} className="mt-0.5 shrink-0 text-destructive" />
+              <p>
+                {t("sftp.conflict.folderMergeHint")}{" "}
+                <span className="font-medium text-destructive">
+                  {t("sftp.conflict.folderReplaceWarning")}
+                </span>
+              </p>
+            </div>
+          )}
+          {unresolvedFolderType && (
+            <div className="flex items-start gap-1.5 rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1.5 text-[10px] leading-4">
+              <AlertTriangle size={12} className="mt-0.5 shrink-0 text-amber-600" />
+              <p>{t("sftp.conflict.folderUnknownDesc")}</p>
+            </div>
+          )}
+          <div className="flex flex-wrap justify-end gap-1">
+            {actions.map((action) => renderConflictAction(action))}
+            {(conflict.applyToAllCount ?? 0) > 1
+              && applyAllActions.map((action) => renderConflictAction(action, true))}
+          </div>
         </div>
         );
       })()}

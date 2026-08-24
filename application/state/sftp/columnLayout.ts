@@ -1,4 +1,4 @@
-export type SortField = "name" | "size" | "modified" | "type";
+export type SortField = "name" | "size" | "modified" | "type" | "owner";
 export type SortOrder = "asc" | "desc";
 
 export interface ColumnWidths {
@@ -6,6 +6,7 @@ export interface ColumnWidths {
   modified: number;
   size: number;
   type: number;
+  owner: number;
 }
 
 export type SftpColumnVisibility = Record<keyof ColumnWidths, boolean>;
@@ -15,6 +16,7 @@ export const DEFAULT_SFTP_COLUMN_VISIBILITY: SftpColumnVisibility = {
   modified: true,
   size: true,
   type: true,
+  owner: true,
 };
 
 export const normalizeSftpColumnVisibility = (value: unknown): SftpColumnVisibility => {
@@ -28,5 +30,6 @@ export const normalizeSftpColumnVisibility = (value: unknown): SftpColumnVisibil
     modified: stored.modified !== false,
     size: stored.size !== false,
     type: stored.type !== false,
+    owner: stored.owner !== false,
   };
 };

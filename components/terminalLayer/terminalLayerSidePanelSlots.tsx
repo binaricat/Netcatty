@@ -594,6 +594,26 @@ function SidePanelAiSlotInner({
 export const SidePanelAiSlot = memo(SidePanelAiSlotInner);
 SidePanelAiSlot.displayName = 'SidePanelAiSlot';
 
+export function getFocusedPortalDescendant(
+  mountNode: HTMLElement,
+  activeElement: Element | null,
+): HTMLElement | null {
+  return activeElement instanceof HTMLElement && mountNode.contains(activeElement)
+    ? activeElement
+    : null;
+}
+
+export function movePersistentPortalNode(
+  mountNode: HTMLElement,
+  target: HTMLElement,
+  focusToRestore: HTMLElement | null,
+) {
+  target.appendChild(mountNode);
+  if (focusToRestore && document.activeElement !== focusToRestore) {
+    focusToRestore.focus({ preventScroll: true });
+  }
+}
+
 function PersistentSidePanelPortal({
   portalKey,
   target,
@@ -609,6 +629,7 @@ function PersistentSidePanelPortal({
     node.dataset.sidePanelPortal = portalKey;
     return node;
   });
+  const focusRestoreRef = React.useRef<HTMLElement | null>(null);
 
   // The React portal always targets the same detached node. Moving that node
   // between a pane host and the hidden parking host preserves the mounted
@@ -616,9 +637,16 @@ function PersistentSidePanelPortal({
   // the focused pane changes.
   React.useLayoutEffect(() => {
     if (!target) return;
-    target.appendChild(mountNode);
+    const activeElement = document.activeElement;
+    const focusedDescendant = focusRestoreRef.current
+      ?? getFocusedPortalDescendant(mountNode, activeElement);
+    movePersistentPortalNode(mountNode, target, focusedDescendant);
+    focusRestoreRef.current = null;
     return () => {
-      if (mountNode.parentNode === target) mountNode.remove();
+      if (mountNode.parentNode !== target) return;
+      const currentActiveElement = document.activeElement;
+      focusRestoreRef.current = getFocusedPortalDescendant(mountNode, currentActiveElement);
+      mountNode.remove();
     };
   }, [mountNode, target]);
 

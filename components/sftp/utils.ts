@@ -265,6 +265,7 @@ export const buildSftpColumnTemplate = (
     if (visibleColumns.modified) columns.push(`minmax(0, ${columnWidths.modified}fr)`);
     if (visibleColumns.size) columns.push(`minmax(52px, ${columnWidths.size}fr)`);
     if (visibleColumns.type) columns.push(`minmax(64px, ${columnWidths.type}fr)`);
+    if (visibleColumns.owner) columns.push(`minmax(56px, ${columnWidths.owner}fr)`);
     return columns.join(' ');
 };
 
@@ -306,6 +307,9 @@ export const sortSftpEntries = (
                 cmp = extA.localeCompare(extB);
                 break;
             }
+            case 'owner':
+                cmp = (a.owner || '').localeCompare(b.owner || '');
+                break;
         }
         return sortOrder === 'asc' ? cmp : -cmp;
     });

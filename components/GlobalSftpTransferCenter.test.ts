@@ -4,6 +4,7 @@ import test from "node:test";
 import type { TransferTask } from "../domain/models";
 import {
   buildGlobalTransferProgressDisplay,
+  getGlobalConflictActionPresentation,
   getGlobalTransferBadge,
   getGlobalTransferBatchEligibility,
   getGlobalTransferStatusOverride,
@@ -15,6 +16,21 @@ import {
   shouldShowCollapsedActiveChildren,
   splitBackgroundTransfers,
 } from "./GlobalSftpTransferCenter";
+
+test("folder conflicts emphasize merge and mark replace as destructive in the transfer center", () => {
+  assert.deepEqual(getGlobalConflictActionPresentation("merge", true), {
+    variant: "default",
+    destructiveReplace: false,
+  });
+  assert.deepEqual(getGlobalConflictActionPresentation("replace", true), {
+    variant: "outline",
+    destructiveReplace: true,
+  });
+  assert.deepEqual(getGlobalConflictActionPresentation("replace", false), {
+    variant: "default",
+    destructiveReplace: false,
+  });
+});
 
 const task = (id: string, status: TransferTask["status"], background = false) => ({
   id,

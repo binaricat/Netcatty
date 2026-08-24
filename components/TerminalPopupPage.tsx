@@ -1,7 +1,6 @@
 import { Copy, Minus, Square, Unplug, X } from 'lucide-react';
 import React, { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { I18nProvider, useI18n } from '../application/i18n/I18nProvider';
-import { useSettingsState } from '../application/state/useSettingsState';
 import { useTerminalPopupWindow } from '../application/state/useTerminalPopupWindow';
 import { useVaultState } from '../application/state/useVaultState';
 import { useWindowControls } from '../application/state/useWindowControls';
@@ -18,6 +17,7 @@ import type { KnownHost } from '../types';
 import { getEffectiveKnownHosts } from '../infrastructure/syncHelpers';
 import { detectLocalOs } from '../lib/localShell';
 import { cn } from '../lib/utils';
+import type { AppLockGateRenderContext } from './AppLockGate';
 import { PluginAuthenticationHost } from './plugins/PluginAuthenticationHost';
 
 const Terminal = lazy(() => import('./Terminal'));
@@ -28,6 +28,7 @@ const POPUP_STARTUP_REVEAL_MIN_DELAY_MS = 1500;
 const POPUP_STARTUP_REVEAL_MAX_DELAY_MS = 12000;
 
 type PopupThemeVars = React.CSSProperties & Record<string, string>;
+type SettingsState = AppLockGateRenderContext["settings"];
 
 const buildPopupThemeVars = (theme: TerminalTheme): PopupThemeVars => {
   const { colors } = theme;
@@ -250,7 +251,14 @@ export function resolveTerminalPopupReuseId(config: TerminalPopupPayload): strin
   return config.sourceSession.reuseConnectionFromSessionId;
 }
 
-function TerminalPopupPageInner() {
+function TerminalPopupPageInner({
+  settings,
+  allowTerminalStart = true,
+}: {
+  settings: SettingsState;
+  /** When false (app locked), keep config listeners mounted but do not start Terminal. */
+  allowTerminalStart?: boolean;
+}) {
   const { t } = useI18n();
   const {
     close,
@@ -260,7 +268,6 @@ function TerminalPopupPageInner() {
     setWindowTitle,
   } = useTerminalPopupWindow();
   const { notifyRendererReady, onWindowCommandCloseRequested } = useWindowControls();
-  const settings = useSettingsState();
   const {
     isInitialized: vaultInitialized,
     hosts,
@@ -338,9 +345,8 @@ function TerminalPopupPageInner() {
         void setWindowTitle(payload.title);
       }
     });
-    // Main delivers the popup payload as soon as the renderer reports ready
-    // (and destroys the window if it never does) — so report ready only after
-    // the config listener above is registered.
+    // Popup config may already be buffered by preload, so register the listener
+    // before reporting renderer readiness or the buffered payload can be lost.
     notifyRendererReady();
     return unsubscribe;
   }, [notifyRendererReady, onPopupConfig, setWindowTitle]);
@@ -379,7 +385,15 @@ function TerminalPopupPageInner() {
     return resolveTerminalPopupReuseId(config);
   }, [config]);
 
-  const ready = Boolean(config && host && vaultInitialized);
+  // Defer *first* backend start while app-locked so startup commands/credentials
+  // do not run behind the overlay. Once a session has started, keep it mounted
+  // across re-locks so the popup is not torn down mid-session (Codex P2).
+  const readyToStart = Boolean(config && host && vaultInitialized && allowTerminalStart);
+  const [sessionStarted, setSessionStarted] = useState(false);
+  useEffect(() => {
+    if (readyToStart) setSessionStarted(true);
+  }, [readyToStart]);
+  const ready = sessionStarted || readyToStart;
   const startupRevealDelayMs = useMemo(() => {
     // Attach mode shows the live session immediately (no startup command).
     if (isAttachMode) return 0;
@@ -516,11 +530,19 @@ function TerminalPopupPageInner() {
   );
 }
 
-export default function TerminalPopupPage() {
-  const settings = useSettingsState();
+export default function TerminalPopupPage({
+  settings,
+  allowTerminalStart = true,
+}: {
+  settings: SettingsState;
+  allowTerminalStart?: boolean;
+}) {
   return (
     <I18nProvider locale={settings.uiLanguage}>
-      <TerminalPopupPageInner />
+      <TerminalPopupPageInner
+        settings={settings}
+        allowTerminalStart={allowTerminalStart}
+      />
       <PluginAuthenticationHost />
     </I18nProvider>
   );

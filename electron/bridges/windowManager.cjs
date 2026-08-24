@@ -1019,7 +1019,11 @@ const terminalPopupWindowApi = createTerminalPopupWindowApi({
   unregisterAppContentWindow,
   notifyAppContentWindowClosed,
 });
-const { openTerminalPopupWindow, closeTerminalPopupWindow } = terminalPopupWindowApi;
+const {
+  openTerminalPopupWindow,
+  closeTerminalPopupWindow,
+  getTerminalPopupWindows,
+} = terminalPopupWindowApi;
 
 /**
  * Register window control IPC handlers (only once)
@@ -1056,6 +1060,13 @@ function registerWindowHandlers(ipcMain, nativeTheme) {
   });
 
   ipcMain.handle("netcatty:window:close", (event) => {
+    try {
+      if (typeof menuDeps?.isAppLocked === "function" && menuDeps.isAppLocked()) {
+        return { success: false, reason: "app-locked" };
+      }
+    } catch {
+      // ignore
+    }
     const win = getWindowForIpcEvent(event);
     if (win && !win.isDestroyed()) {
       debugLog("window:close", {
@@ -1097,6 +1108,13 @@ function registerWindowHandlers(ipcMain, nativeTheme) {
   ipcMain.handle("netcatty:window:setTitle", (event, title) => {
     const win = getWindowForIpcEvent(event);
     if (!win || win.isDestroyed()) return false;
+    try {
+      if (typeof menuDeps?.setAppLockWindowTitle === "function") {
+        return menuDeps.setAppLockWindowTitle(win, title) === true;
+      }
+    } catch {
+      // Ignore title-guard failures and keep normal title behavior.
+    }
     const value = typeof title === "string" ? title.trim() : "";
     try {
       win.setTitle(value || "Netcatty");
@@ -1231,13 +1249,40 @@ function registerWindowHandlers(ipcMain, nativeTheme) {
 /**
  * Build the application menu
  */
-function buildAppMenu(Menu, app, isMac, language = currentLanguage) {
+function buildAppMenu(Menu, app, isMac, language = currentLanguage, options = {}) {
   // Save deps so later language changes can rebuild the menu.
-  menuDeps = { Menu, app, isMac };
-  const closeFocusedWindow = (_menuItem, browserWindow) => {
+  menuDeps = {
+    Menu,
+    app,
+    isMac,
+    isAppLocked: typeof options.isAppLocked === "function"
+      ? options.isAppLocked
+      : (typeof menuDeps?.isAppLocked === "function" ? menuDeps.isAppLocked : undefined),
+    setAppLockWindowTitle: typeof options.setAppLockWindowTitle === "function"
+      ? options.setAppLockWindowTitle
+      : (typeof menuDeps?.setAppLockWindowTitle === "function"
+        ? menuDeps.setAppLockWindowTitle
+        : undefined),
+  };
+  const closeFocusedWindow = (_menuItem, browserWindow, event) => {
+    // Block native Close while app lock is visible so popups/sessions are not
+    // torn down behind the overlay (Codex P2 on 79603979).
+    try {
+      if (typeof menuDeps?.isAppLocked === "function" && menuDeps.isAppLocked()) return;
+    } catch {
+      // ignore
+    }
     // 只有主窗口/设置窗口会接收 command-close；其他 BrowserWindow 直接关闭。
     if (browserWindow && !isMainWindow(browserWindow) && browserWindow !== settingsWindow) {
       closeBrowserWindow(browserWindow);
+      return;
+    }
+
+    // Selecting Close Window with the mouse remains an explicit window-close
+    // action. Only the menu accelerator is routed through the configurable
+    // close-tab shortcut in the renderer.
+    if (event?.triggeredByAccelerator === false) {
+      closeBrowserWindow(browserWindow || getMainWindow());
       return;
     }
 
@@ -1276,8 +1321,26 @@ function buildAppMenu(Menu, app, isMac, language = currentLanguage) {
     {
       label: tMenu(language, "view"),
       submenu: [
-        { label: tMenu(language, "reload"), click: (_, win) => { if (win) win.reload(); } },
-        { role: "toggleDevTools" },
+        {
+          label: tMenu(language, "reload"),
+          click: (_, win) => {
+            // Block reload while app lock is up so lock cannot be bypassed.
+            try {
+              if (typeof menuDeps?.isAppLocked === "function" && menuDeps.isAppLocked()) return;
+            } catch { /* ignore */ }
+            if (win) win.reload();
+          },
+        },
+        {
+          label: "Toggle Developer Tools",
+          accelerator: "Alt+CommandOrControl+I",
+          click: (_, win) => {
+            try {
+              if (typeof menuDeps?.isAppLocked === "function" && menuDeps.isAppLocked()) return;
+            } catch { /* ignore */ }
+            if (win && !win.isDestroyed?.()) win.webContents?.toggleDevTools?.();
+          },
+        },
         { type: "separator" },
         { role: "resetZoom" },
         { role: "zoomIn" },
@@ -1405,6 +1468,7 @@ module.exports = {
   closeSettingsWindow,
   openTerminalPopupWindow,
   closeTerminalPopupWindow,
+  getTerminalPopupWindows,
   prewarmSettingsWindow,
   buildAppMenu,
   getCurrentLanguage,

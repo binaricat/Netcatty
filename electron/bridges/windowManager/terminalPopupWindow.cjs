@@ -311,6 +311,9 @@ function createTerminalPopupWindowApi(ctx) {
     return {
       openTerminalPopupWindow,
       closeTerminalPopupWindow,
+      getTerminalPopupWindows() {
+        return Array.from(terminalPopupWindows.values());
+      },
     };
   }
 }

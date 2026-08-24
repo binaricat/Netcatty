@@ -308,6 +308,14 @@ export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
     sectionKey: "settings.terminal.section.behavior",
   },
   {
+    id: "terminal-disconnected-notice",
+    tab: "terminal",
+    labelKey: "settings.terminal.behavior.disconnectedNotice",
+    descriptionKey: "settings.terminal.behavior.disconnectedNotice.desc",
+    sectionKey: "settings.terminal.section.behavior",
+    keywords: ["disconnect", "connection lost", "dialog", "popup", "断开连接", "断线", "弹窗", "提醒"],
+  },
+  {
     id: "terminal-right-click",
     tab: "terminal",
     labelKey: "settings.terminal.behavior.rightClick",
@@ -375,6 +383,13 @@ export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
     tab: "terminal",
     labelKey: "settings.terminal.behavior.dynamicTabTitle",
     descriptionKey: "settings.terminal.behavior.dynamicTabTitle.desc",
+    sectionKey: "settings.terminal.section.behavior",
+  },
+  {
+    id: "terminal-osc-notifications",
+    tab: "terminal",
+    labelKey: "settings.terminal.behavior.oscNotifications",
+    descriptionKey: "settings.terminal.behavior.oscNotifications.desc",
     sectionKey: "settings.terminal.section.behavior",
   },
   {
@@ -717,6 +732,15 @@ export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
     sectionKey: "ai.safety.title",
   },
   {
+    id: "ai-safety-response-idle-timeout",
+    tab: "ai",
+    aiSubTab: "safety",
+    labelKey: "ai.safety.responseIdleTimeout",
+    descriptionKey: "ai.safety.responseIdleTimeout.description",
+    sectionKey: "ai.safety.title",
+    keywords: ["response", "request", "idle", "timeout", "响应", "请求", "超时"],
+  },
+  {
     id: "ai-safety-blocklist",
     tab: "ai",
     aiSubTab: "safety",
@@ -793,6 +817,13 @@ export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
     descriptionKey: "settings.system.networkProxy.description",
     sectionKey: "settings.system.networkProxy.title",
     keywords: ["proxy", "http", "代理"],
+  },
+  {
+    id: "system-app-lock",
+    tab: "system",
+    labelKey: "settings.appLock.title",
+    descriptionKey: "settings.appLock.description",
+    keywords: ["app lock", "applock", "lock", "应用锁", "锁屏", "idle", "timeout", "无操作"],
   },
   {
     id: "system-credentials",

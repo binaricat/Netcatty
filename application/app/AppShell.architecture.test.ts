@@ -10,6 +10,7 @@ const appSource = readFileSync(join(here, '../../App.tsx'), 'utf8');
 const vaultPublisherSource = readFileSync(join(here, 'publishers/VaultPublisher.tsx'), 'utf8');
 const sessionPublisherSource = readFileSync(join(here, 'publishers/SessionPublisher.tsx'), 'utf8');
 const settingsPublisherSource = readFileSync(join(here, 'publishers/SettingsPublisher.tsx'), 'utf8');
+const appLockGateSource = readFileSync(join(here, '../../components/AppLockGate.tsx'), 'utf8');
 
 const hostsDir = join(here, 'hosts');
 const hostFiles = existsSync(hostsDir)
@@ -79,10 +80,12 @@ test('App.tsx does not subscribe to vault/session/settings runtimes or mega hook
   assert.match(appSource, /<AppSideEffects\b/);
 });
 
-test('publishers own the mega hooks and store fan-out', () => {
+test('publishers and the app-lock gate own the mega hooks and store fan-out', () => {
   assert.match(vaultPublisherSource, /\buseVaultState\s*\(/);
   assert.match(sessionPublisherSource, /\buseSessionState\s*\(/);
-  assert.match(settingsPublisherSource, /\buseSettingsState\s*\(/);
+  assert.match(appLockGateSource, /\buseSettingsState\s*\(/);
+  assert.doesNotMatch(settingsPublisherSource, /\buseSettingsState\s*\(/);
+  assert.match(settingsPublisherSource, /registerAppSettingsRuntime\(settings\)/);
   assert.match(vaultPublisherSource, /publishVaultSnapshot\(/);
   assert.match(vaultPublisherSource, /registerVaultSnapshotActions\(/);
   assert.match(vaultPublisherSource, /registerVaultSnapshotActions\(null\)/);

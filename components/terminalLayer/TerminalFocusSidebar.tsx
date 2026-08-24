@@ -109,6 +109,11 @@ const WorkspaceFocusSessionRow = memo<WorkspaceFocusSessionRowProps>(({
   dynamicTabTitleMode,
   t,
 }) => {
+  const reconnectActive = React.useSyncExternalStore(
+    terminalReconnectRegistry.subscribe,
+    () => terminalReconnectRegistry.isActive(session.id),
+    () => false,
+  );
   const {
     termFg,
     selectedBg,
@@ -217,6 +222,7 @@ const WorkspaceFocusSessionRow = memo<WorkspaceFocusSessionRowProps>(({
         onDetachSession={onDetachSessionFromWorkspace}
         onReconnectSession={terminalReconnectRegistry.request}
         sessionStatus={session.status}
+        reconnectActive={reconnectActive}
         onRenameSession={onStartRename}
         t={t}
       />

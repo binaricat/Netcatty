@@ -99,9 +99,11 @@ import {
   STORAGE_KEY_AI_DEFAULT_AGENT,
   STORAGE_KEY_AI_COMMAND_BLOCKLIST,
   STORAGE_KEY_AI_COMMAND_TIMEOUT,
+  STORAGE_KEY_AI_RESPONSE_IDLE_TIMEOUT,
   STORAGE_KEY_AI_MAX_ITERATIONS,
   STORAGE_KEY_AI_AGENT_MODEL_MAP,
   STORAGE_KEY_AI_AGENT_PROVIDER_MAP,
+  STORAGE_KEY_AI_AGENT_THINKING_MAP,
   STORAGE_KEY_AI_WEB_SEARCH,
   STORAGE_KEY_AI_QUICK_MESSAGES,
   STORAGE_KEY_AI_SHOW_TERMINAL_SELECTION_ACTION,
@@ -249,8 +251,8 @@ const SYNCABLE_TERMINAL_KEYS = [
   'linkModifier', 'keywordHighlightEnabled', 'keywordHighlightRules',
   'keepaliveInterval', 'keepaliveCountMax', 'disableBracketedPaste', 'clearWipesScrollback',
   'autoUploadClipboardImageOnPaste',
-  'preserveSelectionOnInput', 'forcePromptNewLine', 'osc52Clipboard', 'dynamicTabTitleMode',
-  'autoCloseOnExit',
+  'preserveSelectionOnInput', 'forcePromptNewLine', 'osc52Clipboard', 'oscNotifications', 'dynamicTabTitleMode',
+  'autoCloseOnExit', 'disconnectedNoticeMode',
   'showHostInfoBar', 'hostInfoBarTitleMode', 'showServerStats',
   'serverStatsRefreshInterval',
   'systemManagerProcessRefreshInterval', 'systemManagerTmuxRefreshInterval',
@@ -310,9 +312,11 @@ export const SYNCABLE_SETTING_STORAGE_KEYS = [
   STORAGE_KEY_AI_DEFAULT_AGENT,
   STORAGE_KEY_AI_COMMAND_BLOCKLIST,
   STORAGE_KEY_AI_COMMAND_TIMEOUT,
+  STORAGE_KEY_AI_RESPONSE_IDLE_TIMEOUT,
   STORAGE_KEY_AI_MAX_ITERATIONS,
   STORAGE_KEY_AI_AGENT_MODEL_MAP,
   STORAGE_KEY_AI_AGENT_PROVIDER_MAP,
+  STORAGE_KEY_AI_AGENT_THINKING_MAP,
   STORAGE_KEY_AI_WEB_SEARCH,
   STORAGE_KEY_AI_QUICK_MESSAGES,
   STORAGE_KEY_AI_SHOW_TERMINAL_SELECTION_ACTION,
@@ -556,12 +560,18 @@ export function collectSyncableSettings(): SyncPayload['settings'] {
   if (Array.isArray(commandBlocklist)) ai.commandBlocklist = commandBlocklist;
   const commandTimeout = localStorageAdapter.readNumber(STORAGE_KEY_AI_COMMAND_TIMEOUT);
   if (commandTimeout != null && Number.isFinite(commandTimeout)) ai.commandTimeout = commandTimeout;
+  const responseIdleTimeout = localStorageAdapter.readNumber(STORAGE_KEY_AI_RESPONSE_IDLE_TIMEOUT);
+  if (responseIdleTimeout != null && Number.isFinite(responseIdleTimeout)) {
+    ai.responseIdleTimeout = responseIdleTimeout;
+  }
   const maxIterations = localStorageAdapter.readNumber(STORAGE_KEY_AI_MAX_ITERATIONS);
   if (maxIterations != null && Number.isFinite(maxIterations)) ai.maxIterations = maxIterations;
   const agentModelMap = readRecordSetting<Record<string, string>>(STORAGE_KEY_AI_AGENT_MODEL_MAP);
   if (agentModelMap) ai.agentModelMap = agentModelMap;
   const agentProviderMap = readRecordSetting<Record<string, string>>(STORAGE_KEY_AI_AGENT_PROVIDER_MAP);
   if (agentProviderMap) ai.agentProviderMap = agentProviderMap;
+  const agentThinkingMap = readRecordSetting<Record<string, string>>(STORAGE_KEY_AI_AGENT_THINKING_MAP);
+  if (agentThinkingMap) ai.agentThinkingMap = agentThinkingMap;
   const webSearchConfig = readRecordSetting(STORAGE_KEY_AI_WEB_SEARCH);
   if (webSearchConfig) ai.webSearchConfig = stripDeviceBoundApiKey(webSearchConfig);
   const quickMessages = readArraySetting(STORAGE_KEY_AI_QUICK_MESSAGES);
@@ -793,9 +803,13 @@ async function applySyncableSettings(settings: NonNullable<SyncPayload['settings
     if (ai.defaultAgentId != null) localStorageAdapter.writeString(STORAGE_KEY_AI_DEFAULT_AGENT, ai.defaultAgentId);
     if (ai.commandBlocklist != null) localStorageAdapter.write(STORAGE_KEY_AI_COMMAND_BLOCKLIST, ai.commandBlocklist);
     if (ai.commandTimeout != null) localStorageAdapter.writeNumber(STORAGE_KEY_AI_COMMAND_TIMEOUT, ai.commandTimeout);
+    if (ai.responseIdleTimeout != null) {
+      localStorageAdapter.writeNumber(STORAGE_KEY_AI_RESPONSE_IDLE_TIMEOUT, ai.responseIdleTimeout);
+    }
     if (ai.maxIterations != null) localStorageAdapter.writeNumber(STORAGE_KEY_AI_MAX_ITERATIONS, ai.maxIterations);
     if (ai.agentModelMap != null) localStorageAdapter.write(STORAGE_KEY_AI_AGENT_MODEL_MAP, ai.agentModelMap);
     if (ai.agentProviderMap != null) localStorageAdapter.write(STORAGE_KEY_AI_AGENT_PROVIDER_MAP, ai.agentProviderMap);
+    if (ai.agentThinkingMap != null) localStorageAdapter.write(STORAGE_KEY_AI_AGENT_THINKING_MAP, ai.agentThinkingMap);
     if (ai.webSearchConfig !== undefined) {
       if (ai.webSearchConfig === null) {
         localStorageAdapter.remove(STORAGE_KEY_AI_WEB_SEARCH);
@@ -845,8 +859,10 @@ function notifyAIStateAfterSync(ai: NonNullable<SyncPayload['settings']>['ai']):
   if (ai.defaultAgentId != null) touched.push(STORAGE_KEY_AI_DEFAULT_AGENT);
   if (ai.commandBlocklist != null) touched.push(STORAGE_KEY_AI_COMMAND_BLOCKLIST);
   if (ai.commandTimeout != null) touched.push(STORAGE_KEY_AI_COMMAND_TIMEOUT);
+  if (ai.responseIdleTimeout != null) touched.push(STORAGE_KEY_AI_RESPONSE_IDLE_TIMEOUT);
   if (ai.maxIterations != null) touched.push(STORAGE_KEY_AI_MAX_ITERATIONS);
   if (ai.agentModelMap != null) touched.push(STORAGE_KEY_AI_AGENT_MODEL_MAP);
+  if (ai.agentThinkingMap != null) touched.push(STORAGE_KEY_AI_AGENT_THINKING_MAP);
   // agentProviderMap is *always* potentially mutated because the reconcile
   // step may have pruned it even if the payload didn't ship one.
   touched.push(STORAGE_KEY_AI_AGENT_PROVIDER_MAP);

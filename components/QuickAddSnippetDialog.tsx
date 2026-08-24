@@ -12,12 +12,13 @@ import { Keyboard, Package, RotateCcw } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useI18n } from '../application/i18n/I18nProvider';
 import type { Snippet } from '../domain/models';
+import { findActiveSystemShortcutConflict } from '../domain/activeKeyBindings';
 import {
   type HotkeyScheme,
   type KeyBinding,
   keyEventToString,
+  keyStringToKeyboardEvent,
   matchesKeyBinding,
-  parseKeyCombo,
 } from '../domain/models';
 import { isScriptSnippet } from '../domain/snippetScript.ts';
 import { cn, isMacPlatform } from '../lib/utils';
@@ -132,78 +133,6 @@ export const QuickAddSnippetDialog: React.FC<QuickAddSnippetDialogProps> = ({
     snippets.filter((s) => Boolean(s.shortkey) && s.id !== editing?.id)
   ), [snippets, editing?.id]);
 
-  const activeSystemBindings = useMemo(() => {
-    return keyBindings.flatMap((binding) => {
-      const entries: { binding: string; isMac: boolean }[] = [];
-      const macBinding = binding.mac;
-      const pcBinding = binding.pc;
-
-      if (hotkeyScheme === 'mac') {
-        if (macBinding && macBinding !== 'Disabled') {
-          entries.push({ binding: macBinding, isMac: true });
-        }
-        return entries;
-      }
-
-      if (hotkeyScheme === 'pc') {
-        if (pcBinding && pcBinding !== 'Disabled') {
-          entries.push({ binding: pcBinding, isMac: false });
-        }
-        return entries;
-      }
-
-      if (macBinding && macBinding !== 'Disabled') {
-        entries.push({ binding: macBinding, isMac: true });
-      }
-      if (pcBinding && pcBinding !== 'Disabled') {
-        entries.push({ binding: pcBinding, isMac: false });
-      }
-      return entries;
-    });
-  }, [hotkeyScheme, keyBindings]);
-
-  const buildKeyEventFromString = useCallback((keyString: string) => {
-    const parsed = parseKeyCombo(keyString);
-    if (!parsed) return null;
-
-    const modifiers = new Set(parsed.modifiers);
-    const key = parsed.key;
-    const normalizedKey = (() => {
-      switch (key) {
-        case 'Space':
-          return ' ';
-        case '↑':
-          return 'ArrowUp';
-        case '↓':
-          return 'ArrowDown';
-        case '←':
-          return 'ArrowLeft';
-        case '→':
-          return 'ArrowRight';
-        case 'Esc':
-          return 'Escape';
-        case '⌫':
-          return 'Backspace';
-        case 'Del':
-          return 'Delete';
-        case '↵':
-          return 'Enter';
-        case '⇥':
-          return 'Tab';
-        default:
-          return key.length === 1 ? key.toLowerCase() : key;
-      }
-    })();
-
-    return new KeyboardEvent('keydown', {
-      key: normalizedKey,
-      metaKey: modifiers.has('⌘') || modifiers.has('Win'),
-      ctrlKey: modifiers.has('⌃') || modifiers.has('Ctrl'),
-      altKey: modifiers.has('⌥') || modifiers.has('Alt'),
-      shiftKey: modifiers.has('Shift'),
-    });
-  }, []);
-
   const normalizeKeyString = useCallback((value: string) => (
     value.toLowerCase().replace(/\s+/g, '')
   ), []);
@@ -211,16 +140,14 @@ export const QuickAddSnippetDialog: React.FC<QuickAddSnippetDialogProps> = ({
   const validateShortkey = useCallback((key: string): string | null => {
     if (!key) return null;
 
-    const syntheticEvent = buildKeyEventFromString(key);
-    if (syntheticEvent) {
-      const conflictsSystem = activeSystemBindings.some(({ binding, isMac: bindingIsMac }) => (
-        matchesKeyBinding(syntheticEvent, binding, bindingIsMac)
-      ));
-      if (conflictsSystem) {
-        return t('snippets.shortkey.error.systemConflict');
-      }
+    const systemConflict = findActiveSystemShortcutConflict(key, hotkeyScheme, keyBindings);
+    if (systemConflict) {
+      const nameKey = `settings.shortcuts.binding.${systemConflict.id}`;
+      const name = t(nameKey) !== nameKey ? t(nameKey) : systemConflict.label;
+      return t('snippets.shortkey.error.systemConflict', { name });
     }
 
+    const syntheticEvent = keyStringToKeyboardEvent(key);
     if (syntheticEvent) {
       for (const snippet of existingShortkeys) {
         if (snippet.shortkey && matchesKeyBinding(syntheticEvent, snippet.shortkey, isMac)) {
@@ -239,10 +166,10 @@ export const QuickAddSnippetDialog: React.FC<QuickAddSnippetDialogProps> = ({
 
     return null;
   }, [
-    activeSystemBindings,
-    buildKeyEventFromString,
     existingShortkeys,
+    hotkeyScheme,
     isMac,
+    keyBindings,
     normalizeKeyString,
     t,
   ]);

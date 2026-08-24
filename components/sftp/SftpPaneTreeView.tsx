@@ -44,6 +44,7 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
   onOpenFileWith,
   onEditFile,
   onDownloadFile,
+  onExtractArchive,
   onEditPermissions,
   draggedFiles,
   openNewFolderDialog,
@@ -197,6 +198,8 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
   onEditFileRef.current = onEditFile;
   const onDownloadFileRef = useRef(onDownloadFile);
   onDownloadFileRef.current = onDownloadFile;
+  const onExtractArchiveRef = useRef(onExtractArchive);
+  onExtractArchiveRef.current = onExtractArchive;
   const onEditPermissionsRef = useRef(onEditPermissions);
   onEditPermissionsRef.current = onEditPermissions;
   const openRenameDialogRef = useRef(openRenameDialog);
@@ -917,6 +920,7 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
     onOpenFileWithRef,
     onEditFileRef,
     onDownloadFileRef,
+    onExtractArchiveRef,
     onEditPermissionsRef,
     openDeleteConfirmRef,
     openRenameDialogRef,
@@ -996,7 +1000,7 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
             )}
             {visibleColumns.type && (
               <div
-                className="flex items-center justify-end gap-1 cursor-pointer hover:text-foreground min-w-0 overflow-hidden"
+                className="flex items-center justify-end gap-1 cursor-pointer hover:text-foreground relative pr-2 min-w-0 overflow-hidden"
                 onClick={() => handleSort('type')}
               >
                 {sortField === 'type' && (
@@ -1005,6 +1009,23 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
                   </span>
                 )}
                 <span className="truncate whitespace-nowrap">{t('sftp.columns.kind')}</span>
+                <div
+                  className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-primary/50 transition-colors"
+                  onMouseDown={(e) => handleResizeStart('type', e)}
+                />
+              </div>
+            )}
+            {visibleColumns.owner && (
+              <div
+                className="flex items-center justify-end gap-1 cursor-pointer hover:text-foreground min-w-0 overflow-hidden"
+                onClick={() => handleSort('owner')}
+              >
+                {sortField === 'owner' && (
+                  <span className="shrink-0 text-primary">
+                    {sortOrder === 'asc' ? '↑' : '↓'}
+                  </span>
+                )}
+                <span className="truncate whitespace-nowrap">{t('sftp.columns.owner')}</span>
               </div>
             )}
           </div>

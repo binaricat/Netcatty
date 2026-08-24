@@ -11,6 +11,24 @@ test("isMissingStatError accepts only true path absence codes", () => {
   assert.equal(isMissingStatError(new Error("ENOENT")), true);
 });
 
+test("isMissingStatError treats Electron-wrapped SFTP absence as missing", () => {
+  // ipcRenderer.invoke strips custom `code` and wraps the ssh2 message.
+  // New-file uploads lstat the destination first; this is the toast users see.
+  assert.equal(
+    isMissingStatError(
+      new Error("Error invoking remote method 'netcatty:sftp:lstat': Error: No such file"),
+    ),
+    true,
+  );
+  assert.equal(isMissingStatError(new Error("No such file")), true);
+  assert.equal(isMissingStatError(new Error("No such file or directory")), true);
+  assert.equal(isMissingStatError(new Error("No such file: /tmp/tool.sh")), true);
+  assert.equal(
+    isMissingStatError(new Error("ENOENT: no such file or directory, lstat '/tmp/tool.sh'")),
+    true,
+  );
+});
+
 test("isMissingStatError rejects unsupported LSTAT and other failures", () => {
   const enotsup = new Error("Remote server does not support LSTAT") as Error & {
     code: string;
@@ -24,4 +42,25 @@ test("isMissingStatError rejects unsupported LSTAT and other failures", () => {
   eperm.code = "EPERM";
   assert.equal(isMissingStatError(eperm), false);
   assert.equal(isMissingStatError(new Error("channel closed")), false);
+  assert.equal(
+    isMissingStatError(
+      new Error("Error invoking remote method 'netcatty:sftp:lstat': Error: Permission denied"),
+    ),
+    false,
+  );
+  // Path names are user-controlled; do not treat a substring hit as absence.
+  assert.equal(
+    isMissingStatError(
+      new Error("EACCES: permission denied, lstat '/private/enoent/report.txt'"),
+    ),
+    false,
+  );
+  assert.equal(
+    isMissingStatError(
+      new Error(
+        "Error invoking remote method 'netcatty:sftp:lstat': Error: EACCES: permission denied, lstat '/private/enoent/report.txt'",
+      ),
+    ),
+    false,
+  );
 });

@@ -10,7 +10,9 @@ const { spawn } = require("node:child_process");
 const { StringDecoder } = require("node:string_decoder");
 const fs = require("node:fs");
 const path = require("node:path");
+const { resolveCursorCliSpawnSpec } = require("../cursorCliSpawn.cjs");
 const { mcpEnvPairsToObject } = require("./injectMcp.cjs");
+const { encodeCursorCliModel } = require("./cursorDriver.cjs");
 
 const DEFAULT_CURSOR_CLI_MODEL = "auto";
 const NETCATTY_MCP_NAME = "netcatty-remote-hosts";
@@ -56,9 +58,18 @@ function stripCursorApiKeyFromEnv(env) {
   return out;
 }
 
+function spawnCursorCliProcess(spawnImpl, cliPath, args, options = {}) {
+  const spawnFn = spawnImpl || spawn;
+  const spawnSpec = resolveCursorCliSpawnSpec(cliPath, args);
+  return spawnFn(spawnSpec.command, spawnSpec.args, {
+    ...options,
+    shell: spawnSpec.shell,
+  });
+}
+
 function resolveCursorCliModel(model) {
-  const raw = String(model || "").trim();
-  return raw || DEFAULT_CURSOR_CLI_MODEL;
+  const encoded = encodeCursorCliModel(model);
+  return encoded || DEFAULT_CURSOR_CLI_MODEL;
 }
 
 /** Map Netcatty permission mode → Cursor CLI execution class. */
@@ -520,7 +531,6 @@ async function runCursorCliTurn({
     failed: false,
   };
 
-  const spawnFn = spawnImpl || spawn;
   let child = null;
   let settled = false;
 
@@ -529,7 +539,7 @@ async function runCursorCliTurn({
   };
 
   try {
-    child = spawnFn(cliPath, args, {
+    child = spawnCursorCliProcess(spawnImpl, cliPath, args, {
       cwd: effectiveCwd,
       env: childEnv,
       stdio: ["ignore", "pipe", "pipe"],
@@ -667,7 +677,6 @@ async function listCursorCliModels({
   if (abortSignal?.aborted) return { currentModelId: null, models: [] };
 
   const childEnv = stripCursorApiKeyFromEnv(env || process.env);
-  const spawnFn = spawnImpl || spawn;
 
   return await new Promise((resolve) => {
     let stdout = "";
@@ -690,7 +699,7 @@ async function listCursorCliModels({
 
     let child;
     try {
-      child = spawnFn(cliPath, ["models"], {
+      child = spawnCursorCliProcess(spawnImpl, cliPath, ["models"], {
         env: childEnv,
         stdio: ["ignore", "pipe", "pipe"],
         windowsHide: true,
@@ -771,8 +780,10 @@ module.exports = {
   resetMcpMergeRefcountsForTests,
   resolveCursorCliExecMode,
   resolveCursorCliModel,
+  resolveCursorCliSpawnSpec,
   resolveCursorCliWorkspaceCwd,
   runCursorCliTurn,
+  spawnCursorCliProcess,
   stripCursorApiKeyFromEnv,
   translateCursorCliEvent,
 };

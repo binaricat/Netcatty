@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import en from "./en.ts";
 import ru from "./ru.ts";
+import es from "./es.ts";
 import zhCN from "./zh-CN.ts";
 
 const osc7Keys = [
@@ -19,7 +20,7 @@ const osc7Keys = [
 ] as const;
 
 test("OSC 7 setup copy exists in every bundled locale", () => {
-  for (const [locale, messages] of Object.entries({ en, ru, zhCN })) {
+  for (const [locale, messages] of Object.entries({ en, ru, es, zhCN })) {
     for (const key of osc7Keys) {
       assert.equal(typeof messages[key], "string", `${locale} is missing ${key}`);
       assert.notEqual(messages[key], "", `${locale} has empty ${key}`);

@@ -2,8 +2,11 @@ import { createOpenAI } from '@ai-sdk/openai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createGoogle } from '@ai-sdk/google';
 import type { ProviderConfig, ProviderStyle } from '../types';
-import { resolveProviderStyle } from '../types';
+import { resolveOpenAIApi, resolveProviderStyle } from '../types';
 import { normalizeAnthropicSdkBaseURL } from '../anthropicCompatBaseUrl';
+import { normalizeOllamaSdkBaseURL } from '../ollamaCompatBaseUrl';
+
+export { normalizeOllamaSdkBaseURL };
 import {
   applyOpenAIChatContinuationToBody,
   extractProviderContinuationFromRawChunk,
@@ -15,6 +18,7 @@ import {
 
 export interface ProviderRequestContext {
   getOpenAIChatAssistantFields?: () => Array<OpenAIChatAssistantFields | undefined>;
+  streamIdleTimeoutMs?: number;
 }
 
 /**
@@ -39,6 +43,7 @@ interface BridgeAPI {
     headers: Record<string, string>,
     body: string,
     providerId?: string,
+    idleTimeoutMs?: number,
   ): Promise<{ ok: boolean; statusCode?: number; statusText?: string; error?: string; aborted?: boolean }>;
   onAiStreamData(requestId: string, cb: (data: string) => void): () => void;
   onAiStreamEnd(requestId: string, cb: () => void): () => void;
@@ -549,6 +554,7 @@ export function createBridgeFetchForSDK(
         headers,
         requestBody || '',
         providerId,
+        requestContext?.streamIdleTimeoutMs,
       );
 
       if (!result.ok) {
@@ -623,9 +629,10 @@ export function createBridgeFetchForSDK(
  *
  * The URL fallback fires regardless of style — the user picked this
  * providerId for a reason, even if they overrode the wire format. The
- * ollama `'ollama'` throwaway apiKey is style-specific: it's only meaningful
- * to the OpenAI-compat client, since Anthropic/Google clients need a real
- * key on their own URL.
+ * ollama `'ollama'` throwaway apiKey is only for unauthenticated local
+ * OpenAI-compat servers: Anthropic/Google need a real key, and Ollama
+ * Cloud must keep the IPC placeholder so the main process can inject
+ * the decrypted cloud key.
  */
 export function resolveProviderEndpoint(
   config: ProviderConfig,
@@ -635,8 +642,8 @@ export function resolveProviderEndpoint(
   let baseURL = config.baseURL;
   let apiKey = safeApiKey;
   if (config.providerId === 'ollama') {
-    baseURL = baseURL || 'http://localhost:11434/v1';
-    if (style === 'openai') {
+    baseURL = normalizeOllamaSdkBaseURL(baseURL || 'http://localhost:11434/v1');
+    if (style === 'openai' && !apiKey) {
       apiKey = 'ollama';
     }
   } else if (config.providerId === 'openrouter') {
@@ -664,13 +671,18 @@ export function createModelFromConfig(
   const { baseURL, apiKey } = resolveProviderEndpoint(config, style, safeApiKey);
 
   switch (style) {
-    case 'openai':
-      // Use .chat() to force Chat Completions API (not Responses API)
-      return createOpenAI({
+    case 'openai': {
+      const openai = createOpenAI({
         apiKey,
         baseURL,
         fetch: customFetch,
-      }).chat(modelId);
+      });
+      // Chat Completions stays the default so OpenAI-compatible proxies keep
+      // working. Responses is opt-in for relays that cache better on /v1/responses.
+      return resolveOpenAIApi(config) === 'responses'
+        ? openai.responses(modelId)
+        : openai.chat(modelId);
+    }
 
     case 'anthropic':
       return createAnthropic({

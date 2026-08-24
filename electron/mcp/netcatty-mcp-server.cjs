@@ -13,6 +13,7 @@ const { McpServer } = require("@modelcontextprotocol/sdk/server/mcp.js");
 const { StdioServerTransport } = require("@modelcontextprotocol/sdk/server/stdio.js");
 const { getCatalogToolDescription } = require("./catalogToolMetadata.cjs");
 const { registerMcpTools } = require("../capabilities/codegen/mcpToolRegistry.cjs");
+const { normalizeMcpJsonRpcMessage } = require("./normalizeMcpCallArguments.cjs");
 
 function catalogDescription(toolName, fallback) {
   return getCatalogToolDescription(toolName) || fallback;
@@ -255,6 +256,10 @@ async function main() {
   process.stderr.write("[netcatty-mcp] Authenticated with TCP bridge\n");
 
   const transport = new StdioServerTransport();
+  // Protocol.connect keeps this callback and runs it before request dispatch.
+  transport.onmessage = (message) => {
+    normalizeMcpJsonRpcMessage(message);
+  };
   await server.connect(transport);
 }
 

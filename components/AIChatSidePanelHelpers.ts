@@ -1,5 +1,12 @@
-import type { AgentModelPreset, ExternalAgentConfig } from '../infrastructure/ai/types';
+import {
+  resolveAgentModelSelection,
+  type AgentModelPreset,
+  type ExternalAgentConfig,
+} from '../infrastructure/ai/types';
 import { getExternalAgentSdkBackend } from '../infrastructure/ai/managedAgents';
+import { canonicalizeEffortEncodedModelId } from '../infrastructure/ai/composerPicker';
+
+export { canonicalizeEffortEncodedModelId };
 
 export type SdkRuntimeModelCatalog = {
   currentModelId: string | null;
@@ -175,15 +182,73 @@ export function createSdkRuntimeModelCache(options: SdkRuntimeModelCacheOptions 
 
 export const sdkRuntimeModelCache = createSdkRuntimeModelCache();
 
+export function mergeFallbackThinkingLevels(
+  runtime: AgentModelPreset[],
+  fallbacks: AgentModelPreset[],
+): AgentModelPreset[] {
+  if (runtime.length === 0 || fallbacks.length === 0) return runtime;
+  const byId = new Map(fallbacks.map((preset) => [preset.id, preset]));
+  let changed = false;
+  const next = runtime.map((preset) => {
+    if (preset.thinkingLevels?.length) return preset;
+    const fallback = byId.get(preset.id);
+    if (!fallback?.thinkingLevels?.length) return preset;
+    changed = true;
+    return {
+      ...preset,
+      thinkingLevels: [...fallback.thinkingLevels],
+      ...(fallback.defaultThinkingLevel
+        ? { defaultThinkingLevel: fallback.defaultThinkingLevel }
+        : {}),
+      ...(fallback.encodeDefaultThinking === false
+        ? { encodeDefaultThinking: false }
+        : {}),
+    };
+  });
+  return changed ? next : runtime;
+}
+
+export function agentModelPresetsShallowEqual(
+  left: AgentModelPreset[] | undefined,
+  right: AgentModelPreset[] | undefined,
+): boolean {
+  if (left === right) return true;
+  if (!left || !right || left.length !== right.length) return false;
+  return left.every((preset, index) => {
+    const other = right[index];
+    return (
+      preset.id === other.id
+      && preset.name === other.name
+      && preset.defaultThinkingLevel === other.defaultThinkingLevel
+      && (preset.thinkingLevels ?? []).join('\0') === (other.thinkingLevels ?? []).join('\0')
+    );
+  });
+}
+
 export function modelPresetMatchesId(preset: AgentModelPreset, modelId: string): boolean {
+  const canonical = canonicalizeEffortEncodedModelId(modelId);
   if (preset.thinkingLevels?.length) {
-    return preset.thinkingLevels.some((level) => `${preset.id}/${level}` === modelId);
+    return preset.id === canonical
+      || preset.thinkingLevels.some((level) => `${preset.id}/${level}` === canonical);
   }
-  return preset.id === modelId;
+  return preset.id === canonical;
 }
 
 export function modelPresetsContainId(presets: AgentModelPreset[], modelId: string): boolean {
   return presets.some((preset) => modelPresetMatchesId(preset, modelId));
+}
+
+export function normalizeStoredAgentModelSelection(
+  storedModelId: string | null | undefined,
+  presets: AgentModelPreset[],
+): string | undefined {
+  if (!storedModelId) return undefined;
+  const canonical = canonicalizeEffortEncodedModelId(storedModelId);
+  const preset = presets.find((candidate) => modelPresetMatchesId(candidate, canonical));
+  if (!preset) return undefined;
+  return canonical === preset.id
+    ? resolveAgentModelSelection(preset)
+    : canonical;
 }
 
 export function shouldLoadSdkRuntimeModels(agent?: ExternalAgentConfig): boolean {

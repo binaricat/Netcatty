@@ -6,6 +6,7 @@ const path = require("node:path");
 
 const {
   CURSOR_PLATFORM_PACKAGES,
+  beforePackCursorSdk,
   ensureCursorSdkPlatformPackages,
 } = require("./beforePackCursorSdk.cjs");
 const {
@@ -63,6 +64,63 @@ test("ensureCursorSdkPlatformPackages is a no-op when target packages exist", (t
 
   assert.deepEqual(installed, []);
   assert.deepEqual(calls, []);
+});
+
+test("beforePackCursorSdk builds Windows Hello helper only for Windows packages", () => {
+  const calls = [];
+
+  beforePackCursorSdk({
+    appDir: process.cwd(),
+    electronPlatformName: "win32",
+    arch: 3,
+    ensureCursorSdkPlatformPackages: () => [],
+    buildWindowsHelloHelper: (projectDir) => calls.push(projectDir),
+  });
+
+  assert.deepEqual(calls, [{ projectDir: process.cwd(), platform: "win32", arch: "arm64" }]);
+
+  beforePackCursorSdk({
+    appDir: process.cwd(),
+    electronPlatformName: "darwin",
+    ensureCursorSdkPlatformPackages: () => [],
+    buildWindowsHelloHelper: (projectDir) => calls.push(projectDir),
+  });
+
+  assert.deepEqual(calls, [{ projectDir: process.cwd(), platform: "win32", arch: "arm64" }]);
+});
+
+test("beforePackCursorSdk falls back to npm_config_arch for Windows Hello helper arch", () => {
+  const calls = [];
+  const originalArch = process.env.npm_config_arch;
+  process.env.npm_config_arch = "x64";
+  try {
+    beforePackCursorSdk({
+      appDir: process.cwd(),
+      electronPlatformName: "win32",
+      ensureCursorSdkPlatformPackages: () => [],
+      buildWindowsHelloHelper: (projectDir) => calls.push(projectDir),
+    });
+  } finally {
+    if (originalArch === undefined) {
+      delete process.env.npm_config_arch;
+    } else {
+      process.env.npm_config_arch = originalArch;
+    }
+  }
+
+  assert.deepEqual(calls, [{ projectDir: process.cwd(), platform: "win32", arch: "x64" }]);
+});
+
+test("beforePackCursorSdk fails Windows packaging when Windows Hello helper build is skipped", () => {
+  assert.throws(
+    () => beforePackCursorSdk({
+      appDir: process.cwd(),
+      electronPlatformName: "win32",
+      ensureCursorSdkPlatformPackages: () => [],
+      buildWindowsHelloHelper: () => ({ skipped: true, reason: "compiler-unavailable" }),
+    }),
+    /Windows Hello helper was not built: compiler-unavailable/,
+  );
 });
 
 test("Windows packaging rebuilds patched node-pty from source for the target architecture", () => {

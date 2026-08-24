@@ -1,8 +1,9 @@
 import { useMemo } from 'react';
-import { AppWindow, ArrowRight, ArrowUp, ClipboardCopy, Copy, Download, Edit2, ExternalLink, FilePlus, Folder, FolderInput, FolderPlus, Pencil, RefreshCw, Shield, Trash2, Upload } from 'lucide-react';
+import { AppWindow, Archive, ArrowRight, ArrowUp, ClipboardCopy, Copy, Download, Edit2, ExternalLink, FilePlus, Folder, FolderInput, FolderPlus, Pencil, RefreshCw, Shield, Trash2, Upload } from 'lucide-react';
 import { ContextMenuContent, ContextMenuItem, ContextMenuSeparator } from '../ui/context-menu';
 import { getParentPath } from '../../application/state/sftp/utils';
 import { isKnownBinaryFile } from '../../lib/sftpFileUtils';
+import { isExtractableArchive } from '../../domain/sftpArchive';
 import { isNavigableDirectory } from './utils';
 import { getSftpTreeUploadFilesTargetPath, getSftpUploadFilesLabelKey, getSftpUploadFolderLabelKey } from './sftpUploadMenu';
 
@@ -15,7 +16,7 @@ export function useSftpPaneTreeContextMenu(props: SftpPaneTreeContextMenuProps) 
     executeMoveAction, triggerUploadPicker, onUploadExternalFolder, uploadEnabled, folderUploadEnabled,
     setMoveTargetPaths, setMoveToPath, setMoveToError, setMoveToSuggestions, setMoveToSuggestionIndex,
     setIsMoving, setShowMoveToDialog, tRef, onCopyToOtherPaneRef, onNavigateToRef, onOpenFileWithSystemDefaultRef, onOpenFileWithRef,
-    onEditFileRef, onDownloadFileRef, onEditPermissionsRef, openDeleteConfirmRef, openRenameDialogRef,
+    onEditFileRef, onDownloadFileRef, onExtractArchiveRef, onEditPermissionsRef, openDeleteConfirmRef, openRenameDialogRef,
     openNewFolderDialogRef, openNewFileDialogRef,
   } = props;
 
@@ -80,6 +81,11 @@ export function useSftpPaneTreeContextMenu(props: SftpPaneTreeContextMenuProps) 
         {onDownloadFileRef.current && (!isDir || !isLocal) && (
           <ContextMenuItem onClick={() => onDownloadFileRef.current?.(entry, entryPath)}>
             <Download size={14} className="mr-2" />{tRef.current('sftp.context.download')}
+          </ContextMenuItem>
+        )}
+        {!isDir && onExtractArchiveRef.current && isExtractableArchive(entry.name) && (
+          <ContextMenuItem onClick={() => onExtractArchiveRef.current?.(entry, entryPath)}>
+            <Archive size={14} className="mr-2" />{tRef.current('sftp.context.extract')}
           </ContextMenuItem>
         )}
         <ContextMenuSeparator />
@@ -175,6 +181,7 @@ export function useSftpPaneTreeContextMenu(props: SftpPaneTreeContextMenuProps) 
     onUploadExternalFolder,
     onCopyToOtherPaneRef,
     onDownloadFileRef,
+    onExtractArchiveRef,
     onEditFileRef,
     onEditPermissionsRef,
     onNavigateToRef,

@@ -185,11 +185,14 @@ export const STORAGE_KEY_AI_EXTERNAL_AGENTS = 'netcatty_ai_external_agents_v1';
 export const STORAGE_KEY_AI_DEFAULT_AGENT = 'netcatty_ai_default_agent_v1';
 export const STORAGE_KEY_AI_COMMAND_BLOCKLIST = 'netcatty_ai_command_blocklist_v1';
 export const STORAGE_KEY_AI_COMMAND_TIMEOUT = 'netcatty_ai_command_timeout_v1';
+export const STORAGE_KEY_AI_RESPONSE_IDLE_TIMEOUT = 'netcatty_ai_response_idle_timeout_v1';
 export const STORAGE_KEY_AI_MAX_ITERATIONS = 'netcatty_ai_max_iterations_v1';
 export const STORAGE_KEY_AI_SESSIONS = 'netcatty_ai_sessions_v1';
 export const STORAGE_KEY_AI_ACTIVE_SESSION_MAP = 'netcatty_ai_active_session_map_v1';
 export const STORAGE_KEY_AI_AGENT_MODEL_MAP = 'netcatty_ai_agent_model_map_v1';
 export const STORAGE_KEY_AI_AGENT_PROVIDER_MAP = 'netcatty_ai_agent_provider_map_v1';
+export const STORAGE_KEY_AI_AGENT_THINKING_MAP = 'netcatty_ai_agent_thinking_map_v1';
+export const STORAGE_KEY_AI_COMPOSER_MODEL_PREFS = 'netcatty_ai_composer_model_prefs_v1';
 export const STORAGE_KEY_AI_WEB_SEARCH = 'netcatty_ai_web_search_v1';
 export const STORAGE_KEY_AI_QUICK_MESSAGES = 'netcatty_ai_quick_messages_v1';
 /** Confirm-mode permission grant memory (capability + session/command patterns). */

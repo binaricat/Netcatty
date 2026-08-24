@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import { JSDOM } from 'jsdom';
 
 import {
   normalizeTerminalSidePanelTabOrder,
@@ -11,8 +12,13 @@ import {
 import {
   getTerminalSidePanelShellWidth,
   listenForSidePanelPaneFocus,
+  resolveMagnifiedSidePanelHosts,
 } from './TerminalLayerSidePanelSection.tsx';
-import { resolveSidePanelPortalTarget } from './terminalLayerSidePanelSlots.tsx';
+import {
+  getFocusedPortalDescendant,
+  movePersistentPortalNode,
+  resolveSidePanelPortalTarget,
+} from './terminalLayerSidePanelSlots.tsx';
 
 test('AI side panel shell can be force-hidden for layout isolation', () => {
   assert.equal(getTerminalSidePanelShellWidth({
@@ -186,6 +192,61 @@ test('a visible tool without a ready pane host stays in the hidden parking host'
   assert.equal(resolveSidePanelPortalTarget(true, null, null), null);
 });
 
+test('magnifying a side pane moves only its stable portal host into the overlay', () => {
+  const scriptsHost = { id: 'scripts-host' };
+  const sftpHost = { id: 'sftp-host' };
+  const overlayHost = { id: 'overlay-host' };
+  const paneHosts = new Map([
+    ['scripts', scriptsHost],
+    ['sftp', sftpHost],
+  ]);
+
+  const resolved = resolveMagnifiedSidePanelHosts(
+    paneHosts,
+    { id: 'pane-scripts', type: 'pane', tool: 'scripts' },
+    overlayHost,
+  );
+
+  assert.equal(resolved.get('scripts'), overlayHost);
+  assert.equal(resolved.get('sftp'), sftpHost);
+  assert.equal(paneHosts.get('scripts'), scriptsHost);
+});
+
+test('moving a stable portal host restores focus to its active input', () => {
+  const dom = new JSDOM('<!doctype html><html><body><div id="first"></div><div id="second"></div></body></html>');
+  const previousDocument = globalThis.document;
+  const previousHTMLElement = globalThis.HTMLElement;
+  globalThis.document = dom.window.document;
+  globalThis.HTMLElement = dom.window.HTMLElement;
+  try {
+    const first = dom.window.document.getElementById('first') as HTMLElement;
+    const second = dom.window.document.getElementById('second') as HTMLElement;
+    const mountNode = dom.window.document.createElement('div');
+    const input = dom.window.document.createElement('input');
+    mountNode.appendChild(input);
+    first.appendChild(mountNode);
+    input.focus();
+
+    const focusToRestore = getFocusedPortalDescendant(mountNode, dom.window.document.activeElement);
+    mountNode.remove();
+    assert.notEqual(dom.window.document.activeElement, input);
+
+    movePersistentPortalNode(mountNode, second, focusToRestore);
+    assert.equal(dom.window.document.activeElement, input);
+  } finally {
+    globalThis.document = previousDocument;
+    globalThis.HTMLElement = previousHTMLElement;
+    dom.window.close();
+  }
+});
+
+test('the covered side-panel shell cannot receive keyboard focus', () => {
+  const source = readFileSync(new URL('./TerminalLayerSidePanelSection.tsx', import.meta.url), 'utf8');
+
+  assert.match(source, /const activeMagnifiedPane =/);
+  assert.match(source, /inert=\{activeMagnifiedPane \? true : undefined\}/);
+});
+
 test('split pane hosts strictly clip each tool and do not use the side panel root as a portal fallback', () => {
   const sectionSource = readFileSync(new URL('./TerminalLayerSidePanelSection.tsx', import.meta.url), 'utf8');
   const slotsSource = readFileSync(new URL('./terminalLayerSidePanelSlots.tsx', import.meta.url), 'utf8');
@@ -196,6 +257,8 @@ test('split pane hosts strictly clip each tool and do not use the side panel roo
   assert.match(slotsSource, /paneHosts\.get\(tool\)/);
   assert.match(slotsSource, /document\.createElement\('div'\)/);
   assert.match(slotsSource, /target\.appendChild\(mountNode\)/);
+  assert.match(slotsSource, /focusRestoreRef\.current/);
+  assert.match(slotsSource, /movePersistentPortalNode\(mountNode, target, focusedDescendant\)/);
   assert.match(slotsSource, /createPortal\(children, mountNode, portalKey\)/);
   assert.doesNotMatch(slotsSource, /document\.querySelector\([^)]*terminal-side-panel/);
 });

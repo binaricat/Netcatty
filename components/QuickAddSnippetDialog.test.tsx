@@ -29,6 +29,7 @@ test("quick add snippet form binds shortkeys and uses a centered Dialog modal", 
   assert.match(source, /from '\.\/ui\/dialog'/);
   assert.doesNotMatch(source, /AsidePanel/);
   assert.match(source, /snippets\.field\.shortkey/);
+  assert.match(source, /findActiveSystemShortcutConflict/);
   assert.match(source, /keyEventToString/);
   assert.match(source, /shortkey: shortkey \|\| undefined/);
   assert.match(source, /if \(e\.defaultPrevented\) return/);

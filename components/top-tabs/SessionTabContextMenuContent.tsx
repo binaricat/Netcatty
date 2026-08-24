@@ -14,6 +14,7 @@ interface SessionTabContextMenuContentProps {
   onDetachSession?: (sessionId: string) => void;
   onReconnectSession: (sessionId: string) => void;
   sessionStatus: TerminalSession['status'];
+  reconnectActive?: boolean;
   onRenameSession: (sessionId: string) => void;
   /** Vault host for this session; omit edit when missing (e.g. local shell). */
   editHost?: Host;
@@ -30,6 +31,7 @@ export function SessionTabContextMenuContent({
   onDetachSession,
   onReconnectSession,
   sessionStatus,
+  reconnectActive = false,
   onRenameSession,
   editHost,
   onEditHost,
@@ -39,7 +41,7 @@ export function SessionTabContextMenuContent({
   return (
     <ContextMenuContent>
       <ContextMenuItem
-        disabled={isSessionReconnectDisabled(sessionStatus)}
+        disabled={isSessionReconnectDisabled(sessionStatus, reconnectActive)}
         onClick={() => onReconnectSession(sessionId)}
       >
         {t('terminal.menu.reconnect')}
@@ -75,6 +77,9 @@ export function SessionTabContextMenuContent({
   );
 }
 
-export const isSessionReconnectDisabled = (status: TerminalSession['status']): boolean => (
-  status === 'connecting'
+export const isSessionReconnectDisabled = (
+  status: TerminalSession['status'],
+  reconnectActive = false,
+): boolean => (
+  status === 'connecting' || reconnectActive
 );

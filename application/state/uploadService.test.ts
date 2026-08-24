@@ -659,6 +659,39 @@ test("ENOENT from lstat still means absent destination for conflict check", asyn
   assert.equal(results[0].success, true);
 });
 
+test("Electron-wrapped lstat absence still means absent destination", async () => {
+  const file = new File(["new-bytes"], "tool.sh", { lastModified: 1234 });
+  Object.defineProperty(file, "path", { value: "/local/tool.sh" });
+  const uploadedPaths: string[] = [];
+
+  const results = await uploadFromFileList(
+    [file],
+    {
+      targetPath: "/usr/local/bin",
+      sftpId: "sftp-1",
+      isLocal: false,
+      bridge: {
+        mkdirSftp: async () => {},
+        lstatSftp: async () => {
+          throw new Error("Error invoking remote method 'netcatty:sftp:lstat': Error: No such file");
+        },
+        startStreamTransfer: async ({ targetPath: path }) => {
+          uploadedPaths.push(path);
+          return { transferId: "upload-1" };
+        },
+      },
+      joinPath: (base, name) => `${base}/${name}`,
+      resolveConflict: async () => {
+        throw new Error("absent destination must not prompt for conflict");
+      },
+    },
+  );
+
+  assert.deepEqual(uploadedPaths, ["/usr/local/bin/tool.sh"]);
+  assert.equal(results.length, 1);
+  assert.equal(results[0].success, true);
+});
+
 test("compressed-upload LSTAT ENOTSUP is not treated as an absent destination", async (t) => {
   let compressedStarts = 0;
   installCompressedUploadBridge(t, {

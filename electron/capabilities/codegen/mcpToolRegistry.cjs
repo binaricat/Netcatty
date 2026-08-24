@@ -45,6 +45,10 @@ function buildZodSchema(inputShape) {
   return z.object(buildZodShapeObject(inputShape));
 }
 
+function isEmptyMcpInputShape(inputShape) {
+  return Object.keys(inputShape || {}).length === 0;
+}
+
 function formatRpcError(result) {
   if (result?.error) return `Error: ${result.error}`;
   if (result?.code) return `Error: Operation failed (${result.code})`;
@@ -229,10 +233,15 @@ function registerMcpTools(server, deps) {
   const tools = listMcpTools();
   for (const toolDef of tools) {
     if (!toolDef.mcpTool || !toolDef.rpcMethod) continue;
-    const schemaShape = buildZodShapeObject(toolDef.inputShape);
     const handler = createToolHandler(toolDef, deps);
     const toolDescription = deps.catalogDescription(toolDef.mcpTool, toolDef.description);
-    server.tool(toolDef.mcpTool, toolDescription, schemaShape, handler);
+    // Empty Zod objects reject omitted `arguments`. MCP allows omitting them
+    // for no-arg tools; skip the schema so both omitted and {} are valid.
+    if (isEmptyMcpInputShape(toolDef.inputShape)) {
+      server.tool(toolDef.mcpTool, toolDescription, async () => handler({}));
+      continue;
+    }
+    server.tool(toolDef.mcpTool, toolDescription, buildZodShapeObject(toolDef.inputShape), handler);
   }
   return tools.length;
 }
@@ -240,6 +249,7 @@ function registerMcpTools(server, deps) {
 module.exports = {
   buildZodSchema,
   buildZodShapeObject,
+  isEmptyMcpInputShape,
   formatRpcError,
   formatTerminalExecuteResult,
   formatTerminalExecuteMcpResponse,

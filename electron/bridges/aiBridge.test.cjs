@@ -298,6 +298,31 @@ test("non-2xx streaming responses are bounded and actively terminated", async ()
   }
 });
 
+test("AI stream default total timeout is long enough for extended reasoning", () => {
+  const { bridge, restore } = loadBridgeWithMocks();
+  try {
+    assert.equal(bridge.DEFAULT_AI_STREAM_IDLE_TIMEOUT_MS, 120_000);
+    assert.equal(bridge.DEFAULT_AI_STREAM_TOTAL_TIMEOUT_MS, 30 * 60 * 1000);
+    assert.ok(bridge.DEFAULT_AI_STREAM_TOTAL_TIMEOUT_MS > bridge.DEFAULT_AI_STREAM_IDLE_TIMEOUT_MS);
+  } finally {
+    restore();
+  }
+});
+
+test("AI stream total timeout never undercuts the configured idle timeout", () => {
+  const { bridge, restore } = loadBridgeWithMocks();
+  try {
+    const timeouts = bridge._resolveAIStreamTimeoutsForTests({
+      idleTimeoutMs: 60 * 60 * 1000,
+      totalTimeoutMs: 30 * 60 * 1000,
+    });
+    assert.equal(timeouts.idleTimeoutMs, 60 * 60 * 1000);
+    assert.ok(timeouts.totalTimeoutMs > timeouts.idleTimeoutMs);
+  } finally {
+    restore();
+  }
+});
+
 test("streaming requests enforce a total deadline even while bytes keep arriving", async () => {
   let requestClosed = false;
   let resolveRequestClosed;
@@ -345,6 +370,231 @@ test("streaming requests enforce a total deadline even while bytes keep arriving
     restore();
     await new Promise((resolve) => server.close(resolve));
   }
+});
+
+test("streaming requests do not abort active thinking output at the idle deadline", async () => {
+  let requestClosed = false;
+  let resolveRequestClosed;
+  const requestClosedPromise = new Promise((resolve) => { resolveRequestClosed = resolve; });
+  const server = http.createServer((_request, response) => {
+    response.writeHead(200, { "content-type": "text/event-stream" });
+    let n = 0;
+    const interval = setInterval(() => {
+      n += 1;
+      response.write(`data:{"choices":[{"delta":{"reasoning_content":"${n}"}}]}\n`);
+      if (n >= 6) {
+        clearInterval(interval);
+        response.end("data:[DONE]\n\n");
+      }
+    }, 25);
+    response.on("close", () => {
+      clearInterval(interval);
+      requestClosed = true;
+      resolveRequestClosed();
+    });
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  const sentEvents = [];
+  const { bridge, restore } = loadBridgeWithMocks({
+    safeSend: (_sender, channel, payload) => {
+      sentEvents.push({ channel, payload });
+    },
+  });
+  bridge.init({
+    sessions: new Map(),
+    sftpClients: new Map(),
+    electronModule: { app: { getPath: () => process.cwd() }, session: {} },
+  });
+
+  try {
+    const result = await bridge._streamRequestForTests(
+      `http://127.0.0.1:${address.port}/thinking`,
+      {
+        method: "GET",
+        idleTimeoutMs: 80,
+        totalTimeoutMs: 2_000,
+      },
+      { sender: { id: 1 } },
+      "thinking",
+      false,
+    );
+    assert.equal(result.statusCode, 200);
+    await Promise.race([
+      new Promise((resolve, reject) => {
+        const started = Date.now();
+        const poll = () => {
+          if (sentEvents.some(({ channel }) => channel === "netcatty:ai:stream:end")) {
+            resolve();
+            return;
+          }
+          const errorEvent = sentEvents.find(({ channel }) => channel === "netcatty:ai:stream:error");
+          if (errorEvent) {
+            reject(new Error(errorEvent.payload.error));
+            return;
+          }
+          if (Date.now() - started > 1_500) {
+            reject(new Error("thinking stream never finished"));
+            return;
+          }
+          setTimeout(poll, 10);
+        };
+        poll();
+      }),
+    ]);
+    await Promise.race([
+      requestClosedPromise,
+      new Promise((_, reject) => setTimeout(() => reject(new Error("server request stayed open")), 500)),
+    ]);
+    assert.equal(requestClosed, true);
+    assert.equal(bridge._getActiveStreamCountForTests(), 0);
+    assert.equal(
+      sentEvents.some(({ channel }) => channel === "netcatty:ai:stream:error"),
+      false,
+    );
+  } finally {
+    restore();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("streaming requests abort after the idle deadline when no more bytes arrive", async () => {
+  let requestClosed = false;
+  let resolveRequestClosed;
+  const requestClosedPromise = new Promise((resolve) => { resolveRequestClosed = resolve; });
+  const server = http.createServer((_request, response) => {
+    response.writeHead(200, { "content-type": "text/event-stream" });
+    response.write('data:{"choices":[{"delta":{"reasoning_content":"start"}}]}\n');
+    response.on("close", () => {
+      requestClosed = true;
+      resolveRequestClosed();
+    });
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  const sentEvents = [];
+  const { bridge, restore } = loadBridgeWithMocks({
+    safeSend: (_sender, channel, payload) => {
+      sentEvents.push({ channel, payload });
+    },
+  });
+  bridge.init({
+    sessions: new Map(),
+    sftpClients: new Map(),
+    electronModule: { app: { getPath: () => process.cwd() }, session: {} },
+  });
+
+  try {
+    const result = await bridge._streamRequestForTests(
+      `http://127.0.0.1:${address.port}/stalled`,
+      {
+        method: "GET",
+        idleTimeoutMs: 40,
+        totalTimeoutMs: 2_000,
+      },
+      { sender: { id: 1 } },
+      "stalled",
+      false,
+    );
+    assert.equal(result.statusCode, 200);
+    await Promise.race([
+      new Promise((resolve, reject) => {
+        const started = Date.now();
+        const poll = () => {
+          const errorEvent = sentEvents.find(({ channel }) => channel === "netcatty:ai:stream:error");
+          if (errorEvent) {
+            resolve(errorEvent.payload.error);
+            return;
+          }
+          if (Date.now() - started > 1_000) {
+            reject(new Error("stalled stream was not aborted"));
+            return;
+          }
+          setTimeout(poll, 10);
+        };
+        poll();
+      }).then((error) => {
+        assert.match(error, /idle deadline exceeded/i);
+      }),
+    ]);
+    await Promise.race([
+      requestClosedPromise,
+      new Promise((_, reject) => setTimeout(() => reject(new Error("server request stayed open")), 500)),
+    ]);
+    assert.equal(requestClosed, true);
+    assert.equal(bridge._getActiveStreamCountForTests(), 0);
+  } finally {
+    restore();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("streaming chat handler forwards the configured idle deadline", { timeout: 5_000 }, async (t) => {
+  const sentEvents = [];
+  const server = http.createServer((request, response) => {
+    request.resume();
+    request.on("end", () => {
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      response.write('data:{"choices":[{"delta":{"content":"start"}}]}\n\n');
+    });
+  });
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+
+  const { bridge, restore } = loadBridgeWithMocks({
+    safeSend: (_sender, channel, payload) => sentEvents.push({ channel, payload }),
+  });
+  t.after(restore);
+  const ipcMain = createIpcMainStub();
+  bridge.init({
+    sessions: new Map(),
+    sftpClients: new Map(),
+    electronModule: { app: { getPath: () => process.cwd() }, session: {} },
+  });
+  bridge.registerHandlers(ipcMain);
+
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const baseURL = `http://127.0.0.1:${address.port}`;
+  const sender = { id: 1 };
+  await ipcMain.handlers.get("netcatty:ai:sync-providers")(
+    { sender },
+    { providers: [{ id: "custom-idle", baseURL }] },
+  );
+
+  const result = await ipcMain.handlers.get("netcatty:ai:chat:stream")(
+    { sender },
+    {
+      requestId: "custom-idle-request",
+      url: `${baseURL}/v1/chat/completions`,
+      headers: { "content-type": "application/json" },
+      body: '{"stream":true}',
+      providerId: "custom-idle",
+      idleTimeoutMs: 40,
+    },
+  );
+  assert.equal(result.ok, true);
+
+  const error = await new Promise((resolve, reject) => {
+    const started = Date.now();
+    const poll = () => {
+      const event = sentEvents.find(({ channel }) => channel === "netcatty:ai:stream:error");
+      if (event) {
+        resolve(event.payload.error);
+        return;
+      }
+      if (Date.now() - started > 1_000) {
+        reject(new Error("configured stream idle deadline was not forwarded"));
+        return;
+      }
+      setTimeout(poll, 10);
+    };
+    poll();
+  });
+  assert.match(error, /idle deadline exceeded|request timeout/i);
 });
 
 test("mcp attachment update handler forwards current chat attachments", async () => {
@@ -476,6 +726,148 @@ test("streaming AI responses preserve UTF-8 characters split across network chun
     assert.equal(result.ok, true);
     const dataEvent = sentEvents.find(({ channel }) => channel === "netcatty:ai:stream:data");
     assert.equal(dataEvent?.payload.data, '{"choices":[{"delta":{"content":"环境正常"}}]}');
+  } finally {
+    restore();
+  }
+});
+
+test("streaming AI responses accept SSE data: lines without a space after the colon", { timeout: 5_000 }, async (t) => {
+  const sentEvents = [];
+  let handleStreamEvent = () => {};
+  const { bridge, restore } = loadBridgeWithMocks({
+    safeSend: (_sender, channel, payload) => {
+      sentEvents.push({ channel, payload });
+      handleStreamEvent(channel, payload);
+    },
+  });
+  const ipcMain = createIpcMainStub();
+  const server = require("node:http").createServer((req, res) => {
+    req.resume();
+    req.on("end", () => {
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      // Older AxonHub 0.9 emits `data:{json}` with no space (issue #3020).
+      res.end('data:{"choices":[{"delta":{"content":"hello"}}]}\ndata:[DONE]\n\n');
+    });
+  });
+
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+
+  bridge.init({
+    sessions: new Map(),
+    sftpClients: new Map(),
+    electronModule: { app: { getPath: () => process.cwd() } },
+  });
+  bridge.registerHandlers(ipcMain);
+
+  try {
+    const address = server.address();
+    assert.ok(address && typeof address === "object");
+    const baseURL = `http://127.0.0.1:${address.port}`;
+    const sender = { id: 1 };
+    await ipcMain.handlers.get("netcatty:ai:sync-providers")(
+      { sender },
+      { providers: [{ id: "axonhub-legacy", baseURL }] },
+    );
+
+    const streamFinished = new Promise((resolve, reject) => {
+      handleStreamEvent = (channel, payload) => {
+        if (channel === "netcatty:ai:stream:end") resolve();
+        else if (channel === "netcatty:ai:stream:error") reject(new Error(payload.error));
+      };
+    });
+
+    const result = await ipcMain.handlers.get("netcatty:ai:chat:stream")(
+      { sender },
+      {
+        requestId: "axonhub-legacy-request",
+        url: `${baseURL}/v1/chat/completions`,
+        headers: { "content-type": "application/json" },
+        body: '{"stream":true}',
+        providerId: "axonhub-legacy",
+      },
+    );
+    await streamFinished;
+
+    assert.equal(result.ok, true);
+    const dataEvents = sentEvents
+      .filter(({ channel }) => channel === "netcatty:ai:stream:data")
+      .map(({ payload }) => payload.data);
+    assert.deepEqual(dataEvents, [
+      '{"choices":[{"delta":{"content":"hello"}}]}',
+      "[DONE]",
+    ]);
+  } finally {
+    restore();
+  }
+});
+
+test("streaming AI responses flush a trailing data: line that has no space and no newline", { timeout: 5_000 }, async (t) => {
+  const sentEvents = [];
+  let handleStreamEvent = () => {};
+  const { bridge, restore } = loadBridgeWithMocks({
+    safeSend: (_sender, channel, payload) => {
+      sentEvents.push({ channel, payload });
+      handleStreamEvent(channel, payload);
+    },
+  });
+  const ipcMain = createIpcMainStub();
+  const server = require("node:http").createServer((req, res) => {
+    req.resume();
+    req.on("end", () => {
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      res.end('data:{"choices":[{"delta":{"content":"tail"}}]}');
+    });
+  });
+
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+
+  bridge.init({
+    sessions: new Map(),
+    sftpClients: new Map(),
+    electronModule: { app: { getPath: () => process.cwd() } },
+  });
+  bridge.registerHandlers(ipcMain);
+
+  try {
+    const address = server.address();
+    assert.ok(address && typeof address === "object");
+    const baseURL = `http://127.0.0.1:${address.port}`;
+    const sender = { id: 1 };
+    await ipcMain.handlers.get("netcatty:ai:sync-providers")(
+      { sender },
+      { providers: [{ id: "flush-no-space", baseURL }] },
+    );
+
+    const streamFinished = new Promise((resolve, reject) => {
+      handleStreamEvent = (channel, payload) => {
+        if (channel === "netcatty:ai:stream:end") resolve();
+        else if (channel === "netcatty:ai:stream:error") reject(new Error(payload.error));
+      };
+    });
+
+    const result = await ipcMain.handlers.get("netcatty:ai:chat:stream")(
+      { sender },
+      {
+        requestId: "flush-no-space-request",
+        url: `${baseURL}/v1/chat/completions`,
+        headers: { "content-type": "application/json" },
+        body: '{"stream":true}',
+        providerId: "flush-no-space",
+      },
+    );
+    await streamFinished;
+
+    assert.equal(result.ok, true);
+    const dataEvent = sentEvents.find(({ channel }) => channel === "netcatty:ai:stream:data");
+    assert.equal(dataEvent?.payload.data, '{"choices":[{"delta":{"content":"tail"}}]}');
   } finally {
     restore();
   }
@@ -1060,5 +1452,170 @@ test("discover can refresh shell env before scanning Cursor", async () => {
     assert.equal(cursor?.available, true);
   } finally {
     restore();
+  }
+});
+
+/** Boot the bridge with a local HTTP server and capture the request it receives. */
+async function withCapturingServer(t, options, respond) {
+  const received = {};
+  let handleStreamEvent = () => {};
+  const { bridge, restore } = loadBridgeWithMocks({
+    safeSend: (_sender, channel, payload) => handleStreamEvent(channel, payload),
+    ...options,
+  });
+  const ipcMain = createIpcMainStub();
+  const server = http.createServer((req, res) => {
+    const chunks = [];
+    req.on("data", (chunk) => chunks.push(chunk));
+    req.on("end", () => {
+      received.headers = req.headers;
+      received.body = Buffer.concat(chunks);
+      respond(res);
+    });
+  });
+
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+
+  bridge.init({
+    sessions: new Map(),
+    sftpClients: new Map(),
+    electronModule: { app: { getPath: () => process.cwd() } },
+  });
+  bridge.registerHandlers(ipcMain);
+
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const baseURL = `http://127.0.0.1:${address.port}`;
+  const sender = { id: 1 };
+  await ipcMain.handlers.get("netcatty:ai:sync-providers")(
+    { sender },
+    { providers: [{ id: "content-length", baseURL }] },
+  );
+
+  return {
+    received,
+    baseURL,
+    sender,
+    ipcMain,
+    restore,
+    onStreamEvent: (fn) => {
+      handleStreamEvent = fn;
+    },
+  };
+}
+
+test("streaming AI requests send Content-Length instead of chunked encoding", { timeout: 5_000 }, async (t) => {
+  const ctx = await withCapturingServer(t, {}, (res) => {
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.end('data: {"choices":[{"delta":{"content":"ok"}}]}\n\n');
+  });
+
+  try {
+    const body = JSON.stringify({
+      stream: true,
+      messages: [{ role: "user", content: "hi" }],
+    });
+
+    const streamFinished = new Promise((resolve, reject) => {
+      ctx.onStreamEvent((channel, payload) => {
+        if (channel === "netcatty:ai:stream:end") resolve();
+        else if (channel === "netcatty:ai:stream:error") reject(new Error(payload.error));
+      });
+    });
+
+    const result = await ctx.ipcMain.handlers.get("netcatty:ai:chat:stream")(
+      { sender: ctx.sender },
+      {
+        requestId: "content-length-stream",
+        url: `${ctx.baseURL}/v1/messages`,
+        headers: { "content-type": "application/json" },
+        body,
+        providerId: "content-length",
+      },
+    );
+    await streamFinished;
+
+    assert.equal(result.ok, true);
+    assert.equal(ctx.received.headers["content-length"], String(Buffer.byteLength(body)));
+    assert.equal(ctx.received.headers["transfer-encoding"], undefined);
+    assert.equal(ctx.received.body.toString("utf8"), body);
+  } finally {
+    ctx.restore();
+  }
+});
+
+test("Content-Length for AI request bodies counts bytes, not UTF-16 code units", { timeout: 5_000 }, async (t) => {
+  const ctx = await withCapturingServer(t, {}, (res) => {
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.end('data: {"choices":[{"delta":{"content":"ok"}}]}\n\n');
+  });
+
+  try {
+    // A realistic system prompt: multi-byte characters make the UTF-16 length
+    // shorter than the UTF-8 byte length, so `body.length` would truncate.
+    const body = JSON.stringify({
+      stream: true,
+      system: "你是 Catty Agent，一个内置于 netcatty 的终端自动化助手。请检查磁盘使用率。",
+      messages: [{ role: "user", content: "检查系统状态" }],
+    });
+    assert.notEqual(body.length, Buffer.byteLength(body));
+
+    const streamFinished = new Promise((resolve, reject) => {
+      ctx.onStreamEvent((channel, payload) => {
+        if (channel === "netcatty:ai:stream:end") resolve();
+        else if (channel === "netcatty:ai:stream:error") reject(new Error(payload.error));
+      });
+    });
+
+    const result = await ctx.ipcMain.handlers.get("netcatty:ai:chat:stream")(
+      { sender: ctx.sender },
+      {
+        requestId: "content-length-multibyte",
+        url: `${ctx.baseURL}/v1/messages`,
+        headers: { "content-type": "application/json" },
+        body,
+        providerId: "content-length",
+      },
+    );
+    await streamFinished;
+
+    assert.equal(result.ok, true);
+    assert.equal(ctx.received.headers["content-length"], String(Buffer.byteLength(body)));
+    assert.equal(ctx.received.body.toString("utf8"), body);
+  } finally {
+    ctx.restore();
+  }
+});
+
+test("non-streaming AI requests send Content-Length instead of chunked encoding", { timeout: 5_000 }, async (t) => {
+  const ctx = await withCapturingServer(t, {}, (res) => {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end('{"data":[]}');
+  });
+
+  try {
+    const body = JSON.stringify({ model: "test-model", input: "hi" });
+
+    const result = await ctx.ipcMain.handlers.get("netcatty:ai:fetch")(
+      { sender: ctx.sender },
+      {
+        url: `${ctx.baseURL}/v1/messages`,
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body,
+        providerId: "content-length",
+      },
+    );
+
+    assert.equal(result.ok, true);
+    assert.equal(ctx.received.headers["content-length"], String(Buffer.byteLength(body)));
+    assert.equal(ctx.received.headers["transfer-encoding"], undefined);
+    assert.equal(ctx.received.body.toString("utf8"), body);
+  } finally {
+    ctx.restore();
   }
 });

@@ -1,7 +1,29 @@
 export type WindowCommandCloseIntent =
+  | { kind: 'forwardShortcut' }
+  | { kind: 'closeDialog' }
   | { kind: 'closeTab' }
   | { kind: 'closeLogView'; tabId: string }
   | { kind: 'closeWindow' };
+
+type KeyBindingMatcher = (event: KeyboardEvent, binding: string, isMac: boolean) => boolean;
+
+export function isPrimaryModifierWBinding(
+  binding: string | null,
+  matcher: KeyBindingMatcher,
+  isMac: boolean,
+): boolean {
+  return Boolean(
+    binding
+    && matcher({
+      key: 'w',
+      code: 'KeyW',
+      metaKey: isMac,
+      ctrlKey: !isMac,
+      altKey: false,
+      shiftKey: false,
+    } as KeyboardEvent, binding, isMac),
+  );
+}
 
 interface ResolveWindowCommandCloseIntentInput {
   activeTabId: string | null;
@@ -10,6 +32,8 @@ interface ResolveWindowCommandCloseIntentInput {
   workspaceIds: string[];
   logViewIds: string[];
   pluginViewTabIds?: string[];
+  closeTabShortcutEnabled?: boolean;
+  hasOpenDialog?: boolean;
 }
 
 export function resolveWindowCommandCloseIntent({
@@ -19,7 +43,17 @@ export function resolveWindowCommandCloseIntent({
   workspaceIds,
   logViewIds,
   pluginViewTabIds = [],
+  closeTabShortcutEnabled = true,
+  hasOpenDialog = false,
 }: ResolveWindowCommandCloseIntentInput): WindowCommandCloseIntent {
+  if (!closeTabShortcutEnabled) {
+    return { kind: 'forwardShortcut' };
+  }
+
+  if (hasOpenDialog) {
+    return { kind: 'closeDialog' };
+  }
+
   if (!activeTabId) {
     return { kind: 'closeWindow' };
   }

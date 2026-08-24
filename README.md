@@ -35,7 +35,7 @@
 </p>
 
 <p align="center">
-  <a href="./README.md">English</a> · <a href="./README.zh-CN.md">简体中文</a> · <a href="./README.ja-JP.md">日本語</a>
+  <a href="./README.md">English</a> · <a href="./README.zh-CN.md">简体中文</a> · <a href="./README.zh-TW.md">繁體中文</a> · <a href="./README.ja-JP.md">日本語</a>
 </p>
 
 ---
@@ -296,7 +296,7 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
 
-See [agents.md](agents.md) for architecture overview and coding conventions.
+See [AGENTS.md](AGENTS.md) for architecture overview and coding conventions.
 
 ---
 

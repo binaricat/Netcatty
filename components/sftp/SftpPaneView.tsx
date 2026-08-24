@@ -19,7 +19,7 @@ import {
   useSftpWritableHosts,
 } from "./SftpContext";
 import type { SftpPane } from "../../application/state/sftp/types";
-import { joinPath } from "../../application/state/sftp/utils";
+import { joinPath, getParentPath } from "../../application/state/sftp/utils";
 import type { Host } from "../../domain/models";
 import { useSftpPaneDialogs } from "./hooks/useSftpPaneDialogs";
 import { useSftpPaneDragAndSelect } from "./hooks/useSftpPaneDragAndSelect";
@@ -328,6 +328,14 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
     }
   }, [callbacks, pane.connection?.currentPath, requestTreeReload]);
 
+  const handleExtractArchive = useCallback((entry: Parameters<NonNullable<typeof callbacks.onExtractArchive>>[0], fullPath?: string) => {
+    const archivePath = fullPath ?? joinPath(pane.connection?.currentPath ?? "", entry.name);
+    void Promise.resolve(callbacks.onExtractArchive?.(entry, fullPath)).then(() => {
+      const parentPath = getParentPath(archivePath);
+      if (parentPath) requestNestedTreeReload([parentPath]);
+    });
+  }, [callbacks, pane.connection?.currentPath, requestNestedTreeReload]);
+
   const handleMoveEntriesToPath = useCallback(async (sourcePaths: string[], targetPath: string) => {
     await callbacks.onMoveEntriesToPath(sourcePaths, targetPath);
   }, [callbacks]);
@@ -602,6 +610,7 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
             onOpenFileWith={callbacks.onOpenFileWith}
             onEditFile={callbacks.onEditFile}
             onDownloadFile={callbacks.onDownloadFile}
+            onExtractArchive={callbacks.onExtractArchive ? handleExtractArchive : undefined}
             onEditPermissions={callbacks.onEditPermissions}
             draggedFiles={draggedFiles}
             openNewFolderDialog={openNewFolderDialogAtPath}
@@ -653,6 +662,7 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
           onEditFile={callbacks.onEditFile}
           onDownloadFile={callbacks.onDownloadFile}
           onDownloadFiles={callbacks.onDownloadFiles}
+          onExtractArchive={callbacks.onExtractArchive ? handleExtractArchive : undefined}
           onEditPermissions={callbacks.onEditPermissions}
           onUploadExternalFileList={handleUploadExternalFileList}
           onUploadExternalFolder={handleUploadExternalFolder}

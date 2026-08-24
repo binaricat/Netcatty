@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { PROVIDER_PRESETS, resolveProviderStyle } from "./types";
+import { PROVIDER_PRESETS, resolveOpenAIApi, resolveProviderStyle } from "./types";
 
 test("resolveProviderStyle prefers an explicit style override", () => {
   assert.equal(resolveProviderStyle({ providerId: "custom", style: "anthropic" }), "anthropic");
@@ -20,6 +20,13 @@ test("resolveProviderStyle treats every other providerId as the OpenAI-compatibl
   for (const providerId of ["openai", "ollama", "openrouter", "qwen", "deepseek", "kimi", "zhipu", "doubao", "mimo", "custom"] as const) {
     assert.equal(resolveProviderStyle({ providerId }), "openai", `expected openai for ${providerId}`);
   }
+});
+
+test("resolveOpenAIApi defaults missing and unknown values to Chat Completions", () => {
+  assert.equal(resolveOpenAIApi({}), "chat");
+  assert.equal(resolveOpenAIApi({ openaiApi: "chat" }), "chat");
+  assert.equal(resolveOpenAIApi({ openaiApi: "responses" }), "responses");
+  assert.equal(resolveOpenAIApi({ openaiApi: "weird" as "chat" }), "chat");
 });
 
 test("domestic provider presets include editable OpenAI-compatible base URLs", () => {

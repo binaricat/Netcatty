@@ -54,6 +54,7 @@ export interface TurnUiCallbacks {
 export interface CattyTurnContext {
   activeProvider: ProviderConfig | undefined;
   activeModelId: string;
+  reasoningEffort?: string;
   scopeType: 'terminal' | 'workspace';
   scopeTargetId?: string;
   scopeLabel?: string;
@@ -61,6 +62,7 @@ export interface CattyTurnContext {
   permissionMode?: AIPermissionMode;
   commandBlocklist?: string[];
   commandTimeout?: number;
+  responseIdleTimeout?: number;
   terminalSessions: TerminalSessionInfo[];
   webSearchConfig?: WebSearchConfig | null;
   getExecutorContext?: () => ExecutorContext;

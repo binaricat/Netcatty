@@ -141,6 +141,11 @@ const SftpFileRowInner: React.FC<SftpFileRowProps> = ({
                     {isSymlinkToDirectory ? 'link → folder' : entry.type === 'directory' ? 'folder' : entry.type === 'symlink' ? 'link' : entry.name.split('.').pop()?.toLowerCase() || 'file'}
                 </span>
             )}
+            {visibleColumns.owner && (
+                <span className={cn("text-xs truncate text-right", isSelectionVisible ? "text-accent-foreground/85" : "text-muted-foreground")}>
+                    {isParentDir ? '' : (entry.owner || '--')}
+                </span>
+            )}
         </div>
     );
 };
@@ -155,9 +160,11 @@ const areEqual = (prev: SftpFileRowProps, next: SftpFileRowProps): boolean => {
     if (prev.columnWidths.modified !== next.columnWidths.modified) return false;
     if (prev.columnWidths.size !== next.columnWidths.size) return false;
     if (prev.columnWidths.type !== next.columnWidths.type) return false;
+    if (prev.columnWidths.owner !== next.columnWidths.owner) return false;
     if (prev.visibleColumns.modified !== next.visibleColumns.modified) return false;
     if (prev.visibleColumns.size !== next.visibleColumns.size) return false;
     if (prev.visibleColumns.type !== next.visibleColumns.type) return false;
+    if (prev.visibleColumns.owner !== next.visibleColumns.owner) return false;
     // Compare callbacks - important for ".." entry which has static properties
     if (prev.onOpen !== next.onOpen) return false;
     if (prev.onSelect !== next.onSelect) return false;
@@ -170,7 +177,8 @@ const areEqual = (prev: SftpFileRowProps, next: SftpFileRowProps): boolean => {
         prevEntry.lastModified === nextEntry.lastModified &&
         prevEntry.linkTarget === nextEntry.linkTarget &&
         prevEntry.sizeFormatted === nextEntry.sizeFormatted &&
-        prevEntry.lastModifiedFormatted === nextEntry.lastModifiedFormatted
+        prevEntry.lastModifiedFormatted === nextEntry.lastModifiedFormatted &&
+        prevEntry.owner === nextEntry.owner
     );
 };
 

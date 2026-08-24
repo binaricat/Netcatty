@@ -153,6 +153,8 @@ interface SettingsAITabProps {
   setCommandBlocklist: (value: string[]) => void;
   commandTimeout: number;
   setCommandTimeout: (value: number) => void;
+  responseIdleTimeout: number;
+  setResponseIdleTimeout: (value: number) => void;
   maxIterations: number;
   setMaxIterations: (value: number) => void;
   webSearchConfig: WebSearchConfig | null;
@@ -188,6 +190,8 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
   setCommandBlocklist,
   commandTimeout,
   setCommandTimeout,
+  responseIdleTimeout,
+  setResponseIdleTimeout,
   maxIterations,
   setMaxIterations,
   webSearchConfig,
@@ -1372,6 +1376,8 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
             setCommandBlocklist={setCommandBlocklist}
             commandTimeout={commandTimeout}
             setCommandTimeout={setCommandTimeout}
+            responseIdleTimeout={responseIdleTimeout}
+            setResponseIdleTimeout={setResponseIdleTimeout}
             maxIterations={maxIterations}
             setMaxIterations={setMaxIterations}
           />

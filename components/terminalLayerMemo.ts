@@ -77,6 +77,7 @@ export const terminalLayerAreEqual = (
   prev.updateSnippetPackages === next.updateSnippetPackages &&
   prev.toggleScriptsSidePanelRef === next.toggleScriptsSidePanelRef &&
   prev.toggleSidePanelRef === next.toggleSidePanelRef &&
+  prev.paneMagnificationRef === next.paneMagnificationRef &&
   prev.identities === next.identities
   // shellHistory intentionally omitted — History panel reads shellHistoryStore.
 );

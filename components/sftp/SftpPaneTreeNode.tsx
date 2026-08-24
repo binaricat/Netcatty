@@ -121,6 +121,11 @@ export const TreeNode = React.memo<TreeNodeProps>(({
           {isParentEntry ? '' : (isDir ? t('sftp.kind.folder') : (entry.name.split('.').pop()?.toUpperCase() ?? '--'))}
         </span>
       )}
+      {visibleColumns.owner && (
+        <span className="min-w-0 text-right text-muted-foreground text-xs truncate">
+          {isParentEntry ? '' : (entry.owner || '--')}
+        </span>
+      )}
     </div>
   );
 });

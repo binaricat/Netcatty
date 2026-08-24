@@ -260,7 +260,10 @@ export const useVaultItemReorder = ({
     if (disabled) return;
     const target = (event.target as Element | null)?.closest(selector);
     clearVaultDropIndicator();
-    if (!(target instanceof HTMLElement)) return;
+    if (!(target instanceof HTMLElement)) {
+      reset();
+      return;
+    }
 
     const sourceId = draggingIdRef.current || event.dataTransfer.getData(dragType);
     const targetId = target.getAttribute(targetAttribute);
@@ -300,6 +303,7 @@ export const useVaultItemReorder = ({
     dragType,
     onReorder,
     prepareGridLayoutAnimation,
+    reset,
     selector,
     targetAttribute,
     viewMode,
@@ -317,8 +321,19 @@ export const useVaultItemReorder = ({
       event.dataTransfer.setData(dragType, id);
       draggingIdRef.current = id;
       setDraggingId(id);
+
+      // The live grid preview can re-parent the dragged node (virtualised rows,
+      // section changes), and React then unmounts it. dragend still fires on the
+      // detached node but no longer reaches handleDragEndCapture on the
+      // container, so bind the cleanup natively on the source node itself.
+      const sourceNode = event.currentTarget as HTMLElement;
+      const handleNativeDragEnd = () => {
+        sourceNode.removeEventListener("dragend", handleNativeDragEnd);
+        reset();
+      };
+      sourceNode.addEventListener("dragend", handleNativeDragEnd);
     },
-  }), [disabled, dragType, draggingId, targetAttribute, viewMode]);
+  }), [disabled, dragType, draggingId, reset, targetAttribute, viewMode]);
 
   return {
     handleDragOverCapture,

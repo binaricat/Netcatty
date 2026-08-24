@@ -51,6 +51,10 @@ import {
   hasUsableProxyConfig,
   resolveProxyConfigAuth,
 } from "../../../domain/proxyProfiles";
+import {
+  advanceMonotonicConnectionProgress,
+  resolveHopConnectionProgress,
+} from "../connectionProgress";
 import { hasConnectionPassedTcpDial } from "../connectionTimeouts";
 import { resolveHostSshConnectionTimeouts } from "../../../domain/sshConnectionTimeouts";
 import { isPluginHostProtocol, sanitizePluginConnection } from "../../../domain/pluginConnection";
@@ -540,8 +544,8 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         }
 
         ctx.setProgressLogs((prev) => [...prev, logLine]);
-        const hopProgress = (hop / total) * 80 + 10;
-        ctx.setProgressValue(Math.min(95, hopProgress));
+        const hopProgress = resolveHopConnectionProgress(hop, total);
+        ctx.setProgressValue((prev) => advanceMonotonicConnectionProgress(prev, hopProgress));
       });
       if (unsub) unsubscribeChainProgress = unsub;
     }

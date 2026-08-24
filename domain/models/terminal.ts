@@ -41,6 +41,15 @@ export type PasswordPromptAssistMode = 'off' | 'hint' | 'picker';
  * - global: commands recorded across all hosts
  */
 export type AutocompleteHistoryScope = 'host' | 'global';
+/**
+ * When remote programs emit OSC 9 / 777 / 99 desktop-notification sequences.
+ * - off: ignore
+ * - unfocused: notify only when this session is not the focused pane or the window is in the background
+ * - always: honor every notification (default; matches iTerm2 / Ghostty / Codex osc9)
+ */
+export type OscNotificationMode = 'off' | 'unfocused' | 'always';
+/** How an established terminal session reports a later disconnect. */
+export type DisconnectedNoticeMode = 'terminal' | 'dialog';
 
 export const DEFAULT_TERMINAL_WORD_SEPARATORS = ' ()[]{}\'"';
 
@@ -111,6 +120,7 @@ export interface TerminalSettings {
   wordSeparators: string; // Characters for word selection
   linkModifier: LinkModifier; // Modifier key to click links
   autoCloseOnExit: boolean; // Automatically close terminal UI after eligible session exits
+  disconnectedNoticeMode: DisconnectedNoticeMode; // Non-blocking terminal line or legacy dialog after disconnect
 
   // Keyword Highlighting
   keywordHighlightEnabled: boolean;
@@ -173,6 +183,9 @@ export interface TerminalSettings {
 
   // Clipboard
   osc52Clipboard: 'off' | 'write-only' | 'read-write' | 'prompt'; // OSC-52 clipboard access: off, write-only (default), read-write, or prompt on read
+
+  // Desktop notifications from OSC 9 / OSC 777 notify / OSC 99
+  oscNotifications: OscNotificationMode;
 
   // Tab titles
   dynamicTabTitleMode: DynamicTabTitleMode; // off, agent-only, or all shell-reported titles
@@ -360,6 +373,16 @@ const isAutocompleteHistoryScope = (value: unknown): value is AutocompleteHistor
   value === 'global'
 );
 
+const isOscNotificationMode = (value: unknown): value is OscNotificationMode => (
+  value === 'off' ||
+  value === 'unfocused' ||
+  value === 'always'
+);
+
+const isDisconnectedNoticeMode = (value: unknown): value is DisconnectedNoticeMode => (
+  value === 'terminal' || value === 'dialog'
+);
+
 export const normalizeTerminalSettings = (
   settings?: Partial<TerminalSettings> | null,
 ): TerminalSettings => {
@@ -389,6 +412,12 @@ export const normalizeTerminalSettings = (
     autocompleteHistoryScope: isAutocompleteHistoryScope(settings?.autocompleteHistoryScope)
       ? settings.autocompleteHistoryScope
       : DEFAULT_TERMINAL_SETTINGS.autocompleteHistoryScope,
+    oscNotifications: isOscNotificationMode(settings?.oscNotifications)
+      ? settings.oscNotifications
+      : DEFAULT_TERMINAL_SETTINGS.oscNotifications,
+    disconnectedNoticeMode: isDisconnectedNoticeMode(settings?.disconnectedNoticeMode)
+      ? settings.disconnectedNoticeMode
+      : DEFAULT_TERMINAL_SETTINGS.disconnectedNoticeMode,
   };
 
   // Migrate legacy 'canvas' renderer to 'dom' (canvas removed in xterm.js 6.0)
@@ -470,6 +499,8 @@ const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
   wordSeparators: DEFAULT_TERMINAL_WORD_SEPARATORS,
   linkModifier: 'none',
   autoCloseOnExit: true,
+  // Issue #3087: keep terminal history visible after an established session disconnects.
+  disconnectedNoticeMode: 'terminal',
   keywordHighlightEnabled: true,
   keywordHighlightRules: DEFAULT_KEYWORD_HIGHLIGHT_RULES,
   localShell: '', // Empty = use system default
@@ -500,6 +531,7 @@ const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
   preserveSelectionOnInput: false, // Opt-in: keep selection alive when typing
   forcePromptNewLine: false, // Opt-in: keep the next shell prompt visually separated from unterminated final output lines
   osc52Clipboard: 'write-only', // OSC-52: allow remote programs to write clipboard by default
+  oscNotifications: 'always', // Honor OSC 9/777/99 desktop notifications by default
   dynamicTabTitleMode: 'agent',
   rendererType: 'auto', // Auto-detect best renderer based on hardware
   hibernateHiddenTabs: false,

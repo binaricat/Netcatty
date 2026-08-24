@@ -11,6 +11,7 @@ import { TerminalTheme } from '../../domain/models';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import { CustomThemeEditor } from './CustomThemeEditor';
 import { Button } from '../ui/button';
+import { isAppLockOverlayActive } from '../../infrastructure/appLockOverlayDom';
 
 
 interface CustomThemeModalProps {
@@ -132,6 +133,7 @@ export const CustomThemeModal: React.FC<CustomThemeModalProps> = ({
     useEffect(() => {
         if (!open) return;
         const handleKeyDown = (e: KeyboardEvent) => {
+            if (isAppLockOverlayActive()) return;
             if (e.key === 'Escape') {
                 e.stopPropagation();
                 onCancel();

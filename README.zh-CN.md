@@ -24,7 +24,7 @@
 
 <p align="center">
   <a href="https://github.com/binaricat/Netcatty/releases/latest">
-    <img src="https://img.shields.io/github/v/release/binaricat/Netcatty?style=for-the-badge&logo=github&label=下载最新版&color=success" alt="下载最新版">
+    <img src="https://img.shields.io/github/v/release/binaricat/Netcatty?style=for-the-badge&logo=github&label=%E4%B8%8B%E8%BD%BD%E6%9C%80%E6%96%B0%E7%89%88&color=success" alt="下载最新版">
   </a>
 </p>
 
@@ -35,7 +35,7 @@
 </p>
 
 <p align="center">
-  <a href="./README.md">English</a> · <a href="./README.zh-CN.md">简体中文</a> · <a href="./README.ja-JP.md">日本語</a>
+  <a href="./README.md">English</a> · <a href="./README.zh-CN.md">简体中文</a> · <a href="./README.zh-TW.md">繁體中文</a> · <a href="./README.ja-JP.md">日本語</a>
 </p>
 
 ---
@@ -294,7 +294,7 @@ npm run pack:linux   # Linux (AppImage + DEB + RPM)
 4. 推送到分支 (`git push origin feature/amazing-feature`)
 5. 打开一个 Pull Request
 
-查看 [agents.md](agents.md) 了解架构概述和编码规范。
+查看 [AGENTS.md](AGENTS.md) 了解架构概述和编码规范。
 
 ---
 

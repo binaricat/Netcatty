@@ -13,6 +13,7 @@ interface TerminalAutocompleteInputContext {
   lastAcceptedCommandRef: MutableRefObject<string | null>;
   typedInputBufferRef: MutableRefObject<string>;
   typedBufferReliableRef: MutableRefObject<boolean>;
+  previewBaselineRef: MutableRefObject<string>;
   previewActiveRef: MutableRefObject<boolean>;
   termRef: RefObject<XTerm | null>;
   hostIdRef: MutableRefObject<string>;
@@ -20,6 +21,7 @@ interface TerminalAutocompleteInputContext {
   ghostAddonRef: MutableRefObject<GhostTextAddon | null>;
   debounceTimerRef: MutableRefObject<ReturnType<typeof setTimeout> | null>;
   clearState: () => void;
+  syncPopupToInput: (input: string | null) => void;
   fetchSuggestions: () => void | Promise<void>;
 }
 
@@ -34,6 +36,7 @@ export function handleTerminalAutocompleteInput(
     lastAcceptedCommandRef,
     typedInputBufferRef,
     typedBufferReliableRef,
+    previewBaselineRef,
     previewActiveRef,
     termRef,
     hostIdRef,
@@ -41,6 +44,7 @@ export function handleTerminalAutocompleteInput(
     ghostAddonRef,
     debounceTimerRef,
     clearState,
+    syncPopupToInput,
     fetchSuggestions,
   } = context;
   if (!settingsRef.current.enabled) {
@@ -207,6 +211,23 @@ export function handleTerminalAutocompleteInput(
   // text. Drop preview-active so Escape dismisses the popup without
   // reverting these edits back to the stale baseline (#1005).
   previewActiveRef.current = false;
+  if (typedBufferReliableRef.current) {
+    previewBaselineRef.current = typedInputBufferRef.current;
+  }
+
+  // The popup must follow the edited line immediately, before the debounced
+  // provider refresh runs. Reconcile stale history rows against the current
+  // input; an unreliable append-only buffer cannot validate any old row.
+  if (settingsRef.current.showPopupMenu) {
+    const currentInput = typedBufferReliableRef.current
+      ? typedInputBufferRef.current
+      : null;
+    syncPopupToInput(
+      currentInput !== null && currentInput.length >= settingsRef.current.minChars
+        ? currentInput
+        : null,
+    );
+  }
 
   // Re-align any visible ghost text to the freshly-updated buffer
   // immediately. Without this the ghost keeps the tail it captured at

@@ -10,6 +10,27 @@ test("main SftpView keeps browse sessions across top-tab switches", () => {
   assert.doesNotMatch(source, /interactive:\s*isActive/);
 });
 
+test("SFTP magnification overlays one side while preserving the original two-pane geometry", async () => {
+  const { resolveTwoPaneMagnificationStyle } = await import("../domain/paneMagnification.ts");
+
+  assert.deepEqual(resolveTwoPaneMagnificationStyle('left', true, false), {
+    left: '0%', top: '0%', width: '50%', height: '100%', zIndex: 10,
+  });
+  assert.deepEqual(resolveTwoPaneMagnificationStyle('right', true, false), {
+    left: '50%', top: '0%', width: '50%', height: '100%', zIndex: 10,
+  });
+  assert.deepEqual(resolveTwoPaneMagnificationStyle('right', true, true), {
+    left: '12px', top: '12px', width: 'calc(100% - 24px)', height: 'calc(100% - 24px)', zIndex: 50,
+  });
+});
+
+test("SFTP keyboard focus tracks the active side and blocks the covered sibling", () => {
+  const source = readFileSync(new URL("./SftpView.tsx", import.meta.url), "utf8");
+
+  assert.match(source, /inert=\{magnifiedSide === 'right' \? true : undefined\}[\s\S]*onFocusCapture=\{\(\) => handlePaneFocus\("left"\)\}/);
+  assert.match(source, /inert=\{magnifiedSide === 'left' \? true : undefined\}[\s\S]*onFocusCapture=\{\(\) => handlePaneFocus\("right"\)\}/);
+});
+
 test("SftpView re-renders when host-key verification setting changes", async () => {
   Object.defineProperty(globalThis, "localStorage", {
     configurable: true,

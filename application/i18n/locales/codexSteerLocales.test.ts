@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import en from './en.ts';
 import ru from './ru.ts';
+import es from './es.ts';
 import zhCN from './zh-CN.ts';
 import zhTW from './zh-TW.ts';
 
@@ -19,7 +20,7 @@ const STEER_KEYS = [
 ] as const;
 
 test('Codex steering UI is localized in every supported locale', () => {
-  for (const [name, messages] of Object.entries({ en, 'zh-CN': zhCN, 'zh-TW': zhTW, ru })) {
+  for (const [name, messages] of Object.entries({ en, es, 'zh-CN': zhCN, 'zh-TW': zhTW, ru })) {
     const missing = STEER_KEYS.filter(key => !messages[key]);
     assert.deepEqual(missing, [], `${name} is missing Codex steering labels`);
   }

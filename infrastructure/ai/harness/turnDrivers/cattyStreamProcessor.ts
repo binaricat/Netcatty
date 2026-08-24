@@ -9,6 +9,7 @@ import {
 import { mapCattyStreamChunkToAgentEvents } from '../agentEventAdapter';
 import type { AgentEvent } from '../types';
 import type { ProviderAdvancedParams } from '../../types';
+import type { CattyReasoningProviderOptions } from '../../cattyReasoning';
 import { createModelFromConfig } from '../../sdk/providers';
 import type { CattyToolsBundle } from '../capabilityTools';
 import { buildCattyToolApproval } from '../cattyToolApproval';
@@ -57,9 +58,11 @@ export interface ProcessCattyStreamInput {
   currentAssistantMsgId: string;
   maxIterations: number;
   advancedParams?: ProviderAdvancedParams;
+  reasoningProviderOptions?: CattyReasoningProviderOptions;
   continuationContext?: CattyProviderContinuationContext;
   turnId?: string;
   commandTimeoutMs?: number;
+  responseIdleTimeoutMs?: number;
   runtimeContext: CattyRuntimeContext;
   onAgentEvent?: (event: AgentEvent) => void;
   prepareStep?: (args: {
@@ -100,9 +103,11 @@ export async function processCattyStream(input: ProcessCattyStreamInput): Promis
     currentAssistantMsgId,
     maxIterations,
     advancedParams,
+    reasoningProviderOptions,
     continuationContext,
     turnId,
     commandTimeoutMs,
+    responseIdleTimeoutMs,
     runtimeContext: initialRuntimeContext,
     onAgentEvent,
     prepareStep,
@@ -129,6 +134,7 @@ export async function processCattyStream(input: ProcessCattyStreamInput): Promis
     timeout: buildCattyStreamTimeouts({
       permissionMode: runtimeContext.permissionMode,
       commandTimeoutMs,
+      responseIdleTimeoutMs,
       maxIterations,
     }),
     telemetry: {
@@ -206,6 +212,7 @@ export async function processCattyStream(input: ProcessCattyStreamInput): Promis
     ...(advancedParams?.topP != null && { topP: advancedParams.topP }),
     ...(advancedParams?.frequencyPenalty != null && { frequencyPenalty: advancedParams.frequencyPenalty }),
     ...(advancedParams?.presencePenalty != null && { presencePenalty: advancedParams.presencePenalty }),
+    ...(reasoningProviderOptions ? { providerOptions: reasoningProviderOptions } : {}),
   });
 
   let activeMsgId = currentAssistantMsgId;

@@ -76,7 +76,10 @@ test("manual reconnect resets connect automation before opening a new session", 
     "await cancelConnectAutomationBatch(connectAutomationBatch)",
     reconnectIndex,
   );
-  const manualBranchIndex = source.indexOf('if (mode === "manual")', reconnectIndex);
+  const manualBranchIndex = source.indexOf(
+    'if (mode === "manual") {\n      clearAutoReconnect',
+    cancelBatchIndex,
+  );
   const stopFailureRetryIndex = source.indexOf(
     'if (mode === "auto" && retryTokenStillCurrent())',
     cancelBatchIndex,
@@ -129,7 +132,7 @@ test("manual reconnect resets connect automation before opening a new session", 
   );
   assert.ok(
     resetConsumedIndex < connectingIndex && resetCompletedIndex < connectingIndex,
-    "manual reconnect must clear connect-automation consumption before status becomes connecting",
+    "manual reconnect must clear connect-automation consumption before the new session boot continues",
   );
   assert.ok(
     autoElseIndex < autoSuppressIndex && autoSuppressIndex < connectingIndex,
@@ -260,7 +263,8 @@ test("reconnect wakes a hibernated terminal before requiring a terminal instance
   const staleWakeDisposeGuardIndex = source.indexOf('reconnectWakeInvalidateModeRef.current === "dispose"', staleWakeGuardIndex);
   const staleWakeDisposeIndex = source.indexOf("disposeRuntimeOnly();", staleWakeDisposeGuardIndex);
   const disconnectKeepModeIndex = source.indexOf('reconnectWakeInvalidateModeRef.current = "keep"', source.indexOf("const handleDisconnect"));
-  const missingTermReturnIndex = source.indexOf("if (!termRef.current) return;", reconnectIndex);
+  const missingTermGuardIndex = source.indexOf("if (!termRef.current) {", reconnectIndex);
+  const missingTermReturnIndex = source.indexOf("return;", missingTermGuardIndex);
 
   assert.notEqual(wakePromiseRefIndex, -1);
   assert.notEqual(wakeGuardRefIndex, -1);
@@ -281,9 +285,10 @@ test("reconnect wakes a hibernated terminal before requiring a terminal instance
   assert.notEqual(staleWakeDisposeGuardIndex, -1);
   assert.notEqual(staleWakeDisposeIndex, -1);
   assert.notEqual(disconnectKeepModeIndex, -1);
+  assert.notEqual(missingTermGuardIndex, -1);
   assert.notEqual(missingTermReturnIndex, -1);
   assert.ok(
-    hibernatedBranchIndex < missingTermReturnIndex && wakeCallIndex < missingTermReturnIndex,
+    hibernatedBranchIndex < missingTermGuardIndex && wakeCallIndex < missingTermGuardIndex,
     "manual and auto reconnect must wake fully hibernated sessions before the terminal guard can stop the retry",
   );
   assert.ok(

@@ -5,6 +5,13 @@
 
 const path = require("node:path");
 const fs = require("node:fs");
+const {
+  TRAY_PANEL_WIDTH,
+  TRAY_PANEL_HEIGHT,
+  resolveTrayAnchor,
+  resolveTrayDisplayPoint,
+  placeTrayPanel,
+} = require("./trayPanelBounds.cjs");
 
 let electronModule = null;
 let ensureMainWindow = null;
@@ -36,6 +43,14 @@ let trayMenuData = {
 };
 
 let trayPanelWindow = null;
+let appLockController = null;
+/** @type {null | (() => void)} */
+let unsubscribeAppLockRuntime = null;
+/** Queued tray port-forward toggles deferred while the runtime is locked. */
+let pendingPortForwardToggles = [];
+/** Dock host connections deferred until App Lock is unlocked. */
+let pendingHostConnections = [];
+
 /** True after the tray panel renderer finishes its first load. */
 let trayPanelReady = false;
 let trayPanelShowWhenReady = false;
@@ -50,6 +65,123 @@ const FULLSCREEN_LEAVE_WATCHDOG_MS = 5000;
 // fall back on this timeout — whichever comes first.
 const FULLSCREEN_TRAILING_SHOW_FALLBACK_MS = 300;
 const pendingFullscreenHideByWindow = new WeakMap();
+
+function notifyAppLockReopen(win) {
+  try {
+    if (!win || win.isDestroyed?.()) return;
+    win.webContents?.send?.("netcatty:app-lock:reopen");
+  } catch {
+    // ignore
+  }
+}
+
+function lockAppForBackground() {
+  try {
+    appLockController?.setLocked?.("background");
+  } catch {
+    // ignore
+  }
+}
+
+function isAppRuntimeLocked() {
+  try {
+    return appLockController?.getRuntimeState?.()?.locked === true;
+  } catch {
+    return false;
+  }
+}
+
+/** Redact session/port-forward details while locked (Codex P2). */
+function getTrayMenuDataForDisplay() {
+  if (isAppRuntimeLocked()) {
+    return { sessions: [], portForwardRules: [] };
+  }
+  return trayMenuData;
+}
+
+function pushTrayMenuDataToPanel(win = trayPanelWindow) {
+  try {
+    if (!win || win.isDestroyed?.()) return;
+    win.webContents?.send?.("netcatty:trayPanel:setMenuData", getTrayMenuDataForDisplay());
+  } catch {
+    // ignore
+  }
+}
+
+/**
+ * Deliver a tray port-forward toggle, or queue it until the runtime unlocks.
+ * Showing the window + reopen still happens at the click site so the user can
+ * authenticate; tunnel start/stop must wait for unlock.
+ */
+function sendOrQueuePortForwardToggle(win, ruleId, start) {
+  if (!win) return;
+  if (isAppRuntimeLocked()) {
+    pendingPortForwardToggles = pendingPortForwardToggles.filter(
+      (item) => item.ruleId !== ruleId,
+    );
+    pendingPortForwardToggles.push({ win, ruleId, start: Boolean(start) });
+    return;
+  }
+  try {
+    win.webContents?.send?.("netcatty:tray:togglePortForward", ruleId, Boolean(start));
+  } catch {
+    // ignore
+  }
+}
+
+function flushPendingPortForwardToggles() {
+  if (isAppRuntimeLocked()) return;
+  const pending = pendingPortForwardToggles.splice(0);
+  for (const item of pending) {
+    try {
+      const win = item.win;
+      if (!win || win.isDestroyed?.()) continue;
+      win.webContents?.send?.("netcatty:tray:togglePortForward", item.ruleId, item.start);
+    } catch {
+      // ignore
+    }
+  }
+}
+
+function flushPendingHostConnections() {
+  if (isAppRuntimeLocked()) return;
+  const pending = pendingHostConnections.splice(0);
+  for (const hostId of pending) {
+    void sendToMainWindow("netcatty:trayPanel:connectToHost", hostId, { focus: false });
+  }
+}
+
+function bindAppLockRuntimeSubscription() {
+  if (typeof unsubscribeAppLockRuntime === "function") {
+    try {
+      unsubscribeAppLockRuntime();
+    } catch {
+      // ignore
+    }
+    unsubscribeAppLockRuntime = null;
+  }
+  if (!appLockController || typeof appLockController.subscribe !== "function") {
+    return;
+  }
+  try {
+    unsubscribeAppLockRuntime = appLockController.subscribe((state) => {
+      if (state?.locked === false) {
+        flushPendingPortForwardToggles();
+        flushPendingHostConnections();
+        pushTrayMenuDataToPanel();
+        updateTrayMenu();
+        updateDockMenu();
+      } else if (state?.locked === true) {
+        // Clear cached details from the tray panel/menu while locked.
+        pushTrayMenuDataToPanel();
+        updateTrayMenu();
+        updateDockMenu();
+      }
+    });
+  } catch {
+    unsubscribeAppLockRuntime = null;
+  }
+}
 
 function clearPendingFullscreenHide(win) {
   if (!win || typeof win !== "object") return;
@@ -96,6 +228,7 @@ function performPendingFullscreenHide(win) {
     const windowManager = require("./windowManager.cjs");
     windowManager.notifyWindowWillHide?.(win);
     win.hide();
+    lockAppForBackground();
     return "hidden";
   } catch (err) {
     console.warn("[GlobalShortcut] Error hiding window after leaving fullscreen:", err);
@@ -174,6 +307,7 @@ function bringMainWindowToForeground(win) {
   clearPendingFullscreenHide(win);
   const windowManager = require("./windowManager.cjs");
   const focused = windowManager.showAndFocusMainWindow?.(win) ?? false;
+  notifyAppLockReopen(win);
   try {
     electronModule?.app?.focus?.({ steal: true });
   } catch {
@@ -247,6 +381,12 @@ async function sendToMainWindow(channel, payload, { focus = true, createIfMissin
 
 async function connectToHostFromSystemMenu(hostId) {
   if (!hostId) return;
+  if (isAppRuntimeLocked()) {
+    pendingHostConnections = pendingHostConnections.filter((id) => id !== hostId);
+    pendingHostConnections.push(hostId);
+    await openMainWindowReady();
+    return;
+  }
   await sendToMainWindow("netcatty:trayPanel:connectToHost", hostId);
 }
 
@@ -256,15 +396,6 @@ function getTrayPanelUrl() {
     return `${devServerUrl.replace(/\/$/, "")}/#/tray`;
   }
   return "app://netcatty/index.html#/tray";
-}
-
-function pushTrayMenuDataToPanel() {
-  if (!trayPanelWindow || trayPanelWindow.isDestroyed()) return;
-  try {
-    trayPanelWindow.webContents?.send("netcatty:trayPanel:setMenuData", trayMenuData);
-  } catch {
-    // ignore
-  }
 }
 
 function ensureTrayPanelWindow() {
@@ -279,8 +410,8 @@ function ensureTrayPanelWindow() {
   trayPanelShowWhenReady = false;
 
   trayPanelWindow = new BrowserWindow({
-    width: 360,
-    height: 520,
+    width: TRAY_PANEL_WIDTH,
+    height: TRAY_PANEL_HEIGHT,
     show: false,
     frame: false,
     resizable: false,
@@ -290,6 +421,8 @@ function ensureTrayPanelWindow() {
     maximizable: false,
     skipTaskbar: true,
     alwaysOnTop: true,
+    // Native shadow only. CSS box-shadow on this transparent overlay
+    // double-composites on macOS as an extra outline under the card.
     hasShadow: true,
     // Transparent host + clear backdrop so CSS rounded-lg corners are truly
     // see-through. On Windows, disable OS rounding so it does not stack under
@@ -300,7 +433,9 @@ function ensureTrayPanelWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
-          spellcheck: false,
+      spellcheck: false,
+      // Tray must not inherit Chromium page-zoom from the main window origin.
+      zoomFactor: 1,
     },
   });
 
@@ -323,7 +458,11 @@ function ensureTrayPanelWindow() {
 
   trayPanelWindow.webContents.on("did-finish-load", () => {
     trayPanelReady = true;
-    pushTrayMenuDataToPanel();
+    try {
+      pushTrayMenuDataToPanel(trayPanelWindow);
+    } catch {
+      // ignore
+    }
     if (trayPanelShowWhenReady && trayPanelWindow && !trayPanelWindow.isDestroyed()) {
       trayPanelShowWhenReady = false;
       try {
@@ -332,29 +471,51 @@ function ensureTrayPanelWindow() {
       } catch {
         // ignore
       }
+      notifyAppLockReopen(trayPanelWindow);
     }
   });
 
   return trayPanelWindow;
 }
 
-function showTrayPanel() {
+function readTrayBounds() {
+  try {
+    return tray?.getBounds?.() ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function readCursorPoint() {
+  try {
+    return electronModule?.screen?.getCursorScreenPoint?.() ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function showTrayPanel(eventBounds) {
   if (!tray) return;
   const { screen } = electronModule;
   const win = ensureTrayPanelWindow();
 
-  const trayBounds = tray.getBounds();
-  const display = screen.getDisplayNearestPoint({ x: trayBounds.x, y: trayBounds.y });
-  const workArea = display.workArea;
-
-  const panelBounds = win.getBounds();
-  const x = Math.min(
-    Math.max(trayBounds.x + Math.round(trayBounds.width / 2) - Math.round(panelBounds.width / 2), workArea.x),
-    workArea.x + workArea.width - panelBounds.width,
+  const cursorPoint = readCursorPoint();
+  const trayBounds = readTrayBounds();
+  // Event bounds choose the monitor. Cursor is only the fallback so a
+  // Windows getBounds() y=0 lie cannot pick the wrong screen; keyboard /
+  // accessibility activation must not follow an unrelated pointer.
+  const display = screen.getDisplayNearestPoint(
+    resolveTrayDisplayPoint({ eventBounds, trayBounds, cursorPoint }),
   );
-  const y = Math.min(trayBounds.y + trayBounds.height + 6, workArea.y + workArea.height - panelBounds.height);
+  const workArea = display.workArea;
+  const panelBounds = placeTrayPanel({
+    anchor: resolveTrayAnchor({ eventBounds, trayBounds, cursorPoint, workArea }),
+    workArea,
+    width: TRAY_PANEL_WIDTH,
+    height: TRAY_PANEL_HEIGHT,
+  });
 
-  win.setBounds({ x, y, width: panelBounds.width, height: panelBounds.height }, false);
+  win.setBounds(panelBounds, false);
   // Wait for first paint/load so the opaque main-app splash cannot flash as a
   // square underlay before the tray route clears it (#2505).
   if (!trayPanelReady) {
@@ -362,6 +523,10 @@ function showTrayPanel() {
   } else {
     win.show();
     win.focus();
+    // Background-locked tray panel sits behind AppLockOverlay, which suppresses
+    // auto system-unlock until reopenSignal > 0. Emit reopen when the panel is
+    // shown so Touch ID/Hello can auto-prompt (Codex P3 on ffb25f81).
+    notifyAppLockReopen(win);
   }
 
   pushTrayMenuDataToPanel();
@@ -389,7 +554,7 @@ function hideTrayPanel() {
   }
 }
 
-function toggleTrayPanel() {
+function toggleTrayPanel(eventBounds) {
   // A pending first-load show counts as "open" so a second click cancels it
   // instead of leaving did-finish-load to pop the panel open later.
   const isOpenOrPending =
@@ -398,7 +563,7 @@ function toggleTrayPanel() {
   if (isOpenOrPending) {
     hideTrayPanel();
   } else {
-    showTrayPanel();
+    showTrayPanel(eventBounds);
   }
 }
 
@@ -441,6 +606,8 @@ function resolveTrayIconPath() {
  */
 function init(deps) {
   electronModule = deps.electronModule;
+  appLockController = deps.getAppLockController?.() ?? null;
+  bindAppLockRuntimeSubscription();
   ensureMainWindow = deps.ensureMainWindow || null;
   sendWhenRendererReady = deps.sendWhenRendererReady || null;
   getSystemMenuMainWindow = deps.getMainWindow || null;
@@ -519,6 +686,7 @@ function hideWindowRespectingMacFullscreen(win) {
     const windowManager = require("./windowManager.cjs");
     windowManager.notifyWindowWillHide?.(win);
     win.hide();
+    lockAppForBackground();
     return true;
   } catch (err) {
     console.warn("[GlobalShortcut] Error hiding window:", err);
@@ -719,20 +887,20 @@ function createTray() {
       tray.on("click", () => {
         openMainWindow();
       });
-      tray.on("right-click", () => {
-        toggleTrayPanel();
+      tray.on("right-click", (_event, bounds) => {
+        toggleTrayPanel(bounds);
       });
     } else if (process.platform === "linux") {
       // Linux: GtkStatusIcon left-click can toggle the custom panel; StatusNotifier
       // activation shows the native context menu set via setContextMenu() (there is
       // no right-click / popUpContextMenu API on Linux — see Electron Tray docs).
-      tray.on("click", () => {
-        toggleTrayPanel();
+      tray.on("click", (_event, bounds) => {
+        toggleTrayPanel(bounds);
       });
     } else {
       // macOS: Click toggles custom tray panel
-      tray.on("click", () => {
-        toggleTrayPanel();
+      tray.on("click", (_event, bounds) => {
+        toggleTrayPanel(bounds);
       });
     }
 
@@ -760,12 +928,13 @@ function buildTrayMenuTemplate() {
   menuTemplate.push({ type: "separator" });
 
   // Active Sessions
-  if (trayMenuData.sessions && trayMenuData.sessions.length > 0) {
+  const displayTrayData = getTrayMenuDataForDisplay();
+  if (displayTrayData.sessions && displayTrayData.sessions.length > 0) {
     menuTemplate.push({
       label: "Sessions",
       enabled: false,
     });
-    for (const session of trayMenuData.sessions) {
+    for (const session of displayTrayData.sessions) {
       const statusText =
         session.status === "connected"
           ? STATUS_TEXT.session.connected
@@ -787,12 +956,12 @@ function buildTrayMenuTemplate() {
   }
 
   // Port Forwarding Rules
-  if (trayMenuData.portForwardRules && trayMenuData.portForwardRules.length > 0) {
+  if (displayTrayData.portForwardRules && displayTrayData.portForwardRules.length > 0) {
     menuTemplate.push({
       label: "Port Forwarding",
       enabled: false,
     });
-    for (const rule of trayMenuData.portForwardRules) {
+    for (const rule of displayTrayData.portForwardRules) {
       const isActive = rule.status === "active";
       const isConnecting = rule.status === "connecting";
       const isStoppable = isActive || isConnecting || rule.canStop === true;
@@ -815,7 +984,15 @@ function buildTrayMenuTemplate() {
         click: () => {
           const win = getMainWindow();
           if (win) {
-            win.webContents?.send("netcatty:tray:togglePortForward", rule.id, !isStoppable);
+            clearPendingFullscreenHide(win);
+            if (win.isMinimized()) win.restore();
+            win.show();
+            win.focus();
+            notifyAppLockReopen(win);
+            // Defer tunnel start/stop until unlock when the runtime is locked
+            // (e.g. background lock after hide-to-tray). Still surface the
+            // window so the user can authenticate.
+            sendOrQueuePortForwardToggle(win, rule.id, !isStoppable);
           }
         },
       });
@@ -860,7 +1037,7 @@ function getDockMenuHosts() {
 }
 
 function buildDockMenuTemplate() {
-  const hostItems = getDockMenuHosts().map((host) => ({
+  const hostItems = (isAppRuntimeLocked() ? [] : getDockMenuHosts()).map((host) => ({
     label: getDockHostLabel(host),
     click: async () => {
       await connectToHostFromSystemMenu(host.id);
@@ -1087,6 +1264,16 @@ function registerHandlers(ipcMain) {
 function cleanup() {
   unregisterGlobalHotkey();
   destroyTray();
+  pendingPortForwardToggles = [];
+  pendingHostConnections = [];
+  if (typeof unsubscribeAppLockRuntime === "function") {
+    try {
+      unsubscribeAppLockRuntime();
+    } catch {
+      // ignore
+    }
+    unsubscribeAppLockRuntime = null;
+  }
   if (electronModule?.app?.dock?.setMenu) {
     try {
       electronModule.app.dock.setMenu(null);
@@ -1119,4 +1306,9 @@ module.exports = {
   clearPendingFullscreenHide,
   cleanup,
   getTray: () => tray,
+  getTrayPanelWindow: () => trayPanelWindow,
+  // Test helpers
+  __flushPendingPortForwardTogglesForTests: flushPendingPortForwardToggles,
+  __isAppRuntimeLockedForTests: isAppRuntimeLocked,
+  __getPendingPortForwardTogglesForTests: () => pendingPortForwardToggles.slice(),
 };

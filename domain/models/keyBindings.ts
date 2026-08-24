@@ -21,6 +21,38 @@ export const parseKeyCombo = (keyStr: string): { modifiers: string[]; key: strin
   return { modifiers: parts, key };
 };
 
+const KEY_STRING_TO_EVENT_KEY: Record<string, string> = {
+  Space: ' ',
+  '↑': 'ArrowUp',
+  '↓': 'ArrowDown',
+  '←': 'ArrowLeft',
+  '→': 'ArrowRight',
+  Esc: 'Escape',
+  '⌫': 'Backspace',
+  Del: 'Delete',
+  '↵': 'Enter',
+  '⇥': 'Tab',
+};
+
+/** Rebuild a keydown-like event from a stored shortcut string for matching. */
+export const keyStringToKeyboardEvent = (keyString: string): KeyboardEvent | null => {
+  const parsed = parseKeyCombo(keyString);
+  if (!parsed) return null;
+
+  const modifiers = new Set(parsed.modifiers);
+  const mappedKey = KEY_STRING_TO_EVENT_KEY[parsed.key];
+  const key = mappedKey ?? (parsed.key.length === 1 ? parsed.key.toLowerCase() : parsed.key);
+
+  return {
+    key,
+    code: '',
+    metaKey: modifiers.has('⌘') || modifiers.has('Win'),
+    ctrlKey: modifiers.has('⌃') || modifiers.has('Ctrl'),
+    altKey: modifiers.has('⌥') || modifiers.has('Alt'),
+    shiftKey: modifiers.has('Shift'),
+  } as KeyboardEvent;
+};
+
 const PHYSICAL_SHORTCUT_KEY_NAMES: Record<string, string> = {
   Backquote: '`',
   Minus: '-',
@@ -228,7 +260,7 @@ export const DEFAULT_KEY_BINDINGS: KeyBinding[] = [
   { id: 'move-focus', action: 'moveFocus', label: 'Move focus between Split View panes', mac: '⌘ + ⌥ + arrows', pc: 'Ctrl + Alt + arrows', category: 'navigation' },
   { id: 'split-horizontal', action: 'splitHorizontal', label: 'Split Horizontal', mac: '⌘ + D', pc: 'Ctrl + Shift + D', category: 'navigation' },
   { id: 'split-vertical', action: 'splitVertical', label: 'Split Vertical', mac: '⌘ + Shift + D', pc: 'Ctrl + Shift + E', category: 'navigation' },
-  { id: 'toggle-pane-zoom', action: 'togglePaneZoom', label: 'Toggle Pane Zoom', mac: '⌘ + Shift + Enter', pc: 'Ctrl + Shift + Enter', category: 'navigation' },
+  { id: 'toggle-pane-zoom', action: 'togglePaneZoom', label: 'Toggle Pane Zoom', mac: '⌥ + M', pc: 'Alt + M', category: 'navigation' },
 
   // App Features
   { id: 'open-hosts', action: 'openHosts', label: 'Open Hosts Page', mac: 'Disabled', pc: 'Disabled', category: 'app' },

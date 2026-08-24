@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { createRequire } from "node:module";
 import test from "node:test";
+import type { Terminal as XTermType } from "@xterm/xterm";
 import {
   getNormalizedTerminalSelection,
   getTerminalSelectionForClipboard,
@@ -9,6 +11,11 @@ import {
   type SelectionTerminal,
 } from "./normalizeTerminalSelection.ts";
 
+const require = createRequire(import.meta.url);
+const { Terminal: XTerm } = require("@xterm/xterm") as {
+  Terminal: typeof XTermType;
+};
+
 /**
  * Fake line that matches real xterm translateToString(true) semantics:
  * trimRight only drops *empty* cells (trailing chars that were never written),
@@ -16,7 +23,16 @@ import {
  */
 function makeLine(
   text: string,
-  options: { isWrapped?: boolean; emptyCells?: number; cellWidths?: number[] } = {},
+  options: {
+    isWrapped?: boolean;
+    emptyCells?: number;
+    cellWidths?: number[];
+    /**
+     * Model xterm.js 6 string-cache: a no-endColumn translateToString(true)
+     * drops written trailing spaces via String.trimEnd().
+     */
+    canonicalTrimEnd?: boolean;
+  } = {},
 ): SelectionBufferLine {
   const emptyCells = options.emptyCells ?? 0;
   // Optional per-character terminal widths (default 1). Used to model CJK.
@@ -59,8 +75,9 @@ function makeLine(
         getWidth: () => width,
       };
     },
-    translateToString(trimRight = false, startColumn = 0, endColumn = fullCols) {
-      let end = Math.max(startColumn, Math.min(endColumn, fullCols));
+    translateToString(trimRight = false, startColumn = 0, endColumn?: number) {
+      const endSpecified = arguments.length >= 3;
+      let end = Math.max(startColumn, Math.min(endColumn ?? fullCols, fullCols));
       if (trimRight) {
         while (end > startColumn && (cols[end - 1] === "\0" || cols[end - 1] === "")) {
           end -= 1;
@@ -71,13 +88,22 @@ function makeLine(
         const cell = cols[c];
         if (cell && cell !== "\0") result += cell;
       }
+      if (trimRight && options.canonicalTrimEnd && !endSpecified) {
+        return result.trimEnd();
+      }
       return result;
     },
   };
 }
 
 function makeTerm(
-  lines: Array<{ text: string; isWrapped?: boolean; emptyCells?: number; cellWidths?: number[] }>,
+  lines: Array<{
+    text: string;
+    isWrapped?: boolean;
+    emptyCells?: number;
+    cellWidths?: number[];
+    canonicalTrimEnd?: boolean;
+  }>,
   range: { start: { x: number; y: number }; end: { x: number; y: number } } | null,
   options: {
     rawSelection?: string;
@@ -89,6 +115,7 @@ function makeTerm(
       isWrapped: line.isWrapped,
       emptyCells: line.emptyCells,
       cellWidths: line.cellWidths,
+      canonicalTrimEnd: line.canonicalTrimEnd,
     }),
   );
   return {
@@ -361,4 +388,40 @@ test("soft-wrapped CJK with padding joins without inserted spaces", () => {
     { start: { x: 0, y: 0 }, end: { x: 18, y: 1 } },
   );
   assert.equal(getNormalizedTerminalSelection(term), "Pi: 用 /copy 最稳");
+});
+
+test("keeps a wrap-boundary space that canonical translateToString trimEnd would drop", () => {
+  const term = makeTerm(
+    [
+      { text: "|hbase ", canonicalTrimEnd: true },
+      { text: "shell", isWrapped: true, canonicalTrimEnd: true },
+    ],
+    { start: { x: 0, y: 0 }, end: { x: 5, y: 1 } },
+  );
+  assert.equal(getNormalizedTerminalSelection(term), "|hbase shell");
+});
+
+test("real xterm keeps a wrap-boundary space after an untrimmed string-cache prime", async () => {
+  const xterm = new XTerm({ cols: 20, rows: 8, scrollback: 20, allowProposedApi: true });
+  try {
+    await new Promise<void>((resolve) => {
+      xterm.write("12345678901234hbase shell\r\n", resolve);
+    });
+    // Prompt detector / autocomplete / keyword highlight all call this first.
+    xterm.buffer.active.getLine(0)?.translateToString(false);
+
+    const wrapped: SelectionTerminal = {
+      getSelection: () => xterm.getSelection(),
+      getSelectionPosition: () => ({ start: { x: 0, y: 0 }, end: { x: 5, y: 1 } }),
+      buffer: xterm.buffer,
+    };
+
+    assert.equal(
+      xterm.buffer.active.getLine(0)?.translateToString(true),
+      "12345678901234hbase",
+    );
+    assert.equal(getNormalizedTerminalSelection(wrapped), "12345678901234hbase shell");
+  } finally {
+    xterm.dispose();
+  }
 });

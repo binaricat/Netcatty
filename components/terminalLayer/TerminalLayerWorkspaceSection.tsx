@@ -1,10 +1,12 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import React, { memo, useSyncExternalStore } from 'react';
+import React, { memo, useEffect, useState, useSyncExternalStore } from 'react';
+import { createPortal } from 'react-dom';
 
 import {
   getSidePanelLiveSnapshot,
   sidePanelLiveStore,
 } from '../../application/state/sidePanelLiveStore';
+import { getPaneMagnificationShortcutLabel } from '../../domain/paneMagnification';
 import { terminalLayerWorkspaceCtxEqual } from './terminalLayerViewMemo';
 
 type WorkspaceContext = Record<string, any>;
@@ -28,6 +30,8 @@ function TerminalLayerWorkspaceSectionInner({ ctx }: { ctx: WorkspaceContext }) 
 
   const {
     workspaceInnerRef,
+    workspaceOuterRef,
+    activeTabId,
     workspaceOverlayRef,
     draggingSessionId,
     dropHint,
@@ -44,6 +48,10 @@ function TerminalLayerWorkspaceSectionInner({ ctx }: { ctx: WorkspaceContext }) 
     workspaceById,
     workspaceRectsById,
     isTerminalLayerVisible,
+    magnifiedPane,
+    handleMagnifyTerminalPane,
+    handleTerminalPaneInteraction,
+    handleRestoreMagnifiedPane,
     workspaceFocusHandlersRef,
     workspaceBroadcastHandlersRef,
     splitHorizontalHandlersRef,
@@ -115,7 +123,24 @@ function TerminalLayerWorkspaceSectionInner({ ctx }: { ctx: WorkspaceContext }) 
     onReorderTabs,
     onStartSessionDrag,
     onEndSessionDrag,
+    t,
   } = ctx;
+
+  const activeMagnifiedTerminal = !!activeTabId && magnifiedPane?.tabId === activeTabId
+    && magnifiedPane.target.kind === 'terminal'
+    ? magnifiedPane
+    : null;
+  const paneMagnificationShortcutLabel = getPaneMagnificationShortcutLabel(keyBindings, hotkeyScheme);
+  const [showMagnificationHint, setShowMagnificationHint] = useState(false);
+  useEffect(() => {
+    if (!activeMagnifiedTerminal) {
+      setShowMagnificationHint(false);
+      return undefined;
+    }
+    setShowMagnificationHint(true);
+    const timerId = window.setTimeout(() => setShowMagnificationHint(false), 1800);
+    return () => window.clearTimeout(timerId);
+  }, [activeMagnifiedTerminal]);
 
   return (
     <div className="flex-1 min-h-0 flex flex-col">
@@ -167,6 +192,9 @@ function TerminalLayerWorkspaceSectionInner({ ctx }: { ctx: WorkspaceContext }) 
           workspaceById={workspaceById}
           workspaceRectsById={workspaceRectsById}
           isTerminalLayerVisible={isTerminalLayerVisible}
+          magnifiedPane={magnifiedPane}
+          onMagnifyTerminalPane={handleMagnifyTerminalPane}
+          onTerminalPaneInteraction={handleTerminalPaneInteraction}
           workspaceFocusHandlersRef={workspaceFocusHandlersRef}
           workspaceBroadcastHandlersRef={workspaceBroadcastHandlersRef}
           splitHorizontalHandlersRef={splitHorizontalHandlersRef}
@@ -280,6 +308,29 @@ function TerminalLayerWorkspaceSectionInner({ ctx }: { ctx: WorkspaceContext }) 
           );
         })}
     </div>
+
+      {activeMagnifiedTerminal && workspaceOuterRef.current && createPortal(
+        <>
+          <div
+            className="absolute inset-0 z-40 bg-background/55 backdrop-blur-[1px]"
+            aria-hidden="true"
+            data-section="pane-magnification-backdrop"
+          />
+          {showMagnificationHint && (
+            <button
+              type="button"
+              className="absolute bottom-4 right-4 z-[60] rounded border border-border/70 bg-background/90 px-2 py-1 text-[10px] text-muted-foreground shadow-sm animate-in fade-in duration-150"
+              onClick={handleRestoreMagnifiedPane}
+              data-section="pane-magnification-hint"
+              aria-label={t('terminal.paneMagnification.restore')}
+            >
+              {t('terminal.paneMagnification.hint')}: {t('terminal.layer.terminal')}
+              {paneMagnificationShortcutLabel ? ` · ${paneMagnificationShortcutLabel} / Esc` : ' · Esc'}
+            </button>
+          )}
+        </>,
+        workspaceOuterRef.current,
+      )}
 
       {activeWorkspace && isComposeBarOpen && (
         <TerminalComposeBar

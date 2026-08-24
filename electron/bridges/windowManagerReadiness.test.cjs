@@ -358,6 +358,9 @@ test("buildAppMenu sends Cmd+W to any registered main window renderer", () => {
   const firstMainWindow = {
     isDestroyed() { return false; },
     on() {},
+    close() {
+      calls.push("first:close");
+    },
     webContents: {
       isDestroyed() { return false; },
       send(channel) {
@@ -383,9 +386,16 @@ test("buildAppMenu sends Cmd+W to any registered main window renderer", () => {
     const windowMenu = capturedTemplate.find((item) => item.label === "Window");
     const closeItem = windowMenu.submenu.find((item) => item.accelerator === "CommandOrControl+W");
 
-    closeItem.click(null, firstMainWindow);
+    closeItem.click(null, firstMainWindow, { triggeredByAccelerator: true });
 
     assert.deepEqual(calls, ["first:netcatty:window:command-close"]);
+
+    closeItem.click(null, firstMainWindow, { triggeredByAccelerator: false });
+
+    assert.deepEqual(calls, [
+      "first:netcatty:window:command-close",
+      "first:close",
+    ]);
   } finally {
     unregisterMainWindow(firstMainWindow);
     unregisterMainWindow(secondMainWindow);
@@ -2118,6 +2128,7 @@ test("window IPC handlers target the sender owner window", async () => {
   };
   const calls = [];
   const titles = [];
+  const guardedTitles = [];
   const win = {
     isDestroyed() {
       return false;
@@ -2138,7 +2149,45 @@ test("window IPC handlers target the sender owner window", async () => {
       },
     },
   };
+  const minimizeCalls = [];
+  const minimizeCloseCalls = [];
+  const minimizeHideCalls = [];
+  const minimizeSentMessages = [];
+  const minimizeWin = {
+    isDestroyed() {
+      return false;
+    },
+    minimize() {
+      minimizeCalls.push("minimize");
+    },
+    close() {
+      minimizeCloseCalls.push("close");
+    },
+    hide() {
+      minimizeHideCalls.push("hide");
+    },
+    webContents: {
+      id: 404,
+      isDestroyed() {
+        return false;
+      },
+      send(channel, payload) {
+        minimizeSentMessages.push([channel, payload]);
+      },
+    },
+  };
 
+  buildAppMenu({
+    buildFromTemplate(template) {
+      return { template };
+    },
+  }, { name: "Netcatty" }, false, "en", {
+    setAppLockWindowTitle(target, title) {
+      guardedTitles.push([target, title]);
+      target.setTitle(title);
+      return true;
+    },
+  });
   registerWindowHandlers(ipcMain, { themeSource: "light" });
 
   const result = await handlers.get("netcatty:window:focus")({
@@ -2163,6 +2212,7 @@ test("window IPC handlers target the sender owner window", async () => {
 
   assert.equal(titleResult, true);
   assert.deepEqual(titles, ["Prod SSH"]);
+  assert.deepEqual(guardedTitles, [[win, "Prod SSH"]]);
 
   const opacityCalls = [];
   registerMainWindow({
@@ -2183,6 +2233,20 @@ test("window IPC handlers target the sender owner window", async () => {
   const opacityResult = await handlers.get("netcatty:setWindowOpacity")(null, 0.7);
   assert.equal(opacityResult, true);
   assert.deepEqual(opacityCalls, [0.7]);
+
+  await handlers.get("netcatty:window:minimize")({
+    sender: {
+      id: 505,
+      getOwnerBrowserWindow() {
+        return minimizeWin;
+      },
+    },
+  });
+
+  assert.deepEqual(minimizeCalls, ["minimize"]);
+  assert.deepEqual(minimizeCloseCalls, []);
+  assert.deepEqual(minimizeHideCalls, []);
+  assert.deepEqual(minimizeSentMessages, []);
 });
 
 test("resolveSettingsWindowBounds centers settings on the requesting window display", () => {

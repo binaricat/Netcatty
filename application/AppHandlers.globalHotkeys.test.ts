@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { executeHotkeyActionImpl, getLogHostVisualSnapshot, handleGlobalHotkeyKeyDownImpl } from './app/AppHandlers.ts';
+import {
+  executeHotkeyActionImpl,
+  getLogHostVisualSnapshot,
+  handleEscapeKeyDownImpl,
+  handleGlobalHotkeyKeyDownImpl,
+  markForwardedNativeShortcutEvent,
+} from './app/AppHandlers.ts';
 import { matchesKeyBinding } from '../domain/models.ts';
 import { DEFAULT_KEY_BINDINGS } from '../domain/models/keyBindings.ts';
 
@@ -27,6 +33,14 @@ class FakeHTMLElement {
 
   hasAttribute(name: string): boolean {
     return name === 'data-session-id';
+  }
+}
+
+class FakeMonacoHTMLElement extends FakeHTMLElement {
+  tagName = 'TEXTAREA';
+
+  closest(selector: string): FakeMonacoHTMLElement | null {
+    return selector.includes('monaco') ? this : null;
   }
 }
 
@@ -111,6 +125,81 @@ test('global hotkey handler routes quick switch through focused search inputs', 
   assert.deepEqual(handledActions, ['quickSwitch']);
 });
 
+test('global hotkey handler magnifies panes from focused form inputs', () => {
+  const target = new FakeInputHTMLElement();
+  const handledActions: string[] = [];
+  const event = {
+    key: 'm',
+    code: 'KeyM',
+    ctrlKey: false,
+    metaKey: false,
+    altKey: true,
+    shiftKey: false,
+    target,
+    composedPath: () => [target],
+    preventDefault: () => {},
+    stopPropagation: () => {},
+  } as unknown as KeyboardEvent;
+
+  handleGlobalHotkeyKeyDownImpl(
+    () => ({
+      HOTKEY_DEBUG: false,
+      closeTabKeyStr: 'Ctrl + W',
+      executeHotkeyAction: (action: string) => {
+        handledActions.push(action);
+      },
+      hotkeyScheme: 'pc',
+      keyBindings: DEFAULT_KEY_BINDINGS,
+      matchesKeyBinding,
+    }),
+    event,
+  );
+
+  assert.deepEqual(handledActions, ['togglePaneZoom']);
+});
+
+test('forwarded native shortcut can run a reassigned global action from Monaco', () => {
+  const target = new FakeMonacoHTMLElement();
+  const handledActions: string[] = [];
+  let prevented = false;
+  const event = markForwardedNativeShortcutEvent({
+    key: 'w',
+    code: 'KeyW',
+    ctrlKey: false,
+    metaKey: true,
+    altKey: false,
+    shiftKey: false,
+    target,
+    composedPath: () => [target],
+    preventDefault: () => {
+      prevented = true;
+    },
+    stopPropagation: () => {},
+  } as unknown as KeyboardEvent);
+  const keyBindings = DEFAULT_KEY_BINDINGS.map((binding) => {
+    if (binding.action === 'closeTab') return { ...binding, mac: 'Disabled' };
+    if (binding.action === 'newTab') return { ...binding, mac: '⌘ + W' };
+    return binding;
+  });
+
+  handleGlobalHotkeyKeyDownImpl(
+    () => ({
+      HOTKEY_DEBUG: false,
+      closeTabKeyStr: 'Disabled',
+      executeHotkeyAction: (action: string) => {
+        handledActions.push(action);
+      },
+      hotkeyScheme: 'mac',
+      keyBindings,
+      matchesKeyBinding,
+    }),
+    event,
+  );
+
+  assert.deepEqual(handledActions, ['newTab']);
+  assert.equal(prevented, true);
+});
+
 test('quick switch hotkey toggles the quick switcher open state', () => {
   let isQuickSwitcherOpen = false;
   const setIsQuickSwitcherOpen = (next: boolean) => {
@@ -168,6 +257,148 @@ test('quick switch hotkey toggles the quick switcher open state', () => {
 
   executeHotkeyActionImpl(() => ({ ...baseCtx, isQuickSwitcherOpen: true }), 'quickSwitch', event);
   assert.equal(isQuickSwitcherOpen, false);
+});
+
+test('pane zoom hotkey delegates to the active in-app magnification surface', () => {
+  let toggles = 0;
+  const noop = () => {};
+  const controller = {
+    getState: () => 'focusable' as const,
+    focus: () => false,
+    restore: () => false,
+    toggle: () => {
+      toggles += 1;
+      return true;
+    },
+  };
+
+  executeHotkeyActionImpl(() => ({
+    IS_DEV: false,
+    MOVE_FOCUS_DEBOUNCE_MS: 0,
+    activeTabStore: { getActiveTabId: () => 'workspace-1' },
+    addConnectionLogRef: { current: noop },
+    closeSession: noop,
+    closeTabInFlightRef: { current: false },
+    closeWorkspace: noop,
+    collectSessionIds: () => [],
+    confirmIfBusyLocalTerminal: async () => true,
+    createLocalTerminalWithCurrentShell: noop,
+    editorTabs: [],
+    fromEditorTabId: () => null,
+    handleOpenSettingsRef: { current: noop },
+    handleRequestCloseEditorTabRef: { current: noop },
+    isEditorTabId: () => false,
+    isQuickSwitcherOpen: false,
+    lastMoveFocusTimeRef: { current: 0 },
+    moveFocusInWorkspace: noop,
+    orderedTabs: [],
+    resolveCloseIntent: () => ({ kind: 'noop' }),
+    resolveSnippetsShortcutIntent: () => ({ kind: 'noop' }),
+    sessions: [],
+    setActiveTabId: noop,
+    setAddToWorkspaceDialog: noop,
+    setIsQuickSwitcherOpen: noop,
+    setNavigateToSection: noop,
+    settings: { showSftpTab: true, shellOnlyTabNumberShortcuts: false },
+    sftpPaneMagnificationRef: { current: null },
+    splitSessionWithCurrentShell: noop,
+    systemInfoRef: { current: { username: 'user', hostname: 'host' } },
+    terminalPaneMagnificationRef: { current: controller },
+    toEditorTabId: (id: string) => `editor:${id}`,
+    toggleBroadcast: noop,
+    toggleScriptsSidePanelRef: { current: noop },
+    toggleSidePanelRef: { current: noop },
+    toggleWorkspaceViewMode: noop,
+    workspaces: [],
+  }), 'togglePaneZoom', {} as KeyboardEvent);
+
+  assert.equal(toggles, 1);
+});
+
+test('move-focus shortcut cannot send input behind a magnified pane', () => {
+  let moveCalls = 0;
+  executeHotkeyActionImpl(() => ({
+    IS_DEV: false,
+    MOVE_FOCUS_DEBOUNCE_MS: 0,
+    activeTabStore: { getActiveTabId: () => 'workspace-1' },
+    editorTabs: [],
+    lastMoveFocusTimeRef: { current: 0 },
+    moveFocusInWorkspace: () => {
+      moveCalls += 1;
+      return true;
+    },
+    orderedTabs: [],
+    settings: { showSftpTab: true, shellOnlyTabNumberShortcuts: false },
+    sftpPaneMagnificationRef: { current: null },
+    terminalPaneMagnificationRef: {
+      current: {
+        getState: () => 'focused' as const,
+        focus: () => false,
+        restore: () => true,
+        toggle: () => true,
+      },
+    },
+    toEditorTabId: (id: string) => `editor:${id}`,
+    workspaces: [{ id: 'workspace-1', title: 'Workspace' }],
+  }), 'moveFocus', {
+    key: 'ArrowRight',
+  } as KeyboardEvent);
+
+  assert.equal(moveCalls, 0);
+});
+
+test('Escape restores magnification after transient dialogs are closed', () => {
+  let restores = 0;
+  let prevented = false;
+  let stopped = false;
+  const event = {
+    key: 'Escape',
+    defaultPrevented: false,
+    preventDefault: () => { prevented = true; },
+    stopPropagation: () => { stopped = true; },
+  } as unknown as KeyboardEvent;
+
+  handleEscapeKeyDownImpl(() => ({
+    isQuickSwitcherOpen: false,
+    setIsQuickSwitcherOpen: () => {},
+    sftpPaneMagnificationRef: { current: null },
+    terminalPaneMagnificationRef: {
+      current: {
+        getState: () => 'focused',
+        focus: () => false,
+        restore: () => {
+          restores += 1;
+          return true;
+        },
+        toggle: () => false,
+      },
+    },
+  }), event);
+
+  assert.equal(restores, 1);
+  assert.equal(prevented, true);
+  assert.equal(stopped, true);
+});
+
+test('consumed Escape does not restore magnification', () => {
+  let restores = 0;
+  handleEscapeKeyDownImpl(() => ({
+    isQuickSwitcherOpen: false,
+    setIsQuickSwitcherOpen: () => {},
+    terminalPaneMagnificationRef: {
+      current: {
+        getState: () => 'focused',
+        focus: () => false,
+        restore: () => {
+          restores += 1;
+          return true;
+        },
+        toggle: () => false,
+      },
+    },
+  }), { key: 'Escape', defaultPrevented: true } as KeyboardEvent);
+
+  assert.equal(restores, 0);
 });
 
 test('close tab hotkey routes native plugin view tabs through their owner', () => {

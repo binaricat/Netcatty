@@ -24,6 +24,7 @@ import {
   shouldCommitImeControlledChange,
 } from "../../domain/imeControlledInput";
 import { toast } from "../ui/toast";
+import { sftpFilterFocusStore } from "../../application/state/sftp/sftpFilterFocusStore";
 
 export const SFTP_TOOLBAR_ITEM_IDS = [
   "bookmark",
@@ -251,14 +252,16 @@ export const SftpBookmarkList: React.FC<SftpBookmarkListProps> = ({
           )}
           <Tooltip>
             <TooltipTrigger asChild>
-              <button
-                type="button"
-                className="flex-1 text-left text-xs truncate font-mono"
-                onClick={() => onNavigateToBookmark(bm.path)}
-              >
-                {bm.label}
-                <span className="ml-1.5 text-muted-foreground text-[10px]">{bm.path}</span>
-              </button>
+              <PopoverClose asChild>
+                <button
+                  type="button"
+                  className="flex-1 text-left text-xs truncate font-mono"
+                  onClick={() => onNavigateToBookmark(bm.path)}
+                >
+                  {bm.label}
+                  <span className="ml-1.5 text-muted-foreground text-[10px]">{bm.path}</span>
+                </button>
+              </PopoverClose>
             </TooltipTrigger>
             <TooltipContent>{bm.path}</TooltipContent>
           </Tooltip>
@@ -406,6 +409,11 @@ export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = React.memo(({
       setFilterDraft(pane.filter);
     }
   }, [showFilterBar, pane.filter]);
+
+  useEffect(() => sftpFilterFocusStore.subscribe(pane.id, () => {
+    setShowFilterBar(true);
+    window.setTimeout(() => filterInputRef.current?.focus(), 0);
+  }), [filterInputRef, pane.id, setShowFilterBar]);
 
   const commitFilterValue = useCallback((value: string) => {
     // Committing/clearing finalizes any IME session, so drop the guard here. This

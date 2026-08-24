@@ -203,7 +203,7 @@ export const TerminalConnectionDialog: React.FC<TerminalConnectionDialogProps> =
         }
         event.preventDefault();
         event.stopPropagation();
-        onRetry();
+        onRetry?.();
     }, [canEnterReconnectFromDialog, onRetry]);
     const targetFirstSegmentWidth = isVerifyingHostKey || shouldCompleteProgress
         ? 100

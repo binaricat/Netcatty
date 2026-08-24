@@ -4,7 +4,7 @@ declare global {
   interface NetcattyBridge {
     // AI / external agents
     aiSyncProviders?(providers: Array<{ id: string; providerId: string; apiKey?: string; baseURL?: string; enabled: boolean }>): Promise<{ ok: boolean }>;
-    aiChatStream?(requestId: string, url: string, headers?: Record<string, string>, body?: string, providerId?: string): Promise<{ ok: boolean; statusCode?: number; statusText?: string; error?: string }>;
+    aiChatStream?(requestId: string, url: string, headers?: Record<string, string>, body?: string, providerId?: string, idleTimeoutMs?: number): Promise<{ ok: boolean; statusCode?: number; statusText?: string; error?: string; aborted?: boolean }>;
     aiChatCancel?(requestId: string): Promise<boolean>;
     aiFetch?(url: string, method?: string, headers?: Record<string, string>, body?: string, providerId?: string, skipHostCheck?: boolean, followRedirects?: boolean, skipTLSVerify?: boolean): Promise<{ ok: boolean; status?: number; data: string; error?: string }>;
     aiAllowlistAddHost?(baseURL: string): Promise<{ ok: boolean; error?: string }>;

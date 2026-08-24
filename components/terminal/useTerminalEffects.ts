@@ -48,12 +48,18 @@ import {
   type XTermFontRemeasureTarget,
 } from './runtime/terminalFontRemeasure';
 import { shouldClaimTerminalKeyboardFocus } from '../../domain/terminalKeyboardFocus';
+import { handleTerminalOscNotification } from '../../application/state/oscDesktopNotifications';
+import { settleTerminalSearchAfterLayout } from './hooks/useTerminalSearch';
 import {
   isTerminalCloseGenerationCurrent,
   resolveConnectionLogCapturePayload,
   scheduleTerminalCloseTeardown,
   serializeTerminalCloseFallback,
 } from './runtime/terminalCloseCapture';
+import {
+  CONNECTION_PROGRESS_START,
+  advanceIndeterminateConnectionProgress,
+} from './connectionProgress';
 import {
   getConnectionTimeoutMs,
   resolveActiveConnectionTimeoutHost,
@@ -172,6 +178,9 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
     effectiveTerminalProtocol,
   ) && !kittyKeyboardProtocolEnabledForSession;
   ctx.pluginDecorationRulesRef.current = pluginDecorationRules;
+  const prevIsSearchOpenRef = useRef(isSearchOpen);
+  const isFocusedRef = useRef(!!isFocused);
+  isFocusedRef.current = !!isFocused;
   const pluginAwareOnCommandSubmitted = (...args: Parameters<NonNullable<typeof onCommandSubmitted>>) => {
     markTerminalCommandCompletionPending(promptLineBreakStateRef);
     publishPluginTerminalRuntimeLifecycleEvent(pluginTerminalLifecycle, 'commandSubmitted');
@@ -524,6 +533,16 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
           },
           onBell: () => {
             onTerminalBell?.(sessionId);
+          },
+          onOscNotification: (notification) => {
+            handleTerminalOscNotification({
+              notification,
+              mode: terminalSettingsRef.current?.oscNotifications,
+              sessionFocused: isFocusedRef.current,
+              sessionId,
+              fallbackTitle: host.label || host.hostname || "Netcatty",
+              onSessionActivity: () => onTerminalBell?.(sessionId),
+            });
           },
           onOsc52ReadRequest: handleOsc52ReadRequest,
           // Autocomplete integration
@@ -1002,14 +1021,8 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
       setProgressLogs((prev) => [...prev, "Connection timed out."]);
     }, connectionTimeout);
 
-    setProgressValue(5);
     const prog = setInterval(() => {
-      setProgressValue((prev) => {
-        if (prev >= 95) return prev;
-        const remaining = 95 - prev;
-        const increment = Math.max(1, remaining * 0.15);
-        return Math.min(95, prev + increment);
-      });
+      setProgressValue(advanceIndeterminateConnectionProgress);
     }, 200);
 
     return () => {
@@ -1024,6 +1037,7 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
   useEffect(() => {
     if (status === "connecting") {
       setIsDisconnectedDialogDismissed(false);
+      setProgressValue(CONNECTION_PROGRESS_START);
     }
   }, [status]);
 
@@ -1583,13 +1597,29 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
   // When search bar opens/closes, re-fit terminal and maintain scroll position
   useEffect(() => {
     const term = termRef.current;
+    const wasSearchOpen = prevIsSearchOpenRef.current;
+    prevIsSearchOpenRef.current = isSearchOpen;
     if (!term || !fitAddonRef.current) return;
     const buffer = term.buffer.active;
     const wasAtBottom = buffer.viewportY >= buffer.baseY;
     const prevViewportY = buffer.viewportY;
+    const closingSearch = wasSearchOpen && !isSearchOpen;
+    let raf = 0;
+    const settleClosedSearch = () => {
+      // A later open flips prevIsSearchOpenRef before this stale frame runs.
+      if (!closingSearch || prevIsSearchOpenRef.current) return;
+      settleTerminalSearchAfterLayout(
+        searchAddonRef.current,
+        term,
+        () => xtermRuntimeRef.current?.clearTextureAtlas(),
+      );
+    };
     const timer = setTimeout(() => {
       safeFit({ force: true, requireVisible: true });
-      requestAnimationFrame(() => {
+      settleClosedSearch();
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        settleClosedSearch();
         if (wasAtBottom) {
           term.scrollToBottom();
         } else {
@@ -1597,7 +1627,10 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
         }
       });
     }, 0);
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+      if (raf) cancelAnimationFrame(raf);
+    };
   }, [isSearchOpen]);
 
   // When compose bar opens/closes, re-fit terminal and maintain scroll position

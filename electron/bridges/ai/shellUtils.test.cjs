@@ -242,6 +242,45 @@ test("resolveWindowsShimToNativeExe resolves npm .cmd shim to native exe", () =>
   }
 });
 
+test("prepareCommandForSpawn can skip native exe unwrap for node+script shims", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-spawn-no-unwrap-"));
+  try {
+    const shimPath = path.join(tmp, "cursor-agent.cmd");
+    const nodeExe = path.join(tmp, "versions", "2026.06.01-abc", "node.exe");
+    fs.mkdirSync(path.dirname(nodeExe), { recursive: true });
+    fs.writeFileSync(nodeExe, "", "utf8");
+    fs.writeFileSync(
+      shimPath,
+      '@ECHO off\r\n"%~dp0\\versions\\2026.06.01-abc\\node.exe" "%~dp0\\versions\\2026.06.01-abc\\index.js" %*\r\n',
+      "utf8",
+    );
+
+    assert.equal(resolveWindowsShimToNativeExe(shimPath, "win32"), nodeExe);
+
+    const unwrapped = prepareCommandForSpawn(shimPath, ["status", "--format", "json"]);
+    const wrapped = prepareCommandForSpawn(shimPath, ["status", "--format", "json"], {
+      unwrapNativeExe: false,
+    });
+    if (process.platform === "win32") {
+      assert.deepEqual(unwrapped, {
+        command: nodeExe,
+        args: ["status", "--format", "json"],
+        shell: false,
+      });
+      assert.deepEqual(wrapped, {
+        command: buildWindowsShellCommandLine(shimPath, ["status", "--format", "json"]),
+        args: [],
+        shell: true,
+      });
+    } else {
+      assert.equal(unwrapped.shell, false);
+      assert.equal(wrapped.shell, false);
+    }
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test("prepareCommandForSpawn resolves Windows cmd shim to native exe with shell:false", () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-spawn-native-"));
   try {

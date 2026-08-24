@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import en from '../locales/en.ts';
 import ru from '../locales/ru.ts';
+import es from '../locales/es.ts';
 import zhCN from '../locales/zh-CN.ts';
 import zhTW from '../locales/zh-TW.ts';
 
@@ -39,7 +40,7 @@ const keys = [
 ] as const;
 
 test('convergent sync copy exists in every bundled locale', () => {
-  for (const [locale, messages] of Object.entries({ en, ru, zhCN, zhTW })) {
+  for (const [locale, messages] of Object.entries({ en, ru, es, zhCN, zhTW })) {
     for (const key of keys) {
       assert.equal(typeof messages[key], 'string', `${locale} is missing ${key}`);
       assert.notEqual(messages[key], '', `${locale} has empty ${key}`);

@@ -83,6 +83,9 @@ export const ruTerminalMessages: Messages = {
   'terminal.composeBar.snippetClickHint': 'Клик — вставить · Shift+клик — отправить',
   'terminal.toolbar.focus': 'Фокус',
   'terminal.toolbar.focusMode': 'Режим фокуса',
+  'terminal.paneMagnification.magnify': 'Увеличить текущую панель',
+  'terminal.paneMagnification.restore': 'Восстановить раскладку панелей',
+  'terminal.paneMagnification.hint': 'Увеличено',
   'terminal.toolbar.detach': 'Открепить в отдельную вкладку',
   'terminal.toolbar.dragPane': 'Перетащить панель терминала',
   'terminal.toolbar.showActions': 'Показать действия терминала',
@@ -204,6 +207,9 @@ export const ruTerminalMessages: Messages = {
   'terminal.progress.cancelling': 'Отмена...',
   'terminal.progress.startOver': 'Начать заново',
   'terminal.progress.enterReconnectHint': 'Нажмите Enter, чтобы подключиться снова',
+  'terminal.progress.reconnecting': 'Повторное подключение...',
+  'terminal.progress.autoReconnectScheduled': 'Соединение потеряно. Повторное подключение через {seconds} с (попытка {attempt}).',
+  'terminal.progress.autoReconnectAttempt': 'Попытка автоматического подключения {attempt}...',
   'terminal.connection.dismissDisconnectedDialog': 'Закрыть уведомление об отключении',
   'terminal.connection.chainOf': 'Цепочка {current} из {total}',
   'terminal.connection.showLogs': 'Показать журналы',
@@ -765,7 +771,7 @@ export const ruTerminalMessages: Messages = {
   'snippets.shortkey.recording': 'Нажмите сочетание клавиш...',
   'snippets.shortkey.hint': 'Нажмите это сочетание в терминале, чтобы быстро отправить команду.',
   'snippets.shortkey.clear': 'Очистить сочетание',
-  'snippets.shortkey.error.systemConflict': 'Это сочетание конфликтует с системным сочетанием',
+  'snippets.shortkey.error.systemConflict': 'Это сочетание конфликтует с «{name}»',
   'snippets.shortkey.error.snippetConflict': 'Это сочетание уже используется сниппетом: {name}',
 
   // Serial Port

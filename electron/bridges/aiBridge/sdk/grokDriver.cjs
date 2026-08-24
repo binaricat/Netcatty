@@ -22,6 +22,27 @@ const GROK_ABORT_GRACE_MS = 1_500;
 const MAX_GROK_STDERR_CHARS = 64 * 1024;
 const MAX_GROK_MODEL_STDOUT_CHARS = 1024 * 1024;
 const MAX_GROK_LINE_BYTES = 10 * 1024 * 1024;
+const GROK_REASONING_EFFORTS = new Set([
+  "none",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+]);
+const GROK_REASONING_FALLBACKS = Object.freeze({
+  "grok-4.5": {
+    name: "Grok 4.5",
+    thinkingLevels: ["high", "medium", "low"],
+    defaultThinkingLevel: "high",
+  },
+  "grok-4.6": {
+    name: "Grok 4.6",
+    thinkingLevels: ["xhigh", "high", "medium", "low"],
+    defaultThinkingLevel: "high",
+  },
+});
 
 /**
  * Resolve Grok CLI spawn target for Windows .cmd/.bat shims.
@@ -280,6 +301,21 @@ function resolveGrokToolIntegrationFlags(toolIntegrationMode) {
   ];
 }
 
+/**
+ * The renderer encodes a reasoning selection as `<model>/<effort>`. Grok's
+ * CLI requires those values as separate flags, and model ids may themselves
+ * contain `/`, so split only a recognized trailing effort token.
+ */
+function parseGrokModelSelection(model) {
+  const value = String(model || "").trim();
+  const slash = value.lastIndexOf("/");
+  const effort = slash > 0 ? value.slice(slash + 1).toLowerCase() : "";
+  if (slash > 0 && GROK_REASONING_EFFORTS.has(effort)) {
+    return { model: value.slice(0, slash), effort };
+  }
+  return { model: value || undefined, effort: undefined };
+}
+
 function buildGrokCliArgs({
   prompt,
   model,
@@ -296,9 +332,12 @@ function buildGrokCliArgs({
     "--output-format",
     "streaming-json",
   ];
-  const modelId = String(model || "").trim();
-  if (modelId) {
-    args.push("-m", modelId);
+  const selection = parseGrokModelSelection(model);
+  if (selection.model) {
+    args.push("-m", selection.model);
+  }
+  if (selection.effort) {
+    args.push("--reasoning-effort", selection.effort);
   }
   if (cwd) {
     args.push("--cwd", String(cwd));
@@ -908,7 +947,34 @@ function parseGrokModelsOutput(stdout) {
     }
   }
 
-  return { currentModelId, models };
+  return { currentModelId, models: models.map(applyGrokReasoningFallback) };
+}
+
+function applyGrokReasoningFallback(model) {
+  const id = String(model?.id || "").trim();
+  const fallback = GROK_REASONING_FALLBACKS[id];
+  if (!fallback || (Array.isArray(model?.thinkingLevels) && model.thinkingLevels.length > 0)) {
+    return model;
+  }
+  return {
+    ...model,
+    name: String(model?.name || fallback.name),
+    thinkingLevels: [...fallback.thinkingLevels],
+    defaultThinkingLevel: fallback.defaultThinkingLevel,
+  };
+}
+
+function resolveGrokCatalogCurrentModelId(models, currentModelId) {
+  const advertised = String(currentModelId || "").trim();
+  if (!advertised) return null;
+  const selection = parseGrokModelSelection(advertised);
+  const preset = (Array.isArray(models) ? models : [])
+    .find((entry) => entry?.id === selection.model);
+  if (!preset?.thinkingLevels?.length) return advertised;
+  const effort = preset.thinkingLevels.includes(selection.effort)
+    ? selection.effort
+    : (preset.defaultThinkingLevel || preset.thinkingLevels[0]);
+  return effort ? `${preset.id}/${effort}` : preset.id;
 }
 
 async function listGrokModels({
@@ -948,7 +1014,7 @@ async function listGrokModels({
 
     let child;
     try {
-      child = spawnGrokProcess(spawnImpl, cliPath, ["models"], {
+      child = spawnGrokProcess(spawnImpl, cliPath, ["--no-auto-update", "models"], {
         env: childEnv,
         stdio: ["ignore", "pipe", "pipe"],
         windowsHide: true,
@@ -998,6 +1064,7 @@ module.exports = {
   NETCATTY_MCP_NAME,
   MAX_GROK_LINE_BYTES,
   GROK_MCP_MODE_DISALLOWED_LOCAL_TOOLS,
+  applyGrokReasoningFallback,
   buildGrokCliArgs,
   buildGrokMcpServerTomlSection,
   createLineBuffer,
@@ -1008,6 +1075,7 @@ module.exports = {
   parseGrokModelsOutput,
   resetGrokMcpMergeRefcountsForTests,
   resolveGrokPermissionFlags,
+  resolveGrokCatalogCurrentModelId,
   resolveGrokRuntime,
   resolveGrokSpawnSpec,
   resolveGrokToolIntegrationFlags,
@@ -1015,6 +1083,7 @@ module.exports = {
   extractGrokAcpPromptUsage,
   emitGrokUsage,
   normalizeGrokPlanUpdate,
+  parseGrokModelSelection,
   shouldReportGrokProcessExitFailure,
   runGrokTurn,
   spawnGrokProcess,

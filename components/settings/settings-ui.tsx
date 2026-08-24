@@ -161,6 +161,16 @@ export const SettingsSection: React.FC<{
   </section>
 );
 
+/** Footer note under a SettingCard. Keep a gap so it does not kiss the card. */
+export const settingHintClassName = "mt-3 text-xs text-muted-foreground";
+
+export const SettingHint: React.FC<{
+  children: React.ReactNode;
+  className?: string;
+}> = ({ children, className }) => (
+  <p className={cn(settingHintClassName, className)}>{children}</p>
+);
+
 export const settingCardClassName = "rounded-lg border bg-card";
 
 interface SettingCardProps {

@@ -8,6 +8,27 @@
 
 import { ArrowUp, AtSign, Check, ChevronDown, ChevronRight, Cpu, Eye, FileText, ImageIcon, Loader2, MessageSquare, Package, Plus, ShieldCheck, SquareTerminal, X, Zap } from 'lucide-react';
 import {
+  resolveModelSelectionWithThinking,
+  resolveThinkingSelection,
+  type ComposerModelPrefs,
+} from '../../infrastructure/ai/composerPicker';
+import {
+  cattyReasoningLevelsForSelection,
+  resolveVisibleCattyThinkingLevel,
+} from '../../infrastructure/ai/cattyReasoning';
+import {
+  readComposerModelPrefs,
+  rememberComposerRecentModel,
+  subscribeComposerModelPrefs,
+  toggleComposerPinnedModel,
+} from '../../infrastructure/ai/composerModelPrefs';
+import {
+  ComposerModelPicker,
+  COMPOSER_MODEL_PICKER_WIDTH,
+  COMPOSER_PROVIDER_PICKER_WIDTH,
+} from './ComposerModelPicker';
+import { ComposerThinkingChip } from './ComposerThinkingChip';
+import {
   buildSlashCommandItems,
   filterQuickMessages,
   filterSystemSlashCommands,
@@ -20,7 +41,7 @@ import {
   type UserSkillSlashOption,
 } from '../../infrastructure/ai/quickMessages';
 import { SlashCommandPicker } from './SlashCommandPicker';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import { createPortal } from 'react-dom';
 import type { FormEvent } from 'react';
@@ -32,12 +53,13 @@ import {
   PromptInputTools,
 } from '../ai-elements/prompt-input';
 import type { PromptInputStatus } from '../ai-elements/prompt-input';
-import { formatThinkingLabel } from '../../infrastructure/ai/types';
 import type { AgentModelPreset, AIPermissionMode, ProviderConfig, UploadedFile } from '../../infrastructure/ai/types';
 import { ProviderIconBadge } from '../settings/tabs/ai/ProviderIconBadge';
 import { VariableSizeVirtualList, type VariableSizeVirtualListHandle } from '../ui/VariableSizeVirtualList';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
+import { isAppLockOverlayActive } from '../../infrastructure/appLockOverlayDom';
 import type { AgentContextUsage } from '../../application/state/useAgentCompactionUi';
+import { markAiComposerActivity, setAiComposerComposing } from './aiMarkdownWarmup';
 import {
   CHAT_INPUT_DEFAULT_HEIGHT,
   CHAT_INPUT_MAX_HEIGHT,
@@ -50,12 +72,8 @@ import {
   resolveVisibleChatInputMaxHeight,
 } from './chatInputResize';
 
-// Keep in sync with the popover's Tailwind max-width below.
-const MODEL_PICKER_MAX_WIDTH = 360;
-// Slightly wider for the provider picker so the per-row default-model
-// caption doesn't truncate.
-const PROVIDER_PICKER_MAX_WIDTH = 320;
-const PERMISSION_PICKER_WIDTH = 250;
+const PERMISSION_PICKER_WIDTH = 200;
+const THINKING_PICKER_WIDTH = 168;
 const MENU_VIEWPORT_GUTTER = 8;
 const CONTEXT_USAGE_RING_RADIUS = 10;
 const CONTEXT_USAGE_RING_CIRCUMFERENCE = 2 * Math.PI * CONTEXT_USAGE_RING_RADIUS;
@@ -68,11 +86,8 @@ function formatContextTokens(tokens: number): string {
 
 /**
  * Provider picker payload used by Catty Agent. When set, the model chip
- * switches to a flat provider list (provider icon + name + the provider's
- * configured default model as caption) in place of the generic Cpu glyph
- * + model-preset dropdown. Each provider exposes a single model — its
- * `defaultModel` — so a two-level menu would be empty noise; picking a
- * provider implicitly picks its model.
+ * opens a single-column model list. The current provider sits on a
+ * one-line header that drills into a second-level provider list.
  */
 export interface ProviderSwitcherConfig {
   /** Every configured provider — Settings-level visibility, not the
@@ -84,8 +99,89 @@ export interface ProviderSwitcherConfig {
   /** Currently bound model id under the selected provider. */
   selectedModelId?: string;
   /** Fires when the user picks a (providerId, modelId) pair. */
-  onSelect: (providerId: string, modelId: string) => void;
+  onSelect: (providerId: string, modelId: string, contextWindow?: number) => void;
 }
+
+type ComposerHasTextStore = {
+  subscribe: (listener: () => void) => () => void;
+  get: () => boolean;
+  set: (next: boolean) => void;
+};
+
+function createComposerHasTextStore(initial: boolean): ComposerHasTextStore {
+  let value = initial;
+  const listeners = new Set<() => void>();
+  return {
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    get: () => value,
+    set: (next) => {
+      if (value === next) return;
+      value = next;
+      for (const listener of listeners) listener();
+    },
+  };
+}
+
+const ComposerSendUi = React.memo(function ComposerSendUi({
+  hasTextStore,
+  hasTerminalSelectionAttachment,
+  composerDisabled,
+  disabled,
+  isStreaming,
+  canSteer,
+  isSteering,
+  status,
+  onStop,
+  steerSendingLabel,
+  steerLabel,
+}: {
+  hasTextStore: ComposerHasTextStore;
+  hasTerminalSelectionAttachment: boolean;
+  composerDisabled: boolean;
+  disabled: boolean;
+  isStreaming: boolean;
+  canSteer: boolean;
+  isSteering: boolean;
+  status: PromptInputStatus;
+  onStop?: () => void;
+  steerSendingLabel: string;
+  steerLabel: string;
+}) {
+  const hasComposerText = useSyncExternalStore(hasTextStore.subscribe, hasTextStore.get, hasTextStore.get);
+  const sendDisabled = (!hasComposerText && !hasTerminalSelectionAttachment) || disabled;
+  if (isStreaming && canSteer) {
+    return (
+      <>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="submit"
+              disabled={(!hasComposerText && !hasTerminalSelectionAttachment) || composerDisabled}
+              aria-label={isSteering ? steerSendingLabel : steerLabel}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-foreground/20 bg-foreground text-background shadow-sm transition-colors hover:bg-foreground/90 disabled:border-border/80 disabled:bg-muted/52 disabled:text-foreground/72"
+            >
+              {isSteering ? <Loader2 size={14} className="animate-spin" /> : <ArrowUp size={14} />}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>{isSteering ? steerSendingLabel : steerLabel}</TooltipContent>
+        </Tooltip>
+        <PromptInputSubmit status="streaming" onStop={onStop} />
+      </>
+    );
+  }
+  return (
+    <PromptInputSubmit
+      status={status}
+      onStop={onStop}
+      disabled={sendDisabled}
+    />
+  );
+});
 
 interface ChatInputProps {
   value: string;
@@ -141,6 +237,13 @@ interface ChatInputProps {
    * `modelPresets` dropdown because their provider is wired inside the CLI.
    */
   providerSwitcher?: ProviderSwitcherConfig;
+  /** Scope key for recent/pinned model prefs. */
+  pickerScope?: string;
+  /** Catty-only reasoning effort, stored separately from the model id. */
+  thinkingLevel?: string;
+  onThinkingLevelChange?: (level: string) => void;
+  /** Hidden retained panels must not leave body-portaled menus open. */
+  parked?: boolean;
 }
 
 const ChatInput: React.FC<ChatInputProps> = ({
@@ -176,19 +279,30 @@ const ChatInput: React.FC<ChatInputProps> = ({
   permissionMode,
   onPermissionModeChange,
   providerSwitcher,
+  pickerScope = 'default',
+  thinkingLevel,
+  onThinkingLevelChange,
+  parked = false,
 }) => {
   const { t } = useI18n();
   const hasTerminalSelectionAttachment = files.some((file) => file.terminalSelection);
   const composerDisabled = disabled || isSteering;
+  const composerTextRef = useRef(value);
+  const hasTextStoreRef = useRef<ComposerHasTextStore | null>(null);
+  if (hasTextStoreRef.current == null) {
+    hasTextStoreRef.current = createComposerHasTextStore(value.trim().length > 0);
+  }
+  const hasTextStore = hasTextStoreRef.current;
+  const pushedParentTextRef = useRef(value);
   const [composerHeight, setComposerHeight] = useState<number | null>(null);
   const [composerMaxHeight, setComposerMaxHeight] = useState(CHAT_INPUT_MAX_HEIGHT);
   const composerDesiredHeightRef = useRef<number | null>(null);
   // Consolidate menu state into a single discriminated union to prevent multiple menus open simultaneously
-  type ActiveMenu = 'model' | 'attach' | 'atMention' | 'slashCommand' | 'perm' | null;
+  type ActiveMenu = 'model' | 'thinking' | 'attach' | 'atMention' | 'slashCommand' | 'perm' | null;
   const [activeMenu, setActiveMenu] = useState<ActiveMenu>(null);
   const [menuPos, setMenuPos] = useState<{ left: number; bottom: number } | null>(null);
   const [inputPanelPos, setInputPanelPos] = useState<{ left: number; bottom: number; width: number } | null>(null);
-  const [hoveredModelId, setHoveredModelId] = useState<string | null>(null);
+  const [modelPrefs, setModelPrefs] = useState<ComposerModelPrefs>(() => readComposerModelPrefs(pickerScope));
   const [slashQuery, setSlashQuery] = useState('');
   const [slashRange, setSlashRange] = useState<{ start: number; end: number } | null>(null);
   // Active highlight index for @ mention / slash skill keyboard navigation
@@ -196,6 +310,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
 
   // Derived booleans for readability
   const showModelPicker = activeMenu === 'model';
+  const showThinkingPicker = activeMenu === 'thinking';
   const showAttachMenu = activeMenu === 'attach';
   const showAtMention = activeMenu === 'atMention';
   const showSlashCommandPicker = activeMenu === 'slashCommand';
@@ -205,10 +320,19 @@ const ChatInput: React.FC<ChatInputProps> = ({
     setActiveMenu(null);
     setMenuPos(null);
     setInputPanelPos(null);
-    setHoveredModelId(null);
     setSlashQuery('');
     setSlashRange(null);
   }, []);
+
+  useEffect(() => {
+    const refresh = () => setModelPrefs(readComposerModelPrefs(pickerScope));
+    refresh();
+    return subscribeComposerModelPrefs(refresh);
+  }, [pickerScope]);
+
+  useEffect(() => {
+    if (parked) closeAllMenus();
+  }, [closeAllMenus, parked]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const inputShellRef = useRef<HTMLDivElement>(null);
   const resizeStartRef = useRef<{
@@ -320,11 +444,12 @@ const ChatInput: React.FC<ChatInputProps> = ({
     const observer = new ResizeObserver(() => {
       const maxHeight = resolveVisibleChatInputMaxHeight(panel.clientHeight);
       if (maxHeight == null) return;
-      setComposerMaxHeight(maxHeight);
-      setComposerHeight(resolveVisibleChatInputHeight(
+      const nextHeight = resolveVisibleChatInputHeight(
         composerDesiredHeightRef.current,
         maxHeight,
-      ));
+      );
+      setComposerMaxHeight((current) => (current === maxHeight ? current : maxHeight));
+      setComposerHeight((current) => (current === nextHeight ? current : nextHeight));
     });
     observer.observe(panel);
     return () => observer.disconnect();
@@ -335,6 +460,48 @@ const ChatInput: React.FC<ChatInputProps> = ({
     if (!resizeStart) return;
     if (resizeStart.frame !== null) cancelAnimationFrame(resizeStart.frame);
     document.body.style.userSelect = resizeStart.previousUserSelect;
+  }, []);
+
+  const syncHasComposerText = useCallback((text: string) => {
+    hasTextStore.set(text.trim().length > 0);
+  }, [hasTextStore]);
+
+  const readComposerText = useCallback(() => (
+    textareaRef.current?.value ?? composerTextRef.current
+  ), []);
+
+  useEffect(() => {
+    if (value === pushedParentTextRef.current) return;
+    pushedParentTextRef.current = value;
+    composerTextRef.current = value;
+    if (textareaRef.current && textareaRef.current.value !== value) {
+      textareaRef.current.value = value;
+    }
+    syncHasComposerText(value);
+  }, [syncHasComposerText, value]);
+
+  const commitComposerText = useCallback((next: string) => {
+    composerTextRef.current = next;
+    pushedParentTextRef.current = next;
+    if (textareaRef.current && textareaRef.current.value !== next) {
+      textareaRef.current.value = next;
+    }
+    syncHasComposerText(next);
+    onChange(next);
+  }, [onChange, syncHasComposerText]);
+
+  const parkedRef = useRef(parked);
+  useEffect(() => {
+    const becameParked = parked && !parkedRef.current;
+    parkedRef.current = parked;
+    if (!becameParked) return;
+    commitComposerText(readComposerText());
+  }, [commitComposerText, parked, readComposerText]);
+
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+  useEffect(() => () => {
+    onChangeRef.current(textareaRef.current?.value ?? composerTextRef.current);
   }, []);
 
   const findSlashTrigger = useCallback((text: string, caretPosition: number) => {
@@ -362,13 +529,18 @@ const ChatInput: React.FC<ChatInputProps> = ({
     };
   }, []);
 
-  const handleInputChange = useCallback((newValue: string) => {
-    onChange(newValue);
+  const handleInputChange = useCallback((newValue: string, composing = false) => {
+    markAiComposerActivity();
+    const previousText = composerTextRef.current;
+    composerTextRef.current = newValue;
+    syncHasComposerText(newValue);
+    if (composing) return;
+    commitComposerText(newValue);
     const caretPosition = textareaRef.current?.selectionStart ?? newValue.length;
     // Detect if user just typed @
     if (
       hosts.length > 0 &&
-      newValue.length > value.length &&
+      newValue.length > previousText.length &&
       newValue.endsWith('@')
     ) {
       // Position the popover near the textarea
@@ -396,18 +568,19 @@ const ChatInput: React.FC<ChatInputProps> = ({
     } else if (showSlashCommandPicker) {
       closeAllMenus();
     }
-  }, [onChange, value, hosts.length, showAtMention, findSlashTrigger, showSlashCommandPicker, closeAllMenus, getInputPanelMenuPos]);
+  }, [commitComposerText, hosts.length, showAtMention, findSlashTrigger, showSlashCommandPicker, closeAllMenus, getInputPanelMenuPos, syncHasComposerText]);
 
   const handleSelectAtMention = useCallback((host: { label: string; hostname: string }) => {
     // Replace the trailing @ with @hostname
     const name = host.label || host.hostname;
-    const lastAt = value.lastIndexOf('@');
+    const currentText = readComposerText();
+    const lastAt = currentText.lastIndexOf('@');
     const newValue = lastAt >= 0
-      ? value.slice(0, lastAt) + `@${name} `
-      : value + `@${name} `;
-    onChange(newValue);
+      ? currentText.slice(0, lastAt) + `@${name} `
+      : currentText + `@${name} `;
+    commitComposerText(newValue);
     closeAllMenus();
-  }, [value, onChange, closeAllMenus]);
+  }, [readComposerText, commitComposerText, closeAllMenus]);
 
   const openInputPanelMenu = useCallback((menu: 'atMention' | 'slashCommand') => {
     const pos = getInputPanelMenuPos();
@@ -415,8 +588,9 @@ const ChatInput: React.FC<ChatInputProps> = ({
     setMenuPos(null);
     setInputPanelPos(pos);
     if (menu === 'slashCommand') {
-      const caret = textareaRef.current?.selectionStart ?? value.length;
-      const trigger = findSlashTrigger(value, caret);
+      const currentText = readComposerText();
+      const caret = textareaRef.current?.selectionStart ?? currentText.length;
+      const trigger = findSlashTrigger(currentText, caret);
       if (trigger) {
         setSlashQuery(trigger.query);
         setSlashRange({ start: trigger.start, end: trigger.end });
@@ -426,7 +600,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
       }
     }
     setActiveMenu(menu);
-  }, [findSlashTrigger, getInputPanelMenuPos, value]);
+  }, [findSlashTrigger, getInputPanelMenuPos, readComposerText]);
 
   const userSkillOptions = useMemo<UserSkillSlashOption[]>(
     () => (lockTurnConfiguration ? [] : userSkills).map((skill) => ({
@@ -439,8 +613,8 @@ const ChatInput: React.FC<ChatInputProps> = ({
   );
 
   useEffect(() => {
-    if (lockTurnConfiguration && (showModelPicker || showPermPicker)) closeAllMenus();
-  }, [closeAllMenus, lockTurnConfiguration, showModelPicker, showPermPicker]);
+    if (lockTurnConfiguration && (showModelPicker || showThinkingPicker || showPermPicker)) closeAllMenus();
+  }, [closeAllMenus, lockTurnConfiguration, showModelPicker, showThinkingPicker, showPermPicker]);
 
   const quickMessageSlugSet = useMemo(
     () => new Set(quickMessages.map((message) => message.slug)),
@@ -492,37 +666,39 @@ const ChatInput: React.FC<ChatInputProps> = ({
   const showSlashPickerUI = showSlashCommandPicker && (inputPanelPos != null || menuPos != null);
 
   const removeSlashQueryFromInput = useCallback(() => {
-    if (!slashRange) return value;
-    const before = value.slice(0, slashRange.start);
-    const after = value.slice(slashRange.end);
+    const currentText = readComposerText();
+    if (!slashRange) return currentText;
+    const before = currentText.slice(0, slashRange.start);
+    const after = currentText.slice(slashRange.end);
     if (/\s$/.test(before) && /^\s/.test(after)) {
       return `${before}${after.slice(1)}`;
     }
     return `${before}${after}`;
-  }, [slashRange, value]);
+  }, [slashRange, readComposerText]);
 
   const insertUserSkillToken = useCallback((skill: { slug: string }) => {
     if (lockTurnConfiguration) return;
     onAddUserSkill?.(skill.slug);
     if (slashRange) {
-      onChange(removeSlashQueryFromInput());
+      commitComposerText(removeSlashQueryFromInput());
     }
     closeAllMenus();
-  }, [closeAllMenus, lockTurnConfiguration, onAddUserSkill, onChange, removeSlashQueryFromInput, slashRange]);
+  }, [closeAllMenus, lockTurnConfiguration, onAddUserSkill, commitComposerText, removeSlashQueryFromInput, slashRange]);
 
   const insertQuickMessage = useCallback((message: AIQuickMessage) => {
+    const currentText = readComposerText();
     if (slashRange) {
-      const before = value.slice(0, slashRange.start);
-      const after = value.slice(slashRange.end);
+      const before = currentText.slice(0, slashRange.start);
+      const after = currentText.slice(slashRange.end);
       const spacerBefore = before.length > 0 && !/\s$/.test(before) ? ' ' : '';
       const spacerAfter = after.length > 0 && !/^\s/.test(after) ? ' ' : '';
-      onChange(`${before}${spacerBefore}${message.content}${spacerAfter}${after}`);
+      commitComposerText(`${before}${spacerBefore}${message.content}${spacerAfter}${after}`);
     } else {
-      const spacer = value.length > 0 && !/\s$/.test(value) ? ' ' : '';
-      onChange(`${value}${spacer}${message.content}`);
+      const spacer = currentText.length > 0 && !/\s$/.test(currentText) ? ' ' : '';
+      commitComposerText(`${currentText}${spacer}${message.content}`);
     }
     closeAllMenus();
-  }, [closeAllMenus, onChange, slashRange, value]);
+  }, [closeAllMenus, commitComposerText, readComposerText, slashRange]);
 
   const handleSelectSlashCommandItem = useCallback((item: SlashCommandItem) => {
     if (item.kind === 'system') {
@@ -535,7 +711,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
         onCompact?.();
       }
       if (command === 'stop') onStop?.();
-      onChange('');
+      commitComposerText('');
       closeAllMenus();
       return;
     }
@@ -544,7 +720,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
       return;
     }
     insertUserSkillToken(item.skill);
-  }, [canCompact, closeAllMenus, insertQuickMessage, insertUserSkillToken, onChange, onCompact, onStop]);
+  }, [canCompact, closeAllMenus, commitComposerText, insertQuickMessage, insertUserSkillToken, onCompact, onStop]);
 
   // Reset active highlight when a menu opens or when the *identity* of the
   // visible items changes. Watching only `.length` misses cases where the
@@ -613,7 +789,10 @@ const ChatInput: React.FC<ChatInputProps> = ({
 
   useEffect(() => {
     if (!showSlashCommandPicker || !menuPos) return;
-    const onKeyDown = (event: KeyboardEvent) => handleSlashCommandKeyDown(event);
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (isAppLockOverlayActive()) return;
+      handleSlashCommandKeyDown(event);
+    };
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
   }, [handleSlashCommandKeyDown, menuPos, showSlashCommandPicker]);
@@ -677,17 +856,19 @@ const ChatInput: React.FC<ChatInputProps> = ({
 
   const handleSubmit = useCallback(
     (_text: string, _event: FormEvent<HTMLFormElement>) => {
-      const systemCommand = getSystemSlashCommand(value);
+      const submittedText = readComposerText();
+      commitComposerText(submittedText);
+      const systemCommand = getSystemSlashCommand(submittedText);
       if (systemCommand) {
         if (systemCommand === 'compact') {
           if (!canCompact) return;
           onCompact?.();
-          onChange('');
+          commitComposerText('');
           return;
         }
         if (systemCommand === 'stop') {
           onStop?.();
-          onChange('');
+          commitComposerText('');
           return;
         }
         return;
@@ -696,9 +877,11 @@ const ChatInput: React.FC<ChatInputProps> = ({
         onSteer?.();
         return;
       }
+      // Do not empty the box here. handleSend awaits provider sync and may
+      // abort; the parent clears value only after the user message is accepted.
       onSend();
     },
-    [canCompact, canSteer, isStreaming, onCompact, onSend, onSteer, onStop, onChange, value],
+    [canCompact, canSteer, commitComposerText, isStreaming, onCompact, onSend, onSteer, onStop, readComposerText],
   );
 
   const status: PromptInputStatus = isStreaming ? 'streaming' : 'idle';
@@ -711,21 +894,12 @@ const ChatInput: React.FC<ChatInputProps> = ({
   // split on the first '/'. Match against the full id first; only treat the
   // trailing segment as a thinking level when we find a preset whose
   // declared thinkingLevels make the combined form equal to selectedModelId.
-  const { selectedPreset, selectedThinking } = (() => {
-    if (!selectedModelId) return { selectedPreset: undefined, selectedThinking: undefined };
-    const direct = modelPresets.find(m => m.id === selectedModelId);
-    if (direct) return { selectedPreset: direct, selectedThinking: undefined };
-    const viaThinking = modelPresets.find(
-      m => m.thinkingLevels?.some(level => `${m.id}/${level}` === selectedModelId),
-    );
-    if (viaThinking) {
-      const thinking = selectedModelId.slice(viaThinking.id.length + 1);
-      return { selectedPreset: viaThinking, selectedThinking: thinking };
-    }
-    return { selectedPreset: undefined, selectedThinking: undefined };
-  })();
+  const { preset: selectedPreset, thinking: selectedPresetThinking } = resolveThinkingSelection(
+    selectedModelId,
+    modelPresets,
+  );
   const selectedBaseModelId = selectedPreset?.id;
-  // Provider switcher mode (Catty Agent): two-column popover, chip carries
+  // Provider switcher mode (Catty Agent): single-column popover, chip carries
   // the provider's icon + name + model name. Falls back to the existing
   // single-list model dropdown for external SDK agents.
   const hasProviderSwitcher = !!providerSwitcher && providerSwitcher.providers.length > 0;
@@ -745,13 +919,54 @@ const ChatInput: React.FC<ChatInputProps> = ({
     : '';
   const modelLabel = hasProviderSwitcher
     ? providerSwitcherChipLabel
-    : (selectedPreset
-        ? selectedPreset.name + (selectedThinking ? ` / ${formatThinkingLabel(selectedThinking)}` : '')
-        : modelName || providerName || t('ai.chat.noModel'));
-  const modelChipMaxWidth = hasProviderSwitcher
-    ? 'max-w-[180px]'
-    : (selectedThinking ? 'max-w-[148px]' : 'max-w-[82px]');
+    : (selectedPreset?.name || modelName || providerName || t('ai.chat.noModel'));
+  const modelChipMaxWidth = hasProviderSwitcher ? 'max-w-[168px]' : 'max-w-[96px]';
   const hasModelPicker = hasProviderSwitcher || (modelPresets.length > 0 && !!onModelSelect);
+  const thinkingLevels = useMemo(
+    () => (
+      hasProviderSwitcher && onThinkingLevelChange
+        ? cattyReasoningLevelsForSelection(
+          selectedSwitcherProvider,
+          providerSwitcher?.selectedModelId,
+        )
+        : (selectedPreset?.thinkingLevels ?? [])
+    ),
+    [
+      hasProviderSwitcher,
+      onThinkingLevelChange,
+      selectedSwitcherProvider,
+      providerSwitcher?.selectedModelId,
+      selectedPreset?.thinkingLevels,
+    ],
+  );
+  const selectedThinking = hasProviderSwitcher
+    ? thinkingLevel
+    : selectedPresetThinking;
+  const visibleThinking = hasProviderSwitcher
+    ? (selectedThinking
+      ? resolveVisibleCattyThinkingLevel(thinkingLevels, selectedThinking)
+      : undefined)
+    : selectedThinking;
+
+  useEffect(() => {
+    if (!hasProviderSwitcher || !onThinkingLevelChange) return;
+    if (!thinkingLevels.length) return;
+    if (!thinkingLevel) return;
+    if (thinkingLevels.includes(thinkingLevel)) return;
+    const next = resolveVisibleCattyThinkingLevel(thinkingLevels, thinkingLevel);
+    if (next && next !== thinkingLevel) onThinkingLevelChange(next);
+  }, [
+    hasProviderSwitcher,
+    onThinkingLevelChange,
+    providerSwitcher?.selectedProviderId,
+    providerSwitcher?.selectedModelId,
+    thinkingLevel,
+    thinkingLevels,
+  ]);
+  const showThinkingChip = thinkingLevels.length > 0 && (!hasProviderSwitcher || !!onThinkingLevelChange);
+  const popoverMaxWidth = hasProviderSwitcher
+    ? COMPOSER_PROVIDER_PICKER_WIDTH
+    : COMPOSER_MODEL_PICKER_WIDTH;
   const contextUsagePercent = contextUsage
     ? Math.min(100, Math.max(0, (contextUsage.inputTokens / contextUsage.contextWindow) * 100))
     : 0;
@@ -767,7 +982,6 @@ const ChatInput: React.FC<ChatInputProps> = ({
       .replace('{used}', formatContextTokens(contextUsage.inputTokens))
       .replace('{max}', formatContextTokens(contextUsage.contextWindow))
     : '';
-  const popoverMaxWidth = hasProviderSwitcher ? PROVIDER_PICKER_MAX_WIDTH : MODEL_PICKER_MAX_WIDTH;
   const chipClassName =
     'inline-flex h-6 items-center gap-1 rounded-full px-1.5 text-[10.5px] text-foreground/72';
   const selectedSkillChipClassName =
@@ -912,12 +1126,25 @@ const ChatInput: React.FC<ChatInputProps> = ({
           )}
           <PromptInputTextarea
             ref={textareaRef}
-            value={value}
-            onChange={(e) => handleInputChange(e.target.value)}
+            defaultValue={value}
+            spellCheck={false}
+            autoCorrect="off"
+            autoCapitalize="off"
+            autoComplete="off"
+            onChange={(e) => handleInputChange(e.target.value, e.nativeEvent.isComposing)}
+            onFocus={() => markAiComposerActivity()}
+            onCompositionStart={() => setAiComposerComposing(true)}
+            onCompositionUpdate={() => markAiComposerActivity()}
+            onCompositionEnd={(e) => {
+              setAiComposerComposing(false);
+              handleInputChange(e.currentTarget.value);
+            }}
+            onBlur={() => commitComposerText(readComposerText())}
             onKeyDown={handleTextareaKeyDown}
             placeholder={placeholder || (isStreaming && canSteer ? t('ai.codex.steer.placeholder') : defaultPlaceholder)}
             disabled={composerDisabled}
             className={[
+              'field-sizing-fixed',
               selectedUserSkills.length > 0 ? 'pt-1.5' : undefined,
               composerHeight != null ? 'min-h-0 max-h-none flex-1' : undefined,
             ].filter(Boolean).join(' ')}
@@ -1124,9 +1351,6 @@ const ChatInput: React.FC<ChatInputProps> = ({
                     const left = Math.max(8, Math.min(rect.left, window.innerWidth - popoverMaxWidth - 8));
                     setMenuPos({ left, bottom: window.innerHeight - rect.top + 6 });
                   }
-                  if (selectedPreset?.thinkingLevels?.length) {
-                    setHoveredModelId(selectedPreset.id);
-                  }
                   setActiveMenu('model');
                 } else {
                   closeAllMenus();
@@ -1134,7 +1358,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
               }}
               disabled={lockTurnConfiguration}
               className={`${chipClassName} min-w-0 ${hasModelPicker && !lockTurnConfiguration ? 'cursor-pointer hover:bg-muted/24 transition-colors' : 'opacity-60'}`}
-              aria-label={hasProviderSwitcher ? 'Select provider and model' : 'Select model'}
+              aria-label={hasProviderSwitcher ? t('ai.chat.selectProviderAndModel') : t('ai.chat.selectModel')}
               aria-expanded={showModelPicker}
             >
               {hasProviderSwitcher && selectedSwitcherProvider ? (
@@ -1188,143 +1412,78 @@ const ChatInput: React.FC<ChatInputProps> = ({
               </Tooltip>
             )}
             {showModelPicker && hasModelPicker && menuPos && createPortal(
-<>
-            <div className="fixed inset-0 z-[999]" onClick={closeAllMenus} />
-            <div className="fixed inset-0 z-[999] cursor-default" onClick={closeAllMenus} />
-            <div
-              role="listbox"
-                  aria-label={hasProviderSwitcher ? 'Select provider and model' : 'Select model'}
-                  className="fixed z-[1000] w-max min-w-[160px] rounded-lg border border-border/50 bg-popover shadow-lg py-1"
+              <>
+                <div className="fixed inset-0 z-[999]" onClick={closeAllMenus} />
+                <div
+                  role="listbox"
+                  aria-label={hasProviderSwitcher ? t('ai.chat.selectProviderAndModel') : t('ai.chat.selectModel')}
+                  className="fixed z-[1000] overflow-hidden rounded-lg border border-border/50 bg-popover shadow-lg"
                   style={{ left: menuPos.left, bottom: menuPos.bottom, maxWidth: popoverMaxWidth }}
-                  onMouseLeave={() => setHoveredModelId(null)}
                 >
-                  {hasProviderSwitcher ? (
-                    <div className="min-w-[260px] max-h-[320px] overflow-y-auto">
-                      {providerSwitcher!.providers.map((p) => {
-                        const isSelected = providerSwitcher!.selectedProviderId === p.id;
-                        const defaultModel = p.defaultModel?.trim() ?? '';
-                        const hasModel = defaultModel.length > 0;
-                        // Rows without a defaultModel are inert — picking
-                        // one would save a binding with an empty model id
-                        // and produce a confusing model error at send time.
-                        // User has to set a defaultModel in Settings first.
-                        const disabled = !hasModel;
-                        const modelCaption = hasModel
-                          ? defaultModel
-                          : t('ai.chat.noProviderModel');
-                        return (
-                          <button
-                            key={p.id}
-                            type="button"
-                            role="option"
-                            aria-selected={isSelected}
-                            aria-disabled={disabled}
-                            disabled={disabled}
-                            title={disabled ? t('ai.chat.noProviderModel') : undefined}
-                            onClick={() => {
-                              if (disabled) return;
-                              providerSwitcher!.onSelect(p.id, defaultModel);
-                              closeAllMenus();
-                            }}
-                            className={`w-full flex items-center gap-2.5 px-2.5 py-2 text-left transition-colors ${
-                              disabled
-                                ? 'opacity-55 cursor-not-allowed'
-                                : 'hover:bg-muted/30 cursor-pointer'
-                            }`}
-                          >
-                            <ProviderIconBadge provider={p} size="md" />
-                            <div className="flex-1 min-w-0">
-                              <div className="truncate text-[12px] text-foreground/85">{p.name}</div>
-                              <div className={`truncate text-[10.5px] ${hasModel ? 'text-muted-foreground/70 font-mono' : 'text-muted-foreground/55 italic'}`}>
-                                {modelCaption}
-                              </div>
-                            </div>
-                            {isSelected && <Check size={12} className="text-primary shrink-0" />}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <div className="min-w-[260px] max-h-[320px] overflow-y-auto">
-                      {modelPresets.map(preset => {
-                    const isSelected = preset.id === selectedBaseModelId;
-                    const hasThinking = preset.thinkingLevels && preset.thinkingLevels.length > 0;
-                    const showThinkingLevels = hasThinking && hoveredModelId === preset.id;
-                    return (
-                      <div
-                        key={preset.id}
-                        onMouseEnter={() => setHoveredModelId(hasThinking ? preset.id : null)}
-                        onFocus={() => { if (hasThinking) setHoveredModelId(preset.id); }}
-                        onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setHoveredModelId(null); }}
-                      >
-                        <button
-                          type="button"
-                          role="option"
-                          aria-selected={isSelected}
-                          aria-expanded={hasThinking ? showThinkingLevels : undefined}
-                          onClick={() => {
-                            if (!hasThinking) {
-                              onModelSelect?.(preset.id);
-                              closeAllMenus();
-                              return;
-                            }
-                            setHoveredModelId(showThinkingLevels ? null : preset.id);
-                          }}
-                          className="w-full min-w-0 flex items-center gap-1.5 px-3 py-1.5 text-left text-[12px] hover:bg-muted/30 transition-colors cursor-pointer"
-                        >
-                          {isSelected ? <Check size={11} className="text-primary shrink-0" /> : <span className="w-[11px] shrink-0" />}
-                          <span className="flex-1 min-w-0 truncate text-foreground/85">{preset.name}</span>
-                          {hasThinking && (
-                            <ChevronRight
-                              size={10}
-                              className={`text-muted-foreground/50 shrink-0 transition-transform ${showThinkingLevels ? 'rotate-90' : ''}`}
-                            />
-                          )}
-                        </button>
-                        {/* Inline thinking levels — flyout submenus get clipped by overflow-y-auto above. */}
-                        {showThinkingLevels && (
-                          <div role="listbox" aria-label="Thinking level" className="border-t border-border/30 bg-muted/10 py-0.5">
-                            {preset.thinkingLevels!.map(level => {
-                              const fullId = `${preset.id}/${level}`;
-                              const isLevelSelected = selectedModelId === fullId;
-                              return (
-                                <button
-                                  key={level}
-                                  type="button"
-                                  role="option"
-                                  aria-selected={isLevelSelected}
-                                  tabIndex={0}
-                                  onClick={() => {
-                                    onModelSelect?.(fullId);
-                                    closeAllMenus();
-                                  }}
-                                  onKeyDown={(e) => {
-                                    if (e.key === 'Enter' || e.key === ' ') {
-                                      e.preventDefault();
-                                      onModelSelect?.(fullId);
-                                      closeAllMenus();
-                                    } else if (e.key === 'Escape') {
-                                      e.preventDefault();
-                                      closeAllMenus();
-                                    }
-                                  }}
-                                  className="w-full flex items-center gap-1.5 pl-7 pr-3 py-1.5 text-left text-[12px] hover:bg-muted/30 transition-colors cursor-pointer whitespace-nowrap"
-                                >
-                                  {isLevelSelected ? <Check size={11} className="text-primary shrink-0" /> : <span className="w-[11px] shrink-0" />}
-                                  <span className="text-foreground/85">{formatThinkingLabel(level)}</span>
-                                </button>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    );
-                      })}
-                    </div>
-                  )}
+                  <ComposerModelPicker
+                    providers={hasProviderSwitcher ? providerSwitcher!.providers : undefined}
+                    selectedProviderId={providerSwitcher?.selectedProviderId}
+                    selectedModelId={hasProviderSwitcher ? providerSwitcher?.selectedModelId : selectedBaseModelId}
+                    modelPresets={hasProviderSwitcher ? undefined : modelPresets}
+                    prefs={modelPrefs}
+                    onSelectProviderModel={(providerId, modelId, contextWindow) => {
+                      providerSwitcher?.onSelect(providerId, modelId, contextWindow);
+                      setModelPrefs(rememberComposerRecentModel(pickerScope, { providerId, modelId }));
+                      closeAllMenus();
+                    }}
+                    onSelectModel={(modelId) => {
+                      const preset = modelPresets.find((item) => item.id === modelId);
+                      const nextId = preset
+                        ? resolveModelSelectionWithThinking(preset, selectedPresetThinking)
+                        : modelId;
+                      onModelSelect?.(nextId);
+                      setModelPrefs(rememberComposerRecentModel(pickerScope, { modelId }));
+                      closeAllMenus();
+                    }}
+                    onTogglePinned={(entry) => {
+                      setModelPrefs(toggleComposerPinnedModel(pickerScope, entry));
+                    }}
+                  />
                 </div>
               </>,
               document.body,
+            )}
+            {showThinkingChip && (
+              <ComposerThinkingChip
+                levels={thinkingLevels}
+                selectedLevel={visibleThinking}
+                disabled={lockTurnConfiguration}
+                open={showThinkingPicker}
+                menuPos={showThinkingPicker ? menuPos : null}
+                onToggle={(rect) => {
+                  if (lockTurnConfiguration) return;
+                  if (!showThinkingPicker) {
+                    if (rect) {
+                      const left = Math.max(
+                        MENU_VIEWPORT_GUTTER,
+                        Math.min(rect.left, window.innerWidth - THINKING_PICKER_WIDTH - MENU_VIEWPORT_GUTTER),
+                      );
+                      setMenuPos({ left, bottom: window.innerHeight - rect.top + 6 });
+                    }
+                    setActiveMenu('thinking');
+                  } else {
+                    closeAllMenus();
+                  }
+                }}
+                onSelect={(level) => {
+                  if (hasProviderSwitcher) {
+                    onThinkingLevelChange?.(level);
+                  } else if (selectedPreset) {
+                    onModelSelect?.(
+                      level && selectedPreset.thinkingLevels?.includes(level)
+                        ? `${selectedPreset.id}/${level}`
+                        : selectedPreset.id,
+                    );
+                  }
+                  closeAllMenus();
+                }}
+                onClose={closeAllMenus}
+              />
             )}
             {/* Permission mode chip — only for Catty Agent */}
             {permissionMode && onPermissionModeChange && (
@@ -1378,7 +1537,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
                     <div
                       role="listbox"
                       aria-label="Permission mode"
-                      className="fixed z-[1000] w-[250px] max-w-[calc(100vw-16px)] rounded-lg border border-border/50 bg-popover shadow-lg py-1"
+                      className="fixed z-[1000] w-[200px] max-w-[calc(100vw-16px)] rounded-lg border border-border/50 bg-popover shadow-lg py-1"
                       style={{ left: menuPos.left, bottom: menuPos.bottom }}
                     >
                       {([
@@ -1396,16 +1555,16 @@ const ChatInput: React.FC<ChatInputProps> = ({
                             onPermissionModeChange(mode);
                             closeAllMenus();
                           }}
-                          className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[12px] hover:bg-muted/30 transition-colors cursor-pointer"
+                          className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left text-[12px] hover:bg-muted/30 transition-colors cursor-pointer"
                         >
                           {permissionMode === mode
                             ? <Check size={11} className="text-primary shrink-0" />
                             : <span className="w-[11px] shrink-0" />
                           }
                           <Icon size={12} className={`${color} shrink-0`} />
-                          <div className="flex-1 min-w-0">
-                            <div className="text-foreground/85">{label}</div>
-                            <div className="text-[10px] text-muted-foreground/40 leading-tight">{desc}</div>
+                          <div className="flex-1 min-w-0 flex items-baseline gap-1.5">
+                            <span className="text-foreground/85 shrink-0">{label}</span>
+                            <span className="text-[11px] text-muted-foreground/45 truncate">{desc}</span>
                           </div>
                         </button>
                       ))}
@@ -1420,30 +1579,19 @@ const ChatInput: React.FC<ChatInputProps> = ({
           <div className="flex-1 min-w-0" />
 
           <div className="flex items-center gap-1">
-            {isStreaming && canSteer ? (
-              <>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      type="submit"
-                      disabled={(!value.trim() && !hasTerminalSelectionAttachment) || composerDisabled}
-                      aria-label={isSteering ? t('ai.codex.steer.sending') : t('ai.codex.steer.addInstruction')}
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-foreground/20 bg-foreground text-background shadow-sm transition-colors hover:bg-foreground/90 disabled:border-border/80 disabled:bg-muted/52 disabled:text-foreground/72"
-                    >
-                      {isSteering ? <Loader2 size={14} className="animate-spin" /> : <ArrowUp size={14} />}
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent>{isSteering ? t('ai.codex.steer.sending') : t('ai.codex.steer.addInstruction')}</TooltipContent>
-                </Tooltip>
-                <PromptInputSubmit status="streaming" onStop={onStop} />
-              </>
-            ) : (
-              <PromptInputSubmit
-                status={status}
-                onStop={onStop}
-                disabled={(!value.trim() && !hasTerminalSelectionAttachment) || disabled}
-              />
-            )}
+            <ComposerSendUi
+              hasTextStore={hasTextStore}
+              hasTerminalSelectionAttachment={hasTerminalSelectionAttachment}
+              composerDisabled={composerDisabled}
+              disabled={disabled}
+              isStreaming={isStreaming}
+              canSteer={canSteer}
+              isSteering={isSteering}
+              status={status}
+              onStop={onStop}
+              steerSendingLabel={t('ai.codex.steer.sending')}
+              steerLabel={t('ai.codex.steer.addInstruction')}
+            />
           </div>
         </PromptInputFooter>
       </PromptInput>
@@ -1452,4 +1600,59 @@ const ChatInput: React.FC<ChatInputProps> = ({
   );
 };
 
-export default React.memo(ChatInput);
+function contextUsageEqual(
+  prev: AgentContextUsage | null | undefined,
+  next: AgentContextUsage | null | undefined,
+): boolean {
+  if (prev === next) return true;
+  if (!prev || !next) return false;
+  return (
+    prev.sessionId === next.sessionId
+    && prev.inputTokens === next.inputTokens
+    && prev.contextWindow === next.contextWindow
+    && prev.estimated === next.estimated
+  );
+}
+
+function chatInputPropsAreEqual(prev: ChatInputProps, next: ChatInputProps): boolean {
+  return (
+    prev.value === next.value
+    && prev.onChange === next.onChange
+    && prev.onSend === next.onSend
+    && prev.onCompact === next.onCompact
+    && prev.canCompact === next.canCompact
+    && contextUsageEqual(prev.contextUsage, next.contextUsage)
+    && prev.onSteer === next.onSteer
+    && prev.onStop === next.onStop
+    && prev.isStreaming === next.isStreaming
+    && prev.canSteer === next.canSteer
+    && prev.isSteering === next.isSteering
+    && prev.lockTurnConfiguration === next.lockTurnConfiguration
+    && prev.disabled === next.disabled
+    && prev.providerName === next.providerName
+    && prev.modelName === next.modelName
+    && prev.agentName === next.agentName
+    && prev.placeholder === next.placeholder
+    && prev.modelPresets === next.modelPresets
+    && prev.selectedModelId === next.selectedModelId
+    && prev.onModelSelect === next.onModelSelect
+    && prev.files === next.files
+    && prev.onAddFiles === next.onAddFiles
+    && prev.onRemoveFile === next.onRemoveFile
+    && prev.hosts === next.hosts
+    && prev.selectedUserSkills === next.selectedUserSkills
+    && prev.userSkills === next.userSkills
+    && prev.quickMessages === next.quickMessages
+    && prev.onAddUserSkill === next.onAddUserSkill
+    && prev.onRemoveUserSkill === next.onRemoveUserSkill
+    && prev.permissionMode === next.permissionMode
+    && prev.onPermissionModeChange === next.onPermissionModeChange
+    && prev.providerSwitcher === next.providerSwitcher
+    && prev.pickerScope === next.pickerScope
+    && prev.thinkingLevel === next.thinkingLevel
+    && prev.onThinkingLevelChange === next.onThinkingLevelChange
+    && prev.parked === next.parked
+  );
+}
+
+export default React.memo(ChatInput, chatInputPropsAreEqual);

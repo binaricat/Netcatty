@@ -6,6 +6,12 @@ import React, { memo, useEffect, useState, type RefObject } from 'react';
 import type { Terminal as XTerm } from '@xterm/xterm';
 import { Sparkles } from 'lucide-react';
 import { useI18n } from '../../application/i18n/I18nProvider';
+import {
+  createCopyOnSelectUserGestureTracker,
+  shouldWriteCopyOnSelect,
+  subscribeCopyOnSelectUserCommand,
+  subscribeCopyOnSelectUserGesture,
+} from './copyOnSelect';
 import { getTerminalSelectionForClipboard } from './normalizeTerminalSelection';
 import { resolveSelectionOverlayPosition } from './useTerminalEffects';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
@@ -64,6 +70,8 @@ function TerminalSelectionAIOverlayInner({
     let scrollDisposable: { dispose: () => void } | null | undefined = null;
     let resizeDisposable: { dispose: () => void } | null | undefined = null;
     let resizeObserver: ResizeObserver | null = null;
+    let userGestureUnsubscribe: (() => void) | null = null;
+    let userGestureTracker: ReturnType<typeof createCopyOnSelectUserGestureTracker> | null = null;
 
     const requestFrame = typeof requestAnimationFrame === 'function'
       ? requestAnimationFrame
@@ -89,10 +97,23 @@ function TerminalSelectionAIOverlayInner({
       resizeDisposable = null;
       resizeObserver?.disconnect();
       resizeObserver = null;
+      userGestureUnsubscribe?.();
+      userGestureUnsubscribe = null;
+      userGestureTracker?.dispose();
+      userGestureTracker = null;
     };
 
     const attach = (term: XTerm) => {
       cleanupListeners();
+      userGestureTracker = createCopyOnSelectUserGestureTracker();
+      const unsubscribePointer = subscribeCopyOnSelectUserGesture(term, userGestureTracker);
+      const unsubscribeCommand = subscribeCopyOnSelectUserCommand(term, () => {
+        userGestureTracker?.pulse();
+      });
+      userGestureUnsubscribe = () => {
+        unsubscribePointer();
+        unsubscribeCommand();
+      };
 
       const publishSelectionOverlayPosition = () => {
         overlayRafId = null;
@@ -131,15 +152,16 @@ function TerminalSelectionAIOverlayInner({
         }
         scheduleSelectionOverlayPosition();
 
-        // Skip programmatic restore (preserveSelectionOnInput) and the initial
-        // attach snapshot so reopening a tab does not re-copy a retained
-        // selection over the user's current clipboard.
-        if (
-          allowCopy
-          && hasText
-          && copyOnSelect
-          && !isRestoringSelectionRef?.current
-        ) {
+        // Skip programmatic selections: preserveSelectionOnInput restore,
+        // SearchAddon match highlight (issue #3007), and the initial attach
+        // snapshot so those writes cannot clobber a user copy.
+        if (shouldWriteCopyOnSelect({
+          allowCopy,
+          hasText,
+          copyOnSelect: !!copyOnSelect,
+          isRestoringSelection: !!isRestoringSelectionRef?.current,
+          isUserSelection: !!userGestureTracker?.isActive(),
+        })) {
           const selection = getTerminalSelectionForClipboard(term, normalizeTextOnCopy);
           if (!selection) return;
           copyTimer = setTimeout(() => {

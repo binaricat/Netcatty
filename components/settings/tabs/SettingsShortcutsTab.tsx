@@ -6,6 +6,7 @@ import { useI18n } from "../../../application/i18n/I18nProvider";
 import { cn } from "../../../lib/utils";
 import { Button } from "../../ui/button";
 import { SectionHeader, Select, SettingsAnchor, SettingsTabContent, SettingRow, Toggle } from "../settings-ui";
+import { isAppLockOverlayActive } from '../../../infrastructure/appLockOverlayDom';
 
 export default function SettingsShortcutsTab(props: {
   hotkeyScheme: HotkeyScheme;
@@ -65,6 +66,8 @@ export default function SettingsShortcutsTab(props: {
     const specialSuffix = getSpecialSuffix(recordingBindingId);
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Skip while app lock overlay is up so password keys never bind (Codex P2).
+      if (isAppLockOverlayActive()) return;
       e.preventDefault();
       e.stopPropagation();
 

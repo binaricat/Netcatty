@@ -72,7 +72,9 @@ interface AIChatPanelContentProps {
   cattyConfiguredProviders: ProviderConfig[];
   effectiveActiveProvider?: ProviderConfig;
   effectiveActiveModelId?: string;
-  handleAgentProviderModelSelect: (providerId: string, modelId: string) => void;
+  handleAgentProviderModelSelect: (providerId: string, modelId: string, contextWindow?: number) => void;
+  selectedCattyThinking?: string;
+  handleCattyThinkingSelect?: (level: string) => void;
   files: UploadedFile[];
   addFiles: (inputFiles: File[]) => Promise<void>;
   removeFile: (fileId: string) => void;
@@ -89,6 +91,10 @@ interface AIChatPanelContentProps {
   onOpenVaultNote?: (noteId: string) => void;
   onOpenVaultHost?: (hostId: string) => void;
   onOpenVaultSection?: (section: 'notes' | 'hosts') => void;
+  /** Hidden retained panels keep the composer warm without the message tree. */
+  parked?: boolean;
+  /** Disable header transitions while send preflight is in flight. */
+  sending?: boolean;
 }
 
 export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
@@ -136,6 +142,8 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
   effectiveActiveProvider,
   effectiveActiveModelId,
   handleAgentProviderModelSelect,
+  selectedCattyThinking,
+  handleCattyThinkingSelect,
   files,
   addFiles,
   removeFile,
@@ -152,7 +160,37 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
   onOpenVaultNote,
   onOpenVaultHost,
   onOpenVaultSection,
+  parked = false,
+  sending = false,
 }) => {
+  const mentionHosts = React.useMemo(
+    () => terminalSessions.map((session) => ({
+      sessionId: session.sessionId,
+      hostname: session.hostname,
+      label: session.label,
+      connected: session.connected,
+    })),
+    [terminalSessions],
+  );
+  const providerSwitcher = React.useMemo(
+    () => (
+      currentAgentId === 'catty' && cattyConfiguredProviders.length > 0
+        ? {
+            providers: cattyConfiguredProviders,
+            selectedProviderId: effectiveActiveProvider?.id,
+            selectedModelId: effectiveActiveModelId || undefined,
+            onSelect: handleAgentProviderModelSelect,
+          }
+        : undefined
+    ),
+    [
+      cattyConfiguredProviders,
+      currentAgentId,
+      effectiveActiveModelId,
+      effectiveActiveProvider?.id,
+      handleAgentProviderModelSelect,
+    ],
+  );
   const hiddenParts = getAIPanelDiagnosticHiddenParts();
   const hideHeader = isAIPanelDiagnosticPartHidden('header', hiddenParts);
   const hideHistory = isAIPanelDiagnosticPartHidden('history', hiddenParts);
@@ -174,6 +212,8 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
               externalAgents={externalAgents}
               discoveredAgents={discoveredAgents}
               isDiscovering={isDiscovering}
+              parked={parked}
+              disabled={sending}
               onSelectAgent={handleAgentChange}
               onEnableDiscoveredAgent={handleEnableDiscoveredAgent}
               onRediscover={rediscover}
@@ -191,6 +231,7 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
                     variant="ghost"
                     size="icon"
                     className="h-6 w-6 rounded-md text-muted-foreground/62 hover:bg-white/[0.05] hover:text-foreground"
+                    disabled={sending}
                     onClick={() => setShowHistory(!showHistory)}
                   >
                     <History size={12} />
@@ -204,6 +245,7 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
                     variant="ghost"
                     size="icon"
                     className="h-6 w-6 rounded-md text-primary/82 hover:bg-primary/[0.10] hover:text-primary"
+                    disabled={sending}
                     onClick={handleNewChat}
                   >
                     <Plus size={13} />
@@ -217,12 +259,12 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
       )}
 
       {/* ── Main content ── */}
-      {showHistory && !hideHistory ? (
+      {!parked && showHistory && !hideHistory ? (
         <React.Profiler {...getAIPanelProfilerProps('AIChatPanel.History')}>
           <SessionHistoryDrawer
             sessions={historySessions}
             activeSessionId={activeSessionId}
-            onSelect={handleSelectSession}
+            onSelect={sending ? () => undefined : handleSelectSession}
             onDelete={handleDeleteSession}
             onClose={() => setShowHistory(false)}
           />
@@ -230,7 +272,7 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
       ) : (
         <>
           {/* Chat messages */}
-          {!hideMessages && (
+          {!parked && !hideMessages && (
             <React.Profiler {...getAIPanelProfilerProps('AIChatPanel.Messages')}>
               <ChatMessageList
                 messages={messages}
@@ -247,7 +289,7 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
           )}
 
           {/* Recent sessions (Zed-style, shown when no messages) */}
-          {messages.length === 0 && historySessions.length > 0 && !hideRecent && (
+          {!parked && messages.length === 0 && historySessions.length > 0 && !hideRecent && (
             <React.Profiler {...getAIPanelProfilerProps('AIChatPanel.Recent')}>
               <div className="shrink-0 px-4 pb-1">
                 <div className="flex items-baseline justify-between mb-2">
@@ -262,8 +304,9 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
                 {historySessions.slice(0, 3).map((session) => (
                   <button
                     key={session.id}
+                    disabled={sending}
                     onClick={() => handleSelectSession(session.id)}
-                    className="w-full flex items-baseline justify-between py-1.5 text-left hover:text-foreground transition-colors cursor-pointer"
+                    className="w-full flex items-baseline justify-between py-1.5 text-left hover:text-foreground transition-colors cursor-pointer disabled:pointer-events-none disabled:opacity-50"
                   >
                     <span className="text-[13px] text-foreground/60 truncate pr-4">
                       {session.title || t('ai.chat.untitled')}
@@ -291,6 +334,7 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
                   </div>
                 ) : null}
                 <ChatInput
+                  parked={parked}
                   value={inputValue}
                   onChange={setInputValue}
                   onSend={handleSend}
@@ -309,20 +353,14 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
                   modelPresets={agentModelPresets}
                   selectedModelId={selectedAgentModel}
                   onModelSelect={handleAgentModelSelect}
-                  providerSwitcher={
-                    currentAgentId === 'catty' && cattyConfiguredProviders.length > 0
-                      ? {
-                          providers: cattyConfiguredProviders,
-                          selectedProviderId: effectiveActiveProvider?.id,
-                          selectedModelId: effectiveActiveModelId || undefined,
-                          onSelect: handleAgentProviderModelSelect,
-                        }
-                      : undefined
-                  }
+                  providerSwitcher={providerSwitcher}
+                  pickerScope={currentAgentId}
+                  thinkingLevel={currentAgentId === 'catty' ? selectedCattyThinking : undefined}
+                  onThinkingLevelChange={currentAgentId === 'catty' ? handleCattyThinkingSelect : undefined}
                   files={files}
                   onAddFiles={addFiles}
                   onRemoveFile={removeFile}
-                  hosts={terminalSessions.map(s => ({ sessionId: s.sessionId, hostname: s.hostname, label: s.label, connected: s.connected }))}
+                  hosts={mentionHosts}
                   selectedUserSkills={selectedUserSkills}
                   userSkills={userSkillOptions}
                   quickMessages={quickMessages}

@@ -60,6 +60,15 @@ test("build workflow installs bsdtar for Arch pacman packaging", () => {
   );
 });
 
+test("build workflow initializes MSVC before Windows packaging", () => {
+  const msvcStep = /name:\s*Set up MSVC developer command prompt[\s\S]*?if:\s*matrix\.name == 'windows'[\s\S]*?uses:\s*ilammy\/msvc-dev-cmd@v1[\s\S]*?arch:\s*x64/;
+  assert.match(
+    buildWorkflow,
+    msvcStep,
+    "Windows package builds must initialize the MSVC developer prompt so cl.exe is available for the Windows Hello helper",
+  );
+});
+
 test("build workflow verifies RPM artifacts for both Linux architectures", () => {
   assert.ok(
     buildWorkflow.includes("bash scripts/verify-linux-rpm-artifact.sh x86_64"),

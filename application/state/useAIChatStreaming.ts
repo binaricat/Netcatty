@@ -103,6 +103,7 @@ export interface SendToCattyContext {
   globalPermissionMode: AIPermissionMode;
   commandBlocklist?: string[];
   commandTimeout?: number;
+  responseIdleTimeout?: number;
   terminalSessions: TerminalSessionInfo[];
   webSearchConfig?: WebSearchConfig | null;
   getExecutorContext?: () => ExecutorContext;

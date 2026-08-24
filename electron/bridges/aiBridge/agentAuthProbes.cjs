@@ -11,6 +11,7 @@ const { existsSync, readFileSync } = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { execFileSync } = require("node:child_process");
+const { resolveCursorCliSpawnSpec } = require("./cursorCliSpawn.cjs");
 
 function defaultFileExists(p) {
   try { return existsSync(p); } catch { return false; }
@@ -156,12 +157,15 @@ function defaultResolveCursorCliBinary(name, env) {
 }
 
 function defaultRunCursorStatus(binPath, env) {
+  const spec = resolveCursorCliSpawnSpec(binPath, ["status", "--format", "json"]);
   try {
-    const stdout = execFileSync(binPath, ["status", "--format", "json"], {
+    const stdout = execFileSync(spec.command, spec.args, {
       encoding: "utf8",
       timeout: 8000,
       env: env || process.env,
       stdio: ["pipe", "pipe", "pipe"],
+      shell: spec.shell,
+      windowsHide: true,
     });
     return { exitCode: 0, stdout: String(stdout || ""), stderr: "" };
   } catch (err) {
@@ -173,19 +177,34 @@ function defaultRunCursorStatus(binPath, env) {
   }
 }
 
+function extractFirstJsonObject(text) {
+  const raw = String(text || "").replace(/^\uFEFF/, "").trim();
+  if (!raw) return null;
+  const candidates = [raw];
+  const start = raw.indexOf("{");
+  const end = raw.lastIndexOf("}");
+  if (start >= 0 && end > start) {
+    const sliced = raw.slice(start, end + 1);
+    if (sliced !== raw) candidates.push(sliced);
+  }
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate);
+      if (parsed && typeof parsed === "object") return parsed;
+    } catch { /* try next */ }
+  }
+  return null;
+}
+
 function parseCursorStatusJson(stdout) {
-  try {
-    const parsed = JSON.parse(String(stdout || "").trim());
-    if (!parsed || typeof parsed !== "object") return null;
-    // Real Cursor status always exposes isAuthenticated and/or status.
-    // Reject unrelated CLIs that accept unknown flags or emit other JSON.
-    if (typeof parsed.isAuthenticated !== "boolean" && typeof parsed.status !== "string") {
-      return null;
-    }
-    return parsed;
-  } catch {
+  const parsed = extractFirstJsonObject(stdout);
+  if (!parsed) return null;
+  // Real Cursor status always exposes isAuthenticated and/or status.
+  // Reject unrelated CLIs that accept unknown flags or emit other JSON.
+  if (typeof parsed.isAuthenticated !== "boolean" && typeof parsed.status !== "string") {
     return null;
   }
+  return parsed;
 }
 
 /**
@@ -260,4 +279,6 @@ module.exports = {
   CURSOR_CLI_BINARY_CANDIDATES,
   defaultRunSecurity,
   defaultRunGhAuthStatus,
+  parseCursorStatusJson,
+  resolveCursorCliSpawnSpec,
 };

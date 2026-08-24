@@ -27,4 +27,9 @@ test('list and tree SFTP views share column visibility and keyboard-accessible m
   assert.match(treeNodeSource, /visibleColumns\.modified/);
   assert.match(treeNodeSource, /visibleColumns\.size/);
   assert.match(treeNodeSource, /visibleColumns\.type/);
+  assert.match(treeNodeSource, /visibleColumns\.owner/);
+  assert.match(columnMenuSource, /'modified', 'size', 'type', 'owner'/);
+
+  const paneCallbacksSource = readFileSync(new URL('./hooks/useSftpViewPaneCallbacks.ts', import.meta.url), 'utf8');
+  assert.match(paneCallbacksSource, /owner: f\.owner/);
 });

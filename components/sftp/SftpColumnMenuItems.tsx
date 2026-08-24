@@ -26,7 +26,7 @@ export const SftpColumnMenuItems: React.FC<SftpColumnMenuItemsProps> = ({
       <ContextMenuCheckboxItem checked disabled>
         {t('sftp.columns.name')}
       </ContextMenuCheckboxItem>
-      {(['modified', 'size', 'type'] as const).map((field) => (
+      {(['modified', 'size', 'type', 'owner'] as const).map((field) => (
         <ContextMenuCheckboxItem
           key={field}
           checked={visibleColumns[field]}

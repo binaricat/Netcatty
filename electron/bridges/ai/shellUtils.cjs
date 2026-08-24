@@ -272,15 +272,19 @@ function resolveWindowsShimToNativeExe(command, platform = process.platform) {
   return null;
 }
 
-function prepareCommandForSpawn(command, args) {
+function prepareCommandForSpawn(command, args, options = {}) {
   const spawnArgs = Array.isArray(args) ? args : [];
   if (!shouldUseShellForCommand(command)) {
     return { command, args: spawnArgs, shell: false };
   }
 
-  const nativeExePath = resolveWindowsShimToNativeExe(command);
-  if (nativeExePath) {
-    return { command: nativeExePath, args: spawnArgs, shell: false };
+  // Cursor's Windows installer .cmd launches node.exe + index.js. Unwrapping
+  // to the first quoted .exe would drop the script and run node with CLI args.
+  if (options.unwrapNativeExe !== false) {
+    const nativeExePath = resolveWindowsShimToNativeExe(command);
+    if (nativeExePath) {
+      return { command: nativeExePath, args: spawnArgs, shell: false };
+    }
   }
 
   return {

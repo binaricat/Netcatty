@@ -6,7 +6,9 @@ const {
   applyInitialSshDeepLinkPreference,
   applyJmsProtocolClientPreference,
   applySshProtocolClientPreference,
+  getSshDeepLinkRendererReadyTimeoutMs,
   collectJmsDeepLinkUrls,
+  collectPuttyStyleDeepLinkUrls,
   collectSshDeepLinkUrls,
   collectTelnetDeepLinkUrls,
   isJmsDeepLinkUrl,
@@ -16,6 +18,7 @@ const {
   readSshDeepLinkEnabledPreference,
   shouldDeliverJmsDeepLink,
   shouldDeliverSshDeepLink,
+  shouldRequeueFailedSshDeepLinkDelivery,
   updateJmsDeepLinkEnabledPreference,
   updateSshDeepLinkEnabledPreference,
   writeJmsDeepLinkEnabledPreference,
@@ -40,6 +43,34 @@ test("collectSshDeepLinkUrls extracts ssh URLs from process arguments", () => {
       "ssh://bob@example.net:2222",
     ]),
     ["ssh://alice@example.com", "ssh://bob@example.net:2222"],
+  );
+});
+
+test("collectPuttyStyleDeepLinkUrls converts PuTTY argv when no ssh:// token is present", () => {
+  assert.deepEqual(
+    collectPuttyStyleDeepLinkUrls([
+      String.raw`C:\Program Files\Netcatty\Netcatty.exe`,
+      "-ssh",
+      "alice@10.0.0.8",
+      "-P",
+      "2222",
+      "-pw",
+      "s3cret",
+    ]),
+    { ssh: ["ssh://alice:s3cret@10.0.0.8:2222"], telnet: [] },
+  );
+});
+
+test("collectPuttyStyleDeepLinkUrls leaves ssh:// tokens to the existing collector", () => {
+  assert.deepEqual(
+    collectPuttyStyleDeepLinkUrls([
+      "Netcatty.exe",
+      "-url",
+      "ssh://alice@example.com",
+      "-ssh",
+      "ignored@host",
+    ]),
+    { ssh: [], telnet: [] },
   );
 });
 
@@ -254,6 +285,39 @@ test("shouldDeliverSshDeepLink drops stale deliveries after the setting changes"
     enabled: true,
     deliveryGeneration: 2,
     expectedGeneration: 1,
+  }), false);
+});
+
+test("getSshDeepLinkRendererReadyTimeoutMs waits indefinitely so slow unlock keeps links", () => {
+  assert.equal(getSshDeepLinkRendererReadyTimeoutMs({ isDev: false }), 0);
+  assert.equal(getSshDeepLinkRendererReadyTimeoutMs({ isDev: true }), 0);
+});
+
+test("shouldRequeueFailedSshDeepLinkDelivery keeps valid links after readiness failures", () => {
+  assert.equal(shouldRequeueFailedSshDeepLinkDelivery({
+    enabled: true,
+    deliveryGeneration: 1,
+    expectedGeneration: 1,
+    result: { success: false, reason: "Renderer did not report ready before timeout." },
+  }), true);
+  assert.equal(shouldRequeueFailedSshDeepLinkDelivery({
+    enabled: true,
+    deliveryGeneration: 1,
+    expectedGeneration: 1,
+    result: { success: false, reason: "ssh-deep-link-disabled" },
+    cancelReason: "ssh-deep-link-disabled",
+  }), false);
+  assert.equal(shouldRequeueFailedSshDeepLinkDelivery({
+    enabled: true,
+    deliveryGeneration: 1,
+    expectedGeneration: 1,
+    result: { success: true },
+  }), false);
+  assert.equal(shouldRequeueFailedSshDeepLinkDelivery({
+    enabled: false,
+    deliveryGeneration: 1,
+    expectedGeneration: 1,
+    result: { success: false, reason: "window closed" },
   }), false);
 });
 

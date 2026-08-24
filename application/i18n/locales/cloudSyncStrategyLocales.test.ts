@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import en from "../locales/en.ts";
 import ru from "../locales/ru.ts";
+import es from "../locales/es.ts";
 import zhCN from "../locales/zh-CN.ts";
 
 const strategyKeys = [
@@ -17,7 +18,7 @@ const strategyKeys = [
 ] as const;
 
 test("cloud sync strategy copy exists in every bundled locale", () => {
-  for (const [locale, messages] of Object.entries({ en, ru, zhCN })) {
+  for (const [locale, messages] of Object.entries({ en, ru, es, zhCN })) {
     for (const key of strategyKeys) {
       assert.equal(
         typeof messages[key],

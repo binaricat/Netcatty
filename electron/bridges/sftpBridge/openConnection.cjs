@@ -278,7 +278,7 @@ function createOpenConnectionApi(ctx) {
             connOpts.privateKey = effectivePrivateKey;
             if (effectivePassphrase) {
               connOpts.passphrase = effectivePassphrase;
-            } else if (jump.privateKey && isKeyEncrypted(jump.privateKey)) {
+            } else if (isKeyEncrypted(effectivePrivateKey)) {
               // Key is encrypted but no passphrase provided — prompt the user
               console.log(`[SFTP Chain] Hop ${i + 1}: key is encrypted, requesting passphrase`);
               const keyLabel = jump.label || hopLabel;
@@ -1020,7 +1020,7 @@ function createOpenConnectionApi(ctx) {
         connectOpts.privateKey = effectivePrivateKey;
         if (effectivePassphrase) {
           connectOpts.passphrase = effectivePassphrase;
-        } else if (options.privateKey && isKeyEncrypted(options.privateKey)) {
+        } else if (isKeyEncrypted(effectivePrivateKey)) {
           // Key is encrypted but no passphrase provided — prompt the user
           console.log(`[SFTP] Key is encrypted, requesting passphrase for ${options.hostname}`);
           const result = await passphraseHandler.requestPassphrase(

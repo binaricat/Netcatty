@@ -1,6 +1,10 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { execFileSync } = require("node:child_process");
+const {
+  buildWindowsHelloHelper,
+  normalizeWindowsHelperArch,
+} = require("./build-windows-hello-helper.cjs");
 
 const CURSOR_PLATFORM_PACKAGES = {
   darwin: ["@cursor/sdk-darwin-arm64", "@cursor/sdk-darwin-x64"],
@@ -67,10 +71,20 @@ function ensureCursorSdkPlatformPackages({
 function beforePackCursorSdk(context = {}) {
   const projectDir = context.appDir || process.cwd();
   const platform = context.electronPlatformName || process.platform;
-  ensureCursorSdkPlatformPackages({ projectDir, platform });
+  const arch = normalizeWindowsHelperArch(context.arch || process.env.npm_config_arch || process.arch);
+  const ensureCursor = context.ensureCursorSdkPlatformPackages || ensureCursorSdkPlatformPackages;
+  ensureCursor({ projectDir, platform });
+  const buildHelper = context.buildWindowsHelloHelper || buildWindowsHelloHelper;
+  if (platform === "win32") {
+    const result = buildHelper({ projectDir, platform, arch });
+    if (result?.skipped) {
+      throw new Error(`Windows Hello helper was not built: ${result.reason || "unknown"}`);
+    }
+  }
 }
 
 module.exports = beforePackCursorSdk;
 module.exports.default = beforePackCursorSdk;
+module.exports.beforePackCursorSdk = beforePackCursorSdk;
 module.exports.ensureCursorSdkPlatformPackages = ensureCursorSdkPlatformPackages;
 module.exports.CURSOR_PLATFORM_PACKAGES = CURSOR_PLATFORM_PACKAGES;

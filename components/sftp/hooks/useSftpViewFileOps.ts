@@ -8,6 +8,7 @@ import {
 } from "../../../application/state/sftp/transferConcurrency";
 import { logger } from "../../../lib/logger";
 import { toast } from "../../ui/toast";
+import { netcattyBridge } from "../../../infrastructure/services/netcattyBridge";
 import { getFileExtension, getLanguageId, FileOpenerType, SystemAppInfo } from "../../../lib/sftpFileUtils";
 import { isNavigableDirectory } from "../utils";
 import { reportSftpUploadResults } from "../reportSftpUploadResults";
@@ -535,6 +536,52 @@ export const useSftpViewFileOps = ({
     [handleDownloadFileForSide],
   );
 
+  const handleExtractArchiveForSide = useCallback(
+    async (side: "left" | "right", file: SftpFileEntry, fullPath?: string) => {
+      const pane = side === "left" ? sftpRef.current.leftPane : sftpRef.current.rightPane;
+      if (!pane.connection) return;
+
+      const resolvedPath = fullPath ?? sftpRef.current.joinPath(pane.connection.currentPath, file.name);
+      toast.info(t("sftp.extract.extracting", { fileName: file.name }), "SFTP");
+      try {
+        const bridge = netcattyBridge.get();
+        if (pane.connection.isLocal) {
+          if (!bridge?.extractLocalArchive) {
+            throw new Error("Local extract unavailable");
+          }
+          await bridge.extractLocalArchive(resolvedPath);
+        } else {
+          const sftpId = getSftpIdForConnection?.(pane.connection.id);
+          if (!sftpId || !bridge?.extractSftpArchive) {
+            throw new Error("SFTP session not found");
+          }
+          await bridge.extractSftpArchive(sftpId, resolvedPath, pane.filenameEncoding);
+        }
+        await sftpRef.current.refresh(side);
+        toast.success(t("sftp.extract.success", { fileName: file.name }), "SFTP");
+      } catch (e) {
+        logger.error("[SftpView] Failed to extract archive:", e);
+        toast.error(
+          t("sftp.extract.error", {
+            fileName: file.name,
+            error: e instanceof Error ? e.message : String(e),
+          }),
+          "SFTP",
+        );
+      }
+    },
+    [getSftpIdForConnection, sftpRef, t],
+  );
+
+  const onExtractArchiveLeft = useCallback(
+    (file: SftpFileEntry, fullPath?: string) => handleExtractArchiveForSide("left", file, fullPath),
+    [handleExtractArchiveForSide],
+  );
+  const onExtractArchiveRight = useCallback(
+    (file: SftpFileEntry, fullPath?: string) => handleExtractArchiveForSide("right", file, fullPath),
+    [handleExtractArchiveForSide],
+  );
+
   // Multi-file download. For local panes, each file auto-downloads as a blob
   // (no prompt). For remote panes, prompts for a target directory once and
   // streams all selected entries into it — avoids the per-file save dialog
@@ -738,6 +785,8 @@ export const useSftpViewFileOps = ({
     onOpenFileWithRight,
     onDownloadFileLeft,
     onDownloadFileRight,
+    onExtractArchiveLeft,
+    onExtractArchiveRight,
     onDownloadFilesLeft,
     onDownloadFilesRight,
     onUploadExternalFilesLeft,

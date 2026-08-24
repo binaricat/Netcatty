@@ -131,6 +131,11 @@ declare global {
 
     // Get file path from File object (for drag-and-drop, uses Electron's webUtils)
     getPathForFile?(file: File): string | undefined;
+    showSystemNotification?(payload: {
+      title: string;
+      body: string;
+      sessionId?: string;
+    }): Promise<{ shown: boolean; reason?: string }>;
     readClipboardText?(): Promise<string>;
     writeClipboardText?(text: string): Promise<boolean>;
     readClipboardFiles?(): Promise<Array<{ path: string; name: string; isDirectory: boolean; size?: number }>>;

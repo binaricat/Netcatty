@@ -10,7 +10,14 @@ import {
   type RemoteClipboardImageUploadResult,
 } from "../clipboardImagePaste";
 import { handleTerminalClipboardPaste } from "../terminalClipboardPaste";
+import { pulseCopyOnSelectUserCommand } from "../copyOnSelect";
 import { getTerminalSelectionForClipboard } from "../normalizeTerminalSelection";
+import {
+  getHistoryPreviewSelectionFromRoot,
+  requestHistoryPreviewHide,
+  selectHistoryPreviewAll,
+  findHistoryPreviewOverlay,
+} from "../runtime/terminalHistoryScrollOverride";
 
 type BroadcastPasteRefs = {
   sourceSessionId: string;
@@ -97,10 +104,11 @@ export const useTerminalContextActions = ({
   const onCopy = useCallback(() => {
     const term = termRef.current;
     if (!term) return;
-    const selection = getTerminalSelectionForClipboard(
-      term,
-      normalizeTextOnCopyRef?.current ?? true,
-    );
+    const selection = getHistoryPreviewSelectionFromRoot(term.element?.parentElement)
+      || getTerminalSelectionForClipboard(
+        term,
+        normalizeTextOnCopyRef?.current ?? true,
+      );
     if (selection) {
       navigator.clipboard.writeText(selection);
     }
@@ -109,6 +117,8 @@ export const useTerminalContextActions = ({
   const onPaste = useCallback(async () => {
     const term = termRef.current;
     if (!term) return;
+    requestHistoryPreviewHide(term.element?.parentElement);
+    term.focus();
     try {
       const bridge = netcattyBridge.get();
       await handleTerminalClipboardPaste({
@@ -179,11 +189,14 @@ export const useTerminalContextActions = ({
   const onPasteSelection = useCallback(() => {
     const term = termRef.current;
     if (!term) return;
-    const selection = getTerminalSelectionForClipboard(
-      term,
-      normalizeTextOnCopyRef?.current ?? true,
-    );
+    const selection = getHistoryPreviewSelectionFromRoot(term.element?.parentElement)
+      || getTerminalSelectionForClipboard(
+        term,
+        normalizeTextOnCopyRef?.current ?? true,
+      );
     if (!selection || !sessionRef.current) return;
+    requestHistoryPreviewHide(term.element?.parentElement);
+    term.focus();
     pasteTextIntoTerminal(term, selection, {
       scrollOnPaste: scrollOnPasteRef?.current ?? false,
       onPasteData: broadcastUserPasteData,
@@ -193,6 +206,12 @@ export const useTerminalContextActions = ({
   const onSelectAll = useCallback(() => {
     const term = termRef.current;
     if (!term) return;
+    pulseCopyOnSelectUserCommand(term);
+    const previewOverlay = findHistoryPreviewOverlay(term.element?.parentElement);
+    if (previewOverlay && selectHistoryPreviewAll(previewOverlay)) {
+      onHasSelectionChange?.(true);
+      return;
+    }
     term.selectAll();
     onHasSelectionChange?.(true);
   }, [onHasSelectionChange, termRef]);
@@ -214,6 +233,7 @@ export const useTerminalContextActions = ({
   const onSelectWord = useCallback(() => {
     const term = termRef.current;
     if (!term) return;
+    pulseCopyOnSelectUserCommand(term);
     term.selectAll();
     onHasSelectionChange?.(true);
   }, [onHasSelectionChange, termRef]);

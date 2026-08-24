@@ -280,6 +280,13 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
   }, [hostClickBehavior, isMultiSelectMode]);
 
 
+  const resetHostDragState = React.useCallback(() => {
+    draggingHostIdRef.current = null;
+    setDraggingHostId(null);
+    lastPreviewReorderRef.current = null;
+    setDragOverDropTarget(null);
+  }, [setDragOverDropTarget]);
+
   const handleHostDragStart = React.useCallback((e: React.DragEvent, hostId: string) => {
     // copyMove: vault reorder uses move; focus-sidebar append uses copy.
     e.dataTransfer.effectAllowed = "copyMove";
@@ -287,14 +294,19 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
     draggingHostIdRef.current = hostId;
     setDraggingHostId(hostId);
     lastPreviewReorderRef.current = null;
-  }, []);
 
-  const resetHostDragState = React.useCallback(() => {
-    draggingHostIdRef.current = null;
-    setDraggingHostId(null);
-    lastPreviewReorderRef.current = null;
-    setDragOverDropTarget(null);
-  }, [setDragOverDropTarget]);
+    // Grid preview reorder can move the card into another virtual row, and rows
+    // are separate React parents, so the source node gets unmounted mid-drag.
+    // A detached node no longer bubbles dragend up to the container handler, so
+    // bind the cleanup natively on the node itself - it still receives dragend.
+    const sourceNode = e.currentTarget as HTMLElement;
+    const handleNativeDragEnd = () => {
+      sourceNode.removeEventListener("dragend", handleNativeDragEnd);
+      clearVaultDropIndicator();
+      resetHostDragState();
+    };
+    sourceNode.addEventListener("dragend", handleNativeDragEnd);
+  }, [resetHostDragState]);
 
   const renderHostEditButton = (host: any, compact = false) => (
     <Button
@@ -398,6 +410,10 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
             const draggedHostId = e.dataTransfer.getData("host-id");
             const draggedGroupPath = e.dataTransfer.getData("group-path");
             const target = (e.target as Element | null)?.closest("[data-host-id], [data-group-path]");
+            // Always clear the dimmed drag styling: in grid view the live preview
+            // reorder can leave the dragged card itself under the cursor, which
+            // used to fall through every branch below without resetting.
+            if (draggedHostId) resetHostDragState();
             if (!(target instanceof HTMLElement)) return;
             const targetHostId = target.getAttribute("data-host-id");
             const targetGroupPath = target.getAttribute("data-group-path");

@@ -10,6 +10,7 @@ import {
   STORAGE_KEY_AI_DEFAULT_AGENT,
   STORAGE_KEY_AI_COMMAND_BLOCKLIST,
   STORAGE_KEY_AI_COMMAND_TIMEOUT,
+  STORAGE_KEY_AI_RESPONSE_IDLE_TIMEOUT,
   STORAGE_KEY_AI_MAX_ITERATIONS,
   STORAGE_KEY_AI_AGENT_MODEL_MAP,
   STORAGE_KEY_AI_AGENT_PROVIDER_MAP,
@@ -29,7 +30,9 @@ import type {
 import {
   DEFAULT_COMMAND_BLOCKLIST,
   DEFAULT_COMMAND_TIMEOUT_SECONDS,
+  DEFAULT_RESPONSE_IDLE_TIMEOUT_SECONDS,
   normalizeCommandTimeoutSeconds,
+  normalizeResponseIdleTimeoutSeconds,
 } from '../../infrastructure/ai/types';
 import { removeProviderReferences } from './aiProviderCleanup';
 import { AI_STATE_CHANGED_EVENT, emitAIStateChanged } from './aiStateEvents';
@@ -72,6 +75,12 @@ export function useAISettingsState() {
   const [commandTimeout, setCommandTimeoutRaw] = useState<number>(() =>
     normalizeCommandTimeoutSeconds(
       localStorageAdapter.readNumber(STORAGE_KEY_AI_COMMAND_TIMEOUT) ?? DEFAULT_COMMAND_TIMEOUT_SECONDS,
+    )
+  );
+  const [responseIdleTimeout, setResponseIdleTimeoutRaw] = useState<number>(() =>
+    normalizeResponseIdleTimeoutSeconds(
+      localStorageAdapter.readNumber(STORAGE_KEY_AI_RESPONSE_IDLE_TIMEOUT)
+        ?? DEFAULT_RESPONSE_IDLE_TIMEOUT_SECONDS,
     )
   );
   const [maxIterations, setMaxIterationsRaw] = useState<number>(() =>
@@ -175,6 +184,12 @@ export function useAISettingsState() {
     getAIBridge()?.aiMcpSetCommandTimeout?.(normalizedValue);
   }, []);
 
+  const setResponseIdleTimeout = useCallback((value: number) => {
+    const normalizedValue = normalizeResponseIdleTimeoutSeconds(value);
+    setResponseIdleTimeoutRaw(normalizedValue);
+    localStorageAdapter.writeNumber(STORAGE_KEY_AI_RESPONSE_IDLE_TIMEOUT, normalizedValue);
+  }, []);
+
   const setMaxIterations = useCallback((value: number) => {
     setMaxIterationsRaw(value);
     localStorageAdapter.writeNumber(STORAGE_KEY_AI_MAX_ITERATIONS, value);
@@ -249,6 +264,13 @@ export function useAISettingsState() {
             getAIBridge()?.aiMcpSetCommandTimeout?.(normalizedTimeout);
             break;
           }
+          case STORAGE_KEY_AI_RESPONSE_IDLE_TIMEOUT: {
+            const timeout = localStorageAdapter.readNumber(STORAGE_KEY_AI_RESPONSE_IDLE_TIMEOUT)
+              ?? DEFAULT_RESPONSE_IDLE_TIMEOUT_SECONDS;
+            if (!Number.isFinite(timeout)) break;
+            setResponseIdleTimeoutRaw(normalizeResponseIdleTimeoutSeconds(timeout));
+            break;
+          }
           case STORAGE_KEY_AI_MAX_ITERATIONS: {
             const iters = localStorageAdapter.readNumber(STORAGE_KEY_AI_MAX_ITERATIONS) ?? 20;
             if (!Number.isFinite(iters)) break;
@@ -315,6 +337,8 @@ export function useAISettingsState() {
     setCommandBlocklist,
     commandTimeout,
     setCommandTimeout,
+    responseIdleTimeout,
+    setResponseIdleTimeout,
     maxIterations,
     setMaxIterations,
     webSearchConfig,
@@ -346,6 +370,8 @@ export function useAISettingsState() {
     setCommandBlocklist,
     commandTimeout,
     setCommandTimeout,
+    responseIdleTimeout,
+    setResponseIdleTimeout,
     maxIterations,
     setMaxIterations,
     webSearchConfig,

@@ -85,7 +85,9 @@ function buildListCommand(remotePath, encoding = "utf-8") {
     '  if [ -L "$f" ]; then t=l',
     '  elif [ -d "$f" ]; then t=d',
     '  else t=f; fi',
-    '  mode=$(ls -ld -- "$f" 2>/dev/null | awk \'{print $1}\')',
+    '  lsline=$(ls -ld -- "$f" 2>/dev/null)',
+    '  mode=$(printf "%s\\n" "$lsline" | awk \'{print $1}\')',
+    '  owner=$(printf "%s\\n" "$lsline" | awk \'{print $3}\')',
     // Use metadata only — never open the file (FIFOs/special files would hang on wc -c).
     '  size=$(stat -c %s -- "$f" 2>/dev/null || stat -f %z -- "$f" 2>/dev/null || echo 0)',
     '  [ -z "$size" ] && size=0',
@@ -96,7 +98,7 @@ function buildListCommand(remotePath, encoding = "utf-8") {
     '  if command -v base64 >/dev/null 2>&1; then b64=$(printf "%s" "$f" | base64 2>/dev/null | tr -d "\\r\\n")',
     '  elif command -v openssl >/dev/null 2>&1; then b64=$(printf "%s" "$f" | openssl base64 2>/dev/null | tr -d "\\r\\n")',
     '  else b64=; fi',
-    '  printf "%s|%s|%s|%s|%s\\n" "$t" "${mode:-?}" "$size" "$mtime" "$b64"',
+    '  printf "%s|%s|%s|%s|%s|%s\\n" "$t" "${mode:-?}" "$size" "$mtime" "$b64" "${owner:-}"',
     "done",
   ].join("\n");
   return `cd ${q} || exit 1; ${loop}`;
@@ -225,8 +227,37 @@ function shellQuotePath(remotePath, encoding = "utf-8") {
 }
 
 /**
+ * Parse a username from an SFTP longname / `ls -l` line.
+ * Example: "-rwxr-xr-x  1 root  root  4096 Jan 1 00:00 filename"
+ */
+function ownerFromSftpLongname(longname) {
+  if (!longname) return undefined;
+  const match = String(longname).match(/^[dlbcps\-][rwxsStT\-]{9}[+.@]?\s+\d+\s+(\S+)\s+\S+\s+/);
+  const owner = match?.[1]?.trim();
+  return owner || undefined;
+}
+
+function ownerFromUid(uid) {
+  if (typeof uid !== "number" || !Number.isFinite(uid)) return undefined;
+  return String(uid);
+}
+
+function normalizeListingOwner(value) {
+  if (typeof value !== "string") return undefined;
+  const owner = value.trim();
+  if (!owner || owner === "?" || owner === "UNKNOWN") return undefined;
+  return owner;
+}
+
+function resolveListingOwner({ owner, longname, uid } = {}) {
+  return normalizeListingOwner(owner)
+    || ownerFromSftpLongname(longname)
+    || ownerFromUid(uid);
+}
+
+/**
  * Parse records from buildListCommand output.
- * @returns {Array<{ name: string, type: 'file'|'directory'|'symlink', size: number, modifyTime: number, permissions?: string }>}
+ * @returns {Array<{ name: string, type: 'file'|'directory'|'symlink', size: number, modifyTime: number, permissions?: string, owner?: string }>}
  */
 function parseListRecords(stdout, encoding = "utf-8") {
   const lines = String(stdout || "").split(/\r?\n/).filter(Boolean);
@@ -234,7 +265,7 @@ function parseListRecords(stdout, encoding = "utf-8") {
   for (const line of lines) {
     const parts = line.split("|");
     if (parts.length < 5) continue;
-    const [t, modeStr, sizeStr, mtimeStr, b64] = parts;
+    const [t, modeStr, sizeStr, mtimeStr, b64, ownerRaw] = parts;
     let name;
     try {
       name = decodeListBasename(b64, encoding);
@@ -246,7 +277,8 @@ function parseListRecords(stdout, encoding = "utf-8") {
     const size = Number(sizeStr) || 0;
     const modifyTime = (Number(mtimeStr) || 0) * 1000;
     const permissions = parseLsModeToPermissions(modeStr);
-    results.push({ name, type, size, modifyTime, permissions });
+    const owner = resolveListingOwner({ owner: ownerRaw });
+    results.push({ name, type, size, modifyTime, permissions, ...(owner ? { owner } : {}) });
   }
   return results;
 }
@@ -261,13 +293,14 @@ function parseLsLaOutput(stdout, { basePath = "" } = {}) {
     if (!line || line.startsWith("total ")) continue;
     // permissions links owner group size month day time/year name
     const match = line.match(
-      /^([dlbcps\-])([rwxsStT\-]{9})\s+\d+\s+\S+\s+\S+\s+(\d+)\s+(\S+\s+\S+\s+\S+)\s+(.+)$/,
+      /^([dlbcps\-])([rwxsStT\-]{9})[+.@]?\s+\d+\s+(\S+)\s+\S+\s+(\d+)\s+(\S+\s+\S+\s+\S+)\s+(.+)$/,
     );
     if (!match) continue;
     const typeChar = match[1];
     const perm = match[2];
-    const size = Number(match[3]) || 0;
-    let name = match[5];
+    const owner = resolveListingOwner({ owner: match[3] });
+    const size = Number(match[4]) || 0;
+    let name = match[6];
     // strip " -> target" only for symlink rows (backslash filenames may contain " -> ")
     if (typeChar === "l") {
       const arrow = name.indexOf(" -> ");
@@ -288,6 +321,7 @@ function parseLsLaOutput(stdout, { basePath = "" } = {}) {
       size,
       modifyTime: Date.now(),
       permissions: perm,
+      ...(owner ? { owner } : {}),
     });
   }
   return results;
@@ -395,6 +429,9 @@ module.exports = {
   buildRealpathCommand,
   parseListRecords,
   parseLsLaOutput,
+  ownerFromSftpLongname,
+  ownerFromUid,
+  resolveListingOwner,
   parseStatRecord,
   parseLsModeToPermissions,
   lsModeToNumber,

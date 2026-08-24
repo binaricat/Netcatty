@@ -11,10 +11,14 @@
  * forms ssh2 accepts, so we transparently convert them before handing the key
  * to ssh2. Ed25519 (and other) PKCS#8 keys have no legacy PEM representation
  * and surface a clear, actionable error instead of ssh2's opaque one.
+ *
+ * PuTTY PPK is similar: ssh2 only accepts v2 RSA/DSA, so encrypted Ed25519
+ * (and all PPK v3) keys are decrypted here and rewritten as OpenSSH PEM.
  */
 
 const crypto = require("node:crypto");
 const { utils: sshUtils } = require("ssh2");
+const { convertPpkToOpenSsh, isPpkPrivateKey } = require("./ppkConverter.cjs");
 
 const PKCS8_HEADER_RE = /-----BEGIN (?:ENCRYPTED )?PRIVATE KEY-----/;
 
@@ -37,6 +41,14 @@ class UnsupportedPrivateKeyError extends Error {
     super(message);
     this.name = "UnsupportedPrivateKeyError";
     this.code = "ERR_PRIVATE_KEY_UNSUPPORTED";
+  }
+}
+
+class InvalidPrivateKeyError extends Error {
+  constructor(message) {
+    super(message || "SSH key does not contain private key material");
+    this.name = "InvalidPrivateKeyError";
+    this.code = "ERR_PRIVATE_KEY_INVALID";
   }
 }
 
@@ -73,22 +85,40 @@ function repairMalformedPem(text) {
 }
 
 /**
+ * Return true when an ssh2 parser result contains private key material.
+ * parseKey() may return either one key object or an array of key objects.
+ */
+function hasPrivateKeyMaterial(parsed) {
+  const candidates = Array.isArray(parsed) ? parsed : [parsed];
+  return candidates.some((candidate) => {
+    if (!candidate || candidate instanceof Error) return false;
+    if (typeof candidate.isPrivateKey === "function" && candidate.isPrivateKey() === true) {
+      return true;
+    }
+    return typeof candidate.getPrivatePEM === "function"
+      && candidate.getPrivatePEM() !== null;
+  });
+}
+
+/**
  * Normalize a private key into a form ssh2 can parse.
  *
  * @param {string} privateKey - PEM private key contents.
  * @param {string} [passphrase] - Passphrase, if the key is encrypted.
  * @returns {{ privateKey: string, passphrase: string|undefined, converted: boolean }}
- * @throws {PrivateKeyPassphraseError} Encrypted PKCS#8 with a wrong/missing passphrase.
- * @throws {UnsupportedPrivateKeyError} PKCS#8 key whose type has no legacy PEM form (e.g. Ed25519).
+ * @throws {PrivateKeyPassphraseError} Encrypted PKCS#8/PPK with a wrong/missing passphrase.
+ * @throws {UnsupportedPrivateKeyError} Key that cannot be converted into a form ssh2 accepts.
  */
 function normalizePrivateKeyForSsh2(privateKey, passphrase) {
   if (typeof privateKey !== "string" || privateKey.length === 0) {
     return { privateKey, passphrase, converted: false };
   }
 
-  // If ssh2 already understands the key, leave it exactly as-is.
+  // If ssh2 already understands the key and it contains private material,
+  // leave it exactly as-is. A public key can also parse successfully, but it
+  // must never be treated as a value for Client.connect({ privateKey }).
   const parsed = sshUtils.parseKey(privateKey, passphrase);
-  if (parsed && !(parsed instanceof Error)) {
+  if (hasPrivateKeyMaterial(parsed)) {
     return { privateKey, passphrase, converted: false };
   }
 
@@ -98,11 +128,29 @@ function normalizePrivateKeyForSsh2(privateKey, passphrase) {
   const repaired = repairMalformedPem(privateKey);
   if (repaired && repaired !== privateKey) {
     const reparsed = sshUtils.parseKey(repaired, passphrase);
-    if (reparsed && !(reparsed instanceof Error)) {
+    if (hasPrivateKeyMaterial(reparsed)) {
       return { privateKey: repaired, passphrase, converted: true };
     }
   }
   const candidate = repaired || privateKey;
+
+  if (isPpkPrivateKey(candidate)) {
+    try {
+      const converted = convertPpkToOpenSsh(candidate, passphrase);
+      if (converted) {
+        return { privateKey: converted.privateKey, passphrase: undefined, converted: true };
+      }
+    } catch (err) {
+      if (err?.code === "ERR_PPK_PASSPHRASE") {
+        throw new PrivateKeyPassphraseError(
+          "Could not decrypt the PPK private key with the provided passphrase",
+        );
+      }
+      throw new UnsupportedPrivateKeyError(
+        err?.message || "Unable to convert the PuTTY PPK private key.",
+      );
+    }
+  }
 
   // We can only rescue PKCS#8 keys, which Node's crypto can read.
   if (!PKCS8_HEADER_RE.test(candidate)) {
@@ -145,4 +193,6 @@ module.exports = {
   repairMalformedPem,
   PrivateKeyPassphraseError,
   UnsupportedPrivateKeyError,
+  InvalidPrivateKeyError,
+  hasPrivateKeyMaterial,
 };

@@ -29,6 +29,7 @@
 !README.ja-JP.md
 !README.md
 !README.zh-CN.md
+!README.zh-TW.md
 !electron-builder.config.cjs
 !eslint.config.js
 !flake.lock
@@ -115,6 +116,7 @@ coverage
 !/build/icons
 !/build/installer.nsh
 /electron/native/**/build
+/electron/bridges/windowsHelloHelper/build/
 /release
 /out
 /public/monaco

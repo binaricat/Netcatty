@@ -18,6 +18,7 @@ const {
   extractGrokAcpPromptUsage,
   emitGrokUsage,
   normalizeGrokPlanUpdate,
+  parseGrokModelSelection,
   shouldReportGrokProcessExitFailure,
   runGrokTurn,
   spawnGrokProcess,
@@ -83,6 +84,28 @@ test("buildGrokCliArgs uses streaming-json and optional model/resume/cwd", () =>
   assert.ok(autoArgs.includes("--always-approve"));
   assert.ok(autoArgs.includes("--no-auto-update"));
   assert.ok(!autoArgs.includes("-m"));
+});
+
+test("buildGrokCliArgs passes a selected reasoning effort separately from the model", () => {
+  assert.deepEqual(parseGrokModelSelection("grok-4.6/xhigh"), {
+    model: "grok-4.6",
+    effort: "xhigh",
+  });
+  assert.deepEqual(parseGrokModelSelection("provider/model"), {
+    model: "provider/model",
+    effort: undefined,
+  });
+
+  const args = buildGrokCliArgs({
+    prompt: "hi",
+    model: "grok-4.6/xhigh",
+    permissionMode: "auto",
+    toolIntegrationMode: "skills",
+  });
+  const modelIdx = args.indexOf("-m");
+  const effortIdx = args.indexOf("--reasoning-effort");
+  assert.equal(args[modelIdx + 1], "grok-4.6");
+  assert.equal(args[effortIdx + 1], "xhigh");
 });
 
 test("resolveGrokToolIntegrationFlags locks local side-effect tools only in MCP mode", () => {
@@ -444,7 +467,12 @@ test("parseGrokModelsOutput reads default and bullet list", () => {
   ].join("\n"));
   assert.equal(parsed.currentModelId, "grok-4.5");
   assert.deepEqual(parsed.models, [
-    { id: "grok-4.5", name: "grok-4.5" },
+    {
+      id: "grok-4.5",
+      name: "grok-4.5",
+      thinkingLevels: ["high", "medium", "low"],
+      defaultThinkingLevel: "high",
+    },
     { id: "grok-code-fast", name: "grok-code-fast" },
   ]);
 });
@@ -720,7 +748,8 @@ test("listGrokModels parses spawn stdout", async () => {
   child.pid = 1;
   child.kill = () => {};
 
-  const spawnImpl = () => {
+  const spawnImpl = (_bin, args) => {
+    assert.deepEqual(args, ["--no-auto-update", "models"]);
     queueMicrotask(() => {
       child.stdout.emit("data", Buffer.from("Default model: grok-4.5\n* grok-4.5 (default)\n"));
       child.emit("close", 0);

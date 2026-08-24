@@ -229,6 +229,7 @@ if (!process.versions.electron) {
         const settleStarted = performance.now();
         if (!sustainedOnly) await highlighter?.whenSettled?.();
         const settleWaitMs = performance.now() - settleStarted;
+        const rendersDuringSettle = renders - rendersBeforeSettle;
         const quietWorkMs = performance.now() - quietStarted - (sustainedOnly ? 0 : 700);
         let paintTimedOut = false;
         if (!sustainedOnly) {
@@ -237,6 +238,7 @@ if (!process.versions.electron) {
             wait(1000).then(() => { paintTimedOut = true; }),
           ]);
         }
+        const rendersAfterSettle = renders - rendersBeforeSettle - rendersDuringSettle;
         const quietCatchUpMs = performance.now() - quietStarted - (sustainedOnly ? 0 : 700);
         clearInterval(heartbeat);
         clearInterval(pendingSample);
@@ -264,7 +266,8 @@ if (!process.versions.electron) {
           settleWaitMs,
           paintTimedOut,
           rendersDuringStream: rendersAtStreamEnd,
-          rendersDuringSettle: renders - rendersBeforeSettle,
+          rendersDuringSettle,
+          rendersAfterSettle,
           heapDeltaMiB: (heapAfter - heapBefore) / 1024 / 1024,
           rebuildCount: highlighter?.rebuildCount ?? 0,
           rebuildTimings: highlighter?.lastRebuildTimings ?? {},
@@ -342,6 +345,11 @@ if (!process.versions.electron) {
         byKind("new").every(round => !round.paintTimedOut && round.rendersDuringSettle <= 1),
         true,
         `quiet catch-up must repaint atomically: ${JSON.stringify(result)}`,
+      );
+      assert.equal(
+        byKind("new").every(round => (round.rendersAfterSettle ?? 0) <= 1),
+        true,
+        `quiet catch-up must not keep painting after settle: ${JSON.stringify(result)}`,
       );
     }
     assert.equal(

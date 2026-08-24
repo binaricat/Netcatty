@@ -5,6 +5,7 @@ import type {
   AIProviderId,
   ExternalAgentConfig,
   ProviderAdvancedParams,
+  OpenAIApiFormat,
   ProviderStyle,
 } from "../../../../infrastructure/ai/types";
 
@@ -124,6 +125,7 @@ export interface ProviderFormState {
   skipTLSVerify: boolean;
   advancedParams: ProviderAdvancedParams;
   style: ProviderStyle | "";  // "" means inherit-from-providerId
+  openaiApi: OpenAIApiFormat;
   iconId: string;             // "" means no built-in pick (fall back to providerId)
   iconDataUrl: string;        // "" means no upload override
 }

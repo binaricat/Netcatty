@@ -31,10 +31,11 @@ export const useSftpPaneSorting = (): UseSftpPaneSortingResult => {
   const [sortOrder, setSortOrder] = useState<SortOrder>("asc");
   const { directoriesFirst, toggleDirectoriesFirst } = useSftpDirectoriesFirst();
   const [columnWidths, setColumnWidths] = useState<ColumnWidths>({
-    name: 56,
-    modified: 28,
+    name: 50,
+    modified: 24,
     size: 7,
     type: 9,
+    owner: 10,
   });
   const [visibleColumns, setVisibleColumns] = useState<SftpColumnVisibility>(() =>
     normalizeSftpColumnVisibility(
@@ -107,6 +108,7 @@ export const useSftpPaneSorting = (): UseSftpPaneSortingResult => {
       modified: { min: 18, max: 42 },
       size: { min: 5, max: 16 },
       type: { min: 6, max: 18 },
+      owner: { min: 6, max: 20 },
     };
     const { min, max } = limits[field];
     const newWidth = Math.max(

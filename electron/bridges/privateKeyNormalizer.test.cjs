@@ -7,6 +7,7 @@ const {
   normalizePrivateKeyForSsh2,
   PrivateKeyPassphraseError,
   UnsupportedPrivateKeyError,
+  hasPrivateKeyMaterial,
 } = require("./privateKeyNormalizer.cjs");
 
 function genRsa(encoding) {
@@ -37,6 +38,22 @@ function parseOk(key) {
   const r = sshUtils.parseKey(key);
   return r && !(r instanceof Error) ? r : null;
 }
+
+test("checks private material on ssh2 parser objects and arrays", () => {
+  const privateKey = {
+    isPrivateKey: () => true,
+    getPrivatePEM: () => "private",
+  };
+  const publicKey = {
+    isPrivateKey: () => false,
+    getPrivatePEM: () => null,
+  };
+
+  assert.equal(hasPrivateKeyMaterial(privateKey), true);
+  assert.equal(hasPrivateKeyMaterial(publicKey), false);
+  assert.equal(hasPrivateKeyMaterial([publicKey, privateKey]), true);
+  assert.equal(hasPrivateKeyMaterial([publicKey]), false);
+});
 
 test("converts unencrypted RSA PKCS#8 into an ssh2-parseable key", () => {
   const result = normalizePrivateKeyForSsh2(rsaPkcs8());

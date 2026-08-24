@@ -1,5 +1,9 @@
 const fs = require("node:fs");
 const path = require("node:path");
+const {
+  parsePuttyCommandLine,
+  redactPuttyCommandLinePasswords,
+} = require("./puttyCommandLine.cjs");
 
 const SSH_DEEP_LINK_CHANNEL = "netcatty:deepLink:ssh";
 const TELNET_DEEP_LINK_CHANNEL = "netcatty:deepLink:telnet";
@@ -42,6 +46,23 @@ function collectTelnetDeepLinkUrls(argv) {
 
 function collectJmsDeepLinkUrls(argv) {
   return collectDeepLinkUrls(argv, JMS_PROTOCOL);
+}
+
+function collectPuttyStyleDeepLinkUrls(argv) {
+  if (
+    collectSshDeepLinkUrls(argv).length > 0
+    || collectTelnetDeepLinkUrls(argv).length > 0
+    || collectJmsDeepLinkUrls(argv).length > 0
+  ) {
+    return { ssh: [], telnet: [] };
+  }
+
+  const parsed = parsePuttyCommandLine(argv);
+  if (!parsed?.url) return { ssh: [], telnet: [] };
+  if (parsed.protocol === TELNET_PROTOCOL) {
+    return { ssh: [], telnet: [parsed.url] };
+  }
+  return { ssh: [parsed.url], telnet: [] };
 }
 
 function registerProtocolClient({
@@ -299,6 +320,32 @@ function shouldDeliverDeepLink({ enabled = true, deliveryGeneration = 0, expecte
   return enabled !== false && deliveryGeneration === expectedGeneration;
 }
 
+/**
+ * App Lock can suppress rendererReady until unlock. A short readiness timeout
+ * would shift the URL out of the pending queue and drop it if the user takes
+ * longer than that to unlock. Prefer waiting indefinitely for readiness (or
+ * window death); callers re-queue only on non-cancel failures.
+ */
+function getSshDeepLinkRendererReadyTimeoutMs({ isDev = false } = {}) {
+  void isDev;
+  return 0;
+}
+
+function shouldRequeueFailedSshDeepLinkDelivery({
+  enabled = true,
+  deliveryGeneration = 0,
+  expectedGeneration = 0,
+  result = null,
+  cancelReason = "ssh-deep-link-disabled",
+} = {}) {
+  if (!shouldDeliverSshDeepLink({ enabled, deliveryGeneration, expectedGeneration })) {
+    return false;
+  }
+  if (!result || result.success === true) return false;
+  if (result.reason === cancelReason) return false;
+  return true;
+}
+
 function shouldDeliverSshDeepLink(options = {}) {
   return shouldDeliverDeepLink(options);
 }
@@ -357,9 +404,12 @@ module.exports = {
   applyInitialSshDeepLinkPreference,
   applyJmsProtocolClientPreference,
   applySshProtocolClientPreference,
+  getSshDeepLinkRendererReadyTimeoutMs,
   collectJmsDeepLinkUrls,
+  collectPuttyStyleDeepLinkUrls,
   collectSshDeepLinkUrls,
   collectTelnetDeepLinkUrls,
+  redactPuttyCommandLinePasswords,
   isJmsDeepLinkUrl,
   isSshDeepLinkUrl,
   isTelnetDeepLinkUrl,
@@ -374,6 +424,7 @@ module.exports = {
   shouldDeliverJmsDeepLink,
   shouldDeliverSshDeepLink,
   shouldDeliverTelnetDeepLink,
+  shouldRequeueFailedSshDeepLinkDelivery,
   updateJmsDeepLinkEnabledPreference,
   updateSshDeepLinkEnabledPreference,
   writeJmsDeepLinkEnabledPreference,

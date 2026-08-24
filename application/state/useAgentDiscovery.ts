@@ -22,10 +22,16 @@ let agentDiscoveryWriteGeneration = 0;
 export function useAgentDiscovery(
   externalAgents: ExternalAgentConfig[],
   setExternalAgents?: (value: ExternalAgentConfig[] | ((prev: ExternalAgentConfig[]) => ExternalAgentConfig[])) => void,
-  options?: { enabled?: boolean },
+  options?: {
+    enabled?: boolean;
+    schedule?: (task: () => void) => () => void;
+  },
 ) {
   const enabled = options?.enabled ?? true;
-  const [discoveredAgents, setDiscoveredAgents] = useState<DiscoveredAgent[]>([]);
+  const schedule = options?.schedule;
+  const [discoveredAgents, setDiscoveredAgents] = useState<DiscoveredAgent[]>(
+    () => agentDiscoveryCache?.agents ?? [],
+  );
   const [isDiscovering, setIsDiscovering] = useState(false);
   const discoverSeqRef = useRef(0);
   const mountedRef = useRef(true);
@@ -116,8 +122,16 @@ export function useAgentDiscovery(
       if (!cancelled) void discover();
     };
 
+    if (schedule) {
+      const cancel = schedule(runDiscover);
+      return () => {
+        cancelled = true;
+        cancel();
+      };
+    }
+
     if (typeof requestIdleCallback === 'function') {
-      const idleId = requestIdleCallback(runDiscover, { timeout: 2000 });
+      const idleId = requestIdleCallback(runDiscover);
       return () => {
         cancelled = true;
         cancelIdleCallback(idleId);
@@ -129,7 +143,7 @@ export function useAgentDiscovery(
       cancelled = true;
       clearTimeout(timeoutId);
     };
-  }, [discover, enabled]);
+  }, [discover, enabled, schedule]);
 
   // Auto-update args for already-configured discovered agents when
   // the canonical args from discovery change (e.g. after an app update).

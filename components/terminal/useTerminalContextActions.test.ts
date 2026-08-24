@@ -36,6 +36,13 @@ test("terminal context paste reports false when broadcast is disabled", () => {
   assert.equal(didBroadcast, false);
 });
 
+test("paste selection dismisses the history preview before sending text", async () => {
+  const { readFileSync } = await import("node:fs");
+  const source = readFileSync(new URL("./hooks/useTerminalContextActions.ts", import.meta.url), "utf8");
+  assert.match(source, /requestHistoryPreviewHide\(term\.element\?\.parentElement\)/);
+  assert.equal(source.split("requestHistoryPreviewHide(term.element?.parentElement)").length - 1, 2);
+});
+
 test("terminal context paste never broadcasts password-prompt input", () => {
   const didBroadcast = broadcastTerminalPasteData("secret", {
     sourceSessionId: "workspace-session-1",

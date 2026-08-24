@@ -11,6 +11,7 @@ test('reconnect is disabled while a session is still connecting', () => {
   assert.equal(isSessionReconnectDisabled('connecting'), true);
   assert.equal(isSessionReconnectDisabled('connected'), false);
   assert.equal(isSessionReconnectDisabled('disconnected'), false);
+  assert.equal(isSessionReconnectDisabled('disconnected', true), true);
 });
 
 test('session tab menu exposes optional edit-host when a vault host is present', () => {

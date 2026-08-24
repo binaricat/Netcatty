@@ -193,6 +193,30 @@ function codebuddyBuiltinTools(toolIntegrationMode) {
     : [...MCP_MODE_TOOLS];
 }
 
+const CODEBUDDY_REASONING_LEVELS = ["low", "medium", "high", "xhigh"];
+const CODEBUDDY_REASONING_LEVEL_SET = new Set(CODEBUDDY_REASONING_LEVELS);
+
+function splitCodebuddyModelSelection(model) {
+  if (typeof model !== "string" || !model) {
+    return { model: undefined, effort: undefined };
+  }
+  const slash = model.lastIndexOf("/");
+  if (slash <= 0) return { model, effort: undefined };
+  const effort = model.slice(slash + 1).toLowerCase();
+  if (!CODEBUDDY_REASONING_LEVEL_SET.has(effort)) return { model, effort: undefined };
+  return { model: model.slice(0, slash), effort };
+}
+
+function attachCodebuddyThinkingLevels(preset) {
+  if (!preset) return preset;
+  return {
+    ...preset,
+    thinkingLevels: [...CODEBUDDY_REASONING_LEVELS],
+    defaultThinkingLevel: "medium",
+    encodeDefaultThinking: false,
+  };
+}
+
 function buildCodebuddyQueryOptions({
   cwd, model, env, injectedMcpServers, abortController,
   resume, pathToCodebuddyCode, toolIntegrationMode, thinking,
@@ -222,7 +246,8 @@ function buildCodebuddyQueryOptions({
     settingSources: [],
     env,
   };
-  if (model) options.model = model;
+  const selection = splitCodebuddyModelSelection(model);
+  if (selection.model) options.model = selection.model;
   if (abortController) options.abortController = abortController;
   // Resume prior session for multi-turn context continuity.
   if (resume) options.resume = resume;
@@ -240,9 +265,11 @@ function buildCodebuddyQueryOptions({
       ? { append: systemPrompt }
       : systemPrompt;
   }
-  // Effort level for model reasoning.
-  if (["low", "medium", "high", "xhigh"].includes(effort)) {
-    options.effort = effort;
+  // Effort level for model reasoning. Sidebar `model/effort` wins over
+  // the Settings-level codebuddyOptions.effort fallback.
+  const resolvedEffort = selection.effort || effort;
+  if (CODEBUDDY_REASONING_LEVEL_SET.has(resolvedEffort)) {
+    options.effort = resolvedEffort;
   }
   // Safety guardrails.
   if (Number.isInteger(maxTurns) && maxTurns > 0) options.maxTurns = maxTurns;
@@ -633,11 +660,11 @@ function mapCodebuddyModels(models) {
       if (!m) return null;
       const id = m.id || m.modelId || m.value;
       if (!id) return null;
-      return {
+      return attachCodebuddyThinkingLevels({
         id,
         name: m.name || m.displayName || id,
         description: m.description,
-      };
+      });
     })
     .filter(Boolean);
 }
@@ -1013,6 +1040,7 @@ module.exports = {
   runCodebuddyTurn,
   listCodebuddyModels,
   mapCodebuddyModels,
+  splitCodebuddyModelSelection,
   codebuddyBuiltinTools,
   buildCodebuddyHooks,
   isAllowedCodebuddySkillsBash,

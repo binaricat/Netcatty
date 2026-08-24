@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import en from './en';
 import ru from './ru';
+import es from './es';
 import zhCN from './zh-CN';
 import zhTW from './zh-TW';
 
@@ -14,7 +15,7 @@ const keys = [
 ] as const;
 
 test('terminal host management strings exist in every shipped locale', () => {
-  for (const [locale, messages] of Object.entries({ en, 'zh-CN': zhCN, 'zh-TW': zhTW, ru })) {
+  for (const [locale, messages] of Object.entries({ en, es, 'zh-CN': zhCN, 'zh-TW': zhTW, ru })) {
     for (const key of keys) {
       assert.equal(typeof messages[key], 'string', `${locale} is missing ${key}`);
       assert.notEqual(messages[key], '', `${locale} has an empty ${key}`);

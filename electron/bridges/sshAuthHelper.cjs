@@ -16,6 +16,8 @@ const {
   normalizePrivateKeyForSsh2,
   repairMalformedPem,
   PrivateKeyPassphraseError,
+  InvalidPrivateKeyError,
+  hasPrivateKeyMaterial,
 } = require("./privateKeyNormalizer.cjs");
 
 // Default SSH key names in priority order
@@ -40,6 +42,18 @@ class PassphraseCancelledError extends Error {
 
 function isPassphraseCancelledError(err) {
   return Boolean(err?.cancelled || err?.code === "ERR_PASSPHRASE_CANCELLED");
+}
+
+function createInvalidPrivateKeyError(keyPath, keyName) {
+  if (keyPath) {
+    return new InvalidPrivateKeyError(
+      `Selected SSH identity file does not contain a private key: ${keyPath}`,
+    );
+  }
+  const label = keyName ? ` "${keyName}"` : "";
+  return new InvalidPrivateKeyError(
+    `Selected SSH key${label} does not contain a private key`,
+  );
 }
 
 async function readFileNoFollow(filePath) {
@@ -152,7 +166,7 @@ function notifyPassphraseAuthFailed(sender, keyPath, resolvedPath, keyIds) {
 
 /**
  * Resolve a private key (and optional passphrase) into a form ssh2 can parse.
- * PKCS#8 keys, which ssh2 rejects, are transparently converted to a legacy PEM
+ * PKCS#8 keys and PuTTY PPK files that ssh2 rejects are converted first
  * (see privateKeyNormalizer.cjs).
  *
  * @returns {{ privateKey: string, passphrase: string|undefined } | null}
@@ -168,7 +182,7 @@ function resolveKeyForAuth(privateKey, passphrase) {
     throw err;
   }
   const parsed = sshUtils.parseKey(normalized.privateKey, normalized.passphrase);
-  if (parsed && !(parsed instanceof Error)) {
+  if (hasPrivateKeyMaterial(parsed)) {
     return { privateKey: normalized.privateKey, passphrase: normalized.passphrase };
   }
   return null;
@@ -193,7 +207,8 @@ async function preparePrivateKeyForAuth({
 
   if (!isKeyEncrypted(privateKey)) {
     const resolved = resolveKeyForAuth(privateKey, undefined);
-    return { privateKey: resolved ? resolved.privateKey : privateKey, keyPath, keyName };
+    if (!resolved) throw createInvalidPrivateKeyError(keyPath, keyName);
+    return { privateKey: resolved.privateKey, keyPath, keyName };
   }
 
   const promptKeyPath = keyPath || `SSH key for ${keyName || hostname || "connection"}`;
@@ -265,7 +280,8 @@ async function loadIdentityFileForAuth({
 
   if (!isKeyEncrypted(privateKey)) {
     const resolved = resolveKeyForAuth(privateKey, undefined);
-    return { privateKey: resolved ? resolved.privateKey : privateKey, keyPath: resolvedPath, keyName };
+    if (!resolved) throw createInvalidPrivateKeyError(resolvedPath, keyName);
+    return { privateKey: resolved.privateKey, keyPath: resolvedPath, keyName };
   }
 
   let passphraseInvalid = false;
@@ -334,6 +350,7 @@ async function loadFirstIdentityFileForAuth({
     return null;
   }
 
+  let lastInvalidPrivateKeyError = null;
   for (const keyPath of identityFilePaths) {
     try {
       const identityFile = await loadIdentityFileForAuth({
@@ -358,9 +375,13 @@ async function loadFirstIdentityFileForAuth({
         throw err;
       }
       onError?.(err, keyPath);
+      if (err?.code === "ERR_PRIVATE_KEY_INVALID") {
+        lastInvalidPrivateKeyError = err;
+      }
     }
   }
 
+  if (lastInvalidPrivateKeyError) throw lastInvalidPrivateKeyError;
   return null;
 }
 

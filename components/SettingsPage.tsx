@@ -4,7 +4,6 @@
  */
 import { AppWindow, Cloud, FileType, HardDrive, Keyboard, Palette, Puzzle, Sparkles, TerminalSquare, X } from "lucide-react";
 import React, { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
-import { useSettingsState } from "../application/state/useSettingsState";
 import { useAISettingsState } from "../application/state/useAISettingsState";
 import { useAvailableFonts } from "../application/state/fontStore";
 import { usePortForwardingState } from "../application/state/usePortForwardingState";
@@ -13,6 +12,7 @@ import { useWindowControls } from "../application/state/useWindowControls";
 import { useUpdateCheck } from "../application/state/useUpdateCheck";
 import { I18nProvider, useI18n } from "../application/i18n/I18nProvider";
 import { sanitizePortForwardingRulesForSync } from "../application/syncPayload";
+import type { AppLockGateRenderContext } from "./AppLockGate";
 import { toast } from "./ui/toast";
 import { SettingsTabContent } from "./settings/settings-ui";
 import { SettingsFocusProvider, useSettingsFocus } from "./settings/SettingsFocusContext";
@@ -25,6 +25,8 @@ import { useExternalMcpGrantPersister } from "./ai/useExternalMcpGrantPersister"
 import { setupMcpApprovalBridge } from "../infrastructure/ai/shared/approvalGate";
 import { usePluginContributions } from "../application/state/usePluginContributions";
 import { PluginContributionHost } from "./plugins/PluginContributionHost";
+import { matchesKeyBinding } from "../domain/models";
+import { isPrimaryModifierWBinding } from "../application/state/windowCommandClose";
 
 const LazySettingsApplicationTab = lazy(() => import("./SettingsApplicationTab"));
 const LazySettingsAppearanceTab = lazy(() => import("./settings/tabs/SettingsAppearanceTab"));
@@ -64,7 +66,8 @@ class AITabErrorBoundary extends React.Component<
   }
 }
 
-type SettingsState = ReturnType<typeof useSettingsState>;
+type SettingsState = AppLockGateRenderContext["settings"];
+type AppLockState = AppLockGateRenderContext["appLock"];
 
 const settingsTabTriggerClassName =
     "w-full justify-start gap-2 px-3 py-2 text-sm data-[state=active]:bg-background hover:bg-background/60 rounded-md transition-colors overflow-hidden";
@@ -219,6 +222,8 @@ const SettingsAITabContainer: React.FC = () => {
                 setCommandBlocklist={aiState.setCommandBlocklist}
                 commandTimeout={aiState.commandTimeout}
                 setCommandTimeout={aiState.setCommandTimeout}
+                responseIdleTimeout={aiState.responseIdleTimeout}
+                setResponseIdleTimeout={aiState.setResponseIdleTimeout}
                 maxIterations={aiState.maxIterations}
                 setMaxIterations={aiState.setMaxIterations}
                 webSearchConfig={aiState.webSearchConfig}
@@ -298,7 +303,7 @@ const SettingsSyncTabWithVault: React.FC<{ onSettingsApplied?: () => void }> = (
     );
 };
 
-const SettingsPageContent: React.FC<{ settings: SettingsState }> = ({ settings }) => {
+const SettingsPageContent: React.FC<{ settings: SettingsState; appLock?: AppLockState }> = ({ settings, appLock }) => {
     const { t } = useI18n();
     const { request, clearFocus, openSearch } = useSettingsFocus();
     const { notifyRendererReady, closeSettingsWindow, onWindowCommandCloseRequested } = useWindowControls();
@@ -311,6 +316,13 @@ const SettingsPageContent: React.FC<{ settings: SettingsState }> = ({ settings }
     const [activeTab, setActiveTab] = useState("application");
     const [mountedTabs, setMountedTabs] = useState(() => new Set(["application"]));
     const { available: pluginRuntimeAvailable } = usePluginContributions();
+    const closeTabKeyStr = useMemo(() => {
+        if (settings.hotkeyScheme === "disabled") return null;
+        const binding = settings.keyBindings.find((item) => item.action === "closeTab");
+        if (!binding) return null;
+        return settings.hotkeyScheme === "mac" ? binding.mac : binding.pc;
+    }, [settings.hotkeyScheme, settings.keyBindings]);
+    const nativeCommandWClosesSettings = isPrimaryModifierWBinding(closeTabKeyStr, matchesKeyBinding, true);
 
     useEffect(() => {
         notifyRendererReady();
@@ -335,10 +347,20 @@ const SettingsPageContent: React.FC<{ settings: SettingsState }> = ({ settings }
 
     useEffect(() => {
         const unsubscribe = onWindowCommandCloseRequested(() => {
+            if (!nativeCommandWClosesSettings) {
+                (document.activeElement ?? window).dispatchEvent(new KeyboardEvent("keydown", {
+                    key: "w",
+                    code: "KeyW",
+                    metaKey: true,
+                    bubbles: true,
+                    cancelable: true,
+                }));
+                return;
+            }
             void closeSettingsWindow();
         });
         return () => unsubscribe?.();
-    }, [closeSettingsWindow, onWindowCommandCloseRequested]);
+    }, [closeSettingsWindow, nativeCommandWClosesSettings, onWindowCommandCloseRequested]);
 
     useEffect(() => {
         setMountedTabs((prev) => {
@@ -606,6 +628,12 @@ const SettingsPageContent: React.FC<{ settings: SettingsState }> = ({ settings }
                     {mountedTabs.has("system") && (
                         <SettingsLazyTab value="system">
                             <LazySettingsSystemTab
+                                appLockSettings={settings.appLockSettings}
+                                setAppLockTimeoutMinutes={settings.setAppLockTimeoutMinutes}
+                                requestAppLockDisable={settings.requestAppLockDisable}
+                                requestAppLockPasswordChange={settings.requestAppLockPasswordChange}
+                                appLockSystemUnlockStatus={appLock?.systemUnlockStatus}
+                                setAppLockSystemUnlockEnabled={settings.setAppLockSystemUnlockEnabled}
                                 sessionLogsEnabled={settings.sessionLogsEnabled}
                                 setSessionLogsEnabled={settings.setSessionLogsEnabled}
                                 sessionLogsDir={settings.sessionLogsDir}
@@ -662,13 +690,17 @@ const SettingsPageContent: React.FC<{ settings: SettingsState }> = ({ settings }
     );
 };
 
-export default function SettingsPage() {
-    const settings = useSettingsState();
-
+export default function SettingsPage({
+    settings,
+    appLock,
+}: {
+    settings: SettingsState;
+    appLock: AppLockState;
+}) {
     return (
         <I18nProvider locale={settings.uiLanguage}>
             <SettingsFocusProvider>
-                <SettingsPageContent settings={settings} />
+                <SettingsPageContent settings={settings} appLock={appLock} />
             </SettingsFocusProvider>
         </I18nProvider>
     );
