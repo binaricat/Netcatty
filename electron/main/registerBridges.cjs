@@ -393,6 +393,25 @@ function createBridgeRegistrar(context) {
       : null;
     registerTransportIdleTtlSettingsSync(ipcMain, terminalWorkerManager);
     if (terminalWorkerManager) {
+      // A worker crash silently drops every live session at once. Record it in
+      // the crash log so bug reports carry the cause instead of only the
+      // "Terminal worker exited with code 1" symptom.
+      terminalWorkerManager.onWorkerExit?.((error) => {
+        try {
+          crashLogBridge.captureError("terminal-worker-exit", error);
+        } catch { /* never throw from crash logging */ }
+      });
+      terminalWorkerManager.onWorkerProcessError?.((report) => {
+        try {
+          const err = new Error(report?.message || "Terminal worker process error");
+          if (report?.stack) err.stack = report.stack;
+          crashLogBridge.captureError("terminal-worker-process-error", err, {
+            origin: report?.source,
+            ...(report?.code ? { code: report.code } : {}),
+            ...(report?.level ? { level: report.level } : {}),
+          });
+        } catch { /* never throw from crash logging */ }
+      });
       const { registerPluginShutdown } = require("../plugins/shutdownCoordinator.cjs");
       registerPluginShutdown(async () => {
         try {

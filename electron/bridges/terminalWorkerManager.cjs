@@ -414,6 +414,7 @@ function createTerminalWorkerManager(options = {}) {
   const urgentInputPorts = new Map();
   const outputTaps = new Set();
   const terminalInterceptorWarningListeners = new Set();
+  const workerProcessErrorListeners = new Set();
   const sessionOwnedListeners = new Set();
   const sessionClosedListeners = new Set();
   const workerExitListeners = new Set();
@@ -1432,6 +1433,14 @@ function createTerminalWorkerManager(options = {}) {
       }
       return;
     }
+    if (message.kind === "worker-process-error") {
+      // The worker survived this one (its process guards suppressed it), but
+      // main still owns the crash log, so record it there for bug reports.
+      for (const listener of [...workerProcessErrorListeners]) {
+        try { listener(message); } catch {}
+      }
+      return;
+    }
     if (message.kind === "renderer-event") {
       for (const listener of [...workerRendererEventListeners]) {
         try { listener(message); } catch {}
@@ -2003,6 +2012,12 @@ function createTerminalWorkerManager(options = {}) {
     return Object.freeze({ dispose: () => terminalInterceptorWarningListeners.delete(listener) });
   }
 
+  function onWorkerProcessError(listener) {
+    if (typeof listener !== "function") throw new TypeError("Worker process error listener is required");
+    workerProcessErrorListeners.add(listener);
+    return Object.freeze({ dispose: () => workerProcessErrorListeners.delete(listener) });
+  }
+
   function onSessionOwned(listener) {
     if (typeof listener !== "function") throw new TypeError("Terminal session owner listener is required");
     sessionOwnedListeners.add(listener);
@@ -2055,6 +2070,7 @@ function createTerminalWorkerManager(options = {}) {
       supersedingSessionGenerations.clear();
       closeAllUrgentInputPorts();
       terminalInterceptorWarningListeners.clear();
+      workerProcessErrorListeners.clear();
       sessionOwnedListeners.clear();
       sessionClosedListeners.clear();
       workerExitListeners.clear();
@@ -2088,6 +2104,7 @@ function createTerminalWorkerManager(options = {}) {
     attachTerminalInterceptor,
     detachTerminalInterceptor,
     onTerminalInterceptorWarning,
+    onWorkerProcessError,
     onSessionOwned,
     onSessionClosed,
     onWorkerExit,

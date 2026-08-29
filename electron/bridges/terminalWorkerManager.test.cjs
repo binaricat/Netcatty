@@ -4944,3 +4944,33 @@ test("worker exit notifies host lifecycle listeners for every active session", a
     { sessionId: "local-2", reason: "worker-exit" },
   ]);
 });
+
+test("worker process error reports are fanned out to main-process listeners", () => {
+  const child = new FakeChild();
+  const manager = createTerminalWorkerManager({
+    utilityProcess: {
+      fork() {
+        return child;
+      },
+    },
+    workerScriptPath: "/worker.cjs",
+  });
+  const seen = [];
+  const subscription = manager.onWorkerProcessError((report) => seen.push(report));
+  void manager.request("netcatty:test", {});
+
+  child.emit("message", {
+    kind: "worker-process-error",
+    source: "uncaughtException",
+    message: "Keepalive timeout",
+    level: "client-timeout",
+  });
+
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].source, "uncaughtException");
+  assert.equal(seen[0].message, "Keepalive timeout");
+
+  subscription.dispose();
+  child.emit("message", { kind: "worker-process-error", message: "second" });
+  assert.equal(seen.length, 1);
+});
