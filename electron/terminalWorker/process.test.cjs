@@ -2,9 +2,12 @@ const assert = require("node:assert/strict");
 const crypto = require("node:crypto");
 const test = require("node:test");
 
+const { EventEmitter } = require("node:events");
+
 const {
   createZmodemDownloadDirectorySelector,
   createZmodemUploadFileSelector,
+  installWorkerProcessErrorGuards,
   normalizeParentPortMessage,
   registerExternalSessionHandlers,
 } = require("./process.cjs");
@@ -216,4 +219,79 @@ test("external plugin sessions stream auto-save logs through output and lifecycl
       && entry[2] === token),
     true,
   );
+});
+
+test("worker process guards keep a stray ssh2 transport error from killing every session", () => {
+  const parentPort = createParentPort();
+  const fakeProcess = new EventEmitter();
+  const uninstall = installWorkerProcessErrorGuards(parentPort, fakeProcess);
+
+  const err = new Error("Keepalive timeout");
+  err.level = "client-timeout";
+  // Before the guards existed this reached Node's default handler and exited
+  // the utilityProcess with code 1, dropping every live session at once.
+  assert.doesNotThrow(() => fakeProcess.emit("uncaughtException", err));
+
+  uninstall();
+});
+
+test("worker process guards suppress generic runtime errors instead of exiting", () => {
+  const parentPort = createParentPort();
+  const fakeProcess = new EventEmitter();
+  const uninstall = installWorkerProcessErrorGuards(parentPort, fakeProcess);
+
+  // The worker is armed as "runtime started" the moment it is forked, so even
+  // an error with no network classification must not take the process down.
+  assert.doesNotThrow(() => fakeProcess.emit("uncaughtException", new Error("boom")));
+  assert.doesNotThrow(() => fakeProcess.emit("unhandledRejection", new Error("rejected")));
+
+  const reports = parentPort.messages.filter((m) => m.kind === "worker-process-error");
+  assert.equal(reports.length, 2);
+  assert.deepEqual(
+    reports.map((r) => r.source),
+    ["uncaughtException", "unhandledRejection"],
+  );
+  assert.equal(reports[0].message, "boom");
+  assert.ok(typeof reports[0].stack === "string" && reports[0].stack.length > 0);
+
+  uninstall();
+});
+
+test("worker process guards report socket error codes to the parent", () => {
+  const parentPort = createParentPort();
+  const fakeProcess = new EventEmitter();
+  const uninstall = installWorkerProcessErrorGuards(parentPort, fakeProcess);
+
+  const err = new Error("socket hang up");
+  err.code = "ECONNRESET";
+  fakeProcess.emit("uncaughtException", err);
+
+  const report = parentPort.messages.find((m) => m.kind === "worker-process-error");
+  assert.ok(report);
+  assert.equal(report.code, "ECONNRESET");
+
+  uninstall();
+});
+
+test("worker process guards ignore benign stream teardown without reporting", () => {
+  const parentPort = createParentPort();
+  const fakeProcess = new EventEmitter();
+  const uninstall = installWorkerProcessErrorGuards(parentPort, fakeProcess);
+
+  const err = new Error("write EPIPE");
+  err.code = "EPIPE";
+  assert.doesNotThrow(() => fakeProcess.emit("uncaughtException", err));
+  assert.equal(parentPort.messages.filter((m) => m.kind === "worker-process-error").length, 0);
+
+  uninstall();
+});
+
+test("worker process guards can be uninstalled", () => {
+  const parentPort = createParentPort();
+  const fakeProcess = new EventEmitter();
+  const uninstall = installWorkerProcessErrorGuards(parentPort, fakeProcess);
+  uninstall();
+
+  assert.equal(fakeProcess.listenerCount("uncaughtException"), 0);
+  assert.equal(fakeProcess.listenerCount("unhandledRejection"), 0);
 });

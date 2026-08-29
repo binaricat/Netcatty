@@ -5,6 +5,10 @@ const path = require("node:path");
 const { randomUUID } = require("node:crypto");
 const { createTerminalWorkerRuntime } = require("./runtime.cjs");
 const tempDirBridge = require("../bridges/tempDirBridge.cjs");
+const {
+  createProcessErrorController,
+  installProcessErrorHandlers,
+} = require("../bridges/processErrorGuards.cjs");
 
 // The worker owns SSH sessions in the default runtime path. Install the same
 // DH compatibility shim as the main process before loading ssh2-backed bridges.
@@ -223,11 +227,59 @@ function registerPortForwardingWorkerBridge(ipcMain) {
   portForwardingBridge.registerHandlers(ipcMain);
 }
 
+/**
+ * The worker owns every terminal, SSH, SFTP, and port-forwarding session in the
+ * default runtime path, so an unguarded async throw here is not one bad
+ * session -- it exits the utilityProcess with code 1 and terminalWorkerManager's
+ * handleExit() drops *every* live session at once.
+ *
+ * The main process installs these same guards for exactly this reason (see the
+ * "never a reason to kill the entire multi-session app" note in
+ * processErrorGuards.cjs). Once sessions moved into the worker, the worker
+ * became the process that has to survive them.
+ */
+function installWorkerProcessErrorGuards(parentPort, processObject = process) {
+  const controller = createProcessErrorController({
+    captureError(source, err) {
+      try {
+        parentPort?.postMessage?.({
+          kind: "worker-process-error",
+          source,
+          message: err?.message ? String(err.message) : String(err),
+          ...(typeof err?.stack === "string" ? { stack: err.stack } : {}),
+          ...(err?.code ? { code: String(err.code) } : {}),
+          ...(err?.level ? { level: String(err.level) } : {}),
+        });
+      } catch {
+        // The parent port is already gone; the worker is being torn down.
+      }
+    },
+    onFatalError(err) {
+      // Unreachable while runtime protection is armed below, but never let a
+      // classification change silently reintroduce the mass-disconnect bug.
+      console.error("[TerminalWorker] Fatal process error:", err);
+    },
+    logError(...args) {
+      console.error(...args);
+    },
+    logWarn(...args) {
+      console.warn(...args);
+    },
+  });
+  // The worker has no window lifecycle: it is live the moment it is forked.
+  // Arm runtime protection immediately, otherwise classifyProcessError() reads
+  // every runtime error as a pre-startup failure and still lets the process die.
+  controller.completeMainWindowStartup({ windowShown: true });
+  return installProcessErrorHandlers(processObject, controller);
+}
+
 function main() {
   const parentPort = process.parentPort;
   if (!parentPort) {
     throw new Error("Terminal worker requires process.parentPort");
   }
+
+  installWorkerProcessErrorGuards(parentPort);
 
   const sessions = new Map();
   const sftpClients = new Map();
@@ -376,6 +428,7 @@ if (require.main === module) {
 
 module.exports = {
   createWorkerSender,
+  installWorkerProcessErrorGuards,
   createZmodemDownloadDirectorySelector,
   createZmodemUploadFileSelector,
   normalizeParentPortMessage,
