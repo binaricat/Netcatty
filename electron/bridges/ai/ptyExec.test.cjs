@@ -337,7 +337,7 @@ test("pending-input clear prefix covers interactive shells and skips raw devices
   assert.equal(buildPendingInputClearPrefix("raw"), "");
 });
 
-test("startPtyJob skips the clear prefix when expectedPrompt proves a clean idle prompt", async () => {
+test("startPtyJob writes the clear prefix even when expectedPrompt matches a clean idle prompt", async () => {
   const writes = [];
   class CapturePty extends EventEmitter {
     write(data) {
@@ -351,7 +351,10 @@ test("startPtyJob skips the clear prefix when expectedPrompt proves a clean idle
     expectedPrompt: "$ ",
   });
   assert.equal(writes.length, 1);
-  assert.ok(!writes[0].startsWith("\x15\x0b"));
+  // A fresh cached prompt only proves the output tail ends with it — it cannot
+  // prove the PTY input buffer is empty (echo may lag or be disabled), so the
+  // clear prefix must always be sent (#2962).
+  assert.ok(writes[0].startsWith("\x15\x0b"));
   assert.match(writes[0], /__NCMCP_/);
   job.cancel();
   pty.emit("data", Buffer.from("$ "));

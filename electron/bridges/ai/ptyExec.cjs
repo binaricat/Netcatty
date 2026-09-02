@@ -583,15 +583,16 @@ function startPtyJob(ptyStream, command, options) {
   }
 
   const wrapped = buildWrappedCommand(command, resolvedShellKind, marker);
-  // Skip the pending-input clear prefix when expectedPrompt already proves a
-  // clean idle prompt. Callers pass getFreshIdlePrompt(), which only returns a
-  // non-empty prompt when the live PTY tail currently ends with the exact idle
-  // prompt — typed-but-not-entered text would sit after the prompt and break
-  // that suffix match, so a non-empty expectedPrompt means there is nothing to
-  // clear. Sending clear keys anyway corrupts PSReadLine sessions (#3252).
-  const pendingInputClearPrefix = expectedPrompt
-    ? ""
-    : buildPendingInputClearPrefix(resolvedShellKind);
+  // Always send the pending-input clear prefix (#2962). A fresh idle prompt
+  // (getFreshIdlePrompt()) only proves the tracked *output* tail ends with the
+  // cached prompt — it cannot prove the PTY input buffer is empty: typed-but-
+  // not-yet-echoed text, or a session with remote echo disabled, still leaves
+  // the tail ending with the prompt. Skipping the clear keys in that window
+  // appends the wrapper to the user's pending input and corrupts the command.
+  // Sending them on an already-empty line is harmless for every supported
+  // shell; #3252 was about the specific unbound Ctrl key bytes (now removed
+  // from the PowerShell prefix), not about sending the prefix itself.
+  const pendingInputClearPrefix = buildPendingInputClearPrefix(resolvedShellKind);
   ptyStream.write(`${pendingInputClearPrefix}${wrapped}`);
 
   return {
