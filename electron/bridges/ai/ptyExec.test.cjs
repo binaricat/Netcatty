@@ -330,12 +330,14 @@ test("loginShellHint selects fish/posix/powershell/cmd without pinning confirmed
 test("pending-input clear prefix covers interactive shells and skips raw devices", () => {
   assert.equal(buildPendingInputClearPrefix("posix"), "\x15\x0b");
   assert.equal(buildPendingInputClearPrefix("fish"), "\x15\x0b");
-  assert.equal(buildPendingInputClearPrefix("powershell"), "\x1b\x15\x0b");
+  // #3252: Ctrl+U/Ctrl+K are unbound in PSReadLine's default Windows edit
+  // mode, so PowerShell only gets Escape (RevertLine).
+  assert.equal(buildPendingInputClearPrefix("powershell"), "\x1b");
   assert.equal(buildPendingInputClearPrefix("cmd"), "\x1b");
   assert.equal(buildPendingInputClearPrefix("raw"), "");
 });
 
-test("startPtyJob writes the clear prefix before the wrapper", async () => {
+test("startPtyJob skips the clear prefix when expectedPrompt proves a clean idle prompt", async () => {
   const writes = [];
   class CapturePty extends EventEmitter {
     write(data) {
@@ -349,10 +351,31 @@ test("startPtyJob writes the clear prefix before the wrapper", async () => {
     expectedPrompt: "$ ",
   });
   assert.equal(writes.length, 1);
-  assert.ok(writes[0].startsWith("\x15\x0b"));
+  assert.ok(!writes[0].startsWith("\x15\x0b"));
   assert.match(writes[0], /__NCMCP_/);
   job.cancel();
   pty.emit("data", Buffer.from("$ "));
+  await job.resultPromise;
+});
+
+test("startPtyJob still writes the clear prefix when no idle prompt is confirmed", async () => {
+  const writes = [];
+  class CapturePty extends EventEmitter {
+    write(data) {
+      writes.push(String(data));
+    }
+  }
+  const pty = new CapturePty();
+  const job = startPtyJob(pty, "echo hi", {
+    shellKind: "posix",
+    timeoutMs: 50,
+  });
+  assert.equal(writes.length, 1);
+  assert.ok(writes[0].startsWith("\x15\x0b"));
+  assert.match(writes[0], /__NCMCP_/);
+  const markerMatch = writes[0].match(/__NCMCP_[0-9a-z]+_[0-9a-f]+__/);
+  assert.ok(markerMatch);
+  pty.emit("data", Buffer.from(`${markerMatch[0]}_S\r\n${markerMatch[0]}_E:0\r\n`));
   await job.resultPromise;
 });
 

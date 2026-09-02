@@ -583,7 +583,16 @@ function startPtyJob(ptyStream, command, options) {
   }
 
   const wrapped = buildWrappedCommand(command, resolvedShellKind, marker);
-  ptyStream.write(`${buildPendingInputClearPrefix(resolvedShellKind)}${wrapped}`);
+  // Skip the pending-input clear prefix when expectedPrompt already proves a
+  // clean idle prompt. Callers pass getFreshIdlePrompt(), which only returns a
+  // non-empty prompt when the live PTY tail currently ends with the exact idle
+  // prompt — typed-but-not-entered text would sit after the prompt and break
+  // that suffix match, so a non-empty expectedPrompt means there is nothing to
+  // clear. Sending clear keys anyway corrupts PSReadLine sessions (#3252).
+  const pendingInputClearPrefix = expectedPrompt
+    ? ""
+    : buildPendingInputClearPrefix(resolvedShellKind);
+  ptyStream.write(`${pendingInputClearPrefix}${wrapped}`);
 
   return {
     marker,

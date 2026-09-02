@@ -189,8 +189,11 @@ function buildPendingInputClearPrefix(shellKind) {
       return "\x1b";
     case "powershell":
       // Escape = Windows-mode PSReadLine RevertLine (issue reporter default).
-      // Ctrl+U/Ctrl+K also fire for Emacs/Vi when those bindings exist.
-      return "\x1b\x15\x0b";
+      // Ctrl+U/Ctrl+K removed (#3252): they have no default bindings in
+      // PSReadLine's Windows edit mode (kill-line exists only in Emacs mode or
+      // via custom Set-PSReadLineKeyHandler), so the raw control bytes reach
+      // the host and corrupt the injected command.
+      return "\x1b";
     default:
       return "\x15\x0b";
   }
