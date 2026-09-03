@@ -828,6 +828,36 @@ test("tracked pending input is not overwritten when PowerShell edit mode is unkn
   assert.match(result.error, /pending input/i);
 });
 
+test("same-kind fake prompt cannot unlock prefix-free cmd to PowerShell execution", async () => {
+  const writes = [];
+  class CapturePty extends EventEmitter {
+    write(data) {
+      writes.push(String(data));
+    }
+  }
+  const pty = new CapturePty();
+  const session = { _loginShellKind: "cmd" };
+  trackSessionIdlePrompt(session, "PS C:\\Users\\alice>");
+  markSessionInputPending(session, "fake-prompt-program\r", { source: "manual" });
+  trackSessionIdlePrompt(session, "\r\nPS C:\\Users\\alice>");
+  assert.equal(getSessionActiveShellHint(session), "powershell");
+  assert.equal(isSessionInputLineKnownEmpty(session), false);
+
+  const job = startPtyJob(pty, "Write-Output 'PROBE'", {
+    shellKind: session.shellKind,
+    loginShellHint: session._loginShellKind,
+    activeShellHint: getSessionActiveShellHint(session),
+    observedShellHint: getSessionLastObservedShellKind(session),
+    timeoutMs: 50,
+    expectedPrompt: getFreshIdlePrompt(session),
+    inputLineKnownEmpty: isSessionInputLineKnownEmpty(session),
+  });
+  assert.equal(writes.length, 0);
+  const result = await job.resultPromise;
+  assert.equal(result.ok, false);
+  assert.match(result.error, /pending input/i);
+});
+
 test("echoed pending input cannot erase the PowerShell safety decision", async () => {
   const writes = [];
   class CapturePty extends EventEmitter {

@@ -25,6 +25,7 @@ const {
   expandWindowsEnvRefs,
   mergeWindowsPath,
   markSessionInputPending,
+  registerSessionPtyPromptMarker,
   releaseReservedSessionInput,
   reserveSessionInput,
   readWindowsRegistryPath,
@@ -665,7 +666,37 @@ test("manual command output cannot impersonate a different shell prompt", () => 
 
   trackSessionIdlePrompt(session, "\r\nalice@host:~$");
   assert.equal(getSessionActiveShellHint(session), "posix");
+  assert.equal(isSessionInputLineKnownEmpty(session), false);
+
+  markSessionInputPending(session, "\x03", { source: "manual" });
+  trackSessionIdlePrompt(session, "\r\nalice@host:~$");
   assert.equal(isSessionInputLineKnownEmpty(session), true);
+});
+
+test("manual output matching the current prompt still requires a safe clear", () => {
+  const session = {};
+  trackSessionIdlePrompt(session, "PS C:\\Users\\alice>");
+  markSessionInputPending(session, "fake-prompt-program\r", { source: "manual" });
+
+  trackSessionIdlePrompt(session, "\r\nPS C:\\Users\\alice>");
+  assert.equal(getSessionActiveShellHint(session), "powershell");
+  assert.equal(getSessionLastObservedShellKind(session), "powershell");
+  assert.equal(isSessionInputLineKnownEmpty(session), false);
+});
+
+test("a marker-backed command restores trust after manual prompt ambiguity", () => {
+  const session = {};
+  trackSessionIdlePrompt(session, "alice@host:~$");
+  markSessionInputPending(session, "fake-prompt-program\r", { source: "manual" });
+  trackSessionIdlePrompt(session, "\r\nalice@host:~$");
+  assert.equal(isSessionInputLineKnownEmpty(session), false);
+
+  const marker = "__NCMCP_trusted_completion__";
+  const unregister = registerSessionPtyPromptMarker(session, marker);
+  markSessionInputPending(session, "agent-wrapper\r", { source: "automated" });
+  trackSessionIdlePrompt(session, `\r\n${marker}_E:0\r\nalice@host:~$`);
+  assert.equal(isSessionInputLineKnownEmpty(session), true);
+  unregister();
 });
 
 test("submitting again does not trust an unconfirmed shell prompt", () => {

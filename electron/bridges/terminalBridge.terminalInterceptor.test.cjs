@@ -209,8 +209,8 @@ test("modified Enter stays pending when its editing effect is unknown", async ()
 
   terminalBridge.writeToSession(null, {
     sessionId: "session-modified-enter",
-    data: "\r",
-    logicalData: "\r",
+    data: "\x03",
+    logicalData: "\x03",
   });
   await new Promise((resolve) => setImmediate(resolve));
   releaseInput();
@@ -241,8 +241,15 @@ test("manual command output cannot promote a different shell prompt", () => {
 
   trackSessionIdlePrompt(session, "\r\nalice@host:~$");
   assert.equal(getSessionLastObservedShellKind(session), "posix");
+  assert.equal(isSessionInputLineKnownEmpty(session), false);
+
+  terminalBridge.writeToSession(null, {
+    sessionId: "session-manual",
+    data: "\x03",
+  });
+  trackSessionIdlePrompt(session, "\r\nalice@host:~$");
   assert.equal(isSessionInputLineKnownEmpty(session), true);
-  assert.deepEqual(writes, ["printf 'PS C:\\fake>'\r"]);
+  assert.deepEqual(writes, ["printf 'PS C:\\fake>'\r", "\x03"]);
 });
 
 test("input remains ordered when an interceptor is disabled during an in-flight transform", async () => {

@@ -152,6 +152,7 @@ function trackSessionIdlePrompt(session, chunk) {
   const prompt = extractTrailingIdlePrompt(nextTail);
   if (prompt) {
     const activeMarkers = session._activePtyPromptMarkers;
+    let hasTrustedAutomatedCompletion = false;
     if (activeMarkers instanceof Map && activeMarkers.size > 0) {
       for (const [marker, state] of activeMarkers) {
         // During an automated command, ordinary output can end in text that
@@ -162,6 +163,7 @@ function trackSessionIdlePrompt(session, chunk) {
         if (state?.inputAfterEnd) return "";
         if (!state?.ended && !hasCompletedPtyPromptMarker(nextTail, marker)) return "";
       }
+      hasTrustedAutomatedCompletion = true;
     } else if (Object.prototype.hasOwnProperty.call(session, "_manualPromptKindAtSubmit")) {
       // A manual command can print text that looks like another shell's
       // default prompt before the real prompt returns. Only let manual output
@@ -175,7 +177,9 @@ function trackSessionIdlePrompt(session, chunk) {
         return "";
       }
     }
-    confirmSessionIdlePrompt(session, nextTail);
+    confirmSessionIdlePrompt(session, nextTail, undefined, {
+      trustedCompletion: hasTrustedAutomatedCompletion,
+    });
   }
 
   return prompt;
@@ -185,7 +189,7 @@ function getSessionInputVersion(session) {
   return Number(session?._terminalInputVersion || 0);
 }
 
-function confirmSessionIdlePrompt(session, output, expectedInputVersion) {
+function confirmSessionIdlePrompt(session, output, expectedInputVersion, options = {}) {
   if (!session) return "";
   const prompt = extractTrailingIdlePrompt(output);
   if (!prompt) return "";
@@ -207,6 +211,9 @@ function confirmSessionIdlePrompt(session, output, expectedInputVersion) {
     delete session._manualPromptKindAtSubmit;
     delete session._untrustedManualPrompt;
     delete session._untrustedManualPromptKind;
+    if (options.trustedCompletion === true) {
+      delete session._manualInputRequiresClear;
+    }
   }
   session._activeShellKindHint = classifyIdlePromptShellKind(prompt);
   return prompt;
@@ -261,6 +268,7 @@ function markSessionInputActivity(session) {
 
 function markSessionInputPending(session, data = "", options = {}) {
   if (!session) return;
+  const inputWasKnownEmpty = isSessionInputLineKnownEmpty(session);
   markSessionInputActivity(session);
   session._inputSinceIdlePrompt = true;
   // Enter/newline and Ctrl+C submit or cancel the editable line, so a later
@@ -269,6 +277,15 @@ function markSessionInputPending(session, data = "", options = {}) {
   // input typed while a foreground process is returning control).
   session._submittedInputAwaitingPrompt = /[\r\n\x03]$/.test(String(data || ""));
   if (options.source === "manual" && session._submittedInputAwaitingPrompt) {
+    const input = String(data || "");
+    if (input.endsWith("\x03") || (/^[\r\n]+$/.test(input) && inputWasKnownEmpty)) {
+      delete session._manualInputRequiresClear;
+    } else {
+      // A foreground program can print a line identical to the current shell
+      // prompt and continue reading. Remember that manual Enter alone cannot
+      // prove the editable line is safe for a prefix-free agent write.
+      session._manualInputRequiresClear = true;
+    }
     const trustedKind = session._activeShellKindHint;
     session._manualPromptKindAtSubmit = ["posix", "fish", "powershell", "cmd"].includes(trustedKind)
       ? trustedKind
@@ -300,6 +317,7 @@ function isSessionInputLineKnownEmpty(session) {
   return Boolean(
     session
     && !hasReservedSessionInput(session)
+    && session._manualInputRequiresClear !== true
     && session._inputSinceIdlePrompt === false
     && getFreshIdlePrompt(session),
   );
