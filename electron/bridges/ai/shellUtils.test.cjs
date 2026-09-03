@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const {
   addCodexExecutableEnvForSdk,
   buildWindowsShellCommandLine,
+  clearLiveShellKind,
   extractTrailingIdlePrompt,
   formatSyntheticEcho,
   getFreshIdlePrompt,
@@ -638,6 +639,29 @@ test("recognized non-fish idle prompt clears the live fish hint (user exited nes
   assert.equal(session._liveShellKindAt, 0);
   // Fresh posix prompt is still tracked normally.
   assert.equal(session.lastIdlePrompt, "user@host:~$ ");
+});
+
+test("fish banner split across PTY chunk boundaries is still detected", () => {
+  const session = {};
+  // The banner does not have to arrive in a single data event.
+  trackSessionIdlePrompt(session, "user@host:~$ fish\r\nWelcome to fish, the friendly ");
+  assert.ok(!session._liveShellKind);
+  trackSessionIdlePrompt(session, "interactive shell\r\n");
+  assert.equal(session._liveShellKind, "fish");
+  assert.equal(typeof session._liveShellKindAt, "number");
+});
+
+test("clearLiveShellKind resets the live fish hint", () => {
+  const session = {};
+  trackSessionIdlePrompt(session, "Welcome to fish, the friendly interactive shell\r\n");
+  assert.equal(session._liveShellKind, "fish");
+
+  clearLiveShellKind(session);
+  assert.equal(session._liveShellKind, "");
+  assert.equal(session._liveShellKindAt, 0);
+  // No-op on missing / non-object sessions.
+  clearLiveShellKind(undefined);
+  clearLiveShellKind(null);
 });
 
 test("getFreshIdlePrompt returns the cached prompt when the live tail still ends with it", () => {

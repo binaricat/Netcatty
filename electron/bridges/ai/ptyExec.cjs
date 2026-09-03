@@ -44,6 +44,7 @@ function startPtyJob(ptyStream, command, options) {
     shellKind,
     loginShellHint,
     liveShellKind,
+    onLiveShellKindInvalidated,
     chatSessionId,
     abortSignal,
     expectedPrompt,
@@ -150,6 +151,24 @@ function startPtyJob(ptyStream, command, options) {
     startupTimeoutId = setTimeout(() => {
       if (finished || foundStart) return;
       sendInterrupt();
+      // The start marker never arrived: the interactive shell did not
+      // understand the wrapper we typed. If the wrapper was chosen by the
+      // live (banner-detected) fish hint, that hint is stale — e.g. the user
+      // exited a nested fish back to a parent shell whose idle prompt is not
+      // one of the recognized shapes, so trackSessionIdlePrompt never
+      // cleared it (Codex P1 on #3262). Invalidate it so the next command
+      // falls back to shellKind / login hint instead of fish-wrapping into a
+      // POSIX shell again. A real fish session prints its start marker
+      // immediately, so this never fires for a healthy fish wrapper.
+      if (
+        typeof onLiveShellKindInvalidated === "function"
+        && liveShellKind === "fish"
+        && resolvedShellKind === "fish"
+      ) {
+        try {
+          onLiveShellKindInvalidated();
+        } catch { /* invalidation is best-effort */ }
+      }
       const label = maxBufferedChars > 0 ? "Background job startup" : "Command startup";
       finish(preStartOutput, -1, `${label} timed out — start marker never arrived`);
     }, startupMs);
@@ -619,6 +638,7 @@ function startPtyJob(ptyStream, command, options) {
  * @param {string} [options.chatSessionId] - Chat session ID for scoped cancellation
  * @param {AbortSignal} [options.abortSignal] - AbortSignal to cancel execution
  * @param {string} [options.liveShellKind] - Live (nested) shell kind detected in the session
+ * @param {() => void} [options.onLiveShellKindInvalidated] - Called when the live shell hint should be discarded (fish wrapper start marker never arrived)
  * @param {string} [options.expectedPrompt] - Last observed idle prompt for exact fallback matching
  * @param {boolean} [options.typedInput=false] - Emit synthetic command echo before execution
  * @param {(command: string) => void} [options.echoCommand] - Callback used to display synthetic command echo

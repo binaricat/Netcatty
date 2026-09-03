@@ -423,6 +423,45 @@ test("startPtyJob forwards liveShellKind so nested fish gets the fish wrapper", 
   await job.resultPromise;
 });
 
+test("startPtyJob invalidates the live fish hint when the wrapper start marker never arrives", async () => {
+  // Codex P1 on #3262: when a user exits nested fish back to a parent shell
+  // with a custom prompt, the stale live fish hint keeps fish-wrapping
+  // commands into a POSIX shell forever. The wrapper fails before its start
+  // marker, so the startup timeout is the signal that the hint is stale.
+  const writes = [];
+  let invalidated = 0;
+  class NoMarkerPty extends EventEmitter {
+    write(data) {
+      writes.push(String(data));
+      // Simulate a POSIX shell that chokes on the fish wrapper: it echoes
+      // garbage but never emits the start marker.
+      queueMicrotask(() => {
+        this.emit("data", Buffer.from("bash: syntax error near unexpected token\r\nuser@host ❯ "));
+      });
+    }
+  }
+  const pty = new NoMarkerPty();
+  const job = startPtyJob(pty, "echo hi", {
+    shellKind: "posix",
+    liveShellKind: "fish",
+    timeoutMs: 50,
+    onLiveShellKindInvalidated: () => { invalidated += 1; },
+  });
+  const result = await job.resultPromise;
+  assert.ok(result.error.includes("start marker never arrived"));
+  assert.equal(invalidated, 1);
+
+  // Without the live fish hint driving the wrapper, no invalidation fires.
+  invalidated = 0;
+  const job2 = startPtyJob(new NoMarkerPty(), "echo hi", {
+    shellKind: "posix",
+    timeoutMs: 50,
+    onLiveShellKindInvalidated: () => { invalidated += 1; },
+  });
+  await job2.resultPromise;
+  assert.equal(invalidated, 0);
+});
+
 test("execViaRawPty does not prepend a line-clear before device commands", async () => {
   const writes = [];
   const port = new EventEmitter();

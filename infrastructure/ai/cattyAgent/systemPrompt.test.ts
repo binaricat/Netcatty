@@ -53,3 +53,19 @@ test('system prompt tells Catty to emit fish-compatible commands for fish shells
   assert.match(prompt, /set -x VAR value/);
   assert.match(prompt, /bash -lc/);
 });
+
+test('system prompt tells Catty to treat a POSIX session running nested fish as fish', () => {
+  // The renderer-built session context cannot see the main-process live
+  // (banner-detected) shell hint, so a POSIX login session that starts fish
+  // is still listed with a POSIX shell. The prompt must tell Catty to detect
+  // fish from session output instead (Codex P2 on #3262).
+  const prompt = buildSystemPrompt({
+    scopeType: 'terminal',
+    hosts: [],
+    permissionMode: 'confirm',
+  });
+
+  assert.match(prompt, /may still be running fish interactively/);
+  assert.match(prompt, /Welcome to fish, the friendly interactive shell/);
+  assert.match(prompt, /treat that session as fish/);
+});

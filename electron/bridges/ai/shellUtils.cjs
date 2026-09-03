@@ -137,11 +137,16 @@ function looksLikeIdleAutoLogout(outputTail) {
   return false;
 }
 
+// Enough carry to reassemble a banner split across PTY chunks, plus slack
+// for ANSI sequences that stripAnsi removes before scanning.
+const FISH_BANNER_CARRY_CHARS = FISH_WELCOME_PATTERN.source.length + 16;
+
 function trackSessionIdlePrompt(session, chunk) {
   if (!session || typeof chunk !== "string" || !chunk) return "";
 
   const nextTail = `${session._promptTrackTail || ""}${chunk}`.slice(-MAX_PROMPT_TRACK_TAIL);
   session._promptTrackTail = nextTail;
+  const strippedChunk = stripAnsi(chunk);
 
   const prompt = extractTrailingIdlePrompt(nextTail);
   if (prompt) {
@@ -152,19 +157,46 @@ function trackSessionIdlePrompt(session, chunk) {
     // nested fish back to bash/zsh). Clear the live hint so wrapper
     // selection falls back to shellKind / login hint. Fish's own default
     // prompt ends with `>` and never matches the recognized shapes, so this
-    // does not fire while a fish session is idle.
+    // does not fire while a fish session is idle. Note this only covers the
+    // three recognized prompt shapes — a custom parent prompt (Starship,
+    // oh-my-posh, …) is not recognized here; the pty exec path additionally
+    // invalidates the hint via clearLiveShellKind when a fish-wrapped
+    // command's start marker never arrives (Codex P1 on #3262).
     if (session._liveShellKind) {
-      session._liveShellKind = "";
-      session._liveShellKindAt = 0;
+      clearLiveShellKind(session);
     }
   }
 
-  if (FISH_WELCOME_PATTERN.test(stripAnsi(chunk))) {
+  // Detect against a small carry of the previous chunk plus the current
+  // chunk, not the chunk alone: PTY data-event boundaries are arbitrary and
+  // the banner can be split across two events ("Welcome to fish, the
+  // friendly " + "interactive shell") (Codex P2 on #3262). Only text after
+  // the last match is carried forward, so the same banner is never
+  // re-scanned — re-scanning the full rolling tail would resurrect a hint
+  // that a recognized parent prompt just cleared.
+  const bannerScanText = `${session._fishBannerScanCarry || ""}${strippedChunk}`;
+  const bannerMatch = FISH_WELCOME_PATTERN.exec(bannerScanText);
+  if (bannerMatch) {
     session._liveShellKind = "fish";
     session._liveShellKindAt = Date.now();
+    session._fishBannerScanCarry = bannerScanText
+      .slice(bannerMatch.index + bannerMatch[0].length)
+      .slice(-FISH_BANNER_CARRY_CHARS);
+  } else {
+    session._fishBannerScanCarry = bannerScanText.slice(-FISH_BANNER_CARRY_CHARS);
   }
 
   return prompt;
+}
+
+// Clear the live (banner-detected) shell-kind hint. Exported so the pty exec
+// handlers can invalidate the hint when a fish-wrapped command fails to start
+// (start marker never arrived) — the fallback expiry for parent shells whose
+// idle prompt is not one of the three recognized shapes.
+function clearLiveShellKind(session) {
+  if (!session || typeof session !== "object") return;
+  session._liveShellKind = "";
+  session._liveShellKindAt = 0;
 }
 
 // Return `session.lastIdlePrompt` only if the PTY's recent rolling tail
@@ -991,6 +1023,7 @@ module.exports = {
   isDefaultCmdPromptLine,
   isDefaultPosixPromptLine,
   trackSessionIdlePrompt,
+  clearLiveShellKind,
   looksLikeIdleAutoLogout,
   isLocalhostHostname,
   extractFirstNonLocalhostUrl,

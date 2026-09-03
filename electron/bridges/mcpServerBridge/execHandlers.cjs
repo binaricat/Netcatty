@@ -5,6 +5,7 @@ const {
   ensureSessionShellKind,
   ensureSessionShellKindForExec,
 } = require("../ai/sessionShellKind.cjs");
+const { clearLiveShellKind } = require("../ai/shellUtils.cjs");
 
 function createExecHandlerApi(ctx) {
   with (ctx) {
@@ -150,6 +151,7 @@ function createExecHandlerApi(ctx) {
             shellKind: session.shellKind,
             loginShellHint: session._loginShellKind,
             liveShellKind: session._liveShellKind,
+            onLiveShellKindInvalidated: () => clearLiveShellKind(session),
             expectedPrompt: getFreshIdlePrompt(session),
             typedInput: true,
             echoCommand: (rawCommand) => echoCommandToSession(session, sessionId, rawCommand),
@@ -295,6 +297,7 @@ function createExecHandlerApi(ctx) {
             shellKind: session.shellKind,
             loginShellHint: session._loginShellKind,
             liveShellKind: session._liveShellKind,
+            onLiveShellKindInvalidated: () => clearLiveShellKind(session),
             chatSessionId,
             expectedPrompt: getFreshIdlePrompt(session),
             typedInput: true,

@@ -7,7 +7,7 @@ const {
   execViaChannel,
   execViaRawPty,
 } = require("../bridges/ai/ptyExec.cjs");
-const { getFreshIdlePrompt, formatSyntheticEcho } = require("../bridges/ai/shellUtils.cjs");
+const { getFreshIdlePrompt, formatSyntheticEcho, clearLiveShellKind } = require("../bridges/ai/shellUtils.cjs");
 const {
   ensureSessionShellKind,
   ensureSessionShellKindForExec,
@@ -278,6 +278,7 @@ function createWorkerAiExecHandler({
         shellKind: session.shellKind,
         loginShellHint: session._loginShellKind,
         liveShellKind: session._liveShellKind,
+        onLiveShellKindInvalidated: () => clearLiveShellKind(session),
         chatSessionId,
         expectedPrompt: getFreshIdlePrompt(session),
         typedInput: true,
@@ -446,6 +447,7 @@ function createWorkerAiJobStartHandler({
         shellKind: session.shellKind,
         loginShellHint: session._loginShellKind,
         liveShellKind: session._liveShellKind,
+        onLiveShellKindInvalidated: () => clearLiveShellKind(session),
         chatSessionId,
         expectedPrompt: getFreshIdlePrompt(session),
         typedInput: true,

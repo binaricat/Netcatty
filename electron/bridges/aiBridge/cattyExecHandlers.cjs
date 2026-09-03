@@ -2,7 +2,7 @@
 // Module-level require on purpose: code inside registerCattyExecHandlers
 // runs under `with (ctx)` where bare `require` resolves to ctx.require
 // (based in electron/bridges/). Requiring here keeps the path unambiguous.
-const { formatSyntheticEcho } = require("../ai/shellUtils.cjs");
+const { formatSyntheticEcho, clearLiveShellKind } = require("../ai/shellUtils.cjs");
 const { ensureSessionShellKindForExec } = require("../ai/sessionShellKind.cjs");
 
 function getWorkerExecutionMeta(mcpServerBridge, sessionId, chatSessionId) {
@@ -175,6 +175,7 @@ function registerCattyExecHandlers(ctx) {
             shellKind: session.shellKind,
             loginShellHint: session._loginShellKind,
             liveShellKind: session._liveShellKind,
+            onLiveShellKindInvalidated: () => clearLiveShellKind(session),
             chatSessionId,
             expectedPrompt: getFreshIdlePrompt(session),
             typedInput: true,
