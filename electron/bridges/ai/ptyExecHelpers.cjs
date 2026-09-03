@@ -174,6 +174,11 @@ function resolveEffectiveShellKind(shellKind, expectedPrompt, options = {}) {
   }
   if (baseKind) return baseKind;
 
+  // A generic POSIX prompt classification cannot disprove an authoritative
+  // fish login probe, including during the brief gap before that prompt is
+  // redrawn. Preserve fish until an unambiguous PowerShell/cmd prompt wins.
+  if (hint === "fish" && activeHint === "posix") return "fish";
+
   // The last recognized interactive prompt is a stronger soft hint than the
   // login shell. It bridges the brief marker-to-prompt redraw gap between two
   // executions without pinning the session: a newer recognized prompt still

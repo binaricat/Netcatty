@@ -296,6 +296,13 @@ test("loginShellHint selects fish/posix/powershell/cmd without pinning confirmed
     "fish",
   );
   assert.equal(
+    resolveEffectiveShellKind(undefined, "", {
+      loginShellHint: "fish",
+      activeShellHint: "posix",
+    }),
+    "fish",
+  );
+  assert.equal(
     resolveEffectiveShellKind(undefined, "user@host:~$", { loginShellHint: "posix" }),
     "posix",
   );
