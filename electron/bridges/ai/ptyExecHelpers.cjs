@@ -218,7 +218,7 @@ function buildPosixWrapperBody(command, marker) {
   // The BASH_VERSION guard keeps zsh (no portable delete) and dash/sh
   // (no history builtin) completely untouched.
   const historyCleanup =
-    `[ -n "$BASH_VERSION" ] && { ${marker}_h=$(history 1 2>/dev/null); case "$${marker}_h" in *${marker}*) history -d "\${HISTCMD:-}" 2>/dev/null ;; esac; }`;
+    `[ -n "\${BASH_VERSION-}" ] && { ${marker}_h=$(history 1 2>/dev/null); case "$${marker}_h" in *${marker}*) history -d "\${HISTCMD:-}" 2>/dev/null ;; esac; }`;
   return (
     `${marker}=0; ${cmdAssign}; { printf '%s\\n' '${marker}_S'; trap ':' INT; ( ${noPager}eval "$${marker}_cmd" ); __NCMCP_rc=$?; trap - INT; printf '%s\\n' '${marker}_E:'\"$__NCMCP_rc\"; ${historyCleanup}; (exit $__NCMCP_rc); }`
   );
