@@ -82,13 +82,18 @@ const FISH_WELCOME_PATTERN = /Welcome to fish, the friendly interactive shell/;
 // the echoed launch command (e.g. `user@host:~$ fish`) and before its first
 // prompt. Only trust the banner when it follows that echoed launch: a POSIX
 // command, log, or document that merely *prints* the banner text is not
-// evidence of a shell transition (Codex P2 on #3262). Anchoring on a prompt
-// character before `fish` keeps nested launches working (`user@host:~$ fish`,
-// `user@host% exec fish`) while rejecting arbitrary output that happens to
-// mention the banner. A login shell that *is* fish prints the banner with no
-// preceding echo; those sessions are covered by the login-shell probe (#1854)
-// or a confirmed shellKind, not by this hint.
-const FISH_LAUNCH_ECHO_PATTERN = /[#$%>]\s*fish$/;
+// evidence of a shell transition (Codex P2 on #3262). The launch command may
+// be decorated and must still match (Codex P2 on #3262): `exec fish`,
+// an absolute path (`/usr/bin/fish`, `~/.local/bin/fish`), or trailing fish
+// flags (`fish -l`, `fish --no-config`). Anchoring on a prompt character
+// before the launch keeps nested launches working while rejecting arbitrary
+// output that happens to mention the banner (`cat fish-notes.txt` still does
+// not match: the text between the prompt character and `fish` is neither an
+// `exec` prefix nor a `/`-terminated path). A login shell that *is* fish
+// prints the banner with no preceding echo; those sessions are covered by
+// the login-shell probe (#1854) or a confirmed shellKind, not by this hint.
+const FISH_LAUNCH_ECHO_PATTERN =
+  /[#$%>]\s*(?:exec\s+)?(?:[^\s#$%>]+\/)?fish(?:\s+-{1,2}[\w.-]+)*$/;
 
 function isDefaultPowerShellPromptLine(line) {
   return POWERSHELL_PROMPT_PATTERN.test(String(line || ""));
@@ -176,19 +181,66 @@ function hasFishLaunchEchoBeforeBanner(scanText, matchIndex) {
 // A recognized PowerShell/cmd/posix idle prompt after the banner means the
 // fish session already ended (banner and parent prompt in one chunk, e.g.
 // `user@host:~$ fish\nWelcome to fish…\nuser@host:~$ exit\nuser@host:~$`).
-// Prompt clearing runs before the banner scan, so without this check the
-// scan would set the hint that the trailing prompt just cleared.
+// The scan runs after prompt clearing, so without this check the scan would
+// set the hint that the trailing prompt just cleared. Like the clearing path
+// (hasFishExitEchoBeforePrompt), the recognized prompt only counts as exit
+// evidence when an echoed exit command precedes it: a customized fish_prompt
+// shaped like `user@host:~$` must not suppress the banner hint (Codex P1 on
+// #3262).
 function hasRecognizedIdlePromptAfterBanner(scanText, fromIndex) {
   const after = scanText.slice(fromIndex).replace(/\r\n?/g, "\n");
-  return after.split("\n").some((line) => {
+  const lines = after.split("\n");
+  let prevNonEmpty = "";
+  for (const line of lines) {
     const trimmed = line.replace(/\s+$/, "");
-    if (!trimmed) return false;
-    return (
+    if (!trimmed) continue;
+    if (
       isDefaultPowerShellPromptLine(trimmed)
       || isDefaultPosixPromptLine(trimmed)
       || isDefaultCmdPromptLine(trimmed)
-    );
-  });
+    ) {
+      return isExitEchoLine(prevNonEmpty);
+    }
+    prevNonEmpty = trimmed;
+  }
+  return false;
+}
+
+// The last non-empty line before the trailing prompt. Used as exit evidence
+// for hasFishExitEchoBeforePrompt below.
+function lastNonEmptyLineBefore(text, endOffset) {
+  const lines = String(text || "").slice(0, endOffset).split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i].replace(/\s+$/, "");
+    if (line) return line;
+  }
+  return "";
+}
+
+// A customized `fish_prompt` can look exactly like the parent POSIX prompt
+// (`user@host:~$`), so a recognized idle prompt's *shape* alone cannot tell
+// "still inside nested fish" from "back in the parent shell" (Codex P1 on
+// #3262). The visible evidence that the nested fish process actually ended
+// is the echoed exit command — the user typed `exit` (or `logout`) and the
+// PTY echoed it right before the parent prompt reappeared (`user@host:~$
+// exit` / a bare `exit` line). Only such an echo justifies clearing the live
+// fish hint; an idle prompt with no exit echo leaves the hint alone, and a
+// real shell change without one (e.g. Ctrl+D) is still recovered by the pty
+// exec fallback that invalidates the hint when a fish-wrapped command's
+// start marker never arrives (clearLiveShellKind via onLiveShellKindInvalidated).
+function isExitEchoLine(line) {
+  const trimmed = String(line || "").replace(/\s+$/, "");
+  if (!trimmed) return false;
+  // Bare `exit` / `logout` echoed on its own line (prompt repaint may put
+  // the typed command on a separate line after a \r redraw).
+  if (/^(?:exit|logout)$/i.test(trimmed)) return true;
+  // …or typed after a prompt character: `user@host:~$ exit`.
+  return /[#$%>]\s*(?:exit|logout)\s*$/i.test(trimmed);
+}
+
+function hasFishExitEchoBeforePrompt(normalizedTail, prompt) {
+  if (!normalizedTail || !prompt || !normalizedTail.endsWith(prompt)) return false;
+  return isExitEchoLine(lastNonEmptyLineBefore(normalizedTail, normalizedTail.length - prompt.length));
 }
 
 function trackSessionIdlePrompt(session, chunk) {
@@ -203,17 +255,23 @@ function trackSessionIdlePrompt(session, chunk) {
     session.lastIdlePrompt = prompt;
     session.lastIdlePromptAt = Date.now();
     // A recognized PowerShell/cmd/posix idle prompt *after* the fish banner
-    // means the interactive shell is no longer fish (e.g. the user exited a
-    // nested fish back to bash/zsh). Clear the live hint so wrapper
-    // selection falls back to shellKind / login hint. Fish's own default
-    // prompt ends with `>` and never matches the recognized shapes, so this
-    // does not fire while a fish session is idle. Note this only covers the
-    // three recognized prompt shapes — a custom parent prompt (Starship,
-    // oh-my-posh, …) is not recognized here; the pty exec path additionally
-    // invalidates the hint via clearLiveShellKind when a fish-wrapped
-    // command's start marker never arrives (Codex P1 on #3262).
+    // *plus exit evidence* means the interactive shell is no longer fish
+    // (e.g. the user typed `exit` in a nested fish back to bash/zsh). Clear
+    // the live hint so wrapper selection falls back to shellKind / login
+    // hint. Fish's own default prompt ends with `>` and never matches the
+    // recognized shapes, but a *customized* fish_prompt can be shaped like a
+    // POSIX prompt (`user@host:~$`) — for those, prompt shape alone is not
+    // evidence fish exited, so the hint is only cleared when the echoed exit
+    // command precedes the prompt (Codex P1 on #3262). A custom parent
+    // prompt (Starship, oh-my-posh, …) is not recognized here either; the
+    // pty exec path additionally invalidates the hint via clearLiveShellKind
+    // when a fish-wrapped command's start marker never arrives (Codex P1 on
+    // #3262).
     if (session._liveShellKind) {
-      clearLiveShellKind(session);
+      const normalizedTail = stripAnsi(nextTail).replace(/\r/g, "\n");
+      if (hasFishExitEchoBeforePrompt(normalizedTail, stripAnsi(prompt))) {
+        clearLiveShellKind(session);
+      }
     }
   }
 

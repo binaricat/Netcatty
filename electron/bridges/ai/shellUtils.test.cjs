@@ -653,6 +653,62 @@ test("fish banner split across PTY chunk boundaries is still detected", () => {
   assert.equal(typeof session._liveShellKindAt, "number");
 });
 
+test("decorated fish launch commands are recognized before the banner (Codex P2)", () => {
+  // `exec fish`, an absolute path, and trailing flags must all match the
+  // echoed launch line — otherwise the banner is discarded and the first AI
+  // command gets a POSIX wrapper.
+  const launches = [
+    "user@host:~$ fish",
+    "user@host% exec fish",
+    "user@host:~$ /usr/bin/fish",
+    "user@host:~$ ~/.local/bin/fish",
+    "user@host:~$ fish -l",
+    "user@host:~$ fish --no-config",
+  ];
+  for (const launch of launches) {
+    const session = {};
+    trackSessionIdlePrompt(session, `${launch}\r\nWelcome to fish, the friendly interactive shell\r\n`);
+    assert.equal(session._liveShellKind, "fish", launch);
+  }
+
+  // Non-launch lines mentioning fish still do not match.
+  const negatives = [
+    "user@host:~$ cat fish-notes.txt",
+    "user@host:~$ echo fish",
+    "user@host:~$ which fish",
+    "Installing fish",
+  ];
+  for (const launch of negatives) {
+    const session = {};
+    trackSessionIdlePrompt(session, `${launch}\r\nWelcome to fish, the friendly interactive shell\r\n`);
+    assert.ok(!session._liveShellKind, launch);
+  }
+});
+
+test("fish hint survives a POSIX-shaped customized fish_prompt without exit echo (Codex P1)", () => {
+  const session = {};
+  trackSessionIdlePrompt(session, "user@host:~$ fish\r\nWelcome to fish, the friendly interactive shell\r\n");
+  assert.equal(session._liveShellKind, "fish");
+
+  // fish_prompt customized to `user@host:~$`: every idle prompt matches the
+  // POSIX shape, but without an echoed exit command this is not evidence the
+  // nested fish exited — the hint must survive.
+  trackSessionIdlePrompt(session, "user@host:~$ ");
+  assert.equal(session._liveShellKind, "fish");
+  trackSessionIdlePrompt(session, "\r\nuser@host:~$ ");
+  assert.equal(session._liveShellKind, "fish");
+});
+
+test("fish hint still cleared when an echoed exit command precedes the recognized prompt (Codex P1)", () => {
+  const session = {};
+  trackSessionIdlePrompt(session, "user@host:~$ fish\r\nWelcome to fish, the friendly interactive shell\r\n");
+  assert.equal(session._liveShellKind, "fish");
+
+  // Prompt-adjacent exit echo (`user@host:~$ exit`).
+  trackSessionIdlePrompt(session, "\r\nuser@host:~$ exit\r\nuser@host:~$ ");
+  assert.equal(session._liveShellKind, "");
+});
+
 test("clearLiveShellKind resets the live fish hint", () => {
   const session = {};
   trackSessionIdlePrompt(session, "user@host:~$ fish\r\nWelcome to fish, the friendly interactive shell\r\n");
