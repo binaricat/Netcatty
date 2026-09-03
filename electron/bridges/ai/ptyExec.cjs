@@ -73,7 +73,10 @@ function startPtyJob(ptyStream, command, options) {
   );
   const hasAmbiguousShellTransition = Boolean(
     observedShellHint
-    && resolvedShellKind !== observedShellHint,
+    && (
+      resolvedShellKind !== observedShellHint
+      || (loginShellHint && loginShellHint !== observedShellHint)
+    ),
   );
   // This transition identifies the reporter's Windows startup-command path,
   // but it does not reveal the configured PSReadLine edit mode. If terminal

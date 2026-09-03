@@ -24,6 +24,7 @@ const {
   getSessionLastObservedShellKind,
   isSessionInputLineKnownEmpty,
   markSessionInputPending,
+  reserveSessionInput,
   trackSessionIdlePrompt,
 } = require("./shellUtils.cjs");
 
@@ -466,6 +467,34 @@ test("partial input in a nested shell is rejected when its wrapper is ambiguous"
   trackSessionIdlePrompt(session, "PS C:\\Users\\alice>");
   markSessionInputPending(session, "Write-Output 'USER'");
   trackSessionIdlePrompt(session, "Write-Output 'USER'");
+
+  const job = startPtyJob(pty, "Write-Output 'PROBE'", {
+    loginShellHint: session._loginShellKind,
+    activeShellHint: getSessionActiveShellHint(session),
+    observedShellHint: getSessionLastObservedShellKind(session),
+    timeoutMs: 50,
+    expectedPrompt: getFreshIdlePrompt(session),
+    inputLineKnownEmpty: isSessionInputLineKnownEmpty(session),
+  });
+  assert.equal(writes.length, 0);
+  const result = await job.resultPromise;
+  assert.equal(result.ok, false);
+  assert.match(result.error, /pending input/i);
+});
+
+test("reserved input in a nested shell is rejected despite a still-fresh prompt", async () => {
+  const writes = [];
+  class CapturePty extends EventEmitter {
+    write(data) {
+      writes.push(String(data));
+    }
+  }
+  const pty = new CapturePty();
+  const session = { _loginShellKind: "posix" };
+  trackSessionIdlePrompt(session, "PS C:\\Users\\alice>");
+  reserveSessionInput(session);
+  assert.equal(getFreshIdlePrompt(session), "PS C:\\Users\\alice>");
+  assert.equal(getSessionLastObservedShellKind(session), "powershell");
 
   const job = startPtyJob(pty, "Write-Output 'PROBE'", {
     loginShellHint: session._loginShellKind,
