@@ -1483,6 +1483,13 @@ function shouldBlockSessionInput(session, data) {
   return false;
 }
 
+function hasTerminalInputContent(data) {
+  if (typeof data === "string") return data.length > 0;
+  if (Buffer.isBuffer(data) || ArrayBuffer.isView(data)) return data.byteLength > 0;
+  if (data instanceof ArrayBuffer) return data.byteLength > 0;
+  return data !== null && data !== undefined;
+}
+
 function writeToSessionNow(
   payload,
   data,
@@ -1496,6 +1503,10 @@ function writeToSessionNow(
       sessionId: payload.sessionId,
       dataCode: data === "\x03" ? "ETX" : undefined,
     }, trace);
+    return;
+  }
+  if (!hasTerminalInputContent(data)) {
+    if (releaseInputReservation) releaseReservedSessionInput(session);
     return;
   }
   if (shouldBlockSessionInput(session, data)) {

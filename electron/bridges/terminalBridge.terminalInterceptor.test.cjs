@@ -43,6 +43,30 @@ test("ordinary terminal input uses the worker-owned interceptor before transport
   assert.deepEqual(h.writes, ["HELLO"]);
 });
 
+test("interceptor-consumed input releases its reservation without becoming pending", async () => {
+  const writes = [];
+  const session = {
+    type: "local",
+    proc: { write(data) { writes.push(data); } },
+  };
+  terminalBridge.init({
+    sessions: new Map([["session-consumed", session]]),
+    electronModule: {},
+    terminalDataPipeline: {
+      has() { return true; },
+      async interceptInput() { return new Uint8Array(); },
+    },
+  });
+  trackSessionIdlePrompt(session, "PS C:\\Users\\alice>");
+
+  terminalBridge.writeToSession(null, { sessionId: "session-consumed", data: "x" });
+  assert.equal(isSessionInputLineKnownEmpty(session), false);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(writes, []);
+  assert.equal(isSessionInputLineKnownEmpty(session), true);
+});
+
 test("queued intercepted input stays reserved until every write is delivered", async () => {
   const writes = [];
   const releases = new Map();
