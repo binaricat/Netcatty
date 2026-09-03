@@ -624,6 +624,7 @@ test("input tracking keeps an echo-lagged prompt from being treated as an empty 
   markSessionInputPending(session);
   assert.equal(getFreshIdlePrompt(session), "PS C:\\Users\\alice>");
   assert.equal(isSessionInputLineKnownEmpty(session), false);
+  assert.equal(getSessionActiveShellHint(session), "");
 
   trackSessionIdlePrompt(session, "\r\nPS C:\\Users\\alice>");
   assert.equal(isSessionInputLineKnownEmpty(session), true);

@@ -176,6 +176,10 @@ function isSessionInputLineKnownEmpty(session) {
 }
 
 function getSessionActiveShellHint(session) {
+  // Manual/programmatic terminal input may have entered or exited a nested
+  // shell. Do not reuse the prior prompt's kind until a recognized prompt
+  // confirms the new idle state; direct agent wrappers do not mark this flag.
+  if (session?._inputSinceIdlePrompt !== false) return "";
   const hint = session?._activeShellKindHint;
   return ["posix", "fish", "powershell", "cmd"].includes(hint) ? hint : "";
 }
