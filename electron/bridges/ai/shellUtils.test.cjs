@@ -686,6 +686,35 @@ test("an ordinary manual command restores a clean line at the same shell prompt"
   assert.equal(hasUnverifiedManualSessionInput(session), false);
 });
 
+test("manual line-clear keys restore a clean line only after an empty prompt redraw", () => {
+  for (const [initialPrompt, typed, clearKey] of [
+    ["PS C:\\Users\\alice>", "Write-Output 'partial'", "\x1b"],
+    ["PS C:\\Users\\alice>", "Write-Output 'partial'", "\x15"],
+    ["alice@host:~$", "printf partial", "\x15"],
+  ]) {
+    const session = {};
+    trackSessionIdlePrompt(session, initialPrompt);
+    markSessionInputPending(session, typed, { source: "manual" });
+    markSessionInputPending(session, clearKey, { source: "manual" });
+    assert.equal(isSessionInputLineKnownEmpty(session), false);
+
+    trackSessionIdlePrompt(session, `\r${initialPrompt}`);
+    assert.equal(isSessionInputLineKnownEmpty(session), true);
+    assert.equal(hasUnverifiedManualSessionInput(session), false);
+  }
+});
+
+test("a line-clear key cannot claim success while typed text remains after the prompt", () => {
+  const session = {};
+  trackSessionIdlePrompt(session, "PS C:\\Users\\alice>");
+  markSessionInputPending(session, "Write-Output 'partial'", { source: "manual" });
+  markSessionInputPending(session, "\x1b", { source: "manual" });
+
+  trackSessionIdlePrompt(session, "\rPS C:\\Users\\alice>Write-Output 'partial'");
+  assert.equal(isSessionInputLineKnownEmpty(session), false);
+  assert.equal(hasUnverifiedManualSessionInput(session), false);
+});
+
 test("manual Ctrl+C confirms a legitimate nested-shell transition", () => {
   const session = {};
   trackSessionIdlePrompt(session, "alice@host:~$");

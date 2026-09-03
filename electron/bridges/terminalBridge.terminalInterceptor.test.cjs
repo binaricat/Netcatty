@@ -219,6 +219,33 @@ test("modified Enter stays pending when its editing effect is unknown", async ()
   assert.equal(isSessionInputLineKnownEmpty(session), true);
 });
 
+test("a manual line-clear key restores clean input after the prompt redraw", () => {
+  const writes = [];
+  const session = {
+    type: "local",
+    proc: { write(data) { writes.push(String(data)); } },
+  };
+  terminalBridge.init({
+    sessions: new Map([["session-line-clear", session]]),
+    electronModule: {},
+  });
+  trackSessionIdlePrompt(session, "PS C:\\Users\\alice>");
+
+  terminalBridge.writeToSession(null, {
+    sessionId: "session-line-clear",
+    data: "Write-Output 'partial'",
+  });
+  terminalBridge.writeToSession(null, {
+    sessionId: "session-line-clear",
+    data: "\x1b",
+  });
+  assert.equal(isSessionInputLineKnownEmpty(session), false);
+
+  trackSessionIdlePrompt(session, "\rPS C:\\Users\\alice>");
+  assert.equal(isSessionInputLineKnownEmpty(session), true);
+  assert.deepEqual(writes, ["Write-Output 'partial'", "\x1b"]);
+});
+
 test("manual command output cannot promote a different shell prompt", () => {
   const writes = [];
   const session = {

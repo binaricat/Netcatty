@@ -199,6 +199,7 @@ function confirmSessionIdlePrompt(session, output, expectedInputVersion, options
 
   session.lastIdlePrompt = prompt;
   session.lastIdlePromptAt = Date.now();
+  const manualClearConfirmed = session._manualClearCanConfirmPrompt === true;
   const manualCompletionMatchesPrompt = (
     Object.prototype.hasOwnProperty.call(session, "_manualPromptKindAtSubmit")
     && session._manualPromptKindAtSubmit
@@ -213,6 +214,7 @@ function confirmSessionIdlePrompt(session, output, expectedInputVersion, options
     && (
       session._inputSinceIdlePrompt !== true
       || session._submittedInputAwaitingPrompt === true
+      || manualClearConfirmed
     )
   ) {
     session._inputSinceIdlePrompt = false;
@@ -221,7 +223,12 @@ function confirmSessionIdlePrompt(session, output, expectedInputVersion, options
     delete session._untrustedManualPrompt;
     delete session._untrustedManualPromptKind;
     delete session._manualInterruptCanConfirmPrompt;
-    if (options.trustedCompletion === true || manualCompletionMatchesPrompt) {
+    delete session._manualClearCanConfirmPrompt;
+    if (
+      options.trustedCompletion === true
+      || manualCompletionMatchesPrompt
+      || manualClearConfirmed
+    ) {
       delete session._manualInputRequiresClear;
     }
   }
@@ -281,8 +288,13 @@ function markSessionInputPending(session, data = "", options = {}) {
   const inputWasKnownEmpty = isSessionInputLineKnownEmpty(session);
   const input = String(data || "");
   const isManualInterrupt = options.source === "manual" && input.endsWith("\x03");
+  const isManualLineClear = options.source === "manual"
+    && (input === "\x15" || input === "\x1b");
   if (options.source === "manual" && !isManualInterrupt) {
     delete session._manualInterruptCanConfirmPrompt;
+  }
+  if (options.source === "manual" && !isManualLineClear) {
+    delete session._manualClearCanConfirmPrompt;
   }
   markSessionInputActivity(session);
   session._inputSinceIdlePrompt = true;
@@ -291,6 +303,17 @@ function markSessionInputPending(session, data = "", options = {}) {
   // may remain buffered even if the shell redraws its prompt (for example,
   // input typed while a foreground process is returning control).
   session._submittedInputAwaitingPrompt = /[\r\n\x03]$/.test(input);
+  if (isManualLineClear) {
+    // Escape (PSReadLine Windows mode) and Ctrl+U (readline/PSReadLine)
+    // become trustworthy only if the terminal redraws the recognized prompt
+    // with no input after it. Modes where the key leaves text on the line do
+    // not produce that trailing idle-prompt shape.
+    session._manualClearCanConfirmPrompt = true;
+    const trustedKind = session._activeShellKindHint;
+    session._manualPromptKindAtSubmit = ["posix", "fish", "powershell", "cmd"].includes(trustedKind)
+      ? trustedKind
+      : "";
+  }
   if (options.source === "manual" && session._submittedInputAwaitingPrompt) {
     if (isManualInterrupt || (/^[\r\n]+$/.test(input) && inputWasKnownEmpty)) {
       delete session._manualInputRequiresClear;
