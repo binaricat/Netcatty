@@ -7,6 +7,7 @@ const {
   extractTrailingIdlePrompt,
   formatSyntheticEcho,
   getFreshIdlePrompt,
+  getSessionActiveShellHint,
   isSessionInputLineKnownEmpty,
   isDefaultPowerShellPromptLine,
   isDefaultCmdPromptLine,
@@ -612,6 +613,7 @@ test("tracks PowerShell idle prompt after SSH output", () => {
   assert.equal(session.lastIdlePrompt, "PS C:\\Windows\\System32>");
   assert.equal(typeof session.lastIdlePromptAt, "number");
   assert.equal(isSessionInputLineKnownEmpty(session), true);
+  assert.equal(getSessionActiveShellHint(session), "powershell");
 });
 
 test("input tracking keeps an echo-lagged prompt from being treated as an empty line", () => {
@@ -625,6 +627,19 @@ test("input tracking keeps an echo-lagged prompt from being treated as an empty 
 
   trackSessionIdlePrompt(session, "\r\nPS C:\\Users\\alice>");
   assert.equal(isSessionInputLineKnownEmpty(session), true);
+  assert.equal(getSessionActiveShellHint(session), "powershell");
+});
+
+test("the active shell hint follows recognized nested-shell prompts", () => {
+  const session = {};
+  trackSessionIdlePrompt(session, "PS C:\\Users\\alice>");
+  assert.equal(getSessionActiveShellHint(session), "powershell");
+
+  trackSessionIdlePrompt(session, "\r\nC:\\Users\\alice>");
+  assert.equal(getSessionActiveShellHint(session), "cmd");
+
+  trackSessionIdlePrompt(session, "\r\nalice@wsl:/mnt/c$");
+  assert.equal(getSessionActiveShellHint(session), "posix");
 });
 
 test("getFreshIdlePrompt returns the cached prompt when the live tail still ends with it", () => {

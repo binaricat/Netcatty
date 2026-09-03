@@ -44,6 +44,7 @@ function startPtyJob(ptyStream, command, options) {
     timeoutMs = 60000,
     shellKind,
     loginShellHint,
+    activeShellHint,
     chatSessionId,
     abortSignal,
     expectedPrompt,
@@ -58,7 +59,40 @@ function startPtyJob(ptyStream, command, options) {
   const marker = `__NCMCP_${Date.now().toString(36)}_${crypto.randomBytes(16).toString('hex')}__`;
   const resolvedShellKind = resolveEffectiveShellKind(shellKind, expectedPrompt, {
     loginShellHint,
+    activeShellHint,
   });
+  const isCmdToPowerShell =
+    resolvedShellKind === "powershell" && loginShellHint === "cmd";
+  // This transition identifies the reporter's Windows startup-command path,
+  // but it does not reveal the configured PSReadLine edit mode. If terminal
+  // input followed the prompt, no clear-key sequence is portable across
+  // Windows/Emacs/Vi; fail without writing instead of corrupting either line.
+  if (isCmdToPowerShell && !inputLineKnownEmpty) {
+    const error = "Terminal has pending input; submit or clear it before running an agent command";
+    const result = {
+      ok: false,
+      stdout: "",
+      stderr: "",
+      exitCode: -1,
+      error,
+      outputBaseOffset: 0,
+      totalOutputChars: 0,
+      outputTruncated: false,
+    };
+    return {
+      marker,
+      cancel: () => {},
+      getSnapshot: () => ({
+        stdout: "",
+        outputBaseOffset: 0,
+        totalOutputChars: 0,
+        outputTruncated: false,
+        status: "finished",
+        foundStart: false,
+      }),
+      resultPromise: Promise.resolve(result),
+    };
+  }
   const captureLimitChars = maxBufferedChars > 0
     ? maxBufferedChars
     : DEFAULT_FOREGROUND_PTY_CAPTURE_CHARS;
@@ -80,6 +114,7 @@ function startPtyJob(ptyStream, command, options) {
   let startupTimeoutId = null;
   let promptFallbackTimer = null;
   let endMarkerSettleTimer = null;
+  let endMarkerWaitTimer = null;
   let cancelRetryTimerId = null;
   // Track one-shot timers scheduled inside requestCancel so finish() can
   // clear them when the job exits early; otherwise they keep the Node
@@ -108,6 +143,13 @@ function startPtyJob(ptyStream, command, options) {
     if (endMarkerSettleTimer) {
       clearTimeout(endMarkerSettleTimer);
       endMarkerSettleTimer = null;
+    }
+  }
+
+  function clearEndMarkerWait() {
+    if (endMarkerWaitTimer) {
+      clearTimeout(endMarkerWaitTimer);
+      endMarkerWaitTimer = null;
     }
   }
 
@@ -252,6 +294,11 @@ function startPtyJob(ptyStream, command, options) {
     if (!found) return;
     const stdout = output.slice(0, found.endIdx);
     pendingEnd = { stdout, exitCode: found.exitCode };
+    clearTimeout(timeoutId);
+    timeoutId = null;
+    clearTimeout(wallTimeoutId);
+    wallTimeoutId = null;
+    clearStartupTimeout();
     if (!expectedPrompt || extractTrailingIdlePrompt(output)) {
       finish(stdout, found.exitCode);
       return;
@@ -259,9 +306,18 @@ function startPtyJob(ptyStream, command, options) {
     // A terminal often delivers the definitive end marker and the redrawn
     // prompt in separate chunks. Keep the execution lock until that prompt
     // arrives so an immediate follow-up command cannot select its wrapper from
-    // a transient marker-only tail. If a profile changes to an unrecognized
-    // custom prompt, a short quiet-period fallback preserves completion.
+    // a transient marker-only tail. Do not start the quiet-period fallback on
+    // the marker's own newline: network latency can leave that as the only
+    // post-marker data for longer than the fallback. Once printable prompt
+    // data arrives, an unrecognized custom prompt may settle after it is quiet.
     clearEndMarkerSettle();
+    if (!endMarkerWaitTimer) {
+      endMarkerWaitTimer = setTimeout(() => {
+        finish(stdout, found.exitCode);
+      }, 30000);
+    }
+    const postMarkerText = stripAnsi(output.slice(found.endOffset)).trim();
+    if (!postMarkerText) return;
     endMarkerSettleTimer = setTimeout(() => {
       finish(stdout, found.exitCode);
     }, 250);
@@ -346,6 +402,7 @@ function startPtyJob(ptyStream, command, options) {
     clearStartupTimeout();
     clearPromptFallback();
     clearEndMarkerSettle();
+    clearEndMarkerWait();
     clearCancelRetryTimer();
     // Clear any pending one-shot cancel timers so they do not keep the
     // Node event loop alive after the job has resolved.
@@ -449,7 +506,7 @@ function startPtyJob(ptyStream, command, options) {
         : Buffer.from(String(data ?? ""));
     const text = outputDecoder.write(bytes);
     if (!text) return;
-    armOutputTimeout();
+    if (!pendingEnd) armOutputTimeout();
 
     if (!foundStart) {
       preStartOutput += text;
@@ -613,14 +670,11 @@ function startPtyJob(ptyStream, command, options) {
 
   const wrapped = buildWrappedCommand(command, resolvedShellKind, marker);
   // A live PowerShell prompt overriding a cmd login hint is the Windows
-  // OpenSSH + startup-command shape from #3252. Avoid mode-dependent keys when
-  // input tracking proves nothing has been typed since that prompt. If input
-  // is pending, the reporter's default Windows PSReadLine mode safely clears
-  // it with Escape; other PowerShell paths retain the legacy fallback.
-  const isCmdToPowerShell =
-    resolvedShellKind === "powershell" && loginShellHint === "cmd";
+  // OpenSSH + startup-command shape from #3252. Input tracking already proved
+  // this prompt's editable line is untouched, so mode-dependent clear keys are
+  // unnecessary. Other PowerShell paths retain the legacy fallback.
   const pendingInputClearPrefix = isCmdToPowerShell
-    ? (inputLineKnownEmpty && expectedPrompt ? "" : "\x1b")
+    ? ""
     : buildPendingInputClearPrefix(resolvedShellKind);
   ptyStream.write(`${pendingInputClearPrefix}${wrapped}`);
 
@@ -656,6 +710,7 @@ function startPtyJob(ptyStream, command, options) {
  * @param {string} [options.chatSessionId] - Chat session ID for scoped cancellation
  * @param {AbortSignal} [options.abortSignal] - AbortSignal to cancel execution
  * @param {string} [options.expectedPrompt] - Last observed idle prompt for exact fallback matching
+ * @param {string} [options.activeShellHint] - Last shell kind confirmed by an interactive prompt
  * @param {boolean} [options.inputLineKnownEmpty] - No terminal input has followed the observed prompt
  * @param {boolean} [options.typedInput=false] - Emit synthetic command echo before execution
  * @param {(command: string) => void} [options.echoCommand] - Callback used to display synthetic command echo

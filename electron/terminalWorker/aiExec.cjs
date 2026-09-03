@@ -9,6 +9,7 @@ const {
 } = require("../bridges/ai/ptyExec.cjs");
 const {
   getFreshIdlePrompt,
+  getSessionActiveShellHint,
   formatSyntheticEcho,
   isSessionInputLineKnownEmpty,
 } = require("../bridges/ai/shellUtils.cjs");
@@ -281,6 +282,7 @@ function createWorkerAiExecHandler({
         timeoutMs,
         shellKind: session.shellKind,
         loginShellHint: session._loginShellKind,
+        activeShellHint: getSessionActiveShellHint(session),
         chatSessionId,
         expectedPrompt: getFreshIdlePrompt(session),
         inputLineKnownEmpty: isSessionInputLineKnownEmpty(session),
@@ -449,6 +451,7 @@ function createWorkerAiJobStartHandler({
         timeoutMs,
         shellKind: session.shellKind,
         loginShellHint: session._loginShellKind,
+        activeShellHint: getSessionActiveShellHint(session),
         chatSessionId,
         expectedPrompt: getFreshIdlePrompt(session),
         inputLineKnownEmpty: isSessionInputLineKnownEmpty(session),

@@ -5,7 +5,10 @@ const {
   ensureSessionShellKind,
   ensureSessionShellKindForExec,
 } = require("../ai/sessionShellKind.cjs");
-const { isSessionInputLineKnownEmpty } = require("../ai/shellUtils.cjs");
+const {
+  getSessionActiveShellHint,
+  isSessionInputLineKnownEmpty,
+} = require("../ai/shellUtils.cjs");
 
 function createExecHandlerApi(ctx) {
   with (ctx) {
@@ -150,6 +153,7 @@ function createExecHandlerApi(ctx) {
             timeoutMs: commandTimeoutMs,
             shellKind: session.shellKind,
             loginShellHint: session._loginShellKind,
+            activeShellHint: getSessionActiveShellHint(session),
             expectedPrompt: getFreshIdlePrompt(session),
             inputLineKnownEmpty: isSessionInputLineKnownEmpty(session),
             typedInput: true,
@@ -295,6 +299,7 @@ function createExecHandlerApi(ctx) {
             timeoutMs,
             shellKind: session.shellKind,
             loginShellHint: session._loginShellKind,
+            activeShellHint: getSessionActiveShellHint(session),
             chatSessionId,
             expectedPrompt: getFreshIdlePrompt(session),
             inputLineKnownEmpty: isSessionInputLineKnownEmpty(session),

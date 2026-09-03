@@ -105,6 +105,18 @@ function extractTrailingIdlePrompt(output) {
   return "";
 }
 
+function classifyIdlePromptShellKind(prompt) {
+  const line = stripAnsi(prompt)
+    .replace(/\r/g, "\n")
+    .split("\n")
+    .pop()
+    .replace(/\s+$/, "");
+  if (isDefaultPowerShellPromptLine(line)) return "powershell";
+  if (isDefaultCmdPromptLine(line)) return "cmd";
+  if (isDefaultPosixPromptLine(line)) return "posix";
+  return "";
+}
+
 // bash and csh/tcsh print a banner to the terminal right before exiting due to
 // the shell's TMOUT idle-timeout setting ("timed out waiting for input:
 // auto-logout" / "auto-logout"). That exit is a clean shell exit — numeric
@@ -142,6 +154,7 @@ function trackSessionIdlePrompt(session, chunk) {
     session.lastIdlePrompt = prompt;
     session.lastIdlePromptAt = Date.now();
     session._inputSinceIdlePrompt = false;
+    session._activeShellKindHint = classifyIdlePromptShellKind(prompt);
   }
 
   return prompt;
@@ -160,6 +173,11 @@ function isSessionInputLineKnownEmpty(session) {
     && session._inputSinceIdlePrompt === false
     && getFreshIdlePrompt(session),
   );
+}
+
+function getSessionActiveShellHint(session) {
+  const hint = session?._activeShellKindHint;
+  return ["posix", "fish", "powershell", "cmd"].includes(hint) ? hint : "";
 }
 
 // Return `session.lastIdlePrompt` only if the PTY's recent rolling tail
@@ -982,6 +1000,7 @@ module.exports = {
   formatSyntheticEcho,
   extractTrailingIdlePrompt,
   getFreshIdlePrompt,
+  getSessionActiveShellHint,
   markSessionInputPending,
   isSessionInputLineKnownEmpty,
   isDefaultPowerShellPromptLine,

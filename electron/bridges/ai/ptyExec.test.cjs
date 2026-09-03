@@ -20,6 +20,7 @@ const {
 } = require("./ptyExecHelpers.cjs");
 const {
   getFreshIdlePrompt,
+  getSessionActiveShellHint,
   isSessionInputLineKnownEmpty,
   markSessionInputPending,
   trackSessionIdlePrompt,
@@ -326,6 +327,20 @@ test("loginShellHint selects fish/posix/powershell/cmd without pinning confirmed
     resolveEffectiveShellKind(undefined, "alice@wsl:/mnt/c$", { loginShellHint: "cmd" }),
     "posix",
   );
+  assert.equal(
+    resolveEffectiveShellKind(undefined, "", {
+      loginShellHint: "cmd",
+      activeShellHint: "powershell",
+    }),
+    "powershell",
+  );
+  assert.equal(
+    resolveEffectiveShellKind(undefined, "C:\\Users\\alice>", {
+      loginShellHint: "cmd",
+      activeShellHint: "powershell",
+    }),
+    "cmd",
+  );
   // Confirmed shellKind is never overridden by a login hint.
   assert.equal(
     resolveEffectiveShellKind("posix", "user@host:~$", { loginShellHint: "fish" }),
@@ -357,6 +372,7 @@ test("consecutive jobs stay in PowerShell when the end marker and prompt arrive 
     const job = startPtyJob(pty, `Write-Output '${probe}'`, {
       shellKind: session.shellKind,
       loginShellHint: session._loginShellKind,
+      activeShellHint: getSessionActiveShellHint(session),
       timeoutMs: 50,
       expectedPrompt: getFreshIdlePrompt(session),
       inputLineKnownEmpty: isSessionInputLineKnownEmpty(session),
@@ -371,7 +387,7 @@ test("consecutive jobs stay in PowerShell when the end marker and prompt arrive 
     );
     let settled = false;
     job.resultPromise.then(() => { settled = true; });
-    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setTimeout(resolve, 300));
     assert.equal(settled, false);
     pty.emit("data", Buffer.from("PS C:\\Users\\alice>"));
     const result = await job.resultPromise;
@@ -381,7 +397,35 @@ test("consecutive jobs stay in PowerShell when the end marker and prompt arrive 
   }
 });
 
-test("tracked pending input still gets the Windows PowerShell clear key", async () => {
+test("a completed marker cannot be changed into a timeout while awaiting the prompt", async () => {
+  const writes = [];
+  class CapturePty extends EventEmitter {
+    write(data) {
+      writes.push(String(data));
+    }
+  }
+  const pty = new CapturePty();
+  const job = startPtyJob(pty, "Write-Output 'PROBE'", {
+    shellKind: "powershell",
+    timeoutMs: 20,
+    expectedPrompt: "PS C:\\Users\\alice>",
+    enforceWallTimeout: true,
+  });
+  pty.emit("data", Buffer.from(`${job.marker}_S\r\n${job.marker}_E:0\r\n`));
+
+  let settled = false;
+  job.resultPromise.then(() => { settled = true; });
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  assert.equal(settled, false);
+  assert.equal(writes.includes("\x03"), false);
+
+  pty.emit("data", Buffer.from("PS C:\\Users\\alice>"));
+  const result = await job.resultPromise;
+  assert.equal(result.ok, true);
+  assert.equal(result.exitCode, 0);
+});
+
+test("tracked pending input is not overwritten when PowerShell edit mode is unknown", async () => {
   const writes = [];
   class CapturePty extends EventEmitter {
     write(data) {
@@ -396,15 +440,15 @@ test("tracked pending input still gets the Windows PowerShell clear key", async 
   const job = startPtyJob(pty, "Write-Output 'PROBE'", {
     shellKind: session.shellKind,
     loginShellHint: session._loginShellKind,
+    activeShellHint: getSessionActiveShellHint(session),
     timeoutMs: 50,
     expectedPrompt: getFreshIdlePrompt(session),
     inputLineKnownEmpty: isSessionInputLineKnownEmpty(session),
   });
-  assert.ok(writes[0].startsWith("\x1b$__NCMCP_"));
-  assert.ok(!writes[0].startsWith("\x1b\x15\x0b"));
-  job.cancel();
-  pty.emit("data", Buffer.from("PS C:\\Users\\alice>"));
-  await job.resultPromise;
+  assert.equal(writes.length, 0);
+  const result = await job.resultPromise;
+  assert.equal(result.ok, false);
+  assert.match(result.error, /pending input/i);
 });
 
 test("startPtyJob writes the clear prefix even when expectedPrompt matches a clean idle prompt", async () => {

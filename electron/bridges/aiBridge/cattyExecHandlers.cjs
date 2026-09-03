@@ -4,6 +4,7 @@
 // (based in electron/bridges/). Requiring here keeps the path unambiguous.
 const {
   formatSyntheticEcho,
+  getSessionActiveShellHint,
   isSessionInputLineKnownEmpty,
 } = require("../ai/shellUtils.cjs");
 const { ensureSessionShellKindForExec } = require("../ai/sessionShellKind.cjs");
@@ -177,6 +178,7 @@ function registerCattyExecHandlers(ctx) {
             timeoutMs,
             shellKind: session.shellKind,
             loginShellHint: session._loginShellKind,
+            activeShellHint: getSessionActiveShellHint(session),
             chatSessionId,
             expectedPrompt: getFreshIdlePrompt(session),
             inputLineKnownEmpty: isSessionInputLineKnownEmpty(session),

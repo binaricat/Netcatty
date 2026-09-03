@@ -152,6 +152,8 @@ const LOGIN_SHELL_HINTS = new Set(["posix", "fish", "powershell", "cmd"]);
 function resolveEffectiveShellKind(shellKind, expectedPrompt, options = {}) {
   const baseKind = shellKind || "";
   const hint = options.loginShellHint || "";
+  const activeHint = options.activeShellHint || "";
+  const softHint = LOGIN_SHELL_HINTS.has(activeHint) ? activeHint : hint;
   if (SHELL_KINDS_OPEN_TO_PROMPT_OVERRIDE.has(baseKind)) {
     if (isPowerShellPrompt(expectedPrompt)) {
       return "powershell";
@@ -165,12 +167,18 @@ function resolveEffectiveShellKind(shellKind, expectedPrompt, options = {}) {
     // those login shells already share this prompt family.
     if (
       isPosixPrompt(expectedPrompt)
-      && (hint === "powershell" || hint === "cmd")
+      && (softHint === "powershell" || softHint === "cmd")
     ) {
       return "posix";
     }
   }
   if (baseKind) return baseKind;
+
+  // The last recognized interactive prompt is a stronger soft hint than the
+  // login shell. It bridges the brief marker-to-prompt redraw gap between two
+  // executions without pinning the session: a newer recognized prompt still
+  // wins above when the user enters or exits a nested shell.
+  if (LOGIN_SHELL_HINTS.has(activeHint)) return activeHint;
 
   // Soft login-shell hint from remote probe (not a permanent pin).
   if (LOGIN_SHELL_HINTS.has(hint)) return hint;
@@ -303,7 +311,11 @@ function findEndMarker(outputText, marker, { allowInline = false } = {}) {
       const codeMatch = afterEnd.match(/^(\d+)/);
       const exitCode = codeMatch ? parseInt(codeMatch[1], 10) : null;
       if (exitCode !== null) {
-        return { endIdx, exitCode };
+        return {
+          endIdx,
+          endOffset: endIdx + endPattern.length + codeMatch[1].length,
+          exitCode,
+        };
       }
     }
     searchFrom = endIdx + 1;
