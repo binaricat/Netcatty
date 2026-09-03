@@ -1490,6 +1490,14 @@ function hasTerminalInputContent(data) {
   return data !== null && data !== undefined;
 }
 
+function getSessionInputTrackingData(payload, data) {
+  if (!payload || !Object.prototype.hasOwnProperty.call(payload, "logicalData")) {
+    return data;
+  }
+  if (payload.logicalData === null) return null;
+  return typeof payload.logicalData === "string" ? payload.logicalData : data;
+}
+
 function writeToSessionNow(
   payload,
   data,
@@ -1518,11 +1526,13 @@ function writeToSessionNow(
     }, trace);
     return;
   }
-  if (!isTerminalReportSequence(data)) {
-    markSessionInputPending(session, data);
+  const isReport = isTerminalReportSequence(data);
+  const inputTrackingData = isReport ? null : getSessionInputTrackingData(payload, data);
+  if (hasTerminalInputContent(inputTrackingData)) {
+    markSessionInputPending(session, inputTrackingData);
   }
   if (releaseInputReservation) releaseReservedSessionInput(session);
-  if (data !== "\x03" && !payload.automated && !isTerminalReportSequence(data)) {
+  if (inputTrackingData !== "\x03" && !payload.automated && inputTrackingData !== null) {
     disarmTerminalInterruptOutputGate(session);
   }
 
@@ -1625,13 +1635,13 @@ function writeToSessionWithInterception(
   // Reserve accepted input before awaiting an asynchronous interceptor. Keep
   // the reservation separate from submitted-line tracking: an older queued
   // write must not clear the safety state for newer input that is still waiting.
-  if (!isReport) {
+  if (!isReport && payload?.logicalData !== null) {
     reserveSessionInput(expectedSession);
   }
   const writeIfCurrent = (nextData) => {
     const current = sessions.get(payload.sessionId);
     if (!current || current !== expectedSession || current.closed) return;
-    writeToSessionNow(payload, nextData, logRewrite, !isReport);
+    writeToSessionNow(payload, nextData, logRewrite, !isReport && payload?.logicalData !== null);
   };
   const write = async () => {
     if (!hasInterceptor) {
@@ -1667,7 +1677,11 @@ function writeToSession(event, payload) {
     // Activity tracking must not interfere with terminal input.
   }
 
-  if (!payload.automated && !isTerminalReportSequence(payload.data)) {
+  if (
+    !payload.automated
+    && payload.logicalData !== null
+    && !isTerminalReportSequence(payload.data)
+  ) {
     clearPendingAutomatedWrites(session);
   }
   if (shouldBlockSessionInput(session, payload.data)) {

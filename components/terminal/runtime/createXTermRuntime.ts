@@ -205,7 +205,11 @@ import {
 type TerminalBackendApi = {
   openExternalAvailable: () => boolean;
   openExternal: (url: string) => Promise<void>;
-  writeToSession: (sessionId: string, data: string) => void;
+  writeToSession: (
+    sessionId: string,
+    data: string,
+    options?: { sensitive?: boolean; logicalData?: string | null },
+  ) => void;
   interruptSession?: (sessionId: string, trace?: NetcattyTerminalInterruptTrace) => void;
   signalPluginConnection?: (
     sessionId: string,
@@ -1255,8 +1259,11 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         // When backspaceBehavior is configured, remap the Backspace key output
         const outData = mapTerminalBackspaceInput(dataToWrite, ctx.host.backspaceBehavior);
         ctx.onOutputTriggerUserInputRef?.current?.(outData);
+        const writeOptions = options && Object.prototype.hasOwnProperty.call(options, "logicalData")
+          ? { sensitive, logicalData: options.logicalData }
+          : { sensitive };
         for (const chunk of getTextInputWireChunks(outData, options?.perCharacterWrites === true)) {
-          ctx.terminalBackend.writeToSession(id, chunk, { sensitive });
+          ctx.terminalBackend.writeToSession(id, chunk, writeOptions);
         }
 
         // Local echo for serial connections only when explicitly enabled
@@ -1410,7 +1417,13 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
           pressEvent,
           [],
         );
-        handleTerminalInputData(sequence, { source: "kitty" });
+        handleTerminalInputData(sequence, {
+          source: "kitty",
+          logicalData: resolveWin32InputLogicalData(
+            pressEvent,
+            term.modes.applicationCursorKeysMode,
+          ),
+        });
         const forwarded = broadcastKittyInput({
           kind: "key",
           event: pressEvent,
@@ -1486,7 +1499,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       ? null
       : encodeKittyCompositionText(kittyKeyboardMode, sanitizedText);
     if (encoded) {
-      handleTerminalInputData(encoded, { source: "kitty" });
+      handleTerminalInputData(encoded, { source: "kitty", logicalData: sanitizedText });
     } else {
       if (ctx.isBroadcastEnabledRef.current && ctx.onBroadcastInputRef.current) {
         suppressNextTerminalDataBroadcast = true;
@@ -1537,7 +1550,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       ? encodeKittyKeyEvent(kittyKeyboardMode, event)
       : null;
     if (sequence) {
-      handleTerminalInputData(sequence, { source: "kitty" });
+      handleTerminalInputData(sequence, { source: "kitty", logicalData: null });
       return true;
     }
     return false;
@@ -2089,7 +2102,13 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         kittyEvent,
         [],
       );
-      handleTerminalInputData(kittySequenceForKeyDown, { source: "kitty" });
+      handleTerminalInputData(kittySequenceForKeyDown, {
+        source: "kitty",
+        logicalData: resolveWin32InputLogicalData(
+          kittyEvent,
+          term.modes.applicationCursorKeysMode,
+        ),
+      });
       const forwarded = broadcastKittyInput({
         kind: "key",
         event: kittyEvent,
@@ -2332,7 +2351,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         (input) => {
           if (input.kind !== "key" || !kittyKeyboardProtocolEnabled) return;
           const sequence = encodeKittyKeyEvent(kittyKeyboardMode, input.event);
-          if (sequence) handleTerminalInputData(sequence, { source: "kitty" });
+          if (sequence) handleTerminalInputData(sequence, { source: "kitty", logicalData: null });
         },
         kittyKeyboardLockState,
       );
@@ -2437,7 +2456,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         ? null
         : encodeKittyCompositionText(kittyKeyboardMode, sanitizedData);
       if (encoded) {
-        handleTerminalInputData(encoded, { source: "kitty" });
+        handleTerminalInputData(encoded, { source: "kitty", logicalData: sanitizedData });
       } else {
         if (ctx.isBroadcastEnabledRef.current && ctx.onBroadcastInputRef.current) {
           suppressNextTerminalDataBroadcast = true;
@@ -2490,10 +2509,13 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     interruptSession: ctx.terminalBackend.interruptSession
       ? (id) => ctx.terminalBackend.interruptSession?.(id)
       : undefined,
-    writeDisposed: (id, data) => ctx.terminalBackend.writeToSession(
+    writeDisposed: (id, data, logicalData) => ctx.terminalBackend.writeToSession(
       id,
       mapTerminalBackspaceInput(data, ctx.host.backspaceBehavior),
-      { sensitive: ctx.passwordPromptActiveRef?.current === true },
+      {
+        sensitive: ctx.passwordPromptActiveRef?.current === true,
+        ...(logicalData !== undefined ? { logicalData } : {}),
+      },
     ),
     writeActive: (data, logicalData) => handleTerminalInputData(data, {
       source: "kitty",

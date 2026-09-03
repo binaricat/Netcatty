@@ -126,6 +126,9 @@ test("host terminal protocol replies bypass third-party interceptors", async () 
     "\x1b[8;24;80t",
     "\x1b]10;rgb:ffff/ffff/ffff\x1b\\",
     "\x1b]52;c;c2VjcmV0Cg==\x07",
+    "\x1b[M *%",
+    "\x1b[<0;10;5M",
+    "\x1b[<0;10;5m",
   ];
   for (const data of reports) {
     terminalBridge.writeToSession(null, { sessionId: "session-1", data });
@@ -134,6 +137,38 @@ test("host terminal protocol replies bypass third-party interceptors", async () 
   assert.deepEqual(h.intercepted, []);
   assert.deepEqual(h.writes, reports);
   assert.equal(h.session._inputSinceIdlePrompt, false);
+});
+
+test("transport keyboard records use logical Enter semantics for prompt tracking", () => {
+  const writes = [];
+  const session = {
+    type: "local",
+    proc: { write(data) { writes.push(String(data)); } },
+  };
+  terminalBridge.init({
+    sessions: new Map([["session-keyboard", session]]),
+    electronModule: {},
+  });
+  trackSessionIdlePrompt(session, "PS C:\\Users\\alice>");
+
+  const win32Enter = "\x1b[13;28;13;1;0;1_";
+  terminalBridge.writeToSession(null, {
+    sessionId: "session-keyboard",
+    data: win32Enter,
+    logicalData: "\r",
+  });
+  assert.equal(isSessionInputLineKnownEmpty(session), false);
+  trackSessionIdlePrompt(session, "\r\nPS C:\\Users\\alice>");
+  assert.equal(isSessionInputLineKnownEmpty(session), true);
+
+  const win32KeyUp = "\x1b[13;28;13;0;0;1_";
+  terminalBridge.writeToSession(null, {
+    sessionId: "session-keyboard",
+    data: win32KeyUp,
+    logicalData: null,
+  });
+  assert.equal(isSessionInputLineKnownEmpty(session), true);
+  assert.deepEqual(writes, [win32Enter, win32KeyUp]);
 });
 
 test("input remains ordered when an interceptor is disabled during an in-flight transform", async () => {

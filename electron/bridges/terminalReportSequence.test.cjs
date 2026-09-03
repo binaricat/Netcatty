@@ -15,6 +15,10 @@ test("recognizes terminal-generated report families without classifying ordinary
     "\x1b[?2004;1$y",
     "\x1b[8;24;80t",
     "\x1b[4;1080;1920t",
+    "\x1b[M *%",
+    "\x1b[<0;10;5M",
+    "\x1b[<0;10;5m",
+    "\x1b[32;10;5M",
     "\x1b]10;rgb:ffff/ffff/ffff\x1b\\",
     "\x1b]4;255;rgb:ffff/0000/ffff\x1b\\",
     "\x1b]11;rgb:0000/0000/0000\x07",
@@ -25,7 +29,7 @@ test("recognizes terminal-generated report families without classifying ordinary
   ]) {
     assert.equal(isTerminalReportSequence(report), true, JSON.stringify(report));
   }
-  for (const input of ["hello", "\r", "\x1b[A", "\x1b[200~paste\x1b[201~"]) {
+  for (const input of ["hello", "\r", "\x1b[A", "\x1b[M", "\x1b[200~paste\x1b[201~"]) {
     assert.equal(isTerminalReportSequence(input), false, JSON.stringify(input));
   }
 });

@@ -998,7 +998,7 @@ test("multi-character plain text goes out as per-character writes (#3077)", asyn
   assert.ok(writeLoopIdx >= 0);
   const writeLoop = source.slice(writeLoopIdx, writeLoopIdx + 320);
   assert.match(writeLoop, /for \(const chunk of/);
-  assert.match(writeLoop, /writeToSession\(id, chunk, \{ sensitive \}\)/);
+  assert.match(writeLoop, /writeToSession\(id, chunk, writeOptions\)/);
 
   // IME commits split the committed glyph, not the Kitty CSI-u encoding.
   assert.match(
@@ -1018,7 +1018,7 @@ test("multi-character plain text goes out as per-character writes (#3077)", asyn
   // Negotiated Kitty paths keep their single write: CSI-u associated text and
   // forwarded key sequences must never be split across writes.
   const compositionIdx = source.indexOf(
-    "handleTerminalInputData(encoded, { source: \"kitty\" })",
+    "handleTerminalInputData(encoded, { source: \"kitty\", logicalData: sanitizedText })",
   );
   assert.ok(compositionIdx >= 0);
   assert.doesNotMatch(source.slice(0, compositionIdx + 60), /handleTerminalInputData\(encoded, \{ perCharacterWrites/);

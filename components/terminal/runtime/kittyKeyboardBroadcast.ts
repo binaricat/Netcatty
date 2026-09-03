@@ -369,7 +369,7 @@ export const createKittyKeyboardBroadcastHandler = (options: {
   isConnected: () => boolean;
   isRuntimeDisposed: () => boolean;
   interruptSession?: (sessionId: string) => void;
-  writeDisposed: (sessionId: string, data: string) => void;
+  writeDisposed: (sessionId: string, data: string, logicalData?: string | null) => void;
   writeActive: (data: string, logicalData?: string | null) => void;
   writeWin32Event?: (event: KittyKeyboardEvent, logicalData: string | null) => void;
 }): KittyKeyboardBroadcastHandler => (input, dispatchOptions) => {
@@ -379,7 +379,8 @@ export const createKittyKeyboardBroadcastHandler = (options: {
     (input.kind === "key" || input.kind === "win32") &&
     input.event.type === "keyup";
   if (!isPairedRelease && options.isSensitiveInput?.() === true) return;
-  const resolved = resolveKittyKeyboardBroadcastInput(input, options.resolveOptions());
+  const resolveOptions = options.resolveOptions();
+  const resolved = resolveKittyKeyboardBroadcastInput(input, resolveOptions);
   if (!resolved) return;
   if (resolved.urgentInterrupt && options.interruptSession) {
     dispatchOptions?.beforeUrgentInterrupt?.();
@@ -395,11 +396,22 @@ export const createKittyKeyboardBroadcastHandler = (options: {
     }
     return;
   }
+  let logicalData = resolved.logicalData;
+  if (logicalData === undefined) {
+    if (input.kind === "key" || input.kind === "win32") {
+      logicalData = resolveWin32InputLogicalData(
+        input.event,
+        resolveOptions.applicationCursorMode,
+      );
+    } else if (input.kind === "text") {
+      logicalData = input.text;
+    }
+  }
   if (options.isRuntimeDisposed()) {
-    options.writeDisposed(sessionId, resolved.data);
+    options.writeDisposed(sessionId, resolved.data, logicalData);
     return;
   }
-  options.writeActive(resolved.data, resolved.logicalData);
+  options.writeActive(resolved.data, logicalData);
 };
 
 const handlers = new Map<string, KittyKeyboardBroadcastHandler>();

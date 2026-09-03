@@ -664,6 +664,42 @@ test("Win32 input keeps plain Enter bookkeeping without misclassifying modified 
   assert.equal(resolveEnter({ altKey: true }), null);
 });
 
+test("Kitty broadcast targets keep plain Enter bookkeeping semantics", () => {
+  const kittyMode = createKittyKeyboardModeState();
+  setKittyKeyboardModeFlags(kittyMode, 8 | 2);
+  const writes: Array<{ data: string; logicalData?: string | null }> = [];
+  const handler = createKittyKeyboardBroadcastHandler({
+    resolveOptions: () => ({
+      kittyProtocolEnabled: true,
+      kittyMode,
+      applicationCursorMode: false,
+      encodedKeys: new Set<string>(),
+    }),
+    getSessionId: () => "kitty-target",
+    isConnected: () => true,
+    isRuntimeDisposed: () => false,
+    writeDisposed: () => {},
+    writeActive: (data, logicalData) => writes.push({ data, logicalData }),
+  });
+
+  handler({
+    kind: "key",
+    fallbackToLegacy: true,
+    event: { type: "keydown", key: "Enter", code: "Enter" },
+  });
+  handler({
+    kind: "win32",
+    data: "\x1b[13;28;13;1;0;1_",
+    fallbackToLegacy: true,
+    event: { type: "keydown", key: "Enter", code: "Enter" },
+  });
+
+  assert.deepEqual(writes, [
+    { data: "\x1b[13u", logicalData: "\r" },
+    { data: "\x1b[13u", logicalData: "\r" },
+  ]);
+});
+
 test("Win32 key-up broadcast remains a native release with no editing semantics", () => {
   const options = {
     kittyProtocolEnabled: true,

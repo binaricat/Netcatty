@@ -38,7 +38,7 @@ test("password-prompt input is classified before prompt state reset and cannot b
   );
   assert.match(
     runtimeSource,
-    /for \(const chunk of getTextInputWireChunks\(outData, options\?\.perCharacterWrites === true\)\) \{\s*ctx\.terminalBackend\.writeToSession\(id, chunk, \{ sensitive \}\);\s*\}/u,
+    /const writeOptions = options && Object\.prototype\.hasOwnProperty\.call\(options, "logicalData"\)[\s\S]*?for \(const chunk of getTextInputWireChunks\(outData, options\?\.perCharacterWrites === true\)\) \{\s*ctx\.terminalBackend\.writeToSession\(id, chunk, writeOptions\);\s*\}/u,
   );
   assert.match(
     runtimeSource,
@@ -67,6 +67,7 @@ test("confirmed sudo credentials and preload transport preserve the sensitive ma
     /writeToSession\(id, data, \{ automated: true, sensitive: true \}\)/u,
   );
   assert.match(preloadSource, /sensitive: options\?\.sensitive === true/u);
+  assert.match(preloadSource, /logicalData: options\?\.logicalData === null/u);
 });
 
 test("OSC 52 clipboard replies bypass plugin input interception as sensitive host data", () => {

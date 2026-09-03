@@ -329,6 +329,8 @@ declare global {
         automated?: boolean;
         /** Host-classified secret/no-echo input; always bypasses plugin observers and interceptors. */
         sensitive?: boolean;
+        /** User-facing input represented by a transport-specific keyboard record. */
+        logicalData?: string | null;
         lineDelayMs?: number;
         logRewrite?: { sentCommand: string; displayCommand: string };
       },

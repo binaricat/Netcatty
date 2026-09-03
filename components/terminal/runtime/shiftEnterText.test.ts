@@ -147,7 +147,7 @@ test("runtime routes Shift+Enter text through the shared input handler", () => {
   );
   assert.match(
     source,
-    /const sanitizedData = sanitizeTerminalInput\(data\);[\s\S]*const encoded = term\.modes\.win32InputMode\s*\? null\s*:\s*encodeKittyCompositionText\(kittyKeyboardMode, sanitizedData\);[\s\S]*if \(encoded\) \{[\s\S]*handleTerminalInputData\(encoded, \{ source: "kitty" \}\);[\s\S]*\} else \{[\s\S]*handleTerminalInputData\(sanitizedData, \{\s*perCharacterWrites: shouldSplitImeTextInputForWire\(sanitizedData\),?\s*\}\);[\s\S]*broadcastKittyInput\(\{ kind: "text", text: sanitizedData \}\);/,
+    /const sanitizedData = sanitizeTerminalInput\(data\);[\s\S]*const encoded = term\.modes\.win32InputMode\s*\? null\s*:\s*encodeKittyCompositionText\(kittyKeyboardMode, sanitizedData\);[\s\S]*if \(encoded\) \{[\s\S]*handleTerminalInputData\(encoded, \{ source: "kitty", logicalData: sanitizedData \}\);[\s\S]*\} else \{[\s\S]*handleTerminalInputData\(sanitizedData, \{\s*perCharacterWrites: shouldSplitImeTextInputForWire\(sanitizedData\),?\s*\}\);[\s\S]*broadcastKittyInput\(\{ kind: "text", text: sanitizedData \}\);/,
   );
   assert.match(
     source,
@@ -156,6 +156,10 @@ test("runtime routes Shift+Enter text through the shared input handler", () => {
   assert.match(
     source,
     /const broadcastInput: KittyKeyboardBroadcastInput = \{\s*kind: "win32",\s*data,\s*event: win32Input\.event,[\s\S]*handleTerminalInputData\(data, \{\s*logicalData: win32Input\.logicalData,\s*skipBroadcast: true,/s,
+  );
+  assert.match(
+    source,
+    /handleTerminalInputData\(kittySequenceForKeyDown, \{\s*source: "kitty",\s*logicalData: resolveWin32InputLogicalData\(/s,
   );
   assert.match(
     source,
@@ -189,7 +193,7 @@ test("runtime routes Shift+Enter text through the shared input handler", () => {
   );
   assert.match(
     source,
-    /flushKittyKeyboardBroadcastReleases\(\s+kittyForwardedKeys,[\s\S]*encodeKittyKeyEvent\(kittyKeyboardMode, input\.event\)[\s\S]*handleTerminalInputData\(sequence, \{ source: "kitty" \}\)/,
+    /flushKittyKeyboardBroadcastReleases\(\s+kittyForwardedKeys,[\s\S]*encodeKittyKeyEvent\(kittyKeyboardMode, input\.event\)[\s\S]*handleTerminalInputData\(sequence, \{ source: "kitty", logicalData: null \}\)/,
   );
   assert.doesNotMatch(source, /writeToSession\(id, textToSend\)/);
 });
