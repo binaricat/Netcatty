@@ -919,3 +919,16 @@ test("manual session log rejects renderer-supplied filePath without selection to
     fs.rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("html wrapper adapts to light/dark browser color scheme", () => {
+  const bridge = loadBridgeWithDialog({});
+  const html = bridge.wrapTerminalHtmlContent("hello", "host-1", 0);
+  // Day palette is the default; dark applies only via prefers-color-scheme.
+  assert.match(html, /--term-default-bg:\s*#ffffff/);
+  assert.match(html, /color-scheme:\s*light dark/);
+  assert.match(html, /<meta name="color-scheme" content="light dark">/);
+  assert.match(html, /@media \(prefers-color-scheme: dark\)/);
+  assert.match(html, /--term-default-bg:\s*#1e1e1e/);
+  // Fonts remain monospace with a platform-appropriate stack.
+  assert.match(html, /font-family:[^;]*ui-monospace[^;]*monospace/);
+});
