@@ -1529,7 +1529,9 @@ function writeToSessionNow(
   const isReport = isTerminalReportSequence(data);
   const inputTrackingData = isReport ? null : getSessionInputTrackingData(payload, data);
   if (hasTerminalInputContent(inputTrackingData)) {
-    markSessionInputPending(session, inputTrackingData);
+    markSessionInputPending(session, inputTrackingData, {
+      source: payload.automated ? "automated" : "manual",
+    });
   }
   if (releaseInputReservation) releaseReservedSessionInput(session);
   if (inputTrackingData !== "\x03" && !payload.automated && inputTrackingData !== null) {

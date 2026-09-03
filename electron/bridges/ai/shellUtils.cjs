@@ -162,6 +162,18 @@ function trackSessionIdlePrompt(session, chunk) {
         if (state?.inputAfterEnd) return "";
         if (!state?.ended && !hasCompletedPtyPromptMarker(nextTail, marker)) return "";
       }
+    } else if (Object.prototype.hasOwnProperty.call(session, "_manualPromptKindAtSubmit")) {
+      // A manual command can print text that looks like another shell's
+      // default prompt before the real prompt returns. Only let manual output
+      // confirm the shell kind that was already established when Enter was
+      // pressed. Automated startup commands and marker-backed agent commands
+      // may still establish a genuine shell transition.
+      const promptKind = classifyIdlePromptShellKind(prompt);
+      if (!session._manualPromptKindAtSubmit || promptKind !== session._manualPromptKindAtSubmit) {
+        session._untrustedManualPrompt = prompt;
+        session._untrustedManualPromptKind = promptKind;
+        return "";
+      }
     }
     confirmSessionIdlePrompt(session, nextTail);
   }
@@ -192,6 +204,9 @@ function confirmSessionIdlePrompt(session, output, expectedInputVersion) {
   ) {
     session._inputSinceIdlePrompt = false;
     session._submittedInputAwaitingPrompt = false;
+    delete session._manualPromptKindAtSubmit;
+    delete session._untrustedManualPrompt;
+    delete session._untrustedManualPromptKind;
   }
   session._activeShellKindHint = classifyIdlePromptShellKind(prompt);
   return prompt;
@@ -244,7 +259,7 @@ function markSessionInputActivity(session) {
   }
 }
 
-function markSessionInputPending(session, data = "") {
+function markSessionInputPending(session, data = "", options = {}) {
   if (!session) return;
   markSessionInputActivity(session);
   session._inputSinceIdlePrompt = true;
@@ -253,6 +268,12 @@ function markSessionInputPending(session, data = "") {
   // may remain buffered even if the shell redraws its prompt (for example,
   // input typed while a foreground process is returning control).
   session._submittedInputAwaitingPrompt = /[\r\n\x03]$/.test(String(data || ""));
+  if (options.source === "manual" && session._submittedInputAwaitingPrompt) {
+    const trustedKind = session._activeShellKindHint;
+    session._manualPromptKindAtSubmit = ["posix", "fish", "powershell", "cmd"].includes(trustedKind)
+      ? trustedKind
+      : "";
+  }
 }
 
 function hasReservedSessionInput(session) {
@@ -294,6 +315,16 @@ function getSessionActiveShellHint(session) {
 }
 
 function getSessionLastObservedShellKind(session) {
+  const untrustedPrompt = session?._untrustedManualPrompt;
+  const untrustedKind = session?._untrustedManualPromptKind;
+  if (
+    untrustedPrompt
+    && ["posix", "powershell", "cmd"].includes(untrustedKind)
+    && stripAnsi(String(session?._promptTrackTail || "")).replace(/\r/g, "\n")
+      .endsWith(stripAnsi(untrustedPrompt).replace(/\r/g, "\n"))
+  ) {
+    return untrustedKind;
+  }
   const hint = session?._activeShellKindHint;
   return ["posix", "fish", "powershell", "cmd"].includes(hint) ? hint : "";
 }

@@ -5,6 +5,7 @@ const test = require("node:test");
 
 const terminalBridge = require("./terminalBridge.cjs");
 const {
+  getSessionLastObservedShellKind,
   isSessionInputLineKnownEmpty,
   trackSessionIdlePrompt,
 } = require("./ai/shellUtils.cjs");
@@ -169,6 +170,32 @@ test("transport keyboard records use logical Enter semantics for prompt tracking
   });
   assert.equal(isSessionInputLineKnownEmpty(session), true);
   assert.deepEqual(writes, [win32Enter, win32KeyUp]);
+});
+
+test("manual command output cannot promote a different shell prompt", () => {
+  const writes = [];
+  const session = {
+    type: "local",
+    proc: { write(data) { writes.push(String(data)); } },
+  };
+  terminalBridge.init({
+    sessions: new Map([["session-manual", session]]),
+    electronModule: {},
+  });
+  trackSessionIdlePrompt(session, "alice@host:~$");
+
+  terminalBridge.writeToSession(null, {
+    sessionId: "session-manual",
+    data: "printf 'PS C:\\fake>'\r",
+  });
+  assert.equal(trackSessionIdlePrompt(session, "\r\nPS C:\\fake>"), "");
+  assert.equal(getSessionLastObservedShellKind(session), "powershell");
+  assert.equal(isSessionInputLineKnownEmpty(session), false);
+
+  trackSessionIdlePrompt(session, "\r\nalice@host:~$");
+  assert.equal(getSessionLastObservedShellKind(session), "posix");
+  assert.equal(isSessionInputLineKnownEmpty(session), true);
+  assert.deepEqual(writes, ["printf 'PS C:\\fake>'\r"]);
 });
 
 test("input remains ordered when an interceptor is disabled during an in-flight transform", async () => {

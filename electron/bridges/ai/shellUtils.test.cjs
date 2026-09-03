@@ -653,6 +653,56 @@ test("the active shell hint follows recognized nested-shell prompts", () => {
   assert.equal(getSessionActiveShellHint(session), "posix");
 });
 
+test("manual command output cannot impersonate a different shell prompt", () => {
+  const session = {};
+  trackSessionIdlePrompt(session, "alice@host:~$");
+  markSessionInputPending(session, "printf 'PS C:\\fake>'\r", { source: "manual" });
+
+  assert.equal(trackSessionIdlePrompt(session, "\r\nPS C:\\fake>"), "");
+  assert.equal(getSessionActiveShellHint(session), "");
+  assert.equal(getSessionLastObservedShellKind(session), "powershell");
+  assert.equal(isSessionInputLineKnownEmpty(session), false);
+
+  trackSessionIdlePrompt(session, "\r\nalice@host:~$");
+  assert.equal(getSessionActiveShellHint(session), "posix");
+  assert.equal(isSessionInputLineKnownEmpty(session), true);
+});
+
+test("submitting again does not trust an unconfirmed shell prompt", () => {
+  const session = {};
+  trackSessionIdlePrompt(session, "alice@host:~$");
+  markSessionInputPending(session, "printf 'PS C:\\fake>'\r", { source: "manual" });
+  assert.equal(trackSessionIdlePrompt(session, "\r\nPS C:\\fake>"), "");
+  assert.equal(getSessionLastObservedShellKind(session), "powershell");
+
+  markSessionInputPending(session, "\r", { source: "manual" });
+  assert.equal(trackSessionIdlePrompt(session, "\r\nPS C:\\fake>"), "");
+  assert.equal(getSessionActiveShellHint(session), "");
+  assert.equal(isSessionInputLineKnownEmpty(session), false);
+});
+
+test("a fake default prompt expires when the real custom prompt arrives", () => {
+  const session = {};
+  markSessionInputPending(session, "printf 'PS C:\\fake>'\r", { source: "manual" });
+
+  assert.equal(trackSessionIdlePrompt(session, "PS C:\\fake>"), "");
+  assert.equal(getSessionLastObservedShellKind(session), "powershell");
+  trackSessionIdlePrompt(session, "custom-shell ❯ ");
+  assert.equal(getSessionActiveShellHint(session), "");
+  assert.equal(getSessionLastObservedShellKind(session), "");
+  assert.equal(session.lastIdlePrompt, undefined);
+});
+
+test("automated startup input can establish a real shell transition", () => {
+  const session = {};
+  trackSessionIdlePrompt(session, "C:\\Users\\alice>");
+  markSessionInputPending(session, "pwsh\r", { source: "automated" });
+
+  trackSessionIdlePrompt(session, "\r\nPS C:\\Users\\alice>");
+  assert.equal(getSessionActiveShellHint(session), "powershell");
+  assert.equal(isSessionInputLineKnownEmpty(session), true);
+});
+
 test("a submitted line followed by partial pasted input stays pending", () => {
   const session = {};
   trackSessionIdlePrompt(session, "PS C:\\Users\\alice>");
