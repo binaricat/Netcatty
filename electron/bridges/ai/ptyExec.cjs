@@ -45,6 +45,7 @@ function startPtyJob(ptyStream, command, options) {
     shellKind,
     loginShellHint,
     activeShellHint,
+    observedShellHint,
     chatSessionId,
     abortSignal,
     expectedPrompt,
@@ -61,8 +62,10 @@ function startPtyJob(ptyStream, command, options) {
     loginShellHint,
     activeShellHint,
   });
-  const isCmdToPowerShell =
-    resolvedShellKind === "powershell" && loginShellHint === "cmd";
+  const isCmdToPowerShell = loginShellHint === "cmd" && (
+    resolvedShellKind === "powershell"
+    || observedShellHint === "powershell"
+  );
   // This transition identifies the reporter's Windows startup-command path,
   // but it does not reveal the configured PSReadLine edit mode. If terminal
   // input followed the prompt, no clear-key sequence is portable across
@@ -711,6 +714,7 @@ function startPtyJob(ptyStream, command, options) {
  * @param {AbortSignal} [options.abortSignal] - AbortSignal to cancel execution
  * @param {string} [options.expectedPrompt] - Last observed idle prompt for exact fallback matching
  * @param {string} [options.activeShellHint] - Last shell kind confirmed by an interactive prompt
+ * @param {string} [options.observedShellHint] - Last observed shell kind, including while terminal input is pending
  * @param {boolean} [options.inputLineKnownEmpty] - No terminal input has followed the observed prompt
  * @param {boolean} [options.typedInput=false] - Emit synthetic command echo before execution
  * @param {(command: string) => void} [options.echoCommand] - Callback used to display synthetic command echo

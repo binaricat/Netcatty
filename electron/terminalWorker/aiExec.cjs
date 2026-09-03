@@ -10,6 +10,7 @@ const {
 const {
   getFreshIdlePrompt,
   getSessionActiveShellHint,
+  getSessionLastObservedShellKind,
   formatSyntheticEcho,
   isSessionInputLineKnownEmpty,
 } = require("../bridges/ai/shellUtils.cjs");
@@ -283,6 +284,7 @@ function createWorkerAiExecHandler({
         shellKind: session.shellKind,
         loginShellHint: session._loginShellKind,
         activeShellHint: getSessionActiveShellHint(session),
+        observedShellHint: getSessionLastObservedShellKind(session),
         chatSessionId,
         expectedPrompt: getFreshIdlePrompt(session),
         inputLineKnownEmpty: isSessionInputLineKnownEmpty(session),
@@ -452,6 +454,7 @@ function createWorkerAiJobStartHandler({
         shellKind: session.shellKind,
         loginShellHint: session._loginShellKind,
         activeShellHint: getSessionActiveShellHint(session),
+        observedShellHint: getSessionLastObservedShellKind(session),
         chatSessionId,
         expectedPrompt: getFreshIdlePrompt(session),
         inputLineKnownEmpty: isSessionInputLineKnownEmpty(session),

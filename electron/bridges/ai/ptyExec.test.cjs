@@ -21,6 +21,7 @@ const {
 const {
   getFreshIdlePrompt,
   getSessionActiveShellHint,
+  getSessionLastObservedShellKind,
   isSessionInputLineKnownEmpty,
   markSessionInputPending,
   trackSessionIdlePrompt,
@@ -373,6 +374,7 @@ test("consecutive jobs stay in PowerShell when the end marker and prompt arrive 
       shellKind: session.shellKind,
       loginShellHint: session._loginShellKind,
       activeShellHint: getSessionActiveShellHint(session),
+      observedShellHint: getSessionLastObservedShellKind(session),
       timeoutMs: 50,
       expectedPrompt: getFreshIdlePrompt(session),
       inputLineKnownEmpty: isSessionInputLineKnownEmpty(session),
@@ -441,6 +443,38 @@ test("tracked pending input is not overwritten when PowerShell edit mode is unkn
     shellKind: session.shellKind,
     loginShellHint: session._loginShellKind,
     activeShellHint: getSessionActiveShellHint(session),
+    observedShellHint: getSessionLastObservedShellKind(session),
+    timeoutMs: 50,
+    expectedPrompt: getFreshIdlePrompt(session),
+    inputLineKnownEmpty: isSessionInputLineKnownEmpty(session),
+  });
+  assert.equal(writes.length, 0);
+  const result = await job.resultPromise;
+  assert.equal(result.ok, false);
+  assert.match(result.error, /pending input/i);
+});
+
+test("echoed pending input cannot erase the PowerShell safety decision", async () => {
+  const writes = [];
+  class CapturePty extends EventEmitter {
+    write(data) {
+      writes.push(String(data));
+    }
+  }
+  const pty = new CapturePty();
+  const session = { _loginShellKind: "cmd" };
+  trackSessionIdlePrompt(session, "PS C:\\Users\\alice>");
+  markSessionInputPending(session);
+  trackSessionIdlePrompt(session, "Write-Output 'USER'");
+  assert.equal(getFreshIdlePrompt(session), "");
+  assert.equal(getSessionActiveShellHint(session), "");
+  assert.equal(getSessionLastObservedShellKind(session), "powershell");
+
+  const job = startPtyJob(pty, "Write-Output 'PROBE'", {
+    shellKind: session.shellKind,
+    loginShellHint: session._loginShellKind,
+    activeShellHint: getSessionActiveShellHint(session),
+    observedShellHint: getSessionLastObservedShellKind(session),
     timeoutMs: 50,
     expectedPrompt: getFreshIdlePrompt(session),
     inputLineKnownEmpty: isSessionInputLineKnownEmpty(session),

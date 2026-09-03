@@ -8,6 +8,7 @@ const {
   formatSyntheticEcho,
   getFreshIdlePrompt,
   getSessionActiveShellHint,
+  getSessionLastObservedShellKind,
   isSessionInputLineKnownEmpty,
   isDefaultPowerShellPromptLine,
   isDefaultCmdPromptLine,
@@ -625,6 +626,7 @@ test("input tracking keeps an echo-lagged prompt from being treated as an empty 
   assert.equal(getFreshIdlePrompt(session), "PS C:\\Users\\alice>");
   assert.equal(isSessionInputLineKnownEmpty(session), false);
   assert.equal(getSessionActiveShellHint(session), "");
+  assert.equal(getSessionLastObservedShellKind(session), "powershell");
 
   trackSessionIdlePrompt(session, "\r\nPS C:\\Users\\alice>");
   assert.equal(isSessionInputLineKnownEmpty(session), true);

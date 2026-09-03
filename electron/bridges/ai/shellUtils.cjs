@@ -177,9 +177,14 @@ function isSessionInputLineKnownEmpty(session) {
 
 function getSessionActiveShellHint(session) {
   // Manual/programmatic terminal input may have entered or exited a nested
-  // shell. Do not reuse the prior prompt's kind until a recognized prompt
-  // confirms the new idle state; direct agent wrappers do not mark this flag.
+  // shell. Do not use the prior kind for wrapper selection until a recognized
+  // prompt confirms the new idle state. Callers can still inspect the last
+  // observed kind separately to reject ambiguous input without writing.
   if (session?._inputSinceIdlePrompt !== false) return "";
+  return getSessionLastObservedShellKind(session);
+}
+
+function getSessionLastObservedShellKind(session) {
   const hint = session?._activeShellKindHint;
   return ["posix", "fish", "powershell", "cmd"].includes(hint) ? hint : "";
 }
@@ -1005,6 +1010,7 @@ module.exports = {
   extractTrailingIdlePrompt,
   getFreshIdlePrompt,
   getSessionActiveShellHint,
+  getSessionLastObservedShellKind,
   markSessionInputPending,
   isSessionInputLineKnownEmpty,
   isDefaultPowerShellPromptLine,
