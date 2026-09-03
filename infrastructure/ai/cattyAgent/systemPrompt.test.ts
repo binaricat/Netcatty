@@ -40,3 +40,16 @@ test('system prompt does not tell Catty to call host_open', () => {
   assert.match(prompt, /cannot open new terminal sessions yourself/i);
   assert.match(prompt, /ask them to open/i);
 });
+
+test('system prompt tells Catty to emit fish-compatible commands for fish shells', () => {
+  const prompt = buildSystemPrompt({
+    scopeType: 'terminal',
+    hosts: [],
+    permissionMode: 'confirm',
+  });
+
+  assert.match(prompt, /shell: fish/);
+  assert.match(prompt, /not POSIX-compatible/i);
+  assert.match(prompt, /set -x VAR value/);
+  assert.match(prompt, /bash -lc/);
+});

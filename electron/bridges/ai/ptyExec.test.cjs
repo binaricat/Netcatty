@@ -327,6 +327,42 @@ test("loginShellHint selects fish/posix/powershell/cmd without pinning confirmed
   );
 });
 
+test("live fish banner hint selects fish wrapping over posix/unknown base kinds (#3261)", () => {
+  // User typed a nested `fish` on a POSIX login shell: the login-shell probe
+  // correctly reports posix, but the interactive shell is fish. The banner
+  // tracked from the PTY wins so the fish wrapper is used.
+  assert.equal(
+    resolveEffectiveShellKind("posix", "user@host:~$", { liveShellKind: "fish" }),
+    "fish",
+  );
+  assert.equal(
+    resolveEffectiveShellKind(undefined, "", { liveShellKind: "fish", loginShellHint: "posix" }),
+    "fish",
+  );
+  assert.equal(
+    resolveEffectiveShellKind("fish", "user@host:~$", { liveShellKind: "fish" }),
+    "fish",
+  );
+  // Windows and raw/serial sessions are never overridden by the fish banner.
+  assert.equal(
+    resolveEffectiveShellKind("powershell", "", { liveShellKind: "fish" }),
+    "powershell",
+  );
+  assert.equal(
+    resolveEffectiveShellKind("cmd", "", { liveShellKind: "fish" }),
+    "cmd",
+  );
+  assert.equal(
+    resolveEffectiveShellKind("raw", "", { liveShellKind: "fish" }),
+    "raw",
+  );
+  // Without a live banner nothing changes.
+  assert.equal(
+    resolveEffectiveShellKind("posix", "user@host:~$", { loginShellHint: "fish" }),
+    "posix",
+  );
+});
+
 test("pending-input clear prefix covers interactive shells and skips raw devices", () => {
   assert.equal(buildPendingInputClearPrefix("posix"), "\x15\x0b");
   assert.equal(buildPendingInputClearPrefix("fish"), "\x15\x0b");

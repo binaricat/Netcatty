@@ -152,6 +152,18 @@ const LOGIN_SHELL_HINTS = new Set(["posix", "fish", "powershell", "cmd"]);
 function resolveEffectiveShellKind(shellKind, expectedPrompt, options = {}) {
   const baseKind = shellKind || "";
   const hint = options.loginShellHint || "";
+  const liveKind = options.liveShellKind || "";
+  // A live "Welcome to fish" banner (tracked from the PTY stream by
+  // trackSessionIdlePrompt) is direct evidence the *interactive* shell is
+  // fish — e.g. a user-typed nested `fish` on top of a POSIX login shell,
+  // where the login-shell probe (#1854) correctly reports posix but the
+  // posix wrapper is then typed into fish (#3261). Fish / posix / open base
+  // kinds yield to the live banner; Windows (powershell/cmd) and raw/serial
+  // sessions are left alone. A wrong fish wrap fails loudly with a visible
+  // syntax error rather than hanging, so the spoof surface stays benign.
+  if (liveKind === "fish" && baseKind !== "powershell" && baseKind !== "cmd" && baseKind !== "raw") {
+    return "fish";
+  }
   if (SHELL_KINDS_OPEN_TO_PROMPT_OVERRIDE.has(baseKind)) {
     if (isPowerShellPrompt(expectedPrompt)) {
       return "powershell";

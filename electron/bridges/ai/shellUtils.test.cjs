@@ -611,6 +611,35 @@ test("tracks PowerShell idle prompt after SSH output", () => {
   assert.equal(typeof session.lastIdlePromptAt, "number");
 });
 
+test("fish welcome banner sets a live fish shell hint (#3261)", () => {
+  const session = {};
+
+  trackSessionIdlePrompt(session, "Last login...\r\nuser@host:~$ fish\r\nWelcome to fish, the friendly interactive shell\r\n");
+
+  assert.equal(session._liveShellKind, "fish");
+  assert.equal(typeof session._liveShellKindAt, "number");
+});
+
+test("fish banner hint survives unrecognized fish prompts and ANSI codes", () => {
+  const session = {};
+  trackSessionIdlePrompt(session, "\u001b[32mWelcome to fish, the friendly interactive shell\u001b[0m\r\n");
+  trackSessionIdlePrompt(session, "ecs-user@host ~> ");
+
+  assert.equal(session._liveShellKind, "fish");
+});
+
+test("recognized non-fish idle prompt clears the live fish hint (user exited nested fish)", () => {
+  const session = {};
+  trackSessionIdlePrompt(session, "Welcome to fish, the friendly interactive shell\r\n");
+  assert.equal(session._liveShellKind, "fish");
+
+  trackSessionIdlePrompt(session, "\r\nexit\r\nuser@host:~$ ");
+  assert.equal(session._liveShellKind, "");
+  assert.equal(session._liveShellKindAt, 0);
+  // Fresh posix prompt is still tracked normally.
+  assert.equal(session.lastIdlePrompt, "user@host:~$ ");
+});
+
 test("getFreshIdlePrompt returns the cached prompt when the live tail still ends with it", () => {
   const session = {
     lastIdlePrompt: "PS C:\\Users\\alice>",

@@ -66,6 +66,12 @@ const CMD_PROMPT_PATTERN = /^[A-Za-z]:(?:\\[^<>"|]*)?>$/;
 // flip a Windows DefaultShell soft hint.
 const POSIX_PROMPT_PATTERN = /^[^\s@]+@[^\s:]+(?::[^\n\r]*)?[#$]$/;
 
+// Interactive fish prints this banner exactly when it starts (login shell or
+// a user-typed nested `fish`). It is direct evidence that the *interactive*
+// shell is fish, even when the login-shell probe (issue #1854) reported a
+// POSIX login shell the user nested fish on top of (#3261).
+const FISH_WELCOME_PATTERN = /Welcome to fish, the friendly interactive shell/;
+
 function isDefaultPowerShellPromptLine(line) {
   return POWERSHELL_PROMPT_PATTERN.test(String(line || ""));
 }
@@ -141,6 +147,21 @@ function trackSessionIdlePrompt(session, chunk) {
   if (prompt) {
     session.lastIdlePrompt = prompt;
     session.lastIdlePromptAt = Date.now();
+    // A recognized PowerShell/cmd/posix idle prompt *after* the fish banner
+    // means the interactive shell is no longer fish (e.g. the user exited a
+    // nested fish back to bash/zsh). Clear the live hint so wrapper
+    // selection falls back to shellKind / login hint. Fish's own default
+    // prompt ends with `>` and never matches the recognized shapes, so this
+    // does not fire while a fish session is idle.
+    if (session._liveShellKind) {
+      session._liveShellKind = "";
+      session._liveShellKindAt = 0;
+    }
+  }
+
+  if (FISH_WELCOME_PATTERN.test(stripAnsi(chunk))) {
+    session._liveShellKind = "fish";
+    session._liveShellKindAt = Date.now();
   }
 
   return prompt;
