@@ -26,7 +26,11 @@ const {
   consumeVisibleText,
   stripAnsi,
 } = require("./ptyExecHelpers.cjs");
-const { extractTrailingIdlePrompt } = require("./shellUtils.cjs");
+const {
+  extractTrailingIdlePrompt,
+  markSessionPtyPromptMarkerEnded,
+  registerSessionPtyPromptMarker,
+} = require("./shellUtils.cjs");
 
 const DEFAULT_FOREGROUND_PTY_CAPTURE_CHARS = 1024 * 1024;
 
@@ -55,6 +59,7 @@ function startPtyJob(ptyStream, command, options) {
     maxBufferedChars = 0,
     normalizeFinalOutput = true,
     enforceWallTimeout = false,
+    promptTrackingSession,
   } = options || {};
 
   const marker = `__NCMCP_${Date.now().toString(36)}_${crypto.randomBytes(16).toString('hex')}__`;
@@ -293,6 +298,7 @@ function startPtyJob(ptyStream, command, options) {
   function checkEnd() {
     const found = findEndMarker(output, marker, { allowInline: true });
     if (!found) return;
+    markSessionPtyPromptMarkerEnded(promptTrackingSession, marker);
     const stdout = output.slice(0, found.endIdx);
     pendingEnd = { stdout, exitCode: found.exitCode };
     clearTimeout(timeoutId);
@@ -608,6 +614,8 @@ function startPtyJob(ptyStream, command, options) {
     };
   }
 
+  cleanupFns.push(registerSessionPtyPromptMarker(promptTrackingSession, marker));
+
   armOutputTimeout();
   armWallTimeout();
   armStartupTimeout();
@@ -677,7 +685,12 @@ function startPtyJob(ptyStream, command, options) {
   const pendingInputClearPrefix = isCmdToPowerShell
     ? ""
     : buildPendingInputClearPrefix(resolvedShellKind);
-  ptyStream.write(`${pendingInputClearPrefix}${wrapped}`);
+  try {
+    ptyStream.write(`${pendingInputClearPrefix}${wrapped}`);
+  } catch (error) {
+    finish("", -1, `Failed to write command: ${error?.message || error}`);
+    throw error;
+  }
 
   return {
     marker,
@@ -716,6 +729,7 @@ function startPtyJob(ptyStream, command, options) {
  * @param {boolean} [options.inputLineKnownEmpty] - No terminal input has followed the observed prompt
  * @param {boolean} [options.typedInput=false] - Emit synthetic command echo before execution
  * @param {(command: string) => void} [options.echoCommand] - Callback used to display synthetic command echo
+ * @param {object} [options.promptTrackingSession] - Session whose prompt tracker should ignore command output lookalikes
  */
 function execViaPty(ptyStream, command, options) {
   return startPtyJob(ptyStream, command, options).resultPromise;

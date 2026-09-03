@@ -288,6 +288,7 @@ function createWorkerAiExecHandler({
         chatSessionId,
         expectedPrompt: getFreshIdlePrompt(session),
         inputLineKnownEmpty: isSessionInputLineKnownEmpty(session),
+        promptTrackingSession: session,
         typedInput: true,
         echoCommand: (rawCommand) => {
           event?.sender?.send?.("netcatty:data", {
@@ -458,6 +459,7 @@ function createWorkerAiJobStartHandler({
         chatSessionId,
         expectedPrompt: getFreshIdlePrompt(session),
         inputLineKnownEmpty: isSessionInputLineKnownEmpty(session),
+        promptTrackingSession: session,
         typedInput: true,
         echoCommand: (rawCommand) => {
           event?.sender?.send?.("netcatty:data", {

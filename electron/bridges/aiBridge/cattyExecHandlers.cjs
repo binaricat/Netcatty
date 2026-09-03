@@ -184,6 +184,7 @@ function registerCattyExecHandlers(ctx) {
             chatSessionId,
             expectedPrompt: getFreshIdlePrompt(session),
             inputLineKnownEmpty: isSessionInputLineKnownEmpty(session),
+            promptTrackingSession: session,
             typedInput: true,
             echoCommand: (rawCommand) => {
               const contents = electronModule?.webContents?.fromId?.(session.webContentsId);

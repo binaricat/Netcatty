@@ -392,6 +392,7 @@ test("consecutive jobs stay in PowerShell when the end marker and prompt arrive 
       timeoutMs: 50,
       expectedPrompt: getFreshIdlePrompt(session),
       inputLineKnownEmpty: isSessionInputLineKnownEmpty(session),
+      promptTrackingSession: session,
     });
     const write = writes.at(-1);
     assert.ok(write.startsWith("$__NCMCP_"));
@@ -411,6 +412,43 @@ test("consecutive jobs stay in PowerShell when the end marker and prompt arrive 
     assert.equal(result.exitCode, 0);
     assert.equal(result.stdout, probe);
   }
+});
+
+test("command output that looks like a prompt cannot replace the active shell", async () => {
+  const writes = [];
+  class CapturePty extends EventEmitter {
+    write(data) {
+      writes.push(String(data));
+    }
+  }
+  const pty = new CapturePty();
+  const session = { _loginShellKind: "cmd" };
+  pty.on("data", (data) => trackSessionIdlePrompt(session, String(data)));
+  trackSessionIdlePrompt(session, "PS C:\\Users\\alice>");
+
+  const job = startPtyJob(pty, "Write-Output 'alice@host:~$'", {
+    loginShellHint: session._loginShellKind,
+    activeShellHint: getSessionActiveShellHint(session),
+    observedShellHint: getSessionLastObservedShellKind(session),
+    timeoutMs: 1000,
+    expectedPrompt: getFreshIdlePrompt(session),
+    inputLineKnownEmpty: isSessionInputLineKnownEmpty(session),
+    promptTrackingSession: session,
+  });
+
+  pty.emit("data", Buffer.from(`${job.marker}_S\r\nalice@host:~$`));
+  assert.equal(getSessionLastObservedShellKind(session), "powershell");
+  assert.equal(getFreshIdlePrompt(session), "");
+  assert.equal(isSessionInputLineKnownEmpty(session), false);
+
+  pty.emit("data", Buffer.from(`\r\n${job.marker}_E:0\r\n`));
+  pty.emit("data", Buffer.from("PS C:\\Users\\alice>"));
+  const result = await job.resultPromise;
+  assert.equal(result.ok, true);
+  assert.equal(result.stdout, "alice@host:~$");
+  assert.equal(getSessionActiveShellHint(session), "powershell");
+  assert.equal(isSessionInputLineKnownEmpty(session), true);
+  assert.ok(writes.at(0).startsWith("$__NCMCP_"));
 });
 
 test("a completed marker cannot be changed into a timeout while awaiting the prompt", async () => {

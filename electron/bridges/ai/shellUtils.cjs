@@ -151,6 +151,17 @@ function trackSessionIdlePrompt(session, chunk) {
 
   const prompt = extractTrailingIdlePrompt(nextTail);
   if (prompt) {
+    const activeMarkers = session._activePtyPromptMarkers;
+    if (activeMarkers instanceof Map && activeMarkers.size > 0) {
+      for (const [marker, state] of activeMarkers) {
+        // During an automated command, ordinary output can end in text that
+        // happens to look exactly like another shell's prompt. Trust it only
+        // after this job's private end marker has been observed. The tail check
+        // covers an end marker and prompt delivered in the same transport chunk,
+        // before the PTY job's own listener has a chance to update the state.
+        if (!state?.ended && !nextTail.includes(`${marker}_E:`)) return "";
+      }
+    }
     session.lastIdlePrompt = prompt;
     session.lastIdlePromptAt = Date.now();
     if (
@@ -167,6 +178,26 @@ function trackSessionIdlePrompt(session, chunk) {
   }
 
   return prompt;
+}
+
+function registerSessionPtyPromptMarker(session, marker) {
+  if (!session || typeof marker !== "string" || !marker) return () => {};
+  if (!(session._activePtyPromptMarkers instanceof Map)) {
+    session._activePtyPromptMarkers = new Map();
+  }
+  const markers = session._activePtyPromptMarkers;
+  markers.set(marker, { ended: false });
+  return () => {
+    markers.delete(marker);
+    if (session._activePtyPromptMarkers === markers && markers.size === 0) {
+      delete session._activePtyPromptMarkers;
+    }
+  };
+}
+
+function markSessionPtyPromptMarkerEnded(session, marker) {
+  const state = session?._activePtyPromptMarkers?.get?.(marker);
+  if (state) state.ended = true;
 }
 
 function markSessionInputPending(session, data = "") {
@@ -1052,6 +1083,8 @@ module.exports = {
   isDefaultCmdPromptLine,
   isDefaultPosixPromptLine,
   trackSessionIdlePrompt,
+  registerSessionPtyPromptMarker,
+  markSessionPtyPromptMarkerEnded,
   looksLikeIdleAutoLogout,
   isLocalhostHostname,
   extractFirstNonLocalhostUrl,
