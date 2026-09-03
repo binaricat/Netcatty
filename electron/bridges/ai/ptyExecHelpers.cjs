@@ -161,15 +161,15 @@ function resolveEffectiveShellKind(shellKind, expectedPrompt, options = {}) {
     if (isCmdPrompt(expectedPrompt)) {
       return "cmd";
     }
-    // Windows OpenSSH DefaultShell soft hint + nested WSL/bash: live
-    // `user@host:...$` must win so AI does not type a PS/cmd wrapper into
-    // a POSIX shell and hang on markers. Fish/posix soft hints stay put —
-    // those login shells already share this prompt family.
-    if (
-      isPosixPrompt(expectedPrompt)
-      && (softHint === "powershell" || softHint === "cmd")
-    ) {
-      return "posix";
+    if (isPosixPrompt(expectedPrompt)) {
+      // A classic POSIX-shaped prompt cannot distinguish fish from bash/zsh.
+      // Keep an authoritative fish/posix login probe instead of replacing it
+      // with the prompt classifier's necessarily generic posix label.
+      if (hint === "fish" || hint === "posix") return hint;
+      // Windows OpenSSH DefaultShell soft hint + nested WSL/bash: live
+      // `user@host:...$` must win so AI does not type a PS/cmd wrapper into
+      // a POSIX shell and hang on markers.
+      if (softHint === "powershell" || softHint === "cmd") return "posix";
     }
   }
   if (baseKind) return baseKind;

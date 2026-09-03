@@ -101,6 +101,7 @@ test("host terminal protocol replies bypass third-party interceptors", async () 
     "\x1b[?2004;1$y",
     "\x1b[8;24;80t",
     "\x1b]10;rgb:ffff/ffff/ffff\x1b\\",
+    "\x1b]52;c;c2VjcmV0Cg==\x07",
   ];
   for (const data of reports) {
     terminalBridge.writeToSession(null, { sessionId: "session-1", data });
@@ -108,6 +109,7 @@ test("host terminal protocol replies bypass third-party interceptors", async () 
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(h.intercepted, []);
   assert.deepEqual(h.writes, reports);
+  assert.equal(h.session._inputSinceIdlePrompt, false);
 });
 
 test("input remains ordered when an interceptor is disabled during an in-flight transform", async () => {
