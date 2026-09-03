@@ -709,6 +709,19 @@ test("fish hint still cleared when an echoed exit command precedes the recognize
   assert.equal(session._liveShellKind, "");
 });
 
+test("fish hint survives prompt-attached exit output before a POSIX-shaped fish prompt (Codex P2)", () => {
+  const session = {};
+  trackSessionIdlePrompt(session, "user@host:~$ fish\r\nWelcome to fish, the friendly interactive shell\r\n");
+  assert.equal(session._liveShellKind, "fish");
+
+  // `printf 'user@host:~$ exit\n'` in a nested fish whose custom fish_prompt
+  // is shaped like the parent POSIX prompt: the prompt-shaped `exit` output
+  // line directly follows the echoed command line, so it is command output —
+  // not input echo — and must not clear the live hint while fish is active.
+  trackSessionIdlePrompt(session, "\r\nuser@host:~$ printf 'user@host:~$ exit\\n'\r\nuser@host:~$ exit\r\nuser@host:~$ ");
+  assert.equal(session._liveShellKind, "fish");
+});
+
 test("fish hint survives `echo exit` output before a POSIX-shaped fish prompt (Codex P2)", () => {
   const session = {};
   trackSessionIdlePrompt(session, "user@host:~$ fish\r\nWelcome to fish, the friendly interactive shell\r\n");

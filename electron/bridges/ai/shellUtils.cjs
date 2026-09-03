@@ -289,8 +289,9 @@ function lastTwoNonEmptyLinesBefore(text, endOffset) {
 // exec fallback that invalidates the hint when a fish-wrapped command's
 // start marker never arrives (clearLiveShellKind via onLiveShellKindInvalidated).
 // A bare `exit` / `logout` line is only input echo when the line before it is
-// not itself an echoed command: command *output* (`echo exit`) also prints a
-// bare `exit` line, but that output directly follows the echoed
+// not itself an echoed command: command *output* (`echo exit`,
+// `printf 'user@host:~$ exit\n'`) also prints exit-looking lines — bare or
+// prompt-attached — but that output directly follows the echoed
 // `user@host:~$ echo exit` command line, whereas a repaint-separated echo
 // follows the bare prompt itself (Codex P2 on #3262).
 const PROMPT_WITH_COMMAND_PATTERN = /[#$%>]\s*\S/;
@@ -303,8 +304,14 @@ function isExitEchoLine(line, precedingLine) {
   if (/^(?:exit|logout)$/i.test(trimmed)) {
     return !PROMPT_WITH_COMMAND_PATTERN.test(String(precedingLine || ""));
   }
-  // …or typed after a prompt character: `user@host:~$ exit`.
-  return /[#$%>]\s*(?:exit|logout)\s*$/i.test(trimmed);
+  // …or typed after a prompt character: `user@host:~$ exit`. Output can also
+  // print a prompt-shaped exit line (`printf 'user@host:~$ exit\n'`), so the
+  // same input-echo validation applies: it is only evidence when the line
+  // before it is not itself an echoed command (Codex P2 on #3262).
+  if (/[#$%>]\s*(?:exit|logout)\s*$/i.test(trimmed)) {
+    return !PROMPT_WITH_COMMAND_PATTERN.test(String(precedingLine || ""));
+  }
+  return false;
 }
 
 function hasFishExitEchoBeforePrompt(normalizedTail, prompt) {
