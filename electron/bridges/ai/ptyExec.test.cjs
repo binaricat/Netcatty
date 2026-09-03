@@ -427,6 +427,34 @@ test("a completed marker cannot be changed into a timeout while awaiting the pro
   assert.equal(result.exitCode, 0);
 });
 
+test("cancel retries stop after the command end marker while the prompt is delayed", async () => {
+  const writes = [];
+  class CapturePty extends EventEmitter {
+    write(data) {
+      writes.push(String(data));
+    }
+  }
+  const pty = new CapturePty();
+  const job = startPtyJob(pty, "Start-Sleep 10", {
+    shellKind: "powershell",
+    timeoutMs: 1000,
+    expectedPrompt: "PS C:\\Users\\alice>",
+  });
+  job.cancel();
+  assert.equal(writes.filter((write) => write === "\x03").length, 1);
+
+  pty.emit("data", Buffer.from(`${job.marker}_S\r\n${job.marker}_E:130\r\n`));
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  assert.equal(writes.filter((write) => write === "\x03").length, 1);
+
+  pty.emit("data", Buffer.from("PS C:\\Users\\alice>"));
+  const result = await job.resultPromise;
+  assert.equal(result.ok, false);
+  assert.equal(result.error, "Cancelled");
+  assert.equal(result.stdout, "");
+  assert.doesNotMatch(result.stdout, /__NCMCP_/);
+});
+
 test("tracked pending input is not overwritten when PowerShell edit mode is unknown", async () => {
   const writes = [];
   class CapturePty extends EventEmitter {
@@ -437,7 +465,13 @@ test("tracked pending input is not overwritten when PowerShell edit mode is unkn
   const pty = new CapturePty();
   const session = { _loginShellKind: "cmd" };
   trackSessionIdlePrompt(session, "PS C:\\Users\\alice>");
-  markSessionInputPending(session);
+  markSessionInputPending(
+    session,
+    "Write-Output 'ONE'\rWrite-Output 'USER'",
+  );
+  trackSessionIdlePrompt(session, "\r\nPS C:\\Users\\alice>");
+  assert.equal(getFreshIdlePrompt(session), "PS C:\\Users\\alice>");
+  assert.equal(isSessionInputLineKnownEmpty(session), false);
 
   const job = startPtyJob(pty, "Write-Output 'PROBE'", {
     shellKind: session.shellKind,

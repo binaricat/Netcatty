@@ -311,11 +311,7 @@ function findEndMarker(outputText, marker, { allowInline = false } = {}) {
       const codeMatch = afterEnd.match(/^(\d+)/);
       const exitCode = codeMatch ? parseInt(codeMatch[1], 10) : null;
       if (exitCode !== null) {
-        return {
-          endIdx,
-          endOffset: endIdx + endPattern.length + codeMatch[1].length,
-          exitCode,
-        };
+        return { endIdx, exitCode };
       }
     }
     searchFrom = endIdx + 1;

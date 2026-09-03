@@ -1500,7 +1500,7 @@ function writeToSessionNow(payload, data, logRewrite = payload.logRewrite) {
     return;
   }
   if (!isTerminalReportSequence(data)) {
-    markSessionInputPending(session);
+    markSessionInputPending(session, data);
   }
   if (data !== "\x03" && !payload.automated && !isTerminalReportSequence(data)) {
     disarmTerminalInterruptOutputGate(session);

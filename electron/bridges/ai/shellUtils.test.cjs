@@ -617,17 +617,22 @@ test("tracks PowerShell idle prompt after SSH output", () => {
   assert.equal(getSessionActiveShellHint(session), "powershell");
 });
 
-test("input tracking keeps an echo-lagged prompt from being treated as an empty line", () => {
+test("a prompt redraw does not clear partial input typed while a process finishes", () => {
   const session = {};
   trackSessionIdlePrompt(session, "PS C:\\Users\\alice>");
   assert.equal(isSessionInputLineKnownEmpty(session), true);
 
-  markSessionInputPending(session);
+  markSessionInputPending(session, "Write-Output 'USER'");
   assert.equal(getFreshIdlePrompt(session), "PS C:\\Users\\alice>");
   assert.equal(isSessionInputLineKnownEmpty(session), false);
   assert.equal(getSessionActiveShellHint(session), "");
   assert.equal(getSessionLastObservedShellKind(session), "powershell");
 
+  trackSessionIdlePrompt(session, "\r\nPS C:\\Users\\alice>");
+  assert.equal(getFreshIdlePrompt(session), "PS C:\\Users\\alice>");
+  assert.equal(isSessionInputLineKnownEmpty(session), false);
+
+  markSessionInputPending(session, "\r");
   trackSessionIdlePrompt(session, "\r\nPS C:\\Users\\alice>");
   assert.equal(isSessionInputLineKnownEmpty(session), true);
   assert.equal(getSessionActiveShellHint(session), "powershell");
@@ -643,6 +648,20 @@ test("the active shell hint follows recognized nested-shell prompts", () => {
 
   trackSessionIdlePrompt(session, "\r\nalice@wsl:/mnt/c$");
   assert.equal(getSessionActiveShellHint(session), "posix");
+});
+
+test("a submitted line followed by partial pasted input stays pending", () => {
+  const session = {};
+  trackSessionIdlePrompt(session, "PS C:\\Users\\alice>");
+  markSessionInputPending(
+    session,
+    "Write-Output 'ONE'\rWrite-Output 'USER'",
+  );
+
+  trackSessionIdlePrompt(session, "\r\nONE\r\nPS C:\\Users\\alice>");
+  assert.equal(getFreshIdlePrompt(session), "PS C:\\Users\\alice>");
+  assert.equal(isSessionInputLineKnownEmpty(session), false);
+  assert.equal(getSessionLastObservedShellKind(session), "powershell");
 });
 
 test("getFreshIdlePrompt returns the cached prompt when the live tail still ends with it", () => {

@@ -116,7 +116,6 @@ function startPtyJob(ptyStream, command, options) {
   let wallTimeoutId = null;
   let startupTimeoutId = null;
   let promptFallbackTimer = null;
-  let endMarkerSettleTimer = null;
   let endMarkerWaitTimer = null;
   let cancelRetryTimerId = null;
   // Track one-shot timers scheduled inside requestCancel so finish() can
@@ -142,13 +141,6 @@ function startPtyJob(ptyStream, command, options) {
     }
   }
 
-  function clearEndMarkerSettle() {
-    if (endMarkerSettleTimer) {
-      clearTimeout(endMarkerSettleTimer);
-      endMarkerSettleTimer = null;
-    }
-  }
-
   function clearEndMarkerWait() {
     if (endMarkerWaitTimer) {
       clearTimeout(endMarkerWaitTimer);
@@ -160,6 +152,12 @@ function startPtyJob(ptyStream, command, options) {
     if (cancelRetryTimerId) {
       clearTimeout(cancelRetryTimerId);
       cancelRetryTimerId = null;
+    }
+  }
+
+  function clearCancelOneShotTimers() {
+    while (cancelOneShotTimers.length) {
+      clearTimeout(cancelOneShotTimers.pop());
     }
   }
 
@@ -302,6 +300,8 @@ function startPtyJob(ptyStream, command, options) {
     clearTimeout(wallTimeoutId);
     wallTimeoutId = null;
     clearStartupTimeout();
+    clearCancelRetryTimer();
+    clearCancelOneShotTimers();
     if (!expectedPrompt || extractTrailingIdlePrompt(output)) {
       finish(stdout, found.exitCode);
       return;
@@ -309,21 +309,14 @@ function startPtyJob(ptyStream, command, options) {
     // A terminal often delivers the definitive end marker and the redrawn
     // prompt in separate chunks. Keep the execution lock until that prompt
     // arrives so an immediate follow-up command cannot select its wrapper from
-    // a transient marker-only tail. Do not start the quiet-period fallback on
-    // the marker's own newline: network latency can leave that as the only
-    // post-marker data for longer than the fallback. Once printable prompt
-    // data arrives, an unrecognized custom prompt may settle after it is quiet.
-    clearEndMarkerSettle();
+    // a transient marker-only tail. A bounded fallback prevents a permanently
+    // changed/custom prompt from holding the lock forever; the last confirmed
+    // active-shell hint keeps the next execution from reverting to login cmd.
     if (!endMarkerWaitTimer) {
       endMarkerWaitTimer = setTimeout(() => {
         finish(stdout, found.exitCode);
       }, 30000);
     }
-    const postMarkerText = stripAnsi(output.slice(found.endOffset)).trim();
-    if (!postMarkerText) return;
-    endMarkerSettleTimer = setTimeout(() => {
-      finish(stdout, found.exitCode);
-    }, 250);
   }
 
   // Carry buffer for incomplete marker lines split across chunks.
@@ -404,14 +397,11 @@ function startPtyJob(ptyStream, command, options) {
     clearTimeout(wallTimeoutId);
     clearStartupTimeout();
     clearPromptFallback();
-    clearEndMarkerSettle();
     clearEndMarkerWait();
     clearCancelRetryTimer();
     // Clear any pending one-shot cancel timers so they do not keep the
     // Node event loop alive after the job has resolved.
-    while (cancelOneShotTimers.length) {
-      clearTimeout(cancelOneShotTimers.pop());
-    }
+    clearCancelOneShotTimers();
     unsubscribe?.();
     for (const fn of cleanupFns) {
       try {
@@ -594,7 +584,11 @@ function startPtyJob(ptyStream, command, options) {
     if (!cancelRequested) {
       schedulePromptFallback();
     } else if (hasExpectedPromptSuffix(output, expectedPrompt)) {
-      finish(output, 130, "Cancelled");
+      finish(
+        pendingEnd?.stdout ?? output,
+        pendingEnd?.exitCode ?? 130,
+        "Cancelled",
+      );
       return;
     }
     checkEnd();

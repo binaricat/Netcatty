@@ -153,16 +153,27 @@ function trackSessionIdlePrompt(session, chunk) {
   if (prompt) {
     session.lastIdlePrompt = prompt;
     session.lastIdlePromptAt = Date.now();
-    session._inputSinceIdlePrompt = false;
+    if (
+      session._inputSinceIdlePrompt !== true
+      || session._submittedInputAwaitingPrompt === true
+    ) {
+      session._inputSinceIdlePrompt = false;
+      session._submittedInputAwaitingPrompt = false;
+    }
     session._activeShellKindHint = classifyIdlePromptShellKind(prompt);
   }
 
   return prompt;
 }
 
-function markSessionInputPending(session) {
+function markSessionInputPending(session, data = "") {
   if (!session) return;
   session._inputSinceIdlePrompt = true;
+  // Enter/newline and Ctrl+C submit or cancel the editable line, so a later
+  // recognized prompt can confirm that the line is empty again. Other input
+  // may remain buffered even if the shell redraws its prompt (for example,
+  // input typed while a foreground process is returning control).
+  session._submittedInputAwaitingPrompt = /[\r\n\x03]$/.test(String(data || ""));
 }
 
 // A cached prompt alone is not proof that the editable line stayed empty:
