@@ -94,6 +94,10 @@ const FISH_WELCOME_PATTERN = /Welcome to fish, the friendly interactive shell/;
 // the login-shell probe (#1854) or a confirmed shellKind, not by this hint.
 const FISH_LAUNCH_ECHO_PATTERN =
   /[#$%>]\s*(?:exec\s+)?(?:[^\s#$%>]+\/)?fish(?:\s+-{1,2}[\w.-]+)*$/;
+// The launch command part alone (used after the prompt prefix of the echoed
+// launch line has been matched against the session's own idle prompt).
+const FISH_LAUNCH_COMMAND_PATTERN =
+  /^\s*(?:exec\s+)?(?:[^\s#$%>]+\/)?fish(?:\s+-{1,2}[\w.-]+)*$/;
 
 function isDefaultPowerShellPromptLine(line) {
   return POWERSHELL_PROMPT_PATTERN.test(String(line || ""));
@@ -166,14 +170,31 @@ function looksLikeIdleAutoLogout(outputTail) {
 const FISH_BANNER_CARRY_CHARS = FISH_WELCOME_PATTERN.source.length + 192;
 
 // The line immediately before the banner must be the echoed launch command
-// (`user@host:~$ fish`, `user@host% exec fish`, …).
-function hasFishLaunchEchoBeforeBanner(scanText, matchIndex) {
+// (`user@host:~$ fish`, `user@host% exec fish`, …). Shape alone is not enough
+// (Codex P2 on #3262): output of `cat transcript.txt` can contain
+// `user@other:~$ fish` followed by the banner text, so the echoed launch must
+// also reuse the idle prompt this session itself printed last. A transcript
+// copied from another host / a different prompt fails that comparison. When
+// no recognized idle prompt has been observed yet there is nothing to compare
+// against, so the shape-only check stands (a session with a custom prompt
+// shape never records one; wrapper-rejection detection still covers fish).
+function hasFishLaunchEchoBeforeBanner(scanText, matchIndex, session) {
   const before = scanText.slice(0, matchIndex).replace(/\r\n?/g, "\n");
   const lines = before.split("\n");
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i].replace(/\s+$/, "");
     if (!line) continue;
-    return FISH_LAUNCH_ECHO_PATTERN.test(line);
+    if (!FISH_LAUNCH_ECHO_PATTERN.test(line)) return false;
+    const prompt = session && typeof session.lastIdlePrompt === "string"
+      ? session.lastIdlePrompt.replace(/\s+$/, "")
+      : "";
+    if (!prompt) return true;
+    // The prompt may be repainted after the chunk boundary (the banner-scan
+    // carry re-attaches the previous chunk's trailing prompt), so match the
+    // launch command after the *last* occurrence of the session's prompt.
+    const promptIndex = line.lastIndexOf(prompt);
+    if (promptIndex < 0) return false;
+    return FISH_LAUNCH_COMMAND_PATTERN.test(line.slice(promptIndex + prompt.length));
   }
   return false;
 }
@@ -191,6 +212,7 @@ function hasRecognizedIdlePromptAfterBanner(scanText, fromIndex) {
   const after = scanText.slice(fromIndex).replace(/\r\n?/g, "\n");
   const lines = after.split("\n");
   let prevNonEmpty = "";
+  let prevPrevNonEmpty = "";
   for (const line of lines) {
     const trimmed = line.replace(/\s+$/, "");
     if (!trimmed) continue;
@@ -199,22 +221,31 @@ function hasRecognizedIdlePromptAfterBanner(scanText, fromIndex) {
       || isDefaultPosixPromptLine(trimmed)
       || isDefaultCmdPromptLine(trimmed)
     ) {
-      return isExitEchoLine(prevNonEmpty);
+      return isExitEchoLine(prevNonEmpty, prevPrevNonEmpty);
     }
+    prevPrevNonEmpty = prevNonEmpty;
     prevNonEmpty = trimmed;
   }
   return false;
 }
 
-// The last non-empty line before the trailing prompt. Used as exit evidence
-// for hasFishExitEchoBeforePrompt below.
-function lastNonEmptyLineBefore(text, endOffset) {
+// The last two non-empty lines before the trailing prompt. Used as exit
+// evidence (and its context) for hasFishExitEchoBeforePrompt below.
+function lastTwoNonEmptyLinesBefore(text, endOffset) {
   const lines = String(text || "").slice(0, endOffset).split("\n");
+  let last = "";
+  let preceding = "";
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i].replace(/\s+$/, "");
-    if (line) return line;
+    if (!line) continue;
+    if (!last) {
+      last = line;
+      continue;
+    }
+    preceding = line;
+    break;
   }
-  return "";
+  return [last, preceding];
 }
 
 // A customized `fish_prompt` can look exactly like the parent POSIX prompt
@@ -228,19 +259,32 @@ function lastNonEmptyLineBefore(text, endOffset) {
 // real shell change without one (e.g. Ctrl+D) is still recovered by the pty
 // exec fallback that invalidates the hint when a fish-wrapped command's
 // start marker never arrives (clearLiveShellKind via onLiveShellKindInvalidated).
-function isExitEchoLine(line) {
+// A bare `exit` / `logout` line is only input echo when the line before it is
+// not itself an echoed command: command *output* (`echo exit`) also prints a
+// bare `exit` line, but that output directly follows the echoed
+// `user@host:~$ echo exit` command line, whereas a repaint-separated echo
+// follows the bare prompt itself (Codex P2 on #3262).
+const PROMPT_WITH_COMMAND_PATTERN = /[#$%>]\s*\S/;
+
+function isExitEchoLine(line, precedingLine) {
   const trimmed = String(line || "").replace(/\s+$/, "");
   if (!trimmed) return false;
   // Bare `exit` / `logout` echoed on its own line (prompt repaint may put
   // the typed command on a separate line after a \r redraw).
-  if (/^(?:exit|logout)$/i.test(trimmed)) return true;
+  if (/^(?:exit|logout)$/i.test(trimmed)) {
+    return !PROMPT_WITH_COMMAND_PATTERN.test(String(precedingLine || ""));
+  }
   // …or typed after a prompt character: `user@host:~$ exit`.
   return /[#$%>]\s*(?:exit|logout)\s*$/i.test(trimmed);
 }
 
 function hasFishExitEchoBeforePrompt(normalizedTail, prompt) {
   if (!normalizedTail || !prompt || !normalizedTail.endsWith(prompt)) return false;
-  return isExitEchoLine(lastNonEmptyLineBefore(normalizedTail, normalizedTail.length - prompt.length));
+  const [last, preceding] = lastTwoNonEmptyLinesBefore(
+    normalizedTail,
+    normalizedTail.length - prompt.length,
+  );
+  return isExitEchoLine(last, preceding);
 }
 
 function trackSessionIdlePrompt(session, chunk) {
@@ -288,7 +332,7 @@ function trackSessionIdlePrompt(session, chunk) {
   const bannerMatch = FISH_WELCOME_PATTERN.exec(bannerScanText);
   if (
     bannerMatch
-    && hasFishLaunchEchoBeforeBanner(bannerScanText, bannerMatch.index)
+    && hasFishLaunchEchoBeforeBanner(bannerScanText, bannerMatch.index, session)
     && !hasRecognizedIdlePromptAfterBanner(bannerScanText, bannerMatch.index + bannerMatch[0].length)
   ) {
     session._liveShellKind = "fish";
