@@ -13,7 +13,9 @@ const {
   isDefaultPosixPromptLine,
   isPlausibleCliVersionOutput,
   looksLikeIdleAutoLogout,
+  looksLikeFishWrapperRejection,
   prepareCommandForSpawn,
+  setLiveShellKindFish,
   resolveWindowsShimToNativeExe,
   resolveClaudeCodeExecutableForSdk,
   resolveCodexExecutableForSdk,
@@ -623,7 +625,7 @@ test("fish welcome banner sets a live fish shell hint (#3261)", () => {
 
 test("fish banner hint survives unrecognized fish prompts and ANSI codes", () => {
   const session = {};
-  trackSessionIdlePrompt(session, "\u001b[32mWelcome to fish, the friendly interactive shell\u001b[0m\r\n");
+  trackSessionIdlePrompt(session, "user@host:~$ fish\r\n\u001b[32mWelcome to fish, the friendly interactive shell\u001b[0m\r\n");
   trackSessionIdlePrompt(session, "ecs-user@host ~> ");
 
   assert.equal(session._liveShellKind, "fish");
@@ -631,7 +633,7 @@ test("fish banner hint survives unrecognized fish prompts and ANSI codes", () =>
 
 test("recognized non-fish idle prompt clears the live fish hint (user exited nested fish)", () => {
   const session = {};
-  trackSessionIdlePrompt(session, "Welcome to fish, the friendly interactive shell\r\n");
+  trackSessionIdlePrompt(session, "user@host:~$ fish\r\nWelcome to fish, the friendly interactive shell\r\n");
   assert.equal(session._liveShellKind, "fish");
 
   trackSessionIdlePrompt(session, "\r\nexit\r\nuser@host:~$ ");
@@ -653,7 +655,7 @@ test("fish banner split across PTY chunk boundaries is still detected", () => {
 
 test("clearLiveShellKind resets the live fish hint", () => {
   const session = {};
-  trackSessionIdlePrompt(session, "Welcome to fish, the friendly interactive shell\r\n");
+  trackSessionIdlePrompt(session, "user@host:~$ fish\r\nWelcome to fish, the friendly interactive shell\r\n");
   assert.equal(session._liveShellKind, "fish");
 
   clearLiveShellKind(session);
@@ -662,6 +664,55 @@ test("clearLiveShellKind resets the live fish hint", () => {
   // No-op on missing / non-object sessions.
   clearLiveShellKind(undefined);
   clearLiveShellKind(null);
+});
+
+test("fish banner not preceded by an echoed launch command does not set the live fish hint (Codex P2)", () => {
+  // A POSIX command / log / document that merely prints the banner text is
+  // not evidence of a shell transition.
+  const session = {};
+  trackSessionIdlePrompt(session, "user@host:~$ cat fish-notes.txt\r\nWelcome to fish, the friendly interactive shell\r\n");
+  assert.ok(!session._liveShellKind);
+
+  // Even a line that happens to end in the word `fish` is not enough
+  // without a prompt character — docs and logs can end that way.
+  const session2 = {};
+  trackSessionIdlePrompt(session2, "Installing fish\r\nWelcome to fish, the friendly interactive shell\r\n");
+  assert.ok(!session2._liveShellKind);
+});
+
+test("banner followed by a recognized POSIX prompt in the same chunk does not set the live fish hint (Codex P2)", () => {
+  // Nested fish started and exited within one PTY chunk: the trailing parent
+  // prompt must win over the banner (prompt clearing runs before the scan).
+  const session = {};
+  trackSessionIdlePrompt(session, "user@host:~$ fish\r\nWelcome to fish, the friendly interactive shell\r\nexit\r\nuser@host:~$\r\n");
+  assert.ok(!session._liveShellKind);
+});
+
+test("looksLikeFishWrapperRejection detects fish diagnostics and ignores POSIX shells (Codex P1)", () => {
+  // fish rejects the POSIX wrapper before its first prompt with a `fish: `
+  // diagnostic (English prefix, localized payload) — greeting-independent
+  // evidence the interactive shell is fish.
+  assert.ok(looksLikeFishWrapperRejection(
+    "fish: Unsupported use of '='. In fish, please use 'set __NCMCP_x 0'.\r\nuser@host ~> ",
+  ));
+  assert.ok(looksLikeFishWrapperRejection(
+    "fish: Unknown command: __NCMCP_x=0\r\nfish: Unsupported use of '='\r\nuser@host ~> ",
+  ));
+  // POSIX shells never prefix their diagnostics with `fish: `.
+  assert.ok(!looksLikeFishWrapperRejection("bash: syntax error near unexpected token\r\n"));
+  assert.ok(!looksLikeFishWrapperRejection("user@host:~$ echo fish: hello\r\n"));
+  // ANSI sequences around the diagnostic are ignored.
+  assert.ok(looksLikeFishWrapperRejection("\u001b[31mfish: Unsupported use of '='\u001b[0m\r\n"));
+});
+
+test("setLiveShellKindFish records the live fish hint", () => {
+  const session = {};
+  setLiveShellKindFish(session);
+  assert.equal(session._liveShellKind, "fish");
+  assert.equal(typeof session._liveShellKindAt, "number");
+  // No-op on missing / non-object sessions.
+  setLiveShellKindFish(undefined);
+  setLiveShellKindFish(null);
 });
 
 test("getFreshIdlePrompt returns the cached prompt when the live tail still ends with it", () => {

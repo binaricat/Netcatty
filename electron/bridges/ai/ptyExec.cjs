@@ -26,6 +26,7 @@ const {
   consumeVisibleText,
   stripAnsi,
 } = require("./ptyExecHelpers.cjs");
+const { looksLikeFishWrapperRejection } = require("./shellUtils.cjs");
 
 const DEFAULT_FOREGROUND_PTY_CAPTURE_CHARS = 1024 * 1024;
 
@@ -45,6 +46,7 @@ function startPtyJob(ptyStream, command, options) {
     loginShellHint,
     liveShellKind,
     onLiveShellKindInvalidated,
+    onFishWrapperRejected,
     chatSessionId,
     abortSignal,
     expectedPrompt,
@@ -168,6 +170,23 @@ function startPtyJob(ptyStream, command, options) {
         try {
           onLiveShellKindInvalidated();
         } catch { /* invalidation is best-effort */ }
+      }
+      // fish greeting suppressed (Codex P1 on #3262): with `fish_greeting`
+      // disabled, customized, or localized, trackSessionIdlePrompt never sees
+      // the welcome banner and the live hint stays unset, so a POSIX wrapper
+      // is typed into the user's nested fish. fish rejects that wrapper
+      // before its first prompt with a `fish: …` diagnostic —
+      // greeting-independent evidence that the interactive shell is fish.
+      // Record it so the *next* command uses the fish wrapper instead of
+      // reproducing this startup timeout on every command.
+      if (
+        typeof onFishWrapperRejected === "function"
+        && resolvedShellKind !== "fish"
+        && looksLikeFishWrapperRejection(preStartOutput)
+      ) {
+        try {
+          onFishWrapperRejected();
+        } catch { /* hint recording is best-effort */ }
       }
       const label = maxBufferedChars > 0 ? "Background job startup" : "Command startup";
       finish(preStartOutput, -1, `${label} timed out — start marker never arrived`);
@@ -639,6 +658,7 @@ function startPtyJob(ptyStream, command, options) {
  * @param {AbortSignal} [options.abortSignal] - AbortSignal to cancel execution
  * @param {string} [options.liveShellKind] - Live (nested) shell kind detected in the session
  * @param {() => void} [options.onLiveShellKindInvalidated] - Called when the live shell hint should be discarded (fish wrapper start marker never arrived)
+ * @param {() => void} [options.onFishWrapperRejected] - Called when a POSIX wrapper is rejected by fish (fish `fish: …` diagnostic before the start marker) so the live fish hint can be recorded
  * @param {string} [options.expectedPrompt] - Last observed idle prompt for exact fallback matching
  * @param {boolean} [options.typedInput=false] - Emit synthetic command echo before execution
  * @param {(command: string) => void} [options.echoCommand] - Callback used to display synthetic command echo

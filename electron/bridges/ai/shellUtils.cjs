@@ -66,11 +66,29 @@ const CMD_PROMPT_PATTERN = /^[A-Za-z]:(?:\\[^<>"|]*)?>$/;
 // flip a Windows DefaultShell soft hint.
 const POSIX_PROMPT_PATTERN = /^[^\s@]+@[^\s:]+(?::[^\n\r]*)?[#$]$/;
 
-// Interactive fish prints this banner exactly when it starts (login shell or
-// a user-typed nested `fish`). It is direct evidence that the *interactive*
-// shell is fish, even when the login-shell probe (issue #1854) reported a
-// POSIX login shell the user nested fish on top of (#3261).
+// Interactive fish prints this banner when it starts with a default
+// (English) greeting enabled — direct evidence that the *interactive* shell
+// is fish, even when the login-shell probe (issue #1854) reported a POSIX
+// login shell the user nested fish on top of (#3261). The greeting is
+// optional: a disabled, customized, or localized `fish_greeting` never
+// prints it, so this hint is only one detection path — the pty exec path
+// additionally records the hint from fish's wrapper-rejection diagnostic
+// (see looksLikeFishWrapperRejection, Codex P1 on #3262). The banner match
+// is also validated against the launch context (see trackSessionIdlePrompt,
+// Codex P2 on #3262).
 const FISH_WELCOME_PATTERN = /Welcome to fish, the friendly interactive shell/;
+
+// fish prints the greeting as the first line of output immediately after
+// the echoed launch command (e.g. `user@host:~$ fish`) and before its first
+// prompt. Only trust the banner when it follows that echoed launch: a POSIX
+// command, log, or document that merely *prints* the banner text is not
+// evidence of a shell transition (Codex P2 on #3262). Anchoring on a prompt
+// character before `fish` keeps nested launches working (`user@host:~$ fish`,
+// `user@host% exec fish`) while rejecting arbitrary output that happens to
+// mention the banner. A login shell that *is* fish prints the banner with no
+// preceding echo; those sessions are covered by the login-shell probe (#1854)
+// or a confirmed shellKind, not by this hint.
+const FISH_LAUNCH_ECHO_PATTERN = /[#$%>]\s*fish$/;
 
 function isDefaultPowerShellPromptLine(line) {
   return POWERSHELL_PROMPT_PATTERN.test(String(line || ""));
@@ -137,9 +155,41 @@ function looksLikeIdleAutoLogout(outputTail) {
   return false;
 }
 
-// Enough carry to reassemble a banner split across PTY chunks, plus slack
-// for ANSI sequences that stripAnsi removes before scanning.
-const FISH_BANNER_CARRY_CHARS = FISH_WELCOME_PATTERN.source.length + 16;
+// Enough carry to reassemble a banner split across PTY chunks, retain the
+// launch-echo line that precedes it (validation context), and absorb ANSI
+// sequences that stripAnsi removes before scanning.
+const FISH_BANNER_CARRY_CHARS = FISH_WELCOME_PATTERN.source.length + 192;
+
+// The line immediately before the banner must be the echoed launch command
+// (`user@host:~$ fish`, `user@host% exec fish`, …).
+function hasFishLaunchEchoBeforeBanner(scanText, matchIndex) {
+  const before = scanText.slice(0, matchIndex).replace(/\r\n?/g, "\n");
+  const lines = before.split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i].replace(/\s+$/, "");
+    if (!line) continue;
+    return FISH_LAUNCH_ECHO_PATTERN.test(line);
+  }
+  return false;
+}
+
+// A recognized PowerShell/cmd/posix idle prompt after the banner means the
+// fish session already ended (banner and parent prompt in one chunk, e.g.
+// `user@host:~$ fish\nWelcome to fish…\nuser@host:~$ exit\nuser@host:~$`).
+// Prompt clearing runs before the banner scan, so without this check the
+// scan would set the hint that the trailing prompt just cleared.
+function hasRecognizedIdlePromptAfterBanner(scanText, fromIndex) {
+  const after = scanText.slice(fromIndex).replace(/\r\n?/g, "\n");
+  return after.split("\n").some((line) => {
+    const trimmed = line.replace(/\s+$/, "");
+    if (!trimmed) return false;
+    return (
+      isDefaultPowerShellPromptLine(trimmed)
+      || isDefaultPosixPromptLine(trimmed)
+      || isDefaultCmdPromptLine(trimmed)
+    );
+  });
+}
 
 function trackSessionIdlePrompt(session, chunk) {
   if (!session || typeof chunk !== "string" || !chunk) return "";
@@ -173,18 +223,24 @@ function trackSessionIdlePrompt(session, chunk) {
   // friendly " + "interactive shell") (Codex P2 on #3262). Only text after
   // the last match is carried forward, so the same banner is never
   // re-scanned — re-scanning the full rolling tail would resurrect a hint
-  // that a recognized parent prompt just cleared.
+  // that a recognized parent prompt just cleared. The match itself must
+  // look like a real fish launch: preceded by the echoed launch command and
+  // not already followed by a recognized parent prompt in the same text.
   const bannerScanText = `${session._fishBannerScanCarry || ""}${strippedChunk}`;
   const bannerMatch = FISH_WELCOME_PATTERN.exec(bannerScanText);
-  if (bannerMatch) {
+  if (
+    bannerMatch
+    && hasFishLaunchEchoBeforeBanner(bannerScanText, bannerMatch.index)
+    && !hasRecognizedIdlePromptAfterBanner(bannerScanText, bannerMatch.index + bannerMatch[0].length)
+  ) {
     session._liveShellKind = "fish";
     session._liveShellKindAt = Date.now();
-    session._fishBannerScanCarry = bannerScanText
-      .slice(bannerMatch.index + bannerMatch[0].length)
-      .slice(-FISH_BANNER_CARRY_CHARS);
-  } else {
-    session._fishBannerScanCarry = bannerScanText.slice(-FISH_BANNER_CARRY_CHARS);
   }
+  session._fishBannerScanCarry = bannerMatch
+    ? bannerScanText
+      .slice(bannerMatch.index + bannerMatch[0].length)
+      .slice(-FISH_BANNER_CARRY_CHARS)
+    : bannerScanText.slice(-FISH_BANNER_CARRY_CHARS);
 
   return prompt;
 }
@@ -197,6 +253,30 @@ function clearLiveShellKind(session) {
   if (!session || typeof session !== "object") return;
   session._liveShellKind = "";
   session._liveShellKindAt = 0;
+}
+
+// fish rejects a POSIX wrapper (`__NCMCP_x=0; …`) before its first prompt
+// with a `fish: …` diagnostic (e.g. "Unsupported use of '='" or
+// "Unknown command: …"). The `fish: ` prefix is fish's program-name prefix
+// on the PTY and is not localized, so it is greeting-independent evidence
+// that the interactive shell is fish (Codex P1 on #3262: the welcome banner
+// is optional — a disabled, customized, or localized `fish_greeting` never
+// prints it, leaving the live hint unset and the POSIX wrapper failing into
+// the startup timeout on every command).
+const FISH_REJECTION_PATTERN = /(?:^|\n)\s*fish: /;
+
+function looksLikeFishWrapperRejection(output) {
+  const stripped = stripAnsi(String(output || "")).replace(/\r/g, "\n");
+  return FISH_REJECTION_PATTERN.test(stripped);
+}
+
+// Record the live fish hint (companion to clearLiveShellKind). Called by the
+// pty exec handlers when fish rejects the POSIX wrapper so the *next*
+// command uses the fish wrapper instead of reproducing the timeout.
+function setLiveShellKindFish(session) {
+  if (!session || typeof session !== "object") return;
+  session._liveShellKind = "fish";
+  session._liveShellKindAt = Date.now();
 }
 
 // Return `session.lastIdlePrompt` only if the PTY's recent rolling tail
@@ -1024,6 +1104,8 @@ module.exports = {
   isDefaultPosixPromptLine,
   trackSessionIdlePrompt,
   clearLiveShellKind,
+  looksLikeFishWrapperRejection,
+  setLiveShellKindFish,
   looksLikeIdleAutoLogout,
   isLocalhostHostname,
   extractFirstNonLocalhostUrl,

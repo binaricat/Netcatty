@@ -462,6 +462,61 @@ test("startPtyJob invalidates the live fish hint when the wrapper start marker n
   assert.equal(invalidated, 0);
 });
 
+test("startPtyJob records the live fish hint when fish rejects the POSIX wrapper (greeting suppressed)", async () => {
+  // Codex P1 on #3262: with fish_greeting disabled/customized/localized the
+  // welcome banner never appears, so the live hint stays unset and a POSIX
+  // wrapper is typed into nested fish. fish rejects it before its first
+  // prompt with a `fish: …` diagnostic — greeting-independent evidence the
+  // interactive shell is fish. The callback lets the handler record the hint
+  // so the next command uses the fish wrapper instead of timing out again.
+  let rejected = 0;
+  class FishRejectPty extends EventEmitter {
+    write(data) {
+      queueMicrotask(() => {
+        this.emit("data", Buffer.from("fish: Unknown command: __NCMCP_x=0\r\nfish: Unsupported use of '='. In fish, please use 'set __NCMCP_x 0'.\r\nuser@host ~> "));
+      });
+    }
+  }
+  const job = startPtyJob(new FishRejectPty(), "echo hi", {
+    shellKind: "posix",
+    timeoutMs: 50,
+    onFishWrapperRejected: () => { rejected += 1; },
+  });
+  const result = await job.resultPromise;
+  assert.ok(result.error.includes("start marker never arrived"));
+  assert.equal(rejected, 1);
+
+  // A POSIX wrapper that the shell merely did not execute (no fish
+  // diagnostic) does not record the hint.
+  rejected = 0;
+  class QuietPty extends EventEmitter {
+    write(data) {
+      queueMicrotask(() => {
+        this.emit("data", Buffer.from("user@host ❯ "));
+      });
+    }
+  }
+  const job2 = startPtyJob(new QuietPty(), "echo hi", {
+    shellKind: "posix",
+    timeoutMs: 50,
+    onFishWrapperRejected: () => { rejected += 1; },
+  });
+  await job2.resultPromise;
+  assert.equal(rejected, 0);
+
+  // The fish wrapper never triggers the rejection path (resolvedShellKind
+  // is already fish).
+  rejected = 0;
+  const job3 = startPtyJob(new FishRejectPty(), "echo hi", {
+    shellKind: "posix",
+    liveShellKind: "fish",
+    timeoutMs: 50,
+    onFishWrapperRejected: () => { rejected += 1; },
+  });
+  await job3.resultPromise;
+  assert.equal(rejected, 0);
+});
+
 test("execViaRawPty does not prepend a line-clear before device commands", async () => {
   const writes = [];
   const port = new EventEmitter();
