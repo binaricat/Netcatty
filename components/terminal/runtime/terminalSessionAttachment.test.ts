@@ -2051,6 +2051,49 @@ test("attachSessionToTerminal resets timestamp state for a reused terminal", () 
   assert.equal(writes[1], "fresh");
 });
 
+test("attachSessionToTerminal keeps timestamps for scrollback preserved by reconnect", () => {
+  const { term } = createFakeTerm();
+  const ctx = {
+    ...createContext(false, { showLineTimestamps: true }),
+    sessionId: "session-1",
+    sessionRef: { current: null },
+    hasConnectedRef: { current: true },
+    hasRunStartupCommandRef: { current: false },
+    disposeDataRef: { current: null },
+    disposeExitRef: { current: null },
+    fitAddonRef: { current: null },
+    serializeAddonRef: { current: null },
+    pendingAuthRef: { current: null },
+    terminalBackend: {
+      onSessionData: () => () => {},
+      onSessionExit: () => () => {},
+    },
+    updateStatus: () => {},
+    setError: () => {},
+    onSessionExit: () => {},
+  };
+  const originalDateNow = Date.now;
+
+  try {
+    Date.now = () => new Date(2026, 0, 1, 12, 0, 59, 800).getTime();
+    writeSessionData(ctx as never, term, "before reconnect\r\n");
+
+    // Reconnect reuses the same xterm (scrollback preserved by the caller).
+    attachSessionToTerminal(ctx as never, term, "session-2");
+
+    Date.now = () => new Date(2026, 0, 1, 12, 1, 30, 0).getTime();
+    writeSessionData(ctx as never, term, "after reconnect\r\n");
+
+    assert.deepEqual(getVisibleTerminalLineTimestampRows(term), [
+      { row: 0, label: "12:00:59" },
+      { row: 1, label: "12:01:30" },
+    ]);
+  } finally {
+    Date.now = originalDateNow;
+    resetTerminalWriteCoalescer(term);
+  }
+});
+
 test("attachSessionToTerminal clears the backend id before reporting exit", () => {
   const { term } = createFakeTerm();
   let onExit: ((evt: { reason?: string }) => void) | null = null;

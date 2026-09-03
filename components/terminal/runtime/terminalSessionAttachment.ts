@@ -23,7 +23,7 @@ import type {
 } from "./createTerminalSessionStarters.types";
 import { clearConnectionToken } from "./terminalDistroDetection";
 import {
-  resetTerminalLineTimestamps,
+  resetTerminalLineTimestampRecordingState,
   type TerminalLineTimestampPerfStep,
   writeTerminalDataWithLineTimestamps,
 } from "./terminalLineTimestamps";
@@ -409,7 +409,7 @@ export const getFlowController = (
   return controller;
 };
 
-export const resetTerminalLineTimestampState = resetTerminalLineTimestamps;
+export const resetTerminalLineTimestampState = resetTerminalLineTimestampRecordingState;
 
 export const acknowledgeDroppedTerminalDisplayBytes = (
   ctx: TerminalSessionStartersContext,
@@ -856,7 +856,10 @@ export const attachSessionToTerminal = (
   teardownTerminalOutputPipeline(ctx, term, id, flow);
   flushTerminalWriteCoalescer(term);
   resetTerminalSyncBlockFilter(term);
-  resetTerminalLineTimestamps(term);
+  // Reattach keeps the xterm buffer (reconnect preserves scrollback), so only
+  // reset per-session recording state — a full reset would strip timestamps
+  // from preserved history.
+  resetTerminalLineTimestampRecordingState(term);
   resetTerminalOutputPressure(term);
   ctx.onSessionAttached?.(id);
   const assistMode =
