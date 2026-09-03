@@ -636,7 +636,10 @@ test("recognized non-fish idle prompt clears the live fish hint (user exited nes
   trackSessionIdlePrompt(session, "user@host:~$ fish\r\nWelcome to fish, the friendly interactive shell\r\n");
   assert.equal(session._liveShellKind, "fish");
 
-  trackSessionIdlePrompt(session, "\r\nexit\r\nuser@host:~$ ");
+  // A bare exit echo is input evidence only right after a bare idle prompt
+  // line (here fish's own prompt, repaint-split by a \r — Codex P2 on
+  // #3262): multi-line command output can end in a bare `exit` too.
+  trackSessionIdlePrompt(session, "\r\nuser@host ~>\rexit\r\nuser@host:~$ ");
   assert.equal(session._liveShellKind, "");
   assert.equal(session._liveShellKindAt, 0);
   // Fresh posix prompt is still tracked normally.
@@ -735,6 +738,21 @@ test("fish hint survives `echo exit` output before a POSIX-shaped fish prompt (C
   assert.equal(session._liveShellKind, "fish");
 });
 
+test("fish hint survives multi-line command output ending in a bare exit (Codex P2)", () => {
+  const session = {};
+  trackSessionIdlePrompt(session, "user@host:~$ fish\r\nWelcome to fish, the friendly interactive shell\r\n");
+  assert.equal(session._liveShellKind, "fish");
+
+  // `printf 'done\nexit\n'` in a nested fish whose custom fish_prompt is
+  // shaped like the parent POSIX prompt: the bare `exit` output line follows
+  // the arbitrary output line `done`, not a bare idle prompt, so it is
+  // command output — not input echo — and must not clear the live hint
+  // while fish is still active (Codex P2 on #3262). The next AI command
+  // must keep using the fish wrapper instead of timing out on a POSIX one.
+  trackSessionIdlePrompt(session, "\r\nuser@host:~$ printf 'done\\nexit\\n'\r\ndone\r\nexit\r\nuser@host:~$ ");
+  assert.equal(session._liveShellKind, "fish");
+});
+
 test("bare exit echo after a prompt repaint still clears the fish hint (Codex P2)", () => {
   const session = {};
   trackSessionIdlePrompt(session, "user@host:~$ fish\r\nWelcome to fish, the friendly interactive shell\r\n");
@@ -807,34 +825,56 @@ test("same-host transcript launch lines do not set the live fish hint (Codex P2)
   trackSessionIdlePrompt(session, "user@host:~$ cat transcript.txt\r\nuser@host:~$ fish\r\nWelcome to fish, the friendly interactive shell\r\n");
   assert.ok(!session._liveShellKind);
 
-  // A real launch after a command that produced output still counts: the
-  // predecessor is that command's output, not an echoed command reusing the
-  // session prompt.
+  // A launch line that follows an echoed command's output — even with a
+  // header line in between (`cat transcript.txt` → `Transcript follows:` →
+  // `user@host:~$ fish`) — is not banner-detected either: the scan back
+  // over prompt-less output lines still reaches the echoed command that
+  // produced them, so the launch line's provenance as displayed output
+  // stands (Codex P2 on #3262, third round). This also means a real launch
+  // after a prompt-attached echoed command is no longer banner-detected;
+  // that is safe because the POSIX wrapper then fails into fish's
+  // wrapper-rejection diagnostic, which records the hint on the next
+  // command.
   const session3 = {};
   trackSessionIdlePrompt(session3, "user@host:~$ ");
-  trackSessionIdlePrompt(session3, "echo hi\r\nhi\r\nuser@host:~$ fish\r\nWelcome to fish, the friendly interactive shell\r\n");
-  assert.equal(session3._liveShellKind, "fish");
+  trackSessionIdlePrompt(session3, "user@host:~$ echo hi\r\nhi\r\nuser@host:~$ fish\r\nWelcome to fish, the friendly interactive shell\r\n");
+  assert.ok(!session3._liveShellKind);
 
-  // Ordinary output containing `$`/`>` before the launch must not mask a
-  // real launch (the actual-input check is anchored on the session prompt).
+  // Ordinary output containing `$`/`>` before the launch must not mask the
+  // provenance scan (the check is anchored on the session prompt, and
+  // prompt-less output lines are scanned past, not treated as boundaries).
   const session4 = {};
   trackSessionIdlePrompt(session4, "user@host:~$ ");
-  trackSessionIdlePrompt(session4, "echo 'if (x > 0) then'\r\nif (x > 0) then\r\nuser@host:~$ fish\r\nWelcome to fish, the friendly interactive shell\r\n");
-  assert.equal(session4._liveShellKind, "fish");
+  trackSessionIdlePrompt(session4, "user@host:~$ echo 'if (x > 0) then'\r\nif (x > 0) then\r\nuser@host:~$ fish\r\nWelcome to fish, the friendly interactive shell\r\n");
+  assert.ok(!session4._liveShellKind);
 
-  // No preceding line at all (prompt repainted across the chunk boundary):
-  // the launch echo directly continues the idle prompt — still a launch.
+  // No echoed command between the launch echo and the start of the scan
+  // window (prompt repainted across the chunk boundary): the launch echo
+  // directly continues the idle prompt — still a launch.
   const session5 = {};
   trackSessionIdlePrompt(session5, "user@host:~$ ");
   trackSessionIdlePrompt(session5, "fish\r\nWelcome to fish, the friendly interactive shell\r\n");
   assert.equal(session5._liveShellKind, "fish");
 });
 
+test("multi-line same-host transcript with a header does not set the live fish hint (Codex P2)", () => {
+  // A one-line lookback passes this transcript because the immediate
+  // predecessor of the launch line is the `cat` output header, not the
+  // echoed `cat` command. The scan must continue past prompt-less output
+  // lines to the echoed command that produced them.
+  const session = {};
+  trackSessionIdlePrompt(session, "user@host:~$ ");
+  trackSessionIdlePrompt(session, "user@host:~$ cat transcript.txt\r\nTranscript follows:\r\nuser@host:~$ fish\r\nWelcome to fish, the friendly interactive shell\r\n");
+  assert.ok(!session._liveShellKind);
+});
+
 test("banner followed by a recognized POSIX prompt in the same chunk does not set the live fish hint (Codex P2)", () => {
   // Nested fish started and exited within one PTY chunk: the trailing parent
   // prompt must win over the banner (prompt clearing runs before the scan).
+  // The bare `exit` echo is preceded by fish's own idle prompt line
+  // (repaint-split by a \r), which authenticates it as typed input.
   const session = {};
-  trackSessionIdlePrompt(session, "user@host:~$ fish\r\nWelcome to fish, the friendly interactive shell\r\nexit\r\nuser@host:~$\r\n");
+  trackSessionIdlePrompt(session, "user@host:~$ fish\r\nWelcome to fish, the friendly interactive shell\r\nuser@host ~>\rexit\r\nuser@host:~$\r\n");
   assert.ok(!session._liveShellKind);
 });
 

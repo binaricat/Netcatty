@@ -462,6 +462,52 @@ test("startPtyJob invalidates the live fish hint when the wrapper start marker n
   assert.equal(invalidated, 0);
 });
 
+test("startPtyJob keeps the live fish hint when a foreground child blocks startup (Codex P2)", async () => {
+  // terminal_execute typed while a foreground child (vim, ssh, a REPL) owns
+  // the PTY: the wrapper is never executed and the start marker never
+  // arrives, but the live fish hint is still correct. Without non-fish
+  // rejection evidence in the captured output the hint must not be
+  // invalidated — otherwise the next command falls back to the POSIX
+  // wrapper, fails before its marker in fish, and waits through another
+  // startup timeout after the user exits the child back into fish.
+  let invalidated = 0;
+  class ForegroundChildPty extends EventEmitter {
+    write() {
+      queueMicrotask(() => {
+        this.emit("data", Buffer.from("~\r\n~ VIM - Vi IMproved\r\n~\r\n"));
+      });
+    }
+  }
+  const job = startPtyJob(new ForegroundChildPty(), "echo hi", {
+    shellKind: "posix",
+    liveShellKind: "fish",
+    timeoutMs: 50,
+    onLiveShellKindInvalidated: () => { invalidated += 1; },
+  });
+  const result = await job.resultPromise;
+  assert.ok(result.error.includes("start marker never arrived"));
+  assert.equal(invalidated, 0);
+
+  // A non-fish shell rejecting the fish wrapper (bash diagnostic) still
+  // invalidates the stale hint — evidence-gated, not blanket.
+  invalidated = 0;
+  class BashRejectPty extends EventEmitter {
+    write() {
+      queueMicrotask(() => {
+        this.emit("data", Buffer.from("bash: syntax error near unexpected token\r\n"));
+      });
+    }
+  }
+  const job2 = startPtyJob(new BashRejectPty(), "echo hi", {
+    shellKind: "posix",
+    liveShellKind: "fish",
+    timeoutMs: 50,
+    onLiveShellKindInvalidated: () => { invalidated += 1; },
+  });
+  await job2.resultPromise;
+  assert.equal(invalidated, 1);
+});
+
 test("startPtyJob records the live fish hint when fish rejects the POSIX wrapper (greeting suppressed)", async () => {
   // Codex P1 on #3262: with fish_greeting disabled/customized/localized the
   // welcome banner never appears, so the live hint stays unset and a POSIX

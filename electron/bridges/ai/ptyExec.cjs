@@ -26,7 +26,7 @@ const {
   consumeVisibleText,
   stripAnsi,
 } = require("./ptyExecHelpers.cjs");
-const { looksLikeFishWrapperRejection } = require("./shellUtils.cjs");
+const { looksLikeFishWrapperRejection, looksLikeNonFishShellRejection } = require("./shellUtils.cjs");
 
 const DEFAULT_FOREGROUND_PTY_CAPTURE_CHARS = 1024 * 1024;
 
@@ -152,19 +152,25 @@ function startPtyJob(ptyStream, command, options) {
   // Pre-start recovery shared by the startup-timeout and wall-timeout paths
   // (both can be the first deadline to fire; see armWallTimeout above).
   function recoverWrapperStartFailure() {
-    // The start marker never arrived: the interactive shell did not
-    // understand the wrapper we typed. If the wrapper was chosen by the
-    // live (banner-detected) fish hint, that hint is stale — e.g. the user
-    // exited a nested fish back to a parent shell whose idle prompt is not
-    // one of the recognized shapes, so trackSessionIdlePrompt never
-    // cleared it (Codex P1 on #3262). Invalidate it so the next command
-    // falls back to shellKind / login hint instead of fish-wrapping into a
-    // POSIX shell again. A real fish session prints its start marker
-    // immediately, so this never fires for a healthy fish wrapper.
+    // The start marker never arrived. If the wrapper was chosen by the
+    // live (banner-detected) fish hint, the hint *may* be stale — e.g. the
+    // user exited a nested fish back to a parent shell whose idle prompt is
+    // not one of the recognized shapes, so trackSessionIdlePrompt never
+    // cleared it (Codex P1 on #3262) — and the non-fish parent shell then
+    // rejects the fish wrapper with a program-name diagnostic. But a
+    // foreground child (vim, ssh, a REPL) owning the PTY also blocks the
+    // start marker while the live hint is still correct; invalidating there
+    // would send the next command through the POSIX wrapper, fail before
+    // its marker in fish, and burn another startup timeout (Codex P2 on
+    // #3262). Only invalidate when the captured output shows a non-fish
+    // shell rejecting the wrapper; a healthy fish session prints its start
+    // marker immediately, so a silent timeout is never evidence of a stale
+    // hint.
     if (
       typeof onLiveShellKindInvalidated === "function"
       && liveShellKind === "fish"
       && resolvedShellKind === "fish"
+      && looksLikeNonFishShellRejection(preStartOutput)
     ) {
       try {
         onLiveShellKindInvalidated();
@@ -672,7 +678,7 @@ function startPtyJob(ptyStream, command, options) {
  * @param {string} [options.chatSessionId] - Chat session ID for scoped cancellation
  * @param {AbortSignal} [options.abortSignal] - AbortSignal to cancel execution
  * @param {string} [options.liveShellKind] - Live (nested) shell kind detected in the session
- * @param {() => void} [options.onLiveShellKindInvalidated] - Called when the live shell hint should be discarded (fish wrapper start marker never arrived)
+ * @param {() => void} [options.onLiveShellKindInvalidated] - Called when the live shell hint should be discarded (a non-fish shell rejected the fish wrapper before its start marker)
  * @param {() => void} [options.onFishWrapperRejected] - Called when a POSIX wrapper is rejected by fish (fish `fish: …` diagnostic before the start marker) so the live fish hint can be recorded
  * @param {string} [options.expectedPrompt] - Last observed idle prompt for exact fallback matching
  * @param {boolean} [options.typedInput=false] - Emit synthetic command echo before execution

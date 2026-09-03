@@ -181,15 +181,24 @@ const FISH_BANNER_CARRY_CHARS = FISH_WELCOME_PATTERN.source.length + 192;
 // session prompt, so `user@host:~$ cat transcript.txt` emitting
 // `user@host:~$ fish` + banner passes the prefix comparison. The launch line
 // is only real terminal input when it is not itself the output of the
-// preceding echoed command — so the non-empty line before the launch echo
-// must not be an echoed command (the session's idle prompt followed by a
-// command). A real launch directly after a no-output command (`cd`, `clear`)
-// has such a predecessor too and is not detected here; that is safe because
-// the POSIX wrapper then fails into fish's wrapper-rejection diagnostic,
-// which records the hint (see looksLikeFishWrapperRejection). When no
-// recognized idle prompt has been observed yet there is nothing to compare
-// against, so the shape-only check stands (a session with a custom prompt
-// shape never records one; wrapper-rejection detection still covers fish).
+// preceding echoed command — so no echoed command (the session's idle prompt
+// followed by a command) may appear between the launch echo and the start of
+// the scan window. A one-line lookback is not enough (Codex P2 on #3262,
+// third round): `user@host:~$ cat transcript.txt` → `Transcript follows:` →
+// `user@host:~$ fish` + banner slips past it because the immediate
+// predecessor is the header, not the echoed `cat` command. Scan back over
+// prompt-less output lines to the command that produced them; an echoed
+// session-prompt command there means the launch line is displayed output,
+// while a bare idle prompt (or the start of the window — e.g. the launch
+// echo continuing a prompt repainted across the chunk boundary) is a
+// typed-input boundary and authenticates the launch. Trade-off: a real
+// launch that follows a prompt-attached echoed command's output is no
+// longer banner-detected; that is safe because the POSIX wrapper then fails
+// into fish's wrapper-rejection diagnostic, which records the hint (see
+// looksLikeFishWrapperRejection). When no recognized idle prompt has been
+// observed yet there is nothing to compare against, so the shape-only check
+// stands (a session with a custom prompt shape never records one;
+// wrapper-rejection detection still covers fish).
 function hasFishLaunchEchoBeforeBanner(scanText, matchIndex, session) {
   const before = scanText.slice(0, matchIndex).replace(/\r\n?/g, "\n");
   const lines = before.split("\n");
@@ -210,15 +219,19 @@ function hasFishLaunchEchoBeforeBanner(scanText, matchIndex, session) {
       return false;
     }
     // Actual-input check: an echoed command reusing the session's idle
-    // prompt right before the launch line means the launch line is that
-    // command's output (a displayed transcript), not typed input. Anchored
-    // on the session's own prompt so ordinary command output that merely
-    // contains `$`/`>` does not mask real launches.
+    // prompt anywhere between the launch line and the start of the scan
+    // window means the launch line is that command's output (a displayed
+    // transcript), not typed input. Anchored on the session's own prompt so
+    // ordinary command output that merely contains `$`/`>` does not mask
+    // real launches, and extended past single-line output so a header line
+    // between the echoed command and the transcript's launch line cannot
+    // hide the provenance (Codex P2 on #3262).
     for (let j = i - 1; j >= 0; j--) {
       const prev = lines[j].replace(/\s+$/, "");
       if (!prev) continue;
       const prevPromptIndex = prev.lastIndexOf(prompt);
-      if (prevPromptIndex >= 0 && prev.slice(prevPromptIndex + prompt.length).trim()) {
+      if (prevPromptIndex < 0) continue;
+      if (prev.slice(prevPromptIndex + prompt.length).trim()) {
         return false;
       }
       break;
@@ -289,20 +302,31 @@ function lastTwoNonEmptyLinesBefore(text, endOffset) {
 // exec fallback that invalidates the hint when a fish-wrapped command's
 // start marker never arrives (clearLiveShellKind via onLiveShellKindInvalidated).
 // A bare `exit` / `logout` line is only input echo when the line before it is
-// not itself an echoed command: command *output* (`echo exit`,
-// `printf 'user@host:~$ exit\n'`) also prints exit-looking lines — bare or
-// prompt-attached — but that output directly follows the echoed
-// `user@host:~$ echo exit` command line, whereas a repaint-separated echo
-// follows the bare prompt itself (Codex P2 on #3262).
+// a bare idle prompt (prompt repaint puts the typed command on a separate
+// line after a \r redraw): command *output* also prints exit-looking lines —
+// a prompt-attached one (`printf 'user@host:~$ exit\n'`) directly follows the
+// echoed command line, while a multi-line command (`printf 'done\nexit\n'`)
+// leaves the bare `exit` after an arbitrary output line. In both cases the
+// predecessor is command output, never the idle prompt the user was typing
+// at, so "not itself an echoed command" is not enough to authenticate the
+// echo (Codex P2 on #3262).
 const PROMPT_WITH_COMMAND_PATTERN = /[#$%>]\s*\S/;
+
+// A line that ends in a prompt character with nothing typed after it — the
+// idle prompt itself, possibly split from the typed command by a repaint.
+const BARE_IDLE_PROMPT_PATTERN = /[#$%>]\s*$/;
 
 function isExitEchoLine(line, precedingLine) {
   const trimmed = String(line || "").replace(/\s+$/, "");
   if (!trimmed) return false;
   // Bare `exit` / `logout` echoed on its own line (prompt repaint may put
-  // the typed command on a separate line after a \r redraw).
+  // the typed command on a separate line after a \r redraw). The line before
+  // it must be a bare idle prompt: multi-line command output can end in a
+  // bare `exit` line whose predecessor is arbitrary output (`done`), which
+  // no single-line shape check can distinguish from typed input (Codex P2
+  // on #3262).
   if (/^(?:exit|logout)$/i.test(trimmed)) {
-    return !PROMPT_WITH_COMMAND_PATTERN.test(String(precedingLine || ""));
+    return BARE_IDLE_PROMPT_PATTERN.test(String(precedingLine || "").replace(/\s+$/, ""));
   }
   // …or typed after a prompt character: `user@host:~$ exit`. Output can also
   // print a prompt-shaped exit line (`printf 'user@host:~$ exit\n'`), so the
@@ -406,6 +430,21 @@ const FISH_REJECTION_PATTERN = /(?:^|\n)\s*fish: /;
 function looksLikeFishWrapperRejection(output) {
   const stripped = stripAnsi(String(output || "")).replace(/\r/g, "\n");
   return FISH_REJECTION_PATTERN.test(stripped);
+}
+
+// A fish-wrapped command typed into a *non-fish* interactive shell fails
+// before its start marker with that shell's program-name diagnostic prefix
+// (e.g. `bash: syntax error near unexpected token`, `zsh: parse error near …`).
+// The prefix is not localized, so it is evidence the interactive shell is not
+// fish. Used to gate invalidation of the live fish hint on a pre-start
+// timeout: a foreground child (vim, ssh, a REPL) owning the PTY also blocks
+// the start marker, but produces no such diagnostic — in that case the live
+// hint is still correct and must be kept (Codex P2 on #3262).
+const NON_FISH_SHELL_REJECTION_PATTERN = /(?:^|\n)\s*-?(?:bash|zsh|sh|dash|ksh|mksh|ash|csh|tcsh): /;
+
+function looksLikeNonFishShellRejection(output) {
+  const stripped = stripAnsi(String(output || "")).replace(/\r/g, "\n");
+  return NON_FISH_SHELL_REJECTION_PATTERN.test(stripped);
 }
 
 // Record the live fish hint (companion to clearLiveShellKind). Called by the
@@ -1243,6 +1282,7 @@ module.exports = {
   trackSessionIdlePrompt,
   clearLiveShellKind,
   looksLikeFishWrapperRejection,
+  looksLikeNonFishShellRejection,
   setLiveShellKindFish,
   looksLikeIdleAutoLogout,
   isLocalhostHostname,
