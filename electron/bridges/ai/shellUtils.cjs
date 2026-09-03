@@ -164,7 +164,10 @@ function trackSessionIdlePrompt(session, chunk) {
         if (!state?.ended && !hasCompletedPtyPromptMarker(nextTail, marker)) return "";
       }
       hasTrustedAutomatedCompletion = true;
-    } else if (Object.prototype.hasOwnProperty.call(session, "_manualPromptKindAtSubmit")) {
+    } else if (
+      Object.prototype.hasOwnProperty.call(session, "_manualPromptKindAtSubmit")
+      && session._manualInterruptCanConfirmPrompt !== true
+    ) {
       // A manual command can print text that looks like another shell's
       // default prompt before the real prompt returns. Only let manual output
       // confirm the shell kind that was already established when Enter was
@@ -211,6 +214,7 @@ function confirmSessionIdlePrompt(session, output, expectedInputVersion, options
     delete session._manualPromptKindAtSubmit;
     delete session._untrustedManualPrompt;
     delete session._untrustedManualPromptKind;
+    delete session._manualInterruptCanConfirmPrompt;
     if (options.trustedCompletion === true) {
       delete session._manualInputRequiresClear;
     }
@@ -269,17 +273,22 @@ function markSessionInputActivity(session) {
 function markSessionInputPending(session, data = "", options = {}) {
   if (!session) return;
   const inputWasKnownEmpty = isSessionInputLineKnownEmpty(session);
+  const input = String(data || "");
+  const isManualInterrupt = options.source === "manual" && input.endsWith("\x03");
+  if (options.source === "manual" && !isManualInterrupt) {
+    delete session._manualInterruptCanConfirmPrompt;
+  }
   markSessionInputActivity(session);
   session._inputSinceIdlePrompt = true;
   // Enter/newline and Ctrl+C submit or cancel the editable line, so a later
   // recognized prompt can confirm that the line is empty again. Other input
   // may remain buffered even if the shell redraws its prompt (for example,
   // input typed while a foreground process is returning control).
-  session._submittedInputAwaitingPrompt = /[\r\n\x03]$/.test(String(data || ""));
+  session._submittedInputAwaitingPrompt = /[\r\n\x03]$/.test(input);
   if (options.source === "manual" && session._submittedInputAwaitingPrompt) {
-    const input = String(data || "");
-    if (input.endsWith("\x03") || (/^[\r\n]+$/.test(input) && inputWasKnownEmpty)) {
+    if (isManualInterrupt || (/^[\r\n]+$/.test(input) && inputWasKnownEmpty)) {
       delete session._manualInputRequiresClear;
+      if (isManualInterrupt) session._manualInterruptCanConfirmPrompt = true;
     } else {
       // A foreground program can print a line identical to the current shell
       // prompt and continue reading. Remember that manual Enter alone cannot
@@ -321,6 +330,10 @@ function isSessionInputLineKnownEmpty(session) {
     && session._inputSinceIdlePrompt === false
     && getFreshIdlePrompt(session),
   );
+}
+
+function hasUnverifiedManualSessionInput(session) {
+  return session?._manualInputRequiresClear === true;
 }
 
 function getSessionActiveShellHint(session) {
@@ -1170,6 +1183,7 @@ module.exports = {
   getSessionActiveShellHint,
   getSessionLastObservedShellKind,
   hasReservedSessionInput,
+  hasUnverifiedManualSessionInput,
   markSessionInputPending,
   releaseReservedSessionInput,
   reserveSessionInput,

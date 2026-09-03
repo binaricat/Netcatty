@@ -6,6 +6,7 @@ const {
   formatSyntheticEcho,
   getSessionActiveShellHint,
   getSessionLastObservedShellKind,
+  hasUnverifiedManualSessionInput,
   isSessionInputLineKnownEmpty,
 } = require("../ai/shellUtils.cjs");
 const { ensureSessionShellKindForExec } = require("../ai/sessionShellKind.cjs");
@@ -184,6 +185,7 @@ function registerCattyExecHandlers(ctx) {
             chatSessionId,
             expectedPrompt: getFreshIdlePrompt(session),
             inputLineKnownEmpty: isSessionInputLineKnownEmpty(session),
+            inputLineRequiresManualClear: hasUnverifiedManualSessionInput(session),
             promptTrackingSession: session,
             typedInput: true,
             echoCommand: (rawCommand) => {

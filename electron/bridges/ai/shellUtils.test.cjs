@@ -10,6 +10,7 @@ const {
   getSessionActiveShellHint,
   getSessionLastObservedShellKind,
   hasReservedSessionInput,
+  hasUnverifiedManualSessionInput,
   isSessionInputLineKnownEmpty,
   isDefaultPowerShellPromptLine,
   isDefaultCmdPromptLine,
@@ -682,6 +683,25 @@ test("manual output matching the current prompt still requires a safe clear", ()
   assert.equal(getSessionActiveShellHint(session), "powershell");
   assert.equal(getSessionLastObservedShellKind(session), "powershell");
   assert.equal(isSessionInputLineKnownEmpty(session), false);
+  assert.equal(hasUnverifiedManualSessionInput(session), true);
+});
+
+test("manual Ctrl+C confirms a legitimate nested-shell transition", () => {
+  const session = {};
+  trackSessionIdlePrompt(session, "alice@host:~$");
+  markSessionInputPending(session, "pwsh\r", { source: "manual" });
+  assert.equal(trackSessionIdlePrompt(session, "\r\nPS C:\\Users\\alice>"), "");
+  assert.equal(getSessionActiveShellHint(session), "");
+  assert.equal(hasUnverifiedManualSessionInput(session), true);
+
+  markSessionInputPending(session, "\x03", { source: "manual" });
+  assert.equal(
+    trackSessionIdlePrompt(session, "\r\nPS C:\\Users\\alice>"),
+    "PS C:\\Users\\alice>",
+  );
+  assert.equal(getSessionActiveShellHint(session), "powershell");
+  assert.equal(hasUnverifiedManualSessionInput(session), false);
+  assert.equal(isSessionInputLineKnownEmpty(session), true);
 });
 
 test("a marker-backed command restores trust after manual prompt ambiguity", () => {

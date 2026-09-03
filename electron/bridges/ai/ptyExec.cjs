@@ -56,6 +56,7 @@ function startPtyJob(ptyStream, command, options) {
     abortSignal,
     expectedPrompt,
     inputLineKnownEmpty = false,
+    inputLineRequiresManualClear = false,
     typedInput = false,
     echoCommand,
     maxBufferedChars = 0,
@@ -84,7 +85,10 @@ function startPtyJob(ptyStream, command, options) {
   // but it does not reveal the configured PSReadLine edit mode. If terminal
   // input followed the prompt, no clear-key sequence is portable across
   // Windows/Emacs/Vi; fail without writing instead of corrupting either line.
-  if (!inputLineKnownEmpty && (isCmdToPowerShell || hasAmbiguousShellTransition)) {
+  if (
+    inputLineRequiresManualClear
+    || (!inputLineKnownEmpty && (isCmdToPowerShell || hasAmbiguousShellTransition))
+  ) {
     const error = "Terminal has pending input; submit or clear it before running an agent command";
     const result = {
       ok: false,
@@ -744,6 +748,7 @@ function startPtyJob(ptyStream, command, options) {
  * @param {string} [options.activeShellHint] - Last shell kind confirmed by an interactive prompt
  * @param {string} [options.observedShellHint] - Last observed shell kind, including while terminal input is pending
  * @param {boolean} [options.inputLineKnownEmpty] - No terminal input has followed the observed prompt
+ * @param {boolean} [options.inputLineRequiresManualClear] - Manual input cannot be proven complete
  * @param {boolean} [options.typedInput=false] - Emit synthetic command echo before execution
  * @param {(command: string) => void} [options.echoCommand] - Callback used to display synthetic command echo
  * @param {object} [options.promptTrackingSession] - Session whose prompt tracker should ignore command output lookalikes

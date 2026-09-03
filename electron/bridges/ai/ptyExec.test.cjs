@@ -22,6 +22,7 @@ const {
   getFreshIdlePrompt,
   getSessionActiveShellHint,
   getSessionLastObservedShellKind,
+  hasUnverifiedManualSessionInput,
   isSessionInputLineKnownEmpty,
   markSessionInputPending,
   reserveSessionInput,
@@ -828,7 +829,7 @@ test("tracked pending input is not overwritten when PowerShell edit mode is unkn
   assert.match(result.error, /pending input/i);
 });
 
-test("same-kind fake prompt cannot unlock prefix-free cmd to PowerShell execution", async () => {
+test("same-kind fake prompt cannot unlock any agent execution", async () => {
   const writes = [];
   class CapturePty extends EventEmitter {
     write(data) {
@@ -836,14 +837,14 @@ test("same-kind fake prompt cannot unlock prefix-free cmd to PowerShell executio
     }
   }
   const pty = new CapturePty();
-  const session = { _loginShellKind: "cmd" };
-  trackSessionIdlePrompt(session, "PS C:\\Users\\alice>");
+  const session = { _loginShellKind: "posix" };
+  trackSessionIdlePrompt(session, "alice@host:~$");
   markSessionInputPending(session, "fake-prompt-program\r", { source: "manual" });
-  trackSessionIdlePrompt(session, "\r\nPS C:\\Users\\alice>");
-  assert.equal(getSessionActiveShellHint(session), "powershell");
+  trackSessionIdlePrompt(session, "\r\nalice@host:~$");
+  assert.equal(getSessionActiveShellHint(session), "posix");
   assert.equal(isSessionInputLineKnownEmpty(session), false);
 
-  const job = startPtyJob(pty, "Write-Output 'PROBE'", {
+  const job = startPtyJob(pty, "printf PROBE", {
     shellKind: session.shellKind,
     loginShellHint: session._loginShellKind,
     activeShellHint: getSessionActiveShellHint(session),
@@ -851,6 +852,7 @@ test("same-kind fake prompt cannot unlock prefix-free cmd to PowerShell executio
     timeoutMs: 50,
     expectedPrompt: getFreshIdlePrompt(session),
     inputLineKnownEmpty: isSessionInputLineKnownEmpty(session),
+    inputLineRequiresManualClear: hasUnverifiedManualSessionInput(session),
   });
   assert.equal(writes.length, 0);
   const result = await job.resultPromise;

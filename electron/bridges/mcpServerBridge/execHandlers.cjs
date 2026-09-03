@@ -8,6 +8,7 @@ const {
 const {
   getSessionActiveShellHint,
   getSessionLastObservedShellKind,
+  hasUnverifiedManualSessionInput,
   isSessionInputLineKnownEmpty,
 } = require("../ai/shellUtils.cjs");
 
@@ -158,6 +159,7 @@ function createExecHandlerApi(ctx) {
             observedShellHint: getSessionLastObservedShellKind(session),
             expectedPrompt: getFreshIdlePrompt(session),
             inputLineKnownEmpty: isSessionInputLineKnownEmpty(session),
+            inputLineRequiresManualClear: hasUnverifiedManualSessionInput(session),
             promptTrackingSession: session,
             typedInput: true,
             echoCommand: (rawCommand) => echoCommandToSession(session, sessionId, rawCommand),
@@ -307,6 +309,7 @@ function createExecHandlerApi(ctx) {
             chatSessionId,
             expectedPrompt: getFreshIdlePrompt(session),
             inputLineKnownEmpty: isSessionInputLineKnownEmpty(session),
+            inputLineRequiresManualClear: hasUnverifiedManualSessionInput(session),
             promptTrackingSession: session,
             typedInput: true,
             echoCommand: (rawCommand) => echoCommandToSession(session, sessionId, rawCommand),
