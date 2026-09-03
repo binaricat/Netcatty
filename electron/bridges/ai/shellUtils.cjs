@@ -253,8 +253,7 @@ function hasFishLaunchEchoBeforeBanner(scanText, matchIndex, session) {
 function hasRecognizedIdlePromptAfterBanner(scanText, fromIndex) {
   const after = scanText.slice(fromIndex).replace(/\r\n?/g, "\n");
   const lines = after.split("\n");
-  let prevNonEmpty = "";
-  let prevPrevNonEmpty = "";
+  const priorNonEmpty = [];
   for (const line of lines) {
     const trimmed = line.replace(/\s+$/, "");
     if (!trimmed) continue;
@@ -263,31 +262,37 @@ function hasRecognizedIdlePromptAfterBanner(scanText, fromIndex) {
       || isDefaultPosixPromptLine(trimmed)
       || isDefaultCmdPromptLine(trimmed)
     ) {
-      return isExitEchoLine(prevNonEmpty, prevPrevNonEmpty);
+      return isExitEchoLine(
+        priorNonEmpty[priorNonEmpty.length - 1] || "",
+        priorNonEmpty[priorNonEmpty.length - 2] || "",
+        priorNonEmpty.slice(0, -2).slice(-EXIT_ECHO_FORGERY_SCAN_LINES),
+      );
     }
-    prevPrevNonEmpty = prevNonEmpty;
-    prevNonEmpty = trimmed;
+    priorNonEmpty.push(trimmed);
   }
   return false;
 }
 
-// The last two non-empty lines before the trailing prompt. Used as exit
-// evidence (and its context) for hasFishExitEchoBeforePrompt below.
-function lastTwoNonEmptyLinesBefore(text, endOffset) {
+// How many non-empty lines before a candidate exit line are inspected when
+// authenticating it against forged output (see isExitEchoLine).
+const EXIT_ECHO_FORGERY_SCAN_LINES = 20;
+
+// The last two non-empty lines before the trailing prompt plus a bounded
+// window of the lines before them. Used as exit evidence (and its context)
+// for hasFishExitEchoBeforePrompt below. `earlier` is nearest-first.
+function exitEchoContextBefore(text, endOffset) {
   const lines = String(text || "").slice(0, endOffset).split("\n");
-  let last = "";
-  let preceding = "";
-  for (let i = lines.length - 1; i >= 0; i--) {
+  const nonEmpty = [];
+  for (let i = lines.length - 1; i >= 0 && nonEmpty.length < 2 + EXIT_ECHO_FORGERY_SCAN_LINES; i--) {
     const line = lines[i].replace(/\s+$/, "");
     if (!line) continue;
-    if (!last) {
-      last = line;
-      continue;
-    }
-    preceding = line;
-    break;
+    nonEmpty.push(line);
   }
-  return [last, preceding];
+  return {
+    last: nonEmpty[0] || "",
+    preceding: nonEmpty[1] || "",
+    earlier: nonEmpty.slice(2),
+  };
 }
 
 // A customized `fish_prompt` can look exactly like the parent POSIX prompt
@@ -316,9 +321,10 @@ const PROMPT_WITH_COMMAND_PATTERN = /[#$%>]\s*\S/;
 // idle prompt itself, possibly split from the typed command by a repaint.
 const BARE_IDLE_PROMPT_PATTERN = /[#$%>]\s*$/;
 
-function isExitEchoLine(line, precedingLine) {
+function isExitEchoLine(line, precedingLine, earlierLines) {
   const trimmed = String(line || "").replace(/\s+$/, "");
   if (!trimmed) return false;
+  let shaped = false;
   // Bare `exit` / `logout` echoed on its own line (prompt repaint may put
   // the typed command on a separate line after a \r redraw). The line before
   // it must be a bare idle prompt: multi-line command output can end in a
@@ -326,25 +332,38 @@ function isExitEchoLine(line, precedingLine) {
   // no single-line shape check can distinguish from typed input (Codex P2
   // on #3262).
   if (/^(?:exit|logout)$/i.test(trimmed)) {
-    return BARE_IDLE_PROMPT_PATTERN.test(String(precedingLine || "").replace(/\s+$/, ""));
-  }
+    shaped = BARE_IDLE_PROMPT_PATTERN.test(String(precedingLine || "").replace(/\s+$/, ""));
   // …or typed after a prompt character: `user@host:~$ exit`. Output can also
   // print a prompt-shaped exit line (`printf 'user@host:~$ exit\n'`), so the
   // same input-echo validation applies: it is only evidence when the line
   // before it is not itself an echoed command (Codex P2 on #3262).
-  if (/[#$%>]\s*(?:exit|logout)\s*$/i.test(trimmed)) {
-    return !PROMPT_WITH_COMMAND_PATTERN.test(String(precedingLine || ""));
+  } else if (/[#$%>]\s*(?:exit|logout)\s*$/i.test(trimmed)) {
+    shaped = !PROMPT_WITH_COMMAND_PATTERN.test(String(precedingLine || ""));
   }
-  return false;
+  if (!shaped) return false;
+  // Single-predecessor checks are still not enough: multi-line output
+  // (`printf 'done\nuser@host:~$ exit\n'`) can put a prompt-less line
+  // (`done`) right before the forged exit line, passing both guards. The
+  // remaining discriminator is that forged output is *printed by a command*,
+  // so the exact exit line appears verbatim inside an earlier line of the
+  // transcript — the echoed command that produced it. A real input echo is
+  // typed at the keyboard and never appears verbatim in the lines before it
+  // (Codex P2 on #3262). Deliberately adversarial quoting (`e''xit`) can
+  // still evade this, but then the pty exec fallback (clearLiveShellKind via
+  // onLiveShellKindInvalidated) recovers instead.
+  for (const src of Array.isArray(earlierLines) ? earlierLines : []) {
+    if (typeof src === "string" && src.includes(trimmed)) return false;
+  }
+  return true;
 }
 
 function hasFishExitEchoBeforePrompt(normalizedTail, prompt) {
   if (!normalizedTail || !prompt || !normalizedTail.endsWith(prompt)) return false;
-  const [last, preceding] = lastTwoNonEmptyLinesBefore(
+  const { last, preceding, earlier } = exitEchoContextBefore(
     normalizedTail,
     normalizedTail.length - prompt.length,
   );
-  return isExitEchoLine(last, preceding);
+  return isExitEchoLine(last, preceding, earlier);
 }
 
 function trackSessionIdlePrompt(session, chunk) {

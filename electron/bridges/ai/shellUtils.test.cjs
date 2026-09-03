@@ -753,6 +753,48 @@ test("fish hint survives multi-line command output ending in a bare exit (Codex 
   assert.equal(session._liveShellKind, "fish");
 });
 
+test("fish hint survives multi-line prompt-shaped exit output (Codex P2)", () => {
+  const session = {};
+  trackSessionIdlePrompt(session, "user@host:~$ fish\r\nWelcome to fish, the friendly interactive shell\r\n");
+  assert.equal(session._liveShellKind, "fish");
+
+  // `printf 'done\nuser@host:~$ exit\n'` in a nested fish whose custom
+  // fish_prompt is shaped like the parent POSIX prompt: the prompt-shaped
+  // `exit` output line's predecessor is the prompt-less `done`, which passes
+  // the single-predecessor guard, so authentication must fall back to the
+  // verbatim self-echo check — the echoed command contains the exact exit
+  // line it printed, so it is command output, not input echo, and must not
+  // clear the live hint while fish is still active (Codex P2 on #3262).
+  trackSessionIdlePrompt(session, "\r\nuser@host:~$ printf 'done\\nuser@host:~$ exit\\n'\r\ndone\r\nuser@host:~$ exit\r\nuser@host:~$ ");
+  assert.equal(session._liveShellKind, "fish");
+});
+
+test("fish hint survives output forging a bare exit after a prompt-shaped line (Codex P2)", () => {
+  const session = {};
+  trackSessionIdlePrompt(session, "user@host:~$ fish\r\nWelcome to fish, the friendly interactive shell\r\n");
+  assert.equal(session._liveShellKind, "fish");
+
+  // `printf 'user@host:~$\nexit\n'` forges the repaint pattern (bare `exit`
+  // right after a bare-prompt-shaped line). The echoed command contains the
+  // forged `exit` line verbatim, so it is command output — not input echo —
+  // and must not clear the live hint (Codex P2 on #3262).
+  trackSessionIdlePrompt(session, "\r\nuser@host:~$ printf 'user@host:~$\\nexit\\n'\r\nuser@host:~$\r\nexit\r\nuser@host:~$ ");
+  assert.equal(session._liveShellKind, "fish");
+});
+
+test("real exit echo after command output still clears the fish hint (Codex P2)", () => {
+  const session = {};
+  trackSessionIdlePrompt(session, "user@host:~$ fish\r\nWelcome to fish, the friendly interactive shell\r\n");
+  assert.equal(session._liveShellKind, "fish");
+
+  // A real typed `exit` after a command that printed output: the exit echo
+  // line's predecessor is the previous command's output, and no earlier
+  // line contains the exit line verbatim (it was typed, not printed), so
+  // the hint must still be cleared.
+  trackSessionIdlePrompt(session, "\r\nuser@host:~$ printf 'hi\\n'\r\nhi\r\nuser@host:~$ exit\r\nuser@host:~$ ");
+  assert.equal(session._liveShellKind, "");
+});
+
 test("bare exit echo after a prompt repaint still clears the fish hint (Codex P2)", () => {
   const session = {};
   trackSessionIdlePrompt(session, "user@host:~$ fish\r\nWelcome to fish, the friendly interactive shell\r\n");
