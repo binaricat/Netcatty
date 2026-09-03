@@ -159,7 +159,7 @@ function trackSessionIdlePrompt(session, chunk) {
         // after this job's private end marker has been observed. The tail check
         // covers an end marker and prompt delivered in the same transport chunk,
         // before the PTY job's own listener has a chance to update the state.
-        if (!state?.ended && !nextTail.includes(`${marker}_E:`)) return "";
+        if (!state?.ended && !hasCompletedPtyPromptMarker(nextTail, marker)) return "";
       }
     }
     session.lastIdlePrompt = prompt;
@@ -178,6 +178,18 @@ function trackSessionIdlePrompt(session, chunk) {
   }
 
   return prompt;
+}
+
+function hasCompletedPtyPromptMarker(output, marker) {
+  const token = `${marker}_E:`;
+  let searchFrom = 0;
+  while (searchFrom < output.length) {
+    const markerIndex = output.indexOf(token, searchFrom);
+    if (markerIndex === -1) return false;
+    if (/^\d+/.test(output.slice(markerIndex + token.length))) return true;
+    searchFrom = markerIndex + token.length;
+  }
+  return false;
 }
 
 function registerSessionPtyPromptMarker(session, marker) {

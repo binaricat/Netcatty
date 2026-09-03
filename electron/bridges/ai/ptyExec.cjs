@@ -71,11 +71,15 @@ function startPtyJob(ptyStream, command, options) {
     resolvedShellKind === "powershell"
     || observedShellHint === "powershell"
   );
+  const hasAmbiguousShellTransition = Boolean(
+    observedShellHint
+    && resolvedShellKind !== observedShellHint,
+  );
   // This transition identifies the reporter's Windows startup-command path,
   // but it does not reveal the configured PSReadLine edit mode. If terminal
   // input followed the prompt, no clear-key sequence is portable across
   // Windows/Emacs/Vi; fail without writing instead of corrupting either line.
-  if (isCmdToPowerShell && !inputLineKnownEmpty) {
+  if (!inputLineKnownEmpty && (isCmdToPowerShell || hasAmbiguousShellTransition)) {
     const error = "Terminal has pending input; submit or clear it before running an agent command";
     const result = {
       ok: false,
@@ -639,8 +643,12 @@ function startPtyJob(ptyStream, command, options) {
   }
 
   if (typeof ptyStream.on === "function") {
-    const onClose = () => finish(foundStart ? output : preStartOutput, null, cancelRequested ? "Cancelled" : "Stream closed unexpectedly");
-    const onError = (err) => finish(foundStart ? output : preStartOutput, -1, cancelRequested ? "Cancelled" : `Stream error: ${err?.message || err}`);
+    const onClose = () => pendingEnd
+      ? finish(pendingEnd.stdout, pendingEnd.exitCode)
+      : finish(foundStart ? output : preStartOutput, null, cancelRequested ? "Cancelled" : "Stream closed unexpectedly");
+    const onError = (err) => pendingEnd
+      ? finish(pendingEnd.stdout, pendingEnd.exitCode)
+      : finish(foundStart ? output : preStartOutput, -1, cancelRequested ? "Cancelled" : `Stream error: ${err?.message || err}`);
     ptyStream.on("close", onClose);
     ptyStream.on("end", onClose);
     ptyStream.on("error", onError);
@@ -651,7 +659,9 @@ function startPtyJob(ptyStream, command, options) {
     });
   }
   if (typeof ptyStream.onExit === "function") {
-    const disposable = ptyStream.onExit(() => finish(foundStart ? output : preStartOutput, null, cancelRequested ? "Cancelled" : "Process exited"));
+    const disposable = ptyStream.onExit(() => pendingEnd
+      ? finish(pendingEnd.stdout, pendingEnd.exitCode)
+      : finish(foundStart ? output : preStartOutput, null, cancelRequested ? "Cancelled" : "Process exited"));
     cleanupFns.push(() => {
       try {
         disposable?.dispose?.();

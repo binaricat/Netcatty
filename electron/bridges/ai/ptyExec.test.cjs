@@ -436,7 +436,10 @@ test("command output that looks like a prompt cannot replace the active shell", 
     promptTrackingSession: session,
   });
 
-  pty.emit("data", Buffer.from(`${job.marker}_S\r\nalice@host:~$`));
+  // Real terminals echo the wrapper before its start marker. That echo contains
+  // a literal `${marker}_E:` fragment, but not the numeric exit code that proves
+  // the command actually ended.
+  pty.emit("data", Buffer.from(`${writes[0]}${job.marker}_S\r\nalice@host:~$`));
   assert.equal(getSessionLastObservedShellKind(session), "powershell");
   assert.equal(getFreshIdlePrompt(session), "");
   assert.equal(isSessionInputLineKnownEmpty(session), false);
@@ -449,6 +452,53 @@ test("command output that looks like a prompt cannot replace the active shell", 
   assert.equal(getSessionActiveShellHint(session), "powershell");
   assert.equal(isSessionInputLineKnownEmpty(session), true);
   assert.ok(writes.at(0).startsWith("$__NCMCP_"));
+});
+
+test("partial input in a nested shell is rejected when its wrapper is ambiguous", async () => {
+  const writes = [];
+  class CapturePty extends EventEmitter {
+    write(data) {
+      writes.push(String(data));
+    }
+  }
+  const pty = new CapturePty();
+  const session = { _loginShellKind: "posix" };
+  trackSessionIdlePrompt(session, "PS C:\\Users\\alice>");
+  markSessionInputPending(session, "Write-Output 'USER'");
+  trackSessionIdlePrompt(session, "Write-Output 'USER'");
+
+  const job = startPtyJob(pty, "Write-Output 'PROBE'", {
+    loginShellHint: session._loginShellKind,
+    activeShellHint: getSessionActiveShellHint(session),
+    observedShellHint: getSessionLastObservedShellKind(session),
+    timeoutMs: 50,
+    expectedPrompt: getFreshIdlePrompt(session),
+    inputLineKnownEmpty: isSessionInputLineKnownEmpty(session),
+  });
+  assert.equal(writes.length, 0);
+  const result = await job.resultPromise;
+  assert.equal(result.ok, false);
+  assert.match(result.error, /pending input/i);
+});
+
+test("a stream close after the end marker preserves the completed result", async () => {
+  class CapturePty extends EventEmitter {
+    write() {}
+  }
+  const pty = new CapturePty();
+  const job = startPtyJob(pty, "Write-Output 'DONE'", {
+    shellKind: "powershell",
+    timeoutMs: 1000,
+    expectedPrompt: "PS C:\\Users\\alice>",
+  });
+
+  pty.emit("data", Buffer.from(`${job.marker}_S\r\nDONE\r\n${job.marker}_E:0\r\n`));
+  pty.emit("close");
+  const result = await job.resultPromise;
+  assert.equal(result.ok, true);
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.stdout, "DONE");
+  assert.doesNotMatch(result.stdout, /__NCMCP_/);
 });
 
 test("a completed marker cannot be changed into a timeout while awaiting the prompt", async () => {
