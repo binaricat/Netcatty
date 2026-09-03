@@ -203,13 +203,10 @@ function hasCompletedPtyPromptMarker(output, marker) {
   while (searchFrom < output.length) {
     const markerIndex = output.indexOf(token, searchFrom);
     if (markerIndex === -1) return false;
-    const atLineBoundary = markerIndex === 0
-      || output[markerIndex - 1] === "\n"
-      || output[markerIndex - 1] === "\r";
-    if (
-      atLineBoundary
-      && /^\d+(?=\r|\n|$)/.test(output.slice(markerIndex + token.length))
-    ) return true;
+    // The real marker may immediately follow command output that deliberately
+    // omitted its final newline. Requiring the numeric status to terminate the
+    // line still rejects marker-shaped text embedded in an echoed wrapper.
+    if (/^\d+(?=\r|\n|$)/.test(output.slice(markerIndex + token.length))) return true;
     searchFrom = markerIndex + token.length;
   }
   return false;

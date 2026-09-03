@@ -663,6 +663,53 @@ test("fish wrapper echo cannot impersonate completion before manual Ctrl+C", asy
   assert.equal(secondResult.stdout, "NEXT");
 });
 
+test("no-newline output still confirms a changed PowerShell prompt for the next job", async () => {
+  const writes = [];
+  class CapturePty extends EventEmitter {
+    write(data) {
+      writes.push(String(data));
+    }
+  }
+  const pty = new CapturePty();
+  const session = { _loginShellKind: "cmd" };
+  pty.on("data", (data) => trackSessionIdlePrompt(session, String(data)));
+  trackSessionIdlePrompt(session, "PS C:\\old>");
+
+  const first = startPtyJob(pty, "Write-Host -NoNewline X; Set-Location C:\\new", {
+    loginShellHint: session._loginShellKind,
+    activeShellHint: getSessionActiveShellHint(session),
+    observedShellHint: getSessionLastObservedShellKind(session),
+    timeoutMs: 1000,
+    expectedPrompt: getFreshIdlePrompt(session),
+    inputLineKnownEmpty: isSessionInputLineKnownEmpty(session),
+    promptTrackingSession: session,
+  });
+  pty.emit("data", Buffer.from(`${first.marker}_S\r\nX${first.marker}_E:0\r\nPS C:\\new>`));
+  const firstResult = await first.resultPromise;
+  assert.equal(firstResult.ok, true);
+  assert.equal(firstResult.stdout, "X");
+  assert.equal(getFreshIdlePrompt(session), "PS C:\\new>");
+  assert.equal(getSessionActiveShellHint(session), "powershell");
+  assert.equal(isSessionInputLineKnownEmpty(session), true);
+
+  const second = startPtyJob(pty, "Write-Output 'NEXT'", {
+    loginShellHint: session._loginShellKind,
+    activeShellHint: getSessionActiveShellHint(session),
+    observedShellHint: getSessionLastObservedShellKind(session),
+    timeoutMs: 1000,
+    expectedPrompt: getFreshIdlePrompt(session),
+    inputLineKnownEmpty: isSessionInputLineKnownEmpty(session),
+    promptTrackingSession: session,
+  });
+  assert.equal(writes.length, 2);
+  assert.ok(writes[1].startsWith("$__NCMCP_"));
+  assert.doesNotMatch(writes[1], /cmd \/d \/s \/c/i);
+  pty.emit("data", Buffer.from(`${second.marker}_S\r\nNEXT\r\n${second.marker}_E:0\r\nPS C:\\new>`));
+  const secondResult = await second.resultPromise;
+  assert.equal(secondResult.ok, true);
+  assert.equal(secondResult.stdout, "NEXT");
+});
+
 test("a completed marker cannot be changed into a timeout while awaiting the prompt", async () => {
   const writes = [];
   class CapturePty extends EventEmitter {
