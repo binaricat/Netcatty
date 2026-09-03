@@ -135,9 +135,58 @@ function startPtyJob(ptyStream, command, options) {
     wallTimeoutId = setTimeout(() => {
       if (finished) return;
       sendInterrupt();
+      // The wall deadline and the startup deadline share timeoutMs on the
+      // MCP foreground path, and the wall timer is armed first, so it fires
+      // first and finish() below clears the startup timer before that
+      // callback can run (Codex P1 on #3262). Run the same pre-start
+      // recovery here whenever the start marker never arrived, so the fish
+      // hint is still recorded/invalidated on the wall-timeout path.
+      if (!foundStart) {
+        recoverWrapperStartFailure();
+      }
       const timeoutSec = Math.round(timeoutMs / 1000);
       finish(foundStart ? output : preStartOutput, -1, `Command timed out (${timeoutSec}s)`);
     }, timeoutMs);
+  }
+
+  // Pre-start recovery shared by the startup-timeout and wall-timeout paths
+  // (both can be the first deadline to fire; see armWallTimeout above).
+  function recoverWrapperStartFailure() {
+    // The start marker never arrived: the interactive shell did not
+    // understand the wrapper we typed. If the wrapper was chosen by the
+    // live (banner-detected) fish hint, that hint is stale — e.g. the user
+    // exited a nested fish back to a parent shell whose idle prompt is not
+    // one of the recognized shapes, so trackSessionIdlePrompt never
+    // cleared it (Codex P1 on #3262). Invalidate it so the next command
+    // falls back to shellKind / login hint instead of fish-wrapping into a
+    // POSIX shell again. A real fish session prints its start marker
+    // immediately, so this never fires for a healthy fish wrapper.
+    if (
+      typeof onLiveShellKindInvalidated === "function"
+      && liveShellKind === "fish"
+      && resolvedShellKind === "fish"
+    ) {
+      try {
+        onLiveShellKindInvalidated();
+      } catch { /* invalidation is best-effort */ }
+    }
+    // fish greeting suppressed (Codex P1 on #3262): with `fish_greeting`
+    // disabled, customized, or localized, trackSessionIdlePrompt never sees
+    // the welcome banner and the live hint stays unset, so a POSIX wrapper
+    // is typed into the user's nested fish. fish rejects that wrapper
+    // before its first prompt with a `fish: …` diagnostic —
+    // greeting-independent evidence that the interactive shell is fish.
+    // Record it so the *next* command uses the fish wrapper instead of
+    // reproducing this startup timeout on every command.
+    if (
+      typeof onFishWrapperRejected === "function"
+      && resolvedShellKind !== "fish"
+      && looksLikeFishWrapperRejection(preStartOutput)
+    ) {
+      try {
+        onFishWrapperRejected();
+      } catch { /* hint recording is best-effort */ }
+    }
   }
 
   // Bounded startup deadline: we always need a hard limit on how long we
@@ -153,41 +202,7 @@ function startPtyJob(ptyStream, command, options) {
     startupTimeoutId = setTimeout(() => {
       if (finished || foundStart) return;
       sendInterrupt();
-      // The start marker never arrived: the interactive shell did not
-      // understand the wrapper we typed. If the wrapper was chosen by the
-      // live (banner-detected) fish hint, that hint is stale — e.g. the user
-      // exited a nested fish back to a parent shell whose idle prompt is not
-      // one of the recognized shapes, so trackSessionIdlePrompt never
-      // cleared it (Codex P1 on #3262). Invalidate it so the next command
-      // falls back to shellKind / login hint instead of fish-wrapping into a
-      // POSIX shell again. A real fish session prints its start marker
-      // immediately, so this never fires for a healthy fish wrapper.
-      if (
-        typeof onLiveShellKindInvalidated === "function"
-        && liveShellKind === "fish"
-        && resolvedShellKind === "fish"
-      ) {
-        try {
-          onLiveShellKindInvalidated();
-        } catch { /* invalidation is best-effort */ }
-      }
-      // fish greeting suppressed (Codex P1 on #3262): with `fish_greeting`
-      // disabled, customized, or localized, trackSessionIdlePrompt never sees
-      // the welcome banner and the live hint stays unset, so a POSIX wrapper
-      // is typed into the user's nested fish. fish rejects that wrapper
-      // before its first prompt with a `fish: …` diagnostic —
-      // greeting-independent evidence that the interactive shell is fish.
-      // Record it so the *next* command uses the fish wrapper instead of
-      // reproducing this startup timeout on every command.
-      if (
-        typeof onFishWrapperRejected === "function"
-        && resolvedShellKind !== "fish"
-        && looksLikeFishWrapperRejection(preStartOutput)
-      ) {
-        try {
-          onFishWrapperRejected();
-        } catch { /* hint recording is best-effort */ }
-      }
+      recoverWrapperStartFailure();
       const label = maxBufferedChars > 0 ? "Background job startup" : "Command startup";
       finish(preStartOutput, -1, `${label} timed out — start marker never arrived`);
     }, startupMs);

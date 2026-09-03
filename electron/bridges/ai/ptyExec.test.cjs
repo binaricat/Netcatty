@@ -517,6 +517,82 @@ test("startPtyJob records the live fish hint when fish rejects the POSIX wrapper
   assert.equal(rejected, 0);
 });
 
+test("startPtyJob runs fish wrapper recovery on the wall timeout before the startup timer (Codex P1)", async () => {
+  // With enforceWallTimeout (MCP terminal_execute) the wall timer and the
+  // startup timer share timeoutMs, and the wall timer is armed first — so
+  // it fires first and finish() clears the startup timer. The recovery must
+  // still run from the wall-timeout path when the start marker never
+  // arrived, or every MCP command in a nested fish with a suppressed
+  // greeting times out without ever recording the fish hint.
+  let rejected = 0;
+  let invalidated = 0;
+  class FishRejectPty extends EventEmitter {
+    write() {
+      queueMicrotask(() => {
+        this.emit("data", Buffer.from("fish: Unknown command: __NCMCP_x=0\r\nuser@host ~> "));
+      });
+    }
+  }
+  const job = startPtyJob(new FishRejectPty(), "echo hi", {
+    shellKind: "posix",
+    timeoutMs: 50,
+    enforceWallTimeout: true,
+    onFishWrapperRejected: () => { rejected += 1; },
+    onLiveShellKindInvalidated: () => { invalidated += 1; },
+  });
+  const result = await job.resultPromise;
+  assert.equal(rejected, 1);
+  // The wall-timeout error wins (it fired before the startup timer).
+  assert.ok(result.error.includes("timed out"));
+  // No stale live fish hint driving the wrapper here, so no invalidation.
+  assert.equal(invalidated, 0);
+
+  // A stale live fish hint (wrapper chosen by the banner hint) is
+  // invalidated on the wall-timeout path too.
+  invalidated = 0;
+  class NoMarkerPty extends EventEmitter {
+    write() {
+      queueMicrotask(() => {
+        this.emit("data", Buffer.from("bash: syntax error near unexpected token\r\nuser@host ❯ "));
+      });
+    }
+  }
+  const job2 = startPtyJob(new NoMarkerPty(), "echo hi", {
+    shellKind: "posix",
+    liveShellKind: "fish",
+    timeoutMs: 50,
+    enforceWallTimeout: true,
+    onLiveShellKindInvalidated: () => { invalidated += 1; },
+  });
+  await job2.resultPromise;
+  assert.equal(invalidated, 1);
+
+  // Once the start marker arrived, the wall timeout must not run the
+  // recovery (the wrapper was understood; the command was simply slow).
+  invalidated = 0;
+  rejected = 0;
+  class StartedPty extends EventEmitter {
+    write(data) {
+      const marker = markerFromWrite(data);
+      if (!marker || this.started) return;
+      this.started = true;
+      queueMicrotask(() => {
+        this.emit("data", Buffer.from(`${marker}_S\nstill running`));
+      });
+    }
+  }
+  const job3 = startPtyJob(new StartedPty(), "echo hi", {
+    shellKind: "posix",
+    timeoutMs: 50,
+    enforceWallTimeout: true,
+    onFishWrapperRejected: () => { rejected += 1; },
+    onLiveShellKindInvalidated: () => { invalidated += 1; },
+  });
+  await job3.resultPromise;
+  assert.equal(rejected, 0);
+  assert.equal(invalidated, 0);
+});
+
 test("execViaRawPty does not prepend a line-clear before device commands", async () => {
   const writes = [];
   const port = new EventEmitter();

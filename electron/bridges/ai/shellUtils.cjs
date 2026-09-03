@@ -174,8 +174,20 @@ const FISH_BANNER_CARRY_CHARS = FISH_WELCOME_PATTERN.source.length + 192;
 // (Codex P2 on #3262): output of `cat transcript.txt` can contain
 // `user@other:~$ fish` followed by the banner text, so the echoed launch must
 // also reuse the idle prompt this session itself printed last. A transcript
-// copied from another host / a different prompt fails that comparison. When
-// no recognized idle prompt has been observed yet there is nothing to compare
+// copied from another host / a different prompt fails that comparison.
+//
+// Matching the prompt is still not proof of typed input (Codex P2 on #3262,
+// second round): a transcript copied from the *same* host reuses the exact
+// session prompt, so `user@host:~$ cat transcript.txt` emitting
+// `user@host:~$ fish` + banner passes the prefix comparison. The launch line
+// is only real terminal input when it is not itself the output of the
+// preceding echoed command — so the non-empty line before the launch echo
+// must not be an echoed command (the session's idle prompt followed by a
+// command). A real launch directly after a no-output command (`cd`, `clear`)
+// has such a predecessor too and is not detected here; that is safe because
+// the POSIX wrapper then fails into fish's wrapper-rejection diagnostic,
+// which records the hint (see looksLikeFishWrapperRejection). When no
+// recognized idle prompt has been observed yet there is nothing to compare
 // against, so the shape-only check stands (a session with a custom prompt
 // shape never records one; wrapper-rejection detection still covers fish).
 function hasFishLaunchEchoBeforeBanner(scanText, matchIndex, session) {
@@ -194,7 +206,24 @@ function hasFishLaunchEchoBeforeBanner(scanText, matchIndex, session) {
     // launch command after the *last* occurrence of the session's prompt.
     const promptIndex = line.lastIndexOf(prompt);
     if (promptIndex < 0) return false;
-    return FISH_LAUNCH_COMMAND_PATTERN.test(line.slice(promptIndex + prompt.length));
+    if (!FISH_LAUNCH_COMMAND_PATTERN.test(line.slice(promptIndex + prompt.length))) {
+      return false;
+    }
+    // Actual-input check: an echoed command reusing the session's idle
+    // prompt right before the launch line means the launch line is that
+    // command's output (a displayed transcript), not typed input. Anchored
+    // on the session's own prompt so ordinary command output that merely
+    // contains `$`/`>` does not mask real launches.
+    for (let j = i - 1; j >= 0; j--) {
+      const prev = lines[j].replace(/\s+$/, "");
+      if (!prev) continue;
+      const prevPromptIndex = prev.lastIndexOf(prompt);
+      if (prevPromptIndex >= 0 && prev.slice(prevPromptIndex + prompt.length).trim()) {
+        return false;
+      }
+      break;
+    }
+    return true;
   }
   return false;
 }
