@@ -656,6 +656,23 @@ test("fish banner split across PTY chunk boundaries is still detected", () => {
   assert.equal(typeof session._liveShellKindAt, "number");
 });
 
+test("all banner occurrences in one chunk are validated, not just the first (Codex P2)", () => {
+  // A decoy banner occurrence (command output) followed by a genuine launch
+  // in the same PTY event: validating only the first match would fail it and
+  // carry the real launch past unprocessed, leaving the hint unset until the
+  // next data event (Codex P2 on #3262).
+  const session = {};
+  trackSessionIdlePrompt(
+    session,
+    "user@host:~$ cat fish-banner.txt\r\n"
+    + "Welcome to fish, the friendly interactive shell\r\n"
+    + "user@host:~$ fish\r\n"
+    + "Welcome to fish, the friendly interactive shell\r\n",
+  );
+  assert.equal(session._liveShellKind, "fish");
+  assert.equal(typeof session._liveShellKindAt, "number");
+});
+
 test("decorated fish launch commands are recognized before the banner (Codex P2)", () => {
   // `exec fish`, an absolute path, and trailing flags must all match the
   // echoed launch line — otherwise the banner is discarded and the first AI

@@ -422,18 +422,31 @@ function trackSessionIdlePrompt(session, chunk) {
   // look like a real fish launch: preceded by the echoed launch command and
   // not already followed by a recognized parent prompt in the same text.
   const bannerScanText = `${session._fishBannerScanCarry || ""}${strippedChunk}`;
-  const bannerMatch = FISH_WELCOME_PATTERN.exec(bannerScanText);
-  if (
-    bannerMatch
-    && hasFishLaunchEchoBeforeBanner(bannerScanText, bannerMatch.index, session, previousIdlePrompt)
-    && !hasRecognizedIdlePromptAfterBanner(bannerScanText, bannerMatch.index + bannerMatch[0].length)
-  ) {
-    session._liveShellKind = "fish";
-    session._liveShellKindAt = Date.now();
+  // Scan *every* banner occurrence in this chunk, not just the first: one
+  // PTY event can carry an unrelated banner occurrence (a printed transcript,
+  // a motd quote) followed by a genuine `user@host:~$ fish` launch and its
+  // banner. The first match may fail launch validation, and carrying only
+  // past it would leave the valid later launch unprocessed until another
+  // data event — an AI command issued while fish sits idle would then pick
+  // the POSIX wrapper and stall into the startup timeout (Codex P2 on
+  // #3262). The hint is only ever set here, so a later invalid match cannot
+  // undo an earlier valid one.
+  const bannerScanPattern = new RegExp(FISH_WELCOME_PATTERN.source, "g");
+  let bannerMatch;
+  let lastBannerMatch = null;
+  while ((bannerMatch = bannerScanPattern.exec(bannerScanText)) !== null) {
+    lastBannerMatch = bannerMatch;
+    if (
+      hasFishLaunchEchoBeforeBanner(bannerScanText, bannerMatch.index, session, previousIdlePrompt)
+      && !hasRecognizedIdlePromptAfterBanner(bannerScanText, bannerMatch.index + bannerMatch[0].length)
+    ) {
+      session._liveShellKind = "fish";
+      session._liveShellKindAt = Date.now();
+    }
   }
-  session._fishBannerScanCarry = bannerMatch
+  session._fishBannerScanCarry = lastBannerMatch
     ? bannerScanText
-      .slice(bannerMatch.index + bannerMatch[0].length)
+      .slice(lastBannerMatch.index + lastBannerMatch[0].length)
       .slice(-FISH_BANNER_CARRY_CHARS)
     : bannerScanText.slice(-FISH_BANNER_CARRY_CHARS);
 
