@@ -27,7 +27,9 @@ const {
   stripAnsi,
 } = require("./ptyExecHelpers.cjs");
 const {
+  confirmSessionIdlePrompt,
   extractTrailingIdlePrompt,
+  getSessionInputVersion,
   markSessionPtyPromptMarkerEnded,
   registerSessionPtyPromptMarker,
 } = require("./shellUtils.cjs");
@@ -291,6 +293,7 @@ function startPtyJob(ptyStream, command, options) {
   function schedulePromptFallback() {
     clearPromptFallback();
     if (!hasExpectedPromptSuffix(output, expectedPrompt)) return;
+    const promptInputVersion = getSessionInputVersion(promptTrackingSession);
     // Background jobs use a much longer delay (30s) so commands that open
     // child shells / REPLs with the same prompt have time to print past
     // their initial prompt and avoid being misdetected as completed.
@@ -298,6 +301,7 @@ function startPtyJob(ptyStream, command, options) {
     const delayMs = maxBufferedChars > 0 ? 30000 : 250;
     promptFallbackTimer = setTimeout(() => {
       if (!hasExpectedPromptSuffix(output, expectedPrompt)) return;
+      confirmSessionIdlePrompt(promptTrackingSession, output, promptInputVersion);
       finish(output, null, null);
     }, delayMs);
   }

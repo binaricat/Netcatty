@@ -530,6 +530,93 @@ test("a stream close after the end marker preserves the completed result", async
   assert.doesNotMatch(result.stdout, /__NCMCP_/);
 });
 
+test("manual Ctrl+C prompt fallback restores clean input for the next PowerShell job", async () => {
+  const writes = [];
+  class CapturePty extends EventEmitter {
+    write(data) {
+      writes.push(String(data));
+    }
+  }
+  const pty = new CapturePty();
+  const session = { _loginShellKind: "cmd" };
+  pty.on("data", (data) => trackSessionIdlePrompt(session, String(data)));
+  trackSessionIdlePrompt(session, "PS C:\\Users\\alice>");
+
+  const first = startPtyJob(pty, "Start-Sleep 60", {
+    loginShellHint: session._loginShellKind,
+    activeShellHint: getSessionActiveShellHint(session),
+    observedShellHint: getSessionLastObservedShellKind(session),
+    timeoutMs: 1000,
+    expectedPrompt: getFreshIdlePrompt(session),
+    inputLineKnownEmpty: isSessionInputLineKnownEmpty(session),
+    promptTrackingSession: session,
+  });
+  pty.emit("data", Buffer.from(`${first.marker}_S\r\n`));
+  markSessionInputPending(session, "\x03");
+  pty.emit("data", Buffer.from("PS C:\\Users\\alice>"));
+  await first.resultPromise;
+  assert.equal(isSessionInputLineKnownEmpty(session), true);
+
+  const second = startPtyJob(pty, "Write-Output 'NEXT'", {
+    loginShellHint: session._loginShellKind,
+    activeShellHint: getSessionActiveShellHint(session),
+    observedShellHint: getSessionLastObservedShellKind(session),
+    timeoutMs: 1000,
+    expectedPrompt: getFreshIdlePrompt(session),
+    inputLineKnownEmpty: isSessionInputLineKnownEmpty(session),
+    promptTrackingSession: session,
+  });
+  assert.equal(writes.length, 2);
+  assert.ok(writes[1].startsWith("$__NCMCP_"));
+  pty.emit("data", Buffer.from(`${second.marker}_S\r\nNEXT\r\n${second.marker}_E:0\r\nPS C:\\Users\\alice>`));
+  const result = await second.resultPromise;
+  assert.equal(result.ok, true);
+  assert.equal(result.stdout, "NEXT");
+});
+
+test("input submitted after an end marker survives the delayed old prompt", async () => {
+  const writes = [];
+  class CapturePty extends EventEmitter {
+    write(data) {
+      writes.push(String(data));
+    }
+  }
+  const pty = new CapturePty();
+  const session = { _loginShellKind: "cmd" };
+  pty.on("data", (data) => trackSessionIdlePrompt(session, String(data)));
+  trackSessionIdlePrompt(session, "PS C:\\Users\\alice>");
+
+  const first = startPtyJob(pty, "Write-Output 'ONE'", {
+    loginShellHint: session._loginShellKind,
+    activeShellHint: getSessionActiveShellHint(session),
+    observedShellHint: getSessionLastObservedShellKind(session),
+    timeoutMs: 1000,
+    expectedPrompt: getFreshIdlePrompt(session),
+    inputLineKnownEmpty: isSessionInputLineKnownEmpty(session),
+    promptTrackingSession: session,
+  });
+  pty.emit("data", Buffer.from(`${first.marker}_S\r\nONE\r\n${first.marker}_E:0\r\n`));
+  markSessionInputPending(session, "Start-Sleep 60\r");
+  pty.emit("data", Buffer.from("PS C:\\Users\\alice>"));
+  const firstResult = await first.resultPromise;
+  assert.equal(firstResult.ok, true);
+  assert.equal(isSessionInputLineKnownEmpty(session), false);
+
+  const second = startPtyJob(pty, "Write-Output 'TWO'", {
+    loginShellHint: session._loginShellKind,
+    activeShellHint: getSessionActiveShellHint(session),
+    observedShellHint: getSessionLastObservedShellKind(session),
+    timeoutMs: 1000,
+    expectedPrompt: getFreshIdlePrompt(session),
+    inputLineKnownEmpty: isSessionInputLineKnownEmpty(session),
+    promptTrackingSession: session,
+  });
+  assert.equal(writes.length, 1);
+  const secondResult = await second.resultPromise;
+  assert.equal(secondResult.ok, false);
+  assert.match(secondResult.error, /pending input/i);
+});
+
 test("a completed marker cannot be changed into a timeout while awaiting the prompt", async () => {
   const writes = [];
   class CapturePty extends EventEmitter {

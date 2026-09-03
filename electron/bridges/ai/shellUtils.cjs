@@ -159,24 +159,41 @@ function trackSessionIdlePrompt(session, chunk) {
         // after this job's private end marker has been observed. The tail check
         // covers an end marker and prompt delivered in the same transport chunk,
         // before the PTY job's own listener has a chance to update the state.
+        if (state?.inputAfterEnd) return "";
         if (!state?.ended && !hasCompletedPtyPromptMarker(nextTail, marker)) return "";
       }
     }
-    session.lastIdlePrompt = prompt;
-    session.lastIdlePromptAt = Date.now();
-    if (
-      !hasReservedSessionInput(session)
-      && (
-        session._inputSinceIdlePrompt !== true
-        || session._submittedInputAwaitingPrompt === true
-      )
-    ) {
-      session._inputSinceIdlePrompt = false;
-      session._submittedInputAwaitingPrompt = false;
-    }
-    session._activeShellKindHint = classifyIdlePromptShellKind(prompt);
+    confirmSessionIdlePrompt(session, nextTail);
   }
 
+  return prompt;
+}
+
+function getSessionInputVersion(session) {
+  return Number(session?._terminalInputVersion || 0);
+}
+
+function confirmSessionIdlePrompt(session, output, expectedInputVersion) {
+  if (!session) return "";
+  const prompt = extractTrailingIdlePrompt(output);
+  if (!prompt) return "";
+
+  session.lastIdlePrompt = prompt;
+  session.lastIdlePromptAt = Date.now();
+  const inputUnchanged = expectedInputVersion === undefined
+    || getSessionInputVersion(session) === expectedInputVersion;
+  if (
+    inputUnchanged
+    && !hasReservedSessionInput(session)
+    && (
+      session._inputSinceIdlePrompt !== true
+      || session._submittedInputAwaitingPrompt === true
+    )
+  ) {
+    session._inputSinceIdlePrompt = false;
+    session._submittedInputAwaitingPrompt = false;
+  }
+  session._activeShellKindHint = classifyIdlePromptShellKind(prompt);
   return prompt;
 }
 
@@ -212,8 +229,21 @@ function markSessionPtyPromptMarkerEnded(session, marker) {
   if (state) state.ended = true;
 }
 
+function markSessionInputActivity(session) {
+  if (!session) return;
+  session._terminalInputVersion = getSessionInputVersion(session) + 1;
+  const markers = session._activePtyPromptMarkers;
+  if (!(markers instanceof Map)) return;
+  for (const [marker, state] of markers) {
+    if (state?.ended || hasCompletedPtyPromptMarker(session._promptTrackTail || "", marker)) {
+      state.inputAfterEnd = true;
+    }
+  }
+}
+
 function markSessionInputPending(session, data = "") {
   if (!session) return;
+  markSessionInputActivity(session);
   session._inputSinceIdlePrompt = true;
   // Enter/newline and Ctrl+C submit or cancel the editable line, so a later
   // recognized prompt can confirm that the line is empty again. Other input
@@ -228,6 +258,7 @@ function hasReservedSessionInput(session) {
 
 function reserveSessionInput(session) {
   if (!session) return;
+  markSessionInputActivity(session);
   session._reservedInputWriteCount = Number(session._reservedInputWriteCount || 0) + 1;
 }
 
@@ -1095,6 +1126,8 @@ module.exports = {
   isDefaultCmdPromptLine,
   isDefaultPosixPromptLine,
   trackSessionIdlePrompt,
+  confirmSessionIdlePrompt,
+  getSessionInputVersion,
   registerSessionPtyPromptMarker,
   markSessionPtyPromptMarkerEnded,
   looksLikeIdleAutoLogout,
