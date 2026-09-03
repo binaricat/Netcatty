@@ -583,16 +583,17 @@ function startPtyJob(ptyStream, command, options) {
   }
 
   const wrapped = buildWrappedCommand(command, resolvedShellKind, marker);
-  // Always send the pending-input clear prefix (#2962). A fresh idle prompt
-  // (getFreshIdlePrompt()) only proves the tracked *output* tail ends with the
-  // cached prompt — it cannot prove the PTY input buffer is empty: typed-but-
-  // not-yet-echoed text, or a session with remote echo disabled, still leaves
-  // the tail ending with the prompt. Skipping the clear keys in that window
-  // appends the wrapper to the user's pending input and corrupts the command.
-  // Sending them on an already-empty line is harmless for every supported
-  // shell; #3252 was about the specific unbound Ctrl key bytes (now removed
-  // from the PowerShell prefix), not about sending the prefix itself.
-  const pendingInputClearPrefix = buildPendingInputClearPrefix(resolvedShellKind);
+  // A live PowerShell prompt overriding a cmd login hint is the Windows
+  // OpenSSH + startup-command shape from #3252. Its default PSReadLine Windows
+  // bindings clear the line with Escape, while Ctrl+U/Ctrl+K are unbound and
+  // corrupt the injected command. Keep the legacy multi-mode fallback for
+  // other PowerShell sessions: a generic PowerShell kind does not reveal the
+  // configured PSReadLine edit mode, and Escape starts a chord in the default
+  // Emacs bindings used on non-Windows hosts.
+  const pendingInputClearPrefix =
+    resolvedShellKind === "powershell" && loginShellHint === "cmd"
+      ? "\x1b"
+      : buildPendingInputClearPrefix(resolvedShellKind);
   ptyStream.write(`${pendingInputClearPrefix}${wrapped}`);
 
   return {

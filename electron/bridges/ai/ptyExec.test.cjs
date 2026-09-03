@@ -330,11 +330,41 @@ test("loginShellHint selects fish/posix/powershell/cmd without pinning confirmed
 test("pending-input clear prefix covers interactive shells and skips raw devices", () => {
   assert.equal(buildPendingInputClearPrefix("posix"), "\x15\x0b");
   assert.equal(buildPendingInputClearPrefix("fish"), "\x15\x0b");
-  // #3252: Ctrl+U/Ctrl+K are unbound in PSReadLine's default Windows edit
-  // mode, so PowerShell only gets Escape (RevertLine).
-  assert.equal(buildPendingInputClearPrefix("powershell"), "\x1b");
+  assert.equal(buildPendingInputClearPrefix("powershell"), "\x1b\x15\x0b");
   assert.equal(buildPendingInputClearPrefix("cmd"), "\x1b");
   assert.equal(buildPendingInputClearPrefix("raw"), "");
+});
+
+test("consecutive jobs use the safe Windows PowerShell prefix when a live prompt overrides a cmd login hint", async () => {
+  const writes = [];
+  class CapturePty extends EventEmitter {
+    write(data) {
+      writes.push(String(data));
+    }
+  }
+  const pty = new CapturePty();
+
+  for (const probe of ["PROBE_1", "PROBE_2"]) {
+    const job = startPtyJob(pty, `Write-Output '${probe}'`, {
+      shellKind: "unknown",
+      loginShellHint: "cmd",
+      timeoutMs: 50,
+      expectedPrompt: "PS C:\\Users\\alice>",
+    });
+    const write = writes.at(-1);
+    assert.ok(write.startsWith("\x1b$__NCMCP_"));
+    assert.ok(!write.startsWith("\x1b\x15\x0b"));
+    assert.doesNotMatch(write, /cmd \/d \/s \/c/i);
+
+    pty.emit(
+      "data",
+      Buffer.from(`${job.marker}_S\r\n${probe}\r\n${job.marker}_E:0\r\nPS C:\\Users\\alice>`),
+    );
+    const result = await job.resultPromise;
+    assert.equal(result.ok, true);
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stdout, probe);
+  }
 });
 
 test("startPtyJob writes the clear prefix even when expectedPrompt matches a clean idle prompt", async () => {
