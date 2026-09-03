@@ -581,6 +581,11 @@ function startPtyJob(ptyStream, command, options) {
     }
 
     appendToOutput(text);
+    // Parse a completed command before treating a redrawn prompt as a
+    // cancellation boundary. The marker and prompt can arrive in one PTY
+    // chunk; finishing from the prompt first would expose the internal marker.
+    checkEnd();
+    if (finished) return;
     if (!cancelRequested) {
       schedulePromptFallback();
     } else if (hasExpectedPromptSuffix(output, expectedPrompt)) {
@@ -591,7 +596,6 @@ function startPtyJob(ptyStream, command, options) {
       );
       return;
     }
-    checkEnd();
   }
 
   if (abortSignal?.aborted) {

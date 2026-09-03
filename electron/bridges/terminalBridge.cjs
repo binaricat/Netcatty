@@ -60,6 +60,8 @@ const {
   stripAnsi,
   trackSessionIdlePrompt,
   markSessionInputPending,
+  releaseReservedSessionInput,
+  reserveSessionInput,
 } = require("./ai/shellUtils.cjs");
 const { createZmodemSentry } = require("./zmodemHelper.cjs");
 const { discoverShells } = require("./shellDiscovery.cjs");
@@ -1481,7 +1483,12 @@ function shouldBlockSessionInput(session, data) {
   return false;
 }
 
-function writeToSessionNow(payload, data, logRewrite = payload.logRewrite) {
+function writeToSessionNow(
+  payload,
+  data,
+  logRewrite = payload.logRewrite,
+  releaseInputReservation = false,
+) {
   const session = sessions.get(payload.sessionId);
   const trace = payload.interruptTrace || null;
   if (!session) {
@@ -1492,6 +1499,7 @@ function writeToSessionNow(payload, data, logRewrite = payload.logRewrite) {
     return;
   }
   if (shouldBlockSessionInput(session, data)) {
+    if (releaseInputReservation) releaseReservedSessionInput(session);
     logTerminalInterruptDebug("write-session-blocked-by-transfer", {
       sessionId: payload.sessionId,
       dataCode: data === "\x03" ? "ETX" : undefined,
@@ -1502,6 +1510,7 @@ function writeToSessionNow(payload, data, logRewrite = payload.logRewrite) {
   if (!isTerminalReportSequence(data)) {
     markSessionInputPending(session, data);
   }
+  if (releaseInputReservation) releaseReservedSessionInput(session);
   if (data !== "\x03" && !payload.automated && !isTerminalReportSequence(data)) {
     disarmTerminalInterruptOutputGate(session);
   }
@@ -1602,16 +1611,16 @@ function writeToSessionWithInterception(
     writeToSessionNow(payload, data, logRewrite);
     return;
   }
-  // Mark accepted input before awaiting an asynchronous interceptor. Otherwise
-  // an AI execution can observe an idle prompt and write its wrapper first,
-  // with the delayed user input landing afterward in the same terminal.
+  // Reserve accepted input before awaiting an asynchronous interceptor. Keep
+  // the reservation separate from submitted-line tracking: an older queued
+  // write must not clear the safety state for newer input that is still waiting.
   if (!isReport) {
-    markSessionInputPending(expectedSession, data);
+    reserveSessionInput(expectedSession);
   }
   const writeIfCurrent = (nextData) => {
     const current = sessions.get(payload.sessionId);
     if (!current || current !== expectedSession || current.closed) return;
-    writeToSessionNow(payload, nextData, logRewrite);
+    writeToSessionNow(payload, nextData, logRewrite, !isReport);
   };
   const write = async () => {
     if (!hasInterceptor) {

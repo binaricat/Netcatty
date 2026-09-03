@@ -455,6 +455,35 @@ test("cancel retries stop after the command end marker while the prompt is delay
   assert.doesNotMatch(result.stdout, /__NCMCP_/);
 });
 
+test("cancelled output strips an end marker delivered with the prompt", async () => {
+  const writes = [];
+  class CapturePty extends EventEmitter {
+    write(data) {
+      writes.push(String(data));
+    }
+  }
+  const pty = new CapturePty();
+  const job = startPtyJob(pty, "Start-Sleep 10", {
+    shellKind: "powershell",
+    timeoutMs: 1000,
+    expectedPrompt: "PS C:\\Users\\alice>",
+  });
+  pty.emit("data", Buffer.from(`${job.marker}_S\r\n`));
+  job.cancel();
+
+  pty.emit(
+    "data",
+    Buffer.from(`${job.marker}_E:130\r\nPS C:\\Users\\alice>`),
+  );
+  const result = await job.resultPromise;
+  assert.equal(result.ok, false);
+  assert.equal(result.error, "Cancelled");
+  assert.equal(result.stdout, "");
+  assert.doesNotMatch(result.stdout, /__NCMCP_/);
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  assert.equal(writes.filter((write) => write === "\x03").length, 1);
+});
+
 test("tracked pending input is not overwritten when PowerShell edit mode is unknown", async () => {
   const writes = [];
   class CapturePty extends EventEmitter {

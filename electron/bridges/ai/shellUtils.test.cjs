@@ -9,6 +9,7 @@ const {
   getFreshIdlePrompt,
   getSessionActiveShellHint,
   getSessionLastObservedShellKind,
+  hasReservedSessionInput,
   isSessionInputLineKnownEmpty,
   isDefaultPowerShellPromptLine,
   isDefaultCmdPromptLine,
@@ -24,6 +25,8 @@ const {
   expandWindowsEnvRefs,
   mergeWindowsPath,
   markSessionInputPending,
+  releaseReservedSessionInput,
+  reserveSessionInput,
   readWindowsRegistryPath,
   trackSessionIdlePrompt,
 } = require("./shellUtils.cjs");
@@ -662,6 +665,23 @@ test("a submitted line followed by partial pasted input stays pending", () => {
   assert.equal(getFreshIdlePrompt(session), "PS C:\\Users\\alice>");
   assert.equal(isSessionInputLineKnownEmpty(session), false);
   assert.equal(getSessionLastObservedShellKind(session), "powershell");
+});
+
+test("a prompt cannot release input reserved by an asynchronous interceptor", () => {
+  const session = {};
+  trackSessionIdlePrompt(session, "PS C:\\Users\\alice>");
+  reserveSessionInput(session);
+  assert.equal(hasReservedSessionInput(session), true);
+
+  trackSessionIdlePrompt(session, "\r\nPS C:\\Users\\alice>");
+  assert.equal(isSessionInputLineKnownEmpty(session), false);
+  assert.equal(getSessionActiveShellHint(session), "");
+
+  markSessionInputPending(session, "Write-Output 'USER'\r");
+  releaseReservedSessionInput(session);
+  assert.equal(hasReservedSessionInput(session), false);
+  trackSessionIdlePrompt(session, "\r\nPS C:\\Users\\alice>");
+  assert.equal(isSessionInputLineKnownEmpty(session), true);
 });
 
 test("getFreshIdlePrompt returns the cached prompt when the live tail still ends with it", () => {

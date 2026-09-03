@@ -4,6 +4,10 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 
 const terminalBridge = require("./terminalBridge.cjs");
+const {
+  isSessionInputLineKnownEmpty,
+  trackSessionIdlePrompt,
+} = require("./ai/shellUtils.cjs");
 
 function createHarness() {
   const writes = [];
@@ -31,11 +35,51 @@ function createHarness() {
 
 test("ordinary terminal input uses the worker-owned interceptor before transport encoding", async () => {
   const h = createHarness();
+  trackSessionIdlePrompt(h.session, "PS C:\\Users\\alice>");
   terminalBridge.writeToSession(null, { sessionId: "session-1", data: "hello" });
-  assert.equal(h.session._inputSinceIdlePrompt, true);
+  assert.equal(isSessionInputLineKnownEmpty(h.session), false);
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(h.intercepted.map((entry) => entry.data), ["hello"]);
   assert.deepEqual(h.writes, ["HELLO"]);
+});
+
+test("queued intercepted input stays reserved until every write is delivered", async () => {
+  const writes = [];
+  const releases = new Map();
+  const session = {
+    type: "local",
+    proc: { write(data) { writes.push(String(data)); } },
+  };
+  terminalBridge.init({
+    sessions: new Map([["session-queued", session]]),
+    electronModule: {},
+    terminalDataPipeline: {
+      has() { return true; },
+      interceptInput(_sessionId, data) {
+        return new Promise((resolve) => { releases.set(data, resolve); });
+      },
+    },
+  });
+  trackSessionIdlePrompt(session, "PS C:\\Users\\alice>");
+
+  terminalBridge.writeToSession(null, { sessionId: "session-queued", data: "ONE\r" });
+  terminalBridge.writeToSession(null, { sessionId: "session-queued", data: "USER" });
+  await new Promise((resolve) => setImmediate(resolve));
+  trackSessionIdlePrompt(session, "\r\nPS C:\\Users\\alice>");
+  assert.equal(isSessionInputLineKnownEmpty(session), false);
+
+  releases.get("ONE\r")("ONE\r");
+  await new Promise((resolve) => setImmediate(resolve));
+  trackSessionIdlePrompt(session, "\r\nPS C:\\Users\\alice>");
+  assert.equal(isSessionInputLineKnownEmpty(session), false);
+  assert.deepEqual(writes, ["ONE\r"]);
+
+  await new Promise((resolve) => setImmediate(resolve));
+  releases.get("USER")("USER");
+  await new Promise((resolve) => setImmediate(resolve));
+  trackSessionIdlePrompt(session, "\r\nPS C:\\Users\\alice>");
+  assert.equal(isSessionInputLineKnownEmpty(session), false);
+  assert.deepEqual(writes, ["ONE\r", "USER"]);
 });
 
 test("host-classified sensitive input bypasses interceptors and preserves original bytes", async () => {

@@ -154,8 +154,11 @@ function trackSessionIdlePrompt(session, chunk) {
     session.lastIdlePrompt = prompt;
     session.lastIdlePromptAt = Date.now();
     if (
-      session._inputSinceIdlePrompt !== true
-      || session._submittedInputAwaitingPrompt === true
+      !hasReservedSessionInput(session)
+      && (
+        session._inputSinceIdlePrompt !== true
+        || session._submittedInputAwaitingPrompt === true
+      )
     ) {
       session._inputSinceIdlePrompt = false;
       session._submittedInputAwaitingPrompt = false;
@@ -176,11 +179,29 @@ function markSessionInputPending(session, data = "") {
   session._submittedInputAwaitingPrompt = /[\r\n\x03]$/.test(String(data || ""));
 }
 
+function hasReservedSessionInput(session) {
+  return Number(session?._reservedInputWriteCount || 0) > 0;
+}
+
+function reserveSessionInput(session) {
+  if (!session) return;
+  session._reservedInputWriteCount = Number(session._reservedInputWriteCount || 0) + 1;
+}
+
+function releaseReservedSessionInput(session) {
+  if (!session) return;
+  session._reservedInputWriteCount = Math.max(
+    0,
+    Number(session._reservedInputWriteCount || 0) - 1,
+  );
+}
+
 // A cached prompt alone is not proof that the editable line stayed empty:
 // input can be buffered locally, echoed late, or configured not to echo.
 function isSessionInputLineKnownEmpty(session) {
   return Boolean(
     session
+    && !hasReservedSessionInput(session)
     && session._inputSinceIdlePrompt === false
     && getFreshIdlePrompt(session),
   );
@@ -191,7 +212,7 @@ function getSessionActiveShellHint(session) {
   // shell. Do not use the prior kind for wrapper selection until a recognized
   // prompt confirms the new idle state. Callers can still inspect the last
   // observed kind separately to reject ambiguous input without writing.
-  if (session?._inputSinceIdlePrompt !== false) return "";
+  if (hasReservedSessionInput(session) || session?._inputSinceIdlePrompt !== false) return "";
   return getSessionLastObservedShellKind(session);
 }
 
@@ -1022,7 +1043,10 @@ module.exports = {
   getFreshIdlePrompt,
   getSessionActiveShellHint,
   getSessionLastObservedShellKind,
+  hasReservedSessionInput,
   markSessionInputPending,
+  releaseReservedSessionInput,
+  reserveSessionInput,
   isSessionInputLineKnownEmpty,
   isDefaultPowerShellPromptLine,
   isDefaultCmdPromptLine,
