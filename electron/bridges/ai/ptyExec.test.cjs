@@ -617,6 +617,52 @@ test("input submitted after an end marker survives the delayed old prompt", asyn
   assert.match(secondResult.error, /pending input/i);
 });
 
+test("fish wrapper echo cannot impersonate completion before manual Ctrl+C", async () => {
+  const writes = [];
+  class CapturePty extends EventEmitter {
+    write(data) {
+      writes.push(String(data));
+    }
+  }
+  const pty = new CapturePty();
+  const session = { _loginShellKind: "fish" };
+  pty.on("data", (data) => trackSessionIdlePrompt(session, String(data)));
+  trackSessionIdlePrompt(session, "alice@host:~$");
+
+  const first = startPtyJob(pty, "sleep 60", {
+    loginShellHint: session._loginShellKind,
+    activeShellHint: getSessionActiveShellHint(session),
+    observedShellHint: getSessionLastObservedShellKind(session),
+    timeoutMs: 1000,
+    expectedPrompt: getFreshIdlePrompt(session),
+    inputLineKnownEmpty: isSessionInputLineKnownEmpty(session),
+    promptTrackingSession: session,
+  });
+  assert.match(writes[0], new RegExp(`${first.marker}_E:130`));
+  pty.emit("data", Buffer.from(`${writes[0]}${first.marker}_S\r\n`));
+  markSessionInputPending(session, "\x03");
+  pty.emit("data", Buffer.from(`${first.marker}_E:130\r\nalice@host:~$`));
+  const firstResult = await first.resultPromise;
+  assert.equal(firstResult.exitCode, 130);
+  assert.equal(isSessionInputLineKnownEmpty(session), true);
+
+  const second = startPtyJob(pty, "echo NEXT", {
+    loginShellHint: session._loginShellKind,
+    activeShellHint: getSessionActiveShellHint(session),
+    observedShellHint: getSessionLastObservedShellKind(session),
+    timeoutMs: 1000,
+    expectedPrompt: getFreshIdlePrompt(session),
+    inputLineKnownEmpty: isSessionInputLineKnownEmpty(session),
+    promptTrackingSession: session,
+  });
+  assert.equal(writes.length, 2);
+  assert.match(writes[1], /function __ncmcp_int/);
+  pty.emit("data", Buffer.from(`${second.marker}_S\r\nNEXT\r\n${second.marker}_E:0\r\nalice@host:~$`));
+  const secondResult = await second.resultPromise;
+  assert.equal(secondResult.ok, true);
+  assert.equal(secondResult.stdout, "NEXT");
+});
+
 test("a completed marker cannot be changed into a timeout while awaiting the prompt", async () => {
   const writes = [];
   class CapturePty extends EventEmitter {

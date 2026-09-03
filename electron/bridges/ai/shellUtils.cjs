@@ -203,7 +203,13 @@ function hasCompletedPtyPromptMarker(output, marker) {
   while (searchFrom < output.length) {
     const markerIndex = output.indexOf(token, searchFrom);
     if (markerIndex === -1) return false;
-    if (/^\d+/.test(output.slice(markerIndex + token.length))) return true;
+    const atLineBoundary = markerIndex === 0
+      || output[markerIndex - 1] === "\n"
+      || output[markerIndex - 1] === "\r";
+    if (
+      atLineBoundary
+      && /^\d+(?=\r|\n|$)/.test(output.slice(markerIndex + token.length))
+    ) return true;
     searchFrom = markerIndex + token.length;
   }
   return false;
