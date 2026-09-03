@@ -957,6 +957,60 @@ test("posix wrapper keeps cd contained in the subshell (documented trade-off)", 
   }
 });
 
+// Issue #3265: with plain HISTCONTROL the wrapper line is recorded in bash
+// history; arrow-up recall then redraws the marker text, the preload __NCMCP_
+// filter suppresses the redraw fragments containing it, and readline's row
+// accounting desyncs from the rendered screen — leaving AI command residue
+// when the user navigates history. The wrapper must delete its own entry.
+test("posix wrapper removes its own entry from bash history", () => {
+  const marker = "__NCMCP_TEST__";
+  const wrapped = buildWrappedCommand("echo HISTORY_PROBE", "posix", marker);
+  const result = spawnSync(
+    "bash",
+    ["--norc", "-c", 'set -o history; HISTCONTROL=; HISTFILE=/dev/null; history -s "echo user_old"; ' + wrapped + "history"],
+    { encoding: "utf8" },
+  );
+
+  assert.equal(result.error, undefined);
+  assert.match(result.stdout, new RegExp(`${marker}_E:0`));
+  assert.match(result.stdout, /HISTORY_PROBE/);
+  // The user's own entry survives...
+  assert.match(result.stdout, /echo user_old/);
+  // ...and the wrapper entry is gone (deletion happens in the same line).
+  const historyListing = result.stdout.split("\n").filter((line) => /^\s*\d+\s/.test(line));
+  assert.ok(historyListing.length > 0, "expected a history listing");
+  assert.ok(
+    historyListing.every((line) => !line.includes(marker)),
+    `wrapper entry still in history: ${historyListing.join(" | ")}`,
+  );
+  // The cleanup is silent: no stderr leakage into the terminal.
+  assert.equal(result.stderr, "");
+});
+
+test("posix wrapper history cleanup never deletes the user's previous entry", () => {
+  // HISTCONTROL=ignorespace suppresses the leading-space wrapper entry, so
+  // $HISTCMD points at the user's previous command. The marker match must
+  // fail and leave that entry alone.
+  const marker = "__NCMCP_TEST__";
+  const wrapped = buildWrappedCommand("echo HISTORY_PROBE", "posix", marker);
+  const result = spawnSync(
+    "bash",
+    ["--norc", "-c", 'set -o history; HISTCONTROL=ignorespace; HISTFILE=/dev/null; history -s "echo user_old"; ' + wrapped + "history"],
+    { encoding: "utf8" },
+  );
+
+  assert.equal(result.error, undefined);
+  assert.match(result.stdout, new RegExp(`${marker}_E:0`));
+  assert.match(result.stdout, /echo user_old/);
+  const historyListing = result.stdout.split("\n").filter((line) => /^\s*\d+\s/.test(line));
+  assert.ok(historyListing.length > 0, "expected a history listing");
+  assert.ok(
+    historyListing.every((line) => !line.includes(marker)),
+    `wrapper entry still in history: ${historyListing.join(" | ")}`,
+  );
+  assert.equal(result.stderr, "");
+});
+
 test("execViaChannel registers a pending-cancel marker before the SSH channel opens", () => {
   // Regression for the IPC-transit race surfaced by codex on #1101
   // problem 3: if `cancelPtyExecsForSession` runs while we're still
