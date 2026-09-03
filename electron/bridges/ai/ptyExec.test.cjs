@@ -392,6 +392,37 @@ test("startPtyJob writes the clear prefix before the wrapper", async () => {
   await job.resultPromise;
 });
 
+test("startPtyJob forwards liveShellKind so nested fish gets the fish wrapper", async () => {
+  // Regression test for #3261/#3262: the handler passes
+  // liveShellKind: session._liveShellKind to execViaPty → startPtyJob,
+  // which must forward it to resolveEffectiveShellKind. Without that
+  // forwarding a nested fish session still received the POSIX wrapper.
+  const writes = [];
+  class CapturePty extends EventEmitter {
+    write(data) {
+      writes.push(String(data));
+    }
+  }
+  const pty = new CapturePty();
+  const job = startPtyJob(pty, "echo hi", {
+    shellKind: "posix",
+    liveShellKind: "fish",
+    timeoutMs: 50,
+    expectedPrompt: "user@host:~$",
+  });
+  assert.equal(writes.length, 1);
+  // The pending-input clear prefix (if any) comes before the wrapper.
+  const wrapped = writes[0].replace(/^[\x15\x0b\x1b]+/, "");
+  // Fish wrapper signature: leading space + fish `set`/`set -l` syntax.
+  assert.ok(wrapped.startsWith(" set "));
+  assert.ok(wrapped.includes("set -l "));
+  // Sanity: posix wrapper would have started with the marker assignment.
+  assert.ok(!wrapped.startsWith("__NCMCP_"));
+  job.cancel();
+  pty.emit("data", Buffer.from("user@host:~$"));
+  await job.resultPromise;
+});
+
 test("execViaRawPty does not prepend a line-clear before device commands", async () => {
   const writes = [];
   const port = new EventEmitter();

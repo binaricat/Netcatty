@@ -43,6 +43,7 @@ function startPtyJob(ptyStream, command, options) {
     timeoutMs = 60000,
     shellKind,
     loginShellHint,
+    liveShellKind,
     chatSessionId,
     abortSignal,
     expectedPrompt,
@@ -56,6 +57,7 @@ function startPtyJob(ptyStream, command, options) {
   const marker = `__NCMCP_${Date.now().toString(36)}_${crypto.randomBytes(16).toString('hex')}__`;
   const resolvedShellKind = resolveEffectiveShellKind(shellKind, expectedPrompt, {
     loginShellHint,
+    liveShellKind,
   });
   const captureLimitChars = maxBufferedChars > 0
     ? maxBufferedChars
@@ -616,6 +618,7 @@ function startPtyJob(ptyStream, command, options) {
  * @param {number} [options.timeoutMs=60000] - Command timeout in milliseconds
  * @param {string} [options.chatSessionId] - Chat session ID for scoped cancellation
  * @param {AbortSignal} [options.abortSignal] - AbortSignal to cancel execution
+ * @param {string} [options.liveShellKind] - Live (nested) shell kind detected in the session
  * @param {string} [options.expectedPrompt] - Last observed idle prompt for exact fallback matching
  * @param {boolean} [options.typedInput=false] - Emit synthetic command echo before execution
  * @param {(command: string) => void} [options.echoCommand] - Callback used to display synthetic command echo
