@@ -688,6 +688,26 @@ test("decorated fish launch commands are recognized before the banner (Codex P2)
   }
 });
 
+test("banner plus first fish prompt in one chunk validates the launch against the parent prompt (Codex P2)", () => {
+  // Parent prompt `alice@host:~$` was cached before the launch; fish's first
+  // customized prompt (`fish@host:~$`) is POSIX-shaped but different and
+  // arrives in the same PTY event as the banner. The launch echo was printed
+  // by the parent shell before the banner, so it must be validated against
+  // the previously cached prompt — comparing it against the fish prompt
+  // extracted from this same chunk would reject the launch and leave the
+  // hint unset for the first AI command (Codex P2 on #3262).
+  const session = {};
+  trackSessionIdlePrompt(session, "alice@host:~$ ");
+  assert.equal(session.lastIdlePrompt, "alice@host:~$ ");
+
+  trackSessionIdlePrompt(
+    session,
+    "alice@host:~$ fish\r\nWelcome to fish, the friendly interactive shell\r\nfish@host:~$ ",
+  );
+  assert.equal(session._liveShellKind, "fish");
+  assert.equal(session.lastIdlePrompt, "fish@host:~$ ");
+});
+
 test("fish hint survives a POSIX-shaped customized fish_prompt without exit echo (Codex P1)", () => {
   const session = {};
   trackSessionIdlePrompt(session, "user@host:~$ fish\r\nWelcome to fish, the friendly interactive shell\r\n");
@@ -921,20 +941,39 @@ test("banner followed by a recognized POSIX prompt in the same chunk does not se
 });
 
 test("looksLikeFishWrapperRejection detects fish diagnostics and ignores POSIX shells (Codex P1)", () => {
+  const marker = "__NCMCP_x";
   // fish rejects the POSIX wrapper before its first prompt with a `fish: `
   // diagnostic (English prefix, localized payload) — greeting-independent
-  // evidence the interactive shell is fish.
+  // evidence the interactive shell is fish. The diagnostic must be tied to
+  // this job's marker: it appears inside the message itself, in the PTY
+  // echo line before it, or in the source line fish re-prints after it.
   assert.ok(looksLikeFishWrapperRejection(
     "fish: Unsupported use of '='. In fish, please use 'set __NCMCP_x 0'.\r\nuser@host ~> ",
+    marker,
   ));
   assert.ok(looksLikeFishWrapperRejection(
     "fish: Unknown command: __NCMCP_x=0\r\nfish: Unsupported use of '='\r\nuser@host ~> ",
+    marker,
+  ));
+  assert.ok(looksLikeFishWrapperRejection(
+    ` ${marker}=0; echo hi\nfish: Unsupported use of '='\n${marker}=0; echo hi\n^\nuser@host ~> `,
+    marker,
   ));
   // POSIX shells never prefix their diagnostics with `fish: `.
-  assert.ok(!looksLikeFishWrapperRejection("bash: syntax error near unexpected token\r\n"));
-  assert.ok(!looksLikeFishWrapperRejection("user@host:~$ echo fish: hello\r\n"));
+  assert.ok(!looksLikeFishWrapperRejection("bash: syntax error near unexpected token\r\n", marker));
+  assert.ok(!looksLikeFishWrapperRejection("user@host:~$ echo fish: hello\r\n", marker));
+  // A `fish: ` line that is not tied to the injected wrapper — a foreground
+  // child's service-log output — does not evidence a wrapper rejection
+  // (Codex P2 on #3262).
+  assert.ok(!looksLikeFishWrapperRejection(
+    "fish: connection failed\r\nsystemd[1]: service entered failed state\r\nuser@host ~> ",
+    marker,
+  ));
   // ANSI sequences around the diagnostic are ignored.
-  assert.ok(looksLikeFishWrapperRejection("\u001b[31mfish: Unsupported use of '='\u001b[0m\r\n"));
+  assert.ok(looksLikeFishWrapperRejection(
+    "\u001b[31mfish: Unsupported use of '='\u001b[0m\r\n" + marker + "=0; echo hi\r\n",
+    marker,
+  ));
 });
 
 test("setLiveShellKindFish records the live fish hint", () => {

@@ -433,10 +433,14 @@ test("startPtyJob invalidates the live fish hint when the wrapper start marker n
   class NoMarkerPty extends EventEmitter {
     write(data) {
       writes.push(String(data));
-      // Simulate a POSIX shell that chokes on the fish wrapper: it echoes
-      // garbage but never emits the start marker.
+      // Simulate a POSIX shell that chokes on the fish wrapper: the PTY echo
+      // of the typed wrapper (carrying the job marker) is followed by the
+      // rejection diagnostic, but the start marker never arrives. The
+      // diagnostic must sit next to the job marker to count as evidence
+      // (Codex P2 on #3262).
+      const marker = markerFromWrite(data);
       queueMicrotask(() => {
-        this.emit("data", Buffer.from("bash: syntax error near unexpected token\r\nuser@host ❯ "));
+        this.emit("data", Buffer.from(`${marker} wrapper echo\r\nbash: syntax error near unexpected token\r\nuser@host ❯ `));
       });
     }
   }
@@ -491,10 +495,16 @@ test("startPtyJob keeps the live fish hint when a foreground child blocks startu
   // A non-fish shell rejecting the fish wrapper (bash diagnostic) still
   // invalidates the stale hint — evidence-gated, not blanket.
   invalidated = 0;
+  // The rejection diagnostic must sit next to this job's marker (the PTY
+  // echo of the typed fish wrapper precedes it) — a bare `bash: …` line
+  // from a foreground child is not evidence (Codex P2 on #3262).
   class BashRejectPty extends EventEmitter {
-    write() {
+    write(data) {
+      const marker = markerFromWrite(data);
       queueMicrotask(() => {
-        this.emit("data", Buffer.from("bash: syntax error near unexpected token\r\n"));
+        this.emit("data", Buffer.from(
+          `${marker} wrapper echo\r\nbash: syntax error near unexpected token\r\n`,
+        ));
       });
     }
   }
@@ -506,6 +516,26 @@ test("startPtyJob keeps the live fish hint when a foreground child blocks startu
   });
   await job2.resultPromise;
   assert.equal(invalidated, 1);
+
+  // A foreground child emitting an ordinary `bash: …` diagnostic (no wrapper
+  // marker adjacent to it) must not invalidate the still-correct hint
+  // (Codex P2 on #3262).
+  invalidated = 0;
+  class ChildBashLogPty extends EventEmitter {
+    write() {
+      queueMicrotask(() => {
+        this.emit("data", Buffer.from("bash: line 3: connection failed\r\n"));
+      });
+    }
+  }
+  const job3 = startPtyJob(new ChildBashLogPty(), "echo hi", {
+    shellKind: "posix",
+    liveShellKind: "fish",
+    timeoutMs: 50,
+    onLiveShellKindInvalidated: () => { invalidated += 1; },
+  });
+  await job3.resultPromise;
+  assert.equal(invalidated, 0);
 });
 
 test("startPtyJob records the live fish hint when fish rejects the POSIX wrapper (greeting suppressed)", async () => {
@@ -516,10 +546,12 @@ test("startPtyJob records the live fish hint when fish rejects the POSIX wrapper
   // interactive shell is fish. The callback lets the handler record the hint
   // so the next command uses the fish wrapper instead of timing out again.
   let rejected = 0;
+  // The diagnostic must reference this job's marker (Codex P2 on #3262).
   class FishRejectPty extends EventEmitter {
     write(data) {
+      const marker = markerFromWrite(data);
       queueMicrotask(() => {
-        this.emit("data", Buffer.from("fish: Unknown command: __NCMCP_x=0\r\nfish: Unsupported use of '='. In fish, please use 'set __NCMCP_x 0'.\r\nuser@host ~> "));
+        this.emit("data", Buffer.from(`fish: Unknown command: ${marker}=0\r\nfish: Unsupported use of '='. In fish, please use 'set ${marker} 0'.\r\nuser@host ~> `));
       });
     }
   }
@@ -550,6 +582,25 @@ test("startPtyJob records the live fish hint when fish rejects the POSIX wrapper
   await job2.resultPromise;
   assert.equal(rejected, 0);
 
+  // A foreground child's ordinary output line beginning `fish: ` (a service
+  // log, not a shell diagnostic) does not record the hint — the diagnostic
+  // must reference this job's marker (Codex P2 on #3262).
+  rejected = 0;
+  class FishLogChildPty extends EventEmitter {
+    write() {
+      queueMicrotask(() => {
+        this.emit("data", Buffer.from("fish: connection failed\r\nservice entered failed state\r\n"));
+      });
+    }
+  }
+  const job2b = startPtyJob(new FishLogChildPty(), "echo hi", {
+    shellKind: "posix",
+    timeoutMs: 50,
+    onFishWrapperRejected: () => { rejected += 1; },
+  });
+  await job2b.resultPromise;
+  assert.equal(rejected, 0);
+
   // The fish wrapper never triggers the rejection path (resolvedShellKind
   // is already fish).
   rejected = 0;
@@ -573,9 +624,10 @@ test("startPtyJob runs fish wrapper recovery on the wall timeout before the star
   let rejected = 0;
   let invalidated = 0;
   class FishRejectPty extends EventEmitter {
-    write() {
+    write(data) {
+      const marker = markerFromWrite(data);
       queueMicrotask(() => {
-        this.emit("data", Buffer.from("fish: Unknown command: __NCMCP_x=0\r\nuser@host ~> "));
+        this.emit("data", Buffer.from(`fish: Unknown command: ${marker}=0\r\nuser@host ~> `));
       });
     }
   }
@@ -597,9 +649,10 @@ test("startPtyJob runs fish wrapper recovery on the wall timeout before the star
   // invalidated on the wall-timeout path too.
   invalidated = 0;
   class NoMarkerPty extends EventEmitter {
-    write() {
+    write(data) {
+      const marker = markerFromWrite(data);
       queueMicrotask(() => {
-        this.emit("data", Buffer.from("bash: syntax error near unexpected token\r\nuser@host ❯ "));
+        this.emit("data", Buffer.from(`${marker} wrapper echo\r\nbash: syntax error near unexpected token\r\nuser@host ❯ `));
       });
     }
   }

@@ -163,14 +163,16 @@ function startPtyJob(ptyStream, command, options) {
     // would send the next command through the POSIX wrapper, fail before
     // its marker in fish, and burn another startup timeout (Codex P2 on
     // #3262). Only invalidate when the captured output shows a non-fish
-    // shell rejecting the wrapper; a healthy fish session prints its start
+    // shell rejecting *this job's wrapper* (diagnostic adjacent to the job
+    // marker — a foreground child can emit an ordinary `bash: …` line too);
+    // a healthy fish session prints its start
     // marker immediately, so a silent timeout is never evidence of a stale
     // hint.
     if (
       typeof onLiveShellKindInvalidated === "function"
       && liveShellKind === "fish"
       && resolvedShellKind === "fish"
-      && looksLikeNonFishShellRejection(preStartOutput)
+      && looksLikeNonFishShellRejection(preStartOutput, marker)
     ) {
       try {
         onLiveShellKindInvalidated();
@@ -183,11 +185,14 @@ function startPtyJob(ptyStream, command, options) {
     // before its first prompt with a `fish: …` diagnostic —
     // greeting-independent evidence that the interactive shell is fish.
     // Record it so the *next* command uses the fish wrapper instead of
-    // reproducing this startup timeout on every command.
+    // reproducing this startup timeout on every command. The diagnostic must
+    // sit next to this job's marker: a foreground child's ordinary output
+    // (`fish: connection failed` from a service log) is not evidence fish
+    // ever parsed the wrapper (Codex P2 on #3262).
     if (
       typeof onFishWrapperRejected === "function"
       && resolvedShellKind !== "fish"
-      && looksLikeFishWrapperRejection(preStartOutput)
+      && looksLikeFishWrapperRejection(preStartOutput, marker)
     ) {
       try {
         onFishWrapperRejected();

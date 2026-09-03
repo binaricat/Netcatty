@@ -195,20 +195,25 @@ const FISH_BANNER_CARRY_CHARS = FISH_WELCOME_PATTERN.source.length + 192;
 // launch that follows a prompt-attached echoed command's output is no
 // longer banner-detected; that is safe because the POSIX wrapper then fails
 // into fish's wrapper-rejection diagnostic, which records the hint (see
-// looksLikeFishWrapperRejection). When no recognized idle prompt has been
-// observed yet there is nothing to compare against, so the shape-only check
-// stands (a session with a custom prompt shape never records one;
+// looksLikeFishWrapperRejection). The prompt comparison uses the idle prompt
+// cached *before* the chunk being scanned, passed in as `idlePrompt`: when
+// the banner and fish's first prompt arrive in one PTY event, the prompt
+// cached on the session is already fish's own (`fish@host:~$`) by the time
+// this runs, but the launch echo was printed by the *parent* shell before
+// the banner and can only carry the parent prompt — validating against the
+// fish prompt would reject a genuine launch and leave the hint unset for the
+// first AI command (Codex P2 on #3262). When no idle prompt has been cached
+// yet there is nothing to compare against, so the shape-only check stands
+// (a session with a custom prompt shape never records one;
 // wrapper-rejection detection still covers fish).
-function hasFishLaunchEchoBeforeBanner(scanText, matchIndex, session) {
+function hasFishLaunchEchoBeforeBanner(scanText, matchIndex, session, idlePrompt) {
   const before = scanText.slice(0, matchIndex).replace(/\r\n?/g, "\n");
   const lines = before.split("\n");
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i].replace(/\s+$/, "");
     if (!line) continue;
     if (!FISH_LAUNCH_ECHO_PATTERN.test(line)) return false;
-    const prompt = session && typeof session.lastIdlePrompt === "string"
-      ? session.lastIdlePrompt.replace(/\s+$/, "")
-      : "";
+    const prompt = typeof idlePrompt === "string" ? idlePrompt.replace(/\s+$/, "") : "";
     if (!prompt) return true;
     // The prompt may be repainted after the chunk boundary (the banner-scan
     // carry re-attaches the previous chunk's trailing prompt), so match the
@@ -373,6 +378,15 @@ function trackSessionIdlePrompt(session, chunk) {
   session._promptTrackTail = nextTail;
   const strippedChunk = stripAnsi(chunk);
 
+  // Capture the idle prompt cached *before* this chunk is processed: the
+  // banner scan below must validate the launch echo against the prompt the
+  // parent shell was using before the banner, not against a prompt this same
+  // chunk extracted (fish's first prompt arriving with the banner would
+  // otherwise be compared against itself and reject the launch — Codex P2
+  // on #3262).
+  const previousIdlePrompt = typeof session.lastIdlePrompt === "string"
+    ? session.lastIdlePrompt
+    : "";
   const prompt = extractTrailingIdlePrompt(nextTail);
   if (prompt) {
     session.lastIdlePrompt = prompt;
@@ -411,7 +425,7 @@ function trackSessionIdlePrompt(session, chunk) {
   const bannerMatch = FISH_WELCOME_PATTERN.exec(bannerScanText);
   if (
     bannerMatch
-    && hasFishLaunchEchoBeforeBanner(bannerScanText, bannerMatch.index, session)
+    && hasFishLaunchEchoBeforeBanner(bannerScanText, bannerMatch.index, session, previousIdlePrompt)
     && !hasRecognizedIdlePromptAfterBanner(bannerScanText, bannerMatch.index + bannerMatch[0].length)
   ) {
     session._liveShellKind = "fish";
@@ -446,11 +460,6 @@ function clearLiveShellKind(session) {
 // the startup timeout on every command).
 const FISH_REJECTION_PATTERN = /(?:^|\n)\s*fish: /;
 
-function looksLikeFishWrapperRejection(output) {
-  const stripped = stripAnsi(String(output || "")).replace(/\r/g, "\n");
-  return FISH_REJECTION_PATTERN.test(stripped);
-}
-
 // A fish-wrapped command typed into a *non-fish* interactive shell fails
 // before its start marker with that shell's program-name diagnostic prefix
 // (e.g. `bash: syntax error near unexpected token`, `zsh: parse error near …`).
@@ -461,9 +470,41 @@ function looksLikeFishWrapperRejection(output) {
 // hint is still correct and must be kept (Codex P2 on #3262).
 const NON_FISH_SHELL_REJECTION_PATTERN = /(?:^|\n)\s*-?(?:bash|zsh|sh|dash|ksh|mksh|ash|csh|tcsh): /;
 
-function looksLikeNonFishShellRejection(output) {
+// Both rejection patterns match on the shell's program-name prefix alone,
+// but arbitrary *child* output can carry the same prefix (`fish: connection
+// failed` from a service log, `bash: …` from a script a foreground child
+// runs) without any wrapper having been rejected (Codex P2 on #3262, two
+// findings). The injected wrapper always embeds this job's random marker,
+// and the rejecting shell prints its diagnostic right next to that marker
+// text: the PTY echo of the typed wrapper line directly precedes the
+// diagnostic, and the shell re-prints the offending source line (which
+// contains the marker) right after the message. Requiring a marker-bearing
+// line within that window therefore authenticates the diagnostic against
+// this job's wrapper; a foreground child's ordinary output has no wrapper
+// marker adjacent to it. With no marker supplied the prefix check stands
+// (legacy/shape-only callers).
+function rejectionDiagnosticReferencesMarker(stripped, match, marker) {
+  if (!marker) return true;
+  const lines = stripped.split("\n");
+  const diagnosticIndex = stripped.slice(0, match.index).split("\n").length - 1;
+  for (let i = diagnosticIndex - 1; i <= diagnosticIndex + 2; i++) {
+    if (typeof lines[i] === "string" && lines[i].includes(marker)) return true;
+  }
+  return false;
+}
+
+function looksLikeFishWrapperRejection(output, marker) {
   const stripped = stripAnsi(String(output || "")).replace(/\r/g, "\n");
-  return NON_FISH_SHELL_REJECTION_PATTERN.test(stripped);
+  const match = FISH_REJECTION_PATTERN.exec(stripped);
+  if (!match) return false;
+  return rejectionDiagnosticReferencesMarker(stripped, match, marker);
+}
+
+function looksLikeNonFishShellRejection(output, marker) {
+  const stripped = stripAnsi(String(output || "")).replace(/\r/g, "\n");
+  const match = NON_FISH_SHELL_REJECTION_PATTERN.exec(stripped);
+  if (!match) return false;
+  return rejectionDiagnosticReferencesMarker(stripped, match, marker);
 }
 
 // Record the live fish hint (companion to clearLiveShellKind). Called by the
