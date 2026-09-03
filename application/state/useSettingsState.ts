@@ -603,6 +603,18 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
       return incoming;
     });
   }, []);
+  // Tracks the user's preferred transparency level (last value below 100%) so
+  // Cmd+U can restore it after toggling transparency off. Session-only (useRef),
+  // never persisted — matches iTerm2's session-level toggle behavior.
+  const lastNonFullOpacityRef = useRef<number | null>(windowOpacity < 1.0 ? windowOpacity : null);
+  useEffect(() => {
+    if (windowOpacity < 1.0) {
+      lastNonFullOpacityRef.current = windowOpacity;
+    }
+  }, [windowOpacity]);
+  const toggleWindowOpacity = useCallback(() => {
+    setWindowOpacity(windowOpacity < 1.0 ? 1.0 : (lastNonFullOpacityRef.current ?? 0.85));
+  }, [windowOpacity, setWindowOpacity]);
   const [appIconVariant, setAppIconVariantState] = useState<AppIconVariant>(() => {
     const stored = readStoredString(STORAGE_KEY_APP_ICON_VARIANT);
     return resolveAppIconVariant(stored ?? DEFAULT_APP_ICON_VARIANT);
@@ -2125,6 +2137,7 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
     setGlobalHotkeyEnabled,
     windowOpacity,
     setWindowOpacity,
+    toggleWindowOpacity,
     appIconVariant,
     setAppIconVariant,
     rehydrateAllFromStorage,

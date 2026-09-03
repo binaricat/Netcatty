@@ -144,6 +144,7 @@ export function AppSideEffects() {
     showSftpTab,
     shellOnlyTabNumberShortcuts,
     workspaceFocusStyle,
+    toggleWindowOpacity,
   } = settings;
 
   useTerminalKeyboardFocus(hotkeyScheme !== 'disabled' && !disableTerminalFontZoom);
@@ -1080,6 +1081,7 @@ export function AppSideEffects() {
       toggleBroadcast,
       toggleScriptsSidePanelRef,
       toggleSidePanelRef,
+      toggleWindowOpacity,
       toggleWorkspaceViewMode,
       workspaces: workspacesRefForHotkeys.current,
     }), action, e);
@@ -1092,6 +1094,7 @@ export function AppSideEffects() {
     splitSessionWithCurrentShell,
     moveFocusInWorkspace,
     toggleBroadcast,
+    toggleWindowOpacity,
     toggleWorkspaceViewMode,
     confirmIfBusyLocalTerminal,
   ]);

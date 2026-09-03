@@ -674,3 +674,53 @@ test('connection log host snapshot includes custom host icon fields', () => {
     },
   );
 });
+
+test('toggleOpacity hotkey invokes toggleWindowOpacity', () => {
+  let called = false;
+  const noop = () => {};
+
+  executeHotkeyActionImpl(
+    () => ({
+      IS_DEV: false,
+      MOVE_FOCUS_DEBOUNCE_MS: 0,
+      activeTabStore: { getActiveTabId: () => 'vault' },
+      addConnectionLogRef: { current: noop },
+      closeSession: noop,
+      closeTabInFlightRef: { current: false },
+      closeWorkspace: noop,
+      collectSessionIds: () => [],
+      confirmIfBusyLocalTerminal: async () => true,
+      createLocalTerminalWithCurrentShell: noop,
+      editorTabs: [],
+      fromEditorTabId: () => null,
+      handleOpenSettingsRef: { current: noop },
+      handleRequestCloseEditorTabRef: { current: noop },
+      isEditorTabId: () => false,
+      isQuickSwitcherOpen: false,
+      lastMoveFocusTimeRef: { current: 0 },
+      moveFocusInWorkspace: noop,
+      orderedTabs: [],
+      resolveCloseIntent: () => ({ kind: 'noop' }),
+      resolveSnippetsShortcutIntent: () => ({ kind: 'noop' }),
+      sessions: [],
+      setActiveTabId: noop,
+      setAddToWorkspaceDialog: noop,
+      setIsQuickSwitcherOpen: noop,
+      setNavigateToSection: noop,
+      settings: { showSftpTab: true, shellOnlyTabNumberShortcuts: false },
+      splitSessionWithCurrentShell: noop,
+      systemInfoRef: { current: { username: 'user', hostname: 'host' } },
+      toEditorTabId: (id: string) => `editor:${id}`,
+      toggleBroadcast: noop,
+      toggleScriptsSidePanelRef: { current: noop },
+      toggleSidePanelRef: { current: noop },
+      toggleWindowOpacity: () => { called = true; },
+      toggleWorkspaceViewMode: noop,
+      workspaces: [],
+    }),
+    'toggleOpacity',
+    { key: 'u', code: 'KeyU', ctrlKey: true, shiftKey: true } as KeyboardEvent,
+  );
+
+  assert.equal(called, true);
+});

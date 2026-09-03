@@ -565,6 +565,7 @@ export const zhTWTerminalMessages: Messages = {
   'settings.shortcuts.binding.new-workspace': '新增工作區',
   'settings.shortcuts.binding.snippets': '開啟程式碼片段',
   'settings.shortcuts.binding.broadcast': '切換廣播模式',
+  'settings.shortcuts.binding.toggle-opacity': '切換視窗透明度',
   'settings.shortcuts.binding.toggle-side-panel': '切換側邊欄',
   'settings.shortcuts.binding.sftp-copy': '複製檔案',
   'settings.shortcuts.binding.sftp-cut': '剪下檔案',

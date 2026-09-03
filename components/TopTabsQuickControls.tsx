@@ -107,7 +107,7 @@ export const TopTabsQuickControls: React.FC<TopTabsQuickControlsProps> = ({
                 onClick={() => setIsOpacityExpanded((current) => !current)}
               >
                 <div className="flex min-w-0 items-center gap-2 text-sm">
-                  <Droplets size={14} className="shrink-0 text-muted-foreground" />
+                  <Droplets size={14} className={cn("shrink-0", windowOpacity < 1.0 ? "text-primary" : "text-muted-foreground")} />
                   <span className="truncate">{t('topTabs.windowOpacity')}</span>
                 </div>
                 <div className="flex shrink-0 items-center gap-1.5">
