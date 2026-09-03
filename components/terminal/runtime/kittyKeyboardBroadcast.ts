@@ -222,16 +222,16 @@ type ResolveKittyKeyboardBroadcastOptions = {
 export const resolveWin32InputLogicalData = (
   event: KittyKeyboardEvent,
   applicationCursorMode: boolean,
-): string | null => {
+): string | null | undefined => {
   if (event.type === "keyup") return null;
   if (
     event.key === "Enter" &&
     (event.shiftKey || event.altKey || event.ctrlKey || event.metaKey)
   ) {
     // The native record carries semantics that a legacy CR cannot express.
-    // Treating a modified Enter as CR would make Netcatty record a command
-    // submission even when the TUI only inserted a line break.
-    return null;
+    // Leave it undefined so the transport conservatively tracks the wire
+    // record as pending input without claiming that a command was submitted.
+    return undefined;
   }
   return encodeLegacyKeyboardEvent(event, applicationCursorMode);
 };
@@ -371,7 +371,10 @@ export const createKittyKeyboardBroadcastHandler = (options: {
   interruptSession?: (sessionId: string) => void;
   writeDisposed: (sessionId: string, data: string, logicalData?: string | null) => void;
   writeActive: (data: string, logicalData?: string | null) => void;
-  writeWin32Event?: (event: KittyKeyboardEvent, logicalData: string | null) => void;
+  writeWin32Event?: (
+    event: KittyKeyboardEvent,
+    logicalData: string | null | undefined,
+  ) => void;
 }): KittyKeyboardBroadcastHandler => (input, dispatchOptions) => {
   const sessionId = options.getSessionId();
   if (!sessionId || !options.isConnected()) return;
@@ -391,7 +394,7 @@ export const createKittyKeyboardBroadcastHandler = (options: {
     if (!options.isRuntimeDisposed()) {
       options.writeWin32Event?.(
         resolved.win32Event,
-        resolved.logicalData ?? null,
+        resolved.logicalData,
       );
     }
     return;

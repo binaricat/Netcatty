@@ -596,7 +596,7 @@ test("Win32 input broadcast preserves native records for Win32 targets", () => {
     data: shiftEnterRecord,
     kittyEncoded: false,
     urgentInterrupt: false,
-    logicalData: null,
+    logicalData: undefined,
   });
 
   const normalizedShiftEnter = {
@@ -614,7 +614,7 @@ test("Win32 input broadcast preserves native records for Win32 targets", () => {
       data: "",
       kittyEncoded: false,
       urgentInterrupt: false,
-      logicalData: null,
+      logicalData: undefined,
       win32Event: shiftEnter.event,
     },
   );
@@ -634,7 +634,7 @@ test("Win32 input broadcast preserves native records for Win32 targets", () => {
   });
 });
 
-test("Win32 input keeps plain Enter bookkeeping without misclassifying modified Enter", () => {
+test("Win32 input tracks modified Enter conservatively without calling it a submission", () => {
   const options = () => ({
     kittyProtocolEnabled: false,
     kittyMode: createKittyKeyboardModeState(),
@@ -659,9 +659,9 @@ test("Win32 input keeps plain Enter bookkeeping without misclassifying modified 
   }, options())?.logicalData;
 
   assert.equal(resolveEnter({}), "\r");
-  assert.equal(resolveEnter({ shiftKey: true }), null);
-  assert.equal(resolveEnter({ ctrlKey: true }), null);
-  assert.equal(resolveEnter({ altKey: true }), null);
+  assert.equal(resolveEnter({ shiftKey: true }), undefined);
+  assert.equal(resolveEnter({ ctrlKey: true }), undefined);
+  assert.equal(resolveEnter({ altKey: true }), undefined);
 });
 
 test("Kitty broadcast targets keep plain Enter bookkeeping semantics", () => {
@@ -737,9 +737,12 @@ test("Win32 key-up broadcast remains a native release with no editing semantics"
   });
 });
 
-test("Win32 broadcast targets encode normalized keys and release them during sensitive input", () => {
+test("Win32 broadcast targets track modified Enter and release it during sensitive input", () => {
   const encodedKeys = new Set<string>();
-  const delivered: Array<{ type?: string; logicalData: string | null }> = [];
+  const delivered: Array<{
+    type?: string;
+    logicalData: string | null | undefined;
+  }> = [];
   const writes: string[] = [];
   let sensitive = false;
   const handler = createKittyKeyboardBroadcastHandler({
@@ -772,7 +775,7 @@ test("Win32 broadcast targets encode normalized keys and release them during sen
   });
 
   assert.deepEqual(delivered, [
-    { type: "keydown", logicalData: null },
+    { type: "keydown", logicalData: undefined },
     { type: "keyup", logicalData: null },
   ]);
   assert.deepEqual(writes, []);

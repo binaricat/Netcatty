@@ -172,6 +172,53 @@ test("transport keyboard records use logical Enter semantics for prompt tracking
   assert.deepEqual(writes, [win32Enter, win32KeyUp]);
 });
 
+test("modified Enter stays pending when its editing effect is unknown", async () => {
+  const writes = [];
+  let releaseInput;
+  const session = {
+    type: "local",
+    proc: { write(data) { writes.push(String(data)); } },
+  };
+  terminalBridge.init({
+    sessions: new Map([["session-modified-enter", session]]),
+    electronModule: {},
+    terminalDataPipeline: {
+      has() { return true; },
+      interceptInput(_sessionId, data) {
+        return new Promise((resolve) => { releaseInput = () => resolve(data); });
+      },
+    },
+  });
+  trackSessionIdlePrompt(session, "PS C:\\Users\\alice>");
+
+  const modifiedEnter = "\x1b[13;28;13;1;16;1_";
+  terminalBridge.writeToSession(null, {
+    sessionId: "session-modified-enter",
+    data: modifiedEnter,
+    logicalData: undefined,
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  trackSessionIdlePrompt(session, "\r\nPS C:\\Users\\alice>");
+  assert.equal(isSessionInputLineKnownEmpty(session), false);
+
+  releaseInput();
+  await new Promise((resolve) => setImmediate(resolve));
+  trackSessionIdlePrompt(session, "\r\nPS C:\\Users\\alice>");
+  assert.equal(isSessionInputLineKnownEmpty(session), false);
+  assert.deepEqual(writes, [modifiedEnter]);
+
+  terminalBridge.writeToSession(null, {
+    sessionId: "session-modified-enter",
+    data: "\r",
+    logicalData: "\r",
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  releaseInput();
+  await new Promise((resolve) => setImmediate(resolve));
+  trackSessionIdlePrompt(session, "\r\nPS C:\\Users\\alice>");
+  assert.equal(isSessionInputLineKnownEmpty(session), true);
+});
+
 test("manual command output cannot promote a different shell prompt", () => {
   const writes = [];
   const session = {

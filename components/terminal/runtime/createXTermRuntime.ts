@@ -1114,7 +1114,9 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       /**
        * User-facing input represented by a transport-specific wire payload.
        * `null` means the payload has no text/editing semantics (for example a
-       * Win32 key-up record). The wire `data` is still written unchanged.
+       * Win32 key-up record). An explicitly provided `undefined` means its
+       * editing effect is unknown and must be tracked conservatively. The wire
+       * `data` is still written unchanged.
        */
       logicalData?: string | null;
       /** Skip string broadcast when peers will re-resolve from a key chord. */
@@ -1336,7 +1338,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   let imeTextInputDeferredKittyEvent: KittyKeyboardEvent | null = null;
   let win32InputModePendingEvent: {
     event: KittyKeyboardEvent;
-    logicalData: string | null;
+    logicalData: string | null | undefined;
   } | null = null;
   const win32InputModeForwardedKeys = new Map<string, KittyKeyboardForwardedPress>();
   const kittyForwardedKeys = new Map<string, KittyKeyboardForwardedPress>();
@@ -2299,7 +2301,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   };
   const writeWin32InputModeEvent = (
     event: KittyKeyboardEvent,
-    logicalData: string | null,
+    logicalData: string | null | undefined,
   ) => {
     const pending = { event, logicalData };
     win32InputModePendingEvent = pending;
