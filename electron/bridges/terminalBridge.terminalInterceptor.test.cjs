@@ -8,10 +8,12 @@ const terminalBridge = require("./terminalBridge.cjs");
 function createHarness() {
   const writes = [];
   const intercepted = [];
-  const sessions = new Map([["session-1", {
+  const session = {
     type: "local",
     proc: { write(data) { writes.push(String(data)); } },
-  }]]);
+    _inputSinceIdlePrompt: false,
+  };
+  const sessions = new Map([["session-1", session]]);
   terminalBridge.init({
     sessions,
     electronModule: {},
@@ -24,12 +26,13 @@ function createHarness() {
       },
     },
   });
-  return { writes, intercepted };
+  return { writes, intercepted, session };
 }
 
 test("ordinary terminal input uses the worker-owned interceptor before transport encoding", async () => {
   const h = createHarness();
   terminalBridge.writeToSession(null, { sessionId: "session-1", data: "hello" });
+  assert.equal(h.session._inputSinceIdlePrompt, true);
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(h.intercepted.map((entry) => entry.data), ["hello"]);
   assert.deepEqual(h.writes, ["HELLO"]);

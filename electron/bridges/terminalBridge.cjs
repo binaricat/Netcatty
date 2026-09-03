@@ -1591,7 +1591,8 @@ function writeToSessionWithInterception(
   logRewrite = payload.logRewrite,
   expectedSession = sessions.get(payload.sessionId),
 ) {
-  const bypass = payload?.sensitive === true || isTerminalReportSequence(data);
+  const isReport = isTerminalReportSequence(data);
+  const bypass = payload?.sensitive === true || isReport;
   const hasInterceptor = Boolean(
     terminalDataPipeline?.interceptInput
     && terminalDataPipeline.has?.(payload.sessionId, "input"),
@@ -1600,6 +1601,12 @@ function writeToSessionWithInterception(
   if (!hasInterceptor && !previous) {
     writeToSessionNow(payload, data, logRewrite);
     return;
+  }
+  // Mark accepted input before awaiting an asynchronous interceptor. Otherwise
+  // an AI execution can observe an idle prompt and write its wrapper first,
+  // with the delayed user input landing afterward in the same terminal.
+  if (!isReport) {
+    markSessionInputPending(expectedSession, data);
   }
   const writeIfCurrent = (nextData) => {
     const current = sessions.get(payload.sessionId);
