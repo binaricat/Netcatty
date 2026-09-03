@@ -56,7 +56,11 @@ const ptyProcessTree = require("./ptyProcessTree.cjs");
 
 const sessionLogStreamManager = require("./sessionLogStreamManager.cjs");
 const { detectShellKind } = require("./ai/ptyExec.cjs");
-const { stripAnsi, trackSessionIdlePrompt } = require("./ai/shellUtils.cjs");
+const {
+  stripAnsi,
+  trackSessionIdlePrompt,
+  markSessionInputPending,
+} = require("./ai/shellUtils.cjs");
 const { createZmodemSentry } = require("./zmodemHelper.cjs");
 const { discoverShells } = require("./shellDiscovery.cjs");
 const moshHandshake = require("./moshHandshake.cjs");
@@ -1494,6 +1498,9 @@ function writeToSessionNow(payload, data, logRewrite = payload.logRewrite) {
       session: getSessionSnapshot(session),
     }, trace);
     return;
+  }
+  if (!isTerminalReportSequence(data)) {
+    markSessionInputPending(session);
   }
   if (data !== "\x03" && !payload.automated && !isTerminalReportSequence(data)) {
     disarmTerminalInterruptOutputGate(session);

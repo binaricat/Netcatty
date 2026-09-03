@@ -7,7 +7,11 @@ const {
   execViaChannel,
   execViaRawPty,
 } = require("../bridges/ai/ptyExec.cjs");
-const { getFreshIdlePrompt, formatSyntheticEcho } = require("../bridges/ai/shellUtils.cjs");
+const {
+  getFreshIdlePrompt,
+  formatSyntheticEcho,
+  isSessionInputLineKnownEmpty,
+} = require("../bridges/ai/shellUtils.cjs");
 const {
   ensureSessionShellKind,
   ensureSessionShellKindForExec,
@@ -279,6 +283,7 @@ function createWorkerAiExecHandler({
         loginShellHint: session._loginShellKind,
         chatSessionId,
         expectedPrompt: getFreshIdlePrompt(session),
+        inputLineKnownEmpty: isSessionInputLineKnownEmpty(session),
         typedInput: true,
         echoCommand: (rawCommand) => {
           event?.sender?.send?.("netcatty:data", {
@@ -446,6 +451,7 @@ function createWorkerAiJobStartHandler({
         loginShellHint: session._loginShellKind,
         chatSessionId,
         expectedPrompt: getFreshIdlePrompt(session),
+        inputLineKnownEmpty: isSessionInputLineKnownEmpty(session),
         typedInput: true,
         echoCommand: (rawCommand) => {
           event?.sender?.send?.("netcatty:data", {

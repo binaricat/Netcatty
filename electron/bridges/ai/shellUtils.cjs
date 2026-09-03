@@ -141,9 +141,25 @@ function trackSessionIdlePrompt(session, chunk) {
   if (prompt) {
     session.lastIdlePrompt = prompt;
     session.lastIdlePromptAt = Date.now();
+    session._inputSinceIdlePrompt = false;
   }
 
   return prompt;
+}
+
+function markSessionInputPending(session) {
+  if (!session) return;
+  session._inputSinceIdlePrompt = true;
+}
+
+// A cached prompt alone is not proof that the editable line stayed empty:
+// input can be buffered locally, echoed late, or configured not to echo.
+function isSessionInputLineKnownEmpty(session) {
+  return Boolean(
+    session
+    && session._inputSinceIdlePrompt === false
+    && getFreshIdlePrompt(session),
+  );
 }
 
 // Return `session.lastIdlePrompt` only if the PTY's recent rolling tail
@@ -966,6 +982,8 @@ module.exports = {
   formatSyntheticEcho,
   extractTrailingIdlePrompt,
   getFreshIdlePrompt,
+  markSessionInputPending,
+  isSessionInputLineKnownEmpty,
   isDefaultPowerShellPromptLine,
   isDefaultCmdPromptLine,
   isDefaultPosixPromptLine,

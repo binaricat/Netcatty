@@ -7,6 +7,7 @@ const {
   extractTrailingIdlePrompt,
   formatSyntheticEcho,
   getFreshIdlePrompt,
+  isSessionInputLineKnownEmpty,
   isDefaultPowerShellPromptLine,
   isDefaultCmdPromptLine,
   isDefaultPosixPromptLine,
@@ -20,6 +21,7 @@ const {
   parseRegQueryPath,
   expandWindowsEnvRefs,
   mergeWindowsPath,
+  markSessionInputPending,
   readWindowsRegistryPath,
   trackSessionIdlePrompt,
 } = require("./shellUtils.cjs");
@@ -609,6 +611,20 @@ test("tracks PowerShell idle prompt after SSH output", () => {
   assert.equal(prompt, "PS C:\\Windows\\System32>");
   assert.equal(session.lastIdlePrompt, "PS C:\\Windows\\System32>");
   assert.equal(typeof session.lastIdlePromptAt, "number");
+  assert.equal(isSessionInputLineKnownEmpty(session), true);
+});
+
+test("input tracking keeps an echo-lagged prompt from being treated as an empty line", () => {
+  const session = {};
+  trackSessionIdlePrompt(session, "PS C:\\Users\\alice>");
+  assert.equal(isSessionInputLineKnownEmpty(session), true);
+
+  markSessionInputPending(session);
+  assert.equal(getFreshIdlePrompt(session), "PS C:\\Users\\alice>");
+  assert.equal(isSessionInputLineKnownEmpty(session), false);
+
+  trackSessionIdlePrompt(session, "\r\nPS C:\\Users\\alice>");
+  assert.equal(isSessionInputLineKnownEmpty(session), true);
 });
 
 test("getFreshIdlePrompt returns the cached prompt when the live tail still ends with it", () => {

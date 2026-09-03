@@ -18,6 +18,12 @@ const {
   buildPendingInputClearPrefix,
   buildWrappedCommand,
 } = require("./ptyExecHelpers.cjs");
+const {
+  getFreshIdlePrompt,
+  isSessionInputLineKnownEmpty,
+  markSessionInputPending,
+  trackSessionIdlePrompt,
+} = require("./shellUtils.cjs");
 
 class ShellBackedPty extends EventEmitter {
   write(data) {
@@ -335,7 +341,7 @@ test("pending-input clear prefix covers interactive shells and skips raw devices
   assert.equal(buildPendingInputClearPrefix("raw"), "");
 });
 
-test("consecutive jobs use the safe Windows PowerShell prefix when a live prompt overrides a cmd login hint", async () => {
+test("consecutive jobs stay in PowerShell when the end marker and prompt arrive separately", async () => {
   const writes = [];
   class CapturePty extends EventEmitter {
     write(data) {
@@ -343,28 +349,62 @@ test("consecutive jobs use the safe Windows PowerShell prefix when a live prompt
     }
   }
   const pty = new CapturePty();
+  const session = { _loginShellKind: "cmd" };
+  pty.on("data", (data) => trackSessionIdlePrompt(session, String(data)));
+  trackSessionIdlePrompt(session, "Microsoft Windows...\r\nPS C:\\Users\\alice>");
 
   for (const probe of ["PROBE_1", "PROBE_2"]) {
     const job = startPtyJob(pty, `Write-Output '${probe}'`, {
-      shellKind: "unknown",
-      loginShellHint: "cmd",
+      shellKind: session.shellKind,
+      loginShellHint: session._loginShellKind,
       timeoutMs: 50,
-      expectedPrompt: "PS C:\\Users\\alice>",
+      expectedPrompt: getFreshIdlePrompt(session),
+      inputLineKnownEmpty: isSessionInputLineKnownEmpty(session),
     });
     const write = writes.at(-1);
-    assert.ok(write.startsWith("\x1b$__NCMCP_"));
-    assert.ok(!write.startsWith("\x1b\x15\x0b"));
+    assert.ok(write.startsWith("$__NCMCP_"));
     assert.doesNotMatch(write, /cmd \/d \/s \/c/i);
 
     pty.emit(
       "data",
-      Buffer.from(`${job.marker}_S\r\n${probe}\r\n${job.marker}_E:0\r\nPS C:\\Users\\alice>`),
+      Buffer.from(`${job.marker}_S\r\n${probe}\r\n${job.marker}_E:0\r\n`),
     );
+    let settled = false;
+    job.resultPromise.then(() => { settled = true; });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(settled, false);
+    pty.emit("data", Buffer.from("PS C:\\Users\\alice>"));
     const result = await job.resultPromise;
     assert.equal(result.ok, true);
     assert.equal(result.exitCode, 0);
     assert.equal(result.stdout, probe);
   }
+});
+
+test("tracked pending input still gets the Windows PowerShell clear key", async () => {
+  const writes = [];
+  class CapturePty extends EventEmitter {
+    write(data) {
+      writes.push(String(data));
+    }
+  }
+  const pty = new CapturePty();
+  const session = { _loginShellKind: "cmd" };
+  trackSessionIdlePrompt(session, "PS C:\\Users\\alice>");
+  markSessionInputPending(session);
+
+  const job = startPtyJob(pty, "Write-Output 'PROBE'", {
+    shellKind: session.shellKind,
+    loginShellHint: session._loginShellKind,
+    timeoutMs: 50,
+    expectedPrompt: getFreshIdlePrompt(session),
+    inputLineKnownEmpty: isSessionInputLineKnownEmpty(session),
+  });
+  assert.ok(writes[0].startsWith("\x1b$__NCMCP_"));
+  assert.ok(!writes[0].startsWith("\x1b\x15\x0b"));
+  job.cancel();
+  pty.emit("data", Buffer.from("PS C:\\Users\\alice>"));
+  await job.resultPromise;
 });
 
 test("startPtyJob writes the clear prefix even when expectedPrompt matches a clean idle prompt", async () => {

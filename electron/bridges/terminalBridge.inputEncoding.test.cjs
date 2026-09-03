@@ -89,6 +89,7 @@ test("Telnet input is encoded with the session's GB18030 charset", async () => {
     assert.deepEqual([...received], [...iconv.encode("你好\r\n", "gb18030")]);
     // It must NOT be the UTF-8 serialization that the old code always sent.
     assert.notDeepEqual([...received], [...Buffer.from("你好\r", "utf8")]);
+    assert.equal(sessions.get("telnet-gb18030-input")._inputSinceIdlePrompt, true);
   } finally {
     terminalBridge.cleanupAllSessions();
     for (const socket of sockets) socket.destroy();
