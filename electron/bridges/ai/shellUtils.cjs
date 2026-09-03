@@ -199,6 +199,12 @@ function confirmSessionIdlePrompt(session, output, expectedInputVersion, options
 
   session.lastIdlePrompt = prompt;
   session.lastIdlePromptAt = Date.now();
+  const manualCompletionMatchesPrompt = (
+    Object.prototype.hasOwnProperty.call(session, "_manualPromptKindAtSubmit")
+    && session._manualPromptKindAtSubmit
+    && !session._untrustedManualPrompt
+    && classifyIdlePromptShellKind(prompt) === session._manualPromptKindAtSubmit
+  );
   const inputUnchanged = expectedInputVersion === undefined
     || getSessionInputVersion(session) === expectedInputVersion;
   if (
@@ -215,7 +221,7 @@ function confirmSessionIdlePrompt(session, output, expectedInputVersion, options
     delete session._untrustedManualPrompt;
     delete session._untrustedManualPromptKind;
     delete session._manualInterruptCanConfirmPrompt;
-    if (options.trustedCompletion === true) {
+    if (options.trustedCompletion === true || manualCompletionMatchesPrompt) {
       delete session._manualInputRequiresClear;
     }
   }
@@ -290,9 +296,11 @@ function markSessionInputPending(session, data = "", options = {}) {
       delete session._manualInputRequiresClear;
       if (isManualInterrupt) session._manualInterruptCanConfirmPrompt = true;
     } else {
-      // A foreground program can print a line identical to the current shell
-      // prompt and continue reading. Remember that manual Enter alone cannot
-      // prove the editable line is safe for a prefix-free agent write.
+      // Until a recognized prompt matching the shell that accepted this line
+      // returns, do not let an agent write without a portable clear prefix.
+      // A different-shell prompt remains untrusted and requires explicit
+      // recovery; an ordinary same-shell command completion restores the
+      // normal idle state.
       session._manualInputRequiresClear = true;
     }
     const trustedKind = session._activeShellKindHint;

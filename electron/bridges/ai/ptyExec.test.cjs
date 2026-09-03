@@ -829,7 +829,7 @@ test("tracked pending input is not overwritten when PowerShell edit mode is unkn
   assert.match(result.error, /pending input/i);
 });
 
-test("same-kind fake prompt cannot unlock any agent execution", async () => {
+test("a completed manual command allows the next same-shell agent execution", async () => {
   const writes = [];
   class CapturePty extends EventEmitter {
     write(data) {
@@ -837,14 +837,14 @@ test("same-kind fake prompt cannot unlock any agent execution", async () => {
     }
   }
   const pty = new CapturePty();
-  const session = { _loginShellKind: "posix" };
-  trackSessionIdlePrompt(session, "alice@host:~$");
-  markSessionInputPending(session, "fake-prompt-program\r", { source: "manual" });
-  trackSessionIdlePrompt(session, "\r\nalice@host:~$");
-  assert.equal(getSessionActiveShellHint(session), "posix");
-  assert.equal(isSessionInputLineKnownEmpty(session), false);
+  const session = { _loginShellKind: "cmd" };
+  trackSessionIdlePrompt(session, "PS C:\\Users\\alice>");
+  markSessionInputPending(session, "Write-Output 'manual'\r", { source: "manual" });
+  trackSessionIdlePrompt(session, "\r\nmanual\r\nPS C:\\Users\\alice>");
+  assert.equal(getSessionActiveShellHint(session), "powershell");
+  assert.equal(isSessionInputLineKnownEmpty(session), true);
 
-  const job = startPtyJob(pty, "printf PROBE", {
+  const job = startPtyJob(pty, "Write-Output 'PROBE'", {
     shellKind: session.shellKind,
     loginShellHint: session._loginShellKind,
     activeShellHint: getSessionActiveShellHint(session),
@@ -854,10 +854,14 @@ test("same-kind fake prompt cannot unlock any agent execution", async () => {
     inputLineKnownEmpty: isSessionInputLineKnownEmpty(session),
     inputLineRequiresManualClear: hasUnverifiedManualSessionInput(session),
   });
-  assert.equal(writes.length, 0);
+  assert.equal(writes.length, 1);
+  assert.ok(writes[0].startsWith("$__NCMCP_"));
+  assert.match(writes[0], /PROBE/);
+  assert.doesNotMatch(writes[0], /cmd \/d \/s \/c/i);
+  pty.emit("data", Buffer.from(`${job.marker}_S\r\nPROBE\r\n${job.marker}_E:0\r\nPS C:\\Users\\alice>`));
   const result = await job.resultPromise;
-  assert.equal(result.ok, false);
-  assert.match(result.error, /pending input/i);
+  assert.equal(result.ok, true);
+  assert.equal(result.stdout, "PROBE");
 });
 
 test("echoed pending input cannot erase the PowerShell safety decision", async () => {

@@ -674,16 +674,16 @@ test("manual command output cannot impersonate a different shell prompt", () => 
   assert.equal(isSessionInputLineKnownEmpty(session), true);
 });
 
-test("manual output matching the current prompt still requires a safe clear", () => {
+test("an ordinary manual command restores a clean line at the same shell prompt", () => {
   const session = {};
   trackSessionIdlePrompt(session, "PS C:\\Users\\alice>");
-  markSessionInputPending(session, "fake-prompt-program\r", { source: "manual" });
+  markSessionInputPending(session, "Write-Output 'manual'\r", { source: "manual" });
 
-  trackSessionIdlePrompt(session, "\r\nPS C:\\Users\\alice>");
+  trackSessionIdlePrompt(session, "\r\nmanual\r\nPS C:\\Users\\alice>");
   assert.equal(getSessionActiveShellHint(session), "powershell");
   assert.equal(getSessionLastObservedShellKind(session), "powershell");
-  assert.equal(isSessionInputLineKnownEmpty(session), false);
-  assert.equal(hasUnverifiedManualSessionInput(session), true);
+  assert.equal(isSessionInputLineKnownEmpty(session), true);
+  assert.equal(hasUnverifiedManualSessionInput(session), false);
 });
 
 test("manual Ctrl+C confirms a legitimate nested-shell transition", () => {
@@ -707,8 +707,8 @@ test("manual Ctrl+C confirms a legitimate nested-shell transition", () => {
 test("a marker-backed command restores trust after manual prompt ambiguity", () => {
   const session = {};
   trackSessionIdlePrompt(session, "alice@host:~$");
-  markSessionInputPending(session, "fake-prompt-program\r", { source: "manual" });
-  trackSessionIdlePrompt(session, "\r\nalice@host:~$");
+  markSessionInputPending(session, "printf 'PS C:\\fake>'\r", { source: "manual" });
+  trackSessionIdlePrompt(session, "\r\nPS C:\\fake>");
   assert.equal(isSessionInputLineKnownEmpty(session), false);
 
   const marker = "__NCMCP_trusted_completion__";
