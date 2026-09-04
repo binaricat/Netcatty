@@ -6,7 +6,10 @@ import type { SerializeAddon as SerializeAddonType } from "@xterm/addon-serializ
 import type { Terminal as XTermType } from "@xterm/xterm";
 
 import { writeTerminalDataWithLineTimestamps } from "./runtime/terminalLineTimestamps.ts";
-import { noteTerminalOutputPressureData } from "./runtime/terminalOutputPressure.ts";
+import {
+  noteTerminalOutputPressureData,
+  setTerminalOutputPressureVisibility,
+} from "./runtime/terminalOutputPressure.ts";
 import { KeywordHighlighter } from "./keywordHighlight.ts";
 
 const require = createRequire(import.meta.url);
@@ -1103,6 +1106,30 @@ test("saturated streaming keeps the pinned viewport colored in-frame", async () 
   // streaming logs never show an uncolored frame (#3271).
   assert.equal(cellRgb(term, viewportY, "ERROR"), RED);
   assert.equal(cellRgb(term, viewportY + 2, "ERROR"), RED);
+  highlighter.dispose();
+  term.dispose();
+});
+
+test("hidden panes keep bulk streaming on the deferred catch-up path", async () => {
+  const term = new XTerm({ allowProposedApi: true, cols: 80, rows: 6, scrollback: 40 });
+  const highlighter = new KeywordHighlighter(term);
+  highlighter.setRules(rule(), true);
+  const line = "2026-08-13 INFO worker=1 WARN ERROR failed from 10.2.0.1";
+  const chunk = Array.from({ length: 16 }, () => line).join("\r\n");
+  // Below the 16KB/100ms flood gate, so without the background check the bulk
+  // bypass would recolor and refresh the viewport for every hidden batch.
+  setTerminalOutputPressureVisibility(term, false);
+  for (let index = 0; index < 4; index += 1) {
+    noteTerminalOutputPressureData(term, chunk);
+    await write(term, chunk);
+  }
+  const viewportY = term.buffer.active.viewportY;
+  assert.notEqual(cellRgb(term, viewportY, "ERROR"), RED);
+  // Reveal the pane and let catch-up paint the deferred range.
+  setTerminalOutputPressureVisibility(term, true);
+  await new Promise((resolve) => setTimeout(resolve, 650));
+  await highlighter.whenSettled();
+  assert.deepEqual(uncoloredKeywordLines(term, "ERROR", RED), []);
   highlighter.dispose();
   term.dispose();
 });

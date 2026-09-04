@@ -7,7 +7,10 @@ import type { KeywordHighlightRule } from "../../types";
 import { XTERM_PERFORMANCE_CONFIG } from "../../infrastructure/config/xtermPerformance";
 import { readPluginTerminalBufferText } from "./pluginTerminalBufferText";
 import { compileRe2RangeMatcher, forEachNonEmptyRegexMatch } from "./keywordHighlightRegex";
-import { shouldDegradeTerminalKeywordHighlight } from "./runtime/terminalOutputPressure";
+import {
+  isTerminalOutputInBackground,
+  shouldDegradeTerminalKeywordHighlight,
+} from "./runtime/terminalOutputPressure";
 
 type RuntimeKeywordHighlightRule = KeywordHighlightRule & { readonly providerId?: string };
 
@@ -723,6 +726,10 @@ export class KeywordHighlighter implements IDisposable {
   private mayColorViewportDuringBypass(data: string | Uint8Array): boolean {
     if (this.options.shouldBypassHighlight?.()) return false;
     if (typeof data !== "string") return false;
+    // Hidden panes drain bulk output in the background: there is no frame in
+    // which an in-frame viewport repaint could be seen, so keep them on the
+    // deferred catch-up path instead of repainting every background batch.
+    if (isTerminalOutputInBackground(this.term)) return false;
     return !shouldDegradeTerminalKeywordHighlight(this.term, data);
   }
 
