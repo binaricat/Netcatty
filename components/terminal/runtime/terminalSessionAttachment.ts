@@ -485,6 +485,12 @@ export const writeSessionData = (
       batchIngress: number,
       writeOptions?: CoalescedTerminalWriteOptions,
     ): void => {
+      // Output queued while hidden can be flushed after the pane is revealed.
+      // Refresh the pressure visibility at flush time so the write callback
+      // sees the live pane state instead of the ingress snapshot; otherwise a
+      // bulk batch written after reveal stays on the fully deferred path and
+      // the viewport sits uncolored until the quiet catch-up (#3272).
+      setTerminalOutputPressureVisibility(term, isPaneCurrentlyVisible());
       writeSessionDataImmediate(ctx, term, batch, batchIngress, {
         ...writeOptions,
         deferStart: writeOptions?.deferStart ?? !isPaneCurrentlyVisible(),

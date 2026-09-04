@@ -20,7 +20,10 @@ import {
   writeSessionData,
 } from "./terminalSessionAttachment.ts";
 import { getVisibleTerminalLineTimestampRows } from "./terminalLineTimestamps.ts";
-import { noteTerminalOutputPressureData } from "./terminalOutputPressure.ts";
+import {
+  getTerminalOutputPressure,
+  noteTerminalOutputPressureData,
+} from "./terminalOutputPressure.ts";
 
 import {
   clearTerminalSessionFlowAck,
@@ -1536,6 +1539,50 @@ test("writeSessionData keeps the hidden flush gate after coalescer reset and flu
   assert.equal(getFlowController(ctx as never, term).pendingBytes(), 0);
   assert.equal(getDeferredTerminalWriteAckBytes(term), 0);
   assert.equal(acked.reduce((total, bytes) => total + bytes, 0), payload.length);
+  clearTerminalSessionFlowAck("session-1");
+});
+
+test("writeSessionData refreshes pressure visibility when hidden output flushes after reveal", () => {
+  clearTerminalSessionFlowAck("session-1");
+  const payload = "x".repeat(XTERM_WRITE_CALLBACK_FAST_PATH_MAX_BYTES + 1);
+  const writes: string[] = [];
+  const term = {
+    buffer: { active: { type: "normal" } },
+    write(data: string, callback?: () => void) {
+      writes.push(data);
+      callback?.();
+    },
+    scrollToBottom() {},
+  } as unknown as XTerm;
+  const ctx = {
+    ...createContext(false),
+    isVisibleRef: { current: false },
+    sessionRef: { current: "session-1" },
+    terminalBackend: {
+      ackSessionFlow: () => {},
+    },
+  };
+
+  getFlowController(ctx as never, term);
+  resetTerminalWriteCoalescer(term);
+  withAnimationFrameQueue(() => {
+    withDocumentVisibility("visible", () => {
+      writeSessionData(ctx as never, term, payload);
+    });
+    // The ingress snapshot records the pane as hidden.
+    assert.equal(getTerminalOutputPressure(term).background, true);
+    assert.deepEqual(writes, []);
+
+    ctx.isVisibleRef.current = true;
+    withDocumentVisibility("visible", () => {
+      flushPendingTerminalWritesOnResume(term);
+    });
+    // The batch is actually parsed after reveal, so the flush must clear the
+    // stale hidden flag: bulk write callbacks (e.g. keyword highlight) gate
+    // their in-frame viewport recolor on this state (#3272).
+    assert.deepEqual(writes, [payload]);
+    assert.equal(getTerminalOutputPressure(term).background, false);
+  });
   clearTerminalSessionFlowAck("session-1");
 });
 
