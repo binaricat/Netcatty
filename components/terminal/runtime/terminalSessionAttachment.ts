@@ -89,6 +89,7 @@ import {
 } from "./terminalOutputPipeline";
 import {
   hasPendingTerminalWrites,
+  isTerminalPageHidden,
   maybeFlushTerminalWriteCoalescerWhenUnfocused,
   scheduleTerminalRepaintWhenUnfocused,
   shouldFlushTerminalWritesForBackgroundOutput,
@@ -112,6 +113,16 @@ export const buildTermEnv = (host: Host, terminalSettings?: TerminalSettings) =>
 
 const isTerminalPaneVisible = (ctx: TerminalSessionStartersContext): boolean => (
   (ctx.isPaneVisibleRef?.current ?? ctx.isVisibleRef?.current) !== false
+);
+
+/**
+ * Visibility recorded for the output-pressure gates. A pane whose ref says
+ * "visible" still cannot paint while the document is page-hidden, so record it
+ * as background there too; otherwise bulk batches take the background flush
+ * path but keyword-highlight still repainted the viewport per batch.
+ */
+const isTerminalOutputVisibleForPressure = (ctx: TerminalSessionStartersContext): boolean => (
+  isTerminalPaneVisible(ctx) && !isTerminalPageHidden()
 );
 
 const handleTerminalOutputAutoScroll = (
@@ -471,7 +482,7 @@ export const writeSessionData = (
     visible: isPaneVisible,
   });
   flow.received(ingressBytes);
-  setTerminalOutputPressureVisibility(term, isPaneVisible);
+  setTerminalOutputPressureVisibility(term, isTerminalOutputVisibleForPressure(ctx));
   noteTerminalOutputPressureData(term, data);
   const settings = ctx.terminalSettingsRef?.current ?? ctx.terminalSettings;
   const preservePromptSourceChunks = Boolean(
@@ -490,7 +501,7 @@ export const writeSessionData = (
       // sees the live pane state instead of the ingress snapshot; otherwise a
       // bulk batch written after reveal stays on the fully deferred path and
       // the viewport sits uncolored until the quiet catch-up (#3272).
-      setTerminalOutputPressureVisibility(term, isPaneCurrentlyVisible());
+      setTerminalOutputPressureVisibility(term, isTerminalOutputVisibleForPressure(ctx));
       writeSessionDataImmediate(ctx, term, batch, batchIngress, {
         ...writeOptions,
         deferStart: writeOptions?.deferStart ?? !isPaneCurrentlyVisible(),
