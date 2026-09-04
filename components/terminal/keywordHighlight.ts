@@ -404,6 +404,9 @@ export class KeywordHighlighter implements IDisposable {
     // macrotask while backlogged) later chunks may have aged it below the
     // threshold. Re-checking inside the callback would let a write that took
     // the flood path repaint the viewport anyway, defeating the deferred path.
+    // Pane visibility is the exception: it can flip while this write is still
+    // in flight (pane/page shown between entry and callback), so it is
+    // re-evaluated live in the callback below instead of frozen here.
     const colorDuringBypass = bypass && this.mayColorViewportDuringBypass(data);
     if (bypass) {
       if (startedOnNormal && (this.enabled || this.compiledPatterns.length > 0 || this.hasPendingCatchUp())) {
@@ -423,6 +426,10 @@ export class KeywordHighlighter implements IDisposable {
           this.term.buffer.active.type === "normal"
           && this.compiledPatterns.length > 0
           && colorDuringBypass
+          // Visibility may have changed since this write started (hidden pane
+          // shown before the async xterm parse finished): the entry snapshot
+          // only froze the flood/rate decision, so check the live state here.
+          && !isTerminalOutputInBackground(this.term)
         ) {
           this.recolorVisible();
         }
@@ -722,14 +729,14 @@ export class KeywordHighlighter implements IDisposable {
    * viewport costs O(viewport rows × rules) per write, independent of chunk
    * size. Rate/long-line floods and explicit full-bypass requests keep the
    * deferred catch-up so xterm keeps painting the dump smoothly.
+   *
+   * This is the frozen flood/rate decision only: pane visibility is evaluated
+   * live in the write callback (`isTerminalOutputInBackground`) because it can
+   * flip between write entry and the asynchronous callback.
    */
   private mayColorViewportDuringBypass(data: string | Uint8Array): boolean {
     if (this.options.shouldBypassHighlight?.()) return false;
     if (typeof data !== "string") return false;
-    // Hidden panes drain bulk output in the background: there is no frame in
-    // which an in-frame viewport repaint could be seen, so keep them on the
-    // deferred catch-up path instead of repainting every background batch.
-    if (isTerminalOutputInBackground(this.term)) return false;
     return !shouldDegradeTerminalKeywordHighlight(this.term, data);
   }
 
