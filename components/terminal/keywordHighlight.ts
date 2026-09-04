@@ -402,6 +402,21 @@ export class KeywordHighlighter implements IDisposable {
         this.scheduleCatchUp();
       }
       return this.originalWrite(data, () => {
+        // Bulk writes skip per-write coloring so xterm can keep painting the
+        // flood, but the viewport itself must not sit uncolored until the
+        // catch-up timer fires (#3271). Recolor the visible rows here, inside
+        // the write callback: xterm parses in a macrotask and renders in the
+        // next rAF, so these colors land in the same frame as the text. The
+        // cost is O(viewport rows × rules), independent of chunk size, and
+        // true rate/long-line floods keep the fully deferred path. Rows that
+        // scrolled past the viewport stay with the deferred catch-up.
+        if (
+          this.term.buffer.active.type === "normal"
+          && this.compiledPatterns.length > 0
+          && this.mayColorViewportDuringBypass(data)
+        ) {
+          this.recolorVisible();
+        }
         if (this.term.buffer.active.type === "normal" && !startedOnNormal) {
           if (this.enabled || this.compiledPatterns.length > 0) {
             this.markCatchUp(0);
@@ -690,6 +705,19 @@ export class KeywordHighlighter implements IDisposable {
     if (typeof data !== "string") return true;
     if (shouldDegradeTerminalKeywordHighlight(this.term, data)) return true;
     return this.countNewlines(data) >= BULK_WRITE_LINE_BREAKS;
+  }
+
+  /**
+   * Streaming logs usually trip only the bulk line-break heuristic (coalesced
+   * PTY ticks), which is cheap to color in-frame: rematching the visible
+   * viewport costs O(viewport rows × rules) per write, independent of chunk
+   * size. Rate/long-line floods and explicit full-bypass requests keep the
+   * deferred catch-up so xterm keeps painting the dump smoothly.
+   */
+  private mayColorViewportDuringBypass(data: string | Uint8Array): boolean {
+    if (this.options.shouldBypassHighlight?.()) return false;
+    if (typeof data !== "string") return false;
+    return !shouldDegradeTerminalKeywordHighlight(this.term, data);
   }
 
   private countNewlines(data: string): number {

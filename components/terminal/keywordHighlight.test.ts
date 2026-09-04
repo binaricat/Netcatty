@@ -243,6 +243,27 @@ test("bulk output skipped on the hot path is highlighted after output becomes qu
   term.dispose();
 });
 
+test("streaming bulk output colors the viewport in the same write", async () => {
+  const term = new XTerm({ allowProposedApi: true, cols: 80, rows: 5, scrollback: 50 });
+  const highlighter = new KeywordHighlighter(term);
+  highlighter.setRules(rule(), true);
+  // More than BULK_WRITE_LINE_BREAKS newlines per chunk, but far below the
+  // large-output rate, like a coalesced `tail -f` tick (#3271).
+  const chunk = Array.from({ length: 12 }, (_, index) => `line-${index} ERROR`).join("\r\n");
+  await write(term, chunk);
+  assert.equal(highlighter.rebuildCount, 0);
+  const viewportY = term.buffer.active.viewportY;
+  assert.equal(cellRgb(term, viewportY + 4, "ERROR"), RED, "visible rows must color in-frame");
+  assert.notEqual(cellRgb(term, 0, "ERROR"), RED, "history above the viewport stays with catch-up");
+
+  await new Promise((resolve) => setTimeout(resolve, 650));
+  await highlighter.whenSettled();
+  assert.deepEqual(uncoloredKeywordLines(term, "ERROR", RED), []);
+  assert.equal(highlighter.rebuildCount, 1);
+  highlighter.dispose();
+  term.dispose();
+});
+
 test("ordinary Enter does not rebuild a saturated scrollback", async () => {
   const term = new XTerm({ allowProposedApi: true, cols: 40, rows: 3, scrollback: 10 });
   const highlighter = new KeywordHighlighter(term);
@@ -1039,7 +1060,9 @@ test("quiet catch-up refreshes a tall viewport once", async () => {
   await write(term, flood);
   await new Promise((resolve) => setTimeout(resolve, 650));
   await highlighter.whenSettled();
-  assert.equal(refreshCount, 1);
+  // One refresh paints the viewport in-frame inside the bulk write callback;
+  // the second is the single catch-up viewport pass after output quiets.
+  assert.equal(refreshCount, 2);
   assert.deepEqual(uncoloredKeywordLines(term, "ERROR", RED), []);
   highlighter.dispose();
   term.dispose();
@@ -1064,7 +1087,7 @@ test("identical flood lines are all colored after quiet catch-up", async () => {
   term.dispose();
 });
 
-test("saturated flood does not rematch the pinned viewport on each write", async () => {
+test("saturated streaming keeps the pinned viewport colored in-frame", async () => {
   const term = new XTerm({ allowProposedApi: true, cols: 80, rows: 6, scrollback: 8 });
   const highlighter = new KeywordHighlighter(term);
   highlighter.setRules(rule(), true);
@@ -1076,8 +1099,32 @@ test("saturated flood does not rematch the pinned viewport on each write", async
   }
   assert.equal(highlighter.rebuildCount, 0);
   const viewportY = term.buffer.active.viewportY;
+  // Bulk bypass still colors the visible rows inside the write callback, so
+  // streaming logs never show an uncolored frame (#3271).
+  assert.equal(cellRgb(term, viewportY, "ERROR"), RED);
+  assert.equal(cellRgb(term, viewportY + 2, "ERROR"), RED);
+  highlighter.dispose();
+  term.dispose();
+});
+
+test("high-rate flood keeps the viewport on the deferred catch-up path", async () => {
+  const term = new XTerm({ allowProposedApi: true, cols: 80, rows: 6, scrollback: 8 });
+  const highlighter = new KeywordHighlighter(term);
+  highlighter.setRules(rule(), true);
+  const line = "2026-08-13 INFO worker=1 WARN ERROR failed from 10.2.0.1";
+  // ~20KB inside the 100ms rate window trips the large-output degradation, so
+  // the in-frame viewport repaint stays off and only catch-up colors.
+  const chunk = Array.from({ length: 300 }, () => line).join("\r\n");
+  for (let index = 0; index < 3; index += 1) {
+    noteTerminalOutputPressureData(term, chunk);
+    await write(term, chunk);
+  }
+  assert.equal(highlighter.rebuildCount, 0);
+  const viewportY = term.buffer.active.viewportY;
   assert.notEqual(cellRgb(term, viewportY, "ERROR"), RED);
-  assert.notEqual(cellRgb(term, viewportY + 2, "ERROR"), RED);
+  await new Promise((resolve) => setTimeout(resolve, 900));
+  await highlighter.whenSettled();
+  assert.deepEqual(uncoloredKeywordLines(term, "ERROR", RED), []);
   highlighter.dispose();
   term.dispose();
 });
