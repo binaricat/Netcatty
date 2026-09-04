@@ -396,6 +396,12 @@ export class KeywordHighlighter implements IDisposable {
       ? this.resolveAbsoluteRepaintRange(absoluteControls, originModeNeedsSafety)
       : null;
     const bypass = !startedOnNormal || this.shouldBypassWrite(data);
+    // Freeze in-frame eligibility at entry: the pressure window is a rolling
+    // sample, and by the time this write's callback runs (xterm parses in a
+    // macrotask while backlogged) later chunks may have aged it below the
+    // threshold. Re-checking inside the callback would let a write that took
+    // the flood path repaint the viewport anyway, defeating the deferred path.
+    const colorDuringBypass = bypass && this.mayColorViewportDuringBypass(data);
     if (bypass) {
       if (startedOnNormal && (this.enabled || this.compiledPatterns.length > 0 || this.hasPendingCatchUp())) {
         this.markCatchUp(absoluteRepaintRange === null ? startY : Math.min(startY, startBaseY));
@@ -413,7 +419,7 @@ export class KeywordHighlighter implements IDisposable {
         if (
           this.term.buffer.active.type === "normal"
           && this.compiledPatterns.length > 0
-          && this.mayColorViewportDuringBypass(data)
+          && colorDuringBypass
         ) {
           this.recolorVisible();
         }
