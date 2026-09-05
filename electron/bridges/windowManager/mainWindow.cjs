@@ -2,6 +2,7 @@
 const {
   windowsFramelessContentChromeOptions,
 } = require("./windowsWindowChrome.cjs");
+const { attachDisplayRecovery } = require("./displayRecovery.cjs");
 
 const TERMINAL_KEYBOARD_FOCUS = Symbol("netcattyTerminalKeyboardFocus");
 
@@ -178,8 +179,24 @@ function createMainWindowApi(ctx) {
         registerAppContentWindow(win, { queryDirtyEditors: true });
       }
     
+      // Multi-monitor recovery (#3244): Windows lock/sleep can temporarily
+      // tear down a secondary display and the OS relocates the window onto
+      // the primary display. When the display comes back, put the window back
+      // where the user left it.
+      let detachDisplayRecovery = null;
+      try {
+        detachDisplayRecovery = attachDisplayRecovery({ win, screen });
+      } catch {
+        detachDisplayRecovery = null;
+      }
+
       // Clear reference when the main window is destroyed
       win.on('closed', () => {
+        try {
+          detachDisplayRecovery?.();
+        } catch {
+          // ignore
+        }
         try {
           if (win?.webContents?.id) {
             unhealthyWebContentsIds.delete(win.webContents.id);

@@ -315,6 +315,30 @@ test('pane zoom hotkey delegates to the active in-app magnification surface', ()
   assert.equal(toggles, 1);
 });
 
+test('broadcast hotkey toggles global mode for an active orphan tab', () => {
+  let globalToggles = 0;
+  let workspaceToggles = 0;
+
+  executeHotkeyActionImpl(() => ({
+    activeTabStore: { getActiveTabId: () => 'orphan-1' },
+    editorTabs: [],
+    orderedTabs: ['orphan-1', 'orphan-2'],
+    settings: { showSftpTab: true, shellOnlyTabNumberShortcuts: false },
+    toEditorTabId: (id: string) => id,
+    sessions: [
+      { id: 'orphan-1' },
+      { id: 'orphan-2' },
+    ],
+    workspaces: [],
+    canUseGlobalBroadcast: true,
+    toggleBroadcast: () => { workspaceToggles += 1; },
+    toggleGlobalBroadcast: () => { globalToggles += 1; },
+  }), 'broadcast', {} as KeyboardEvent);
+
+  assert.equal(globalToggles, 1);
+  assert.equal(workspaceToggles, 0);
+});
+
 test('move-focus shortcut cannot send input behind a magnified pane', () => {
   let moveCalls = 0;
   executeHotkeyActionImpl(() => ({

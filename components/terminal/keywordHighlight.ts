@@ -5,9 +5,13 @@ import { isSafePluginDecorationPattern } from "../../domain/pluginTerminalProvid
 import { checkRegexSafetyPattern } from "../../lib/regexSafety";
 import type { KeywordHighlightRule } from "../../types";
 import { XTERM_PERFORMANCE_CONFIG } from "../../infrastructure/config/xtermPerformance";
+import { isTerminalReplayWrite } from "./terminalReplay";
 import { readPluginTerminalBufferText } from "./pluginTerminalBufferText";
 import { compileRe2RangeMatcher, forEachNonEmptyRegexMatch } from "./keywordHighlightRegex";
-import { shouldDegradeTerminalKeywordHighlight } from "./runtime/terminalOutputPressure";
+import {
+  isTerminalOutputInBackground,
+  shouldDegradeTerminalKeywordHighlight,
+} from "./runtime/terminalOutputPressure";
 
 type RuntimeKeywordHighlightRule = KeywordHighlightRule & { readonly providerId?: string };
 
@@ -396,12 +400,43 @@ export class KeywordHighlighter implements IDisposable {
       ? this.resolveAbsoluteRepaintRange(absoluteControls, originModeNeedsSafety)
       : null;
     const bypass = !startedOnNormal || this.shouldBypassWrite(data);
+    // Freeze in-frame eligibility at entry: the pressure window is a rolling
+    // sample, and by the time this write's callback runs (xterm parses in a
+    // macrotask while backlogged) later chunks may have aged it below the
+    // threshold. Re-checking inside the callback would let a write that took
+    // the flood path repaint the viewport anyway, defeating the deferred path.
+    // Pane visibility is the exception: it can flip while this write is still
+    // in flight (pane/page shown between entry and callback), so it is
+    // re-evaluated live in the callback below instead of frozen here.
+    const colorDuringBypass = bypass && this.mayColorViewportDuringBypass(data);
     if (bypass) {
       if (startedOnNormal && (this.enabled || this.compiledPatterns.length > 0 || this.hasPendingCatchUp())) {
         this.markCatchUp(absoluteRepaintRange === null ? startY : Math.min(startY, startBaseY));
         this.scheduleCatchUp();
       }
       return this.originalWrite(data, () => {
+        // Bulk writes skip per-write coloring so xterm can keep painting the
+        // flood, but the viewport itself must not sit uncolored until the
+        // catch-up timer fires (#3271). Recolor the visible rows here, inside
+        // the write callback: xterm parses in a macrotask and renders in the
+        // next rAF, so these colors land in the same frame as the text. The
+        // cost is O(viewport rows × rules), independent of chunk size, and
+        // true rate/long-line floods keep the fully deferred path. Rows that
+        // scrolled past the viewport stay with the deferred catch-up.
+        if (
+          this.term.buffer.active.type === "normal"
+          && this.compiledPatterns.length > 0
+          && colorDuringBypass
+          // Visibility may have changed since this write started (hidden pane
+          // shown before the async xterm parse finished): the entry snapshot
+          // only froze the flood/rate decision, so check the live state here.
+          && !isTerminalOutputInBackground(this.term)
+          // Appended logs should not add another repaint while reading history.
+          // Scroll/reveal handlers retain their existing recoloring behavior.
+          && this.term.buffer.active.viewportY === this.term.buffer.active.baseY
+        ) {
+          this.recolorVisible();
+        }
         if (this.term.buffer.active.type === "normal" && !startedOnNormal) {
           if (this.enabled || this.compiledPatterns.length > 0) {
             this.markCatchUp(0);
@@ -690,6 +725,23 @@ export class KeywordHighlighter implements IDisposable {
     if (typeof data !== "string") return true;
     if (shouldDegradeTerminalKeywordHighlight(this.term, data)) return true;
     return this.countNewlines(data) >= BULK_WRITE_LINE_BREAKS;
+  }
+
+  /**
+   * Streaming logs usually trip only the bulk line-break heuristic (coalesced
+   * PTY ticks), which is cheap to color in-frame: rematching the visible
+   * viewport costs O(viewport rows × rules) per write, independent of chunk
+   * size. Rate/long-line floods and explicit full-bypass requests keep the
+   * deferred catch-up so xterm keeps painting the dump smoothly.
+   *
+   * This is the frozen flood/rate decision only: pane visibility is evaluated
+   * live in the write callback (`isTerminalOutputInBackground`) because it can
+   * flip between write entry and the asynchronous callback.
+   */
+  private mayColorViewportDuringBypass(data: string | Uint8Array): boolean {
+    if (this.options.shouldBypassHighlight?.()) return false;
+    if (typeof data !== "string" || isTerminalReplayWrite(this.term)) return false;
+    return !shouldDegradeTerminalKeywordHighlight(this.term, data);
   }
 
   private countNewlines(data: string): number {

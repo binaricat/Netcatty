@@ -367,8 +367,15 @@ test("note editor registers a code block editor for pasted fenced code", () => {
     source,
     /codeBlockPlugin\([^)]*\),\s*codeMirrorPlugin\(\{\s*codeBlockLanguages:/s,
   );
-  assert.match(source, /codeMirrorExtensions:\s*NOTE_CODE_MIRROR_EXTENSIONS/);
+  assert.match(source, /codeMirrorExtensions:\s*\[\s*\.\.\.NOTE_CODE_MIRROR_EXTENSIONS,/);
   assert.match(source, /syntaxHighlighting\(noteCodeHighlightStyle\)/);
+  // Tooltips mount on body to escape clipped code blocks, so their placement
+  // must be bounded to this editor instead of the whole window.
+  assert.match(
+    source,
+    /createNoteCodeTooltipExtensions\(\s*typeof document === "undefined" \? undefined : document\.body,/,
+  );
+  assert.match(source, /\(\) => containerRef\.current,/);
 });
 
 test("note editor enables image plugin for remote markdown images", () => {

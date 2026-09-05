@@ -246,6 +246,11 @@ export const setTerminalOutputPressureVisibility = (
   getOrCreateState(term).background = !visible;
 };
 
+/** True while the pane is hidden (recorded via {@link setTerminalOutputPressureVisibility}). */
+export const isTerminalOutputInBackground = (term: XTerm): boolean => (
+  pressureStates.get(term)?.background ?? false
+);
+
 export const setTerminalOutputPressureLargeOutput = (
   term: XTerm,
   largeOutput: boolean,

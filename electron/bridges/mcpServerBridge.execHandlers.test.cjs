@@ -8,6 +8,10 @@ const test = require("node:test");
 const { createBackgroundJobApi } = require("./mcpServerBridge/backgroundJobs.cjs");
 const { createExecHandlerApi } = require("./mcpServerBridge/execHandlers.cjs");
 const { PROBE_OUTPUT_MARKER } = require("./ai/sessionShellKind.cjs");
+const {
+  checkBlocklistForShell,
+  resolveSessionBlocklistShellKind,
+} = require("./ai/commandSafety.cjs");
 
 class FakePty extends EventEmitter {
   constructor() {
@@ -68,8 +72,11 @@ function createExecHandlerTestContext({ sessions, backgroundJobs }) {
     getSessionMeta() {
       return {};
     },
-    checkCommandSafety() {
+    checkCommandSafetyForShell() {
       return { blocked: false };
+    },
+    resolveSessionBlocklistShellKind() {
+      return "";
     },
     beginChatExecution() {
       return { ok: true, release() {} };
@@ -225,4 +232,36 @@ test("MCP terminal_start chat cancel during shellKind probe aborts before PTY wr
   assert.equal(job.status, "cancelled");
   assert.equal(job.pendingShellProbe, false);
   assert.equal(ctx.activeSessionExecutions.size, 0);
+});
+
+test("MCP exec probes an unclassified PowerShell session before the authoritative check", async () => {
+  const pty = new FakePty();
+  const session = {
+    protocol: "ssh",
+    stream: pty,
+    shellKind: "",
+    remoteSshVersion: "OpenSSH_for_Windows_9.5",
+    lastIdlePrompt: "custom% ",
+    _promptTrackTail: "custom prompt\r\ncustom% ",
+    _shellKindExecProbe: async () => (
+      "DefaultShell    REG_SZ    C:\\Program Files\\PowerShell\\7\\pwsh.exe\r\n"
+    ),
+  };
+  const ctx = createExecHandlerTestContext({
+    sessions: new Map([["ssh-powershell", session]]),
+    backgroundJobs: new Map(),
+  });
+  ctx.checkCommandSafetyForShell = checkBlocklistForShell;
+  ctx.resolveSessionBlocklistShellKind = resolveSessionBlocklistShellKind;
+  ctx.execViaPty = async () => ({ ok: true, stdout: "ok", stderr: "", exitCode: 0 });
+  const api = createExecHandlerApi(ctx);
+
+  const result = await api.handleExec({
+    sessionId: "ssh-powershell",
+    command: 'Write-Host "now: $(Get-Date)"',
+    chatSessionId: "chat-powershell",
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(session._loginShellKind, "powershell");
 });

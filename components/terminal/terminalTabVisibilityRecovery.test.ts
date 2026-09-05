@@ -25,7 +25,7 @@ test('tab-switch suppression does not consume the visible recovery pass', () => 
   assert.match(source, /const becameVisible = isVisible && !wasVisibleRef\.current/);
   assert.match(
     source,
-    /if \(!isVisible\) \{\s*wasVisibleRef\.current = false;\s*return;\s*\}[\s\S]*if \(splitResizeActive\) return;[\s\S]*wasVisibleRef\.current = true;[\s\S]*recoverTerminalAfterBecomeVisible\(\)/,
+    /if \(!isVisible\) \{\s*wasVisibleRef\.current = false;\s*syncOutputPressureVisibility\(\);\s*return;\s*\}[\s\S]*if \(splitResizeActive\) return;[\s\S]*wasVisibleRef\.current = true;[\s\S]*recoverTerminalAfterBecomeVisible\(\)/,
   );
   assert.doesNotMatch(source, /wasVisibleRef\.current = isVisible;\s*if \(!isVisible \|\| isResizing\) return/);
 });

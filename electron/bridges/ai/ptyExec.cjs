@@ -28,6 +28,8 @@ const {
 } = require("./ptyExecHelpers.cjs");
 const { extractTrailingIdlePrompt } = require("./shellUtils.cjs");
 
+const { buildLiveShellProbe, parseLiveShellProbe } = require("./liveShellProbe.cjs");
+
 const DEFAULT_FOREGROUND_PTY_CAPTURE_CHARS = 1024 * 1024;
 const END_MARKER_PROMPT_WAIT_MS = 30000;
 const promptRecoveryPendingPtys = new WeakSet();
@@ -54,6 +56,8 @@ function startPtyJob(ptyStream, command, options) {
     timeoutMs = 60000,
     shellKind,
     loginShellHint,
+    probeLiveShell = false,
+    onProbeAborted,
     chatSessionId,
     abortSignal,
     expectedPrompt,
@@ -65,7 +69,7 @@ function startPtyJob(ptyStream, command, options) {
   } = options || {};
 
   const marker = `__NCMCP_${Date.now().toString(36)}_${crypto.randomBytes(16).toString('hex')}__`;
-  const resolvedShellKind = resolveEffectiveShellKind(shellKind, expectedPrompt, {
+  let resolvedShellKind = resolveEffectiveShellKind(shellKind, expectedPrompt, {
     loginShellHint,
   });
   const waitForReturnedPrompt = loginShellHint === "cmd"
@@ -87,6 +91,10 @@ function startPtyJob(ptyStream, command, options) {
     : DEFAULT_FOREGROUND_PTY_CAPTURE_CHARS;
   const CANCEL_RETRY_MS = 5000;
   const CANCEL_WALL_TIMEOUT_MS = 30000;
+
+  const usesLiveShellProbe = probeLiveShell && ["posix", "fish"].includes(resolvedShellKind);
+  let probingShell = usesLiveShellProbe;
+  let probeOutput = "";
 
   let output = "";
   let foundStart = false;
@@ -405,6 +413,13 @@ function startPtyJob(ptyStream, command, options) {
   function finish(stdout, exitCode, error) {
     if (finished) return;
     finished = true;
+    if (usesLiveShellProbe && !foundStart && typeof onProbeAborted === "function") {
+      try {
+        onProbeAborted(marker);
+      } catch {
+        // Display cleanup must never prevent command cancellation or completion.
+      }
+    }
     clearTimeout(timeoutId);
     clearTimeout(wallTimeoutId);
     clearStartupTimeout();
@@ -512,6 +527,22 @@ function startPtyJob(ptyStream, command, options) {
     const text = outputDecoder.write(bytes);
     if (!text) return;
     if (!pendingEnd) armOutputTimeout();
+
+    if (probingShell) {
+      probeOutput = (probeOutput + text).slice(-16384);
+      if (cancelRequested && hasExpectedPromptSuffix(probeOutput, expectedPrompt)) {
+        finish("", -1, "Cancelled");
+        return;
+      }
+      const probe = parseLiveShellProbe(stripAnsi(probeOutput), marker);
+      if (!probe) return;
+      probingShell = false;
+      probeOutput = "";
+      if (probe.kind) resolvedShellKind = probe.kind;
+      if (finished || cancelRequested) return;
+      writeWrappedCommand();
+      return;
+    }
 
     if (!foundStart) {
       preStartOutput += text;
@@ -698,8 +729,16 @@ function startPtyJob(ptyStream, command, options) {
     }
   }
 
-  const wrapped = buildWrappedCommand(command, resolvedShellKind, marker);
-  ptyStream.write(`${buildPendingInputClearPrefix(resolvedShellKind)}${wrapped}`);
+  function writeWrappedCommand() {
+    const wrapped = buildWrappedCommand(command, resolvedShellKind, marker, probeLiveShell);
+    ptyStream.write(`${buildPendingInputClearPrefix(resolvedShellKind)}${wrapped}`);
+  }
+
+  if (probingShell) {
+    ptyStream.write(`${buildPendingInputClearPrefix(resolvedShellKind)}${buildLiveShellProbe(marker)}`);
+  } else {
+    writeWrappedCommand();
+  }
 
   return {
     marker,

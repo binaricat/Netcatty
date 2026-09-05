@@ -6,7 +6,11 @@ import type { SerializeAddon as SerializeAddonType } from "@xterm/addon-serializ
 import type { Terminal as XTermType } from "@xterm/xterm";
 
 import { writeTerminalDataWithLineTimestamps } from "./runtime/terminalLineTimestamps.ts";
-import { noteTerminalOutputPressureData } from "./runtime/terminalOutputPressure.ts";
+import {
+  noteTerminalOutputPressureData,
+  setTerminalOutputPressureVisibility,
+} from "./runtime/terminalOutputPressure.ts";
+import { writeTerminalPayloadChunked } from "./terminalReplay.ts";
 import { KeywordHighlighter } from "./keywordHighlight.ts";
 
 const require = createRequire(import.meta.url);
@@ -238,6 +242,27 @@ test("bulk output skipped on the hot path is highlighted after output becomes qu
   await new Promise((resolve) => setTimeout(resolve, 650));
   await highlighter.whenSettled();
   assert.equal(cellRgb(term, 0, "ERROR"), RED);
+  assert.equal(highlighter.rebuildCount, 1);
+  highlighter.dispose();
+  term.dispose();
+});
+
+test("streaming bulk output colors the viewport in the same write", async () => {
+  const term = new XTerm({ allowProposedApi: true, cols: 80, rows: 5, scrollback: 50 });
+  const highlighter = new KeywordHighlighter(term);
+  highlighter.setRules(rule(), true);
+  // More than BULK_WRITE_LINE_BREAKS newlines per chunk, but far below the
+  // large-output rate, like a coalesced `tail -f` tick (#3271).
+  const chunk = Array.from({ length: 12 }, (_, index) => `line-${index} ERROR`).join("\r\n");
+  await write(term, chunk);
+  assert.equal(highlighter.rebuildCount, 0);
+  const viewportY = term.buffer.active.viewportY;
+  assert.equal(cellRgb(term, viewportY + 4, "ERROR"), RED, "visible rows must color in-frame");
+  assert.notEqual(cellRgb(term, 0, "ERROR"), RED, "history above the viewport stays with catch-up");
+
+  await new Promise((resolve) => setTimeout(resolve, 650));
+  await highlighter.whenSettled();
+  assert.deepEqual(uncoloredKeywordLines(term, "ERROR", RED), []);
   assert.equal(highlighter.rebuildCount, 1);
   highlighter.dispose();
   term.dispose();
@@ -1039,7 +1064,9 @@ test("quiet catch-up refreshes a tall viewport once", async () => {
   await write(term, flood);
   await new Promise((resolve) => setTimeout(resolve, 650));
   await highlighter.whenSettled();
-  assert.equal(refreshCount, 1);
+  // One refresh paints the viewport in-frame inside the bulk write callback;
+  // the second is the single catch-up viewport pass after output quiets.
+  assert.equal(refreshCount, 2);
   assert.deepEqual(uncoloredKeywordLines(term, "ERROR", RED), []);
   highlighter.dispose();
   term.dispose();
@@ -1064,7 +1091,7 @@ test("identical flood lines are all colored after quiet catch-up", async () => {
   term.dispose();
 });
 
-test("saturated flood does not rematch the pinned viewport on each write", async () => {
+test("saturated streaming keeps the pinned viewport colored in-frame", async () => {
   const term = new XTerm({ allowProposedApi: true, cols: 80, rows: 6, scrollback: 8 });
   const highlighter = new KeywordHighlighter(term);
   highlighter.setRules(rule(), true);
@@ -1076,8 +1103,56 @@ test("saturated flood does not rematch the pinned viewport on each write", async
   }
   assert.equal(highlighter.rebuildCount, 0);
   const viewportY = term.buffer.active.viewportY;
+  // Bulk bypass still colors the visible rows inside the write callback, so
+  // streaming logs never show an uncolored frame (#3271).
+  assert.equal(cellRgb(term, viewportY, "ERROR"), RED);
+  assert.equal(cellRgb(term, viewportY + 2, "ERROR"), RED);
+  highlighter.dispose();
+  term.dispose();
+});
+
+test("hidden panes keep bulk streaming on the deferred catch-up path", async () => {
+  const term = new XTerm({ allowProposedApi: true, cols: 80, rows: 6, scrollback: 40 });
+  const highlighter = new KeywordHighlighter(term);
+  highlighter.setRules(rule(), true);
+  const line = "2026-08-13 INFO worker=1 WARN ERROR failed from 10.2.0.1";
+  const chunk = Array.from({ length: 16 }, () => line).join("\r\n");
+  // Below the 16KB/100ms flood gate, so without the background check the bulk
+  // bypass would recolor and refresh the viewport for every hidden batch.
+  setTerminalOutputPressureVisibility(term, false);
+  for (let index = 0; index < 4; index += 1) {
+    noteTerminalOutputPressureData(term, chunk);
+    await write(term, chunk);
+  }
+  const viewportY = term.buffer.active.viewportY;
   assert.notEqual(cellRgb(term, viewportY, "ERROR"), RED);
-  assert.notEqual(cellRgb(term, viewportY + 2, "ERROR"), RED);
+  // Reveal the pane and let catch-up paint the deferred range.
+  setTerminalOutputPressureVisibility(term, true);
+  await new Promise((resolve) => setTimeout(resolve, 650));
+  await highlighter.whenSettled();
+  assert.deepEqual(uncoloredKeywordLines(term, "ERROR", RED), []);
+  highlighter.dispose();
+  term.dispose();
+});
+
+test("high-rate flood keeps the viewport on the deferred catch-up path", async () => {
+  const term = new XTerm({ allowProposedApi: true, cols: 80, rows: 6, scrollback: 8 });
+  const highlighter = new KeywordHighlighter(term);
+  highlighter.setRules(rule(), true);
+  const line = "2026-08-13 INFO worker=1 WARN ERROR failed from 10.2.0.1";
+  // ~20KB inside the 100ms rate window trips the large-output degradation, so
+  // the in-frame viewport repaint stays off and only catch-up colors.
+  const chunk = Array.from({ length: 300 }, () => line).join("\r\n");
+  for (let index = 0; index < 3; index += 1) {
+    noteTerminalOutputPressureData(term, chunk);
+    await write(term, chunk);
+  }
+  assert.equal(highlighter.rebuildCount, 0);
+  const viewportY = term.buffer.active.viewportY;
+  assert.notEqual(cellRgb(term, viewportY, "ERROR"), RED);
+  await new Promise((resolve) => setTimeout(resolve, 900));
+  await highlighter.whenSettled();
+  assert.deepEqual(uncoloredKeywordLines(term, "ERROR", RED), []);
   highlighter.dispose();
   term.dispose();
 });
@@ -1097,4 +1172,53 @@ test("recycled identical flood rows are recolored on catch-up", async () => {
   assert.deepEqual(uncoloredKeywordLines(term, "ERROR", RED), []);
   highlighter.dispose();
   term.dispose();
+});
+
+
+test("hibernate replay defers bulk viewport coloring but subsequent live output colors immediately", async () => {
+  const term = new XTerm({ allowProposedApi: true, cols: 80, rows: 6, scrollback: 100 });
+  const highlighter = new KeywordHighlighter(term);
+  highlighter.setRules(rule(), true);
+  const chunk = Array.from({ length: 20 }, () => "history ERROR").join("\r\n");
+  try {
+    await writeTerminalPayloadChunked(term, chunk);
+    assert.notEqual(cellRgb(term, term.buffer.active.viewportY, "ERROR"), RED);
+    await highlighter.whenSettled();
+    assert.deepEqual(uncoloredKeywordLines(term, "ERROR", RED), []);
+    await write(term, "\r\n" + chunk);
+    assert.equal(cellRgb(term, term.buffer.active.viewportY, "ERROR"), RED);
+  } finally {
+    highlighter.dispose();
+    term.dispose();
+  }
+});
+
+
+test("bulk streaming does not recolor a scrolled-back history viewport", async () => {
+  const term = new XTerm({ allowProposedApi: true, cols: 80, rows: 6, scrollback: 100 });
+  let bypass = false;
+  const highlighter = new KeywordHighlighter(term, { shouldBypassHighlight: () => bypass });
+  highlighter.setRules(rule(), true);
+  const chunk = Array.from({ length: 20 }, () => "log ERROR").join("\r\n") + "\r\n";
+  try {
+    await write(term, chunk);
+    await highlighter.whenSettled();
+    term.scrollToTop();
+    let refreshes = 0;
+    const refresh = term.refresh.bind(term);
+    term.refresh = (start, end) => { refreshes += 1; refresh(start, end); };
+    bypass = true;
+    await write(term, chunk);
+    const scrollRefreshes = refreshes;
+    refreshes = 0;
+    bypass = false;
+    await write(term, chunk);
+    assert.equal(refreshes, scrollRefreshes, "bulk callback must not add another history repaint");
+    term.scrollToBottom();
+    await write(term, chunk);
+    assert.equal(cellRgb(term, term.buffer.active.viewportY, "ERROR"), RED);
+  } finally {
+    highlighter.dispose();
+    term.dispose();
+  }
 });

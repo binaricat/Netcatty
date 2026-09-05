@@ -710,7 +710,10 @@ export interface TerminalLayerProps {
   onCreateLocalTerminal?: () => void;
   // Broadcast mode
   isBroadcastEnabled?: (workspaceId: string) => boolean;
+  isGlobalBroadcastEnabled?: boolean;
+  canUseGlobalBroadcast?: boolean;
   onToggleBroadcast?: (workspaceId: string) => void;
+  onToggleGlobalBroadcast?: () => void;
   // SFTP side panel
   updateHosts: (hosts: Host[]) => void;
   updateSnippets?: (snippets: Snippet[]) => void;
@@ -810,6 +813,9 @@ interface TerminalPaneProps {
   onSetWorkspaceFocusedSession?: (workspaceId: string, sessionId: string) => void;
   onSplitSession?: (sessionId: string, direction: SplitDirection) => void;
   isBroadcastEnabled?: (workspaceId: string) => boolean;
+  isGlobalBroadcastEnabled?: boolean;
+  canUseGlobalBroadcast?: boolean;
+  onToggleGlobalBroadcast?: () => void;
   onBroadcastInput: (
     data: string,
     sourceSessionId: string,
@@ -935,6 +941,9 @@ const terminalPanePropsAreEqual = (
   prev.onSetWorkspaceFocusedSession === next.onSetWorkspaceFocusedSession &&
   prev.onSplitSession === next.onSplitSession &&
   prev.isBroadcastEnabled === next.isBroadcastEnabled &&
+  prev.isGlobalBroadcastEnabled === next.isGlobalBroadcastEnabled &&
+  prev.canUseGlobalBroadcast === next.canUseGlobalBroadcast &&
+  prev.onToggleGlobalBroadcast === next.onToggleGlobalBroadcast &&
   prev.onBroadcastInput === next.onBroadcastInput &&
   prev.onBroadcastInterruptPriorityChange === next.onBroadcastInterruptPriorityChange &&
   prev.onToggleWorkspaceComposeBar === next.onToggleWorkspaceComposeBar &&
@@ -1233,6 +1242,9 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
   onSetWorkspaceFocusedSession,
   onSplitSession,
   isBroadcastEnabled,
+  isGlobalBroadcastEnabled,
+  canUseGlobalBroadcast,
+  onToggleGlobalBroadcast,
   onBroadcastInput,
   onBroadcastInterruptPriorityChange,
   onToggleWorkspaceComposeBar,
@@ -1459,7 +1471,9 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
     : undefined;
   const splitHorizontalHandler = splitHorizontalHandlersRef.current.get(session.id);
   const splitVerticalHandler = splitVerticalHandlersRef.current.get(session.id);
-  const broadcastEnabled = activeWorkspaceId ? !!isBroadcastEnabled?.(activeWorkspaceId) : false;
+  const broadcastEnabled = activeWorkspaceId
+    ? !!isBroadcastEnabled?.(activeWorkspaceId)
+    : (isGlobalBroadcastEnabled ?? false);
   const isHostEphemeral = !isSavedVaultHost(hostMap.get(host.id));
   const sessionAppearance = useMemo(
     () => resolveSessionAppearance({ host, isEphemeral: isHostEphemeral }),
@@ -1605,7 +1619,11 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
         onSplitHorizontal={onSplitSession ? splitHorizontalHandler : undefined}
         onSplitVertical={onSplitSession ? splitVerticalHandler : undefined}
         isBroadcastEnabled={broadcastEnabled}
-        onToggleBroadcast={inActiveWorkspace ? workspaceBroadcastHandler : undefined}
+        onToggleBroadcast={
+          inActiveWorkspace
+            ? workspaceBroadcastHandler
+            : (canUseGlobalBroadcast ? onToggleGlobalBroadcast : undefined)
+        }
         onToggleComposeBar={inActiveWorkspace ? onToggleWorkspaceComposeBar : undefined}
         isWorkspaceComposeBarOpen={inActiveWorkspace ? isComposeBarOpen : undefined}
         onBroadcastInput={broadcastEnabled ? onBroadcastInput : undefined}
@@ -1697,6 +1715,9 @@ interface TerminalPanesHostProps {
   onSetWorkspaceFocusedSession?: (workspaceId: string, sessionId: string) => void;
   onSplitSession?: (sessionId: string, direction: SplitDirection) => void;
   isBroadcastEnabled?: (workspaceId: string) => boolean;
+  isGlobalBroadcastEnabled?: boolean;
+  canUseGlobalBroadcast?: boolean;
+  onToggleGlobalBroadcast?: () => void;
   onBroadcastInput: (
     data: string,
     sourceSessionId: string,
@@ -1784,6 +1805,9 @@ const terminalPanesHostPropsAreEqual = (
   if (prev.onSetWorkspaceFocusedSession !== next.onSetWorkspaceFocusedSession) return false;
   if (prev.onSplitSession !== next.onSplitSession) return false;
   if (prev.isBroadcastEnabled !== next.isBroadcastEnabled) return false;
+  if (prev.isGlobalBroadcastEnabled !== next.isGlobalBroadcastEnabled) return false;
+  if (prev.canUseGlobalBroadcast !== next.canUseGlobalBroadcast) return false;
+  if (prev.onToggleGlobalBroadcast !== next.onToggleGlobalBroadcast) return false;
   if (prev.onBroadcastInput !== next.onBroadcastInput) return false;
   if (prev.onBroadcastInterruptPriorityChange !== next.onBroadcastInterruptPriorityChange) return false;
   if (prev.onToggleWorkspaceComposeBar !== next.onToggleWorkspaceComposeBar) return false;

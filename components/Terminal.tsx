@@ -212,6 +212,7 @@ import {
 import {
   releaseTerminalFlowBeforeHibernate,
 } from "./terminal/runtime/terminalSessionAttachment";
+import { resetTerminalLineTimestamps } from "./terminal/runtime/terminalLineTimestamps";
 import {
   flushPendingTerminalWritesBeforeHibernate,
   hasPendingTerminalWrites,
@@ -1631,6 +1632,9 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         }
         if (term) {
           term.reset();
+          // The buffer was just wiped; drop ledger stamps anchored to the old
+          // rows so the reconnect gutter cannot paint stale timestamps.
+          resetTerminalLineTimestamps(term);
           if (payload.snapshot) {
             await new Promise<void>((resolve) => term.write(payload.snapshot, resolve));
           }
