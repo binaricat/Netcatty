@@ -1192,3 +1192,33 @@ test("hibernate replay defers bulk viewport coloring but subsequent live output 
     term.dispose();
   }
 });
+
+
+test("bulk streaming does not recolor a scrolled-back history viewport", async () => {
+  const term = new XTerm({ allowProposedApi: true, cols: 80, rows: 6, scrollback: 100 });
+  let bypass = false;
+  const highlighter = new KeywordHighlighter(term, { shouldBypassHighlight: () => bypass });
+  highlighter.setRules(rule(), true);
+  const chunk = Array.from({ length: 20 }, () => "log ERROR").join("\r\n") + "\r\n";
+  try {
+    await write(term, chunk);
+    await highlighter.whenSettled();
+    term.scrollToTop();
+    let refreshes = 0;
+    const refresh = term.refresh.bind(term);
+    term.refresh = (start, end) => { refreshes += 1; refresh(start, end); };
+    bypass = true;
+    await write(term, chunk);
+    const scrollRefreshes = refreshes;
+    refreshes = 0;
+    bypass = false;
+    await write(term, chunk);
+    assert.equal(refreshes, scrollRefreshes, "bulk callback must not add another history repaint");
+    term.scrollToBottom();
+    await write(term, chunk);
+    assert.equal(cellRgb(term, term.buffer.active.viewportY, "ERROR"), RED);
+  } finally {
+    highlighter.dispose();
+    term.dispose();
+  }
+});

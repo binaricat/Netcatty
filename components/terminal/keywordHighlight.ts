@@ -431,6 +431,9 @@ export class KeywordHighlighter implements IDisposable {
           // shown before the async xterm parse finished): the entry snapshot
           // only froze the flood/rate decision, so check the live state here.
           && !isTerminalOutputInBackground(this.term)
+          // Appended logs should not add another repaint while reading history.
+          // Scroll/reveal handlers retain their existing recoloring behavior.
+          && this.term.buffer.active.viewportY === this.term.buffer.active.baseY
         ) {
           this.recolorVisible();
         }
