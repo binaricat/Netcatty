@@ -1105,6 +1105,14 @@ test("inactive close events preserve an already scheduled reconnect", async (t) 
   assert.ok(scheduled?.reconnectTimerCallback);
   assert.equal(scheduled.status, "connecting");
 
+  const pendingRetry = scheduled.reconnectTimerCallback;
+  statusListener?.("error", "connection closed");
+  assert.equal(scheduled.status, "connecting");
+  assert.equal(scheduled.error, "Reconnecting (1/5)...");
+  assert.equal(scheduled.reconnectTimerCallback, pendingRetry);
+  assert.deepEqual((await reconcileWithBackend()).gone, []);
+  assert.equal(getActiveConnection(reconnectRule.id), scheduled);
+
   statusListener?.("inactive");
 
   assert.equal(getActiveConnection(reconnectRule.id), scheduled);
