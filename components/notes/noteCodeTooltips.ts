@@ -1,5 +1,5 @@
 import { Prec } from "@codemirror/state";
-import { EditorView, tooltips } from "@codemirror/view";
+import { EditorView, getTooltip, showTooltip, tooltips } from "@codemirror/view";
 
 export interface NoteTooltipSpace {
   top: number;
@@ -10,7 +10,8 @@ export interface NoteTooltipSpace {
 
 /** True when the element clips horizontally overflowing descendants. */
 const clipsHorizontally = (style: CSSStyleDeclaration): boolean =>
-  style.overflowX !== "visible";
+  style.overflowX !== "visible" ||
+  /(^|\s)(strict|content|paint)(\s|$)/.test(style.contain || "");
 
 /** True when the element clips vertically overflowing descendants. Paint
  *  containment (strict/content/paint) also clips and captures fixed
@@ -66,6 +67,14 @@ export const getNoteTooltipSpace = (
   return space;
 };
 
+export const constrainNoteCodeTooltipWidth = (view: EditorView, space: NoteTooltipSpace): void => {
+  const width = `${Math.max(0, space.right - space.left)}px`;
+  for (const tooltip of view.state.facet(showTooltip)) {
+    if (!tooltip) continue;
+    getTooltip(view, tooltip)?.dom.style.setProperty("--note-tooltip-width", width);
+  }
+};
+
 export const createNoteCodeTooltipExtensions = (
   parent: HTMLElement | undefined,
   getBoundsRoot?: () => HTMLElement | null,
@@ -77,7 +86,13 @@ export const createNoteCodeTooltipExtensions = (
       // Tooltips escape those clips via the global parent, so constrain their
       // placement to the owning notes pane instead of the whole window.
       tooltipSpace: getBoundsRoot
-        ? (view: EditorView) => getNoteTooltipSpace(getBoundsRoot(), view.dom.ownerDocument)
+        ? (view: EditorView) => {
+          const space = getNoteTooltipSpace(getBoundsRoot(), view.dom.ownerDocument);
+          // CodeMirror constrains coordinates and height, but not width. Set
+          // the available width; its ResizeObserver remeasures after resizing.
+          constrainNoteCodeTooltipWidth(view, space);
+          return space;
+        }
         : undefined,
     }),
   ),
@@ -88,6 +103,14 @@ export const createNoteCodeTooltipExtensions = (
       backgroundColor: "hsl(var(--popover))",
       color: "hsl(var(--popover-foreground))",
       border: "1px solid hsl(var(--border))",
+    },
+    ".cm-tooltip-autocomplete": {
+      maxWidth: "var(--note-tooltip-width, 95vw)",
+      boxSizing: "border-box",
+    },
+    ".cm-tooltip.cm-tooltip-autocomplete > ul": {
+      minWidth: "min(250px, max(0px, calc(var(--note-tooltip-width, 95vw) - 2px)))",
+      maxWidth: "min(700px, max(0px, calc(var(--note-tooltip-width, 95vw) - 2px)))",
     },
     ".cm-tooltip-autocomplete > ul > li[aria-selected]": {
       backgroundColor: "hsl(var(--accent))",

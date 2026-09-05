@@ -3,7 +3,7 @@ import test from "node:test";
 import { JSDOM } from "jsdom";
 import { EditorState } from "@codemirror/state";
 import { EditorView, showTooltip } from "@codemirror/view";
-import { createNoteCodeTooltipExtensions, getNoteTooltipSpace } from "./noteCodeTooltips";
+import { constrainNoteCodeTooltipWidth, createNoteCodeTooltipExtensions, getNoteTooltipSpace } from "./noteCodeTooltips";
 
 const stubRect = (element: Element, top: number, left: number, right: number, bottom: number) => {
   element.getBoundingClientRect = () => ({
@@ -59,6 +59,10 @@ test("note tooltips escape clipped code blocks and disappear with their editor",
     for (const themeClass of view.themeClasses.split(" ")) {
       assert.ok(tooltip.parentElement?.classList.contains(themeClass));
     }
+    constrainNoteCodeTooltipWidth(view, { top: 0, left: 100, right: 300, bottom: 400 });
+    assert.equal((tooltip as HTMLElement).style.getPropertyValue("--note-tooltip-width"), "200px");
+    constrainNoteCodeTooltipWidth(view, { top: 0, left: 100, right: 250, bottom: 400 });
+    assert.equal((tooltip as HTMLElement).style.getPropertyValue("--note-tooltip-width"), "150px");
     view.destroy();
     view = undefined;
     assert.equal(dom.window.document.querySelector(".cm-tooltip"), null);
@@ -105,7 +109,7 @@ test("note tooltip space honors paint containment without overflow clipping", ()
   const pane = dom.window.document.querySelector("#pane") as HTMLElement;
   const note = dom.window.document.querySelector("#note") as HTMLElement;
   stubRect(pane, 0, 0, 800, 600);
-  stubRect(note, 50, 50, 750, 900);
+  stubRect(note, 50, -50, 850, 900);
   const realGetComputedStyle = dom.window.getComputedStyle.bind(dom.window);
   dom.window.getComputedStyle = ((element: Element) => ({
     ...realGetComputedStyle(element),
@@ -116,8 +120,8 @@ test("note tooltip space honors paint containment without overflow clipping", ()
   try {
     assert.deepEqual(getNoteTooltipSpace(note, dom.window.document), {
       top: 50,
-      left: 50,
-      right: 750,
+      left: 0,
+      right: 800,
       bottom: 600,
     });
   } finally {
