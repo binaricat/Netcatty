@@ -695,9 +695,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # The CDN security mirror advertises Bullseye packages that return 404.
-          # Use Debian's security endpoint while retaining Bullseye compatibility.
-          sed -i 's|deb.debian.org/debian-security|security.debian.org/debian-security|g' /etc/apt/sources.list
+          # Both security endpoints can lack files advertised in their indexes.
+          # Let APT try the other official endpoint for each missing download.
+          printf 'http://deb.debian.org/debian-security\tpriority:1\nhttp://security.debian.org/debian-security\tpriority:2\n' > /etc/apt/security-mirrors.txt
+          sed -i 's|http://deb.debian.org/debian-security|mirror+file:/etc/apt/security-mirrors.txt|g' /etc/apt/sources.list
           apt-get -o Acquire::Retries=4 update
           apt-get -o Acquire::Retries=4 install -y curl build-essential python3 git libfuse2 file rpm \
             libarchive-tools \
