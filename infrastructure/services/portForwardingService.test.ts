@@ -7,6 +7,7 @@ import {
   getActiveConnection,
   hasActivePortForwardRuntime,
   reconcileWithBackend,
+  resetReconnectAttempts,
   setReconnectCallback,
   startAllPortForwards,
   startPortForward,
@@ -1004,6 +1005,42 @@ for (const autoStartAfterReplacement of [false, true]) {
     assert.equal(getActiveConnection(reconnectRule.id)?.status, "active");
   });
 }
+
+test("final retry error followed by inactive preserves exhaustion until explicit recovery", async (t) => {
+  let statusListener: ((status: PortForwardingRule["status"]) => void) | undefined;
+  let reconnects = 0;
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { netcatty: {
+      startPortForward: async () => ({ success: true }),
+      stopPortForwardByRuleId: async () => ({ stopped: 1, failed: 0, errors: [] }),
+      onPortForwardStatus: (_id: string, listener: typeof statusListener) => {
+        statusListener = listener;
+        return () => undefined;
+      },
+    } },
+  });
+  const reconnectRule = rule({ id: "exhausted-inactive-rule", autoStart: true });
+  setReconnectCallback(async () => { reconnects += 1; return { success: true }; });
+  t.after(async () => {
+    setReconnectCallback(null);
+    await stopAndCleanupRuleAndWait(reconnectRule.id);
+  });
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  await startPortForward(reconnectRule, host(), [], [], [], () => undefined, true);
+  const connection = getActiveConnection(reconnectRule.id)!;
+  connection.reconnectAttempts = 5;
+  statusListener?.("error");
+  statusListener?.("inactive");
+  t.mock.timers.tick(3000);
+  assert.equal(reconnects, 0);
+  assert.equal(getActiveConnection(reconnectRule.id), undefined);
+  assert.equal(resetReconnectAttempts(reconnectRule.id), true);
+  await startPortForward(reconnectRule, host(), [], [], [], () => undefined, true);
+  statusListener?.("inactive");
+  t.mock.timers.tick(3000);
+  assert.equal(reconnects, 1);
+});
 
 test("inactive close events preserve an already scheduled reconnect", async (t) => {
   let statusListener: ((status: PortForwardingRule["status"], error?: string | null) => void) | undefined;

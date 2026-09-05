@@ -1031,6 +1031,7 @@ export const startPortForward = async (
         if (
           !manualStopsInProgress.has(rule.id)
           && !rulesPendingCleanup.has(rule.id)
+          && !exhaustedReconnectRules.has(rule.id)
         ) {
           const reconnectScheduled = scheduleReconnectIfNeeded(
             rule.id,
