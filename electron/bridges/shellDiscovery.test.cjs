@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 
 const {
   isWindowsAppExecutionAlias,
+  probeArgsFor,
   selectExecutableCandidate,
   windowsAppsAliasPrefix,
 } = require("./shellDiscovery.cjs");
@@ -174,6 +175,24 @@ test("selectExecutableCandidate falls back to the alias when no real install exi
     ], deps),
     ALIAS_PWSH,
   );
+});
+
+test("probeArgsFor suppresses the profile for PowerShell-family aliases", () => {
+  // The spawn probe must never execute the user's PowerShell profile.
+  assert.deepEqual(probeArgsFor(ALIAS_PWSH), [
+    "-NoProfile",
+    "-NonInteractive",
+    "-Command",
+    "exit",
+  ]);
+  assert.deepEqual(probeArgsFor("C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"), [
+    "-NoProfile",
+    "-NonInteractive",
+    "-Command",
+    "exit",
+  ]);
+  // Non-PowerShell candidates keep the plain empty-stdin probe.
+  assert.deepEqual(probeArgsFor("C:\\Users\\u\\AppData\\Local\\Microsoft\\WindowsApps\\wt.exe"), []);
 });
 
 test("selectExecutableCandidate ignores empty candidates", () => {

@@ -129,22 +129,43 @@ function isWindowsAppExecutionAlias(candidate, env = process.env, platform) {
 }
 
 /**
+ * Arguments that make a PowerShell-family executable exit immediately
+ * without loading the user's profile. The probe only needs to prove that
+ * CreateProcess can resolve the AppExecLink — running the user's normal
+ * shell initialization would be a surprising side effect (profiles may
+ * write, hit the network, or block on input, which would stall the main
+ * process until the probe timeout and then kill the profile midway).
+ *
+ * @param {string} candidate  Executable path.
+ * @returns {string[]} Extra arguments, or an empty list.
+ */
+function probeArgsFor(candidate) {
+  const base = path.win32.basename(String(candidate || "")).toLowerCase();
+  if (base === "pwsh.exe" || base === "powershell.exe" || base === "pwsh" || base === "powershell") {
+    return ["-NoProfile", "-NonInteractive", "-Command", "exit"];
+  }
+  return [];
+}
+
+/**
  * Probe whether a WindowsApps alias candidate is actually launchable.
  *
  * Node cannot read the reparse tag of an AppExecLink, so `statSync` failing
  * while `lstatSync` succeeds matches both a live alias and a stale or broken
  * reparse point (e.g. after an incomplete package removal). The only reliable
  * pure-JS check is to let CreateProcess resolve it: a live alias spawns, a
- * stale one fails to spawn. The spawned console host receives empty stdin, so
- * it exits immediately instead of waiting for input; a timeout still proves
- * the process started, which is all we care about.
+ * stale one fails to spawn. PowerShell-family candidates are probed with
+ * `-NoProfile -NonInteractive -Command exit` so the user's profile is never
+ * executed; other candidates receive empty stdin so they exit immediately
+ * instead of waiting for input. A timeout still proves the process started,
+ * which is all we care about.
  *
  * @param {string} candidate  WindowsApps alias path (AppExecLink reparse point).
  * @returns {boolean} True when the process could be started.
  */
 function probeAliasLaunchable(candidate) {
   try {
-    const result = spawnSync(candidate, [], {
+    const result = spawnSync(candidate, probeArgsFor(candidate), {
       timeout: 5000,
       windowsHide: true,
       input: "",
@@ -830,5 +851,6 @@ module.exports = {
   isWindowsAppExecutionAlias,
   selectExecutableCandidate,
   probeAliasLaunchable,
+  probeArgsFor,
   mapWslDistroIcon,
 };
