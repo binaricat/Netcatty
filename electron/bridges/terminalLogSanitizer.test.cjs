@@ -260,12 +260,12 @@ test("SGR colors are emitted as themeable CSS variables with hex fallbacks", () 
   assert.match(html, /color:\s*#f14c4c; background-color:\s*#2472c8/);
 });
 
-test("256-color base palette uses CSS variables; cube colors stay hex", () => {
+test("256-color base and cube foregrounds use themeable variables", () => {
   const renderer = createTerminalTextRenderer();
   renderer.feed("\x1b[38;5;1mbase\x1b[0m \x1b[38;5;208mcube\n");
   const html = renderer.toHtmlContent();
   assert.match(html, /color:\s*var\(--ansi-1, #cd3131\)[^"]*"[^>]*>base/);
-  assert.match(html, /color:\s*#ff8700[^"]*"[^>]*>cube/);
+  assert.match(html, /color:\s*var\(--term-custom-ff8700, #ff8700\)[^"]*"[^>]*>cube/);
 });
 
 test("inverse text falls back to themeable default background/foreground", () => {

@@ -934,8 +934,12 @@ test("html wrapper adapts to light/dark browser color scheme", () => {
 });
 
 test("all light-mode ANSI foregrounds remain readable on the default background", () => {
-  const { wrapTerminalHtmlContent } = loadBridgeWithDialog({});
-  const lightCss = wrapTerminalHtmlContent("hello", "host", 0).split("@media")[0];
+  const { terminalDataToHtml } = loadBridgeWithDialog({});
+  let data = "";
+  for (let index = 0; index < 256; index++) data += `\x1b[38;5;${index}mcolor ${index}\x1b[0m\n`;
+  data += "\x1b[38;2;255;255;255mwhite\x1b[0m\n\x1b[38;2;255;255;0myellow\x1b[0m\n\x1b[38;2;18;52;86mdark\x1b[0m";
+  const html = terminalDataToHtml(data, "host", 0);
+  const [lightCss, darkCss] = html.split("@media");
   const luminance = (hex) => {
     const channels = hex.match(/[a-f0-9]{2}/gi).map((channel) => {
       const value = parseInt(channel, 16) / 255;
@@ -944,11 +948,16 @@ test("all light-mode ANSI foregrounds remain readable on the default background"
     return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
   };
   const background = luminance(lightCss.match(/--term-default-bg:\s*(#[a-f0-9]{6})/i)[1]);
-  const palette = [...lightCss.matchAll(/--ansi-(\d+):\s*(#[a-f0-9]{6})/gi)];
-  assert.equal(palette.length, 16);
+  const palette = [...lightCss.matchAll(/--(ansi-\d+|term-custom-[a-f0-9]{6}):\s*(#[a-f0-9]{6})/gi)];
+  assert.equal(palette.length, 257);
   for (const [, index, color] of palette) {
     const foreground = luminance(color);
     const contrast = (Math.max(background, foreground) + 0.05) / (Math.min(background, foreground) + 0.05);
     assert.ok(contrast >= 4.5, `ANSI ${index} (${color}) contrast ${contrast.toFixed(2)} is below 4.5:1`);
   }
+  for (const [, hex, color] of lightCss.matchAll(/--term-custom-([a-f0-9]{6}):\s*(#[a-f0-9]{6})/gi)) {
+    assert.ok(darkCss.includes(`--term-custom-${hex}: #${hex};`));
+    if (1.05 / (luminance(hex) + 0.05) >= 4.5) assert.equal(color, `#${hex}`);
+  }
+  assert.match(html, /color: var\(--term-custom-ffffff, #ffffff\)[^>]*>white/);
 });

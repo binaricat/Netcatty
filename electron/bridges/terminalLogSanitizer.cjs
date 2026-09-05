@@ -606,6 +606,9 @@ function styleToCss(style) {
     const originalColor = (color) => color?.replace(/var\(--[\w-]+, (#[a-f0-9]{6})\)/g, "$1");
     fg = originalColor(fg) || DEFAULT_FOREGROUND;
     bg = originalColor(bg);
+  } else if (fg?.startsWith("#")) {
+    // The wrapper supplies a readable light variant for extended/true colors.
+    fg = `var(--term-custom-${fg.slice(1)}, ${fg})`;
   }
   if (fg) declarations.push(`color: ${fg}`);
   if (bg) declarations.push(`background-color: ${bg}`);

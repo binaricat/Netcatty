@@ -77,7 +77,35 @@ function terminalPlainTextToHtml(plainText, hostLabel, timestamp) {
   return wrapTerminalHtmlContent(htmlContent, hostLabel, timestamp);
 }
 
+function buildExtendedForegroundPalette(htmlContent) {
+  const colors = new Set(Array.from(
+    htmlContent.matchAll(/var\(--term-custom-([a-f0-9]{6}), #[a-f0-9]{6}\)/g),
+    (match) => match[1],
+  ));
+  const light = [];
+  const dark = [];
+  for (const hex of colors) {
+    const channels = hex.match(/../g).map((channel) => parseInt(channel, 16));
+    const luminance = (rgb) => rgb.reduce((sum, channel, index) => {
+      const value = channel / 255;
+      const linear = value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+      return sum + linear * [0.2126, 0.7152, 0.0722][index];
+    }, 0);
+    let adjusted = channels;
+    // Scale all channels together to retain the hue. Stop at normal-text
+    // contrast against the light page; dark mode retains the exact SGR color.
+    for (let scale = 0.99; 1.05 / (luminance(adjusted) + 0.05) < 4.5; scale -= 0.01) {
+      adjusted = channels.map((channel) => Math.floor(channel * Math.max(0, scale)));
+    }
+    const lightHex = adjusted.map((channel) => channel.toString(16).padStart(2, "0")).join("");
+    light.push(`--term-custom-${hex}: #${lightHex};`);
+    dark.push(`--term-custom-${hex}: #${hex};`);
+  }
+  return { light: light.join("\n      "), dark: dark.join("\n        ") };
+}
+
 function wrapTerminalHtmlContent(htmlContent, hostLabel, timestamp) {
+  const extendedPalette = buildExtendedForegroundPalette(htmlContent);
   const dateStr = new Date(timestamp).toLocaleString();
   const safeHostLabel = escapeHtml(hostLabel || "Unknown");
   const safeDateStr = escapeHtml(dateStr);
@@ -113,6 +141,7 @@ function wrapTerminalHtmlContent(htmlContent, hostLabel, timestamp) {
       --ansi-13: #bc05bc;
       --ansi-14: #007c9b;
       --ansi-15: #767676;
+      ${extendedPalette.light}
     }
     @media (prefers-color-scheme: dark) {
       :root {
@@ -136,6 +165,7 @@ function wrapTerminalHtmlContent(htmlContent, hostLabel, timestamp) {
         --ansi-13: #d670d6;
         --ansi-14: #29b8db;
         --ansi-15: #ffffff;
+        ${extendedPalette.dark}
       }
     }
     body {
