@@ -1657,3 +1657,23 @@ test("ordinary text resembling the probe prefix is eventually delivered", async 
     preload.cleanup();
   }
 });
+
+
+test("slow echo-disabled probe prompt stays hidden across delayed flushes", async () => {
+  const preload = loadPreloadWithFakeElectron();
+  try {
+    const received = [];
+    preload.api.onSessionData("slow-probe", (chunk) => received.push(chunk));
+    const send = (data) => preload.handlers.get("netcatty:data")({}, { sessionId: "slow-probe", data });
+    send("__NCMCP_probe___Q");
+    await sleep(120);
+    assert.equal(received.join(""), "");
+    send("slow prompt> ");
+    await sleep(120);
+    assert.equal(received.join(""), "");
+    send("\r\n__NCMCP_probe___S\r\nfile.txt\r\n");
+    assert.equal(received.join(""), "file.txt\r\n");
+  } finally {
+    preload.cleanup();
+  }
+});

@@ -194,7 +194,9 @@ function filterMcpChunk(sessionId, chunk, meta) {
           _mcpLineMetas.delete(sessionId);
           _mcpDroppingWrappedLine.add(sessionId);
         }
-        if (droppedAny) _mcpDroppingWrappedLine.add(sessionId);
+        if (droppedAny || /__NCMCP_[A-Za-z0-9_]+_Q/.test(tail)) {
+          _mcpDroppingWrappedLine.add(sessionId);
+        }
       } else {
         result += tail; // safe to display immediately
       }
@@ -252,7 +254,9 @@ function flushMcpBufferedOutput(sessionId) {
     _mcpLineMetas.delete(sessionId);
     _mcpFlushTimers.delete(sessionId);
     if (_mcpDroppingWrappedLine.has(sessionId)) {
-      _mcpDroppingWrappedLine.delete(sessionId);
+      // A timed flush is not a line boundary. Keep discarding a known
+      // internal line until its newline arrives, including slow prompts
+      // between the probe completion marker and an echo-disabled wrapper.
       if (heldMeta) _mcpPendingMetas.set(sessionId, mergeTerminalDataMeta(_mcpPendingMetas.get(sessionId), heldMeta));
       return;
     }
