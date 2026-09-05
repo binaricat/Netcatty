@@ -1346,3 +1346,22 @@ test("cancelled live probe resets display once without injecting a command", asy
     assert.ok(writes.every((data) => !data.includes(`${job.marker}_R`)));
   }
 });
+
+test("posix wrapper avoids history expansion in interactive zsh", (t) => {
+  const marker = "__NCMCP_ZSH_HISTORY__";
+  const wrapped = buildWrappedCommand("echo HISTORY_PROBE", "posix", marker);
+  const result = spawnSync("zsh", ["-f", "-i"], {
+    input: `${wrapped}exit\n`,
+    encoding: "utf8",
+    env: { ...process.env, TERM: "dumb" },
+  });
+  if (result.error?.code === "ENOENT") {
+    t.skip("zsh is not installed");
+    return;
+  }
+  assert.equal(result.error, undefined);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, new RegExp(`${marker}_E:0`));
+  assert.match(result.stdout, /HISTORY_PROBE/);
+  assert.doesNotMatch(result.stderr, /event not found/);
+});

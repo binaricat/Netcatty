@@ -215,8 +215,10 @@ function buildPosixWrapperBody(command, marker, startFormat) {
   // older Bash versions can expose HISTCMD as the next history number.
   // builtin history bypasses user aliases and functions. The unset-safe guard
   // leaves non-Bash shells alone, including shells with nounset enabled.
+  // Use ^ for the Bash bracket negation: ! triggers interactive zsh history
+  // expansion before the Bash-only guard can run.
   const historyCleanup =
-    `[ -n "\${BASH_VERSION-}" ] && { ${marker}_h=$(builtin history 1 2>/dev/null); case "$${marker}_h" in *${marker}*) ${marker}_h=\${${marker}_h#"\${${marker}_h%%[![:space:]]*}"}; builtin history -d "\${${marker}_h%%[[:space:]]*}" 2>/dev/null ;; esac; }`;
+    `[ -n "\${BASH_VERSION-}" ] && { ${marker}_h=$(builtin history 1 2>/dev/null); case "$${marker}_h" in *${marker}*) ${marker}_h=\${${marker}_h#"\${${marker}_h%%[^[:space:]]*}"}; builtin history -d "\${${marker}_h%%[[:space:]]*}" 2>/dev/null ;; esac; }`;
   return (
     `${marker}=0; ${cmdAssign}; { printf '${startFormat}' '${marker}_S'; trap ':' INT; ( ${noPager}eval "$${marker}_cmd" ); __NCMCP_rc=$?; trap - INT; printf '%s\\n' '${marker}_E:'\"$__NCMCP_rc\"; ${historyCleanup}; (exit $__NCMCP_rc); }`
   );
