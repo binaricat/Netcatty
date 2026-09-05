@@ -225,6 +225,7 @@ const scheduleReconnectIfNeeded = (
 
   const currentConn = activeConnections.get(ruleId);
   if (currentConn?.reconnectSuppressed) return false;
+  if (currentConn?.reconnectTimerCallback) return true;
   const attempts = (currentConn?.reconnectAttempts ?? 0) + 1;
 
   if (attempts <= MAX_RECONNECT_ATTEMPTS) {

@@ -1042,6 +1042,40 @@ test("final retry error followed by inactive preserves exhaustion until explicit
   assert.equal(reconnects, 1);
 });
 
+for (const rejects of [false, true]) {
+  test(`inactive during failed startup schedules only one retry (${rejects ? "throw" : "reply"})`, async (t) => {
+    let statusListener: ((status: PortForwardingRule["status"]) => void) | undefined;
+    const reconnectRule = rule({ id: `inactive-start-failed-${rejects}`, autoStart: true });
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: { netcatty: {
+        startPortForward: async () => {
+          getActiveConnection(reconnectRule.id)!.reconnectAttempts = 4;
+          statusListener?.("inactive");
+          if (rejects) throw new Error("SSH connection closed before ready");
+          return { success: false, error: "SSH connection closed before ready" };
+        },
+        stopPortForwardByRuleId: async () => ({ stopped: 1, failed: 0, errors: [] }),
+        onPortForwardStatus: (_id: string, listener: typeof statusListener) => {
+          statusListener = listener;
+          return () => undefined;
+        },
+      } },
+    });
+    let reconnects = 0;
+    setReconnectCallback(async () => { reconnects += 1; return { success: true }; });
+    t.after(async () => {
+      setReconnectCallback(null);
+      await stopAndCleanupRuleAndWait(reconnectRule.id);
+    });
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    await startPortForward(reconnectRule, host(), [], [], [], () => undefined, true);
+    assert.equal(getActiveConnection(reconnectRule.id)?.reconnectAttempts, 5);
+    t.mock.timers.tick(3000);
+    assert.equal(reconnects, 1);
+  });
+}
+
 test("inactive close events preserve an already scheduled reconnect", async (t) => {
   let statusListener: ((status: PortForwardingRule["status"], error?: string | null) => void) | undefined;
   Object.defineProperty(globalThis, "window", {
