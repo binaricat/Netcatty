@@ -890,6 +890,36 @@ test("inactive backend events remove the runtime tunnel immediately", async () =
   assert.equal(getActiveConnection(disconnectedRule.id), undefined);
 });
 
+test("auto-start rules reconnect after an unexpected inactive event", async (t) => {
+  let statusListener: ((status: PortForwardingRule["status"], error?: string | null) => void) | undefined;
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: {
+      netcatty: {
+        startPortForward: async () => ({ success: true }),
+        stopPortForwardByRuleId: async () => ({ stopped: 1, failed: 0, errors: [] }),
+        onPortForwardStatus: (_tunnelId: string, listener: typeof statusListener) => {
+          statusListener = listener;
+          return () => undefined;
+        },
+      },
+    },
+  });
+  const reconnectRule = rule({ id: "inactive-event-reconnect-rule" });
+  setReconnectCallback(async () => ({ success: true }));
+  t.after(async () => {
+    setReconnectCallback(null);
+    await stopAndCleanupRuleAndWait(reconnectRule.id);
+  });
+
+  await startPortForward(reconnectRule, host(), [], [], [], () => undefined, true);
+  statusListener?.("inactive");
+
+  const connection = getActiveConnection(reconnectRule.id);
+  assert.ok(connection?.reconnectTimerCallback);
+  assert.equal(connection.status, "connecting");
+});
+
 test("inactive close events preserve an already scheduled reconnect", async (t) => {
   let statusListener: ((status: PortForwardingRule["status"], error?: string | null) => void) | undefined;
   Object.defineProperty(globalThis, "window", {

@@ -1018,6 +1018,21 @@ export const startPortForward = async (
           conn.locallyInitiated = false;
           return;
         }
+        if (
+          !manualStopsInProgress.has(rule.id)
+          && !rulesPendingCleanup.has(rule.id)
+        ) {
+          const reconnectScheduled = scheduleReconnectIfNeeded(
+            rule.id,
+            enableReconnect,
+            onStatusChange,
+          );
+          if (reconnectScheduled) {
+            conn?.unsubscribe?.();
+            if (conn) conn.unsubscribe = undefined;
+            return;
+          }
+        }
         conn?.unsubscribe?.();
         clearReconnectTimer(rule.id);
         activeConnections.delete(rule.id);
