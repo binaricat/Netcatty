@@ -18,6 +18,10 @@ class FakePty extends EventEmitter {
 
   write(data) {
     this.writes.push(String(data));
+    if (String(data).includes("command sh -c")) {
+      const marker = String(data).match(/(__NCMCP_[A-Za-z0-9_]+__)/)[1];
+      queueMicrotask(() => this.emit("data", `${marker}_P:\n`));
+    }
   }
 }
 
@@ -49,7 +53,7 @@ function createFakeEvent() {
 }
 
 function extractMarker(writes) {
-  const wrapper = writes.find((entry) => entry.includes("__NCMCP_"));
+  const wrapper = writes.find((entry) => entry.includes("__NCMCP_") && !entry.includes("command sh -c"));
   assert.ok(wrapper, "expected wrapped command to be written to the PTY");
   const match = wrapper.match(/(__NCMCP_[A-Za-z0-9_]+__)/);
   assert.ok(match, "expected command wrapper to contain an MCP marker");
@@ -257,7 +261,7 @@ test("worker background job probes unset remote shellKind before wrapping", asyn
   // Login fish is a soft hint (not pinned); wrapper should be fish-native.
   assert.equal(sessions.get("ssh-fish").shellKind, undefined);
   assert.equal(sessions.get("ssh-fish")._loginShellKind, "fish");
-  const wrapper = pty.writes.find((entry) => entry.includes("__NCMCP_"));
+  const wrapper = pty.writes.find((entry) => entry.includes("__NCMCP_") && !entry.includes("command sh -c"));
   assert.match(wrapper, /set -l __NCMCP_.*_cmd/);
   assert.doesNotMatch(wrapper, / sh -c '/);
 
@@ -342,7 +346,7 @@ test("worker chat cancel during shellKind probe aborts job start before PTY writ
   assert.equal(started.ok, false);
   assert.equal(started.error, "Cancelled");
   assert.equal(
-    pty.writes.filter((entry) => entry.includes("__NCMCP_")).length,
+    pty.writes.filter((entry) => entry.includes("__NCMCP_") && !entry.includes("command sh -c")).length,
     0,
     "cancelled pending start must not type a wrapper into the PTY",
   );
@@ -378,7 +382,7 @@ test("worker exec keeps shell-selected defaults: powershell frees $(), dangerous
   });
   await nextTick();
   assert.ok(
-    pty.writes.some((entry) => entry.includes("__NCMCP_")),
+    pty.writes.some((entry) => entry.includes("__NCMCP_") && !entry.includes("command sh -c")),
     "expected the unblocked command to reach the PTY",
   );
   await allowedPromise.catch(() => {});
@@ -417,7 +421,7 @@ test("worker exec honors an explicitly empty configured blocklist", async () => 
   await nextTick();
 
   assert.ok(
-    pty.writes.some((entry) => entry.includes("__NCMCP_")),
+    pty.writes.some((entry) => entry.includes("__NCMCP_") && !entry.includes("command sh -c")),
     "disabled defaults must allow the command to reach the PTY wrapper",
   );
   await execution.catch(() => {});
@@ -482,7 +486,7 @@ test("worker exec on an unclassified posix session still blocks command substitu
   assert.equal(blocked.ok, false);
   assert.match(blocked.error, /Command blocked by safety policy/);
   assert.equal(
-    pty.writes.filter((entry) => entry.includes("__NCMCP_")).length,
+    pty.writes.filter((entry) => entry.includes("__NCMCP_") && !entry.includes("command sh -c")).length,
     0,
     "blocked commands must not reach the PTY",
   );
