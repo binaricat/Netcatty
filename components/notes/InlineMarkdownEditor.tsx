@@ -1206,7 +1206,13 @@ export const InlineMarkdownEditor = React.memo(
       codeBlockLanguages: NOTE_CODE_BLOCK_LANGUAGES,
       codeMirrorExtensions: [
         ...NOTE_CODE_MIRROR_EXTENSIONS,
-        ...createNoteCodeTooltipExtensions(typeof document === "undefined" ? undefined : document.body),
+        ...createNoteCodeTooltipExtensions(
+          typeof document === "undefined" ? undefined : document.body,
+          // Tooltips escape clipped code blocks via the body parent; bound
+          // their placement to this notes editor so a completion near a pane
+          // edge flips or shrinks instead of rendering over an adjacent pane.
+          () => containerRef.current,
+        ),
       ],
     }),
     markdownShortcutPlugin(),
