@@ -213,7 +213,10 @@ function probeAliasLaunchable(candidate, deps = {}) {
  * disabled alias) stats cleanly and is rejected.
  *
  * Non-alias candidates win over alias candidates so a real install (MSI,
- * zip, Chocolatey…) is still preferred when both are on PATH.
+ * zip, Chocolatey…) is still preferred when both are on PATH. The launch
+ * probe for alias candidates is deferred until after the full scan: the
+ * probe spawns a process (up to a five-second timeout), so it must not run
+ * while a later regular candidate may make the result moot.
  *
  * @param {string[]} candidates  Ordered candidate paths.
  * @param {{fs?: typeof import("node:fs"), env?: NodeJS.ProcessEnv, platform?: string, probe?: (candidate: string) => boolean}} [deps]  Injectable for tests.
@@ -246,10 +249,9 @@ function selectExecutableCandidate(candidates, deps = {}) {
       } catch (_lstatErr) {
         continue;
       }
-      // lstatSync cannot distinguish a live AppExecLink from a stale or
-      // broken one (both fail statSync with EACCES), so probe launchability
-      // before accepting it as the fallback shell.
-      if (!probe(candidate)) continue;
+      // Record the reparse-point alias as the fallback candidate, but do
+      // NOT probe yet — the probe spawns a process and must be deferred
+      // until we know no regular candidate exists (see after the loop).
       aliasFallback = candidate;
       continue;
     }
@@ -258,6 +260,11 @@ function selectExecutableCandidate(candidates, deps = {}) {
     return candidate;
   }
 
+  // No regular candidate won, so the recorded alias fallback is the last
+  // option. lstatSync cannot distinguish a live AppExecLink from a stale or
+  // broken one (both fail statSync with EACCES), so confirm launchability
+  // with the spawn probe before accepting it.
+  if (aliasFallback && !probe(aliasFallback)) return null;
   return aliasFallback;
 }
 
