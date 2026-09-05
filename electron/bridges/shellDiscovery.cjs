@@ -136,8 +136,13 @@ function isWindowsAppExecutionAlias(candidate, env = process.env, platform) {
  * write, hit the network, or block on input, which would stall the main
  * process until the probe timeout and then kill the profile midway).
  *
+ * An empty list means "do not probe": there is no argument set that
+ * guarantees the candidate exits immediately without side effects, so
+ * callers must never spawn it. See `probeAliasLaunchable`.
+ *
  * @param {string} candidate  Executable path.
- * @returns {string[]} Extra arguments, or an empty list.
+ * @returns {string[]} Extra arguments, or an empty list when the candidate
+ *   must not be probed.
  */
 function probeArgsFor(candidate) {
   const base = path.win32.basename(String(candidate || "")).toLowerCase();
@@ -154,18 +159,28 @@ function probeArgsFor(candidate) {
  * while `lstatSync` succeeds matches both a live alias and a stale or broken
  * reparse point (e.g. after an incomplete package removal). The only reliable
  * pure-JS check is to let CreateProcess resolve it: a live alias spawns, a
- * stale one fails to spawn. PowerShell-family candidates are probed with
- * `-NoProfile -NonInteractive -Command exit` so the user's profile is never
- * executed; other candidates receive empty stdin so they exit immediately
- * instead of waiting for input. A timeout still proves the process started,
- * which is all we care about.
+ * stale one fails to spawn.
+ *
+ * Only the PowerShell family is probed. `probeArgsFor()` returns
+ * `-NoProfile -NonInteractive -Command exit` for those, so the probe is
+ * guaranteed to exit immediately without running the user's profile.
+ * Any other WindowsApps alias (e.g. `python.exe`, `wt.exe`) is NOT probed:
+ * spawning an arbitrary alias with no arguments can open a GUI or the
+ * Microsoft Store, or block the Electron main process until the probe
+ * timeout. Unknown aliases are therefore treated as not launchable.
  *
  * @param {string} candidate  WindowsApps alias path (AppExecLink reparse point).
+ * @param {{spawnSync?: typeof import("node:child_process").spawnSync}} [deps]  Injectable for tests.
  * @returns {boolean} True when the process could be started.
  */
-function probeAliasLaunchable(candidate) {
+function probeAliasLaunchable(candidate, deps = {}) {
+  const spawn = deps.spawnSync || spawnSync;
+  // Restrict the probe to candidates we know launch headlessly and exit
+  // immediately; anything else would be spawned with no arguments.
+  const args = probeArgsFor(candidate);
+  if (args.length === 0) return false;
   try {
-    const result = spawnSync(candidate, probeArgsFor(candidate), {
+    const result = spawn(candidate, args, {
       timeout: 5000,
       windowsHide: true,
       input: "",
@@ -192,7 +207,9 @@ function probeAliasLaunchable(candidate) {
  * the full alias path. For those, fall back to `fs.lstatSync()`, which
  * still sees the reparse point itself, and then confirm launchability with
  * a spawn probe — `lstatSync` alone cannot tell a live alias from a stale
- * reparse point. A zero-byte plain file in the same directory (e.g. a
+ * reparse point. Only PowerShell-family aliases are probed (see
+ * `probeAliasLaunchable`); other aliases are never spawned and are rejected.
+ * A zero-byte plain file in the same directory (e.g. a
  * disabled alias) stats cleanly and is rejected.
  *
  * Non-alias candidates win over alias candidates so a real install (MSI,

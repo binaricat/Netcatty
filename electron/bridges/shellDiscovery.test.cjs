@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 
 const {
   isWindowsAppExecutionAlias,
+  probeAliasLaunchable,
   probeArgsFor,
   selectExecutableCandidate,
   windowsAppsAliasPrefix,
@@ -191,8 +192,61 @@ test("probeArgsFor suppresses the profile for PowerShell-family aliases", () => 
     "-Command",
     "exit",
   ]);
-  // Non-PowerShell candidates keep the plain empty-stdin probe.
+  // Non-PowerShell candidates must not be probed at all (empty args = "do
+  // not probe"): launching an arbitrary WindowsApps alias with no arguments
+  // can open a GUI or the Microsoft Store.
   assert.deepEqual(probeArgsFor("C:\\Users\\u\\AppData\\Local\\Microsoft\\WindowsApps\\wt.exe"), []);
+  assert.deepEqual(probeArgsFor("C:\\Users\\u\\AppData\\Local\\Microsoft\\WindowsApps\\python.exe"), []);
+});
+
+test("probeAliasLaunchable never spawns non-PowerShell WindowsApps aliases", () => {
+  // Probing python.exe/wt.exe with no arguments can open a GUI or the
+  // Microsoft Store, so unknown aliases must be rejected without spawning.
+  const spawnCalls = [];
+  const spawnSync = (...args) => {
+    spawnCalls.push(args);
+    return { error: undefined };
+  };
+  assert.equal(
+    probeAliasLaunchable("C:\\Users\\u\\AppData\\Local\\Microsoft\\WindowsApps\\python.exe", { spawnSync }),
+    false,
+  );
+  assert.equal(spawnCalls.length, 0);
+});
+
+test("probeAliasLaunchable probes PowerShell-family aliases with -NoProfile", () => {
+  const spawnCalls = [];
+  const spawnSync = (...args) => {
+    spawnCalls.push(args);
+    return { error: undefined };
+  };
+  assert.equal(probeAliasLaunchable(ALIAS_PWSH, { spawnSync }), true);
+  assert.equal(spawnCalls.length, 1);
+  assert.deepEqual(spawnCalls[0][1], [
+    "-NoProfile",
+    "-NonInteractive",
+    "-Command",
+    "exit",
+  ]);
+});
+
+test("probeAliasLaunchable treats a probe timeout as launchable", () => {
+  // ETIMEDOUT means the process ran until we killed it — it launched.
+  const spawnSync = () => {
+    const err = new Error("spawn timeout");
+    err.code = "ETIMEDOUT";
+    return { error: err };
+  };
+  assert.equal(probeAliasLaunchable(ALIAS_PWSH, { spawnSync }), true);
+});
+
+test("probeAliasLaunchable rejects aliases that fail to spawn", () => {
+  const spawnSync = () => {
+    const err = new Error("spawn failed");
+    err.code = "ENOENT";
+    return { error: err };
+  };
+  assert.equal(probeAliasLaunchable(ALIAS_PWSH, { spawnSync }), false);
 });
 
 test("selectExecutableCandidate ignores empty candidates", () => {
