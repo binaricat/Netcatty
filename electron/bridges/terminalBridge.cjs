@@ -818,22 +818,36 @@ function findExecutable(name, opts = {}) {
   return name;
 }
 
+// Resolved default Windows shell for this app session (undefined = not yet
+// resolved). Resolution can run a spawn probe for MSIX app-execution aliases
+// (see findExecutable → selectExecutableCandidate), which blocks the Electron
+// main process for up to the probe timeout, so the result is memoized and
+// never recomputed per terminal.
+let cachedDefaultLocalShell;
+
 function getDefaultLocalShell() {
   if (process.platform !== "win32") {
     return process.env.SHELL || "/bin/bash";
   }
 
+  if (cachedDefaultLocalShell !== undefined) {
+    return cachedDefaultLocalShell;
+  }
+
   const pwsh = findExecutable("pwsh");
   if (pwsh && pwsh.toLowerCase() !== "pwsh") {
+    cachedDefaultLocalShell = pwsh;
     return pwsh;
   }
 
   const powershell = findExecutable("powershell");
   if (powershell && powershell.toLowerCase() !== "powershell") {
+    cachedDefaultLocalShell = powershell;
     return powershell;
   }
 
-  return "powershell.exe";
+  cachedDefaultLocalShell = "powershell.exe";
+  return cachedDefaultLocalShell;
 }
 
 function getLocalShellArgs(shellPath) {
@@ -882,7 +896,6 @@ const applyLocaleDefaults = (env) => {
  */
 function startLocalSession(event, payload) {
   const sessionId = payload?.sessionId || randomUUID();
-  const defaultShell = getDefaultLocalShell();
   // payload.shell may be a discovered shell ID (e.g., "wsl-ubuntu") — resolve it
   let resolvedShell = payload?.shell;
   let resolvedArgs = payload?.shellArgs;
@@ -895,7 +908,10 @@ function startLocalSession(event, payload) {
       resolvedArgs = resolvedArgs ?? match.args;
     }
   }
-  const shell = normalizeExecutablePath(resolvedShell) || defaultShell;
+  // Resolve the platform default shell lazily — only when the payload did not
+  // name a usable shell — so terminal creation never pays for default-shell
+  // resolution (which may probe MSIX aliases on Windows) when it isn't needed.
+  const shell = normalizeExecutablePath(resolvedShell) || getDefaultLocalShell();
   const shellArgs = resolvedArgs ?? getLocalShellArgs(shell);
   const shellKind = detectShellKind(shell);
   const { buildTerminalProcessEnv } = require("./httpNetworkProxyBridge.cjs");
