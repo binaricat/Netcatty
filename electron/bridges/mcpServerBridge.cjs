@@ -14,6 +14,11 @@ const { existsSync } = require("node:fs");
 
 const { toUnpackedAsarPath, getFreshIdlePrompt, formatSyntheticEcho } = require("./ai/shellUtils.cjs");
 const { appendVaultAgentGuidance } = require("../shared/vaultAgentGuidance.cjs");
+const {
+  checkBlocklistForShell,
+  checkBlocklistCommonOnly,
+  resolveSessionBlocklistShellKind,
+} = require("./ai/commandSafety.cjs");
 const { execViaPty, startPtyJob, execViaChannel, execViaRawPty } = require("./ai/ptyExec.cjs");
 const { safeSend } = require("./ipcUtils.cjs");
 const { getCliDiscoveryFilePath } = require("../cli/discoveryPath.cjs");
@@ -108,10 +113,8 @@ const {
 } = require("./mcpServerBridge/sessionIdleManager.cjs");
 const openedSessionOwnership = createSessionOwnershipRegistry();
 
-// Command safety checking (reuse from aiBridge)
+// Command safety checking (see ./ai/commandSafety.cjs)
 let commandBlocklist = [];
-// Cached compiled RegExp objects for commandBlocklist (rebuilt when blocklist changes)
-let compiledBlocklist = [];
 
 // Command timeout in milliseconds (default 60s, synced from user settings)
 const MAX_COMMAND_TIMEOUT_SECONDS = 24 * 60 * 60;
@@ -492,16 +495,13 @@ function echoCommandToSession(session, sessionId, command) {
 }
 
 function setCommandBlocklist(list) {
+  // Stored raw; checkCommandSafetyForShell / checkCommandSafetyCommonOnly
+  // split settings additions from the shell-grouped default table.
   commandBlocklist = list || [];
-  // Recompile cached regexes when blocklist changes
-  compiledBlocklist = [];
-  for (const pattern of commandBlocklist) {
-    try {
-      compiledBlocklist.push(new RegExp(pattern, "i"));
-    } catch {
-      compiledBlocklist.push(null); // placeholder for invalid patterns
-    }
-  }
+}
+
+function getCommandBlocklist() {
+  return [...commandBlocklist];
 }
 
 function setCommandTimeout(seconds) {
@@ -1098,14 +1098,22 @@ function forgetUnownedTerminalSessionMetadata(sessionId) {
 /**
  * Run an array of async task factories with a concurrency limit.
  */
-function checkCommandSafety(command) {
-  for (let i = 0; i < compiledBlocklist.length; i++) {
-    const re = compiledBlocklist[i];
-    if (re && re.test(command)) {
-      return { blocked: true, matchedPattern: commandBlocklist[i] };
-    }
-  }
-  return { blocked: false };
+/**
+ * Shell-aware blocklist check. `shellKind` selects the default pattern groups;
+ * settings entries that are not default patterns always apply. Unknown kinds
+ * keep the strict full default table.
+ */
+function checkCommandSafetyForShell(command, shellKind) {
+  return checkBlocklistForShell(command, shellKind, commandBlocklist);
+}
+
+/**
+ * Settings additions plus shell-independent (common) defaults. For
+ * metadata-only call sites with no live session: the terminal worker re-runs
+ * the shell-selected defaults on the live session before execution.
+ */
+function checkCommandSafetyCommonOnly(command) {
+  return checkBlocklistCommonOnly(command, commandBlocklist);
 }
 
 // ── TCP Server ──
@@ -1578,7 +1586,12 @@ async function handleWorkerTerminalExec(params = {}) {
   const chatSessionId = params?.chatSessionId || null;
   const meta = getSessionMeta(sessionId, chatSessionId) || {};
   if (!isNetworkDeviceLikeMeta(meta)) {
-    const safety = checkCommandSafety(command);
+    // meta.shellType is not reported for remote sessions yet; until it is,
+    // defer the shell-selected default patterns to the terminal worker, which
+    // resolves the shell kind from the live session and idle prompt.
+    const safety = meta.shellType
+      ? checkCommandSafetyForShell(command, meta.shellType)
+      : checkCommandSafetyCommonOnly(command);
     if (safety.blocked) {
       return { ok: false, error: `Command blocked by safety policy. Pattern: ${safety.matchedPattern}` };
     }
@@ -1607,6 +1620,7 @@ async function handleWorkerTerminalExec(params = {}) {
       commandTimeoutMs,
       sessionMeta: meta,
       enforceWallTimeout: true,
+      commandBlocklist,
     }, {});
   } catch (err) {
     return { ok: false, error: err?.message || String(err) };
@@ -1632,7 +1646,11 @@ async function handleWorkerJobStart(params = {}) {
   const chatSessionId = params?.chatSessionId || null;
   const meta = getSessionMeta(sessionId, chatSessionId) || {};
   if (!isNetworkDeviceLikeMeta(meta)) {
-    const safety = checkCommandSafety(command);
+    // Same shell-aware deferral as handleWorkerTerminalExec: the terminal
+    // worker re-runs the shell-selected defaults on the live session.
+    const safety = meta.shellType
+      ? checkCommandSafetyForShell(command, meta.shellType)
+      : checkCommandSafetyCommonOnly(command);
     if (safety.blocked) {
       return { ok: false, error: `Command blocked by safety policy. Pattern: ${safety.matchedPattern}` };
     }
@@ -1653,6 +1671,7 @@ async function handleWorkerJobStart(params = {}) {
       chatSessionId,
       commandTimeoutMs,
       sessionMeta: meta,
+      commandBlocklist,
     }, {});
     if (result?.ok && result.jobId) {
       if (pendingStart.cancelled || closingTerminalSessions.has(sessionId)) {
@@ -2162,7 +2181,7 @@ const execHandlerApi = createExecHandlerApi({
   get commandTimeoutMs() { return commandTimeoutMs; },
   DEFAULT_BACKGROUND_JOB_TIMEOUT_MS, DEFAULT_BACKGROUND_JOB_POLL_INTERVAL_MS, MAX_BACKGROUND_JOB_OUTPUT_CHARS,
   backgroundJobs, activePtyExecs,
-  debugLog, getSessionMeta, checkCommandSafety, reserveSessionExecution, releaseSessionExecution,
+  debugLog, getSessionMeta, checkCommandSafetyForShell, resolveSessionBlocklistShellKind, reserveSessionExecution, releaseSessionExecution,
   beginChatExecution, execViaRawPty, execViaPty, execViaChannel, startPtyJob,
   getFreshIdlePrompt, echoCommandToSession, createBackgroundJobId, storeCompletedJobOutput,
   serializeBackgroundJob, validateSessionScope, Date, Error,
@@ -2198,6 +2217,7 @@ function cleanup() {
 module.exports = {
   init,
   setCommandBlocklist,
+  getCommandBlocklist,
   setCommandTimeout,
   getCommandTimeoutMs,
   setSessionIdleTimeoutMinutes,
@@ -2211,7 +2231,9 @@ module.exports = {
   getPermissionGrants,
   setChatSessionCancelled,
   applyChatSessionCancelled,
-  checkCommandSafety,
+  checkCommandSafetyForShell,
+  checkCommandSafetyCommonOnly,
+  resolveSessionBlocklistShellKind,
   updateSessionMetadata,
   updateLiveSessionMetadata,
   mergeSessionMetadata,

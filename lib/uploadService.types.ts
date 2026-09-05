@@ -120,6 +120,8 @@ export interface UploadConfig {
   sftpId: string | null;
   /** Stable target host ID, used to apply the concurrency limit per server. */
   targetHostId?: string;
+  /** Maximum number of files this upload may admit at once. */
+  fileTransferConcurrency?: number;
   /** Is this a local file system upload? */
   isLocal: boolean;
   /** The bridge for file operations */

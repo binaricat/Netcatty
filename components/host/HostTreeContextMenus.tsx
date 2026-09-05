@@ -1,9 +1,12 @@
-import { Copy, FileSymlink, Folder, FolderOpen, Monitor, Pencil, Plus, Server, Settings2 } from 'lucide-react';
+import { Copy, FileSymlink, Files, Folder, FolderOpen, Monitor, Pencil, Plus, Server, Settings2 } from 'lucide-react';
 import React from 'react';
 
 import { useI18n } from '../../application/i18n/I18nProvider';
+import { requestOpenDualPaneSftp } from '../../application/state/sftp/sftpDualPaneOpenStore';
+import { useSettingsChromeStore } from '../../application/state/settingsChromeStore';
 import { sanitizeHost } from '../../domain/host';
 import { isPluginHostProtocol } from '../../domain/pluginConnection';
+import { canOpenDualPaneSftp } from '../../domain/sftpDualPaneOpen';
 import type { Host } from '../../types';
 import { ContextMenuContent, ContextMenuItem, ContextMenuShortcut } from '../ui/context-menu';
 import { collectOwnedPluginMenus, comparePluginMenus, usePluginContributions } from '../../application/state/usePluginContributions';
@@ -18,6 +21,17 @@ export interface HostTreeHostContextMenuHandlers {
   onCopyCredentials: (host: Host) => void;
   onDeleteHost: (host: Host) => void;
 }
+
+export const OpenDualPaneSftpMenuItem: React.FC<{ host: Host }> = ({ host }) => {
+  const { t } = useI18n();
+  const { showSftpTab } = useSettingsChromeStore();
+  if (!showSftpTab || !canOpenDualPaneSftp(host)) return null;
+  return (
+    <ContextMenuItem onClick={() => requestOpenDualPaneSftp(host.id)}>
+      <Files className="mr-2 h-4 w-4" /> {t('vault.hosts.openSftp')}
+    </ContextMenuItem>
+  );
+};
 
 export const HostTreeHostContextMenuContent: React.FC<
   HostTreeHostContextMenuHandlers & { host: Host }
@@ -50,6 +64,7 @@ export const HostTreeHostContextMenuContent: React.FC<
       <ContextMenuItem onClick={() => onConnect(safeHost)}>
         <Monitor className="mr-2 h-4 w-4" /> {t('vault.hosts.connect')}
       </ContextMenuItem>
+      <OpenDualPaneSftpMenuItem host={safeHost} />
       {onEditHost && (
         <ContextMenuItem onClick={() => onEditHost(host)}>
           <Settings2 className="mr-2 h-4 w-4" /> {t('terminal.layer.hostTree.editHost')}

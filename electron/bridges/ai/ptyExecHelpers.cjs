@@ -152,18 +152,6 @@ const LOGIN_SHELL_HINTS = new Set(["posix", "fish", "powershell", "cmd"]);
 function resolveEffectiveShellKind(shellKind, expectedPrompt, options = {}) {
   const baseKind = shellKind || "";
   const hint = options.loginShellHint || "";
-  const liveKind = options.liveShellKind || "";
-  // A live "Welcome to fish" banner (tracked from the PTY stream by
-  // trackSessionIdlePrompt) is direct evidence the *interactive* shell is
-  // fish — e.g. a user-typed nested `fish` on top of a POSIX login shell,
-  // where the login-shell probe (#1854) correctly reports posix but the
-  // posix wrapper is then typed into fish (#3261). Fish / posix / open base
-  // kinds yield to the live banner; Windows (powershell/cmd) and raw/serial
-  // sessions are left alone. A wrong fish wrap fails loudly with a visible
-  // syntax error rather than hanging, so the spoof surface stays benign.
-  if (liveKind === "fish" && baseKind !== "powershell" && baseKind !== "cmd" && baseKind !== "raw") {
-    return "fish";
-  }
   if (SHELL_KINDS_OPEN_TO_PROMPT_OVERRIDE.has(baseKind)) {
     if (isPowerShellPrompt(expectedPrompt)) {
       return "powershell";
@@ -200,9 +188,11 @@ function buildPendingInputClearPrefix(shellKind) {
     case "cmd":
       return "\x1b";
     case "powershell":
-      // Escape = Windows-mode PSReadLine RevertLine (issue reporter default).
-      // Ctrl+U/Ctrl+K also fire for Emacs/Vi when those bindings exist.
-      return "\x1b\x15\x0b";
+      // Vi gg plus a counted dd removes the whole multiline buffer, including
+      // in PSReadLine 2.0 where dG is unavailable. Escape+r is Emacs
+      // RevertLine. Repeated Escape clears Windows mode, and the final
+      // i+Backspace leaves every mode on an empty editable line.
+      return "\x1bggd2147483647d\x1br\x1b\x1bi\x08";
     default:
       return "\x15\x0b";
   }

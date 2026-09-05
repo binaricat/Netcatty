@@ -1,5 +1,5 @@
 import type { ProviderStyle } from './types';
-import { resolveProviderStyle, type ProviderConfig } from './types';
+import { resolveOpenAIApi, resolveProviderStyle, type ProviderConfig } from './types';
 import { CATTY_REASONING_LEVELS } from './composerPicker';
 
 const ANTHROPIC_THINKING_BUDGET: Record<'low' | 'medium' | 'high', number> = {
@@ -36,6 +36,54 @@ export function estimateReasoningOutputReserve(
     return Math.ceil(googleConfig.thinkingBudget);
   }
   return 0;
+}
+
+/**
+ * OpenAI Responses turns must run stateless (`store: false`).
+ *
+ * The Responses API defaults to `store: true`, which makes the SDK replay
+ * prior reasoning turns as server-side item references (`rs_…` ids).
+ * Relays — the main reason Responses mode is opt-in here — frequently do not
+ * persist items, so the next turn fails with "Item with id 'rs_…' not found.
+ * Items are not persisted when `store` is set to false." With `store: false`
+ * the SDK instead requests `reasoning.encrypted_content` and replays the full
+ * reasoning items inline, which works against both relays and OpenAI directly.
+ *
+ * The installed `@ai-sdk/openai` only auto-adds the encrypted-content include
+ * for model IDs its own capability detector recognizes (o-series / gpt-5).
+ * Relay reasoners such as `deepseek-r1`, `gpt-oss`, or `grok-4` pass
+ * Netcatty's broader classifier but not the SDK's, so the include must be
+ * requested explicitly or the provider returns no replayable ciphertext and
+ * the reasoning items get dropped from subsequent turns. The SDK dedupes the
+ * include when it would have added it anyway.
+ *
+ * The include is therefore requested for *every* stateless Responses turn,
+ * not gated on a reasoning classifier: relay model IDs are arbitrary, and
+ * always-thinking models whose IDs match no known pattern (e.g. DeepSeek's
+ * default `deepseek-v4-flash`, which streams thinking deltas) would silently
+ * lose replayable reasoning. Models that emit no reasoning simply have no
+ * reasoning items to encrypt, so the extra include is a no-op for them.
+ */
+const REASONING_ENCRYPTED_CONTENT_INCLUDE = 'reasoning.encrypted_content';
+
+export function applyResponsesApiStatelessStoreOption(
+  provider: Pick<ProviderConfig, 'openaiApi' | 'providerId' | 'style'> | null | undefined,
+  options: CattyReasoningProviderOptions | undefined,
+): CattyReasoningProviderOptions | undefined {
+  if (!provider || resolveProviderStyle(provider) !== 'openai') return options;
+  if (resolveOpenAIApi(provider) !== 'responses') return options;
+  const openaiOptions: Record<string, unknown> = {
+    ...options?.openai,
+    store: false,
+  };
+  const existingInclude = Array.isArray(openaiOptions.include) ? openaiOptions.include : [];
+  if (!existingInclude.includes(REASONING_ENCRYPTED_CONTENT_INCLUDE)) {
+    openaiOptions.include = [...existingInclude, REASONING_ENCRYPTED_CONTENT_INCLUDE];
+  }
+  return {
+    ...options,
+    openai: openaiOptions,
+  };
 }
 
 export function buildCattyReasoningProviderOptions(

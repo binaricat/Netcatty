@@ -2,7 +2,7 @@ import { useCallback, useMemo, useSyncExternalStore } from "react";
 import type { SftpBookmark } from "../../../domain/models";
 import { localStorageAdapter } from "../../../infrastructure/persistence/localStorageAdapter";
 import { STORAGE_KEY_SFTP_LOCAL_BOOKMARKS } from "../../../infrastructure/config/storageKeys";
-import { createSftpBookmark } from "./bookmarkHelpers";
+import { createSftpBookmark, moveSftpBookmark, renameSftpBookmark } from "./bookmarkHelpers";
 
 type Listener = () => void;
 
@@ -74,10 +74,20 @@ export const useLocalSftpBookmarks = ({
     setLocalSftpBookmarks((prev) => prev.filter((b) => b.id !== id));
   }, []);
 
+  const reorderBookmark = useCallback((fromId: string, toId: string) => {
+    setLocalSftpBookmarks((prev) => moveSftpBookmark(prev, fromId, toId));
+  }, []);
+
+  const renameBookmark = useCallback((id: string, label: string) => {
+    setLocalSftpBookmarks((prev) => renameSftpBookmark(prev, id, label));
+  }, []);
+
   return {
     bookmarks,
     isCurrentPathBookmarked,
     toggleBookmark,
     deleteBookmark,
+    reorderBookmark,
+    renameBookmark,
   };
 };

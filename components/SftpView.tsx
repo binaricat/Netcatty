@@ -20,6 +20,7 @@ import { activeTabStore as globalActiveTabStore, useIsSftpActive } from "../appl
 import { useSftpState } from "../application/state/useSftpState";
 import { useSftpBackend } from "../application/state/useSftpBackend";
 import { getParentPath, isConcreteTransferTargetPath } from "../application/state/sftp/utils";
+import { buildCacheKey } from "../application/state/sftp/sharedRemoteHostCache";
 import { HotkeyScheme, KeyBinding, TerminalSession } from "../domain/models";
 import {
   getPaneMagnificationShortcutLabel,
@@ -27,6 +28,11 @@ import {
   type PaneMagnificationController,
 } from "../domain/paneMagnification";
 import { listSftpConnectedHosts, resolveSftpTransferSourceSessionId, sftpPickerSessionsEqual } from "../domain/sftpConnectedHosts";
+import { applyDualPaneSftpOpen, dualPaneTabFromPane } from "../domain/sftpDualPaneOpen";
+import {
+  consumePendingDualPaneSftpRequest,
+  subscribeDualPaneSftpOpen,
+} from "../application/state/sftp/sftpDualPaneOpenStore";
 import { logger } from "../lib/logger";
 import { useRenderTracker } from "../lib/useRenderTracker";
 import { cn } from "../lib/utils";
@@ -193,6 +199,54 @@ const SftpViewInner: React.FC<SftpViewProps> = ({
   // without needing to re-create when sftp changes
   const sftpRef = useRef(sftp);
   sftpRef.current = sftp;
+  const effectiveHostsRef = useRef(effectiveHosts);
+  effectiveHostsRef.current = effectiveHosts;
+
+  useEffect(() => {
+    const toTabs = (panes: Array<{
+      id: string;
+      connection: { id: string; isLocal?: boolean; hostId?: string | null; status?: string | null } | null;
+    }>, getEndpointKey: (connectionId: string) => string | null) => panes.map(
+      (pane) => dualPaneTabFromPane(
+        pane,
+        pane.connection ? getEndpointKey(pane.connection.id) : null,
+      ),
+    );
+
+    const applyRequest = (request: { hostId: string } | null) => {
+      if (!request) return;
+      const host = effectiveHostsRef.current.find((candidate) => candidate.id === request.hostId);
+      if (!host) return;
+      const current = sftpRef.current;
+      const hostEndpointKey = buildCacheKey(
+        host.id,
+        host.hostname,
+        host.port,
+        host.protocol,
+        host.sftpSudo,
+        host.username,
+        host.sftpFileProtocol,
+      );
+      // External "Open SFTP" promises a visible local-left / host-right pair.
+      // Clear a stale single-pane magnification before selecting or connecting.
+      setMagnifiedSide(null);
+      applyDualPaneSftpOpen(
+        {
+          leftTabs: toTabs(current.leftTabs.tabs, current.getConnectionCacheKey),
+          rightTabs: toTabs(current.rightTabs.tabs, current.getConnectionCacheKey),
+          selectTab: current.selectTab,
+          connect: (side, nextHost, options) => {
+            void current.connect(side, nextHost === "local" ? "local" : host, options);
+          },
+        },
+        host,
+        hostEndpointKey,
+      );
+    };
+
+    applyRequest(consumePendingDualPaneSftpRequest());
+    return subscribeDualPaneSftpOpen(applyRequest);
+  }, []);
 
   // Register this useSftpState's writeTextFileByConnection with the bridge so
   // the editor tab's save path can reach the active SFTP session. The bridge

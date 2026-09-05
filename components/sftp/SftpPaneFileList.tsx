@@ -19,6 +19,7 @@ import { buildSftpColumnTemplate, isNavigableDirectory, isSftpColumnMenuKey } fr
 import { isKnownBinaryFile } from "../../lib/sftpFileUtils";
 import { isExtractableArchive } from "../../domain/sftpArchive";
 import { SftpFileRow } from "./SftpFileRow";
+import type { SftpListDensity } from "../../domain/sftpListDensity";
 import { SftpColumnMenuItems } from "./SftpColumnMenuItems";
 import { getSftpVirtualListScrollTop } from "../../domain/sftpVirtualList";
 import {
@@ -77,6 +78,7 @@ interface SftpPaneFileListProps {
   openDeleteConfirm: (targets: string[]) => void;
   rowHeight: number;
   visibleRows: { entry: SftpFileEntry; index: number; top: number }[];
+  listDensity?: SftpListDensity;
 }
 
 const SftpErrorWithLogs: React.FC<{
@@ -164,6 +166,7 @@ export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = React.memo(({
   openDeleteConfirm,
   rowHeight,
   visibleRows,
+  listDensity = "comfortable",
 }) => {
   const {
     columnWidths,
@@ -288,6 +291,7 @@ export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = React.memo(({
             onDragOver={handleEntryDragOver}
             onDragLeave={handleRowDragLeave}
             onDrop={handleEntryDrop}
+            density={listDensity}
           />
         </ContextMenuTrigger>
         {entry.name !== ".." && (
@@ -497,6 +501,7 @@ export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = React.memo(({
       openRenameDialog,
       pane.connection,
       pane.selectedFiles,
+      listDensity,
       setShowNewFolderDialog,
       setShowNewFileDialog,
       t,

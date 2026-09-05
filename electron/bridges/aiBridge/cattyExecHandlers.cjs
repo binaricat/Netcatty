@@ -2,7 +2,7 @@
 // Module-level require on purpose: code inside registerCattyExecHandlers
 // runs under `with (ctx)` where bare `require` resolves to ctx.require
 // (based in electron/bridges/). Requiring here keeps the path unambiguous.
-const { formatSyntheticEcho, clearLiveShellKind, setLiveShellKindFish } = require("../ai/shellUtils.cjs");
+const { formatSyntheticEcho } = require("../ai/shellUtils.cjs");
 const { ensureSessionShellKindForExec } = require("../ai/sessionShellKind.cjs");
 
 function getWorkerExecutionMeta(mcpServerBridge, sessionId, chatSessionId) {
@@ -32,7 +32,11 @@ async function proxyCattyExecToWorker({
 
   const meta = getWorkerExecutionMeta(mcpServerBridge, sessionId, chatSessionId);
   if (!isNetworkDeviceLike(meta)) {
-    const safety = mcpServerBridge.checkCommandSafety(command);
+    // No live session here: settings additions plus common defaults only; the
+    // terminal worker re-runs the shell-selected defaults on the live session.
+    const safety = meta.shellType
+      ? mcpServerBridge.checkCommandSafetyForShell(command, meta.shellType)
+      : mcpServerBridge.checkCommandSafetyCommonOnly(command);
     if (safety.blocked) {
       return { ok: false, error: `Command blocked by safety policy. Pattern: ${safety.matchedPattern}` };
     }
@@ -54,6 +58,7 @@ async function proxyCattyExecToWorker({
       chatSessionId,
       commandTimeoutMs: mcpServerBridge.getCommandTimeoutMs ? mcpServerBridge.getCommandTimeoutMs() : 60000,
       sessionMeta: meta,
+      commandBlocklist: mcpServerBridge.getCommandBlocklist?.(),
     }, {
       webContentsId: event?.sender?.id,
     });
@@ -109,16 +114,6 @@ function registerCattyExecHandlers(ctx) {
     const isSshOrSerial = sessionProtocol === "ssh" || sessionProtocol === "serial";
     const isNetworkDevice = (meta.deviceType === "network" && isSshOrSerial) || sessionProtocol === "serial";
 
-    // Shell blocklist is meaningless on network device CLIs (e.g. "shutdown"
-    // disables an interface on Cisco). Skip for network devices and serial sessions.
-    if (!isNetworkDevice) {
-      const safety = mcpServerBridge.checkCommandSafety(command);
-      if (safety.blocked) {
-        releaseLock();
-        return { ok: false, error: `Command blocked by safety policy. Pattern: ${safety.matchedPattern}` };
-      }
-    }
-
     // Helper: ensure the session lock is released once the promise settles
     // (or immediately on a synchronous error/early return).
     const withLockRelease = (factory) => {
@@ -168,15 +163,19 @@ function registerCattyExecHandlers(ctx) {
             chatSessionId,
           });
           if (!probed.ok) return probed;
+          const safety = mcpServerBridge.checkCommandSafetyForShell(
+            command,
+            mcpServerBridge.resolveSessionBlocklistShellKind(session),
+          );
+          if (safety.blocked) {
+            return { ok: false, error: `Command blocked by safety policy. Pattern: ${safety.matchedPattern}` };
+          }
           return execViaPty(ptyStream, command, {
             stripMarkers: true,
             trackForCancellation: mcpServerBridge.activePtyExecs,
             timeoutMs,
             shellKind: session.shellKind,
             loginShellHint: session._loginShellKind,
-            liveShellKind: session._liveShellKind,
-            onLiveShellKindInvalidated: () => clearLiveShellKind(session),
-            onFishWrapperRejected: () => setLiveShellKindFish(session),
             chatSessionId,
             expectedPrompt: getFreshIdlePrompt(session),
             typedInput: true,
@@ -207,11 +206,25 @@ function registerCattyExecHandlers(ctx) {
       if (sshClient && typeof sshClient.exec === "function") {
         const { execViaChannel } = require("./ai/ptyExec.cjs");
         const channelTimeoutMs = mcpServerBridge.getCommandTimeoutMs ? mcpServerBridge.getCommandTimeoutMs() : 60000;
-        return withLockRelease(() => execViaChannel(sshClient, command, {
-          timeoutMs: channelTimeoutMs,
-          trackForCancellation: mcpServerBridge.activePtyExecs,
-          chatSessionId,
-        }));
+        return withLockRelease(async () => {
+          const probed = await ensureSessionShellKindForExec(session, {
+            trackForCancellation: mcpServerBridge.activePtyExecs,
+            chatSessionId,
+          });
+          if (!probed.ok) return probed;
+          const safety = mcpServerBridge.checkCommandSafetyForShell(
+            command,
+            mcpServerBridge.resolveSessionBlocklistShellKind(session),
+          );
+          if (safety.blocked) {
+            return { ok: false, error: `Command blocked by safety policy. Pattern: ${safety.matchedPattern}` };
+          }
+          return execViaChannel(sshClient, command, {
+            timeoutMs: channelTimeoutMs,
+            trackForCancellation: mcpServerBridge.activePtyExecs,
+            chatSessionId,
+          });
+        });
       }
 
       // Serial port: raw command execution (no shell wrapping)

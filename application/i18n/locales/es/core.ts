@@ -1040,6 +1040,7 @@ Resalta el panel dividido enfocado:
   // Vault hosts header/actions
   'vault.hosts.search.placeholder': 'Busca un host o escribe ssh usuario@hostname / ssh -p 2222 usuario@hostname...',
   'vault.hosts.connect': 'Conectar',
+  'vault.hosts.openSftp': 'Abrir SFTP',
   'vault.view.grid': 'Cuadrícula',
   'vault.view.list': 'Lista',
   'vault.view.tree': 'Árbol',

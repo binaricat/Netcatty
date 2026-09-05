@@ -1,17 +1,37 @@
-[
-  "\\brm\\s+(?=[^\\n;&|]*(?:-[a-zA-Z]*r[a-zA-Z]*f[a-zA-Z]*\\b|-[a-zA-Z]*f[a-zA-Z]*r[a-zA-Z]*\\b|-[a-zA-Z]*r[a-zA-Z]*\\b[^\\n;&|]*-[a-zA-Z]*f[a-zA-Z]*\\b|-[a-zA-Z]*f[a-zA-Z]*\\b[^\\n;&|]*-[a-zA-Z]*r[a-zA-Z]*\\b|--recursive\\b[^\\n;&|]*(?:--force\\b|-[a-zA-Z]*f[a-zA-Z]*\\b)|(?:--force\\b|-[a-zA-Z]*f[a-zA-Z]*\\b)[^\\n;&|]*--recursive\\b))",
-  "\\bmkfs\\.",
-  "\\bdd\\s+if=.*\\s+of=/dev/",
-  "\\b(shutdown|reboot|poweroff|halt)\\b",
-  ":\\(\\)\\{\\s*:\\|:\\&\\s*\\};:",
-  ">\\s*/dev/sd",
-  "\\bchmod\\s+(-[a-zA-Z]*R[a-zA-Z]*|--recursive)\\s+777\\s+/",
-  "\\bmv\\s+/\\s",
-  ":\\s*>\\s*/etc/",
-  "\\bcurl\\s+.*\\|\\s*\\bsudo\\s+\\bbash\\b",
-  "\\bwget\\s+.*\\|\\s*\\bsudo\\s+\\bbash\\b",
-  "base64.*\\|.*(?:ba)?sh",
-  "\\beval\\b",
-  "\\$\\(",
-  "`.+`"
-]
+{
+  "common": [
+    "\\brm\\s+(?=[^\\n;&|]*(?:-[a-zA-Z]*r[a-zA-Z]*f[a-zA-Z]*\\b|-[a-zA-Z]*f[a-zA-Z]*r[a-zA-Z]*\\b|-[a-zA-Z]*r[a-zA-Z]*\\b[^\\n;&|]*-[a-zA-Z]*f[a-zA-Z]*\\b|-[a-zA-Z]*f[a-zA-Z]*\\b[^\\n;&|]*-[a-zA-Z]*r[a-zA-Z]*\\b|--recursive\\b[^\\n;&|]*(?:--force\\b|-[a-zA-Z]*f[a-zA-Z]*\\b)|(?:--force\\b|-[a-zA-Z]*f[a-zA-Z]*\\b)[^\\n;&|]*--recursive\\b))",
+    "\\b(shutdown|reboot|poweroff|halt)\\b"
+  ],
+  "posixNative": [
+    "\\bmkfs\\.",
+    "\\bdd\\s+if=.*\\s+of=/dev/",
+    ">\\s*/dev/sd",
+    "\\bchmod\\s+(-[a-zA-Z]*R[a-zA-Z]*|--recursive)\\s+777\\s+/",
+    "\\bmv\\s+/\\s",
+    "\\bcurl\\s+.*\\|\\s*\\bsudo\\s+\\bbash\\b",
+    "\\bwget\\s+.*\\|\\s*\\bsudo\\s+\\bbash\\b",
+    "base64.*\\|.*(?:ba)?sh"
+  ],
+  "posix": [
+    ":\\(\\)\\{\\s*:\\|:\\&\\s*\\};:",
+    ":\\s*>\\s*/etc/",
+    "\\beval\\b",
+    "\\$\\(",
+    "`.+`"
+  ],
+  "powershell": [
+    "\\b(Remove-Item|del|erase|rd|ri|rm|rmdir)\\b[^\\n;&|]*-(rec\\w*|re|r)\\b[^\\n;&|]*-(fo\\w*|f)\\b",
+    "\\b(Remove-Item|del|erase|rd|ri|rm|rmdir)\\b[^\\n;&|]*-(fo\\w*|f)\\b[^\\n;&|]*-(rec\\w*|re|r)\\b",
+    "\\b(iex|Invoke-Expression)\\b",
+    "\\b(curl|wget|iwr|irm|Invoke-WebRequest|Invoke-RestMethod)\\b[^\\n;&|]*\\|\\s*(iex|Invoke-Expression)\\b",
+    "\\bSet-ExecutionPolicy\\b[^\\n;&|]*\\b(Bypass|Unrestricted)\\b",
+    "\\b(Format-Volume|Clear-Disk|Initialize-Disk|Stop-Computer|Restart-Computer)\\b"
+  ],
+  "shellGroups": {
+    "powershell": ["common", "posixNative", "powershell"],
+    "cmd": ["common", "posixNative"],
+    "posix": ["common", "posixNative", "posix"],
+    "fish": ["common", "posixNative", "posix"]
+  }
+}

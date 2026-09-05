@@ -18,6 +18,10 @@ const {
   buildPendingInputClearPrefix,
   buildWrappedCommand,
 } = require("./ptyExecHelpers.cjs");
+const {
+  getFreshIdlePrompt,
+  trackSessionIdlePrompt,
+} = require("./shellUtils.cjs");
 
 class ShellBackedPty extends EventEmitter {
   write(data) {
@@ -160,6 +164,39 @@ test("background PTY jobs preserve output that has no trailing newline", async (
   assert.equal(result.ok, true);
   assert.equal(result.stdout, "abc");
   assert.equal(result.exitCode, 0);
+});
+
+test("background PowerShell jobs exclude a changed prompt from results and snapshots", async () => {
+  class CapturePty extends EventEmitter {
+    write() {}
+  }
+  const pty = new CapturePty();
+  const job = startPtyJob(pty, "Set-Location C:\\tmp; Write-Output 'DONE'", {
+    shellKind: "unknown",
+    loginShellHint: "cmd",
+    timeoutMs: 1000,
+    expectedPrompt: "PS C:\\Users\\alice>",
+    maxBufferedChars: 1024,
+    normalizeFinalOutput: false,
+  });
+
+  const endMarker = `${job.marker}_E:0`;
+  pty.emit("data", Buffer.from(`${job.marker}_S\r\nDONE\r\n${endMarker.slice(0, 4)}`));
+  const partialSnapshot = job.getSnapshot();
+  assert.equal(partialSnapshot.stdout, "DONE\n");
+  assert.equal(partialSnapshot.totalOutputChars, "DONE\n".length);
+  assert.doesNotMatch(partialSnapshot.stdout, /__NC/);
+
+  pty.emit("data", Buffer.from(`${endMarker.slice(4)}\r\nPS C:\\tmp>`));
+  const result = await job.resultPromise;
+  const snapshot = job.getSnapshot();
+
+  assert.equal(result.ok, true);
+  assert.equal(result.stdout, "DONE\n");
+  assert.equal(snapshot.stdout, "DONE\n");
+  assert.ok(snapshot.totalOutputChars >= partialSnapshot.totalOutputChars);
+  assert.doesNotMatch(result.stdout, /PS C:\\\\tmp>/);
+  assert.doesNotMatch(snapshot.stdout, /PS C:\\\\tmp>/);
 });
 
 test("uses PowerShell wrapping when a session with no confirmed shell sees a PowerShell prompt", () => {
@@ -327,51 +364,478 @@ test("loginShellHint selects fish/posix/powershell/cmd without pinning confirmed
   );
 });
 
-test("live fish banner hint selects fish wrapping over posix/unknown base kinds (#3261)", () => {
-  // User typed a nested `fish` on a POSIX login shell: the login-shell probe
-  // correctly reports posix, but the interactive shell is fish. The banner
-  // tracked from the PTY wins so the fish wrapper is used.
-  assert.equal(
-    resolveEffectiveShellKind("posix", "user@host:~$", { liveShellKind: "fish" }),
-    "fish",
-  );
-  assert.equal(
-    resolveEffectiveShellKind(undefined, "", { liveShellKind: "fish", loginShellHint: "posix" }),
-    "fish",
-  );
-  assert.equal(
-    resolveEffectiveShellKind("fish", "user@host:~$", { liveShellKind: "fish" }),
-    "fish",
-  );
-  // Windows and raw/serial sessions are never overridden by the fish banner.
-  assert.equal(
-    resolveEffectiveShellKind("powershell", "", { liveShellKind: "fish" }),
-    "powershell",
-  );
-  assert.equal(
-    resolveEffectiveShellKind("cmd", "", { liveShellKind: "fish" }),
-    "cmd",
-  );
-  assert.equal(
-    resolveEffectiveShellKind("raw", "", { liveShellKind: "fish" }),
-    "raw",
-  );
-  // Without a live banner nothing changes.
-  assert.equal(
-    resolveEffectiveShellKind("posix", "user@host:~$", { loginShellHint: "fish" }),
-    "posix",
-  );
-});
-
 test("pending-input clear prefix covers interactive shells and skips raw devices", () => {
   assert.equal(buildPendingInputClearPrefix("posix"), "\x15\x0b");
   assert.equal(buildPendingInputClearPrefix("fish"), "\x15\x0b");
-  assert.equal(buildPendingInputClearPrefix("powershell"), "\x1b\x15\x0b");
+  assert.equal(buildPendingInputClearPrefix("powershell"), "\x1bggd2147483647d\x1br\x1b\x1bi\x08");
   assert.equal(buildPendingInputClearPrefix("cmd"), "\x1b");
   assert.equal(buildPendingInputClearPrefix("raw"), "");
 });
 
-test("startPtyJob writes the clear prefix before the wrapper", async () => {
+test("consecutive jobs wait for the PowerShell prompt after a split end marker", async () => {
+  const writes = [];
+  class CapturePty extends EventEmitter {
+    write(data) {
+      writes.push(String(data));
+    }
+  }
+  const pty = new CapturePty();
+  const session = { _loginShellKind: "cmd" };
+  pty.on("data", (data) => trackSessionIdlePrompt(session, String(data)));
+  trackSessionIdlePrompt(session, "Microsoft Windows...\r\nPS C:\\Users\\alice>");
+
+  for (const probe of ["PROBE_1", "PROBE_2"]) {
+    const job = startPtyJob(pty, `Write-Output '${probe}'`, {
+      shellKind: session.shellKind,
+      loginShellHint: session._loginShellKind,
+      timeoutMs: 20,
+      expectedPrompt: getFreshIdlePrompt(session),
+    });
+    const write = writes.at(-1);
+    assert.match(write, /\$__NCMCP_/);
+    assert.doesNotMatch(write, /cmd \/d \/s \/c/i);
+
+    pty.emit(
+      "data",
+      Buffer.from(`${job.marker}_S\r\n${probe}\r\n${job.marker}_E:0\r\n`),
+    );
+    let settled = false;
+    job.resultPromise.then(() => { settled = true; });
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    assert.equal(settled, false);
+
+    pty.emit("data", Buffer.from("PS C:\\Users\\alice>"));
+    const result = await job.resultPromise;
+    assert.equal(result.ok, true);
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stdout, probe);
+  }
+});
+
+test("non-target shells still finish at the end marker without waiting for a prompt", async () => {
+  class CapturePty extends EventEmitter {
+    write() {}
+  }
+  const pty = new CapturePty();
+  const job = startPtyJob(pty, "printf done", {
+    shellKind: "posix",
+    timeoutMs: 20,
+    expectedPrompt: "alice@host:~$",
+  });
+  pty.emit("data", Buffer.from(`${job.marker}_S\r\ndone\r\n${job.marker}_E:0\r\n`));
+
+  let settled = false;
+  job.resultPromise.then(() => { settled = true; });
+  await new Promise((resolve) => setImmediate(resolve));
+  if (!settled) job.cancel();
+  assert.equal(settled, true);
+});
+
+test("cancel retries stop after an end marker while the prompt is delayed", async () => {
+  const writes = [];
+  class CapturePty extends EventEmitter {
+    write(data) {
+      writes.push(String(data));
+    }
+  }
+  const pty = new CapturePty();
+  const job = startPtyJob(pty, "Start-Sleep 10", {
+    shellKind: "unknown",
+    loginShellHint: "cmd",
+    timeoutMs: 1000,
+    expectedPrompt: "PS C:\\Users\\alice>",
+  });
+  job.cancel();
+  assert.equal(writes.filter((write) => write === "\x03").length, 1);
+
+  pty.emit("data", Buffer.from(`${job.marker}_S\r\n${job.marker}_E:130\r\n`));
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  assert.equal(writes.filter((write) => write === "\x03").length, 1);
+
+  pty.emit("data", Buffer.from("PS C:\\Users\\alice>"));
+  const result = await job.resultPromise;
+  assert.equal(result.ok, false);
+  assert.equal(result.error, "Cancelled");
+  assert.equal(result.stdout, "");
+  assert.doesNotMatch(result.stdout, /__NCMCP_/);
+});
+
+test("cancelled output strips an end marker delivered with the prompt", async () => {
+  const writes = [];
+  class CapturePty extends EventEmitter {
+    write(data) {
+      writes.push(String(data));
+    }
+  }
+  const pty = new CapturePty();
+  const job = startPtyJob(pty, "Start-Sleep 10", {
+    shellKind: "unknown",
+    loginShellHint: "cmd",
+    timeoutMs: 1000,
+    expectedPrompt: "PS C:\\Users\\alice>",
+  });
+  pty.emit("data", Buffer.from(`${job.marker}_S\r\n`));
+  job.cancel();
+
+  pty.emit(
+    "data",
+    Buffer.from(`${job.marker}_E:130\r\nPS C:\\Users\\alice>`),
+  );
+  const result = await job.resultPromise;
+  assert.equal(result.ok, false);
+  assert.equal(result.error, "Cancelled");
+  assert.equal(result.stdout, "");
+  assert.doesNotMatch(result.stdout, /__NCMCP_/);
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  assert.equal(writes.filter((write) => write === "\x03").length, 1);
+});
+
+test("cancel after an end marker keeps waiting without interrupting the prompt", async () => {
+  const writes = [];
+  class CapturePty extends EventEmitter {
+    write(data) {
+      writes.push(String(data));
+    }
+  }
+  const pty = new CapturePty();
+  const job = startPtyJob(pty, "Write-Output 'DONE'", {
+    shellKind: "unknown",
+    loginShellHint: "cmd",
+    timeoutMs: 1000,
+    expectedPrompt: "PS C:\\Users\\alice>",
+  });
+  pty.emit("data", Buffer.from(`${job.marker}_S\r\nDONE\r\n${job.marker}_E:0\r\n`));
+  job.cancel();
+
+  let settled = false;
+  job.resultPromise.then(() => { settled = true; });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(settled, false);
+  assert.equal(writes.filter((write) => write === "\x03").length, 0);
+
+  pty.emit("data", Buffer.from("PS C:\\Users\\alice>"));
+  const result = await job.resultPromise;
+  assert.equal(result.ok, true);
+  assert.equal(result.stdout, "DONE");
+});
+
+test("stream termination after an end marker preserves the completed result", async (t) => {
+  for (const termination of ["close", "error", "exit"]) {
+    await t.test(termination, async () => {
+      class CapturePty extends EventEmitter {
+        write() {}
+
+        onExit(callback) {
+          this.exitCallback = callback;
+          return { dispose() {} };
+        }
+      }
+      const pty = new CapturePty();
+      const job = startPtyJob(pty, "Write-Output 'DONE'", {
+        shellKind: "unknown",
+        loginShellHint: "cmd",
+        timeoutMs: 1000,
+        expectedPrompt: "PS C:\\Users\\alice>",
+      });
+      pty.emit("data", Buffer.from(`${job.marker}_S\r\nDONE\r\n${job.marker}_E:7\r\n`));
+      if (termination === "error") {
+        pty.emit("error", new Error("disconnected"));
+      } else if (termination === "exit") {
+        pty.exitCallback();
+      } else {
+        pty.emit("close");
+      }
+
+      const result = await job.resultPromise;
+      assert.equal(result.ok, false);
+      assert.equal(result.exitCode, 7);
+      assert.equal(result.stdout, "DONE");
+      assert.doesNotMatch(result.stdout, /__NCMCP_/);
+      assert.equal(result.error, undefined);
+    });
+  }
+});
+
+test("a foreground wall deadline returns on time but blocks writes until the prompt returns", async () => {
+  const writes = [];
+  class CapturePty extends EventEmitter {
+    write(data) {
+      writes.push(String(data));
+    }
+  }
+  const pty = new CapturePty();
+  const session = { _loginShellKind: "cmd" };
+  pty.on("data", (data) => trackSessionIdlePrompt(session, String(data)));
+  trackSessionIdlePrompt(session, "PS C:\\Users\\alice>");
+
+  const first = startPtyJob(pty, "Write-Output 'DONE'", {
+    shellKind: session.shellKind,
+    loginShellHint: session._loginShellKind,
+    timeoutMs: 30,
+    expectedPrompt: getFreshIdlePrompt(session),
+    enforceWallTimeout: true,
+  });
+  pty.emit("data", Buffer.from(`${first.marker}_S\r\nDONE\r\n${first.marker}_E:0\r\n`));
+
+  const deadlineGuard = Symbol("deadline guard");
+  const firstResult = await Promise.race([
+    first.resultPromise,
+    new Promise((resolve) => setTimeout(() => resolve(deadlineGuard), 300)),
+  ]);
+  assert.notEqual(firstResult, deadlineGuard);
+  assert.equal(firstResult.ok, true);
+  assert.equal(firstResult.exitCode, 0);
+  assert.equal(firstResult.stdout, "DONE");
+  assert.equal(writes.filter((write) => write === "\x03").length, 0);
+
+  assert.throws(
+    () => startPtyJob(pty, "Write-Output 'TOO_EARLY'", {
+      shellKind: session.shellKind,
+      loginShellHint: session._loginShellKind,
+      timeoutMs: 1000,
+      expectedPrompt: getFreshIdlePrompt(session),
+    }),
+    (error) => (
+      error?.code === "SHELL_PROMPT_PENDING"
+      && /waiting for the shell prompt/i.test(error.message)
+    ),
+  );
+  assert.equal(writes.length, 1);
+
+  pty.emit("data", Buffer.from("PS C:\\Users\\alice>"));
+  const second = startPtyJob(pty, "Write-Output 'NEXT'", {
+    shellKind: session.shellKind,
+    loginShellHint: session._loginShellKind,
+    timeoutMs: 1000,
+    expectedPrompt: getFreshIdlePrompt(session),
+  });
+  const secondWrite = writes.at(-1);
+  assert.match(secondWrite, /\$__NCMCP_/);
+  assert.doesNotMatch(secondWrite, /cmd \/d \/s \/c/i);
+  pty.emit(
+    "data",
+    Buffer.from(`${second.marker}_S\r\nNEXT\r\n${second.marker}_E:0\r\nPS C:\\Users\\alice>`),
+  );
+  const secondResult = await second.resultPromise;
+  assert.equal(secondResult.ok, true);
+  assert.equal(secondResult.stdout, "NEXT");
+  assert.equal(writes.filter((write) => write === "\x03").length, 0);
+});
+
+test("startPtyJob clears PowerShell input in Windows, Emacs, and Vi editor states", async () => {
+  class PowerShellLinePty extends EventEmitter {
+    constructor(editMode, { legacyVi = false } = {}) {
+      super();
+      this.editMode = editMode;
+      this.legacyVi = legacyVi;
+      this.pendingInput = "";
+      this.cursor = 0;
+      this.viInsertMode = true;
+      this.viReplacePending = false;
+      this.viChord = "";
+      this.viChordDigits = "";
+      this.emacsChord = false;
+      this.submittedLines = [];
+      this.writes = [];
+    }
+
+    setPendingInput(text, { cursor = text.length, viInsertMode = true } = {}) {
+      this.pendingInput = text;
+      this.cursor = cursor;
+      this.viInsertMode = viInsertMode;
+      this.viReplacePending = false;
+      this.viChord = "";
+      this.viChordDigits = "";
+    }
+
+    insert(text) {
+      this.pendingInput = `${this.pendingInput.slice(0, this.cursor)}${text}${this.pendingInput.slice(this.cursor)}`;
+      this.cursor += text.length;
+    }
+
+    applyEditKey(key) {
+      if (this.editMode === "windows") {
+        if (key === "\x1b") {
+          this.pendingInput = "";
+          this.cursor = 0;
+        } else if (key === "\x08") {
+          if (this.cursor > 0) {
+            this.pendingInput = `${this.pendingInput.slice(0, this.cursor - 1)}${this.pendingInput.slice(this.cursor)}`;
+            this.cursor -= 1;
+          }
+        } else {
+          this.insert(key);
+        }
+        return;
+      }
+
+      if (this.editMode === "emacs") {
+        if (this.emacsChord) {
+          this.emacsChord = false;
+          if (key.toLowerCase() === "r") {
+            this.pendingInput = "";
+            this.cursor = 0;
+          }
+        } else if (key === "\x1b") {
+          this.emacsChord = true;
+        } else if (key === "\x15") {
+          this.pendingInput = this.pendingInput.slice(this.cursor);
+          this.cursor = 0;
+        } else if (key === "\x0b") {
+          this.pendingInput = this.pendingInput.slice(0, this.cursor);
+        } else if (key === "\x08") {
+          if (this.cursor > 0) {
+            this.pendingInput = `${this.pendingInput.slice(0, this.cursor - 1)}${this.pendingInput.slice(this.cursor)}`;
+            this.cursor -= 1;
+          }
+        } else {
+          this.insert(key);
+        }
+        return;
+      }
+
+      if (this.viReplacePending) {
+        this.viReplacePending = false;
+        return;
+      }
+      if (this.viChord) {
+        const chord = this.viChord;
+        if (chord === "d" && /[0-9]/.test(key)) {
+          this.viChordDigits += key;
+          return;
+        }
+        this.viChord = "";
+        if (chord === "g" && key === "g") {
+          this.cursor = 0;
+        } else if (chord === "d" && key === "G" && !this.legacyVi) {
+          this.pendingInput = this.pendingInput.slice(0, this.cursor);
+        } else if (chord === "d" && key === "d") {
+          // PSReadLine 2.0's dd clears the whole buffer. In 2.1+, dd clears
+          // the requested number of logical lines.
+          if (this.legacyVi) {
+            this.pendingInput = "";
+            this.cursor = 0;
+          } else {
+            const requestedLines = Number(this.viChordDigits || "1");
+            const lineStart = this.pendingInput.lastIndexOf("\n", Math.max(0, this.cursor - 1)) + 1;
+            let lineEnd = lineStart;
+            let remaining = requestedLines;
+            while (remaining > 0 && lineEnd < this.pendingInput.length) {
+              const newline = this.pendingInput.indexOf("\n", lineEnd);
+              if (newline === -1) {
+                lineEnd = this.pendingInput.length;
+                break;
+              }
+              lineEnd = newline + 1;
+              remaining -= 1;
+            }
+            this.pendingInput = `${this.pendingInput.slice(0, lineStart)}${this.pendingInput.slice(lineEnd)}`;
+            this.cursor = Math.min(lineStart, this.pendingInput.length);
+          }
+        }
+        this.viChordDigits = "";
+        return;
+      }
+      if (!this.viInsertMode) {
+        if (key === "i") {
+          this.viInsertMode = true;
+        } else if (key === "r") {
+          this.viReplacePending = true;
+        } else if (key === "g" || key === "d") {
+          this.viChord = key;
+        }
+        return;
+      }
+      if (key === "\x1b") {
+        this.viInsertMode = false;
+      } else if (key === "\x08") {
+        if (this.cursor > 0) {
+          this.pendingInput = `${this.pendingInput.slice(0, this.cursor - 1)}${this.pendingInput.slice(this.cursor)}`;
+          this.cursor -= 1;
+        }
+      } else {
+        this.insert(key);
+      }
+    }
+
+    write(data) {
+      const text = String(data);
+      this.writes.push(text);
+
+      const clearPrefix = buildPendingInputClearPrefix("powershell");
+      assert.ok(text.startsWith(clearPrefix));
+      for (const key of clearPrefix) this.applyEditKey(key);
+      const wrapper = text.slice(clearPrefix.length);
+      const submittedLine = this.viInsertMode
+        ? `${this.pendingInput.slice(0, this.cursor)}${wrapper}${this.pendingInput.slice(this.cursor)}`
+        : this.pendingInput;
+      this.submittedLines.push(submittedLine);
+      this.pendingInput = "";
+      this.cursor = 0;
+
+      const marker = submittedLine.match(/__NCMCP_[0-9a-z]+_[0-9a-f]+__/)?.[0];
+      assert.ok(marker);
+      queueMicrotask(() => {
+        this.emit("data", Buffer.from(`${marker}_S\r\n${marker}_E:0\r\nPS C:\\Users\\alice>`));
+      });
+    }
+  }
+
+  const legacyPreviousPrefixPty = new PowerShellLinePty("vi", { legacyVi: true });
+  legacyPreviousPrefixPty.setPendingInput("first line\n; Write-Output 'USER_SECOND'");
+  for (const key of "\x1bggdG\x1br\x1b\x1bi\x08") legacyPreviousPrefixPty.applyEditKey(key);
+  assert.match(legacyPreviousPrefixPty.pendingInput, /USER_SECOND/);
+
+  const editorCases = [
+    { editMode: "windows", cursorAtStart: false, viInsertMode: true, multiline: false },
+    { editMode: "emacs", cursorAtStart: true, viInsertMode: true, multiline: false },
+    { editMode: "vi", cursorAtStart: true, viInsertMode: true, multiline: false },
+    { editMode: "vi", cursorAtStart: true, viInsertMode: false, multiline: false },
+    { editMode: "vi", cursorAtStart: false, viInsertMode: true, multiline: true },
+    { editMode: "vi", cursorAtStart: false, viInsertMode: false, multiline: true },
+    { editMode: "vi", cursorAtStart: false, viInsertMode: true, multiline: true, legacyVi: true },
+    { editMode: "vi", cursorAtStart: false, viInsertMode: false, multiline: true, legacyVi: true },
+  ];
+  for (const { editMode, cursorAtStart, viInsertMode, multiline, legacyVi = false } of editorCases) {
+    const pty = new PowerShellLinePty(editMode, { legacyVi });
+    const commands = ["Write-Output 'one'", "Write-Output 'two'"];
+    for (const [index, command] of commands.entries()) {
+      if (index === 1) {
+        // Model input accepted by PSReadLine before its echo reaches the
+        // tracked PTY output. The leading semicolon makes a retained suffix
+        // executable after the wrapper, matching the dangerous Vi edge case.
+        const pendingInput = multiline
+          ? "; Write-Output 'USER'\nWrite-Output 'USER_SECOND'"
+          : cursorAtStart
+            ? "; Write-Output 'USER'"
+            : "Write-Output 'USER'; ";
+        pty.setPendingInput(pendingInput, {
+          cursor: cursorAtStart ? 0 : pendingInput.length,
+          viInsertMode,
+        });
+      }
+      const job = startPtyJob(pty, command, {
+        shellKind: "unknown",
+        loginShellHint: "cmd",
+        timeoutMs: 50,
+        expectedPrompt: "PS C:\\Users\\alice>",
+      });
+      await job.resultPromise;
+    }
+
+    assert.equal(pty.writes.length, 2);
+    assert.equal(pty.submittedLines.length, 2);
+    for (const [index, submittedLine] of pty.submittedLines.entries()) {
+      assert.ok(pty.writes[index].startsWith("\x1bggd2147483647d\x1br\x1b\x1bi\x08$__NCMCP_"));
+      assert.ok(submittedLine.startsWith("$__NCMCP_"));
+      assert.doesNotMatch(submittedLine, /Write-Output 'USER'/);
+      assert.doesNotMatch(submittedLine, /Write-Output 'USER_SECOND'/);
+      assert.doesNotMatch(submittedLine, /cmd \/d \/s \/c/i);
+    }
+  }
+});
+
+test("startPtyJob keeps the clear prefix for non-PowerShell sessions", async () => {
   const writes = [];
   class CapturePty extends EventEmitter {
     write(data) {
@@ -390,306 +854,6 @@ test("startPtyJob writes the clear prefix before the wrapper", async () => {
   job.cancel();
   pty.emit("data", Buffer.from("$ "));
   await job.resultPromise;
-});
-
-test("startPtyJob forwards liveShellKind so nested fish gets the fish wrapper", async () => {
-  // Regression test for #3261/#3262: the handler passes
-  // liveShellKind: session._liveShellKind to execViaPty → startPtyJob,
-  // which must forward it to resolveEffectiveShellKind. Without that
-  // forwarding a nested fish session still received the POSIX wrapper.
-  const writes = [];
-  class CapturePty extends EventEmitter {
-    write(data) {
-      writes.push(String(data));
-    }
-  }
-  const pty = new CapturePty();
-  const job = startPtyJob(pty, "echo hi", {
-    shellKind: "posix",
-    liveShellKind: "fish",
-    timeoutMs: 50,
-    expectedPrompt: "user@host:~$",
-  });
-  assert.equal(writes.length, 1);
-  // The pending-input clear prefix (if any) comes before the wrapper.
-  const wrapped = writes[0].replace(/^[\x15\x0b\x1b]+/, "");
-  // Fish wrapper signature: leading space + fish `set`/`set -l` syntax.
-  assert.ok(wrapped.startsWith(" set "));
-  assert.ok(wrapped.includes("set -l "));
-  // Sanity: posix wrapper would have started with the marker assignment.
-  assert.ok(!wrapped.startsWith("__NCMCP_"));
-  job.cancel();
-  pty.emit("data", Buffer.from("user@host:~$"));
-  await job.resultPromise;
-});
-
-test("startPtyJob invalidates the live fish hint when the wrapper start marker never arrives", async () => {
-  // Codex P1 on #3262: when a user exits nested fish back to a parent shell
-  // with a custom prompt, the stale live fish hint keeps fish-wrapping
-  // commands into a POSIX shell forever. The wrapper fails before its start
-  // marker, so the startup timeout is the signal that the hint is stale.
-  const writes = [];
-  let invalidated = 0;
-  class NoMarkerPty extends EventEmitter {
-    write(data) {
-      writes.push(String(data));
-      // Simulate a POSIX shell that chokes on the fish wrapper: the PTY echo
-      // of the typed wrapper (carrying the job marker) is followed by the
-      // rejection diagnostic, but the start marker never arrives. The
-      // diagnostic must sit next to the job marker to count as evidence
-      // (Codex P2 on #3262).
-      const marker = markerFromWrite(data);
-      queueMicrotask(() => {
-        this.emit("data", Buffer.from(`${marker} wrapper echo\r\nbash: syntax error near unexpected token\r\nuser@host ❯ `));
-      });
-    }
-  }
-  const pty = new NoMarkerPty();
-  const job = startPtyJob(pty, "echo hi", {
-    shellKind: "posix",
-    liveShellKind: "fish",
-    timeoutMs: 50,
-    onLiveShellKindInvalidated: () => { invalidated += 1; },
-  });
-  const result = await job.resultPromise;
-  assert.ok(result.error.includes("start marker never arrived"));
-  assert.equal(invalidated, 1);
-
-  // Without the live fish hint driving the wrapper, no invalidation fires.
-  invalidated = 0;
-  const job2 = startPtyJob(new NoMarkerPty(), "echo hi", {
-    shellKind: "posix",
-    timeoutMs: 50,
-    onLiveShellKindInvalidated: () => { invalidated += 1; },
-  });
-  await job2.resultPromise;
-  assert.equal(invalidated, 0);
-});
-
-test("startPtyJob keeps the live fish hint when a foreground child blocks startup (Codex P2)", async () => {
-  // terminal_execute typed while a foreground child (vim, ssh, a REPL) owns
-  // the PTY: the wrapper is never executed and the start marker never
-  // arrives, but the live fish hint is still correct. Without non-fish
-  // rejection evidence in the captured output the hint must not be
-  // invalidated — otherwise the next command falls back to the POSIX
-  // wrapper, fails before its marker in fish, and waits through another
-  // startup timeout after the user exits the child back into fish.
-  let invalidated = 0;
-  class ForegroundChildPty extends EventEmitter {
-    write() {
-      queueMicrotask(() => {
-        this.emit("data", Buffer.from("~\r\n~ VIM - Vi IMproved\r\n~\r\n"));
-      });
-    }
-  }
-  const job = startPtyJob(new ForegroundChildPty(), "echo hi", {
-    shellKind: "posix",
-    liveShellKind: "fish",
-    timeoutMs: 50,
-    onLiveShellKindInvalidated: () => { invalidated += 1; },
-  });
-  const result = await job.resultPromise;
-  assert.ok(result.error.includes("start marker never arrived"));
-  assert.equal(invalidated, 0);
-
-  // A non-fish shell rejecting the fish wrapper (bash diagnostic) still
-  // invalidates the stale hint — evidence-gated, not blanket.
-  invalidated = 0;
-  // The rejection diagnostic must sit next to this job's marker (the PTY
-  // echo of the typed fish wrapper precedes it) — a bare `bash: …` line
-  // from a foreground child is not evidence (Codex P2 on #3262).
-  class BashRejectPty extends EventEmitter {
-    write(data) {
-      const marker = markerFromWrite(data);
-      queueMicrotask(() => {
-        this.emit("data", Buffer.from(
-          `${marker} wrapper echo\r\nbash: syntax error near unexpected token\r\n`,
-        ));
-      });
-    }
-  }
-  const job2 = startPtyJob(new BashRejectPty(), "echo hi", {
-    shellKind: "posix",
-    liveShellKind: "fish",
-    timeoutMs: 50,
-    onLiveShellKindInvalidated: () => { invalidated += 1; },
-  });
-  await job2.resultPromise;
-  assert.equal(invalidated, 1);
-
-  // A foreground child emitting an ordinary `bash: …` diagnostic (no wrapper
-  // marker adjacent to it) must not invalidate the still-correct hint
-  // (Codex P2 on #3262).
-  invalidated = 0;
-  class ChildBashLogPty extends EventEmitter {
-    write() {
-      queueMicrotask(() => {
-        this.emit("data", Buffer.from("bash: line 3: connection failed\r\n"));
-      });
-    }
-  }
-  const job3 = startPtyJob(new ChildBashLogPty(), "echo hi", {
-    shellKind: "posix",
-    liveShellKind: "fish",
-    timeoutMs: 50,
-    onLiveShellKindInvalidated: () => { invalidated += 1; },
-  });
-  await job3.resultPromise;
-  assert.equal(invalidated, 0);
-});
-
-test("startPtyJob records the live fish hint when fish rejects the POSIX wrapper (greeting suppressed)", async () => {
-  // Codex P1 on #3262: with fish_greeting disabled/customized/localized the
-  // welcome banner never appears, so the live hint stays unset and a POSIX
-  // wrapper is typed into nested fish. fish rejects it before its first
-  // prompt with a `fish: …` diagnostic — greeting-independent evidence the
-  // interactive shell is fish. The callback lets the handler record the hint
-  // so the next command uses the fish wrapper instead of timing out again.
-  let rejected = 0;
-  // The diagnostic must reference this job's marker (Codex P2 on #3262).
-  class FishRejectPty extends EventEmitter {
-    write(data) {
-      const marker = markerFromWrite(data);
-      queueMicrotask(() => {
-        this.emit("data", Buffer.from(`fish: Unknown command: ${marker}=0\r\nfish: Unsupported use of '='. In fish, please use 'set ${marker} 0'.\r\nuser@host ~> `));
-      });
-    }
-  }
-  const job = startPtyJob(new FishRejectPty(), "echo hi", {
-    shellKind: "posix",
-    timeoutMs: 50,
-    onFishWrapperRejected: () => { rejected += 1; },
-  });
-  const result = await job.resultPromise;
-  assert.ok(result.error.includes("start marker never arrived"));
-  assert.equal(rejected, 1);
-
-  // A POSIX wrapper that the shell merely did not execute (no fish
-  // diagnostic) does not record the hint.
-  rejected = 0;
-  class QuietPty extends EventEmitter {
-    write(data) {
-      queueMicrotask(() => {
-        this.emit("data", Buffer.from("user@host ❯ "));
-      });
-    }
-  }
-  const job2 = startPtyJob(new QuietPty(), "echo hi", {
-    shellKind: "posix",
-    timeoutMs: 50,
-    onFishWrapperRejected: () => { rejected += 1; },
-  });
-  await job2.resultPromise;
-  assert.equal(rejected, 0);
-
-  // A foreground child's ordinary output line beginning `fish: ` (a service
-  // log, not a shell diagnostic) does not record the hint — the diagnostic
-  // must reference this job's marker (Codex P2 on #3262).
-  rejected = 0;
-  class FishLogChildPty extends EventEmitter {
-    write() {
-      queueMicrotask(() => {
-        this.emit("data", Buffer.from("fish: connection failed\r\nservice entered failed state\r\n"));
-      });
-    }
-  }
-  const job2b = startPtyJob(new FishLogChildPty(), "echo hi", {
-    shellKind: "posix",
-    timeoutMs: 50,
-    onFishWrapperRejected: () => { rejected += 1; },
-  });
-  await job2b.resultPromise;
-  assert.equal(rejected, 0);
-
-  // The fish wrapper never triggers the rejection path (resolvedShellKind
-  // is already fish).
-  rejected = 0;
-  const job3 = startPtyJob(new FishRejectPty(), "echo hi", {
-    shellKind: "posix",
-    liveShellKind: "fish",
-    timeoutMs: 50,
-    onFishWrapperRejected: () => { rejected += 1; },
-  });
-  await job3.resultPromise;
-  assert.equal(rejected, 0);
-});
-
-test("startPtyJob runs fish wrapper recovery on the wall timeout before the startup timer (Codex P1)", async () => {
-  // With enforceWallTimeout (MCP terminal_execute) the wall timer and the
-  // startup timer share timeoutMs, and the wall timer is armed first — so
-  // it fires first and finish() clears the startup timer. The recovery must
-  // still run from the wall-timeout path when the start marker never
-  // arrived, or every MCP command in a nested fish with a suppressed
-  // greeting times out without ever recording the fish hint.
-  let rejected = 0;
-  let invalidated = 0;
-  class FishRejectPty extends EventEmitter {
-    write(data) {
-      const marker = markerFromWrite(data);
-      queueMicrotask(() => {
-        this.emit("data", Buffer.from(`fish: Unknown command: ${marker}=0\r\nuser@host ~> `));
-      });
-    }
-  }
-  const job = startPtyJob(new FishRejectPty(), "echo hi", {
-    shellKind: "posix",
-    timeoutMs: 50,
-    enforceWallTimeout: true,
-    onFishWrapperRejected: () => { rejected += 1; },
-    onLiveShellKindInvalidated: () => { invalidated += 1; },
-  });
-  const result = await job.resultPromise;
-  assert.equal(rejected, 1);
-  // The wall-timeout error wins (it fired before the startup timer).
-  assert.ok(result.error.includes("timed out"));
-  // No stale live fish hint driving the wrapper here, so no invalidation.
-  assert.equal(invalidated, 0);
-
-  // A stale live fish hint (wrapper chosen by the banner hint) is
-  // invalidated on the wall-timeout path too.
-  invalidated = 0;
-  class NoMarkerPty extends EventEmitter {
-    write(data) {
-      const marker = markerFromWrite(data);
-      queueMicrotask(() => {
-        this.emit("data", Buffer.from(`${marker} wrapper echo\r\nbash: syntax error near unexpected token\r\nuser@host ❯ `));
-      });
-    }
-  }
-  const job2 = startPtyJob(new NoMarkerPty(), "echo hi", {
-    shellKind: "posix",
-    liveShellKind: "fish",
-    timeoutMs: 50,
-    enforceWallTimeout: true,
-    onLiveShellKindInvalidated: () => { invalidated += 1; },
-  });
-  await job2.resultPromise;
-  assert.equal(invalidated, 1);
-
-  // Once the start marker arrived, the wall timeout must not run the
-  // recovery (the wrapper was understood; the command was simply slow).
-  invalidated = 0;
-  rejected = 0;
-  class StartedPty extends EventEmitter {
-    write(data) {
-      const marker = markerFromWrite(data);
-      if (!marker || this.started) return;
-      this.started = true;
-      queueMicrotask(() => {
-        this.emit("data", Buffer.from(`${marker}_S\nstill running`));
-      });
-    }
-  }
-  const job3 = startPtyJob(new StartedPty(), "echo hi", {
-    shellKind: "posix",
-    timeoutMs: 50,
-    enforceWallTimeout: true,
-    onFishWrapperRejected: () => { rejected += 1; },
-    onLiveShellKindInvalidated: () => { invalidated += 1; },
-  });
-  await job3.resultPromise;
-  assert.equal(rejected, 0);
-  assert.equal(invalidated, 0);
 });
 
 test("execViaRawPty does not prepend a line-clear before device commands", async () => {

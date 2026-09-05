@@ -8,6 +8,7 @@ import {
   uploadFromDataTransfer,
   uploadFromFileList,
 } from "../../lib/uploadService.ts";
+import { DEFAULT_SFTP_FILE_TRANSFER_CONCURRENCY } from "../../domain/sftpTransferConcurrency.ts";
 
 function createDataTransfer(files: File[]): DataTransfer {
   return {
@@ -195,6 +196,50 @@ test("uploads picked folder files with their relative directory structure", asyn
   assert.deepEqual(results, [
     { fileName: "folder/sub/file.txt", success: true },
   ]);
+});
+
+test("ordinary multi-file uploads use the shared transfer concurrency", async () => {
+  const countInitiallyStarted = async (fileTransferConcurrency?: number) => {
+    const started: string[] = [];
+    let releaseAll!: () => void;
+    const gate = new Promise<void>((resolve) => { releaseAll = resolve; });
+    const files = Array.from({ length: DEFAULT_SFTP_FILE_TRANSFER_CONCURRENCY + 2 }, (_, index) => {
+      const file = new File([`file-${index}`], `file-${index}.txt`);
+      Object.defineProperty(file, "path", { value: `/local/file-${index}.txt` });
+      return file;
+    });
+
+    const uploading = uploadFromFileList(
+      files,
+      {
+        targetPath: "/target",
+        sftpId: "sftp-1",
+        fileTransferConcurrency,
+        isLocal: false,
+        bridge: {
+          mkdirSftp: async () => {},
+          startStreamTransfer: async ({ targetPath }) => {
+            started.push(targetPath);
+            await gate;
+            return { transferId: targetPath };
+          },
+        },
+        joinPath: (base, name) => `${base}/${name}`,
+      },
+    );
+
+    await new Promise((resolve) => setImmediate(resolve));
+    const initiallyStarted = started.length;
+    releaseAll();
+    await uploading;
+    return initiallyStarted;
+  };
+
+  assert.equal(
+    await countInitiallyStarted(),
+    DEFAULT_SFTP_FILE_TRANSFER_CONCURRENCY,
+  );
+  assert.equal(await countInitiallyStarted(3), 3);
 });
 
 test("compression remains enabled for DataTransfer folder uploads that have a conflict resolver", async (t) => {

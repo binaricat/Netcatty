@@ -7,11 +7,15 @@ const {
   execViaChannel,
   execViaRawPty,
 } = require("../bridges/ai/ptyExec.cjs");
-const { getFreshIdlePrompt, formatSyntheticEcho, clearLiveShellKind, setLiveShellKindFish } = require("../bridges/ai/shellUtils.cjs");
+const { getFreshIdlePrompt, formatSyntheticEcho } = require("../bridges/ai/shellUtils.cjs");
 const {
   ensureSessionShellKind,
   ensureSessionShellKindForExec,
 } = require("../bridges/ai/sessionShellKind.cjs");
+const {
+  checkBlocklistForShell,
+  resolveSessionBlocklistShellKind,
+} = require("../bridges/ai/commandSafety.cjs");
 
 const DEFAULT_BACKGROUND_JOB_TIMEOUT_MS = 60 * 60 * 1000;
 const DEFAULT_BACKGROUND_JOB_POLL_INTERVAL_MS = 30 * 1000;
@@ -232,6 +236,7 @@ function createWorkerAiExecHandler({
       commandTimeoutMs,
       sessionMeta,
       enforceWallTimeout,
+      commandBlocklist,
     } = payload;
     const session = sessions?.get(sessionId);
     if (!session) {
@@ -271,15 +276,20 @@ function createWorkerAiExecHandler({
         chatSessionId,
       });
       if (!probed.ok) return probed;
+      const safety = checkBlocklistForShell(
+        command,
+        resolveSessionBlocklistShellKind(session),
+        commandBlocklist,
+      );
+      if (safety.blocked) {
+        return { ok: false, error: `Command blocked by safety policy. Pattern: ${safety.matchedPattern}` };
+      }
       return execViaPty(ptyStream, command, {
         stripMarkers: true,
         trackForCancellation: activePtyExecs,
         timeoutMs,
         shellKind: session.shellKind,
         loginShellHint: session._loginShellKind,
-        liveShellKind: session._liveShellKind,
-        onLiveShellKindInvalidated: () => clearLiveShellKind(session),
-        onFishWrapperRejected: () => setLiveShellKindFish(session),
         chatSessionId,
         expectedPrompt: getFreshIdlePrompt(session),
         typedInput: true,
@@ -300,6 +310,19 @@ function createWorkerAiExecHandler({
 
     const sshClient = session.sshClient || session.conn;
     if (sshClient && typeof sshClient.exec === "function") {
+      const probed = await ensureSessionShellKindForExec(session, {
+        trackForCancellation: activePtyExecs,
+        chatSessionId,
+      });
+      if (!probed.ok) return probed;
+      const safety = checkBlocklistForShell(
+        command,
+        resolveSessionBlocklistShellKind(session),
+        commandBlocklist,
+      );
+      if (safety.blocked) {
+        return { ok: false, error: `Command blocked by safety policy. Pattern: ${safety.matchedPattern}` };
+      }
       return execViaChannel(sshClient, command, {
         timeoutMs,
         trackForCancellation: activePtyExecs,
@@ -335,6 +358,7 @@ function createWorkerAiJobStartHandler({
       chatSessionId,
       commandTimeoutMs,
       sessionMeta,
+      commandBlocklist,
     } = payload;
     if (!sessionId || !command) {
       return { ok: false, error: "sessionId and command are required" };
@@ -437,6 +461,21 @@ function createWorkerAiJobStartHandler({
       };
     }
 
+    const safety = checkBlocklistForShell(
+      command,
+      resolveSessionBlocklistShellKind(session),
+      commandBlocklist,
+    );
+    if (safety.blocked) {
+      job.status = "failed";
+      job.error = `Command blocked by safety policy. Pattern: ${safety.matchedPattern}`;
+      job.updatedAt = Date.now();
+      job.pendingShellProbe = false;
+      backgroundJobs.delete(jobId);
+      if (activeSessionJobs.get(sessionId) === jobId) activeSessionJobs.delete(sessionId);
+      return { ok: false, error: job.error };
+    }
+
     const timeoutMs = Math.max(
       Number.isFinite(commandTimeoutMs) ? commandTimeoutMs : 60000,
       DEFAULT_BACKGROUND_JOB_TIMEOUT_MS,
@@ -447,9 +486,6 @@ function createWorkerAiJobStartHandler({
         timeoutMs,
         shellKind: session.shellKind,
         loginShellHint: session._loginShellKind,
-        liveShellKind: session._liveShellKind,
-        onLiveShellKindInvalidated: () => clearLiveShellKind(session),
-        onFishWrapperRejected: () => setLiveShellKindFish(session),
         chatSessionId,
         expectedPrompt: getFreshIdlePrompt(session),
         typedInput: true,

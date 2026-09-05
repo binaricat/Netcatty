@@ -262,6 +262,40 @@ test("formatMessagesForCompaction keeps non-attachment data fields", () => {
   assert.doesNotMatch(formatted, /redacted data payload/);
 });
 
+test("formatMessagesForCompaction omits encrypted provider continuation metadata", () => {
+  const ciphertext = "gAAAA".repeat(20_000);
+  const formatted = formatMessagesForCompaction([
+    {
+      role: "assistant",
+      content: [
+        {
+          type: "reasoning",
+          text: "Checked the deployment state.",
+          providerOptions: {
+            openai: {
+              itemId: "rs_secret",
+              reasoningEncryptedContent: ciphertext,
+            },
+          },
+        },
+        {
+          type: "tool-call",
+          toolCallId: "call-1",
+          toolName: "run_command",
+          input: { command: "docker service ls" },
+        },
+      ],
+    },
+  ]);
+
+  assert.match(formatted, /Checked the deployment state/);
+  assert.match(formatted, /docker service ls/);
+  assert.doesNotMatch(formatted, /reasoningEncryptedContent/);
+  assert.doesNotMatch(formatted, /rs_secret/);
+  assert.doesNotMatch(formatted, new RegExp(ciphertext.slice(0, 40)));
+  assert.ok(formatted.length < 2_000);
+});
+
 test("estimateModelMessagesTokens counts multimodal and tool content", () => {
   const tokens = estimateModelMessagesTokens([
     { role: "user", content: [{ type: "text", text: "hello world" }] },

@@ -4,7 +4,10 @@ const assert = require("node:assert/strict");
 const { EventEmitter } = require("node:events");
 const test = require("node:test");
 
-const { registerWorkerAiExecHandlers } = require("./aiExec.cjs");
+const {
+  createWorkerAiJobStartHandler,
+  registerWorkerAiExecHandlers,
+} = require("./aiExec.cjs");
 const { PROBE_OUTPUT_MARKER } = require("../bridges/ai/sessionShellKind.cjs");
 
 class FakePty extends EventEmitter {
@@ -342,5 +345,145 @@ test("worker chat cancel during shellKind probe aborts job start before PTY writ
     pty.writes.filter((entry) => entry.includes("__NCMCP_")).length,
     0,
     "cancelled pending start must not type a wrapper into the PTY",
+  );
+});
+
+test("worker exec keeps shell-selected defaults: powershell frees $(), dangerous PS commands blocked", async () => {
+  const pty = new FakePty();
+  const sessions = new Map([
+    ["ps-1", {
+      protocol: "ssh",
+      stream: pty,
+      shellKind: "",
+      remoteSshVersion: "OpenSSH_for_Windows_9.5",
+      lastIdlePrompt: "custom% ",
+      _promptTrackTail: "custom prompt\r\ncustom% ",
+      _shellKindExecProbe: async () => (
+        "DefaultShell    REG_SZ    C:\\Program Files\\PowerShell\\7\\pwsh.exe\r\n"
+      ),
+    }],
+  ]);
+  const ipcMain = createFakeIpcMain();
+  registerWorkerAiExecHandlers(ipcMain, { sessions });
+  const event = createFakeEvent();
+  const exec = ipcMain.handlers.get("netcatty:ai:exec");
+
+  // PowerShell subexpression syntax on a PowerShell session is legal: the
+  // command must pass the worker blocklist and reach the PTY wrapper.
+  const allowedPromise = exec(event, {
+    sessionId: "ps-1",
+    command: 'Write-Host "now: $(Get-Date)"',
+    chatSessionId: "chat-ps",
+    commandTimeoutMs: 300,
+  });
+  await nextTick();
+  assert.ok(
+    pty.writes.some((entry) => entry.includes("__NCMCP_")),
+    "expected the unblocked command to reach the PTY",
+  );
+  await allowedPromise.catch(() => {});
+
+  // PowerShell-native destructive commands are blocked by the new group.
+  const blocked = await exec(event, {
+    sessionId: "ps-1",
+    command: "Remove-Item -Recurse -Force C:\\important",
+    chatSessionId: "chat-ps",
+    commandTimeoutMs: 5000,
+  });
+  assert.equal(blocked.ok, false);
+  assert.match(blocked.error, /Command blocked by safety policy/);
+  assert.equal(blocked.error.includes("Remove-Item"), true);
+});
+
+test("worker exec honors an explicitly empty configured blocklist", async () => {
+  const pty = new FakePty();
+  const sessions = new Map([
+    ["posix-no-blocklist", {
+      protocol: "ssh",
+      stream: pty,
+      shellKind: "posix",
+    }],
+  ]);
+  const ipcMain = createFakeIpcMain();
+  registerWorkerAiExecHandlers(ipcMain, { sessions });
+
+  const execution = ipcMain.handlers.get("netcatty:ai:exec")(createFakeEvent(), {
+    sessionId: "posix-no-blocklist",
+    command: "rm -rf /tmp/test-only",
+    chatSessionId: "chat-no-blocklist",
+    commandTimeoutMs: 300,
+    commandBlocklist: [],
+  });
+  await nextTick();
+
+  assert.ok(
+    pty.writes.some((entry) => entry.includes("__NCMCP_")),
+    "disabled defaults must allow the command to reach the PTY wrapper",
+  );
+  await execution.catch(() => {});
+});
+
+test("worker background job probes before blocking a first PowerShell command", async () => {
+  const pty = new FakePty();
+  const sessions = new Map([
+    ["ps-danger-first", {
+      protocol: "ssh",
+      stream: pty,
+      shellKind: "",
+      remoteSshVersion: "OpenSSH_for_Windows_9.5",
+      lastIdlePrompt: "custom% ",
+      _promptTrackTail: "custom prompt\r\ncustom% ",
+      _shellKindExecProbe: async () => (
+        "DefaultShell    REG_SZ    C:\\Program Files\\PowerShell\\7\\pwsh.exe\r\n"
+      ),
+    }],
+  ]);
+  const backgroundJobs = new Map();
+  const activeSessionJobs = new Map();
+  const start = createWorkerAiJobStartHandler({
+    sessions,
+    backgroundJobs,
+    activeSessionJobs,
+  });
+
+  const result = await start(createFakeEvent(), {
+    sessionId: "ps-danger-first",
+    command: "Remove-Item -Recurse -Force C:\\important",
+    chatSessionId: "chat-ps-danger",
+  });
+
+  assert.equal(result.ok, false);
+  assert.match(result.error, /Command blocked by safety policy/);
+  assert.equal(pty.writes.length, 0);
+  assert.equal(backgroundJobs.size, 0);
+  assert.equal(activeSessionJobs.size, 0);
+});
+
+test("worker exec on an unclassified posix session still blocks command substitution", async () => {
+  const pty = new FakePty();
+  const sessions = new Map([
+    ["ssh-posix", {
+      protocol: "ssh",
+      stream: pty,
+      shellKind: "posix",
+    }],
+  ]);
+  const ipcMain = createFakeIpcMain();
+  registerWorkerAiExecHandlers(ipcMain, { sessions });
+  const event = createFakeEvent();
+
+  const blocked = await ipcMain.handlers.get("netcatty:ai:exec")(event, {
+    sessionId: "ssh-posix",
+    command: "echo $(whoami)",
+    chatSessionId: "chat-posix",
+    commandTimeoutMs: 5000,
+  });
+
+  assert.equal(blocked.ok, false);
+  assert.match(blocked.error, /Command blocked by safety policy/);
+  assert.equal(
+    pty.writes.filter((entry) => entry.includes("__NCMCP_")).length,
+    0,
+    "blocked commands must not reach the PTY",
   );
 });

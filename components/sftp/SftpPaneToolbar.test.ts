@@ -8,8 +8,11 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import {
   getSftpBookmarkButtonLabelKey,
+  getSftpBookmarkIdentity,
   getNextSftpViewMode,
   copySftpCurrentPathToClipboard,
+  canReorderSftpBookmark,
+  getSftpBookmarkMoveTargets,
   getNextSftpToolbarDisplayPath,
   getSftpViewModeToggleTarget,
   getSftpViewModeToggleLabelKey,
@@ -30,6 +33,11 @@ const toolbarSource = fs.readFileSync(
 test("single SFTP view-mode button toggles to the other mode", () => {
   assert.equal(getNextSftpViewMode("list"), "tree");
   assert.equal(getNextSftpViewMode("tree"), "list");
+});
+
+test("SFTP toolbar includes compact list density next to view mode", () => {
+  assert.match(toolbarSource, /"listDensity"/);
+  assert.match(toolbarSource, /getSftpListDensityToggleLabelKey/);
 });
 
 test("narrow SFTP toolbar spills non-pinned show items into overflow without changing hide/collapse", () => {
@@ -491,6 +499,82 @@ test("toolbar display path keeps the previous confirmed path while loading the s
   );
 });
 
+test("bookmark delete asks for confirmation inside the app", () => {
+  assert.doesNotMatch(toolbarSource, /window\.confirm/);
+  assert.doesNotMatch(toolbarSource, /confirmRemoveSftpBookmark/);
+  assert.match(toolbarSource, /import \{ ConfirmDialog \} from "\.\.\/ui\/confirm-dialog"/);
+  assert.match(toolbarSource, /<ConfirmDialog/);
+  assert.match(toolbarSource, /sftp\.bookmark\.removeConfirm/);
+  assert.match(toolbarSource, /path: pendingBookmarkRemoval\.path/);
+});
+
+test("bookmark rename does not use window.prompt", () => {
+  assert.doesNotMatch(toolbarSource, /window\.prompt/);
+  assert.match(toolbarSource, /event\.nativeEvent\.isComposing/);
+});
+
+test("bookmark drag ordering stays within global or location scope", () => {
+  const bookmarks = [
+    { id: "gbm-1", path: "/global-a", label: "Global A", global: true },
+    { id: "gbm-2", path: "/global-b", label: "Global B", global: true },
+    { id: "bm-1", path: "/host-a", label: "Host A" },
+    { id: "bm-2", path: "/host-b", label: "Host B" },
+  ];
+  assert.equal(canReorderSftpBookmark(bookmarks[0], bookmarks[1]), true);
+  assert.equal(canReorderSftpBookmark(bookmarks[2], bookmarks[3]), true);
+  assert.equal(canReorderSftpBookmark(bookmarks[0], bookmarks[2]), false);
+  assert.equal(canReorderSftpBookmark(undefined, bookmarks[2]), false);
+  assert.deepEqual(getSftpBookmarkMoveTargets(bookmarks, bookmarks[0]), {
+    previous: null,
+    next: bookmarks[1],
+  });
+  assert.deepEqual(getSftpBookmarkMoveTargets(bookmarks, bookmarks[2]), {
+    previous: null,
+    next: bookmarks[3],
+  });
+});
+
+test("bookmark operations keep global and location entries distinct when ids collide", () => {
+  const global = { id: "shared-id", path: "/global", label: "Global", global: true };
+  const location = { id: "shared-id", path: "/location", label: "Location" };
+  const nextLocation = { id: "next", path: "/next", label: "Next" };
+  const bookmarks = [global, location, nextLocation];
+
+  assert.notEqual(getSftpBookmarkIdentity(global), getSftpBookmarkIdentity(location));
+  assert.deepEqual(getSftpBookmarkMoveTargets(bookmarks, location), {
+    previous: null,
+    next: nextLocation,
+  });
+  assert.equal(canReorderSftpBookmark(location, nextLocation), true);
+  assert.equal(canReorderSftpBookmark(global, location), false);
+});
+
+test("bookmark manage mode exposes keyboard reorder controls without a dead path button", () => {
+  const markup = renderToStaticMarkup(
+    React.createElement(SftpBookmarkList, {
+      bookmarks: [
+        { id: "bm-1", path: "/srv/a", label: "First" },
+        { id: "bm-2", path: "/srv/b", label: "Second" },
+      ],
+      managing: true,
+      onNavigateToBookmark: () => {},
+      onRequestDeleteBookmark: () => {},
+      onReorderBookmark: () => {},
+      t: (key: string, params?: Record<string, unknown>) => ({
+        "sftp.bookmark.moveUp": `Move ${params?.label ?? ""} up`,
+        "sftp.bookmark.moveDown": `Move ${params?.label ?? ""} down`,
+        "sftp.bookmark.remove": "Remove bookmark",
+      }[key] ?? key),
+    }),
+  );
+
+  assert.match(markup, /aria-label="Move First up"[^>]*disabled/);
+  assert.match(markup, /aria-label="Move First down"/);
+  assert.match(markup, /aria-label="Move Second up"/);
+  assert.match(markup, /aria-label="Move Second down"[^>]*disabled/);
+  assert.doesNotMatch(markup, /<button[^>]*>\s*<div class="text-xs font-medium truncate">First/);
+});
+
 test("bookmark list renders saved paths as selectable rows", () => {
   const markup = renderToStaticMarkup(
     React.createElement(
@@ -502,7 +586,7 @@ test("bookmark list renders saved paths as selectable rows", () => {
         React.createElement(SftpBookmarkList, {
           bookmarks: [{ id: "bm-1", path: "/srv/www", label: "Web root" }],
           onNavigateToBookmark: () => {},
-          onDeleteBookmark: () => {},
+          onRequestDeleteBookmark: () => {},
           t: (key: string) => ({
             "sftp.bookmark.remove": "Remove bookmark",
           }[key] ?? key),
