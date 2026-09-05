@@ -89,8 +89,105 @@ function regEnumSubkeys(keyPath) {
 }
 
 /**
+ * Absolute path prefix of the per-user Windows App Execution Aliases
+ * directory (`%LOCALAPPDATA%\Microsoft\WindowsApps`), lower-cased and
+ * terminated with a path separator — or `null` when it cannot be
+ * determined (non-Windows platforms, missing LOCALAPPDATA).
+ *
+ * @param {NodeJS.ProcessEnv} [env]  Environment to read LOCALAPPDATA from.
+ * @param {string} [platform]  Platform override (tests).
+ * @returns {string|null}
+ */
+function windowsAppsAliasPrefix(env = process.env, platform = process.platform) {
+  if (platform !== "win32") return null;
+  const localAppData = env.LOCALAPPDATA || "";
+  if (!localAppData) return null;
+  // Win32 paths always use backslashes; build the prefix explicitly so the
+  // check does not depend on the path module of the host OS (tests).
+  return (
+    localAppData.replace(/[\\/]+$/, "") +
+    "\\Microsoft\\WindowsApps\\"
+  ).toLowerCase();
+}
+
+/**
+ * Check whether a candidate path lives in the per-user Windows App
+ * Execution Aliases directory (e.g. the MSIX/Store `pwsh.exe` alias).
+ *
+ * @param {string} candidate  Candidate executable path.
+ * @param {NodeJS.ProcessEnv} [env]  Environment to read LOCALAPPDATA from.
+ * @param {string} [platform]  Platform override (tests).
+ * @returns {boolean}
+ */
+function isWindowsAppExecutionAlias(candidate, env = process.env, platform) {
+  if (!candidate || typeof candidate !== "string") return false;
+  const prefix = windowsAppsAliasPrefix(env, platform);
+  if (!prefix) return false;
+  return (
+    candidate.replace(/\//g, "\\").toLowerCase().startsWith(prefix)
+  );
+}
+
+/**
+ * Pick the first launchable executable path from an ordered candidate list
+ * (e.g. the lines `where.exe <name>` printed, in PATH order).
+ *
+ * Regular files are verified with `fs.existsSync()`. Candidates inside the
+ * WindowsApps alias directory need special handling: MSIX/Store packages
+ * expose their executables as AppExecLink reparse points, which Node's
+ * `fs.statSync()`/`fs.existsSync()` cannot resolve (they fail with EACCES,
+ * see nodejs/node#36790) even though CreateProcess launches them fine via
+ * the full alias path. For those, fall back to `fs.lstatSync()`, which
+ * still sees the reparse point itself. A zero-byte plain file in the same
+ * directory (e.g. a disabled alias) stats cleanly and is rejected.
+ *
+ * Non-alias candidates win over alias candidates so a real install (MSI,
+ * zip, Chocolatey…) is still preferred when both are on PATH.
+ *
+ * @param {string[]} candidates  Ordered candidate paths.
+ * @param {{fs?: typeof import("node:fs"), env?: NodeJS.ProcessEnv, platform?: string}} [deps]  Injectable for tests.
+ * @returns {string|null} First launchable path, or `null`.
+ */
+function selectExecutableCandidate(candidates, deps = {}) {
+  const fsMod = deps.fs || fs;
+  const env = deps.env || process.env;
+  const platform = deps.platform || process.platform;
+  let aliasFallback = null;
+
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+
+    if (isWindowsAppExecutionAlias(candidate, env, platform)) {
+      if (aliasFallback) continue;
+      // existsSync() is false for AppExecLink reparse points, so a plain
+      // existence check would filter the alias out. Verify via statSync:
+      // success means a plain (non-launchable) stub; failure means a
+      // reparse point, confirmed with lstatSync.
+      try {
+        fsMod.statSync(candidate);
+        continue; // Plain zero-byte stub — not an AppExecLink.
+      } catch (_statErr) {
+        // Expected for AppExecLink reparse points.
+      }
+      try {
+        fsMod.lstatSync(candidate);
+      } catch (_lstatErr) {
+        continue;
+      }
+      aliasFallback = candidate;
+      continue;
+    }
+
+    if (!fsMod.existsSync(candidate)) continue;
+    return candidate;
+  }
+
+  return aliasFallback;
+}
+
+/**
  * Locate an executable on the system PATH using `where.exe`.
- * Returns the first valid, non-alias path, or `null` if not found.
+ * Returns the first valid, launchable path, or `null` if not found.
  *
  * @param {string} name  Executable name, e.g. "pwsh"
  * @returns {string|null}
@@ -98,30 +195,12 @@ function regEnumSubkeys(keyPath) {
 function findExecutableOnPath(name) {
   try {
     const result = execFileSync("where.exe", [name], EXEC_OPTS);
-    const candidates = result
-      .split(/\r?\n/)
-      .map((l) => l.trim())
-      .filter(Boolean);
-
-    for (const candidate of candidates) {
-      if (!fs.existsSync(candidate)) continue;
-      // Skip Windows App Execution Aliases (WindowsApps zero-byte stubs).
-      try {
-        const localAppData = (process.env.LOCALAPPDATA || "").toLowerCase();
-        if (
-          localAppData &&
-          candidate.toLowerCase().startsWith(
-            path.join(localAppData, "Microsoft", "WindowsApps").toLowerCase() +
-              path.sep,
-          )
-        ) {
-          continue;
-        }
-      } catch (_e) {
-        // Ignore — just use the candidate.
-      }
-      return candidate;
-    }
+    return selectExecutableCandidate(
+      result
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter(Boolean),
+    );
   } catch (_err) {
     // Not found on PATH.
   }
@@ -709,5 +788,8 @@ module.exports = {
   regQueryValue,
   regEnumSubkeys,
   findExecutableOnPath,
+  windowsAppsAliasPrefix,
+  isWindowsAppExecutionAlias,
+  selectExecutableCandidate,
   mapWslDistroIcon,
 };

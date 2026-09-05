@@ -58,7 +58,10 @@ const sessionLogStreamManager = require("./sessionLogStreamManager.cjs");
 const { detectShellKind } = require("./ai/ptyExec.cjs");
 const { stripAnsi, trackSessionIdlePrompt } = require("./ai/shellUtils.cjs");
 const { createZmodemSentry } = require("./zmodemHelper.cjs");
-const { discoverShells } = require("./shellDiscovery.cjs");
+const {
+  discoverShells,
+  selectExecutableCandidate,
+} = require("./shellDiscovery.cjs");
 const moshHandshake = require("./moshHandshake.cjs");
 const tempDirBridge = require("./tempDirBridge.cjs");
 const { createTelnetAutoLogin } = require("./telnetAutoLogin.cjs");
@@ -741,22 +744,9 @@ function resolvePosixExecutable(name, opts = {}) {
 /**
  * Find executable path on Windows
  */
-function isWindowsAppExecutionAlias(filePath) {
-  if (!filePath || process.platform !== "win32") return false;
-
-  const normalizedPath = path.normalize(filePath).toLowerCase();
-  const windowsAppsDir = path.join(
-    process.env.LOCALAPPDATA || "",
-    "Microsoft",
-    "WindowsApps",
-  ).toLowerCase();
-
-  return !!windowsAppsDir && normalizedPath.startsWith(`${windowsAppsDir}${path.sep}`);
-}
-
 function findExecutable(name, opts = {}) {
   if (process.platform !== "win32") return name;
-  
+
   const { execFileSync } = require("child_process");
   try {
     const pathOverride = Object.prototype.hasOwnProperty.call(opts, "pathOverride")
@@ -776,15 +766,17 @@ function findExecutable(name, opts = {}) {
       .map((line) => line.trim())
       .filter(Boolean);
 
-    for (const candidate of candidates) {
-      if (!fs.existsSync(candidate)) continue;
-      if (name === "pwsh" && isWindowsAppExecutionAlias(candidate)) continue;
-      return candidate;
-    }
+    // selectExecutableCandidate accepts Windows App Execution Aliases
+    // (MSIX/Store installs, e.g. winget's MSIX PowerShell 7) as a fallback
+    // after regular files — ConPTY launches them fine via the full alias
+    // path even though fs.existsSync() cannot resolve AppExecLink reparse
+    // points (issue #3280).
+    const found = selectExecutableCandidate(candidates, { fs, env: process.env });
+    if (found) return found;
   } catch (err) {
     console.warn(`Could not find ${name} via where.exe:`, err.message);
   }
-  
+
   if (!/^[a-zA-Z0-9._-]+$/.test(name)) return name;
 
   const commonPaths = [];
@@ -793,6 +785,9 @@ function findExecutable(name, opts = {}) {
     commonPaths.push(
       path.join(process.env.ProgramFiles || "C:\\Program Files", "PowerShell", "7", "pwsh.exe"),
       path.join(process.env.ProgramW6432 || "C:\\Program Files", "PowerShell", "7", "pwsh.exe"),
+      // MSIX/Store (winget) installs expose pwsh only via the per-user
+      // app execution alias — there is no "Program Files\PowerShell\7".
+      path.join(process.env.LOCALAPPDATA || "", "Microsoft", "WindowsApps", "pwsh.exe"),
     );
   }
 
@@ -815,9 +810,11 @@ function findExecutable(name, opts = {}) {
   );
   
   for (const p of commonPaths) {
-    if (fs.existsSync(p)) return p;
+    // selectExecutableCandidate also accepts app execution aliases, whose
+    // AppExecLink reparse points fs.existsSync() cannot see.
+    if (selectExecutableCandidate([p], { fs, env: process.env })) return p;
   }
-  
+
   return name;
 }
 
