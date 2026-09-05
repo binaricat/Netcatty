@@ -1294,3 +1294,26 @@ test("execViaChannel cancellation never exposes an incomplete UTF-8 character", 
   assert.doesNotMatch(result.stdout, /�/u);
   assert.equal(result.error, "Cancelled");
 });
+
+for (const customization of [":", "HISTCONTROL=ignorespace", "alias history='history 10'", "history() { :; }"]) {
+  test(`posix wrapper bypasses history customization: ${customization}`, () => {
+    const marker = "__NCMCP_CUSTOM_HISTORY__";
+    const wrapped = buildWrappedCommand("echo HISTORY_PROBE", "posix", marker);
+    const result = spawnSync("bash", ["--noprofile", "--norc", "-i"], {
+      input: `HISTFILE=/dev/null; HISTCONTROL=; PS1=; PS2=
+${customization}
+builtin history -c
+echo user_old
+${wrapped}builtin history
+exit
+`,
+      encoding: "utf8",
+      env: { ...process.env, TERM: "dumb" },
+    });
+    assert.equal(result.status, 0);
+    assert.match(result.stdout, new RegExp(`${marker}_E:0`));
+    const entries = result.stdout.split("\n").filter((line) => /^\s*\d+\s/.test(line));
+    assert.ok(entries.some((line) => line.includes("echo user_old")));
+    assert.ok(entries.every((line) => !line.includes(marker)), entries.join("\n"));
+  });
+}
