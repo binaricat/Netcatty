@@ -57,6 +57,7 @@ function startPtyJob(ptyStream, command, options) {
     shellKind,
     loginShellHint,
     probeLiveShell = false,
+    onProbeAborted,
     chatSessionId,
     abortSignal,
     expectedPrompt,
@@ -91,7 +92,8 @@ function startPtyJob(ptyStream, command, options) {
   const CANCEL_RETRY_MS = 5000;
   const CANCEL_WALL_TIMEOUT_MS = 30000;
 
-  let probingShell = probeLiveShell && ["posix", "fish"].includes(resolvedShellKind);
+  const usesLiveShellProbe = probeLiveShell && ["posix", "fish"].includes(resolvedShellKind);
+  let probingShell = usesLiveShellProbe;
   let probeOutput = "";
 
   let output = "";
@@ -411,6 +413,13 @@ function startPtyJob(ptyStream, command, options) {
   function finish(stdout, exitCode, error) {
     if (finished) return;
     finished = true;
+    if (usesLiveShellProbe && !foundStart && typeof onProbeAborted === "function") {
+      try {
+        onProbeAborted(marker);
+      } catch {
+        // Display cleanup must never prevent command cancellation or completion.
+      }
+    }
     clearTimeout(timeoutId);
     clearTimeout(wallTimeoutId);
     clearStartupTimeout();

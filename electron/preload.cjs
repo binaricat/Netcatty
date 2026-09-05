@@ -95,6 +95,8 @@ const _mcpLineMetas = new Map(); // sessionId -> trailing fragment metadata
 const _mcpPendingMetas = new Map(); // sessionId -> metadata from filtered-empty chunks
 const _mcpFlushTimers = new Map(); // sessionId -> delayed-flush timer
 const _mcpDroppingWrappedLine = new Set(); // sessionIds with a split marker echo line in progress
+const _mcpProbePrompts = new Map(); // sessionId -> probe marker awaiting its command
+const _mcpAbortedProbes = new Map(); // sessionId -> bounded set of cancelled probe markers
 const MAX_MCP_BUFFERED_LINE_CHARS = 64 * 1024;
 
 function clearMcpSessionState(sessionId) {
@@ -106,6 +108,31 @@ function clearMcpSessionState(sessionId) {
   _mcpLineMetas.delete(sessionId);
   _mcpPendingMetas.delete(sessionId);
   _mcpDroppingWrappedLine.delete(sessionId);
+  _mcpProbePrompts.delete(sessionId);
+  _mcpAbortedProbes.delete(sessionId);
+}
+
+function filterProbePromptFragment(sessionId, fragment) {
+  const reset = fragment.match(/(__NCMCP_(?:(?!__NCMCP_)[A-Za-z0-9_])+)_R/);
+  if (reset) {
+    const aborted = _mcpAbortedProbes.get(sessionId) || new Set();
+    aborted.add(reset[1]);
+    if (aborted.size > 32) aborted.delete(aborted.values().next().value);
+    _mcpAbortedProbes.set(sessionId, aborted);
+    if (_mcpProbePrompts.get(sessionId) === reset[1]) _mcpProbePrompts.delete(sessionId);
+    return true;
+  }
+  const completion = fragment.match(/^\r?(__NCMCP_[A-Za-z0-9_]+)_Q/);
+  if (completion && !_mcpAbortedProbes.get(sessionId)?.has(completion[1])) {
+    _mcpProbePrompts.set(sessionId, completion[1]);
+  }
+  const marker = _mcpProbePrompts.get(sessionId);
+  if (!marker) return false;
+  const line = fragment.replace(/^\r/, "");
+  if (line.startsWith(`${marker}_S`) || line.startsWith(`${marker}_E`)) {
+    _mcpProbePrompts.delete(sessionId);
+  }
+  return true;
 }
 
 // Returns true if `s` ends with a non-empty prefix of "__NCMCP_"
@@ -149,7 +176,7 @@ function filterMcpChunk(sessionId, chunk, meta) {
   _mcpPendingMetas.delete(sessionId);
 
   // Fast path: nothing suspicious in the combined data
-  if (!_mcpDroppingWrappedLine.has(sessionId) && !data.includes("__NCMCP_") && !_endsWithMarkerPrefix(data)) {
+  if (!_mcpDroppingWrappedLine.has(sessionId) && !_mcpProbePrompts.has(sessionId) && !data.includes("__NCMCP_") && !_endsWithMarkerPrefix(data)) {
     const deliveryMeta = held ? stateMeta : sameChunkMeta;
     return {
       data,
@@ -177,7 +204,8 @@ function filterMcpChunk(sessionId, chunk, meta) {
       // echoes can wrap across PTY lines; wrapped fragments that don't
       // contain __NCMCP_ would otherwise leak through as garbage.
       const tail = data.slice(pos);
-      if (droppedAny || tail.includes("__NCMCP_") || _endsWithMarkerPrefix(tail)) {
+      const probePrompt = filterProbePromptFragment(sessionId, tail);
+      if (probePrompt || droppedAny || tail.includes("__NCMCP_") || _endsWithMarkerPrefix(tail)) {
         let tailMeta = !held && tail === chunk ? sameChunkMeta : stateMeta;
         if (heldIngressAlreadyAcknowledged && !hasPluginPipelineIngress(tailMeta)) {
           tailMeta = { ...(tailMeta || {}), pluginPipelineIngressBytes: 0 };
@@ -196,7 +224,7 @@ function filterMcpChunk(sessionId, chunk, meta) {
         }
         // The reserved prefix already identifies an internal line. Its
         // remaining marker or suffix may arrive after the timed flush.
-        if (droppedAny || tail.includes("__NCMCP_")) {
+        if (probePrompt || droppedAny || tail.includes("__NCMCP_")) {
           _mcpDroppingWrappedLine.add(sessionId);
         }
       } else {
@@ -205,7 +233,8 @@ function filterMcpChunk(sessionId, chunk, meta) {
       break;
     }
     const line = data.slice(pos, nlIdx + 1); // includes the \n
-    if (droppedAny || line.includes("__NCMCP_")) {
+    const probePrompt = filterProbePromptFragment(sessionId, line);
+    if (probePrompt || droppedAny || line.includes("__NCMCP_")) {
       droppedAny = false;
       _mcpDroppingWrappedLine.delete(sessionId);
     } else {
@@ -256,6 +285,13 @@ function flushMcpBufferedOutput(sessionId) {
     _mcpLineMetas.delete(sessionId);
     _mcpFlushTimers.delete(sessionId);
     if (_mcpDroppingWrappedLine.has(sessionId)) {
+      // Retain a bounded partial marker so a delayed Q/R suffix still updates
+      // the probe lifecycle, rather than losing its identity at the timer.
+      if (held && /^\r?__NCMCP_[A-Za-z0-9_]*$/.test(held) && held.length <= 256) {
+        _mcpLineBufs.set(sessionId, held);
+        if (heldMeta) _mcpLineMetas.set(sessionId, heldMeta);
+        return;
+      }
       // A timed flush is not a line boundary. Keep discarding a known
       // internal line until its newline arrives, including slow prompts
       // between the probe completion marker and an echo-disabled wrapper.

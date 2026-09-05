@@ -484,13 +484,13 @@ function shutdownHost({ preserveScopedMetadata = false } = {}) {
   sessionIdleManager.clearAll();
 }
 
-function echoCommandToSession(session, sessionId, command) {
+function echoCommandToSession(session, sessionId, command, { syntheticEcho = true } = {}) {
   if (!electronModule || !session?.webContentsId || !command) return;
   const contents = electronModule.webContents?.fromId?.(session.webContentsId);
   safeSend(contents, "netcatty:data", {
     sessionId,
     data: formatSyntheticEcho(command),
-    syntheticEcho: true,
+    syntheticEcho,
   });
 }
 

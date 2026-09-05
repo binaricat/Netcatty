@@ -1698,3 +1698,85 @@ test("split probe completion markers stay hidden across delayed flushes", async 
     }
   }
 });
+
+test("multiline probe prompts remain hidden until the matching command starts", async () => {
+  const preload = loadPreloadWithFakeElectron();
+  try {
+    const received = [];
+    preload.api.onSessionData("multiline-probe", (chunk) => received.push(chunk));
+    const send = (data) => preload.handlers.get("netcatty:data")({}, { sessionId: "multiline-probe", data });
+    send("__NCMCP_probe___");
+    await sleep(120);
+    send("Qfirst prompt line\r\nsecond prompt line\r\n> ");
+    await sleep(120);
+    send("__NCMCP_other___S\r\nstill prompt\r\n");
+    assert.equal(received.join(""), "");
+    send("\r\n__NCMCP_probe___S\r\nfile.txt\r\n");
+    assert.equal(received.join(""), "file.txt\r\n");
+  } finally {
+    preload.cleanup();
+  }
+});
+
+test("aborted probes release multiline suppression and ignore a late completion", () => {
+  const preload = loadPreloadWithFakeElectron();
+  try {
+    const received = [];
+    preload.api.onSessionData("aborted-probe", (chunk) => received.push(chunk));
+    const send = (data) => preload.handlers.get("netcatty:data")({}, { sessionId: "aborted-probe", data });
+    send("__NCMCP_probe___Qfirst prompt\r\nsecond prompt\r\n");
+    send("__NCMCP_probe___R\r\n");
+    send("normal output\r\n");
+    send("__NCMCP_buffered___Q");
+    send("__NCMCP_buffered___R\r\n");
+    send("after buffered cancellation\r\n");
+    send("__NCMCP_late___R\r\n");
+    send("__NCMCP_late___Q\r\nlate prompt\r\n");
+    assert.equal(received.join(""), "normal output\r\nafter buffered cancellation\r\nlate prompt\r\n");
+  } finally {
+    preload.cleanup();
+  }
+});
+
+test("real PTY multiline prompt is displayed only after the AI command", {
+  skip: process.env.NETCATTY_LIVE_FISH_TEST !== "1", timeout: 10000,
+}, async () => {
+  const preload = loadPreloadWithFakeElectron();
+  const terminal = require("node-pty").spawn("/bin/bash", ["--noprofile", "--norc", "--noediting"], {
+    name: "dumb", cols: 240, rows: 24,
+    env: { ...process.env, TERM: "dumb", PS1: "FIRST_LINE\nLAST_LINE> ", BASH_SILENCE_DEPRECATION_WARNING: "1" },
+  });
+  let raw = "";
+  const received = [];
+  const send = (data) => preload.handlers.get("netcatty:data")({}, { sessionId: "real-multiline", data });
+  preload.api.onSessionData("real-multiline", (data) => received.push(data));
+  terminal.onData((data) => { raw += data; send(data); });
+  const ready = async () => {
+    const deadline = Date.now() + 3000;
+    while (!raw.includes("LAST_LINE>")) {
+      if (Date.now() > deadline) throw new Error("Missing multiline shell prompt");
+      await sleep(10);
+    }
+    raw = "";
+  };
+  try {
+    await ready();
+    terminal.write("stty -echo\r");
+    await ready();
+    received.length = 0;
+    const result = await require("./bridges/ai/ptyExec.cjs").execViaPty(terminal, "printf 'visible-result\\n'", {
+      shellKind: "posix", probeLiveShell: true, stripMarkers: true, timeoutMs: 3000,
+      onProbeAborted: (marker) => send(`${marker}_R\n`),
+    });
+    assert.equal(result.exitCode, 0, JSON.stringify(result));
+    await sleep(160);
+    const display = received.join("");
+    assert.match(display, /visible-result/);
+    assert.equal((display.match(/FIRST_LINE/g) || []).length, 1, display);
+    assert.equal((display.match(/LAST_LINE/g) || []).length, 1, display);
+    assert.equal(display.includes("__NCMCP_"), false, display);
+  } finally {
+    terminal.kill();
+    preload.cleanup();
+  }
+});

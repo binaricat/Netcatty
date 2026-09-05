@@ -1240,3 +1240,33 @@ test("execViaChannel cancellation never exposes an incomplete UTF-8 character", 
   assert.doesNotMatch(result.stdout, /�/u);
   assert.equal(result.error, "Cancelled");
 });
+
+
+test("cancelled live probe resets display once without injecting a command", async () => {
+  for (const callbackThrows of [false, true]) {
+    const pty = new EventEmitter();
+    const writes = [];
+    const resets = [];
+    pty.write = (data) => writes.push(data);
+    const job = startPtyJob(pty, "touch should-not-run", {
+      shellKind: "posix",
+      probeLiveShell: true,
+      expectedPrompt: "user@host:~$ ",
+      timeoutMs: 1000,
+      onProbeAborted: (marker) => {
+        resets.push(marker);
+        if (callbackThrows) throw new Error("Renderer closed");
+      },
+    });
+    job.cancel();
+    pty.emit("data", "\r\nuser@host:~$ ");
+    const result = await job.resultPromise;
+    assert.equal(result.error, "Cancelled");
+    assert.deepEqual(resets, [job.marker]);
+    pty.emit("data", `${job.marker}_P:fish\n${job.marker}_Q`);
+    job.cancel();
+    assert.deepEqual(resets, [job.marker]);
+    assert.ok(writes.every((data) => !data.includes("touch should-not-run")));
+    assert.ok(writes.every((data) => !data.includes(`${job.marker}_R`)));
+  }
+});
