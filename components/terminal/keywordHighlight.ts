@@ -5,6 +5,7 @@ import { isSafePluginDecorationPattern } from "../../domain/pluginTerminalProvid
 import { checkRegexSafetyPattern } from "../../lib/regexSafety";
 import type { KeywordHighlightRule } from "../../types";
 import { XTERM_PERFORMANCE_CONFIG } from "../../infrastructure/config/xtermPerformance";
+import { isTerminalReplayWrite } from "./terminalReplay";
 import { readPluginTerminalBufferText } from "./pluginTerminalBufferText";
 import { compileRe2RangeMatcher, forEachNonEmptyRegexMatch } from "./keywordHighlightRegex";
 import {
@@ -736,7 +737,7 @@ export class KeywordHighlighter implements IDisposable {
    */
   private mayColorViewportDuringBypass(data: string | Uint8Array): boolean {
     if (this.options.shouldBypassHighlight?.()) return false;
-    if (typeof data !== "string") return false;
+    if (typeof data !== "string" || isTerminalReplayWrite(this.term)) return false;
     return !shouldDegradeTerminalKeywordHighlight(this.term, data);
   }
 

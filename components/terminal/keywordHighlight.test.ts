@@ -10,6 +10,7 @@ import {
   noteTerminalOutputPressureData,
   setTerminalOutputPressureVisibility,
 } from "./runtime/terminalOutputPressure.ts";
+import { writeTerminalPayloadChunked } from "./terminalReplay.ts";
 import { KeywordHighlighter } from "./keywordHighlight.ts";
 
 const require = createRequire(import.meta.url);
@@ -1171,4 +1172,23 @@ test("recycled identical flood rows are recolored on catch-up", async () => {
   assert.deepEqual(uncoloredKeywordLines(term, "ERROR", RED), []);
   highlighter.dispose();
   term.dispose();
+});
+
+
+test("hibernate replay defers bulk viewport coloring but subsequent live output colors immediately", async () => {
+  const term = new XTerm({ allowProposedApi: true, cols: 80, rows: 6, scrollback: 100 });
+  const highlighter = new KeywordHighlighter(term);
+  highlighter.setRules(rule(), true);
+  const chunk = Array.from({ length: 20 }, () => "history ERROR").join("\r\n");
+  try {
+    await writeTerminalPayloadChunked(term, chunk);
+    assert.notEqual(cellRgb(term, term.buffer.active.viewportY, "ERROR"), RED);
+    await highlighter.whenSettled();
+    assert.deepEqual(uncoloredKeywordLines(term, "ERROR", RED), []);
+    await write(term, "\r\n" + chunk);
+    assert.equal(cellRgb(term, term.buffer.active.viewportY, "ERROR"), RED);
+  } finally {
+    highlighter.dispose();
+    term.dispose();
+  }
 });
