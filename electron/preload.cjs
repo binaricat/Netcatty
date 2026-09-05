@@ -115,6 +115,14 @@ function _endsWithMarkerPrefix(s) {
   for (let i = 1; i < p.length; i++) {
     if (s.endsWith(p.slice(0, i))) return true;
   }
+  // The shell-neutral live probe begins with this harmless builtin. Its
+  // echo can arrive before the random marker (e.g. " tru"), so retain the
+  // partial prefix just like a split marker. Ordinary text is still released
+  // by the existing bounded flush if no marker follows.
+  const probePrefix = " true __NCMCP_";
+  for (let i = 2; i < probePrefix.length; i++) {
+    if (s.endsWith(probePrefix.slice(0, i))) return true;
+  }
   return false;
 }
 

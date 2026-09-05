@@ -9,9 +9,9 @@ test('live shell response excludes echoed commands, stale markers and partial li
   assert.equal(parseLiveShellProbe(buildLiveShellProbe(marker), marker), null);
   assert.equal(parseLiveShellProbe(`${marker}_P:fi`, marker), null);
   assert.equal(parseLiveShellProbe('__NCMCP_old___P:fish\n', marker), null);
-  assert.deepEqual(parseLiveShellProbe(`\r${marker}_P:/usr/bin/fish\r\n`, marker), { kind: 'fish' });
-  assert.deepEqual(parseLiveShellProbe(`${marker}_P:-zsh\n`, marker), { kind: 'posix' });
-  assert.deepEqual(parseLiveShellProbe(`${marker}_P:\n`, marker), { kind: null });
+  assert.deepEqual(parseLiveShellProbe(`\r${marker}_P:/usr/bin/fish\r\n${marker}_Q`, marker), { kind: 'fish' });
+  assert.deepEqual(parseLiveShellProbe(`${marker}_P:-zsh\n${marker}_Q`, marker), { kind: 'posix' });
+  assert.deepEqual(parseLiveShellProbe(`${marker}_P:\n${marker}_Q`, marker), { kind: null });
 });
 
 test('probe waits for complete reply before choosing the first wrapper', async () => {
@@ -23,7 +23,7 @@ test('probe waits for complete reply before choosing the first wrapper', async (
   assert.ok(!writes[0].includes('printf success'));
   pty.emit('data', `${job.marker}_P:fi`);
   assert.equal(writes.length, 1);
-  pty.emit('data', 'sh\r\n');
+  pty.emit('data', `sh\r\n${job.marker}_Q`);
   assert.equal(writes.length, 2);
   assert.ok(writes[1].includes('function __ncmcp_int'));
   pty.emit('data', `${job.marker}_S\r\nsuccess\r\n${job.marker}_E:0\r\n`);
@@ -36,7 +36,7 @@ test('cancelled probe never injects user command after a late reply', async () =
   pty.write = (data) => writes.push(data);
   const job = startPtyJob(pty, 'touch should-not-run', { probeLiveShell: true, timeoutMs: 1000 });
   job.cancel();
-  pty.emit('data', `${job.marker}_P:fish\n`);
+  pty.emit('data', `${job.marker}_P:fish\n${job.marker}_Q`);
   pty.emit('close');
   await job.resultPromise;
   assert.ok(writes.every((data) => !data.includes('touch should-not-run')));
@@ -88,7 +88,17 @@ test('real PTY: first execution in startup fish and return to parent shells', {
       });
       assert.equal(result.exitCode, 0, JSON.stringify(result));
       assert.match(result.stdout, /first-command-success/);
-      if (startup) continue;
+      if (startup) {
+        await waitFor('FISH_READY>');
+        terminal.write('set -gx PATH /nonexistent\r');
+        await waitFor('FISH_READY>');
+        const fallback = await execViaPty(terminal, 'printf fallback-success', {
+          shellKind: 'fish', probeLiveShell: true, timeoutMs: 3000,
+        });
+        assert.equal(fallback.exitCode, 0, JSON.stringify(fallback));
+        assert.match(fallback.stdout, /fallback-success/);
+        continue;
+      }
       await waitFor('FISH_READY>');
       terminal.write('exit\r');
       await waitFor('PARENT_READY>');

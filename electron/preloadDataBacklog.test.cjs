@@ -1607,3 +1607,53 @@ test("startPluginConnection reopens a previously closed terminal data session", 
   assert.equal(invoked[0].wasClosed, false);
   assert.equal(closedTerminalDataSessions.has("session-1"), false);
 });
+
+
+test("live-shell probe suppresses the intermediate prompt across chunks", () => {
+  const preload = loadPreloadWithFakeElectron();
+  try {
+    const received = [];
+    preload.api.onSessionData("probe-session", (chunk) => received.push(chunk));
+    for (const data of [
+      "__NCMCP_probe___P:bash\r\n",
+      "__NCMCP_probe___Q",
+      "user@host:~$ ",
+      " __NCMCP_probe__=0; wrapped-command\r\n",
+      "__NCMCP_probe___S\r\n",
+      "file.txt\r\n",
+    ]) {
+      preload.handlers.get("netcatty:data")({}, { sessionId: "probe-session", data });
+    }
+    assert.equal(received.join(""), "file.txt\r\n");
+  } finally {
+    preload.cleanup();
+  }
+});
+
+
+test("live-shell probe buffers echoed builtin prefixes until the marker arrives", () => {
+  const preload = loadPreloadWithFakeElectron();
+  try {
+    const received = [];
+    preload.api.onSessionData("probe-echo", (chunk) => received.push(chunk));
+    for (const data of [" tru", "e __NCM", "CP_probe__; probe-command\r\n", "file.txt\r\n"]) {
+      preload.handlers.get("netcatty:data")({}, { sessionId: "probe-echo", data });
+    }
+    assert.equal(received.join(""), "file.txt\r\n");
+  } finally {
+    preload.cleanup();
+  }
+});
+
+test("ordinary text resembling the probe prefix is eventually delivered", async () => {
+  const preload = loadPreloadWithFakeElectron();
+  try {
+    const received = [];
+    preload.api.onSessionData("ordinary-text", (chunk) => received.push(chunk));
+    preload.handlers.get("netcatty:data")({}, { sessionId: "ordinary-text", data: "ordinary tru" });
+    await sleep(120);
+    assert.equal(received.join(""), "ordinary tru");
+  } finally {
+    preload.cleanup();
+  }
+});

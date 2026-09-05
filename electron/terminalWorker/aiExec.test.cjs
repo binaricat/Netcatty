@@ -20,7 +20,7 @@ class FakePty extends EventEmitter {
     this.writes.push(String(data));
     if (String(data).includes("command sh -c")) {
       const marker = String(data).match(/(__NCMCP_[A-Za-z0-9_]+__)/)[1];
-      queueMicrotask(() => this.emit("data", `${marker}_P:\n`));
+      queueMicrotask(() => this.emit("data", `${marker}_P:\n${marker}_Q`));
     }
   }
 }
