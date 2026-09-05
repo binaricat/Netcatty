@@ -82,14 +82,17 @@ let reconnectCallback: ((
   ruleId: string,
   onStatusChange: (status: PortForwardingRule['status'], error?: string) => void
 ) => Promise<{ success: boolean; error?: string }>) | null = null;
+let shouldReconnectRule: ((ruleId: string) => boolean) | undefined;
 
 /**
  * Set the reconnect callback (called by state hook to enable auto-reconnect)
  */
 export const setReconnectCallback = (
-  callback: typeof reconnectCallback
+  callback: typeof reconnectCallback,
+  shouldReconnect?: (ruleId: string) => boolean,
 ): void => {
   reconnectCallback = callback;
+  shouldReconnectRule = callback ? shouldReconnect : undefined;
 };
 
 /**
@@ -212,7 +215,7 @@ const scheduleReconnectIfNeeded = (
   enableReconnect: boolean,
   onStatusChange: (status: PortForwardingRule['status'], error?: string) => void,
 ): boolean => {
-  if (!enableReconnect || !reconnectCallback) {
+  if (!enableReconnect || !reconnectCallback || shouldReconnectRule?.(ruleId) === false) {
     return false;
   }
   if (rulesPendingCleanup.has(ruleId)) {
@@ -242,6 +245,12 @@ const scheduleReconnectIfNeeded = (
       currentConn.reconnectTimeoutId = undefined;
       currentConn.reconnectDueAt = undefined;
       currentConn.reconnectTimerCallback = undefined;
+      if (shouldReconnectRule?.(ruleId) === false) {
+        currentConn.unsubscribe?.();
+        activeConnections.delete(ruleId);
+        onStatusChange('inactive');
+        return;
+      }
       if (reconnectCallback) {
         currentConn.reconnectStartAuthorized = true;
         reconnectCallback(ruleId, onStatusChange);

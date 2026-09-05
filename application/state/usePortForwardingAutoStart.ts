@@ -385,7 +385,10 @@ export const usePortForwardingAutoStart = ({
       return startPortForward(rule, host, resolveEffectiveHosts(hostsRef.current), keysRef.current, identitiesRef.current, onStatusChange, true, terminalSettingsRef.current, knownHostsRef.current);
     };
 
-    setReconnectCallback(handleReconnect);
+    setReconnectCallback(handleReconnect, (ruleId) => isPortForwardingAutoStartEnabled(
+      localStorageAdapter.read<PortForwardingRule[]>(STORAGE_KEY_PORT_FORWARDING) ?? [],
+      ruleId,
+    ));
     return () => {
       setReconnectCallback(null);
     };

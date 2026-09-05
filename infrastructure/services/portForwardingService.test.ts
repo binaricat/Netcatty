@@ -920,6 +920,49 @@ test("auto-start rules reconnect after an unexpected inactive event", async (t) 
   assert.equal(connection.status, "connecting");
 });
 
+for (const disableDuringDelay of [false, true]) {
+  test(`inactive reconnect respects auto-start disabled ${disableDuringDelay ? "during delay" : "before disconnect"}`, async (t) => {
+    let statusListener: ((status: PortForwardingRule["status"]) => void) | undefined;
+    let autoStart = true;
+    let reconnects = 0;
+    const statuses: string[] = [];
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: {
+        netcatty: {
+          startPortForward: async () => ({ success: true }),
+          stopPortForwardByRuleId: async () => ({ stopped: 1, failed: 0, errors: [] }),
+          onPortForwardStatus: (_id: string, listener: typeof statusListener) => {
+            statusListener = listener;
+            return () => undefined;
+          },
+        },
+      },
+    });
+    const reconnectRule = rule({ id: `disabled-inactive-${disableDuringDelay}`, autoStart: true });
+    setReconnectCallback(async () => {
+      reconnects += 1;
+      return { success: true };
+    }, () => autoStart);
+    t.after(async () => {
+      setReconnectCallback(null);
+      await stopAndCleanupRuleAndWait(reconnectRule.id);
+    });
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    await startPortForward(reconnectRule, host(), [], [], [], (status) => statuses.push(status), true);
+    if (!disableDuringDelay) autoStart = false;
+    statusListener?.("inactive");
+    if (disableDuringDelay) {
+      assert.ok(getActiveConnection(reconnectRule.id)?.reconnectTimerCallback);
+      autoStart = false;
+    }
+    t.mock.timers.tick(3000);
+    assert.equal(reconnects, 0);
+    assert.equal(getActiveConnection(reconnectRule.id), undefined);
+    assert.equal(statuses.at(-1), "inactive");
+  });
+}
+
 test("inactive close events preserve an already scheduled reconnect", async (t) => {
   let statusListener: ((status: PortForwardingRule["status"], error?: string | null) => void) | undefined;
   Object.defineProperty(globalThis, "window", {
