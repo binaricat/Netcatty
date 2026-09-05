@@ -194,7 +194,9 @@ function filterMcpChunk(sessionId, chunk, meta) {
           _mcpLineMetas.delete(sessionId);
           _mcpDroppingWrappedLine.add(sessionId);
         }
-        if (droppedAny || /__NCMCP_[A-Za-z0-9_]+_Q/.test(tail)) {
+        // The reserved prefix already identifies an internal line. Its
+        // remaining marker or suffix may arrive after the timed flush.
+        if (droppedAny || tail.includes("__NCMCP_")) {
           _mcpDroppingWrappedLine.add(sessionId);
         }
       } else {

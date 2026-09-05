@@ -1677,3 +1677,24 @@ test("slow echo-disabled probe prompt stays hidden across delayed flushes", asyn
     preload.cleanup();
   }
 });
+
+test("split probe completion markers stay hidden across delayed flushes", async () => {
+  for (const prefix of ["__NCMCP_", "__NCMCP_probe___"]) {
+    const preload = loadPreloadWithFakeElectron();
+    try {
+      const received = [];
+      preload.api.onSessionData("split-probe", (chunk) => received.push(chunk));
+      const send = (data) => preload.handlers.get("netcatty:data")({}, { sessionId: "split-probe", data });
+      send(prefix);
+      await sleep(120);
+      assert.equal(received.join(""), "");
+      send("__NCMCP_probe___Q".slice(prefix.length) + "slow prompt> ");
+      await sleep(120);
+      assert.equal(received.join(""), "");
+      send("\r\n__NCMCP_probe___S\r\nfile.txt\r\n");
+      assert.equal(received.join(""), "file.txt\r\n");
+    } finally {
+      preload.cleanup();
+    }
+  }
+});
