@@ -721,7 +721,7 @@ function startPtyJob(ptyStream, command, options) {
   }
 
   function writeWrappedCommand() {
-    const wrapped = buildWrappedCommand(command, resolvedShellKind, marker);
+    const wrapped = buildWrappedCommand(command, resolvedShellKind, marker, probeLiveShell);
     ptyStream.write(`${buildPendingInputClearPrefix(resolvedShellKind)}${wrapped}`);
   }
 

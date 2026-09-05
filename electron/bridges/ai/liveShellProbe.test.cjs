@@ -30,6 +30,24 @@ test('probe waits for complete reply before choosing the first wrapper', async (
   assert.equal((await job.resultPromise).exitCode, 0);
 });
 
+test('probe wrapper keeps the start marker separate when terminal echo is disabled', async () => {
+  const { spawnSync } = require('node:child_process');
+  const pty = new EventEmitter();
+  let job;
+  pty.write = (data) => {
+    if (String(data).includes('command sh -c')) return;
+    if (data === '\x03') return;
+    const script = String(data).replace(/^\x15\x0b/, '');
+    const result = spawnSync('/bin/sh', ['-c', script], { encoding: 'utf8' });
+    queueMicrotask(() => pty.emit('data', `${job.marker}_QPROMPT> ${result.stdout}`));
+  };
+  job = startPtyJob(pty, 'printf no-newline-output', { probeLiveShell: true, timeoutMs: 1000 });
+  pty.emit('data', `${job.marker}_P:sh\n${job.marker}_Q`);
+  const result = await job.resultPromise;
+  assert.equal(result.exitCode, 0, JSON.stringify(result));
+  assert.match(result.stdout, /no-newline-output/);
+});
+
 test('cancelled probe never injects user command after a late reply', async () => {
   const pty = new EventEmitter();
   const writes = [];
@@ -110,5 +128,37 @@ test('real PTY: first execution in startup fish and return to parent shells', {
     } finally {
       terminal.kill();
     }
+  }
+});
+
+test('real PTY: echo-disabled bash completes output without a trailing newline', {
+  skip: process.env.NETCATTY_LIVE_FISH_TEST !== '1', timeout: 10000,
+}, async () => {
+  const pty = require('node-pty').spawn('/bin/bash', ['--noprofile', '--norc', '--noediting'], {
+    name: 'dumb', cols: 240, rows: 24,
+    env: { ...process.env, TERM: 'dumb', PS1: 'NOECHO_READY> ', BASH_SILENCE_DEPRECATION_WARNING: '1' },
+  });
+  let output = '';
+  pty.onData((data) => { output += data; });
+  const ready = async () => {
+    const deadline = Date.now() + 3000;
+    while (!output.includes('NOECHO_READY>')) {
+      if (Date.now() > deadline) throw new Error('No echo-disabled shell prompt');
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    output = '';
+  };
+  try {
+    await ready();
+    pty.write('stty -echo\n');
+    await ready();
+    const result = await require('./ptyExec.cjs').execViaPty(pty, 'printf noecho-success', {
+      shellKind: 'posix', probeLiveShell: true, timeoutMs: 2000,
+    });
+    assert.equal(result.exitCode, 0, JSON.stringify(result));
+    assert.match(result.stdout, /noecho-success/);
+    assert.ok(!output.includes('command sh -c'), 'the terminal must actually suppress input echo');
+  } finally {
+    pty.kill();
   }
 });
