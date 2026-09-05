@@ -593,12 +593,20 @@ function getTrimmedLineLength(line) {
 function styleToCss(style) {
   if (!style) return "";
   const declarations = [];
-  const fg = style.inverse
+  let fg = style.inverse
     ? (style.bg || `var(--term-default-bg, ${DEFAULT_BACKGROUND})`)
     : style.fg;
-  const bg = style.inverse
+  let bg = style.inverse
     ? (style.fg || `var(--term-default-fg, ${DEFAULT_FOREGROUND})`)
     : style.bg;
+  // Theme the normal page foreground, but preserve the original color pair
+  // when output supplies a background (including a foreground inverted into
+  // one). Darkening foregrounds independently can make these runs unreadable.
+  if (style.bg || (style.inverse && style.fg)) {
+    const originalColor = (color) => color?.replace(/var\(--[\w-]+, (#[a-f0-9]{6})\)/g, "$1");
+    fg = originalColor(fg) || DEFAULT_FOREGROUND;
+    bg = originalColor(bg);
+  }
   if (fg) declarations.push(`color: ${fg}`);
   if (bg) declarations.push(`background-color: ${bg}`);
   if (style.bold) declarations.push("font-weight: 700");

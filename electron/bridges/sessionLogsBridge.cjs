@@ -99,20 +99,20 @@ function wrapTerminalHtmlContent(htmlContent, hostLabel, timestamp) {
       /* ANSI palette (basic 0-7, bright 8-15) tuned for the light background. */
       --ansi-0: #000000;
       --ansi-1: #cd3131;
-      --ansi-2: #00bc00;
-      --ansi-3: #949800;
+      --ansi-2: #008000;
+      --ansi-3: #747700;
       --ansi-4: #0451a5;
       --ansi-5: #bc05bc;
-      --ansi-6: #0598bc;
+      --ansi-6: #007c9b;
       --ansi-7: #555555;
       --ansi-8: #666666;
       --ansi-9: #cd3131;
-      --ansi-10: #14ce14;
-      --ansi-11: #b5ba00;
+      --ansi-10: #008500;
+      --ansi-11: #797600;
       --ansi-12: #0451a5;
       --ansi-13: #bc05bc;
-      --ansi-14: #0598bc;
-      --ansi-15: #a5a5a5;
+      --ansi-14: #007c9b;
+      --ansi-15: #767676;
     }
     @media (prefers-color-scheme: dark) {
       :root {

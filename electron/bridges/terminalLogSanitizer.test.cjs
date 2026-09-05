@@ -257,7 +257,7 @@ test("SGR colors are emitted as themeable CSS variables with hex fallbacks", () 
   // wrapping HTML page can swap palettes for light and dark themes.
   assert.match(html, /color:\s*var\(--ansi-1, #cd3131\)[^"]*"[^>]*>red/);
   assert.match(html, /color:\s*var\(--ansi-9, #f14c4c\)[^"]*"[^>]*>bright-red/);
-  assert.match(html, /background-color:\s*var\(--ansi-4, #2472c8\)/);
+  assert.match(html, /color:\s*#f14c4c; background-color:\s*#2472c8/);
 });
 
 test("256-color base palette uses CSS variables; cube colors stay hex", () => {
@@ -276,4 +276,15 @@ test("inverse text falls back to themeable default background/foreground", () =>
     html,
     /color:\s*var\(--term-default-bg, #1e1e1e\); background-color:\s*var\(--term-default-fg, #d4d4d4\)/,
   );
+});
+
+test("explicit backgrounds preserve original foreground/background pairs across themes", () => {
+  const renderer = createTerminalTextRenderer();
+  renderer.feed("\x1b[37;41mERROR\x1b[0m \x1b[40mTEXT\x1b[0m \x1b[38;5;15;48;5;1mindexed\x1b[0m \x1b[31;7minverse\x1b[0m \x1b[48;2;0;0;0mRGB background\x1b[0m");
+  const html = renderer.toHtmlContent();
+  assert.match(html, /color: #e5e5e5; background-color: #cd3131[^>]*>ERROR/);
+  assert.match(html, /color: #d4d4d4; background-color: #000000[^>]*>TEXT/);
+  assert.match(html, /color: #ffffff; background-color: #cd3131[^>]*>indexed/);
+  assert.match(html, /color: #1e1e1e; background-color: #cd3131[^>]*>inverse/);
+  assert.match(html, /color: #d4d4d4; background-color: #000000[^>]*>RGB background/);
 });

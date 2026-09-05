@@ -932,3 +932,23 @@ test("html wrapper adapts to light/dark browser color scheme", () => {
   // Fonts remain monospace with a platform-appropriate stack.
   assert.match(html, /font-family:[^;]*ui-monospace[^;]*monospace/);
 });
+
+test("all light-mode ANSI foregrounds remain readable on the default background", () => {
+  const { wrapTerminalHtmlContent } = loadBridgeWithDialog({});
+  const lightCss = wrapTerminalHtmlContent("hello", "host", 0).split("@media")[0];
+  const luminance = (hex) => {
+    const channels = hex.match(/[a-f0-9]{2}/gi).map((channel) => {
+      const value = parseInt(channel, 16) / 255;
+      return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+    });
+    return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
+  };
+  const background = luminance(lightCss.match(/--term-default-bg:\s*(#[a-f0-9]{6})/i)[1]);
+  const palette = [...lightCss.matchAll(/--ansi-(\d+):\s*(#[a-f0-9]{6})/gi)];
+  assert.equal(palette.length, 16);
+  for (const [, index, color] of palette) {
+    const foreground = luminance(color);
+    const contrast = (Math.max(background, foreground) + 0.05) / (Math.min(background, foreground) + 0.05);
+    assert.ok(contrast >= 4.5, `ANSI ${index} (${color}) contrast ${contrast.toFixed(2)} is below 4.5:1`);
+  }
+});
