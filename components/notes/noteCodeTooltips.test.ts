@@ -3,7 +3,7 @@ import test from "node:test";
 import { JSDOM } from "jsdom";
 import { EditorState } from "@codemirror/state";
 import { EditorView, showTooltip } from "@codemirror/view";
-import { constrainNoteCodeTooltipWidth, createNoteCodeTooltipExtensions, getNoteTooltipSpace } from "./noteCodeTooltips";
+import { syncNoteCodeTooltipStyle, createNoteCodeTooltipExtensions, getNoteTooltipSpace } from "./noteCodeTooltips";
 
 const stubRect = (element: Element, top: number, left: number, right: number, bottom: number) => {
   element.getBoundingClientRect = () => ({
@@ -59,9 +59,17 @@ test("note tooltips escape clipped code blocks and disappear with their editor",
     for (const themeClass of view.themeClasses.split(" ")) {
       assert.ok(tooltip.parentElement?.classList.contains(themeClass));
     }
-    constrainNoteCodeTooltipWidth(view, { top: 0, left: 100, right: 300, bottom: 400 });
+    view.dom.style.setProperty("--popover", "120 50% 20%");
+    view.dom.style.setProperty("--accent", "120 70% 40%");
+    syncNoteCodeTooltipStyle(view, { top: 0, left: 100, right: 300, bottom: 400 });
+    assert.equal((tooltip as HTMLElement).style.getPropertyValue("--popover"), "120 50% 20%");
+    assert.equal((tooltip as HTMLElement).style.getPropertyValue("--accent"), "120 70% 40%");
     assert.equal((tooltip as HTMLElement).style.getPropertyValue("--note-tooltip-width"), "200px");
-    constrainNoteCodeTooltipWidth(view, { top: 0, left: 100, right: 250, bottom: 400 });
+    view.dom.style.setProperty("--popover", "240 50% 20%");
+    view.dom.style.removeProperty("--accent");
+    syncNoteCodeTooltipStyle(view, { top: 0, left: 100, right: 250, bottom: 400 });
+    assert.equal((tooltip as HTMLElement).style.getPropertyValue("--popover"), "240 50% 20%");
+    assert.equal((tooltip as HTMLElement).style.getPropertyValue("--accent"), "");
     assert.equal((tooltip as HTMLElement).style.getPropertyValue("--note-tooltip-width"), "150px");
     view.destroy();
     view = undefined;

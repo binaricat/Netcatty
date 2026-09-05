@@ -67,11 +67,21 @@ export const getNoteTooltipSpace = (
   return space;
 };
 
-export const constrainNoteCodeTooltipWidth = (view: EditorView, space: NoteTooltipSpace): void => {
+export const syncNoteCodeTooltipStyle = (view: EditorView, space: NoteTooltipSpace): void => {
   const width = `${Math.max(0, space.right - space.left)}px`;
+  const paneStyle = view.dom.ownerDocument.defaultView?.getComputedStyle(view.dom);
+  const tokens = ["--popover", "--popover-foreground", "--border", "--accent", "--accent-foreground"];
   for (const tooltip of view.state.facet(showTooltip)) {
     if (!tooltip) continue;
-    getTooltip(view, tooltip)?.dom.style.setProperty("--note-tooltip-width", width);
+    const dom = getTooltip(view, tooltip)?.dom;
+    if (!dom) continue;
+    dom.style.setProperty("--note-tooltip-width", width);
+    // Detached tooltips must retain terminal-side-panel theme overrides.
+    for (const token of tokens) {
+      const value = paneStyle?.getPropertyValue(token).trim();
+      if (value) dom.style.setProperty(token, value);
+      else dom.style.removeProperty(token);
+    }
   }
 };
 
@@ -85,15 +95,13 @@ export const createNoteCodeTooltipExtensions = (
       parent,
       // Tooltips escape those clips via the global parent, so constrain their
       // placement to the owning notes pane instead of the whole window.
-      tooltipSpace: getBoundsRoot
-        ? (view: EditorView) => {
-          const space = getNoteTooltipSpace(getBoundsRoot(), view.dom.ownerDocument);
-          // CodeMirror constrains coordinates and height, but not width. Set
-          // the available width; its ResizeObserver remeasures after resizing.
-          constrainNoteCodeTooltipWidth(view, space);
-          return space;
-        }
-        : undefined,
+      tooltipSpace: (view: EditorView) => {
+        const space = getNoteTooltipSpace(getBoundsRoot?.(), view.dom.ownerDocument);
+        // CodeMirror constrains coordinates and height, but not width. Set
+        // the available width; its ResizeObserver remeasures after resizing.
+        syncNoteCodeTooltipStyle(view, space);
+        return space;
+      },
     }),
   ),
   // CodeMirror carries this theme's scope onto its detached tooltip container.
