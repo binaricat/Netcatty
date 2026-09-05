@@ -86,16 +86,22 @@ function buildExtendedForegroundPalette(htmlContent) {
   const dark = [];
   for (const hex of colors) {
     const channels = hex.match(/../g).map((channel) => parseInt(channel, 16));
-    const luminance = (rgb) => rgb.reduce((sum, channel, index) => {
+    const linearChannels = channels.map((channel) => {
       const value = channel / 255;
-      const linear = value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
-      return sum + linear * [0.2126, 0.7152, 0.0722][index];
-    }, 0);
+      return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+    });
+    const luminance = linearChannels[0] * 0.2126 + linearChannels[1] * 0.7152 + linearChannels[2] * 0.0722;
+    const maxLuminance = 1.05 / 4.5 - 0.05;
     let adjusted = channels;
-    // Scale all channels together to retain the hue. Stop at normal-text
-    // contrast against the light page; dark mode retains the exact SGR color.
-    for (let scale = 0.99; 1.05 / (luminance(adjusted) + 0.05) < 4.5; scale -= 0.01) {
-      adjusted = channels.map((channel) => Math.floor(channel * Math.max(0, scale)));
+    // A single linear-light scaling reaches the contrast target without an
+    // iterative search for every color on each streaming snapshot.
+    if (luminance > maxLuminance) {
+      const scale = maxLuminance / luminance;
+      adjusted = linearChannels.map((channel) => {
+        const value = channel * scale;
+        const srgb = value <= 0.0031308 ? value * 12.92 : 1.055 * value ** (1 / 2.4) - 0.055;
+        return Math.floor(srgb * 255);
+      });
     }
     const lightHex = adjusted.map((channel) => channel.toString(16).padStart(2, "0")).join("");
     light.push(`--term-custom-${hex}: #${lightHex};`);
