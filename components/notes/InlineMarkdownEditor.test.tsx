@@ -367,7 +367,7 @@ test("note editor registers a code block editor for pasted fenced code", () => {
     source,
     /codeBlockPlugin\([^)]*\),\s*codeMirrorPlugin\(\{\s*codeBlockLanguages:/s,
   );
-  assert.match(source, /codeMirrorExtensions:\s*NOTE_CODE_MIRROR_EXTENSIONS/);
+  assert.match(source, /codeMirrorExtensions:\s*\[\s*\.\.\.NOTE_CODE_MIRROR_EXTENSIONS,/);
   assert.match(source, /syntaxHighlighting\(noteCodeHighlightStyle\)/);
 });
 
