@@ -963,6 +963,48 @@ for (const disableDuringDelay of [false, true]) {
   });
 }
 
+for (const autoStartAfterReplacement of [false, true]) {
+  test(`stale reconnect leaves a replacement tunnel intact with auto-start ${autoStartAfterReplacement}`, async (t) => {
+    let statusListener: ((status: PortForwardingRule["status"]) => void) | undefined;
+    let autoStart = true;
+    let reconnects = 0;
+    const reconnectRule = rule({ id: `replaced-inactive-${autoStartAfterReplacement}`, autoStart: true });
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: { netcatty: {
+        startPortForward: async () => ({ success: true }),
+        stopPortForwardByRuleId: async () => ({ stopped: 1, failed: 0, errors: [] }),
+        onPortForwardStatus: (_id: string, listener: typeof statusListener) => {
+          statusListener = listener;
+          return () => undefined;
+        },
+        listPortForwards: async () => [{ ruleId: reconnectRule.id, tunnelId: "replacement", status: "active", type: "local" }],
+      } },
+    });
+    setReconnectCallback(async () => { reconnects += 1; return { success: true }; }, () => autoStart);
+    t.after(async () => {
+      setReconnectCallback(null);
+      await stopAndCleanupRuleAndWait(reconnectRule.id);
+    });
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const statuses: string[] = [];
+    await startPortForward(reconnectRule, host(), [], [], [], (status) => statuses.push(status), true);
+    statusListener?.("inactive");
+    assert.ok(getActiveConnection(reconnectRule.id)?.reconnectTimerCallback);
+    await reconcileWithBackend();
+    const replacement = getActiveConnection(reconnectRule.id);
+    assert.equal(replacement?.tunnelId, "replacement");
+    const previousStatuses = [...statuses];
+    autoStart = autoStartAfterReplacement;
+    t.mock.timers.tick(3000);
+    assert.equal(getActiveConnection(reconnectRule.id), replacement);
+    assert.equal(reconnects, 0);
+    assert.deepEqual(statuses, previousStatuses);
+    statusListener?.("active");
+    assert.equal(getActiveConnection(reconnectRule.id)?.status, "active");
+  });
+}
+
 test("inactive close events preserve an already scheduled reconnect", async (t) => {
   let statusListener: ((status: PortForwardingRule["status"], error?: string | null) => void) | undefined;
   Object.defineProperty(globalThis, "window", {

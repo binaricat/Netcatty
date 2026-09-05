@@ -245,6 +245,7 @@ const scheduleReconnectIfNeeded = (
       currentConn.reconnectTimeoutId = undefined;
       currentConn.reconnectDueAt = undefined;
       currentConn.reconnectTimerCallback = undefined;
+      if (activeConnections.get(ruleId) !== currentConn) return;
       if (shouldReconnectRule?.(ruleId) === false) {
         currentConn.unsubscribe?.();
         activeConnections.delete(ruleId);
