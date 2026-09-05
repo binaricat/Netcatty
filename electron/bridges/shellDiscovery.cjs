@@ -8,7 +8,7 @@
 
 const fs = require("node:fs");
 const path = require("node:path");
-const { execFileSync } = require("node:child_process");
+const { execFileSync, spawnSync } = require("node:child_process");
 
 const EXEC_OPTS = { encoding: "utf8", timeout: 5000, windowsHide: true };
 
@@ -129,6 +129,37 @@ function isWindowsAppExecutionAlias(candidate, env = process.env, platform) {
 }
 
 /**
+ * Probe whether a WindowsApps alias candidate is actually launchable.
+ *
+ * Node cannot read the reparse tag of an AppExecLink, so `statSync` failing
+ * while `lstatSync` succeeds matches both a live alias and a stale or broken
+ * reparse point (e.g. after an incomplete package removal). The only reliable
+ * pure-JS check is to let CreateProcess resolve it: a live alias spawns, a
+ * stale one fails to spawn. The spawned console host receives empty stdin, so
+ * it exits immediately instead of waiting for input; a timeout still proves
+ * the process started, which is all we care about.
+ *
+ * @param {string} candidate  WindowsApps alias path (AppExecLink reparse point).
+ * @returns {boolean} True when the process could be started.
+ */
+function probeAliasLaunchable(candidate) {
+  try {
+    const result = spawnSync(candidate, [], {
+      timeout: 5000,
+      windowsHide: true,
+      input: "",
+    });
+    if (result.error) {
+      // ETIMEDOUT means the process ran until we killed it — it launched.
+      return result.error.code === "ETIMEDOUT";
+    }
+    return true;
+  } catch (_err) {
+    return false;
+  }
+}
+
+/**
  * Pick the first launchable executable path from an ordered candidate list
  * (e.g. the lines `where.exe <name>` printed, in PATH order).
  *
@@ -138,20 +169,23 @@ function isWindowsAppExecutionAlias(candidate, env = process.env, platform) {
  * `fs.statSync()`/`fs.existsSync()` cannot resolve (they fail with EACCES,
  * see nodejs/node#36790) even though CreateProcess launches them fine via
  * the full alias path. For those, fall back to `fs.lstatSync()`, which
- * still sees the reparse point itself. A zero-byte plain file in the same
- * directory (e.g. a disabled alias) stats cleanly and is rejected.
+ * still sees the reparse point itself, and then confirm launchability with
+ * a spawn probe — `lstatSync` alone cannot tell a live alias from a stale
+ * reparse point. A zero-byte plain file in the same directory (e.g. a
+ * disabled alias) stats cleanly and is rejected.
  *
  * Non-alias candidates win over alias candidates so a real install (MSI,
  * zip, Chocolatey…) is still preferred when both are on PATH.
  *
  * @param {string[]} candidates  Ordered candidate paths.
- * @param {{fs?: typeof import("node:fs"), env?: NodeJS.ProcessEnv, platform?: string}} [deps]  Injectable for tests.
+ * @param {{fs?: typeof import("node:fs"), env?: NodeJS.ProcessEnv, platform?: string, probe?: (candidate: string) => boolean}} [deps]  Injectable for tests.
  * @returns {string|null} First launchable path, or `null`.
  */
 function selectExecutableCandidate(candidates, deps = {}) {
   const fsMod = deps.fs || fs;
   const env = deps.env || process.env;
   const platform = deps.platform || process.platform;
+  const probe = deps.probe || probeAliasLaunchable;
   let aliasFallback = null;
 
   for (const candidate of candidates) {
@@ -174,6 +208,10 @@ function selectExecutableCandidate(candidates, deps = {}) {
       } catch (_lstatErr) {
         continue;
       }
+      // lstatSync cannot distinguish a live AppExecLink from a stale or
+      // broken one (both fail statSync with EACCES), so probe launchability
+      // before accepting it as the fallback shell.
+      if (!probe(candidate)) continue;
       aliasFallback = candidate;
       continue;
     }
@@ -791,5 +829,6 @@ module.exports = {
   windowsAppsAliasPrefix,
   isWindowsAppExecutionAlias,
   selectExecutableCandidate,
+  probeAliasLaunchable,
   mapWslDistroIcon,
 };

@@ -57,6 +57,8 @@ const WIN_DEPS = (entries) => ({
   fs: makeFakeFs(entries),
   env: WIN_ENV,
   platform: "win32",
+  // Default probe: treat every reparse point as a live, launchable alias.
+  probe: () => true,
 });
 
 test("windowsAppsAliasPrefix returns null off Windows", () => {
@@ -110,6 +112,33 @@ test("selectExecutableCandidate rejects a plain zero-byte alias stub", () => {
   // Disabled alias: statSync succeeds (plain file) → not launchable.
   const deps = WIN_DEPS(new Map([[ALIAS_PWSH.toLowerCase(), "stub"]]));
   assert.equal(selectExecutableCandidate([ALIAS_PWSH], deps), null);
+});
+
+test("selectExecutableCandidate rejects a stale app execution alias", () => {
+  // Stale reparse point (e.g. after incomplete package removal): statSync
+  // fails with EACCES just like a live AppExecLink, but the spawn probe
+  // shows the process cannot be launched.
+  const deps = {
+    ...WIN_DEPS(new Map([[ALIAS_PWSH.toLowerCase(), "appExecLink"]])),
+    probe: () => false,
+  };
+  assert.equal(selectExecutableCandidate([ALIAS_PWSH], deps), null);
+});
+
+test("selectExecutableCandidate skips a stale alias for later candidates", () => {
+  // A stale alias must not be recorded as the fallback, so a later real
+  // install is still selected.
+  const deps = {
+    ...WIN_DEPS(new Map([
+      ["c:\\program files\\powershell\\7\\pwsh.exe", "file"],
+      [ALIAS_PWSH.toLowerCase(), "appExecLink"],
+    ])),
+    probe: (candidate) => candidate !== ALIAS_PWSH,
+  };
+  assert.equal(
+    selectExecutableCandidate([ALIAS_PWSH, "C:\\Program Files\\PowerShell\\7\\pwsh.exe"], deps),
+    "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+  );
 });
 
 test("selectExecutableCandidate prefers a real install over the alias", () => {
