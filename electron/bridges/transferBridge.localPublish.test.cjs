@@ -293,3 +293,23 @@ test("write-only timestamp fallback leaves a later pathname replacement unchange
   assert.equal(Math.floor(fs.statSync(target).mtimeMs / 1000), 1_600_000_000);
   assert.equal(Math.floor(fs.statSync(published).mtimeMs / 1000), 1_700_000_000);
 });
+
+test("copy fallback publishes a destination with a preserved write-only mode", async (t) => {
+  const root = fs.mkdtempSync(`${temp.getTempFilePath("publish-restrictive")}-`);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const staged = path.join(root, "staged");
+  const target = path.join(root, "target");
+  const payload = Buffer.alloc(1024 * 1024 + 3, 7);
+  fs.writeFileSync(staged, payload);
+  fs.writeFileSync(target, "original", { mode: 0o200 });
+  const link = fs.promises.link;
+  fs.promises.link = async () => { throw Object.assign(new Error("hardlinks unavailable"), { code: "ENOTSUP" }); };
+  t.after(() => { fs.promises.link = link; });
+  await bridge._promoteLocalTransferForTests(staged, target, { existingMode: 0o200 });
+  const stat = fs.statSync(target);
+  assert.equal(stat.mode & 0o777, 0o200);
+  assert.equal(stat.size, payload.length);
+  fs.chmodSync(target, 0o600); // grant readback for verification
+  assert.deepEqual(fs.readFileSync(target), payload);
+  assert.deepEqual(fs.readdirSync(root), ["target"]);
+});
