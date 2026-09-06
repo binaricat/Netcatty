@@ -1098,6 +1098,75 @@ export function useAIState() {
     return true;
   }, [ensureDraftForScope, updateDraftIfPresent]);
 
+  /** Re-mention duplicate refresh: replace an existing vault-note attachment in
+   *  place with its refreshed payload. The budget decision is made against the
+   *  authoritative application-state draft — the caller's `currentDraftRef`
+   *  pre-check can be stale (e.g. a file upload reached application state but is
+   *  not yet reflected in the ref) — with the stale attachment's payload freed
+   *  before the refreshed one is charged, matching `attachVaultNoteMention`'s
+   *  duplicate accounting. Returns false when the authoritative draft has no
+   *  such attachment (the caller should fall back to a normal attach) or when
+   *  the aggregate attachment budget rejected the refresh. */
+  const refreshDraftVaultNoteAttachment = useCallback((
+    scopeKey: string,
+    fallbackAgentId: string,
+    upload: UploadedFile,
+  ): boolean => {
+    ensureDraftForScope(scopeKey, fallbackAgentId);
+    // Same authoritative-snapshot reasoning as `addDraftAttachment` above: the
+    // module-level draft snapshot is refreshed as soon as every draft
+    // mutation's updater runs, so it is the authoritative synchronous view.
+    const snapshotDraft = ensureDraftForScopeState(
+      latestAIDraftsByScopeSnapshot ?? {},
+      scopeKey,
+      fallbackAgentId,
+    )[scopeKey];
+    if (!snapshotDraft) return false;
+    const snapshotDuplicate = snapshotDraft.attachments.find(
+      (attachment) => (
+        isVaultNoteAttachment(attachment) && attachment.vaultNoteId === upload.vaultNoteId
+      ),
+    );
+    if (!snapshotDuplicate) {
+      // The caller's stale pre-check saw a duplicate that the authoritative
+      // draft does not have; attach normally (with its own budget re-check).
+      return addDraftAttachment(scopeKey, fallbackAgentId, upload);
+    }
+    if (
+      appendUploadsWithinAttachmentBudget(
+        snapshotDraft.attachments.filter((attachment) => attachment.id !== snapshotDuplicate.id),
+        [upload],
+      ).length === 0
+    ) {
+      return false;
+    }
+    updateDraftIfPresent(scopeKey, (draft) => {
+      const existingDuplicate = draft.attachments.find(
+        (attachment) => (
+          isVaultNoteAttachment(attachment) && attachment.vaultNoteId === upload.vaultNoteId
+        ),
+      );
+      if (!existingDuplicate) return draft;
+      if (
+        appendUploadsWithinAttachmentBudget(
+          draft.attachments.filter((attachment) => attachment.id !== existingDuplicate.id),
+          [upload],
+        ).length === 0
+      ) {
+        return draft;
+      }
+      return {
+        ...draft,
+        attachments: draft.attachments.map((attachment) => (
+          isVaultNoteAttachment(attachment) && attachment.vaultNoteId === upload.vaultNoteId
+            ? upload
+            : attachment
+        )),
+      };
+    });
+    return true;
+  }, [addDraftAttachment, ensureDraftForScope, updateDraftIfPresent]);
+
   const cleanupOrphanedSessions = useCallback((activeTargetIds: Set<string>) => {
     cleanupOrphanedAISessions(activeTargetIds);
 
@@ -1334,6 +1403,7 @@ export function useAIState() {
     clearDraftForScope,
     addDraftFiles,
     addDraftAttachment,
+    refreshDraftVaultNoteAttachment,
     removeDraftFile,
     createSession,
     deleteSession,
@@ -1395,6 +1465,7 @@ export function useAIState() {
     clearDraftForScope,
     addDraftFiles,
     addDraftAttachment,
+    refreshDraftVaultNoteAttachment,
     removeDraftFile,
     createSession,
     deleteSession,

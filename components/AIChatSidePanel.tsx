@@ -259,6 +259,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   clearDraftForScope,
   addDraftFiles,
   addDraftAttachment,
+  refreshDraftVaultNoteAttachment,
   removeDraftFile,
   createSession,
   deleteSession,
@@ -647,16 +648,23 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     enterScopeDraftMode(currentAgentId, panelViewRef.current.mode === 'session');
     if (result.status === 'duplicate') {
       // Re-mentioning a note refreshes the existing attachment in place
-      // instead of appending a second copy of the same note payload.
-      const refreshed = upload;
-      updateScopeDraft(currentAgentId, (draft) => ({
-        ...draft,
-        attachments: draft.attachments.map((attachment) => (
-          isVaultNoteAttachment(attachment) && attachment.vaultNoteId === refreshed.vaultNoteId
-            ? refreshed
-            : attachment
-        )),
-      }));
+      // instead of appending a second copy of the same note payload. The
+      // replacement and its budget decision happen together in the
+      // authoritative application-state updater: the `currentDraftRef`
+      // pre-check above could not see uploads another mutation (e.g. a file
+      // upload) already added, so a refreshed note that grew must not bypass
+      // the aggregate cap the non-duplicate path enforces. A rejection here
+      // must be surfaced to the user instead of silently dropping the note.
+      if (!refreshDraftVaultNoteAttachment(scopeKey, currentAgentId, upload)) {
+        console.warn(
+          '[AIChatSidePanel] Vault note mention skipped: aggregate attachment budget exceeded',
+        );
+        toast.warning(
+          t('ai.chat.mentionNoteBudgetExceeded', {
+            title: String(note.title || '').trim() || t('ai.chat.untitledNote'),
+          }),
+        );
+      }
       return;
     }
     if (!addDraftAttachment(scopeKey, currentAgentId, upload)) {
@@ -677,9 +685,9 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     addDraftAttachment,
     currentAgentId,
     enterScopeDraftMode,
+    refreshDraftVaultNoteAttachment,
     scopeKey,
     t,
-    updateScopeDraft,
   ]);
 
   useEffect(() => {
@@ -1839,6 +1847,7 @@ const AI_CHAT_SIDE_PANEL_AI_STATE_KEYS = [
   'clearDraftForScope',
   'addDraftFiles',
   'addDraftAttachment',
+  'refreshDraftVaultNoteAttachment',
   'removeDraftFile',
   'createSession',
   'deleteSession',

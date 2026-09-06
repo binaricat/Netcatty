@@ -520,15 +520,23 @@ export function serializeSessionsForStorage(
       strippedAttachmentCount += 1;
     }
     if (strippedAttachmentCount > 0) {
-      const strippedMessagesByIndex = new Map(
+      // Strip from the current message rather than replacing it with
+      // `entry.strippedMessage`: that precomputed message was derived from
+      // the pre-ciphertext-prune session, so a message holding both an
+      // encrypted-reasoning payload and an attachment body would have the
+      // already-removed ciphertext restored here. `jsonLengthDelta` is only
+      // a projection; the actual size is measured from `nextJson` below.
+      const attachmentStrippedIndexes = new Set(
         current.attachmentStrippedMessages
           .slice(0, strippedAttachmentCount)
-          .map(entry => [entry.index, entry.strippedMessage] as const),
+          .map(entry => entry.index),
       );
       const nextSession = {
         ...current.session,
         messages: current.session.messages.map((message, messageIndex) => (
-          strippedMessagesByIndex.get(messageIndex) ?? message
+          attachmentStrippedIndexes.has(messageIndex)
+            ? stripAttachmentBodiesFromMessage(message)
+            : message
         )),
       };
       const nextJson = JSON.stringify(nextSession);

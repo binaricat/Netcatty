@@ -38,6 +38,13 @@ export interface AIChatSidePanelProps {
   /** Resolves with the uploads rejected by the aggregate attachment budget. */
   addDraftFiles: (scopeKey: string, fallbackAgentId: string, inputFiles: File[]) => Promise<UploadedFile[]>;
   addDraftAttachment: (scopeKey: string, fallbackAgentId: string, upload: UploadedFile) => boolean;
+  /** Re-mention duplicate refresh; returns false when the authoritative
+   *  budget re-check rejected the refreshed payload. */
+  refreshDraftVaultNoteAttachment: (
+    scopeKey: string,
+    fallbackAgentId: string,
+    upload: UploadedFile,
+  ) => boolean;
   removeDraftFile: (scopeKey: string, fallbackAgentId: string, fileId: string) => void;
   createSession: (scope: AISessionScope, agentId?: string) => AISession;
   deleteSession: (sessionId: string, scopeKey?: string) => void;
