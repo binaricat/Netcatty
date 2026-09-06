@@ -414,11 +414,19 @@ export const createTerminalOutputHistoryPreview = (options?: {
       const piece = span.slice(offset, offset + (maxChars - current.length));
       if (!piece) return;
       let fitting = piece;
+      let fittingWidth: number | undefined;
       if (viewportCols > 0) {
         const room = viewportCols - cursorCell;
-        fitting = spanIsAscii
-          ? piece.slice(0, room)
-          : sliceStringByCellColumns(piece, 0, room);
+        if (spanIsAscii) {
+          fitting = piece.slice(0, room);
+        } else {
+          const fullWidth = stringCellWidth(piece);
+          if (fullWidth <= room) {
+            fittingWidth = fullWidth;
+          } else {
+            fitting = sliceStringByCellColumns(piece, 0, room);
+          }
+        }
         if (!fitting) {
           if (cursorCell > 0) {
             if (autowrap) {
@@ -439,7 +447,7 @@ export const createTerminalOutputHistoryPreview = (options?: {
         }
       }
       const pieceAscii = isAsciiOnly(fitting);
-      const pieceWidth = pieceAscii ? fitting.length : stringCellWidth(fitting);
+      const pieceWidth = fittingWidth ?? (pieceAscii ? fitting.length : stringCellWidth(fitting));
       const appending = cursor >= current.length;
       if (appending) {
         current += fitting;
@@ -727,7 +735,9 @@ export const createTerminalOutputHistoryPreview = (options?: {
       }
     },
     setViewportCols(cols: number): void {
-      viewportCols = Math.max(0, Math.floor(cols));
+      const nextCols = Math.max(0, Math.floor(cols));
+      if (nextCols === viewportCols) return;
+      viewportCols = nextCols;
       if (viewportCols > 0 && cursorCell > viewportCols - 1) {
         // xterm clamps its cursor to the new last column as soon as the
         // terminal narrows; keep the tracked column (and its UTF-16 index) in

@@ -477,3 +477,14 @@ test("non-wrapping wide glyph at the right edge cannot block terminal capture", 
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(JSON.parse(result.stdout), [["abcdZ"], ["abcdZ"], ["abcdZ"]]);
 });
+
+test("unchanged viewport reports preserve pending wrap across display chunks", () => {
+  const history = createTerminalOutputHistoryPreview();
+  history.setViewportRows(24);
+  history.setViewportCols(5);
+  history.append("abcde");
+  history.setViewportRows(24);
+  history.setViewportCols(5);
+  history.append("f");
+  assert.deepEqual(history.getLines(), ["abcde", "f"]);
+});
