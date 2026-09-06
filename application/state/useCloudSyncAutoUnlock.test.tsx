@@ -5,6 +5,36 @@ import { createDomRenderer, flushEffects, installDomEnvironment, runWithAct } fr
 import { useCloudSyncAutoUnlock } from './useCloudSyncAutoUnlock.ts';
 
 for (const strict of [false, true]) {
+  test(`pending password read is handed off when its owner unmounts (StrictMode=${strict})`, async () => {
+    const dom = installDomEnvironment();
+    const renderer = await createDomRenderer(dom.document);
+    const pending: Array<(value: string | null) => void> = [];
+    let unlocks = 0;
+    const manager = { unlock: async () => { unlocks++; return true; } };
+    const bridge = { cloudSyncGetSessionPassword: () => new Promise<string | null>(resolve => { pending.push(resolve); }) };
+    function Consumer() {
+      useCloudSyncAutoUnlock({ securityState: 'LOCKED', masterKeyIdentity: 'handoff-key', manager, bridge });
+      return null;
+    }
+    function tree(owner: boolean) {
+      return React.createElement(strict ? React.StrictMode : React.Fragment, null,
+        owner ? React.createElement(Consumer, { key: 'owner' }) : null,
+        React.createElement(Consumer, { key: 'peer' }));
+    }
+    try {
+      await renderer.render(tree(true));
+      await flushEffects();
+      assert.ok(pending.length > 0);
+      await renderer.render(tree(false));
+      await flushEffects();
+      await runWithAct(async () => { for (const resolve of pending) resolve('fixture-only'); });
+      await flushEffects();
+      assert.equal(unlocks, 1, 'cancelled owners must not unlock when their old responses arrive');
+    } finally { await renderer.unmount(); dom.cleanup(); }
+  });
+}
+
+for (const strict of [false, true]) {
   test(`peer auto-unlocks when password arrives after the config (StrictMode=${strict})`, async () => {
     const dom = installDomEnvironment();
     const renderer = await createDomRenderer(dom.document);
