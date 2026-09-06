@@ -618,6 +618,26 @@ test("a grapheme split across display chunks is rejoined", () => {
   assert.deepEqual(joined.getLines(), ["👩‍💻Z"]);
 });
 
+test("a control between chunks resets the split-grapheme join", () => {
+  const history = createTerminalOutputHistoryPreview();
+  history.setViewportRows(5);
+  history.setViewportCols(5);
+  // xterm resets its preceding-join state at every control it parses, so an
+  // SGR between the base chunk and the continuation leaves two graphemes:
+  // 👩 (2 cells) + ‍💻 (2 cells) + Z fill the row before Q wraps.
+  history.append("👩");
+  history.append("\x1b[31m");
+  history.append("‍💻ZQ");
+  assert.deepEqual(history.getLines(), ["👩‍💻Z", "Q"]);
+
+  // The unsplit input with the same control is the reference behavior.
+  const joined = createTerminalOutputHistoryPreview();
+  joined.setViewportRows(5);
+  joined.setViewportCols(5);
+  joined.append("👩\x1b[31m‍💻ZQ");
+  assert.deepEqual(joined.getLines(), ["👩‍💻Z", "Q"]);
+});
+
 test("a width-only resize resets the tracked scroll margins", () => {
   const history = createTerminalOutputHistoryPreview();
   history.setViewportRows(24);

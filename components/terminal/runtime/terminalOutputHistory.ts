@@ -91,6 +91,16 @@ const escapeIntroducerLength = (input: string, start: number): number => {
 const ERASE_TO_END_OF_LINE = "\x1f";
 
 /**
+ * Marks a control sequence the stripper removed. xterm's grapheme provider
+ * resets its preceding-join state at every control it parses, so a cluster's
+ * base and continuation separated by one (an SGR between display chunks, say)
+ * stay separate graphemes; the writer must not rejoin them across the gap.
+ * A C0 byte the transcript filters (`keepTranscriptChars` drops \x06), so only
+ * this marker can produce it in stripper output.
+ */
+const CONTROL_BOUNDARY = "\x06";
+
+/**
  * The erase-in-line sequences progress lines use (`\r` + text + `\x1b[K`) must
  * be applied to the transcript, or the stale suffix of a shorter redraw shows
  * up as text. Returns the marker for the variants the transcript can apply.
@@ -210,11 +220,11 @@ export const stripTerminalDisplayToPlainText = (
       const isBareEscFinal = !isCsi
         && escapeIntroducerLength(input, i) === 1
         && /^[78c]$/.test(sequence);
-      if (preserveRowControls && (passesRowControl || isBareEscFinal)) {
-        output += input.slice(i, end);
-      }
+      const passes = preserveRowControls && (passesRowControl || isBareEscFinal);
+      if (passes) output += input.slice(i, end);
       const eraseInLine = eraseInLineMarkerFor(input, i, end);
       if (eraseInLine) output += eraseInLine;
+      else if (preserveRowControls && !passes) output += CONTROL_BOUNDARY;
       i = end;
       continue;
     }
@@ -553,6 +563,36 @@ export const createTerminalOutputHistoryPreview = (options?: {
         // same gap a second time.
         currentCellWidth = Math.max(width, cursorCell);
       }
+      // A span may open with a zero-width grapheme (a combining mark, or a ZWJ
+      // whose base ended an earlier chunk after a control reset the
+      // preceding-join state). Append it onto the open line directly, the way
+      // the deferred-wrap path above does: column slicing drops a leading
+      // zero-width cluster from a cut piece, which would desynchronize the
+      // span offset and re-write the grapheme that follows it.
+      if (!spanIsAscii && cursor >= current.length) {
+        const rest = span.slice(offset, offset + WRAP_PROBE_UTF16_UNITS);
+        let first = rest
+          ? outputGraphemeSegmenter.segment(rest)[Symbol.iterator]().next().value?.segment
+          : undefined;
+        if (
+          first !== undefined
+          && rest.length === WRAP_PROBE_UTF16_UNITS
+          && first.length === rest.length
+        ) {
+          // The probe filled its window and may continue past it; only then
+          // pay for slicing the full remaining suffix.
+          first = outputGraphemeSegmenter
+            .segment(span.slice(offset))[Symbol.iterator]().next().value?.segment;
+        }
+        if (first !== undefined && stringCellWidth(first) === 0) {
+          current += first;
+          cursor = current.length;
+          // The zero-width piece extends the tail in place; stop offering a join.
+          openGrapheme = null;
+          offset += first.length;
+          continue;
+        }
+      }
       // The maxChars budget still wins when it is smaller (that slice keeps
       // the established behavior). Otherwise cut the piece at a grapheme
       // boundary: slicing mid-grapheme would regroup combining marks / ZWJ
@@ -700,7 +740,19 @@ export const createTerminalOutputHistoryPreview = (options?: {
     let i = 0;
     while (i < text.length) {
       const ch = text[i];
+      if (ch === CONTROL_BOUNDARY) {
+        // A stripped control (an SGR between display chunks, say): xterm
+        // consumed a control here, resetting its preceding-join state, so a
+        // later continuation must not rejoin the grapheme the tail holds.
+        openGrapheme = null;
+        i += 1;
+        continue;
+      }
       if (ch === ESC || ch === C1_CSI) {
+        // Any control xterm parses resets its preceding-join state (see the
+        // CONTROL_BOUNDARY comment), so a split cluster cannot rejoin across
+        // a ride-through cursor or mode control either.
+        openGrapheme = null;
         if (ch === ESC && text[i + 1] !== "[") {
           // Bare ESC finals ride through the stripper: DECSC ("ESC 7") saves
           // and DECRC ("ESC 8") restores the tracked cursor; RIS ("ESC c")
@@ -873,6 +925,7 @@ export const createTerminalOutputHistoryPreview = (options?: {
         && text[end] !== ESC
         && text[end] !== C1_CSI
         && text[end] !== ERASE_TO_END_OF_LINE
+        && text[end] !== CONTROL_BOUNDARY
       ) {
         end += 1;
       }
