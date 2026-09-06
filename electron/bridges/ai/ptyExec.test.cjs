@@ -26,7 +26,7 @@ const {
 class ShellBackedPty extends EventEmitter {
   write(data) {
     if (data === "\x03") return;
-    const script = String(data).replace(/^\x15\x0b/, "");
+    const script = String(data).replace(/^\x0b\x15/, "");
     const result = spawnSync("sh", ["-c", script], { encoding: "utf8" });
     queueMicrotask(() => {
       this.emit("data", Buffer.from(result.stdout));
@@ -365,8 +365,8 @@ test("loginShellHint selects fish/posix/powershell/cmd without pinning confirmed
 });
 
 test("pending-input clear prefix covers interactive shells and skips raw devices", () => {
-  assert.equal(buildPendingInputClearPrefix("posix"), "\x15\x0b");
-  assert.equal(buildPendingInputClearPrefix("fish"), "\x15\x0b");
+  assert.equal(buildPendingInputClearPrefix("posix"), "\x0b\x15");
+  assert.equal(buildPendingInputClearPrefix("fish"), "\x0b\x15");
   assert.equal(buildPendingInputClearPrefix("powershell"), "\x1bggd2147483647d\x1br\x1b\x1bi\x08");
   assert.equal(buildPendingInputClearPrefix("cmd"), "\x1b");
   assert.equal(buildPendingInputClearPrefix("raw"), "");
@@ -849,7 +849,7 @@ test("startPtyJob keeps the clear prefix for non-PowerShell sessions", async () 
     expectedPrompt: "$ ",
   });
   assert.equal(writes.length, 1);
-  assert.ok(writes[0].startsWith("\x15\x0b"));
+  assert.ok(writes[0].startsWith("\x0b\x15"));
   assert.match(writes[0], /__NCMCP_/);
   job.cancel();
   pty.emit("data", Buffer.from("$ "));
@@ -919,6 +919,17 @@ test("posix wrapper types multi-line commands as one physical line (no PS2 leak)
   assert.match(result.stdout, /it's quoted\n/);
   assert.match(result.stdout, /last\n/);
   assert.match(result.stdout, new RegExp(`${marker}_E:0`));
+});
+
+test("long POSIX assignments preserve quotes, Unicode, and heredoc newlines on bounded input lines", () => {
+  const marker = "__NCMCP_LONG_LITERAL_TEST__";
+  const literal = "quote' \\ $HOME `false` " + "\u4e2d\u6587\ud83d\ude42".repeat(600);
+  const command = `cat <<'SMOKE_END'\n${literal}\n\nsecond line\nSMOKE_END\nprintf tail`;
+  const wrapped = buildWrappedCommand(command, "posix", marker, true);
+  assert.ok(wrapped.split('\n').every(line => Buffer.byteLength(line, 'utf8') < 1000));
+  const result = spawnSync('sh', ['-c', wrapped], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, `\n${marker}_S\n${literal}\n\nsecond line\ntail${marker}_E:0\n`);
 });
 
 test("posix wrapper isolates explicit exit from the active shell and reports its code", () => {
@@ -1295,7 +1306,7 @@ test("execViaChannel cancellation never exposes an incomplete UTF-8 character", 
   assert.equal(result.error, "Cancelled");
 });
 
-for (const customization of [":", "HISTCONTROL=ignorespace", "alias history='history 10'", "history() { :; }"]) {
+for (const customization of [":", "HISTCONTROL=ignorespace", "alias history='history 10'", 'history() { builtin history "$@" | cat; }', "history() { :; }", "alias command=':'", "command() { :; }", "readonly __nc_h=USER", "readonly __nc_d=USER"]) {
   test(`posix wrapper bypasses history customization: ${customization}`, () => {
     const marker = "__NCMCP_CUSTOM_HISTORY__";
     const wrapped = buildWrappedCommand("echo HISTORY_PROBE", "posix", marker);
