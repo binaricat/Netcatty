@@ -620,6 +620,18 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
             title: String(note.title || '').trim() || t('ai.chat.untitledNote'),
           }),
         );
+      } else if (result.status === 'invalid') {
+        // A note with an oversized/empty id cannot be attached (truncating the
+        // id would break `vault_notes_get` addressing), so surface that too
+        // instead of silently doing nothing.
+        console.warn(
+          '[AIChatSidePanel] Vault note mention skipped: note has an invalid id',
+        );
+        toast.error(
+          t('ai.chat.mentionNoteInvalid', {
+            title: String(note.title || '').trim() || t('ai.chat.untitledNote'),
+          }),
+        );
       }
       return;
     }

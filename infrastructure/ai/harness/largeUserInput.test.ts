@@ -123,3 +123,36 @@ test('boundPromptForExternalSdk never splits surrogate pairs at either cut', () 
   assert.match(bounded, /^a+\n\n\[\.\.\. prompt truncated/);
   assert.match(bounded, /\n\nb+$/);
 });
+
+test('boundPromptForExternalSdk re-states note headers lost to the cut', () => {
+  const note = (title: string, id: string, size: number) => (
+    `\n\n[Vault Note: ${title} (id: ${id})]\n${'body '.repeat(size / 5)}`
+  );
+  const prompt = (
+    'question' +
+    note('First', 'id-1', 50_000) +
+    note('Second', 'id-2', 50_000) +
+    note('Third', 'id-3', 50_000)
+  );
+  const bounded = boundPromptForExternalSdk(prompt);
+
+  // The first two note headers survive in the head; the third header falls in
+  // the omitted span, so it must be re-stated with its id.
+  assert.match(bounded, /\[Vault Note: First \(id: id-1\)\]/);
+  assert.match(bounded, /Omitted Vault note headers: \[Vault Note: Third \(id: id-3\)\]/);
+});
+
+test('boundPromptForExternalSdk re-states headers straddling either cut', () => {
+  const pad = (character: string, size: number) => character.repeat(size);
+  // The third note's header straddles the head/tail boundary: the tail keeps
+  // only its remainder, so the header must be re-stated in full.
+  const note3 = '\n\n[Vault Note: Third (id: id-3)]\nthird body';
+  const prompt = (
+    pad('a', 80_000) +
+    '\n\n[Vault Note: Second (id: id-2)]\n' + pad('c', 8_000) +
+    note3 + pad('d', 16_000)
+  );
+  const bounded = boundPromptForExternalSdk(prompt);
+
+  assert.match(bounded, /Omitted Vault note headers: \[Vault Note: Second \(id: id-2\)\] \[Vault Note: Third \(id: id-3\)\]/);
+});

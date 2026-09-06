@@ -500,6 +500,7 @@ export const zhTWAiMessages: Messages = {
   'ai.chat.mentionNoteSearch': '搜尋筆記…',
   'ai.chat.mentionNoteEmpty': '沒有符合的筆記',
   'ai.chat.mentionNoteBudgetExceeded': '「{{title}}」未附加：提及的筆記將超出附件大小上限。',
+  'ai.chat.mentionNoteInvalid': '無法附加「{{title}}」：筆記的識別碼無效。',
   'ai.chat.untitledNote': '未命名筆記',
   'ai.chat.menuUserSkills': '使用者 Skills',
   'ai.chat.menuSlashCommands': '快捷指令',

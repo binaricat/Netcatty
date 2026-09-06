@@ -501,6 +501,7 @@ export const zhCNAiMessages: Messages = {
   'ai.chat.mentionNoteSearch': '搜索笔记…',
   'ai.chat.mentionNoteEmpty': '没有匹配的笔记',
   'ai.chat.mentionNoteBudgetExceeded': '「{{title}}」未附加：提及的笔记将超出附件大小上限。',
+  'ai.chat.mentionNoteInvalid': '无法附加「{{title}}」：笔记的标识符无效。',
   'ai.chat.untitledNote': '未命名笔记',
   'ai.chat.menuUserSkills': '用户 Skills',
   'ai.chat.menuSlashCommands': '快捷命令',

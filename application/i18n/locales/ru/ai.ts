@@ -453,6 +453,7 @@ export const ruAiMessages: Messages = {
   'ai.chat.mentionNoteSearch': 'Поиск заметок…',
   'ai.chat.mentionNoteEmpty': 'Нет подходящих заметок',
   'ai.chat.mentionNoteBudgetExceeded': '«{{title}}» не прикреплена: упомянутые заметки превысили бы лимит размера вложений.',
+  'ai.chat.mentionNoteInvalid': '«{{title}}» не удалось прикрепить: у заметки недопустимый идентификатор.',
   'ai.chat.untitledNote': 'Заметка без названия',
   'ai.chat.menuUserSkills': 'Пользовательские навыки',
   'ai.chat.menuSlashCommands': 'Команды /',

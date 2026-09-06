@@ -59,6 +59,32 @@ const EXTERNAL_PROMPT_MAX_CHARS = 100_000;
 const EXTERNAL_PROMPT_HEAD_CHARS = 80_000;
 const EXTERNAL_PROMPT_TAIL_CHARS = 16_000;
 
+// External SDK prompts inline Vault note mentions as
+// `[Vault Note: <title> (id: <noteId>)]` blocks. A head/tail cut can drop a
+// block's header while keeping part of its body, leaving the tail unlabeled
+// and its note id unrecoverable (external agents have no `tool_output_read`
+// recovery path), so the lost headers are re-stated in the truncation notice.
+const EXTERNAL_PROMPT_MAX_LOST_NOTE_HEADERS = 10;
+const NOTE_HEADER_PATTERN = /\[Vault Note: [^\]\n]*\]/g;
+
+/** Collect note headers that the head/tail cut does not show in full. */
+function collectLostNoteHeaders(prompt: string, headLength: number, tailStart: number): string[] {
+  const lost: string[] = [];
+  NOTE_HEADER_PATTERN.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = NOTE_HEADER_PATTERN.exec(prompt)) !== null) {
+    const end = match.index + match[0].length;
+    // A header is preserved only if the cut hides it (fully or partially):
+    // headers shown in full already carry their title and id.
+    const fullyVisible = end <= headLength || match.index >= tailStart;
+    if (!fullyVisible && !lost.includes(match[0])) {
+      lost.push(match[0]);
+      if (lost.length >= EXTERNAL_PROMPT_MAX_LOST_NOTE_HEADERS) break;
+    }
+  }
+  return lost;
+}
+
 /** Hard-bound an external SDK prompt, keeping both ends and never splitting a surrogate pair. */
 export function boundPromptForExternalSdk(prompt: string): string {
   if (prompt.length <= EXTERNAL_PROMPT_MAX_CHARS) return prompt;
@@ -67,9 +93,13 @@ export function boundPromptForExternalSdk(prompt: string): string {
   if (/[\uD800-\uDBFF]$/.test(head)) head = head.slice(0, -1);
   if (/^[\uDC00-\uDFFF]/.test(tail)) tail = tail.slice(1);
   const omitted = prompt.length - head.length - tail.length;
+  const lostNoteHeaders = collectLostNoteHeaders(prompt, head.length, prompt.length - tail.length);
+  const lostNoteHeadersNote = lostNoteHeaders.length > 0
+    ? ` Omitted Vault note headers: ${lostNoteHeaders.join(' ')}`
+    : '';
   return [
     head,
-    `\n\n[... prompt truncated for size: showing the first ${head.length} and last ${tail.length} of ${prompt.length} characters (${omitted} omitted). If a Vault note attachment above looks incomplete, ask the user to share the missing part ...]\n\n`,
+    `\n\n[... prompt truncated for size: showing the first ${head.length} and last ${tail.length} of ${prompt.length} characters (${omitted} omitted).${lostNoteHeadersNote} If a Vault note attachment above looks incomplete, ask the user to share the missing part ...]\n\n`,
     tail,
   ].join('');
 }
