@@ -298,6 +298,7 @@ export const createTerminalOutputHistoryPreview = (options?: {
   let cursor = 0;
   let cursorCell = 0;
   let screenRow = 1;
+  let currentCellWidth = 0;
   let totalChars = 0;
   let pendingEscape = "";
   let cacheDirty = true;
@@ -308,6 +309,7 @@ export const createTerminalOutputHistoryPreview = (options?: {
     lines.push(current);
     totalChars += current.length;
     current = "";
+    currentCellWidth = 0;
     cursor = 0;
     cursorCell = 0;
     // Never trim away the last retained line.
@@ -329,13 +331,37 @@ export const createTerminalOutputHistoryPreview = (options?: {
     let offset = 0;
     while (offset < span.length) {
       if (current.length >= maxChars) commitCurrentLine();
+      const width = currentCellWidth;
+      if (cursorCell > width) {
+        current += " ".repeat(cursorCell - width);
+        cursor = current.length;
+      }
       const piece = span.slice(offset, offset + (maxChars - current.length));
       if (!piece) return;
-      current = cursor >= current.length
-        ? current + piece
-        : current.slice(0, cursor) + piece + current.slice(cursor + piece.length);
-      cursor = cursor >= current.length ? current.length : cursor + piece.length;
-      cursorCell += pieceCellWidth(piece);
+      const pieceAscii = isAsciiOnly(piece);
+      const pieceWidth = pieceAscii ? piece.length : stringCellWidth(piece);
+      const appending = cursor >= current.length;
+      if (appending) {
+        current += piece;
+      } else if (pieceAscii && isAsciiOnly(current)) {
+        current = current.slice(0, cursor) + piece + current.slice(cursor + piece.length);
+      } else {
+        // Cursor coordinates count cells, while strings count UTF-16 units.
+        // Replace entire intersected graphemes and blank any remaining half
+        // of a wide glyph, retaining the columns of the untouched suffix.
+        const prefix = sliceStringByCellColumns(current, 0, cursorCell);
+        const endCell = cursorCell + pieceWidth;
+        const endPrefix = sliceStringByCellColumns(current, 0, endCell);
+        const overlapsWideEnd = pieceCellWidth(endPrefix) < Math.min(endCell, width);
+        const suffix = sliceStringByCellColumns(current, endCell + (overlapsWideEnd ? 1 : 0));
+        current = prefix + " ".repeat(cursorCell - pieceCellWidth(prefix))
+          + piece + (overlapsWideEnd ? " " : "") + suffix;
+      }
+      cursorCell += pieceWidth;
+      currentCellWidth = Math.max(width, cursorCell);
+      cursor = appending ? current.length
+        : isAsciiOnly(current) ? cursorCell
+          : sliceStringByCellColumns(current, 0, cursorCell).length;
       offset += piece.length;
     }
   };
@@ -360,10 +386,9 @@ export const createTerminalOutputHistoryPreview = (options?: {
           : command === "E" || command === "F" ? 0 : cursorCell;
         if (nextRow !== screenRow && current) commitCurrentLine();
         // CUP/HVP set both coordinates; vertical-only moves keep the column.
-        // Bound padding by the transcript budget even for hostile coordinates.
+        // Keep placement logical until text arrives; cursor moves print no spaces.
+        // Bound eventual padding by the transcript budget.
         const targetCell = Math.min(maxChars - 1, column);
-        const width = pieceCellWidth(current);
-        if (targetCell > width) current += " ".repeat(targetCell - width);
         cursor = targetCell === 0 ? 0
           : isAsciiOnly(current) ? targetCell
             : sliceStringByCellColumns(current, 0, targetCell).length;
@@ -392,6 +417,7 @@ export const createTerminalOutputHistoryPreview = (options?: {
       }
       if (ch === ERASE_TO_END_OF_LINE) {
         current = current.slice(0, cursor);
+        currentCellWidth = pieceCellWidth(current);
         i += 1;
         continue;
       }
@@ -443,6 +469,7 @@ export const createTerminalOutputHistoryPreview = (options?: {
     clear(): void {
       lines = [];
       current = "";
+      currentCellWidth = 0;
       cursor = 0;
       cursorCell = 0;
       totalChars = 0;

@@ -278,3 +278,26 @@ test("positioned output respects wide-cell boundaries and retained size limits",
   assert.ok(history.getLines().join('').length <= 128);
   assert.ok(history.getLines().join('').endsWith('end'));
 });
+
+
+test("cursor placement alone does not append blank history rows", () => {
+  const history = createTerminalOutputHistoryPreview();
+  history.append('abc\x1b[2;4H\x1b[1B\x1b[1B');
+  assert.deepEqual(history.getLines(), ['abc']);
+  history.append('X');
+  assert.deepEqual(history.getLines(), ['abc', '   X']);
+});
+
+test("positioned overwrites replace whole graphemes and preserve cell spacing", () => {
+  for (const glyph of ['😀', '👩‍💻', '中']) {
+    const history = createTerminalOutputHistoryPreview();
+    history.append(`A${glyph}B\x1b[1;2HX`);
+    assert.deepEqual(history.getLines(), ['AX B']);
+    history.clear();
+    history.append(`A${glyph}B\x1b[1;3HX`);
+    assert.deepEqual(history.getLines(), ['A XB']);
+  }
+  const history = createTerminalOutputHistoryPreview();
+  history.append('AéB\x1b[1;2HX');
+  assert.deepEqual(history.getLines(), ['AXB']);
+});
