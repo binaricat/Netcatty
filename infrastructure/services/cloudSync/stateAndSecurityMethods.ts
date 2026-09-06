@@ -933,25 +933,22 @@ export async function unlockImpl(this: any,password: string): Promise<boolean> {
       configAtStart
     );
 
-    if (!unlockedKey) {
-      return false;
-    }
-
-    // Stale-completion guard: only install the derived key if the active
-    // configuration and security generation still match the ones this call
-    // started with. Otherwise the key would not match the config that is
-    // now active (making re-encrypted records unreadable) or would undo a
-    // deliberate lock that happened while deriving.
-    if (this.state.masterKeyConfig !== configAtStart) return false;
+    // Superseded derivations are not password failures. Callers discard the
+    // shared session password only after false, so report stale work as an
+    // error before interpreting either a valid or invalid old-config result.
     if (
-      generationAtStart !== undefined
-      && this.getSyncSecurityGeneration?.() !== generationAtStart
-    ) return false;
+      this.state.masterKeyConfig !== configAtStart
+      || (generationAtStart !== undefined
+        && this.getSyncSecurityGeneration?.() !== generationAtStart)
+      || (this.state.securityState !== 'LOCKED' && this.state.securityState !== 'UNLOCKED')
+    ) {
+      throw new Error('Vault changed while unlocking. Try again.');
+    }
+    if (!unlockedKey) return false;
     if (this.state.securityState === 'UNLOCKED') {
       // Another unlock with the same config won the race; nothing to install.
       return true;
     }
-    if (this.state.securityState !== 'LOCKED') return false;
 
     this.state.unlockedKey = unlockedKey;
     this.state.securityState = 'UNLOCKED';
