@@ -1,4 +1,5 @@
 import { Terminal as XTerm } from "@xterm/xterm";
+import type { IMarker } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { SerializeAddon } from "@xterm/addon-serialize";
 import { SearchAddon } from "@xterm/addon-search";
@@ -252,7 +253,10 @@ import {
   shouldStartTerminalBackend,
 } from "./terminal/restoredSessionGate";
 import {
+  alignTerminalViewportScroll,
   AUTO_RUN_SNIPPET_LINE_DELAY_MS,
+  cancelPendingSynchronizedRestore,
+  deferScrollRestoreDuringSynchronizedOutput,
   forceSyncRenderAfterResize,
   MAX_CONNECTION_LOG_DATA_CHARS,
   shouldDelayAutoRunSnippetInput,
@@ -2868,6 +2872,41 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   }, [reuseConnectionFromSessionId, sessionId, terminalBackend]);
 
   type SafeFitOptions = { force?: boolean; requireVisible?: boolean; immediate?: boolean; allowHidden?: boolean };
+  // Scroll-tracking state for the deferred synchronized-output (DECSET 2026)
+  // scroll restore, shared across fits so a later fit's reflow (the
+  // immediate-plus-RAF split-resize path) refreshes the retained listener's
+  // baseline instead of leaving it stale on the pre-reflow row. Cleared when
+  // the owning restore runs or is dropped.
+  type SyncScrollTracker = {
+    term: XTerm;
+    // Buffer the pending restore belongs to. A fit landing on a different
+    // active buffer must replace the tracker instead of reusing it (see the
+    // buffer-switch handling below).
+    buffer: XTerm["buffer"]["active"];
+    moved: boolean;
+    lastScrollY: number;
+    // Marker pinned to the restore's saved viewport row. xterm keeps the
+    // marker's line in sync with that row across scrollback trims and reflow
+    // (it adjusts on line insert/delete/trim and is disposed once its row is
+    // trimmed out of the buffer, reporting -1 afterwards). The marker gives
+    // the onScroll handler an unambiguous buffer-trim signal: a trim moves
+    // the reported viewport row and the marker down by exactly one row in the
+    // same BufferService.scroll call, while a user scroll moves only the
+    // reported row. Line content cannot tell the two apart because adjacent
+    // rows often repeat (blank lines, repeated output).
+    marker: IMarker;
+    // Marker line observed at the last scroll notification, so a trim shows
+    // up as a one-row marker shift between consecutive events. Also keeps
+    // the last valid anchor while a marker is disposed (its row was trimmed
+    // out of the buffer or merged into a surviving row, see restoreScroll).
+    lastMarkerLine: number;
+    scrollListener?: { dispose: () => void };
+  };
+  // Pin a marker to an absolute buffer row: registerMarker offsets from the
+  // cursor's absolute row (baseY + cursorY).
+  const registerSavedRowMarker = (t: XTerm, y: number): IMarker =>
+    t.registerMarker(y - (t.buffer.active.baseY + t.buffer.active.cursorY));
+  const syncScrollTrackerRef = useRef<SyncScrollTracker | null>(null);
   const pendingWriteSafeFitRef = useRef<{
     term: XTerm;
     options: SafeFitOptions;
@@ -2964,9 +3003,13 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           return;
         }
 
-        const buffer = term.buffer.active;
-        const wasPinnedToBottom = buffer.viewportY >= buffer.baseY;
-        const savedViewportY = buffer.viewportY;
+        // Capture the buffer the restore belongs to: if the stream switches
+        // between the alternate and normal buffers while synchronized output
+        // (DECSET 2026) is active, the deferred restore must not apply the
+        // captured pinned/viewport state of one buffer to the other.
+        const restoreBuffer = term.buffer.active;
+        const wasPinnedToBottom = restoreBuffer.viewportY >= restoreBuffer.baseY;
+        const savedViewportY = restoreBuffer.viewportY;
 
         const dimensions = fitAddon.proposeDimensions();
         if (!dimensions || Number.isNaN(dimensions.cols) || Number.isNaN(dimensions.rows)) return;
@@ -2976,6 +3019,61 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         // as a one-frame WebGL blink during layout changes. Resize directly
         // using the proposed dimensions to preserve the existing behavior
         // without forcing a blank intermediate frame.
+        // Capture the retained tracker's marker line before the resize: a
+        // wider reflow merges the marker's row into a surviving row and
+        // disposes the marker even though its text was kept, so the
+        // pre-reflow line is the only remaining anchor for the restore
+        // (see restoreScroll).
+        const preResizeTracker = syncScrollTrackerRef.current;
+        // A marker disposed by an earlier wider reflow (its row merged into a
+        // surviving row) reports -1; its lastMarkerLine still holds the valid
+        // pre-reflow anchor, so carry that forward instead of overwriting it
+        // with -1 on the next widening fit. A marker disposed by a scrollback
+        // trim had its anchor followed down by the scroll listener and
+        // clamped at the top of the buffer (0), which matches where the
+        // restore would target anyway, so this fallback stays accurate there
+        // too.
+        const preResizeMarkerLine =
+          preResizeTracker && preResizeTracker.term === term
+            ? preResizeTracker.marker.line >= 0
+              ? preResizeTracker.marker.line
+              : preResizeTracker.lastMarkerLine
+            : -1;
+        // A wider reflow merges the marker's row into a surviving row ABOVE
+        // it, so the pre-resize numeric index overstates the anchor by the
+        // number of rows the reflow deleted above it (multiple wrapped
+        // continuations can collapse in one fit). Capture the marker row's
+        // wrapped logical line — its full concatenated text and the marker
+        // row's cell offset within that text — so a marker disposed by this
+        // reflow can be remapped to the row that now holds the same cell
+        // offset after the resize: the new wrap width re-splits the logical
+        // line at different columns, so the old row's text is not guaranteed
+        // to occur inside any single surviving row (it can straddle two).
+        const preResizeMarkerInfo = (() => {
+          if (preResizeMarkerLine < 0) return null;
+          const buffer = term.buffer.active;
+          if (!buffer.getLine(preResizeMarkerLine)) return null;
+          let start = preResizeMarkerLine;
+          // Row y's isWrapped means y continues y-1, so walk while the
+          // current row is wrapped; testing start-1 instead would stop at
+          // the first continuation row and omit the head's cells.
+          while (start > 0 && buffer.getLine(start)?.isWrapped) start--;
+          let text = '';
+          const rowStartOffsets: number[] = [];
+          for (let y = start; ; y++) {
+            const line = buffer.getLine(y);
+            if (!line) break;
+            rowStartOffsets.push(text.length);
+            text += line.translateToString(true);
+            if (!buffer.getLine(y + 1)?.isWrapped) break;
+          }
+          if (!text.trim()) return null;
+          return {
+            text,
+            offset: rowStartOffsets[preResizeMarkerLine - start] ?? text.length,
+          };
+        })();
+        const reflowsWider = dimensions.cols > term.cols;
         if (term.cols !== dimensions.cols || term.rows !== dimensions.rows) {
           term.resize(dimensions.cols, dimensions.rows);
           forceSyncRenderAfterResize(term);
@@ -2988,13 +3086,270 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           forceSyncRenderAfterResize(term);
         }
 
+        // The reflow above adjusted the buffer's viewport row while the
+        // scrollable viewport kept its stale pixel offset; realign them so the
+        // relative restore below cannot apply its delta twice (#3299).
+        alignTerminalViewportScroll(term);
+
+        // Remap a disposed marker's anchor to the surviving wrapped row (see
+        // the preResizeMarkerInfo capture above): xterm disposes the marker
+        // when this reflow deleted its row, and the pre-resize index now
+        // belongs to a later line once the deleted rows above it collapse.
+        // Match whole logical lines (consecutive rows joined by isWrapped)
+        // against the captured logical text, then land on the row that now
+        // holds the marker row's cell offset: the new wrap width can split
+        // the old row's text across two rows, so per-row matching would
+        // either miss the anchor or latch onto unrelated repeated output.
+        // Returns null when no surviving row holds the marker's text: the
+        // marker's row can also be disposed by a scrollback trim (a fit that
+        // simultaneously widens columns and shrinks rows trims the top of a
+        // full buffer before reflowing), and remapping that disposal to the
+        // stale pre-resize index would scroll the restore to unrelated
+        // surviving content — the nearest remaining row there is the top of
+        // the buffer.
+        const remappedMarkerAnchor: number | null = (() => {
+          if (!reflowsWider || preResizeMarkerLine <= 0 || !preResizeMarkerInfo) {
+            return null;
+          }
+          const buffer = term.buffer.active;
+          // The surviving head of the marker's logical line can sit
+          // arbitrarily far above the pre-resize marker index: the marker
+          // row may be hundreds of wrapped rows into its line, and a
+          // widening reflow collapses both that line's continuations and
+          // unrelated rows above it. No fixed window around the pre-resize
+          // index is wide enough — a 500-row bound stops short of the head
+          // and leaves the restore anchored on content far below it — so
+          // search the full range down to the top of the buffer.
+          // A second widening fit can trim enough rows that the stale
+          // pre-resize index now points past the resized buffer's end;
+          // starting the search there would hit an undefined line and
+          // `break` out before reaching the surviving head lower down.
+          // Clamp the start to the buffer's last valid row instead.
+          const startY = Math.min(preResizeMarkerLine - 1, buffer.length - 1);
+          for (let y = startY; y >= 0; y--) {
+            const line = buffer.getLine(y);
+            if (!line) break;
+            if (line.isWrapped) continue;
+            let text = '';
+            const rowStartOffsets: number[] = [];
+            for (let end = y; ; end++) {
+              const groupLine = buffer.getLine(end);
+              if (!groupLine) break;
+              rowStartOffsets.push(text.length);
+              text += groupLine.translateToString(true);
+              if (!buffer.getLine(end + 1)?.isWrapped) break;
+            }
+            if (text.includes(preResizeMarkerInfo.text)) {
+              for (let i = rowStartOffsets.length - 1; i >= 0; i--) {
+                if (rowStartOffsets[i] <= preResizeMarkerInfo.offset) return y + i;
+              }
+              return y;
+            }
+          }
+          return null;
+        })();
+
         // Preserve scroll position across resize (superset/Tabby pattern).
-        if (wasPinnedToBottom) {
-          term.scrollToBottom();
+        // While synchronized output (DECSET 2026) is active,
+        // alignTerminalViewportScroll defers DOM positioning to xterm's
+        // queued viewport sync; this restore is relative and would apply the
+        // resize delta twice through the still-stale DOM offset, so defer it
+        // until the mode ends as well (#3299).
+        //
+        // Cancel the restore only on real scroll events. xterm accepts wheel
+        // scrolling while synchronized output is active, so if the user
+        // scrolls before the deferred restore runs, honoring the row captured
+        // at resize time would yank them back once the mode ends. A viewportY
+        // comparison cannot tell that apart from reflow: a later resize (the
+        // immediate-plus-RAF split-resize path) reflows the buffer — changing
+        // viewportY without firing onScroll — and would wrongly cancel the
+        // retained pre-reflow restore. term.onScroll only fires for actual
+        // scrolls (user, output following the bottom, clear), so track it
+        // instead. (If new output scrolled the viewport because it was pinned
+        // to the bottom, the user is already where the restore would put
+        // them, so skipping is a no-op there too.)
+        // A retained restore from an earlier fit already owns the scroll
+        // tracking on this terminal. Its tracker is shared so that this fit's
+        // reflow — which changes viewportY without firing onScroll — refreshes
+        // the retained listener's baseline; installing a second listener here
+        // would be dropped with this duplicate restore, leaving a stale
+        // baseline that makes the next output line look like a user scroll
+        // and wrongly cancels the retained restore.
+        //
+        // The retained tracker only carries over while its restore targets
+        // the currently active buffer, though. If the stream switched buffers
+        // (DECSET 1049/1047) while a restore is still pending, the retained
+        // restore's buffer-identity check would discard it at completion
+        // while deferScrollRestoreDuringSynchronizedOutput coalesces the new
+        // restore by terminal — dropping the newly active buffer's restore
+        // and leaving it at its reflow-adjusted row. Replace the retained
+        // restore and tracker with ones bound to the new buffer.
+        const retainedTracker = syncScrollTrackerRef.current;
+        let tracker: SyncScrollTracker;
+        if (
+          retainedTracker &&
+          retainedTracker.term === term &&
+          retainedTracker.buffer === restoreBuffer &&
+          !retainedTracker.moved
+        ) {
+          tracker = retainedTracker;
+          tracker.lastScrollY = term.buffer.active.viewportY;
+          // The reflow above may have moved the marker without any scroll
+          // notification; refresh its baseline alongside lastScrollY. A
+          // wider reflow can dispose the marker (its row was merged into a
+          // surviving row, so its text still exists): remap the anchor to
+          // that surviving row instead of copying the stale pre-resize
+          // index, which now belongs to a later line once the rows deleted
+          // above it collapse, and re-pin a fresh marker there — a disposed
+          // marker reports -1 and can no longer follow trims, leaving the
+          // onScroll handler unable to tell a scrollback trim from a
+          // one-row user scroll. Only re-pin when the remap actually finds
+          // the marker's text in a surviving row, though: a fit that also
+          // trims the top of a full buffer disposes the marker without any
+          // surviving copy, where re-pinning to the stale pre-resize index
+          // would anchor the restore on unrelated surviving content — fall
+          // back to -1 there (and for narrower reflows, which can genuinely
+          // trim the marker's row out of the scrollback), so the restore
+          // clamps to the top of the buffer, the nearest remaining row.
+          if (tracker.marker.line >= 0) {
+            tracker.lastMarkerLine = tracker.marker.line;
+          } else if (reflowsWider && remappedMarkerAnchor !== null) {
+            tracker.marker.dispose();
+            tracker.marker = registerSavedRowMarker(
+              term,
+              Math.min(remappedMarkerAnchor, term.buffer.active.baseY),
+            );
+            tracker.lastMarkerLine = tracker.marker.line;
+          } else {
+            tracker.lastMarkerLine = -1;
+          }
         } else {
-          const targetY = Math.min(savedViewportY, term.buffer.active.baseY);
-          if (term.buffer.active.viewportY !== targetY) {
-            term.scrollToLine(targetY);
+          // Two cases land here besides a buffer switch: a retained tracker
+          // bound to a different buffer, and a retained tracker the user has
+          // already scrolled away from (moved). The moved case must replace
+          // the retained restore, not just refresh its baseline: that
+          // restore exits at completion because of `moved`, and this fit's
+          // own restore is coalesced into it (dropped), so without a
+          // replacement nothing would restore the viewport the user scrolled
+          // to across this second reflow. Replacing re-anchors the restore at
+          // the user's current viewport with a clean tracker.
+          if (retainedTracker && retainedTracker.term === term) {
+            retainedTracker.scrollListener?.dispose();
+            retainedTracker.marker.dispose();
+            cancelPendingSynchronizedRestore(term);
+          }
+          const marker = registerSavedRowMarker(term, savedViewportY);
+          tracker = {
+            term,
+            buffer: restoreBuffer,
+            moved: false,
+            lastScrollY: term.buffer.active.viewportY,
+            marker,
+            lastMarkerLine: marker.line,
+          };
+          syncScrollTrackerRef.current = tracker;
+        }
+        const isRetained = tracker === retainedTracker;
+        // BufferService.scroll fires onScroll for every line feed even when
+        // isUserScrolling keeps ydisp unchanged, so compare reported
+        // positions instead of treating any notification as a scroll:
+        // output arriving while the user is parked above the bottom must
+        // not cancel the restore.
+        //
+        // A full scrollback changes that signature: BufferService.scroll
+        // recycles the top line and decrements ydisp to keep the scrolled-up
+        // viewport stable, then reports the decremented row. That looks like
+        // a one-line user scroll, so identify the trim instead of canceling:
+        // a trim moves the saved-row marker down one row in the same
+        // BufferService.scroll call that decrements the reported row, while a
+        // user scroll leaves the marker untouched. Line content cannot make
+        // that distinction (adjacent rows often repeat), so rely on the
+        // marker's one-row shift only. The marker also shifts absolute row
+        // indices down for the restore's saved target.
+        let scrollListener: { dispose: () => void } | undefined;
+        if (!isRetained) {
+          scrollListener = term.onScroll((y: number) => {
+            // xterm emits onScroll on every buffer activation (DECSET
+            // 1049/1047), so a switch into (and back out of) the alternate
+            // buffer reports the alternate buffer's row here. Comparing it
+            // with this tracker's normal-buffer baseline would wrongly set
+            // moved and cancel the restore; ignore notifications for any
+            // buffer other than the one this tracker owns.
+            if (term.buffer.active !== tracker.buffer) return;
+            if (y !== tracker.lastScrollY) {
+              // A live marker matches the trim signature when it shifted
+              // down one row together with the reported row. The fit path
+              // re-pins a marker disposed by a wider reflow to the surviving
+              // merged row, so this handler keeps that unambiguous signal
+              // there too. The remaining disposed-marker case is a marker
+              // trimmed out of the buffer at row 0 — a trim already happened
+              // and clamped its anchor at the top of the buffer, where the
+              // restore's target clamps too — so a one-row decrement of the
+              // reported row is still a trim; shift the anchor down with it
+              // (a genuine one-row user scroll cannot move a live marker,
+              // and in this state the anchor is already at the top).
+              const markerLine = tracker.marker.line;
+              if (
+                y === tracker.lastScrollY - 1 &&
+                (markerLine === tracker.lastMarkerLine - 1 ||
+                  (markerLine === -1 && tracker.lastMarkerLine >= 0))
+              ) {
+                tracker.lastScrollY = y;
+                tracker.lastMarkerLine = markerLine >= 0
+                  ? markerLine
+                  : Math.max(tracker.lastMarkerLine - 1, 0);
+                return;
+              }
+              tracker.moved = true;
+            }
+            tracker.lastScrollY = y;
+            tracker.lastMarkerLine = tracker.marker.line;
+          });
+          tracker.scrollListener = scrollListener;
+        }
+        const restoreScroll = () => {
+          scrollListener?.dispose();
+          if (syncScrollTrackerRef.current === tracker) {
+            syncScrollTrackerRef.current = null;
+          }
+          if (term.buffer.active !== restoreBuffer) {
+            tracker.marker.dispose();
+            return;
+          }
+          const markerTarget = tracker.marker.line;
+          tracker.marker.dispose();
+          if (tracker.moved) return;
+          if (wasPinnedToBottom) {
+            term.scrollToBottom();
+          } else {
+            // The marker followed the saved row across scrollback trims (and
+            // reflow); follow it to the row's current position. A disposed
+            // marker reports -1: its row was either trimmed out of the
+            // buffer (top of the buffer is the closest remaining position)
+            // or merged into a surviving row by a wider reflow, in which
+            // case lastMarkerLine preserves the pre-reflow anchor — closer
+            // to the surviving row than the top of the buffer.
+            const anchor = markerTarget >= 0
+              ? markerTarget
+              : Math.max(tracker.lastMarkerLine, 0);
+            const targetY = Math.min(
+              Math.max(anchor, 0),
+              term.buffer.active.baseY,
+            );
+            if (term.buffer.active.viewportY !== targetY) {
+              term.scrollToLine(targetY);
+            }
+          }
+        };
+        if (!deferScrollRestoreDuringSynchronizedOutput(term, restoreScroll)) {
+          // An earlier pending restore owns this terminal and its pre-reflow
+          // target; drop this one along with its scroll listener (if any).
+          if (scrollListener) {
+            scrollListener.dispose();
+            tracker.marker.dispose();
+            if (syncScrollTrackerRef.current === tracker) {
+              syncScrollTrackerRef.current = null;
+            }
           }
         }
         term.refresh(0, Math.max(0, term.rows - 1));

@@ -539,3 +539,172 @@ export function forceSyncRenderAfterResize(term: XTerm): void {
     logger.warn("Sync render after resize failed", err);
   }
 }
+
+type XTermWithPrivateViewport = XTerm & {
+  _core?: {
+    _viewport?: {
+      scrollToLine?: (line: number, disableSmoothScroll?: boolean) => void;
+      _sync?: () => void;
+    };
+  };
+};
+
+/**
+ * Re-align the DOM scroll position with the buffer's viewport row.
+ *
+ * xterm's reflow adjusts the buffer's viewport row (ydisp) during resize, but
+ * the scrollable viewport keeps its stale pixel offset. Any subsequent
+ * relative scroll (wheel, scrollToLine) then applies its delta twice — once
+ * against the buffer and once against the stale DOM offset — drifting the
+ * reading position (all the way to the top while shrinking, #3299). Snapping
+ * the viewport back to the buffer row before a relative restore removes the
+ * desync.
+ */
+export function alignTerminalViewportScroll(term: XTerm): void {
+  const viewport = (term as XTermWithPrivateViewport)._core?._viewport;
+  const scrollToLine = viewport?.scrollToLine;
+  if (typeof scrollToLine !== "function") return;
+
+  // After a resize, xterm only refreshes the viewport's scroll dimensions on
+  // its queued render callback. Setting a scroll position against the stale
+  // dimensions gets clamped to the old maximum while xterm records the
+  // requested row, so the queued sync then assumes the position was already
+  // applied and the DOM offset stays stale — the next wheel scroll jumps
+  // upward by the resize delta. Sync the dimensions now, before positioning.
+  // If synchronized output (DECSET 2026) is active, _sync() above is a no-op
+  // that merely defers DOM scroll updates until the mode ends; positioning
+  // here would still record the requested row as _latestYDisp against the
+  // stale dimensions, and the deferred sync would then see
+  // ydisp === _latestYDisp and skip repositioning, leaving a stale DOM
+  // offset. Leave positioning to that deferred sync instead: after reflow the
+  // buffer's ydisp differs from the recorded _latestYDisp, so it repositions
+  // with fresh dimensions on its own.
+  if (typeof viewport._sync === "function") {
+    try {
+      viewport._sync.call(viewport);
+    } catch (err) {
+      logger.warn("Sync viewport dimensions after resize failed", err);
+    }
+  }
+  if (term.modes?.synchronizedOutputMode) return;
+
+  try {
+    scrollToLine.call(viewport, term.buffer.active.viewportY, true);
+  } catch (err) {
+    logger.warn("Align viewport scroll after resize failed", err);
+  }
+}
+
+/**
+ * Apply the caller's post-resize scroll restore, deferring it while
+ * synchronized output (DECSET 2026) is active.
+ *
+ * `alignTerminalViewportScroll` leaves DOM positioning to xterm's deferred
+ * viewport sync while that mode is on. The caller's restore (public
+ * scrollToLine/scrollToBottom) is a *relative* scroll through the still-stale
+ * DOM offset, so running it immediately would apply the resize delta twice and
+ * the deferred sync would then preserve the wrong reading row (#3299). Defer
+ * the restore to a subsequent task/frame after the first render following the
+ * mode's end: the public onRender fires before the internal render event the
+ * viewport uses to perform its deferred sync, so the restore must wait until
+ * that internal handler has applied the fresh scroll dimensions.
+ */
+/**
+ * One pending restore per terminal. Consecutive fits while synchronized
+ * output is active (e.g. the forced fit plus the RAF fit after a split
+ * resize) each capture their own scroll target: the first fit records the
+ * pre-reflow reading row, later fits record the reflow-adjusted viewportY.
+ * Running every deferred restore would let the later, reflow-adjusted target
+ * overwrite the original row, so the terminal still drifts. Keep only the
+ * earliest pending restore — it holds the pre-reflow target — until it runs.
+ *
+ * Returns whether the restore was taken over: `true` when it ran immediately
+ * or was registered as the pending restore, `false` when an earlier pending
+ * restore exists and this one was dropped. Callers that attach their own
+ * cleanup (e.g. scroll listeners) for the restore must dispose it when this
+ * returns `false`.
+ */
+const pendingSynchronizedRestores = new WeakMap<XTerm, { dispose: () => void }>();
+
+/**
+ * Run `fn` after the current render frame has fully completed. xterm's
+ * viewport registered its own internal render handler that performs the
+ * deferred `_sync` (fresh scroll dimensions + DOM offset), and that handler
+ * still runs after this function's caller within the same frame.
+ */
+function runAfterRenderFrame(fn: () => void): void {
+  if (typeof requestAnimationFrame === "function") {
+    requestAnimationFrame(() => fn());
+  } else {
+    setTimeout(fn, 0);
+  }
+}
+
+/**
+ * Drop the terminal's pending deferred restore (if any) without running it.
+ *
+ * The pending slot is keyed by terminal only. A caller that tracks which
+ * buffer a restore belongs to uses this when the active buffer changes while
+ * a restore is still pending: the stale restore's own buffer-identity check
+ * would discard it at completion anyway, and leaving it pending would make
+ * `deferScrollRestoreDuringSynchronizedOutput` drop the newly active buffer's
+ * restore, losing that buffer's scroll position.
+ */
+export function cancelPendingSynchronizedRestore(term: XTerm): void {
+  const pending = pendingSynchronizedRestores.get(term);
+  if (!pending) return;
+  pendingSynchronizedRestores.delete(term);
+  pending.dispose();
+}
+
+export function deferScrollRestoreDuringSynchronizedOutput(
+  term: XTerm,
+  restore: () => void,
+): boolean {
+  // Coalesce even when the mode has already ended: the pending restore may
+  // still be waiting for its scheduled frame (see below), and running a
+  // second restore in that window would apply the second fit's reflow-adjusted
+  // target instead of the pre-reflow reading row — its programmatic scroll can
+  // also trip the retained scroll tracker's onScroll listener into marking the
+  // original restore as user-canceled.
+  if (pendingSynchronizedRestores.has(term)) return false;
+  if (!term.modes?.synchronizedOutputMode) {
+    restore();
+    return true;
+  }
+  let listener: { dispose: () => void } | undefined;
+  let canceled = false;
+  listener = term.onRender(() => {
+    if (term.modes?.synchronizedOutputMode) return;
+    listener?.dispose();
+    listener = undefined;
+    // The public onRender is forwarded from
+    // RenderService.onRenderedViewportChange, which fires before the separate
+    // internal RenderService.onRender event the viewport uses to perform its
+    // deferred _sync. The restore is a *relative* scroll, so running it here
+    // would still go through stale scroll dimensions and reapply the resize
+    // delta (#3299). Push it to a subsequent task/frame so the viewport's
+    // internal render handler has applied fresh dimensions first.
+    //
+    // Keep the pending slot occupied until the restore actually runs so fits
+    // racing in that window coalesce (see the check at the top) instead of
+    // restoring immediately.
+    // Identity-check the slot before deleting: if this restore was canceled
+    // and a newer one was registered for the terminal before this frame runs,
+    // the slot holds the newer restore's entry and must be left alone.
+    const frameSentinel = {
+      dispose: () => {
+        canceled = true;
+      },
+    };
+    pendingSynchronizedRestores.set(term, frameSentinel);
+    runAfterRenderFrame(() => {
+      if (pendingSynchronizedRestores.get(term) === frameSentinel) {
+        pendingSynchronizedRestores.delete(term);
+      }
+      if (!canceled) restore();
+    });
+  });
+  pendingSynchronizedRestores.set(term, listener);
+  return true;
+}
