@@ -405,12 +405,22 @@ export function serializeSessionsForStorage(
     const minimalJson = minimalSession === strippedSession
       ? strippedJson
       : JSON.stringify(minimalSession);
+    // Floor for the newest session while its replay continuation stays
+    // protected: attachment bodies removed but ciphertext intact. The
+    // ciphertext-stripping loop never touches the newest session in that
+    // case, so `minimalJson` would understate the smallest size it can
+    // actually reach.
+    const attachmentStrippedSession = stripAttachmentBodiesFromSession(session);
+    const attachmentStrippedJson = attachmentStrippedSession === session
+      ? json
+      : JSON.stringify(attachmentStrippedSession);
     return {
       session,
       json,
       strippedSession,
       strippedJson,
       minimalJson,
+      attachmentStrippedJson,
       ciphertextMessages,
       attachmentStrippedMessages,
     };
@@ -422,17 +432,21 @@ export function serializeSessionsForStorage(
   const protectNewestContinuation = serialized.length > 0
     && serialized[0].json.length + 2 <= budgetBytes;
 
-  // Determine how many sessions can fit using the smallest representation for
-  // older sessions while reserving the newest session's full representation
-  // when possible. This also prevents an old, oversized visible chat that must
-  // be dropped anyway from causing newer replay ciphertext to be stripped.
-  // The per-session floor is its fully stripped representation, so a newest
-  // chat with oversized attachment bodies is retained at its metadata-only
-  // size and the attachment fallback below prunes those bodies instead of
-  // evicting older history that would otherwise still fit.
+  // Determine how many sessions can fit using the smallest representation
+  // each session can actually reach while its continuation is preserved:
+  // the newest session is sized at its attachment-stripped floor (its
+  // replay ciphertext stays protected), older sessions at their fully
+  // stripped floor. Reserving the newest session's full representation
+  // here would evict older visible history even though its replay-unused
+  // attachment bodies could be stripped instead; the attachment fallback
+  // below removes those bodies oldest-first only when the budget requires
+  // it, so a newest session whose full JSON fits is persisted intact.
   let minimalLength = 2
     + serialized.reduce((total, entry, index) => (
-      total + (protectNewestContinuation && index === 0 ? entry.json.length : entry.minimalJson.length)
+      total
+      + (protectNewestContinuation && index === 0
+        ? entry.attachmentStrippedJson.length
+        : entry.minimalJson.length)
     ), 0)
     + Math.max(0, serialized.length - 1);
   while (minimalLength > budgetBytes && serialized.length > 1) {
