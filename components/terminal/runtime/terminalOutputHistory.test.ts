@@ -564,6 +564,25 @@ test("a zero-width mark arriving after the wrap column joins the final cell", ()
   assert.deepEqual([...history.getLines()], ["abcdé", "Z"]);
 });
 
+test("a standalone zero-width mark after a control starts the wrapped row", () => {
+  const history = createTerminalOutputHistoryPreview();
+  history.setViewportRows(24);
+  history.setViewportCols(5);
+  // The SGR control xterm parses resets its preceding-join state, so the
+  // combining mark that follows is a standalone grapheme: it must not attach
+  // to the previous row's final cell; the pending wrap happens and the mark
+  // begins the next row (like xterm's `15-graphemes` runtime).
+  history.append("abcde\x1b[31m");
+  history.append("́Z\n");
+  assert.deepEqual([...history.getLines()], ["abcde", "́Z"]);
+  // The same holds when the control rides inside one display chunk.
+  history.clear();
+  history.setViewportRows(24);
+  history.setViewportCols(5);
+  history.append("abcde\x1b[31ḿZ\n");
+  assert.deepEqual([...history.getLines()], ["abcde", "́Z"]);
+});
+
 test("combined private-mode controls apply every parameter", () => {
   const history = createTerminalOutputHistoryPreview();
   history.setViewportRows(24);

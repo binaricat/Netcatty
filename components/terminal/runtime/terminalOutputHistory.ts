@@ -535,7 +535,11 @@ export const createTerminalOutputHistoryPreview = (options?: {
         if (autowrap) {
           // A zero-width grapheme (a combining mark that arrived in a later
           // display chunk) joins the final cell of the current row instead of
-          // starting the next one; the wrap stays deferred behind it.
+          // starting the next one; the wrap stays deferred behind it. That
+          // only holds while a valid preceding grapheme ends the row
+          // (`openGrapheme` still set): a control xterm parsed reset its
+          // preceding-join state, so a standalone mark must not attach to the
+          // prior row's cell — xterm wraps and the mark begins the next row.
           const rest = spanIsAscii
             ? ""
             : span.slice(offset, offset + WRAP_PROBE_UTF16_UNITS);
@@ -553,7 +557,8 @@ export const createTerminalOutputHistoryPreview = (options?: {
               .segment(span.slice(offset))[Symbol.iterator]().next().value?.segment;
           }
           if (
-            first !== undefined
+            openGrapheme !== null
+            && first !== undefined
             && stringCellWidth(first, widthTerm) === 0
             && cursor >= current.length
             && current.length < maxChars
