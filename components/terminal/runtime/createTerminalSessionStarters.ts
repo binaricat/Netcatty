@@ -709,8 +709,14 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
           // an ordinary open bypasses endpoint/idle transport reuse. Duplicate
           // Session clones must never borrow the source's live transport
           // either, so they send an explicit `reuseTransport: false`.
+          // Reconnects (manual retry / auto-reconnect) also dial fresh: a
+          // reused transport multiplexes onto the previous login, so remote
+          // group changes (e.g. `usermod -aG`) would stay invisible (#3293).
           reuseTransport: !sourceSessionId
-            && (requiresFreshSshConnection || isFallbackAfterSourceReuse || ctx.requireFreshConnection === true)
+            && (requiresFreshSshConnection
+              || isFallbackAfterSourceReuse
+              || ctx.requireFreshConnection === true
+              || ctx.requireFreshConnectionOnReconnectRef?.current === true)
             ? false
             : undefined,
           skipShellPidDiscovery: ctx.isNetworkDevice === true,
