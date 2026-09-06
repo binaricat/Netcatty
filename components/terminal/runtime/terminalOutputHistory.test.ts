@@ -199,6 +199,32 @@ test("preview rows keep wide characters intact at a column boundary", () => {
   );
 });
 
+test("wrap decisions measure with the live terminal's Unicode width provider", () => {
+  // The configured `15-graphemes` runtime counts `🖥` as one xterm cell while
+  // the local fallback counts two, so without the injected provider the
+  // tracker commits `abcd` and puts `🖥X` on the continuation row while xterm
+  // renders `abcd🖥` with `X` wrapped. The preview must match the terminal.
+  const widthTerm = {
+    _core: {
+      unicodeService: { getStringCellWidth: (s: string) => [...s].length },
+    },
+  } as never;
+  const history = createTerminalOutputHistoryPreview();
+  history.setViewportRows(24);
+  history.setViewportCols(5);
+  history.setWidthTerminal(widthTerm);
+  history.append("abcd🖥X");
+  assert.deepEqual(history.getLines(), ["abcd🖥", "X"]);
+
+  const preview = createTerminalOutputHistoryPreview();
+  preview.setWidthTerminal(widthTerm);
+  preview.append("abcd🖥X\n");
+  assert.deepEqual(
+    preview.getPreviewRows({ cols: 5, rows: 2, top: 0 }).rows.map((row) => row.text),
+    ["abcd🖥", "X"],
+  );
+});
+
 test("wheel steps walk the preview from the newest row upwards", () => {
   const history = createTerminalOutputHistoryPreview();
   for (let index = 0; index < 6; index += 1) history.append(`row ${index}\n`);

@@ -237,6 +237,15 @@ export const stripTerminalDisplayToPlainText = (
   return { text: output, pending: "" };
 };
 
+/**
+ * The live xterm instance whose Unicode provider measures cell widths. The
+ * configured `15-graphemes` runtime intentionally disagrees with the local
+ * fallback for some graphemes (e.g. `terminalStringCellWidth.test.ts` records
+ * `🖥` as one xterm cell while the fallback counts two), so every wrap /
+ * overwrite decision here must measure the way the terminal measures.
+ */
+type WidthTerm = NonNullable<Parameters<typeof stringCellWidth>[1]>;
+
 const isAsciiOnly = (text: string): boolean => {
   for (let i = 0; i < text.length; i += 1) {
     if (text.charCodeAt(i) > 0x7f) return false;
@@ -245,8 +254,8 @@ const isAsciiOnly = (text: string): boolean => {
 };
 
 /** Cell columns a transcript span occupies (wide glyphs count twice). */
-const pieceCellWidth = (text: string): number =>
-  isAsciiOnly(text) ? text.length : stringCellWidth(text);
+const pieceCellWidth = (text: string, term?: WidthTerm | null): number =>
+  isAsciiOnly(text) ? text.length : stringCellWidth(text, term);
 
 /** UTF-16 units of the first grapheme of `text` ("" when empty). */
 const firstGraphemeUnits = (text: string): string =>
@@ -264,10 +273,14 @@ const lastGraphemeUnits = (text: string): string => {
  * the same `isWrapped` flag xterm uses so soft-wrapped selection joins keep
  * working (see joinHistoryPreviewSelectionText).
  */
-export const wrapOutputHistoryLineToRows = (text: string, cols: number): string[] => {
+export const wrapOutputHistoryLineToRows = (
+  text: string,
+  cols: number,
+  term?: WidthTerm | null,
+): string[] => {
   if (cols < 1) return [text];
   const ascii = isAsciiOnly(text);
-  const width = ascii ? text.length : stringCellWidth(text);
+  const width = ascii ? text.length : stringCellWidth(text, term);
   if (width <= cols) return [text];
 
   const rows: string[] = [];
@@ -276,10 +289,10 @@ export const wrapOutputHistoryLineToRows = (text: string, cols: number): string[
     // ASCII lines skip the grapheme segmenter; a transcript can hold long lines.
     const row = ascii
       ? text.slice(startCell, startCell + cols)
-      : sliceStringByCellColumns(text, startCell, startCell + cols);
+      : sliceStringByCellColumns(text, startCell, startCell + cols, term);
     if (!row) break;
     rows.push(row);
-    startCell += ascii ? row.length : stringCellWidth(row);
+    startCell += ascii ? row.length : stringCellWidth(row, term);
   }
   return rows.length > 0 ? rows : [text];
 };
@@ -288,10 +301,11 @@ const buildPreviewRows = (
   lines: readonly string[],
   lineStartsWrapped: readonly boolean[],
   cols: number,
+  term?: WidthTerm | null,
 ): HistoryPreviewRow[] => {
   const rows: HistoryPreviewRow[] = [];
   for (let index = 0; index < lines.length; index += 1) {
-    const wrapped = wrapOutputHistoryLineToRows(lines[index], cols);
+    const wrapped = wrapOutputHistoryLineToRows(lines[index], cols, term);
     // A line committed by an automatic wrap is itself the continuation row of
     // the previous one; its first preview row keeps the wrapped join.
     const startsWrapped = lineStartsWrapped[index] ?? false;
@@ -357,6 +371,12 @@ export interface TerminalOutputHistoryPreview {
    * (0) keeps the unclamped behavior.
    */
   setViewportCols(cols: number): void;
+  /**
+   * Report the live terminal so wrap decisions use its Unicode width provider
+   * (the configured `15-graphemes` runtime) instead of the local fallback,
+   * which disagrees with xterm for some graphemes. Unset keeps the fallback.
+   */
+  setWidthTerminal(term: WidthTerm | null): void;
 }
 
 export const createTerminalOutputHistoryPreview = (options?: {
@@ -380,6 +400,9 @@ export const createTerminalOutputHistoryPreview = (options?: {
   let pendingEscape = "";
   let viewportRows = 0;
   let viewportCols = 0;
+  // The live xterm instance backing this transcript; its Unicode provider
+  // measures the cell widths every wrap decision below commits to.
+  let widthTerm: WidthTerm | null = null;
   // Active DECSTBM scroll margins (1-based rows); Infinity means "viewport bottom".
   let scrollTopMargin = 1;
   let scrollBottomMargin = Infinity;
@@ -487,7 +510,7 @@ export const createTerminalOutputHistoryPreview = (options?: {
       if (first.length > openGrapheme.length) {
         // The joined cluster replaces the open grapheme: subtract its width
         // so the joined grapheme below lands on exactly the same cells.
-        const openWidth = pieceCellWidth(openGrapheme);
+        const openWidth = pieceCellWidth(openGrapheme, widthTerm);
         current = current.slice(0, current.length - openGrapheme.length);
         cursor = current.length;
         cursorCell = Math.max(0, cursorCell - openWidth);
@@ -531,7 +554,7 @@ export const createTerminalOutputHistoryPreview = (options?: {
           }
           if (
             first !== undefined
-            && stringCellWidth(first) === 0
+            && stringCellWidth(first, widthTerm) === 0
             && cursor >= current.length
             && current.length < maxChars
           ) {
@@ -550,7 +573,7 @@ export const createTerminalOutputHistoryPreview = (options?: {
           cursorCell = viewportCols - 1;
           cursor = cursorCell === 0 ? 0
             : isAsciiOnly(current) ? cursorCell
-              : sliceStringByCellColumns(current, 0, cursorCell).length;
+              : sliceStringByCellColumns(current, 0, cursorCell, widthTerm).length;
         }
       }
       if (current.length >= maxChars) commitCurrentLine();
@@ -584,7 +607,7 @@ export const createTerminalOutputHistoryPreview = (options?: {
           first = outputGraphemeSegmenter
             .segment(span.slice(offset))[Symbol.iterator]().next().value?.segment;
         }
-        if (first !== undefined && stringCellWidth(first) === 0) {
+        if (first !== undefined && stringCellWidth(first, widthTerm) === 0) {
           current += first;
           cursor = current.length;
           // The zero-width piece extends the tail in place; stop offering a join.
@@ -625,11 +648,11 @@ export const createTerminalOutputHistoryPreview = (options?: {
         if (spanIsAscii) {
           fitting = piece.slice(0, room);
         } else {
-          const fullWidth = stringCellWidth(piece);
+          const fullWidth = stringCellWidth(piece, widthTerm);
           if (fullWidth <= room) {
             fittingWidth = fullWidth;
           } else {
-            fitting = sliceStringByCellColumns(piece, 0, room);
+            fitting = sliceStringByCellColumns(piece, 0, room, widthTerm);
           }
         }
         if (!fitting) {
@@ -652,7 +675,8 @@ export const createTerminalOutputHistoryPreview = (options?: {
         }
       }
       const pieceAscii = isAsciiOnly(fitting);
-      const pieceWidth = fittingWidth ?? (pieceAscii ? fitting.length : stringCellWidth(fitting));
+      const pieceWidth = fittingWidth
+        ?? (pieceAscii ? fitting.length : stringCellWidth(fitting, widthTerm));
       const appending = cursor >= current.length;
       if (appending) {
         current += fitting;
@@ -666,12 +690,17 @@ export const createTerminalOutputHistoryPreview = (options?: {
           // Cursor coordinates count cells, while strings count UTF-16 units.
           // Replace entire intersected graphemes and blank any remaining half
           // of a wide glyph, retaining the columns of the untouched suffix.
-          const prefix = sliceStringByCellColumns(current, 0, cursorCell);
+          const prefix = sliceStringByCellColumns(current, 0, cursorCell, widthTerm);
           const endCell = cursorCell + pieceWidth;
-          const endPrefix = sliceStringByCellColumns(current, 0, endCell);
-          const overlapsWideEnd = pieceCellWidth(endPrefix) < Math.min(endCell, width);
-          const suffix = sliceStringByCellColumns(current, endCell + (overlapsWideEnd ? 1 : 0));
-          current = prefix + " ".repeat(cursorCell - pieceCellWidth(prefix))
+          const endPrefix = sliceStringByCellColumns(current, 0, endCell, widthTerm);
+          const overlapsWideEnd = pieceCellWidth(endPrefix, widthTerm) < Math.min(endCell, width);
+          const suffix = sliceStringByCellColumns(
+            current,
+            endCell + (overlapsWideEnd ? 1 : 0),
+            undefined,
+            widthTerm,
+          );
+          current = prefix + " ".repeat(cursorCell - pieceCellWidth(prefix, widthTerm))
             + fitting + (overlapsWideEnd ? " " : "") + suffix;
         }
       }
@@ -687,7 +716,7 @@ export const createTerminalOutputHistoryPreview = (options?: {
       }
       cursor = appending ? current.length
         : isAsciiOnly(current) ? cursorCell
-          : sliceStringByCellColumns(current, 0, cursorCell).length;
+          : sliceStringByCellColumns(current, 0, cursorCell, widthTerm).length;
       offset += fitting.length;
     }
   };
@@ -733,7 +762,7 @@ export const createTerminalOutputHistoryPreview = (options?: {
     cursorCell = savedCell;
     cursor = savedCell === 0 ? 0
       : isAsciiOnly(current) ? savedCell
-        : sliceStringByCellColumns(current, 0, savedCell).length;
+        : sliceStringByCellColumns(current, 0, savedCell, widthTerm).length;
   };
 
   const writeText = (text: string) => {
@@ -867,7 +896,7 @@ export const createTerminalOutputHistoryPreview = (options?: {
         );
         cursor = targetCell === 0 ? 0
           : isAsciiOnly(current) ? targetCell
-            : sliceStringByCellColumns(current, 0, targetCell).length;
+            : sliceStringByCellColumns(current, 0, targetCell, widthTerm).length;
         cursorCell = targetCell;
         screenRow = nextRow;
         i = end;
@@ -902,7 +931,7 @@ export const createTerminalOutputHistoryPreview = (options?: {
         current = current.slice(0, cursor);
         // The erased suffix may have contained the open grapheme.
         openGrapheme = null;
-        currentCellWidth = pieceCellWidth(current);
+        currentCellWidth = pieceCellWidth(current, widthTerm);
         i += 1;
         continue;
       }
@@ -942,6 +971,7 @@ export const createTerminalOutputHistoryPreview = (options?: {
       getLines(),
       current ? [...lineWrapFlags, currentStartsWrapped] : lineWrapFlags,
       cols,
+      widthTerm,
     );
     cacheCols = cols;
     cacheDirty = false;
@@ -1008,6 +1038,9 @@ export const createTerminalOutputHistoryPreview = (options?: {
         screenRow = Math.min(screenRow, viewportRows);
       }
     },
+    setWidthTerminal(term: WidthTerm | null): void {
+      widthTerm = term ?? null;
+    },
     setViewportCols(cols: number): void {
       const nextCols = Math.max(0, Math.floor(cols));
       if (nextCols === viewportCols) return;
@@ -1026,7 +1059,7 @@ export const createTerminalOutputHistoryPreview = (options?: {
         cursorCell = viewportCols - 1;
         cursor = cursorCell === 0 ? 0
           : isAsciiOnly(current) ? cursorCell
-            : sliceStringByCellColumns(current, 0, cursorCell).length;
+            : sliceStringByCellColumns(current, 0, cursorCell, widthTerm).length;
       }
     },
   };

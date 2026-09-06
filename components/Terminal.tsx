@@ -644,6 +644,10 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     if (captureTerm) {
       terminalOutputHistoryRef.current.setViewportRows(captureTerm.rows);
       terminalOutputHistoryRef.current.setViewportCols(captureTerm.cols);
+      // The tracker's wrap decisions must measure cell widths the way this
+      // terminal's Unicode provider does, or the preview diverges from what
+      // xterm actually rendered (e.g. `15-graphemes` emoji widths).
+      terminalOutputHistoryRef.current.setWidthTerminal(captureTerm);
     }
     const readableCommandData = commandLogRewriterRef.current.append(data);
     // The alternate-screen preview reads the raw display stream (before the
