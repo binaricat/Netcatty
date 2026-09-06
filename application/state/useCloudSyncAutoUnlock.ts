@@ -19,6 +19,7 @@ export function useCloudSyncAutoUnlock(input: {
   const { securityState, masterKeyIdentity, manager, bridge } = input;
   const [passwordRevision, setPasswordRevision] = useState(0);
   const attemptedRef = useRef<string | null>(null);
+  const unlockedIdentityRef = useRef<string | null>(null);
 
   useEffect(() => bridge?.onCloudSyncSessionPasswordAvailable?.(() => {
     setPasswordRevision(value => value + 1);
@@ -28,10 +29,14 @@ export function useCloudSyncAutoUnlock(input: {
     if (!masterKeyIdentity) return;
     const attempt = JSON.stringify([masterKeyIdentity, passwordRevision]);
     if (securityState === 'UNLOCKED') {
+      unlockedIdentityRef.current = masterKeyIdentity;
       attemptedRef.current = attempt;
       return;
     }
     if (securityState !== 'LOCKED') return;
+    // Once this key has been unlocked, a later lock is intentional. A peer
+    // sharing its password must not undo it, regardless of notification order.
+    if (unlockedIdentityRef.current === masterKeyIdentity) return;
     if (attemptedRef.current === attempt) return;
     attemptedRef.current = attempt;
     let cancelled = false;

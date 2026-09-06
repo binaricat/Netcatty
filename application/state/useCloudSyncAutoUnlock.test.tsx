@@ -42,8 +42,8 @@ test('completed auto-unlock does not undo a later deliberate lock', async () => 
     cloudSyncGetSessionPassword: async () => 'fixture-only',
     onCloudSyncSessionPasswordAvailable: (cb: () => void) => { onAvailable = cb; return () => { onAvailable = undefined; }; },
   };
-  function Harness({ state }: { state: string }) {
-    useCloudSyncAutoUnlock({ securityState: state, masterKeyIdentity: 'key', manager, bridge });
+  function Harness({ state, identity = 'key' }: { state: string; identity?: string }) {
+    useCloudSyncAutoUnlock({ securityState: state, masterKeyIdentity: identity, manager, bridge });
     return null;
   }
   try {
@@ -54,5 +54,11 @@ test('completed auto-unlock does not undo a later deliberate lock', async () => 
     await renderer.render(React.createElement(Harness, { state: 'LOCKED' }));
     await flushEffects();
     assert.equal(calls, 1);
+    await runWithAct(async () => { onAvailable?.(); });
+    await flushEffects();
+    assert.equal(calls, 1, 'a peer password event after deliberate lock must not reopen this vault');
+    await renderer.render(React.createElement(Harness, { state: 'LOCKED', identity: 'replacement-key' }));
+    await flushEffects();
+    assert.equal(calls, 2, 'a genuinely replaced key can still initialize automatically');
   } finally { await renderer.unmount(); dom.cleanup(); }
 });
