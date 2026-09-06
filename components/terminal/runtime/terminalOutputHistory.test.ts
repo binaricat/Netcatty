@@ -408,3 +408,48 @@ test("narrowing the viewport clamps the tracked cursor column", () => {
   history.append("X");
   assert.deepEqual(history.getLines(), [" ".repeat(9) + "X"]);
 });
+
+test("printable output past the viewport width wraps the tracked cursor", () => {
+  // xterm wraps `f` onto the second row, so `CSI 2;1H` overwrites it there
+  // instead of adding a separate line below a stale wrapped row.
+  const input = "abcdef\x1b[2;1HXY";
+  for (let split = 0; split <= input.length; split++) {
+    const history = createTerminalOutputHistoryPreview();
+    history.setViewportRows(24);
+    history.setViewportCols(5);
+    history.append(input.slice(0, split));
+    history.append(input.slice(split));
+    assert.deepEqual(history.getLines(), ["abcde", "XY"]);
+  }
+});
+
+test("a carriage return cancels the deferred wrap instead of splitting the row", () => {
+  const history = createTerminalOutputHistoryPreview();
+  history.setViewportRows(24);
+  history.setViewportCols(5);
+  history.append("abcde\rXYZ");
+  assert.deepEqual(history.getLines(), ["XYZde"]);
+});
+
+test("wide glyphs wrap whole at the viewport width", () => {
+  const history = createTerminalOutputHistoryPreview();
+  history.setViewportRows(24);
+  history.setViewportCols(4);
+  history.append("中文中文中文\n");
+  assert.deepEqual(history.getLines(), ["中文", "中文", "中文"]);
+});
+
+test("origin mode resolves absolute rows against the scroll region", () => {
+  const history = createTerminalOutputHistoryPreview();
+  history.setViewportRows(24);
+  // In origin mode both addresses target row 20 (top margin + 15, then the
+  // bottom-margin clamp), so the redraw overwrites `status` in place instead
+  // of retaining it as a stale separate line.
+  history.append("\x1b[5;20r\x1b[?6h\x1b[16;1Hstatus\x1b[99;1HNEW");
+  assert.deepEqual(history.getLines(), ["NEWtus"]);
+  history.clear();
+  // clear() forgets origin mode: rows are absolute again.
+  history.setViewportRows(24);
+  history.append("\x1b[5;20r\x1b[?6h\x1b[?6l\x1b[5;1Habsolute");
+  assert.deepEqual(history.getLines(), ["absolute"]);
+});

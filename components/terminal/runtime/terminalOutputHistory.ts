@@ -13,7 +13,8 @@ import type { HistoryPreviewRow } from "./terminalHistoryScrollOverride";
  * stream is the only usable source, so every display chunk fed to the log
  * capture is reduced to plain lines here: row moves separate printed lines, a bare
  * `\r` overwrites the line it restarts (progress bars/spinners stay one line),
- * and the retained tail is bounded.
+ * printable output wraps at the reported viewport width the way xterm's
+ * deferred autowrap does, and the retained tail is bounded.
  *
  * Feed it the chunk *after* the programmatic command rewriter (masked commands
  * never reach the preview) but *before* the replay-safe sanitizer, which drops
@@ -175,11 +176,13 @@ export const stripTerminalDisplayToPlainText = (
             + rest.slice(rest.length - (MAX_PENDING_ESCAPE_CHARS - introducerLength)),
         };
       }
+      const sequence = input.slice(i + escapeIntroducerLength(input, i), end);
       // Only the history writer consumes cursor-row controls. Standalone plain
-      // text stripping keeps its original contract.
+      // text stripping keeps its original contract. DEC origin mode changes
+      // ride along so absolute rows can resolve against the scroll margins.
       if (preserveRowControls
         && (input[i] === C1_CSI || input[i + 1] === "[")
-        && /^[0-9;]*[HfABEFdr]$/.test(input.slice(i + escapeIntroducerLength(input, i), end))) {
+        && (/^[0-9;]*[HfABEFdr]$/.test(sequence) || /^\?6[hl]$/.test(sequence))) {
         output += input.slice(i, end);
       }
       const eraseInLine = eraseInLineMarkerFor(input, i, end);
@@ -319,6 +322,9 @@ export const createTerminalOutputHistoryPreview = (options?: {
   // Active DECSTBM scroll margins (1-based rows); Infinity means "viewport bottom".
   let scrollTopMargin = 1;
   let scrollBottomMargin = Infinity;
+  // DEC origin mode (DECOM): absolute rows become relative to the top margin
+  // and clamp within the region.
+  let originMode = false;
   let cacheDirty = true;
   let cacheCols = -1;
   let cacheRows: HistoryPreviewRow[] = [];
@@ -339,15 +345,41 @@ export const createTerminalOutputHistoryPreview = (options?: {
   };
 
   /**
+   * Move the tracked cursor to the start of the next screen row the way xterm
+   * does when printable output crosses the last column: the open line is
+   * committed at the wrap column so a later cursor-addressed redraw targets
+   * the row the terminal actually wrapped to.
+   */
+  const wrapCursor = () => {
+    const screenBottom = viewportRows > 0 ? viewportRows : 1_000_000;
+    const bottomLimit = screenRow <= scrollBottomMargin
+      ? Math.min(scrollBottomMargin, screenBottom)
+      : screenBottom;
+    commitCurrentLine();
+    screenRow = Math.min(bottomLimit, screenRow + 1);
+    cursor = 0;
+    cursorCell = 0;
+    currentCellWidth = 0;
+  };
+
+  /**
    * Write one span at the open line's cursor. A cursor-addressed redraw
    * (cursor-home CSI stripped, no LF) would keep appending frames to the open
    * line forever, so the budget is enforced here: spans are written in bounded
    * pieces, committing a full line at the cap, so nothing is dropped and the
-   * copy every write makes stays bounded.
+   * copy every write makes stays bounded. With a known viewport width, spans
+   * are additionally capped at the remaining columns so xterm's deferred
+   * autowrap splits the line where the terminal wraps it.
    */
   const writeSpan = (span: string) => {
     let offset = 0;
+    // ASCII-ness is monotone under slicing; decide once so the per-row cap
+    // below stays linear for long spans.
+    const spanIsAscii = isAsciiOnly(span);
     while (offset < span.length) {
+      // xterm defers the wrap until the next printable character arrives; a
+      // cursor move or carriage return in between cancels it instead.
+      if (viewportCols > 0 && cursorCell >= viewportCols) wrapCursor();
       if (current.length >= maxChars) commitCurrentLine();
       const width = currentCellWidth;
       if (cursorCell > width) {
@@ -356,13 +388,30 @@ export const createTerminalOutputHistoryPreview = (options?: {
       }
       const piece = span.slice(offset, offset + (maxChars - current.length));
       if (!piece) return;
-      const pieceAscii = isAsciiOnly(piece);
-      const pieceWidth = pieceAscii ? piece.length : stringCellWidth(piece);
+      let fitting = piece;
+      if (viewportCols > 0) {
+        const room = viewportCols - cursorCell;
+        fitting = spanIsAscii
+          ? piece.slice(0, room)
+          : sliceStringByCellColumns(piece, 0, room);
+        if (!fitting) {
+          if (cursorCell > 0) {
+            // The next glyph is wider than the remaining columns; xterm wraps
+            // and places it on the following row.
+            wrapCursor();
+            continue;
+          }
+          // Wider than the whole viewport: write it anyway so the loop moves on.
+          fitting = piece;
+        }
+      }
+      const pieceAscii = isAsciiOnly(fitting);
+      const pieceWidth = pieceAscii ? fitting.length : stringCellWidth(fitting);
       const appending = cursor >= current.length;
       if (appending) {
-        current += piece;
+        current += fitting;
       } else if (pieceAscii && isAsciiOnly(current)) {
-        current = current.slice(0, cursor) + piece + current.slice(cursor + piece.length);
+        current = current.slice(0, cursor) + fitting + current.slice(cursor + fitting.length);
       } else {
         // Cursor coordinates count cells, while strings count UTF-16 units.
         // Replace entire intersected graphemes and blank any remaining half
@@ -373,14 +422,14 @@ export const createTerminalOutputHistoryPreview = (options?: {
         const overlapsWideEnd = pieceCellWidth(endPrefix) < Math.min(endCell, width);
         const suffix = sliceStringByCellColumns(current, endCell + (overlapsWideEnd ? 1 : 0));
         current = prefix + " ".repeat(cursorCell - pieceCellWidth(prefix))
-          + piece + (overlapsWideEnd ? " " : "") + suffix;
+          + fitting + (overlapsWideEnd ? " " : "") + suffix;
       }
       cursorCell += pieceWidth;
       currentCellWidth = Math.max(width, cursorCell);
       cursor = appending ? current.length
         : isAsciiOnly(current) ? cursorCell
           : sliceStringByCellColumns(current, 0, cursorCell).length;
-      offset += piece.length;
+      offset += fitting.length;
     }
   };
 
@@ -413,6 +462,21 @@ export const createTerminalOutputHistoryPreview = (options?: {
           i = end;
           continue;
         }
+        if (command === "h" || command === "l") {
+          // DECOM (CSI ?6h / ?6l): while set, CUP/HVP/VPA rows are relative to
+          // and clamped within the scroll region. The terminal also homes the
+          // cursor (to the origin-dependent home) on the mode change.
+          if (params[0] === "?6") {
+            originMode = command === "h";
+            const homeRow = originMode ? scrollTopMargin : 1;
+            if (screenRow !== homeRow && current) commitCurrentLine();
+            screenRow = homeRow;
+            cursor = 0;
+            cursorCell = 0;
+          }
+          i = end;
+          continue;
+        }
         const amount = Math.min(1_000_000, Math.max(1, Number(params[0]) || 1));
         // The terminal clamps cursor-row targets to the viewport's bottom row;
         // mirror that so moves past it stay same-row redraws. Inside a scroll
@@ -429,7 +493,11 @@ export const createTerminalOutputHistoryPreview = (options?: {
           ? Math.max(topLimit, screenRow - amount)
           : command === "B" || command === "E"
             ? Math.min(bottomLimit, screenRow + amount)
-            : Math.min(screenBottom, amount);
+            : originMode
+              // Origin mode makes CUP/HVP/VPA rows relative to (and clamped
+              // within) the scroll region's margins.
+              ? Math.min(Math.min(scrollBottomMargin, screenBottom), scrollTopMargin + amount - 1)
+              : Math.min(screenBottom, amount);
         const column = command === "H" || command === "f"
           ? Math.max(0, (Number(params[1]) || 1) - 1)
           : command === "E" || command === "F" ? 0 : cursorCell;
@@ -540,6 +608,7 @@ export const createTerminalOutputHistoryPreview = (options?: {
       // The next xterm instance starts with a full-viewport scroll region.
       scrollTopMargin = 1;
       scrollBottomMargin = Infinity;
+      originMode = false;
       cacheDirty = true;
     },
     getLines,
