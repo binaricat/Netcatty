@@ -3054,7 +3054,10 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           const buffer = term.buffer.active;
           if (!buffer.getLine(preResizeMarkerLine)) return null;
           let start = preResizeMarkerLine;
-          while (start > 0 && buffer.getLine(start - 1)?.isWrapped) start--;
+          // Row y's isWrapped means y continues y-1, so walk while the
+          // current row is wrapped; testing start-1 instead would stop at
+          // the first continuation row and omit the head's cells.
+          while (start > 0 && buffer.getLine(start)?.isWrapped) start--;
           let text = '';
           const rowStartOffsets: number[] = [];
           for (let y = start; ; y++) {
