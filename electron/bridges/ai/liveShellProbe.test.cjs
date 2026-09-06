@@ -170,6 +170,7 @@ for (const [customization, listHistory] of [
   ['HISTCONTROL=ignorespace', 'command builtin history'],
   ["alias history='history 10'", 'command builtin history'],
   ['history() { :; }', 'command builtin history'],
+  ['history() { builtin history "$@" | cat; }', 'command builtin history'],
   ["alias eval=':'", 'command builtin history'],
   ['eval() { :; }', 'command builtin history'],
   ['PATH=/nonexistent', 'command builtin history'],
@@ -292,5 +293,17 @@ for (const [shell, args] of [
     assert.equal(result.status, 0, result.stderr);
     assert.ok(result.stdout.includes(`${marker}_Q`), result.stdout);
     assert.ok(result.stdout.includes('shell_survived'), result.stdout);
+  });
+}
+
+for (const shell of ['/bin/dash', '/bin/zsh']) {
+  test(`history cleanup keeps the execution wrapper portable in ${shell}`, { skip: !require('node:fs').existsSync(shell) }, () => {
+    const { spawnSync } = require('node:child_process');
+    const { buildWrappedCommand } = require('./ptyExecHelpers.cjs');
+    const marker = '__NCMCP_PORTABLE_HISTORY__';
+    const result = spawnSync(shell, ['-c', buildWrappedCommand('echo portable-history-ok', 'posix', marker, true)], { encoding: 'utf8', timeout: 5000 });
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /portable-history-ok/);
+    assert.ok(result.stdout.includes(`${marker}_E:0`));
   });
 }

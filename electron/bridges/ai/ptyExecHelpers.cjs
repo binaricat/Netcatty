@@ -209,21 +209,19 @@ function buildBashHistoryCleanup(marker) {
   // HISTCONTROL=ignorespace skips the wrapper. Read the entry's actual number:
   // older Bash versions can expose HISTCMD as the next history number.
   // Any single dispatcher name can be shadowed by a user alias or function
-  // (command, builtin, history), so fall back through \history, \command
-  // history and \builtin history, deleting with whichever dispatcher actually
-  // read the marker-bearing entry. The leading backslash stops alias
-  // expansion; the fallback chain stops functions of the same names. The
+  // (command, builtin, history), so try command history and builtin history.
+  // Each attempt re-reads the latest entry:
+  // a history function can display it but delete only in a subshell. The
+  // fallback chain handles a function shadowing a single dispatcher. The
   // unset-safe guard leaves non-Bash shells alone, including shells with
   // nounset enabled.
   // Use ^ for the Bash bracket negation: ! triggers interactive zsh history
   // expansion before the Bash-only guard can run.
-  const entry = `${marker}_h`;
-  const attempt = (read) => (
-    `${entry}=$(${read} 1 2>/dev/null); case "$${entry}" in *${marker}*) `
-    + `${entry}=\${${entry}#"\${${entry}%%[^[:space:]]*}"}; `
-    + `${read} -d "\${${entry}%%[[:space:]]*}" 2>/dev/null ;;`
-  );
-  return `[ -n "\${BASH_VERSION-}" ] && { ${attempt("\\history")}*) ${attempt("\\command history")}*) ${attempt("\\builtin history")} esac ;; esac ;; esac; }`;
+  // Keep the shared cleanup short enough for canonical PTY input buffers.
+  // Expansion of the dispatcher avoids alias expansion of command names.
+  const entry = "__nc_h";
+  const dispatcher = "__nc_d";
+  return `[ "\${BASH_VERSION-}" ]&&{ for ${dispatcher} in command builtin;do ${entry}=$($${dispatcher} history 1);case "$${entry}" in *${marker}*) ${entry}=\${${entry}#"\${${entry}%%[^[:space:]]*}"};$${dispatcher} history -d "\${${entry}%%[[:space:]]*}";;esac;done; } 2>/dev/null`;
 }
 
 function buildPosixWrapperBody(command, marker, startFormat) {
