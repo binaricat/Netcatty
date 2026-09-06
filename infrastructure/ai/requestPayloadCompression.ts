@@ -124,6 +124,9 @@ export function compressMessagesForRequestTooLargeRetry(
 
 function compressModelMessageForRequestRetry(message: ModelMessage): ModelMessage {
   if (typeof message.content === "string") {
+    // User text is an instruction or exact input, not terminal output. Lossy
+    // cleanup can alter commands even when the request is far below its limit.
+    if (message.role === "user") return message;
     const content = compressAndTruncateText(message.content, RETRY_MAX_MESSAGE_TEXT_CHARS);
     return content === message.content ? message : ({ ...message, content } as ModelMessage);
   }
@@ -132,6 +135,7 @@ function compressModelMessageForRequestRetry(message: ModelMessage): ModelMessag
 
   let didAdjust = false;
   const content = message.content.map((part) => {
+    if (message.role === "user" && part.type === "text") return part;
     const compressed = compressContentPartForRequestRetry(part);
     if (compressed !== part) didAdjust = true;
     return compressed;
