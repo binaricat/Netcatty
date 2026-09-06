@@ -3105,8 +3105,15 @@ const TerminalComponent: React.FC<TerminalProps> = ({
             return preResizeMarkerLine;
           }
           const buffer = term.buffer.active;
-          const minLine = Math.max(preResizeMarkerLine - 500, 0);
-          for (let y = preResizeMarkerLine - 1; y >= minLine; y--) {
+          // The surviving head of the marker's logical line can sit
+          // arbitrarily far above the pre-resize marker index: the marker
+          // row may be hundreds of wrapped rows into its line, and a
+          // widening reflow collapses both that line's continuations and
+          // unrelated rows above it. No fixed window around the pre-resize
+          // index is wide enough — a 500-row bound stops short of the head
+          // and leaves the restore anchored on content far below it — so
+          // search the full range down to the top of the buffer.
+          for (let y = preResizeMarkerLine - 1; y >= 0; y--) {
             const line = buffer.getLine(y);
             if (!line) break;
             if (line.isWrapped) continue;
