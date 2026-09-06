@@ -2870,6 +2870,17 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   }, [reuseConnectionFromSessionId, sessionId, terminalBackend]);
 
   type SafeFitOptions = { force?: boolean; requireVisible?: boolean; immediate?: boolean; allowHidden?: boolean };
+  // Scroll-tracking state for the deferred synchronized-output (DECSET 2026)
+  // scroll restore, shared across fits so a later fit's reflow (the
+  // immediate-plus-RAF split-resize path) refreshes the retained listener's
+  // baseline instead of leaving it stale on the pre-reflow row. Cleared when
+  // the owning restore runs or is dropped.
+  type SyncScrollTracker = {
+    term: XTerm;
+    moved: boolean;
+    lastScrollY: number;
+  };
+  const syncScrollTrackerRef = useRef<SyncScrollTracker | null>(null);
   const pendingWriteSafeFitRef = useRef<{
     term: XTerm;
     options: SafeFitOptions;
@@ -3018,21 +3029,43 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         // instead. (If new output scrolled the viewport because it was pinned
         // to the bottom, the user is already where the restore would put
         // them, so skipping is a no-op there too.)
-        let viewportMovedDuringSync = false;
+        // A retained restore from an earlier fit already owns the scroll
+        // tracking on this terminal. Its tracker is shared so that this fit's
+        // reflow — which changes viewportY without firing onScroll — refreshes
+        // the retained listener's baseline; installing a second listener here
+        // would be dropped with this duplicate restore, leaving a stale
+        // baseline that makes the next output line look like a user scroll
+        // and wrongly cancels the retained restore.
+        const retainedTracker = syncScrollTrackerRef.current;
+        const tracker: SyncScrollTracker =
+          retainedTracker && retainedTracker.term === term
+            ? retainedTracker
+            : { term, moved: false, lastScrollY: term.buffer.active.viewportY };
+        const isRetained = tracker === retainedTracker;
+        if (isRetained) {
+          tracker.lastScrollY = term.buffer.active.viewportY;
+        } else {
+          syncScrollTrackerRef.current = tracker;
+        }
         // BufferService.scroll fires onScroll for every line feed even when
         // isUserScrolling keeps ydisp unchanged, so compare reported
         // positions instead of treating any notification as a scroll:
         // output arriving while the user is parked above the bottom must
         // not cancel the restore.
-        let lastScrollY = term.buffer.active.viewportY;
-        const scrollListener = term.onScroll((y: number) => {
-          if (y !== lastScrollY) viewportMovedDuringSync = true;
-          lastScrollY = y;
-        });
+        let scrollListener: { dispose: () => void } | undefined;
+        if (!isRetained) {
+          scrollListener = term.onScroll((y: number) => {
+            if (y !== tracker.lastScrollY) tracker.moved = true;
+            tracker.lastScrollY = y;
+          });
+        }
         const restoreScroll = () => {
-          scrollListener.dispose();
+          scrollListener?.dispose();
+          if (syncScrollTrackerRef.current === tracker) {
+            syncScrollTrackerRef.current = null;
+          }
           if (term.buffer.active !== restoreBuffer) return;
-          if (viewportMovedDuringSync) return;
+          if (tracker.moved) return;
           if (wasPinnedToBottom) {
             term.scrollToBottom();
           } else {
@@ -3044,8 +3077,13 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         };
         if (!deferScrollRestoreDuringSynchronizedOutput(term, restoreScroll)) {
           // An earlier pending restore owns this terminal and its pre-reflow
-          // target; drop this one along with its scroll listener.
-          scrollListener.dispose();
+          // target; drop this one along with its scroll listener (if any).
+          if (scrollListener) {
+            scrollListener.dispose();
+            if (syncScrollTrackerRef.current === tracker) {
+              syncScrollTrackerRef.current = null;
+            }
+          }
         }
         term.refresh(0, Math.max(0, term.rows - 1));
 
