@@ -8,6 +8,9 @@
 
 const pausedIds = new Set<string>();
 const barriers = new Map<string, { promise: Promise<void>; resolve: () => void }>();
+// A completed child's history row can disappear while its worker still waits
+// for the folder to resume. Keep the paused tree independent of UI history.
+const pausedChildren = new Map<string, Set<string>>();
 
 function ensureBarrier(taskId: string): { promise: Promise<void>; resolve: () => void } {
   let barrier = barriers.get(taskId);
@@ -45,11 +48,18 @@ export function releaseTransferPause(taskId: string): void {
 }
 
 export function releaseTransferPauseTree(rootTaskId: string, childIds: readonly string[] = []): void {
+  const children = new Set([...childIds, ...(pausedChildren.get(rootTaskId) ?? [])]);
+  pausedChildren.delete(rootTaskId);
   releaseTransferPause(rootTaskId);
-  for (const id of childIds) releaseTransferPause(id);
+  for (const id of children) releaseTransferPause(id);
 }
 
 export function latchTransferPauseTree(rootTaskId: string, childIds: readonly string[] = []): void {
+  if (childIds.length > 0) {
+    const children = pausedChildren.get(rootTaskId) ?? new Set<string>();
+    for (const id of childIds) children.add(id);
+    pausedChildren.set(rootTaskId, children);
+  }
   latchTransferPause(rootTaskId);
   for (const id of childIds) latchTransferPause(id);
 }
@@ -77,6 +87,7 @@ export function resetTransferPauseLatchesForTests(): void {
   for (const id of ids) releaseTransferPause(id);
   pausedIds.clear();
   barriers.clear();
+  pausedChildren.clear();
 }
 
 export function listTransferPauseLatchesForTests(): string[] {

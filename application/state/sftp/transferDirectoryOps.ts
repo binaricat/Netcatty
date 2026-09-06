@@ -840,7 +840,9 @@ export function useSftpDirectoryTransferOps({
                   if (row.status === "paused" || row.status === "pausing" || isPauseLatched(rootTaskId)) {
                     return { ...row, speed: 0 };
                   }
-                  return { ...row, transferredBytes: row.transferredBytes + 1 };
+                  const completed = (row.directoryResumeCheckpoint?.completedEntries ?? 0)
+                    + base.filter((child) => child.parentTaskId === rootTaskId && child.status === "completed").length;
+                  return { ...row, transferredBytes: completed };
                 });
               });
               return;
@@ -924,6 +926,12 @@ export function useSftpDirectoryTransferOps({
                 || parentRow.status === "pausing"
                 || isPauseLatched(rootTaskId)
               );
+              // Background completion may have already compacted this child and
+              // advanced the checkpoint. Count retained + compacted completions
+              // instead of incrementing the same file again when invoke settles.
+              const completed = (parentRow?.directoryResumeCheckpoint?.completedEntries ?? 0)
+                + prev.filter((row) => row.parentTaskId === rootTaskId
+                  && (row.status === "completed" || row.id === fileId)).length;
               const updated = prev.map((t) => {
                 if (t.id === fileId) {
                   return { ...t, status: "completed" as TransferStatus, endTime: Date.now(), transferredBytes: t.totalBytes };
@@ -934,7 +942,7 @@ export function useSftpDirectoryTransferOps({
                   }
                   return {
                     ...t,
-                    transferredBytes: t.transferredBytes + 1,
+                    transferredBytes: completed,
                     speed: t.speed,
                   };
                 }

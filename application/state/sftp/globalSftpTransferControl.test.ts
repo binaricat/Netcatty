@@ -500,3 +500,23 @@ for (const newerResume of [false, true]) {
     assert.equal(isTransferPauseLatched(`${id}-child`), !newerResume);
   });
 }
+
+test("folder resume releases a completed child compacted while pause was draining", async (t) => {
+  t.after(resetTransferPauseLatchesForTests);
+  t.after(resetTransferWalkRegistryForTests);
+  const root = { ...makeTask("compacted-pause-root"), isDirectory: true };
+  const child = { ...makeTask("compacted-pause-child"), parentTaskId: root.id };
+  registerTransferWalk(root.id);
+  const { host, getTasks } = createHost([root, child], () => ({
+    pauseTransfer: async () => ({ success: true }),
+    resumeTransfer: async () => ({ success: false, reason: "Transfer is no longer active" }),
+  }));
+  await softPauseTransfer(host, root.id);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(isTransferPauseLatched(child.id), true);
+  // Completion during soft-drain compacts this row before the user resumes.
+  host.setTasks(getTasks().filter((task) => task.id !== child.id));
+  const resumed = await softResumeTransfer(host, root.id);
+  assert.equal(resumed.handled, true);
+  assert.equal(isTransferPauseLatched(child.id), false, "the worker still waits on this child even though its history row is gone");
+});
