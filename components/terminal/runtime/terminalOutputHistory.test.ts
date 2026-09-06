@@ -254,8 +254,27 @@ test("vertical moves do not insert blank transcript rows or expose control strin
   const history = createTerminalOutputHistoryPreview();
   history.append('one\r\n\x1b[2;1Htwo\x1b[1Bthree\x9b4;1Hfour');
   history.append('\x1b]titleH\x07\x1b[999999999Bfive');
-  assert.deepEqual(history.getLines(), ['one', 'two', 'three', 'four', 'five']);
+  assert.deepEqual(history.getLines(), ['one', 'two', '   three', 'four', '    five']);
   history.clear();
   history.append('\x1b[Hnew\x1b[HNEW\x1b[K');
   assert.deepEqual(history.getLines(), ['NEW']);
+});
+
+test("row controls retain requested and inherited terminal columns", () => {
+  const history = createTerminalOutputHistoryPreview();
+  history.append('\x1b[2;10Htext\x1b[1Bnext\x1b[6dlast\x1b[1Eleft');
+  assert.deepEqual(history.getLines(), ['         text', '             next', '                 last', 'left']);
+  history.clear();
+  history.append('\x9b2;3fAB\x1b[2;3HXY');
+  assert.deepEqual(history.getLines(), ['  XY']);
+});
+
+test("positioned output respects wide-cell boundaries and retained size limits", () => {
+  const history = createTerminalOutputHistoryPreview({ maxChars: 64 });
+  history.append('\x1b[2;3H中文\x1b[2;5HX\x1b[K');
+  assert.deepEqual(history.getLines(), ['  中X']);
+  history.clear();
+  history.append('\x1b[2;999999999Hend');
+  assert.ok(history.getLines().join('').length <= 128);
+  assert.ok(history.getLines().join('').endsWith('end'));
 });

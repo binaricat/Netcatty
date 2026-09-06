@@ -355,13 +355,19 @@ export const createTerminalOutputHistoryPreview = (options?: {
           : command === "B" || command === "E"
             ? Math.min(1_000_000, screenRow + amount)
             : amount;
+        const column = command === "H" || command === "f"
+          ? Math.max(0, (Number(params[1]) || 1) - 1)
+          : command === "E" || command === "F" ? 0 : cursorCell;
         if (nextRow !== screenRow && current) commitCurrentLine();
-        // Home on the same row redraws a progress line rather than appending
-        // another copy. Horizontal cursor positioning is otherwise unchanged.
-        if ((command === "H" || command === "f") && (Number(params[1]) || 1) === 1) {
-          cursor = 0;
-          cursorCell = 0;
-        }
+        // CUP/HVP set both coordinates; vertical-only moves keep the column.
+        // Bound padding by the transcript budget even for hostile coordinates.
+        const targetCell = Math.min(maxChars - 1, column);
+        const width = pieceCellWidth(current);
+        if (targetCell > width) current += " ".repeat(targetCell - width);
+        cursor = targetCell === 0 ? 0
+          : isAsciiOnly(current) ? targetCell
+            : sliceStringByCellColumns(current, 0, targetCell).length;
+        cursorCell = targetCell;
         screenRow = nextRow;
         i = end;
         continue;
