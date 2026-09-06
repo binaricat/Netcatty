@@ -39,7 +39,8 @@ const host = (id: string, label: string, hostname = label): Host => ({
   protocol: "ssh",
 } as Host);
 
-test("superseded folder child settles when its completion was compacted into the parent", async (t) => {
+for (const batchExistingIdentity of [false, true]) {
+test(`superseded folder child settles when its completion was compacted into the parent: batched=${batchExistingIdentity}`, async (t) => {
   const { sftpTransferCenterStore } = await import("../sftpTransferCenterStore");
   const previousLocalStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
   Object.defineProperty(globalThis, "localStorage", {
@@ -68,7 +69,20 @@ test("superseded folder child settles when its completion was compacted into the
     else Reflect.deleteProperty(globalThis, "localStorage");
     resetDedicatedSessionOpenGateForTests();
   });
-  sftpTransferCenterStore.publishOwner("compacted-owner", [parent]);
+  const persisted: TransferTask = {
+    ...parent, id: "retained-child", parentTaskId: parent.id, isDirectory: false,
+    sourcePath: "/local/folder/a.bin", targetPath: "/remote/folder/a.bin",
+    totalBytes: 10, sourceLastModified: 1, status: "interrupted",
+    directoryEntryIndex: 0, directoryEntryIdentity: "a".repeat(64),
+  };
+  const { createDedicatedResumeChildUpdateBatcher } = await import("../../app/dedicatedResumeProgress");
+  // Exercise the real large-history batching branch with one relevant retained row.
+  const childBatcher = createDedicatedResumeChildUpdateBatcher({
+    getTaskCount: () => 4096,
+    hasTask: (id) => id === persisted.id,
+    upsertTasks: (updates) => sftpTransferCenterStore.upsertTasks(updates),
+  });
+  sftpTransferCenterStore.publishOwner("compacted-owner", [parent, ...(batchExistingIdentity ? [persisted] : [])]);
   (netcattyBridge as { get: () => unknown }).get = () => ({
     openSftp: async () => "dedicated-sftp", closeSftp: async () => {},
     listLocalTree: async () => [{
@@ -76,8 +90,17 @@ test("superseded folder child settles when its completion was compacted into the
     }],
     mkdirSftp: async () => {},
     statLocal: async () => ({ size: 10, lastModified: 1 }),
-    startStreamTransfer: async (options: { transferId: string }) => {
+    startStreamTransfer: async (options: {
+      transferId: string; parentTaskId?: string; directoryEntryIndex?: number; directoryEntryIdentity?: string;
+    }) => {
       childId = options.transferId;
+      // Main-process lifecycle events carry the stream's metadata, not queued UI updates.
+      sftpTransferCenterStore.ingestBackgroundEvent({
+        type: "started", transferId: childId, lifecycleEpoch: 0,
+        parentTaskId: options.parentTaskId,
+        directoryEntryIndex: options.directoryEntryIndex,
+        directoryEntryIdentity: options.directoryEntryIdentity,
+      });
       // A newer same-id owner completes before this older invocation rejoins.
       sftpTransferCenterStore.ingestBackgroundEvent({
         type: "completed", transferId: childId, transferred: 10, totalBytes: 10, lifecycleEpoch: 0,
@@ -88,8 +111,10 @@ test("superseded folder child settles when its completion was compacted into the
   running = resumeTransferWithDedicatedSession(parent, {
     hosts: [host("h1", "box", "1.2.3.4")], keys: [], identities: [],
   }, undefined, {
-    children: [], shouldAbort: () => abort,
-    onChildUpdate: (child) => sftpTransferCenterStore.publishOwner("compacted-owner", [parent, child]),
+    children: batchExistingIdentity ? [persisted] : [], shouldAbort: () => abort,
+    onChildUpdate: (child) => batchExistingIdentity
+      ? childBatcher.push(child)
+      : sftpTransferCenterStore.publishOwner("compacted-owner", [parent, child]),
   });
   const result = await Promise.race([
     running,
@@ -101,6 +126,7 @@ test("superseded folder child settles when its completion was compacted into the
   assert.notEqual(result, "still-waiting", "completed compacted child must not leave its folder waiting forever");
   assert.equal((result as { success: boolean }).success, true);
 });
+}
 
 test("resolveDirectoryResumeTargetRoot prefers staged replace path", () => {
   assert.equal(

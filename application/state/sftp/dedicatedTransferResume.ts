@@ -1250,6 +1250,11 @@ async function resumeDirectoryWithDedicatedSession(
 
               const streamResult = await runTransferAndWaitForOwner(childBase, () => bridge.startStreamTransfer!({
                 transferId: childId,
+                // Lifecycle events must carry the current identity even while
+                // large-history renderer child updates remain batched.
+                parentTaskId: childBase.parentTaskId,
+                directoryEntryIndex: childBase.directoryEntryIndex,
+                directoryEntryIdentity: childBase.directoryEntryIdentity,
                 sourcePath: file.sourcePath,
                 targetPath: file.targetPath,
                 sourceType,
