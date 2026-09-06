@@ -4,6 +4,8 @@ import {
 } from "../../terminal/autocomplete/terminalStringCellWidth";
 import type { HistoryPreviewRow } from "./terminalHistoryScrollOverride";
 
+const outputGraphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+
 /**
  * Plain-text transcript of what a session printed, used as the alternate-screen
  * history preview data source (#2516).
@@ -424,9 +426,11 @@ export const createTerminalOutputHistoryPreview = (options?: {
               // and places it on the following row.
               wrapCursor();
             } else {
-              // DECAWM disabled: the glyph overwrites the trailing columns
-              // instead of wrapping to the next row.
-              fitting = piece;
+              // Match xterm: a wide glyph that cannot fit with DECAWM off is
+              // discarded. Consume the entire grapheme so this loop advances
+              // and later narrow characters can still overwrite the last cell.
+              const first = outputGraphemeSegmenter.segment(piece)[Symbol.iterator]().next().value;
+              offset += first?.segment.length ?? piece.length;
             }
             continue;
           }

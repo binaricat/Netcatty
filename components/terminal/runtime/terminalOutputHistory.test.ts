@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { spawnSync } from "node:child_process";
 
 import {
   DEFAULT_OUTPUT_HISTORY_MAX_LINES,
@@ -452,4 +453,27 @@ test("origin mode resolves absolute rows against the scroll region", () => {
   history.setViewportRows(24);
   history.append("\x1b[5;20r\x1b[?6h\x1b[?6l\x1b[5;1Habsolute");
   assert.deepEqual(history.getLines(), ["absolute"]);
+});
+
+test("non-wrapping wide glyph at the right edge cannot block terminal capture", () => {
+  const moduleUrl = new URL("./terminalOutputHistory.ts", import.meta.url).href;
+  const script = `
+    import { createTerminalOutputHistoryPreview } from ${JSON.stringify(moduleUrl)};
+    const results = [];
+    for (const glyph of ["中", "👩‍💻", "界界"]) {
+      const history = createTerminalOutputHistoryPreview();
+      history.setViewportRows(24);
+      history.setViewportCols(5);
+      history.append(String.fromCharCode(27) + "[?7labcd" + glyph + "Z");
+      results.push(history.getLines());
+    }
+    console.log(JSON.stringify(results));
+  `;
+  const result = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script], {
+    encoding: "utf8",
+    timeout: 5000,
+  });
+  assert.equal(result.error, undefined, String(result.error));
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), [["abcdZ"], ["abcdZ"], ["abcdZ"]]);
 });
