@@ -145,3 +145,57 @@ test('completed auto-unlock does not undo a later deliberate lock', async () => 
     assert.equal(calls, 2, 'a genuinely replaced key can still initialize automatically');
   } finally { await renderer.unmount(); dom.cleanup(); }
 });
+
+for (const strict of [false, true]) {
+  test(`remount reads a password shared while no consumer was mounted (StrictMode=${strict})`, async () => {
+    const dom = installDomEnvironment();
+    const renderer = await createDomRenderer(dom.document);
+    let password: string | null = null;
+    let reads = 0;
+    const unlocked: string[] = [];
+    const manager = { unlock: async (value: string) => { unlocked.push(value); return true; } };
+    const bridge = { cloudSyncGetSessionPassword: async () => { reads++; return password; } };
+    function Consumer() {
+      useCloudSyncAutoUnlock({ securityState: 'LOCKED', masterKeyIdentity: 'remount-key', manager, bridge });
+      return null;
+    }
+    const tree = () => React.createElement(strict ? React.StrictMode : React.Fragment, null, React.createElement(Consumer));
+    try {
+      await renderer.render(tree());
+      await flushEffects();
+      assert.ok(reads > 0);
+      assert.deepEqual(unlocked, []);
+      await renderer.render(null);
+      await flushEffects();
+      password = 'fixture-shared-while-absent';
+      await renderer.render(tree());
+      await flushEffects();
+      assert.deepEqual(unlocked, ['fixture-shared-while-absent']);
+    } finally { await renderer.unmount(); dom.cleanup(); }
+  });
+}
+
+test('remount during an active derivation does not start a duplicate unlock', async () => {
+  const dom = installDomEnvironment();
+  const renderer = await createDomRenderer(dom.document);
+  let finish!: (value: boolean) => void;
+  let unlocks = 0;
+  const manager = { unlock: () => { unlocks++; return new Promise<boolean>(resolve => { finish = resolve; }); } };
+  const bridge = { cloudSyncGetSessionPassword: async () => 'fixture-only' };
+  function Consumer() {
+    useCloudSyncAutoUnlock({ securityState: 'LOCKED', masterKeyIdentity: 'active-key', manager, bridge });
+    return null;
+  }
+  try {
+    await renderer.render(React.createElement(Consumer));
+    await flushEffects();
+    assert.equal(unlocks, 1);
+    await renderer.render(null);
+    await renderer.render(React.createElement(Consumer));
+    await flushEffects();
+    assert.equal(unlocks, 1);
+    await runWithAct(async () => finish(true));
+    await flushEffects();
+    assert.equal(unlocks, 1);
+  } finally { await renderer.unmount(); dom.cleanup(); }
+});

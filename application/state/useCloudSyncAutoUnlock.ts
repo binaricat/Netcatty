@@ -15,6 +15,7 @@ const unlockedIdentityByManager = new WeakMap<AutoUnlockManager, string>();
 // same manager observes the same events, and without sharing they would each
 // run the expensive PBKDF2 derivation inside manager.unlock.
 const attemptedAttemptByManager = new WeakMap<AutoUnlockManager, string | null>();
+const completedAttemptByManager = new WeakMap<AutoUnlockManager, string>();
 // Mounted consumers register a retry trigger here so an attempt can be handed
 // off when its owner unmounts (see the cleanup below).
 const retryListenersByManager = new WeakMap<AutoUnlockManager, Set<() => void>>();
@@ -54,10 +55,19 @@ export function useCloudSyncAutoUnlock(input: {
     }
     const notifyRetry = () => setPasswordRevision(value => value + 1);
     listeners.add(notifyRetry);
+    const removeListener = () => {
+      listeners.delete(notifyRetry);
+      if (listeners.size === 0 && completedAttemptByManager.get(manager) === attemptedAttemptByManager.get(manager)) {
+        attemptedAttemptByManager.delete(manager);
+        completedAttemptByManager.delete(manager);
+      }
+    };
     if (attemptedAttemptByManager.get(manager) === attempt) {
-      return () => listeners.delete(notifyRetry);
+      return removeListener;
     }
     attemptedAttemptByManager.set(manager, attempt);
+    completedAttemptByManager.delete(manager);
+    let handedOff = false;
     let cancelled = false;
     let awaitingPassword = true;
     void (async () => {
@@ -74,13 +84,24 @@ export function useCloudSyncAutoUnlock(input: {
         await manager.unlock(password);
       } catch {
         // Explicit sync actions surface errors; keep auto-unlock silent.
+      } finally {
+        if (!handedOff && attemptedAttemptByManager.get(manager) === attempt) {
+          completedAttemptByManager.set(manager, attempt);
+          // Availability events can arrive while no consumer is mounted.
+          // A future mount must read again after this attempt has settled.
+          if (listeners.size === 0) {
+            attemptedAttemptByManager.delete(manager);
+            completedAttemptByManager.delete(manager);
+          }
+        }
       }
     })();
     return () => {
       cancelled = true;
-      listeners.delete(notifyRetry);
+      removeListener();
       // React StrictMode can immediately remount the same effect.
       if (awaitingPassword && attemptedAttemptByManager.get(manager) === attempt) {
+        handedOff = true;
         attemptedAttemptByManager.set(manager, null);
         // Hand the attempt off: this consumer's in-flight password request is
         // discarded as cancelled, but other mounted consumers already returned
