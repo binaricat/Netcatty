@@ -33,6 +33,36 @@ const MAX_SSH_CONNECTION_TIMEOUT_MS = 3600000;
 const COPY_TAB_RATE_LIMIT_RETRY_TIMEOUT_MS = 30000;
 
 /**
+ * In-flight headless "test connection" transports, keyed by sessionId. A test
+ * connection never enters the terminal `sessions` registry (it opens no shell),
+ * so a dedicated registry is needed so the renderer can cancel an in-flight
+ * dial. Entries are removed when the connection closes.
+ */
+const testConnectionTransports = new Map();
+
+function registerTestConnectionTransport(sessionId, transport) {
+  testConnectionTransports.set(sessionId, transport);
+}
+
+function unregisterTestConnectionTransport(sessionId) {
+  testConnectionTransports.delete(sessionId);
+}
+
+function cancelTestConnection(sessionId) {
+  const transport = testConnectionTransports.get(sessionId);
+  if (!transport) return { success: false, error: "Test connection not found" };
+  const end = (item) => {
+    try { item?.end?.(); } catch { /* ignore */ }
+    try { item?.destroy?.(); } catch { /* ignore */ }
+  };
+  for (const chain of transport.chainConnections || []) end(chain);
+  end(transport.pendingConn);
+  end(transport.socket);
+  end(transport.conn);
+  return { success: true };
+}
+
+/**
  * Fan out netcatty:exit to the primary contents plus any attach-home owner
  * (AI observe popup rebind) so neither side is left stale.
  */
@@ -191,6 +221,31 @@ async function prepareAgentForwardingOptions(options, resolveForwardingAgentSock
     _resolvedForwardingAgentSocket: forwardingAgent || null,
     forwardingAgentSocket: forwardingAgent || "",
   };
+}
+
+/**
+ * Emit the one-shot outcome for a headless "test connection" attempt.
+ *
+ * A connection test authenticates (and, for Telnet, completes auto-login)
+ * and then tears down without ever opening a shell channel. There is no
+ * persistent terminal session to carry progress, so success/failure is
+ * reported through a dedicated `netcatty:test:result` event consumed by the
+ * host-editor test dialog. The same `netcatty:chain:progress`,
+ * `netcatty:host-key:verify`, `netcatty:keyboard-interactive`, and
+ * `netcatty:passphrase-auth-failed` channels keep flowing unchanged so the
+ * dialog reuses the terminal's progress/log/auth/host-key UI verbatim.
+ */
+function sendConnectionTestResult(sender, sessionId, ok, error) {
+  if (!sender || sender.isDestroyed?.()) return;
+  try {
+    sender.send("netcatty:test:result", {
+      sessionId,
+      ok: Boolean(ok),
+      ...(error ? { error: String(error) } : {}),
+    });
+  } catch {
+    // Renderer was destroyed mid-send; nothing to do.
+  }
 }
 
 function createStartSessionApi(ctx) {
@@ -1205,6 +1260,7 @@ function createStartSessionApi(ctx) {
 
     async function startSSHSession(event, options) {
       const sessionId = options.sessionId || randomUUID();
+      const testMode = options.testMode === true;
       const sender = event.sender;
       const log = createSshDiagnosticLogger(
         !!options.sshDebugLogEnabled || process.env.NETCATTY_SSH_DEBUG === "1",
@@ -1419,6 +1475,16 @@ function createStartSessionApi(ctx) {
         const conn = new SSHClient();
         let chainConnections = [];
         let connectionSocket = null;
+
+        // Register the test transport BEFORE the chain/proxy dial so an
+        // in-flight bastion/proxy attempt can be cancelled. `connectThroughChain`
+        // updates `pendingConn` and `chainConnections` via `options._tunnelRef`
+        // as each hop/proxy socket is established.
+        let testTransport = null;
+        if (testMode) {
+          testTransport = { conn, socket: null, pendingConn: null, chainConnections };
+          registerTestConnectionTransport(sessionId, testTransport);
+        }
 
         // Determine if we have jump hosts
         const jumpHosts = options.jumpHosts || [];
@@ -2085,6 +2151,10 @@ function createStartSessionApi(ctx) {
           // Pass fetched keys to chain connection to avoid re-reading files
           options._defaultKeys = discoveredDefaultKeys;
           options._sshDiagnosticLogger = log;
+          if (testTransport) {
+            options._tunnelRef = testTransport;
+            options._connectionsRef = testTransport.chainConnections;
+          }
 
           const chainResult = await connectThroughChain(
             event,
@@ -2108,11 +2178,20 @@ function createStartSessionApi(ctx) {
             options.proxy,
             options.hostname,
             options.port || 22,
-            { timeoutMs: tcpConnectTimeoutMs }
+            {
+              timeoutMs: tcpConnectTimeoutMs,
+              ...(testTransport
+                ? { onSocket: (socket) => { testTransport.pendingConn = socket; } }
+                : {}),
+            }
           );
           connectOpts.sock = connectionSocket;
           delete connectOpts.host;
           delete connectOpts.port;
+          if (testTransport) {
+            testTransport.socket = connectionSocket;
+            testTransport.pendingConn = null;
+          }
         } else {
           // Direct connection (no jump hosts, no proxy)
           sendProgress(1, 1, options.hostname, 'connecting');
@@ -2216,6 +2295,23 @@ function createStartSessionApi(ctx) {
             }
 
             sendProgress(totalHops, totalHops, options.hostname, 'authenticated');
+
+            if (testMode) {
+              // Headless connection test: authentication succeeded. Report the
+              // outcome and tear down without opening a shell channel. The
+              // auth-method cache write above is intentionally kept so a
+              // successful test warms the same cache a real connection uses.
+              clearAuthReadyTimer();
+              sendConnectionTestResult(sender, sessionId, true);
+              settled = true;
+              try { conn.end(); } catch { /* ignore */ }
+              for (const c of chainConnections) {
+                try { c.end(); } catch { /* ignore */ }
+              }
+              resolve({ sessionId, testResult: "connected" });
+              return;
+            }
+
             sendProgress(totalHops, totalHops, options.hostname, 'shell');
 
             let establishedOwnerSession = null;
@@ -2432,6 +2528,9 @@ function createStartSessionApi(ctx) {
             // Destroy the connection to prevent further socket errors from leaking
             // as uncaught exceptions (e.g. ECONNRESET on embedded devices).
             try { conn.destroy(); } catch { }
+            if (testMode) {
+              sendConnectionTestResult(sender, sessionId, false, visibleError);
+            }
             settled = true;
             reject(err);
           });
@@ -2460,12 +2559,16 @@ function createStartSessionApi(ctx) {
             sessionDecoders.delete(sessionId);
             teardownTransport();
             try { conn.destroy(); } catch { }
+            if (testMode) {
+              sendConnectionTestResult(sender, sessionId, false, err.message);
+            }
             settled = true;
             reject(err);
           });
 
           conn.once("close", () => {
             clearAuthReadyTimer();
+            unregisterTestConnectionTransport(sessionId);
             const contents = event.sender;
             const currentSession = sessions.get(sessionId);
             const ownsCurrentSession = Boolean(connRef && currentSession?.connRef === connRef);
@@ -2528,6 +2631,14 @@ function createStartSessionApi(ctx) {
               }
             }
             if (!settled) {
+              if (testMode) {
+                sendConnectionTestResult(
+                  sender,
+                  sessionId,
+                  false,
+                  `Connection to ${options.hostname} closed unexpectedly`,
+                );
+              }
               settled = true;
               reject(new Error(`Connection to ${options.hostname} closed unexpectedly`));
             }
@@ -2544,7 +2655,11 @@ function createStartSessionApi(ctx) {
             hostname: options.hostname,
             password: options.password,
             logPrefix,
-            scope: "terminal",
+            // A test has no terminal session registered in the renderer's
+            // session list, so the terminal-scoped keyboard-interactive queue
+            // would auto-reject the prompt. Use the external scope so the
+            // host-editor test dialog can still render password/2FA prompts.
+            scope: testMode ? "external" : "terminal",
             bootEpoch: options.bootEpoch,
             getAuthBanner: () => authBanner,
             shouldSkipAutoFill: () => shouldSkipKiPasswordAutoFill(authPhase),
@@ -2596,6 +2711,30 @@ function createStartSessionApi(ctx) {
           }
           // If authHandler is a function, it already handles keyboard-interactive
 
+          if (testMode) {
+            // A connection test exercises the single configured credential,
+            // skipping the full agent / ~/.ssh key / method fallback chain.
+            // Password credentials still allow keyboard-interactive after
+            // "password" so PAM/2FA hosts (which reject the raw "password"
+            // method) are covered without re-prompting the user.
+            const order = [];
+            if (connectOpts.privateKey) {
+              order.push("publickey");
+            } else if (connectOpts.agent) {
+              order.push("agent");
+            }
+            if (connectOpts.password) {
+              if (options.requiresMfa) {
+                order.push("keyboard-interactive");
+              } else {
+                order.push("password");
+                order.push("keyboard-interactive");
+              }
+            }
+            if (order.length === 0) order.push("keyboard-interactive");
+            connectOpts.authHandler = order;
+          }
+
           console.log(`${logPrefix} Connecting to ${options.hostname}...`);
           log("connect options prepared", {
             sessionId,
@@ -2616,6 +2755,8 @@ function createStartSessionApi(ctx) {
               : undefined,
           });
           conn.connect(connectOpts);
+          // The test transport was already registered before the dial; nothing
+          // to re-register here.
         }).catch((err) => {
           if (pendingDialCoordination && !options._deferPendingDialFailure) {
             failTransportDial(pendingDialCoordination, err);
@@ -2638,6 +2779,10 @@ function createStartSessionApi(ctx) {
             { sessionId, exitCode: 1, error: userVisibleSshErrorMessage(err, options) },
           );
         }
+        if (testMode) {
+          unregisterTestConnectionTransport(sessionId);
+          sendConnectionTestResult(sender, sessionId, false, userVisibleSshErrorMessage(err, options));
+        }
         throw err;
       }
     }
@@ -2656,4 +2801,6 @@ module.exports = {
   shouldPromoteCachedAuthMethod,
   applyAgentForwarding,
   prepareAgentForwardingOptions,
+  sendConnectionTestResult,
+  cancelTestConnection,
 };

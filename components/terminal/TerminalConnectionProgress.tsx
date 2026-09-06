@@ -21,6 +21,7 @@ export interface TerminalConnectionProgressProps {
     onCloseSession: () => void;
     onRetry?: () => void;
     reconnectLabel?: string;
+    closeLabel?: string;
 }
 
 export interface TerminalConnectionLogListProps {
@@ -65,6 +66,7 @@ export const TerminalConnectionProgress: React.FC<TerminalConnectionProgressProp
     onCloseSession,
     onRetry,
     reconnectLabel,
+    closeLabel,
 }) => {
     const { t } = useI18n();
 
@@ -79,6 +81,13 @@ export const TerminalConnectionProgress: React.FC<TerminalConnectionProgressProp
                                 {isAwaitingUserInput
                                     ? t('terminal.progress.waitingForUserInput')
                                     : t('terminal.progress.timeoutIn', { seconds: timeLeft })}
+                            </span>
+                        </>
+                    ) : status === 'connected' ? (
+                        <>
+                            <div className="mt-[0.4rem] h-1.5 w-1.5 flex-shrink-0 rounded-full bg-emerald-500" />
+                            <span className="min-w-0 whitespace-pre-wrap break-words leading-5 text-emerald-500">
+                                {t('terminal.progress.connected')}
                             </span>
                         </>
                     ) : (
@@ -105,7 +114,7 @@ export const TerminalConnectionProgress: React.FC<TerminalConnectionProgressProp
                     )}
                     <div className="ml-auto flex shrink-0 justify-end gap-2">
                         <Button variant="ghost" size="sm" className="h-7 px-3 text-[11px]" onClick={onCloseSession}>
-                            {t('terminal.toolbar.closeSession')}
+                            {closeLabel ?? t('terminal.toolbar.closeSession')}
                         </Button>
                         {onRetry && (
                             <Button size="sm" className="h-7 px-3 text-[11px]" onClick={onRetry}>

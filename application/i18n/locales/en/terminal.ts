@@ -186,6 +186,7 @@ export const enTerminalMessages: Messages = {
   'terminal.progress.timeoutIn': 'Timeout in {seconds}s',
   'terminal.progress.waitingForUserInput': 'Waiting for user input',
   'terminal.progress.disconnected': 'Disconnected',
+  'terminal.progress.connected': 'Connected',
   'terminal.progress.cancelling': 'Cancelling...',
   'terminal.progress.startOver': 'Start over',
   'terminal.progress.enterReconnectHint': 'Press Enter to reconnect',

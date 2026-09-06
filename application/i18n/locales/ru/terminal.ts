@@ -207,6 +207,7 @@ export const ruTerminalMessages: Messages = {
   'terminal.progress.timeoutIn': 'Тайм-аут через {seconds}с',
   'terminal.progress.waitingForUserInput': 'Ожидание ввода пользователя',
   'terminal.progress.disconnected': 'Отключено',
+  'terminal.progress.connected': 'Подключено',
   'terminal.progress.cancelling': 'Отмена...',
   'terminal.progress.startOver': 'Начать заново',
   'terminal.progress.enterReconnectHint': 'Нажмите Enter, чтобы подключиться снова',
