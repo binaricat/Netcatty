@@ -832,13 +832,22 @@ export const createTerminalOutputHistoryPreview = (options?: {
                 viewportCols > 0 ? viewportCols - 1 : cursorCell,
               );
             if (text[i + 1] === "M") {
-              // RI: up one row, clamped at the top margin (the region scroll
-              // xterm performs at its top is not modeled).
+              // RI: up one row, clamped at the top margin. RI issued while
+              // the cursor already sits at that margin makes xterm scroll
+              // the region down instead of moving: a blank row opens at the
+              // margin and the open row's text slides below it, so commit
+              // the open row (the transcript keeps it) rather than letting
+              // later output overwrite it in place.
               const topLimit = screenRow >= scrollTopMargin
                 ? Math.min(scrollTopMargin, screenBottom)
                 : 1;
               const nextRow = Math.max(topLimit, screenRow - 1);
-              if (nextRow !== screenRow && current) commitCurrentLine();
+              const scrollsAtMargin = nextRow === screenRow
+                && screenRow >= scrollTopMargin
+                && screenRow <= scrollBottomMargin;
+              if ((nextRow !== screenRow || scrollsAtMargin) && current) {
+                commitCurrentLine();
+              }
               screenRow = nextRow;
             } else {
               // IND / NEL: down one row, clamped like LF at the scroll

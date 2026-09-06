@@ -380,6 +380,9 @@ test("NEL and IND advance the row; RI moves back up", () => {
   history.clear();
   history.append('\x1b[r\x1b[3;1Hfoo\x1bMbar');
   assert.deepEqual(history.getLines(), ['foo', '   bar']);
+  history.clear();
+  history.append('\x1b[2;3r\x1b[2;1Hfoo\x1bMbar');
+  assert.deepEqual(history.getLines(), ['foo', '   bar']);
 });
 
 
