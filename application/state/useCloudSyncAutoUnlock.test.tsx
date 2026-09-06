@@ -32,6 +32,54 @@ for (const strict of [false, true]) {
   });
 }
 
+for (const strict of [false, true]) {
+  test(`a failed attempt during key rotation keeps the password for the arriving config (StrictMode=${strict})`, async () => {
+    const dom = installDomEnvironment();
+    const renderer = await createDomRenderer(dom.document);
+    let password: string | null = null;
+    let cleared = 0;
+    let currentIdentity = 'old-key';
+    const listeners = new Set<() => void>();
+    const unlocked: Array<[string, string]> = [];
+    const manager = {
+      unlock: async (value: string) => {
+        unlocked.push([currentIdentity, value]);
+        return currentIdentity === 'new-key';
+      },
+    };
+    const bridge = {
+      cloudSyncGetSessionPassword: async () => password,
+      cloudSyncClearSessionPassword: async () => { cleared++; return true; },
+      onCloudSyncSessionPasswordAvailable: (cb: () => void) => { listeners.add(cb); return () => { listeners.delete(cb); }; },
+    };
+    function Harness() {
+      useCloudSyncAutoUnlock({ securityState: 'LOCKED', masterKeyIdentity: currentIdentity, manager, bridge });
+      return null;
+    }
+    try {
+      await renderer.render(strict ? React.createElement(React.StrictMode, null, React.createElement(Harness)) : React.createElement(Harness));
+      await flushEffects();
+      // The password notification overtakes the config event: the peer is
+      // still locked on the old config when the new password arrives.
+      await runWithAct(async () => { password = 'rotation-password'; for (const cb of listeners) cb(); });
+      await flushEffects();
+      assert.deepEqual(unlocked, [['old-key', 'rotation-password']], 'the new password was tried against the old config');
+      assert.equal(cleared, 0, 'the failed attempt must not clear the shared password');
+      // The config event arrives afterwards; the retained password must
+      // still be available to auto-unlock the rotated key.
+      currentIdentity = 'new-key';
+      await renderer.render(strict ? React.createElement(React.StrictMode, null, React.createElement(Harness)) : React.createElement(Harness));
+      await flushEffects();
+      assert.deepEqual(unlocked, [
+        ['old-key', 'rotation-password'],
+        ['new-key', 'rotation-password'],
+      ]);
+      assert.equal(cleared, 0);
+    } finally { await renderer.unmount(); dom.cleanup(); }
+    assert.equal(listeners.size, 0);
+  });
+}
+
 test('completed auto-unlock does not undo a later deliberate lock', async () => {
   const dom = installDomEnvironment();
   const renderer = await createDomRenderer(dom.document);

@@ -5,7 +5,6 @@ interface AutoUnlockManager {
 }
 interface AutoUnlockBridge {
   cloudSyncGetSessionPassword?(): Promise<string | null>;
-  cloudSyncClearSessionPassword?(): Promise<boolean>;
   onCloudSyncSessionPasswordAvailable?(callback: () => void): () => void;
 }
 
@@ -49,10 +48,13 @@ export function useCloudSyncAutoUnlock(input: {
         const password = await bridge?.cloudSyncGetSessionPassword?.();
         awaitingPassword = false;
         if (cancelled || !password) return;
-        const ok = await manager.unlock(password);
-        if (!cancelled && !ok) {
-          await bridge?.cloudSyncClearSessionPassword?.();
-        }
+        // A failed attempt must not clear the shared password: the config and
+        // the password travel over unordered channels (localStorage vs IPC),
+        // so this attempt may have raced a master-key rotation and the
+        // password may match the config that is still in flight. The attempt
+        // is deduped per [identity, revision], so keeping the password lets
+        // the arriving config trigger a retry instead of stranding the vault.
+        await manager.unlock(password);
       } catch {
         // Explicit sync actions surface errors; keep auto-unlock silent.
       }
