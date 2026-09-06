@@ -759,3 +759,21 @@ test("a width-only resize resets the tracked scroll margins", () => {
   history.append("\x1b[20;1HX\x1b[BY");
   assert.deepEqual(history.getLines(), ["row20content", "X", " Y"]);
 });
+
+
+test("preview reflow retains leading, consecutive and trailing blank hard lines", () => {
+  const history = createTerminalOutputHistoryPreview();
+  history.setViewportCols(5);
+  history.append("\nabcdef\n\n\nend\n\n");
+  assert.deepEqual([...history.getLines()], ["", "abcde", "f", "", "", "end", ""]);
+  const preview = history.getPreviewRows({ cols: 10, rows: 6, top: 0 });
+  assert.equal(preview.totalRows, 6);
+  assert.deepEqual(preview.rows.map((row) => row.text), ["", "abcdef", "", "", "end", ""]);
+});
+
+test("blank-only history remains distinct from empty history", () => {
+  const history = createTerminalOutputHistoryPreview();
+  assert.equal(history.getPreviewRowCount(10), 0);
+  history.append("\n\n");
+  assert.equal(history.getPreviewRowCount(10), 2);
+});

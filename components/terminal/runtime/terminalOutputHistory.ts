@@ -316,6 +316,7 @@ const buildPreviewRows = (
   // a widened preview, unlike xterm's single row after its resize reflow.
   let pending = "";
   let pendingStartsWrapped = false;
+  let hasPending = false;
   const flush = () => {
     const wrapped = wrapOutputHistoryLineToRows(pending, cols, term);
     for (let row = 0; row < wrapped.length; row += 1) {
@@ -329,15 +330,16 @@ const buildPreviewRows = (
   };
   for (let index = 0; index < lines.length; index += 1) {
     const startsWrapped = lineStartsWrapped[index] ?? false;
-    if (startsWrapped && pending) {
+    if (startsWrapped && hasPending) {
       pending += lines[index];
     } else {
-      if (pending) flush();
+      if (hasPending) flush();
+      hasPending = true;
       pending = lines[index];
       pendingStartsWrapped = startsWrapped;
     }
   }
-  if (pending) flush();
+  if (hasPending) flush();
   return rows;
 };
 
