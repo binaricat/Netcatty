@@ -89,6 +89,10 @@ const escapeIntroducerLength = (input: string, start: number): number => {
 
 /** Marks an erase-in-line the transcript must apply (kept in stripper output). */
 const ERASE_TO_END_OF_LINE = "\x1f";
+/** Marks `CSI 1 K` (erase from the line start through the cursor, inclusive). */
+const ERASE_START_TO_CURSOR = "\x1e";
+/** Marks `CSI 2 K` (erase the whole line). */
+const ERASE_WHOLE_LINE = "\x1d";
 
 /**
  * Marks a control sequence the stripper removed. xterm's grapheme provider
@@ -103,14 +107,16 @@ const CONTROL_BOUNDARY = "\x06";
 /**
  * The erase-in-line sequences progress lines use (`\r` + text + `\x1b[K`) must
  * be applied to the transcript, or the stale suffix of a shorter redraw shows
- * up as text. Returns the marker for the variants the transcript can apply.
+ * up as text. Returns the marker for the erase mode: every variant (default/0,
+ * 1, 2) has a transcript equivalent, applied by the writer against its tracked
+ * cursor.
  */
 const eraseInLineMarkerFor = (input: string, start: number, end: number): string | null => {
   if (input[end - 1] !== "K") return null;
   const introducerLength = escapeIntroducerLength(input, start);
   const mode = input.slice(start + introducerLength, end - 1).split(";")[0];
-  // Erase from start to cursor (1) has no transcript equivalent; skip it.
-  if (mode === "1") return null;
+  if (mode === "1") return ERASE_START_TO_CURSOR;
+  if (mode === "2") return ERASE_WHOLE_LINE;
   return ERASE_TO_END_OF_LINE;
 };
 
@@ -1010,6 +1016,31 @@ export const createTerminalOutputHistoryPreview = (options?: {
         i += 1;
         continue;
       }
+      if (ch === ERASE_START_TO_CURSOR) {
+        // Erase from the line start through the cursor, inclusive: blank the
+        // intersected cells and keep the untouched suffix at its columns, the
+        // way xterm fills the erased cells with blanks. The cursor stays put.
+        openGrapheme = null;
+        const throughCursor = Math.min(cursorCell + 1, currentCellWidth);
+        if (throughCursor > 0) {
+          const suffix = sliceStringByCellColumns(current, throughCursor, undefined, widthTerm);
+          current = " ".repeat(throughCursor) + suffix;
+          cursor = isAsciiOnly(current) ? cursorCell
+            : sliceStringByCellColumns(current, 0, cursorCell, widthTerm).length;
+        }
+        i += 1;
+        continue;
+      }
+      if (ch === ERASE_WHOLE_LINE) {
+        // Erase the whole line: the transcript keeps the cursor's column, so a
+        // later write re-pads the gap the way xterm renders the blanked cells.
+        current = "";
+        cursor = 0;
+        openGrapheme = null;
+        currentCellWidth = 0;
+        i += 1;
+        continue;
+      }
       if (ch === "\t") {
         // Expand to the next 8-column tab stop so row widths match how the
         // preview overlay renders the text; a literal tab renders at the tab
@@ -1029,6 +1060,8 @@ export const createTerminalOutputHistoryPreview = (options?: {
         && text[end] !== ESC
         && text[end] !== C1_CSI
         && text[end] !== ERASE_TO_END_OF_LINE
+        && text[end] !== ERASE_START_TO_CURSOR
+        && text[end] !== ERASE_WHOLE_LINE
         && text[end] !== CONTROL_BOUNDARY
       ) {
         end += 1;
