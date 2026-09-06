@@ -301,3 +301,23 @@ test("positioned overwrites replace whole graphemes and preserve cell spacing", 
   history.append('AéB\x1b[1;2HX');
   assert.deepEqual(history.getLines(), ['AXB']);
 });
+
+test("cursor-row moves clamp to the reported terminal viewport", () => {
+  const history = createTerminalOutputHistoryPreview();
+  history.setViewportRows(24);
+  // Bottom-row address + a down move past the viewport: the terminal keeps
+  // the cursor on row 24, so the status redraw must not split history lines.
+  history.append("\x1b[24;1Hstatus\x1b[1BNEW");
+  assert.deepEqual(history.getLines(), ["statusNEW"]);
+  history.clear();
+  // Absolute rows beyond the viewport clamp to the bottom row too: the redraw
+  // overwrites the bottom row in place instead of adding a history line.
+  history.append("\x1b[24;1Hrow24\x1b[999;1Hredraw");
+  assert.deepEqual(history.getLines(), ["redraw"]);
+  history.clear();
+  // Without a reported viewport the legacy behavior applies (columns are
+  // retained across row moves).
+  const unclamped = createTerminalOutputHistoryPreview();
+  unclamped.append("\x1b[24;1Hstatus\x1b[1BNEW");
+  assert.deepEqual(unclamped.getLines(), ["status", "      NEW"]);
+});

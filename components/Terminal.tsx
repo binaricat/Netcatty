@@ -638,6 +638,12 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const fontWeightFixupDoneRef = useRef(false);
 
   const captureTerminalLogData = useCallback((data: string) => {
+    // Keep the history tracker's viewport row count current so cursor-row
+    // moves are clamped to the bottom row exactly like the terminal does.
+    const captureTerm = termRef.current;
+    if (captureTerm) {
+      terminalOutputHistoryRef.current.setViewportRows(captureTerm.rows);
+    }
     const readableCommandData = commandLogRewriterRef.current.append(data);
     // The alternate-screen preview reads the raw display stream (before the
     // replay sanitizer, which drops alternate-screen output on purpose) but

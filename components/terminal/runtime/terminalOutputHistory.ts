@@ -285,6 +285,13 @@ export interface TerminalOutputHistoryPreview {
   /** Viewport rows the retained transcript wraps to at `cols` columns. */
   getPreviewRowCount(cols: number): number;
   getPreviewRows(params: { cols: number; rows: number; top: number }): OutputHistoryPreviewWindow;
+  /**
+   * Report the live terminal's viewport row count so cursor-row moves are
+   * clamped the way the terminal clamps them: `CSI n B`/`E` and absolute
+   * positions past the bottom row stay on it instead of registering as
+   * historical row transitions. Unset (0) keeps the unclamped behavior.
+   */
+  setViewportRows(rows: number): void;
 }
 
 export const createTerminalOutputHistoryPreview = (options?: {
@@ -301,6 +308,7 @@ export const createTerminalOutputHistoryPreview = (options?: {
   let currentCellWidth = 0;
   let totalChars = 0;
   let pendingEscape = "";
+  let viewportRows = 0;
   let cacheDirty = true;
   let cacheCols = -1;
   let cacheRows: HistoryPreviewRow[] = [];
@@ -376,11 +384,15 @@ export const createTerminalOutputHistoryPreview = (options?: {
         const command = text[end - 1];
         const params = text.slice(bodyStart, end - 1).split(";");
         const amount = Math.min(1_000_000, Math.max(1, Number(params[0]) || 1));
+        // The terminal clamps cursor-row targets to the viewport's bottom row;
+        // mirror that so moves past it stay same-row redraws. Without a known
+        // viewport, keep the legacy 1,000,000 cap.
+        const rowLimit = viewportRows > 0 ? viewportRows : 1_000_000;
         const nextRow = command === "A" || command === "F"
           ? Math.max(1, screenRow - amount)
           : command === "B" || command === "E"
-            ? Math.min(1_000_000, screenRow + amount)
-            : amount;
+            ? Math.min(rowLimit, screenRow + amount)
+            : Math.min(rowLimit, amount);
         const column = command === "H" || command === "f"
           ? Math.max(0, (Number(params[1]) || 1) - 1)
           : command === "E" || command === "F" ? 0 : cursorCell;
@@ -491,6 +503,9 @@ export const createTerminalOutputHistoryPreview = (options?: {
       const window = cacheRows.slice(clampedTop, clampedTop + rowCount);
       while (window.length < rowCount) window.push({ isWrapped: false, text: "" });
       return { rows: window, totalRows };
+    },
+    setViewportRows(rows: number): void {
+      viewportRows = Math.max(0, Math.floor(rows));
     },
   };
 };
