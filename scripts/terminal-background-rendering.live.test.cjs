@@ -93,6 +93,14 @@ if (!process.versions.electron) {
         const b=pane.r.term.buffer.active;
         assert.equal(b.getLine(b.baseY+b.cursorY-1).translateToString(true),'background-11','hidden output is already parsed');
       }
+      // Cached right-hand split offsets can exceed a restored window's width.
+      apply(panes[4],false,{...visibleStyle,left:'1600px'});
+      await wait(150);
+      const offsetFrames=panes[4].frames;
+      await write(panes[4],'cached-offset\\r\\n');await wait(100);
+      assert.equal(panes[4].frames,offsetFrames,'cached split offsets must not leave hidden panes painting');
+      assert.ok(panes[4].el.getBoundingClientRect().right<=0,'park the entire cached split pane');
+      assert.deepEqual(size(panes[4]),beforeSizes[4]);
       // No zero-width fitting during a window resize while tabs are parked.
       root.style.width='850px';
       assert.equal(panes[1].el.clientWidth,1050);

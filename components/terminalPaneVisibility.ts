@@ -68,9 +68,11 @@ export function resolveInactiveTerminalPaneStyle<T extends TerminalPaneStyle>(
     ...layoutStyle,
     // Keep the measured box and live parser, but move the screen outside the
     // viewport so xterm's IntersectionObserver pauses rendering. Occlusion and
-    // visibility:hidden alone do not stop xterm's WebGL refreshes. Translate
-    // by both this pane's width and the viewport width, including pinned panes
-    // that are wider than a window resized while they were in the background.
+    // visibility:hidden alone do not stop xterm's WebGL refreshes.
+    // Reset cached split offsets before translating: they can exceed the current
+    // viewport after a window shrinks. Translate by both pane and viewport width,
+    // including pinned panes wider than a window resized in the background.
+    left: 0,
     transform: "translateX(calc(-100vw - 100%))",
     visibility: hibernateHiddenTabs ? "hidden" : "visible",
     pointerEvents: "none",
