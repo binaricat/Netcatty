@@ -330,7 +330,11 @@ const buildPreviewRows = (
   };
   for (let index = 0; index < lines.length; index += 1) {
     const startsWrapped = lineStartsWrapped[index] ?? false;
-    if (startsWrapped && hasPending) {
+    // An empty pending is a predecessor xterm erased to blank but still shows
+    // as an occupied row (e.g. five columns, `abcde\x1b[2KX`): joining its
+    // continuation here would drop that row and shift every later preview
+    // row, so flush it as its own row before the run continues.
+    if (startsWrapped && hasPending && pending !== "") {
       pending += lines[index];
     } else {
       if (hasPending) flush();
@@ -702,8 +706,10 @@ export const createTerminalOutputHistoryPreview = (options?: {
             }
             continue;
           }
-          // Wider than the whole viewport: write it anyway so the loop moves on.
-          fitting = piece;
+          // Wider than the whole viewport: write only the first grapheme so
+          // the loop wraps the rest the way xterm wraps after an oversized
+          // glyph, instead of pinning later characters to this row.
+          fitting = firstGraphemeUnits(piece);
         }
       }
       const pieceAscii = isAsciiOnly(fitting);

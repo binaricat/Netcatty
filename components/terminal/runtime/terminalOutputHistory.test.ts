@@ -780,3 +780,30 @@ test("blank-only history remains distinct from empty history", () => {
   history.append("\n\n");
   assert.equal(history.getPreviewRowCount(10), 2);
 });
+
+test("reflow keeps an erase-blanked wrapped predecessor as its own row", () => {
+  const history = createTerminalOutputHistoryPreview();
+  history.setViewportRows(24);
+  history.setViewportCols(5);
+  // At five columns `abcde` fills row one and defers the wrap; `CSI 2K`
+  // blanks it and `X` wraps to row two, so xterm shows a blank first row and
+  // a wrapped `X` on the second. The preview must keep both rows instead of
+  // joining the erased predecessor into its continuation.
+  history.append("abcde\x1b[2KX");
+  assert.deepEqual([...history.getLines()], ["", "X"]);
+  const preview = history.getPreviewRows({ cols: 5, rows: 2, top: 0 });
+  assert.equal(preview.totalRows, 2);
+  assert.deepEqual(preview.rows.map((row) => row.text), ["", "X"]);
+  assert.deepEqual(preview.rows.map((row) => row.isWrapped), [false, true]);
+});
+
+test("a grapheme wider than the viewport wraps the following characters", () => {
+  const history = createTerminalOutputHistoryPreview();
+  history.setViewportRows(24);
+  history.setViewportCols(1);
+  // xterm renders the wide glyph on the first row and wraps `X` to the
+  // second; retaining the whole tail as one row would shift every later
+  // cursor-row transition one row behind the terminal.
+  history.append("中X");
+  assert.deepEqual([...history.getLines()], ["中", "X"]);
+});
