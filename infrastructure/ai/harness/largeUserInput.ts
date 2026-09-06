@@ -71,7 +71,11 @@ const EXTERNAL_PROMPT_TAIL_CHARS = 16_000;
 // header is capped (keeping the `[Vault Note: ` prefix and the `(id: ...)]`
 // tail so the note id stays recoverable).
 const EXTERNAL_PROMPT_MAX_NOTE_HEADER_CHARS = 400;
-const NOTE_HEADER_PATTERN = /\[Vault Note: [^\]\n]*\]/g;
+// Note titles may themselves contain `]` (e.g. `Deploy [prod]`), so the match
+// cannot stop at the first closing bracket: anchor on the generated
+// ` (id: <noteId>)]` suffix instead. The note id never contains `)`, `]`, or
+// a newline.
+const NOTE_HEADER_PATTERN = /\[Vault Note: [^\n]*? \(id: [^\]\n)]*\)\]/g;
 
 /** Cap a restored note header, keeping its prefix and id-bearing tail. */
 function capNoteHeader(header: string): string {

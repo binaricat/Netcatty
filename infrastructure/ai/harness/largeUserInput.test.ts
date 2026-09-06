@@ -142,6 +142,24 @@ test('boundPromptForExternalSdk re-states note headers lost to the cut', () => {
   assert.match(bounded, /Omitted Vault note headers: \[Vault Note: Third \(id: id-3\)\]/);
 });
 
+test('boundPromptForExternalSdk preserves headers whose titles contain brackets', () => {
+  const note = (title: string, id: string, size: number) => (
+    `\n\n[Vault Note: ${title} (id: ${id})]\n${'body '.repeat(size / 5)}`
+  );
+  // A bracketed title must not end the header early: the restored header has
+  // to keep the note id recoverable. Both headers fall in the omitted span.
+  const prompt = (
+    'question' +
+    note('Deploy [prod]', 'note-123', 50_000) +
+    'x'.repeat(40_000) +
+    note('Nested [[x]]', 'note-456', 20_000)
+  );
+  const bounded = boundPromptForExternalSdk(prompt);
+
+  assert.match(bounded, /\[Vault Note: Deploy \[prod\] \(id: note-123\)\]/);
+  assert.match(bounded, /Omitted Vault note headers: \[Vault Note: Nested \[\[x\]\] \(id: note-456\)\]/);
+});
+
 test('boundPromptForExternalSdk re-states headers straddling either cut', () => {
   const pad = (character: string, size: number) => character.repeat(size);
   // The third note's header straddles the head/tail boundary: the tail keeps
