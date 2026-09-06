@@ -362,3 +362,45 @@ test("a child-only remote resume does not release the folder pause", async (t) =
   assert.equal(isTransferPauseLatched("mixed-root"), true);
   assert.equal(isTransferPauseLatched("mixed-two"), true);
 });
+
+test("directory resume joins successful and remotely resumed children", async (t) => {
+  t.after(resetTransferPauseLatchesForTests);
+  const id = "mixed-success-resume";
+  const { host, getTasks } = createHost([
+    { ...makeTask(id, "paused"), isDirectory: true },
+    { ...makeTask(`${id}-one`, "paused"), parentTaskId: id },
+    { ...makeTask(`${id}-two`, "paused"), parentTaskId: id },
+  ], () => ({ resumeTransfer: async childId => childId === `${id}-one`
+    ? { success: true, lifecycleEpoch: 3 }
+    : { success: false, superseded: true, supersededBy: "resume" } }));
+  assert.deepEqual(await softResumeTransfer(host, id), { handled: true });
+  assert.equal(getTasks().find(task => task.id === id)?.status, "transferring");
+  assert.equal(isTransferPauseLatched(id), false);
+});
+
+for (const newerPause of [false, true]) {
+  test(`directory live resume rejection is ignored only when superseded: ${newerPause}`, async (t) => {
+    t.after(resetTransferPauseLatchesForTests);
+    t.after(resetTransferWalkRegistryForTests);
+    const id = `rejected-folder-resume-${newerPause}`;
+    registerTransferWalk(id);
+    let rejectResume!: (error: Error) => void;
+    let backendPaused = true;
+    const { host, getTasks } = createHost([
+      { ...makeTask(id, "paused"), isDirectory: true },
+      { ...makeTask(`${id}-child`, "paused"), parentTaskId: id },
+    ], () => ({
+      resumeTransfer: () => new Promise((_, reject) => { rejectResume = reject; }),
+      pauseTransfer: async () => { backendPaused = true; return { success: true, lifecycleEpoch: 4 }; },
+    }));
+    const running = softResumeTransfer(host, id);
+    if (newerPause) await softPauseTransfer(host, id);
+    rejectResume(new Error("resume transport disconnected"));
+    const result = await running;
+    assert.equal(result.handled, newerPause);
+    if (!newerPause) assert.match(result.reason || "", /resume transport disconnected/);
+    assert.equal(backendPaused, true);
+    assert.equal(getTasks().find(task => task.id === id)?.status, "paused");
+    if (newerPause) assert.equal(isTransferPauseLatched(id), true);
+  });
+}

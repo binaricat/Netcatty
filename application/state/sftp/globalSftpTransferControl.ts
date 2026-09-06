@@ -69,6 +69,7 @@ function reconcileSupersededControls(
   backendIds: string[],
   results: ReadonlyArray<SupersededControlResult | undefined>,
   epoch: number,
+  requestedAction: "pause" | "resume",
 ): void {
   if (!isTransferControlEpochCurrent(taskId, epoch)) return;
   const task = host.getTasks().find((candidate) => candidate.id === taskId);
@@ -83,7 +84,9 @@ function reconcileSupersededControls(
       } catch { /* best-effort */ }
     }
   };
-  const decisions = results.map((result) => result?.superseded ? result.supersededBy : undefined);
+  const decisions = results.map((result) => result?.superseded
+    ? result.supersededBy
+    : result?.success ? requestedAction : undefined);
   // A child-only resume does not establish a folder-wide decision. Require all
   // relevant children to agree, or an already-authoritative resumed root row.
   if (decisions.length > 0 && decisions.every((action) => action === "resume")) {
@@ -280,7 +283,7 @@ export async function softPauseTransfer(
       }));
       if (!pauseStillCurrent()) return;
       if (pauseResults.some(({ result }) => wasSuperseded(result))) {
-        reconcileSupersededControls(host, taskId, childIds, backendIds, pauseResults.map(({ result }) => result), pauseEpoch);
+        reconcileSupersededControls(host, taskId, childIds, backendIds, pauseResults.map(({ result }) => result), pauseEpoch, "pause");
         return;
       }
       const after = host.getTasks().find((candidate) => candidate.id === taskId);
@@ -332,7 +335,7 @@ export async function softPauseTransfer(
     result: await pauseOne(id),
   })));
   if (pauseResults.some(({ result }) => wasSuperseded(result))) {
-    reconcileSupersededControls(host, taskId, childIds, backendIds, pauseResults.map(({ result }) => result), pauseEpoch);
+    reconcileSupersededControls(host, taskId, childIds, backendIds, pauseResults.map(({ result }) => result), pauseEpoch, "pause");
     return "noop";
   }
   const afterLivePause = host.getTasks().find((candidate) => candidate.id === taskId);
@@ -515,12 +518,14 @@ export async function softResumeTransfer(
   try { bridge = host.getBridge(); } catch { bridge = undefined; }
 
   const resumeIds = treeIds.length > 0 ? treeIds : [taskId];
+  const rejectedIds = new Set<string>();
   const results = await Promise.all(resumeIds.map(async (id) => {
     try {
       return await bridge?.resumeTransfer?.(id) ?? { success: false, reason: "Resume unavailable" };
     } catch (error) {
       // Rejections must pass the same stale-control check as ordinary failures.
-      return { success: false, reason: error instanceof Error ? error.message : "Resume unavailable" };
+      rejectedIds.add(id);
+      return { success: false, reason: error instanceof Error && error.message ? error.message : "Resume request failed" };
     }
   }));
   const after = host.getTasks().find((candidate) => candidate.id === taskId);
@@ -528,7 +533,19 @@ export async function softResumeTransfer(
   if (!after || ["completed", "cancelled", "failed"].includes(after.status)) return { handled: true };
 
   if (results.some(wasSuperseded)) {
-    reconcileSupersededControls(host, taskId, releaseIds, resumeIds, results, resumeEpoch);
+    reconcileSupersededControls(host, taskId, releaseIds, resumeIds, results, resumeEpoch, "resume");
+  }
+  if (rejectedIds.size > 0) {
+    // An IPC rejection is not evidence that a paused stream is absent. Keep
+    // failed children and undispatched work held while the caller reports it.
+    latchTransferPauseTree(taskId, [...rejectedIds]);
+    for (const id of [taskId, ...rejectedIds]) {
+      try { globalSftpTransferScheduler.pause(id); } catch { /* best-effort */ }
+    }
+    const rejectedIndex = resumeIds.findIndex((id) => rejectedIds.has(id));
+    return { handled: false, reason: results[rejectedIndex]?.reason || "Resume request failed" };
+  }
+  if (results.some(wasSuperseded)) {
     return { handled: true };
   }
   const successIds = resumeIds.filter((_, index) => results[index]?.success);
