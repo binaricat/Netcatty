@@ -186,7 +186,7 @@ export const stripTerminalDisplayToPlainText = (
       const isCsi = input[i] === C1_CSI || input[i + 1] === "[";
       const passesRowControl = isCsi
         && (/^[0-9;]*[HfABEFdr]$/.test(sequence)
-          || /^\?[67][hl]$/.test(sequence)
+          || /^\?[67](?:;[67])*[hl]$/.test(sequence)
           || /^[su]$/.test(sequence));
       const isDecSaveRestore = !isCsi
         && escapeIntroducerLength(input, i) === 1
@@ -446,6 +446,10 @@ export const createTerminalOutputHistoryPreview = (options?: {
       if (cursorCell > width) {
         current += " ".repeat(cursorCell - width);
         cursor = current.length;
+        // Track the materialized padding so a discarded glyph (a wide one that
+        // cannot fit with DECAWM off) does not make the next character pad the
+        // same gap a second time.
+        currentCellWidth = Math.max(width, cursorCell);
       }
       const piece = span.slice(offset, offset + (maxChars - current.length));
       if (!piece) return;
@@ -522,7 +526,9 @@ export const createTerminalOutputHistoryPreview = (options?: {
       viewportCols > 0 ? viewportCols - 1 : savedCursor.cell,
     );
     if (savedCursor.row !== screenRow && current) commitCurrentLine();
-    screenRow = savedCursor.row;
+    // A resize that removed the saved row leaves an obsolete target; xterm
+    // clamps a restored cursor to the current viewport's bottom row.
+    screenRow = viewportRows > 0 ? Math.min(savedCursor.row, viewportRows) : savedCursor.row;
     cursorCell = savedCell;
     cursor = savedCell === 0 ? 0
       : isAsciiOnly(current) ? savedCell
@@ -573,18 +579,25 @@ export const createTerminalOutputHistoryPreview = (options?: {
           // DECOM (CSI ?6h / ?6l): while set, CUP/HVP/VPA rows are relative to
           // and clamped within the scroll region. The terminal also homes the
           // cursor (to the origin-dependent home) on the mode change.
-          if (params[0] === "?6") {
-            originMode = command === "h";
-            const homeRow = originMode ? scrollTopMargin : 1;
-            if (screenRow !== homeRow && current) commitCurrentLine();
-            screenRow = homeRow;
-            cursor = 0;
-            cursorCell = 0;
-          }
           // DECAWM (CSI ?7h / ?7l): while off, printable characters never wrap
           // to the next row; they overwrite the last column instead.
-          if (params[0] === "?7") {
-            autowrap = command === "h";
+          // Private-mode sequences may combine modes in one control
+          // (`CSI ?6;7l`); the leading "?" applies to every parameter, so each
+          // one must be applied or combined controls would be dropped whole.
+          if (params[0]?.startsWith("?")) {
+            for (const param of params) {
+              const mode = param.replace(/^\?/, "");
+              if (mode === "6") {
+                originMode = command === "h";
+                const homeRow = originMode ? scrollTopMargin : 1;
+                if (screenRow !== homeRow && current) commitCurrentLine();
+                screenRow = homeRow;
+                cursor = 0;
+                cursorCell = 0;
+              } else if (mode === "7") {
+                autowrap = command === "h";
+              }
+            }
           }
           i = end;
           continue;

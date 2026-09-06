@@ -513,3 +513,41 @@ test("a zero-width mark arriving after the wrap column joins the final cell", ()
   history.append("́Z\n");
   assert.deepEqual([...history.getLines()], ["abcdé", "Z"]);
 });
+
+test("combined private-mode controls apply every parameter", () => {
+  const history = createTerminalOutputHistoryPreview();
+  history.setViewportRows(24);
+  history.setViewportCols(5);
+  // `CSI ?6;7l` resets both origin mode and DECAWM in one control; dropping
+  // the control whole would leave autowrap on and wrap the overflow into a
+  // second row (xterm keeps `abcdef` on one row as `abcdf`).
+  history.append("\x1b[5;20r\x1b[?6;7l\x1b[5;1Habcdef");
+  assert.deepEqual(history.getLines(), ["abcdf"]);
+  // `CSI ?6;7h` re-enables both: absolute rows clamp to the margins again and
+  // printable output wraps once more.
+  history.append("\x1b[?6;7h\x1b[99;1HNEW");
+  assert.deepEqual(history.getLines(), ["abcdf", "NEW"]);
+});
+
+test("discarding a non-fitting wide glyph does not re-pad the deferred gap", () => {
+  const history = createTerminalOutputHistoryPreview();
+  history.setViewportRows(24);
+  history.setViewportCols(5);
+  // Cursor on the last column, DECAWM off: the wide glyph is discarded and the
+  // next narrow character overwrites the last cell without padding it again.
+  history.append("\x1b[?7l\x1b[1;5H中Z");
+  assert.deepEqual(history.getLines(), ["    Z"]);
+});
+
+test("restoring a cursor saved above a shrunken viewport clamps to the bottom row", () => {
+  const history = createTerminalOutputHistoryPreview();
+  history.setViewportRows(24);
+  history.append("\x1b[24;1Hsaved\x1b7");
+  history.setViewportRows(10);
+  history.append("\x1b8X");
+  // The saved row 24 no longer exists; the restore lands on the bottom row so
+  // the later bottom-row address writes `Y` on the same line as `X` instead of
+  // keeping an obsolete extra line (the saved column is preserved).
+  history.append("\x1b[10;1HY");
+  assert.deepEqual(history.getLines(), ["saved", "Y    X"]);
+});
