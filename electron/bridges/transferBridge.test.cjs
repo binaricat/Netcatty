@@ -1607,7 +1607,8 @@ test("pause soft-drains concurrent ranges but resume waits before truncating", a
   assert.equal(durableBytes, payload.length);
 });
 
-test("a newer pause supersedes resume while concurrent writes are draining", async (t) => {
+for (const settleWrites of [true, false]) {
+test(`a newer pause supersedes resume while concurrent writes are draining: settle=${settleWrites}`, async (t) => {
   const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-transfer-resume-repause-"));
   t.after(async () => {
     await fs.promises.rm(tempDir, { recursive: true, force: true });
@@ -1706,16 +1707,24 @@ test("a newer pause supersedes resume while concurrent writes are draining", asy
 
   const newerPause = await transferBridge.pauseTransfer(null, { transferId: "upload-resume-repause" });
   assert.equal(newerPause.success, true);
+  if (settleWrites) {
+    holdWrites = false;
+    for (const { complete } of pendingWrites.splice(0)) complete();
+  }
+  const resumeResult = await resuming;
   holdWrites = false;
   for (const { complete } of pendingWrites.splice(0)) complete();
-  const resumeResult = await resuming;
   await transferBridge.cancelTransfer(null, { transferId: "upload-resume-repause" });
   await running;
   assert.equal(resumeResult.success, false, "old resume must not restart writes after a newer pause");
-  assert.match(resumeResult.reason, /superseded.*pause/i);
+  if (settleWrites) assert.match(resumeResult.reason, /superseded.*pause/i);
+  assert.equal(resumeResult.superseded, true, "direct callers need a structured superseded result too");
+  assert.equal(resumeResult.supersededBy, "pause");
   assert.equal(truncatedBeforeDrain, false);
   assert.equal(resumedBeforeDrain, false);
 });
+
+}
 
 test("cancelling resume during soft-drain does not truncate the staged file", async (t) => {
   const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-transfer-resume-cancel-"));

@@ -300,6 +300,29 @@ test("worker-backed pause and resume fan authoritative lifecycle to every window
   }
 });
 
+for (const latestAction of ["pause", "resume", "cancel"]) {
+  test(`stale worker pause retains latest ${latestAction} after that newer request has settled`, async (t) => {
+    const bridgePath = require.resolve("./transferBridge.cjs");
+    delete require.cache[bridgePath];
+    t.after(() => { delete require.cache[bridgePath]; });
+    const bridge = require(bridgePath);
+    const handlers = new Map();
+    let finishFirst;
+    const firstGate = new Promise((resolve) => { finishFirst = resolve; });
+    let requests = 0;
+    bridge.registerHandlers({ handle: (channel, fn) => handlers.set(channel, fn) }, {
+      terminalWorkerManager: { request: async () => ++requests === 1 ? firstGate : { success: true } },
+    });
+    const payload = { transferId: `worker-last-action-${latestAction}` };
+    const first = handlers.get("netcatty:transfer:pause")(null, payload);
+    await handlers.get(`netcatty:transfer:${latestAction}`)(null, payload);
+    finishFirst({ success: true });
+    const stale = await first;
+    assert.equal(stale.superseded, true);
+    assert.equal(stale.supersededBy, latestAction, "completed newer request must retain intent for older pending replies");
+  });
+}
+
 for (const outcome of ["resume-success", "pause-success", "pause-failure", "pause-error", "resume-error"]) {
   test(`worker ${outcome} arriving after a newer pause cannot broadcast resumed`, async (t) => {
     const sent = [];
@@ -331,8 +354,30 @@ for (const outcome of ["resume-success", "pause-success", "pause-failure", "paus
     const afterPause = sent.length;
     if (outcome.endsWith("error")) rejectFirst(new Error("channel closed"));
     else resolveFirst({ success: outcome.endsWith("success"), reason: "pause unavailable" });
-    assert.deepEqual(await first, { success: false, superseded: true });
+    assert.deepEqual(await first, { success: false, superseded: true, supersededBy: "pause" });
     assert.equal(sent.slice(afterPause).some((event) => event.type === "resumed"), false);
     assert.equal(sent.at(-1).type, "paused");
+  });
+}
+
+for (const action of ["pause", "resume"]) {
+  test(`superseded result follows rollback after latest ${action} fails`, async (t) => {
+    const bridgePath = require.resolve("./transferBridge.cjs");
+    delete require.cache[bridgePath];
+    t.after(() => { delete require.cache[bridgePath]; });
+    const bridge = require(bridgePath);
+    const handlers = new Map();
+    let finish;
+    let calls = 0;
+    bridge.registerHandlers({ handle: (channel, fn) => handlers.set(channel, fn) }, {
+      terminalWorkerManager: { request: () => ++calls === 1
+        ? new Promise(resolve => { finish = resolve; })
+        : Promise.resolve({ success: false, reason: "unavailable" }) },
+    });
+    const payload = { transferId: `rollback-${action}` };
+    const older = handlers.get("netcatty:transfer:pause")(null, payload);
+    await handlers.get(`netcatty:transfer:${action}`)(null, payload);
+    finish({ success: true });
+    assert.equal((await older).supersededBy, action === "pause" ? "resume" : "pause");
   });
 }

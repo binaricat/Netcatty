@@ -286,6 +286,33 @@ test("directory softResume stamps bridge epoch only on successIds; queued siblin
   resetTransferWalkRegistryForTests();
 });
 
+for (const isDirectory of [false, true]) {
+  for (const newerLocalPause of [false, true]) {
+    test(`cross-window resume releases ${isDirectory ? "folder" : "file"} latches unless local pause is newer: ${newerLocalPause}`, async (t) => {
+      t.after(resetTransferPauseLatchesForTests);
+      let finish!: (result: { success: boolean; superseded: true; supersededBy: "resume" }) => void;
+      let pauses = 0;
+      const id = `remote-resume-${isDirectory}-${newerLocalPause}`;
+      const initial: TransferTask[] = [{ ...makeTask(id), isDirectory }];
+      if (isDirectory) initial.push({ ...makeTask(`${id}-child`), parentTaskId: id });
+      const { host, getTasks } = createHost(initial, () => ({
+        pauseTransfer: () => ++pauses === 1
+          ? new Promise((resolve) => { finish = resolve; })
+          : Promise.resolve({ success: true, lifecycleEpoch: 9 }),
+      }));
+      const pending = softPauseTransfer(host, id);
+      host.setTasks(getTasks().map(task => isDirectory && task.id === id ? task : ({ ...task, status: "transferring", lifecycleEpoch: 8 })));
+      if (newerLocalPause) await softPauseTransfer(host, id);
+      finish({ success: false, superseded: true, supersededBy: "resume" });
+      await pending;
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(isTransferPauseLatched(id), newerLocalPause, "authoritative resume must release the old root pause barrier");
+      assert.equal(getTasks().find(task => task.id === id)?.status, newerLocalPause ? "paused" : "transferring");
+      if (isDirectory) assert.equal(isTransferPauseLatched(`${id}-child`), newerLocalPause);
+    });
+  }
+}
+
 for (const action of ["pause", "resume"] as const) {
   test(`superseded cross-window ${action} preserves authoritative paused state`, async (t) => {
     t.after(resetTransferPauseLatchesForTests);
@@ -304,3 +331,34 @@ for (const action of ["pause", "resume"] as const) {
     else assert.deepEqual(result, { handled: true }, "obsolete response must not trigger dedicated recovery");
   });
 }
+
+for (const isDirectory of [false, true]) {
+  test(`remote pause restores released ${isDirectory ? "folder" : "file"} barriers after stale resume`, async (t) => {
+    t.after(resetTransferPauseLatchesForTests);
+    const id = `remote-pause-${isDirectory}`;
+    const tasks: TransferTask[] = [{ ...makeTask(id, "paused"), isDirectory }];
+    if (isDirectory) tasks.push({ ...makeTask(`${id}-child`, "paused"), parentTaskId: id });
+    const { host, getTasks } = createHost(tasks, () => ({
+      resumeTransfer: async () => ({ success: false, superseded: true, supersededBy: "pause" }),
+    }));
+    assert.deepEqual(await softResumeTransfer(host, id), { handled: true });
+    assert.equal(isTransferPauseLatched(id), true);
+    if (isDirectory) assert.equal(isTransferPauseLatched(`${id}-child`), true);
+    assert.equal(getTasks()[0].status, "paused");
+  });
+}
+
+test("a child-only remote resume does not release the folder pause", async (t) => {
+  t.after(resetTransferPauseLatchesForTests);
+  const { host } = createHost([
+    { ...makeTask("mixed-root"), isDirectory: true },
+    { ...makeTask("mixed-one"), parentTaskId: "mixed-root" },
+    { ...makeTask("mixed-two"), parentTaskId: "mixed-root" },
+  ], () => ({ pauseTransfer: async id => id === "mixed-one"
+    ? { success: false, superseded: true, supersededBy: "resume" }
+    : { success: true } }));
+  await softPauseTransfer(host, "mixed-root");
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(isTransferPauseLatched("mixed-root"), true);
+  assert.equal(isTransferPauseLatched("mixed-two"), true);
+});

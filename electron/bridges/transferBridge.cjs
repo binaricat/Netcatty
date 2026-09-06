@@ -6850,7 +6850,7 @@ async function pauseTransfer(_event, payload) {
   if (usesContiguousRangeCheckpoint) {
     await transfer.waitForPause();
     if (!transfer.paused || transfer.pauseSuperseded) {
-      return { success: false, reason: "Pause was superseded by resume" };
+      return { success: false, superseded: true, supersededBy: "resume", reason: "Pause was superseded by resume" };
     }
     // Concurrent path already tracks contiguous durable bytes — do not spend
     // hundreds of ms waiting for writeStream drain before acknowledging pause.
@@ -6965,7 +6965,7 @@ async function pauseTransfer(_event, payload) {
     return { success: false, reason: "Transfer is no longer active" };
   }
   if (!transfer.paused || transfer.pauseSuperseded) {
-    return { success: false, reason: "Pause was superseded by resume" };
+    return { success: false, superseded: true, supersededBy: "resume", reason: "Pause was superseded by resume" };
   }
   // Confirm pause as soon as soft-drain + durable checkpoint are ready.
   // Source identity (remote sample reads on download) used to block this IPC
@@ -7021,6 +7021,10 @@ async function resumeTransfer(_event, payload) {
     };
   }
   const pauseRequestToken = transfer.pauseRequestToken;
+  const invalidResumeResult = (reason) => ({
+    success: false, reason,
+    ...(transfer.pauseRequestToken !== pauseRequestToken ? { superseded: true, supersededBy: "pause" } : {}),
+  });
   const resumeInvalidReason = () => {
     if (activeTransfers.get(payload?.transferId) !== transfer || transfer.cancelled) {
       return "Transfer is no longer active";
@@ -7040,7 +7044,7 @@ async function resumeTransfer(_event, payload) {
     return { success: false, reason: "Transfer is no longer active" };
   }
   const initialInvalidReason = resumeInvalidReason();
-  if (initialInvalidReason) return { success: false, reason: initialInvalidReason };
+  if (initialInvalidReason) return invalidResumeResult(initialInvalidReason);
   // Already flowing (e.g. double-click resume): do not pipe() again.
   if (!transfer.paused) {
     transfer.lifecycleState = "transferring";
@@ -7075,7 +7079,7 @@ async function resumeTransfer(_event, payload) {
           await transfer.captureSourceFingerprint?.();
         }
         if (!transfer.sourceFingerprint) {
-          return { success: false, reason: "Could not verify the source file for resume" };
+          return invalidResumeResult("Could not verify the source file for resume");
         }
         await transfer.verifySourceFingerprint(transfer.sourceFingerprint);
       }
@@ -7083,14 +7087,11 @@ async function resumeTransfer(_event, payload) {
       if (transfer.cancelled || activeTransfers.get(payload?.transferId) !== transfer) {
         return { success: false, reason: "Transfer is no longer active" };
       }
-      return {
-        success: false,
-        reason: error?.message || "Could not verify the source file for resume",
-      };
+      return invalidResumeResult(error?.message || "Could not verify the source file for resume");
     }
   }
   const verifiedInvalidReason = resumeInvalidReason();
-  if (verifiedInvalidReason) return { success: false, reason: verifiedInvalidReason };
+  if (verifiedInvalidReason) return invalidResumeResult(verifiedInvalidReason);
   // Soft-drained concurrent pause may leave a sparse tail past the contiguous
   // checkpoint. Wait with Resume's own budget, then single-flight truncate so
   // background settle cannot race new writes after unpause.
@@ -7101,17 +7102,14 @@ async function resumeTransfer(_event, payload) {
       { maxWaitMs: RESUME_RANGE_SETTLE_MS },
     );
     if (!settled?.ok) {
-      return {
-        success: false,
-        reason: settled?.reason || "The current file is still finishing. Try resume again.",
-      };
+      return invalidResumeResult(settled?.reason || "The current file is still finishing. Try resume again.");
     }
     if (transfer.cancelled || activeTransfers.get(payload?.transferId) !== transfer) {
       return { success: false, reason: "Transfer is no longer active" };
     }
   }
   const finalInvalidReason = resumeInvalidReason();
-  if (finalInvalidReason) return { success: false, reason: finalInvalidReason };
+  if (finalInvalidReason) return invalidResumeResult(finalInvalidReason);
   transfer.paused = false;
   transfer.pauseSuperseded = false;
   transfer.lifecycleEpoch += 1;
@@ -7289,16 +7287,32 @@ function registerHandlers(ipcMain, options = {}) {
     // Control replies can arrive out of order across windows. Only the latest
     // request may publish lifecycle state; retain tokens only while in flight.
     const workerControlRequests = new Map();
-    const withWorkerControl = async (transferId, work) => {
+    const withWorkerControl = async (transferId, action, work) => {
       const token = Symbol("control");
-      workerControlRequests.set(transferId, token);
+      const state = workerControlRequests.get(transferId) || { token, action, pending: 0 };
+      state.token = token;
+      state.action = action;
+      state.pending += 1;
+      workerControlRequests.set(transferId, state);
+      const isCurrent = () => workerControlRequests.get(transferId) === state && state.token === token;
+      const superseded = () => ({ success: false, superseded: true, supersededBy: state.action });
       try {
-        return await work(() => workerControlRequests.get(transferId) === token);
+        const result = await work(isCurrent, superseded);
+        if (isCurrent() && !result?.success && !result?.superseded) {
+          if (action === "pause") state.action = "resume";
+          else if (action === "resume") state.action = "pause";
+        }
+        return result;
       } catch (error) {
-        if (workerControlRequests.get(transferId) !== token) return { success: false, superseded: true };
+        if (!isCurrent()) return superseded();
+        if (action === "pause") state.action = "resume";
+        else if (action === "resume") state.action = "pause";
         throw error;
       } finally {
-        if (workerControlRequests.get(transferId) === token) workerControlRequests.delete(transferId);
+        state.pending -= 1;
+        if (state.pending === 0 && workerControlRequests.get(transferId) === state) {
+          workerControlRequests.delete(transferId);
+        }
       }
     };
     const nextWorkerLifecycleEpoch = (transferId, suggestedEpoch) => {
@@ -7352,12 +7366,12 @@ function registerHandlers(ipcMain, options = {}) {
     ipcMain.handle("netcatty:transfer:cancel", (event, payload) => (
       cancelQueuedTransfer(payload?.transferId)
         ? { success: true }
-        : withWorkerControl(payload?.transferId, () => workerRequest(event, "netcatty:transfer:cancel", payload))
+        : withWorkerControl(payload?.transferId, "cancel", () => workerRequest(event, "netcatty:transfer:cancel", payload))
     ));
     ipcMain.handle("netcatty:transfer:pause", async (event, payload) => {
       const queued = pauseQueuedTransfer(payload?.transferId);
       if (queued) return queued;
-      return withWorkerControl(payload?.transferId, async (isCurrent) => {
+      return withWorkerControl(payload?.transferId, "pause", async (isCurrent, superseded) => {
         const lifecycleEpoch = nextWorkerLifecycleEpoch(payload?.transferId);
         broadcastGlobalTransferEvent({
           type: "pausing",
@@ -7367,7 +7381,7 @@ function registerHandlers(ipcMain, options = {}) {
       });
       try {
         const result = await workerRequest(event, "netcatty:transfer:pause", payload);
-        if (!isCurrent()) return { success: false, superseded: true };
+        if (!isCurrent()) return superseded();
         if (!result?.success) {
           const rollbackEpoch = nextWorkerLifecycleEpoch(payload?.transferId);
           broadcastGlobalTransferEvent({
@@ -7406,9 +7420,9 @@ function registerHandlers(ipcMain, options = {}) {
     ipcMain.handle("netcatty:transfer:resume", async (event, payload) => {
       const queuedResume = resumeQueuedTransfer(payload?.transferId);
       if (queuedResume) return queuedResume;
-      return withWorkerControl(payload?.transferId, async (isCurrent) => {
+      return withWorkerControl(payload?.transferId, "resume", async (isCurrent, superseded) => {
         const result = await workerRequest(event, "netcatty:transfer:resume", payload);
-        if (!isCurrent()) return { success: false, superseded: true };
+        if (!isCurrent()) return superseded();
         if (result?.success) {
           // Normalize into main-process epoch space (may advance past worker-local).
           // Soft-resume UI must stamp THIS epoch or later worker progress is stale.

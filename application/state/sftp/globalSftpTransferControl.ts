@@ -31,6 +31,7 @@ export type TransferControlBridge = {
     success: boolean;
     /** A newer control in another window owns the authoritative state. */
     superseded?: boolean;
+    supersededBy?: "pause" | "resume" | "cancel";
     reason?: string;
     checkpointBytes?: number;
     resumeStage?: TransferTask["resumeStage"];
@@ -44,6 +45,7 @@ export type TransferControlBridge = {
     success: boolean;
     /** A newer control in another window owns the authoritative state. */
     superseded?: boolean;
+    supersededBy?: "pause" | "resume" | "cancel";
     reason?: string;
     lifecycleEpoch?: number;
   }>;
@@ -52,6 +54,50 @@ export type TransferControlBridge = {
 
 function wasSuperseded(result: { success?: boolean; superseded?: boolean } | undefined | null): boolean {
   return result?.superseded === true;
+}
+
+type SupersededControlResult = {
+  success?: boolean;
+  superseded?: boolean;
+  supersededBy?: "pause" | "resume" | "cancel";
+};
+
+function reconcileSupersededControls(
+  host: TransferControlHost,
+  taskId: string,
+  childIds: string[],
+  backendIds: string[],
+  results: ReadonlyArray<SupersededControlResult | undefined>,
+  epoch: number,
+): void {
+  if (!isTransferControlEpochCurrent(taskId, epoch)) return;
+  const task = host.getTasks().find((candidate) => candidate.id === taskId);
+  if (!task || ["completed", "cancelled", "failed"].includes(task.status)) return;
+  const apply = (id: string, descendants: string[], action: "pause" | "resume" | "cancel") => {
+    if (action === "resume") releaseTransferPauseTree(id, descendants);
+    else latchTransferPauseTree(id, descendants);
+    for (const affectedId of [id, ...descendants]) {
+      try {
+        if (action === "resume") globalSftpTransferScheduler.resume(affectedId);
+        else globalSftpTransferScheduler.pause(affectedId);
+      } catch { /* best-effort */ }
+    }
+  };
+  const decisions = results.map((result) => result?.superseded ? result.supersededBy : undefined);
+  // A child-only resume does not establish a folder-wide decision. Require all
+  // relevant children to agree, or an already-authoritative resumed root row.
+  if (decisions.length > 0 && decisions.every((action) => action === "resume")) {
+    apply(taskId, childIds, "resume");
+    host.setTasks(host.getTasks().map((row) => row.id === taskId ? { ...row, status: "transferring" } : row));
+  } else if (decisions.length > 0 && decisions.every((action) => action === "pause")) {
+    apply(taskId, childIds, "pause");
+    host.setTasks(host.getTasks().map((row) => row.id === taskId ? { ...row, status: "paused" } : row));
+  } else if (task.status === "transferring" && decisions.includes("resume")) {
+    apply(taskId, [], "resume");
+  }
+  decisions.forEach((action, index) => {
+    if (action) apply(backendIds[index], [], action);
+  });
 }
 
 /** Prefer the highest bridge lifecycleEpoch from successful pause/resume results. */
@@ -232,7 +278,11 @@ export async function softPauseTransfer(
         }
         return { id, result };
       }));
-      if (!pauseStillCurrent() || pauseResults.some(({ result }) => wasSuperseded(result))) return;
+      if (!pauseStillCurrent()) return;
+      if (pauseResults.some(({ result }) => wasSuperseded(result))) {
+        reconcileSupersededControls(host, taskId, childIds, backendIds, pauseResults.map(({ result }) => result), pauseEpoch);
+        return;
+      }
       const after = host.getTasks().find((candidate) => candidate.id === taskId);
       if (!after || after.status === "cancelled") return;
       if (after.status !== "paused" && after.status !== "pausing") return;
@@ -281,7 +331,10 @@ export async function softPauseTransfer(
     id,
     result: await pauseOne(id),
   })));
-  if (pauseResults.some(({ result }) => wasSuperseded(result))) return "noop";
+  if (pauseResults.some(({ result }) => wasSuperseded(result))) {
+    reconcileSupersededControls(host, taskId, childIds, backendIds, pauseResults.map(({ result }) => result), pauseEpoch);
+    return "noop";
+  }
   const afterLivePause = host.getTasks().find((candidate) => candidate.id === taskId);
   if (afterLivePause?.status === "cancelled") {
     releaseTransferPauseTree(taskId, childIds);
@@ -474,7 +527,10 @@ export async function softResumeTransfer(
   if (!isTransferControlEpochCurrent(taskId, resumeEpoch)) return { handled: true };
   if (!after || ["completed", "cancelled", "failed"].includes(after.status)) return { handled: true };
 
-  if (results.some(wasSuperseded)) return { handled: true };
+  if (results.some(wasSuperseded)) {
+    reconcileSupersededControls(host, taskId, releaseIds, resumeIds, results, resumeEpoch);
+    return { handled: true };
+  }
   const successIds = resumeIds.filter((_, index) => results[index]?.success);
   const walkAlive = isTransferWalkInFlight(taskId);
   // Directory walk can continue after unlatch without bridge resume on every child.
