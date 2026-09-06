@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { ToolOutputStore } from './toolOutputStore';
-import { fitLargeUserInputForModel } from './largeUserInput';
+import { fitLargeUserInputForModel, boundPromptForExternalSdk } from './largeUserInput';
 import {
   buildCattySdkMessages,
   createContinuationContext,
@@ -89,4 +89,140 @@ test('a persisted compaction boundary replaces older history with its summary', 
   assert.match(String(messages[0]?.content), /The earlier question was answered/);
   assert.doesNotMatch(JSON.stringify(messages), /old secret question|old answer/);
   assert.match(JSON.stringify(messages), /recent question/);
+});
+
+test('boundPromptForExternalSdk keeps prompts within the bound untouched', () => {
+  const prompt = 'hello '.repeat(1_000);
+  assert.equal(boundPromptForExternalSdk(prompt), prompt);
+});
+
+test('boundPromptForExternalSdk keeps both ends and reports the omitted span', () => {
+  const prompt = `START-${'middle '.repeat(30_000)}-FINAL QUESTION`;
+  const bounded = boundPromptForExternalSdk(prompt);
+
+  assert.match(bounded, /^START-/);
+  assert.match(bounded, /FINAL QUESTION\n?$/);
+  assert.match(bounded, /prompt truncated for size/);
+  assert.ok(bounded.length < prompt.length);
+  // The bounded prompt must stay under the hard cap so a 768 KiB vault-note
+  // payload can never reach the external SDK unchanged.
+  assert.ok(bounded.length <= 100_000 + 300);
+  assert.doesNotMatch(bounded, /tool_output_read/);
+});
+
+test('boundPromptForExternalSdk never splits surrogate pairs at either cut', () => {
+  const head = 'a'.repeat(80_000);
+  const tail = 'b'.repeat(16_000);
+  const prompt = `${head}\u{1F600}${'c'.repeat(50_000)}\u{1F600}${tail}`;
+  const bounded = boundPromptForExternalSdk(prompt);
+
+  // A lone surrogate would be replaced with U+FFFD when encoded; the bound
+  // must cut before/after whole pairs instead.
+  assert.doesNotMatch(bounded, /[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
+  assert.doesNotMatch(bounded, /(^|[^\uD800-\uDBFF])[\uDC00-\uDFFF]/);
+  assert.match(bounded, /^a+\n\n\[\.\.\. prompt truncated/);
+  assert.match(bounded, /\n\nb+$/);
+});
+
+test('boundPromptForExternalSdk re-states note headers lost to the cut', () => {
+  const note = (title: string, id: string, size: number) => (
+    `\n\n[Vault Note: ${title} (id: ${id})]\n${'body '.repeat(size / 5)}`
+  );
+  const prompt = (
+    'question' +
+    note('First', 'id-1', 50_000) +
+    note('Second', 'id-2', 50_000) +
+    note('Third', 'id-3', 50_000)
+  );
+  const bounded = boundPromptForExternalSdk(prompt);
+
+  // The first two note headers survive in the head; the third header falls in
+  // the omitted span, so it must be re-stated with its id.
+  assert.match(bounded, /\[Vault Note: First \(id: id-1\)\]/);
+  assert.match(bounded, /Omitted Vault note headers: \[Vault Note: Third \(id: id-3\)\]/);
+});
+
+test('boundPromptForExternalSdk preserves headers whose titles contain brackets', () => {
+  const note = (title: string, id: string, size: number) => (
+    `\n\n[Vault Note: ${title} (id: ${id})]\n${'body '.repeat(size / 5)}`
+  );
+  // A bracketed title must not end the header early: the restored header has
+  // to keep the note id recoverable. Both headers fall in the omitted span.
+  const prompt = (
+    'question' +
+    note('Deploy [prod]', 'note-123', 50_000) +
+    'x'.repeat(40_000) +
+    note('Nested [[x]]', 'note-456', 20_000)
+  );
+  const bounded = boundPromptForExternalSdk(prompt);
+
+  assert.match(bounded, /\[Vault Note: Deploy \[prod\] \(id: note-123\)\]/);
+  assert.match(bounded, /Omitted Vault note headers: \[Vault Note: Nested \[\[x\]\] \(id: note-456\)\]/);
+});
+
+test('boundPromptForExternalSdk re-states headers whose ids contain delimiters', () => {
+  const note = (title: string, id: string, size: number) => (
+    `\n\n[Vault Note: ${title} (id: ${id})]\n${'body '.repeat(size / 5)}`
+  );
+  // Imported or synced note ids may contain `)` or `]`: the header must still
+  // be matched and re-stated verbatim so the exact id stays recoverable. Both
+  // headers fall in the omitted span.
+  const prompt = (
+    'question' +
+    note('Parens', 'note(1)', 50_000) +
+    'x'.repeat(40_000) +
+    note('Brackets', 'note[2]', 20_000)
+  );
+  const bounded = boundPromptForExternalSdk(prompt);
+
+  assert.match(bounded, /\[Vault Note: Parens \(id: note\(1\)\)\]/);
+  assert.match(bounded, /Omitted Vault note headers: \[Vault Note: Brackets \(id: note\[2\]\)\]/);
+});
+
+test('boundPromptForExternalSdk re-states headers straddling either cut', () => {
+  const pad = (character: string, size: number) => character.repeat(size);
+  // The third note's header straddles the head/tail boundary: the tail keeps
+  // only its remainder, so the header must be re-stated in full.
+  const note3 = '\n\n[Vault Note: Third (id: id-3)]\nthird body';
+  const prompt = (
+    pad('a', 80_000) +
+    '\n\n[Vault Note: Second (id: id-2)]\n' + pad('c', 8_000) +
+    note3 + pad('d', 16_000)
+  );
+  const bounded = boundPromptForExternalSdk(prompt);
+
+  assert.match(bounded, /Omitted Vault note headers: \[Vault Note: Second \(id: id-2\)\] \[Vault Note: Third \(id: id-3\)\]/);
+});
+
+test('boundPromptForExternalSdk re-states every lost header, including the tail owner', () => {
+  const note = (title: string, id: string, size: number) => (
+    `\n\n[Vault Note: ${title} (id: ${id})]\n${'body '.repeat(size / 5)}`
+  );
+  // Fifteen ~50k notes fit under the 768 KiB attachment budget but far
+  // exceed the 100k prompt cap: only the first header survives in the head,
+  // and the retained tail belongs to note 15, whose header must be restored.
+  let prompt = 'question';
+  for (let index = 1; index <= 15; index += 1) {
+    prompt += note(`Note ${index}`, `id-${index}`, 50_000);
+  }
+  const bounded = boundPromptForExternalSdk(prompt);
+
+  assert.match(bounded, /Omitted Vault note headers: .*\[Vault Note: Note 15 \(id: id-15\)\]/);
+  assert.ok(bounded.length <= 100_000, `bounded length ${bounded.length} exceeds 100_000`);
+});
+
+test('boundPromptForExternalSdk caps restored headers and keeps the output bound', () => {
+  // A pathological single-line header spanning the head/tail cut would
+  // otherwise be restored verbatim and defeat the 100k cap.
+  const hugeHeader = `[Vault Note: ${'t'.repeat(246_000)} (id: id-huge)]`;
+  const prompt = `q${'a'.repeat(80_000)}${hugeHeader}${'b'.repeat(20_000)}after`;
+  const bounded = boundPromptForExternalSdk(prompt);
+
+  assert.ok(bounded.length <= 100_000, `bounded length ${bounded.length} exceeds 100_000`);
+  const restored = bounded.match(/Omitted Vault note headers: (\[Vault Note: [^\]]*\])/)?.[1];
+  assert.ok(restored);
+  assert.ok(restored.length <= 400, `restored header length ${restored.length} exceeds cap`);
+  // The id-bearing tail and the `[Vault Note: ` prefix survive capping.
+  assert.match(restored, /^\[Vault Note: t+…/);
+  assert.match(restored, /…t+ \(id: id-huge\)\]$/);
 });

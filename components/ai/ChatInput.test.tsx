@@ -332,3 +332,21 @@ test('ChatInput wires /compact through getSystemSlashCommand and canCompact', ()
   assert.match(source, /onCompact\?\.\(\)/);
   assert.match(source, /command\.slug !== 'compact' \|\| canCompact/);
 });
+
+test('renders a Mention Note picker entry with a searchable note list', () => {
+  const source = readFileSync(new URL('./ChatInput.tsx', import.meta.url), 'utf8');
+
+  assert.match(source, /openInputPanelMenu\('noteMention'\)/);
+  assert.match(source, /ai\.chat\.menuMentionNote/);
+  assert.match(source, /aria-activedescendant=\{noteMentionItems\[activeMenuIndex\] \? `note-mention-/);
+  assert.match(source, /matchesVaultNoteSearch\(note, noteQuery\)/);
+  assert.match(source, /onClick=\{\(\) => handleSelectNoteMention\(note\)\}/);
+  assert.match(source, /onKeyDown=\{handleNoteMentionKeyDown\}/);
+});
+
+test('renders vault note attachment chips with the note title', () => {
+  const source = readFileSync(new URL('./ChatInput.tsx', import.meta.url), 'utf8');
+
+  assert.match(source, /file\.vaultNoteId \? \(/);
+  assert.match(source, /\{file\.vaultNoteTitle \|\| file\.filename\}/);
+});

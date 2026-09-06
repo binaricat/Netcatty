@@ -12,6 +12,7 @@ import type {
   DiscoveredAgent,
   ExternalAgentConfig,
 } from '../infrastructure/ai/types';
+import type { VaultNote } from '../domain/models';
 import type { ExecutorContext } from '../infrastructure/ai/cattyAgent/executor';
 import {
   filterAgentModelPresetsForCliVersion,
@@ -20,6 +21,7 @@ import {
   resolveAgentModelSelection,
 } from '../infrastructure/ai/types';
 import { getExternalAgentSdkBackend, getManualAgentCommand, matchesManagedAgentConfig } from '../infrastructure/ai/managedAgents';
+import { toast } from './ui/toast';
 import { useAgentDiscovery } from '../application/state/useAgentDiscovery';
 import {
   getReadyUserSkillOptions,
@@ -42,8 +44,9 @@ import { draftsByScopeEqualIgnoringComposerText, selectDraftForAgentSwitch } fro
 import { sanitizeContextWindow } from '../infrastructure/ai/contextCompaction';
 import {
   buildPromptWithTerminalSelectionAttachments,
-  isTerminalSelectionAttachment,
+  isInlineTextAttachment,
 } from '../application/state/terminalSelectionAttachment';
+import { attachVaultNoteMention, isVaultNoteAttachment } from '../application/state/vaultNoteAttachment';
 import type { CodexIntegrationStatus } from './settings/tabs/ai/types';
 import {
   useAIChatStreaming,
@@ -255,6 +258,8 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   showSessionView,
   clearDraftForScope,
   addDraftFiles,
+  addDraftAttachment,
+  refreshDraftVaultNoteAttachment,
   removeDraftFile,
   createSession,
   deleteSession,
@@ -590,12 +595,100 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
 
   const addFiles = useCallback(async (inputFiles: File[]) => {
     enterScopeDraftMode(currentAgentId, panelViewRef.current.mode === 'session');
-    await addDraftFiles(scopeKey, currentAgentId, inputFiles);
-  }, [addDraftFiles, currentAgentId, enterScopeDraftMode, scopeKey]);
+    const rejected = await addDraftFiles(scopeKey, currentAgentId, inputFiles);
+    if (rejected.length > 0) {
+      // The aggregate attachment budget (shared with vault-note mentions)
+      // rejected the files that would not fit, so surface the rejection to
+      // the user instead of silently dropping them.
+      console.warn(
+        `[AIChatSidePanel] ${rejected.length} file(s) skipped: aggregate attachment budget exceeded`,
+      );
+      toast.warning(t('ai.chat.attachmentBudgetExceeded', { count: rejected.length }));
+    }
+  }, [addDraftFiles, currentAgentId, enterScopeDraftMode, scopeKey, t]);
 
   const removeFile = useCallback((fileId: string) => {
     removeDraftFile(scopeKey, currentAgentId, fileId);
   }, [removeDraftFile, scopeKey, currentAgentId]);
+
+  /** Mention Note: attach a Vault → Notes entry as inline context for the next send. */
+  const mentionNote = useCallback((note: VaultNote) => {
+    const result = attachVaultNoteMention(
+      currentDraftRef.current?.attachments ?? [],
+      note,
+    );
+    const upload = result.upload;
+    if (!upload) {
+      if (result.status === 'budget') {
+        // The picker closes without attaching, so surface the rejection to the
+        // user instead of silently dropping the requested note.
+        console.warn(
+          '[AIChatSidePanel] Vault note mention skipped: aggregate attachment budget exceeded',
+        );
+        toast.warning(
+          t('ai.chat.mentionNoteBudgetExceeded', {
+            title: String(note.title || '').trim() || t('ai.chat.untitledNote'),
+          }),
+        );
+      } else if (result.status === 'invalid') {
+        // A note with an oversized/empty id cannot be attached (truncating the
+        // id would break `vault_notes_get` addressing), so surface that too
+        // instead of silently doing nothing.
+        console.warn(
+          '[AIChatSidePanel] Vault note mention skipped: note has an invalid id',
+        );
+        toast.error(
+          t('ai.chat.mentionNoteInvalid', {
+            title: String(note.title || '').trim() || t('ai.chat.untitledNote'),
+          }),
+        );
+      }
+      return;
+    }
+    enterScopeDraftMode(currentAgentId, panelViewRef.current.mode === 'session');
+    if (result.status === 'duplicate') {
+      // Re-mentioning a note refreshes the existing attachment in place
+      // instead of appending a second copy of the same note payload. The
+      // replacement and its budget decision happen together in the
+      // authoritative application-state updater: the `currentDraftRef`
+      // pre-check above could not see uploads another mutation (e.g. a file
+      // upload) already added, so a refreshed note that grew must not bypass
+      // the aggregate cap the non-duplicate path enforces. A rejection here
+      // must be surfaced to the user instead of silently dropping the note.
+      if (!refreshDraftVaultNoteAttachment(scopeKey, currentAgentId, upload)) {
+        console.warn(
+          '[AIChatSidePanel] Vault note mention skipped: aggregate attachment budget exceeded',
+        );
+        toast.warning(
+          t('ai.chat.mentionNoteBudgetExceeded', {
+            title: String(note.title || '').trim() || t('ai.chat.untitledNote'),
+          }),
+        );
+      }
+      return;
+    }
+    if (!addDraftAttachment(scopeKey, currentAgentId, upload)) {
+      // The authoritative state updater re-checks the budget against the
+      // current draft, which may already hold uploads the stale
+      // `currentDraftRef` pre-check above could not see, so a rejection here
+      // must be surfaced to the user instead of silently dropping the note.
+      console.warn(
+        '[AIChatSidePanel] Vault note mention skipped: aggregate attachment budget exceeded',
+      );
+      toast.warning(
+        t('ai.chat.mentionNoteBudgetExceeded', {
+          title: String(note.title || '').trim() || t('ai.chat.untitledNote'),
+        }),
+      );
+    }
+  }, [
+    addDraftAttachment,
+    currentAgentId,
+    enterScopeDraftMode,
+    refreshDraftVaultNoteAttachment,
+    scopeKey,
+    t,
+  ]);
 
   useEffect(() => {
     if (isVisible) return undefined;
@@ -1149,18 +1242,27 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
       filename: file.filename,
       filePath: file.filePath,
       terminalSelection: file.terminalSelection,
+      vaultNoteId: file.vaultNoteId,
+      vaultNoteTitle: file.vaultNoteTitle,
       previewText: file.previewText,
       lineCount: file.lineCount,
     }));
-    const hasTerminalSelectionAttachments = attachments.some(isTerminalSelectionAttachment);
-    if ((!trimmed && !hasTerminalSelectionAttachments) || isStreaming) return;
+    const hasInlineTextAttachments = attachments.some(isInlineTextAttachment);
+    if ((!trimmed && !hasInlineTextAttachments) || isStreaming) return;
+    // Note-only sends (empty text + a mentioned note) still need a usable
+    // session title: fall back to the first mentioned note's title so these
+    // conversations don't all show up as "Untitled" in history.
+    const noteOnlyTitle = attachments.find(
+      (attachment) => isVaultNoteAttachment(attachment) && attachment.vaultNoteTitle,
+    )?.vaultNoteTitle ?? '';
+    const titleText = trimmed || noteOnlyTitle.trim();
     const sendAgentId = currentSessionView?.agentId ?? draft?.agentId ?? currentAgentId;
     const agentConfig = sendAgentId !== 'catty' ? findEnabledExternalAgent(externalAgents, sendAgentId) : undefined;
     if (sendAgentId !== 'catty' && !agentConfig) return;
 
     const selectedSkillSlugs = draft?.selectedUserSkillSlugs ?? [];
     const modelPrompt = buildPromptWithTerminalSelectionAttachments(trimmed, attachments);
-    const modelAttachments = attachments.filter((attachment) => !isTerminalSelectionAttachment(attachment));
+    const modelAttachments = attachments.filter((attachment) => !isInlineTextAttachment(attachment));
     const isDraftMode = currentPanelView.mode === 'draft';
 
     flushDraftText();
@@ -1337,7 +1439,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         updateLastMessage(sessionId, msg => msg.statusText ? { ...msg, statusText: '' } : msg);
         setStreamingForScope(sessionId, false);
         abortControllersRef.current.delete(sessionId);
-        autoTitleSession(sessionId, trimmed);
+        autoTitleSession(sessionId, titleText);
       } else {
         const toolScope = {
           type: scopeType,
@@ -1360,7 +1462,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
           getExecutorContext: () => buildExecutorContextForScope(toolScope),
           autoTitleSession,
           selectedUserSkillSlugs: selectedSkillSlugs,
-          titleText: trimmed,
+          titleText,
         }, modelAttachments.length > 0 ? modelAttachments : undefined);
       }
     } finally {
@@ -1474,15 +1576,17 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
       filename: file.filename,
       filePath: file.filePath,
       terminalSelection: file.terminalSelection,
+      vaultNoteId: file.vaultNoteId,
+      vaultNoteTitle: file.vaultNoteTitle,
       previewText: file.previewText,
       lineCount: file.lineCount,
     }));
-    const hasTerminalSelectionAttachments = attachments.some(isTerminalSelectionAttachment);
-    if (!trimmed && !hasTerminalSelectionAttachments) return;
+    const hasInlineTextAttachments = attachments.some(isInlineTextAttachment);
+    if (!trimmed && !hasInlineTextAttachments) return;
 
     const userMessageId = generateId();
     const modelPrompt = buildPromptWithTerminalSelectionAttachments(trimmed, attachments);
-    const modelAttachments = attachments.filter((attachment) => !isTerminalSelectionAttachment(attachment));
+    const modelAttachments = attachments.filter((attachment) => !isInlineTextAttachment(attachment));
     setSteerWarnings(current => {
       const next = { ...current };
       delete next[sessionId];
@@ -1707,6 +1811,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         files={files}
         addFiles={addFiles}
         removeFile={removeFile}
+        onMentionNote={mentionNote}
         terminalSessions={terminalSessions}
         selectedUserSkills={selectedUserSkills}
         userSkillOptions={userSkillOptions}
@@ -1741,6 +1846,8 @@ const AI_CHAT_SIDE_PANEL_AI_STATE_KEYS = [
   'showSessionView',
   'clearDraftForScope',
   'addDraftFiles',
+  'addDraftAttachment',
+  'refreshDraftVaultNoteAttachment',
   'removeDraftFile',
   'createSession',
   'deleteSession',

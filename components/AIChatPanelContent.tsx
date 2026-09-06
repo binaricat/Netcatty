@@ -88,6 +88,8 @@ interface AIChatPanelContentProps {
   setGlobalPermissionMode?: (mode: AIPermissionMode) => void;
   notes?: VaultNote[];
   hosts?: Host[];
+  /** Mention Note: attach a Vault → Notes entry as inline context. */
+  onMentionNote?: (note: VaultNote) => void;
   onOpenVaultNote?: (noteId: string) => void;
   onOpenVaultHost?: (hostId: string) => void;
   onOpenVaultSection?: (section: 'notes' | 'hosts') => void;
@@ -157,6 +159,7 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
   setGlobalPermissionMode,
   notes = [],
   hosts = [],
+  onMentionNote,
   onOpenVaultNote,
   onOpenVaultHost,
   onOpenVaultSection,
@@ -361,6 +364,8 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
                   onAddFiles={addFiles}
                   onRemoveFile={removeFile}
                   hosts={mentionHosts}
+                  notes={notes}
+                  onMentionNote={onMentionNote}
                   selectedUserSkills={selectedUserSkills}
                   userSkills={userSkillOptions}
                   quickMessages={quickMessages}

@@ -105,6 +105,10 @@ export interface ChatMessageAttachment {
   filename?: string;
   filePath?: string;    // original filesystem path, when available
   terminalSelection?: boolean;
+  /** Set when the attachment was created from a Vault → Notes mention. */
+  vaultNoteId?: string;
+  /** Original note title, for display and prompt labels. */
+  vaultNoteTitle?: string;
   previewText?: string;
   lineCount?: number;
 }
@@ -117,6 +121,10 @@ export interface UploadedFile {
   mediaType: string;
   filePath?: string;
   terminalSelection?: boolean;
+  /** Set when the attachment was created from a Vault → Notes mention. */
+  vaultNoteId?: string;
+  /** Original note title, for display and prompt labels. */
+  vaultNoteTitle?: string;
   previewText?: string;
   lineCount?: number;
 }

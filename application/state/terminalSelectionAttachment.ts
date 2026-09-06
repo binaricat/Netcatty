@@ -1,10 +1,14 @@
 import type { ChatMessageAttachment, UploadedFile } from "../../infrastructure/ai/types";
+import {
+  decodeVaultNoteAttachment,
+  isVaultNoteAttachment,
+} from "./vaultNoteAttachment";
 
 export const TERMINAL_SELECTION_ATTACHMENT_MEDIA_TYPE = "text/plain";
 
 const MAX_PREVIEW_CHARS = 80;
 
-function bytesToBase64(bytes: Uint8Array): string {
+export function bytesToBase64(bytes: Uint8Array): string {
   let binary = "";
   const chunkSize = 0x8000;
 
@@ -16,7 +20,7 @@ function bytesToBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-function base64ToText(base64Data: string): string {
+export function base64ToText(base64Data: string): string {
   const binary = atob(base64Data);
   const bytes = new Uint8Array(binary.length);
 
@@ -39,7 +43,7 @@ function buildTimestamp(date: Date): string {
   ].join("-");
 }
 
-function getPreviewText(text: string): string {
+export function getPreviewText(text: string): string {
   const firstLine = text.split(/\r?\n/).find((line) => line.trim().length > 0) ?? "";
   return firstLine.length > MAX_PREVIEW_CHARS
     ? `${firstLine.slice(0, MAX_PREVIEW_CHARS - 1)}...`
@@ -81,6 +85,16 @@ export function isTerminalSelectionAttachment(
   return attachment.terminalSelection === true;
 }
 
+/**
+ * Attachments whose text is inlined into the prompt instead of being sent as
+ * file parts: terminal selections and Vault note mentions.
+ */
+export function isInlineTextAttachment(
+  attachment: Pick<ChatMessageAttachment | UploadedFile, "terminalSelection" | "vaultNoteId">,
+): boolean {
+  return isTerminalSelectionAttachment(attachment) || isVaultNoteAttachment(attachment);
+}
+
 export function buildPromptWithTerminalSelectionAttachments(
   prompt: string,
   attachments: Array<ChatMessageAttachment | UploadedFile>,
@@ -95,7 +109,22 @@ export function buildPromptWithTerminalSelectionAttachments(
     })
     .filter((block): block is string => block !== null);
 
-  if (terminalBlocks.length === 0) return prompt;
-  if (!prompt.trim()) return terminalBlocks.join("").trimStart();
-  return `${prompt}${terminalBlocks.join("")}`;
+  const noteBlocks = attachments
+    .filter(isVaultNoteAttachment)
+    .map((attachment) => {
+      const text = decodeVaultNoteAttachment(attachment);
+      // Only a decode failure (`null`) drops the block; an empty note body is
+      // valid content and must keep its header (title + note id) so the agent
+      // can still identify the attached note.
+      if (text === null) return null;
+      const title = attachment.vaultNoteTitle || attachment.filename || "note";
+      const noteId = attachment.vaultNoteId ? ` (id: ${attachment.vaultNoteId})` : "";
+      return `\n\n[Vault Note: ${title}${noteId}]\n${text}`;
+    })
+    .filter((block): block is string => block !== null);
+
+  const blocks = [...terminalBlocks, ...noteBlocks];
+  if (blocks.length === 0) return prompt;
+  if (!prompt.trim()) return blocks.join("").trimStart();
+  return `${prompt}${blocks.join("")}`;
 }

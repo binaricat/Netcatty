@@ -9,6 +9,7 @@ import type {
   AISession,
   AIPermissionMode,
   AIToolIntegrationMode,
+  ChatMessageAttachment,
 } from '../../infrastructure/ai/types';
 import type { ProviderContinuationOptions } from '../../infrastructure/ai/providerContinuation';
 import { findSafeChatMessageCompactionSplitIndex } from '../../infrastructure/ai/contextCompaction';
@@ -249,6 +250,56 @@ function stripEncryptedReasoningFromSession(session: AISession): AISession {
   return changed ? { ...session, messages } : session;
 }
 
+function stripAttachmentBodies(
+  attachments: ChatMessageAttachment[],
+): ChatMessageAttachment[] {
+  let changed = false;
+  const next = attachments.map(attachment => {
+    if (!attachment.base64Data) return attachment;
+    changed = true;
+    return {
+      ...attachment,
+      base64Data: '',
+    };
+  });
+  return changed ? next : attachments;
+}
+
+/**
+ * Replace an attachment's persisted base64 payload with a metadata-only stub.
+ * Attachment bodies (vault-note inlines, files, legacy images) are by far the
+ * largest per-message payload, and the aggregate draft budget only bounds a
+ * single turn: each send persists its attachments on the session message, so
+ * several large note-mention turns can push one session past every storage
+ * retry budget. Dropping the bodies keeps the conversation — including the
+ * attachment metadata — instead of leaving the whole chat memory-only after a
+ * failed write; the in-memory state is untouched.
+ */
+function stripAttachmentBodiesFromMessage(message: AISession['messages'][number]) {
+  const attachments = message.attachments
+    ? stripAttachmentBodies(message.attachments)
+    : undefined;
+  const images = message.images
+    ? stripAttachmentBodies(message.images)
+    : undefined;
+  if (attachments === message.attachments && images === message.images) return message;
+  return {
+    ...message,
+    ...(attachments !== undefined ? { attachments } : {}),
+    ...(images !== undefined ? { images } : {}),
+  };
+}
+
+function stripAttachmentBodiesFromSession(session: AISession): AISession {
+  let changed = false;
+  const messages = session.messages.map(message => {
+    const stripped = stripAttachmentBodiesFromMessage(message);
+    if (stripped !== message) changed = true;
+    return stripped;
+  });
+  return changed ? { ...session, messages } : session;
+}
+
 function stripCompactedEncryptedReasoningFromSession(session: AISession): AISession {
   const compactedMessageCount = Math.min(
     session.messages.length,
@@ -332,14 +383,46 @@ export function serializeSessionsForStorage(
     });
     const strippedSession = stripEncryptedReasoningFromSession(session);
     const json = JSON.stringify(session);
+    const attachmentStrippedMessages = session.messages.flatMap((message, index) => {
+      const strippedMessage = stripAttachmentBodiesFromMessage(message);
+      if (strippedMessage === message) return [];
+      return [{
+        index,
+        strippedMessage,
+        jsonLengthDelta: JSON.stringify(strippedMessage).length - JSON.stringify(message).length,
+      }];
+    });
+    const strippedJson = strippedSession === session
+      ? json
+      : JSON.stringify(strippedSession);
+    // Smallest representation this serializer can produce for the session
+    // (replay ciphertext and attachment bodies removed). Retention below
+    // must use this floor: a newest session carrying large attachment
+    // bodies can still deserve to keep older visible history once the
+    // attachment fallback strips those bodies, even though its full or
+    // ciphertext-stripped representations alone exceed the budget.
+    const minimalSession = stripAttachmentBodiesFromSession(strippedSession);
+    const minimalJson = minimalSession === strippedSession
+      ? strippedJson
+      : JSON.stringify(minimalSession);
+    // Floor for the newest session while its replay continuation stays
+    // protected: attachment bodies removed but ciphertext intact. The
+    // ciphertext-stripping loop never touches the newest session in that
+    // case, so `minimalJson` would understate the smallest size it can
+    // actually reach.
+    const attachmentStrippedSession = stripAttachmentBodiesFromSession(session);
+    const attachmentStrippedJson = attachmentStrippedSession === session
+      ? json
+      : JSON.stringify(attachmentStrippedSession);
     return {
       session,
       json,
       strippedSession,
-      strippedJson: strippedSession === session
-        ? json
-        : JSON.stringify(strippedSession),
+      strippedJson,
+      minimalJson,
+      attachmentStrippedJson,
       ciphertextMessages,
+      attachmentStrippedMessages,
     };
   });
 
@@ -349,19 +432,27 @@ export function serializeSessionsForStorage(
   const protectNewestContinuation = serialized.length > 0
     && serialized[0].json.length + 2 <= budgetBytes;
 
-  // Determine how many sessions can fit using the smallest representation for
-  // older sessions while reserving the newest session's full representation
-  // when possible. This also prevents an old, oversized visible chat that must
-  // be dropped anyway from causing newer replay ciphertext to be stripped.
+  // Determine how many sessions can fit using the smallest representation
+  // each session can actually reach while its continuation is preserved:
+  // the newest session is sized at its attachment-stripped floor (its
+  // replay ciphertext stays protected), older sessions at their fully
+  // stripped floor. Reserving the newest session's full representation
+  // here would evict older visible history even though its replay-unused
+  // attachment bodies could be stripped instead; the attachment fallback
+  // below removes those bodies oldest-first only when the budget requires
+  // it, so a newest session whose full JSON fits is persisted intact.
   let minimalLength = 2
     + serialized.reduce((total, entry, index) => (
-      total + (protectNewestContinuation && index === 0 ? entry.json.length : entry.strippedJson.length)
+      total
+      + (protectNewestContinuation && index === 0
+        ? entry.attachmentStrippedJson.length
+        : entry.minimalJson.length)
     ), 0)
     + Math.max(0, serialized.length - 1);
   while (minimalLength > budgetBytes && serialized.length > 1) {
     const removed = serialized.pop();
     if (!removed) break;
-    minimalLength -= removed.strippedJson.length + 1;
+    minimalLength -= removed.minimalJson.length + 1;
   }
 
   // Then keep full continuation data for the retained sessions and remove
@@ -399,6 +490,59 @@ export function serializeSessionsForStorage(
       const projectedJsonLength = current.json.length
         + current.ciphertextMessages
           .slice(0, strippedMessageCount)
+          .reduce((total, entry) => total + entry.jsonLengthDelta, 0);
+      jsonLength += nextJson.length - projectedJsonLength;
+      serialized[index] = {
+        ...current,
+        session: nextSession,
+        json: nextJson,
+      };
+    }
+  }
+
+  // Last resort when even the ciphertext budget failed: prune persisted
+  // attachment payloads oldest-first, including from the newest session.
+  // The aggregate attachment budget only bounds a single draft, so every
+  // sent turn keeps its attachment bodies on the session message and a chat
+  // with several large note mentions can outgrow every retry budget —
+  // without this fallback the newest chat fails to persist entirely and
+  // disappears on restart. Oldest messages lose their bodies first so the
+  // most recent turns keep theirs whenever possible.
+  for (let index = serialized.length - 1; index >= 0; index -= 1) {
+    if (jsonLength <= budgetBytes) break;
+    const current = serialized[index];
+    let strippedAttachmentCount = 0;
+    while (
+      jsonLength > budgetBytes
+      && strippedAttachmentCount < current.attachmentStrippedMessages.length
+    ) {
+      jsonLength += current.attachmentStrippedMessages[strippedAttachmentCount].jsonLengthDelta;
+      strippedAttachmentCount += 1;
+    }
+    if (strippedAttachmentCount > 0) {
+      // Strip from the current message rather than replacing it with
+      // `entry.strippedMessage`: that precomputed message was derived from
+      // the pre-ciphertext-prune session, so a message holding both an
+      // encrypted-reasoning payload and an attachment body would have the
+      // already-removed ciphertext restored here. `jsonLengthDelta` is only
+      // a projection; the actual size is measured from `nextJson` below.
+      const attachmentStrippedIndexes = new Set(
+        current.attachmentStrippedMessages
+          .slice(0, strippedAttachmentCount)
+          .map(entry => entry.index),
+      );
+      const nextSession = {
+        ...current.session,
+        messages: current.session.messages.map((message, messageIndex) => (
+          attachmentStrippedIndexes.has(messageIndex)
+            ? stripAttachmentBodiesFromMessage(message)
+            : message
+        )),
+      };
+      const nextJson = JSON.stringify(nextSession);
+      const projectedJsonLength = current.json.length
+        + current.attachmentStrippedMessages
+          .slice(0, strippedAttachmentCount)
           .reduce((total, entry) => total + entry.jsonLengthDelta, 0);
       jsonLength += nextJson.length - projectedJsonLength;
       serialized[index] = {

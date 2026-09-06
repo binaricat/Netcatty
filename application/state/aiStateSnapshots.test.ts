@@ -228,6 +228,94 @@ test('serializeSessionsForStorage keeps the newest replayable turn in one oversi
   );
 });
 
+test('serializeSessionsForStorage prunes attachment bodies oldest-first when over budget', async () => {
+  const { serializeSessionsForStorage } = await import('./aiStateSnapshots');
+  // Each sent turn persists its attachment bodies on the session message, so
+  // repeated large note-mention turns can exceed every storage retry budget
+  // even though each individual draft fit the aggregate attachment budget.
+  const body = 'A'.repeat(200 * 1024); // ~200 KB of note body per turn
+  const attachment = () => ({
+    base64Data: Buffer.from(body).toString('base64'),
+    mediaType: 'text/markdown',
+    filename: 'note.md',
+    vaultNoteId: 'note-1',
+    vaultNoteTitle: 'Note',
+    previewText: 'Note',
+  });
+  const message = (id: string) => ({
+    id,
+    role: 'user' as const,
+    content: '',
+    timestamp: 0,
+    attachments: [attachment()],
+  });
+  const session = makeSession('active', 1, [
+    message('turn-1'),
+    message('turn-2'),
+    message('turn-3'),
+  ]);
+
+  // A budget that only the attachment payloads can exceed: the chat itself
+  // must survive with attachment metadata intact instead of failing to
+  // persist entirely (which would leave the newest chat memory-only).
+  const result = serializeSessionsForStorage([session], 300 * 1024);
+
+  assert.ok(result.json.length <= 300 * 1024);
+  assert.deepEqual(result.sessions[0].messages.map(m => m.id), ['turn-1', 'turn-2', 'turn-3']);
+  // Oldest messages lose their bodies first...
+  assert.equal(result.sessions[0].messages[0].attachments?.[0].base64Data, '');
+  assert.equal(result.sessions[0].messages[1].attachments?.[0].base64Data, '');
+  // ...so the most recent turn keeps its body whenever possible.
+  assert.equal(
+    result.sessions[0].messages[2].attachments?.[0].base64Data,
+    Buffer.from(body).toString('base64'),
+  );
+  // Metadata still travels with the stripped attachments.
+  assert.equal(result.sessions[0].messages[0].attachments?.[0].vaultNoteId, 'note-1');
+});
+
+test('serializeSessionsForStorage retains older sessions when the newest chat exceeds the budget via attachment bodies', async () => {
+  const { serializeSessionsForStorage } = await import('./aiStateSnapshots');
+  const body = 'A'.repeat(200 * 1024); // ~267 KB base64-encoded
+  const newest = makeSession('newest', 2, [{
+    id: 'new-message',
+    role: 'user',
+    content: '',
+    timestamp: 2,
+    attachments: [{
+      base64Data: Buffer.from(body).toString('base64'),
+      mediaType: 'text/markdown',
+      filename: 'note.md',
+      vaultNoteId: 'note-1',
+      vaultNoteTitle: 'Note',
+      previewText: 'Note',
+    }],
+  }]);
+  const olderVisible = makeSession('older', 1, [{
+    id: 'older-message',
+    role: 'user',
+    content: 'x'.repeat(50 * 1024),
+    timestamp: 1,
+  }]);
+
+  // The newest session's full representation alone exceeds the budget, but
+  // stripping its attachment bodies leaves room for the older chat too, so
+  // the retention decision must not evict the older session first.
+  const result = serializeSessionsForStorage([olderVisible, newest], 200 * 1024);
+
+  assert.deepEqual(result.sessions.map(session => session.id), ['newest', 'older']);
+  assert.ok(result.json.length <= 200 * 1024);
+  assert.equal(
+    result.sessions[0].messages[0].attachments?.[0].base64Data,
+    '',
+  );
+  assert.equal(
+    result.sessions[0].messages[0].attachments?.[0].vaultNoteId,
+    'note-1',
+  );
+  assert.equal(result.sessions[1].messages[0].content, 'x'.repeat(50 * 1024));
+});
+
 test('serializeSessionsForStorage drops compacted ciphertext before protecting the newest chat', async () => {
   const { serializeSessionsForStorage } = await import('./aiStateSnapshots');
   const ciphertext = 'gAAAA'.repeat(20 * 1024); // ~100 KB per reasoning turn
