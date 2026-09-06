@@ -342,12 +342,16 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
   const mountedRef = useRef(true);
   const agentPathRequestIdRef = useRef<Partial<Record<ManagedAgentKey, number>>>({});
   const codexRequestIdRef = useRef(0);
-  useEffect(() => () => {
-    mountedRef.current = false;
-    codexRequestIdRef.current += 1;
-    for (const key of ["codex", "claude", "copilot", "cursor", "codebuddy", "opencode", "grok"] as ManagedAgentKey[]) {
-      agentPathRequestIdRef.current[key] = (agentPathRequestIdRef.current[key] ?? 0) + 1;
-    }
+  useEffect(() => {
+    mountedRef.current = true;
+    const agentPathRequestIds = agentPathRequestIdRef.current;
+    return () => {
+      mountedRef.current = false;
+      codexRequestIdRef.current += 1;
+      for (const key of ["codex", "claude", "copilot", "cursor", "codebuddy", "opencode", "grok"] as ManagedAgentKey[]) {
+        agentPathRequestIds[key] = (agentPathRequestIds[key] ?? 0) + 1;
+      }
+    };
   }, []);
 
   const applyResolvedAgentPath = useCallback((
