@@ -154,6 +154,13 @@ export type TerminalSessionStartersContext = {
   // SSH attempt must send `reuseTransport: false` so the bridge never borrows
   // the source's live or any other pooled transport.
   requireFreshConnection?: boolean;
+  // Set by the reconnect path (manual retry / auto-reconnect) for the rest of
+  // the pane's lifetime: every SSH attempt must dial a brand-new connection
+  // instead of borrowing a live or idle pooled transport. Reusing an
+  // already-authenticated connection skips the server-side login, so remote
+  // supplementary-group changes (e.g. `usermod -aG`) stay invisible until the
+  // whole app quits (#3293).
+  requireFreshConnectionOnReconnectRef?: MutableRefObject<boolean>;
   // Persists across renderer auth retries after the one-shot source intent is
   // consumed. Cleared only after a backend session starts successfully.
   reuseConnectionSourceAttemptedRef?: MutableRefObject<boolean>;

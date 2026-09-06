@@ -528,6 +528,44 @@ test("startSSH requests a fresh transport for Duplicate Session clones", async (
   assert.equal(captured[2].reuseTransport, false);
 });
 
+test("startSSH dials a fresh transport once a pane has reconnected (#3293)", async () => {
+  const captured: Record<string, unknown>[] = [];
+  const terminalBackend = {
+    backendAvailable: () => true,
+    startSSHSession: async (options: Record<string, unknown>) => {
+      captured.push(options);
+      return `ssh-session-${captured.length}`;
+    },
+    onSessionData: () => noop,
+    onSessionExit: () => noop,
+    onChainProgress: () => noop,
+    writeToSession: noop,
+    resizeSession: noop,
+  };
+
+  // Before any reconnect the flag is unset: an ordinary open stays eligible
+  // for endpoint/idle transport reuse.
+  await createTerminalSessionStarters(createStarterContext({
+    shouldUseFreshSshConnection: () => false,
+    requireFreshConnectionOnReconnectRef: { current: false },
+    terminalBackend,
+  }) as never).startSSH(createTermStub() as never);
+  assert.equal(captured[0].reuseTransport, undefined);
+
+  // After a reconnect (manual retry / auto-reconnect) every attempt must dial
+  // a brand-new connection so the server performs a fresh login and picks up
+  // remote supplementary-group changes (e.g. `usermod -aG`).
+  const reconnectedStarters = createTerminalSessionStarters(createStarterContext({
+    shouldUseFreshSshConnection: () => false,
+    requireFreshConnectionOnReconnectRef: { current: true },
+    terminalBackend,
+  }) as never);
+  await reconnectedStarters.startSSH(createTermStub() as never);
+  await reconnectedStarters.startSSH(createTermStub() as never);
+  assert.equal(captured[1].reuseTransport, false);
+  assert.equal(captured[2].reuseTransport, false);
+});
+
 test("startSSH commits an empty automation snapshot only after the backend session succeeds", async () => {
   let resolveStart: ((sessionId: string) => void) | undefined;
   let commitCount = 0;

@@ -564,6 +564,11 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const reconnectWakeInvalidateModeRef = useRef<"dispose" | "keep">("dispose");
   const reconnectWakeTokenRef = useRef<symbol | null>(null);
   const manualReconnectRequestRef = useRef<() => void>(() => {});
+  // Once a pane reconnects, every later SSH attempt in it must dial a fresh
+  // connection: reusing a live/idle pooled transport multiplexes onto the old
+  // login, so remote supplementary-group changes (e.g. `usermod -aG`) are not
+  // picked up until the app fully quits (#3293). See createTerminalSessionStarters.
+  const requireFreshConnectionOnReconnectRef = useRef(false);
   const terminalDataCapturedRef = useRef(false);
   const connectionLogBufferRef = useRef(createConnectionLogBuffer(MAX_CONNECTION_LOG_DATA_CHARS));
   const terminalOutputHistoryRef = useRef(createTerminalOutputHistoryPreview());
@@ -2375,6 +2380,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     sessionId,
     reuseConnectionFromSessionIdRef: reuseConnectionSourceRef,
     requireFreshConnection,
+    requireFreshConnectionOnReconnectRef,
     reuseConnectionSourceAttemptedRef,
     setConnectionReuseAttemptSourceId,
     shouldUseFreshSshConnection: () => {
@@ -3627,6 +3633,10 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     const retryStillActive = () => retryTokenStillCurrent() && termRef.current === term;
 
     bootEpochRef.current += 1;
+    // This start is a reconnect: force the bridge to dial a fresh connection
+    // instead of borrowing a parked/live transport, so the server performs a
+    // new login and picks up remote supplementary-group changes (#3293).
+    requireFreshConnectionOnReconnectRef.current = true;
     publishBootEpoch();
     isBootActiveRef.current = true;
     auth.resetForRetry();
