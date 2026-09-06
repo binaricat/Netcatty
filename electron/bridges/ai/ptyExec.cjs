@@ -200,6 +200,9 @@ function startPtyJob(ptyStream, command, options) {
   // Foreground execs use the configured timeoutMs as the deadline (matching
   // the pre-PR behavior); background jobs use a fixed 30s since their main
   // timeout is much longer (1 hour) and meant for the actual command.
+  // The timer is armed once input delivery completes (see writeInput) so the
+  // paced-typing time for oversized probes/wrappers is excluded from the
+  // startup budget instead of counting against it.
   const BG_STARTUP_TIMEOUT_MS = 30000;
   function armStartupTimeout() {
     const startupMs = maxBufferedChars > 0 ? BG_STARTUP_TIMEOUT_MS : timeoutMs;
@@ -652,7 +655,6 @@ function startPtyJob(ptyStream, command, options) {
 
   armOutputTimeout();
   armWallTimeout();
-  armStartupTimeout();
 
   unsubscribe = subscribeToPtyData(ptyStream, onData);
 
@@ -759,6 +761,12 @@ function startPtyJob(ptyStream, command, options) {
             finish(preStartOutput, -1, `Terminal input failed: ${error.message}`);
           }
         }, 30);
+      } else {
+        // Input delivery is complete: only now does the startup deadline
+        // begin, so paced typing time never consumes the startup budget.
+        if (!finished && !cancelRequested && generation === inputWriteGeneration) {
+          armStartupTimeout();
+        }
       }
     };
     writeNext();
