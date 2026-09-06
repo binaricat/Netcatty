@@ -15,6 +15,7 @@ const unlockedIdentityByManager = new WeakMap<AutoUnlockManager, string>();
 // same manager observes the same events, and without sharing they would each
 // run the expensive PBKDF2 derivation inside manager.unlock.
 const attemptedAttemptByManager = new WeakMap<AutoUnlockManager, string | null>();
+const passwordRevisionByManager = new WeakMap<AutoUnlockManager, number>();
 const completedAttemptByManager = new WeakMap<AutoUnlockManager, string>();
 // Mounted consumers register a retry trigger here so an attempt can be handed
 // off when its owner unmounts (see the cleanup below).
@@ -28,15 +29,16 @@ export function useCloudSyncAutoUnlock(input: {
   bridge: AutoUnlockBridge | null | undefined;
 }) {
   const { securityState, masterKeyIdentity, manager, bridge } = input;
-  const [passwordRevision, setPasswordRevision] = useState(0);
+  const [retryRevision, setRetryRevision] = useState(0);
 
   useEffect(() => bridge?.onCloudSyncSessionPasswordAvailable?.(() => {
-    setPasswordRevision(value => value + 1);
-  }), [bridge]);
+    passwordRevisionByManager.set(manager, (passwordRevisionByManager.get(manager) ?? 0) + 1);
+    setRetryRevision(value => value + 1);
+  }), [bridge, manager]);
 
   useEffect(() => {
     if (!masterKeyIdentity) return;
-    const attempt = JSON.stringify([masterKeyIdentity, passwordRevision]);
+    const attempt = JSON.stringify([masterKeyIdentity, passwordRevisionByManager.get(manager) ?? 0]);
     if (securityState === 'UNLOCKED') {
       unlockedIdentityByManager.set(manager, masterKeyIdentity);
       attemptedAttemptByManager.set(manager, attempt);
@@ -53,7 +55,7 @@ export function useCloudSyncAutoUnlock(input: {
       listeners = new Set();
       retryListenersByManager.set(manager, listeners);
     }
-    const notifyRetry = () => setPasswordRevision(value => value + 1);
+    const notifyRetry = () => setRetryRevision(value => value + 1);
     listeners.add(notifyRetry);
     const removeListener = () => {
       listeners.delete(notifyRetry);
@@ -109,5 +111,5 @@ export function useCloudSyncAutoUnlock(input: {
         for (const notify of listeners) notify();
       }
     };
-  }, [securityState, masterKeyIdentity, manager, bridge, passwordRevision]);
+  }, [securityState, masterKeyIdentity, manager, bridge, retryRevision]);
 }

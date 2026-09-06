@@ -199,3 +199,55 @@ test('remount during an active derivation does not start a duplicate unlock', as
     assert.equal(unlocks, 1);
   } finally { await renderer.unmount(); dom.cleanup(); }
 });
+
+test('two StrictMode consumers share one derivation after initial effect replay', async () => {
+  const dom = installDomEnvironment();
+  const renderer = await createDomRenderer(dom.document);
+  const pending: Array<(value: string | null) => void> = [];
+  let unlocks = 0;
+  const manager = { unlock: async () => { unlocks++; return true; } };
+  const bridge = { cloudSyncGetSessionPassword: () => new Promise<string | null>(resolve => pending.push(resolve)) };
+  function Consumer() {
+    useCloudSyncAutoUnlock({ securityState: 'LOCKED', masterKeyIdentity: 'strict-shared', manager, bridge });
+    return null;
+  }
+  try {
+    await renderer.render(React.createElement(React.StrictMode, null,
+      React.createElement(Consumer, { key: 'one' }), React.createElement(Consumer, { key: 'two' })));
+    await flushEffects();
+    await runWithAct(async () => { for (const resolve of pending) resolve('fixture-only'); });
+    await flushEffects();
+    assert.equal(unlocks, 1);
+  } finally { await renderer.unmount(); dom.cleanup(); }
+});
+
+test('password notification and a later peer mount share the same attempt', async () => {
+  const dom = installDomEnvironment();
+  const renderer = await createDomRenderer(dom.document);
+  let password: string | null = null;
+  const listeners = new Set<() => void>();
+  let unlocks = 0;
+  const manager = { unlock: async () => { unlocks++; return false; } };
+  const bridge = {
+    cloudSyncGetSessionPassword: async () => password,
+    onCloudSyncSessionPasswordAvailable: (cb: () => void) => { listeners.add(cb); return () => { listeners.delete(cb); }; },
+  };
+  function Consumer() {
+    useCloudSyncAutoUnlock({ securityState: 'LOCKED', masterKeyIdentity: 'notification-key', manager, bridge });
+    return null;
+  }
+  const tree = (late: boolean) => React.createElement(React.Fragment, null,
+    React.createElement(Consumer, { key: 'one' }), React.createElement(Consumer, { key: 'two' }),
+    late ? React.createElement(Consumer, { key: 'late' }) : null);
+  try {
+    await renderer.render(tree(false));
+    await flushEffects();
+    assert.equal(unlocks, 0);
+    await runWithAct(async () => { password = 'fixture-only'; for (const cb of listeners) cb(); });
+    await flushEffects();
+    assert.equal(unlocks, 1);
+    await renderer.render(tree(true));
+    await flushEffects();
+    assert.equal(unlocks, 1, 'new consumers share the notification generation');
+  } finally { await renderer.unmount(); dom.cleanup(); }
+});
