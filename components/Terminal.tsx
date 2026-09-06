@@ -254,6 +254,7 @@ import {
 import {
   alignTerminalViewportScroll,
   AUTO_RUN_SNIPPET_LINE_DELAY_MS,
+  deferScrollRestoreDuringSynchronizedOutput,
   forceSyncRenderAfterResize,
   MAX_CONNECTION_LOG_DATA_CHARS,
   shouldDelayAutoRunSnippetInput,
@@ -2995,14 +2996,21 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         alignTerminalViewportScroll(term);
 
         // Preserve scroll position across resize (superset/Tabby pattern).
-        if (wasPinnedToBottom) {
-          term.scrollToBottom();
-        } else {
-          const targetY = Math.min(savedViewportY, term.buffer.active.baseY);
-          if (term.buffer.active.viewportY !== targetY) {
-            term.scrollToLine(targetY);
+        // While synchronized output (DECSET 2026) is active,
+        // alignTerminalViewportScroll defers DOM positioning to xterm's
+        // queued viewport sync; this restore is relative and would apply the
+        // resize delta twice through the still-stale DOM offset, so defer it
+        // until the mode ends as well (#3299).
+        deferScrollRestoreDuringSynchronizedOutput(term, () => {
+          if (wasPinnedToBottom) {
+            term.scrollToBottom();
+          } else {
+            const targetY = Math.min(savedViewportY, term.buffer.active.baseY);
+            if (term.buffer.active.viewportY !== targetY) {
+              term.scrollToLine(targetY);
+            }
           }
-        }
+        });
         term.refresh(0, Math.max(0, term.rows - 1));
 
         if (typeof requestAnimationFrame === "function") {

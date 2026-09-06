@@ -594,3 +594,33 @@ export function alignTerminalViewportScroll(term: XTerm): void {
     logger.warn("Align viewport scroll after resize failed", err);
   }
 }
+
+/**
+ * Apply the caller's post-resize scroll restore, deferring it while
+ * synchronized output (DECSET 2026) is active.
+ *
+ * `alignTerminalViewportScroll` leaves DOM positioning to xterm's deferred
+ * viewport sync while that mode is on. The caller's restore (public
+ * scrollToLine/scrollToBottom) is a *relative* scroll through the still-stale
+ * DOM offset, so running it immediately would apply the resize delta twice and
+ * the deferred sync would then preserve the wrong reading row (#3299). Defer
+ * the restore to the first render after the mode ends: xterm's viewport
+ * registered its own onRender handler earlier, so it re-syncs with fresh
+ * scroll dimensions during that same render before the restore runs.
+ */
+export function deferScrollRestoreDuringSynchronizedOutput(
+  term: XTerm,
+  restore: () => void,
+): void {
+  if (!term.modes?.synchronizedOutputMode) {
+    restore();
+    return;
+  }
+  let listener: { dispose: () => void } | undefined;
+  listener = term.onRender(() => {
+    if (term.modes?.synchronizedOutputMode) return;
+    listener?.dispose();
+    listener = undefined;
+    restore();
+  });
+}
