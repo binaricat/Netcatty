@@ -16,7 +16,7 @@ function buildLiveShellProbe(marker) {
   // The builtin completion marker still runs if sh cannot launch. Leave it
   // unterminated so preload hides the intermediate prompt and wrapper echo
   // on the same marker-bearing line, including across output chunks.
-  return ` true ${marker}; command sh -c '${script}' 2>/dev/null && eval '${buildBashHistoryCleanup(marker)}'; printf '%s' '${marker}_Q'\n`;
+  return ` true ${marker}; command sh -c '${script}' 2>/dev/null && builtin eval '${buildBashHistoryCleanup(marker)}'; printf '%s' '${marker}_Q'\n`;
 }
 
 function parseLiveShellProbe(output, marker) {

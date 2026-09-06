@@ -163,7 +163,7 @@ test('real PTY: echo-disabled bash completes output without a trailing newline',
   }
 });
 
-for (const customization of [':', 'HISTCONTROL=ignorespace', "alias history='history 10'", 'history() { :; }']) {
+for (const customization of [':', 'HISTCONTROL=ignorespace', "alias history='history 10'", 'history() { :; }', "alias eval=':'", 'eval() { :; }']) {
   for (const executeCommand of [false, true]) {
     test(`bash probe keeps user history clean (${customization}, wrapper=${executeCommand})`, () => {
       const { spawnSync } = require('node:child_process');
