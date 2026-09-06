@@ -259,3 +259,23 @@ for (const invocationName of ['sh', 'renamed-bash']) {
     }
   });
 }
+
+for (const [shell, args] of [
+  ['/bin/dash', ['-i']],
+  ['/bin/zsh', ['-f', '-i']],
+  ['/bin/bash', ['--noprofile', '--norc', '-i']],
+]) {
+  test(`probe preserves an interactive errexit session in ${shell}`, (t) => {
+    const { spawnSync } = require('node:child_process');
+    const marker = '__NCMCP_ERREXIT_PROBE__';
+    const result = spawnSync(shell, args, {
+      input: 'set -e\n' + buildLiveShellProbe(marker) + '\necho shell_survived\nexit\n',
+      encoding: 'utf8', env: { ...process.env, TERM: 'dumb', HISTFILE: '/dev/null' }, timeout: 5000,
+    });
+    if (result.error?.code === 'ENOENT') return t.skip(`${shell} is unavailable`);
+    assert.ifError(result.error);
+    assert.equal(result.status, 0, result.stderr);
+    assert.ok(result.stdout.includes(`${marker}_Q`), result.stdout);
+    assert.ok(result.stdout.includes('shell_survived'), result.stdout);
+  });
+}
