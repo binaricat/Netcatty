@@ -2897,8 +2897,8 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     marker: IMarker;
     // Marker line observed at the last scroll notification, so a trim shows
     // up as a one-row marker shift between consecutive events. Also keeps
-    // the last valid anchor when a wider reflow disposes the marker by
-    // merging its row into a surviving row (see restoreScroll).
+    // the last valid anchor while a marker is disposed (its row was trimmed
+    // out of the buffer or merged into a surviving row, see restoreScroll).
     lastMarkerLine: number;
     scrollListener?: { dispose: () => void };
   };
@@ -3042,14 +3042,34 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         // A wider reflow merges the marker's row into a surviving row ABOVE
         // it, so the pre-resize numeric index overstates the anchor by the
         // number of rows the reflow deleted above it (multiple wrapped
-        // continuations can collapse in one fit). Capture the row's text so
-        // a marker disposed by this reflow can be remapped to the surviving
-        // merged row after the resize: the removed row's content reappears
-        // verbatim inside the row that absorbed it.
-        const preResizeMarkerText =
-          preResizeMarkerLine >= 0
-            ? (term.buffer.active.getLine(preResizeMarkerLine)?.translateToString(true) ?? '')
-            : '';
+        // continuations can collapse in one fit). Capture the marker row's
+        // wrapped logical line — its full concatenated text and the marker
+        // row's cell offset within that text — so a marker disposed by this
+        // reflow can be remapped to the row that now holds the same cell
+        // offset after the resize: the new wrap width re-splits the logical
+        // line at different columns, so the old row's text is not guaranteed
+        // to occur inside any single surviving row (it can straddle two).
+        const preResizeMarkerInfo = (() => {
+          if (preResizeMarkerLine < 0) return null;
+          const buffer = term.buffer.active;
+          if (!buffer.getLine(preResizeMarkerLine)) return null;
+          let start = preResizeMarkerLine;
+          while (start > 0 && buffer.getLine(start - 1)?.isWrapped) start--;
+          let text = '';
+          const rowStartOffsets: number[] = [];
+          for (let y = start; ; y++) {
+            const line = buffer.getLine(y);
+            if (!line) break;
+            rowStartOffsets.push(text.length);
+            text += line.translateToString(true);
+            if (!buffer.getLine(y + 1)?.isWrapped) break;
+          }
+          if (!text.trim()) return null;
+          return {
+            text,
+            offset: rowStartOffsets[preResizeMarkerLine - start] ?? text.length,
+          };
+        })();
         const reflowsWider = dimensions.cols > term.cols;
         if (term.cols !== dimensions.cols || term.rows !== dimensions.rows) {
           term.resize(dimensions.cols, dimensions.rows);
@@ -3069,19 +3089,39 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         alignTerminalViewportScroll(term);
 
         // Remap a disposed marker's anchor to the surviving wrapped row (see
-        // the preResizeMarkerText capture above): xterm disposes the marker
+        // the preResizeMarkerInfo capture above): xterm disposes the marker
         // when this reflow deleted its row, and the pre-resize index now
         // belongs to a later line once the deleted rows above it collapse.
+        // Match whole logical lines (consecutive rows joined by isWrapped)
+        // against the captured logical text, then land on the row that now
+        // holds the marker row's cell offset: the new wrap width can split
+        // the old row's text across two rows, so per-row matching would
+        // either miss the anchor or latch onto unrelated repeated output.
         const remappedMarkerAnchor = (() => {
-          if (!reflowsWider || preResizeMarkerLine <= 0) return preResizeMarkerLine;
-          const text = preResizeMarkerText.trim();
-          if (!text) return preResizeMarkerLine;
+          if (!reflowsWider || preResizeMarkerLine <= 0 || !preResizeMarkerInfo) {
+            return preResizeMarkerLine;
+          }
           const buffer = term.buffer.active;
           const minLine = Math.max(preResizeMarkerLine - 500, 0);
           for (let y = preResizeMarkerLine - 1; y >= minLine; y--) {
             const line = buffer.getLine(y);
             if (!line) break;
-            if (line.translateToString(true).includes(text)) return y;
+            if (line.isWrapped) continue;
+            let text = '';
+            const rowStartOffsets: number[] = [];
+            for (let end = y; ; end++) {
+              const groupLine = buffer.getLine(end);
+              if (!groupLine) break;
+              rowStartOffsets.push(text.length);
+              text += groupLine.translateToString(true);
+              if (!buffer.getLine(end + 1)?.isWrapped) break;
+            }
+            if (text.includes(preResizeMarkerInfo.text)) {
+              for (let i = rowStartOffsets.length - 1; i >= 0; i--) {
+                if (rowStartOffsets[i] <= preResizeMarkerInfo.offset) return y + i;
+              }
+              return y;
+            }
           }
           return preResizeMarkerLine;
         })();
@@ -3136,11 +3176,24 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           // surviving row, so its text still exists): remap the anchor to
           // that surviving row instead of copying the stale pre-resize
           // index, which now belongs to a later line once the rows deleted
-          // above it collapse. A narrower reflow can genuinely trim the
-          // marker's row out of the scrollback, where -1 stays accurate.
-          tracker.lastMarkerLine = tracker.marker.line >= 0
-            ? tracker.marker.line
-            : (reflowsWider ? remappedMarkerAnchor : -1);
+          // above it collapse, and re-pin a fresh marker there — a disposed
+          // marker reports -1 and can no longer follow trims, leaving the
+          // onScroll handler unable to tell a scrollback trim from a
+          // one-row user scroll. A narrower reflow can genuinely trim the
+          // marker's row out of the scrollback, where -1 stays accurate and
+          // no surviving row exists to re-pin to.
+          if (tracker.marker.line >= 0) {
+            tracker.lastMarkerLine = tracker.marker.line;
+          } else if (reflowsWider) {
+            tracker.marker.dispose();
+            tracker.marker = registerSavedRowMarker(
+              term,
+              Math.min(remappedMarkerAnchor, term.buffer.active.baseY),
+            );
+            tracker.lastMarkerLine = tracker.marker.line;
+          } else {
+            tracker.lastMarkerLine = -1;
+          }
         } else {
           if (retainedTracker && retainedTracker.term === term) {
             retainedTracker.scrollListener?.dispose();
@@ -3187,17 +3240,16 @@ const TerminalComponent: React.FC<TerminalProps> = ({
             if (term.buffer.active !== tracker.buffer) return;
             if (y !== tracker.lastScrollY) {
               // A live marker matches the trim signature when it shifted
-              // down one row together with the reported row. A marker
-              // disposed by a wider reflow (its row was merged into a
-              // surviving row) reports -1 for the rest of the mode and can
-              // no longer follow trims, but lastMarkerLine still anchors
-              // that surviving row: a one-row decrement of the reported row
-              // is then a trim, not a user scroll, so shift the anchor down
-              // with it (clamped at the top of the buffer, where the
-              // restore's target clamps too). A genuine one-row user scroll
-              // is indistinguishable in that disposed-marker state and is
-              // deliberately resolved in favor of the trim, which recurs on
-              // every output line while the mode stays active.
+              // down one row together with the reported row. The fit path
+              // re-pins a marker disposed by a wider reflow to the surviving
+              // merged row, so this handler keeps that unambiguous signal
+              // there too. The remaining disposed-marker case is a marker
+              // trimmed out of the buffer at row 0 — a trim already happened
+              // and clamped its anchor at the top of the buffer, where the
+              // restore's target clamps too — so a one-row decrement of the
+              // reported row is still a trim; shift the anchor down with it
+              // (a genuine one-row user scroll cannot move a live marker,
+              // and in this state the anchor is already at the top).
               const markerLine = tracker.marker.line;
               if (
                 y === tracker.lastScrollY - 1 &&
