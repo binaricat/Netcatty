@@ -160,6 +160,25 @@ test('boundPromptForExternalSdk preserves headers whose titles contain brackets'
   assert.match(bounded, /Omitted Vault note headers: \[Vault Note: Nested \[\[x\]\] \(id: note-456\)\]/);
 });
 
+test('boundPromptForExternalSdk re-states headers whose ids contain delimiters', () => {
+  const note = (title: string, id: string, size: number) => (
+    `\n\n[Vault Note: ${title} (id: ${id})]\n${'body '.repeat(size / 5)}`
+  );
+  // Imported or synced note ids may contain `)` or `]`: the header must still
+  // be matched and re-stated verbatim so the exact id stays recoverable. Both
+  // headers fall in the omitted span.
+  const prompt = (
+    'question' +
+    note('Parens', 'note(1)', 50_000) +
+    'x'.repeat(40_000) +
+    note('Brackets', 'note[2]', 20_000)
+  );
+  const bounded = boundPromptForExternalSdk(prompt);
+
+  assert.match(bounded, /\[Vault Note: Parens \(id: note\(1\)\)\]/);
+  assert.match(bounded, /Omitted Vault note headers: \[Vault Note: Brackets \(id: note\[2\]\)\]/);
+});
+
 test('boundPromptForExternalSdk re-states headers straddling either cut', () => {
   const pad = (character: string, size: number) => character.repeat(size);
   // The third note's header straddles the head/tail boundary: the tail keeps

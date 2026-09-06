@@ -73,9 +73,14 @@ const EXTERNAL_PROMPT_TAIL_CHARS = 16_000;
 const EXTERNAL_PROMPT_MAX_NOTE_HEADER_CHARS = 400;
 // Note titles may themselves contain `]` (e.g. `Deploy [prod]`), so the match
 // cannot stop at the first closing bracket: anchor on the generated
-// ` (id: <noteId>)]` suffix instead. The note id never contains `)`, `]`, or
-// a newline.
-const NOTE_HEADER_PATTERN = /\[Vault Note: [^\n]*? \(id: [^\]\n)]*\)\]/g;
+// ` (id: <noteId>)]` suffix instead. Imported or synced note ids may also
+// contain `)` or `]`, so the id part must not exclude them either: the title
+// matches lazily up to the first ` (id: ` and the id matches greedily up to
+// the last `)]` on the line — the generated header always ends its line with
+// `)]`, so the full header (including an id bearing `)` or `]`) is matched
+// verbatim. An id containing a newline would split the header across lines
+// and cannot be matched or restored.
+const NOTE_HEADER_PATTERN = /\[Vault Note: [^\n]*? \(id: [^\n]*\)\]/g;
 
 /** Cap a restored note header, keeping its prefix and id-bearing tail. */
 function capNoteHeader(header: string): string {
