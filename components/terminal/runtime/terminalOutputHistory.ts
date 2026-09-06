@@ -238,6 +238,17 @@ const isAsciiOnly = (text: string): boolean => {
 const pieceCellWidth = (text: string): number =>
   isAsciiOnly(text) ? text.length : stringCellWidth(text);
 
+/** UTF-16 units of the first grapheme of `text` ("" when empty). */
+const firstGraphemeUnits = (text: string): string =>
+  outputGraphemeSegmenter.segment(text)[Symbol.iterator]().next().value?.segment ?? "";
+
+/** UTF-16 units of the last grapheme of `text` ("" when empty). */
+const lastGraphemeUnits = (text: string): string => {
+  let last = "";
+  for (const { segment } of outputGraphemeSegmenter.segment(text)) last = segment;
+  return last;
+};
+
 /**
  * Wrap one transcript line into viewport-sized rows. Continuation rows carry
  * the same `isWrapped` flag xterm uses so soft-wrapped selection joins keep
@@ -370,6 +381,13 @@ export const createTerminalOutputHistoryPreview = (options?: {
   let autowrap = true;
   // Cursor saved by SC/DECSC (CSI s / ESC 7) for CSI u / ESC 8 to restore.
   let savedCursor: { row: number; cell: number } | null = null;
+  // UTF-16 units of the grapheme the last appending write left open at the
+  // line tail, plus the cursor cell just past it. The backend can split a
+  // grapheme across display chunks (base in one chunk, its ZWJ / combining
+  // mark / trailing surrogate in the next) while xterm's grapheme provider
+  // joins them across writes, so the next span must be able to rejoin it.
+  let openGrapheme: string | null = null;
+  let openGraphemeCell = 0;
   let cacheDirty = true;
   let cacheCols = -1;
   let cacheRows: HistoryPreviewRow[] = [];
@@ -379,6 +397,7 @@ export const createTerminalOutputHistoryPreview = (options?: {
     lineWrapFlags.push(currentStartsWrapped);
     totalChars += current.length;
     current = "";
+    openGrapheme = null;
     currentCellWidth = 0;
     cursor = 0;
     cursorCell = 0;
@@ -426,7 +445,47 @@ export const createTerminalOutputHistoryPreview = (options?: {
     let offset = 0;
     // ASCII-ness is monotone under slicing; decide once so the per-row cap
     // below stays linear for long spans.
-    const spanIsAscii = isAsciiOnly(span);
+    let spanIsAscii = isAsciiOnly(span);
+    // The previous chunk may have ended mid-grapheme (its base was written
+    // while this span begins with the continuation: a ZWJ sequence, a
+    // combining mark, or the trailing surrogate of a pair). xterm's grapheme
+    // provider joins the cluster across writes, but segmenting this span
+    // alone treats the continuation as a standalone grapheme: a leading ZWJ
+    // sequence measures wrong and a trailing low surrogate slices a cell
+    // mid-surrogate-pair. Rejoin instead: drop the provisional open grapheme
+    // from the line tail and let the joined cluster be written in its place,
+    // so the width and wrap decisions below match the terminal's.
+    if (
+      openGrapheme !== null
+      && !spanIsAscii
+      && current
+      && cursor === current.length
+      && cursorCell === openGraphemeCell
+    ) {
+      const probeEnd = Math.min(span.length, WRAP_PROBE_UTF16_UNITS);
+      const head = openGrapheme + span.slice(0, probeEnd);
+      let first = firstGraphemeUnits(head);
+      if (
+        first.length === head.length
+        && probeEnd === WRAP_PROBE_UTF16_UNITS
+        && span.length > probeEnd
+      ) {
+        // The probe filled its window and may continue past it; only then
+        // pay for re-segmenting the full remaining span.
+        first = firstGraphemeUnits(openGrapheme + span);
+      }
+      if (first.length > openGrapheme.length) {
+        // The joined cluster replaces the open grapheme: subtract its width
+        // so the joined grapheme below lands on exactly the same cells.
+        const openWidth = pieceCellWidth(openGrapheme);
+        current = current.slice(0, current.length - openGrapheme.length);
+        cursor = current.length;
+        cursorCell = Math.max(0, cursorCell - openWidth);
+        currentCellWidth = Math.max(0, currentCellWidth - openWidth);
+        span = first + span.slice(first.length - openGrapheme.length);
+        spanIsAscii = false;
+      }
+    }
     // Cap each piece at about one row of cells (plus probe slack): the width
     // measurement and column slicing below cost O(piece), so an uncapped
     // piece would rescan the entire remaining span once per row it filled.
@@ -468,6 +527,9 @@ export const createTerminalOutputHistoryPreview = (options?: {
           ) {
             current += first;
             cursor = current.length;
+            // The tracked open grapheme no longer describes the tail (the
+            // zero-width piece extends it in place); stop offering a join.
+            openGrapheme = null;
             offset += first.length;
             continue;
           }
@@ -554,22 +616,35 @@ export const createTerminalOutputHistoryPreview = (options?: {
       const appending = cursor >= current.length;
       if (appending) {
         current += fitting;
-      } else if (pieceAscii && isAsciiOnly(current)) {
-        current = current.slice(0, cursor) + fitting + current.slice(cursor + fitting.length);
       } else {
-        // Cursor coordinates count cells, while strings count UTF-16 units.
-        // Replace entire intersected graphemes and blank any remaining half
-        // of a wide glyph, retaining the columns of the untouched suffix.
-        const prefix = sliceStringByCellColumns(current, 0, cursorCell);
-        const endCell = cursorCell + pieceWidth;
-        const endPrefix = sliceStringByCellColumns(current, 0, endCell);
-        const overlapsWideEnd = pieceCellWidth(endPrefix) < Math.min(endCell, width);
-        const suffix = sliceStringByCellColumns(current, endCell + (overlapsWideEnd ? 1 : 0));
-        current = prefix + " ".repeat(cursorCell - pieceCellWidth(prefix))
-          + fitting + (overlapsWideEnd ? " " : "") + suffix;
+        // The tail is overwritten, so the tracked open grapheme (if any) no
+        // longer ends the line.
+        openGrapheme = null;
+        if (pieceAscii && isAsciiOnly(current)) {
+          current = current.slice(0, cursor) + fitting + current.slice(cursor + fitting.length);
+        } else {
+          // Cursor coordinates count cells, while strings count UTF-16 units.
+          // Replace entire intersected graphemes and blank any remaining half
+          // of a wide glyph, retaining the columns of the untouched suffix.
+          const prefix = sliceStringByCellColumns(current, 0, cursorCell);
+          const endCell = cursorCell + pieceWidth;
+          const endPrefix = sliceStringByCellColumns(current, 0, endCell);
+          const overlapsWideEnd = pieceCellWidth(endPrefix) < Math.min(endCell, width);
+          const suffix = sliceStringByCellColumns(current, endCell + (overlapsWideEnd ? 1 : 0));
+          current = prefix + " ".repeat(cursorCell - pieceCellWidth(prefix))
+            + fitting + (overlapsWideEnd ? " " : "") + suffix;
+        }
       }
       cursorCell += pieceWidth;
       currentCellWidth = Math.max(width, cursorCell);
+      if (appending) {
+        // Remember the grapheme this append left at the tail so a later chunk
+        // continuing it (a split cluster) can be rejoined (see writeSpan).
+        // An empty open grapheme would corrupt the join, so track null then.
+        openGrapheme = !fitting ? null
+          : isAsciiOnly(fitting) ? fitting.slice(-1) : lastGraphemeUnits(fitting);
+        openGraphemeCell = cursorCell;
+      }
       cursor = appending ? current.length
         : isAsciiOnly(current) ? cursorCell
           : sliceStringByCellColumns(current, 0, cursorCell).length;
@@ -593,7 +668,12 @@ export const createTerminalOutputHistoryPreview = (options?: {
     originMode = false;
     autowrap = true;
     savedCursor = null;
-    if (screenRow !== 1 && current) commitCurrentLine();
+    // xterm clears the display before homing the cursor, so the open row's
+    // screen state must not survive the reset even when the tracked cursor is
+    // already on row 1: keeping `current` would let later output overwrite a
+    // stale suffix (`LONG` + RIS + `X` would read `XONG`). Committing keeps
+    // the printed text (the transcript is a log) and starts a fresh row.
+    if (current) commitCurrentLine();
     screenRow = 1;
     cursor = 0;
     cursorCell = 0;
@@ -768,6 +848,8 @@ export const createTerminalOutputHistoryPreview = (options?: {
       }
       if (ch === ERASE_TO_END_OF_LINE) {
         current = current.slice(0, cursor);
+        // The erased suffix may have contained the open grapheme.
+        openGrapheme = null;
         currentCellWidth = pieceCellWidth(current);
         i += 1;
         continue;
@@ -826,6 +908,7 @@ export const createTerminalOutputHistoryPreview = (options?: {
       lineWrapFlags = [];
       currentStartsWrapped = false;
       current = "";
+      openGrapheme = null;
       currentCellWidth = 0;
       cursor = 0;
       cursorCell = 0;
@@ -875,6 +958,12 @@ export const createTerminalOutputHistoryPreview = (options?: {
     setViewportCols(cols: number): void {
       const nextCols = Math.max(0, Math.floor(cols));
       if (nextCols === viewportCols) return;
+      // xterm resets its scroll region on any buffer resize, including a
+      // width-only one where setViewportRows sees no row change; keep the
+      // tracked margins in step so relative moves clamp to the live bounds
+      // instead of a region set for the previous size.
+      scrollTopMargin = 1;
+      scrollBottomMargin = viewportRows > 0 ? viewportRows : Infinity;
       viewportCols = nextCols;
       if (viewportCols > 0 && cursorCell > viewportCols - 1) {
         // xterm clamps its cursor to the new last column as soon as the

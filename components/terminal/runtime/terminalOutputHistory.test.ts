@@ -588,3 +588,47 @@ test("RIS resets the tracked modes, margins, and cursor", () => {
   // clamp to its bottom (row 20), rewriting the same tracked line as before.
   assert.deepEqual(reset.getLines(), ["OLD"]);
 });
+
+test("RIS commits the open row even when the cursor is already homed", () => {
+  const history = createTerminalOutputHistoryPreview();
+  history.setViewportRows(24);
+  history.setViewportCols(20);
+  // xterm clears the display before homing the cursor, so output after RIS
+  // must not overwrite a stale suffix of the cleared screen row.
+  history.append("LONG\x1bcX");
+  assert.deepEqual(history.getLines(), ["LONG", "X"]);
+});
+
+test("a grapheme split across display chunks is rejoined", () => {
+  const history = createTerminalOutputHistoryPreview();
+  history.setViewportRows(5);
+  history.setViewportCols(4);
+  // The backend delivered the ZWJ sequence's base in one chunk and its
+  // continuation in the next; xterm's grapheme provider joins them across
+  // writes, so the preview must measure the joined cluster, not the chunks.
+  history.append("👩");
+  history.append("‍💻Z");
+  assert.deepEqual(history.getLines(), ["👩‍💻Z"]);
+
+  // The unsplit input is the reference behavior.
+  const joined = createTerminalOutputHistoryPreview();
+  joined.setViewportRows(5);
+  joined.setViewportCols(4);
+  joined.append("👩‍💻Z");
+  assert.deepEqual(joined.getLines(), ["👩‍💻Z"]);
+});
+
+test("a width-only resize resets the tracked scroll margins", () => {
+  const history = createTerminalOutputHistoryPreview();
+  history.setViewportRows(24);
+  history.setViewportCols(80);
+  history.append("\x1b[1;20r");
+  history.append("row20content");
+  // xterm resets its scroll region on any buffer resize; a width-only resize
+  // must clear the old DECSTBM margins so relative moves clamp to the live
+  // bottom row instead of the region's stale one.
+  history.setViewportRows(24);
+  history.setViewportCols(40);
+  history.append("\x1b[20;1HX\x1b[BY");
+  assert.deepEqual(history.getLines(), ["row20content", "X", " Y"]);
+});
