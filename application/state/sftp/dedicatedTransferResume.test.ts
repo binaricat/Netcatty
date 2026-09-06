@@ -39,8 +39,9 @@ const host = (id: string, label: string, hostname = label): Host => ({
   protocol: "ssh",
 } as Host);
 
-for (const batchExistingIdentity of [false, true]) {
-test(`superseded folder child settles when its completion was compacted into the parent: batched=${batchExistingIdentity}`, async (t) => {
+for (const retainedStatus of [undefined, "interrupted", "failed"] as const) {
+const batchExistingIdentity = retainedStatus !== undefined;
+test(`superseded folder child settles when its completion was compacted into the parent: retained=${retainedStatus ?? "none"}`, async (t) => {
   const { sftpTransferCenterStore } = await import("../sftpTransferCenterStore");
   const previousLocalStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
   Object.defineProperty(globalThis, "localStorage", {
@@ -72,7 +73,7 @@ test(`superseded folder child settles when its completion was compacted into the
   const persisted: TransferTask = {
     ...parent, id: "retained-child", parentTaskId: parent.id, isDirectory: false,
     sourcePath: "/local/folder/a.bin", targetPath: "/remote/folder/a.bin",
-    totalBytes: 10, sourceLastModified: 1, status: "interrupted",
+    totalBytes: 10, sourceLastModified: 1, status: retainedStatus ?? "interrupted",
     directoryEntryIndex: 0, directoryEntryIdentity: "a".repeat(64),
   };
   const { createDedicatedResumeChildUpdateBatcher } = await import("../../app/dedicatedResumeProgress");
@@ -120,6 +121,7 @@ test(`superseded folder child settles when its completion was compacted into the
     running,
     new Promise<"still-waiting">((resolve) => setTimeout(() => resolve("still-waiting"), 450)),
   ]);
+  assert.notEqual(result, "still-waiting", "completed compacted child must not leave its folder waiting forever");
   assert.ok(childId);
   assert.equal(sftpTransferCenterStore.getTask(childId), undefined, "completed row was compacted");
   assert.equal(sftpTransferCenterStore.getTask(parent.id)?.directoryResumeCheckpoint?.completedEntries, 1);

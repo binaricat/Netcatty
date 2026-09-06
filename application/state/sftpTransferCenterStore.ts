@@ -28,6 +28,7 @@ import {
 } from "./sftp/transferControlEpoch";
 import { isTransferWalkInFlight } from "./sftp/transferWalkRegistry";
 import {
+  isTransferOrRootCancelled,
   markTransferCancelledTree,
   settleTransferCancelTree,
 } from "./sftp/transferCancelLatch";
@@ -98,6 +99,8 @@ export interface SftpTransferCenterStore {
   getTask(taskId: string): TransferTask | undefined;
   /** Observe exact task settlement before completed child rows are compacted. */
   observeTaskSettlement(task: TransferTask): { read(): TransferTask | undefined; dispose(): void };
+  /** Publish an explicit dispatch identity without flushing large child-history batches. */
+  admitTaskRun(task: TransferTask): "ready" | "paused" | "completed" | "cancelled" | "conflict";
   getOwnerTasks(ownerId: string): TransferTask[];
   publishOwner(ownerId: string, tasks: readonly TransferTask[]): void;
   registerOwner(ownerId: string, controls: SftpTransferOwnerControls): () => void;
@@ -1326,6 +1329,46 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
     },
     getSnapshot: () => ensureSnapshot(),
     getBadgeSnapshot: () => badgeSnapshot,
+    admitTaskRun(incoming) {
+      const rootId = incoming.parentTaskId ?? incoming.id;
+      if (isTransferOrRootCancelled(rootId, incoming.id)) return "cancelled";
+      const parent = incoming.parentTaskId ? tasks.find((task) => task.id === rootId) : undefined;
+      if (parent?.status === "cancelled") return "cancelled";
+      const index = tasks.findIndex((task) => task.id === incoming.id);
+      const existing = index < 0 ? undefined : tasks[index];
+      if (existing && (existing.sourcePath !== incoming.sourcePath || existing.targetPath !== incoming.targetPath
+        || existing.parentTaskId !== incoming.parentTaskId)) return "conflict";
+      if (existing?.status === "cancelled") return "cancelled";
+      if (existing?.status === "completed") {
+        return matchesObservedTask(incoming, existing) ? "completed" : "conflict";
+      }
+      if (isTransferOrRootPauseLatched(rootId, incoming.id)
+        || parent?.status === "paused" || parent?.status === "pausing"
+        || existing?.status === "paused" || existing?.status === "pausing") return "paused";
+      if (parent?.status === "completed") return "conflict";
+      if (!existing) return "ready";
+      if (existing.status === "transferring"
+        && existing.directoryEntryIndex === incoming.directoryEntryIndex
+        && existing.directoryEntryIdentity === incoming.directoryEntryIdentity) return "ready";
+      // Explicit retry may leave failed/interrupted and replace its manifest identity.
+      // Do not overwrite byte checkpoints with a delayed renderer snapshot.
+      const next = tasks.slice();
+      next[index] = {
+        ...existing,
+        directoryEntryIndex: incoming.directoryEntryIndex,
+        directoryEntryIdentity: incoming.directoryEntryIdentity,
+        ...(existing.status === "transferring" ? {} : {
+          status: "transferring" as const,
+          lifecycleEpoch: undefined,
+          error: undefined,
+          endTime: undefined,
+          reconnectRequired: false,
+        }),
+      };
+      tasks = next;
+      emitProgress(false);
+      return "ready";
+    },
     observeTaskSettlement(expected) {
       const observer: { expected: TransferTask; settled?: TransferTask } = { expected: { ...expected } };
       const observers = settlementObservers.get(expected.id) ?? new Set();

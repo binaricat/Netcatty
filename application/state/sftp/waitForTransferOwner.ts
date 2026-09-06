@@ -9,9 +9,21 @@ export async function runTransferAndWaitForOwner(
   start: () => Promise<StreamResult>,
   shouldAbort: () => boolean,
 ): Promise<StreamResult> {
-  // Register before start: a replacement owner can finish before our reply.
-  const observation = sftpTransferCenterStore.observeTaskSettlement(task);
+  // Register before admission/start: an owner may finish while dispatch waits for resume.
+  let observation = sftpTransferCenterStore.observeTaskSettlement(task);
   try {
+    for (;;) {
+      if (shouldAbort()) throw new Error("Transfer cancelled");
+      const admission = sftpTransferCenterStore.admitTaskRun(task);
+      if (admission === "cancelled") throw new Error("Transfer cancelled");
+      if (admission === "completed" || observation.read()?.status === "completed") return {};
+      if (admission === "conflict") throw new Error("Transfer identity changed before dispatch");
+      if (admission === "ready") break;
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+    // Admission begins a new attempt; discard any previous failed settlement.
+    observation.dispose();
+    observation = sftpTransferCenterStore.observeTaskSettlement(task);
     const result = await start();
     if (!result?.superseded) return result;
     for (;;) {

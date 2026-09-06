@@ -45,3 +45,113 @@ test("a disposed observer receives no later completion", () => {
   store.patchTask(task.id, { status: "completed" });
   assert.equal(observation.read(), undefined);
 });
+
+test("explicit dispatch refreshes failed identity without overwriting checkpoints", () => {
+  const store = createSftpTransferCenterStore();
+  const task = { ...child(), status: "failed" as const, checkpointBytes: 7 };
+  store.upsertTasks([task]);
+  const next = { ...task, directoryEntryIdentity: "b".repeat(64), checkpointBytes: 0 };
+  assert.equal(store.admitTaskRun(next), "ready");
+  assert.equal(store.getTask(task.id)?.status, "transferring");
+  assert.equal(store.getTask(task.id)?.directoryEntryIdentity, next.directoryEntryIdentity);
+  assert.equal(store.getTask(task.id)?.checkpointBytes, 7);
+});
+
+for (const status of ["cancelled", "completed", "paused", "pausing"] as const) {
+  test(`dispatch cannot revive a retained ${status} row`, () => {
+    const store = createSftpTransferCenterStore();
+    const task = child();
+    store.upsertTasks([
+      { ...task, id: "root", parentTaskId: undefined },
+      { ...task, status },
+    ]);
+    assert.equal(store.admitTaskRun(task), status === "pausing" ? "paused" : status);
+    assert.equal(store.getTask(task.id)?.status, status);
+  });
+}
+
+test("dispatch preserves active lifecycle guards and avoids replacing unchanged rows", () => {
+  const store = createSftpTransferCenterStore();
+  const task = { ...child(), lifecycleEpoch: 9 };
+  store.upsertTasks([task]);
+  const before = store.getTask(task.id);
+  assert.equal(store.admitTaskRun(task), "ready");
+  assert.equal(store.getTask(task.id), before);
+  assert.equal(store.admitTaskRun({ ...task, directoryEntryIdentity: "b".repeat(64) }), "ready");
+  assert.equal(store.getTask(task.id)?.lifecycleEpoch, 9);
+});
+
+test("dispatch rejects a later pause or cancellation before changing identity", async (t) => {
+  const { latchTransferPause, resetTransferPauseLatchesForTests } = await import("./transferPauseLatch");
+  const { markTransferCancelledTree, settleTransferCancelTree } = await import("./transferCancelLatch");
+  const store = createSftpTransferCenterStore();
+  const task = { ...child(), status: "failed" as const };
+  store.upsertTasks([task]);
+  t.after(() => { resetTransferPauseLatchesForTests(); settleTransferCancelTree("root", [task.id]); });
+  latchTransferPause("root");
+  assert.equal(store.admitTaskRun(task), "paused");
+  resetTransferPauseLatchesForTests();
+  markTransferCancelledTree("root", [task.id]);
+  assert.equal(store.admitTaskRun(task), "cancelled");
+  assert.equal(store.getTask(task.id)?.status, "failed");
+});
+
+for (const nextStatus of ["transferring", "completed", "cancelled"] as const) {
+  test(`dispatch waits through a later pause until ${nextStatus}`, async (t) => {
+    const { sftpTransferCenterStore: store } = await import("../sftpTransferCenterStore");
+    const { runTransferAndWaitForOwner } = await import("./waitForTransferOwner");
+    const task = { ...child(), id: `paused-admission-${nextStatus}`, parentTaskId: undefined };
+    store.upsertTasks([{ ...task, status: "paused" }]);
+    let starts = 0;
+    let abort = false;
+    const running = runTransferAndWaitForOwner(task, async () => { starts += 1; return {}; }, () => abort);
+    // Attach rejection handling before the cancellation event is delivered.
+    const settled = running.then(() => "completed", (error: Error) => error.message);
+    t.after(async () => { abort = true; await settled; store.dismiss(task.id); });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.equal(starts, 0);
+    assert.equal(store.getTask(task.id)?.status, "paused");
+    if (nextStatus !== "cancelled") store.patchTask(task.id, { status: "transferring", lifecycleEpoch: 1 });
+    if (nextStatus === "cancelled") {
+      const { markTransferCancelledTree, settleTransferCancelTree } = await import("./transferCancelLatch");
+      markTransferCancelledTree(task.id, []);
+      t.after(() => settleTransferCancelTree(task.id, []));
+    } else store.patchTask(task.id, { status: nextStatus });
+    const outcome = await Promise.race([settled, new Promise((resolve) => setTimeout(() => resolve("still-waiting"), 1000))]);
+    assert.equal(outcome, nextStatus === "cancelled" ? "Transfer cancelled" : "completed");
+    assert.equal(starts, nextStatus === "transferring" ? 1 : 0);
+  });
+}
+
+test("completed dispatch consumes only exact identity and never restarts", async (t) => {
+  const { sftpTransferCenterStore: store } = await import("../sftpTransferCenterStore");
+  const { runTransferAndWaitForOwner } = await import("./waitForTransferOwner");
+  const task = { ...child(), id: "completed-admission", parentTaskId: undefined };
+  store.upsertTasks([{ ...task, status: "completed" }]);
+  t.after(() => store.dismiss(task.id));
+  const start = async () => { assert.fail("completed transfer must not restart"); };
+  await runTransferAndWaitForOwner(task, start, () => false);
+  await assert.rejects(runTransferAndWaitForOwner({ ...task, directoryEntryIdentity: "b".repeat(64) }, start, () => false), /identity changed/);
+  assert.equal(store.getTask(task.id)?.status, "completed");
+});
+
+test("a resumed retry does not inherit failed settlement captured while admission was paused", async (t) => {
+  const { sftpTransferCenterStore: store } = await import("../sftpTransferCenterStore");
+  const { runTransferAndWaitForOwner } = await import("./waitForTransferOwner");
+  const { latchTransferPause, resetTransferPauseLatchesForTests } = await import("./transferPauseLatch");
+  const task = { ...child(), id: "failed-paused-admission", parentTaskId: undefined };
+  store.upsertTasks([{ ...task, status: "failed", error: "previous attempt failed" }]);
+  latchTransferPause(task.id);
+  let abort = false;
+  const running = runTransferAndWaitForOwner(task, async () => {
+    store.patchTask(task.id, { status: "completed" });
+    return { superseded: true };
+  }, () => abort);
+  const settled = running.then(() => "completed", (error: Error) => error.message);
+  t.after(async () => { abort = true; resetTransferPauseLatchesForTests(); await settled; store.dismiss(task.id); });
+  // An unrelated lifecycle publication captures the previous failed row while waiting.
+  store.upsertTasks([{ ...child(), id: "unrelated-admission", parentTaskId: undefined }]);
+  t.after(() => store.dismiss("unrelated-admission"));
+  resetTransferPauseLatchesForTests();
+  assert.equal(await Promise.race([settled, new Promise((resolve) => setTimeout(() => resolve("still-waiting"), 1000))]), "completed");
+});

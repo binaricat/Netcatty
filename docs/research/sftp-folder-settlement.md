@@ -20,3 +20,5 @@ success. Reused IDs with different indexed file identities are not evidence.
 
 This addresses a separately reproduced folder-never-settles condition relevant
 to #2568 and #3155. It does not establish the original reporters' precise cause.
+
+Large-history recovery follow-up: stream lifecycle events carry the current child hierarchy identity. Before dispatch, the store admits the explicit retry into the current row without a full history compaction, so a batched old failed row cannot reject the new completion. Admission distinguishes pause waiting, cancellation, identity conflict and exact prior completion; active lifecycle epochs and newer pause/cancel intent remain protected.
