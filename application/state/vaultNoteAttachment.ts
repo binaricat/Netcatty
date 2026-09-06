@@ -131,6 +131,35 @@ export function attachVaultNoteMention(
   return { upload, status: "attached" };
 }
 
+/**
+ * Shared application-state attachment updater: select which uploads fit
+ * within the aggregate attachment budget when appending to a draft. This must
+ * run on every insertion path (ordinary file drops *and* note mentions)
+ * regardless of order: `attachVaultNoteMention` only checks the budget when a
+ * note is attached, so files appended afterwards would bypass the cap and
+ * could push the persisted newest session past MAX_SESSIONS_JSON_BYTES,
+ * evicting older sessions (or the chat) after a restart. Uploads that do not
+ * fit are dropped greedily in input order and returned to the caller so it
+ * can surface the rejection to the user.
+ */
+export function appendUploadsWithinAttachmentBudget(
+  existingAttachments: ReadonlyArray<UploadedFile>,
+  uploads: ReadonlyArray<UploadedFile>,
+): UploadedFile[] {
+  let usedBytes = existingAttachments.reduce(
+    (total, attachment) => total + vaultNoteAttachmentBudgetBytes(attachment),
+    0,
+  );
+  const accepted: UploadedFile[] = [];
+  for (const upload of uploads) {
+    const cost = vaultNoteAttachmentBudgetBytes(upload);
+    if (usedBytes + cost > MAX_VAULT_NOTE_TOTAL_ATTACHMENT_BYTES) continue;
+    usedBytes += cost;
+    accepted.push(upload);
+  }
+  return accepted;
+}
+
 /** Bound the inlined body, pointing at `vault_notes_get` when truncating. */
 function boundNoteBody(content: string, noteId: string): string {
   if (content.length <= MAX_VAULT_NOTE_ATTACHMENT_CHARS) return content;

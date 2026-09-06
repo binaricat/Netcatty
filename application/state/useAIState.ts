@@ -55,6 +55,7 @@ import {
 } from './aiDraftState';
 import { convertFilesToUploads } from './useFileUpload';
 import { removeProviderReferences } from './aiProviderCleanup';
+import { appendUploadsWithinAttachmentBudget } from './vaultNoteAttachment';
 import { publishAISessionsSnapshot } from './aiSessionsStore';
 import {
   AI_STATE_CHANGED_DRAFTS_BY_SCOPE,
@@ -1016,20 +1017,34 @@ export function useAIState() {
     scopeKey: string,
     fallbackAgentId: string,
     inputFiles: File[],
-  ) => {
+  ): Promise<UploadedFile[]> => {
+    // Resolves with the uploads rejected by the aggregate attachment budget.
     ensureDraftForScope(scopeKey, fallbackAgentId);
     const initialUploadGeneration = getDraftUploadGeneration(scopeKey);
     const uploads = await convertFilesToUploads(inputFiles);
-    if (uploads.length === 0) return;
+    if (uploads.length === 0) return [];
 
     if (getDraftUploadGeneration(scopeKey) !== initialUploadGeneration) {
-      return;
+      return [];
     }
 
-    updateDraftIfPresent(scopeKey, (draft) => ({
-      ...draft,
-      attachments: [...draft.attachments, ...uploads],
-    }));
+    // Ordinary files share the aggregate attachment budget with vault-note
+    // mentions (same `base64Data`/`dataUrl` payload shape), so the budget must
+    // be enforced on this path too: files appended after near-limit notes
+    // would otherwise push the persisted newest session past its storage
+    // budget. Returns the uploads rejected by the budget so callers can
+    // surface the rejection.
+    let rejected: UploadedFile[] = [];
+    updateDraftIfPresent(scopeKey, (draft) => {
+      const fitting = appendUploadsWithinAttachmentBudget(draft.attachments, uploads);
+      rejected = uploads.filter((upload) => !fitting.includes(upload));
+      if (fitting.length === 0) return draft;
+      return {
+        ...draft,
+        attachments: [...draft.attachments, ...fitting],
+      };
+    });
+    return rejected;
   }, [ensureDraftForScope, updateDraftIfPresent]);
 
   const removeDraftFile = useCallback((scopeKey: string, fallbackAgentId: string, fileId: string) => {
@@ -1046,10 +1061,18 @@ export function useAIState() {
     upload: UploadedFile,
   ) => {
     ensureDraftForScope(scopeKey, fallbackAgentId);
-    updateDraftIfPresent(scopeKey, (draft) => ({
-      ...draft,
-      attachments: [...draft.attachments, upload],
-    }));
+    // Defense in depth: callers pre-check the budget via
+    // `attachVaultNoteMention`, but the shared updater re-checks against the
+    // current draft state so no insertion path can bypass the aggregate cap.
+    updateDraftIfPresent(scopeKey, (draft) => {
+      if (appendUploadsWithinAttachmentBudget(draft.attachments, [upload]).length === 0) {
+        return draft;
+      }
+      return {
+        ...draft,
+        attachments: [...draft.attachments, upload],
+      };
+    });
   }, [ensureDraftForScope, updateDraftIfPresent]);
 
   const cleanupOrphanedSessions = useCallback((activeTargetIds: Set<string>) => {

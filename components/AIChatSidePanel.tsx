@@ -594,8 +594,17 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
 
   const addFiles = useCallback(async (inputFiles: File[]) => {
     enterScopeDraftMode(currentAgentId, panelViewRef.current.mode === 'session');
-    await addDraftFiles(scopeKey, currentAgentId, inputFiles);
-  }, [addDraftFiles, currentAgentId, enterScopeDraftMode, scopeKey]);
+    const rejected = await addDraftFiles(scopeKey, currentAgentId, inputFiles);
+    if (rejected.length > 0) {
+      // The aggregate attachment budget (shared with vault-note mentions)
+      // rejected the files that would not fit, so surface the rejection to
+      // the user instead of silently dropping them.
+      console.warn(
+        `[AIChatSidePanel] ${rejected.length} file(s) skipped: aggregate attachment budget exceeded`,
+      );
+      toast.warning(t('ai.chat.attachmentBudgetExceeded', { count: rejected.length }));
+    }
+  }, [addDraftFiles, currentAgentId, enterScopeDraftMode, scopeKey, t]);
 
   const removeFile = useCallback((fileId: string) => {
     removeDraftFile(scopeKey, currentAgentId, fileId);

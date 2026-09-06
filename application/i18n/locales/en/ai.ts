@@ -501,6 +501,7 @@ export const enAiMessages: Messages = {
   'ai.chat.mentionNoteSearch': 'Search notes…',
   'ai.chat.mentionNoteEmpty': 'No matching notes',
   'ai.chat.mentionNoteBudgetExceeded': '"{{title}}" was not attached: mentioned notes would exceed the attachment size limit.',
+  'ai.chat.attachmentBudgetExceeded': '{{count}} file(s) were not attached: the attachments would exceed the attachment size limit.',
   'ai.chat.mentionNoteInvalid': '"{{title}}" could not be attached: the note has an invalid identifier.',
   'ai.chat.untitledNote': 'Untitled note',
   'ai.chat.menuUserSkills': 'User Skills',

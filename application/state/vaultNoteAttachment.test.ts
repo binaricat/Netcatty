@@ -6,12 +6,26 @@ import {
   MAX_VAULT_NOTE_ID_CHARS,
   MAX_VAULT_NOTE_TOTAL_ATTACHMENT_BYTES,
   VAULT_NOTE_ATTACHMENT_MEDIA_TYPE,
+  appendUploadsWithinAttachmentBudget,
   attachVaultNoteMention,
   createVaultNoteAttachment,
   decodeVaultNoteAttachment,
   isVaultNoteAttachment,
 } from "./vaultNoteAttachment.ts";
-import { buildPromptWithTerminalSelectionAttachments } from "./terminalSelectionAttachment.ts";
+import { buildPromptWithTerminalSelectionAttachments, bytesToBase64 } from "./terminalSelectionAttachment.ts";
+import type { UploadedFile } from "../../infrastructure/ai/types.ts";
+
+/** Build a minimal ordinary-file upload whose body decodes to `content`. */
+function makeFileUpload(filename: string, content: string): UploadedFile {
+  const base64Data = bytesToBase64(new TextEncoder().encode(content));
+  return {
+    id: crypto.randomUUID(),
+    filename,
+    dataUrl: `data:text/plain;base64,${base64Data}`,
+    base64Data,
+    mediaType: "text/plain",
+  };
+}
 
 test("createVaultNoteAttachment returns null without a note id", () => {
   assert.equal(createVaultNoteAttachment({ id: "  ", title: "T", content: "c" }), null);
@@ -283,4 +297,41 @@ test("attachVaultNoteMention counts the persisted note id toward the aggregate b
   );
   assert.equal(overflow.status, "budget");
   assert.equal(overflow.upload, null);
+});
+
+test("appendUploadsWithinAttachmentBudget drops ordinary files that exceed the aggregate budget", () => {
+  // Reverse ordering vs. attachVaultNoteMention: near-limit notes attached
+  // first, then an ordinary file appended via addDraftFiles. The file shares
+  // the same `base64Data` payload budget and must be rejected here.
+  const noteBody = "a".repeat(Math.floor(MAX_VAULT_NOTE_TOTAL_ATTACHMENT_BYTES / 4) - 1000);
+  let attachments: ReturnType<typeof createVaultNoteAttachment>[] = [];
+  for (const id of ["n1", "n2", "n3", "n4"]) {
+    const result = attachVaultNoteMention(attachments, { id, title: id, content: noteBody });
+    assert.equal(result.status, "attached", `note ${id} should fit`);
+    attachments = [...attachments, result.upload!];
+  }
+
+  const oversizedFile = makeFileUpload("big.txt", "b".repeat(MAX_VAULT_NOTE_TOTAL_ATTACHMENT_BYTES));
+  const accepted = appendUploadsWithinAttachmentBudget(attachments, [oversizedFile]);
+  assert.deepEqual(accepted, []);
+
+  // A file that fits is accepted alongside the existing note attachments.
+  const smallFile = makeFileUpload("small.txt", "tiny");
+  assert.deepEqual(
+    appendUploadsWithinAttachmentBudget(attachments, [smallFile]),
+    [smallFile],
+  );
+});
+
+test("appendUploadsWithinAttachmentBudget accepts uploads greedily in input order", () => {
+  // Budget remaining after the existing attachments accepts the first upload
+  // but not the second; the first must still be attached.
+  const existing = createVaultNoteAttachment({ id: "n1", title: "N", content: "x".repeat(600_000) });
+  assert.ok(existing);
+  const first = makeFileUpload("first.txt", "a".repeat(100_000));
+  const second = makeFileUpload("second.txt", "b".repeat(MAX_VAULT_NOTE_TOTAL_ATTACHMENT_BYTES));
+  assert.deepEqual(
+    appendUploadsWithinAttachmentBudget([existing], [first, second]),
+    [first],
+  );
 });
