@@ -17,9 +17,29 @@ import {
   isHistoryPreviewDismissClick,
   joinHistoryPreviewSelectionText,
   nextHistoryPreviewTop,
+  selectHistoryPreviewAll,
   shouldHideHistoryPreviewOnMouseDown,
   shouldKeepHistoryPreviewOnKey,
 } from "./terminalHistoryScrollOverride.ts";
+
+test("select all includes every preview row and preserves soft-wrap copying", async () => {
+  const { JSDOM } = await import("jsdom");
+  const dom = new JSDOM("<pre><span>中文abc</span>\n<span>def</span>\n<span>last</span></pre>");
+  try {
+    const overlay = dom.window.document.querySelector("pre")!;
+    overlay.setAttribute(HISTORY_PREVIEW_WRAP_ATTR, "010");
+    assert.equal(selectHistoryPreviewAll(overlay), true);
+    assert.equal(dom.window.getSelection()!.toString(), "中文abc\ndef\nlast");
+    assert.equal(getHistoryPreviewSelectionText(overlay, dom.window.getSelection()), "中文abcdef\nlast");
+    overlay.textContent = "plain\ntext";
+    assert.equal(selectHistoryPreviewAll(overlay), true);
+    assert.equal(dom.window.getSelection()!.toString(), "plain\ntext");
+    overlay.textContent = "";
+    assert.equal(selectHistoryPreviewAll(overlay), false);
+  } finally {
+    dom.window.close();
+  }
+});
 
 const wheel = (
   over: Partial<Parameters<typeof forcedHistoryScrollLinesForWheel>[0]> = {},

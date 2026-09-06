@@ -358,9 +358,7 @@ export const selectHistoryPreviewAll = (overlay: HTMLElement | null | undefined)
   const selection = overlay.ownerDocument.getSelection();
   if (!selection) return false;
   const range = overlay.ownerDocument.createRange();
-  const textNode = overlay.firstChild;
-  if (textNode) range.selectNodeContents(textNode);
-  else range.selectNodeContents(overlay);
+  range.selectNodeContents(overlay);
   selection.removeAllRanges();
   selection.addRange(range);
   return !selection.isCollapsed;
