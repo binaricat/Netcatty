@@ -1065,6 +1065,27 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     overlay.style.fontSize = `${currentTerminalFontSize()}px`;
     overlay.style.fontFamily = String(term.options.fontFamily ?? fontFamily);
     overlay.style.lineHeight = String(term.options.lineHeight ?? lineHeight);
+    // xterm rounds its cell dimensions to device pixels. A native <pre> with
+    // the same font settings can therefore be wider (and shorter) than the
+    // terminal, clipping the final columns of every full-width history row.
+    const screen = term.element?.querySelector(".xterm-screen");
+    const screenRect = screen?.getBoundingClientRect();
+    if (screenRect && screenRect.width > 0 && screenRect.height > 0
+      && term.cols > 0 && term.rows > 0) {
+      overlay.style.fontWeight = String(term.options.fontWeight ?? "normal");
+      overlay.style.fontKerning = "none";
+      overlay.style.fontVariantLigatures = "none";
+      overlay.style.letterSpacing = "0px";
+      const measure = document.createElement("span");
+      measure.style.display = "inline-block";
+      measure.textContent = "W";
+      overlay.replaceChildren(measure);
+      const nativeCellWidth = measure.getBoundingClientRect().width;
+      if (nativeCellWidth > 0) {
+        overlay.style.letterSpacing = `${screenRect.width / term.cols - nativeCellWidth}px`;
+      }
+      overlay.style.lineHeight = `${screenRect.height / term.rows}px`;
+    }
     overlay.textContent = previewRows.map((row) => row.text).join("\n");
     overlay.setAttribute(HISTORY_PREVIEW_WRAP_ATTR, encodeHistoryPreviewWrapFlags(previewRows));
     return true;
