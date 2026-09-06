@@ -9,6 +9,7 @@ import type {
   AISession,
   AIPermissionMode,
   AIToolIntegrationMode,
+  ChatMessageAttachment,
 } from '../../infrastructure/ai/types';
 import type { ProviderContinuationOptions } from '../../infrastructure/ai/providerContinuation';
 import { findSafeChatMessageCompactionSplitIndex } from '../../infrastructure/ai/contextCompaction';
@@ -249,6 +250,46 @@ function stripEncryptedReasoningFromSession(session: AISession): AISession {
   return changed ? { ...session, messages } : session;
 }
 
+function stripAttachmentBodies(
+  attachments: ChatMessageAttachment[],
+): ChatMessageAttachment[] {
+  let changed = false;
+  const next = attachments.map(attachment => {
+    if (!attachment.base64Data) return attachment;
+    changed = true;
+    return {
+      ...attachment,
+      base64Data: '',
+    };
+  });
+  return changed ? next : attachments;
+}
+
+/**
+ * Replace an attachment's persisted base64 payload with a metadata-only stub.
+ * Attachment bodies (vault-note inlines, files, legacy images) are by far the
+ * largest per-message payload, and the aggregate draft budget only bounds a
+ * single turn: each send persists its attachments on the session message, so
+ * several large note-mention turns can push one session past every storage
+ * retry budget. Dropping the bodies keeps the conversation — including the
+ * attachment metadata — instead of leaving the whole chat memory-only after a
+ * failed write; the in-memory state is untouched.
+ */
+function stripAttachmentBodiesFromMessage(message: AISession['messages'][number]) {
+  const attachments = message.attachments
+    ? stripAttachmentBodies(message.attachments)
+    : undefined;
+  const images = message.images
+    ? stripAttachmentBodies(message.images)
+    : undefined;
+  if (attachments === message.attachments && images === message.images) return message;
+  return {
+    ...message,
+    ...(attachments !== undefined ? { attachments } : {}),
+    ...(images !== undefined ? { images } : {}),
+  };
+}
+
 function stripCompactedEncryptedReasoningFromSession(session: AISession): AISession {
   const compactedMessageCount = Math.min(
     session.messages.length,
@@ -332,6 +373,15 @@ export function serializeSessionsForStorage(
     });
     const strippedSession = stripEncryptedReasoningFromSession(session);
     const json = JSON.stringify(session);
+    const attachmentStrippedMessages = session.messages.flatMap((message, index) => {
+      const strippedMessage = stripAttachmentBodiesFromMessage(message);
+      if (strippedMessage === message) return [];
+      return [{
+        index,
+        strippedMessage,
+        jsonLengthDelta: JSON.stringify(strippedMessage).length - JSON.stringify(message).length,
+      }];
+    });
     return {
       session,
       json,
@@ -340,6 +390,7 @@ export function serializeSessionsForStorage(
         ? json
         : JSON.stringify(strippedSession),
       ciphertextMessages,
+      attachmentStrippedMessages,
     };
   });
 
@@ -399,6 +450,51 @@ export function serializeSessionsForStorage(
       const projectedJsonLength = current.json.length
         + current.ciphertextMessages
           .slice(0, strippedMessageCount)
+          .reduce((total, entry) => total + entry.jsonLengthDelta, 0);
+      jsonLength += nextJson.length - projectedJsonLength;
+      serialized[index] = {
+        ...current,
+        session: nextSession,
+        json: nextJson,
+      };
+    }
+  }
+
+  // Last resort when even the ciphertext budget failed: prune persisted
+  // attachment payloads oldest-first, including from the newest session.
+  // The aggregate attachment budget only bounds a single draft, so every
+  // sent turn keeps its attachment bodies on the session message and a chat
+  // with several large note mentions can outgrow every retry budget —
+  // without this fallback the newest chat fails to persist entirely and
+  // disappears on restart. Oldest messages lose their bodies first so the
+  // most recent turns keep theirs whenever possible.
+  for (let index = serialized.length - 1; index >= 0; index -= 1) {
+    if (jsonLength <= budgetBytes) break;
+    const current = serialized[index];
+    let strippedAttachmentCount = 0;
+    while (
+      jsonLength > budgetBytes
+      && strippedAttachmentCount < current.attachmentStrippedMessages.length
+    ) {
+      jsonLength += current.attachmentStrippedMessages[strippedAttachmentCount].jsonLengthDelta;
+      strippedAttachmentCount += 1;
+    }
+    if (strippedAttachmentCount > 0) {
+      const strippedMessagesByIndex = new Map(
+        current.attachmentStrippedMessages
+          .slice(0, strippedAttachmentCount)
+          .map(entry => [entry.index, entry.strippedMessage] as const),
+      );
+      const nextSession = {
+        ...current.session,
+        messages: current.session.messages.map((message, messageIndex) => (
+          strippedMessagesByIndex.get(messageIndex) ?? message
+        )),
+      };
+      const nextJson = JSON.stringify(nextSession);
+      const projectedJsonLength = current.json.length
+        + current.attachmentStrippedMessages
+          .slice(0, strippedAttachmentCount)
           .reduce((total, entry) => total + entry.jsonLengthDelta, 0);
       jsonLength += nextJson.length - projectedJsonLength;
       serialized[index] = {

@@ -17,9 +17,10 @@ export const VAULT_NOTE_ATTACHMENT_MEDIA_TYPE = "text/markdown";
 /**
  * Upper bound for the note body inlined into an attachment. The body is
  * persisted as base64 in both `base64Data` and `dataUrl` on the message, and
- * the AI session serializer cannot shrink attachments to fit its storage
- * budget, so an unbounded note (a ~2 MB note is valid in the Vault) could
- * make the current chat fail to persist and disappear after a restart. The
+ * the AI session serializer can only shrink attachments by dropping their
+ * bodies entirely as a last-resort fallback, so an unbounded note (a ~2 MB
+ * note is valid in the Vault) could make the current chat lose its inlined
+ * note content — or fail to persist and disappear after a restart. The
  * cap keeps the persisted attachment well under that budget; the note id
  * still travels with the attachment, so the agent can read the full body
  * with `vault_notes_get` when needed.
@@ -28,12 +29,13 @@ export const MAX_VAULT_NOTE_ATTACHMENT_CHARS = 200_000;
 
 /**
  * Aggregate cap on the decoded byte size of vault-note attachments in a single
- * draft. The per-note cap above is not enough: the AI session serializer
- * cannot drop attachments from the newest session to fit its storage budget
- * (MAX_SESSIONS_JSON_BYTES = 2 MiB), so enough mentioned notes in one chat
- * would make persistence fail permanently and the chat disappear on restart.
- * The budget counts decoded bytes, since base64 inflates the payload by ~1/3
- * when persisted (`base64Data` + `dataUrl` on the message).
+ * draft. The per-note cap above is not enough: the AI session serializer can
+ * only drop attachment bodies from the newest session as a last-resort
+ * fallback (losing the inlined note content from persisted history), so
+ * enough mentioned notes in one chat would otherwise degrade or fail
+ * persistence against MAX_SESSIONS_JSON_BYTES = 2 MiB. The budget counts
+ * decoded bytes, since base64 inflates the payload by ~1/3 when persisted
+ * (`base64Data` + `dataUrl` on the message).
  */
 export const MAX_VAULT_NOTE_TOTAL_ATTACHMENT_BYTES = 768 * 1024;
 

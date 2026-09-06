@@ -1068,21 +1068,34 @@ export function useAIState() {
     upload: UploadedFile,
   ): boolean => {
     ensureDraftForScope(scopeKey, fallbackAgentId);
-    // Defense in depth: callers pre-check the budget via
-    // `attachVaultNoteMention`, but the shared updater re-checks against the
-    // current draft state so no insertion path can bypass the aggregate cap.
-    let attached = false;
+    // React may defer the queued `setDraftsByScopeRaw` updaters above until the
+    // batched render (e.g. when `ensureDraftForScope` has to create a missing
+    // draft, it schedules that render), so a flag captured inside the updater
+    // below is still unset when this function returns. Decide against the
+    // module-level draft snapshot instead: every draft mutation refreshes it as
+    // soon as its updater runs, so it is the authoritative synchronous view.
+    // The updater keeps the budget re-check as defense in depth; a stale
+    // snapshot can only make this return value disagree with the deferred
+    // insert, never bypass the cap.
+    const snapshotDraft = ensureDraftForScopeState(
+      latestAIDraftsByScopeSnapshot ?? {},
+      scopeKey,
+      fallbackAgentId,
+    )[scopeKey];
+    if (!snapshotDraft) return false;
+    if (appendUploadsWithinAttachmentBudget(snapshotDraft.attachments, [upload]).length === 0) {
+      return false;
+    }
     updateDraftIfPresent(scopeKey, (draft) => {
       if (appendUploadsWithinAttachmentBudget(draft.attachments, [upload]).length === 0) {
         return draft;
       }
-      attached = true;
       return {
         ...draft,
         attachments: [...draft.attachments, upload],
       };
     });
-    return attached;
+    return true;
   }, [ensureDraftForScope, updateDraftIfPresent]);
 
   const cleanupOrphanedSessions = useCallback((activeTargetIds: Set<string>) => {
