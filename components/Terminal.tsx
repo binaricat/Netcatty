@@ -638,6 +638,17 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const fontWeightFixupDoneRef = useRef(false);
 
   const captureTerminalLogData = useCallback((data: string) => {
+    // Keep the history tracker's viewport size current so cursor-row and
+    // cursor-column moves are clamped exactly like the terminal clamps them.
+    const captureTerm = termRef.current;
+    if (captureTerm) {
+      terminalOutputHistoryRef.current.setViewportRows(captureTerm.rows);
+      terminalOutputHistoryRef.current.setViewportCols(captureTerm.cols);
+      // The tracker's wrap decisions must measure cell widths the way this
+      // terminal's Unicode provider does, or the preview diverges from what
+      // xterm actually rendered (e.g. `15-graphemes` emoji widths).
+      terminalOutputHistoryRef.current.setWidthTerminal(captureTerm);
+    }
     const readableCommandData = commandLogRewriterRef.current.append(data);
     // The alternate-screen preview reads the raw display stream (before the
     // replay sanitizer, which drops alternate-screen output on purpose) but
