@@ -429,10 +429,13 @@ export function useSftpDirectoryTransferOps({
                     const epochAtAttempt = getTransferControlEpoch(rootTaskId);
                     try {
                       const result = await netcattyBridge.get()?.pauseTransfer?.(task.id);
-                      // Resume won while we were awaiting pause — undo.
+                      // Compensate only if the newest decision still wants this file running.
+                      // A new pause or cancellation also changes the epoch.
                       if (
                         result?.success
                         && !isTransferControlEpochCurrent(rootTaskId, epochAtAttempt)
+                        && !isPauseLatched(rootTaskId, task.id)
+                        && !isCancelledLocalOrGlobal(cancelledTasksRef, rootTaskId, task.id)
                       ) {
                         try {
                           await netcattyBridge.get()?.resumeTransfer?.(task.id);
