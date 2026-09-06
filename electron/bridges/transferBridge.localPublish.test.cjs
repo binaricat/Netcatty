@@ -227,3 +227,69 @@ test("fallback close failure retains the original backup and prepared replacemen
   const ready = fs.readdirSync(root).find((name) => name.endsWith(".ready"));
   assert.equal(fs.readFileSync(path.join(root, ready), "utf8"), "download");
 });
+
+for (const mode of [0o200, 0]) {
+  test(`copy fallback publishes prepared bytes with destination mode ${mode.toString(8)}`, async (t) => {
+    const root = fs.mkdtempSync(`${temp.getTempFilePath("publish-mode")}-`);
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    const staged = path.join(root, "staged");
+    const target = path.join(root, "target");
+    fs.writeFileSync(staged, "download");
+    t.mock.method(fs.promises, "link", async () => { throw Object.assign(new Error("unsupported"), { code: "ENOTSUP" }); });
+    await bridge._promoteLocalTransferForTests(staged, target, {
+      existingMode: mode, sourceSoftIdentity: { mtimeMs: 1_700_000_000_000 },
+    });
+    const stat = fs.statSync(target);
+    assert.equal(stat.mode & 0o777, mode);
+    assert.equal(Math.floor(stat.mtimeMs / 1000), 1_700_000_000);
+    fs.chmodSync(target, 0o600);
+    assert.equal(fs.readFileSync(target, "utf8"), "download");
+  });
+}
+
+test("direct local timestamp preservation supports a write-only target", async (t) => {
+  const root = fs.mkdtempSync(`${temp.getTempFilePath("stamp-writeonly")}-`);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const target = path.join(root, "target");
+  fs.writeFileSync(target, "download");
+  fs.chmodSync(target, 0o200);
+  await bridge._preserveTransferredDestinationMtimeForTests({
+    targetType: "local", targetPath: target,
+    sourceSoftIdentity: { mtimeMs: 1_700_000_000_000 },
+  });
+  const stat = fs.statSync(target);
+  assert.equal(stat.mode & 0o777, 0o200);
+  assert.equal(Math.floor(stat.mtimeMs / 1000), 1_700_000_000);
+});
+
+test("write-only timestamp fallback leaves a later pathname replacement unchanged", async (t) => {
+  const root = fs.mkdtempSync(`${temp.getTempFilePath("stamp-writeonly-race")}-`);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const target = path.join(root, "target");
+  const published = path.join(root, "published");
+  fs.writeFileSync(target, "download");
+  fs.chmodSync(target, 0o200);
+  let replaced = false;
+  const open = fs.promises.open;
+  t.mock.method(fs.promises, "open", async (...args) => {
+    const handle = await open(...args);
+    if (args[0] === target && args[1] === fs.constants.O_WRONLY) {
+      const utimes = handle.utimes.bind(handle);
+      handle.utimes = async (...times) => {
+        fs.renameSync(target, published);
+        fs.writeFileSync(target, "concurrent");
+        fs.utimesSync(target, 1_600_000_000, 1_600_000_000);
+        replaced = true;
+        return utimes(...times);
+      };
+    }
+    return handle;
+  });
+  await bridge._preserveTransferredDestinationMtimeForTests({
+    targetType: "local", targetPath: target,
+    sourceSoftIdentity: { mtimeMs: 1_700_000_000_000 },
+  });
+  assert.equal(replaced, true);
+  assert.equal(Math.floor(fs.statSync(target).mtimeMs / 1000), 1_600_000_000);
+  assert.equal(Math.floor(fs.statSync(published).mtimeMs / 1000), 1_700_000_000);
+});

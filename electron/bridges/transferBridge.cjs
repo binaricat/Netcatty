@@ -959,6 +959,7 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
   let backedUp = false;
   let committed = false;
   let keepRecoveryFiles = false;
+  let preparedHandle;
   try {
     assertNotCancelled();
     try {
@@ -976,6 +977,9 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
         fs.promises.utimes(readyPath, when, when), 15_000, "Prepared destination utimes",
       ).catch(() => {});
     }
+    // Keep read access to our private bytes before destination permissions
+    // can remove it; the no-hardlink fallback copies through this handle.
+    preparedHandle = await fs.promises.open(readyPath, "r");
     let appliedMode = null;
     let validatedTarget;
     let stable = false;
@@ -1016,7 +1020,7 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
     assertNotCancelled();
     let publishedIdentity = null;
     try {
-      publishedIdentity = await publishLocalFileExclusive(readyPath, targetPath, assertNotCancelled) ?? null;
+      publishedIdentity = await publishLocalFileExclusive(readyPath, targetPath, assertNotCancelled, preparedHandle) ?? null;
     } catch (error) {
       if (error?.code === "EEXIST") {
         throw new Error("Local download target changed during replacement", { cause: error });
@@ -1057,6 +1061,8 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
     }
     await fs.promises.unlink(readyPath).catch(() => {});
     throw error;
+  } finally {
+    await preparedHandle?.close().catch(() => {});
   }
 }
 
@@ -1105,7 +1111,14 @@ async function preserveTransferredDestinationMtime(transfer, options = {}) {
       // Verify and stamp the same open file. A later pathname replacement
       // must never receive metadata belonging to this completed transfer.
       await awaitBestEffortBounded((async () => {
-        const handle = await fs.promises.open(transfer.targetPath, "r");
+        let handle;
+        try {
+          handle = await fs.promises.open(transfer.targetPath, "r");
+        } catch (error) {
+          if (error?.code !== "EACCES" && error?.code !== "EPERM") throw error;
+          // O_WRONLY neither creates nor truncates a write-only destination.
+          handle = await fs.promises.open(transfer.targetPath, fs.constants.O_WRONLY);
+        }
         try {
           const currentStat = await handle.stat();
           const publishedIdentity = transfer.publishedLocalIdentity;

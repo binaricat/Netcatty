@@ -8,7 +8,7 @@ const fs = require("node:fs");
 // but no pathname cleanup may remove a concurrent writer's replacement.
 // Resolves with the published inode identity ({ dev, ino, size }) so callers can
 // verify an open destination handle before later metadata stamping.
-async function publishLocalFileExclusive(source, target, assertNotCancelled = () => {}) {
+async function publishLocalFileExclusive(source, target, assertNotCancelled = () => {}, preparedHandle) {
   assertNotCancelled();
   try {
     await fs.promises.link(source, target);
@@ -24,7 +24,7 @@ async function publishLocalFileExclusive(source, target, assertNotCancelled = ()
   let failure;
   let publishedIdentity;
   try {
-    input = await fs.promises.open(source, "r");
+    input = preparedHandle ?? await fs.promises.open(source, "r");
     const stat = await input.stat();
     assertNotCancelled();
     output = await fs.promises.open(target, "wx", stat.mode & 0o7777);
@@ -57,7 +57,7 @@ async function publishLocalFileExclusive(source, target, assertNotCancelled = ()
   } catch (error) {
     failure = error;
   } finally {
-    for (const handle of [output, input]) {
+    for (const handle of [output, preparedHandle ? undefined : input]) {
       try { await handle?.close(); } catch (error) { failure ??= error; }
     }
   }
