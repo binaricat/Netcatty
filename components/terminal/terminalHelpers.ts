@@ -604,9 +604,10 @@ export function alignTerminalViewportScroll(term: XTerm): void {
  * scrollToLine/scrollToBottom) is a *relative* scroll through the still-stale
  * DOM offset, so running it immediately would apply the resize delta twice and
  * the deferred sync would then preserve the wrong reading row (#3299). Defer
- * the restore to the first render after the mode ends: xterm's viewport
- * registered its own onRender handler earlier, so it re-syncs with fresh
- * scroll dimensions during that same render before the restore runs.
+ * the restore to a subsequent task/frame after the first render following the
+ * mode's end: the public onRender fires before the internal render event the
+ * viewport uses to perform its deferred sync, so the restore must wait until
+ * that internal handler has applied the fresh scroll dimensions.
  */
 /**
  * One pending restore per terminal. Consecutive fits while synchronized
@@ -618,6 +619,20 @@ export function alignTerminalViewportScroll(term: XTerm): void {
  * earliest pending restore — it holds the pre-reflow target — until it runs.
  */
 const pendingSynchronizedRestores = new WeakMap<XTerm, { dispose: () => void }>();
+
+/**
+ * Run `fn` after the current render frame has fully completed. xterm's
+ * viewport registered its own internal render handler that performs the
+ * deferred `_sync` (fresh scroll dimensions + DOM offset), and that handler
+ * still runs after this function's caller within the same frame.
+ */
+function runAfterRenderFrame(fn: () => void): void {
+  if (typeof requestAnimationFrame === "function") {
+    requestAnimationFrame(() => fn());
+  } else {
+    setTimeout(fn, 0);
+  }
+}
 
 export function deferScrollRestoreDuringSynchronizedOutput(
   term: XTerm,
@@ -634,7 +649,14 @@ export function deferScrollRestoreDuringSynchronizedOutput(
     pendingSynchronizedRestores.delete(term);
     listener?.dispose();
     listener = undefined;
-    restore();
+    // The public onRender is forwarded from
+    // RenderService.onRenderedViewportChange, which fires before the separate
+    // internal RenderService.onRender event the viewport uses to perform its
+    // deferred _sync. The restore is a *relative* scroll, so running it here
+    // would still go through stale scroll dimensions and reapply the resize
+    // delta (#3299). Push it to a subsequent task/frame so the viewport's
+    // internal render handler has applied fresh dimensions first.
+    runAfterRenderFrame(restore);
   });
   pendingSynchronizedRestores.set(term, listener);
 }

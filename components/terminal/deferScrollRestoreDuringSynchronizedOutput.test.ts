@@ -3,6 +3,11 @@ import { test } from "node:test";
 import type { Terminal as XTerm } from "@xterm/xterm";
 import { deferScrollRestoreDuringSynchronizedOutput } from "./terminalHelpers";
 
+const flushMacroTask = () =>
+  new Promise<void>((resolve) => {
+    setTimeout(resolve, 0);
+  });
+
 type RenderListener = () => void;
 
 const createTerm = (
@@ -35,7 +40,7 @@ test("runs the restore immediately when synchronized output is inactive", () => 
   assert.equal(renderListeners.length, 0);
 });
 
-test("defers the restore until a render after synchronized output ends", () => {
+test("defers the restore until a render after synchronized output ends", async () => {
   const renderListeners: RenderListener[] = [];
   const term = createTerm(true, renderListeners);
   let restored = 0;
@@ -49,17 +54,22 @@ test("defers the restore until a render after synchronized output ends", () => {
 
   // A render while the mode is still active must not run the restore.
   renderListeners[0]();
+  await flushMacroTask();
   assert.equal(restored, 0);
   assert.equal(renderListeners.length, 1);
 
-  // The first render after the mode ends runs the restore and unwinds.
+  // The first render after the mode ends schedules the restore in a
+  // subsequent task (after xterm's internal viewport render handler) and
+  // unwinds the listener.
   (term.modes as { synchronizedOutputMode: boolean }).synchronizedOutputMode = false;
   renderListeners[0]();
-  assert.equal(restored, 1);
+  assert.equal(restored, 0);
   assert.equal(renderListeners.length, 0);
+  await flushMacroTask();
+  assert.equal(restored, 1);
 });
 
-test("coalesces consecutive deferred restores so only the earliest runs", () => {
+test("coalesces consecutive deferred restores so only the earliest runs", async () => {
   const renderListeners: RenderListener[] = [];
   const term = createTerm(true, renderListeners);
   const restored: number[] = [];
@@ -79,6 +89,7 @@ test("coalesces consecutive deferred restores so only the earliest runs", () => 
 
   (term.modes as { synchronizedOutputMode: boolean }).synchronizedOutputMode = false;
   renderListeners[0]();
+  await flushMacroTask();
   assert.deepEqual(restored, [1]);
 
   // The pending slot is freed once the restore runs, so a later deferral
@@ -90,5 +101,6 @@ test("coalesces consecutive deferred restores so only the earliest runs", () => 
   assert.equal(renderListeners.length, 1);
   (term.modes as { synchronizedOutputMode: boolean }).synchronizedOutputMode = false;
   renderListeners[0]();
+  await flushMacroTask();
   assert.deepEqual(restored, [1, 3]);
 });
