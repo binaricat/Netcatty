@@ -51,6 +51,46 @@ function createHost(initial: TransferTask[], bridge?: TransferControlHost["getBr
   };
 }
 
+test("an older pause response must not resume a newer pause", async (t) => {
+  t.after(resetTransferPauseLatchesForTests);
+  let finishFirstPause!: (value: { success: boolean; lifecycleEpoch: number }) => void;
+  let calls = 0;
+  let backendPaused = true;
+  const { host, getTasks } = createHost([makeTask("overlapping-pause")], () => ({
+    pauseTransfer: async () => {
+      backendPaused = true;
+      if (++calls === 1) return new Promise((resolve) => { finishFirstPause = resolve; });
+      return { success: true, lifecycleEpoch: 2 };
+    },
+    resumeTransfer: async () => {
+      backendPaused = false;
+      return { success: true, lifecycleEpoch: 3 };
+    },
+  }));
+  const first = softPauseTransfer(host, "overlapping-pause");
+  await softPauseTransfer(host, "overlapping-pause");
+  finishFirstPause({ success: true, lifecycleEpoch: 1 });
+  await first;
+  assert.equal(getTasks()[0].status, "paused");
+  assert.equal(backendPaused, true, "late pause acknowledgement must not restart file writes");
+});
+
+test("a delayed resume response must not repaint a newer pause", async (t) => {
+  t.after(resetTransferPauseLatchesForTests);
+  let finishResume!: (value: { success: boolean; lifecycleEpoch: number }) => void;
+  const { host, getTasks } = createHost([makeTask("resume-then-pause", "paused")], () => ({
+    resumeTransfer: () => new Promise((resolve) => { finishResume = resolve; }),
+    pauseTransfer: async () => ({ success: true, lifecycleEpoch: 3 }),
+  }));
+  const resume = softResumeTransfer(host, "resume-then-pause");
+  await softPauseTransfer(host, "resume-then-pause");
+  finishResume({ success: true, lifecycleEpoch: 2 });
+  await resume;
+  assert.equal(isTransferPauseLatched("resume-then-pause"), true);
+  assert.equal(getTasks()[0].status, "paused", "latest user intent must win over an older response");
+  assert.equal(getTasks()[0].lifecycleEpoch, 3);
+});
+
 test("softPauseTransfer latches and paints paused for a live directory walk without a panel", async () => {
   resetTransferPauseLatchesForTests();
   resetTransferWalkRegistryForTests();

@@ -6792,7 +6792,13 @@ async function pauseTransfer(_event, payload) {
   ) {
     return { success: false, reason: "This transfer cannot be paused yet" };
   }
-  if (transfer.pauseOperation) return transfer.pauseOperation;
+  // A repeated pause is still a newer user decision: invalidate any resume
+  // waiting for verification or outstanding ranges, even if already paused.
+  transfer.pauseRequestToken = Symbol("pause");
+  if (transfer.pauseOperation) {
+    transfer.pauseSuperseded = false;
+    return transfer.pauseOperation;
+  }
   if (transfer.paused && transfer.lifecycleState === "paused") {
     const result = {
       success: true,
@@ -7014,6 +7020,16 @@ async function resumeTransfer(_event, payload) {
       reason: transfer.pauseUnavailableReason || "This transfer cannot be resumed safely",
     };
   }
+  const pauseRequestToken = transfer.pauseRequestToken;
+  const resumeInvalidReason = () => {
+    if (activeTransfers.get(payload?.transferId) !== transfer || transfer.cancelled) {
+      return "Transfer is no longer active";
+    }
+    if (transfer.pauseRequestToken !== pauseRequestToken) {
+      return "Resume was superseded by a newer pause";
+    }
+    return null;
+  };
   if (transfer.pauseOperation) {
     transfer.pauseSuperseded = true;
     try { transfer.cancelPauseWait?.(); } catch { }
@@ -7023,6 +7039,8 @@ async function resumeTransfer(_event, payload) {
   if (currentTransfer !== transfer || transfer.cancelled) {
     return { success: false, reason: "Transfer is no longer active" };
   }
+  const initialInvalidReason = resumeInvalidReason();
+  if (initialInvalidReason) return { success: false, reason: initialInvalidReason };
   // Already flowing (e.g. double-click resume): do not pipe() again.
   if (!transfer.paused) {
     transfer.lifecycleState = "transferring";
@@ -7071,6 +7089,8 @@ async function resumeTransfer(_event, payload) {
       };
     }
   }
+  const verifiedInvalidReason = resumeInvalidReason();
+  if (verifiedInvalidReason) return { success: false, reason: verifiedInvalidReason };
   // Soft-drained concurrent pause may leave a sparse tail past the contiguous
   // checkpoint. Wait with Resume's own budget, then single-flight truncate so
   // background settle cannot race new writes after unpause.
@@ -7090,6 +7110,8 @@ async function resumeTransfer(_event, payload) {
       return { success: false, reason: "Transfer is no longer active" };
     }
   }
+  const finalInvalidReason = resumeInvalidReason();
+  if (finalInvalidReason) return { success: false, reason: finalInvalidReason };
   transfer.paused = false;
   transfer.pauseSuperseded = false;
   transfer.lifecycleEpoch += 1;
@@ -7264,6 +7286,18 @@ function registerWorkerHandle(ipcMain, terminalWorkerManager, channel) {
 function registerHandlers(ipcMain, options = {}) {
   const terminalWorkerManager = options.terminalWorkerManager || null;
   if (terminalWorkerManager) {
+    // Control replies can arrive out of order across windows. Only the latest
+    // request may publish lifecycle state; retain tokens only while in flight.
+    const workerControlRequests = new Map();
+    const withWorkerControl = async (transferId, work) => {
+      const token = Symbol("control");
+      workerControlRequests.set(transferId, token);
+      try {
+        return await work(() => workerControlRequests.get(transferId) === token);
+      } finally {
+        if (workerControlRequests.get(transferId) === token) workerControlRequests.delete(transferId);
+      }
+    };
     const nextWorkerLifecycleEpoch = (transferId, suggestedEpoch) => {
       const entry = workerTransferLifecycleEpochs.get(transferId);
       const current = Math.max(0, Number(entry?.epoch) || 0);
@@ -7289,6 +7323,7 @@ function registerHandlers(ipcMain, options = {}) {
           && workerTransferLifecycleEpochs.get(payload.transferId) === lifecycleEntry
         ) {
           workerTransferLifecycleEpochs.delete(payload.transferId);
+          workerControlRequests.delete(payload.transferId);
         }
       };
       // Renderer (or outer main) already admitted — skip a second queue so
@@ -7314,20 +7349,22 @@ function registerHandlers(ipcMain, options = {}) {
     ipcMain.handle("netcatty:transfer:cancel", (event, payload) => (
       cancelQueuedTransfer(payload?.transferId)
         ? { success: true }
-        : workerRequest(event, "netcatty:transfer:cancel", payload)
+        : withWorkerControl(payload?.transferId, () => workerRequest(event, "netcatty:transfer:cancel", payload))
     ));
     ipcMain.handle("netcatty:transfer:pause", async (event, payload) => {
       const queued = pauseQueuedTransfer(payload?.transferId);
       if (queued) return queued;
-      const lifecycleEpoch = nextWorkerLifecycleEpoch(payload?.transferId);
-      broadcastGlobalTransferEvent({
-        type: "pausing",
-        transferId: payload?.transferId,
-        lifecycleEpoch,
-        lifecycleState: "pausing",
+      return withWorkerControl(payload?.transferId, async (isCurrent) => {
+        const lifecycleEpoch = nextWorkerLifecycleEpoch(payload?.transferId);
+        broadcastGlobalTransferEvent({
+          type: "pausing",
+          transferId: payload?.transferId,
+          lifecycleEpoch,
+          lifecycleState: "pausing",
       });
       try {
         const result = await workerRequest(event, "netcatty:transfer:pause", payload);
+        if (!isCurrent()) return { success: false, reason: "Transfer control was superseded" };
         if (!result?.success) {
           const rollbackEpoch = nextWorkerLifecycleEpoch(payload?.transferId);
           broadcastGlobalTransferEvent({
@@ -7351,6 +7388,7 @@ function registerHandlers(ipcMain, options = {}) {
         });
         return { ...result, lifecycleEpoch };
       } catch (error) {
+        if (!isCurrent()) throw error;
         const rollbackEpoch = nextWorkerLifecycleEpoch(payload?.transferId);
         broadcastGlobalTransferEvent({
           type: "resumed",
@@ -7360,24 +7398,28 @@ function registerHandlers(ipcMain, options = {}) {
         });
         throw error;
       }
+      });
     });
     ipcMain.handle("netcatty:transfer:resume", async (event, payload) => {
       const queuedResume = resumeQueuedTransfer(payload?.transferId);
       if (queuedResume) return queuedResume;
-      const result = await workerRequest(event, "netcatty:transfer:resume", payload);
-      if (result?.success) {
-        // Normalize into main-process epoch space (may advance past worker-local).
-        // Soft-resume UI must stamp THIS epoch or later worker progress is stale.
-        const lifecycleEpoch = nextWorkerLifecycleEpoch(payload?.transferId, result.lifecycleEpoch);
-        broadcastGlobalTransferEvent({
-          type: "resumed",
-          transferId: payload?.transferId,
-          lifecycleEpoch,
-          lifecycleState: "transferring",
-        });
-        return { ...result, lifecycleEpoch };
-      }
-      return result;
+      return withWorkerControl(payload?.transferId, async (isCurrent) => {
+        const result = await workerRequest(event, "netcatty:transfer:resume", payload);
+        if (!isCurrent()) return { success: false, reason: "Transfer control was superseded" };
+        if (result?.success) {
+          // Normalize into main-process epoch space (may advance past worker-local).
+          // Soft-resume UI must stamp THIS epoch or later worker progress is stale.
+          const lifecycleEpoch = nextWorkerLifecycleEpoch(payload?.transferId, result.lifecycleEpoch);
+          broadcastGlobalTransferEvent({
+            type: "resumed",
+            transferId: payload?.transferId,
+            lifecycleEpoch,
+            lifecycleState: "transferring",
+          });
+          return { ...result, lifecycleEpoch };
+        }
+        return result;
+      });
     });
     ipcMain.handle("netcatty:transfer:prioritize", (event, payload) => (
       prioritizeQueuedTransfer(payload?.transferId)

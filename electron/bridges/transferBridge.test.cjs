@@ -1607,6 +1607,116 @@ test("pause soft-drains concurrent ranges but resume waits before truncating", a
   assert.equal(durableBytes, payload.length);
 });
 
+test("a newer pause supersedes resume while concurrent writes are draining", async (t) => {
+  const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-transfer-resume-repause-"));
+  t.after(async () => {
+    await fs.promises.rm(tempDir, { recursive: true, force: true });
+  });
+
+  // Several MB so concurrent fanout stays saturated while we hold writes.
+  const payload = Buffer.alloc(UPLOAD_TRANSFER_CONCURRENCY * TRANSFER_CHUNK_SIZE * 4, 65);
+  const localPath = path.join(tempDir, "upload.bin");
+  await fs.promises.writeFile(localPath, payload);
+  let holdWrites = true;
+  const pendingWrites = [];
+  let durableBytes = 0;
+  const truncateCalls = [];
+  const fastSftp = createFastSftp({
+    open(_remotePath, _flags, callback) {
+      callback(null, Buffer.from("remote-handle"));
+    },
+    write(_handle, _buffer, _offset, length, position, callback) {
+      const complete = () => {
+        durableBytes = Math.max(durableBytes, position + length);
+        callback(null);
+      };
+      if (holdWrites) pendingWrites.push({ position, complete });
+      else setImmediate(complete);
+    },
+    close(_handle, callback) {
+      callback(null);
+    },
+  });
+  const client = {
+    sftp: createFastSftp({}),
+    stat() {
+      return Promise.resolve({ size: durableBytes });
+    },
+    truncate(_remotePath, size) {
+      truncateCalls.push(size);
+      durableBytes = size;
+      return Promise.resolve();
+    },
+    rename() {
+      return Promise.resolve();
+    },
+    delete() {
+      return Promise.resolve();
+    },
+    client: {
+      sftp(callback) {
+        callback(null, fastSftp);
+      },
+    },
+  };
+  transferBridge.init({ sftpClients: new Map([["target", client]]) });
+
+  const running = transferBridge.startTransfer(
+    { sender: createSender() },
+    {
+      transferId: "upload-resume-repause",
+      sourcePath: localPath,
+      targetPath: "/tmp/upload-soft.bin",
+      sourceType: "local",
+      targetType: "sftp",
+      targetSftpId: "target",
+      totalBytes: payload.length,
+      resumable: true,
+    },
+  );
+
+  const readyDeadline = Date.now() + 1000;
+  while (pendingWrites.length < UPLOAD_TRANSFER_CONCURRENCY && Date.now() < readyDeadline) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  assert.ok(pendingWrites.length >= 1, "expected in-flight concurrent writes");
+
+  const started = Date.now();
+  // Hold writes so active ranges never drain — soft-drain must still resolve.
+  const paused = await transferBridge.pauseTransfer(null, { transferId: "upload-resume-repause" });
+  const elapsed = Date.now() - started;
+  assert.equal(paused.success, true);
+  // Soft drain is PAUSE_RANGE_DRAIN_MS (~50ms); allow headroom without full drain.
+  assert.ok(elapsed < 1500, `soft pause took too long: ${elapsed}ms`);
+
+  const outOfOrderWrite = pendingWrites.pop();
+  assert.ok(outOfOrderWrite?.position > 0, "expected a range beyond the contiguous checkpoint");
+  outOfOrderWrite.complete();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  let resumeSettled = false;
+  const resuming = transferBridge.resumeTransfer(null, { transferId: "upload-resume-repause" })
+    .then((result) => {
+      resumeSettled = true;
+      return result;
+    });
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  const truncatedBeforeDrain = truncateCalls.length > 0;
+  const resumedBeforeDrain = resumeSettled;
+
+  const newerPause = await transferBridge.pauseTransfer(null, { transferId: "upload-resume-repause" });
+  assert.equal(newerPause.success, true);
+  holdWrites = false;
+  for (const { complete } of pendingWrites.splice(0)) complete();
+  const resumeResult = await resuming;
+  await transferBridge.cancelTransfer(null, { transferId: "upload-resume-repause" });
+  await running;
+  assert.equal(resumeResult.success, false, "old resume must not restart writes after a newer pause");
+  assert.match(resumeResult.reason, /superseded.*pause/i);
+  assert.equal(truncatedBeforeDrain, false);
+  assert.equal(resumedBeforeDrain, false);
+});
+
 test("cancelling resume during soft-drain does not truncate the staged file", async (t) => {
   const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-transfer-resume-cancel-"));
   t.after(async () => {

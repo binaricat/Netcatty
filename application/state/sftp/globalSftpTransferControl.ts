@@ -20,6 +20,7 @@ import {
   isTransferControlEpochCurrent,
 } from "./transferControlEpoch";
 import {
+  isTransferOrRootPauseLatched,
   latchTransferPauseTree,
   releaseTransferPauseTree,
 } from "./transferPauseLatch";
@@ -170,6 +171,14 @@ export async function softPauseTransfer(
   }
 
   const backendIds = treeIds.length > 0 ? treeIds : [taskId];
+  // An obsolete pause can be superseded by another pause or cancellation,
+  // not only by resume. Compensate only while the tree still wants to run.
+  const undoObsoletePause = async (id: string) => {
+    const live = host.getTasks().find((candidate) => candidate.id === taskId);
+    if (!live || ["completed", "cancelled", "failed", "interrupted"].includes(live.status)) return;
+    if (isTransferOrRootPauseLatched(taskId, id)) return;
+    try { await bridge!.resumeTransfer?.(id); } catch { /* best-effort */ }
+  };
   const pauseOne = async (id: string) => {
     let result = await bridge!.pauseTransfer?.(id)
       ?? { success: false, reason: "Pause unavailable" };
@@ -177,7 +186,7 @@ export async function softPauseTransfer(
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
       if (!isTransferControlEpochCurrent(taskId, pauseEpoch)) {
         if (result.success) {
-          try { await bridge!.resumeTransfer?.(id); } catch { /* best-effort */ }
+          await undoObsoletePause(id);
         }
         return { success: false, reason: "Pause superseded by resume" };
       }
@@ -186,6 +195,9 @@ export async function softPauseTransfer(
         return result;
       }
       await new Promise((resolve) => setTimeout(resolve, 40));
+      if (!isTransferControlEpochCurrent(taskId, pauseEpoch)) {
+        return { success: false, reason: "Pause superseded by newer control" };
+      }
       result = await bridge!.pauseTransfer?.(id)
         ?? { success: false, reason: "Pause unavailable" };
     }
@@ -205,7 +217,7 @@ export async function softPauseTransfer(
           || !live
           || (live.status !== "paused" && live.status !== "pausing");
         if (userResumed) {
-          try { await bridge!.resumeTransfer?.(id); } catch { /* best-effort */ }
+          await undoObsoletePause(id);
           return { id, result: { success: false, reason: "Pause superseded by resume" } };
         }
         return { id, result };
@@ -271,7 +283,7 @@ export async function softPauseTransfer(
   if (userAlreadyResumed) {
     for (const { id, result } of pauseResults) {
       if (result?.success) {
-        try { await bridge.resumeTransfer?.(id); } catch { /* best-effort */ }
+        await undoObsoletePause(id);
       }
     }
     return "noop";
@@ -284,7 +296,7 @@ export async function softPauseTransfer(
     if (!isTransferControlEpochCurrent(taskId, pauseEpoch)) {
       for (const { id, result } of pauseResults) {
         if (result?.success) {
-          try { await bridge.resumeTransfer?.(id); } catch { /* best-effort */ }
+          await undoObsoletePause(id);
         }
       }
       return "noop";
@@ -367,8 +379,9 @@ export async function softPauseTransfer(
     bridgeResults: pauseResults.map((row) => row.result),
   });
   for (const id of rollback.bridgeIdsToResume) {
-    try { await bridge.resumeTransfer?.(id); } catch { /* best-effort */ }
+    await undoObsoletePause(id);
   }
+  if (!isTransferControlEpochCurrent(taskId, pauseEpoch)) return "noop";
   const hard = pauseResults.find(({ result }) =>
     result && !result.success && !isBenignPauseMiss(result.reason),
   )?.result;
@@ -428,7 +441,7 @@ export async function softResumeTransfer(
     : [taskId, ...childIds.filter((id) => id !== taskId)];
 
   // Supersede in-flight soft-drain / pauseWatch only — not a bridge lifecycle stamp.
-  bumpTransferControlEpoch(taskId);
+  const resumeEpoch = bumpTransferControlEpoch(taskId);
   releaseTransferPauseTree(taskId, releaseIds);
   for (const id of [taskId, ...releaseIds]) {
     try { globalSftpTransferScheduler.resume(id); } catch { /* best-effort */ }
@@ -442,7 +455,8 @@ export async function softResumeTransfer(
     bridge?.resumeTransfer?.(id) ?? { success: false, reason: "Resume unavailable" },
   ));
   const after = host.getTasks().find((candidate) => candidate.id === taskId);
-  if (after?.status === "cancelled") return { handled: true };
+  if (!isTransferControlEpochCurrent(taskId, resumeEpoch)) return { handled: true };
+  if (!after || ["completed", "cancelled", "failed"].includes(after.status)) return { handled: true };
 
   const successIds = resumeIds.filter((_, index) => results[index]?.success);
   const walkAlive = isTransferWalkInFlight(taskId);

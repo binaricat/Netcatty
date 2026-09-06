@@ -3762,3 +3762,48 @@ test("hard directory resume failure falls back to bounded fresh retry history", 
   assert.equal(retainedParent?.checkpointBytes, 0);
   assert.ok(snapshot.length <= 200, `failed directory history must stay bounded, got ${snapshot.length}`);
 });
+
+
+test("held dedicated file resume cannot overwrite a subsequent pause", async (t) => {
+  const store = createSftpTransferCenterStore();
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+  let releaseRun!: () => void;
+  let started!: () => void;
+  let releaseResume!: (result: { success: boolean; lifecycleEpoch: number }) => void;
+  const runGate = new Promise<void>((resolve) => { releaseRun = resolve; });
+  const startGate = new Promise<void>((resolve) => { started = resolve; });
+  const resumeGate = new Promise<{ success: boolean; lifecycleEpoch: number }>((resolve) => { releaseResume = resolve; });
+  t.after(async () => {
+    releaseRun();
+    if (previousWindow) Object.defineProperty(globalThis, "window", previousWindow);
+    else Reflect.deleteProperty(globalThis, "window");
+    const { resetTransferPauseLatchesForTests } = await import("./sftp/transferPauseLatch");
+    resetTransferPauseLatchesForTests();
+  });
+  Object.defineProperty(globalThis, "window", { configurable: true, value: { netcatty: {
+    pauseTransfer: async () => ({ success: true, checkpointBytes: 2, lifecycleEpoch: 3 }),
+    resumeTransfer: () => resumeGate,
+  } } });
+  store.publishOwner("dedicated-resume", [{
+    ...makeTask("held-file", "interrupted"),
+    ownerId: "dedicated-resume", targetHostId: "host-a", reconnectRequired: true,
+  }]);
+  store.setDedicatedResumeHandler(async () => {
+    store.patchTask("held-file", { status: "transferring", reconnectRequired: false });
+    started();
+    await runGate;
+    return { success: true };
+  });
+  const first = store.resume("held-file");
+  await startGate;
+  await store.pause("held-file");
+  const second = store.resume("held-file");
+  await store.pause("held-file");
+  releaseResume({ success: true, lifecycleEpoch: 2 });
+  await new Promise((resolve) => setImmediate(resolve));
+  const row = store.getSnapshot().tasks.find((task) => task.id === "held-file");
+  releaseRun();
+  await Promise.all([first, second]);
+  assert.equal(row?.status, "paused", "held transfer must respect the latest pause");
+  assert.equal(row?.lifecycleEpoch, 3);
+});
