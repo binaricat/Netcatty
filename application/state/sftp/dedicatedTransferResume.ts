@@ -95,8 +95,8 @@ export function resetDedicatedSessionOpenGateForTests(): void {
 }
 
 /**
- * Resolve a vault host for a transfer endpoint. Prefer stable id; fall back to
- * label/hostname when the id is stale after vault edits or older task records.
+ * Resolve the recorded endpoint, never a same-named replacement. Legacy tasks
+ * without an id may use label/hostname only when exactly one host matches.
  */
 export function resolveHostForTransferEndpoint(
   hosts: readonly Host[],
@@ -104,16 +104,16 @@ export function resolveHostForTransferEndpoint(
   hostLabel?: string,
 ): Host | null {
   if (hostId) {
-    const byId = hosts.find((host) => host.id === hostId);
-    if (byId) return byId;
+    return hosts.find((host) => host.id === hostId) ?? null;
   }
   const needle = (hostLabel || "").trim().toLowerCase();
   if (!needle) return null;
-  return hosts.find((host) => {
+  const matches = hosts.filter((host) => {
     const label = (host.label || "").trim().toLowerCase();
     const hostname = (host.hostname || "").trim().toLowerCase();
     return label === needle || hostname === needle;
-  }) ?? null;
+  });
+  return matches.length === 1 ? matches[0] : null;
 }
 
 export type OpenTransferSftpSessionOptions = {

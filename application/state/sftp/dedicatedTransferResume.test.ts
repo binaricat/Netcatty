@@ -97,10 +97,11 @@ test("persisted resume child lookup handles 50,000 retained rows in linear time"
   assert.ok(Date.now() - startedAt < 2_000, "50k retained-child lookup should stay linear");
 });
 
-test("resolveHostForTransferEndpoint prefers id then label", () => {
+test("resolveHostForTransferEndpoint requires recorded id and supports unique legacy names", () => {
   const hosts = [host("id-1", "CI-Build-01", "ci-01.example")];
   assert.equal(resolveHostForTransferEndpoint(hosts, "id-1", "other")?.id, "id-1");
-  assert.equal(resolveHostForTransferEndpoint(hosts, "missing", "CI-Build-01")?.id, "id-1");
+  assert.equal(resolveHostForTransferEndpoint(hosts, "missing", "CI-Build-01"), null);
+  assert.equal(resolveHostForTransferEndpoint(hosts, undefined, "CI-Build-01")?.id, "id-1");
   assert.equal(resolveHostForTransferEndpoint(hosts, undefined, "ci-01.example")?.id, "id-1");
   assert.equal(resolveHostForTransferEndpoint(hosts, "missing", "gone"), null);
 });
@@ -1998,3 +1999,33 @@ test("corrupted replace-stage history cannot delete an unrelated directory", asy
     resetDedicatedSessionOpenGateForTests();
   }
 });
+
+for (const scenario of ["deleted-id", "ambiguous-legacy-label"] as const) {
+  test(`restart upload does not select a different server by ${scenario}`, async (t) => {
+    const originalGet = netcattyBridge.get;
+    t.after(() => { netcattyBridge.get = originalGet; });
+    const opened: string[] = [];
+    let uploads = 0;
+    (netcattyBridge as { get: () => unknown }).get = () => ({
+      openSftp: async (options: { hostname: string }) => { opened.push(options.hostname); return "new-channel"; },
+      closeSftp: async () => {},
+      statLocal: async () => ({ size: 100, lastModified: 123 }),
+      startStreamTransfer: async () => { uploads++; return { transferId: "wrong-host-resume" }; },
+    });
+    const hosts = scenario === "deleted-id"
+      ? [host("different-id", "production", "different.example")]
+      : [host("first-id", "production", "first.example"), host("second-id", "production", "second.example")];
+    const result = await resumeTransferWithDedicatedSession({
+      id: "wrong-host-resume", fileName: "deployment.zip",
+      sourcePath: "/fixture/deployment.zip", targetPath: "/srv/deployment.zip",
+      sourceConnectionId: "local", targetConnectionId: "right-expired",
+      targetHostId: scenario === "deleted-id" ? "deleted-original-id" : undefined,
+      targetHostLabel: "production", direction: "upload", status: "interrupted",
+      totalBytes: 100, transferredBytes: 20, checkpointBytes: 20,
+      speed: 0, startTime: 1, isDirectory: false, reconnectRequired: true,
+    }, {hosts, keys: [], identities: []});
+    assert.equal(result.success, false, "resume must stop instead of selecting another endpoint by display name");
+    assert.deepEqual(opened, [], "must not authenticate to an unproven replacement host");
+    assert.equal(uploads, 0);
+  });
+}
