@@ -341,6 +341,7 @@ for (const stop of ['cancel', 'timeout']) {
     pty.write = data => writes.push(data);
     const job = startPtyJob(pty, 'echo must_not_run', {
       shellKind: 'posix', probeLiveShell: true, timeoutMs: stop === 'timeout' ? 70 : 1000,
+      enforceWallTimeout: stop === 'timeout',
     });
     await new Promise(resolve => setTimeout(resolve, 45));
     assert.ok(writes.length >= 2, 'probe must have started a later chunk');

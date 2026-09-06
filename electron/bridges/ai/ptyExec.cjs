@@ -94,6 +94,7 @@ function startPtyJob(ptyStream, command, options) {
 
   const usesLiveShellProbe = probeLiveShell && ["posix", "fish"].includes(resolvedShellKind);
   let probingShell = usesLiveShellProbe;
+  let deliveringInput = false;
   let probeOutput = "";
 
   let output = "";
@@ -529,7 +530,7 @@ function startPtyJob(ptyStream, command, options) {
         : Buffer.from(String(data ?? ""));
     const text = outputDecoder.write(bytes);
     if (!text) return;
-    if (!pendingEnd) armOutputTimeout();
+    if (!pendingEnd && !deliveringInput) armOutputTimeout();
 
     if (probingShell) {
       probeOutput = (probeOutput + text).slice(-16384);
@@ -742,6 +743,11 @@ function startPtyJob(ptyStream, command, options) {
 
   function writeInput(text) {
     stopInputWrite();
+    // Each delivery gets a fresh wait budget, including the transition from
+    // probe to wrapper. Echo may be disabled while we are still typing.
+    clearStartupTimeout();
+    clearTimeout(timeoutId);
+    deliveringInput = true;
     const generation = inputWriteGeneration;
     let offset = 0;
     // Readline may overrun its input queue when long probes arrive in one
@@ -765,7 +771,9 @@ function startPtyJob(ptyStream, command, options) {
         // Input delivery is complete: only now does the startup deadline
         // begin, so paced typing time never consumes the startup budget.
         if (!finished && !cancelRequested && generation === inputWriteGeneration) {
-          armStartupTimeout();
+          deliveringInput = false;
+          armOutputTimeout();
+          if (!foundStart) armStartupTimeout();
         }
       }
     };
