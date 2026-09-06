@@ -1140,12 +1140,17 @@ export function useAIState() {
     ) {
       return false;
     }
-    // The authoritative updater's rejection must reach the caller: if the
-    // budget check inside the updater fails (e.g. a completed upload pushed
-    // the draft over the cap after the snapshot pre-check above), returning
-    // `true` here would suppress the caller's budget warning while nothing
-    // was refreshed.
-    let refreshed = false;
+    // React may defer the queued `setDraftsByScopeRaw` updater until the
+    // batched render (e.g. when another draft mutation is already queued), so
+    // a flag captured inside the updater is still unset when this function
+    // returns and a successful refresh would be reported as a budget
+    // rejection, making the caller warn although the note was refreshed.
+    // Decide against the module-level draft snapshot instead, exactly like
+    // `addDraftAttachment` above: every draft mutation refreshes the snapshot
+    // as soon as its updater runs, so it is the authoritative synchronous
+    // view. The updater keeps the budget re-check as defense in depth; a
+    // stale snapshot can only make this return value disagree with the
+    // deferred refresh, never bypass the cap.
     updateDraftIfPresent(scopeKey, (draft) => {
       const existingDuplicate = draft.attachments.find(
         (attachment) => (
@@ -1161,7 +1166,6 @@ export function useAIState() {
       ) {
         return draft;
       }
-      refreshed = true;
       return {
         ...draft,
         attachments: draft.attachments.map((attachment) => (
@@ -1171,7 +1175,7 @@ export function useAIState() {
         )),
       };
     });
-    return refreshed;
+    return true;
   }, [addDraftAttachment, ensureDraftForScope, updateDraftIfPresent]);
 
   const cleanupOrphanedSessions = useCallback((activeTargetIds: Set<string>) => {
