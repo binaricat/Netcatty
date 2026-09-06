@@ -1207,6 +1207,13 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     }));
     const hasInlineTextAttachments = attachments.some(isInlineTextAttachment);
     if ((!trimmed && !hasInlineTextAttachments) || isStreaming) return;
+    // Note-only sends (empty text + a mentioned note) still need a usable
+    // session title: fall back to the first mentioned note's title so these
+    // conversations don't all show up as "Untitled" in history.
+    const noteOnlyTitle = attachments.find(
+      (attachment) => isVaultNoteAttachment(attachment) && attachment.vaultNoteTitle,
+    )?.vaultNoteTitle ?? '';
+    const titleText = trimmed || noteOnlyTitle.trim();
     const sendAgentId = currentSessionView?.agentId ?? draft?.agentId ?? currentAgentId;
     const agentConfig = sendAgentId !== 'catty' ? findEnabledExternalAgent(externalAgents, sendAgentId) : undefined;
     if (sendAgentId !== 'catty' && !agentConfig) return;
@@ -1390,7 +1397,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         updateLastMessage(sessionId, msg => msg.statusText ? { ...msg, statusText: '' } : msg);
         setStreamingForScope(sessionId, false);
         abortControllersRef.current.delete(sessionId);
-        autoTitleSession(sessionId, trimmed);
+        autoTitleSession(sessionId, titleText);
       } else {
         const toolScope = {
           type: scopeType,
@@ -1413,7 +1420,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
           getExecutorContext: () => buildExecutorContextForScope(toolScope),
           autoTitleSession,
           selectedUserSkillSlugs: selectedSkillSlugs,
-          titleText: trimmed,
+          titleText,
         }, modelAttachments.length > 0 ? modelAttachments : undefined);
       }
     } finally {

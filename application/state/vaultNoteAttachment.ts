@@ -37,6 +37,15 @@ export const MAX_VAULT_NOTE_ATTACHMENT_CHARS = 200_000;
  */
 export const MAX_VAULT_NOTE_TOTAL_ATTACHMENT_BYTES = 768 * 1024;
 
+/**
+ * Upper bound for the note title persisted in attachment metadata
+ * (`vaultNoteTitle`, and `previewText` when the body is empty). Vault title
+ * normalization imposes no length limit, and the session serializer cannot
+ * shrink these metadata strings to fit its storage budget, so an oversized
+ * pasted or synced title must never reach the persisted message.
+ */
+export const MAX_VAULT_NOTE_TITLE_CHARS = 120;
+
 /** Estimate the decoded byte size of a base64 payload without decoding it. */
 function base64DecodedByteLength(base64: string): number {
   let chars = base64.length;
@@ -104,6 +113,14 @@ function boundNoteBody(content: string, noteId: string): string {
   return `${truncated}\n\n[... Vault note truncated for size: showing ${truncated.length} of ${content.length} characters. Use vault_notes_get with noteId ${noteId} to read the full note ...]`;
 }
 
+/** Bound the persisted title metadata, never splitting a surrogate pair. */
+function boundNoteTitle(title: string): string {
+  if (title.length <= MAX_VAULT_NOTE_TITLE_CHARS) return title;
+  let truncated = title.slice(0, MAX_VAULT_NOTE_TITLE_CHARS);
+  if (/[\uD800-\uDBFF]$/.test(truncated)) truncated = truncated.slice(0, -1);
+  return truncated;
+}
+
 /** Strip path separators, control characters and quotes so a note title is a safe attachment filename. */
 function sanitizeNoteFilename(title: string): string {
   const cleaned = title
@@ -116,7 +133,7 @@ function sanitizeNoteFilename(title: string): string {
 export function createVaultNoteAttachment(note: Pick<VaultNote, "id" | "title" | "content">): UploadedFile | null {
   const id = String(note.id || "").trim();
   if (!id) return null;
-  const title = String(note.title || "").trim() || "Untitled note";
+  const title = boundNoteTitle(String(note.title || "").trim()) || "Untitled note";
   const content = boundNoteBody(note.content ?? "", id);
   const base64Data = bytesToBase64(new TextEncoder().encode(content));
   const filename = `${sanitizeNoteFilename(title)}.md`;
