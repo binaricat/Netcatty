@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 
 import {
   MAX_VAULT_NOTE_ATTACHMENT_CHARS,
+  MAX_VAULT_NOTE_TOTAL_ATTACHMENT_BYTES,
   VAULT_NOTE_ATTACHMENT_MEDIA_TYPE,
+  attachVaultNoteMention,
   createVaultNoteAttachment,
   decodeVaultNoteAttachment,
   isVaultNoteAttachment,
@@ -107,4 +109,103 @@ test("buildPromptWithTerminalSelectionAttachments supports note-only prompts", (
 
 test("buildPromptWithTerminalSelectionAttachments keeps plain prompts untouched without inline attachments", () => {
   assert.equal(buildPromptWithTerminalSelectionAttachments("hello", []), "hello");
+});
+
+test("attachVaultNoteMention attaches a new note within the aggregate budget", () => {
+  const result = attachVaultNoteMention([], { id: "note-a", title: "A", content: "hello" });
+
+  assert.equal(result.status, "attached");
+  assert.ok(result.upload);
+  assert.equal(result.upload.vaultNoteId, "note-a");
+});
+
+test("attachVaultNoteMention reports a duplicate for an already mentioned note and still produces a fresh upload", () => {
+  const first = attachVaultNoteMention([], { id: "note-a", title: "A", content: "v1" });
+  assert.ok(first.upload);
+
+  const second = attachVaultNoteMention([first.upload], { id: "note-a", title: "A", content: "v2" });
+
+  assert.equal(second.status, "duplicate");
+  assert.ok(second.upload);
+  assert.equal(decodeVaultNoteAttachment(second.upload), "v2");
+});
+
+test("attachVaultNoteMention rejects a note that would exceed the aggregate budget", () => {
+  // Each note fits the per-note char cap, but a fifth pushes the aggregate
+  // decoded payload past MAX_VAULT_NOTE_TOTAL_ATTACHMENT_BYTES.
+  const noteBody = "a".repeat(Math.floor(MAX_VAULT_NOTE_TOTAL_ATTACHMENT_BYTES / 4));
+  assert.ok(noteBody.length <= MAX_VAULT_NOTE_ATTACHMENT_CHARS);
+  let attachments: ReturnType<typeof createVaultNoteAttachment>[] = [];
+  for (const id of ["n1", "n2", "n3", "n4"]) {
+    const result = attachVaultNoteMention(attachments, { id, title: id, content: noteBody });
+    assert.equal(result.status, "attached", `note ${id} should fit`);
+    attachments = [...attachments, result.upload!];
+  }
+
+  const overflow = attachVaultNoteMention(
+    attachments,
+    { id: "n5", title: "n5", content: noteBody },
+  );
+  assert.equal(overflow.status, "budget");
+  assert.equal(overflow.upload, null);
+});
+
+test("attachVaultNoteMention counts emoji-heavy notes by byte size, not character count", () => {
+  // 100_000 emoji characters = 400_000 UTF-8 bytes; two of them would exceed
+  // the 768 KiB aggregate budget even though each fits the per-note char cap.
+  const emojiBody = "😀".repeat(100_000);
+  const first = attachVaultNoteMention([], { id: "e1", title: "E", content: emojiBody });
+  assert.equal(first.status, "attached");
+  assert.ok(first.upload);
+
+  const second = attachVaultNoteMention([first.upload], { id: "e2", title: "E", content: emojiBody });
+  assert.equal(second.status, "budget");
+  assert.equal(second.upload, null);
+
+  const duplicate = attachVaultNoteMention([first.upload], { id: "e1", title: "E", content: emojiBody });
+  assert.equal(duplicate.status, "duplicate");
+});
+
+test("attachVaultNoteMention applies the budget when refreshing a duplicate that grew", () => {
+  // Fill most of the budget with other notes, then try to refresh a small
+  // mention into one that fills the per-note char cap.
+  const fillerBody = "a".repeat(Math.floor(MAX_VAULT_NOTE_TOTAL_ATTACHMENT_BYTES / 4));
+  let attachments: ReturnType<typeof createVaultNoteAttachment>[] = [];
+  for (const id of ["f1", "f2", "f3"]) {
+    const filler = attachVaultNoteMention(attachments, { id, title: id, content: fillerBody });
+    assert.equal(filler.status, "attached");
+    attachments = [...attachments, filler.upload!];
+  }
+  const small = attachVaultNoteMention(attachments, { id: "g1", title: "G", content: "tiny" });
+  assert.equal(small.status, "attached");
+  assert.ok(small.upload);
+  attachments = [...attachments, small.upload!];
+
+  const grown = attachVaultNoteMention(
+    attachments,
+    { id: "g1", title: "G", content: "a".repeat(MAX_VAULT_NOTE_ATTACHMENT_CHARS) },
+  );
+  assert.equal(grown.status, "budget");
+  assert.equal(grown.upload, null);
+});
+
+test("attachVaultNoteMention ignores non-vault attachments when computing the budget", () => {
+  const plain = {
+    id: crypto.randomUUID(),
+    filename: "image.png",
+    dataUrl: "data:image/png;base64,AAAA",
+    base64Data: "A".repeat(4 * 1024 * 1024), // far above the budget
+    mediaType: "image/png",
+  };
+  const result = attachVaultNoteMention([plain], { id: "note-x", title: "X", content: "body" });
+
+  assert.equal(result.status, "attached");
+  assert.ok(result.upload);
+});
+
+test("attachVaultNoteMention rejects notes without an id", () => {
+  const result = attachVaultNoteMention([], { id: "  ", title: "T", content: "c" });
+
+  assert.equal(result.status, "invalid");
+  assert.equal(result.upload, null);
 });

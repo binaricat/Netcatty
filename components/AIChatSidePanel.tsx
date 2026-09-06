@@ -45,7 +45,7 @@ import {
   buildPromptWithTerminalSelectionAttachments,
   isInlineTextAttachment,
 } from '../application/state/terminalSelectionAttachment';
-import { createVaultNoteAttachment } from '../application/state/vaultNoteAttachment';
+import { attachVaultNoteMention, isVaultNoteAttachment } from '../application/state/vaultNoteAttachment';
 import type { CodexIntegrationStatus } from './settings/tabs/ai/types';
 import {
   useAIChatStreaming,
@@ -602,11 +602,42 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
 
   /** Mention Note: attach a Vault → Notes entry as inline context for the next send. */
   const mentionNote = useCallback((note: VaultNote) => {
-    const upload = createVaultNoteAttachment(note);
-    if (!upload) return;
+    const result = attachVaultNoteMention(
+      currentDraftRef.current?.attachments ?? [],
+      note,
+    );
+    const upload = result.upload;
+    if (!upload) {
+      if (result.status === 'budget') {
+        console.warn(
+          '[AIChatSidePanel] Vault note mention skipped: aggregate attachment budget exceeded',
+        );
+      }
+      return;
+    }
     enterScopeDraftMode(currentAgentId, panelViewRef.current.mode === 'session');
+    if (result.status === 'duplicate') {
+      // Re-mentioning a note refreshes the existing attachment in place
+      // instead of appending a second copy of the same note payload.
+      const refreshed = upload;
+      updateScopeDraft(currentAgentId, (draft) => ({
+        ...draft,
+        attachments: draft.attachments.map((attachment) => (
+          isVaultNoteAttachment(attachment) && attachment.vaultNoteId === refreshed.vaultNoteId
+            ? refreshed
+            : attachment
+        )),
+      }));
+      return;
+    }
     addDraftAttachment(scopeKey, currentAgentId, upload);
-  }, [addDraftAttachment, currentAgentId, enterScopeDraftMode, scopeKey]);
+  }, [
+    addDraftAttachment,
+    currentAgentId,
+    enterScopeDraftMode,
+    scopeKey,
+    updateScopeDraft,
+  ]);
 
   useEffect(() => {
     if (isVisible) return undefined;

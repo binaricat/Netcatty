@@ -26,6 +26,75 @@ export const VAULT_NOTE_ATTACHMENT_MEDIA_TYPE = "text/markdown";
  */
 export const MAX_VAULT_NOTE_ATTACHMENT_CHARS = 200_000;
 
+/**
+ * Aggregate cap on the decoded byte size of vault-note attachments in a single
+ * draft. The per-note cap above is not enough: the AI session serializer
+ * cannot drop attachments from the newest session to fit its storage budget
+ * (MAX_SESSIONS_JSON_BYTES = 2 MiB), so enough mentioned notes in one chat
+ * would make persistence fail permanently and the chat disappear on restart.
+ * The budget counts decoded bytes, since base64 inflates the payload by ~1/3
+ * when persisted (`base64Data` + `dataUrl` on the message).
+ */
+export const MAX_VAULT_NOTE_TOTAL_ATTACHMENT_BYTES = 768 * 1024;
+
+/** Estimate the decoded byte size of a base64 payload without decoding it. */
+function base64DecodedByteLength(base64: string): number {
+  let chars = base64.length;
+  while (chars > 0 && base64.charCodeAt(chars - 1) === 61 /* "=" padding */) chars -= 1;
+  return Math.floor((chars * 3) / 4);
+}
+
+export type VaultNoteMentionStatus = "attached" | "duplicate" | "budget" | "invalid";
+
+export type VaultNoteMentionResult = {
+  /** Fresh attachment for the note; null unless `status === "attached"` or `"duplicate"`. */
+  upload: UploadedFile | null;
+  status: VaultNoteMentionStatus;
+};
+
+/**
+ * Build the attachment for a note mention against the draft's existing
+ * attachments. Re-mentioning a note is a no-op duplicate (the caller may
+ * refresh the existing attachment in place), and the aggregate decoded size
+ * of note attachments is capped so one chat can never exceed the storage
+ * budget for persisted sessions.
+ */
+export function attachVaultNoteMention(
+  existingAttachments: ReadonlyArray<UploadedFile>,
+  note: Pick<VaultNote, "id" | "title" | "content">,
+): VaultNoteMentionResult {
+  const noteId = String(note.id || "").trim();
+  const upload = createVaultNoteAttachment(note);
+  if (!upload) return { upload: null, status: "invalid" };
+  const usedBytes = existingAttachments.reduce(
+    (total, attachment) => (
+      isVaultNoteAttachment(attachment)
+        ? total + base64DecodedByteLength(attachment.base64Data)
+        : total
+    ),
+    0,
+  );
+  const existingDuplicate = noteId
+    ? existingAttachments.find(
+      (attachment) => isVaultNoteAttachment(attachment) && attachment.vaultNoteId === noteId,
+    )
+    : undefined;
+  if (existingDuplicate) {
+    // Re-mentioning a note refreshes it in place rather than appending a
+    // second copy; the freed payload of the stale attachment counts against
+    // the new one's budget.
+    const usedWithoutDuplicate = usedBytes - base64DecodedByteLength(existingDuplicate.base64Data);
+    if (usedWithoutDuplicate + base64DecodedByteLength(upload.base64Data) > MAX_VAULT_NOTE_TOTAL_ATTACHMENT_BYTES) {
+      return { upload: null, status: "budget" };
+    }
+    return { upload, status: "duplicate" };
+  }
+  if (usedBytes + base64DecodedByteLength(upload.base64Data) > MAX_VAULT_NOTE_TOTAL_ATTACHMENT_BYTES) {
+    return { upload: null, status: "budget" };
+  }
+  return { upload, status: "attached" };
+}
+
 /** Bound the inlined body, pointing at `vault_notes_get` when truncating. */
 function boundNoteBody(content: string, noteId: string): string {
   if (content.length <= MAX_VAULT_NOTE_ATTACHMENT_CHARS) return content;
