@@ -1662,6 +1662,13 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       return false;
     }
 
+    if (e.type === "keypress" && broadcastForwardedKeys.has(kittyKeyIdentity(e))) {
+      // Space and uppercase letters can emit xterm data from keypress, after
+      // keydown's zero-delay cleanup. Rejoin that physical broadcast instead
+      // of sending the same character a second time as unpaired raw text.
+      markBroadcastLegacyDataPending(kittyKeyIdentity(e));
+    }
+
     if (e.type !== "keydown") {
       return true;
     }
@@ -2423,6 +2430,10 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       });
       return;
     }
+    // insertText can follow an already-delivered keypress. Its fallback marker
+    // must not classify the next physical key as a second composition commit.
+    // Actual composition/input handlers clear the physical-key pairing first.
+    if (broadcastLegacyDataPending) kittyCompositionPending = false;
     if (kittyCompositionPending && !data.startsWith("\u001b")) {
       kittyCompositionPending = false;
       if (kittyCompositionClearTimer !== undefined) {
