@@ -227,7 +227,7 @@ test("hidden terminal layers measure once when their layout must stay active", (
   }), true);
 });
 
-test("inactive terminal pane keeps rendering when hibernate is disabled", () => {
+test("inactive terminal pane parks its screen without changing live dimensions", () => {
   const inactiveStyle = resolveInactiveTerminalPaneStyle(
     { left: "40px", top: 0, width: "640px", height: "480px" },
     { width: 1180, height: 720 },
@@ -235,6 +235,7 @@ test("inactive terminal pane keeps rendering when hibernate is disabled", () => 
   );
 
   assert.equal(inactiveStyle.left, "40px");
+  assert.equal(inactiveStyle.transform, "translateX(calc(-100vw - 100%))");
   assert.equal(inactiveStyle.top, 0);
   assert.equal(inactiveStyle.visibility, "visible");
   assert.equal(inactiveStyle.pointerEvents, "none");
