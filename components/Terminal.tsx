@@ -2896,7 +2896,9 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     // rows often repeat (blank lines, repeated output).
     marker: IMarker;
     // Marker line observed at the last scroll notification, so a trim shows
-    // up as a one-row marker shift between consecutive events.
+    // up as a one-row marker shift between consecutive events. Also keeps
+    // the last valid anchor when a wider reflow disposes the marker by
+    // merging its row into a surviving row (see restoreScroll).
     lastMarkerLine: number;
     scrollListener?: { dispose: () => void };
   };
@@ -3017,6 +3019,17 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         // as a one-frame WebGL blink during layout changes. Resize directly
         // using the proposed dimensions to preserve the existing behavior
         // without forcing a blank intermediate frame.
+        // Capture the retained tracker's marker line before the resize: a
+        // wider reflow merges the marker's row into a surviving row and
+        // disposes the marker even though its text was kept, so the
+        // pre-reflow line is the only remaining anchor for the restore
+        // (see restoreScroll).
+        const preResizeTracker = syncScrollTrackerRef.current;
+        const preResizeMarkerLine =
+          preResizeTracker && preResizeTracker.term === term
+            ? preResizeTracker.marker.line
+            : -1;
+        const reflowsWider = dimensions.cols > term.cols;
         if (term.cols !== dimensions.cols || term.rows !== dimensions.rows) {
           term.resize(dimensions.cols, dimensions.rows);
           forceSyncRenderAfterResize(term);
@@ -3079,8 +3092,15 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           tracker = retainedTracker;
           tracker.lastScrollY = term.buffer.active.viewportY;
           // The reflow above may have moved the marker without any scroll
-          // notification; refresh its baseline alongside lastScrollY.
-          tracker.lastMarkerLine = tracker.marker.line;
+          // notification; refresh its baseline alongside lastScrollY. A
+          // wider reflow can dispose the marker (its row was merged into a
+          // surviving row, so its text still exists): keep the pre-resize
+          // line as the restore's anchor. A narrower reflow can genuinely
+          // trim the marker's row out of the scrollback, where -1 stays
+          // accurate.
+          tracker.lastMarkerLine = tracker.marker.line >= 0
+            ? tracker.marker.line
+            : (reflowsWider ? preResizeMarkerLine : -1);
         } else {
           if (retainedTracker && retainedTracker.term === term) {
             retainedTracker.scrollListener?.dispose();
@@ -3155,10 +3175,16 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           } else {
             // The marker followed the saved row across scrollback trims (and
             // reflow); follow it to the row's current position. A disposed
-            // marker reports -1 — its row no longer exists, so the top of
-            // the buffer is the closest remaining position.
+            // marker reports -1: its row was either trimmed out of the
+            // buffer (top of the buffer is the closest remaining position)
+            // or merged into a surviving row by a wider reflow, in which
+            // case lastMarkerLine preserves the pre-reflow anchor — closer
+            // to the surviving row than the top of the buffer.
+            const anchor = markerTarget >= 0
+              ? markerTarget
+              : Math.max(tracker.lastMarkerLine, 0);
             const targetY = Math.min(
-              Math.max(markerTarget, 0),
+              Math.max(anchor, 0),
               term.buffer.active.baseY,
             );
             if (term.buffer.active.viewportY !== targetY) {
