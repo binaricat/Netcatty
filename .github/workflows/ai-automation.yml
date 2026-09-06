@@ -877,6 +877,7 @@ jobs:
               --bare -p --permission-mode dontAsk \
               --settings "$HOME/.claude/settings.json" \
               --allowedTools "Read" "Bash(web-search *)" "Bash(web-fetch *)" \
+              "Bash($research_dir/web-search *)" "Bash($research_dir/web-fetch *)" \
               --disallowedTools "WebSearch" "WebFetch" "Edit" "Write" "NotebookEdit" \
               --output-format stream-json --verbose --model "$AI_MODEL" \
               "$prompt"
@@ -1695,6 +1696,7 @@ jobs:
               --bare -p --permission-mode dontAsk \
               --settings "$HOME/.claude/settings.json" \
               --allowedTools "Read" "Bash(web-search *)" "Bash(web-fetch *)" \
+              "Bash($research_dir/web-search *)" "Bash($research_dir/web-fetch *)" \
               --disallowedTools "WebSearch" "WebFetch" "Edit" "Write" "NotebookEdit" \
               --output-format stream-json --verbose --model "$AI_MODEL" \
               "$prompt"
