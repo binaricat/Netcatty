@@ -3029,8 +3029,10 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         // surviving row) reports -1; its lastMarkerLine still holds the valid
         // pre-reflow anchor, so carry that forward instead of overwriting it
         // with -1 on the next widening fit. A marker disposed by a scrollback
-        // trim already had lastMarkerLine updated to -1 by the scroll
-        // listener, so this fallback stays accurate there too.
+        // trim had its anchor followed down by the scroll listener and
+        // clamped at the top of the buffer (0), which matches where the
+        // restore would target anyway, so this fallback stays accurate there
+        // too.
         const preResizeMarkerLine =
           preResizeTracker && preResizeTracker.term === term
             ? preResizeTracker.marker.line >= 0
@@ -3154,16 +3156,28 @@ const TerminalComponent: React.FC<TerminalProps> = ({
             // buffer other than the one this tracker owns.
             if (term.buffer.active !== tracker.buffer) return;
             if (y !== tracker.lastScrollY) {
-              // A disposed marker reports -1 (its row was trimmed out of the
-              // buffer), which can only match the trim signature for the
-              // trim that disposed it.
+              // A live marker matches the trim signature when it shifted
+              // down one row together with the reported row. A marker
+              // disposed by a wider reflow (its row was merged into a
+              // surviving row) reports -1 for the rest of the mode and can
+              // no longer follow trims, but lastMarkerLine still anchors
+              // that surviving row: a one-row decrement of the reported row
+              // is then a trim, not a user scroll, so shift the anchor down
+              // with it (clamped at the top of the buffer, where the
+              // restore's target clamps too). A genuine one-row user scroll
+              // is indistinguishable in that disposed-marker state and is
+              // deliberately resolved in favor of the trim, which recurs on
+              // every output line while the mode stays active.
               const markerLine = tracker.marker.line;
               if (
                 y === tracker.lastScrollY - 1 &&
-                markerLine === tracker.lastMarkerLine - 1
+                (markerLine === tracker.lastMarkerLine - 1 ||
+                  (markerLine === -1 && tracker.lastMarkerLine >= 0))
               ) {
                 tracker.lastScrollY = y;
-                tracker.lastMarkerLine = markerLine;
+                tracker.lastMarkerLine = markerLine >= 0
+                  ? markerLine
+                  : Math.max(tracker.lastMarkerLine - 1, 0);
                 return;
               }
               tracker.moved = true;
