@@ -12401,6 +12401,60 @@ test("preserveTransferredDestinationMtime stamps the published local inode", asy
   assert.equal(Math.floor(after.mtimeMs / 1000), Math.floor(sourceMtimeMs / 1000));
 });
 
+test("local publication returns an identity usable for timestamp preservation", async (t) => {
+  const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-published-time-"));
+  t.after(() => fs.promises.rm(tempDir, { recursive: true, force: true }));
+  const stagedPath = path.join(tempDir, "stage");
+  const targetPath = path.join(tempDir, "target");
+  await fs.promises.writeFile(stagedPath, "payload");
+  let publishedLocalIdentity;
+  await transferBridge._promoteLocalTransferForTests(stagedPath, targetPath, {
+    onCommit(identity) { publishedLocalIdentity = identity; },
+  });
+  await transferBridge._preserveTransferredDestinationMtimeForTests({
+    targetType: "local", targetPath, publishedLocalIdentity,
+    sourceSoftIdentity: { mtimeMs: 1_700_000_000_000 },
+  });
+  assert.equal(Math.floor((await fs.promises.stat(targetPath)).mtimeMs / 1000), 1_700_000_000);
+});
+
+test("local timestamp preservation cannot stamp a replacement after identity verification", async (t) => {
+  const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-stamp-race-"));
+  t.after(() => fs.promises.rm(tempDir, { recursive: true, force: true }));
+  const targetPath = path.join(tempDir, "target");
+  const oldPath = path.join(tempDir, "published");
+  await fs.promises.writeFile(targetPath, "payload");
+  const publishedLocalIdentity = transferBridge._stableLocalFileIdentityForTests(await fs.promises.stat(targetPath));
+  let replaced = false;
+  const replace = async () => {
+    if (replaced) return;
+    replaced = true;
+    await fs.promises.rename(targetPath, oldPath);
+    await fs.promises.writeFile(targetPath, "concurrent");
+    await originalUtimes(targetPath, 1_600_000_000, 1_600_000_000);
+  };
+  const originalUtimes = fs.promises.utimes;
+  const originalOpen = fs.promises.open;
+  t.mock.method(fs.promises, "utimes", async (name, ...args) => {
+    if (name === targetPath) await replace();
+    return originalUtimes(name, ...args);
+  });
+  t.mock.method(fs.promises, "open", async (...args) => {
+    const handle = await originalOpen(...args);
+    if (args[0] === targetPath) {
+      const utimes = handle.utimes.bind(handle);
+      handle.utimes = async (...times) => { await replace(); return utimes(...times); };
+    }
+    return handle;
+  });
+  await transferBridge._preserveTransferredDestinationMtimeForTests({
+    targetType: "local", targetPath, publishedLocalIdentity,
+    sourceSoftIdentity: { mtimeMs: 1_700_000_000_000 },
+  });
+  assert.equal(replaced, true);
+  assert.equal(Math.floor((await fs.promises.stat(targetPath)).mtimeMs / 1000), 1_600_000_000);
+});
+
 test("restoreRemoteUploadModeBestEffort times out hanging chmod", async () => {
   const hangingClient = {
     async chmod() {

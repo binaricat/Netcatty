@@ -170,3 +170,60 @@ test("cancelled replacement restores original timestamps through the copy fallba
   assert.equal(stat.atimeMs, atime.getTime());
   assert.equal(fs.readFileSync(target, "utf8"), "original");
 });
+
+for (const replaceAfterCommit of [false, true]) {
+  test(`local publication prepares timestamps before restrictive permissions${replaceAfterCommit ? " and leaves post-commit replacement alone" : ""}`, async (t) => {
+    const root = fs.mkdtempSync(`${temp.getTempFilePath("publish-mtime")}-`);
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    const staged = path.join(root, "staged");
+    const target = path.join(root, "target");
+    fs.writeFileSync(staged, "download");
+    const transfer = {
+      targetType: "local", targetPath: target,
+      sourceSoftIdentity: { mtimeMs: 1_700_000_000_000 },
+    };
+    await bridge._promoteLocalTransferForTests(staged, target, {
+      existingMode: 0,
+      sourceSoftIdentity: transfer.sourceSoftIdentity,
+      onCommit(identity) {
+        transfer.publishedLocalIdentity = identity;
+        transfer.localMtimePrepared = true;
+        if (replaceAfterCommit) {
+          fs.renameSync(target, path.join(root, "published"));
+          fs.writeFileSync(target, "concurrent");
+          fs.utimesSync(target, 1_600_000_000, 1_600_000_000);
+        }
+      },
+    });
+    await bridge._preserveTransferredDestinationMtimeForTests(transfer);
+    const stat = fs.statSync(target);
+    assert.equal(Math.floor(stat.mtimeMs / 1000), replaceAfterCommit ? 1_600_000_000 : 1_700_000_000);
+    if (!replaceAfterCommit) assert.equal(stat.mode & 0o777, 0);
+  });
+}
+
+test("fallback close failure retains the original backup and prepared replacement", async (t) => {
+  const root = fs.mkdtempSync(`${temp.getTempFilePath("publish-close")}-`);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const staged = path.join(root, "staged");
+  const target = path.join(root, "target");
+  fs.writeFileSync(staged, "download");
+  fs.writeFileSync(target, "original");
+  t.mock.method(fs.promises, "link", async () => { throw Object.assign(new Error("unsupported"), { code: "ENOTSUP" }); });
+  const open = fs.promises.open;
+  t.mock.method(fs.promises, "open", async (...args) => {
+    const handle = await open(...args);
+    if (args[0] === target && args[1] === "wx") {
+      const close = handle.close.bind(handle);
+      handle.close = async () => { await close(); throw new Error("close failed"); };
+    }
+    return handle;
+  });
+  await assert.rejects(bridge._promoteLocalTransferForTests(staged, target), (error) => {
+    assert.equal(error.recoveryFailed, true);
+    assert.equal(fs.readFileSync(error.remoteBackupPath, "utf8"), "original");
+    return true;
+  });
+  const ready = fs.readdirSync(root).find((name) => name.endsWith(".ready"));
+  assert.equal(fs.readFileSync(path.join(root, ready), "utf8"), "download");
+});

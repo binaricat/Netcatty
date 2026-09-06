@@ -7,7 +7,7 @@ const fs = require("node:fs");
 // exclusively created handle instead: partial contents can be visible there,
 // but no pathname cleanup may remove a concurrent writer's replacement.
 // Resolves with the published inode identity ({ dev, ino, size }) so callers can
-// verify the destination before later pathname-based metadata stamping.
+// verify an open destination handle before later metadata stamping.
 async function publishLocalFileExclusive(source, target, assertNotCancelled = () => {}) {
   assertNotCancelled();
   try {
@@ -22,6 +22,7 @@ async function publishLocalFileExclusive(source, target, assertNotCancelled = ()
   let input;
   let output;
   let failure;
+  let publishedIdentity;
   try {
     input = await fs.promises.open(source, "r");
     const stat = await input.stat();
@@ -52,7 +53,7 @@ async function publishLocalFileExclusive(source, target, assertNotCancelled = ()
     if (!targetStat.isFile() || targetStat.dev !== ownedStat.dev || targetStat.ino !== ownedStat.ino) {
       throw new Error("Local download target changed during replacement");
     }
-    return { dev: ownedStat.dev, ino: ownedStat.ino, size: ownedStat.size };
+    publishedIdentity = { dev: ownedStat.dev, ino: ownedStat.ino, size: ownedStat.size };
   } catch (error) {
     failure = error;
   } finally {
@@ -66,6 +67,7 @@ async function publishLocalFileExclusive(source, target, assertNotCancelled = ()
     if (output) failure.localPublicationIncomplete = true;
     throw failure;
   }
+  return publishedIdentity;
 }
 
 module.exports = { publishLocalFileExclusive };

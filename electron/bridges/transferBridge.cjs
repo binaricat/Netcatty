@@ -967,6 +967,15 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
       if (error?.code !== "EXDEV") throw error;
       await fs.promises.copyFile(stagedPath, readyPath, fs.constants.COPYFILE_EXCL);
     }
+    // Stamp the private prepared file before applying possibly unreadable
+    // destination permissions. Publication carries these times to the target.
+    const mtimeMs = Number(options.sourceSoftIdentity?.mtimeMs);
+    if (Number.isFinite(mtimeMs) && mtimeMs >= 1000) {
+      const when = new Date(Math.floor(mtimeMs / 1000) * 1000);
+      await awaitBestEffortBounded(
+        fs.promises.utimes(readyPath, when, when), 15_000, "Prepared destination utimes",
+      ).catch(() => {});
+    }
     let appliedMode = null;
     let validatedTarget;
     let stable = false;
@@ -1018,8 +1027,8 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
     // Publication is the commit boundary. A late cancel must not perform a
     // check-then-unlink rollback against a name another process may now own.
     committed = true;
-    // Hand the published inode identity to the caller so later pathname-based
-    // metadata stamping can refuse to touch a concurrent replacement.
+    // Hand the published inode identity to the caller for descriptor-based
+    // metadata stamping after publication.
     options.onCommit?.(publishedIdentity);
     if (backedUp) await fs.promises.unlink(backupPath).catch(() => {});
     await fs.promises.unlink(readyPath).catch(() => {});
@@ -1092,26 +1101,23 @@ async function preserveTransferredDestinationMtime(transfer, options = {}) {
       : 15_000;
 
     if (transfer.targetType === "local" && transfer.targetPath) {
-      // When the destination was published through the exclusive local
-      // promotion, only stamp the inode that publication committed. Another
-      // process may have replaced the pathname since; its file must keep its
-      // own timestamps (Codex P2 on the commit boundary).
-      if (transfer.publishedLocalIdentity) {
+      if (transfer.localMtimePrepared) return;
+      // Verify and stamp the same open file. A later pathname replacement
+      // must never receive metadata belonging to this completed transfer.
+      await awaitBestEffortBounded((async () => {
+        const handle = await fs.promises.open(transfer.targetPath, "r");
         try {
-          const currentStat = await fs.promises.lstat(transfer.targetPath);
-          if (!currentStat.isFile() || stableLocalFileIdentity(currentStat) !== transfer.publishedLocalIdentity) {
-            return;
-          }
-        } catch {
-          // Destination vanished or became unstattable; nothing to stamp.
-          return;
+          const currentStat = await handle.stat();
+          const publishedIdentity = transfer.publishedLocalIdentity;
+          const expectedIdentity = typeof publishedIdentity === "string"
+            ? publishedIdentity : stableLocalFileIdentity(publishedIdentity);
+          if (!currentStat.isFile()
+            || (expectedIdentity && stableLocalFileIdentity(currentStat) !== expectedIdentity)) return;
+          await handle.utimes(when, when);
+        } finally {
+          await handle.close();
         }
-      }
-      await awaitBestEffortBounded(
-        fs.promises.utimes(transfer.targetPath, when, when),
-        mtimeTimeoutMs,
-        "Destination utimes",
-      );
+      })(), mtimeTimeoutMs, "Destination utimes");
       return;
     }
 
@@ -5982,6 +5988,7 @@ async function startTransferNow(event, payload, onProgress) {
         } = await inspectLocalPromotionTarget(targetPath);
         if (transfer.cancelled) throw new Error("Transfer cancelled");
         await promoteLocalTransfer(downloadTargetPath, promotionTargetPath, {
+          sourceSoftIdentity: transfer.sourceSoftIdentity,
           existingMode,
           async validateTarget() {
             const latestTarget = await inspectLocalPromotionTarget(targetPath);
@@ -5998,6 +6005,7 @@ async function startTransferNow(event, payload, onProgress) {
           },
           onCommit(publishedIdentity) {
             transfer.completionCommitted = true;
+            transfer.localMtimePrepared = true;
             transfer.publishedLocalIdentity = publishedIdentity ?? null;
           },
         });
@@ -6086,11 +6094,13 @@ async function startTransferNow(event, payload, onProgress) {
       });
       if (transfer.resumable && transfer.stagedLocalPath) {
         await promoteLocalTransfer(transfer.stagedLocalPath, targetPath, {
+          sourceSoftIdentity: transfer.sourceSoftIdentity,
           assertNotCancelled() {
             if (transfer.cancelled) throw new Error("Transfer cancelled");
           },
           onCommit(publishedIdentity) {
             transfer.completionCommitted = true;
+            transfer.localMtimePrepared = true;
             transfer.publishedLocalIdentity = publishedIdentity ?? null;
           },
         });
