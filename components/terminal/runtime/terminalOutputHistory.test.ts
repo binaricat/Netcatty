@@ -570,3 +570,21 @@ test("restoring a cursor saved above a shrunken viewport clamps to the bottom ro
   history.append("\x1b[10;1HY");
   assert.deepEqual(history.getLines(), ["saved", "Y    X"]);
 });
+
+test("RIS resets the tracked modes, margins, and cursor", () => {
+  const history = createTerminalOutputHistoryPreview();
+  history.setViewportRows(24);
+  history.setViewportCols(5);
+  // DECAWM off, then RIS: xterm re-enables autowrap and homes the cursor, so
+  // `abcdef` wraps to `abcde`/`f` exactly like a fresh terminal.
+  history.append("\x1b[?7l\x1bcabcdef");
+  assert.deepEqual(history.getLines(), ["abcde", "f"]);
+
+  // RIS also clears the scroll region, DECOM, and the saved cursor.
+  const reset = createTerminalOutputHistoryPreview();
+  reset.setViewportRows(24);
+  reset.append("\x1b[5;20r\x1b[?6h\x1b7\x1bc\x1b[99;1HOLD");
+  // Without the reset, the CUP row would be relative to the top margin and
+  // clamp to its bottom (row 20), rewriting the same tracked line as before.
+  assert.deepEqual(reset.getLines(), ["OLD"]);
+});

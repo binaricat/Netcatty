@@ -200,17 +200,17 @@ export const stripTerminalDisplayToPlainText = (
       const sequence = input.slice(i + escapeIntroducerLength(input, i), end);
       // Only the history writer consumes cursor-row controls. Standalone plain
       // text stripping keeps its original contract. DEC origin/autowrap mode
-      // changes and cursor save/restore ride along so rows resolve the way the
-      // terminal resolves them.
+      // changes, cursor save/restore, and RIS ride along so rows resolve the
+      // way the terminal resolves them.
       const isCsi = input[i] === C1_CSI || input[i + 1] === "[";
       const passesRowControl = isCsi
         && (/^[0-9;]*[HfABEFdr]$/.test(sequence)
           || isTrackedDecPrivateModeSequence(sequence)
           || /^[su]$/.test(sequence));
-      const isDecSaveRestore = !isCsi
+      const isBareEscFinal = !isCsi
         && escapeIntroducerLength(input, i) === 1
-        && /^[78]$/.test(sequence);
-      if (preserveRowControls && (passesRowControl || isDecSaveRestore)) {
+        && /^[78c]$/.test(sequence);
+      if (preserveRowControls && (passesRowControl || isBareEscFinal)) {
         output += input.slice(i, end);
       }
       const eraseInLine = eraseInLineMarkerFor(input, i, end);
@@ -581,6 +581,24 @@ export const createTerminalOutputHistoryPreview = (options?: {
     savedCursor = { row: screenRow, cell: cursorCell };
   };
 
+  /**
+   * RIS (`ESC c`): xterm resets DECAWM/DECOM and the scroll margins, discards
+   * the saved cursor, and homes it, so later output after a mode change
+   * resolves the way the terminal resolves it. The transcript itself is a log
+   * of printed output, so it is kept.
+   */
+  const resetTrackedState = () => {
+    scrollTopMargin = 1;
+    scrollBottomMargin = Infinity;
+    originMode = false;
+    autowrap = true;
+    savedCursor = null;
+    if (screenRow !== 1 && current) commitCurrentLine();
+    screenRow = 1;
+    cursor = 0;
+    cursorCell = 0;
+  };
+
   const restoreTrackedCursor = () => {
     if (!savedCursor) return;
     const savedCell = Math.min(
@@ -605,9 +623,11 @@ export const createTerminalOutputHistoryPreview = (options?: {
       if (ch === ESC || ch === C1_CSI) {
         if (ch === ESC && text[i + 1] !== "[") {
           // Bare ESC finals ride through the stripper: DECSC ("ESC 7") saves
-          // and DECRC ("ESC 8") restores the tracked cursor.
+          // and DECRC ("ESC 8") restores the tracked cursor; RIS ("ESC c")
+          // resets the tracked modes, margins, and cursor.
           if (text[i + 1] === "7") saveTrackedCursor();
           else if (text[i + 1] === "8") restoreTrackedCursor();
+          else if (text[i + 1] === "c") resetTrackedState();
           i += 2;
           continue;
         }
