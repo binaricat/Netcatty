@@ -640,6 +640,23 @@ function runAfterRenderFrame(fn: () => void): void {
   }
 }
 
+/**
+ * Drop the terminal's pending deferred restore (if any) without running it.
+ *
+ * The pending slot is keyed by terminal only. A caller that tracks which
+ * buffer a restore belongs to uses this when the active buffer changes while
+ * a restore is still pending: the stale restore's own buffer-identity check
+ * would discard it at completion anyway, and leaving it pending would make
+ * `deferScrollRestoreDuringSynchronizedOutput` drop the newly active buffer's
+ * restore, losing that buffer's scroll position.
+ */
+export function cancelPendingSynchronizedRestore(term: XTerm): void {
+  const pending = pendingSynchronizedRestores.get(term);
+  if (!pending) return;
+  pendingSynchronizedRestores.delete(term);
+  pending.dispose();
+}
+
 export function deferScrollRestoreDuringSynchronizedOutput(
   term: XTerm,
   restore: () => void,

@@ -254,6 +254,7 @@ import {
 import {
   alignTerminalViewportScroll,
   AUTO_RUN_SNIPPET_LINE_DELAY_MS,
+  cancelPendingSynchronizedRestore,
   deferScrollRestoreDuringSynchronizedOutput,
   forceSyncRenderAfterResize,
   MAX_CONNECTION_LOG_DATA_CHARS,
@@ -2877,8 +2878,13 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   // the owning restore runs or is dropped.
   type SyncScrollTracker = {
     term: XTerm;
+    // Buffer the pending restore belongs to. A fit landing on a different
+    // active buffer must replace the tracker instead of reusing it (see the
+    // buffer-switch handling below).
+    buffer: XTerm["buffer"]["active"];
     moved: boolean;
     lastScrollY: number;
+    scrollListener?: { dispose: () => void };
   };
   const syncScrollTrackerRef = useRef<SyncScrollTracker | null>(null);
   const pendingWriteSafeFitRef = useRef<{
@@ -3036,17 +3042,38 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         // would be dropped with this duplicate restore, leaving a stale
         // baseline that makes the next output line look like a user scroll
         // and wrongly cancels the retained restore.
+        //
+        // The retained tracker only carries over while its restore targets
+        // the currently active buffer, though. If the stream switched buffers
+        // (DECSET 1049/1047) while a restore is still pending, the retained
+        // restore's buffer-identity check would discard it at completion
+        // while deferScrollRestoreDuringSynchronizedOutput coalesces the new
+        // restore by terminal — dropping the newly active buffer's restore
+        // and leaving it at its reflow-adjusted row. Replace the retained
+        // restore and tracker with ones bound to the new buffer.
         const retainedTracker = syncScrollTrackerRef.current;
-        const tracker: SyncScrollTracker =
-          retainedTracker && retainedTracker.term === term
-            ? retainedTracker
-            : { term, moved: false, lastScrollY: term.buffer.active.viewportY };
-        const isRetained = tracker === retainedTracker;
-        if (isRetained) {
+        let tracker: SyncScrollTracker;
+        if (
+          retainedTracker &&
+          retainedTracker.term === term &&
+          retainedTracker.buffer === restoreBuffer
+        ) {
+          tracker = retainedTracker;
           tracker.lastScrollY = term.buffer.active.viewportY;
         } else {
+          if (retainedTracker && retainedTracker.term === term) {
+            retainedTracker.scrollListener?.dispose();
+            cancelPendingSynchronizedRestore(term);
+          }
+          tracker = {
+            term,
+            buffer: restoreBuffer,
+            moved: false,
+            lastScrollY: term.buffer.active.viewportY,
+          };
           syncScrollTrackerRef.current = tracker;
         }
+        const isRetained = tracker === retainedTracker;
         // BufferService.scroll fires onScroll for every line feed even when
         // isUserScrolling keeps ydisp unchanged, so compare reported
         // positions instead of treating any notification as a scroll:
@@ -3058,6 +3085,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
             if (y !== tracker.lastScrollY) tracker.moved = true;
             tracker.lastScrollY = y;
           });
+          tracker.scrollListener = scrollListener;
         }
         const restoreScroll = () => {
           scrollListener?.dispose();

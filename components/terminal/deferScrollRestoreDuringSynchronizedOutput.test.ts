@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Terminal as XTerm } from "@xterm/xterm";
-import { deferScrollRestoreDuringSynchronizedOutput } from "./terminalHelpers";
+import {
+  cancelPendingSynchronizedRestore,
+  deferScrollRestoreDuringSynchronizedOutput,
+} from "./terminalHelpers";
 
 const flushMacroTask = () =>
   new Promise<void>((resolve) => {
@@ -109,4 +112,34 @@ test("coalesces consecutive deferred restores so only the earliest runs", async 
   renderListeners[0]();
   await flushMacroTask();
   assert.deepEqual(restored, [1, 3]);
+});
+
+test("cancelPendingSynchronizedRestore drops the pending restore without running it", async () => {
+  const renderListeners: RenderListener[] = [];
+  const term = createTerm(true, renderListeners);
+  let restored = 0;
+
+  deferScrollRestoreDuringSynchronizedOutput(term, () => {
+    restored += 1;
+  });
+  assert.equal(renderListeners.length, 1);
+
+  // Cancelling frees the pending slot and unwinds the render listener
+  // without running the restore — the caller replaced it (e.g. the active
+  // buffer changed while the mode was still on).
+  cancelPendingSynchronizedRestore(term);
+  assert.equal(renderListeners.length, 0);
+
+  (term.modes as { synchronizedOutputMode: boolean }).synchronizedOutputMode = false;
+  await flushMacroTask();
+  assert.equal(restored, 0);
+
+  // The freed slot accepts a new restore even after the mode ended.
+  deferScrollRestoreDuringSynchronizedOutput(term, () => {
+    restored += 1;
+  });
+  assert.equal(restored, 1);
+
+  // Cancelling without a pending restore is a no-op.
+  cancelPendingSynchronizedRestore(term);
 });
