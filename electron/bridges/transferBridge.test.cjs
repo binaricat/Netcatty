@@ -10653,6 +10653,8 @@ test("SFTP downloads cancelled while opening do not block the session", async (t
   let delayedOpen = null;
   let abandonedChannelClosed = false;
   let openCalls = 0;
+  let physicalEndCalls = 0;
+  let physicalDestroyCalls = 0;
   const abandonedSftp = createFastSftp({
     end() {
       abandonedChannelClosed = true;
@@ -10672,6 +10674,8 @@ test("SFTP downloads cancelled while opening do not block the session", async (t
       return Promise.resolve({ size: 10 });
     },
     client: {
+      end() { physicalEndCalls++; },
+      destroy() { physicalDestroyCalls++; },
       sftp(callback) {
         openCalls += 1;
         if (openCalls === 1) {
@@ -10709,6 +10713,8 @@ test("SFTP downloads cancelled while opening do not block the session", async (t
   const cancelled = await cancelledPromise;
   assert.equal(cancelled.error, "Transfer cancelled");
   assert.equal(abandonedChannelClosed, true);
+  assert.equal(physicalEndCalls, 0, "cancelling one download must preserve the shared SSH connection");
+  assert.equal(physicalDestroyCalls, 0, "terminal and browsing channels must not be destroyed");
 
   const next = await Promise.race([
     start("download-after-cancel"),
