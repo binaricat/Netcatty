@@ -55,7 +55,7 @@ import {
 } from './aiDraftState';
 import { convertFilesToUploads } from './useFileUpload';
 import { removeProviderReferences } from './aiProviderCleanup';
-import { appendUploadsWithinAttachmentBudget } from './vaultNoteAttachment';
+import { appendUploadsWithinAttachmentBudget, isVaultNoteAttachment } from './vaultNoteAttachment';
 import { publishAISessionsSnapshot } from './aiSessionsStore';
 import {
   AI_STATE_CHANGED_DRAFTS_BY_SCOPE,
@@ -1028,15 +1028,21 @@ export function useAIState() {
       return [];
     }
 
-    // Ordinary files share the aggregate attachment budget with vault-note
-    // mentions (same `base64Data`/`dataUrl` payload shape), so the budget must
-    // be enforced on this path too: files appended after near-limit notes
-    // would otherwise push the persisted newest session past its storage
-    // budget. Returns the uploads rejected by the budget so callers can
-    // surface the rejection.
+    // The aggregate budget guards the persisted-session storage cap for
+    // vault-note mentions. Ordinary-only drafts must keep their pre-feature
+    // behavior (no size cap — a large screenshot or document on an otherwise
+    // empty draft is valid), so the cap applies only when the draft or the
+    // incoming uploads include a vault-note mention. Ordinary files still
+    // count toward the budget when deciding whether a note can be added
+    // (see `attachVaultNoteMention`). Returns the uploads rejected by the
+    // budget so callers can surface the rejection.
     let rejected: UploadedFile[] = [];
     updateDraftIfPresent(scopeKey, (draft) => {
-      const fitting = appendUploadsWithinAttachmentBudget(draft.attachments, uploads);
+      const budgetApplies = draft.attachments.some(isVaultNoteAttachment)
+        || uploads.some(isVaultNoteAttachment);
+      const fitting = budgetApplies
+        ? appendUploadsWithinAttachmentBudget(draft.attachments, uploads)
+        : [...uploads];
       rejected = uploads.filter((upload) => !fitting.includes(upload));
       if (fitting.length === 0) return draft;
       return {

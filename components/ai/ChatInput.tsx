@@ -1788,6 +1788,8 @@ function chatInputPropsAreEqual(prev: ChatInputProps, next: ChatInputProps): boo
     && prev.onAddFiles === next.onAddFiles
     && prev.onRemoveFile === next.onRemoveFile
     && prev.hosts === next.hosts
+    && prev.notes === next.notes
+    && prev.onMentionNote === next.onMentionNote
     && prev.selectedUserSkills === next.selectedUserSkills
     && prev.userSkills === next.userSkills
     && prev.quickMessages === next.quickMessages

@@ -133,14 +133,17 @@ export function attachVaultNoteMention(
 
 /**
  * Shared application-state attachment updater: select which uploads fit
- * within the aggregate attachment budget when appending to a draft. This must
- * run on every insertion path (ordinary file drops *and* note mentions)
- * regardless of order: `attachVaultNoteMention` only checks the budget when a
- * note is attached, so files appended afterwards would bypass the cap and
- * could push the persisted newest session past MAX_SESSIONS_JSON_BYTES,
- * evicting older sessions (or the chat) after a restart. Uploads that do not
- * fit are dropped greedily in input order and returned to the caller so it
- * can surface the rejection to the user.
+ * within the aggregate attachment budget when appending to a draft. Callers
+ * apply this whenever a vault-note mention is involved (the draft already
+ * contains one, or the incoming uploads include one): `attachVaultNoteMention`
+ * only checks the budget when a note is attached, so files appended afterwards
+ * would bypass the cap and could push the persisted newest session past
+ * MAX_SESSIONS_JSON_BYTES, evicting older sessions (or the chat) after a
+ * restart. Ordinary-only drafts keep their uncapped behavior; ordinary files
+ * still count toward the budget here and in `attachVaultNoteMention` (they use
+ * the same `base64Data`/`dataUrl` payload shape). Uploads that do not fit are
+ * dropped greedily in input order and returned to the caller so it can surface
+ * the rejection to the user.
  */
 export function appendUploadsWithinAttachmentBudget(
   existingAttachments: ReadonlyArray<UploadedFile>,
