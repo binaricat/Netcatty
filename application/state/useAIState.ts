@@ -26,6 +26,7 @@ import { sanitizeQuickMessages } from '../../infrastructure/ai/quickMessages';
 import type {
   AIDraft,
   AISessionContextCompaction,
+  UploadedFile,
   AISession,
   AIPermissionMode,
   AIToolIntegrationMode,
@@ -1038,6 +1039,19 @@ export function useAIState() {
     }));
   }, [updateDraft]);
 
+  /** Append a programmatically built attachment (e.g. a Vault note mention) to the draft. */
+  const addDraftAttachment = useCallback((
+    scopeKey: string,
+    fallbackAgentId: string,
+    upload: UploadedFile,
+  ) => {
+    ensureDraftForScope(scopeKey, fallbackAgentId);
+    updateDraftIfPresent(scopeKey, (draft) => ({
+      ...draft,
+      attachments: [...draft.attachments, upload],
+    }));
+  }, [ensureDraftForScope, updateDraftIfPresent]);
+
   const cleanupOrphanedSessions = useCallback((activeTargetIds: Set<string>) => {
     cleanupOrphanedAISessions(activeTargetIds);
 
@@ -1273,6 +1287,7 @@ export function useAIState() {
     showSessionView,
     clearDraftForScope,
     addDraftFiles,
+    addDraftAttachment,
     removeDraftFile,
     createSession,
     deleteSession,
@@ -1333,6 +1348,7 @@ export function useAIState() {
     showSessionView,
     clearDraftForScope,
     addDraftFiles,
+    addDraftAttachment,
     removeDraftFile,
     createSession,
     deleteSession,

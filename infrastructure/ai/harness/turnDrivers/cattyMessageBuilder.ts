@@ -13,7 +13,7 @@ import {
 } from '../../../../components/ai/cattyHistoryReplay';
 import {
   buildPromptWithTerminalSelectionAttachments,
-  isTerminalSelectionAttachment,
+  isInlineTextAttachment,
 } from '../../../../application/state/terminalSelectionAttachment';
 import {
   getOpenAIChatAssistantFieldsForHistoryMessage,
@@ -411,7 +411,7 @@ export function buildCattySdkMessages(input: BuildCattySdkMessagesInput): ModelM
     if (attachments?.length) {
       const modelText = buildPromptWithTerminalSelectionAttachments(trimmed, attachments);
       const modelAttachments = attachments.filter(
-        (attachment) => !isTerminalSelectionAttachment(attachment),
+        (attachment) => !isInlineTextAttachment(attachment),
       );
       if (!modelAttachments.length) {
         sdkMessages.push({ role: 'user', content: modelText });

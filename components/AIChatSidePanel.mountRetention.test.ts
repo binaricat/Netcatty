@@ -83,6 +83,7 @@ const baseProps = (overrides: Partial<AIChatSidePanelProps> = {}): AIChatSidePan
   showSessionView: () => undefined,
   clearDraftForScope: () => undefined,
   addDraftFiles: async () => undefined,
+  addDraftAttachment: () => undefined,
   removeDraftFile: () => undefined,
   createSession: () => session(),
   deleteSession: () => undefined,

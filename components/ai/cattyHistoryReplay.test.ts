@@ -210,3 +210,22 @@ test("buildHistoricalToolReplayMaps pairs reused tool ids with the nearest prece
   assert.equal(maps.resolvedToolCallsByAssistant.get(messages[1]), undefined);
   assert.equal(maps.resolvedToolCallsByAssistant.get(messages[2])?.has(messages[2].toolCalls![0]), true);
 });
+
+test("buildHistoricalUserReplayContent replaces historical vault note mentions with id metadata", () => {
+  const attachment: ChatMessageAttachment = {
+    base64Data: "A".repeat(5_000),
+    mediaType: "text/markdown",
+    filename: "runbook.md",
+    vaultNoteId: "note-123",
+    vaultNoteTitle: "Runbook",
+    previewText: "restart nginx",
+  };
+
+  const result = buildHistoricalUserReplayContent("check this note", [attachment]);
+
+  assert.match(result, /check this note/);
+  assert.match(result, /Historical vault note omitted from replay/);
+  assert.match(result, /noteId=note-123/);
+  assert.match(result, /title=Runbook/);
+  assert.doesNotMatch(result, /AAAAAA/);
+});

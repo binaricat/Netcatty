@@ -8,6 +8,7 @@ import type {
   ChatMessage,
   ExternalAgentConfig,
   ProviderConfig,
+  UploadedFile,
   WebSearchConfig,
 } from '../infrastructure/ai/types';
 import type { AIQuickMessage } from '../infrastructure/ai/quickMessages';
@@ -35,6 +36,7 @@ export interface AIChatSidePanelProps {
   showSessionView: (scopeKey: string, sessionId: string) => void;
   clearDraftForScope: (scopeKey: string) => void;
   addDraftFiles: (scopeKey: string, fallbackAgentId: string, inputFiles: File[]) => Promise<void>;
+  addDraftAttachment: (scopeKey: string, fallbackAgentId: string, upload: UploadedFile) => void;
   removeDraftFile: (scopeKey: string, fallbackAgentId: string, fileId: string) => void;
   createSession: (scope: AISessionScope, agentId?: string) => AISession;
   deleteSession: (sessionId: string, scopeKey?: string) => void;

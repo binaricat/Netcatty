@@ -576,6 +576,7 @@ const AIChatPanelsHostInner: React.FC<AIChatPanelsHostProps> = ({
                     showSessionView={aiConfig.showSessionView}
                     clearDraftForScope={aiConfig.clearDraftForScope}
                     addDraftFiles={aiConfig.addDraftFiles}
+                    addDraftAttachment={aiConfig.addDraftAttachment}
                     removeDraftFile={aiConfig.removeDraftFile}
                     createSession={aiConfig.createSession}
                     deleteSession={aiConfig.deleteSession}

@@ -6,7 +6,7 @@
  * and a bottom toolbar with muted controls + subtle send button.
  */
 
-import { ArrowUp, AtSign, Check, ChevronDown, ChevronRight, Cpu, Eye, FileText, ImageIcon, Loader2, MessageSquare, Package, Plus, ShieldCheck, SquareTerminal, X, Zap } from 'lucide-react';
+import { ArrowUp, AtSign, BookOpen, Check, ChevronDown, ChevronRight, Cpu, Eye, FileText, ImageIcon, Loader2, MessageSquare, Package, Plus, ShieldCheck, SquareTerminal, X, Zap } from 'lucide-react';
 import {
   resolveModelSelectionWithThinking,
   resolveThinkingSelection,
@@ -54,6 +54,8 @@ import {
 } from '../ai-elements/prompt-input';
 import type { PromptInputStatus } from '../ai-elements/prompt-input';
 import type { AgentModelPreset, AIPermissionMode, ProviderConfig, UploadedFile } from '../../infrastructure/ai/types';
+import type { VaultNote } from '../../domain/models';
+import { matchesVaultNoteSearch } from '../../domain/notes';
 import { ProviderIconBadge } from '../settings/tabs/ai/ProviderIconBadge';
 import { VariableSizeVirtualList, type VariableSizeVirtualListHandle } from '../ui/VariableSizeVirtualList';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
@@ -216,6 +218,10 @@ interface ChatInputProps {
   onRemoveFile?: (id: string) => void;
   /** Available hosts for @ mention */
   hosts?: Array<{ sessionId: string; hostname: string; label: string; connected: boolean }>;
+  /** Available Vault → Notes entries for the Mention Note picker */
+  notes?: VaultNote[];
+  /** Callback when the user picks a note to attach as context */
+  onMentionNote?: (note: VaultNote) => void;
   /** User skills currently selected for the next send */
   selectedUserSkills?: Array<{ id: string; slug: string; name: string; description: string }>;
   /** Available user skills for /skill-slug insertion */
@@ -271,6 +277,8 @@ const ChatInput: React.FC<ChatInputProps> = ({
   onAddFiles,
   onRemoveFile,
   hosts = [],
+  notes = [],
+  onMentionNote,
   selectedUserSkills = [],
   userSkills = [],
   quickMessages = [],
@@ -285,7 +293,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
   parked = false,
 }) => {
   const { t } = useI18n();
-  const hasTerminalSelectionAttachment = files.some((file) => file.terminalSelection);
+  const hasTerminalSelectionAttachment = files.some((file) => file.terminalSelection || file.vaultNoteId);
   const composerDisabled = disabled || isSteering;
   const composerTextRef = useRef(value);
   const hasTextStoreRef = useRef<ComposerHasTextStore | null>(null);
@@ -298,13 +306,15 @@ const ChatInput: React.FC<ChatInputProps> = ({
   const [composerMaxHeight, setComposerMaxHeight] = useState(CHAT_INPUT_MAX_HEIGHT);
   const composerDesiredHeightRef = useRef<number | null>(null);
   // Consolidate menu state into a single discriminated union to prevent multiple menus open simultaneously
-  type ActiveMenu = 'model' | 'thinking' | 'attach' | 'atMention' | 'slashCommand' | 'perm' | null;
+  type ActiveMenu = 'model' | 'thinking' | 'attach' | 'atMention' | 'noteMention' | 'slashCommand' | 'perm' | null;
   const [activeMenu, setActiveMenu] = useState<ActiveMenu>(null);
   const [menuPos, setMenuPos] = useState<{ left: number; bottom: number } | null>(null);
   const [inputPanelPos, setInputPanelPos] = useState<{ left: number; bottom: number; width: number } | null>(null);
   const [modelPrefs, setModelPrefs] = useState<ComposerModelPrefs>(() => readComposerModelPrefs(pickerScope));
   const [slashQuery, setSlashQuery] = useState('');
   const [slashRange, setSlashRange] = useState<{ start: number; end: number } | null>(null);
+  // Search query for the Mention Note picker
+  const [noteQuery, setNoteQuery] = useState('');
   // Active highlight index for @ mention / slash skill keyboard navigation
   const [activeMenuIndex, setActiveMenuIndex] = useState(0);
 
@@ -313,6 +323,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
   const showThinkingPicker = activeMenu === 'thinking';
   const showAttachMenu = activeMenu === 'attach';
   const showAtMention = activeMenu === 'atMention';
+  const showNoteMention = activeMenu === 'noteMention';
   const showSlashCommandPicker = activeMenu === 'slashCommand';
   const showPermPicker = activeMenu === 'perm';
 
@@ -322,6 +333,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
     setInputPanelPos(null);
     setSlashQuery('');
     setSlashRange(null);
+    setNoteQuery('');
   }, []);
 
   useEffect(() => {
@@ -582,7 +594,12 @@ const ChatInput: React.FC<ChatInputProps> = ({
     closeAllMenus();
   }, [readComposerText, commitComposerText, closeAllMenus]);
 
-  const openInputPanelMenu = useCallback((menu: 'atMention' | 'slashCommand') => {
+  const handleSelectNoteMention = useCallback((note: VaultNote) => {
+    onMentionNote?.(note);
+    closeAllMenus();
+  }, [onMentionNote, closeAllMenus]);
+
+  const openInputPanelMenu = useCallback((menu: 'atMention' | 'noteMention' | 'slashCommand') => {
     const pos = getInputPanelMenuPos();
     if (!pos) return;
     setMenuPos(null);
@@ -745,6 +762,53 @@ const ChatInput: React.FC<ChatInputProps> = ({
   useEffect(() => {
     if (showSlashCommandPicker) setActiveMenuIndex(0);
   }, [showSlashCommandPicker, slashCommandKey]);
+
+  // Mention Note picker: filtered notes, highlight reset, search-input focus
+  const noteMentionItems = useMemo(
+    () => notes.filter((note) => matchesVaultNoteSearch(note, noteQuery)),
+    [notes, noteQuery],
+  );
+  const noteMentionKey = useMemo(
+    () => noteMentionItems.map((note) => note.id).join('|'),
+    [noteMentionItems],
+  );
+  const noteSearchInputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (showNoteMention) setActiveMenuIndex(0);
+  }, [showNoteMention, noteMentionKey]);
+  useEffect(() => {
+    if (!showNoteMention || noteMentionItems.length === 0) return;
+    atMentionListRef.current?.scrollToIndex(activeMenuIndex);
+  }, [activeMenuIndex, noteMentionKey, noteMentionItems.length, showNoteMention]);
+  useEffect(() => {
+    if (!showNoteMention) return;
+    noteSearchInputRef.current?.focus();
+  }, [showNoteMention]);
+
+  const handleNoteMentionKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.nativeEvent.isComposing) return;
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      closeAllMenus();
+      return;
+    }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const note = noteMentionItems[Math.min(activeMenuIndex, noteMentionItems.length - 1)];
+      if (note) handleSelectNoteMention(note);
+      return;
+    }
+    if (noteMentionItems.length === 0) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setActiveMenuIndex((i) => (i + 1) % noteMentionItems.length);
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setActiveMenuIndex((i) => (i - 1 + noteMentionItems.length) % noteMentionItems.length);
+    }
+  }, [activeMenuIndex, closeAllMenus, handleSelectNoteMention, noteMentionItems]);
 
   useEffect(() => {
     if (!showSlashCommandPicker || !menuPos || slashCommandItems.length === 0) return;
@@ -1041,6 +1105,8 @@ const ChatInput: React.FC<ChatInputProps> = ({
               >
                 {file.terminalSelection ? (
                   <SquareTerminal size={12} className="text-muted-foreground/70 shrink-0" />
+                ) : file.vaultNoteId ? (
+                  <BookOpen size={11} className="text-muted-foreground/60 shrink-0" />
                 ) : file.mediaType.startsWith('image/') ? (
                   <ImageIcon size={11} className="text-muted-foreground/60 shrink-0" />
                 ) : (
@@ -1051,6 +1117,12 @@ const ChatInput: React.FC<ChatInputProps> = ({
                     <span className="block truncate max-w-[210px] text-foreground/82">
                       {t('ai.chat.terminalSelectionAttachment')}
                       {file.lineCount ? ` · ${t('ai.chat.terminalSelectionLines').replace('{count}', String(file.lineCount))}` : ''}
+                    </span>
+                  </span>
+                ) : file.vaultNoteId ? (
+                  <span className="min-w-0">
+                    <span className="block truncate max-w-[210px] text-foreground/82">
+                      {file.vaultNoteTitle || file.filename}
                     </span>
                   </span>
                 ) : (
@@ -1209,6 +1281,71 @@ const ChatInput: React.FC<ChatInputProps> = ({
           document.body,
         )}
 
+        {/* Mention Note popover */}
+        {showNoteMention && inputPanelPos && createPortal(
+          <>
+            <div className="fixed inset-0 z-[999]" onClick={closeAllMenus} />
+            <div
+              role="listbox"
+              aria-label={t('ai.chat.menuMentionNote')}
+              aria-activedescendant={noteMentionItems[activeMenuIndex] ? `note-mention-${noteMentionItems[activeMenuIndex].id}` : undefined}
+              className="fixed z-[1000] overflow-hidden rounded-lg border border-border/50 bg-popover shadow-lg"
+              style={{ left: inputPanelPos.left, bottom: inputPanelPos.bottom, width: 'auto', minWidth: Math.min(240, inputPanelPos.width), maxWidth: inputPanelPos.width }}
+            >
+              <div className="p-1.5 border-b border-border/40">
+                <input
+                  ref={noteSearchInputRef}
+                  type="text"
+                  value={noteQuery}
+                  onChange={(e) => setNoteQuery(e.target.value)}
+                  onKeyDown={handleNoteMentionKeyDown}
+                  placeholder={t('ai.chat.mentionNoteSearch')}
+                  className="w-full h-6 rounded-md bg-muted/40 px-2 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/50"
+                />
+              </div>
+              {noteMentionItems.length === 0 ? (
+                <div className="px-3 py-2 text-[11px] text-muted-foreground/60">{t('ai.chat.mentionNoteEmpty')}</div>
+              ) : (
+                <div className="max-h-[280px]" style={{ height: Math.min(280, 8 + noteMentionItems.reduce((total, note) => total + (note.group ? 52 : 36), 0)) }}>
+                  <VariableSizeVirtualList
+                    ref={atMentionListRef}
+                    items={noteMentionItems}
+                    getItemHeight={(note) => note.group ? 52 : 36}
+                    getItemKey={(note) => note.id}
+                    className="h-full"
+                    contentClassName="p-1"
+                    renderItem={(note, idx) => {
+                      const isActive = idx === activeMenuIndex;
+                      return (
+                        <button
+                          id={`note-mention-${note.id}`}
+                          type="button"
+                          role="option"
+                          aria-selected={isActive}
+                          onMouseEnter={() => setActiveMenuIndex(idx)}
+                          onClick={() => handleSelectNoteMention(note)}
+                          className={`h-full w-full rounded-md px-2 py-1 text-left transition-colors cursor-pointer ${isActive ? 'bg-muted/40' : 'hover:bg-muted/30'}`}
+                        >
+                          <div className="flex items-center gap-2 text-[12px] text-foreground/90">
+                            <BookOpen size={11} className="text-muted-foreground/50 shrink-0" />
+                            <span className="truncate">{note.title || t('ai.chat.untitledNote')}</span>
+                          </div>
+                          {note.group ? (
+                            <div className="pl-5 text-[10px] text-muted-foreground/60 truncate">
+                              {note.group}
+                            </div>
+                          ) : null}
+                        </button>
+                      );
+                    }}
+                  />
+                </div>
+              )}
+            </div>
+          </>,
+          document.body,
+        )}
+
         {/* / command popover */}
         {showSlashPickerUI && createPortal(
           <>
@@ -1310,6 +1447,17 @@ const ChatInput: React.FC<ChatInputProps> = ({
                   >
                     <ImageIcon size={13} className="text-muted-foreground/60" />
                     <span className="text-foreground/85">{t('ai.chat.menuImage')}</span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    aria-label={t('ai.chat.menuMentionNote')}
+                    onClick={() => openInputPanelMenu('noteMention')}
+                    className="w-full flex items-center gap-2.5 px-3 py-1.5 text-left text-[12px] hover:bg-muted/30 transition-colors cursor-pointer whitespace-nowrap"
+                  >
+                    <BookOpen size={13} className="text-muted-foreground/60" />
+                    <span className="flex-1 text-foreground/85">{t('ai.chat.menuMentionNote')}</span>
+                    {notes.length > 0 && <ChevronRight size={10} className="text-muted-foreground/50" />}
                   </button>
                   <button
                     type="button"
