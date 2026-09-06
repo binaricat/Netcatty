@@ -3039,6 +3039,17 @@ const TerminalComponent: React.FC<TerminalProps> = ({
               ? preResizeTracker.marker.line
               : preResizeTracker.lastMarkerLine
             : -1;
+        // A wider reflow merges the marker's row into a surviving row ABOVE
+        // it, so the pre-resize numeric index overstates the anchor by the
+        // number of rows the reflow deleted above it (multiple wrapped
+        // continuations can collapse in one fit). Capture the row's text so
+        // a marker disposed by this reflow can be remapped to the surviving
+        // merged row after the resize: the removed row's content reappears
+        // verbatim inside the row that absorbed it.
+        const preResizeMarkerText =
+          preResizeMarkerLine >= 0
+            ? (term.buffer.active.getLine(preResizeMarkerLine)?.translateToString(true) ?? '')
+            : '';
         const reflowsWider = dimensions.cols > term.cols;
         if (term.cols !== dimensions.cols || term.rows !== dimensions.rows) {
           term.resize(dimensions.cols, dimensions.rows);
@@ -3056,6 +3067,24 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         // scrollable viewport kept its stale pixel offset; realign them so the
         // relative restore below cannot apply its delta twice (#3299).
         alignTerminalViewportScroll(term);
+
+        // Remap a disposed marker's anchor to the surviving wrapped row (see
+        // the preResizeMarkerText capture above): xterm disposes the marker
+        // when this reflow deleted its row, and the pre-resize index now
+        // belongs to a later line once the deleted rows above it collapse.
+        const remappedMarkerAnchor = (() => {
+          if (!reflowsWider || preResizeMarkerLine <= 0) return preResizeMarkerLine;
+          const text = preResizeMarkerText.trim();
+          if (!text) return preResizeMarkerLine;
+          const buffer = term.buffer.active;
+          const minLine = Math.max(preResizeMarkerLine - 500, 0);
+          for (let y = preResizeMarkerLine - 1; y >= minLine; y--) {
+            const line = buffer.getLine(y);
+            if (!line) break;
+            if (line.translateToString(true).includes(text)) return y;
+          }
+          return preResizeMarkerLine;
+        })();
 
         // Preserve scroll position across resize (superset/Tabby pattern).
         // While synchronized output (DECSET 2026) is active,
@@ -3104,13 +3133,14 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           // The reflow above may have moved the marker without any scroll
           // notification; refresh its baseline alongside lastScrollY. A
           // wider reflow can dispose the marker (its row was merged into a
-          // surviving row, so its text still exists): keep the pre-resize
-          // line as the restore's anchor. A narrower reflow can genuinely
-          // trim the marker's row out of the scrollback, where -1 stays
-          // accurate.
+          // surviving row, so its text still exists): remap the anchor to
+          // that surviving row instead of copying the stale pre-resize
+          // index, which now belongs to a later line once the rows deleted
+          // above it collapse. A narrower reflow can genuinely trim the
+          // marker's row out of the scrollback, where -1 stays accurate.
           tracker.lastMarkerLine = tracker.marker.line >= 0
             ? tracker.marker.line
-            : (reflowsWider ? preResizeMarkerLine : -1);
+            : (reflowsWider ? remappedMarkerAnchor : -1);
         } else {
           if (retainedTracker && retainedTracker.term === term) {
             retainedTracker.scrollListener?.dispose();
