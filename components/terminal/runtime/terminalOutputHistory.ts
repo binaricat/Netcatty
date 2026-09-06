@@ -178,11 +178,18 @@ export const stripTerminalDisplayToPlainText = (
       }
       const sequence = input.slice(i + escapeIntroducerLength(input, i), end);
       // Only the history writer consumes cursor-row controls. Standalone plain
-      // text stripping keeps its original contract. DEC origin mode changes
-      // ride along so absolute rows can resolve against the scroll margins.
-      if (preserveRowControls
-        && (input[i] === C1_CSI || input[i + 1] === "[")
-        && (/^[0-9;]*[HfABEFdr]$/.test(sequence) || /^\?6[hl]$/.test(sequence))) {
+      // text stripping keeps its original contract. DEC origin/autowrap mode
+      // changes and cursor save/restore ride along so rows resolve the way the
+      // terminal resolves them.
+      const isCsi = input[i] === C1_CSI || input[i + 1] === "[";
+      const passesRowControl = isCsi
+        && (/^[0-9;]*[HfABEFdr]$/.test(sequence)
+          || /^\?[67][hl]$/.test(sequence)
+          || /^[su]$/.test(sequence));
+      const isDecSaveRestore = !isCsi
+        && escapeIntroducerLength(input, i) === 1
+        && /^[78]$/.test(sequence);
+      if (preserveRowControls && (passesRowControl || isDecSaveRestore)) {
         output += input.slice(i, end);
       }
       const eraseInLine = eraseInLineMarkerFor(input, i, end);
@@ -325,6 +332,11 @@ export const createTerminalOutputHistoryPreview = (options?: {
   // DEC origin mode (DECOM): absolute rows become relative to the top margin
   // and clamp within the region.
   let originMode = false;
+  // DECAWM: while off, printable characters never wrap to the next row; they
+  // overwrite the last column instead.
+  let autowrap = true;
+  // Cursor saved by SC/DECSC (CSI s / ESC 7) for CSI u / ESC 8 to restore.
+  let savedCursor: { row: number; cell: number } | null = null;
   let cacheDirty = true;
   let cacheCols = -1;
   let cacheRows: HistoryPreviewRow[] = [];
@@ -379,7 +391,18 @@ export const createTerminalOutputHistoryPreview = (options?: {
     while (offset < span.length) {
       // xterm defers the wrap until the next printable character arrives; a
       // cursor move or carriage return in between cancels it instead.
-      if (viewportCols > 0 && cursorCell >= viewportCols) wrapCursor();
+      if (viewportCols > 0 && cursorCell >= viewportCols) {
+        if (autowrap) {
+          wrapCursor();
+        } else {
+          // DECAWM disabled: keep writing on the current row, overwriting the
+          // last column the way xterm does.
+          cursorCell = viewportCols - 1;
+          cursor = cursorCell === 0 ? 0
+            : isAsciiOnly(current) ? cursorCell
+              : sliceStringByCellColumns(current, 0, cursorCell).length;
+        }
+      }
       if (current.length >= maxChars) commitCurrentLine();
       const width = currentCellWidth;
       if (cursorCell > width) {
@@ -396,9 +419,15 @@ export const createTerminalOutputHistoryPreview = (options?: {
           : sliceStringByCellColumns(piece, 0, room);
         if (!fitting) {
           if (cursorCell > 0) {
-            // The next glyph is wider than the remaining columns; xterm wraps
-            // and places it on the following row.
-            wrapCursor();
+            if (autowrap) {
+              // The next glyph is wider than the remaining columns; xterm wraps
+              // and places it on the following row.
+              wrapCursor();
+            } else {
+              // DECAWM disabled: the glyph overwrites the trailing columns
+              // instead of wrapping to the next row.
+              fitting = piece;
+            }
             continue;
           }
           // Wider than the whole viewport: write it anyway so the loop moves on.
@@ -433,11 +462,38 @@ export const createTerminalOutputHistoryPreview = (options?: {
     }
   };
 
+  const saveTrackedCursor = () => {
+    savedCursor = { row: screenRow, cell: cursorCell };
+  };
+
+  const restoreTrackedCursor = () => {
+    if (!savedCursor) return;
+    const savedCell = Math.min(
+      maxChars - 1,
+      savedCursor.cell,
+      viewportCols > 0 ? viewportCols - 1 : savedCursor.cell,
+    );
+    if (savedCursor.row !== screenRow && current) commitCurrentLine();
+    screenRow = savedCursor.row;
+    cursorCell = savedCell;
+    cursor = savedCell === 0 ? 0
+      : isAsciiOnly(current) ? savedCell
+        : sliceStringByCellColumns(current, 0, savedCell).length;
+  };
+
   const writeText = (text: string) => {
     let i = 0;
     while (i < text.length) {
       const ch = text[i];
       if (ch === ESC || ch === C1_CSI) {
+        if (ch === ESC && text[i + 1] !== "[") {
+          // Bare ESC finals ride through the stripper: DECSC ("ESC 7") saves
+          // and DECRC ("ESC 8") restores the tracked cursor.
+          if (text[i + 1] === "7") saveTrackedCursor();
+          else if (text[i + 1] === "8") restoreTrackedCursor();
+          i += 2;
+          continue;
+        }
         const bodyStart = i + (ch === ESC ? 2 : 1);
         const end = consumeCsiBody(text, bodyStart)!;
         const command = text[end - 1];
@@ -454,8 +510,11 @@ export const createTerminalOutputHistoryPreview = (options?: {
           if (bottom > top) {
             scrollTopMargin = top;
             scrollBottomMargin = bottom;
-            if (screenRow !== 1 && current) commitCurrentLine();
-            screenRow = 1;
+            // xterm homes the cursor at the origin-dependent home position:
+            // row 1, or the new top margin while DECOM is active.
+            const homeRow = originMode ? top : 1;
+            if (screenRow !== homeRow && current) commitCurrentLine();
+            screenRow = homeRow;
             cursor = 0;
             cursorCell = 0;
           }
@@ -474,6 +533,24 @@ export const createTerminalOutputHistoryPreview = (options?: {
             cursor = 0;
             cursorCell = 0;
           }
+          // DECAWM (CSI ?7h / ?7l): while off, printable characters never wrap
+          // to the next row; they overwrite the last column instead.
+          if (params[0] === "?7") {
+            autowrap = command === "h";
+          }
+          i = end;
+          continue;
+        }
+        if (command === "s") {
+          // SC: remember the cursor row and column so a later restore moves
+          // back to it instead of output after it being concatenated onto the
+          // row the stripper last saw.
+          saveTrackedCursor();
+          i = end;
+          continue;
+        }
+        if (command === "u") {
+          restoreTrackedCursor();
           i = end;
           continue;
         }
@@ -609,6 +686,8 @@ export const createTerminalOutputHistoryPreview = (options?: {
       scrollTopMargin = 1;
       scrollBottomMargin = Infinity;
       originMode = false;
+      autowrap = true;
+      savedCursor = null;
       cacheDirty = true;
     },
     getLines,
