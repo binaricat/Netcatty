@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 interface AutoUnlockManager {
   unlock(password: string): Promise<boolean>;
@@ -11,6 +11,10 @@ interface AutoUnlockBridge {
 // A renderer can mount several consumers of the same manager. Remember the
 // unlocked key across consumer unmounts so reopening settings cannot undo a lock.
 const unlockedIdentityByManager = new WeakMap<AutoUnlockManager, string>();
+// Dedupe attempts per manager (not per hook instance): every consumer of the
+// same manager observes the same events, and without sharing they would each
+// run the expensive PBKDF2 derivation inside manager.unlock.
+const attemptedAttemptByManager = new WeakMap<AutoUnlockManager, string | null>();
 
 /** Retry a locked peer window when the setting window finishes sharing its key. */
 export function useCloudSyncAutoUnlock(input: {
@@ -21,7 +25,6 @@ export function useCloudSyncAutoUnlock(input: {
 }) {
   const { securityState, masterKeyIdentity, manager, bridge } = input;
   const [passwordRevision, setPasswordRevision] = useState(0);
-  const attemptedRef = useRef<string | null>(null);
 
   useEffect(() => bridge?.onCloudSyncSessionPasswordAvailable?.(() => {
     setPasswordRevision(value => value + 1);
@@ -32,15 +35,15 @@ export function useCloudSyncAutoUnlock(input: {
     const attempt = JSON.stringify([masterKeyIdentity, passwordRevision]);
     if (securityState === 'UNLOCKED') {
       unlockedIdentityByManager.set(manager, masterKeyIdentity);
-      attemptedRef.current = attempt;
+      attemptedAttemptByManager.set(manager, attempt);
       return;
     }
     if (securityState !== 'LOCKED') return;
     // Once this key has been unlocked, a later lock is intentional. A peer
     // sharing its password must not undo it, regardless of notification order.
     if (unlockedIdentityByManager.get(manager) === masterKeyIdentity) return;
-    if (attemptedRef.current === attempt) return;
-    attemptedRef.current = attempt;
+    if (attemptedAttemptByManager.get(manager) === attempt) return;
+    attemptedAttemptByManager.set(manager, attempt);
     let cancelled = false;
     let awaitingPassword = true;
     void (async () => {
@@ -62,7 +65,9 @@ export function useCloudSyncAutoUnlock(input: {
     return () => {
       cancelled = true;
       // React StrictMode can immediately remount the same effect.
-      if (awaitingPassword && attemptedRef.current === attempt) attemptedRef.current = null;
+      if (awaitingPassword && attemptedAttemptByManager.get(manager) === attempt) {
+        attemptedAttemptByManager.set(manager, null);
+      }
     };
   }, [securityState, masterKeyIdentity, manager, bridge, passwordRevision]);
 }
