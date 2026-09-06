@@ -452,6 +452,7 @@ export const ruAiMessages: Messages = {
   'ai.chat.menuMentionNote': 'Упомянуть заметку',
   'ai.chat.mentionNoteSearch': 'Поиск заметок…',
   'ai.chat.mentionNoteEmpty': 'Нет подходящих заметок',
+  'ai.chat.mentionNoteBudgetExceeded': '«{{title}}» не прикреплена: упомянутые заметки превысили бы лимит размера вложений.',
   'ai.chat.untitledNote': 'Заметка без названия',
   'ai.chat.menuUserSkills': 'Пользовательские навыки',
   'ai.chat.menuSlashCommands': 'Команды /',

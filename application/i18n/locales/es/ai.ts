@@ -500,6 +500,7 @@ export const esAiMessages: Messages = {
   'ai.chat.menuMentionNote': 'Mencionar nota',
   'ai.chat.mentionNoteSearch': 'Buscar notas…',
   'ai.chat.mentionNoteEmpty': 'Sin notas coincidentes',
+  'ai.chat.mentionNoteBudgetExceeded': 'No se adjuntó «{{title}}»: las notas mencionadas superarían el límite de tamaño de adjuntos.',
   'ai.chat.untitledNote': 'Nota sin título',
   'ai.chat.menuUserSkills': 'Habilidades de usuario',
   'ai.chat.menuSlashCommands': 'Comandos de barra',

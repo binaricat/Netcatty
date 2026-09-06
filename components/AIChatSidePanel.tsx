@@ -21,6 +21,7 @@ import {
   resolveAgentModelSelection,
 } from '../infrastructure/ai/types';
 import { getExternalAgentSdkBackend, getManualAgentCommand, matchesManagedAgentConfig } from '../infrastructure/ai/managedAgents';
+import { toast } from './ui/toast';
 import { useAgentDiscovery } from '../application/state/useAgentDiscovery';
 import {
   getReadyUserSkillOptions,
@@ -609,8 +610,15 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     const upload = result.upload;
     if (!upload) {
       if (result.status === 'budget') {
+        // The picker closes without attaching, so surface the rejection to the
+        // user instead of silently dropping the requested note.
         console.warn(
           '[AIChatSidePanel] Vault note mention skipped: aggregate attachment budget exceeded',
+        );
+        toast.warning(
+          t('ai.chat.mentionNoteBudgetExceeded', {
+            title: String(note.title || '').trim() || t('ai.chat.untitledNote'),
+          }),
         );
       }
       return;
@@ -636,6 +644,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     currentAgentId,
     enterScopeDraftMode,
     scopeKey,
+    t,
     updateScopeDraft,
   ]);
 

@@ -500,6 +500,7 @@ export const enAiMessages: Messages = {
   'ai.chat.menuMentionNote': 'Mention Note',
   'ai.chat.mentionNoteSearch': 'Search notes…',
   'ai.chat.mentionNoteEmpty': 'No matching notes',
+  'ai.chat.mentionNoteBudgetExceeded': '"{{title}}" was not attached: mentioned notes would exceed the attachment size limit.',
   'ai.chat.untitledNote': 'Untitled note',
   'ai.chat.menuUserSkills': 'User Skills',
   'ai.chat.menuSlashCommands': 'Slash Commands',
