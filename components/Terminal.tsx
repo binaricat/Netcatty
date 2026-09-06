@@ -2884,8 +2884,20 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     buffer: XTerm["buffer"]["active"];
     moved: boolean;
     lastScrollY: number;
+    // Content of the buffer line at `lastScrollY` (empty when unavailable).
+    // Lets the onScroll handler tell scrollback trims apart from user
+    // scrolls: a trim shifts every buffer row down by one, so the line that
+    // was at lastScrollY reappears at lastScrollY - 1 with identical content.
+    lastScrollLine: string;
+    // Number of scrollback lines trimmed since the restore was captured.
+    // Trimming shifts absolute row indices down, so the restore's saved
+    // target row must shift down by the same amount.
+    trimAdjust: number;
     scrollListener?: { dispose: () => void };
   };
+  // Snapshot of the buffer line at an absolute row for scroll-trim detection.
+  const scrollLineSnapshot = (t: XTerm, y: number): string =>
+    t.buffer.active.getLine(y)?.translateToString(true) ?? "";
   const syncScrollTrackerRef = useRef<SyncScrollTracker | null>(null);
   const pendingWriteSafeFitRef = useRef<{
     term: XTerm;
@@ -3060,6 +3072,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         ) {
           tracker = retainedTracker;
           tracker.lastScrollY = term.buffer.active.viewportY;
+          tracker.lastScrollLine = scrollLineSnapshot(term, tracker.lastScrollY);
         } else {
           if (retainedTracker && retainedTracker.term === term) {
             retainedTracker.scrollListener?.dispose();
@@ -3070,6 +3083,8 @@ const TerminalComponent: React.FC<TerminalProps> = ({
             buffer: restoreBuffer,
             moved: false,
             lastScrollY: term.buffer.active.viewportY,
+            lastScrollLine: scrollLineSnapshot(term, term.buffer.active.viewportY),
+            trimAdjust: 0,
           };
           syncScrollTrackerRef.current = tracker;
         }
@@ -3079,11 +3094,39 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         // positions instead of treating any notification as a scroll:
         // output arriving while the user is parked above the bottom must
         // not cancel the restore.
+        //
+        // A full scrollback changes that signature: BufferService.scroll
+        // recycles the top line and decrements ydisp to keep the scrolled-up
+        // viewport stable, then reports the decremented row. That looks like
+        // a one-line user scroll, so identify the trim instead of canceling:
+        // the buffer is at capacity and the line that was at lastScrollY
+        // reappears one row lower with identical content. A trim shifts
+        // absolute row indices down, so count it to shift the restore's
+        // saved target down accordingly.
         let scrollListener: { dispose: () => void } | undefined;
         if (!isRetained) {
           scrollListener = term.onScroll((y: number) => {
-            if (y !== tracker.lastScrollY) tracker.moved = true;
+            const buffer = term.buffer.active;
+            if (y !== tracker.lastScrollY) {
+              const scrollback = term.options.scrollback;
+              const maxBufferLength = typeof scrollback === "number"
+                ? term.rows + scrollback
+                : Number.POSITIVE_INFINITY;
+              if (
+                y === tracker.lastScrollY - 1 &&
+                buffer.length >= maxBufferLength &&
+                buffer.getLine(y)?.translateToString(true) === tracker.lastScrollLine
+              ) {
+                tracker.trimAdjust++;
+                tracker.lastScrollY = y;
+                // The snapshot already matches this row's content by
+                // definition, so it stays valid for the next trim.
+                return;
+              }
+              tracker.moved = true;
+            }
             tracker.lastScrollY = y;
+            tracker.lastScrollLine = scrollLineSnapshot(term, y);
           });
           tracker.scrollListener = scrollListener;
         }
@@ -3097,7 +3140,12 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           if (wasPinnedToBottom) {
             term.scrollToBottom();
           } else {
-            const targetY = Math.min(savedViewportY, term.buffer.active.baseY);
+            // Scrollback trims shifted absolute row indices down; follow the
+            // saved content to its current row.
+            const targetY = Math.min(
+              savedViewportY - tracker.trimAdjust,
+              term.buffer.active.baseY,
+            );
             if (term.buffer.active.viewportY !== targetY) {
               term.scrollToLine(targetY);
             }
