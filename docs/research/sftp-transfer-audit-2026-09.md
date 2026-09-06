@@ -1,8 +1,9 @@
 # SFTP transfer audit (September 2026)
 
 Baseline: `7b964ead21c1e176999557147914f4975a63f5c8`.
-Status: in progress. This is an evidence ledger, not a declaration that all SFTP
-paths or reporter environments have been cleared.
+Status: scoped audit completed, with five independently reproduced defects
+fixed and submitted. This ledger distinguishes verified paths from reporter
+environments unavailable to this audit.
 
 ## Completion requirements
 
@@ -73,6 +74,22 @@ Verification so far:
   transfer engine and disk staging across process death, not the renderer's
   automatic history restoration or a real VPN/jump-host environment.
 
+## Submitted fixes
+
+| PR | Confirmed failure | Architectural change |
+| --- | --- | --- |
+| [3284](https://github.com/binaricat/Netcatty/pull/3284) | Late pause/resume replies revive a newer paused/cancelled task or overwrite its visible state, including cross-window and folder watcher paths | Shared held-file resume handling; obsolete controls carry the winning action to reconcile local barriers; compensation checks current intent rather than assuming every epoch change means resume. |
+| [3285](https://github.com/binaricat/Netcatty/pull/3285) | Deleted recorded host or duplicate legacy display names can resume an upload against another saved server | Exact host-ID recovery; unique-match-only legacy resolution; preserve live-session recovery. |
+| [3286](https://github.com/binaricat/Netcatty/pull/3286) | Publication/restoration can overwrite a concurrently saved local file; rollback can delete a replacement | One exclusive publication helper, a clear commit boundary, preserved recovery artifacts on conflicts or incomplete fallback copying. |
+| [3287](https://github.com/binaricat/Netcatty/pull/3287) | Folder stays active after child completion was compacted out of visible history | One bounded settlement observer/helper for both live transfer and recovery; no persistent tombstone history. |
+| [3288](https://github.com/binaricat/Netcatty/pull/3288) | Cancelling or timing out channel initialization disconnects shared SSH users | Channel cancellation is separated from shared-transport ownership; abandoned initialization is bounded until settlement. |
+
+Additional engine experiments used actual loopback SSH/SFTP, killed the child
+process, and resumed in a fresh process for remote-to-remote transfers. Both the
+download phase and upload phase passed final 32 MiB SHA-256 comparison. The
+upload-phase checkpoint was 16777216 bytes. These complement direct upload and
+download recovery, not full-app history restoration or reporter confirmation.
+
 ## Historical issue evidence fetched in this audit
 
 | Issue | Reported condition | Audit treatment |
@@ -84,11 +101,17 @@ Verification so far:
 | [3149](https://github.com/binaricat/Netcatty/issues/3149) | Windows proxy + terminal drag-upload reports No such file | Check target pinning, path encoding, session and retry behavior. |
 | [2832](https://github.com/binaricat/Netcatty/issues/2832) | Browsing works through VPN/jump host, transfers wait indefinitely, cancel works | Check dedicated connection admission/authentication/timeout. |
 | [2568](https://github.com/binaricat/Netcatty/issues/2568) | Folder copy reaches 100% but remains active; pause ineffective | Check parent settlement and directory checkpoints. |
+| [2458](https://github.com/binaricat/Netcatty/issues/2458) | Windows 1 GiB upload continues after Pause/Pause all from both terminal sidebar and SFTP tab | Motivates transport-plus-visible-state regressions; current delayed-control defects independently reproduced. |
+| [3031](https://github.com/binaricat/Netcatty/issues/3031) | macOS jump-host/proxy drag upload: no such file | Missing full error, protocol, target path and direct-connect comparison prevent attribution. |
+| [2556](https://github.com/binaricat/Netcatty/issues/2556) | Windows download of 1.9 GiB from local Linux VM; separate many-small-files progress complaint | Preserve verification correctness; distinguish network payload from verification and incremental discovery. No comparative reporter throughput available. |
+| [2886](https://github.com/binaricat/Netcatty/issues/2886) | sudo terminal drop denied while SFTP upload succeeds | Existing terminal fallback fix is separate; contradictory bot explanations are not evidence of identity or permission correctness. |
 | [2638](https://github.com/binaricat/Netcatty/issues/2638) | Recovery after network failure | Verify restore end to end; UI availability alone is insufficient. |
 
 Issue state (open/closed) and automated comments do not substitute for runtime
 proof. Initial title search hit its 100-result cap. Expanded SFTP search returned
-308 issue matches, including reports without SFTP in the title. Remaining relevant reports need their bodies/comments read.
+308 issue matches, including reports without SFTP in the title. The reports
+listed above were read as representative symptom clusters; this was not a claim
+to have investigated all 308 matching issues individually.
 
 ## External reference points
 
@@ -112,14 +135,92 @@ proof. Initial title search hit its 100-result cap. Expanded SFTP search returne
   distinguishes completion of a state update from completion of transfer I/O.
   This supports keeping control requests independent of long-lived transfer runs.
 
-## Remaining audit coverage
+## Coverage and practical limits
 
-- Finish review of download/upload/remote-to-remote/SCP completion and integrity.
-- Exercise transport disconnect and full-app restart/history recovery; engine-level
-  fresh-process recovery in both directions has passed.
-- Review folder manifests, skip/merge/replace, cancellation, path boundaries.
-- Measure many-file discovery/history and inspect renderer responsiveness.
-- Check pooled sessions, authentication, VPN/jump-host boundaries and cleanup.
-- Exercise the actual transfer-center UI and detached/closed originating panels.
-- Complete architectural comparison, fix additional reproduced material defects,
-  obtain clean current-head review, and publish PRs with accurate evidence.
+| Area | Evidence and result |
+| --- | --- |
+| Transfer controls and global center | Actual component/store browser interactions; delayed replies, direct/worker, folder watcher and cross-window action regressions. PR 3284 fixes confirmed ordering failures, including root-state reconciliation and failed resume settlement. |
+| Upload/download and remote-to-remote durability | Four real SSH/SFTP fresh-process recovery experiments, including both remote-to-remote phases, all compare final bytes by SHA-256. Existing transfer tests cover changed source, sparse ranges, cancellation and publication. |
+| Local/SCP publication | Real filesystem conflict regressions and SCP abort tests; one shared no-overwrite publication helper. Copy fallback retains mode/timestamps and recovery files on failure. Actual FAT/exFAT hardware was unavailable. |
+| Folder traversal and final state | Discovery concurrency, replacement/rollback, manifest, pause latch, skip/conflict and history tests; actual live/recovery entrypoints reproduce compacted-child hang and pass after PR 3287. |
+| History, restart and ownership | Store history/large-manifest and dedicated recovery tests; PR 3285 rejects missing or ambiguous saved host identity. Full Electron quit/relaunch with restored user credentials was not exercised; engine-process recovery was. Editing endpoint details under an unchanged saved host ID remains a documented identity-model limitation. |
+| Connection sharing and cleanup | Connection pool, lease and initialization tests; real delayed SFTP OPEN followed by cancellation leaves browsing alive and closes the late channel after PR 3288. VPN/MFA/security-product and original jump-host environments were unavailable. |
+| Responsiveness | Actual browser controls, list virtualization, bounded directory discovery and 50k history cases; scheduler smoke figures below are diagnostic, not end-user throughput or Windows runtime proof. |
+
+No additional data-loss defect was established by these checks. User reports of
+VPN-specific hangs, proxy drag-upload path errors and Windows throughput/freezes
+still require their original environments and discriminating logs. They are not
+marked resolved solely because a related mechanism was repaired here.
+
+## Validation summary
+
+Each fix received two independent local reviews. Review-discovered gaps were
+corrected and checked again. PR 3284 latest focused control/worker tests: 35 pass;
+two actual direct-resume tests include the full undrained timeout and pass.
+PR 3285 full suite: 11,379 pass, 18 skip. PR 3286 full suite before its metadata
+follow-up: 11,386 pass, 18 skip; latest publication/abort tests: 34 pass.
+PR 3287 serial full suite: 11,383 pass, 18 skip; production build passes.
+PR 3288 real SSH cancellation experiment and nine channel tests pass; its full
+suite has 11,380 passes and one unrelated terminal write-queue timing failure,
+independently reproduced on the unchanged baseline. That entire test file passes
+alone (81 tests). A separate integration worktree combines all five branches;
+one test-only insertion conflict was resolved by retaining both regressions.
+The folder test was subsequently relocated in its own PR; a fresh merge-tree
+check confirms it combines with the other control tests without a conflict.
+
+## Architectural assessment
+
+The staged-file and contiguous-checkpoint design is worth retaining. A simpler
+client that writes directly into the destination is not an equivalent safety
+reference. The most important simplification is ownership: a long-lived stream
+must not block its own control requests, and one authoritative lifecycle must
+inform every window. PR 3284 removes a duplicate state-writing recovery path
+and makes obsolete controls explicit.
+
+Publication is a second useful module boundary. PR 3286 replaces repeated
+check/rename/check/rollback branches with one no-overwrite operation shared by
+publication and restoration. On hardlink-capable filesystems its commit is
+atomic; the documented exclusive-copy fallback trades atomic visibility for
+compatibility while preserving recoverable data and cancellation.
+
+The current transfer list virtualizes beyond 20 visible tasks, directory listing
+has a tree-wide concurrency gate, and history migration yields cooperatively.
+A scheduler-only smoke workload of 1000 and 10000 immediately completing jobs
+finished in 87 ms and 4362 ms, with maximum timer gaps of 15 ms and 111 ms during
+other validation activity. The queue still scans for eligibility/priority/fairness;
+this is a follow-up performance lead, not proof of the Windows freeze reports or
+a standalone throughput benchmark. Folder fan-out bounds ordinary queue growth.
+
+Do not weaken full saved-prefix verification merely to improve resume timings.
+The loopback experiments include extra verification reads; those bytes are not
+payload throughput. A future optimization needs proof that changed sources and
+out-of-order durable ranges still cannot produce mixed file contents.
+
+PR 3287 makes final transfer ownership independent of visible history retention:
+observers capture terminal settlement before compaction and are disposed after
+the waiting invocation exits. PR 3288 keeps per-channel cancellation from
+claiming ownership of a shared SSH connection. These targeted boundaries reduce
+duplicated policy without replacing the working durable-transfer engine.
+
+Combined-engine live checks also passed: shared-connection cancellation retains
+working browsing and closes the late channel; a 32 MiB download killed at a
+16809984-byte checkpoint resumes in a new process to the expected SHA-256. An
+initial 8 MiB fixture completed before an intermediate checkpoint was sampled;
+the larger paced fixture supplies the intended process-death evidence.
+
+## Final combined validation
+
+The combined full suite passed: 11,439 passed, 0 failed, 18 skipped. Lint and
+production build passed. This run includes all five fixes and the failed-child
+admission follow-up. A final control-aggregation follow-up then corrected mixed
+success/superseded resume outcomes and current IPC rejection handling; both
+independent reviewers approved it. After bringing that follow-up and the
+test-only relocation into the integration checkout, all 202 affected control,
+store, folder, observation, recovery and worker tests passed. Final lint/build
+are recorded in the PR descriptions. No production changes were made in the
+integration checkout; the only merge edits preserve independent regression tests.
+
+The initial combined run stopped after an older exact-result assertion rejected
+the newly structured superseded response and left its fixture alive. The
+assertion was updated, its fixture completed, and the successful full run above
+supersedes that aborted run. Tests were not removed or weakened.
