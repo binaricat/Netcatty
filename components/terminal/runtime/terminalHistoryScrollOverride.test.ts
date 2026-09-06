@@ -352,3 +352,23 @@ test("history preview right-click is recognized as an app-menu target", () => {
     false,
   );
 });
+
+
+test("nested preview rows retain soft-wrap copy and partial selections", async () => {
+  const { JSDOM } = await import("jsdom");
+  const dom = new JSDOM("<pre><span>中文abc</span>\n<span>def</span></pre>");
+  const overlay = dom.window.document.querySelector("pre")!;
+  overlay.setAttribute(HISTORY_PREVIEW_WRAP_ATTR, "01");
+  const first = overlay.firstChild!.firstChild!;
+  const last = overlay.lastChild!.firstChild!;
+  const selection = {
+    rangeCount: 1, anchorNode: first, focusNode: last,
+    anchorOffset: 1, focusOffset: 2, toString: () => "文abc\ndef",
+  };
+  assert.equal(getHistoryPreviewSelectionText(overlay, selection), "文abcde");
+  assert.equal(getHistoryPreviewSelectionText(overlay, {
+    ...selection, anchorNode: overlay, focusNode: overlay,
+    anchorOffset: 0, focusOffset: overlay.childNodes.length,
+  }), "中文abcdef");
+  dom.window.close();
+});
