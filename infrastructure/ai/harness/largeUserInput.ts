@@ -65,7 +65,19 @@ const EXTERNAL_PROMPT_TAIL_CHARS = 16_000;
 // and its note id unrecoverable (external agents have no `tool_output_read`
 // recovery path), so the lost headers are re-stated in the truncation notice.
 const EXTERNAL_PROMPT_MAX_LOST_NOTE_HEADERS = 10;
+// A pathological single-line `[Vault Note: ...]` sequence can be arbitrarily
+// long; restoring it verbatim would defeat the prompt bound, so each restored
+// header is capped (keeping the `[Vault Note: ` prefix and the `(id: ...)]`
+// tail so the note id stays recoverable).
+const EXTERNAL_PROMPT_MAX_NOTE_HEADER_CHARS = 400;
 const NOTE_HEADER_PATTERN = /\[Vault Note: [^\]\n]*\]/g;
+
+/** Cap a restored note header, keeping its prefix and id-bearing tail. */
+function capNoteHeader(header: string): string {
+  if (header.length <= EXTERNAL_PROMPT_MAX_NOTE_HEADER_CHARS) return header;
+  const keep = Math.floor((EXTERNAL_PROMPT_MAX_NOTE_HEADER_CHARS - 1) / 2);
+  return `${header.slice(0, keep)}…${header.slice(-keep)}`;
+}
 
 /** Collect note headers that the head/tail cut does not show in full. */
 function collectLostNoteHeaders(prompt: string, headLength: number, tailStart: number): string[] {
@@ -93,13 +105,30 @@ export function boundPromptForExternalSdk(prompt: string): string {
   if (/[\uD800-\uDBFF]$/.test(head)) head = head.slice(0, -1);
   if (/^[\uDC00-\uDFFF]/.test(tail)) tail = tail.slice(1);
   const omitted = prompt.length - head.length - tail.length;
-  const lostNoteHeaders = collectLostNoteHeaders(prompt, head.length, prompt.length - tail.length);
-  const lostNoteHeadersNote = lostNoteHeaders.length > 0
-    ? ` Omitted Vault note headers: ${lostNoteHeaders.join(' ')}`
+  const lostNoteHeaders = collectLostNoteHeaders(prompt, head.length, prompt.length - tail.length)
+    .map(capNoteHeader);
+  const noticePrefix = `\n\n[... prompt truncated for size: showing the first ${head.length} and last ${tail.length} of ${prompt.length} characters (${omitted} omitted).`;
+  const noticeSuffix = ' If a Vault note attachment above looks incomplete, ask the user to share the missing part ...]\n\n';
+  // Enforce the final output bound: the restored headers must fit in the
+  // remaining budget, so drop whole headers (longest-restored last) until the
+  // notice fits.
+  const maxHeadersNoteLength = Math.max(
+    0,
+    EXTERNAL_PROMPT_MAX_CHARS - head.length - tail.length - noticePrefix.length - noticeSuffix.length,
+  );
+  let restoredHeaders = lostNoteHeaders;
+  while (
+    restoredHeaders.length > 0
+    && ` Omitted Vault note headers: ${restoredHeaders.join(' ')}`.length > maxHeadersNoteLength
+  ) {
+    restoredHeaders = restoredHeaders.slice(0, -1);
+  }
+  const lostNoteHeadersNote = restoredHeaders.length > 0
+    ? ` Omitted Vault note headers: ${restoredHeaders.join(' ')}`
     : '';
   return [
     head,
-    `\n\n[... prompt truncated for size: showing the first ${head.length} and last ${tail.length} of ${prompt.length} characters (${omitted} omitted).${lostNoteHeadersNote} If a Vault note attachment above looks incomplete, ask the user to share the missing part ...]\n\n`,
+    `${noticePrefix}${lostNoteHeadersNote}${noticeSuffix}`,
     tail,
   ].join('');
 }

@@ -156,3 +156,19 @@ test('boundPromptForExternalSdk re-states headers straddling either cut', () => 
 
   assert.match(bounded, /Omitted Vault note headers: \[Vault Note: Second \(id: id-2\)\] \[Vault Note: Third \(id: id-3\)\]/);
 });
+
+test('boundPromptForExternalSdk caps restored headers and keeps the output bound', () => {
+  // A pathological single-line header spanning the head/tail cut would
+  // otherwise be restored verbatim and defeat the 100k cap.
+  const hugeHeader = `[Vault Note: ${'t'.repeat(246_000)} (id: id-huge)]`;
+  const prompt = `q${'a'.repeat(80_000)}${hugeHeader}${'b'.repeat(20_000)}after`;
+  const bounded = boundPromptForExternalSdk(prompt);
+
+  assert.ok(bounded.length <= 100_000, `bounded length ${bounded.length} exceeds 100_000`);
+  const restored = bounded.match(/Omitted Vault note headers: (\[Vault Note: [^\]]*\])/)?.[1];
+  assert.ok(restored);
+  assert.ok(restored.length <= 400, `restored header length ${restored.length} exceeds cap`);
+  // The id-bearing tail and the `[Vault Note: ` prefix survive capping.
+  assert.match(restored, /^\[Vault Note: t+…/);
+  assert.match(restored, /…t+ \(id: id-huge\)\]$/);
+});
