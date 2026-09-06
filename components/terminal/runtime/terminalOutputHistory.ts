@@ -396,16 +396,20 @@ export const createTerminalOutputHistoryPreview = (options?: {
         if (command === "r") {
           // DECSTBM: xterm homes the cursor after (re)setting the scroll
           // margins, and relative row moves inside the region stop at its
-          // bottom margin instead of the viewport's bottom row.
-          scrollTopMargin = Math.max(1, Number(params[0]) || 1);
-          scrollBottomMargin = Math.max(
-            scrollTopMargin,
-            Number(params[1]) || (viewportRows > 0 ? viewportRows : 1_000_000),
-          );
-          if (screenRow !== 1 && current) commitCurrentLine();
-          screenRow = 1;
-          cursor = 0;
-          cursorCell = 0;
+          // bottom margin instead of the viewport's bottom row. A region whose
+          // bottom is not below its top (after clamping both to the viewport)
+          // is ignored entirely, margins and cursor alike.
+          const viewportBottom = viewportRows > 0 ? viewportRows : 1_000_000;
+          const top = Math.min(Math.max(1, Number(params[0]) || 1), viewportBottom);
+          const bottom = Math.min(Number(params[1]) || viewportBottom, viewportBottom);
+          if (bottom > top) {
+            scrollTopMargin = top;
+            scrollBottomMargin = bottom;
+            if (screenRow !== 1 && current) commitCurrentLine();
+            screenRow = 1;
+            cursor = 0;
+            cursorCell = 0;
+          }
           i = end;
           continue;
         }
@@ -533,6 +537,9 @@ export const createTerminalOutputHistoryPreview = (options?: {
       totalChars = 0;
       pendingEscape = "";
       screenRow = 1;
+      // The next xterm instance starts with a full-viewport scroll region.
+      scrollTopMargin = 1;
+      scrollBottomMargin = Infinity;
       cacheDirty = true;
     },
     getLines,
@@ -551,17 +558,34 @@ export const createTerminalOutputHistoryPreview = (options?: {
       return { rows: window, totalRows };
     },
     setViewportRows(rows: number): void {
-      viewportRows = Math.max(0, Math.floor(rows));
+      const nextRows = Math.max(0, Math.floor(rows));
+      if (nextRows !== viewportRows) {
+        // xterm resets the scroll region to the full new viewport whenever the
+        // terminal size changes; keep the tracked margins in step so relative
+        // moves clamp to the new bounds instead of the previous ones.
+        scrollTopMargin = 1;
+        scrollBottomMargin = nextRows > 0 ? nextRows : Infinity;
+      }
+      viewportRows = nextRows;
       if (viewportRows > 0) {
         // xterm clamps its cursor as soon as the viewport shrinks; keep the
-        // tracked row (and any scroll margins) inside the new bounds so a
-        // later relative move is not misread as a row transition.
+        // tracked row inside the new bounds so a later relative move is not
+        // misread as a row transition.
         screenRow = Math.min(screenRow, viewportRows);
-        scrollBottomMargin = Math.min(scrollBottomMargin, viewportRows);
       }
     },
     setViewportCols(cols: number): void {
       viewportCols = Math.max(0, Math.floor(cols));
+      if (viewportCols > 0 && cursorCell > viewportCols - 1) {
+        // xterm clamps its cursor to the new last column as soon as the
+        // terminal narrows; keep the tracked column (and its UTF-16 index) in
+        // step so the next printable span lands there instead of padding past
+        // the viewport edge.
+        cursorCell = viewportCols - 1;
+        cursor = cursorCell === 0 ? 0
+          : isAsciiOnly(current) ? cursorCell
+            : sliceStringByCellColumns(current, 0, cursorCell).length;
+      }
     },
   };
 };

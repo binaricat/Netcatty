@@ -356,3 +356,55 @@ test("relative row moves stop at the scroll region's bottom margin", () => {
   history.append("\x1b[1;20r\x1b[20;1Hstatus\x1b[1BNEW");
   assert.deepEqual(history.getLines(), ["statusNEW"]);
 });
+
+test("invalid DECSTBM ranges are ignored", () => {
+  const history = createTerminalOutputHistoryPreview();
+  history.setViewportRows(24);
+  // Bottom not greater than top: xterm ignores the sequence, so the existing
+  // text must stay on its row and later text must not home the cursor.
+  history.append("\x1b[5;1Hbefore\x1b[20;10rafter");
+  assert.deepEqual(history.getLines(), ["beforeafter"]);
+  history.clear();
+  // A top past the viewport clamps to it, leaving no valid region either.
+  history.append("\x1b[5;1Hbefore\x1b[30;40rafter");
+  assert.deepEqual(history.getLines(), ["beforeafter"]);
+  history.clear();
+  // A bottom past the viewport clamps to it; the valid region still applies.
+  history.append("\x1b[1;999r\x1b[24;1Hstatus\x1b[999BNEW");
+  assert.deepEqual(history.getLines(), ["statusNEW"]);
+});
+
+test("growing the viewport resets the scroll margins", () => {
+  const history = createTerminalOutputHistoryPreview();
+  history.setViewportRows(24);
+  history.append("\x1b[1;24r");
+  history.setViewportRows(40);
+  // xterm resets the scroll region on resize, so a relative move past row 24
+  // reaches row 25 instead of stopping at the stale bottom margin.
+  history.append("\x1b[24;1Hrow24\x1b[1Brow25");
+  assert.deepEqual(history.getLines(), ["row24", "     row25"]);
+});
+
+test("clear resets retained scroll margins between terminal boots", () => {
+  const history = createTerminalOutputHistoryPreview();
+  history.setViewportRows(24);
+  history.append("\x1b[1;20robsolete");
+  history.clear();
+  // The fresh xterm instance has a full-viewport region; the new session must
+  // not inherit the previous boot's bottom margin.
+  history.setViewportRows(24);
+  history.append("\x1b[20;1Hrow20\x1b[1Brow21");
+  assert.deepEqual(history.getLines(), ["row20", "     row21"]);
+});
+
+test("narrowing the viewport clamps the tracked cursor column", () => {
+  const history = createTerminalOutputHistoryPreview();
+  history.setViewportRows(24);
+  history.setViewportCols(80);
+  history.append("\x1b[1;80H");
+  history.setViewportCols(10);
+  // xterm clamps the cursor to the new last column; the next printable span
+  // must be written there, not padded out to the old column 80.
+  history.append("X");
+  assert.deepEqual(history.getLines(), [" ".repeat(9) + "X"]);
+});
