@@ -62,7 +62,7 @@ type SupersededControlResult = {
   supersededBy?: "pause" | "resume" | "cancel";
 };
 
-function reconcileSupersededControls(
+export function reconcileSupersededControls(
   host: TransferControlHost,
   taskId: string,
   childIds: string[],
@@ -70,8 +70,9 @@ function reconcileSupersededControls(
   results: ReadonlyArray<SupersededControlResult | undefined>,
   epoch: number,
   requestedAction: "pause" | "resume",
+  controlTaskId = taskId,
 ): void {
-  if (!isTransferControlEpochCurrent(taskId, epoch)) return;
+  if (!isTransferControlEpochCurrent(controlTaskId, epoch)) return;
   const task = host.getTasks().find((candidate) => candidate.id === taskId);
   if (!task || ["completed", "cancelled", "failed"].includes(task.status)) return;
   const apply = (id: string, descendants: string[], action: "pause" | "resume" | "cancel") => {
@@ -535,24 +536,27 @@ export async function softResumeTransfer(
   if (results.some(wasSuperseded)) {
     reconcileSupersededControls(host, taskId, releaseIds, resumeIds, results, resumeEpoch, "resume");
   }
+  const successIds = resumeIds.filter((_, index) => results[index]?.success);
+  const effectiveRunning = results.some((result) => result?.success || (result?.superseded && result.supersededBy === "resume"));
+  const rejectedIndex = resumeIds.findIndex((id) => rejectedIds.has(id));
+  const rejectionReason = rejectedIndex >= 0 ? results[rejectedIndex]?.reason || "Resume request failed" : undefined;
   if (rejectedIds.size > 0) {
-    // An IPC rejection is not evidence that a paused stream is absent. Keep
-    // failed children and undispatched work held while the caller reports it.
-    latchTransferPauseTree(taskId, [...rejectedIds]);
-    for (const id of [taskId, ...rejectedIds]) {
+    // A partial resume stays visibly active; hold only failed children. Do not
+    // hide successfully running streams behind a paused root barrier.
+    const heldIds = effectiveRunning ? [...rejectedIds] : [taskId, ...rejectedIds];
+    for (const id of heldIds) {
+      latchTransferPauseTree(id, []);
       try { globalSftpTransferScheduler.pause(id); } catch { /* best-effort */ }
     }
-    const rejectedIndex = resumeIds.findIndex((id) => rejectedIds.has(id));
-    return { handled: false, reason: results[rejectedIndex]?.reason || "Resume request failed" };
+    if (!effectiveRunning) return { handled: false, reason: rejectionReason };
   }
-  if (results.some(wasSuperseded)) {
+  if (results.some(wasSuperseded) && rejectedIds.size === 0) {
     return { handled: true };
   }
-  const successIds = resumeIds.filter((_, index) => results[index]?.success);
   const walkAlive = isTransferWalkInFlight(taskId);
   // Directory walk can continue after unlatch without bridge resume on every child.
   // Single-file must not claim success when every bridge resume fails (stuck bar).
-  if (successIds.length === 0) {
+  if (!effectiveRunning) {
     if (task.isDirectory && walkAlive) {
       host.setTasks(paintTreeStatus(
         host.getTasks(),
@@ -595,6 +599,12 @@ export async function softResumeTransfer(
       return candidate;
     }
 
+    if (rejectedIds.has(candidate.id)) {
+      return { ...candidate, status: "paused" as const, speed: 0, error: rejectionReason };
+    }
+    const candidateResult = results[resumeIds.indexOf(candidate.id)];
+    if (candidate.id !== taskId && candidateResult?.superseded) return candidate;
+
     // Parent: transferring. Prefer bridge epoch; never wipe to undefined or a
     // late pause fanout re-applies "paused" (acceptsLifecycle treats missing as any).
     if (candidate.id === taskId) {
@@ -606,7 +616,7 @@ export async function softResumeTransfer(
       return {
         ...candidate,
         status: "transferring" as const,
-        error: undefined,
+        error: rejectionReason,
         reconnectRequired: false,
         pauseUnavailableReason: undefined,
         phase: undefined,

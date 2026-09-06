@@ -404,3 +404,68 @@ for (const newerPause of [false, true]) {
     if (newerPause) assert.equal(isTransferPauseLatched(id), true);
   });
 }
+
+for (const newerResume of [false, true]) {
+  test(`partial folder resume rejection reports running and paused children unless superseded: ${newerResume}`, async (t) => {
+    t.after(resetTransferPauseLatchesForTests);
+    const id = `partial-reject-${newerResume}`;
+    const successfulId = `${id}-one`;
+    let rejectResume!: (error: Error) => void;
+    let successfulBackendPaused = true;
+    let round = 0;
+    let rollbackCalls = 0;
+    const { host, getTasks } = createHost([
+      { ...makeTask(id, "paused"), isDirectory: true },
+      { ...makeTask(successfulId, "paused"), parentTaskId: id },
+      { ...makeTask(`${id}-two`, "paused"), parentTaskId: id },
+    ], () => ({
+      resumeTransfer: async childId => {
+        if (childId === successfulId) { successfulBackendPaused = false; return { success: true }; }
+        if (round > 0) return { success: true };
+        return new Promise((_, reject) => { rejectResume = reject; });
+      },
+      pauseTransfer: async childId => {
+        rollbackCalls++;
+        if (childId === successfulId) successfulBackendPaused = true;
+        return { success: true };
+      },
+    }));
+    const running = softResumeTransfer(host, id);
+    if (newerResume) { round++; await softResumeTransfer(host, id); }
+    rejectResume(new Error("second child IPC rejected"));
+    const result = await running;
+    assert.equal(result.handled, true);
+    assert.equal(successfulBackendPaused, false, "successful child keeps running after partial resume");
+    assert.equal(rollbackCalls, 0, "partial reporting must not introduce compensating controls");
+    assert.equal(getTasks()[0].status, "transferring", "root must report the successful child still running");
+    assert.equal(isTransferPauseLatched(id), false);
+    const rejected = getTasks().find(task => task.id === `${id}-two`);
+    assert.equal(rejected?.status, newerResume ? "transferring" : "paused");
+    assert.equal(isTransferPauseLatched(`${id}-two`), !newerResume);
+    if (!newerResume) assert.match(rejected?.error || "", /second child IPC rejected/);
+  });
+}
+
+test("remote-resumed child remains visibly running when sibling resume rejects", async (t) => {
+  t.after(resetTransferPauseLatchesForTests);
+  const id = "remote-partial-reject";
+  const runningId = `${id}-one`;
+  const rejectedId = `${id}-two`;
+  const { host, getTasks } = createHost([
+    { ...makeTask(id, "paused"), isDirectory: true },
+    { ...makeTask(runningId, "paused"), parentTaskId: id },
+    { ...makeTask(rejectedId, "paused"), parentTaskId: id },
+  ], () => ({ resumeTransfer: async childId => {
+    if (childId === rejectedId) throw new Error("sibling resume rejected");
+    host.setTasks(getTasks().map(task => task.id === runningId ? { ...task, status: "transferring", lifecycleEpoch: 8 } : task));
+    return { success: false, superseded: true, supersededBy: "resume" };
+  } }));
+  assert.equal((await softResumeTransfer(host, id)).handled, true);
+  assert.equal(getTasks()[0].status, "transferring");
+  assert.equal(isTransferPauseLatched(id), false);
+  assert.equal(getTasks().find(task => task.id === runningId)?.status, "transferring");
+  assert.equal(getTasks().find(task => task.id === runningId)?.lifecycleEpoch, 8);
+  assert.equal(getTasks().find(task => task.id === rejectedId)?.status, "paused");
+  assert.equal(isTransferPauseLatched(rejectedId), true);
+  assert.match(getTasks().find(task => task.id === rejectedId)?.error || "", /sibling resume rejected/);
+});

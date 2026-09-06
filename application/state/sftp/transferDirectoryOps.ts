@@ -1,3 +1,4 @@
+import { reconcileSupersededControls } from "./globalSftpTransferControl";
 import { useCallback, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
 import type { Host, SftpFileEntry, SftpFilenameEncoding, TransferStatus, TransferTask } from "../../../domain/models";
 import {
@@ -427,8 +428,26 @@ export function useSftpDirectoryTransferOps({
                     )
                   ) {
                     const epochAtAttempt = getTransferControlEpoch(rootTaskId);
+                    const childEpochAtAttempt = getTransferControlEpoch(task.id);
                     try {
                       const result = await netcattyBridge.get()?.pauseTransfer?.(task.id);
+                      if (
+                        result?.superseded && result.supersededBy === "resume"
+                        && isTransferControlEpochCurrent(rootTaskId, epochAtAttempt)
+                        && getTransferControlEpoch(task.id) === childEpochAtAttempt
+                        && !isCancelledLocalOrGlobal(cancelledTasksRef, rootTaskId, task.id)
+                      ) {
+                        const rootAlreadyRunning = transfersRef.current.find((row) => row.id === rootTaskId)?.status === "transferring";
+                        reconcileSupersededControls({
+                          getTasks: () => transfersRef.current,
+                          setTasks: (next) => setTransfers(next),
+                          getBridge: () => netcattyBridge.get(),
+                        }, rootAlreadyRunning ? rootTaskId : task.id, rootAlreadyRunning ? [task.id] : [], [task.id], [result],
+                        epochAtAttempt, "pause", rootTaskId);
+                        if (rootAlreadyRunning) pausedTasksRef.current.delete(rootTaskId);
+                        pausedTasksRef.current.delete(task.id);
+                        break;
+                      }
                       // Compensate only if the newest decision still wants this file running.
                       // A new pause or cancellation also changes the epoch.
                       if (
