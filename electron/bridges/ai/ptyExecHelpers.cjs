@@ -219,8 +219,14 @@ function buildBashHistoryCleanup(marker) {
   // expansion before the Bash-only guard can run.
   // Keep the shared cleanup short enough for canonical PTY input buffers.
   // Expansion of the dispatcher avoids alias expansion of command names.
-  const entry = "__nc_h";
-  const dispatcher = "__nc_d";
+  // Temp names derive from the marker: a fixed name like __nc_h can collide
+  // with user state, and a readonly (or integer/nameref-attributed) user
+  // variable makes the assignment fail, leaving the marker-bearing history
+  // entry undeleted. Markers are unique per invocation, so the derived names
+  // cannot clash with anything the user already defined.
+  const suffix = String(marker || "").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 24) || "dflt";
+  const entry = `__nc_h_${suffix}`;
+  const dispatcher = `__nc_d_${suffix}`;
   return `[ "\${BASH_VERSION-}" ]&&{ for ${dispatcher} in command builtin;do ${entry}=$($${dispatcher} history 1);case "$${entry}" in *${marker}*) ${entry}=\${${entry}#"\${${entry}%%[^[:space:]]*}"};$${dispatcher} history -d "\${${entry}%%[[:space:]]*}";;esac;done; } 2>/dev/null`;
 }
 

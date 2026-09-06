@@ -1295,7 +1295,7 @@ test("execViaChannel cancellation never exposes an incomplete UTF-8 character", 
   assert.equal(result.error, "Cancelled");
 });
 
-for (const customization of [":", "HISTCONTROL=ignorespace", "alias history='history 10'", 'history() { builtin history "$@" | cat; }', "history() { :; }", "alias command=':'", "command() { :; }"]) {
+for (const customization of [":", "HISTCONTROL=ignorespace", "alias history='history 10'", 'history() { builtin history "$@" | cat; }', "history() { :; }", "alias command=':'", "command() { :; }", "readonly __nc_h=USER", "readonly __nc_d=USER"]) {
   test(`posix wrapper bypasses history customization: ${customization}`, () => {
     const marker = "__NCMCP_CUSTOM_HISTORY__";
     const wrapped = buildWrappedCommand("echo HISTORY_PROBE", "posix", marker);
