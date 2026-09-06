@@ -1140,6 +1140,12 @@ export function useAIState() {
     ) {
       return false;
     }
+    // The authoritative updater's rejection must reach the caller: if the
+    // budget check inside the updater fails (e.g. a completed upload pushed
+    // the draft over the cap after the snapshot pre-check above), returning
+    // `true` here would suppress the caller's budget warning while nothing
+    // was refreshed.
+    let refreshed = false;
     updateDraftIfPresent(scopeKey, (draft) => {
       const existingDuplicate = draft.attachments.find(
         (attachment) => (
@@ -1155,6 +1161,7 @@ export function useAIState() {
       ) {
         return draft;
       }
+      refreshed = true;
       return {
         ...draft,
         attachments: draft.attachments.map((attachment) => (
@@ -1164,7 +1171,7 @@ export function useAIState() {
         )),
       };
     });
-    return true;
+    return refreshed;
   }, [addDraftAttachment, ensureDraftForScope, updateDraftIfPresent]);
 
   const cleanupOrphanedSessions = useCallback((activeTargetIds: Set<string>) => {
