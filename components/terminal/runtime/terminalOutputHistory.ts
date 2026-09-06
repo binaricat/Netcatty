@@ -310,15 +310,34 @@ const buildPreviewRows = (
   term?: WidthTerm | null,
 ): HistoryPreviewRow[] => {
   const rows: HistoryPreviewRow[] = [];
-  for (let index = 0; index < lines.length; index += 1) {
-    const wrapped = wrapOutputHistoryLineToRows(lines[index], cols, term);
-    // A line committed by an automatic wrap is itself the continuation row of
-    // the previous one; its first preview row keeps the wrapped join.
-    const startsWrapped = lineStartsWrapped[index] ?? false;
+  // A line committed by an automatic wrap is itself the continuation row of
+  // the previous one, so rejoin each soft-wrapped run before re-wrapping:
+  // reflowing the segments independently would keep them on separate rows at
+  // a widened preview, unlike xterm's single row after its resize reflow.
+  let pending = "";
+  let pendingStartsWrapped = false;
+  const flush = () => {
+    const wrapped = wrapOutputHistoryLineToRows(pending, cols, term);
     for (let row = 0; row < wrapped.length; row += 1) {
-      rows.push({ isWrapped: row > 0 || startsWrapped, text: wrapped[row] });
+      // The run's first row keeps the join to the (possibly trimmed)
+      // predecessor; the re-wrapped rows continue it.
+      rows.push({
+        isWrapped: row > 0 || (row === 0 && pendingStartsWrapped),
+        text: wrapped[row],
+      });
+    }
+  };
+  for (let index = 0; index < lines.length; index += 1) {
+    const startsWrapped = lineStartsWrapped[index] ?? false;
+    if (startsWrapped && pending) {
+      pending += lines[index];
+    } else {
+      if (pending) flush();
+      pending = lines[index];
+      pendingStartsWrapped = startsWrapped;
     }
   }
+  if (pending) flush();
   return rows;
 };
 
@@ -929,9 +948,16 @@ export const createTerminalOutputHistoryPreview = (options?: {
             maxChars - 1,
             viewportCols > 0 ? viewportCols - 1 : 1_000_000,
           );
+          // A deferred autowrap (or a DECAWM-off overwrite) parks the tracked
+          // cursor one cell past the last column; xterm applies relative moves
+          // from the last column it displays, so normalize the sentinel before
+          // moving. The move also cancels the pending wrap, as in xterm.
+          const baseCell = viewportCols > 0 && cursorCell >= viewportCols
+            ? viewportCols - 1
+            : cursorCell;
           const targetCell = Math.max(
             0,
-            Math.min(maxCell, command === "C" ? cursorCell + move : cursorCell - move),
+            Math.min(maxCell, command === "C" ? baseCell + move : baseCell - move),
           );
           cursor = targetCell === 0 ? 0
             : isAsciiOnly(current) ? targetCell

@@ -174,6 +174,44 @@ test("preview rows flag lines committed by automatic wraps as soft-wrapped", () 
   );
 });
 
+test("preview reflows adjacent soft-wrapped lines together when widened", () => {
+  const history = createTerminalOutputHistoryPreview();
+  history.setViewportRows(24);
+  history.setViewportCols(5);
+  // Captured at five columns, the transcript holds two wrap segments; a
+  // ten-column preview must rejoin them into the single row xterm shows
+  // after its resize reflow.
+  history.append("abcdef\n");
+  assert.deepEqual(
+    history.getPreviewRows({ cols: 10, rows: 1, top: 0 }).rows.map((row) => row.text),
+    ["abcdef"],
+  );
+  // A narrower preview keeps splitting the rejoined run, flagging the
+  // continuation rows.
+  assert.deepEqual(
+    history.getPreviewRows({ cols: 3, rows: 2, top: 0 }).rows.map((row) => row.text),
+    ["abc", "def"],
+  );
+  assert.deepEqual(
+    history.getPreviewRows({ cols: 3, rows: 2, top: 0 }).rows.map((row) => row.isWrapped),
+    [false, true],
+  );
+});
+
+test("CUB moves from the displayed last column while a wrap is deferred", () => {
+  const history = createTerminalOutputHistoryPreview();
+  history.setViewportRows(24);
+  history.setViewportCols(5);
+  // "abcde" fills the row and defers the wrap; xterm displays the cursor on
+  // the last column, so CUB 1 targets it minus one and X overwrites "e".
+  history.append("abcde\x1b[DX");
+  assert.deepEqual([...history.getLines()], ["abcXe"]);
+  history.clear();
+  // CUF from the same deferred state still clamps to the last column.
+  history.append("abcde\x1b[CX");
+  assert.deepEqual([...history.getLines()], ["abcdX"]);
+});
+
 test("preview windows clamp to the retained rows and pad short output", () => {
   const history = createTerminalOutputHistoryPreview();
   history.append("one\ntwo\n");
