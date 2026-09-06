@@ -213,6 +213,11 @@ function buildBashHistoryCleanup(marker) {
   // Each attempt re-reads the latest entry:
   // a history function can display it but delete only in a subshell. The
   // fallback chain handles a function shadowing a single dispatcher. The
+  // loop stops as soon as a follow-up read after `history -d` confirms the
+  // marker is gone, so a slow shadowed fallback (e.g. builtin() { sleep 60; })
+  // is not invoked after the real dispatcher already deleted the entry. When
+  // deletion is unconfirmed (a shadowed dispatcher displayed the entry but
+  // deleted nothing), the next dispatcher still gets its turn. The
   // unset-safe guard leaves non-Bash shells alone, including shells with
   // nounset enabled.
   // Use ^ for the Bash bracket negation: ! triggers interactive zsh history
@@ -227,7 +232,7 @@ function buildBashHistoryCleanup(marker) {
   const suffix = String(marker || "").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 24) || "dflt";
   const entry = `__nc_h_${suffix}`;
   const dispatcher = `__nc_d_${suffix}`;
-  return `[ "\${BASH_VERSION-}" ]&&{ for ${dispatcher} in command builtin;do ${entry}=$($${dispatcher} history 1);case "$${entry}" in *${marker}*) ${entry}=\${${entry}#"\${${entry}%%[^[:space:]]*}"};$${dispatcher} history -d "\${${entry}%%[[:space:]]*}";;esac;done; } 2>/dev/null`;
+  return `[ "\${BASH_VERSION-}" ]&&{ for ${dispatcher} in command builtin;do ${entry}=$($${dispatcher} history 1);case "$${entry}" in *${marker}*) ${entry}=\${${entry}#"\${${entry}%%[^[:space:]]*}"};$${dispatcher} history -d "\${${entry}%%[[:space:]]*}";${entry}=$($${dispatcher} history 1);case "$${entry}" in *${marker}*) :;;*) break;;esac;;esac;done; } 2>/dev/null`;
 }
 
 function buildPosixWrapperBody(command, marker, startFormat) {
