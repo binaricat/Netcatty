@@ -519,13 +519,13 @@ export async function softResumeTransfer(
   try { bridge = host.getBridge(); } catch { bridge = undefined; }
 
   const resumeIds = treeIds.length > 0 ? treeIds : [taskId];
-  const rejectedIds = new Set<string>();
+  const failedIds = new Set<string>();
   const results = await Promise.all(resumeIds.map(async (id) => {
     try {
       return await bridge?.resumeTransfer?.(id) ?? { success: false, reason: "Resume unavailable" };
     } catch (error) {
       // Rejections must pass the same stale-control check as ordinary failures.
-      rejectedIds.add(id);
+      failedIds.add(id);
       return { success: false, reason: error instanceof Error && error.message ? error.message : "Resume request failed" };
     }
   }));
@@ -533,24 +533,30 @@ export async function softResumeTransfer(
   if (!isTransferControlEpochCurrent(taskId, resumeEpoch)) return { handled: true };
   if (!after || ["completed", "cancelled", "failed"].includes(after.status)) return { handled: true };
 
+  results.forEach((result, index) => {
+    // A missing stream can belong to queued directory work. Verification and
+    // other explicit failures still own a paused stream and must remain held.
+    const benignMiss = /^(?:Transfer is no longer active|not active|Resume unavailable)$/i.test(result.reason || "");
+    if (!result.success && !result.superseded && !benignMiss) failedIds.add(resumeIds[index]);
+  });
   if (results.some(wasSuperseded)) {
     reconcileSupersededControls(host, taskId, releaseIds, resumeIds, results, resumeEpoch, "resume");
   }
   const successIds = resumeIds.filter((_, index) => results[index]?.success);
   const effectiveRunning = results.some((result) => result?.success || (result?.superseded && result.supersededBy === "resume"));
-  const rejectedIndex = resumeIds.findIndex((id) => rejectedIds.has(id));
-  const rejectionReason = rejectedIndex >= 0 ? results[rejectedIndex]?.reason || "Resume request failed" : undefined;
-  if (rejectedIds.size > 0) {
+  const failedIndex = resumeIds.findIndex((id) => failedIds.has(id));
+  const failureReason = failedIndex >= 0 ? results[failedIndex]?.reason || "Resume request failed" : undefined;
+  if (failedIds.size > 0) {
     // A partial resume stays visibly active; hold only failed children. Do not
     // hide successfully running streams behind a paused root barrier.
-    const heldIds = effectiveRunning ? [...rejectedIds] : [taskId, ...rejectedIds];
+    const heldIds = effectiveRunning ? [...failedIds] : [taskId, ...failedIds];
     for (const id of heldIds) {
       latchTransferPauseTree(id, []);
       try { globalSftpTransferScheduler.pause(id); } catch { /* best-effort */ }
     }
-    if (!effectiveRunning) return { handled: false, reason: rejectionReason };
+    if (!effectiveRunning) return { handled: false, reason: failureReason };
   }
-  if (results.some(wasSuperseded) && rejectedIds.size === 0) {
+  if (results.some(wasSuperseded) && failedIds.size === 0) {
     return { handled: true };
   }
   const walkAlive = isTransferWalkInFlight(taskId);
@@ -599,8 +605,8 @@ export async function softResumeTransfer(
       return candidate;
     }
 
-    if (rejectedIds.has(candidate.id)) {
-      return { ...candidate, status: "paused" as const, speed: 0, error: rejectionReason };
+    if (failedIds.has(candidate.id)) {
+      return { ...candidate, status: "paused" as const, speed: 0, error: failureReason };
     }
     const candidateResult = results[resumeIds.indexOf(candidate.id)];
     if (candidate.id !== taskId && candidateResult?.superseded) return candidate;
@@ -616,7 +622,7 @@ export async function softResumeTransfer(
       return {
         ...candidate,
         status: "transferring" as const,
-        error: rejectionReason,
+        error: failureReason,
         reconnectRequired: false,
         pauseUnavailableReason: undefined,
         phase: undefined,

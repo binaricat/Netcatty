@@ -446,7 +446,8 @@ for (const newerResume of [false, true]) {
   });
 }
 
-test("remote-resumed child remains visibly running when sibling resume rejects", async (t) => {
+for (const resolvedFailure of [false, true]) {
+test(`remote-resumed child remains visibly running when sibling resume fails: resolved=${resolvedFailure}`, async (t) => {
   t.after(resetTransferPauseLatchesForTests);
   const id = "remote-partial-reject";
   const runningId = `${id}-one`;
@@ -456,7 +457,10 @@ test("remote-resumed child remains visibly running when sibling resume rejects",
     { ...makeTask(runningId, "paused"), parentTaskId: id },
     { ...makeTask(rejectedId, "paused"), parentTaskId: id },
   ], () => ({ resumeTransfer: async childId => {
-    if (childId === rejectedId) throw new Error("sibling resume rejected");
+    if (childId === rejectedId) {
+      if (resolvedFailure) return { success: false, reason: "sibling resume rejected" };
+      throw new Error("sibling resume rejected");
+    }
     host.setTasks(getTasks().map(task => task.id === runningId ? { ...task, status: "transferring", lifecycleEpoch: 8 } : task));
     return { success: false, superseded: true, supersededBy: "resume" };
   } }));
@@ -469,3 +473,30 @@ test("remote-resumed child remains visibly running when sibling resume rejects",
   assert.equal(isTransferPauseLatched(rejectedId), true);
   assert.match(getTasks().find(task => task.id === rejectedId)?.error || "", /sibling resume rejected/);
 });
+
+}
+
+for (const newerResume of [false, true]) {
+  test(`resolved verification failure holds live folder unless newer resume won: ${newerResume}`, async (t) => {
+    t.after(resetTransferPauseLatchesForTests);
+    t.after(resetTransferWalkRegistryForTests);
+    const id = `resolved-verification-${newerResume}`;
+    registerTransferWalk(id);
+    let finish!: (value: { success: boolean; reason: string }) => void;
+    let calls = 0;
+    const { host, getTasks } = createHost([
+      { ...makeTask(id, "paused"), isDirectory: true },
+      { ...makeTask(`${id}-child`, "paused"), parentTaskId: id },
+    ], () => ({ resumeTransfer: () => ++calls === 1
+      ? new Promise(resolve => { finish = resolve; }) : Promise.resolve({ success: true }) }));
+    const running = softResumeTransfer(host, id);
+    if (newerResume) await softResumeTransfer(host, id);
+    finish({ success: false, reason: "Could not verify the source file for resume" });
+    const result = await running;
+    assert.equal(result.handled, newerResume);
+    if (!newerResume) assert.match(result.reason || "", /verify the source file/);
+    assert.equal(getTasks()[0].status, newerResume ? "transferring" : "paused");
+    assert.equal(isTransferPauseLatched(id), !newerResume);
+    assert.equal(isTransferPauseLatched(`${id}-child`), !newerResume);
+  });
+}
