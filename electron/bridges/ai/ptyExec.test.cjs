@@ -26,7 +26,7 @@ const {
 class ShellBackedPty extends EventEmitter {
   write(data) {
     if (data === "\x03") return;
-    const script = String(data).replace(/^\x15\x0b/, "");
+    const script = String(data).replace(/^\x0b\x15/, "");
     const result = spawnSync("sh", ["-c", script], { encoding: "utf8" });
     queueMicrotask(() => {
       this.emit("data", Buffer.from(result.stdout));
@@ -365,8 +365,8 @@ test("loginShellHint selects fish/posix/powershell/cmd without pinning confirmed
 });
 
 test("pending-input clear prefix covers interactive shells and skips raw devices", () => {
-  assert.equal(buildPendingInputClearPrefix("posix"), "\x15\x0b");
-  assert.equal(buildPendingInputClearPrefix("fish"), "\x15\x0b");
+  assert.equal(buildPendingInputClearPrefix("posix"), "\x0b\x15");
+  assert.equal(buildPendingInputClearPrefix("fish"), "\x0b\x15");
   assert.equal(buildPendingInputClearPrefix("powershell"), "\x1bggd2147483647d\x1br\x1b\x1bi\x08");
   assert.equal(buildPendingInputClearPrefix("cmd"), "\x1b");
   assert.equal(buildPendingInputClearPrefix("raw"), "");
@@ -849,7 +849,7 @@ test("startPtyJob keeps the clear prefix for non-PowerShell sessions", async () 
     expectedPrompt: "$ ",
   });
   assert.equal(writes.length, 1);
-  assert.ok(writes[0].startsWith("\x15\x0b"));
+  assert.ok(writes[0].startsWith("\x0b\x15"));
   assert.match(writes[0], /__NCMCP_/);
   job.cancel();
   pty.emit("data", Buffer.from("$ "));

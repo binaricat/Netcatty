@@ -194,7 +194,9 @@ function buildPendingInputClearPrefix(shellKind) {
       // i+Backspace leaves every mode on an empty editable line.
       return "\x1bggd2147483647d\x1br\x1b\x1bi\x08";
     default:
-      return "\x15\x0b";
+      // Kill the suffix before the prefix. Canonical/no-editing terminals do
+      // not bind Ctrl+K; the trailing Ctrl+U must erase that literal byte too.
+      return "\x0b\x15";
   }
 }
 

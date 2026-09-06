@@ -40,7 +40,7 @@ test('probe wrapper keeps the start marker separate when terminal echo is disabl
     if (data === '\x03') return;
     pendingInput += String(data);
     if (!pendingInput.endsWith('\n')) return;
-    const script = pendingInput.replace(/^\x15\x0b/, '');
+    const script = pendingInput.replace(/^\x0b\x15/, '');
     pendingInput = '';
     const result = spawnSync('/bin/sh', ['-c', script], { encoding: 'utf8' });
     queueMicrotask(() => pty.emit('data', `${job.marker}_QPROMPT> ${result.stdout}`));
@@ -166,6 +166,41 @@ test('real PTY: echo-disabled bash completes output without a trailing newline',
     pty.kill();
   }
 });
+
+for (const editing of [true, false]) {
+  test(`real PTY: pending input clearing leaves no control command (editing=${editing})`, {
+    skip: process.env.NETCATTY_LIVE_FISH_TEST !== '1', timeout: 5000,
+  }, async () => {
+    const pty = require('node-pty').spawn('/bin/bash', ['--noprofile', '--norc', ...(editing ? [] : ['--noediting'])], {
+      name: 'dumb', cols: 240, rows: 24,
+      env: { ...process.env, TERM: 'dumb', PS1: 'CLEAR_READY> ', HISTFILE: '/dev/null', BASH_SILENCE_DEPRECATION_WARNING: '1' },
+    });
+    let output = '';
+    pty.onData(data => { output += data; });
+    try {
+      const waitForPrompt = async () => {
+        const deadline = Date.now() + 3000;
+        while (!output.includes('CLEAR_READY>')) {
+          if (Date.now() > deadline) throw new Error(`Missing prompt: ${output}`);
+          await new Promise(resolve => setTimeout(resolve, 10));
+        }
+      };
+      await waitForPrompt();
+      output = '';
+      // Leave text on both sides of the readline cursor. Without editing, all
+      // bytes remain pending canonical input and must still be discarded.
+      pty.write('left-right\x1b[5D');
+      await new Promise(resolve => setTimeout(resolve, 50));
+      const { buildPendingInputClearPrefix } = require('./ptyExecHelpers.cjs');
+      pty.write(buildPendingInputClearPrefix('posix') + "printf 'CLEAR_SUCCESS\\n'\n");
+      await waitForPrompt();
+      assert.match(output, /CLEAR_SUCCESS\r\n/);
+      assert.doesNotMatch(output, /command not found|syntax error/);
+    } finally {
+      pty.kill();
+    }
+  });
+}
 
 test('real PTY: canonical bash executes a long literal command without truncation', {
   skip: process.env.NETCATTY_LIVE_FISH_TEST !== '1', timeout: 15000,
