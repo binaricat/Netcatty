@@ -232,10 +232,15 @@ function buildBashHistoryCleanup(marker) {
   // variables are unset afterwards: the verification read still assigns the
   // next history entry to __nc_h_*, which could otherwise keep a recent
   // (possibly secret-bearing) command recoverable even after history -c.
+  // Unset through the same dispatcher loop as history: a user alias or
+  // function named unset would otherwise shadow the plain call and leave
+  // the verification-read history entry (possibly secret-bearing) in the
+  // scratch variable. Unsetting the loop variable mid-loop is safe: bash
+  // reassigns it from the already-expanded word list on each iteration.
   const suffix = String(marker || "").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 24) || "dflt";
   const entry = `__nc_h_${suffix}`;
   const dispatcher = `__nc_d_${suffix}`;
-  return `[ "\${BASH_VERSION-}" ]&&{ for ${dispatcher} in command builtin;do ${entry}=$($${dispatcher} history 1);case "$${entry}" in *${marker}*) ${entry}=\${${entry}#"\${${entry}%%[^[:space:]]*}"};$${dispatcher} history -d "\${${entry}%%[[:space:]]*}";${entry}=$($${dispatcher} history 1);case "$${entry}" in *${marker}*) :;;*) break;;esac;;esac;done;unset ${entry} ${dispatcher}; } 2>/dev/null`;
+  return `[ "\${BASH_VERSION-}" ]&&{ for ${dispatcher} in command builtin;do ${entry}=$($${dispatcher} history 1);case "$${entry}" in *${marker}*) ${entry}=\${${entry}#"\${${entry}%%[^[:space:]]*}"};$${dispatcher} history -d "\${${entry}%%[[:space:]]*}";${entry}=$($${dispatcher} history 1);case "$${entry}" in *${marker}*) :;;*) break;;esac;;esac;done;for ${dispatcher} in command builtin;do $${dispatcher} unset ${entry} ${dispatcher};done; } 2>/dev/null`;
 }
 
 function buildPosixWrapperBody(command, marker, startFormat) {
