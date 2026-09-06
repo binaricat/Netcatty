@@ -3100,9 +3100,16 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         // holds the marker row's cell offset: the new wrap width can split
         // the old row's text across two rows, so per-row matching would
         // either miss the anchor or latch onto unrelated repeated output.
-        const remappedMarkerAnchor = (() => {
+        // Returns null when no surviving row holds the marker's text: the
+        // marker's row can also be disposed by a scrollback trim (a fit that
+        // simultaneously widens columns and shrinks rows trims the top of a
+        // full buffer before reflowing), and remapping that disposal to the
+        // stale pre-resize index would scroll the restore to unrelated
+        // surviving content — the nearest remaining row there is the top of
+        // the buffer.
+        const remappedMarkerAnchor: number | null = (() => {
           if (!reflowsWider || preResizeMarkerLine <= 0 || !preResizeMarkerInfo) {
-            return preResizeMarkerLine;
+            return null;
           }
           const buffer = term.buffer.active;
           // The surviving head of the marker's logical line can sit
@@ -3133,7 +3140,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
               return y;
             }
           }
-          return preResizeMarkerLine;
+          return null;
         })();
 
         // Preserve scroll position across resize (superset/Tabby pattern).
@@ -3176,7 +3183,8 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         if (
           retainedTracker &&
           retainedTracker.term === term &&
-          retainedTracker.buffer === restoreBuffer
+          retainedTracker.buffer === restoreBuffer &&
+          !retainedTracker.moved
         ) {
           tracker = retainedTracker;
           tracker.lastScrollY = term.buffer.active.viewportY;
@@ -3189,12 +3197,17 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           // above it collapse, and re-pin a fresh marker there — a disposed
           // marker reports -1 and can no longer follow trims, leaving the
           // onScroll handler unable to tell a scrollback trim from a
-          // one-row user scroll. A narrower reflow can genuinely trim the
-          // marker's row out of the scrollback, where -1 stays accurate and
-          // no surviving row exists to re-pin to.
+          // one-row user scroll. Only re-pin when the remap actually finds
+          // the marker's text in a surviving row, though: a fit that also
+          // trims the top of a full buffer disposes the marker without any
+          // surviving copy, where re-pinning to the stale pre-resize index
+          // would anchor the restore on unrelated surviving content — fall
+          // back to -1 there (and for narrower reflows, which can genuinely
+          // trim the marker's row out of the scrollback), so the restore
+          // clamps to the top of the buffer, the nearest remaining row.
           if (tracker.marker.line >= 0) {
             tracker.lastMarkerLine = tracker.marker.line;
-          } else if (reflowsWider) {
+          } else if (reflowsWider && remappedMarkerAnchor !== null) {
             tracker.marker.dispose();
             tracker.marker = registerSavedRowMarker(
               term,
@@ -3205,6 +3218,15 @@ const TerminalComponent: React.FC<TerminalProps> = ({
             tracker.lastMarkerLine = -1;
           }
         } else {
+          // Two cases land here besides a buffer switch: a retained tracker
+          // bound to a different buffer, and a retained tracker the user has
+          // already scrolled away from (moved). The moved case must replace
+          // the retained restore, not just refresh its baseline: that
+          // restore exits at completion because of `moved`, and this fit's
+          // own restore is coalesced into it (dropped), so without a
+          // replacement nothing would restore the viewport the user scrolled
+          // to across this second reflow. Replacing re-anchors the restore at
+          // the user's current viewport with a clean tracker.
           if (retainedTracker && retainedTracker.term === term) {
             retainedTracker.scrollListener?.dispose();
             retainedTracker.marker.dispose();
