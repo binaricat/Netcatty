@@ -36,6 +36,14 @@ export const DEFAULT_OUTPUT_HISTORY_MAX_CHARS = 200_000;
 /** xterm's default tab stop interval, used when expanding tabs for the preview. */
 const TERMINAL_TAB_STOP_COLUMNS = 8;
 
+// Bounded look-ahead windows keep long non-ASCII spans linear. The per-row
+// piece and the deferred-wrap grapheme probe below otherwise slice/measure
+// the whole unconsumed suffix once per viewport row they fill, making capture
+// quadratic (and synchronously blocking the renderer) for large CJK chunks.
+// The slack absorbs zero-width grapheme runs a row can also absorb; a
+// grapheme longer than a window just costs one bounded fallback.
+const WRAP_PROBE_UTF16_UNITS = 64;
+
 // 8-bit (C1) control string introducers: DCS, SOS, OSC, PM, APC. Their
 // payloads must be consumed with them, not left as transcript text.
 const isC1ControlStringIntroducer = (ch: string): boolean =>
@@ -408,6 +416,15 @@ export const createTerminalOutputHistoryPreview = (options?: {
     // ASCII-ness is monotone under slicing; decide once so the per-row cap
     // below stays linear for long spans.
     const spanIsAscii = isAsciiOnly(span);
+    // Cap each piece at about one row of cells (plus probe slack): the width
+    // measurement and column slicing below cost O(piece), so an uncapped
+    // piece would rescan the entire remaining span once per row it filled.
+    // Iterating over more, smaller pieces appends the same characters in the
+    // same order, so the transcript is unchanged. Without a viewport width
+    // the whole span is consumed in a single pass, so no cap is needed.
+    const pieceCap = viewportCols > 0
+      ? viewportCols * 2 + WRAP_PROBE_UTF16_UNITS
+      : Number.POSITIVE_INFINITY;
     while (offset < span.length) {
       // xterm defers the wrap until the next printable character arrives; a
       // cursor move or carriage return in between cancels it instead.
@@ -416,10 +433,22 @@ export const createTerminalOutputHistoryPreview = (options?: {
           // A zero-width grapheme (a combining mark that arrived in a later
           // display chunk) joins the final cell of the current row instead of
           // starting the next one; the wrap stays deferred behind it.
-          const rest = spanIsAscii ? "" : span.slice(offset);
-          const first = rest
+          const rest = spanIsAscii
+            ? ""
+            : span.slice(offset, offset + WRAP_PROBE_UTF16_UNITS);
+          let first = rest
             ? outputGraphemeSegmenter.segment(rest)[Symbol.iterator]().next().value?.segment
             : undefined;
+          if (
+            first !== undefined
+            && rest.length === WRAP_PROBE_UTF16_UNITS
+            && first.length === rest.length
+          ) {
+            // The first grapheme fills the probe window and may continue past
+            // it; only then pay for slicing the full remaining suffix.
+            first = outputGraphemeSegmenter
+              .segment(span.slice(offset))[Symbol.iterator]().next().value?.segment;
+          }
           if (
             first !== undefined
             && stringCellWidth(first) === 0
@@ -451,7 +480,26 @@ export const createTerminalOutputHistoryPreview = (options?: {
         // same gap a second time.
         currentCellWidth = Math.max(width, cursorCell);
       }
-      const piece = span.slice(offset, offset + (maxChars - current.length));
+      // The maxChars budget still wins when it is smaller (that slice keeps
+      // the established behavior). Otherwise cut the piece at a grapheme
+      // boundary: slicing mid-grapheme would regroup combining marks / ZWJ
+      // clusters and corrupt the transcript, while a boundary-aligned cut
+      // keeps every piece's segmentation identical to the span's.
+      let pieceEnd = offset + (maxChars - current.length);
+      if (pieceEnd - offset > pieceCap) {
+        const window = span.slice(offset, offset + pieceCap + WRAP_PROBE_UTF16_UNITS);
+        let cutLength = 0;
+        let end = window.length;
+        for (const { segment } of outputGraphemeSegmenter.segment(window)) {
+          if (cutLength + segment.length > pieceCap) {
+            end = cutLength;
+            break;
+          }
+          cutLength += segment.length;
+        }
+        pieceEnd = offset + end;
+      }
+      const piece = span.slice(offset, pieceEnd);
       if (!piece) return;
       let fitting = piece;
       let fittingWidth: number | undefined;
