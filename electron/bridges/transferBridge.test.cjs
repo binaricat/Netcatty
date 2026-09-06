@@ -1885,6 +1885,8 @@ test("resuming while a fast pause is pending settles the pause request", async (
   assert.deepEqual(await pausing, {
     success: false,
     reason: "Pause was superseded by resume",
+    superseded: true,
+    supersededBy: "resume",
   });
 
   finishWrite();
