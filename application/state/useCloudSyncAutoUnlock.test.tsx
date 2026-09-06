@@ -57,6 +57,11 @@ test('completed auto-unlock does not undo a later deliberate lock', async () => 
     await runWithAct(async () => { onAvailable?.(); });
     await flushEffects();
     assert.equal(calls, 1, 'a peer password event after deliberate lock must not reopen this vault');
+    await renderer.render(null);
+    await renderer.render(React.createElement(Harness, { state: 'LOCKED' }));
+    await runWithAct(async () => { onAvailable?.(); });
+    await flushEffects();
+    assert.equal(calls, 1, 'a remounted consumer must retain the manager deliberate lock');
     await renderer.render(React.createElement(Harness, { state: 'LOCKED', identity: 'replacement-key' }));
     await flushEffects();
     assert.equal(calls, 2, 'a genuinely replaced key can still initialize automatically');

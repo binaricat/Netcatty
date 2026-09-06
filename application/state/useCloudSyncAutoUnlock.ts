@@ -9,6 +9,10 @@ interface AutoUnlockBridge {
   onCloudSyncSessionPasswordAvailable?(callback: () => void): () => void;
 }
 
+// A renderer can mount several consumers of the same manager. Remember the
+// unlocked key across consumer unmounts so reopening settings cannot undo a lock.
+const unlockedIdentityByManager = new WeakMap<AutoUnlockManager, string>();
+
 /** Retry a locked peer window when the setting window finishes sharing its key. */
 export function useCloudSyncAutoUnlock(input: {
   securityState: string;
@@ -19,7 +23,6 @@ export function useCloudSyncAutoUnlock(input: {
   const { securityState, masterKeyIdentity, manager, bridge } = input;
   const [passwordRevision, setPasswordRevision] = useState(0);
   const attemptedRef = useRef<string | null>(null);
-  const unlockedIdentityRef = useRef<string | null>(null);
 
   useEffect(() => bridge?.onCloudSyncSessionPasswordAvailable?.(() => {
     setPasswordRevision(value => value + 1);
@@ -29,14 +32,14 @@ export function useCloudSyncAutoUnlock(input: {
     if (!masterKeyIdentity) return;
     const attempt = JSON.stringify([masterKeyIdentity, passwordRevision]);
     if (securityState === 'UNLOCKED') {
-      unlockedIdentityRef.current = masterKeyIdentity;
+      unlockedIdentityByManager.set(manager, masterKeyIdentity);
       attemptedRef.current = attempt;
       return;
     }
     if (securityState !== 'LOCKED') return;
     // Once this key has been unlocked, a later lock is intentional. A peer
     // sharing its password must not undo it, regardless of notification order.
-    if (unlockedIdentityRef.current === masterKeyIdentity) return;
+    if (unlockedIdentityByManager.get(manager) === masterKeyIdentity) return;
     if (attemptedRef.current === attempt) return;
     attemptedRef.current = attempt;
     let cancelled = false;
