@@ -451,9 +451,14 @@ export async function softResumeTransfer(
   try { bridge = host.getBridge(); } catch { bridge = undefined; }
 
   const resumeIds = treeIds.length > 0 ? treeIds : [taskId];
-  const results = await Promise.all(resumeIds.map(async (id) =>
-    bridge?.resumeTransfer?.(id) ?? { success: false, reason: "Resume unavailable" },
-  ));
+  const results = await Promise.all(resumeIds.map(async (id) => {
+    try {
+      return await bridge?.resumeTransfer?.(id) ?? { success: false, reason: "Resume unavailable" };
+    } catch (error) {
+      // Rejections must pass the same stale-control check as ordinary failures.
+      return { success: false, reason: error instanceof Error ? error.message : "Resume unavailable" };
+    }
+  }));
   const after = host.getTasks().find((candidate) => candidate.id === taskId);
   if (!isTransferControlEpochCurrent(taskId, resumeEpoch)) return { handled: true };
   if (!after || ["completed", "cancelled", "failed"].includes(after.status)) return { handled: true };

@@ -48,7 +48,14 @@ Verification so far:
   from a 32 MiB saved checkpoint and pauses/resumes during the remaining download.
   All final SHA-256 digests match. Pause acknowledgements 6-15 ms, resume checks
   1391-1493 ms. These are fixture measurements, not WAN throughput claims.
-- Full suite, current diff review, and app interaction remain delivery gates.
+- Independent review found another held-run failure path: rejection or a dead
+  stream response followed by a newer pause during wind-down could start a fresh
+  resume. Two regressions reproduced it; shared rejection handling and epoch
+  checks after wind-down now pass (109 store/control tests).
+- First full suite: 11377 passed, 7 plugin archive failures traced to missing
+  worktree-local nested dependency (yauzl 3.x). Reinstalled with npm ci; all 29
+  plugin CLI tests then pass. Full rerun pending.
+- Production build passes. Current diff review and app interaction remain gates.
 
 ## Historical issue evidence fetched in this audit
 
@@ -56,7 +63,7 @@ Verification so far:
 | --- | --- | --- |
 | [3213](https://github.com/binaricat/Netcatty/issues/3213) | macOS, 10+ files of 100-200 MB; pause/resume and force-quit recovery unreliable | Control ordering reproduced separately; source direction and server still absent from report. Do not claim reporter confirmation. |
 | [3155](https://github.com/binaricat/Netcatty/issues/3155) | Windows, many-file transfer freezes; no count or logs | Recheck bounded discovery, scheduling, publication and history work. |
-| [2973](https://github.com/binaricat/Netcatty/issues/2973) | VPN uploads disconnect SSH and SFTP; transfer spinner continues; later inodes VPN report | Check transport loss and settlement. Network/security cause not established by the available logs. |
+| [2973](https://github.com/binaricat/Netcatty/issues/2973) | VPN uploads disconnect SSH and SFTP; transfer spinner continues; later inode VPN report | Check transport loss and settlement. Network/security cause not established by the available logs. |
 | [3186](https://github.com/binaricat/Netcatty/issues/3186) | Replacement changes permissions on 1.1.82 | Check mode/owner behavior on each replacement path; existing bot explanations are not proof. |
 | [3149](https://github.com/binaricat/Netcatty/issues/3149) | Windows proxy + terminal drag-upload reports No such file | Check target pinning, path encoding, session and retry behavior. |
 | [2832](https://github.com/binaricat/Netcatty/issues/2832) | Browsing works through VPN/jump host, transfers wait indefinitely, cancel works | Check dedicated connection admission/authentication/timeout. |
@@ -64,8 +71,8 @@ Verification so far:
 | [2638](https://github.com/binaricat/Netcatty/issues/2638) | Recovery after network failure | Verify restore end to end; UI availability alone is insufficient. |
 
 Issue state (open/closed) and automated comments do not substitute for runtime
-proof. Title search returned 98 SFTP issues; expand beyond titles for file
-transfer reports. Remaining relevant reports need their bodies/comments read.
+proof. Initial title search hit its 100-result cap. Expanded SFTP search returned
+308 issue matches, including reports without SFTP in the title. Remaining relevant reports need their bodies/comments read.
 
 ## External reference points
 
@@ -76,7 +83,18 @@ transfer reports. Remaining relevant reports need their bodies/comments read.
 - [WinSCP resume documentation](https://winscp.net/eng/docs/resume): partial-file
   discovery and temporary filenames support interruption recovery; temporary
   creation can be unavailable under some permission layouts.
-- Electerm transfer and queue source paths located; detailed comparison pending.
+- [Electerm transfer implementation](https://github.com/electerm/electerm/blob/master/src/app/server/transfer.js):
+  separates a per-transfer object from queue/UI state, opens a separate SFTP
+  channel on the existing SSH connection when available, and uses 32 KiB chunks
+  with 64 requests. Its live pause flag stops scheduling additional reads. Its
+  ordinary transfer opens the destination with `w`; it is not evidence for
+  durable checkpoint recovery. Retain Netcatty's staging and contiguous-offset
+  protections when simplifying ownership.
+- [Electerm action store](https://github.com/electerm/electerm/blob/master/src/client/components/file-transfer/transports-action-store.jsx)
+  counts pending initializations toward admission; its
+  [mutation queue](https://github.com/electerm/electerm/blob/master/src/client/components/file-transfer/transfer-queue.jsx)
+  distinguishes completion of a state update from completion of transfer I/O.
+  This supports keeping control requests independent of long-lived transfer runs.
 
 ## Remaining audit coverage
 

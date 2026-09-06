@@ -1671,7 +1671,7 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
           // Always clear process-global latches + control epoch so walks wake and
           // late soft-drain / pauseWatch cannot re-pause streams. Do not stamp
           // control epoch as task.lifecycleEpoch (bridge-aligned only).
-          bumpTransferControlEpoch(taskId);
+          let resumeEpoch = bumpTransferControlEpoch(taskId);
           releaseTransferPauseTree(taskId, childIds);
 
           if (task.ownerId === "dedicated-resume" && task.isDirectory) {
@@ -1693,17 +1693,20 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
               try { await bridge?.clearPendingTransferCancel?.(id); } catch { /* best-effort */ }
             }
             try { await bridge?.clearPendingTransferCancel?.(taskId); } catch { /* best-effort */ }
+            if (!isTransferControlEpochCurrent(taskId, resumeEpoch)) return existing;
             return resumeInvocations.get(taskId) ?? startFresh();
           }
 
           try {
             // Reuse the live control path: held dedicated transfers must obey
             // the same ordering and per-child lifecycle rules as panel jobs.
-            const soft = await softResumeTransfer({
+            const softOperation = softResumeTransfer({
               getTasks: () => tasks,
               setTasks: (next) => { tasks = next; emit(); },
               getBridge: defaultTransferControlBridge,
             }, taskId);
+            resumeEpoch = getTransferControlEpoch(taskId);
+            const soft = await softOperation;
             if (soft.handled) return existing;
             const streamGone = /no longer active|not active|not found|session is no longer|Resume unavailable|Transfer not found/i
               .test(soft.reason ?? "");
@@ -1721,18 +1724,22 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
           } catch {
             // Fall through to await + restart.
           }
+          if (!isTransferControlEpochCurrent(taskId, resumeEpoch)) return existing;
           try {
             await existing;
           } catch { /* previous aborted */ }
+          if (!isTransferControlEpochCurrent(taskId, resumeEpoch)) return existing;
           return resumeInvocations.get(taskId) ?? startFresh();
         }
 
         // After demotion to interrupted/attention/failed while work unwinds:
         // wait then re-invoke (do not rejoin a dying canceling promise).
         if (task && (task.status === "interrupted" || task.status === "attention" || task.status === "failed")) {
+          const resumeEpoch = getTransferControlEpoch(taskId);
           try {
             await existing;
           } catch { /* previous aborted */ }
+          if (getTransferControlEpoch(taskId) !== resumeEpoch) return existing;
           return resumeInvocations.get(taskId) ?? startFresh();
         }
         return existing;
