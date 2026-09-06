@@ -1005,8 +1005,9 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
       }
     }
     assertNotCancelled();
+    let publishedIdentity = null;
     try {
-      await publishLocalFileExclusive(readyPath, targetPath, assertNotCancelled);
+      publishedIdentity = await publishLocalFileExclusive(readyPath, targetPath, assertNotCancelled) ?? null;
     } catch (error) {
       if (error?.code === "EEXIST") {
         throw new Error("Local download target changed during replacement", { cause: error });
@@ -1017,7 +1018,9 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
     // Publication is the commit boundary. A late cancel must not perform a
     // check-then-unlink rollback against a name another process may now own.
     committed = true;
-    options.onCommit?.();
+    // Hand the published inode identity to the caller so later pathname-based
+    // metadata stamping can refuse to touch a concurrent replacement.
+    options.onCommit?.(publishedIdentity);
     if (backedUp) await fs.promises.unlink(backupPath).catch(() => {});
     await fs.promises.unlink(readyPath).catch(() => {});
     await fs.promises.unlink(stagedPath).catch(() => {});
@@ -1089,6 +1092,21 @@ async function preserveTransferredDestinationMtime(transfer, options = {}) {
       : 15_000;
 
     if (transfer.targetType === "local" && transfer.targetPath) {
+      // When the destination was published through the exclusive local
+      // promotion, only stamp the inode that publication committed. Another
+      // process may have replaced the pathname since; its file must keep its
+      // own timestamps (Codex P2 on the commit boundary).
+      if (transfer.publishedLocalIdentity) {
+        try {
+          const currentStat = await fs.promises.lstat(transfer.targetPath);
+          if (!currentStat.isFile() || stableLocalFileIdentity(currentStat) !== transfer.publishedLocalIdentity) {
+            return;
+          }
+        } catch {
+          // Destination vanished or became unstattable; nothing to stamp.
+          return;
+        }
+      }
       await awaitBestEffortBounded(
         fs.promises.utimes(transfer.targetPath, when, when),
         mtimeTimeoutMs,
@@ -5978,8 +5996,9 @@ async function startTransferNow(event, payload, onProgress) {
           assertNotCancelled() {
             if (transfer.cancelled) throw new Error("Transfer cancelled");
           },
-          onCommit() {
+          onCommit(publishedIdentity) {
             transfer.completionCommitted = true;
+            transfer.publishedLocalIdentity = publishedIdentity ?? null;
           },
         });
         transfer.stagedLocalPath = null;
@@ -6070,8 +6089,9 @@ async function startTransferNow(event, payload, onProgress) {
           assertNotCancelled() {
             if (transfer.cancelled) throw new Error("Transfer cancelled");
           },
-          onCommit() {
+          onCommit(publishedIdentity) {
             transfer.completionCommitted = true;
+            transfer.publishedLocalIdentity = publishedIdentity ?? null;
           },
         });
         transfer.stagedLocalPath = null;

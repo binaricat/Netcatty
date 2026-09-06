@@ -6,11 +6,15 @@ const fs = require("node:fs");
 // Hardlinks make complete bytes visible atomically. FAT-like filesystems use an
 // exclusively created handle instead: partial contents can be visible there,
 // but no pathname cleanup may remove a concurrent writer's replacement.
+// Resolves with the published inode identity ({ dev, ino, size }) so callers can
+// verify the destination before later pathname-based metadata stamping.
 async function publishLocalFileExclusive(source, target, assertNotCancelled = () => {}) {
   assertNotCancelled();
   try {
     await fs.promises.link(source, target);
-    return;
+    // The hardlink shares the published inode; stat either name.
+    const linkedStat = await fs.promises.lstat(source);
+    return { dev: linkedStat.dev, ino: linkedStat.ino, size: linkedStat.size };
   } catch (error) {
     if (!["ENOTSUP", "EOPNOTSUPP", "ENOSYS", "EPERM", "EACCES", "EXDEV"].includes(error?.code)) throw error;
   }
@@ -48,6 +52,7 @@ async function publishLocalFileExclusive(source, target, assertNotCancelled = ()
     if (!targetStat.isFile() || targetStat.dev !== ownedStat.dev || targetStat.ino !== ownedStat.ino) {
       throw new Error("Local download target changed during replacement");
     }
+    return { dev: ownedStat.dev, ino: ownedStat.ino, size: ownedStat.size };
   } catch (error) {
     failure = error;
   } finally {

@@ -12352,6 +12352,55 @@ test("preserveTransferredDestinationMtime stamps local targets from sourceSoftId
   assert.notEqual(Math.floor(after.mtimeMs / 1000), Math.floor(before.mtimeMs / 1000));
 });
 
+test("preserveTransferredDestinationMtime skips a concurrently replaced local target", async (t) => {
+  const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-preserve-mtime-race-"));
+  t.after(async () => fs.promises.rm(tempDir, { recursive: true, force: true }));
+
+  const targetPath = path.join(tempDir, "copied.bin");
+  await fs.promises.writeFile(targetPath, Buffer.from("concurrent"));
+  const before = await fs.promises.stat(targetPath);
+  const sourceMtimeMs = 1_700_000_000_000; // 2023-11-14T22:13:20.000Z
+
+  // Identity recorded at publication no longer matches the pathname's file.
+  await transferBridge._preserveTransferredDestinationMtimeForTests({
+    targetType: "local",
+    targetPath,
+    publishedLocalIdentity: "999999:999999:7",
+    sourceSoftIdentity: { size: 7, mtimeMs: sourceMtimeMs },
+  });
+
+  const after = await fs.promises.stat(targetPath);
+  assert.equal(Math.floor(after.mtimeMs / 1000), Math.floor(before.mtimeMs / 1000));
+
+  // A vanished destination is likewise left alone.
+  await transferBridge._preserveTransferredDestinationMtimeForTests({
+    targetType: "local",
+    targetPath: path.join(tempDir, "missing.bin"),
+    publishedLocalIdentity: "999999:999999:7",
+    sourceSoftIdentity: { size: 7, mtimeMs: sourceMtimeMs },
+  });
+});
+
+test("preserveTransferredDestinationMtime stamps the published local inode", async (t) => {
+  const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-preserve-mtime-inode-"));
+  t.after(async () => fs.promises.rm(tempDir, { recursive: true, force: true }));
+
+  const targetPath = path.join(tempDir, "copied.bin");
+  await fs.promises.writeFile(targetPath, Buffer.from("payload"));
+  const publishedStat = await fs.promises.lstat(targetPath);
+  const sourceMtimeMs = 1_700_000_000_000; // 2023-11-14T22:13:20.000Z
+
+  await transferBridge._preserveTransferredDestinationMtimeForTests({
+    targetType: "local",
+    targetPath,
+    publishedLocalIdentity: transferBridge._stableLocalFileIdentityForTests(publishedStat),
+    sourceSoftIdentity: { size: 7, mtimeMs: sourceMtimeMs },
+  });
+
+  const after = await fs.promises.stat(targetPath);
+  assert.equal(Math.floor(after.mtimeMs / 1000), Math.floor(sourceMtimeMs / 1000));
+});
+
 test("restoreRemoteUploadModeBestEffort times out hanging chmod", async () => {
   const hangingClient = {
     async chmod() {
