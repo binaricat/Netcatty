@@ -320,6 +320,30 @@ test("positioned output respects wide-cell boundaries and retained size limits",
   assert.ok(history.getLines().join('').endsWith('end'));
 });
 
+test("CHA and relative horizontal moves stay on the tracked row", () => {
+  const history = createTerminalOutputHistoryPreview();
+  history.append('abcde\x1b[1GX');
+  assert.deepEqual(history.getLines(), ['Xbcde']);
+  history.clear();
+  history.append('ab\x1b[3CX');
+  assert.deepEqual(history.getLines(), ['ab   X']);
+  history.clear();
+  history.append('abcde\x1b[2DX');
+  assert.deepEqual(history.getLines(), ['abcXe']);
+});
+
+test("NEL and IND advance the row; RI moves back up", () => {
+  const history = createTerminalOutputHistoryPreview();
+  history.append('foo\x1bEbar');
+  assert.deepEqual(history.getLines(), ['foo', 'bar']);
+  history.clear();
+  history.append('foo\x1bDbar');
+  assert.deepEqual(history.getLines(), ['foo', '   bar']);
+  history.clear();
+  history.append('\x1b[r\x1b[3;1Hfoo\x1bMbar');
+  assert.deepEqual(history.getLines(), ['foo', '   bar']);
+});
+
 
 test("cursor placement alone does not append blank history rows", () => {
   const history = createTerminalOutputHistoryPreview();

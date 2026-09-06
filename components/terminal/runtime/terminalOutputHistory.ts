@@ -208,18 +208,18 @@ export const stripTerminalDisplayToPlainText = (
         };
       }
       const sequence = input.slice(i + escapeIntroducerLength(input, i), end);
-      // Only the history writer consumes cursor-row controls. Standalone plain
-      // text stripping keeps its original contract. DEC origin/autowrap mode
-      // changes, cursor save/restore, and RIS ride along so rows resolve the
-      // way the terminal resolves them.
+      // Only the history writer consumes cursor-row/column controls.
+      // Standalone plain text stripping keeps its original contract. DEC
+      // origin/autowrap mode changes, cursor save/restore, and RIS ride along
+      // so rows resolve the way the terminal resolves them.
       const isCsi = input[i] === C1_CSI || input[i + 1] === "[";
       const passesRowControl = isCsi
-        && (/^[0-9;]*[HfABEFdr]$/.test(sequence)
+        && (/^[0-9;]*[HfABCDEFdDrG]$/.test(sequence)
           || isTrackedDecPrivateModeSequence(sequence)
           || /^[su]$/.test(sequence));
       const isBareEscFinal = !isCsi
         && escapeIntroducerLength(input, i) === 1
-        && /^[78c]$/.test(sequence);
+        && /^[78cDEM]$/.test(sequence);
       const passes = preserveRowControls && (passesRowControl || isBareEscFinal);
       if (passes) output += input.slice(i, end);
       const eraseInLine = eraseInLineMarkerFor(input, i, end);
@@ -789,6 +789,41 @@ export const createTerminalOutputHistoryPreview = (options?: {
           if (text[i + 1] === "7") saveTrackedCursor();
           else if (text[i + 1] === "8") restoreTrackedCursor();
           else if (text[i + 1] === "c") resetTrackedState();
+          else if (text[i + 1] === "D" || text[i + 1] === "E" || text[i + 1] === "M") {
+            const screenBottom = viewportRows > 0 ? viewportRows : 1_000_000;
+            // The column these controls keep (NEL returns to the first one).
+            const column = text[i + 1] === "E"
+              ? 0
+              : Math.min(
+                maxChars - 1,
+                cursorCell,
+                viewportCols > 0 ? viewportCols - 1 : cursorCell,
+              );
+            if (text[i + 1] === "M") {
+              // RI: up one row, clamped at the top margin (the region scroll
+              // xterm performs at its top is not modeled).
+              const topLimit = screenRow >= scrollTopMargin
+                ? Math.min(scrollTopMargin, screenBottom)
+                : 1;
+              const nextRow = Math.max(topLimit, screenRow - 1);
+              if (nextRow !== screenRow && current) commitCurrentLine();
+              screenRow = nextRow;
+            } else {
+              // IND / NEL: down one row, clamped like LF at the scroll
+              // region's bottom margin.
+              const bottomLimit = screenRow <= scrollBottomMargin
+                ? Math.min(scrollBottomMargin, screenBottom)
+                : screenBottom;
+              screenRow = Math.min(bottomLimit, screenRow + 1);
+              commitCurrentLine();
+            }
+            // commitCurrentLine resets the tracked cursor; restore the column
+            // these controls keep, the way the vertical CSI moves do.
+            cursor = column === 0 ? 0
+              : isAsciiOnly(current) ? column
+                : sliceStringByCellColumns(current, 0, column, widthTerm).length;
+            cursorCell = column;
+          }
           i += 2;
           continue;
         }
@@ -856,6 +891,41 @@ export const createTerminalOutputHistoryPreview = (options?: {
         }
         if (command === "u") {
           restoreTrackedCursor();
+          i = end;
+          continue;
+        }
+        if (command === "G") {
+          // CHA: absolute column move on the current row. Keep placement
+          // logical until text arrives, clamped like CUP's column.
+          const column = Math.max(0, (Number(params[0]) || 1) - 1);
+          const targetCell = Math.min(
+            maxChars - 1,
+            column,
+            viewportCols > 0 ? viewportCols - 1 : column,
+          );
+          cursor = targetCell === 0 ? 0
+            : isAsciiOnly(current) ? targetCell
+              : sliceStringByCellColumns(current, 0, targetCell, widthTerm).length;
+          cursorCell = targetCell;
+          i = end;
+          continue;
+        }
+        if (command === "C" || command === "D") {
+          // CUF / CUB: relative horizontal moves stay on the same row, clamped
+          // to the last column the way xterm clamps them.
+          const move = Math.min(1_000_000, Math.max(1, Number(params[0]) || 1));
+          const maxCell = Math.min(
+            maxChars - 1,
+            viewportCols > 0 ? viewportCols - 1 : 1_000_000,
+          );
+          const targetCell = Math.max(
+            0,
+            Math.min(maxCell, command === "C" ? cursorCell + move : cursorCell - move),
+          );
+          cursor = targetCell === 0 ? 0
+            : isAsciiOnly(current) ? targetCell
+              : sliceStringByCellColumns(current, 0, targetCell, widthTerm).length;
+          cursorCell = targetCell;
           i = end;
           continue;
         }
