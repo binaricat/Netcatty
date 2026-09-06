@@ -408,6 +408,18 @@ test("positioned overwrites replace whole graphemes and preserve cell spacing", 
   assert.deepEqual(history.getLines(), ['AXB']);
 });
 
+test("EL 1 erases a wide glyph intersected by the erase boundary", () => {
+  // The cursor lands on the wide glyph's first cell: xterm blanks both cells
+  // and keeps the suffix at its columns.
+  const history = createTerminalOutputHistoryPreview();
+  history.append('中A\x1b[1G\x1b[1K');
+  assert.deepEqual(history.getLines(), ['  A']);
+  history.clear();
+  // The cursor lands on the wide glyph's second cell: the glyph is erased too.
+  history.append('A中B\x1b[1;3H\x1b[1K');
+  assert.deepEqual(history.getLines(), ['   B']);
+});
+
 test("cursor-row moves clamp to the reported terminal viewport", () => {
   const history = createTerminalOutputHistoryPreview();
   history.setViewportRows(24);

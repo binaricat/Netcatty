@@ -275,6 +275,25 @@ const lastGraphemeUnits = (text: string): string => {
 };
 
 /**
+ * Start cell of the first grapheme that begins at or after `cell`. A wide
+ * grapheme straddling `cell` is skipped, so a cell boundary that cuts into it
+ * extends to the grapheme's end (xterm erases whole intersected cells).
+ */
+const firstGraphemeStartCellAtOrAfter = (
+  text: string,
+  cell: number,
+  term?: WidthTerm | null,
+): number => {
+  if (isAsciiOnly(text)) return Math.min(cell, text.length);
+  let startCell = 0;
+  for (const { segment } of outputGraphemeSegmenter.segment(text)) {
+    if (startCell >= cell) return startCell;
+    startCell += pieceCellWidth(segment, term);
+  }
+  return startCell;
+};
+
+/**
  * Wrap one transcript line into viewport-sized rows. Continuation rows carry
  * the same `isWrapped` flag xterm uses so soft-wrapped selection joins keep
  * working (see joinHistoryPreviewSelectionText).
@@ -1066,8 +1085,14 @@ export const createTerminalOutputHistoryPreview = (options?: {
         openGrapheme = null;
         const throughCursor = Math.min(cursorCell + 1, currentCellWidth);
         if (throughCursor > 0) {
-          const suffix = sliceStringByCellColumns(current, throughCursor, undefined, widthTerm);
-          current = " ".repeat(throughCursor) + suffix;
+          // A grapheme straddling the erase boundary is erased in full, so the
+          // blanked prefix extends to the next grapheme that starts after it.
+          const suffixStart = firstGraphemeStartCellAtOrAfter(current, throughCursor, widthTerm);
+          const suffix = suffixStart < currentCellWidth
+            ? sliceStringByCellColumns(current, suffixStart, undefined, widthTerm)
+            : "";
+          current = " ".repeat(suffixStart) + suffix;
+          currentCellWidth = suffixStart + pieceCellWidth(suffix, widthTerm);
           cursor = isAsciiOnly(current) ? cursorCell
             : sliceStringByCellColumns(current, 0, cursorCell, widthTerm).length;
         }
