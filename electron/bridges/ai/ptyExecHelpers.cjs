@@ -198,7 +198,24 @@ function buildPendingInputClearPrefix(shellKind) {
   }
 }
 
-function buildBashHistoryCleanup(marker) {
+// Suffix shared by the cleanup's scratch variable names so liveShellProbe can
+// reference the verified-deletion flag the cleanup leaves behind.
+function bashHistoryCleanupSuffix(marker) {
+  return String(marker || "").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 24) || "dflt";
+}
+
+function bashHistoryCleanupStatusVar(marker) {
+  return `__nc_o_${bashHistoryCleanupSuffix(marker)}`;
+}
+
+// keepStatus keeps the verified-deletion flag set on return: buildLiveShellProbe
+// runs the cleanup through two outer dispatchers (\command eval and \builtin
+// eval) because a shadowing function can swallow either, and it must skip the
+// \builtin eval fallback once the \command eval path already verified deletion.
+// Assignments made by eval'd code persist in the interactive shell, so the
+// flag acts as the cross-invocation success signal. The flag only holds "1"
+// (never secret-bearing), so leaving it set is safe.
+function buildBashHistoryCleanup(marker, keepStatus = false) {
   // Issue #3265: without HISTCONTROL=ignorespace the wrapper line is recorded
   // in bash history. Pressing arrow-up then makes readline redraw that huge
   // marker-containing line, and the preload __NCMCP_ filter suppresses the
@@ -228,19 +245,42 @@ function buildBashHistoryCleanup(marker) {
   // with user state, and a readonly (or integer/nameref-attributed) user
   // variable makes the assignment fail, leaving the marker-bearing history
   // entry undeleted. Markers are unique per invocation, so the derived names
-  // cannot clash with anything the user already defined. Both scratch
+  // cannot clash with anything the user already defined. The scratch
   // variables are unset afterwards: the verification read still assigns the
   // next history entry to __nc_h_*, which could otherwise keep a recent
   // (possibly secret-bearing) command recoverable even after history -c.
-  // Unset through the same dispatcher loop as history: a user alias or
+  // Unset through the same dispatchers as history: a user alias or
   // function named unset would otherwise shadow the plain call and leave
   // the verification-read history entry (possibly secret-bearing) in the
   // scratch variable. Unsetting the loop variable mid-loop is safe: bash
   // reassigns it from the already-expanded word list on each iteration.
-  const suffix = String(marker || "").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 24) || "dflt";
+  // Verified deletion sets __nc_o_*; the unset stage then only walks both
+  // dispatchers when deletion is still unverified, so a slow shadowed
+  // fallback (e.g. builtin() { sleep 60; }) is not invoked again after a
+  // real dispatcher already finished the job — unsetting goes through the
+  // dispatcher that verified the deletion instead. When unverified, both
+  // dispatchers still get their turn for every scratch variable.
+  // The initial read also verifies absence: a non-empty latest entry without
+  // the marker proves the dispatcher reached real history (a no-op shadow
+  // returns empty output), so there is nothing to delete and the fallback
+  // dispatcher is not invoked either. Only an empty read (no-op shadow or
+  // empty history) leaves it ambiguous and gives the next dispatcher its
+  // turn.
+  const suffix = bashHistoryCleanupSuffix(marker);
   const entry = `__nc_h_${suffix}`;
   const dispatcher = `__nc_d_${suffix}`;
-  return `[ "\${BASH_VERSION-}" ]&&{ for ${dispatcher} in command builtin;do ${entry}=$($${dispatcher} history 1);case "$${entry}" in *${marker}*) ${entry}=\${${entry}#"\${${entry}%%[^[:space:]]*}"};$${dispatcher} history -d "\${${entry}%%[[:space:]]*}";${entry}=$($${dispatcher} history 1);case "$${entry}" in *${marker}*) :;;*) break;;esac;;esac;done;for ${dispatcher} in command builtin;do $${dispatcher} unset ${entry} ${dispatcher};done; } 2>/dev/null`;
+  const status = bashHistoryCleanupStatusVar(marker);
+  const loop =
+    `for ${dispatcher} in command builtin;do ${entry}=$($${dispatcher} history 1);case "$${entry}" in ` +
+    `*${marker}*) ${entry}=\${${entry}#"\${${entry}%%[^[:space:]]*}"};$${dispatcher} history -d "\${${entry}%%[[:space:]]*}";` +
+    `${entry}=$($${dispatcher} history 1);case "$${entry}" in *${marker}*) :;;*) ${status}=1;break;;esac;;` +
+    `"") :;; *) ${status}=1;break;;esac;done`;
+  const scratch = keepStatus ? entry : `${entry} ${status}`;
+  return (
+    `[ "\${BASH_VERSION-}" ]&&{ ${status}=;${loop};` +
+    `if [ -n "$${status}" ];then $${dispatcher} unset ${scratch} ${dispatcher};` +
+    `else for ${dispatcher} in command builtin;do $${dispatcher} unset ${scratch} ${dispatcher};done;fi; } 2>/dev/null`
+  );
 }
 
 function buildPosixWrapperBody(command, marker, startFormat) {
@@ -502,6 +542,7 @@ module.exports = {
   buildPendingInputClearPrefix,
   buildWrappedCommand,
   buildBashHistoryCleanup,
+  bashHistoryCleanupStatusVar,
   findEndMarker,
   normalizePtyOutput,
   appendBoundedOutput,

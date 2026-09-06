@@ -1,6 +1,9 @@
 "use strict";
 
-const { buildBashHistoryCleanup } = require("./ptyExecHelpers.cjs");
+const {
+  buildBashHistoryCleanup,
+  bashHistoryCleanupStatusVar,
+} = require("./ptyExecHelpers.cjs");
 
 // Both fish and POSIX shells accept this command. Inspect the parent of a
 // short-lived sh in the interactive PTY, rather than the SSH login shell.
@@ -12,6 +15,16 @@ function buildLiveShellProbe(marker) {
   // cleanup is dispatched through both \command eval and \builtin eval: the
   // one that reaches the real eval runs the cleanup, the other no-ops once
   // the marker is already gone; cleanup itself checks BASH_VERSION.
+  // The \builtin eval fallback only runs when the \command eval path left the
+  // cleanup's verified-deletion flag unset (shadowed dispatcher or nothing to
+  // verify); a slow shadowed fallback (e.g. builtin() { sleep 60; }) is
+  // therefore not invoked again after a real dispatcher already deleted the
+  // entry. The eval'd cleanup leaves the flag (holding only "1") set in the
+  // interactive shell, so the test reads it through eval: the quoted
+  // ${flag-} default keeps the expansion nounset-safe in POSIX shells (a bare
+  // $flag aborts dash under set -u), and the flag can never be a secret.
+  // Fish rejects ${...} inside the eval'd test, which only fails that segment
+  // (non-zero) so the fallback runs and no-ops there as before.
   // Fish cannot resolve eval through command and rejects it without parsing its
   // quoted POSIX body. Make cleanup failure non-fatal even under set -e,
   // suppress its diagnostic, and always emit Q afterward.
@@ -20,8 +33,12 @@ function buildLiveShellProbe(marker) {
   // The builtin completion marker still runs if sh cannot launch. Leave it
   // unterminated so preload hides the intermediate prompt and wrapper echo
   // on the same marker-bearing line, including across output chunks.
-  const cleanup = buildBashHistoryCleanup(marker);
-  return ` true ${marker}; command sh -c '${script}' 2>/dev/null; \\command eval '${cleanup}' 2>/dev/null || true; \\builtin eval '${cleanup}' 2>/dev/null || true; printf '%s' '${marker}_Q'\n`;
+  const cleanup = buildBashHistoryCleanup(marker, true);
+  const cleanupStatus = bashHistoryCleanupStatusVar(marker);
+  // "${var-}" is written via concatenation: inside a template literal "\${"
+  // would escape the interpolation and emit the literal name instead.
+  const statusTest = `eval '[ -n "$` + `{${cleanupStatus}-}" ]' 2>/dev/null`;
+  return ` true ${marker}; command sh -c '${script}' 2>/dev/null; \\command eval '${cleanup}' 2>/dev/null || true; ${statusTest} || \\builtin eval '${cleanup}' 2>/dev/null || true; printf '%s' '${marker}_Q'\n`;
 }
 
 function parseLiveShellProbe(output, marker) {
