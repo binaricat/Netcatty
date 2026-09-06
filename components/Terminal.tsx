@@ -3019,8 +3019,15 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         // to the bottom, the user is already where the restore would put
         // them, so skipping is a no-op there too.)
         let viewportMovedDuringSync = false;
-        const scrollListener = term.onScroll(() => {
-          viewportMovedDuringSync = true;
+        // BufferService.scroll fires onScroll for every line feed even when
+        // isUserScrolling keeps ydisp unchanged, so compare reported
+        // positions instead of treating any notification as a scroll:
+        // output arriving while the user is parked above the bottom must
+        // not cancel the restore.
+        let lastScrollY = term.buffer.active.viewportY;
+        const scrollListener = term.onScroll((y: number) => {
+          if (y !== lastScrollY) viewportMovedDuringSync = true;
+          lastScrollY = y;
         });
         const restoreScroll = () => {
           scrollListener.dispose();
