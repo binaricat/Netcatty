@@ -12269,55 +12269,31 @@ test("local promotion does not clobber a target recreated after backup", async (
   assert.deepEqual(await fs.promises.readFile(path.join(tempDir, backupName)), original);
 });
 
-test("local promotion rollback does not clobber a concurrent post-publish target", async (t) => {
-  const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-local-promo-postpub-"));
-  t.after(async () => {
-    await fs.promises.rm(tempDir, { recursive: true, force: true });
-  });
-
+test("local promotion commits before a late cancel and never deletes a concurrent replacement", async (t) => {
+  const tempDir = await fs.promises.mkdtemp(`${tempDirBridge.getTempFilePath("local-promo-postpub")}-`);
+  t.after(async () => fs.promises.rm(tempDir, { recursive: true, force: true }));
   const stagedPath = path.join(tempDir, "download.staged");
   const targetPath = path.join(tempDir, "target.bin");
-  const original = Buffer.from("original-target-content");
-  const concurrent = Buffer.from("post-publish-concurrent");
-  const downloaded = Buffer.from("downloaded-replacement");
-  await fs.promises.writeFile(targetPath, original);
-  await fs.promises.writeFile(stagedPath, downloaded);
-  const originalStat = await fs.promises.lstat(targetPath);
-
-  await assert.rejects(
-    () => transferBridge._promoteLocalTransferForTests(stagedPath, targetPath, {
-      async validateTarget() {
-        return {
-          existingMode: null,
-          stableIdentity: transferBridge._stableLocalFileIdentityForTests(originalStat),
-          targetIdentity: [
-            originalStat.dev,
-            originalStat.ino,
-            originalStat.size,
-            originalStat.mtimeMs,
-            originalStat.ctimeMs,
-          ].join(":"),
-        };
-      },
-      assertNotCancelled() {
-        // After ready is published onto targetPath, simulate concurrent replace + cancel.
-        try {
-          if (fs.readFileSync(targetPath).equals(downloaded)) {
-            fs.writeFileSync(targetPath, concurrent);
-            throw new Error("Transfer cancelled");
-          }
-        } catch (err) {
-          if (String(err.message || err).includes("cancelled")) throw err;
-        }
-      },
-    }),
-    /cancelled/i,
-  );
-
-  assert.deepEqual(await fs.promises.readFile(targetPath), concurrent);
-  const backupName = (await fs.promises.readdir(tempDir)).find((name) => name.includes(".backup"));
-  assert.ok(backupName, "original should remain in backup");
-  assert.deepEqual(await fs.promises.readFile(path.join(tempDir, backupName)), original);
+  await fs.promises.writeFile(targetPath, "original");
+  await fs.promises.writeFile(stagedPath, "download");
+  let cancelled = false;
+  let committed = false;
+  const link = fs.promises.link;
+  t.after(() => { fs.promises.link = link; });
+  fs.promises.link = async (...args) => {
+    await link.apply(fs.promises, args);
+    if (args[1] === targetPath && String(args[0]).endsWith(".ready")) {
+      await fs.promises.unlink(targetPath);
+      await fs.promises.writeFile(targetPath, "concurrent");
+      cancelled = true;
+    }
+  };
+  await transferBridge._promoteLocalTransferForTests(stagedPath, targetPath, {
+    assertNotCancelled() { if (cancelled) throw new Error("Transfer cancelled"); },
+    onCommit() { committed = true; },
+  });
+  assert.equal(committed, true);
+  assert.equal(await fs.promises.readFile(targetPath, "utf8"), "concurrent");
 });
 
 test("local promotion succeeds when backup still matches validated identity", async (t) => {

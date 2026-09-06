@@ -1,0 +1,64 @@
+"use strict";
+
+const fs = require("node:fs");
+
+// Publish a prepared regular file without replacing any destination entry.
+// Hardlinks make complete bytes visible atomically. FAT-like filesystems use an
+// exclusively created handle instead: partial contents can be visible there,
+// but no pathname cleanup may remove a concurrent writer's replacement.
+async function publishLocalFileExclusive(source, target, assertNotCancelled = () => {}) {
+  assertNotCancelled();
+  try {
+    await fs.promises.link(source, target);
+    return;
+  } catch (error) {
+    if (!["ENOTSUP", "EOPNOTSUPP", "ENOSYS", "EPERM", "EACCES", "EXDEV"].includes(error?.code)) throw error;
+  }
+
+  let input;
+  let output;
+  let failure;
+  try {
+    input = await fs.promises.open(source, "r");
+    const stat = await input.stat();
+    assertNotCancelled();
+    output = await fs.promises.open(target, "wx", stat.mode & 0o7777);
+    // Apply through the owned handle; never chmod a potentially replaced name.
+    await output.chmod(stat.mode & 0o7777);
+    const buffer = Buffer.allocUnsafe(1024 * 1024);
+    let position = 0;
+    while (position < stat.size) {
+      assertNotCancelled();
+      const { bytesRead } = await input.read(buffer, 0, Math.min(buffer.length, stat.size - position), position);
+      if (!bytesRead) throw new Error("Prepared local file ended before publication completed");
+      let written = 0;
+      while (written < bytesRead) {
+        assertNotCancelled();
+        const { bytesWritten } = await output.write(buffer, written, bytesRead - written, position + written);
+        if (!bytesWritten) throw new Error("Local publication made no write progress");
+        written += bytesWritten;
+      }
+      position += bytesRead;
+    }
+    assertNotCancelled();
+    const ownedStat = await output.stat();
+    const targetStat = await fs.promises.lstat(target);
+    if (!targetStat.isFile() || targetStat.dev !== ownedStat.dev || targetStat.ino !== ownedStat.ino) {
+      throw new Error("Local download target changed during replacement");
+    }
+  } catch (error) {
+    failure = error;
+  } finally {
+    for (const handle of [output, input]) {
+      try { await handle?.close(); } catch (error) { failure ??= error; }
+    }
+  }
+  if (failure) {
+    // Once exclusive creation succeeded, leave the partial destination intact.
+    // The caller must retain its complete prepared file and any original backup.
+    if (output) failure.localPublicationIncomplete = true;
+    throw failure;
+  }
+}
+
+module.exports = { publishLocalFileExclusive };

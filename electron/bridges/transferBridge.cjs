@@ -950,219 +950,101 @@ function stableLocalFileIdentity(statLike) {
 }
 
 async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
-  const assertNotCancelled = typeof options.assertNotCancelled === "function"
-    ? options.assertNotCancelled
-    : () => {};
+  const { publishLocalFileExclusive } = require("./localFilePublish.cjs");
+  const assertNotCancelled = options.assertNotCancelled || (() => {});
   const token = crypto.randomUUID().replace(/-/g, "");
-  const targetDir = path.dirname(targetPath);
-  const targetBase = path.basename(targetPath);
-  const readyPath = path.join(targetDir, `.${targetBase}.netcatty-${token}.ready`);
-  const backupPath = path.join(targetDir, `.${targetBase}.netcatty-${token}.backup`);
-  let preparedPath = stagedPath;
+  const base = path.join(path.dirname(targetPath), `.${path.basename(targetPath)}.netcatty-${token}`);
+  const readyPath = `${base}.ready`;
+  const backupPath = `${base}.backup`;
   let backedUp = false;
-  let published = false;
-  let publishedIdentity = null;
+  let committed = false;
+  let keepRecoveryFiles = false;
   try {
     assertNotCancelled();
     try {
       await fs.promises.rename(stagedPath, readyPath);
-    } catch (err) {
-      if (err?.code !== "EXDEV") throw err;
-      await fs.promises.copyFile(stagedPath, readyPath);
-      preparedPath = readyPath;
+    } catch (error) {
+      if (error?.code !== "EXDEV") throw error;
+      await fs.promises.copyFile(stagedPath, readyPath, fs.constants.COPYFILE_EXCL);
     }
-    if (preparedPath !== readyPath) preparedPath = readyPath;
     let appliedMode = null;
-    let targetStable = false;
-    let expectedStableIdentity = null;
+    let validatedTarget;
+    let stable = false;
     for (let attempt = 0; attempt < 3; attempt += 1) {
-      const validatedTarget = typeof options.validateTarget === "function"
+      validatedTarget = typeof options.validateTarget === "function"
         ? await options.validateTarget()
-        : null;
-      const existingMode = Number.isInteger(validatedTarget?.existingMode)
+        : undefined;
+      const mode = Number.isInteger(validatedTarget?.existingMode)
         ? validatedTarget.existingMode & 0o7777
-        : Number.isInteger(options.existingMode)
-          ? options.existingMode & 0o7777
-          : null;
-      if (existingMode !== null && existingMode !== appliedMode) {
-        await fs.promises.chmod(readyPath, existingMode);
-        appliedMode = existingMode;
+        : Number.isInteger(options.existingMode) ? options.existingMode & 0o7777 : null;
+      if (mode !== null && mode !== appliedMode) {
+        await fs.promises.chmod(readyPath, mode);
+        appliedMode = mode;
         continue;
       }
-      expectedStableIdentity = validatedTarget?.stableIdentity
-        || (validatedTarget?.targetIdentity
-          ? String(validatedTarget.targetIdentity).split(":").slice(0, 3).join(":")
-          : null);
-      targetStable = true;
+      stable = true;
       break;
     }
-    if (!targetStable) {
-      throw new Error("Local download target kept changing before replacement");
-    }
+    if (!stable) throw new Error("Local download target kept changing before replacement");
     assertNotCancelled();
-    try {
-      await fs.promises.rename(targetPath, backupPath);
-      backedUp = true;
-    } catch (err) {
-      if (err?.code !== "ENOENT") throw err;
-    }
-    // Another process may have replaced the destination between validateTarget
-    // and rename. Re-check the moved backup before publishing the download.
-    if (backedUp && expectedStableIdentity) {
-      let backupStat;
+    const expectedAbsent = validatedTarget?.targetIdentity === "missing" || validatedTarget?.targetIdentity === null;
+    const expectedIdentity = validatedTarget?.stableIdentity
+      || (validatedTarget?.targetIdentity ? String(validatedTarget.targetIdentity).split(":").slice(0, 3).join(":") : null);
+    if (!expectedAbsent) {
       try {
-        backupStat = await fs.promises.lstat(backupPath);
-      } catch (err) {
-        throw new Error(
-          `Local download target disappeared during replacement: ${targetPath}`,
-          { cause: err },
-        );
+        await fs.promises.rename(targetPath, backupPath);
+        backedUp = true;
+      } catch (error) {
+        if (error?.code !== "ENOENT") throw error;
       }
-      if (!backupStat.isFile() || stableLocalFileIdentity(backupStat) !== expectedStableIdentity) {
-        // If another writer already recreated targetPath, do not restore the
-        // mismatched backup over it — leave both intact and fail closed.
-        let targetOccupied = false;
-        try {
-          await fs.promises.lstat(targetPath);
-          targetOccupied = true;
-        } catch (err) {
-          if (err?.code !== "ENOENT") throw err;
-        }
-        if (targetOccupied) {
-          const conflict = new Error("Local download target changed during replacement");
-          conflict.leaveConcurrentTarget = true;
-          conflict.remoteBackupPath = backupPath;
-          backedUp = false;
-          throw conflict;
-        }
-        try {
-          await fs.promises.rename(backupPath, targetPath);
-          backedUp = false;
-        } catch (restoreErr) {
-          const recoveryFailure = new Error(
-            `Could not restore the original file after a concurrent replacement was detected. `
-            + `Backup: ${backupPath}; target: ${targetPath}`,
-            { cause: restoreErr },
-          );
-          recoveryFailure.recoveryFailed = true;
-          throw recoveryFailure;
-        }
+    }
+    if (backedUp && expectedIdentity) {
+      const stat = await fs.promises.lstat(backupPath);
+      if (!stat.isFile() || stableLocalFileIdentity(stat) !== expectedIdentity) {
         throw new Error("Local download target changed during replacement");
       }
     }
-    // After the backup move, a concurrent writer may recreate targetPath. Never
-    // clobber that file: leave it in place, keep the original in backupPath for
-    // recovery, and fail closed before publishing the download.
-    if (backedUp) {
-      let recreated = false;
-      try {
-        await fs.promises.lstat(targetPath);
-        recreated = true;
-      } catch (err) {
-        if (err?.code !== "ENOENT") throw err;
-      }
-      if (recreated) {
-        const conflict = new Error("Local download target changed during replacement");
-        conflict.leaveConcurrentTarget = true;
-        conflict.remoteBackupPath = backupPath;
-        // Prevent the catch path from renaming backup over the concurrent file.
-        backedUp = false;
-        throw conflict;
-      }
-    }
     assertNotCancelled();
-    // Capture identity of the ready file before publish so rollback can refuse
-    // to clobber a concurrent replacement of the published target.
     try {
-      publishedIdentity = stableLocalFileIdentity(await fs.promises.lstat(readyPath));
-    } catch {
-      publishedIdentity = null;
+      await publishLocalFileExclusive(readyPath, targetPath, assertNotCancelled);
+    } catch (error) {
+      if (error?.code === "EEXIST") {
+        throw new Error("Local download target changed during replacement", { cause: error });
+      }
+      if (error?.localPublicationIncomplete) keepRecoveryFiles = true;
+      throw error;
     }
-    await fs.promises.rename(readyPath, targetPath);
-    published = true;
-    assertNotCancelled();
+    // Publication is the commit boundary. A late cancel must not perform a
+    // check-then-unlink rollback against a name another process may now own.
+    committed = true;
     options.onCommit?.();
     if (backedUp) await fs.promises.unlink(backupPath).catch(() => {});
-    if (stagedPath !== readyPath) await fs.promises.unlink(stagedPath).catch(() => {});
-  } catch (err) {
-    let restoreError = null;
-    if (err?.leaveConcurrentTarget) {
-      // Caller already decided not to touch a concurrent target/backup pair.
-    } else if (backedUp) {
-      let targetMatchesPublished = false;
-      let targetMissing = false;
+    await fs.promises.unlink(readyPath).catch(() => {});
+    await fs.promises.unlink(stagedPath).catch(() => {});
+  } catch (error) {
+    if (committed) throw error;
+    if (backedUp && !keepRecoveryFiles) {
       try {
-        const targetStat = await fs.promises.lstat(targetPath);
-        targetMatchesPublished = !!(
-          published
-          && publishedIdentity
-          && stableLocalFileIdentity(targetStat) === publishedIdentity
-        );
-      } catch (statErr) {
-        if (statErr?.code === "ENOENT") targetMissing = true;
-        else restoreError = statErr;
-      }
-      if (!restoreError) {
-        if (published && !targetMissing && !targetMatchesPublished) {
-          // Concurrent writer replaced our published file — keep both.
-          err.leaveConcurrentTarget = true;
-          err.remoteBackupPath = backupPath;
-          backedUp = false;
-        } else {
-          if (published && targetMatchesPublished) {
-            await fs.promises.unlink(targetPath).catch(() => {});
-          }
-          if (targetMissing || targetMatchesPublished || !published) {
-            try {
-              // Only restore when the path is free or still holds our publish.
-              if (!published) {
-                let occupied = false;
-                try {
-                  await fs.promises.lstat(targetPath);
-                  occupied = true;
-                } catch (occErr) {
-                  if (occErr?.code !== "ENOENT") throw occErr;
-                }
-                if (occupied) {
-                  err.leaveConcurrentTarget = true;
-                  err.remoteBackupPath = backupPath;
-                  backedUp = false;
-                } else {
-                  await fs.promises.rename(backupPath, targetPath);
-                  backedUp = false;
-                }
-              } else {
-                await fs.promises.rename(backupPath, targetPath);
-                backedUp = false;
-              }
-            } catch (recoveryErr) {
-              restoreError = recoveryErr;
-            }
-          }
-        }
-      }
-    } else if (published) {
-      try {
-        const targetStat = await fs.promises.lstat(targetPath);
-        if (publishedIdentity && stableLocalFileIdentity(targetStat) === publishedIdentity) {
-          await fs.promises.unlink(targetPath);
-        }
-      } catch (recoveryErr) {
-        if (recoveryErr?.code !== "ENOENT") restoreError = recoveryErr;
+        await publishLocalFileExclusive(backupPath, targetPath);
+        await fs.promises.unlink(backupPath).catch(() => {});
+        backedUp = false;
+      } catch (restoreError) {
+        keepRecoveryFiles = true;
+        error.cause ??= restoreError;
       }
     }
-    if (restoreError) {
-      const recoveryFailure = new Error(
-        `Could not restore the original file after replacement failed. `
-        + `Backup: ${backupPath}; prepared replacement: ${readyPath}; `
-        + `original staged path: ${stagedPath}; target: ${targetPath}`,
-        { cause: restoreError },
+    if (keepRecoveryFiles) {
+      const failure = new Error(
+        `${error.message}. Recovery files preserved. Backup: ${backedUp ? backupPath : "none"}; `
+        + `prepared replacement: ${readyPath}; target: ${targetPath}`,
+        { cause: error },
       );
-      recoveryFailure.recoveryFailed = true;
-      throw recoveryFailure;
+      failure.recoveryFailed = true;
+      if (backedUp) failure.remoteBackupPath = backupPath;
+      throw failure;
     }
     await fs.promises.unlink(readyPath).catch(() => {});
-    throw err;
+    throw error;
   }
 }
 
