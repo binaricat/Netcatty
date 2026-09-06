@@ -228,11 +228,14 @@ function buildBashHistoryCleanup(marker) {
   // with user state, and a readonly (or integer/nameref-attributed) user
   // variable makes the assignment fail, leaving the marker-bearing history
   // entry undeleted. Markers are unique per invocation, so the derived names
-  // cannot clash with anything the user already defined.
+  // cannot clash with anything the user already defined. Both scratch
+  // variables are unset afterwards: the verification read still assigns the
+  // next history entry to __nc_h_*, which could otherwise keep a recent
+  // (possibly secret-bearing) command recoverable even after history -c.
   const suffix = String(marker || "").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 24) || "dflt";
   const entry = `__nc_h_${suffix}`;
   const dispatcher = `__nc_d_${suffix}`;
-  return `[ "\${BASH_VERSION-}" ]&&{ for ${dispatcher} in command builtin;do ${entry}=$($${dispatcher} history 1);case "$${entry}" in *${marker}*) ${entry}=\${${entry}#"\${${entry}%%[^[:space:]]*}"};$${dispatcher} history -d "\${${entry}%%[[:space:]]*}";${entry}=$($${dispatcher} history 1);case "$${entry}" in *${marker}*) :;;*) break;;esac;;esac;done; } 2>/dev/null`;
+  return `[ "\${BASH_VERSION-}" ]&&{ for ${dispatcher} in command builtin;do ${entry}=$($${dispatcher} history 1);case "$${entry}" in *${marker}*) ${entry}=\${${entry}#"\${${entry}%%[^[:space:]]*}"};$${dispatcher} history -d "\${${entry}%%[[:space:]]*}";${entry}=$($${dispatcher} history 1);case "$${entry}" in *${marker}*) :;;*) break;;esac;;esac;done;unset ${entry} ${dispatcher}; } 2>/dev/null`;
 }
 
 function buildPosixWrapperBody(command, marker, startFormat) {
