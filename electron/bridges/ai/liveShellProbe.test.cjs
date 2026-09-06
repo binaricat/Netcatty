@@ -163,16 +163,30 @@ test('real PTY: echo-disabled bash completes output without a trailing newline',
   }
 });
 
-for (const customization of [':', 'HISTCONTROL=ignorespace', "alias history='history 10'", 'history() { :; }', "alias eval=':'", 'eval() { :; }', 'PATH=/nonexistent', "alias builtin=':'", 'builtin() { :; }']) {
+// The second element is a history-listing invocation that still reaches the
+// real history builtin under that customization.
+for (const [customization, listHistory] of [
+  [':', 'command builtin history'],
+  ['HISTCONTROL=ignorespace', 'command builtin history'],
+  ["alias history='history 10'", 'command builtin history'],
+  ['history() { :; }', 'command builtin history'],
+  ["alias eval=':'", 'command builtin history'],
+  ['eval() { :; }', 'command builtin history'],
+  ['PATH=/nonexistent', 'command builtin history'],
+  ["alias builtin=':'", 'command builtin history'],
+  ['builtin() { :; }', 'command builtin history'],
+  ["alias command=':'", '\\builtin history'],
+  ['command() { :; }', '\\builtin history'],
+]) {
   for (const executeCommand of [false, true]) {
     test(`bash probe keeps user history clean (${customization}, wrapper=${executeCommand})`, () => {
       const { spawnSync } = require('node:child_process');
       const { buildWrappedCommand } = require('./ptyExecHelpers.cjs');
       const marker = '__NCMCP_HISTORY_PROBE__';
-      const input = `HISTFILE=/dev/null; HISTCONTROL=; PS1=; PS2=\n${customization}\ncommand builtin history -c\necho user_one\necho user_two\n`
+      const input = `HISTFILE=/dev/null; HISTCONTROL=; PS1=; PS2=\n${customization}\n${listHistory} -c\necho user_one\necho user_two\n`
         + buildLiveShellProbe(marker)
         + (executeCommand ? buildWrappedCommand('echo command_ok', 'posix', marker, true) : '')
-        + '\nprintf \"\\n\"\ncommand builtin history\nexit\n';
+        + '\nprintf \"\\n\"\n' + listHistory + '\nexit\n';
       const result = spawnSync('/bin/bash', ['--noprofile', '--norc', '-i'], {
         input, encoding: 'utf8', env: { ...process.env, TERM: 'dumb' }, timeout: 5000,
       });
