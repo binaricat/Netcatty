@@ -1107,3 +1107,60 @@ test("getSessionDistroInfo wraps the os-release probe in a remote watchdog", asy
   );
   assert.ok(commands[0].includes("cat /etc/os-release"));
 });
+
+for (const blocked of [false, true]) {
+  test(`real distro probe ${blocked ? 'kills blocked children' : 'cleans its watchdog after success'}`, {
+    skip: process.platform === 'win32', timeout: 10000,
+  }, async () => {
+    const fs = require('node:fs');
+    const path = require('node:path');
+    const { spawn } = require('node:child_process');
+    const directory = require('../tempDirBridge.cjs').getTempFilePath('watchdog-test');
+    fs.mkdirSync(directory, { mode: 0o700 });
+    fs.writeFileSync(path.join(directory, 'cat'), blocked
+      ? '#!/bin/sh\nexec /bin/sleep 30\n'
+      : '#!/bin/sh\nprintf probe_completed\n', { mode: 0o700 });
+    const commands = [];
+    const api = makeSessionOps(new Map([['watchdog-smoke', {
+      type: 'ssh', conn: { exec(command, cb) { commands.push(command); cb(null, fakeStream('fixture')); } },
+    }]]));
+    const captured = await api.getSessionDistroInfo({}, { sessionId: 'watchdog-smoke' });
+    assert.equal(captured.success, true);
+    assert.equal(commands.length, 1);
+    const started = Date.now();
+    const child = spawn('/bin/sh', ['-c', commands[0]], {
+      detached: true, env: { ...process.env, PATH: `${directory}:${process.env.PATH}` },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let output = '', outcome = null;
+    child.stdout.on('data', data => { output += data; });
+    child.stderr.resume();
+    const finished = new Promise((resolve, reject) => {
+      child.once('error', reject);
+      child.once('close', (code, signal) => { outcome = { code, signal }; resolve(); });
+    });
+    let timer;
+    try {
+      await Promise.race([finished, new Promise(resolve => { timer = setTimeout(resolve, 7000); })]);
+      const ps = spawnSync('ps', ['-axo', 'pid=,pgid=,stat='], { encoding: 'utf8' });
+      assert.equal(ps.status, 0, ps.stderr);
+      const living = ps.stdout.split('\n').map(line => line.trim().split(/\s+/))
+        .filter(row => Number(row[1]) === child.pid && !row[2].startsWith('Z'));
+      assert.ok(outcome, `probe did not close; descendants still alive: ${JSON.stringify(living)}`);
+      assert.deepEqual(living, [], 'probe must not leave a child or watchdog sleep running');
+      if (blocked) {
+        assert.equal(outcome.signal, 'SIGKILL');
+        assert.ok(Date.now() - started >= 4500, 'remote watchdog must own the timeout');
+      } else {
+        assert.equal(outcome.code, 0);
+        assert.equal(output, 'probe_completed');
+        assert.ok(Date.now() - started < 2000, 'success must not wait for the watchdog deadline');
+      }
+    } finally {
+      clearTimeout(timer);
+      try { process.kill(-child.pid, 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') throw error; }
+      await finished;
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+}
