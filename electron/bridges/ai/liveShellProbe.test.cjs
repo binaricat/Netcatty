@@ -162,3 +162,74 @@ test('real PTY: echo-disabled bash completes output without a trailing newline',
     pty.kill();
   }
 });
+
+for (const customization of [':', 'HISTCONTROL=ignorespace', "alias history='history 10'", 'history() { :; }']) {
+  for (const executeCommand of [false, true]) {
+    test(`bash probe keeps user history clean (${customization}, wrapper=${executeCommand})`, () => {
+      const { spawnSync } = require('node:child_process');
+      const { buildWrappedCommand } = require('./ptyExecHelpers.cjs');
+      const marker = '__NCMCP_HISTORY_PROBE__';
+      const input = `HISTFILE=/dev/null; HISTCONTROL=; PS1=; PS2=\n${customization}\nbuiltin history -c\necho user_one\necho user_two\n`
+        + buildLiveShellProbe(marker)
+        + (executeCommand ? buildWrappedCommand('echo command_ok', 'posix', marker, true) : '')
+        + '\nprintf \"\\n\"\nbuiltin history\nexit\n';
+      const result = spawnSync('/bin/bash', ['--noprofile', '--norc', '-i'], {
+        input, encoding: 'utf8', env: { ...process.env, TERM: 'dumb' }, timeout: 5000,
+      });
+      assert.equal(result.status, 0, result.stderr);
+      assert.ok(result.stdout.includes(`${marker}_Q`), result.stdout);
+      const entries = result.stdout.split('\n').filter(line => /^\s*\d+\s/.test(line));
+      assert.ok(entries.some(line => line.includes('echo user_one')), entries.join('\n'));
+      assert.ok(entries.some(line => line.includes('echo user_two')), entries.join('\n'));
+      assert.ok(entries.every(line => !line.includes(marker)), entries.join('\n'));
+    });
+  }
+}
+
+test('real PTY: probe and execution leave only user commands for arrow recall', {
+  skip: process.env.NETCATTY_LIVE_FISH_TEST !== '1', timeout: 10000,
+}, async () => {
+  const terminal = require('node-pty').spawn('/bin/bash', ['--noprofile', '--norc'], {
+    name: 'dumb', cols: 240, rows: 24,
+    env: { ...process.env, TERM: 'dumb', HISTFILE: '/dev/null', HISTCONTROL: '',
+      PS1: 'HISTORY_READY> ', BASH_SILENCE_DEPRECATION_WARNING: '1' },
+  });
+  let output = '';
+  terminal.onData(data => { output += data; });
+  const waitFor = async text => {
+    const deadline = Date.now() + 3000;
+    while (!output.includes(text)) {
+      if (Date.now() > deadline) throw new Error(`Missing ${text}: ${output.slice(-1500)}`);
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    const result = output;
+    output = '';
+    return result;
+  };
+  try {
+    await waitFor('HISTORY_READY>');
+    terminal.write('builtin history -c\r');
+    await waitFor('HISTORY_READY>');
+    terminal.write('echo user_history_one\r');
+    await waitFor('HISTORY_READY>');
+    terminal.write('echo user_history_two\r');
+    await waitFor('HISTORY_READY>');
+    const result = await require('./ptyExec.cjs').execViaPty(terminal, 'printf agent_success', {
+      shellKind: 'posix', probeLiveShell: true, timeoutMs: 2000,
+    });
+    assert.equal(result.exitCode, 0, JSON.stringify(result));
+    assert.match(result.stdout, /agent_success/);
+    await waitFor('HISTORY_READY>');
+    terminal.write('\x1b[A\r');
+    const recalled = await waitFor('HISTORY_READY>');
+    assert.match(recalled, /user_history_two/);
+    assert.doesNotMatch(recalled, /__NCMCP_/);
+    terminal.write('builtin history\r');
+    const history = await waitFor('HISTORY_READY>');
+    assert.match(history, /echo user_history_one/);
+    assert.match(history, /echo user_history_two/);
+    assert.doesNotMatch(history, /__NCMCP_/);
+  } finally {
+    terminal.kill();
+  }
+});
