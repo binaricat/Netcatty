@@ -527,6 +527,38 @@ test("narrowing the viewport clamps the tracked cursor column", () => {
   assert.deepEqual(history.getLines(), [" ".repeat(9) + "X"]);
 });
 
+test("narrowing the viewport trims the tracked cursor row like xterm", () => {
+  const history = createTerminalOutputHistoryPreview();
+  history.setViewportRows(24);
+  history.setViewportCols(10);
+  history.append("abcdefgh");
+  history.setViewportCols(5);
+  // xterm trims the cursor row to the new width on a narrowing resize
+  // (`reflowCursorLine` defaults to false, so `fgh` is discarded instead of
+  // re-wrapped), so X overwrites the last retained cell rather than leaving
+  // a phantom `fgh` tail plus an extra wrapped preview row.
+  history.append("X");
+  assert.deepEqual(history.getLines(), ["abcdX"]);
+  assert.deepEqual(
+    history.getPreviewRows({ cols: 5, rows: 1, top: 0 }).rows.map((row) => row.text),
+    ["abcdX"],
+  );
+});
+
+test("narrowing the viewport drops the trimmed wide-glyph tail", () => {
+  const history = createTerminalOutputHistoryPreview();
+  history.setViewportRows(24);
+  history.setViewportCols(6);
+  history.append("中文");
+  history.setViewportCols(3);
+  // The second glyph spans cells 2-3 past the new width; xterm discards it
+  // whole, so the open row keeps only the glyph that still fits and the next
+  // printable span lands on the new last column.
+  assert.deepEqual(history.getLines(), ["中"]);
+  history.append("X");
+  assert.deepEqual(history.getLines(), ["中X"]);
+});
+
 test("printable output past the viewport width wraps the tracked cursor", () => {
   // xterm wraps `f` onto the second row, so `CSI 2;1H` overwrites it there
   // instead of adding a separate line below a stale wrapped row.

@@ -1220,6 +1220,7 @@ export const createTerminalOutputHistoryPreview = (options?: {
     setViewportCols(cols: number): void {
       const nextCols = Math.max(0, Math.floor(cols));
       if (nextCols === viewportCols) return;
+      const narrowed = viewportCols > 0 && nextCols < viewportCols;
       // xterm resets its scroll region on any buffer resize, including a
       // width-only one where setViewportRows sees no row change; keep the
       // tracked margins in step so relative moves clamp to the live bounds
@@ -1227,7 +1228,21 @@ export const createTerminalOutputHistoryPreview = (options?: {
       scrollTopMargin = 1;
       scrollBottomMargin = viewportRows > 0 ? viewportRows : Infinity;
       viewportCols = nextCols;
-      if (viewportCols > 0 && cursorCell > viewportCols - 1) {
+      if (viewportCols <= 0) return;
+      if (narrowed && currentCellWidth > viewportCols) {
+        // xterm trims the cursor row to the new width when the terminal
+        // narrows (`reflowCursorLine` defaults to false, so the overflow is
+        // discarded instead of re-wrapped into a continuation row); drop the
+        // same characters from the tracked open line so later output lands on
+        // the row xterm actually shows instead of retaining a phantom tail.
+        current = sliceStringByCellColumns(current, 0, viewportCols, widthTerm);
+        currentCellWidth = pieceCellWidth(current, widthTerm);
+        // The grapheme the last append left open may have been trimmed away.
+        if (openGrapheme !== null && openGraphemeCell > viewportCols) {
+          openGrapheme = null;
+        }
+      }
+      if (cursorCell > viewportCols - 1) {
         // xterm clamps its cursor to the new last column as soon as the
         // terminal narrows; keep the tracked column (and its UTF-16 index) in
         // step so the next printable span lands there instead of padding past
