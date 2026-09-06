@@ -285,3 +285,22 @@ test("directory softResume stamps bridge epoch only on successIds; queued siblin
   resetTransferPauseLatchesForTests();
   resetTransferWalkRegistryForTests();
 });
+
+for (const action of ["pause", "resume"] as const) {
+  test(`superseded cross-window ${action} preserves authoritative paused state`, async (t) => {
+    t.after(resetTransferPauseLatchesForTests);
+    let finish!: (result: { success: boolean; superseded: boolean }) => void;
+    const deferred = () => new Promise<{ success: boolean; superseded: boolean }>((resolve) => { finish = resolve; });
+    const { host, getTasks } = createHost([makeTask(`cross-window-${action}`, action === "pause" ? "transferring" : "paused")], () => ({ pauseTransfer: deferred, resumeTransfer: deferred }));
+    const id = getTasks()[0].id;
+    const operation = action === "pause" ? softPauseTransfer(host, id) : softResumeTransfer(host, id);
+    // A global event from another window changes lifecycle, not this window's local control epoch.
+    host.setTasks(getTasks().map(task => ({ ...task, status: "paused", lifecycleEpoch: 8 })));
+    finish({ success: false, superseded: true });
+    const result = await operation;
+    assert.equal(getTasks()[0].status, "paused");
+    assert.equal(getTasks()[0].lifecycleEpoch, 8);
+    if (action === "pause") assert.equal(isTransferPauseLatched(id), true);
+    else assert.deepEqual(result, { handled: true }, "obsolete response must not trigger dedicated recovery");
+  });
+}

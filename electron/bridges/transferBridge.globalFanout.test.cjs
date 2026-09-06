@@ -300,7 +300,7 @@ test("worker-backed pause and resume fan authoritative lifecycle to every window
   }
 });
 
-for (const outcome of ["resume-success", "pause-failure", "pause-error"]) {
+for (const outcome of ["resume-success", "pause-success", "pause-failure", "pause-error", "resume-error"]) {
   test(`worker ${outcome} arriving after a newer pause cannot broadcast resumed`, async (t) => {
     const sent = [];
     const restore = withElectronVersionStub();
@@ -325,13 +325,13 @@ for (const outcome of ["resume-success", "pause-failure", "pause-error"]) {
       terminalWorkerManager: { request: async () => ++requests === 1 ? firstGate : { success: true } },
     });
     const payload = { transferId: `worker-order-${outcome}` };
-    const channel = outcome === "resume-success" ? "resume" : "pause";
+    const channel = outcome.startsWith("resume") ? "resume" : "pause";
     const first = handlers.get(`netcatty:transfer:${channel}`)(null, payload).catch(() => null);
     await handlers.get("netcatty:transfer:pause")(null, payload);
     const afterPause = sent.length;
-    if (outcome === "pause-error") rejectFirst(new Error("channel closed"));
-    else resolveFirst({ success: outcome === "resume-success", reason: "pause unavailable" });
-    await first;
+    if (outcome.endsWith("error")) rejectFirst(new Error("channel closed"));
+    else resolveFirst({ success: outcome.endsWith("success"), reason: "pause unavailable" });
+    assert.deepEqual(await first, { success: false, superseded: true });
     assert.equal(sent.slice(afterPause).some((event) => event.type === "resumed"), false);
     assert.equal(sent.at(-1).type, "paused");
   });

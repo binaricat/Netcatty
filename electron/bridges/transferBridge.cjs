@@ -7294,6 +7294,9 @@ function registerHandlers(ipcMain, options = {}) {
       workerControlRequests.set(transferId, token);
       try {
         return await work(() => workerControlRequests.get(transferId) === token);
+      } catch (error) {
+        if (workerControlRequests.get(transferId) !== token) return { success: false, superseded: true };
+        throw error;
       } finally {
         if (workerControlRequests.get(transferId) === token) workerControlRequests.delete(transferId);
       }
@@ -7364,7 +7367,7 @@ function registerHandlers(ipcMain, options = {}) {
       });
       try {
         const result = await workerRequest(event, "netcatty:transfer:pause", payload);
-        if (!isCurrent()) return { success: false, reason: "Transfer control was superseded" };
+        if (!isCurrent()) return { success: false, superseded: true };
         if (!result?.success) {
           const rollbackEpoch = nextWorkerLifecycleEpoch(payload?.transferId);
           broadcastGlobalTransferEvent({
@@ -7405,7 +7408,7 @@ function registerHandlers(ipcMain, options = {}) {
       if (queuedResume) return queuedResume;
       return withWorkerControl(payload?.transferId, async (isCurrent) => {
         const result = await workerRequest(event, "netcatty:transfer:resume", payload);
-        if (!isCurrent()) return { success: false, reason: "Transfer control was superseded" };
+        if (!isCurrent()) return { success: false, superseded: true };
         if (result?.success) {
           // Normalize into main-process epoch space (may advance past worker-local).
           // Soft-resume UI must stamp THIS epoch or later worker progress is stale.

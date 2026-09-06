@@ -29,6 +29,8 @@ import { isTransferWalkInFlight } from "./transferWalkRegistry";
 export type TransferControlBridge = {
   pauseTransfer?: (id: string) => Promise<{
     success: boolean;
+    /** A newer control in another window owns the authoritative state. */
+    superseded?: boolean;
     reason?: string;
     checkpointBytes?: number;
     resumeStage?: TransferTask["resumeStage"];
@@ -40,11 +42,17 @@ export type TransferControlBridge = {
   }>;
   resumeTransfer?: (id: string) => Promise<{
     success: boolean;
+    /** A newer control in another window owns the authoritative state. */
+    superseded?: boolean;
     reason?: string;
     lifecycleEpoch?: number;
   }>;
   cancelTransfer?: (id: string) => Promise<unknown>;
 };
+
+function wasSuperseded(result: { success?: boolean; superseded?: boolean } | undefined | null): boolean {
+  return result?.superseded === true;
+}
 
 /** Prefer the highest bridge lifecycleEpoch from successful pause/resume results. */
 function maxBridgeLifecycleEpoch(
@@ -184,6 +192,7 @@ export async function softPauseTransfer(
       ?? { success: false, reason: "Pause unavailable" };
     const maxAttempts = task.isDirectory ? 4 : 16;
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      if (wasSuperseded(result)) return result;
       if (!isTransferControlEpochCurrent(taskId, pauseEpoch)) {
         if (result.success) {
           await undoObsoletePause(id);
@@ -212,6 +221,7 @@ export async function softPauseTransfer(
           return { id, result: { success: false, reason: "Pause superseded by resume" } };
         }
         const result = await pauseOne(id);
+        if (wasSuperseded(result)) return { id, result };
         const live = host.getTasks().find((candidate) => candidate.id === taskId);
         const userResumed = !pauseStillCurrent()
           || !live
@@ -222,7 +232,7 @@ export async function softPauseTransfer(
         }
         return { id, result };
       }));
-      if (!pauseStillCurrent()) return;
+      if (!pauseStillCurrent() || pauseResults.some(({ result }) => wasSuperseded(result))) return;
       const after = host.getTasks().find((candidate) => candidate.id === taskId);
       if (!after || after.status === "cancelled") return;
       if (after.status !== "paused" && after.status !== "pausing") return;
@@ -271,6 +281,7 @@ export async function softPauseTransfer(
     id,
     result: await pauseOne(id),
   })));
+  if (pauseResults.some(({ result }) => wasSuperseded(result))) return "noop";
   const afterLivePause = host.getTasks().find((candidate) => candidate.id === taskId);
   if (afterLivePause?.status === "cancelled") {
     releaseTransferPauseTree(taskId, childIds);
@@ -463,6 +474,7 @@ export async function softResumeTransfer(
   if (!isTransferControlEpochCurrent(taskId, resumeEpoch)) return { handled: true };
   if (!after || ["completed", "cancelled", "failed"].includes(after.status)) return { handled: true };
 
+  if (results.some(wasSuperseded)) return { handled: true };
   const successIds = resumeIds.filter((_, index) => results[index]?.success);
   const walkAlive = isTransferWalkInFlight(taskId);
   // Directory walk can continue after unlatch without bridge resume on every child.

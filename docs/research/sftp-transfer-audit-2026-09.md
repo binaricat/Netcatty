@@ -54,8 +54,24 @@ Verification so far:
   checks after wind-down now pass (109 store/control tests).
 - First full suite: 11377 passed, 7 plugin archive failures traced to missing
   worktree-local nested dependency (yauzl 3.x). Reinstalled with npm ci; all 29
-  plugin CLI tests then pass. Full rerun pending.
-- Production build passes. Current diff review and app interaction remain gates.
+  plugin CLI tests then pass. Full rerun passed: 11386 passed, 0 failed,
+  18 skipped.
+- GitHub review found a cross-window gap: the obsolete worker result was a hard
+  failure to a renderer whose local control epoch had not changed. Explicit
+  superseded outcomes now bypass rollback, compensation and dedicated recovery,
+  including rejected worker requests. Updated focused suite: 122 passed.
+- Production build and lint pass after that follow-up; two independent reviewers
+  found no actionable follow-up issues.
+- Browser fixture exercised the actual transfer-center component/store with
+  simulated transport: pause all, resume all, individual pause, paused filter,
+  and cancel. State/buttons matched; no browser console errors. This is not a
+  full Electron connection-path test.
+- Separate real loopback SSH/SFTP audit experiments killed the transferring child
+  process with SIGKILL and resumed the saved checkpoint in a fresh child process.
+  Both 32 MiB download and upload completed with matching SHA-256. Persisted
+  checkpoints were 30670848 and 14024704 bytes respectively. This validates the
+  transfer engine and disk staging across process death, not the renderer's
+  automatic history restoration or a real VPN/jump-host environment.
 
 ## Historical issue evidence fetched in this audit
 
@@ -99,7 +115,8 @@ proof. Initial title search hit its 100-result cap. Expanded SFTP search returne
 ## Remaining audit coverage
 
 - Finish review of download/upload/remote-to-remote/SCP completion and integrity.
-- Exercise abrupt disconnect and fresh-process recovery in both directions.
+- Exercise transport disconnect and full-app restart/history recovery; engine-level
+  fresh-process recovery in both directions has passed.
 - Review folder manifests, skip/merge/replace, cancellation, path boundaries.
 - Measure many-file discovery/history and inspect renderer responsiveness.
 - Check pooled sessions, authentication, VPN/jump-host boundaries and cleanup.
