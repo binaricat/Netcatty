@@ -34,10 +34,14 @@ test('probe wrapper keeps the start marker separate when terminal echo is disabl
   const { spawnSync } = require('node:child_process');
   const pty = new EventEmitter();
   let job;
+  let pendingInput = '';
   pty.write = (data) => {
     if (String(data).includes('command sh -c')) return;
     if (data === '\x03') return;
-    const script = String(data).replace(/^\x15\x0b/, '');
+    pendingInput += String(data);
+    if (!pendingInput.endsWith('\n')) return;
+    const script = pendingInput.replace(/^\x15\x0b/, '');
+    pendingInput = '';
     const result = spawnSync('/bin/sh', ['-c', script], { encoding: 'utf8' });
     queueMicrotask(() => pty.emit('data', `${job.marker}_QPROMPT> ${result.stdout}`));
   };
@@ -305,5 +309,49 @@ for (const shell of ['/bin/dash', '/bin/zsh']) {
     assert.equal(result.status, 0, result.stderr);
     assert.match(result.stdout, /portable-history-ok/);
     assert.ok(result.stdout.includes(`${marker}_E:0`));
+  });
+}
+
+for (const historyControl of ['', 'ignorespace']) {
+  test(`successful cleanup does not invoke a shadowed builtin (${historyControl || 'default'})`, () => {
+    const { spawnSync } = require('node:child_process');
+    const { buildWrappedCommand } = require('./ptyExecHelpers.cjs');
+    const marker = '__NCMCP_FALLBACK_GUARD__';
+    const input = `HISTFILE=/dev/null; HISTCONTROL=${historyControl}; PS1=; PS2=\nbuiltin() { printf UNEXPECTED_FALLBACK; }\ncommand history -c\necho user_one\n`
+      + buildLiveShellProbe(marker)
+      + buildWrappedCommand('echo command_ok', 'posix', marker, true)
+      + '\ncommand history\nexit\n';
+    const result = spawnSync('/bin/bash', ['--noprofile', '--norc', '-i'], {
+      input, encoding: 'utf8', env: { ...process.env, TERM: 'dumb' }, timeout: 5000,
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.ok(result.stdout.includes(`${marker}_Q`), result.stdout);
+    assert.match(result.stdout, /command_ok/);
+    assert.doesNotMatch(result.stdout, /UNEXPECTED_FALLBACK/);
+    const entries = result.stdout.split('\n').filter(line => /^\s*\d+\s/.test(line));
+    assert.ok(entries.some(line => line.includes('echo user_one')), entries.join('\n'));
+    assert.ok(entries.every(line => !line.includes(marker)), entries.join('\n'));
+  });
+}
+
+for (const stop of ['cancel', 'timeout']) {
+  test(`paced probe stops writing after ${stop}`, async () => {
+    const pty = new EventEmitter();
+    const writes = [];
+    pty.write = data => writes.push(data);
+    const job = startPtyJob(pty, 'echo must_not_run', {
+      shellKind: 'posix', probeLiveShell: true, timeoutMs: stop === 'timeout' ? 70 : 1000,
+    });
+    await new Promise(resolve => setTimeout(resolve, 45));
+    assert.ok(writes.length >= 2, 'probe must have started a later chunk');
+    if (stop === 'cancel') {
+      job.cancel();
+      pty.emit('close');
+    }
+    await job.resultPromise;
+    const count = writes.length;
+    await new Promise(resolve => setTimeout(resolve, 100));
+    assert.equal(writes.length, count);
+    assert.ok(writes.every(data => !data.includes('must_not_run')));
   });
 }
