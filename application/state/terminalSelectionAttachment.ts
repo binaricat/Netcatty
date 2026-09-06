@@ -113,7 +113,10 @@ export function buildPromptWithTerminalSelectionAttachments(
     .filter(isVaultNoteAttachment)
     .map((attachment) => {
       const text = decodeVaultNoteAttachment(attachment);
-      if (!text) return null;
+      // Only a decode failure (`null`) drops the block; an empty note body is
+      // valid content and must keep its header (title + note id) so the agent
+      // can still identify the attached note.
+      if (text === null) return null;
       const title = attachment.vaultNoteTitle || attachment.filename || "note";
       const noteId = attachment.vaultNoteId ? ` (id: ${attachment.vaultNoteId})` : "";
       return `\n\n[Vault Note: ${title}${noteId}]\n${text}`;
