@@ -114,6 +114,47 @@ test("coalesces consecutive deferred restores so only the earliest runs", async 
   assert.deepEqual(restored, [1, 3]);
 });
 
+test("coalesces fits that race the scheduled restore frame", async () => {
+  const renderListeners: RenderListener[] = [];
+  const term = createTerm(true, renderListeners);
+  const restored: number[] = [];
+
+  assert.equal(
+    deferScrollRestoreDuringSynchronizedOutput(term, () => {
+      restored.push(1);
+    }),
+    true,
+  );
+
+  // The mode ends and the restore is scheduled for a subsequent frame, but
+  // the pending slot must stay occupied through that frame.
+  (term.modes as { synchronizedOutputMode: boolean }).synchronizedOutputMode = false;
+  renderListeners[0]();
+  assert.equal(restored.length, 0);
+
+  // A fit racing between the render and the scheduled frame must be dropped:
+  // running its restore immediately would let its programmatic scroll trip
+  // the retained scroll tracker into canceling the original restore.
+  assert.equal(
+    deferScrollRestoreDuringSynchronizedOutput(term, () => {
+      restored.push(2);
+    }),
+    false,
+  );
+
+  await flushMacroTask();
+  assert.deepEqual(restored, [1]);
+
+  // The slot is freed once the scheduled restore runs.
+  assert.equal(
+    deferScrollRestoreDuringSynchronizedOutput(term, () => {
+      restored.push(3);
+    }),
+    true,
+  );
+  assert.deepEqual(restored, [1, 3]);
+});
+
 test("cancelPendingSynchronizedRestore drops the pending restore without running it", async () => {
   const renderListeners: RenderListener[] = [];
   const term = createTerm(true, renderListeners);
@@ -142,4 +183,22 @@ test("cancelPendingSynchronizedRestore drops the pending restore without running
 
   // Cancelling without a pending restore is a no-op.
   cancelPendingSynchronizedRestore(term);
+});
+
+test("cancelPendingSynchronizedRestore also cancels a restore waiting for its scheduled frame", async () => {
+  const renderListeners: RenderListener[] = [];
+  const term = createTerm(true, renderListeners);
+  let restored = 0;
+
+  deferScrollRestoreDuringSynchronizedOutput(term, () => {
+    restored += 1;
+  });
+
+  // Schedule the restore (mode ended, render observed).
+  (term.modes as { synchronizedOutputMode: boolean }).synchronizedOutputMode = false;
+  renderListeners[0]();
+
+  cancelPendingSynchronizedRestore(term);
+  await flushMacroTask();
+  assert.equal(restored, 0);
 });

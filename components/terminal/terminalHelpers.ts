@@ -661,15 +661,21 @@ export function deferScrollRestoreDuringSynchronizedOutput(
   term: XTerm,
   restore: () => void,
 ): boolean {
+  // Coalesce even when the mode has already ended: the pending restore may
+  // still be waiting for its scheduled frame (see below), and running a
+  // second restore in that window would apply the second fit's reflow-adjusted
+  // target instead of the pre-reflow reading row — its programmatic scroll can
+  // also trip the retained scroll tracker's onScroll listener into marking the
+  // original restore as user-canceled.
+  if (pendingSynchronizedRestores.has(term)) return false;
   if (!term.modes?.synchronizedOutputMode) {
     restore();
     return true;
   }
-  if (pendingSynchronizedRestores.has(term)) return false;
   let listener: { dispose: () => void } | undefined;
+  let canceled = false;
   listener = term.onRender(() => {
     if (term.modes?.synchronizedOutputMode) return;
-    pendingSynchronizedRestores.delete(term);
     listener?.dispose();
     listener = undefined;
     // The public onRender is forwarded from
@@ -679,7 +685,19 @@ export function deferScrollRestoreDuringSynchronizedOutput(
     // would still go through stale scroll dimensions and reapply the resize
     // delta (#3299). Push it to a subsequent task/frame so the viewport's
     // internal render handler has applied fresh dimensions first.
-    runAfterRenderFrame(restore);
+    //
+    // Keep the pending slot occupied until the restore actually runs so fits
+    // racing in that window coalesce (see the check at the top) instead of
+    // restoring immediately.
+    pendingSynchronizedRestores.set(term, {
+      dispose: () => {
+        canceled = true;
+      },
+    });
+    runAfterRenderFrame(() => {
+      pendingSynchronizedRestores.delete(term);
+      if (!canceled) restore();
+    });
   });
   pendingSynchronizedRestores.set(term, listener);
   return true;

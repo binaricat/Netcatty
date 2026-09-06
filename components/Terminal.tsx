@@ -1,4 +1,5 @@
 import { Terminal as XTerm } from "@xterm/xterm";
+import type { IMarker } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { SerializeAddon } from "@xterm/addon-serialize";
 import { SearchAddon } from "@xterm/addon-search";
@@ -2884,20 +2885,25 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     buffer: XTerm["buffer"]["active"];
     moved: boolean;
     lastScrollY: number;
-    // Content of the buffer line at `lastScrollY` (empty when unavailable).
-    // Lets the onScroll handler tell scrollback trims apart from user
-    // scrolls: a trim shifts every buffer row down by one, so the line that
-    // was at lastScrollY reappears at lastScrollY - 1 with identical content.
-    lastScrollLine: string;
-    // Number of scrollback lines trimmed since the restore was captured.
-    // Trimming shifts absolute row indices down, so the restore's saved
-    // target row must shift down by the same amount.
-    trimAdjust: number;
+    // Marker pinned to the restore's saved viewport row. xterm keeps the
+    // marker's line in sync with that row across scrollback trims and reflow
+    // (it adjusts on line insert/delete/trim and is disposed once its row is
+    // trimmed out of the buffer, reporting -1 afterwards). The marker gives
+    // the onScroll handler an unambiguous buffer-trim signal: a trim moves
+    // the reported viewport row and the marker down by exactly one row in the
+    // same BufferService.scroll call, while a user scroll moves only the
+    // reported row. Line content cannot tell the two apart because adjacent
+    // rows often repeat (blank lines, repeated output).
+    marker: IMarker;
+    // Marker line observed at the last scroll notification, so a trim shows
+    // up as a one-row marker shift between consecutive events.
+    lastMarkerLine: number;
     scrollListener?: { dispose: () => void };
   };
-  // Snapshot of the buffer line at an absolute row for scroll-trim detection.
-  const scrollLineSnapshot = (t: XTerm, y: number): string =>
-    t.buffer.active.getLine(y)?.translateToString(true) ?? "";
+  // Pin a marker to an absolute buffer row: registerMarker offsets from the
+  // cursor's absolute row (baseY + cursorY).
+  const registerSavedRowMarker = (t: XTerm, y: number): IMarker =>
+    t.registerMarker(y - (t.buffer.active.baseY + t.buffer.active.cursorY));
   const syncScrollTrackerRef = useRef<SyncScrollTracker | null>(null);
   const pendingWriteSafeFitRef = useRef<{
     term: XTerm;
@@ -3072,19 +3078,23 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         ) {
           tracker = retainedTracker;
           tracker.lastScrollY = term.buffer.active.viewportY;
-          tracker.lastScrollLine = scrollLineSnapshot(term, tracker.lastScrollY);
+          // The reflow above may have moved the marker without any scroll
+          // notification; refresh its baseline alongside lastScrollY.
+          tracker.lastMarkerLine = tracker.marker.line;
         } else {
           if (retainedTracker && retainedTracker.term === term) {
             retainedTracker.scrollListener?.dispose();
+            retainedTracker.marker.dispose();
             cancelPendingSynchronizedRestore(term);
           }
+          const marker = registerSavedRowMarker(term, savedViewportY);
           tracker = {
             term,
             buffer: restoreBuffer,
             moved: false,
             lastScrollY: term.buffer.active.viewportY,
-            lastScrollLine: scrollLineSnapshot(term, term.buffer.active.viewportY),
-            trimAdjust: 0,
+            marker,
+            lastMarkerLine: marker.line,
           };
           syncScrollTrackerRef.current = tracker;
         }
@@ -3099,34 +3109,32 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         // recycles the top line and decrements ydisp to keep the scrolled-up
         // viewport stable, then reports the decremented row. That looks like
         // a one-line user scroll, so identify the trim instead of canceling:
-        // the buffer is at capacity and the line that was at lastScrollY
-        // reappears one row lower with identical content. A trim shifts
-        // absolute row indices down, so count it to shift the restore's
-        // saved target down accordingly.
+        // a trim moves the saved-row marker down one row in the same
+        // BufferService.scroll call that decrements the reported row, while a
+        // user scroll leaves the marker untouched. Line content cannot make
+        // that distinction (adjacent rows often repeat), so rely on the
+        // marker's one-row shift only. The marker also shifts absolute row
+        // indices down for the restore's saved target.
         let scrollListener: { dispose: () => void } | undefined;
         if (!isRetained) {
           scrollListener = term.onScroll((y: number) => {
-            const buffer = term.buffer.active;
             if (y !== tracker.lastScrollY) {
-              const scrollback = term.options.scrollback;
-              const maxBufferLength = typeof scrollback === "number"
-                ? term.rows + scrollback
-                : Number.POSITIVE_INFINITY;
+              // A disposed marker reports -1 (its row was trimmed out of the
+              // buffer), which can only match the trim signature for the
+              // trim that disposed it.
+              const markerLine = tracker.marker.line;
               if (
                 y === tracker.lastScrollY - 1 &&
-                buffer.length >= maxBufferLength &&
-                buffer.getLine(y)?.translateToString(true) === tracker.lastScrollLine
+                markerLine === tracker.lastMarkerLine - 1
               ) {
-                tracker.trimAdjust++;
                 tracker.lastScrollY = y;
-                // The snapshot already matches this row's content by
-                // definition, so it stays valid for the next trim.
+                tracker.lastMarkerLine = markerLine;
                 return;
               }
               tracker.moved = true;
             }
             tracker.lastScrollY = y;
-            tracker.lastScrollLine = scrollLineSnapshot(term, y);
+            tracker.lastMarkerLine = tracker.marker.line;
           });
           tracker.scrollListener = scrollListener;
         }
@@ -3135,15 +3143,22 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           if (syncScrollTrackerRef.current === tracker) {
             syncScrollTrackerRef.current = null;
           }
-          if (term.buffer.active !== restoreBuffer) return;
+          if (term.buffer.active !== restoreBuffer) {
+            tracker.marker.dispose();
+            return;
+          }
+          const markerTarget = tracker.marker.line;
+          tracker.marker.dispose();
           if (tracker.moved) return;
           if (wasPinnedToBottom) {
             term.scrollToBottom();
           } else {
-            // Scrollback trims shifted absolute row indices down; follow the
-            // saved content to its current row.
+            // The marker followed the saved row across scrollback trims (and
+            // reflow); follow it to the row's current position. A disposed
+            // marker reports -1 — its row no longer exists, so the top of
+            // the buffer is the closest remaining position.
             const targetY = Math.min(
-              savedViewportY - tracker.trimAdjust,
+              Math.max(markerTarget, 0),
               term.buffer.active.baseY,
             );
             if (term.buffer.active.viewportY !== targetY) {
@@ -3156,6 +3171,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           // target; drop this one along with its scroll listener (if any).
           if (scrollListener) {
             scrollListener.dispose();
+            tracker.marker.dispose();
             if (syncScrollTrackerRef.current === tracker) {
               syncScrollTrackerRef.current = null;
             }
