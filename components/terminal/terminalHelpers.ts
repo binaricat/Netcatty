@@ -571,6 +571,14 @@ export function alignTerminalViewportScroll(term: XTerm): void {
   // requested row, so the queued sync then assumes the position was already
   // applied and the DOM offset stays stale — the next wheel scroll jumps
   // upward by the resize delta. Sync the dimensions now, before positioning.
+  // If synchronized output (DECSET 2026) is active, _sync() above is a no-op
+  // that merely defers DOM scroll updates until the mode ends; positioning
+  // here would still record the requested row as _latestYDisp against the
+  // stale dimensions, and the deferred sync would then see
+  // ydisp === _latestYDisp and skip repositioning, leaving a stale DOM
+  // offset. Leave positioning to that deferred sync instead: after reflow the
+  // buffer's ydisp differs from the recorded _latestYDisp, so it repositions
+  // with fresh dimensions on its own.
   if (typeof viewport._sync === "function") {
     try {
       viewport._sync.call(viewport);
@@ -578,6 +586,7 @@ export function alignTerminalViewportScroll(term: XTerm): void {
       logger.warn("Sync viewport dimensions after resize failed", err);
     }
   }
+  if (term.modes?.synchronizedOutputMode) return;
 
   try {
     scrollToLine.call(viewport, term.buffer.active.viewportY, true);
