@@ -39,9 +39,10 @@ const host = (id: string, label: string, hostname = label): Host => ({
   protocol: "ssh",
 } as Host);
 
-for (const retainedStatus of [undefined, "interrupted", "failed"] as const) {
+for (const retainedStatus of [undefined, "interrupted", "failed", "paused"] as const) {
+for (const newerPause of retainedStatus === "paused" ? [false, true] : [false]) {
 const batchExistingIdentity = retainedStatus !== undefined;
-test(`superseded folder child settles when its completion was compacted into the parent: retained=${retainedStatus ?? "none"}`, async (t) => {
+test(`superseded folder child settles when its completion was compacted into the parent: retained=${retainedStatus ?? "none"}, newerPause=${newerPause}`, async (t) => {
   const { sftpTransferCenterStore } = await import("../sftpTransferCenterStore");
   const previousLocalStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
   Object.defineProperty(globalThis, "localStorage", {
@@ -90,7 +91,10 @@ test(`superseded folder child settles when its completion was compacted into the
       localPath: "/local/folder/a.bin", relativePath: "a.bin", type: "file", size: 10, lastModified: 1,
     }],
     mkdirSftp: async () => {},
-    statLocal: async () => ({ size: 10, lastModified: 1 }),
+    statLocal: async () => {
+      if (newerPause) sftpTransferCenterStore.patchTask(persisted.id, { status: "paused", lifecycleEpoch: 9 });
+      return { size: 10, lastModified: 1 };
+    },
     startStreamTransfer: async (options: {
       transferId: string; parentTaskId?: string; directoryEntryIndex?: number; directoryEntryIdentity?: string;
     }) => {
@@ -121,6 +125,12 @@ test(`superseded folder child settles when its completion was compacted into the
     running,
     new Promise<"still-waiting">((resolve) => setTimeout(() => resolve("still-waiting"), 450)),
   ]);
+  if (newerPause) {
+    assert.equal(result, "still-waiting", "a later pause must still hold fresh recovery");
+    assert.equal(childId, undefined, "newer paused child must not start");
+    assert.equal(sftpTransferCenterStore.getTask(persisted.id)?.lifecycleEpoch, 9);
+    return;
+  }
   assert.notEqual(result, "still-waiting", "completed compacted child must not leave its folder waiting forever");
   assert.ok(childId);
   assert.equal(sftpTransferCenterStore.getTask(childId), undefined, "completed row was compacted");
@@ -128,6 +138,7 @@ test(`superseded folder child settles when its completion was compacted into the
   assert.notEqual(result, "still-waiting", "completed compacted child must not leave its folder waiting forever");
   assert.equal((result as { success: boolean }).success, true);
 });
+}
 }
 
 test("resolveDirectoryResumeTargetRoot prefers staged replace path", () => {

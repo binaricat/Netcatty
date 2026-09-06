@@ -100,7 +100,7 @@ export interface SftpTransferCenterStore {
   /** Observe exact task settlement before completed child rows are compacted. */
   observeTaskSettlement(task: TransferTask): { read(): TransferTask | undefined; dispose(): void };
   /** Publish an explicit dispatch identity without flushing large child-history batches. */
-  admitTaskRun(task: TransferTask): "ready" | "paused" | "completed" | "cancelled" | "conflict";
+  admitTaskRun(task: TransferTask, pausedAtResume?: TransferTask): "ready" | "paused" | "completed" | "cancelled" | "conflict";
   getOwnerTasks(ownerId: string): TransferTask[];
   publishOwner(ownerId: string, tasks: readonly TransferTask[]): void;
   registerOwner(ownerId: string, controls: SftpTransferOwnerControls): () => void;
@@ -1329,7 +1329,7 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
     },
     getSnapshot: () => ensureSnapshot(),
     getBadgeSnapshot: () => badgeSnapshot,
-    admitTaskRun(incoming) {
+    admitTaskRun(incoming, pausedAtResume) {
       const rootId = incoming.parentTaskId ?? incoming.id;
       if (isTransferOrRootCancelled(rootId, incoming.id)) return "cancelled";
       const parent = incoming.parentTaskId ? tasks.find((task) => task.id === rootId) : undefined;
@@ -1342,9 +1342,12 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
       if (existing?.status === "completed") {
         return matchesObservedTask(incoming, existing) ? "completed" : "conflict";
       }
+      const resumesUnchangedPause = existing === pausedAtResume
+        && existing?.status === "paused"
+        && (parent?.status === "pending" || parent?.status === "transferring");
       if (isTransferOrRootPauseLatched(rootId, incoming.id)
         || parent?.status === "paused" || parent?.status === "pausing"
-        || existing?.status === "paused" || existing?.status === "pausing") return "paused";
+        || (existing?.status === "paused" && !resumesUnchangedPause) || existing?.status === "pausing") return "paused";
       if (parent?.status === "completed") return "conflict";
       if (!existing) return "ready";
       if (existing.status === "transferring"

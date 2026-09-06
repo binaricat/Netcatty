@@ -155,3 +155,17 @@ test("a resumed retry does not inherit failed settlement captured while admissio
   resetTransferPauseLatchesForTests();
   assert.equal(await Promise.race([settled, new Promise((resolve) => setTimeout(() => resolve("still-waiting"), 1000))]), "completed");
 });
+
+test("fresh directory recovery authorizes only an unchanged retained pause under an active parent", () => {
+  const store = createSftpTransferCenterStore();
+  const task = child();
+  store.upsertTasks([{ ...task, id: "root", parentTaskId: undefined, isDirectory: true, status: "pending" }, { ...task, status: "paused", lifecycleEpoch: 4 }]);
+  const paused = store.getTask(task.id)!;
+  assert.equal(store.admitTaskRun(task), "paused", "ordinary live dispatch must respect cross-window pause");
+  assert.equal(store.admitTaskRun(task, paused), "ready");
+  store.patchTask(task.id, { status: "paused", lifecycleEpoch: 5 });
+  assert.equal(store.admitTaskRun(task, paused), "paused", "newer child pause invalidates fresh recovery permission");
+  const currentPause = store.getTask(task.id)!;
+  store.patchTask("root", { status: "paused", lifecycleEpoch: 6 });
+  assert.equal(store.admitTaskRun(task, currentPause), "paused", "parent pause still wins");
+});

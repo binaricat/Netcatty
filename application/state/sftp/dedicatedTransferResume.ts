@@ -1001,6 +1001,11 @@ async function resumeDirectoryWithDedicatedSession(
   onProgress?: (progress: DedicatedResumeProgress) => void,
   options?: DedicatedResumeOptions,
 ): Promise<DedicatedResumeResult> {
+  // Fresh recovery authorizes only pauses already present at its entry. Keep
+  // row references so a newer cross-window pause invalidates that permission.
+  const pausedAtResume = new Map(sftpTransferCenterStore.getSnapshot().tasks
+    .filter((child) => child.parentTaskId === parent.id && child.status === "paused")
+    .map((child) => [child.id, child]));
   const bridge = netcattyBridge.get();
   if (!bridge?.startStreamTransfer) {
     return { success: false, error: "Transfer bridge unavailable" };
@@ -1273,7 +1278,7 @@ async function resumeDirectoryWithDedicatedSession(
                 uploadCheckpointBytes: childBase.uploadCheckpointBytes,
                 sourceFingerprint: childBase.sourceFingerprint,
                 skipAdmission: true,
-              }), () => options?.shouldAbort?.() === true);
+              }), () => options?.shouldAbort?.() === true, pausedAtResume.get(childId));
 
               if (streamResult?.error || streamResult?.cancelled) {
                 throw new Error(streamResult.error || "Transfer cancelled");
