@@ -17,6 +17,21 @@ test("createVaultNoteAttachment returns null without a note id", () => {
   assert.equal(createVaultNoteAttachment({ id: "  ", title: "T", content: "c" }), null);
 });
 
+test("createVaultNoteAttachment preserves a note id with surrounding whitespace", () => {
+  // `sanitizeVaultNote` keeps imported/synced ids verbatim and the Vault
+  // agent bridge resolves notes by exact id equality, so the attachment must
+  // carry the original id (trim only for validation).
+  const attachment = createVaultNoteAttachment({ id: " note-ws ", title: "T", content: "abc".repeat(70_001) });
+
+  assert.ok(attachment);
+  assert.equal(attachment.vaultNoteId, " note-ws ");
+  const decoded = decodeVaultNoteAttachment(attachment) ?? "";
+  assert.match(decoded, /noteId {2}note-ws /);
+
+  const prompt = buildPromptWithTerminalSelectionAttachments("summarize", [attachment]);
+  assert.match(prompt, /\[Vault Note: T \(id: {2}note-ws \)\]/);
+});
+
 test("createVaultNoteAttachment attaches the note entity with content roundtrip", () => {
   const attachment = createVaultNoteAttachment({
     id: "note-1",

@@ -94,7 +94,10 @@ export function attachVaultNoteMention(
   existingAttachments: ReadonlyArray<UploadedFile>,
   note: Pick<VaultNote, "id" | "title" | "content">,
 ): VaultNoteMentionResult {
-  const noteId = String(note.id || "").trim();
+  // Match the raw id: `createVaultNoteAttachment` persists the original id
+  // (whitespace included) in `vaultNoteId`, so the duplicate check must use
+  // the same form.
+  const noteId = String(note.id || "");
   const upload = createVaultNoteAttachment(note);
   if (!upload) return { upload: null, status: "invalid" };
   const usedBytes = existingAttachments.reduce(
@@ -153,11 +156,17 @@ function sanitizeNoteFilename(title: string): string {
 }
 
 export function createVaultNoteAttachment(note: Pick<VaultNote, "id" | "title" | "content">): UploadedFile | null {
-  const id = String(note.id || "").trim();
+  // Keep the original id (whitespace included): `sanitizeVaultNote` preserves
+  // whitespace in imported/synced note ids, and the Vault agent bridge
+  // resolves `note.get`/`note.update` by exact id equality, so a trimmed id
+  // in the prompt would not address the actual note entity. Validate the
+  // trimmed form, but attach and reference the original id verbatim.
+  const id = String(note.id || "");
+  const trimmedId = id.trim();
   // An unbounded id would be persisted verbatim in `vaultNoteId` and could
   // push the newest session past its storage budget on its own; truncating
   // would break `vault_notes_get` addressing, so reject instead.
-  if (!id || id.length > MAX_VAULT_NOTE_ID_CHARS) return null;
+  if (!trimmedId || id.length > MAX_VAULT_NOTE_ID_CHARS) return null;
   const title = boundNoteTitle(String(note.title || "").trim()) || "Untitled note";
   const content = boundNoteBody(note.content ?? "", id);
   const base64Data = bytesToBase64(new TextEncoder().encode(content));

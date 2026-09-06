@@ -157,6 +157,23 @@ test('boundPromptForExternalSdk re-states headers straddling either cut', () => 
   assert.match(bounded, /Omitted Vault note headers: \[Vault Note: Second \(id: id-2\)\] \[Vault Note: Third \(id: id-3\)\]/);
 });
 
+test('boundPromptForExternalSdk re-states every lost header, including the tail owner', () => {
+  const note = (title: string, id: string, size: number) => (
+    `\n\n[Vault Note: ${title} (id: ${id})]\n${'body '.repeat(size / 5)}`
+  );
+  // Fifteen ~50k notes fit under the 768 KiB attachment budget but far
+  // exceed the 100k prompt cap: only the first header survives in the head,
+  // and the retained tail belongs to note 15, whose header must be restored.
+  let prompt = 'question';
+  for (let index = 1; index <= 15; index += 1) {
+    prompt += note(`Note ${index}`, `id-${index}`, 50_000);
+  }
+  const bounded = boundPromptForExternalSdk(prompt);
+
+  assert.match(bounded, /Omitted Vault note headers: .*\[Vault Note: Note 15 \(id: id-15\)\]/);
+  assert.ok(bounded.length <= 100_000, `bounded length ${bounded.length} exceeds 100_000`);
+});
+
 test('boundPromptForExternalSdk caps restored headers and keeps the output bound', () => {
   // A pathological single-line header spanning the head/tail cut would
   // otherwise be restored verbatim and defeat the 100k cap.

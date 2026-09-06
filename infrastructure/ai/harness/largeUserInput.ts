@@ -63,8 +63,9 @@ const EXTERNAL_PROMPT_TAIL_CHARS = 16_000;
 // `[Vault Note: <title> (id: <noteId>)]` blocks. A head/tail cut can drop a
 // block's header while keeping part of its body, leaving the tail unlabeled
 // and its note id unrecoverable (external agents have no `tool_output_read`
-// recovery path), so the lost headers are re-stated in the truncation notice.
-const EXTERNAL_PROMPT_MAX_LOST_NOTE_HEADERS = 10;
+// recovery path), so every lost header is collected and re-stated in the
+// truncation notice; the header owning the retained tail is kept even when
+// the notice budget forces the others out (see `boundPromptForExternalSdk`).
 // A pathological single-line `[Vault Note: ...]` sequence can be arbitrarily
 // long; restoring it verbatim would defeat the prompt bound, so each restored
 // header is capped (keeping the `[Vault Note: ` prefix and the `(id: ...)]`
@@ -89,12 +90,24 @@ function collectLostNoteHeaders(prompt: string, headLength: number, tailStart: n
     // A header is preserved only if the cut hides it (fully or partially):
     // headers shown in full already carry their title and id.
     const fullyVisible = end <= headLength || match.index >= tailStart;
-    if (!fullyVisible && !lost.includes(match[0])) {
-      lost.push(match[0]);
-      if (lost.length >= EXTERNAL_PROMPT_MAX_LOST_NOTE_HEADERS) break;
-    }
+    if (!fullyVisible && !lost.includes(match[0])) lost.push(match[0]);
   }
   return lost;
+}
+
+/**
+ * The header straddling the tail cut owns the visible tail fragment, so its
+ * title and id must be re-stated even when the notice budget drops every
+ * other lost header. Returns null when no header spans `tailStart`.
+ */
+function findTailNoteHeader(prompt: string, tailStart: number): string | null {
+  NOTE_HEADER_PATTERN.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = NOTE_HEADER_PATTERN.exec(prompt)) !== null) {
+    if (match.index >= tailStart) break;
+    if (match.index + match[0].length > tailStart) return match[0];
+  }
+  return null;
 }
 
 /** Hard-bound an external SDK prompt, keeping both ends and never splitting a surrogate pair. */
@@ -105,26 +118,40 @@ export function boundPromptForExternalSdk(prompt: string): string {
   if (/[\uD800-\uDBFF]$/.test(head)) head = head.slice(0, -1);
   if (/^[\uDC00-\uDFFF]/.test(tail)) tail = tail.slice(1);
   const omitted = prompt.length - head.length - tail.length;
-  const lostNoteHeaders = collectLostNoteHeaders(prompt, head.length, prompt.length - tail.length)
-    .map(capNoteHeader);
+  const tailStart = prompt.length - tail.length;
+  const lostNoteHeaders = collectLostNoteHeaders(prompt, head.length, tailStart).map(capNoteHeader);
+  const tailNoteHeader = findTailNoteHeader(prompt, tailStart);
+  if (tailNoteHeader !== null) {
+    const cappedTailNoteHeader = capNoteHeader(tailNoteHeader);
+    // Dedup may have folded the tail-owning header into an earlier identical
+    // entry (or it may be missing entirely when capping collided); make sure
+    // its text is present so the visible tail fragment stays labeled.
+    if (!lostNoteHeaders.includes(cappedTailNoteHeader)) lostNoteHeaders.push(cappedTailNoteHeader);
+  }
   const noticePrefix = `\n\n[... prompt truncated for size: showing the first ${head.length} and last ${tail.length} of ${prompt.length} characters (${omitted} omitted).`;
   const noticeSuffix = ' If a Vault note attachment above looks incomplete, ask the user to share the missing part ...]\n\n';
+  const headersNotePrefix = ' Omitted Vault note headers: ';
   // Enforce the final output bound: the restored headers must fit in the
-  // remaining budget, so drop whole headers (longest-restored last) until the
-  // notice fits.
+  // remaining budget. Headers near the head are the least valuable (their
+  // opening text is still visible in the head), so drop those first; the
+  // last entry — the header owning the retained tail — is always kept, and
+  // the per-header cap (400 chars) keeps it within the ~3.7k remaining
+  // budget, so the output bound cannot be exceeded.
   const maxHeadersNoteLength = Math.max(
     0,
     EXTERNAL_PROMPT_MAX_CHARS - head.length - tail.length - noticePrefix.length - noticeSuffix.length,
   );
-  let restoredHeaders = lostNoteHeaders;
-  while (
-    restoredHeaders.length > 0
-    && ` Omitted Vault note headers: ${restoredHeaders.join(' ')}`.length > maxHeadersNoteLength
-  ) {
-    restoredHeaders = restoredHeaders.slice(0, -1);
+  const restoredHeaders: string[] = [];
+  let restoredLength = headersNotePrefix.length;
+  for (let index = lostNoteHeaders.length - 1; index >= 0; index -= 1) {
+    const header = lostNoteHeaders[index];
+    const nextLength = restoredLength + header.length + (restoredHeaders.length > 0 ? 1 : 0);
+    if (restoredHeaders.length > 0 && nextLength > maxHeadersNoteLength) break;
+    restoredHeaders.unshift(header);
+    restoredLength = nextLength;
   }
   const lostNoteHeadersNote = restoredHeaders.length > 0
-    ? ` Omitted Vault note headers: ${restoredHeaders.join(' ')}`
+    ? `${headersNotePrefix}${restoredHeaders.join(' ')}`
     : '';
   return [
     head,
