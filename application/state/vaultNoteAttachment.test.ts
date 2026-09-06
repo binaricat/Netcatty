@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   MAX_VAULT_NOTE_ATTACHMENT_CHARS,
+  MAX_VAULT_NOTE_ID_CHARS,
   MAX_VAULT_NOTE_TOTAL_ATTACHMENT_BYTES,
   VAULT_NOTE_ATTACHMENT_MEDIA_TYPE,
   attachVaultNoteMention,
@@ -133,7 +134,7 @@ test("attachVaultNoteMention reports a duplicate for an already mentioned note a
 test("attachVaultNoteMention rejects a note that would exceed the aggregate budget", () => {
   // Each note fits the per-note char cap, but a fifth pushes the aggregate
   // decoded payload past MAX_VAULT_NOTE_TOTAL_ATTACHMENT_BYTES.
-  const noteBody = "a".repeat(Math.floor(MAX_VAULT_NOTE_TOTAL_ATTACHMENT_BYTES / 4));
+  const noteBody = "a".repeat(Math.floor(MAX_VAULT_NOTE_TOTAL_ATTACHMENT_BYTES / 4) - 1000);
   assert.ok(noteBody.length <= MAX_VAULT_NOTE_ATTACHMENT_CHARS);
   let attachments: ReturnType<typeof createVaultNoteAttachment>[] = [];
   for (const id of ["n1", "n2", "n3", "n4"]) {
@@ -208,4 +209,41 @@ test("attachVaultNoteMention rejects notes without an id", () => {
 
   assert.equal(result.status, "invalid");
   assert.equal(result.upload, null);
+});
+
+test("createVaultNoteAttachment rejects unreasonably long note ids", () => {
+  // A multi-megabyte id is persisted verbatim in `vaultNoteId` and could push
+  // the newest session past its storage budget on its own.
+  const result = attachVaultNoteMention([], {
+    id: "id-" + "a".repeat(2 * 1024 * 1024),
+    title: "T",
+    content: "c",
+  });
+
+  assert.equal(result.status, "invalid");
+  assert.equal(result.upload, null);
+  assert.equal(createVaultNoteAttachment({ id: "a".repeat(MAX_VAULT_NOTE_ID_CHARS + 1), title: "T", content: "c" }), null);
+  assert.ok(createVaultNoteAttachment({ id: "a".repeat(MAX_VAULT_NOTE_ID_CHARS), title: "T", content: "c" }));
+});
+
+test("attachVaultNoteMention counts the persisted note id toward the aggregate budget", () => {
+  // A long (but accepted) id adds persisted bytes beyond the decoded body;
+  // three of these must trip the budget instead of silently passing.
+  const longId = "i".repeat(MAX_VAULT_NOTE_ID_CHARS);
+  const noteBody = "a".repeat(Math.floor(MAX_VAULT_NOTE_TOTAL_ATTACHMENT_BYTES / 4) - 100);
+  assert.ok(noteBody.length <= MAX_VAULT_NOTE_ATTACHMENT_CHARS);
+  let attachments: ReturnType<typeof createVaultNoteAttachment>[] = [];
+  for (const [index, suffix] of ["a", "b", "c"].entries()) {
+    const id = longId.slice(0, MAX_VAULT_NOTE_ID_CHARS - 1) + suffix;
+    const result = attachVaultNoteMention(attachments, { id, title: suffix, content: noteBody });
+    assert.equal(result.status, "attached", `note ${index} should fit`);
+    attachments = [...attachments, result.upload!];
+  }
+
+  const overflow = attachVaultNoteMention(
+    attachments,
+    { id: longId, title: "x4", content: noteBody },
+  );
+  assert.equal(overflow.status, "budget");
+  assert.equal(overflow.upload, null);
 });

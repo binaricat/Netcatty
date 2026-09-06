@@ -46,11 +46,33 @@ export const MAX_VAULT_NOTE_TOTAL_ATTACHMENT_BYTES = 768 * 1024;
  */
 export const MAX_VAULT_NOTE_TITLE_CHARS = 120;
 
+/**
+ * Upper bound for the note id persisted in attachment metadata
+ * (`vaultNoteId`). Vault note ids are unbounded strings, and the session
+ * serializer cannot shrink this field to fit its storage budget, so a
+ * pasted or synced note with a multi-megabyte id must be rejected rather
+ * than attached; truncating the id would break `vault_notes_get` addressing.
+ */
+export const MAX_VAULT_NOTE_ID_CHARS = 200;
+
 /** Estimate the decoded byte size of a base64 payload without decoding it. */
 function base64DecodedByteLength(base64: string): number {
   let chars = base64.length;
   while (chars > 0 && base64.charCodeAt(chars - 1) === 61 /* "=" padding */) chars -= 1;
   return Math.floor((chars * 3) / 4);
+}
+
+/**
+ * Persisted byte cost of a vault-note attachment against the session storage
+ * budget: the decoded body (persisted twice, as `base64Data` and inside
+ * `dataUrl`) plus the `vaultNoteId` metadata string, which the session
+ * serializer cannot shrink to fit.
+ */
+function vaultNoteAttachmentBudgetBytes(attachment: Pick<UploadedFile, "base64Data" | "vaultNoteId">): number {
+  const idBytes = typeof attachment.vaultNoteId === "string"
+    ? new TextEncoder().encode(attachment.vaultNoteId).length
+    : 0;
+  return base64DecodedByteLength(attachment.base64Data) + idBytes;
 }
 
 export type VaultNoteMentionStatus = "attached" | "duplicate" | "budget" | "invalid";
@@ -78,7 +100,7 @@ export function attachVaultNoteMention(
   const usedBytes = existingAttachments.reduce(
     (total, attachment) => (
       isVaultNoteAttachment(attachment)
-        ? total + base64DecodedByteLength(attachment.base64Data)
+        ? total + vaultNoteAttachmentBudgetBytes(attachment)
         : total
     ),
     0,
@@ -92,13 +114,13 @@ export function attachVaultNoteMention(
     // Re-mentioning a note refreshes it in place rather than appending a
     // second copy; the freed payload of the stale attachment counts against
     // the new one's budget.
-    const usedWithoutDuplicate = usedBytes - base64DecodedByteLength(existingDuplicate.base64Data);
-    if (usedWithoutDuplicate + base64DecodedByteLength(upload.base64Data) > MAX_VAULT_NOTE_TOTAL_ATTACHMENT_BYTES) {
+    const usedWithoutDuplicate = usedBytes - vaultNoteAttachmentBudgetBytes(existingDuplicate);
+    if (usedWithoutDuplicate + vaultNoteAttachmentBudgetBytes(upload) > MAX_VAULT_NOTE_TOTAL_ATTACHMENT_BYTES) {
       return { upload: null, status: "budget" };
     }
     return { upload, status: "duplicate" };
   }
-  if (usedBytes + base64DecodedByteLength(upload.base64Data) > MAX_VAULT_NOTE_TOTAL_ATTACHMENT_BYTES) {
+  if (usedBytes + vaultNoteAttachmentBudgetBytes(upload) > MAX_VAULT_NOTE_TOTAL_ATTACHMENT_BYTES) {
     return { upload: null, status: "budget" };
   }
   return { upload, status: "attached" };
@@ -132,7 +154,10 @@ function sanitizeNoteFilename(title: string): string {
 
 export function createVaultNoteAttachment(note: Pick<VaultNote, "id" | "title" | "content">): UploadedFile | null {
   const id = String(note.id || "").trim();
-  if (!id) return null;
+  // An unbounded id would be persisted verbatim in `vaultNoteId` and could
+  // push the newest session past its storage budget on its own; truncating
+  // would break `vault_notes_get` addressing, so reject instead.
+  if (!id || id.length > MAX_VAULT_NOTE_ID_CHARS) return null;
   const title = boundNoteTitle(String(note.title || "").trim()) || "Untitled note";
   const content = boundNoteBody(note.content ?? "", id);
   const base64Data = bytesToBase64(new TextEncoder().encode(content));
