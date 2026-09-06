@@ -3001,7 +3001,18 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         // queued viewport sync; this restore is relative and would apply the
         // resize delta twice through the still-stale DOM offset, so defer it
         // until the mode ends as well (#3299).
+        //
+        // Capture the post-reflow row now: xterm accepts wheel scrolling
+        // while synchronized output is active, so if the user scrolls before
+        // the deferred restore runs, honoring the row captured at resize time
+        // would yank them back once the mode ends. Skip the restore if the
+        // viewport has moved since the fit and leave the user where they
+        // scrolled to. (If new output scrolled the viewport because it was
+        // pinned to the bottom, the user is already where the restore would
+        // put them, so skipping is a no-op there too.)
+        const anchorViewportY = term.buffer.active.viewportY;
         deferScrollRestoreDuringSynchronizedOutput(term, () => {
+          if (term.buffer.active.viewportY !== anchorViewportY) return;
           if (wasPinnedToBottom) {
             term.scrollToBottom();
           } else {
