@@ -244,12 +244,19 @@ export const wrapOutputHistoryLineToRows = (text: string, cols: number): string[
   return rows.length > 0 ? rows : [text];
 };
 
-const buildPreviewRows = (lines: readonly string[], cols: number): HistoryPreviewRow[] => {
+const buildPreviewRows = (
+  lines: readonly string[],
+  lineStartsWrapped: readonly boolean[],
+  cols: number,
+): HistoryPreviewRow[] => {
   const rows: HistoryPreviewRow[] = [];
-  for (const line of lines) {
-    const wrapped = wrapOutputHistoryLineToRows(line, cols);
+  for (let index = 0; index < lines.length; index += 1) {
+    const wrapped = wrapOutputHistoryLineToRows(lines[index], cols);
+    // A line committed by an automatic wrap is itself the continuation row of
+    // the previous one; its first preview row keeps the wrapped join.
+    const startsWrapped = lineStartsWrapped[index] ?? false;
     for (let row = 0; row < wrapped.length; row += 1) {
-      rows.push({ isWrapped: row > 0, text: wrapped[row] });
+      rows.push({ isWrapped: row > 0 || startsWrapped, text: wrapped[row] });
     }
   }
   return rows;
@@ -319,6 +326,11 @@ export const createTerminalOutputHistoryPreview = (options?: {
   const maxLines = Math.max(1, options?.maxLines ?? DEFAULT_OUTPUT_HISTORY_MAX_LINES);
   const maxChars = Math.max(1, options?.maxChars ?? DEFAULT_OUTPUT_HISTORY_MAX_CHARS);
   let lines: string[] = [];
+  // lines[i] began as an automatic-wrap continuation (see wrapCursor), so the
+  // preview's first row for it must carry xterm's isWrapped flag and join the
+  // previous line's last row during selection.
+  let lineWrapFlags: boolean[] = [];
+  let currentStartsWrapped = false;
   let current = "";
   let cursor = 0;
   let cursorCell = 0;
@@ -345,15 +357,18 @@ export const createTerminalOutputHistoryPreview = (options?: {
 
   const commitCurrentLine = () => {
     lines.push(current);
+    lineWrapFlags.push(currentStartsWrapped);
     totalChars += current.length;
     current = "";
     currentCellWidth = 0;
     cursor = 0;
     cursorCell = 0;
+    currentStartsWrapped = false;
     // Never trim away the last retained line.
     while (lines.length > maxLines || (totalChars > maxChars && lines.length > 1)) {
       const dropped = lines.shift();
       if (dropped === undefined) break;
+      lineWrapFlags.shift();
       totalChars -= dropped.length;
     }
   };
@@ -370,6 +385,9 @@ export const createTerminalOutputHistoryPreview = (options?: {
       ? Math.min(scrollBottomMargin, screenBottom)
       : screenBottom;
     commitCurrentLine();
+    // The continuation row xterm moved to is a soft wrap: mark the next
+    // committed line so the preview keeps the wrapped-row join.
+    currentStartsWrapped = true;
     screenRow = Math.min(bottomLimit, screenRow + 1);
     cursor = 0;
     cursorCell = 0;
@@ -395,6 +413,24 @@ export const createTerminalOutputHistoryPreview = (options?: {
       // cursor move or carriage return in between cancels it instead.
       if (viewportCols > 0 && cursorCell >= viewportCols) {
         if (autowrap) {
+          // A zero-width grapheme (a combining mark that arrived in a later
+          // display chunk) joins the final cell of the current row instead of
+          // starting the next one; the wrap stays deferred behind it.
+          const rest = spanIsAscii ? "" : span.slice(offset);
+          const first = rest
+            ? outputGraphemeSegmenter.segment(rest)[Symbol.iterator]().next().value?.segment
+            : undefined;
+          if (
+            first !== undefined
+            && stringCellWidth(first) === 0
+            && cursor >= current.length
+            && current.length < maxChars
+          ) {
+            current += first;
+            cursor = current.length;
+            offset += first.length;
+            continue;
+          }
           wrapCursor();
         } else {
           // DECAWM disabled: keep writing on the current row, overwriting the
@@ -671,7 +707,11 @@ export const createTerminalOutputHistoryPreview = (options?: {
 
   const refreshPreviewCache = (cols: number) => {
     if (!cacheDirty && cacheCols === cols) return;
-    cacheRows = buildPreviewRows(getLines(), cols);
+    cacheRows = buildPreviewRows(
+      getLines(),
+      current ? [...lineWrapFlags, currentStartsWrapped] : lineWrapFlags,
+      cols,
+    );
     cacheCols = cols;
     cacheDirty = false;
   };
@@ -687,6 +727,8 @@ export const createTerminalOutputHistoryPreview = (options?: {
     },
     clear(): void {
       lines = [];
+      lineWrapFlags = [];
+      currentStartsWrapped = false;
       current = "";
       currentCellWidth = 0;
       cursor = 0;

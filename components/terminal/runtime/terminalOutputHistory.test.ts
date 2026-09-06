@@ -160,6 +160,20 @@ test("preview rows wrap long lines and flag the continuation rows", () => {
   );
 });
 
+test("preview rows flag lines committed by automatic wraps as soft-wrapped", () => {
+  const history = createTerminalOutputHistoryPreview();
+  history.setViewportRows(24);
+  history.setViewportCols(5);
+  // "abcde" fills the viewport and "f" wraps; the transcript commits both
+  // lines, but the preview must keep the soft-wrapped join between them.
+  history.append("abcdef\n");
+  assert.deepEqual([...history.getLines()], ["abcde", "f"]);
+  assert.deepEqual(
+    history.getPreviewRows({ cols: 5, rows: 2, top: 0 }).rows.map((row) => row.isWrapped),
+    [false, true],
+  );
+});
+
 test("preview windows clamp to the retained rows and pad short output", () => {
   const history = createTerminalOutputHistoryPreview();
   history.append("one\ntwo\n");
@@ -487,4 +501,15 @@ test("unchanged viewport reports preserve pending wrap across display chunks", (
   history.setViewportCols(5);
   history.append("f");
   assert.deepEqual(history.getLines(), ["abcde", "f"]);
+});
+
+test("a zero-width mark arriving after the wrap column joins the final cell", () => {
+  const history = createTerminalOutputHistoryPreview();
+  history.setViewportRows(24);
+  history.setViewportCols(5);
+  // The base character fills the last column; its combining mark arrives in
+  // the next chunk. xterm attaches the mark to that cell without wrapping.
+  history.append("abcde");
+  history.append("́Z\n");
+  assert.deepEqual([...history.getLines()], ["abcdé", "Z"]);
 });
