@@ -1,11 +1,12 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import React, { memo, useCallback, useSyncExternalStore } from 'react';
+import React, { memo, useCallback, useRef, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 
 import { activeTabStore } from '../../application/state/activeTabStore';
 import { getSftpCurrentPathMemoryKey } from '../../application/state/sftp/sftpReopenLocation';
 import {
   getSidePanelLiveSnapshot,
+  SIDE_PANEL_INACTIVE_LIVE_SNAPSHOT,
   subscribeSidePanelLiveSnapshot,
 } from '../../application/state/sidePanelLiveStore';
 import {
@@ -49,10 +50,18 @@ const subscribeShellHistoryNoop = () => () => {};
 const getEmptyShellHistorySnapshot = () => EMPTY_SHELL_HISTORY;
 
 function useSidePanelLiveSnapshotForTab(tabId: string, subscribe: boolean) {
-  const getSnapshot = useCallback(
-    () => getSidePanelLiveSnapshot(subscribe),
-    [subscribe],
-  );
+  const retainedSnapshot = useRef({ tabId, snapshot: SIDE_PANEL_INACTIVE_LIVE_SNAPSHOT });
+  const getSnapshot = useCallback(() => {
+    if (!subscribe) return SIDE_PANEL_INACTIVE_LIVE_SNAPSHOT;
+    const snapshot = getSidePanelLiveSnapshot(true);
+    const snapshotTabId = snapshot.activeWorkspace?.id ?? snapshot.focusedSessionId;
+    // Tab visibility changes before the live publisher commits its next snapshot.
+    // Keep this panel's last context until its own terminal/workspace catches up.
+    if (snapshotTabId === tabId) retainedSnapshot.current = { tabId, snapshot };
+    return retainedSnapshot.current.tabId === tabId
+      ? retainedSnapshot.current.snapshot
+      : SIDE_PANEL_INACTIVE_LIVE_SNAPSHOT;
+  }, [subscribe, tabId]);
   return useSyncExternalStore(
     (listener) => subscribeSidePanelLiveSnapshot(subscribe, listener),
     getSnapshot,
