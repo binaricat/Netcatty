@@ -608,6 +608,17 @@ export function alignTerminalViewportScroll(term: XTerm): void {
  * registered its own onRender handler earlier, so it re-syncs with fresh
  * scroll dimensions during that same render before the restore runs.
  */
+/**
+ * One pending restore per terminal. Consecutive fits while synchronized
+ * output is active (e.g. the forced fit plus the RAF fit after a split
+ * resize) each capture their own scroll target: the first fit records the
+ * pre-reflow reading row, later fits record the reflow-adjusted viewportY.
+ * Running every deferred restore would let the later, reflow-adjusted target
+ * overwrite the original row, so the terminal still drifts. Keep only the
+ * earliest pending restore — it holds the pre-reflow target — until it runs.
+ */
+const pendingSynchronizedRestores = new WeakMap<XTerm, { dispose: () => void }>();
+
 export function deferScrollRestoreDuringSynchronizedOutput(
   term: XTerm,
   restore: () => void,
@@ -616,11 +627,14 @@ export function deferScrollRestoreDuringSynchronizedOutput(
     restore();
     return;
   }
+  if (pendingSynchronizedRestores.has(term)) return;
   let listener: { dispose: () => void } | undefined;
   listener = term.onRender(() => {
     if (term.modes?.synchronizedOutputMode) return;
+    pendingSynchronizedRestores.delete(term);
     listener?.dispose();
     listener = undefined;
     restore();
   });
+  pendingSynchronizedRestores.set(term, listener);
 }

@@ -58,3 +58,37 @@ test("defers the restore until a render after synchronized output ends", () => {
   assert.equal(restored, 1);
   assert.equal(renderListeners.length, 0);
 });
+
+test("coalesces consecutive deferred restores so only the earliest runs", () => {
+  const renderListeners: RenderListener[] = [];
+  const term = createTerm(true, renderListeners);
+  const restored: number[] = [];
+
+  // First fit captures the pre-reflow reading row (target 1).
+  deferScrollRestoreDuringSynchronizedOutput(term, () => {
+    restored.push(1);
+  });
+  assert.equal(renderListeners.length, 1);
+
+  // A second fit before the mode ends must not register an independent
+  // restore that would overwrite the pre-reflow target.
+  deferScrollRestoreDuringSynchronizedOutput(term, () => {
+    restored.push(2);
+  });
+  assert.equal(renderListeners.length, 1);
+
+  (term.modes as { synchronizedOutputMode: boolean }).synchronizedOutputMode = false;
+  renderListeners[0]();
+  assert.deepEqual(restored, [1]);
+
+  // The pending slot is freed once the restore runs, so a later deferral
+  // registers a fresh listener.
+  (term.modes as { synchronizedOutputMode: boolean }).synchronizedOutputMode = true;
+  deferScrollRestoreDuringSynchronizedOutput(term, () => {
+    restored.push(3);
+  });
+  assert.equal(renderListeners.length, 1);
+  (term.modes as { synchronizedOutputMode: boolean }).synchronizedOutputMode = false;
+  renderListeners[0]();
+  assert.deepEqual(restored, [1, 3]);
+});
