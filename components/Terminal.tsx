@@ -3025,9 +3025,17 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         // pre-reflow line is the only remaining anchor for the restore
         // (see restoreScroll).
         const preResizeTracker = syncScrollTrackerRef.current;
+        // A marker disposed by an earlier wider reflow (its row merged into a
+        // surviving row) reports -1; its lastMarkerLine still holds the valid
+        // pre-reflow anchor, so carry that forward instead of overwriting it
+        // with -1 on the next widening fit. A marker disposed by a scrollback
+        // trim already had lastMarkerLine updated to -1 by the scroll
+        // listener, so this fallback stays accurate there too.
         const preResizeMarkerLine =
           preResizeTracker && preResizeTracker.term === term
-            ? preResizeTracker.marker.line
+            ? preResizeTracker.marker.line >= 0
+              ? preResizeTracker.marker.line
+              : preResizeTracker.lastMarkerLine
             : -1;
         const reflowsWider = dimensions.cols > term.cols;
         if (term.cols !== dimensions.cols || term.rows !== dimensions.rows) {
@@ -3138,6 +3146,13 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         let scrollListener: { dispose: () => void } | undefined;
         if (!isRetained) {
           scrollListener = term.onScroll((y: number) => {
+            // xterm emits onScroll on every buffer activation (DECSET
+            // 1049/1047), so a switch into (and back out of) the alternate
+            // buffer reports the alternate buffer's row here. Comparing it
+            // with this tracker's normal-buffer baseline would wrongly set
+            // moved and cancel the restore; ignore notifications for any
+            // buffer other than the one this tracker owns.
+            if (term.buffer.active !== tracker.buffer) return;
             if (y !== tracker.lastScrollY) {
               // A disposed marker reports -1 (its row was trimmed out of the
               // buffer), which can only match the trim signature for the
