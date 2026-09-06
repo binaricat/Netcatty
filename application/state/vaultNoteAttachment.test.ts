@@ -205,7 +205,9 @@ test("attachVaultNoteMention applies the budget when refreshing a duplicate that
   assert.equal(grown.upload, null);
 });
 
-test("attachVaultNoteMention ignores non-vault attachments when computing the budget", () => {
+test("attachVaultNoteMention counts non-vault attachments toward the budget", () => {
+  // Ordinary files are persisted with the same `base64Data`/`dataUrl` shape
+  // as note attachments, so their payload must consume the same budget.
   const plain = {
     id: crypto.randomUUID(),
     filename: "image.png",
@@ -213,7 +215,13 @@ test("attachVaultNoteMention ignores non-vault attachments when computing the bu
     base64Data: "A".repeat(4 * 1024 * 1024), // far above the budget
     mediaType: "image/png",
   };
-  const result = attachVaultNoteMention([plain], { id: "note-x", title: "X", content: "body" });
+  const blocked = attachVaultNoteMention([plain], { id: "note-x", title: "X", content: "body" });
+
+  assert.equal(blocked.status, "budget");
+  assert.equal(blocked.upload, null);
+
+  const small = { ...plain, base64Data: "AAAA", dataUrl: "data:image/png;base64,AAAA" };
+  const result = attachVaultNoteMention([small], { id: "note-x", title: "X", content: "body" });
 
   assert.equal(result.status, "attached");
   assert.ok(result.upload);
@@ -239,6 +247,20 @@ test("createVaultNoteAttachment rejects unreasonably long note ids", () => {
   assert.equal(result.upload, null);
   assert.equal(createVaultNoteAttachment({ id: "a".repeat(MAX_VAULT_NOTE_ID_CHARS + 1), title: "T", content: "c" }), null);
   assert.ok(createVaultNoteAttachment({ id: "a".repeat(MAX_VAULT_NOTE_ID_CHARS), title: "T", content: "c" }));
+});
+
+test("createVaultNoteAttachment rejects ids outside the prompt-header grammar", () => {
+  // An embedded newline splits the single-line `[Vault Note: ...]` header
+  // across lines, so `boundPromptForExternalSdk` could never match or
+  // restore it.
+  assert.equal(createVaultNoteAttachment({ id: "note\nmulti", title: "T", content: "c" }), null);
+});
+
+test("createVaultNoteAttachment flattens newlines in note titles", () => {
+  const result = createVaultNoteAttachment({ id: "note-1", title: "Multi\nline\r\ntitle", content: "c" });
+
+  assert.ok(result);
+  assert.equal(result!.vaultNoteTitle, "Multi line title");
 });
 
 test("attachVaultNoteMention counts the persisted note id toward the aggregate budget", () => {

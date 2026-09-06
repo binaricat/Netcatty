@@ -79,7 +79,8 @@ const EXTERNAL_PROMPT_MAX_NOTE_HEADER_CHARS = 400;
 // the last `)]` on the line — the generated header always ends its line with
 // `)]`, so the full header (including an id bearing `)` or `]`) is matched
 // verbatim. An id containing a newline would split the header across lines
-// and cannot be matched or restored.
+// and cannot be matched or restored, so `createVaultNoteAttachment` rejects
+// such ids and flattens newlines in titles.
 const NOTE_HEADER_PATTERN = /\[Vault Note: [^\n]*? \(id: [^\n]*\)\]/g;
 
 /** Cap a restored note header, keeping its prefix and id-bearing tail. */

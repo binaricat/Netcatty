@@ -86,9 +86,10 @@ export type VaultNoteMentionResult = {
 /**
  * Build the attachment for a note mention against the draft's existing
  * attachments. Re-mentioning a note is a no-op duplicate (the caller may
- * refresh the existing attachment in place), and the aggregate decoded size
- * of note attachments is capped so one chat can never exceed the storage
- * budget for persisted sessions.
+ * refresh the existing attachment in place), and the aggregate persisted size
+ * of all draft attachments (ordinary files included — they use the same
+ * `base64Data`/`dataUrl` payload shape) is capped so one chat can never
+ * exceed the storage budget for persisted sessions.
  */
 export function attachVaultNoteMention(
   existingAttachments: ReadonlyArray<UploadedFile>,
@@ -100,12 +101,13 @@ export function attachVaultNoteMention(
   const noteId = String(note.id || "");
   const upload = createVaultNoteAttachment(note);
   if (!upload) return { upload: null, status: "invalid" };
+  // Every attachment is persisted with the same `base64Data` + `dataUrl`
+  // payload shape, so ordinary files count toward the budget too: ignoring
+  // them would let a large plain file plus near-limit notes push the newest
+  // session past MAX_SESSIONS_JSON_BYTES, making the serializer drop older
+  // sessions (or the chat) after a restart.
   const usedBytes = existingAttachments.reduce(
-    (total, attachment) => (
-      isVaultNoteAttachment(attachment)
-        ? total + vaultNoteAttachmentBudgetBytes(attachment)
-        : total
-    ),
+    (total, attachment) => total + vaultNoteAttachmentBudgetBytes(attachment),
     0,
   );
   const existingDuplicate = noteId
@@ -140,6 +142,10 @@ function boundNoteBody(content: string, noteId: string): string {
 
 /** Bound the persisted title metadata, never splitting a surrogate pair. */
 function boundNoteTitle(title: string): string {
+  // A newline in the title would split the generated `[Vault Note: ...]`
+  // header across lines, so `boundPromptForExternalSdk` could neither match
+  // nor restore it; flatten it to a space.
+  title = title.replace(/\r?\n/g, " ");
   if (title.length <= MAX_VAULT_NOTE_TITLE_CHARS) return title;
   let truncated = title.slice(0, MAX_VAULT_NOTE_TITLE_CHARS);
   if (/[\uD800-\uDBFF]$/.test(truncated)) truncated = truncated.slice(0, -1);
@@ -167,6 +173,11 @@ export function createVaultNoteAttachment(note: Pick<VaultNote, "id" | "title" |
   // push the newest session past its storage budget on its own; truncating
   // would break `vault_notes_get` addressing, so reject instead.
   if (!trimmedId || id.length > MAX_VAULT_NOTE_ID_CHARS) return null;
+  // An id containing a newline is outside the prompt-header grammar
+  // (`[Vault Note: <title> (id: <noteId>)]` is single-line), so it could
+  // never be matched or restored by `boundPromptForExternalSdk`; reject it
+  // like the other unaddressable id shapes.
+  if (id.includes("\n")) return null;
   const title = boundNoteTitle(String(note.title || "").trim()) || "Untitled note";
   const content = boundNoteBody(note.content ?? "", id);
   const base64Data = bytesToBase64(new TextEncoder().encode(content));
