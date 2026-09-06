@@ -689,13 +689,19 @@ export function deferScrollRestoreDuringSynchronizedOutput(
     // Keep the pending slot occupied until the restore actually runs so fits
     // racing in that window coalesce (see the check at the top) instead of
     // restoring immediately.
-    pendingSynchronizedRestores.set(term, {
+    // Identity-check the slot before deleting: if this restore was canceled
+    // and a newer one was registered for the terminal before this frame runs,
+    // the slot holds the newer restore's entry and must be left alone.
+    const frameSentinel = {
       dispose: () => {
         canceled = true;
       },
-    });
+    };
+    pendingSynchronizedRestores.set(term, frameSentinel);
     runAfterRenderFrame(() => {
-      pendingSynchronizedRestores.delete(term);
+      if (pendingSynchronizedRestores.get(term) === frameSentinel) {
+        pendingSynchronizedRestores.delete(term);
+      }
       if (!canceled) restore();
     });
   });
