@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  MAX_VAULT_NOTE_ATTACHMENT_CHARS,
   VAULT_NOTE_ATTACHMENT_MEDIA_TYPE,
   createVaultNoteAttachment,
   decodeVaultNoteAttachment,
@@ -47,6 +48,30 @@ test("createVaultNoteAttachment falls back to a safe filename for blank titles",
   assert.ok(attachment);
   assert.equal(attachment.filename, "Untitled note.md");
   assert.equal(attachment.vaultNoteTitle, "Untitled note");
+});
+
+test("createVaultNoteAttachment bounds oversized note bodies and keeps the note id addressable", () => {
+  const oversized = "a".repeat(MAX_VAULT_NOTE_ATTACHMENT_CHARS + 10_000);
+  const attachment = createVaultNoteAttachment({ id: "note-big", title: "Big", content: oversized });
+
+  assert.ok(attachment);
+  const decoded = decodeVaultNoteAttachment(attachment) ?? "";
+  assert.ok(decoded.length < oversized.length, "oversized body must be truncated");
+  assert.ok(decoded.startsWith("a".repeat(MAX_VAULT_NOTE_ATTACHMENT_CHARS)));
+  assert.match(decoded, /vault_notes_get with noteId note-big/);
+
+  const prompt = buildPromptWithTerminalSelectionAttachments("summarize", [attachment]);
+  assert.match(prompt, /\[Vault Note: Big \(id: note-big\)\]/);
+  assert.match(prompt, /vault_notes_get with noteId note-big/);
+});
+
+test("createVaultNoteAttachment does not split surrogate pairs at the truncation boundary", () => {
+  const content = "a".repeat(MAX_VAULT_NOTE_ATTACHMENT_CHARS - 1) + "😀".repeat(5_000);
+  const attachment = createVaultNoteAttachment({ id: "note-emoji", title: "E", content });
+
+  assert.ok(attachment);
+  const decoded = decodeVaultNoteAttachment(attachment) ?? "";
+  assert.doesNotMatch(decoded, /[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
 });
 
 test("isVaultNoteAttachment and decode reject plain attachments", () => {
