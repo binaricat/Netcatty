@@ -28,6 +28,7 @@ import {
 } from "./sftp/transferControlEpoch";
 import { isTransferWalkInFlight } from "./sftp/transferWalkRegistry";
 import {
+  isTransferOrRootCancelled,
   markTransferCancelledTree,
   settleTransferCancelTree,
 } from "./sftp/transferCancelLatch";
@@ -96,6 +97,10 @@ export interface SftpTransferCenterStore {
   getBadgeSnapshot(): { count: number; hasAttention: boolean };
   /** Single task row — same object identity until that row is patched. */
   getTask(taskId: string): TransferTask | undefined;
+  /** Observe exact task settlement before completed child rows are compacted. */
+  observeTaskSettlement(task: TransferTask): { read(): TransferTask | undefined; dispose(): void };
+  /** Publish an explicit dispatch identity without flushing large child-history batches. */
+  admitTaskRun(task: TransferTask, pausedAtResume?: TransferTask): "ready" | "paused" | "completed" | "cancelled" | "conflict";
   getOwnerTasks(ownerId: string): TransferTask[];
   publishOwner(ownerId: string, tasks: readonly TransferTask[]): void;
   registerOwner(ownerId: string, controls: SftpTransferOwnerControls): () => void;
@@ -398,6 +403,15 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
   let snapshotDirty = false;
   const listeners = new Set<Listener>();
   const progressListeners = new Set<Listener>();
+  const settlementObservers = new Map<string, Set<{ expected: TransferTask; settled?: TransferTask }>>();
+  const matchesObservedTask = (expected: TransferTask, candidate: TransferTask) => (
+    expected.id === candidate.id
+    && expected.sourcePath === candidate.sourcePath
+    && expected.targetPath === candidate.targetPath
+    && expected.parentTaskId === candidate.parentTaskId
+    && expected.directoryEntryIndex === candidate.directoryEntryIndex
+    && expected.directoryEntryIdentity === candidate.directoryEntryIdentity
+  );
   const refreshBadgeSnapshot = () => {
     const next = buildBadgeSnapshot(tasks);
     if (
@@ -609,6 +623,14 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
     // live renderer walk keeps its controls until TransferRuntime.runWalk
     // settles; everything else can release its whole tree here.
     settleFinishedTransferControlState(tasks, tasks);
+    if (settlementObservers.size > 0) {
+      for (const task of tasks) {
+        if (!TERMINAL_OWNER_STATUSES.has(task.status)) continue;
+        for (const observer of settlementObservers.get(task.id) ?? []) {
+          if (!observer.settled && matchesObservedTask(observer.expected, task)) observer.settled = task;
+        }
+      }
+    }
     const beforePrune = tasks;
     tasks = pruneSftpTransferHistory(tasks);
     const retainedIds = new Set(tasks.map((task) => task.id));
@@ -1307,6 +1329,70 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
     },
     getSnapshot: () => ensureSnapshot(),
     getBadgeSnapshot: () => badgeSnapshot,
+    admitTaskRun(incoming, pausedAtResume) {
+      const rootId = incoming.parentTaskId ?? incoming.id;
+      if (isTransferOrRootCancelled(rootId, incoming.id)) return "cancelled";
+      const parent = incoming.parentTaskId ? tasks.find((task) => task.id === rootId) : undefined;
+      if (parent?.status === "cancelled") return "cancelled";
+      const index = tasks.findIndex((task) => task.id === incoming.id);
+      const existing = index < 0 ? undefined : tasks[index];
+      if (existing && (existing.sourcePath !== incoming.sourcePath || existing.targetPath !== incoming.targetPath
+        || existing.parentTaskId !== incoming.parentTaskId)) return "conflict";
+      if (existing?.status === "cancelled") return "cancelled";
+      if (existing?.status === "completed") {
+        return matchesObservedTask(incoming, existing) ? "completed" : "conflict";
+      }
+      const resumesUnchangedPause = existing === pausedAtResume
+        && existing?.status === "paused"
+        && (parent?.status === "pending" || parent?.status === "transferring");
+      if (isTransferOrRootPauseLatched(rootId, incoming.id)
+        || parent?.status === "paused" || parent?.status === "pausing"
+        || (existing?.status === "paused" && !resumesUnchangedPause) || existing?.status === "pausing") return "paused";
+      if (parent?.status === "completed") return "conflict";
+      if (!existing) return "ready";
+      if (existing.status === "transferring"
+        && existing.directoryEntryIndex === incoming.directoryEntryIndex
+        && existing.directoryEntryIdentity === incoming.directoryEntryIdentity) return "ready";
+      // Explicit retry may leave failed/interrupted and replace its manifest identity.
+      // Do not overwrite byte checkpoints with a delayed renderer snapshot.
+      const next = tasks.slice();
+      next[index] = {
+        ...existing,
+        directoryEntryIndex: incoming.directoryEntryIndex,
+        directoryEntryIdentity: incoming.directoryEntryIdentity,
+        ...(existing.status === "transferring" ? {} : {
+          status: "transferring" as const,
+          lifecycleEpoch: undefined,
+          error: undefined,
+          endTime: undefined,
+          reconnectRequired: false,
+        }),
+      };
+      tasks = next;
+      emitProgress(false);
+      return "ready";
+    },
+    observeTaskSettlement(expected) {
+      const observer: { expected: TransferTask; settled?: TransferTask } = { expected: { ...expected } };
+      const observers = settlementObservers.get(expected.id) ?? new Set();
+      observers.add(observer);
+      settlementObservers.set(expected.id, observers);
+      let disposed = false;
+      return {
+        read() {
+          if (disposed) return undefined;
+          if (observer.settled) return observer.settled;
+          const current = tasks.find((task) => task.id === expected.id);
+          return current && matchesObservedTask(observer.expected, current) ? current : undefined;
+        },
+        dispose() {
+          disposed = true;
+          observer.settled = undefined;
+          observers.delete(observer);
+          if (observers.size === 0) settlementObservers.delete(expected.id);
+        },
+      };
+    },
     getTask(taskId) {
       return tasks.find((task) => task.id === taskId);
     },

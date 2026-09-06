@@ -1,3 +1,4 @@
+import { runTransferAndWaitForOwner } from "./waitForTransferOwner";
 import { useCallback, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
 import type { Host, SftpFileEntry, SftpFilenameEncoding, TransferStatus, TransferTask } from "../../../domain/models";
 import {
@@ -412,7 +413,11 @@ export function useSftpDirectoryTransferOps({
                 }
                 // Await the invoke result — cancel resolves with { error } and may
                 // not fire onComplete/onError after preload clears listeners.
-                const transferPromise = netcattyBridge.require().startStreamTransfer!(options);
+                const transferPromise = runTransferAndWaitForOwner(
+                  task,
+                  () => netcattyBridge.require().startStreamTransfer!(options),
+                  () => isCancelledLocalOrGlobal(cancelledTasksRef, rootTaskId, task.id),
+                );
                 // Streams that arm after the parent pause round never receive the
                 // initial pauseTransfer. Keep pausing while the folder is latched.
                 // Capture epoch per attempt so Resume (epoch bump) undoes a late pause.
@@ -449,33 +454,6 @@ export function useSftpDirectoryTransferOps({
                 } finally {
                   watchPaused = false;
                   await pauseWatch.catch(() => {});
-                }
-                // Same-id retry stole ownership while OPEN was pending. The live
-                // owner still drives progress/completion events; this invoke must
-                // not mark the child completed or failed (Codex P2 on b17f64e9).
-                if (result?.superseded === true) {
-                  // Wait for the live same-id owner only — no fixed deadline so
-                  // long transfers are not failed while still running (Codex P2).
-                  for (;;) {
-                    if (
-                      cancelledTasksRef.current.has(task.id)
-                      || cancelledTasksRef.current.has(rootTaskId)
-                    ) {
-                      throw new Error("Transfer cancelled");
-                    }
-                    const latest = sftpTransferCenterStore.getTask(task.id)
-                      ?? transfersRef.current.find((candidate) => candidate.id === task.id);
-                    const status = latest?.status;
-                    if (status === "completed") break;
-                    if (status === "failed") {
-                      throw new Error(latest?.error || "Transfer failed");
-                    }
-                    if (status === "cancelled") {
-                      throw new Error("Transfer cancelled");
-                    }
-                    await new Promise((resolve) => setTimeout(resolve, 200));
-                  }
-                  break;
                 }
                 if (result?.error || result?.cancelled) {
                   throw new Error(result.error || "Transfer cancelled");

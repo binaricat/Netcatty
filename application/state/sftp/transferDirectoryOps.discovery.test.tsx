@@ -233,3 +233,74 @@ test("live directory download rejects a Windows backslash traversal entry", asyn
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = previousActEnvironment;
   }
 });
+
+test("live folder settles a superseded child whose completed row was compacted", async () => {
+  const { sftpTransferCenterStore } = await import("../sftpTransferCenterStore");
+  const previousWindow = (globalThis as { window?: unknown }).window;
+  const previousLocalStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+  const previousActEnvironment = (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
+  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  Object.defineProperty(globalThis, "localStorage", {
+    configurable: true,
+    value: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
+  });
+  const root = { ...rootTask(), id: "live-compacted-root", startTime: Date.now() };
+  let tasks: TransferTask[] = [root];
+  const transfersRef = { current: tasks };
+  const cancelledTasksRef = { current: new Set<string>() };
+  let childId: string | undefined;
+  (globalThis as { window?: unknown }).window = { netcatty: {
+    mkdirLocal: async () => undefined,
+    statLocal: async () => ({ type: "directory" }),
+    startStreamTransfer: async (options: { transferId: string }) => {
+      childId = options.transferId;
+      sftpTransferCenterStore.publishOwner("live-compacted-owner", tasks);
+      // The winning invocation has already completed; history compaction drops its row.
+      sftpTransferCenterStore.ingestBackgroundEvent({
+        type: "completed", transferId: childId, transferred: 1, totalBytes: 1, lifecycleEpoch: 0,
+      });
+      return { superseded: true };
+    },
+  } };
+  let operations: ReturnType<typeof useSftpDirectoryTransferOps> | undefined;
+  let renderer: ReactTestRenderer | null = null;
+  let running: Promise<number> | undefined;
+  const Probe = () => {
+    operations = useSftpDirectoryTransferOps({
+      ownerId: "live-compacted-owner", cancelledTasksRef,
+      pausedTasksRef: { current: new Set() }, waitUntilTransferResumed: async () => undefined,
+      activeChildIdsRef: { current: new Map() }, transfersRef,
+      setTransfers: (update) => {
+        tasks = typeof update === "function" ? update(tasks) : update;
+        transfersRef.current = tasks;
+      },
+      listLocalFiles: async () => [], listRemoteFiles: async () => [fileEntry("file.txt")],
+    });
+    return null;
+  };
+  try {
+    await act(async () => { renderer = create(React.createElement(Probe)); });
+    assert.ok(operations);
+    running = operations.transferDirectory(root, "source-sftp", null, false, true, "auto", "auto", root.id);
+    const result = await Promise.race([
+      running,
+      new Promise<"still-waiting">((resolve) => setTimeout(() => resolve("still-waiting"), 450)),
+    ]);
+    assert.ok(childId);
+    assert.equal(sftpTransferCenterStore.getTask(childId), undefined);
+    assert.equal(sftpTransferCenterStore.getTask(root.id)?.directoryResumeCheckpoint?.completedEntries, 1);
+    assert.notEqual(result, "still-waiting", "compacted completion must settle the live folder");
+    assert.equal(result, 0);
+  } finally {
+    cancelledTasksRef.current.add(root.id);
+    await running?.catch(() => {});
+    await act(async () => { renderer?.unmount(); });
+    sftpTransferCenterStore.patchTask(root.id, { status: "completed" });
+    sftpTransferCenterStore.dismiss(root.id);
+    (globalThis as { window?: unknown }).window = previousWindow;
+    if (previousLocalStorage) Object.defineProperty(globalThis, "localStorage", previousLocalStorage);
+    else Reflect.deleteProperty(globalThis, "localStorage");
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = previousActEnvironment;
+  }
+});
+
