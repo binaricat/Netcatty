@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { ToolOutputStore } from './toolOutputStore';
-import { fitLargeUserInputForModel } from './largeUserInput';
+import { fitLargeUserInputForModel, boundPromptForExternalSdk } from './largeUserInput';
 import {
   buildCattySdkMessages,
   createContinuationContext,
@@ -89,4 +89,37 @@ test('a persisted compaction boundary replaces older history with its summary', 
   assert.match(String(messages[0]?.content), /The earlier question was answered/);
   assert.doesNotMatch(JSON.stringify(messages), /old secret question|old answer/);
   assert.match(JSON.stringify(messages), /recent question/);
+});
+
+test('boundPromptForExternalSdk keeps prompts within the bound untouched', () => {
+  const prompt = 'hello '.repeat(1_000);
+  assert.equal(boundPromptForExternalSdk(prompt), prompt);
+});
+
+test('boundPromptForExternalSdk keeps both ends and reports the omitted span', () => {
+  const prompt = `START-${'middle '.repeat(30_000)}-FINAL QUESTION`;
+  const bounded = boundPromptForExternalSdk(prompt);
+
+  assert.match(bounded, /^START-/);
+  assert.match(bounded, /FINAL QUESTION\n?$/);
+  assert.match(bounded, /prompt truncated for size/);
+  assert.ok(bounded.length < prompt.length);
+  // The bounded prompt must stay under the hard cap so a 768 KiB vault-note
+  // payload can never reach the external SDK unchanged.
+  assert.ok(bounded.length <= 100_000 + 300);
+  assert.doesNotMatch(bounded, /tool_output_read/);
+});
+
+test('boundPromptForExternalSdk never splits surrogate pairs at either cut', () => {
+  const head = 'a'.repeat(80_000);
+  const tail = 'b'.repeat(16_000);
+  const prompt = `${head}\u{1F600}${'c'.repeat(50_000)}\u{1F600}${tail}`;
+  const bounded = boundPromptForExternalSdk(prompt);
+
+  // A lone surrogate would be replaced with U+FFFD when encoded; the bound
+  // must cut before/after whole pairs instead.
+  assert.doesNotMatch(bounded, /[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
+  assert.doesNotMatch(bounded, /(^|[^\uD800-\uDBFF])[\uDC00-\uDFFF]/);
+  assert.match(bounded, /^a+\n\n\[\.\.\. prompt truncated/);
+  assert.match(bounded, /\n\nb+$/);
 });

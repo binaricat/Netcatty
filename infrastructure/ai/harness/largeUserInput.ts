@@ -48,3 +48,28 @@ export function fitLargeUserInputForModel(
     input.slice(-LARGE_USER_INPUT_TAIL_CHARS),
   ].join('');
 }
+
+// The external SDK backends (claude-code, codex, grok, ...) have no
+// `tool_output_read` tool, so the handle path above cannot be used there.
+// Instead the prompt is hard-bounded before it is sent or steered: external
+// model context windows vary and a full 768 KiB vault-note payload plus
+// history can exceed the smallest of them, which fails the whole turn with a
+// request/context-too-large error.
+const EXTERNAL_PROMPT_MAX_CHARS = 100_000;
+const EXTERNAL_PROMPT_HEAD_CHARS = 80_000;
+const EXTERNAL_PROMPT_TAIL_CHARS = 16_000;
+
+/** Hard-bound an external SDK prompt, keeping both ends and never splitting a surrogate pair. */
+export function boundPromptForExternalSdk(prompt: string): string {
+  if (prompt.length <= EXTERNAL_PROMPT_MAX_CHARS) return prompt;
+  let head = prompt.slice(0, EXTERNAL_PROMPT_HEAD_CHARS);
+  let tail = prompt.slice(-EXTERNAL_PROMPT_TAIL_CHARS);
+  if (/[\uD800-\uDBFF]$/.test(head)) head = head.slice(0, -1);
+  if (/^[\uDC00-\uDFFF]/.test(tail)) tail = tail.slice(1);
+  const omitted = prompt.length - head.length - tail.length;
+  return [
+    head,
+    `\n\n[... prompt truncated for size: showing the first ${head.length} and last ${tail.length} of ${prompt.length} characters (${omitted} omitted). If a Vault note attachment above looks incomplete, ask the user to share the missing part ...]\n\n`,
+    tail,
+  ].join('');
+}
