@@ -73,6 +73,9 @@ export const terminalLayerAreEqual = (
   prev.onCreateLocalTerminal === next.onCreateLocalTerminal &&
   prev.isBroadcastEnabled === next.isBroadcastEnabled &&
   prev.onToggleBroadcast === next.onToggleBroadcast &&
+  prev.isGlobalBroadcastEnabled === next.isGlobalBroadcastEnabled &&
+  prev.canUseGlobalBroadcast === next.canUseGlobalBroadcast &&
+  prev.onToggleGlobalBroadcast === next.onToggleGlobalBroadcast &&
   prev.updateSnippets === next.updateSnippets &&
   prev.updateSnippetPackages === next.updateSnippetPackages &&
   prev.toggleScriptsSidePanelRef === next.toggleScriptsSidePanelRef &&

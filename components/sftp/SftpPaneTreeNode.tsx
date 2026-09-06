@@ -67,11 +67,7 @@ export const TreeNode = React.memo<TreeNodeProps>(({
       )}
       style={{ gridTemplateColumns: columnTemplate, height: TREE_ROW_HEIGHT }}
       onClick={e => onNodeClick(entry, entryPath, e)}
-      onDoubleClick={() => {
-        if (isParentEntry) { onOpenEntry(entry, entryPath); return; }
-        if (isDir) void onToggleExpand(entry, entryPath);
-        else onOpenEntry(entry, entryPath);
-      }}
+      onDoubleClick={() => onOpenEntry(entry, entryPath)}
       onContextMenu={e => {
         if (!isParentEntry) {
           onContextMenu(entry, entryPath, e);

@@ -65,6 +65,7 @@
     "test:ssh-mfa-models": "node --test electron/bridges/sshMfaModels.live.test.cjs",
     "test:ssh-mfa-models:live": "SSH_MFA_LIVE=1 node --test electron/bridges/sshMfaModels.live.test.cjs",
     "test:tray-panel-layout": "electron scripts/tray-panel-layout.live.test.cjs",
+    "test:terminal-background-rendering": "electron scripts/terminal-background-rendering.live.test.cjs",
     "test:xterm-webgl-overflow": "electron scripts/xterm-webgl-atlas-overflow.live.test.cjs",
     "test:xterm-macos-selection": "electron scripts/xterm-macos-column-selection.live.test.cjs",
     "test:xterm-keyword-highlight-performance": "electron scripts/xterm-keyword-highlight-performance.live.test.cjs",

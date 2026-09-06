@@ -1082,6 +1082,7 @@ Highlight the focused split pane:
   // Vault hosts header/actions
   'vault.hosts.search.placeholder': 'Find a host or ssh user@hostname / ssh -p 2222 user@hostname...',
   'vault.hosts.connect': 'Connect',
+  'vault.hosts.openSftp': 'Open SFTP',
   'vault.view.grid': 'Grid',
   'vault.view.list': 'List',
   'vault.view.tree': 'Tree',

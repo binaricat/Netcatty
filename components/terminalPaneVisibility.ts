@@ -22,6 +22,7 @@ export type TerminalPaneStyle = {
   width?: string | number;
   height?: string | number;
   visibility?: string;
+  transform?: string;
   pointerEvents?: string;
   zIndex?: number;
 };
@@ -65,6 +66,14 @@ export function resolveInactiveTerminalPaneStyle<T extends TerminalPaneStyle>(
 ): T {
   return {
     ...layoutStyle,
+    // Keep the measured box and live parser, but move the screen outside the
+    // viewport so xterm's IntersectionObserver pauses rendering. Occlusion and
+    // visibility:hidden alone do not stop xterm's WebGL refreshes.
+    // Reset cached split offsets before translating: they can exceed the current
+    // viewport after a window shrinks. Translate by both pane and viewport width,
+    // including pinned panes wider than a window resized in the background.
+    left: 0,
+    transform: "translateX(calc(-100vw - 100%))",
     visibility: hibernateHiddenTabs ? "hidden" : "visible",
     pointerEvents: "none",
     zIndex: 0,

@@ -950,219 +950,151 @@ function stableLocalFileIdentity(statLike) {
 }
 
 async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
-  const assertNotCancelled = typeof options.assertNotCancelled === "function"
-    ? options.assertNotCancelled
-    : () => {};
+  const { publishLocalFileExclusive } = require("./localFilePublish.cjs");
+  const assertNotCancelled = options.assertNotCancelled || (() => {});
   const token = crypto.randomUUID().replace(/-/g, "");
-  const targetDir = path.dirname(targetPath);
-  const targetBase = path.basename(targetPath);
-  const readyPath = path.join(targetDir, `.${targetBase}.netcatty-${token}.ready`);
-  const backupPath = path.join(targetDir, `.${targetBase}.netcatty-${token}.backup`);
-  let preparedPath = stagedPath;
+  const base = path.join(path.dirname(targetPath), `.${path.basename(targetPath)}.netcatty-${token}`);
+  const readyPath = `${base}.ready`;
+  const backupPath = `${base}.backup`;
+  const restoreProbePath = `${base}.restore-check`;
   let backedUp = false;
-  let published = false;
-  let publishedIdentity = null;
+  let committed = false;
+  let keepRecoveryFiles = false;
+  let preparedHandle;
+  let originalHandle;
+  let restoreProbeCreated = false;
+  let localMtimePrepared = false;
   try {
     assertNotCancelled();
     try {
       await fs.promises.rename(stagedPath, readyPath);
-    } catch (err) {
-      if (err?.code !== "EXDEV") throw err;
-      await fs.promises.copyFile(stagedPath, readyPath);
-      preparedPath = readyPath;
+    } catch (error) {
+      if (error?.code !== "EXDEV") throw error;
+      await fs.promises.copyFile(stagedPath, readyPath, fs.constants.COPYFILE_EXCL);
     }
-    if (preparedPath !== readyPath) preparedPath = readyPath;
+    // Stamp the private prepared file before applying possibly unreadable
+    // destination permissions. Publication carries these times to the target.
+    const mtimeMs = Number(options.sourceSoftIdentity?.mtimeMs);
+    if (Number.isFinite(mtimeMs) && mtimeMs >= 1000) {
+      const when = new Date(Math.floor(mtimeMs / 1000) * 1000);
+      await awaitBestEffortBounded(
+        fs.promises.utimes(readyPath, when, when), 15_000, "Prepared destination utimes",
+      ).then(() => { localMtimePrepared = true; }).catch(() => {});
+    }
+    // Keep read access to our private bytes before destination permissions
+    // can remove it; the no-hardlink fallback copies through this handle.
+    preparedHandle = await fs.promises.open(readyPath, "r");
     let appliedMode = null;
-    let targetStable = false;
-    let expectedStableIdentity = null;
+    let validatedTarget;
+    let stable = false;
     for (let attempt = 0; attempt < 3; attempt += 1) {
-      const validatedTarget = typeof options.validateTarget === "function"
+      validatedTarget = typeof options.validateTarget === "function"
         ? await options.validateTarget()
-        : null;
-      const existingMode = Number.isInteger(validatedTarget?.existingMode)
+        : undefined;
+      const mode = Number.isInteger(validatedTarget?.existingMode)
         ? validatedTarget.existingMode & 0o7777
-        : Number.isInteger(options.existingMode)
-          ? options.existingMode & 0o7777
-          : null;
-      if (existingMode !== null && existingMode !== appliedMode) {
-        await fs.promises.chmod(readyPath, existingMode);
-        appliedMode = existingMode;
+        : Number.isInteger(options.existingMode) ? options.existingMode & 0o7777 : null;
+      if (mode !== null && mode !== appliedMode) {
+        await fs.promises.chmod(readyPath, mode);
+        appliedMode = mode;
         continue;
       }
-      expectedStableIdentity = validatedTarget?.stableIdentity
-        || (validatedTarget?.targetIdentity
-          ? String(validatedTarget.targetIdentity).split(":").slice(0, 3).join(":")
-          : null);
-      targetStable = true;
+      stable = true;
       break;
     }
-    if (!targetStable) {
-      throw new Error("Local download target kept changing before replacement");
-    }
+    if (!stable) throw new Error("Local download target kept changing before replacement");
     assertNotCancelled();
-    try {
-      await fs.promises.rename(targetPath, backupPath);
-      backedUp = true;
-    } catch (err) {
-      if (err?.code !== "ENOENT") throw err;
-    }
-    // Another process may have replaced the destination between validateTarget
-    // and rename. Re-check the moved backup before publishing the download.
-    if (backedUp && expectedStableIdentity) {
-      let backupStat;
+    const expectedAbsent = validatedTarget?.targetIdentity === "missing" || validatedTarget?.targetIdentity === null;
+    const expectedIdentity = validatedTarget?.stableIdentity
+      || (validatedTarget?.targetIdentity ? String(validatedTarget.targetIdentity).split(":").slice(0, 3).join(":") : null);
+    if (!expectedAbsent) {
       try {
-        backupStat = await fs.promises.lstat(backupPath);
-      } catch (err) {
-        throw new Error(
-          `Local download target disappeared during replacement: ${targetPath}`,
-          { cause: err },
-        );
+        originalHandle = await fs.promises.open(targetPath, "r");
+      } catch (error) {
+        if (error?.code === "EACCES" || error?.code === "EPERM") {
+          // An unreadable original cannot use copy-based recovery. Verify the
+          // non-overwriting alternative before moving its only visible name.
+          try {
+            await fs.promises.link(targetPath, restoreProbePath);
+            restoreProbeCreated = true;
+            await fs.promises.unlink(restoreProbePath);
+            restoreProbeCreated = false;
+          } catch (restoreError) {
+            throw new Error("Cannot safely replace unreadable local destination: hardlink recovery unavailable", { cause: restoreError });
+          }
+        } else if (error?.code !== "ENOENT") throw error;
       }
-      if (!backupStat.isFile() || stableLocalFileIdentity(backupStat) !== expectedStableIdentity) {
-        // If another writer already recreated targetPath, do not restore the
-        // mismatched backup over it — leave both intact and fail closed.
-        let targetOccupied = false;
-        try {
-          await fs.promises.lstat(targetPath);
-          targetOccupied = true;
-        } catch (err) {
-          if (err?.code !== "ENOENT") throw err;
-        }
-        if (targetOccupied) {
-          const conflict = new Error("Local download target changed during replacement");
-          conflict.leaveConcurrentTarget = true;
-          conflict.remoteBackupPath = backupPath;
-          backedUp = false;
-          throw conflict;
-        }
-        try {
-          await fs.promises.rename(backupPath, targetPath);
-          backedUp = false;
-        } catch (restoreErr) {
-          const recoveryFailure = new Error(
-            `Could not restore the original file after a concurrent replacement was detected. `
-            + `Backup: ${backupPath}; target: ${targetPath}`,
-            { cause: restoreErr },
-          );
-          recoveryFailure.recoveryFailed = true;
-          throw recoveryFailure;
-        }
+      assertNotCancelled();
+      try {
+        await fs.promises.rename(targetPath, backupPath);
+        backedUp = true;
+      } catch (error) {
+        if (error?.code !== "ENOENT") throw error;
+      }
+    }
+    if (backedUp && expectedIdentity) {
+      const stat = await fs.promises.lstat(backupPath);
+      if (!stat.isFile() || stableLocalFileIdentity(stat) !== expectedIdentity) {
         throw new Error("Local download target changed during replacement");
       }
     }
-    // After the backup move, a concurrent writer may recreate targetPath. Never
-    // clobber that file: leave it in place, keep the original in backupPath for
-    // recovery, and fail closed before publishing the download.
-    if (backedUp) {
-      let recreated = false;
-      try {
-        await fs.promises.lstat(targetPath);
-        recreated = true;
-      } catch (err) {
-        if (err?.code !== "ENOENT") throw err;
-      }
-      if (recreated) {
-        const conflict = new Error("Local download target changed during replacement");
-        conflict.leaveConcurrentTarget = true;
-        conflict.remoteBackupPath = backupPath;
-        // Prevent the catch path from renaming backup over the concurrent file.
-        backedUp = false;
-        throw conflict;
-      }
-    }
     assertNotCancelled();
-    // Capture identity of the ready file before publish so rollback can refuse
-    // to clobber a concurrent replacement of the published target.
+    let publishedIdentity = null;
     try {
-      publishedIdentity = stableLocalFileIdentity(await fs.promises.lstat(readyPath));
-    } catch {
-      publishedIdentity = null;
+      publishedIdentity = await publishLocalFileExclusive(readyPath, targetPath, assertNotCancelled, preparedHandle) ?? null;
+    } catch (error) {
+      if (error?.code === "EEXIST") {
+        throw new Error("Local download target changed during replacement", { cause: error });
+      }
+      if (error?.localPublicationIncomplete) keepRecoveryFiles = true;
+      throw error;
     }
-    await fs.promises.rename(readyPath, targetPath);
-    published = true;
-    assertNotCancelled();
-    options.onCommit?.();
+    // Publication is the commit boundary. A late cancel must not perform a
+    // check-then-unlink rollback against a name another process may now own.
+    committed = true;
+    // Hand the published inode identity to the caller for descriptor-based
+    // metadata stamping after publication.
+    options.onCommit?.(publishedIdentity, localMtimePrepared);
     if (backedUp) await fs.promises.unlink(backupPath).catch(() => {});
-    if (stagedPath !== readyPath) await fs.promises.unlink(stagedPath).catch(() => {});
-  } catch (err) {
-    let restoreError = null;
-    if (err?.leaveConcurrentTarget) {
-      // Caller already decided not to touch a concurrent target/backup pair.
-    } else if (backedUp) {
-      let targetMatchesPublished = false;
-      let targetMissing = false;
+    await fs.promises.unlink(readyPath).catch(() => {});
+    await fs.promises.unlink(stagedPath).catch(() => {});
+  } catch (error) {
+    if (committed) throw error;
+    if (backedUp && !keepRecoveryFiles) {
       try {
-        const targetStat = await fs.promises.lstat(targetPath);
-        targetMatchesPublished = !!(
-          published
-          && publishedIdentity
-          && stableLocalFileIdentity(targetStat) === publishedIdentity
-        );
-      } catch (statErr) {
-        if (statErr?.code === "ENOENT") targetMissing = true;
-        else restoreError = statErr;
-      }
-      if (!restoreError) {
-        if (published && !targetMissing && !targetMatchesPublished) {
-          // Concurrent writer replaced our published file — keep both.
-          err.leaveConcurrentTarget = true;
-          err.remoteBackupPath = backupPath;
-          backedUp = false;
-        } else {
-          if (published && targetMatchesPublished) {
-            await fs.promises.unlink(targetPath).catch(() => {});
-          }
-          if (targetMissing || targetMatchesPublished || !published) {
-            try {
-              // Only restore when the path is free or still holds our publish.
-              if (!published) {
-                let occupied = false;
-                try {
-                  await fs.promises.lstat(targetPath);
-                  occupied = true;
-                } catch (occErr) {
-                  if (occErr?.code !== "ENOENT") throw occErr;
-                }
-                if (occupied) {
-                  err.leaveConcurrentTarget = true;
-                  err.remoteBackupPath = backupPath;
-                  backedUp = false;
-                } else {
-                  await fs.promises.rename(backupPath, targetPath);
-                  backedUp = false;
-                }
-              } else {
-                await fs.promises.rename(backupPath, targetPath);
-                backedUp = false;
-              }
-            } catch (recoveryErr) {
-              restoreError = recoveryErr;
-            }
-          }
+        // The pathname may have changed between open and rename. Never copy
+        // an earlier inode over the original actually moved into the backup.
+        let restoreHandle;
+        if (originalHandle) {
+          const [heldStat, backupStat] = await Promise.all([
+            originalHandle.stat(), fs.promises.lstat(backupPath),
+          ]);
+          if (stableLocalFileIdentity(heldStat) === stableLocalFileIdentity(backupStat)) restoreHandle = originalHandle;
         }
-      }
-    } else if (published) {
-      try {
-        const targetStat = await fs.promises.lstat(targetPath);
-        if (publishedIdentity && stableLocalFileIdentity(targetStat) === publishedIdentity) {
-          await fs.promises.unlink(targetPath);
-        }
-      } catch (recoveryErr) {
-        if (recoveryErr?.code !== "ENOENT") restoreError = recoveryErr;
+        await publishLocalFileExclusive(backupPath, targetPath, undefined, restoreHandle);
+        await fs.promises.unlink(backupPath).catch(() => {});
+        backedUp = false;
+      } catch (restoreError) {
+        keepRecoveryFiles = true;
+        error.cause ??= restoreError;
       }
     }
-    if (restoreError) {
-      const recoveryFailure = new Error(
-        `Could not restore the original file after replacement failed. `
-        + `Backup: ${backupPath}; prepared replacement: ${readyPath}; `
-        + `original staged path: ${stagedPath}; target: ${targetPath}`,
-        { cause: restoreError },
+    if (keepRecoveryFiles) {
+      const failure = new Error(
+        `${error.message}. Recovery files preserved. Backup: ${backedUp ? backupPath : "none"}; `
+        + `prepared replacement: ${readyPath}; target: ${targetPath}`,
+        { cause: error },
       );
-      recoveryFailure.recoveryFailed = true;
-      throw recoveryFailure;
+      failure.recoveryFailed = true;
+      if (backedUp) failure.remoteBackupPath = backupPath;
+      throw failure;
     }
     await fs.promises.unlink(readyPath).catch(() => {});
-    throw err;
+    throw error;
+  } finally {
+    await preparedHandle?.close().catch(() => {});
+    await originalHandle?.close().catch(() => {});
+    if (restoreProbeCreated) await fs.promises.unlink(restoreProbePath).catch(() => {});
   }
 }
 
@@ -1207,11 +1139,30 @@ async function preserveTransferredDestinationMtime(transfer, options = {}) {
       : 15_000;
 
     if (transfer.targetType === "local" && transfer.targetPath) {
-      await awaitBestEffortBounded(
-        fs.promises.utimes(transfer.targetPath, when, when),
-        mtimeTimeoutMs,
-        "Destination utimes",
-      );
+      if (transfer.localMtimePrepared) return;
+      // Verify and stamp the same open file. A later pathname replacement
+      // must never receive metadata belonging to this completed transfer.
+      await awaitBestEffortBounded((async () => {
+        let handle;
+        try {
+          handle = await fs.promises.open(transfer.targetPath, "r");
+        } catch (error) {
+          if (error?.code !== "EACCES" && error?.code !== "EPERM") throw error;
+          // O_WRONLY neither creates nor truncates a write-only destination.
+          handle = await fs.promises.open(transfer.targetPath, fs.constants.O_WRONLY);
+        }
+        try {
+          const currentStat = await handle.stat();
+          const publishedIdentity = transfer.publishedLocalIdentity;
+          const expectedIdentity = typeof publishedIdentity === "string"
+            ? publishedIdentity : stableLocalFileIdentity(publishedIdentity);
+          if (!currentStat.isFile()
+            || (expectedIdentity && stableLocalFileIdentity(currentStat) !== expectedIdentity)) return;
+          await handle.utimes(when, when);
+        } finally {
+          await handle.close();
+        }
+      })(), mtimeTimeoutMs, "Destination utimes");
       return;
     }
 
@@ -6082,6 +6033,7 @@ async function startTransferNow(event, payload, onProgress) {
         } = await inspectLocalPromotionTarget(targetPath);
         if (transfer.cancelled) throw new Error("Transfer cancelled");
         await promoteLocalTransfer(downloadTargetPath, promotionTargetPath, {
+          sourceSoftIdentity: transfer.sourceSoftIdentity,
           existingMode,
           async validateTarget() {
             const latestTarget = await inspectLocalPromotionTarget(targetPath);
@@ -6096,8 +6048,10 @@ async function startTransferNow(event, payload, onProgress) {
           assertNotCancelled() {
             if (transfer.cancelled) throw new Error("Transfer cancelled");
           },
-          onCommit() {
+          onCommit(publishedIdentity, localMtimePrepared) {
             transfer.completionCommitted = true;
+            transfer.localMtimePrepared = localMtimePrepared;
+            transfer.publishedLocalIdentity = publishedIdentity ?? null;
           },
         });
         transfer.stagedLocalPath = null;
@@ -6185,11 +6139,14 @@ async function startTransferNow(event, payload, onProgress) {
       });
       if (transfer.resumable && transfer.stagedLocalPath) {
         await promoteLocalTransfer(transfer.stagedLocalPath, targetPath, {
+          sourceSoftIdentity: transfer.sourceSoftIdentity,
           assertNotCancelled() {
             if (transfer.cancelled) throw new Error("Transfer cancelled");
           },
-          onCommit() {
+          onCommit(publishedIdentity, localMtimePrepared) {
             transfer.completionCommitted = true;
+            transfer.localMtimePrepared = localMtimePrepared;
+            transfer.publishedLocalIdentity = publishedIdentity ?? null;
           },
         });
         transfer.stagedLocalPath = null;
@@ -6792,7 +6749,13 @@ async function pauseTransfer(_event, payload) {
   ) {
     return { success: false, reason: "This transfer cannot be paused yet" };
   }
-  if (transfer.pauseOperation) return transfer.pauseOperation;
+  // A repeated pause is still a newer user decision: invalidate any resume
+  // waiting for verification or outstanding ranges, even if already paused.
+  transfer.pauseRequestToken = Symbol("pause");
+  if (transfer.pauseOperation) {
+    transfer.pauseSuperseded = false;
+    return transfer.pauseOperation;
+  }
   if (transfer.paused && transfer.lifecycleState === "paused") {
     const result = {
       success: true,
@@ -6844,7 +6807,7 @@ async function pauseTransfer(_event, payload) {
   if (usesContiguousRangeCheckpoint) {
     await transfer.waitForPause();
     if (!transfer.paused || transfer.pauseSuperseded) {
-      return { success: false, reason: "Pause was superseded by resume" };
+      return { success: false, superseded: true, supersededBy: "resume", reason: "Pause was superseded by resume" };
     }
     // Concurrent path already tracks contiguous durable bytes — do not spend
     // hundreds of ms waiting for writeStream drain before acknowledging pause.
@@ -6959,7 +6922,7 @@ async function pauseTransfer(_event, payload) {
     return { success: false, reason: "Transfer is no longer active" };
   }
   if (!transfer.paused || transfer.pauseSuperseded) {
-    return { success: false, reason: "Pause was superseded by resume" };
+    return { success: false, superseded: true, supersededBy: "resume", reason: "Pause was superseded by resume" };
   }
   // Confirm pause as soon as soft-drain + durable checkpoint are ready.
   // Source identity (remote sample reads on download) used to block this IPC
@@ -7014,6 +6977,20 @@ async function resumeTransfer(_event, payload) {
       reason: transfer.pauseUnavailableReason || "This transfer cannot be resumed safely",
     };
   }
+  const pauseRequestToken = transfer.pauseRequestToken;
+  const invalidResumeResult = (reason) => ({
+    success: false, reason,
+    ...(transfer.pauseRequestToken !== pauseRequestToken ? { superseded: true, supersededBy: "pause" } : {}),
+  });
+  const resumeInvalidReason = () => {
+    if (activeTransfers.get(payload?.transferId) !== transfer || transfer.cancelled) {
+      return "Transfer is no longer active";
+    }
+    if (transfer.pauseRequestToken !== pauseRequestToken) {
+      return "Resume was superseded by a newer pause";
+    }
+    return null;
+  };
   if (transfer.pauseOperation) {
     transfer.pauseSuperseded = true;
     try { transfer.cancelPauseWait?.(); } catch { }
@@ -7023,6 +7000,8 @@ async function resumeTransfer(_event, payload) {
   if (currentTransfer !== transfer || transfer.cancelled) {
     return { success: false, reason: "Transfer is no longer active" };
   }
+  const initialInvalidReason = resumeInvalidReason();
+  if (initialInvalidReason) return invalidResumeResult(initialInvalidReason);
   // Already flowing (e.g. double-click resume): do not pipe() again.
   if (!transfer.paused) {
     transfer.lifecycleState = "transferring";
@@ -7057,7 +7036,7 @@ async function resumeTransfer(_event, payload) {
           await transfer.captureSourceFingerprint?.();
         }
         if (!transfer.sourceFingerprint) {
-          return { success: false, reason: "Could not verify the source file for resume" };
+          return invalidResumeResult("Could not verify the source file for resume");
         }
         await transfer.verifySourceFingerprint(transfer.sourceFingerprint);
       }
@@ -7065,12 +7044,11 @@ async function resumeTransfer(_event, payload) {
       if (transfer.cancelled || activeTransfers.get(payload?.transferId) !== transfer) {
         return { success: false, reason: "Transfer is no longer active" };
       }
-      return {
-        success: false,
-        reason: error?.message || "Could not verify the source file for resume",
-      };
+      return invalidResumeResult(error?.message || "Could not verify the source file for resume");
     }
   }
+  const verifiedInvalidReason = resumeInvalidReason();
+  if (verifiedInvalidReason) return invalidResumeResult(verifiedInvalidReason);
   // Soft-drained concurrent pause may leave a sparse tail past the contiguous
   // checkpoint. Wait with Resume's own budget, then single-flight truncate so
   // background settle cannot race new writes after unpause.
@@ -7081,15 +7059,14 @@ async function resumeTransfer(_event, payload) {
       { maxWaitMs: RESUME_RANGE_SETTLE_MS },
     );
     if (!settled?.ok) {
-      return {
-        success: false,
-        reason: settled?.reason || "The current file is still finishing. Try resume again.",
-      };
+      return invalidResumeResult(settled?.reason || "The current file is still finishing. Try resume again.");
     }
     if (transfer.cancelled || activeTransfers.get(payload?.transferId) !== transfer) {
       return { success: false, reason: "Transfer is no longer active" };
     }
   }
+  const finalInvalidReason = resumeInvalidReason();
+  if (finalInvalidReason) return invalidResumeResult(finalInvalidReason);
   transfer.paused = false;
   transfer.pauseSuperseded = false;
   transfer.lifecycleEpoch += 1;
@@ -7264,6 +7241,37 @@ function registerWorkerHandle(ipcMain, terminalWorkerManager, channel) {
 function registerHandlers(ipcMain, options = {}) {
   const terminalWorkerManager = options.terminalWorkerManager || null;
   if (terminalWorkerManager) {
+    // Control replies can arrive out of order across windows. Only the latest
+    // request may publish lifecycle state; retain tokens only while in flight.
+    const workerControlRequests = new Map();
+    const withWorkerControl = async (transferId, action, work) => {
+      const token = Symbol("control");
+      const state = workerControlRequests.get(transferId) || { token, action, pending: 0 };
+      state.token = token;
+      state.action = action;
+      state.pending += 1;
+      workerControlRequests.set(transferId, state);
+      const isCurrent = () => workerControlRequests.get(transferId) === state && state.token === token;
+      const superseded = () => ({ success: false, superseded: true, supersededBy: state.action });
+      try {
+        const result = await work(isCurrent, superseded);
+        if (isCurrent() && !result?.success && !result?.superseded) {
+          if (action === "pause") state.action = "resume";
+          else if (action === "resume") state.action = "pause";
+        }
+        return result;
+      } catch (error) {
+        if (!isCurrent()) return superseded();
+        if (action === "pause") state.action = "resume";
+        else if (action === "resume") state.action = "pause";
+        throw error;
+      } finally {
+        state.pending -= 1;
+        if (state.pending === 0 && workerControlRequests.get(transferId) === state) {
+          workerControlRequests.delete(transferId);
+        }
+      }
+    };
     const nextWorkerLifecycleEpoch = (transferId, suggestedEpoch) => {
       const entry = workerTransferLifecycleEpochs.get(transferId);
       const current = Math.max(0, Number(entry?.epoch) || 0);
@@ -7289,6 +7297,7 @@ function registerHandlers(ipcMain, options = {}) {
           && workerTransferLifecycleEpochs.get(payload.transferId) === lifecycleEntry
         ) {
           workerTransferLifecycleEpochs.delete(payload.transferId);
+          workerControlRequests.delete(payload.transferId);
         }
       };
       // Renderer (or outer main) already admitted — skip a second queue so
@@ -7314,20 +7323,22 @@ function registerHandlers(ipcMain, options = {}) {
     ipcMain.handle("netcatty:transfer:cancel", (event, payload) => (
       cancelQueuedTransfer(payload?.transferId)
         ? { success: true }
-        : workerRequest(event, "netcatty:transfer:cancel", payload)
+        : withWorkerControl(payload?.transferId, "cancel", () => workerRequest(event, "netcatty:transfer:cancel", payload))
     ));
     ipcMain.handle("netcatty:transfer:pause", async (event, payload) => {
       const queued = pauseQueuedTransfer(payload?.transferId);
       if (queued) return queued;
-      const lifecycleEpoch = nextWorkerLifecycleEpoch(payload?.transferId);
-      broadcastGlobalTransferEvent({
-        type: "pausing",
-        transferId: payload?.transferId,
-        lifecycleEpoch,
-        lifecycleState: "pausing",
+      return withWorkerControl(payload?.transferId, "pause", async (isCurrent, superseded) => {
+        const lifecycleEpoch = nextWorkerLifecycleEpoch(payload?.transferId);
+        broadcastGlobalTransferEvent({
+          type: "pausing",
+          transferId: payload?.transferId,
+          lifecycleEpoch,
+          lifecycleState: "pausing",
       });
       try {
         const result = await workerRequest(event, "netcatty:transfer:pause", payload);
+        if (!isCurrent()) return superseded();
         if (!result?.success) {
           const rollbackEpoch = nextWorkerLifecycleEpoch(payload?.transferId);
           broadcastGlobalTransferEvent({
@@ -7351,6 +7362,7 @@ function registerHandlers(ipcMain, options = {}) {
         });
         return { ...result, lifecycleEpoch };
       } catch (error) {
+        if (!isCurrent()) throw error;
         const rollbackEpoch = nextWorkerLifecycleEpoch(payload?.transferId);
         broadcastGlobalTransferEvent({
           type: "resumed",
@@ -7360,24 +7372,28 @@ function registerHandlers(ipcMain, options = {}) {
         });
         throw error;
       }
+      });
     });
     ipcMain.handle("netcatty:transfer:resume", async (event, payload) => {
       const queuedResume = resumeQueuedTransfer(payload?.transferId);
       if (queuedResume) return queuedResume;
-      const result = await workerRequest(event, "netcatty:transfer:resume", payload);
-      if (result?.success) {
-        // Normalize into main-process epoch space (may advance past worker-local).
-        // Soft-resume UI must stamp THIS epoch or later worker progress is stale.
-        const lifecycleEpoch = nextWorkerLifecycleEpoch(payload?.transferId, result.lifecycleEpoch);
-        broadcastGlobalTransferEvent({
-          type: "resumed",
-          transferId: payload?.transferId,
-          lifecycleEpoch,
-          lifecycleState: "transferring",
-        });
-        return { ...result, lifecycleEpoch };
-      }
-      return result;
+      return withWorkerControl(payload?.transferId, "resume", async (isCurrent, superseded) => {
+        const result = await workerRequest(event, "netcatty:transfer:resume", payload);
+        if (!isCurrent()) return superseded();
+        if (result?.success) {
+          // Normalize into main-process epoch space (may advance past worker-local).
+          // Soft-resume UI must stamp THIS epoch or later worker progress is stale.
+          const lifecycleEpoch = nextWorkerLifecycleEpoch(payload?.transferId, result.lifecycleEpoch);
+          broadcastGlobalTransferEvent({
+            type: "resumed",
+            transferId: payload?.transferId,
+            lifecycleEpoch,
+            lifecycleState: "transferring",
+          });
+          return { ...result, lifecycleEpoch };
+        }
+        return result;
+      });
     });
     ipcMain.handle("netcatty:transfer:prioritize", (event, payload) => (
       prioritizeQueuedTransfer(payload?.transferId)

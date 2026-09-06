@@ -92,6 +92,8 @@ declare global {
     ): Promise<{ transferId: string; totalBytes?: number; error?: string; cancelled?: boolean }>;
     pauseTransfer?(transferId: string): Promise<{
       success: boolean;
+      superseded?: boolean;
+      supersededBy?: "pause" | "resume" | "cancel";
       checkpointBytes?: number;
       resumeStage?: 'direct' | 'download' | 'upload';
       downloadCheckpointBytes?: number;
@@ -100,7 +102,7 @@ declare global {
       lifecycleEpoch?: number;
       reason?: string;
     }>;
-    resumeTransfer?(transferId: string): Promise<{ success: boolean; reason?: string; lifecycleEpoch?: number }>;
+    resumeTransfer?(transferId: string): Promise<{ success: boolean; reason?: string; lifecycleEpoch?: number; superseded?: boolean; supersededBy?: "pause" | "resume" | "cancel" }>;
     prioritizeTransfer?(transferId: string): Promise<{ success: boolean }>;
     setGlobalTransferConcurrency?(limit: number): Promise<{ success: boolean; limit: number }>;
     cleanupTransferArtifacts?(payload: {

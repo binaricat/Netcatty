@@ -4,6 +4,11 @@ import test from "node:test";
 import {
   createGlobalSftpTransferScheduler,
 } from "./globalTransferScheduler";
+import { resolveProgressiveFolderUploadConcurrency } from "../../../lib/progressiveFolderUpload";
+import {
+  DEFAULT_SFTP_FILE_TRANSFER_CONCURRENCY,
+  resolveSftpTransferConcurrency,
+} from "./transferConcurrency";
 
 test("scheduler limits each remote host independently", async () => {
   const scheduler = createGlobalSftpTransferScheduler();
@@ -26,6 +31,40 @@ test("scheduler limits each remote host independently", async () => {
   releases.splice(0).forEach((release) => release());
   await jobs;
   assert.equal(maxActive, 2);
+});
+
+test("progressive folder uploads use six slots by default and preserve a saved limit", async () => {
+  const displayedDefault = resolveSftpTransferConcurrency(() => null);
+  const effectiveDefault = resolveProgressiveFolderUploadConcurrency(null);
+  assert.equal(displayedDefault, DEFAULT_SFTP_FILE_TRANSFER_CONCURRENCY);
+  assert.equal(effectiveDefault, displayedDefault);
+  assert.equal(effectiveDefault, 6);
+  assert.equal(resolveProgressiveFolderUploadConcurrency(3), 3);
+  assert.equal(resolveProgressiveFolderUploadConcurrency(99), 6);
+
+  const scheduler = createGlobalSftpTransferScheduler();
+  const releases: Array<() => void> = [];
+  let active = 0;
+  let maxActive = 0;
+  const jobs = Array.from({ length: 8 }, (_, index) => scheduler.run(
+    "progressive",
+    `file-${index}`,
+    ["host:one"],
+    () => null,
+    async () => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await new Promise<void>((resolve) => releases.push(resolve));
+      active -= 1;
+    },
+  ));
+
+  while (releases.length < 6) await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(maxActive, 6);
+  releases.splice(0).forEach((release) => release());
+  while (releases.length < 2) await new Promise((resolve) => setImmediate(resolve));
+  releases.splice(0).forEach((release) => release());
+  await Promise.all(jobs);
 });
 
 test("scheduler alternates owners when both have queued work", async () => {

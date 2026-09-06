@@ -635,6 +635,9 @@ export function TerminalLayerTabBridge({ stableRef }: { stableRef: StableRef }) 
     validAIScopeTargetIds: s.validAIScopeTargetIds,
     workspaceBroadcastHandlersRef: s.workspaceBroadcastHandlersRef,
     workspaceById,
+    isGlobalBroadcastEnabled: s.isGlobalBroadcastEnabled,
+    canUseGlobalBroadcast: s.canUseGlobalBroadcast,
+    onToggleGlobalBroadcast: s.onToggleGlobalBroadcastRef.current,
     // AI scope maintenance (merge/dissolve handoff) needs the full list; do not
     // rely on workspaceById alone — SidePanelStateRoot reads ctx.workspaces.
     workspaces: s.workspaces,
@@ -691,6 +694,9 @@ export function TerminalLayerTabBridge({ stableRef }: { stableRef: StableRef }) 
     s.terminalTheme,
     s.resolveSessionAppearance,
     s.hostMap,
+    s.isGlobalBroadcastEnabled,
+    s.canUseGlobalBroadcast,
+    s.onToggleGlobalBroadcastRef,
   ]);
 
   return <TerminalLayerView ctx={ctx} />;

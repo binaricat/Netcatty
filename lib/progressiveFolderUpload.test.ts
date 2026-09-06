@@ -93,6 +93,59 @@ test("progressive folder upload starts file transfers before the tree walk finis
   assert.ok(uploadA < batch2, "first file must upload while scan still running");
 });
 
+test("progressive folder upload honors an explicit transfer concurrency above the default", async () => {
+  const requestedConcurrency = 16;
+  const entries: LocalTreeListEntry[] = Array.from(
+    { length: requestedConcurrency + 2 },
+    (_, index) => ({
+      localPath: `/tmp/docs/file-${index}.txt`,
+      relativePath: `docs/file-${index}.txt`,
+      type: "file",
+      size: 1,
+      lastModified: index,
+    }),
+  );
+  const started: string[] = [];
+  let releaseAll!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    releaseAll = resolve;
+  });
+  const config = {
+    targetPath: "/remote",
+    sftpId: "sftp-1",
+    fileTransferConcurrency: requestedConcurrency,
+    isLocal: false,
+    joinPath: (base: string, name: string) => `${base}/${name}`,
+    bridge: {
+      mkdirSftp: async () => {},
+      startStreamTransfer: async (payload: { sourcePath: string; transferId: string }) => {
+        started.push(payload.sourcePath);
+        await gate;
+        return { transferId: payload.transferId };
+      },
+    },
+    listLocalTree: async (
+      _path: string,
+      options: { onEntries?: (batch: LocalTreeListEntry[]) => void },
+    ) => {
+      options.onEntries?.(entries);
+      return [];
+    },
+  };
+
+  const uploading = uploadLocalFoldersProgressively(
+    [{ name: "docs", localPath: "/tmp/docs" }],
+    config,
+    new UploadController(),
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+  const initiallyStarted = started.length;
+  releaseAll();
+  await uploading;
+
+  assert.equal(initiallyStarted, requestedConcurrency);
+});
+
 test("progressive folder upload enqueues nested subdirectory files", async () => {
   const transferred: string[] = [];
   const mkdirs: string[] = [];
@@ -525,6 +578,140 @@ test("progressive root conflict skip does not overwrite an existing remote folde
   );
   assert.equal(transferred.length, 0);
   assert.equal(result[0]?.cancelled, true);
+});
+
+test("progressive root conflict check fails closed when destination access is denied", async () => {
+  let conflictPrompts = 0;
+  let scans = 0;
+  let transfers = 0;
+
+  await assert.rejects(
+    () => uploadLocalFoldersProgressively(
+      [{ name: "docs", localPath: "/tmp/docs" }],
+      {
+        targetPath: "/remote",
+        sftpId: "sftp-1",
+        isLocal: false,
+        joinPath: (base, name) => `${base}/${name}`,
+        resolveConflict: async () => {
+          conflictPrompts += 1;
+          return "skip";
+        },
+        bridge: {
+          mkdirSftp: async () => {},
+          lstatSftp: async () => {
+            const error = new Error("Permission denied") as Error & { code: string };
+            error.code = "EACCES";
+            throw error;
+          },
+          startStreamTransfer: async (payload) => {
+            transfers += 1;
+            return { transferId: payload.transferId };
+          },
+        },
+        listLocalTree: async () => {
+          scans += 1;
+          return [];
+        },
+      },
+    ),
+    /Permission denied/,
+  );
+
+  assert.equal(conflictPrompts, 0, "unknown destination state must not be treated as a conflict");
+  assert.equal(scans, 0, "folder scanning must not start after a failed destination check");
+  assert.equal(transfers, 0, "upload must not start when destination safety is unknown");
+});
+
+test("progressive root conflict check treats explicit ENOENT as an absent destination", async () => {
+  const transferred: string[] = [];
+  let followedStats = 0;
+  const results = await uploadLocalFoldersProgressively(
+    [{ name: "docs", localPath: "/tmp/docs" }],
+    {
+      targetPath: "/remote",
+      sftpId: "sftp-1",
+      isLocal: false,
+      joinPath: (base, name) => `${base}/${name}`,
+      resolveConflict: async () => {
+        throw new Error("absent destination must not prompt for conflict");
+      },
+      bridge: {
+        mkdirSftp: async () => {},
+        statSftp: async () => {
+          followedStats += 1;
+          return { type: "directory", size: 0, lastModified: 1 };
+        },
+        lstatSftp: async () => {
+          const error = new Error("No such file") as Error & { code: string };
+          error.code = "ENOENT";
+          throw error;
+        },
+        startStreamTransfer: async (payload) => {
+          transferred.push(payload.targetPath);
+          return { transferId: payload.transferId };
+        },
+      },
+      listLocalTree: async (_path, options) => {
+        options.onEntries?.([{
+          localPath: "/tmp/docs/a.txt",
+          relativePath: "docs/a.txt",
+          type: "file",
+          size: 1,
+          lastModified: 1,
+        }]);
+        return [];
+      },
+    },
+  );
+
+  assert.equal(followedStats, 0, "destination checks should prefer no-follow lstat");
+  assert.deepEqual(transferred, ["/remote/docs/a.txt"]);
+  assert.equal(results[0]?.success, true);
+});
+
+test("progressive root replace carries the inspected type into the guarded delete", async () => {
+  let currentType: "file" | "directory" = "directory";
+  let scans = 0;
+  let transfers = 0;
+
+  await assert.rejects(
+    () => uploadLocalFoldersProgressively(
+      [{ name: "docs", localPath: "/tmp/docs" }],
+      {
+        targetPath: "/remote",
+        sftpId: "sftp-1",
+        isLocal: false,
+        joinPath: (base, name) => `${base}/${name}`,
+        resolveConflict: async () => {
+          currentType = "file";
+          return "replace";
+        },
+        bridge: {
+          mkdirSftp: async () => {},
+          lstatSftp: async () => ({ type: "directory", size: 0, lastModified: 1 }),
+          deleteSftp: async (_sftpId, _path, expectedType) => {
+            assert.equal(expectedType, "directory");
+            if (currentType !== expectedType) {
+              throw new Error(`Expected ${expectedType}, found ${currentType}`);
+            }
+          },
+          startStreamTransfer: async (payload) => {
+            transfers += 1;
+            return { transferId: payload.transferId };
+          },
+        },
+        listLocalTree: async () => {
+          scans += 1;
+          return [];
+        },
+      },
+    ),
+    /Expected directory, found file/,
+  );
+
+  assert.equal(scans, 0, "changed targets must abort before scanning starts");
+  assert.equal(transfers, 0, "changed targets must not be overwritten");
 });
 
 test("progressive multi-root resume of non-head parent unblocks while head stays paused", async () => {

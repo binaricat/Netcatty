@@ -28,6 +28,7 @@ import {
   sanitizeHostsForSync,
   type SyncPayload,
 } from '../domain/sync';
+import { migrateLegacyCommandBlocklist } from '../domain/commandBlocklist';
 import { migrateHostsFromLegacyLineTimestamps } from '../domain/host';
 import { toPersistedPortForwardingRules } from '../domain/portForwardingPersistence';
 import {
@@ -43,6 +44,10 @@ import { localStorageAdapter } from '../infrastructure/persistence/localStorageA
 import { decryptField, encryptField } from '../infrastructure/persistence/secureFieldAdapter';
 import { sanitizeQuickMessages } from '../infrastructure/ai/quickMessages';
 import { emitAIStateChanged } from './state/aiStateEvents';
+import {
+  persistCommandBlocklistSetting,
+  readCommandBlocklistSetting,
+} from './state/commandBlocklistSettings';
 import { rehydrateGlobalSftpBookmarks } from './state/sftp/globalSftpBookmarks';
 import {
   nextTerminalFontSizeSyncVersion,
@@ -572,8 +577,10 @@ export function collectSyncableSettings(): SyncPayload['settings'] {
   // externalAgents intentionally not collected: command/args/env are device-local.
   const defaultAgentId = localStorageAdapter.readString(STORAGE_KEY_AI_DEFAULT_AGENT);
   if (defaultAgentId != null) ai.defaultAgentId = defaultAgentId;
-  const commandBlocklist = localStorageAdapter.read<string[]>(STORAGE_KEY_AI_COMMAND_BLOCKLIST);
-  if (Array.isArray(commandBlocklist)) ai.commandBlocklist = commandBlocklist;
+  const storedCommandBlocklist = localStorageAdapter.read<string[]>(STORAGE_KEY_AI_COMMAND_BLOCKLIST);
+  if (Array.isArray(storedCommandBlocklist)) {
+    ai.commandBlocklist = readCommandBlocklistSetting();
+  }
   const commandTimeout = localStorageAdapter.readNumber(STORAGE_KEY_AI_COMMAND_TIMEOUT);
   if (commandTimeout != null && Number.isFinite(commandTimeout)) ai.commandTimeout = commandTimeout;
   const responseIdleTimeout = localStorageAdapter.readNumber(STORAGE_KEY_AI_RESPONSE_IDLE_TIMEOUT);
@@ -824,7 +831,9 @@ async function applySyncableSettings(settings: NonNullable<SyncPayload['settings
     // externalAgents intentionally not applied: device-local. Legacy snapshots
     // that still carry an `externalAgents` field are silently ignored.
     if (ai.defaultAgentId != null) localStorageAdapter.writeString(STORAGE_KEY_AI_DEFAULT_AGENT, ai.defaultAgentId);
-    if (ai.commandBlocklist != null) localStorageAdapter.write(STORAGE_KEY_AI_COMMAND_BLOCKLIST, ai.commandBlocklist);
+    if (ai.commandBlocklist != null) {
+      persistCommandBlocklistSetting(migrateLegacyCommandBlocklist(ai.commandBlocklist));
+    }
     if (ai.commandTimeout != null) localStorageAdapter.writeNumber(STORAGE_KEY_AI_COMMAND_TIMEOUT, ai.commandTimeout);
     if (ai.responseIdleTimeout != null) {
       localStorageAdapter.writeNumber(STORAGE_KEY_AI_RESPONSE_IDLE_TIMEOUT, ai.responseIdleTimeout);

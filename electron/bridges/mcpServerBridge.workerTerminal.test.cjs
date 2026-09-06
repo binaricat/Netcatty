@@ -124,6 +124,7 @@ test("MCP/Catty terminal_execute proxies to worker when terminal sessions live i
           activePortForwards: [],
         },
         enforceWallTimeout: true,
+        commandBlocklist: [],
       },
       options: {},
     },
@@ -433,6 +434,7 @@ test("MCP/Catty terminal_start, poll, and stop proxy worker background jobs", as
       hostChain: [],
       activePortForwards: [],
     },
+    commandBlocklist: [],
   });
 });
 

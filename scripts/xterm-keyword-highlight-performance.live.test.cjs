@@ -117,6 +117,33 @@ if (!process.versions.electron) {
       const write = data => new Promise(resolve => term.write(data, resolve));
       const waitPaint = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 
+      // #3271: inspect the first actual renderer frame for tail -200f and
+      // subsequent coalesced log ticks, before the deferred catch-up can run.
+      let streamingFrames = 0;
+      let uncoloredStreamingFrame = false;
+      const streamingRender = term.onRender(() => {
+        streamingFrames += 1;
+        for (let row = 0; row < term.rows; row += 1) {
+          const line = term.buffer.active.getLine(term.buffer.active.viewportY + row);
+          const column = line?.translateToString(true).indexOf("ERROR") ?? -1;
+          if (column >= 0 && line.getCell(column).getFgColor() !== 0xf87171) {
+            uncoloredStreamingFrame = true;
+          }
+        }
+      });
+      for (const lines of [200, 12, 12, 12]) {
+        const batch = Array.from({ length: lines }, () => "log ERROR").join("\\r\\n") + "\\r\\n";
+        noteTerminalOutputPressureData(term, batch);
+        await write(batch);
+        await waitPaint();
+        await new Promise(resolve => setTimeout(resolve, 120));
+      }
+      streamingRender.dispose();
+      if (uncoloredStreamingFrame) throw new Error("Streaming output rendered before keyword color");
+      if (streamingFrames < 4) throw new Error("Streaming renderer frames were not observed");
+      await highlighter.whenSettled();
+      term.reset();
+
       await write("row-1 ERROR\\r\\nrow-2 ERROR\\r\\nrow-3 ERROR\\r\\nrow-4 ERROR");
       await write("\\x1b[1;");
       await write(

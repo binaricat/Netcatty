@@ -50,7 +50,7 @@ test("app resume handlers flush backlog and recover the terminal renderer before
   assertRecoverTerminalOnAppResumeOrder(source);
   assert.match(
     resumeEffectSource,
-    /const handleVisibilityChange = \(\) => \{\s*if \(document\.visibilityState !== 'visible'\) return;\s*recoverTerminalOnAppResume\(\);\s*\};/,
+    /const handleVisibilityChange = \(\) => \{\s*if \(document\.visibilityState !== 'visible'\) \{\s*syncOutputPressureVisibility\(\);\s*return;\s*\}\s*recoverTerminalOnAppResume\(\);\s*\};/,
   );
   assert.match(
     resumeEffectSource,

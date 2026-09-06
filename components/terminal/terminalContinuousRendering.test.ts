@@ -24,7 +24,7 @@ test("renderer activity follows the hibernate setting instead of active-tab visi
   );
 });
 
-test("inactive terminal surfaces remain painted and non-interactive without hibernate", () => {
+test("inactive terminal surfaces remain mounted and non-interactive without hibernate", () => {
   assert.match(supportSource, /resolveTerminalHibernateEnabledForProtocol\(terminalSettings, host\.protocol\)/);
   assert.match(
     supportSource,

@@ -3708,7 +3708,7 @@ test("ssh session restores cwd before startup command after attaching", async ()
   assert.deepEqual(progressLogs, ["Restoring working directory: /srv/app dir"]);
 });
 
-test("local session resets terminal timestamp state when reusing a terminal", async () => {
+test("local session keeps timestamp anchors for preserved scrollback when reusing a terminal", async () => {
   const writes: string[] = [];
   const markerLines: number[] = [];
   const disposedMarkerLines: number[] = [];
@@ -3814,8 +3814,10 @@ test("local session resets terminal timestamp state when reusing a terminal", as
   assert.equal(writes.length, 2);
   assert.equal(writes[0], "unfinished");
   assert.equal(writes[1], "fresh");
+  // Reconnect preserves the buffer, so the pre-restart stamp stays anchored
+  // (not disposed) and the fresh output records its own stamp.
   assert.deepEqual(markerLines, [0, 0]);
-  assert.deepEqual(disposedMarkerLines, [0]);
+  assert.deepEqual(disposedMarkerLines, []);
 });
 
 test("session data waits for prior terminal writes before evaluating prompt line breaks", async () => {

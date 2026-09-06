@@ -46,6 +46,9 @@ const baseProps = {
   onSetWorkspaceFocusedSession: () => {},
   isBroadcastEnabled: () => false,
   onToggleBroadcast: () => {},
+  isGlobalBroadcastEnabled: false,
+  canUseGlobalBroadcast: false,
+  onToggleGlobalBroadcast: () => {},
   updateSnippets: () => {},
   updateSnippetPackages: () => {},
   onSplitSession: () => {},
@@ -116,6 +119,23 @@ test("TerminalLayer re-renders when broadcast state changes", () => {
     terminalLayerAreEqual(
       baseProps as never,
       { ...baseProps, isBroadcastEnabled: () => true } as never,
+    ),
+    false,
+  );
+});
+
+test("TerminalLayer re-renders when global broadcast state changes", () => {
+  assert.equal(
+    terminalLayerAreEqual(
+      baseProps as never,
+      { ...baseProps, isGlobalBroadcastEnabled: true } as never,
+    ),
+    false,
+  );
+  assert.equal(
+    terminalLayerAreEqual(
+      baseProps as never,
+      { ...baseProps, canUseGlobalBroadcast: true } as never,
     ),
     false,
   );

@@ -82,14 +82,17 @@ let reconnectCallback: ((
   ruleId: string,
   onStatusChange: (status: PortForwardingRule['status'], error?: string) => void
 ) => Promise<{ success: boolean; error?: string }>) | null = null;
+let shouldReconnectRule: ((ruleId: string) => boolean) | undefined;
 
 /**
  * Set the reconnect callback (called by state hook to enable auto-reconnect)
  */
 export const setReconnectCallback = (
-  callback: typeof reconnectCallback
+  callback: typeof reconnectCallback,
+  shouldReconnect?: (ruleId: string) => boolean,
 ): void => {
   reconnectCallback = callback;
+  shouldReconnectRule = callback ? shouldReconnect : undefined;
 };
 
 /**
@@ -212,7 +215,7 @@ const scheduleReconnectIfNeeded = (
   enableReconnect: boolean,
   onStatusChange: (status: PortForwardingRule['status'], error?: string) => void,
 ): boolean => {
-  if (!enableReconnect || !reconnectCallback) {
+  if (!enableReconnect || !reconnectCallback || shouldReconnectRule?.(ruleId) === false) {
     return false;
   }
   if (rulesPendingCleanup.has(ruleId)) {
@@ -222,6 +225,11 @@ const scheduleReconnectIfNeeded = (
 
   const currentConn = activeConnections.get(ruleId);
   if (currentConn?.reconnectSuppressed) return false;
+  if (currentConn?.reconnectTimerCallback) {
+    currentConn.status = 'connecting';
+    currentConn.error = `Reconnecting (${currentConn.reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`;
+    return true;
+  }
   const attempts = (currentConn?.reconnectAttempts ?? 0) + 1;
 
   if (attempts <= MAX_RECONNECT_ATTEMPTS) {
@@ -242,6 +250,13 @@ const scheduleReconnectIfNeeded = (
       currentConn.reconnectTimeoutId = undefined;
       currentConn.reconnectDueAt = undefined;
       currentConn.reconnectTimerCallback = undefined;
+      if (activeConnections.get(ruleId) !== currentConn) return;
+      if (shouldReconnectRule?.(ruleId) === false) {
+        currentConn.unsubscribe?.();
+        activeConnections.delete(ruleId);
+        onStatusChange('inactive');
+        return;
+      }
       if (reconnectCallback) {
         currentConn.reconnectStartAuthorized = true;
         reconnectCallback(ruleId, onStatusChange);
@@ -1017,6 +1032,22 @@ export const startPortForward = async (
           conn.unsubscribe = undefined;
           conn.locallyInitiated = false;
           return;
+        }
+        if (
+          !manualStopsInProgress.has(rule.id)
+          && !rulesPendingCleanup.has(rule.id)
+          && !exhaustedReconnectRules.has(rule.id)
+        ) {
+          const reconnectScheduled = scheduleReconnectIfNeeded(
+            rule.id,
+            enableReconnect,
+            onStatusChange,
+          );
+          if (reconnectScheduled) {
+            conn?.unsubscribe?.();
+            if (conn) conn.unsubscribe = undefined;
+            return;
+          }
         }
         conn?.unsubscribe?.();
         clearReconnectTimer(rule.id);

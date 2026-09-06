@@ -695,6 +695,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Security CDN endpoints can lack files advertised in their indexes.
+          # Fall back per file, with the final Bullseye security snapshot for packages only.
+          # Live signed indexes still select versions and verify every download.
+          printf 'http://deb.debian.org/debian-security\tpriority:1\nhttp://security.debian.org/debian-security\tpriority:2\nhttp://snapshot.debian.org/archive/debian-security/20260901T000000Z/\tpriority:3 type:deb\n' > /etc/apt/security-mirrors.txt
+          sed -i 's|http://deb.debian.org/debian-security|mirror+file:/etc/apt/security-mirrors.txt|g' /etc/apt/sources.list
           apt-get -o Acquire::Retries=4 update
           apt-get -o Acquire::Retries=4 install -y curl build-essential python3 git libfuse2 file rpm \
             libarchive-tools \

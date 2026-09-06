@@ -9,6 +9,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { execFileSync } = require("node:child_process");
+const { isWindowsAppExecutionAliasPath } = require("../../lib/localShell.cjs");
 
 const EXEC_OPTS = { encoding: "utf8", timeout: 5000, windowsHide: true };
 
@@ -90,7 +91,12 @@ function regEnumSubkeys(keyPath) {
 
 /**
  * Locate an executable on the system PATH using `where.exe`.
- * Returns the first valid, non-alias path, or `null` if not found.
+ * Returns the first valid path, or `null` if not found.
+ *
+ * Windows App Execution Aliases (MSIX/Store installs, e.g. winget PowerShell 7)
+ * are kept as a last-resort candidate: they are reparse points that fail
+ * `fs.existsSync()`, but spawning the alias path launches the packaged app
+ * just fine. A regular executable always wins when one is on the PATH.
  *
  * @param {string} name  Executable name, e.g. "pwsh"
  * @returns {string|null}
@@ -103,25 +109,16 @@ function findExecutableOnPath(name) {
       .map((l) => l.trim())
       .filter(Boolean);
 
+    let aliasCandidate = null;
     for (const candidate of candidates) {
-      if (!fs.existsSync(candidate)) continue;
-      // Skip Windows App Execution Aliases (WindowsApps zero-byte stubs).
-      try {
-        const localAppData = (process.env.LOCALAPPDATA || "").toLowerCase();
-        if (
-          localAppData &&
-          candidate.toLowerCase().startsWith(
-            path.join(localAppData, "Microsoft", "WindowsApps").toLowerCase() +
-              path.sep,
-          )
-        ) {
-          continue;
-        }
-      } catch (_e) {
-        // Ignore — just use the candidate.
+      if (isWindowsAppExecutionAliasPath(candidate)) {
+        aliasCandidate ??= candidate;
+        continue;
       }
+      if (!fs.existsSync(candidate)) continue;
       return candidate;
     }
+    if (aliasCandidate) return aliasCandidate;
   } catch (_err) {
     // Not found on PATH.
   }

@@ -209,6 +209,8 @@ export type ToolbarOverflowMenuProps = {
   buttonClassName?: string;
   contentClassName?: string;
   align?: 'start' | 'center' | 'end';
+  /** Optional access to the persistent trigger, e.g. for restoring focus after a nested dialog. */
+  triggerRef?: React.Ref<HTMLButtonElement>;
 };
 
 /**
@@ -225,6 +227,7 @@ export const ToolbarOverflowMenu: React.FC<ToolbarOverflowMenuProps> = ({
   buttonClassName,
   contentClassName,
   align = 'end',
+  triggerRef,
 }) => {
   const [open, setOpen] = useState(false);
   const close = useCallback(() => setOpen(false), []);
@@ -238,6 +241,7 @@ export const ToolbarOverflowMenu: React.FC<ToolbarOverflowMenuProps> = ({
         <TooltipTrigger asChild>
           <PopoverTrigger asChild>
             <Button
+              ref={triggerRef}
               variant="ghost"
               size="icon"
               className={buttonClassName}

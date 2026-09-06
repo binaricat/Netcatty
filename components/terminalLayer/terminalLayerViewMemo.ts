@@ -430,6 +430,9 @@ const WORKSPACE_CTX_KEYS = [
   'onReorderTabs',
   'onStartSessionDrag',
   'onEndSessionDrag',
+  'isGlobalBroadcastEnabled',
+  'canUseGlobalBroadcast',
+  'onToggleGlobalBroadcast',
 ] as const;
 
 export function terminalLayerSidePanelStableCtxEqual(prev: Ctx, next: Ctx): boolean {

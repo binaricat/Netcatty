@@ -246,8 +246,13 @@ function sanitizeContentForCompaction(content: Exclude<ModelMessage["content"], 
 function sanitizeContentPartForCompaction(part: unknown): unknown {
   if (!isRecord(part)) return sanitizeUnknownForCompaction(part);
 
+  const sanitized = sanitizeRecordForCompaction(part);
+  // Provider options are replay metadata for the actual model request, not
+  // conversation content. In particular, Responses encrypted reasoning can
+  // be tens of KB per turn and must never become literal summarization text.
+  delete sanitized.providerOptions;
+
   if (part.type === "image") {
-    const sanitized = sanitizeRecordForCompaction(part);
     return {
       ...sanitized,
       image: describeRedactedPayload(part.image, {
@@ -258,7 +263,6 @@ function sanitizeContentPartForCompaction(part: unknown): unknown {
   }
 
   if (part.type === "file") {
-    const sanitized = sanitizeRecordForCompaction(part);
     return {
       ...sanitized,
       data: describeRedactedPayload(part.data, {
@@ -269,7 +273,7 @@ function sanitizeContentPartForCompaction(part: unknown): unknown {
     };
   }
 
-  return sanitizeUnknownForCompaction(part);
+  return sanitized;
 }
 
 function sanitizeRecordForCompaction(value: Record<string, unknown>): Record<string, unknown> {

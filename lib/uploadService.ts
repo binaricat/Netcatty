@@ -16,6 +16,7 @@ import {
   getSftpConflictTypeKey,
 } from "../domain/sftpConflict";
 import { isMissingStatError } from "../domain/sftpStatError";
+import { resolveSftpTransferConcurrency } from "../domain/sftpTransferConcurrency";
 
 // ============================================================================
 // Types
@@ -268,6 +269,7 @@ async function uploadEntriesWithOptionalCompression(
       controller,
       resolveConflict,
       config.targetHostId,
+      config.fileTransferConcurrency,
     );
   }
 
@@ -284,6 +286,7 @@ async function uploadEntriesWithOptionalCompression(
       controller,
       resolveConflict,
       config.targetHostId,
+      config.fileTransferConcurrency,
     );
   }
 
@@ -414,6 +417,7 @@ async function uploadEntriesWithOptionalCompression(
     controller,
     replayResolvedConflict,
     config.targetHostId,
+    config.fileTransferConcurrency,
   );
   return [...resolvedResults, ...terminalCompressedResults, ...regularResults];
 }
@@ -432,6 +436,7 @@ async function uploadEntries(
   controller?: UploadController,
   resolveConflict?: UploadConfig["resolveConflict"],
   targetHostId?: string,
+  fileTransferConcurrency?: number,
 ): Promise<UploadResult[]> {
   const results: UploadResult[] = [];
   const createdDirs = new Set<string>();
@@ -919,9 +924,9 @@ async function uploadEntries(
     settleTask(taskId, settle);
   };
 
-  // Keep external multi-file uploads conservative: each file may open an
-  // isolated fastPut channel with its own in-flight WRITE fanout.
-  const UPLOAD_CONCURRENCY = 2;
+  const uploadConcurrency = resolveSftpTransferConcurrency(
+    () => fileTransferConcurrency,
+  );
 
   try {
     let entryIndex = 0;
@@ -1021,7 +1026,7 @@ async function uploadEntries(
     };
 
     const workers = Array.from(
-      { length: Math.min(UPLOAD_CONCURRENCY, fileEntries.length || 1) },
+      { length: Math.min(uploadConcurrency, fileEntries.length || 1) },
       () => worker(),
     );
     await Promise.all(workers);

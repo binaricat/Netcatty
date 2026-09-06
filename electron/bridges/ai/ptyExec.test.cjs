@@ -18,6 +18,10 @@ const {
   buildPendingInputClearPrefix,
   buildWrappedCommand,
 } = require("./ptyExecHelpers.cjs");
+const {
+  getFreshIdlePrompt,
+  trackSessionIdlePrompt,
+} = require("./shellUtils.cjs");
 
 class ShellBackedPty extends EventEmitter {
   write(data) {
@@ -160,6 +164,39 @@ test("background PTY jobs preserve output that has no trailing newline", async (
   assert.equal(result.ok, true);
   assert.equal(result.stdout, "abc");
   assert.equal(result.exitCode, 0);
+});
+
+test("background PowerShell jobs exclude a changed prompt from results and snapshots", async () => {
+  class CapturePty extends EventEmitter {
+    write() {}
+  }
+  const pty = new CapturePty();
+  const job = startPtyJob(pty, "Set-Location C:\\tmp; Write-Output 'DONE'", {
+    shellKind: "unknown",
+    loginShellHint: "cmd",
+    timeoutMs: 1000,
+    expectedPrompt: "PS C:\\Users\\alice>",
+    maxBufferedChars: 1024,
+    normalizeFinalOutput: false,
+  });
+
+  const endMarker = `${job.marker}_E:0`;
+  pty.emit("data", Buffer.from(`${job.marker}_S\r\nDONE\r\n${endMarker.slice(0, 4)}`));
+  const partialSnapshot = job.getSnapshot();
+  assert.equal(partialSnapshot.stdout, "DONE\n");
+  assert.equal(partialSnapshot.totalOutputChars, "DONE\n".length);
+  assert.doesNotMatch(partialSnapshot.stdout, /__NC/);
+
+  pty.emit("data", Buffer.from(`${endMarker.slice(4)}\r\nPS C:\\tmp>`));
+  const result = await job.resultPromise;
+  const snapshot = job.getSnapshot();
+
+  assert.equal(result.ok, true);
+  assert.equal(result.stdout, "DONE\n");
+  assert.equal(snapshot.stdout, "DONE\n");
+  assert.ok(snapshot.totalOutputChars >= partialSnapshot.totalOutputChars);
+  assert.doesNotMatch(result.stdout, /PS C:\\\\tmp>/);
+  assert.doesNotMatch(snapshot.stdout, /PS C:\\\\tmp>/);
 });
 
 test("uses PowerShell wrapping when a session with no confirmed shell sees a PowerShell prompt", () => {
@@ -330,12 +367,475 @@ test("loginShellHint selects fish/posix/powershell/cmd without pinning confirmed
 test("pending-input clear prefix covers interactive shells and skips raw devices", () => {
   assert.equal(buildPendingInputClearPrefix("posix"), "\x15\x0b");
   assert.equal(buildPendingInputClearPrefix("fish"), "\x15\x0b");
-  assert.equal(buildPendingInputClearPrefix("powershell"), "\x1b\x15\x0b");
+  assert.equal(buildPendingInputClearPrefix("powershell"), "\x1bggd2147483647d\x1br\x1b\x1bi\x08");
   assert.equal(buildPendingInputClearPrefix("cmd"), "\x1b");
   assert.equal(buildPendingInputClearPrefix("raw"), "");
 });
 
-test("startPtyJob writes the clear prefix before the wrapper", async () => {
+test("consecutive jobs wait for the PowerShell prompt after a split end marker", async () => {
+  const writes = [];
+  class CapturePty extends EventEmitter {
+    write(data) {
+      writes.push(String(data));
+    }
+  }
+  const pty = new CapturePty();
+  const session = { _loginShellKind: "cmd" };
+  pty.on("data", (data) => trackSessionIdlePrompt(session, String(data)));
+  trackSessionIdlePrompt(session, "Microsoft Windows...\r\nPS C:\\Users\\alice>");
+
+  for (const probe of ["PROBE_1", "PROBE_2"]) {
+    const job = startPtyJob(pty, `Write-Output '${probe}'`, {
+      shellKind: session.shellKind,
+      loginShellHint: session._loginShellKind,
+      timeoutMs: 20,
+      expectedPrompt: getFreshIdlePrompt(session),
+    });
+    const write = writes.at(-1);
+    assert.match(write, /\$__NCMCP_/);
+    assert.doesNotMatch(write, /cmd \/d \/s \/c/i);
+
+    pty.emit(
+      "data",
+      Buffer.from(`${job.marker}_S\r\n${probe}\r\n${job.marker}_E:0\r\n`),
+    );
+    let settled = false;
+    job.resultPromise.then(() => { settled = true; });
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    assert.equal(settled, false);
+
+    pty.emit("data", Buffer.from("PS C:\\Users\\alice>"));
+    const result = await job.resultPromise;
+    assert.equal(result.ok, true);
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stdout, probe);
+  }
+});
+
+test("non-target shells still finish at the end marker without waiting for a prompt", async () => {
+  class CapturePty extends EventEmitter {
+    write() {}
+  }
+  const pty = new CapturePty();
+  const job = startPtyJob(pty, "printf done", {
+    shellKind: "posix",
+    timeoutMs: 20,
+    expectedPrompt: "alice@host:~$",
+  });
+  pty.emit("data", Buffer.from(`${job.marker}_S\r\ndone\r\n${job.marker}_E:0\r\n`));
+
+  let settled = false;
+  job.resultPromise.then(() => { settled = true; });
+  await new Promise((resolve) => setImmediate(resolve));
+  if (!settled) job.cancel();
+  assert.equal(settled, true);
+});
+
+test("cancel retries stop after an end marker while the prompt is delayed", async () => {
+  const writes = [];
+  class CapturePty extends EventEmitter {
+    write(data) {
+      writes.push(String(data));
+    }
+  }
+  const pty = new CapturePty();
+  const job = startPtyJob(pty, "Start-Sleep 10", {
+    shellKind: "unknown",
+    loginShellHint: "cmd",
+    timeoutMs: 1000,
+    expectedPrompt: "PS C:\\Users\\alice>",
+  });
+  job.cancel();
+  assert.equal(writes.filter((write) => write === "\x03").length, 1);
+
+  pty.emit("data", Buffer.from(`${job.marker}_S\r\n${job.marker}_E:130\r\n`));
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  assert.equal(writes.filter((write) => write === "\x03").length, 1);
+
+  pty.emit("data", Buffer.from("PS C:\\Users\\alice>"));
+  const result = await job.resultPromise;
+  assert.equal(result.ok, false);
+  assert.equal(result.error, "Cancelled");
+  assert.equal(result.stdout, "");
+  assert.doesNotMatch(result.stdout, /__NCMCP_/);
+});
+
+test("cancelled output strips an end marker delivered with the prompt", async () => {
+  const writes = [];
+  class CapturePty extends EventEmitter {
+    write(data) {
+      writes.push(String(data));
+    }
+  }
+  const pty = new CapturePty();
+  const job = startPtyJob(pty, "Start-Sleep 10", {
+    shellKind: "unknown",
+    loginShellHint: "cmd",
+    timeoutMs: 1000,
+    expectedPrompt: "PS C:\\Users\\alice>",
+  });
+  pty.emit("data", Buffer.from(`${job.marker}_S\r\n`));
+  job.cancel();
+
+  pty.emit(
+    "data",
+    Buffer.from(`${job.marker}_E:130\r\nPS C:\\Users\\alice>`),
+  );
+  const result = await job.resultPromise;
+  assert.equal(result.ok, false);
+  assert.equal(result.error, "Cancelled");
+  assert.equal(result.stdout, "");
+  assert.doesNotMatch(result.stdout, /__NCMCP_/);
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  assert.equal(writes.filter((write) => write === "\x03").length, 1);
+});
+
+test("cancel after an end marker keeps waiting without interrupting the prompt", async () => {
+  const writes = [];
+  class CapturePty extends EventEmitter {
+    write(data) {
+      writes.push(String(data));
+    }
+  }
+  const pty = new CapturePty();
+  const job = startPtyJob(pty, "Write-Output 'DONE'", {
+    shellKind: "unknown",
+    loginShellHint: "cmd",
+    timeoutMs: 1000,
+    expectedPrompt: "PS C:\\Users\\alice>",
+  });
+  pty.emit("data", Buffer.from(`${job.marker}_S\r\nDONE\r\n${job.marker}_E:0\r\n`));
+  job.cancel();
+
+  let settled = false;
+  job.resultPromise.then(() => { settled = true; });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(settled, false);
+  assert.equal(writes.filter((write) => write === "\x03").length, 0);
+
+  pty.emit("data", Buffer.from("PS C:\\Users\\alice>"));
+  const result = await job.resultPromise;
+  assert.equal(result.ok, true);
+  assert.equal(result.stdout, "DONE");
+});
+
+test("stream termination after an end marker preserves the completed result", async (t) => {
+  for (const termination of ["close", "error", "exit"]) {
+    await t.test(termination, async () => {
+      class CapturePty extends EventEmitter {
+        write() {}
+
+        onExit(callback) {
+          this.exitCallback = callback;
+          return { dispose() {} };
+        }
+      }
+      const pty = new CapturePty();
+      const job = startPtyJob(pty, "Write-Output 'DONE'", {
+        shellKind: "unknown",
+        loginShellHint: "cmd",
+        timeoutMs: 1000,
+        expectedPrompt: "PS C:\\Users\\alice>",
+      });
+      pty.emit("data", Buffer.from(`${job.marker}_S\r\nDONE\r\n${job.marker}_E:7\r\n`));
+      if (termination === "error") {
+        pty.emit("error", new Error("disconnected"));
+      } else if (termination === "exit") {
+        pty.exitCallback();
+      } else {
+        pty.emit("close");
+      }
+
+      const result = await job.resultPromise;
+      assert.equal(result.ok, false);
+      assert.equal(result.exitCode, 7);
+      assert.equal(result.stdout, "DONE");
+      assert.doesNotMatch(result.stdout, /__NCMCP_/);
+      assert.equal(result.error, undefined);
+    });
+  }
+});
+
+test("a foreground wall deadline returns on time but blocks writes until the prompt returns", async () => {
+  const writes = [];
+  class CapturePty extends EventEmitter {
+    write(data) {
+      writes.push(String(data));
+    }
+  }
+  const pty = new CapturePty();
+  const session = { _loginShellKind: "cmd" };
+  pty.on("data", (data) => trackSessionIdlePrompt(session, String(data)));
+  trackSessionIdlePrompt(session, "PS C:\\Users\\alice>");
+
+  const first = startPtyJob(pty, "Write-Output 'DONE'", {
+    shellKind: session.shellKind,
+    loginShellHint: session._loginShellKind,
+    timeoutMs: 30,
+    expectedPrompt: getFreshIdlePrompt(session),
+    enforceWallTimeout: true,
+  });
+  pty.emit("data", Buffer.from(`${first.marker}_S\r\nDONE\r\n${first.marker}_E:0\r\n`));
+
+  const deadlineGuard = Symbol("deadline guard");
+  const firstResult = await Promise.race([
+    first.resultPromise,
+    new Promise((resolve) => setTimeout(() => resolve(deadlineGuard), 300)),
+  ]);
+  assert.notEqual(firstResult, deadlineGuard);
+  assert.equal(firstResult.ok, true);
+  assert.equal(firstResult.exitCode, 0);
+  assert.equal(firstResult.stdout, "DONE");
+  assert.equal(writes.filter((write) => write === "\x03").length, 0);
+
+  assert.throws(
+    () => startPtyJob(pty, "Write-Output 'TOO_EARLY'", {
+      shellKind: session.shellKind,
+      loginShellHint: session._loginShellKind,
+      timeoutMs: 1000,
+      expectedPrompt: getFreshIdlePrompt(session),
+    }),
+    (error) => (
+      error?.code === "SHELL_PROMPT_PENDING"
+      && /waiting for the shell prompt/i.test(error.message)
+    ),
+  );
+  assert.equal(writes.length, 1);
+
+  pty.emit("data", Buffer.from("PS C:\\Users\\alice>"));
+  const second = startPtyJob(pty, "Write-Output 'NEXT'", {
+    shellKind: session.shellKind,
+    loginShellHint: session._loginShellKind,
+    timeoutMs: 1000,
+    expectedPrompt: getFreshIdlePrompt(session),
+  });
+  const secondWrite = writes.at(-1);
+  assert.match(secondWrite, /\$__NCMCP_/);
+  assert.doesNotMatch(secondWrite, /cmd \/d \/s \/c/i);
+  pty.emit(
+    "data",
+    Buffer.from(`${second.marker}_S\r\nNEXT\r\n${second.marker}_E:0\r\nPS C:\\Users\\alice>`),
+  );
+  const secondResult = await second.resultPromise;
+  assert.equal(secondResult.ok, true);
+  assert.equal(secondResult.stdout, "NEXT");
+  assert.equal(writes.filter((write) => write === "\x03").length, 0);
+});
+
+test("startPtyJob clears PowerShell input in Windows, Emacs, and Vi editor states", async () => {
+  class PowerShellLinePty extends EventEmitter {
+    constructor(editMode, { legacyVi = false } = {}) {
+      super();
+      this.editMode = editMode;
+      this.legacyVi = legacyVi;
+      this.pendingInput = "";
+      this.cursor = 0;
+      this.viInsertMode = true;
+      this.viReplacePending = false;
+      this.viChord = "";
+      this.viChordDigits = "";
+      this.emacsChord = false;
+      this.submittedLines = [];
+      this.writes = [];
+    }
+
+    setPendingInput(text, { cursor = text.length, viInsertMode = true } = {}) {
+      this.pendingInput = text;
+      this.cursor = cursor;
+      this.viInsertMode = viInsertMode;
+      this.viReplacePending = false;
+      this.viChord = "";
+      this.viChordDigits = "";
+    }
+
+    insert(text) {
+      this.pendingInput = `${this.pendingInput.slice(0, this.cursor)}${text}${this.pendingInput.slice(this.cursor)}`;
+      this.cursor += text.length;
+    }
+
+    applyEditKey(key) {
+      if (this.editMode === "windows") {
+        if (key === "\x1b") {
+          this.pendingInput = "";
+          this.cursor = 0;
+        } else if (key === "\x08") {
+          if (this.cursor > 0) {
+            this.pendingInput = `${this.pendingInput.slice(0, this.cursor - 1)}${this.pendingInput.slice(this.cursor)}`;
+            this.cursor -= 1;
+          }
+        } else {
+          this.insert(key);
+        }
+        return;
+      }
+
+      if (this.editMode === "emacs") {
+        if (this.emacsChord) {
+          this.emacsChord = false;
+          if (key.toLowerCase() === "r") {
+            this.pendingInput = "";
+            this.cursor = 0;
+          }
+        } else if (key === "\x1b") {
+          this.emacsChord = true;
+        } else if (key === "\x15") {
+          this.pendingInput = this.pendingInput.slice(this.cursor);
+          this.cursor = 0;
+        } else if (key === "\x0b") {
+          this.pendingInput = this.pendingInput.slice(0, this.cursor);
+        } else if (key === "\x08") {
+          if (this.cursor > 0) {
+            this.pendingInput = `${this.pendingInput.slice(0, this.cursor - 1)}${this.pendingInput.slice(this.cursor)}`;
+            this.cursor -= 1;
+          }
+        } else {
+          this.insert(key);
+        }
+        return;
+      }
+
+      if (this.viReplacePending) {
+        this.viReplacePending = false;
+        return;
+      }
+      if (this.viChord) {
+        const chord = this.viChord;
+        if (chord === "d" && /[0-9]/.test(key)) {
+          this.viChordDigits += key;
+          return;
+        }
+        this.viChord = "";
+        if (chord === "g" && key === "g") {
+          this.cursor = 0;
+        } else if (chord === "d" && key === "G" && !this.legacyVi) {
+          this.pendingInput = this.pendingInput.slice(0, this.cursor);
+        } else if (chord === "d" && key === "d") {
+          // PSReadLine 2.0's dd clears the whole buffer. In 2.1+, dd clears
+          // the requested number of logical lines.
+          if (this.legacyVi) {
+            this.pendingInput = "";
+            this.cursor = 0;
+          } else {
+            const requestedLines = Number(this.viChordDigits || "1");
+            const lineStart = this.pendingInput.lastIndexOf("\n", Math.max(0, this.cursor - 1)) + 1;
+            let lineEnd = lineStart;
+            let remaining = requestedLines;
+            while (remaining > 0 && lineEnd < this.pendingInput.length) {
+              const newline = this.pendingInput.indexOf("\n", lineEnd);
+              if (newline === -1) {
+                lineEnd = this.pendingInput.length;
+                break;
+              }
+              lineEnd = newline + 1;
+              remaining -= 1;
+            }
+            this.pendingInput = `${this.pendingInput.slice(0, lineStart)}${this.pendingInput.slice(lineEnd)}`;
+            this.cursor = Math.min(lineStart, this.pendingInput.length);
+          }
+        }
+        this.viChordDigits = "";
+        return;
+      }
+      if (!this.viInsertMode) {
+        if (key === "i") {
+          this.viInsertMode = true;
+        } else if (key === "r") {
+          this.viReplacePending = true;
+        } else if (key === "g" || key === "d") {
+          this.viChord = key;
+        }
+        return;
+      }
+      if (key === "\x1b") {
+        this.viInsertMode = false;
+      } else if (key === "\x08") {
+        if (this.cursor > 0) {
+          this.pendingInput = `${this.pendingInput.slice(0, this.cursor - 1)}${this.pendingInput.slice(this.cursor)}`;
+          this.cursor -= 1;
+        }
+      } else {
+        this.insert(key);
+      }
+    }
+
+    write(data) {
+      const text = String(data);
+      this.writes.push(text);
+
+      const clearPrefix = buildPendingInputClearPrefix("powershell");
+      assert.ok(text.startsWith(clearPrefix));
+      for (const key of clearPrefix) this.applyEditKey(key);
+      const wrapper = text.slice(clearPrefix.length);
+      const submittedLine = this.viInsertMode
+        ? `${this.pendingInput.slice(0, this.cursor)}${wrapper}${this.pendingInput.slice(this.cursor)}`
+        : this.pendingInput;
+      this.submittedLines.push(submittedLine);
+      this.pendingInput = "";
+      this.cursor = 0;
+
+      const marker = submittedLine.match(/__NCMCP_[0-9a-z]+_[0-9a-f]+__/)?.[0];
+      assert.ok(marker);
+      queueMicrotask(() => {
+        this.emit("data", Buffer.from(`${marker}_S\r\n${marker}_E:0\r\nPS C:\\Users\\alice>`));
+      });
+    }
+  }
+
+  const legacyPreviousPrefixPty = new PowerShellLinePty("vi", { legacyVi: true });
+  legacyPreviousPrefixPty.setPendingInput("first line\n; Write-Output 'USER_SECOND'");
+  for (const key of "\x1bggdG\x1br\x1b\x1bi\x08") legacyPreviousPrefixPty.applyEditKey(key);
+  assert.match(legacyPreviousPrefixPty.pendingInput, /USER_SECOND/);
+
+  const editorCases = [
+    { editMode: "windows", cursorAtStart: false, viInsertMode: true, multiline: false },
+    { editMode: "emacs", cursorAtStart: true, viInsertMode: true, multiline: false },
+    { editMode: "vi", cursorAtStart: true, viInsertMode: true, multiline: false },
+    { editMode: "vi", cursorAtStart: true, viInsertMode: false, multiline: false },
+    { editMode: "vi", cursorAtStart: false, viInsertMode: true, multiline: true },
+    { editMode: "vi", cursorAtStart: false, viInsertMode: false, multiline: true },
+    { editMode: "vi", cursorAtStart: false, viInsertMode: true, multiline: true, legacyVi: true },
+    { editMode: "vi", cursorAtStart: false, viInsertMode: false, multiline: true, legacyVi: true },
+  ];
+  for (const { editMode, cursorAtStart, viInsertMode, multiline, legacyVi = false } of editorCases) {
+    const pty = new PowerShellLinePty(editMode, { legacyVi });
+    const commands = ["Write-Output 'one'", "Write-Output 'two'"];
+    for (const [index, command] of commands.entries()) {
+      if (index === 1) {
+        // Model input accepted by PSReadLine before its echo reaches the
+        // tracked PTY output. The leading semicolon makes a retained suffix
+        // executable after the wrapper, matching the dangerous Vi edge case.
+        const pendingInput = multiline
+          ? "; Write-Output 'USER'\nWrite-Output 'USER_SECOND'"
+          : cursorAtStart
+            ? "; Write-Output 'USER'"
+            : "Write-Output 'USER'; ";
+        pty.setPendingInput(pendingInput, {
+          cursor: cursorAtStart ? 0 : pendingInput.length,
+          viInsertMode,
+        });
+      }
+      const job = startPtyJob(pty, command, {
+        shellKind: "unknown",
+        loginShellHint: "cmd",
+        timeoutMs: 50,
+        expectedPrompt: "PS C:\\Users\\alice>",
+      });
+      await job.resultPromise;
+    }
+
+    assert.equal(pty.writes.length, 2);
+    assert.equal(pty.submittedLines.length, 2);
+    for (const [index, submittedLine] of pty.submittedLines.entries()) {
+      assert.ok(pty.writes[index].startsWith("\x1bggd2147483647d\x1br\x1b\x1bi\x08$__NCMCP_"));
+      assert.ok(submittedLine.startsWith("$__NCMCP_"));
+      assert.doesNotMatch(submittedLine, /Write-Output 'USER'/);
+      assert.doesNotMatch(submittedLine, /Write-Output 'USER_SECOND'/);
+      assert.doesNotMatch(submittedLine, /cmd \/d \/s \/c/i);
+    }
+  }
+});
+
+test("startPtyJob keeps the clear prefix for non-PowerShell sessions", async () => {
   const writes = [];
   class CapturePty extends EventEmitter {
     write(data) {
@@ -455,6 +955,60 @@ test("posix wrapper keeps cd contained in the subshell (documented trade-off)", 
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
+});
+
+// Issue #3265: with plain HISTCONTROL the wrapper line is recorded in bash
+// history; arrow-up recall then redraws the marker text, the preload __NCMCP_
+// filter suppresses the redraw fragments containing it, and readline's row
+// accounting desyncs from the rendered screen — leaving AI command residue
+// when the user navigates history. The wrapper must delete its own entry.
+test("posix wrapper removes its own entry from bash history", () => {
+  const marker = "__NCMCP_TEST__";
+  const wrapped = buildWrappedCommand("echo HISTORY_PROBE", "posix", marker);
+  const result = spawnSync(
+    "bash",
+    ["--norc", "-c", 'set -o history; HISTCONTROL=; HISTFILE=/dev/null; history -s "echo user_old"; ' + wrapped + "history"],
+    { encoding: "utf8" },
+  );
+
+  assert.equal(result.error, undefined);
+  assert.match(result.stdout, new RegExp(`${marker}_E:0`));
+  assert.match(result.stdout, /HISTORY_PROBE/);
+  // The user's own entry survives...
+  assert.match(result.stdout, /echo user_old/);
+  // ...and the wrapper entry is gone (deletion happens in the same line).
+  const historyListing = result.stdout.split("\n").filter((line) => /^\s*\d+\s/.test(line));
+  assert.ok(historyListing.length > 0, "expected a history listing");
+  assert.ok(
+    historyListing.every((line) => !line.includes(marker)),
+    `wrapper entry still in history: ${historyListing.join(" | ")}`,
+  );
+  // The cleanup is silent: no stderr leakage into the terminal.
+  assert.equal(result.stderr, "");
+});
+
+test("posix wrapper history cleanup never deletes the user's previous entry", () => {
+  // HISTCONTROL=ignorespace suppresses the leading-space wrapper entry, so
+  // $HISTCMD points at the user's previous command. The marker match must
+  // fail and leave that entry alone.
+  const marker = "__NCMCP_TEST__";
+  const wrapped = buildWrappedCommand("echo HISTORY_PROBE", "posix", marker);
+  const result = spawnSync(
+    "bash",
+    ["--norc", "-c", 'set -o history; HISTCONTROL=ignorespace; HISTFILE=/dev/null; history -s "echo user_old"; ' + wrapped + "history"],
+    { encoding: "utf8" },
+  );
+
+  assert.equal(result.error, undefined);
+  assert.match(result.stdout, new RegExp(`${marker}_E:0`));
+  assert.match(result.stdout, /echo user_old/);
+  const historyListing = result.stdout.split("\n").filter((line) => /^\s*\d+\s/.test(line));
+  assert.ok(historyListing.length > 0, "expected a history listing");
+  assert.ok(
+    historyListing.every((line) => !line.includes(marker)),
+    `wrapper entry still in history: ${historyListing.join(" | ")}`,
+  );
+  assert.equal(result.stderr, "");
 });
 
 test("execViaChannel registers a pending-cancel marker before the SSH channel opens", () => {
@@ -739,4 +1293,75 @@ test("execViaChannel cancellation never exposes an incomplete UTF-8 character", 
   assert.equal(result.stdout, "");
   assert.doesNotMatch(result.stdout, /�/u);
   assert.equal(result.error, "Cancelled");
+});
+
+for (const customization of [":", "HISTCONTROL=ignorespace", "alias history='history 10'", "history() { :; }"]) {
+  test(`posix wrapper bypasses history customization: ${customization}`, () => {
+    const marker = "__NCMCP_CUSTOM_HISTORY__";
+    const wrapped = buildWrappedCommand("echo HISTORY_PROBE", "posix", marker);
+    const result = spawnSync("bash", ["--noprofile", "--norc", "-i"], {
+      input: `HISTFILE=/dev/null; HISTCONTROL=; PS1=; PS2=
+${customization}
+builtin history -c
+echo user_old
+${wrapped}builtin history
+exit
+`,
+      encoding: "utf8",
+      env: { ...process.env, TERM: "dumb" },
+    });
+    assert.equal(result.status, 0);
+    assert.match(result.stdout, new RegExp(`${marker}_E:0`));
+    const entries = result.stdout.split("\n").filter((line) => /^\s*\d+\s/.test(line));
+    assert.ok(entries.some((line) => line.includes("echo user_old")));
+    assert.ok(entries.every((line) => !line.includes(marker)), entries.join("\n"));
+  });
+}
+
+test("cancelled live probe resets display once without injecting a command", async () => {
+  for (const callbackThrows of [false, true]) {
+    const pty = new EventEmitter();
+    const writes = [];
+    const resets = [];
+    pty.write = (data) => writes.push(data);
+    const job = startPtyJob(pty, "touch should-not-run", {
+      shellKind: "posix",
+      probeLiveShell: true,
+      expectedPrompt: "user@host:~$ ",
+      timeoutMs: 1000,
+      onProbeAborted: (marker) => {
+        resets.push(marker);
+        if (callbackThrows) throw new Error("Renderer closed");
+      },
+    });
+    job.cancel();
+    pty.emit("data", "\r\nuser@host:~$ ");
+    const result = await job.resultPromise;
+    assert.equal(result.error, "Cancelled");
+    assert.deepEqual(resets, [job.marker]);
+    pty.emit("data", `${job.marker}_P:fish\n${job.marker}_Q`);
+    job.cancel();
+    assert.deepEqual(resets, [job.marker]);
+    assert.ok(writes.every((data) => !data.includes("touch should-not-run")));
+    assert.ok(writes.every((data) => !data.includes(`${job.marker}_R`)));
+  }
+});
+
+test("posix wrapper avoids history expansion in interactive zsh", (t) => {
+  const marker = "__NCMCP_ZSH_HISTORY__";
+  const wrapped = buildWrappedCommand("echo HISTORY_PROBE", "posix", marker);
+  const result = spawnSync("zsh", ["-f", "-i"], {
+    input: `${wrapped}exit\n`,
+    encoding: "utf8",
+    env: { ...process.env, TERM: "dumb" },
+  });
+  if (result.error?.code === "ENOENT") {
+    t.skip("zsh is not installed");
+    return;
+  }
+  assert.equal(result.error, undefined);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, new RegExp(`${marker}_E:0`));
+  assert.match(result.stdout, /HISTORY_PROBE/);
+  assert.doesNotMatch(result.stderr, /event not found/);
 });

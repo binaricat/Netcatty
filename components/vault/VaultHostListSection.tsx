@@ -26,6 +26,7 @@ import {
 } from "../../domain/hostClickBehavior";
 import type { GroupNode, Host } from "../../domain/models";
 import { isPluginHostProtocol } from "../../domain/pluginConnection";
+import { OpenDualPaneSftpMenuItem } from "../host/HostTreeContextMenus";
 
 type VaultHostListSectionContext = Record<string, any>;
 
@@ -608,6 +609,7 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                                 <ContextMenuItem onClick={() => handleHostConnect(host)}>
                                   <Plug className="mr-2 h-4 w-4" /> {t('vault.hosts.connect')}
                                 </ContextMenuItem>
+                                <OpenDualPaneSftpMenuItem host={host} />
                                 <ContextMenuItem onClick={() => handleEditHost(host)}>
                                   <Edit2 className="mr-2 h-4 w-4" /> {t('action.edit')}
                                 </ContextMenuItem>
@@ -727,6 +729,7 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                                 <ContextMenuItem onClick={() => handleHostConnect(host)}>
                                   <Plug className="mr-2 h-4 w-4" /> {t('vault.hosts.connect')}
                                 </ContextMenuItem>
+                                <OpenDualPaneSftpMenuItem host={host} />
                                 <ContextMenuItem onClick={() => handleEditHost(host)}>
                                   <Edit2 className="mr-2 h-4 w-4" /> {t('action.edit')}
                                 </ContextMenuItem>
@@ -1106,6 +1109,7 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                                       >
                                         <Plug className="mr-2 h-4 w-4" /> {t('vault.hosts.connect')}
                                       </ContextMenuItem>
+                                      <OpenDualPaneSftpMenuItem host={host} />
                                       <ContextMenuItem
                                         onClick={() => handleEditHost(host)}
                                       >
@@ -1255,6 +1259,7 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                                 >
                                   <Plug className="mr-2 h-4 w-4" /> {t('vault.hosts.connect')}
                                 </ContextMenuItem>
+                                <OpenDualPaneSftpMenuItem host={host} />
                                 <ContextMenuItem
                                   onClick={() => handleEditHost(host)}
                                 >

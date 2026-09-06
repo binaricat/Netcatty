@@ -233,6 +233,8 @@ export const useSessionState = ({
   const [tabOrder, setTabOrder] = useState<string[]>(initialRestoreState.tabOrder);
   // Broadcast mode: stores workspace IDs that have broadcast enabled
   const [broadcastWorkspaceIds, setBroadcastWorkspaceIds] = useState<Set<string>>(new Set());
+  // Global broadcast mode: enables broadcast for all orphan sessions (not in workspaces)
+  const [globalBroadcastEnabled, setGlobalBroadcastEnabled] = useState<boolean>(false);
   // Log views: stores open log replay tabs
   const [logViews, setLogViews] = useState<LogView[]>([]);
   const [restorePreviousSessionRevision, setRestorePreviousSessionRevision] = useState(0);
@@ -1121,6 +1123,12 @@ export const useSessionState = ({
 	  }, [setActiveTabId]);
 
   const orphanSessions = useMemo(() => sessions.filter(s => !s.workspaceId && !s.hiddenFromTabs), [sessions]);
+  const canUseGlobalBroadcast = orphanSessions.length >= 2;
+
+  // Losing the group must disarm broadcast before another tab can join it.
+  if (!canUseGlobalBroadcast && globalBroadcastEnabled) {
+    setGlobalBroadcastEnabled(false);
+  }
 
   const openLogView = useCallback((log: ConnectionLog) => {
     const tabId = getLogViewTabId(log);
@@ -1272,6 +1280,14 @@ export const useSessionState = ({
     return broadcastWorkspaceIds.has(workspaceId);
   }, [broadcastWorkspaceIds]);
 
+  // Toggle global broadcast mode for orphan sessions
+  const toggleGlobalBroadcast = useCallback(() => {
+    setGlobalBroadcastEnabled(prev => !prev);
+  }, []);
+
+  // Global broadcast enabled state - direct boolean value
+  const isGlobalBroadcastEnabled = globalBroadcastEnabled;
+
   const baseWorkTabIds = useMemo(() => [
     ...orphanSessions.map(s => s.id),
     ...workspaces.map(w => w.id),
@@ -1395,9 +1411,12 @@ export const useSessionState = ({
     moveFocusInWorkspace,
     runSnippet,
     orphanSessions,
+    canUseGlobalBroadcast,
     // Broadcast mode
     toggleBroadcast,
     isBroadcastEnabled,
+    toggleGlobalBroadcast,
+    isGlobalBroadcastEnabled,
     orderedTabs,
     getOrderedWorkTabs,
     reorderTabs,

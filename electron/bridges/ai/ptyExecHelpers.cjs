@@ -188,26 +188,46 @@ function buildPendingInputClearPrefix(shellKind) {
     case "cmd":
       return "\x1b";
     case "powershell":
-      // Escape = Windows-mode PSReadLine RevertLine (issue reporter default).
-      // Ctrl+U/Ctrl+K also fire for Emacs/Vi when those bindings exist.
-      return "\x1b\x15\x0b";
+      // Vi gg plus a counted dd removes the whole multiline buffer, including
+      // in PSReadLine 2.0 where dG is unavailable. Escape+r is Emacs
+      // RevertLine. Repeated Escape clears Windows mode, and the final
+      // i+Backspace leaves every mode on an empty editable line.
+      return "\x1bggd2147483647d\x1br\x1b\x1bi\x08";
     default:
       return "\x15\x0b";
   }
 }
 
-function buildPosixWrapperBody(command, marker) {
+function buildPosixWrapperBody(command, marker, startFormat) {
   const noPager = "PAGER=cat SYSTEMD_PAGER= GIT_PAGER=cat LESS= ";
   const commandLines = String(command || "").replace(/\r\n?/g, "\n").split("\n");
   const cmdAssign = commandLines.length > 1
     ? `${marker}_cmd=$(printf '%s\\n' ${commandLines.map((line) => `'${escapePosixSingleQuoted(line)}'`).join(" ")})`
     : `${marker}_cmd='${escapePosixSingleQuoted(command)}'`;
+  // Issue #3265: without HISTCONTROL=ignorespace the wrapper line is recorded
+  // in bash history. Pressing arrow-up then makes readline redraw that huge
+  // marker-containing line, and the preload __NCMCP_ filter suppresses the
+  // redraw fragments that contain the marker — readline's row accounting
+  // diverges from what the terminal actually rendered, so every subsequent
+  // history-navigation redraw leaves fragments of the AI command on screen.
+  // Match the latest entry before deleting it, preserving user history when
+  // HISTCONTROL=ignorespace skips the wrapper. Read the entry's actual number:
+  // older Bash versions can expose HISTCMD as the next history number.
+  // builtin history bypasses user aliases and functions. The unset-safe guard
+  // leaves non-Bash shells alone, including shells with nounset enabled.
+  // Use ^ for the Bash bracket negation: ! triggers interactive zsh history
+  // expansion before the Bash-only guard can run.
+  const historyCleanup =
+    `[ -n "\${BASH_VERSION-}" ] && { ${marker}_h=$(builtin history 1 2>/dev/null); case "$${marker}_h" in *${marker}*) ${marker}_h=\${${marker}_h#"\${${marker}_h%%[^[:space:]]*}"}; builtin history -d "\${${marker}_h%%[[:space:]]*}" 2>/dev/null ;; esac; }`;
   return (
-    `${marker}=0; ${cmdAssign}; { printf '%s\\n' '${marker}_S'; trap ':' INT; ( ${noPager}eval "$${marker}_cmd" ); __NCMCP_rc=$?; trap - INT; printf '%s\\n' '${marker}_E:'\"$__NCMCP_rc\"; (exit $__NCMCP_rc); }`
+    `${marker}=0; ${cmdAssign}; { printf '${startFormat}' '${marker}_S'; trap ':' INT; ( ${noPager}eval "$${marker}_cmd" ); __NCMCP_rc=$?; trap - INT; printf '%s\\n' '${marker}_E:'\"$__NCMCP_rc\"; ${historyCleanup}; (exit $__NCMCP_rc); }`
   );
 }
 
-function buildWrappedCommand(command, shellKind, marker) {
+function buildWrappedCommand(command, shellKind, marker, separateStartMarker = false) {
+  // A live probe leaves its completion marker unterminated to hide the next
+  // prompt. With terminal echo disabled, only the wrapper can end that line.
+  const startFormat = separateStartMarker ? "\\n%s\\n" : "%s\\n";
   switch (shellKind) {
     case "powershell": {
       const psPager = "$env:PAGER='cat'; $env:SYSTEMD_PAGER=''; $env:GIT_PAGER='cat'; $env:LESS=''; ";
@@ -233,7 +253,7 @@ function buildWrappedCommand(command, shellKind, marker) {
         ` set ${marker} 0; function __ncmcp_int --on-signal INT; printf '%s\\n' '${marker}_E:130'; functions -e __ncmcp_int; end; ` +
         `set -l ${marker}_cmd '${escapeFishSingleQuoted(command)}'; ` +
         `begin; set -gx PAGER cat; set -gx SYSTEMD_PAGER ''; set -gx GIT_PAGER cat; set -gx LESS ''; ` +
-        `printf '%s\\n' '${marker}_S'; eval \$${marker}_cmd; set __NCMCP_rc $status; ` +
+        `printf '${startFormat}' '${marker}_S'; eval \$${marker}_cmd; set __NCMCP_rc $status; ` +
         `functions -e __ncmcp_int; printf '%s\\n' '${marker}_E:'\$__NCMCP_rc; end\n`
       );
 
@@ -282,7 +302,7 @@ function buildWrappedCommand(command, shellKind, marker) {
       // can opt in by adding `HISTCONTROL=ignoreboth` to ~/.bashrc.
       // Without that config the prefix is harmless; it just doesn't
       // suppress history recording.
-      return ` ${buildPosixWrapperBody(command, marker)}\n`;
+      return ` ${buildPosixWrapperBody(command, marker, startFormat)}\n`;
     }
   }
 }

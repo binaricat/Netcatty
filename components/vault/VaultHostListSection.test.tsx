@@ -494,3 +494,8 @@ test("VaultHostListSection exposes hostname copy in host context menus, not as a
   assert.match(source, /handleCopyHostname\(host\)/);
   assert.match(source, /!isPluginHostProtocol\(host\.protocol\)/);
 });
+
+test("VaultHostListSection opens dual-pane SFTP from host context menus", () => {
+  const source = readFileSync(new URL("./VaultHostListSection.tsx", import.meta.url), "utf8");
+  assert.match(source, /OpenDualPaneSftpMenuItem/);
+});

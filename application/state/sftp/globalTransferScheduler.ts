@@ -1,3 +1,5 @@
+import { resolveSftpTransferConcurrency } from "../../../domain/sftpTransferConcurrency";
+
 type LimitReader = () => number | null | undefined;
 
 interface ScheduledJob<T> {
@@ -20,9 +22,7 @@ export interface GlobalSftpTransferScheduler {
 }
 
 function normalizeLimit(value: number | null | undefined): number {
-  return Number.isInteger(value) && value !== undefined && value !== null && value >= 1 && value <= 16
-    ? value
-    : 2;
+  return resolveSftpTransferConcurrency(() => value);
 }
 
 export function getSftpTransferResourceKeys(input: {

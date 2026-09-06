@@ -398,6 +398,7 @@ async function collectLocalTreeEntries(rootPath, limits = {}, onProgress, isCanc
   const queue = [{
     localPath: rootPath,
     relativePath: rootName,
+    realPath: rootRealPath,
     ancestorRealPaths: new Set([rootRealPath]),
   }];
   let queueIndex = 0;
@@ -431,14 +432,23 @@ async function collectLocalTreeEntries(rootPath, limits = {}, onProgress, isCanc
             // Use lstat to distinguish links, then stat the target. Directory
             // links retain the established folder-upload behavior, while the
             // real-path ancestor chain prevents junction/symlink cycles.
+            // Ordinary files/dirs skip realpath: node_modules-sized trees pay
+            // an extra syscall per directory otherwise, which shows up as
+            // "scanning" stall before the first byte is uploaded.
             const linkStat = await fs.promises.lstat(childPath);
-            const stat = linkStat.isSymbolicLink()
+            const followLink = linkStat.isSymbolicLink();
+            const stat = followLink
               ? await fs.promises.stat(childPath).catch(() => linkStat)
               : linkStat;
             const isDirectory = stat.isDirectory();
-            const realPath = isDirectory
-              ? await fs.promises.realpath(childPath)
-              : null;
+            // Ordinary directories keep their ancestor identity by composing
+            // from the already-resolved parent. Only directory links pay for
+            // realpath, which is what cycle detection actually needs.
+            const realPath = !isDirectory
+              ? null
+              : followLink
+                ? await fs.promises.realpath(childPath)
+                : path.join(current.realPath, child.name);
             const isCycle = !!realPath && current.ancestorRealPaths.has(realPath);
             const ancestorRealPaths = realPath
               ? new Set([...current.ancestorRealPaths, realPath])
@@ -449,6 +459,7 @@ async function collectLocalTreeEntries(rootPath, limits = {}, onProgress, isCanc
               stat,
               isDirectory,
               isCycle,
+              realPath,
               ancestorRealPaths,
             };
           } catch (error) {
@@ -485,6 +496,7 @@ async function collectLocalTreeEntries(rootPath, limits = {}, onProgress, isCanc
           queue.push({
             localPath: child.childPath,
             relativePath: child.childRelativePath,
+            realPath: child.realPath,
             ancestorRealPaths: child.ancestorRealPaths,
           });
         } else {

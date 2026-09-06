@@ -26,14 +26,27 @@ const {
   consumeVisibleText,
   stripAnsi,
 } = require("./ptyExecHelpers.cjs");
+const { extractTrailingIdlePrompt } = require("./shellUtils.cjs");
+
+const { buildLiveShellProbe, parseLiveShellProbe } = require("./liveShellProbe.cjs");
 
 const DEFAULT_FOREGROUND_PTY_CAPTURE_CHARS = 1024 * 1024;
+const END_MARKER_PROMPT_WAIT_MS = 30000;
+const promptRecoveryPendingPtys = new WeakSet();
 
 function stripJobMarkerLines(text, marker) {
   return text.replace(
     new RegExp(`^([^\r\n]*?)${marker}[^\r\n]*[\r\n]*`, "gm"),
     "$1",
   );
+}
+
+function trailingPrefixLength(text, prefix) {
+  const maxLength = Math.min(text.length, prefix.length);
+  for (let length = maxLength; length > 0; length -= 1) {
+    if (text.endsWith(prefix.slice(0, length))) return length;
+  }
+  return 0;
 }
 
 function startPtyJob(ptyStream, command, options) {
@@ -43,6 +56,8 @@ function startPtyJob(ptyStream, command, options) {
     timeoutMs = 60000,
     shellKind,
     loginShellHint,
+    probeLiveShell = false,
+    onProbeAborted,
     chatSessionId,
     abortSignal,
     expectedPrompt,
@@ -54,14 +69,32 @@ function startPtyJob(ptyStream, command, options) {
   } = options || {};
 
   const marker = `__NCMCP_${Date.now().toString(36)}_${crypto.randomBytes(16).toString('hex')}__`;
-  const resolvedShellKind = resolveEffectiveShellKind(shellKind, expectedPrompt, {
+  let resolvedShellKind = resolveEffectiveShellKind(shellKind, expectedPrompt, {
     loginShellHint,
   });
+  const waitForReturnedPrompt = loginShellHint === "cmd"
+    && resolvedShellKind === "powershell"
+    && Boolean(expectedPrompt);
+  if (promptRecoveryPendingPtys.has(ptyStream)) {
+    if (extractTrailingIdlePrompt(expectedPrompt || "")) {
+      promptRecoveryPendingPtys.delete(ptyStream);
+    } else {
+      const error = new Error(
+        "Terminal is still waiting for the shell prompt after the previous command",
+      );
+      error.code = "SHELL_PROMPT_PENDING";
+      throw error;
+    }
+  }
   const captureLimitChars = maxBufferedChars > 0
     ? maxBufferedChars
     : DEFAULT_FOREGROUND_PTY_CAPTURE_CHARS;
   const CANCEL_RETRY_MS = 5000;
   const CANCEL_WALL_TIMEOUT_MS = 30000;
+
+  const usesLiveShellProbe = probeLiveShell && ["posix", "fish"].includes(resolvedShellKind);
+  let probingShell = usesLiveShellProbe;
+  let probeOutput = "";
 
   let output = "";
   let foundStart = false;
@@ -77,6 +110,7 @@ function startPtyJob(ptyStream, command, options) {
   let wallTimeoutId = null;
   let startupTimeoutId = null;
   let promptFallbackTimer = null;
+  let endMarkerWaitTimer = null;
   let cancelRetryTimerId = null;
   // Track one-shot timers scheduled inside requestCancel so finish() can
   // clear them when the job exits early; otherwise they keep the Node
@@ -87,6 +121,7 @@ function startPtyJob(ptyStream, command, options) {
   let unsubscribe = null;
   const cleanupFns = [];
   let pendingStart = "";
+  let pendingEnd = null;
   let resolveResult;
   const outputDecoder = new StringDecoder("utf8");
   const resultPromise = new Promise((resolve) => {
@@ -100,11 +135,30 @@ function startPtyJob(ptyStream, command, options) {
     }
   }
 
+  function clearEndMarkerWait() {
+    if (endMarkerWaitTimer) {
+      clearTimeout(endMarkerWaitTimer);
+      endMarkerWaitTimer = null;
+    }
+  }
+
   function clearCancelRetryTimer() {
     if (cancelRetryTimerId) {
       clearTimeout(cancelRetryTimerId);
       cancelRetryTimerId = null;
     }
+  }
+
+  function clearCancelOneShotTimers() {
+    while (cancelOneShotTimers.length) {
+      clearTimeout(cancelOneShotTimers.pop());
+    }
+  }
+
+  function finishWithoutReturnedPrompt() {
+    if (!pendingEnd || finished) return;
+    promptRecoveryPendingPtys.add(ptyStream);
+    finish(pendingEnd.stdout, pendingEnd.exitCode);
   }
 
   function armOutputTimeout() {
@@ -129,6 +183,10 @@ function startPtyJob(ptyStream, command, options) {
     if (!enforceWallTimeout || maxBufferedChars > 0) return;
     wallTimeoutId = setTimeout(() => {
       if (finished) return;
+      if (pendingEnd) {
+        finishWithoutReturnedPrompt();
+        return;
+      }
       sendInterrupt();
       const timeoutSec = Math.round(timeoutMs / 1000);
       finish(foundStart ? output : preStartOutput, -1, `Command timed out (${timeoutSec}s)`);
@@ -178,6 +236,11 @@ function startPtyJob(ptyStream, command, options) {
 
   function requestCancel() {
     if (finished || cancelRequested) return;
+    if (pendingEnd) {
+      // The command already completed. Do not send Ctrl+C into the restoring
+      // prompt or release the lock before the next shell can be identified.
+      return;
+    }
     cancelRequested = true;
     clearPromptFallback();
     clearCancelRetryTimer();
@@ -233,10 +296,47 @@ function startPtyJob(ptyStream, command, options) {
   }
 
   function checkEnd() {
+    if (pendingEnd) {
+      if (extractTrailingIdlePrompt(output)) {
+        finish(pendingEnd.stdout, pendingEnd.exitCode);
+      }
+      return;
+    }
     const found = findEndMarker(output, marker, { allowInline: true });
     if (!found) return;
     const stdout = output.slice(0, found.endIdx);
-    finish(stdout, found.exitCode);
+    if (maxBufferedChars > 0) {
+      // visibleOutput is assembled independently from the raw marker buffer.
+      // If a chunk split happens inside the constant "__NCMCP_" prefix, the
+      // partial prefix may already have entered visibleOutput before the next
+      // chunk makes the full marker recognizable. Roll back at the complete
+      // marker now that checkEnd has reconstructed it from raw output.
+      const visibleEnd = findEndMarker(visibleOutput, marker, { allowInline: true });
+      if (visibleEnd) {
+        visibleOutput = visibleOutput.slice(0, visibleEnd.endIdx);
+        visibleMarkerCarry = "";
+        visibleCarry = "";
+      }
+    }
+    pendingEnd = { stdout, exitCode: found.exitCode };
+    clearTimeout(timeoutId);
+    timeoutId = null;
+    clearStartupTimeout();
+    clearCancelRetryTimer();
+    clearCancelOneShotTimers();
+    if (!waitForReturnedPrompt || extractTrailingIdlePrompt(output)) {
+      finish(stdout, found.exitCode);
+      return;
+    }
+    // In the Windows OpenSSH cmd-to-PowerShell startup path, the end marker and
+    // restored prompt can arrive separately. Keep the lock until the prompt
+    // returns so a consecutive command cannot fall back to cmd.exe.
+    if (!endMarkerWaitTimer) {
+      endMarkerWaitTimer = setTimeout(
+        finishWithoutReturnedPrompt,
+        END_MARKER_PROMPT_WAIT_MS,
+      );
+    }
   }
 
   // Carry buffer for incomplete marker lines split across chunks.
@@ -271,24 +371,24 @@ function startPtyJob(ptyStream, command, options) {
       // lines split across PTY data boundaries are matched as a whole.
       cleanVisible = visibleMarkerCarry + cleanVisible;
       visibleMarkerCarry = "";
-      // We must withhold any trailing line that *might* be the start of an
-      // internal marker line, even if the random marker token isn't fully
-      // present yet (the chunk boundary may split the marker mid-token).
-      // Detect this by looking for the constant prefix "__NCMCP_" — only
-      // user output that *contains an unrelated __NCMCP_ string and ends
-      // with a newline* will be preserved through the next strip step.
-      const NCMCP_PREFIX = "__NCMCP_";
-      const lastNl = cleanVisible.lastIndexOf("\n");
-      if (lastNl === -1) {
-        if (cleanVisible.includes(NCMCP_PREFIX)) {
-          visibleMarkerCarry = cleanVisible;
-          return;
-        }
-      } else if (lastNl < cleanVisible.length - 1) {
-        const trailing = cleanVisible.slice(lastNl + 1);
-        if (trailing.includes(NCMCP_PREFIX)) {
-          visibleMarkerCarry = trailing;
-          cleanVisible = cleanVisible.slice(0, lastNl + 1);
+      // Once the end marker is visible, freeze the background result at that
+      // exact boundary. A changed PowerShell prompt may not match
+      // expectedPrompt, but it is session state rather than command output.
+      const completedMarker = findEndMarker(cleanVisible, marker, { allowInline: true });
+      if (completedMarker) {
+        cleanVisible = cleanVisible.slice(0, completedMarker.endIdx);
+      } else {
+        // Hold back the longest suffix that could still become this job's end
+        // marker. This covers chunk splits anywhere in the random marker,
+        // including before the constant "__NCMCP_" prefix is complete, while
+        // allowing preceding command output to remain visible to pollers.
+        const partialMarkerLength = trailingPrefixLength(
+          cleanVisible,
+          `${marker}_E:`,
+        );
+        if (partialMarkerLength > 0) {
+          visibleMarkerCarry = cleanVisible.slice(-partialMarkerLength);
+          cleanVisible = cleanVisible.slice(0, -partialMarkerLength);
         }
       }
       // Strip only this job's specific marker lines so user output that
@@ -307,22 +407,28 @@ function startPtyJob(ptyStream, command, options) {
     if (!text) return;
     const next = appendBoundedOutput(output, text, captureLimitChars);
     output = next.text;
-    appendToVisible(text);
+    if (!pendingEnd) appendToVisible(text);
   }
 
   function finish(stdout, exitCode, error) {
     if (finished) return;
     finished = true;
+    if (usesLiveShellProbe && !foundStart && typeof onProbeAborted === "function") {
+      try {
+        onProbeAborted(marker);
+      } catch {
+        // Display cleanup must never prevent command cancellation or completion.
+      }
+    }
     clearTimeout(timeoutId);
     clearTimeout(wallTimeoutId);
     clearStartupTimeout();
     clearPromptFallback();
+    clearEndMarkerWait();
     clearCancelRetryTimer();
     // Clear any pending one-shot cancel timers so they do not keep the
     // Node event loop alive after the job has resolved.
-    while (cancelOneShotTimers.length) {
-      clearTimeout(cancelOneShotTimers.pop());
-    }
+    clearCancelOneShotTimers();
     unsubscribe?.();
     for (const fn of cleanupFns) {
       try {
@@ -420,7 +526,23 @@ function startPtyJob(ptyStream, command, options) {
         : Buffer.from(String(data ?? ""));
     const text = outputDecoder.write(bytes);
     if (!text) return;
-    armOutputTimeout();
+    if (!pendingEnd) armOutputTimeout();
+
+    if (probingShell) {
+      probeOutput = (probeOutput + text).slice(-16384);
+      if (cancelRequested && hasExpectedPromptSuffix(probeOutput, expectedPrompt)) {
+        finish("", -1, "Cancelled");
+        return;
+      }
+      const probe = parseLiveShellProbe(stripAnsi(probeOutput), marker);
+      if (!probe) return;
+      probingShell = false;
+      probeOutput = "";
+      if (probe.kind) resolvedShellKind = probe.kind;
+      if (finished || cancelRequested) return;
+      writeWrappedCommand();
+      return;
+    }
 
     if (!foundStart) {
       preStartOutput += text;
@@ -502,13 +624,20 @@ function startPtyJob(ptyStream, command, options) {
     }
 
     appendToOutput(text);
+    // Process a completed marker before cancellation/prompt handling so the
+    // internal marker cannot leak when both arrive in the same PTY chunk.
+    checkEnd();
+    if (finished) return;
     if (!cancelRequested) {
       schedulePromptFallback();
     } else if (hasExpectedPromptSuffix(output, expectedPrompt)) {
-      finish(output, 130, "Cancelled");
+      finish(
+        pendingEnd?.stdout ?? output,
+        pendingEnd?.exitCode ?? 130,
+        "Cancelled",
+      );
       return;
     }
-    checkEnd();
   }
 
   if (abortSignal?.aborted) {
@@ -544,8 +673,20 @@ function startPtyJob(ptyStream, command, options) {
   }
 
   if (typeof ptyStream.on === "function") {
-    const onClose = () => finish(foundStart ? output : preStartOutput, null, cancelRequested ? "Cancelled" : "Stream closed unexpectedly");
-    const onError = (err) => finish(foundStart ? output : preStartOutput, -1, cancelRequested ? "Cancelled" : `Stream error: ${err?.message || err}`);
+    const onClose = () => {
+      if (pendingEnd) {
+        finish(pendingEnd.stdout, pendingEnd.exitCode, cancelRequested ? "Cancelled" : null);
+        return;
+      }
+      finish(foundStart ? output : preStartOutput, null, cancelRequested ? "Cancelled" : "Stream closed unexpectedly");
+    };
+    const onError = (err) => {
+      if (pendingEnd) {
+        finish(pendingEnd.stdout, pendingEnd.exitCode, cancelRequested ? "Cancelled" : null);
+        return;
+      }
+      finish(foundStart ? output : preStartOutput, -1, cancelRequested ? "Cancelled" : `Stream error: ${err?.message || err}`);
+    };
     ptyStream.on("close", onClose);
     ptyStream.on("end", onClose);
     ptyStream.on("error", onError);
@@ -556,7 +697,13 @@ function startPtyJob(ptyStream, command, options) {
     });
   }
   if (typeof ptyStream.onExit === "function") {
-    const disposable = ptyStream.onExit(() => finish(foundStart ? output : preStartOutput, null, cancelRequested ? "Cancelled" : "Process exited"));
+    const disposable = ptyStream.onExit(() => {
+      if (pendingEnd) {
+        finish(pendingEnd.stdout, pendingEnd.exitCode, cancelRequested ? "Cancelled" : null);
+        return;
+      }
+      finish(foundStart ? output : preStartOutput, null, cancelRequested ? "Cancelled" : "Process exited");
+    });
     cleanupFns.push(() => {
       try {
         disposable?.dispose?.();
@@ -582,8 +729,16 @@ function startPtyJob(ptyStream, command, options) {
     }
   }
 
-  const wrapped = buildWrappedCommand(command, resolvedShellKind, marker);
-  ptyStream.write(`${buildPendingInputClearPrefix(resolvedShellKind)}${wrapped}`);
+  function writeWrappedCommand() {
+    const wrapped = buildWrappedCommand(command, resolvedShellKind, marker, probeLiveShell);
+    ptyStream.write(`${buildPendingInputClearPrefix(resolvedShellKind)}${wrapped}`);
+  }
+
+  if (probingShell) {
+    ptyStream.write(`${buildPendingInputClearPrefix(resolvedShellKind)}${buildLiveShellProbe(marker)}`);
+  } else {
+    writeWrappedCommand();
+  }
 
   return {
     marker,

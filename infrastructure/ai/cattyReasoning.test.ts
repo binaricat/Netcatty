@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  applyResponsesApiStatelessStoreOption,
   buildCattyReasoningProviderOptions,
   cattyReasoningLevelsForSelection,
   estimateReasoningOutputReserve,
@@ -288,5 +289,51 @@ test('buildCattyReasoningProviderOptions maps Gemini thinking levels', () => {
   assert.equal(
     buildCattyReasoningProviderOptions({ providerId: 'google' }, 'high', 'gemini-1.5-flash'),
     undefined,
+  );
+});
+
+test('applyResponsesApiStatelessStoreOption sets store:false for OpenAI Responses providers', () => {
+  const responsesProvider = { providerId: 'openai' as const, openaiApi: 'responses' as const };
+  assert.deepEqual(
+    applyResponsesApiStatelessStoreOption(responsesProvider, { openai: { reasoningEffort: 'high' } }),
+    { openai: { reasoningEffort: 'high', store: false, include: ['reasoning.encrypted_content'] } },
+  );
+  // Even with no reasoning options, Responses turns stay stateless
+  // and request replayable (encrypted) reasoning.
+  assert.deepEqual(
+    applyResponsesApiStatelessStoreOption(responsesProvider, undefined),
+    { openai: { store: false, include: ['reasoning.encrypted_content'] } },
+  );
+});
+
+test('applyResponsesApiStatelessStoreOption is a no-op for Chat Completions and other styles', () => {
+  assert.deepEqual(
+    applyResponsesApiStatelessStoreOption({ providerId: 'openai' as const }, { openai: { reasoningEffort: 'high' } }),
+    { openai: { reasoningEffort: 'high' } },
+  );
+  const chatProvider = { providerId: 'openai' as const, openaiApi: 'chat' as const };
+  assert.deepEqual(
+    applyResponsesApiStatelessStoreOption(chatProvider, { openai: { reasoningEffort: 'low' } }),
+    { openai: { reasoningEffort: 'low' } },
+  );
+  const anthropicProvider = { providerId: 'openai' as const, openaiApi: 'responses' as const, style: 'anthropic' as const };
+  assert.deepEqual(
+    applyResponsesApiStatelessStoreOption(anthropicProvider, { anthropic: { thinking: { type: 'adaptive' } } }),
+    { anthropic: { thinking: { type: 'adaptive' } } },
+  );
+  assert.equal(applyResponsesApiStatelessStoreOption(undefined, undefined), undefined);
+});
+
+test('applyResponsesApiStatelessStoreOption always requests encrypted reasoning on stateless Responses turns', () => {
+  const responsesProvider = { providerId: 'custom' as const, openaiApi: 'responses' as const };
+  // Every stateless Responses turn gets the include, covering known reasoner
+  // IDs (`deepseek-r1`, `gpt-oss-120b`, `grok-4`, `o3`, `gpt-5.1`) as before,
+  // always-thinking relay models whose IDs match no classifier (e.g.
+  // DeepSeek's default `deepseek-v4-flash`), and plain chat models — for the
+  // latter the include is a no-op (no reasoning items to encrypt).
+  assert.deepEqual(
+    applyResponsesApiStatelessStoreOption(responsesProvider, undefined),
+    { openai: { store: false, include: ['reasoning.encrypted_content'] } },
+    'deepseek-v4-flash',
   );
 });

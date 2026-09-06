@@ -1,5 +1,5 @@
 // AI Provider types
-import defaultCommandBlocklist from '../../lib/commandBlocklist.json';
+import commandBlocklistTable from '../../lib/commandBlocklist.json';
 import type { AgentActivity, AgentUsage } from '../../domain/agentActivity';
 import type { ProviderContinuation } from './providerContinuation';
 
@@ -387,7 +387,10 @@ export interface AISettings {
 }
 
 export const DEFAULT_COMMAND_BLOCKLIST = [
-  ...defaultCommandBlocklist,
+  ...commandBlocklistTable.common,
+  ...commandBlocklistTable.posixNative,
+  ...commandBlocklistTable.posix,
+  ...commandBlocklistTable.powershell,
 ];
 
 export const DEFAULT_COMMAND_TIMEOUT_SECONDS = 60;

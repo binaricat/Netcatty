@@ -67,6 +67,7 @@ import { ThemeSidePanel } from './terminal/ThemeSidePanel';
 import { focusTerminalSessionInput } from './terminal/focusTerminalSession';
 import { TerminalComposeBar } from './terminal/TerminalComposeBar';
 import { resolveTerminalFontSizeUpdateTarget } from './terminalLayer/terminalFontSizeUpdate';
+import { resolveTerminalBroadcastTargetIds } from '../domain/terminalBroadcast';
 import {
   AUTO_RUN_SNIPPET_LINE_DELAY_MS,
   shouldDelayAutoRunSnippetInput,
@@ -246,6 +247,9 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   onCreateLocalTerminal,
   isBroadcastEnabled,
   onToggleBroadcast,
+  isGlobalBroadcastEnabled,
+  onToggleGlobalBroadcast,
+  canUseGlobalBroadcast,
   updateHosts,
   updateSnippets,
   updateSnippetPackages,
@@ -1049,27 +1053,25 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   const sessionHostsMapRef = useRef(sessionHostsMap);
   sessionHostsMapRef.current = sessionHostsMap;
 
-  // Handle broadcast input - write to all other sessions in the source workspace.
+  // Resolve the active broadcast mode, then write to its target sessions.
   const handleBroadcastInput = useCallback((
     data: string,
     sourceSessionId: string,
     options?: TerminalBroadcastInputOptions,
   ) => {
-    const directTargetIds = options?.kittyKeyboardTargetSessionIds;
-    const sourceSession = directTargetIds
-      ? undefined
-      : sessionsRef.current.find((session) => session.id === sourceSessionId);
-    const workspaceId = sourceSession?.workspaceId;
-    if (!directTargetIds && !workspaceId) return [];
-    const directTargetSet = directTargetIds ? new Set(directTargetIds) : null;
+    const targetSessionIds = resolveTerminalBroadcastTargetIds({
+      sessions: sessionsRef.current,
+      sourceSessionId,
+      globalBroadcastEnabled: isGlobalBroadcastEnabled,
+      directTargetSessionIds: options?.kittyKeyboardTargetSessionIds,
+    });
+    if (targetSessionIds.length === 0) return [];
+
+    const targetSessionIdSet = new Set(targetSessionIds);
     const deliveredSessionIds: string[] = [];
 
     for (const session of sessionsRef.current) {
-      if (directTargetSet) {
-        if (!directTargetSet.has(session.id)) continue;
-      } else if (session.workspaceId !== workspaceId || session.id === sourceSessionId) {
-        continue;
-      }
+      if (!targetSessionIdSet.has(session.id)) continue;
       if (!canUseDirectSessionWriteFallback(session)) continue;
 
       if (options?.kittyKeyboardInput) {
@@ -1107,7 +1109,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       deliveredSessionIds.push(session.id);
     }
     return deliveredSessionIds;
-  }, [terminalBackend]);
+  }, [terminalBackend, isGlobalBroadcastEnabled]);
 
   const handleCommandSubmitted = useCallback((command: string, _hostId: string, _hostLabel: string, sessionId: string) => {
     codingCliSignalController.handleCommandSubmitted(sessionId, command);
@@ -1296,6 +1298,9 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   const onToggleBroadcastRef = useRef(onToggleBroadcast);
   onToggleBroadcastRef.current = onToggleBroadcast;
   const workspaceBroadcastHandlersRef = useRef<Map<string, () => void>>(new Map());
+
+  const onToggleGlobalBroadcastRef = useRef(onToggleGlobalBroadcast);
+  onToggleGlobalBroadcastRef.current = onToggleGlobalBroadcast;
 
   const mountedSftpTabIds = useMemo(
     () => Array.from(sftpHostForTab.keys()),
@@ -2298,6 +2303,8 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     restoreTerminalCwd,
     identities,
     isBroadcastEnabled,
+    isGlobalBroadcastEnabled,
+    canUseGlobalBroadcast,
     isComposeBarOpen,
     keyBindings,
     keys,
@@ -2334,6 +2341,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     onSplitSession,
     onSplitSessionRef,
     onToggleBroadcastRef,
+    onToggleGlobalBroadcastRef,
     onToggleWorkspaceViewMode,
     onToggleWorkspaceViewModeRef,
     onUpdateHost,

@@ -269,10 +269,13 @@ export async function compactCattyMessages(
   }
 }
 
-export function prepareCattyMessagesForStream(messages: ModelMessage[]): ModelMessage[] {
+export function prepareCattyMessagesForStream(
+  messages: ModelMessage[],
+  options: { preserveReasoning?: boolean } = {},
+): ModelMessage[] {
   return pruneMessages({
     messages,
-    reasoning: 'all',
+    reasoning: options.preserveReasoning ? 'none' : 'all',
     emptyMessages: 'remove',
   });
 }

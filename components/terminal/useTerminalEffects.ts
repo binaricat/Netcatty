@@ -41,8 +41,10 @@ import {
   flushPendingTerminalWritesBeforeHibernate,
   flushPendingTerminalWritesOnResume,
   forceTerminalRepaintBypassingAnimationFrame,
+  isTerminalPageHidden,
   repaintTerminalAfterReveal,
 } from './runtime/terminalUnfocusedRepaint';
+import { setTerminalOutputPressureVisibility } from './runtime/terminalOutputPressure';
 import {
   forceXTermFontRemeasure,
   type XTermFontRemeasureTarget,
@@ -1274,10 +1276,27 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
     pendingOutputScrollRef.current = false;
   };
 
+  // The output-pressure visibility flag is read live by the keyword
+  // highlighter's write callback, but the write path only refreshes it at
+  // ingress and coalescer flush. A batch dispatched while hidden can still be
+  // parsing when the pane/page is revealed, and a stale `background: true`
+  // would then skip the in-frame viewport recolor (#3272). Re-sync the flag
+  // on every visibility transition so in-flight writes always see the
+  // current pane/document state.
+  const syncOutputPressureVisibility = () => {
+    const term = termRef.current;
+    if (!term) return;
+    setTerminalOutputPressureVisibility(
+      term,
+      isVisibleRef.current && !isTerminalPageHidden(),
+    );
+  };
+
   const flushTerminalWritesAfterBecomeVisible = () => {
     lastCommittedVisibleLayoutKeyRef.current = null;
     const term = termRef.current;
     if (term) {
+      syncOutputPressureVisibility();
       cancelScheduledUnfocusedRepaint(term);
       flushPendingTerminalWritesOnResume(term);
       repaintTerminalAfterReveal(term, () => isVisibleRef.current);
@@ -1327,6 +1346,7 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
 
     if (!isVisible) {
       wasVisibleRef.current = false;
+      syncOutputPressureVisibility();
       return;
     }
 
@@ -1844,6 +1864,7 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
     const recoverTerminalOnAppResume = () => {
       const term = termRef.current;
       if (term) {
+        syncOutputPressureVisibility();
         cancelScheduledUnfocusedRepaint(term);
         flushPendingTerminalWritesOnResume(term);
         forceTerminalRepaintBypassingAnimationFrame(term);
@@ -1854,7 +1875,10 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
     };
 
     const handleVisibilityChange = () => {
-      if (document.visibilityState !== 'visible') return;
+      if (document.visibilityState !== 'visible') {
+        syncOutputPressureVisibility();
+        return;
+      }
       recoverTerminalOnAppResume();
     };
 

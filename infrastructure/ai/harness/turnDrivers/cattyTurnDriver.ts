@@ -12,8 +12,11 @@ import {
   isWebSearchReady,
   normalizeCommandTimeoutSeconds,
   normalizeResponseIdleTimeoutSeconds,
+  resolveOpenAIApi,
+  resolveProviderStyle,
 } from '../../types';
 import {
+  applyResponsesApiStatelessStoreOption,
   buildCattyReasoningProviderOptions,
   estimateReasoningOutputReserve,
 } from '../../cattyReasoning';
@@ -202,6 +205,8 @@ async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Prom
     context.activeProvider.id,
     context.activeProvider.providerId,
     activeModelId,
+    resolveProviderStyle(context.activeProvider) === 'openai'
+      && resolveOpenAIApi(context.activeProvider) === 'responses',
   );
 
   ui.setStreamingForScope(sessionId, true);
@@ -256,11 +261,15 @@ async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Prom
       defaultContextWindow: DEFAULT_CONTEXT_WINDOW_TOKENS,
     });
     const maxOutputTokens = context.activeProvider.advancedParams?.maxTokens ?? DEFAULT_MAX_OUTPUT_TOKENS;
-    const reasoningProviderOptions = buildCattyReasoningProviderOptions(
+    const reasoningProviderOptions = applyResponsesApiStatelessStoreOption(
       context.activeProvider,
-      context.reasoningEffort,
-      activeModelId,
+      buildCattyReasoningProviderOptions(
+        context.activeProvider,
+        context.reasoningEffort,
+        activeModelId,
+      ),
     );
+    const preserveStatelessResponsesReasoning = reasoningProviderOptions?.openai?.store === false;
     const reasoningReserveTokens = estimateReasoningOutputReserve(reasoningProviderOptions);
     // Fold thinking budget into compaction maxOutput only. reservedTokens is
     // added to estimated input separately, so adding the budget there too
@@ -275,7 +284,9 @@ async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Prom
     }, providerId);
 
     const prepareMessagesForStream = (messages: ModelMessage[]): ModelMessage[] => {
-      const pruned = prepareCattyMessagesForStream(messages);
+      const pruned = prepareCattyMessagesForStream(messages, {
+        preserveReasoning: preserveStatelessResponsesReasoning,
+      });
       continuationContext.openAIChatAssistantFields = collectOpenAIChatAssistantFieldsForMessages(
         pruned,
         openAIChatAssistantFieldsByMessage,

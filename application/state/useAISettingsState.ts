@@ -28,7 +28,6 @@ import type {
   WebSearchConfig,
 } from '../../infrastructure/ai/types';
 import {
-  DEFAULT_COMMAND_BLOCKLIST,
   DEFAULT_COMMAND_TIMEOUT_SECONDS,
   DEFAULT_RESPONSE_IDLE_TIMEOUT_SECONDS,
   normalizeCommandTimeoutSeconds,
@@ -38,6 +37,10 @@ import { removeProviderReferences } from './aiProviderCleanup';
 import { AI_STATE_CHANGED_EVENT, emitAIStateChanged } from './aiStateEvents';
 import { getAIBridge } from './aiStateSnapshots';
 import { useStoredBoolean } from './useStoredBoolean';
+import {
+  persistCommandBlocklistSetting,
+  readCommandBlocklistSetting,
+} from './commandBlocklistSettings';
 
 function readPermissionMode(): AIPermissionMode {
   const stored = localStorageAdapter.readString(STORAGE_KEY_AI_PERMISSION_MODE);
@@ -69,9 +72,7 @@ export function useAISettingsState() {
   const [defaultAgentId, setDefaultAgentIdRaw] = useState<string>(() =>
     localStorageAdapter.readString(STORAGE_KEY_AI_DEFAULT_AGENT) ?? 'catty'
   );
-  const [commandBlocklist, setCommandBlocklistRaw] = useState<string[]>(() =>
-    localStorageAdapter.read<string[]>(STORAGE_KEY_AI_COMMAND_BLOCKLIST) ?? [...DEFAULT_COMMAND_BLOCKLIST]
-  );
+  const [commandBlocklist, setCommandBlocklistRaw] = useState<string[]>(readCommandBlocklistSetting);
   const [commandTimeout, setCommandTimeoutRaw] = useState<number>(() =>
     normalizeCommandTimeoutSeconds(
       localStorageAdapter.readNumber(STORAGE_KEY_AI_COMMAND_TIMEOUT) ?? DEFAULT_COMMAND_TIMEOUT_SECONDS,
@@ -173,7 +174,7 @@ export function useAISettingsState() {
 
   const setCommandBlocklist = useCallback((value: string[]) => {
     setCommandBlocklistRaw(value);
-    localStorageAdapter.write(STORAGE_KEY_AI_COMMAND_BLOCKLIST, value);
+    persistCommandBlocklistSetting(value);
     getAIBridge()?.aiMcpSetCommandBlocklist?.(value);
   }, []);
 
@@ -249,9 +250,7 @@ export function useAISettingsState() {
             setDefaultAgentIdRaw(localStorageAdapter.readString(STORAGE_KEY_AI_DEFAULT_AGENT) ?? 'catty');
             break;
           case STORAGE_KEY_AI_COMMAND_BLOCKLIST: {
-            const list = localStorageAdapter.read<string[]>(STORAGE_KEY_AI_COMMAND_BLOCKLIST);
-            if (list != null && !Array.isArray(list)) break;
-            const blocklist = list ?? [...DEFAULT_COMMAND_BLOCKLIST];
+            const blocklist = readCommandBlocklistSetting();
             setCommandBlocklistRaw(blocklist);
             getAIBridge()?.aiMcpSetCommandBlocklist?.(blocklist);
             break;
