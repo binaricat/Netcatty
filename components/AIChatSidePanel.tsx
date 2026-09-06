@@ -659,7 +659,20 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
       }));
       return;
     }
-    addDraftAttachment(scopeKey, currentAgentId, upload);
+    if (!addDraftAttachment(scopeKey, currentAgentId, upload)) {
+      // The authoritative state updater re-checks the budget against the
+      // current draft, which may already hold uploads the stale
+      // `currentDraftRef` pre-check above could not see, so a rejection here
+      // must be surfaced to the user instead of silently dropping the note.
+      console.warn(
+        '[AIChatSidePanel] Vault note mention skipped: aggregate attachment budget exceeded',
+      );
+      toast.warning(
+        t('ai.chat.mentionNoteBudgetExceeded', {
+          title: String(note.title || '').trim() || t('ai.chat.untitledNote'),
+        }),
+      );
+    }
   }, [
     addDraftAttachment,
     currentAgentId,

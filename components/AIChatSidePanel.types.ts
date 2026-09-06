@@ -37,7 +37,7 @@ export interface AIChatSidePanelProps {
   clearDraftForScope: (scopeKey: string) => void;
   /** Resolves with the uploads rejected by the aggregate attachment budget. */
   addDraftFiles: (scopeKey: string, fallbackAgentId: string, inputFiles: File[]) => Promise<UploadedFile[]>;
-  addDraftAttachment: (scopeKey: string, fallbackAgentId: string, upload: UploadedFile) => void;
+  addDraftAttachment: (scopeKey: string, fallbackAgentId: string, upload: UploadedFile) => boolean;
   removeDraftFile: (scopeKey: string, fallbackAgentId: string, fileId: string) => void;
   createSession: (scope: AISessionScope, agentId?: string) => AISession;
   deleteSession: (sessionId: string, scopeKey?: string) => void;

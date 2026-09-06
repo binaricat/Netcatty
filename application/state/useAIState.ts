@@ -1060,25 +1060,29 @@ export function useAIState() {
     }));
   }, [updateDraft]);
 
-  /** Append a programmatically built attachment (e.g. a Vault note mention) to the draft. */
+  /** Append a programmatically built attachment (e.g. a Vault note mention) to the draft.
+   *  Returns false when the authoritative budget re-check rejected the upload. */
   const addDraftAttachment = useCallback((
     scopeKey: string,
     fallbackAgentId: string,
     upload: UploadedFile,
-  ) => {
+  ): boolean => {
     ensureDraftForScope(scopeKey, fallbackAgentId);
     // Defense in depth: callers pre-check the budget via
     // `attachVaultNoteMention`, but the shared updater re-checks against the
     // current draft state so no insertion path can bypass the aggregate cap.
+    let attached = false;
     updateDraftIfPresent(scopeKey, (draft) => {
       if (appendUploadsWithinAttachmentBudget(draft.attachments, [upload]).length === 0) {
         return draft;
       }
+      attached = true;
       return {
         ...draft,
         attachments: [...draft.attachments, upload],
       };
     });
+    return attached;
   }, [ensureDraftForScope, updateDraftIfPresent]);
 
   const cleanupOrphanedSessions = useCallback((activeTargetIds: Set<string>) => {
