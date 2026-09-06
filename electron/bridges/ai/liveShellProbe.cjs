@@ -6,17 +6,17 @@ const { buildBashHistoryCleanup } = require("./ptyExecHelpers.cjs");
 // short-lived sh in the interactive PTY, rather than the SSH login shell.
 function buildLiveShellProbe(marker) {
   const script = 'if test -r "/proc/$PPID/comm"; then IFS= read -r name < "/proc/$PPID/comm"; else name=$(ps -p "$PPID" -o comm= 2>/dev/null); fi; '
-    + `printf "${marker}_P:%s\\n" "$name"; name=\${name##*/}; name=\${name#-}; test "$name" = bash`;
-  // The child reports whether the parent is Bash through its exit status.
-  // Only Bash evaluates its history cleanup; the surrounding && syntax is
-  // also accepted by fish and does not expand unset parent-shell variables.
-  // Clean the probe before Q, including when no command follows cancellation.
+    + `printf "${marker}_P:%s\\n" "$name"`;
+  // Run cleanup independently of process-name detection or external sh/PATH.
+  // Bash and zsh provide builtin eval and the cleanup itself checks BASH_VERSION.
+  // Shells without it (including fish) reject the builtin without parsing its
+  // quoted POSIX body; suppress that diagnostic and always emit Q afterward.
   // Put the job marker near the start of the echo, as the existing wrappers
   // do, so preload can suppress it before a long command is split into chunks.
   // The builtin completion marker still runs if sh cannot launch. Leave it
   // unterminated so preload hides the intermediate prompt and wrapper echo
   // on the same marker-bearing line, including across output chunks.
-  return ` true ${marker}; command sh -c '${script}' 2>/dev/null && builtin eval '${buildBashHistoryCleanup(marker)}'; printf '%s' '${marker}_Q'\n`;
+  return ` true ${marker}; command sh -c '${script}' 2>/dev/null; builtin eval '${buildBashHistoryCleanup(marker)}' 2>/dev/null; printf '%s' '${marker}_Q'\n`;
 }
 
 function parseLiveShellProbe(output, marker) {
