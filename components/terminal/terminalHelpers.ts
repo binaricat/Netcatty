@@ -544,6 +544,7 @@ type XTermWithPrivateViewport = XTerm & {
   _core?: {
     _viewport?: {
       scrollToLine?: (line: number, disableSmoothScroll?: boolean) => void;
+      _sync?: () => void;
     };
   };
 };
@@ -563,6 +564,20 @@ export function alignTerminalViewportScroll(term: XTerm): void {
   const viewport = (term as XTermWithPrivateViewport)._core?._viewport;
   const scrollToLine = viewport?.scrollToLine;
   if (typeof scrollToLine !== "function") return;
+
+  // After a resize, xterm only refreshes the viewport's scroll dimensions on
+  // its queued render callback. Setting a scroll position against the stale
+  // dimensions gets clamped to the old maximum while xterm records the
+  // requested row, so the queued sync then assumes the position was already
+  // applied and the DOM offset stays stale — the next wheel scroll jumps
+  // upward by the resize delta. Sync the dimensions now, before positioning.
+  if (typeof viewport._sync === "function") {
+    try {
+      viewport._sync.call(viewport);
+    } catch (err) {
+      logger.warn("Sync viewport dimensions after resize failed", err);
+    }
+  }
 
   try {
     scrollToLine.call(viewport, term.buffer.active.viewportY, true);

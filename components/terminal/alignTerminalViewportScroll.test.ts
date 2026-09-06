@@ -5,6 +5,7 @@ import { alignTerminalViewportScroll } from "./terminalHelpers";
 
 type ViewportSpy = {
   scrollToLine: (line: number, disableSmoothScroll?: boolean) => void;
+  _sync?: () => void;
   calls: Array<{ line: number; disableSmoothScroll?: boolean }>;
 };
 
@@ -29,6 +30,44 @@ test("alignTerminalViewportScroll snaps the viewport back to the buffer row with
   alignTerminalViewportScroll(term);
 
   assert.deepEqual(calls, [{ line: 247, disableSmoothScroll: true }]);
+});
+
+test("alignTerminalViewportScroll syncs viewport dimensions before setting the position", () => {
+  const calls: Array<{ line: number; disableSmoothScroll?: boolean }> = [];
+  const order: string[] = [];
+  const viewport: ViewportSpy = {
+    _sync: () => {
+      order.push("sync");
+    },
+    scrollToLine: (line, disableSmoothScroll) => {
+      order.push("scrollToLine");
+      calls.push({ line, disableSmoothScroll });
+    },
+    calls,
+    syncCalls: 0,
+  };
+  const term = createTerm(247, viewport);
+
+  alignTerminalViewportScroll(term);
+
+  assert.deepEqual(order, ["sync", "scrollToLine"]);
+  assert.deepEqual(calls, [{ line: 247, disableSmoothScroll: true }]);
+});
+
+test("alignTerminalViewportScroll survives a failing dimension sync", () => {
+  const calls: Array<{ line: number; disableSmoothScroll?: boolean }> = [];
+  const viewport: ViewportSpy = {
+    _sync: () => {
+      throw new Error("boom");
+    },
+    scrollToLine: (line, disableSmoothScroll) => {
+      calls.push({ line, disableSmoothScroll });
+    },
+    calls,
+  };
+
+  assert.doesNotThrow(() => alignTerminalViewportScroll(createTerm(5, viewport)));
+  assert.deepEqual(calls, [{ line: 5, disableSmoothScroll: true }]);
 });
 
 test("alignTerminalViewportScroll is a no-op when the private viewport is unavailable", () => {
