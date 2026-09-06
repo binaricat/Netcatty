@@ -234,3 +234,28 @@ test("default retention bounds the preview history", () => {
   assert.ok(transcript.length <= 2 * 6, transcript);
   assert.ok(transcript.includes("cc"), transcript);
 });
+test("Vim absolute row moves separate printed rows across arbitrary chunks", () => {
+  const input = '\x1b[2;1HSMOKE-VIM-002\x1b[2;14H\x1b[K\x1b[3;1HSMOKE-VIM-003\x1b[3;14H\x1b[K\x1b[4;1HSMOKE-VIM-004';
+  for (let split = 0; split <= input.length; split++) {
+    const history = createTerminalOutputHistoryPreview();
+    history.append(input.slice(0, split));
+    history.append(input.slice(split));
+    assert.deepEqual(history.getLines(), ['SMOKE-VIM-002', 'SMOKE-VIM-003', 'SMOKE-VIM-004']);
+  }
+});
+
+test("same-row cursor-home redraw stays one progress line", () => {
+  const history = createTerminalOutputHistoryPreview();
+  for (let i = 0; i < 100; i++) history.append(`\x1b[1;1Hprogress ${i}\x1b[K`);
+  assert.deepEqual(history.getLines(), ['progress 99']);
+});
+
+test("vertical moves do not insert blank transcript rows or expose control strings", () => {
+  const history = createTerminalOutputHistoryPreview();
+  history.append('one\r\n\x1b[2;1Htwo\x1b[1Bthree\x9b4;1Hfour');
+  history.append('\x1b]titleH\x07\x1b[999999999Bfive');
+  assert.deepEqual(history.getLines(), ['one', 'two', 'three', 'four', 'five']);
+  history.clear();
+  history.append('\x1b[Hnew\x1b[HNEW\x1b[K');
+  assert.deepEqual(history.getLines(), ['NEW']);
+});

@@ -11,7 +11,7 @@ import type { HistoryPreviewRow } from "./terminalHistoryScrollOverride";
  * Inside screen/vim/codex the app owns the alternate buffer, so xterm's normal
  * buffer has no scrollback and the preview has nothing to show. The output
  * stream is the only usable source, so every display chunk fed to the log
- * capture is reduced to plain lines here: escape sequences are dropped, a bare
+ * capture is reduced to plain lines here: row moves separate printed lines, a bare
  * `\r` overwrites the line it restarts (progress bars/spinners stay one line),
  * and the retained tail is bounded.
  *
@@ -152,6 +152,7 @@ const keepTranscriptChars = (span: string): string => {
 export const stripTerminalDisplayToPlainText = (
   chunk: string,
   pending: string = "",
+  preserveRowControls = false,
 ): { text: string; pending: string } => {
   const input = pending + chunk;
   let output = "";
@@ -173,6 +174,13 @@ export const stripTerminalDisplayToPlainText = (
           pending: rest.slice(0, introducerLength)
             + rest.slice(rest.length - (MAX_PENDING_ESCAPE_CHARS - introducerLength)),
         };
+      }
+      // Only the history writer consumes cursor-row controls. Standalone plain
+      // text stripping keeps its original contract.
+      if (preserveRowControls
+        && (input[i] === C1_CSI || input[i + 1] === "[")
+        && /^[0-9;]*[HfABEFd]$/.test(input.slice(i + escapeIntroducerLength(input, i), end))) {
+        output += input.slice(i, end);
       }
       const eraseInLine = eraseInLineMarkerFor(input, i, end);
       if (eraseInLine) output += eraseInLine;
@@ -289,6 +297,7 @@ export const createTerminalOutputHistoryPreview = (options?: {
   let current = "";
   let cursor = 0;
   let cursorCell = 0;
+  let screenRow = 1;
   let totalChars = 0;
   let pendingEscape = "";
   let cacheDirty = true;
@@ -335,7 +344,30 @@ export const createTerminalOutputHistoryPreview = (options?: {
     let i = 0;
     while (i < text.length) {
       const ch = text[i];
+      if (ch === ESC || ch === C1_CSI) {
+        const bodyStart = i + (ch === ESC ? 2 : 1);
+        const end = consumeCsiBody(text, bodyStart)!;
+        const command = text[end - 1];
+        const params = text.slice(bodyStart, end - 1).split(";");
+        const amount = Math.min(1_000_000, Math.max(1, Number(params[0]) || 1));
+        const nextRow = command === "A" || command === "F"
+          ? Math.max(1, screenRow - amount)
+          : command === "B" || command === "E"
+            ? Math.min(1_000_000, screenRow + amount)
+            : amount;
+        if (nextRow !== screenRow && current) commitCurrentLine();
+        // Home on the same row redraws a progress line rather than appending
+        // another copy. Horizontal cursor positioning is otherwise unchanged.
+        if ((command === "H" || command === "f") && (Number(params[1]) || 1) === 1) {
+          cursor = 0;
+          cursorCell = 0;
+        }
+        screenRow = nextRow;
+        i = end;
+        continue;
+      }
       if (ch === "\n") {
+        screenRow = Math.min(1_000_000, screenRow + 1);
         commitCurrentLine();
         i += 1;
         continue;
@@ -373,6 +405,8 @@ export const createTerminalOutputHistoryPreview = (options?: {
         && text[end] !== "\r"
         && text[end] !== "\b"
         && text[end] !== "\t"
+        && text[end] !== ESC
+        && text[end] !== C1_CSI
         && text[end] !== ERASE_TO_END_OF_LINE
       ) {
         end += 1;
@@ -394,7 +428,7 @@ export const createTerminalOutputHistoryPreview = (options?: {
   return {
     append(chunk: string): void {
       if (!chunk) return;
-      const { text, pending } = stripTerminalDisplayToPlainText(chunk, pendingEscape);
+      const { text, pending } = stripTerminalDisplayToPlainText(chunk, pendingEscape, true);
       pendingEscape = pending;
       if (!text) return;
       writeText(text);
@@ -407,6 +441,7 @@ export const createTerminalOutputHistoryPreview = (options?: {
       cursorCell = 0;
       totalChars = 0;
       pendingEscape = "";
+      screenRow = 1;
       cacheDirty = true;
     },
     getLines,
