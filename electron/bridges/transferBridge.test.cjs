@@ -12830,3 +12830,23 @@ test("in-place isolated OPEN keeps path gate until late callback after channel e
   assert.equal(sender.sent.some((entry) => entry.channel === "netcatty:transfer:complete"), false);
   assert.ok(eventLog.includes(`late-open-truncate:${targetPath}`) || eventLog.includes("close"));
 });
+
+test("preserveTransferredDestinationMtime stamps a write-only local target", async (t) => {
+  const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-preserve-mtime-wo-"));
+  t.after(async () => fs.promises.rm(tempDir, { recursive: true, force: true }));
+
+  const targetPath = path.join(tempDir, "copied.bin");
+  await fs.promises.writeFile(targetPath, Buffer.from("payload"));
+  await fs.promises.chmod(targetPath, 0o200);
+  const sourceMtimeMs = 1_700_000_000_000;
+
+  await transferBridge._preserveTransferredDestinationMtimeForTests({
+    targetType: "local",
+    targetPath,
+    sourceSoftIdentity: { size: 7, mtimeMs: sourceMtimeMs },
+  });
+
+  const after = await fs.promises.stat(targetPath);
+  assert.equal(Math.floor(after.mtimeMs / 1000), 1_700_000_000);
+  assert.equal(after.mode & 0o777, 0o200);
+});

@@ -23,11 +23,22 @@ async function publishLocalFileExclusive(source, target, assertNotCancelled = ()
   let output;
   let failure;
   let publishedIdentity;
+  let finalMode;
   try {
-    input = await fs.promises.open(source, "r");
+    try {
+      input = await fs.promises.open(source, "r");
+    } catch (error) {
+      // A preserved restrictive destination mode (e.g. 0200 or 000) may already
+      // sit on the prepared file. Keep it readable for this copy, and defer the
+      // restrictive mode to the owned output handle once bytes are published.
+      if (error?.code !== "EACCES") throw error;
+      finalMode = (await fs.promises.lstat(source)).mode & 0o7777;
+      await fs.promises.chmod(source, finalMode | 0o400);
+      input = await fs.promises.open(source, "r");
+    }
     const stat = await input.stat();
     assertNotCancelled();
-    output = await fs.promises.open(target, "wx", stat.mode & 0o7777);
+    output = await fs.promises.open(target, "wx", (finalMode ?? stat.mode) & 0o7777);
     const buffer = Buffer.allocUnsafe(1024 * 1024);
     let position = 0;
     while (position < stat.size) {
@@ -46,7 +57,7 @@ async function publishLocalFileExclusive(source, target, assertNotCancelled = ()
     assertNotCancelled();
     // Restore metadata after writes (which may clear special permission bits),
     // through the owned handle rather than a potentially replaced pathname.
-    await output.chmod(stat.mode & 0o7777);
+    await output.chmod((finalMode ?? stat.mode) & 0o7777);
     await output.utimes(stat.atime, stat.mtime);
     const ownedStat = await output.stat();
     const targetStat = await fs.promises.lstat(target);

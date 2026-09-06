@@ -1105,7 +1105,18 @@ async function preserveTransferredDestinationMtime(transfer, options = {}) {
       // Verify and stamp the same open file. A later pathname replacement
       // must never receive metadata belonging to this completed transfer.
       await awaitBestEffortBounded((async () => {
-        const handle = await fs.promises.open(transfer.targetPath, "r");
+        let handle;
+        try {
+          handle = await fs.promises.open(transfer.targetPath, "r");
+        } catch (error) {
+          // A preserved write-only destination mode (e.g. 0200) cannot be
+          // reopened for reading. Stamp through a write handle instead; never
+          // create a missing destination here.
+          if (error?.code !== "EACCES") throw error;
+          const existing = await fs.promises.lstat(transfer.targetPath);
+          if (!existing.isFile()) throw error;
+          handle = await fs.promises.open(transfer.targetPath, "a");
+        }
         try {
           const currentStat = await handle.stat();
           const publishedIdentity = transfer.publishedLocalIdentity;
