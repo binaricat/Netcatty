@@ -39,6 +39,69 @@ const host = (id: string, label: string, hostname = label): Host => ({
   protocol: "ssh",
 } as Host);
 
+test("superseded folder child settles when its completion was compacted into the parent", async (t) => {
+  const { sftpTransferCenterStore } = await import("../sftpTransferCenterStore");
+  const previousLocalStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+  Object.defineProperty(globalThis, "localStorage", {
+    configurable: true,
+    value: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
+  });
+  const originalGet = netcattyBridge.get;
+  let abort = false;
+  let running: Promise<unknown> | undefined;
+  let childId: string | undefined;
+  const parent: TransferTask = {
+    id: "superseded-compacted-folder", fileName: "folder",
+    sourcePath: "/local/folder", targetPath: "/remote/folder",
+    sourceConnectionId: "local", targetConnectionId: "expired-sftp",
+    targetHostId: "h1", direction: "upload", status: "transferring",
+    totalBytes: 1, transferredBytes: 0, speed: 0, startTime: Date.now(),
+    isDirectory: true, progressMode: "files", reconnectRequired: true,
+  };
+  t.after(async () => {
+    abort = true;
+    await running;
+    netcattyBridge.get = originalGet;
+    sftpTransferCenterStore.patchTask(parent.id, { status: "completed" });
+    sftpTransferCenterStore.dismiss(parent.id);
+    if (previousLocalStorage) Object.defineProperty(globalThis, "localStorage", previousLocalStorage);
+    else Reflect.deleteProperty(globalThis, "localStorage");
+    resetDedicatedSessionOpenGateForTests();
+  });
+  sftpTransferCenterStore.publishOwner("compacted-owner", [parent]);
+  (netcattyBridge as { get: () => unknown }).get = () => ({
+    openSftp: async () => "dedicated-sftp", closeSftp: async () => {},
+    listLocalTree: async () => [{
+      localPath: "/local/folder/a.bin", relativePath: "a.bin", type: "file", size: 10, lastModified: 1,
+    }],
+    mkdirSftp: async () => {},
+    statLocal: async () => ({ size: 10, lastModified: 1 }),
+    startStreamTransfer: async (options: { transferId: string }) => {
+      childId = options.transferId;
+      // A newer same-id owner completes before this older invocation rejoins.
+      sftpTransferCenterStore.ingestBackgroundEvent({
+        type: "completed", transferId: childId, transferred: 10, totalBytes: 10, lifecycleEpoch: 0,
+      });
+      return { superseded: true };
+    },
+  });
+  running = resumeTransferWithDedicatedSession(parent, {
+    hosts: [host("h1", "box", "1.2.3.4")], keys: [], identities: [],
+  }, undefined, {
+    children: [], shouldAbort: () => abort,
+    onChildUpdate: (child) => sftpTransferCenterStore.publishOwner("compacted-owner", [parent, child]),
+  });
+  const result = await Promise.race([
+    running,
+    new Promise<"still-waiting">((resolve) => setTimeout(() => resolve("still-waiting"), 450)),
+  ]);
+  assert.ok(childId);
+  assert.equal(sftpTransferCenterStore.getTask(childId), undefined, "completed row was compacted");
+  assert.equal(sftpTransferCenterStore.getTask(parent.id)?.directoryResumeCheckpoint?.completedEntries, 1);
+  assert.notEqual(result, "still-waiting", "completed compacted child must not leave its folder waiting forever");
+  assert.equal((result as { success: boolean }).success, true);
+});
+
 test("resolveDirectoryResumeTargetRoot prefers staged replace path", () => {
   assert.equal(
     resolveDirectoryResumeTargetRoot({

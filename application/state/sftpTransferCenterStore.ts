@@ -96,6 +96,8 @@ export interface SftpTransferCenterStore {
   getBadgeSnapshot(): { count: number; hasAttention: boolean };
   /** Single task row — same object identity until that row is patched. */
   getTask(taskId: string): TransferTask | undefined;
+  /** Observe exact task settlement before completed child rows are compacted. */
+  observeTaskSettlement(task: TransferTask): { read(): TransferTask | undefined; dispose(): void };
   getOwnerTasks(ownerId: string): TransferTask[];
   publishOwner(ownerId: string, tasks: readonly TransferTask[]): void;
   registerOwner(ownerId: string, controls: SftpTransferOwnerControls): () => void;
@@ -398,6 +400,15 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
   let snapshotDirty = false;
   const listeners = new Set<Listener>();
   const progressListeners = new Set<Listener>();
+  const settlementObservers = new Map<string, Set<{ expected: TransferTask; settled?: TransferTask }>>();
+  const matchesObservedTask = (expected: TransferTask, candidate: TransferTask) => (
+    expected.id === candidate.id
+    && expected.sourcePath === candidate.sourcePath
+    && expected.targetPath === candidate.targetPath
+    && expected.parentTaskId === candidate.parentTaskId
+    && expected.directoryEntryIndex === candidate.directoryEntryIndex
+    && expected.directoryEntryIdentity === candidate.directoryEntryIdentity
+  );
   const refreshBadgeSnapshot = () => {
     const next = buildBadgeSnapshot(tasks);
     if (
@@ -609,6 +620,14 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
     // live renderer walk keeps its controls until TransferRuntime.runWalk
     // settles; everything else can release its whole tree here.
     settleFinishedTransferControlState(tasks, tasks);
+    if (settlementObservers.size > 0) {
+      for (const task of tasks) {
+        if (!TERMINAL_OWNER_STATUSES.has(task.status)) continue;
+        for (const observer of settlementObservers.get(task.id) ?? []) {
+          if (!observer.settled && matchesObservedTask(observer.expected, task)) observer.settled = task;
+        }
+      }
+    }
     const beforePrune = tasks;
     tasks = pruneSftpTransferHistory(tasks);
     const retainedIds = new Set(tasks.map((task) => task.id));
@@ -1307,6 +1326,27 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
     },
     getSnapshot: () => ensureSnapshot(),
     getBadgeSnapshot: () => badgeSnapshot,
+    observeTaskSettlement(expected) {
+      const observer: { expected: TransferTask; settled?: TransferTask } = { expected: { ...expected } };
+      const observers = settlementObservers.get(expected.id) ?? new Set();
+      observers.add(observer);
+      settlementObservers.set(expected.id, observers);
+      let disposed = false;
+      return {
+        read() {
+          if (disposed) return undefined;
+          if (observer.settled) return observer.settled;
+          const current = tasks.find((task) => task.id === expected.id);
+          return current && matchesObservedTask(observer.expected, current) ? current : undefined;
+        },
+        dispose() {
+          disposed = true;
+          observer.settled = undefined;
+          observers.delete(observer);
+          if (observers.size === 0) settlementObservers.delete(expected.id);
+        },
+      };
+    },
     getTask(taskId) {
       return tasks.find((task) => task.id === taskId);
     },
