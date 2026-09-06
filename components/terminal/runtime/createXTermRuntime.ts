@@ -1,3 +1,4 @@
+import { stringCellWidth } from "../autocomplete/terminalStringCellWidth";
 import { FitAddon } from "@xterm/addon-fit";
 import { ImageAddon } from "@xterm/addon-image";
 import { SearchAddon } from "@xterm/addon-search";
@@ -1065,7 +1066,43 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     overlay.style.fontSize = `${currentTerminalFontSize()}px`;
     overlay.style.fontFamily = String(term.options.fontFamily ?? fontFamily);
     overlay.style.lineHeight = String(term.options.lineHeight ?? lineHeight);
-    overlay.textContent = previewRows.map((row) => row.text).join("\n");
+    // Native font advances differ from xterm's device-pixel-rounded cells.
+    // Fit each row to its terminal cell width, including double-width glyphs,
+    // rather than applying a single-cell correction once per Unicode glyph.
+    overlay.style.fontWeight = String(term.options.fontWeight ?? "normal");
+    overlay.style.fontKerning = "none";
+    overlay.style.fontVariantLigatures = "none";
+    const screenRect = term.element?.querySelector(".xterm-screen")?.getBoundingClientRect();
+    if (screenRect && screenRect.width > 0 && screenRect.height > 0
+      && term.cols > 0 && term.rows > 0) {
+      overlay.style.lineHeight = `${screenRect.height / term.rows}px`;
+      const rowElements = previewRows.map((row) => {
+        const span = document.createElement("span");
+        span.style.display = "inline-block";
+        span.style.verticalAlign = "top";
+        span.style.transformOrigin = "left top";
+        span.textContent = row.text;
+        return span;
+      });
+      const fragment = document.createDocumentFragment();
+      rowElements.forEach((span, index) => {
+        if (index > 0) fragment.appendChild(document.createTextNode("\n"));
+        fragment.appendChild(span);
+      });
+      overlay.replaceChildren(fragment);
+      // Batch all measurements before writing transforms to avoid one forced
+      // layout per row. Text nodes and explicit newlines stay unchanged for copy.
+      const nativeWidths = rowElements.map((span) => span.getBoundingClientRect().width);
+      rowElements.forEach((span, index) => {
+        const nativeWidth = nativeWidths[index];
+        const cells = stringCellWidth(previewRows[index].text, term);
+        if (nativeWidth > 0 && cells > 0) {
+          span.style.transform = `scaleX(${cells * screenRect.width / term.cols / nativeWidth})`;
+        }
+      });
+    } else {
+      overlay.textContent = previewRows.map((row) => row.text).join("\n");
+    }
     overlay.setAttribute(HISTORY_PREVIEW_WRAP_ATTR, encodeHistoryPreviewWrapFlags(previewRows));
     return true;
   };

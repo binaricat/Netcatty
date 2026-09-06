@@ -147,6 +147,7 @@ export type HistoryPreviewSelectionLike = {
 };
 
 export type HistoryPreviewNodeLike = {
+  ownerDocument?: Pick<Document, "createRange">;
   contains(node: { nodeType?: number } | null): boolean;
   firstChild?: { nodeType?: number } | null;
   getAttribute?(name: string): string | null;
@@ -271,6 +272,16 @@ const resolveOverlayTextOffset = (
   node: { nodeType?: number } | null,
   offset: number,
 ): number | null => {
+  if (overlay.ownerDocument && node) {
+    try {
+      const prefix = overlay.ownerDocument.createRange();
+      prefix.selectNodeContents(overlay as unknown as Node);
+      prefix.setEnd(node as Node, offset);
+      return prefix.toString().length;
+    } catch {
+      return null;
+    }
+  }
   if (node === textNode) return offset;
   if (node === overlay) return offset <= 0 ? 0 : overlay.textContent?.length ?? 0;
   return null;
@@ -347,9 +358,7 @@ export const selectHistoryPreviewAll = (overlay: HTMLElement | null | undefined)
   const selection = overlay.ownerDocument.getSelection();
   if (!selection) return false;
   const range = overlay.ownerDocument.createRange();
-  const textNode = overlay.firstChild;
-  if (textNode) range.selectNodeContents(textNode);
-  else range.selectNodeContents(overlay);
+  range.selectNodeContents(overlay);
   selection.removeAllRanges();
   selection.addRange(range);
   return !selection.isCollapsed;
