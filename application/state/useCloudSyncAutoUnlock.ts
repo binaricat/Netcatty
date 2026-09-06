@@ -15,6 +15,9 @@ const unlockedIdentityByManager = new WeakMap<AutoUnlockManager, string>();
 // same manager observes the same events, and without sharing they would each
 // run the expensive PBKDF2 derivation inside manager.unlock.
 const attemptedAttemptByManager = new WeakMap<AutoUnlockManager, string | null>();
+// Mounted consumers register a retry trigger here so an attempt can be handed
+// off when its owner unmounts (see the cleanup below).
+const retryListenersByManager = new WeakMap<AutoUnlockManager, Set<() => void>>();
 
 /** Retry a locked peer window when the setting window finishes sharing its key. */
 export function useCloudSyncAutoUnlock(input: {
@@ -42,7 +45,18 @@ export function useCloudSyncAutoUnlock(input: {
     // Once this key has been unlocked, a later lock is intentional. A peer
     // sharing its password must not undo it, regardless of notification order.
     if (unlockedIdentityByManager.get(manager) === masterKeyIdentity) return;
-    if (attemptedAttemptByManager.get(manager) === attempt) return;
+    // Register before the dedup check: a consumer that only observes an
+    // in-flight attempt must still be reachable for an ownership handoff.
+    let listeners = retryListenersByManager.get(manager);
+    if (!listeners) {
+      listeners = new Set();
+      retryListenersByManager.set(manager, listeners);
+    }
+    const notifyRetry = () => setPasswordRevision(value => value + 1);
+    listeners.add(notifyRetry);
+    if (attemptedAttemptByManager.get(manager) === attempt) {
+      return () => listeners.delete(notifyRetry);
+    }
     attemptedAttemptByManager.set(manager, attempt);
     let cancelled = false;
     let awaitingPassword = true;
@@ -64,9 +78,14 @@ export function useCloudSyncAutoUnlock(input: {
     })();
     return () => {
       cancelled = true;
+      listeners.delete(notifyRetry);
       // React StrictMode can immediately remount the same effect.
       if (awaitingPassword && attemptedAttemptByManager.get(manager) === attempt) {
         attemptedAttemptByManager.set(manager, null);
+        // Hand the attempt off: this consumer's in-flight password request is
+        // discarded as cancelled, but other mounted consumers already returned
+        // at the dedup check above, so they must be nudged to retry.
+        for (const notify of listeners) notify();
       }
     };
   }, [securityState, masterKeyIdentity, manager, bridge, passwordRevision]);
