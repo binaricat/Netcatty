@@ -252,6 +252,7 @@ import {
   shouldStartTerminalBackend,
 } from "./terminal/restoredSessionGate";
 import {
+  alignTerminalViewportScroll,
   AUTO_RUN_SNIPPET_LINE_DELAY_MS,
   forceSyncRenderAfterResize,
   MAX_CONNECTION_LOG_DATA_CHARS,
@@ -2987,6 +2988,11 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           xtermRuntimeRef.current?.clearTextureAtlas();
           forceSyncRenderAfterResize(term);
         }
+
+        // The reflow above adjusted the buffer's viewport row while the
+        // scrollable viewport kept its stale pixel offset; realign them so the
+        // relative restore below cannot apply its delta twice (#3299).
+        alignTerminalViewportScroll(term);
 
         // Preserve scroll position across resize (superset/Tabby pattern).
         if (wasPinnedToBottom) {

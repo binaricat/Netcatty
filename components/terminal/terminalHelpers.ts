@@ -539,3 +539,34 @@ export function forceSyncRenderAfterResize(term: XTerm): void {
     logger.warn("Sync render after resize failed", err);
   }
 }
+
+type XTermWithPrivateViewport = XTerm & {
+  _core?: {
+    _viewport?: {
+      scrollToLine?: (line: number, disableSmoothScroll?: boolean) => void;
+    };
+  };
+};
+
+/**
+ * Re-align the DOM scroll position with the buffer's viewport row.
+ *
+ * xterm's reflow adjusts the buffer's viewport row (ydisp) during resize, but
+ * the scrollable viewport keeps its stale pixel offset. Any subsequent
+ * relative scroll (wheel, scrollToLine) then applies its delta twice — once
+ * against the buffer and once against the stale DOM offset — drifting the
+ * reading position (all the way to the top while shrinking, #3299). Snapping
+ * the viewport back to the buffer row before a relative restore removes the
+ * desync.
+ */
+export function alignTerminalViewportScroll(term: XTerm): void {
+  const viewport = (term as XTermWithPrivateViewport)._core?._viewport;
+  const scrollToLine = viewport?.scrollToLine;
+  if (typeof scrollToLine !== "function") return;
+
+  try {
+    scrollToLine.call(viewport, term.buffer.active.viewportY, true);
+  } catch (err) {
+    logger.warn("Align viewport scroll after resize failed", err);
+  }
+}
