@@ -75,16 +75,22 @@ test("coalesces consecutive deferred restores so only the earliest runs", async 
   const restored: number[] = [];
 
   // First fit captures the pre-reflow reading row (target 1).
-  deferScrollRestoreDuringSynchronizedOutput(term, () => {
-    restored.push(1);
-  });
+  assert.equal(
+    deferScrollRestoreDuringSynchronizedOutput(term, () => {
+      restored.push(1);
+    }),
+    true,
+  );
   assert.equal(renderListeners.length, 1);
 
   // A second fit before the mode ends must not register an independent
   // restore that would overwrite the pre-reflow target.
-  deferScrollRestoreDuringSynchronizedOutput(term, () => {
-    restored.push(2);
-  });
+  assert.equal(
+    deferScrollRestoreDuringSynchronizedOutput(term, () => {
+      restored.push(2);
+    }),
+    false,
+  );
   assert.equal(renderListeners.length, 1);
 
   (term.modes as { synchronizedOutputMode: boolean }).synchronizedOutputMode = false;

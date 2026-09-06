@@ -2966,9 +2966,13 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           return;
         }
 
-        const buffer = term.buffer.active;
-        const wasPinnedToBottom = buffer.viewportY >= buffer.baseY;
-        const savedViewportY = buffer.viewportY;
+        // Capture the buffer the restore belongs to: if the stream switches
+        // between the alternate and normal buffers while synchronized output
+        // (DECSET 2026) is active, the deferred restore must not apply the
+        // captured pinned/viewport state of one buffer to the other.
+        const restoreBuffer = term.buffer.active;
+        const wasPinnedToBottom = restoreBuffer.viewportY >= restoreBuffer.baseY;
+        const savedViewportY = restoreBuffer.viewportY;
 
         const dimensions = fitAddon.proposeDimensions();
         if (!dimensions || Number.isNaN(dimensions.cols) || Number.isNaN(dimensions.rows)) return;
@@ -3002,17 +3006,26 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         // resize delta twice through the still-stale DOM offset, so defer it
         // until the mode ends as well (#3299).
         //
-        // Capture the post-reflow row now: xterm accepts wheel scrolling
-        // while synchronized output is active, so if the user scrolls before
-        // the deferred restore runs, honoring the row captured at resize time
-        // would yank them back once the mode ends. Skip the restore if the
-        // viewport has moved since the fit and leave the user where they
-        // scrolled to. (If new output scrolled the viewport because it was
-        // pinned to the bottom, the user is already where the restore would
-        // put them, so skipping is a no-op there too.)
-        const anchorViewportY = term.buffer.active.viewportY;
-        deferScrollRestoreDuringSynchronizedOutput(term, () => {
-          if (term.buffer.active.viewportY !== anchorViewportY) return;
+        // Cancel the restore only on real scroll events. xterm accepts wheel
+        // scrolling while synchronized output is active, so if the user
+        // scrolls before the deferred restore runs, honoring the row captured
+        // at resize time would yank them back once the mode ends. A viewportY
+        // comparison cannot tell that apart from reflow: a later resize (the
+        // immediate-plus-RAF split-resize path) reflows the buffer — changing
+        // viewportY without firing onScroll — and would wrongly cancel the
+        // retained pre-reflow restore. term.onScroll only fires for actual
+        // scrolls (user, output following the bottom, clear), so track it
+        // instead. (If new output scrolled the viewport because it was pinned
+        // to the bottom, the user is already where the restore would put
+        // them, so skipping is a no-op there too.)
+        let viewportMovedDuringSync = false;
+        const scrollListener = term.onScroll(() => {
+          viewportMovedDuringSync = true;
+        });
+        const restoreScroll = () => {
+          scrollListener.dispose();
+          if (term.buffer.active !== restoreBuffer) return;
+          if (viewportMovedDuringSync) return;
           if (wasPinnedToBottom) {
             term.scrollToBottom();
           } else {
@@ -3021,7 +3034,12 @@ const TerminalComponent: React.FC<TerminalProps> = ({
               term.scrollToLine(targetY);
             }
           }
-        });
+        };
+        if (!deferScrollRestoreDuringSynchronizedOutput(term, restoreScroll)) {
+          // An earlier pending restore owns this terminal and its pre-reflow
+          // target; drop this one along with its scroll listener.
+          scrollListener.dispose();
+        }
         term.refresh(0, Math.max(0, term.rows - 1));
 
         if (typeof requestAnimationFrame === "function") {

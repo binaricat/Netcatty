@@ -617,6 +617,12 @@ export function alignTerminalViewportScroll(term: XTerm): void {
  * Running every deferred restore would let the later, reflow-adjusted target
  * overwrite the original row, so the terminal still drifts. Keep only the
  * earliest pending restore — it holds the pre-reflow target — until it runs.
+ *
+ * Returns whether the restore was taken over: `true` when it ran immediately
+ * or was registered as the pending restore, `false` when an earlier pending
+ * restore exists and this one was dropped. Callers that attach their own
+ * cleanup (e.g. scroll listeners) for the restore must dispose it when this
+ * returns `false`.
  */
 const pendingSynchronizedRestores = new WeakMap<XTerm, { dispose: () => void }>();
 
@@ -637,12 +643,12 @@ function runAfterRenderFrame(fn: () => void): void {
 export function deferScrollRestoreDuringSynchronizedOutput(
   term: XTerm,
   restore: () => void,
-): void {
+): boolean {
   if (!term.modes?.synchronizedOutputMode) {
     restore();
-    return;
+    return true;
   }
-  if (pendingSynchronizedRestores.has(term)) return;
+  if (pendingSynchronizedRestores.has(term)) return false;
   let listener: { dispose: () => void } | undefined;
   listener = term.onRender(() => {
     if (term.modes?.synchronizedOutputMode) return;
@@ -659,4 +665,5 @@ export function deferScrollRestoreDuringSynchronizedOutput(
     runAfterRenderFrame(restore);
   });
   pendingSynchronizedRestores.set(term, listener);
+  return true;
 }
