@@ -550,6 +550,28 @@ export const writeSessionData = (
 const isPlainTerminalDisplayData = (data: string): boolean =>
   !data.includes("\x1b") && !data.includes("\x9b");
 
+const REPLACEABLE_DEC_2026_FRAME_KEY = "dec-2026-full-frame";
+const DEC_2026_SYNC_START = "\x1b[?2026h";
+const DEC_2026_SYNC_END = "\x1b[?2026l";
+const TERMINAL_QUERY_PREFIX_PATTERN = new RegExp(
+  `^(?:${String.fromCharCode(0x1b)}\\[[0-9;?]*[cnpt])+$`,
+  "u",
+);
+
+/**
+ * Full TUI snapshots make older queued snapshots obsolete. OpenCode prefixes
+ * these with a small pixel-size query, so allow only CSI queries before the
+ * synchronized block; printable shell output must never become replaceable.
+ */
+export const isReplaceableDec2026FullFrame = (data: string): boolean => {
+  const syncStart = data.indexOf(DEC_2026_SYNC_START);
+  if (syncStart < 0 || !data.endsWith(DEC_2026_SYNC_END)) return false;
+  const prefix = data.slice(0, syncStart);
+  if (prefix && !TERMINAL_QUERY_PREFIX_PATTERN.test(prefix)) return false;
+  const frame = data.slice(syncStart + DEC_2026_SYNC_START.length, -DEC_2026_SYNC_END.length);
+  return frame.includes("\x1b[H") || frame.includes("\x1b[1;1H");
+};
+
 const writeSessionDataImmediate = (
   ctx: TerminalSessionStartersContext,
   term: XTerm,
@@ -562,6 +584,9 @@ const writeSessionDataImmediate = (
   // event loop can paint/input between xterm parses (serial queue otherwise
   // chains the next write the moment the callback fires).
   const displayBytes = data.length;
+  const replacePendingKey = isReplaceableDec2026FullFrame(data)
+    ? REPLACEABLE_DEC_2026_FRAME_KEY
+    : undefined;
   const bulkYieldAfter = shouldDegradeTerminalSideWork(term)
     && displayBytes >= XTERM_WRITE_CALLBACK_FAST_PATH_MAX_BYTES;
   enqueueTerminalWrite(term, displayBytes, (done) => {
@@ -750,6 +775,7 @@ const writeSessionDataImmediate = (
     });
   }, {
     dropBytes: ingressBytes,
+    replacePendingKey,
     deferStart: writeOptions.deferStart,
     // Intermediate plain shards set yieldAfter via writeLargeTerminalBatch;
     // bulk pressure also yields after sizable items (Tabby FlowControl intent).
