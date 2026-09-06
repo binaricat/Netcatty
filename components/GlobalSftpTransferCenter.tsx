@@ -23,6 +23,7 @@ import { useI18n } from "../application/i18n/I18nProvider";
 import {
   sftpTransferCenterStore,
   useSftpTransferCenterBadge,
+  useSftpTransferResuming,
   type SftpTransferCenterSnapshot,
 } from "../application/state/sftpTransferCenterStore";
 import { transferRuntime } from "../application/state/sftp/transferRuntime";
@@ -355,7 +356,6 @@ function TransferRow({
   const { t } = useI18n();
   const folderReplaceWarningId = React.useId();
   // Optimistic spinner from click until store status moves off paused/interrupted.
-  const [resumeClicked, setResumeClicked] = useState(false);
   const isDirParent = isDirectoryParentTask(task);
   const showCollapsedChildren = isDirParent && shouldShowCollapsedActiveChildren(task.status);
   const activeChildren = useMemo(
@@ -397,22 +397,8 @@ function TransferRow({
   const storeResuming = task.reconnectRequired === true
     && ["pending", "queued", "transferring"].includes(task.status)
     && !task.error;
-  const isResuming = storeResuming
-    || (resumeClicked && ["paused", "interrupted", "attention", "pending", "queued"].includes(task.status) && !task.error);
-  // Clear optimistic click once the store has left the idle-resume surface or failed.
-  useEffect(() => {
-    if (!resumeClicked) return;
-    if (
-      storeResuming
-      || task.status === "transferring"
-      || task.status === "completed"
-      || task.status === "failed"
-      || task.status === "cancelled"
-      || !!task.error
-    ) {
-      setResumeClicked(false);
-    }
-  }, [resumeClicked, storeResuming, task.status, task.error]);
+  const sharedResuming = useSftpTransferResuming(task.id);
+  const isResuming = sharedResuming || storeResuming;
   const canPause = task.resumable !== false && task.status === "transferring" && canControl && !isResuming;
   // Orphaned tasks after app restart (interrupted / attention / paused without a
   // live panel owner) must still expose resume/cancel from the global center.
@@ -467,7 +453,6 @@ function TransferRow({
     }));
   };
   const resumeTask = () => {
-    setResumeClicked(true);
     // Dedicated resume opens vault sessions for local↔remote and SFTP↔SFTP.
     // Only force-open the panel when the row still needs a live owner/adoption
     // (e.g. conflict) — not on every remote-to-remote resume click.
