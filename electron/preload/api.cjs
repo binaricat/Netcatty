@@ -1176,6 +1176,11 @@ function createPreloadApi(ctx) {
   // Cloud sync session (in-memory only, shared across windows)
   cloudSyncSetSessionPassword: (password) =>
     ipcRenderer.invoke("netcatty:cloudSync:session:setPassword", password),
+  onCloudSyncSessionPasswordAvailable: (callback) => {
+    const handler = () => callback();
+    ipcRenderer.on("netcatty:cloudSync:session:passwordAvailable", handler);
+    return () => ipcRenderer.removeListener("netcatty:cloudSync:session:passwordAvailable", handler);
+  },
   cloudSyncGetSessionPassword: () =>
     ipcRenderer.invoke("netcatty:cloudSync:session:getPassword"),
   cloudSyncClearSessionPassword: () =>
