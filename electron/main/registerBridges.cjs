@@ -789,6 +789,13 @@ function createBridgeRegistrar(context) {
       cloudSyncSessionPassword = typeof password === "string" && password.length ? password : null;
       if (cloudSyncSessionPassword) {
         persistCloudSyncPassword(cloudSyncSessionPassword);
+        // Peer renderers may have observed MASTER_KEY_CONFIG before the
+        // settings renderer finished unlocking and shared this password.
+        for (const win of BrowserWindow.getAllWindows()) {
+          if (!win.isDestroyed() && !win.webContents.isDestroyed()) {
+            win.webContents.send("netcatty:cloudSync:session:passwordAvailable");
+          }
+        }
       } else {
         clearPersistedCloudSyncPassword();
       }
