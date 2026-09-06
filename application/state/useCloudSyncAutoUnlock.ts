@@ -25,8 +25,13 @@ export function useCloudSyncAutoUnlock(input: {
   }), [bridge]);
 
   useEffect(() => {
-    if (securityState !== 'LOCKED' || !masterKeyIdentity) return;
+    if (!masterKeyIdentity) return;
     const attempt = JSON.stringify([masterKeyIdentity, passwordRevision]);
+    if (securityState === 'UNLOCKED') {
+      attemptedRef.current = attempt;
+      return;
+    }
+    if (securityState !== 'LOCKED') return;
     if (attemptedRef.current === attempt) return;
     attemptedRef.current = attempt;
     let cancelled = false;

@@ -37,7 +37,11 @@ test('completed auto-unlock does not undo a later deliberate lock', async () => 
   const renderer = await createDomRenderer(dom.document);
   let calls = 0;
   const manager = { unlock: async () => { calls++; return true; } };
-  const bridge = { cloudSyncGetSessionPassword: async () => 'fixture-only' };
+  let onAvailable: (() => void) | undefined;
+  const bridge = {
+    cloudSyncGetSessionPassword: async () => 'fixture-only',
+    onCloudSyncSessionPasswordAvailable: (cb: () => void) => { onAvailable = cb; return () => { onAvailable = undefined; }; },
+  };
   function Harness({ state }: { state: string }) {
     useCloudSyncAutoUnlock({ securityState: state, masterKeyIdentity: 'key', manager, bridge });
     return null;
@@ -46,6 +50,7 @@ test('completed auto-unlock does not undo a later deliberate lock', async () => 
     await renderer.render(React.createElement(Harness, { state: 'LOCKED' }));
     await flushEffects();
     await renderer.render(React.createElement(Harness, { state: 'UNLOCKED' }));
+    await runWithAct(async () => { onAvailable?.(); });
     await renderer.render(React.createElement(Harness, { state: 'LOCKED' }));
     await flushEffects();
     assert.equal(calls, 1);
