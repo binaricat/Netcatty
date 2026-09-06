@@ -921,6 +921,17 @@ test("posix wrapper types multi-line commands as one physical line (no PS2 leak)
   assert.match(result.stdout, new RegExp(`${marker}_E:0`));
 });
 
+test("long POSIX assignments preserve quotes, Unicode, and heredoc newlines on bounded input lines", () => {
+  const marker = "__NCMCP_LONG_LITERAL_TEST__";
+  const literal = "quote' \\ $HOME `false` " + "\u4e2d\u6587\ud83d\ude42".repeat(600);
+  const command = `cat <<'SMOKE_END'\n${literal}\n\nsecond line\nSMOKE_END\nprintf tail`;
+  const wrapped = buildWrappedCommand(command, "posix", marker, true);
+  assert.ok(wrapped.split('\n').every(line => Buffer.byteLength(line, 'utf8') < 1000));
+  const result = spawnSync('sh', ['-c', wrapped], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, `\n${marker}_S\n${literal}\n\nsecond line\ntail${marker}_E:0\n`);
+});
+
 test("posix wrapper isolates explicit exit from the active shell and reports its code", () => {
   const marker = "__NCMCP_TEST__";
   const wrapped = buildWrappedCommand("exit 7", "posix", marker);

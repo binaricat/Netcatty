@@ -167,6 +167,32 @@ test('real PTY: echo-disabled bash completes output without a trailing newline',
   }
 });
 
+test('real PTY: canonical bash executes a long literal command without truncation', {
+  skip: process.env.NETCATTY_LIVE_FISH_TEST !== '1', timeout: 15000,
+}, async () => {
+  const pty = require('node-pty').spawn('/bin/bash', ['--noprofile', '--norc', '--noediting'], {
+    name: 'dumb', cols: 240, rows: 24,
+    env: { ...process.env, TERM: 'dumb', PS1: 'CANONICAL_READY> ', HISTFILE: '/dev/null', BASH_SILENCE_DEPRECATION_WARNING: '1' },
+  });
+  let output = '';
+  pty.onData((data) => { output += data; });
+  try {
+    const deadline = Date.now() + 3000;
+    while (!output.includes('CANONICAL_READY>')) {
+      if (Date.now() > deadline) throw new Error('Missing canonical shell prompt');
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    const literal = 'x'.repeat(12000);
+    const result = await require('./ptyExec.cjs').execViaPty(pty, `printf '%s' '${literal}'`, {
+      shellKind: 'posix', probeLiveShell: true, timeoutMs: 1500,
+    });
+    assert.equal(result.exitCode, 0, JSON.stringify({ ...result, stdout: result.stdout?.slice(-200) }));
+    assert.equal(result.stdout.trim(), literal);
+  } finally {
+    pty.kill();
+  }
+});
+
 // The second element is a history-listing invocation that still reaches the
 // real history builtin under that customization.
 for (const [customization, listHistory] of [

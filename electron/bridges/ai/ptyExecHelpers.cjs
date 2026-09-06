@@ -218,9 +218,32 @@ function buildBashHistoryCleanup(marker, keepDispatcher = false) {
 function buildPosixWrapperBody(command, marker, startFormat) {
   const noPager = "PAGER=cat SYSTEMD_PAGER= GIT_PAGER=cat LESS= ";
   const commandLines = String(command || "").replace(/\r\n?/g, "\n").split("\n");
-  const cmdAssign = commandLines.length > 1
+  let cmdAssign = commandLines.length > 1
     ? `${marker}_cmd=$(printf '%s\\n' ${commandLines.map((line) => `'${escapePosixSingleQuoted(line)}'`).join(" ")})`
     : `${marker}_cmd='${escapePosixSingleQuoted(command)}'`;
+  if (Buffer.byteLength(cmdAssign, 'utf8') > 650) {
+    // Canonical PTYs limit bytes per physical input line, regardless of write
+    // pacing. Emit bounded quoted pieces inside one command substitution; each
+    // continuation keeps the marker visible to the terminal echo filter.
+    const writes = [];
+    for (const [index, line] of commandLines.entries()) {
+      let chunk = '';
+      let bytes = 0;
+      for (const character of line) {
+        const quoted = escapePosixSingleQuoted(character);
+        const size = Buffer.byteLength(quoted, 'utf8');
+        if (bytes + size > 512) {
+          writes.push(`printf '%s' '${chunk}'`);
+          chunk = '';
+          bytes = 0;
+        }
+        chunk += quoted;
+        bytes += size;
+      }
+      writes.push(`printf '${index < commandLines.length - 1 ? '%s\\n' : '%s'}' '${chunk}'`);
+    }
+    cmdAssign = `${marker}_cmd=$(${writes.join(`; \\\n: '${marker}'; `)})`;
+  }
   const historyCleanup = buildBashHistoryCleanup(marker);
   const prefix = `${marker}=0; ${cmdAssign}; { printf '${startFormat}' '${marker}_S'; trap ':' INT; ( ${noPager}eval "$${marker}_cmd" ); __NCMCP_rc=$?; trap - INT; printf '%s\\n' '${marker}_E:'\"$__NCMCP_rc\"`;
   const suffix = `${historyCleanup}; (exit $__NCMCP_rc); }`;
