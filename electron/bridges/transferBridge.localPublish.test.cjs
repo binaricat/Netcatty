@@ -148,3 +148,25 @@ for (const interruption of ["cancel", "replace", "restore-replace"]) {
     assert.equal(fs.readFileSync(path.join(root, names.find(name => name.endsWith(".backup"))), "utf8"), "original");
   });
 }
+
+test("cancelled replacement restores original timestamps through the copy fallback", async (t) => {
+  const root = fs.mkdtempSync(`${temp.getTempFilePath("publish-restore-times")}-`);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const staged = path.join(root, "staged");
+  const target = path.join(root, "target");
+  fs.writeFileSync(staged, "download");
+  fs.writeFileSync(target, "original", { mode: 0o640 });
+  const atime = new Date("2019-01-02T00:00:00Z");
+  const mtime = new Date("2020-02-03T00:00:00Z");
+  fs.utimesSync(target, atime, mtime);
+  const link = fs.promises.link;
+  fs.promises.link = async () => { throw Object.assign(new Error("unsupported"), { code: "ENOTSUP" }); };
+  t.after(() => { fs.promises.link = link; });
+  await assert.rejects(() => bridge._promoteLocalTransferForTests(staged, target, {
+    assertNotCancelled() { if (!fs.existsSync(target)) throw new Error("Transfer cancelled"); },
+  }), /cancelled/);
+  const stat = fs.statSync(target);
+  assert.equal(stat.mtimeMs, mtime.getTime());
+  assert.equal(stat.atimeMs, atime.getTime());
+  assert.equal(fs.readFileSync(target, "utf8"), "original");
+});

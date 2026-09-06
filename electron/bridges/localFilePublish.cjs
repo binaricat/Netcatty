@@ -23,8 +23,6 @@ async function publishLocalFileExclusive(source, target, assertNotCancelled = ()
     const stat = await input.stat();
     assertNotCancelled();
     output = await fs.promises.open(target, "wx", stat.mode & 0o7777);
-    // Apply through the owned handle; never chmod a potentially replaced name.
-    await output.chmod(stat.mode & 0o7777);
     const buffer = Buffer.allocUnsafe(1024 * 1024);
     let position = 0;
     while (position < stat.size) {
@@ -41,6 +39,10 @@ async function publishLocalFileExclusive(source, target, assertNotCancelled = ()
       position += bytesRead;
     }
     assertNotCancelled();
+    // Restore metadata after writes (which may clear special permission bits),
+    // through the owned handle rather than a potentially replaced pathname.
+    await output.chmod(stat.mode & 0o7777);
+    await output.utimes(stat.atime, stat.mtime);
     const ownedStat = await output.stat();
     const targetStat = await fs.promises.lstat(target);
     if (!targetStat.isFile() || targetStat.dev !== ownedStat.dev || targetStat.ino !== ownedStat.ino) {
