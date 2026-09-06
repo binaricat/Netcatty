@@ -321,3 +321,38 @@ test("cursor-row moves clamp to the reported terminal viewport", () => {
   unclamped.append("\x1b[24;1Hstatus\x1b[1BNEW");
   assert.deepEqual(unclamped.getLines(), ["status", "      NEW"]);
 });
+
+test("absolute cursor columns clamp to the reported viewport width", () => {
+  const history = createTerminalOutputHistoryPreview();
+  history.setViewportRows(24);
+  history.setViewportCols(80);
+  // CUP past the last column clamps to it on screen; without the clamp the
+  // preview would pad 998 spaces and fabricate wrapped rows.
+  history.append("\x1b[1;999HX");
+  assert.deepEqual(history.getLines(), [" ".repeat(79) + "X"]);
+});
+
+test("line feeds on the bottom row stay clamped to it", () => {
+  const history = createTerminalOutputHistoryPreview();
+  history.setViewportRows(24);
+  history.append("\x1b[24;1Hstatus\r\nnew\x1b[24;1HNEW");
+  assert.deepEqual(history.getLines(), ["status", "NEW"]);
+});
+
+test("shrinking the viewport clamps the tracked cursor row", () => {
+  const history = createTerminalOutputHistoryPreview();
+  history.setViewportRows(24);
+  history.append("\x1b[24;1Hbottom");
+  history.setViewportRows(10);
+  // The terminal moved the cursor to the new bottom row, so a relative move
+  // from there must stay a same-row redraw instead of committing a line.
+  history.append("\x1b[1BX");
+  assert.deepEqual(history.getLines(), ["bottomX"]);
+});
+
+test("relative row moves stop at the scroll region's bottom margin", () => {
+  const history = createTerminalOutputHistoryPreview();
+  history.setViewportRows(24);
+  history.append("\x1b[1;20r\x1b[20;1Hstatus\x1b[1BNEW");
+  assert.deepEqual(history.getLines(), ["statusNEW"]);
+});

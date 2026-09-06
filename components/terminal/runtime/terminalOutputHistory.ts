@@ -179,7 +179,7 @@ export const stripTerminalDisplayToPlainText = (
       // text stripping keeps its original contract.
       if (preserveRowControls
         && (input[i] === C1_CSI || input[i + 1] === "[")
-        && /^[0-9;]*[HfABEFd]$/.test(input.slice(i + escapeIntroducerLength(input, i), end))) {
+        && /^[0-9;]*[HfABEFdr]$/.test(input.slice(i + escapeIntroducerLength(input, i), end))) {
         output += input.slice(i, end);
       }
       const eraseInLine = eraseInLineMarkerFor(input, i, end);
@@ -292,6 +292,12 @@ export interface TerminalOutputHistoryPreview {
    * historical row transitions. Unset (0) keeps the unclamped behavior.
    */
   setViewportRows(rows: number): void;
+  /**
+   * Report the live terminal's viewport column count so absolute cursor
+   * columns past the last one clamp to it, exactly like xterm does. Unset
+   * (0) keeps the unclamped behavior.
+   */
+  setViewportCols(cols: number): void;
 }
 
 export const createTerminalOutputHistoryPreview = (options?: {
@@ -309,6 +315,10 @@ export const createTerminalOutputHistoryPreview = (options?: {
   let totalChars = 0;
   let pendingEscape = "";
   let viewportRows = 0;
+  let viewportCols = 0;
+  // Active DECSTBM scroll margins (1-based rows); Infinity means "viewport bottom".
+  let scrollTopMargin = 1;
+  let scrollBottomMargin = Infinity;
   let cacheDirty = true;
   let cacheCols = -1;
   let cacheRows: HistoryPreviewRow[] = [];
@@ -383,24 +393,53 @@ export const createTerminalOutputHistoryPreview = (options?: {
         const end = consumeCsiBody(text, bodyStart)!;
         const command = text[end - 1];
         const params = text.slice(bodyStart, end - 1).split(";");
+        if (command === "r") {
+          // DECSTBM: xterm homes the cursor after (re)setting the scroll
+          // margins, and relative row moves inside the region stop at its
+          // bottom margin instead of the viewport's bottom row.
+          scrollTopMargin = Math.max(1, Number(params[0]) || 1);
+          scrollBottomMargin = Math.max(
+            scrollTopMargin,
+            Number(params[1]) || (viewportRows > 0 ? viewportRows : 1_000_000),
+          );
+          if (screenRow !== 1 && current) commitCurrentLine();
+          screenRow = 1;
+          cursor = 0;
+          cursorCell = 0;
+          i = end;
+          continue;
+        }
         const amount = Math.min(1_000_000, Math.max(1, Number(params[0]) || 1));
         // The terminal clamps cursor-row targets to the viewport's bottom row;
-        // mirror that so moves past it stay same-row redraws. Without a known
-        // viewport, keep the legacy 1,000,000 cap.
-        const rowLimit = viewportRows > 0 ? viewportRows : 1_000_000;
+        // mirror that so moves past it stay same-row redraws. Inside a scroll
+        // region, relative moves stop at the region's bottom margin. Without a
+        // known viewport, keep the legacy 1,000,000 cap.
+        const screenBottom = viewportRows > 0 ? viewportRows : 1_000_000;
+        const bottomLimit = screenRow <= scrollBottomMargin
+          ? Math.min(scrollBottomMargin, screenBottom)
+          : screenBottom;
+        const topLimit = screenRow >= scrollTopMargin
+          ? Math.min(scrollTopMargin, screenBottom)
+          : 1;
         const nextRow = command === "A" || command === "F"
-          ? Math.max(1, screenRow - amount)
+          ? Math.max(topLimit, screenRow - amount)
           : command === "B" || command === "E"
-            ? Math.min(rowLimit, screenRow + amount)
-            : Math.min(rowLimit, amount);
+            ? Math.min(bottomLimit, screenRow + amount)
+            : Math.min(screenBottom, amount);
         const column = command === "H" || command === "f"
           ? Math.max(0, (Number(params[1]) || 1) - 1)
           : command === "E" || command === "F" ? 0 : cursorCell;
         if (nextRow !== screenRow && current) commitCurrentLine();
         // CUP/HVP set both coordinates; vertical-only moves keep the column.
         // Keep placement logical until text arrives; cursor moves print no spaces.
-        // Bound eventual padding by the transcript budget.
-        const targetCell = Math.min(maxChars - 1, column);
+        // Bound eventual padding by the transcript budget and, when known, the
+        // viewport width: xterm clamps the column to the last one on screen,
+        // while an unclamped column would fabricate wrapped rows.
+        const targetCell = Math.min(
+          maxChars - 1,
+          column,
+          viewportCols > 0 ? viewportCols - 1 : column,
+        );
         cursor = targetCell === 0 ? 0
           : isAsciiOnly(current) ? targetCell
             : sliceStringByCellColumns(current, 0, targetCell).length;
@@ -410,7 +449,14 @@ export const createTerminalOutputHistoryPreview = (options?: {
         continue;
       }
       if (ch === "\n") {
-        screenRow = Math.min(1_000_000, screenRow + 1);
+        // xterm scrolls at the viewport's bottom row (or the scroll region's
+        // bottom margin) and leaves the cursor on that row; advancing past it
+        // would turn a later same-row redraw into a row transition.
+        const screenBottom = viewportRows > 0 ? viewportRows : 1_000_000;
+        const bottomLimit = screenRow <= scrollBottomMargin
+          ? Math.min(scrollBottomMargin, screenBottom)
+          : screenBottom;
+        screenRow = Math.min(bottomLimit, screenRow + 1);
         commitCurrentLine();
         i += 1;
         continue;
@@ -506,6 +552,16 @@ export const createTerminalOutputHistoryPreview = (options?: {
     },
     setViewportRows(rows: number): void {
       viewportRows = Math.max(0, Math.floor(rows));
+      if (viewportRows > 0) {
+        // xterm clamps its cursor as soon as the viewport shrinks; keep the
+        // tracked row (and any scroll margins) inside the new bounds so a
+        // later relative move is not misread as a row transition.
+        screenRow = Math.min(screenRow, viewportRows);
+        scrollBottomMargin = Math.min(scrollBottomMargin, viewportRows);
+      }
+    },
+    setViewportCols(cols: number): void {
+      viewportCols = Math.max(0, Math.floor(cols));
     },
   };
 };
