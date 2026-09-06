@@ -224,3 +224,25 @@ The initial combined run stopped after an older exact-result assertion rejected
 the newly structured superseded response and left its fixture alive. The
 assertion was updated, its fixture completed, and the successful full run above
 supersedes that aborted run. Tests were not removed or weakened.
+
+## Delivery follow-ups
+
+The remote publication branch received an automated patch during final review.
+It was fetched and checked rather than assuming earlier validation covered it.
+Two actual filesystem regressions showed lost normal mtime preservation and a
+remaining final-path stamping race. The repair prepares staged timestamps before
+publication and restrictive chmod, skips post-commit stamping of that pathname,
+and uses a verified file handle on non-promoted local paths. Fallback close
+errors also retain recovery artifacts. Publication/bridge/SCP checks: 31 pass;
+independent targeted review: 10 pass.
+
+Fresh dedicated recovery now recognizes only the exact unchanged paused child
+rows captured at its entry as old pauses eligible to resume. A newer row,
+pausing state, root/child latch or cancellation still blocks admission. This
+avoids a 4096-row batching deadlock without removing later pause protection.
+Actual batched paused-history and later-pause regressions pass; 163 relevant
+tests and an independent 60-test review pass.
+
+The delivery rerun includes all follow-ups above: 11,452 tests passed, 0 failed,
+18 skipped (182.9 seconds, four test processes). This is the final combined
+full-suite result and supersedes the earlier intermediate counts.
