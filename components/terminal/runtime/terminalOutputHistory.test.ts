@@ -527,6 +527,25 @@ test("combined private-mode controls apply every parameter", () => {
   // printable output wraps once more.
   history.append("\x1b[?6;7h\x1b[99;1HNEW");
   assert.deepEqual(history.getLines(), ["abcdf", "NEW"]);
+  // Unrelated parameters ride along: xterm applies both `CSI ?6;25h` params
+  // (25 is DECTCEM, untracked here), so dropping the control whole would
+  // resolve the later CUP row absolutely instead of against the top margin.
+  const combined = createTerminalOutputHistoryPreview();
+  combined.setViewportRows(24);
+  combined.append("\x1b[5;20r\x1b[?6;25h\x1b[16;1Hstatus\x1b[99;1HOLD");
+  assert.deepEqual(combined.getLines(), ["OLDtus"]);
+});
+
+test("a grapheme longer than the per-row piece cap is not dropped", () => {
+  const history = createTerminalOutputHistoryPreview();
+  history.setViewportRows(24);
+  history.setViewportCols(5);
+  // One base character trailed by more combining marks than the piece cap
+  // holds: cutting at a grapheme boundary yields an empty slice for it, and
+  // returning early would silently drop this grapheme and everything after.
+  const mark = "́";
+  history.append("abcd" + "e" + mark.repeat(80) + "Z");
+  assert.deepEqual(history.getLines(), ["abcde" + mark.repeat(80), "Z"]);
 });
 
 test("discarding a non-fitting wide glyph does not re-pad the deferred gap", () => {

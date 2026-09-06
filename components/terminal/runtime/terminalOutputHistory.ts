@@ -156,6 +156,17 @@ const keepTranscriptChars = (span: string): string => {
 };
 
 /**
+ * A private-mode sequence is preserved when it carries a tracked mode (DECOM 6
+ * or DECAWM 7), even alongside unrelated modes like `CSI ?6;25h`: xterm applies
+ * every parameter and drops only the untracked ones during interpretation.
+ */
+const isTrackedDecPrivateModeSequence = (sequence: string): boolean => {
+  const match = /^\?([0-9;]+)([hl])$/.exec(sequence);
+  if (!match) return false;
+  return match[1].split(";").some((p) => p === "6" || p === "7");
+};
+
+/**
  * Reduce a display chunk to plain text: escape sequences are removed while
  * `\n` / `\r` / `\b` / `\t` and the erase-in-line marker survive so the history
  * can track line edits.
@@ -194,7 +205,7 @@ export const stripTerminalDisplayToPlainText = (
       const isCsi = input[i] === C1_CSI || input[i + 1] === "[";
       const passesRowControl = isCsi
         && (/^[0-9;]*[HfABEFdr]$/.test(sequence)
-          || /^\?[67](?:;[67])*[hl]$/.test(sequence)
+          || isTrackedDecPrivateModeSequence(sequence)
           || /^[su]$/.test(sequence));
       const isDecSaveRestore = !isCsi
         && escapeIntroducerLength(input, i) === 1
@@ -492,7 +503,11 @@ export const createTerminalOutputHistoryPreview = (options?: {
         let end = window.length;
         for (const { segment } of outputGraphemeSegmenter.segment(window)) {
           if (cutLength + segment.length > pieceCap) {
-            end = cutLength;
+            // A single grapheme wider than the cap (a base character trailed
+            // by many combining marks) cannot be split at a boundary; take the
+            // whole first grapheme rather than an empty piece, which would
+            // drop this grapheme and everything after it.
+            end = cutLength > 0 ? cutLength : Math.min(segment.length, window.length);
             break;
           }
           cutLength += segment.length;
