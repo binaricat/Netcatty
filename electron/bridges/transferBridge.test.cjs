@@ -12856,3 +12856,34 @@ test("preserveTransferredDestinationMtime stamps a write-only local target", asy
   assert.equal(Math.floor(after.mtimeMs / 1000), 1_700_000_000);
   assert.equal(after.mode & 0o777, 0o200);
 });
+
+for (const failureMode of ["rejection", "timeout"]) {
+test(`resumable local transfer retries a failed prepared-file timestamp: ${failureMode}`, async (t) => {
+  const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-mtime-retry-"));
+  t.after(() => fs.promises.rm(tempDir, { recursive: true, force: true }));
+  const sourcePath = path.join(tempDir, "source");
+  const targetPath = path.join(tempDir, "target");
+  await fs.promises.writeFile(sourcePath, "payload");
+  await fs.promises.utimes(sourcePath, 1_600_000_000, 1_600_000_000);
+  let preparationFailed = false;
+  const utimes = fs.promises.utimes;
+  t.mock.method(fs.promises, "utimes", async (name, ...args) => {
+    if (String(name).endsWith(".ready")) {
+      preparationFailed = true;
+      if (failureMode === "timeout") return new Promise(() => {});
+      throw Object.assign(new Error("transient metadata failure"), { code: "EIO" });
+    }
+    return utimes(name, ...args);
+  });
+  transferBridge.init({ sftpClients: new Map() });
+  const result = await transferBridge.startTransfer({ sender: createSender() }, {
+    transferId: "local-mtime-retry", sourcePath, targetPath,
+    sourceType: "local", targetType: "local", totalBytes: 7, resumable: true,
+  });
+  assert.equal(result.error, undefined);
+  assert.equal(preparationFailed, true);
+  assert.equal(Math.floor((await fs.promises.stat(targetPath)).mtimeMs / 1000), 1_600_000_000);
+  assert.equal(await fs.promises.readFile(targetPath, "utf8"), "payload");
+});
+
+}

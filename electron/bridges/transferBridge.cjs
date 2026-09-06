@@ -960,6 +960,7 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
   let committed = false;
   let keepRecoveryFiles = false;
   let preparedHandle;
+  let localMtimePrepared = false;
   try {
     assertNotCancelled();
     try {
@@ -975,7 +976,7 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
       const when = new Date(Math.floor(mtimeMs / 1000) * 1000);
       await awaitBestEffortBounded(
         fs.promises.utimes(readyPath, when, when), 15_000, "Prepared destination utimes",
-      ).catch(() => {});
+      ).then(() => { localMtimePrepared = true; }).catch(() => {});
     }
     // Keep read access to our private bytes before destination permissions
     // can remove it; the no-hardlink fallback copies through this handle.
@@ -1033,7 +1034,7 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
     committed = true;
     // Hand the published inode identity to the caller for descriptor-based
     // metadata stamping after publication.
-    options.onCommit?.(publishedIdentity);
+    options.onCommit?.(publishedIdentity, localMtimePrepared);
     if (backedUp) await fs.promises.unlink(backupPath).catch(() => {});
     await fs.promises.unlink(readyPath).catch(() => {});
     await fs.promises.unlink(stagedPath).catch(() => {});
@@ -6016,9 +6017,9 @@ async function startTransferNow(event, payload, onProgress) {
           assertNotCancelled() {
             if (transfer.cancelled) throw new Error("Transfer cancelled");
           },
-          onCommit(publishedIdentity) {
+          onCommit(publishedIdentity, localMtimePrepared) {
             transfer.completionCommitted = true;
-            transfer.localMtimePrepared = true;
+            transfer.localMtimePrepared = localMtimePrepared;
             transfer.publishedLocalIdentity = publishedIdentity ?? null;
           },
         });
@@ -6111,9 +6112,9 @@ async function startTransferNow(event, payload, onProgress) {
           assertNotCancelled() {
             if (transfer.cancelled) throw new Error("Transfer cancelled");
           },
-          onCommit(publishedIdentity) {
+          onCommit(publishedIdentity, localMtimePrepared) {
             transfer.completionCommitted = true;
-            transfer.localMtimePrepared = true;
+            transfer.localMtimePrepared = localMtimePrepared;
             transfer.publishedLocalIdentity = publishedIdentity ?? null;
           },
         });
