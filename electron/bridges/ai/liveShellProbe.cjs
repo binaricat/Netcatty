@@ -8,8 +8,8 @@ function buildLiveShellProbe(marker) {
   const script = 'if test -r "/proc/$PPID/comm"; then IFS= read -r name < "/proc/$PPID/comm"; else name=$(ps -p "$PPID" -o comm= 2>/dev/null); fi; '
     + `printf "${marker}_P:%s\\n" "$name"`;
   // Run cleanup independently of process-name detection or external sh/PATH.
-  // Bash and zsh provide builtin eval and the cleanup itself checks BASH_VERSION.
-  // Shells without it (including fish) reject the builtin without parsing its
+  // POSIX command bypasses eval aliases/functions; cleanup checks BASH_VERSION.
+  // Fish cannot resolve eval through command and rejects it without parsing its
   // quoted POSIX body. Make cleanup failure non-fatal even under set -e,
   // suppress its diagnostic, and always emit Q afterward.
   // Put the job marker near the start of the echo, as the existing wrappers
@@ -17,7 +17,7 @@ function buildLiveShellProbe(marker) {
   // The builtin completion marker still runs if sh cannot launch. Leave it
   // unterminated so preload hides the intermediate prompt and wrapper echo
   // on the same marker-bearing line, including across output chunks.
-  return ` true ${marker}; command sh -c '${script}' 2>/dev/null; builtin eval '${buildBashHistoryCleanup(marker)}' 2>/dev/null || true; printf '%s' '${marker}_Q'\n`;
+  return ` true ${marker}; command sh -c '${script}' 2>/dev/null; command eval '${buildBashHistoryCleanup(marker)}' 2>/dev/null || true; printf '%s' '${marker}_Q'\n`;
 }
 
 function parseLiveShellProbe(output, marker) {

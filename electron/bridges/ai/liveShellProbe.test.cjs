@@ -163,16 +163,16 @@ test('real PTY: echo-disabled bash completes output without a trailing newline',
   }
 });
 
-for (const customization of [':', 'HISTCONTROL=ignorespace', "alias history='history 10'", 'history() { :; }', "alias eval=':'", 'eval() { :; }', 'PATH=/nonexistent']) {
+for (const customization of [':', 'HISTCONTROL=ignorespace', "alias history='history 10'", 'history() { :; }', "alias eval=':'", 'eval() { :; }', 'PATH=/nonexistent', "alias builtin=':'", 'builtin() { :; }']) {
   for (const executeCommand of [false, true]) {
     test(`bash probe keeps user history clean (${customization}, wrapper=${executeCommand})`, () => {
       const { spawnSync } = require('node:child_process');
       const { buildWrappedCommand } = require('./ptyExecHelpers.cjs');
       const marker = '__NCMCP_HISTORY_PROBE__';
-      const input = `HISTFILE=/dev/null; HISTCONTROL=; PS1=; PS2=\n${customization}\nbuiltin history -c\necho user_one\necho user_two\n`
+      const input = `HISTFILE=/dev/null; HISTCONTROL=; PS1=; PS2=\n${customization}\ncommand builtin history -c\necho user_one\necho user_two\n`
         + buildLiveShellProbe(marker)
         + (executeCommand ? buildWrappedCommand('echo command_ok', 'posix', marker, true) : '')
-        + '\nprintf \"\\n\"\nbuiltin history\nexit\n';
+        + '\nprintf \"\\n\"\ncommand builtin history\nexit\n';
       const result = spawnSync('/bin/bash', ['--noprofile', '--norc', '-i'], {
         input, encoding: 'utf8', env: { ...process.env, TERM: 'dumb' }, timeout: 5000,
       });
@@ -239,14 +239,15 @@ for (const invocationName of ['sh', 'renamed-bash']) {
     const fs = require('node:fs');
     const path = require('node:path');
     const { spawnSync } = require('node:child_process');
-    const directory = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'netcatty-probe-bash-'));
+    const directory = require('../tempDirBridge.cjs').getTempFilePath('probe-bash');
+    fs.mkdirSync(directory, { mode: 0o700 });
     try {
       const shell = path.join(directory, invocationName);
       fs.symlinkSync('/bin/bash', shell);
       const marker = '__NCMCP_RENAMED_BASH__';
       const result = spawnSync(shell, ['--noprofile', '--norc', '-i'], {
         input: 'HISTFILE=/dev/null; HISTCONTROL=; PS1=; PS2=\nbuiltin history -c\necho preserve_user_history\n'
-          + buildLiveShellProbe(marker) + '\nprintf "\\n"\nbuiltin history\nexit\n',
+          + buildLiveShellProbe(marker) + '\nprintf "\\n"\ncommand builtin history\nexit\n',
         encoding: 'utf8', env: { ...process.env, TERM: 'dumb' }, timeout: 5000,
       });
       assert.equal(result.status, 0, result.stderr);

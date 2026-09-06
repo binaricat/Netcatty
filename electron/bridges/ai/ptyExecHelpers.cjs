@@ -208,11 +208,11 @@ function buildBashHistoryCleanup(marker) {
   // Match the latest entry before deleting it, preserving user history when
   // HISTCONTROL=ignorespace skips the wrapper. Read the entry's actual number:
   // older Bash versions can expose HISTCMD as the next history number.
-  // builtin history bypasses user aliases and functions. The unset-safe guard
+  // command history bypasses user aliases and functions. The unset-safe guard
   // leaves non-Bash shells alone, including shells with nounset enabled.
   // Use ^ for the Bash bracket negation: ! triggers interactive zsh history
   // expansion before the Bash-only guard can run.
-  return `[ -n "\${BASH_VERSION-}" ] && { ${marker}_h=$(builtin history 1 2>/dev/null); case "$${marker}_h" in *${marker}*) ${marker}_h=\${${marker}_h#"\${${marker}_h%%[^[:space:]]*}"}; builtin history -d "\${${marker}_h%%[[:space:]]*}" 2>/dev/null ;; esac; }`;
+  return `[ -n "\${BASH_VERSION-}" ] && { ${marker}_h=$(command history 1 2>/dev/null); case "$${marker}_h" in *${marker}*) ${marker}_h=\${${marker}_h#"\${${marker}_h%%[^[:space:]]*}"}; command history -d "\${${marker}_h%%[[:space:]]*}" 2>/dev/null ;; esac; }`;
 }
 
 function buildPosixWrapperBody(command, marker, startFormat) {
