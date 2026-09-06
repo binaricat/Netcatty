@@ -3120,7 +3120,13 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           // index is wide enough — a 500-row bound stops short of the head
           // and leaves the restore anchored on content far below it — so
           // search the full range down to the top of the buffer.
-          for (let y = preResizeMarkerLine - 1; y >= 0; y--) {
+          // A second widening fit can trim enough rows that the stale
+          // pre-resize index now points past the resized buffer's end;
+          // starting the search there would hit an undefined line and
+          // `break` out before reaching the surviving head lower down.
+          // Clamp the start to the buffer's last valid row instead.
+          const startY = Math.min(preResizeMarkerLine - 1, buffer.length - 1);
+          for (let y = startY; y >= 0; y--) {
             const line = buffer.getLine(y);
             if (!line) break;
             if (line.isWrapped) continue;
