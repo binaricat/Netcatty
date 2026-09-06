@@ -956,10 +956,13 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
   const base = path.join(path.dirname(targetPath), `.${path.basename(targetPath)}.netcatty-${token}`);
   const readyPath = `${base}.ready`;
   const backupPath = `${base}.backup`;
+  const restoreProbePath = `${base}.restore-check`;
   let backedUp = false;
   let committed = false;
   let keepRecoveryFiles = false;
   let preparedHandle;
+  let originalHandle;
+  let restoreProbeCreated = false;
   let localMtimePrepared = false;
   try {
     assertNotCancelled();
@@ -1006,6 +1009,23 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
       || (validatedTarget?.targetIdentity ? String(validatedTarget.targetIdentity).split(":").slice(0, 3).join(":") : null);
     if (!expectedAbsent) {
       try {
+        originalHandle = await fs.promises.open(targetPath, "r");
+      } catch (error) {
+        if (error?.code === "EACCES" || error?.code === "EPERM") {
+          // An unreadable original cannot use copy-based recovery. Verify the
+          // non-overwriting alternative before moving its only visible name.
+          try {
+            await fs.promises.link(targetPath, restoreProbePath);
+            restoreProbeCreated = true;
+            await fs.promises.unlink(restoreProbePath);
+            restoreProbeCreated = false;
+          } catch (restoreError) {
+            throw new Error("Cannot safely replace unreadable local destination: hardlink recovery unavailable", { cause: restoreError });
+          }
+        } else if (error?.code !== "ENOENT") throw error;
+      }
+      assertNotCancelled();
+      try {
         await fs.promises.rename(targetPath, backupPath);
         backedUp = true;
       } catch (error) {
@@ -1042,7 +1062,16 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
     if (committed) throw error;
     if (backedUp && !keepRecoveryFiles) {
       try {
-        await publishLocalFileExclusive(backupPath, targetPath);
+        // The pathname may have changed between open and rename. Never copy
+        // an earlier inode over the original actually moved into the backup.
+        let restoreHandle;
+        if (originalHandle) {
+          const [heldStat, backupStat] = await Promise.all([
+            originalHandle.stat(), fs.promises.lstat(backupPath),
+          ]);
+          if (stableLocalFileIdentity(heldStat) === stableLocalFileIdentity(backupStat)) restoreHandle = originalHandle;
+        }
+        await publishLocalFileExclusive(backupPath, targetPath, undefined, restoreHandle);
         await fs.promises.unlink(backupPath).catch(() => {});
         backedUp = false;
       } catch (restoreError) {
@@ -1064,6 +1093,8 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
     throw error;
   } finally {
     await preparedHandle?.close().catch(() => {});
+    await originalHandle?.close().catch(() => {});
+    if (restoreProbeCreated) await fs.promises.unlink(restoreProbePath).catch(() => {});
   }
 }
 

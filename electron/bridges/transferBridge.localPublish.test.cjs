@@ -272,6 +272,9 @@ test("write-only timestamp fallback leaves a later pathname replacement unchange
   let replaced = false;
   const open = fs.promises.open;
   t.mock.method(fs.promises, "open", async (...args) => {
+    if (args[0] === target && args[1] === "r") {
+      throw Object.assign(new Error("read access denied"), { code: "EACCES" });
+    }
     const handle = await open(...args);
     if (args[0] === target && args[1] === fs.constants.O_WRONLY) {
       const utimes = handle.utimes.bind(handle);
@@ -294,7 +297,7 @@ test("write-only timestamp fallback leaves a later pathname replacement unchange
   assert.equal(Math.floor(fs.statSync(published).mtimeMs / 1000), 1_700_000_000);
 });
 
-test("copy fallback publishes a destination with a preserved write-only mode", async (t) => {
+test("copy fallback refuses to move an unreadable existing destination", async (t) => {
   const root = fs.mkdtempSync(`${temp.getTempFilePath("publish-restrictive")}-`);
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const staged = path.join(root, "staged");
@@ -305,11 +308,78 @@ test("copy fallback publishes a destination with a preserved write-only mode", a
   const link = fs.promises.link;
   fs.promises.link = async () => { throw Object.assign(new Error("hardlinks unavailable"), { code: "ENOTSUP" }); };
   t.after(() => { fs.promises.link = link; });
-  await bridge._promoteLocalTransferForTests(staged, target, { existingMode: 0o200 });
+  const open = fs.promises.open;
+  t.mock.method(fs.promises, "open", async (...args) => {
+    if (args[0] === target && args[1] === "r") throw Object.assign(new Error("read access denied"), { code: "EACCES" });
+    return open(...args);
+  });
+  await assert.rejects(bridge._promoteLocalTransferForTests(staged, target, { existingMode: 0o200 }), /hardlink recovery unavailable/);
   const stat = fs.statSync(target);
   assert.equal(stat.mode & 0o777, 0o200);
-  assert.equal(stat.size, payload.length);
+  assert.equal(stat.size, "original".length);
   fs.chmodSync(target, 0o600); // grant readback for verification
-  assert.deepEqual(fs.readFileSync(target), payload);
+  assert.equal(fs.readFileSync(target, "utf8"), "original");
+  assert.deepEqual(fs.readdirSync(root), ["target"]);
+});
+
+for (const mode of [0o200, 0]) {
+  test(`unreadable original remains at destination when safe restoration is unavailable: ${mode.toString(8)}`, async (t) => {
+    const root = fs.mkdtempSync(`${temp.getTempFilePath("restore-unreadable")}-`);
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    const staged = path.join(root, "staged");
+    const target = path.join(root, "target");
+    fs.writeFileSync(staged, "download");
+    fs.writeFileSync(target, "original");
+    fs.chmodSync(target, mode);
+    const open = fs.promises.open;
+    t.mock.method(fs.promises, "open", async (...args) => {
+      if (args[1] === "r" && (args[0] === target || String(args[0]).endsWith(".backup"))) {
+        throw Object.assign(new Error("read access denied"), { code: "EACCES" });
+      }
+      return open(...args);
+    });
+    let cancelled = false;
+    const rename = fs.promises.rename;
+    t.mock.method(fs.promises, "rename", async (...args) => {
+      const result = await rename(...args);
+      if (args[0] === target) cancelled = true;
+      return result;
+    });
+    t.mock.method(fs.promises, "link", async () => { throw Object.assign(new Error("unsupported"), { code: "ENOTSUP" }); });
+    await assert.rejects(bridge._promoteLocalTransferForTests(staged, target, {
+      existingMode: mode,
+      assertNotCancelled() { if (cancelled) throw new Error("Transfer cancelled"); },
+    }));
+    assert.equal(fs.existsSync(target), true, "unrestorable original must not be moved away");
+    assert.equal(fs.statSync(target).mode & 0o777, mode);
+    fs.chmodSync(target, 0o600);
+    assert.equal(fs.readFileSync(target, "utf8"), "original");
+  });
+}
+
+test("copy recovery retains original read access after its permissions become restrictive", async (t) => {
+  const root = fs.mkdtempSync(`${temp.getTempFilePath("restore-held-handle")}-`);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const staged = path.join(root, "staged");
+  const target = path.join(root, "target");
+  fs.writeFileSync(staged, "download");
+  fs.writeFileSync(target, "original");
+  let cancelled = false;
+  const rename = fs.promises.rename;
+  t.mock.method(fs.promises, "rename", async (...args) => {
+    const result = await rename(...args);
+    if (args[0] === target) {
+      fs.chmodSync(args[1], 0);
+      cancelled = true;
+    }
+    return result;
+  });
+  t.mock.method(fs.promises, "link", async () => { throw Object.assign(new Error("unsupported"), { code: "ENOTSUP" }); });
+  await assert.rejects(bridge._promoteLocalTransferForTests(staged, target, {
+    assertNotCancelled() { if (cancelled) throw new Error("Transfer cancelled"); },
+  }), /Transfer cancelled/);
+  assert.equal(fs.statSync(target).mode & 0o777, 0);
+  fs.chmodSync(target, 0o600);
+  assert.equal(fs.readFileSync(target, "utf8"), "original");
   assert.deepEqual(fs.readdirSync(root), ["target"]);
 });
