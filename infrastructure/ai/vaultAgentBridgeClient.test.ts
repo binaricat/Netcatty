@@ -171,7 +171,12 @@ describe('handleVaultAgentOp vault notes', () => {
     assert.equal(found.note.content.length, 20);
     assert.equal((await service.getNote({ noteId: 'note-1', expectedUpdatedAt: 1 })).ok, false);
     assert.equal((await service.getNote({ noteId: 'missing' })).ok, false);
-    assert.equal((await service.getNote({ noteId: 'x'.repeat(201) })).ok, false);
+    const importedId = 'x'.repeat(201);
+    deps.updateNotes([{ id: importedId, title: 'Imported', content, createdAt: 1, updatedAt: 2 }]);
+    const imported = await service.getNote({ noteId: importedId });
+    assert.equal(imported.ok, true);
+    assert.equal(imported.note.id, importedId);
+    assert.equal(imported.note.content.length, 6000);
   });
 
   it('note.create persists to updateNotes and returns the new note', async () => {
