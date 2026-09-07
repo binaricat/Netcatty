@@ -616,22 +616,20 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
             ? ctx.host.identityFilePaths
             : undefined;
 
-      let sourceReuseAttemptedWithinStart = false;
       const startAttempt = async (attempt: {
         password?: string;
         key?: SSHKey;
         useIdentityFiles?: boolean;
         useSshAgent?: boolean;
       }): Promise<string> => {
-        const sourceSessionId = ctx.reuseConnectionFromSessionIdRef?.current;
-        const sourceReuseAttempted = ctx.reuseConnectionSourceAttemptedRef?.current
-          ?? sourceReuseAttemptedWithinStart;
-        const isFallbackAfterSourceReuse = sourceReuseAttempted && !sourceSessionId;
+        // Reconnect supersedes a Copy/Split intent that was still waiting for credentials.
+        const sourceSessionId = ctx.requireFreshConnectionOnReconnectRef?.current
+          ? undefined
+          : ctx.reuseConnectionFromSessionIdRef?.current;
         if (ctx.reuseConnectionFromSessionIdRef) {
           ctx.reuseConnectionFromSessionIdRef.current = undefined;
         }
         if (sourceSessionId) {
-          sourceReuseAttemptedWithinStart = true;
           if (ctx.reuseConnectionSourceAttemptedRef) {
             ctx.reuseConnectionSourceAttemptedRef.current = true;
           }
@@ -704,27 +702,14 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
           // bridge silently falls back to a fresh connection if the source is
           // gone, so reconnect/retry after the source closed still works.
           sourceSessionId,
-          // Connect-time automation must see the complete login sequence. An
-          // explicit Copy/Split keeps its source-session reuse contract, while
-          // an ordinary open bypasses endpoint/idle transport reuse. Duplicate
-          // Session clones must never borrow the source's live transport
-          // either, so they send an explicit `reuseTransport: false`.
-          // Reconnects (manual retry / auto-reconnect) also dial fresh: a
-          // reused transport multiplexes onto the previous login, so remote
-          // group changes (e.g. `usermod -aG`) would stay invisible (#3293).
-          reuseTransport: !sourceSessionId
-            && (requiresFreshSshConnection
-              || isFallbackAfterSourceReuse
-              || ctx.requireFreshConnection === true
-              || ctx.requireFreshConnectionOnReconnectRef?.current === true)
-            ? false
-            : undefined,
+          // Only an explicit Copy/Split may share an existing login. Ordinary
+          // opens and reconnects must authenticate again to refresh remote groups.
+          reuseTransport: sourceSessionId ? undefined : false,
           skipShellPidDiscovery: ctx.isNetworkDevice === true,
         });
         if (!requiresFreshSshConnection) {
           ctx.onConnectAutomationSnapshotCommitted?.();
         }
-        sourceReuseAttemptedWithinStart = false;
         if (ctx.reuseConnectionSourceAttemptedRef) {
           ctx.reuseConnectionSourceAttemptedRef.current = false;
         }
