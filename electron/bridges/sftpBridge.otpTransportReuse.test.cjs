@@ -20,8 +20,9 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const net = require("node:net");
-const os = require("node:os");
 const path = require("node:path");
+
+const tempDirBridge = require("./tempDirBridge.cjs");
 
 const { Server } = require("ssh2");
 const keygen = require("ssh2/lib/keygen.js");
@@ -362,7 +363,7 @@ test("SFTP-page transfers reuse the OTP-authenticated transport (#3310)", async 
   assert.ok(transferChannel, "shared transport must host the transfer SFTP channel");
 
   // ── 3. Stream upload over the reused session completes. ──
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-otp-"));
+  const tempRoot = fs.mkdtempSync(`${tempDirBridge.getTempFilePath("otp-reuse-upload")}-`);
   t.after(() => {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   });
@@ -409,12 +410,13 @@ test("SFTP-page transfers reuse the OTP-authenticated transport (#3310)", async 
     { ...options, password: "one-time-code-not-valid-anymore" },
   );
   await waitFor(
-    () => {
-      answerOtpPrompts(driftSender);
-      return server.getKeyboardInteractiveRounds() >= 2;
-    },
+    () =>
+      driftSender.sent.some((s) => s.channel === "netcatty:keyboard-interactive") &&
+      server.getKeyboardInteractiveRounds() >= 2,
     { message: "drifted transfer open must surface a fresh OTP prompt" },
   );
+  const driftSurfaced = answerOtpPrompts(driftSender);
+  assert.ok(driftSurfaced, "fresh OTP prompt must actually reach the renderer sender");
   const drifted = await driftOpen;
   assert.equal(
     sftpClients.get(drifted.sftpId)?.__netcattyTransportManaged,
