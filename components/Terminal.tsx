@@ -3082,9 +3082,13 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           // when the anchored content is gone (scrollback trim). Prefer the
           // viewport-row marker (it marks the viewed row itself) over the
           // line-start marker, which only seeds the scan.
-          const markerRow = [reflowMarker, reflowStartMarker]
-            .find((marker) => marker && !marker.isDisposed && marker.line >= 0)
-            ?.line ?? null;
+          const viewedMarkerRow = reflowMarker && !reflowMarker.isDisposed && reflowMarker.line >= 0
+            ? reflowMarker.line
+            : null;
+          const markerRow = viewedMarkerRow
+            ?? (reflowStartMarker && !reflowStartMarker.isDisposed && reflowStartMarker.line >= 0
+              ? reflowStartMarker.line
+              : null);
           reflowMarker?.dispose();
           reflowMarker = null;
           reflowStartMarker?.dispose();
@@ -3092,7 +3096,21 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           const anchoredViewportY = reflowAnchor === null
             ? null
             : resolveTerminalReflowScrollAnchor(term.buffer.active, reflowAnchor, markerRow);
-          const targetY = Math.min(anchoredViewportY ?? savedViewportY, term.buffer.active.baseY);
+          // Content matching can still fail when the viewed line is the
+          // cursor's own logical line: with the pinned `reflowCursorLine:
+          // false` default a narrowing resize skips rewrapping that line and
+          // truncates its rows, so the captured prefix no longer matches even
+          // though the viewport-row marker survived and tracks the exact
+          // viewed row. Restore the marker position there rather than the
+          // stale saved index, which would jump upward by the accumulated
+          // reflow delta of the rewrapped lines above. (The line-start marker
+          // must not stand in for a failed match: its row only seeds the
+          // scan, and the column-grow merge disposes the viewport marker
+          // while the merged line still matches the anchor.)
+          const targetY = Math.min(
+            anchoredViewportY ?? viewedMarkerRow ?? savedViewportY,
+            term.buffer.active.baseY,
+          );
           if (term.buffer.active.viewportY !== targetY) {
             term.scrollToLine(targetY);
           }
