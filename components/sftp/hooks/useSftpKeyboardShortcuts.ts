@@ -21,6 +21,7 @@ import { keepOnlyPaneSelections } from "./selectionScope";
 import type { SftpStateApi } from "../../../application/state/useSftpState";
 import type { UploadEndpointPin } from "../../../application/state/sftp/uploadTargetPin";
 import { filterHiddenFiles, isNavigableDirectory } from "../utils";
+import { resolveSamePanePasteAction } from "../copyToOtherPane";
 import type { SftpFileEntry } from "../../../types";
 import { extractDropEntries, type DropEntry } from "../../../lib/sftpFileUtils";
 import { toast } from "../../ui/toast";
@@ -354,8 +355,21 @@ export const useSftpKeyboardShortcuts = ({
     const isSameConnection = clipboard.sourceSide === focusedSide
       && clipboard.sourceConnectionId === pane.connection!.id;
     if (isSameConnection) {
-      toast.info("Paste within the same pane is not supported. Use copy to other pane instead.", "SFTP");
-      return;
+      const pasteAction = resolveSamePanePasteAction({
+        operation: clipboard.operation,
+        sourcePath: clipboard.sourcePath,
+        targetPath: pane.connection!.currentPath,
+      });
+      if (pasteAction === "block-same-folder") {
+        toast.info("The cut items are already in this folder.", "SFTP");
+        return;
+      }
+      if (pasteAction === "block-into-source") {
+        toast.info("A folder can't be moved into itself. Choose a different folder.", "SFTP");
+        return;
+      }
+      // Same-pane copy (and cut into a different folder) falls through to the
+      // shared transfer path below.
     }
 
     const sourceTabs = clipboard.sourceSide === "left" ? sftp.leftTabs.tabs : sftp.rightTabs.tabs;
