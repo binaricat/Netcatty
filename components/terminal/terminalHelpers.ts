@@ -1162,15 +1162,27 @@ export function resolveTerminalReflowScrollAnchor(
   const trackContinuation = anchor.charOffset > 0
     && typeof anchor.viewedText === "string"
     && anchor.viewedText.length > 0;
+  // When the marker constrains the search to one containing logical line,
+  // evaluate that row directly: a scan outward from a marker deep inside a
+  // long wrapped line would walk one physical row per distance just to reach
+  // the line's start, and a failing primary pass would sweep the whole buffer
+  // before the continuation pass could run.
+  const resolveRow = (row: number): number | null => {
+    const primary = primaryRow(row);
+    if (primary >= 0) return reflowOffsetTargetRow(buffer, row, primary);
+    if (!trackContinuation) return null;
+    const continuation = reflowAnchorContinuationOffset(buffer, row, anchor);
+    if (continuation < 0) return null;
+    return reflowOffsetTargetRow(buffer, row, continuation);
+  };
   const resolveFrom = (from: number, onlyRow?: number): number | null => {
-    const match = (row: number, base: (r: number) => number): number =>
-      onlyRow === undefined || row === onlyRow ? base(row) : -1;
+    if (onlyRow !== undefined) return resolveRow(onlyRow);
     const primary = reflowScanOutward(buffer, anchor, from, (row) =>
-      match(row, primaryRow));
+      primaryRow(row));
     if (primary !== null) return primary;
     if (!trackContinuation) return null;
     return reflowScanOutward(buffer, anchor, from, (row) =>
-      match(row, (r) => reflowAnchorContinuationOffset(buffer, r, anchor)));
+      reflowAnchorContinuationOffset(buffer, row, anchor));
   };
   // A surviving marker is pinned to the viewed row or to the anchored
   // logical line's start, so it lives inside that line. In the continuation
@@ -1225,13 +1237,24 @@ const reflowScanOutward = (
     }
   }
   if (bestRow < 0) return null;
+  return reflowOffsetTargetRow(buffer, bestRow, bestOffset);
+}
 
-  // Rewrap moves the captured characters to a different row offset within the
-  // logical line; walk the (new) row boundaries to the row holding them. Use
-  // the same per-row text as the capture so real trailing spaces on wrapped
-  // rows are counted identically on both sides.
-  let targetRow = bestRow;
-  let remaining = bestOffset;
+/**
+ * Row that ends up at the viewport top when `row` is the anchored logical
+ * line and `offset` characters of it are above the viewport. Rewrap moves the
+ * captured characters to a different row offset within the logical line; walk
+ * the (new) row boundaries to the row holding them. Use the same per-row text
+ * as the capture so real trailing spaces on wrapped rows are counted
+ * identically on both sides.
+ */
+const reflowOffsetTargetRow = (
+  buffer: ReflowAnchorBuffer,
+  row: number,
+  offset: number,
+): number => {
+  let targetRow = row;
+  let remaining = offset;
   while (remaining > 0) {
     if (!buffer.getLine(targetRow) || !buffer.getLine(targetRow + 1)?.isWrapped) break;
     const rowLength = reflowAnchorRowText(buffer, targetRow).length;
@@ -1240,4 +1263,4 @@ const reflowScanOutward = (
     targetRow += 1;
   }
   return Math.min(targetRow, buffer.baseY);
-}
+};
