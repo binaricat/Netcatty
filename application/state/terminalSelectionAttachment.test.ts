@@ -7,7 +7,7 @@ import {
   createTerminalSelectionAttachment,
   decodeTerminalSelectionAttachment,
 } from "./terminalSelectionAttachment.ts";
-import { createVaultNoteAttachment, formatVaultNoteReference } from "./vaultNoteAttachment.ts";
+import { createVaultNoteAttachment, formatVaultNoteReferences } from "./vaultNoteAttachment.ts";
 
 test("createTerminalSelectionAttachment returns null for blank selections", () => {
   assert.equal(createTerminalSelectionAttachment("   \n\t"), null);
@@ -58,6 +58,6 @@ test("buildPromptWithTerminalSelectionAttachments keeps empty Vault note blocks"
   assert.ok(attachment);
   assert.equal(
     buildPromptWithTerminalSelectionAttachments("add deployment steps to this note", [attachment]),
-    `add deployment steps to this note\n\n${formatVaultNoteReference(attachment)}`,
+    `add deployment steps to this note\n\n${formatVaultNoteReferences([attachment])}`,
   );
 });

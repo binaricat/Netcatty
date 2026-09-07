@@ -24,8 +24,9 @@ export function isVaultNoteAttachment(
 }
 
 /** JSON preserves special characters and whitespace in exact note IDs. */
-export function formatVaultNoteReference(
-  attachment: Pick<ChatMessageAttachment | UploadedFile, "vaultNoteId" | "vaultNoteTitle">,
+export function formatVaultNoteReferences(
+  attachments: Array<Pick<ChatMessageAttachment | UploadedFile, "vaultNoteId" | "vaultNoteTitle">>,
 ): string {
-  return `[Vault note reference: ${JSON.stringify({ noteId: attachment.vaultNoteId, title: attachment.vaultNoteTitle })}]\nUse vault_notes_get with this exact noteId to read the latest content before summarizing or editing. If unavailable, report that instead of choosing another note.`;
+  const notes = attachments.map((attachment) => ({ noteId: attachment.vaultNoteId, title: attachment.vaultNoteTitle }));
+  return `[Vault note references: ${JSON.stringify(notes)}]\nUse vault_notes_get with each exact noteId to read the latest content before summarizing or editing. If unavailable, report that instead of choosing another note.`;
 }

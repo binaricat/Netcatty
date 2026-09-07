@@ -1,6 +1,6 @@
 import type { ChatMessageAttachment, UploadedFile } from "../../infrastructure/ai/types";
 import {
-  formatVaultNoteReference,
+  formatVaultNoteReferences,
   isVaultNoteAttachment,
 } from "./vaultNoteAttachment";
 
@@ -109,9 +109,8 @@ export function buildPromptWithTerminalSelectionAttachments(
     })
     .filter((block): block is string => block !== null);
 
-  const noteBlocks = attachments
-    .filter(isVaultNoteAttachment)
-    .map((attachment) => `\n\n${formatVaultNoteReference(attachment)}`);
+  const notes = attachments.filter(isVaultNoteAttachment);
+  const noteBlocks = notes.length ? [`\n\n${formatVaultNoteReferences(notes)}`] : [];
 
   const blocks = [...terminalBlocks, ...noteBlocks];
   if (blocks.length === 0) return prompt;

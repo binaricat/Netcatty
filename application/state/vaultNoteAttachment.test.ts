@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createVaultNoteAttachment, formatVaultNoteReference } from "./vaultNoteAttachment.ts";
+import { createVaultNoteAttachment, formatVaultNoteReferences } from "./vaultNoteAttachment.ts";
 import { buildPromptWithTerminalSelectionAttachments, createTerminalSelectionAttachment, isInlineTextAttachment } from "./terminalSelectionAttachment.ts";
 
 test("mentions carry identity without copying even large note bodies", () => {
@@ -20,8 +20,8 @@ test("mentions carry identity without copying even large note bodies", () => {
 test("same titled notes keep distinct exact IDs including imported special characters", () => {
   for (const id of ["note-a", "note-b", ' quoted"\\id\r\n ']) {
     const attachment = createVaultNoteAttachment({ id, title: "Same title" })!;
-    const reference = formatVaultNoteReference(attachment).split("\n")[0];
-    const metadata = JSON.parse(reference.slice("[Vault note reference: ".length, -1));
+    const reference = formatVaultNoteReferences([attachment]).split("\n")[0];
+    const [metadata] = JSON.parse(reference.slice("[Vault note references: ".length, -1));
     assert.equal(metadata.noteId, id);
     assert.equal(metadata.title, "Same title");
   }

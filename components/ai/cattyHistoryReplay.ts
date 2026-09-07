@@ -1,6 +1,6 @@
 import type { ChatMessage, ChatMessageAttachment, ToolCall, ToolResult } from "../../infrastructure/ai/types";
 import { isTerminalSelectionAttachment } from "../../application/state/terminalSelectionAttachment";
-import { formatVaultNoteReference, isVaultNoteAttachment } from "../../application/state/vaultNoteAttachment";
+import { formatVaultNoteReferences, isVaultNoteAttachment } from "../../application/state/vaultNoteAttachment";
 import { redactSecretsForModel } from "../../infrastructure/ai/harness/modelSecretRedaction";
 
 const MAX_ATTACHMENT_PLACEHOLDER_DETAIL_CHARS = 120;
@@ -53,7 +53,7 @@ export function buildHistoricalUserReplayContent(
 ): string {
   if (!attachments.length) return content;
   // Keep note identities ahead of prose so bounded external history retains them.
-  const noteReferences = attachments.filter(isVaultNoteAttachment).map(formatVaultNoteReference);
+  const notes = attachments.filter(isVaultNoteAttachment);
   const placeholders = attachments.filter((attachment) => !isVaultNoteAttachment(attachment))
     .map((attachment, index) => (
       isTerminalSelectionAttachment(attachment)
@@ -63,7 +63,7 @@ export function buildHistoricalUserReplayContent(
 
   const attachmentBlock = placeholders.map((line) => `\n\n${line}`).join("");
   const body = content.trim() ? `${content}${attachmentBlock}` : placeholders.join("\n\n");
-  return noteReferences.length ? [...noteReferences, body].filter(Boolean).join("\n\n") : body;
+  return notes.length ? [formatVaultNoteReferences(notes), body].filter(Boolean).join("\n\n") : body;
 }
 
 function getToolCommand(toolCall?: ToolCall): string | undefined {

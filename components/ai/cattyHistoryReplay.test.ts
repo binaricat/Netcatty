@@ -242,3 +242,16 @@ test("external recovery retains note identity before truncating a long user requ
   assert.match(replay.content, /truncated/);
   assert.ok(replay.content.length <= 2000);
 });
+
+test("external recovery keeps multiple note IDs and a short user constraint", () => {
+  const attachments = Array.from({length: 10}, (_, index) => ({
+    mediaType: "text/markdown", base64Data: "", vaultNoteId: `note-${index}`, vaultNoteTitle: `Runbook ${index}`,
+  }));
+  const history = buildExternalBridgeContextMessages([{
+    id: "many-notes", role: "user", timestamp: 1, content: "Only compare; do not edit.", attachments,
+  }]);
+  const replay = history.find((message) => message.role === "user")!;
+  for (const attachment of attachments) assert.ok(replay.content.includes(JSON.stringify(attachment.vaultNoteId)));
+  assert.match(replay.content, /Only compare; do not edit/);
+  assert.equal(replay.content.match(/Use vault_notes_get/g)?.length, 1);
+});
