@@ -267,14 +267,16 @@ test("createVaultNoteAttachment rejects ids outside the prompt-header grammar", 
   // An embedded newline splits the single-line `[Vault Note: ...]` header
   // across lines, so `boundPromptForExternalSdk` could never match or
   // restore it.
-  assert.equal(createVaultNoteAttachment({ id: "note\nmulti", title: "T", content: "c" }), null);
+  for (const separator of ["\n", "\r", "\r\n"]) {
+    assert.equal(createVaultNoteAttachment({ id: `note${separator}multi`, title: "T", content: "c" }), null);
+  }
 });
 
 test("createVaultNoteAttachment flattens newlines in note titles", () => {
-  const result = createVaultNoteAttachment({ id: "note-1", title: "Multi\nline\r\ntitle", content: "c" });
+  const result = createVaultNoteAttachment({ id: "note-1", title: "Multi\nline\r\ntitle\rtext", content: "c" });
 
   assert.ok(result);
-  assert.equal(result!.vaultNoteTitle, "Multi line title");
+  assert.equal(result!.vaultNoteTitle, "Multi line title text");
 });
 
 test("attachVaultNoteMention counts the persisted note id toward the aggregate budget", () => {

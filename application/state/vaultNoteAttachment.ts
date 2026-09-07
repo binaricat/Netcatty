@@ -179,7 +179,7 @@ function boundNoteTitle(title: string): string {
   // A newline in the title would split the generated `[Vault Note: ...]`
   // header across lines, so `boundPromptForExternalSdk` could neither match
   // nor restore it; flatten it to a space.
-  title = title.replace(/\r?\n/g, " ");
+  title = title.replace(/\r\n|[\r\n]/g, " ");
   if (title.length <= MAX_VAULT_NOTE_TITLE_CHARS) return title;
   let truncated = title.slice(0, MAX_VAULT_NOTE_TITLE_CHARS);
   if (/[\uD800-\uDBFF]$/.test(truncated)) truncated = truncated.slice(0, -1);
@@ -211,7 +211,7 @@ export function createVaultNoteAttachment(note: Pick<VaultNote, "id" | "title" |
   // (`[Vault Note: <title> (id: <noteId>)]` is single-line), so it could
   // never be matched or restored by `boundPromptForExternalSdk`; reject it
   // like the other unaddressable id shapes.
-  if (id.includes("\n")) return null;
+  if (/[\r\n]/.test(id)) return null;
   const title = boundNoteTitle(String(note.title || "").trim()) || "Untitled note";
   const content = boundNoteBody(note.content ?? "", id);
   const base64Data = bytesToBase64(new TextEncoder().encode(content));
