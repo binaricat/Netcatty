@@ -658,6 +658,16 @@ export type TerminalReflowScrollAnchor = {
    * Null when there is no following logical line.
    */
   contextSuffix: string | null;
+  /**
+   * Text of the logical line starting at the captured viewport row — the
+   * continuation the reader was actually looking at. Equal to `textPrefix`
+   * when the viewport top row is the logical line's start. When scrollback
+   * trim removes the line's leading physical rows during a column shrink,
+   * `textPrefix` can no longer match while the viewed characters survive
+   * later in the line; the resolver re-locates them through this text.
+   * Optional so hand-built anchors (tests) work without it.
+   */
+  viewedText?: string;
 };
 
 // Enough characters to tell neighboring output apart (timestamps, prompts,
@@ -777,6 +787,7 @@ export function captureTerminalReflowScrollAnchor(
     charOffset += reflowAnchorRowText(buffer, row).length;
   }
   const textPrefix = reflowAnchorJoinTextPrefix(buffer, startRow, REFLOW_ANCHOR_TEXT_PREFIX_CHARS);
+  const viewedText = reflowAnchorJoinTextPrefix(buffer, viewportY, REFLOW_ANCHOR_TEXT_PREFIX_CHARS);
   const nextStart = reflowAnchorNextLogicalLineStart(buffer, startRow);
   const contextSuffix = nextStart === null
     ? null
@@ -790,6 +801,7 @@ export function captureTerminalReflowScrollAnchor(
     charOffset,
     textPrefix,
     contextSuffix,
+    viewedText,
   };
 }
 
@@ -807,6 +819,45 @@ const reflowAnchorCandidateMatches = (
     return nextStart === null && anchor.contextSuffix === null;
   }
   return reflowAnchorJoinTextPrefix(buffer, nextStart, REFLOW_ANCHOR_CONTEXT_CHARS) === anchor.contextSuffix;
+};
+
+/**
+ * In-line offset of the anchor's viewed characters within the logical line at
+ * `row`, or -1 when the line does not contain them.
+ *
+ * Fallback identity for a partially trimmed logical line: a column shrink on
+ * a full scrollback removes the line's leading physical rows, so its captured
+ * `textPrefix` no longer matches anywhere while the characters the viewport
+ * was showing (the viewed continuation) survive later in the line. Rewrap
+ * only ever removes leading content, so the viewed text now starts at an
+ * offset ≤ the captured `charOffset`; the closest such position wins. The
+ * following-line identity check still applies so blank or repeated
+ * continuations do not resolve to a nearby decoy.
+ */
+const reflowAnchorContinuationOffset = (
+  buffer: ReflowAnchorBuffer,
+  row: number,
+  anchor: TerminalReflowScrollAnchor,
+): number => {
+  const viewedText = typeof anchor.viewedText === "string" ? anchor.viewedText : "";
+  if (viewedText === "" || anchor.charOffset <= 0) return -1;
+  const nextStart = reflowAnchorNextLogicalLineStart(buffer, row);
+  if (nextStart === null || anchor.contextSuffix === null) {
+    if (nextStart !== null || anchor.contextSuffix !== null) return -1;
+  } else if (
+    reflowAnchorJoinTextPrefix(buffer, nextStart, REFLOW_ANCHOR_CONTEXT_CHARS)
+      !== anchor.contextSuffix
+  ) {
+    return -1;
+  }
+  // A match starting at or before `charOffset` fits entirely within the first
+  // `charOffset + viewedText.length` characters of the line.
+  const text = reflowAnchorJoinTextPrefix(
+    buffer,
+    row,
+    anchor.charOffset + viewedText.length,
+  );
+  return text.lastIndexOf(viewedText, anchor.charOffset);
 };
 
 /**
@@ -834,33 +885,58 @@ export function resolveTerminalReflowScrollAnchor(
     && hintRow >= 0 && hintRow < buffer.length
     ? hintRow
     : null;
+  const primaryRow = (row: number): number =>
+    reflowAnchorCandidateMatches(buffer, row, anchor) ? anchor.charOffset : -1;
+  // Continuation tracking only applies when the viewport started partway into
+  // the logical line: otherwise trimming the line's start row removes the
+  // viewed characters too, and the plain row fallback is correct.
+  const trackContinuation = anchor.charOffset > 0
+    && typeof anchor.viewedText === "string"
+    && anchor.viewedText.length > 0;
+  const resolveFrom = (from: number): number | null => {
+    const primary = reflowScanOutward(buffer, anchor, from, primaryRow);
+    if (primary !== null) return primary;
+    if (!trackContinuation) return null;
+    return reflowScanOutward(buffer, anchor, from, (row) =>
+      reflowAnchorContinuationOffset(buffer, row, anchor));
+  };
   if (seedRow !== null && seedRow !== anchor.startRow) {
-    const seeded = reflowScanOutward(buffer, anchor, seedRow);
+    const seeded = resolveFrom(seedRow);
     if (seeded !== null) return seeded;
   }
-  return reflowScanOutward(buffer, anchor, anchor.startRow);
+  return resolveFrom(anchor.startRow);
 }
 
 /**
  * Scan outward from `startRow`, checking the closest logical lines first and
  * stopping as soon as no remaining row can beat the best match. A tie at equal
  * distance resolves to the topmost row, matching a plain top-down scan.
+ *
+ * `matchRow` returns the in-line character offset that should end up at the
+ * viewport top when `row` is the anchored logical line, or -1 for no match.
  */
 const reflowScanOutward = (
   buffer: ReflowAnchorBuffer,
   anchor: TerminalReflowScrollAnchor,
   startRow: number,
+  matchRow: (row: number) => number,
 ): number | null => {
   let bestRow = -1;
+  let bestOffset = -1;
   let bestDistance = Number.POSITIVE_INFINITY;
   const maxDistance = Math.max(startRow, buffer.length - 1 - startRow);
   for (let distance = 0; distance <= maxDistance && distance <= bestDistance; distance += 1) {
     for (const row of distance === 0 ? [startRow] : [startRow - distance, startRow + distance]) {
       if (row < 0 || row >= buffer.length) continue;
-      if (buffer.getLine(row)?.isWrapped) continue;
-      if (reflowAnchorCandidateMatches(buffer, row, anchor) && distance < bestDistance) {
+      // A wrapped row continues the logical line above it, so it is matched at
+      // its start — except row 0, which after a scrollback trim may begin
+      // mid-logical-line with no start row left in the buffer.
+      if (row > 0 && buffer.getLine(row)?.isWrapped) continue;
+      const offset = matchRow(row);
+      if (offset >= 0 && distance < bestDistance) {
         bestDistance = distance;
         bestRow = row;
+        bestOffset = offset;
       }
     }
   }
@@ -871,7 +947,7 @@ const reflowScanOutward = (
   // the same per-row text as the capture so real trailing spaces on wrapped
   // rows are counted identically on both sides.
   let targetRow = bestRow;
-  let remaining = anchor.charOffset;
+  let remaining = bestOffset;
   while (remaining > 0) {
     if (!buffer.getLine(targetRow) || !buffer.getLine(targetRow + 1)?.isWrapped) break;
     const rowLength = reflowAnchorRowText(buffer, targetRow).length;

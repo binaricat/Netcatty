@@ -258,6 +258,60 @@ test("resolveTerminalReflowScrollAnchor clamps the restored row to baseY", () =>
   assert.equal(resolvedRow, 0);
 });
 
+test("resolve re-locates the viewed continuation when trim removes the line's first rows", () => {
+  // Viewport partway through a long wrapped line; a column shrink on a full
+  // scrollback trims the wrapped line's leading rows, so the line's start (and
+  // its captured textPrefix) is gone while the viewed characters survive.
+  const longLine = "prefix " + "A".repeat(120) + " MARKER-unique-anchor " + "B".repeat(120);
+  const before = wrapToRows([longLine], 40);
+  const viewportRow = before.findIndex((row) => row.text.includes("MARKER"));
+  const captureBuffer = fakeBuffer(before, { viewportY: viewportRow });
+  const anchor = captureTerminalReflowScrollAnchor(captureBuffer as never);
+  assert.ok(anchor);
+  assert.equal(anchor!.startRow, 0);
+  assert.ok(anchor!.charOffset > 0);
+
+  // Narrower rewrap, then scrollback trim drops the wrapped line's first two
+  // physical rows. xterm keeps the original BufferLine objects, so the first
+  // surviving row stays flagged as a wrapped continuation.
+  const after = wrapToRows([longLine], 30);
+  const trimRows = 2;
+  const trimmed = after.slice(trimRows).map((row, i) =>
+    i === 0 ? { text: row.text, isWrapped: true } : row);
+  // The viewed row (original char 120) lands at surviving row 2.
+  const resolvedRow = resolveTerminalReflowScrollAnchor(
+    fakeBuffer(trimmed, { viewportY: 0 }) as never,
+    anchor!,
+  );
+  assert.equal(resolvedRow, 2);
+  assert.equal(trimmed[2]!.text, before[3]!.text.slice(0, 30));
+});
+
+test("resolve uses a surviving viewed-row marker hint after a mid-line trim", () => {
+  // The marker tracks the viewed row: it survives a trim that disposes a
+  // marker pinned to the logical line's start, and the seeded scan must
+  // resolve from it.
+  const longLine = "prefix " + "A".repeat(120) + " MARKER-unique-anchor " + "B".repeat(120);
+  const before = wrapToRows([longLine], 40);
+  const viewportRow = before.findIndex((row) => row.text.includes("MARKER"));
+  const captureBuffer = fakeBuffer(before, { viewportY: viewportRow });
+  const anchor = captureTerminalReflowScrollAnchor(captureBuffer as never);
+  assert.ok(anchor);
+
+  const after = wrapToRows([longLine], 30);
+  const trimRows = 2;
+  const trimmed = after.slice(trimRows).map((row, i) =>
+    i === 0 ? { text: row.text, isWrapped: true } : row);
+  // xterm tracked marker: viewport row 3, pushed to 4 by the rewrap, minus the
+  // two trimmed rows.
+  const resolvedRow = resolveTerminalReflowScrollAnchor(
+    fakeBuffer(trimmed, { viewportY: 0 }) as never,
+    anchor!,
+    viewportRow + 1 - trimRows,
+  );
+  assert.equal(resolvedRow, 2);
+});
+
 test("captureTerminalReflowScrollAnchor returns null for a blank line with no following identity", () => {
   const rows = [{ text: "a" }, { text: "" }, { text: "" }, { text: "b" }];
   const buffer = fakeBuffer(rows, { viewportY: 1 });

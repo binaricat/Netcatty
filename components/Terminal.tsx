@@ -3021,13 +3021,17 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           ? null
           : captureTerminalReflowScrollAnchor(buffer);
 
-        // Marker pinned to the anchor's row. xterm adjusts marker rows through
-        // the rewrap (and disposes it on scrollback trim), so after the resize
-        // it marks where the anchored line moved without scanning for it.
+        // Marker pinned to the viewed row. xterm adjusts marker rows through
+        // the rewrap (and disposes them on scrollback trim), so after the
+        // resize it marks where the viewed content moved without scanning for
+        // it. Pinning to the viewport row rather than the logical line's start
+        // keeps the marker alive — and the resolver seeded — when a column
+        // shrink on a full scrollback trims the line's first physical rows
+        // (the viewed content survives; its start row does not).
         let reflowMarker: IMarker | null = null;
         if (reflowAnchor) {
           reflowMarker = term.registerMarker(
-            reflowAnchor.startRow - (buffer.baseY + buffer.cursorY),
+            savedViewportY - (buffer.baseY + buffer.cursorY),
           );
         }
 
