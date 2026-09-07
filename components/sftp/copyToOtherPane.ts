@@ -74,25 +74,60 @@ const canonicalizeSftpPath = (path: string): string => {
  * the post-move source delete would remove the freshly moved items. Note that
  * `sourcePath` is the folder containing every clipboard item, so the per-item
  * checks must join it with each selected entry's name.
+ *
+ * Lexical canonicalization alone cannot see through symlinks: when the
+ * destination reaches the copied directory through an alias (e.g.
+ * `/a/link -> /a/docs/sub`), a purely string-level comparison would allow the
+ * paste and the recursive transfer would rediscover its own output. When
+ * `resolvePath` is provided (SFTP realpath for remote connections, the local
+ * realpath bridge for local panes), both sides are resolved through the
+ * filesystem before comparing. If that resolution fails, the guard fails
+ * closed and blocks the paste rather than risking a runaway transfer.
  */
-export const resolveSamePanePasteAction = (params: {
+export const resolveSamePanePasteAction = async (params: {
   operation: "copy" | "cut";
   sourcePath: string;
   targetPath: string;
   files: readonly SamePanePasteFile[];
-}): SamePanePasteAction => {
+  /** Optional filesystem resolver (e.g. realpath). Throws → unresolvable. */
+  resolvePath?: (path: string) => Promise<string>;
+}): Promise<SamePanePasteAction> => {
+  const { resolvePath } = params;
+
   // Canonicalize first so equivalent spellings of the same directory (dot
-  // segments, repeated separators) are still caught by the guards below.
-  const targetPath = canonicalizeSftpPath(params.targetPath);
-  if (
-    params.operation === "cut"
-    && isSameSftpPath(targetPath, canonicalizeSftpPath(params.sourcePath))
-  ) {
+  // segments, repeated separators) are still caught by the guards below, then
+  // resolve through the filesystem when a resolver is available so symlink
+  // aliases compare equal to their real targets. Returns null when resolution
+  // fails, which callers treat as fail-closed.
+  const canonicalizeForComparison = async (path: string): Promise<string | null> => {
+    const lexical = canonicalizeSftpPath(path);
+    if (!resolvePath) return lexical;
+    try {
+      return canonicalizeSftpPath(await resolvePath(path));
+    } catch {
+      return null;
+    }
+  };
+
+  const [targetPath, sourcePath] = await Promise.all([
+    canonicalizeForComparison(params.targetPath),
+    canonicalizeForComparison(params.sourcePath),
+  ]);
+  // A files-only copy has no nesting hazard, so an unresolvable path only
+  // blocks pastes that could actually recurse (directory items, or a cut).
+  const failClosed = !targetPath || !sourcePath;
+  if (failClosed && (params.operation === "cut" || params.files.some((file) => file.isDirectory))) {
+    return "block-into-source";
+  }
+  if (failClosed) return "allow";
+
+  if (params.operation === "cut" && isSameSftpPath(targetPath, sourcePath)) {
     return "block-same-folder";
   }
   for (const file of params.files) {
     if (!file.isDirectory) continue;
-    const itemPath = canonicalizeSftpPath(joinPath(params.sourcePath, file.name));
+    const itemPath = await canonicalizeForComparison(joinPath(params.sourcePath, file.name));
+    if (!itemPath) return "block-into-source";
     if (
       isSameSftpPath(targetPath, itemPath)
       || isSftpDescendantPath(targetPath, itemPath)

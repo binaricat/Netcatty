@@ -363,11 +363,27 @@ export const useSftpKeyboardShortcuts = ({
     const isSameConnection = clipboard.sourceSide === focusedSide
       && clipboard.sourceConnectionId === pane.connection!.id;
     if (isSameConnection) {
-      const pasteAction = resolveSamePanePasteAction({
+      // Resolve paths through the filesystem (realpath) so the guards below
+      // catch destinations that reach the clipboard source through a symlink
+      // alias — a purely lexical comparison would allow those pastes, and the
+      // recursive transfer would nest into its own freshly created output.
+      const bridge = netcattyBridge.get();
+      const connection = pane.connection!;
+      let resolvePath: ((path: string) => Promise<string>) | undefined;
+      if (connection.isLocal) {
+        if (bridge?.realpathLocal) resolvePath = (path) => bridge.realpathLocal!(path);
+      } else {
+        const sftpId = sftp.getSftpIdForConnection(connection.id);
+        if (sftpId && bridge?.realpathSftp) {
+          resolvePath = (path) => bridge.realpathSftp!(sftpId, path);
+        }
+      }
+      const pasteAction = await resolveSamePanePasteAction({
         operation: clipboard.operation,
         sourcePath: clipboard.sourcePath,
         targetPath,
         files: clipboard.files,
+        resolvePath,
       });
       if (pasteAction === "block-same-folder") {
         toast.info("The cut items are already in this folder.", "SFTP");

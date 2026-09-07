@@ -64,108 +64,108 @@ test("copy to other pane reports why it cannot start instead of silently returni
   assert.equal(unavailableCount, 1);
 });
 
-test("same-pane copy of files into their own source folder is allowed", () => {
+test("same-pane copy of files into their own source folder is allowed", async () => {
   const files = [
     { name: "report.txt", isDirectory: false },
     { name: "notes.txt", isDirectory: false },
   ];
   assert.equal(
-    resolveSamePanePasteAction({ operation: "copy", sourcePath: "/home/user", targetPath: "/home/user", files }),
+    await resolveSamePanePasteAction({ operation: "copy", sourcePath: "/home/user", targetPath: "/home/user", files }),
     "allow",
   );
   assert.equal(
-    resolveSamePanePasteAction({ operation: "copy", sourcePath: "/home/user", targetPath: "/home/user/docs", files }),
+    await resolveSamePanePasteAction({ operation: "copy", sourcePath: "/home/user", targetPath: "/home/user/docs", files }),
     "allow",
   );
 });
 
-test("same-pane copy of a directory into itself or a descendant is blocked", () => {
+test("same-pane copy of a directory into itself or a descendant is blocked", async () => {
   const files = [{ name: "docs", isDirectory: true }];
   assert.equal(
-    resolveSamePanePasteAction({ operation: "copy", sourcePath: "/a", targetPath: "/a/docs", files }),
+    await resolveSamePanePasteAction({ operation: "copy", sourcePath: "/a", targetPath: "/a/docs", files }),
     "block-into-source",
   );
   assert.equal(
-    resolveSamePanePasteAction({ operation: "copy", sourcePath: "/a", targetPath: "/a/docs/sub", files }),
+    await resolveSamePanePasteAction({ operation: "copy", sourcePath: "/a", targetPath: "/a/docs/sub", files }),
     "block-into-source",
   );
   assert.equal(
-    resolveSamePanePasteAction({ operation: "copy", sourcePath: "/a", targetPath: "/a/docs/sub/deep", files }),
+    await resolveSamePanePasteAction({ operation: "copy", sourcePath: "/a", targetPath: "/a/docs/sub/deep", files }),
     "block-into-source",
   );
 });
 
-test("same-pane copy of a directory into a sibling is allowed", () => {
+test("same-pane copy of a directory into a sibling is allowed", async () => {
   const files = [{ name: "docs", isDirectory: true }];
   assert.equal(
-    resolveSamePanePasteAction({ operation: "copy", sourcePath: "/a/docs", targetPath: "/a/sub", files }),
+    await resolveSamePanePasteAction({ operation: "copy", sourcePath: "/a/docs", targetPath: "/a/sub", files }),
     "allow",
   );
   assert.equal(
-    resolveSamePanePasteAction({ operation: "copy", sourcePath: "/a/docs", targetPath: "/a/docsx", files }),
+    await resolveSamePanePasteAction({ operation: "copy", sourcePath: "/a/docs", targetPath: "/a/docsx", files }),
     "allow",
   );
 });
 
-test("same-pane cut into the source folder is blocked", () => {
+test("same-pane cut into the source folder is blocked", async () => {
   const files = [{ name: "report.txt", isDirectory: false }];
   assert.equal(
-    resolveSamePanePasteAction({ operation: "cut", sourcePath: "/home/user", targetPath: "/home/user", files }),
+    await resolveSamePanePasteAction({ operation: "cut", sourcePath: "/home/user", targetPath: "/home/user", files }),
     "block-same-folder",
   );
   assert.equal(
-    resolveSamePanePasteAction({ operation: "cut", sourcePath: "/home/user", targetPath: "/home/user/", files }),
+    await resolveSamePanePasteAction({ operation: "cut", sourcePath: "/home/user", targetPath: "/home/user/", files }),
     "block-same-folder",
   );
 });
 
-test("same-pane cut of files into a child of the source folder is allowed", () => {
+test("same-pane cut of files into a child of the source folder is allowed", async () => {
   const files = [
     { name: "report.txt", isDirectory: false },
     { name: "photos", isDirectory: false },
   ];
   assert.equal(
-    resolveSamePanePasteAction({ operation: "cut", sourcePath: "/home/user", targetPath: "/home/user/docs", files }),
+    await resolveSamePanePasteAction({ operation: "cut", sourcePath: "/home/user", targetPath: "/home/user/docs", files }),
     "allow",
   );
   assert.equal(
-    resolveSamePanePasteAction({ operation: "cut", sourcePath: "/home/user", targetPath: "/home/user/docs/sub", files }),
-    "allow",
-  );
-});
-
-test("same-pane cut of a directory into itself or a descendant is blocked", () => {
-  const files = [{ name: "docs", isDirectory: true }];
-  assert.equal(
-    resolveSamePanePasteAction({ operation: "cut", sourcePath: "/home/user", targetPath: "/home/user/docs", files }),
-    "block-into-source",
-  );
-  assert.equal(
-    resolveSamePanePasteAction({ operation: "cut", sourcePath: "/home/user", targetPath: "/home/user/docs/sub", files }),
-    "block-into-source",
-  );
-  assert.equal(
-    resolveSamePanePasteAction({ operation: "cut", sourcePath: "/home/user", targetPath: "/home/user/docs/sub/deep", files }),
-    "block-into-source",
-  );
-});
-
-test("same-pane cut into a sibling folder is allowed", () => {
-  const files = [{ name: "docs", isDirectory: true }];
-  assert.equal(
-    resolveSamePanePasteAction({ operation: "cut", sourcePath: "/home/user", targetPath: "/home/other", files }),
-    "allow",
-  );
-  assert.equal(
-    resolveSamePanePasteAction({ operation: "cut", sourcePath: "/home/user", targetPath: "/home/user2", files }),
+    await resolveSamePanePasteAction({ operation: "cut", sourcePath: "/home/user", targetPath: "/home/user/docs/sub", files }),
     "allow",
   );
 });
 
-test("same-pane paste guard understands Windows paths", () => {
+test("same-pane cut of a directory into itself or a descendant is blocked", async () => {
   const files = [{ name: "docs", isDirectory: true }];
   assert.equal(
-    resolveSamePanePasteAction({
+    await resolveSamePanePasteAction({ operation: "cut", sourcePath: "/home/user", targetPath: "/home/user/docs", files }),
+    "block-into-source",
+  );
+  assert.equal(
+    await resolveSamePanePasteAction({ operation: "cut", sourcePath: "/home/user", targetPath: "/home/user/docs/sub", files }),
+    "block-into-source",
+  );
+  assert.equal(
+    await resolveSamePanePasteAction({ operation: "cut", sourcePath: "/home/user", targetPath: "/home/user/docs/sub/deep", files }),
+    "block-into-source",
+  );
+});
+
+test("same-pane cut into a sibling folder is allowed", async () => {
+  const files = [{ name: "docs", isDirectory: true }];
+  assert.equal(
+    await resolveSamePanePasteAction({ operation: "cut", sourcePath: "/home/user", targetPath: "/home/other", files }),
+    "allow",
+  );
+  assert.equal(
+    await resolveSamePanePasteAction({ operation: "cut", sourcePath: "/home/user", targetPath: "/home/user2", files }),
+    "allow",
+  );
+});
+
+test("same-pane paste guard understands Windows paths", async () => {
+  const files = [{ name: "docs", isDirectory: true }];
+  assert.equal(
+    await resolveSamePanePasteAction({
       operation: "cut",
       sourcePath: "C:\\Users\\me",
       targetPath: "C:/Users/me",
@@ -174,7 +174,7 @@ test("same-pane paste guard understands Windows paths", () => {
     "block-same-folder",
   );
   assert.equal(
-    resolveSamePanePasteAction({
+    await resolveSamePanePasteAction({
       operation: "cut",
       sourcePath: "C:\\Users\\me",
       targetPath: "C:\\Users\\me\\docs",
@@ -183,7 +183,7 @@ test("same-pane paste guard understands Windows paths", () => {
     "block-into-source",
   );
   assert.equal(
-    resolveSamePanePasteAction({
+    await resolveSamePanePasteAction({
       operation: "copy",
       sourcePath: "C:\\Users\\me",
       targetPath: "C:\\Users\\me\\docs",
@@ -192,7 +192,7 @@ test("same-pane paste guard understands Windows paths", () => {
     "allow",
   );
   assert.equal(
-    resolveSamePanePasteAction({
+    await resolveSamePanePasteAction({
       operation: "cut",
       sourcePath: "C:\\Users\\me",
       targetPath: "C:\\Users\\other",
@@ -202,22 +202,22 @@ test("same-pane paste guard understands Windows paths", () => {
   );
 });
 
-test("same-pane guards canonicalize equivalent path spellings", () => {
+test("same-pane guards canonicalize equivalent path spellings", async () => {
   const files = [{ name: "docs", isDirectory: true }];
   assert.equal(
-    resolveSamePanePasteAction({ operation: "cut", sourcePath: "/home/user", targetPath: "/home/user/.", files }),
+    await resolveSamePanePasteAction({ operation: "cut", sourcePath: "/home/user", targetPath: "/home/user/.", files }),
     "block-same-folder",
   );
   assert.equal(
-    resolveSamePanePasteAction({ operation: "cut", sourcePath: "/home/user", targetPath: "/home//user", files }),
+    await resolveSamePanePasteAction({ operation: "cut", sourcePath: "/home/user", targetPath: "/home//user", files }),
     "block-same-folder",
   );
   assert.equal(
-    resolveSamePanePasteAction({ operation: "cut", sourcePath: "/home/user", targetPath: "/home/user/../user", files }),
+    await resolveSamePanePasteAction({ operation: "cut", sourcePath: "/home/user", targetPath: "/home/user/../user", files }),
     "block-same-folder",
   );
   assert.equal(
-    resolveSamePanePasteAction({
+    await resolveSamePanePasteAction({
       operation: "cut",
       sourcePath: "/home/user",
       targetPath: "/home/./user/docs",
@@ -226,19 +226,19 @@ test("same-pane guards canonicalize equivalent path spellings", () => {
     "block-into-source",
   );
   assert.equal(
-    resolveSamePanePasteAction({ operation: "cut", sourcePath: "/home/user", targetPath: "/home/userx", files }),
+    await resolveSamePanePasteAction({ operation: "cut", sourcePath: "/home/user", targetPath: "/home/userx", files }),
     "allow",
   );
 });
 
-test("same-pane guards collapse a leading double slash for POSIX comparisons", () => {
+test("same-pane guards collapse a leading double slash for POSIX comparisons", async () => {
   const files = [{ name: "docs", isDirectory: true }];
   assert.equal(
-    resolveSamePanePasteAction({ operation: "cut", sourcePath: "/home/user", targetPath: "//home/user", files }),
+    await resolveSamePanePasteAction({ operation: "cut", sourcePath: "/home/user", targetPath: "//home/user", files }),
     "block-same-folder",
   );
   assert.equal(
-    resolveSamePanePasteAction({
+    await resolveSamePanePasteAction({
       operation: "cut",
       sourcePath: "/home/user",
       targetPath: "//home/user/docs",
@@ -247,19 +247,19 @@ test("same-pane guards collapse a leading double slash for POSIX comparisons", (
     "block-into-source",
   );
   assert.equal(
-    resolveSamePanePasteAction({ operation: "cut", sourcePath: "//home/user", targetPath: "/home/user", files }),
+    await resolveSamePanePasteAction({ operation: "cut", sourcePath: "//home/user", targetPath: "/home/user", files }),
     "block-same-folder",
   );
   assert.equal(
-    resolveSamePanePasteAction({ operation: "cut", sourcePath: "/home/user", targetPath: "/home/other", files }),
+    await resolveSamePanePasteAction({ operation: "cut", sourcePath: "/home/user", targetPath: "/home/other", files }),
     "allow",
   );
 });
 
-test("same-pane guards canonicalize equivalent Windows path spellings", () => {
+test("same-pane guards canonicalize equivalent Windows path spellings", async () => {
   const files = [{ name: "docs", isDirectory: true }];
   assert.equal(
-    resolveSamePanePasteAction({
+    await resolveSamePanePasteAction({
       operation: "cut",
       sourcePath: "C:\\Users\\me",
       targetPath: "C:\\Users\\me\\.",
@@ -268,7 +268,7 @@ test("same-pane guards canonicalize equivalent Windows path spellings", () => {
     "block-same-folder",
   );
   assert.equal(
-    resolveSamePanePasteAction({
+    await resolveSamePanePasteAction({
       operation: "cut",
       sourcePath: "C:\\Users\\me",
       targetPath: "C:\\Users\\\\me",
@@ -277,12 +277,96 @@ test("same-pane guards canonicalize equivalent Windows path spellings", () => {
     "block-same-folder",
   );
   assert.equal(
-    resolveSamePanePasteAction({
+    await resolveSamePanePasteAction({
       operation: "cut",
       sourcePath: "C:\\Users\\me",
       targetPath: "C:\\Users\\me\\docs\\sub\\..\\docs",
       files,
     }),
     "block-into-source",
+  );
+});
+
+test("same-pane guards resolve filesystem aliases before comparing", async () => {
+  const files = [{ name: "docs", isDirectory: true }];
+  // /a/link -> /a/docs/sub: pasting /a/docs from /a/link must be blocked even
+  // though the lexical paths look unrelated.
+  const aliasedResolver = (path: string) => {
+    const aliases: Record<string, string> = {
+      "/a/link": "/a/docs/sub",
+      "/a/docs": "/a/docs",
+      "/a": "/a",
+    };
+    return Promise.resolve(aliases[path] ?? path);
+  };
+  assert.equal(
+    await resolveSamePanePasteAction({
+      operation: "copy",
+      sourcePath: "/a",
+      targetPath: "/a/link",
+      files,
+      resolvePath: aliasedResolver,
+    }),
+    "block-into-source",
+  );
+  assert.equal(
+    await resolveSamePanePasteAction({
+      operation: "cut",
+      sourcePath: "/a",
+      targetPath: "/a/link",
+      files,
+      resolvePath: aliasedResolver,
+    }),
+    "block-into-source",
+  );
+});
+
+test("same-pane guards still allow unrelated real paths when resolving", async () => {
+  const files = [{ name: "docs", isDirectory: true }];
+  const resolver = (path: string) => {
+    const resolved: Record<string, string> = {
+      "/a/docs": "/data/docs",
+      "/a/other": "/data/other",
+      "/a/docs/docs": "/data/docs/docs",
+    };
+    return Promise.resolve(resolved[path] ?? path);
+  };
+  assert.equal(
+    await resolveSamePanePasteAction({
+      operation: "copy",
+      sourcePath: "/a/docs",
+      targetPath: "/a/other",
+      files,
+      resolvePath: resolver,
+    }),
+    "allow",
+  );
+});
+
+test("same-pane guards fail closed when filesystem resolution fails", async () => {
+  const files = [{ name: "docs", isDirectory: true }];
+  assert.equal(
+    await resolveSamePanePasteAction({
+      operation: "copy",
+      sourcePath: "/a/docs",
+      targetPath: "/a/other",
+      files,
+      resolvePath: () => Promise.reject(new Error("realpath unavailable")),
+    }),
+    "block-into-source",
+  );
+});
+
+test("files-only copy still passes when path resolution is unavailable", async () => {
+  const files = [{ name: "report.txt", isDirectory: false }];
+  assert.equal(
+    await resolveSamePanePasteAction({
+      operation: "copy",
+      sourcePath: "/a",
+      targetPath: "/b",
+      files,
+      resolvePath: () => Promise.reject(new Error("realpath unavailable")),
+    }),
+    "allow",
   );
 });

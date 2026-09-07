@@ -352,6 +352,16 @@ async function lstatLocal(event, payload) {
   };
 }
 
+/**
+ * Resolve a local path to its absolute canonical form, following every
+ * symlink component. Same-pane paste guards use this so destinations that
+ * reach the clipboard source through a symlink alias compare equal to the
+ * real source path.
+ */
+async function realpathLocal(event, payload) {
+  return fs.promises.realpath(payload.path);
+}
+
 function throwIfLocalTreeCancelled(isCancelled) {
   if (typeof isCancelled === "function" && isCancelled()) {
     const error = new Error("Local directory traversal cancelled");
@@ -668,6 +678,7 @@ function registerHandlers(ipcMain) {
   ipcMain.handle("netcatty:local:mkdir", mkdirLocal);
   ipcMain.handle("netcatty:local:stat", statLocal);
   ipcMain.handle("netcatty:local:lstat", lstatLocal);
+  ipcMain.handle("netcatty:local:realpath", realpathLocal);
   ipcMain.handle("netcatty:local:tree", listLocalTree);
   ipcMain.handle("netcatty:local:homedir", getHomeDir);
   ipcMain.handle("netcatty:local:drives", listDrives);
@@ -687,6 +698,7 @@ module.exports = {
   mkdirLocal,
   statLocal,
   lstatLocal,
+  realpathLocal,
   collectLocalTreeEntries,
   createLocalTreeTraversalBudget,
   MAX_LOCAL_TREE_DIRECTORIES,
