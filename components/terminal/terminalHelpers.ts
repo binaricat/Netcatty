@@ -718,6 +718,14 @@ const reflowAnchorRowText = (
   // this stays a fresh untrimmed translation even when another feature cached
   // the row.
   const text = line.translateToString(false, 0, lineLength);
+  // A trailing null cell is structural wide-character wrap padding only when
+  // the glyph that did not fit actually starts the following wrapped row. A
+  // null ahead of a normal-width continuation is an erased or skipped cell
+  // that renders as a real blank: stripping it would make an anchor captured
+  // from "abc " + "Z" read as "abcZ" while a wider rewrap yields "abc Z", so
+  // the resolver could no longer re-locate the content.
+  const nextFirstCell = buffer.getLine(row + 1)?.getCell?.(0);
+  if (!nextFirstCell || nextFirstCell.getWidth?.() !== 2) return text;
   let paddingCells = 0;
   while (paddingCells < lineLength) {
     const cell = line.getCell(lineLength - 1 - paddingCells);

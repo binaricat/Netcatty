@@ -46,7 +46,7 @@ const manualBuffer = (
  * padding xterm leaves when a wide character wraps to the next row).
  * `translateToString(false)` renders null cells as spaces.
  */
-const xtermRow = (text: string, isWrapped?: boolean, nullPad = 0) => {
+const xtermRow = (text: string, isWrapped?: boolean, nullPad = 0, firstCellWidth = 1) => {
   const length = text.length + nullPad;
   return {
     isWrapped,
@@ -55,7 +55,13 @@ const xtermRow = (text: string, isWrapped?: boolean, nullPad = 0) => {
       trimRight ? text : text + " ".repeat(length - text.length),
     getCell: (x: number) =>
       x < length
-        ? { getCode: () => (x < text.length ? 32 : 0) }
+        ? {
+            getCode: () => (x < text.length ? 32 : 0),
+            // Real xterm cells always report a width: wide-character wrap
+            // padding and ordinary blank cells have width 1; `firstCellWidth`
+            // models a row whose first column holds a double-width glyph.
+            getWidth: () => (x === 0 ? firstCellWidth : 1),
+          }
         : undefined,
   };
 };
@@ -152,17 +158,42 @@ test("capture/resolve exclude wide-character wrap padding from wrapped rows", ()
   const before = manualBuffer([
     xtermRow("head"),
     xtermRow("abc", false, 1),
-    xtermRow("中Z", true),
+    xtermRow("中Z", true, 0, 2),
   ], 2);
   const anchor = captureTerminalReflowScrollAnchor(before as never);
   assert.ok(anchor);
   assert.equal(anchor!.textPrefix, "abc中Z");
   assert.equal(anchor!.charOffset, 3);
 
+  // The rewrapped row holds "abc中" with no trailing null: the glyph ends
+  // exactly at the new column count, and a null ahead of the normal-width
+  // "Z" continuation would be a real blank, not padding.
   const after = manualBuffer([
     xtermRow("head"),
-    xtermRow("abc中", false, 1),
+    xtermRow("abc中", false),
     xtermRow("Z", true),
+  ], 0);
+  const resolvedRow = resolveTerminalReflowScrollAnchor(after as never, anchor!);
+  assert.equal(resolvedRow, 1);
+});
+
+test("capture/resolve keep a null cell ahead of a normal-width continuation", () => {
+  // "abc " plus a null cell (erased or skipped — not wide-character padding,
+  // since the continuation "Z" is normal-width) renders as "abc Z". Stripping
+  // the null would read the anchor as "abcZ" while a wider rewrap joins the
+  // same content as "abc Z", so the resolver could not re-locate it.
+  const before = manualBuffer([
+    xtermRow("head"),
+    xtermRow("abc", false, 1),
+    xtermRow("Z", true),
+  ], 2);
+  const anchor = captureTerminalReflowScrollAnchor(before as never);
+  assert.ok(anchor);
+  assert.equal(anchor!.textPrefix, "abc Z");
+
+  const after = manualBuffer([
+    xtermRow("head"),
+    xtermRow("abc Z"),
   ], 0);
   const resolvedRow = resolveTerminalReflowScrollAnchor(after as never, anchor!);
   assert.equal(resolvedRow, 1);

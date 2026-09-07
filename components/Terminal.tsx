@@ -3021,18 +3021,28 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           ? null
           : captureTerminalReflowScrollAnchor(buffer);
 
-        // Marker pinned to the viewed row. xterm adjusts marker rows through
-        // the rewrap (and disposes them on scrollback trim), so after the
-        // resize it marks where the viewed content moved without scanning for
-        // it. Pinning to the viewport row rather than the logical line's start
-        // keeps the marker alive — and the resolver seeded — when a column
+        // Markers pinned to the viewed row and to the viewed logical line's
+        // start. xterm adjusts marker rows through the rewrap (and disposes
+        // them when their row is deleted or trimmed), so after the resize a
+        // surviving marker marks where the viewed content moved without
+        // scanning for it. Each rewrap direction deletes a different row:
+        // a column grow merges a wrapped continuation into its predecessor
+        // (disposing a marker on the viewed continuation row), while a column
         // shrink on a full scrollback trims the line's first physical rows
-        // (the viewed content survives; its start row does not).
+        // (disposing a marker on the start row; the viewed content survives).
+        // Pinning one marker to each of those rows keeps the resolver seeded
+        // in both directions.
         let reflowMarker: IMarker | null = null;
+        let reflowStartMarker: IMarker | null = null;
         if (reflowAnchor) {
           reflowMarker = term.registerMarker(
             savedViewportY - (buffer.baseY + buffer.cursorY),
           );
+          if (reflowAnchor.startRow !== savedViewportY) {
+            reflowStartMarker = term.registerMarker(
+              reflowAnchor.startRow - (buffer.baseY + buffer.cursorY),
+            );
+          }
         }
 
         lastFittedSizeRef.current = { width, height };
@@ -3061,12 +3071,16 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           term.scrollToBottom();
         } else {
           // Re-locate the anchored content; fall back to the saved row index
-          // when the anchored content is gone (scrollback trim).
-          const markerRow = reflowMarker && !reflowMarker.isDisposed && reflowMarker.line >= 0
-            ? reflowMarker.line
-            : null;
+          // when the anchored content is gone (scrollback trim). Prefer the
+          // viewport-row marker (it marks the viewed row itself) over the
+          // line-start marker, which only seeds the scan.
+          const markerRow = [reflowMarker, reflowStartMarker]
+            .find((marker) => marker && !marker.isDisposed && marker.line >= 0)
+            ?.line ?? null;
           reflowMarker?.dispose();
           reflowMarker = null;
+          reflowStartMarker?.dispose();
+          reflowStartMarker = null;
           const anchoredViewportY = reflowAnchor === null
             ? null
             : resolveTerminalReflowScrollAnchor(term.buffer.active, reflowAnchor, markerRow);
