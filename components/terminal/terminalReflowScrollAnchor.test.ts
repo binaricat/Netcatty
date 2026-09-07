@@ -199,6 +199,31 @@ test("capture/resolve keep a null cell ahead of a normal-width continuation", ()
   assert.equal(resolvedRow, 1);
 });
 
+test("capture/resolve strip only the structural wide-wrap padding cell", () => {
+  // A tab or cursor-forward move can leave additional null cells before a wide
+  // glyph is written at the final column. Only the last null is xterm's
+  // structural wrap padding — the earlier nulls are real blanks that xterm
+  // preserves during reflow — so the anchor must read "abc 中Z", not "abc中Z".
+  const before = manualBuffer([
+    xtermRow("head"),
+    xtermRow("abc", false, 2),
+    xtermRow("中Z", true, 0, 2),
+  ], 2);
+  const anchor = captureTerminalReflowScrollAnchor(before as never);
+  assert.ok(anchor);
+  assert.equal(anchor!.textPrefix, "abc 中Z");
+  assert.equal(anchor!.charOffset, 4);
+
+  // After widening, the same content joins as "abc 中" + "Z".
+  const after = manualBuffer([
+    xtermRow("head"),
+    xtermRow("abc 中"),
+    xtermRow("Z", true),
+  ], 0);
+  const resolvedRow = resolveTerminalReflowScrollAnchor(after as never, anchor!);
+  assert.equal(resolvedRow, 1);
+});
+
 test("capture/resolve keep a wide glyph that exactly ends a wrapped row", () => {
   // "ab中Z" at width 4: the glyph fills the row's final two columns and the
   // trailing cell is its width-0 continuation (codepoint 0) — content, not the

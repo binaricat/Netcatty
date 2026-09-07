@@ -726,20 +726,23 @@ const reflowAnchorRowText = (
   // the resolver could no longer re-locate the content.
   const nextFirstCell = buffer.getLine(row + 1)?.getCell?.(0);
   if (!nextFirstCell || nextFirstCell.getWidth?.() !== 2) return text;
-  let paddingCells = 0;
-  while (paddingCells < lineLength) {
-    const cell = line.getCell(lineLength - 1 - paddingCells);
-    if (!cell || cell.getCode() !== 0) break;
-    // A width-0 cell is the second half of a wide glyph that occupies this
-    // row's final columns (xterm writes it as codepoint 0, width 0). It is
-    // content: `translateToString` skips it in the forward iteration, so it
-    // contributes no character and must not be sliced off — slicing it would
-    // delete the glyph itself (or half of an emoji surrogate pair).
-    if (cell.getWidth?.() === 0) break;
-    paddingCells += 1;
-  }
-  // Each trailing null cell renders as exactly one space, so slicing by the
-  // cell count removes precisely the structural padding.
+  // Exactly one trailing cell can be structural: a double-width glyph wraps
+  // only from the row's final column, so xterm nulls just that last cell. Null
+  // cells further back come from tabs, cursor-forward moves, or erases; xterm
+  // preserves them as real blanks during reflow, so stripping them would make
+  // an anchor captured from "abc  " + "中Z" read as "abc中Z" while a wider
+  // rewrap joins the same content as "abc 中Z", and the resolver would fall
+  // back to the stale row.
+  const lastCell = line.getCell(lineLength - 1);
+  // A width-0 cell is the second half of a wide glyph that occupies this row's
+  // final columns (xterm writes it as codepoint 0, width 0). It is content:
+  // `translateToString` skips it in the forward iteration, so it contributes no
+  // character and must not be sliced off — slicing it would delete the glyph
+  // itself (or half of an emoji surrogate pair).
+  const paddingCells =
+    lastCell && lastCell.getCode() === 0 && lastCell.getWidth?.() !== 0 ? 1 : 0;
+  // The single structural null cell renders as exactly one space, so slicing
+  // one character removes precisely the structural padding.
   return paddingCells > 0 ? text.slice(0, text.length - paddingCells) : text;
 };
 
