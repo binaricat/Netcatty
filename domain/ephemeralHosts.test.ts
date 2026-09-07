@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { applyEphemeralHostsUpdate, isSavedVaultHost, splitHostsUpdateByEphemeral } from "./ephemeralHosts";
+import { applyEphemeralHostDistroUpdate, applyEphemeralHostsUpdate, isSavedVaultHost, splitHostsUpdateByEphemeral } from "./ephemeralHosts";
 import type { Host } from "./models";
 
 const makeHost = (id: string, overrides: Partial<Host> = {}): Host => ({
@@ -59,4 +59,19 @@ test("isSavedVaultHost is false for missing or ephemeral hosts", () => {
   assert.equal(isSavedVaultHost(makeHost("a", { ephemeral: true })), false);
   assert.equal(isSavedVaultHost(null), false);
   assert.equal(isSavedVaultHost(undefined), false);
+});
+
+test("temporary host detection reaches AI without changing other hosts or reviving closed sessions", async () => {
+  const { buildAITerminalSessionInfo } = await import('./buildAITerminalSessionInfo');
+  const other = makeHost('other');
+  for (const [distro, os] of [['ubuntu', 'linux'], ['darwin', 'macos'], ['windows', 'windows']]) {
+    const target = makeHost('quick-connect', { ephemeral: true });
+    const next = applyEphemeralHostDistroUpdate([target, other], target.id, distro);
+    assert.equal(buildAITerminalSessionInfo(undefined, next[0], 'macos').os, os);
+    assert.equal(next[0].ephemeral, true);
+    assert.equal(next[1], other);
+    assert.equal(applyEphemeralHostDistroUpdate(next, target.id, distro), next);
+    const closed = [other];
+    assert.equal(applyEphemeralHostDistroUpdate(closed, target.id, distro), closed);
+  }
 });
