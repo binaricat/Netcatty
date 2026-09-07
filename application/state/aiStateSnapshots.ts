@@ -426,11 +426,11 @@ export function serializeSessionsForStorage(
     };
   });
 
-  // Preserve the newest session's full continuation whenever it can fit by
-  // itself. That session is the one the user is most likely continuing now;
-  // older visible history must not make its next tool turn unreplayable.
+  // Preserve the newest session's continuation whenever it fits after
+  // removing replay-unused attachment bodies. Large note mentions must not
+  // make the next tool turn unreplayable just to retain unused payloads.
   const protectNewestContinuation = serialized.length > 0
-    && serialized[0].json.length + 2 <= budgetBytes;
+    && serialized[0].attachmentStrippedJson.length + 2 <= budgetBytes;
 
   // Determine how many sessions can fit using the smallest representation
   // each session can actually reach while its continuation is preserved:

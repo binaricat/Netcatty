@@ -599,3 +599,34 @@ test('writeSessionsForStorage makes a final attempt with only the newest session
     });
   }
 });
+
+test('serializeSessionsForStorage protects newest continuation when note bodies alone exceed the budget', async () => {
+  const { serializeSessionsForStorage } = await import('./aiStateSnapshots');
+  const ciphertext = 'c'.repeat(120_000);
+  const payload = 'a'.repeat(250_000);
+  const newest = makeSession('newest', 2, [
+    {
+      id: 'note-message', role: 'user', content: 'Use this note', timestamp: 1,
+      attachments: [{
+        id: 'attachment', filename: 'note.md', mediaType: 'text/markdown',
+        vaultNoteId: 'note-1', vaultNoteTitle: 'Note',
+        base64Data: payload,
+      }],
+    },
+    {
+      id: 'assistant-message', role: 'assistant', content: 'Working', timestamp: 2,
+      providerContinuation: {
+        reasoningParts: [{ text: '', providerOptions: { openai: { reasoningEncryptedContent: ciphertext } } }],
+      },
+    },
+  ]);
+  const older = makeSession('older', 1, [{ id: 'old', role: 'user', content: 'x'.repeat(40_000), timestamp: 0 }]);
+  const result = serializeSessionsForStorage([older, newest], 200_000);
+  const restored = JSON.parse(result.json) as AISession[];
+  assert.ok(result.json.length <= 200_000);
+  assert.deepEqual(restored.map(session => session.id), ['newest', 'older']);
+  assert.equal(restored[0].messages[1].providerContinuation?.reasoningParts?.[0].providerOptions?.openai?.reasoningEncryptedContent, ciphertext);
+  assert.equal(restored[0].messages[0].attachments?.[0].vaultNoteId, 'note-1');
+  assert.equal(restored[0].messages[0].attachments?.[0].base64Data, '');
+  assert.equal(newest.messages[0].attachments?.[0].base64Data, payload);
+});
