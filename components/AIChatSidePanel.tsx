@@ -9,6 +9,7 @@ import type {
   AIPanelView,
   AgentModelPreset,
   AISessionScope,
+  UploadedFile,
   DiscoveredAgent,
   ExternalAgentConfig,
 } from '../infrastructure/ai/types';
@@ -600,8 +601,17 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     removeDraftFile(scopeKey, currentAgentId, fileId);
   }, [removeDraftFile, scopeKey, currentAgentId]);
 
+  // External turns keep the tools from launch; changed settings cannot enable note reads mid-turn.
+  const canMentionNotes = currentAgentId === 'catty' || (toolIntegrationMode === 'mcp' && !isStreaming);
+  const validateNoteMentions = useCallback((attachments: UploadedFile[]) => {
+    if (canMentionNotes || !attachments.some(isVaultNoteAttachment)) return true;
+    toast.warning(t('ai.chat.mentionNoteUnavailable'));
+    return false;
+  }, [canMentionNotes, t]);
+
   /** Mention Note: attach a Vault → Notes entry as inline context for the next send. */
   const mentionNote = useCallback((note: VaultNote) => {
+    if (!canMentionNotes) return;
     const upload = createVaultNoteAttachment(note);
     if (!upload) {
       toast.error(t('ai.chat.mentionNoteInvalid', {
@@ -617,7 +627,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         upload,
       ],
     }));
-  }, [updateDraft, currentAgentId, enterScopeDraftMode, scopeKey, t]);
+  }, [canMentionNotes, updateDraft, currentAgentId, enterScopeDraftMode, scopeKey, t]);
 
   useEffect(() => {
     if (isVisible) return undefined;
@@ -1163,6 +1173,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     const draft = currentDraftRef.current;
     const currentPanelView = panelViewRef.current;
     const currentSessionView = activeSessionRef.current;
+    if (!validateNoteMentions(draft?.attachments ?? [])) return;
     const trimmed = draft?.text.trim() ?? '';
     const sendScopeKey = scopeKey;
     const attachments = (draft?.attachments ?? []).map((file) => ({
@@ -1402,6 +1413,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
       }
     }
   }, [
+    validateNoteMentions,
     isStreaming, activeProvider, effectiveActiveProvider, effectiveActiveModelId, selectedCattyThinking, scopeKey, currentAgentId,
     activeModelId, externalAgents,
     createSession, addMessageToSession, updateMessageById, updateLastMessage,
@@ -1498,6 +1510,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     const draft = currentDraftRef.current;
     if (!sessionId || !draft || steeringSessionId || !canSteerCurrentTurn) return;
 
+    if (!validateNoteMentions(draft.attachments)) return;
     const trimmed = draft.text.trim();
     const attachments = draft.attachments.map((file) => ({
       base64Data: file.base64Data,
@@ -1544,7 +1557,8 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     } finally {
       setSteeringSessionId(current => current === sessionId ? null : current);
     }
-  }, [canSteerCurrentTurn, clearScopeDraft, steerExternalAgent, steeringSessionId]);
+  }, [
+    validateNoteMentions, canSteerCurrentTurn, clearScopeDraft, steerExternalAgent, steeringSessionId]);
 
   const stopStreamingForSession = useCallback(async (sessionId: string) => {
     const controller = abortControllersRef.current.get(sessionId);
@@ -1740,7 +1754,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         files={files}
         addFiles={addFiles}
         removeFile={removeFile}
-        onMentionNote={mentionNote}
+        onMentionNote={canMentionNotes ? mentionNote : undefined}
         terminalSessions={terminalSessions}
         selectedUserSkills={selectedUserSkills}
         userSkillOptions={userSkillOptions}

@@ -500,6 +500,7 @@ export const enAiMessages: Messages = {
   'ai.chat.menuMentionNote': 'Mention Note',
   'ai.chat.mentionNoteSearch': 'Search notes…',
   'ai.chat.mentionNoteEmpty': 'No matching notes',
+  'ai.chat.mentionNoteUnavailable': 'This agent cannot read Vault notes in the current connection mode.',
   'ai.chat.mentionNoteInvalid': '"{{title}}" could not be attached: the note has an invalid identifier.',
   'ai.chat.untitledNote': 'Untitled note',
   'ai.chat.menuUserSkills': 'User Skills',

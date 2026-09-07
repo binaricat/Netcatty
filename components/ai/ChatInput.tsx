@@ -1456,8 +1456,10 @@ const ChatInput: React.FC<ChatInputProps> = ({
                     type="button"
                     role="menuitem"
                     aria-label={t('ai.chat.menuMentionNote')}
+                    disabled={!onMentionNote}
+                    title={!onMentionNote ? t('ai.chat.mentionNoteUnavailable') : undefined}
                     onClick={() => openInputPanelMenu('noteMention')}
-                    className="w-full flex items-center gap-2.5 px-3 py-1.5 text-left text-[12px] hover:bg-muted/30 transition-colors cursor-pointer whitespace-nowrap"
+                    className="w-full flex items-center gap-2.5 px-3 py-1.5 text-left text-[12px] hover:bg-muted/30 transition-colors cursor-pointer whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     <BookOpen size={13} className="text-muted-foreground/60" />
                     <span className="flex-1 text-foreground/85">{t('ai.chat.menuMentionNote')}</span>
