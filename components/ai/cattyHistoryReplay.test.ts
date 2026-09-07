@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { buildExternalBridgeContextMessages } from "../../infrastructure/ai/harness/externalBridgeContext.ts";
 
 import type { ChatMessageAttachment, ToolCall, ToolResult } from "../../infrastructure/ai/types.ts";
 import {
@@ -228,4 +229,16 @@ test("buildHistoricalUserReplayContent replaces historical vault note mentions w
   assert.match(result, /"noteId":"note-123"/);
   assert.match(result, /"title":"Runbook"/);
   assert.doesNotMatch(result, /AAAAAA/);
+});
+
+test("external recovery retains note identity before truncating a long user request", () => {
+  const history = buildExternalBridgeContextMessages([{
+    id: "long-note-request", role: "user", timestamp: 1, content: "x".repeat(2500),
+    attachments: [{mediaType: "text/markdown", base64Data: "", vaultNoteId: "note-123", vaultNoteTitle: "Runbook"}],
+  }]);
+  const replay = history.find((message) => message.role === "user")!;
+  assert.match(replay.content, /"noteId":"note-123"/);
+  assert.match(replay.content, /vault_notes_get/);
+  assert.match(replay.content, /truncated/);
+  assert.ok(replay.content.length <= 2000);
 });

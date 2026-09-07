@@ -51,17 +51,19 @@ export function buildHistoricalUserReplayContent(
   content: string,
   attachments: ChatMessageAttachment[] = [],
 ): string {
-  const placeholders = attachments.map((attachment, index) => (
-    isVaultNoteAttachment(attachment)
-      ? formatVaultNoteReference(attachment)
-      : isTerminalSelectionAttachment(attachment)
+  if (!attachments.length) return content;
+  // Keep note identities ahead of prose so bounded external history retains them.
+  const noteReferences = attachments.filter(isVaultNoteAttachment).map(formatVaultNoteReference);
+  const placeholders = attachments.filter((attachment) => !isVaultNoteAttachment(attachment))
+    .map((attachment, index) => (
+      isTerminalSelectionAttachment(attachment)
         ? formatTerminalSelectionPlaceholder(attachment, index)
         : formatAttachmentPlaceholder(attachment, index)
-  ));
+    ));
 
-  if (!placeholders.length) return content;
   const attachmentBlock = placeholders.map((line) => `\n\n${line}`).join("");
-  return content.trim() ? `${content}${attachmentBlock}` : placeholders.join("\n\n");
+  const body = content.trim() ? `${content}${attachmentBlock}` : placeholders.join("\n\n");
+  return noteReferences.length ? [...noteReferences, body].filter(Boolean).join("\n\n") : body;
 }
 
 function getToolCommand(toolCall?: ToolCall): string | undefined {
