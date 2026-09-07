@@ -620,3 +620,127 @@ export function createSynchronizedOutputFitScheduler() {
     },
   };
 }
+
+type ReflowAnchorBufferLine = {
+  isWrapped?: boolean;
+  translateToString(trimRight?: boolean): string;
+};
+
+type ReflowAnchorBuffer = {
+  length: number;
+  baseY: number;
+  viewportY: number;
+  getLine(y: number): ReflowAnchorBufferLine | undefined;
+};
+
+export type TerminalReflowScrollAnchor = {
+  /** Buffer row where the logical line under the viewport top starts. */
+  startRow: number;
+  /** Characters of the logical line above the viewport top row. */
+  charOffset: number;
+  /** Prefix of the logical line's joined text, used to re-locate it after reflow. */
+  textPrefix: string;
+};
+
+// Enough characters to tell neighboring output apart (timestamps, prompts,
+// command echoes) without scanning whole paragraphs of wrapped rows.
+const REFLOW_ANCHOR_TEXT_PREFIX_CHARS = 256;
+
+const reflowAnchorLogicalLineStart = (buffer: ReflowAnchorBuffer, row: number): number => {
+  let start = Math.max(0, Math.min(row, buffer.length - 1));
+  while (start > 0 && buffer.getLine(start)?.isWrapped) start--;
+  return start;
+};
+
+const reflowAnchorJoinTextPrefix = (
+  buffer: ReflowAnchorBuffer,
+  startRow: number,
+  maxChars: number,
+): string => {
+  let text = "";
+  let row = startRow;
+  while (row < buffer.length && text.length < maxChars) {
+    const line = buffer.getLine(row);
+    if (!line) break;
+    if (row > startRow && !line.isWrapped) break;
+    text += line.translateToString(true);
+    row += 1;
+  }
+  return text.slice(0, maxChars);
+};
+
+/**
+ * Capture what the reader is looking at before a fit-induced reflow.
+ *
+ * Restoring a pre-resize row index keeps the reading position only when rows
+ * above the viewport keep their count. A column change rewraps the whole
+ * scrollback, inserting rows above the viewport while shrinking (the reading
+ * content slides down) and removing them while growing — restoring the stale
+ * index then walks the viewport toward the top on every shrink step until it
+ * lands there (#3299). Anchoring on the viewport top's content instead lets
+ * the restore re-locate the same characters after the reflow. Returns null
+ * when there is nothing above the viewport worth anchoring (top row, or the
+ * pinned/alternate-screen case handled by the bottom-anchored restore).
+ */
+export function captureTerminalReflowScrollAnchor(
+  buffer: ReflowAnchorBuffer,
+): TerminalReflowScrollAnchor | null {
+  const viewportY = buffer.viewportY;
+  if (!Number.isFinite(viewportY) || viewportY <= 0 || viewportY > buffer.baseY) return null;
+
+  const startRow = reflowAnchorLogicalLineStart(buffer, viewportY);
+  let charOffset = 0;
+  for (let row = startRow; row < viewportY; row += 1) {
+    charOffset += buffer.getLine(row)?.translateToString(true).length ?? 0;
+  }
+  return {
+    startRow,
+    charOffset,
+    textPrefix: reflowAnchorJoinTextPrefix(buffer, startRow, REFLOW_ANCHOR_TEXT_PREFIX_CHARS),
+  };
+}
+
+/**
+ * Re-locate the anchored reading position after a reflow.
+ *
+ * Returns the buffer row that now holds the captured characters, or null when
+ * the anchored content is gone (e.g. trimmed from a full scrollback) so the
+ * caller can fall back to the plain row restore.
+ */
+export function resolveTerminalReflowScrollAnchor(
+  buffer: ReflowAnchorBuffer,
+  anchor: TerminalReflowScrollAnchor,
+): number | null {
+  let bestRow = -1;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  let row = 0;
+  while (row < buffer.length) {
+    if (buffer.getLine(row)?.isWrapped) {
+      row += 1;
+      continue;
+    }
+    if (reflowAnchorJoinTextPrefix(buffer, row, REFLOW_ANCHOR_TEXT_PREFIX_CHARS) === anchor.textPrefix) {
+      const distance = Math.abs(row - anchor.startRow);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        bestRow = row;
+      }
+    }
+    row += 1;
+  }
+  if (bestRow < 0) return null;
+
+  // Rewrap moves the captured characters to a different row offset within the
+  // logical line; walk the (new) row boundaries to the row holding them.
+  let targetRow = bestRow;
+  let remaining = anchor.charOffset;
+  while (remaining > 0) {
+    const line = buffer.getLine(targetRow);
+    if (!line || !buffer.getLine(targetRow + 1)?.isWrapped) break;
+    const rowLength = line.translateToString(true).length;
+    if (remaining < rowLength) break;
+    remaining -= rowLength;
+    targetRow += 1;
+  }
+  return Math.min(targetRow, buffer.baseY);
+}

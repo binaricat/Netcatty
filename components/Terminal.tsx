@@ -254,7 +254,9 @@ import {
 } from "./terminal/restoredSessionGate";
 import {
   alignTerminalViewportScroll,
+  captureTerminalReflowScrollAnchor,
   createSynchronizedOutputFitScheduler,
+  resolveTerminalReflowScrollAnchor,
   AUTO_RUN_SNIPPET_LINE_DELAY_MS,
   forceSyncRenderAfterResize,
   MAX_CONNECTION_LOG_DATA_CHARS,
@@ -3005,6 +3007,12 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         const buffer = term.buffer.active;
         const wasPinnedToBottom = buffer.viewportY >= buffer.baseY;
         const savedViewportY = buffer.viewportY;
+        // A column change rewraps the scrollback, moving rows above the
+        // reading position, so a saved row index no longer points at the same
+        // content after the resize. Capture the content instead of an index.
+        const reflowAnchor = wasPinnedToBottom
+          ? null
+          : captureTerminalReflowScrollAnchor(buffer);
 
         const dimensions = fitAddon.proposeDimensions();
         if (!dimensions || Number.isNaN(dimensions.cols) || Number.isNaN(dimensions.rows)) return;
@@ -3034,7 +3042,12 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         if (wasPinnedToBottom) {
           term.scrollToBottom();
         } else {
-          const targetY = Math.min(savedViewportY, term.buffer.active.baseY);
+          // Re-locate the anchored content; fall back to the saved row index
+          // when the anchored content is gone (scrollback trim).
+          const anchoredViewportY = reflowAnchor === null
+            ? null
+            : resolveTerminalReflowScrollAnchor(term.buffer.active, reflowAnchor);
+          const targetY = Math.min(anchoredViewportY ?? savedViewportY, term.buffer.active.baseY);
           if (term.buffer.active.viewportY !== targetY) {
             term.scrollToLine(targetY);
           }
