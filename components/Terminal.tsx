@@ -1,3 +1,4 @@
+import { resolveHostOs } from '../domain/host';
 import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { SerializeAddon } from "@xterm/addon-serialize";
@@ -1099,12 +1100,15 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   // hosts (TerminalLayer) and saved-host defaults (HostDetailsPanel) both
   // stamp os: "linux", which mis-routes the autocomplete clear sequence to
   // Ctrl-U on Windows where cmd/PowerShell render it literally (#1112).
-  const autocompleteHostOs: "linux" | "windows" | "macos" = host.protocol === "local"
+  const resolvedAutocompleteOs = host.protocol === "local"
     ? detectLocalOs(navigator.userAgent || navigator.platform)
-    : (host.os || "linux");
+    : resolveHostOs(host);
+  const autocompleteHostOs = resolvedAutocompleteOs === "windows" || resolvedAutocompleteOs === "macos"
+    ? resolvedAutocompleteOs : "linux";
   const autocompleteSettings = resolveTerminalAutocompleteSettings({
     protocol: effectiveTerminalProtocol,
     terminalSettings,
+    systemUnknown: resolvedAutocompleteOs === 'unknown',
     isNetworkDevice: host.deviceType === 'network'
       || classifyDistroId(host.distro) === 'network-device',
   });

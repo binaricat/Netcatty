@@ -733,7 +733,7 @@
       "os": {
         "type": "string",
         "optional": true,
-        "description": "Host operating system: linux, windows, or macos. Drives AI environment reporting and shell-aware behavior."
+        "description": "Operating system override: auto (default), linux, windows, macos, freebsd, or unknown. Use auto to use detected system information; network device mode is separate."
       },
       "identityId": {
         "type": "string",

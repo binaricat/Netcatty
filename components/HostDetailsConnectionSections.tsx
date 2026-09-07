@@ -23,12 +23,6 @@ export const HOST_AUTH_METHOD_CHOICES = [
   ["certificate", "hostDetails.auth.certificate"],
 ] as const;
 
-export const HOST_OS_CHOICES = [
-  ["linux", "hostDetails.os.linux"],
-  ["windows", "hostDetails.os.windows"],
-  ["macos", "hostDetails.os.macos"],
-] as const;
-
 export function shouldForceAuthMethodReselect(
   nextMethod: "auto" | "password" | "key" | "certificate",
   currentMethod: "auto" | "password" | "key" | "certificate",
@@ -131,12 +125,6 @@ export const HostDetailsConnectionSections: React.FC<HostDetailsConnectionSectio
   const selectedAuthMethodLabel = t(
     HOST_AUTH_METHOD_CHOICES.find(([value]) => value === resolvedAuthMethod)?.[1] ?? "hostDetails.auth.auto",
   );
-  const resolvedHostOs = HOST_OS_CHOICES.some(([value]) => value === form.os)
-    ? form.os as Host["os"]
-    : "linux";
-  const selectedHostOsLabel = t(
-    HOST_OS_CHOICES.find(([value]) => value === resolvedHostOs)?.[1] ?? "hostDetails.os.linux",
-  );
   const effectiveEtEnabled = form.etEnabled ?? groupDefaults?.etEnabled;
   const effectiveProtocol = form.protocol ?? groupDefaults?.protocol;
 
@@ -152,31 +140,6 @@ export const HostDetailsConnectionSections: React.FC<HostDetailsConnectionSectio
             onChange={(e) => update("hostname", e.target.value)}
             className="h-10 w-full"
           />
-          <HostDetailsSettingRow
-            label={t("hostDetails.os.title")}
-            hint={t("hostDetails.os.desc")}
-          >
-            <Select
-              value={resolvedHostOs}
-              onValueChange={(value) => update("os", value as Host["os"])}
-            >
-              <SelectTrigger
-                className="h-8 w-32 gap-2"
-                aria-label={t("hostDetails.os.title")}
-              >
-                <span className="min-w-0 flex-1 truncate text-left">
-                  {selectedHostOsLabel}
-                </span>
-              </SelectTrigger>
-              <SelectContent>
-                {HOST_OS_CHOICES.map(([value, labelKey]) => (
-                  <SelectItem key={value} value={value}>
-                    {t(labelKey)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </HostDetailsSettingRow>
         </HostDetailsSection>
 
         <HostDetailsSection

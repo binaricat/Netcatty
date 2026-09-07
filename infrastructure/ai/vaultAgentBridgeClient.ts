@@ -1,3 +1,4 @@
+import { resolveHostOs } from '../../domain/host';
 import type { GroupConfig, Host, Identity, KnownHost, ManagedSource, PortForwardingRule, ProxyProfile, Snippet, SSHKey, TerminalSettings, VaultNote } from '../../domain/models';
 import type { RememberImportedKeyPassphraseResult } from '../../application/defaultKeyPassphrases';
 import {
@@ -127,6 +128,7 @@ export function sanitizeHostForAgent(host: Host): Record<string, unknown> {
     }
     sanitized[key] = value;
   }
+  sanitized.os = resolveHostOs(host);
   return sanitized;
 }
 
@@ -140,7 +142,7 @@ function summarizeHostForList(host: Host) {
     protocol: host.protocol,
     group: host.group,
     tags: host.tags,
-    os: host.os,
+    os: resolveHostOs(host),
     createdAt: host.createdAt,
     connectScriptIds: host.connectScriptIds,
     loginScriptId: host.loginScriptId,
@@ -531,7 +533,7 @@ async function registerOpenedSessionInMcpScope(
     hostId: host.id,
     hostname: host.hostname || '',
     label: host.label || host.hostname || sessionId,
-    os: host.os || '',
+    os: resolveHostOs(host),
     username: host.username || '',
     protocol,
     deviceType: host.deviceType || '',

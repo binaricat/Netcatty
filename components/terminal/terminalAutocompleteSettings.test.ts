@@ -126,3 +126,12 @@ test("falls back to raised maxSuggestions default when unset", () => {
     50,
   );
 });
+
+test('unknown systems do not rewrite the command line while retaining suggestions', () => {
+  for (const terminalSettings of [undefined, { autocompleteEnabled: true }]) {
+    const settings = resolveTerminalAutocompleteSettings({protocol:'ssh', systemUnknown:true, terminalSettings});
+    assert.equal(settings?.enabled, true);
+    assert.equal(settings?.livePreview, false);
+    assert.equal(settings?.allowLineReplacement, false);
+  }
+});

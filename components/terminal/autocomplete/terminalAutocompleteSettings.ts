@@ -18,10 +18,11 @@ export function resolveTerminalAutocompleteSettings(input: {
   terminalSettings?: TerminalAutocompleteSettingFields;
   /** Vendor CLI / network-device session: skip live-preview PTY rewrites (#1193). */
   isNetworkDevice?: boolean;
+  systemUnknown?: boolean;
 }): Partial<AutocompleteSettings> | undefined {
-  const { protocol, terminalSettings, isNetworkDevice } = input;
+  const { protocol, terminalSettings, isNetworkDevice, systemUnknown } = input;
 
-  if (protocol === "serial") {
+  if (protocol === "serial" || systemUnknown) {
     return {
       enabled: terminalSettings?.autocompleteEnabled ?? true,
       showGhostText: terminalSettings?.autocompleteGhostText ?? true,

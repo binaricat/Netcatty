@@ -63,6 +63,10 @@ export const runDistroDetection = async (
     if (ctx.terminalBackend.getSessionRemoteInfo && sessionId) {
       const info = await ctx.terminalBackend.getSessionRemoteInfo(sessionId);
       if (!isStillCurrent()) return;
+      if (!isKnownNetworkDevice && /^(?:SSH-(?:2\.0|1\.99)-)?OpenSSH_for_Windows(?:_|$)/i.test(info?.remoteSshVersion || '')) {
+        ctx.onOsDetected?.(ctx.host.id, 'windows');
+        return;
+      }
       const vendor = detectVendorFromSshVersion(info?.remoteSshVersion);
       if (vendor) {
         ctx.onOsDetected?.(ctx.host.id, vendor);
@@ -89,12 +93,13 @@ export const runDistroDetection = async (
       const res = await ctx.terminalBackend.getSessionDistroInfo(sessionId);
       if (!isStillCurrent()) return;
       if (!res?.success) return;
-      const data = `${res.stdout || ""}\n${res.stderr || ""}`;
+      const data = (res.stdout || "").trim();
       const idMatch = data.match(/^ID="?([\w-]+)"?$/im);
       const rawDistro = idMatch
         ? idMatch[1]
-        : (data.split(/\s+/)[0] || "").toLowerCase();
-      const distro = normalizeDistroId(rawDistro) || rawDistro;
+        : (data.match(/^(Linux|Darwin|FreeBSD)\b/i)?.[1] || "").toLowerCase();
+      // An os-release ID confirms Linux even for distributions without a dedicated icon.
+      const distro = normalizeDistroId(rawDistro) || (idMatch ? 'linux' : '');
       if (distro) ctx.onOsDetected?.(ctx.host.id, distro);
     }
   } catch (err) {

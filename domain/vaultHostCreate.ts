@@ -1,5 +1,6 @@
 import type { GroupConfig, Host, HostProtocol, Identity, ManagedSource, ProxyProfile } from './models';
 import { sanitizeHost } from './host';
+import type { HostOsSelection } from './models/connection';
 import {
   findIntroducedVaultJumpGraphIssue,
   findVaultGroupConfigJumpReference,
@@ -93,9 +94,10 @@ const normalizeProtocol = (raw: unknown): VaultHostDraftProtocol | undefined => 
   return undefined;
 };
 
-const normalizeOs = (raw: unknown): Host['os'] | undefined => {
+const normalizeOs = (raw: unknown): HostOsSelection | undefined => {
   if (typeof raw !== 'string') return undefined;
   const value = raw.trim().toLowerCase();
+  if (value === 'auto' || value === 'freebsd' || value === 'unknown') return value;
   if (value === 'linux') return 'linux';
   if (value === 'windows' || value === 'win') return 'windows';
   if (value === 'macos' || value === 'mac' || value === 'osx' || value === 'darwin') return 'macos';
@@ -229,9 +231,9 @@ export function buildVaultHostFromDraft(
     && draft.os !== null
     && !(typeof draft.os === 'string' && !draft.os.trim());
   if (hasOsInput && parsedOs === undefined) {
-    return { ok: false, error: 'os must be linux, windows, or macos.' };
+    return { ok: false, error: 'os must be auto, linux, windows, macos, freebsd, or unknown.' };
   }
-  const os = parsedOs ?? 'linux';
+  const os = parsedOs === 'windows' || parsedOs === 'macos' ? parsedOs : 'linux';
   const parsedPort = parsePort(draft.port);
   const hasPortInput = draft.port !== undefined
     && draft.port !== null
@@ -308,6 +310,7 @@ export function buildVaultHostFromDraft(
       group: normalizeGroupPath(draft.group),
       tags: tags.tags,
       os,
+      osOverride: parsedOs ?? 'auto',
       protocol,
       createdAt: now,
       ...(keyPath
@@ -438,9 +441,10 @@ export function applyVaultHostUpdate(
   if (os.provided) {
     const nextOs = normalizeOs(os.value);
     if (!nextOs) {
-      return { ok: false, error: 'os must be linux, windows, or macos.' };
+      return { ok: false, error: 'os must be auto, linux, windows, macos, freebsd, or unknown.' };
     }
-    updated.os = nextOs;
+    updated.osOverride = nextOs;
+    updated.os = nextOs === 'windows' || nextOs === 'macos' ? nextOs : 'linux';
   }
 
   if (identityId.provided) {

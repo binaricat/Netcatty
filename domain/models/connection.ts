@@ -151,6 +151,9 @@ export interface SftpBookmark {
 
 export type HostAuthMethod = 'auto' | 'password' | 'key' | 'certificate';
 
+export type HostOperatingSystem = 'linux' | 'windows' | 'macos' | 'freebsd' | 'unknown';
+export type HostOsSelection = 'auto' | HostOperatingSystem;
+
 export interface Host {
   id: string;
   label: string;
@@ -161,7 +164,10 @@ export interface Host {
   identityId?: string;
   group?: string;
   tags: string[];
+  // Legacy compatibility value; use resolveHostOs for runtime decisions.
   os: 'linux' | 'windows' | 'macos';
+  // Absent on old records: preserve Windows/macOS, treat old Linux defaults as auto.
+  osOverride?: HostOsSelection;
   // Device type: 'general' for standard servers, 'network' for switches/routers/firewalls.
   // Network devices use raw command execution (no shell wrapping) for AI agent compatibility.
   deviceType?: 'general' | 'network';
