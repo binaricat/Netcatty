@@ -10,7 +10,6 @@ import {
   resolveUserSkillsContext,
   isToolResultError,
 } from '../../aiChatStreamingSupport';
-import { boundPromptForExternalSdk } from '../largeUserInput';
 import type { AgentActivity, AgentUsage, ChatMessage } from '../../types';
 import type {
   ExternalTurnInput,
@@ -406,9 +405,7 @@ async function runExternalTurn(
         netcattyBridge,
         requestId,
         sessionId,
-        // The persisted user message keeps the full text (steerInput.userText);
-        // only the model-facing prompt is bounded.
-        boundPromptForExternalSdk(steerInput.prompt),
+        steerInput.prompt,
         steerInput.attachedImages.length > 0 ? steerInput.attachedImages : undefined,
         steerInput.userMessageId,
       );
@@ -445,19 +442,13 @@ async function runExternalTurn(
   };
   registerLiveTurn(liveTurn);
 
-  // The persisted chat message keeps the full text (`userText`); the prompt
-  // forwarded to the external SDK is bounded so oversized vault-note or
-  // terminal-selection payloads cannot exceed the external model's context
-  // window (the Catty path bounds via fitLargeUserInputForModel).
-  const modelPrompt = boundPromptForExternalSdk(trimmed);
-
   try {
     await runSdkAgentTurn(
       netcattyBridge,
       requestId,
       sessionId,
       agentConfig,
-      modelPrompt,
+      trimmed,
       callbacks,
       signal,
       undefined,
@@ -475,7 +466,7 @@ async function runExternalTurn(
       },
     );
 
-    const estimatedUsage = resolveEstimatedUsageFallback(modelPrompt, actualUsageReported);
+    const estimatedUsage = resolveEstimatedUsageFallback(trimmed, actualUsageReported);
     if (estimatedUsage) {
       flushTextBeforeNonTextEvent();
       runOrBufferUiOperation(() => updateUsage(estimatedUsage));

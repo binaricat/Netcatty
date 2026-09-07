@@ -1,6 +1,6 @@
 import type { ChatMessageAttachment, UploadedFile } from "../../infrastructure/ai/types";
 import {
-  decodeVaultNoteAttachment,
+  formatVaultNoteReference,
   isVaultNoteAttachment,
 } from "./vaultNoteAttachment";
 
@@ -8,7 +8,7 @@ export const TERMINAL_SELECTION_ATTACHMENT_MEDIA_TYPE = "text/plain";
 
 const MAX_PREVIEW_CHARS = 80;
 
-export function bytesToBase64(bytes: Uint8Array): string {
+function bytesToBase64(bytes: Uint8Array): string {
   let binary = "";
   const chunkSize = 0x8000;
 
@@ -20,7 +20,7 @@ export function bytesToBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-export function base64ToText(base64Data: string): string {
+function base64ToText(base64Data: string): string {
   const binary = atob(base64Data);
   const bytes = new Uint8Array(binary.length);
 
@@ -43,7 +43,7 @@ function buildTimestamp(date: Date): string {
   ].join("-");
 }
 
-export function getPreviewText(text: string): string {
+function getPreviewText(text: string): string {
   const firstLine = text.split(/\r?\n/).find((line) => line.trim().length > 0) ?? "";
   return firstLine.length > MAX_PREVIEW_CHARS
     ? `${firstLine.slice(0, MAX_PREVIEW_CHARS - 1)}...`
@@ -111,17 +111,7 @@ export function buildPromptWithTerminalSelectionAttachments(
 
   const noteBlocks = attachments
     .filter(isVaultNoteAttachment)
-    .map((attachment) => {
-      const text = decodeVaultNoteAttachment(attachment);
-      // Only a decode failure (`null`) drops the block; an empty note body is
-      // valid content and must keep its header (title + note id) so the agent
-      // can still identify the attached note.
-      if (text === null) return null;
-      const title = attachment.vaultNoteTitle || attachment.filename || "note";
-      const noteId = attachment.vaultNoteId ? ` (id: ${attachment.vaultNoteId})` : "";
-      return `\n\n[Vault Note: ${title}${noteId}]\n${text}`;
-    })
-    .filter((block): block is string => block !== null);
+    .map((attachment) => `\n\n${formatVaultNoteReference(attachment)}`);
 
   const blocks = [...terminalBlocks, ...noteBlocks];
   if (blocks.length === 0) return prompt;

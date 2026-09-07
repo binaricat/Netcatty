@@ -26,7 +26,6 @@ import { sanitizeQuickMessages } from '../../infrastructure/ai/quickMessages';
 import type {
   AIDraft,
   AISessionContextCompaction,
-  UploadedFile,
   AISession,
   AIPermissionMode,
   AIToolIntegrationMode,
@@ -55,7 +54,6 @@ import {
 } from './aiDraftState';
 import { convertFilesToUploads } from './useFileUpload';
 import { removeProviderReferences } from './aiProviderCleanup';
-import { appendUploadsWithinAttachmentBudget, isVaultNoteAttachment } from './vaultNoteAttachment';
 import { publishAISessionsSnapshot } from './aiSessionsStore';
 import {
   AI_STATE_CHANGED_DRAFTS_BY_SCOPE,
@@ -180,17 +178,9 @@ export function useAIState() {
   );
   // Per-scope draft/view state is intentionally memory-only so a relaunch
   // does not restore stale composer input or panel intent against new history.
-  const [draftsByScope, setDraftsByScopeReact] = useState<DraftsByScope>(() =>
+  const [draftsByScope, setDraftsByScopeRaw] = useState<DraftsByScope>(() =>
     latestAIDraftsByScopeSnapshot ?? {}
   );
-  // Draft mutations must commit synchronously: callers use their outcome to
-  // report attachment rejection before React flushes a batched render.
-  const setDraftsByScopeRaw = useCallback((update: React.SetStateAction<DraftsByScope>) => {
-    const previous = latestAIDraftsByScopeSnapshot ?? {};
-    const next = typeof update === 'function' ? update(previous) : update;
-    setLatestAIDraftsByScopeSnapshot(next);
-    setDraftsByScopeReact(next);
-  }, []);
   const [panelViewByScope, setPanelViewByScopeRaw] = useState<PanelViewByScope>(() =>
     latestAIPanelViewByScopeSnapshot ?? {}
   );
@@ -628,7 +618,7 @@ export function useAIState() {
       window.removeEventListener('storage', handleStorage);
       window.removeEventListener(AI_STATE_CHANGED_EVENT, handleLocalStateChanged);
     };
-  }, [setDraftsByScopeRaw]);
+  }, []);
 
   // ── Sync initial safety settings to MCP Server on mount ──
   useEffect(() => {
@@ -884,7 +874,7 @@ export function useAIState() {
     if (textOnly) return;
     bumpDraftMutationVersion(scopeKey);
     emitAIStateChanged(AI_STATE_CHANGED_DRAFTS_BY_SCOPE);
-  }, [setDraftsByScopeRaw]);
+  }, []);
 
   const updateDraft = useCallback((
     scopeKey: string,
@@ -919,7 +909,7 @@ export function useAIState() {
     if (textOnly) return;
     bumpDraftMutationVersion(scopeKey);
     emitAIStateChanged(AI_STATE_CHANGED_DRAFTS_BY_SCOPE);
-  }, [setDraftsByScopeRaw]);
+  }, []);
 
   const updateDraftIfPresent = useCallback((
     scopeKey: string,
@@ -954,7 +944,7 @@ export function useAIState() {
     if (textOnly) return;
     bumpDraftMutationVersion(scopeKey);
     emitAIStateChanged(AI_STATE_CHANGED_DRAFTS_BY_SCOPE);
-  }, [setDraftsByScopeRaw]);
+  }, []);
 
   const showDraftView = useCallback((scopeKey: string) => {
     const currentActiveSessionIdMap = latestAIActiveSessionMapSnapshot
@@ -1019,46 +1009,26 @@ export function useAIState() {
       setPanelViewByScopeRaw(nextPanelViewByScope);
       emitAIStateChanged(AI_STATE_CHANGED_PANEL_VIEW_BY_SCOPE);
     }
-  }, [panelViewByScope, setDraftsByScopeRaw]);
+  }, [panelViewByScope]);
 
   const addDraftFiles = useCallback(async (
     scopeKey: string,
     fallbackAgentId: string,
     inputFiles: File[],
-  ): Promise<UploadedFile[]> => {
-    // Resolves with the uploads rejected by the aggregate attachment budget.
+  ) => {
     ensureDraftForScope(scopeKey, fallbackAgentId);
     const initialUploadGeneration = getDraftUploadGeneration(scopeKey);
     const uploads = await convertFilesToUploads(inputFiles);
-    if (uploads.length === 0) return [];
+    if (uploads.length === 0) return;
 
     if (getDraftUploadGeneration(scopeKey) !== initialUploadGeneration) {
-      return [];
+      return;
     }
 
-    // The aggregate budget guards the persisted-session storage cap for
-    // vault-note mentions. Ordinary-only drafts must keep their pre-feature
-    // behavior (no size cap — a large screenshot or document on an otherwise
-    // empty draft is valid), so the cap applies only when the draft or the
-    // incoming uploads include a vault-note mention. Ordinary files still
-    // count toward the budget when deciding whether a note can be added
-    // (see `attachVaultNoteMention`). Returns the uploads rejected by the
-    // budget so callers can surface the rejection.
-    let rejected: UploadedFile[] = [];
-    updateDraftIfPresent(scopeKey, (draft) => {
-      const budgetApplies = draft.attachments.some(isVaultNoteAttachment)
-        || uploads.some(isVaultNoteAttachment);
-      const fitting = budgetApplies
-        ? appendUploadsWithinAttachmentBudget(draft.attachments, uploads)
-        : [...uploads];
-      rejected = uploads.filter((upload) => !fitting.includes(upload));
-      if (fitting.length === 0) return draft;
-      return {
-        ...draft,
-        attachments: [...draft.attachments, ...fitting],
-      };
-    });
-    return rejected;
+    updateDraftIfPresent(scopeKey, (draft) => ({
+      ...draft,
+      attachments: [...draft.attachments, ...uploads],
+    }));
   }, [ensureDraftForScope, updateDraftIfPresent]);
 
   const removeDraftFile = useCallback((scopeKey: string, fallbackAgentId: string, fileId: string) => {
@@ -1067,38 +1037,6 @@ export function useAIState() {
       attachments: draft.attachments.filter((file) => file.id !== fileId),
     }));
   }, [updateDraft]);
-
-  /** Append or refresh an attachment and return the applied budget decision. */
-  const addDraftAttachment = useCallback((
-    scopeKey: string,
-    fallbackAgentId: string,
-    upload: UploadedFile,
-  ): boolean => {
-    let attached = false;
-    updateDraft(scopeKey, fallbackAgentId, (draft) => {
-      const duplicate = isVaultNoteAttachment(upload)
-        ? draft.attachments.find((entry) => entry.vaultNoteId === upload.vaultNoteId)
-        : undefined;
-      const remaining = duplicate
-        ? draft.attachments.filter((entry) => entry.id !== duplicate.id)
-        : draft.attachments;
-      const budgetApplies = isVaultNoteAttachment(upload)
-        || remaining.some(isVaultNoteAttachment);
-      if (budgetApplies && appendUploadsWithinAttachmentBudget(remaining, [upload]).length === 0) {
-        return draft;
-      }
-      attached = true;
-      return {
-        ...draft,
-        attachments: duplicate
-          ? draft.attachments.map((entry) => entry.id === duplicate.id ? upload : entry)
-          : [...draft.attachments, upload],
-      };
-    });
-    return attached;
-  }, [updateDraft]);
-
-  const refreshDraftVaultNoteAttachment = addDraftAttachment;
 
   const cleanupOrphanedSessions = useCallback((activeTargetIds: Set<string>) => {
     cleanupOrphanedAISessions(activeTargetIds);
@@ -1116,7 +1054,7 @@ export function useAIState() {
     );
     setDraftsByScopeRaw(latestAIDraftsByScopeSnapshot ?? {});
     setPanelViewByScopeRaw(latestAIPanelViewByScopeSnapshot ?? {});
-  }, [setDraftsByScopeRaw]);
+  }, []);
 
   const seedWorkspaceActiveSessionFromMembers = useCallback((input: {
     workspaceId: string;
@@ -1335,8 +1273,6 @@ export function useAIState() {
     showSessionView,
     clearDraftForScope,
     addDraftFiles,
-    addDraftAttachment,
-    refreshDraftVaultNoteAttachment,
     removeDraftFile,
     createSession,
     deleteSession,
@@ -1397,8 +1333,6 @@ export function useAIState() {
     showSessionView,
     clearDraftForScope,
     addDraftFiles,
-    addDraftAttachment,
-    refreshDraftVaultNoteAttachment,
     removeDraftFile,
     createSession,
     deleteSession,

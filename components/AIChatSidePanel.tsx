@@ -258,7 +258,6 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   showSessionView,
   clearDraftForScope,
   addDraftFiles,
-  addDraftAttachment,
   removeDraftFile,
   createSession,
   deleteSession,
@@ -594,17 +593,8 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
 
   const addFiles = useCallback(async (inputFiles: File[]) => {
     enterScopeDraftMode(currentAgentId, panelViewRef.current.mode === 'session');
-    const rejected = await addDraftFiles(scopeKey, currentAgentId, inputFiles);
-    if (rejected.length > 0) {
-      // The aggregate attachment budget (shared with vault-note mentions)
-      // rejected the files that would not fit, so surface the rejection to
-      // the user instead of silently dropping them.
-      console.warn(
-        `[AIChatSidePanel] ${rejected.length} file(s) skipped: aggregate attachment budget exceeded`,
-      );
-      toast.warning(t('ai.chat.attachmentBudgetExceeded', { count: rejected.length }));
-    }
-  }, [addDraftFiles, currentAgentId, enterScopeDraftMode, scopeKey, t]);
+    await addDraftFiles(scopeKey, currentAgentId, inputFiles);
+  }, [addDraftFiles, currentAgentId, enterScopeDraftMode, scopeKey]);
 
   const removeFile = useCallback((fileId: string) => {
     removeDraftFile(scopeKey, currentAgentId, fileId);
@@ -620,24 +610,14 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
       return;
     }
     enterScopeDraftMode(currentAgentId, panelViewRef.current.mode === 'session');
-    if (!addDraftAttachment(scopeKey, currentAgentId, upload)) {
-      // The state hook applies both duplicate refresh and budget decisions.
-      console.warn(
-        '[AIChatSidePanel] Vault note mention skipped: aggregate attachment budget exceeded',
-      );
-      toast.warning(
-        t('ai.chat.mentionNoteBudgetExceeded', {
-          title: String(note.title || '').trim() || t('ai.chat.untitledNote'),
-        }),
-      );
-    }
-  }, [
-    addDraftAttachment,
-    currentAgentId,
-    enterScopeDraftMode,
-      scopeKey,
-    t,
-  ]);
+    updateDraft(scopeKey, currentAgentId, (current) => ({
+      ...current,
+      attachments: [
+        ...current.attachments.filter((file) => file.vaultNoteId !== upload.vaultNoteId),
+        upload,
+      ],
+    }));
+  }, [updateDraft, currentAgentId, enterScopeDraftMode, scopeKey, t]);
 
   useEffect(() => {
     if (isVisible) return undefined;
@@ -1795,8 +1775,6 @@ const AI_CHAT_SIDE_PANEL_AI_STATE_KEYS = [
   'showSessionView',
   'clearDraftForScope',
   'addDraftFiles',
-  'addDraftAttachment',
-  'refreshDraftVaultNoteAttachment',
   'removeDraftFile',
   'createSession',
   'deleteSession',

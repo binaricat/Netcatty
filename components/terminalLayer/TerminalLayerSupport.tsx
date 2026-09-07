@@ -8,8 +8,6 @@ import {
 import { useTerminalLayoutSuppressActive } from '../../application/state/terminalLayoutSuppressStore';
 import type { TerminalSessionExitEvent } from '../../application/state/resolveTerminalSessionExitIntent';
 import { createTerminalSelectionAttachment } from '../../application/state/terminalSelectionAttachment';
-import { useI18n } from '../../application/i18n/I18nProvider';
-import { toast } from '../ui/toast';
 import { getTopTabInsertionTarget, isPointInsideRect, WORKSPACE_SESSION_DRAG_TYPE } from '../../application/state/terminalDragData';
 import { useAIState } from '../../application/state/useAIState';
 import { useAISessionsStore } from '../../application/state/aiSessionsStore';
@@ -497,7 +495,6 @@ const AIChatPanelsHostInner: React.FC<AIChatPanelsHostProps> = ({
   onOpenVaultSnippetFromChat,
 }) => {
   const aiConfig = useContext(AIConfigContext);
-  const { t } = useI18n();
 
   if (!aiConfig) {
     throw new Error('AIChatPanelsHost must be rendered inside AIStateProvider');
@@ -511,7 +508,7 @@ const AIChatPanelsHostInner: React.FC<AIChatPanelsHostProps> = ({
   const {
     defaultAgentId,
     showDraftView,
-    addDraftAttachment,
+    updateDraft,
   } = aiConfig;
 
   useEffect(() => {
@@ -535,9 +532,10 @@ const AIChatPanelsHostInner: React.FC<AIChatPanelsHostProps> = ({
     if (!isSessionView) {
       showDraftView(scopeKey);
     }
-    if (!addDraftAttachment(scopeKey, defaultAgentId, attachment)) {
-      toast.warning(t('ai.chat.attachmentBudgetExceeded', { count: 1 }));
-    }
+    updateDraft(scopeKey, defaultAgentId, (draft) => ({
+      ...draft,
+      attachments: [...draft.attachments, attachment],
+    }));
   }, [
     activeSessionIdMap,
     contextsByTabId,
@@ -546,8 +544,7 @@ const AIChatPanelsHostInner: React.FC<AIChatPanelsHostProps> = ({
     panelViewByScope,
     pendingTerminalSelection,
     showDraftView,
-    addDraftAttachment,
-    t,
+    updateDraft,
   ]);
 
   return (
@@ -579,8 +576,6 @@ const AIChatPanelsHostInner: React.FC<AIChatPanelsHostProps> = ({
                     showSessionView={aiConfig.showSessionView}
                     clearDraftForScope={aiConfig.clearDraftForScope}
                     addDraftFiles={aiConfig.addDraftFiles}
-                    addDraftAttachment={aiConfig.addDraftAttachment}
-                    refreshDraftVaultNoteAttachment={aiConfig.refreshDraftVaultNoteAttachment}
                     removeDraftFile={aiConfig.removeDraftFile}
                     createSession={aiConfig.createSession}
                     deleteSession={aiConfig.deleteSession}

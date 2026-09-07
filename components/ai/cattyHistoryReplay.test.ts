@@ -224,8 +224,8 @@ test("buildHistoricalUserReplayContent replaces historical vault note mentions w
   const result = buildHistoricalUserReplayContent("check this note", [attachment]);
 
   assert.match(result, /check this note/);
-  assert.match(result, /Historical vault note omitted from replay/);
-  assert.match(result, /noteId=note-123/);
-  assert.match(result, /title=Runbook/);
+  assert.match(result, /Vault note reference/);
+  assert.match(result, /"noteId":"note-123"/);
+  assert.match(result, /"title":"Runbook"/);
   assert.doesNotMatch(result, /AAAAAA/);
 });

@@ -500,8 +500,6 @@ export const esAiMessages: Messages = {
   'ai.chat.menuMentionNote': 'Mencionar nota',
   'ai.chat.mentionNoteSearch': 'Buscar notas…',
   'ai.chat.mentionNoteEmpty': 'Sin notas coincidentes',
-  'ai.chat.mentionNoteBudgetExceeded': 'No se adjuntó «{{title}}»: las notas mencionadas superarían el límite de tamaño de adjuntos.',
-  'ai.chat.attachmentBudgetExceeded': 'No se adjuntaron {{count}} archivo(s): los adjuntos superarían el límite de tamaño de adjuntos.',
   'ai.chat.mentionNoteInvalid': 'No se pudo adjuntar «{{title}}»: la nota tiene un identificador no válido.',
   'ai.chat.untitledNote': 'Nota sin título',
   'ai.chat.menuUserSkills': 'Habilidades de usuario',

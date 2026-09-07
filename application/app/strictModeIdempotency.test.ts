@@ -257,7 +257,7 @@ test('terminal selection Ask-AI payload is consumed once under StrictMode', () =
     /if \(consumedTerminalSelectionRequestIds\.has\(pendingTerminalSelection\.requestId\)\)/,
   );
   const latchAt = hostSource.indexOf('markTerminalSelectionRequestConsumed(pendingTerminalSelection.requestId)');
-  const draftAt = hostSource.indexOf('addDraftAttachment(scopeKey, defaultAgentId');
+  const draftAt = hostSource.indexOf('updateDraft(scopeKey, defaultAgentId');
   assert.ok(latchAt > 0 && draftAt > latchAt, 'must latch before mutating the draft');
 });
 

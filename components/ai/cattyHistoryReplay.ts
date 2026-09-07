@@ -1,6 +1,6 @@
 import type { ChatMessage, ChatMessageAttachment, ToolCall, ToolResult } from "../../infrastructure/ai/types";
 import { isTerminalSelectionAttachment } from "../../application/state/terminalSelectionAttachment";
-import { isVaultNoteAttachment } from "../../application/state/vaultNoteAttachment";
+import { formatVaultNoteReference, isVaultNoteAttachment } from "../../application/state/vaultNoteAttachment";
 import { redactSecretsForModel } from "../../infrastructure/ai/harness/modelSecretRedaction";
 
 const MAX_ATTACHMENT_PLACEHOLDER_DETAIL_CHARS = 120;
@@ -47,28 +47,13 @@ function formatAttachmentPlaceholder(
   return `[Historical ${label} attachment omitted from replay: ${details || `attachment-${index + 1}`}]`;
 }
 
-function formatVaultNotePlaceholder(
-  attachment: ChatMessageAttachment,
-  index: number,
-): string {
-  const details = [
-    attachment.vaultNoteTitle ? `title=${attachment.vaultNoteTitle}` : undefined,
-    attachment.vaultNoteId ? `noteId=${attachment.vaultNoteId}` : undefined,
-    attachment.lineCount != null ? `lines=${attachment.lineCount}` : undefined,
-    attachment.previewText ? `preview=${truncateInline(attachment.previewText, MAX_ATTACHMENT_PLACEHOLDER_DETAIL_CHARS)}` : undefined,
-    describeAttachmentSize(attachment),
-  ].filter(Boolean).join(", ");
-
-  return `[Historical vault note omitted from replay: ${details || `note-${index + 1}`}]`;
-}
-
 export function buildHistoricalUserReplayContent(
   content: string,
   attachments: ChatMessageAttachment[] = [],
 ): string {
   const placeholders = attachments.map((attachment, index) => (
     isVaultNoteAttachment(attachment)
-      ? formatVaultNotePlaceholder(attachment, index)
+      ? formatVaultNoteReference(attachment)
       : isTerminalSelectionAttachment(attachment)
         ? formatTerminalSelectionPlaceholder(attachment, index)
         : formatAttachmentPlaceholder(attachment, index)
