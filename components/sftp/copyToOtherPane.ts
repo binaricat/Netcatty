@@ -1,8 +1,10 @@
 export type SftpPaneSide = "left" | "right";
 
 import {
+  getWindowsUncRoot,
   isSameSftpPath,
   isSftpDescendantPath,
+  isWindowsPath,
   joinPath,
 } from "../../application/state/sftp/utils";
 
@@ -12,6 +14,53 @@ export interface SamePanePasteFile {
   name: string;
   isDirectory: boolean;
 }
+
+/**
+ * Lexically resolve "." / ".." segments and repeated separators so equivalent
+ * spellings of the same directory (e.g. /home/user/., /home//user) compare
+ * equal in the same-pane paste guards. Purely string-level: it never touches
+ * the server, and it is only used to make the guards stricter, never to build
+ * transfer paths.
+ */
+const canonicalizeSftpPath = (path: string): string => {
+  const isWindows = isWindowsPath(path);
+  const separator = isWindows ? "\\" : "/";
+  const unified = isWindows ? path.replace(/\//g, "\\") : path;
+
+  let root = "";
+  let rest = unified;
+  if (isWindows) {
+    const uncRoot = getWindowsUncRoot(unified, { acceptForwardSlashUnc: true });
+    const driveRoot = unified.match(/^[A-Za-z]:\\/)?.[0];
+    if (uncRoot) {
+      root = uncRoot;
+      rest = unified.slice(uncRoot.length);
+    } else if (driveRoot) {
+      root = driveRoot;
+      rest = unified.slice(driveRoot.length);
+    }
+  } else if (unified.startsWith("//")) {
+    // Match getParentPath: pure //host/... stays POSIX with a double-slash prefix.
+    root = "//";
+    rest = unified.slice(2);
+  } else if (unified.startsWith("/")) {
+    root = "/";
+    rest = unified.slice(1);
+  }
+
+  const parts: string[] = [];
+  for (const segment of rest.split(separator)) {
+    if (!segment || segment === ".") continue;
+    if (segment === "..") {
+      parts.pop();
+      continue;
+    }
+    parts.push(segment);
+  }
+
+  if (root) return root + parts.join(separator);
+  return parts.join(separator) || ".";
+};
 
 /**
  * Decide whether an internal SFTP paste that targets the same connection as the
@@ -31,18 +80,21 @@ export const resolveSamePanePasteAction = (params: {
   targetPath: string;
   files: readonly SamePanePasteFile[];
 }): SamePanePasteAction => {
+  // Canonicalize first so equivalent spellings of the same directory (dot
+  // segments, repeated separators) are still caught by the guards below.
+  const targetPath = canonicalizeSftpPath(params.targetPath);
   if (
     params.operation === "cut"
-    && isSameSftpPath(params.targetPath, params.sourcePath)
+    && isSameSftpPath(targetPath, canonicalizeSftpPath(params.sourcePath))
   ) {
     return "block-same-folder";
   }
   for (const file of params.files) {
     if (!file.isDirectory) continue;
-    const itemPath = joinPath(params.sourcePath, file.name);
+    const itemPath = canonicalizeSftpPath(joinPath(params.sourcePath, file.name));
     if (
-      isSameSftpPath(params.targetPath, itemPath)
-      || isSftpDescendantPath(params.targetPath, itemPath)
+      isSameSftpPath(targetPath, itemPath)
+      || isSftpDescendantPath(targetPath, itemPath)
     ) {
       return "block-into-source";
     }

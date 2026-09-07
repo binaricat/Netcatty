@@ -352,13 +352,21 @@ export const useSftpKeyboardShortcuts = ({
     const clipboard = sftpClipboardStore.get();
     if (!clipboard || clipboard.files.length === 0) return;
 
+    // Pin the destination this paste was validated against. Native pastes may
+    // await clipboard reads before reaching here, and the user can navigate or
+    // switch tabs meanwhile — startTransfer would otherwise resolve the
+    // then-active pane and could land inside a directory this guard approved
+    // as safe.
+    const targetConnectionId = pane.connection!.id;
+    const targetPath = pane.connection!.currentPath;
+
     const isSameConnection = clipboard.sourceSide === focusedSide
       && clipboard.sourceConnectionId === pane.connection!.id;
     if (isSameConnection) {
       const pasteAction = resolveSamePanePasteAction({
         operation: clipboard.operation,
         sourcePath: clipboard.sourcePath,
-        targetPath: pane.connection!.currentPath,
+        targetPath,
         files: clipboard.files,
       });
       if (pasteAction === "block-same-folder") {
@@ -446,10 +454,22 @@ export const useSftpKeyboardShortcuts = ({
         updateClipboardAfterCompletion(pendingNames.size === 0);
       };
 
+      // Abandon the paste when the destination pane changed while the paste
+      // was pending: startTransfer resolves the currently active pane, and a
+      // different connection would receive a path pinned from another host.
+      const activeTargetPane = focusedSide === "left"
+        ? sftp.leftTabs.tabs.find((tab) => tab.id === sftp.leftTabs.activeTabId)
+        : sftp.rightTabs.tabs.find((tab) => tab.id === sftp.rightTabs.activeTabId);
+      if (!activeTargetPane?.connection || activeTargetPane.connection.id !== targetConnectionId) {
+        toast.info("Paste cancelled: the destination connection changed.", "SFTP");
+        return;
+      }
+
       await sftp.startTransfer(clipboard.files, clipboard.sourceSide, focusedSide, {
         sourcePane,
         sourcePath: clipboard.sourcePath,
         sourceConnectionId: clipboard.sourceConnectionId,
+        targetPath,
         onTransferComplete: handleTransferComplete,
       });
     } catch {

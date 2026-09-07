@@ -201,3 +201,63 @@ test("same-pane paste guard understands Windows paths", () => {
     "allow",
   );
 });
+
+test("same-pane guards canonicalize equivalent path spellings", () => {
+  const files = [{ name: "docs", isDirectory: true }];
+  assert.equal(
+    resolveSamePanePasteAction({ operation: "cut", sourcePath: "/home/user", targetPath: "/home/user/.", files }),
+    "block-same-folder",
+  );
+  assert.equal(
+    resolveSamePanePasteAction({ operation: "cut", sourcePath: "/home/user", targetPath: "/home//user", files }),
+    "block-same-folder",
+  );
+  assert.equal(
+    resolveSamePanePasteAction({ operation: "cut", sourcePath: "/home/user", targetPath: "/home/user/../user", files }),
+    "block-same-folder",
+  );
+  assert.equal(
+    resolveSamePanePasteAction({
+      operation: "cut",
+      sourcePath: "/home/user",
+      targetPath: "/home/./user/docs",
+      files,
+    }),
+    "block-into-source",
+  );
+  assert.equal(
+    resolveSamePanePasteAction({ operation: "cut", sourcePath: "/home/user", targetPath: "/home/userx", files }),
+    "allow",
+  );
+});
+
+test("same-pane guards canonicalize equivalent Windows path spellings", () => {
+  const files = [{ name: "docs", isDirectory: true }];
+  assert.equal(
+    resolveSamePanePasteAction({
+      operation: "cut",
+      sourcePath: "C:\\Users\\me",
+      targetPath: "C:\\Users\\me\\.",
+      files,
+    }),
+    "block-same-folder",
+  );
+  assert.equal(
+    resolveSamePanePasteAction({
+      operation: "cut",
+      sourcePath: "C:\\Users\\me",
+      targetPath: "C:\\Users\\\\me",
+      files,
+    }),
+    "block-same-folder",
+  );
+  assert.equal(
+    resolveSamePanePasteAction({
+      operation: "cut",
+      sourcePath: "C:\\Users\\me",
+      targetPath: "C:\\Users\\me\\docs\\sub\\..\\docs",
+      files,
+    }),
+    "block-into-source",
+  );
+});
