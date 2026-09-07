@@ -1,5 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
+import { fitLargeToolResultForModel } from './harness/toolResultFitting';
 import type { GroupConfig, Host, ManagedSource, PortForwardingRule, ProxyProfile, Snippet, VaultNote } from '../../domain/models';
 import { handleVaultAgentOp, runSerializedVaultAgentRequest, type VaultAgentApiDeps } from './vaultAgentBridgeClient';
 
@@ -137,6 +139,41 @@ function createDeps(
 }
 
 describe('handleVaultAgentOp vault notes', () => {
+  it('bounds both Catty and MCP reads through the real service and forwards continuation/search parameters', async () => {
+    const require = createRequire(import.meta.url);
+    const { createVaultService } = require('../../electron/capabilities/services/vaultService.cjs');
+    const { registerMcpTools } = require('../../electron/capabilities/codegen/mcpToolRegistry.cjs');
+    const content = Array.from({ length: 10_000 }, (_, i) => `line ${i}: example text\n`).join('');
+    const deps = createDeps({ notes: [{ id: 'note-1', title: 'Long', content, createdAt: 1, updatedAt: 2 }] });
+    const service = createVaultService({ invokeVaultAgent: (op: string, params: Record<string, unknown>) => handleVaultAgentOp(op, params, deps) });
+    type Result = { note: { content: string }; nextOffset: number | null; matchOffset?: number };
+    const handlers = new Map<string, (params: Record<string, unknown>) => Promise<{ content: Array<{ text: string }> }>>();
+    registerMcpTools({ tool: (...args: unknown[]) => handlers.set(args[0] as string, args.at(-1) as NonNullable<ReturnType<typeof handlers.get>>) }, {
+      rpcCall: (_method: string, params: Record<string, unknown>) => service.getNote(params),
+      scopeParams: {}, guardWriteOperation: () => null, catalogDescription: (_name: string, description: string) => description,
+    });
+    const get = handlers.get('vault_notes_get')!;
+    let offset: number | null = 0;
+    let collected = '';
+    while (offset !== null) {
+      const params = { noteId: 'note-1', offset, maxChars: 9000, expectedUpdatedAt: 2 };
+      const raw = await service.getNote(params);
+      const catty = fitLargeToolResultForModel({ result: raw, capabilityId: 'vault.note.get' });
+      const mcp = JSON.parse((await get(params)).content[0].text) as Result;
+      assert.deepEqual(catty, mcp);
+      assert.ok(mcp.note.content.length <= 6000);
+      collected += mcp.note.content;
+      offset = mcp.nextOffset;
+    }
+    assert.equal(collected, content);
+    const found = JSON.parse((await get({ noteId: 'note-1', query: 'line 9999:', maxChars: 20 })).content[0].text) as Result;
+    assert.equal(found.matchOffset, content.indexOf('line 9999:'));
+    assert.equal(found.note.content.length, 20);
+    assert.equal((await service.getNote({ noteId: 'note-1', expectedUpdatedAt: 1 })).ok, false);
+    assert.equal((await service.getNote({ noteId: 'missing' })).ok, false);
+    assert.equal((await service.getNote({ noteId: 'x'.repeat(201) })).ok, false);
+  });
+
   it('note.create persists to updateNotes and returns the new note', async () => {
     const updated: VaultNote[][] = [];
     const deps = createDeps({

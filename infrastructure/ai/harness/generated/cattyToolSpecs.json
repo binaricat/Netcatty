@@ -894,12 +894,32 @@
     "toolName": "vault_notes_get",
     "rpcMethod": "vault/notes/get",
     "localExecution": false,
-    "description": "Get a Vault → Notes entry by id (full markdown content).",
+    "description": "Read or search a Vault → Notes entry by exact id, at most 6000 characters per call. Content is only the returned range, not necessarily the whole note. Follow nextOffset with expectedUpdatedAt until null for a complete read; query searches only return matching excerpts. Read every range without query before summarizing the whole note or replacing its content; never treat unread text as absent. For long notes, retain section summaries rather than repeatedly loading all ranges. If the note changed, restart.",
     "inputShape": {
       "noteId": {
         "type": "string",
         "optional": false,
         "description": "Vault note ID from vault_notes_list."
+      },
+      "offset": {
+        "type": "number",
+        "optional": true,
+        "description": "Zero-based UTF-16 offset; default 0. Continue with returned nextOffset."
+      },
+      "maxChars": {
+        "type": "number",
+        "optional": true,
+        "description": "Maximum excerpt length in UTF-16 units, at least 2; default and hard cap 6000."
+      },
+      "query": {
+        "type": "string",
+        "optional": true,
+        "description": "Optional case-sensitive literal search, 1-200 UTF-16 units. Returns an excerpt starting at the next match at/after offset; matchOffset=null means no match. Keep query when continuing search."
+      },
+      "expectedUpdatedAt": {
+        "type": "number",
+        "optional": true,
+        "description": "Pass note.updatedAt from the first read on subsequent reads to detect changes; restart if it changed."
       }
     },
     "policy": {

@@ -167,6 +167,10 @@ const TOOL_INPUT_FIELDS = Object.freeze({
   "vault.note.list": {},
   "vault.note.get": {
     noteId: { type: "string", description: "Vault note ID from vault_notes_list." },
+    offset: { type: "number", optional: true, description: "Zero-based UTF-16 offset; default 0. Continue with returned nextOffset." },
+    maxChars: { type: "number", optional: true, description: "Maximum excerpt length in UTF-16 units, at least 2; default and hard cap 6000." },
+    query: { type: "string", optional: true, description: "Optional case-sensitive literal search, 1-200 UTF-16 units. Returns an excerpt starting at the next match at/after offset; matchOffset=null means no match. Keep query when continuing search." },
+    expectedUpdatedAt: { type: "number", optional: true, description: "Pass note.updatedAt from the first read on subsequent reads to detect changes; restart if it changed." },
   },
   "vault.note.create": {
     title: { type: "string", description: "Note title shown in Vault → Notes." },

@@ -206,7 +206,7 @@ const VAULT_CAPABILITIES = [
     id: "vault.note.get",
     domain: "vault",
     status: CAPABILITY_STATUS.IMPLEMENTED,
-    description: "Get a Vault → Notes entry by id (full markdown content).",
+    description: "Read or search a Vault → Notes entry by exact id, at most 6000 characters per call. Content is only the returned range, not necessarily the whole note. Follow nextOffset with expectedUpdatedAt until null for a complete read; query searches only return matching excerpts. Read every range without query before summarizing the whole note or replacing its content; never treat unread text as absent. For long notes, retain section summaries rather than repeatedly loading all ranges. If the note changed, restart.",
     policy: {
       write: false,
       sensitiveRead: false,

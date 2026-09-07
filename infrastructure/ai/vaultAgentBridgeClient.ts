@@ -24,6 +24,7 @@ import {
 import { isScriptSnippet } from '../../domain/snippetScript.ts';
 import { applySnippetVariables, parseSnippetVariables } from '../../domain/snippetVariables';
 import { getNextVaultOrder } from '../../domain/vaultOrder';
+import { readVaultNote } from '../../domain/vaultNoteRead';
 import {
   runAutomationScript,
   stopScriptRun,
@@ -929,9 +930,10 @@ export async function handleVaultAgentOp(
     }
     case 'note.get': {
       const noteId = String(params.noteId || '');
+      if (!noteId.trim() || noteId.length > 200) return { ok: false, error: 'noteId must contain 1 to 200 characters.' };
       const note = deps.getNotes().find((entry) => entry.id === noteId);
       if (!note) return { ok: false, error: `Vault note "${noteId}" was not found.` };
-      return { ok: true, note: serializeVaultNoteForAgent(note) };
+      return readVaultNote(note, params);
     }
     case 'note.create': {
       const title = sanitizeNoteTitle(params.title);

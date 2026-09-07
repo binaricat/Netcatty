@@ -90,7 +90,13 @@ function createVaultService(ctx = {}) {
     getNote: async (params = {}) => {
       const bridgeErr = requireBridge();
       if (bridgeErr) return bridgeErr;
-      return invokeVaultAgent("note.get", { noteId: params.noteId });
+      return invokeVaultAgent("note.get", {
+        noteId: params.noteId,
+        offset: params.offset,
+        maxChars: params.maxChars,
+        query: params.query,
+        expectedUpdatedAt: params.expectedUpdatedAt,
+      });
     },
     createNote: async (params = {}) => {
       const bridgeErr = requireBridge();
