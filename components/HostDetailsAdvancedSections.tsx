@@ -400,7 +400,7 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
                 </Select>
               </HostDetailsSettingRow>
               <p className="text-xs text-muted-foreground">
-                {t("hostDetails.os.current")}: {t(`hostDetails.os.${resolveHostOs(form)}`)}
+                {t("hostDetails.os.current")}: {t(`hostDetails.os.${resolveHostOs({ ...form, deviceType: effectiveDeviceType })}`)}
               </p>
             </CollapsibleContent>
           </Collapsible>
