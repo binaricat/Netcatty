@@ -621,9 +621,15 @@ export function createSynchronizedOutputFitScheduler() {
   };
 }
 
+type ReflowAnchorCell = {
+  getCode(): number;
+};
+
 type ReflowAnchorBufferLine = {
   isWrapped?: boolean;
-  translateToString(trimRight?: boolean): string;
+  length?: number;
+  translateToString(trimRight?: boolean, startColumn?: number, endColumn?: number): string;
+  getCell?(x: number, cell?: ReflowAnchorCell): ReflowAnchorCell | undefined;
 };
 
 type ReflowAnchorBuffer = {
@@ -671,6 +677,13 @@ const reflowAnchorLogicalLineStart = (buffer: ReflowAnchorBuffer, row: number): 
  * sit mid-line, making the captured prefix and offset disagree with the
  * re-joined line. Trim only the final physical row of the logical line, where
  * trailing whitespace is viewport padding rather than wrapped content.
+ *
+ * On a wrapped row, xterm's wide-character wrap padding is structural, not
+ * content: when a double-width glyph does not fit at the end of a row, xterm
+ * leaves the last cell as a null cell (codepoint 0) and draws the glyph on the
+ * next row. Rewrap moves that boundary, so the padding cell must not take part
+ * in the joined text — only cells with no codepoint at all are dropped here,
+ * while typed spaces (codepoint 32) are kept.
  */
 const reflowAnchorRowText = (
   buffer: ReflowAnchorBuffer,
@@ -678,7 +691,27 @@ const reflowAnchorRowText = (
 ): string => {
   const line = buffer.getLine(row);
   if (!line) return "";
-  return line.translateToString(!buffer.getLine(row + 1)?.isWrapped);
+  const isWrappedRow = buffer.getLine(row + 1)?.isWrapped === true;
+  if (!isWrappedRow) return line.translateToString(true);
+  const lineLength = typeof line.length === "number" ? line.length : undefined;
+  if (lineLength === undefined || !line.getCell) {
+    // Fallback for buffer lines without cell access: keep the full untrimmed
+    // row rather than risk the trimmed-cache path dropping real spaces.
+    return line.translateToString(false);
+  }
+  // Passing an explicit endColumn bypasses xterm's canonical string cache, so
+  // this stays a fresh untrimmed translation even when another feature cached
+  // the row.
+  const text = line.translateToString(false, 0, lineLength);
+  let paddingCells = 0;
+  while (paddingCells < lineLength) {
+    const cell = line.getCell(lineLength - 1 - paddingCells);
+    if (!cell || cell.getCode() !== 0) break;
+    paddingCells += 1;
+  }
+  // Each trailing null cell renders as exactly one space, so slicing by the
+  // cell count removes precisely the structural padding.
+  return paddingCells > 0 ? text.slice(0, text.length - paddingCells) : text;
 };
 
 const reflowAnchorJoinTextPrefix = (

@@ -31,7 +31,7 @@ const cacheTrimmingRow = (text: string, isWrapped?: boolean) => ({
 });
 
 const manualBuffer = (
-  rows: ReturnType<typeof cacheTrimmingRow>[],
+  rows: Array<ReturnType<typeof cacheTrimmingRow> | ReturnType<typeof xtermRow>>,
   viewportY: number,
 ) => ({
   length: rows.length,
@@ -39,6 +39,26 @@ const manualBuffer = (
   viewportY,
   getLine: (y: number) => rows[y],
 });
+
+/**
+ * Row mimicking an xterm buffer line: `text` is the written content (typed
+ * spaces included), followed by `nullPad` structural null cells (e.g. the
+ * padding xterm leaves when a wide character wraps to the next row).
+ * `translateToString(false)` renders null cells as spaces.
+ */
+const xtermRow = (text: string, isWrapped?: boolean, nullPad = 0) => {
+  const length = text.length + nullPad;
+  return {
+    isWrapped,
+    length,
+    translateToString: (trimRight?: boolean) =>
+      trimRight ? text : text + " ".repeat(length - text.length),
+    getCell: (x: number) =>
+      x < length
+        ? { getCode: () => (x < text.length ? 32 : 0) }
+        : undefined,
+  };
+};
 
 /** Hard-wrap logical text into fake buffer rows of the given cell width. */
 const wrapToRows = (logicalLines: string[], cols: number): FakeRow[] => {
@@ -104,6 +124,29 @@ test("capture/resolve preserve real trailing spaces on wrapped rows across rewra
     cacheTrimmingRow("AB   "),
     cacheTrimmingRow("CD", true),
     cacheTrimmingRow("tail"),
+  ], 0);
+  const resolvedRow = resolveTerminalReflowScrollAnchor(after as never, anchor!);
+  assert.equal(resolvedRow, 1);
+});
+
+test("capture/resolve exclude wide-character wrap padding from wrapped rows", () => {
+  // "abc中Z" at width 4 renders as "abc " plus a structural null cell on the
+  // wrapped row and "中Z" on the next one. Rewrap at width 5 produces
+  // "abc中" + "Z", so the padding cell must not take part in the anchor text.
+  const before = manualBuffer([
+    xtermRow("head"),
+    xtermRow("abc", false, 1),
+    xtermRow("中Z", true),
+  ], 2);
+  const anchor = captureTerminalReflowScrollAnchor(before as never);
+  assert.ok(anchor);
+  assert.equal(anchor!.textPrefix, "abc中Z");
+  assert.equal(anchor!.charOffset, 3);
+
+  const after = manualBuffer([
+    xtermRow("head"),
+    xtermRow("abc中", false, 1),
+    xtermRow("Z", true),
   ], 0);
   const resolvedRow = resolveTerminalReflowScrollAnchor(after as never, anchor!);
   assert.equal(resolvedRow, 1);
