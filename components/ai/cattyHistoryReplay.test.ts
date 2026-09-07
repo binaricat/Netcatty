@@ -255,3 +255,17 @@ test("external recovery keeps multiple note IDs and a short user constraint", ()
   assert.match(replay.content, /Only compare; do not edit/);
   assert.equal(replay.content.match(/Use vault_notes_get/g)?.length, 1);
 });
+
+test("compact external recovery retains the request alongside note references", () => {
+  const noteId = '550e8400-e29b-41d4-a716-446655440000';
+  const request = "Only summarize yesterday's deployments; do not edit.";
+  const messages: ChatMessage[] = [{
+    id: 'old-note', role: 'user', timestamp: 1, content: request,
+    attachments: [{ mediaType: 'text/markdown', base64Data: '', vaultNoteId: noteId, vaultNoteTitle: 'Deployment Runbook' }],
+  }, ...Array.from({ length: 8 }, (_, i): ChatMessage => ({
+    id: `later-${i}`, role: i % 2 ? 'assistant' : 'user', timestamp: i + 2, content: i % 2 ? 'Done.' : 'ok',
+  }))];
+  const compact = buildExternalBridgeContextMessages(messages)[0].content;
+  assert.ok(compact.includes(noteId));
+  assert.ok(compact.includes(request));
+});

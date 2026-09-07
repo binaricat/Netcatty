@@ -777,6 +777,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
     [noteMentionItems],
   );
   const noteSearchInputRef = useRef<HTMLInputElement>(null);
+  const noteListId = React.useId();
   useEffect(() => {
     if (showNoteMention) setActiveMenuIndex(0);
   }, [showNoteMention, noteMentionKey]);
@@ -1290,15 +1291,18 @@ const ChatInput: React.FC<ChatInputProps> = ({
           <>
             <div className="fixed inset-0 z-[999]" onClick={closeAllMenus} />
             <div
-              role="listbox"
-              aria-label={t('ai.chat.menuMentionNote')}
-              aria-activedescendant={noteMentionItems[activeMenuIndex] ? `note-mention-${noteMentionItems[activeMenuIndex].id}` : undefined}
               className="fixed z-[1000] overflow-hidden rounded-lg border border-border/50 bg-popover shadow-lg"
               style={{ left: inputPanelPos.left, bottom: inputPanelPos.bottom, width: 'auto', minWidth: Math.min(240, inputPanelPos.width), maxWidth: inputPanelPos.width }}
             >
               <div className="p-1.5 border-b border-border/40">
                 <input
                   ref={noteSearchInputRef}
+                  role="combobox"
+                  aria-label={t('ai.chat.menuMentionNote')}
+                  aria-expanded={true}
+                  aria-controls={noteListId}
+                  aria-autocomplete="list"
+                  aria-activedescendant={noteMentionItems[activeMenuIndex] ? `${noteListId}-${activeMenuIndex}` : undefined}
                   type="text"
                   value={noteQuery}
                   onChange={(e) => setNoteQuery(e.target.value)}
@@ -1307,6 +1311,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
                   className="w-full h-6 rounded-md bg-muted/40 px-2 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/50"
                 />
               </div>
+              <div id={noteListId} role="listbox" aria-label={t('ai.chat.menuMentionNote')}>
               {noteMentionItems.length === 0 ? (
                 <div className="px-3 py-2 text-[11px] text-muted-foreground/60">{t('ai.chat.mentionNoteEmpty')}</div>
               ) : (
@@ -1322,7 +1327,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
                       const isActive = idx === activeMenuIndex;
                       return (
                         <button
-                          id={`note-mention-${note.id}`}
+                          id={`${noteListId}-${idx}`}
                           type="button"
                           role="option"
                           aria-selected={isActive}
@@ -1345,6 +1350,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
                   />
                 </div>
               )}
+              </div>
             </div>
           </>,
           document.body,

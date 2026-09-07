@@ -1,6 +1,7 @@
 import type { ChatMessage } from '../types';
 import type { ExternalBridgeHistoryMessage } from './types';
 import { buildHistoricalToolResultReplayText, buildHistoricalUserReplayContent } from '../../../components/ai/cattyHistoryReplay';
+import { formatVaultNoteReferences, isVaultNoteAttachment } from '../../../application/state/vaultNoteAttachment';
 
 type ExternalAgentHistoryMessage = ExternalBridgeHistoryMessage;
 type RawHistoryMessage = ExternalAgentHistoryMessage & { sourceId: string };
@@ -173,6 +174,12 @@ function summarizeMessage(
 
 function summarizeDurableUserMessage(message: ChatMessage): string | null {
   if (message.role !== "user") return null;
+  const notes = message.attachments?.filter(isVaultNoteAttachment) ?? [];
+  if (notes.length) {
+    // Budget prose separately: the reference instruction must not consume the request's 280 characters.
+    const request = truncateText(normalizeWhitespace(message.content || ''), MAX_DURABLE_USER_MESSAGE_CHARS);
+    return `User request: ${request}\n${formatVaultNoteReferences(notes)}`;
+  }
   const content = getUserHistoryContent(message);
   if (!content) return null;
   if (isTrivialUserMessage(content)) return null;
