@@ -15,6 +15,7 @@ import {
   importMarkdownFilesToVaultNotes,
   importMarkdownPayloadsToVaultNotes,
   matchesVaultNoteSearch,
+  createVaultNoteSearchIndex,
   normalizeNoteGroups,
   normalizeVaultNotes,
   remapExpandedNoteGroupPaths,
@@ -616,4 +617,19 @@ test("formatMarkdownListSelection prefixes every non-empty selected line", () =>
 
 test("formatMarkdownQuoteSelection prefixes every selected line", () => {
   assert.equal(formatMarkdownQuoteSelection("one\n\ntwo"), "> one\n>\n> two");
+});
+
+test("note mention index preserves search fields, entity identity and edited snapshots", () => {
+  const notes = [
+    { id: "a", title: "Same", content: "Alpha body", group: "Production", tags: ["API"], createdAt: 1, updatedAt: 1 },
+    { id: "b", title: "Same", content: "Beta body", createdAt: 1, updatedAt: 1 },
+  ];
+  const search = createVaultNoteSearchIndex(notes);
+  for (const query of ["", " SAME ", "ALPHA", "beta", "production", "api", "missing", "same alpha"]) {
+    assert.deepEqual(search(query), notes.filter((note) => matchesVaultNoteSearch(note, query)));
+  }
+  assert.equal(search("beta")[0], notes[1]);
+  const edited = [{ ...notes[0], content: "Replacement" }, notes[1]];
+  assert.deepEqual(createVaultNoteSearchIndex(edited)("alpha"), []);
+  assert.equal(createVaultNoteSearchIndex(edited)("replacement")[0], edited[0]);
 });

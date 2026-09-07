@@ -284,6 +284,21 @@ export const matchesVaultNoteSearch = (
   ].some((value) => value.toLowerCase().includes(needle));
 };
 
+/** Build once per note-list snapshot, so typing does not lowercase full bodies. */
+export const createVaultNoteSearchIndex = (notes: readonly VaultNote[]) => {
+  const entries = notes.map((note) => ({
+    note,
+    fields: [note.title, note.content, note.group ?? "", ...(note.tags ?? [])]
+      .map((value) => value.toLowerCase()),
+  }));
+  return (query: string): VaultNote[] => {
+    const needle = query.trim().toLowerCase();
+    return entries
+      .filter((entry) => !needle || entry.fields.some((field) => field.includes(needle)))
+      .map((entry) => entry.note);
+  };
+};
+
 const isSanitizedRenderedLink = (value: string): boolean => {
   try {
     const url = new URL(value);

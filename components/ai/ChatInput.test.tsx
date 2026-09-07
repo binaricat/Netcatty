@@ -339,7 +339,7 @@ test('renders a Mention Note picker entry with a searchable note list', () => {
   assert.match(source, /openInputPanelMenu\('noteMention'\)/);
   assert.match(source, /ai\.chat\.menuMentionNote/);
   assert.match(source, /aria-activedescendant=\{noteMentionItems\[activeMenuIndex\] \? `note-mention-/);
-  assert.match(source, /matchesVaultNoteSearch\(note, noteQuery\)/);
+  assert.match(source, /createVaultNoteSearchIndex\(notes\)/);
   assert.match(source, /onClick=\{\(\) => handleSelectNoteMention\(note\)\}/);
   assert.match(source, /onKeyDown=\{handleNoteMentionKeyDown\}/);
 });

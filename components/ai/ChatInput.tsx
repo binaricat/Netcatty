@@ -55,7 +55,7 @@ import {
 import type { PromptInputStatus } from '../ai-elements/prompt-input';
 import type { AgentModelPreset, AIPermissionMode, ProviderConfig, UploadedFile } from '../../infrastructure/ai/types';
 import type { VaultNote } from '../../domain/models';
-import { matchesVaultNoteSearch } from '../../domain/notes';
+import { createVaultNoteSearchIndex } from '../../domain/notes';
 import { ProviderIconBadge } from '../settings/tabs/ai/ProviderIconBadge';
 import { VariableSizeVirtualList, type VariableSizeVirtualListHandle } from '../ui/VariableSizeVirtualList';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
@@ -764,9 +764,13 @@ const ChatInput: React.FC<ChatInputProps> = ({
   }, [showSlashCommandPicker, slashCommandKey]);
 
   // Mention Note picker: filtered notes, highlight reset, search-input focus
+  const searchMentionNotes = useMemo(
+    () => showNoteMention ? createVaultNoteSearchIndex(notes) : null,
+    [notes, showNoteMention],
+  );
   const noteMentionItems = useMemo(
-    () => notes.filter((note) => matchesVaultNoteSearch(note, noteQuery)),
-    [notes, noteQuery],
+    () => searchMentionNotes?.(noteQuery) ?? [],
+    [searchMentionNotes, noteQuery],
   );
   const noteMentionKey = useMemo(
     () => noteMentionItems.map((note) => note.id).join('|'),
