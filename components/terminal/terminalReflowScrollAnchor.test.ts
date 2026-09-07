@@ -7,10 +7,14 @@ import {
 
 type FakeRow = { isWrapped?: boolean; text: string };
 
-const fakeBuffer = (rows: FakeRow[], extra: { viewportY: number; baseY?: number }) => ({
+const fakeBuffer = (
+  rows: FakeRow[],
+  extra: { viewportY: number; baseY?: number; cursorY?: number },
+) => ({
   length: rows.length,
   baseY: extra.baseY ?? rows.length - 1,
   viewportY: extra.viewportY,
+  cursorY: extra.cursorY,
   getLine: (y: number) => {
     const row = rows[y];
     return row
@@ -38,6 +42,30 @@ const manualBuffer = (
   baseY: rows.length - 1,
   viewportY,
   getLine: (y: number) => rows[y],
+});
+
+/**
+ * Final row whose canonical trimmed translation is served from a cached
+ * untrimmed value with `trimEnd()`: typed trailing spaces are dropped, while
+ * a fresh translation with explicit columns keeps them (typed spaces are
+ * content; a fresh trim cuts only trailing null cells).
+ */
+const cacheTrimmedFinalRow = (text: string) => ({
+  isWrapped: false,
+  length: text.length,
+  translateToString: (trimRight?: boolean, startCol?: number, endCol?: number) => {
+    if (startCol === undefined && endCol === undefined) {
+      return trimRight ? text.replace(/\s+$/, "") : text;
+    }
+    return text;
+  },
+});
+
+/** Row mirroring xterm's fresh translation: typed trailing spaces survive. */
+const xtermFreshRow = (text: string, isWrapped?: boolean) => ({
+  isWrapped,
+  length: text.length,
+  translateToString: () => text,
 });
 
 /**
@@ -522,5 +550,107 @@ test("resolveTerminalReflowScrollAnchor falls back to a full scan when the hint 
     anchor,
     2,
   );
+  assert.equal(resolvedRow, 0);
+});
+
+test("capture keeps typed trailing spaces when the final row's trim hits the string cache", () => {
+  // The anchored logical line ends with typed spaces on its final row: the
+  // canonical trimmed translation is served from a cached untrimmed value via
+  // trimEnd() and drops them, while a column shrink rewraps the line and
+  // moves those spaces onto a wrapped row the resolver reads untrimmed.
+  const before = manualBuffer([
+    cacheTrimmingRow("head"),
+    cacheTrimmedFinalRow("AB   "),
+    cacheTrimmingRow("tail"),
+  ], 1);
+  const anchor = captureTerminalReflowScrollAnchor(before as never);
+  assert.ok(anchor);
+  assert.equal(anchor!.textPrefix, "AB   ");
+  assert.equal(anchor!.charOffset, 0);
+
+  // Narrower rewrap: the trailing spaces move onto a wrapped row, which the
+  // resolver reads untrimmed — the capture must have kept them.
+  const after = manualBuffer([
+    cacheTrimmingRow("head"),
+    xtermFreshRow("AB "),
+    xtermFreshRow("  ", true),
+    cacheTrimmingRow("tail"),
+  ], 0);
+  const resolvedRow = resolveTerminalReflowScrollAnchor(after as never, anchor!);
+  assert.equal(resolvedRow, 1);
+});
+
+test("resolve keeps the anchored line when the following cursor line is truncated", () => {
+  // The anchored line sits directly above the cursor's prompt line. Narrowing
+  // with the pinned `reflowCursorLine: false` default skips rewrapping the
+  // cursor line and truncates its rows, so the captured follower text no
+  // longer matches even though the anchored line survived.
+  const before = fakeBuffer([
+    { text: "header" },
+    { text: "anchored unique alpha" },
+    { text: "cursor prompt tail" },
+  ], { viewportY: 1, baseY: 2, cursorY: 0 });
+  const anchor = captureTerminalReflowScrollAnchor(before as never);
+  assert.ok(anchor);
+  assert.equal(anchor!.contextSuffix, "cursor prompt tail");
+
+  // After the shrink the anchored line rewraps into two rows while the cursor
+  // line keeps its old row structure truncated to the new column count.
+  const after = fakeBuffer([
+    { text: "header" },
+    { text: "anchored uni" },
+    { text: "que alpha", isWrapped: true },
+    { text: "cursor promp" },
+  ], { viewportY: 0, baseY: 3, cursorY: 0 });
+  const resolvedRow = resolveTerminalReflowScrollAnchor(after as never, anchor!);
+  assert.equal(resolvedRow, 1);
+});
+
+test("resolve still rejects the anchored line when a non-cursor follower changes", () => {
+  // Without cursor information the follower identity must stay strict: a
+  // changed follower means the anchored content cannot be validated.
+  const rows = [
+    { text: "header" },
+    { text: "anchored unique alpha" },
+    { text: "cursor promp" },
+  ];
+  const anchor = {
+    startRow: 1,
+    charOffset: 0,
+    textPrefix: "anchored unique alpha",
+    contextSuffix: "cursor prompt tail",
+  };
+  const resolvedRow = resolveTerminalReflowScrollAnchor(
+    fakeBuffer(rows, { viewportY: 0 }) as never,
+    anchor,
+  );
+  assert.equal(resolvedRow, null);
+});
+
+test("resolve re-locates the viewed continuation past a truncated cursor follower", () => {
+  // Viewport partway into a long wrapped line; the following line is the
+  // cursor line, which a narrowing resize truncates instead of rewrapping.
+  // The continuation fallback must not reject the surviving line just because
+  // its follower text changed.
+  const before = fakeBuffer([
+    { text: "M".repeat(10), isWrapped: false },
+    { text: "M".repeat(10), isWrapped: true },
+    { text: "M".repeat(10), isWrapped: true },
+    { text: "cursor line tail" },
+  ], { viewportY: 1, baseY: 3, cursorY: 0 });
+  const anchor = captureTerminalReflowScrollAnchor(before as never);
+  assert.ok(anchor);
+  assert.equal(anchor!.charOffset, 10);
+
+  // Column shrink to 8 with a scrollback trim of the first 8 characters; the
+  // cursor line keeps its old structure truncated to 10 columns.
+  const after = fakeBuffer([
+    { text: "M".repeat(8), isWrapped: true },
+    { text: "M".repeat(8), isWrapped: true },
+    { text: "M".repeat(6), isWrapped: true },
+    { text: "cursor lin" },
+  ], { viewportY: 0, baseY: 3, cursorY: 0 });
+  const resolvedRow = resolveTerminalReflowScrollAnchor(after as never, anchor!);
+  // Original char 10 (the viewport top) is surviving char 2, in row 0.
   assert.equal(resolvedRow, 0);
 });

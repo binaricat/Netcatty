@@ -641,6 +641,12 @@ type ReflowAnchorBuffer = {
   length: number;
   baseY: number;
   viewportY: number;
+  /**
+   * Cursor row within the screen (0-based), so the cursor's absolute buffer
+   * row is `baseY + cursorY`. Real xterm buffers expose it; hand-built test
+   * buffers may omit it.
+   */
+  cursorY?: number;
   getLine(y: number): ReflowAnchorBufferLine | undefined;
 };
 
@@ -708,6 +714,16 @@ const reflowAnchorLogicalLineStart = (buffer: ReflowAnchorBuffer, row: number): 
  * re-joined line. Trim only the final physical row of the logical line, where
  * trailing whitespace is viewport padding rather than wrapped content.
  *
+ * The final-row trim must still bypass xterm's canonical string cache: a
+ * canonical `true` request is served from a cached untrimmed value with
+ * `trimEnd()`, which drops real typed spaces, while a fresh translation cuts
+ * only the trailing null cells. A column shrink can move typed trailing
+ * spaces from the old final row onto a newly wrapped row, where the
+ * post-resize translation preserves them — dropping them at capture would
+ * make the captured prefix and line length disagree with the re-joined line,
+ * so resolution returns null and restoring the stale row jumps. Rows without
+ * a cell length (hand-built tests) keep the plain trimmed translation.
+ *
  * On a wrapped row, xterm's wide-character wrap padding is structural, not
  * content: when a double-width glyph does not fit at the end of a row, xterm
  * leaves the last cell as a null cell (codepoint 0) and draws the glyph on the
@@ -722,8 +738,15 @@ const reflowAnchorRowText = (
   const line = buffer.getLine(row);
   if (!line) return "";
   const isWrappedRow = buffer.getLine(row + 1)?.isWrapped === true;
-  if (!isWrappedRow) return line.translateToString(true);
   const lineLength = typeof line.length === "number" ? line.length : undefined;
+  if (!isWrappedRow) {
+    if (lineLength === undefined) return line.translateToString(true);
+    // Passing an explicit endColumn bypasses xterm's canonical string cache,
+    // so a cached untrimmed value cannot reach the trim and drop real typed
+    // trailing spaces. The fresh trimmed translation still cuts trailing null
+    // cells (viewport padding) while keeping typed spaces as content.
+    return line.translateToString(true, 0, lineLength);
+  }
   if (lineLength === undefined || !line.getCell) {
     // Fallback for buffer lines without cell access: keep the full untrimmed
     // row rather than risk the trimmed-cache path dropping real spaces.
@@ -858,6 +881,36 @@ export function captureTerminalReflowScrollAnchor(
   };
 }
 
+/**
+ * Whether the logical line immediately following the anchored one contains the
+ * cursor.
+ *
+ * The pinned xterm configuration leaves `reflowCursorLine` at its false
+ * default: reflow skips the cursor's logical line entirely, and the
+ * post-reflow line resize then truncates each of its rows to the new column
+ * count. The following line's joined text changes on a narrowing resize even
+ * though the anchored line itself survived, so a captured `contextSuffix` for
+ * that line can no longer match and requiring the exact match would reject
+ * the surviving anchored line, falling back to the stale row index. Tolerate
+ * a follower mismatch when the follower is the cursor line: that position
+ * still disambiguates the anchor, because only the logical line immediately
+ * preceding the cursor line can claim it.
+ */
+const reflowAnchorFollowerIsCursorLine = (
+  buffer: ReflowAnchorBuffer,
+  row: number,
+): boolean => {
+  const cursorY = buffer.cursorY;
+  if (typeof cursorY !== "number" || !Number.isFinite(cursorY)) return false;
+  const nextStart = reflowAnchorNextLogicalLineStart(buffer, row);
+  if (nextStart === null) return false;
+  const cursorRow = buffer.baseY + cursorY;
+  if (cursorRow < nextStart) return false;
+  let nextEnd = nextStart;
+  while (nextEnd + 1 < buffer.length && buffer.getLine(nextEnd + 1)?.isWrapped) nextEnd += 1;
+  return cursorRow <= nextEnd;
+};
+
 /** True when the logical line at `row` matches the anchor's captured identity. */
 const reflowAnchorCandidateMatches = (
   buffer: ReflowAnchorBuffer,
@@ -871,7 +924,9 @@ const reflowAnchorCandidateMatches = (
   if (nextStart === null || anchor.contextSuffix === null) {
     return nextStart === null && anchor.contextSuffix === null;
   }
-  return reflowAnchorJoinTextPrefix(buffer, nextStart, REFLOW_ANCHOR_CONTEXT_CHARS) === anchor.contextSuffix;
+  return reflowAnchorJoinTextPrefix(buffer, nextStart, REFLOW_ANCHOR_CONTEXT_CHARS)
+      === anchor.contextSuffix
+    || reflowAnchorFollowerIsCursorLine(buffer, row);
 };
 
 /**
@@ -955,6 +1010,7 @@ const reflowAnchorContinuationOffset = (
   } else if (
     reflowAnchorJoinTextPrefix(buffer, nextStart, REFLOW_ANCHOR_CONTEXT_CHARS)
       !== anchor.contextSuffix
+    && !reflowAnchorFollowerIsCursorLine(buffer, row)
   ) {
     return -1;
   }
