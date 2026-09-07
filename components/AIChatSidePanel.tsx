@@ -47,7 +47,7 @@ import {
   buildPromptWithTerminalSelectionAttachments,
   isInlineTextAttachment,
 } from '../application/state/terminalSelectionAttachment';
-import { createVaultNoteAttachment, isVaultNoteAttachment } from '../application/state/vaultNoteAttachment';
+import { createVaultNoteAttachment, isVaultNoteAttachment, vaultNoteReferencesFit } from '../application/state/vaultNoteAttachment';
 import type { CodexIntegrationStatus } from './settings/tabs/ai/types';
 import {
   useAIChatStreaming,
@@ -604,9 +604,15 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   // External turns keep the tools from launch; changed settings cannot enable note reads mid-turn.
   const canMentionNotes = currentAgentId === 'catty' || (toolIntegrationMode === 'mcp' && !isStreaming);
   const validateNoteMentions = useCallback((attachments: UploadedFile[]) => {
-    if (canMentionNotes || !attachments.some(isVaultNoteAttachment)) return true;
-    toast.warning(t('ai.chat.mentionNoteUnavailable'));
-    return false;
+    if (!canMentionNotes && attachments.some(isVaultNoteAttachment)) {
+      toast.warning(t('ai.chat.mentionNoteUnavailable'));
+      return false;
+    }
+    if (!vaultNoteReferencesFit(attachments)) {
+      toast.warning(t('ai.chat.mentionNoteTooMany'));
+      return false;
+    }
+    return true;
   }, [canMentionNotes, t]);
 
   /** Mention Note: attach a Vault → Notes entry as inline context for the next send. */
@@ -619,6 +625,8 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
       }));
       return;
     }
+    const existing = currentDraftRef.current?.attachments ?? [];
+    if (!validateNoteMentions([...existing.filter((file) => file.vaultNoteId !== upload.vaultNoteId), upload])) return;
     enterScopeDraftMode(currentAgentId, panelViewRef.current.mode === 'session');
     updateDraft(scopeKey, currentAgentId, (current) => ({
       ...current,
@@ -627,7 +635,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         upload,
       ],
     }));
-  }, [canMentionNotes, updateDraft, currentAgentId, enterScopeDraftMode, scopeKey, t]);
+  }, [canMentionNotes, validateNoteMentions, updateDraft, currentAgentId, enterScopeDraftMode, scopeKey, t]);
 
   useEffect(() => {
     if (isVisible) return undefined;

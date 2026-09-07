@@ -501,6 +501,7 @@ export const esAiMessages: Messages = {
   'ai.chat.mentionNoteSearch': 'Buscar notas…',
   'ai.chat.mentionNoteEmpty': 'Sin notas coincidentes',
   'ai.chat.mentionNoteUnavailable': 'Este agente no puede leer notas de la bóveda en el modo de conexión actual.',
+  'ai.chat.mentionNoteTooMany': 'No se pueden referenciar todas estas notas juntas. Selecciona menos notas.',
   'ai.chat.mentionNoteInvalid': 'No se pudo adjuntar «{{title}}»: la nota tiene un identificador no válido.',
   'ai.chat.untitledNote': 'Nota sin título',
   'ai.chat.menuUserSkills': 'Habilidades de usuario',

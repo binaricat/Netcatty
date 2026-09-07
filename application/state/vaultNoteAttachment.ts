@@ -30,3 +30,9 @@ export function formatVaultNoteReferences(
   const notes = attachments.map((attachment) => ({ noteId: attachment.vaultNoteId, title: attachment.vaultNoteTitle }));
   return `[Vault note references: ${JSON.stringify(notes)}]\nUse vault_notes_get with each exact noteId to read the latest content before summarizing or editing. If unavailable, report that instead of choosing another note.`;
 }
+
+/** Reserve at least half of external replay's 2,000 characters for the user's request. */
+export function vaultNoteReferencesFit(attachments: UploadedFile[]): boolean {
+  const notes = attachments.filter(isVaultNoteAttachment);
+  return notes.length === 0 || formatVaultNoteReferences(notes).length <= 1000;
+}

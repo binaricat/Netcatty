@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createVaultNoteAttachment, formatVaultNoteReferences } from "./vaultNoteAttachment.ts";
+import { createVaultNoteAttachment, formatVaultNoteReferences, vaultNoteReferencesFit } from "./vaultNoteAttachment.ts";
 import { buildPromptWithTerminalSelectionAttachments, createTerminalSelectionAttachment, isInlineTextAttachment } from "./terminalSelectionAttachment.ts";
 
 test("mentions carry identity without copying even large note bodies", () => {
@@ -42,4 +42,13 @@ test("note-only sends and mixed terminal selections retain both kinds of context
   assert.match(prompt, /systemctl status nginx/);
   assert.match(prompt, /empty-note/);
   assert.match(prompt, /^compare/);
+});
+
+test("reference limit reserves replay space and does not count ordinary files", () => {
+  const notes = Array.from({length: 10}, (_, i) => createVaultNoteAttachment({id: String(i).padEnd(200, "x"), title: "t".repeat(120)})!);
+  assert.equal(vaultNoteReferencesFit(notes), false);
+  const accepted = notes.filter((_, index) => vaultNoteReferencesFit(notes.slice(0, index + 1)));
+  assert.ok(accepted.length > 0);
+  assert.ok(formatVaultNoteReferences(accepted).length <= 1000);
+  assert.equal(vaultNoteReferencesFit([...accepted, {id: "file", filename: "file", mediaType: "text/plain", dataUrl: "", base64Data: "x".repeat(2_000_000)}]), true);
 });

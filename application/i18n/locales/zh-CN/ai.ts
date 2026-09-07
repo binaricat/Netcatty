@@ -501,6 +501,7 @@ export const zhCNAiMessages: Messages = {
   'ai.chat.mentionNoteSearch': '搜索笔记…',
   'ai.chat.mentionNoteEmpty': '没有匹配的笔记',
   'ai.chat.mentionNoteUnavailable': '当前连接方式下，此 AI 无法读取保险箱笔记。',
+  'ai.chat.mentionNoteTooMany': '这些笔记无法一起引用，请减少选择。',
   'ai.chat.mentionNoteInvalid': '无法附加「{{title}}」：笔记的标识符无效。',
   'ai.chat.untitledNote': '未命名笔记',
   'ai.chat.menuUserSkills': '用户 Skills',

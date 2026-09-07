@@ -500,6 +500,7 @@ export const zhTWAiMessages: Messages = {
   'ai.chat.mentionNoteSearch': '搜尋筆記…',
   'ai.chat.mentionNoteEmpty': '沒有符合的筆記',
   'ai.chat.mentionNoteUnavailable': '目前連線方式下，此 AI 無法讀取保險箱筆記。',
+  'ai.chat.mentionNoteTooMany': '這些筆記無法一起引用，請減少選擇。',
   'ai.chat.mentionNoteInvalid': '無法附加「{{title}}」：筆記的識別碼無效。',
   'ai.chat.untitledNote': '未命名筆記',
   'ai.chat.menuUserSkills': '使用者 Skills',
