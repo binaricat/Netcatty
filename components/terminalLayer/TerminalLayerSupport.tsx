@@ -505,6 +505,7 @@ const AIChatPanelsHostInner: React.FC<AIChatPanelsHostProps> = ({
   const {
     sessions,
     activeSessionIdMap,
+    draftsByScope,
     panelViewByScope,
   } = useAISessionsStore();
   const {
