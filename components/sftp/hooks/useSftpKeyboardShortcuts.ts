@@ -402,7 +402,14 @@ export const useSftpKeyboardShortcuts = ({
       // shared transfer path below.
     }
 
-    const sourceTabs = clipboard.sourceSide === "left" ? sftp.leftTabs.tabs : sftp.rightTabs.tabs;
+    // Re-read live state, not the pre-await snapshot: the same-connection
+    // guard above can await realpath while the user switches tabs, and
+    // startTransfer resolves the currently active pane. Comparing against the
+    // stale snapshot would let the pinned targetPath land on a different
+    // connection (and a cut would then delete the original after the wrong
+    // host received the data).
+    const liveSftp = sftpRef.current;
+    const sourceTabs = clipboard.sourceSide === "left" ? liveSftp.leftTabs.tabs : liveSftp.rightTabs.tabs;
     const sourcePane = sourceTabs.find((tab) => tab.connection?.id === clipboard.sourceConnectionId);
 
     if (!sourcePane?.connection) {
@@ -473,9 +480,11 @@ export const useSftpKeyboardShortcuts = ({
       // Abandon the paste when the destination pane changed while the paste
       // was pending: startTransfer resolves the currently active pane, and a
       // different connection would receive a path pinned from another host.
+      // Read the live tabs (see the liveSftp note above), not the snapshot
+      // captured before the await.
       const activeTargetPane = focusedSide === "left"
-        ? sftp.leftTabs.tabs.find((tab) => tab.id === sftp.leftTabs.activeTabId)
-        : sftp.rightTabs.tabs.find((tab) => tab.id === sftp.rightTabs.activeTabId);
+        ? liveSftp.leftTabs.tabs.find((tab) => tab.id === liveSftp.leftTabs.activeTabId)
+        : liveSftp.rightTabs.tabs.find((tab) => tab.id === liveSftp.rightTabs.activeTabId);
       if (!activeTargetPane?.connection || activeTargetPane.connection.id !== targetConnectionId) {
         toast.info("Paste cancelled: the destination connection changed.", "SFTP");
         return;

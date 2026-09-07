@@ -562,7 +562,17 @@ export function useSftpDirectoryTransferOps({
     let regularFiles: SftpFileEntry[] = [];
     // Keep the current remote ancestor active through child discovery.
     try {
-      if (!sourceIsLocal && sourceSftpId) {
+      // Claim local source visits against the shared budget too. Unlike the
+      // remote realpath claim below, a lexical local path cannot detect
+      // aliases (e.g. a bind mount reaching the copied directory through a
+      // different name), so a same-pane paste that slips past the paste
+      // guards could rediscover its own output. The budget's global directory
+      // and entry counters bound that runaway the same way they bound remote
+      // traversal instead of letting it run until storage is exhausted.
+      if (sourceIsLocal) {
+        claimedCanonicalPath = claimSftpDirectoryVisit(traversal, task.sourcePath);
+        if (!claimedCanonicalPath) return totalErrors;
+      } else if (sourceSftpId) {
         const bridge = netcattyBridge.get();
         const canonicalPath = await bridge?.realpathSftp?.(sourceSftpId, task.sourcePath, sourceEncoding)
           .catch(() => task.sourcePath) ?? task.sourcePath;
@@ -611,7 +621,7 @@ export function useSftpDirectoryTransferOps({
 
       // Filter both "." and ".." — some SFTP servers include "." in readdir
       const filtered = files.filter((f) => f.name !== ".." && f.name !== ".");
-      if (!sourceIsLocal) accountSftpDirectoryEntries(traversal, filtered.length);
+      accountSftpDirectoryEntries(traversal, filtered.length);
       // Separate directories from files.
       // Symlink directories are only followed when followSymlinks is true
       // (downloadToLocal). Uploads/copies treat symlinks as regular entries
