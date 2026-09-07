@@ -398,6 +398,33 @@ test("resolve adjusts a repeating viewed window by the derived trim delta", () =
   assert.equal(resolvedRow, 4);
 });
 
+test("resolve adjusts a repeating viewed window on a line beyond the old length cap", () => {
+  // A 9,000-character single logical line: the exact line length must still
+  // be captured so the trim delta stays exact — content matching alone
+  // cannot find the window in the repetitive run, and a stale pre-trim
+  // offset would land the viewport below the surviving position.
+  const longLine = "prompt " + "A".repeat(8993);
+  const before = wrapToRows([longLine], 40);
+  const captureBuffer = fakeBuffer(before, { viewportY: 200 }); // charOffset 8000
+  const anchor = captureTerminalReflowScrollAnchor(captureBuffer as never);
+  assert.ok(anchor);
+  assert.equal(anchor!.charOffset, 8000);
+  assert.equal(anchor!.lineLength, longLine.length);
+
+  const after = wrapToRows([longLine], 30);
+  const trimRows = 2; // 60 leading characters trimmed with the first rows
+  const trimmed = after.slice(trimRows).map((row, i) =>
+    i === 0 ? { text: row.text, isWrapped: true } : row);
+  const resolvedRow = resolveTerminalReflowScrollAnchor(
+    fakeBuffer(trimmed, { viewportY: 0 }) as never,
+    anchor!,
+  );
+  // The viewed characters moved back by the trimmed 60: char 8000 now sits
+  // at surviving offset 7940, in row 264 of the 30-column rewrap. A stale
+  // pre-trim offset would land in row 266.
+  assert.equal(resolvedRow, 264);
+});
+
 test("resolve adjusts a self-repeating textPrefix match on a trimmed line", () => {
   // The captured textPrefix is itself a run of one character, so it
   // coincidentally re-matches the trimmed suffix at row 0 and the primary
@@ -478,9 +505,44 @@ test("resolve uses a surviving viewed-row marker hint after a mid-line trim", ()
 });
 
 test("captureTerminalReflowScrollAnchor returns null for a blank line with no following identity", () => {
-  const rows = [{ text: "a" }, { text: "" }, { text: "" }, { text: "b" }];
+  // Only blank lines follow the anchored one: no non-blank context exists to
+  // identify it, so every blank line would match and capture must decline.
+  const rows = [{ text: "a" }, { text: "" }, { text: "" }];
   const buffer = fakeBuffer(rows, { viewportY: 1 });
   assert.equal(captureTerminalReflowScrollAnchor(buffer as never), null);
+});
+
+test("blank anchor line inside a blank run re-locates via the next non-blank line", () => {
+  // The viewport starts on the first of two consecutive blank lines, so the
+  // immediate follower is blank too: the context must skip the blank run to
+  // borrow the identity of the unique output after it.
+  const logicalLines = [
+    "header before the blank region",
+    "",
+    "",
+    "target line unique beta tail",
+    "filler one",
+    "",
+    "decoy tail gamma",
+  ];
+  const before = wrapToRows(logicalLines, 80);
+  const captureBuffer = fakeBuffer(before, { viewportY: 1 });
+  const anchor = captureTerminalReflowScrollAnchor(captureBuffer as never);
+  assert.ok(anchor);
+  assert.equal(anchor!.textPrefix, "");
+  assert.ok(anchor!.contextSuffix!.startsWith("target line unique beta"));
+
+  // Rewrap at a narrower width: the anchored blank line drifts away from its
+  // pre-reflow row while the decoy blank line ends up elsewhere in the run.
+  const after = wrapToRows(logicalLines, 12);
+  const resolvedRow = resolveTerminalReflowScrollAnchor(
+    fakeBuffer(after, { viewportY: 0 }) as never,
+    anchor!,
+  );
+  assert.ok(resolvedRow !== null);
+  assert.equal(after[resolvedRow!]!.text, "");
+  const joinedAfter = after.slice(resolvedRow!).map((r) => r.text).join("");
+  assert.ok(joinedAfter.startsWith("target line unique beta"));
 });
 
 test("blank anchor line is re-located by its following line, not proximity", () => {

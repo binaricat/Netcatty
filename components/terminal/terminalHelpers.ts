@@ -658,10 +658,12 @@ export type TerminalReflowScrollAnchor = {
   /** Prefix of the logical line's joined text, used to re-locate it after reflow. */
   textPrefix: string;
   /**
-   * Prefix of the logical line following the anchor line. A blank anchor line
-   * has empty text, so without this context every blank line matches and the
-   * resolver would land on whichever blank line is nearest the stale row.
-   * Null when there is no following logical line.
+   * Prefix of the first non-blank logical line after the anchor line,
+   * skipping any run of blank logical lines (they keep their row count
+   * across rewrap, so the skipped run cannot re-position the context line).
+   * A blank anchor line has empty text, so without this context every blank
+   * line matches and the resolver would land on whichever blank line is
+   * nearest the stale row. Null when no non-blank logical line follows.
    */
   contextSuffix: string | null;
   /**
@@ -695,7 +697,12 @@ const REFLOW_ANCHOR_TEXT_PREFIX_CHARS = 256;
 const REFLOW_ANCHOR_CONTEXT_CHARS = 96;
 // Cap on how much of the anchored logical line is measured to derive the
 // scrollback-trim delta; longer lines fall back to content-only re-location.
-const REFLOW_ANCHOR_LINE_LENGTH_CHARS = 8192;
+// The bound keeps a pathological single line from turning every resize into
+// an unbounded O(line) scan, while still measuring any realistic wrapped
+// line exactly: content matching alone cannot recover the trim delta when
+// the viewed window repeats within the line, so the exact length is the
+// only disambiguator and a too-tight cap would silently drop it.
+const REFLOW_ANCHOR_LINE_LENGTH_CHARS = 262_144;
 
 const reflowAnchorLogicalLineStart = (buffer: ReflowAnchorBuffer, row: number): number => {
   let start = Math.max(0, Math.min(row, buffer.length - 1));
@@ -836,6 +843,24 @@ const reflowAnchorNextLogicalLineStart = (
 };
 
 /**
+ * First logical line strictly after the one starting at `row` whose joined
+ * text is non-empty, or null. A blank logical line is a single empty row at
+ * every width, so a run of blank lines survives rewrap intact and cannot
+ * re-position the lines after it relative to the anchor — skipping the run
+ * is stable on both sides of the resize.
+ */
+const reflowAnchorNextNonBlankLogicalLineStart = (
+  buffer: ReflowAnchorBuffer,
+  row: number,
+): number | null => {
+  let next = reflowAnchorNextLogicalLineStart(buffer, row);
+  while (next !== null && reflowAnchorJoinTextPrefix(buffer, next, 1) === "") {
+    next = reflowAnchorNextLogicalLineStart(buffer, next);
+  }
+  return next;
+};
+
+/**
  * Capture what the reader is looking at before a fit-induced reflow.
  *
  * Restoring a pre-resize row index keeps the reading position only when rows
@@ -861,14 +886,19 @@ export function captureTerminalReflowScrollAnchor(
   }
   const textPrefix = reflowAnchorJoinTextPrefix(buffer, startRow, REFLOW_ANCHOR_TEXT_PREFIX_CHARS);
   const viewedText = reflowAnchorJoinTextPrefix(buffer, viewportY, REFLOW_ANCHOR_TEXT_PREFIX_CHARS);
-  const nextStart = reflowAnchorNextLogicalLineStart(buffer, startRow);
-  const contextSuffix = nextStart === null
+  // Identity beyond the anchor line itself: the first *non-blank* logical
+  // line after it, skipping any run of blank lines. Scanning only to the
+  // immediate follower would leave a blank anchor unanchored whenever the
+  // next line is blank too, even though unique output further down pins the
+  // position exactly (blank runs keep their row count across rewrap).
+  const contextStart = reflowAnchorNextNonBlankLogicalLineStart(buffer, startRow);
+  const contextSuffix = contextStart === null
     ? null
-    : reflowAnchorJoinTextPrefix(buffer, nextStart, REFLOW_ANCHOR_CONTEXT_CHARS);
-  // A blank anchor line in an otherwise blank region carries no identity at
-  // all: every blank line would match, so re-locating by content cannot beat
-  // the plain row restore. Return null and let the caller fall back to it.
-  if (textPrefix === "" && (contextSuffix === null || contextSuffix === "")) return null;
+    : reflowAnchorJoinTextPrefix(buffer, contextStart, REFLOW_ANCHOR_CONTEXT_CHARS);
+  // A blank anchor line with no non-blank line after it carries no identity
+  // at all: every blank line would match, so re-locating by content cannot
+  // beat the plain row restore. Return null and let the caller fall back to it.
+  if (textPrefix === "" && contextSuffix === null) return null;
   const lineLength = reflowAnchorLogicalLineLength(buffer, startRow, REFLOW_ANCHOR_LINE_LENGTH_CHARS);
   return {
     startRow,
@@ -882,33 +912,32 @@ export function captureTerminalReflowScrollAnchor(
 }
 
 /**
- * Whether the logical line immediately following the anchored one contains the
- * cursor.
+ * Whether the anchor's context line — the first non-blank logical line after
+ * the anchored one, starting at `contextRow` — contains the cursor.
  *
  * The pinned xterm configuration leaves `reflowCursorLine` at its false
  * default: reflow skips the cursor's logical line entirely, and the
  * post-reflow line resize then truncates each of its rows to the new column
- * count. The following line's joined text changes on a narrowing resize even
+ * count. The context line's joined text changes on a narrowing resize even
  * though the anchored line itself survived, so a captured `contextSuffix` for
  * that line can no longer match and requiring the exact match would reject
  * the surviving anchored line, falling back to the stale row index. Tolerate
- * a follower mismatch when the follower is the cursor line: that position
+ * a context mismatch when the context line is the cursor line: that position
  * still disambiguates the anchor, because only the logical line immediately
- * preceding the cursor line can claim it.
+ * preceding the cursor line can claim it. (Blank lines skipped on the way to
+ * the context line need no tolerance: truncation keeps a blank line blank.)
  */
-const reflowAnchorFollowerIsCursorLine = (
+const reflowAnchorContextIsCursorLine = (
   buffer: ReflowAnchorBuffer,
-  row: number,
+  contextRow: number,
 ): boolean => {
   const cursorY = buffer.cursorY;
   if (typeof cursorY !== "number" || !Number.isFinite(cursorY)) return false;
-  const nextStart = reflowAnchorNextLogicalLineStart(buffer, row);
-  if (nextStart === null) return false;
   const cursorRow = buffer.baseY + cursorY;
-  if (cursorRow < nextStart) return false;
-  let nextEnd = nextStart;
-  while (nextEnd + 1 < buffer.length && buffer.getLine(nextEnd + 1)?.isWrapped) nextEnd += 1;
-  return cursorRow <= nextEnd;
+  if (cursorRow < contextRow) return false;
+  let contextEnd = contextRow;
+  while (contextEnd + 1 < buffer.length && buffer.getLine(contextEnd + 1)?.isWrapped) contextEnd += 1;
+  return cursorRow <= contextEnd;
 };
 
 /** True when the logical line at `row` matches the anchor's captured identity. */
@@ -920,13 +949,13 @@ const reflowAnchorCandidateMatches = (
   if (reflowAnchorJoinTextPrefix(buffer, row, REFLOW_ANCHOR_TEXT_PREFIX_CHARS) !== anchor.textPrefix) {
     return false;
   }
-  const nextStart = reflowAnchorNextLogicalLineStart(buffer, row);
-  if (nextStart === null || anchor.contextSuffix === null) {
-    return nextStart === null && anchor.contextSuffix === null;
+  const contextStart = reflowAnchorNextNonBlankLogicalLineStart(buffer, row);
+  if (contextStart === null || anchor.contextSuffix === null) {
+    return contextStart === null && anchor.contextSuffix === null;
   }
-  return reflowAnchorJoinTextPrefix(buffer, nextStart, REFLOW_ANCHOR_CONTEXT_CHARS)
+  return reflowAnchorJoinTextPrefix(buffer, contextStart, REFLOW_ANCHOR_CONTEXT_CHARS)
       === anchor.contextSuffix
-    || reflowAnchorFollowerIsCursorLine(buffer, row);
+    || reflowAnchorContextIsCursorLine(buffer, contextStart);
 };
 
 /**
@@ -1004,13 +1033,13 @@ const reflowAnchorContinuationOffset = (
 ): number => {
   const viewedText = typeof anchor.viewedText === "string" ? anchor.viewedText : "";
   if (viewedText === "" || anchor.charOffset <= 0) return -1;
-  const nextStart = reflowAnchorNextLogicalLineStart(buffer, row);
-  if (nextStart === null || anchor.contextSuffix === null) {
-    if (nextStart !== null || anchor.contextSuffix !== null) return -1;
+  const contextStart = reflowAnchorNextNonBlankLogicalLineStart(buffer, row);
+  if (contextStart === null || anchor.contextSuffix === null) {
+    if (contextStart !== null || anchor.contextSuffix !== null) return -1;
   } else if (
-    reflowAnchorJoinTextPrefix(buffer, nextStart, REFLOW_ANCHOR_CONTEXT_CHARS)
+    reflowAnchorJoinTextPrefix(buffer, contextStart, REFLOW_ANCHOR_CONTEXT_CHARS)
       !== anchor.contextSuffix
-    && !reflowAnchorFollowerIsCursorLine(buffer, row)
+    && !reflowAnchorContextIsCursorLine(buffer, contextStart)
   ) {
     return -1;
   }
