@@ -668,6 +668,18 @@ export type TerminalReflowScrollAnchor = {
    * Optional so hand-built anchors (tests) work without it.
    */
   viewedText?: string;
+  /**
+   * Joined length of the whole anchored logical line, when the line fits
+   * within `REFLOW_ANCHOR_LINE_LENGTH_CHARS`. Rewrap trim removes only
+   * leading content, so comparing this with the surviving line's length
+   * derives exactly how many leading characters were trimmed — both the
+   * captured `charOffset` and the re-located viewed window must move back by
+   * that amount. Content matching alone cannot recover it when the window
+   * repeats within the line (a long run of one character re-matches at the
+   * stale pre-trim offset, scrolling the viewport too far down). Optional so
+   * hand-built anchors (tests) work without it.
+   */
+  lineLength?: number;
 };
 
 // Enough characters to tell neighboring output apart (timestamps, prompts,
@@ -675,6 +687,9 @@ export type TerminalReflowScrollAnchor = {
 const REFLOW_ANCHOR_TEXT_PREFIX_CHARS = 256;
 // Following-line identity that disambiguates blank or repeated anchor lines.
 const REFLOW_ANCHOR_CONTEXT_CHARS = 96;
+// Cap on how much of the anchored logical line is measured to derive the
+// scrollback-trim delta; longer lines fall back to content-only re-location.
+const REFLOW_ANCHOR_LINE_LENGTH_CHARS = 8192;
 
 const reflowAnchorLogicalLineStart = (buffer: ReflowAnchorBuffer, row: number): number => {
   let start = Math.max(0, Math.min(row, buffer.length - 1));
@@ -763,6 +778,30 @@ const reflowAnchorJoinTextPrefix = (
   return text.slice(0, maxChars);
 };
 
+/**
+ * Joined length of the whole logical line starting at `row`, measuring rows
+ * exactly like the capture-side prefix and offset do. Stops once `maxChars`
+ * is reached (the caller treats that as "too long to measure"), so a
+ * pathological single line cannot turn every resize into an O(line) scan.
+ */
+const reflowAnchorLogicalLineLength = (
+  buffer: ReflowAnchorBuffer,
+  row: number,
+  maxChars: number,
+): number => {
+  let length = 0;
+  let r = row;
+  while (r < buffer.length) {
+    const line = buffer.getLine(r);
+    if (!line) break;
+    if (r > row && !line.isWrapped) break;
+    length += reflowAnchorRowText(buffer, r).length;
+    if (length >= maxChars) return length;
+    r += 1;
+  }
+  return length;
+};
+
 /** First logical line strictly after the one starting at `row`, or null. */
 const reflowAnchorNextLogicalLineStart = (
   buffer: ReflowAnchorBuffer,
@@ -807,12 +846,15 @@ export function captureTerminalReflowScrollAnchor(
   // all: every blank line would match, so re-locating by content cannot beat
   // the plain row restore. Return null and let the caller fall back to it.
   if (textPrefix === "" && (contextSuffix === null || contextSuffix === "")) return null;
+  const lineLength = reflowAnchorLogicalLineLength(buffer, startRow, REFLOW_ANCHOR_LINE_LENGTH_CHARS);
   return {
     startRow,
     charOffset,
     textPrefix,
     contextSuffix,
     viewedText,
+    // Only a fully measured line supports the trim-delta derivation below.
+    lineLength: lineLength < REFLOW_ANCHOR_LINE_LENGTH_CHARS ? lineLength : undefined,
   };
 }
 
@@ -833,17 +875,72 @@ const reflowAnchorCandidateMatches = (
 };
 
 /**
+ * `charOffset` adjusted for leading content a scrollback trim removed, or -1
+ * when the adjustment cannot be validated.
+ *
+ * Trim removes only leading rows, so a partially trimmed logical line
+ * survives at row 0 as a suffix of the captured one, beginning `trimChars`
+ * characters into it; every captured offset within the line shrinks by that
+ * amount. Comparing the captured line length with the surviving length
+ * derives `trimChars` exactly, which content matching alone cannot do when
+ * the anchored window repeats within the line (a long run of one character
+ * would re-match at the stale pre-trim offset and scroll the viewport too
+ * far down the surviving line). The derived position is validated against
+ * the captured viewed text so a coincidental repeat cannot claim it.
+ *
+ * Only row 0 can be partially trimmed (trim removes from the buffer top), so
+ * any other row — and any anchor without a captured line length, such as
+ * hand-built test anchors — keeps the plain offset.
+ */
+const reflowAnchorTrimAdjustedCharOffset = (
+  buffer: ReflowAnchorBuffer,
+  row: number,
+  anchor: TerminalReflowScrollAnchor,
+): number => {
+  const lineLength = anchor.lineLength;
+  if (
+    row !== 0 ||
+    typeof lineLength !== "number" ||
+    !Number.isFinite(lineLength) ||
+    lineLength <= 0
+  ) {
+    return anchor.charOffset;
+  }
+  const survivingLength = reflowAnchorLogicalLineLength(
+    buffer,
+    0,
+    REFLOW_ANCHOR_LINE_LENGTH_CHARS,
+  );
+  if (survivingLength >= REFLOW_ANCHOR_LINE_LENGTH_CHARS) return anchor.charOffset;
+  const trimChars = Math.max(0, lineLength - survivingLength);
+  const target = anchor.charOffset - trimChars;
+  if (target < 0) return -1;
+  const viewedText = typeof anchor.viewedText === "string" ? anchor.viewedText : "";
+  if (viewedText !== "") {
+    const text = reflowAnchorJoinTextPrefix(buffer, 0, target + viewedText.length);
+    if (text.length < target + viewedText.length || !text.startsWith(viewedText, target)) {
+      return -1;
+    }
+  }
+  return target;
+};
+
+/**
  * In-line offset of the anchor's viewed characters within the logical line at
  * `row`, or -1 when the line does not contain them.
  *
  * Fallback identity for a partially trimmed logical line: a column shrink on
  * a full scrollback removes the line's leading physical rows, so its captured
  * `textPrefix` no longer matches anywhere while the characters the viewport
- * was showing (the viewed continuation) survive later in the line. Rewrap
- * only ever removes leading content, so the viewed text now starts at an
- * offset ≤ the captured `charOffset`; the closest such position wins. The
- * following-line identity check still applies so blank or repeated
- * continuations do not resolve to a nearby decoy.
+ * was showing (the viewed continuation) survive later in the line. When the
+ * captured line length is known, the trim delta is derived exactly and the
+ * viewed characters are required at `charOffset` minus that delta (see
+ * `reflowAnchorTrimAdjustedCharOffset`). Without a captured length, rewrap is
+ * only known to remove leading content, so the viewed text is searched from
+ * the captured `charOffset` backwards and the closest such position wins —
+ * which cannot distinguish the true position when the window repeats within
+ * the line. The following-line identity check still applies so blank or
+ * repeated continuations do not resolve to a nearby decoy.
  */
 const reflowAnchorContinuationOffset = (
   buffer: ReflowAnchorBuffer,
@@ -860,6 +957,9 @@ const reflowAnchorContinuationOffset = (
       !== anchor.contextSuffix
   ) {
     return -1;
+  }
+  if (row === 0 && typeof anchor.lineLength === "number" && Number.isFinite(anchor.lineLength)) {
+    return reflowAnchorTrimAdjustedCharOffset(buffer, row, anchor);
   }
   // A match starting at or before `charOffset` fits entirely within the first
   // `charOffset + viewedText.length` characters of the line.
@@ -897,7 +997,9 @@ export function resolveTerminalReflowScrollAnchor(
     ? hintRow
     : null;
   const primaryRow = (row: number): number =>
-    reflowAnchorCandidateMatches(buffer, row, anchor) ? anchor.charOffset : -1;
+    reflowAnchorCandidateMatches(buffer, row, anchor)
+      ? reflowAnchorTrimAdjustedCharOffset(buffer, row, anchor)
+      : -1;
   // Continuation tracking only applies when the viewport started partway into
   // the logical line: otherwise trimming the line's start row removes the
   // viewed characters too, and the plain row fallback is correct.

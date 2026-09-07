@@ -343,6 +343,57 @@ test("resolve re-locates the viewed continuation when trim removes the line's fi
   assert.equal(trimmed[2]!.text, before[3]!.text.slice(0, 30));
 });
 
+test("resolve adjusts a repeating viewed window by the derived trim delta", () => {
+  // The viewed window is a long run of one character, so it repeats
+  // throughout the line: content alone re-matches it at the stale pre-trim
+  // offset. The captured line length must supply the trim delta.
+  const longLine = "prompt " + "A".repeat(950);
+  const before = wrapToRows([longLine], 40);
+  const viewportRow = 5;
+  const captureBuffer = fakeBuffer(before, { viewportY: viewportRow });
+  const anchor = captureTerminalReflowScrollAnchor(captureBuffer as never);
+  assert.ok(anchor);
+  assert.equal(anchor!.charOffset, 200);
+  assert.equal(anchor!.lineLength, longLine.length);
+
+  const after = wrapToRows([longLine], 30);
+  const trimRows = 2; // 60 leading characters trimmed with the first rows
+  const trimmed = after.slice(trimRows).map((row, i) =>
+    i === 0 ? { text: row.text, isWrapped: true } : row);
+  const resolvedRow = resolveTerminalReflowScrollAnchor(
+    fakeBuffer(trimmed, { viewportY: 0 }) as never,
+    anchor!,
+  );
+  // The viewed characters moved back by the trimmed 60: char 200 now sits at
+  // surviving offset 140, inside row 4 of the 30-column rewrap. A stale
+  // pre-trim offset would land in row 6.
+  assert.equal(resolvedRow, 4);
+});
+
+test("resolve adjusts a self-repeating textPrefix match on a trimmed line", () => {
+  // The captured textPrefix is itself a run of one character, so it
+  // coincidentally re-matches the trimmed suffix at row 0 and the primary
+  // path must shrink its offset by the trim delta too.
+  const longLine = "A".repeat(1000);
+  const before = wrapToRows([longLine], 40);
+  const captureBuffer = fakeBuffer(before, { viewportY: 5 });
+  const anchor = captureTerminalReflowScrollAnchor(captureBuffer as never);
+  assert.ok(anchor);
+  assert.equal(anchor!.charOffset, 200);
+
+  const after = wrapToRows([longLine], 30);
+  const trimRows = 2;
+  const trimmed = after.slice(trimRows).map((row, i) =>
+    i === 0 ? { text: row.text, isWrapped: true } : row);
+  const resolvedRow = resolveTerminalReflowScrollAnchor(
+    fakeBuffer(trimmed, { viewportY: 0 }) as never,
+    anchor!,
+  );
+  // Char 200 survives at surviving offset 140, in row 4 — not row 6, where
+  // the stale pre-trim offset would place it.
+  assert.equal(resolvedRow, 4);
+});
+
 test("resolve uses a surviving viewed-row marker hint after a mid-line trim", () => {
   // The marker tracks the viewed row: it survives a trim that disposes a
   // marker pinned to the logical line's start, and the seeded scan must
