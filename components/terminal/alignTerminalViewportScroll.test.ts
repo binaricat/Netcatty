@@ -44,7 +44,6 @@ test("alignTerminalViewportScroll syncs viewport dimensions before setting the p
       calls.push({ line, disableSmoothScroll });
     },
     calls,
-    syncCalls: 0,
   };
   const term = createTerm(247, viewport);
 
