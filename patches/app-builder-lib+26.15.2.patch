@@ -18,3 +18,27 @@ index c433dbb..1274151 100644
                      }
                      return typeof (e === null || e === void 0 ? void 0 : e.code) === "string" && ["ENOTFOUND", "ETIMEDOUT", "ECONNRESET", "EPIPE", "ENOENT"].includes(e.code);
                  },
+diff --git a/node_modules/app-builder-lib/out/codeSign/macCodeSign.js b/node_modules/app-builder-lib/out/codeSign/macCodeSign.js
+--- a/node_modules/app-builder-lib/out/codeSign/macCodeSign.js
++++ b/node_modules/app-builder-lib/out/codeSign/macCodeSign.js
+@@ -156,16 +156,16 @@
+     if (cscIKeyPassword != null) {
+         cscPasswords.push(cscIKeyPassword);
+     }
+-    return await importCerts(keychainFile, certPaths, cscPasswords);
+-}
+-async function importCerts(keychainFile, paths, keyPasswords) {
++    return await importCerts(keychainFile, certPaths, cscPasswords, keychainPassword);
++}
++async function importCerts(keychainFile, paths, keyPasswords, keychainPassword) {
+     var _a;
+     for (let i = 0; i < paths.length; i++) {
+         const password = (_a = keyPasswords[i]) !== null && _a !== void 0 ? _a : "";
+         await (0, builder_util_1.exec)("/usr/bin/security", ["import", paths[i], "-k", keychainFile, "-T", "/usr/bin/codesign", "-T", "/usr/bin/productbuild", "-P", password]);
+         // https://stackoverflow.com/questions/39868578/security-codesign-in-sierra-keychain-ignores-access-control-settings-and-ui-p
+         // https://github.com/electron-userland/electron-packager/issues/701#issuecomment-322315996
+-        await (0, builder_util_1.exec)("/usr/bin/security", ["set-key-partition-list", "-S", "apple-tool:,apple:", "-s", "-k", password, keychainFile]);
++        await (0, builder_util_1.exec)("/usr/bin/security", ["set-key-partition-list", "-S", "apple-tool:,apple:", "-s", "-k", keychainPassword, keychainFile]);
+     }
+     return {
+         keychainFile,
