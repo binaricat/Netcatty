@@ -59,7 +59,14 @@ const canonicalizeSftpPath = (path: string): string => {
     parts.push(segment);
   }
 
-  if (root) return root + parts.join(separator);
+  // UNC roots come back without a trailing separator, so re-insert one before
+  // joining the segments; without it \\server\share\docs would collapse to
+  // \\server\sharedocs and collide with an unrelated share's path.
+  if (root) {
+    return root.endsWith(separator)
+      ? root + parts.join(separator)
+      : root + separator + parts.join(separator);
+  }
   return parts.join(separator) || ".";
 };
 

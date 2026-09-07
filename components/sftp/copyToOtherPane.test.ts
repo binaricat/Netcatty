@@ -287,6 +287,30 @@ test("same-pane guards canonicalize equivalent Windows path spellings", async ()
   );
 });
 
+test("same-pane guards keep the separator after UNC share roots", async () => {
+  const files = [{ name: "docs", isDirectory: true }];
+  // Copying docs from \\server\share into \\server\sharedocs (a different
+  // share) must not collide with the source item \\server\share\docs.
+  assert.equal(
+    await resolveSamePanePasteAction({
+      operation: "copy",
+      sourcePath: "\\\\server\\share",
+      targetPath: "\\\\server\\sharedocs",
+      files,
+    }),
+    "allow",
+  );
+  assert.equal(
+    await resolveSamePanePasteAction({
+      operation: "copy",
+      sourcePath: "\\\\server\\share",
+      targetPath: "\\\\server\\share\\docs",
+      files,
+    }),
+    "block-into-source",
+  );
+});
+
 test("same-pane guards resolve filesystem aliases before comparing", async () => {
   const files = [{ name: "docs", isDirectory: true }];
   // /a/link -> /a/docs/sub: pasting /a/docs from /a/link must be blocked even
