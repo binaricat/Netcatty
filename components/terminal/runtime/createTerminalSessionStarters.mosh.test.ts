@@ -16,6 +16,11 @@ const armSudoPrompt = (
 };
 
 test("startMosh enables sudo autofill with the host saved password", async () => {
+  let detected = "";
+  let probes = 0;
+  let ready: (() => void) | undefined;
+  let resolveDetected!: () => void;
+  const detectionDone = new Promise<void>((resolve) => { resolveDetected = resolve; });
   let onData: ((data: string) => void) | null = null;
   const sent: string[] = [];
   const terminalBackend = {
@@ -28,6 +33,8 @@ test("startMosh enables sudo autofill with the host saved password", async () =>
     startSSHSession: async () => "ssh-session",
     startTelnetSession: async () => "telnet-session",
     startMoshSession: async () => "mosh-session",
+    onMoshSessionReady: (_id: string, callback: () => void) => { ready = callback; return noop; },
+    getSessionDistroInfo: async () => { probes++; return { success: true, stdout: "ID=ubuntu" }; },
     startLocalSession: async () => "local-session",
     startSerialSession: async () => "serial-session",
     execCommand: async () => ({}),
@@ -49,6 +56,7 @@ test("startMosh enables sudo autofill with the host saved password", async () =>
       username: "alice",
       password: "saved-secret",
     },
+    onOsDetected: (_id: string, distro: string) => { detected = distro; resolveDetected(); },
     keys: [],
     identities: [],
     resolvedChainHosts: [],
@@ -85,6 +93,11 @@ test("startMosh enables sudo autofill with the host saved password", async () =>
   };
 
   await createTerminalSessionStarters(ctx as never).startMosh(term as never);
+  assert.equal(probes, 0, "wait for the Mosh handshake before probing");
+  ready?.();
+  await detectionDone;
+  assert.equal(detected, "ubuntu");
+  assert.equal(probes, 1);
   onData?.(armSudoPrompt(sudoAutofillRef.current));
   sudoAutofillRef.current?.confirmFill();
 

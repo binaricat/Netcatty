@@ -171,7 +171,15 @@ function createSessionOpsApi(ctx) {
           knownHosts: session.etStatsAuth?.knownHosts,
         });
       }
-      if (!session || !session.conn) {
+      if (session?.type === 'mosh' && !session.moshStatsConn && typeof ensureMoshStatsConnection === 'function') {
+        try {
+          await ensureMoshStatsConnection(session, sessionId, _event?.sender);
+        } catch (err) {
+          return { success: false, error: err?.message || String(err) };
+        }
+      }
+      const conn = session?.conn || session?.moshStatsConn;
+      if (!conn) {
         return { success: false, error: 'Session not found or not connected' };
       }
       const command = withPosixRemoteWatchdog(
@@ -179,7 +187,7 @@ function createSessionOpsApi(ctx) {
         5000,
       );
       try {
-        const { stdout, stderr } = await executeBoundedSshCommand(session.conn, command, {
+        const { stdout, stderr } = await executeBoundedSshCommand(conn, command, {
           openingTimeoutMs: 5000,
           runTimeoutMs: 5000,
           maxOutputBytes: 256 * 1024,

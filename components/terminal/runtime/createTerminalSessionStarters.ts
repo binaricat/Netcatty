@@ -1208,7 +1208,13 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         cancelPendingStartupCommand?.();
         cancelPendingStartupCommand = undefined;
       };
+      const detectMoshSystem = () => {
+        if (!isCurrentAttempt()) return;
+        const token = registerConnectionToken(attachedSessionId);
+        void runDistroDetection(ctx, attachedSessionId, token);
+      };
       const runMoshStartup = () => {
+        detectMoshSystem();
         disposeMoshReady?.();
         disposeMoshReady = undefined;
         ctx.setIsConnectionAwaitingUserInput?.(false);
@@ -1298,7 +1304,8 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
           runMoshStartup();
         }
       } else {
-        // Older bridges without the ready event: keep previous behavior.
+        // Older bridges without the ready event: the start call completed the handshake.
+        detectMoshSystem();
         scheduleStartupCommand(ctx, term, id);
       }
     } catch (err) {
