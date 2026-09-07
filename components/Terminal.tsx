@@ -3071,6 +3071,14 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           return {
             text,
             offset: rowStartOffsets[preResizeMarkerLine - start] ?? text.length,
+            // Head row of the marker's logical line pre-resize. A widening
+            // reflow only removes rows (wrapped continuations collapse,
+            // scrollback trims), so the line's surviving head can only move
+            // UP — its post-reflow row is an upper bound for the genuine
+            // match, and any logical head still below it in the search range
+            // belongs to a LATER line (e.g. a repeated occurrence of the
+            // same output that reflow shifted up), never to the marker.
+            head: start,
           };
         })();
         const reflowsWider = dimensions.cols > term.cols;
@@ -3126,10 +3134,32 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           // `break` out before reaching the surviving head lower down.
           // Clamp the start to the buffer's last valid row instead.
           const startY = Math.min(preResizeMarkerLine - 1, buffer.length - 1);
+          // Content identity alone cannot pick out the marker's logical
+          // line: synchronized output repeats prompts and progress lines
+          // verbatim, and a widening reflow can shift a LATER occurrence
+          // above the pre-resize marker index, where this descending search
+          // would latch onto it and re-pin the restore to the wrong row
+          // (restoring further down than the pre-resize position). Two
+          // structural guards close that gap:
+          // 1. Skip logical heads below the captured pre-resize head
+          //    (`preResizeMarkerInfo.head`): a widening reflow only removes
+          //    rows, so the marker's surviving head sits at or above it,
+          //    while any surviving head still lower in the range belongs to
+          //    a later line.
+          // 2. Count matches and give up on ambiguity: when the captured
+          //    text occurs in more than one logical line the occurrence
+          //    cannot be told apart by content, so return null instead of
+          //    re-pinning to a guess — the restore then falls back to
+          //    lastMarkerLine = -1 and clamps to the top of the buffer,
+          //    which is wrong only as often as a disposed marker without
+          //    any surviving copy already is.
+          let matchedRow: number | null = null;
+          let matchCount = 0;
           for (let y = startY; y >= 0; y--) {
             const line = buffer.getLine(y);
             if (!line) break;
             if (line.isWrapped) continue;
+            if (y > preResizeMarkerInfo.head) continue;
             let text = '';
             const rowStartOffsets: number[] = [];
             for (let end = y; ; end++) {
@@ -3140,13 +3170,21 @@ const TerminalComponent: React.FC<TerminalProps> = ({
               if (!buffer.getLine(end + 1)?.isWrapped) break;
             }
             if (text.includes(preResizeMarkerInfo.text)) {
-              for (let i = rowStartOffsets.length - 1; i >= 0; i--) {
-                if (rowStartOffsets[i] <= preResizeMarkerInfo.offset) return y + i;
+              if (matchCount === 0) {
+                for (let i = rowStartOffsets.length - 1; i >= 0; i--) {
+                  if (rowStartOffsets[i] <= preResizeMarkerInfo.offset) {
+                    matchedRow = y + i;
+                    break;
+                  }
+                }
+                if (matchedRow === null) matchedRow = y;
               }
-              return y;
+              // A second logical line holding the same text makes the
+              // content match ambiguous — no occurrence is trustworthy.
+              if (++matchCount > 1) return null;
             }
           }
-          return null;
+          return matchedRow;
         })();
 
         // Preserve scroll position across resize (superset/Tabby pattern).
