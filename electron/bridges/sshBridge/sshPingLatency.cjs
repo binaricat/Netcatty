@@ -37,26 +37,41 @@ function createSshPingLatencyProbe({
       let settled = false;
       let timer = null;
 
-      const finish = (value) => {
+      const finish = (value, consumeSlot) => {
         if (settled) return;
         settled = true;
         if (timer !== null) clearTimeoutFn(timer);
-        const index = callbacks.indexOf(onReply);
-        if (index >= 0) callbacks.splice(index, 1);
+        if (consumeSlot) {
+          const index = callbacks.indexOf(onReply);
+          if (index >= 0) callbacks.splice(index, 1);
+        }
         resolve(value);
       };
       const onReply = (hadErr) => {
-        finish(hadErr ? null : Math.max(0, Math.round(now() - startedAt)));
+        // ssh2 reports REQUEST_SUCCESS as `false` and REQUEST_FAILURE as
+        // `true`; the latter is OpenSSH's normal reply to the unsupported
+        // keepalive@openssh.com request, so both count as a completed ping.
+        // Only an Error instance (transport teardown/flush) is a failure.
+        if (hadErr instanceof Error) {
+          finish(null, true);
+          return;
+        }
+        finish(Math.max(0, Math.round(now() - startedAt)), true);
       };
 
       callbacks.push(onReply);
       try {
         proto.ping();
       } catch {
-        finish(null);
+        // The request was never sent, so the queued callback can never be
+        // consumed; remove it to keep the FIFO intact.
+        finish(null, true);
         return;
       }
-      timer = setTimeoutFn(() => finish(null), timeoutMs);
+      // On timeout, deliberately leave `onReply` in the queue as a tombstone:
+      // global-request replies carry no request ID and ssh2 correlates them
+      // by FIFO order, so a late reply must still consume this slot.
+      timer = setTimeoutFn(() => finish(null, false), timeoutMs);
     });
   };
 }

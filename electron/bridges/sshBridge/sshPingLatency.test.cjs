@@ -62,9 +62,22 @@ test("resolves null for connections that cannot carry a transport ping", async (
   assert.equal(await measure({ exec() {} }), null);
 });
 
+test("treats REQUEST_FAILURE (`true`) as a completed ping", async () => {
+  // OpenSSH answers the unsupported keepalive@openssh.com global request with
+  // SSH_MSG_REQUEST_FAILURE, which ssh2 reports as boolean `true`.
+  const { measure } = createProbe();
+  const conn = createFakeSshClient({ delayMs: 25, hadErr: true });
+  fakeNow = 1000;
+
+  const pending = measure(conn);
+  fakeNow = 1042;
+  assert.equal(await pending, 42);
+  assert.equal(conn._callbacks.length, 0);
+});
+
 test("resolves null when the reply reports an error", async () => {
   const { measure } = createProbe();
-  const conn = createFakeSshClient({ hadErr: true });
+  const conn = createFakeSshClient({ hadErr: new Error("connection closed") });
   assert.equal(await measure(conn), null);
 });
 
@@ -74,7 +87,7 @@ test("resolves null when ping() throws", async () => {
   assert.equal(await measure(conn), null);
 });
 
-test("times out and removes its callback from the queue", async () => {
+test("times out but keeps its tombstone callback in the FIFO queue", async () => {
   const { measure, timers } = createProbe();
   const conn = createFakeSshClient({ delayMs: 10_000 });
   fakeNow = 0;
@@ -86,23 +99,26 @@ test("times out and removes its callback from the queue", async () => {
   fakeNow = 500;
   timeoutEntry.fn();
   assert.equal(await pending, null);
-  assert.equal(conn._callbacks.length, 0);
   assert.equal(timeoutEntry.fired, true);
 
-  // The stale reply never fires (timer was "cleared" and entry removed).
+  // The slot is preserved so a late reply still consumes it and cannot be
+  // misattributed to a subsequent queued callback.
+  assert.equal(conn._callbacks.length, 1);
+  assert.equal(conn._callbacks[0].name, "onReply");
 });
 
-test("a late reply after a real timeout does not resolve twice or leak the callback", async () => {
+test("a late reply after a real timeout consumes its tombstone slot without resolving twice", async () => {
   const measure = createSshPingLatencyProbe({ defaultTimeoutMs: 50 });
   const conn = createFakeSshClient({ delayMs: 500 });
   fakeNow = 0;
 
   const latency = await measure(conn);
   assert.equal(latency, null);
-  assert.equal(conn._callbacks.length, 0);
+  assert.equal(conn._callbacks.length, 1);
 
-  // The delayed fake reply eventually fires into an empty queue; the settled
-  // promise must stay null (no unhandled rejection / double resolve).
+  // The delayed fake reply fires into the preserved tombstone slot (the fake
+  // shifts it, like the real REQUEST_SUCCESS/REQUEST_FAILURE handlers); the
+  // settled promise must stay null (no unhandled rejection / double resolve).
   await new Promise((resolve) => setTimeout(resolve, 550));
   assert.equal(conn._callbacks.length, 0);
 });
