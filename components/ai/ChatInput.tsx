@@ -773,7 +773,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
     [searchMentionNotes, noteQuery],
   );
   const noteMentionKey = useMemo(
-    () => noteMentionItems.map((note) => note.id).join('|'),
+    () => JSON.stringify(noteMentionItems.map((note) => note.id)),
     [noteMentionItems],
   );
   const noteSearchInputRef = useRef<HTMLInputElement>(null);

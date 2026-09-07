@@ -618,7 +618,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   /** Mention Note: attach a Vault → Notes entry as inline context for the next send. */
   const mentionNote = useCallback((note: VaultNote) => {
     if (!canMentionNotes) return;
-    const upload = createVaultNoteAttachment(note);
+    const upload = createVaultNoteAttachment({ id: note.id, title: note.title.trim() || t('ai.chat.untitledNote') });
     if (!upload) {
       toast.error(t('ai.chat.mentionNoteInvalid', {
         title: String(note.title || '').trim() || t('ai.chat.untitledNote'),
