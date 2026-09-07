@@ -705,12 +705,14 @@ const REFLOW_ANCHOR_CONTEXT_CHARS = 96;
 // the viewed window repeats within the line, so the exact length is the
 // only disambiguator and a too-tight cap would silently drop it.
 const REFLOW_ANCHOR_LINE_LENGTH_CHARS = 262_144;
-// Cap on how far back the capture walks a wrapped logical line to its start
-// and how many physical rows the `charOffset` pass may translate. Both walks
-// step one physical row at a time, so a viewport deep inside a multi-megabyte
+// Cap on how far back the capture walks a wrapped logical line to its start,
+// how many physical rows the `charOffset` pass may translate, and how many
+// continuation rows the forward walk to a logical line's end may cross. Each
+// walk steps one physical row at a time, so a viewport inside a multi-megabyte
 // wrapped line (minified JSON, base64) would otherwise repeat O(line)
 // renderer-thread work on every column-changing fit frame. Beyond the cap the
-// anchor is dropped and the fit falls back to the plain row restore.
+// anchor is dropped (or its follower identity is dropped) and the fit falls
+// back to the next-best restore.
 const REFLOW_ANCHOR_MAX_LINE_ROWS = 2048;
 // Cap on how far the context lookup may scan a run of blank logical lines
 // after the anchor before giving up. A blank logical line is a single empty
@@ -848,13 +850,27 @@ const reflowAnchorLogicalLineLength = (
   return length;
 };
 
-/** First logical line strictly after the one starting at `row`, or null. */
+/**
+ * First logical line strictly after the one starting at `row`, or null.
+ *
+ * Bounded (`maxRows`): the walk crosses every continuation row of the line at
+ * `row` just to find where it ends, so a viewport near the top of a very long
+ * wrapped line would otherwise repeat an O(line) scan on every resize frame —
+ * even when nothing else is measured (a column grow, or the trim-delta skip).
+ * Beyond the bound the follower identity is dropped on both sides: capture
+ * records no context and resolve reports none, so they stay consistent and
+ * the anchor degrades to its own text.
+ */
 const reflowAnchorNextLogicalLineStart = (
   buffer: ReflowAnchorBuffer,
   row: number,
+  maxRows: number,
 ): number | null => {
   let next = row + 1;
-  while (next < buffer.length && buffer.getLine(next)?.isWrapped) next += 1;
+  while (next < buffer.length && buffer.getLine(next)?.isWrapped) {
+    if (next - row > maxRows) return null;
+    next += 1;
+  }
   return next < buffer.length ? next : null;
 };
 
@@ -874,13 +890,13 @@ const reflowAnchorNextNonBlankLogicalLineStart = (
   // scan; capture and resolve truncate identically, so the bound preserves
   // the two sides' agreement (see the constant's comment).
   const scanStart = row + 1;
-  let next = reflowAnchorNextLogicalLineStart(buffer, row);
+  let next = reflowAnchorNextLogicalLineStart(buffer, row, REFLOW_ANCHOR_MAX_LINE_ROWS);
   while (
     next !== null
     && next - scanStart <= REFLOW_ANCHOR_CONTEXT_SCAN_ROWS
     && reflowAnchorJoinTextPrefix(buffer, next, 1) === ""
   ) {
-    next = reflowAnchorNextLogicalLineStart(buffer, next);
+    next = reflowAnchorNextLogicalLineStart(buffer, next, REFLOW_ANCHOR_MAX_LINE_ROWS);
   }
   return next !== null && next - scanStart <= REFLOW_ANCHOR_CONTEXT_SCAN_ROWS
     ? next
@@ -1043,8 +1059,17 @@ const reflowAnchorContextIsCursorLine = (
   if (typeof cursorY !== "number" || !Number.isFinite(cursorY)) return false;
   const cursorRow = buffer.baseY + cursorY;
   if (cursorRow < contextRow) return false;
+  // Stop at the cursor row: the answer only depends on whether the context
+  // line reaches it, so walking a very long wrapped line past the cursor to
+  // its end would repeat an O(line) scan per candidate match for nothing.
   let contextEnd = contextRow;
-  while (contextEnd + 1 < buffer.length && buffer.getLine(contextEnd + 1)?.isWrapped) contextEnd += 1;
+  while (
+    contextEnd < cursorRow
+    && contextEnd + 1 < buffer.length
+    && buffer.getLine(contextEnd + 1)?.isWrapped
+  ) {
+    contextEnd += 1;
+  }
   return cursorRow <= contextEnd;
 };
 
