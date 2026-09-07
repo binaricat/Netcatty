@@ -468,7 +468,7 @@ export const createTerminalOutputHistoryPreview = (options?: {
   // overwrite the last column instead.
   let autowrap = true;
   // Cursor saved by SC/DECSC (CSI s / ESC 7) for CSI u / ESC 8 to restore.
-  let savedCursor: { row: number; cell: number } | null = null;
+  let savedCursor: { row: number; cell: number; originMode: boolean; autowrap: boolean } | null = null;
   // UTF-16 units of the grapheme the last appending write left open at the
   // line tail, plus the cursor cell just past it. The backend can split a
   // grapheme across display chunks (base in one chunk, its ZWJ / combining
@@ -805,7 +805,7 @@ export const createTerminalOutputHistoryPreview = (options?: {
   };
 
   const saveTrackedCursor = () => {
-    savedCursor = { row: screenRow, cell: cursorCell };
+    savedCursor = { row: screenRow, cell: cursorCell, originMode, autowrap };
   };
 
   /**
@@ -833,6 +833,8 @@ export const createTerminalOutputHistoryPreview = (options?: {
 
   const restoreTrackedCursor = () => {
     if (!savedCursor) return;
+    originMode = savedCursor.originMode;
+    autowrap = savedCursor.autowrap;
     const savedCell = Math.min(
       maxChars - 1,
       savedCursor.cell,

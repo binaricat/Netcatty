@@ -65,3 +65,20 @@ for (const chunks of [["abc中X"], ["abc中XYZ"], ["abc中文X"], ["abc中文", 
     } finally { term.dispose(); }
   });
 }
+
+for (const [save, restore] of [["\x1b7", "\x1b8"], ["\x1b[s", "\x1b[u"]]) {
+  test(`cursor restore also restores wrapping mode: ${JSON.stringify(save)}`, async () => {
+    const { term, history, write } = createHarness(5);
+    try {
+      await write(`\x1b[?7l${save}\x1b[?7h${restore}abcdef`);
+      assert.deepEqual(history.getLines(), [term.buffer.active.getLine(0)?.translateToString(true)]);
+    } finally { term.dispose(); }
+  });
+  test(`cursor restore also restores origin mode: ${JSON.stringify(save)}`, async () => {
+    const { term, history, write } = createHarness(5);
+    try {
+      await write(`\x1b[2;5r\x1b[?6h${save}\x1b[?6lA${restore}X\x1b[1;2HY`);
+      assert.deepEqual(history.getLines(), [term.buffer.active.getLine(0)?.translateToString(true), term.buffer.active.getLine(1)?.translateToString(true)]);
+    } finally { term.dispose(); }
+  });
+}
