@@ -37,10 +37,7 @@ import {
   releaseTransferPauseTree,
   waitUntilTransferPauseReleased,
 } from "./transferPauseLatch";
-import {
-  bumpTransferControlEpoch,
-  settleTransferControlEpochTree,
-} from "./transferControlEpoch";
+import { bumpTransferControlEpoch } from "./transferControlEpoch";
 import { transferRuntime } from "./transferRuntime";
 import {
   clearTransferCancelled,
@@ -48,7 +45,6 @@ import {
   isTransferCancelledFlag,
   markTransferCancelled,
   markTransferCancelledTree,
-  settleTransferCancelTree,
 } from "./transferCancelLatch";
 import type { TransferResult, UseSftpTransfersParams, UseSftpTransfersResult } from "./useSftpTransfers.types";
 import type { TransferConnectionLease } from "./transferConnectionPool";
@@ -1809,127 +1805,109 @@ export const useSftpTransfers = ({
         return "attention";
       }
 
-      const sourceEncoding = params.sourceEncoding ?? "auto";
-      // Mutable counter to track child failures outside React state,
-      // so the final status check doesn't depend on render timing.
-      let childFailureCount = 0;
+      const patchDownload = (updates: Partial<TransferTask>) => {
+        transferRuntime.patchTask(task.id, updates);
+        const canonical = transferRuntime.getTask(task.id);
+        if (canonical) setTransfers((prev) => prev.map((row) => row.id === task.id ? canonical : row));
+      };
+      const executeDownload = async (): Promise<TransferStatus> => {
+        const sourceEncoding = params.sourceEncoding ?? "auto";
+        // Mutable counter to track child failures outside React state,
+        // so the final status check doesn't depend on render timing.
+        let childFailureCount = 0;
 
-      // Dedicated pool only when host id is known — never fall back to browse
-      // (tab close would kill the download and freeze the global center).
-      let sourceWorkLease: TransferConnectionLease | null = null;
-      let workingSourceSftpId = params.sftpId;
-      if (acquireTransferSession && params.sourceHostId) {
-        sourceWorkLease = await acquireTransferSession(
-          params.sourceHostId,
-          `${task.id}:work-source`,
-        );
-        workingSourceSftpId = sourceWorkLease.sftpId;
-      }
+        // Dedicated pool only when host id is known — never fall back to browse
+        // (tab close would kill the download and freeze the global center).
+        let sourceWorkLease: TransferConnectionLease | null = null;
+        let workingSourceSftpId = params.sftpId;
+        try {
+          if (acquireTransferSession && params.sourceHostId) {
+            sourceWorkLease = await acquireTransferSession(
+              params.sourceHostId,
+              `${task.id}:work-source`,
+            );
+            workingSourceSftpId = sourceWorkLease.sftpId;
+          }
+          await waitUntilTransferResumed(task.id);
+          if (cancelledTasksRef.current.has(task.id)) throw new Error("Transfer cancelled");
+          if (params.isDirectory) patchDownload({ status: "transferring", error: undefined });
 
-      try {
-        if (params.isDirectory) {
-          childFailureCount = await transferDirectory(
-            task,
-            workingSourceSftpId,
-            null,       // targetSftpId = null (local)
-            false,       // sourceIsLocal = false
-            true,        // targetIsLocal = true
-            sourceEncoding,
-            "auto",      // targetEncoding
-            task.id,
-            false,       // sameHost
-            0,           // symlinkDepth
-            true,        // followSymlinks — download should expand symlink dirs
-          );
-        } else {
-          await transferFile(
-            task,
-            workingSourceSftpId,
-            null,
-            false,
-            true,
-            sourceEncoding,
-            "auto",
-            task.id,
-          );
-        }
+          if (params.isDirectory) {
+            childFailureCount = await transferDirectory(
+              task,
+              workingSourceSftpId,
+              null,       // targetSftpId = null (local)
+              false,       // sourceIsLocal = false
+              true,        // targetIsLocal = true
+              sourceEncoding,
+              "auto",      // targetEncoding
+              task.id,
+              false,       // sameHost
+              0,           // symlinkDepth
+              true,        // followSymlinks — download should expand symlink dirs
+            );
+          } else {
+            await transferFile(
+              task,
+              workingSourceSftpId,
+              null,
+              false,
+              true,
+              sourceEncoding,
+              "auto",
+              task.id,
+            );
+          }
 
-        // Use childFailureCount (tracked outside React state) to determine
-        // final status reliably, regardless of render timing.
-        // Cancel must win: transferDirectory counts cancelled children as errors,
-        // but cancelTransfer already marked the parent cancelled — do not demote
-        // it to failed with "Some files failed to transfer".
-        // Re-read cancel inside the state update so a cancel that lands after
-        // transferDirectory returns cannot be overwritten by completed/failed.
-        let appliedStatus: TransferStatus = "completed";
-        setTransfers((prev) => {
-          const liveParent = prev.find((candidate) => candidate.id === task.id);
-          const completedCount = (liveParent?.directoryResumeCheckpoint?.completedEntries ?? 0) + prev.filter(
-            (t) => t.parentTaskId === task.id && t.status === "completed",
-          ).length;
-          return prev.map((t) => {
-            if (t.id !== task.id) return t;
-            const parentCancelled = t.status === "cancelled"
-              || cancelledTasksRef.current.has(task.id);
-            const resolved = resolveDirectDirectoryDownloadFinalStatus({
-              parentCancelled,
-              childFailureCount,
-            });
-            appliedStatus = resolved.status;
-            if (resolved.status === "cancelled") {
-              cancelledTasksRef.current.delete(task.id);
-              return {
-                ...t,
-                status: "cancelled" as TransferStatus,
-                error: undefined,
-                endTime: Date.now(),
-                // Keep partial progress — do not look 100% complete when cancelled.
-                speed: 0,
-              };
-            }
-            const finalTotal = t.totalBytes > 0 ? t.totalBytes : completedCount;
-            const hasFailures = resolved.status === "failed";
-            return {
-              ...t,
-              status: resolved.status,
-              error: resolved.error,
-              endTime: Date.now(),
-              totalBytes: finalTotal,
-              transferredBytes: hasFailures ? completedCount : finalTotal,
-              speed: 0,
-            };
+          // Runtime owns lifecycle while the walk is registered. Publish the
+          // final root there before mirroring it to the panel.
+          const rows = sftpTransferCenterStore.getSnapshot().tasks;
+          const liveParent = transferRuntime.getTask(task.id) ?? task;
+          const completedCount = (liveParent.directoryResumeCheckpoint?.completedEntries ?? 0)
+            + rows.filter((row) => row.parentTaskId === task.id && row.status === "completed").length;
+          const resolved = resolveDirectDirectoryDownloadFinalStatus({
+            parentCancelled: liveParent.status === "cancelled" || cancelledTasksRef.current.has(task.id),
+            childFailureCount,
           });
-        });
-        activeChildIdsRef.current.delete(task.id);
-        return appliedStatus;
-      } catch (err) {
-        activeChildIdsRef.current.delete(task.id);
-        const isCancelled = cancelledTasksRef.current.has(task.id);
-        // Clean up cancelled task tracking to prevent memory leak
-        if (isCancelled) cancelledTasksRef.current.delete(task.id);
-        const errMsg = err instanceof Error ? err.message : String(err);
-        setTransfers((prev) =>
-          prev.map((t) =>
-            t.id === task.id
-              ? {
-                  ...t,
-                  status: isCancelled ? ("cancelled" as TransferStatus) : ("failed" as TransferStatus),
-                  error: isCancelled ? undefined : errMsg,
-                  endTime: Date.now(),
-                }
-              : t,
-          ),
-        );
-        return isCancelled ? "cancelled" : "failed";
-      } finally {
-        sourceWorkLease?.release();
-        sourceWorkLease = null;
-        const childIds = sftpTransferCenterStore.getSnapshot().tasks
-          .filter((candidate) => candidate.parentTaskId === task.id)
-          .map((candidate) => candidate.id);
-        const relatedChildIds = settleTransferCancelTree(task.id, childIds);
-        settleTransferControlEpochTree(task.id, relatedChildIds);
-      }
+          const finalTotal = liveParent.totalBytes > 0 ? liveParent.totalBytes : completedCount;
+          patchDownload({
+            status: resolved.status,
+            error: resolved.error,
+            endTime: Date.now(),
+            speed: 0,
+            ...(resolved.status === "cancelled" ? {} : {
+              totalBytes: finalTotal,
+              transferredBytes: resolved.status === "failed" ? completedCount : finalTotal,
+            }),
+          });
+          const appliedStatus = transferRuntime.getTask(task.id)?.status ?? resolved.status;
+          activeChildIdsRef.current.delete(task.id);
+          return appliedStatus;
+        } catch (err) {
+          activeChildIdsRef.current.delete(task.id);
+          const isCancelled = cancelledTasksRef.current.has(task.id);
+          // Clean up cancelled task tracking to prevent memory leak
+          if (isCancelled) cancelledTasksRef.current.delete(task.id);
+          const errMsg = err instanceof Error ? err.message : String(err);
+          patchDownload({
+            status: isCancelled ? "cancelled" : "failed",
+            error: isCancelled ? undefined : errMsg,
+            endTime: Date.now(),
+            speed: 0,
+          });
+          return isCancelled ? "cancelled" : "failed";
+        } finally {
+          sourceWorkLease?.release();
+          sourceWorkLease = null;
+        }
+      };
+      let result: TransferStatus = "failed";
+      await runTrackedTransferAttempt(inFlightTransferIdsRef.current, task.id, () =>
+        transferRuntime.runWalk(task.id, async () => {
+          result = await executeDownload();
+        }),
+      );
+      return result;
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [sftpSessionsRef, acquireTransferSession],

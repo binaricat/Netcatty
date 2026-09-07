@@ -1,16 +1,23 @@
 "use strict";
 
+const { buildBashHistoryCleanup, bashHistoryScratchNames } = require("./ptyExecHelpers.cjs");
+
 // Both fish and POSIX shells accept this command. Inspect the parent of a
 // short-lived sh in the interactive PTY, rather than the SSH login shell.
 function buildLiveShellProbe(marker) {
   const script = 'if test -r "/proc/$PPID/comm"; then IFS= read -r name < "/proc/$PPID/comm"; else name=$(ps -p "$PPID" -o comm= 2>/dev/null); fi; '
     + `printf "${marker}_P:%s\\n" "$name"`;
-  // Put the job marker near the start of the echo, as the existing wrappers
-  // do, so preload can suppress it before a long command is split into chunks.
-  // The builtin completion marker still runs if sh cannot launch. Leave it
-  // unterminated so preload hides the intermediate prompt and wrapper echo
-  // on the same marker-bearing line, including across output chunks.
-  return ` true ${marker}; command sh -c '${script}' 2>/dev/null; printf '%s' '${marker}_Q'\n`;
+  // command eval bypasses an eval customization; plain eval is the fallback
+  // when command itself is shadowed. Never invoke a shadowed builtin after the
+  // command path already succeeded. Both eval bodies remain Bash-guarded.
+  const cleanup = buildBashHistoryCleanup(marker, true);
+  const { dispatcher } = bashHistoryScratchNames(marker);
+  const clear = `[ -z "\${${dispatcher}-}" ]||$${dispatcher} unset ${dispatcher}`;
+  const fallback = `[ "\${${dispatcher}-}" = command ]||{ ${cleanup}; };${clear}`;
+  // Continuation lines stay within canonical input limits. Each echo carries
+  // the marker so the renderer also hides continuation prompts.
+  return ` true ${marker}; command sh -c '${script}' 2>/dev/null; \\\n: '${marker}'; \\command eval '${cleanup}' 2>/dev/null || true; \\\n: '${marker}'; \\eval '${fallback}' 2>/dev/null || true; \\\n: '${marker}'; \\command eval '${clear}' 2>/dev/null || true; printf '%s' '${marker}_Q'\n`;
+
 }
 
 function parseLiveShellProbe(output, marker) {

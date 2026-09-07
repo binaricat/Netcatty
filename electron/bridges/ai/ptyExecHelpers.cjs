@@ -194,34 +194,64 @@ function buildPendingInputClearPrefix(shellKind) {
       // i+Backspace leaves every mode on an empty editable line.
       return "\x1bggd2147483647d\x1br\x1b\x1bi\x08";
     default:
-      return "\x15\x0b";
+      // Kill the suffix before the prefix. Canonical/no-editing terminals do
+      // not bind Ctrl+K; the trailing Ctrl+U must erase that literal byte too.
+      return "\x0b\x15";
   }
+}
+
+function bashHistoryScratchNames(marker) {
+  const suffix = String(marker || "").toLowerCase().replace(/[^a-z0-9]/g, "").slice(-12) || "dflt";
+  return { entry: `__nc_h_${suffix}`, dispatcher: `__nc_d_${suffix}` };
+}
+
+function buildBashHistoryCleanup(marker, keepDispatcher = false) {
+  // Expanded dispatcher names bypass aliases. Verify that a dispatcher really
+  // executes builtins before trusting an empty history read from a no-op function.
+  // After deletion, verify the entry is gone: a shadowed history function may
+  // delete only in a subshell. Stop as soon as the real dispatcher succeeds.
+  // Invocation-specific scratch names avoid readonly user variables. Clear the
+  // history-bearing scratch through the verified dispatcher, never plain unset.
+  const { entry, dispatcher } = bashHistoryScratchNames(marker);
+  const unsetNames = keepDispatcher ? entry : `${entry} ${dispatcher}`;
+  return `[ "\${BASH_VERSION-}" ]&&{ for ${dispatcher} in command builtin;do ${entry}=$($${dispatcher} printf x);[ "$${entry}" = x ]||continue;${entry}=$($${dispatcher} history 1);case "$${entry}" in *${marker}*) ${entry}=\${${entry}#"\${${entry}%%[^[:space:]]*}"};$${dispatcher} history -d "\${${entry}%%[[:space:]]*}";${entry}=$($${dispatcher} history 1);case "$${entry}" in *${marker}*) continue;;esac;;esac;$${dispatcher} unset ${unsetNames};break;done; } 2>/dev/null`;
 }
 
 function buildPosixWrapperBody(command, marker, startFormat) {
   const noPager = "PAGER=cat SYSTEMD_PAGER= GIT_PAGER=cat LESS= ";
   const commandLines = String(command || "").replace(/\r\n?/g, "\n").split("\n");
-  const cmdAssign = commandLines.length > 1
+  let cmdAssign = commandLines.length > 1
     ? `${marker}_cmd=$(printf '%s\\n' ${commandLines.map((line) => `'${escapePosixSingleQuoted(line)}'`).join(" ")})`
     : `${marker}_cmd='${escapePosixSingleQuoted(command)}'`;
-  // Issue #3265: without HISTCONTROL=ignorespace the wrapper line is recorded
-  // in bash history. Pressing arrow-up then makes readline redraw that huge
-  // marker-containing line, and the preload __NCMCP_ filter suppresses the
-  // redraw fragments that contain the marker — readline's row accounting
-  // diverges from what the terminal actually rendered, so every subsequent
-  // history-navigation redraw leaves fragments of the AI command on screen.
-  // Match the latest entry before deleting it, preserving user history when
-  // HISTCONTROL=ignorespace skips the wrapper. Read the entry's actual number:
-  // older Bash versions can expose HISTCMD as the next history number.
-  // builtin history bypasses user aliases and functions. The unset-safe guard
-  // leaves non-Bash shells alone, including shells with nounset enabled.
-  // Use ^ for the Bash bracket negation: ! triggers interactive zsh history
-  // expansion before the Bash-only guard can run.
-  const historyCleanup =
-    `[ -n "\${BASH_VERSION-}" ] && { ${marker}_h=$(builtin history 1 2>/dev/null); case "$${marker}_h" in *${marker}*) ${marker}_h=\${${marker}_h#"\${${marker}_h%%[^[:space:]]*}"}; builtin history -d "\${${marker}_h%%[[:space:]]*}" 2>/dev/null ;; esac; }`;
-  return (
-    `${marker}=0; ${cmdAssign}; { printf '${startFormat}' '${marker}_S'; trap ':' INT; ( ${noPager}eval "$${marker}_cmd" ); __NCMCP_rc=$?; trap - INT; printf '%s\\n' '${marker}_E:'\"$__NCMCP_rc\"; ${historyCleanup}; (exit $__NCMCP_rc); }`
-  );
+  if (Buffer.byteLength(cmdAssign, 'utf8') > 650) {
+    // Canonical PTYs limit bytes per physical input line, regardless of write
+    // pacing. Emit bounded quoted pieces inside one command substitution; each
+    // continuation keeps the marker visible to the terminal echo filter.
+    const writes = [];
+    for (const [index, line] of commandLines.entries()) {
+      let chunk = '';
+      let bytes = 0;
+      for (const character of line) {
+        const quoted = escapePosixSingleQuoted(character);
+        const size = Buffer.byteLength(quoted, 'utf8');
+        if (bytes + size > 512) {
+          writes.push(`printf '%s' '${chunk}'`);
+          chunk = '';
+          bytes = 0;
+        }
+        chunk += quoted;
+        bytes += size;
+      }
+      writes.push(`printf '${index < commandLines.length - 1 ? '%s\\n' : '%s'}' '${chunk}'`);
+    }
+    cmdAssign = `${marker}_cmd=$(${writes.join(`; \\\n: '${marker}'; `)})`;
+  }
+  const historyCleanup = buildBashHistoryCleanup(marker);
+  const prefix = `${marker}=0; ${cmdAssign}; { printf '${startFormat}' '${marker}_S'; trap ':' INT; ( ${noPager}eval "$${marker}_cmd" ); __NCMCP_rc=$?; trap - INT; printf '%s\\n' '${marker}_E:'\"$__NCMCP_rc\"`;
+  const suffix = `${historyCleanup}; (exit $__NCMCP_rc); }`;
+  const separator = prefix.length + suffix.length + 2 > 1000
+    ? `; \\\n: '${marker}'; ` : "; ";
+  return `${prefix}${separator}${suffix}`;
 }
 
 function buildWrappedCommand(command, shellKind, marker, separateStartMarker = false) {
@@ -259,7 +289,7 @@ function buildWrappedCommand(command, shellKind, marker, separateStartMarker = f
 
     case "posix":
     default: {
-      // Single-line compound command with early marker.
+      // Compound command with an early marker on each physical line.
       //
       // Layout: __NCMCP_xxx=0; { ... MARKER_S; eval command; MARKER_E; }
       //
@@ -276,7 +306,7 @@ function buildWrappedCommand(command, shellKind, marker, separateStartMarker = f
       //    keeps shell syntax errors inside the eval call so the wrapper
       //    can still emit the end marker and return a non-zero exit code.
       //
-      // 3) Single-line { ... } is parsed fully before execution, so SIGINT
+      // 3) The complete { ... } group is parsed before execution, so SIGINT
       //    cannot cause bash to flush the end marker from the input buffer.
       //    trap ':' INT lets child processes receive SIGINT normally while
       //    preventing the shell from aborting the compound command.
@@ -470,6 +500,8 @@ module.exports = {
   resolveEffectiveShellKind,
   buildPendingInputClearPrefix,
   buildWrappedCommand,
+  buildBashHistoryCleanup,
+  bashHistoryScratchNames,
   findEndMarker,
   normalizePtyOutput,
   appendBoundedOutput,

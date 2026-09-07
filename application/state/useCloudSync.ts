@@ -6,6 +6,7 @@
  * Uses useSyncExternalStore for real-time state synchronization across all components.
  */
 
+import { useCloudSyncAutoUnlock } from './useCloudSyncAutoUnlock';
 import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 import {
   type CloudProvider,
@@ -266,42 +267,14 @@ export const useCloudSync = (): CloudSyncHook => {
     getConvergentSyncLocalConfigSnapshot,
   );
 
-  // Auto-unlock: if a master key exists, retrieve the persisted password (Electron safeStorage)
-  // and unlock silently so users don't have to manage a LOCKED state in the UI.
-  // Track the master key config hash to detect when a new master key is set up in another window.
-  const lastMasterKeyHashRef = useRef<string | null>(null);
-  const attemptedAutoUnlockRef = useRef(false);
-  useEffect(() => {
-    // Compute a simple hash of the master key config to detect changes
-    const currentHash = state.masterKeyConfig 
-      ? JSON.stringify({ salt: state.masterKeyConfig.salt, kdf: state.masterKeyConfig.kdf })
-      : null;
-    
-    // If master key config changed (e.g., set up in settings window), reset the attempt flag
-    if (currentHash !== lastMasterKeyHashRef.current) {
-      lastMasterKeyHashRef.current = currentHash;
-      attemptedAutoUnlockRef.current = false;
-    }
-    
-    if (attemptedAutoUnlockRef.current) return;
-    if (state.securityState !== 'LOCKED') return;
-    attemptedAutoUnlockRef.current = true;
-
-    void (async () => {
-      try {
-        const bridge = netcattyBridge.get();
-        const password = await bridge?.cloudSyncGetSessionPassword?.();
-        if (!password) return;
-
-        const ok = await manager.unlock(password);
-        if (!ok) {
-          void bridge?.cloudSyncClearSessionPassword?.();
-        }
-      } catch {
-        // Ignore auto-unlock errors; manual actions will surface them.
-      }
-    })();
-  }, [state.securityState, state.masterKeyConfig]);
+  useCloudSyncAutoUnlock({
+    securityState: state.securityState,
+    masterKeyIdentity: state.masterKeyConfig
+      ? JSON.stringify(state.masterKeyConfig)
+      : null,
+    manager,
+    bridge: netcattyBridge.get(),
+  });
 
   useEffect(() => {
     if (state.securityState !== 'UNLOCKED') return;

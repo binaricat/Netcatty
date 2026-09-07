@@ -94,6 +94,7 @@ function startPtyJob(ptyStream, command, options) {
 
   const usesLiveShellProbe = probeLiveShell && ["posix", "fish"].includes(resolvedShellKind);
   let probingShell = usesLiveShellProbe;
+  let deliveringInput = false;
   let probeOutput = "";
 
   let output = "";
@@ -200,6 +201,9 @@ function startPtyJob(ptyStream, command, options) {
   // Foreground execs use the configured timeoutMs as the deadline (matching
   // the pre-PR behavior); background jobs use a fixed 30s since their main
   // timeout is much longer (1 hour) and meant for the actual command.
+  // The timer is armed once input delivery completes (see writeInput) so the
+  // paced-typing time for oversized probes/wrappers is excluded from the
+  // startup budget instead of counting against it.
   const BG_STARTUP_TIMEOUT_MS = 30000;
   function armStartupTimeout() {
     const startupMs = maxBufferedChars > 0 ? BG_STARTUP_TIMEOUT_MS : timeoutMs;
@@ -526,7 +530,7 @@ function startPtyJob(ptyStream, command, options) {
         : Buffer.from(String(data ?? ""));
     const text = outputDecoder.write(bytes);
     if (!text) return;
-    if (!pendingEnd) armOutputTimeout();
+    if (!pendingEnd && !deliveringInput) armOutputTimeout();
 
     if (probingShell) {
       probeOutput = (probeOutput + text).slice(-16384);
@@ -652,7 +656,6 @@ function startPtyJob(ptyStream, command, options) {
 
   armOutputTimeout();
   armWallTimeout();
-  armStartupTimeout();
 
   unsubscribe = subscribeToPtyData(ptyStream, onData);
 
@@ -729,13 +732,61 @@ function startPtyJob(ptyStream, command, options) {
     }
   }
 
+  let inputWriteTimer = null;
+  let inputWriteGeneration = 0;
+  function stopInputWrite() {
+    inputWriteGeneration += 1;
+    clearTimeout(inputWriteTimer);
+    inputWriteTimer = null;
+  }
+  cleanupFns.push(stopInputWrite);
+
+  function writeInput(text) {
+    stopInputWrite();
+    // Each delivery gets a fresh wait budget, including the transition from
+    // probe to wrapper. Echo may be disabled while we are still typing.
+    clearStartupTimeout();
+    clearTimeout(timeoutId);
+    deliveringInput = true;
+    const generation = inputWriteGeneration;
+    let offset = 0;
+    // Readline may overrun its input queue when long probes arrive in one
+    // write. Yield between bounded chunks; cancelled/replaced jobs must never
+    // finish typing an old command into a subsequent prompt.
+    const chunkSize = usesLiveShellProbe && text.length > 1024 ? 128 : text.length;
+    const writeNext = () => {
+      if (finished || cancelRequested || generation !== inputWriteGeneration) return;
+      let end = Math.min(offset + chunkSize, text.length);
+      // Do not split a UTF-16 surrogate pair across independently encoded writes.
+      if (end < text.length && /[\uD800-\uDBFF]/.test(text[end - 1])) end -= 1;
+      ptyStream.write(text.slice(offset, end));
+      offset = end;
+      if (offset < text.length && generation === inputWriteGeneration && !finished && !cancelRequested) {
+        inputWriteTimer = setTimeout(() => {
+          try { writeNext(); } catch (error) {
+            finish(preStartOutput, -1, `Terminal input failed: ${error.message}`);
+          }
+        }, 30);
+      } else {
+        // Input delivery is complete: only now does the startup deadline
+        // begin, so paced typing time never consumes the startup budget.
+        if (!finished && !cancelRequested && generation === inputWriteGeneration) {
+          deliveringInput = false;
+          armOutputTimeout();
+          if (!foundStart) armStartupTimeout();
+        }
+      }
+    };
+    writeNext();
+  }
+
   function writeWrappedCommand() {
     const wrapped = buildWrappedCommand(command, resolvedShellKind, marker, probeLiveShell);
-    ptyStream.write(`${buildPendingInputClearPrefix(resolvedShellKind)}${wrapped}`);
+    writeInput(`${buildPendingInputClearPrefix(resolvedShellKind)}${wrapped}`);
   }
 
   if (probingShell) {
-    ptyStream.write(`${buildPendingInputClearPrefix(resolvedShellKind)}${buildLiveShellProbe(marker)}`);
+    writeInput(`${buildPendingInputClearPrefix(resolvedShellKind)}${buildLiveShellProbe(marker)}`);
   } else {
     writeWrappedCommand();
   }

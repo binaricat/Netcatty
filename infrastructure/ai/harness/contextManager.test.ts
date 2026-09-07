@@ -6,6 +6,24 @@ import { TraceStore } from './traceStore.ts';
 import { ToolOutputStore } from './toolOutputStore.ts';
 import { createInitialCattyRuntimeContext } from './cattyRuntimeContext.ts';
 
+test('normal turn and step preparation preserve exact user literals alongside noisy tool output', async () => {
+  const literal = "printf '%s\\n' 'CANONICAL_GUI_" + 'x'.repeat(1200) + "_END'";
+  const content = `Execute exactly: ${literal}\n\n\n\n${'keep this line\n'.repeat(5)}`;
+  for (const userContent of [content, [{ type: 'text' as const, text: content }]]) {
+    const messages: ModelMessage[] = [
+      { role: 'user', content: userContent },
+      { role: 'assistant', content: [{ type: 'tool-call', toolCallId: 'noise', toolName: 'terminal_execute', input: {} }] },
+      { role: 'tool', content: [{ type: 'tool-result', toolCallId: 'noise', toolName: 'terminal_execute', output: { type: 'text', value: 'log '.repeat(10000) } }] },
+    ];
+    const turn = await prepareTurnContext({ messages, backend: 'catty', contextWindow: 1_300_000, trigger: 'pre-turn' });
+    const step = await prepareStepContext({ messages: turn.messages, contextWindow: 1_300_000, stepNumber: 0 });
+    for (const prepared of [turn, step]) {
+      assert.deepEqual(prepared.messages.find(message => message.role === 'user')?.content, userContent);
+      assert.ok(JSON.stringify(prepared.messages).length < JSON.stringify(messages).length);
+    }
+  }
+});
+
 test('prepareTurnContext applies typed compression before LLM summarize threshold', async () => {
   const longOutput = 'line\n'.repeat(20_000);
   const messages: ModelMessage[] = [

@@ -20,10 +20,10 @@ import {
     X,
     XCircle,
 } from 'lucide-react';
-import React, { memo, useEffect, useState } from 'react';
+import React, { memo } from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import { getParentPath } from '../../application/state/sftp/utils';
-import { useSftpTransferTask } from '../../application/state/sftpTransferCenterStore';
+import { useSftpTransferTask, useSftpTransferResuming } from '../../application/state/sftpTransferCenterStore';
 import { cn } from '../../lib/utils';
 import { TransferTask } from '../../types';
 import {
@@ -136,8 +136,6 @@ const SftpTransferItemInner: React.FC<SftpTransferItemProps> = ({
     // panel setTransfersState for every tick — that re-rendered the whole SFTP
     // tree and pegged the renderer during large copies.
     const task = useSftpTransferTask(propsTask.id, propsTask);
-    // Optimistic spinner from click until store status moves off paused/interrupted.
-    const [resumeClicked, setResumeClicked] = useState(false);
 
     // Same progress model as the global transfer center (done · found for folders).
     const isDirParent = isDirectoryParentTask(task);
@@ -159,21 +157,8 @@ const SftpTransferItemInner: React.FC<SftpTransferItemProps> = ({
     const storeResuming = task.reconnectRequired === true
         && ['pending', 'queued', 'transferring'].includes(task.status)
         && !task.error;
-    const isResuming = storeResuming
-        || (resumeClicked && ['paused', 'interrupted', 'attention', 'pending', 'queued'].includes(task.status) && !task.error);
-    useEffect(() => {
-        if (!resumeClicked) return;
-        if (
-            storeResuming
-            || task.status === 'transferring'
-            || task.status === 'completed'
-            || task.status === 'failed'
-            || task.status === 'cancelled'
-            || !!task.error
-        ) {
-            setResumeClicked(false);
-        }
-    }, [resumeClicked, storeResuming, task.status, task.error]);
+    const sharedResuming = useSftpTransferResuming(task.id);
+    const isResuming = sharedResuming || storeResuming;
     const effectiveSpeed = task.status === 'transferring'
         ? (Number.isFinite(task.speed) && task.speed > 0 ? task.speed : 0)
         : 0;
@@ -417,7 +402,6 @@ const SftpTransferItemInner: React.FC<SftpTransferItemProps> = ({
                         className={actionButtonClass}
                         data-action="resume-transfer"
                         {...oncePerActivationHandlers(() => {
-                            setResumeClicked(true);
                             onResume();
                         })}
                         aria-label={actionAriaLabel(resumeActionLabel)}

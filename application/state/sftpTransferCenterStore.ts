@@ -109,6 +109,8 @@ export interface SftpTransferCenterStore {
   /** Insert or merge tasks by id (used by dedicated directory resume for children). */
   upsertTasks(incoming: readonly TransferTask[]): void;
   canControl(taskId: string): boolean;
+  subscribeResume(listener: Listener): () => void;
+  isResuming(taskId: string): boolean;
   pause(taskId: string): Promise<void>;
   resume(taskId: string): Promise<void>;
   cancel(taskId: string): Promise<void>;
@@ -431,6 +433,13 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
   let persistenceDirty = false;
   let persistenceTimer: ReturnType<typeof setTimeout> | null = null;
   const resumeInvocations = new Map<string, Promise<void>>();
+  // Ephemeral control intent: never serialize this or change bridge lifecycle epochs.
+  const resumeRequests = new Map<string, symbol>();
+  const resumeListeners = new Set<Listener>();
+  const notifyResume = () => resumeListeners.forEach((listener) => listener());
+  const clearResumeRequest = (taskId: string) => {
+    if (resumeRequests.delete(taskId)) notifyResume();
+  };
   const resumePreparationFailures = new Map<string, string>();
   let dedicatedResumeHandler: DedicatedTransferResumeHandler | null = null;
   const dedicatedResumeWaiters = new Set<{
@@ -1725,114 +1734,140 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
         controls.adopt && controls.canAdopt?.(task)
       )));
     },
-    pause: (taskId) => invoke(taskId, "pause"),
+    subscribeResume(listener) {
+      resumeListeners.add(listener);
+      return () => { resumeListeners.delete(listener); };
+    },
+    isResuming(taskId) {
+      if (!resumeRequests.has(taskId)) return false;
+      const task = tasks.find((candidate) => candidate.id === taskId);
+      return !!task && !task.error
+        && ["paused", "interrupted", "attention", "pending", "queued"].includes(task.status);
+    },
+    pause(taskId) {
+      clearResumeRequest(taskId);
+      return invoke(taskId, "pause");
+    },
     async resume(taskId) {
-      const startFresh = () => {
-        const running = invoke(taskId, "resume").finally(() => {
-          if (resumeInvocations.get(taskId) === running) resumeInvocations.delete(taskId);
-        });
-        resumeInvocations.set(taskId, running);
-        return running;
-      };
+      const request = Symbol("resume");
+      resumeRequests.set(taskId, request);
+      notifyResume();
+      const runResume = async () => {
+        const startFresh = () => {
+          const running = invoke(taskId, "resume").finally(() => {
+            if (resumeInvocations.get(taskId) === running) resumeInvocations.delete(taskId);
+          });
+          resumeInvocations.set(taskId, running);
+          return running;
+        };
 
-      const existing = resumeInvocations.get(taskId);
-      if (existing) {
-        // Dedicated resume holds the invocation for the full stream lifetime.
-        const task = tasks.find((candidate) => candidate.id === taskId);
-        if (task?.status === "cancelled") return existing;
+        const existing = resumeInvocations.get(taskId);
+        if (existing) {
+          // Dedicated resume holds the invocation for the full stream lifetime.
+          const task = tasks.find((candidate) => candidate.id === taskId);
+          if (task?.status === "cancelled") return existing;
 
-        // Soft-unpause live backend streams when still paused under a held run.
-        // Dedicated *directory* walks treat status===paused as shouldAbort between
-        // files, so soft-rejoin is unsafe (dying promise + false transferring).
-        // Wind down soft-paused children then startFresh from checkpoints.
-        // Single-file dedicated (and non-directory live streams) soft-unpause.
-        if (task && (task.status === "paused" || task.status === "pausing")) {
-          const childIds = tasks
-            .filter((candidate) => candidate.parentTaskId === taskId
-              && (candidate.status === "paused"
-                || candidate.status === "pausing"
-                || candidate.status === "transferring"))
-            .map((candidate) => candidate.id);
+          // Soft-unpause live backend streams when still paused under a held run.
+          // Dedicated *directory* walks treat status===paused as shouldAbort between
+          // files, so soft-rejoin is unsafe (dying promise + false transferring).
+          // Wind down soft-paused children then startFresh from checkpoints.
+          // Single-file dedicated (and non-directory live streams) soft-unpause.
+          if (task && (task.status === "paused" || task.status === "pausing")) {
+            const childIds = tasks
+              .filter((candidate) => candidate.parentTaskId === taskId
+                && (candidate.status === "paused"
+                  || candidate.status === "pausing"
+                  || candidate.status === "transferring"))
+              .map((candidate) => candidate.id);
 
-          // Always clear process-global latches + control epoch so walks wake and
-          // late soft-drain / pauseWatch cannot re-pause streams. Do not stamp
-          // control epoch as task.lifecycleEpoch (bridge-aligned only).
-          let resumeEpoch = bumpTransferControlEpoch(taskId);
-          releaseTransferPauseTree(taskId, childIds);
+            // Always clear process-global latches + control epoch so walks wake and
+            // late soft-drain / pauseWatch cannot re-pause streams. Do not stamp
+            // control epoch as task.lifecycleEpoch (bridge-aligned only).
+            let resumeEpoch = bumpTransferControlEpoch(taskId);
+            releaseTransferPauseTree(taskId, childIds);
 
-          if (task.ownerId === "dedicated-resume" && task.isDirectory) {
-            const bridge = netcattyBridge.get();
-            // Cancel soft-paused child streams so the held walk settles. When a
-            // child is not in activeTransfers, cancelTransfer leaves a sticky
-            // pendingCancel latch — clear it before startFresh reuses the same
-            // child transferIds (otherwise startStreamTransfer aborts immediately).
-            for (const id of childIds) {
-              try { await bridge?.cancelTransfer?.(id); } catch { /* best-effort wind-down */ }
-              try { await bridge?.clearPendingTransferCancel?.(id); } catch { /* best-effort */ }
+            if (task.ownerId === "dedicated-resume" && task.isDirectory) {
+              const bridge = netcattyBridge.get();
+              // Cancel soft-paused child streams so the held walk settles. When a
+              // child is not in activeTransfers, cancelTransfer leaves a sticky
+              // pendingCancel latch — clear it before startFresh reuses the same
+              // child transferIds (otherwise startStreamTransfer aborts immediately).
+              for (const id of childIds) {
+                try { await bridge?.cancelTransfer?.(id); } catch { /* best-effort wind-down */ }
+                try { await bridge?.clearPendingTransferCancel?.(id); } catch { /* best-effort */ }
+              }
+              try { await bridge?.clearPendingTransferCancel?.(taskId); } catch { /* best-effort */ }
+              try {
+                await existing;
+              } catch { /* previous aborted / cancelled */ }
+              // Clear again after wind-down in case cancel raced during await.
+              for (const id of childIds) {
+                try { await bridge?.clearPendingTransferCancel?.(id); } catch { /* best-effort */ }
+              }
+              try { await bridge?.clearPendingTransferCancel?.(taskId); } catch { /* best-effort */ }
+              if (!isTransferControlEpochCurrent(taskId, resumeEpoch)) return existing;
+              return resumeInvocations.get(taskId) ?? startFresh();
             }
-            try { await bridge?.clearPendingTransferCancel?.(taskId); } catch { /* best-effort */ }
+
+            try {
+              // Reuse the live control path: held dedicated transfers must obey
+              // the same ordering and per-child lifecycle rules as panel jobs.
+              const softOperation = softResumeTransfer({
+                getTasks: () => tasks,
+                setTasks: (next) => { tasks = next; emit(); },
+                getBridge: defaultTransferControlBridge,
+              }, taskId);
+              resumeEpoch = getTransferControlEpoch(taskId);
+              const soft = await softOperation;
+              if (soft.handled) return existing;
+              const streamGone = /no longer active|not active|not found|session is no longer|Resume unavailable|Transfer not found/i
+                .test(soft.reason ?? "");
+              if (!streamGone) {
+                tasks = tasks.map((candidate) => candidate.id === taskId ? {
+                  ...candidate,
+                  status: "paused" as const,
+                  speed: 0,
+                  phase: undefined,
+                  error: soft.reason,
+                } : candidate);
+                emit();
+                return existing;
+              }
+            } catch {
+              // Fall through to await + restart.
+            }
+            if (!isTransferControlEpochCurrent(taskId, resumeEpoch)) return existing;
             try {
               await existing;
-            } catch { /* previous aborted / cancelled */ }
-            // Clear again after wind-down in case cancel raced during await.
-            for (const id of childIds) {
-              try { await bridge?.clearPendingTransferCancel?.(id); } catch { /* best-effort */ }
-            }
-            try { await bridge?.clearPendingTransferCancel?.(taskId); } catch { /* best-effort */ }
+            } catch { /* previous aborted */ }
             if (!isTransferControlEpochCurrent(taskId, resumeEpoch)) return existing;
             return resumeInvocations.get(taskId) ?? startFresh();
           }
 
-          try {
-            // Reuse the live control path: held dedicated transfers must obey
-            // the same ordering and per-child lifecycle rules as panel jobs.
-            const softOperation = softResumeTransfer({
-              getTasks: () => tasks,
-              setTasks: (next) => { tasks = next; emit(); },
-              getBridge: defaultTransferControlBridge,
-            }, taskId);
-            resumeEpoch = getTransferControlEpoch(taskId);
-            const soft = await softOperation;
-            if (soft.handled) return existing;
-            const streamGone = /no longer active|not active|not found|session is no longer|Resume unavailable|Transfer not found/i
-              .test(soft.reason ?? "");
-            if (!streamGone) {
-              tasks = tasks.map((candidate) => candidate.id === taskId ? {
-                ...candidate,
-                status: "paused" as const,
-                speed: 0,
-                phase: undefined,
-                error: soft.reason,
-              } : candidate);
-              emit();
-              return existing;
-            }
-          } catch {
-            // Fall through to await + restart.
+          // After demotion to interrupted/attention/failed while work unwinds:
+          // wait then re-invoke (do not rejoin a dying canceling promise).
+          if (task && (task.status === "interrupted" || task.status === "attention" || task.status === "failed")) {
+            const resumeEpoch = getTransferControlEpoch(taskId);
+            try {
+              await existing;
+            } catch { /* previous aborted */ }
+            if (getTransferControlEpoch(taskId) !== resumeEpoch) return existing;
+            return resumeInvocations.get(taskId) ?? startFresh();
           }
-          if (!isTransferControlEpochCurrent(taskId, resumeEpoch)) return existing;
-          try {
-            await existing;
-          } catch { /* previous aborted */ }
-          if (!isTransferControlEpochCurrent(taskId, resumeEpoch)) return existing;
-          return resumeInvocations.get(taskId) ?? startFresh();
+          return existing;
         }
-
-        // After demotion to interrupted/attention/failed while work unwinds:
-        // wait then re-invoke (do not rejoin a dying canceling promise).
-        if (task && (task.status === "interrupted" || task.status === "attention" || task.status === "failed")) {
-          const resumeEpoch = getTransferControlEpoch(taskId);
-          try {
-            await existing;
-          } catch { /* previous aborted */ }
-          if (getTransferControlEpoch(taskId) !== resumeEpoch) return existing;
-          return resumeInvocations.get(taskId) ?? startFresh();
-        }
-        return existing;
+        return startFresh();
+      };
+      try {
+        return await runResume();
+      } finally {
+        if (resumeRequests.get(taskId) === request) clearResumeRequest(taskId);
       }
-      return startFresh();
     },
-    cancel: (taskId) => invoke(taskId, "cancel"),
+    cancel(taskId) {
+      clearResumeRequest(taskId);
+      return invoke(taskId, "cancel");
+    },
     async retry(taskId) {
       const ownerId = findOwner(taskId);
       const task = tasks.find((candidate) => candidate.id === taskId);
@@ -2428,5 +2463,18 @@ export function useSftpTransferTask(taskId: string, fallback: TransferTask): Tra
     sftpTransferCenterStore.subscribeProgress,
     () => sftpTransferCenterStore.getTask(taskId) ?? fallbackRef.current,
     () => fallbackRef.current,
+  );
+}
+
+/** Shared control feedback for every transfer surface, including newly mounted rows. */
+export function useSftpTransferResuming(taskId: string): boolean {
+  return useSyncExternalStore(
+    (listener) => {
+      const unsubscribeTask = sftpTransferCenterStore.subscribe(listener);
+      const unsubscribeResume = sftpTransferCenterStore.subscribeResume(listener);
+      return () => { unsubscribeTask(); unsubscribeResume(); };
+    },
+    () => sftpTransferCenterStore.isResuming(taskId),
+    () => false,
   );
 }
