@@ -334,6 +334,10 @@ async function statLocal(event, payload) {
     type: stat.isDirectory() ? "directory" : "file",
     size: stat.size,
     lastModified: stat.mtime.getTime(),
+    // Filesystem identity for same-pane paste guards: realpath cannot see
+    // through bind mounts, but dev/ino name the same directory regardless of
+    // the mount path used. Windows dev/ino are unreliable, so omit them there.
+    ...(process.platform === "win32" ? {} : { dev: stat.dev, ino: stat.ino }),
   };
 }
 
@@ -349,6 +353,8 @@ async function lstatLocal(event, payload) {
     type: stat.isDirectory() ? "directory" : stat.isSymbolicLink() ? "symlink" : "file",
     size: stat.size,
     lastModified: stat.mtime.getTime(),
+    // Mirror statLocal so guards comparing identities work with either stat.
+    ...(process.platform === "win32" ? {} : { dev: stat.dev, ino: stat.ino }),
   };
 }
 

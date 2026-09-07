@@ -394,3 +394,83 @@ test("files-only copy still passes when path resolution is unavailable", async (
     "allow",
   );
 });
+
+test("same-pane cut into a bind-mount alias of the source folder is blocked", async () => {
+  const files = [{ name: "report.txt", isDirectory: false }];
+  // realpath cannot see through bind mounts: /mnt/alias is bind-mounted to /a,
+  // so both sides resolve to themselves and only stat identities match.
+  const resolver = (path: string) => Promise.resolve(path);
+  const statIdentity = (path: string) => Promise.resolve(
+    path === "/a" || path === "/mnt/alias" ? { dev: 42, ino: 7 } : { dev: 42, ino: 9 },
+  );
+  assert.equal(
+    await resolveSamePanePasteAction({
+      operation: "cut",
+      sourcePath: "/a",
+      targetPath: "/mnt/alias",
+      files,
+      resolvePath: resolver,
+      statIdentity,
+    }),
+    "block-same-folder",
+  );
+  // Distinct filesystem identities must not block the cut.
+  assert.equal(
+    await resolveSamePanePasteAction({
+      operation: "cut",
+      sourcePath: "/a",
+      targetPath: "/mnt/other",
+      files,
+      resolvePath: resolver,
+      statIdentity: (path) => Promise.resolve(
+        path === "/a" ? { dev: 42, ino: 7 } : { dev: 42, ino: 8 },
+      ),
+    }),
+    "allow",
+  );
+  // A provider that cannot stat falls through instead of blocking.
+  assert.equal(
+    await resolveSamePanePasteAction({
+      operation: "cut",
+      sourcePath: "/a",
+      targetPath: "/mnt/alias",
+      files,
+      resolvePath: resolver,
+      statIdentity: () => Promise.resolve(null),
+    }),
+    "allow",
+  );
+});
+
+test("same-pane paste into a bind-mount alias of a clipboard directory is blocked", async () => {
+  const files = [{ name: "docs", isDirectory: true }];
+  // /mnt/docs-alias is bind-mounted to /a/docs: pasting /a/docs there names
+  // the same directory, for copy (recursive rediscovery) and cut (the source
+  // delete would remove the freshly pasted entry).
+  const resolver = (path: string) => Promise.resolve(path);
+  const statIdentity = (path: string) => Promise.resolve(
+    path === "/a/docs" || path === "/mnt/docs-alias" ? { dev: 42, ino: 11 } : { dev: 42, ino: 3 },
+  );
+  assert.equal(
+    await resolveSamePanePasteAction({
+      operation: "copy",
+      sourcePath: "/a",
+      targetPath: "/mnt/docs-alias",
+      files,
+      resolvePath: resolver,
+      statIdentity,
+    }),
+    "block-into-source",
+  );
+  assert.equal(
+    await resolveSamePanePasteAction({
+      operation: "cut",
+      sourcePath: "/a",
+      targetPath: "/mnt/docs-alias",
+      files,
+      resolvePath: resolver,
+      statIdentity,
+    }),
+    "block-into-source",
+  );
+});

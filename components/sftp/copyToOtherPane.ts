@@ -15,6 +15,12 @@ export interface SamePanePasteFile {
   isDirectory: boolean;
 }
 
+/** Filesystem identity of a directory (stat dev/ino). */
+export interface SamePanePasteIdentity {
+  dev: number;
+  ino: number;
+}
+
 /**
  * Lexically resolve "." / ".." segments and repeated separators so equivalent
  * spellings of the same directory (e.g. /home/user/., /home//user) compare
@@ -90,6 +96,14 @@ const canonicalizeSftpPath = (path: string): string => {
  * realpath bridge for local panes), both sides are resolved through the
  * filesystem before comparing. If that resolution fails, the guard fails
  * closed and blocks the paste rather than risking a runaway transfer.
+ *
+ * realpath also cannot see through bind mounts: two mount paths for the same
+ * directory resolve to different strings. When `statIdentity` is provided
+ * (local panes only — remote SFTP stats carry no dev/ino), both sides' stat
+ * identities are compared as a final check; equal identities block the paste.
+ * The check only ever blocks on a positive identity match — an unavailable
+ * stat falls through to the symlink guards above rather than blocking
+ * unrelated pastes on transient stat failures.
  */
 export const resolveSamePanePasteAction = async (params: {
   operation: "copy" | "cut";
@@ -98,8 +112,10 @@ export const resolveSamePanePasteAction = async (params: {
   files: readonly SamePanePasteFile[];
   /** Optional filesystem resolver (e.g. realpath). Throws → unresolvable. */
   resolvePath?: (path: string) => Promise<string>;
+  /** Optional stat identity provider (dev/ino). Returns null → unknown. */
+  statIdentity?: (path: string) => Promise<SamePanePasteIdentity | null>;
 }): Promise<SamePanePasteAction> => {
-  const { resolvePath } = params;
+  const { resolvePath, statIdentity } = params;
 
   // Canonicalize first so equivalent spellings of the same directory (dot
   // segments, repeated separators) are still caught by the guards below, then
@@ -131,6 +147,37 @@ export const resolveSamePanePasteAction = async (params: {
   if (params.operation === "cut" && isSameSftpPath(targetPath, sourcePath)) {
     return "block-same-folder";
   }
+
+  // Bind-mount alias detection: realpath above maps each mount path to itself,
+  // so a cut (whose post-transfer source delete would destroy the only copy)
+  // must additionally compare filesystem identities. A positive match means
+  // both paths name the same directory. dev/ino are only trusted when at least
+  // one side is non-zero — Windows stats report meaningless 0 identities, and
+  // the local bridge omits them there.
+  const identityOf = async (path: string): Promise<SamePanePasteIdentity | null> => {
+    if (!statIdentity) return null;
+    try {
+      const identity = await statIdentity(path);
+      if (!identity || identity.dev === undefined || identity.ino === undefined) return null;
+      if (identity.dev === 0 && identity.ino === 0) return null;
+      return identity;
+    } catch {
+      return null;
+    }
+  };
+  const sameIdentity = (a: SamePanePasteIdentity, b: SamePanePasteIdentity): boolean =>
+    a.dev === b.dev && a.ino === b.ino;
+
+  if (params.operation === "cut") {
+    const [targetIdentity, sourceIdentity] = await Promise.all([
+      identityOf(params.targetPath),
+      identityOf(params.sourcePath),
+    ]);
+    if (targetIdentity && sourceIdentity && sameIdentity(targetIdentity, sourceIdentity)) {
+      return "block-same-folder";
+    }
+  }
+
   for (const file of params.files) {
     if (!file.isDirectory) continue;
     const itemPath = await canonicalizeForComparison(joinPath(params.sourcePath, file.name));
@@ -140,6 +187,18 @@ export const resolveSamePanePasteAction = async (params: {
       || isSftpDescendantPath(targetPath, itemPath)
     ) {
       return "block-into-source";
+    }
+    // A bind-mount alias of the directory item itself also names the paste
+    // destination, for both copy (recursive rediscovery) and cut (source
+    // delete would remove the freshly pasted entry).
+    if (statIdentity) {
+      const [targetIdentity, itemIdentity] = await Promise.all([
+        identityOf(params.targetPath),
+        identityOf(joinPath(params.sourcePath, file.name)),
+      ]);
+      if (targetIdentity && itemIdentity && sameIdentity(targetIdentity, itemIdentity)) {
+        return "block-into-source";
+      }
     }
   }
   return "allow";
