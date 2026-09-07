@@ -19,6 +19,27 @@ const fakeBuffer = (rows: FakeRow[], extra: { viewportY: number; baseY?: number 
   },
 });
 
+/**
+ * Row whose `translateToString(true)` mirrors xterm's trimmed-cache behavior:
+ * real trailing spaces are dropped, while `translateToString(false)` keeps the
+ * full row content.
+ */
+const cacheTrimmingRow = (text: string, isWrapped?: boolean) => ({
+  isWrapped,
+  translateToString: (trimRight?: boolean) =>
+    trimRight ? text.replace(/\s+$/, "") : text,
+});
+
+const manualBuffer = (
+  rows: ReturnType<typeof cacheTrimmingRow>[],
+  viewportY: number,
+) => ({
+  length: rows.length,
+  baseY: rows.length - 1,
+  viewportY,
+  getLine: (y: number) => rows[y],
+});
+
 /** Hard-wrap logical text into fake buffer rows of the given cell width. */
 const wrapToRows = (logicalLines: string[], cols: number): FakeRow[] => {
   const rows: FakeRow[] = [];
@@ -62,6 +83,30 @@ test("captureTerminalReflowScrollAnchor records the wrapped group start and char
   assert.equal(anchor!.startRow, 1);
   assert.equal(anchor!.charOffset, rows[1]!.text.length + rows[2]!.text.length);
   assert.ok(anchor!.textPrefix.startsWith("long line part one"));
+});
+
+test("capture/resolve preserve real trailing spaces on wrapped rows across rewrap", () => {
+  // "AB   CD" wrapped at width 4 puts the real (typed) spaces at the end of a
+  // non-final wrapped row; at width 5 they end up mid-row before "CD".
+  const before = manualBuffer([
+    cacheTrimmingRow("head"),
+    cacheTrimmingRow("AB  "),
+    cacheTrimmingRow(" CD", true),
+    cacheTrimmingRow("tail"),
+  ], 2);
+  const anchor = captureTerminalReflowScrollAnchor(before as never);
+  assert.ok(anchor);
+  assert.equal(anchor!.textPrefix, "AB   CD");
+  assert.equal(anchor!.charOffset, 4);
+
+  const after = manualBuffer([
+    cacheTrimmingRow("head"),
+    cacheTrimmingRow("AB   "),
+    cacheTrimmingRow("CD", true),
+    cacheTrimmingRow("tail"),
+  ], 0);
+  const resolvedRow = resolveTerminalReflowScrollAnchor(after as never, anchor!);
+  assert.equal(resolvedRow, 1);
 });
 
 test("resolveTerminalReflowScrollAnchor re-locates the same content after a column rewrap", () => {

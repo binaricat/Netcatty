@@ -661,6 +661,26 @@ const reflowAnchorLogicalLineStart = (buffer: ReflowAnchorBuffer, row: number): 
   return start;
 };
 
+/**
+ * Text of one physical row as it participates in a joined logical line.
+ *
+ * Real trailing spaces on a wrapped row are content: another feature may have
+ * cached the row untrimmed via `translateToString(false)` (the autocomplete and
+ * prompt parsers do), so a `true` call is satisfied from that cache with
+ * `trimEnd()` and drops those spaces. After a reflow the same characters can
+ * sit mid-line, making the captured prefix and offset disagree with the
+ * re-joined line. Trim only the final physical row of the logical line, where
+ * trailing whitespace is viewport padding rather than wrapped content.
+ */
+const reflowAnchorRowText = (
+  buffer: ReflowAnchorBuffer,
+  row: number,
+): string => {
+  const line = buffer.getLine(row);
+  if (!line) return "";
+  return line.translateToString(!buffer.getLine(row + 1)?.isWrapped);
+};
+
 const reflowAnchorJoinTextPrefix = (
   buffer: ReflowAnchorBuffer,
   startRow: number,
@@ -672,7 +692,7 @@ const reflowAnchorJoinTextPrefix = (
     const line = buffer.getLine(row);
     if (!line) break;
     if (row > startRow && !line.isWrapped) break;
-    text += line.translateToString(true);
+    text += reflowAnchorRowText(buffer, row);
     row += 1;
   }
   return text.slice(0, maxChars);
@@ -710,7 +730,7 @@ export function captureTerminalReflowScrollAnchor(
   const startRow = reflowAnchorLogicalLineStart(buffer, viewportY);
   let charOffset = 0;
   for (let row = startRow; row < viewportY; row += 1) {
-    charOffset += buffer.getLine(row)?.translateToString(true).length ?? 0;
+    charOffset += reflowAnchorRowText(buffer, row).length;
   }
   const textPrefix = reflowAnchorJoinTextPrefix(buffer, startRow, REFLOW_ANCHOR_TEXT_PREFIX_CHARS);
   const nextStart = reflowAnchorNextLogicalLineStart(buffer, startRow);
@@ -803,13 +823,14 @@ const reflowScanOutward = (
   if (bestRow < 0) return null;
 
   // Rewrap moves the captured characters to a different row offset within the
-  // logical line; walk the (new) row boundaries to the row holding them.
+  // logical line; walk the (new) row boundaries to the row holding them. Use
+  // the same per-row text as the capture so real trailing spaces on wrapped
+  // rows are counted identically on both sides.
   let targetRow = bestRow;
   let remaining = anchor.charOffset;
   while (remaining > 0) {
-    const line = buffer.getLine(targetRow);
-    if (!line || !buffer.getLine(targetRow + 1)?.isWrapped) break;
-    const rowLength = line.translateToString(true).length;
+    if (!buffer.getLine(targetRow) || !buffer.getLine(targetRow + 1)?.isWrapped) break;
+    const rowLength = reflowAnchorRowText(buffer, targetRow).length;
     if (remaining < rowLength) break;
     remaining -= rowLength;
     targetRow += 1;
