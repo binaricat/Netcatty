@@ -623,6 +623,11 @@ export function createSynchronizedOutputFitScheduler() {
 
 type ReflowAnchorCell = {
   getCode(): number;
+  /**
+   * 0 only for the second cell of a wide glyph that sits on this row;
+   * structural wrap padding cells (and ordinary empty cells) have width 1.
+   */
+  getWidth?(): number;
 };
 
 type ReflowAnchorBufferLine = {
@@ -707,6 +712,12 @@ const reflowAnchorRowText = (
   while (paddingCells < lineLength) {
     const cell = line.getCell(lineLength - 1 - paddingCells);
     if (!cell || cell.getCode() !== 0) break;
+    // A width-0 cell is the second half of a wide glyph that occupies this
+    // row's final columns (xterm writes it as codepoint 0, width 0). It is
+    // content: `translateToString` skips it in the forward iteration, so it
+    // contributes no character and must not be sliced off — slicing it would
+    // delete the glyph itself (or half of an emoji surrogate pair).
+    if (cell.getWidth?.() === 0) break;
     paddingCells += 1;
   }
   // Each trailing null cell renders as exactly one space, so slicing by the

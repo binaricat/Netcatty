@@ -60,6 +60,22 @@ const xtermRow = (text: string, isWrapped?: boolean, nullPad = 0) => {
   };
 };
 
+/**
+ * Row mimicking an xterm buffer line whose final columns are exactly filled by
+ * a double-width glyph: the glyph cell has width 2 and the trailing cell is its
+ * width-0 continuation (codepoint 0, renders as nothing — xterm's forward
+ * iteration skips it, so `translateToString` yields just `text`).
+ */
+const wideEndingRow = (text: string, isWrapped?: boolean) => ({
+  isWrapped,
+  length: text.length + 1,
+  translateToString: () => text,
+  getCell: (x: number) =>
+    x < text.length
+      ? { getCode: () => text.codePointAt(x) ?? 0, getWidth: () => (x === text.length - 1 ? 2 : 1) }
+      : { getCode: () => 0, getWidth: () => 0 },
+});
+
 /** Hard-wrap logical text into fake buffer rows of the given cell width. */
 const wrapToRows = (logicalLines: string[], cols: number): FakeRow[] => {
   const rows: FakeRow[] = [];
@@ -147,6 +163,32 @@ test("capture/resolve exclude wide-character wrap padding from wrapped rows", ()
     xtermRow("head"),
     xtermRow("abc中", false, 1),
     xtermRow("Z", true),
+  ], 0);
+  const resolvedRow = resolveTerminalReflowScrollAnchor(after as never, anchor!);
+  assert.equal(resolvedRow, 1);
+});
+
+test("capture/resolve keep a wide glyph that exactly ends a wrapped row", () => {
+  // "ab中Z" at width 4: the glyph fills the row's final two columns and the
+  // trailing cell is its width-0 continuation (codepoint 0) — content, not the
+  // structural wrap padding of a glyph that did not fit. Slicing it off would
+  // drop the glyph from the anchor text, so a rewrap at width 6 ("ab中" then
+  // "Z" vs. "ab中Z" on one row) could no longer match.
+  const before = manualBuffer([
+    wideEndingRow("head"),
+    wideEndingRow("ab中", false),
+    cacheTrimmingRow("Z", true),
+    cacheTrimmingRow("tail"),
+  ], 2);
+  const anchor = captureTerminalReflowScrollAnchor(before as never);
+  assert.ok(anchor);
+  assert.equal(anchor!.textPrefix, "ab中Z");
+  assert.equal(anchor!.charOffset, 3);
+
+  const after = manualBuffer([
+    wideEndingRow("head"),
+    cacheTrimmingRow("ab中Z"),
+    cacheTrimmingRow("tail"),
   ], 0);
   const resolvedRow = resolveTerminalReflowScrollAnchor(after as never, anchor!);
   assert.equal(resolvedRow, 1);
