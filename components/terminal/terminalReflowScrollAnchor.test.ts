@@ -398,6 +398,73 @@ test("resolve adjusts a repeating viewed window by the derived trim delta", () =
   assert.equal(resolvedRow, 4);
 });
 
+test("capture skips the whole-line measurement when no trim can reach the line", () => {
+  // A scrollback with ample headroom below its row capacity: even the
+  // worst-case row growth of a 40→30 column shrink cannot overflow past the
+  // rows above the anchored line, so the trim delta can never be needed and
+  // the expensive whole-line measurement is skipped.
+  const lines = ["head ".repeat(8).trim(), ("body-" + "A".repeat(700) + "-tail")];
+  const before = wrapToRows(lines, 40);
+  const viewportRow = before.findIndex((row) => row.text.includes("tail"));
+  assert.ok(viewportRow > 1);
+  const captureBuffer = fakeBuffer(before, { viewportY: viewportRow });
+
+  const unlimited = captureTerminalReflowScrollAnchor(captureBuffer as never);
+  assert.ok(unlimited);
+  assert.equal(unlimited!.lineLength, lines[1]!.length);
+
+  // Capacity 250 rows vs a 19-row buffer: worst overflow 19 + 19*40/30 - 250 < 0,
+  // so no trim can occur at all and the anchored line is never reached.
+  const limited = captureTerminalReflowScrollAnchor(captureBuffer as never, {
+    maxRows: 250,
+    oldCols: 40,
+    newCols: 30,
+  });
+  assert.ok(limited);
+  assert.equal(limited!.startRow, unlimited!.startRow);
+  assert.equal(limited!.charOffset, unlimited!.charOffset);
+  assert.equal(limited!.lineLength, undefined);
+
+  // Resolution is unchanged: the untrimmed line keeps the plain offset.
+  const after = wrapToRows(lines, 30);
+  const resolvedRow = resolveTerminalReflowScrollAnchor(
+    fakeBuffer(after, { viewportY: 0 }) as never,
+    limited!,
+  );
+  const unlimitedResolvedRow = resolveTerminalReflowScrollAnchor(
+    fakeBuffer(after, { viewportY: 0 }) as never,
+    unlimited!,
+  );
+  assert.equal(resolvedRow, unlimitedResolvedRow);
+  assert.ok(resolvedRow !== null);
+});
+
+test("capture still measures the whole line when a trim can reach it", () => {
+  // Buffer at its row capacity with a wide shrink: trim can eat into the
+  // anchored line, so the exact line length must still be captured.
+  const longLine = "prompt " + "A".repeat(950);
+  const before = wrapToRows([longLine], 40);
+  const captureBuffer = fakeBuffer(before, { viewportY: 5 });
+  const anchor = captureTerminalReflowScrollAnchor(captureBuffer as never, {
+    maxRows: before.length, // full scrollback
+    oldCols: 40,
+    newCols: 30,
+  });
+  assert.ok(anchor);
+  assert.equal(anchor!.lineLength, longLine.length);
+
+  // The derived trim delta still disambiguates the repeating viewed window.
+  const after = wrapToRows([longLine], 30);
+  const trimRows = 2;
+  const trimmed = after.slice(trimRows).map((row, i) =>
+    i === 0 ? { text: row.text, isWrapped: true } : row);
+  const resolvedRow = resolveTerminalReflowScrollAnchor(
+    fakeBuffer(trimmed, { viewportY: 0 }) as never,
+    anchor!,
+  );
+  assert.equal(resolvedRow, 4);
+});
+
 test("resolve adjusts a repeating viewed window on a line beyond the old length cap", () => {
   // A 9,000-character single logical line: the exact line length must still
   // be captured so the trim delta stays exact — content matching alone

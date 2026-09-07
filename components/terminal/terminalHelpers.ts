@@ -678,7 +678,9 @@ export type TerminalReflowScrollAnchor = {
   viewedText?: string;
   /**
    * Joined length of the whole anchored logical line, when the line fits
-   * within `REFLOW_ANCHOR_LINE_LENGTH_CHARS`. Rewrap trim removes only
+   * within `REFLOW_ANCHOR_LINE_LENGTH_CHARS` and a scrollback trim could
+   * reach the line during the pending resize (otherwise the plain offset is
+   * exact and the measurement is skipped). Rewrap trim removes only
    * leading content, so comparing this with the surviving line's length
    * derives exactly how many leading characters were trimmed — both the
    * captured `charOffset` and the re-located viewed window must move back by
@@ -861,6 +863,63 @@ const reflowAnchorNextNonBlankLogicalLineStart = (
 };
 
 /**
+ * Row/column bounds of the pending resize, used to skip the whole-line
+ * measurement when no scrollback trim can reach the anchored line. xterm's
+ * buffer keeps at most `newRows + scrollback` rows (`Buffer._getCorrectBufferLength`),
+ * trimming from the top beyond that — once before the rewrap (row reduction)
+ * and again while a column shrink inserts wrapped rows.
+ */
+export type TerminalReflowTrimLimits = {
+  /** Rows xterm keeps before trimming from the buffer top: newRows + scrollback. */
+  maxRows: number;
+  /** Terminal columns before the pending resize. */
+  oldCols: number;
+  /** Terminal columns after the pending resize. */
+  newCols: number;
+};
+
+/**
+ * Whether a scrollback trim can eat into the anchored logical line during the
+ * pending resize, i.e. whether the captured whole-line length could ever be
+ * needed by the trim-delta derivation.
+ *
+ * xterm trims only from the buffer top, and only past `maxRows`. A row
+ * reduction trims `length - maxRows` rows before the rewrap. A column shrink
+ * rewrap adds at most `length * oldCols / newCols` rows: each physical row of
+ * `c` cells (`c ≤ oldCols`) rewraps into `ceil(c / newCols)` rows, so it adds
+ * `ceil(c / newCols) - 1 ≤ (c - 1) / newCols` rows (empty rows add none), and
+ * the total added rows are bounded by `length * oldCols / newCols`. The
+ * anchored line is partially trimmed — the only case the captured length
+ * disambiguates — only when the worst-case overflow also covers the rows
+ * above it. A column grow merges rows and never trims. When trim provably
+ * cannot reach the line, the whole-line measurement (up to
+ * `REFLOW_ANCHOR_LINE_LENGTH_CHARS` translated characters across thousands of
+ * physical rows, on every resize frame) is pure overhead and the resolver's
+ * plain offset is exact for an untrimmed line.
+ */
+const reflowAnchorTrimCanReachLine = (
+  buffer: ReflowAnchorBuffer,
+  startRow: number,
+  limits: TerminalReflowTrimLimits,
+): boolean => {
+  if (!(limits.maxRows > 0) || !(limits.oldCols > 0) || !(limits.newCols > 0)) {
+    // Unknown bounds: measure, keeping the unconditional previous behavior.
+    return true;
+  }
+  // A row reduction trims from the buffer top before the rewrap runs.
+  const rowTrim = Math.max(0, buffer.length - limits.maxRows);
+  if (rowTrim > startRow) return true;
+  // A column grow merges rows and never trims past the row reduction above.
+  if (limits.newCols >= limits.oldCols) return false;
+  const rowsAbove = Math.max(0, startRow - rowTrim);
+  // Worst-case rewrap overflow; using the pre-trim length only overestimates.
+  const worstOverflow = buffer.length
+    + (buffer.length * limits.oldCols) / limits.newCols
+    - limits.maxRows;
+  return worstOverflow > rowsAbove;
+};
+
+/**
  * Capture what the reader is looking at before a fit-induced reflow.
  *
  * Restoring a pre-resize row index keeps the reading position only when rows
@@ -872,9 +931,14 @@ const reflowAnchorNextNonBlankLogicalLineStart = (
  * the restore re-locate the same characters after the reflow. Returns null
  * when there is nothing above the viewport worth anchoring (top row, or the
  * pinned/alternate-screen case handled by the bottom-anchored restore).
+ *
+ * `trimLimits` is optional so hand-built buffers (tests) keep the
+ * unconditional measurement; when given, the whole-line measurement runs
+ * only when a trim could reach the anchored line.
  */
 export function captureTerminalReflowScrollAnchor(
   buffer: ReflowAnchorBuffer,
+  trimLimits?: TerminalReflowTrimLimits,
 ): TerminalReflowScrollAnchor | null {
   const viewportY = buffer.viewportY;
   if (!Number.isFinite(viewportY) || viewportY <= 0 || viewportY > buffer.baseY) return null;
@@ -899,7 +963,14 @@ export function captureTerminalReflowScrollAnchor(
   // at all: every blank line would match, so re-locating by content cannot
   // beat the plain row restore. Return null and let the caller fall back to it.
   if (textPrefix === "" && contextSuffix === null) return null;
-  const lineLength = reflowAnchorLogicalLineLength(buffer, startRow, REFLOW_ANCHOR_LINE_LENGTH_CHARS);
+  // The whole-line measurement translates up to REFLOW_ANCHOR_LINE_LENGTH_CHARS
+  // characters across thousands of physical rows and only feeds the trim-delta
+  // derivation, so run it only when a trim could actually reach the line.
+  let lineLength: number | undefined;
+  if (!trimLimits || reflowAnchorTrimCanReachLine(buffer, startRow, trimLimits)) {
+    const measured = reflowAnchorLogicalLineLength(buffer, startRow, REFLOW_ANCHOR_LINE_LENGTH_CHARS);
+    lineLength = measured < REFLOW_ANCHOR_LINE_LENGTH_CHARS ? measured : undefined;
+  }
   return {
     startRow,
     charOffset,
@@ -907,7 +978,7 @@ export function captureTerminalReflowScrollAnchor(
     contextSuffix,
     viewedText,
     // Only a fully measured line supports the trim-delta derivation below.
-    lineLength: lineLength < REFLOW_ANCHOR_LINE_LENGTH_CHARS ? lineLength : undefined,
+    lineLength,
   };
 }
 

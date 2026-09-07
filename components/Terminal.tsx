@@ -3019,7 +3019,15 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         // anchor scan on those frames.
         const reflowAnchor = wasPinnedToBottom || term.cols === dimensions.cols
           ? null
-          : captureTerminalReflowScrollAnchor(buffer);
+          : captureTerminalReflowScrollAnchor(buffer, {
+              // xterm keeps at most rows + scrollback buffer rows and trims
+              // from the top beyond that (Buffer._getCorrectBufferLength), so
+              // these bounds let the capture skip its whole-line measurement
+              // when no trim can reach the anchored line.
+              maxRows: dimensions.rows + (term.options.scrollback ?? 1000),
+              oldCols: term.cols,
+              newCols: dimensions.cols,
+            });
 
         // Markers pinned to the viewed row and to the viewed logical line's
         // start. xterm adjusts marker rows through the rewrap (and disposes
