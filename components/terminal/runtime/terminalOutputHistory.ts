@@ -531,6 +531,7 @@ export const createTerminalOutputHistoryPreview = (options?: {
    */
   const writeSpan = (span: string) => {
     let offset = 0;
+    let protectedFinalWideCell = false;
     // ASCII-ness is monotone under slicing; decide once so the per-row cap
     // below stays linear for long spans.
     let spanIsAscii = isAsciiOnly(span);
@@ -584,6 +585,26 @@ export const createTerminalOutputHistoryPreview = (options?: {
       ? viewportCols * 2 + WRAP_PROBE_UTF16_UNITS
       : Number.POSITIVE_INFINITY;
     while (offset < span.length) {
+      if (!autowrap && viewportCols > 0) {
+        // Xterm leaves the wide leading cell intact when overflow writes land
+        // on its final continuation cell. A later print span starting on that
+        // continuation cell can erase it, so keep this protection span-local.
+        if (!protectedFinalWideCell && cursorCell >= viewportCols
+          && currentCellWidth === viewportCols && !isAsciiOnly(current)) {
+          const prefix = sliceStringByCellColumns(current, 0, viewportCols - 1, widthTerm);
+          protectedFinalWideCell = pieceCellWidth(prefix, widthTerm) < viewportCols - 1;
+        }
+        if (protectedFinalWideCell) {
+          const first = spanIsAscii ? span[offset] : firstGraphemeUnits(span.slice(offset));
+          const width = spanIsAscii ? 1 : pieceCellWidth(first, widthTerm);
+          cursorCell = width === 2 ? viewportCols - 1 : viewportCols;
+          cursor = width === 2
+            ? sliceStringByCellColumns(current, 0, cursorCell, widthTerm).length
+            : current.length;
+          offset += first.length;
+          continue;
+        }
+      }
       // xterm defers the wrap until the next printable character arrives; a
       // cursor move or carriage return in between cancels it instead.
       if (viewportCols > 0 && cursorCell >= viewportCols) {

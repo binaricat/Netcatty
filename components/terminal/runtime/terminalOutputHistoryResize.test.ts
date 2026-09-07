@@ -54,3 +54,14 @@ test("resize uses xterm's reflowed cursor for later same-row redraws", async () 
       [term.buffer.active.getLine(0)?.translateToString(true), term.buffer.active.getLine(1)?.translateToString(true)]);
   } finally { term.dispose(); }
 });
+
+for (const chunks of [["abc中X"], ["abc中XYZ"], ["abc中文X"], ["abc中文", "X"], ["abc中\x1b[5GZ"]]) {
+  test(`no-autowrap final wide cell matches xterm: ${JSON.stringify(chunks)}`, async () => {
+    const { term, history, write } = createHarness(5);
+    try {
+      await write("\x1b[?7l");
+      for (const chunk of chunks) await write(chunk);
+      assert.equal(history.getLines().at(-1), term.buffer.active.getLine(0)?.translateToString(true));
+    } finally { term.dispose(); }
+  });
+}
