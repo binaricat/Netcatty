@@ -640,11 +640,20 @@ export type TerminalReflowScrollAnchor = {
   charOffset: number;
   /** Prefix of the logical line's joined text, used to re-locate it after reflow. */
   textPrefix: string;
+  /**
+   * Prefix of the logical line following the anchor line. A blank anchor line
+   * has empty text, so without this context every blank line matches and the
+   * resolver would land on whichever blank line is nearest the stale row.
+   * Null when there is no following logical line.
+   */
+  contextSuffix: string | null;
 };
 
 // Enough characters to tell neighboring output apart (timestamps, prompts,
 // command echoes) without scanning whole paragraphs of wrapped rows.
 const REFLOW_ANCHOR_TEXT_PREFIX_CHARS = 256;
+// Following-line identity that disambiguates blank or repeated anchor lines.
+const REFLOW_ANCHOR_CONTEXT_CHARS = 96;
 
 const reflowAnchorLogicalLineStart = (buffer: ReflowAnchorBuffer, row: number): number => {
   let start = Math.max(0, Math.min(row, buffer.length - 1));
@@ -667,6 +676,16 @@ const reflowAnchorJoinTextPrefix = (
     row += 1;
   }
   return text.slice(0, maxChars);
+};
+
+/** First logical line strictly after the one starting at `row`, or null. */
+const reflowAnchorNextLogicalLineStart = (
+  buffer: ReflowAnchorBuffer,
+  row: number,
+): number | null => {
+  let next = row + 1;
+  while (next < buffer.length && buffer.getLine(next)?.isWrapped) next += 1;
+  return next < buffer.length ? next : null;
 };
 
 /**
@@ -693,12 +712,38 @@ export function captureTerminalReflowScrollAnchor(
   for (let row = startRow; row < viewportY; row += 1) {
     charOffset += buffer.getLine(row)?.translateToString(true).length ?? 0;
   }
+  const textPrefix = reflowAnchorJoinTextPrefix(buffer, startRow, REFLOW_ANCHOR_TEXT_PREFIX_CHARS);
+  const nextStart = reflowAnchorNextLogicalLineStart(buffer, startRow);
+  const contextSuffix = nextStart === null
+    ? null
+    : reflowAnchorJoinTextPrefix(buffer, nextStart, REFLOW_ANCHOR_CONTEXT_CHARS);
+  // A blank anchor line in an otherwise blank region carries no identity at
+  // all: every blank line would match, so re-locating by content cannot beat
+  // the plain row restore. Return null and let the caller fall back to it.
+  if (textPrefix === "" && (contextSuffix === null || contextSuffix === "")) return null;
   return {
     startRow,
     charOffset,
-    textPrefix: reflowAnchorJoinTextPrefix(buffer, startRow, REFLOW_ANCHOR_TEXT_PREFIX_CHARS),
+    textPrefix,
+    contextSuffix,
   };
 }
+
+/** True when the logical line at `row` matches the anchor's captured identity. */
+const reflowAnchorCandidateMatches = (
+  buffer: ReflowAnchorBuffer,
+  row: number,
+  anchor: TerminalReflowScrollAnchor,
+): boolean => {
+  if (reflowAnchorJoinTextPrefix(buffer, row, REFLOW_ANCHOR_TEXT_PREFIX_CHARS) !== anchor.textPrefix) {
+    return false;
+  }
+  const nextStart = reflowAnchorNextLogicalLineStart(buffer, row);
+  if (nextStart === null || anchor.contextSuffix === null) {
+    return nextStart === null && anchor.contextSuffix === null;
+  }
+  return reflowAnchorJoinTextPrefix(buffer, nextStart, REFLOW_ANCHOR_CONTEXT_CHARS) === anchor.contextSuffix;
+};
 
 /**
  * Re-locate the anchored reading position after a reflow.
@@ -713,20 +758,23 @@ export function resolveTerminalReflowScrollAnchor(
 ): number | null {
   let bestRow = -1;
   let bestDistance = Number.POSITIVE_INFINITY;
-  let row = 0;
-  while (row < buffer.length) {
-    if (buffer.getLine(row)?.isWrapped) {
-      row += 1;
-      continue;
-    }
-    if (reflowAnchorJoinTextPrefix(buffer, row, REFLOW_ANCHOR_TEXT_PREFIX_CHARS) === anchor.textPrefix) {
-      const distance = Math.abs(row - anchor.startRow);
-      if (distance < bestDistance) {
+  // Rewrap moves a logical line only a few rows per resize step, so search
+  // outward from the stale row and stop as soon as no remaining row can beat
+  // the best match. This keeps O(scrollback) work off the per-frame resize
+  // path for the common case; the scan still covers the whole buffer when
+  // needed. A tie at equal distance resolves to the topmost row, matching a
+  // plain top-down scan.
+  const startRow = anchor.startRow;
+  const maxDistance = Math.max(startRow, buffer.length - 1 - startRow);
+  for (let distance = 0; distance <= maxDistance && distance <= bestDistance; distance += 1) {
+    for (const row of distance === 0 ? [startRow] : [startRow - distance, startRow + distance]) {
+      if (row < 0 || row >= buffer.length) continue;
+      if (buffer.getLine(row)?.isWrapped) continue;
+      if (reflowAnchorCandidateMatches(buffer, row, anchor) && distance < bestDistance) {
         bestDistance = distance;
         bestRow = row;
       }
     }
-    row += 1;
   }
   if (bestRow < 0) return null;
 

@@ -3007,15 +3007,18 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         const buffer = term.buffer.active;
         const wasPinnedToBottom = buffer.viewportY >= buffer.baseY;
         const savedViewportY = buffer.viewportY;
-        // A column change rewraps the scrollback, moving rows above the
-        // reading position, so a saved row index no longer points at the same
-        // content after the resize. Capture the content instead of an index.
-        const reflowAnchor = wasPinnedToBottom
-          ? null
-          : captureTerminalReflowScrollAnchor(buffer);
 
         const dimensions = fitAddon.proposeDimensions();
         if (!dimensions || Number.isNaN(dimensions.cols) || Number.isNaN(dimensions.rows)) return;
+
+        // A column change rewraps the scrollback, moving rows above the
+        // reading position, so a saved row index no longer points at the same
+        // content after the resize. Capture the content instead of an index.
+        // Row-only and pixel-only fits never rewrap, so skip the O(scrollback)
+        // anchor scan on those frames.
+        const reflowAnchor = wasPinnedToBottom || term.cols === dimensions.cols
+          ? null
+          : captureTerminalReflowScrollAnchor(buffer);
 
         lastFittedSizeRef.current = { width, height };
         // addon-fit 0.11 clears the renderer before resizing, which can show

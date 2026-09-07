@@ -102,7 +102,7 @@ test("resolveTerminalReflowScrollAnchor keeps the in-line offset across rewrap",
 test("resolveTerminalReflowScrollAnchor picks the duplicate nearest the original position", () => {
   const rowText = "identical output";
   const rows = Array.from({ length: 10 }, () => ({ text: rowText }));
-  const anchor = { startRow: 7, charOffset: 0, textPrefix: rowText };
+  const anchor = { startRow: 7, charOffset: 0, textPrefix: rowText, contextSuffix: rowText };
   const resolvedRow = resolveTerminalReflowScrollAnchor(
     fakeBuffer(rows, { viewportY: 0 }) as never,
     anchor,
@@ -112,7 +112,7 @@ test("resolveTerminalReflowScrollAnchor picks the duplicate nearest the original
 
 test("resolveTerminalReflowScrollAnchor returns null when the anchored content is trimmed away", () => {
   const rows = [{ text: "other" }, { text: "content" }];
-  const anchor = { startRow: 10, charOffset: 0, textPrefix: "vanished" };
+  const anchor = { startRow: 10, charOffset: 0, textPrefix: "vanished", contextSuffix: null };
   const resolvedRow = resolveTerminalReflowScrollAnchor(
     fakeBuffer(rows, { viewportY: 0 }) as never,
     anchor,
@@ -122,8 +122,55 @@ test("resolveTerminalReflowScrollAnchor returns null when the anchored content i
 
 test("resolveTerminalReflowScrollAnchor clamps the restored row to baseY", () => {
   const rows = [{ text: "content" }, { text: "more" }];
-  const anchor = { startRow: 0, charOffset: 0, textPrefix: "content" };
+  const anchor = { startRow: 0, charOffset: 0, textPrefix: "content", contextSuffix: "more" };
   const buffer = fakeBuffer(rows, { viewportY: 0, baseY: 0 });
   const resolvedRow = resolveTerminalReflowScrollAnchor(buffer as never, anchor);
   assert.equal(resolvedRow, 0);
+});
+
+test("captureTerminalReflowScrollAnchor returns null for a blank line with no following identity", () => {
+  const rows = [{ text: "a" }, { text: "" }, { text: "" }, { text: "b" }];
+  const buffer = fakeBuffer(rows, { viewportY: 1 });
+  assert.equal(captureTerminalReflowScrollAnchor(buffer as never), null);
+});
+
+test("blank anchor line is re-located by its following line, not proximity", () => {
+  const logicalLines = [
+    "header before the blank region",
+    "",
+    "target line unique beta tail",
+    "filler one",
+    "filler two",
+    "",
+    "decoy tail gamma",
+  ];
+  const before = wrapToRows(logicalLines, 80);
+  const viewportRow = before.findIndex((row) => row.text === "" && before.indexOf(row) > 0);
+  const captureBuffer = fakeBuffer(before, { viewportY: viewportRow });
+  const anchor = captureTerminalReflowScrollAnchor(captureBuffer as never);
+  assert.ok(anchor);
+  assert.equal(anchor!.textPrefix, "");
+  assert.ok(anchor!.contextSuffix!.startsWith("target line unique beta"));
+
+  // Rewrap at a narrower width: the anchored blank line drifts away from its
+  // pre-reflow row while the decoy blank line ends up nearer to it.
+  const after = wrapToRows(logicalLines, 12);
+  const resolvedRow = resolveTerminalReflowScrollAnchor(
+    fakeBuffer(after, { viewportY: 0 }) as never,
+    anchor!,
+  );
+  assert.ok(resolvedRow !== null);
+  assert.equal(after[resolvedRow!]!.text, "");
+  const joinedAfter = after.slice(resolvedRow!).map((r) => r.text).join("");
+  assert.ok(joinedAfter.startsWith("target line unique beta"));
+});
+
+test("resolveTerminalReflowScrollAnchor requires the following line to match", () => {
+  const rows = [{ text: "" }, { text: "first follower" }, { text: "" }, { text: "other follower" }];
+  const anchor = { startRow: 0, charOffset: 0, textPrefix: "", contextSuffix: "other follower" };
+  const resolvedRow = resolveTerminalReflowScrollAnchor(
+    fakeBuffer(rows, { viewportY: 0 }) as never,
+    anchor,
+  );
+  assert.equal(resolvedRow, 2);
 });
