@@ -851,3 +851,32 @@ test("a grapheme wider than the viewport wraps the following characters", () => 
   history.append("中X");
   assert.deepEqual([...history.getLines()], ["中", "X"]);
 });
+
+
+test("resizing invalidates cached preview text even when returning to its old width", () => {
+  const history = createTerminalOutputHistoryPreview();
+  history.setViewportRows(24);
+  history.setViewportCols(10);
+  history.append("abcdefgh");
+  assert.deepEqual(history.getPreviewRows({ cols: 10, rows: 1, top: 0 }).rows,
+    [{ text: "abcdefgh", isWrapped: false }]);
+  // A hidden preview is not read between these resizes. Returning to the
+  // cached width must not resurrect characters trimmed from the live row.
+  history.setViewportCols(5);
+  history.setViewportCols(10);
+  assert.deepEqual(history.getLines(), ["abcde"]);
+  assert.deepEqual(history.getPreviewRows({ cols: 10, rows: 1, top: 0 }).rows,
+    [{ text: "abcde", isWrapped: false }]);
+});
+
+test("resizing invalidates cached preview row counts after trimming a wide line", () => {
+  const history = createTerminalOutputHistoryPreview();
+  history.setViewportRows(24);
+  history.setViewportCols(10);
+  history.append("abcdefgh");
+  assert.equal(history.getPreviewRowCount(4), 2);
+  history.setViewportCols(3);
+  assert.equal(history.getPreviewRowCount(4), 1);
+  assert.deepEqual(history.getPreviewRows({ cols: 4, rows: 1, top: 0 }).rows,
+    [{ text: "abc", isWrapped: false }]);
+});

@@ -1237,6 +1237,9 @@ export const createTerminalOutputHistoryPreview = (options?: {
         // the row xterm actually shows instead of retaining a phantom tail.
         current = sliceStringByCellColumns(current, 0, viewportCols, widthTerm);
         currentCellWidth = pieceCellWidth(current, widthTerm);
+        // Hidden previews can skip intermediate widths; invalidate by content
+        // change even when the next read reuses the cached column count.
+        cacheDirty = true;
         // The grapheme the last append left open may have been trimmed away.
         if (openGrapheme !== null && openGraphemeCell > viewportCols) {
           openGrapheme = null;
