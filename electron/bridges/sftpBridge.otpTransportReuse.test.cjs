@@ -34,7 +34,7 @@ const transferBridge = require("./transferBridge.cjs");
 
 const OTP_CODE = "135790";
 
-// SFTP status codes (RFC draft-ietf-secsh-filexfer-02 §7).
+// SFTP status codes (RFC draft-ietf-secsh-filexfer-02, section 7).
 const STATUS_OK = 0;
 const STATUS_EOF = 1;
 const STATUS_NO_SUCH_FILE = 2;
@@ -298,9 +298,6 @@ const BASE_OPTIONS = (port) => ({
 
 test("SFTP-page transfers reuse the OTP-authenticated transport (#3310)", async (t) => {
   const server = await startOtpOnlyServer();
-  t.after(async () => {
-    await server.close();
-  });
   pool.resetSshTransportRegistryForTests({ defaultIdleTtlMs: 0 });
   t.after(() => {
     pool.resetSshTransportRegistryForTests({ defaultIdleTtlMs: 0 });
@@ -309,6 +306,28 @@ test("SFTP-page transfers reuse the OTP-authenticated transport (#3310)", async 
   const sftpClients = new Map();
   sftpBridge.init({ sftpClients, sessions: new Map(), electronModule: {} });
   transferBridge.init({ sftpClients });
+
+  // Tear down SSH clients and shared transports BEFORE awaiting server
+  // closure: node runs `t.after` hooks in registration order, and
+  // `net.Server.close()` would hang if an assertion failed while the SSH
+  // TCP clients were still connected.
+  t.after(async () => {
+    for (const sftpId of [...sftpClients.keys()]) {
+      try {
+        await sftpBridge.closeSftp(null, { sftpId });
+      } catch {
+        // Best-effort cleanup.
+      }
+    }
+    for (const pending of kiHandler.getRequests().values()) {
+      if (pending.timeoutId) clearTimeout(pending.timeoutId);
+    }
+    pool.discardAllTransports("test-end");
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  });
+  t.after(async () => {
+    await server.close();
+  });
 
   const options = BASE_OPTIONS(server.port);
   const loginEndpointKey = pool.buildEndpointKey(
@@ -321,7 +340,7 @@ test("SFTP-page transfers reuse the OTP-authenticated transport (#3310)", async 
     "pooled transfer opens must resolve to the login endpoint",
   );
 
-  // ── 1. SFTP-page login: keyboard-interactive modal, then browse open. ──
+  // -- 1. SFTP-page login: keyboard-interactive modal, then browse open. --
   const browseSender = createSender();
   const browseOpen = sftpBridge.openSftp(
     { sender: browseSender },
@@ -336,7 +355,7 @@ test("SFTP-page transfers reuse the OTP-authenticated transport (#3310)", async 
   assert.equal(browse.fileProtocol, "sftp");
   assert.equal(server.getKeyboardInteractiveRounds(), 1, "exactly one OTP round for login");
 
-  // ── 2. Pooled transfer open: rides the authenticated transport. ──
+  // -- 2. Pooled transfer open: rides the authenticated transport. --
   const transferSender = createSender();
   const transfer = await sftpBridge.openSftp(
     { sender: transferSender },
@@ -362,7 +381,7 @@ test("SFTP-page transfers reuse the OTP-authenticated transport (#3310)", async 
   const transferChannel = await sftpBridge.requireSftpChannel(transferClient);
   assert.ok(transferChannel, "shared transport must host the transfer SFTP channel");
 
-  // ── 3. Stream upload over the reused session completes. ──
+  // -- 3. Stream upload over the reused session completes. --
   const tempRoot = fs.mkdtempSync(`${tempDirBridge.getTempFilePath("otp-reuse-upload")}-`);
   t.after(() => {
     fs.rmSync(tempRoot, { recursive: true, force: true });
@@ -402,7 +421,7 @@ test("SFTP-page transfers reuse the OTP-authenticated transport (#3310)", async 
   );
   assert.equal(server.getKeyboardInteractiveRounds(), 1, "upload must not re-authenticate");
 
-  // ── 4. Credential drift: fresh dial must surface a new OTP prompt, ──
+  // -- 4. Credential drift: fresh dial must surface a new OTP prompt, --
   // not hang silently (e.g. an OTP saved into the host record after login).
   const driftSender = createSender();
   const driftOpen = sftpBridge.openSftp(
@@ -423,19 +442,4 @@ test("SFTP-page transfers reuse the OTP-authenticated transport (#3310)", async 
     true,
     "drifted dial must still register a transport-managed client",
   );
-
-  // ── Cleanup: return leases and tear down shared transports so the ──
-  // test process can exit.
-  for (const sftpId of [...sftpClients.keys()]) {
-    try {
-      await sftpBridge.closeSftp(null, { sftpId });
-    } catch {
-      // Best-effort cleanup.
-    }
-  }
-  for (const pending of kiHandler.getRequests().values()) {
-    if (pending.timeoutId) clearTimeout(pending.timeoutId);
-  }
-  pool.discardAllTransports("test-end");
-  await new Promise((resolve) => setTimeout(resolve, 100));
 });
