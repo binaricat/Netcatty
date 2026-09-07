@@ -394,6 +394,36 @@ test("resolve adjusts a self-repeating textPrefix match on a trimmed line", () =
   assert.equal(resolvedRow, 4);
 });
 
+test("resolve constrains the seeded scan to the marker's containing line on a continuation", () => {
+  // The viewport starts deep inside a long wrapped line whose identical copy
+  // follows shortly after: the marker row (the viewed continuation) is
+  // closer to the duplicate's start than to the original line's start, so a
+  // proximity scan seeded from the marker would jump into the duplicate. The
+  // seeded scan must only claim the marker's own logical line.
+  const lineText = "line-start-unique-" + "A".repeat(300);
+  const follower = "follower tail beta";
+  const logicalLines = [lineText, follower, "gap filler row", lineText, follower];
+  const before = wrapToRows(logicalLines, 40);
+  const viewportRow = 7; // deep inside the original line's wrapped rows
+  const anchor = captureTerminalReflowScrollAnchor(
+    fakeBuffer(before, { viewportY: viewportRow }) as never,
+  );
+  assert.ok(anchor);
+  assert.ok(anchor!.charOffset > 0);
+
+  const after = wrapToRows(logicalLines, 30);
+  // xterm tracked the viewed row (chars 280..) to row 9 of the rewrap; the
+  // duplicate's start (row 13) is 4 rows from it, the original's start
+  // (row 0) is 9 rows away.
+  const resolvedRow = resolveTerminalReflowScrollAnchor(
+    fakeBuffer(after, { viewportY: 0 }) as never,
+    anchor!,
+    9,
+  );
+  assert.equal(resolvedRow, 9);
+  assert.equal(after[resolvedRow!]!.text, lineText.slice(280, 310));
+});
+
 test("resolve uses a surviving viewed-row marker hint after a mid-line trim", () => {
   // The marker tracks the viewed row: it survives a trim that disposes a
   // marker pinned to the logical line's start, and the seeded scan must

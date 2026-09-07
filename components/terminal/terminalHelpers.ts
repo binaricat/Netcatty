@@ -1006,15 +1006,30 @@ export function resolveTerminalReflowScrollAnchor(
   const trackContinuation = anchor.charOffset > 0
     && typeof anchor.viewedText === "string"
     && anchor.viewedText.length > 0;
-  const resolveFrom = (from: number): number | null => {
-    const primary = reflowScanOutward(buffer, anchor, from, primaryRow);
+  const resolveFrom = (from: number, onlyRow?: number): number | null => {
+    const match = (row: number, base: (r: number) => number): number =>
+      onlyRow === undefined || row === onlyRow ? base(row) : -1;
+    const primary = reflowScanOutward(buffer, anchor, from, (row) =>
+      match(row, primaryRow));
     if (primary !== null) return primary;
     if (!trackContinuation) return null;
     return reflowScanOutward(buffer, anchor, from, (row) =>
-      reflowAnchorContinuationOffset(buffer, row, anchor));
+      match(row, (r) => reflowAnchorContinuationOffset(buffer, r, anchor)));
   };
+  // A surviving marker is pinned to the viewed row or to the anchored
+  // logical line's start, so it lives inside that line. In the continuation
+  // case the marker can sit deep inside a long wrapped line, where a
+  // repeating line/follower block below it is closer to the marker than the
+  // original line's start is; a proximity scan seeded from the marker would
+  // then jump into the duplicate even though the fallback from the stale
+  // `anchor.startRow` selects the original. Constrain the seeded scan to the
+  // marker's containing line, falling through to the stale-row scan when
+  // that line no longer matches.
+  const seededLine = seedRow !== null && trackContinuation
+    ? reflowAnchorLogicalLineStart(buffer, seedRow)
+    : undefined;
   if (seedRow !== null && seedRow !== anchor.startRow) {
-    const seeded = resolveFrom(seedRow);
+    const seeded = resolveFrom(seedRow, seededLine);
     if (seeded !== null) return seeded;
   }
   return resolveFrom(anchor.startRow);
