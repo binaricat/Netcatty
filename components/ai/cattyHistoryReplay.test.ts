@@ -256,16 +256,23 @@ test("external recovery keeps multiple note IDs and a short user constraint", ()
   assert.equal(replay.content.match(/Use vault_notes_get/g)?.length, 1);
 });
 
-test("compact external recovery retains the request alongside note references", () => {
+for (const terminalSelection of [false, true]) {
+test(`compact external recovery retains the request and attachment (terminal=${terminalSelection}) alongside note references`, () => {
   const noteId = '550e8400-e29b-41d4-a716-446655440000';
   const request = "Only summarize yesterday's deployments; do not edit.";
   const messages: ChatMessage[] = [{
     id: 'old-note', role: 'user', timestamp: 1, content: request,
-    attachments: [{ mediaType: 'text/markdown', base64Data: '', vaultNoteId: noteId, vaultNoteTitle: 'Deployment Runbook' }],
+    attachments: [
+      { mediaType: 'text/markdown', base64Data: '', vaultNoteId: noteId, vaultNoteTitle: 'Deployment Runbook' },
+      { mediaType: 'text/plain', base64Data: 'YWJj', filename: 'other.txt', terminalSelection },
+    ],
   }, ...Array.from({ length: 8 }, (_, i): ChatMessage => ({
     id: `later-${i}`, role: i % 2 ? 'assistant' : 'user', timestamp: i + 2, content: i % 2 ? 'Done.' : 'ok',
   }))];
   const compact = buildExternalBridgeContextMessages(messages)[0].content;
   assert.ok(compact.includes(noteId));
   assert.ok(compact.includes(request));
+  assert.ok(compact.includes('other.txt'));
+  assert.ok(compact.includes(terminalSelection ? 'terminal selection omitted' : 'attachment omitted'));
 });
+}

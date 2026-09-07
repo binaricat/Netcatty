@@ -177,7 +177,8 @@ function summarizeDurableUserMessage(message: ChatMessage): string | null {
   const notes = message.attachments?.filter(isVaultNoteAttachment) ?? [];
   if (notes.length) {
     // Budget prose separately: the reference instruction must not consume the request's 280 characters.
-    const request = truncateText(normalizeWhitespace(message.content || ''), MAX_DURABLE_USER_MESSAGE_CHARS);
+    const nonNotes = message.attachments?.filter((attachment) => !isVaultNoteAttachment(attachment));
+    const request = truncateText(normalizeWhitespace(buildHistoricalUserReplayContent(message.content || '', nonNotes)), MAX_DURABLE_USER_MESSAGE_CHARS);
     return `User request: ${request}\n${formatVaultNoteReferences(notes)}`;
   }
   const content = getUserHistoryContent(message);
