@@ -2781,6 +2781,17 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     },
   );
   term.onResize(({ cols, rows }) => {
+    // An idle alternate-screen application may emit nothing after resizing.
+    // Update history now, using xterm's cursor after any normal-buffer reflow.
+    const buffer = term.buffer.active;
+    const cursorLine = buffer.getLine(buffer.baseY + buffer.cursorY);
+    ctx.terminalOutputHistory?.syncViewportAfterResize({
+      cols, rows,
+      cursorX: buffer.cursorX,
+      cursorY: buffer.cursorY,
+      cursorLine: cursorLine?.translateToString(true, 0, cols) ?? "",
+      isWrapped: cursorLine?.isWrapped ?? false,
+    });
     // A reflow can leave stale glyphs in the WebGL atlas; clear it so the new
     // dimensions re-rasterize cleanly (issue #1049).
     clearWebglTextureAtlas();

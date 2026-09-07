@@ -421,6 +421,11 @@ export interface TerminalOutputHistoryPreview {
    * (0) keeps the unclamped behavior.
    */
   setViewportCols(cols: number): void;
+  /** Synchronize an actual xterm resize, including its zero-based cursor after reflow. */
+  syncViewportAfterResize(size: {
+    cols: number; rows: number; cursorX: number; cursorY: number;
+    cursorLine: string; isWrapped: boolean;
+  }): void;
   /**
    * Report the live terminal so wrap decisions use its Unicode width provider
    * (the configured `15-graphemes` runtime) instead of the local fallback,
@@ -1153,7 +1158,7 @@ export const createTerminalOutputHistoryPreview = (options?: {
     cacheDirty = false;
   };
 
-  return {
+  const history: TerminalOutputHistoryPreview = {
     append(chunk: string): void {
       if (!chunk) return;
       const { text, pending } = stripTerminalDisplayToPlainText(chunk, pendingEscape, true);
@@ -1217,6 +1222,29 @@ export const createTerminalOutputHistoryPreview = (options?: {
     setWidthTerminal(term: WidthTerm | null): void {
       widthTerm = term ?? null;
     },
+    syncViewportAfterResize({ cols, rows, cursorX, cursorY, cursorLine, isWrapped }): void {
+      history.setViewportRows(rows);
+      history.setViewportCols(cols);
+      // Xterm knows which committed rows reflowed and whether this buffer
+      // supports reflow. Do not infer the new cursor from transcript rows:
+      // they can include earlier redraws that no longer occupy the screen.
+      // The alternate buffer can retain hidden cells and expose them again
+      // when widened, unlike normal-buffer cursor-line truncation. Read the
+      // visible cursor row rather than applying that truncation to both.
+      const resizedLine = cursorLine.slice(0, maxChars);
+      if (current !== resizedLine || currentStartsWrapped !== isWrapped) {
+        current = resizedLine;
+        currentStartsWrapped = isWrapped;
+        currentCellWidth = pieceCellWidth(current, widthTerm);
+        openGrapheme = null;
+        cacheDirty = true;
+      }
+      screenRow = Math.max(1, Math.min(rows, cursorY + 1));
+      cursorCell = Math.max(0, Math.min(cols - 1, cursorX));
+      cursor = cursorCell === 0 ? 0
+        : isAsciiOnly(current) ? cursorCell
+          : sliceStringByCellColumns(current, 0, cursorCell, widthTerm).length;
+    },
     setViewportCols(cols: number): void {
       const nextCols = Math.max(0, Math.floor(cols));
       if (nextCols === viewportCols) return;
@@ -1257,4 +1285,5 @@ export const createTerminalOutputHistoryPreview = (options?: {
       }
     },
   };
+  return history;
 };
