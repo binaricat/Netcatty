@@ -39,13 +39,14 @@ const canonicalizeSftpPath = (path: string): string => {
       root = driveRoot;
       rest = unified.slice(driveRoot.length);
     }
-  } else if (unified.startsWith("//")) {
-    // Match getParentPath: pure //host/... stays POSIX with a double-slash prefix.
-    root = "//";
-    rest = unified.slice(2);
   } else if (unified.startsWith("/")) {
+    // Collapse a leading "//" to "/" for comparisons: on ordinary POSIX
+    // filesystems "//home/user" names the same directory as "/home/user", and
+    // treating it as a distinct root would let a same-pane cut reach the
+    // replace/delete flow. This helper never builds transfer paths, so the
+    // guards stay strict either way.
     root = "/";
-    rest = unified.slice(1);
+    rest = unified.replace(/^\/+/, "");
   }
 
   const parts: string[] = [];

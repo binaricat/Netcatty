@@ -231,6 +231,31 @@ test("same-pane guards canonicalize equivalent path spellings", () => {
   );
 });
 
+test("same-pane guards collapse a leading double slash for POSIX comparisons", () => {
+  const files = [{ name: "docs", isDirectory: true }];
+  assert.equal(
+    resolveSamePanePasteAction({ operation: "cut", sourcePath: "/home/user", targetPath: "//home/user", files }),
+    "block-same-folder",
+  );
+  assert.equal(
+    resolveSamePanePasteAction({
+      operation: "cut",
+      sourcePath: "/home/user",
+      targetPath: "//home/user/docs",
+      files,
+    }),
+    "block-into-source",
+  );
+  assert.equal(
+    resolveSamePanePasteAction({ operation: "cut", sourcePath: "//home/user", targetPath: "/home/user", files }),
+    "block-same-folder",
+  );
+  assert.equal(
+    resolveSamePanePasteAction({ operation: "cut", sourcePath: "/home/user", targetPath: "/home/other", files }),
+    "allow",
+  );
+});
+
 test("same-pane guards canonicalize equivalent Windows path spellings", () => {
   const files = [{ name: "docs", isDirectory: true }];
   assert.equal(
