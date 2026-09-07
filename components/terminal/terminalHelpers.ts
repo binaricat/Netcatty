@@ -705,6 +705,20 @@ const REFLOW_ANCHOR_CONTEXT_CHARS = 96;
 // the viewed window repeats within the line, so the exact length is the
 // only disambiguator and a too-tight cap would silently drop it.
 const REFLOW_ANCHOR_LINE_LENGTH_CHARS = 262_144;
+// Cap on how far back the capture walks a wrapped logical line to its start
+// and how many physical rows the `charOffset` pass may translate. Both walks
+// step one physical row at a time, so a viewport deep inside a multi-megabyte
+// wrapped line (minified JSON, base64) would otherwise repeat O(line)
+// renderer-thread work on every column-changing fit frame. Beyond the cap the
+// anchor is dropped and the fit falls back to the plain row restore.
+const REFLOW_ANCHOR_MAX_LINE_ROWS = 2048;
+// Cap on how far the context lookup may scan a run of blank logical lines
+// after the anchor before giving up. A blank logical line is a single empty
+// row at every width, so the run keeps its row count across rewrap: capture
+// and resolve therefore truncate at the same line and either both find the
+// same non-blank context line or both report none — the bound cannot make
+// the two sides disagree.
+const REFLOW_ANCHOR_CONTEXT_SCAN_ROWS = 1024;
 
 const reflowAnchorLogicalLineStart = (buffer: ReflowAnchorBuffer, row: number): number => {
   let start = Math.max(0, Math.min(row, buffer.length - 1));
@@ -855,11 +869,22 @@ const reflowAnchorNextNonBlankLogicalLineStart = (
   buffer: ReflowAnchorBuffer,
   row: number,
 ): number | null => {
+  // Bounded (REFLOW_ANCHOR_CONTEXT_SCAN_ROWS) so a long run of blank lines
+  // after the anchor cannot turn every column-changing fit into an O(run)
+  // scan; capture and resolve truncate identically, so the bound preserves
+  // the two sides' agreement (see the constant's comment).
+  const scanStart = row + 1;
   let next = reflowAnchorNextLogicalLineStart(buffer, row);
-  while (next !== null && reflowAnchorJoinTextPrefix(buffer, next, 1) === "") {
+  while (
+    next !== null
+    && next - scanStart <= REFLOW_ANCHOR_CONTEXT_SCAN_ROWS
+    && reflowAnchorJoinTextPrefix(buffer, next, 1) === ""
+  ) {
     next = reflowAnchorNextLogicalLineStart(buffer, next);
   }
-  return next;
+  return next !== null && next - scanStart <= REFLOW_ANCHOR_CONTEXT_SCAN_ROWS
+    ? next
+    : null;
 };
 
 /**
@@ -943,7 +968,19 @@ export function captureTerminalReflowScrollAnchor(
   const viewportY = buffer.viewportY;
   if (!Number.isFinite(viewportY) || viewportY <= 0 || viewportY > buffer.baseY) return null;
 
-  const startRow = reflowAnchorLogicalLineStart(buffer, viewportY);
+  // Bounded walk back to the logical-line start (REFLOW_ANCHOR_MAX_LINE_ROWS):
+  // the walk and the charOffset pass below each translate one physical row per
+  // step, so a viewport deep inside a multi-megabyte wrapped line would
+  // otherwise repeat O(line) work on every column-changing fit frame. Beyond
+  // the bound the anchor is dropped and the caller falls back to the plain
+  // row restore.
+  let startRow = viewportY;
+  while (startRow > 0 && buffer.getLine(startRow)?.isWrapped) {
+    if (viewportY - startRow >= REFLOW_ANCHOR_MAX_LINE_ROWS) return null;
+    startRow -= 1;
+  }
+  // Bounded by construction: the loop covers the at-most
+  // REFLOW_ANCHOR_MAX_LINE_ROWS physical rows between `startRow` and `viewportY`.
   let charOffset = 0;
   for (let row = startRow; row < viewportY; row += 1) {
     charOffset += reflowAnchorRowText(buffer, row).length;
