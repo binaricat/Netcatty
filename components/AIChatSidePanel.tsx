@@ -46,7 +46,7 @@ import {
   buildPromptWithTerminalSelectionAttachments,
   isInlineTextAttachment,
 } from '../application/state/terminalSelectionAttachment';
-import { attachVaultNoteMention, isVaultNoteAttachment } from '../application/state/vaultNoteAttachment';
+import { createVaultNoteAttachment, isVaultNoteAttachment } from '../application/state/vaultNoteAttachment';
 import type { CodexIntegrationStatus } from './settings/tabs/ai/types';
 import {
   useAIChatStreaming,
@@ -259,7 +259,6 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   clearDraftForScope,
   addDraftFiles,
   addDraftAttachment,
-  refreshDraftVaultNoteAttachment,
   removeDraftFile,
   createSession,
   deleteSession,
@@ -613,65 +612,16 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
 
   /** Mention Note: attach a Vault → Notes entry as inline context for the next send. */
   const mentionNote = useCallback((note: VaultNote) => {
-    const result = attachVaultNoteMention(
-      currentDraftRef.current?.attachments ?? [],
-      note,
-    );
-    const upload = result.upload;
+    const upload = createVaultNoteAttachment(note);
     if (!upload) {
-      if (result.status === 'budget') {
-        // The picker closes without attaching, so surface the rejection to the
-        // user instead of silently dropping the requested note.
-        console.warn(
-          '[AIChatSidePanel] Vault note mention skipped: aggregate attachment budget exceeded',
-        );
-        toast.warning(
-          t('ai.chat.mentionNoteBudgetExceeded', {
-            title: String(note.title || '').trim() || t('ai.chat.untitledNote'),
-          }),
-        );
-      } else if (result.status === 'invalid') {
-        // A note with an oversized/empty id cannot be attached (truncating the
-        // id would break `vault_notes_get` addressing), so surface that too
-        // instead of silently doing nothing.
-        console.warn(
-          '[AIChatSidePanel] Vault note mention skipped: note has an invalid id',
-        );
-        toast.error(
-          t('ai.chat.mentionNoteInvalid', {
-            title: String(note.title || '').trim() || t('ai.chat.untitledNote'),
-          }),
-        );
-      }
+      toast.error(t('ai.chat.mentionNoteInvalid', {
+        title: String(note.title || '').trim() || t('ai.chat.untitledNote'),
+      }));
       return;
     }
     enterScopeDraftMode(currentAgentId, panelViewRef.current.mode === 'session');
-    if (result.status === 'duplicate') {
-      // Re-mentioning a note refreshes the existing attachment in place
-      // instead of appending a second copy of the same note payload. The
-      // replacement and its budget decision happen together in the
-      // authoritative application-state updater: the `currentDraftRef`
-      // pre-check above could not see uploads another mutation (e.g. a file
-      // upload) already added, so a refreshed note that grew must not bypass
-      // the aggregate cap the non-duplicate path enforces. A rejection here
-      // must be surfaced to the user instead of silently dropping the note.
-      if (!refreshDraftVaultNoteAttachment(scopeKey, currentAgentId, upload)) {
-        console.warn(
-          '[AIChatSidePanel] Vault note mention skipped: aggregate attachment budget exceeded',
-        );
-        toast.warning(
-          t('ai.chat.mentionNoteBudgetExceeded', {
-            title: String(note.title || '').trim() || t('ai.chat.untitledNote'),
-          }),
-        );
-      }
-      return;
-    }
     if (!addDraftAttachment(scopeKey, currentAgentId, upload)) {
-      // The authoritative state updater re-checks the budget against the
-      // current draft, which may already hold uploads the stale
-      // `currentDraftRef` pre-check above could not see, so a rejection here
-      // must be surfaced to the user instead of silently dropping the note.
+      // The state hook applies both duplicate refresh and budget decisions.
       console.warn(
         '[AIChatSidePanel] Vault note mention skipped: aggregate attachment budget exceeded',
       );
@@ -685,8 +635,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     addDraftAttachment,
     currentAgentId,
     enterScopeDraftMode,
-    refreshDraftVaultNoteAttachment,
-    scopeKey,
+      scopeKey,
     t,
   ]);
 

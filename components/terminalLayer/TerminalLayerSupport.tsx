@@ -8,10 +8,8 @@ import {
 import { useTerminalLayoutSuppressActive } from '../../application/state/terminalLayoutSuppressStore';
 import type { TerminalSessionExitEvent } from '../../application/state/resolveTerminalSessionExitIntent';
 import { createTerminalSelectionAttachment } from '../../application/state/terminalSelectionAttachment';
-import {
-  appendUploadsWithinAttachmentBudget,
-  isVaultNoteAttachment,
-} from '../../application/state/vaultNoteAttachment';
+import { useI18n } from '../../application/i18n/I18nProvider';
+import { toast } from '../ui/toast';
 import { getTopTabInsertionTarget, isPointInsideRect, WORKSPACE_SESSION_DRAG_TYPE } from '../../application/state/terminalDragData';
 import { useAIState } from '../../application/state/useAIState';
 import { useAISessionsStore } from '../../application/state/aiSessionsStore';
@@ -499,6 +497,7 @@ const AIChatPanelsHostInner: React.FC<AIChatPanelsHostProps> = ({
   onOpenVaultSnippetFromChat,
 }) => {
   const aiConfig = useContext(AIConfigContext);
+  const { t } = useI18n();
 
   if (!aiConfig) {
     throw new Error('AIChatPanelsHost must be rendered inside AIStateProvider');
@@ -506,13 +505,12 @@ const AIChatPanelsHostInner: React.FC<AIChatPanelsHostProps> = ({
   const {
     sessions,
     activeSessionIdMap,
-    draftsByScope,
     panelViewByScope,
   } = useAISessionsStore();
   const {
     defaultAgentId,
     showDraftView,
-    updateDraft,
+    addDraftAttachment,
   } = aiConfig;
 
   useEffect(() => {
@@ -536,50 +534,19 @@ const AIChatPanelsHostInner: React.FC<AIChatPanelsHostProps> = ({
     if (!isSessionView) {
       showDraftView(scopeKey);
     }
-    // Surface the shared budget's rejection to the user (as `addFiles` does
-    // for file uploads) instead of silently dropping the requested selection;
-    // the authoritative re-check below still decides the final state.
-    const existingDraft = draftsByScope[scopeKey];
-    if (
-      existingDraft?.attachments.some(isVaultNoteAttachment)
-      && appendUploadsWithinAttachmentBudget(existingDraft.attachments, [attachment]).length === 0
-    ) {
-      console.warn(
-        '[TerminalLayerSupport] terminal selection skipped: aggregate attachment budget exceeded',
-      );
+    if (!addDraftAttachment(scopeKey, defaultAgentId, attachment)) {
+      toast.warning(t('ai.chat.attachmentBudgetExceeded', { count: 1 }));
     }
-    // A draft that already holds a vault-note attachment is under the shared
-    // aggregate attachment budget (see `appendUploadsWithinAttachmentBudget`);
-    // the terminal selection appended here must route through the same cap or
-    // a large selection could push the persisted newest session past
-    // MAX_SESSIONS_JSON_BYTES and force attachment bodies to be stripped.
-    // Ordinary-only drafts keep their uncapped behavior. The check runs inside
-    // the authoritative application-state updater; a selection that does not
-    // fit is dropped rather than silently exceeding the cap.
-    updateDraft(scopeKey, defaultAgentId, (draft) => {
-      if (!draft.attachments.some(isVaultNoteAttachment)) {
-        return {
-          ...draft,
-          attachments: [...draft.attachments, attachment],
-        };
-      }
-      const accepted = appendUploadsWithinAttachmentBudget(draft.attachments, [attachment]);
-      if (accepted.length === 0) return draft;
-      return {
-        ...draft,
-        attachments: [...draft.attachments, ...accepted],
-      };
-    });
   }, [
     activeSessionIdMap,
     contextsByTabId,
     defaultAgentId,
-    draftsByScope,
     onPendingTerminalSelectionConsumed,
     panelViewByScope,
     pendingTerminalSelection,
     showDraftView,
-    updateDraft,
+    addDraftAttachment,
+    t,
   ]);
 
   return (

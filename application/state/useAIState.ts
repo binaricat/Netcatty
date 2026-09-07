@@ -180,9 +180,17 @@ export function useAIState() {
   );
   // Per-scope draft/view state is intentionally memory-only so a relaunch
   // does not restore stale composer input or panel intent against new history.
-  const [draftsByScope, setDraftsByScopeRaw] = useState<DraftsByScope>(() =>
+  const [draftsByScope, setDraftsByScopeReact] = useState<DraftsByScope>(() =>
     latestAIDraftsByScopeSnapshot ?? {}
   );
+  // Draft mutations must commit synchronously: callers use their outcome to
+  // report attachment rejection before React flushes a batched render.
+  const setDraftsByScopeRaw = useCallback((update: React.SetStateAction<DraftsByScope>) => {
+    const previous = latestAIDraftsByScopeSnapshot ?? {};
+    const next = typeof update === 'function' ? update(previous) : update;
+    setLatestAIDraftsByScopeSnapshot(next);
+    setDraftsByScopeReact(next);
+  }, []);
   const [panelViewByScope, setPanelViewByScopeRaw] = useState<PanelViewByScope>(() =>
     latestAIPanelViewByScopeSnapshot ?? {}
   );
@@ -620,7 +628,7 @@ export function useAIState() {
       window.removeEventListener('storage', handleStorage);
       window.removeEventListener(AI_STATE_CHANGED_EVENT, handleLocalStateChanged);
     };
-  }, []);
+  }, [setDraftsByScopeRaw]);
 
   // ── Sync initial safety settings to MCP Server on mount ──
   useEffect(() => {
@@ -876,7 +884,7 @@ export function useAIState() {
     if (textOnly) return;
     bumpDraftMutationVersion(scopeKey);
     emitAIStateChanged(AI_STATE_CHANGED_DRAFTS_BY_SCOPE);
-  }, []);
+  }, [setDraftsByScopeRaw]);
 
   const updateDraft = useCallback((
     scopeKey: string,
@@ -911,7 +919,7 @@ export function useAIState() {
     if (textOnly) return;
     bumpDraftMutationVersion(scopeKey);
     emitAIStateChanged(AI_STATE_CHANGED_DRAFTS_BY_SCOPE);
-  }, []);
+  }, [setDraftsByScopeRaw]);
 
   const updateDraftIfPresent = useCallback((
     scopeKey: string,
@@ -946,7 +954,7 @@ export function useAIState() {
     if (textOnly) return;
     bumpDraftMutationVersion(scopeKey);
     emitAIStateChanged(AI_STATE_CHANGED_DRAFTS_BY_SCOPE);
-  }, []);
+  }, [setDraftsByScopeRaw]);
 
   const showDraftView = useCallback((scopeKey: string) => {
     const currentActiveSessionIdMap = latestAIActiveSessionMapSnapshot
@@ -1011,7 +1019,7 @@ export function useAIState() {
       setPanelViewByScopeRaw(nextPanelViewByScope);
       emitAIStateChanged(AI_STATE_CHANGED_PANEL_VIEW_BY_SCOPE);
     }
-  }, [panelViewByScope]);
+  }, [panelViewByScope, setDraftsByScopeRaw]);
 
   const addDraftFiles = useCallback(async (
     scopeKey: string,
@@ -1060,123 +1068,37 @@ export function useAIState() {
     }));
   }, [updateDraft]);
 
-  /** Append a programmatically built attachment (e.g. a Vault note mention) to the draft.
-   *  Returns false when the authoritative budget re-check rejected the upload. */
+  /** Append or refresh an attachment and return the applied budget decision. */
   const addDraftAttachment = useCallback((
     scopeKey: string,
     fallbackAgentId: string,
     upload: UploadedFile,
   ): boolean => {
-    ensureDraftForScope(scopeKey, fallbackAgentId);
-    // React may defer the queued `setDraftsByScopeRaw` updaters above until the
-    // batched render (e.g. when `ensureDraftForScope` has to create a missing
-    // draft, it schedules that render), so a flag captured inside the updater
-    // below is still unset when this function returns. Decide against the
-    // module-level draft snapshot instead: every draft mutation refreshes it as
-    // soon as its updater runs, so it is the authoritative synchronous view.
-    // The updater keeps the budget re-check as defense in depth; a stale
-    // snapshot can only make this return value disagree with the deferred
-    // insert, never bypass the cap.
-    const snapshotDraft = ensureDraftForScopeState(
-      latestAIDraftsByScopeSnapshot ?? {},
-      scopeKey,
-      fallbackAgentId,
-    )[scopeKey];
-    if (!snapshotDraft) return false;
-    if (appendUploadsWithinAttachmentBudget(snapshotDraft.attachments, [upload]).length === 0) {
-      return false;
-    }
-    updateDraftIfPresent(scopeKey, (draft) => {
-      if (appendUploadsWithinAttachmentBudget(draft.attachments, [upload]).length === 0) {
+    let attached = false;
+    updateDraft(scopeKey, fallbackAgentId, (draft) => {
+      const duplicate = isVaultNoteAttachment(upload)
+        ? draft.attachments.find((entry) => entry.vaultNoteId === upload.vaultNoteId)
+        : undefined;
+      const remaining = duplicate
+        ? draft.attachments.filter((entry) => entry.id !== duplicate.id)
+        : draft.attachments;
+      const budgetApplies = isVaultNoteAttachment(upload)
+        || remaining.some(isVaultNoteAttachment);
+      if (budgetApplies && appendUploadsWithinAttachmentBudget(remaining, [upload]).length === 0) {
         return draft;
       }
+      attached = true;
       return {
         ...draft,
-        attachments: [...draft.attachments, upload],
+        attachments: duplicate
+          ? draft.attachments.map((entry) => entry.id === duplicate.id ? upload : entry)
+          : [...draft.attachments, upload],
       };
     });
-    return true;
-  }, [ensureDraftForScope, updateDraftIfPresent]);
+    return attached;
+  }, [updateDraft]);
 
-  /** Re-mention duplicate refresh: replace an existing vault-note attachment in
-   *  place with its refreshed payload. The budget decision is made against the
-   *  authoritative application-state draft — the caller's `currentDraftRef`
-   *  pre-check can be stale (e.g. a file upload reached application state but is
-   *  not yet reflected in the ref) — with the stale attachment's payload freed
-   *  before the refreshed one is charged, matching `attachVaultNoteMention`'s
-   *  duplicate accounting. Returns false when the authoritative draft has no
-   *  such attachment (the caller should fall back to a normal attach) or when
-   *  the aggregate attachment budget rejected the refresh. */
-  const refreshDraftVaultNoteAttachment = useCallback((
-    scopeKey: string,
-    fallbackAgentId: string,
-    upload: UploadedFile,
-  ): boolean => {
-    ensureDraftForScope(scopeKey, fallbackAgentId);
-    // Same authoritative-snapshot reasoning as `addDraftAttachment` above: the
-    // module-level draft snapshot is refreshed as soon as every draft
-    // mutation's updater runs, so it is the authoritative synchronous view.
-    const snapshotDraft = ensureDraftForScopeState(
-      latestAIDraftsByScopeSnapshot ?? {},
-      scopeKey,
-      fallbackAgentId,
-    )[scopeKey];
-    if (!snapshotDraft) return false;
-    const snapshotDuplicate = snapshotDraft.attachments.find(
-      (attachment) => (
-        isVaultNoteAttachment(attachment) && attachment.vaultNoteId === upload.vaultNoteId
-      ),
-    );
-    if (!snapshotDuplicate) {
-      // The caller's stale pre-check saw a duplicate that the authoritative
-      // draft does not have; attach normally (with its own budget re-check).
-      return addDraftAttachment(scopeKey, fallbackAgentId, upload);
-    }
-    if (
-      appendUploadsWithinAttachmentBudget(
-        snapshotDraft.attachments.filter((attachment) => attachment.id !== snapshotDuplicate.id),
-        [upload],
-      ).length === 0
-    ) {
-      return false;
-    }
-    // React may defer the queued `setDraftsByScopeRaw` updater until the
-    // batched render (e.g. when another draft mutation is already queued), so
-    // a flag captured inside the updater is still unset when this function
-    // returns and a successful refresh would be reported as a budget
-    // rejection, making the caller warn although the note was refreshed.
-    // Decide against the module-level draft snapshot instead, exactly like
-    // `addDraftAttachment` above: every draft mutation refreshes the snapshot
-    // as soon as its updater runs, so it is the authoritative synchronous
-    // view. The updater keeps the budget re-check as defense in depth; a
-    // stale snapshot can only make this return value disagree with the
-    // deferred refresh, never bypass the cap.
-    updateDraftIfPresent(scopeKey, (draft) => {
-      const existingDuplicate = draft.attachments.find(
-        (attachment) => (
-          isVaultNoteAttachment(attachment) && attachment.vaultNoteId === upload.vaultNoteId
-        ),
-      );
-      if (!existingDuplicate) return draft;
-      if (
-        appendUploadsWithinAttachmentBudget(
-          draft.attachments.filter((attachment) => attachment.id !== existingDuplicate.id),
-          [upload],
-        ).length === 0
-      ) {
-        return draft;
-      }
-      return {
-        ...draft,
-        attachments: draft.attachments.map((attachment) => (
-          isVaultNoteAttachment(attachment) && attachment.vaultNoteId === upload.vaultNoteId
-            ? upload
-            : attachment
-        )),
-      };
-    });
-    return true;
-  }, [addDraftAttachment, ensureDraftForScope, updateDraftIfPresent]);
+  const refreshDraftVaultNoteAttachment = addDraftAttachment;
 
   const cleanupOrphanedSessions = useCallback((activeTargetIds: Set<string>) => {
     cleanupOrphanedAISessions(activeTargetIds);
@@ -1194,7 +1116,7 @@ export function useAIState() {
     );
     setDraftsByScopeRaw(latestAIDraftsByScopeSnapshot ?? {});
     setPanelViewByScopeRaw(latestAIPanelViewByScopeSnapshot ?? {});
-  }, []);
+  }, [setDraftsByScopeRaw]);
 
   const seedWorkspaceActiveSessionFromMembers = useCallback((input: {
     workspaceId: string;
