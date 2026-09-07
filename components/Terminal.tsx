@@ -1,5 +1,6 @@
 import { resolveHostOs } from '../domain/host';
 import { Terminal as XTerm } from "@xterm/xterm";
+import type { IMarker } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { SerializeAddon } from "@xterm/addon-serialize";
 import { SearchAddon } from "@xterm/addon-search";
@@ -3020,6 +3021,16 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           ? null
           : captureTerminalReflowScrollAnchor(buffer);
 
+        // Marker pinned to the anchor's row. xterm adjusts marker rows through
+        // the rewrap (and disposes it on scrollback trim), so after the resize
+        // it marks where the anchored line moved without scanning for it.
+        let reflowMarker: IMarker | null = null;
+        if (reflowAnchor) {
+          reflowMarker = term.registerMarker(
+            reflowAnchor.startRow - (buffer.baseY + buffer.cursorY),
+          );
+        }
+
         lastFittedSizeRef.current = { width, height };
         // addon-fit 0.11 clears the renderer before resizing, which can show
         // as a one-frame WebGL blink during layout changes. Resize directly
@@ -3047,9 +3058,14 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         } else {
           // Re-locate the anchored content; fall back to the saved row index
           // when the anchored content is gone (scrollback trim).
+          const markerRow = reflowMarker && !reflowMarker.isDisposed && reflowMarker.line >= 0
+            ? reflowMarker.line
+            : null;
+          reflowMarker?.dispose();
+          reflowMarker = null;
           const anchoredViewportY = reflowAnchor === null
             ? null
-            : resolveTerminalReflowScrollAnchor(term.buffer.active, reflowAnchor);
+            : resolveTerminalReflowScrollAnchor(term.buffer.active, reflowAnchor, markerRow);
           const targetY = Math.min(anchoredViewportY ?? savedViewportY, term.buffer.active.baseY);
           if (term.buffer.active.viewportY !== targetY) {
             term.scrollToLine(targetY);

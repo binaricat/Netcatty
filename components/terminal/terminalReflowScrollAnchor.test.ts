@@ -174,3 +174,32 @@ test("resolveTerminalReflowScrollAnchor requires the following line to match", (
   );
   assert.equal(resolvedRow, 2);
 });
+
+test("resolveTerminalReflowScrollAnchor uses a marker hint far from the stale row", () => {
+  // Rewrap pushed the anchored line far down; the tracked marker (hint) points
+  // at its new row while the stale anchor row is far above. The seeded scan
+  // must find the match next to the hint, not traverse from the stale row.
+  const rows = Array.from({ length: 300 }, (_, i) => ({
+    text: i === 150 ? "line 001" : i === 151 ? "line 002" : "filler " + String(i).padStart(3, "0"),
+  }));
+  const anchor = { startRow: 1, charOffset: 0, textPrefix: "line 001", contextSuffix: "line 002" };
+  const resolvedRow = resolveTerminalReflowScrollAnchor(
+    fakeBuffer(rows, { viewportY: 0 }) as never,
+    anchor,
+    150,
+  );
+  assert.equal(resolvedRow, 150);
+});
+
+test("resolveTerminalReflowScrollAnchor falls back to a full scan when the hint misses", () => {
+  const rows = wrapToRows(["target unique alpha", "filler beta", "filler gamma"], 80);
+  const anchor = { startRow: 0, charOffset: 0, textPrefix: "target unique alpha", contextSuffix: "filler beta" };
+  // Hint points nowhere near matching content; the stale-row scan must still
+  // find the match.
+  const resolvedRow = resolveTerminalReflowScrollAnchor(
+    fakeBuffer(rows, { viewportY: 0 }) as never,
+    anchor,
+    2,
+  );
+  assert.equal(resolvedRow, 0);
+});

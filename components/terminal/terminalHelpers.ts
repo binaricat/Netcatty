@@ -751,20 +751,44 @@ const reflowAnchorCandidateMatches = (
  * Returns the buffer row that now holds the captured characters, or null when
  * the anchored content is gone (e.g. trimmed from a full scrollback) so the
  * caller can fall back to the plain row restore.
+ *
+ * `hintRow` is the row a stable marker (one tracked by xterm through the
+ * rewrap) points at after the resize. Rewrap shifts the anchored line by the
+ * accumulated wrap delta of everything above it — tens of thousands of rows
+ * for large scrollbacks — so scanning outward from the stale `anchor.startRow`
+ * can cost O(scrollback) per resize frame. Seeding the same outward scan from
+ * the marker row keeps it O(delta) around the true position; the full scan
+ * from the stale row only runs as a fallback when the marker is unavailable
+ * (scrollback trim disposes it) or its neighborhood no longer matches.
  */
 export function resolveTerminalReflowScrollAnchor(
   buffer: ReflowAnchorBuffer,
   anchor: TerminalReflowScrollAnchor,
+  hintRow?: number | null,
 ): number | null {
+  const seedRow = typeof hintRow === "number" && Number.isFinite(hintRow)
+    && hintRow >= 0 && hintRow < buffer.length
+    ? hintRow
+    : null;
+  if (seedRow !== null && seedRow !== anchor.startRow) {
+    const seeded = reflowScanOutward(buffer, anchor, seedRow);
+    if (seeded !== null) return seeded;
+  }
+  return reflowScanOutward(buffer, anchor, anchor.startRow);
+}
+
+/**
+ * Scan outward from `startRow`, checking the closest logical lines first and
+ * stopping as soon as no remaining row can beat the best match. A tie at equal
+ * distance resolves to the topmost row, matching a plain top-down scan.
+ */
+const reflowScanOutward = (
+  buffer: ReflowAnchorBuffer,
+  anchor: TerminalReflowScrollAnchor,
+  startRow: number,
+): number | null => {
   let bestRow = -1;
   let bestDistance = Number.POSITIVE_INFINITY;
-  // Rewrap moves a logical line only a few rows per resize step, so search
-  // outward from the stale row and stop as soon as no remaining row can beat
-  // the best match. This keeps O(scrollback) work off the per-frame resize
-  // path for the common case; the scan still covers the whole buffer when
-  // needed. A tie at equal distance resolves to the topmost row, matching a
-  // plain top-down scan.
-  const startRow = anchor.startRow;
   const maxDistance = Math.max(startRow, buffer.length - 1 - startRow);
   for (let distance = 0; distance <= maxDistance && distance <= bestDistance; distance += 1) {
     for (const row of distance === 0 ? [startRow] : [startRow - distance, startRow + distance]) {
