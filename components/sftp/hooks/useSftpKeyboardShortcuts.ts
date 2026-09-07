@@ -359,13 +359,19 @@ export const useSftpKeyboardShortcuts = ({
         operation: clipboard.operation,
         sourcePath: clipboard.sourcePath,
         targetPath: pane.connection!.currentPath,
+        files: clipboard.files,
       });
       if (pasteAction === "block-same-folder") {
         toast.info("The cut items are already in this folder.", "SFTP");
         return;
       }
       if (pasteAction === "block-into-source") {
-        toast.info("A folder can't be moved into itself. Choose a different folder.", "SFTP");
+        toast.info(
+          clipboard.operation === "cut"
+            ? "A folder can't be moved into itself. Choose a different folder."
+            : "A folder can't be copied into itself or one of its subfolders. Choose a different folder.",
+          "SFTP",
+        );
         return;
       }
       // Same-pane copy (and cut into a different folder) falls through to the

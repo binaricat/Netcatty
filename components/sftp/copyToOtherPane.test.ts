@@ -64,61 +64,140 @@ test("copy to other pane reports why it cannot start instead of silently returni
   assert.equal(unavailableCount, 1);
 });
 
-test("same-pane copy is always allowed", () => {
+test("same-pane copy of files into their own source folder is allowed", () => {
+  const files = [
+    { name: "report.txt", isDirectory: false },
+    { name: "notes.txt", isDirectory: false },
+  ];
   assert.equal(
-    resolveSamePanePasteAction({ operation: "copy", sourcePath: "/home/user", targetPath: "/home/user" }),
+    resolveSamePanePasteAction({ operation: "copy", sourcePath: "/home/user", targetPath: "/home/user", files }),
     "allow",
   );
   assert.equal(
-    resolveSamePanePasteAction({ operation: "copy", sourcePath: "/home/user", targetPath: "/home/user/docs" }),
+    resolveSamePanePasteAction({ operation: "copy", sourcePath: "/home/user", targetPath: "/home/user/docs", files }),
+    "allow",
+  );
+});
+
+test("same-pane copy of a directory into itself or a descendant is blocked", () => {
+  const files = [{ name: "docs", isDirectory: true }];
+  assert.equal(
+    resolveSamePanePasteAction({ operation: "copy", sourcePath: "/a", targetPath: "/a/docs", files }),
+    "block-into-source",
+  );
+  assert.equal(
+    resolveSamePanePasteAction({ operation: "copy", sourcePath: "/a", targetPath: "/a/docs/sub", files }),
+    "block-into-source",
+  );
+  assert.equal(
+    resolveSamePanePasteAction({ operation: "copy", sourcePath: "/a", targetPath: "/a/docs/sub/deep", files }),
+    "block-into-source",
+  );
+});
+
+test("same-pane copy of a directory into a sibling is allowed", () => {
+  const files = [{ name: "docs", isDirectory: true }];
+  assert.equal(
+    resolveSamePanePasteAction({ operation: "copy", sourcePath: "/a/docs", targetPath: "/a/sub", files }),
+    "allow",
+  );
+  assert.equal(
+    resolveSamePanePasteAction({ operation: "copy", sourcePath: "/a/docs", targetPath: "/a/docsx", files }),
     "allow",
   );
 });
 
 test("same-pane cut into the source folder is blocked", () => {
+  const files = [{ name: "report.txt", isDirectory: false }];
   assert.equal(
-    resolveSamePanePasteAction({ operation: "cut", sourcePath: "/home/user", targetPath: "/home/user" }),
+    resolveSamePanePasteAction({ operation: "cut", sourcePath: "/home/user", targetPath: "/home/user", files }),
     "block-same-folder",
   );
   assert.equal(
-    resolveSamePanePasteAction({ operation: "cut", sourcePath: "/home/user", targetPath: "/home/user/" }),
+    resolveSamePanePasteAction({ operation: "cut", sourcePath: "/home/user", targetPath: "/home/user/", files }),
     "block-same-folder",
   );
 });
 
-test("same-pane cut into a descendant of the source folder is blocked", () => {
+test("same-pane cut of files into a child of the source folder is allowed", () => {
+  const files = [
+    { name: "report.txt", isDirectory: false },
+    { name: "photos", isDirectory: false },
+  ];
   assert.equal(
-    resolveSamePanePasteAction({ operation: "cut", sourcePath: "/home/user", targetPath: "/home/user/docs" }),
+    resolveSamePanePasteAction({ operation: "cut", sourcePath: "/home/user", targetPath: "/home/user/docs", files }),
+    "allow",
+  );
+  assert.equal(
+    resolveSamePanePasteAction({ operation: "cut", sourcePath: "/home/user", targetPath: "/home/user/docs/sub", files }),
+    "allow",
+  );
+});
+
+test("same-pane cut of a directory into itself or a descendant is blocked", () => {
+  const files = [{ name: "docs", isDirectory: true }];
+  assert.equal(
+    resolveSamePanePasteAction({ operation: "cut", sourcePath: "/home/user", targetPath: "/home/user/docs", files }),
     "block-into-source",
   );
   assert.equal(
-    resolveSamePanePasteAction({ operation: "cut", sourcePath: "/home/user", targetPath: "/home/user/docs/sub" }),
+    resolveSamePanePasteAction({ operation: "cut", sourcePath: "/home/user", targetPath: "/home/user/docs/sub", files }),
+    "block-into-source",
+  );
+  assert.equal(
+    resolveSamePanePasteAction({ operation: "cut", sourcePath: "/home/user", targetPath: "/home/user/docs/sub/deep", files }),
     "block-into-source",
   );
 });
 
 test("same-pane cut into a sibling folder is allowed", () => {
+  const files = [{ name: "docs", isDirectory: true }];
   assert.equal(
-    resolveSamePanePasteAction({ operation: "cut", sourcePath: "/home/user", targetPath: "/home/other" }),
+    resolveSamePanePasteAction({ operation: "cut", sourcePath: "/home/user", targetPath: "/home/other", files }),
     "allow",
   );
   assert.equal(
-    resolveSamePanePasteAction({ operation: "cut", sourcePath: "/home/user", targetPath: "/home/user2" }),
+    resolveSamePanePasteAction({ operation: "cut", sourcePath: "/home/user", targetPath: "/home/user2", files }),
     "allow",
   );
 });
 
-test("same-pane cut guard understands Windows paths", () => {
+test("same-pane paste guard understands Windows paths", () => {
+  const files = [{ name: "docs", isDirectory: true }];
   assert.equal(
-    resolveSamePanePasteAction({ operation: "cut", sourcePath: "C:\\Users\\me", targetPath: "C:/Users/me" }),
+    resolveSamePanePasteAction({
+      operation: "cut",
+      sourcePath: "C:\\Users\\me",
+      targetPath: "C:/Users/me",
+      files,
+    }),
     "block-same-folder",
   );
   assert.equal(
-    resolveSamePanePasteAction({ operation: "cut", sourcePath: "C:\\Users\\me", targetPath: "C:\\Users\\me\\docs" }),
+    resolveSamePanePasteAction({
+      operation: "cut",
+      sourcePath: "C:\\Users\\me",
+      targetPath: "C:\\Users\\me\\docs",
+      files,
+    }),
     "block-into-source",
   );
   assert.equal(
-    resolveSamePanePasteAction({ operation: "cut", sourcePath: "C:\\Users\\me", targetPath: "C:\\Users\\other" }),
+    resolveSamePanePasteAction({
+      operation: "copy",
+      sourcePath: "C:\\Users\\me",
+      targetPath: "C:\\Users\\me\\docs",
+      files: [{ name: "report.txt", isDirectory: false }],
+    }),
+    "allow",
+  );
+  assert.equal(
+    resolveSamePanePasteAction({
+      operation: "cut",
+      sourcePath: "C:\\Users\\me",
+      targetPath: "C:\\Users\\other",
+      files,
+    }),
     "allow",
   );
 });
