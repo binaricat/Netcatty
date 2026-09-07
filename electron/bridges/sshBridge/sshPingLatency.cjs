@@ -53,7 +53,13 @@ function createSshPingLatencyProbe({
         // keepalive@openssh.com request, so both count as a completed ping.
         // Only an Error instance (transport teardown/flush) is a failure.
         if (hadErr instanceof Error) {
-          finish(null, true);
+          // The client is flushing the whole queue with an Error while
+          // iterating it by index; splicing here would shift later
+          // callbacks into already-visited slots, so ssh2 would skip
+          // them (e.g. a pending forwardIn reply would hang until its
+          // own timeout). Leave the array untouched instead — it is
+          // being discarded by the client anyway.
+          finish(null, false);
           return;
         }
         finish(Math.max(0, Math.round(now() - startedAt)), true);

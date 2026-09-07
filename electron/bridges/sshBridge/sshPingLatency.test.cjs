@@ -81,6 +81,29 @@ test("resolves null when the reply reports an error", async () => {
   assert.equal(await measure(conn), null);
 });
 
+test("disconnect flush does not splice the queue being iterated", async () => {
+  // Like ssh2's close handler, flush the queue by index so that splicing the
+  // currently executing entry would shift later callbacks into already-visited
+  // slots and make ssh2 skip them (e.g. a pending forwardIn reply).
+  const { measure } = createProbe();
+  const conn = createFakeSshClient({ delayMs: 10_000 });
+  let laterCalled = false;
+  const later = () => { laterCalled = true; };
+  conn._callbacks.push(later);
+
+  const pending = measure(conn);
+  assert.equal(conn._callbacks.length, 2);
+
+  const flushed = conn._callbacks;
+  for (let i = 0; i < flushed.length; ++i) flushed[i](new Error("No response from server"));
+
+  assert.equal(await pending, null);
+  // The queue must be untouched during the flush so the later callback is
+  // still visited and receives the disconnect error.
+  assert.equal(flushed.length, 2);
+  assert.ok(laterCalled, "later callback received the disconnect error");
+});
+
 test("resolves null when ping() throws", async () => {
   const { measure } = createProbe();
   const conn = createFakeSshClient({ failPing: true });
