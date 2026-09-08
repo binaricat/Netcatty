@@ -139,14 +139,17 @@ export function AppSideEffects() {
     terminalSettings,
     hotkeyScheme,
     keyBindings,
-    disableTerminalFontZoom,
     isHotkeyRecording,
     showSftpTab,
     shellOnlyTabNumberShortcuts,
     workspaceFocusStyle,
   } = settings;
 
-  useTerminalKeyboardFocus(hotkeyScheme !== 'disabled' && !disableTerminalFontZoom);
+  // Always publish terminal keyboard focus to the main process. When font zoom
+  // is disabled (or hotkeys are off) the renderer ignores the font chords, so
+  // the main process must keep handing them to the page instead of falling
+  // back to window zoom while the user is typing in a terminal (#3327).
+  useTerminalKeyboardFocus();
 
   const discoveredShells = useDiscoveredShells();
 
