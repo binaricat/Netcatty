@@ -114,6 +114,7 @@ import {
 import { formatSerialLocalEcho } from "./serialLocalEcho";
 import { stringCellWidth } from "../autocomplete/terminalStringCellWidth";
 import { getCharByteLength, getLastChar, removeLastChar, isPrintableInput } from "../../../domain/serialCharMetrics";
+import { resolveTerminalEncodingFromCharset } from "../../../domain/terminalEncodingPreference";
 import { mapTerminalBackspaceInput } from "./terminalBackspaceInput";
 import { sanitizeTerminalInput } from "./terminalInputSanitize";
 import { formatTelnetLocalEcho } from "./telnetLocalEcho";
@@ -1239,14 +1240,18 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
           // restored or hibernated session keeps its configured behavior
           // even if the vault host was edited after the session started.
           if (ctx.serialByteOrientedBackspace ?? true) {
-            // For serial hosts with a non-UTF-8 charset, the host charset is
-            // authoritative unless the user has explicitly changed the toolbar
-            // encoding to something other than the default (utf-8).
+            // For recognized charsets (UTF-8, GB18030), the toolbar encoding
+            // is authoritative — it may reflect a remembered or explicit user
+            // choice that overrides the host charset. For unrecognized charsets
+            // (e.g. Shift_JIS), the toolbar encoding falls back to the default
+            // (utf-8), so the host charset is the correct wire encoding.
             const toolbarEnc = ctx.currentEncodingRef?.current;
             const hostChar = ctx.host.charset;
+            const hostCharRecognized = hostChar
+              ? resolveTerminalEncodingFromCharset(hostChar) !== null
+              : false;
             const effectiveEncoding =
-              hostChar && hostChar.toLowerCase() !== 'utf-8' &&
-              (!toolbarEnc || toolbarEnc === 'utf-8')
+              hostChar && !hostCharRecognized
                 ? hostChar
                 : toolbarEnc ?? hostChar ?? 'utf-8';
             const bytes = getCharByteLength(lastChar, effectiveEncoding);
