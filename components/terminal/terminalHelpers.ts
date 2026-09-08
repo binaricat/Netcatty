@@ -1781,10 +1781,18 @@ export function resolveTerminalReflowScrollAnchor(
         trackContinuation
         && seededLine !== undefined
         && seedRow !== seededLine
-        // The marker is also kept when the containment walk exceeds its bound
-        // (`undefined`): the line may be the truncated cursor line, whose
-        // changed row lengths the scanned offset mapping cannot traverse.
-        && reflowAnchorContextIsCursorLine(buffer, seededLine) !== false
+        // Only a confirmed cursor line may override the scanned result. An
+        // unknown answer (`undefined`: the line continues past the containment
+        // walk bound) may equally be a rewrapped non-cursor line, whose group
+        // a column shrink extends by appending its new rows after the old ones
+        // — the marker then keeps its old within-line row while the viewed
+        // characters move deeper, and the scanned result is the correct
+        // restore. Declining on unknown matches the marker trust
+        // `TerminalReflowScrollAnchor.containsCursor` applies (see its doc):
+        // an unverifiable line must not gain that trust. A genuine truncated
+        // cursor line keeps its row indices, so the walk still reaches the
+        // cursor within the bound and answers `true` there.
+        && reflowAnchorContextIsCursorLine(buffer, seededLine) === true
       ) {
         return Math.min(seedRow, buffer.baseY);
       }

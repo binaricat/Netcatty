@@ -664,6 +664,39 @@ test("resolve keeps the surviving marker when the truncated cursor line is the a
   assert.equal(resolvedRow, viewportRow);
 });
 
+test("resolve keeps the scanned row when the marker line's containment walk is unknown", () => {
+  // The viewport sits partway into a non-cursor logical line that rewraps to
+  // more than REFLOW_ANCHOR_CURSOR_LINE_WALK_ROWS (2048) rows before the
+  // cursor: the containment walk from the line's start reports unknown
+  // (`undefined`) at its bound instead of traversing the whole line. A column
+  // shrink extends such a rewrapped group by appending its new rows after the
+  // old ones, so xterm keeps the marker at its old within-line row while the
+  // viewed characters move deeper. The unknown answer must not be read as
+  // containment: only the scanned result — which maps the captured offset
+  // through the new row lengths — restores the right reading position.
+  const cols = 10;
+  const line = "start " + "A".repeat(24_994); // 25,000 chars: 2,500 rows at 10 cols
+  const rows = wrapToRows([line, "follower unique beta", "tail unique gamma"], cols);
+  const anchor = {
+    startRow: 0,
+    // The viewed characters sit at joined offset 500 — post-shrink row 50,
+    // far below the marker's stale within-line row.
+    charOffset: 500,
+    textPrefix: line.slice(0, 256),
+    contextSuffix: "follower unique beta",
+    viewedText: "A".repeat(20),
+  };
+  const resolvedRow = resolveTerminalReflowScrollAnchor(
+    fakeBuffer(rows, { viewportY: 0, cursorY: 0 }) as never,
+    anchor as never,
+    5, // the marker kept its old within-line row through the shrink
+  );
+  // The cursor (last row) sits ~2,500 rows below the line's start, past the
+  // containment walk bound, so the answer is unknown; the scanned offset
+  // mapping — not the stale marker row — must win.
+  assert.equal(resolvedRow, 50);
+});
+
 test("follower bound counts the anchored line's first physical row", () => {
   // The follower bound must cover the whole logical line: excluding the
   // line's first row leaves the count reflow-variable, because that row's
