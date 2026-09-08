@@ -1057,7 +1057,10 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   // character (not an escape sequence or control char).  Backspace byte
   // expansion is only safe when the cursor is at the end of the typed
   // buffer — i.e. the last input advanced the cursor, not moved it.
-  let lastInputWasPrintable = false;
+  //
+  // Starts true: at session start and after line submission the cursor is
+  // at the beginning of an empty buffer (i.e. the end of the buffer).
+  let lastInputWasPrintable = true;
 
   const handleTerminalInputData = (
     data: string,
@@ -1124,6 +1127,10 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         { sensitive, allowHostStyleGreaterThanPrompt: ctx.allowHostStyleGreaterThanPrompt },
       );
       handledSubmittedInput = true;
+      // After line submission the cursor is at the beginning of the next
+      // prompt line (end of empty buffer).  Reset cursor-tail confidence
+      // so backspace byte expansion works on the next line's first char.
+      lastInputWasPrintable = true;
       // Recipients of a key-chord broadcast must not arm password assistance.
       // handlingKittyBroadcast already blocks re-fan-out via canBroadcastInput.
       if (!canBroadcastInput && !handlingKittyBroadcast) {
@@ -1299,12 +1306,14 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         } else if (data === "\x03") {
           ctx.commandBufferRef.current = "";
           ctx.scriptRecorderRef?.current?.recordClearLine();
+          lastInputWasPrintable = true; // buffer cleared, cursor at start
           // Hard-abort password assist when Ctrl+C reaches the input path
           // (e.g. broadcast peers) so a later su re-arms cleanly (#2191).
           ctx.sudoAutofillRef?.current?.abort();
         } else if (data === "\x15") {
           ctx.commandBufferRef.current = "";
           ctx.scriptRecorderRef?.current?.recordClearLine();
+          lastInputWasPrintable = true; // buffer cleared, cursor at start
         } else if (data.length === 1 && data.charCodeAt(0) >= 32) {
           ctx.commandBufferRef.current += data;
           ctx.scriptRecorderRef?.current?.recordInput(data);
