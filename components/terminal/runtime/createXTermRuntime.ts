@@ -1167,6 +1167,13 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         ctx.terminalBackend,
       );
 
+      // Shared variables for character-mode backspace expansion.
+      // Declared outside the if/else so the broadcast section (after the
+      // block) can access them when the character-mode branch expanded
+      // a multi-byte serial backspace.
+      let outData = mapTerminalBackspaceInput(dataToWrite, ctx.host.backspaceBehavior);
+      let isExpanded = false;
+
       // Serial line mode: buffer input and send on Enter
       if (
         inputSource !== "kitty" &&
@@ -1199,9 +1206,8 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         // after cursor-movement escape sequences (e.g. arrow keys) that
         // leave the cursor before the buffer tail.
         const isBackspace = dataToWrite === "\x7f" || dataToWrite === "\b";
-        let outData = mapTerminalBackspaceInput(dataToWrite, ctx.host.backspaceBehavior);
+        outData = mapTerminalBackspaceInput(dataToWrite, ctx.host.backspaceBehavior);
         let backspaceCells = 1;
-        let isExpanded = false;
 
         if (
           isBackspace &&
@@ -1233,11 +1239,31 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
           if (localEcho) writeLocalTerminalData(localEcho);
         }
 
-        // Update printable tracking: backspace is not printable,
-        // escape sequences and control chars are not printable,
-        // printable characters advance the cursor.
+        // Update printable tracking.  Backspace is not printable.
+        // Escape sequences (cursor movements, special keys) and control
+        // chars set lastInputWasPrintable to false — the cursor position
+        // is now unknown.  Printable characters keep the flag as-is:
+        // typing at the end advances the cursor to the end (stays true),
+        // but typing after a cursor movement inserts at the cursor
+        // position, not the buffer end (stays false).
+        //
+        // Bracketed paste (\x1b[200~...\x1b[201~) is special: xterm wraps
+        // pasted text in these markers, so the data starts with ESC and
+        // isPrintableInput returns false.  But the pasted content is
+        // printable and the cursor IS at the end after the paste.
         if (!isBackspace) {
-          lastInputWasPrintable = isPrintableInput(dataToWrite);
+          const isBracketedPaste =
+            dataToWrite.startsWith("\x1b[200~") && dataToWrite.endsWith("\x1b[201~");
+          if (isBracketedPaste) {
+            // Cursor is at the end after a paste; trust the flag.
+            lastInputWasPrintable = true;
+          } else if (!isPrintableInput(dataToWrite)) {
+            // Escape sequence or control char: cursor position unknown.
+            lastInputWasPrintable = false;
+          }
+          // If printable (non-backspace, non-escape), keep flag as-is:
+          // typing at the end keeps cursor at end; typing after a cursor
+          // movement keeps cursor not at end.
         }
       }
 
