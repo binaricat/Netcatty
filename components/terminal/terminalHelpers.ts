@@ -689,6 +689,22 @@ export type TerminalReflowScrollAnchor = {
    */
   contextRowTexts?: string[];
   /**
+   * True only with a null `contextSuffix`, and only when the capture's
+   * follower lookup ended at `REFLOW_ANCHOR_MAX_LINE_CHARS` rather than at
+   * the end of the buffer — a follower line existed but its identity was
+   * dropped by the character bound. The bound counts the anchored line's own
+   * characters, which a scrollback trim shrinks (it removes only leading
+   * content), so the resolve side can find a follower the capture was over
+   * the bound for. Without this flag the resolve's strict null-vs-found
+   * comparison would reject the otherwise matching anchor and fall back to
+   * the stale row, jumping the viewport. With it, the resolve treats the
+   * follower as unidentified — the same text-only degradation the bound
+   * already applies when both sides drop it — instead of a mismatch.
+   * Undefined (falsy) for hand-built anchors (tests), which keep the strict
+   * no-follower requirement.
+   */
+  contextDropped?: boolean;
+  /**
    * Text of the logical line starting at the captured viewport row — the
    * continuation the reader was actually looking at. Equal to `textPrefix`
    * when the viewport top row is the logical line's start. When scrollback
@@ -785,8 +801,13 @@ const REFLOW_ANCHOR_CONTEXT_SCAN_ROWS = 1024;
 // drop a captured follower context there, rejecting the otherwise unchanged
 // anchor. Joined characters survive rewrap unchanged — the cursor's own line
 // can only lose characters to row truncation, never gain them — so once a
-// line fits the bound at capture it still fits at resolve: both sides either
-// find the same follower or both drop it. The value matches
+// line fits the bound at capture it still fits at resolve. The reverse does
+// not hold under scrollback trim: the count starts at the anchored line
+// itself, and trim removes the line's leading characters, so a line over the
+// bound at capture can fall under it at resolve and present a follower the
+// capture dropped. Capture records that case (`contextDropped`) and the
+// resolve side degrades to text-only identity instead of rejecting the
+// anchor over the mismatch. The value matches
 // REFLOW_ANCHOR_LINE_LENGTH_CHARS, the cap already accepted for whole-line
 // measurement, so any line whose follower stays reachable is also a line
 // whose length could have been measured anyway.
@@ -970,21 +991,41 @@ const reflowAnchorLogicalLineLength = (
  * costs O(maxChars) row translations. Beyond the bound the follower identity
  * is dropped on both sides: capture records no context and resolve reports
  * none, so they stay consistent and the anchor degrades to its own text.
+ *
+ * The one asymmetry the bound cannot absorb on its own is scrollback trim:
+ * the count starts at the anchored line itself, and a partial trim removes
+ * the line's *leading* characters, shrinking the count without touching the
+ * follower. A line over the bound at capture can therefore fall under it at
+ * resolve, and the resolve would then present a follower the capture never
+ * identified. Callers learn about that case through `boundDropped` (see
+ * `TerminalReflowScrollAnchor.contextDropped`) instead of being able to
+ * distinguish it from a genuine end-of-buffer.
  */
+type ReflowAnchorNextLineLookup = {
+  /** Start row of the next logical line, or null when there is none. */
+  start: number | null;
+  /**
+   * True when the character bound — not the end of the buffer — ended the
+   * lookup. A follower may still exist past the bound; the caller must not
+   * read `start: null` as "no follower exists" in that case.
+   */
+  boundDropped: boolean;
+};
+
 const reflowAnchorNextLogicalLineStart = (
   buffer: ReflowAnchorBuffer,
   row: number,
   maxChars: number,
-): number | null => {
+): ReflowAnchorNextLineLookup => {
   let next = row + 1;
   let chars = reflowAnchorRowText(buffer, row).length;
-  if (chars > maxChars) return null;
+  if (chars > maxChars) return { start: null, boundDropped: true };
   while (next < buffer.length && buffer.getLine(next)?.isWrapped) {
     chars += reflowAnchorRowText(buffer, next).length;
-    if (chars > maxChars) return null;
+    if (chars > maxChars) return { start: null, boundDropped: true };
     next += 1;
   }
-  return next < buffer.length ? next : null;
+  return { start: next < buffer.length ? next : null, boundDropped: false };
 };
 
 /**
@@ -992,12 +1033,17 @@ const reflowAnchorNextLogicalLineStart = (
  * text is non-empty, or null. A blank logical line is a single empty row at
  * every width, so a run of blank lines survives rewrap intact and cannot
  * re-position the lines after it relative to the anchor — skipping the run
- * is stable on both sides of the resize.
+ * is stable on both sides of the resize. `boundDropped` propagates the
+ * character-bound outcome of any walk involved (see
+ * `reflowAnchorNextLogicalLineStart`): the row bound below truncates
+ * identically on both sides, but a scrollback trim can move the anchored
+ * line under the character bound between capture and resolve, so resolve
+ * must be able to tell "no follower" from "follower past the bound".
  */
 const reflowAnchorNextNonBlankLogicalLineStart = (
   buffer: ReflowAnchorBuffer,
   row: number,
-): number | null => {
+): ReflowAnchorNextLineLookup => {
   // Bounded (REFLOW_ANCHOR_CONTEXT_SCAN_ROWS) so a long run of blank lines
   // after the anchor cannot turn every column-changing fit into an O(run)
   // scan. The bound counts only the blank rows between the anchored line's
@@ -1011,17 +1057,19 @@ const reflowAnchorNextNonBlankLogicalLineStart = (
   // every width, so measuring from the first follower keeps capture and
   // resolve truncating at the same line (see the constant's comment).
   const first = reflowAnchorNextLogicalLineStart(buffer, row, REFLOW_ANCHOR_MAX_LINE_CHARS);
-  if (first === null) return null;
-  let next = first;
+  if (first.start === null) return first;
+  let next = first.start;
   while (
-    next - first <= REFLOW_ANCHOR_CONTEXT_SCAN_ROWS
+    next - first.start <= REFLOW_ANCHOR_CONTEXT_SCAN_ROWS
     && reflowAnchorJoinTextPrefix(buffer, next, 1) === ""
   ) {
     const following = reflowAnchorNextLogicalLineStart(buffer, next, REFLOW_ANCHOR_MAX_LINE_CHARS);
-    if (following === null) return null;
-    next = following;
+    if (following.start === null) return following;
+    next = following.start;
   }
-  return next - first <= REFLOW_ANCHOR_CONTEXT_SCAN_ROWS ? next : null;
+  return next - first.start <= REFLOW_ANCHOR_CONTEXT_SCAN_ROWS
+    ? { start: next, boundDropped: false }
+    : { start: null, boundDropped: false };
 };
 
 /**
@@ -1161,7 +1209,8 @@ export function captureTerminalReflowScrollAnchor(
   // immediate follower would leave a blank anchor unanchored whenever the
   // next line is blank too, even though unique output further down pins the
   // position exactly (blank runs keep their row count across rewrap).
-  const contextStart = reflowAnchorNextNonBlankLogicalLineStart(buffer, startRow);
+  const context = reflowAnchorNextNonBlankLogicalLineStart(buffer, startRow);
+  const contextStart = context.start;
   const contextSuffix = contextStart === null
     ? null
     : reflowAnchorJoinTextPrefix(buffer, contextStart, REFLOW_ANCHOR_CONTEXT_CHARS);
@@ -1185,6 +1234,12 @@ export function captureTerminalReflowScrollAnchor(
     charOffset,
     textPrefix,
     contextSuffix,
+    // True when the follower lookup hit the character bound rather than the
+    // buffer end: a follower line existed but stayed unidentified, and the
+    // resolve side must degrade to text-only matching instead of rejecting
+    // the anchor over a follower the capture never captured (a scrollback
+    // trim can move the line under the bound between capture and resolve).
+    contextDropped: contextStart === null && context.boundDropped,
     // Undefined when the boundary list cannot cover the suffix; the row-wise
     // cursor-line tolerance then declines and only the strict checks apply.
     contextRowTexts,
@@ -1463,7 +1518,18 @@ const reflowAnchorTruncatedCursorRowsMatch = (
   return true;
 };
 
-/** True when the logical line at `row` matches the anchor's captured identity. */
+/**
+ * True when the logical line at `row` matches the anchor's captured identity.
+ *
+ * When the capture dropped the follower identity at its character bound
+ * (`contextDropped`), the resolve side must not demand a follower-less line:
+ * the bound counts the anchored line's own characters, which a scrollback
+ * trim shrinks, so the surviving line can present a follower the capture was
+ * over the bound for. The anchor then degrades to its text-only identity —
+ * the same degradation the bound applies when both sides drop the follower —
+ * rather than rejecting the otherwise matching line and falling back to the
+ * stale row.
+ */
 const reflowAnchorCandidateMatches = (
   buffer: ReflowAnchorBuffer,
   row: number,
@@ -1472,11 +1538,11 @@ const reflowAnchorCandidateMatches = (
   if (reflowAnchorJoinTextPrefix(buffer, row, REFLOW_ANCHOR_TEXT_PREFIX_CHARS) !== anchor.textPrefix) {
     return false;
   }
-  const contextStart = reflowAnchorNextNonBlankLogicalLineStart(buffer, row);
-  if (contextStart === null || anchor.contextSuffix === null) {
-    return contextStart === null && anchor.contextSuffix === null;
+  const context = reflowAnchorNextNonBlankLogicalLineStart(buffer, row);
+  if (anchor.contextSuffix === null) {
+    return anchor.contextDropped === true || context.start === null;
   }
-  return reflowAnchorFollowerMatches(buffer, contextStart, anchor);
+  return context.start !== null && reflowAnchorFollowerMatches(buffer, context.start, anchor);
 };
 
 /**
@@ -1570,10 +1636,16 @@ const reflowAnchorContinuationOffset = (
 ): number => {
   const viewedText = typeof anchor.viewedText === "string" ? anchor.viewedText : "";
   if (viewedText === "" || anchor.charOffset <= 0) return -1;
-  const contextStart = reflowAnchorNextNonBlankLogicalLineStart(buffer, row);
-  if (contextStart === null || anchor.contextSuffix === null) {
-    if (contextStart !== null || anchor.contextSuffix !== null) return -1;
-  } else if (!reflowAnchorFollowerMatches(buffer, contextStart, anchor)) {
+  // A follower the capture dropped at its character bound (`contextDropped`)
+  // stays unidentified here too: the bound counts the anchored line's own
+  // characters, which a scrollback trim shrinks, so the surviving line can
+  // present a follower the capture was over the bound for. Treat it as the
+  // capture did — unidentified, not absent — and keep resolving through the
+  // viewed text instead of rejecting the line outright.
+  const context = reflowAnchorNextNonBlankLogicalLineStart(buffer, row);
+  if (anchor.contextSuffix === null) {
+    if (context.start !== null && anchor.contextDropped !== true) return -1;
+  } else if (context.start === null || !reflowAnchorFollowerMatches(buffer, context.start, anchor)) {
     return -1;
   }
   if (row === 0 && typeof anchor.lineLength === "number" && Number.isFinite(anchor.lineLength)) {

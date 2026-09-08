@@ -692,6 +692,45 @@ test("follower bound counts the anchored line's first physical row", () => {
   assert.equal(resolvedRow, 2);
 });
 
+test("resolve survives a scrollback trim that moves the anchored line under the follower bound", () => {
+  // The follower bound counts the anchored line's own characters, and a full
+  // scrollback trim removes the line's *leading* characters — so a line over
+  // the bound at capture can fall under it at resolve. Capture then records
+  // no follower identity (contextSuffix null, contextDropped true) while the
+  // resolve-side walk finds a follower the capture never identified: the
+  // strict null-vs-found comparison would reject the otherwise matching
+  // anchor and fall back to the stale row, jumping the viewport. The resolve
+  // must degrade to text-only identity (the same degradation the bound
+  // applies when both sides drop the follower) and re-locate the viewed
+  // characters through the continuation pass instead.
+  const longLine = "head " + "A".repeat(262_200); // 262,305 characters: over the bound
+  const follower = "follower tail beta";
+  const before = wrapToRows([longLine, follower], 200);
+  const captureBuffer = fakeBuffer(before, { viewportY: 1 });
+  const anchor = captureTerminalReflowScrollAnchor(captureBuffer as never);
+  assert.ok(anchor);
+  assert.equal(anchor!.contextSuffix, null);
+  assert.equal(anchor!.contextDropped, true);
+  assert.equal(anchor!.charOffset, 200);
+
+  // A column shrink on a full scrollback trims the line's first physical row
+  // (200 leading characters), leaving the surviving line (262,105 characters)
+  // under the bound with its follower now reachable to the resolve-side walk.
+  const after = wrapToRows([longLine.slice(200), follower], 100);
+  const resolvedRow = resolveTerminalReflowScrollAnchor(
+    fakeBuffer(after, { viewportY: 0 }) as never,
+    anchor!,
+  );
+  // Without the fix the found-but-never-captured follower rejected every
+  // candidate and the resolver returned null (stale-row fallback). With it,
+  // the continuation pass re-locates the viewed characters inside the
+  // surviving line: the repeating "A" run makes the closest repeat win
+  // (offset 200, the captured charOffset), which maps to row 2 of the
+  // 100-column rewrap — inside the same run, not a jump to the stale row.
+  assert.ok(resolvedRow !== null);
+  assert.equal(resolvedRow, 2);
+});
+
 test("captureTerminalReflowScrollAnchor returns null for a blank line with no following identity", () => {
   // Only blank lines follow the anchored one: no non-blank context exists to
   // identify it, so every blank line would match and capture must decline.
