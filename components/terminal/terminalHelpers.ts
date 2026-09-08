@@ -1201,7 +1201,11 @@ const reflowAnchorFollowerMatches = (
  * to `ABCDEFGH` + `KLMNOPQR`). Verify the rows individually instead, against
  * the captured row boundaries (`contextRowTexts`): the surviving row at each
  * captured position must be a prefix of the row captured there, because its
- * own truncation removes only its tail. Without the captured boundaries the
+ * own truncation removes only its tail. A column grow is the one exception:
+ * it does not reflow the cursor line but null-pads its rows, so the surviving
+ * row can also extend the captured row by trailing null cells (verified by
+ * cell code, since the padding renders as ordinary blanks). Without the
+ * captured boundaries the
  * per-row identity cannot be verified — matching each row anywhere in the
  * captured text would let arbitrary gaps between the rows pass, so a
  * duplicate's wrapped prompt whose rows merely appear as ordered substrings
@@ -1212,6 +1216,38 @@ const reflowAnchorFollowerMatches = (
  * prefix of the longer. Rows past the captured ones are unbounded (the
  * captured suffix is a bounded prefix of the old line) and go unverified.
  */
+/**
+ * Whether every cell of the physical row at `row` past `prefixLength` is null
+ * (codepoint 0): the padding xterm adds when columns grow.
+ *
+ * A column grow skips reflowing the cursor line entirely (`reflowCursorLine`
+ * stays false) but expands each of its physical rows to the new column count
+ * with null cells. `reflowAnchorRowText` keeps that padding on a non-final
+ * wrapped row — its trailing-null trim runs only on the line's final row — so
+ * the surviving `rowText` renders longer than the captured row even though no
+ * character was added. Null cells render as ordinary blanks in
+ * `translateToString`, so the padding cannot be recognized from the row text
+ * alone; the cell codes are the only witness. Without them a false accept
+ * would need surviving real content beyond the captured prefix, which neither
+ * truncation nor grow padding produces — extra written characters are
+ * rejected because they carry a non-zero codepoint. Hand-built rows without
+ * cell access keep the strict one-directional check.
+ */
+const reflowAnchorRowEndsInNullPadding = (
+  buffer: ReflowAnchorBuffer,
+  row: number,
+  prefixLength: number,
+): boolean => {
+  const line = buffer.getLine(row);
+  const lineLength = typeof line?.length === "number" ? line.length : undefined;
+  if (!line || lineLength === undefined || !line.getCell) return false;
+  for (let x = prefixLength; x < lineLength; x += 1) {
+    const cell = line.getCell(x);
+    if (!cell || cell.getCode() !== 0) return false;
+  }
+  return true;
+};
+
 const reflowAnchorTruncatedCursorRowsMatch = (
   buffer: ReflowAnchorBuffer,
   contextRow: number,
@@ -1230,9 +1266,18 @@ const reflowAnchorTruncatedCursorRowsMatch = (
     if (captured !== "") {
       const rowText = reflowAnchorRowText(buffer, row);
       const last = i === capturedRows.length - 1;
+      // A column grow pads the cursor line's rows with null cells instead of
+      // reflowing them, so a non-final surviving row can also be the captured
+      // row plus trailing null padding (`reflowAnchorRowText` keeps that
+      // padding on non-final wrapped rows). Accept it only when the extra
+      // characters are verifiably null cells — extra written content must
+      // still be rejected, so the string prefix alone is not enough.
+      const paddedBeyondCaptured = rowText.length > captured.length
+        && rowText.startsWith(captured)
+        && reflowAnchorRowEndsInNullPadding(buffer, row, captured.length);
       if (last
         ? !rowText.startsWith(captured) && !captured.startsWith(rowText)
-        : !captured.startsWith(rowText)
+        : !captured.startsWith(rowText) && !paddedBeyondCaptured
       ) {
         return false;
       }

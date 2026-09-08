@@ -940,3 +940,71 @@ test("resolve keeps the anchored line when a multi-row cursor follower wider tha
   const resolvedRow = resolveTerminalReflowScrollAnchor(after as never, anchor!);
   assert.equal(resolvedRow, 1);
 });
+
+test("resolve keeps the anchored line when a multi-row cursor follower is null-padded by a column grow", () => {
+  // A column grow does not reflow the cursor line: xterm expands each of its
+  // physical rows to the new column count with trailing null cells instead.
+  // `reflowAnchorRowText` keeps that padding on non-final wrapped rows, so the
+  // surviving row text is longer than the captured one and the one-directional
+  // prefix check rejects the valid anchor. The row-wise tolerance must accept
+  // the grow padding while still rejecting extra written characters.
+  const before = fakeBuffer([
+    { text: "header" },
+    { text: "anchored unique alpha" },
+    { text: "ABCDEFGHIJ" },
+    { text: "KLMNOPQRST", isWrapped: true },
+  ], { viewportY: 1, baseY: 3, cursorY: 0 });
+  const anchor = captureTerminalReflowScrollAnchor(before as never);
+  assert.ok(anchor);
+  assert.equal(anchor!.contextSuffix, "ABCDEFGHIJKLMNOPQRST");
+  assert.deepEqual(anchor!.contextRowTexts, ["ABCDEFGHIJ", "KLMNOPQRST"]);
+
+  // Column grow to 14: the anchored line rewraps into two rows while each
+  // cursor-line row keeps its content plus four trailing null cells.
+  const after = {
+    length: 5,
+    baseY: 4,
+    viewportY: 0,
+    cursorY: 0,
+    getLine: (y: number) => [
+      { isWrapped: false, length: 6, translateToString: () => "header" },
+      xtermRow("anchored uniq"),
+      xtermRow("ue alpha", true),
+      xtermRow("ABCDEFGHIJ", false, 4),
+      xtermRow("KLMNOPQRST", true, 4),
+    ][y],
+  };
+  const resolvedRow = resolveTerminalReflowScrollAnchor(after as never, anchor!);
+  assert.equal(resolvedRow, 1);
+});
+
+test("resolve still rejects a multi-row cursor follower with extra written characters after a grow", () => {
+  // Null-cell padding is structural, but written content beyond the captured
+  // prefix is not: a row that grew real characters must keep the tolerance
+  // rejected even though its text starts with the captured row.
+  const rows = [
+    { text: "header" },
+    { text: "anchored unique alpha" },
+    { text: "ABCDEFGHIJKL" },
+    { text: "KLMNOPQRST", isWrapped: true },
+  ];
+  const anchor = {
+    startRow: 1,
+    charOffset: 0,
+    textPrefix: "anchored unique alpha",
+    contextSuffix: "ABCDEFGHIJKLMNOPQRST",
+    contextRowTexts: ["ABCDEFGHIJ", "KLMNOPQRST"],
+  };
+  const buffer = {
+    length: rows.length,
+    baseY: rows.length - 1,
+    viewportY: 0,
+    cursorY: 0,
+    getLine: (y: number) =>
+      y >= 0 && y < rows.length
+        ? xtermRow(rows[y]!.text, rows[y]!.isWrapped)
+        : undefined,
+  };
+  const resolvedRow = resolveTerminalReflowScrollAnchor(buffer as never, anchor);
+  assert.equal(resolvedRow, null);
+});
