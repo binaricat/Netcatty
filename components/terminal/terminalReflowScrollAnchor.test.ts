@@ -1165,3 +1165,80 @@ test("resolve still rejects a multi-row cursor follower with extra written chara
   const resolvedRow = resolveTerminalReflowScrollAnchor(buffer as never, anchor);
   assert.equal(resolvedRow, null);
 });
+
+test("resolve keeps the anchored line when the cursor follower spans the containment walk bound", () => {
+  // The containment walk from the context line's start to the cursor row is
+  // capped at REFLOW_ANCHOR_CURSOR_LINE_WALK_ROWS (2048) physical rows. A
+  // cursor line whose cursor sits exactly at the bound still gets the exact
+  // answer, so the truncated-follower tolerance keeps validating the anchor.
+  const fillerBefore = "Y".repeat(20);
+  const beforeRows: FakeRow[] = [
+    { text: "header" },
+    { text: "anchored unique alpha" },
+    { text: "cursor prompt tail" },
+  ];
+  // The cursor line spans rows 2..2050: the cursor (last row) sits 2048 rows
+  // below the context line's start — exactly at the bound.
+  for (let i = 0; i < 2048; i += 1) {
+    beforeRows.push({ text: fillerBefore, isWrapped: i < 2047 });
+  }
+  const before = fakeBuffer(beforeRows, { viewportY: 1, baseY: beforeRows.length - 1, cursorY: 0 });
+  const anchor = captureTerminalReflowScrollAnchor(before as never);
+  assert.ok(anchor);
+  assert.equal(anchor!.contextSuffix, "cursor prompt tail" + "Y".repeat(78));
+
+  // Narrowing truncates each cursor-line row separately while the anchored
+  // line rewraps into two rows.
+  const afterRows: FakeRow[] = [
+    { text: "header" },
+    { text: "anchored uni" },
+    { text: "que alpha", isWrapped: true },
+    { text: "cursor promp" },
+  ];
+  for (let i = 0; i < 2047; i += 1) {
+    afterRows.push({ text: "Y".repeat(12), isWrapped: true });
+  }
+  const after = fakeBuffer(afterRows, { viewportY: 0, baseY: afterRows.length - 1, cursorY: 0 });
+  const resolvedRow = resolveTerminalReflowScrollAnchor(after as never, anchor!);
+  assert.equal(resolvedRow, 1);
+});
+
+test("resolve declines the cursor follower tolerance past the containment walk bound", () => {
+  // A multi-megabyte cursor line puts the cursor more than
+  // REFLOW_ANCHOR_CURSOR_LINE_WALK_ROWS wrapped rows below the context line's
+  // start. The containment walk reports unknown instead of traversing the
+  // whole span on every fit frame, the cursor-line tolerance declines, and the
+  // resolve falls back to the plain row restore (null here).
+  const fillerBefore = "Y".repeat(20);
+  const beforeRows: FakeRow[] = [
+    { text: "header" },
+    { text: "anchored unique alpha" },
+    { text: "cursor prompt tail" },
+  ];
+  // The cursor line spans rows 2..2051 (2050 rows) — capture ignores the
+  // cursor, so only the follower's extent matters here.
+  for (let i = 0; i < 2050; i += 1) {
+    beforeRows.push({ text: fillerBefore, isWrapped: i < 2049 });
+  }
+  const before = fakeBuffer(beforeRows, { viewportY: 1, baseY: beforeRows.length - 1, cursorY: 0 });
+  const anchor = captureTerminalReflowScrollAnchor(before as never);
+  assert.ok(anchor);
+  assert.equal(anchor!.contextSuffix, "cursor prompt tail" + "Y".repeat(78));
+
+  const afterRows: FakeRow[] = [
+    { text: "header" },
+    { text: "anchored uni" },
+    { text: "que alpha", isWrapped: true },
+    { text: "cursor promp" },
+  ];
+  for (let i = 0; i < 2050; i += 1) {
+    afterRows.push({ text: "Y".repeat(12), isWrapped: i < 2049 });
+  }
+  // The cursor sits on row 2052, a wrapped continuation of the cursor line
+  // (which spans rows 3..2052): 2049 rows below the context line's start, so
+  // the unbounded walk would answer "contains the cursor" — and the bound
+  // must report unknown there instead.
+  const after = fakeBuffer(afterRows, { viewportY: 0, baseY: 2052, cursorY: 0 });
+  const resolvedRow = resolveTerminalReflowScrollAnchor(after as never, anchor!);
+  assert.equal(resolvedRow, null);
+});

@@ -776,6 +776,19 @@ const REFLOW_ANCHOR_CONTEXT_SCAN_ROWS = 1024;
 // measurement, so any line whose follower stays reachable is also a line
 // whose length could have been measured anyway.
 const REFLOW_ANCHOR_MAX_LINE_CHARS = 262_144;
+// Cap on how far the cursor-line containment check may walk the context
+// line's wrapped rows toward the cursor. The walk already stops at the cursor
+// row, but a multi-megabyte cursor line (minified JSON, base64) puts the
+// cursor tens of thousands of wrapped rows below the context line's start,
+// and every column-changing fit re-runs the walk once per candidate follower
+// match — renderer-thread work every other reflow scan here caps. Beyond the
+// bound the containment answer is reported as unknown and the cursor-line
+// tolerance is declined (the strict checks and the plain fallbacks apply);
+// a context line that ends within the bound still gets the exact answer. The
+// value matches REFLOW_ANCHOR_MAX_LINE_ROWS, the per-frame row cap the
+// capture-side walks already accept, so no scan of this kind exceeds that
+// order of work per fit frame.
+const REFLOW_ANCHOR_CURSOR_LINE_WALK_ROWS = REFLOW_ANCHOR_MAX_LINE_ROWS;
 
 /**
  * Start row of the logical line containing `row`, or undefined when that walk
@@ -1181,11 +1194,18 @@ export function captureTerminalReflowScrollAnchor(
  * still disambiguates the anchor, because only the logical line immediately
  * preceding the cursor line can claim it. (Blank lines skipped on the way to
  * the context line need no tolerance: truncation keeps a blank line blank.)
+ *
+ * Bounded: the walk from `contextRow` to the cursor row steps one physical
+ * row at a time, so a very long cursor line would repeat O(distance) work per
+ * candidate match on every column-changing fit. Past
+ * `REFLOW_ANCHOR_CURSOR_LINE_WALK_ROWS` the answer is reported as `undefined`
+ * (unknown) and every caller declines the cursor-line tolerance — a line that
+ * ends, or reaches the cursor, within the bound still gets the exact answer.
  */
 const reflowAnchorContextIsCursorLine = (
   buffer: ReflowAnchorBuffer,
   contextRow: number,
-): boolean => {
+): boolean | undefined => {
   const cursorY = buffer.cursorY;
   if (typeof cursorY !== "number" || !Number.isFinite(cursorY)) return false;
   const cursorRow = buffer.baseY + cursorY;
@@ -1193,12 +1213,20 @@ const reflowAnchorContextIsCursorLine = (
   // Stop at the cursor row: the answer only depends on whether the context
   // line reaches it, so walking a very long wrapped line past the cursor to
   // its end would repeat an O(line) scan per candidate match for nothing.
+  // Cap the walk at `REFLOW_ANCHOR_CURSOR_LINE_WALK_ROWS` physical rows: a
+  // multi-megabyte cursor line puts the cursor tens of thousands of wrapped
+  // rows below `contextRow`, and every column-changing fit re-runs the walk
+  // for each candidate follower match. Returning `undefined` says the answer
+  // is unknown — the caller declines the cursor-line tolerance instead of
+  // paying the unbounded walk; a context line that ends (or reaches the
+  // cursor) within the cap still gets the exact answer.
   let contextEnd = contextRow;
   while (
     contextEnd < cursorRow
     && contextEnd + 1 < buffer.length
     && buffer.getLine(contextEnd + 1)?.isWrapped
   ) {
+    if (contextEnd - contextRow >= REFLOW_ANCHOR_CURSOR_LINE_WALK_ROWS) return undefined;
     contextEnd += 1;
   }
   return cursorRow <= contextEnd;
@@ -1226,7 +1254,12 @@ const reflowAnchorFollowerMatches = (
   if (anchor.contextSuffix === null) return false;
   const text = reflowAnchorJoinTextPrefix(buffer, contextRow, REFLOW_ANCHOR_CONTEXT_CHARS);
   if (text === anchor.contextSuffix) return true;
-  if (text.length === 0 || !reflowAnchorContextIsCursorLine(buffer, contextRow)) return false;
+  // The tolerance also declines when the containment walk exceeds its bound
+  // (`undefined`): only the strict check above applies then, and the resolve
+  // falls back to the plain row restore like any other unmatched anchor.
+  if (text.length === 0 || reflowAnchorContextIsCursorLine(buffer, contextRow) !== true) {
+    return false;
+  }
   return anchor.contextSuffix.startsWith(text)
     || reflowAnchorTruncatedCursorRowsMatch(buffer, contextRow, anchor);
 };
@@ -1448,8 +1481,10 @@ const reflowAnchorTrimAdjustedCharOffset = (
   // validates. The line's physical rows keep their indices, so decline the
   // derivation and let the caller fall back to the surviving viewport-row
   // marker (or the unchanged saved index), both of which still point at the
-  // viewed row.
-  if (trimChars > 0 && reflowAnchorContextIsCursorLine(buffer, row)) return -1;
+  // viewed row. A containment walk past its bound (`undefined`) also declines:
+  // the line may be the truncated cursor line and the derivation would treat
+  // its truncation as a leading trim.
+  if (trimChars > 0 && reflowAnchorContextIsCursorLine(buffer, row) !== false) return -1;
   const target = anchor.charOffset - trimChars;
   if (target < 0) return -1;
   const viewedText = typeof anchor.viewedText === "string" ? anchor.viewedText : "";
@@ -1625,7 +1660,10 @@ export function resolveTerminalReflowScrollAnchor(
         trackContinuation
         && seededLine !== undefined
         && seedRow !== seededLine
-        && reflowAnchorContextIsCursorLine(buffer, seededLine)
+        // The marker is also kept when the containment walk exceeds its bound
+        // (`undefined`): the line may be the truncated cursor line, whose
+        // changed row lengths the scanned offset mapping cannot traverse.
+        && reflowAnchorContextIsCursorLine(buffer, seededLine) !== false
       ) {
         return Math.min(seedRow, buffer.baseY);
       }
