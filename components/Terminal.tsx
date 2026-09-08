@@ -223,7 +223,8 @@ import {
   resolveTerminalHibernateReplayChunkBytes,
   type TerminalHibernateWakePayload,
 } from "../domain/terminalHibernate";
-import { getCharDisplayWidth, getLastChar, removeLastChar } from "../domain/serialCharMetrics";
+import { getLastChar, removeLastChar } from "../domain/serialCharMetrics";
+import { stringCellWidth } from "./terminal/autocomplete/terminalStringCellWidth";
 import { terminalHiddenRendererStore } from "../application/state/terminalHiddenRendererStore";
 import {
   wakeTerminalFromHibernate,
@@ -979,7 +980,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           } else if (ch === "\b" || ch === "\x7f") {
             if (serialLineBufferRef.current.length > 0) {
               const lastChar = getLastChar(serialLineBufferRef.current);
-              const cells = getCharDisplayWidth(lastChar);
+              const cells = stringCellWidth(lastChar, termRef.current);
               serialLineBufferRef.current = removeLastChar(serialLineBufferRef.current);
               if (serialConfig?.localEcho) writeLocalTerminalData("\b \b".repeat(cells));
             }

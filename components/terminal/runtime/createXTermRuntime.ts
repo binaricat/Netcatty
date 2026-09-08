@@ -111,7 +111,8 @@ import {
   shouldCommitDeferredImeTextInput,
   shouldDeferKeyDownForImeTextInput,
 } from "./terminalImeTextInput";
-import { formatSerialLocalEcho, backspaceCellsForChar } from "./serialLocalEcho";
+import { formatSerialLocalEcho } from "./serialLocalEcho";
+import { stringCellWidth } from "../autocomplete/terminalStringCellWidth";
 import { getCharByteLength, getLastChar, removeLastChar, isPrintableInput } from "../../../domain/serialCharMetrics";
 import { mapTerminalBackspaceInput } from "./terminalBackspaceInput";
 import { sanitizeTerminalInput } from "./terminalInputSanitize";
@@ -1191,6 +1192,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
             ctx.terminalBackend.writeToSession(id, nextData, { sensitive });
           },
           writeToTerminal: writeLocalTerminalData,
+          term,
         });
       } else {
         // Character mode (default): send immediately
@@ -1219,17 +1221,24 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         if (
           isBackspace &&
           ctx.host.protocol === "serial" &&
-          (ctx.host.serialConfig?.byteOrientedBackspace ?? true) &&
           ctx.commandBufferRef &&
           ctx.commandBufferRef.current.length > 0 &&
           lastInputWasPrintable
         ) {
           const lastChar = getLastChar(ctx.commandBufferRef.current);
-          const effectiveEncoding = ctx.currentEncodingRef?.current ?? ctx.host.charset;
-          const bytes = getCharByteLength(lastChar, effectiveEncoding);
-          if (bytes > 1) {
-            outData = outData.repeat(bytes);
-            backspaceCells = backspaceCellsForChar(lastChar);
+          // Always compute display width for local echo, independently of
+          // whether wire-level byte expansion is enabled.  A wide CJK or
+          // emoji grapheme needs its full cell count erased even when
+          // byteOrientedBackspace is disabled (character-aware endpoint).
+          backspaceCells = stringCellWidth(lastChar, term);
+
+          // Only expand wire bytes when byte-oriented mode is enabled.
+          if (ctx.host.serialConfig?.byteOrientedBackspace ?? true) {
+            const effectiveEncoding = ctx.currentEncodingRef?.current ?? ctx.host.charset;
+            const bytes = getCharByteLength(lastChar, effectiveEncoding);
+            if (bytes > 1) {
+              outData = outData.repeat(bytes);
+            }
           }
         }
 

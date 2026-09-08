@@ -58,6 +58,23 @@ test("getCharDisplayWidth returns 2 for emoji", () => {
   assert.equal(getCharDisplayWidth("\u{1F600}"), 2); // Grinning face
 });
 
+test("getCharDisplayWidth returns 2 for VS16 emoji-presentation grapheme", () => {
+  // U+2764 (text heart, 1 cell) + U+FE0F (VS16) → emoji presentation (2 cells)
+  assert.equal(getCharDisplayWidth("\u2764\uFE0F"), 2);
+  // U+00A9 (copyright, 1 cell) + U+FE0F → emoji presentation (2 cells)
+  assert.equal(getCharDisplayWidth("\u00A9\uFE0F"), 2);
+});
+
+test("getCharDisplayWidth returns 2 for VS16 keycap grapheme", () => {
+  // U+0031 (digit 1) + U+FE0F + U+20E3 (combining keycap) → keycap emoji (2 cells)
+  assert.equal(getCharDisplayWidth("1\uFE0F\u20E3"), 2);
+});
+
+test("getCharDisplayWidth returns 1 for text-presentation heart (no VS16)", () => {
+  // U+2764 alone is text presentation (1 cell), not emoji
+  assert.equal(getCharDisplayWidth("\u2764"), 1);
+});
+
 /* ------------------------------------------------------------------ */
 /* Byte length — UTF-8                                                 */
 /* ------------------------------------------------------------------ */

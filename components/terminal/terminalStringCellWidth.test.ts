@@ -37,6 +37,25 @@ test("stringCellWidth ignores combining marks inside a grapheme", () => {
   assert.equal(stringCellWidth("e\u0301"), 1);
 });
 
+test("stringCellWidth fallback returns 2 for VS16 emoji-presentation grapheme", () => {
+  // Without xterm, the fallback must detect VS16 (U+FE0F) and return 2
+  // even when the base character is outside the standard emoji range.
+  // U+2764 (text heart, not in 0x1F300-0x1FAFF) + U+FE0F → emoji (2 cells)
+  assert.equal(stringCellWidth("\u2764\uFE0F"), 2);
+  // U+00A9 (copyright) + U+FE0F → emoji (2 cells)
+  assert.equal(stringCellWidth("\u00A9\uFE0F"), 2);
+});
+
+test("stringCellWidth fallback returns 2 for VS16 keycap grapheme", () => {
+  // digit + VS16 + combining keycap → emoji-presentation keycap (2 cells)
+  assert.equal(stringCellWidth("1\uFE0F\u20E3"), 2);
+});
+
+test("stringCellWidth fallback returns 1 for text heart without VS16", () => {
+  // U+2764 alone is text presentation, not emoji
+  assert.equal(stringCellWidth("\u2764"), 1);
+});
+
 test("stringCellWidth matches xterm 15-graphemes for common emoji clusters", () => {
   class El {
     tagName: string;

@@ -37,6 +37,13 @@ function isCombiningMark(char: string): boolean {
  */
 export function getCharDisplayWidth(char: string): number {
   if (!char) return 0;
+  // Emoji-presentation graphemes (base + VS16 / U+FE0F) always render as
+  // 2 cells.  The variation selector forces emoji presentation regardless
+  // of the base character's default width — e.g. U+2764 (text heart)
+  // becomes a 2-cell emoji, and keycap sequences (digit + VS16 + U+20E3)
+  // also render wide.  xterm's 15-graphemes provider handles this via
+  // getStringCellWidth; the pure fallback must detect VS16 explicitly.
+  if (char.includes("\uFE0F")) return 2;
   // `for...of` handles surrogate pairs; char is a single grapheme.
   let max = 0;
   for (const ch of char) {
