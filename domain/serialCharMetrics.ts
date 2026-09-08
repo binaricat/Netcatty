@@ -114,18 +114,32 @@ export function getCharByteLength(char: string, charset?: string): number {
 
   // GB18030 / GBK / GB2312 / CP936:
   //  1 byte for ASCII (0x00-0x7F)
-  //  2 bytes for BMP non-ASCII (0x80-0xFFFF)
-  //  4 bytes for supplementary-plane characters (> 0xFFFF)
-  // The 4-byte GB18030 range covers CJK Extension B+ and some emoji,
-  // which are representable but rare in serial terminals.
+  //  2 bytes for BMP characters in the GBK character set
+  //  4 bytes for supplementary-plane characters AND for BMP characters
+  //    outside the GBK set (e.g. U+0100 'Ā' → 4-byte GB18030 encoding)
   if (encoding === 'gb18030') {
     for (const ch of char) {
       const cp = ch.codePointAt(0);
       if (cp === undefined) continue;
-      if (cp >= 0x80) {
-        // Supplementary plane → 4-byte GB18030 encoding.
-        return cp > 0xffff ? 4 : 2;
-      }
+      if (cp < 0x80) continue; // ASCII → 1 byte (handled at end)
+      // Supplementary plane → always 4-byte GB18030 encoding.
+      if (cp > 0xffff) return 4;
+      // BMP: 2 bytes if in the GBK character set, 4 bytes otherwise.
+      return isGbkCharacter(cp) ? 2 : 4;
+    }
+    return 1;
+  }
+
+  // Unknown encoding — fall back to UTF-8 (most common).
+  // Shift_JIS: 1 byte for ASCII, 2 bytes for all other characters
+  // (the vast majority of Shift_JIS characters are double-byte).
+  // This mirrors iconv-lite's Shift_JIS encoding behavior.
+  if (encoding === 'shift-jis') {
+    for (const ch of char) {
+      const cp = ch.codePointAt(0);
+      if (cp === undefined) continue;
+      if (cp < 0x80) continue; // ASCII → 1 byte (handled at end)
+      return 2;
     }
     return 1;
   }
@@ -143,13 +157,16 @@ export function getCharByteLength(char: string, charset?: string): number {
 /** Map a charset string (e.g. "utf-8", "gb18030", "GBK", "cp936") to a
  *  canonical encoding identifier.  Mirrors `normalizeTerminalEncoding`
  *  in `terminalEncoding.cjs` but lives in the renderer process. */
-function resolveWireEncoding(charset?: string): 'utf-8' | 'gb18030' | 'unknown' {
+function resolveWireEncoding(charset?: string): 'utf-8' | 'gb18030' | 'shift-jis' | 'unknown' {
   if (!charset) return 'utf-8';
   const raw = String(charset).trim().toLowerCase();
   const normalized = raw.replace(/[^a-z0-9]/g, '');
   if (normalized === 'utf8') return 'utf-8';
   if (['gb18030', 'gbk', 'gb2312', 'cp936', 'ms936'].includes(normalized)) {
     return 'gb18030';
+  }
+  if (['shiftjis', 'shift_jis', 'sjis', 'cp932', 'ms932'].includes(normalized)) {
+    return 'shift-jis';
   }
   return 'unknown';
 }
@@ -160,6 +177,24 @@ function utf8ByteLength(cp: number): number {
   if (cp <= 0x7ff) return 2;
   if (cp <= 0xffff) return 3;
   return 4;
+}
+
+/** Check if a BMP code point is in the GBK character set (2-byte GB18030
+ *  encoding). Characters outside this set (e.g. U+0100 'Ā') are encoded as
+ *  4 bytes in GB18030. Mirrors iconv-lite's GB18030 behavior. */
+function isGbkCharacter(cp: number): boolean {
+  return (
+    (cp >= 0x00a1 && cp <= 0x00fe) || // Latin-1 punctuation
+    (cp >= 0x2000 && cp <= 0x206f) || // General punctuation
+    (cp >= 0x3000 && cp <= 0x312f) || // CJK Symbols, Hiragana, Katakana, Hangul Jamo
+    (cp >= 0x31a0 && cp <= 0x31bf) || // Bopomofo
+    (cp >= 0x31f0 && cp <= 0x31ff) || // Katakana Phonetic
+    (cp >= 0x3400 && cp <= 0x4dbf) || // CJK Extension A
+    (cp >= 0x4e00 && cp <= 0x9fff) || // CJK Unified Ideographs
+    (cp >= 0xf900 && cp <= 0xfaff) || // CJK Compatibility Ideographs
+    (cp >= 0xfe30 && cp <= 0xfe4f) || // CJK Compatibility Forms
+    (cp >= 0xff00 && cp <= 0xffef)    // Halfwidth / Fullwidth Forms
+  );
 }
 
 /* ------------------------------------------------------------------ */

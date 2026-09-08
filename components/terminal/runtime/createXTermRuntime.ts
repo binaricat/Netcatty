@@ -1239,7 +1239,16 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
           // restored or hibernated session keeps its configured behavior
           // even if the vault host was edited after the session started.
           if (ctx.serialByteOrientedBackspace ?? true) {
-            const effectiveEncoding = ctx.currentEncodingRef?.current ?? ctx.host.charset;
+            // For serial hosts with a non-UTF-8 charset, the host charset is
+            // authoritative unless the user has explicitly changed the toolbar
+            // encoding to something other than the default (utf-8).
+            const toolbarEnc = ctx.currentEncodingRef?.current;
+            const hostChar = ctx.host.charset;
+            const effectiveEncoding =
+              hostChar && hostChar.toLowerCase() !== 'utf-8' &&
+              (!toolbarEnc || toolbarEnc === 'utf-8')
+                ? hostChar
+                : toolbarEnc ?? hostChar ?? 'utf-8';
             const bytes = getCharByteLength(lastChar, effectiveEncoding);
             if (bytes > 1) {
               outData = outData.repeat(bytes);
@@ -1278,8 +1287,11 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         if (!isBackspace) {
           const isBracketedPaste =
             dataToWrite.startsWith("\x1b[200~") && dataToWrite.endsWith("\x1b[201~");
-          if (!isBracketedPaste && !isPrintableInput(dataToWrite)) {
+          if (!isBracketedPaste && !isPrintableInput(dataToWrite) && !handledSubmittedInput) {
             // Escape sequence or control char: cursor position unknown.
+            // Skip when handledSubmittedInput is true: the submission handler
+            // already set lastInputWasPrintable = true (buffer cleared, cursor
+            // at next prompt), and the same \r/\n should not reset it.
             lastInputWasPrintable = false;
           }
           // If printable (non-backspace, non-escape, non-bracketed-paste),
