@@ -863,3 +863,80 @@ test("resolve still rejects a multi-row follower that does not continue the capt
   );
   assert.equal(resolvedRow, null);
 });
+
+test("resolve rejects a cursor follower whose rows sit inside the captured text with gaps", () => {
+  // The row-wise cursor-line tolerance compares each surviving row against
+  // the row captured at the same position. Rows that merely occur as ordered
+  // substrings of the captured follower text — with gaps between them that
+  // are not the truncated tails of the corresponding original rows — must
+  // not validate a duplicate of the anchored line.
+  const rows = [
+    { text: "header" },
+    { text: "anchored unique alpha" },
+    { text: "ABCDE" },
+    { text: "JKLMNOP", isWrapped: true },
+  ];
+  const anchor = {
+    startRow: 1,
+    charOffset: 0,
+    textPrefix: "anchored unique alpha",
+    contextSuffix: "ABCDEFGHIJKLMNOPQRST",
+    contextRowTexts: ["ABCDEFGHIJ", "KLMNOPQRST"],
+  };
+  const resolvedRow = resolveTerminalReflowScrollAnchor(
+    fakeBuffer(rows, { viewportY: 0, cursorY: 0 }) as never,
+    anchor,
+  );
+  assert.equal(resolvedRow, null);
+});
+
+test("resolve declines the row-wise tolerance for an anchor without captured row boundaries", () => {
+  // Without the captured row boundaries the per-row identity cannot be
+  // verified, so the tolerance declines even for rows that appear as ordered
+  // substrings of the captured text.
+  const rows = [
+    { text: "header" },
+    { text: "anchored unique alpha" },
+    { text: "ABCDE" },
+    { text: "JKLMNOP", isWrapped: true },
+  ];
+  const anchor = {
+    startRow: 1,
+    charOffset: 0,
+    textPrefix: "anchored unique alpha",
+    contextSuffix: "ABCDEFGHIJKLMNOPQRST",
+  };
+  const resolvedRow = resolveTerminalReflowScrollAnchor(
+    fakeBuffer(rows, { viewportY: 0, cursorY: 0 }) as never,
+    anchor,
+  );
+  assert.equal(resolvedRow, null);
+});
+
+test("resolve keeps the anchored line when a multi-row cursor follower wider than the context cap is truncated", () => {
+  // The captured suffix is a bounded prefix of the follower line, so its cap
+  // can fall mid-row: the last captured row is then itself a truncated
+  // prefix of the original row, and the surviving row — truncated to the new
+  // column count on top of that — must still be verified against it.
+  const before = fakeBuffer([
+    { text: "header" },
+    { text: "anchored unique alpha" },
+    { text: "A".repeat(60) },
+    { text: "B".repeat(60), isWrapped: true },
+  ], { viewportY: 1, baseY: 3, cursorY: 0 });
+  const anchor = captureTerminalReflowScrollAnchor(before as never);
+  assert.ok(anchor);
+  assert.equal(anchor!.contextSuffix, "A".repeat(60) + "B".repeat(36));
+  assert.deepEqual(anchor!.contextRowTexts, ["A".repeat(60), "B".repeat(36)]);
+
+  // Column shrink: each cursor-line row keeps its leading characters only.
+  const after = fakeBuffer([
+    { text: "header" },
+    { text: "anchored uni" },
+    { text: "que alpha", isWrapped: true },
+    { text: "A".repeat(50) },
+    { text: "B".repeat(30), isWrapped: true },
+  ], { viewportY: 0, baseY: 4, cursorY: 0 });
+  const resolvedRow = resolveTerminalReflowScrollAnchor(after as never, anchor!);
+  assert.equal(resolvedRow, 1);
+});

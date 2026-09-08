@@ -667,6 +667,21 @@ export type TerminalReflowScrollAnchor = {
    */
   contextSuffix: string | null;
   /**
+   * Text of each physical row of the captured context line, cut so the rows
+   * join to exactly `contextSuffix` (the last row is shortened where the
+   * suffix's character cap falls mid-row). The cursor-line tolerance needs
+   * these boundaries: a narrowing resize truncates the cursor line row by
+   * row, so each surviving row is a prefix of the row captured at the same
+   * position — comparing each surviving row against its own captured prefix
+   * keeps the tolerance from accepting a duplicate whose rows merely appear
+   * as ordered substrings of the captured text with arbitrary gaps between
+   * them. Undefined for hand-built anchors (tests) and when the context
+   * line's row count reaches `REFLOW_ANCHOR_MAX_LINE_ROWS` before the
+   * captured suffix is covered; the row-wise tolerance then declines and
+   * only the strict checks apply.
+   */
+  contextRowTexts?: string[];
+  /**
    * Text of the logical line starting at the captured viewport row — the
    * continuation the reader was actually looking at. Equal to `textPrefix`
    * when the viewport top row is the logical line's start. When scrollback
@@ -996,6 +1011,38 @@ const reflowAnchorTrimCanReachLine = (
 };
 
 /**
+ * Per-row text of the context line's physical rows, cut so the rows join to
+ * exactly the captured suffix (the last row is shortened where the character
+ * cap falls mid-row). The cursor-line tolerance compares each surviving row
+ * against the row captured at the same position, so the boundaries must join
+ * to the captured identity — a mismatched pair would let the tolerance
+ * validate text the strict checks reject. Undefined when the line's row
+ * count reaches the walk bound before the captured suffix is covered: a
+ * partial boundary list would no longer join to the suffix, so the row-wise
+ * tolerance declines instead of trusting it.
+ */
+const reflowAnchorContextRowTexts = (
+  buffer: ReflowAnchorBuffer,
+  contextRow: number,
+  maxChars: number,
+): string[] | undefined => {
+  const rows: string[] = [];
+  let total = 0;
+  let row = contextRow;
+  while (total < maxChars) {
+    if (rows.length >= REFLOW_ANCHOR_MAX_LINE_ROWS) return undefined;
+    const line = buffer.getLine(row);
+    if (!line || (row > contextRow && !line.isWrapped)) break;
+    const text = reflowAnchorRowText(buffer, row);
+    const take = Math.min(text.length, maxChars - total);
+    rows.push(text.slice(0, take));
+    total += take;
+    row += 1;
+  }
+  return rows;
+};
+
+/**
  * Capture what the reader is looking at before a fit-induced reflow.
  *
  * Restoring a pre-resize row index keeps the reading position only when rows
@@ -1047,6 +1094,9 @@ export function captureTerminalReflowScrollAnchor(
   const contextSuffix = contextStart === null
     ? null
     : reflowAnchorJoinTextPrefix(buffer, contextStart, REFLOW_ANCHOR_CONTEXT_CHARS);
+  const contextRowTexts = contextStart === null || contextSuffix === null
+    ? undefined
+    : reflowAnchorContextRowTexts(buffer, contextStart, REFLOW_ANCHOR_CONTEXT_CHARS);
   // A blank anchor line with no non-blank line after it carries no identity
   // at all: every blank line would match, so re-locating by content cannot
   // beat the plain row restore. Return null and let the caller fall back to it.
@@ -1064,6 +1114,9 @@ export function captureTerminalReflowScrollAnchor(
     charOffset,
     textPrefix,
     contextSuffix,
+    // Undefined when the boundary list cannot cover the suffix; the row-wise
+    // cursor-line tolerance then declines and only the strict checks apply.
+    contextRowTexts,
     viewedText,
     // Only a fully measured line supports the trim-delta derivation below.
     lineLength,
@@ -1132,7 +1185,7 @@ const reflowAnchorFollowerMatches = (
   if (text === anchor.contextSuffix) return true;
   if (text.length === 0 || !reflowAnchorContextIsCursorLine(buffer, contextRow)) return false;
   return anchor.contextSuffix.startsWith(text)
-    || reflowAnchorTruncatedCursorRowsMatch(buffer, contextRow, anchor.contextSuffix);
+    || reflowAnchorTruncatedCursorRowsMatch(buffer, contextRow, anchor);
 };
 
 /**
@@ -1145,51 +1198,46 @@ const reflowAnchorFollowerMatches = (
  * row — every row keeps its leading characters while its tail past the new
  * column count vanishes between the rows — so the joined surviving text is no
  * longer a prefix of the captured one (`ABCDEFGHIJ` + `KLMNOPQRST` truncates
- * to `ABCDEFGH` + `KLMNOPQR`). Verify the rows individually instead: the
- * first surviving row must be a prefix of the captured text (its own
- * truncation removes only its tail), and each following row's text must occur
- * as a contiguous chunk of the captured text at or after the position the
- * previous row's match ended — the chunk deleted between two surviving rows
- * is exactly the previous row's truncated tail, so true match positions only
- * move forward. Verification stops when the captured text (a bounded prefix
- * of the old line) is exhausted; a row reaching past it only has its captured
- * portion verified. A row that cannot be placed in the captured text still
- * rejects, so unrelated follower text cannot pass by matching a single chunk.
+ * to `ABCDEFGH` + `KLMNOPQR`). Verify the rows individually instead, against
+ * the captured row boundaries (`contextRowTexts`): the surviving row at each
+ * captured position must be a prefix of the row captured there, because its
+ * own truncation removes only its tail. Without the captured boundaries the
+ * per-row identity cannot be verified — matching each row anywhere in the
+ * captured text would let arbitrary gaps between the rows pass, so a
+ * duplicate's wrapped prompt whose rows merely appear as ordered substrings
+ * of the captured follower could validate it — and the tolerance declines.
+ * The final captured row is the exception in both directions: the capture cap
+ * may have cut it short mid-row, so the surviving row and the captured row
+ * are both prefixes of the same original row and the shorter one must be a
+ * prefix of the longer. Rows past the captured ones are unbounded (the
+ * captured suffix is a bounded prefix of the old line) and go unverified.
  */
 const reflowAnchorTruncatedCursorRowsMatch = (
   buffer: ReflowAnchorBuffer,
   contextRow: number,
-  capturedSuffix: string,
+  anchor: TerminalReflowScrollAnchor,
 ): boolean => {
-  let matched = 0;
+  const capturedRows = anchor.contextRowTexts;
+  if (!capturedRows) return false;
   let row = contextRow;
-  while (row < buffer.length && matched < capturedSuffix.length) {
-    if (!buffer.getLine(row)) return false;
-    const rowText = reflowAnchorRowText(buffer, row);
-    if (row === contextRow) {
-      if (!capturedSuffix.startsWith(rowText.slice(0, capturedSuffix.length))) return false;
-      matched = Math.min(rowText.length, capturedSuffix.length);
-    } else if (rowText !== "") {
-      const found = capturedSuffix.indexOf(rowText, matched);
-      if (found >= 0) {
-        matched = found + rowText.length;
-      } else {
-        // The row may reach past the captured prefix: its captured portion is
-        // then the captured text's tail at some position at or after the
-        // previous row's match.
-        let start = matched;
-        while (
-          start < capturedSuffix.length
-          && !rowText.startsWith(capturedSuffix.slice(start))
-        ) {
-          start += 1;
-        }
-        if (start >= capturedSuffix.length) return false;
-        matched = capturedSuffix.length;
+  for (let i = 0; i < capturedRows.length; i += 1) {
+    if (row >= buffer.length || !buffer.getLine(row)) return false;
+    // The captured rows beyond the first were continuation rows: the
+    // surviving line must still wrap at every captured boundary, or its rows
+    // no longer line up with the captured ones.
+    if (i > 0 && buffer.getLine(row)?.isWrapped !== true) return false;
+    const captured = capturedRows[i];
+    if (captured !== "") {
+      const rowText = reflowAnchorRowText(buffer, row);
+      const last = i === capturedRows.length - 1;
+      if (last
+        ? !rowText.startsWith(captured) && !captured.startsWith(rowText)
+        : !captured.startsWith(rowText)
+      ) {
+        return false;
       }
     }
     row += 1;
-    if (row < buffer.length && !buffer.getLine(row)?.isWrapped) break;
   }
   return true;
 };
