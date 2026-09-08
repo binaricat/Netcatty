@@ -17,7 +17,19 @@ const DEFAULT_PING_TIMEOUT_MS = 3000;
  * the next entry), so pushing a callback immediately before sending the
  * ping pairs it with the matching reply. On connection teardown the client
  * flushes the queue with an error argument, which resolves `null`.
+ *
+ * At most one ping may be unresolved per connection: while a previous ping is
+ * in flight or its timeout tombstone still occupies a FIFO slot, subsequent
+ * calls resolve `null` without queueing another callback.
  */
+// Serializes probes per connection: ssh2 correlates global-request replies
+// with queued callbacks purely by FIFO order, so at most one unresolved ping
+// (in-flight or timed-out tombstone) may occupy a slot in `conn._callbacks`
+// at any time. Otherwise the next reply is delivered to the already-settled
+// tombstone and the queue desynchronizes (e.g. swallowing forwardIn results),
+// and repeated polls would grow the queue indefinitely.
+const lastQueuedCallbackByConn = new WeakMap();
+
 function createSshPingLatencyProbe({
   setTimeoutFn = setTimeout,
   clearTimeoutFn = clearTimeout,
@@ -33,11 +45,22 @@ function createSshPingLatencyProbe({
         return;
       }
 
+      // If a previous ping on this connection is still unresolved (in-flight
+      // or left as a timeout tombstone) and its callback still occupies a
+      // queue slot, skip this poll entirely: queueing another callback would
+      // misalign the FIFO once the outstanding reply (or the tombstone's late
+      // reply) arrives.
+      const previous = lastQueuedCallbackByConn.get(conn);
+      if (previous && callbacks.includes(previous)) {
+        resolve(null);
+        return;
+      }
+
       const startedAt = now();
       let settled = false;
       let timer = null;
 
-      const finish = (value, consumeSlot) => {
+      const finish = (value, consumeSlot, keepTracking) => {
         if (settled) return;
         settled = true;
         if (timer !== null) clearTimeoutFn(timer);
@@ -45,6 +68,7 @@ function createSshPingLatencyProbe({
           const index = callbacks.indexOf(onReply);
           if (index >= 0) callbacks.splice(index, 1);
         }
+        if (!keepTracking) lastQueuedCallbackByConn.delete(conn);
         resolve(value);
       };
       const onReply = (hadErr) => {
@@ -59,25 +83,31 @@ function createSshPingLatencyProbe({
           // them (e.g. a pending forwardIn reply would hang until its
           // own timeout). Leave the array untouched instead — it is
           // being discarded by the client anyway.
-          finish(null, false);
+          finish(null, false, false);
           return;
         }
-        finish(Math.max(0, Math.round(now() - startedAt)), true);
+        // A normal reply has already been shifted out of the FIFO by ssh2
+        // before reaching this callback, so the splice below is a no-op;
+        // consuming this slot also frees the connection for the next ping.
+        finish(Math.max(0, Math.round(now() - startedAt)), true, false);
       };
 
       callbacks.push(onReply);
+      lastQueuedCallbackByConn.set(conn, onReply);
       try {
         proto.ping();
       } catch {
         // The request was never sent, so the queued callback can never be
         // consumed; remove it to keep the FIFO intact.
-        finish(null, true);
+        finish(null, true, false);
         return;
       }
       // On timeout, deliberately leave `onReply` in the queue as a tombstone:
       // global-request replies carry no request ID and ssh2 correlates them
-      // by FIFO order, so a late reply must still consume this slot.
-      timer = setTimeoutFn(() => finish(null, false), timeoutMs);
+      // by FIFO order, so a late reply must still consume this slot. The
+      // tracking entry stays set so later polls skip this connection until
+      // the tombstone is actually consumed by a reply.
+      timer = setTimeoutFn(() => finish(null, false, true), timeoutMs);
     });
   };
 }

@@ -145,3 +145,48 @@ test("a late reply after a real timeout consumes its tombstone slot without reso
   await new Promise((resolve) => setTimeout(resolve, 550));
   assert.equal(conn._callbacks.length, 0);
 });
+
+test("skips polls while a previous ping is in flight", async () => {
+  const { measure } = createProbe();
+  const conn = createFakeSshClient({ delayMs: 10_000 });
+  fakeNow = 0;
+
+  const pending = measure(conn, 500);
+  // A second poll while the first ping is still in flight must not queue
+  // another callback or send another ping.
+  assert.equal(await measure(conn), null);
+  assert.equal(conn._callbacks.length, 1);
+});
+
+test("skips polls after a timeout until the tombstone is consumed, then resumes", async () => {
+  const { measure, timers } = createProbe();
+  const conn = createFakeSshClient({ delayMs: 10_000 });
+  fakeNow = 0;
+
+  const first = measure(conn, 100);
+  assert.equal(conn._callbacks.length, 1);
+
+  // Later stats polls must not queue additional callbacks while the
+  // tombstone is unconsumed; ssh2 would otherwise deliver the next reply
+  // to the already-settled tombstone and desynchronize the FIFO.
+  assert.equal(await measure(conn), null);
+  assert.equal(await measure(conn), null);
+  assert.equal(conn._callbacks.length, 1);
+
+  fakeNow = 100;
+  timers[0].fn();
+  assert.equal(await first, null);
+  assert.equal(conn._callbacks.length, 1);
+
+  // A late reply consumes the tombstone slot (like ssh2 shifting it), after
+  // which new pings are allowed again.
+  const tombstone = conn._callbacks.shift();
+  tombstone(false);
+  assert.equal(conn._callbacks.length, 0);
+
+  const conn2 = createFakeSshClient({ delayMs: 25 });
+  fakeNow = 1000;
+  const pending = measure(conn2);
+  fakeNow = 1042;
+  assert.equal(await pending, 42);
+});
