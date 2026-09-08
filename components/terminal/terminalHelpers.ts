@@ -705,9 +705,8 @@ const REFLOW_ANCHOR_CONTEXT_CHARS = 96;
 // the viewed window repeats within the line, so the exact length is the
 // only disambiguator and a too-tight cap would silently drop it.
 const REFLOW_ANCHOR_LINE_LENGTH_CHARS = 262_144;
-// Cap on how far back the capture walks a wrapped logical line to its start,
-// how many physical rows the `charOffset` pass may translate, and how many
-// continuation rows the forward walk to a logical line's end may cross. Each
+// Cap on how far back the capture walks a wrapped logical line to its start
+// and how many physical rows the `charOffset` pass may translate. Each
 // walk steps one physical row at a time, so a viewport inside a multi-megabyte
 // wrapped line (minified JSON, base64) would otherwise repeat O(line)
 // renderer-thread work on every column-changing fit frame. Beyond the cap the
@@ -725,6 +724,20 @@ const REFLOW_ANCHOR_MAX_LINE_ROWS = 2048;
 // same non-blank context line or both report none — the bound cannot make
 // the two sides disagree.
 const REFLOW_ANCHOR_CONTEXT_SCAN_ROWS = 1024;
+// Cap on how many joined characters the forward walk to the next logical line
+// may cross before the follower identity is dropped. The bound counts
+// characters, not physical rows: a row count is reflow-variable (the same
+// logical line occupies more rows at a narrower width), so a column change
+// alone could push the line past a row bound between capture and resolve and
+// drop a captured follower context there, rejecting the otherwise unchanged
+// anchor. Joined characters survive rewrap unchanged — the cursor's own line
+// can only lose characters to row truncation, never gain them — so once a
+// line fits the bound at capture it still fits at resolve: both sides either
+// find the same follower or both drop it. The value matches
+// REFLOW_ANCHOR_LINE_LENGTH_CHARS, the cap already accepted for whole-line
+// measurement, so any line whose follower stays reachable is also a line
+// whose length could have been measured anyway.
+const REFLOW_ANCHOR_MAX_LINE_CHARS = 262_144;
 
 const reflowAnchorLogicalLineStart = (buffer: ReflowAnchorBuffer, row: number): number => {
   let start = Math.max(0, Math.min(row, buffer.length - 1));
@@ -857,22 +870,32 @@ const reflowAnchorLogicalLineLength = (
 /**
  * First logical line strictly after the one starting at `row`, or null.
  *
- * Bounded (`maxRows`): the walk crosses every continuation row of the line at
- * `row` just to find where it ends, so a viewport near the top of a very long
- * wrapped line would otherwise repeat an O(line) scan on every resize frame —
- * even when nothing else is measured (a column grow, or the trim-delta skip).
- * Beyond the bound the follower identity is dropped on both sides: capture
- * records no context and resolve reports none, so they stay consistent and
- * the anchor degrades to its own text.
+ * Bounded (`maxChars`, counted in joined characters): the walk crosses every
+ * continuation row of the line at `row` just to find where it ends, so a
+ * viewport near the top of a very long wrapped line would otherwise repeat an
+ * O(line) scan on every resize frame — even when nothing else is measured (a
+ * column grow, or the trim-delta skip). Counting characters instead of rows
+ * keeps the bound reflow-invariant: a row count changes with the column
+ * width, so a column change alone could push the line past the bound between
+ * capture and resolve and make a captured follower context vanish there,
+ * rejecting the otherwise unchanged anchor. Characters survive rewrap
+ * unchanged, so both sides either find the same follower or both drop it.
+ * Every wrapped row exists only because content overflowed onto it, so each
+ * visited row contributes at least one character and the walk costs
+ * O(maxChars) row translations. Beyond the bound the follower identity is
+ * dropped on both sides: capture records no context and resolve reports
+ * none, so they stay consistent and the anchor degrades to its own text.
  */
 const reflowAnchorNextLogicalLineStart = (
   buffer: ReflowAnchorBuffer,
   row: number,
-  maxRows: number,
+  maxChars: number,
 ): number | null => {
   let next = row + 1;
+  let chars = 0;
   while (next < buffer.length && buffer.getLine(next)?.isWrapped) {
-    if (next - row > maxRows) return null;
+    chars += reflowAnchorRowText(buffer, next).length;
+    if (chars > maxChars) return null;
     next += 1;
   }
   return next < buffer.length ? next : null;
@@ -901,14 +924,14 @@ const reflowAnchorNextNonBlankLogicalLineStart = (
   // with no intervening blanks). Blank logical lines are single empty rows at
   // every width, so measuring from the first follower keeps capture and
   // resolve truncating at the same line (see the constant's comment).
-  const first = reflowAnchorNextLogicalLineStart(buffer, row, REFLOW_ANCHOR_MAX_LINE_ROWS);
+  const first = reflowAnchorNextLogicalLineStart(buffer, row, REFLOW_ANCHOR_MAX_LINE_CHARS);
   if (first === null) return null;
   let next = first;
   while (
     next - first <= REFLOW_ANCHOR_CONTEXT_SCAN_ROWS
     && reflowAnchorJoinTextPrefix(buffer, next, 1) === ""
   ) {
-    const following = reflowAnchorNextLogicalLineStart(buffer, next, REFLOW_ANCHOR_MAX_LINE_ROWS);
+    const following = reflowAnchorNextLogicalLineStart(buffer, next, REFLOW_ANCHOR_MAX_LINE_CHARS);
     if (following === null) return null;
     next = following;
   }
@@ -1085,6 +1108,33 @@ const reflowAnchorContextIsCursorLine = (
   return cursorRow <= contextEnd;
 };
 
+/**
+ * Whether the logical line starting at `contextRow` validates the anchor's
+ * captured follower identity.
+ *
+ * The strict check compares the captured `contextSuffix` text. The
+ * cursor-line tolerance (see `reflowAnchorContextIsCursorLine`) relaxes it
+ * only for a follower that was truncated rather than rewrapped — and that
+ * truncation removes trailing characters, so the surviving follower text must
+ * be a prefix of the captured text. Requiring the prefix keeps the tolerance
+ * from validating an unrelated duplicate of the anchored text that merely
+ * happens to sit before the cursor line: its follower does not continue the
+ * captured identity at all and stays rejected, while the candidate the
+ * captured suffix was actually taken from still matches.
+ */
+const reflowAnchorFollowerMatches = (
+  buffer: ReflowAnchorBuffer,
+  contextRow: number,
+  anchor: TerminalReflowScrollAnchor,
+): boolean => {
+  if (anchor.contextSuffix === null) return false;
+  const text = reflowAnchorJoinTextPrefix(buffer, contextRow, REFLOW_ANCHOR_CONTEXT_CHARS);
+  if (text === anchor.contextSuffix) return true;
+  return text.length > 0
+    && anchor.contextSuffix.startsWith(text)
+    && reflowAnchorContextIsCursorLine(buffer, contextRow);
+};
+
 /** True when the logical line at `row` matches the anchor's captured identity. */
 const reflowAnchorCandidateMatches = (
   buffer: ReflowAnchorBuffer,
@@ -1098,9 +1148,7 @@ const reflowAnchorCandidateMatches = (
   if (contextStart === null || anchor.contextSuffix === null) {
     return contextStart === null && anchor.contextSuffix === null;
   }
-  return reflowAnchorJoinTextPrefix(buffer, contextStart, REFLOW_ANCHOR_CONTEXT_CHARS)
-      === anchor.contextSuffix
-    || reflowAnchorContextIsCursorLine(buffer, contextStart);
+  return reflowAnchorFollowerMatches(buffer, contextStart, anchor);
 };
 
 /**
@@ -1195,11 +1243,7 @@ const reflowAnchorContinuationOffset = (
   const contextStart = reflowAnchorNextNonBlankLogicalLineStart(buffer, row);
   if (contextStart === null || anchor.contextSuffix === null) {
     if (contextStart !== null || anchor.contextSuffix !== null) return -1;
-  } else if (
-    reflowAnchorJoinTextPrefix(buffer, contextStart, REFLOW_ANCHOR_CONTEXT_CHARS)
-      !== anchor.contextSuffix
-    && !reflowAnchorContextIsCursorLine(buffer, contextStart)
-  ) {
+  } else if (!reflowAnchorFollowerMatches(buffer, contextStart, anchor)) {
     return -1;
   }
   if (row === 0 && typeof anchor.lineLength === "number" && Number.isFinite(anchor.lineLength)) {
