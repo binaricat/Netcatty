@@ -216,11 +216,21 @@ const scheduleReconnectIfNeeded = (
   enableReconnect: boolean,
   onStatusChange: (status: PortForwardingRule['status'], error?: string) => void,
 ): boolean => {
-  if (!enableReconnect || !reconnectCallback || shouldReconnectRule?.(ruleId) === false) {
+  // The rule's autoReconnect setting may change while the tunnel is running
+  // (e.g. toggled in the edit panel).  The start-time flag alone would keep
+  // rejecting reconnects after such a change, so also consult the dynamic
+  // rule gate, which reads fresh rule state.
+  const effectiveEnableReconnect =
+    enableReconnect || shouldReconnectRule?.(ruleId) === true;
+  if (
+    !effectiveEnableReconnect ||
+    !reconnectCallback ||
+    shouldReconnectRule?.(ruleId) === false
+  ) {
     return false;
   }
   if (rulesPendingCleanup.has(ruleId)) {
-    deferredReconnects.set(ruleId, { enableReconnect, onStatusChange });
+    deferredReconnects.set(ruleId, { enableReconnect: effectiveEnableReconnect, onStatusChange });
     return true;
   }
 

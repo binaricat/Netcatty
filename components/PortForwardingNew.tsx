@@ -716,6 +716,7 @@ const PortForwarding: React.FC<PortForwardingProps> = ({
         remoteHost: draftRule.remoteHost,
         remotePort: draftRule.remotePort,
         hostId: draftRule.hostId,
+        autoReconnect: draftRule.autoReconnect ?? false,
       });
     }
 
