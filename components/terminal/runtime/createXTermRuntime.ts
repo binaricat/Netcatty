@@ -1058,9 +1058,11 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   // expansion is only safe when the cursor is at the end of the typed
   // buffer — i.e. the last input advanced the cursor, not moved it.
   //
-  // Starts true: at session start and after line submission the cursor is
-  // at the beginning of an empty buffer (i.e. the end of the buffer).
-  let lastInputWasPrintable = true;
+  // Starts true when the buffer is empty (new session: cursor is at the
+  // beginning of an empty buffer).  Starts false when the buffer is
+  // nonempty (hibernation wake: the pre-hibernation cursor may have been
+  // moved away from the tail, so we conservatively assume it is not).
+  let lastInputWasPrintable = !ctx.commandBufferRef?.current;
 
   const handleTerminalInputData = (
     data: string,
@@ -1257,34 +1259,38 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         // Bracketed paste (\x1b[200~...\x1b[201~) is special: xterm wraps
         // pasted text in these markers, so the data starts with ESC and
         // isPrintableInput returns false.  But the pasted content is
-        // printable and the cursor IS at the end after the paste.
+        // printable.  However, the cursor may not be at the buffer tail
+        // (e.g. after a left-arrow movement), so we keep the flag as-is:
+        // paste at the end keeps confidence, paste after a cursor movement
+        // keeps it unknown.
         if (!isBackspace) {
           const isBracketedPaste =
             dataToWrite.startsWith("\x1b[200~") && dataToWrite.endsWith("\x1b[201~");
-          if (isBracketedPaste) {
-            // Cursor is at the end after a paste; trust the flag.
-            lastInputWasPrintable = true;
-          } else if (!isPrintableInput(dataToWrite)) {
+          if (!isBracketedPaste && !isPrintableInput(dataToWrite)) {
             // Escape sequence or control char: cursor position unknown.
             lastInputWasPrintable = false;
           }
-          // If printable (non-backspace, non-escape), keep flag as-is:
-          // typing at the end keeps cursor at end; typing after a cursor
-          // movement keeps cursor not at end.
+          // If printable (non-backspace, non-escape, non-bracketed-paste),
+          // keep flag as-is: typing at the end keeps cursor at end; typing
+          // after a cursor movement keeps cursor not at end.
+          // If bracketed paste, also keep flag as-is (see above).
         }
       }
 
-      // Use remapped data so broadcast peers also receive the correct byte.
-      // For expanded serial backspaces, send the same expanded data so peer
-      // serial devices (with the same encoding) also delete the whole char.
-      // Non-serial peers that receive extra backspaces simply delete extra
-      // chars from their own input — acceptable for the common same-encoding
-      // broadcast case.  Per-target expansion would require each peer's
-      // command buffer and encoding, which the broadcast callback does not
-      // have access to (known limitation, tracked separately).
-      const broadcastData = isExpanded
-        ? outData
-        : mapTerminalBackspaceInput(dataToWrite, ctx.host.backspaceBehavior);
+      // Broadcast peers receive the non-expanded backspace.  The source
+      // session may have expanded a multi-byte CJK backspace to N DELs,
+      // but each broadcast peer has its own protocol, encoding, and
+      // command buffer.  Sending the source's expanded payload would
+      // over-delete on peers with a different encoding (e.g. GB18030
+      // needs 2 DELs for a 3-byte UTF-8 char) or delete extra characters
+      // on non-serial peers (e.g. SSH, where backspace is character-level).
+      // Per-target expansion would require each peer's command buffer and
+      // encoding, which the broadcast callback does not have access to
+      // (known limitation, tracked separately).
+      const broadcastData = mapTerminalBackspaceInput(
+        dataToWrite,
+        ctx.host.backspaceBehavior,
+      );
       if (willBroadcastInput) {
         onBroadcastInput?.(broadcastData, ctx.sessionId);
       }
