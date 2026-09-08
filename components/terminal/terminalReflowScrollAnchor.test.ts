@@ -697,6 +697,38 @@ test("resolve keeps the scanned row when the marker line's containment walk is u
   assert.equal(resolvedRow, 50);
 });
 
+test("resolve keeps the marker row when the cursor line is confirmed from the marker", () => {
+  // The marker sits inside the cursor's own logical line, but the cursor sits
+  // more than REFLOW_ANCHOR_CURSOR_LINE_WALK_ROWS (2048) wrapped rows below
+  // the line's start, so the containment walk from the line's start reports
+  // unknown (`undefined`). The marker row is known to sit inside the line (its
+  // line-start walk succeeded), so the containment walk seeded at the marker
+  // only has to cover the remaining span down to the cursor — within the
+  // bound here — and answers exactly. The line is the non-reflowed cursor
+  // line, whose physical rows keep their indices through a column change
+  // while their lengths change, so the surviving marker row is the exact
+  // restore position and must beat the scanned result (which would map the
+  // captured offset through the changed row lengths to row 50).
+  const cols = 10;
+  const line = "start " + "A".repeat(24_994); // 25,000 chars: 2,500 rows at 10 cols
+  const rows = wrapToRows([line, "follower unique beta", "tail unique gamma"], cols);
+  const anchor = {
+    startRow: 0,
+    charOffset: 500,
+    textPrefix: line.slice(0, 256),
+    contextSuffix: "follower unique beta",
+    viewedText: "A".repeat(20),
+  };
+  const resolvedRow = resolveTerminalReflowScrollAnchor(
+    // The cursor sits on the line's last wrapped row (2,499), 2,038 rows below
+    // the marker — within the bound — but 2,499 rows below the line's start.
+    fakeBuffer(rows, { viewportY: 0, baseY: 2_499, cursorY: 0 }) as never,
+    anchor as never,
+    461, // the marker's within-line row; the cursor sits 2,038 rows below it
+  );
+  assert.equal(resolvedRow, 461);
+});
+
 test("follower bound counts the anchored line's first physical row", () => {
   // The follower bound must cover the whole logical line: excluding the
   // line's first row leaves the count reflow-variable, because that row's

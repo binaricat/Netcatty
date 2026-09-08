@@ -1308,6 +1308,52 @@ const reflowAnchorContextIsCursorLine = (
 };
 
 /**
+ * Whether the logical line starting at `lineStart` — already known to contain
+ * `markerRow` — also contains the cursor row (`baseY + cursorY`).
+ *
+ * The marker branch of the resolve needs this answer for the marker's own
+ * containing line, and the plain containment walk
+ * (`reflowAnchorContextIsCursorLine`) starts at the line's start: a genuine
+ * cursor line whose cursor sits more than `REFLOW_ANCHOR_CURSOR_LINE_WALK_ROWS`
+ * wrapped rows below its start reports unknown there even though the line is
+ * still verifiable — the marker row is known to sit inside the line (the
+ * caller resolved `lineStart` from it), so every row between the line's start
+ * and the marker is already wrapped and only the remaining span from the
+ * marker down to the cursor needs walking. Seeding the walk at the marker
+ * therefore answers exactly whenever the cursor is within the bound of the
+ * marker (the common case: the live prompt keeps the cursor inside the
+ * viewport, within a viewport height of the viewport-row marker, even when it
+ * sits tens of thousands of wrapped rows below the line's start), while a
+ * genuinely unverifiable span still reports `undefined` and the caller
+ * declines the marker trust — an unknown answer may equally be a rewrapped
+ * non-cursor line whose stale marker row no longer holds the viewed
+ * characters (see the marker branch in `resolveTerminalReflowScrollAnchor`).
+ *
+ * Bounded: the walk steps one physical row at a time and stops at the cap, so
+ * a multi-megabyte cursor line still costs at most
+ * `REFLOW_ANCHOR_CURSOR_LINE_WALK_ROWS` steps per candidate match.
+ */
+const reflowAnchorMarkerLineContainsCursor = (
+  buffer: ReflowAnchorBuffer,
+  lineStart: number,
+  markerRow: number,
+): boolean | undefined => {
+  const cursorY = buffer.cursorY;
+  if (typeof cursorY !== "number" || !Number.isFinite(cursorY)) return false;
+  const cursorRow = buffer.baseY + cursorY;
+  if (cursorRow < lineStart) return false;
+  // Rows `lineStart + 1..markerRow` are all wrapped (the caller's line-start
+  // walk established that), so a cursor between the line's start and the
+  // marker is inside the line without any further walking.
+  if (cursorRow <= markerRow) return true;
+  for (let row = markerRow; row < cursorRow; row += 1) {
+    if (row - markerRow >= REFLOW_ANCHOR_CURSOR_LINE_WALK_ROWS) return undefined;
+    if (buffer.getLine(row + 1)?.isWrapped !== true) return false;
+  }
+  return true;
+};
+
+/**
  * Whether the logical line containing `viewportRow` also contains the cursor
  * row (`baseY + cursorY`).
  *
@@ -1782,17 +1828,20 @@ export function resolveTerminalReflowScrollAnchor(
         && seededLine !== undefined
         && seedRow !== seededLine
         // Only a confirmed cursor line may override the scanned result. An
-        // unknown answer (`undefined`: the line continues past the containment
-        // walk bound) may equally be a rewrapped non-cursor line, whose group
-        // a column shrink extends by appending its new rows after the old ones
-        // — the marker then keeps its old within-line row while the viewed
-        // characters move deeper, and the scanned result is the correct
-        // restore. Declining on unknown matches the marker trust
+        // unknown answer (`undefined`: the span to the cursor continues past
+        // the containment walk bound) may equally be a rewrapped non-cursor
+        // line, whose group a column shrink extends by appending its new rows
+        // after the old ones — the marker then keeps its old within-line row
+        // while the viewed characters move deeper, and the scanned result is
+        // the correct restore. Declining on unknown matches the marker trust
         // `TerminalReflowScrollAnchor.containsCursor` applies (see its doc):
-        // an unverifiable line must not gain that trust. A genuine truncated
-        // cursor line keeps its row indices, so the walk still reaches the
-        // cursor within the bound and answers `true` there.
-        && reflowAnchorContextIsCursorLine(buffer, seededLine) === true
+        // an unverifiable line must not gain that trust. The containment walk
+        // seeds at the marker row instead of the line's start: the marker is
+        // known to sit inside this line, so a genuine truncated cursor line
+        // whose cursor sits more than the bound below the line's start — but
+        // within the bound below the marker, as the live prompt's cursor does
+        // inside its viewport — is still confirmed and answers `true` there.
+        && reflowAnchorMarkerLineContainsCursor(buffer, seededLine, seedRow) === true
       ) {
         return Math.min(seedRow, buffer.baseY);
       }
