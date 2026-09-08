@@ -3107,8 +3107,27 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           // must not stand in for a failed match: its row only seeds the
           // scan, and the column-grow merge disposes the viewport marker
           // while the merged line still matches the anchor.)
+          // Only those two cases may trust the viewport-row marker. When the
+          // viewport sits partway into a wrapped non-cursor line, a column
+          // shrink rewraps that line and xterm appends the group's newly
+          // created rows after the existing ones, so the marker keeps its old
+          // within-line row while the viewed characters move deeper — even
+          // though xterm still adjusts the marker through unrelated
+          // insertions and would have disposed it only if its row were
+          // trimmed. That mismatch is unobservable through marker disposal,
+          // so trust the marker as a restore position only when the anchored
+          // line is the cursor's own (row indices survive truncation) or the
+          // marker sits at the anchored line's start (the group's new rows
+          // are appended below it, and insertions above shift it onto the
+          // relocated start). Anything else falls back to the plain row
+          // restore.
+          const markerTrackedViewport = reflowAnchor !== null
+            && (reflowAnchor.startRow === savedViewportY
+              || reflowAnchor.containsCursor === true)
+            ? viewedMarkerRow
+            : null;
           const targetY = Math.min(
-            anchoredViewportY ?? viewedMarkerRow ?? savedViewportY,
+            anchoredViewportY ?? markerTrackedViewport ?? savedViewportY,
             term.buffer.active.baseY,
           );
           if (term.buffer.active.viewportY !== targetY) {

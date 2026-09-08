@@ -712,6 +712,21 @@ export type TerminalReflowScrollAnchor = {
    * hand-built anchors (tests) work without it.
    */
   lineLength?: number;
+  /**
+   * Whether the anchored logical line contained the cursor row at capture
+   * time. With the pinned `reflowCursorLine: false` default such a line is
+   * never rewrapped — a column change only truncates or null-pads its rows
+   * in place — so its row indices survive the rewrap and a viewport-row
+   * marker inside it still marks the viewed row. Any other wrapped line is
+   * rewrapped, and a column shrink then appends the group's newly created
+   * rows after the existing ones, leaving a marker inside the group at its
+   * old within-line row while the viewed characters move deeper — so the
+   * caller must not trust such a marker as a restore position. False also
+   * covers a containment walk past its bound (unknown), which declines the
+   * marker trust the same way. Optional so hand-built test anchors work
+   * without it.
+   */
+  containsCursor?: boolean;
 };
 
 // Enough characters to tell neighboring output apart (timestamps, prompts,
@@ -1176,6 +1191,11 @@ export function captureTerminalReflowScrollAnchor(
     viewedText,
     // Only a fully measured line supports the trim-delta derivation below.
     lineLength,
+    // Lets the caller trust a surviving viewport-row marker as a restore
+    // position: only the cursor's own logical line (or the anchored line's
+    // start row, which the caller checks directly) keeps a marker's row
+    // pointing at the viewed characters through a column shrink.
+    containsCursor: reflowAnchorLineContainsCursor(buffer, viewportY),
   };
 }
 
@@ -1230,6 +1250,35 @@ const reflowAnchorContextIsCursorLine = (
     contextEnd += 1;
   }
   return cursorRow <= contextEnd;
+};
+
+/**
+ * Whether the logical line containing `viewportRow` also contains the cursor
+ * row (`baseY + cursorY`).
+ *
+ * The viewport row is already known to sit inside the anchored line (the
+ * capture walk reached it from the line's start), so the line contains the
+ * cursor exactly when every row from the viewport down to the cursor is
+ * wrapped. Past `REFLOW_ANCHOR_CURSOR_LINE_WALK_ROWS` physical rows the walk
+ * is declined and the answer is reported as `false` — the same degradation
+ * `reflowAnchorContextIsCursorLine` applies — because the caller uses this
+ * to decide whether a viewport-row marker may be trusted as a restore
+ * position, and an unverifiable line must not gain that trust (see
+ * `TerminalReflowScrollAnchor.containsCursor`).
+ */
+const reflowAnchorLineContainsCursor = (
+  buffer: ReflowAnchorBuffer,
+  viewportRow: number,
+): boolean => {
+  const cursorY = buffer.cursorY;
+  if (typeof cursorY !== "number" || !Number.isFinite(cursorY)) return false;
+  const cursorRow = buffer.baseY + cursorY;
+  if (cursorRow < viewportRow) return false;
+  for (let row = viewportRow; row < cursorRow; row += 1) {
+    if (row - viewportRow >= REFLOW_ANCHOR_CURSOR_LINE_WALK_ROWS) return false;
+    if (buffer.getLine(row + 1)?.isWrapped !== true) return false;
+  }
+  return true;
 };
 
 /**

@@ -1242,3 +1242,51 @@ test("resolve declines the cursor follower tolerance past the containment walk b
   const resolvedRow = resolveTerminalReflowScrollAnchor(after as never, anchor!);
   assert.equal(resolvedRow, null);
 });
+
+test("capture records containsCursor when the anchored line holds the cursor", () => {
+  // The cursor sits on a wrapped continuation row of the anchored line: the
+  // line is the cursor's own logical line, whose row indices survive a
+  // column change (rows are truncated or null-padded in place), so a
+  // viewport-row marker inside it may be trusted as a restore position.
+  const beforeRows: FakeRow[] = [
+    { text: "header" },
+    { text: "anchored unique alpha" },
+    { text: "beta", isWrapped: true },
+  ];
+  const before = fakeBuffer(beforeRows, { viewportY: 1, baseY: 2, cursorY: 0 });
+  const anchor = captureTerminalReflowScrollAnchor(before as never);
+  assert.ok(anchor);
+  assert.equal(anchor!.containsCursor, true);
+});
+
+test("capture records containsCursor false for a non-cursor anchored line", () => {
+  // The cursor sits below the anchored line (the line ends at row 1): a
+  // column shrink rewraps the anchored line and xterm appends its new rows
+  // after the existing group, so a viewport-row marker inside it keeps its
+  // old within-line row while the viewed characters move deeper — the
+  // caller must not trust it as a restore position.
+  const beforeRows: FakeRow[] = [
+    { text: "header" },
+    { text: "anchored unique alpha" },
+    { text: "cursor prompt tail" },
+  ];
+  const before = fakeBuffer(beforeRows, { viewportY: 1, baseY: 2, cursorY: 0 });
+  const anchor = captureTerminalReflowScrollAnchor(before as never);
+  assert.ok(anchor);
+  assert.equal(anchor!.containsCursor, false);
+});
+
+test("capture declines containsCursor past the containment walk bound", () => {
+  // The cursor sits more than REFLOW_ANCHOR_CURSOR_LINE_WALK_ROWS wrapped
+  // rows below the viewport inside the same logical line. The bounded walk
+  // reports false (unknown) so the marker trust is declined the same way an
+  // unverifiable line is.
+  const beforeRows: FakeRow[] = [{ text: "header" }];
+  for (let i = 0; i < 2051; i += 1) {
+    beforeRows.push({ text: "Y".repeat(20), isWrapped: true });
+  }
+  const before = fakeBuffer(beforeRows, { viewportY: 1, baseY: 2051, cursorY: 0 });
+  const anchor = captureTerminalReflowScrollAnchor(before as never);
+  assert.ok(anchor);
+  assert.equal(anchor!.containsCursor, false);
+});
