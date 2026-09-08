@@ -900,12 +900,16 @@ const reflowAnchorLogicalLineLength = (
  * keeps the bound reflow-invariant: a row count changes with the column
  * width, so a column change alone could push the line past the bound between
  * capture and resolve and make a captured follower context vanish there,
- * rejecting the otherwise unchanged anchor. Characters survive rewrap
- * unchanged, so both sides either find the same follower or both drop it.
- * Every wrapped row exists only because content overflowed onto it, so each
- * visited row contributes at least one character and the walk costs
- * O(maxChars) row translations. Beyond the bound the follower identity is
- * dropped on both sides: capture records no context and resolve reports
+ * rejecting the otherwise unchanged anchor. The count must cover the whole
+ * logical line: the line's first physical row is part of it, and its length
+ * changes with the column count, so excluding it would leave the count
+ * reflow-variable — a wide first row at capture and a narrow one at resolve
+ * could push the same line past the bound on one side only. Characters
+ * survive rewrap unchanged, so both sides either find the same follower or
+ * both drop it. Every wrapped row exists only because content overflowed onto
+ * it, so each visited row contributes at least one character and the walk
+ * costs O(maxChars) row translations. Beyond the bound the follower identity
+ * is dropped on both sides: capture records no context and resolve reports
  * none, so they stay consistent and the anchor degrades to its own text.
  */
 const reflowAnchorNextLogicalLineStart = (
@@ -914,7 +918,8 @@ const reflowAnchorNextLogicalLineStart = (
   maxChars: number,
 ): number | null => {
   let next = row + 1;
-  let chars = 0;
+  let chars = reflowAnchorRowText(buffer, row).length;
+  if (chars > maxChars) return null;
   while (next < buffer.length && buffer.getLine(next)?.isWrapped) {
     chars += reflowAnchorRowText(buffer, next).length;
     if (chars > maxChars) return null;
@@ -1544,7 +1549,31 @@ export function resolveTerminalReflowScrollAnchor(
     : undefined;
   if (seedRow !== null && (seedRow !== anchor.startRow || seededLine !== undefined)) {
     const seeded = resolveFrom(seedRow, seededLine);
-    if (seeded !== null) return seeded;
+    if (seeded !== null) {
+      // A column change never rewraps the cursor's own logical line (the
+      // pinned `reflowCursorLine: false` default): it truncates or null-pads
+      // each physical row in place, keeping every row index while changing
+      // the row lengths that the offset-to-row mapping walks. The scanned
+      // result therefore translates the captured in-line offsets through the
+      // changed row lengths and lands past (narrowing) or before (growing)
+      // the viewed row — and a viewport partway into the line always spans
+      // changed rows, since every non-final row of a wrapped line is exactly
+      // the old column count long. When the surviving viewport-row marker
+      // sits inside that line, it marks the viewed row itself, whose index
+      // truncation and padding leave unchanged — keep it instead of letting
+      // the scanned result override it. A marker at the line's start
+      // (`seedRow === seededLine`) is the line-start marker, which only
+      // seeds the scan and must not stand in for the result.
+      if (
+        trackContinuation
+        && seededLine !== undefined
+        && seedRow !== seededLine
+        && reflowAnchorContextIsCursorLine(buffer, seededLine)
+      ) {
+        return Math.min(seedRow, buffer.baseY);
+      }
+      return seeded;
+    }
   }
   return resolveFrom(anchor.startRow);
 }

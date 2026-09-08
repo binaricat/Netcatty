@@ -599,6 +599,69 @@ test("resolve uses a surviving viewed-row marker hint after a mid-line trim", ()
   assert.equal(resolvedRow, 2);
 });
 
+test("resolve keeps the surviving marker when the truncated cursor line is the anchor", () => {
+  // The viewport starts partway into the cursor's own long wrapped line.
+  // Narrowing with the pinned `reflowCursorLine: false` default does not
+  // rewrap that line: it truncates every physical row in place, keeping the
+  // row indices while changing the row lengths the captured char offset maps
+  // through. The repetitive text keeps the primary match alive, and the
+  // stale offset then overrides the exact surviving viewport-row marker —
+  // the resolver must retain the marker instead.
+  const cursorLine = "prompt " + "A".repeat(400);
+  const before = wrapToRows(["header unique alpha", cursorLine], 40);
+  const viewportRow = 5; // partway into the cursor line (rows 1..11)
+  const captureBuffer = fakeBuffer(before, {
+    viewportY: viewportRow,
+    baseY: before.length - 1,
+    cursorY: 0,
+  });
+  const anchor = captureTerminalReflowScrollAnchor(captureBuffer as never);
+  assert.ok(anchor);
+  assert.ok(anchor!.charOffset > 0);
+
+  // After the 40→30 shrink the header keeps its single row and the cursor
+  // line keeps every physical row, each truncated to the new column count.
+  const afterRows: FakeRow[] = before.map((row, i) =>
+    i === 0 ? row : { text: row.text.slice(0, 30), isWrapped: row.isWrapped });
+  // The marker tracks the viewed row, whose index the truncation leaves at 5.
+  const resolvedRow = resolveTerminalReflowScrollAnchor(
+    fakeBuffer(afterRows, { viewportY: 0, baseY: afterRows.length - 1, cursorY: 0 }) as never,
+    anchor!,
+    viewportRow,
+  );
+  // The stale offset would map char 160 through the truncated 30-column rows
+  // to row 6; the marker row is exact.
+  assert.equal(resolvedRow, viewportRow);
+});
+
+test("follower bound counts the anchored line's first physical row", () => {
+  // The follower bound must cover the whole logical line: excluding the
+  // line's first row leaves the count reflow-variable, because that row's
+  // length changes with the column count. A line just past the bound then
+  // captures a follower at a wide first row that the resolver drops at a
+  // narrow one, rejecting the otherwise unchanged anchor.
+  const longLine = "head " + "A".repeat(262_200);
+  const follower = "follower tail beta";
+  const before = wrapToRows([longLine, follower], 200);
+  const captureBuffer = fakeBuffer(before, { viewportY: 1 });
+  const anchor = captureTerminalReflowScrollAnchor(captureBuffer as never);
+  assert.ok(anchor);
+  // The whole line (262,305 characters) sits past the bound at either
+  // column count, so the follower identity is dropped on both sides and the
+  // anchor degrades to its own text instead of failing to resolve after a
+  // rewrap that changes the first row's length.
+  assert.equal(anchor!.contextSuffix, null);
+
+  const after = wrapToRows([longLine, follower], 100);
+  const resolvedRow = resolveTerminalReflowScrollAnchor(
+    fakeBuffer(after, { viewportY: 0 }) as never,
+    anchor!,
+  );
+  // The plain charOffset rewraps exactly (the line itself is not the cursor
+  // line): captured char 200 sits at row 2 of the 100-column rewrap.
+  assert.equal(resolvedRow, 2);
+});
+
 test("captureTerminalReflowScrollAnchor returns null for a blank line with no following identity", () => {
   // Only blank lines follow the anchored one: no non-blank context exists to
   // identify it, so every blank line would match and capture must decline.
