@@ -112,7 +112,7 @@ import {
   shouldDeferKeyDownForImeTextInput,
 } from "./terminalImeTextInput";
 import { formatSerialLocalEcho, backspaceCellsForChar } from "./serialLocalEcho";
-import { getCharByteLength } from "../../../domain/serialCharMetrics";
+import { getCharByteLength, getLastChar, removeLastChar, isPrintableInput } from "../../../domain/serialCharMetrics";
 import { mapTerminalBackspaceInput } from "./terminalBackspaceInput";
 import { sanitizeTerminalInput } from "./terminalInputSanitize";
 import { formatTelnetLocalEcho } from "./telnetLocalEcho";
@@ -349,6 +349,8 @@ export type CreateXTermRuntimeContext = {
   serialLocalEcho?: boolean;
   serialLineMode?: boolean;
   serialLineBufferRef?: RefObject<string>;
+  /** Current effective session encoding (updated when user changes toolbar encoding). */
+  currentEncodingRef?: RefObject<string>;
   telnetLocalEchoRef?: RefObject<boolean>;
   onTerminalLogData?: (data: string) => void;
 
@@ -1051,6 +1053,12 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     writeLocalTerminalDataInOrder(term, nextData, ctx.onTerminalLogData);
   };
 
+  // Tracks whether the most recent non-backspace input was a printable
+  // character (not an escape sequence or control char).  Backspace byte
+  // expansion is only safe when the cursor is at the end of the typed
+  // buffer — i.e. the last input advanced the cursor, not moved it.
+  let lastInputWasPrintable = false;
+
   const handleTerminalInputData = (
     data: string,
     options?: {
@@ -1185,20 +1193,31 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         // garbled characters.  When the command-buffer's last character is
         // wider than one byte, send as many backspace bytes as the character
         // occupies on the wire so the device deletes the whole character.
+        //
+        // The expansion is only safe when the cursor is at the end of the
+        // typed buffer.  `lastInputWasPrintable` guards against expanding
+        // after cursor-movement escape sequences (e.g. arrow keys) that
+        // leave the cursor before the buffer tail.
         const isBackspace = dataToWrite === "\x7f" || dataToWrite === "\b";
         let outData = mapTerminalBackspaceInput(dataToWrite, ctx.host.backspaceBehavior);
         let backspaceCells = 1;
+        let isExpanded = false;
 
         if (
           isBackspace &&
           ctx.host.protocol === "serial" &&
           ctx.commandBufferRef &&
-          ctx.commandBufferRef.current.length > 0
+          ctx.commandBufferRef.current.length > 0 &&
+          lastInputWasPrintable
         ) {
-          const lastChar = ctx.commandBufferRef.current.slice(-1);
-          const bytes = getCharByteLength(lastChar, ctx.host.charset);
-          outData = outData.repeat(bytes);
-          backspaceCells = backspaceCellsForChar(lastChar);
+          const lastChar = getLastChar(ctx.commandBufferRef.current);
+          const effectiveEncoding = ctx.currentEncodingRef?.current ?? ctx.host.charset;
+          const bytes = getCharByteLength(lastChar, effectiveEncoding);
+          if (bytes > 1) {
+            outData = outData.repeat(bytes);
+            backspaceCells = backspaceCellsForChar(lastChar);
+            isExpanded = true;
+          }
         }
 
         ctx.onOutputTriggerUserInputRef?.current?.(outData);
@@ -1213,10 +1232,26 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
           const localEcho = formatTelnetLocalEcho(dataToWrite);
           if (localEcho) writeLocalTerminalData(localEcho);
         }
+
+        // Update printable tracking: backspace is not printable,
+        // escape sequences and control chars are not printable,
+        // printable characters advance the cursor.
+        if (!isBackspace) {
+          lastInputWasPrintable = isPrintableInput(dataToWrite);
+        }
       }
 
-      // Use remapped data so broadcast peers also receive the correct byte
-      const broadcastData = mapTerminalBackspaceInput(dataToWrite, ctx.host.backspaceBehavior);
+      // Use remapped data so broadcast peers also receive the correct byte.
+      // For expanded serial backspaces, send the same expanded data so peer
+      // serial devices (with the same encoding) also delete the whole char.
+      // Non-serial peers that receive extra backspaces simply delete extra
+      // chars from their own input — acceptable for the common same-encoding
+      // broadcast case.  Per-target expansion would require each peer's
+      // command buffer and encoding, which the broadcast callback does not
+      // have access to (known limitation, tracked separately).
+      const broadcastData = isExpanded
+        ? outData
+        : mapTerminalBackspaceInput(dataToWrite, ctx.host.backspaceBehavior);
       if (willBroadcastInput) {
         onBroadcastInput?.(broadcastData, ctx.sessionId);
       }
@@ -1233,7 +1268,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
           // Command recording and sudo command preparation happen before the
           // input is written so sudo can receive a one-time prompt marker.
         } else if (data === "\x7f" || data === "\b") {
-          ctx.commandBufferRef.current = ctx.commandBufferRef.current.slice(0, -1);
+          ctx.commandBufferRef.current = removeLastChar(ctx.commandBufferRef.current);
           ctx.scriptRecorderRef?.current?.recordBackspace();
         } else if (data === "\x03") {
           ctx.commandBufferRef.current = "";

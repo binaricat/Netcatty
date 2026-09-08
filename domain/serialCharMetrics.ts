@@ -1,5 +1,6 @@
 /**
- * Character display-width and wire-byte-length utilities for serial terminals.
+ * Character display-width, wire-byte-length, and surrogate-pair-safe
+ * slicing utilities for serial terminals.
  *
  * Serial devices (MCUs, routers, embedded CLIs) process backspace at the
  * byte level: one 0x7F byte removes one byte from the input buffer.  For a
@@ -9,7 +10,9 @@
  *  1. calculate how many backspace bytes to send so the device deletes a
  *     whole character, not just the trailing byte;
  *  2. generate a local-echo erase sequence that matches the glyph's cell
- *     width (a CJK ideograph occupies 2 cells, not 1).
+ *     width (a CJK ideograph occupies 2 cells, not 1);
+ *  3. safely remove the last complete Unicode code point (handling UTF-16
+ *     surrogate pairs for supplementary characters like emoji and CJK Ext B).
  */
 
 /* ------------------------------------------------------------------ */
@@ -80,9 +83,8 @@ function codePointCellWidth(cp: number): number {
  * the whole character instead of just the last byte.
  *
  *  - UTF-8: calculated exactly from the Unicode code point.
- *  - GB18030 / GBK / GB2312 / CP936: 2 bytes for non-ASCII (most CJK is
- *    2 bytes; the 4-byte GB18030 range covers only rare Extension B+ chars
- *    that are essentially never typed in a terminal).
+ *  - GB18030 / GBK / GB2312 / CP936: 1 byte for ASCII, 2 bytes for BMP
+ *    non-ASCII, 4 bytes for supplementary-plane characters (CJK Extension B+).
  *  - Unknown / missing: falls back to UTF-8.
  */
 export function getCharByteLength(char: string, charset?: string): number {
@@ -101,11 +103,20 @@ export function getCharByteLength(char: string, charset?: string): number {
     return total || 1;
   }
 
-  // GB18030 / GBK / GB2312 / CP936: 1 byte for ASCII, 2 for non-ASCII.
+  // GB18030 / GBK / GB2312 / CP936:
+  //  1 byte for ASCII (0x00-0x7F)
+  //  2 bytes for BMP non-ASCII (0x80-0xFFFF)
+  //  4 bytes for supplementary-plane characters (> 0xFFFF)
+  // The 4-byte GB18030 range covers CJK Extension B+ and some emoji,
+  // which are representable but rare in serial terminals.
   if (encoding === 'gb18030') {
     for (const ch of char) {
       const cp = ch.codePointAt(0);
-      if (cp !== undefined && cp >= 0x80) return 2;
+      if (cp === undefined) continue;
+      if (cp >= 0x80) {
+        // Supplementary plane → 4-byte GB18030 encoding.
+        return cp > 0xffff ? 4 : 2;
+      }
     }
     return 1;
   }
@@ -140,4 +151,65 @@ function utf8ByteLength(cp: number): number {
   if (cp <= 0x7ff) return 2;
   if (cp <= 0xffff) return 3;
   return 4;
+}
+
+/* ------------------------------------------------------------------ */
+/* Surrogate-pair-safe string slicing                                  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Returns the last complete Unicode code point (or grapheme) of `str`.
+ *
+ * For a supplementary-plane character (code point > 0xFFFF) stored as a
+ * UTF-16 surrogate pair, `slice(-1)` would return only the low surrogate.
+ * This function returns the full 2-code-unit string.
+ *
+ * Returns an empty string for an empty input.
+ */
+export function getLastChar(str: string): string {
+  if (!str) return "";
+  const last = str[str.length - 1];
+  const code = last.charCodeAt(0);
+  // Low surrogate (U+DC00–U+DFFF) — include the preceding high surrogate.
+  if (code >= 0xdc00 && code <= 0xdfff) {
+    return str.slice(-2);
+  }
+  return last;
+}
+
+/**
+ * Returns `str` with the last complete Unicode code point removed.
+ *
+ * Unlike `slice(0, -1)` this correctly removes a full surrogate pair,
+ * not just the low surrogate unit.
+ */
+export function removeLastChar(str: string): string {
+  if (!str) return "";
+  const last = getLastChar(str);
+  return str.slice(0, str.length - last.length);
+}
+
+/* ------------------------------------------------------------------ */
+/* Input classification                                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * True when `data` represents a printable character or string that advances
+ * the cursor (i.e. the remote line editor's cursor is likely at the end of
+ * the typed buffer).
+ *
+ * False for escape sequences (cursor movements, special keys) and control
+ * characters that do not add to the input buffer.  Used to decide whether
+ * backspace byte expansion is safe — only expand when the last input was
+ * a printable character, not a cursor movement.
+ */
+export function isPrintableInput(data: string): boolean {
+  if (!data) return false;
+  // Escape sequences (cursor movements, special keys, etc.)
+  if (data.charCodeAt(0) === 0x1b) return false;
+  // Control characters below 0x20 and DEL (0x7F)
+  const cp = data.charCodeAt(0);
+  if (cp < 0x20 || cp === 0x7f) return false;
+  // Everything else is printable
+  return true;
 }

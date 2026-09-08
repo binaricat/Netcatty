@@ -95,3 +95,37 @@ test("serial line mode backspace on empty buffer does nothing", () => {
   assert.equal(bufferRef.current, "");
   assert.deepEqual(echoes, []);
 });
+
+test("serial line mode backspace removes full surrogate pair for CJK Extension B", () => {
+  const echoes: string[] = [];
+  const extB = "\u{20000}"; // CJK Extension B, stored as surrogate pair
+  const bufferRef = { current: "a" + extB };
+
+  handleSerialLineModeInput("\x7f", {
+    bufferRef,
+    localEcho: true,
+    writeToSession: () => {},
+    writeToTerminal: (data) => echoes.push(data),
+  });
+
+  // Buffer should have "a" remaining (surrogate pair fully removed).
+  assert.equal(bufferRef.current, "a");
+  // Two cells erased for the wide character.
+  assert.deepEqual(echoes, ["\b \b\b \b"]);
+});
+
+test("serial line mode backspace removes full surrogate pair for emoji", () => {
+  const echoes: string[] = [];
+  const emoji = "\u{1F600}"; // Grinning face, stored as surrogate pair
+  const bufferRef = { current: "hi" + emoji };
+
+  handleSerialLineModeInput("\x7f", {
+    bufferRef,
+    localEcho: true,
+    writeToSession: () => {},
+    writeToTerminal: (data) => echoes.push(data),
+  });
+
+  assert.equal(bufferRef.current, "hi");
+  assert.deepEqual(echoes, ["\b \b\b \b"]);
+});

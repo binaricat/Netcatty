@@ -1,4 +1,4 @@
-import { getCharDisplayWidth } from '../../../domain/serialCharMetrics';
+import { getCharDisplayWidth, getLastChar, removeLastChar } from '../../../domain/serialCharMetrics';
 
 type StringRef = {
   current: string;
@@ -54,9 +54,9 @@ export function handleSerialLineModeInput(
 
   if (data === "\x7f" || data === "\b") {
     if (options.bufferRef.current.length > 0) {
-      const lastChar = options.bufferRef.current.slice(-1);
+      const lastChar = getLastChar(options.bufferRef.current);
       const cells = getCharDisplayWidth(lastChar);
-      options.bufferRef.current = options.bufferRef.current.slice(0, -1);
+      options.bufferRef.current = removeLastChar(options.bufferRef.current);
       if (options.localEcho) options.writeToTerminal("\b \b".repeat(cells));
     }
     return;
