@@ -808,7 +808,7 @@ export async function handleVaultAgentOp(
         if (!detected) {
           return {
             ok: false,
-            error: 'Could not detect import format. Specify csv, putty, mobaxterm, securecrt, or ssh_config.',
+            error: 'Could not detect import format. Specify csv, putty, mobaxterm, securecrt, finalshell, or ssh_config.',
           };
         }
         resolvedFormat = detected;

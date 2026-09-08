@@ -141,7 +141,9 @@ export function useVaultImportHandlers({
                 ? "CSV"
                 : format === "securecrt"
                   ? "SecureCRT"
-                  : "ssh_config";
+                  : format === "finalshell"
+                    ? "FinalShell"
+                    : "ssh_config";
         const updateProgress = (next: Partial<VaultImportProgress>) => {
           setImportProgress((current) => ({
             status: "running",

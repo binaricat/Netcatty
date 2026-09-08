@@ -138,7 +138,7 @@ const TOOL_INPUT_FIELDS = Object.freeze({
   "vault.host.import": {
     format: {
       type: "string",
-      description: "Import format: csv, putty, mobaxterm, securecrt, ssh_config, or auto to detect from text.",
+      description: "Import format: csv, putty, mobaxterm, securecrt, finalshell, ssh_config, or auto to detect from text.",
     },
     text: { type: "string", description: "Exported host data text to import." },
     dryRun: {

@@ -783,12 +783,12 @@
     "toolName": "vault_hosts_import",
     "rpcMethod": "vault/hosts/import",
     "localExecution": false,
-    "description": "Parse known host export file formats (PuTTY, MobaXterm, CSV, SecureCRT, ssh_config) into vault hosts. For arbitrary unstructured text, map to host objects and use vault_hosts_create instead. Only for text in known export formats (PuTTY reg, MobaXterm ini, CSV template, SecureCRT, ssh_config). If attached host text is unknown or auto-detection fails, use read_attachment content, extract fields yourself, and call vault_hosts_create.",
+    "description": "Parse known host export file formats (PuTTY, MobaXterm, CSV, SecureCRT, FinalShell, ssh_config) into vault hosts. For arbitrary unstructured text, map to host objects and use vault_hosts_create instead. Only for text in known export formats (PuTTY reg, MobaXterm ini, CSV template, SecureCRT, ssh_config). If attached host text is unknown or auto-detection fails, use read_attachment content, extract fields yourself, and call vault_hosts_create.",
     "inputShape": {
       "format": {
         "type": "string",
         "optional": false,
-        "description": "Import format: csv, putty, mobaxterm, securecrt, ssh_config, or auto to detect from text."
+        "description": "Import format: csv, putty, mobaxterm, securecrt, finalshell, ssh_config, or auto to detect from text."
       },
       "text": {
         "type": "string",
