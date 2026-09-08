@@ -1130,9 +1130,68 @@ const reflowAnchorFollowerMatches = (
   if (anchor.contextSuffix === null) return false;
   const text = reflowAnchorJoinTextPrefix(buffer, contextRow, REFLOW_ANCHOR_CONTEXT_CHARS);
   if (text === anchor.contextSuffix) return true;
-  return text.length > 0
-    && anchor.contextSuffix.startsWith(text)
-    && reflowAnchorContextIsCursorLine(buffer, contextRow);
+  if (text.length === 0 || !reflowAnchorContextIsCursorLine(buffer, contextRow)) return false;
+  return anchor.contextSuffix.startsWith(text)
+    || reflowAnchorTruncatedCursorRowsMatch(buffer, contextRow, anchor.contextSuffix);
+};
+
+/**
+ * Whether the cursor line's surviving physical rows account for the captured
+ * follower text.
+ *
+ * The prefix tolerance only holds for a cursor line that occupies a single
+ * physical row: truncation removes a tail, so the surviving joined text stays
+ * a prefix of the captured one. A multi-row cursor line is truncated row by
+ * row — every row keeps its leading characters while its tail past the new
+ * column count vanishes between the rows — so the joined surviving text is no
+ * longer a prefix of the captured one (`ABCDEFGHIJ` + `KLMNOPQRST` truncates
+ * to `ABCDEFGH` + `KLMNOPQR`). Verify the rows individually instead: the
+ * first surviving row must be a prefix of the captured text (its own
+ * truncation removes only its tail), and each following row's text must occur
+ * as a contiguous chunk of the captured text at or after the position the
+ * previous row's match ended — the chunk deleted between two surviving rows
+ * is exactly the previous row's truncated tail, so true match positions only
+ * move forward. Verification stops when the captured text (a bounded prefix
+ * of the old line) is exhausted; a row reaching past it only has its captured
+ * portion verified. A row that cannot be placed in the captured text still
+ * rejects, so unrelated follower text cannot pass by matching a single chunk.
+ */
+const reflowAnchorTruncatedCursorRowsMatch = (
+  buffer: ReflowAnchorBuffer,
+  contextRow: number,
+  capturedSuffix: string,
+): boolean => {
+  let matched = 0;
+  let row = contextRow;
+  while (row < buffer.length && matched < capturedSuffix.length) {
+    if (!buffer.getLine(row)) return false;
+    const rowText = reflowAnchorRowText(buffer, row);
+    if (row === contextRow) {
+      if (!capturedSuffix.startsWith(rowText.slice(0, capturedSuffix.length))) return false;
+      matched = Math.min(rowText.length, capturedSuffix.length);
+    } else if (rowText !== "") {
+      const found = capturedSuffix.indexOf(rowText, matched);
+      if (found >= 0) {
+        matched = found + rowText.length;
+      } else {
+        // The row may reach past the captured prefix: its captured portion is
+        // then the captured text's tail at some position at or after the
+        // previous row's match.
+        let start = matched;
+        while (
+          start < capturedSuffix.length
+          && !rowText.startsWith(capturedSuffix.slice(start))
+        ) {
+          start += 1;
+        }
+        if (start >= capturedSuffix.length) return false;
+        matched = capturedSuffix.length;
+      }
+    }
+    row += 1;
+    if (row < buffer.length && !buffer.getLine(row)?.isWrapped) break;
+  }
+  return true;
 };
 
 /** True when the logical line at `row` matches the anchor's captured identity. */

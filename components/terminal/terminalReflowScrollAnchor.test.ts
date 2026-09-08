@@ -783,3 +783,83 @@ test("resolve re-locates the viewed continuation past a truncated cursor followe
   // Original char 10 (the viewport top) is surviving char 2, in row 0.
   assert.equal(resolvedRow, 0);
 });
+
+test("resolve keeps the anchored line when a multi-row cursor follower is truncated", () => {
+  // The cursor line spans two physical rows. A narrowing resize truncates each
+  // of its rows separately, so the joined surviving follower text (`ABCDEFGH`
+  // + `KLMNOPQR`) is not a prefix of the captured one (`ABCDEFGHIJ` +
+  // `KLMNOPQRST`); the row-wise tolerance must still validate the anchor.
+  const before = fakeBuffer([
+    { text: "header" },
+    { text: "anchored unique alpha" },
+    { text: "ABCDEFGHIJ" },
+    { text: "KLMNOPQRST", isWrapped: true },
+  ], { viewportY: 1, baseY: 3, cursorY: 0 });
+  const anchor = captureTerminalReflowScrollAnchor(before as never);
+  assert.ok(anchor);
+  assert.equal(anchor!.contextSuffix, "ABCDEFGHIJKLMNOPQRST");
+
+  // After the shrink the anchored line rewraps into two rows while each row of
+  // the multi-row cursor line keeps its leading characters only.
+  const after = fakeBuffer([
+    { text: "header" },
+    { text: "anchored uni" },
+    { text: "que alpha", isWrapped: true },
+    { text: "ABCDEFGH" },
+    { text: "KLMNOPQR", isWrapped: true },
+  ], { viewportY: 0, baseY: 4, cursorY: 0 });
+  const resolvedRow = resolveTerminalReflowScrollAnchor(after as never, anchor!);
+  assert.equal(resolvedRow, 1);
+});
+
+test("resolve re-locates the viewed continuation past a multi-row truncated cursor follower", () => {
+  // Viewport partway into a long wrapped line; the following line is the
+  // multi-row cursor line, whose rows a narrowing resize truncates separately.
+  // The row-wise follower identity must not reject the surviving line.
+  const before = fakeBuffer([
+    { text: "M".repeat(10), isWrapped: false },
+    { text: "M".repeat(10), isWrapped: true },
+    { text: "M".repeat(10), isWrapped: true },
+    { text: "ABCDEFGHIJ" },
+    { text: "KLMNOPQRST", isWrapped: true },
+  ], { viewportY: 1, baseY: 4, cursorY: 0 });
+  const anchor = captureTerminalReflowScrollAnchor(before as never);
+  assert.ok(anchor);
+  assert.equal(anchor!.charOffset, 10);
+
+  // Column shrink to 8: the anchored line rewraps normally while the cursor
+  // line keeps its old row structure truncated row by row.
+  const after = fakeBuffer([
+    { text: "M".repeat(8), isWrapped: false },
+    { text: "M".repeat(8), isWrapped: true },
+    { text: "M".repeat(8), isWrapped: true },
+    { text: "M".repeat(6), isWrapped: true },
+    { text: "ABCDEFGH" },
+    { text: "KLMNOPQR", isWrapped: true },
+  ], { viewportY: 0, baseY: 5, cursorY: 0 });
+  const resolvedRow = resolveTerminalReflowScrollAnchor(after as never, anchor!);
+  // Original char 10 (the viewport top) is surviving char 10, in row 1.
+  assert.equal(resolvedRow, 1);
+});
+
+test("resolve still rejects a multi-row follower that does not continue the captured text", () => {
+  // The row-wise cursor-line tolerance must not accept a follower whose rows
+  // cannot be placed in the captured follower text.
+  const rows = [
+    { text: "header" },
+    { text: "anchored unique alpha" },
+    { text: "ZZZZZZZZ" },
+    { text: "YYYYYYYY", isWrapped: true },
+  ];
+  const anchor = {
+    startRow: 1,
+    charOffset: 0,
+    textPrefix: "anchored unique alpha",
+    contextSuffix: "ABCDEFGHIJKLMNOPQRST",
+  };
+  const resolvedRow = resolveTerminalReflowScrollAnchor(
+    fakeBuffer(rows, { viewportY: 0, cursorY: 0 }) as never,
+    anchor,
+  );
+  assert.equal(resolvedRow, null);
+});
