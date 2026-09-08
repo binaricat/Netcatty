@@ -3085,15 +3085,31 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           const viewedMarkerRow = reflowMarker && !reflowMarker.isDisposed && reflowMarker.line >= 0
             ? reflowMarker.line
             : null;
-          const markerRow = viewedMarkerRow
-            ?? (reflowStartMarker && !reflowStartMarker.isDisposed && reflowStartMarker.line >= 0
-              ? reflowStartMarker.line
-              : null);
+          const startMarkerRow = reflowStartMarker && !reflowStartMarker.isDisposed
+            && reflowStartMarker.line >= 0
+            ? reflowStartMarker.line
+            : null;
+          const markerRow = viewedMarkerRow ?? startMarkerRow;
           reflowMarker?.dispose();
           reflowMarker = null;
           reflowStartMarker?.dispose();
           reflowStartMarker = null;
-          const anchoredViewportY = reflowAnchor === null
+          // A continuation anchor registers both markers, so both coming back
+          // disposed means the trim deleted the rows they pin — including the
+          // viewed row itself — and the anchored content is gone. Scanning the
+          // buffer from the stale row could then only match a repetitive
+          // duplicate while costing a full O(scrollback) sweep (twice, for the
+          // continuation pass) on every divider-drag frame; fall back directly
+          // instead. A single disposed viewport marker keeps the resolve: a
+          // column-grow merge disposes it while the merged line still matches
+          // the anchor, and a shrink trim that reaches the viewed row of a
+          // non-continuation anchor leaves no surviving start marker to
+          // disambiguate.
+          const anchoredContentTrimmed = reflowAnchor !== null
+            && reflowAnchor.startRow !== savedViewportY
+            && viewedMarkerRow === null
+            && startMarkerRow === null;
+          const anchoredViewportY = reflowAnchor === null || anchoredContentTrimmed
             ? null
             : resolveTerminalReflowScrollAnchor(term.buffer.active, reflowAnchor, markerRow);
           // Content matching can still fail when the viewed line is the
