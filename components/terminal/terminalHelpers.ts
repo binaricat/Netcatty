@@ -1722,11 +1722,19 @@ const reflowAnchorContinuationOffset = (
  * the marker row keeps it O(delta) around the true position; the full scan
  * from the stale row only runs as a fallback when the marker is unavailable
  * (scrollback trim disposes it) or its neighborhood no longer matches.
+ *
+ * `trimReachedStart` reports that every pinned marker was disposed, so the
+ * scrollback trim cut through the anchored line's start row. Any surviving
+ * remnant of that line then begins at row 0 (a trim removes from the buffer
+ * top, and a narrowing rewrap can relocate the viewed characters into
+ * appended rows before the trim), so the resolve checks only that remnant —
+ * see the branch at the end of this function.
  */
 export function resolveTerminalReflowScrollAnchor(
   buffer: ReflowAnchorBuffer,
   anchor: TerminalReflowScrollAnchor,
   hintRow?: number | null,
+  trimReachedStart?: boolean,
 ): number | null {
   const seedRow = typeof hintRow === "number" && Number.isFinite(hintRow)
     && hintRow >= 0 && hintRow < buffer.length
@@ -1847,6 +1855,24 @@ export function resolveTerminalReflowScrollAnchor(
       }
       return seeded;
     }
+  }
+  // `trimReachedStart` says both pinned markers came back disposed, so the
+  // scrollback trim cut through the anchored line's start row. Marker
+  // disposal is not proof the content is gone: a narrowing rewrap relocates
+  // the viewed characters into newly appended continuation rows before the
+  // trim cuts the same number of rows from the top, so the characters can
+  // outlive both pinned rows. A trim removes from the buffer top, so a line
+  // whose start row it reached leaves any surviving remnant beginning at
+  // row 0 — check that remnant directly instead of sweeping from the stale
+  // start row, which after a real trim could only match a repetitive
+  // duplicate while costing an O(scrollback) sweep per resize frame. No
+  // match at row 0 means the viewed characters were trimmed away too and
+  // the plain row restore applies. A non-continuation anchor has no viewed
+  // continuation to relocate: a trim reaching its viewed row (the line's
+  // start) removed the viewed characters themselves.
+  if (trimReachedStart) {
+    if (!trackContinuation) return null;
+    return resolveFrom(0, 0);
   }
   return resolveFrom(anchor.startRow);
 }

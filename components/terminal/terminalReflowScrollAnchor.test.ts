@@ -399,6 +399,58 @@ test("resolve re-locates the viewed continuation when trim removes the line's fi
   assert.equal(trimmed[2]!.text, before[3]!.text.slice(0, 30));
 });
 
+test("resolve with trimReachedStart re-locates the top remnant without a hint", () => {
+  // Both markers disposed (the trim reached the line's start and viewed
+  // rows), yet the viewed characters survive: the narrowing rewrap moved
+  // them into appended continuation rows before the trim cut the same rows
+  // from the top. The remnant of a line whose start row was trimmed always
+  // begins at row 0, so the resolver must find the viewed characters there
+  // instead of reporting the content deleted.
+  const longLine = "prefix " + "A".repeat(400) + " MARKER-unique-anchor " + "B".repeat(400);
+  const before = wrapToRows([longLine], 40);
+  const viewportRow = before.findIndex((row) => row.text.includes("MARKER"));
+  const captureBuffer = fakeBuffer(before, { viewportY: viewportRow });
+  const anchor = captureTerminalReflowScrollAnchor(captureBuffer as never);
+  assert.ok(anchor);
+  assert.equal(anchor!.startRow, 0);
+  assert.ok(anchor!.charOffset > 0);
+
+  // Narrower rewrap (21 → 28 rows) puts the viewed characters on row 13;
+  // a 12-row trim then disposes both pinned rows (start 0, viewed 10) while
+  // the characters survive at row 1 of the top remnant.
+  const after = wrapToRows([longLine], 30);
+  const trimRows = 12;
+  const trimmed = after.slice(trimRows).map((row, i) =>
+    i === 0 ? { text: row.text, isWrapped: true } : row);
+  const resolvedRow = resolveTerminalReflowScrollAnchor(
+    fakeBuffer(trimmed, { viewportY: 0 }) as never,
+    anchor!,
+    null,
+    true,
+  );
+  assert.equal(resolvedRow, 1);
+  assert.equal(trimmed[1]!.text, after[13]!.text);
+});
+
+test("resolve with trimReachedStart returns null when the trim removed the viewed characters", () => {
+  const longLine = "prefix " + "A".repeat(120) + " MARKER-unique-anchor " + "B".repeat(120);
+  const before = wrapToRows([longLine], 40);
+  const viewportRow = before.findIndex((row) => row.text.includes("MARKER"));
+  const captureBuffer = fakeBuffer(before, { viewportY: viewportRow });
+  const anchor = captureTerminalReflowScrollAnchor(captureBuffer as never);
+  assert.ok(anchor);
+
+  // A deeper trim removes the whole line: nothing of it survives, so the
+  // resolver must decline instead of restoring the stale row.
+  const resolvedRow = resolveTerminalReflowScrollAnchor(
+    fakeBuffer([{ text: "other" }], { viewportY: 0 }) as never,
+    anchor!,
+    null,
+    true,
+  );
+  assert.equal(resolvedRow, null);
+});
+
 test("resolve adjusts a repeating viewed window by the derived trim delta", () => {
   // The viewed window is a long run of one character, so it repeats
   // throughout the line: content alone re-matches it at the stale pre-trim

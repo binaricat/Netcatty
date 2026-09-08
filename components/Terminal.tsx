@@ -3096,32 +3096,30 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           reflowStartMarker?.dispose();
           reflowStartMarker = null;
           // A continuation anchor registers both markers, so both coming back
-          // disposed means the trim deleted the rows they pin — including the
-          // viewed row itself — and the anchored content is gone. Scanning the
-          // buffer from the stale row could then only match a repetitive
-          // duplicate while costing a full O(scrollback) sweep (twice, for the
-          // continuation pass) on every divider-drag frame; fall back directly
-          // instead. That holds only when the fit does not grow columns: on a
-          // column grow the merge of a wrapped continuation into its
-          // predecessor disposes the viewport marker while the viewed
-          // characters survive, and a simultaneous row reduction on a
-          // saturated scrollback can trim the start marker's row while the
-          // viewed continuation lives on — both markers then read as disposed
-          // even though the anchored content still exists, so the resolver
-          // must keep running there (it falls back to the stale row on its
-          // own when the scan finds nothing). A single disposed viewport
-          // marker also keeps the resolve: a column-grow merge disposes it
-          // while the merged line still matches the anchor, and a shrink trim
-          // that reaches the viewed row of a non-continuation anchor leaves
-          // no surviving start marker to disambiguate.
-          const anchoredContentTrimmed = reflowAnchor !== null
+          // disposed means the trim deleted the rows they pin — but marker
+          // disposal alone is not proof the anchored content is gone: a
+          // narrowing rewrap relocates the viewed characters into newly
+          // appended continuation rows before the trim cuts the same number
+          // of rows from the top, so the characters can survive at the buffer
+          // top while both pinned rows are gone. `trimReachedStart` switches
+          // the resolver to that remnant check (a trim removes from the top,
+          // so a line whose start row it reached leaves any surviving part at
+          // row 0) instead of letting it sweep the stale row for repetitive
+          // duplicates on every divider-drag frame. A single disposed
+          // viewport marker keeps the seeded resolve: a column-grow merge
+          // disposes it while the merged line still matches the anchor.
+          const trimReachedStart = reflowAnchor !== null
             && reflowAnchor.startRow !== savedViewportY
             && viewedMarkerRow === null
-            && startMarkerRow === null
-            && dimensions.cols <= previousCols;
-          const anchoredViewportY = reflowAnchor === null || anchoredContentTrimmed
+            && startMarkerRow === null;
+          const anchoredViewportY = reflowAnchor === null
             ? null
-            : resolveTerminalReflowScrollAnchor(term.buffer.active, reflowAnchor, markerRow);
+            : resolveTerminalReflowScrollAnchor(
+                term.buffer.active,
+                reflowAnchor,
+                markerRow,
+                trimReachedStart,
+              );
           // Content matching can still fail when the viewed line is the
           // cursor's own logical line: with the pinned `reflowCursorLine:
           // false` default a narrowing resize skips rewrapping that line and
