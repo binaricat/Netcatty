@@ -27,6 +27,9 @@ export interface PortForwardingRule {
   hostId?: string;
   // Auto-start: if true, this rule will automatically start when the app launches
   autoStart?: boolean;
+  // Auto-reconnect: if true, the tunnel automatically reconnects (with bounded
+  // retries) after an unexpected disconnect, regardless of auto-start
+  autoReconnect?: boolean;
   /**
    * Runtime projection for the UI. Authoritative phase lives in the Electron
    * main-process registry; this field is rebuilt from snapshots / events and

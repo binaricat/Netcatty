@@ -979,6 +979,8 @@ export const zhCNVaultMessages: Messages = {
   'pf.deleteActive.confirm': '关闭并删除',
   'pf.form.autoStart': '自动启动',
   'pf.form.autoStartDesc': '应用启动时自动开启此规则',
+  'pf.form.autoReconnect': '自动重连',
+  'pf.form.autoReconnectDesc': '连接断开后自动尝试重新连接',
 
   // SFTP (pane + conflict)
   'sftp.pane.local': '本地',

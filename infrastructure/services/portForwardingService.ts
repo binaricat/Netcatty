@@ -12,6 +12,7 @@ import {
   selectStoppablePortForwardingRules,
 } from '../../domain/portForwardingBulkActions';
 import { isEncryptedCredentialPlaceholder, sanitizeCredentialValue } from '../../domain/credentials';
+import { isPortForwardingAutoReconnectEnabled } from '../../domain/portForwardingReconnect';
 import { resolveBridgeKeyAuth, resolveBridgeSshAgentAuth, resolveHostAuth } from '../../domain/sshAuth';
 import { resolveHostKeepalive } from '../../domain/host';
 import { resolveHostSshConnectionTimeouts } from '../../domain/sshConnectionTimeouts';
@@ -1392,7 +1393,7 @@ export const startAllPortForwards = async (
       keys,
       identities,
       (status, error) => onStatusChange(rule.id, status, error),
-      Boolean(rule.autoStart),
+      isPortForwardingAutoReconnectEnabled(rule),
       terminalSettings,
       knownHosts,
     );

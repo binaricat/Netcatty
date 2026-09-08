@@ -13,6 +13,7 @@ import { useActiveTabId } from "../application/state/activeTabStore";
 import { resolveGroupDefaults, applyGroupDefaults } from "../domain/groupConfig";
 import { materializeHostProxyProfile } from "../domain/proxyProfiles";
 import { upsertKnownHost } from "../domain/knownHosts";
+import { isPortForwardingAutoReconnectEnabled } from "../domain/portForwardingReconnect";
 import type { Host, KnownHost } from "../domain/models";
 import { getEffectiveKnownHosts } from "../infrastructure/syncHelpers";
 import { PortForwardHostKeyTrayPrompt } from "./port-forwarding";
@@ -453,7 +454,7 @@ const TrayPanelContent: React.FC<TrayPanelContentProps> = ({ terminalSettings })
                             const host = resolveEffectiveHost(rawHost);
                             void startTunnel(rule, host, hosts.map(resolveEffectiveHost), keys, identities, (status, error) => {
                               if (status === "error" && error) toast.error(error);
-                            }, rule.autoStart, terminalSettings, effectiveKnownHosts);
+                            }, isPortForwardingAutoReconnectEnabled(rule), terminalSettings, effectiveKnownHosts);
                           }
                         }}
                         className={cn(

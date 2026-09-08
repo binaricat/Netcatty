@@ -9,6 +9,7 @@ import { sanitizeHostIconFields } from '../../domain/hostIcon';
 import { resolveEffectiveTerminalProtocol } from '../../domain/terminalProtocol';
 import { getTerminalPassthroughActions } from '../state/useGlobalHotkeys';
 import { tabShortcutDigitFromEvent } from '../../domain/models/keyBindings';
+import { isPortForwardingAutoReconnectEnabled } from '../../domain/portForwardingReconnect';
 import { buildNumberShortcutTabTargets } from './tabShortcutTargets';
 import { captureInheritedCwd } from '../state/inheritedCwd';
 
@@ -151,7 +152,7 @@ export function handleTrayTogglePortForwardImpl(getCtx: AppContextGetter, ruleId
         const effectiveHost = resolveEffectiveHost(host);
         void startTunnel(rule, effectiveHost, hosts.map(resolveEffectiveHost), keys, identities, (status, error) => {
           if (status === "error" && error) toast.error(error);
-        }, rule.autoStart, terminalSettings, knownHosts);
+        }, isPortForwardingAutoReconnectEnabled(rule), terminalSettings, knownHosts);
       }
       return;
     }

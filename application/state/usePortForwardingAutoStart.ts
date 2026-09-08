@@ -8,6 +8,7 @@ import { GroupConfig, Host, Identity, KnownHost, PortForwardingRule, ProxyProfil
 import { resolveGroupDefaults, applyGroupDefaults } from "../../domain/groupConfig";
 import { materializeHostProxyProfile } from "../../domain/proxyProfiles";
 import { STORAGE_KEY_PORT_FORWARDING } from "../../infrastructure/config/storageKeys";
+import { isPortForwardingAutoReconnectEnabled } from "../../domain/portForwardingReconnect";
 import { localStorageAdapter } from "../../infrastructure/persistence/localStorageAdapter";
 import {
   getActiveConnection,
@@ -103,6 +104,11 @@ export const isPortForwardingAutoStartEnabled = (
   ruleId: string,
 ): boolean => rules.some((rule) => rule.id === ruleId && rule.autoStart === true);
 
+export const isPortForwardingReconnectRequested = (
+  rules: PortForwardingRule[],
+  ruleId: string,
+): boolean => rules.some((rule) => rule.id === ruleId && isPortForwardingAutoReconnectEnabled(rule));
+
 export const shouldStartPortForwardingAutoStartRule = (
   rule: PortForwardingRule,
   connection?: { status: PortForwardingRule["status"] },
@@ -118,7 +124,7 @@ export const recoverPortForwardingAutoStartAfterNetworkRestore = async (
   ) ?? [];
   const recoverableRuleIds = new Set<string>();
   for (const rule of rules) {
-    if (rule.autoStart && resetReconnectAttempts(rule.id)) {
+    if (isPortForwardingAutoReconnectEnabled(rule) && resetReconnectAttempts(rule.id)) {
       recoverableRuleIds.add(rule.id);
     }
   }
@@ -184,7 +190,7 @@ export const runPortForwardingAutoStart = async ({
   recoveryRuleIds,
 }: RunPortForwardingAutoStartOptions): Promise<void> => {
   await syncWithBackend({
-    shouldReconnect: (ruleId) => isPortForwardingAutoStartEnabled(
+    shouldReconnect: (ruleId) => isPortForwardingReconnectRequested(
       localStorageAdapter.read<PortForwardingRule[]>(STORAGE_KEY_PORT_FORWARDING) ?? [],
       ruleId,
     ),
@@ -385,7 +391,7 @@ export const usePortForwardingAutoStart = ({
       return startPortForward(rule, host, resolveEffectiveHosts(hostsRef.current), keysRef.current, identitiesRef.current, onStatusChange, true, terminalSettingsRef.current, knownHostsRef.current);
     };
 
-    setReconnectCallback(handleReconnect, (ruleId) => isPortForwardingAutoStartEnabled(
+    setReconnectCallback(handleReconnect, (ruleId) => isPortForwardingReconnectRequested(
       localStorageAdapter.read<PortForwardingRule[]>(STORAGE_KEY_PORT_FORWARDING) ?? [],
       ruleId,
     ));

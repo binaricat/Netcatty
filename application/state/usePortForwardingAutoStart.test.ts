@@ -7,6 +7,7 @@ import {
   getAutoStartRuleBlockReason,
   isAutoStartProxyReady,
   isPortForwardingAutoStartEnabled,
+  isPortForwardingReconnectRequested,
 } from "./usePortForwardingAutoStart.ts";
 import type { GroupConfig, Host, PortForwardingRule, ProxyProfile } from "../../domain/models.ts";
 import { STORAGE_KEY_PORT_FORWARDING } from "../../infrastructure/config/storageKeys.ts";
@@ -175,6 +176,14 @@ test("reconnect eligibility follows the current auto-start setting", () => {
   assert.equal(isPortForwardingAutoStartEnabled([rule({ autoStart: true })], "rule-1"), true);
   assert.equal(isPortForwardingAutoStartEnabled([rule({ autoStart: false })], "rule-1"), false);
   assert.equal(isPortForwardingAutoStartEnabled([], "rule-1"), false);
+});
+
+test("reconnect is requested for auto-start and auto-reconnect rules only", () => {
+  assert.equal(isPortForwardingReconnectRequested([rule({ autoStart: true })], "rule-1"), true);
+  assert.equal(isPortForwardingReconnectRequested([rule({ autoStart: false, autoReconnect: true })], "rule-1"), true);
+  assert.equal(isPortForwardingReconnectRequested([rule({ autoStart: false, autoReconnect: false })], "rule-1"), false);
+  assert.equal(isPortForwardingReconnectRequested([rule({ autoStart: false })], "rule-1"), false);
+  assert.equal(isPortForwardingReconnectRequested([], "rule-1"), false);
 });
 
 test("network recovery starts an exhausted auto-start rule through the real service path", async (t) => {
