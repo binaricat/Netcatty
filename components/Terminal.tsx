@@ -3937,7 +3937,9 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     requestSearchFocus,
     serialLocalEcho: serialConfig?.localEcho,
     serialLineMode: serialConfig?.lineMode,
+    serialByteOrientedBackspace: serialConfig?.byteOrientedBackspace ?? true,
     serialLineBufferRef,
+    currentEncodingRef: terminalEncodingRef,
     telnetLocalEchoRef,
     onTerminalLogData: captureTerminalLogData,
     onCwdChange: (cwd: string) => {
