@@ -1280,11 +1280,15 @@ export function resolveTerminalReflowScrollAnchor(
   // then jump into the duplicate even though the fallback from the stale
   // `anchor.startRow` selects the original. Constrain the seeded scan to the
   // marker's containing line, falling through to the stale-row scan when
-  // that line no longer matches.
+  // that line no longer matches. The marker row may also numerically equal
+  // the stale `anchor.startRow` — when the rewrap above the anchor removed
+  // exactly as many wrapped rows as the viewport spans — while still sitting
+  // inside the relocated line, so the seeded path must run for equal rows
+  // too whenever a containing line was resolved.
   const seededLine = seedRow !== null && trackContinuation
     ? reflowAnchorLogicalLineStart(buffer, seedRow)
     : undefined;
-  if (seedRow !== null && seedRow !== anchor.startRow) {
+  if (seedRow !== null && (seedRow !== anchor.startRow || seededLine !== undefined)) {
     const seeded = resolveFrom(seedRow, seededLine);
     if (seeded !== null) return seeded;
   }
