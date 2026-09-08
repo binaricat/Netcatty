@@ -3017,6 +3017,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         // content after the resize. Capture the content instead of an index.
         // Row-only and pixel-only fits never rewrap, so skip the O(scrollback)
         // anchor scan on those frames.
+        const previousCols = term.cols;
         const reflowAnchor = wasPinnedToBottom || term.cols === dimensions.cols
           ? null
           : captureTerminalReflowScrollAnchor(buffer, {
@@ -3025,7 +3026,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
               // these bounds let the capture skip its whole-line measurement
               // when no trim can reach the anchored line.
               maxRows: dimensions.rows + (term.options.scrollback ?? 1000),
-              oldCols: term.cols,
+              oldCols: previousCols,
               newCols: dimensions.cols,
             });
 
@@ -3100,15 +3101,24 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           // buffer from the stale row could then only match a repetitive
           // duplicate while costing a full O(scrollback) sweep (twice, for the
           // continuation pass) on every divider-drag frame; fall back directly
-          // instead. A single disposed viewport marker keeps the resolve: a
-          // column-grow merge disposes it while the merged line still matches
-          // the anchor, and a shrink trim that reaches the viewed row of a
-          // non-continuation anchor leaves no surviving start marker to
-          // disambiguate.
+          // instead. That holds only when the fit does not grow columns: on a
+          // column grow the merge of a wrapped continuation into its
+          // predecessor disposes the viewport marker while the viewed
+          // characters survive, and a simultaneous row reduction on a
+          // saturated scrollback can trim the start marker's row while the
+          // viewed continuation lives on — both markers then read as disposed
+          // even though the anchored content still exists, so the resolver
+          // must keep running there (it falls back to the stale row on its
+          // own when the scan finds nothing). A single disposed viewport
+          // marker also keeps the resolve: a column-grow merge disposes it
+          // while the merged line still matches the anchor, and a shrink trim
+          // that reaches the viewed row of a non-continuation anchor leaves
+          // no surviving start marker to disambiguate.
           const anchoredContentTrimmed = reflowAnchor !== null
             && reflowAnchor.startRow !== savedViewportY
             && viewedMarkerRow === null
-            && startMarkerRow === null;
+            && startMarkerRow === null
+            && dimensions.cols <= previousCols;
           const anchoredViewportY = reflowAnchor === null || anchoredContentTrimmed
             ? null
             : resolveTerminalReflowScrollAnchor(term.buffer.active, reflowAnchor, markerRow);
