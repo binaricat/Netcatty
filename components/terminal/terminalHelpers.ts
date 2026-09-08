@@ -628,6 +628,13 @@ type ReflowAnchorCell = {
    * structural wrap padding cells (and ordinary empty cells) have width 1.
    */
   getWidth?(): number;
+  /**
+   * Characters the cell contributes to `translateToString` (a wide glyph's
+   * first cell carries the whole glyph, combining marks included; null and
+   * width-0 continuation cells contribute none). Real xterm cells expose it;
+   * hand-built test cells may omit it.
+   */
+  getString?(): string;
 };
 
 type ReflowAnchorBufferLine = {
@@ -1217,8 +1224,53 @@ const reflowAnchorFollowerMatches = (
  * captured suffix is a bounded prefix of the old line) and go unverified.
  */
 /**
+ * Cell column of `line` where its first `charCount` characters — as counted
+ * by `reflowAnchorRowText` — end, or undefined when the mapping cannot be
+ * verified from the cells.
+ *
+ * A JavaScript string length is not a cell column: a double-width glyph
+ * occupies two cells while contributing one or two characters (a CJK BMP
+ * glyph is a single code unit, an emoji is a surrogate pair), and combining
+ * marks ride in their base cell. Walking the cells mirrors
+ * `translateToString`: a width-0 continuation cell contributes nothing (its
+ * glyph was counted by the wide cell before it), a null cell (codepoint 0)
+ * renders as exactly one blank, and any other cell contributes its string —
+ * base plus combining marks. Cells without `getString` (hand-built test
+ * buffers) count as one character each, which keeps ASCII-only test rows
+ * aligned. An undefined result also covers a character count that falls
+ * between cell boundaries, which real translations never produce.
+ */
+const reflowAnchorPrefixCellLength = (
+  line: ReflowAnchorBufferLine,
+  charCount: number,
+): number | undefined => {
+  const lineLength = typeof line.length === "number" ? line.length : undefined;
+  if (!line.getCell || lineLength === undefined) return undefined;
+  let column = 0;
+  let chars = 0;
+  while (chars < charCount && column < lineLength) {
+    const cell = line.getCell(column);
+    if (!cell) return undefined;
+    const width = cell.getWidth?.() ?? 1;
+    if (width <= 0) {
+      // Second cell of a wide glyph: it contributes no characters of its own.
+      column += 1;
+      continue;
+    }
+    chars += cell.getCode() === 0 ? 1 : cell.getString?.().length || 1;
+    column += width;
+  }
+  return chars === charCount ? column : undefined;
+};
+
+/**
  * Whether every cell of the physical row at `row` past `prefixLength` is null
  * (codepoint 0): the padding xterm adds when columns grow.
+ *
+ * `prefixLength` is a cell column, not a string offset — derive it with
+ * `reflowAnchorPrefixCellLength` when only the character count of the prefix
+ * is known (see the column-grow tolerance in
+ * `reflowAnchorTruncatedCursorRowsMatch`).
  *
  * A column grow skips reflowing the cursor line entirely (`reflowCursorLine`
  * stays false) but expands each of its physical rows to the new column count
@@ -1257,11 +1309,12 @@ const reflowAnchorTruncatedCursorRowsMatch = (
   if (!capturedRows) return false;
   let row = contextRow;
   for (let i = 0; i < capturedRows.length; i += 1) {
-    if (row >= buffer.length || !buffer.getLine(row)) return false;
+    const line = buffer.getLine(row);
+    if (row >= buffer.length || !line) return false;
     // The captured rows beyond the first were continuation rows: the
     // surviving line must still wrap at every captured boundary, or its rows
     // no longer line up with the captured ones.
-    if (i > 0 && buffer.getLine(row)?.isWrapped !== true) return false;
+    if (i > 0 && line.isWrapped !== true) return false;
     const captured = capturedRows[i];
     if (captured !== "") {
       const rowText = reflowAnchorRowText(buffer, row);
@@ -1271,10 +1324,15 @@ const reflowAnchorTruncatedCursorRowsMatch = (
       // row plus trailing null padding (`reflowAnchorRowText` keeps that
       // padding on non-final wrapped rows). Accept it only when the extra
       // characters are verifiably null cells — extra written content must
-      // still be rejected, so the string prefix alone is not enough.
+      // still be rejected, so the string prefix alone is not enough. The
+      // captured row's length is a character count, not a cell column (wide
+      // glyphs span two cells), so the padding check starts at the cell the
+      // captured prefix actually ends on.
+      const capturedEndCell = reflowAnchorPrefixCellLength(line, captured.length);
       const paddedBeyondCaptured = rowText.length > captured.length
         && rowText.startsWith(captured)
-        && reflowAnchorRowEndsInNullPadding(buffer, row, captured.length);
+        && capturedEndCell !== undefined
+        && reflowAnchorRowEndsInNullPadding(buffer, row, capturedEndCell);
       if (last
         ? !rowText.startsWith(captured) && !captured.startsWith(rowText)
         : !captured.startsWith(rowText) && !paddedBeyondCaptured

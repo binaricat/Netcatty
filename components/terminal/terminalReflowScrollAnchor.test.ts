@@ -110,6 +110,34 @@ const wideEndingRow = (text: string, isWrapped?: boolean) => ({
       : { getCode: () => 0, getWidth: () => 0 },
 });
 
+/**
+ * Row mimicking an xterm buffer line holding double-width glyphs: each glyph
+ * occupies two cells (a width-2 first cell carrying the character, plus a
+ * width-0 null continuation), followed by `nullPad` trailing null cells that
+ * render as spaces. Exercises the cell-to-character mapping the grow-padding
+ * check relies on: one glyph is one JavaScript character but two cell
+ * columns.
+ */
+const wideCharRow = (text: string, isWrapped?: boolean, nullPad = 0) => {
+  const length = text.length * 2 + nullPad;
+  return {
+    isWrapped,
+    length,
+    translateToString: () => text + " ".repeat(nullPad),
+    getCell: (x: number) => {
+      if (x >= length) return undefined;
+      if (x < text.length * 2) {
+        return {
+          getCode: () => (x % 2 === 0 ? text.codePointAt(x / 2) ?? 0 : 0),
+          getWidth: () => (x % 2 === 0 ? 2 : 0),
+          getString: () => (x % 2 === 0 ? text[x / 2] : ""),
+        };
+      }
+      return { getCode: () => 0, getWidth: () => 1, getString: () => "" };
+    },
+  };
+};
+
 /** Hard-wrap logical text into fake buffer rows of the given cell width. */
 const wrapToRows = (logicalLines: string[], cols: number): FakeRow[] => {
   const rows: FakeRow[] = [];
@@ -972,6 +1000,42 @@ test("resolve keeps the anchored line when a multi-row cursor follower is null-p
       xtermRow("ue alpha", true),
       xtermRow("ABCDEFGHIJ", false, 4),
       xtermRow("KLMNOPQRST", true, 4),
+    ][y],
+  };
+  const resolvedRow = resolveTerminalReflowScrollAnchor(after as never, anchor!);
+  assert.equal(resolvedRow, 1);
+});
+
+test("resolve keeps a wide-character cursor follower null-padded by a column grow", () => {
+  // A captured row's JavaScript length is not its cell column count: a
+  // double-width glyph is one character but two cells. The grow-padding check
+  // must start at the cell the captured prefix ends on, not at cell index
+  // `captured.length` — otherwise it inspects a glyph as padding and rejects
+  // the valid anchor, falling back to the stale row.
+  const before = fakeBuffer([
+    { text: "header" },
+    { text: "anchored unique alpha" },
+    { text: "中中中中中" },
+    { text: "甲乙丙丁戊", isWrapped: true },
+  ], { viewportY: 1, baseY: 3, cursorY: 0 });
+  const anchor = captureTerminalReflowScrollAnchor(before as never);
+  assert.ok(anchor);
+  assert.equal(anchor!.contextSuffix, "中中中中中甲乙丙丁戊");
+  assert.deepEqual(anchor!.contextRowTexts, ["中中中中中", "甲乙丙丁戊"]);
+
+  // Column grow to 14 columns: each wide-character cursor-line row keeps its
+  // content (10 cells) plus four trailing null cells.
+  const after = {
+    length: 5,
+    baseY: 4,
+    viewportY: 0,
+    cursorY: 0,
+    getLine: (y: number) => [
+      { isWrapped: false, length: 6, translateToString: () => "header" },
+      xtermRow("anchored uniq"),
+      xtermRow("ue alpha", true),
+      wideCharRow("中中中中中", false, 4),
+      wideCharRow("甲乙丙丁戊", true, 4),
     ][y],
   };
   const resolvedRow = resolveTerminalReflowScrollAnchor(after as never, anchor!);
