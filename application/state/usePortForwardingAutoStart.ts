@@ -116,6 +116,18 @@ export const shouldStartPortForwardingAutoStartRule = (
   !connection || connection.status === "inactive" || connection.status === "error"
 );
 
+/**
+ * Network-recovery counterpart of `shouldStartPortForwardingAutoStartRule`:
+ * unlike launch-time auto-start, rules that only opt in via `autoReconnect`
+ * are also restarted after network restoration.
+ */
+export const shouldRestartPortForwardingReconnectRule = (
+  rule: PortForwardingRule,
+  connection?: { status: PortForwardingRule["status"] },
+): boolean => isPortForwardingAutoReconnectEnabled(rule) && (
+  !connection || connection.status === "inactive" || connection.status === "error"
+);
+
 export const recoverPortForwardingAutoStartAfterNetworkRestore = async (
   restartAutoStartRules: (recoverableRuleIds: ReadonlySet<string>) => Promise<void>,
 ): Promise<void> => {
@@ -203,9 +215,11 @@ export const runPortForwardingAutoStart = async ({
     STORAGE_KEY_PORT_FORWARDING,
   ) ?? [];
   const autoStartRules = rules.filter((rule) =>
-    (!recoveryRuleIds || recoveryRuleIds.has(rule.id)) &&
-    (!recoveryRuleIds || isReconnectRecoveryEligible(rule.id)) &&
-    shouldStartPortForwardingAutoStartRule(rule, getActiveConnection(rule.id)),
+    recoveryRuleIds
+      ? recoveryRuleIds.has(rule.id) &&
+        isReconnectRecoveryEligible(rule.id) &&
+        shouldRestartPortForwardingReconnectRule(rule, getActiveConnection(rule.id))
+      : shouldStartPortForwardingAutoStartRule(rule, getActiveConnection(rule.id)),
   );
 
   if (autoStartRules.length === 0) return;

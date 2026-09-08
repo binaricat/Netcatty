@@ -327,6 +327,7 @@ const TOOL_INPUT_FIELDS = Object.freeze({
     remotePort: { type: "number", optional: true, description: "Required except for dynamic forwarding." },
     hostId: { type: "string", description: "Vault host ID used for the tunnel." },
     autoStart: { type: "string", optional: true, description: "true or false." },
+    autoReconnect: { type: "string", optional: true, description: "true or false. Reconnect automatically after unexpected disconnects." },
   },
   "portforward.rules.update": {
     ruleId: { type: "string", description: "Port forwarding rule ID." },
@@ -338,6 +339,7 @@ const TOOL_INPUT_FIELDS = Object.freeze({
     remotePort: { type: "number", optional: true, description: "Remote port." },
     hostId: { type: "string", optional: true, description: "Vault host ID used for the tunnel." },
     autoStart: { type: "string", optional: true, description: "true or false." },
+    autoReconnect: { type: "string", optional: true, description: "true or false. Reconnect automatically after unexpected disconnects." },
   },
   "portforward.rules.duplicate": {
     ruleId: { type: "string", description: "Port forwarding rule ID to copy." },

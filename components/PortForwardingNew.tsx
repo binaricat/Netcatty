@@ -517,6 +517,7 @@ const PortForwarding: React.FC<PortForwardingProps> = ({
       remoteHost: newFormDraft.remoteHost,
       remotePort: newFormDraft.remotePort,
       hostId: newFormDraft.hostId,
+      autoReconnect: newFormDraft.autoReconnect ?? false,
     });
 
     setShowNewForm(false);

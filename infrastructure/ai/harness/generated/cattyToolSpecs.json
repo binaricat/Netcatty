@@ -1993,6 +1993,11 @@
         "type": "string",
         "optional": true,
         "description": "true or false."
+      },
+      "autoReconnect": {
+        "type": "string",
+        "optional": true,
+        "description": "true or false. Reconnect automatically after unexpected disconnects."
       }
     },
     "policy": {
@@ -2056,6 +2061,11 @@
         "type": "string",
         "optional": true,
         "description": "true or false."
+      },
+      "autoReconnect": {
+        "type": "string",
+        "optional": true,
+        "description": "true or false. Reconnect automatically after unexpected disconnects."
       }
     },
     "policy": {
