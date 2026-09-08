@@ -886,6 +886,8 @@ export const zhCNTerminalMessages: Messages = {
   'serial.field.lineModeDesc': '缓冲输入，按回车后发送（而不是逐字符发送）',
   'serial.field.backspaceBehavior': '回退键',
   'serial.field.backspaceBehaviorDesc': '如果网络设备不响应默认回退键，请改用 Ctrl+H。',
+  'serial.field.byteOrientedBackspace': '按字节退格',
+  'serial.field.byteOrientedBackspaceDesc': '发送与字符字节数相同的 DEL，使设备删除整个多字节字符（适用于按字节删除的设备）。若为逐字符删除的行编辑器（如 Linux readline），请关闭。',
   'serial.backspace.default': '默认（DEL，0x7F）',
   'serial.backspace.ctrlH': 'Ctrl+H（BS，0x08）',
   'serial.field.charset': '字符编码',

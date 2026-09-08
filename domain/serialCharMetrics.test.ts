@@ -196,6 +196,53 @@ test("getLastChar and removeLastChar handle empty string", () => {
   assert.equal(removeLastChar(""), "");
 });
 
+test("getLastChar returns whole decomposed grapheme (base + combining mark)", () => {
+  // e + U+0301 (combining acute) renders as one visible é.
+  const decomposed = "e\u0301";
+  assert.equal(getLastChar("a" + decomposed), decomposed);
+  assert.equal(getLastChar(decomposed), decomposed);
+});
+
+test("removeLastChar removes whole decomposed grapheme (base + combining mark)", () => {
+  const decomposed = "e\u0301";
+  assert.equal(removeLastChar("a" + decomposed), "a");
+  assert.equal(removeLastChar(decomposed), "");
+});
+
+test("getLastChar returns whole ZWJ emoji sequence", () => {
+  // Man + ZWJ + Woman renders as one grapheme.
+  const zwj = "\u{1F468}\u200D\u{1F469}";
+  assert.equal(getLastChar("hi" + zwj), zwj);
+});
+
+test("removeLastChar removes whole ZWJ emoji sequence", () => {
+  const zwj = "\u{1F468}\u200D\u{1F469}";
+  assert.equal(removeLastChar("hi" + zwj), "hi");
+  assert.equal(removeLastChar(zwj), "");
+});
+
+test("getLastChar returns whole variation-selector sequence", () => {
+  // Heart + VS16 (U+FE0F) renders as one emoji grapheme.
+  const heart = "\u2764\uFE0F";
+  assert.equal(getLastChar("a" + heart), heart);
+});
+
+test("removeLastChar removes whole variation-selector sequence", () => {
+  const heart = "\u2764\uFE0F";
+  assert.equal(removeLastChar("a" + heart), "a");
+  assert.equal(removeLastChar(heart), "");
+});
+
+test("getCharByteLength counts whole decomposed grapheme bytes in UTF-8", () => {
+  // e (1 byte) + combining acute (2 bytes) = 3 bytes on the wire.
+  assert.equal(getCharByteLength("e\u0301", "utf-8"), 3);
+});
+
+test("getCharDisplayWidth returns 1 for decomposed grapheme", () => {
+  // Base 'e' is 1 cell; combining mark contributes 0 cells.
+  assert.equal(getCharDisplayWidth("e\u0301"), 1);
+});
+
 /* ------------------------------------------------------------------ */
 /* isPrintableInput                                                      */
 /* ------------------------------------------------------------------ */

@@ -1176,13 +1176,6 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         ctx.terminalBackend,
       );
 
-      // Shared variables for character-mode backspace expansion.
-      // Declared outside the if/else so the broadcast section (after the
-      // block) can access them when the character-mode branch expanded
-      // a multi-byte serial backspace.
-      let outData = mapTerminalBackspaceInput(dataToWrite, ctx.host.backspaceBehavior);
-      let isExpanded = false;
-
       // Serial line mode: buffer input and send on Enter
       if (
         inputSource !== "kitty" &&
@@ -1210,17 +1203,23 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         // wider than one byte, send as many backspace bytes as the character
         // occupies on the wire so the device deletes the whole character.
         //
+        // Gated on serialConfig.byteOrientedBackspace (default true): some
+        // serial endpoints are character-aware (e.g. a UTF-8 Linux console
+        // with readline) where one DEL already deletes a whole character,
+        // and repeating it would over-delete preceding characters.
+        //
         // The expansion is only safe when the cursor is at the end of the
         // typed buffer.  `lastInputWasPrintable` guards against expanding
         // after cursor-movement escape sequences (e.g. arrow keys) that
         // leave the cursor before the buffer tail.
         const isBackspace = dataToWrite === "\x7f" || dataToWrite === "\b";
-        outData = mapTerminalBackspaceInput(dataToWrite, ctx.host.backspaceBehavior);
+        let outData = mapTerminalBackspaceInput(dataToWrite, ctx.host.backspaceBehavior);
         let backspaceCells = 1;
 
         if (
           isBackspace &&
           ctx.host.protocol === "serial" &&
+          (ctx.host.serialConfig?.byteOrientedBackspace ?? true) &&
           ctx.commandBufferRef &&
           ctx.commandBufferRef.current.length > 0 &&
           lastInputWasPrintable
@@ -1231,7 +1230,6 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
           if (bytes > 1) {
             outData = outData.repeat(bytes);
             backspaceCells = backspaceCellsForChar(lastChar);
-            isExpanded = true;
           }
         }
 

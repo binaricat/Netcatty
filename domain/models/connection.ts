@@ -127,6 +127,12 @@ export interface SerialConfig {
   lineMode?: boolean; // Line mode - buffer input and send on Enter (default: false)
   // Store the default explicitly so an open/restored session keeps its launch-time behavior.
   backspaceBehavior?: 'default' | 'ctrl-h';
+  // Byte-oriented backspace: when true (default), a Backspace deletes the
+  // whole multi-byte character by sending one DEL per wire byte (correct for
+  // MCUs/routers that remove bytes).  Set to false for character-aware line
+  // editors (e.g. a Linux console with readline) where one DEL already
+  // removes a whole character and repeating it would over-delete.
+  byteOrientedBackspace?: boolean;
 }
 
 // Per-protocol configuration

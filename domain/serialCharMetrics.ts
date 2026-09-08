@@ -11,8 +11,10 @@
  *     whole character, not just the trailing byte;
  *  2. generate a local-echo erase sequence that matches the glyph's cell
  *     width (a CJK ideograph occupies 2 cells, not 1);
- *  3. safely remove the last complete Unicode code point (handling UTF-16
- *     surrogate pairs for supplementary characters like emoji and CJK Ext B).
+ *  3. safely remove the last complete grapheme from a line buffer
+ *     (handling UTF-16 surrogate pairs for supplementary characters,
+ *     combining marks for decomposed accents, variation selectors, and
+ *     ZWJ sequences).
  */
 
 /* ------------------------------------------------------------------ */
@@ -154,39 +156,54 @@ function utf8ByteLength(cp: number): number {
 }
 
 /* ------------------------------------------------------------------ */
-/* Surrogate-pair-safe string slicing                                  */
+/* Grapheme-safe string slicing                                        */
 /* ------------------------------------------------------------------ */
 
 /**
- * Returns the last complete Unicode code point (or grapheme) of `str`.
+ * Shared grapheme segmenter for whole-grapheme slicing.
  *
- * For a supplementary-plane character (code point > 0xFFFF) stored as a
- * UTF-16 surrogate pair, `slice(-1)` would return only the low surrogate.
- * This function returns the full 2-code-unit string.
+ * Serial terminal backspace operates on whole rendered characters.  A
+ * decomposed `e\u0301` (base + combining acute) is one visible character,
+ * so the command buffer must remove it as one unit — not just the combining
+ * mark.  `Intl.Segmenter` with grapheme granularity handles surrogate pairs
+ * (emoji, CJK Ext B), combining marks, variation selectors, and ZWJ
+ * sequences.  Grapheme boundaries are locale-independent.
+ */
+let graphemeSegmenter: Intl.Segmenter | undefined;
+
+function getGraphemeSegmenter(): Intl.Segmenter {
+  graphemeSegmenter ??= new Intl.Segmenter(undefined, { granularity: "grapheme" });
+  return graphemeSegmenter;
+}
+
+/**
+ * Returns the last complete grapheme of `str`.
+ *
+ * Unlike `slice(-1)` — which returns a lone low surrogate for a
+ * supplementary-plane character (e.g. emoji, CJK Extension B) or only a
+ * combining mark for a decomposed grapheme — this returns the whole
+ * rendered character.
  *
  * Returns an empty string for an empty input.
  */
 export function getLastChar(str: string): string {
   if (!str) return "";
-  const last = str[str.length - 1];
-  const code = last.charCodeAt(0);
-  // Low surrogate (U+DC00–U+DFFF) — include the preceding high surrogate.
-  if (code >= 0xdc00 && code <= 0xdfff) {
-    return str.slice(-2);
-  }
-  return last;
+  const segments = Array.from(getGraphemeSegmenter().segment(str));
+  const last = segments[segments.length - 1];
+  return last ? last.segment : "";
 }
 
 /**
- * Returns `str` with the last complete Unicode code point removed.
+ * Returns `str` with the last complete grapheme removed.
  *
- * Unlike `slice(0, -1)` this correctly removes a full surrogate pair,
- * not just the low surrogate unit.
+ * Unlike `slice(0, -1)` this correctly removes a full surrogate pair, a
+ * combining sequence, or a ZWJ sequence — not just the trailing code unit.
  */
 export function removeLastChar(str: string): string {
   if (!str) return "";
-  const last = getLastChar(str);
-  return str.slice(0, str.length - last.length);
+  const segments = Array.from(getGraphemeSegmenter().segment(str));
+  const last = segments[segments.length - 1];
+  return last ? str.slice(0, last.index) : "";
 }
 
 /* ------------------------------------------------------------------ */

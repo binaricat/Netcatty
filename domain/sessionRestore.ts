@@ -119,6 +119,11 @@ const sanitizeSerialConfig = (value: unknown): SerialConfig | undefined => {
     ...(isOneOf(value.backspaceBehavior, ["default", "ctrl-h"] as const)
       ? { backspaceBehavior: value.backspaceBehavior }
       : {}),
+    // Missing value = legacy session saved before byte-oriented backspace
+    // existed; the runtime defaults to enabled (byte-oriented deletion).
+    ...(readBoolean(value, "byteOrientedBackspace") !== undefined
+      ? { byteOrientedBackspace: readBoolean(value, "byteOrientedBackspace") }
+      : {}),
   };
 };
 

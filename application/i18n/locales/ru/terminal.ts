@@ -800,6 +800,8 @@ export const ruTerminalMessages: Messages = {
   'serial.field.lineModeDesc': 'Буферизовать ввод и отправлять по Enter (вместо посимвольной отправки)',
   'serial.field.backspaceBehavior': 'Клавиша Backspace',
   'serial.field.backspaceBehaviorDesc': 'Используйте Ctrl+H для сетевых устройств, которые не реагируют на код Backspace по умолчанию.',
+  'serial.field.byteOrientedBackspace': 'Побайтовый Backspace',
+  'serial.field.byteOrientedBackspaceDesc': 'Отправляет по одному DEL на байт, чтобы устройство удалило весь многобайтовый символ (для устройств, удаляющих побайтово). Отключите для редакторов, удаляющих посимвольно (например, readline в Linux).',
   'serial.backspace.default': 'По умолчанию (DEL, 0x7F)',
   'serial.backspace.ctrlH': 'Ctrl+H (BS, 0x08)',
   'serial.field.charset': 'Кодировка',
