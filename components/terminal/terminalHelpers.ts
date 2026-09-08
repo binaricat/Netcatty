@@ -735,6 +735,22 @@ const REFLOW_ANCHOR_LINE_LENGTH_CHARS = 262_144;
 // anchor is dropped (or its follower identity is dropped) and the fit falls
 // back to the next-best restore.
 const REFLOW_ANCHOR_MAX_LINE_ROWS = 2048;
+// Cap on how far back the resolve-side walk from a surviving viewport-row
+// marker to its containing logical line's start may go. The capture-side walk
+// (`REFLOW_ANCHOR_MAX_LINE_ROWS`) bounds the pre-resize distance, but a column
+// shrink rewraps that same prefix into up to `oldCols / newCols` times as many
+// rows, so after a large shrink the marker can legitimately sit much deeper
+// into the reflowed line than it did at capture. The bound leaves headroom for
+// an 8x shrink (the marker row is then at most 8 * REFLOW_ANCHOR_MAX_LINE_ROWS
+// rows from the line's start) while keeping the per-frame walk strictly
+// bounded instead of traversing the whole supported scrollback. Beyond the
+// bound the containing line is treated as unresolved: the seeded scan is
+// skipped (an unconstrained scan from the marker would re-walk every
+// continuation row it just declined to visit, and could jump into a duplicate
+// line closer to the marker) and the resolver falls back to the stale-row
+// scan, the same degradation it already uses when the seeded line no longer
+// matches.
+const REFLOW_ANCHOR_MARKER_LINE_WALK_ROWS = 16_384;
 // Cap on how far the context lookup may scan a run of blank logical lines
 // after the anchor before giving up. The bound counts only the blank rows
 // between the anchored line's first follower and the context line: the
@@ -761,9 +777,24 @@ const REFLOW_ANCHOR_CONTEXT_SCAN_ROWS = 1024;
 // whose length could have been measured anyway.
 const REFLOW_ANCHOR_MAX_LINE_CHARS = 262_144;
 
-const reflowAnchorLogicalLineStart = (buffer: ReflowAnchorBuffer, row: number): number => {
+/**
+ * Start row of the logical line containing `row`, or undefined when that walk
+ * exceeds `maxRows` physical rows. Bounded: after a large column shrink a
+ * surviving marker can sit tens of thousands of rows into the reflowed line,
+ * and this walk runs on every resolve — the bound keeps it from stepping
+ * through nearly the whole scrollback per divider-drag frame (see
+ * `REFLOW_ANCHOR_MARKER_LINE_WALK_ROWS`).
+ */
+const reflowAnchorLogicalLineStart = (
+  buffer: ReflowAnchorBuffer,
+  row: number,
+  maxRows: number,
+): number | undefined => {
   let start = Math.max(0, Math.min(row, buffer.length - 1));
-  while (start > 0 && buffer.getLine(start)?.isWrapped) start--;
+  while (start > 0 && buffer.getLine(start)?.isWrapped) {
+    if (row - start >= maxRows) return undefined;
+    start--;
+  }
   return start;
 };
 
@@ -1539,15 +1570,26 @@ export function resolveTerminalReflowScrollAnchor(
   // then jump into the duplicate even though the fallback from the stale
   // `anchor.startRow` selects the original. Constrain the seeded scan to the
   // marker's containing line, falling through to the stale-row scan when
-  // that line no longer matches. The marker row may also numerically equal
+  // that line no longer matches — or when the walk back to its start exceeds
+  // `REFLOW_ANCHOR_MARKER_LINE_WALK_ROWS` (a large column shrink can push the
+  // marker that deep into the reflowed line): skipping the seeded path avoids
+  // re-walking the same continuation rows in an unconstrained scan that could
+  // jump into a duplicate. The marker row may also numerically equal
   // the stale `anchor.startRow` — when the rewrap above the anchor removed
   // exactly as many wrapped rows as the viewport spans — while still sitting
   // inside the relocated line, so the seeded path must run for equal rows
   // too whenever a containing line was resolved.
   const seededLine = seedRow !== null && trackContinuation
-    ? reflowAnchorLogicalLineStart(buffer, seedRow)
+    ? reflowAnchorLogicalLineStart(buffer, seedRow, REFLOW_ANCHOR_MARKER_LINE_WALK_ROWS)
     : undefined;
-  if (seedRow !== null && (seedRow !== anchor.startRow || seededLine !== undefined)) {
+  if (
+    seedRow !== null
+    && (seededLine !== undefined
+      // No continuation tracking means no containing-line walk ran, so the
+      // pre-bound behavior — an unconstrained scan seeded from a marker that
+      // differs from the stale row — is kept as-is.
+      || (!trackContinuation && seedRow !== anchor.startRow))
+  ) {
     const seeded = resolveFrom(seedRow, seededLine);
     if (seeded !== null) {
       // A column change never rewraps the cursor's own logical line (the

@@ -599,6 +599,36 @@ test("resolve uses a surviving viewed-row marker hint after a mid-line trim", ()
   assert.equal(resolvedRow, 2);
 });
 
+test("resolve bounds the marker-to-line-start walk on an over-deep continuation marker", () => {
+  // A large column shrink rewraps the captured prefix into far more rows than
+  // the capture-side bound allowed, so the surviving marker can sit beyond
+  // REFLOW_ANCHOR_MARKER_LINE_WALK_ROWS rows into the reflowed line. The walk
+  // back to the containing line's start must give up at the bound instead of
+  // stepping through nearly the whole scrollback, and the resolver must still
+  // re-locate the viewed characters through the stale-row scan fallback.
+  const cols = 8;
+  const markerRow = 17_000; // deeper than the 16,384-row walk bound
+  const line = "target unique alpha" + "A".repeat(markerRow * cols);
+  const rows = wrapToRows([line, "follower unique beta"], cols);
+  const anchor = {
+    startRow: 0,
+    // The viewed characters start exactly where row `markerRow` starts: each
+    // physical row holds `cols` characters from the line's head.
+    charOffset: markerRow * cols,
+    textPrefix: line.slice(0, 256),
+    contextSuffix: "follower unique beta",
+    viewedText: "A".repeat(64),
+  };
+  const resolvedRow = resolveTerminalReflowScrollAnchor(
+    fakeBuffer(rows, { viewportY: 0 }) as never,
+    anchor as never,
+    markerRow,
+  );
+  // The stale-row scan matches the line at its start (row 0) and the offset
+  // pass maps the captured characters back to the marker's row.
+  assert.equal(resolvedRow, markerRow);
+});
+
 test("resolve keeps the surviving marker when the truncated cursor line is the anchor", () => {
   // The viewport starts partway into the cursor's own long wrapped line.
   // Narrowing with the pinned `reflowCursorLine: false` default does not
