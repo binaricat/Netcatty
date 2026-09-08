@@ -349,6 +349,8 @@ export type CreateXTermRuntimeContext = {
   // Serial-specific options
   serialLocalEcho?: boolean;
   serialLineMode?: boolean;
+  /** Byte-oriented backspace from session snapshot (default true). */
+  serialByteOrientedBackspace?: boolean;
   serialLineBufferRef?: RefObject<string>;
   /** Current effective session encoding (updated when user changes toolbar encoding). */
   currentEncodingRef?: RefObject<string>;
@@ -1233,7 +1235,10 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
           backspaceCells = stringCellWidth(lastChar, term);
 
           // Only expand wire bytes when byte-oriented mode is enabled.
-          if (ctx.host.serialConfig?.byteOrientedBackspace ?? true) {
+          // Reads from the session snapshot (not the live host) so a
+          // restored or hibernated session keeps its configured behavior
+          // even if the vault host was edited after the session started.
+          if (ctx.serialByteOrientedBackspace ?? true) {
             const effectiveEncoding = ctx.currentEncodingRef?.current ?? ctx.host.charset;
             const bytes = getCharByteLength(lastChar, effectiveEncoding);
             if (bytes > 1) {
