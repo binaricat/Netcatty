@@ -715,8 +715,12 @@ const REFLOW_ANCHOR_LINE_LENGTH_CHARS = 262_144;
 // back to the next-best restore.
 const REFLOW_ANCHOR_MAX_LINE_ROWS = 2048;
 // Cap on how far the context lookup may scan a run of blank logical lines
-// after the anchor before giving up. A blank logical line is a single empty
-// row at every width, so the run keeps its row count across rewrap: capture
+// after the anchor before giving up. The bound counts only the blank rows
+// between the anchored line's first follower and the context line: the
+// anchored line's own continuation row count changes with rewrap, so
+// including it would let the column change alone flip whether a captured
+// context stays reachable. A blank logical line is a single empty row at
+// every width, so the counted run keeps its row count across rewrap: capture
 // and resolve therefore truncate at the same line and either both find the
 // same non-blank context line or both report none — the bound cannot make
 // the two sides disagree.
@@ -887,20 +891,28 @@ const reflowAnchorNextNonBlankLogicalLineStart = (
 ): number | null => {
   // Bounded (REFLOW_ANCHOR_CONTEXT_SCAN_ROWS) so a long run of blank lines
   // after the anchor cannot turn every column-changing fit into an O(run)
-  // scan; capture and resolve truncate identically, so the bound preserves
-  // the two sides' agreement (see the constant's comment).
-  const scanStart = row + 1;
-  let next = reflowAnchorNextLogicalLineStart(buffer, row, REFLOW_ANCHOR_MAX_LINE_ROWS);
+  // scan. The bound counts only the blank rows between the anchored line's
+  // first follower and the context line: the anchored line's own continuation
+  // rows also lie between the anchor and that follower, and their count
+  // changes with the pending rewrap, so measuring from the anchor row would
+  // let the column change alone flip whether a captured context stays
+  // reachable (the anchored line growing past the bound on one side of the
+  // resize would drop the context there and reject the surviving anchor even
+  // with no intervening blanks). Blank logical lines are single empty rows at
+  // every width, so measuring from the first follower keeps capture and
+  // resolve truncating at the same line (see the constant's comment).
+  const first = reflowAnchorNextLogicalLineStart(buffer, row, REFLOW_ANCHOR_MAX_LINE_ROWS);
+  if (first === null) return null;
+  let next = first;
   while (
-    next !== null
-    && next - scanStart <= REFLOW_ANCHOR_CONTEXT_SCAN_ROWS
+    next - first <= REFLOW_ANCHOR_CONTEXT_SCAN_ROWS
     && reflowAnchorJoinTextPrefix(buffer, next, 1) === ""
   ) {
-    next = reflowAnchorNextLogicalLineStart(buffer, next, REFLOW_ANCHOR_MAX_LINE_ROWS);
+    const following = reflowAnchorNextLogicalLineStart(buffer, next, REFLOW_ANCHOR_MAX_LINE_ROWS);
+    if (following === null) return null;
+    next = following;
   }
-  return next !== null && next - scanStart <= REFLOW_ANCHOR_CONTEXT_SCAN_ROWS
-    ? next
-    : null;
+  return next - first <= REFLOW_ANCHOR_CONTEXT_SCAN_ROWS ? next : null;
 };
 
 /**
@@ -1107,7 +1119,11 @@ const reflowAnchorCandidateMatches = (
  *
  * Only row 0 can be partially trimmed (trim removes from the buffer top), so
  * any other row — and any anchor without a captured line length, such as
- * hand-built test anchors — keeps the plain offset.
+ * hand-built test anchors — keeps the plain offset. The row-0 line being the
+ * cursor's own logical line is the other exception: a narrowing resize
+ * truncates that line's rows instead of trimming its start, so the length
+ * loss is not a leading trim and the derivation declines (see the guard
+ * below).
  */
 const reflowAnchorTrimAdjustedCharOffset = (
   buffer: ReflowAnchorBuffer,
@@ -1130,6 +1146,16 @@ const reflowAnchorTrimAdjustedCharOffset = (
   );
   if (survivingLength >= REFLOW_ANCHOR_LINE_LENGTH_CHARS) return anchor.charOffset;
   const trimChars = Math.max(0, lineLength - survivingLength);
+  // A narrowing resize with the pinned `reflowCursorLine: false` default does
+  // not rewrap the cursor's logical line: it truncates the right side of every
+  // physical row instead. That length loss removes characters from within the
+  // line, not from its start, so treating it as a leading trim would shift the
+  // offset to an earlier, wrong position — which repetitive content then
+  // validates. The line's physical rows keep their indices, so decline the
+  // derivation and let the caller fall back to the surviving viewport-row
+  // marker (or the unchanged saved index), both of which still point at the
+  // viewed row.
+  if (trimChars > 0 && reflowAnchorContextIsCursorLine(buffer, row)) return -1;
   const target = anchor.charOffset - trimChars;
   if (target < 0) return -1;
   const viewedText = typeof anchor.viewedText === "string" ? anchor.viewedText : "";
