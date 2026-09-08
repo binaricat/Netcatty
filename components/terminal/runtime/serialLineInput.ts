@@ -1,3 +1,5 @@
+import { getCharDisplayWidth } from '../../../domain/serialCharMetrics';
+
 type StringRef = {
   current: string;
 };
@@ -52,8 +54,10 @@ export function handleSerialLineModeInput(
 
   if (data === "\x7f" || data === "\b") {
     if (options.bufferRef.current.length > 0) {
+      const lastChar = options.bufferRef.current.slice(-1);
+      const cells = getCharDisplayWidth(lastChar);
       options.bufferRef.current = options.bufferRef.current.slice(0, -1);
-      if (options.localEcho) options.writeToTerminal("\b \b");
+      if (options.localEcho) options.writeToTerminal("\b \b".repeat(cells));
     }
     return;
   }

@@ -111,7 +111,8 @@ import {
   shouldCommitDeferredImeTextInput,
   shouldDeferKeyDownForImeTextInput,
 } from "./terminalImeTextInput";
-import { formatSerialLocalEcho } from "./serialLocalEcho";
+import { formatSerialLocalEcho, backspaceCellsForChar } from "./serialLocalEcho";
+import { getCharByteLength } from "../../../domain/serialCharMetrics";
 import { mapTerminalBackspaceInput } from "./terminalBackspaceInput";
 import { sanitizeTerminalInput } from "./terminalInputSanitize";
 import { formatTelnetLocalEcho } from "./telnetLocalEcho";
@@ -1176,14 +1177,36 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         });
       } else {
         // Character mode (default): send immediately
-        // When backspaceBehavior is configured, remap the Backspace key output
-        const outData = mapTerminalBackspaceInput(dataToWrite, ctx.host.backspaceBehavior);
+        // When backspaceBehavior is configured, remap the Backspace key output.
+        //
+        // Serial devices process backspace at the byte level: one 0x7F removes
+        // one byte from the input buffer.  For a multi-byte CJK character a
+        // single backspace leaves orphan bytes that render as hidden or
+        // garbled characters.  When the command-buffer's last character is
+        // wider than one byte, send as many backspace bytes as the character
+        // occupies on the wire so the device deletes the whole character.
+        const isBackspace = dataToWrite === "\x7f" || dataToWrite === "\b";
+        let outData = mapTerminalBackspaceInput(dataToWrite, ctx.host.backspaceBehavior);
+        let backspaceCells = 1;
+
+        if (
+          isBackspace &&
+          ctx.host.protocol === "serial" &&
+          ctx.commandBufferRef &&
+          ctx.commandBufferRef.current.length > 0
+        ) {
+          const lastChar = ctx.commandBufferRef.current.slice(-1);
+          const bytes = getCharByteLength(lastChar, ctx.host.charset);
+          outData = outData.repeat(bytes);
+          backspaceCells = backspaceCellsForChar(lastChar);
+        }
+
         ctx.onOutputTriggerUserInputRef?.current?.(outData);
         ctx.terminalBackend.writeToSession(id, outData, { sensitive });
 
         // Local echo for serial connections only when explicitly enabled
         if (inputSource !== "kitty" && ctx.host.protocol === "serial" && ctx.serialLocalEcho) {
-          const localEcho = formatSerialLocalEcho(dataToWrite);
+          const localEcho = formatSerialLocalEcho(dataToWrite, isBackspace ? backspaceCells : undefined);
           if (localEcho) writeLocalTerminalData(localEcho);
         }
         if (inputSource !== "kitty" && ctx.host.protocol === "telnet" && ctx.telnetLocalEchoRef?.current) {

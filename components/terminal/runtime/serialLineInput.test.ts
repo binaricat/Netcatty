@@ -35,3 +35,63 @@ test("serial line mode sends every completed line when pasted text ends with ent
   assert.equal(bufferRef.current, "");
   assert.deepEqual(echoes, ["show version", "\r\n", "show clock", "\r\n"]);
 });
+
+test("serial line mode backspace erases one cell for ASCII characters", () => {
+  const echoes: string[] = [];
+  const bufferRef = { current: "abc" };
+
+  handleSerialLineModeInput("\x7f", {
+    bufferRef,
+    localEcho: true,
+    writeToSession: () => {},
+    writeToTerminal: (data) => echoes.push(data),
+  });
+
+  assert.equal(bufferRef.current, "ab");
+  assert.deepEqual(echoes, ["\b \b"]); // 1 cell erased
+});
+
+test("serial line mode backspace erases two cells for CJK characters", () => {
+  const echoes: string[] = [];
+  const bufferRef = { current: "你好" };
+
+  handleSerialLineModeInput("\x7f", {
+    bufferRef,
+    localEcho: true,
+    writeToSession: () => {},
+    writeToTerminal: (data) => echoes.push(data),
+  });
+
+  assert.equal(bufferRef.current, "你");
+  assert.deepEqual(echoes, ["\b \b\b \b"]); // 2 cells erased
+});
+
+test("serial line mode backspace erases two cells for fullwidth characters", () => {
+  const echoes: string[] = [];
+  const bufferRef = { current: "test！" };
+
+  handleSerialLineModeInput("\b", {
+    bufferRef,
+    localEcho: true,
+    writeToSession: () => {},
+    writeToTerminal: (data) => echoes.push(data),
+  });
+
+  assert.equal(bufferRef.current, "test");
+  assert.deepEqual(echoes, ["\b \b\b \b"]); // 2 cells erased
+});
+
+test("serial line mode backspace on empty buffer does nothing", () => {
+  const echoes: string[] = [];
+  const bufferRef = { current: "" };
+
+  handleSerialLineModeInput("\x7f", {
+    bufferRef,
+    localEcho: true,
+    writeToSession: () => {},
+    writeToTerminal: (data) => echoes.push(data),
+  });
+
+  assert.equal(bufferRef.current, "");
+  assert.deepEqual(echoes, []);
+});
