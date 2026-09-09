@@ -1038,15 +1038,25 @@ export function AppSideEffects() {
         const closed = await handleRequestCloseEditorTabRef.current(fromEditorTabId(tabId));
         if (!closed) cancelledEditorIds.add(tabId);
       }
-      // A cancelled editor must keep its owning tab open too, or the owner's
-      // unmount cleanup would force-close the very editor the user chose to
-      // keep. Editor tabs record the SFTP connection id (not the terminal
-      // session id), so resolve the owning top-level tab via the panel
-      // registry instead of comparing against session ids. A browse reconnect
-      // regenerates connection ids while the editor still references the old
-      // one, so also resolve by the editor's stable pane tab id.
+      // Any editor that survives this batch close must keep its owning tab
+      // open — not only ones whose dirty-save prompt was cancelled. When the
+      // order is [owner terminal, anchor, owned editor], "Close Tabs to the
+      // Left" on the anchor targets only the owner; closing it would unmount
+      // its SftpSidePanel, whose cleanup force-closes the surviving editor
+      // (dropping dirty state) even though that editor was outside the
+      // requested range. Editor tabs record the SFTP connection id (not the
+      // terminal session id), so resolve the owning top-level tab via the
+      // panel registry instead of comparing against session ids. A browse
+      // reconnect regenerates connection ids while the editor still
+      // references the old one, so also resolve by the editor's stable pane
+      // tab id.
       const keepTabIds = new Set<string>();
-      for (const tabId of cancelledEditorIds) {
+      const survivingEditorIds = new Set<string>();
+      for (const editorTab of editorTabStore.getTabs()) {
+        const topId = toEditorTabId(editorTab.id);
+        if (!closingTabIds.has(topId) || cancelledEditorIds.has(topId)) survivingEditorIds.add(topId);
+      }
+      for (const tabId of survivingEditorIds) {
         const editorTab = editorTabStore.getTab(fromEditorTabId(tabId));
         const ownerTabId = findEditorSftpOwnerTabId(editorTab?.sessionId, editorTab?.sftpTabId);
         if (ownerTabId) keepTabIds.add(ownerTabId);
