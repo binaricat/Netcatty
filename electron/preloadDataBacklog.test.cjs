@@ -1782,19 +1782,46 @@ test("real PTY multiline prompt is displayed only after the AI command", {
 });
 
 test("OpenWrt bounded wrapper continuations stay hidden across fragmented echoes", () => {
+  for (const prompt of ['> ', 'CONT> ']) {
+    const { buildWrappedCommand } = require('./bridges/ai/ptyExecHelpers.cjs');
+    const preload = loadPreloadWithFakeElectron();
+    try {
+      const received = [];
+      const sessionId = 'openwrt-echo';
+      const marker = '__NCMCP_mttikd5b_ccbc892e865a115a80c88afdc77b96a6__';
+      preload.api.onSessionData(sessionId, chunk => received.push(chunk));
+      const wrapped = buildWrappedCommand("printf 'visible-output\\n'", 'posix', marker);
+      const echo = wrapped.trimEnd().split('\n').map((line, index) => `${index ? prompt : ''}${line}\r\n`).join('');
+      const data = `${echo}${marker}_S\r\nvisible-output\r\n${marker}_E:0\r\n`;
+      for (let offset = 0; offset < data.length; offset += 7) {
+        preload.handlers.get('netcatty:data')({}, { sessionId, data: data.slice(offset, offset + 7) });
+      }
+      assert.equal(received.join(''), 'visible-output\r\n');
+    } finally {
+      preload.cleanup();
+    }
+  }
+});
+
+test("a standalone customized PS2 continuation prompt is held until its marker line arrives", () => {
   const { buildWrappedCommand } = require('./bridges/ai/ptyExecHelpers.cjs');
   const preload = loadPreloadWithFakeElectron();
   try {
     const received = [];
-    const sessionId = 'openwrt-echo';
+    const sessionId = 'custom-ps2-echo';
     const marker = '__NCMCP_mttikd5b_ccbc892e865a115a80c88afdc77b96a6__';
     preload.api.onSessionData(sessionId, chunk => received.push(chunk));
     const wrapped = buildWrappedCommand("printf 'visible-output\\n'", 'posix', marker);
-    const echo = wrapped.trimEnd().split('\n').map((line, index) => `${index ? '> ' : ''}${line}\r\n`).join('');
-    const data = `${echo}${marker}_S\r\nvisible-output\r\n${marker}_E:0\r\n`;
-    for (let offset = 0; offset < data.length; offset += 7) {
-      preload.handlers.get('netcatty:data')({}, { sessionId, data: data.slice(offset, offset + 7) });
+    const lines = wrapped.trimEnd().split('\n');
+    // The shell prints its continuation prompt (arbitrary PS2 text) as its
+    // own PTY fragment after each echoed newline, before the next
+    // marker-bearing line content arrives.
+    preload.handlers.get('netcatty:data')({}, { sessionId, data: `${lines[0]}\r\n` });
+    for (let index = 1; index < lines.length; index += 1) {
+      preload.handlers.get('netcatty:data')({}, { sessionId, data: 'CONT> ' });
+      preload.handlers.get('netcatty:data')({}, { sessionId, data: `${lines[index]}\r\n` });
     }
+    preload.handlers.get('netcatty:data')({}, { sessionId, data: `${marker}_S\r\nvisible-output\r\n${marker}_E:0\r\n` });
     assert.equal(received.join(''), 'visible-output\r\n');
   } finally {
     preload.cleanup();

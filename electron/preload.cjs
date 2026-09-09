@@ -97,7 +97,14 @@ const _mcpFlushTimers = new Map(); // sessionId -> delayed-flush timer
 const _mcpDroppingWrappedLine = new Set(); // sessionIds with a split marker echo line in progress
 const _mcpProbePrompts = new Map(); // sessionId -> probe marker awaiting its command
 const _mcpAbortedProbes = new Map(); // sessionId -> bounded set of cancelled probe markers
+const _mcpAtLineStart = new Set(); // sessionIds whose stream currently sits at a line start (or holds a line that began at one)
 const MAX_MCP_BUFFERED_LINE_CHARS = 64 * 1024;
+// A customized PS2 continuation prompt of arbitrary text precedes every
+// marker-bearing no-op line of the AI wrapper echo, so the prompt itself
+// cannot be pattern-matched. Bound the fragment hold well below the
+// oversized-line branch so a stray long fragment can never poison the
+// drop-until-newline state.
+const MAX_MCP_PROMPT_FRAGMENT_CHARS = 256;
 
 function clearMcpSessionState(sessionId) {
   if (!sessionId) return;
@@ -110,6 +117,27 @@ function clearMcpSessionState(sessionId) {
   _mcpDroppingWrappedLine.delete(sessionId);
   _mcpProbePrompts.delete(sessionId);
   _mcpAbortedProbes.delete(sessionId);
+  _mcpAtLineStart.delete(sessionId);
+}
+
+// True when `fragment` is a short no-newline piece that starts a fresh line
+// and could therefore be a continuation prompt printed by the shell before
+// the next wrapper line's marker arrives. Holding it lets the fragment join
+// the marker-bearing line it precedes instead of flashing on the terminal;
+// ordinary fragments are still released by the bounded timed flush.
+function isPossibleContinuationPromptTail(tail, followsLineBreak) {
+  return (
+    followsLineBreak
+    && !!tail
+    && !tail.includes("\n")
+    && !tail.includes("__NCMCP_")
+    && tail.length <= MAX_MCP_PROMPT_FRAGMENT_CHARS
+  );
+}
+
+function setMcpAtLineStart(sessionId, atLineStart) {
+  if (atLineStart) _mcpAtLineStart.add(sessionId);
+  else _mcpAtLineStart.delete(sessionId);
 }
 
 function filterProbePromptFragment(sessionId, fragment) {
@@ -182,7 +210,13 @@ function filterMcpChunk(sessionId, chunk, meta) {
   _mcpPendingMetas.delete(sessionId);
 
   // Fast path: nothing suspicious in the combined data
-  if (!_mcpDroppingWrappedLine.has(sessionId) && !_mcpProbePrompts.has(sessionId) && !data.includes("__NCMCP_") && !_endsWithMarkerPrefix(data)) {
+  const atLineStart = _mcpAtLineStart.has(sessionId);
+  const wholeChunkMayBePrompt = atLineStart
+    && !data.includes("\n")
+    && data.length <= MAX_MCP_PROMPT_FRAGMENT_CHARS
+    && !data.includes("__NCMCP_");
+  if (!_mcpDroppingWrappedLine.has(sessionId) && !_mcpProbePrompts.has(sessionId) && !data.includes("__NCMCP_") && !_endsWithMarkerPrefix(data) && !wholeChunkMayBePrompt) {
+    setMcpAtLineStart(sessionId, !!data && /\n$/.test(data));
     const deliveryMeta = held ? stateMeta : sameChunkMeta;
     return {
       data,
@@ -211,7 +245,12 @@ function filterMcpChunk(sessionId, chunk, meta) {
       // contain __NCMCP_ would otherwise leak through as garbage.
       const tail = data.slice(pos);
       const probePrompt = filterProbePromptFragment(sessionId, tail);
-      if (probePrompt || droppedAny || tail.includes("__NCMCP_") || _endsWithMarkerPrefix(tail)) {
+      // `tail` starts a fresh line either after a complete line inside this
+      // chunk or when the previous chunk ended at a line boundary. A shell
+      // emits its continuation prompt (PS2, of any user customization) at
+      // exactly such a boundary, before the next wrapper line's marker.
+      const promptTail = isPossibleContinuationPromptTail(tail, pos > 0 || atLineStart);
+      if (probePrompt || droppedAny || tail.includes("__NCMCP_") || _endsWithMarkerPrefix(tail) || promptTail) {
         let tailMeta = !held && tail === chunk ? sameChunkMeta : stateMeta;
         if (heldIngressAlreadyAcknowledged && !hasPluginPipelineIngress(tailMeta)) {
           tailMeta = { ...(tailMeta || {}), pluginPipelineIngressBytes: 0 };
@@ -248,6 +287,12 @@ function filterMcpChunk(sessionId, chunk, meta) {
     }
     pos = nlIdx + 1;
   }
+
+  // Track whether the stream now sits at a line start: any consumed complete
+  // line (delivered or suppressed) leaves the stream at the next line's
+  // start, while a chunk with no newline at all simply continues the same
+  // line, keeping the previous state.
+  if (pos > 0) setMcpAtLineStart(sessionId, true);
 
   const deliveryMeta = !held && result === chunk ? sameChunkMeta : stateMeta;
   return {
