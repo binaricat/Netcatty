@@ -262,9 +262,21 @@ function parseCodexConfigToml(text) {
  * because the config.toml is a strong signal the user doesn't want that.
  */
 function readCodexCustomProviderConfig(shellEnv) {
+  // Codex honors $CODEX_HOME and reads $CODEX_HOME/config.toml (see
+  // codexAppServer/protocol.schema.json), so prefer it over the legacy
+  // ~/.codex location — otherwise a custom provider configured under
+  // CODEX_HOME would be missed (or an unrelated default-home config could
+  // shadow what the CLI actually runs).
+  const codexHome = typeof shellEnv?.CODEX_HOME === "string" ? shellEnv.CODEX_HOME.trim() : "";
   const home = shellEnv?.HOME || shellEnv?.USERPROFILE || os.homedir();
+  if (codexHome) {
+    return readCodexCustomProviderConfigFrom(path.join(codexHome, "config.toml"), shellEnv);
+  }
   if (!home) return null;
-  const configPath = path.join(home, ".codex", "config.toml");
+  return readCodexCustomProviderConfigFrom(path.join(home, ".codex", "config.toml"), shellEnv);
+}
+
+function readCodexCustomProviderConfigFrom(configPath, shellEnv) {
   if (!existsSync(configPath)) return null;
 
   let text;

@@ -233,3 +233,45 @@ test("readCodexCustomProviderConfig returns null for the default openai provider
 
   assert.equal(readCodexCustomProviderConfig({ HOME: tempDir }), null);
 });
+
+test("readCodexCustomProviderConfig honors CODEX_HOME over ~/.codex", (t) => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-codex-home-"));
+  t.after(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  // An unrelated config in the default home must be ignored when CODEX_HOME
+  // points elsewhere.
+  fs.mkdirSync(path.join(tempDir, ".codex"), { recursive: true });
+  fs.writeFileSync(
+    path.join(tempDir, ".codex", "config.toml"),
+    'model_provider = "stale"\n\n[model_providers.stale]\nname = "Stale"\n',
+    "utf8",
+  );
+
+  const codexHome = path.join(tempDir, "custom-home");
+  fs.mkdirSync(codexHome, { recursive: true });
+  fs.writeFileSync(
+    path.join(codexHome, "config.toml"),
+    [
+      'model_provider = "ccs"',
+      'model = "glm-5"',
+      "",
+      "[model_providers.ccs]",
+      'name = "Coding Plan"',
+      'base_url = "https://example.invalid/v1"',
+      'env_key = "CODING_PLAN_API_KEY"',
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+
+  const config = readCodexCustomProviderConfig({
+    HOME: tempDir,
+    CODEX_HOME: codexHome,
+    CODING_PLAN_API_KEY: "not-a-real-secret-just-presence",
+  });
+
+  assert.equal(config?.providerName, "ccs");
+  assert.equal(config?.model, "glm-5");
+});
