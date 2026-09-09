@@ -21,7 +21,7 @@ import { getNotesSnapshot } from '../state/notesStore';
 import { useVaultAgentBridge } from '../state/useVaultAgentBridge';
 import { useWindowControls } from '../state/useWindowControls';
 import { useTerminalKeyboardFocus } from '../state/useTerminalKeyboardFocus';
-import { useEditorTabChromeList } from '../state/editorTabStore';
+import { editorTabStore, useEditorTabChromeList } from '../state/editorTabStore';
 import {
   isPluginViewTabId,
   pluginViewTabStore,
@@ -1019,19 +1019,36 @@ export function AppSideEffects() {
       const pluginIds = targetIds.filter((id) => pluginViewTabStore.getTab(id));
       const editorIds = targetIds.filter((id) => isEditorTabId(id));
       const regularIds = targetIds.filter((id) => !pluginViewTabStore.getTab(id) && !isEditorTabId(id));
-      const canClose = !regularIds.length || await closeTabsBatchImpl(
-        () => ({ closeLogView, closeSessions, closeTabsInFlightRef, closeWorkspace, confirmIfBusyLocalTerminal, logViews, sessions, targetIds: regularIds, workspaces }),
-        regularIds,
-      );
-      if (!canClose) return;
-      for (const id of pluginIds) pluginViewTabStore.close(id);
       // Editor tabs must route through their own close handler so dirty-save
       // prompts run; a cancelled prompt leaves that tab open.
+      // Prompt BEFORE closing any regular tabs: closing an editor's owning
+      // terminal/workspace tab unmounts its SFTP side panel, whose cleanup
+      // force-closes bound editors (dropping dirty state) and unregisters the
+      // save channel — making the prompt moot.
       const cancelledEditorIds = new Set<string>();
       for (const tabId of editorIds) {
         const closed = await handleRequestCloseEditorTabRef.current(fromEditorTabId(tabId));
         if (!closed) cancelledEditorIds.add(tabId);
       }
+      // A cancelled editor must keep its owning tab open too, or the owner's
+      // unmount cleanup would force-close the very editor the user chose to keep.
+      const keepSessionIds = new Set<string>();
+      for (const tabId of cancelledEditorIds) {
+        const editorTab = editorTabStore.getTab(fromEditorTabId(tabId));
+        if (editorTab?.sessionId) keepSessionIds.add(editorTab.sessionId);
+      }
+      const effectiveRegularIds = keepSessionIds.size === 0 ? regularIds : regularIds.filter((tabId) => {
+        if (keepSessionIds.has(tabId)) return false;
+        const ws = workspaces.find((w) => w.id === tabId);
+        if (ws && sessions.some((s) => s.workspaceId === tabId && keepSessionIds.has(s.id))) return false;
+        return true;
+      });
+      const canClose = !effectiveRegularIds.length || await closeTabsBatchImpl(
+        () => ({ closeLogView, closeSessions, closeTabsInFlightRef, closeWorkspace, confirmIfBusyLocalTerminal, logViews, sessions, targetIds: effectiveRegularIds, workspaces }),
+        effectiveRegularIds,
+      );
+      if (!canClose) return;
+      for (const id of pluginIds) pluginViewTabStore.close(id);
       // Focus only shifts when the active tab actually closed — a dirty editor
       // whose close was cancelled stays open and keeps focus.
       if (closingTabIds.has(activeBeforeClose) && !cancelledEditorIds.has(activeBeforeClose)) {
