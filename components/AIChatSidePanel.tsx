@@ -859,9 +859,12 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
       bridge.aiCodexGetIntegration({ codexPath: getManualAgentCommand(currentAgentConfig) }) as Promise<CodexIntegrationStatus>,
     ).then((info) => {
       if (cancelled) return;
-      const hasCustom = info?.state === 'connected_custom_config';
-      setCodexConfigModel(info?.customConfig?.model ?? null);
-      setCodexCustomConfigResolved(hasCustom);
+      // Surface the third-party model configured in ~/.codex/config.toml even
+      // when auth.json also reports a login (provider switcher tools write
+      // both): config.toml's model_provider is what Codex actually runs with.
+      const customModel = info?.customConfig?.model ?? null;
+      setCodexConfigModel(customModel);
+      setCodexCustomConfigResolved(Boolean(customModel));
     }).catch(() => {
       if (!cancelled) {
         setCodexConfigModel(null);

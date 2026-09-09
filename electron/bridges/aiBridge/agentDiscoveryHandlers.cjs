@@ -299,17 +299,22 @@ function registerAgentDiscoveryHandlers(ctx) {
       // functional from the CLI but would look "not_logged_in" here. Probe
       // config.toml so we can surface that as a valid ready state instead of
       // pushing the user into the ChatGPT login flow.
+      //
+      // Probe even when auth.json reports a login: provider switcher tools
+      // (cc-switch, ccs) write an API key into auth.json while config.toml's
+      // `model_provider` actually selects a third-party provider, and
+      // config.toml is what Codex uses. Keep a validated ChatGPT login as the
+      // displayed state, but still return customConfig so the chat model
+      // picker can surface the configured third-party model.
       let customConfig = null;
-      if (state !== "connected_chatgpt" && state !== "connected_api_key") {
-        try {
-          const shellEnv = await getShellEnv();
-          customConfig = readCodexCustomProviderConfig(shellEnv);
-          if (customConfig) {
-            state = "connected_custom_config";
-          }
-        } catch {
-          customConfig = null;
+      try {
+        const shellEnv = await getShellEnv();
+        customConfig = readCodexCustomProviderConfig(shellEnv);
+        if (customConfig && state !== "connected_chatgpt") {
+          state = "connected_custom_config";
         }
+      } catch {
+        customConfig = null;
       }
 
       return {

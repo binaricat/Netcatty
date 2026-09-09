@@ -119,7 +119,10 @@ function loadBridgeWithMocks(options = {}) {
           : realNormalizeCodexIntegrationState(...args),
       appendCodexChatGptValidationFailure: (rawOutput, validationError) =>
         `${rawOutput}\n\nChatGPT auth validation failed:\n${validationError}`.trim(),
-      readCodexCustomProviderConfig: () => null,
+      readCodexCustomProviderConfig: (...args) =>
+        typeof options.readCodexCustomProviderConfig === "function"
+          ? options.readCodexCustomProviderConfig(...args)
+          : null,
       getCodexCustomConfigPreflightError: () => null,
       extractCodexError: (err) => ({ message: err?.message || String(err) }),
       isCodexAuthError: (...args) =>
@@ -1008,6 +1011,107 @@ test("codex integration keeps ChatGPT connected when the SDK validation probe fa
     assert.equal(result.isConnected, true);
     assert.match(result.rawOutput, /Logged in using ChatGPT/);
     assert.match(result.rawOutput, /ChatGPT auth validation failed:/);
+  } finally {
+    restore();
+  }
+});
+
+test("codex integration surfaces config.toml provider even when auth.json reports an API-key login", async (t) => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-codex-integration-"));
+  t.after(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  const codexPath = path.join(tempDir, "codex");
+  fs.writeFileSync(
+    codexPath,
+    `#!${process.execPath}\nconsole.log('Logged in using an API key');\n`,
+    { mode: 0o755 },
+  );
+
+  const customConfig = {
+    providerName: "ccs",
+    displayName: "Coding Plan",
+    baseUrl: "https://example.invalid/v1",
+    envKey: null,
+    envKeyPresent: false,
+    hasHardcodedApiKey: true,
+    model: "glm-5",
+    authHash: "hash",
+  };
+
+  const { bridge, restore } = loadBridgeWithMocks({
+    normalizeCliPathForPlatform: (value) => value,
+    shellEnv: { HOME: tempDir },
+    readCodexCustomProviderConfig: () => customConfig,
+  });
+  const ipcMain = createIpcMainStub();
+
+  bridge.init({
+    sessions: new Map(),
+    sftpClients: new Map(),
+    electronModule: { app: { getPath: () => process.cwd() } },
+  });
+  bridge.registerHandlers(ipcMain);
+
+  try {
+    const handler = ipcMain.handlers.get("netcatty:ai:codex:get-integration");
+    const result = await handler({ sender: { id: 1 } }, { codexPath });
+
+    assert.equal(result.state, "connected_custom_config", JSON.stringify(result));
+    assert.equal(result.isConnected, true);
+    assert.equal(result.customConfig?.model, "glm-5");
+    assert.equal(result.customConfig?.providerName, "ccs");
+  } finally {
+    restore();
+  }
+});
+
+test("codex integration keeps a validated ChatGPT login visible but still returns config.toml provider", async (t) => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-codex-integration-"));
+  t.after(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  const codexPath = path.join(tempDir, "codex");
+  fs.writeFileSync(
+    codexPath,
+    `#!${process.execPath}\nconsole.log('Logged in using ChatGPT');\n`,
+    { mode: 0o755 },
+  );
+
+  const customConfig = {
+    providerName: "ccs",
+    displayName: "Coding Plan",
+    baseUrl: null,
+    envKey: null,
+    envKeyPresent: false,
+    hasHardcodedApiKey: true,
+    model: "glm-5",
+    authHash: "hash",
+  };
+
+  const { bridge, restore } = loadBridgeWithMocks({
+    normalizeCliPathForPlatform: (value) => value,
+    shellEnv: { HOME: tempDir },
+    readCodexCustomProviderConfig: () => customConfig,
+  });
+  const ipcMain = createIpcMainStub();
+
+  bridge.init({
+    sessions: new Map(),
+    sftpClients: new Map(),
+    electronModule: { app: { getPath: () => process.cwd() } },
+  });
+  bridge.registerHandlers(ipcMain);
+
+  try {
+    const handler = ipcMain.handlers.get("netcatty:ai:codex:get-integration");
+    const result = await handler({ sender: { id: 1 } }, { codexPath });
+
+    assert.equal(result.state, "connected_chatgpt", JSON.stringify(result));
+    assert.equal(result.isConnected, true);
+    assert.equal(result.customConfig?.model, "glm-5");
   } finally {
     restore();
   }
