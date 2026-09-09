@@ -1066,10 +1066,12 @@ export function AppSideEffects() {
       // Focus only shifts when the active tab actually closed — a dirty editor
       // whose close was cancelled stays open and keeps focus.
       if (closingTabIds.has(activeBeforeClose) && !cancelledEditorIds.has(activeBeforeClose)) {
-        // Recompute the destination excluding cancelled editors so a surviving
-        // neighbor is preferred over falling through to 'vault'.
+        // Recompute the destination excluding cancelled editors and the tabs
+        // preserved alongside them (their owning terminal/workspace tabs), so
+        // an owner that stays open keeps focus and is never treated as closed.
         const effectiveClosingTabIds = new Set(closingTabIds);
         for (const id of cancelledEditorIds) effectiveClosingTabIds.delete(id);
+        for (const id of keepTabIds) effectiveClosingTabIds.delete(id);
         const focusAfterClose = resolveBatchTabCloseFocus({
           orderedTabIds: orderedTabsWithEditors,
           closingTabIds: effectiveClosingTabIds,
