@@ -150,6 +150,12 @@ function _endsWithMarkerPrefix(s) {
   for (let i = 2; i < probePrefix.length; i++) {
     if (s.endsWith(probePrefix.slice(0, i))) return true;
   }
+  // BusyBox echoes a continuation prompt before the marker-bearing no-op.
+  // Hold fragmented prefixes too; ordinary prompts still use the timed flush.
+  const tail = s.slice(s.lastIndexOf("\n") + 1);
+  for (const prefix of ["> : '__NCMCP_", '> : "__NCMCP_', ": '__NCMCP_", ': "__NCMCP_']) {
+    if (tail && prefix.startsWith(tail)) return true;
+  }
   return false;
 }
 

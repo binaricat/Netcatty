@@ -214,7 +214,12 @@ function buildBashHistoryCleanup(marker, keepDispatcher = false) {
   // history-bearing scratch through the verified dispatcher, never plain unset.
   const { entry, dispatcher } = bashHistoryScratchNames(marker);
   const unsetNames = keepDispatcher ? entry : `${entry} ${dispatcher}`;
-  return `[ "\${BASH_VERSION-}" ]&&{ for ${dispatcher} in command builtin;do ${entry}=$($${dispatcher} printf x);[ "$${entry}" = x ]||continue;${entry}=$($${dispatcher} history 1);case "$${entry}" in *${marker}*) ${entry}=\${${entry}#"\${${entry}%%[^[:space:]]*}"};$${dispatcher} history -d "\${${entry}%%[[:space:]]*}";${entry}=$($${dispatcher} history 1);case "$${entry}" in *${marker}*) continue;;esac;;esac;$${dispatcher} unset ${unsetNames};break;done; } 2>/dev/null`;
+  return [
+    `[ "\${BASH_VERSION-}" ]&&{ for ${dispatcher} in command builtin;do ${entry}=$($${dispatcher} printf x);[ "$${entry}" = x ]||continue;`,
+    `${entry}=$($${dispatcher} history 1);case "$${entry}" in *${marker}*) ${entry}=\${${entry}#"\${${entry}%%[^[:space:]]*}"};$${dispatcher} history -d "\${${entry}%%[[:space:]]*}";`,
+    `${entry}=$($${dispatcher} history 1);case "$${entry}" in *${marker}*) continue;;esac;;esac;`,
+    `$${dispatcher} unset ${unsetNames};break;done; } 2>/dev/null`,
+  ].join(` \\\n: "${marker}"; `);
 }
 
 function buildPosixWrapperBody(command, marker, startFormat) {
@@ -223,9 +228,10 @@ function buildPosixWrapperBody(command, marker, startFormat) {
   let cmdAssign = commandLines.length > 1
     ? `${marker}_cmd=$(printf '%s\\n' ${commandLines.map((line) => `'${escapePosixSingleQuoted(line)}'`).join(" ")})`
     : `${marker}_cmd='${escapePosixSingleQuoted(command)}'`;
-  if (Buffer.byteLength(cmdAssign, 'utf8') > 650) {
-    // Canonical PTYs limit bytes per physical input line, regardless of write
-    // pacing. Emit bounded quoted pieces inside one command substitution; each
+  if (Buffer.byteLength(cmdAssign, 'utf8') > 350) {
+    // Reserve room below BusyBox's 512-byte editor limit for the assignment,
+    // marker and continuation syntax. Write pacing cannot bypass this limit.
+    // Emit bounded quoted pieces inside one command substitution; each
     // continuation keeps the marker visible to the terminal echo filter.
     const writes = [];
     for (const [index, line] of commandLines.entries()) {
@@ -234,7 +240,7 @@ function buildPosixWrapperBody(command, marker, startFormat) {
       for (const character of line) {
         const quoted = escapePosixSingleQuoted(character);
         const size = Buffer.byteLength(quoted, 'utf8');
-        if (bytes + size > 512) {
+        if (bytes + size > 300) {
           writes.push(`printf '%s' '${chunk}'`);
           chunk = '';
           bytes = 0;
@@ -247,11 +253,17 @@ function buildPosixWrapperBody(command, marker, startFormat) {
     cmdAssign = `${marker}_cmd=$(${writes.join(`; \\\n: '${marker}'; `)})`;
   }
   const historyCleanup = buildBashHistoryCleanup(marker);
-  const prefix = `${marker}=0; ${cmdAssign}; { printf '${startFormat}' '${marker}_S'; trap ':' INT; ( ${noPager}eval "$${marker}_cmd" ); __NCMCP_rc=$?; trap - INT; printf '%s\\n' '${marker}_E:'\"$__NCMCP_rc\"`;
-  const suffix = `${historyCleanup}; (exit $__NCMCP_rc); }`;
-  const separator = prefix.length + suffix.length + 2 > 1000
-    ? `; \\\n: '${marker}'; ` : "; ";
-  return `${prefix}${separator}${suffix}`;
+  // OpenWrt builds BusyBox with a 512-byte interactive line editor. Keep
+  // every physical line below that limit, even for short user commands.
+  // Mark every continuation so the renderer suppresses its prompt and echo.
+  return [
+    `${marker}=0`,
+    cmdAssign,
+    `{ printf '${startFormat}' '${marker}_S'; trap ':' INT; ( ${noPager}eval "$${marker}_cmd" ); __NCMCP_rc=$?; trap - INT`,
+    `printf '%s\\n' '${marker}_E:'"$__NCMCP_rc"`,
+    historyCleanup,
+    `(exit $__NCMCP_rc); }`,
+  ].join(`; \\\n: '${marker}'; `);
 }
 
 function buildWrappedCommand(command, shellKind, marker, separateStartMarker = false) {

@@ -1780,3 +1780,37 @@ test("real PTY multiline prompt is displayed only after the AI command", {
     preload.cleanup();
   }
 });
+
+test("OpenWrt bounded wrapper continuations stay hidden across fragmented echoes", () => {
+  const { buildWrappedCommand } = require('./bridges/ai/ptyExecHelpers.cjs');
+  const preload = loadPreloadWithFakeElectron();
+  try {
+    const received = [];
+    const sessionId = 'openwrt-echo';
+    const marker = '__NCMCP_mttikd5b_ccbc892e865a115a80c88afdc77b96a6__';
+    preload.api.onSessionData(sessionId, chunk => received.push(chunk));
+    const wrapped = buildWrappedCommand("printf 'visible-output\\n'", 'posix', marker);
+    const echo = wrapped.trimEnd().split('\n').map((line, index) => `${index ? '> ' : ''}${line}\r\n`).join('');
+    const data = `${echo}${marker}_S\r\nvisible-output\r\n${marker}_E:0\r\n`;
+    for (let offset = 0; offset < data.length; offset += 7) {
+      preload.handlers.get('netcatty:data')({}, { sessionId, data: data.slice(offset, offset + 7) });
+    }
+    assert.equal(received.join(''), 'visible-output\r\n');
+  } finally {
+    preload.cleanup();
+  }
+});
+
+
+test("ordinary text resembling an OpenWrt continuation is released", async () => {
+  const preload = loadPreloadWithFakeElectron();
+  try {
+    const received = [];
+    preload.api.onSessionData("ordinary-continuation", chunk => received.push(chunk));
+    preload.handlers.get("netcatty:data")({}, { sessionId: "ordinary-continuation", data: "> : '" });
+    await sleep(120);
+    assert.equal(received.join(""), "> : '");
+  } finally {
+    preload.cleanup();
+  }
+});

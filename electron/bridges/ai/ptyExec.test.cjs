@@ -902,16 +902,15 @@ test("posix wrapper isolates set -e failures from the active shell", () => {
   assert.doesNotMatch(result.stdout, /SHOULD_NOT_PRINT/);
 });
 
-test("posix wrapper types multi-line commands as one physical line (no PS2 leak) and preserves semantics", () => {
+test("posix wrapper marks every continuation and preserves multi-line command semantics", () => {
   const marker = "__NCMCP_TEST__";
   const wrapped = buildWrappedCommand(
     "echo first\necho \"it's quoted\"\n\necho last",
     "posix",
     marker,
   );
-  // A single physical line: the interactive shell must never show PS2
-  // ("> ") continuation echoes, which would leak past the preload filter.
-  assert.equal(wrapped.indexOf("\n"), wrapped.length - 1);
+  // Every continuation carries the marker so its PS2 echo stays hidden.
+  assert.ok(wrapped.trimEnd().split("\n").every(line => line.includes(marker)));
 
   const result = spawnSync("sh", ["-c", wrapped], { encoding: "utf8" });
   assert.equal(result.error, undefined);
@@ -926,7 +925,7 @@ test("long POSIX assignments preserve quotes, Unicode, and heredoc newlines on b
   const literal = "quote' \\ $HOME `false` " + "\u4e2d\u6587\ud83d\ude42".repeat(600);
   const command = `cat <<'SMOKE_END'\n${literal}\n\nsecond line\nSMOKE_END\nprintf tail`;
   const wrapped = buildWrappedCommand(command, "posix", marker, true);
-  assert.ok(wrapped.split('\n').every(line => Buffer.byteLength(line, 'utf8') < 1000));
+  assert.ok(wrapped.split('\n').every(line => Buffer.byteLength(line, 'utf8') <= 480));
   const result = spawnSync('sh', ['-c', wrapped], { encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stdout, `\n${marker}_S\n${literal}\n\nsecond line\ntail${marker}_E:0\n`);
