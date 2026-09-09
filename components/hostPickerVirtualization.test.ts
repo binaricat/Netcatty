@@ -83,6 +83,7 @@ test('AddToWorkspaceDialog virtualizes and clamps selection on shrink', () => {
   const source = read('workspace/AddToWorkspaceDialog.tsx');
   assert.match(source, /VariableSizeVirtualList/);
   assert.match(source, /data-host-picker-virtual="add-workspace"/);
+  assert.match(source, /matchesWorkspaceHostPickerQuery/);
   assert.match(source, /clampListIndex\(prev, items\.length\)/);
   assert.match(source, /onClick=\{\(\) => handleTargetClick\(idx, LOCAL_ITEM_ID\)\}/);
   assert.match(source, /onClick=\{\(\) => handleTargetClick\(idx, host\.id\)\}/);
@@ -96,6 +97,7 @@ test('CreateWorkspaceDialog virtualizes selectable hosts', () => {
   const source = read('CreateWorkspaceDialog.tsx');
   assert.match(source, /FixedSizeVirtualList/);
   assert.match(source, /data-host-picker-virtual="create-workspace"/);
+  assert.match(source, /matchesWorkspaceHostPickerQuery/);
   assert.doesNotMatch(source, /filteredHosts\.map\(host =>/);
 });
 
