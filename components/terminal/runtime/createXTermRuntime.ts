@@ -352,6 +352,8 @@ export type CreateXTermRuntimeContext = {
   serialLineMode?: boolean;
   /** Byte-oriented backspace from session snapshot (default true). */
   serialByteOrientedBackspace?: boolean;
+  /** True when the user has explicitly selected a toolbar encoding (vs default). */
+  userPickedEncodingRef?: RefObject<boolean>;
   serialLineBufferRef?: RefObject<string>;
   /** Current effective session encoding (updated when user changes toolbar encoding). */
   currentEncodingRef?: RefObject<string>;
@@ -1240,20 +1242,33 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
           // restored or hibernated session keeps its configured behavior
           // even if the vault host was edited after the session started.
           if (ctx.serialByteOrientedBackspace ?? true) {
-            // For recognized charsets (UTF-8, GB18030), the toolbar encoding
-            // is authoritative — it may reflect a remembered or explicit user
-            // choice that overrides the host charset. For unrecognized charsets
-            // (e.g. Shift_JIS), the toolbar encoding falls back to the default
-            // (utf-8), so the host charset is the correct wire encoding.
+            // Determine the effective wire encoding for byte-length
+            // calculation.  The logic mirrors the backend attach path:
+            //
+            //  1. If the toolbar encoding is not the default (utf-8), the
+            //     user explicitly selected it → trust toolbar.
+            //  2. If the user explicitly selected utf-8 (userPickedEncoding
+            //     is true), the backend was synced to utf-8 → trust toolbar.
+            //  3. For recognized charsets (UTF-8, GB18030), the toolbar
+            //     encoding is authoritative — it may reflect a remembered
+            //     override (e.g. remembered utf-8 on a GB18030 host).
+            //  4. For unrecognized charsets (e.g. Shift_JIS), the toolbar
+            //     encoding is the fallback default (utf-8) and the backend
+            //     uses the host charset.
             const toolbarEnc = ctx.currentEncodingRef?.current;
             const hostChar = ctx.host.charset;
+            const userPicked = ctx.userPickedEncodingRef?.current ?? false;
             const hostCharRecognized = hostChar
               ? resolveTerminalEncodingFromCharset(hostChar) !== null
               : false;
             const effectiveEncoding =
-              hostChar && !hostCharRecognized
-                ? hostChar
-                : toolbarEnc ?? hostChar ?? 'utf-8';
+              toolbarEnc && toolbarEnc !== 'utf-8'
+                ? toolbarEnc                          // explicit non-default
+                : userPicked && toolbarEnc
+                  ? toolbarEnc                        // explicit utf-8 selection
+                  : hostChar && !hostCharRecognized
+                    ? hostChar                        // unrecognized → host charset
+                    : toolbarEnc ?? hostChar ?? 'utf-8'; // recognized → toolbar
             const bytes = getCharByteLength(lastChar, effectiveEncoding);
             if (bytes > 1) {
               outData = outData.repeat(bytes);

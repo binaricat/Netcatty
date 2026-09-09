@@ -517,6 +517,7 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
           serialLocalEcho: serialConfig?.localEcho,
           serialLineMode: serialConfig?.lineMode,
           serialByteOrientedBackspace: serialConfig?.byteOrientedBackspace ?? true,
+          userPickedEncodingRef,
           serialLineBufferRef,
           currentEncodingRef: terminalEncodingRef,
           telnetLocalEchoRef,

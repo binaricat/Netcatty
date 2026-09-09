@@ -189,7 +189,6 @@ function isGbkCharacter(cp: number): boolean {
     (cp >= 0x3000 && cp <= 0x312f) || // CJK Symbols, Hiragana, Katakana, Hangul Jamo
     (cp >= 0x31a0 && cp <= 0x31bf) || // Bopomofo
     (cp >= 0x31f0 && cp <= 0x31ff) || // Katakana Phonetic
-    (cp >= 0x3400 && cp <= 0x4dbf) || // CJK Extension A
     (cp >= 0x4e00 && cp <= 0x9fff) || // CJK Unified Ideographs
     (cp >= 0xf900 && cp <= 0xfaff) || // CJK Compatibility Ideographs
     (cp >= 0xfe30 && cp <= 0xfe4f) || // CJK Compatibility Forms
