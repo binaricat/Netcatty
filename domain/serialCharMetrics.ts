@@ -118,38 +118,38 @@ export function getCharByteLength(char: string, charset?: string): number {
   //  4 bytes for supplementary-plane characters AND for BMP characters
   //    outside the GBK set (e.g. U+0100 'Ā' → 4-byte GB18030 encoding)
   if (encoding === 'gb18030') {
+    let total = 0;
     for (const ch of char) {
       const cp = ch.codePointAt(0);
       if (cp === undefined) continue;
-      if (cp < 0x80) continue; // ASCII → 1 byte (handled at end)
-      // Supplementary plane → always 4-byte GB18030 encoding.
-      if (cp > 0xffff) return 4;
-      // BMP: 2 bytes if in the GBK character set, 4 bytes otherwise.
-      return isGbkCharacter(cp) ? 2 : 4;
+      if (cp < 0x80) { total += 1; continue; } // ASCII → 1 byte
+      if (cp > 0xffff) { total += 4; continue; } // Supplementary → 4 bytes
+      total += isGbkCharacter(cp) ? 2 : 4; // BMP: 2 or 4 bytes
     }
-    return 1;
+    return total || 1;
   }
 
-  // Unknown encoding — fall back to UTF-8 (most common).
   // Shift_JIS: 1 byte for ASCII, 2 bytes for all other characters
   // (the vast majority of Shift_JIS characters are double-byte).
   // This mirrors iconv-lite's Shift_JIS encoding behavior.
   if (encoding === 'shift-jis') {
+    let total = 0;
     for (const ch of char) {
       const cp = ch.codePointAt(0);
       if (cp === undefined) continue;
-      if (cp < 0x80) continue; // ASCII → 1 byte (handled at end)
-      return 2;
+      total += cp < 0x80 ? 1 : 2; // ASCII → 1 byte, non-ASCII → 2 bytes
     }
-    return 1;
+    return total || 1;
   }
 
-  // Unknown encoding — fall back to UTF-8 (most common).
+  // Unknown encoding — assume 1 byte for ASCII, 2 bytes for non-ASCII.
+  // This covers Big5, EUC-JP, Johab, EUC-KR, and other common serial
+  // encodings that use iconv-lite's multi-byte encoding path.
   let total = 0;
   for (const ch of char) {
     const cp = ch.codePointAt(0);
     if (cp === undefined) continue;
-    total += utf8ByteLength(cp);
+    total += cp < 0x80 ? 1 : 2;
   }
   return total || 1;
 }
@@ -184,7 +184,6 @@ function utf8ByteLength(cp: number): number {
  *  4 bytes in GB18030. Mirrors iconv-lite's GB18030 behavior. */
 function isGbkCharacter(cp: number): boolean {
   return (
-    (cp >= 0x00a1 && cp <= 0x00fe) || // Latin-1 punctuation
     (cp >= 0x2000 && cp <= 0x206f) || // General punctuation
     (cp >= 0x3000 && cp <= 0x312f) || // CJK Symbols, Hiragana, Katakana, Hangul Jamo
     (cp >= 0x31a0 && cp <= 0x31bf) || // Bopomofo
