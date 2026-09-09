@@ -1010,8 +1010,8 @@ export function AppSideEffects() {
   }, [orderedTabsWithEditors]);
 
   // Close many tabs at once with a single batched busy-shell confirmation.
-  // Used by the "Close all / Close others / Close to the right" context-menu
-  // actions on tabs (#748).
+  // Used by the "Close all / Close others / Close to the left / Close to the
+  // right" context-menu actions on tabs (#748).
   const closeTabsBatch = useCallback(
     async (targetIds: string[]) => {
       const closingTabIds = new Set(targetIds);
@@ -1022,14 +1022,26 @@ export function AppSideEffects() {
         activeTabId: activeBeforeClose,
       });
       const pluginIds = targetIds.filter((id) => pluginViewTabStore.getTab(id));
-      const regularIds = targetIds.filter((id) => !pluginViewTabStore.getTab(id));
+      const editorIds = targetIds.filter((id) => isEditorTabId(id));
+      const regularIds = targetIds.filter((id) => !pluginViewTabStore.getTab(id) && !isEditorTabId(id));
       const canClose = !regularIds.length || await closeTabsBatchImpl(
         () => ({ closeLogView, closeSessions, closeTabsInFlightRef, closeWorkspace, confirmIfBusyLocalTerminal, logViews, sessions, targetIds: regularIds, workspaces }),
         regularIds,
       );
       if (!canClose) return;
       for (const id of pluginIds) pluginViewTabStore.close(id);
-      if (closingTabIds.has(activeBeforeClose)) activeTabStore.setActiveTabId(focusAfterClose);
+      // Editor tabs must route through their own close handler so dirty-save
+      // prompts run; a cancelled prompt leaves that tab open.
+      const cancelledEditorIds = new Set<string>();
+      for (const tabId of editorIds) {
+        const closed = await handleRequestCloseEditorTabRef.current(fromEditorTabId(tabId));
+        if (!closed) cancelledEditorIds.add(tabId);
+      }
+      // Focus only shifts when the active tab actually closed — a dirty editor
+      // whose close was cancelled stays open and keeps focus.
+      if (closingTabIds.has(activeBeforeClose) && !cancelledEditorIds.has(activeBeforeClose)) {
+        activeTabStore.setActiveTabId(focusAfterClose);
+      }
     },
     [workspaces, sessions, logViews, confirmIfBusyLocalTerminal, closeWorkspace, closeSessions, closeLogView, orderedTabsWithEditors],
   );
