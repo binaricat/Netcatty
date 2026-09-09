@@ -143,9 +143,15 @@ function createAgentCliHelpers(ctx) {
       throw new Error(`Codex CLI path not found: ${requestedPath}`);
     }
     const codexCliPath = configuredPath || await resolveCliFromPathAsync("codex", shellEnv) || "codex";
+    // Callers probing on behalf of a specific agent pass `options.env` (the
+    // merged shell + agent env, as built for SDK spawns) so CODEX_HOME/HOME
+    // overrides select the same config the agent turn will use.
+    const env = options?.env && typeof options.env === "object" && Object.keys(options.env).length > 0
+      ? options.env
+      : shellEnv;
     return await runCommand(codexCliPath, args, {
       cwd: options?.cwd?.trim() || undefined,
-      env: shellEnv,
+      env,
       timeoutMs: Number.isFinite(options?.timeoutMs)
         ? Number(options.timeoutMs)
         : DEFAULT_CODEX_CLI_TIMEOUT_MS,

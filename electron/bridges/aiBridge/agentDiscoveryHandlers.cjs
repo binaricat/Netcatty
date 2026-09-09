@@ -265,7 +265,18 @@ function registerAgentDiscoveryHandlers(ctx) {
       invalidateShellEnvCache();
     }
     try {
-      const codexCliOptions = { codexPath: options?.codexPath };
+      const shellEnv = await getShellEnv();
+      // A managed Codex agent may override CODEX_HOME/HOME in its env. The
+      // SDK run-turn path merges those overrides into the subprocess env
+      // (sdkStreamHandlers → buildSdkAgentEnv), so this probe must resolve
+      // auth.json/config.toml from the same home the agent will actually
+      // use — otherwise it reports the shell's default config.
+      const effectiveEnv = buildSdkAgentEnv({
+        shellEnv,
+        requestedAgentEnv: normalizeAgentEnv(options?.agentEnv),
+        withCliDiscoveryEnv,
+      });
+      const codexCliOptions = { codexPath: options?.codexPath, env: effectiveEnv };
       const result = await runCodexCli(["login", "status"], codexCliOptions);
       const rawOutput = [result.stdout, result.stderr]
         .filter((chunk) => chunk.trim().length > 0)
@@ -308,8 +319,7 @@ function registerAgentDiscoveryHandlers(ctx) {
       // picker can surface the configured third-party model.
       let customConfig = null;
       try {
-        const shellEnv = await getShellEnv();
-        customConfig = readCodexCustomProviderConfig(shellEnv);
+        customConfig = readCodexCustomProviderConfig(effectiveEnv);
         if (customConfig && state !== "connected_chatgpt") {
           state = "connected_custom_config";
         }

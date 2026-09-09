@@ -856,7 +856,14 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     if (!bridge?.aiCodexGetIntegration) return;
     let cancelled = false;
     void Promise.resolve(
-      bridge.aiCodexGetIntegration({ codexPath: getManualAgentCommand(currentAgentConfig) }) as Promise<CodexIntegrationStatus>,
+      // Probe with the agent's own env (same agent.env the run-turn path
+      // merges into the subprocess env): CODEX_HOME/HOME overrides here
+      // select a different config.toml than the shell's default home, and
+      // customConfig.model must reflect the config the agent will run with.
+      bridge.aiCodexGetIntegration({
+        codexPath: getManualAgentCommand(currentAgentConfig),
+        agentEnv: currentAgentConfig.env,
+      }) as Promise<CodexIntegrationStatus>,
     ).then((info) => {
       if (cancelled) return;
       // Surface the third-party model configured in ~/.codex/config.toml even
