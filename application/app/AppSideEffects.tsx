@@ -1016,11 +1016,6 @@ export function AppSideEffects() {
     async (targetIds: string[]) => {
       const closingTabIds = new Set(targetIds);
       const activeBeforeClose = activeTabStore.getActiveTabId();
-      const focusAfterClose = resolveBatchTabCloseFocus({
-        orderedTabIds: orderedTabsWithEditors,
-        closingTabIds,
-        activeTabId: activeBeforeClose,
-      });
       const pluginIds = targetIds.filter((id) => pluginViewTabStore.getTab(id));
       const editorIds = targetIds.filter((id) => isEditorTabId(id));
       const regularIds = targetIds.filter((id) => !pluginViewTabStore.getTab(id) && !isEditorTabId(id));
@@ -1040,6 +1035,15 @@ export function AppSideEffects() {
       // Focus only shifts when the active tab actually closed — a dirty editor
       // whose close was cancelled stays open and keeps focus.
       if (closingTabIds.has(activeBeforeClose) && !cancelledEditorIds.has(activeBeforeClose)) {
+        // Recompute the destination excluding cancelled editors so a surviving
+        // neighbor is preferred over falling through to 'vault'.
+        const effectiveClosingTabIds = new Set(closingTabIds);
+        for (const id of cancelledEditorIds) effectiveClosingTabIds.delete(id);
+        const focusAfterClose = resolveBatchTabCloseFocus({
+          orderedTabIds: orderedTabsWithEditors,
+          closingTabIds: effectiveClosingTabIds,
+          activeTabId: activeBeforeClose,
+        });
         activeTabStore.setActiveTabId(focusAfterClose);
       }
     },
