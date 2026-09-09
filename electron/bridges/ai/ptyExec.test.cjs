@@ -928,7 +928,7 @@ test("long POSIX assignments preserve quotes, Unicode, and heredoc newlines on b
   assert.ok(wrapped.split('\n').every(line => Buffer.byteLength(line, 'utf8') <= 480));
   const result = spawnSync('sh', ['-c', wrapped], { encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(result.stdout, `\n${marker}_S\n${literal}\n\nsecond line\ntail${marker}_E:0\n`);
+  assert.equal(result.stdout, `\n${marker}_I\n\n${marker}_S\n${literal}\n\nsecond line\ntail${marker}_E:0\n`);
 });
 
 test("posix wrapper isolates explicit exit from the active shell and reports its code", () => {
@@ -1374,4 +1374,20 @@ test("posix wrapper avoids history expansion in interactive zsh", (t) => {
   assert.match(result.stdout, new RegExp(`${marker}_E:0`));
   assert.match(result.stdout, /HISTORY_PROBE/);
   assert.doesNotMatch(result.stderr, /event not found/);
+});
+
+
+test("cancelled POSIX input without a live probe resets display suppression", async () => {
+  const pty = new EventEmitter();
+  const resets = [];
+  pty.write = () => {};
+  const job = startPtyJob(pty, "echo should-not-start", {
+    shellKind: "posix", probeLiveShell: false, timeoutMs: 1000,
+    expectedPrompt: "ready$ ", onProbeAborted: marker => resets.push(marker),
+  });
+  pty.emit("data", `${job.marker}_I\nCUSTOM> `);
+  job.cancel();
+  pty.emit("data", "\nready$ ");
+  assert.equal((await job.resultPromise).error, "Cancelled");
+  assert.deepEqual(resets, [job.marker]);
 });

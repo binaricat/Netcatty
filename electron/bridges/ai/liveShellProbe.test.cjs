@@ -34,19 +34,27 @@ test('probe wrapper keeps the start marker separate when terminal echo is disabl
   const { spawnSync } = require('node:child_process');
   const pty = new EventEmitter();
   let job;
+  let probing = true;
   let pendingInput = '';
   pty.write = (data) => {
-    if (String(data).includes('command sh -c')) return;
-    if (data === '\x03') return;
+    if (data === "\x03") return;
     pendingInput += String(data);
-    if (!pendingInput.endsWith('\n')) return;
+    if (!pendingInput.endsWith('\n') || pendingInput.endsWith('\\\n')) return;
+    if (probing) {
+      // Wait for the complete probe, including paced chunks and continuations.
+      if (!pendingInput.includes("printf '%s'")) return;
+      pendingInput = '';
+      probing = false;
+      queueMicrotask(() => pty.emit('data', `${job.marker}_P:sh\n${job.marker}_Q`));
+      return;
+    }
+    if (!pendingInput.includes(`${job.marker}_E:`)) return;
     const script = pendingInput.replace(/^\x0b\x15/, '');
     pendingInput = '';
     const result = spawnSync('/bin/sh', ['-c', script], { encoding: 'utf8' });
     queueMicrotask(() => pty.emit('data', `${job.marker}_QPROMPT> ${result.stdout}`));
   };
-  job = startPtyJob(pty, 'printf no-newline-output', { probeLiveShell: true, timeoutMs: 1000 });
-  pty.emit('data', `${job.marker}_P:sh\n${job.marker}_Q`);
+  job = startPtyJob(pty, 'printf no-newline-output', { probeLiveShell: true, timeoutMs: 3000 });
   const result = await job.resultPromise;
   assert.equal(result.exitCode, 0, JSON.stringify(result));
   assert.match(result.stdout, /no-newline-output/);

@@ -1789,6 +1789,7 @@ test("OpenWrt bounded wrapper continuations stay hidden across fragmented echoes
     const sessionId = 'openwrt-echo';
     const marker = '__NCMCP_mttikd5b_ccbc892e865a115a80c88afdc77b96a6__';
     preload.api.onSessionData(sessionId, chunk => received.push(chunk));
+    preload.handlers.get("netcatty:data")({}, { sessionId, data: `${marker}_I\n` });
     const wrapped = buildWrappedCommand("printf 'visible-output\\n'", 'posix', marker);
     const echo = wrapped.trimEnd().split('\n').map((line, index) => `${index ? '> ' : ''}${line}\r\n`).join('');
     const data = `${echo}${marker}_S\r\nvisible-output\r\n${marker}_E:0\r\n`;
@@ -1813,4 +1814,62 @@ test("ordinary text resembling an OpenWrt continuation is released", async () =>
   } finally {
     preload.cleanup();
   }
+});
+
+for (const echo of [true, false]) {
+  test(`real PTY hides custom multiline secondary prompts (echo=${echo})`, {
+    skip: process.env.NETCATTY_LIVE_FISH_TEST !== '1', timeout: 10000,
+  }, async () => {
+    const preload = loadPreloadWithFakeElectron();
+    const terminal = require('node-pty').spawn('/bin/bash', ['--noprofile', '--norc', '--noediting'], {
+      name: 'dumb', cols: 240, rows: 24,
+      env: { ...process.env, TERM: 'dumb', PS1: 'READY> ', PS2: 'CUSTOM\nCONT> ', BASH_SILENCE_DEPRECATION_WARNING: '1' },
+    });
+    const received = [];
+    let raw = '';
+    const send = data => preload.handlers.get('netcatty:data')({}, { sessionId: 'custom-ps2', data });
+    preload.api.onSessionData('custom-ps2', data => received.push(data));
+    terminal.onData(data => { raw += data; send(data); });
+    const ready = async () => {
+      const deadline = Date.now() + 3000;
+      while (!raw.includes('READY> ')) {
+        if (Date.now() > deadline) throw new Error('Missing Bash prompt');
+        await sleep(10);
+      }
+      raw = '';
+      await sleep(120);
+    };
+    try {
+      await ready();
+      if (!echo) { terminal.write('stty -echo\r'); await ready(); }
+      for (const probeLiveShell of [false, true]) {
+        received.length = 0;
+        const result = await require('./bridges/ai/ptyExec.cjs').execViaPty(terminal, "printf 'visible-result\\n'", {
+          shellKind: 'posix', probeLiveShell, stripMarkers: true, timeoutMs: 3000,
+          onProbeAborted: (marker) => send(`${marker}_R\n`),
+        });
+        assert.equal(result.exitCode, 0, JSON.stringify(result));
+        await sleep(160);
+        const display = received.join('');
+        assert.match(display, /visible-result/);
+        assert.doesNotMatch(display, /CUSTOM|CONT>|__NCMCP_/, JSON.stringify({ display, raw }));
+        assert.match(display, /READY> /);
+      }
+    } finally { terminal.kill(); preload.cleanup(); }
+  });
+}
+
+
+test("aborted input releases custom prompts and ignores a late input marker", () => {
+  const preload = loadPreloadWithFakeElectron();
+  try {
+    const received = [];
+    preload.api.onSessionData("aborted-input", data => received.push(data));
+    const send = data => preload.handlers.get("netcatty:data")({}, { sessionId: "aborted-input", data });
+    send("__NCMCP_input___I\nCUSTOM\nCONT> ");
+    send("__NCMCP_input___R\n");
+    send("normal output\n");
+    send("__NCMCP_input___I\nlate prompt\n");
+    assert.equal(received.join(""), "normal output\nlate prompt\n");
+  } finally { preload.cleanup(); }
 });
