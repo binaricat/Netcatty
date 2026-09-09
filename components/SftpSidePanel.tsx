@@ -31,6 +31,7 @@ import {
 import { useSftpFollowTerminalCwd } from "../application/state/sftp/useSftpFollowTerminalCwd";
 import { usePendingSftpUploadRebind } from "../application/state/sftp/usePendingSftpUploadRebind";
 import { registerEditorSftpWriterScoped } from "../application/state/editorSftpBridge";
+import { registerEditorSftpOwnerResolver } from "../application/state/editorSftpOwnerRegistry";
 import {
   editorTabStore,
   useEditorTabPresenceRevision,
@@ -147,6 +148,9 @@ interface SftpSidePanelProps {
    * focused). Keeps browse SFTP sessions warm across History/System switches.
    */
   ownerPanelOpen?: boolean;
+  /** Top-level tab id hosting this panel (terminal/workspace tab), used to
+   * resolve which tab owns an editor's SFTP connection. */
+  ownerTabId?: string | null;
   renderOverlays?: boolean;
   pendingUpload?: {
     requestId: string;
@@ -201,6 +205,7 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
   showWorkspaceHostHeader = false,
   isVisible = true,
   ownerPanelOpen = false,
+  ownerTabId = null,
   renderOverlays = true,
   pendingUpload = null,
   onPendingUploadHandled,
@@ -476,6 +481,27 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
     return registerEditorSftpWriterScoped((connectionId, expectedHostId, filePath, content, encoding, sftpTabId) =>
       sftpRef.current.writeTextFileByConnection(connectionId, expectedHostId, filePath, content, encoding, sftpTabId),
     );
+  }, []);
+
+  const ownerTabIdRef = useRef(ownerTabId);
+  ownerTabIdRef.current = ownerTabId;
+
+  // While mounted, report which SFTP connections this panel owns and which
+  // top-level tab hosts it, so batch-close logic can keep the owning tab open
+  // when an editor bound to one of those connections survives its close
+  // prompt. Intentionally no deps — go through sftpRef so connection churn
+  // doesn't register/unregister on every re-render.
+  useEffect(() => {
+    return registerEditorSftpOwnerResolver(() => {
+      const s = sftpRef.current;
+      if (!s) return { connectionIds: [], ownerTabId: ownerTabIdRef.current };
+      const connectionIds: string[] = [];
+      for (const tab of [...(s.leftTabs?.tabs ?? []), ...(s.rightTabs?.tabs ?? [])]) {
+        const id = tab.connection?.id;
+        if (id) connectionIds.push(id);
+      }
+      return { connectionIds, ownerTabId: ownerTabIdRef.current };
+    });
   }, []);
 
   // When this side panel unmounts (its hosting terminal tab was closed) we

@@ -677,29 +677,45 @@ export async function confirmIfBusyLocalTerminalImpl(getCtx: AppContextGetter, s
     }
 }
 
-export async function closeTabsBatchImpl(getCtx: AppContextGetter, targetIds: string[]) {
+/**
+ * Expand batch-close target ids into the terminal session ids whose local
+ * shells the busy probe must inspect: workspace ids contribute every session
+ * they contain; standalone session ids pass through.
+ */
+export function collectBatchBusyProbeSessionIds(
+  sessions: readonly { id: string; workspaceId?: string | null }[],
+  workspaces: readonly { id: string }[],
+  targetIds: readonly string[],
+): string[] {
+  const sessionIdsToProbe: string[] = [];
+  for (const tabId of targetIds) {
+    const ws = workspaces.find((w) => w.id === tabId);
+    if (ws) {
+      for (const s of sessions) {
+        if (s.workspaceId === tabId) sessionIdsToProbe.push(s.id);
+      }
+    } else if (sessions.find((s) => s.id === tabId)) {
+      sessionIdsToProbe.push(tabId);
+    }
+  }
+  return sessionIdsToProbe;
+}
+
+export async function closeTabsBatchImpl(
+  getCtx: AppContextGetter,
+  targetIds: string[],
+  options?: { skipBusyConfirm?: boolean },
+) {
   const { closeLogView, closeSessions, closeTabsInFlightRef, closeWorkspace, confirmIfBusyLocalTerminal, logViews, sessions, workspaces } = getCtx();
 {
       if (targetIds.length === 0) return true;
       if (closeTabsInFlightRef.current) return false;
 
-      // Expand workspace ids into their constituent session ids so the busy
-      // probe sees every local shell that's about to be killed.
-      const sessionIdsToProbe: string[] = [];
-      for (const tabId of targetIds) {
-        const ws = workspaces.find((w) => w.id === tabId);
-        if (ws) {
-          for (const s of sessions) {
-            if (s.workspaceId === tabId) sessionIdsToProbe.push(s.id);
-          }
-        } else if (sessions.find((s) => s.id === tabId)) {
-          sessionIdsToProbe.push(tabId);
-        }
-      }
+      const sessionIdsToProbe = collectBatchBusyProbeSessionIds(sessions, workspaces, targetIds);
 
       closeTabsInFlightRef.current = true;
       try {
-        const ok = await confirmIfBusyLocalTerminal(sessionIdsToProbe);
+        const ok = options?.skipBusyConfirm || await confirmIfBusyLocalTerminal(sessionIdsToProbe);
         if (!ok) return false;
         const standaloneSessionIds = targetIds.filter((tabId) => (
           sessions.some((session) => session.id === tabId)

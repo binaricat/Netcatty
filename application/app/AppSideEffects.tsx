@@ -22,6 +22,7 @@ import { useVaultAgentBridge } from '../state/useVaultAgentBridge';
 import { useWindowControls } from '../state/useWindowControls';
 import { useTerminalKeyboardFocus } from '../state/useTerminalKeyboardFocus';
 import { editorTabStore, useEditorTabChromeList } from '../state/editorTabStore';
+import { findEditorSftpOwnerTabId } from '../state/editorSftpOwnerRegistry';
 import {
   isPluginViewTabId,
   pluginViewTabStore,
@@ -90,7 +91,7 @@ import { isScriptSnippet } from '../../domain/snippetScript.ts';
 import { collectSnippetDeleteIds } from '../../domain/snippetSelection.ts';
 import { shouldOpenLocalTerminalOnStartup, resolveStartupLandingSetting } from '../../domain/startupLanding';
 import { useAppStartupEffects } from './useAppStartupEffects';
-import { handleTrayJumpToSessionImpl, handleTrayTogglePortForwardImpl, handleTrayPanelConnectImpl, handleTrayPanelConnectRequestImpl, flushQueuedTrayPanelConnectHostsImpl, handleGlobalHotkeyKeyDownImpl, handleEscapeKeyDownImpl, handleKeyboardInteractiveSubmitImpl, handleKeyboardInteractiveCancelImpl, handlePassphraseSubmitImpl, handlePassphraseCancelImpl, handlePassphraseSkipImpl, createLocalTerminalWithCurrentShellImpl, splitSessionWithCurrentShellImpl, copySessionWithCurrentShellImpl, duplicateSessionWithCurrentShellImpl, copyWorkspaceWithCurrentShellImpl, copySessionToNewWindowWithCurrentShellImpl, confirmIfBusyLocalTerminalImpl, closeTabsBatchImpl, executeHotkeyActionImpl, handleCreateLocalTerminalImpl, handleConnectToHostImpl, handleTerminalDataCaptureImpl, hasMultipleProtocolsImpl, handleHostConnectWithProtocolCheckImpl, handleProtocolSelectImpl, handleRootContextMenuImpl, markForwardedNativeShortcutEvent } from './AppHandlers';
+import { handleTrayJumpToSessionImpl, handleTrayTogglePortForwardImpl, handleTrayPanelConnectImpl, handleTrayPanelConnectRequestImpl, flushQueuedTrayPanelConnectHostsImpl, handleGlobalHotkeyKeyDownImpl, handleEscapeKeyDownImpl, handleKeyboardInteractiveSubmitImpl, handleKeyboardInteractiveCancelImpl, handlePassphraseSubmitImpl, handlePassphraseCancelImpl, handlePassphraseSkipImpl, createLocalTerminalWithCurrentShellImpl, splitSessionWithCurrentShellImpl, copySessionWithCurrentShellImpl, duplicateSessionWithCurrentShellImpl, copyWorkspaceWithCurrentShellImpl, copySessionToNewWindowWithCurrentShellImpl, confirmIfBusyLocalTerminalImpl, closeTabsBatchImpl, collectBatchBusyProbeSessionIds, executeHotkeyActionImpl, handleCreateLocalTerminalImpl, handleConnectToHostImpl, handleTerminalDataCaptureImpl, hasMultipleProtocolsImpl, handleHostConnectWithProtocolCheckImpl, handleProtocolSelectImpl, handleRootContextMenuImpl, markForwardedNativeShortcutEvent } from './AppHandlers';
 
 type OpenSessionInNewWindowPayload = {
   title?: string;
@@ -1019,6 +1020,13 @@ export function AppSideEffects() {
       const pluginIds = targetIds.filter((id) => pluginViewTabStore.getTab(id));
       const editorIds = targetIds.filter((id) => isEditorTabId(id));
       const regularIds = targetIds.filter((id) => !pluginViewTabStore.getTab(id) && !isEditorTabId(id));
+      // Busy-terminal confirmation must run BEFORE editor close prompts: if it
+      // ran later (inside closeTabsBatchImpl), a cancelled confirmation would
+      // return with clean/saved/discarded editors already removed, so
+      // cancelling the bulk operation would no longer prevent its mutations.
+      if (regularIds.length && !(await confirmIfBusyLocalTerminal(
+        collectBatchBusyProbeSessionIds(sessions, workspaces, regularIds),
+      ))) return;
       // Editor tabs must route through their own close handler so dirty-save
       // prompts run; a cancelled prompt leaves that tab open.
       // Prompt BEFORE closing any regular tabs: closing an editor's owning
@@ -1031,21 +1039,27 @@ export function AppSideEffects() {
         if (!closed) cancelledEditorIds.add(tabId);
       }
       // A cancelled editor must keep its owning tab open too, or the owner's
-      // unmount cleanup would force-close the very editor the user chose to keep.
-      const keepSessionIds = new Set<string>();
+      // unmount cleanup would force-close the very editor the user chose to
+      // keep. Editor tabs record the SFTP connection id (not the terminal
+      // session id), so resolve the owning top-level tab via the panel
+      // registry instead of comparing against session ids.
+      const keepTabIds = new Set<string>();
       for (const tabId of cancelledEditorIds) {
         const editorTab = editorTabStore.getTab(fromEditorTabId(tabId));
-        if (editorTab?.sessionId) keepSessionIds.add(editorTab.sessionId);
+        const ownerTabId = findEditorSftpOwnerTabId(editorTab?.sessionId);
+        if (ownerTabId) keepTabIds.add(ownerTabId);
       }
-      const effectiveRegularIds = keepSessionIds.size === 0 ? regularIds : regularIds.filter((tabId) => {
-        if (keepSessionIds.has(tabId)) return false;
+      const effectiveRegularIds = keepTabIds.size === 0 ? regularIds : regularIds.filter((tabId) => {
+        if (keepTabIds.has(tabId)) return false;
         const ws = workspaces.find((w) => w.id === tabId);
-        if (ws && sessions.some((s) => s.workspaceId === tabId && keepSessionIds.has(s.id))) return false;
+        if (ws && sessions.some((s) => s.workspaceId === tabId && keepTabIds.has(s.id))) return false;
         return true;
       });
+      // Busy confirmation already ran above — skip it inside the batch closer.
       const canClose = !effectiveRegularIds.length || await closeTabsBatchImpl(
         () => ({ closeLogView, closeSessions, closeTabsInFlightRef, closeWorkspace, confirmIfBusyLocalTerminal, logViews, sessions, targetIds: effectiveRegularIds, workspaces }),
         effectiveRegularIds,
+        { skipBusyConfirm: true },
       );
       if (!canClose) return;
       for (const id of pluginIds) pluginViewTabStore.close(id);
