@@ -496,11 +496,16 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
       const s = sftpRef.current;
       if (!s) return { connectionIds: [], ownerTabId: ownerTabIdRef.current };
       const connectionIds: string[] = [];
+      const paneTabIds: string[] = [];
       for (const tab of [...(s.leftTabs?.tabs ?? []), ...(s.rightTabs?.tabs ?? [])]) {
         const id = tab.connection?.id;
         if (id) connectionIds.push(id);
+        // Pane tab ids are stable across browse reconnects (unlike connection
+        // ids), so owner resolution can match editors bound to a stale
+        // pre-reconnect connection id.
+        if (tab.id) paneTabIds.push(tab.id);
       }
-      return { connectionIds, ownerTabId: ownerTabIdRef.current };
+      return { connectionIds, paneTabIds, ownerTabId: ownerTabIdRef.current };
     });
   }, []);
 

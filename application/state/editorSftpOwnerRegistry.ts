@@ -15,6 +15,13 @@
  */
 export interface EditorSftpOwnerSnapshot {
   connectionIds: readonly string[];
+  /**
+   * Stable SFTP pane tab ids (pane.id) hosted by this panel. Unlike connection
+   * ids these survive browse reconnects that regenerate connection ids, so
+   * owner resolution can fall back to them when an editor still references a
+   * pre-reconnect connection id.
+   */
+  paneTabIds?: readonly string[];
   ownerTabId: string | null;
 }
 
@@ -29,11 +36,18 @@ export const registerEditorSftpOwnerResolver = (resolver: EditorSftpOwnerResolve
   };
 };
 
-export const findEditorSftpOwnerTabId = (connectionId: string | undefined): string | null => {
-  if (!connectionId) return null;
+export const findEditorSftpOwnerTabId = (
+  connectionId: string | undefined,
+  paneTabId?: string,
+): string | null => {
+  if (!connectionId && !paneTabId) return null;
   for (const resolve of resolvers) {
     const snapshot = resolve();
-    if (snapshot.ownerTabId && snapshot.connectionIds.includes(connectionId)) {
+    if (!snapshot.ownerTabId) continue;
+    if (connectionId && snapshot.connectionIds.includes(connectionId)) {
+      return snapshot.ownerTabId;
+    }
+    if (paneTabId && snapshot.paneTabIds?.includes(paneTabId)) {
       return snapshot.ownerTabId;
     }
   }

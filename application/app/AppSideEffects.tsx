@@ -1042,11 +1042,13 @@ export function AppSideEffects() {
       // unmount cleanup would force-close the very editor the user chose to
       // keep. Editor tabs record the SFTP connection id (not the terminal
       // session id), so resolve the owning top-level tab via the panel
-      // registry instead of comparing against session ids.
+      // registry instead of comparing against session ids. A browse reconnect
+      // regenerates connection ids while the editor still references the old
+      // one, so also resolve by the editor's stable pane tab id.
       const keepTabIds = new Set<string>();
       for (const tabId of cancelledEditorIds) {
         const editorTab = editorTabStore.getTab(fromEditorTabId(tabId));
-        const ownerTabId = findEditorSftpOwnerTabId(editorTab?.sessionId);
+        const ownerTabId = findEditorSftpOwnerTabId(editorTab?.sessionId, editorTab?.sftpTabId);
         if (ownerTabId) keepTabIds.add(ownerTabId);
       }
       const effectiveRegularIds = keepTabIds.size === 0 ? regularIds : regularIds.filter((tabId) => {
