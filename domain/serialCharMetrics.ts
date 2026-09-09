@@ -129,15 +129,19 @@ export function getCharByteLength(char: string, charset?: string): number {
     return total || 1;
   }
 
-  // Shift_JIS: 1 byte for ASCII, 2 bytes for all other characters
-  // (the vast majority of Shift_JIS characters are double-byte).
+  // Shift_JIS: 1 byte for ASCII, 1 byte for half-width Katakana
+  // (U+FF61–U+FF9F, mapped to 0xA1–0xDF), 1 byte for ¥ (U+00A5 → 0x5C),
+  // and 2 bytes for all other non-ASCII characters.
   // This mirrors iconv-lite's Shift_JIS encoding behavior.
   if (encoding === 'shift-jis') {
     let total = 0;
     for (const ch of char) {
       const cp = ch.codePointAt(0);
       if (cp === undefined) continue;
-      total += cp < 0x80 ? 1 : 2; // ASCII → 1 byte, non-ASCII → 2 bytes
+      if (cp < 0x80) { total += 1; continue; } // ASCII → 1 byte
+      if (cp >= 0xff61 && cp <= 0xff9f) { total += 1; continue; } // Half-width Katakana → 1 byte
+      if (cp === 0xa5) { total += 1; continue; } // ¥ → 1 byte (0x5C)
+      total += 2; // All other non-ASCII → 2 bytes
     }
     return total || 1;
   }
