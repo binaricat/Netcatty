@@ -98,6 +98,9 @@ let inkCtx: CanvasRenderingContext2D | null = null;
 function measureInkCoverage(ctx: CanvasRenderingContext2D, font: string, text: string): number {
   const sizeMatch = font.match(/(\d+(?:\.\d+)?)px/);
   const px = sizeMatch ? parseFloat(sizeMatch[1]) : 16;
+  // Measure with the target font so ascent/descent/width reflect the actual
+  // glyphs (the context's default font would undersize the canvas and clip).
+  ctx.font = font;
   const metrics = ctx.measureText(text);
   const ascent = Math.ceil(metrics.actualBoundingBoxAscent || px * 0.8) + 2;
   const descent = Math.ceil(metrics.actualBoundingBoxDescent || px * 0.2) + 2;
