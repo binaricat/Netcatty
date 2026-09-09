@@ -37,8 +37,8 @@ export function pickNearestBundledWeight(
  * false-positive on syntactically valid but unavailable families/weights in
  * Chromium (see fontAvailability.ts).
  *
- * Compares geometric TextMetrics first, then — for metric-aligned monospace
- * variable fonts where every geometric delta is ~0 (#3335) — actual stroke
+ * Compares geometric TextMetrics first, then, for metric-aligned monospace
+ * variable fonts where every geometric delta is ~0 (#3335), actual stroke
  * ink coverage via `measureTextInk`.
  */
 export function isBoldWeightDistinctWithContext(
@@ -83,7 +83,7 @@ export function isBoldWeightDistinctWithContext(
 /**
  * Relative ink increase required to accept a bold weight once the geometric
  * probes are inconclusive. Real heavier weights add far more than this
- * (Roboto Mono 400→700 ≈ +25%); identical rendering differs by ~0%.
+ * (Roboto Mono 400 to 700 is about +25%); identical rendering differs by ~0%.
  */
 const BOLD_INK_RATIO_THRESHOLD = 0.03;
 
