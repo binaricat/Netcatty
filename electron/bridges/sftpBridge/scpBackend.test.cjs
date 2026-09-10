@@ -222,6 +222,26 @@ describe("scpBackend browse/manage with fake exec", () => {
     );
   });
 
+  it("does not treat exit 2 without an ENOENT marker as a missing file", async () => {
+    // Codex: a remote shell failure (e.g. syntax/usage error) can also exit 2;
+    // without the ENOENT marker it must surface the real stderr, not ENOENT.
+    const shellFailBackend = createScpBackend({
+      exec: async () => ({ stdout: "", stderr: "sh: syntax error\n", code: 2 }),
+      execStream: async () => createMockStream(),
+    });
+    await assert.rejects(
+      () => shellFailBackend.stat("/home/test/readme.txt"),
+      (err) => {
+        assert.equal(err.code, "EMPTY_RESPONSE");
+        assert.match(err.message, /exit 2/);
+        assert.match(err.message, /syntax error/);
+        assert.equal(err.exitCode, 2);
+        assert.equal(err.stderr, "sh: syntax error");
+        return true;
+      },
+    );
+  });
+
   it("resolves home directory", async () => {
     const home = await backend.homeDir();
     assert.equal(home, "/home/test");
