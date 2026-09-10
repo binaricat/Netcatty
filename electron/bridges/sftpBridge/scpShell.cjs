@@ -358,6 +358,20 @@ function parseStatRecord(stdout, { stderr = "", exitCode = null } = {}) {
     err.stderr = stderrText;
     throw err;
   }
+  // Any other nonzero status is a remote execution failure — even when stdout
+  // looks like a valid record (e.g. a forced-command wrapper that forwards the
+  // stat record before failing). Such metadata is untrustworthy, so reject it
+  // instead of letting the caller proceed on it.
+  if (exitCode != null && exitCode !== 0) {
+    const detail = [
+      `stat command exited ${exitCode}`,
+      stderrText ? `stderr: ${stderrText.slice(0, 200)}` : null,
+    ].filter(Boolean).join("; ");
+    const err = new ScpShellError(detail);
+    err.exitCode = exitCode;
+    err.stderr = stderrText;
+    throw err;
+  }
   const parts = line.split("|");
   if (parts.length < 5) {
     // Non-empty stdout that isn't a stat record: the remote command may have

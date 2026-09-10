@@ -255,6 +255,29 @@ describe("scpBackend browse/manage with fake exec", () => {
     );
   });
 
+  it("rejects stat metadata forwarded by a wrapper that exits nonzero", async () => {
+    // Codex: a forced-command wrapper can forward the stat record but exit
+    // nonzero; the metadata is untrustworthy and must not be returned.
+    const wrapperBackend = createScpBackend({
+      exec: async () => ({
+        stdout: "f|-rw-r--r--|5|1700000000|/home/test/readme.txt|12345\n",
+        stderr: "forced command failed\n",
+        code: 1,
+      }),
+      execStream: async () => createMockStream(),
+    });
+    await assert.rejects(
+      () => wrapperBackend.stat("/home/test/readme.txt"),
+      (err) => {
+        assert.match(err.message, /exited 1/);
+        assert.match(err.message, /forced command failed/);
+        assert.equal(err.exitCode, 1);
+        assert.equal(err.stderr, "forced command failed");
+        return true;
+      },
+    );
+  });
+
   it("resolves home directory", async () => {
     const home = await backend.homeDir();
     assert.equal(home, "/home/test");
