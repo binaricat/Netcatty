@@ -335,7 +335,14 @@ function parseStatRecord(stdout, { stderr = "", exitCode = null } = {}) {
     // Only report ENOENT when the remote actually said so — an empty exec
     // response (e.g. channel negotiation failure) is a transport problem, not
     // a missing file, and must not be masked as ENOENT.
-    if (line === "ENOENT" || stderrText.split(/\r?\n/)[0].trim() === "ENOENT") {
+    // Accept the ENOENT marker on any stderr line: non-interactive shells may
+    // print banners/warnings before running the command, so the marker is not
+    // always on the first line. When the exit code is known it must be 2 (the
+    // value the stat command exits with), so an unrelated error is not masked.
+    const stderrLines = stderrText.split(/\r?\n/).map((entry) => entry.trim());
+    const markerOnStderr = stderrLines.includes("ENOENT")
+      && (exitCode == null || exitCode === 2);
+    if (line === "ENOENT" || markerOnStderr) {
       const err = new ScpShellError("No such file", "ENOENT");
       err.code = "ENOENT";
       throw err;

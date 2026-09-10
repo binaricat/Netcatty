@@ -186,6 +186,19 @@ describe("scpBackend browse/manage with fake exec", () => {
     );
   });
 
+  it("reports ENOENT when a shell banner precedes the marker on stderr", async () => {
+    // Codex: non-interactive shells may print warnings before the command, so
+    // the ENOENT marker can appear on a later stderr line.
+    const bannerBackend = createScpBackend({
+      exec: async () => ({ stdout: "", stderr: "warning: env cleared\nENOENT\n", code: 2 }),
+      execStream: async () => createMockStream(),
+    });
+    await assert.rejects(
+      () => bannerBackend.stat("/home/test/gone.txt"),
+      (err) => err.code === "ENOENT" && err.message === "No such file",
+    );
+  });
+
   it("does not mask an empty exec response as ENOENT in stat", async () => {
     const emptyBackend = createScpBackend({
       // Simulates the reporter's case: the exec channel returns no output at
