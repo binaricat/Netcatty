@@ -12,11 +12,18 @@ import { useI18n } from '../../application/i18n/I18nProvider';
 interface ColorFieldDef {
     key: keyof TerminalTheme['colors'];
     labelKey: string;
+    /** Fallback shown when the (optional) field has no value yet. */
+    fallbackKey?: keyof TerminalTheme['colors'];
 }
 
 const GENERAL_COLORS: ColorFieldDef[] = [
     { key: 'background', labelKey: 'terminal.customTheme.color.background' },
     { key: 'foreground', labelKey: 'terminal.customTheme.color.foreground' },
+    {
+        key: 'foregroundIntense',
+        labelKey: 'terminal.customTheme.color.foregroundIntense',
+        fallbackKey: 'foreground',
+    },
     { key: 'cursor', labelKey: 'terminal.customTheme.color.cursor' },
     { key: 'selection', labelKey: 'terminal.customTheme.color.selection' },
 ];
@@ -135,11 +142,11 @@ export const CustomThemeEditor: React.FC<CustomThemeEditorProps> = ({
                 {title}
             </div>
             <div className="space-y-1">
-                {fields.map(({ key, labelKey }) => (
+                {fields.map(({ key, labelKey, fallbackKey }) => (
                     <ColorInput
                         key={key}
                         label={t(labelKey)}
-                        value={theme.colors[key]}
+                        value={theme.colors[key] ?? (fallbackKey ? theme.colors[fallbackKey] : '')}
                         onChange={(v) => updateColor(key, v)}
                     />
                 ))}

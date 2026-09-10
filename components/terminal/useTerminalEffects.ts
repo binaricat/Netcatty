@@ -1047,12 +1047,15 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
   }, [status]);
 
 
-  const effectiveThemeKey = `${effectiveTheme.id}:${effectiveTheme.colors.background}:${effectiveTheme.colors.foreground}:${effectiveTheme.colors.cursor}`;
+  const effectiveThemeKey = `${effectiveTheme.id}:${effectiveTheme.colors.background}:${effectiveTheme.colors.foreground}:${effectiveTheme.colors.foregroundIntense ?? ""}:${effectiveTheme.colors.cursor}`;
 
   // Sync xterm theme before browser paint; apply synchronously on visible panes.
   useLayoutEffect(() => {
     const term = termRef.current;
     if (!term) return;
+
+    // Theme colors feed the foregroundIntense stream rewrite (#3352).
+    xtermRuntimeRef.current?.setForegroundIntenseColors(effectiveTheme.colors);
 
     if (isRendererActiveRef.current || isFocused) {
       cancelTerminalThemeUpdate(sessionId);

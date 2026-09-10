@@ -1,0 +1,293 @@
+/**
+ * Foreground-intense color support for terminal themes (#3352).
+ *
+ * xterm.js resolves bold text drawn with the *default* foreground (SGR 1,
+ * SGR 39;1) to the theme `foreground` color — there is no `foregroundIntense`
+ * theme key, and `drawBoldTextInBrightColors` only affects cells with an
+ * explicit ANSI color. Themes that define a distinct `foregroundIntense` get
+ * it by rewriting the output stream: whenever SGR state is "bold + default
+ * foreground", the transformer appends an explicit `38;2;r;g;b` (truecolor)
+ * color so every renderer (WebGL, DOM) paints the intense variant. When bold
+ * is later cleared while the injected color is active, `39` is appended to
+ * restore the true default foreground.
+ *
+ * Explicit ANSI colors (e.g. SGR 1 + cyan) are left untouched and keep the
+ * existing normal/bright palette logic.
+ */
+
+export type ForegroundIntenseRgb = readonly [number, number, number];
+
+export type ForegroundIntenseThemeColors = {
+  foreground: string;
+  foregroundIntense?: string;
+};
+
+/** Parse a `#rgb` / `#rrggbb` theme color to an rgb triple, or null. */
+export function parseHexColor(value: string | undefined): ForegroundIntenseRgb | null {
+  if (!value) return null;
+  const hex = value.trim().replace(/^#/, "");
+  let triplet: string | null = null;
+  if (/^[0-9a-fA-F]{3}$/.test(hex)) {
+    triplet = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
+  } else if (/^[0-9a-fA-F]{6}$/.test(hex)) {
+    triplet = hex;
+  }
+  if (!triplet) return null;
+  return [
+    parseInt(triplet.slice(0, 2), 16),
+    parseInt(triplet.slice(2, 4), 16),
+    parseInt(triplet.slice(4, 6), 16),
+  ];
+}
+
+/**
+ * Resolve the intense rgb triple for a theme. Returns null when the feature
+ * is off: no `foregroundIntense`, an invalid color, or a value equal to the
+ * normal foreground (nothing to intensify).
+ */
+export function resolveForegroundIntenseRgb(
+  colors: ForegroundIntenseThemeColors,
+): ForegroundIntenseRgb | null {
+  const intense = parseHexColor(colors.foregroundIntense);
+  if (!intense) return null;
+  const normal = parseHexColor(colors.foreground);
+  if (!normal) return null;
+  if (
+    intense[0] === normal[0] &&
+    intense[1] === normal[1] &&
+    intense[2] === normal[2]
+  ) {
+    return null;
+  }
+  return intense;
+}
+
+export type ForegroundIntenseTransformer = {
+  /** Rewrite one output chunk (escape sequences split across chunks are fine). */
+  transform(chunk: string): string;
+  /** Update the intense color (e.g. after a theme switch). Null disables. */
+  setColor(rgb: ForegroundIntenseRgb | null): void;
+  /** Return any buffered partial escape sequence; call on teardown. */
+  flush(): string;
+  /** Forget tracked SGR state (e.g. after a full screen reset). */
+  reset(): void;
+};
+
+const ESC = "\x1b";
+const BEL = "\x07";
+const C1_CSI = String.fromCharCode(0x9b);
+const C1_ST = String.fromCharCode(0x9c);
+/** A captured escape sequence longer than this is treated as malformed. */
+const MAX_SEQUENCE_LENGTH = 8192;
+
+type Phase = "ground" | "esc" | "csi" | "string" | "stringEsc";
+
+const FG_DEFAULT = 0;
+const FG_EXPLICIT = 1;
+const FG_INJECTED = 2;
+
+/**
+ * Create a stream transformer that applies the intense color to bold text
+ * drawn with the default foreground. When `rgb` is null the transformer is a
+ * zero-cost pass-through (no SGR state is tracked).
+ */
+export function createForegroundIntenseTransformer(
+  rgb: ForegroundIntenseRgb | null,
+): ForegroundIntenseTransformer {
+  let color = rgb;
+  let bold = false;
+  let fgKind = FG_DEFAULT;
+  let phase: Phase = "ground";
+  let seq = "";
+  let out = "";
+
+  const resetState = (): void => {
+    bold = false;
+    fgKind = FG_DEFAULT;
+  };
+
+  const injectParams = (): string => `;38;2;${color![0]};${color![1]};${color![2]}`;
+
+  /** Apply one SGR sequence (params split on ';') and normalize the state. */
+  const applySgr = (rawParams: string): string => {
+    const params = rawParams === "" ? ["0"] : rawParams.split(";");
+    for (let i = 0; i < params.length; i += 1) {
+      const raw = params[i];
+      if (raw === "") {
+        resetState();
+        continue;
+      }
+      // ITU T.416 colon form: one self-contained parameter, e.g. 38:2:1:2:3.
+      if (raw.includes(":")) {
+        const lead = parseInt(raw, 10);
+        if (lead === 38 || lead === 58) fgKind = FG_EXPLICIT;
+        continue;
+      }
+      const n = parseInt(raw, 10);
+      if (Number.isNaN(n)) continue;
+      if (n === 0) {
+        resetState();
+      } else if (n === 1) {
+        bold = true;
+      } else if (n === 22) {
+        bold = false;
+      } else if ((n >= 30 && n <= 37) || (n >= 90 && n <= 97)) {
+        fgKind = FG_EXPLICIT;
+      } else if (n === 39) {
+        fgKind = FG_DEFAULT;
+      } else if (n === 38 || n === 48 || n === 58) {
+        // Extended color: skip its sub-parameters so 48;5;196 is not read as
+        // a foreground color. 38 also makes the foreground explicit.
+        const sub = params[i + 1];
+        if (sub === "5") i += 2;
+        else if (sub === "2") i += 4;
+        else i += 1;
+        if (n !== 48) fgKind = FG_EXPLICIT;
+      }
+      // Everything else (dim, underline, background colors, ...) does not
+      // change bold/default-foreground state.
+    }
+    // Normalize: bold + default foreground renders with the intense color.
+    if (color && bold && fgKind !== FG_EXPLICIT) {
+      if (fgKind !== FG_INJECTED) {
+        fgKind = FG_INJECTED;
+        return injectParams();
+      }
+      return "";
+    }
+    if (!bold && fgKind === FG_INJECTED) {
+      fgKind = FG_DEFAULT;
+      return ";39";
+    }
+    return "";
+  };
+
+  const transform = (chunk: string): string => {
+    if (!chunk) return chunk;
+    // Plain chunks (the common case for floods) never change SGR state.
+    if (phase === "ground" && !chunk.includes(ESC) && !chunk.includes(C1_CSI)) {
+      return chunk;
+    }
+    if (!color && phase === "ground" && !bold && fgKind !== FG_INJECTED) {
+      // Feature disabled: pass through without state tracking.
+      return chunk;
+    }
+    out = "";
+    for (let i = 0; i < chunk.length; i += 1) {
+      const ch = chunk[i];
+      switch (phase) {
+        case "ground": {
+          if (ch === ESC) {
+            phase = "esc";
+            seq = ch;
+          } else if (ch === C1_CSI) {
+            phase = "csi";
+            seq = ch;
+          } else {
+            out += ch;
+          }
+          break;
+        }
+        case "esc": {
+          if (ch === "[") {
+            phase = "csi";
+            seq += ch;
+          } else if (
+            ch === "]" || ch === "P" || ch === "X" || ch === "^" || ch === "_"
+          ) {
+            // OSC / DCS / SOS / PM / APC — swallow until BEL or ST.
+            phase = "string";
+            seq += ch;
+          } else if (ch === ESC) {
+            seq = ch;
+          } else {
+            // Two-character escape (charset designators, RIS, IND, ...).
+            seq += ch;
+            if (ch === "c") resetState();
+            out += seq;
+            seq = "";
+            phase = "ground";
+          }
+          break;
+        }
+        case "csi": {
+          const code = ch.charCodeAt(0);
+          if (code >= 0x40 && code <= 0x7e) {
+            seq += ch;
+            const isSgr = ch === "m";
+            const paramsStart = seq.charCodeAt(0) === 0x9b ? 1 : 2;
+            const extra = isSgr ? applySgr(seq.slice(paramsStart, seq.length - 1)) : "";
+            out += seq.slice(0, seq.length - 1) + extra + ch;
+            seq = "";
+            phase = "ground";
+          } else if (ch === ESC) {
+            // Aborted sequence: emit what we captured, restart parsing.
+            out += seq;
+            seq = ESC;
+            phase = "esc";
+          } else {
+            seq += ch;
+            if (seq.length > MAX_SEQUENCE_LENGTH) {
+              out += seq;
+              seq = "";
+              phase = "ground";
+            }
+          }
+          break;
+        }
+        case "string": {
+          seq += ch;
+          if (ch === BEL || ch === C1_ST) {
+            out += seq;
+            seq = "";
+            phase = "ground";
+          } else if (ch === ESC) {
+            phase = "stringEsc";
+          } else if (seq.length > MAX_SEQUENCE_LENGTH) {
+            out += seq;
+            seq = "";
+            phase = "ground";
+          }
+          break;
+        }
+        case "stringEsc": {
+          if (ch === "\\") {
+            out += seq + ch; // seq ends with ESC; ch is the ST backslash.
+            seq = "";
+            phase = "ground";
+          } else {
+            // Malformed string terminator: flush what we held and continue.
+            out += seq;
+            seq = "";
+            if (ch === ESC) {
+              phase = "esc";
+              seq = ch;
+            } else if (ch === C1_CSI) {
+              phase = "csi";
+              seq = ch;
+            } else {
+              out += ch;
+              phase = "ground";
+            }
+          }
+          break;
+        }
+      }
+    }
+    return out;
+  };
+
+  return {
+    transform,
+    setColor(next: ForegroundIntenseRgb | null): void {
+      color = next;
+    },
+    flush(): string {
+      const pending = phase === "ground" ? "" : seq;
+      seq = "";
+      phase = "ground";
+      return pending;
+    },
+    reset: resetState,
+  };
+}

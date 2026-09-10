@@ -569,6 +569,13 @@ export interface TerminalTheme {
   colors: {
     background: string;
     foreground: string;
+    /**
+     * Optional intense variant for bold text drawn with the default foreground
+     * (SGR 1 / SGR 39;1). When set and different from `foreground`, bold text
+     * without an explicit ANSI color renders with this color instead (#3352).
+     * Explicit ANSI colors keep the existing normal/bright palette behavior.
+     */
+    foregroundIntense?: string;
     cursor: string;
     selection: string;
     black: string;

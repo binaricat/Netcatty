@@ -269,6 +269,7 @@ export const ruTerminalMessages: Messages = {
   'terminal.customTheme.group.bright': 'Яркие цвета',
   'terminal.customTheme.color.background': 'Фон',
   'terminal.customTheme.color.foreground': 'Текст',
+  'terminal.customTheme.color.foregroundIntense': 'Яркий текст (жирный)',
   'terminal.customTheme.color.cursor': 'Курсор',
   'terminal.customTheme.color.selection': 'Выделение',
   'terminal.customTheme.color.black': 'Чёрный',
