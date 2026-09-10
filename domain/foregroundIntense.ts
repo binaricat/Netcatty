@@ -101,6 +101,11 @@ export function createForegroundIntenseTransformer(
   let color = rgb;
   let bold = false;
   let fgKind = FG_DEFAULT;
+  // Rendition state saved by DECSC (ESC 7) / SCOSC (CSI s), restored by
+  // DECRC (ESC 8) / SCORC (CSI u). xterm.js saves and restores the fg/bg
+  // attributes together with the cursor position, so the tracked SGR state
+  // must follow.
+  let saved: { bold: boolean; fgKind: number } | null = null;
   let phase: Phase = "ground";
   let seq = "";
   let out = "";
@@ -134,7 +139,9 @@ export function createForegroundIntenseTransformer(
         resetState();
       } else if (n === 1) {
         bold = true;
-      } else if (n === 22) {
+      } else if (n === 22 || n === 221) {
+        // 22 is "bold off"; 221 is the Kitty "not bold" extension that the
+        // bundled xterm.js also applies to BOLD.
         bold = false;
       } else if ((n >= 30 && n <= 37) || (n >= 90 && n <= 97)) {
         fgKind = FG_EXPLICIT;
@@ -208,8 +215,17 @@ export function createForegroundIntenseTransformer(
           } else {
             // Two-character escape (charset designators, RIS, IND, ...).
             seq += ch;
-            if (ch === "c") resetState();
-            out += seq;
+            let extra = "";
+            if (ch === "c") {
+              // RIS resets everything, including the saved cursor rendition.
+              resetState();
+              saved = null;
+            } else if (ch === "7") {
+              saveRendition();
+            } else if (ch === "8") {
+              extra = restoreRendition();
+            }
+            out += seq + extra;
             seq = "";
             phase = "ground";
           }
@@ -219,10 +235,24 @@ export function createForegroundIntenseTransformer(
           const code = ch.charCodeAt(0);
           if (code >= 0x40 && code <= 0x7e) {
             seq += ch;
-            const isSgr = ch === "m";
             const paramsStart = seq.charCodeAt(0) === 0x9b ? 1 : 2;
-            const extra = isSgr ? applySgr(seq.slice(paramsStart, seq.length - 1)) : "";
-            out += seq.slice(0, seq.length - 1) + extra + ch;
+            const params = seq.slice(paramsStart, seq.length - 1);
+            let extra = "";
+            if (ch === "m") {
+              // SGR extras are parameters, appended before the final byte.
+              extra = applySgr(params);
+              out += seq.slice(0, seq.length - 1) + extra + ch;
+            } else {
+              if (ch === "s" && /^[0-9;]*$/.test(params)) {
+                // SCOSC (plain CSI s only; prefixed/intermediate forms such as
+                // the Kitty keyboard CSI = u / CSI ? u are different commands).
+                saveRendition();
+              } else if (ch === "u" && /^[0-9;]*$/.test(params)) {
+                extra = restoreRendition();
+              }
+              // Non-SGR extras are full sequences, appended after the final byte.
+              out += seq + extra;
+            }
             seq = "";
             phase = "ground";
           } else if (ch === ESC) {
@@ -305,6 +335,28 @@ export function createForegroundIntenseTransformer(
       return `${ESC}[${injectParams().slice(1)}m`;
     }
     return "";
+  };
+
+  /** DECSC / SCOSC: remember the tracked rendition state. */
+  const saveRendition = (): void => {
+    saved = { bold, fgKind };
+  };
+
+  /**
+   * DECRC / SCORC: xterm.js restores the saved fg/bg attributes, so bring the
+   * tracked state back in step and emit whatever keeps the terminal in sync
+   * (e.g. drop a stale injected color or re-inject the current one).
+   */
+  const restoreRendition = (): string => {
+    if (saved) {
+      bold = saved.bold;
+      fgKind = saved.fgKind;
+    } else {
+      // xterm.js starts with default saved attributes, so restoring without a
+      // prior save resets the rendition.
+      resetState();
+    }
+    return resync();
   };
 
   return {

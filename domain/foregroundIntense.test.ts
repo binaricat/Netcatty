@@ -170,3 +170,51 @@ test('plain text chunks are returned unchanged (fast path)', () => {
   const plain = 'lorem ipsum '.repeat(50);
   assert.equal(t.transform(plain), plain);
 });
+
+test('SGR 221 (Kitty not bold) clears the injected color like SGR 22', () => {
+  const t = createForegroundIntenseTransformer([...INTENSE]);
+  t.transform(`${ESC}[1m`);
+  assert.equal(t.transform(`${ESC}[221m`), `${ESC}[221;39m`);
+  // Subsequent bold re-injects.
+  assert.equal(t.transform(`${ESC}[1m`), `${ESC}[1;38;2;255;96;0m`);
+});
+
+test('ESC 7 / ESC 8 save and restore the tracked rendition state', () => {
+  const t = createForegroundIntenseTransformer([...INTENSE]);
+  // Save default state, then bold + injected, then restore: xterm drops the
+  // injected color and bold, so the transformer must too (nothing to emit —
+  // the terminal is already back in sync).
+  assert.equal(t.transform(`${ESC}7`), `${ESC}7`);
+  t.transform(`${ESC}[1m`);
+  assert.equal(t.transform(`${ESC}8`), `${ESC}8`);
+  // Final SGR 1 after restore must re-inject (state is default + bold again).
+  assert.equal(t.transform(`${ESC}[1m`), `${ESC}[1;38;2;255;96;0m`);
+});
+
+test('CSI s / CSI u save and restore the tracked rendition state', () => {
+  const t = createForegroundIntenseTransformer([...INTENSE]);
+  assert.equal(t.transform(`${ESC}[s`), `${ESC}[s`);
+  assert.equal(t.transform(`${ESC}[1m`), `${ESC}[1;38;2;255;96;0m`);
+  // Restore un-bolds and restores the default foreground: drop the injection.
+  assert.equal(t.transform(`${ESC}[u`), `${ESC}[u`);
+  assert.equal(t.transform(`${ESC}[1m`), `${ESC}[1;38;2;255;96;0m`);
+});
+
+test('restore to a saved bold+injected state keeps the injection', () => {
+  const t = createForegroundIntenseTransformer([...INTENSE]);
+  t.transform(`${ESC}[1m`); // saved state: bold + injected truecolor
+  assert.equal(t.transform(`${ESC}[s`), `${ESC}[s`);
+  t.transform(`${ESC}[0m`);
+  assert.equal(t.transform(`${ESC}[u`), `${ESC}[u${ESC}[38;2;255;96;0m`);
+  // State is bold + default-fg (injected) again; no double injection needed.
+  assert.equal(t.transform('x'), 'x');
+});
+
+test('prefixed CSI sequences (Kitty CSI = u / CSI ? u) are not treated as restores', () => {
+  const t = createForegroundIntenseTransformer([...INTENSE]);
+  t.transform(`${ESC}[1m`);
+  assert.equal(t.transform(`${ESC}[?u`), `${ESC}[?u`);
+  assert.equal(t.transform(`${ESC}[=u`), `${ESC}[=u`);
+  // Injection is still considered active: SGR 22 must emit the revert.
+  assert.equal(t.transform(`${ESC}[22m`), `${ESC}[22;39m`);
+});
