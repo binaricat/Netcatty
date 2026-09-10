@@ -2027,6 +2027,23 @@ async function openSftpForSession(_event, payload) {
         `[SFTP] openSftpForSession SFTP channel failed for ${sessionId}; falling back to SCP mode:`,
         sftpErr?.message || String(sftpErr),
       );
+      // Persist the real failure reason: packaged builds do not keep
+      // main-process console output, so this diagnostic is the only trace of
+      // why the first-hop SFTP channel negotiation failed.
+      try {
+        require("./crashLogBridge.cjs").captureDiagnostic(
+          "sftpBridge.openSftpForSession",
+          `SFTP channel failed for ${sessionId}; falling back to SCP mode`,
+          {
+            sessionId: sourceSessionId,
+            fileProtocol,
+            reason: sftpErr?.message || String(sftpErr),
+            reasonCode: sftpErr?.code ?? sftpErr?.level ?? undefined,
+          },
+        );
+      } catch {
+        // Crash log unavailable (e.g. tests without Electron) — console.warn above still applies.
+      }
       client.__netcattyFileProtocol = "scp";
       client.sftp = null;
       try {

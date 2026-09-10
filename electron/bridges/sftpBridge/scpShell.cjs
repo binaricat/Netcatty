@@ -327,11 +327,28 @@ function parseLsLaOutput(stdout, { basePath = "" } = {}) {
   return results;
 }
 
-function parseStatRecord(stdout) {
+function parseStatRecord(stdout, { stderr = "", exitCode = null } = {}) {
   const line = String(stdout || "").trim().split(/\r?\n/)[0] || "";
+  const stderrText = String(stderr || "").trim();
   if (!line || line === "ENOENT") {
-    const err = new ScpShellError("No such file", "ENOENT");
-    err.code = "ENOENT";
+    // Real missing path: the stat command prints ENOENT on stderr and exits 2.
+    // Only report ENOENT when the remote actually said so — an empty exec
+    // response (e.g. channel negotiation failure) is a transport problem, not
+    // a missing file, and must not be masked as ENOENT.
+    if (line === "ENOENT" || exitCode === 2 || stderrText.split(/\r?\n/)[0].trim() === "ENOENT") {
+      const err = new ScpShellError("No such file", "ENOENT");
+      err.code = "ENOENT";
+      throw err;
+    }
+    const detail = [
+      "exec channel returned empty response",
+      exitCode != null ? `exit ${exitCode}` : null,
+      stderrText ? `stderr: ${stderrText.slice(0, 200)}` : null,
+    ].filter(Boolean).join("; ");
+    const err = new ScpShellError(detail, "EMPTY_RESPONSE");
+    err.code = "EMPTY_RESPONSE";
+    err.exitCode = exitCode;
+    err.stderr = stderrText;
     throw err;
   }
   const parts = line.split("|");

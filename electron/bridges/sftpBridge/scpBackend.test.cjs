@@ -175,6 +175,53 @@ describe("scpBackend browse/manage with fake exec", () => {
     assert.match(statCommand, /\[ ! -L "\$p" \]/, "broken symlinks must not be reported as missing");
   });
 
+  it("reports ENOENT when the stat command exits 2 with an ENOENT marker", async () => {
+    const missingBackend = createScpBackend({
+      exec: async () => ({ stdout: "", stderr: "ENOENT\n", code: 2 }),
+      execStream: async () => createMockStream(),
+    });
+    await assert.rejects(
+      () => missingBackend.stat("/home/test/gone.txt"),
+      (err) => err.code === "ENOENT" && err.message === "No such file",
+    );
+  });
+
+  it("does not mask an empty exec response as ENOENT in stat", async () => {
+    const emptyBackend = createScpBackend({
+      // Simulates the reporter's case: the exec channel returns no output at
+      // all (e.g. channel negotiation failure) — not a missing file.
+      exec: async () => ({ stdout: "", stderr: "", code: 0 }),
+      execStream: async () => createMockStream(),
+    });
+    await assert.rejects(
+      () => emptyBackend.stat("/home/test/readme.txt"),
+      (err) => {
+        assert.equal(err.code, "EMPTY_RESPONSE");
+        assert.match(err.message, /empty response/);
+        assert.ok(!(err instanceof Error && err.message === "No such file"));
+        return true;
+      },
+    );
+  });
+
+  it("surfaces stderr and exit code when the stat command fails without output", async () => {
+    const failingBackend = createScpBackend({
+      exec: async () => ({ stdout: "", stderr: "sh: syntax error\n", code: 1 }),
+      execStream: async () => createMockStream(),
+    });
+    await assert.rejects(
+      () => failingBackend.stat("/home/test/readme.txt"),
+      (err) => {
+        assert.equal(err.code, "EMPTY_RESPONSE");
+        assert.match(err.message, /exit 1/);
+        assert.match(err.message, /syntax error/);
+        assert.equal(err.exitCode, 1);
+        assert.equal(err.stderr, "sh: syntax error");
+        return true;
+      },
+    );
+  });
+
   it("resolves home directory", async () => {
     const home = await backend.homeDir();
     assert.equal(home, "/home/test");
