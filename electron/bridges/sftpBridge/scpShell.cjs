@@ -353,7 +353,19 @@ function parseStatRecord(stdout, { stderr = "", exitCode = null } = {}) {
   }
   const parts = line.split("|");
   if (parts.length < 5) {
-    throw new ScpShellError(`Malformed stat record: ${line.slice(0, 80)}`);
+    // Non-empty stdout that isn't a stat record: the remote command may have
+    // failed (nonzero exit, e.g. a restricted shell printing a banner) while
+    // still writing to stdout. Preserve exit code and stderr so failures with
+    // output aren't reduced to a bare "malformed" message.
+    const detail = [
+      `Malformed stat record: ${line.slice(0, 80)}`,
+      exitCode != null ? `exit ${exitCode}` : null,
+      stderrText ? `stderr: ${stderrText.slice(0, 200)}` : null,
+    ].filter(Boolean).join("; ");
+    const err = new ScpShellError(detail);
+    err.exitCode = exitCode;
+    err.stderr = stderrText;
+    throw err;
   }
   const [t, modeStr, sizeStr, mtimeStr, abs, inoStr] = parts;
   const ino = inoStr && /^\d+$/.test(String(inoStr).trim())
