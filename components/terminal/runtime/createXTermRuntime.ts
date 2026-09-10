@@ -640,11 +640,24 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     }
     originalTermWrite(data, callback);
   };
+  // xterm.reset() (snapshot replay, reconnect) wipes the rendition; the
+  // transformer's tracked SGR state must be dropped with it.
+  const originalTermReset = term.reset.bind(term);
+  term.reset = (): void => {
+    originalTermReset();
+    foregroundIntenseTransformer.reset();
+  };
   const setForegroundIntenseColors = (colors: TerminalTheme["colors"]): void => {
-    foregroundIntenseTransformer.setColor(resolveForegroundIntenseRgb(colors));
+    // Resync immediately so an outstanding injected color or an active
+    // bold + default foreground does not linger until the next SGR boundary.
+    const resync = foregroundIntenseTransformer.setColor(
+      resolveForegroundIntenseRgb(colors),
+    );
+    if (resync) originalTermWrite(resync);
   };
   const foregroundIntenseRestore = (): void => {
     term.write = originalTermWrite;
+    term.reset = originalTermReset;
   };
 
   type MaybeRenderer = {

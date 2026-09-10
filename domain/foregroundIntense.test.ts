@@ -112,13 +112,49 @@ test('transformer with null rgb is a pass-through', () => {
 test('theme switch from intense back to null reverts outstanding injection', () => {
   const t = createForegroundIntenseTransformer([...INTENSE]);
   assert.equal(t.transform(`${ESC}[1m`), `${ESC}[1;38;2;255;96;0m`);
-  // Color removed (theme change): bold stays but injection is turned off and
-  // the outstanding injected color is cleared on the next SGR boundary.
-  t.setColor(null);
-  assert.equal(t.transform(`${ESC}[22m`), `${ESC}[22;39m`);
+  // Color removed (theme change): the outstanding injected color is reverted
+  // immediately via the resync sequence returned by setColor.
+  assert.equal(t.setColor(null), `${ESC}[39m`);
+  assert.equal(t.transform(`${ESC}[22m`), `${ESC}[22m`);
   // Re-enabling keeps working.
-  t.setColor([...INTENSE]);
+  assert.equal(t.setColor([...INTENSE]), '');
   assert.equal(t.transform(`${ESC}[1m`), `${ESC}[1;38;2;255;96;0m`);
+});
+
+test('theme switch re-injects the new color while bold + default is active', () => {
+  const t = createForegroundIntenseTransformer([255, 0, 0] as const);
+  t.transform(`${ESC}[1m`);
+  assert.equal(t.setColor([...INTENSE]), `${ESC}[38;2;255;96;0m`);
+  assert.equal(t.transform('plain'), 'plain');
+  assert.equal(t.transform(`${ESC}[22m`), `${ESC}[22;39m`);
+});
+
+test('enabling intense while bold + default is active injects immediately', () => {
+  const t = createForegroundIntenseTransformer(null);
+  // State is tracked even while disabled, so enabling resyncs without
+  // waiting for another SGR boundary from the application.
+  assert.equal(t.transform(`${ESC}[1m`), `${ESC}[1m`);
+  assert.equal(t.setColor([...INTENSE]), `${ESC}[38;2;255;96;0m`);
+  assert.equal(t.transform(`${ESC}[22m`), `${ESC}[22;39m`);
+});
+
+test('reset clears tracked bold/injection state', () => {
+  const t = createForegroundIntenseTransformer([...INTENSE]);
+  t.transform(`${ESC}[1m`);
+  t.reset();
+  assert.equal(t.transform(`${ESC}[22m`), `${ESC}[22m`);
+  assert.equal(t.transform(`${ESC}[1m`), `${ESC}[1;38;2;255;96;0m`);
+});
+
+test('SGR 58 (underline color) does not suppress injection', () => {
+  const t = createForegroundIntenseTransformer([...INTENSE]);
+  assert.equal(t.transform(`${ESC}[58;5;196m`), `${ESC}[58;5;196m`);
+  assert.equal(t.transform(`${ESC}[1m`), `${ESC}[1;38;2;255;96;0m`);
+  t.reset();
+  assert.equal(
+    t.transform(`${ESC}[58:2:9:9:9;1m`),
+    `${ESC}[58:2:9:9:9;1;38;2;255;96;0m`,
+  );
 });
 
 test('RIS full reset clears tracked bold state', () => {

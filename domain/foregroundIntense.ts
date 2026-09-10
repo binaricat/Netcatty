@@ -65,8 +65,12 @@ export function resolveForegroundIntenseRgb(
 export type ForegroundIntenseTransformer = {
   /** Rewrite one output chunk (escape sequences split across chunks are fine). */
   transform(chunk: string): string;
-  /** Update the intense color (e.g. after a theme switch). Null disables. */
-  setColor(rgb: ForegroundIntenseRgb | null): void;
+  /**
+   * Update the intense color (e.g. after a theme switch). Null disables.
+   * Returns a resync escape sequence the caller must write to the terminal
+   * (empty string when nothing is outstanding).
+   */
+  setColor(rgb: ForegroundIntenseRgb | null): string;
   /** Return any buffered partial escape sequence; call on teardown. */
   flush(): string;
   /** Forget tracked SGR state (e.g. after a full screen reset). */
@@ -120,7 +124,8 @@ export function createForegroundIntenseTransformer(
       // ITU T.416 colon form: one self-contained parameter, e.g. 38:2:1:2:3.
       if (raw.includes(":")) {
         const lead = parseInt(raw, 10);
-        if (lead === 38 || lead === 58) fgKind = FG_EXPLICIT;
+        // 48/58 only change background/underline color, not the foreground.
+        if (lead === 38) fgKind = FG_EXPLICIT;
         continue;
       }
       const n = parseInt(raw, 10);
@@ -137,12 +142,13 @@ export function createForegroundIntenseTransformer(
         fgKind = FG_DEFAULT;
       } else if (n === 38 || n === 48 || n === 58) {
         // Extended color: skip its sub-parameters so 48;5;196 is not read as
-        // a foreground color. 38 also makes the foreground explicit.
+        // a foreground color. Only 38 makes the foreground explicit; 48/58
+        // change the background/underline color instead.
         const sub = params[i + 1];
         if (sub === "5") i += 2;
         else if (sub === "2") i += 4;
         else i += 1;
-        if (n !== 48) fgKind = FG_EXPLICIT;
+        if (n === 38) fgKind = FG_EXPLICIT;
       }
       // Everything else (dim, underline, background colors, ...) does not
       // change bold/default-foreground state.
@@ -168,10 +174,9 @@ export function createForegroundIntenseTransformer(
     if (phase === "ground" && !chunk.includes(ESC) && !chunk.includes(C1_CSI)) {
       return chunk;
     }
-    if (!color && phase === "ground" && !bold && fgKind !== FG_INJECTED) {
-      // Feature disabled: pass through without state tracking.
-      return chunk;
-    }
+    // Note: SGR state is tracked even while the feature is disabled (no
+    // color) so a later theme change can resynchronize without waiting for
+    // another SGR boundary from the application.
     out = "";
     for (let i = 0; i < chunk.length; i += 1) {
       const ch = chunk[i];
@@ -277,10 +282,36 @@ export function createForegroundIntenseTransformer(
     return out;
   };
 
+  /**
+   * Emit the escape sequence that brings xterm's rendition back in sync after
+   * a theme change. Handles an injected color that is now stale (wrong rgb or
+   * disabled) and a bold + default foreground that should start injecting
+   * right away instead of waiting for the next SGR boundary.
+   */
+  const resync = (): string => {
+    if (fgKind === FG_INJECTED) {
+      if (color && bold) {
+        // Re-inject with the new intense color.
+        return `${ESC}[${injectParams().slice(1)}m`;
+      }
+      // Injection no longer applies: restore the true default foreground.
+      fgKind = FG_DEFAULT;
+      return `${ESC}[39m`;
+    }
+    if (color && bold && fgKind === FG_DEFAULT) {
+      // Bold text is being emitted with the default foreground; start
+      // injecting immediately so already-streamed bold text switches too.
+      fgKind = FG_INJECTED;
+      return `${ESC}[${injectParams().slice(1)}m`;
+    }
+    return "";
+  };
+
   return {
     transform,
-    setColor(next: ForegroundIntenseRgb | null): void {
+    setColor(next: ForegroundIntenseRgb | null): string {
       color = next;
+      return resync();
     },
     flush(): string {
       const pending = phase === "ground" ? "" : seq;
