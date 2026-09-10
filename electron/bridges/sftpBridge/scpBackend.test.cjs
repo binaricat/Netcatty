@@ -255,6 +255,23 @@ describe("scpBackend browse/manage with fake exec", () => {
     );
   });
 
+  it("does not treat a stdout ENOENT marker with a nonzero, non-2 exit as missing", async () => {
+    // Codex: a forced-command wrapper can print "ENOENT" on stdout before
+    // failing with another status; it must not be reported as ENOENT.
+    const wrapperBackend = createScpBackend({
+      exec: async () => ({ stdout: "ENOENT\n", stderr: "denied\n", code: 126 }),
+      execStream: async () => createMockStream(),
+    });
+    await assert.rejects(
+      () => wrapperBackend.stat("/home/test/readme.txt"),
+      (err) => {
+        assert.notEqual(err.code, "ENOENT");
+        assert.equal(err.exitCode, 126);
+        return true;
+      },
+    );
+  });
+
   it("rejects stat metadata forwarded by a wrapper that exits nonzero", async () => {
     // Codex: a forced-command wrapper can forward the stat record but exit
     // nonzero; the metadata is untrustworthy and must not be returned.

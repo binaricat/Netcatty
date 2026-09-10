@@ -340,9 +340,14 @@ function parseStatRecord(stdout, { stderr = "", exitCode = null } = {}) {
     // always on the first line. When the exit code is known it must be 2 (the
     // value the stat command exits with), so an unrelated error is not masked.
     const stderrLines = stderrText.split(/\r?\n/).map((entry) => entry.trim());
+    // Apply the same exit-2-or-unknown requirement to the stdout marker: a
+    // forced-command wrapper that writes "ENOENT" on stdout before failing
+    // must not be reported as a missing path.
     const markerOnStderr = stderrLines.includes("ENOENT")
       && (exitCode == null || exitCode === 2);
-    if (line === "ENOENT" || markerOnStderr) {
+    const markerOnStdout = line === "ENOENT"
+      && (exitCode == null || exitCode === 2);
+    if (markerOnStdout || markerOnStderr) {
       const err = new ScpShellError("No such file", "ENOENT");
       err.code = "ENOENT";
       throw err;
