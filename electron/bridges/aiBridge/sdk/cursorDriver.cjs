@@ -334,8 +334,12 @@ async function runCursorTurn({
   try {
     // Local Cursor agents inherit process.env; serialize the mutation so
     // concurrent chats cannot swap NETCATTY_CLI_CHAT_SESSION_ID mid-spawn.
-    agent = await withExclusiveProcessEnv(runtimeEnv, async () => {
-      const createAgent = () => Agent.create(agentOptions);
+    agent = await abortable(withExclusiveProcessEnv(runtimeEnv, async () => {
+      if (signal?.aborted) throw new CursorTurnAbortError();
+      const createAgent = () => {
+        if (signal?.aborted) throw new CursorTurnAbortError();
+        return Agent.create(agentOptions);
+      };
       let agentPromise;
       if (resumeSessionId && typeof Agent.resume === "function") {
         agentPromise = Agent.resume(resumeSessionId, agentOptions).catch((error) => {
@@ -353,20 +357,23 @@ async function runCursorTurn({
       } else {
         agentPromise = createAgent();
       }
-      return abortable(agentPromise, signal, (lateAgent) => {
-        try { lateAgent?.close?.(); } catch { /* best effort */ }
-      });
+      return agentPromise;
+    }), signal, (lateAgent) => {
+      try { lateAgent?.close?.(); } catch { /* best effort */ }
     });
     sessionId = agent.agentId || sessionId;
     if (sessionId) emitter.sessionId(sessionId);
     if (signal?.aborted) return { sessionId };
 
     const sendMessage = buildCursorSendMessage(prompt, attachments);
-    run = await withExclusiveProcessEnv(runtimeEnv, () => abortable(agent.send(sendMessage), signal, (lateRun) => {
+    run = await abortable(withExclusiveProcessEnv(runtimeEnv, () => {
+      if (signal?.aborted) throw new CursorTurnAbortError();
+      return agent.send(sendMessage);
+    }), signal, (lateRun) => {
       if (lateRun && typeof lateRun.cancel === "function") {
         void lateRun.cancel().catch(() => {});
       }
-    }));
+    });
     const state = { reasoningOpen: false };
     let hasContent = false;
     let failed = false;
