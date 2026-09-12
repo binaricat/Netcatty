@@ -119,7 +119,6 @@ import {
   shouldFlushStaleDeferredImeTextInput,
 } from "./terminalImeTextInput";
 import { formatSerialLocalEcho } from "./serialLocalEcho";
-import { stringCellWidth } from "../autocomplete/terminalStringCellWidth";
 import { getLastChar, removeLastChar, isPrintableInput } from "../../../domain/serialCharMetrics";
 import { mapTerminalBackspaceInput } from "./terminalBackspaceInput";
 import {
