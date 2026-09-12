@@ -240,6 +240,8 @@ export type XTermRuntime = {
   serializeAddon: SerializeAddon;
   searchAddon: SearchAddon;
   dispose: () => void;
+  /** Track a single-line serial snippet already sent and left for editing. */
+  recordSerialSnippetInput: (data: string) => void;
   /** Current working directory detected via OSC 7 */
   currentCwd: string | undefined;
   keywordHighlighter: KeywordHighlighter;
@@ -1153,6 +1155,15 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   // nonempty (hibernation wake: the pre-hibernation cursor may have been
   // moved away from the tail, so we conservatively assume it is not).
   let lastInputWasPrintable = !ctx.commandBufferRef?.current;
+
+  const recordSerialSnippetInput = (data: string) => {
+    if (!ctx.commandBufferRef) return;
+    // Empty pending input has no earlier tracked characters to move through.
+    // Preserve uncertainty when appending to an existing edited line.
+    if (!ctx.commandBufferRef.current) lastInputWasPrintable = true;
+    ctx.commandBufferRef.current += data;
+    if (ctx.serialLocalEcho) writeLocalTerminalData(data);
+  };
 
   const handleTerminalInputData = (
     data: string,
@@ -2933,6 +2944,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     ),
     getKittyKeyboardProtocolEnabled: () => kittyKeyboardProtocolEnabled,
     setKittyKeyboardProtocolEnabled,
+    recordSerialSnippetInput,
     dispose: () => {
       runtimeDisposed = true;
       resizeScheduler.dispose();

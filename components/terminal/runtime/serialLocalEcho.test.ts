@@ -81,25 +81,46 @@ test("urgent Ctrl+C restores serial tail confidence when it clears pending input
   assert.match(source, /clearTerminalInputStateForInterrupt\(\{[^]*?\}\);\s*lastInputWasPrintable = true;/);
 });
 
-test("pending single-line serial snippets participate in editing and local echo", async () => {
+test("pending single-line serial snippets share runtime editing bookkeeping", async () => {
   const { readFile } = await import("node:fs/promises");
   const { runInNewContext } = await import("node:vm");
   const source = await readFile(new URL("../../Terminal.tsx", import.meta.url), "utf8");
   const start = source.indexOf("if (host.protocol === 'serial' && noAutoRun");
   const end = source.indexOf("scrollToBottomAfterProgrammaticInput(data);", start);
   assert.ok(start > 0 && end > start);
-  for (const [protocol, noAutoRun, isMultiLine, lineMode, localEcho, tracked] of [
-    ["serial", true, false, false, true, true],
-    ["serial", true, false, false, false, true],
-    ["serial", false, false, false, true, false],
-    ["serial", true, true, false, true, false],
-    ["serial", true, false, true, true, false],
-    ["ssh", true, false, false, true, false],
+  for (const [protocol, noAutoRun, isMultiLine, lineMode, tracked] of [
+    ["serial", true, false, false, true],
+    ["serial", false, false, false, false],
+    ["serial", true, true, false, false],
+    ["serial", true, false, true, false],
+    ["ssh", true, false, false, false],
+  ] as const) {
+    const recorded: string[] = [];
+    const state = {host: {protocol}, noAutoRun, isMultiLine, serialConfig: {lineMode}, data: "你", xtermRuntimeRef: {current: {recordSerialSnippetInput: (text: string) => recorded.push(text)}}};
+    runInNewContext(source.slice(start, end), state);
+    assert.deepEqual(recorded, tracked ? ["你"] : []);
+  }
+});
+
+test("serial snippets restore an empty tail but preserve uncertainty on an edited line", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const { runInNewContext } = await import("node:vm");
+  const source = await readFile(new URL("./createXTermRuntime.ts", import.meta.url), "utf8");
+  const start = source.indexOf("const recordSerialSnippetInput = (data: string) => {");
+  const end = source.indexOf("\n  };", start);
+  assert.ok(start > 0 && end > start);
+  const body = source.slice(source.indexOf("{", start) + 1, end);
+  for (const [pending, confident, localEcho, expected] of [
+    ["", false, true, true],
+    ["", false, false, true],
+    ["abc", false, true, false],
+    ["abc", true, true, true],
   ] as const) {
     const echoed: string[] = [];
-    const state = {host: {protocol}, noAutoRun, isMultiLine, serialConfig: {lineMode, localEcho}, data: "你", commandBufferRef: {current: "abc"}, writeLocalTerminalData: (text: string) => echoed.push(text)};
-    runInNewContext(source.slice(start, end), state);
-    assert.equal(state.commandBufferRef.current, tracked ? "abc你" : "abc");
-    assert.deepEqual(echoed, tracked && localEcho ? ["你"] : []);
+    const state = {ctx: {commandBufferRef: {current: pending}, serialLocalEcho: localEcho}, lastInputWasPrintable: confident, data: "你", writeLocalTerminalData: (text: string) => echoed.push(text)};
+    runInNewContext(`(() => { ${body} })()`, state);
+    assert.equal(state.lastInputWasPrintable, expected);
+    assert.equal(state.ctx.commandBufferRef.current, pending + "你");
+    assert.deepEqual(echoed, localEcho ? ["你"] : []);
   }
 });

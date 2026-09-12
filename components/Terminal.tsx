@@ -3327,15 +3327,14 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     });
     // Single-line snippets left for editing share the serial typed-input buffer.
     if (host.protocol === 'serial' && noAutoRun && !isMultiLine && !serialConfig?.lineMode) {
-      commandBufferRef.current += data;
-      if (serialConfig?.localEcho) writeLocalTerminalData(data);
+      xtermRuntimeRef.current?.recordSerialSnippetInput(data);
     }
     scrollToBottomAfterProgrammaticInput(data);
     if (options?.focus !== false) {
       term.focus();
     }
     return true;
-  }, [prepareProgrammaticSudoInput, scrollToBottomAfterProgrammaticInput, terminalBackend, sessionId, host.protocol, serialConfig?.lineMode, serialConfig?.localEcho, writeLocalTerminalData]);
+  }, [prepareProgrammaticSudoInput, scrollToBottomAfterProgrammaticInput, terminalBackend, sessionId, host.protocol, serialConfig?.lineMode]);
 
   const executeSnippet = useCallback(async (snippet: Snippet) => {
     if (isScriptSnippet(snippet)) {
