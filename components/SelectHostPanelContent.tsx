@@ -1,3 +1,4 @@
+import { compareHostAddresses } from "../domain/hostAddressSort";
 import {
   Check,
   CheckSquare,
@@ -200,6 +201,8 @@ export const SelectHostPanelContent: React.FC<SelectHostPanelContentProps> = ({
 
     result = [...result].sort((a, b) => {
       switch (sortMode) {
+        case 'ip':
+          return compareHostAddresses(a.hostname, b.hostname) || a.label.localeCompare(b.label);
         case 'az':
           return a.label.localeCompare(b.label);
         case 'za':

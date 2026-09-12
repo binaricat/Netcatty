@@ -162,3 +162,12 @@ test("Hosts manual sort mode uses saved order", () => {
 
   assert.ok(markup.indexOf("Zulu Host") < markup.indexOf("Alpha Host"));
 });
+
+test("Hosts IP sort is restored and compares octets instead of labels", () => {
+  const markup = renderVault("ip", [
+    { ...host("ten", "Alpha Ten", 1), hostname: "10.0.0.10" },
+    { ...host("two", "Zulu Two", 2), hostname: "10.0.0.2" },
+  ]);
+  assert.ok(markup.includes("Zulu Two"));
+  assert.ok(markup.indexOf("Zulu Two") < markup.indexOf("Alpha Ten"));
+});

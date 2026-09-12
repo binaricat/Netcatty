@@ -1,3 +1,4 @@
+import { compareHostAddresses } from "../domain/hostAddressSort";
 import { CheckSquare, Edit2, FileSymlink, Server, Square, Expand, Minimize2 } from 'lucide-react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -39,7 +40,7 @@ const getTreeGroupDropIntent = (
 const hasDragType = (dataTransfer: DataTransfer, type: string) =>
   Array.from(dataTransfer.types).includes(type);
 
-type HostTreeSortMode = 'manual' | 'az' | 'za' | 'newest' | 'oldest' | 'group';
+type HostTreeSortMode = 'manual' | 'az' | 'za' | 'newest' | 'oldest' | 'group' | 'ip';
 
 export type VisibleHostTreeItem =
   | {
@@ -90,6 +91,7 @@ const sortHostTreeHosts = (hosts: Host[], sortMode: HostTreeSortMode): Host[] =>
     if (sortMode === 'newest') return (b.createdAt || 0) - (a.createdAt || 0);
     if (sortMode === 'oldest') return (a.createdAt || 0) - (b.createdAt || 0);
     if (sortMode === 'manual') return 0;
+    if (sortMode === 'ip') return compareHostAddresses(a.hostname, b.hostname) || a.label.localeCompare(b.label);
     return a.label.localeCompare(b.label);
   });
   return sortMode === 'manual' ? sortByVaultOrder(sorted) : sorted;
