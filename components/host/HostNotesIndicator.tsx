@@ -7,11 +7,13 @@ import { HoverCard, HoverCardContent, HoverCardTrigger } from "../ui/hover-card"
 export interface HostNotesIndicatorProps {
   notes?: string;
   className?: string;
+  label?: string;
 }
 
 export const HostNotesIndicator: React.FC<HostNotesIndicatorProps> = ({
   notes,
   className,
+  label = "Host notes",
 }) => {
   const trimmed = notes?.trim();
   if (!trimmed) return null;
@@ -25,7 +27,7 @@ export const HostNotesIndicator: React.FC<HostNotesIndicatorProps> = ({
             "inline-flex h-4 w-4 shrink-0 items-center justify-center rounded border-0 bg-transparent p-0 text-muted-foreground transition-colors hover:text-foreground",
             className,
           )}
-          aria-label="Host notes"
+          aria-label={label}
           onClick={(e) => e.stopPropagation()}
           onPointerDown={(e) => e.stopPropagation()}
         >

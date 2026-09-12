@@ -893,6 +893,7 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                                 <div className="flex-1 min-w-0">
                                   <div className="text-sm font-semibold flex items-center gap-1.5 min-w-0">
                                     <span className="truncate">{node.name}</span>
+                                    <HostNotesIndicator notes={groupConfigs.find((config) => config.path === node.path)?.notes} label="Group notes" />
                                     {!isMultiSelectMode && viewMode !== "grid" && renderGroupEditButton(node.path, true)}
                                     {managedGroupPaths.has(node.path) && (
                                       <span className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-primary/15 text-primary shrink-0">

@@ -539,18 +539,21 @@ const TreeNode: React.FC<TreeNodeProps> = ({
                     : <Square size={16} />
                   : undefined}
                 labelActions={!isMultiSelectMode && (
-                  <button
-                    aria-label={`Edit ${node.name}`}
-                    tabIndex={-1}
-                    data-host-tree-group-edit-button={node.path}
-                    className="flex h-5 w-5 shrink-0 items-center justify-center rounded opacity-0 transition-colors hover:bg-secondary/80 group-hover:opacity-100"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onEditGroup(node.path);
-                    }}
-                  >
-                    <Edit2 size={12} />
-                  </button>
+                  <span className="inline-flex items-center gap-1">
+                    <HostNotesIndicator notes={groupConfigs.find((config) => config.path === node.path)?.notes} label="Group notes" />
+                    <button
+                      aria-label={`Edit ${node.name}`}
+                      tabIndex={-1}
+                      data-host-tree-group-edit-button={node.path}
+                      className="flex h-5 w-5 shrink-0 items-center justify-center rounded opacity-0 transition-colors hover:bg-secondary/80 group-hover:opacity-100"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onEditGroup(node.path);
+                      }}
+                    >
+                      <Edit2 size={12} />
+                    </button>
+                  </span>
                 )}
               />
             </CollapsibleTrigger>

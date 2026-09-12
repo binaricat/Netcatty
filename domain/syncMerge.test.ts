@@ -620,3 +620,14 @@ test("mergeSyncPayloads keeps host telemetry off merged payloads", () => {
   assert.equal(unchanged.payload.hosts[0]?.lastConnectedAt, undefined);
   assert.equal(unchanged.summary.modified.local, 0);
 });
+
+test("group notes sync edits and clearing without dropping connection settings", () => {
+  const config = { path: "Project", notes: "# VPN\nOld instructions", username: "admin" };
+  const base = payload({ customGroups: ["Project"], groupConfigs: [config] });
+  const edited = payload({ customGroups: ["Project"], groupConfigs: [{ ...config, notes: "# VPN\nNew instructions" }] });
+  const merged = mergeSyncPayloads(base, base, edited).payload;
+  assert.equal(merged.groupConfigs?.[0].notes, "# VPN\nNew instructions");
+  assert.equal(merged.groupConfigs?.[0].username, "admin");
+  const cleared = payload({ customGroups: ["Project"], groupConfigs: [{ path: "Project", username: "admin" }] });
+  assert.equal(mergeSyncPayloads(merged, merged, cleared).payload.groupConfigs?.[0].notes, undefined);
+});
