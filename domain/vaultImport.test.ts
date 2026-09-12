@@ -267,6 +267,14 @@ test("FinalShell import skips non-SSH connection types", () => {
   assert.match(result.issues[0]?.message ?? "", /unsupported.*type/i);
 });
 
+test("FinalShell auto-detection accepts missing and null usernames", () => {
+  for (const user_name of [undefined, null]) {
+    const text = JSON.stringify({ host: "optional-user.example.com", conection_type: 100, user_name });
+    assert.equal(detectVaultImportFormat(text), "finalshell");
+    assert.equal(importVaultHostsFromText("finalshell", text).hosts.length, 1);
+  }
+});
+
 test("FinalShell detection requires characteristic fields and avoids generic JSON", () => {
   assert.equal(detectVaultImportFormat(JSON.stringify({
     name: "Production",

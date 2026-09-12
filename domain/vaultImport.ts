@@ -1438,7 +1438,6 @@ export function detectVaultImportFormat(text: string): VaultImportFormat | null 
       && !Array.isArray(candidate)
       && Object.prototype.hasOwnProperty.call(candidate, "conection_type")
       && typeof (candidate as Record<string, unknown>).host === "string"
-      && typeof (candidate as Record<string, unknown>).user_name === "string"
     ) {
       return "finalshell";
     }
