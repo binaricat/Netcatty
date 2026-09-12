@@ -14,14 +14,14 @@ const modules = await Promise.all([
 'components/terminal/runtime/terminalBackspaceInput.ts', 'components/terminal/runtime/terminalPerCharacterInput.ts',
 'components/terminal/runtime/terminalSudoAutofill.ts', 'components/terminal/runtime/terminalCommandExecution.ts',
 'components/terminal/runtime/serialLocalEcho.ts', 'components/terminal/autocomplete/terminalStringCellWidth.ts',
-'components/terminal/runtime/shiftEnterText.ts',
+'components/terminal/runtime/shiftEnterText.ts', 'components/terminal/runtime/terminalStartupCommands.ts',
 ].map(p=>import(root+'/'+p)));
 const source=fs.readFileSync(root+'/components/terminal/runtime/createXTermRuntime.ts','utf8');
 const start=source.indexOf('let lastInputWasPrintable =');
 const end=source.indexOf('  let kittyCompositionPending',start);
 const code=ts.transpileModule(source.slice(start,end)+ '\n globalThis.api = {handleTerminalInputData,recordSerialSnippetInput,getConfidence:()=>lastInputWasPrintable};',{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText;
 for (const encoding of ['utf-8','gb18030']) {
-for (const insert of ['typed','raw','bracketed','snippet']) {
+for (const insert of ['typed','raw','bracketed','snippet','startup']) {
 for (const prefix of ['fresh','empty-arrow','submit','paste-submit','interrupt','clear']) {
  let wire=Buffer.alloc(0);
  const session={encoding, serialPort:{write(data: string | Buffer){for(const byte of Buffer.from(data)) { if(byte===127||byte===8) wire=wire.subarray(0,Math.max(0,wire.length-1)); else wire=Buffer.concat([wire,Buffer.from([byte])]);}}}};
@@ -39,6 +39,7 @@ for (const prefix of ['fresh','empty-arrow','submit','paste-submit','interrupt',
  if(insert==='raw') input('ab你好');
  if(insert==='bracketed') input('\x1b[200~ab你好\x1b[201~');
  if(insert==='snippet') {ctx.terminalBackend.writeToSession('s','ab你好',{});snippet('ab你好');}
+ if(insert==='startup') await new Promise<void>(resolve => {Object.assign({}, ...modules).scheduleStartupCommand({...ctx, noAutoRun:true, startupCommand:'ab你好', hasRunStartupCommandRef:{current:false}, terminalSettings:{startupCommandDelayMs:0}, recordSerialSnippetInput:snippet}, env.term, 's', resolve);});
  // Device paste framing is a transport protocol, remove it from our byte-deleting model.
  if(insert==='bracketed') wire=wire.subarray(6,wire.length-6);
  input('\x7f');input('\x7f');

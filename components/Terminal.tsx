@@ -2432,6 +2432,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     isNetworkDevice,
     startupCommand,
     noAutoRun,
+    recordSerialSnippetInput: (data) => xtermRuntimeRef.current?.recordSerialSnippetInput(data),
     multiLineRunMode,
     shellType,
     suppressHostStartupCommandRef,
