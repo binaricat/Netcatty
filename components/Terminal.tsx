@@ -3282,6 +3282,13 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   }, [onAddSelectionToAI, sessionId, terminalSettings?.normalizeTextOnCopy]);
 
   const handleSetTerminalEncoding = useCallback((encoding: TerminalEncodingPreference) => {
+    // A byte-oriented device still holds bytes in the previous encoding.
+    // Require an empty input line before changing that encoding.
+    if (host.protocol === 'serial' && serialConfig?.byteOrientedBackspace === true
+      && !serialConfig?.lineMode && commandBufferRef.current) {
+      toast.info(t('serial.encoding.pendingInput'));
+      return;
+    }
     setTerminalEncoding(encoding);
     setRememberedTerminalEncoding(encoding);
     userPickedEncodingRef.current = true;
@@ -3294,7 +3301,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     if (sessionRef.current) {
       setSessionEncoding(sessionRef.current, encoding);
     }
-  }, [handleUpdateHostFromTerminal, host.id, host.protocol, setRememberedTerminalEncoding, setSessionEncoding]);
+  }, [handleUpdateHostFromTerminal, host.id, host.protocol, serialConfig?.byteOrientedBackspace, serialConfig?.lineMode, setRememberedTerminalEncoding, setSessionEncoding, t]);
 
   const handleOpenSFTP = useCallback(async () => {
     if (onOpenSftp) {

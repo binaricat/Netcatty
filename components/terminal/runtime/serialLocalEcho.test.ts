@@ -50,3 +50,27 @@ test("both Enter and submitted paste restore serial tail confidence", async () =
   const writeInput = source.indexOf("prioritizeTerminalInput(", pasteBranch);
   assert.ok(pasteBranch > 0 && restoreTail > pasteBranch && restoreTail < writeInput);
 });
+
+test("byte-oriented serial input prevents encoding changes while wire bytes are pending", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const { runInNewContext } = await import("node:vm");
+  const source = await readFile(new URL("../../Terminal.tsx", import.meta.url), "utf8");
+  const handlerStart = source.indexOf("const handleSetTerminalEncoding = useCallback");
+  const start = source.indexOf("if (host.protocol === 'serial'", handlerStart);
+  const end = source.indexOf("setTerminalEncoding(encoding);", start);
+  assert.ok(handlerStart > 0 && start > handlerStart && end > start);
+  const guard = source.slice(start, end);
+  for (const [protocol, byteMode, lineMode, pending, blocked] of [
+    ["serial", true, false, "abc你", true],
+    ["serial", true, false, "", false],
+    ["serial", false, false, "abc你", false],
+    ["serial", true, true, "abc你", false],
+    ["ssh", true, false, "abc你", false],
+  ] as const) {
+    const notices: string[] = [];
+    const state = {host: {protocol}, serialConfig: {byteOrientedBackspace: byteMode, lineMode}, commandBufferRef: {current: pending}, toast: {info: (text: string) => notices.push(text)}, t: (key: string) => key};
+    const changed = runInNewContext(`(() => { ${guard} return true; })()`, state);
+    assert.equal(changed, blocked ? undefined : true);
+    assert.equal(notices.length, blocked ? 1 : 0);
+  }
+});

@@ -807,6 +807,7 @@ export const esTerminalMessages: Messages = {
   'serial.field.lineModeDesc': 'Almacenar en búfer la entrada y enviarla al presionar Enter (en lugar de carácter por carácter)',
   'serial.field.backspaceBehavior': 'Tecla de retroceso',
   'serial.field.backspaceBehaviorDesc': 'Usa Ctrl+H para dispositivos de red que no responden al código de Retroceso predeterminado.',
+  'serial.encoding.pendingInput': 'Envía o borra la entrada actual antes de cambiar la codificación.',
   'serial.field.byteOrientedBackspace': 'Retroceso orientado a bytes',
   'serial.field.byteOrientedBackspaceDesc': 'Envía un DEL por byte para que el dispositivo elimine un carácter multibyte completo (para dispositivos que eliminan por bytes). Desactívelo para editores de línea conscientes de caracteres (p. ej. readline de Linux).',
   'serial.backspace.default': 'Predeterminado (DEL, 0x7F)',

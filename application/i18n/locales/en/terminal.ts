@@ -807,6 +807,7 @@ export const enTerminalMessages: Messages = {
   'serial.field.lineModeDesc': 'Buffer input and send on Enter (instead of character-by-character)',
   'serial.field.backspaceBehavior': 'Backspace key',
   'serial.field.backspaceBehaviorDesc': 'Use Ctrl+H for network devices that do not respond to the default Backspace code.',
+  'serial.encoding.pendingInput': 'Submit or clear the current input before changing the encoding.',
   'serial.field.byteOrientedBackspace': 'Byte-Oriented Backspace',
   'serial.field.byteOrientedBackspaceDesc': 'Send one DEL per byte so the device deletes a whole multi-byte character (for devices that delete bytes). Disable for character-aware line editors (e.g. Linux readline).',
   'serial.backspace.default': 'Default (DEL, 0x7F)',
