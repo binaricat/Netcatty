@@ -339,10 +339,6 @@ function createStartSessionApi(ctx) {
         _reuseEndpoint: normalizeEndpoint(buildConnectionReuseEndpoint(options, {
           agentForwarding: options._actualAgentForwarding ?? options.agentForwarding,
         })),
-        tcpLatencyDirect:
-          !Array.isArray(options.jumpHosts) || options.jumpHosts.length === 0
-            ? !options.proxy
-            : false,
         cols: options.cols || 80,
         rows: options.rows || 24,
       };

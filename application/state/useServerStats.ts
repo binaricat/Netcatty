@@ -47,7 +47,7 @@ export interface ServerStats {
   disks: DiskInfo[];            // All mounted disks
   netRxSpeed: number;           // Total network receive speed (bytes/sec)
   netTxSpeed: number;           // Total network transmit speed (bytes/sec)
-  latencyMs: number | null;     // TCP connection establishment latency to the SSH endpoint
+  latencyMs: number | null;     // SSH transport ping round-trip to the SSH endpoint
   netInterfaces: NetInterfaceInfo[];  // Per-interface network stats
   lastUpdated: number | null;   // Timestamp of last successful update
 }

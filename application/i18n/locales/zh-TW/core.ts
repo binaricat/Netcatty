@@ -63,7 +63,7 @@ export const zhTWCoreMessages: Messages = {
   'field.selectHosts': '選擇主機',
   'placeholder.workspaceName': '工作區名稱',
   'placeholder.sessionName': '工作階段名稱',
-  'placeholder.searchHosts': '搜尋主機...',
+  'placeholder.searchHosts': '搜尋主機或標籤...',
   'toast.settingsUnavailable': '目前平台無法開啟設定視窗。',
   'credentials.protectionUnavailable.title': '憑證保護不可用',
   'credentials.protectionUnavailable.message': '目前裝置無法自動解密已儲存的密碼和金鑰。連線前請重新輸入憑證。',

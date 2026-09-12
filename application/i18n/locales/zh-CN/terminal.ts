@@ -722,6 +722,7 @@ export const zhCNTerminalMessages: Messages = {
   'tabs.copyTabToNewWindow': '复制标签页到新窗口',
   'tabs.copyTabToNewWindowFailed': '无法在新窗口打开标签页',
   'tabs.closeOthers': '关闭其他标签',
+  'tabs.closeToLeft': '关闭左侧标签',
   'tabs.closeToRight': '关闭右侧标签',
   'tabs.closeAll': '关闭所有标签',
   'keychain.edit.labelRequired': 'Label *',

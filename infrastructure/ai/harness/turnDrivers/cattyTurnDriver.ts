@@ -247,6 +247,7 @@ async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Prom
         {
           getOpenAIChatAssistantFields: () => continuationContext.openAIChatAssistantFields,
           streamIdleTimeoutMs: responseIdleTimeoutMs,
+          chatSessionId: sessionId,
         },
       );
     } catch (e) {
