@@ -625,7 +625,7 @@ test("getServerStats measures latency by pinging the stats connection", async ()
     type: "mosh",
     hostname: "vm.example.test",
     moshStatsAuth: { hostname: "vm.example.test", port: 2222 },
-    moshStatsConn: fakeConn(LINUX_STATS),
+    moshStatsConn: Object.assign(fakeConn(LINUX_STATS), { config: { keepaliveInterval: 0 } }),
   };
   sessions.set("sid", session);
 
@@ -1182,5 +1182,21 @@ for (const blocked of [false, true]) {
       await finished;
       fs.rmSync(directory, { recursive: true, force: true });
     }
+  });
+}
+
+for (const keepaliveInterval of [0, 10000]) {
+  test(`getServerStats honors shared SSH keepalive policy (${keepaliveInterval})`, async () => {
+    const conn = fakeConn(LINUX_STATS);
+    conn.config = { keepaliveInterval };
+    const sessions = new Map([["sid", { type: "ssh", conn }]]);
+    let pingCalls = 0;
+    const api = makeSessionOps(sessions, {
+      measureSshPingLatency: async () => { pingCalls++; return 2; },
+    });
+    const result = await api.getServerStats({ sender: {} }, { sessionId: "sid" });
+    assert.equal(result.success, true);
+    assert.equal(pingCalls, keepaliveInterval === 0 ? 0 : 1);
+    assert.equal(result.stats.latencyMs, keepaliveInterval === 0 ? null : 2);
   });
 }

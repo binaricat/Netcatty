@@ -1264,7 +1264,13 @@ function createSessionOpsApi(ctx) {
       // Measure latency with an SSH transport ping on the connection already
       // serving stats. A separate TCP connect to the SSH port would land in
       // sshd logs as a failed pre-auth login with no username (issue #3320).
-      const pingLatencyPromise = sshStatsConn && typeof measureSshPingLatency === 'function'
+      // A shared interactive connection must honor the user's keepalive opt-out
+      // (some network devices ignore these requests and would poison the FIFO).
+      // Dedicated Mosh/ET companions disable periodic keepalives internally;
+      // they are not shared with forwarding and can still carry stats pings.
+      const pingDisabled = sshStatsConn === session.conn
+        && sshStatsConn?.config?.keepaliveInterval === 0;
+      const pingLatencyPromise = sshStatsConn && !pingDisabled && typeof measureSshPingLatency === 'function'
         ? Promise.resolve(measureSshPingLatency(sshStatsConn)).catch(() => null)
         : Promise.resolve(null);
       const formatStatsError = (error) => (

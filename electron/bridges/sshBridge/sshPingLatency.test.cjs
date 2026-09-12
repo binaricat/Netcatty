@@ -89,9 +89,8 @@ test("disconnect flush does not splice the queue being iterated", async () => {
   const conn = createFakeSshClient({ delayMs: 10_000 });
   let laterCalled = false;
   const later = () => { laterCalled = true; };
-  conn._callbacks.push(later);
-
   const pending = measure(conn);
+  conn._callbacks.push(later);
   assert.equal(conn._callbacks.length, 2);
 
   const flushed = conn._callbacks;
@@ -184,9 +183,9 @@ test("skips polls after a timeout until the tombstone is consumed, then resumes"
   tombstone(false);
   assert.equal(conn._callbacks.length, 0);
 
-  const conn2 = createFakeSshClient({ delayMs: 25 });
   fakeNow = 1000;
-  const pending = measure(conn2);
+  const pending = measure(conn);
   fakeNow = 1042;
+  conn._callbacks.shift()(false);
   assert.equal(await pending, 42);
 });
