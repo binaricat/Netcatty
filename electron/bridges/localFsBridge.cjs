@@ -334,6 +334,10 @@ async function statLocal(event, payload) {
     type: stat.isDirectory() ? "directory" : "file",
     size: stat.size,
     lastModified: stat.mtime.getTime(),
+    // Filesystem identity for same-pane paste guards: realpath cannot see
+    // through bind mounts, but dev/ino name the same directory regardless of
+    // the mount path used. Windows dev/ino are unreliable, so omit them there.
+    ...(process.platform === "win32" ? {} : { dev: stat.dev, ino: stat.ino }),
   };
 }
 
@@ -349,7 +353,19 @@ async function lstatLocal(event, payload) {
     type: stat.isDirectory() ? "directory" : stat.isSymbolicLink() ? "symlink" : "file",
     size: stat.size,
     lastModified: stat.mtime.getTime(),
+    // Mirror statLocal so guards comparing identities work with either stat.
+    ...(process.platform === "win32" ? {} : { dev: stat.dev, ino: stat.ino }),
   };
+}
+
+/**
+ * Resolve a local path to its absolute canonical form, following every
+ * symlink component. Same-pane paste guards use this so destinations that
+ * reach the clipboard source through a symlink alias compare equal to the
+ * real source path.
+ */
+async function realpathLocal(event, payload) {
+  return fs.promises.realpath(payload.path);
 }
 
 function throwIfLocalTreeCancelled(isCancelled) {
@@ -668,6 +684,7 @@ function registerHandlers(ipcMain) {
   ipcMain.handle("netcatty:local:mkdir", mkdirLocal);
   ipcMain.handle("netcatty:local:stat", statLocal);
   ipcMain.handle("netcatty:local:lstat", lstatLocal);
+  ipcMain.handle("netcatty:local:realpath", realpathLocal);
   ipcMain.handle("netcatty:local:tree", listLocalTree);
   ipcMain.handle("netcatty:local:homedir", getHomeDir);
   ipcMain.handle("netcatty:local:drives", listDrives);
@@ -687,6 +704,7 @@ module.exports = {
   mkdirLocal,
   statLocal,
   lstatLocal,
+  realpathLocal,
   collectLocalTreeEntries,
   createLocalTreeTraversalBudget,
   MAX_LOCAL_TREE_DIRECTORIES,

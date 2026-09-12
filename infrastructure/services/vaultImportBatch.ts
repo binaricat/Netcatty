@@ -61,6 +61,17 @@ const shouldIgnoreSecureCrtFile = (file: File): boolean => (
   || !file.name.toLowerCase().endsWith(".ini")
 );
 
+const finalShellGroupFromFile = (
+  file: File,
+  transferredRelativePath?: string,
+): string | undefined => {
+  const segments = normalizeRelativePath(file, transferredRelativePath);
+  if (segments.length <= 1) return undefined;
+  segments.pop();
+  if (segments[0]?.toLowerCase() === "conn") segments.shift();
+  return segments.length > 0 ? segments.join("/") : undefined;
+};
+
 export async function importVaultHostFiles({
   format,
   files,
@@ -75,7 +86,9 @@ export async function importVaultHostFiles({
   }));
   const selectedFiles = format === "securecrt"
     ? sourceFiles.filter(({ file }) => !shouldIgnoreSecureCrtFile(file))
-    : sourceFiles.slice(0, 1);
+    : format === "finalshell"
+      ? sourceFiles.filter(({ file }) => file.name.toLowerCase().endsWith(".json"))
+      : sourceFiles.slice(0, 1);
   const hosts: Host[] = [];
   const issues: VaultImportIssue[] = [];
   const keyPassphrases: NonNullable<VaultImportResult["keyPassphrases"]> = [];
@@ -94,7 +107,9 @@ export async function importVaultHostFiles({
       });
       const group = format === "securecrt"
         ? secureCrtGroupFromFile(file, relativePath)
-        : undefined;
+        : format === "finalshell"
+          ? finalShellGroupFromFile(file, relativePath)
+          : undefined;
       const fileHosts = result.hosts.map((host) => (
         group && !host.group ? { ...host, group } : host
       ));
@@ -114,14 +129,14 @@ export async function importVaultHostFiles({
           skipped++;
           issues.push({
             level: "warning",
-            message: `${file.name}: no importable SecureCRT session found.`,
+            message: `${file.name}: no importable ${format === "securecrt" ? "SecureCRT session" : "FinalShell connection"} found.`,
           });
         }
       } else {
         hosts.push(...fileHosts);
       }
     } catch (error) {
-      if (format !== "securecrt" || selectedFiles.length <= 1) throw error;
+      if ((format !== "securecrt" && format !== "finalshell") || selectedFiles.length <= 1) throw error;
       skipped++;
       issues.push({
         level: "error",
@@ -137,7 +152,7 @@ export async function importVaultHostFiles({
   }
 
   const seen = new Set<string>();
-  const uniqueHosts = format === "securecrt"
+  const uniqueHosts = format === "securecrt" || format === "finalshell"
     ? hosts
     : hosts.filter((host) => {
       const key = buildVaultHostMergeKey(host);

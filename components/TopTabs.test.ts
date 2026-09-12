@@ -634,3 +634,24 @@ test("App shell retains presentation-stable sessions for domain memos", () => {
   assert.match(appSource, /sessions: sessionsForShell/);
   assert.match(appSource, /orphanSessions: orphanSessionsForShell/);
 });
+
+test("bulk close context menu offers symmetric close-to-left option", () => {
+  const bulkCloseBlock = topTabsSource.slice(
+    topTabsSource.indexOf("Bulk-close menu items shared by session and workspace context menus"),
+    topTabsSource.indexOf("// Render the tabs"),
+  );
+  // Left of the anchor is symmetric with close-to-right: slice(0, anchorIdx).
+  assert.match(bulkCloseBlock, /orderedTabs\.slice\(0, anchorIdx\)/);
+  assert.match(bulkCloseBlock, /tabs\.closeToLeft/);
+  assert.match(bulkCloseBlock, /onCloseTabsBatch\(leftIds\)/);
+
+  // Locale parity: the new key is translated in every terminal locale.
+  const locales = ["en", "es", "ru", "zh-CN", "zh-TW"] as const;
+  for (const locale of locales) {
+    const source = readFileSync(
+      new URL(`../application/i18n/locales/${locale}/terminal.ts`, import.meta.url),
+      "utf8",
+    );
+    assert.match(source, /'tabs\.closeToLeft':/);
+  }
+});

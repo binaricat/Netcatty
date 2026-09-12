@@ -490,6 +490,9 @@ function shouldReplaySdkHistory({
 }
 
 function registerSdkStreamHandlers(ctx) {
+  const injectCliEnv = typeof ctx.withCliDiscoveryEnv === "function"
+    ? ctx.withCliDiscoveryEnv
+    : (env) => env;
   with (ctx) {
     // chatSessionId -> { sessionId } for resume; controller per requestId.
     const sdkActiveStreams = new Map(); // requestId -> AbortController
@@ -571,7 +574,7 @@ function registerSdkStreamHandlers(ctx) {
           let env = buildSdkAgentEnv({
             shellEnv,
             requestedAgentEnv: normalizedAgentEnv,
-            withCliDiscoveryEnv,
+            withCliDiscoveryEnv: (agentEnv) => injectCliEnv(agentEnv, chatSessionId),
             normalizeClaudeCodeExecutableEnv: normalizeClaudeCodeExecutableEnvForSdk,
           });
           if (cursorAuthMode === "cli-login") {

@@ -10,7 +10,7 @@ const {
 const { getFreshIdlePrompt, formatSyntheticEcho } = require("../bridges/ai/shellUtils.cjs");
 const {
   ensureSessionShellKind,
-  ensureSessionShellKindForExec,
+  remoteDisallowsExecChannelProbe, ensureSessionShellKindForExec,
 } = require("../bridges/ai/sessionShellKind.cjs");
 const {
   checkBlocklistForShell,
@@ -291,6 +291,7 @@ function createWorkerAiExecHandler({
         shellKind: session.shellKind,
         loginShellHint: session._loginShellKind,
         probeLiveShell: true,
+        bastionKeystrokes: remoteDisallowsExecChannelProbe(session.remoteSshVersion),
         onProbeAborted: (marker) => {
           event?.sender?.send?.("netcatty:data", {
             sessionId,
@@ -494,6 +495,7 @@ function createWorkerAiJobStartHandler({
         shellKind: session.shellKind,
         loginShellHint: session._loginShellKind,
         probeLiveShell: true,
+        bastionKeystrokes: remoteDisallowsExecChannelProbe(session.remoteSshVersion),
         onProbeAborted: (marker) => {
           event?.sender?.send?.("netcatty:data", {
             sessionId,

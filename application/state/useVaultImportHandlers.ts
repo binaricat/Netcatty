@@ -111,6 +111,7 @@ export function useVaultImportHandlers({
 
   const handleImportFileSelected = useCallback(
       async (format: VaultImportFormat, files: File[], options?: VaultImportOptions) => {
+        const preserveProfiles = format === "securecrt" || format === "finalshell";
         const file = files[0];
         if (!file) return;
         if (importInFlightRef.current) return;
@@ -141,7 +142,9 @@ export function useVaultImportHandlers({
                 ? "CSV"
                 : format === "securecrt"
                   ? "SecureCRT"
-                  : "ssh_config";
+                  : format === "finalshell"
+                    ? "FinalShell"
+                    : "ssh_config";
         const updateProgress = (next: Partial<VaultImportProgress>) => {
           setImportProgress((current) => ({
             status: "running",
@@ -183,9 +186,9 @@ export function useVaultImportHandlers({
             result = applyVaultImportDestination(
               result,
               options?.destination ?? { mode: "preserve" },
-              // SecureCRT keeps distinct session files that share an endpoint;
+              // Folder imports keep distinct profiles that share an endpoint;
               // only rewrite their group when the user picks an import location.
-              { collapseDuplicateEndpoints: format !== "securecrt" },
+              { collapseDuplicateEndpoints: !preserveProfiles },
             );
           }
           updateProgress({ stage: "preparing", percent: 70 });
@@ -321,7 +324,7 @@ export function useVaultImportHandlers({
 
           const existingKeys = new Set(currentHosts.map(makeKey));
           // Filter out duplicates for both managed and non-managed imports
-          let newHosts = format === "securecrt"
+          let newHosts = preserveProfiles
             ? result.hosts
             : result.hosts.filter((h) => !existingKeys.has(makeKey(h)));
 
@@ -486,7 +489,7 @@ export function useVaultImportHandlers({
               importBaselineHosts,
               importBaselineGroups,
               result,
-              { skipDuplicates: format !== "securecrt" },
+              { skipDuplicates: !preserveProfiles },
             );
             newHosts = merged.addedHosts;
             addedHostIds = new Set(merged.addedHosts.map((host) => host.id));

@@ -111,6 +111,7 @@ test("vault host import tool description routes unknown attached host text to ho
   const importSpec = listCattyToolSpecs().find((spec) => spec.capabilityId === "vault.host.import");
   assert.ok(importSpec);
   assert.match(importSpec.description, /known export formats/i);
+  assert.match(importSpec.description, /FinalShell/);
   assert.match(importSpec.description, /unknown/i);
   assert.match(importSpec.description, /read_attachment/i);
   assert.match(importSpec.description, /vault_hosts_create/i);

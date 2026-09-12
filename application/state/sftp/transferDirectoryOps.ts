@@ -558,11 +558,20 @@ export function useSftpDirectoryTransferOps({
     }
     const listingGate = progress.listingGate;
     const traversal = traversalBudget ?? createSftpDirectoryTraversalBudget();
+    // Only the newly supported same-pane local copy needs this fallback.
+    // Preserve existing large local uploads and cross-pane copies.
+    const boundLocalTraversal = sourceIsLocal && targetIsLocal
+      && task.sourceConnectionId === task.targetConnectionId;
     let claimedCanonicalPath: string | null = null;
     let regularFiles: SftpFileEntry[] = [];
     // Keep the current remote ancestor active through child discovery.
     try {
-      if (!sourceIsLocal && sourceSftpId) {
+      // Bound same-pane local copies that rediscover their own output through
+      // filesystem aliases not detected by the paste guard.
+      if (boundLocalTraversal) {
+        claimedCanonicalPath = claimSftpDirectoryVisit(traversal, task.sourcePath);
+        if (!claimedCanonicalPath) return totalErrors;
+      } else if (!sourceIsLocal && sourceSftpId) {
         const bridge = netcattyBridge.get();
         const canonicalPath = await bridge?.realpathSftp?.(sourceSftpId, task.sourcePath, sourceEncoding)
           .catch(() => task.sourcePath) ?? task.sourcePath;
@@ -611,7 +620,7 @@ export function useSftpDirectoryTransferOps({
 
       // Filter both "." and ".." — some SFTP servers include "." in readdir
       const filtered = files.filter((f) => f.name !== ".." && f.name !== ".");
-      if (!sourceIsLocal) accountSftpDirectoryEntries(traversal, filtered.length);
+      if (!sourceIsLocal || boundLocalTraversal) accountSftpDirectoryEntries(traversal, filtered.length);
       // Separate directories from files.
       // Symlink directories are only followed when followSymlinks is true
       // (downloadToLocal). Uploads/copies treat symlinks as regular entries

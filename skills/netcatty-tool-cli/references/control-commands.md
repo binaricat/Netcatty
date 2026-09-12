@@ -7,9 +7,9 @@ Read this when you need diagnostics, cancellation, or to re-enable a cancelled c
 - Runtime diagnostics:
   - `<netcatty-cli-prefix> status --json`
 - Cancel outstanding Netcatty work for this chat scope:
-  - `<netcatty-cli-prefix> cancel --chat-session <chat-session-id> --json`
+  - `<netcatty-cli-prefix> cancel --json`
 - Re-enable execution for that same chat scope:
-  - `<netcatty-cli-prefix> resume --chat-session <chat-session-id> --json`
+  - `<netcatty-cli-prefix> resume --json`
 
 ## Rules
 

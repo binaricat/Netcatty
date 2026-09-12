@@ -442,7 +442,7 @@ export const useSftpTransfers = ({
     cleanupTaskArtifacts,
   });
 
-  const { statTargetPath, getDuplicateTarget, deleteTargetPath } = useSftpTransferConflictOps();
+  const { statTargetPath, getDuplicateTarget, deleteTargetPath, isSameSourceEntry } = useSftpTransferConflictOps();
 
   const { transferFile, transferDirectory } = useSftpDirectoryTransferOps({
     ownerId,
@@ -840,9 +840,14 @@ export const useSftpTransfers = ({
 
       // Try same-host directory optimization first; falls back to recursive transfer
       // if remote cp is unavailable (e.g. Windows SSH servers).
-      let dirHandledBySameHost = false;
+      // Merge/Replace onto the source directory is already satisfied. Walking
+      // it would rewrite its children (including replacing links with files).
+      // Duplicate has a different target and continues through normal copying.
+      let directoryHandled = task.isDirectory
+        && await isSameSourceEntry(task, targetPane, targetSftpId, targetEncoding);
       if (
         task.isDirectory
+        && !directoryHandled
         && !task.replaceExistingTarget
         && task.resumable === false
         && sameHost
@@ -862,10 +867,10 @@ export const useSftpTransfers = ({
         if (cancelledTasksRef.current.has(task.id)) {
           throw new Error("Transfer cancelled");
         }
-        dirHandledBySameHost = result.success;
+        directoryHandled = result.success;
       }
 
-      if (task.isDirectory && !dirHandledBySameHost) {
+      if (task.isDirectory && !directoryHandled) {
         // For directory transfers, parent task uses:
         //   totalBytes = total file count (discovered async)
         //   transferredBytes = completed file count (incremented by child completions)

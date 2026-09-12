@@ -189,6 +189,7 @@ test("buildSessionRestorePayload deeply allowlists serial config fields", () => 
         localEcho: true,
         lineMode: true,
         backspaceBehavior: "ctrl-h",
+        byteOrientedBackspace: false,
         password: "do-not-store",
       },
     } as TerminalSession & { serialConfig: TerminalSession["serialConfig"] & { password: string } }],
@@ -208,6 +209,7 @@ test("buildSessionRestorePayload deeply allowlists serial config fields", () => 
     localEcho: true,
     lineMode: true,
     backspaceBehavior: "ctrl-h",
+    byteOrientedBackspace: false,
   });
 });
 

@@ -51,6 +51,13 @@ interface UsePluginTerminalProvidersOptions extends PluginTerminalProviderRefres
   getSnapshotState(): Partial<NetcattyTerminalSessionSnapshot>;
 }
 
+export function toPluginTerminalTheme(theme: TerminalTheme) {
+  // The preview plugin contract exposes the existing palette only. Keep the
+  // host-only optional color out of its strictly validated request payload.
+  const { foregroundIntense: _foregroundIntense, ...colors } = theme.colors;
+  return { type: theme.type, colors };
+}
+
 export function mergePluginTerminalThemeColors(
   results: readonly PluginTerminalThemeColors[],
 ): PluginTerminalThemeColors {
@@ -211,10 +218,7 @@ export function usePluginTerminalProviders(options: UsePluginTerminalProvidersOp
     if (hasProvider('terminal.theme')) {
       tasks.push(applyCurrentProviderResponse(waitForProviderResponse(request('terminal.theme', 'provideTheme', {
         reason,
-        currentTheme: {
-          type: metadata.baseTheme.type,
-          colors: metadata.baseTheme.colors,
-        },
+        currentTheme: toPluginTerminalTheme(metadata.baseTheme),
       }, PROVIDER_DEADLINE_MS, undefined, controller.signal), controller), isCurrent,
         (response) => {
           setThemeColors(mergePluginTerminalThemeColors(response.results.map((result) => result.status === 'ok'

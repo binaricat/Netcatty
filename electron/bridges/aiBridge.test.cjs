@@ -47,9 +47,10 @@ function loadBridgeWithMocks(options = {}) {
       cleanupScopedMetadata: async () => {},
       cleanup() {},
     },
-    "../cli/discoveryPath.cjs": {
+      "../cli/discoveryPath.cjs": {
       getCliLauncherPath: () => "/tmp/netcatty-tool-cli",
       TOOL_CLI_DISCOVERY_ENV_VAR: "NETCATTY_TOOL_CLI_DISCOVERY_FILE",
+      TOOL_CLI_CHAT_SESSION_ENV_VAR: "NETCATTY_CLI_CHAT_SESSION_ID",
     },
     "./ai/userSkills.cjs": {
       scanUserSkills: async () => ({ readyCount: 0, warningCount: 0, skills: [], warnings: [] }),

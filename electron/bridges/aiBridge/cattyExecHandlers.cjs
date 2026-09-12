@@ -3,7 +3,7 @@
 // runs under `with (ctx)` where bare `require` resolves to ctx.require
 // (based in electron/bridges/). Requiring here keeps the path unambiguous.
 const { formatSyntheticEcho } = require("../ai/shellUtils.cjs");
-const { ensureSessionShellKindForExec } = require("../ai/sessionShellKind.cjs");
+const { remoteDisallowsExecChannelProbe, ensureSessionShellKindForExec } = require("../ai/sessionShellKind.cjs");
 
 function getWorkerExecutionMeta(mcpServerBridge, sessionId, chatSessionId) {
   return mcpServerBridge.getSessionMeta?.(sessionId, chatSessionId) || {};
@@ -177,6 +177,7 @@ function registerCattyExecHandlers(ctx) {
             shellKind: session.shellKind,
             loginShellHint: session._loginShellKind,
             probeLiveShell: true,
+            bastionKeystrokes: remoteDisallowsExecChannelProbe(session.remoteSshVersion),
             onProbeAborted: (marker) => {
               const contents = electronModule?.webContents?.fromId?.(session.webContentsId);
               safeSend(contents, "netcatty:data", { sessionId, data: `${marker}_R\n` });

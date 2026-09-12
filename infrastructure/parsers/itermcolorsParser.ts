@@ -28,6 +28,7 @@ const COLOR_KEY_MAP: Record<string, keyof TerminalTheme['colors']> = {
     'Ansi 15 Color': 'brightWhite',
     'Background Color': 'background',
     'Foreground Color': 'foreground',
+    'Bold Color': 'foregroundIntense',
     'Cursor Color': 'cursor',
     'Selection Color': 'selection',
 };
@@ -138,6 +139,7 @@ export function parseItermcolors(xml: string, name: string): TerminalTheme | nul
         const defaults: TerminalTheme['colors'] = {
             background: colors.background,
             foreground: colors.foreground,
+            foregroundIntense: colors.foregroundIntense,
             cursor: colors.cursor || colors.foreground,
             selection: colors.selection || (isDarkBackground(colors.background) ? '#264f78' : '#add6ff'),
             black: colors.black || '#000000',

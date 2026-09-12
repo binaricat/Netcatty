@@ -346,6 +346,7 @@ function createPreloadApi(ctx) {
       data,
       automated: Boolean(options?.automated),
       sensitive: options?.sensitive === true,
+      serialEraseChar: typeof options?.serialEraseChar === "string" ? options.serialEraseChar : undefined,
       lineDelayMs: Number.isFinite(lineDelayMs) && lineDelayMs > 0 ? lineDelayMs : undefined,
       logRewrite: options?.logRewrite && typeof options.logRewrite === "object"
         ? {
@@ -915,6 +916,9 @@ function createPreloadApi(ctx) {
   },
   lstatLocal: async (path) => {
     return ipcRenderer.invoke("netcatty:local:lstat", { path });
+  },
+  realpathLocal: async (path) => {
+    return ipcRenderer.invoke("netcatty:local:realpath", { path });
   },
   listLocalTree: async (path, options = {}) => {
     const onProgress = typeof options?.onProgress === "function" ? options.onProgress : null;

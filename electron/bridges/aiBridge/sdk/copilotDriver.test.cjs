@@ -282,9 +282,16 @@ test("approveNetcattyCliShellOnly allows Netcatty CLI shell commands only", () =
   assert.deepEqual(
     approveNetcattyCliShellOnly({
       kind: "shell",
-      fullCommandText: 'node "/Applications/Netcatty.app/netcatty-tool-cli.cjs" env --chat-session abc --json',
+      fullCommandText: 'node "/Applications/Netcatty.app/netcatty-tool-cli.cjs" env --json',
     }),
     { kind: "approve-once" },
+  );
+  assert.equal(
+    approveNetcattyCliShellOnly({
+      kind: "shell",
+      fullCommandText: 'node "/Applications/Netcatty.app/netcatty-tool-cli.cjs" env --chat-session abc --json',
+    }).kind,
+    "reject",
   );
   assert.equal(
     approveNetcattyCliShellOnly({ kind: "shell", fullCommandText: "pwd" }).kind,
@@ -313,11 +320,38 @@ test("isLikelyNetcattyCliShellCommand rejects chained or wrapped local commands"
 
 test("isLikelyNetcattyCliShellCommand allows quoted remote exec payloads after --", () => {
   assert.equal(
-    isLikelyNetcattyCliShellCommand('netcatty-tool-cli exec --session s1 --chat-session c1 --json -- "hostname && whoami"'),
+    isLikelyNetcattyCliShellCommand('netcatty-tool-cli exec --session s1 --json -- "hostname && whoami"'),
     true,
   );
   assert.equal(
-    isLikelyNetcattyCliShellCommand("netcatty-tool-cli exec --session s1 --chat-session c1 --json -- hostname && whoami"),
+    isLikelyNetcattyCliShellCommand('netcatty-tool-cli exec --session s1 --json -- "echo --chat-session"'),
+    true,
+  );
+  assert.equal(
+    isLikelyNetcattyCliShellCommand("netcatty-tool-cli exec --session s1 --json -- hostname && whoami"),
+    false,
+  );
+});
+
+test("isLikelyNetcattyCliShellCommand rejects removed --chat-session and host-env overrides", () => {
+  assert.equal(
+    isLikelyNetcattyCliShellCommand("netcatty-tool-cli env --chat-session abc --json"),
+    false,
+  );
+  assert.equal(
+    isLikelyNetcattyCliShellCommand("netcatty-tool-cli exec --session s1 --chat-session=c1 --json -- hostname"),
+    false,
+  );
+  assert.equal(
+    isLikelyNetcattyCliShellCommand("NETCATTY_CLI_CHAT_SESSION_ID=other netcatty-tool-cli env --json"),
+    false,
+  );
+  assert.equal(
+    isLikelyNetcattyCliShellCommand("NETCATTY_TOOL_CLI_DISCOVERY_FILE=/tmp/x netcatty-tool-cli status --json"),
+    false,
+  );
+  assert.equal(
+    isLikelyNetcattyCliShellCommand("FOO=bar netcatty-tool-cli status --json"),
     false,
   );
 });

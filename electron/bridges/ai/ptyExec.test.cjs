@@ -1376,3 +1376,32 @@ test("posix wrapper avoids history expansion in interactive zsh", (t) => {
   assert.match(result.stdout, /HISTORY_PROBE/);
   assert.doesNotMatch(result.stderr, /event not found/);
 });
+
+test("startPtyJob types the wrapper one code point per write for strict bastions (#3146)", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const writes = [];
+  class CapturePty extends EventEmitter {
+    write(data) {
+      writes.push(String(data));
+    }
+  }
+  const pty = new CapturePty();
+  const job = startPtyJob(pty, "echo test", {
+    shellKind: "posix",
+    bastionKeystrokes: true,
+    timeoutMs: 50,
+    expectedPrompt: "$ ",
+  });
+  const wrapped = buildWrappedCommand("echo test", "posix", job.marker);
+  const expected = Array.from(`${buildPendingInputClearPrefix("posix")}${wrapped}`);
+  while (writes.length < expected.length) t.mock.timers.tick(30);
+  assert.deepEqual(writes, expected, "one write per code point");
+  for (const chunk of writes) {
+    assert.equal(Array.from(chunk).length, 1, "each write is a single code point");
+  }
+  job.cancel();
+  pty.emit("data", Buffer.from("$ "));
+  const result = await job.resultPromise;
+  assert.equal(result.ok, false);
+  assert.equal(result.error, "Cancelled");
+});
