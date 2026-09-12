@@ -30,7 +30,8 @@ test('compose bar preserves a draft on pane focus and records only successful as
   });
   let textarea = createTextarea();
   let finish!: (sent: boolean) => void;
-  const onSend = () => new Promise<boolean>((resolve) => { finish = resolve; });
+  let rejectSend!: (error: Error) => void;
+  const onSend = () => new Promise<boolean>((resolve, reject) => { finish = resolve; rejectSend = reject; });
   const render = (sessionId: string) => (
     <TooltipProvider><TerminalComposeBar sessionId={sessionId} onSend={onSend} onClose={() => {}} /></TooltipProvider>
   );
@@ -82,6 +83,16 @@ test('compose bar preserves a draft on pane focus and records only successful as
   await act(async () => { finish(true); });
   await act(async () => { finishRejected(false); });
   assert.deepEqual(getComposeBarHistory('b'), ['accepted command', 'first', 'second', 'after rejected']);
+  const errorLog = t.mock.method(console, 'error', () => {});
+  textarea.value = 'exception';
+  key('Enter');
+  const rejectFirst = rejectSend;
+  textarea.value = 'after exception';
+  key('Enter');
+  await act(async () => { finish(true); });
+  await act(async () => { rejectFirst(new Error('send failed')); });
+  assert.equal(errorLog.mock.callCount(), 1);
+  assert.deepEqual(getComposeBarHistory('b'), ['accepted command', 'first', 'second', 'after rejected', 'after exception']);
   await act(async () => { root.unmount(); });
   pruneComposeBarHistory([]);
 });

@@ -2169,7 +2169,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
           const session = sessionsRef.current.find((candidate) => candidate.id === sid);
           if (!session || !canUseDirectSessionWriteFallback(session)) continue;
           terminalBackend.writeToSession(sid, payload, { sensitive: false });
-          recordHistory = true;
+          recordHistory = recordHistory || session.status === 'connected';
         }
       }
     } else {
@@ -2188,15 +2188,15 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
         } else {
           const session = sessionsRef.current.find((candidate) => candidate.id === targetId);
           if (!session || !canUseDirectSessionWriteFallback(session)) return false;
-          recordHistory = !isTerminalSensitiveInputActive(targetId);
+          recordHistory = session.status === 'connected' && !isTerminalSensitiveInputActive(targetId);
           terminalBackend.writeToSession(targetId, payload, {
             sensitive: isTerminalSensitiveInputActive(targetId),
           });
         }
       }
     }
-    const results = await Promise.all(pendingSends);
-    return recordHistory || results.some(Boolean);
+    const results = await Promise.allSettled(pendingSends);
+    return recordHistory || results.some((result) => result.status === 'fulfilled' && result.value);
   }, [isBroadcastEnabled, terminalBackend]);
 
   const sessionLogConfig = useMemo(
