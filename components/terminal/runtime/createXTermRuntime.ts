@@ -1242,10 +1242,6 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         { sensitive, allowHostStyleGreaterThanPrompt: ctx.allowHostStyleGreaterThanPrompt },
       );
       handledSubmittedInput = true;
-      // After line submission the cursor is at the beginning of the next
-      // prompt line (end of empty buffer).  Reset cursor-tail confidence
-      // so backspace byte expansion works on the next line's first char.
-      lastInputWasPrintable = true;
       // Recipients of a key-chord broadcast must not arm password assistance.
       // handlingKittyBroadcast already blocks re-fan-out via canBroadcastInput.
       if (!canBroadcastInput && !handlingKittyBroadcast) {
@@ -1280,6 +1276,9 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         }
       }
     }
+
+    // Both Enter and a submitted paste start a new, empty input line.
+    if (handledSubmittedInput) lastInputWasPrintable = true;
 
     if (id) {
       prioritizeTerminalInput(

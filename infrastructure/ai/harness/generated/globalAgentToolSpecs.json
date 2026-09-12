@@ -788,7 +788,7 @@
       "serialConfig": {
         "type": "string",
         "optional": true,
-        "description": "JSON object for serial connections: path, baudRate, and optional dataBits, stopBits, parity, flowControl, localEcho, lineMode, backspaceBehavior (default or ctrl-h). Existing backspaceBehavior is preserved when omitted."
+        "description": "JSON object for serial connections: path, baudRate, and optional dataBits, stopBits, parity, flowControl, localEcho, lineMode, backspaceBehavior (default or ctrl-h), byteOrientedBackspace (boolean, default false; enable only for devices that delete bytes rather than characters). Existing backspaceBehavior and byteOrientedBackspace are preserved when omitted."
       }
     },
     "policy": {

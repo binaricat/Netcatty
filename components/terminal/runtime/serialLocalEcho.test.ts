@@ -41,3 +41,12 @@ test("serial byte deletion metadata is forwarded through the runtime input loop"
   const source = await readFile(new URL("./createXTermRuntime.ts", import.meta.url), "utf8");
   assert.match(source, /writeToSession\(id, chunk, \{ sensitive, serialEraseChar \}\)/);
 });
+
+test("both Enter and submitted paste restore serial tail confidence", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const source = await readFile(new URL("./createXTermRuntime.ts", import.meta.url), "utf8");
+  const pasteBranch = source.indexOf("const pastedCommand = logicalData");
+  const restoreTail = source.indexOf("if (handledSubmittedInput) lastInputWasPrintable = true;");
+  const writeInput = source.indexOf("prioritizeTerminalInput(", pasteBranch);
+  assert.ok(pasteBranch > 0 && restoreTail > pasteBranch && restoreTail < writeInput);
+});
