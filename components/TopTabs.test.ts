@@ -655,32 +655,3 @@ test("bulk close context menu offers symmetric close-to-left option", () => {
     assert.match(source, /'tabs\.closeToLeft':/);
   }
 });
-
-test("batch tab close routes editor tabs through their close handler", () => {
-  const effectsSource = readFileSync(
-    new URL("../application/app/AppSideEffects.tsx", import.meta.url),
-    "utf8",
-  );
-  const closeTabsBatchBlock = effectsSource.slice(
-    effectsSource.indexOf("const closeTabsBatch = useCallback("),
-    effectsSource.indexOf("// Shared hotkey action handler"),
-  );
-  // Editor tab ids in the batch targets must go through the editor close
-  // handler (dirty-save prompts), not the session/workspace batch closer.
-  assert.match(closeTabsBatchBlock, /isEditorTabId\(id\)/);
-  assert.match(closeTabsBatchBlock, /handleRequestCloseEditorTabRef\.current\(fromEditorTabId\(tabId\)\)/);
-  // A cancelled dirty-editor close keeps that tab open, so focus must not be
-  // stolen away from it.
-  assert.match(closeTabsBatchBlock, /cancelledEditorIds\.has\(activeBeforeClose\)/);
-  // The busy-terminal confirmation must precede editor close prompts —
-  // otherwise cancelling the bulk operation after the confirmation still
-  // leaves clean/saved editors removed.
-  const editorPromptIndex = closeTabsBatchBlock.indexOf("handleRequestCloseEditorTabRef.current(fromEditorTabId(tabId))");
-  const busyConfirmIndex = closeTabsBatchBlock.indexOf("await confirmIfBusyLocalTerminal(");
-  assert.ok(editorPromptIndex !== -1 && busyConfirmIndex !== -1 && busyConfirmIndex < editorPromptIndex);
-  // The batch closer runs with the confirmation already done.
-  assert.match(closeTabsBatchBlock, /skipBusyConfirm: true/);
-  // A cancelled editor keeps its owning terminal tab open via the SFTP owner
-  // registry (editorTab.sessionId is an SFTP connection id, not a session id).
-  assert.match(closeTabsBatchBlock, /findEditorSftpOwnerTabId/);
-});

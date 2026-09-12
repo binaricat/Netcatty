@@ -11,6 +11,8 @@ import { getTerminalPassthroughActions } from '../state/useGlobalHotkeys';
 import { tabShortcutDigitFromEvent } from '../../domain/models/keyBindings';
 import { buildNumberShortcutTabTargets } from './tabShortcutTargets';
 import { captureInheritedCwd } from '../state/inheritedCwd';
+import { fromEditorTabId, isEditorTabId } from '../state/activeTabStore';
+import { resolveBatchTabCloseFocus } from '../state/pluginViewTabStore';
 
 type AppContextGetter = () => Record<string, any>;
 const TERMINAL_PASSTHROUGH_ACTIONS = getTerminalPassthroughActions();
@@ -701,40 +703,62 @@ export function collectBatchBusyProbeSessionIds(
   return sessionIdsToProbe;
 }
 
-export async function closeTabsBatchImpl(
-  getCtx: AppContextGetter,
-  targetIds: string[],
-  options?: { skipBusyConfirm?: boolean },
-) {
-  const { closeLogView, closeSessions, closeTabsInFlightRef, closeWorkspace, confirmIfBusyLocalTerminal, logViews, sessions, workspaces } = getCtx();
-{
-      if (targetIds.length === 0) return true;
-      if (closeTabsInFlightRef.current) return false;
+export async function closeTabsBatchImpl(getCtx: AppContextGetter, targetIds: string[]) {
+  const {
+    closeLogView, closeSessions, closeTabsInFlightRef, closeWorkspace,
+    confirmIfBusyLocalTerminal, logViews, sessions, workspaces,
+    activeTabStore, editorTabStore, pluginViewTabStore,
+    handleRequestCloseEditorTabRef, findEditorSftpOwnerTabId, orderedTabsWithEditors,
+  } = getCtx();
+  if (targetIds.length === 0) return true;
+  if (closeTabsInFlightRef.current) return false;
+  closeTabsInFlightRef.current = true;
+  try {
+    const activeBeforeClose = activeTabStore.getActiveTabId();
+    const pluginIds = targetIds.filter((id) => pluginViewTabStore.getTab(id));
+    const editorIds = targetIds.filter(isEditorTabId);
+    const regularIds = targetIds.filter((id) => !pluginViewTabStore.getTab(id) && !isEditorTabId(id));
+    // Cancel busy-terminal confirmation before making any changes, including editors.
+    if (regularIds.length && !await confirmIfBusyLocalTerminal(
+      collectBatchBusyProbeSessionIds(sessions, workspaces, regularIds),
+    )) return false;
 
-      const sessionIdsToProbe = collectBatchBusyProbeSessionIds(sessions, workspaces, targetIds);
-
-      closeTabsInFlightRef.current = true;
-      try {
-        const ok = options?.skipBusyConfirm || await confirmIfBusyLocalTerminal(sessionIdsToProbe);
-        if (!ok) return false;
-        const standaloneSessionIds = targetIds.filter((tabId) => (
-          sessions.some((session) => session.id === tabId)
-        ));
-        if (standaloneSessionIds.length > 0) {
-          closeSessions(standaloneSessionIds);
-        }
-        for (const tabId of targetIds) {
-          if (workspaces.find((w) => w.id === tabId)) {
-            closeWorkspace(tabId);
-          } else if (logViews.find((lv) => lv.id === tabId)) {
-            closeLogView(tabId);
-          }
-        }
-        return true;
-      } finally {
-        closeTabsInFlightRef.current = false;
-      }
+    const closedEditorIds: string[] = [];
+    for (const id of editorIds) {
+      if (await handleRequestCloseEditorTabRef.current(fromEditorTabId(id))) closedEditorIds.push(id);
     }
+
+    // Owners must remain mounted while any editor survives (cancelled or outside
+    // the range), because unmounting their SFTP panel discards its editors.
+    const keepTabIds = new Set<string>();
+    for (const editor of editorTabStore.getTabs()) {
+      const owner = findEditorSftpOwnerTabId(editor.sessionId, editor.sftpTabId);
+      if (owner) keepTabIds.add(owner);
+    }
+    const effectiveRegularIds = regularIds.filter((id) => !keepTabIds.has(id) && !(
+      workspaces.some((workspace) => workspace.id === id) &&
+      sessions.some((session) => session.workspaceId === id && keepTabIds.has(session.id))
+    ));
+    const standaloneSessionIds = effectiveRegularIds.filter((id) => sessions.some((session) => session.id === id));
+    if (standaloneSessionIds.length) closeSessions(standaloneSessionIds);
+    for (const id of effectiveRegularIds) {
+      if (workspaces.some((workspace) => workspace.id === id)) closeWorkspace(id);
+      else if (logViews.some((logView) => logView.id === id)) closeLogView(id);
+    }
+    for (const id of pluginIds) pluginViewTabStore.close(id);
+
+    const closingTabIds = new Set([...effectiveRegularIds, ...closedEditorIds, ...pluginIds]);
+    if (closingTabIds.has(activeBeforeClose)) {
+      activeTabStore.setActiveTabId(resolveBatchTabCloseFocus({
+        orderedTabIds: orderedTabsWithEditors,
+        closingTabIds,
+        activeTabId: activeBeforeClose,
+      }));
+    }
+    return true;
+  } finally {
+    closeTabsInFlightRef.current = false;
+  }
 }
 
 export function executeHotkeyActionImpl(getCtx: AppContextGetter, action: string, e: KeyboardEvent) {

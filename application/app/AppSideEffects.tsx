@@ -26,7 +26,6 @@ import { findEditorSftpOwnerTabId } from '../state/editorSftpOwnerRegistry';
 import {
   isPluginViewTabId,
   pluginViewTabStore,
-  resolveBatchTabCloseFocus,
   usePluginViewTabs,
 } from '../state/pluginViewTabStore';
 import {
@@ -91,7 +90,7 @@ import { isScriptSnippet } from '../../domain/snippetScript.ts';
 import { collectSnippetDeleteIds } from '../../domain/snippetSelection.ts';
 import { shouldOpenLocalTerminalOnStartup, resolveStartupLandingSetting } from '../../domain/startupLanding';
 import { useAppStartupEffects } from './useAppStartupEffects';
-import { handleTrayJumpToSessionImpl, handleTrayTogglePortForwardImpl, handleTrayPanelConnectImpl, handleTrayPanelConnectRequestImpl, flushQueuedTrayPanelConnectHostsImpl, handleGlobalHotkeyKeyDownImpl, handleEscapeKeyDownImpl, handleKeyboardInteractiveSubmitImpl, handleKeyboardInteractiveCancelImpl, handlePassphraseSubmitImpl, handlePassphraseCancelImpl, handlePassphraseSkipImpl, createLocalTerminalWithCurrentShellImpl, splitSessionWithCurrentShellImpl, copySessionWithCurrentShellImpl, duplicateSessionWithCurrentShellImpl, copyWorkspaceWithCurrentShellImpl, copySessionToNewWindowWithCurrentShellImpl, confirmIfBusyLocalTerminalImpl, closeTabsBatchImpl, collectBatchBusyProbeSessionIds, executeHotkeyActionImpl, handleCreateLocalTerminalImpl, handleConnectToHostImpl, handleTerminalDataCaptureImpl, hasMultipleProtocolsImpl, handleHostConnectWithProtocolCheckImpl, handleProtocolSelectImpl, handleRootContextMenuImpl, markForwardedNativeShortcutEvent } from './AppHandlers';
+import { handleTrayJumpToSessionImpl, handleTrayTogglePortForwardImpl, handleTrayPanelConnectImpl, handleTrayPanelConnectRequestImpl, flushQueuedTrayPanelConnectHostsImpl, handleGlobalHotkeyKeyDownImpl, handleEscapeKeyDownImpl, handleKeyboardInteractiveSubmitImpl, handleKeyboardInteractiveCancelImpl, handlePassphraseSubmitImpl, handlePassphraseCancelImpl, handlePassphraseSkipImpl, createLocalTerminalWithCurrentShellImpl, splitSessionWithCurrentShellImpl, copySessionWithCurrentShellImpl, duplicateSessionWithCurrentShellImpl, copyWorkspaceWithCurrentShellImpl, copySessionToNewWindowWithCurrentShellImpl, confirmIfBusyLocalTerminalImpl, closeTabsBatchImpl, executeHotkeyActionImpl, handleCreateLocalTerminalImpl, handleConnectToHostImpl, handleTerminalDataCaptureImpl, hasMultipleProtocolsImpl, handleHostConnectWithProtocolCheckImpl, handleProtocolSelectImpl, handleRootContextMenuImpl, markForwardedNativeShortcutEvent } from './AppHandlers';
 
 type OpenSessionInNewWindowPayload = {
   title?: string;
@@ -1014,84 +1013,15 @@ export function AppSideEffects() {
   // Used by the "Close all / Close others / Close to the left / Close to the
   // right" context-menu actions on tabs (#748).
   const closeTabsBatch = useCallback(
-    async (targetIds: string[]) => {
-      const closingTabIds = new Set(targetIds);
-      const activeBeforeClose = activeTabStore.getActiveTabId();
-      const pluginIds = targetIds.filter((id) => pluginViewTabStore.getTab(id));
-      const editorIds = targetIds.filter((id) => isEditorTabId(id));
-      const regularIds = targetIds.filter((id) => !pluginViewTabStore.getTab(id) && !isEditorTabId(id));
-      // Busy-terminal confirmation must run BEFORE editor close prompts: if it
-      // ran later (inside closeTabsBatchImpl), a cancelled confirmation would
-      // return with clean/saved/discarded editors already removed, so
-      // cancelling the bulk operation would no longer prevent its mutations.
-      if (regularIds.length && !(await confirmIfBusyLocalTerminal(
-        collectBatchBusyProbeSessionIds(sessions, workspaces, regularIds),
-      ))) return;
-      // Editor tabs must route through their own close handler so dirty-save
-      // prompts run; a cancelled prompt leaves that tab open.
-      // Prompt BEFORE closing any regular tabs: closing an editor's owning
-      // terminal/workspace tab unmounts its SFTP side panel, whose cleanup
-      // force-closes bound editors (dropping dirty state) and unregisters the
-      // save channel — making the prompt moot.
-      const cancelledEditorIds = new Set<string>();
-      for (const tabId of editorIds) {
-        const closed = await handleRequestCloseEditorTabRef.current(fromEditorTabId(tabId));
-        if (!closed) cancelledEditorIds.add(tabId);
-      }
-      // Any editor that survives this batch close must keep its owning tab
-      // open — not only ones whose dirty-save prompt was cancelled. When the
-      // order is [owner terminal, anchor, owned editor], "Close Tabs to the
-      // Left" on the anchor targets only the owner; closing it would unmount
-      // its SftpSidePanel, whose cleanup force-closes the surviving editor
-      // (dropping dirty state) even though that editor was outside the
-      // requested range. Editor tabs record the SFTP connection id (not the
-      // terminal session id), so resolve the owning top-level tab via the
-      // panel registry instead of comparing against session ids. A browse
-      // reconnect regenerates connection ids while the editor still
-      // references the old one, so also resolve by the editor's stable pane
-      // tab id.
-      const keepTabIds = new Set<string>();
-      const survivingEditorIds = new Set<string>();
-      for (const editorTab of editorTabStore.getTabs()) {
-        const topId = toEditorTabId(editorTab.id);
-        if (!closingTabIds.has(topId) || cancelledEditorIds.has(topId)) survivingEditorIds.add(topId);
-      }
-      for (const tabId of survivingEditorIds) {
-        const editorTab = editorTabStore.getTab(fromEditorTabId(tabId));
-        const ownerTabId = findEditorSftpOwnerTabId(editorTab?.sessionId, editorTab?.sftpTabId);
-        if (ownerTabId) keepTabIds.add(ownerTabId);
-      }
-      const effectiveRegularIds = keepTabIds.size === 0 ? regularIds : regularIds.filter((tabId) => {
-        if (keepTabIds.has(tabId)) return false;
-        const ws = workspaces.find((w) => w.id === tabId);
-        if (ws && sessions.some((s) => s.workspaceId === tabId && keepTabIds.has(s.id))) return false;
-        return true;
-      });
-      // Busy confirmation already ran above — skip it inside the batch closer.
-      const canClose = !effectiveRegularIds.length || await closeTabsBatchImpl(
-        () => ({ closeLogView, closeSessions, closeTabsInFlightRef, closeWorkspace, confirmIfBusyLocalTerminal, logViews, sessions, targetIds: effectiveRegularIds, workspaces }),
-        effectiveRegularIds,
-        { skipBusyConfirm: true },
-      );
-      if (!canClose) return;
-      for (const id of pluginIds) pluginViewTabStore.close(id);
-      // Focus only shifts when the active tab actually closed — a dirty editor
-      // whose close was cancelled stays open and keeps focus.
-      if (closingTabIds.has(activeBeforeClose) && !cancelledEditorIds.has(activeBeforeClose)) {
-        // Recompute the destination excluding cancelled editors and the tabs
-        // preserved alongside them (their owning terminal/workspace tabs), so
-        // an owner that stays open keeps focus and is never treated as closed.
-        const effectiveClosingTabIds = new Set(closingTabIds);
-        for (const id of cancelledEditorIds) effectiveClosingTabIds.delete(id);
-        for (const id of keepTabIds) effectiveClosingTabIds.delete(id);
-        const focusAfterClose = resolveBatchTabCloseFocus({
-          orderedTabIds: orderedTabsWithEditors,
-          closingTabIds: effectiveClosingTabIds,
-          activeTabId: activeBeforeClose,
-        });
-        activeTabStore.setActiveTabId(focusAfterClose);
-      }
-    },
+    (targetIds: string[]) => closeTabsBatchImpl(
+      () => ({
+        closeLogView, closeSessions, closeTabsInFlightRef, closeWorkspace,
+        confirmIfBusyLocalTerminal, logViews, sessions, workspaces,
+        activeTabStore, editorTabStore, pluginViewTabStore,
+        handleRequestCloseEditorTabRef, findEditorSftpOwnerTabId, orderedTabsWithEditors,
+      }),
+      targetIds,
+    ),
     [workspaces, sessions, logViews, confirmIfBusyLocalTerminal, closeWorkspace, closeSessions, closeLogView, orderedTabsWithEditors],
   );
 
