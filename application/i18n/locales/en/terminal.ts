@@ -637,6 +637,7 @@ export const enTerminalMessages: Messages = {
   'tabs.copyTabToNewWindow': 'Copy Tab to New Window',
   'tabs.copyTabToNewWindowFailed': 'Failed to open tab in a new window',
   'tabs.closeOthers': 'Close Others',
+  'tabs.closeToLeft': 'Close Tabs to the Left',
   'tabs.closeToRight': 'Close Tabs to the Right',
   'tabs.closeAll': 'Close All',
   'keychain.edit.labelRequired': 'Label *',

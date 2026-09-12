@@ -652,6 +652,7 @@ export const ruTerminalMessages: Messages = {
   'tabs.copyTabToNewWindow': 'Копировать вкладку в новое окно',
   'tabs.copyTabToNewWindowFailed': 'Не удалось открыть вкладку в новом окне',
   'tabs.closeOthers': 'Закрыть остальные',
+  'tabs.closeToLeft': 'Закрыть вкладки слева',
   'tabs.closeToRight': 'Закрыть вкладки справа',
   'tabs.closeAll': 'Закрыть все',
   'keychain.edit.labelRequired': 'Метка *',

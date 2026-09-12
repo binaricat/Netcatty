@@ -63,6 +63,23 @@ describe('queryLocalFonts deduplication', () => {
     );
   });
 
+  it('recognizes Fixedsys Excelsior as a monospace terminal font (#3332)', async () => {
+    installMockWindow(async () => [
+      { family: 'Fixedsys Excelsior 3.01' },
+      { family: 'Fixedsys Excelsior' },
+      { family: 'Microsoft YaHei UI' },
+    ]);
+
+    const monoFonts = await getMonospaceFonts();
+    const names = monoFonts.map((f) => f.name);
+
+    // Both upstream family-name variants must be offered in the picker.
+    assert.ok(names.includes('Fixedsys Excelsior'));
+    assert.ok(names.includes('Fixedsys Excelsior 3.01'));
+    // Proportional system fonts stay excluded.
+    assert.ok(!names.includes('Microsoft YaHei UI'));
+  });
+
   it('a second sequential call also reuses the resolved promise (no second API call)', async () => {
     let callCount = 0;
     installMockWindow(async () => {

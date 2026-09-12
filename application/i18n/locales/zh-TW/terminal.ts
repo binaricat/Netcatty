@@ -722,6 +722,7 @@ export const zhTWTerminalMessages: Messages = {
   'tabs.copyTabToNewWindow': '複製分頁到新視窗',
   'tabs.copyTabToNewWindowFailed': '無法在新視窗開啟分頁',
   'tabs.closeOthers': '關閉其他分頁',
+  'tabs.closeToLeft': '關閉左側分頁',
   'tabs.closeToRight': '關閉右側分頁',
   'tabs.closeAll': '關閉所有分頁',
   'keychain.edit.labelRequired': 'Label *',
