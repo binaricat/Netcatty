@@ -1967,6 +1967,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
           serialLineBufferRef: ctx.serialLineBufferRef,
           onAutocompleteInput: ctx.onAutocompleteInput,
         });
+        lastInputWasPrintable = true;
         if (ctx.passwordPromptActiveRef) {
           ctx.passwordPromptActiveRef.current = false;
         }

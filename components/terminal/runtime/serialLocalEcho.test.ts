@@ -74,3 +74,9 @@ test("byte-oriented serial input prevents encoding changes while wire bytes are 
     assert.equal(notices.length, blocked ? 1 : 0);
   }
 });
+
+test("urgent Ctrl+C restores serial tail confidence when it clears pending input", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const source = await readFile(new URL("./createXTermRuntime.ts", import.meta.url), "utf8");
+  assert.match(source, /clearTerminalInputStateForInterrupt\(\{[^]*?\}\);\s*lastInputWasPrintable = true;/);
+});
