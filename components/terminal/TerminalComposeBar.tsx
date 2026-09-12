@@ -345,10 +345,17 @@ export const TerminalComposeBar: React.FC<TerminalComposeBarProps> = ({
     const text = el.value;
     if (!text) return;
     const recordSent = prepareRecord();
-    const result = onSend(text);
+    let result: ReturnType<typeof onSend>;
+    try {
+      result = onSend(text);
+    } catch (error) {
+      recordSent();
+      throw error;
+    }
     void Promise.resolve(result).then((sent) => {
-      if (sent !== false) recordSent(text);
+      recordSent(sent !== false ? text : undefined);
     }).catch((error: unknown) => {
+      recordSent();
       console.error('Compose bar send failed', error);
     });
     reset();

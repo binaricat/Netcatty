@@ -21,8 +21,22 @@ test('late send completion cannot restore a closed session or overwrite another 
   const second = createComposeBarHistoryRecorder('a');
   second('second');
   first('first');
-  assert.deepEqual(getComposeBarHistory('a'), ['second', 'first']);
+  assert.deepEqual(getComposeBarHistory('a'), ['first', 'second']);
+  const late = createComposeBarHistoryRecorder('a');
   pruneComposeBarHistory([]);
-  first('late');
+  late('late');
   assert.deepEqual(getComposeBarHistory('a'), []);
+});
+
+
+test('failed submissions unblock later successes in submission order', async () => {
+  const { createComposeBarHistoryRecorder } = await import('./composeBarHistoryStore');
+  pruneComposeBarHistory([]);
+  const failed = createComposeBarHistoryRecorder('a');
+  const accepted = createComposeBarHistoryRecorder('a');
+  accepted('accepted');
+  assert.deepEqual(getComposeBarHistory('a'), []);
+  failed();
+  assert.deepEqual(getComposeBarHistory('a'), ['accepted']);
+  pruneComposeBarHistory([]);
 });
