@@ -603,7 +603,8 @@ test("buildCodebuddyHooks blocks non-Netcatty Bash commands in skills mode", asy
       decision: "block",
       reason:
         "Only Netcatty CLI commands are allowed in Skills mode. " +
-        "Use the netcatty-tool-cli command prefix provided by the host.",
+        "Use the netcatty-tool-cli command prefix provided by the host. " +
+        "Do not pass --chat-session or override NETCATTY_CLI_CHAT_SESSION_ID; the host already bound this process.",
     },
   );
   assert.deepEqual(
@@ -611,7 +612,7 @@ test("buildCodebuddyHooks blocks non-Netcatty Bash commands in skills mode", asy
       {
         tool_name: "Bash",
         tool_input: {
-          command: "netcatty-tool-cli session --session s1 --chat-session c1 --json",
+          command: "netcatty-tool-cli session --session s1 --json",
         },
         tool_use_id: "tu-cli",
       },
@@ -619,6 +620,34 @@ test("buildCodebuddyHooks blocks non-Netcatty Bash commands in skills mode", asy
       { signal: new AbortController().signal },
     ),
     { continue: true },
+  );
+  assert.equal(
+    (await preHook(
+      {
+        tool_name: "Bash",
+        tool_input: {
+          command: "netcatty-tool-cli session --session s1 --chat-session c1 --json",
+        },
+        tool_use_id: "tu-legacy",
+      },
+      "tu-legacy",
+      { signal: new AbortController().signal },
+    )).decision,
+    "block",
+  );
+  assert.equal(
+    (await preHook(
+      {
+        tool_name: "Bash",
+        tool_input: {
+          command: "NETCATTY_CLI_CHAT_SESSION_ID=other netcatty-tool-cli env --json",
+        },
+        tool_use_id: "tu-env-override",
+      },
+      "tu-env-override",
+      { signal: new AbortController().signal },
+    )).decision,
+    "block",
   );
   assert.equal(
     (await preHook(

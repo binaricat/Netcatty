@@ -5,6 +5,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const { mcpEnvPairsToObject } = require("./injectMcp.cjs");
+const { withExclusiveProcessEnv } = require("./processEnvGate.cjs");
 const {
   buildOpenCodeNativeSkillsPermissionRules,
   buildOpenCodeSkillsPermissionRules,
@@ -475,36 +476,22 @@ async function createDefaultOpenCode(options, env, binPath) {
   }
 
   const { env: nextEnv, cleanup: cleanupShim } = createOpenCodeProcessEnv(env, binPath);
-  const previous = {};
-  for (const [key, value] of Object.entries(nextEnv)) {
-    previous[key] = process.env[key];
-    process.env[key] = String(value);
-  }
 
   // Restore the Electron main-process environment as soon as the child has been
   // spawned. Keeping PATH/OPENCODE_BIN pointed at a temporary shim for the
   // server lifetime (or list-models idle window) can leak into later turns and
   // other spawns; see #2184 review. The on-disk shim stays until close() so a
   // still-running child that re-resolves helpers does not race a deleted path.
-  const restoreProcessEnv = () => {
-    if (restoreProcessEnv.done) return;
-    restoreProcessEnv.done = true;
-    for (const key of Object.keys(nextEnv)) {
-      if (previous[key] === undefined) delete process.env[key];
-      else process.env[key] = previous[key];
-    }
-  };
-
+  // Serialize the mutation so concurrent chats cannot swap
+  // NETCATTY_CLI_CHAT_SESSION_ID while createOpencode is still spawning.
   const cleanup = () => {
     if (cleanup.done) return;
     cleanup.done = true;
-    restoreProcessEnv();
     cleanupShim();
   };
 
   try {
-    const opencode = await sdk.createOpencode(options);
-    restoreProcessEnv();
+    const opencode = await withExclusiveProcessEnv(nextEnv, () => sdk.createOpencode(options));
     const originalClose = opencode.server?.close?.bind(opencode.server);
     if (typeof originalClose === "function") {
       opencode.server.close = () => {

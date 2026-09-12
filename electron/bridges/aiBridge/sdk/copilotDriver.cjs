@@ -25,6 +25,11 @@
  *   text + per-tool-call events (assistant.message / tool execution events).
  */
 const { mcpEnvPairsToObject } = require("./injectMcp.cjs");
+const { isRemovedChatSessionFlag } = require("../../../cli/cliChatSession.cjs");
+const {
+  TOOL_CLI_CHAT_SESSION_ENV_VAR,
+  TOOL_CLI_DISCOVERY_ENV_VAR,
+} = require("../../../cli/discoveryPath.cjs");
 
 // Neutral client options. The real CopilotClient options (with RuntimeConnection)
 // are assembled in runCopilotTurn, because RuntimeConnection comes from the SDK
@@ -167,8 +172,11 @@ function isNetcattyCliInvocationPrefix(localPart) {
   const text = String(localPart || "").trim();
   if (!text) return false;
   const pathPrefix = String.raw`(?:\.\./|\./|/|[A-Za-z]:[\\/])[\w. \\-]*[\\/]`;
+  // Do not allow `VAR=value cmd` prefixes. The host already injects
+  // NETCATTY_CLI_CHAT_SESSION_ID / discovery env; inline assignments would
+  // override that tenant binding.
   const invocation = new RegExp(
-    String.raw`^(?:(?:[A-Za-z_][\w.-]*=[^\s]+\s+)*)?(?:` +
+    String.raw`^(?:` +
     String.raw`"[^"]*${NETCATTY_CLI_PATH_SUFFIX}"|` +
     String.raw `'[^']*${NETCATTY_CLI_PATH_SUFFIX}'|` +
     String.raw `${NETCATTY_CLI_TOKEN}(?=\s|$)|` +
@@ -179,6 +187,74 @@ function isNetcattyCliInvocationPrefix(localPart) {
     "i",
   );
   return invocation.test(text);
+}
+
+function unquoteCliToken(token) {
+  const text = String(token || "");
+  if (
+    (text.startsWith('"') && text.endsWith('"') && text.length >= 2)
+    || (text.startsWith("'") && text.endsWith("'") && text.length >= 2)
+  ) {
+    return text.slice(1, -1);
+  }
+  return text;
+}
+
+function someLocalCliToken(localPart, predicate) {
+  const text = String(localPart || "");
+  let inSingle = false;
+  let inDouble = false;
+  let escape = false;
+  let token = "";
+
+  const take = () => {
+    if (!token) return false;
+    const hit = predicate(unquoteCliToken(token));
+    token = "";
+    return hit;
+  };
+
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (escape) {
+      token += ch;
+      escape = false;
+      continue;
+    }
+    if (ch === "\\" && (inSingle || inDouble)) {
+      escape = true;
+      token += ch;
+      continue;
+    }
+    if (!inDouble && ch === "'") {
+      inSingle = !inSingle;
+      token += ch;
+      continue;
+    }
+    if (!inSingle && ch === '"') {
+      inDouble = !inDouble;
+      token += ch;
+      continue;
+    }
+    if (!inSingle && !inDouble && /\s/.test(ch)) {
+      if (take()) return true;
+      continue;
+    }
+    token += ch;
+  }
+  return take();
+}
+
+/** True when the local CLI argv still uses the removed --chat-session flag. */
+function localArgvHasRemovedChatSessionFlag(localPart) {
+  return someLocalCliToken(localPart, isRemovedChatSessionFlag);
+}
+
+function localPrefixOverridesHostCliEnv(localPart) {
+  const names = [TOOL_CLI_CHAT_SESSION_ENV_VAR, TOOL_CLI_DISCOVERY_ENV_VAR];
+  return someLocalCliToken(localPart, (token) => (
+    names.some((name) => token.startsWith(`${name}=`))
+  ));
 }
 
 function hasExecPayloadSubcommand(localPart) {
@@ -194,6 +270,8 @@ function isLikelyNetcattyCliShellCommand(fullCommandText) {
   const remotePayload = splitAt >= 0 ? command.slice(splitAt + 4).trim() : "";
 
   if (!localPart || LOCAL_SHELL_WRAPPER_PATTERN.test(localPart)) return false;
+  if (localPrefixOverridesHostCliEnv(localPart)) return false;
+  if (localArgvHasRemovedChatSessionFlag(localPart)) return false;
   if (!isNetcattyCliInvocationPrefix(localPart)) return false;
 
   if (remotePayload) {
@@ -227,7 +305,7 @@ function approveNetcattyCliShellOnly(request) {
     return {
       kind: "reject",
       feedback:
-        "Only Netcatty CLI shell commands are allowed. Invoke the netcatty-tool-cli launcher or script prefix provided in the host context, and include --chat-session on every call.",
+        "Only Netcatty CLI shell commands are allowed. Invoke the netcatty-tool-cli launcher or script prefix provided by the host. Do not pass --chat-session or override NETCATTY_CLI_CHAT_SESSION_ID; the host already bound this process.",
     };
   }
   return {

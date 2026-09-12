@@ -5,8 +5,15 @@
  *
  * Cursor SDK local agents use Agent.create({ apiKey, model, local:{cwd},
  * mcpServers }) and stream SDKMessage events from run.stream().
+ * Each local turn runs in its own utility process with a host-supplied environment.
+ * Stopping a stalled SDK startup cannot block another chat or leak its tenant.
  */
 const { mcpEnvPairsToObject } = require("./injectMcp.cjs");
+const {
+  applyTemporaryProcessEnv,
+  withExclusiveProcessEnv,
+  withTemporaryProcessEnv,
+} = require("./processEnvGate.cjs");
 
 const DEFAULT_CURSOR_MODEL = "composer-2.5";
 
@@ -82,32 +89,6 @@ function buildCursorAgentOptions({ apiKey, env, model, cwd, injectedMcpServers }
   const mcpServers = toCursorMcpServers(injectedMcpServers);
   if (Object.keys(mcpServers).length > 0) options.mcpServers = mcpServers;
   return options;
-}
-
-function applyTemporaryProcessEnv(env) {
-  if (!env || typeof env !== "object") return () => {};
-  const previous = new Map();
-  for (const [key, value] of Object.entries(env)) {
-    if (typeof value !== "string") continue;
-    previous.set(key, Object.prototype.hasOwnProperty.call(process.env, key) ? process.env[key] : undefined);
-    process.env[key] = value;
-  }
-
-  return () => {
-    for (const [key, value] of previous.entries()) {
-      if (value === undefined) delete process.env[key];
-      else process.env[key] = value;
-    }
-  };
-}
-
-async function withTemporaryProcessEnv(env, fn) {
-  const restore = applyTemporaryProcessEnv(env);
-  try {
-    return await fn();
-  } finally {
-    restore();
-  }
 }
 
 function buildCursorSendMessage(prompt, attachments) {
@@ -332,7 +313,13 @@ async function abortable(promise, signal, onLateResolve) {
   }
 }
 
-async function runCursorTurn({
+function runCursorTurn(options) {
+  // Injected SDK modules are used by the in-process driver tests only.
+  if (options.sdkModule) return runCursorTurnInProcess(options);
+  return require("./cursorWorkerHost.cjs").runCursorWorkerTurn(options);
+}
+
+async function runCursorTurnInProcess({
   prompt, attachments, agentOptions, runtimeEnv, resumeSessionId, emitter, signal, sdkModule,
 }) {
   let resolvedModule = sdkModule;
@@ -350,9 +337,14 @@ async function runCursorTurn({
   let run = null;
   let sessionId = resumeSessionId || null;
   try {
-    const restoreCreateEnv = applyTemporaryProcessEnv(runtimeEnv);
-    try {
-      const createAgent = () => Agent.create(agentOptions);
+    // Local Cursor agents inherit process.env; serialize the mutation so
+    // concurrent chats cannot swap NETCATTY_CLI_CHAT_SESSION_ID mid-spawn.
+    agent = await abortable(withExclusiveProcessEnv(runtimeEnv, async () => {
+      if (signal?.aborted) throw new CursorTurnAbortError();
+      const createAgent = () => {
+        if (signal?.aborted) throw new CursorTurnAbortError();
+        return Agent.create(agentOptions);
+      };
       let agentPromise;
       if (resumeSessionId && typeof Agent.resume === "function") {
         agentPromise = Agent.resume(resumeSessionId, agentOptions).catch((error) => {
@@ -370,27 +362,23 @@ async function runCursorTurn({
       } else {
         agentPromise = createAgent();
       }
-      agent = await abortable(agentPromise, signal, (lateAgent) => {
-        try { lateAgent?.close?.(); } catch { /* best effort */ }
-      });
-    } finally {
-      restoreCreateEnv();
-    }
+      return agentPromise;
+    }), signal, (lateAgent) => {
+      try { lateAgent?.close?.(); } catch { /* best effort */ }
+    });
     sessionId = agent.agentId || sessionId;
     if (sessionId) emitter.sessionId(sessionId);
     if (signal?.aborted) return { sessionId };
 
     const sendMessage = buildCursorSendMessage(prompt, attachments);
-    const restoreSendEnv = applyTemporaryProcessEnv(runtimeEnv);
-    try {
-      run = await abortable(agent.send(sendMessage), signal, (lateRun) => {
-        if (lateRun && typeof lateRun.cancel === "function") {
-          void lateRun.cancel().catch(() => {});
-        }
-      });
-    } finally {
-      restoreSendEnv();
-    }
+    run = await abortable(withExclusiveProcessEnv(runtimeEnv, () => {
+      if (signal?.aborted) throw new CursorTurnAbortError();
+      return agent.send(sendMessage);
+    }), signal, (lateRun) => {
+      if (lateRun && typeof lateRun.cancel === "function") {
+        void lateRun.cancel().catch(() => {});
+      }
+    });
     const state = { reasoningOpen: false };
     let hasContent = false;
     let failed = false;
@@ -553,6 +541,7 @@ module.exports = {
   parseCursorModelSelection,
   encodeCursorCliModel,
   runCursorTurn,
+  runCursorTurnInProcess,
   toCursorMcpServers,
   translateCursorEvent,
   withTemporaryProcessEnv,
