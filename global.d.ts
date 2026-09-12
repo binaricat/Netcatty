@@ -185,6 +185,9 @@ declare global {
     permissions?: string; // e.g., "rwxr-xr-x"
     owner?: string;
     group?: string;
+    /** Local-only filesystem identity; undefined for remote SFTP stats. */
+    dev?: number;
+    ino?: number;
   }
 
   interface SftpTransferProgress {

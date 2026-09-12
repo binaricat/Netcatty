@@ -1,0 +1,232 @@
+import { netcattyBridge } from "../../../infrastructure/services/netcattyBridge";
+import {
+  getWindowsUncRoot,
+  isSameSftpPath,
+  isSftpDescendantPath,
+  isWindowsPath,
+  joinPath,
+} from "./utils";
+
+export type SamePanePasteAction = "allow" | "block-same-folder" | "block-into-source";
+
+export interface SamePanePasteFile {
+  name: string;
+  isDirectory: boolean;
+}
+
+/** Filesystem identity of a directory (stat dev/ino). */
+export interface SamePanePasteIdentity {
+  dev: number;
+  ino: number;
+}
+
+/**
+ * Lexically resolve "." / ".." segments and repeated separators so equivalent
+ * spellings of the same directory (e.g. /home/user/., /home//user) compare
+ * equal in the same-pane paste guards. Purely string-level: it never touches
+ * the server, and it is only used to make the guards stricter, never to build
+ * transfer paths.
+ */
+const canonicalizeSftpPath = (path: string): string => {
+  const isWindows = isWindowsPath(path);
+  const separator = isWindows ? "\\" : "/";
+  const unified = isWindows ? path.replace(/\//g, "\\") : path;
+
+  let root = "";
+  let rest = unified;
+  if (isWindows) {
+    const uncRoot = getWindowsUncRoot(unified, { acceptForwardSlashUnc: true });
+    const driveRoot = unified.match(/^[A-Za-z]:\\/)?.[0];
+    if (uncRoot) {
+      root = uncRoot;
+      rest = unified.slice(uncRoot.length);
+    } else if (driveRoot) {
+      root = driveRoot;
+      rest = unified.slice(driveRoot.length);
+    }
+  } else if (unified.startsWith("/")) {
+    // Collapse a leading "//" to "/" for comparisons: on ordinary POSIX
+    // filesystems "//home/user" names the same directory as "/home/user", and
+    // treating it as a distinct root would let a same-pane cut reach the
+    // replace/delete flow. This helper never builds transfer paths, so the
+    // guards stay strict either way.
+    root = "/";
+    rest = unified.replace(/^\/+/, "");
+  }
+
+  const parts: string[] = [];
+  for (const segment of rest.split(separator)) {
+    if (!segment || segment === ".") continue;
+    if (segment === "..") {
+      parts.pop();
+      continue;
+    }
+    parts.push(segment);
+  }
+
+  // UNC roots come back without a trailing separator, so re-insert one before
+  // joining the segments; without it \\server\share\docs would collapse to
+  // \\server\sharedocs and collide with an unrelated share's path.
+  if (root) {
+    return root.endsWith(separator)
+      ? root + parts.join(separator)
+      : root + separator + parts.join(separator);
+  }
+  return parts.join(separator) || ".";
+};
+
+/**
+ * Decide whether an internal SFTP paste that targets the same connection as the
+ * clipboard source can proceed. Copying files into their own source folder is
+ * allowed (the conflict dialog handles same-name collisions), but pasting a
+ * clipboard directory into itself or one of its descendants is blocked for both
+ * copy and cut: the transfer creates the destination before listing the source,
+ * so the fresh copy would be rediscovered and nested until the traversal limit.
+ * For cuts, pasting into the clipboard's source folder is also blocked because
+ * the post-move source delete would remove the freshly moved items. Note that
+ * `sourcePath` is the folder containing every clipboard item, so the per-item
+ * checks must join it with each selected entry's name.
+ *
+ * Lexical canonicalization alone cannot see through symlinks: when the
+ * destination reaches the copied directory through an alias (e.g.
+ * `/a/link -> /a/docs/sub`), a purely string-level comparison would allow the
+ * paste and the recursive transfer would rediscover its own output. When
+ * `resolvePath` is provided (SFTP realpath for remote connections, the local
+ * realpath bridge for local panes), both sides are resolved through the
+ * filesystem before comparing. If that resolution fails, the guard fails
+ * closed and blocks the paste rather than risking a runaway transfer.
+ *
+ * realpath also cannot see through bind mounts: two mount paths for the same
+ * directory resolve to different strings. When `statIdentity` is provided
+ * (local panes only — remote SFTP stats carry no dev/ino), both sides' stat
+ * identities are compared as a final check; equal identities block the paste.
+ * The check only ever blocks on a positive identity match — an unavailable
+ * stat falls through to the symlink guards above rather than blocking
+ * unrelated pastes on transient stat failures.
+ */
+export const resolveSamePanePasteAction = async (params: {
+  operation: "copy" | "cut";
+  sourcePath: string;
+  targetPath: string;
+  files: readonly SamePanePasteFile[];
+  /** Optional filesystem resolver (e.g. realpath). Throws → unresolvable. */
+  resolvePath?: (path: string) => Promise<string>;
+  /** Optional stat identity provider (dev/ino). Returns null → unknown. */
+  statIdentity?: (path: string) => Promise<SamePanePasteIdentity | null>;
+}): Promise<SamePanePasteAction> => {
+  const { resolvePath, statIdentity } = params;
+
+  // Canonicalize first so equivalent spellings of the same directory (dot
+  // segments, repeated separators) are still caught by the guards below, then
+  // resolve through the filesystem when a resolver is available so symlink
+  // aliases compare equal to their real targets. Returns null when resolution
+  // fails, which callers treat as fail-closed.
+  const canonicalizeForComparison = async (path: string): Promise<string | null> => {
+    const lexical = canonicalizeSftpPath(path);
+    if (!resolvePath) return lexical;
+    try {
+      return canonicalizeSftpPath(await resolvePath(path));
+    } catch {
+      return null;
+    }
+  };
+
+  const [targetPath, sourcePath] = await Promise.all([
+    canonicalizeForComparison(params.targetPath),
+    canonicalizeForComparison(params.sourcePath),
+  ]);
+  // A files-only copy has no nesting hazard, so an unresolvable path only
+  // blocks pastes that could actually recurse (directory items, or a cut).
+  const failClosed = !targetPath || !sourcePath;
+  if (failClosed && (params.operation === "cut" || params.files.some((file) => file.isDirectory))) {
+    return "block-into-source";
+  }
+  if (failClosed) return "allow";
+
+  if (params.operation === "cut" && isSameSftpPath(targetPath, sourcePath)) {
+    return "block-same-folder";
+  }
+
+  // Bind-mount alias detection: realpath above maps each mount path to itself,
+  // so a cut (whose post-transfer source delete would destroy the only copy)
+  // must additionally compare filesystem identities. A positive match means
+  // both paths name the same directory. dev/ino are only trusted when at least
+  // one side is non-zero — Windows stats report meaningless 0 identities, and
+  // the local bridge omits them there.
+  const identityOf = async (path: string): Promise<SamePanePasteIdentity | null> => {
+    if (!statIdentity) return null;
+    try {
+      const identity = await statIdentity(path);
+      if (!identity || identity.dev === undefined || identity.ino === undefined) return null;
+      if (identity.dev === 0 && identity.ino === 0) return null;
+      return identity;
+    } catch {
+      return null;
+    }
+  };
+  const sameIdentity = (a: SamePanePasteIdentity, b: SamePanePasteIdentity): boolean =>
+    a.dev === b.dev && a.ino === b.ino;
+
+  if (params.operation === "cut") {
+    const [targetIdentity, sourceIdentity] = await Promise.all([
+      identityOf(params.targetPath),
+      identityOf(params.sourcePath),
+    ]);
+    if (targetIdentity && sourceIdentity && sameIdentity(targetIdentity, sourceIdentity)) {
+      return "block-same-folder";
+    }
+  }
+
+  for (const file of params.files) {
+    if (!file.isDirectory) continue;
+    const itemPath = await canonicalizeForComparison(joinPath(params.sourcePath, file.name));
+    if (!itemPath) return "block-into-source";
+    if (
+      isSameSftpPath(targetPath, itemPath)
+      || isSftpDescendantPath(targetPath, itemPath)
+    ) {
+      return "block-into-source";
+    }
+    // A bind-mount alias of the directory item itself also names the paste
+    // destination, for both copy (recursive rediscovery) and cut (source
+    // delete would remove the freshly pasted entry).
+    if (statIdentity) {
+      const [targetIdentity, itemIdentity] = await Promise.all([
+        identityOf(params.targetPath),
+        identityOf(joinPath(params.sourcePath, file.name)),
+      ]);
+      if (targetIdentity && itemIdentity && sameIdentity(targetIdentity, itemIdentity)) {
+        return "block-into-source";
+      }
+    }
+  }
+  return "allow";
+};
+
+/** Application boundary for filesystem checks used by every internal paste entry. */
+export const resolveSameConnectionPasteAction = async (params: {
+  operation: "copy" | "cut";
+  sourcePath: string;
+  targetPath: string;
+  files: readonly SamePanePasteFile[];
+  isLocal: boolean;
+  sftpId: string | null;
+}): Promise<SamePanePasteAction> => {
+  const bridge = netcattyBridge.get();
+  let resolvePath: ((path: string) => Promise<string>) | undefined;
+  let statIdentity: ((path: string) => Promise<SamePanePasteIdentity | null>) | undefined;
+  if (params.isLocal) {
+    if (bridge?.realpathLocal) resolvePath = (path) => bridge.realpathLocal!(path);
+    if (bridge?.statLocal) {
+      statIdentity = async (path) => {
+        const stat = await bridge.statLocal!(path);
+        if (stat.dev === undefined || stat.ino === undefined) return null;
+        return { dev: stat.dev, ino: stat.ino };
+      };
+    }
+  } else if (params.sftpId && bridge?.realpathSftp) {
+    const sftpId = params.sftpId;
+    resolvePath = (path) => bridge.realpathSftp!(sftpId, path);
+  }
+  return resolveSamePanePasteAction({ ...params, resolvePath, statIdentity });
+};

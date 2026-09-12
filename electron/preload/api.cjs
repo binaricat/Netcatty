@@ -916,6 +916,9 @@ function createPreloadApi(ctx) {
   lstatLocal: async (path) => {
     return ipcRenderer.invoke("netcatty:local:lstat", { path });
   },
+  realpathLocal: async (path) => {
+    return ipcRenderer.invoke("netcatty:local:realpath", { path });
+  },
   listLocalTree: async (path, options = {}) => {
     const onProgress = typeof options?.onProgress === "function" ? options.onProgress : null;
     const onEntries = typeof options?.onEntries === "function" ? options.onEntries : null;
