@@ -396,3 +396,14 @@ test('custom model requests send explicit effort for Chat and Responses and omit
     }
   }
 });
+
+
+test('provider defaults do not enable reasoning on known unsupported OpenAI models', () => {
+  for (const openaiApi of ['chat', 'responses'] as const) {
+    const provider = { providerId: 'custom', style: 'openai' as const, openaiApi, advancedParams: { reasoningEffort: 'high' } };
+    for (const model of ['gpt-4o', 'gpt-4o-mini', 'gpt-4.1', 'gpt-4-turbo', 'gpt-3.5-turbo', 'openai/gpt-4o', 'gpt-5-chat-latest']) {
+      assert.equal(buildCattyReasoningProviderOptions(provider, 'high', model), undefined, model);
+      assert.deepEqual(cattyReasoningLevelsForSelection(provider, model), [], model);
+    }
+  }
+});

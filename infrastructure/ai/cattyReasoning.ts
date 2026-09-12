@@ -120,6 +120,7 @@ export function buildCattyReasoningProviderOptions(
   if (!resolved) return undefined;
 
   if (style === 'openai') {
+    if (modelId && openaiModelKnownUnsupportedReasoning(modelId)) return undefined;
     const explicitDefault = ['low', 'medium', 'high'].includes(provider.advancedParams?.reasoningEffort ?? '');
     const unrecognizedModel = !!modelId && !openaiModelLikelySupportsReasoning(modelId);
     if (unrecognizedModel && !explicitDefault) return undefined;
@@ -264,7 +265,7 @@ export function cattyReasoningLevelsForSelection(
     return CATTY_REASONING_LEVELS;
   }
   if (style === 'openai') {
-    if (!modelId) return [];
+    if (!modelId || openaiModelKnownUnsupportedReasoning(modelId)) return [];
     if (!openaiModelLikelySupportsReasoning(modelId)) {
       return ['low', 'medium', 'high'].includes(provider.advancedParams?.reasoningEffort ?? '')
         ? LEVELS_LOW_MEDIUM_HIGH
@@ -302,6 +303,12 @@ export function resolveVisibleCattyThinkingLevel(
     if (levels.includes(REASONING_RANK[i])) return REASONING_RANK[i];
   }
   return levels[0];
+}
+
+// Explicit defaults may enable relay aliases, but not known non-reasoning families.
+function openaiModelKnownUnsupportedReasoning(modelId: string): boolean {
+  const id = modelId.trim().toLowerCase();
+  return openaiModelIsChatSnapshot(id) || /(^|\/)gpt-(?:4(?:o|[.-]|$)|3\.5(?:[.-]|$))/.test(id);
 }
 
 function openaiModelIsChatSnapshot(modelId: string): boolean {
