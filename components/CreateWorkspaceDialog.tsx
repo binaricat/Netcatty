@@ -1,7 +1,6 @@
 import { Search } from 'lucide-react';
 import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import { useI18n } from '../application/i18n/I18nProvider';
-import { matchesWorkspaceHostPickerQuery } from '../lib/searchMatcher';
 import { Host } from '../types';
 import { DistroAvatar } from './DistroAvatar';
 import { Button } from './ui/button';
@@ -31,9 +30,13 @@ export const CreateWorkspaceDialog: React.FC<CreateWorkspaceDialogProps> = ({
   const [selectedHostIds, setSelectedHostIds] = useState<Set<string>>(new Set());
 
   const filteredHosts = useMemo(() => {
-    const term = search.trim();
-    if (!term) return hosts;
-    return hosts.filter((host) => matchesWorkspaceHostPickerQuery(term, host));
+    if (!search.trim()) return hosts;
+    const term = search.toLowerCase();
+    return hosts.filter(h =>
+      h.label.toLowerCase().includes(term) ||
+      h.hostname.toLowerCase().includes(term) ||
+      (h.group || '').toLowerCase().includes(term)
+    );
   }, [hosts, search]);
 
   const toggleHost = useCallback((hostId: string) => {
@@ -106,7 +109,7 @@ export const CreateWorkspaceDialog: React.FC<CreateWorkspaceDialogProps> = ({
             <div className="relative">
                 <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
                 <Input
-                placeholder={t('placeholder.searchHosts', { defaultValue: 'Search hosts or tags...' })}
+                placeholder={t('placeholder.searchHosts', { defaultValue: 'Search hosts...' })}
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className="pl-8"

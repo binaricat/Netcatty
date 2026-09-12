@@ -7,7 +7,6 @@ import {
   getHostSearchMatch,
   matchesHostSearchQuery,
   matchesSearchQuery,
-  matchesWorkspaceHostPickerQuery,
   resetPinyinCacheForTests,
 } from "../lib/searchMatcher.ts";
 
@@ -132,57 +131,6 @@ test("host search avoids compact hostname false positives on numeric segments", 
       hostname: "10.6.1.88",
       group: "网络设备",
       tags: [],
-    }),
-    false,
-  );
-});
-
-test("host search matches tags without requiring the label or group", () => {
-  assert.equal(
-    matchesHostSearchQuery("prod", {
-      label: "web-1",
-      hostname: "10.0.0.8",
-      group: "infra",
-      tags: ["prod", "k8s"],
-    }),
-    true,
-  );
-  assert.equal(
-    matchesHostSearchQuery("prod", {
-      label: "web-1",
-      hostname: "10.0.0.8",
-      group: "infra",
-      tags: ["staging"],
-    }),
-    false,
-  );
-});
-
-test("workspace picker search matches tags and usernames", () => {
-  assert.equal(
-    matchesWorkspaceHostPickerQuery("k8s", {
-      label: "api-gateway",
-      hostname: "10.0.0.9",
-      group: "edge",
-      tags: ["k8s", "prod"],
-    }),
-    true,
-  );
-  assert.equal(
-    matchesWorkspaceHostPickerQuery("deploy", {
-      label: "api-gateway",
-      hostname: "10.0.0.9",
-      username: "deploy",
-      tags: [],
-    }),
-    true,
-  );
-  assert.equal(
-    matchesWorkspaceHostPickerQuery("k8s", {
-      label: "api-gateway",
-      hostname: "10.0.0.9",
-      username: "deploy",
-      tags: ["prod"],
     }),
     false,
   );

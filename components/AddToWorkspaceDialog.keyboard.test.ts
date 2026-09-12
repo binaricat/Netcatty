@@ -28,15 +28,6 @@ test('checked targets keep a visible background after the cursor moves away', ()
   assert.equal(getWorkspaceTargetRowStateClass(true, true), 'bg-primary/20');
 });
 
-test('workspace host picker search matches tags through the shared matcher', () => {
-  const source = readFileSync(
-    new URL('./workspace/AddToWorkspaceDialog.tsx', import.meta.url),
-    'utf8',
-  );
-  assert.match(source, /matchesWorkspaceHostPickerQuery/);
-  assert.doesNotMatch(source, /h\.label\?\.toLowerCase\(\)\.includes\(term\)/);
-});
-
 test('clicking a target aligns the keyboard cursor with that target', () => {
   const source = readFileSync(
     new URL('./workspace/AddToWorkspaceDialog.tsx', import.meta.url),

@@ -77,7 +77,7 @@ export const enCoreMessages: Messages = {
   'field.selectHosts': 'Select Hosts',
   'placeholder.workspaceName': 'Workspace name',
   'placeholder.sessionName': 'Session name',
-  'placeholder.searchHosts': 'Search hosts or tags...',
+  'placeholder.searchHosts': 'Search hosts...',
   'toast.settingsUnavailable': 'Settings window is unavailable on this platform.',
   'credentials.protectionUnavailable.title': 'Credential Protection Unavailable',
   'credentials.protectionUnavailable.message': 'Saved passwords and keys cannot be auto-decrypted on this device. Re-enter credentials before connecting.',

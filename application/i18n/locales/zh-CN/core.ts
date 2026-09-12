@@ -61,7 +61,6 @@ export const zhCNCoreMessages: Messages = {
   'field.name': '名称',
   'placeholder.workspaceName': '工作区名称',
   'placeholder.sessionName': '会话名称',
-  'placeholder.searchHosts': '搜索主机或标签...',
   'toast.settingsUnavailable': '当前平台无法打开设置窗口。',
   'credentials.protectionUnavailable.title': '凭据保护不可用',
   'credentials.protectionUnavailable.message': '当前设备无法自动解密已保存的密码和密钥。连接前请重新输入凭据。',
