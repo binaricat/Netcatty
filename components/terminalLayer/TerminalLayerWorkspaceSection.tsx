@@ -338,8 +338,10 @@ function TerminalLayerWorkspaceSectionInner({ ctx }: { ctx: WorkspaceContext }) 
         workspaceOuterRef.current,
       )}
 
-      {activeWorkspace && isComposeBarOpen && (
+      {activeWorkspace && focusedSessionId && isComposeBarOpen && (
         <TerminalComposeBar
+          key={focusedSessionId}
+          sessionId={focusedSessionId}
           onSend={handleComposeSend}
           onSnippetClick={(snippet) => void handleSnippetFromPanel(snippet)}
           snippets={snippets}

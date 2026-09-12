@@ -1,3 +1,4 @@
+import { pruneComposeBarHistory } from '../application/state/composeBarHistoryStore';
 import { FolderTree, History, MessageSquare, PanelLeft, PanelRight, Palette, X, Zap } from 'lucide-react';
 import React, { memo, startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { activeTabStore } from '../application/state/activeTabStore';
@@ -301,6 +302,10 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     closePane: closeSidePanelPaneForTab,
     resizeSplit: resizeSidePanelSplitForTab,
   } = useTerminalSidePanelLayoutState();
+  useEffect(() => {
+    pruneComposeBarHistory(sessions.map((session) => session.id));
+  }, [sessions]);
+
   useEffect(() => {
     setMagnifiedPane((current) => {
       if (!current) return current;
@@ -2139,7 +2144,8 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
 
   const handleComposeSend = useCallback((text: string) => {
     const activeWorkspace = activeWorkspaceRef.current;
-    if (!activeWorkspace) return;
+    if (!activeWorkspace) return false;
+    let recordHistory = false;
     const payload = text + '\r';
     const broadcastEnabled = isBroadcastEnabled?.(activeWorkspace.id);
     const focusedSessionId = activeWorkspace.focusedSessionId;
@@ -2156,10 +2162,12 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
         const executor = snippetExecutorsRef.current.get(sid);
         if (executor) {
           executor(text, false, { broadcast: false });
+          recordHistory = true;
         } else {
           const session = sessionsRef.current.find((candidate) => candidate.id === sid);
           if (!session || !canUseDirectSessionWriteFallback(session)) continue;
           terminalBackend.writeToSession(sid, payload, { sensitive: false });
+          recordHistory = true;
         }
       }
     } else {
@@ -2171,16 +2179,19 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       if (targetId) {
         const executor = snippetExecutorsRef.current.get(targetId);
         if (executor) {
+          recordHistory = !isTerminalSensitiveInputActive(targetId);
           executor(text, false);
         } else {
           const session = sessionsRef.current.find((candidate) => candidate.id === targetId);
-          if (!session || !canUseDirectSessionWriteFallback(session)) return;
+          if (!session || !canUseDirectSessionWriteFallback(session)) return false;
+          recordHistory = !isTerminalSensitiveInputActive(targetId);
           terminalBackend.writeToSession(targetId, payload, {
             sensitive: isTerminalSensitiveInputActive(targetId),
           });
         }
       }
     }
+    return recordHistory;
   }, [isBroadcastEnabled, terminalBackend]);
 
   const sessionLogConfig = useMemo(

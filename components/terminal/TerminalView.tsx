@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { ChevronsLeft, GripVertical, Minimize2, Network, PanelLeft, X as XIcon } from 'lucide-react';
+import { isTerminalSensitiveInputActive } from './runtime/terminalSensitiveInputRegistry';
 import { isSessionReconnectDisabled } from '../top-tabs/SessionTabContextMenuContent';
 
 import { resolveEffectiveTerminalProtocol } from '../../domain/terminalProtocol';
@@ -1304,10 +1305,15 @@ function TerminalViewInner({ ctx, isPaneMagnified = false }: { ctx: TerminalView
         {/* Compose Bar (solo sessions only; workspace uses TerminalLayer's global bar) */}
         {isComposeBarOpen && !inWorkspace && (
           <TerminalComposeBar
+            key={sessionId}
+            sessionId={sessionId}
             onSend={(text) => {
               if (sessionRef.current) {
+                const sensitive = isTerminalSensitiveInputActive(sessionId);
                 executeSnippetCommand(text, false);
+                return !sensitive;
               }
+              return false;
             }}
             onSnippetClick={(snippet) => void executeSnippet(snippet)}
             snippets={snippets}
