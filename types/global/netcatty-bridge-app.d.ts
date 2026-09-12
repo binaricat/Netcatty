@@ -108,6 +108,7 @@ declare global {
     quitApp?(): Promise<{ success: boolean }>;
     jumpToSessionFromTrayPanel?(sessionId: string): Promise<{ success: boolean }>;
     connectToHostFromTrayPanel?(hostId: string): Promise<{ success: boolean }>;
+    startPortForwardFromTrayPanel?(ruleId: string): Promise<{ success: boolean; error?: string }>;
     closeSessionFromTrayPanel?(sessionId: string): Promise<{ success: boolean }>;
     onTrayPanelCloseRequest?(callback: () => void): () => void;
     onTrayPanelRefresh?(callback: () => void): () => void;

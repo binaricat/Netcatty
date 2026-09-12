@@ -1770,3 +1770,55 @@ test("setCloseToTray(false) still destroys an unpinned tray as before", async ()
     bridge.cleanup();
   }
 });
+
+test("tray panel forwarding start reaches the main renderer coordinator", async () => {
+  await withPlatform("darwin", async () => {
+    const bridge = loadBridge();
+    const electronModule = createElectronStub();
+    const sentMessages = [];
+    const mainWin = new FakeWindow();
+    mainWin.webContents = { send: (...args) => sentMessages.push(args) };
+    electronModule.BrowserWindow.getAllWindows = () => [mainWin];
+    bridge.init({ electronModule, getMainWindow: () => mainWin });
+    const ipcMain = createIpcMainStub();
+    bridge.registerHandlers(ipcMain);
+    const result = await ipcMain.handlers.get("netcatty:trayPanel:startPortForward")(null, "reconnect-rule");
+    assert.deepEqual(result, { success: true });
+    assert.ok(sentMessages.some((args) =>
+      args[0] === "netcatty:trayPanel:startPortForward" && args[1] === "reconnect-rule"));
+  });
+});
+
+
+test("tray panel forwarding waits for a newly created main renderer", async () => {
+  await withPlatform("darwin", async () => {
+    const bridge = loadBridge();
+    const electronModule = createElectronStub();
+    const mainWin = new FakeWindow();
+    let main = null;
+    let releaseReady;
+    let delivered = false;
+    const ready = new Promise((resolve) => { releaseReady = resolve; });
+    electronModule.BrowserWindow.getAllWindows = () => main ? [main] : [];
+    bridge.init({
+      electronModule,
+      getMainWindow: () => main,
+      ensureMainWindow: async () => { main = mainWin; return mainWin; },
+      sendWhenRendererReady: async (win, channel, ruleId) => {
+        assert.equal(win, mainWin);
+        assert.equal(channel, "netcatty:trayPanel:startPortForward");
+        assert.equal(ruleId, "new-main-rule");
+        await ready;
+        delivered = true;
+        return { success: true };
+      },
+    });
+    const ipcMain = createIpcMainStub();
+    bridge.registerHandlers(ipcMain);
+    const pending = ipcMain.handlers.get("netcatty:trayPanel:startPortForward")(null, "new-main-rule");
+    assert.equal(delivered, false);
+    releaseReady();
+    assert.deepEqual(await pending, { success: true });
+    assert.equal(delivered, true);
+  });
+});
