@@ -1,6 +1,6 @@
 "use strict";
 
-const { buildBashHistoryCleanup, bashHistoryScratchNames } = require("./ptyExecHelpers.cjs");
+const { buildBashHistoryCleanup, bashHistoryScratchNames, buildInlineHistoryDrop } = require("./ptyExecHelpers.cjs");
 
 // Both fish and POSIX shells accept this command. Inspect the parent of a
 // short-lived sh in the interactive PTY, rather than the SSH login shell.
@@ -16,7 +16,11 @@ function buildLiveShellProbe(marker) {
   const fallback = `[ "\${${dispatcher}-}" = command ]||{ ${cleanup}; };${clear}`;
   // Start display suppression in the PTY before any continuation is read,
   // independently of PS2 and echo mode. Keep every later physical line short.
-  return ` true ${marker}; printf '\\n%s\\n' '${marker}_I'\n : '${marker}'; command sh -c '${script}' 2>/dev/null; \\\n: '${marker}'; \\command eval '${cleanup}' 2>/dev/null || true; \\\n: '${marker}'; \\eval '${fallback}' 2>/dev/null || true; \\\n: '${marker}'; \\command eval '${clear}' 2>/dev/null || true; printf '%s' '${marker}_Q'\n`;
+  // The standalone first line crosses a prompt boundary, so delete its history
+  // entry inline (buildInlineHistoryDrop) before an immediate-history hook
+  // such as PROMPT_COMMAND='history -a' can persist it — same reason as the
+  // wrapper input marker in ptyExecHelpers.cjs.
+  return ` true ${marker}; printf '\\n%s\\n' '${marker}_I'; ${buildInlineHistoryDrop(marker)}\n : '${marker}'; command sh -c '${script}' 2>/dev/null; \\\n: '${marker}'; \\command eval '${cleanup}' 2>/dev/null || true; \\\n: '${marker}'; \\eval '${fallback}' 2>/dev/null || true; \\\n: '${marker}'; \\command eval '${clear}' 2>/dev/null || true; printf '%s' '${marker}_Q'\n`;
 
 }
 

@@ -229,6 +229,25 @@ function buildBashHistoryCleanup(marker, keepDispatcher = false) {
   ].join(` \\\n: "${marker}"; `);
 }
 
+// Delete the just-read interactive Bash history entry for a standalone
+// internal line (the `_I` input marker) before a prompt-boundary
+// PROMPT_COMMAND='history -a' can persist it. Only an entry whose text
+// carries this invocation's marker is deleted, so a customization that
+// suppressed the line (HISTCONTROL=ignorespace) leaves the user's previous
+// entry untouched — never trust $HISTCMD here. Bash-guarded and
+// shadowing-safe (verified dispatcher, mirroring buildBashHistoryCleanup);
+// other POSIX shells leave their entry for the tail cleanup to handle.
+function buildInlineHistoryDrop(marker) {
+  const { entry, dispatcher } = bashHistoryScratchNames(marker);
+  const inlineEntry = `${entry}_i`;
+  const inlineDispatcher = `${dispatcher}_i`;
+  return [
+    `[ "\${BASH_VERSION-}" ]&&{ for ${inlineDispatcher} in command builtin;do ${inlineEntry}=$($${inlineDispatcher} printf x);[ "$${inlineEntry}" = x ]||continue;`,
+    `${inlineEntry}=$($${inlineDispatcher} history 1);${inlineEntry}=\${${inlineEntry}#"\${${inlineEntry}%%[^[:space:]]*}"};case "$${inlineEntry}" in *'${marker}'*)`,
+    `$${inlineDispatcher} history -d "\${${inlineEntry}%%[[:space:]]*}";;esac;break;done; } 2>/dev/null`,
+  ].join(` \\\n: '${marker}'; `);
+}
+
 function buildPosixWrapperBody(command, marker, startFormat) {
   const noPager = "PAGER=cat SYSTEMD_PAGER= GIT_PAGER=cat LESS= ";
   const commandLines = String(command || "").replace(/\r\n?/g, "\n").split("\n");
@@ -264,7 +283,11 @@ function buildPosixWrapperBody(command, marker, startFormat) {
   // every physical line below that limit, even for short user commands.
   // Emit a short standalone input marker before the shell reads any PS2
   // continuation. A leading newline separates it from concurrent PTY echo.
-  return `${marker}=0; printf '\\n%s\\n' '${marker}_I'\n` + [
+  // Because this line ends at a real prompt boundary, an immediate-history
+  // hook (PROMPT_COMMAND='history -a') can persist it before the wrapper's
+  // tail cleanup runs — so delete the entry inline while it is still only in
+  // memory (buildInlineHistoryDrop).
+  return `${marker}=0; printf '\\n%s\\n' '${marker}_I'; ${buildInlineHistoryDrop(marker)}\n` + [
     ` : '${marker}'; ${cmdAssign}`,
     `{ printf '${startFormat}' '${marker}_S'; trap ':' INT; ( ${noPager}eval "$${marker}_cmd" ); __NCMCP_rc=$?; trap - INT`,
     `printf '%s\\n' '${marker}_E:'"$__NCMCP_rc"`,
@@ -521,6 +544,7 @@ module.exports = {
   buildPendingInputClearPrefix,
   buildWrappedCommand,
   buildBashHistoryCleanup,
+  buildInlineHistoryDrop,
   bashHistoryScratchNames,
   findEndMarker,
   normalizePtyOutput,
