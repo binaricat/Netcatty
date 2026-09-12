@@ -95,3 +95,19 @@ test("stopping before the utility process spawns does not dispatch a turn", asyn
   assert.equal(killed, true);
   assert.deepEqual(sent, []);
 });
+
+test("utility-process fatal errors retain their reason and settle only once", async () => {
+  const { EventEmitter } = require("node:events");
+  const child = new EventEmitter();
+  const errors = [];
+  let kills = 0;
+  child.kill = () => { kills++; child.emit("exit", 1); };
+  const turn = runCursorWorkerTurn({
+    resumeSessionId: "existing-session",
+    emitter: { emitError: (message) => errors.push(message) },
+  }, () => child);
+  child.emit("error", "FatalError", "v8::Heap", '{"environmentVariables":{"API_KEY":"secret"}}');
+  assert.deepEqual(await turn, { sessionId: "existing-session" });
+  assert.deepEqual(errors, ["FatalError: v8::Heap"]);
+  assert.equal(kills, 1);
+});

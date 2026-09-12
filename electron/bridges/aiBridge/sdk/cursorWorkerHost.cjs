@@ -64,8 +64,13 @@ function runCursorWorkerTurn({ emitter, signal, ...params }, createWorker = crea
         terminate();
       }
     });
-    worker.once("error", (error) => {
-      if (!settled) emitter.emitError(error.message);
+    worker.once("error", (type, location) => {
+      // The third argument is a full Node diagnostic report and can contain
+      // credentials from the environment. Keep it out of persisted chat errors.
+      const message = type instanceof Error
+        ? type.message
+        : [type, location].filter(Boolean).join(": ");
+      if (!settled) emitter.emitError(message || "Cursor worker failed.");
       finish({ sessionId });
       terminate();
     });
