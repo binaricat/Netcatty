@@ -14,9 +14,9 @@ function buildLiveShellProbe(marker) {
   const { dispatcher } = bashHistoryScratchNames(marker);
   const clear = `[ -z "\${${dispatcher}-}" ]||$${dispatcher} unset ${dispatcher}`;
   const fallback = `[ "\${${dispatcher}-}" = command ]||{ ${cleanup}; };${clear}`;
-  // Continuation lines stay within canonical input limits. Each echo carries
-  // the marker so the renderer also hides continuation prompts.
-  return ` true ${marker}; command sh -c '${script}' 2>/dev/null; \\\n: '${marker}'; \\command eval '${cleanup}' 2>/dev/null || true; \\\n: '${marker}'; \\eval '${fallback}' 2>/dev/null || true; \\\n: '${marker}'; \\command eval '${clear}' 2>/dev/null || true; printf '%s' '${marker}_Q'\n`;
+  // Start display suppression in the PTY before any continuation is read,
+  // independently of PS2 and echo mode. Keep every later physical line short.
+  return ` true ${marker}; printf '\\n%s\\n' '${marker}_I'\n : '${marker}'; command sh -c '${script}' 2>/dev/null; \\\n: '${marker}'; \\command eval '${cleanup}' 2>/dev/null || true; \\\n: '${marker}'; \\eval '${fallback}' 2>/dev/null || true; \\\n: '${marker}'; \\command eval '${clear}' 2>/dev/null || true; printf '%s' '${marker}_Q'\n`;
 
 }
 

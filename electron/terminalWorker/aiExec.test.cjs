@@ -18,8 +18,10 @@ class FakePty extends EventEmitter {
 
   write(data) {
     this.writes.push(String(data));
-    if (String(data).includes("command sh -c")) {
-      const marker = String(data).match(/(__NCMCP_[A-Za-z0-9_]+__)/)[1];
+    const input = this.writes.join("");
+    if (!this.probeReplied && input.includes("command sh -c") && input.endsWith("_Q'\n")) {
+      this.probeReplied = true;
+      const marker = input.match(/(__NCMCP_[A-Za-z0-9_]+__)/)[1];
       queueMicrotask(() => this.emit("data", `${marker}_P:\n${marker}_Q`));
     }
   }
@@ -52,9 +54,19 @@ function createFakeEvent() {
   };
 }
 
-function extractMarker(writes) {
-  const wrapper = writes.find((entry) => entry.includes("__NCMCP_") && !entry.includes("command sh -c"));
-  assert.ok(wrapper, "expected wrapped command to be written to the PTY");
+async function waitForWrapper(writes) {
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline) {
+    const input = writes.join("");
+    const wrapper = input.slice(input.lastIndexOf("\x0b\x15"));
+    if (wrapper.includes("_cmd") && wrapper.includes("_E:") && wrapper.endsWith("\n") && !wrapper.endsWith("\\\n")) return wrapper;
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  assert.fail("expected complete wrapped command to be written to the PTY");
+}
+
+async function extractMarker(writes) {
+  const wrapper = await waitForWrapper(writes);
   const match = wrapper.match(/(__NCMCP_[A-Za-z0-9_]+__)/);
   assert.ok(match, "expected command wrapper to contain an MCP marker");
   return match[1];
@@ -144,7 +156,7 @@ test("worker AI background jobs start, poll, stop, and block overlapping exec", 
     },
   ]);
 
-  const marker = extractMarker(pty.writes);
+  const marker = await extractMarker(pty.writes);
   pty.emit("data", `${marker}_S\r\nready\r\n`);
   await nextTick();
 
@@ -207,7 +219,7 @@ test("worker chat cancellation stops matching background jobs", async () => {
     chatSessionId: "chat-1",
     commandTimeoutMs: 5000,
   });
-  const marker = extractMarker(pty.writes);
+  const marker = await extractMarker(pty.writes);
   pty.emit("data", `${marker}_S\r\nrunning\r\n`);
   await nextTick();
 
@@ -261,11 +273,11 @@ test("worker background job probes unset remote shellKind before wrapping", asyn
   // Login fish is a soft hint (not pinned); wrapper should be fish-native.
   assert.equal(sessions.get("ssh-fish").shellKind, undefined);
   assert.equal(sessions.get("ssh-fish")._loginShellKind, "fish");
-  const wrapper = pty.writes.find((entry) => entry.includes("__NCMCP_") && !entry.includes("command sh -c"));
+  const wrapper = await waitForWrapper(pty.writes);
   assert.match(wrapper, /set -l __NCMCP_.*_cmd/);
   assert.doesNotMatch(wrapper, / sh -c '/);
 
-  const marker = extractMarker(pty.writes);
+  const marker = await extractMarker(pty.writes);
   pty.emit("data", `${marker}_S\r\n${marker}_E:0\r\n`);
   await nextTick();
 });
@@ -305,7 +317,7 @@ test("worker background job reserves the session while shellKind probe is pendin
   const first = await firstStart;
   assert.equal(first.ok, true);
 
-  const marker = extractMarker(pty.writes);
+  const marker = await extractMarker(pty.writes);
   pty.emit("data", `${marker}_S\r\n${marker}_E:0\r\n`);
   await nextTick();
 });

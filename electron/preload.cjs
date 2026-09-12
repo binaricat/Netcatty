@@ -95,7 +95,7 @@ const _mcpLineMetas = new Map(); // sessionId -> trailing fragment metadata
 const _mcpPendingMetas = new Map(); // sessionId -> metadata from filtered-empty chunks
 const _mcpFlushTimers = new Map(); // sessionId -> delayed-flush timer
 const _mcpDroppingWrappedLine = new Set(); // sessionIds with a split marker echo line in progress
-const _mcpProbePrompts = new Map(); // sessionId -> probe marker awaiting its command
+const _mcpProbePrompts = new Map(); // sessionId -> input/probe marker awaiting command start
 const _mcpAbortedProbes = new Map(); // sessionId -> bounded set of cancelled probe markers
 const MAX_MCP_BUFFERED_LINE_CHARS = 64 * 1024;
 
@@ -122,7 +122,9 @@ function filterProbePromptFragment(sessionId, fragment) {
     if (_mcpProbePrompts.get(sessionId) === reset[1]) _mcpProbePrompts.delete(sessionId);
     return true;
   }
-  const completion = fragment.match(/^\r?(__NCMCP_[A-Za-z0-9_]+)_Q/);
+  // I starts suppression before multiline input; Q keeps it active after
+  // the live shell probe. Both end only at the matching command start/reset.
+  const completion = fragment.match(/^\r?(__NCMCP_[A-Za-z0-9_]+)_[IQ]/);
   if (completion && !_mcpAbortedProbes.get(sessionId)?.has(completion[1])) {
     _mcpProbePrompts.set(sessionId, completion[1]);
   }

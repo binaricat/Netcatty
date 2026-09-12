@@ -418,7 +418,7 @@ function startPtyJob(ptyStream, command, options) {
   function finish(stdout, exitCode, error) {
     if (finished) return;
     finished = true;
-    if (usesLiveShellProbe && !foundStart && typeof onProbeAborted === "function") {
+    if (!foundStart && typeof onProbeAborted === "function") {
       try {
         onProbeAborted(marker);
       } catch {
