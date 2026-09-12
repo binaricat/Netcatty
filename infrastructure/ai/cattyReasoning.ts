@@ -308,7 +308,7 @@ export function resolveVisibleCattyThinkingLevel(
 // Explicit defaults may enable relay aliases, but not known non-reasoning families.
 function openaiModelKnownUnsupportedReasoning(modelId: string): boolean {
   const id = modelId.trim().toLowerCase();
-  return openaiModelIsChatSnapshot(id) || /(^|\/)gpt-(?:4(?:o|[.-]|$)|3\.5(?:[.-]|$))/.test(id);
+  return openaiModelIsChatSnapshot(id) || /(^|\/)(?:chat)?gpt-(?:4(?:o|[.-]|$)|3\.5(?:[.-]|$))/.test(id);
 }
 
 function openaiModelIsChatSnapshot(modelId: string): boolean {
