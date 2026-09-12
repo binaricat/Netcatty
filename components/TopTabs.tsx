@@ -997,17 +997,15 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
 
   return (
     <>
-      {tabsAtBottom && (
         <div
           data-tab-window-titlebar
           data-section="top-tabs"
-          className="h-9 shrink-0 flex items-end justify-end bg-secondary app-drag"
+          className={cn("h-9 shrink-0 items-end justify-end bg-secondary app-drag", tabsAtBottom ? "flex" : "hidden")}
           style={dragRegionNoSelect}
           onDoubleClick={handleTitleBarDoubleClick}
         >
           {!isMacClient && <WindowControls />}
         </div>
-      )}
     <div
       data-top-tabs-root
       data-position={tabBarPosition}
@@ -1079,7 +1077,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
           {hasHostTreeToggleSurface && (
             <div
               ref={hostTreeToggleSlotRef}
-              className="top-tab-host-tree-toggle-slot mb-0 flex-shrink-0 self-end app-no-drag"
+              className={cn("top-tab-host-tree-toggle-slot mb-0 flex-shrink-0 app-no-drag", tabsAtBottom ? "self-start" : "self-end")}
               data-section="top-tabs-host-tree-toggle"
               data-visible={effectiveShowHostTreeToggle ? 'true' : 'false'}
               style={noDragRegionStyle}
@@ -1189,7 +1187,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-7 w-7 flex-shrink-0 app-no-drag self-end rounded-none"
+                  className={cn("h-7 w-7 flex-shrink-0 app-no-drag rounded-none", tabsAtBottom ? "self-start" : "self-end")}
                   style={{ color: 'var(--top-tabs-muted, hsl(var(--muted-foreground)))' }}
                   onClick={onOpenQuickSwitcher}
                 >
@@ -1203,7 +1201,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
 
         {/* Fixed right controls — utility icons + window controls share one h-7 row */}
         <div
-          className="flex-shrink-0 flex items-center gap-0.5 app-drag self-end h-7 overflow-visible"
+          className={cn("flex-shrink-0 flex items-center gap-0.5 app-drag h-7 overflow-visible", tabsAtBottom ? "self-start" : "self-end")}
           style={dragRegionStyle}
           data-section="top-tabs-toolbar-actions"
         >
