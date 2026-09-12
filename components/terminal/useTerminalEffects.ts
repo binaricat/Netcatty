@@ -1054,9 +1054,6 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
     const term = termRef.current;
     if (!term) return;
 
-    // Theme colors feed the foregroundIntense stream rewrite (#3352).
-    xtermRuntimeRef.current?.setForegroundIntenseColors(effectiveTheme.colors);
-
     if (isRendererActiveRef.current || isFocused) {
       cancelTerminalThemeUpdate(sessionId);
       applyTerminalThemeSync(term, effectiveTheme);

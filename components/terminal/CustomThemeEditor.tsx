@@ -7,6 +7,7 @@
 import React, { useCallback, memo } from 'react';
 import { TerminalTheme } from '../../domain/models';
 import { useI18n } from '../../application/i18n/I18nProvider';
+import { Switch } from '../ui/switch';
 
 
 interface ColorFieldDef {
@@ -54,10 +55,14 @@ const ColorInput = memo(({
     label,
     value,
     onChange,
+    enabled,
+    onEnabledChange,
 }: {
     label: string;
     value: string;
     onChange: (value: string) => void;
+    enabled?: boolean;
+    onEnabledChange?: (enabled: boolean) => void;
 }) => {
     // Local state for text input — allows partial hex while typing
     const [textValue, setTextValue] = React.useState(value);
@@ -83,9 +88,14 @@ const ColorInput = memo(({
 
     return (
         <div className="flex items-center gap-2">
+            {onEnabledChange && (
+                <Switch checked={enabled} onCheckedChange={onEnabledChange} aria-label={label} />
+            )}
             <div className="relative">
                 <input
                     type="color"
+                    aria-label={label}
+                    disabled={enabled === false}
                     value={value}
                     onChange={(e) => onChange(e.target.value)}
                     className="w-6 h-6 rounded cursor-pointer border border-border/50 p-0"
@@ -95,6 +105,8 @@ const ColorInput = memo(({
             <span className="text-[10px] text-muted-foreground flex-1 truncate">{label}</span>
             <input
                 type="text"
+                aria-label={label}
+                disabled={enabled === false}
                 value={textValue}
                 onChange={handleTextChange}
                 onBlur={handleBlur}
@@ -121,7 +133,7 @@ export const CustomThemeEditor: React.FC<CustomThemeEditorProps> = ({
 }) => {
     const { t } = useI18n();
 
-    const updateColor = useCallback((key: keyof TerminalTheme['colors'], value: string) => {
+    const updateColor = useCallback((key: keyof TerminalTheme['colors'], value: string | undefined) => {
         onChange({
             ...theme,
             colors: { ...theme.colors, [key]: value },
@@ -146,8 +158,12 @@ export const CustomThemeEditor: React.FC<CustomThemeEditorProps> = ({
                     <ColorInput
                         key={key}
                         label={t(labelKey)}
-                        value={theme.colors[key] ?? (fallbackKey ? theme.colors[fallbackKey] : '')}
+                        value={theme.colors[key] ?? (fallbackKey ? theme.colors[fallbackKey] : '') ?? ''}
                         onChange={(v) => updateColor(key, v)}
+                        enabled={key === 'foregroundIntense' ? theme.colors.foregroundIntense !== undefined : undefined}
+                        onEnabledChange={key === 'foregroundIntense'
+                            ? (enabled) => updateColor(key, enabled ? theme.colors.foreground : undefined)
+                            : undefined}
                     />
                 ))}
             </div>

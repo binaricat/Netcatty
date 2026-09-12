@@ -43,10 +43,6 @@ import {
 } from "../../../domain/terminalAppearance";
 import { DEFAULT_TERMINAL_SCROLLBACK } from "../../../domain/models/terminal";
 import {
-  createForegroundIntenseTransformer,
-  resolveForegroundIntenseRgb,
-} from "../../../domain/foregroundIntense";
-import {
   Osc99Assembler,
   parseOsc777Payload,
   parseOsc9Payload,
@@ -243,12 +239,6 @@ export type XTermRuntime = {
   serializeAddon: SerializeAddon;
   searchAddon: SearchAddon;
   dispose: () => void;
-  /**
-   * Update the theme colors used by the `foregroundIntense` stream rewrite
-   * (#3352). Call after theme changes; pass theme colors without a distinct
-   * intense color to disable it.
-   */
-  setForegroundIntenseColors: (colors: TerminalTheme["colors"]) => void;
   /** Current working directory detected via OSC 7 */
   currentCwd: string | undefined;
   keywordHighlighter: KeywordHighlighter;
@@ -623,42 +613,6 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     },
   });
   installSearchDecorationTracker(term);
-
-  // Theme `foregroundIntense` (#3352): bold text drawn with the *default*
-  // foreground (SGR 1 / SGR 39;1) renders with the theme's intense color by
-  // rewriting the output stream — xterm.js has no foregroundIntense theme key
-  // and drawBoldTextInBrightColors only covers explicit ANSI colors. With no
-  // distinct intense color the transformer is a pure pass-through.
-  const foregroundIntenseTransformer = createForegroundIntenseTransformer(
-    resolveForegroundIntenseRgb(ctx.terminalTheme.colors),
-  );
-  const originalTermWrite = term.write.bind(term);
-  term.write = (data: string | Uint8Array, callback?: () => void): void => {
-    if (typeof data === "string") {
-      originalTermWrite(foregroundIntenseTransformer.transform(data), callback);
-      return;
-    }
-    originalTermWrite(data, callback);
-  };
-  // xterm.reset() (snapshot replay, reconnect) wipes the rendition; the
-  // transformer's tracked SGR state must be dropped with it.
-  const originalTermReset = term.reset.bind(term);
-  term.reset = (): void => {
-    originalTermReset();
-    foregroundIntenseTransformer.reset();
-  };
-  const setForegroundIntenseColors = (colors: TerminalTheme["colors"]): void => {
-    // Resync immediately so an outstanding injected color or an active
-    // bold + default foreground does not linger until the next SGR boundary.
-    const resync = foregroundIntenseTransformer.setColor(
-      resolveForegroundIntenseRgb(colors),
-    );
-    if (resync) originalTermWrite(resync);
-  };
-  const foregroundIntenseRestore = (): void => {
-    term.write = originalTermWrite;
-    term.reset = originalTermReset;
-  };
 
   type MaybeRenderer = {
     constructor?: { name?: string };
@@ -2887,7 +2841,6 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     fitAddon,
     serializeAddon,
     searchAddon,
-    setForegroundIntenseColors,
     keywordHighlighter,
     cursorLineHighlighter,
     pluginProviderHost,
@@ -2930,7 +2883,6 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       historyPreviewBufferChangeDisposable.dispose();
       stopDprWatch();
       keywordHighlighter.dispose();
-      foregroundIntenseRestore();
       cursorLineHighlighter.dispose();
       pluginLinkProviderHost?.dispose();
       pluginProviderHost?.dispose();
