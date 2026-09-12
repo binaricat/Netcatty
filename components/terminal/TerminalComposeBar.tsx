@@ -292,8 +292,11 @@ export const TerminalComposeBar: React.FC<TerminalComposeBarProps> = ({
   themeColors,
 }) => {
   const { t } = useI18n();
-  const { prepareRecord, navigate, reset } = useComposeBarHistory(sessionId);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const restoreDraft = useCallback((draft: string) => {
+    if (textareaRef.current) textareaRef.current.value = draft;
+  }, []);
+  const { prepareRecord, navigate, reset } = useComposeBarHistory(sessionId, restoreDraft);
   const isComposingRef = useRef(false);
   const resizeCleanupRef = useRef<(() => void) | null>(null);
   const [barHeight, setBarHeight, persistBarHeight] = useComposeBarHeight();

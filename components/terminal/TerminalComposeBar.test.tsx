@@ -5,7 +5,7 @@ import { JSDOM } from 'jsdom';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { TerminalComposeBar } from './TerminalComposeBar';
 import { TooltipProvider } from '../ui/tooltip';
-import { getComposeBarHistory, pruneComposeBarHistory } from '../../application/state/composeBarHistoryStore';
+import { getComposeBarHistory, pruneComposeBarHistory, recordComposeBarHistory } from '../../application/state/composeBarHistoryStore';
 
 test('compose bar preserves a draft on pane focus and records only successful async sends', async (t) => {
   const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://localhost' });
@@ -47,6 +47,12 @@ test('compose bar preserves a draft on pane focus and records only successful as
     key: name, nativeEvent: {}, currentTarget: textarea, preventDefault() {},
   });
   textarea.value = 'unsent draft';
+  await act(async () => { root.update(render('b')); });
+  assert.equal(textarea.value, 'unsent draft');
+  await act(async () => { root.update(render('a')); });
+  recordComposeBarHistory('a', 'old command from A');
+  key('ArrowUp');
+  assert.equal(textarea.value, 'old command from A');
   await act(async () => { root.update(render('b')); });
   assert.equal(textarea.value, 'unsent draft');
   key('Enter');
