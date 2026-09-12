@@ -582,6 +582,7 @@ function TerminalViewInner({ ctx, isPaneMagnified = false }: { ctx: TerminalView
       isAlternateScreen={hasMouseTracking}
       getMouseTrackingMode={() => termRef.current?.modes.mouseTrackingMode}
       showContextMenuOverFullscreenApps={terminalSettings?.showContextMenuOverFullscreenApps}
+      onSaveScreen={terminalContextActions.onSaveScreen}
       onCopy={terminalContextActions.onCopy}
       onPaste={terminalContextActions.onPaste}
       onUploadClipboardImage={status === "connected" ? terminalContextActions.onUploadClipboardImage : undefined}
