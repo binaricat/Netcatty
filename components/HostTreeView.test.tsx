@@ -168,6 +168,7 @@ test("HostTreeView shows selected groups in multi-select mode", () => {
         children: {},
         hosts: [],
       }]}
+      groupConfigs={[{ path: "production", notes: "# VPN instructions" }]}
       hosts={[]}
       expandedPaths={new Set<string>()}
       onTogglePath={() => undefined}
@@ -188,6 +189,7 @@ test("HostTreeView shows selected groups in multi-select mode", () => {
     />,
   );
 
+  assert.match(markup, /aria-label="Group notes"/);
   assert.match(markup, /data-selected="true"/);
   assert.match(markup, /data-group-path="production"/);
   assert.match(markup, /role="tree"/);
