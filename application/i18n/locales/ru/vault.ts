@@ -304,6 +304,8 @@ export const ruVaultMessages: Messages = {
   'pf.deleteActive.confirm': 'Остановить и удалить',
   'pf.form.autoStart': 'Автозапуск',
   'pf.form.autoStartDesc': 'Автоматически запускать это правило при запуске приложения',
+  'pf.form.autoReconnect': 'Автопереподключение',
+  'pf.form.autoReconnectDesc': 'Автоматически восстанавливать соединение при обрыве',
 
   // SFTP
   'sftp.newFolder': 'Новая папка',

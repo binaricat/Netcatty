@@ -1,4 +1,5 @@
 import test from "node:test";
+import { isPortForwardingAutoReconnectEnabled } from "../../domain/portForwardingReconnect.ts";
 import assert from "node:assert/strict";
 
 import type { Host, PortForwardingRule, SSHKey } from "../../domain/models.ts";
@@ -2317,3 +2318,45 @@ test("startAllPortForwards skips tracked error runtimes and stopAll stops them",
   stopAndCleanupRule("bulk-idle-after-error");
   await new Promise<void>((resolve) => setImmediate(resolve));
 });
+
+for (const type of ["local", "remote", "dynamic"] as const) {
+  test(`${type} reconnect follows live rule choices and respects manual stop`, async (t) => {
+    const liveRule = rule({ id: `reconnect-choice-${type}`, type, autoStart: true });
+    let listener: ((status: PortForwardingRule["status"], error?: string) => void) | undefined;
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: { netcatty: {
+        startPortForward: async () => ({ success: true }),
+        onPortForwardStatus: (_id: string, callback: typeof listener) => {
+          listener = callback;
+          return () => undefined;
+        },
+        stopPortForwardByRuleId: async () => ({ stopped: 1, failed: 0, errors: [] }),
+      } },
+    });
+    setReconnectCallback(async () => ({ success: true }), () => isPortForwardingAutoReconnectEnabled(liveRule));
+    t.after(async () => {
+      setReconnectCallback(null);
+      await stopAndCleanupRuleAndWait(liveRule.id);
+    });
+    const start = async () => {
+      await startPortForward(liveRule, host(), [], [], [], () => undefined,
+        isPortForwardingAutoReconnectEnabled(liveRule));
+      listener?.("active");
+    };
+    // Legacy auto-start still reconnects, until explicitly turned off while active.
+    await start();
+    liveRule.autoReconnect = false;
+    listener?.("error", "network dropped");
+    assert.equal(getActiveConnection(liveRule.id)?.reconnectTimerCallback, undefined);
+    await stopAndCleanupRuleAndWait(liveRule.id);
+    // Enabling reconnect while active takes effect without restarting the tunnel.
+    liveRule.autoStart = false;
+    await start();
+    liveRule.autoReconnect = true;
+    listener?.("error", "network dropped");
+    assert.ok(getActiveConnection(liveRule.id)?.reconnectTimerCallback);
+    await stopPortForward(liveRule.id, () => undefined);
+    assert.equal(getActiveConnection(liveRule.id)?.reconnectTimerCallback, undefined);
+  });
+}

@@ -4,6 +4,7 @@
  */
 import { ChevronDown,Zap } from 'lucide-react';
 import React from 'react';
+import { isPortForwardingAutoReconnectEnabled } from '../../domain/portForwardingReconnect';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import { Host,PortForwardingRule,PortForwardingType } from '../../domain/models';
 import { cn } from '../../lib/utils';
@@ -180,6 +181,18 @@ export const NewFormPanel: React.FC<NewFormPanelProps> = ({
                     <Switch
                         checked={draft.autoStart ?? false}
                         onCheckedChange={checked => onDraftChange({ autoStart: checked })}
+                    />
+                </div>
+
+                {/* Auto Reconnect Toggle */}
+                <div className="flex items-center justify-between py-2">
+                    <div className="space-y-0.5">
+                        <Label className="text-sm font-medium">{t('pf.form.autoReconnect')}</Label>
+                        <p className="text-[10px] text-muted-foreground">{t('pf.form.autoReconnectDesc')}</p>
+                    </div>
+                    <Switch
+                        checked={isPortForwardingAutoReconnectEnabled(draft)}
+                        onCheckedChange={checked => onDraftChange({ autoReconnect: checked })}
                     />
                 </div>
             </AsidePanelContent>

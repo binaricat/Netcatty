@@ -266,6 +266,8 @@ export const enVaultMessages: Messages = {
   'pf.deleteActive.confirm': 'Stop and Delete',
   'pf.form.autoStart': 'Auto Start',
   'pf.form.autoStartDesc': 'Automatically start this rule when the app launches',
+  'pf.form.autoReconnect': 'Auto Reconnect',
+  'pf.form.autoReconnectDesc': 'Automatically reconnect when the connection drops',
 
   // SFTP
   'sftp.newFolder': 'New Folder',

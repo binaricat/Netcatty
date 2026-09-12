@@ -23,6 +23,15 @@ const parsePort = (value: unknown, name: string): Result<number> => {
     : { ok: false, error: `${name} must be an integer between 1 and 65535.` };
 };
 
+const parseToggle = (value: unknown, name: string): Result<boolean | undefined> => {
+  if (value === undefined) return { ok: true, value: undefined };
+  if (typeof value === 'boolean') return { ok: true, value };
+  const normalized = String(value).trim().toLowerCase();
+  if (['true', '1', 'yes'].includes(normalized)) return { ok: true, value: true };
+  if (['false', '0', 'no'].includes(normalized)) return { ok: true, value: false };
+  return { ok: false, error: `${name} must be true or false.` };
+};
+
 export const validatePortForwardingHost = (
   hosts: Host[],
   hostId: string | undefined,
@@ -61,16 +70,12 @@ function buildRule(
     remotePort = parsedRemotePort.value;
   }
   if (!existing && !newRule) return { ok: false, error: 'New rule id and timestamp are required.' };
-  let autoStart = existing?.autoStart ?? false;
-  if (source.autoStart !== undefined) {
-    if (typeof source.autoStart === 'boolean') autoStart = source.autoStart;
-    else {
-      const normalized = String(source.autoStart).trim().toLowerCase();
-      if (['true', '1', 'yes'].includes(normalized)) autoStart = true;
-      else if (['false', '0', 'no'].includes(normalized)) autoStart = false;
-      else return { ok: false, error: 'autoStart must be true or false.' };
-    }
-  }
+  const autoStartToggle = parseToggle(source.autoStart, 'autoStart');
+  if ('error' in autoStartToggle) return autoStartToggle;
+  const autoStart = autoStartToggle.value ?? existing?.autoStart ?? false;
+  const autoReconnectToggle = parseToggle(source.autoReconnect, 'autoReconnect');
+  if ('error' in autoReconnectToggle) return autoReconnectToggle;
+  const autoReconnect = autoReconnectToggle.value ?? existing?.autoReconnect;
   return {
     ok: true,
     value: {
@@ -82,6 +87,7 @@ function buildRule(
       ...(type === 'dynamic' ? {} : { remoteHost, remotePort }),
       hostId,
       autoStart,
+      ...(autoReconnect === undefined ? {} : { autoReconnect }),
       status: existing?.status ?? 'inactive',
       error: existing?.error,
       lastUsedAt: existing?.lastUsedAt,

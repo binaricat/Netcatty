@@ -266,6 +266,8 @@ export const esVaultMessages: Messages = {
   'pf.deleteActive.confirm': 'Detener y eliminar',
   'pf.form.autoStart': 'Inicio automático',
   'pf.form.autoStartDesc': 'Inicia automáticamente esta regla cuando se abra la aplicación',
+  'pf.form.autoReconnect': 'Reconexión automática',
+  'pf.form.autoReconnectDesc': 'Vuelve a conectar automáticamente si se pierde la conexión',
 
   // SFTP
   'sftp.newFolder': 'Nueva carpeta',

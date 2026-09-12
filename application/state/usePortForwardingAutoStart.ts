@@ -8,6 +8,7 @@ import { GroupConfig, Host, Identity, KnownHost, PortForwardingRule, ProxyProfil
 import { resolveGroupDefaults, applyGroupDefaults } from "../../domain/groupConfig";
 import { materializeHostProxyProfile } from "../../domain/proxyProfiles";
 import { STORAGE_KEY_PORT_FORWARDING } from "../../infrastructure/config/storageKeys";
+import { isPortForwardingAutoReconnectEnabled } from "../../domain/portForwardingReconnect";
 import { localStorageAdapter } from "../../infrastructure/persistence/localStorageAdapter";
 import {
   getActiveConnection,
@@ -103,10 +104,27 @@ export const isPortForwardingAutoStartEnabled = (
   ruleId: string,
 ): boolean => rules.some((rule) => rule.id === ruleId && rule.autoStart === true);
 
+export const isPortForwardingReconnectRequested = (
+  rules: PortForwardingRule[],
+  ruleId: string,
+): boolean => rules.some((rule) => rule.id === ruleId && isPortForwardingAutoReconnectEnabled(rule));
+
 export const shouldStartPortForwardingAutoStartRule = (
   rule: PortForwardingRule,
   connection?: { status: PortForwardingRule["status"] },
 ): boolean => rule.autoStart === true && (
+  !connection || connection.status === "inactive" || connection.status === "error"
+);
+
+/**
+ * Network-recovery counterpart of `shouldStartPortForwardingAutoStartRule`:
+ * unlike launch-time auto-start, rules that only opt in via `autoReconnect`
+ * are also restarted after network restoration.
+ */
+export const shouldRestartPortForwardingReconnectRule = (
+  rule: PortForwardingRule,
+  connection?: { status: PortForwardingRule["status"] },
+): boolean => isPortForwardingAutoReconnectEnabled(rule) && (
   !connection || connection.status === "inactive" || connection.status === "error"
 );
 
@@ -118,7 +136,7 @@ export const recoverPortForwardingAutoStartAfterNetworkRestore = async (
   ) ?? [];
   const recoverableRuleIds = new Set<string>();
   for (const rule of rules) {
-    if (rule.autoStart && resetReconnectAttempts(rule.id)) {
+    if (isPortForwardingAutoReconnectEnabled(rule) && resetReconnectAttempts(rule.id)) {
       recoverableRuleIds.add(rule.id);
     }
   }
@@ -184,7 +202,7 @@ export const runPortForwardingAutoStart = async ({
   recoveryRuleIds,
 }: RunPortForwardingAutoStartOptions): Promise<void> => {
   await syncWithBackend({
-    shouldReconnect: (ruleId) => isPortForwardingAutoStartEnabled(
+    shouldReconnect: (ruleId) => isPortForwardingReconnectRequested(
       localStorageAdapter.read<PortForwardingRule[]>(STORAGE_KEY_PORT_FORWARDING) ?? [],
       ruleId,
     ),
@@ -197,9 +215,11 @@ export const runPortForwardingAutoStart = async ({
     STORAGE_KEY_PORT_FORWARDING,
   ) ?? [];
   const autoStartRules = rules.filter((rule) =>
-    (!recoveryRuleIds || recoveryRuleIds.has(rule.id)) &&
-    (!recoveryRuleIds || isReconnectRecoveryEligible(rule.id)) &&
-    shouldStartPortForwardingAutoStartRule(rule, getActiveConnection(rule.id)),
+    recoveryRuleIds
+      ? recoveryRuleIds.has(rule.id) &&
+        isReconnectRecoveryEligible(rule.id) &&
+        shouldRestartPortForwardingReconnectRule(rule, getActiveConnection(rule.id))
+      : shouldStartPortForwardingAutoStartRule(rule, getActiveConnection(rule.id)),
   );
 
   if (autoStartRules.length === 0) return;
@@ -385,7 +405,7 @@ export const usePortForwardingAutoStart = ({
       return startPortForward(rule, host, resolveEffectiveHosts(hostsRef.current), keysRef.current, identitiesRef.current, onStatusChange, true, terminalSettingsRef.current, knownHostsRef.current);
     };
 
-    setReconnectCallback(handleReconnect, (ruleId) => isPortForwardingAutoStartEnabled(
+    setReconnectCallback(handleReconnect, (ruleId) => isPortForwardingReconnectRequested(
       localStorageAdapter.read<PortForwardingRule[]>(STORAGE_KEY_PORT_FORWARDING) ?? [],
       ruleId,
     ));

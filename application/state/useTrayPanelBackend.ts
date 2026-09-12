@@ -32,6 +32,11 @@ export const useTrayPanelBackend = () => {
     await bridge?.connectToHostFromTrayPanel?.(hostId);
   }, []);
 
+  const startPortForwardFromTrayPanel = useCallback(async (ruleId: string) => {
+    const bridge = netcattyBridge.get();
+    return bridge?.startPortForwardFromTrayPanel?.(ruleId);
+  }, []);
+
   const onTrayPanelCloseRequest = useCallback((callback: () => void) => {
     const bridge = netcattyBridge.get();
     return bridge?.onTrayPanelCloseRequest?.(callback);
@@ -71,6 +76,7 @@ export const useTrayPanelBackend = () => {
     quitApp,
     jumpToSession,
     closeSessionFromTrayPanel,
+    startPortForwardFromTrayPanel,
     connectToHostFromTrayPanel,
     onTrayPanelCloseRequest,
     onTrayPanelRefresh,

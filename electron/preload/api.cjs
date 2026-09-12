@@ -1571,8 +1571,13 @@ function createPreloadApi(ctx) {
   },
   onTrayTogglePortForward: (callback) => {
     const handler = (_event, ruleId, start) => callback(ruleId, start);
+    const startHandler = (_event, ruleId) => callback(ruleId, true);
     ipcRenderer.on("netcatty:tray:togglePortForward", handler);
-    return () => ipcRenderer.removeListener("netcatty:tray:togglePortForward", handler);
+    ipcRenderer.on("netcatty:trayPanel:startPortForward", startHandler);
+    return () => {
+      ipcRenderer.removeListener("netcatty:tray:togglePortForward", handler);
+      ipcRenderer.removeListener("netcatty:trayPanel:startPortForward", startHandler);
+    };
   },
 
   // Tray panel actions forwarded to main window
@@ -1600,6 +1605,8 @@ function createPreloadApi(ctx) {
     ipcRenderer.invoke("netcatty:trayPanel:jumpToSession", sessionId),
   connectToHostFromTrayPanel: (hostId) =>
     ipcRenderer.invoke("netcatty:trayPanel:connectToHost", hostId),
+  startPortForwardFromTrayPanel: (ruleId) =>
+    ipcRenderer.invoke("netcatty:trayPanel:startPortForward", ruleId),
   closeSessionFromTrayPanel: (sessionId) =>
     ipcRenderer.invoke("netcatty:trayPanel:closeSession", sessionId),
   onTrayPanelCloseRequest: (callback) => {

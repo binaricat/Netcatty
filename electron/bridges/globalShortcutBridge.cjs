@@ -1271,6 +1271,21 @@ function registerHandlers(ipcMain) {
     return { success: true };
   });
 
+  ipcMain.handle("netcatty:trayPanel:startPortForward", async (_event, ruleId) => {
+    const win = await openMainWindowReady();
+    if (!win) return { success: false, error: "Main window is not available" };
+    if (isAppRuntimeLocked()) {
+      sendOrQueuePortForwardToggle(win, ruleId, true);
+      return { success: true };
+    }
+    const delivered = await sendToMainWindow("netcatty:trayPanel:startPortForward", ruleId, {
+      focus: false,
+    });
+    return delivered
+      ? { success: true }
+      : { success: false, error: "Main window is not ready" };
+  });
+
   ipcMain.handle("netcatty:trayPanel:closeSession", async (_event, sessionId) => {
     const delivered = await sendToMainWindow("netcatty:trayPanel:closeSession", sessionId, {
       focus: false,

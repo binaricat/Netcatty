@@ -10,10 +10,8 @@ import { useI18n } from "../application/i18n/I18nProvider";
 import { I18nProvider } from "../application/i18n/I18nProvider";
 import { useTrayPanelBackend } from "../application/state/useTrayPanelBackend";
 import { useActiveTabId } from "../application/state/activeTabStore";
-import { resolveGroupDefaults, applyGroupDefaults } from "../domain/groupConfig";
-import { materializeHostProxyProfile } from "../domain/proxyProfiles";
 import { upsertKnownHost } from "../domain/knownHosts";
-import type { Host, KnownHost } from "../domain/models";
+import type { KnownHost } from "../domain/models";
 import { getEffectiveKnownHosts } from "../infrastructure/syncHelpers";
 import { PortForwardHostKeyTrayPrompt } from "./port-forwarding";
 import { X, Maximize2, ChevronRight, ChevronDown, Power } from "lucide-react";
@@ -136,11 +134,7 @@ const WorkspaceGroup: React.FC<{
   );
 };
 
-interface TrayPanelContentProps {
-  terminalSettings?: { verifyHostKeys: boolean; keepaliveInterval: number; keepaliveCountMax: number };
-}
-
-const TrayPanelContent: React.FC<TrayPanelContentProps> = ({ terminalSettings }) => {
+const TrayPanelContent: React.FC = () => {
   const { t } = useI18n();
   const {
     hideTrayPanel,
@@ -148,27 +142,23 @@ const TrayPanelContent: React.FC<TrayPanelContentProps> = ({ terminalSettings })
     quitApp,
     jumpToSession,
     closeSessionFromTrayPanel,
+    startPortForwardFromTrayPanel,
     onTrayPanelCloseRequest,
     onTrayPanelRefresh,
     onTrayPanelMenuData,
   } = useTrayPanelBackend();
 
-  const { hosts, keys, identities, proxyProfiles, groupConfigs, knownHosts, updateKnownHosts } = useVaultState();
+  const { hosts, knownHosts, updateKnownHosts } = useVaultState();
   // TrayPanel runs in its own BrowserWindow, so this hook's session state is
   // independent from (and typically empty compared to) the main App's — it's
   // used here only for its storage-sync side effects, never for closeSession.
   useSessionState({ persistSessionRestore: false });
   const {
     rules: portForwardingRules,
-    startTunnel,
     stopTunnel,
     hasRuntimeTunnel,
   } = usePortForwardingState();
   const activeTabId = useActiveTabId();
-  const proxyProfileIdSet = useMemo(
-    () => new Set(proxyProfiles.map((profile) => profile.id)),
-    [proxyProfiles],
-  );
   const effectiveKnownHosts = useMemo(
     () => getEffectiveKnownHosts(knownHosts) ?? [],
     [knownHosts],
@@ -444,16 +434,9 @@ const TrayPanelContent: React.FC<TrayPanelContentProps> = ({ terminalSettings })
                               if (!result.success && result.error) toast.error(result.error);
                             });
                           } else {
-                            const resolveEffectiveHost = (host: Host) => {
-                              const withGroupDefaults = host.group
-                                ? applyGroupDefaults(host, resolveGroupDefaults(host.group, groupConfigs, { validProxyProfileIds: proxyProfileIdSet }), { validProxyProfileIds: proxyProfileIdSet })
-                                : applyGroupDefaults(host, {}, { validProxyProfileIds: proxyProfileIdSet });
-                              return materializeHostProxyProfile(withGroupDefaults, proxyProfiles);
-                            };
-                            const host = resolveEffectiveHost(rawHost);
-                            void startTunnel(rule, host, hosts.map(resolveEffectiveHost), keys, identities, (status, error) => {
-                              if (status === "error" && error) toast.error(error);
-                            }, rule.autoStart, terminalSettings, effectiveKnownHosts);
+                            void startPortForwardFromTrayPanel(rule.id).then((result) => {
+                              if (result && !result.success && result.error) toast.error(result.error);
+                            });
                           }
                         }}
                         className={cn(
@@ -519,7 +502,7 @@ type SettingsState = AppLockGateRenderContext["settings"];
 const TrayPanel: React.FC<{ settings: SettingsState }> = ({ settings }) => {
   return (
     <I18nProvider locale={settings.uiLanguage}>
-      <TrayPanelContent terminalSettings={settings.terminalSettings} />
+      <TrayPanelContent />
     </I18nProvider>
   );
 };
