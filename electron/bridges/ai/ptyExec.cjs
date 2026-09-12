@@ -57,6 +57,7 @@ function startPtyJob(ptyStream, command, options) {
     shellKind,
     loginShellHint,
     probeLiveShell = false,
+    bastionKeystrokes = false,
     onProbeAborted,
     chatSessionId,
     abortSignal,
@@ -733,13 +734,26 @@ function startPtyJob(ptyStream, command, options) {
   }
 
   let inputWriteTimer = null;
+  let inputDrainListener = null;
   let inputWriteGeneration = 0;
   function stopInputWrite() {
     inputWriteGeneration += 1;
     clearTimeout(inputWriteTimer);
     inputWriteTimer = null;
+    if (inputDrainListener) ptyStream.removeListener("drain", inputDrainListener);
+    inputDrainListener = null;
   }
   cleanupFns.push(stopInputWrite);
+
+  function completeInputDelivery(generation) {
+    // Input delivery is complete: only now does the startup deadline begin,
+    // so paced typing time never consumes the startup budget.
+    if (!finished && !cancelRequested && generation === inputWriteGeneration) {
+      deliveringInput = false;
+      if (!pendingEnd) armOutputTimeout();
+      if (!foundStart) armStartupTimeout();
+    }
+  }
 
   function writeInput(text) {
     stopInputWrite();
@@ -749,32 +763,45 @@ function startPtyJob(ptyStream, command, options) {
     clearTimeout(timeoutId);
     deliveringInput = true;
     const generation = inputWriteGeneration;
+
+    // Keep each write to one Unicode code point for strict bastions, while
+    // retaining bounded pacing so long input cannot overrun shell queues.
     let offset = 0;
-    // Readline may overrun its input queue when long probes arrive in one
-    // write. Yield between bounded chunks; cancelled/replaced jobs must never
-    // finish typing an old command into a subsequent prompt.
-    const chunkSize = usesLiveShellProbe && text.length > 1024 ? 128 : text.length;
+    const batchSize = (usesLiveShellProbe || bastionKeystrokes) && text.length > 1024 ? 128 : text.length;
+    const isCurrent = () => !finished && !cancelRequested && generation === inputWriteGeneration;
+    const scheduleNext = () => {
+      if (!isCurrent()) return;
+      inputWriteTimer = setTimeout(writeNext, 30);
+    };
     const writeNext = () => {
-      if (finished || cancelRequested || generation !== inputWriteGeneration) return;
-      let end = Math.min(offset + chunkSize, text.length);
-      // Do not split a UTF-16 surrogate pair across independently encoded writes.
-      if (end < text.length && /[\uD800-\uDBFF]/.test(text[end - 1])) end -= 1;
-      ptyStream.write(text.slice(offset, end));
-      offset = end;
-      if (offset < text.length && generation === inputWriteGeneration && !finished && !cancelRequested) {
-        inputWriteTimer = setTimeout(() => {
-          try { writeNext(); } catch (error) {
-            finish(preStartOutput, -1, `Terminal input failed: ${error.message}`);
+      try {
+        let end = Math.min(offset + batchSize, text.length);
+        if (end < text.length && /[\uD800-\uDBFF]/.test(text[end - 1])) end -= 1;
+        while (offset < end) {
+          if (!isCurrent()) return;
+          const chunk = bastionKeystrokes
+            ? String.fromCodePoint(text.codePointAt(offset))
+            : text.slice(offset, end);
+          offset += chunk.length;
+          const writable = ptyStream.write(chunk);
+          if (!isCurrent()) return;
+          if (writable === false) {
+            inputDrainListener = () => {
+              inputDrainListener = null;
+              clearTimeout(inputWriteTimer);
+              scheduleNext();
+            };
+            ptyStream.once("drain", inputDrainListener);
+            inputWriteTimer = setTimeout(() => {
+              finish(preStartOutput, -1, "Terminal input timed out waiting for drain");
+            }, maxBufferedChars > 0 ? BG_STARTUP_TIMEOUT_MS : timeoutMs);
+            return;
           }
-        }, 30);
-      } else {
-        // Input delivery is complete: only now does the startup deadline
-        // begin, so paced typing time never consumes the startup budget.
-        if (!finished && !cancelRequested && generation === inputWriteGeneration) {
-          deliveringInput = false;
-          armOutputTimeout();
-          if (!foundStart) armStartupTimeout();
         }
+        if (offset < text.length) scheduleNext();
+        else completeInputDelivery(generation);
+      } catch (error) {
+        finish(preStartOutput, -1, `Terminal input failed: ${error.message}`);
       }
     };
     writeNext();

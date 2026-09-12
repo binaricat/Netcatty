@@ -60,3 +60,68 @@ test('completed delivery still has a bounded wait for a missing probe reply', as
   assert.match(result.error, /Command startup timed out/);
   assert.ok(writes.includes('\x03'));
 });
+
+for (const cancel of [false, true]) {
+  test(`backpressure pauses input until ${cancel ? 'cancellation' : 'drain'}`, async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const pty = new EventEmitter();
+    const writes = [];
+    let blocked = true;
+    pty.write = (data) => { writes.push(data); return !blocked; };
+    const job = startPtyJob(pty, 'echo 😀', { shellKind: 'posix', bastionKeystrokes: true, timeoutMs: 500 });
+    assert.equal(writes.length, 1);
+    t.mock.timers.tick(300);
+    assert.equal(writes.length, 1, 'no more input is queued while blocked');
+    if (cancel) {
+      job.cancel();
+      const count = writes.length;
+      pty.emit('drain');
+      t.mock.timers.tick(30);
+      assert.equal(writes.length, count, 'cancelled input never resumes');
+      assert.equal(pty.listenerCount('drain'), 0);
+      pty.emit('close');
+      assert.match((await job.resultPromise).error, /Cancelled/);
+    } else {
+      blocked = false;
+      pty.emit('drain');
+      t.mock.timers.tick(30);
+      while (!writes.join('').endsWith('\n')) t.mock.timers.tick(30);
+      assert.ok(writes.every((value) => Array.from(value).length === 1));
+      assert.ok(writes.includes('😀'));
+      pty.emit('data', `${job.marker}_S\nOK\n${job.marker}_E:0\n`);
+      assert.equal((await job.resultPromise).exitCode, 0);
+    }
+  });
+}
+
+test('a stalled drain has a bounded wait and releases its listener', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const pty = new EventEmitter();
+  pty.write = () => false;
+  const job = startPtyJob(pty, 'echo blocked', { shellKind: 'posix', timeoutMs: 500 });
+  t.mock.timers.tick(500);
+  assert.match((await job.resultPromise).error, /input timed out waiting for drain/);
+  assert.equal(pty.listenerCount('drain'), 0);
+});
+
+for (const shellKind of ['powershell', 'cmd']) {
+  test(`bastion ${shellKind} input yields without a live probe and stops on cancel`, async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const pty = new EventEmitter();
+    const writes = [];
+    pty.write = (data) => { writes.push(data); };
+    const job = startPtyJob(pty, `echo ${'x'.repeat(12000)}`, {
+      shellKind, bastionKeystrokes: true, timeoutMs: 500,
+    });
+    assert.equal(writes.length, 128);
+    t.mock.timers.tick(30);
+    assert.equal(writes.length, 256);
+    assert.ok(writes.every((value) => Array.from(value).length === 1));
+    job.cancel();
+    const count = writes.length;
+    t.mock.timers.tick(30);
+    assert.equal(writes.length, count);
+    pty.emit('close');
+    assert.match((await job.resultPromise).error, /Cancelled/);
+  });
+}

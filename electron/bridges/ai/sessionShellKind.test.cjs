@@ -13,6 +13,7 @@ const {
   parseRemoteLoginShellProbeOutput,
   parseRemoteWindowsLoginShellProbeOutput,
   isWindowsOpenSshRemote,
+  remoteDisallowsExecChannelProbe,
   createSshConnExecProbe,
   createSessionExecProbe,
   ensureSessionShellKind,
@@ -783,6 +784,40 @@ test("createSessionExecProbe prefers session.conn over companions", () => {
   // Prefer primary conn: a probe built only from moshStatsConn is a different
   // function identity; we just need a usable probe here.
   assert.equal(createSessionExecProbe({}), null);
+});
+
+test("remoteDisallowsExecChannelProbe flags bastion banners that drop a second channel (#3146)", () => {
+  assert.equal(remoteDisallowsExecChannelProbe("BHostSSH_7.0"), true);
+  assert.equal(remoteDisallowsExecChannelProbe("TERM-SSHD"), true);
+  assert.equal(remoteDisallowsExecChannelProbe("OpenSSH_9.6"), false);
+  assert.equal(remoteDisallowsExecChannelProbe("dropbear_2022.83"), false);
+  assert.equal(remoteDisallowsExecChannelProbe("OpenSSH_for_Windows_9.5"), false);
+  assert.equal(remoteDisallowsExecChannelProbe(undefined), false);
+  assert.equal(remoteDisallowsExecChannelProbe(""), false);
+});
+
+test("createSessionExecProbe skips the exec channel on bastions so AI exec does not disconnect (#3146)", () => {
+  const session = {
+    remoteSshVersion: "BHostSSH_7.0",
+    conn: { exec() {} },
+  };
+  assert.equal(createSessionExecProbe(session), null);
+});
+
+test("ensureSessionShellKind does not exec-probe bastions (#3146)", async () => {
+  let execCalls = 0;
+  const session = {
+    protocol: "ssh",
+    remoteSshVersion: "BHostSSH_7.0",
+    conn: {
+      exec() {
+        execCalls += 1;
+      },
+    },
+  };
+  const kind = await ensureSessionShellKind(session);
+  assert.equal(kind, undefined);
+  assert.equal(execCalls, 0, "bastion must never open a second SSH channel");
 });
 
 // --- Real fish binary: wrapper must produce markers (issue #1854) -----------
