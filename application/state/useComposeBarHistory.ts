@@ -3,7 +3,7 @@ import { navigateComposeBarHistory, type ComposeBarHistoryDirection } from '../.
 import { getComposeBarHistory, createComposeBarHistoryRecorder } from './composeBarHistoryStore';
 
 export function useComposeBarHistory(sessionId: string) {
-  const cursor = useRef({ index: Infinity, draft: '' });
+  const cursor = useRef<{ index: number; draft: string; entries?: readonly string[] }>({ index: Infinity, draft: '' });
 
   const reset = useCallback(() => {
     cursor.current = { index: Infinity, draft: '' };
@@ -16,12 +16,21 @@ export function useComposeBarHistory(sessionId: string) {
   const prepareRecord = useCallback(() => createComposeBarHistoryRecorder(sessionId), [sessionId]);
 
   const navigate = useCallback((currentValue: string, direction: ComposeBarHistoryDirection) => {
+    // A late send can evict old entries. Keep one walk stable until the user
+    // returns to the draft or edits, then pick up the latest history.
+    const entries = cursor.current.entries ?? getComposeBarHistory(sessionId);
     const result = navigateComposeBarHistory({
-      entries: getComposeBarHistory(sessionId),
       ...cursor.current,
+      entries,
       currentValue,
     }, direction);
-    if (result) cursor.current = result;
+    if (result) {
+      cursor.current = {
+        index: result.index === entries.length ? Infinity : result.index,
+        draft: result.draft,
+        entries: result.index === entries.length ? undefined : entries,
+      };
+    }
     return result?.value;
   }, [sessionId]);
 
