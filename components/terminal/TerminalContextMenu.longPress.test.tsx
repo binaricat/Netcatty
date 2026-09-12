@@ -99,6 +99,23 @@ test('long press opens the existing menu without running the short-click action'
     await fire('mouseup');
     assert.equal(window.document.querySelector('[role="menu"]'), null);
     assert.equal(pastes, 2);
+    let reconnects = 0;
+    await act(async () => root.render(<I18nProvider locale="en">
+      <TerminalContextMenu sessionId="3153" status="disconnected" rightClickBehavior="paste"
+        rightClickLongPressMenu isReconnectable onReconnect={() => reconnects++}
+        getMouseTrackingMode={() => mode} onPaste={() => pastes++}>
+        <div data-testid="surface">Terminal</div>
+      </TerminalContextMenu>
+    </I18nProvider>));
+    await fire('mousedown');
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 550)); });
+    await fire('mouseup');
+    const reconnectItem = Array.from(window.document.querySelectorAll<HTMLElement>('[role="menuitem"]'))
+      .find(item => item.textContent === 'Reconnect');
+    assert.ok(reconnectItem);
+    assert.equal(pastes, 2);
+    await act(async () => reconnectItem.click());
+    assert.equal(reconnects, 1);
   } finally {
     await act(async () => root.unmount());
     window.close();

@@ -227,13 +227,14 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
   onRename,
   onDetach,
 }) => {
+  const showReconnectAction = shouldShowReconnectAction({ isReconnectable, onReconnect });
   const surfaceRef = useRef<HTMLDivElement>(null);
   const canStartLongPress = useEffectEvent(() => rightClickLongPressMenu
     && rightClickBehavior !== 'context-menu'
-    && !isMouseTrackingActive({
+    && (showReconnectAction || !isMouseTrackingActive({
       mouseTracking: isAlternateScreen,
       terminalMouseTrackingMode: getMouseTrackingMode?.(),
-    }));
+    })));
   useEffect(() => {
     if (surfaceRef.current) return installRightClickLongPress(surfaceRef.current, canStartLongPress);
   }, []);
@@ -290,7 +291,6 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
   const splitHShortcut = getShortcut('split-horizontal');
   const splitVShortcut = getShortcut('split-vertical');
   const clearShortcut = getShortcut('clear-buffer');
-  const showReconnectAction = shouldShowReconnectAction({ isReconnectable, onReconnect });
 
   const terminalMouseTrackingMode = getMouseTrackingMode?.();
 
