@@ -29,6 +29,7 @@ const { registerProviderHandlers } = require("./aiBridge/providerHandlers.cjs"),
 const { createVaultAgentBridge } = require("./aiBridge/vaultAgentBridge.cjs");
 const { registerAgentDiscoveryHandlers } = require("./aiBridge/agentDiscoveryHandlers.cjs"), { registerAgentProcessHandlers } = require("./aiBridge/agentProcessHandlers.cjs"), { registerSdkStreamHandlers } = require("./aiBridge/sdk/sdkStreamHandlers.cjs");
 const { probeClaudeAuth, probeCopilotAuth, probeCodexAuth, probeCodebuddyAuth, probeCursorCliAuth, probeGrokAuth } = require("./aiBridge/agentAuthProbes.cjs");
+const { buildSdkAgentEnv } = require("./aiBridge/sdk/env.cjs");
 
 // ── Extracted modules ──
 const {
@@ -946,6 +947,7 @@ function createHandlerContext(ipcMain) {
     killTrackedProcessTree,
     safeSend,
     withCliDiscoveryEnv,
+    buildSdkAgentEnv,
     validateSender,
     validateSenderOrSettings,
     envPairsToObject,

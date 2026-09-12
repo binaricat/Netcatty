@@ -29,7 +29,7 @@ declare global {
       acpArgs?: string[];
     }>>;
     aiPrewarmShellEnv?(): Promise<{ ok: boolean; error?: string }>;
-    aiCodexGetIntegration?(options?: { refreshShellEnv?: boolean; validateChatGptAuth?: boolean; codexPath?: string }): Promise<{
+    aiCodexGetIntegration?(options?: { refreshShellEnv?: boolean; validateChatGptAuth?: boolean; codexPath?: string; agentEnv?: Record<string, string> }): Promise<{
       state: 'connected_chatgpt' | 'connected_api_key' | 'connected_custom_config' | 'not_logged_in' | 'unknown';
       isConnected: boolean;
       rawOutput: string;
@@ -45,7 +45,7 @@ declare global {
         authHash: string | null;
       } | null;
     }>;
-    aiCodexStartLogin?(options?: { codexPath?: string }): Promise<{
+    aiCodexStartLogin?(options?: { codexPath?: string; agentEnv?: Record<string, string> }): Promise<{
       ok: boolean;
       session?: {
         sessionId: string;
@@ -85,7 +85,7 @@ declare global {
       };
       error?: string;
     }>;
-    aiCodexLogout?(options?: { codexPath?: string }): Promise<{
+    aiCodexLogout?(options?: { codexPath?: string; agentEnv?: Record<string, string> }): Promise<{
       ok: boolean;
       state?: 'connected_chatgpt' | 'connected_api_key' | 'connected_custom_config' | 'not_logged_in' | 'unknown';
       isConnected?: boolean;

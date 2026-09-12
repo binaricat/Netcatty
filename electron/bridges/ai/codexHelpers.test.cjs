@@ -1,5 +1,8 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
 
 const {
   MAX_CODEX_LOGIN_OUTPUT_CHARS,
@@ -13,6 +16,7 @@ const {
   extractCodexError,
   isCodexAuthError,
   normalizeCodexIntegrationState,
+  readCodexCustomProviderConfig,
   recordCodexLoginSession,
   stopCodexLoginProcess,
 } = require("./codexHelpers.cjs");
@@ -176,4 +180,98 @@ test("extractCodexError handles circular structured errors", () => {
   const normalized = extractCodexError(error);
 
   assert.equal(normalized.message, '{"status":500,"self":"[Circular]"}');
+});
+
+test("readCodexCustomProviderConfig parses a switcher-style third-party config.toml", (t) => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-codex-config-"));
+  t.after(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  fs.mkdirSync(path.join(tempDir, ".codex"), { recursive: true });
+  fs.writeFileSync(
+    path.join(tempDir, ".codex", "config.toml"),
+    [
+      'model_provider = "ccs"',
+      'model = "glm-5"',
+      "",
+      "[model_providers.ccs]",
+      'name = "Coding Plan"',
+      'base_url = "https://example.invalid/v1"',
+      'wire_api = "responses"',
+      'env_key = "CODING_PLAN_API_KEY"',
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+
+  const config = readCodexCustomProviderConfig({
+    HOME: tempDir,
+    CODING_PLAN_API_KEY: "not-a-real-secret-just-presence",
+  });
+
+  assert.equal(config?.providerName, "ccs");
+  assert.equal(config?.displayName, "Coding Plan");
+  assert.equal(config?.baseUrl, "https://example.invalid/v1");
+  assert.equal(config?.model, "glm-5");
+  assert.equal(config?.envKey, "CODING_PLAN_API_KEY");
+  assert.equal(config?.envKeyPresent, true);
+});
+
+test("readCodexCustomProviderConfig returns null for the default openai provider", (t) => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-codex-config-"));
+  t.after(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  fs.mkdirSync(path.join(tempDir, ".codex"), { recursive: true });
+  fs.writeFileSync(
+    path.join(tempDir, ".codex", "config.toml"),
+    'model_provider = "openai"\n',
+    "utf8",
+  );
+
+  assert.equal(readCodexCustomProviderConfig({ HOME: tempDir }), null);
+});
+
+test("readCodexCustomProviderConfig honors CODEX_HOME over ~/.codex", (t) => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-codex-home-"));
+  t.after(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  // An unrelated config in the default home must be ignored when CODEX_HOME
+  // points elsewhere.
+  fs.mkdirSync(path.join(tempDir, ".codex"), { recursive: true });
+  fs.writeFileSync(
+    path.join(tempDir, ".codex", "config.toml"),
+    'model_provider = "stale"\n\n[model_providers.stale]\nname = "Stale"\n',
+    "utf8",
+  );
+
+  const codexHome = path.join(tempDir, "custom-home");
+  fs.mkdirSync(codexHome, { recursive: true });
+  fs.writeFileSync(
+    path.join(codexHome, "config.toml"),
+    [
+      'model_provider = "ccs"',
+      'model = "glm-5"',
+      "",
+      "[model_providers.ccs]",
+      'name = "Coding Plan"',
+      'base_url = "https://example.invalid/v1"',
+      'env_key = "CODING_PLAN_API_KEY"',
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+
+  const config = readCodexCustomProviderConfig({
+    HOME: tempDir,
+    CODEX_HOME: codexHome,
+    CODING_PLAN_API_KEY: "not-a-real-secret-just-presence",
+  });
+
+  assert.equal(config?.providerName, "ccs");
+  assert.equal(config?.model, "glm-5");
 });

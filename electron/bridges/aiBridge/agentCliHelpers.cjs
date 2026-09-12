@@ -1,4 +1,5 @@
 /* eslint-disable no-undef */
+const { createHash } = require("node:crypto");
 const { StringDecoder } = require("node:string_decoder");
 
 const DEFAULT_CODEX_CLI_TIMEOUT_MS = 10_000;
@@ -8,6 +9,7 @@ const MAX_AGENT_CLI_BUFFER_CHARS = 10 * 1024 * 1024;
 function createAgentCliHelpers(ctx) {
   with (ctx) {
   const codexAuthValidationInFlight = new Map();
+  let codexValidationKey = null;
   async function runCommand(command, args, options) {
     return await new Promise((resolve, reject) => {
       let settled = false;
@@ -143,9 +145,15 @@ function createAgentCliHelpers(ctx) {
       throw new Error(`Codex CLI path not found: ${requestedPath}`);
     }
     const codexCliPath = configuredPath || await resolveCliFromPathAsync("codex", shellEnv) || "codex";
+    // Callers probing on behalf of a specific agent pass `options.env` (the
+    // merged shell + agent env, as built for SDK spawns) so CODEX_HOME/HOME
+    // overrides select the same config the agent turn will use.
+    const env = options?.env && typeof options.env === "object" && Object.keys(options.env).length > 0
+      ? options.env
+      : shellEnv;
     return await runCommand(codexCliPath, args, {
       cwd: options?.cwd?.trim() || undefined,
-      env: shellEnv,
+      env,
       timeoutMs: Number.isFinite(options?.timeoutMs)
         ? Number(options.timeoutMs)
         : DEFAULT_CODEX_CLI_TIMEOUT_MS,
@@ -166,10 +174,21 @@ function createAgentCliHelpers(ctx) {
   }
 
   async function validateCodexChatGptAuth(options) {
+    const shellEnv = options?.env || await getShellEnv();
+    // Hash sorted entries so equivalent env objects share probes without
+    // retaining raw credentials in cache keys.
+    const envKey = createHash("sha256")
+      .update(JSON.stringify(Object.entries(shellEnv).sort(([a], [b]) => a.localeCompare(b))))
+      .digest("hex");
     const maxAgeMs = options?.maxAgeMs ?? 30000;
     const now = Date.now();
     const rawRequestedCodexPath = String(options?.codexPath || "").trim();
     const requestedCodexPath = rawRequestedCodexPath ? normalizeCliPathForPlatform?.(rawRequestedCodexPath) : null;
+    const validationKey = JSON.stringify([requestedCodexPath, envKey]);
+    const cacheValidation = (result) => {
+      codexValidationKey = validationKey;
+      setCodexValidationCache(result);
+    };
     if (rawRequestedCodexPath && !requestedCodexPath) {
       const result = {
         ok: false,
@@ -178,24 +197,22 @@ function createAgentCliHelpers(ctx) {
         error: `Codex CLI path not found: ${rawRequestedCodexPath}`,
         code: "ENOENT",
       };
-      setCodexValidationCache(result);
       return result;
     }
     const cached = getCodexValidationCache();
-    if (cached && now - cached.checkedAt < maxAgeMs && (cached.codexPath || null) === requestedCodexPath) return cached;
-    const inFlightKey = requestedCodexPath || "__auto__";
+    if (codexValidationKey === validationKey && cached && now - cached.checkedAt < maxAgeMs) return cached;
+    const inFlightKey = validationKey;
     const existingValidation = codexAuthValidationInFlight.get(inFlightKey);
     if (existingValidation) return existingValidation;
 
     const validationPromise = (async () => {
-      const shellEnv = await getShellEnv();
       const rawCodexPath = requestedCodexPath || await resolveSdkBinPathAsync("codex", shellEnv);
       const codexPath = rawCodexPath && typeof resolveCodexExecutableForSdk === "function"
         ? resolveCodexExecutableForSdk(rawCodexPath) || null
         : rawCodexPath;
       if (!codexPath) {
         const result = { ok: false, checkedAt: now, codexPath: requestedCodexPath, error: "codex binary not found", code: "ENOENT" };
-        setCodexValidationCache(result);
+        cacheValidation(result);
         return result;
       }
 
@@ -244,12 +261,12 @@ function createAgentCliHelpers(ctx) {
 
         await Promise.race([probePromise, timeoutPromise]);
         const result = { ok: true, checkedAt: now, codexPath, error: null };
-        setCodexValidationCache(result);
+        cacheValidation(result);
         return result;
       } catch (error) {
         const normalized = extractCodexError(error);
         const result = { ok: false, checkedAt: now, codexPath, error: normalized.message, code: normalized.code };
-        setCodexValidationCache(result);
+        cacheValidation(result);
         return result;
       } finally {
         if (timeoutId) clearTimeout(timeoutId);

@@ -48,7 +48,7 @@ import {
   isInlineTextAttachment,
 } from '../application/state/terminalSelectionAttachment';
 import { createVaultNoteAttachment, isVaultNoteAttachment, vaultNoteReferencesFit } from '../application/state/vaultNoteAttachment';
-import type { CodexIntegrationStatus } from './settings/tabs/ai/types';
+import { useCodexConfigModel } from '../application/state/useCodexConfigModel';
 import {
   useAIChatStreaming,
   getNetcattyBridge,
@@ -843,35 +843,9 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     [currentAgentConfig],
   );
 
-  const [codexConfigModel, setCodexConfigModel] = useState<string | null>(null);
-  const [codexCustomConfigResolved, setCodexCustomConfigResolved] = useState(false);
-  useEffect(() => {
-    if (!isVisible) return;
-    setCodexCustomConfigResolved(false);
-    if (!isCodexManagedAgent) {
-      setCodexConfigModel(null);
-      return;
-    }
-    const bridge = getNetcattyBridge();
-    if (!bridge?.aiCodexGetIntegration) return;
-    let cancelled = false;
-    void Promise.resolve(
-      bridge.aiCodexGetIntegration({ codexPath: getManualAgentCommand(currentAgentConfig) }) as Promise<CodexIntegrationStatus>,
-    ).then((info) => {
-      if (cancelled) return;
-      const hasCustom = info?.state === 'connected_custom_config';
-      setCodexConfigModel(info?.customConfig?.model ?? null);
-      setCodexCustomConfigResolved(hasCustom);
-    }).catch(() => {
-      if (!cancelled) {
-        setCodexConfigModel(null);
-        setCodexCustomConfigResolved(false);
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [isVisible, isCodexManagedAgent, currentAgentId, currentAgentConfig]);
+  const { model: codexConfigModel, loadModel: loadCodexConfigModel } = useCodexConfigModel(
+    currentAgentConfig, isVisible,
+  );
 
   const agentModelMapRef = useRef(agentModelMap);
   agentModelMapRef.current = agentModelMap;
@@ -1035,18 +1009,12 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
 
   const isCodexAppServer = isCodexManagedAgent && currentAgentConfig?.codexRuntime === 'app-server';
   const canSteerCurrentTurn = Boolean(activeSessionId && isStreaming && isCodexAppServer);
-  const hasCodexCustomConfig = codexCustomConfigResolved && isCodexManagedAgent && !isCodexAppServer;
+  const hasCodexCustomConfig = Boolean(codexConfigModel) && isCodexManagedAgent;
 
   const agentModelPresets = useMemo(() => {
     const runtimePresets = runtimeAgentModelPresets[currentAgentId];
-    if (hasCodexCustomConfig) {
-      if (runtimePresets) {
-        return runtimePresets;
-      }
-      if (codexConfigModel) {
-        return [{ id: codexConfigModel, name: codexConfigModel }];
-      }
-      return [];
+    if (hasCodexCustomConfig && codexConfigModel) {
+      return [{ id: codexConfigModel, name: codexConfigModel }];
     }
     if (runtimePresets) return runtimePresets;
     const presets = getAgentModelPresets(
@@ -1236,8 +1204,11 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
       if (sendBridge?.aiSyncWebSearch) {
         await sendBridge.aiSyncWebSearch(webSearchConfig?.apiHost || null, webSearchConfig?.apiKey || null);
       }
-      let sendSelectedAgentModel = selectedAgentModel;
-      if (currentAgentConfig && shouldLoadSdkRuntimeModels(currentAgentConfig)) {
+      // A quick send must await the same config probe as the picker. Its model
+      // also takes precedence over App Server's built-in model catalog.
+      const configModel = await loadCodexConfigModel();
+      let sendSelectedAgentModel = configModel ?? selectedAgentModel;
+      if (!configModel && currentAgentConfig && shouldLoadSdkRuntimeModels(currentAgentConfig)) {
         const runtimeTarget = buildExternalAgentRuntimeModelTarget(currentAgentConfig);
         if (runtimeTarget) {
           const catalog = await loadSdkRuntimeModelCatalog(runtimeTarget);
@@ -1421,7 +1392,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
       }
     }
   }, [
-    validateNoteMentions,
+    validateNoteMentions, loadCodexConfigModel,
     isStreaming, activeProvider, effectiveActiveProvider, effectiveActiveModelId, selectedCattyThinking, scopeKey, currentAgentId,
     activeModelId, externalAgents,
     createSession, addMessageToSession, updateMessageById, updateLastMessage,

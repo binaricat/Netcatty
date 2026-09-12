@@ -645,6 +645,11 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
     }, 900);
   }, []);
 
+  const codexManagedAgent = useMemo(
+    () => externalAgents.find((agent) => agent.id === "discovered_codex"),
+    [externalAgents],
+  );
+
   const refreshCodexIntegration = useCallback(async (opts?: { refreshShellEnv?: boolean; validateChatGptAuth?: boolean; codexPath?: string }) => {
     const bridge = getBridge();
     if (!bridge?.aiCodexGetIntegration) return;
@@ -655,7 +660,7 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
     setIsCodexLoading(true);
     setCodexError(null);
     try {
-      const integration = await bridge.aiCodexGetIntegration(opts);
+      const integration = await bridge.aiCodexGetIntegration({ ...opts, agentEnv: codexManagedAgent?.env });
       if (!isCurrentRequest()) return;
       setCodexIntegration(integration);
     } catch (err) {
@@ -667,7 +672,7 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
         setIsCodexLoading(false);
       }
     }
-  }, []);
+  }, [codexManagedAgent?.env]);
 
   const codexCommittedPath = useMemo(
     () => getManagedAgentCommandPath(externalAgents, "codex") || codexPathInfo?.path || undefined,
@@ -682,10 +687,6 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
     codexCommittedPath
   ), [codexCommittedPath]);
 
-  const codexManagedAgent = useMemo(
-    () => externalAgents.find((agent) => agent.id === "discovered_codex"),
-    [externalAgents],
-  );
   const codexRuntime = codexManagedAgent?.codexRuntime ?? 'sdk';
 
   const refreshCodexAppServerStatus = useCallback(async () => {
@@ -861,7 +862,7 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
     setCodexError(null);
     setIsCodexLoading(true);
     try {
-      const result = await bridge.aiCodexStartLogin({ codexPath: getCodexPathOverride() });
+      const result = await bridge.aiCodexStartLogin({ codexPath: getCodexPathOverride(), agentEnv: codexManagedAgent?.env });
       if (!isCurrentRequest()) return;
       if (!result.ok || !result.session) {
         throw new Error(result.error || "Failed to start Codex login");
@@ -876,7 +877,7 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
         setIsCodexLoading(false);
       }
     }
-  }, [getCodexPathOverride]);
+  }, [getCodexPathOverride, codexManagedAgent?.env]);
 
   const handleCancelCodexLogin = useCallback(async () => {
     const bridge = getBridge();
@@ -912,7 +913,7 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
     setCodexError(null);
     setIsCodexLoading(true);
     try {
-      const result = await bridge.aiCodexLogout({ codexPath: getCodexPathOverride() });
+      const result = await bridge.aiCodexLogout({ codexPath: getCodexPathOverride(), agentEnv: codexManagedAgent?.env });
       if (!isCurrentRequest()) return;
       if (!result.ok) {
         throw new Error(result.error || "Failed to log out from Codex");
@@ -928,7 +929,7 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
         setIsCodexLoading(false);
       }
     }
-  }, [getCodexPathOverride, refreshCodexIntegration]);
+  }, [getCodexPathOverride, refreshCodexIntegration, codexManagedAgent?.env]);
 
   const refreshUserSkillsStatus = useCallback(async () => {
     const bridge = getBridge();

@@ -78,6 +78,14 @@ async function probeCursorSdkAvailability(shellEnv, options = {}) {
 
 function registerAgentDiscoveryHandlers(ctx) {
   with (ctx) {
+  async function getCodexAgentEnv(options) {
+    return buildSdkAgentEnv({
+      shellEnv: await getShellEnv(),
+      requestedAgentEnv: normalizeAgentEnv(options?.agentEnv),
+      withCliDiscoveryEnv,
+    });
+  }
+
   ipcMain.handle("netcatty:ai:agents:discover", async (event, options = {}) => {
     if (!validateSenderOrSettings(event)) return { ok: false, error: "Unauthorized IPC sender" };
     if (options?.refreshShellEnv) {
@@ -265,7 +273,9 @@ function registerAgentDiscoveryHandlers(ctx) {
       invalidateShellEnvCache();
     }
     try {
-      const codexCliOptions = { codexPath: options?.codexPath };
+      // Probe the same config and credentials as the managed agent's turns.
+      const effectiveEnv = await getCodexAgentEnv(options);
+      const codexCliOptions = { codexPath: options?.codexPath, env: effectiveEnv };
       const result = await runCodexCli(["login", "status"], codexCliOptions);
       const rawOutput = [result.stdout, result.stderr]
         .filter((chunk) => chunk.trim().length > 0)
@@ -275,7 +285,7 @@ function registerAgentDiscoveryHandlers(ctx) {
       let effectiveRawOutput = rawOutput;
 
       if (state === "connected_chatgpt" && options?.validateChatGptAuth === true) {
-        const validation = await validateCodexChatGptAuth({ maxAgeMs: 10000, codexPath: options?.codexPath });
+        const validation = await validateCodexChatGptAuth({ maxAgeMs: 10000, codexPath: options?.codexPath, env: effectiveEnv });
         if (!validation.ok) {
           if (isCodexAuthError(validation)) {
             try {
@@ -299,17 +309,21 @@ function registerAgentDiscoveryHandlers(ctx) {
       // functional from the CLI but would look "not_logged_in" here. Probe
       // config.toml so we can surface that as a valid ready state instead of
       // pushing the user into the ChatGPT login flow.
+      //
+      // Probe even when auth.json reports a login: provider switcher tools
+      // (cc-switch, ccs) write an API key into auth.json while config.toml's
+      // `model_provider` actually selects a third-party provider, and
+      // config.toml is what Codex uses. Keep a validated ChatGPT login as the
+      // displayed state, but still return customConfig so the chat model
+      // picker can surface the configured third-party model.
       let customConfig = null;
-      if (state !== "connected_chatgpt" && state !== "connected_api_key") {
-        try {
-          const shellEnv = await getShellEnv();
-          customConfig = readCodexCustomProviderConfig(shellEnv);
-          if (customConfig) {
-            state = "connected_custom_config";
-          }
-        } catch {
-          customConfig = null;
+      try {
+        customConfig = readCodexCustomProviderConfig(effectiveEnv);
+        if (customConfig && state !== "connected_chatgpt") {
+          state = "connected_custom_config";
         }
+      } catch {
+        customConfig = null;
       }
 
       return {
@@ -342,15 +356,20 @@ function registerAgentDiscoveryHandlers(ctx) {
     }
 
     try {
-      const shellEnv = await getShellEnv();
+      const shellEnv = await getCodexAgentEnv(options);
       const codexCliPath = requestedCodexPath
         || await resolveCliFromPathAsync("codex", shellEnv)
         || "codex";
+      const credentialHomeKey = shellEnv.CODEX_HOME?.trim()
+        || require("node:path").join(shellEnv.HOME || shellEnv.USERPROFILE || require("node:os").homedir(), ".codex");
       const existingSession = getActiveCodexLoginSession();
       if (existingSession) {
         const existingPath = existingSession.codexPath || null;
         if (existingPath && codexCliPath !== existingPath) {
           return { ok: false, error: "A Codex login is already running for a different CLI path." };
+        }
+        if (existingSession.credentialHomeKey !== credentialHomeKey) {
+          return { ok: false, error: "A Codex login is already running for a different credential home." };
         }
         return { ok: true, session: toCodexLoginSessionResponse(existingSession) };
       }
@@ -373,6 +392,7 @@ function registerAgentDiscoveryHandlers(ctx) {
         error: null,
         exitCode: null,
         codexPath: codexCliPath,
+        credentialHomeKey,
       };
 
       const stdoutDecoder = createCodexLoginOutputDecoder(session);
@@ -454,7 +474,7 @@ function registerAgentDiscoveryHandlers(ctx) {
   ipcMain.handle("netcatty:ai:codex:logout", async (event, options = {}) => {
     if (!validateSenderOrSettings(event)) return { ok: false, error: "Unauthorized IPC sender" };
     try {
-      const codexCliOptions = { codexPath: options?.codexPath };
+      const codexCliOptions = { codexPath: options?.codexPath, env: await getCodexAgentEnv(options) };
       const logoutResult = await runCodexCli(["logout"], codexCliOptions);
       invalidateCodexValidationCache();
       const statusResult = await runCodexCli(["login", "status"], codexCliOptions);
