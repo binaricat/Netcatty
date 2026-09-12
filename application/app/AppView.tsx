@@ -300,6 +300,8 @@ function AppViewInner({ domains }: AppViewProps) {
     restoreTerminalCwd,
     terminalSidePanelAutoOpen,
     terminalSidePanelAutoOpenTab,
+    localShellSidePanelAutoOpen,
+    localShellSidePanelAutoOpenTab,
   } = useSettingsChromeStore();
   const { setTheme, setWindowOpacity } = useSettingsChromeActions();
 
@@ -751,6 +753,8 @@ function AppViewInner({ domains }: AppViewProps) {
           sftpAutoOpenSidebar={sftpAutoOpenSidebar}
           terminalSidePanelAutoOpen={terminalSidePanelAutoOpen}
           terminalSidePanelAutoOpenTab={terminalSidePanelAutoOpenTab}
+          localShellSidePanelAutoOpen={localShellSidePanelAutoOpen}
+          localShellSidePanelAutoOpenTab={localShellSidePanelAutoOpenTab}
           sftpFollowTerminalCwd={sftpFollowTerminalCwd}
           setSftpFollowTerminalCwd={setSftpFollowTerminalCwd}
           editorWordWrap={editorWordWrap}

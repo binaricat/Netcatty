@@ -895,36 +895,6 @@ function SettingsTerminalTab(props: {
           </div>
         </SettingRow>
 
-        <SettingRow
-          label={t("settings.terminal.localShell.sidePanel.autoOpen")}
-          description={t("settings.terminal.localShell.sidePanel.autoOpen.desc")}
-        >
-          <Toggle checked={localShellSidePanelAutoOpen} onChange={setLocalShellSidePanelAutoOpen} />
-        </SettingRow>
-
-        <SettingRow
-          label={t("settings.terminal.localShell.sidePanel.autoOpenTab")}
-          description={t("settings.terminal.localShell.sidePanel.autoOpenTab.desc")}
-        >
-          <ShadcnSelect
-            value={localShellSidePanelAutoOpenTab}
-            onValueChange={setLocalShellSidePanelAutoOpenTab}
-            disabled={!localShellSidePanelAutoOpen}
-          >
-            <SelectTrigger className="h-9 w-48 text-sm">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="files">{t("settings.terminal.sidePanel.autoOpenTab.files")}</SelectItem>
-              <SelectItem value="scripts">{t("settings.terminal.sidePanel.autoOpenTab.scripts")}</SelectItem>
-              <SelectItem value="history">{t("settings.terminal.sidePanel.autoOpenTab.history")}</SelectItem>
-              <SelectItem value="theme">{t("settings.terminal.sidePanel.autoOpenTab.theme")}</SelectItem>
-              <SelectItem value="system">{t("settings.terminal.sidePanel.autoOpenTab.system")}</SelectItem>
-              <SelectItem value="notes">{t("settings.terminal.sidePanel.autoOpenTab.notes")}</SelectItem>
-              <SelectItem value="ai">{t("settings.terminal.sidePanel.autoOpenTab.ai")}</SelectItem>
-            </SelectContent>
-          </ShadcnSelect>
-        </SettingRow>
       </div>
 
       <SectionHeader title={t("settings.terminal.section.connection")} />

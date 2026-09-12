@@ -1911,6 +1911,8 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
       restoreTerminalCwd,
       terminalSidePanelAutoOpen,
       terminalSidePanelAutoOpenTab,
+      localShellSidePanelAutoOpen,
+      localShellSidePanelAutoOpenTab,
     });
   }, [
     darkUiThemeId,
@@ -1932,6 +1934,8 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
     theme,
     uiLanguage,
     windowOpacity,
+    localShellSidePanelAutoOpen,
+    localShellSidePanelAutoOpenTab,
   ]);
 
   useLayoutEffect(() => {

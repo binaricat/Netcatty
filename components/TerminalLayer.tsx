@@ -458,7 +458,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     if (!session) return;
     const proto = session.protocol;
     const sftpAvailable = proto === 'ssh' || proto === 'mosh';
-    const isLocalShell = proto === 'local' || proto === undefined;
+    const isLocalShell = proto === 'local';
     const tabId = session.workspaceId || sessionId;
 
     if (sidePanelOpenTabsRef.current.has(tabId)) return;
