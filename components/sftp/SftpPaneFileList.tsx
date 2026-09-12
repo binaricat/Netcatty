@@ -196,7 +196,12 @@ export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = React.memo(({
     return () => sftpListOrderStore.clearPane(pane.id);
   }, [sortedDisplayFiles, pane.id]);
 
+  const lastScrolledSelectionRef = useRef<Set<string> | null>(null);
   useEffect(() => {
+    // A same-directory refresh retains the selection object. Do not pull the
+    // viewport back to an old selection when the user has scrolled elsewhere.
+    if (lastScrolledSelectionRef.current === pane.selectedFiles) return;
+    lastScrolledSelectionRef.current = pane.selectedFiles;
     if (pane.selectedFiles.size !== 1) return;
     const selectedName = Array.from(pane.selectedFiles)[0];
     if (!selectedName) return;

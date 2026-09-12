@@ -1,3 +1,4 @@
+import { publishTerminalCommandCompletion } from "../application/state/terminalCommandCompletion";
 import { createTerminalReflowReadingPosition } from "./terminal/terminalReflowReadingPosition";
 import { resolveHostOs } from '../domain/host';
 import { Terminal as XTerm } from "@xterm/xterm";
@@ -2367,9 +2368,10 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     onCommandSubmitted?.(...args);
   }, [onCommandSubmitted, onTerminalCwdChange, sessionId, terminalCwdTracker]);
   const pluginAwareOnCommandCompleted = useCallback(() => {
+    publishTerminalCommandCompletion(sessionId);
     pluginTerminalLifecycle.onCommandCompleted();
     void xtermRuntimeRef.current?.pluginProviderHost?.commandCompleted();
-  }, [pluginTerminalLifecycle]);
+  }, [pluginTerminalLifecycle, sessionId]);
   const pluginAwareOnTerminalCwdChange = useCallback((
     changedSessionId: string,
     cwd: string | null,

@@ -1,3 +1,4 @@
+import { useSftpCommandRefresh } from "../application/state/sftp/useSftpCommandRefresh";
 /**
  * SftpSidePanel - SFTP file browser rendered as a resizable side panel
  *
@@ -1619,6 +1620,22 @@ const SftpSidePanelInteractiveBody: React.FC<SftpSidePanelInteractiveBodyProps> 
     || (sftp.activeExternalEditCount ?? 0) > 0;
   const connectionId = sftp.leftPane.connection?.id ?? null;
   const connectionPath = sftp.leftPane.connection?.currentPath ?? null;
+  const [autoRefresh, setAutoRefresh] = useState(true);
+  useSftpCommandRefresh({
+    sessionId: focusedSessionId ?? activeSessionId,
+    enabled: autoRefresh,
+    visible: isVisible && ownerPanelOpen,
+    busy: hasActiveWork || sftp.leftPane.loading,
+    matchesTerminal: !!activeHost && !!connectedHostObjRef.current
+      && sftpHostEndpointsEqual(activeHost, connectedHostObjRef.current)
+      && sftp.leftPane.connection?.hostId === activeHost.id,
+    paneId: sftp.leftPane.id,
+    connectionId,
+    path: connectionPath,
+    connected: sftp.leftPane.connection?.status === "connected",
+    refresh: () => sftpRef.current.refresh("left", { tabId: sftp.leftPane.id, preserveSelection: true }),
+  });
+
 
   const {
     handleGoToTerminalCwd,
@@ -1860,6 +1877,10 @@ const SftpSidePanelInteractiveBody: React.FC<SftpSidePanelInteractiveBodyProps> 
         data-section="terminal-sftp-panel"
         onClick={handlePaneFocus}
       >
+        <label className="flex shrink-0 items-center gap-2 border-b border-border/50 px-3 py-1 text-xs text-muted-foreground">
+          <input type="checkbox" checked={autoRefresh} onChange={(event) => setAutoRefresh(event.target.checked)} />
+          {t("sftp.refreshAfterCommand")}
+        </label>
         {showWorkspaceHostHeader && displayHost && (
           <div
             className={`${TERMINAL_SIDE_PANEL_INNER_HEADER_CLASS} border-b border-border/50 bg-muted/20 px-3 flex items-center`}
