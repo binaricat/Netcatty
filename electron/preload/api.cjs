@@ -346,6 +346,7 @@ function createPreloadApi(ctx) {
       data,
       automated: Boolean(options?.automated),
       sensitive: options?.sensitive === true,
+      serialEraseChar: typeof options?.serialEraseChar === "string" ? options.serialEraseChar : undefined,
       lineDelayMs: Number.isFinite(lineDelayMs) && lineDelayMs > 0 ? lineDelayMs : undefined,
       logRewrite: options?.logRewrite && typeof options.logRewrite === "object"
         ? {

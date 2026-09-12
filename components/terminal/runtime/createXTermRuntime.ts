@@ -119,6 +119,7 @@ import {
   shouldFlushStaleDeferredImeTextInput,
 } from "./terminalImeTextInput";
 import { formatSerialLocalEcho } from "./serialLocalEcho";
+import { getLastChar, removeLastChar, isPrintableInput } from "../../../domain/serialCharMetrics";
 import { mapTerminalBackspaceInput } from "./terminalBackspaceInput";
 import {
   getTextInputWireChunks,
@@ -239,6 +240,8 @@ export type XTermRuntime = {
   serializeAddon: SerializeAddon;
   searchAddon: SearchAddon;
   dispose: () => void;
+  /** Track the pending final line of a serial snippet left for editing. */
+  recordSerialSnippetInput: (data: string) => void;
   /** Current working directory detected via OSC 7 */
   currentCwd: string | undefined;
   keywordHighlighter: KeywordHighlighter;
@@ -365,6 +368,8 @@ export type CreateXTermRuntimeContext = {
   // Serial-specific options
   serialLocalEcho?: boolean;
   serialLineMode?: boolean;
+  /** Opt-in for devices whose line editor deletes bytes instead of characters. */
+  serialByteOrientedBackspace?: boolean;
   serialLineBufferRef?: RefObject<string>;
   telnetLocalEchoRef?: RefObject<boolean>;
   onTerminalLogData?: (data: string) => void;
@@ -1140,6 +1145,46 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     writeLocalTerminalDataInOrder(term, nextData, ctx.onTerminalLogData);
   };
 
+  // Tracks whether the most recent non-backspace input was a printable
+  // character (not an escape sequence or control char).  Backspace byte
+  // expansion is only safe when the cursor is at the end of the typed
+  // buffer — i.e. the last input advanced the cursor, not moved it.
+  //
+  // Starts true when the buffer is empty (new session: cursor is at the
+  // beginning of an empty buffer).  Starts false when the buffer is
+  // nonempty (hibernation wake: the pre-hibernation cursor may have been
+  // moved away from the tail, so we conservatively assume it is not).
+  let lastInputWasPrintable = !ctx.commandBufferRef?.current;
+
+  const restoreSerialTailForEmptyInput = (data: string) => {
+    // Apply the same rule to typed text, pasted text, and editable snippets.
+    // Preserve uncertainty when inserting into an existing edited line.
+    if (!ctx.commandBufferRef.current &&
+      (isPrintableInput(data) || getSingleBracketedPasteLine(data))) {
+      lastInputWasPrintable = true;
+    }
+  };
+
+  const recordSerialTextInput = (data: string) => {
+    const text = data.startsWith("\x1b[200~") && data.endsWith("\x1b[201~")
+      ? data.slice(6, -6)
+      : data;
+    const lastLineBreak = Math.max(text.lastIndexOf("\r"), text.lastIndexOf("\n"));
+    if (lastLineBreak >= 0) {
+      ctx.commandBufferRef.current = "";
+      lastInputWasPrintable = true;
+    }
+    const pendingText = text.slice(lastLineBreak + 1);
+    restoreSerialTailForEmptyInput(pendingText);
+    ctx.commandBufferRef.current += pendingText;
+    return text;
+  };
+
+  const recordSerialSnippetInput = (data: string) => {
+    const text = recordSerialTextInput(data);
+    if (ctx.serialLocalEcho) writeLocalTerminalData(formatSerialLocalEcho(text));
+  };
+
   const handleTerminalInputData = (
     data: string,
     options?: {
@@ -1178,6 +1223,8 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     if (logicalData) {
       ctx.sudoAutofillRef?.current?.dismissOnUserContentInput(logicalData);
     }
+
+    if (logicalData !== null) restoreSerialTailForEmptyInput(logicalData);
 
     const inputSource = options?.source ?? "terminal";
     const id = ctx.sessionRef.current;
@@ -1263,6 +1310,9 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       }
     }
 
+    // Both Enter and a submitted paste start a new, empty input line.
+    if (handledSubmittedInput) lastInputWasPrintable = true;
+
     if (id) {
       prioritizeTerminalInput(
         term,
@@ -1286,24 +1336,79 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
             ctx.terminalBackend.writeToSession(id, nextData, { sensitive });
           },
           writeToTerminal: writeLocalTerminalData,
+          term,
         });
       } else {
-        // Character mode (default): send immediately
-        // When backspaceBehavior is configured, remap the Backspace key output
+        // Character mode sends input immediately. Byte-oriented devices opt in
+        // to expansion in the backend, using the session's actual wire encoder.
+        const isBackspace = dataToWrite === "\x7f" || dataToWrite === "\b";
         const outData = mapTerminalBackspaceInput(dataToWrite, ctx.host.backspaceBehavior);
+        let serialEraseChar: string | undefined;
+        let backspaceCells = 1;
+
+        if (
+          isBackspace &&
+          ctx.host.protocol === "serial" &&
+          ctx.commandBufferRef &&
+          ctx.commandBufferRef.current.length > 0 &&
+          lastInputWasPrintable
+        ) {
+          const lastChar = getLastChar(ctx.commandBufferRef.current);
+          // Always compute display width for local echo, independently of
+          // whether wire-level byte expansion is enabled.  A wide CJK or
+          // emoji grapheme needs its full cell count erased even when
+          // byteOrientedBackspace is disabled (character-aware endpoint).
+          backspaceCells = stringCellWidth(lastChar, term);
+
+          if (ctx.serialByteOrientedBackspace === true) {
+            serialEraseChar = lastChar;
+          }
+        }
+
         ctx.onOutputTriggerUserInputRef?.current?.(outData);
         for (const chunk of getTextInputWireChunks(outData, options?.perCharacterWrites === true)) {
-          ctx.terminalBackend.writeToSession(id, chunk, { sensitive });
+          ctx.terminalBackend.writeToSession(id, chunk, { sensitive, serialEraseChar });
         }
 
         // Local echo for serial connections only when explicitly enabled
         if (inputSource !== "kitty" && ctx.host.protocol === "serial" && ctx.serialLocalEcho) {
-          const localEcho = formatSerialLocalEcho(dataToWrite);
+          const localEcho = formatSerialLocalEcho(dataToWrite, isBackspace ? backspaceCells : undefined);
           if (localEcho) writeLocalTerminalData(localEcho);
         }
         if (inputSource !== "kitty" && ctx.host.protocol === "telnet" && ctx.telnetLocalEchoRef?.current) {
           const localEcho = formatTelnetLocalEcho(dataToWrite);
           if (localEcho) writeLocalTerminalData(localEcho);
+        }
+
+        // Update printable tracking.  Backspace is not printable.
+        // Escape sequences (cursor movements, special keys) and control
+        // chars set lastInputWasPrintable to false — the cursor position
+        // is now unknown.  Printable characters keep the flag as-is:
+        // typing at the end advances the cursor to the end (stays true),
+        // but typing after a cursor movement inserts at the cursor
+        // position, not the buffer end (stays false).
+        //
+        // Bracketed paste (\x1b[200~...\x1b[201~) is special: xterm wraps
+        // pasted text in these markers, so the data starts with ESC and
+        // isPrintableInput returns false.  But the pasted content is
+        // printable.  However, the cursor may not be at the buffer tail
+        // (e.g. after a left-arrow movement), so we keep the flag as-is:
+        // paste at the end keeps confidence, paste after a cursor movement
+        // keeps it unknown.
+        if (!isBackspace) {
+          const isBracketedPaste =
+            dataToWrite.startsWith("\x1b[200~") && dataToWrite.endsWith("\x1b[201~");
+          if (!isBracketedPaste && !isPrintableInput(dataToWrite) && !handledSubmittedInput) {
+            // Escape sequence or control char: cursor position unknown.
+            // Skip when handledSubmittedInput is true: the submission handler
+            // already set lastInputWasPrintable = true (buffer cleared, cursor
+            // at next prompt), and the same \r/\n should not reset it.
+            lastInputWasPrintable = false;
+          }
+          // If printable (non-backspace, non-escape, non-bracketed-paste),
+          // keep flag as-is: typing at the end keeps cursor at end; typing
+          // after a cursor movement keeps cursor not at end.
+          // If bracketed paste, also keep flag as-is (see above).
         }
       }
 
@@ -1332,17 +1437,25 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
           // Command recording and sudo command preparation happen before the
           // input is written so sudo can receive a one-time prompt marker.
         } else if (logicalData === "\x7f" || logicalData === "\b") {
-          ctx.commandBufferRef.current = ctx.commandBufferRef.current.slice(0, -1);
+          ctx.commandBufferRef.current = removeLastChar(ctx.commandBufferRef.current);
           ctx.scriptRecorderRef?.current?.recordBackspace();
         } else if (logicalData === "\x03") {
           ctx.commandBufferRef.current = "";
           ctx.scriptRecorderRef?.current?.recordClearLine();
+          lastInputWasPrintable = true; // buffer cleared, cursor at start
           // Hard-abort password assist when Ctrl+C reaches the input path
           // (e.g. broadcast peers) so a later su re-arms cleanly (#2191).
           ctx.sudoAutofillRef?.current?.abort();
         } else if (logicalData === "\x15") {
           ctx.commandBufferRef.current = "";
           ctx.scriptRecorderRef?.current?.recordClearLine();
+          lastInputWasPrintable = true;
+        } else if (ctx.host.protocol === "serial" && (
+          isPrintableInput(logicalData) || /[\r\n]/.test(logicalData) ||
+          (logicalData.startsWith("\x1b[200~") && logicalData.endsWith("\x1b[201~"))
+        )) {
+          recordSerialTextInput(logicalData);
+          ctx.scriptRecorderRef?.current?.recordInput(logicalData);
         } else if (logicalData.length === 1 && logicalData.charCodeAt(0) >= 32) {
           ctx.commandBufferRef.current += logicalData;
           ctx.scriptRecorderRef?.current?.recordInput(logicalData);
@@ -1893,6 +2006,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
           serialLineBufferRef: ctx.serialLineBufferRef,
           onAutocompleteInput: ctx.onAutocompleteInput,
         });
+        lastInputWasPrintable = true;
         if (ctx.passwordPromptActiveRef) {
           ctx.passwordPromptActiveRef.current = false;
         }
@@ -2858,6 +2972,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     ),
     getKittyKeyboardProtocolEnabled: () => kittyKeyboardProtocolEnabled,
     setKittyKeyboardProtocolEnabled,
+    recordSerialSnippetInput,
     dispose: () => {
       runtimeDisposed = true;
       resizeScheduler.dispose();

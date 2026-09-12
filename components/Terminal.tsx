@@ -234,6 +234,8 @@ import {
   resolveTerminalHibernateReplayChunkBytes,
   type TerminalHibernateWakePayload,
 } from "../domain/terminalHibernate";
+import { getLastChar, removeLastChar } from "../domain/serialCharMetrics";
+import { stringCellWidth } from "./terminal/autocomplete/terminalStringCellWidth";
 import { terminalHiddenRendererStore } from "../application/state/terminalHiddenRendererStore";
 import {
   wakeTerminalFromHibernate,
@@ -1023,8 +1025,10 @@ const TerminalComponent: React.FC<TerminalProps> = ({
             serialLineBufferRef.current = "";
           } else if (ch === "\b" || ch === "\x7f") {
             if (serialLineBufferRef.current.length > 0) {
-              serialLineBufferRef.current = serialLineBufferRef.current.slice(0, -1);
-              if (serialConfig?.localEcho) writeLocalTerminalData("\b \b");
+              const lastChar = getLastChar(serialLineBufferRef.current);
+              const cells = stringCellWidth(lastChar, termRef.current);
+              serialLineBufferRef.current = removeLastChar(serialLineBufferRef.current);
+              if (serialConfig?.localEcho) writeLocalTerminalData("\b \b".repeat(cells));
             }
           } else if (ch.charCodeAt(0) >= 32) {
             serialLineBufferRef.current += ch;
@@ -2428,6 +2432,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     isNetworkDevice,
     startupCommand,
     noAutoRun,
+    recordSerialSnippetInput: (data) => xtermRuntimeRef.current?.recordSerialSnippetInput(data),
     multiLineRunMode,
     shellType,
     suppressHostStartupCommandRef,
@@ -3321,12 +3326,16 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       sensitive,
       ...(lineDelayMs ? { lineDelayMs } : {}),
     });
+    // Snippets left for editing share the serial typed-input buffer.
+    if (host.protocol === 'serial' && noAutoRun && !serialConfig?.lineMode) {
+      xtermRuntimeRef.current?.recordSerialSnippetInput(data);
+    }
     scrollToBottomAfterProgrammaticInput(data);
     if (options?.focus !== false) {
       term.focus();
     }
     return true;
-  }, [prepareProgrammaticSudoInput, scrollToBottomAfterProgrammaticInput, terminalBackend, sessionId]);
+  }, [prepareProgrammaticSudoInput, scrollToBottomAfterProgrammaticInput, terminalBackend, sessionId, host.protocol, serialConfig?.lineMode]);
 
   const executeSnippet = useCallback(async (snippet: Snippet) => {
     if (isScriptSnippet(snippet)) {
@@ -3404,6 +3413,13 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   }, [onAddSelectionToAI, sessionId, terminalSettings?.normalizeTextOnCopy]);
 
   const handleSetTerminalEncoding = useCallback((encoding: TerminalEncodingPreference) => {
+    // A byte-oriented device still holds bytes in the previous encoding.
+    // Require an empty input line before changing that encoding.
+    if (host.protocol === 'serial' && serialConfig?.byteOrientedBackspace === true
+      && !serialConfig?.lineMode && commandBufferRef.current) {
+      toast.info(t('serial.encoding.pendingInput'));
+      return;
+    }
     setTerminalEncoding(encoding);
     setRememberedTerminalEncoding(encoding);
     userPickedEncodingRef.current = true;
@@ -3416,7 +3432,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     if (sessionRef.current) {
       setSessionEncoding(sessionRef.current, encoding);
     }
-  }, [handleUpdateHostFromTerminal, host.id, host.protocol, setRememberedTerminalEncoding, setSessionEncoding]);
+  }, [handleUpdateHostFromTerminal, host.id, host.protocol, serialConfig?.byteOrientedBackspace, serialConfig?.lineMode, setRememberedTerminalEncoding, setSessionEncoding, t]);
 
   const handleOpenSFTP = useCallback(async () => {
     if (onOpenSftp) {
@@ -4212,6 +4228,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     requestSearchFocus,
     serialLocalEcho: serialConfig?.localEcho,
     serialLineMode: serialConfig?.lineMode,
+    serialByteOrientedBackspace: serialConfig?.byteOrientedBackspace ?? false,
     serialLineBufferRef,
     telnetLocalEchoRef,
     onTerminalLogData: captureTerminalLogData,

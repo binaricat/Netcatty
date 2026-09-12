@@ -74,6 +74,9 @@ export const scheduleStartupCommand = (
         return;
       }
       ctx.terminalBackend.writeToSession(ctx.sessionRef.current, commandToRun, { automated: true });
+      if (ctx.host.protocol === "serial" && !ctx.serialConfig?.lineMode) {
+        ctx.recordSerialSnippetInput?.(commandToRun);
+      }
       onSettled?.();
     }, delayMs);
     return () => {

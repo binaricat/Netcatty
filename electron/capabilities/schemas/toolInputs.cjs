@@ -130,7 +130,7 @@ const TOOL_INPUT_FIELDS = Object.freeze({
     moshServerPath: { type: "string", optional: true, description: "Optional mosh-server path." },
     etEnabled: { type: "string", optional: true, description: "true or false." },
     etPort: { type: "number", optional: true, description: "Eternal Terminal server port." },
-    serialConfig: { type: "string", optional: true, description: "JSON object for serial connections: path, baudRate, and optional dataBits, stopBits, parity, flowControl, localEcho, lineMode, backspaceBehavior (default or ctrl-h). Existing backspaceBehavior is preserved when omitted." },
+    serialConfig: { type: "string", optional: true, description: "JSON object for serial connections: path, baudRate, and optional dataBits, stopBits, parity, flowControl, localEcho, lineMode, backspaceBehavior (default or ctrl-h), byteOrientedBackspace (boolean, default false; enable only for devices that delete bytes rather than characters). Existing backspaceBehavior and byteOrientedBackspace are preserved when omitted." },
   },
   "vault.host.delete": {
     hostId: { type: "string", description: "Vault host ID from vault_hosts_list." },

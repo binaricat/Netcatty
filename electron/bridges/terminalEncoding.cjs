@@ -100,8 +100,17 @@ function encodeTerminalInput(data, encoding) {
   return iconv.encode(data, encoding);
 }
 
+// Only expand a single Backspace. Other input (including plugin replacements)
+// must retain its normal meaning. The caller restricts this to serial sessions.
+function expandSerialBackspace(data, char, encoding) {
+  if ((data !== "\x7f" && data !== "\b") || typeof char !== "string" || !char) return data;
+  const encoded = encodeTerminalInput(char, encoding);
+  return data.repeat(Buffer.byteLength(encoded));
+}
+
 module.exports = {
   normalizeTerminalEncoding,
   isUtf8Encoding,
   encodeTerminalInput,
+  expandSerialBackspace,
 };

@@ -59,6 +59,13 @@ function codePointCellWidth(cp: number): number {
 }
 
 function graphemeCellWidth(grapheme: string): number {
+  // Emoji-presentation graphemes (base + VS16 / U+FE0F) always render as
+  // 2 cells regardless of the base character's text width.  xterm's
+  // 15-graphemes Unicode provider handles this via getStringCellWidth;
+  // the fallback must detect VS16 explicitly because codePointCellWidth
+  // returns 0 for the variation selector itself and 1 for bases like
+  // U+2764 (heavy black heart) that are outside the standard emoji range.
+  if (grapheme.includes("\uFE0F")) return 2;
   let max = 0;
   for (const ch of grapheme) {
     const w = codePointCellWidth(ch.codePointAt(0) ?? 0);

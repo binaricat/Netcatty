@@ -101,6 +101,28 @@ test("workspace host factory creates a complete serial session", () => {
   });
 });
 
+test("serial session factories preserve byteOrientedBackspace", () => {
+  const quickSession = createSerialTerminalSession("session-q", {
+    path: "COM4",
+    baudRate: 9600,
+    byteOrientedBackspace: false,
+  });
+  const savedHostSession = createHostTerminalSession("session-h", host({
+    protocol: "serial",
+    hostname: "COM3",
+    port: 115200,
+    username: "",
+    serialConfig: {
+      path: "COM3",
+      baudRate: 115200,
+      byteOrientedBackspace: false,
+    },
+  }));
+
+  assert.equal(quickSession.serialConfig?.byteOrientedBackspace, false);
+  assert.equal(savedHostSession.serialConfig?.byteOrientedBackspace, false);
+});
+
 test("workspace append snapshots serial Backspace behavior inherited from a group", () => {
   const savedHost = host({
     protocol: "serial",
