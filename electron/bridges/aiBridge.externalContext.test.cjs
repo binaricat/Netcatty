@@ -34,7 +34,9 @@ test("buildExternalAgentSystemContext (skills mode) routes attachments through N
     chatSessionId: "chat-1",
   });
 
-  assert.match(context, /attachment list --json --chat-session chat-1/i);
-  assert.match(context, /attachment read --filename <filename> --json --chat-session chat-1/i);
+  assert.match(context, /attachment list --json/i);
+  assert.match(context, /attachment read --filename <filename> --json/i);
+  assert.match(context, /already bound in this process via the host environment/i);
+  assert.doesNotMatch(context, /--chat-session/);
   assert.match(context, /Use the local shell only to invoke Netcatty CLI commands/i);
 });

@@ -157,6 +157,8 @@ declare global {
     statLocal?(path: string): Promise<SftpStatResult>;
     /** No-follow local metadata for conflict detection (symlink vs target). */
     lstatLocal?(path: string): Promise<SftpStatResult>;
+    /** Canonical absolute local path with all symlink components resolved. */
+    realpathLocal?(path: string): Promise<string>;
     listLocalTree?(
       path: string,
       options?: {

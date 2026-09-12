@@ -644,6 +644,7 @@ export const zhCNVaultMessages: Messages = {
   'terminal.customTheme.group.bright': '高亮色',
   'terminal.customTheme.color.background': '背景',
   'terminal.customTheme.color.foreground': '前景',
+  'terminal.customTheme.color.foregroundIntense': '高亮前景（粗体）',
   'terminal.customTheme.color.cursor': '光标',
   'terminal.customTheme.color.selection': '选区',
   'terminal.customTheme.color.black': '黑色',

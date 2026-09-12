@@ -3,7 +3,7 @@
 // where bare `require` resolves to ctx.require (based in electron/bridges/).
 const {
   ensureSessionShellKind,
-  ensureSessionShellKindForExec,
+  remoteDisallowsExecChannelProbe, ensureSessionShellKindForExec,
 } = require("../ai/sessionShellKind.cjs");
 
 function createExecHandlerApi(ctx) {
@@ -147,6 +147,7 @@ function createExecHandlerApi(ctx) {
             shellKind: session.shellKind,
             loginShellHint: session._loginShellKind,
             probeLiveShell: true,
+            bastionKeystrokes: remoteDisallowsExecChannelProbe(session.remoteSshVersion),
             onProbeAborted: (marker) => echoCommandToSession(session, sessionId, `${marker}_R`, { syntheticEcho: false }),
             expectedPrompt: getFreshIdlePrompt(session),
             typedInput: true,
@@ -316,6 +317,7 @@ function createExecHandlerApi(ctx) {
             shellKind: session.shellKind,
             loginShellHint: session._loginShellKind,
             probeLiveShell: true,
+            bastionKeystrokes: remoteDisallowsExecChannelProbe(session.remoteSshVersion),
             onProbeAborted: (marker) => echoCommandToSession(session, sessionId, `${marker}_R`, { syntheticEcho: false }),
             chatSessionId,
             expectedPrompt: getFreshIdlePrompt(session),

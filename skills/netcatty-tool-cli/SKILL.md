@@ -12,14 +12,14 @@ For routine tasks, the host prompt is usually enough. Read only the reference th
 ## Router
 
 1. Use the exact Netcatty CLI prefix provided by the host prompt.
-2. Keep `--chat-session <chat-session-id>` on every Netcatty CLI call. Do not omit it.
-3. Treat `--chat-session <chat-session-id>` as required for `env`, `session`, real `exec`, and every `sftp` operation. Treat `--session <session-id>` as required for `session`, `exec`, and every `sftp` operation.
+2. The current chat session is already bound in `NETCATTY_CLI_CHAT_SESSION_ID`. There is no chat-session CLI flag.
+3. Treat `--session <session-id>` as required for `session`, `exec`, and every `sftp` operation.
 4. Classify the task before choosing a command path:
    - Remote command execution tasks go through the exec reference.
    - Remote file or directory tasks go through the sftp reference.
    - If the user explicitly says to avoid shell or `exec`, do not use `exec`.
    - Treat `exec` as the short-command path only. If the command may exceed about 60 seconds, or streams output for an extended period, use the long-running job commands instead of plain `exec`.
-5. If the host prompt already names a connected default target session, use that session directly for routine requests that do not mention another session or host, but still start with `session --session <id> --json --chat-session <chat-session-id>` instead of jumping straight to `exec` or `sftp`.
+5. If the host prompt already names a connected default target session, use that session directly for routine requests that do not mention another session or host, but still start with `session --session <id> --json` instead of jumping straight to `exec` or `sftp`.
 6. Only fall back to `env` lookup when the task is ambiguous, the user points to another session, or that direct `session` lookup fails.
 
 ## Core Rules

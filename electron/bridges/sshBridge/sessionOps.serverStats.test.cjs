@@ -59,7 +59,7 @@ const LINUX_STATS =
 const MACOS_STATS =
   "NC_LATENCY_MARK|CPU:27|CORES:10|MEMINFO:32768 4096 0 8192 2048 1536|PROCS:123;1.2;Finder|DISKS:/:120:460:26:apfs:/dev/disk3|NET:en0:1000:3000";
 
-function makeSessionOps(sessions) {
+function makeSessionOps(sessions, extra = {}) {
   return createSessionOpsApi({
     get sessions() {
       return sessions;
@@ -68,8 +68,9 @@ function makeSessionOps(sessions) {
     clearTimeout,
     Buffer,
     quoteShellArg,
-    measureTcpConnectLatency: async () => 3,
+    measureSshPingLatency: async () => 3,
     // The rest of the sessionOps surface isn't exercised by getServerStats.
+    ...extra,
   });
 }
 
@@ -556,7 +557,7 @@ test("getServerStats opens a Mosh stats companion connection when session.conn i
       s.moshStatsConn = fakeConn(LINUX_STATS);
       return s.moshStatsConn;
     },
-    measureTcpConnectLatency: async () => 3,
+    measureSshPingLatency: async () => 3,
   });
 
   const result = await api.getServerStats({ sender: {} }, { sessionId: "sid" });
@@ -618,25 +619,20 @@ test("getServerStats does not touch the companion path for a normal SSH session"
   assert.equal(result.success, true);
 });
 
-test("getServerStats measures TCP connectivity instead of SSH protocol latency", async () => {
+test("getServerStats measures latency by pinging the stats connection", async () => {
   const sessions = new Map();
   const session = {
     type: "mosh",
     hostname: "vm.example.test",
     moshStatsAuth: { hostname: "vm.example.test", port: 2222 },
-    moshStatsConn: fakeConn(LINUX_STATS),
+    moshStatsConn: Object.assign(fakeConn(LINUX_STATS), { config: { keepaliveInterval: 0 } }),
   };
   sessions.set("sid", session);
 
-  const probes = [];
-  const api = createSessionOpsApi({
-    sessions,
-    setTimeout,
-    clearTimeout,
-    Buffer,
-    quoteShellArg,
-    measureTcpConnectLatency: async (target) => {
-      probes.push(target);
+  const pingedConns = [];
+  const api = makeSessionOps(sessions, {
+    measureSshPingLatency: async (conn) => {
+      pingedConns.push(conn);
       return 2;
     },
   });
@@ -645,24 +641,19 @@ test("getServerStats measures TCP connectivity instead of SSH protocol latency",
 
   assert.equal(result.success, true);
   assert.equal(result.stats.latencyMs, 2);
-  assert.deepEqual(probes, [{ hostname: "vm.example.test", port: 2222 }]);
+  assert.deepEqual(pingedConns, [session.moshStatsConn]);
 });
 
-test("getServerStats skips a misleading direct probe for jump-host sessions", async () => {
+test("getServerStats pings the companion connection for jump-host sessions", async () => {
   const sessions = new Map([["sid", {
     type: "mosh",
     moshStatsAuth: { hostname: "private.example.test", port: 22, hasJumpHost: true },
     moshStatsConn: fakeConn(LINUX_STATS),
   }]]);
-  let probeCalls = 0;
-  const api = createSessionOpsApi({
-    sessions,
-    setTimeout,
-    clearTimeout,
-    Buffer,
-    quoteShellArg,
-    measureTcpConnectLatency: async () => {
-      probeCalls += 1;
+  let pingCalls = 0;
+  const api = makeSessionOps(sessions, {
+    measureSshPingLatency: async () => {
+      pingCalls += 1;
       return 2;
     },
   });
@@ -670,8 +661,37 @@ test("getServerStats skips a misleading direct probe for jump-host sessions", as
   const result = await api.getServerStats({ sender: {} }, { sessionId: "sid" });
 
   assert.equal(result.success, true);
+  assert.equal(result.stats.latencyMs, 2);
+  assert.equal(pingCalls, 1);
+});
+
+test("getServerStats reports no latency when only an exec fallback is available", async () => {
+  const sessions = new Map([["sid", {
+    type: "et",
+    sshUserHost: "alice@example.test",
+    sshOptions: [],
+    sshEnv: {},
+    etStatsAuth: { hostname: "private.example.test", hasJumpHost: true },
+  }]]);
+  let pingCalls = 0;
+  const api = makeSessionOps(sessions, {
+    execOnEtSession: async (_session, command) => ({
+      success: true,
+      stdout: command.includes('echo "DISKS:$disks"') ? "DISKS:" : LINUX_STATS,
+      stderr: "",
+    }),
+    measureSshPingLatency: async () => {
+      pingCalls += 1;
+      return 2;
+    },
+  });
+
+  const result = await api.getServerStats({ sender: {} }, { sessionId: "sid" });
+
+  assert.equal(result.success, true);
+  assert.equal(result.stats.memTotal, 8000);
   assert.equal(result.stats.latencyMs, null);
-  assert.equal(probeCalls, 0);
+  assert.equal(pingCalls, 0);
 });
 
 test("getServerStats closes a blocked probe channel when stats time out", async () => {
@@ -1162,5 +1182,21 @@ for (const blocked of [false, true]) {
       await finished;
       fs.rmSync(directory, { recursive: true, force: true });
     }
+  });
+}
+
+for (const keepaliveInterval of [0, 10000]) {
+  test(`getServerStats honors shared SSH keepalive policy (${keepaliveInterval})`, async () => {
+    const conn = fakeConn(LINUX_STATS);
+    conn.config = { keepaliveInterval };
+    const sessions = new Map([["sid", { type: "ssh", conn }]]);
+    let pingCalls = 0;
+    const api = makeSessionOps(sessions, {
+      measureSshPingLatency: async () => { pingCalls++; return 2; },
+    });
+    const result = await api.getServerStats({ sender: {} }, { sessionId: "sid" });
+    assert.equal(result.success, true);
+    assert.equal(pingCalls, keepaliveInterval === 0 ? 0 : 1);
+    assert.equal(result.stats.latencyMs, keepaliveInterval === 0 ? null : 2);
   });
 }

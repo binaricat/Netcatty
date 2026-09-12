@@ -4,6 +4,7 @@ const os = require("node:os");
 const path = require("node:path");
 const CLI_STATE_DIR_NAME = "netcatty-tool-cli";
 const TOOL_CLI_DISCOVERY_ENV_VAR = "NETCATTY_TOOL_CLI_DISCOVERY_FILE";
+const TOOL_CLI_CHAT_SESSION_ENV_VAR = "NETCATTY_CLI_CHAT_SESSION_ID";
 const FALLBACK_APP_DATA_DIR_NAME = "netcatty";
 
 function toUnpackedAsarPath(filePath) {
@@ -79,4 +80,5 @@ module.exports = {
   getCliDiscoveryFilePath,
   getCliLauncherPath,
   TOOL_CLI_DISCOVERY_ENV_VAR,
+  TOOL_CLI_CHAT_SESSION_ENV_VAR,
 };

@@ -21,6 +21,7 @@ import { keepOnlyPaneSelections } from "./selectionScope";
 import type { SftpStateApi } from "../../../application/state/useSftpState";
 import type { UploadEndpointPin } from "../../../application/state/sftp/uploadTargetPin";
 import { filterHiddenFiles, isNavigableDirectory } from "../utils";
+import { resolveSameConnectionPasteAction } from "../../../application/state/sftp/samePanePaste";
 import type { SftpFileEntry } from "../../../types";
 import { extractDropEntries, type DropEntry } from "../../../lib/sftpFileUtils";
 import { toast } from "../../ui/toast";
@@ -351,14 +352,51 @@ export const useSftpKeyboardShortcuts = ({
     const clipboard = sftpClipboardStore.get();
     if (!clipboard || clipboard.files.length === 0) return;
 
+    // Pin the destination this paste was validated against. Native pastes may
+    // await clipboard reads before reaching here, and the user can navigate or
+    // switch tabs meanwhile — startTransfer would otherwise resolve the
+    // then-active pane and could land inside a directory this guard approved
+    // as safe.
+    const targetConnectionId = pane.connection!.id;
+    const targetPath = pane.connection!.currentPath;
+
     const isSameConnection = clipboard.sourceSide === focusedSide
       && clipboard.sourceConnectionId === pane.connection!.id;
     if (isSameConnection) {
-      toast.info("Paste within the same pane is not supported. Use copy to other pane instead.", "SFTP");
-      return;
+      const connection = pane.connection!;
+      const pasteAction = await resolveSameConnectionPasteAction({
+        operation: clipboard.operation,
+        sourcePath: clipboard.sourcePath,
+        targetPath,
+        files: clipboard.files,
+        isLocal: connection.isLocal,
+        sftpId: connection.isLocal ? null : (sftp.getSftpIdForConnection(connection.id) ?? null),
+      });
+      if (pasteAction === "block-same-folder") {
+        toast.info("The cut items are already in this folder.", "SFTP");
+        return;
+      }
+      if (pasteAction === "block-into-source") {
+        toast.info(
+          clipboard.operation === "cut"
+            ? "A folder can't be moved into itself. Choose a different folder."
+            : "A folder can't be copied into itself or one of its subfolders. Choose a different folder.",
+          "SFTP",
+        );
+        return;
+      }
+      // Same-pane copy (and cut into a different folder) falls through to the
+      // shared transfer path below.
     }
 
-    const sourceTabs = clipboard.sourceSide === "left" ? sftp.leftTabs.tabs : sftp.rightTabs.tabs;
+    // Re-read live state, not the pre-await snapshot: the same-connection
+    // guard above can await realpath while the user switches tabs, and
+    // startTransfer resolves the currently active pane. Comparing against the
+    // stale snapshot would let the pinned targetPath land on a different
+    // connection (and a cut would then delete the original after the wrong
+    // host received the data).
+    const liveSftp = sftpRef.current;
+    const sourceTabs = clipboard.sourceSide === "left" ? liveSftp.leftTabs.tabs : liveSftp.rightTabs.tabs;
     const sourcePane = sourceTabs.find((tab) => tab.connection?.id === clipboard.sourceConnectionId);
 
     if (!sourcePane?.connection) {
@@ -426,10 +464,24 @@ export const useSftpKeyboardShortcuts = ({
         updateClipboardAfterCompletion(pendingNames.size === 0);
       };
 
+      // Abandon the paste when the destination pane changed while the paste
+      // was pending: startTransfer resolves the currently active pane, and a
+      // different connection would receive a path pinned from another host.
+      // Read the live tabs (see the liveSftp note above), not the snapshot
+      // captured before the await.
+      const activeTargetPane = focusedSide === "left"
+        ? liveSftp.leftTabs.tabs.find((tab) => tab.id === liveSftp.leftTabs.activeTabId)
+        : liveSftp.rightTabs.tabs.find((tab) => tab.id === liveSftp.rightTabs.activeTabId);
+      if (!activeTargetPane?.connection || activeTargetPane.connection.id !== targetConnectionId) {
+        toast.info("Paste cancelled: the destination connection changed.", "SFTP");
+        return;
+      }
+
       await sftp.startTransfer(clipboard.files, clipboard.sourceSide, focusedSide, {
         sourcePane,
         sourcePath: clipboard.sourcePath,
         sourceConnectionId: clipboard.sourceConnectionId,
+        targetPath,
         onTransferComplete: handleTransferComplete,
       });
     } catch {

@@ -61,6 +61,21 @@ function isWindowsOpenSshRemote(remoteSshVersion) {
 }
 
 /**
+ * Whether this SSH banner identifies a bastion that binds the transport to the
+ * first interactive session and tears it down when a second channel opens
+ * (BHostSSH, QiZhi TERM-SSHD, and other menu-driven jump hosts). For these the
+ * exec-channel login-shell probe must be skipped so approving an AI command
+ * does not disconnect the session (#3146).
+ */
+function remoteDisallowsExecChannelProbe(remoteSshVersion) {
+  const software = String(remoteSshVersion || "").trim();
+  if (!software) return false;
+  if (/BHostSSH/i.test(software)) return true;
+  if (/TERM-SSHD/i.test(software)) return true;
+  return false;
+}
+
+/**
  * Map a remote shell path / basename to a wrapper kind.
  * Returns null when we cannot classify (leave session.shellKind unset).
  * Empty / missing paths return null (classifyLocalShellType would default to
@@ -181,9 +196,16 @@ function createSshConnExecProbe(conn) {
  */
 function createSessionExecProbe(session) {
   if (!session || typeof session !== "object") return null;
+  // A session-level probe (mosh/et companion stats connection) is independent
+  // of the interactive transport, so it is safe even on bastions.
   if (typeof session._shellKindExecProbe === "function") {
     return (command, timeoutMs) => session._shellKindExecProbe(command, timeoutMs);
   }
+  // Bastions bind the interactive transport to the first session and tear it
+  // down when a second SSH channel opens. Our exec-channel login-shell probe
+  // would disconnect them before the command ever runs, so skip it and let the
+  // PTY live shell probe (probeLiveShell) determine the wrapper (#3146).
+  if (remoteDisallowsExecChannelProbe(session.remoteSshVersion)) return null;
   return (
     createSshConnExecProbe(session.conn)
     || createSshConnExecProbe(session.sshClient)
@@ -447,6 +469,7 @@ module.exports = {
   WINDOWS_NO_DEFAULT_SHELL_MARKER,
   isConfirmedShellKind,
   isWindowsOpenSshRemote,
+  remoteDisallowsExecChannelProbe,
   classifyShellKindFromRemotePath,
   buildRemoteLoginShellProbeCommand,
   buildRemoteWindowsLoginShellProbeCommand,

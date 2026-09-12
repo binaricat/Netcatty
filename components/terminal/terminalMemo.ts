@@ -1,7 +1,7 @@
 import type { TerminalProps } from './terminalHelpers';
 
 const themeFingerprint = (theme: TerminalProps['terminalTheme'] | undefined): string => (
-  theme?.colors ? `${theme.id}:${theme.colors.background}:${theme.colors.foreground}:${theme.colors.cursor}` : ''
+  theme?.colors ? `${theme.id}:${theme.colors.background}:${theme.colors.foreground}:${theme.colors.foregroundIntense ?? ''}:${theme.colors.cursor}` : ''
 );
 
 export const terminalPropsAreEqual = (

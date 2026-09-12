@@ -128,7 +128,7 @@ const VAULT_CAPABILITIES = [
     id: "vault.host.import",
     domain: "vault",
     status: CAPABILITY_STATUS.IMPLEMENTED,
-    description: "Parse known host export file formats (PuTTY, MobaXterm, CSV, SecureCRT, ssh_config) into vault hosts. For arbitrary unstructured text, map to host objects and use vault_hosts_create instead.",
+    description: "Parse known host export file formats (PuTTY, MobaXterm, CSV, SecureCRT, FinalShell, ssh_config) into vault hosts. For arbitrary unstructured text, map to host objects and use vault_hosts_create instead.",
     policy: {
       write: true,
       sensitiveRead: false,
