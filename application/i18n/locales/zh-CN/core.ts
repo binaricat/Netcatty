@@ -119,6 +119,12 @@ export const zhCNCoreMessages: Messages = {
   'settings.terminal.sidePanel.pane.system': '系统',
   'settings.terminal.sidePanel.pane.notes': '笔记',
   'settings.terminal.sidePanel.pane.ai': 'AI',
+  'settings.terminal.section.localShellSidePanel': '本地 Shell 侧边栏',
+  'settings.terminal.localShellSidePanel.autoOpen': '打开本地 Shell 时展开侧边栏',
+  'settings.terminal.localShellSidePanel.autoOpen.desc': '打开本地 Shell 后自动打开一个侧边栏。',
+  'settings.terminal.localShellSidePanel.autoOpenPane': '默认侧边栏',
+  'settings.terminal.localShellSidePanel.autoOpenPane.desc': '选择优先打开哪个面板。',
+  'settings.terminal.localShellSidePanel.pane.files': '文件',
 
   // Settings > System
   'settings.system.title': '系统',

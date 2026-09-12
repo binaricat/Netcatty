@@ -645,6 +645,12 @@ Highlight the focused split pane:
   'settings.terminal.sidePanel.pane.system': 'System',
   'settings.terminal.sidePanel.pane.notes': 'Notes',
   'settings.terminal.sidePanel.pane.ai': 'AI',
+  'settings.terminal.section.localShellSidePanel': 'Local Shell Side Panel',
+  'settings.terminal.localShellSidePanel.autoOpen': 'Open side panel with local shell',
+  'settings.terminal.localShellSidePanel.autoOpen.desc': 'Automatically open a side panel when opening a local shell.',
+  'settings.terminal.localShellSidePanel.autoOpenPane': 'Default side panel',
+  'settings.terminal.localShellSidePanel.autoOpenPane.desc': 'Choose which panel opens first.',
+  'settings.terminal.localShellSidePanel.pane.files': 'Files',
   'settings.terminal.accessibility.minimumContrastRatio.desc':
     'Adjust colors to meet contrast requirements (1 = disabled, 21 = max)',
   'settings.terminal.behavior.rightClick': 'Right-click behavior',

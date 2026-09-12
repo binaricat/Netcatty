@@ -58,9 +58,9 @@ const FONT_WEIGHT_OPTIONS = [
 function SettingsTerminalTab(props: {
   terminalThemeId: string;
   setTerminalThemeId: (id: string) => void;
-  resolvedTheme: "dark" | "light";
+  resolvedTheme: 'light' | 'dark';
   followAppTerminalTheme: boolean;
-  setFollowAppTerminalTheme: (value: boolean) => void;
+  setFollowAppTerminalTheme: (follow: boolean) => void;
   terminalThemeDarkId: string;
   setTerminalThemeDarkId: (id: string) => void;
   terminalThemeLightId: string;
@@ -80,6 +80,10 @@ function SettingsTerminalTab(props: {
   setTerminalSidePanelAutoOpen: (enabled: boolean) => void;
   terminalSidePanelAutoOpenTab: TerminalSidePanelAutoOpenTab;
   setTerminalSidePanelAutoOpenTab: (tab: TerminalSidePanelAutoOpenTab) => void;
+  localShellSidePanelAutoOpen: boolean;
+  setLocalShellSidePanelAutoOpen: (enabled: boolean) => void;
+  localShellSidePanelAutoOpenTab: TerminalSidePanelAutoOpenTab;
+  setLocalShellSidePanelAutoOpenTab: (tab: TerminalSidePanelAutoOpenTab) => void;
   availableFonts: TerminalFont[];
   workspaceFocusStyle: 'dim' | 'border';
   setWorkspaceFocusStyle: (style: 'dim' | 'border') => void;
@@ -106,6 +110,10 @@ function SettingsTerminalTab(props: {
     setTerminalSidePanelAutoOpen,
     terminalSidePanelAutoOpenTab,
     setTerminalSidePanelAutoOpenTab,
+    localShellSidePanelAutoOpen,
+    setLocalShellSidePanelAutoOpen,
+    localShellSidePanelAutoOpenTab,
+    setLocalShellSidePanelAutoOpenTab,
     availableFonts,
     workspaceFocusStyle,
     setWorkspaceFocusStyle,
@@ -750,6 +758,33 @@ function SettingsTerminalTab(props: {
         </SettingRow>
       </div>
 
+      <SectionHeader title={t("settings.terminal.section.localShellSidePanel")} />
+      <div className="space-y-0 divide-y divide-border rounded-lg border bg-card px-4">
+        <SettingRow
+          anchorId="terminal-local-shell-side-panel-auto-open"
+          label={t("settings.terminal.localShellSidePanel.autoOpen")}
+          description={t("settings.terminal.localShellSidePanel.autoOpen.desc")}
+        >
+          <Toggle checked={localShellSidePanelAutoOpen} onChange={setLocalShellSidePanelAutoOpen} />
+        </SettingRow>
+
+        <SettingRow
+          label={t("settings.terminal.localShellSidePanel.autoOpenPane")}
+          description={t("settings.terminal.localShellSidePanel.autoOpenPane.desc")}
+        >
+          <Select
+            value={localShellSidePanelAutoOpenTab}
+            options={TERMINAL_SIDE_PANEL_AUTO_OPEN_TABS.map((tab) => ({
+              value: tab,
+              label: t(`settings.terminal.sidePanel.pane.${tab}`),
+            }))}
+            onChange={(value) => setLocalShellSidePanelAutoOpenTab(value as TerminalSidePanelAutoOpenTab)}
+            disabled={!localShellSidePanelAutoOpen}
+            className="w-36"
+          />
+        </SettingRow>
+      </div>
+
       <SectionHeader title={t("settings.terminal.section.keywordHighlight")} />
       <SettingsAnchor anchorId="terminal-keyword-highlight" className="rounded-lg border bg-card p-4">
         <div className="flex items-center justify-between mb-4">
@@ -858,6 +893,37 @@ function SettingsTerminalTab(props: {
               </span>
             )}
           </div>
+        </SettingRow>
+
+        <SettingRow
+          label={t("settings.terminal.localShell.sidePanel.autoOpen")}
+          description={t("settings.terminal.localShell.sidePanel.autoOpen.desc")}
+        >
+          <Toggle checked={localShellSidePanelAutoOpen} onChange={setLocalShellSidePanelAutoOpen} />
+        </SettingRow>
+
+        <SettingRow
+          label={t("settings.terminal.localShell.sidePanel.autoOpenTab")}
+          description={t("settings.terminal.localShell.sidePanel.autoOpenTab.desc")}
+        >
+          <ShadcnSelect
+            value={localShellSidePanelAutoOpenTab}
+            onValueChange={setLocalShellSidePanelAutoOpenTab}
+            disabled={!localShellSidePanelAutoOpen}
+          >
+            <SelectTrigger className="h-9 w-48 text-sm">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="files">{t("settings.terminal.sidePanel.autoOpenTab.files")}</SelectItem>
+              <SelectItem value="scripts">{t("settings.terminal.sidePanel.autoOpenTab.scripts")}</SelectItem>
+              <SelectItem value="history">{t("settings.terminal.sidePanel.autoOpenTab.history")}</SelectItem>
+              <SelectItem value="theme">{t("settings.terminal.sidePanel.autoOpenTab.theme")}</SelectItem>
+              <SelectItem value="system">{t("settings.terminal.sidePanel.autoOpenTab.system")}</SelectItem>
+              <SelectItem value="notes">{t("settings.terminal.sidePanel.autoOpenTab.notes")}</SelectItem>
+              <SelectItem value="ai">{t("settings.terminal.sidePanel.autoOpenTab.ai")}</SelectItem>
+            </SelectContent>
+          </ShadcnSelect>
         </SettingRow>
       </div>
 
