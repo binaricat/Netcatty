@@ -3,9 +3,9 @@ import test from "node:test";
 import {
   canCopyToOtherPane,
   requireCopyToOtherPaneTarget,
-  resolveSamePanePasteAction,
   type SftpPaneSide,
 } from "./copyToOtherPane";
+import { resolveSamePanePasteAction } from "../../application/state/sftp/samePanePaste";
 
 test("copy to other pane is unavailable when the destination pane is missing", () => {
   assert.equal(canCopyToOtherPane({ getActivePane: () => null }, "right"), false);

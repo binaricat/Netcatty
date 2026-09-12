@@ -21,7 +21,7 @@ import { keepOnlyPaneSelections } from "./selectionScope";
 import type { SftpStateApi } from "../../../application/state/useSftpState";
 import type { UploadEndpointPin } from "../../../application/state/sftp/uploadTargetPin";
 import { filterHiddenFiles, isNavigableDirectory } from "../utils";
-import { resolveSamePanePasteAction } from "../copyToOtherPane";
+import { resolveSameConnectionPasteAction } from "../../../application/state/sftp/samePanePaste";
 import type { SftpFileEntry } from "../../../types";
 import { extractDropEntries, type DropEntry } from "../../../lib/sftpFileUtils";
 import { toast } from "../../ui/toast";
@@ -363,40 +363,14 @@ export const useSftpKeyboardShortcuts = ({
     const isSameConnection = clipboard.sourceSide === focusedSide
       && clipboard.sourceConnectionId === pane.connection!.id;
     if (isSameConnection) {
-      // Resolve paths through the filesystem (realpath) so the guards below
-      // catch destinations that reach the clipboard source through a symlink
-      // alias — a purely lexical comparison would allow those pastes, and the
-      // recursive transfer would nest into its own freshly created output.
-      // Local panes also compare stat identities (dev/ino) because realpath
-      // cannot see through bind mounts: two mount paths for the same
-      // directory resolve to different strings, and a cut's post-transfer
-      // source delete would then destroy the only copy.
-      const bridge = netcattyBridge.get();
       const connection = pane.connection!;
-      let resolvePath: ((path: string) => Promise<string>) | undefined;
-      let statIdentity: ((path: string) => Promise<{ dev: number; ino: number } | null>) | undefined;
-      if (connection.isLocal) {
-        if (bridge?.realpathLocal) resolvePath = (path) => bridge.realpathLocal!(path);
-        if (bridge?.statLocal) {
-          statIdentity = async (path) => {
-            const stat = await bridge.statLocal!(path);
-            if (stat.dev === undefined || stat.ino === undefined) return null;
-            return { dev: stat.dev, ino: stat.ino };
-          };
-        }
-      } else {
-        const sftpId = sftp.getSftpIdForConnection(connection.id);
-        if (sftpId && bridge?.realpathSftp) {
-          resolvePath = (path) => bridge.realpathSftp!(sftpId, path);
-        }
-      }
-      const pasteAction = await resolveSamePanePasteAction({
+      const pasteAction = await resolveSameConnectionPasteAction({
         operation: clipboard.operation,
         sourcePath: clipboard.sourcePath,
         targetPath,
         files: clipboard.files,
-        resolvePath,
-        statIdentity,
+        isLocal: connection.isLocal,
+        sftpId: connection.isLocal ? null : (sftp.getSftpIdForConnection(connection.id) ?? null),
       });
       if (pasteAction === "block-same-folder") {
         toast.info("The cut items are already in this folder.", "SFTP");
