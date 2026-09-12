@@ -638,6 +638,7 @@ export const esTerminalMessages: Messages = {
   'tabs.copyTabToNewWindow': 'Copiar pestaña a una nueva ventana',
   'tabs.copyTabToNewWindowFailed': 'No se pudo abrir la pestaña en una nueva ventana',
   'tabs.closeOthers': 'Cerrar las demás',
+  'tabs.closeToLeft': 'Cerrar pestañas a la izquierda',
   'tabs.closeToRight': 'Cerrar pestañas a la derecha',
   'tabs.closeAll': 'Cerrar todas',
   'keychain.edit.labelRequired': 'Etiqueta *',

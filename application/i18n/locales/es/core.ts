@@ -77,7 +77,7 @@ export const esCoreMessages: Messages = {
   'field.selectHosts': 'Seleccionar hosts',
   'placeholder.workspaceName': 'Nombre del espacio de trabajo',
   'placeholder.sessionName': 'Nombre de la sesión',
-  'placeholder.searchHosts': 'Buscar hosts...',
+  'placeholder.searchHosts': 'Buscar hosts o etiquetas...',
   'toast.settingsUnavailable': 'La ventana de configuración no está disponible en esta plataforma.',
   'credentials.protectionUnavailable.title': 'Protección de credenciales no disponible',
   'credentials.protectionUnavailable.message': 'Las contraseñas y claves guardadas no se pueden descifrar automáticamente en este dispositivo. Vuelve a ingresar las credenciales antes de conectarte.',

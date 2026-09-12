@@ -6,6 +6,7 @@
  */
 import { Check, Search, Terminal } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { matchesWorkspaceHostPickerQuery } from '../../lib/searchMatcher';
 import { Host } from '../../types';
 import { DistroAvatar } from '../DistroAvatar';
 import { Button } from '../ui/button';
@@ -112,14 +113,9 @@ export const AddToWorkspaceDialog: React.FC<AddToWorkspaceDialogProps> = ({
   }, [query]);
 
   const filteredHosts = useMemo(() => {
-    const term = query.trim().toLowerCase();
+    const term = query.trim();
     if (!term) return selectableHosts;
-    return selectableHosts.filter((h) =>
-      (h.label?.toLowerCase().includes(term))
-      || (h.hostname?.toLowerCase().includes(term))
-      || (h.username?.toLowerCase().includes(term))
-      || (h.group?.toLowerCase().includes(term)),
-    );
+    return selectableHosts.filter((host) => matchesWorkspaceHostPickerQuery(term, host));
   }, [selectableHosts, query]);
 
   const { items, visualRows, itemIndexToVisualIndex } = useMemo(() => {
@@ -305,7 +301,7 @@ export const AddToWorkspaceDialog: React.FC<AddToWorkspaceDialogProps> = ({
               setSelectedIndex(0);
             }}
             onKeyDown={handleKeyDown}
-            placeholder="Search hosts or local shells..."
+            placeholder="Search hosts, tags, or local shells..."
             className="flex-1 h-8 border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 px-0 text-sm"
           />
           {workspaceTitle && (

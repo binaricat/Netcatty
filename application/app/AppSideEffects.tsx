@@ -21,11 +21,11 @@ import { getNotesSnapshot } from '../state/notesStore';
 import { useVaultAgentBridge } from '../state/useVaultAgentBridge';
 import { useWindowControls } from '../state/useWindowControls';
 import { useTerminalKeyboardFocus } from '../state/useTerminalKeyboardFocus';
-import { useEditorTabChromeList } from '../state/editorTabStore';
+import { editorTabStore, useEditorTabChromeList } from '../state/editorTabStore';
+import { findEditorSftpOwnerTabId } from '../state/editorSftpOwnerRegistry';
 import {
   isPluginViewTabId,
   pluginViewTabStore,
-  resolveBatchTabCloseFocus,
   usePluginViewTabs,
 } from '../state/pluginViewTabStore';
 import {
@@ -139,14 +139,17 @@ export function AppSideEffects() {
     terminalSettings,
     hotkeyScheme,
     keyBindings,
-    disableTerminalFontZoom,
     isHotkeyRecording,
     showSftpTab,
     shellOnlyTabNumberShortcuts,
     workspaceFocusStyle,
   } = settings;
 
-  useTerminalKeyboardFocus(hotkeyScheme !== 'disabled' && !disableTerminalFontZoom);
+  // Always publish terminal keyboard focus to the main process. When font zoom
+  // is disabled (or hotkeys are off) the renderer ignores the font chords, so
+  // the main process must keep handing them to the page instead of falling
+  // back to window zoom while the user is typing in a terminal (#3327).
+  useTerminalKeyboardFocus();
 
   const discoveredShells = useDiscoveredShells();
 
@@ -1010,27 +1013,18 @@ export function AppSideEffects() {
   }, [orderedTabsWithEditors]);
 
   // Close many tabs at once with a single batched busy-shell confirmation.
-  // Used by the "Close all / Close others / Close to the right" context-menu
-  // actions on tabs (#748).
+  // Used by the "Close all / Close others / Close to the left / Close to the
+  // right" context-menu actions on tabs (#748).
   const closeTabsBatch = useCallback(
-    async (targetIds: string[]) => {
-      const closingTabIds = new Set(targetIds);
-      const activeBeforeClose = activeTabStore.getActiveTabId();
-      const focusAfterClose = resolveBatchTabCloseFocus({
-        orderedTabIds: orderedTabsWithEditors,
-        closingTabIds,
-        activeTabId: activeBeforeClose,
-      });
-      const pluginIds = targetIds.filter((id) => pluginViewTabStore.getTab(id));
-      const regularIds = targetIds.filter((id) => !pluginViewTabStore.getTab(id));
-      const canClose = !regularIds.length || await closeTabsBatchImpl(
-        () => ({ closeLogView, closeSessions, closeTabsInFlightRef, closeWorkspace, confirmIfBusyLocalTerminal, logViews, sessions, targetIds: regularIds, workspaces }),
-        regularIds,
-      );
-      if (!canClose) return;
-      for (const id of pluginIds) pluginViewTabStore.close(id);
-      if (closingTabIds.has(activeBeforeClose)) activeTabStore.setActiveTabId(focusAfterClose);
-    },
+    (targetIds: string[]) => closeTabsBatchImpl(
+      () => ({
+        closeLogView, closeSessions, closeTabsInFlightRef, closeWorkspace,
+        confirmIfBusyLocalTerminal, logViews, sessions, workspaces,
+        activeTabStore, editorTabStore, pluginViewTabStore,
+        handleRequestCloseEditorTabRef, findEditorSftpOwnerTabId, orderedTabsWithEditors,
+      }),
+      targetIds,
+    ),
     [workspaces, sessions, logViews, confirmIfBusyLocalTerminal, closeWorkspace, closeSessions, closeLogView, orderedTabsWithEditors],
   );
 

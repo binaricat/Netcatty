@@ -769,6 +769,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
     const anchorIdx = orderedTabs.indexOf(anchorId);
     const othersIds = orderedTabs.filter((id) => id !== anchorId);
     const rightIds = anchorIdx >= 0 ? orderedTabs.slice(anchorIdx + 1) : [];
+    const leftIds = anchorIdx > 0 ? orderedTabs.slice(0, anchorIdx) : [];
     return (
       <>
         <ContextMenuSeparator />
@@ -777,6 +778,12 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
           onClick={() => onCloseTabsBatch(othersIds)}
         >
           {t('tabs.closeOthers')}
+        </ContextMenuItem>
+        <ContextMenuItem
+          disabled={leftIds.length === 0}
+          onClick={() => onCloseTabsBatch(leftIds)}
+        >
+          {t('tabs.closeToLeft')}
         </ContextMenuItem>
         <ContextMenuItem
           disabled={rightIds.length === 0}
