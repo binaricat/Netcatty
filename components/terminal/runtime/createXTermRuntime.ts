@@ -91,6 +91,7 @@ import {
 import { installUserCursorPreferenceGuard } from "./cursorPreference";
 import { terminalAltKeyOptions } from "./altKeyOptions";
 import { optionArrowWordJumpSequence } from "./optionArrowWordJump";
+import { commandArrowLineJumpSequence } from "./commandArrowLineJump";
 import { optionYankLastArgSequence } from "./optionYankLastArg";
 import { watchDevicePixelRatio } from "./rendererDprWatch";
 import { dispatchWin32InputModeEvent } from "./win32InputMode";
@@ -2264,6 +2265,22 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
           forwarded.targetSessionIds,
         );
       }
+      return false;
+    }
+
+    // Keep app/snippet shortcuts and negotiated keyboard protocols ahead of
+    // the shell-only macOS line-editing fallback (issue #3139).
+    const lineJumpSequence =
+      term.buffer.active.type === "normal" &&
+      !term.modes.win32InputMode &&
+      !isKittyKeyboardModeActive(kittyKeyboardMode)
+        ? commandArrowLineJumpSequence(e, isMacPlatform())
+        : null;
+    if (lineJumpSequence && ctx.sessionRef.current) {
+      e.preventDefault();
+      e.stopPropagation();
+      handleTerminalInputData(lineJumpSequence);
+      scrollToBottomAfterInput(lineJumpSequence);
       return false;
     }
 
