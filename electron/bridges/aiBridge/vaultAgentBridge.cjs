@@ -8,15 +8,17 @@ const pendingVaultRequests = new Map();
 function createVaultAgentBridge({ getMainWindowFn, validateSender }) {
   function registerHandlers(ipcMain) {
     ipcMain.handle("netcatty:ai:vault-agent:response", (event, { requestId, result }) => {
-      if (!validateSender(event)) {
-        return { ok: false, error: "Unauthorized IPC sender" };
-      }
       if (!requestId || typeof requestId !== "string") {
         return { ok: false, error: "requestId is required" };
       }
       const entry = pendingVaultRequests.get(requestId);
       if (!entry) {
         return { ok: false, error: "Unknown or expired vault agent request." };
+      }
+      if (entry.senderId != null
+        ? event.sender?.id !== entry.senderId
+        : !validateSender(event)) {
+        return { ok: false, error: "Unauthorized IPC sender" };
       }
       clearTimeout(entry.timer);
       pendingVaultRequests.delete(requestId);
@@ -27,7 +29,11 @@ function createVaultAgentBridge({ getMainWindowFn, validateSender }) {
 
   async function invokeVaultAgent(op, params = {}, options = {}) {
     const mainWin = typeof getMainWindowFn === "function" ? getMainWindowFn() : null;
-    if (!mainWin || mainWin.isDestroyed()) {
+    // Only read-only terminal requests may target an owning popup renderer.
+    const target = op === "terminal.readContext" && options.webContents
+      ? options.webContents
+      : mainWin && !mainWin.isDestroyed() ? mainWin.webContents : null;
+    if (!target || target.isDestroyed?.()) {
       return {
         ok: false,
         error: "No active Netcatty window is available for vault access.",
@@ -45,9 +51,9 @@ function createVaultAgentBridge({ getMainWindowFn, validateSender }) {
         });
       }, options.timeoutMs ?? VAULT_AGENT_TIMEOUT_MS);
 
-      pendingVaultRequests.set(requestId, { resolve, timer });
+      pendingVaultRequests.set(requestId, { resolve, timer, senderId: target.id });
       try {
-        mainWin.webContents.send("netcatty:ai:vault-agent:request", {
+        target.send("netcatty:ai:vault-agent:request", {
           requestId,
           op,
           params,

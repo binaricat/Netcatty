@@ -58,3 +58,22 @@ test("one allowed terminal is inferred and revoked scope suppresses the result",
   assert.equal(revoked.ok, false);
   assert.equal(revoked.content, undefined);
 });
+
+test("read dispatch resolves the owning popup for legacy and worker sessions", async (t) => {
+  const bridge = setup(t);
+  const popup = { id: 22, isDestroyed: () => false };
+  for (const worker of [false, true]) {
+    bridge.init({
+      sessions: new Map(worker ? [] : [["a", { webContentsId: 22 }]]),
+      electronModule: { webContents: { fromId: (id) => id === 22 ? popup : null } },
+      terminalWorkerManager: worker ? { getSessionOwnerWebContentsId: () => 22 } : null,
+    });
+    bridge.setVaultAgentInvoker(async (_op, params, options) => {
+      assert.equal(options.webContents, popup);
+      return { ok: true, sessionId: params.sessionId };
+    });
+    assert.equal((await bridge.dispatchBuiltinRpc("netcatty/readContext", {
+      sessionId: "a", chatSessionId: "chat",
+    })).ok, true);
+  }
+});

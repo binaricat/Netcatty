@@ -2170,3 +2170,35 @@ describe('terminal.readContext', () => {
     assert.equal((await handleVaultAgentOp('terminal.readContext', { sessionId: 'read-test' }, createDeps())).ok, false);
   });
 });
+
+it('popup bridge reads its local screen without installing a vault handler', async (t) => {
+  const { setupVaultAgentBridge, registerVaultAgentHandler } = await import('./vaultAgentBridgeClient');
+  const { netcattyBridge } = await import('../services/netcattyBridge');
+  const { registerScreenSnapshotProvider } = await import('../scripts/screenSnapshotRegistry');
+  const { buildTerminalContextReadResult } = await import('../../domain/terminalContextRead');
+  let listener: Parameters<NetcattyBridge['onVaultAgentRequest']>[0];
+  const responses: Record<string, unknown>[] = [];
+  let unsubscribed = false;
+  const stub = {
+    onVaultAgentRequest: (callback: typeof listener) => {
+      listener = callback;
+      return () => { unsubscribed = true; };
+    },
+    respondVaultAgent: async (_id: string, result: Record<string, unknown>) => { responses.push(result); },
+  };
+  t.mock.method(netcattyBridge, 'get', () => stub as unknown as NetcattyBridge);
+  registerVaultAgentHandler(null);
+  const unregister = registerScreenSnapshotProvider('popup', () => ({ rows: 1, cols: 80, currentRow: 0, lines: ['screen'] }), async (request) =>
+    buildTerminalContextReadResult({ ...request, fullText: 'popup output', source: 'live' }));
+  const dispose = setupVaultAgentBridge();
+  try {
+    await listener!({ requestId: 'read', op: 'terminal.readContext', params: { sessionId: 'popup' } });
+    assert.equal(responses[0].content, 'popup output');
+    await listener!({ requestId: 'vault', op: 'host.list', params: {} });
+    assert.equal(responses[1].ok, false);
+  } finally {
+    dispose();
+    unregister();
+  }
+  assert.equal(unsubscribed, true);
+});

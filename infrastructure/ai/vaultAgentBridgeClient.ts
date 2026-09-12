@@ -572,16 +572,7 @@ export async function handleVaultAgentOp(
   deps: VaultAgentApiDeps,
 ): Promise<Record<string, unknown>> {
   switch (op) {
-    case 'terminal.readContext': {
-      const sessionId = typeof params.sessionId === 'string' ? params.sessionId : '';
-      if (!sessionId) return { ok: false, error: 'sessionId is required.' };
-      return { ...await readScreenContext({
-        sessionId,
-        range: normalizeTerminalContextRange(params.range),
-        startLine: typeof params.startLine === 'number' ? params.startLine : undefined,
-        maxLines: typeof params.maxLines === 'number' ? params.maxLines : undefined,
-      }) };
-    }
+    case 'terminal.readContext': return handleTerminalContextRead(params);
     case 'session.close': {
       const sessionId = String(params.sessionId || '').trim();
       if (!sessionId) return { ok: false, error: 'sessionId is required.' };
@@ -1460,6 +1451,17 @@ export function registerVaultAgentHandler(handler: VaultAgentHandler | null): vo
   activeHandler = handler;
 }
 
+async function handleTerminalContextRead(params: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const sessionId = typeof params.sessionId === 'string' ? params.sessionId : '';
+  if (!sessionId) return { ok: false, error: 'sessionId is required.' };
+  return { ...await readScreenContext({
+    sessionId,
+    range: normalizeTerminalContextRange(params.range),
+    startLine: typeof params.startLine === 'number' ? params.startLine : undefined,
+    maxLines: typeof params.maxLines === 'number' ? params.maxLines : undefined,
+  }) };
+}
+
 export function setupVaultAgentBridge(): () => void {
   const bridge = netcattyBridge.get();
   if (!bridge?.onVaultAgentRequest || !bridge.respondVaultAgent) {
@@ -1471,8 +1473,9 @@ export function setupVaultAgentBridge(): () => void {
     const safeParams = params || {};
     const runHandler = async () => {
       try {
-        const result = activeHandler
-          ? await activeHandler(op, safeParams)
+        const result = op === 'terminal.readContext'
+          ? await handleTerminalContextRead(safeParams)
+          : activeHandler ? await activeHandler(op, safeParams)
           : { ok: false, error: 'Vault agent bridge is not ready.' };
         await bridge.respondVaultAgent?.(requestId, result);
       } catch (err) {
