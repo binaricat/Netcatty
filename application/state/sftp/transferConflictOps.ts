@@ -3,7 +3,7 @@ import type { SftpFilenameEncoding, TransferTask } from "../../../domain/models"
 import { netcattyBridge } from "../../../infrastructure/services/netcattyBridge";
 import { isMissingStatError } from "./errors";
 import type { SftpPane } from "./types";
-import { getParentPath, joinPath } from "./utils";
+import { getFileName, getParentPath, isSameSftpPath, joinPath } from "./utils";
 
 export function useSftpTransferConflictOps() {
   const splitNameForDuplicate = useCallback((fileName: string, isDirectory: boolean) => {
@@ -93,6 +93,27 @@ export function useSftpTransferConflictOps() {
       expectedType?: "file" | "directory" | "symlink",
     ) => {
       if (!targetPane.connection) return;
+      // Replace unlinks symlinks before copying. Never unlink the source entry
+      // when a clipboard copy is pasted back into its own directory.
+      if (expectedType === "symlink" && task.sourceConnectionId === task.targetConnectionId) {
+        const bridge = netcattyBridge.get();
+        const resolve = targetPane.connection.isLocal
+          ? bridge?.realpathLocal
+          : targetSftpId && bridge?.realpathSftp
+            ? (value: string) => bridge.realpathSftp!(targetSftpId, value, targetEncoding)
+            : undefined;
+        const [sourceParent, targetParent] = await Promise.all(
+          [getParentPath(task.sourcePath), getParentPath(task.targetPath)].map(
+            (value) => resolve ? resolve(value) : Promise.resolve(value),
+          ),
+        );
+        if (isSameSftpPath(
+          joinPath(sourceParent, getFileName(task.sourcePath)),
+          joinPath(targetParent, getFileName(task.targetPath)),
+        )) {
+          throw new Error("Cannot replace the source link with itself. Choose Duplicate or Skip.");
+        }
+      }
       if (targetPane.connection.isLocal) {
         const deleteLocalFile = netcattyBridge.get()?.deleteLocalFile;
         if (!deleteLocalFile) throw new Error("Local delete unavailable");
