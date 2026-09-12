@@ -12,6 +12,7 @@ test('header rows preserve values and reject ambiguous or invalid names and valu
   for (const rows of [
     [{ name: 'X-Tenant', value: 'a' }, { name: 'x-tenant', value: 'b' }],
     [{ name: '', value: 'secret' }], [{ name: 'Bad Name', value: 'x' }],
+    [{ name: 'Content-Length', value: '1' }], [{ name: 'tRaNsFeR-EnCoDiNg', value: 'chunked' }],
     [{ name: 'X-Tenant', value: 'a\r\nb' }], [{ name: 'X-Tenant', value: '中文' }],
   ]) assert.throws(() => parseProviderHeaderRows(rows));
   assert.equal(Object.getOwnPropertyDescriptor(parseProviderHeaderRows([{ name: '__proto__', value: 'safe' }]), '__proto__')?.value, 'safe');

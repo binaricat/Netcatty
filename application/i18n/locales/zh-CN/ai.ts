@@ -59,7 +59,7 @@ export const zhCNAiMessages: Messages = {
   'ai.providers.headers.value': '请求头内容',
   'ai.providers.headers.add': '添加请求头',
   'ai.providers.headers.remove': '删除请求头',
-  'ai.providers.headers.invalid': '请填写有效的请求头名称和内容，名称不能重复。',
+  'ai.providers.headers.invalid': '请填写有效且不重复的请求头。Content-Length 和 Transfer-Encoding 由应用自动设置。',
   'ai.providers.headers.loadError': '无法解锁已保存的请求头。请取消编辑，解锁系统钥匙串后重试。',
   'ai.providers.headers.saveError': '无法安全保存。请确认系统钥匙串可用后重试。',
   'ai.providers.apiKey': 'API Key',

@@ -59,7 +59,7 @@ export const enAiMessages: Messages = {
   'ai.providers.headers.value': 'Header value',
   'ai.providers.headers.add': 'Add header',
   'ai.providers.headers.remove': 'Remove header',
-  'ai.providers.headers.invalid': 'Use valid HTTP header names and values; names must be unique.',
+  'ai.providers.headers.invalid': 'Use valid, unique HTTP headers. Content-Length and Transfer-Encoding are managed automatically.',
   'ai.providers.headers.loadError': 'Unable to unlock saved headers. Cancel and try again after unlocking your system keychain.',
   'ai.providers.headers.saveError': 'Unable to save securely. Check that your system keychain is available and try again.',
   'ai.providers.apiKey': 'API Key',

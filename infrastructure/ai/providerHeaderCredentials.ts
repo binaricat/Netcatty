@@ -11,6 +11,7 @@ export function parseProviderHeaderRows(rows: HeaderRow[]): Record<string, strin
     const name = row.name.trim();
     if (!/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(name)
       || /[^\t\x20-\x7e\x80-\xff]/.test(row.value)
+      || ['content-length', 'transfer-encoding'].includes(name.toLowerCase())
       || names.has(name.toLowerCase())) {
       throw new Error('Invalid or duplicate HTTP header');
     }
