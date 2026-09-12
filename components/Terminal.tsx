@@ -1,3 +1,4 @@
+import { createTerminalReflowReadingPosition } from "./terminal/terminalReflowReadingPosition";
 import { resolveHostOs } from '../domain/host';
 import { Terminal as XTerm } from "@xterm/xterm";
 import type { IMarker } from "@xterm/xterm";
@@ -255,7 +256,6 @@ import {
 } from "./terminal/restoredSessionGate";
 import {
   alignTerminalViewportScroll,
-  captureTerminalReflowScrollAnchor,
   createSynchronizedOutputFitScheduler,
   resolveTerminalReflowScrollAnchor,
   AUTO_RUN_SNIPPET_LINE_DELAY_MS,
@@ -645,6 +645,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const isRendererActiveRef = useRef(isRendererActive);
   isRendererActiveRef.current = isRendererActive;
   const pendingOutputScrollRef = useRef(false);
+  const reflowReadingPositionRef = useRef(createTerminalReflowReadingPosition());
   const lastFittedSizeRef = useRef<{ width: number; height: number } | null>(null);
   const fontWeightFixupDoneRef = useRef(false);
 
@@ -3020,7 +3021,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         const previousCols = term.cols;
         const reflowAnchor = wasPinnedToBottom || term.cols === dimensions.cols
           ? null
-          : captureTerminalReflowScrollAnchor(buffer, {
+          : reflowReadingPositionRef.current.capture(buffer, {
               // xterm keeps at most rows + scrollback buffer rows and trims
               // from the top beyond that (Buffer._getCorrectBufferLength), so
               // these bounds let the capture skip its whole-line measurement
@@ -3157,6 +3158,9 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           if (term.buffer.active.viewportY !== targetY) {
             term.scrollToLine(targetY);
           }
+        }
+        if (term.cols !== previousCols) {
+          reflowReadingPositionRef.current.remember(term.buffer.active, reflowAnchor);
         }
         term.refresh(0, Math.max(0, term.rows - 1));
 

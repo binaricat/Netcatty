@@ -21,7 +21,7 @@ if (!process.versions.electron) {
   const safeFitSource = esbuild.transformSync(source.slice(start, end), { loader: "ts" }).code;
   const bundle = esbuild.buildSync({
     stdin: {
-      contents: 'export {Terminal} from "@xterm/xterm"; export {alignTerminalViewportScroll, captureTerminalReflowScrollAnchor, forceSyncRenderAfterResize, createSynchronizedOutputFitScheduler, resolveTerminalReflowScrollAnchor} from "./components/terminal/terminalHelpers";',
+      contents: 'export {Terminal} from "@xterm/xterm"; export {alignTerminalViewportScroll, captureTerminalReflowScrollAnchor, forceSyncRenderAfterResize, createSynchronizedOutputFitScheduler, resolveTerminalReflowScrollAnchor} from "./components/terminal/terminalHelpers"; export {createTerminalReflowReadingPosition} from "./components/terminal/terminalReflowReadingPosition";',
       loader: "ts", resolveDir: root,
     },
     bundle: true, format: "cjs", platform: "browser", write: false,
@@ -44,7 +44,7 @@ if (!process.versions.electron) {
       const assert = require('node:assert/strict');
       const loaded = {exports:{}};
       ((module,exports)=>{${bundle}})(loaded,loaded.exports);
-      const {Terminal,forceSyncRenderAfterResize,createSynchronizedOutputFitScheduler,captureTerminalReflowScrollAnchor,resolveTerminalReflowScrollAnchor} = loaded.exports;
+      const {createTerminalReflowReadingPosition,Terminal,forceSyncRenderAfterResize,createSynchronizedOutputFitScheduler,captureTerminalReflowScrollAnchor,resolveTerminalReflowScrollAnchor} = loaded.exports;
       const alignTerminalViewportScroll = process.env.NETCATTY_FIT_BASELINE ? ()=>{} : loaded.exports.alignTerminalViewportScroll;
       const wait = ms => new Promise(resolve=>setTimeout(resolve,ms));
       const term = new Terminal({cols:80,rows:25,scrollback:1000,fontSize:14,allowProposedApi:true,smoothScrollDuration:0});
@@ -52,6 +52,7 @@ if (!process.versions.electron) {
       el.style.cssText='width:900px;height:560px'; term.open(el);
       const write = data => new Promise(resolve=>term.write(data,resolve));
       const ref = current => ({current});
+      const reflowReadingPositionRef=ref(createTerminalReflowReadingPosition());
       const termRef=ref(term), containerRef=ref(el), isRendererActiveRef=ref(true), lastFittedSizeRef=ref(null);
       const autocompleteRepositionRef=ref(null), xtermRuntimeRef=ref(null), pendingWriteSafeFitRef=ref(null);
       const synchronizedFitSchedulerRef=ref(createSynchronizedOutputFitScheduler());
@@ -91,6 +92,24 @@ if (!process.versions.electron) {
         const actual=logicalJoinFrom(term.buffer.active.viewportY);
         assert.ok(actual.includes(chars),label+' expected '+JSON.stringify(chars)+' in '+JSON.stringify(actual.slice(0,40)));
       };
+      // A long wrapped paragraph must retain its character offset, not just
+      // its logical-line identity, throughout a continuous divider drag.
+      const longText=Array.from({length:1000},(_,i)=>String(i).padStart(4,'0')+' ').join('');
+      await write(longText+'\\r\\n'+Array.from({length:30},(_,i)=>'follower '+i).join('\\r\\n'));
+      await wait(100);term.scrollToLine(30);await wait(50);
+      const readingOffset=30*80;
+      const checkOffset=(offset,label)=>{
+        const row=term.buffer.active.viewportY;
+        assert.ok(row*term.cols<=offset && (row+1)*term.cols>offset,label+' row '+row+' cols '+term.cols);
+        check(row,label);
+      };
+      for(let cols=79;cols>=40;cols--){fit(cols,25);await wait(10);checkOffset(readingOffset,'long paragraph shrink');}
+      for(let cols=41;cols<=80;cols++){fit(cols,25);await wait(10);checkOffset(readingOffset,'long paragraph grow');}
+      // Scrolling establishes a fresh anchor instead of restoring the old one.
+      term.scrollLines(-10);await wait(50);
+      const userOffset=term.buffer.active.viewportY*term.cols;
+      for(let cols=79;cols>=40;cols--){fit(cols,25);await wait(10);checkOffset(userOffset,'user scroll during drag');}
+      term.reset();fit(80,25);await wait(50);
       await write(Array.from({length:200},(_,i)=>'line '+i+' '+('A    B repeated '.repeat(7))).join('\\r\\n'));
       await wait(100); term.scrollToLine(70); await wait(50);
       fit(80,16); await wait(80); check(70,'shrink');
@@ -137,7 +156,7 @@ if (!process.versions.electron) {
       await write('\\x1b[?2026h');fit(140,25);synchronizedFitSchedulerRef.current.dispose();
       await write('\\x1b[?2026l');await wait(100);assert.equal(term.cols,beforeDispose,'teardown cancels retry');
       assert.ok(el.querySelector('.xterm-screen').getBoundingClientRect().height > 0,'real rendered terminal');
-      return {passed:['shrink','grow','18 drag steps','bottom and next scroll','synchronized repeated spaced text','user scroll','mode reentry','full scrollback trim','alternate buffer','output timeout','cleanup'],viewportY:term.buffer.active.viewportY,domRow:domRow()};
+      return {passed:['shrink','grow','18 drag steps','long paragraph character offset and user scroll','bottom and next scroll','synchronized repeated spaced text','user scroll','mode reentry','full scrollback trim','alternate buffer','output timeout','cleanup'],viewportY:term.buffer.active.viewportY,domRow:domRow()};
     })()`);
     console.log(JSON.stringify(result));
     if (process.env.NETCATTY_FIT_SCREENSHOT) {

@@ -1793,19 +1793,10 @@ export function resolveTerminalReflowScrollAnchor(
     ? reflowAnchorLogicalLineStart(buffer, seedRow, REFLOW_ANCHOR_MARKER_LINE_WALK_ROWS)
     : undefined;
   if (seedRow !== null && trackContinuation && seededLine === undefined) {
-    // The marker sits beyond `REFLOW_ANCHOR_MARKER_LINE_WALK_ROWS` rows into
-    // its rewrapped line (a large column shrink). The stale-row fallback below
-    // would still be unbounded for this case: after matching the line from the
-    // stale start, `reflowOffsetTargetRow` walks one physical row per
-    // `newCols` characters up to the captured offset — up to the same
-    // continuation depth the bound just declined to visit, repeated on every
-    // divider-drag frame. The surviving viewport-row marker is the O(1)
-    // destination instead: xterm adjusted its row through the rewrap (and
-    // would have disposed it if its row were trimmed), so it already marks the
-    // row holding the viewed characters. This is the same marker metadata the
-    // cursor-line branch below trusts; only the expensive re-derivation is
-    // skipped.
-    return Math.min(seedRow, buffer.baseY);
+    // Beyond the walk bound we cannot establish whether the marker tracks
+    // a cursor row or a rewrapped continuation. Decline rather than treating
+    // the marker's old within-line row as the position of the characters.
+    return null;
   }
   if (
     seedRow !== null

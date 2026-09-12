@@ -656,8 +656,7 @@ test("resolve bounds the marker-to-line-start walk on an over-deep continuation 
   // the capture-side bound allowed, so the surviving marker can sit beyond
   // REFLOW_ANCHOR_MARKER_LINE_WALK_ROWS rows into the reflowed line. The walk
   // back to the containing line's start must give up at the bound instead of
-  // stepping through nearly the whole scrollback, and the resolver must still
-  // re-locate the viewed characters through the stale-row scan fallback.
+  // stepping through nearly the whole scrollback or trusting a stale marker.
   const cols = 8;
   const markerRow = 17_000; // deeper than the 16,384-row walk bound
   const line = "target unique alpha" + "A".repeat(markerRow * cols);
@@ -676,9 +675,7 @@ test("resolve bounds the marker-to-line-start walk on an over-deep continuation 
     anchor as never,
     markerRow,
   );
-  // The stale-row scan matches the line at its start (row 0) and the offset
-  // pass maps the captured characters back to the marker's row.
-  assert.equal(resolvedRow, markerRow);
+  assert.equal(resolvedRow, null);
 });
 
 test("resolve keeps the surviving marker when the truncated cursor line is the anchor", () => {
