@@ -8,7 +8,7 @@ import type { ProviderConfig } from "./types";
  */
 export const OPENCODE_SESSION_HEADER = "x-opencode-session";
 
-/** Match the opencode.ai API hosts (Zen `…/zen/v1`, Go `…/zen/go/v1`). */
+/** Match the opencode.ai API hosts (Zen `.../zen/v1`, Go `.../zen/go/v1`). */
 export function isOpencodeEndpoint(baseURL: string | undefined): boolean {
   if (!baseURL) return false;
   try {
