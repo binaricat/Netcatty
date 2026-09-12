@@ -799,7 +799,8 @@ function buildCodebuddyHooks(
             decision: "block",
             reason:
               "Only Netcatty CLI commands are allowed in Skills mode. " +
-              "Use the netcatty-tool-cli command prefix provided by the host.",
+              "Use the netcatty-tool-cli command prefix provided by the host. " +
+              "Do not pass --chat-session or override NETCATTY_CLI_CHAT_SESSION_ID; the host already bound this process.",
           };
         }
         return { continue: true };

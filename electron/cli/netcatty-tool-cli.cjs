@@ -5,6 +5,12 @@ const path = require("node:path");
 
 const { connectClient, createError } = require("./netcattyRpcClient.cjs");
 const {
+  bindChatSessionId,
+  describeMissingChatSession,
+  describeRemovedChatSessionFlag,
+  isRemovedChatSessionFlag,
+} = require("./cliChatSession.cjs");
+const {
   buildCatalogCliParams,
   formatCliHelpLines,
   getCliRpcMethod,
@@ -21,23 +27,24 @@ function printHelp() {
     catalogLines + "\n\n" +
     "Examples:\n" +
     "  netcatty-tool-cli status --json\n" +
-    "  netcatty-tool-cli env --chat-session ai_123 --json\n" +
-    "  netcatty-tool-cli attachment list --chat-session ai_123 --json\n" +
-    "  netcatty-tool-cli attachment read --filename hosts.csv --chat-session ai_123 --json\n" +
-    "  netcatty-tool-cli session --session sess_123 --json --chat-session ai_123\n" +
-    "  netcatty-tool-cli exec --session sess_123 --chat-session ai_123 --json -- \"pwd\"\n" +
+    "  netcatty-tool-cli env --json\n" +
+    "  netcatty-tool-cli attachment list --json\n" +
+    "  netcatty-tool-cli attachment read --filename hosts.csv --json\n" +
+    "  netcatty-tool-cli session --session sess_123 --json\n" +
+    "  netcatty-tool-cli exec --session sess_123 --json -- \"pwd\"\n" +
     "  netcatty-tool-cli vault host get --host-id host_123 --json\n" +
     "  netcatty-tool-cli vault host open --host-id host_123 --json\n" +
-    "  netcatty-tool-cli snippets run --snippet-id snip_1 --session sess_123 --chat-session ai_123 --json\n" +
+    "  netcatty-tool-cli snippets run --snippet-id snip_1 --session sess_123 --json\n" +
     "  netcatty-tool-cli portforward rules list --json\n\n" +
     "Notes:\n" +
     "  - Start the Netcatty desktop app before using this CLI.\n" +
     "  - This CLI is intended as an internal Skills + CLI transport, not a general customer-facing shell tool.\n" +
-    "  - `env` and `session` always require --chat-session <id>.\n" +
-    "  - `exec` always requires both --session <id> and --chat-session <id>.\n" +
-    "  - `job-start` always requires both --session <id> and --chat-session <id>.\n" +
-    "  - `job-poll` and `job-stop` always require both --job <id> and --chat-session <id>.\n" +
-    "  - Every `sftp <op>` always requires both --session <id> and --chat-session <id>, and only works on connected SSH-backed sessions.\n" +
+    "  - Host-launched agents receive NETCATTY_CLI_CHAT_SESSION_ID in the environment. There is no --chat-session flag.\n" +
+    "  - `env` and `session` require NETCATTY_CLI_CHAT_SESSION_ID.\n" +
+    "  - `exec` always requires --session <id>, plus NETCATTY_CLI_CHAT_SESSION_ID.\n" +
+    "  - `job-start` always requires --session <id>, plus NETCATTY_CLI_CHAT_SESSION_ID.\n" +
+    "  - `job-poll` and `job-stop` always require --job <id>, plus NETCATTY_CLI_CHAT_SESSION_ID.\n" +
+    "  - Every `sftp <op>` always requires --session <id>, plus NETCATTY_CLI_CHAT_SESSION_ID, and only works on connected SSH-backed sessions.\n" +
     "  - Vault/portforward/snippet commands use catalog-driven dispatch; see `capabilities --json` for the full list.\n" +
     "  - After `--`, pass exactly one shell-ready command string. Preserve quoting inside that one argument.\n" +
     "  - `cancel` stops in-flight execs, session-backed SFTP transfers, and running jobs for that chat session, then blocks further execs until `resume`.\n",
@@ -97,10 +104,8 @@ function parseArgs(argv) {
       opts.json = true;
       continue;
     }
-    if (arg === "--chat-session") {
-      opts.chatSessionId = readFlagValue(args, i + 1);
-      i += 1;
-      continue;
+    if (isRemovedChatSessionFlag(arg)) {
+      throw createError("INVALID_ARGUMENT", describeRemovedChatSessionFlag());
     }
     if (arg === "--scope-session") {
       const value = readFlagValue(args, i + 1);
@@ -378,6 +383,16 @@ function getSingleCommandOrThrow(opts, commandName) {
   return opts.command[0];
 }
 
+function requireChatSession(opts, commandLabel) {
+  if (opts.chatSessionId) return opts.chatSessionId;
+  throw createError("INVALID_ARGUMENT", describeMissingChatSession(commandLabel));
+}
+
+function bindHostChatSession(opts, env = process.env) {
+  opts.chatSessionId = bindChatSessionId(env);
+  return opts.chatSessionId;
+}
+
 function ensureBridgeCallOk(result, defaultCode, defaultMessage) {
   if (!result || result.ok !== false) {
     return result;
@@ -388,36 +403,37 @@ function ensureBridgeCallOk(result, defaultCode, defaultMessage) {
 }
 
 async function run() {
-  const { positionals, opts } = parseArgs(process.argv);
-  const [command, subcommand] = positionals;
-
-  if (!command || command === "help" || command === "--help" || command === "-h") {
-    printHelp();
-    process.exit(0);
-  }
-
-  if (command === "capabilities") {
-    const hasStatusFlag = process.argv.includes("--status");
-    const statusArg = hasStatusFlag
-      ? process.argv[process.argv.indexOf("--status") + 1]
-      : CAPABILITY_STATUS.IMPLEMENTED;
-    const status = statusArg === "all" ? null : statusArg;
-    const payload = {
-      ok: true,
-      capabilities: listCliCapabilities(
-        hasStatusFlag && statusArg === "all"
-          ? { status: null }
-          : { status },
-      ),
-    };
-    process.stdout.write(opts.json
-      ? `${JSON.stringify(payload, null, 2)}\n`
-      : `${payload.capabilities.map((entry) => entry.command.join(" ")).join("\n")}\n`);
-    return;
-  }
-
   let client = null;
   try {
+    const { positionals, opts } = parseArgs(process.argv);
+    const [command, subcommand] = positionals;
+
+    if (!command || command === "help" || command === "--help" || command === "-h") {
+      printHelp();
+      return;
+    }
+
+    if (command === "capabilities") {
+      const hasStatusFlag = process.argv.includes("--status");
+      const statusArg = hasStatusFlag
+        ? process.argv[process.argv.indexOf("--status") + 1]
+        : CAPABILITY_STATUS.IMPLEMENTED;
+      const status = statusArg === "all" ? null : statusArg;
+      const payload = {
+        ok: true,
+        capabilities: listCliCapabilities(
+          hasStatusFlag && statusArg === "all"
+            ? { status: null }
+            : { status },
+        ),
+      };
+      process.stdout.write(opts.json
+        ? `${JSON.stringify(payload, null, 2)}\n`
+        : `${payload.capabilities.map((entry) => entry.command.join(" ")).join("\n")}\n`);
+      return;
+    }
+
+    bindHostChatSession(opts);
     client = await connectClient();
 
     if (command === "status") {
@@ -428,9 +444,7 @@ async function run() {
     }
 
     if (command === "env") {
-      if (!opts.chatSessionId) {
-        throw createError("INVALID_ARGUMENT", "Missing required --chat-session <id> for env.");
-      }
+      requireChatSession(opts, "env");
       const params = buildScopeParams(opts);
       const result = await client.call("netcatty/getContext", params);
       const output = opts.json ? JSON.stringify({ ok: true, ...result }, null, 2) : formatEnvText(result);
@@ -439,9 +453,7 @@ async function run() {
     }
 
     if (command === "session") {
-      if (!opts.chatSessionId) {
-        throw createError("INVALID_ARGUMENT", "Missing required --chat-session <id> for session.");
-      }
+      requireChatSession(opts, "session");
       const host = await resolveTargetHost(client, opts);
       const payload = { ok: true, host };
       const output = opts.json ? JSON.stringify(payload, null, 2) : formatSessionText(host);
@@ -450,9 +462,7 @@ async function run() {
     }
 
     if (command === "exec") {
-      if (!opts.chatSessionId) {
-        throw createError("INVALID_ARGUMENT", "Missing required --chat-session <id> for exec.");
-      }
+      requireChatSession(opts, "exec");
       const shellCommand = getSingleCommandOrThrow(opts, "exec");
       const host = await resolveTargetHost(client, opts);
       const rpcParams = {
@@ -475,9 +485,7 @@ async function run() {
     }
 
     if (command === "job-start") {
-      if (!opts.chatSessionId) {
-        throw createError("INVALID_ARGUMENT", "Missing required --chat-session <id> for job-start.");
-      }
+      requireChatSession(opts, "job-start");
       const shellCommand = getSingleCommandOrThrow(opts, "job-start");
       const host = await resolveTargetHost(client, opts);
       const result = await client.call("netcatty/jobStart", {
@@ -495,9 +503,7 @@ async function run() {
     }
 
     if (command === "job-poll") {
-      if (!opts.chatSessionId) {
-        throw createError("INVALID_ARGUMENT", "Missing required --chat-session <id> for job-poll.");
-      }
+      requireChatSession(opts, "job-poll");
       if (!opts.jobId) {
         throw createError("INVALID_ARGUMENT", "Missing required --job <id> for job-poll.");
       }
@@ -518,9 +524,7 @@ async function run() {
     }
 
     if (command === "job-stop") {
-      if (!opts.chatSessionId) {
-        throw createError("INVALID_ARGUMENT", "Missing required --chat-session <id> for job-stop.");
-      }
+      requireChatSession(opts, "job-stop");
       if (!opts.jobId) {
         throw createError("INVALID_ARGUMENT", "Missing required --job <id> for job-stop.");
       }
@@ -539,9 +543,7 @@ async function run() {
     }
 
     if (command === "sftp") {
-      if (!opts.chatSessionId) {
-        throw createError("INVALID_ARGUMENT", "Missing required --chat-session <id> for sftp.");
-      }
+      requireChatSession(opts, "sftp");
       if (!subcommand || subcommand === "help") {
         printHelp();
         return;
@@ -722,9 +724,7 @@ async function run() {
     }
 
     if (command === "cancel" || command === "resume") {
-      if (!opts.chatSessionId) {
-        throw createError("INVALID_ARGUMENT", `Missing required --chat-session <id> for ${command}.`);
-      }
+      requireChatSession(opts, command);
       const cancelled = command === "cancel";
       const result = await client.call("netcatty/setCancelled", {
         chatSessionId: opts.chatSessionId,
@@ -743,11 +743,8 @@ async function run() {
       if (!rpcMethod) {
         throw createError("INVALID_ARGUMENT", `No RPC mapping for command: ${positionals.join(" ")}`);
       }
-      if (catalogCapability.policy?.requiresChatSession && !opts.chatSessionId) {
-        throw createError(
-          "INVALID_ARGUMENT",
-          `Missing required --chat-session <id> for ${positionals.join(" ")}.`,
-        );
+      if (catalogCapability.policy?.requiresChatSession) {
+        requireChatSession(opts, positionals.join(" "));
       }
       const params = buildCatalogCliParams(catalogCapability.id, opts, createError);
       const result = ensureBridgeCallOk(
@@ -784,4 +781,6 @@ if (require.main === module) {
 
 module.exports = {
   parseArgs,
+  bindHostChatSession,
+  requireChatSession,
 };

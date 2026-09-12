@@ -145,16 +145,31 @@ export function matchesSearchQuery(
  * - "6" / "1" from hostname IP
  * across different fields.
  */
+export type HostSearchLike = {
+  label?: string | null;
+  hostname?: string | null;
+  group?: string | null;
+  username?: string | null;
+  tags?: Array<string | null | undefined> | null;
+};
+
 export function matchesHostSearchQuery(
   query: string,
-  hostLike: {
-    label?: string | null;
-    hostname?: string | null;
-    group?: string | null;
-    tags?: Array<string | null | undefined> | null;
-  },
+  hostLike: HostSearchLike,
 ): boolean {
   return getHostSearchMatch(query, hostLike).matched;
+}
+
+/**
+ * Workspace host pickers (Ctrl+Shift+J create/append) reuse vault host search,
+ * including tags, and keep username as an extra field.
+ */
+export function matchesWorkspaceHostPickerQuery(
+  query: string,
+  hostLike: HostSearchLike,
+): boolean {
+  return matchesHostSearchQuery(query, hostLike)
+    || matchesSearchQuery(query, hostLike.username);
 }
 
 type HostMatchField = "label" | "hostname" | "group" | "tag";
@@ -301,12 +316,7 @@ function evaluateHostFieldGroup(
 
 export function getHostSearchMatch(
   query: string,
-  hostLike: {
-    label?: string | null;
-    hostname?: string | null;
-    group?: string | null;
-    tags?: Array<string | null | undefined> | null;
-  },
+  hostLike: HostSearchLike,
 ): HostSearchMatchResult {
   const normalizedQuery = normalizeText(query);
   if (!normalizedQuery) {

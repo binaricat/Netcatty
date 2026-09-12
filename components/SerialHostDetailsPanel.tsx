@@ -90,6 +90,9 @@ export const SerialHostDetailsPanel: React.FC<SerialHostDetailsPanelPropsWithRes
     resolveSerialBackspaceFormValue(initialData, groupDefaults),
   );
   const [backspaceBehaviorChanged, setBackspaceBehaviorChanged] = useState(false);
+  const [byteOrientedBackspace, setByteOrientedBackspace] = useState(
+    initialData.serialConfig?.byteOrientedBackspace ?? false,
+  );
   const [charset, setCharset] = useState(initialData.charset || 'UTF-8');
   const [tags, setTags] = useState<string[]>(initialData.tags || []);
   const [group, setGroup] = useState(initialData.group || '');
@@ -128,6 +131,7 @@ export const SerialHostDetailsPanel: React.FC<SerialHostDetailsPanelPropsWithRes
         selectedBehavior: backspaceBehavior,
         behaviorChanged: backspaceBehaviorChanged,
       }),
+      byteOrientedBackspace,
     };
 
     const portName = selectedPort.split('/').pop() || selectedPort;
@@ -434,6 +438,24 @@ export const SerialHostDetailsPanel: React.FC<SerialHostDetailsPanelPropsWithRes
                 <p className="text-xs text-muted-foreground">
                   {t('serial.field.backspaceBehaviorDesc')}
                 </p>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <Label htmlFor="byte-oriented-backspace" className="text-sm font-medium cursor-pointer">
+                    {t('serial.field.byteOrientedBackspace')}
+                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    {t('serial.field.byteOrientedBackspaceDesc')}
+                  </p>
+                </div>
+                <input
+                  type="checkbox"
+                  id="byte-oriented-backspace"
+                  checked={byteOrientedBackspace}
+                  onChange={(e) => setByteOrientedBackspace(e.target.checked)}
+                  className="h-4 w-4 rounded border-input"
+                />
               </div>
 
               <div className="flex items-center justify-between">

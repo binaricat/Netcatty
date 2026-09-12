@@ -644,6 +644,7 @@ export const zhTWVaultMessages: Messages = {
   'terminal.customTheme.group.bright': '標示色',
   'terminal.customTheme.color.background': '背景',
   'terminal.customTheme.color.foreground': '前景',
+  'terminal.customTheme.color.foregroundIntense': '高亮前景（粗體）',
   'terminal.customTheme.color.cursor': '游標',
   'terminal.customTheme.color.selection': '選區',
   'terminal.customTheme.color.black': '黑色',

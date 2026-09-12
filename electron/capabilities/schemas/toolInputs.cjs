@@ -130,7 +130,7 @@ const TOOL_INPUT_FIELDS = Object.freeze({
     moshServerPath: { type: "string", optional: true, description: "Optional mosh-server path." },
     etEnabled: { type: "string", optional: true, description: "true or false." },
     etPort: { type: "number", optional: true, description: "Eternal Terminal server port." },
-    serialConfig: { type: "string", optional: true, description: "JSON object for serial connections: path, baudRate, and optional dataBits, stopBits, parity, flowControl, localEcho, lineMode, backspaceBehavior (default or ctrl-h). Existing backspaceBehavior is preserved when omitted." },
+    serialConfig: { type: "string", optional: true, description: "JSON object for serial connections: path, baudRate, and optional dataBits, stopBits, parity, flowControl, localEcho, lineMode, backspaceBehavior (default or ctrl-h), byteOrientedBackspace (boolean, default false; enable only for devices that delete bytes rather than characters). Existing backspaceBehavior and byteOrientedBackspace are preserved when omitted." },
   },
   "vault.host.delete": {
     hostId: { type: "string", description: "Vault host ID from vault_hosts_list." },
@@ -138,7 +138,7 @@ const TOOL_INPUT_FIELDS = Object.freeze({
   "vault.host.import": {
     format: {
       type: "string",
-      description: "Import format: csv, putty, mobaxterm, securecrt, ssh_config, or auto to detect from text.",
+      description: "Import format: csv, putty, mobaxterm, securecrt, finalshell, ssh_config, or auto to detect from text.",
     },
     text: { type: "string", description: "Exported host data text to import." },
     dryRun: {
@@ -396,7 +396,7 @@ const MODEL_DESCRIPTION_HINTS = Object.freeze({
   "vault.host.open":
     "Opens a terminal tab for a saved vault host (same as clicking the host in Netcatty). Connection may still be establishing when the tool returns — use get_environment or wait briefly before terminal_execute if needed. Call session_close with the returned sessionId when the task is finished. Auth prompts (passphrase / keyboard-interactive) still require the user in the Netcatty UI.",
   "vault.host.import":
-    "Only for text in known export formats (PuTTY reg, MobaXterm ini, CSV template, SecureCRT, ssh_config). If attached host text is unknown or auto-detection fails, use read_attachment content, extract fields yourself, and call vault_hosts_create.",
+    "Only for text in known export formats (PuTTY reg, MobaXterm ini, CSV template, SecureCRT, FinalShell JSON, ssh_config). If attached host text is unknown or auto-detection fails, use read_attachment content, extract fields yourself, and call vault_hosts_create.",
   "vault.hosts.create":
     "Use when the user wants to add/create a host in Vault → Hosts (创建主机、SSH 连接凭据). NOT for Vault → Notes sidebar docs. Put SSH password in password, or a local private-key file path in keyPath. If that key is encrypted and the user supplied its passphrase, put it in passphrase so later connections do not prompt. Put long remarks/admin tables in host notes. Never fall back to vault_notes_create if this fails.",
   "vault.host.update":

@@ -64,6 +64,51 @@ describe('isBoldWeightDistinctWithContext', () => {
     });
     assert.equal(isBoldWeightDistinctWithContext('Menlo', 400, 700, 14, ctx), false);
   });
+
+  it('detects metric-aligned variable-font bold via ink coverage (#3335)', () => {
+    // Roboto Mono VF: identical width/ascent/descent across wght, but real
+    // weights carry proportionally more ink (measured ~1.25x for 700/400).
+    const inkByWeight: Partial<Record<number, number>> = { 400: 1000, 700: 1252 };
+    const ctx = {
+      measureText: () =>
+        ({
+          width: 117.6191,
+          actualBoundingBoxAscent: 10.0967,
+          actualBoundingBoxDescent: 0.1367,
+        }) as TextMetrics,
+      measureTextInk: (font: string) => {
+        const weight = Number(font.match(/^(\d+)\s/)?.[1] ?? 400);
+        return inkByWeight[weight] ?? 1000;
+      },
+    };
+    assert.equal(isBoldWeightDistinctWithContext('Roboto Mono', 400, 700, 14, ctx), true);
+  });
+
+  it('keeps rejecting a bold weight whose ink matches the normal weight', () => {
+    const ctx = {
+      measureText: () =>
+        ({
+          width: 117.6191,
+          actualBoundingBoxAscent: 10.0967,
+          actualBoundingBoxDescent: 0.1367,
+        }) as TextMetrics,
+      measureTextInk: () => 1000,
+    };
+    assert.equal(isBoldWeightDistinctWithContext('Roboto Mono', 400, 700, 14, ctx), false);
+  });
+
+  it('ignores sub-threshold ink jitter between weights', () => {
+    const ctx = {
+      measureText: () =>
+        ({
+          width: 117.6191,
+          actualBoundingBoxAscent: 10.0967,
+          actualBoundingBoxDescent: 0.1367,
+        }) as TextMetrics,
+      measureTextInk: (font: string) => (font.startsWith('700 ') ? 1005 : 1000),
+    };
+    assert.equal(isBoldWeightDistinctWithContext('Roboto Mono', 400, 700, 14, ctx), false);
+  });
 });
 
 describe('resolveFontWeightBold', () => {

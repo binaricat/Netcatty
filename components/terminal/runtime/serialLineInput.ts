@@ -1,3 +1,7 @@
+import { getLastChar, removeLastChar } from '../../../domain/serialCharMetrics';
+import { stringCellWidth } from '../autocomplete/terminalStringCellWidth';
+import type { Terminal as XTerm } from '@xterm/xterm';
+
 type StringRef = {
   current: string;
 };
@@ -7,6 +11,8 @@ type SerialLineModeInputOptions = {
   localEcho?: boolean;
   writeToSession: (data: string) => void;
   writeToTerminal: (data: string) => void;
+  /** xterm instance for grapheme-accurate width via UnicodeService. */
+  term?: XTerm | null;
 };
 
 const submitLine = ({
@@ -52,8 +58,10 @@ export function handleSerialLineModeInput(
 
   if (data === "\x7f" || data === "\b") {
     if (options.bufferRef.current.length > 0) {
-      options.bufferRef.current = options.bufferRef.current.slice(0, -1);
-      if (options.localEcho) options.writeToTerminal("\b \b");
+      const lastChar = getLastChar(options.bufferRef.current);
+      const cells = stringCellWidth(lastChar, options.term);
+      options.bufferRef.current = removeLastChar(options.bufferRef.current);
+      if (options.localEcho) options.writeToTerminal("\b \b".repeat(cells));
     }
     return;
   }

@@ -57,6 +57,10 @@ const KNOWN_MONOSPACE_FONTS = new Set([
     'meslolgs nf',
     'symbols nerd font mono',
     'symbols nerd font',
+    // Fixedsys / Fixedsys Excelsior — classic DOS-style bitmap-look
+    // monospace font; the community TrueType revival carries no mono
+    // suffix, so name-based detection would otherwise miss it (#3332).
+    'fixedsys',
 ]);
 
 /**

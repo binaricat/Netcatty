@@ -56,3 +56,17 @@ test("terminal memo refreshes when terminal context reader callback changes", ()
     false,
   );
 });
+
+test('terminal memo refreshes for intense foreground edits and toggles', async () => {
+  const { TERMINAL_THEMES } = await import('../../infrastructure/config/terminalThemes');
+  const theme = TERMINAL_THEMES[0];
+  for (const field of ['terminalTheme', 'appearanceTheme'] as const) {
+    const props = { ...baseProps, [field]: theme };
+    const enabled = { ...props, [field]: { ...theme, colors: { ...theme.colors, foregroundIntense: '#ff8800' } } };
+    const recolored = { ...props, [field]: { ...theme, colors: { ...theme.colors, foregroundIntense: '#00ff00' } } };
+    assert.equal(terminalPropsAreEqual(props, enabled), false);
+    assert.equal(terminalPropsAreEqual(enabled, recolored), false);
+    assert.equal(terminalPropsAreEqual(enabled, props), false);
+    assert.equal(terminalPropsAreEqual(enabled, { ...enabled }), true);
+  }
+});
