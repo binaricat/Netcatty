@@ -40,6 +40,10 @@ test('loading saved headers preserves model metadata and blocks saving until dec
     await act(async () => save().click());
     assert.deepEqual(saved?.customHeaders, { 'X-Tenant': sealed });
     assert.deepEqual(saved?.modelContextWindows, { model: 12345 });
+    await act(async () => (dom.window.document.querySelector('[aria-label="Remove header"]') as HTMLButtonElement).click());
+    await act(async () => save().click());
+    assert.deepEqual(saved?.customHeaders, {});
+    assert.equal(dom.window.document.querySelector('[aria-label="Header name"]'), null);
   } finally {
     await act(async () => root.unmount());
     dom.window.close();
