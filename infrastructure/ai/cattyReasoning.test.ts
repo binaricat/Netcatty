@@ -8,8 +8,27 @@ import {
   estimateReasoningOutputReserve,
   openaiModelLikelySupportsReasoning,
   openaiModelSupportsNoneReasoning,
+  resolveEffectiveCattyReasoningEffort,
   resolveVisibleCattyThinkingLevel,
 } from './cattyReasoning';
+
+test('resolveEffectiveCattyReasoningEffort prefers the composer chip over the provider default', () => {
+  assert.equal(resolveEffectiveCattyReasoningEffort('low', 'high'), 'low');
+  assert.equal(resolveEffectiveCattyReasoningEffort('off', 'high'), 'off');
+});
+
+test('resolveEffectiveCattyReasoningEffort falls back to the provider default', () => {
+  assert.equal(resolveEffectiveCattyReasoningEffort(undefined, 'high'), 'high');
+  assert.equal(resolveEffectiveCattyReasoningEffort(null, ' high '), 'high');
+  assert.equal(resolveEffectiveCattyReasoningEffort('', 'HIGH'), 'high');
+});
+
+test('resolveEffectiveCattyReasoningEffort drops blank or default provider values', () => {
+  assert.equal(resolveEffectiveCattyReasoningEffort(undefined, undefined), undefined);
+  assert.equal(resolveEffectiveCattyReasoningEffort(undefined, ''), undefined);
+  assert.equal(resolveEffectiveCattyReasoningEffort(undefined, 'default'), undefined);
+  assert.equal(resolveEffectiveCattyReasoningEffort(undefined, '  '), undefined);
+});
 
 test('buildCattyReasoningProviderOptions is omitted when effort is off', () => {
   assert.equal(

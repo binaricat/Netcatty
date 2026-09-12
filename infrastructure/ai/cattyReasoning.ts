@@ -22,6 +22,24 @@ const LEVELS_MINIMAL_HIGH = ['minimal', 'high'] as const;
 
 export type CattyReasoningProviderOptions = Record<string, Record<string, unknown>>;
 
+/**
+ * Effective reasoning effort for a turn: the composer thinking chip wins when
+ * the user picked a level; otherwise fall back to the provider-level default
+ * configured under advanced parameters. `default` / blank provider values are
+ * dropped so the request body stays untouched (avoids 400s on models that do
+ * not accept reasoning_effort).
+ */
+export function resolveEffectiveCattyReasoningEffort(
+  chipEffort: string | null | undefined,
+  providerDefaultEffort: string | null | undefined,
+): string | undefined {
+  const chip = typeof chipEffort === 'string' ? chipEffort.trim() : '';
+  if (chip) return chip;
+  const fallback = typeof providerDefaultEffort === 'string' ? providerDefaultEffort.trim().toLowerCase() : '';
+  if (!fallback || fallback === 'default') return undefined;
+  return fallback;
+}
+
 /** Extra completion tokens the SDK will add on top of maxTokens for thinking. */
 export function estimateReasoningOutputReserve(
   options: CattyReasoningProviderOptions | undefined,
