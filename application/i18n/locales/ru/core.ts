@@ -606,6 +606,8 @@ export const ruCoreMessages: Messages = {
     'Подстраивать цвета под требования контрастности (1 = отключено, 21 = максимум)',
   'settings.terminal.behavior.rightClick': 'Поведение правой кнопки мыши',
   'settings.terminal.behavior.rightClick.desc': 'Действие при щелчке правой кнопкой в терминале',
+  'settings.terminal.behavior.rightClick.longPressMenu': 'Удержание правой кнопки открывает меню',
+  'settings.terminal.behavior.rightClick.longPressMenu.desc': 'Если правая кнопка вставляет текст или выделяет слово, удерживайте её полсекунды для открытия меню. Не влияет на приложения, захватывающие мышь.',
   'settings.terminal.behavior.rightClick.fullscreenMenu': 'Показывать меню поверх полноэкранных приложений',
   'settings.terminal.behavior.rightClick.fullscreenMenu.desc':
     'Показывать контекстное меню, даже когда tmux, vim или другие полноэкранные приложения перехватывают мышь. Когда выключено, правый щелчок передаётся приложению (Shift+правый щелчок всё равно открывает меню).',

@@ -579,6 +579,7 @@ function TerminalViewInner({ ctx, isPaneMagnified = false }: { ctx: TerminalView
       hotkeyScheme={hotkeyScheme}
       keyBindings={keyBindings}
       rightClickBehavior={terminalSettings?.rightClickBehavior}
+      rightClickLongPressMenu={terminalSettings?.rightClickLongPressMenu}
       isAlternateScreen={hasMouseTracking}
       getMouseTrackingMode={() => termRef.current?.modes.mouseTrackingMode}
       showContextMenuOverFullscreenApps={terminalSettings?.showContextMenuOverFullscreenApps}

@@ -16,7 +16,7 @@ import {
   Trash2,
   Upload,
 } from 'lucide-react';
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useEffectEvent, useRef, useState } from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import { KeyBinding, RightClickBehavior } from '../../domain/models';
 import {
@@ -27,6 +27,7 @@ import {
   ContextMenuShortcut,
   ContextMenuTrigger,
 } from '../ui/context-menu';
+import { installRightClickLongPress } from './runtime/rightClickLongPress';
 import { isMiddleClickContextMenuEvent, isMouseTrackingActive } from './runtime/middleClickBehavior';
 import { isHistoryPreviewContextMenuTarget } from './runtime/terminalHistoryScrollOverride';
 import { collectOwnedPluginMenus, comparePluginMenus, usePluginContributions } from '../../application/state/usePluginContributions';
@@ -44,6 +45,7 @@ export interface TerminalContextMenuProps {
   hotkeyScheme?: 'disabled' | 'mac' | 'pc';
   keyBindings?: KeyBinding[];
   rightClickBehavior?: RightClickBehavior;
+  rightClickLongPressMenu?: boolean;
   isAlternateScreen?: boolean;
   /** Read the current xterm mouse-tracking mode when handling a right-click. */
   getMouseTrackingMode?: () => string | undefined;
@@ -203,6 +205,7 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
   hotkeyScheme = 'mac',
   keyBindings,
   rightClickBehavior = 'context-menu',
+  rightClickLongPressMenu = false,
   isAlternateScreen = false,
   getMouseTrackingMode,
   showContextMenuOverFullscreenApps = false,
@@ -224,6 +227,16 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
   onRename,
   onDetach,
 }) => {
+  const surfaceRef = useRef<HTMLDivElement>(null);
+  const canStartLongPress = useEffectEvent(() => rightClickLongPressMenu
+    && rightClickBehavior !== 'context-menu'
+    && !isMouseTrackingActive({
+      mouseTracking: isAlternateScreen,
+      terminalMouseTrackingMode: getMouseTrackingMode?.(),
+    }));
+  useEffect(() => {
+    if (surfaceRef.current) return installRightClickLongPress(surfaceRef.current, canStartLongPress);
+  }, []);
   const { t } = useI18n();
   const [menuOpen, setMenuOpen] = useState(false);
   const terminalContext = buildTerminalPluginContributionContext({
@@ -348,6 +361,7 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
     <ContextMenu onOpenChange={handleOpenChange}>
       <ContextMenuTrigger
         asChild
+        ref={surfaceRef}
         onContextMenu={handleRightClick}
       >
         {children}
