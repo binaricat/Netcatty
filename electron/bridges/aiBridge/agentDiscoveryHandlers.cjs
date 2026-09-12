@@ -286,7 +286,7 @@ function registerAgentDiscoveryHandlers(ctx) {
       let effectiveRawOutput = rawOutput;
 
       if (state === "connected_chatgpt" && options?.validateChatGptAuth === true) {
-        const validation = await validateCodexChatGptAuth({ maxAgeMs: 10000, codexPath: options?.codexPath });
+        const validation = await validateCodexChatGptAuth({ maxAgeMs: 10000, codexPath: options?.codexPath, env: effectiveEnv });
         if (!validation.ok) {
           if (isCodexAuthError(validation)) {
             try {

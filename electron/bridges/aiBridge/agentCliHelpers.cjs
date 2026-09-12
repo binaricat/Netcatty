@@ -172,6 +172,10 @@ function createAgentCliHelpers(ctx) {
   }
 
   async function validateCodexChatGptAuth(options) {
+    // Agent-specific credentials must never reuse the default shell's result.
+    const cacheValidation = (result) => {
+      if (!options?.env) setCodexValidationCache(result);
+    };
     const maxAgeMs = options?.maxAgeMs ?? 30000;
     const now = Date.now();
     const rawRequestedCodexPath = String(options?.codexPath || "").trim();
@@ -184,24 +188,24 @@ function createAgentCliHelpers(ctx) {
         error: `Codex CLI path not found: ${rawRequestedCodexPath}`,
         code: "ENOENT",
       };
-      setCodexValidationCache(result);
+      cacheValidation(result);
       return result;
     }
     const cached = getCodexValidationCache();
-    if (cached && now - cached.checkedAt < maxAgeMs && (cached.codexPath || null) === requestedCodexPath) return cached;
-    const inFlightKey = requestedCodexPath || "__auto__";
+    if (!options?.env && cached && now - cached.checkedAt < maxAgeMs && (cached.codexPath || null) === requestedCodexPath) return cached;
+    const inFlightKey = options?.env ? Symbol() : requestedCodexPath || "__auto__";
     const existingValidation = codexAuthValidationInFlight.get(inFlightKey);
     if (existingValidation) return existingValidation;
 
     const validationPromise = (async () => {
-      const shellEnv = await getShellEnv();
+      const shellEnv = options?.env || await getShellEnv();
       const rawCodexPath = requestedCodexPath || await resolveSdkBinPathAsync("codex", shellEnv);
       const codexPath = rawCodexPath && typeof resolveCodexExecutableForSdk === "function"
         ? resolveCodexExecutableForSdk(rawCodexPath) || null
         : rawCodexPath;
       if (!codexPath) {
         const result = { ok: false, checkedAt: now, codexPath: requestedCodexPath, error: "codex binary not found", code: "ENOENT" };
-        setCodexValidationCache(result);
+        cacheValidation(result);
         return result;
       }
 
@@ -250,12 +254,12 @@ function createAgentCliHelpers(ctx) {
 
         await Promise.race([probePromise, timeoutPromise]);
         const result = { ok: true, checkedAt: now, codexPath, error: null };
-        setCodexValidationCache(result);
+        cacheValidation(result);
         return result;
       } catch (error) {
         const normalized = extractCodexError(error);
         const result = { ok: false, checkedAt: now, codexPath, error: normalized.message, code: normalized.code };
-        setCodexValidationCache(result);
+        cacheValidation(result);
         return result;
       } finally {
         if (timeoutId) clearTimeout(timeoutId);

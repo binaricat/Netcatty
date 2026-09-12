@@ -125,7 +125,7 @@ test("runCodexCli omits an incomplete UTF-8 suffix at its byte limit", async () 
   assert.doesNotMatch(result.stdout, /�/u);
 });
 
-function createValidationHelpers({ loadCodexSdk, setTimeout, clearTimeout }) {
+function createValidationHelpers({ loadCodexSdk, setTimeout, clearTimeout, ...overrides }) {
   return createAgentCliHelpers({
     getCodexValidationCache: () => null,
     setCodexValidationCache() {},
@@ -138,8 +138,70 @@ function createValidationHelpers({ loadCodexSdk, setTimeout, clearTimeout }) {
     loadCodexSdk,
     ...(setTimeout ? { setTimeout } : {}),
     ...(clearTimeout ? { clearTimeout } : {}),
+    ...overrides,
   });
 }
+
+test("agent auth validation uses its environment without reading or replacing the default cache", async () => {
+  const defaultEnv = { HOME: "/default-home" };
+  const agentEnv = { HOME: "/agent-home", CODEX_HOME: "/agent-codex", CUSTOM_KEY: "test-value" };
+  const defaultFailure = { ok: false, checkedAt: Date.now(), codexPath: "/fake/codex", error: "default login expired" };
+  let cached = defaultFailure;
+  const receivedEnvs = [];
+  const helpers = createValidationHelpers({
+    getShellEnv: async () => defaultEnv,
+    getCodexValidationCache: () => cached,
+    setCodexValidationCache: (result) => { cached = result; },
+    loadCodexSdk: async () => ({
+      Codex: class {
+        constructor(options) { receivedEnvs.push(options.env); }
+        startThread() {
+          return { async runStreamed() {
+            return { events: (async function* () { yield { type: "turn.completed" }; })() };
+          } };
+        }
+      },
+    }),
+  });
+
+  const agentResult = await helpers.validateCodexChatGptAuth({ codexPath: "/fake/codex", env: agentEnv });
+  assert.equal(agentResult.ok, true);
+  assert.deepEqual(receivedEnvs, [agentEnv]);
+  assert.equal(cached, defaultFailure);
+  const defaultResult = await helpers.validateCodexChatGptAuth({ codexPath: "/fake/codex" });
+  assert.equal(defaultResult, defaultFailure);
+  assert.equal(receivedEnvs.length, 1);
+});
+
+test("agent auth failure cannot become the default environment's cached result", async () => {
+  let cached = null;
+  const receivedHomes = [];
+  const helpers = createValidationHelpers({
+    getShellEnv: async () => ({ HOME: "/default-home" }),
+    getCodexValidationCache: () => cached,
+    setCodexValidationCache: (result) => { cached = result; },
+    loadCodexSdk: async () => ({
+      Codex: class {
+        constructor(options) { this.home = options.env.HOME; receivedHomes.push(this.home); }
+        startThread() {
+          const home = this.home;
+          return { async runStreamed() {
+            if (home === "/agent-home") throw new Error("agent login expired");
+            return { events: (async function* () { yield { type: "turn.completed" }; })() };
+          } };
+        }
+      },
+    }),
+  });
+
+  const agentResult = await helpers.validateCodexChatGptAuth({ codexPath: "/fake/codex", env: { HOME: "/agent-home" } });
+  assert.equal(agentResult.ok, false);
+  assert.equal(cached, null);
+  const defaultResult = await helpers.validateCodexChatGptAuth({ codexPath: "/fake/codex" });
+  assert.equal(defaultResult.ok, true);
+  assert.deepEqual(receivedHomes, ["/agent-home", "/default-home"]);
+  assert.equal(cached, defaultResult);
+});
 
 test("ChatGPT auth validation coalesces concurrent probes and cleans the stream", async () => {
   let runCount = 0;

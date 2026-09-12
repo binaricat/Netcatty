@@ -48,7 +48,7 @@ import {
   isInlineTextAttachment,
 } from '../application/state/terminalSelectionAttachment';
 import { createVaultNoteAttachment, isVaultNoteAttachment, vaultNoteReferencesFit } from '../application/state/vaultNoteAttachment';
-import type { CodexIntegrationStatus } from './settings/tabs/ai/types';
+import { useCodexConfigModel } from '../application/state/useCodexConfigModel';
 import {
   useAIChatStreaming,
   getNetcattyBridge,
@@ -843,45 +843,9 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     [currentAgentConfig],
   );
 
-  const [codexConfigModel, setCodexConfigModel] = useState<string | null>(null);
-  const [codexCustomConfigResolved, setCodexCustomConfigResolved] = useState(false);
-  useEffect(() => {
-    if (!isVisible) return;
-    setCodexCustomConfigResolved(false);
-    if (!isCodexManagedAgent) {
-      setCodexConfigModel(null);
-      return;
-    }
-    const bridge = getNetcattyBridge();
-    if (!bridge?.aiCodexGetIntegration) return;
-    let cancelled = false;
-    void Promise.resolve(
-      // Probe with the agent's own env (same agent.env the run-turn path
-      // merges into the subprocess env): CODEX_HOME/HOME overrides here
-      // select a different config.toml than the shell's default home, and
-      // customConfig.model must reflect the config the agent will run with.
-      bridge.aiCodexGetIntegration({
-        codexPath: getManualAgentCommand(currentAgentConfig),
-        agentEnv: currentAgentConfig.env,
-      }) as Promise<CodexIntegrationStatus>,
-    ).then((info) => {
-      if (cancelled) return;
-      // Surface the third-party model configured in ~/.codex/config.toml even
-      // when auth.json also reports a login (provider switcher tools write
-      // both): config.toml's model_provider is what Codex actually runs with.
-      const customModel = info?.customConfig?.model ?? null;
-      setCodexConfigModel(customModel);
-      setCodexCustomConfigResolved(Boolean(customModel));
-    }).catch(() => {
-      if (!cancelled) {
-        setCodexConfigModel(null);
-        setCodexCustomConfigResolved(false);
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [isVisible, isCodexManagedAgent, currentAgentId, currentAgentConfig]);
+  const { model: codexConfigModel, loadModel: loadCodexConfigModel } = useCodexConfigModel(
+    currentAgentConfig, isVisible,
+  );
 
   const agentModelMapRef = useRef(agentModelMap);
   agentModelMapRef.current = agentModelMap;
@@ -1045,18 +1009,12 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
 
   const isCodexAppServer = isCodexManagedAgent && currentAgentConfig?.codexRuntime === 'app-server';
   const canSteerCurrentTurn = Boolean(activeSessionId && isStreaming && isCodexAppServer);
-  const hasCodexCustomConfig = codexCustomConfigResolved && isCodexManagedAgent && !isCodexAppServer;
+  const hasCodexCustomConfig = Boolean(codexConfigModel) && isCodexManagedAgent;
 
   const agentModelPresets = useMemo(() => {
     const runtimePresets = runtimeAgentModelPresets[currentAgentId];
-    if (hasCodexCustomConfig) {
-      if (runtimePresets) {
-        return runtimePresets;
-      }
-      if (codexConfigModel) {
-        return [{ id: codexConfigModel, name: codexConfigModel }];
-      }
-      return [];
+    if (hasCodexCustomConfig && codexConfigModel) {
+      return [{ id: codexConfigModel, name: codexConfigModel }];
     }
     if (runtimePresets) return runtimePresets;
     const presets = getAgentModelPresets(
@@ -1246,8 +1204,11 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
       if (sendBridge?.aiSyncWebSearch) {
         await sendBridge.aiSyncWebSearch(webSearchConfig?.apiHost || null, webSearchConfig?.apiKey || null);
       }
-      let sendSelectedAgentModel = selectedAgentModel;
-      if (currentAgentConfig && shouldLoadSdkRuntimeModels(currentAgentConfig)) {
+      // A quick send must await the same config probe as the picker. Its model
+      // also takes precedence over App Server's built-in model catalog.
+      const configModel = await loadCodexConfigModel();
+      let sendSelectedAgentModel = configModel ?? selectedAgentModel;
+      if (!configModel && currentAgentConfig && shouldLoadSdkRuntimeModels(currentAgentConfig)) {
         const runtimeTarget = buildExternalAgentRuntimeModelTarget(currentAgentConfig);
         if (runtimeTarget) {
           const catalog = await loadSdkRuntimeModelCatalog(runtimeTarget);
@@ -1431,7 +1392,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
       }
     }
   }, [
-    validateNoteMentions,
+    validateNoteMentions, loadCodexConfigModel,
     isStreaming, activeProvider, effectiveActiveProvider, effectiveActiveModelId, selectedCattyThinking, scopeKey, currentAgentId,
     activeModelId, externalAgents,
     createSession, addMessageToSession, updateMessageById, updateLastMessage,
