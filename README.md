@@ -235,7 +235,11 @@ Exit Netcatty before updating or uninstalling:
 ```powershell
 scoop update
 scoop update netcatty
-# Uninstall when no longer needed:
+```
+
+To uninstall:
+
+```powershell
 scoop uninstall netcatty
 ```
 

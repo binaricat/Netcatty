@@ -233,7 +233,11 @@ scoop install lemon/netcatty
 ```powershell
 scoop update
 scoop update netcatty
-# 不再需要时卸载：
+```
+
+卸载：
+
+```powershell
 scoop uninstall netcatty
 ```
 
