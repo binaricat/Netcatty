@@ -1,5 +1,7 @@
+import { createTerminalReflowReadingPosition } from "./terminal/terminalReflowReadingPosition";
 import { resolveHostOs } from '../domain/host';
 import { Terminal as XTerm } from "@xterm/xterm";
+import type { IMarker } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { SerializeAddon } from "@xterm/addon-serialize";
 import { SearchAddon } from "@xterm/addon-search";
@@ -255,6 +257,7 @@ import {
 import {
   alignTerminalViewportScroll,
   createSynchronizedOutputFitScheduler,
+  resolveTerminalReflowScrollAnchor,
   AUTO_RUN_SNIPPET_LINE_DELAY_MS,
   forceSyncRenderAfterResize,
   MAX_CONNECTION_LOG_DATA_CHARS,
@@ -642,6 +645,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const isRendererActiveRef = useRef(isRendererActive);
   isRendererActiveRef.current = isRendererActive;
   const pendingOutputScrollRef = useRef(false);
+  const reflowReadingPositionRef = useRef(createTerminalReflowReadingPosition());
   const lastFittedSizeRef = useRef<{ width: number; height: number } | null>(null);
   const fontWeightFixupDoneRef = useRef(false);
 
@@ -3009,6 +3013,48 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         const dimensions = fitAddon.proposeDimensions();
         if (!dimensions || Number.isNaN(dimensions.cols) || Number.isNaN(dimensions.rows)) return;
 
+        // A column change rewraps the scrollback, moving rows above the
+        // reading position, so a saved row index no longer points at the same
+        // content after the resize. Capture the content instead of an index.
+        // Row-only and pixel-only fits never rewrap, so skip the O(scrollback)
+        // anchor scan on those frames.
+        const previousCols = term.cols;
+        const reflowAnchor = wasPinnedToBottom || term.cols === dimensions.cols
+          ? null
+          : reflowReadingPositionRef.current.capture(buffer, {
+              // xterm keeps at most rows + scrollback buffer rows and trims
+              // from the top beyond that (Buffer._getCorrectBufferLength), so
+              // these bounds let the capture skip its whole-line measurement
+              // when no trim can reach the anchored line.
+              maxRows: dimensions.rows + (term.options.scrollback ?? 1000),
+              oldCols: previousCols,
+              newCols: dimensions.cols,
+            });
+
+        // Markers pinned to the viewed row and to the viewed logical line's
+        // start. xterm adjusts marker rows through the rewrap (and disposes
+        // them when their row is deleted or trimmed), so after the resize a
+        // surviving marker marks where the viewed content moved without
+        // scanning for it. Each rewrap direction deletes a different row:
+        // a column grow merges a wrapped continuation into its predecessor
+        // (disposing a marker on the viewed continuation row), while a column
+        // shrink on a full scrollback trims the line's first physical rows
+        // (disposing a marker on the start row; the viewed content survives).
+        // Pinning one marker to each of those rows keeps the resolver seeded
+        // in both directions.
+        let reflowMarker: IMarker | null = null;
+        let reflowStartMarker: IMarker | null = null;
+        if (reflowAnchor) {
+          reflowMarker = term.registerMarker(
+            savedViewportY - (buffer.baseY + buffer.cursorY),
+          );
+          if (reflowAnchor.startRow !== savedViewportY) {
+            reflowStartMarker = term.registerMarker(
+              reflowAnchor.startRow - (buffer.baseY + buffer.cursorY),
+            );
+          }
+        }
+
         lastFittedSizeRef.current = { width, height };
         // addon-fit 0.11 clears the renderer before resizing, which can show
         // as a one-frame WebGL blink during layout changes. Resize directly
@@ -3030,14 +3076,94 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         // Align first so the relative restore below does not apply that delta twice.
         alignTerminalViewportScroll(term);
 
+        let anchoredViewportY: number | null = null;
         // Preserve scroll position across resize (superset/Tabby pattern).
         if (wasPinnedToBottom) {
           term.scrollToBottom();
         } else {
-          const targetY = Math.min(savedViewportY, term.buffer.active.baseY);
+          // Re-locate the anchored content; fall back to the saved row index
+          // when the anchored content is gone (scrollback trim). Prefer the
+          // viewport-row marker (it marks the viewed row itself) over the
+          // line-start marker, which only seeds the scan.
+          const viewedMarkerRow = reflowMarker && !reflowMarker.isDisposed && reflowMarker.line >= 0
+            ? reflowMarker.line
+            : null;
+          const startMarkerRow = reflowStartMarker && !reflowStartMarker.isDisposed
+            && reflowStartMarker.line >= 0
+            ? reflowStartMarker.line
+            : null;
+          const markerRow = viewedMarkerRow ?? startMarkerRow;
+          reflowMarker?.dispose();
+          reflowMarker = null;
+          reflowStartMarker?.dispose();
+          reflowStartMarker = null;
+          // A continuation anchor registers both markers, so both coming back
+          // disposed means the trim deleted the rows they pin — but marker
+          // disposal alone is not proof the anchored content is gone: a
+          // narrowing rewrap relocates the viewed characters into newly
+          // appended continuation rows before the trim cuts the same number
+          // of rows from the top, so the characters can survive at the buffer
+          // top while both pinned rows are gone. `trimReachedStart` switches
+          // the resolver to that remnant check (a trim removes from the top,
+          // so a line whose start row it reached leaves any surviving part at
+          // row 0) instead of letting it sweep the stale row for repetitive
+          // duplicates on every divider-drag frame. A single disposed
+          // viewport marker keeps the seeded resolve: a column-grow merge
+          // disposes it while the merged line still matches the anchor.
+          const trimReachedStart = reflowAnchor !== null
+            && reflowAnchor.startRow !== savedViewportY
+            && viewedMarkerRow === null
+            && startMarkerRow === null;
+          anchoredViewportY = reflowAnchor === null
+            ? null
+            : resolveTerminalReflowScrollAnchor(
+                term.buffer.active,
+                reflowAnchor,
+                markerRow,
+                trimReachedStart,
+              );
+          // Content matching can still fail when the viewed line is the
+          // cursor's own logical line: with the pinned `reflowCursorLine:
+          // false` default a narrowing resize skips rewrapping that line and
+          // truncates its rows, so the captured prefix no longer matches even
+          // though the viewport-row marker survived and tracks the exact
+          // viewed row. Restore the marker position there rather than the
+          // stale saved index, which would jump upward by the accumulated
+          // reflow delta of the rewrapped lines above. (The line-start marker
+          // must not stand in for a failed match: its row only seeds the
+          // scan, and the column-grow merge disposes the viewport marker
+          // while the merged line still matches the anchor.)
+          // Only those two cases may trust the viewport-row marker. When the
+          // viewport sits partway into a wrapped non-cursor line, a column
+          // shrink rewraps that line and xterm appends the group's newly
+          // created rows after the existing ones, so the marker keeps its old
+          // within-line row while the viewed characters move deeper — even
+          // though xterm still adjusts the marker through unrelated
+          // insertions and would have disposed it only if its row were
+          // trimmed. That mismatch is unobservable through marker disposal,
+          // so trust the marker as a restore position only when the anchored
+          // line is the cursor's own (row indices survive truncation) or the
+          // marker sits at the anchored line's start (the group's new rows
+          // are appended below it, and insertions above shift it onto the
+          // relocated start). Anything else falls back to the plain row
+          // restore.
+          const markerTrackedViewport = reflowAnchor !== null
+            && (reflowAnchor.startRow === savedViewportY
+              || reflowAnchor.containsCursor === true)
+            ? viewedMarkerRow
+            : null;
+          const targetY = Math.min(
+            anchoredViewportY ?? markerTrackedViewport ?? savedViewportY,
+            term.buffer.active.baseY,
+          );
           if (term.buffer.active.viewportY !== targetY) {
             term.scrollToLine(targetY);
           }
+        }
+        if (term.cols !== previousCols) {
+          reflowReadingPositionRef.current.remember(
+            term.buffer.active, anchoredViewportY === null ? null : reflowAnchor,
+          );
         }
         term.refresh(0, Math.max(0, term.rows - 1));
 

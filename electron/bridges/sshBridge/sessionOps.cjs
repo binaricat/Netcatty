@@ -121,19 +121,6 @@ function createSessionOpsApi(ctx) {
       // POSIX sh's $PPID is sshd (needed by the cwd probe).
       return `exec sh -c ${quoteShellArg(withRemoteWatchdog(command, timeoutMs))}`;
     }
-    function getTcpLatencyTarget(session) {
-      if (session.tcpLatencyDirect === false) return null;
-
-      const auth = session.tcpLatencyTarget || session.moshStatsAuth || session.etStatsAuth || session._reuseEndpoint || null;
-      if (auth?.hasJumpHost || auth?.hasProxy) return null;
-
-      const hostname = auth?.hostname || session.hostname;
-      const rawPort = auth?.port ?? 22;
-      const port = Number(rawPort);
-      if (!hostname || !Number.isInteger(port) || port < 1 || port > 65535) return null;
-      return { hostname, port };
-    }
-
     async function getSessionRemoteInfo(_event, payload) {
       const { sessionId } = payload || {};
       const session = sessions.get(sessionId);
@@ -1274,9 +1261,17 @@ function createSessionOpsApi(ctx) {
         }
         return executeBoundedSshCommand(conn, command, options);
       };
-      const tcpLatencyTarget = getTcpLatencyTarget(session);
-      const tcpLatencyPromise = tcpLatencyTarget && typeof measureTcpConnectLatency === 'function'
-        ? Promise.resolve(measureTcpConnectLatency(tcpLatencyTarget)).catch(() => null)
+      // Measure latency with an SSH transport ping on the connection already
+      // serving stats. A separate TCP connect to the SSH port would land in
+      // sshd logs as a failed pre-auth login with no username (issue #3320).
+      // A shared interactive connection must honor the user's keepalive opt-out
+      // (some network devices ignore these requests and would poison the FIFO).
+      // Dedicated Mosh/ET companions disable periodic keepalives internally;
+      // they are not shared with forwarding and can still carry stats pings.
+      const pingDisabled = sshStatsConn === session.conn
+        && sshStatsConn?.config?.keepaliveInterval === 0;
+      const pingLatencyPromise = sshStatsConn && !pingDisabled && typeof measureSshPingLatency === 'function'
+        ? Promise.resolve(measureSshPingLatency(sshStatsConn)).catch(() => null)
         : Promise.resolve(null);
       const formatStatsError = (error) => (
         error?.code === "SSH_EXEC_OPEN_TIMEOUT" || error?.code === "SSH_EXEC_RUN_TIMEOUT"
@@ -1303,7 +1298,7 @@ function createSessionOpsApi(ctx) {
                 .filter(Boolean)
                 .join('|');
             }
-            const measuredLatency = await tcpLatencyPromise;
+            const measuredLatency = await pingLatencyPromise;
             if (settled) return;
             const latencyMs = Number.isFinite(measuredLatency) ? measuredLatency : null;
     

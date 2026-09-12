@@ -236,3 +236,47 @@ test("resolveProviderEndpoint adds /v1 to a bare ollama.com Cloud host", () => {
     "https://ollama.com/v1",
   );
 });
+
+// Exercise the real SDK request builders through the Electron fetch boundary.
+// A rejected request is sufficient here: headers are inspected before parsing.
+test("SDK requests forward custom headers and scope OpenCode sessions", async (t) => {
+  const browserGlobal = globalThis as typeof globalThis & { window?: unknown };
+  const originalWindow = browserGlobal.window;
+  t.after(() => { browserGlobal.window = originalWindow; });
+  const requests: Array<{ url: string; headers: Headers }> = [];
+  browserGlobal.window = {
+    netcatty: {
+      aiFetch: async (url: string, _method: string, headers: Record<string, string>) => {
+        requests.push({ url, headers: new Headers(headers) });
+        return { ok: false, status: 400, data: '{"error":{"message":"test response"}}' };
+      },
+    },
+  };
+
+  for (const style of ["openai", "anthropic", "google"] as const) {
+    for (const openaiApi of style === "openai" ? ["chat", "responses"] as const : ["chat"] as const) {
+      for (const sessionId of ["conversation-a", "conversation-a", "conversation-b"]) {
+        const model = createModelFromConfig(makeConfig({
+          style,
+          openaiApi,
+          apiKey: "test-key",
+          baseURL: "https://opencode.ai/zen/go/v1",
+          customHeaders: { "X-Test-Header": "configured" },
+        }), { chatSessionId: sessionId });
+        await assert.rejects(model.doGenerate({ prompt: [{ role: "user", content: [{ type: "text", text: "hello" }] }] }));
+        const request = requests.at(-1)!;
+        assert.equal(request.headers.get("x-opencode-session"), sessionId);
+        assert.equal(request.headers.get("x-test-header"), "configured");
+      }
+    }
+  }
+  for (const baseURL of ["https://opencode.ai/zen/go/v1", "https://example.test/v1"]) {
+    for (const customHeaders of [undefined, { "X-OpenCode-Session": "override" }]) {
+      const model = createModelFromConfig(makeConfig({ baseURL, apiKey: "test-key", customHeaders }), { chatSessionId: "automatic" });
+      await assert.rejects(model.doGenerate({ prompt: [{ role: "user", content: [{ type: "text", text: "hello" }] }] }));
+      assert.equal(requests.at(-1)!.headers.get("x-opencode-session"),
+        customHeaders ? "override" : baseURL.includes("opencode.ai") ? "automatic" : null);
+    }
+  }
+  assert.equal(requests.length, 16);
+});
