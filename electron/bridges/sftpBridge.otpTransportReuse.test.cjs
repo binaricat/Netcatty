@@ -237,7 +237,12 @@ function startOtpOnlyServer() {
         });
       });
 
-      const server = net.createServer((socket) => sshServer.injectSocket(socket));
+      const sockets = new Set();
+      const server = net.createServer((socket) => {
+        sockets.add(socket);
+        socket.on("close", () => sockets.delete(socket));
+        sshServer.injectSocket(socket);
+      });
       server.on("error", reject);
       server.listen(0, "127.0.0.1", () => resolve({
         port: server.address().port,
@@ -245,6 +250,8 @@ function startOtpOnlyServer() {
         dirs,
         getKeyboardInteractiveRounds: () => keyboardInteractiveRounds,
         close: () => new Promise((done) => {
+          // Include clients still waiting for authentication, before registration.
+          for (const socket of sockets) socket.destroy();
           sshServer.close?.();
           server.close(() => done());
         }),
@@ -267,10 +274,10 @@ function createSender() {
 /** Answer every pending keyboard-interactive request with the OTP code. */
 function answerOtpPrompts(sender) {
   const surfaced = sender.sent.some((s) => s.channel === "netcatty:keyboard-interactive");
-  for (const pending of kiHandler.getRequests().values()) {
-    pending.finishCallback([OTP_CODE]);
-    // Clear the 5-minute TTL timer so the test process can exit promptly.
-    if (pending.timeoutId) clearTimeout(pending.timeoutId);
+  for (const { channel, payload } of sender.sent) {
+    if (channel === "netcatty:keyboard-interactive" && kiHandler.getRequests().has(payload.requestId)) {
+      kiHandler.handleResponse({ sender }, { requestId: payload.requestId, responses: [OTP_CODE] });
+    }
   }
   return surfaced;
 }
@@ -303,6 +310,7 @@ test("SFTP-page transfers reuse the OTP-authenticated transport (#3310)", async 
     pool.resetSshTransportRegistryForTests({ defaultIdleTtlMs: 0 });
   });
 
+  const pendingOpens = [];
   const sftpClients = new Map();
   sftpBridge.init({ sftpClients, sessions: new Map(), electronModule: {} });
   transferBridge.init({ sftpClients });
@@ -319,14 +327,15 @@ test("SFTP-page transfers reuse the OTP-authenticated transport (#3310)", async 
         // Best-effort cleanup.
       }
     }
-    for (const pending of kiHandler.getRequests().values()) {
-      if (pending.timeoutId) clearTimeout(pending.timeoutId);
+    for (const pending of [...kiHandler.getRequests().values()]) {
+      kiHandler.cancelRequestsForSession(pending.sessionId, "test-end");
     }
     pool.discardAllTransports("test-end");
     await new Promise((resolve) => setTimeout(resolve, 100));
   });
   t.after(async () => {
     await server.close();
+    await Promise.allSettled(pendingOpens);
   });
 
   const options = BASE_OPTIONS(server.port);
@@ -346,6 +355,8 @@ test("SFTP-page transfers reuse the OTP-authenticated transport (#3310)", async 
     { sender: browseSender },
     { ...options, sessionId: "sftp-browse-otp" },
   );
+  pendingOpens.push(browseOpen);
+  browseOpen.catch(() => {}); // Teardown observes failures if the prompt wait fails first.
   const browseSurfaced = await waitFor(
     () => answerOtpPrompts(browseSender),
     { message: "SFTP-tab login must surface the OTP prompt" },
@@ -428,6 +439,8 @@ test("SFTP-page transfers reuse the OTP-authenticated transport (#3310)", async 
     { sender: driftSender },
     { ...options, password: "one-time-code-not-valid-anymore" },
   );
+  pendingOpens.push(driftOpen);
+  driftOpen.catch(() => {});
   await waitFor(
     () =>
       driftSender.sent.some((s) => s.channel === "netcatty:keyboard-interactive") &&
