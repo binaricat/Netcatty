@@ -28,7 +28,7 @@ test('loading saved headers preserves model metadata and blocks saving until dec
   let saved: Partial<ProviderConfig> | undefined;
   try {
     await act(async () => root.render(<I18nProvider locale="en"><TooltipProvider>
-      <ProviderConfigForm provider={{ id: 'custom', providerId: 'custom', enabled: true,
+      <ProviderConfigForm provider={{ id: 'custom', name: 'Custom', providerId: 'custom', enabled: true,
         customHeaders: { 'X-Tenant': sealed }, modelContextWindows: { model: 12345 },
       }} onSave={(updates) => { saved = updates; }} onCancel={() => {}} />
     </TooltipProvider></I18nProvider>));
