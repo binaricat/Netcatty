@@ -29,11 +29,13 @@ test("other platforms, keys, modifiers and composition are untouched", () => {
 // This avoids constructing the renderer's WebGL/addon stack in Node.
 const runtime = readFileSync(new URL("./createXTermRuntime.ts", import.meta.url), "utf8");
 const start = runtime.indexOf("    const lineJumpSequence =");
-const end = runtime.indexOf("    // macOS Option+", start);
-assert.ok(start > 0 && end > start);
-const fallback = `(function () { ${runtime.slice(start, end)} return true; })()`;
+const end = runtime.indexOf("    // Autocomplete key handler", start);
+const applyStart = runtime.indexOf("    if (lineJumpSequence && ctx.sessionRef.current)");
+const applyEnd = runtime.indexOf("    // macOS Option+", applyStart);
+assert.ok(start > 0 && end > start && applyEnd > applyStart);
+const fallback = `(function () { ${runtime.slice(start, end)} ${runtime.slice(applyStart, applyEnd)} return true; })()`;
 
-for (const mode of ["shell", "alternate", "kitty", "win32", "disconnected", "non-mac"]) {
+for (const mode of ["shell", "alternate", "kitty", "win32", "disconnected", "non-mac", "password", "sudo-picker"]) {
   test(`runtime Command arrow fallback: ${mode}`, () => {
     const writes: string[] = [];
     let prevented = 0;
@@ -41,7 +43,11 @@ for (const mode of ["shell", "alternate", "kitty", "win32", "disconnected", "non
     const result = runInNewContext(fallback, {
       e: { ...event, preventDefault: () => prevented++, stopPropagation: () => stopped++ },
       term: { buffer: { active: { type: mode === "alternate" ? "alternate" : "normal" } }, modes: { win32InputMode: mode === "win32" } },
-      ctx: { sessionRef: { current: mode === "disconnected" ? null : "session" } },
+      ctx: {
+        sessionRef: { current: mode === "disconnected" ? null : "session" },
+        passwordPromptActiveRef: { current: mode === "password" },
+      },
+      sudoAutofill: { isPromptPending: () => mode === "sudo-picker" },
       kittyKeyboardMode: {},
       isKittyKeyboardModeActive: () => mode === "kitty",
       isMacPlatform: () => mode !== "non-mac",
@@ -56,5 +62,35 @@ for (const mode of ["shell", "alternate", "kitty", "win32", "disconnected", "non
     assert.deepEqual(writes, mode === "shell" ? ["\x01"] : []);
     assert.equal(prevented, mode === "shell" ? 1 : 0);
     assert.equal(stopped, prevented);
+  });
+}
+
+for (const key of ["ArrowLeft", "ArrowRight"]) {
+  test(`Command ${key} bypasses directory autocomplete, bare arrows still navigate it`, () => {
+    const autocompleteEnd = runtime.indexOf("    const kittySequenceForKeyDown =", end);
+    assert.ok(autocompleteEnd > end);
+    const route = `(function () { ${runtime.slice(start, autocompleteEnd)} ${runtime.slice(applyStart, applyEnd)} return true; })()`;
+    for (const metaKey of [true, false]) {
+      let autocompleteCalls = 0;
+      const writes: string[] = [];
+      runInNewContext(route, {
+        e: { ...event, key, metaKey, preventDefault: () => {}, stopPropagation: () => {} },
+        term: { buffer: { active: { type: "normal" } }, modes: {} },
+        ctx: {
+          sessionRef: { current: "session" },
+          // A focused directory panel consumes either arrow.
+          onAutocompleteKeyEvent: () => { autocompleteCalls++; return false; },
+        },
+        sudoAutofill: undefined,
+        kittyKeyboardMode: {},
+        isKittyKeyboardModeActive: () => false,
+        isMacPlatform: () => true,
+        commandArrowLineJumpSequence,
+        handleTerminalInputData: (data: string) => writes.push(data),
+        scrollToBottomAfterInput: () => {},
+      });
+      assert.equal(autocompleteCalls, metaKey ? 0 : 1);
+      assert.deepEqual(writes, metaKey ? [key === "ArrowLeft" ? "\x01" : "\x05"] : []);
+    }
   });
 }

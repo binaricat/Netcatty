@@ -1959,8 +1959,19 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       return false;
     }
 
+    // Resolve the local shell chord before autocomplete can consume directory
+    // arrows, but apply it only after app/snippet shortcuts below.
+    const lineJumpSequence =
+      term.buffer.active.type === "normal" &&
+      ctx.passwordPromptActiveRef?.current !== true &&
+      !sudoAutofill?.isPromptPending() &&
+      !term.modes.win32InputMode &&
+      !isKittyKeyboardModeActive(kittyKeyboardMode)
+        ? commandArrowLineJumpSequence(e, isMacPlatform())
+        : null;
+
     // Autocomplete key handler (must be checked before other handlers)
-    if (ctx.onAutocompleteKeyEvent && !isKittyKeyboardModeActive(kittyKeyboardMode)) {
+    if (ctx.onAutocompleteKeyEvent && !lineJumpSequence && !isKittyKeyboardModeActive(kittyKeyboardMode)) {
       const consumed = ctx.onAutocompleteKeyEvent(e);
       if (!consumed) return false; // Event was consumed by autocomplete
     }
@@ -2270,12 +2281,6 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
 
     // Keep app/snippet shortcuts and negotiated keyboard protocols ahead of
     // the shell-only macOS line-editing fallback (issue #3139).
-    const lineJumpSequence =
-      term.buffer.active.type === "normal" &&
-      !term.modes.win32InputMode &&
-      !isKittyKeyboardModeActive(kittyKeyboardMode)
-        ? commandArrowLineJumpSequence(e, isMacPlatform())
-        : null;
     if (lineJumpSequence && ctx.sessionRef.current) {
       e.preventDefault();
       e.stopPropagation();
