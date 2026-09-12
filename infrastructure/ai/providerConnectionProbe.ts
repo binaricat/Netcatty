@@ -154,6 +154,7 @@ export async function probeProviderConnection(input: {
   bridge: ProviderProbeFetchBridge | undefined;
   baseURL: string;
   apiKey: string;
+  customHeaders?: Record<string, string>;
   providerId: string;
   style: ProviderStyle;
   presetModelsEndpoint?: string;
@@ -181,7 +182,7 @@ export async function probeProviderConnection(input: {
     await bridge.aiAllowlistAddHost(baseURL);
   }
   const url = buildProviderProbeUrl(baseURL, endpoint);
-  const headers = buildModelDiscoveryHeaders(input.style, input.apiKey);
+  const headers = buildModelDiscoveryHeaders(input.style, input.apiKey, input.customHeaders);
   const result = await bridge.aiFetch(
     url,
     "GET",

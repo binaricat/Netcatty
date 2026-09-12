@@ -1,3 +1,4 @@
+import { decryptProviderHeaders } from './providerHeaderCredentials';
 import { decryptField } from '../persistence/secureFieldAdapter';
 import { buildModelDiscoveryHeaders, resolveModelsDiscoveryEndpoint } from './modelDiscoveryHeaders';
 import { normalizeOllamaSdkBaseURL } from './ollamaCompatBaseUrl';
@@ -61,6 +62,7 @@ export function providerModelCacheKey(provider: ProviderConfig): string {
     provider.baseURL ?? '',
     provider.skipTLSVerify ? '1' : '0',
     credentialFingerprint(provider.apiKey),
+    credentialFingerprint(JSON.stringify(provider.customHeaders)),
   ].join('|');
 }
 
@@ -140,7 +142,7 @@ export async function fetchProviderModelCatalog(
       await bridge.aiAllowlistAddHost(baseURL);
     }
     const url = buildProviderProbeUrl(baseURL, endpoint);
-    const headers = buildModelDiscoveryHeaders(style, apiKey);
+    const headers = buildModelDiscoveryHeaders(style, apiKey, await decryptProviderHeaders(provider.customHeaders));
     const result = await bridge.aiFetch(
       url,
       'GET',

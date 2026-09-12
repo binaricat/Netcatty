@@ -22,8 +22,8 @@ export function isOpencodeEndpoint(baseURL: string | undefined): boolean {
 /**
  * Build the extra SDK request headers for a provider config.
  *
- * - User-configured `customHeaders` always win verbatim (they were previously
- *   collected in settings but never applied).
+ * - User-configured `customHeaders` take precedence. Stored encrypted values are
+ *   resolved by the main process before sending.
  * - OpenCode endpoints get an automatic `x-opencode-session` header carrying
  *   the chat session id, so OpenCode Go can route the conversation. A
  *   user-supplied session header takes precedence over the automatic one.

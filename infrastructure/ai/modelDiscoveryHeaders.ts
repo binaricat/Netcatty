@@ -38,7 +38,7 @@ export function resolveModelsDiscoveryEndpoint(
  * Returning an empty object when the key is missing lets the caller still
  * issue an unauthenticated probe (e.g. against local Ollama).
  */
-export function buildModelDiscoveryHeaders(
+function buildDefaultModelDiscoveryHeaders(
   style: ProviderStyle,
   apiKey: string | undefined,
 ): Record<string, string> {
@@ -55,4 +55,17 @@ export function buildModelDiscoveryHeaders(
     default:
       return { Authorization: `Bearer ${apiKey}` };
   }
+}
+
+export function buildModelDiscoveryHeaders(
+  style: ProviderStyle,
+  apiKey: string | undefined,
+  customHeaders: Record<string, string> = {},
+): Record<string, string> {
+  const headers = buildDefaultModelDiscoveryHeaders(style, apiKey);
+  const overridden = new Set(Object.keys(customHeaders).map((name) => name.toLowerCase()));
+  return Object.fromEntries([
+    ...Object.entries(headers).filter(([name]) => !overridden.has(name.toLowerCase())),
+    ...Object.entries(customHeaders),
+  ]);
 }

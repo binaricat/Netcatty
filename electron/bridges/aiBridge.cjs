@@ -299,7 +299,7 @@ const WEB_SEARCH_KEY_PLACEHOLDER = "__WEB_SEARCH_KEY__";
 function injectApiKeyIntoRequest(url, headers, providerId) {
   if (!providerId) return { url, headers };
   const resolved = resolveProviderApiKey(providerId);
-  if (!resolved || !resolved.apiKey) return { url, headers };
+  if (!resolved) return { url, headers };
   const realKey = resolved.apiKey;
 
   // Replace placeholder in all header values
@@ -314,6 +314,17 @@ function injectApiKeyIntoRequest(url, headers, providerId) {
     patchedUrl = url.replace(API_KEY_PLACEHOLDER, encodeURIComponent(realKey));
   }
 
+  for (const [name, stored] of Object.entries(resolved.provider.customHeaders || {})) {
+    const value = decryptApiKeyValue(stored);
+    if (stored.startsWith(ENC_PREFIX) && (!value || value === stored)) {
+      throw new Error("Unable to decrypt custom HTTP headers");
+    }
+    // Replace case-insensitively, including SDK-generated authorization headers.
+    for (const key of Object.keys(patchedHeaders)) {
+      if (key.toLowerCase() === name.toLowerCase()) delete patchedHeaders[key];
+    }
+    Object.defineProperty(patchedHeaders, name, { value, enumerable: true, configurable: true });
+  }
   return { url: patchedUrl, headers: patchedHeaders };
 }
 

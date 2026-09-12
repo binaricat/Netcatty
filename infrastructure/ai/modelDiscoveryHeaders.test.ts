@@ -57,3 +57,12 @@ test("resolveModelsDiscoveryEndpoint falls back to the preset path only when the
   assert.equal(resolveModelsDiscoveryEndpoint("google", "/custom/list"), "/custom/list");
   assert.equal(resolveModelsDiscoveryEndpoint("google", undefined), undefined);
 });
+
+test('custom discovery headers override default auth regardless of case', () => {
+  for (const [style, name] of [['openai', 'authorization'], ['anthropic', 'X-API-Key'], ['google', 'X-Goog-Api-Key']] as const) {
+    const headers = buildModelDiscoveryHeaders(style, 'default-key', { [name]: 'custom-key', 'X-Tenant': 'tenant' });
+    assert.equal(headers[name], 'custom-key');
+    assert.equal(Object.keys(headers).filter(key => key.toLowerCase() === name.toLowerCase()).length, 1);
+    assert.equal(headers['X-Tenant'], 'tenant');
+  }
+});

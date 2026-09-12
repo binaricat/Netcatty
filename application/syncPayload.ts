@@ -1,3 +1,4 @@
+import { decryptProviderHeaders, encryptProviderHeaders } from '../infrastructure/ai/providerHeaderCredentials';
 /**
  * Sync Payload Builders - Single source of truth for constructing and applying
  * the encrypted cloud-sync payload.
@@ -399,13 +400,13 @@ const mergeAiProvidersPreservingLocalApiKeys = (
     if (typeof provider?.id === 'string') localById.set(provider.id, provider);
   }
   return incoming.map((provider) => {
-    if (provider.apiKey != null) return provider;
     const id = typeof provider.id === 'string' ? provider.id : undefined;
     const localProvider = id != null ? localById.get(id) : undefined;
-    if (localProvider && typeof localProvider.apiKey === 'string') {
-      return { ...provider, apiKey: localProvider.apiKey };
-    }
-    return provider;
+    return {
+      ...provider,
+      ...(provider.apiKey == null && typeof localProvider?.apiKey === 'string' ? { apiKey: localProvider.apiKey } : {}),
+      ...(provider.customHeaders == null && localProvider?.customHeaders != null ? { customHeaders: localProvider.customHeaders } : {}),
+    };
   });
 };
 
@@ -559,7 +560,11 @@ export function collectSyncableSettings(): SyncPayload['settings'] {
 
   const ai: NonNullable<SyncPayload['settings']>['ai'] = {};
   const providers = readArraySetting(STORAGE_KEY_AI_PROVIDERS);
-  if (providers) ai.providers = providers.map(stripDeviceBoundApiKey);
+  if (providers) ai.providers = providers.map((provider) => {
+    const next = { ...stripDeviceBoundApiKey(provider) };
+    delete next.customHeaders;
+    return next;
+  });
   const activeProviderId = localStorageAdapter.readString(STORAGE_KEY_AI_ACTIVE_PROVIDER);
   if (activeProviderId != null) ai.activeProviderId = activeProviderId;
   const activeModelId = localStorageAdapter.readString(STORAGE_KEY_AI_ACTIVE_MODEL);
@@ -621,7 +626,12 @@ export async function collectCloudSyncableSettings(): Promise<SyncPayload['setti
   };
 
   if (providers) {
-    ai.providers = await Promise.all(providers.map(withPortableApiKey));
+    ai.providers = await Promise.all(providers.map(async (provider) => {
+      const next = await withPortableApiKey(provider);
+      return isRecord(provider.customHeaders)
+        ? { ...next, customHeaders: await decryptProviderHeaders(provider.customHeaders as Record<string, string>) }
+        : next;
+    }));
   }
   if (webSearchConfig) {
     ai.webSearchConfig = await withPortableApiKey(webSearchConfig);
@@ -817,7 +827,12 @@ async function applySyncableSettings(settings: NonNullable<SyncPayload['settings
   const ai = settings.ai;
   if (ai) {
     if (ai.providers != null) {
-      const providers = await Promise.all(ai.providers.map(withLocalEncryptedApiKey));
+      const providers = await Promise.all(ai.providers.map(async (provider) => {
+        const next = await withLocalEncryptedApiKey(provider);
+        return isRecord(provider.customHeaders)
+          ? { ...next, customHeaders: await encryptProviderHeaders(await decryptProviderHeaders(provider.customHeaders as Record<string, string>)) }
+          : next;
+      }));
       localStorageAdapter.write(
         STORAGE_KEY_AI_PROVIDERS,
         mergeAiProvidersPreservingLocalApiKeys(providers),

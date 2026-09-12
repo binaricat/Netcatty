@@ -61,7 +61,7 @@ export interface ProviderConfig {
   apiKey?: string;           // encrypted via credentialBridge (enc:v1: prefix)
   baseURL?: string;          // custom endpoint URL
   defaultModel?: string;
-  customHeaders?: Record<string, string>;
+  customHeaders?: Record<string, string>; // values encrypted via credentialBridge; decrypted at request boundary
   enabled: boolean;
   skipTLSVerify?: boolean;   // skip TLS certificate verification (for self-signed certs)
   /** User override for the model context window, in tokens. Wins over discovered model metadata. */

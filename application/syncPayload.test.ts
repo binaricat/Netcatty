@@ -1963,3 +1963,30 @@ test("applySyncPayload applies pluginSidecars through the production applier hoo
 
   assert.equal((applied as SyncPayload["pluginSidecars"])?.entries[0].value.clock, 3);
 });
+
+test('custom provider headers use portable cloud secrets and local encryption with legacy preservation', async () => {
+  localStorage.clear();
+  const sealed = `enc:v1:${Buffer.concat([Buffer.from('v10'), Buffer.alloc(32, 2)]).toString('base64')}`;
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: {
+    netcatty: {
+      credentialsEncrypt: async () => sealed,
+      credentialsDecrypt: async (value: string) => value === sealed ? 'tenant-secret' : value,
+    },
+    dispatchEvent: () => true,
+  } });
+  localStorage.setItem(storageKeys.STORAGE_KEY_AI_PROVIDERS, JSON.stringify([{
+    id: 'custom-headers', providerId: 'custom', enabled: true, customHeaders: { 'X-Tenant': sealed },
+  }]));
+  const plainSettings = buildSyncPayload(vault([]));
+  assert.equal(plainSettings.settings?.ai?.providers?.[0]?.customHeaders, undefined);
+  const cloud = await buildCloudSyncPayload(vault([]));
+  assert.deepEqual(cloud.settings?.ai?.providers?.[0]?.customHeaders, { 'X-Tenant': 'tenant-secret' });
+  await applySyncPayload(cloud, { importVaultData: () => {} });
+  const read = () => JSON.parse(localStorage.getItem(storageKeys.STORAGE_KEY_AI_PROVIDERS)!)[0];
+  assert.deepEqual(read().customHeaders, { 'X-Tenant': sealed });
+  await applySyncPayload(plainSettings, { importVaultData: () => {} });
+  assert.deepEqual(read().customHeaders, { 'X-Tenant': sealed });
+  cloud.settings!.ai!.providers![0].customHeaders = {};
+  await applySyncPayload(cloud, { importVaultData: () => {} });
+  assert.deepEqual(read().customHeaders, {});
+});
