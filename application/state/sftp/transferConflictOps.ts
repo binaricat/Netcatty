@@ -103,10 +103,21 @@ export function useSftpTransferConflictOps() {
         (value) => resolve ? resolve(value) : Promise.resolve(value),
       ),
     );
-    return isSameSftpPath(
+    if (isSameSftpPath(
       joinPath(sourceParent, getFileName(task.sourcePath)),
       joinPath(targetParent, getFileName(task.targetPath)),
-    );
+    )) return true;
+    // Bind mounts keep distinct realpaths while naming the same directory.
+    // Compare parents so a symlink is identified as an entry, not its referent.
+    if (targetPane.connection.isLocal && bridge?.statLocal
+      && getFileName(task.sourcePath) === getFileName(task.targetPath)) {
+      const [sourceStat, targetStat] = await Promise.all([
+        bridge.statLocal(sourceParent), bridge.statLocal(targetParent),
+      ]);
+      return sourceStat.dev !== undefined && sourceStat.ino !== undefined
+        && sourceStat.dev === targetStat.dev && sourceStat.ino === targetStat.ino;
+    }
+    return false;
   }, []);
 
   const deleteTargetPath = useCallback(

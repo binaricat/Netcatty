@@ -9,6 +9,47 @@ import { netcattyBridge } from "../../../infrastructure/services/netcattyBridge"
 import type { SftpPane } from "./types";
 import { useSftpTransferConflictOps } from "./transferConflictOps";
 
+test("bind-mounted parents cannot cause replacement to delete the source link", async (t) => {
+  const originalGet = netcattyBridge.get;
+  const globals = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
+  const previousAct = globals.IS_REACT_ACT_ENVIRONMENT;
+  globals.IS_REACT_ACT_ENVIRONMENT = true;
+  let renderer: ReactTestRenderer | undefined;
+  let ops!: ReturnType<typeof useSftpTransferConflictOps>;
+  let deletes = 0;
+  t.after(async () => {
+    await act(async () => renderer?.unmount());
+    netcattyBridge.get = originalGet;
+    globals.IS_REACT_ACT_ENVIRONMENT = previousAct;
+  });
+  netcattyBridge.get = () => ({
+    // Bind mounts retain different realpaths but expose the same parent identity.
+    realpathLocal: async (value: string) => value,
+    statLocal: async (value: string) => ({
+      type: "directory", size: 0, lastModified: 0, dev: 42,
+      ino: value === "/a" || value === "/mnt/alias" ? 7 : 8,
+    }),
+    deleteLocalFile: async () => { deletes++; },
+  } as unknown as NetcattyBridge);
+  function Probe() { ops = useSftpTransferConflictOps(); return null; }
+  await act(async () => { renderer = create(React.createElement(Probe)); });
+  const pane = { connection: { id: "local-pane", isLocal: true } } as SftpPane;
+  const task = {
+    sourceConnectionId: "local-pane", targetConnectionId: "local-pane",
+    sourcePath: "/a/link", targetPath: "/mnt/alias/link", fileName: "link", isDirectory: false,
+  } as TransferTask;
+  await assert.rejects(ops.deleteTargetPath(task, pane, null, "auto", "symlink"), /Choose Duplicate or Skip/);
+  assert.equal(deletes, 0);
+  assert.equal(await ops.isSameSourceEntry(task, pane, null, "auto"), true);
+  // Different entries and genuinely different parents must remain replaceable.
+  for (const targetPath of ["/mnt/alias/another-link", "/other/link"]) {
+    const other = { ...task, targetPath };
+    assert.equal(await ops.isSameSourceEntry(other, pane, null, "auto"), false);
+    await ops.deleteTargetPath(other, pane, null, "auto", "symlink");
+  }
+  assert.equal(deletes, 2);
+});
+
 test("same-pane link replacement preserves the source, including aliased parent paths", async (t) => {
   const dir = await fs.mkdtemp(path.join(process.cwd(), ".pr3318-links-"));
   const actGlobal = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
