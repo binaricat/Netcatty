@@ -28,7 +28,7 @@ function fixture() {
       cols = nextCols;
       const row = anchor ? resolveTerminalReflowScrollAnchor(buffer, anchor, 0) : null;
       if (row !== null) buffer.viewportY = row;
-      tracker.remember(buffer, anchor);
+      tracker.remember(buffer, row === null ? null : anchor);
     },
   };
 }

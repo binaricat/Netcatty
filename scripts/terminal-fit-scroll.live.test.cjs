@@ -110,6 +110,14 @@ if (!process.versions.electron) {
       const userOffset=term.buffer.active.viewportY*term.cols;
       for(let cols=79;cols>=40;cols--){fit(cols,25);await wait(10);checkOffset(userOffset,'user scroll during drag');}
       term.reset();fit(80,25);await wait(50);
+      // The cursor's own wrapped line is truncated/padded by xterm instead
+      // of reflowed. Its changing text must not reset the paragraph offset.
+      await write(longText+'\\r\\n'+'cursor '.repeat(30));
+      await wait(100);term.scrollToLine(30);await wait(50);
+      for(let cols=79;cols>=40;cols--){fit(cols,25);await wait(10);checkOffset(readingOffset,'cursor follower shrink');}
+      for(let cols=41;cols<=80;cols++){fit(cols,25);await wait(10);checkOffset(readingOffset,'cursor follower grow');}
+      term.reset();fit(80,25);await wait(50);
+
       await write(Array.from({length:200},(_,i)=>'line '+i+' '+('A    B repeated '.repeat(7))).join('\\r\\n'));
       await wait(100); term.scrollToLine(70); await wait(50);
       fit(80,16); await wait(80); check(70,'shrink');
@@ -156,7 +164,7 @@ if (!process.versions.electron) {
       await write('\\x1b[?2026h');fit(140,25);synchronizedFitSchedulerRef.current.dispose();
       await write('\\x1b[?2026l');await wait(100);assert.equal(term.cols,beforeDispose,'teardown cancels retry');
       assert.ok(el.querySelector('.xterm-screen').getBoundingClientRect().height > 0,'real rendered terminal');
-      return {passed:['shrink','grow','18 drag steps','long paragraph character offset and user scroll','bottom and next scroll','synchronized repeated spaced text','user scroll','mode reentry','full scrollback trim','alternate buffer','output timeout','cleanup'],viewportY:term.buffer.active.viewportY,domRow:domRow()};
+      return {passed:['shrink','grow','18 drag steps','long paragraph character offset and user scroll','cursor follower changes','bottom and next scroll','synchronized repeated spaced text','user scroll','mode reentry','full scrollback trim','alternate buffer','output timeout','cleanup'],viewportY:term.buffer.active.viewportY,domRow:domRow()};
     })()`);
     console.log(JSON.stringify(result));
     if (process.env.NETCATTY_FIT_SCREENSHOT) {

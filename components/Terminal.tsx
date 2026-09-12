@@ -3076,6 +3076,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         // Align first so the relative restore below does not apply that delta twice.
         alignTerminalViewportScroll(term);
 
+        let anchoredViewportY: number | null = null;
         // Preserve scroll position across resize (superset/Tabby pattern).
         if (wasPinnedToBottom) {
           term.scrollToBottom();
@@ -3113,7 +3114,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
             && reflowAnchor.startRow !== savedViewportY
             && viewedMarkerRow === null
             && startMarkerRow === null;
-          const anchoredViewportY = reflowAnchor === null
+          anchoredViewportY = reflowAnchor === null
             ? null
             : resolveTerminalReflowScrollAnchor(
                 term.buffer.active,
@@ -3160,7 +3161,9 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           }
         }
         if (term.cols !== previousCols) {
-          reflowReadingPositionRef.current.remember(term.buffer.active, reflowAnchor);
+          reflowReadingPositionRef.current.remember(
+            term.buffer.active, anchoredViewportY === null ? null : reflowAnchor,
+          );
         }
         term.refresh(0, Math.max(0, term.rows - 1));
 

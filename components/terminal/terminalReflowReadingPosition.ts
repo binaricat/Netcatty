@@ -30,6 +30,9 @@ export function createTerminalReflowReadingPosition() {
       }
       return anchor;
     },
+    // The caller passes null unless content resolution succeeded. A cursor
+    // follower may change during resize; the resolver already validates that
+    // tolerance. Save its new identity for the next pre-fit comparison.
     remember(buffer: Buffer, anchor: TerminalReflowScrollAnchor | null) {
       previous = null;
       if (!anchor || anchor.containsCursor) return;
@@ -38,8 +41,7 @@ export function createTerminalReflowReadingPosition() {
       });
       // Trim, clamping and failed content resolution must not carry a stale
       // offset into the next frame. Only retain the sub-row rounding loss.
-      if (!current || current.containsCursor || current.textPrefix !== anchor.textPrefix
-        || current.contextSuffix !== anchor.contextSuffix) return;
+      if (!current || current.containsCursor || current.textPrefix !== anchor.textPrefix) return;
       const remainder = anchor.charOffset - current.charOffset;
       const rowLength = buffer.getLine(buffer.viewportY)?.translateToString(false).length ?? 0;
       if (remainder < 0 || remainder >= rowLength) return;
