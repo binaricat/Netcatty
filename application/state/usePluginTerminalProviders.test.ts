@@ -8,6 +8,7 @@ import {
   isPluginTerminalProviderRefreshCurrent,
   mergePluginTerminalThemeColors,
   resolvePluginTerminalTheme,
+  toPluginTerminalTheme,
   waitForProviderResponse,
 } from './usePluginTerminalProviders.ts';
 
@@ -23,6 +24,15 @@ const baseTheme = {
     brightMagenta: '#ff77ff', brightCyan: '#77ffff', brightWhite: '#ffffff',
   },
 } as const satisfies TerminalTheme;
+
+test('theme provider requests keep the existing palette contract with intense color enabled or disabled', () => {
+  for (const foregroundIntense of ['#ff8800', undefined]) {
+    const theme = { ...baseTheme, colors: { ...baseTheme.colors, foregroundIntense } };
+    assert.deepEqual(toPluginTerminalTheme(theme), { type: baseTheme.type, colors: baseTheme.colors });
+    assert.equal(theme.colors.foregroundIntense, foregroundIntense);
+    assert.equal(resolvePluginTerminalTheme(theme, { background: '#112233' }).colors.foregroundIntense, foregroundIntense);
+  }
+});
 
 test('terminal theme Providers merge deterministically over the host theme', () => {
   const merged = mergePluginTerminalThemeColors([
