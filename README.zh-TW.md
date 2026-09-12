@@ -219,6 +219,26 @@ Windows 發行檔可能仍未簽章。
 
 > **macOS 使用者請注意：** 目前的發行版本應該都已完成程式碼簽章與公證。如果 Gatekeeper 仍然跳出警告，請確認你下載的是 GitHub Releases 上最新的官方建置版本。
 
+### Scoop（Windows x64，社群維護）
+
+安裝 [Scoop](https://scoop.sh/) 後，可以透過社群維護的 [lemon 軟體來源](https://github.com/hoilc/scoop-lemon/blob/master/bucket/netcatty.json) 安裝 Netcatty。此軟體來源從 Netcatty 官方 GitHub Releases 下載安裝檔：
+
+```powershell
+scoop bucket add lemon https://github.com/hoilc/scoop-lemon
+scoop install lemon/netcatty
+```
+
+更新或解除安裝前，請先結束 Netcatty：
+
+```powershell
+scoop update
+scoop update netcatty
+# 不再需要時解除安裝：
+scoop uninstall netcatty
+```
+
+這是第三方套件，並非 Netcatty 官方軟體來源，更新可能晚於 GitHub Releases。目前僅支援 x64。設定儲存在 `%APPDATA%\netcatty`，更新和一般解除安裝會保留這些設定；`scoop uninstall netcatty --purge` 也會刪除這些設定。透過此方式安裝後，請使用 Scoop 管理更新。
+
 ### Nix / NixOS
 
 Netcatty 提供了一個 flake，替 Nix 與 NixOS 使用者包裝官方的 Linux AppImage 發行版：

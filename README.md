@@ -221,6 +221,26 @@ application and integration are complete.
 
 > **macOS Users:** Current releases are expected to be code-signed and notarized. If Gatekeeper still warns, make sure you downloaded the latest official build from GitHub Releases.
 
+### Scoop (Windows x64, community-maintained)
+
+With [Scoop](https://scoop.sh/) installed, you can install Netcatty from the community-maintained [lemon bucket](https://github.com/hoilc/scoop-lemon/blob/master/bucket/netcatty.json), which downloads the installer from Netcatty's official GitHub Releases:
+
+```powershell
+scoop bucket add lemon https://github.com/hoilc/scoop-lemon
+scoop install lemon/netcatty
+```
+
+Exit Netcatty before updating or uninstalling:
+
+```powershell
+scoop update
+scoop update netcatty
+# Uninstall when no longer needed:
+scoop uninstall netcatty
+```
+
+This is a third-party package, not an official Netcatty bucket, and updates may lag behind GitHub Releases. It currently supports x64 only. Settings remain in `%APPDATA%\netcatty` across updates and normal uninstalls; `scoop uninstall netcatty --purge` also deletes those settings. Use Scoop to manage updates for this installation.
+
 ### Nix / NixOS
 
 Netcatty provides a flake that wraps the official Linux AppImage release for Nix and NixOS users:
