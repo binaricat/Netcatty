@@ -55,6 +55,7 @@ export const esCoreMessages: Messages = {
   'sort.za': 'Z-a',
   'sort.newest': 'Más reciente a más antiguo',
   'sort.oldest': 'Más antiguo a más reciente',
+  'sort.ip': 'Por IP',
   'sort.group': 'Por grupo',
   'field.label': 'Etiqueta',
   'field.type': 'Tipo',
