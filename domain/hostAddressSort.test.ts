@@ -28,3 +28,16 @@ test("compareHostAddresses treats equal addresses as equal", () => {
   assert.equal(compareHostAddresses("10.0.0.1", "10.0.0.1"), 0);
   assert.equal(compareHostAddresses(" 10.0.0.1 ", "10.0.0.1"), 0);
 });
+
+test("compareHostAddresses sorts IPv6 hexadecimal words numerically", () => {
+  assert.deepEqual(["2001:db8::10", "2001:db8::f", "2001:db8::2"].sort(compareHostAddresses), ["2001:db8::2", "2001:db8::f", "2001:db8::10"]);
+  assert.equal(compareHostAddresses("[2001:db8::f]", "2001:0db8:0:0:0:0:0:000f"), 0);
+  assert.equal(compareHostAddresses("fe80::1%eth0", "fe80::1%eth1"), 0);
+  assert.equal(compareHostAddresses("::ffff:192.0.2.1", "::ffff:c000:201"), 0);
+  assert.ok(compareHostAddresses("::", "::1") < 0);
+});
+
+test("compareHostAddresses orders mixed address families before hostnames", () => {
+  assert.deepEqual(["host2", "2001:db8::1", "10.0.0.2", "host1", "::1"].sort(compareHostAddresses), ["10.0.0.2", "::1", "2001:db8::1", "host1", "host2"]);
+  assert.ok(compareHostAddresses("::1", "not:an:ip") < 0);
+});
