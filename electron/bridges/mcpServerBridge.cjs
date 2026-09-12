@@ -1817,6 +1817,27 @@ async function cancelWorkerBackgroundJobsForTerminalSession(sessionId) {
   for (const jobId of matchingJobs) workerBackgroundJobs.delete(jobId);
 }
 
+// Read via the existing renderer bridge and the sidebar's bounded reader.
+async function handleReadContext(params = {}) {
+  const scopedIds = resolveScopedSessionIds(params.chatSessionId, params.scopedSessionIds);
+  const sessionId = typeof params.sessionId === "string" && params.sessionId.trim()
+    ? params.sessionId.trim()
+    : scopedIds?.length === 1 ? scopedIds[0] : null;
+  if (!sessionId) return { ok: false, error: "sessionId is required when the scope does not contain exactly one terminal." };
+  const scopeError = validateSessionScope(sessionId, params.chatSessionId, params.scopedSessionIds);
+  if (scopeError) return { ok: false, error: scopeError };
+  if (!invokeVaultAgentFn) return { ok: false, error: "Terminal context reader is unavailable." };
+  const result = await invokeVaultAgentFn("terminal.readContext", {
+    sessionId,
+    range: params.range,
+    startLine: params.startLine,
+    maxLines: params.maxLines,
+  });
+  // Scope can change while the renderer drains pending terminal output.
+  const currentScopeError = validateSessionScope(sessionId, params.chatSessionId, params.scopedSessionIds);
+  return currentScopeError ? { ok: false, error: currentScopeError } : result;
+}
+
 let builtinRpcHandlerRegistry = null;
 
 function getBuiltinRpcHandlerRegistry() {
@@ -1826,6 +1847,7 @@ function getBuiltinRpcHandlerRegistry() {
       "meta.status": handleGetStatus,
       "attachment.list": handleListAttachments,
       "attachment.read": handleReadAttachment,
+      "harness.terminal.read_context": handleReadContext,
       "terminal.execute": handleExec,
       "sftp.list": handleSftpList,
       "sftp.read": handleSftpRead,

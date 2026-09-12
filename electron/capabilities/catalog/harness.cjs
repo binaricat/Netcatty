@@ -2,7 +2,7 @@
 
 const { CAPABILITY_STATUS } = require("../constants.cjs");
 
-/** Catty-only harness tools (sidebar agent; renderer-local; not MCP/CLI). */
+/** Renderer-local harness tools; terminal reading also exposes a scoped MCP entry. */
 /** @type {import("../types.cjs").CapabilityDefinition[]} */
 const HARNESS_CAPABILITIES = [
   {
@@ -61,6 +61,7 @@ const HARNESS_CAPABILITIES = [
   },
   {
     id: "harness.terminal.read_context",
+    agentKinds: ["sidebar"],
     domain: "harness",
     status: CAPABILITY_STATUS.IMPLEMENTED,
     description: "Read a bounded slice of the current terminal screen or scrollback from the active AI scope.",
@@ -75,6 +76,7 @@ const HARNESS_CAPABILITIES = [
     },
     surfaces: {
       catty: { toolName: "terminal_read_context" },
+      builtin: { rpcMethod: "netcatty/readContext", mcpTool: "terminal_read_context" },
     },
   },
   {

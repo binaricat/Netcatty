@@ -1,3 +1,5 @@
+import { readScreenContext } from "../scripts/screenSnapshotRegistry";
+import { normalizeTerminalContextRange } from "../../domain/terminalContextRead";
 import { resolveHostOs } from '../../domain/host';
 import type { GroupConfig, Host, Identity, KnownHost, ManagedSource, PortForwardingRule, ProxyProfile, Snippet, SSHKey, TerminalSettings, VaultNote } from '../../domain/models';
 import type { RememberImportedKeyPassphraseResult } from '../../application/defaultKeyPassphrases';
@@ -570,6 +572,16 @@ export async function handleVaultAgentOp(
   deps: VaultAgentApiDeps,
 ): Promise<Record<string, unknown>> {
   switch (op) {
+    case 'terminal.readContext': {
+      const sessionId = typeof params.sessionId === 'string' ? params.sessionId : '';
+      if (!sessionId) return { ok: false, error: 'sessionId is required.' };
+      return { ...await readScreenContext({
+        sessionId,
+        range: normalizeTerminalContextRange(params.range),
+        startLine: typeof params.startLine === 'number' ? params.startLine : undefined,
+        maxLines: typeof params.maxLines === 'number' ? params.maxLines : undefined,
+      }) };
+    }
     case 'session.close': {
       const sessionId = String(params.sessionId || '').trim();
       if (!sessionId) return { ok: false, error: 'sessionId is required.' };
