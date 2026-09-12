@@ -368,10 +368,24 @@ test("SFTP-page transfers reuse the OTP-authenticated transport (#3310)", async 
 
   // -- 2. Pooled transfer open: rides the authenticated transport. --
   const transferSender = createSender();
-  const transfer = await sftpBridge.openSftp(
+  const transferOpen = sftpBridge.openSftp(
     { sender: transferSender },
     { ...options },
   );
+  pendingOpens.push(transferOpen);
+  let transferOpenSettled = false;
+  transferOpen.then(
+    () => { transferOpenSettled = true; },
+    () => { transferOpenSettled = true; },
+  );
+  const transferPrompted = () => transferSender.sent.some(
+    (s) => s.channel === "netcatty:keyboard-interactive",
+  );
+  await waitFor(() => transferOpenSettled || transferPrompted(), {
+    message: "pooled transfer open must complete promptly",
+  });
+  assert.equal(transferPrompted(), false, "pooled transfer open must not prompt again");
+  const transfer = await transferOpen;
   const transferClient = sftpClients.get(transfer.sftpId);
   assert.ok(transferClient, "pooled transfer open must register a client");
   assert.equal(
@@ -383,11 +397,6 @@ test("SFTP-page transfers reuse the OTP-authenticated transport (#3310)", async 
     server.getKeyboardInteractiveRounds(),
     1,
     "pooled transfer open must not re-authenticate (no second OTP)",
-  );
-  assert.equal(
-    transferSender.sent.some((s) => s.channel === "netcatty:keyboard-interactive"),
-    false,
-    "pooled transfer open must not prompt again",
   );
   const transferChannel = await sftpBridge.requireSftpChannel(transferClient);
   assert.ok(transferChannel, "shared transport must host the transfer SFTP channel");
