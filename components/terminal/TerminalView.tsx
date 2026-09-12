@@ -1307,11 +1307,11 @@ function TerminalViewInner({ ctx, isPaneMagnified = false }: { ctx: TerminalView
           <TerminalComposeBar
             key={sessionId}
             sessionId={sessionId}
-            onSend={(text) => {
+            onSend={async (text) => {
               if (sessionRef.current) {
                 const sensitive = isTerminalSensitiveInputActive(sessionId);
-                executeSnippetCommand(text, false);
-                return !sensitive;
+                const sent = await executeSnippetCommand(text, false);
+                return sent && !sensitive && !isTerminalSensitiveInputActive(sessionId);
               }
               return false;
             }}

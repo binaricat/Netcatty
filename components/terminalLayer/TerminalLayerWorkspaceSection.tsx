@@ -340,7 +340,6 @@ function TerminalLayerWorkspaceSectionInner({ ctx }: { ctx: WorkspaceContext }) 
 
       {activeWorkspace && focusedSessionId && isComposeBarOpen && (
         <TerminalComposeBar
-          key={focusedSessionId}
           sessionId={focusedSessionId}
           onSend={handleComposeSend}
           onSnippetClick={(snippet) => void handleSnippetFromPanel(snippet)}

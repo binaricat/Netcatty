@@ -270,7 +270,7 @@ const ComposeBarSnippetManagePopover = memo(function ComposeBarSnippetManagePopo
 
 export interface TerminalComposeBarProps {
   // Return false for rejected or sensitive input so it is not recalled.
-  onSend: (text: string) => boolean | void;
+  onSend: (text: string) => boolean | void | Promise<boolean | void>;
   sessionId: string;
   onClose: () => void;
   onSnippetClick?: (snippet: Snippet) => void;
@@ -292,7 +292,7 @@ export const TerminalComposeBar: React.FC<TerminalComposeBarProps> = ({
   themeColors,
 }) => {
   const { t } = useI18n();
-  const { record, navigate, reset } = useComposeBarHistory(sessionId);
+  const { prepareRecord, navigate, reset } = useComposeBarHistory(sessionId);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const isComposingRef = useRef(false);
   const resizeCleanupRef = useRef<(() => void) | null>(null);
@@ -344,11 +344,17 @@ export const TerminalComposeBar: React.FC<TerminalComposeBarProps> = ({
     if (!el) return;
     const text = el.value;
     if (!text) return;
-    if (onSend(text) !== false) record(text);
+    const recordSent = prepareRecord();
+    const result = onSend(text);
+    void Promise.resolve(result).then((sent) => {
+      if (sent !== false) recordSent(text);
+    }).catch((error: unknown) => {
+      console.error('Compose bar send failed', error);
+    });
     reset();
     el.value = '';
     el.focus();
-  }, [onSend, record, reset]);
+  }, [onSend, prepareRecord, reset]);
 
   const insertCommand = useCallback((command: string) => {
     const el = textareaRef.current;

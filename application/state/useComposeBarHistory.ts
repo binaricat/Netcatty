@@ -1,6 +1,6 @@
-import { useCallback, useRef } from 'react';
+import { useCallback, useLayoutEffect, useRef } from 'react';
 import { navigateComposeBarHistory, type ComposeBarHistoryDirection } from '../../domain/composeBarHistory';
-import { getComposeBarHistory, recordComposeBarHistory } from './composeBarHistoryStore';
+import { getComposeBarHistory, createComposeBarHistoryRecorder } from './composeBarHistoryStore';
 
 export function useComposeBarHistory(sessionId: string) {
   const cursor = useRef({ index: Infinity, draft: '' });
@@ -9,10 +9,11 @@ export function useComposeBarHistory(sessionId: string) {
     cursor.current = { index: Infinity, draft: '' };
   }, []);
 
-  const record = useCallback((text: string) => {
-    recordComposeBarHistory(sessionId, text);
-    reset();
-  }, [reset, sessionId]);
+  // Keep the existing textarea draft when workspace focus changes, but begin
+  // a fresh history walk in the newly focused session.
+  useLayoutEffect(reset, [reset, sessionId]);
+
+  const prepareRecord = useCallback(() => createComposeBarHistoryRecorder(sessionId), [sessionId]);
 
   const navigate = useCallback((currentValue: string, direction: ComposeBarHistoryDirection) => {
     const result = navigateComposeBarHistory({
@@ -24,5 +25,5 @@ export function useComposeBarHistory(sessionId: string) {
     return result?.value;
   }, [sessionId]);
 
-  return { record, navigate, reset };
+  return { prepareRecord, navigate, reset };
 }

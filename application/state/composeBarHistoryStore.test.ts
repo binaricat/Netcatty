@@ -13,3 +13,16 @@ test('compose history is isolated per terminal and removed when its session clos
   assert.deepEqual(getComposeBarHistory('b'), ['echo b']);
   pruneComposeBarHistory([]);
 });
+
+test('late send completion cannot restore a closed session or overwrite another send', async () => {
+  const { createComposeBarHistoryRecorder } = await import('./composeBarHistoryStore');
+  pruneComposeBarHistory([]);
+  const first = createComposeBarHistoryRecorder('a');
+  const second = createComposeBarHistoryRecorder('a');
+  second('second');
+  first('first');
+  assert.deepEqual(getComposeBarHistory('a'), ['second', 'first']);
+  pruneComposeBarHistory([]);
+  first('late');
+  assert.deepEqual(getComposeBarHistory('a'), []);
+});

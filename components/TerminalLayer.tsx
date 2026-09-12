@@ -2142,10 +2142,11 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     toast.info(t('scripts.recording.started'));
   }, [getActiveTerminalSessionId, t]);
 
-  const handleComposeSend = useCallback((text: string) => {
+  const handleComposeSend = useCallback(async (text: string) => {
     const activeWorkspace = activeWorkspaceRef.current;
     if (!activeWorkspace) return false;
     let recordHistory = false;
+    const pendingSends: Promise<boolean>[] = [];
     const payload = text + '\r';
     const broadcastEnabled = isBroadcastEnabled?.(activeWorkspace.id);
     const focusedSessionId = activeWorkspace.focusedSessionId;
@@ -2161,8 +2162,9 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
         if (isTerminalSensitiveInputActive(sid)) continue;
         const executor = snippetExecutorsRef.current.get(sid);
         if (executor) {
-          executor(text, false, { broadcast: false });
-          recordHistory = true;
+          pendingSends.push(Promise.resolve(executor(text, false, { broadcast: false })).then(
+            (sent) => sent && !isTerminalSensitiveInputActive(sid),
+          ));
         } else {
           const session = sessionsRef.current.find((candidate) => candidate.id === sid);
           if (!session || !canUseDirectSessionWriteFallback(session)) continue;
@@ -2179,8 +2181,10 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       if (targetId) {
         const executor = snippetExecutorsRef.current.get(targetId);
         if (executor) {
-          recordHistory = !isTerminalSensitiveInputActive(targetId);
-          executor(text, false);
+          const sensitive = isTerminalSensitiveInputActive(targetId);
+          pendingSends.push(Promise.resolve(executor(text, false)).then(
+            (sent) => sent && !sensitive && !isTerminalSensitiveInputActive(targetId),
+          ));
         } else {
           const session = sessionsRef.current.find((candidate) => candidate.id === targetId);
           if (!session || !canUseDirectSessionWriteFallback(session)) return false;
@@ -2191,7 +2195,8 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
         }
       }
     }
-    return recordHistory;
+    const results = await Promise.all(pendingSends);
+    return recordHistory || results.some(Boolean);
   }, [isBroadcastEnabled, terminalBackend]);
 
   const sessionLogConfig = useMemo(
