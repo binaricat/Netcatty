@@ -5,9 +5,8 @@
  *
  * Cursor SDK local agents use Agent.create({ apiKey, model, local:{cwd},
  * mcpServers }) and stream SDKMessage events from run.stream().
- * Local agents inherit process.env; Skills+CLI chat tenants are applied
- * through a serialized process-env gate so concurrent chats cannot leak
- * NETCATTY_CLI_CHAT_SESSION_ID.
+ * Each local turn runs in its own worker with a host-supplied environment.
+ * Stopping a stalled SDK startup cannot block another chat or leak its tenant.
  */
 const { mcpEnvPairsToObject } = require("./injectMcp.cjs");
 const {
@@ -314,7 +313,13 @@ async function abortable(promise, signal, onLateResolve) {
   }
 }
 
-async function runCursorTurn({
+function runCursorTurn(options) {
+  // Injected SDK modules are used by the in-process driver tests only.
+  if (options.sdkModule) return runCursorTurnInProcess(options);
+  return require("./cursorWorkerHost.cjs").runCursorWorkerTurn(options);
+}
+
+async function runCursorTurnInProcess({
   prompt, attachments, agentOptions, runtimeEnv, resumeSessionId, emitter, signal, sdkModule,
 }) {
   let resolvedModule = sdkModule;
@@ -536,6 +541,7 @@ module.exports = {
   parseCursorModelSelection,
   encodeCursorCliModel,
   runCursorTurn,
+  runCursorTurnInProcess,
   toCursorMcpServers,
   translateCursorEvent,
   withTemporaryProcessEnv,
