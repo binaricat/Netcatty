@@ -105,7 +105,7 @@ export function applyResponsesApiStatelessStoreOption(
 }
 
 export function buildCattyReasoningProviderOptions(
-  provider: Pick<ProviderConfig, 'providerId' | 'style'> | null | undefined,
+  provider: Pick<ProviderConfig, 'providerId' | 'style' | 'advancedParams' | 'openaiApi'> | null | undefined,
   effort: string | null | undefined,
   modelId?: string,
 ): CattyReasoningProviderOptions | undefined {
@@ -120,14 +120,16 @@ export function buildCattyReasoningProviderOptions(
   if (!resolved) return undefined;
 
   if (style === 'openai') {
-    if (modelId && !openaiModelLikelySupportsReasoning(modelId)) return undefined;
+    const explicitDefault = ['low', 'medium', 'high'].includes(provider.advancedParams?.reasoningEffort ?? '');
+    const unrecognizedModel = !!modelId && !openaiModelLikelySupportsReasoning(modelId);
+    if (unrecognizedModel && !explicitDefault) return undefined;
     if (resolved === 'off') {
       if (modelId && openaiModelSupportsNoneReasoning(modelId)) {
         return { openai: { reasoningEffort: 'none' } };
       }
       return undefined;
     }
-    return { openai: { reasoningEffort: resolved } };
+    return { openai: { reasoningEffort: resolved, ...(explicitDefault && resolveOpenAIApi(provider) === 'responses' ? { forceReasoning: true } : {}) } };
   }
 
   if (style === 'anthropic') {
@@ -245,7 +247,7 @@ export function openaiModelLikelySupportsReasoning(modelId: string): boolean {
 
 /** Levels shown on the Catty thinking chip, or empty when the model cannot take them. */
 export function cattyReasoningLevelsForSelection(
-  provider: Pick<ProviderConfig, 'providerId' | 'style'> | null | undefined,
+  provider: Pick<ProviderConfig, 'providerId' | 'style' | 'advancedParams' | 'openaiApi'> | null | undefined,
   modelId?: string,
 ): readonly string[] {
   if (!provider) return [];
@@ -262,7 +264,12 @@ export function cattyReasoningLevelsForSelection(
     return CATTY_REASONING_LEVELS;
   }
   if (style === 'openai') {
-    if (!modelId || !openaiModelLikelySupportsReasoning(modelId)) return [];
+    if (!modelId) return [];
+    if (!openaiModelLikelySupportsReasoning(modelId)) {
+      return ['low', 'medium', 'high'].includes(provider.advancedParams?.reasoningEffort ?? '')
+        ? LEVELS_LOW_MEDIUM_HIGH
+        : [];
+    }
     if (openaiModelSupportsNoneReasoning(modelId)) return CATTY_REASONING_LEVELS;
     if (openaiModelSupportsMinimalReasoning(modelId)) return LEVELS_MINIMAL_LOW_MEDIUM_HIGH;
     return LEVELS_LOW_MEDIUM_HIGH;

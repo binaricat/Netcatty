@@ -356,3 +356,43 @@ test('applyResponsesApiStatelessStoreOption always requests encrypted reasoning 
     'deepseek-v4-flash',
   );
 });
+
+test('explicit provider effort exposes controls for a custom OpenAI model', () => {
+  const provider = { providerId: 'custom', style: 'openai' as const, advancedParams: { reasoningEffort: 'low' } };
+  assert.deepEqual(cattyReasoningLevelsForSelection(provider, 'relay-model'), ['low', 'medium', 'high']);
+  assert.deepEqual(cattyReasoningLevelsForSelection({ ...provider, advancedParams: {} }, 'relay-model'), []);
+});
+
+test('custom model requests send explicit effort for Chat and Responses and omit it by default', async () => {
+  const { createOpenAI } = await import('@ai-sdk/openai');
+  for (const api of ['chat', 'responses'] as const) {
+    for (const [chip, fallback, expected] of [
+      [undefined, 'high', 'high'],
+      ['low', 'high', 'low'],
+      ['', 'high', 'high'],
+      [undefined, undefined, undefined],
+      [undefined, 'default', undefined],
+    ] as const) {
+      let body: Record<string, unknown> | undefined;
+      const openai = createOpenAI({ apiKey: 'test', fetch: async (_url, init) => {
+        body = JSON.parse(String(init?.body));
+        throw new Error('captured request');
+      } });
+      const provider = { providerId: 'custom', style: 'openai' as const, openaiApi: api, advancedParams: { reasoningEffort: fallback } };
+      const options = buildCattyReasoningProviderOptions(provider, resolveEffectiveCattyReasoningEffort(chip, fallback), 'relay-model');
+      await assert.rejects(openai[api]('relay-model').doGenerate({
+        prompt: [{ role: 'user', content: [{ type: 'text', text: 'hello' }] }],
+        providerOptions: options,
+        temperature: 0.4,
+        topP: 0.8,
+      }), /captured request/);
+      assert.ok(body);
+      if (api === 'chat') {
+        assert.equal(body.temperature, 0.4);
+        assert.equal(body.top_p, 0.8);
+      }
+      assert.equal(api === 'chat' ? body.reasoning_effort : (body.reasoning as { effort?: string } | undefined)?.effort, expected);
+      if (!expected) assert.equal(body.reasoning, undefined);
+    }
+  }
+});
