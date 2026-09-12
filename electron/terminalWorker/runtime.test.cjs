@@ -1429,3 +1429,39 @@ test("runtime forwards non-output renderer events to the parent", async () => {
     sessionGeneration: 0,
   });
 });
+
+test("runtime contains throws from fire-and-forget send listeners", () => {
+  const parentPort = createParentPort();
+  const seenPayloads = [];
+  const runtime = createTerminalWorkerRuntime({
+    parentPort,
+    terminalDataPipeline: null,
+    registerBridges(ipcMain) {
+      ipcMain.on("netcatty:write", (_event, payload) => {
+        seenPayloads.push(payload);
+        throw new Error("listener blew up synchronously");
+      });
+    },
+  });
+  runtime.start();
+
+  assert.doesNotThrow(() => parentPort.emitMessage({
+    kind: "send",
+    channel: "netcatty:write",
+    payload: { sessionId: "s1", data: "ls\r" },
+    webContentsId: 7,
+  }));
+  assert.deepEqual(seenPayloads, [{ sessionId: "s1", data: "ls\r" }]);
+
+  // A following message must still dispatch normally after the swallowed throw.
+  assert.doesNotThrow(() => parentPort.emitMessage({
+    kind: "send",
+    channel: "netcatty:write",
+    payload: { sessionId: "s1", data: "pwd\r" },
+    webContentsId: 7,
+  }));
+  assert.deepEqual(seenPayloads, [
+    { sessionId: "s1", data: "ls\r" },
+    { sessionId: "s1", data: "pwd\r" },
+  ]);
+});

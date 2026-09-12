@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { buildExternalBridgeContextMessages } from "../../infrastructure/ai/harness/externalBridgeContext.ts";
 
 import type { ChatMessageAttachment, ToolCall, ToolResult } from "../../infrastructure/ai/types.ts";
 import {
@@ -210,3 +211,68 @@ test("buildHistoricalToolReplayMaps pairs reused tool ids with the nearest prece
   assert.equal(maps.resolvedToolCallsByAssistant.get(messages[1]), undefined);
   assert.equal(maps.resolvedToolCallsByAssistant.get(messages[2])?.has(messages[2].toolCalls![0]), true);
 });
+
+test("buildHistoricalUserReplayContent replaces historical vault note mentions with id metadata", () => {
+  const attachment: ChatMessageAttachment = {
+    base64Data: "A".repeat(5_000),
+    mediaType: "text/markdown",
+    filename: "runbook.md",
+    vaultNoteId: "note-123",
+    vaultNoteTitle: "Runbook",
+    previewText: "restart nginx",
+  };
+
+  const result = buildHistoricalUserReplayContent("check this note", [attachment]);
+
+  assert.match(result, /check this note/);
+  assert.match(result, /Vault note reference/);
+  assert.match(result, /"noteId":"note-123"/);
+  assert.match(result, /"title":"Runbook"/);
+  assert.doesNotMatch(result, /AAAAAA/);
+});
+
+test("external recovery retains note identity before truncating a long user request", () => {
+  const history = buildExternalBridgeContextMessages([{
+    id: "long-note-request", role: "user", timestamp: 1, content: "x".repeat(2500),
+    attachments: [{mediaType: "text/markdown", base64Data: "", vaultNoteId: "note-123", vaultNoteTitle: "Runbook"}],
+  }]);
+  const replay = history.find((message) => message.role === "user")!;
+  assert.match(replay.content, /"noteId":"note-123"/);
+  assert.match(replay.content, /vault_notes_get/);
+  assert.match(replay.content, /truncated/);
+  assert.ok(replay.content.length <= 2000);
+});
+
+test("external recovery keeps multiple note IDs and a short user constraint", () => {
+  const attachments = Array.from({length: 10}, (_, index) => ({
+    mediaType: "text/markdown", base64Data: "", vaultNoteId: `note-${index}`, vaultNoteTitle: `Runbook ${index}`,
+  }));
+  const history = buildExternalBridgeContextMessages([{
+    id: "many-notes", role: "user", timestamp: 1, content: "Only compare; do not edit.", attachments,
+  }]);
+  const replay = history.find((message) => message.role === "user")!;
+  for (const attachment of attachments) assert.ok(replay.content.includes(JSON.stringify(attachment.vaultNoteId)));
+  assert.match(replay.content, /Only compare; do not edit/);
+  assert.equal(replay.content.match(/Use vault_notes_get/g)?.length, 1);
+});
+
+for (const terminalSelection of [false, true]) {
+test(`compact external recovery retains the request and attachment (terminal=${terminalSelection}) alongside note references`, () => {
+  const noteId = '550e8400-e29b-41d4-a716-446655440000';
+  const request = "Only summarize yesterday's deployments; do not edit.";
+  const messages: ChatMessage[] = [{
+    id: 'old-note', role: 'user', timestamp: 1, content: request,
+    attachments: [
+      { mediaType: 'text/markdown', base64Data: '', vaultNoteId: noteId, vaultNoteTitle: 'Deployment Runbook' },
+      { mediaType: 'text/plain', base64Data: 'YWJj', filename: 'other.txt', terminalSelection },
+    ],
+  }, ...Array.from({ length: 8 }, (_, i): ChatMessage => ({
+    id: `later-${i}`, role: i % 2 ? 'assistant' : 'user', timestamp: i + 2, content: i % 2 ? 'Done.' : 'ok',
+  }))];
+  const compact = buildExternalBridgeContextMessages(messages)[0].content;
+  assert.ok(compact.includes(noteId));
+  assert.ok(compact.includes(request));
+  assert.ok(compact.includes('other.txt'));
+  assert.ok(compact.includes(terminalSelection ? 'terminal selection omitted' : 'attachment omitted'));
+});
+}

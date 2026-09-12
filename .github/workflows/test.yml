@@ -52,6 +52,9 @@ jobs:
       - name: Test
         run: npm test
 
+      - name: Test terminal background rendering
+        run: xvfb-run -a ./node_modules/.bin/electron --no-sandbox --use-angle=swiftshader --enable-unsafe-swiftshader scripts/terminal-background-rendering.live.test.cjs
+
       - name: Test terminal keyword highlight performance
         env:
           NETCATTY_TERMINAL_PERF_SHOW_WINDOW: "1"

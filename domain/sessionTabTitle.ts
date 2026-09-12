@@ -15,7 +15,52 @@ export const getSessionConnectionLabel = (session: Pick<TerminalSession, 'custom
  */
 export const DEFAULT_WORKSPACE_TITLE = 'Workspace';
 
+/**
+ * Compose the title for a workspace created by merging standalone session
+ * tabs (e.g. dragging tab "02" onto tab "01"). The merged workspace inherits
+ * both tabs' connection labels joined with "/" ("01/02") so the window title
+ * and the rename dialog show the merged identity instead of the generic
+ * "Workspace". Returns null when neither session has a label — the caller
+ * keeps the default auto-titled behavior in that case. Identical labels
+ * collapse to a single name so two panes on the same host don't read
+ * "web-01/web-01".
+ */
+export const buildMergedWorkspaceTitle = (
+  baseLabel: string,
+  joiningLabel: string,
+): string | null => {
+  const base = baseLabel.trim();
+  const joining = joiningLabel.trim();
+  if (!base && !joining) return null;
+  if (!base) return joining;
+  if (!joining || joining === base) return base;
+  return `${base}/${joining}`;
+};
+
 type WorkspaceTabLabelSession = Pick<TerminalSession, 'id' | 'customName' | 'hostLabel' | 'hostId'>;
+
+/**
+ * Recompute a merged workspace's composed title from its *current* member
+ * sessions. Unlike the one-shot `buildMergedWorkspaceTitle` call at merge
+ * time, this runs over live membership, so pane renames and panes being
+ * added or removed are reflected. Returns null when no member has a label.
+ * Labels are deduplicated by exact match against the other member labels
+ * (not against the accumulated title, which would only catch full-string
+ * repeats like "web/db/web/db"), keeping first-seen order: `web/db/web`
+ * collapses to `web/db`.
+ */
+export const buildMergedWorkspaceTitleFromSessions = (
+  sessions: readonly WorkspaceTabLabelSession[],
+): string | null => {
+  const labels: string[] = [];
+  for (const session of sessions) {
+    const label = getSessionConnectionLabel(session).trim();
+    if (!label || labels.includes(label)) continue;
+    labels.push(label);
+  }
+  if (labels.length === 0) return null;
+  return labels.join('/');
+};
 
 /**
  * Resolve the label shown on a split-workspace tab. When the user has renamed

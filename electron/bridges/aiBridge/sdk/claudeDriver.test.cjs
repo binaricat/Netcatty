@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { translateClaudeMessage, buildClaudeQueryOptions, buildClaudePromptInput, classifyClaudeSpawnError, listClaudeModels, mapClaudeModels, parseClaudeSettings } = require("./claudeDriver.cjs");
+const { translateClaudeMessage, buildClaudeQueryOptions, buildClaudePromptInput, classifyClaudeSpawnError, listClaudeModels, mapClaudeModels, parseClaudeSettings, splitClaudeModelSelection } = require("./claudeDriver.cjs");
 
 function collector() {
   const events = [];
@@ -129,10 +129,46 @@ test("mapClaudeModels maps {value,displayName,description} -> {id,name,descripti
     { displayName: "no value -> dropped" },
   ]);
   assert.deepEqual(out, [
-    { id: "claude-opus-4-6", name: "Opus 4.6", description: "Recommended" },
-    { id: "claude-sonnet-4-6", name: "Sonnet 4.6", description: undefined },
+    {
+      id: "claude-opus-4-6",
+      name: "Opus 4.6",
+      description: "Recommended",
+      thinkingLevels: ["low", "medium", "high", "max"],
+      defaultThinkingLevel: "medium",
+    },
+    {
+      id: "claude-sonnet-4-6",
+      name: "Sonnet 4.6",
+      description: undefined,
+      thinkingLevels: ["low", "medium", "high", "max"],
+      defaultThinkingLevel: "medium",
+    },
   ]);
   assert.deepEqual(mapClaudeModels(null), []);
+});
+
+test("splitClaudeModelSelection only treats known trailing effort as thinking", () => {
+  assert.deepEqual(splitClaudeModelSelection("sonnet/high"), { model: "sonnet", effort: "high" });
+  assert.deepEqual(splitClaudeModelSelection("claude-opus-4-6"), {
+    model: "claude-opus-4-6",
+    effort: undefined,
+  });
+  assert.deepEqual(splitClaudeModelSelection("org/custom-model"), {
+    model: "org/custom-model",
+    effort: undefined,
+  });
+});
+
+test("buildClaudeQueryOptions splits model/effort into model + settings.effort", () => {
+  const opts = buildClaudeQueryOptions({
+    cwd: "/tmp",
+    model: "sonnet/high",
+    env: {},
+    settings: { model: "sonnet" },
+  });
+  assert.equal(opts.model, "sonnet");
+  assert.equal(opts.effort, "high");
+  assert.deepEqual(opts.settings, { model: "sonnet", effort: "high" });
 });
 
 test("parseClaudeSettings: path string, inline JSON object, empty, and bad JSON", () => {

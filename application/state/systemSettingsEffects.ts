@@ -2,6 +2,7 @@ import { useEffect, useRef, type MutableRefObject } from 'react';
 import {
   STORAGE_KEY_AUTO_UPDATE_ENABLED,
   STORAGE_KEY_CLOSE_TO_TRAY,
+  STORAGE_KEY_AUTO_LAUNCH_ENABLED,
   STORAGE_KEY_GLOBAL_HOTKEY_ENABLED,
   STORAGE_KEY_TOGGLE_WINDOW_HOTKEY,
   STORAGE_KEY_WINDOW_OPACITY,
@@ -24,11 +25,24 @@ import {
   type WindowOpacityRecord,
 } from './windowOpacitySync';
 
+/**
+ * A getAutoLaunch/setAutoLaunch IPC result is only safe to apply to state
+ * when the main process could actually determine the OS's login-item state.
+ * success:false means "unknown" (a transient read/write failure), not a
+ * confirmed disabled state — applying enabled:false in that case would
+ * overwrite a valid cached value and, via the push effect, cascade into an
+ * unwanted disable write that could remove a working login item.
+ */
+export function isAutoLaunchResultTrustworthy(result: { success?: boolean }): boolean {
+  return result.success !== false;
+}
+
 interface UseSystemSettingsEffectsParams {
   enabled?: boolean;
   toggleWindowHotkey: string;
   globalHotkeyEnabled: boolean;
   closeToTray: boolean;
+  autoLaunchEnabled: boolean;
   windowOpacityRecord: WindowOpacityRecord;
   windowOpacityMutationSourceRef: MutableRefObject<WindowOpacityMutationSource>;
   appIconVariant: AppIconVariant;
@@ -38,6 +52,8 @@ interface UseSystemSettingsEffectsParams {
   setHotkeyRegistrationError: (error: string | null) => void;
   setAutoUpdateEnabled: (enabled: boolean | ((prev: boolean) => boolean)) => void;
   setAppIconVariant: (variant: AppIconVariant | ((prev: AppIconVariant) => AppIconVariant)) => void;
+  setAutoLaunchEnabled: (enabled: boolean | ((prev: boolean) => boolean)) => void;
+  setAutoLaunchSupported: (supported: boolean) => void;
   notifySettingsChanged: (key: string, value: unknown) => void;
 }
 
@@ -46,6 +62,7 @@ export function useSystemSettingsEffects({
   toggleWindowHotkey,
   globalHotkeyEnabled,
   closeToTray,
+  autoLaunchEnabled,
   windowOpacityRecord,
   windowOpacityMutationSourceRef,
   appIconVariant,
@@ -55,9 +72,26 @@ export function useSystemSettingsEffects({
   setHotkeyRegistrationError,
   setAutoUpdateEnabled,
   setAppIconVariant,
+  setAutoLaunchEnabled,
+  setAutoLaunchSupported,
   notifySettingsChanged,
 }: UseSystemSettingsEffectsParams) {
   const appIconApplyRequestIdRef = useRef(0);
+  // True once the push effect has issued a real OS write (i.e. after mount,
+  // when persistMountedRef is set — see below). If the user toggles
+  // auto-launch while the mount-time hydration read is still in flight, the
+  // hydration effect must not let its now-stale response overwrite that
+  // choice, or the adjacent push effect reacts to the overwrite and issues
+  // the opposite OS write right after the user's own request lands.
+  const autoLaunchWriteStartedRef = useRef(false);
+  // Incremented on every push-effect invocation. If the user toggles again
+  // before an in-flight bridge.setAutoLaunch(...) resolves, that older
+  // call's response is stale by the time it arrives — comparing its own
+  // request against its own result is self-consistent but says nothing
+  // about whether a newer request has since superseded it, so a delayed
+  // response could otherwise "correct" state the user has already moved
+  // past (undoing a toggle they made after this specific request started).
+  const autoLaunchWriteGenerationRef = useRef(0);
 
   // Persist and sync toggle window hotkey setting
   useEffect(() => {
@@ -138,6 +172,61 @@ export function useSystemSettingsEffects({
     if (!persistMountedRef.current) return;
     notifySettingsChanged(STORAGE_KEY_CLOSE_TO_TRAY, closeToTray);
   }, [enabled, closeToTray, notifySettingsChanged, persistMountedRef]);
+
+  // Hydrate auto-launch from the main process on mount — the OS login item
+  // is the real source of truth (the user may have toggled it outside the
+  // app), localStorage is only an optimistic cache for first paint.
+  useEffect(() => {
+    if (!enabled) return;
+    const bridge = netcattyBridge.get();
+    if (!bridge?.getAutoLaunch) return;
+    let cancelled = false;
+    bridge.getAutoLaunch().then((result) => {
+      if (cancelled) return;
+      setAutoLaunchSupported(result.supported);
+      // The user (or an already-issued write) may have moved state on while
+      // this request was in flight — a stale hydration response must not
+      // clobber it, or the push effect below reacts to the clobber and
+      // fires an unwanted OS write right after the user's own request.
+      if (autoLaunchWriteStartedRef.current) return;
+      if (!isAutoLaunchResultTrustworthy(result)) return;
+      setAutoLaunchEnabled(result.enabled);
+      localStorageAdapter.writeString(STORAGE_KEY_AUTO_LAUNCH_ENABLED, result.enabled ? 'true' : 'false');
+    }).catch((err) => {
+      console.warn('[AutoLaunch] Failed to read login item state:', err);
+    });
+    return () => {
+      cancelled = true;
+    };
+    // Runs once per mount — this is a one-shot hydration, not a sync loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabled]);
+
+  // Push auto-launch changes to the main process and cache the result.
+  useEffect(() => {
+    if (!enabled) return;
+    if (!persistMountedRef.current) return;
+    const bridge = netcattyBridge.get();
+    if (!bridge?.setAutoLaunch) return;
+    // A real write is now in flight — permanently disqualify the mount-time
+    // hydration effect above from applying a (now possibly stale) response.
+    autoLaunchWriteStartedRef.current = true;
+    const requestGeneration = ++autoLaunchWriteGenerationRef.current;
+    bridge.setAutoLaunch(autoLaunchEnabled).then((result) => {
+      setAutoLaunchSupported(result.supported);
+      // The user toggled again before this request resolved — a newer
+      // request (and its own response, once it arrives) is authoritative;
+      // reconciling this stale one could undo a choice made after it fired.
+      if (autoLaunchWriteGenerationRef.current !== requestGeneration) return;
+      if (!isAutoLaunchResultTrustworthy(result)) return;
+      if (result.enabled !== autoLaunchEnabled) setAutoLaunchEnabled(result.enabled);
+      localStorageAdapter.writeString(STORAGE_KEY_AUTO_LAUNCH_ENABLED, result.enabled ? 'true' : 'false');
+    }).catch((err) => {
+      console.warn('[AutoLaunch] Failed to update login item state:', err);
+    });
+    notifySettingsChanged(STORAGE_KEY_AUTO_LAUNCH_ENABLED, autoLaunchEnabled);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabled, autoLaunchEnabled]);
 
   // Persist and apply app-level HTTP(S) network proxy (cloud sync / AI)
   useEffect(() => {

@@ -197,6 +197,12 @@ export const enCoreMessages: Messages = {
   'settings.appLock.validation.mismatch': 'The new passwords do not match.',
   'settings.appLock.validation.incorrect': 'The current lock password is incorrect.',
 
+  // Settings > System > Auto Launch
+  'settings.autoLaunch.title': 'Launch at Login',
+  'settings.autoLaunch.enabled': 'Launch at system startup',
+  'settings.autoLaunch.enabledDesc': 'Automatically start Netcatty when you log in, hidden in the system tray.',
+  'settings.autoLaunch.unsupportedDesc': 'Not available on this platform or in a development build.',
+
   // Settings > System > Network Proxy
   'settings.system.networkProxy.title': 'Network Proxy',
   'settings.system.networkProxy.description': 'HTTP(S) proxy for cloud sync and AI providers. This is separate from SSH ProxyJump / ProxyCommand profiles.',
@@ -358,6 +364,12 @@ export const enCoreMessages: Messages = {
   'settings.vault.showHostTreeSidebarDesc': 'Display the host list sidebar and its top-bar toggle on terminal and editor tabs.',
   'settings.vault.autoImportSystemKnownHosts': 'Auto-import system known_hosts',
   'settings.vault.autoImportSystemKnownHostsDesc': 'When Vault loads, silently import entries from the OpenSSH known_hosts file. Turn this off to keep Netcatty known hosts separate; Scan System still imports on demand.',
+  'settings.vault.notesFont': 'Code font',
+  'settings.vault.notesFontDesc': 'Font family used for code blocks and inline code in notes',
+  'settings.vault.notesFontSize': 'Note font size',
+  'settings.vault.notesFontSizeDesc': 'Font size used for note body text',
+  'settings.vault.notesCodeFontSize': 'Code font size',
+  'settings.vault.notesCodeFontSizeDesc': 'Font size used for code blocks and inline code in notes',
 
   // Update notifications
   'update.available.title': 'Update Available',
@@ -643,6 +655,11 @@ Highlight the focused split pane:
   'settings.terminal.behavior.autoCloseOnExit': 'Auto-close terminal on exit',
   'settings.terminal.behavior.autoCloseOnExit.desc':
     'Allow terminal tabs and windows to close automatically after session exit. Turn this off to keep them open after every exit.',
+  'settings.terminal.behavior.disconnectedNotice': 'When a connection disconnects',
+  'settings.terminal.behavior.disconnectedNotice.desc':
+    'Show a compact notice inside established terminals, or use the full disconnected dialog. Initial connection failures still use the dialog.',
+  'settings.terminal.behavior.disconnectedNotice.terminal': 'Terminal notice',
+  'settings.terminal.behavior.disconnectedNotice.dialog': 'Dialog',
   'settings.terminal.behavior.rightClick.menu': 'Show menu',
   'settings.terminal.behavior.rightClick.paste': 'Paste',
   'settings.terminal.behavior.rightClick.selectWord': 'Select word',
@@ -1065,6 +1082,7 @@ Highlight the focused split pane:
   // Vault hosts header/actions
   'vault.hosts.search.placeholder': 'Find a host or ssh user@hostname / ssh -p 2222 user@hostname...',
   'vault.hosts.connect': 'Connect',
+  'vault.hosts.openSftp': 'Open SFTP',
   'vault.view.grid': 'Grid',
   'vault.view.list': 'List',
   'vault.view.tree': 'Tree',

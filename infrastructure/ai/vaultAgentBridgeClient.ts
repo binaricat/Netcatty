@@ -1,3 +1,4 @@
+import { resolveHostOs } from '../../domain/host';
 import type { GroupConfig, Host, Identity, KnownHost, ManagedSource, PortForwardingRule, ProxyProfile, Snippet, SSHKey, TerminalSettings, VaultNote } from '../../domain/models';
 import type { RememberImportedKeyPassphraseResult } from '../../application/defaultKeyPassphrases';
 import {
@@ -24,6 +25,7 @@ import {
 import { isScriptSnippet } from '../../domain/snippetScript.ts';
 import { applySnippetVariables, parseSnippetVariables } from '../../domain/snippetVariables';
 import { getNextVaultOrder } from '../../domain/vaultOrder';
+import { readVaultNote } from '../../domain/vaultNoteRead';
 import {
   runAutomationScript,
   stopScriptRun,
@@ -100,6 +102,7 @@ const VAULT_HOST_UPDATE_FIELDS = [
   'tags',
   'notes',
   'protocol',
+  'os',
   'identityId',
   'jumpHostIds',
   'proxyProfileId',
@@ -125,6 +128,7 @@ export function sanitizeHostForAgent(host: Host): Record<string, unknown> {
     }
     sanitized[key] = value;
   }
+  sanitized.os = resolveHostOs(host);
   return sanitized;
 }
 
@@ -138,7 +142,7 @@ function summarizeHostForList(host: Host) {
     protocol: host.protocol,
     group: host.group,
     tags: host.tags,
-    os: host.os,
+    os: resolveHostOs(host),
     createdAt: host.createdAt,
     connectScriptIds: host.connectScriptIds,
     loginScriptId: host.loginScriptId,
@@ -529,7 +533,7 @@ async function registerOpenedSessionInMcpScope(
     hostId: host.id,
     hostname: host.hostname || '',
     label: host.label || host.hostname || sessionId,
-    os: host.os || '',
+    os: resolveHostOs(host),
     username: host.username || '',
     protocol,
     deviceType: host.deviceType || '',
@@ -930,7 +934,7 @@ export async function handleVaultAgentOp(
       const noteId = String(params.noteId || '');
       const note = deps.getNotes().find((entry) => entry.id === noteId);
       if (!note) return { ok: false, error: `Vault note "${noteId}" was not found.` };
-      return { ok: true, note: serializeVaultNoteForAgent(note) };
+      return readVaultNote(note, params);
     }
     case 'note.create': {
       const title = sanitizeNoteTitle(params.title);

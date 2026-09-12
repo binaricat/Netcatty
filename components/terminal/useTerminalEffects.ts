@@ -41,8 +41,10 @@ import {
   flushPendingTerminalWritesBeforeHibernate,
   flushPendingTerminalWritesOnResume,
   forceTerminalRepaintBypassingAnimationFrame,
+  isTerminalPageHidden,
   repaintTerminalAfterReveal,
 } from './runtime/terminalUnfocusedRepaint';
+import { setTerminalOutputPressureVisibility } from './runtime/terminalOutputPressure';
 import {
   forceXTermFontRemeasure,
   type XTermFontRemeasureTarget,
@@ -171,7 +173,7 @@ export function resolveSelectionOverlayPosition(term: any, container: HTMLElemen
 }
 
 export function useTerminalEffects(ctx: TerminalEffectsContext) {
-  const { CONNECTION_TIMEOUT, Error, XTERM_PERFORMANCE_CONFIG, applyUserCursorPreference, auth, autocompleteCloseRef, autocompleteInputRef, autocompleteKeyEventRef, captureTerminalLogData, chainHosts, chainProgress, clearTerminalCwd, commandBufferRef, connectionLogBufferRef, containerRef, createPromptLineBreakState, createReplaySafeTerminalLogSanitizer, createXTermRuntime, deferTerminalResizeRef, disableTerminalFontZoomRef, effectiveFontSize, effectiveFontWeight, effectiveTheme, error, executeSnippetCommand, finalizeTerminalLogData, fitAddonRef, fontFamilyId, fontSize, fontWeightFixupDoneRef, forceCloseHibernatedSession, forceSyncRenderAfterResize, handleOsc52ReadRequest, handleTerminalDataCaptureOnce, hasConnectedRef, hasRuntimeRef, host, hotkeySchemeRef, hibernatedRef, identities, inWorkspace, isBootActiveRef, bootEpochRef, isBroadcastEnabledRef, isComposeBarOpen, isConnectionAwaitingUserInput, isConnectionPastTcpDial, isFocusMode, isFocused, isLocalConnection, isNetworkDevice, isResizing, isRestoringSelectionRef, isSearchOpen, isSerialConnection, isVisible, isVisibleRef, keyBindingsRef, keys, kittyKeyboardProtocolEnabledForSession, knownCwdRef, lastFittedSizeRef, lastToastedErrorRef, logger, mouseTrackingRef, needsHostKeyVerification, onBroadcastInputRef, onBroadcastInterruptPriorityChange, onCommandExecuted, onCommandSubmitted, onHotkeyActionRef, onOpenExternalError, onOutputTriggerUserInputRef, onPluginRuntimeCwdChange, onSnippetExecutorChange, onTerminalCwdChange, onTerminalTitleChange, onTerminalBell, onTerminalFontSizeChange, paneLayoutKey, passwordPromptActiveRef, pendingAuthRef, pendingOutputScrollRef, pluginDecorationRules, pluginTerminalLifecycle, pluginTerminalProviderRevision, isPluginTerminalProviderAvailable, requestPluginTerminalProviders, prepareRestoredReconnect, prepareInitialCwdIntent, prevIsResizingRef, promptLineBreakStateRef, resizeSession, resolveHostAuth, resolvedFontFamily, safeFit, scriptRecorderRef, searchAddonRef, serialConfig, serialLineBufferRef, terminalEncodingRef, userPickedEncodingRef, hasRememberedEncodingRef, serializeAddonRef, sessionId, sessionRef, sessionStarters, setError, setHasMouseTracking, setIsCancelling, setIsDisconnectedDialogDismissed, requestSearchFocus, setNeedsHostKeyVerification, setPendingHostKeyInfo, setPendingHostKeyRequestId, setProgressLogs, setProgressValue, setShowLogs, setStatus, setTimeLeft, shouldEnableNativeUserInputAutoScroll, shouldProbeSessionCwd, shouldStartTerminalBackend, attachExistingSession, attachAuthorization, attachHomeWebContentsIdRef, onSnippetShortkeyRef, snippetsRef, splitResizeActive, status, statusRef, sudoAutofillRef, t, teardown, telnetLocalEchoRef, termRef, terminalAltKeyOptions, terminalBackend, terminalContextActionsRef, terminalCwdTracker, terminalDataCapturedRef, terminalLogSanitizerRef, terminalSettings, terminalSettingsRef, terminalTitleRef, toHostKeyInfo, toast, updateStatus, useEffect, useLayoutEffect, xtermRuntimeRef, zmodem, zmodemToastedRef, restoreState, vaultInitialized } = ctx;
+  const { CONNECTION_TIMEOUT, Error, XTERM_PERFORMANCE_CONFIG, applyUserCursorPreference, auth, autocompleteCloseRef, autocompleteInputRef, autocompleteKeyEventRef, autocompleteRepositionRef, captureTerminalLogData, chainHosts, chainProgress, clearTerminalCwd, commandBufferRef, connectionLogBufferRef, containerRef, createPromptLineBreakState, createReplaySafeTerminalLogSanitizer, createXTermRuntime, deferTerminalResizeRef, disableTerminalFontZoomRef, effectiveFontSize, effectiveFontWeight, effectiveTheme, error, executeSnippetCommand, finalizeTerminalLogData, fitAddonRef, fontFamilyId, fontSize, fontWeightFixupDoneRef, forceCloseHibernatedSession, forceSyncRenderAfterResize, handleOsc52ReadRequest, handleTerminalDataCaptureOnce, hasConnectedRef, hasRuntimeRef, host, hotkeySchemeRef, hibernatedRef, identities, inWorkspace, isBootActiveRef, bootEpochRef, isBroadcastEnabledRef, isComposeBarOpen, isConnectionAwaitingUserInput, isConnectionPastTcpDial, isFocusMode, isFocused, isLocalConnection, isNetworkDevice, isResizing, isRestoringSelectionRef, isSearchOpen, isSerialConnection, isVisible, isVisibleRef, keyBindingsRef, keys, kittyKeyboardProtocolEnabledForSession, knownCwdRef, lastFittedSizeRef, lastToastedErrorRef, logger, mouseTrackingRef, needsHostKeyVerification, onBroadcastInputRef, onBroadcastInterruptPriorityChange, onCommandExecuted, onCommandSubmitted, onHotkeyActionRef, onOpenExternalError, onOutputTriggerUserInputRef, onPluginRuntimeCwdChange, onSnippetExecutorChange, onTerminalCwdChange, onTerminalTitleChange, onTerminalBell, onTerminalFontSizeChange, paneLayoutKey, passwordPromptActiveRef, pendingAuthRef, pendingOutputScrollRef, pluginDecorationRules, pluginTerminalLifecycle, pluginTerminalProviderRevision, isPluginTerminalProviderAvailable, requestPluginTerminalProviders, prepareRestoredReconnect, prepareInitialCwdIntent, prevIsResizingRef, promptLineBreakStateRef, resizeSession, resolveHostAuth, resolvedFontFamily, safeFit, scriptRecorderRef, searchAddonRef, serialConfig, serialLineBufferRef, serializeAddonRef, sessionId, sessionRef, sessionStarters, setError, setHasMouseTracking, setIsCancelling, setIsDisconnectedDialogDismissed, requestSearchFocus, setNeedsHostKeyVerification, setPendingHostKeyInfo, setPendingHostKeyRequestId, setProgressLogs, setProgressValue, setShowLogs, setStatus, setTimeLeft, shouldEnableNativeUserInputAutoScroll, shouldProbeSessionCwd, shouldStartTerminalBackend, attachExistingSession, attachAuthorization, attachHomeWebContentsIdRef, onSnippetShortkeyRef, snippetsRef, splitResizeActive, status, statusRef, sudoAutofillRef, t, teardown, telnetLocalEchoRef, termRef, terminalAltKeyOptions, terminalBackend, terminalContextActionsRef, terminalCwdTracker, terminalDataCapturedRef, terminalLogSanitizerRef, terminalOutputHistory, terminalSettings, terminalSettingsRef, terminalTitleRef, toHostKeyInfo, toast, updateStatus, useEffect, useLayoutEffect, xtermRuntimeRef, zmodem, zmodemToastedRef, restoreState, vaultInitialized } = ctx;
   const effectiveTerminalProtocol = resolveEffectiveTerminalProtocol(host);
   const hibernateHiddenTabs = resolveTerminalHibernateEnabledForProtocol(
     terminalSettings,
@@ -432,6 +434,7 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
     isBootActiveRef.current = true;
     terminalDataCapturedRef.current = false;
     connectionLogBufferRef.current.reset();
+    terminalOutputHistory?.clear();
     terminalLogSanitizerRef.current = createReplaySafeTerminalLogSanitizer();
     setError(null);
     hasConnectedRef.current = false;
@@ -516,13 +519,11 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
           // Serial-specific options
           serialLocalEcho: serialConfig?.localEcho,
           serialLineMode: serialConfig?.lineMode,
-          serialByteOrientedBackspace: serialConfig?.byteOrientedBackspace ?? true,
-          userPickedEncodingRef,
-          hasRememberedEncodingRef,
+          serialByteOrientedBackspace: serialConfig?.byteOrientedBackspace ?? false,
           serialLineBufferRef,
-          currentEncodingRef: terminalEncodingRef,
           telnetLocalEchoRef,
           onTerminalLogData: captureTerminalLogData,
+          terminalOutputHistory,
           onCwdChange: (cwd: string) => {
             onPluginRuntimeCwdChange(cwd, { source: 'osc7' });
           },
@@ -552,6 +553,7 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
           // Autocomplete integration
           onAutocompleteKeyEvent: (e: KeyboardEvent) => autocompleteKeyEventRef.current?.(e) ?? true,
           onAutocompleteInput: (data: string) => autocompleteInputRef.current?.(data),
+          onAutocompleteReposition: () => autocompleteRepositionRef.current?.(),
           terminalContextActionsRef,
           isRestoringSelectionRef,
           // Defer WebGL context creation for panes that mount hidden (e.g. the
@@ -651,7 +653,7 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
               passwordPromptActiveRef.current = snap.passwordPromptActive;
             }
             if (snap.cwd !== undefined) {
-              const cwd = terminalCwdTracker.setRendererCwd(snap.cwd);
+              const cwd = terminalCwdTracker.setRendererCwd(snap.cwd, "snapshot");
               knownCwdRef.current = cwd;
               publishPluginTerminalRuntimeLifecycleEvent(
                 pluginTerminalLifecycle,
@@ -1275,10 +1277,27 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
     pendingOutputScrollRef.current = false;
   };
 
+  // The output-pressure visibility flag is read live by the keyword
+  // highlighter's write callback, but the write path only refreshes it at
+  // ingress and coalescer flush. A batch dispatched while hidden can still be
+  // parsing when the pane/page is revealed, and a stale `background: true`
+  // would then skip the in-frame viewport recolor (#3272). Re-sync the flag
+  // on every visibility transition so in-flight writes always see the
+  // current pane/document state.
+  const syncOutputPressureVisibility = () => {
+    const term = termRef.current;
+    if (!term) return;
+    setTerminalOutputPressureVisibility(
+      term,
+      isVisibleRef.current && !isTerminalPageHidden(),
+    );
+  };
+
   const flushTerminalWritesAfterBecomeVisible = () => {
     lastCommittedVisibleLayoutKeyRef.current = null;
     const term = termRef.current;
     if (term) {
+      syncOutputPressureVisibility();
       cancelScheduledUnfocusedRepaint(term);
       flushPendingTerminalWritesOnResume(term);
       repaintTerminalAfterReveal(term, () => isVisibleRef.current);
@@ -1328,6 +1347,7 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
 
     if (!isVisible) {
       wasVisibleRef.current = false;
+      syncOutputPressureVisibility();
       return;
     }
 
@@ -1845,6 +1865,7 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
     const recoverTerminalOnAppResume = () => {
       const term = termRef.current;
       if (term) {
+        syncOutputPressureVisibility();
         cancelScheduledUnfocusedRepaint(term);
         flushPendingTerminalWritesOnResume(term);
         forceTerminalRepaintBypassingAnimationFrame(term);
@@ -1855,7 +1876,10 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
     };
 
     const handleVisibilityChange = () => {
-      if (document.visibilityState !== 'visible') return;
+      if (document.visibilityState !== 'visible') {
+        syncOutputPressureVisibility();
+        return;
+      }
       recoverTerminalOnAppResume();
     };
 

@@ -78,10 +78,31 @@ function parseClaudeSettings(settings) {
   return str;
 }
 
+const CLAUDE_REASONING_LEVELS = new Set(["low", "medium", "high", "max"]);
+
+function splitClaudeModelSelection(model) {
+  if (typeof model !== "string" || !model) {
+    return { model: undefined, effort: undefined };
+  }
+  const slash = model.lastIndexOf("/");
+  if (slash <= 0) return { model, effort: undefined };
+  const effort = model.slice(slash + 1);
+  if (!CLAUDE_REASONING_LEVELS.has(effort)) return { model, effort: undefined };
+  return { model: model.slice(0, slash), effort };
+}
+
+function mergeClaudeEffortSettings(settings, effort) {
+  if (!effort) return settings;
+  if (settings == null) return { effort };
+  if (typeof settings === "object") return { ...settings, effort };
+  return settings;
+}
+
 function buildClaudeQueryOptions({
   cwd, model, env, pathToClaudeCodeExecutable, abortController, injectedMcpServers, settings, resume,
   toolIntegrationMode,
 }) {
+  const { model: resolvedModel, effort } = splitClaudeModelSelection(model);
   const options = {
     cwd,
     includePartialMessages: true,
@@ -97,7 +118,8 @@ function buildClaudeQueryOptions({
     env,
     abortController,
   };
-  if (model) options.model = model;
+  if (resolvedModel) options.model = resolvedModel;
+  if (effort) options.effort = effort;
   // Resume the prior session so context carries ACROSS turns. Without this the
   // SDK starts a fresh session every turn (full amnesia). The session id is
   // emitted on system-init (before any turn work), so a mid-turn Stop can't lose
@@ -108,7 +130,7 @@ function buildClaudeQueryOptions({
     options.pathToClaudeCodeExecutable = pathToClaudeCodeExecutable;
   }
   // Optional settings.json path / inline object — additive to CLAUDE_CONFIG_DIR.
-  const parsedSettings = parseClaudeSettings(settings);
+  const parsedSettings = mergeClaudeEffortSettings(parseClaudeSettings(settings), effort);
   if (parsedSettings !== undefined) options.settings = parsedSettings;
   return options;
 }
@@ -266,7 +288,13 @@ function mapClaudeModels(models) {
   if (!Array.isArray(models)) return [];
   return models
     .filter((m) => m && m.value)
-    .map((m) => ({ id: m.value, name: m.displayName || m.value, description: m.description }));
+    .map((m) => ({
+      id: m.value,
+      name: m.displayName || m.value,
+      description: m.description,
+      thinkingLevels: ["low", "medium", "high", "max"],
+      defaultThinkingLevel: "medium",
+    }));
 }
 
 /**
@@ -345,6 +373,8 @@ async function listClaudeModels({
 module.exports = {
   buildClaudeQueryOptions,
   parseClaudeSettings,
+  splitClaudeModelSelection,
+  mergeClaudeEffortSettings,
   translateClaudeMessage,
   classifyClaudeSpawnError,
   buildClaudePromptInput,

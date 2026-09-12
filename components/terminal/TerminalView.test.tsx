@@ -1,11 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import React from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 
 import {
   formatTerminalHostInfoBarTitle,
   formatTerminalHostInfoBarTooltip,
   formatTerminalTitleConnectionAddress,
+  focusTerminalFromDisconnectedNotice,
   getLineTimestampToggleHostUpdate,
   resolveNetworkDeviceTipRightInset,
   resolveTerminalRightInset,
@@ -17,7 +20,142 @@ import {
   shouldShowSelectionAIOverlay,
   shouldShowLineTimestampToolbarToggle,
   shouldShowStatusBarConnectionControls,
+  TerminalDisconnectedNotice,
+  resolveTerminalDisconnectedNoticeMessage,
 } from "./TerminalView.tsx";
+
+test("terminal disconnected notice keeps the reason and reconnect hint on one compact row", () => {
+  const markup = renderToStaticMarkup(React.createElement(TerminalDisconnectedNotice, {
+    message: "Connection timed out.",
+    reconnectHint: "Press Enter to reconnect",
+    bottom: 4,
+    left: 4,
+    right: 4,
+  }));
+
+  assert.match(markup, /data-terminal-disconnected-notice="true"/);
+  assert.match(markup, /role="status"/);
+  assert.match(markup, /Connection timed out\./);
+  assert.match(markup, /Press Enter to reconnect/);
+  assert.match(markup, /h-7/);
+  assert.doesNotMatch(markup, /pointer-events-none/);
+});
+
+test("clicking the disconnected notice preserves terminal keyboard focus", () => {
+  let prevented = false;
+  let focused = false;
+
+  focusTerminalFromDisconnectedNotice(
+    { preventDefault: () => { prevented = true; } },
+    () => { focused = true; },
+  );
+
+  assert.equal(prevented, true);
+  assert.equal(focused, true);
+});
+
+test("automatic reconnect notice uses explicit lifecycle copy instead of a stale log line", () => {
+  assert.equal(
+    resolveTerminalDisconnectedNoticeMessage({
+      status: "connecting",
+      error: null,
+      reconnectMessage: "Auto reconnect attempt 2...",
+      disconnectedLabel: "Disconnected",
+    }),
+    "Auto reconnect attempt 2...",
+  );
+  assert.equal(
+    resolveTerminalDisconnectedNoticeMessage({
+      status: "disconnected",
+      error: "Connection timed out.",
+      reconnectMessage: "Waiting for host key confirmation",
+      disconnectedLabel: "Disconnected",
+    }),
+    "Connection timed out.",
+  );
+  assert.equal(
+    resolveTerminalDisconnectedNoticeMessage({
+      status: "disconnected",
+      error: "Connection timed out.",
+      reconnectMessage: "Reconnecting...",
+      disconnectedLabel: "Disconnected",
+      isReconnectActive: true,
+    }),
+    "Reconnecting...",
+  );
+});
+
+test("automatic reconnect switches to attempt copy before waking a hibernated terminal", () => {
+  const source = readFileSync(new URL("../Terminal.tsx", import.meta.url), "utf8");
+  const startReconnect = source.indexOf('const startReconnect = async');
+  const updateNotice = source.indexOf('setReconnectNoticeMessage(reconnectAttemptMessage)', startReconnect);
+  const wakeHibernated = source.indexOf('if (!termRef.current && hibernatedRef.current)', startReconnect);
+
+  assert.ok(startReconnect >= 0);
+  assert.ok(updateNotice > startReconnect);
+  assert.ok(wakeHibernated > updateNotice);
+});
+
+test("hibernated manual reconnect can continue after its runtime wakes", () => {
+  const source = readFileSync(new URL("../Terminal.tsx", import.meta.url), "utf8");
+  const startReconnect = source.indexOf("const startReconnect = async");
+  const markManualReconnect = source.indexOf(
+    'setManualReconnectActive(mode === "manual")',
+    startReconnect,
+  );
+  const initialGuard = source.slice(startReconnect, markManualReconnect);
+  const clearWakeInFlight = source.indexOf(
+    "reconnectWakeInFlightRef.current = false",
+    markManualReconnect,
+  );
+  const continueReconnect = source.indexOf("startReconnectRef.current?.(mode)", clearWakeInFlight);
+
+  assert.ok(startReconnect >= 0);
+  assert.ok(markManualReconnect > startReconnect);
+  assert.match(initialGuard, /reconnectPreparationTokenRef\.current !== null/);
+  assert.match(initialGuard, /reconnectWakeInFlightRef\.current/);
+  assert.doesNotMatch(initialGuard, /manualReconnectActive/);
+  assert.ok(clearWakeInFlight > markManualReconnect);
+  assert.ok(continueReconnect > clearWakeInFlight);
+});
+
+test("manual reconnect publishes preparation without starting the connection timeout", () => {
+  const source = readFileSync(new URL("../Terminal.tsx", import.meta.url), "utf8");
+  const startReconnect = source.indexOf("const startReconnect = async");
+  const publishPreparation = source.indexOf(
+    "terminalReconnectRegistry.setActive(sessionId, true)",
+    startReconnect,
+  );
+  const cleanupSession = source.indexOf(
+    "await cleanupSession({ retainOwnership: true })",
+    startReconnect,
+  );
+  const restoreDisconnected = source.indexOf(
+    'updateStatus("disconnected")',
+    startReconnect,
+  );
+
+  assert.ok(startReconnect >= 0);
+  assert.ok(publishPreparation > startReconnect);
+  assert.ok(cleanupSession > publishPreparation);
+  assert.equal(
+    source.indexOf('if (mode === "manual") updateStatus("connecting")', startReconnect),
+    -1,
+  );
+  assert.ok(restoreDisconnected > startReconnect);
+  assert.ok(restoreDisconnected < cleanupSession);
+});
+
+test("programmatic input during hibernated reconnect does not clear reconnect presentation", () => {
+  const source = readFileSync(new URL("../Terminal.tsx", import.meta.url), "utf8");
+  const scrollStart = source.indexOf("const scrollToBottomAfterProgrammaticInput");
+  const scrollEnd = source.indexOf("useEffect(() =>", scrollStart);
+  const scrollBody = source.slice(scrollStart, scrollEnd);
+
+  assert.notEqual(scrollStart, -1);
+  assert.notEqual(scrollEnd, -1);
+  assert.doesNotMatch(scrollBody, /manualReconnectActiveRef|setReconnectNoticeMessage/);
+});
 
 test("line timestamp toggle creates a persistent host update", () => {
   const host = {
@@ -111,6 +249,7 @@ test("terminal enter reconnect ignores active controls and non-disconnected stat
   assert.equal(shouldReconnectTerminalOnEnterKey({ ...base, needsAuth: true }), false);
   assert.equal(shouldReconnectTerminalOnEnterKey({ ...base, needsHostKeyVerification: true }), false);
   assert.equal(shouldReconnectTerminalOnEnterKey({ ...base, hasBlockingOverlay: true }), false);
+  assert.equal(shouldReconnectTerminalOnEnterKey({ ...base, isReconnectActive: true }), false);
   assert.equal(shouldReconnectTerminalOnEnterKey({ ...base, altKey: true }), false);
 });
 
@@ -238,6 +377,18 @@ test("terminal title keeps the copy host action beside the address", () => {
   assert.ok(copyAction < timestampToggle);
 });
 
+test("focus mode and temporary pane magnification use separate toolbar actions", () => {
+  const source = readFileSync(new URL("./TerminalView.tsx", import.meta.url), "utf8");
+  const focusAction = source.indexOf("onClick={onExpandToFocus}");
+  const magnifyAction = source.indexOf("onClick={onTogglePaneMagnification}");
+
+  assert.notEqual(focusAction, -1);
+  assert.notEqual(magnifyAction, -1);
+  assert.ok(focusAction < magnifyAction);
+  assert.match(source.slice(focusAction, magnifyAction), /terminal\.toolbar\.focusMode/);
+  assert.match(source.slice(magnifyAction), /terminal\.paneMagnification\.(restore|magnify)/);
+});
+
 test("popup terminals disable line timestamp controls", () => {
   const source = readFileSync(new URL("../TerminalPopupPage.tsx", import.meta.url), "utf8");
 
@@ -250,9 +401,10 @@ test("terminal body keeps a slight inset from the surrounding chrome", () => {
   assert.match(source, /const terminalBodyInset = 4/);
   assert.match(source, /left: activeLineTimestampGutterWidth \+ terminalBodyInset/);
   assert.match(source, /right: terminalRightInset/);
-  assert.match(source, /bottom: terminalBodyInset/);
+  assert.match(source, /const terminalBottomInset = terminalBodyInset \+ \(showDisconnectedTerminalNotice \? 28 : 0\)/);
+  assert.match(source, /bottom: terminalBottomInset/);
   assert.match(source, /left=\{terminalBodyInset\}/);
-  assert.match(source, /bottom=\{terminalBodyInset\}/);
+  assert.match(source, /bottom=\{terminalBottomInset\}/);
 });
 
 test("hidden host information bar gives its vertical space back to the terminal", () => {
@@ -311,7 +463,7 @@ test("hidden host information keeps terminal actions rendered", () => {
   const disconnectAction = source.indexOf('aria-label={t("terminal.statusbar.disconnect.label")}', systemAction);
   const reconnectAction = source.indexOf('aria-label={t("terminal.statusbar.reconnect.label")}', disconnectAction);
   const actionsStart = source.indexOf('className="flex items-center gap-0.5 flex-shrink-0"');
-  const controls = source.indexOf("{renderControls({ showClose: inWorkspace })}");
+  const controls = source.indexOf("{renderControls({ showClose: inWorkspace, restorePaneLayout: isPaneMagnified })}");
   const compactDragHandle = source.indexOf('data-terminal-detach-drag-handle="true"');
 
   assert.notEqual(hostInfoStart, -1);

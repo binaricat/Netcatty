@@ -4,6 +4,7 @@ const { executeBoundedSshCommand } = require("./boundedSshExec.cjs");
 const { isSshChannelOpenRateLimitedError } = require("./boundedSshChannelOpen.cjs");
 
 const SCAN_COMPLETE_MARKER = "__NETCATTY_SHELL_SCAN_COMPLETE__";
+const discoveryDisabledConnections = new WeakSet();
 
 function buildInteractiveShellPidCommand(quoteShellArg) {
   const script = `SELF=$$
@@ -49,6 +50,15 @@ async function listInteractiveShellPids(conn, options = {}) {
   if (!conn || typeof conn.exec !== "function" || typeof options.quoteShellArg !== "function") {
     return { available: false, pids: [], ages: {} };
   }
+  const invalidateOnOpenTimeout = options.invalidateOnOpenTimeout === true;
+  if (!invalidateOnOpenTimeout && discoveryDisabledConnections.has(conn)) {
+    return { available: false, disabled: true, pids: [], ages: {} };
+  }
+  // Shell PID discovery only improves cwd recovery for reused shells. A slow
+  // auxiliary exec open must not invalidate the physical transport and close
+  // every interactive shell sharing it. After one open timeout, stop probing
+  // this connection so ssh2 cannot retain another uncancellable callback on
+  // every later reuse.
   try {
     const result = await executeBoundedSshCommand(
       conn,
@@ -59,7 +69,7 @@ async function listInteractiveShellPids(conn, options = {}) {
         maxOutputBytes: 1024 * 1024,
         setTimeoutFn: options.setTimeoutFn,
         clearTimeoutFn: options.clearTimeoutFn,
-        invalidateOnOpenTimeout: options.invalidateOnOpenTimeout,
+        invalidateOnOpenTimeout,
       },
     );
     const lines = result.stdout.split(/\r?\n/);
@@ -78,10 +88,14 @@ async function listInteractiveShellPids(conn, options = {}) {
     }
     return { available, pids, ages };
   } catch (error) {
+    const openTimedOut = error?.code === "SSH_EXEC_OPEN_TIMEOUT";
+    if (openTimedOut && !invalidateOnOpenTimeout) {
+      discoveryDisabledConnections.add(conn);
+    }
     return {
       available: false,
       rateLimited: isSshChannelOpenRateLimitedError(error),
-      openTimedOut: error?.code === "SSH_EXEC_OPEN_TIMEOUT",
+      openTimedOut,
       pids: [],
       ages: {},
     };

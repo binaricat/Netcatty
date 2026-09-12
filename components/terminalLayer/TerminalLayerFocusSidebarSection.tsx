@@ -18,6 +18,7 @@ function TerminalLayerFocusSidebarSectionInner({ ctx }: { ctx: FocusSidebarConte
       onAppendHostToWorkspace={ctx.onAppendHostToWorkspace}
       onCloseSession={ctx.handleCloseSession}
       onCopySession={ctx.onCopySession}
+      onDuplicateSession={ctx.onDuplicateSession}
       onCopySessionToNewWindow={ctx.onCopySessionToNewWindow}
       onDetachSessionFromWorkspace={ctx.onRemoveSessionFromWorkspace}
       onSetWorkspaceFocusedSession={ctx.onSetWorkspaceFocusedSession}

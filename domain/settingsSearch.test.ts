@@ -19,6 +19,8 @@ const EN: Record<string, string> = {
   "settings.appearance.uiTheme": "UI theme",
   "settings.terminal.behavior.copyOnSelect": "Copy on select",
   "settings.terminal.behavior.copyOnSelect.desc": "Copy selected text automatically",
+  "settings.terminal.behavior.disconnectedNotice": "When a connection disconnects",
+  "settings.terminal.behavior.disconnectedNotice.desc": "Show a terminal notice or dialog",
   "settings.terminal.section.behavior": "Behavior",
   "settings.system.networkProxy.mode": "Proxy mode",
   "settings.system.networkProxy.description": "HTTP(S) proxy for cloud sync and AI",
@@ -36,6 +38,8 @@ const ZH: Record<string, string> = {
   ...EN,
   "settings.appearance.theme": "主题",
   "settings.terminal.behavior.copyOnSelect": "选中即复制",
+  "settings.terminal.behavior.disconnectedNotice": "连接断开时",
+  "settings.terminal.behavior.disconnectedNotice.desc": "在终端内显示简短提示，或使用完整弹窗",
   "settings.system.networkProxy.mode": "代理模式",
   "settings.system.networkProxy.title": "网络代理",
   "settings.appLock.title": "应用锁定",
@@ -54,6 +58,17 @@ test("settings search catalog has unique ids", () => {
 test("filterSettingsSearchCatalog matches English labels", () => {
   const hits = filterSettingsSearchCatalog("copy on select", tEn);
   assert.ok(hits.some((hit) => hit.entry.id === "terminal-copy-on-select"));
+});
+
+test("settings search finds the disconnected notice preference", () => {
+  const byEnglish = filterSettingsSearchCatalog("connection disconnects", tEn);
+  assert.ok(byEnglish.some((hit) => hit.entry.id === "terminal-disconnected-notice"));
+
+  const byChinese = filterSettingsSearchCatalog("断开连接", tZh);
+  assert.ok(byChinese.some((hit) => hit.entry.id === "terminal-disconnected-notice"));
+
+  const byPopupAlias = filterSettingsSearchCatalog("弹窗提醒", tZh);
+  assert.ok(byPopupAlias.some((hit) => hit.entry.id === "terminal-disconnected-notice"));
 });
 
 test("filterSettingsSearchCatalog matches Chinese labels and pinyin", () => {

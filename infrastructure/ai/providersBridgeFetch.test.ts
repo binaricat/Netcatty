@@ -13,6 +13,7 @@ test('buffers stream events emitted before the Response stream starts', async (t
 
   const dataHandlers = new Map<string, (data: string) => void>();
   const endHandlers = new Map<string, () => void>();
+  let receivedIdleTimeoutMs: number | undefined;
 
   (globalThis as typeof globalThis & { window?: unknown }).window = {
     netcatty: {
@@ -27,7 +28,15 @@ test('buffers stream events emitted before the Response stream starts', async (t
         return () => endHandlers.delete(requestId);
       },
       onAiStreamError: () => () => undefined,
-      aiChatStream: async (requestId: string) => {
+      aiChatStream: async (
+        requestId: string,
+        _url: string,
+        _headers: Record<string, string>,
+        _body: string,
+        _providerId?: string,
+        idleTimeoutMs?: number,
+      ) => {
+        receivedIdleTimeoutMs = idleTimeoutMs;
         const emit = dataHandlers.get(requestId);
         assert.ok(emit, 'stream data handler should be registered before aiChatStream starts');
         emit(JSON.stringify({
@@ -41,7 +50,9 @@ test('buffers stream events emitted before the Response stream starts', async (t
     },
   };
 
-  const fetch = createBridgeFetchForSDK('deepseek-custom');
+  const fetch = createBridgeFetchForSDK('deepseek-custom', {
+    streamIdleTimeoutMs: 10 * 60 * 1000,
+  });
   const response = await fetch('https://api.example.test/v1/chat/completions', {
     method: 'POST',
     body: JSON.stringify({
@@ -52,6 +63,7 @@ test('buffers stream events emitted before the Response stream starts', async (t
 
   const text = await response.text();
   assert.match(text, /"content":"fast"/);
+  assert.equal(receivedIdleTimeoutMs, 10 * 60 * 1000);
 });
 
 test('captures OpenAI-compatible reasoning_content before the tool follow-up request', async (t) => {

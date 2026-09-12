@@ -65,6 +65,12 @@ const createSessionRuntimeState = () => ({
       ["live", "/live"],
     ]),
   },
+  terminalRendererCwdSourceBySessionRef: {
+    current: new Map([
+      ["closed", "backend" as const],
+      ["live", "osc7" as const],
+    ]),
+  },
   terminalOsc7SignalBySessionRef: {
     current: new Map([
       ["closed", 4],
@@ -95,6 +101,7 @@ test("closing a terminal session cancels its probe and deletes only its runtime 
   assert.equal(liveCancelCount, 0);
   for (const runtimeMap of [
     state.terminalRendererCwdBySessionRef.current,
+    state.terminalRendererCwdSourceBySessionRef.current,
     state.terminalOsc7SignalBySessionRef.current,
     state.cwdProbeGenerationRef.current,
     state.cwdProbeCancelersRef.current,
@@ -123,6 +130,7 @@ test("session pruning preserves reconnecting sessions and unmount cleanup remove
   assert.equal(liveCancelCount, 1);
   for (const runtimeMap of [
     state.terminalRendererCwdBySessionRef.current,
+    state.terminalRendererCwdSourceBySessionRef.current,
     state.terminalOsc7SignalBySessionRef.current,
     state.cwdProbeGenerationRef.current,
     state.cwdProbeCancelersRef.current,

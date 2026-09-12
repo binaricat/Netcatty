@@ -13,7 +13,6 @@ interface UseSftpSessionErrorsParams {
   ) => void;
   navSeqRef: MutableRefObject<{ left: number; right: number }>;
   lastConnectedHostRef: MutableRefObject<{ left: Host | "local" | null; right: Host | "local" | null }>;
-  reconnectingRef: MutableRefObject<{ left: boolean; right: boolean }>;
   releaseConnection: (connectionId: string) => Promise<void>;
 }
 
@@ -42,7 +41,6 @@ export const useSftpSessionErrors = ({
   updateActiveTab,
   navSeqRef,
   lastConnectedHostRef,
-  reconnectingRef,
   releaseConnection,
 }: UseSftpSessionErrorsParams) =>
   useCallback(
@@ -64,22 +62,10 @@ export const useSftpSessionErrors = ({
         connection: pane.connection,
       });
 
-      if (canReconnect && !reconnectingRef.current[side]) {
+      if (canReconnect) {
         // Keep the connection object (host identity + path) so the UI does not
         // collapse into the empty host picker when listing root (or any path)
         // fails with a transient session error on some servers.
-        reconnectingRef.current[side] = true;
-        updateActiveTab(side, (prev) => ({
-          ...prev,
-          reconnecting: true,
-          loading: false,
-          error: "sftp.error.connectionLostReconnecting",
-        }));
-        return;
-      }
-
-      if (canReconnect && reconnectingRef.current[side]) {
-        // Already reconnecting — keep connection, avoid blank host picker.
         updateActiveTab(side, (prev) => ({
           ...prev,
           reconnecting: true,
@@ -108,7 +94,6 @@ export const useSftpSessionErrors = ({
       updateActiveTab,
       navSeqRef,
       lastConnectedHostRef,
-      reconnectingRef,
       releaseConnection,
     ],
   );

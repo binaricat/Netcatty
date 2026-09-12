@@ -4,7 +4,7 @@ import {
     setGlobalSftpBookmarks,
     subscribeGlobalSftpBookmarks,
 } from "../../../application/state/sftp/globalSftpBookmarks";
-import { createSftpBookmark } from "../../../application/state/sftp/bookmarkHelpers";
+import { createSftpBookmark, moveSftpBookmark, renameSftpBookmark } from "../../../application/state/sftp/bookmarkHelpers";
 
 interface UseGlobalSftpBookmarksParams {
     currentPath: string | undefined;
@@ -34,10 +34,20 @@ export const useGlobalSftpBookmarks = ({
         setGlobalSftpBookmarks((prev) => prev.filter((b) => b.id !== id));
     }, []);
 
+    const reorderBookmark = useCallback((fromId: string, toId: string) => {
+        setGlobalSftpBookmarks((prev) => moveSftpBookmark(prev, fromId, toId));
+    }, []);
+
+    const renameBookmark = useCallback((id: string, label: string) => {
+        setGlobalSftpBookmarks((prev) => renameSftpBookmark(prev, id, label));
+    }, []);
+
     return {
         bookmarks,
         isCurrentPathBookmarked,
         addBookmark,
         deleteBookmark,
+        reorderBookmark,
+        renameBookmark,
     };
 };

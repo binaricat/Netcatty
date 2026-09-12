@@ -126,12 +126,38 @@ test("scripts side panel clears pending bulk delete when the panel hides", () =>
   // pending deletes so a later re-show does not resurrect a half-dismissed prompt.
   assert.match(
     source,
-    /if\s*\(\s*!isVisible\s*\)\s*setPendingDeleteIds\(\s*null\s*\)/,
+    /if\s*\(\s*isVisible\s*\)\s*return/,
   );
+  assert.match(source, /setIsPackageDialogOpen\(\s*false\s*\)/);
+  assert.match(source, /setRenamingPackagePath\(\s*''\s*\)/);
+  assert.match(source, /setNewPackageName\(\s*''\s*\)/);
 });
 
 test("scripts side panel package dialog traps focus and exposes dialog close contract", () => {
   assert.match(source, /packageDialogRef/);
   assert.match(source, /data-dialog-close="true"/);
   assert.match(source, /isPackageDialogOpen/);
+});
+
+test("scripts side panel package rows wrap in a rename and delete context menu", () => {
+  assert.match(source, /const PackageRow = memo/);
+  assert.match(
+    source,
+    /data-pkg-path=\{row\.path\}[\s\S]*?<ContextMenu>[\s\S]*?<ContextMenuTrigger asChild>[\s\S]*?\{rowButton\}/,
+  );
+  assert.match(source, /common\.rename/);
+  assert.match(source, /vault\.deleteConfirm\.packageDesc/);
+  assert.match(source, /deleteSnippetPackage/);
+  assert.match(source, /renameSnippetPackage/);
+  assert.match(source, /SNIPPET_PACKAGE_PATH_CHANGE_EVENT/);
+  assert.match(source, /detail: \{ from: renamingPackagePath, to: result\.newPath \}/);
+  assert.match(source, /detail: \{ from: path, to: null \}/);
+  assert.match(source, /openRenamePackageDialog/);
+  assert.match(source, /requestDeletePackage/);
+});
+
+test("scripts side panel does not start a drag from a non-primary pointer", () => {
+  assert.match(source, /from '\.\/ui\/primaryOnlyDrag'/);
+  assert.match(source, /isNonPrimaryPointer/);
+  assert.match(source, /primaryOnlyDragHandlers/);
 });

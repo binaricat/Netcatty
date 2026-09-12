@@ -164,6 +164,8 @@ declare global {
     // connection. Lets a duplicated tab skip a second MFA prompt (issue #1204).
     // The bridge falls back to a fresh connection if the source is gone.
     sourceSessionId?: string;
+    /** Require openSftpForSession to use exactly the requested live session. */
+    requireExactSourceSession?: boolean;
     // Skip POSIX process discovery when copying a network-device session.
     skipShellPidDiscovery?: boolean;
     /**

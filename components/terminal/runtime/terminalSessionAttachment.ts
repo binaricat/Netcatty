@@ -23,7 +23,7 @@ import type {
 } from "./createTerminalSessionStarters.types";
 import { clearConnectionToken } from "./terminalDistroDetection";
 import {
-  resetTerminalLineTimestamps,
+  resetTerminalLineTimestampRecordingState,
   type TerminalLineTimestampPerfStep,
   writeTerminalDataWithLineTimestamps,
 } from "./terminalLineTimestamps";
@@ -89,6 +89,7 @@ import {
 } from "./terminalOutputPipeline";
 import {
   hasPendingTerminalWrites,
+  isTerminalPageHidden,
   maybeFlushTerminalWriteCoalescerWhenUnfocused,
   scheduleTerminalRepaintWhenUnfocused,
   shouldFlushTerminalWritesForBackgroundOutput,
@@ -112,6 +113,16 @@ export const buildTermEnv = (host: Host, terminalSettings?: TerminalSettings) =>
 
 const isTerminalPaneVisible = (ctx: TerminalSessionStartersContext): boolean => (
   (ctx.isPaneVisibleRef?.current ?? ctx.isVisibleRef?.current) !== false
+);
+
+/**
+ * Visibility recorded for the output-pressure gates. A pane whose ref says
+ * "visible" still cannot paint while the document is page-hidden, so record it
+ * as background there too; otherwise bulk batches take the background flush
+ * path but keyword-highlight still repainted the viewport per batch.
+ */
+const isTerminalOutputVisibleForPressure = (ctx: TerminalSessionStartersContext): boolean => (
+  isTerminalPaneVisible(ctx) && !isTerminalPageHidden()
 );
 
 const handleTerminalOutputAutoScroll = (
@@ -409,7 +420,7 @@ export const getFlowController = (
   return controller;
 };
 
-export const resetTerminalLineTimestampState = resetTerminalLineTimestamps;
+export const resetTerminalLineTimestampState = resetTerminalLineTimestampRecordingState;
 
 export const acknowledgeDroppedTerminalDisplayBytes = (
   ctx: TerminalSessionStartersContext,
@@ -471,7 +482,7 @@ export const writeSessionData = (
     visible: isPaneVisible,
   });
   flow.received(ingressBytes);
-  setTerminalOutputPressureVisibility(term, isPaneVisible);
+  setTerminalOutputPressureVisibility(term, isTerminalOutputVisibleForPressure(ctx));
   noteTerminalOutputPressureData(term, data);
   const settings = ctx.terminalSettingsRef?.current ?? ctx.terminalSettings;
   const preservePromptSourceChunks = Boolean(
@@ -485,6 +496,12 @@ export const writeSessionData = (
       batchIngress: number,
       writeOptions?: CoalescedTerminalWriteOptions,
     ): void => {
+      // Output queued while hidden can be flushed after the pane is revealed.
+      // Refresh the pressure visibility at flush time so the write callback
+      // sees the live pane state instead of the ingress snapshot; otherwise a
+      // bulk batch written after reveal stays on the fully deferred path and
+      // the viewport sits uncolored until the quiet catch-up (#3272).
+      setTerminalOutputPressureVisibility(term, isTerminalOutputVisibleForPressure(ctx));
       writeSessionDataImmediate(ctx, term, batch, batchIngress, {
         ...writeOptions,
         deferStart: writeOptions?.deferStart ?? !isPaneCurrentlyVisible(),
@@ -775,6 +792,7 @@ export const tryAttachSessionToTerminal = (
     onConnected?: (meta?: TerminalSessionDataMeta) => void;
     onExit?: (evt: TerminalSessionExitEvent) => void;
     requireExplicitConnectionReady?: boolean;
+    deferConnectionDuringMoshHandshake?: boolean;
     convertLfToCrlf?: boolean;
     sudoAutofillPassword?: string;
     sudoAutofillCandidates?: SudoPasswordAutofillCandidate[];
@@ -837,6 +855,7 @@ export const attachSessionToTerminal = (
     onConnected?: (meta?: TerminalSessionDataMeta) => void;
     onExit?: (evt: TerminalSessionExitEvent) => void;
     requireExplicitConnectionReady?: boolean;
+    deferConnectionDuringMoshHandshake?: boolean;
     convertLfToCrlf?: boolean;
     sudoAutofillPassword?: string;
     sudoAutofillCandidates?: SudoPasswordAutofillCandidate[];
@@ -854,7 +873,10 @@ export const attachSessionToTerminal = (
   teardownTerminalOutputPipeline(ctx, term, id, flow);
   flushTerminalWriteCoalescer(term);
   resetTerminalSyncBlockFilter(term);
-  resetTerminalLineTimestamps(term);
+  // Reattach keeps the xterm buffer (reconnect preserves scrollback), so only
+  // reset per-session recording state — a full reset would strip timestamps
+  // from preserved history.
+  resetTerminalLineTimestampRecordingState(term);
   resetTerminalOutputPressure(term);
   ctx.onSessionAttached?.(id);
   const assistMode =
@@ -885,6 +907,13 @@ export const attachSessionToTerminal = (
   const markConnectedOnFirstOutput = (meta?: TerminalSessionDataMeta) => {
     const pluginConnectionReady = meta?.pluginConnectionReady === true;
     if (opts?.requireExplicitConnectionReady === true && !pluginConnectionReady) return;
+    if (
+      opts?.deferConnectionDuringMoshHandshake === true
+      && meta?.moshHandshake === true
+      && meta?.moshHandshakeRequiresUserInput !== true
+    ) {
+      return;
+    }
     if (ctx.hasConnectedRef.current && !pluginConnectionReady) return;
     if (!ctx.hasConnectedRef.current) {
       ctx.updateStatus("connected");
@@ -945,11 +974,9 @@ export const attachSessionToTerminal = (
       data = sudoAutofill?.handleOutput(data) ?? data;
       writeSessionData(ctx, term, data, ingressBytes, meta);
       ctx.onTerminalOutput?.(data, meta);
-      // Mark connected on first visible output so the connection overlay
-      // dismisses and interactive Mosh handshake prompts (password/OTP)
-      // remain reachable. Startup commands / pending scripts are gated
-      // separately on netcatty:mosh:ready so they do not hit the handshake
-      // PTY (#2199).
+      // Ordinary transports connect on first visible output. Mosh defers that
+      // transition until ready unless its SSH bootstrap explicitly reports
+      // that it is blocked on input Netcatty could not answer automatically.
       markConnectedOnFirstOutput(meta);
     },
     { replayBacklog: true },

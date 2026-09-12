@@ -1,7 +1,11 @@
 import React, { useCallback, useState } from "react";
 import { Plus, X } from "lucide-react";
 import type { AIPermissionMode } from "../../../../infrastructure/ai/types";
-import { DEFAULT_COMMAND_BLOCKLIST, MAX_COMMAND_TIMEOUT_SECONDS } from "../../../../infrastructure/ai/types";
+import {
+  DEFAULT_COMMAND_BLOCKLIST,
+  MAX_COMMAND_TIMEOUT_SECONDS,
+  MAX_RESPONSE_IDLE_TIMEOUT_SECONDS,
+} from "../../../../infrastructure/ai/types";
 import { useI18n } from "../../../../application/i18n/I18nProvider";
 import { Button } from "../../../ui/button";
 import { Select, SettingCard, SettingRow, SettingsAnchor, SettingsSection } from "../../settings-ui";
@@ -13,6 +17,8 @@ export const SafetySettings: React.FC<{
   setCommandBlocklist: (value: string[]) => void;
   commandTimeout: number;
   setCommandTimeout: (value: number) => void;
+  responseIdleTimeout: number;
+  setResponseIdleTimeout: (value: number) => void;
   maxIterations: number;
   setMaxIterations: (value: number) => void;
 }> = ({
@@ -22,6 +28,8 @@ export const SafetySettings: React.FC<{
   setCommandBlocklist,
   commandTimeout,
   setCommandTimeout,
+  responseIdleTimeout,
+  setResponseIdleTimeout,
   maxIterations,
   setMaxIterations,
 }) => {
@@ -82,6 +90,28 @@ export const SafetySettings: React.FC<{
             onChange={(val) => setGlobalPermissionMode(val as AIPermissionMode)}
             className="w-64"
           />
+        </SettingRow>
+
+        <SettingRow
+          anchorId="ai-safety-response-idle-timeout"
+          label={t('ai.safety.responseIdleTimeout')}
+          description={t('ai.safety.responseIdleTimeout.description')}
+        >
+          <div className="flex items-center gap-2">
+            <input
+              type="number"
+              aria-label={t('ai.safety.responseIdleTimeout')}
+              value={responseIdleTimeout}
+              onChange={(e) => {
+                const val = parseInt(e.target.value, 10);
+                if (!isNaN(val)) setResponseIdleTimeout(val);
+              }}
+              min={1}
+              max={MAX_RESPONSE_IDLE_TIMEOUT_SECONDS}
+              className="w-20 h-9 rounded-md border border-input bg-background px-3 text-sm text-right focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            />
+            <span className="text-xs text-muted-foreground">{t('ai.safety.responseIdleTimeout.unit')}</span>
+          </div>
         </SettingRow>
 
         <SettingRow

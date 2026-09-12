@@ -1,6 +1,6 @@
 import React from "react";
 import { DEFAULT_TERMINAL_WORD_SEPARATORS } from "../../../domain/models";
-import type { DynamicTabTitleMode, LinkModifier, MiddleClickBehavior, OscNotificationMode, RightClickBehavior, TerminalSettings } from "../../../domain/models";
+import type { DisconnectedNoticeMode, DynamicTabTitleMode, LinkModifier, MiddleClickBehavior, OscNotificationMode, RightClickBehavior, TerminalSettings } from "../../../domain/models";
 import { Input } from "../../ui/input";
 import { Label } from "../../ui/label";
 import { SectionHeader, Select, SettingsAnchor, SettingRow, Toggle } from "../settings-ui";
@@ -47,6 +47,22 @@ export const TerminalBehaviorSettings: React.FC<TerminalBehaviorSettingsProps> =
           <Toggle
             checked={terminalSettings.autoCloseOnExit}
             onChange={(v) => updateTerminalSetting("autoCloseOnExit", v)}
+          />
+        </SettingRow>
+
+        <SettingRow
+          anchorId="terminal-disconnected-notice"
+          label={t("settings.terminal.behavior.disconnectedNotice")}
+          description={t("settings.terminal.behavior.disconnectedNotice.desc")}
+        >
+          <Select
+            value={terminalSettings.disconnectedNoticeMode}
+            options={[
+              { value: "terminal", label: t("settings.terminal.behavior.disconnectedNotice.terminal") },
+              { value: "dialog", label: t("settings.terminal.behavior.disconnectedNotice.dialog") },
+            ]}
+            onChange={(v) => updateTerminalSetting("disconnectedNoticeMode", v as DisconnectedNoticeMode)}
+            className="w-40"
           />
         </SettingRow>
 

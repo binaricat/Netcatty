@@ -18,15 +18,20 @@ import { netcattyBridge } from "../../infrastructure/services/netcattyBridge";
 import {
   clearReconnectTimer,
   getActiveConnection,
+  hasActivePortForwardRuntime,
   getPortForwardRuntimeAuthority,
   initReconnectCancelListener,
   reconcileWithBackend,
+  startAllPortForwards,
   startPortForward,
+  stopAllActivePortForwards,
   stopAllPortForwards,
   stopAndCleanupRule,
   stopAndCleanupRuleAndWait,
   stopPortForward,
   syncWithBackend,
+  type StartAllPortForwardsResult,
+  type StopAllActivePortForwardsResult,
 } from "../../infrastructure/services/portForwardingService";
 import { useStoredViewMode, ViewMode } from "./useStoredViewMode";
 
@@ -89,8 +94,20 @@ export interface UsePortForwardingStateResult {
     ruleId: string,
     onStatusChange?: (status: PortForwardingRule["status"], error?: string) => void,
   ) => Promise<{ success: boolean; error?: string }>;
+  startAllTunnels: (
+    rules: PortForwardingRule[],
+    resolveHost: (rule: PortForwardingRule) => Host | undefined,
+    hosts: Host[],
+    keys: SSHKey[],
+    identities: Identity[],
+    terminalSettings?: { keepaliveInterval: number; keepaliveCountMax: number },
+    knownHosts?: KnownHost[],
+    hostNotFoundMessage?: string,
+  ) => Promise<StartAllPortForwardsResult>;
+  stopAllTunnels: (rules: PortForwardingRule[]) => Promise<StopAllActivePortForwardsResult>;
   stopRuleTunnels: (ruleId: string) => Promise<{ success: boolean; error?: string }>;
   hasRuntimeTunnel: (ruleId: string) => boolean;
+  hasAnyRuntimeTunnel: () => boolean;
 
   filteredRules: PortForwardingRule[];
   selectedRule: PortForwardingRule | undefined;
@@ -280,6 +297,7 @@ export const createPortForwardingStorageSyncHandlers = ({
 const applyRuntimeSnapshotProjection = (
   goneRuleIds: ReadonlySet<string> = new Set(),
   authorityAvailable = snapshotAvailable,
+  appearedRuleIds: readonly string[] = [],
 ) => {
   const normalizedRules = normalizeRulesWithConnections(globalRules, {
     reconciledGoneRuleIds: goneRuleIds,
@@ -289,7 +307,7 @@ const applyRuntimeSnapshotProjection = (
     setRuntimeProjection(normalizedRules);
   } else if (hasPortForwardingRuntimePresenceChanged({
     gone: [...goneRuleIds],
-    appeared: [],
+    appeared: appearedRuleIds,
   })) {
     globalRules = normalizedRules;
     notifyListeners();
@@ -351,7 +369,11 @@ const subscribeToPortForwardRuntime = (): (() => void) => {
         applyRuntimeSnapshotProjection(new Set(), false);
         return;
       }
-      applyRuntimeSnapshotProjection(new Set(reconciliation.gone), true);
+      applyRuntimeSnapshotProjection(
+        new Set(reconciliation.gone),
+        true,
+        reconciliation.appeared,
+      );
     } catch {
       if (disposed) return;
       snapshotAvailable = false;
@@ -379,7 +401,11 @@ const subscribeToPortForwardRuntime = (): (() => void) => {
         applyRuntimeSnapshotProjection(new Set(), false);
         return;
       }
-      applyRuntimeSnapshotProjection(new Set(reconciliation.gone), true);
+      applyRuntimeSnapshotProjection(
+        new Set(reconciliation.gone),
+        true,
+        reconciliation.appeared,
+      );
     });
   });
 
@@ -724,6 +750,46 @@ export const usePortForwardingState = (): UsePortForwardingStateResult => {
     return connection !== undefined && connection.status !== "inactive";
   }, []);
 
+  const hasAnyRuntimeTunnel = useCallback(() => hasActivePortForwardRuntime(), []);
+
+  const startAllTunnels = useCallback(
+    async (
+      targetRules: PortForwardingRule[],
+      resolveHost: (rule: PortForwardingRule) => Host | undefined,
+      hosts: Host[],
+      keys: SSHKey[],
+      identities: Identity[],
+      terminalSettings?: { keepaliveInterval: number; keepaliveCountMax: number },
+      knownHosts?: KnownHost[],
+      hostNotFoundMessage?: string,
+    ) => {
+      return startAllPortForwards(
+        targetRules,
+        resolveHost,
+        hosts,
+        keys,
+        identities,
+        (ruleId, status, error) => {
+          setRuleStatus(ruleId, status, error);
+        },
+        terminalSettings,
+        knownHosts,
+        (ruleId) => globalRules.find((rule) => rule.id === ruleId),
+        hostNotFoundMessage,
+      );
+    },
+    [setRuleStatus],
+  );
+
+  const stopAllTunnels = useCallback(
+    async (targetRules: PortForwardingRule[]) => {
+      return stopAllActivePortForwards(targetRules, (ruleId, status, error) => {
+        setRuleStatus(ruleId, status, error);
+      });
+    },
+    [setRuleStatus],
+  );
+
   // Filter and sort rules
   const filteredRules = useMemo(() => {
     let result = [...rules];
@@ -789,8 +855,11 @@ export const usePortForwardingState = (): UsePortForwardingStateResult => {
     setRuleStatus,
     startTunnel,
     stopTunnel,
+    startAllTunnels,
+    stopAllTunnels,
     stopRuleTunnels: stopAndCleanupRuleAndWait,
     hasRuntimeTunnel,
+    hasAnyRuntimeTunnel,
 
     filteredRules,
     selectedRule,

@@ -1,3 +1,4 @@
+import { createRequire } from 'node:module';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
@@ -8,6 +9,11 @@ import {
   isUntrustedTerminalInputPrompt,
   shouldUsePluginTerminalCompletionProvider,
 } from './terminalPromptSecurity.ts';
+
+const require = createRequire(import.meta.url);
+const sharedPromptSecurity = require('./terminalPromptSecurity.shared.cjs') as {
+  isUntrustedTerminalInputPrompt: typeof isUntrustedTerminalInputPrompt;
+};
 
 test('terminal prompt security recognizes password, MFA, OTP, PIN, and CJK challenges', () => {
   const challenges = [
@@ -114,4 +120,25 @@ test('ordinary shell commands ending with a colon are not untrusted input prompt
   assert.equal(isUntrustedTerminalInputPrompt('Please authenticate: '), true);
   assert.equal(isUntrustedTerminalInputPrompt('Token: '), true);
   assert.equal(isUntrustedTerminalInputPrompt('Password: '), true);
+});
+
+test('renderer and main-process prompt classifiers stay aligned', () => {
+  const cases: Array<[
+    string,
+    { allowHostStyleGreaterThan?: boolean } | undefined,
+    boolean,
+  ]> = [
+    ['Custom authentication> ', undefined, true],
+    ['Please authenticate: ', undefined, true],
+    ['alice@host:~$ ', undefined, false],
+    ['user@host:~$ lsof -i:', undefined, false],
+    ['Challenge # 1:', undefined, true],
+    ['router> show ip:', { allowHostStyleGreaterThan: true }, false],
+    ['router> show ip:', undefined, true],
+  ];
+
+  for (const [prompt, options, expected] of cases) {
+    assert.equal(isUntrustedTerminalInputPrompt(prompt, options), expected, prompt);
+    assert.equal(sharedPromptSecurity.isUntrustedTerminalInputPrompt(prompt, options), expected, prompt);
+  }
 });

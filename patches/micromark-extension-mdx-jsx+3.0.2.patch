@@ -1,0 +1,48 @@
+diff --git a/node_modules/micromark-extension-mdx-jsx/dev/lib/factory-tag.js b/node_modules/micromark-extension-mdx-jsx/dev/lib/factory-tag.js
+index 36d8f7f..9f9d6eb 100644
+--- a/node_modules/micromark-extension-mdx-jsx/dev/lib/factory-tag.js
++++ b/node_modules/micromark-extension-mdx-jsx/dev/lib/factory-tag.js
+@@ -151,6 +151,19 @@ export function factoryTag(
+    * @type {State}
+    */
+   function nameBefore(code) {
++    // Netcatty notes are Markdown: numeric comparisons cannot start JSX tags.
++    // Let micromark roll back this construct and keep the literal text.
++    if (
++      code !== codes.eof &&
++      ((code >= codes.digit0 && code <= codes.digit9) ||
++        code === codes.equalsTo ||
++        code === codes.plusSign ||
++        code === codes.dash ||
++        code === codes.dot)
++    ) {
++      return nok(code)
++    }
++
+     // Closing tag.
+     if (code === codes.slash) {
+       effects.enter(tagClosingMarkerType)
+diff --git a/node_modules/micromark-extension-mdx-jsx/lib/factory-tag.js b/node_modules/micromark-extension-mdx-jsx/lib/factory-tag.js
+index 6beab7e..b501f5e 100644
+--- a/node_modules/micromark-extension-mdx-jsx/lib/factory-tag.js
++++ b/node_modules/micromark-extension-mdx-jsx/lib/factory-tag.js
+@@ -108,6 +108,19 @@ export function factoryTag(effects, ok, nok, acorn, acornOptions, addResult, all
+    * @type {State}
+    */
+   function nameBefore(code) {
++    // Netcatty notes are Markdown: numeric comparisons cannot start JSX tags.
++    // Let micromark roll back this construct and keep the literal text.
++    if (
++      code !== null &&
++      ((code >= 48 && code <= 57) ||
++        code === 61 ||
++        code === 43 ||
++        code === 45 ||
++        code === 46)
++    ) {
++      return nok(code);
++    }
++
+     // Closing tag.
+     if (code === 47) {
+       effects.enter(tagClosingMarkerType);

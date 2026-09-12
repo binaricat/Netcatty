@@ -43,7 +43,7 @@ import { materializeHostProxyProfile } from '../../domain/proxyProfiles';
 import { buildSshDeepLinkConnectionHost, buildSshDeepLinkEphemeralHost, buildSshDeepLinkEphemeralHostFromSaved, buildSshDeepLinkHostDraft, findSshDeepLinkHost, parseSshDeepLink } from '../../domain/sshDeepLink';
 import { buildTelnetDeepLinkConnectionHost, buildTelnetDeepLinkEphemeralHostFromSaved, buildTelnetDeepLinkOpenHost, findTelnetDeepLinkHost, materializeTelnetDeepLinkMatchHost, parseTelnetDeepLink } from '../../domain/telnetDeepLink';
 import { buildJmsDeepLinkEphemeralHost, isSupportedJmsProtocol, parseJmsDeepLink } from '../../domain/jmsDeepLink';
-import { applyEphemeralHostsUpdate, splitHostsUpdateByEphemeral } from '../../domain/ephemeralHosts';
+import { applyEphemeralHostDistroUpdate, applyEphemeralHostsUpdate, splitHostsUpdateByEphemeral } from '../../domain/ephemeralHosts';
 import { resolveHostAuth } from '../../domain/sshAuth';
 import { isEncryptedCredentialPlaceholder, stripSyncPayloadEncryptedCredentials } from '../../domain/credentials';
 import {
@@ -52,9 +52,10 @@ import {
 } from '../../domain/terminalAppearance';
 import { selectConnectionLogForTerminalDataCapture } from '../../domain/connectionLog';
 import { collectSessionIds } from '../../domain/workspace';
+import type { PaneMagnificationController } from '../../domain/paneMagnification';
 import { resolveCloseIntent } from '../state/resolveCloseIntent';
 import { resolveSnippetsShortcutIntent } from '../state/resolveSnippetsShortcutIntent';
-import { resolveWindowCommandCloseIntent } from '../state/windowCommandClose';
+import { isPrimaryModifierWBinding, resolveWindowCommandCloseIntent } from '../state/windowCommandClose';
 import type { SyncPayload } from '../../domain/sync';
 import { applySyncPayload, buildLocalVaultPayloadAsync, hasMeaningfulSyncData } from '../syncPayload';
 import {
@@ -89,7 +90,7 @@ import { isScriptSnippet } from '../../domain/snippetScript.ts';
 import { collectSnippetDeleteIds } from '../../domain/snippetSelection.ts';
 import { shouldOpenLocalTerminalOnStartup, resolveStartupLandingSetting } from '../../domain/startupLanding';
 import { useAppStartupEffects } from './useAppStartupEffects';
-import { handleTrayJumpToSessionImpl, handleTrayTogglePortForwardImpl, handleTrayPanelConnectImpl, handleTrayPanelConnectRequestImpl, flushQueuedTrayPanelConnectHostsImpl, handleGlobalHotkeyKeyDownImpl, handleEscapeKeyDownImpl, handleKeyboardInteractiveSubmitImpl, handleKeyboardInteractiveCancelImpl, handlePassphraseSubmitImpl, handlePassphraseCancelImpl, handlePassphraseSkipImpl, createLocalTerminalWithCurrentShellImpl, splitSessionWithCurrentShellImpl, copySessionWithCurrentShellImpl, copyWorkspaceWithCurrentShellImpl, copySessionToNewWindowWithCurrentShellImpl, confirmIfBusyLocalTerminalImpl, closeTabsBatchImpl, executeHotkeyActionImpl, handleCreateLocalTerminalImpl, handleConnectToHostImpl, handleTerminalDataCaptureImpl, hasMultipleProtocolsImpl, handleHostConnectWithProtocolCheckImpl, handleProtocolSelectImpl, handleRootContextMenuImpl } from './AppHandlers';
+import { handleTrayJumpToSessionImpl, handleTrayTogglePortForwardImpl, handleTrayPanelConnectImpl, handleTrayPanelConnectRequestImpl, flushQueuedTrayPanelConnectHostsImpl, handleGlobalHotkeyKeyDownImpl, handleEscapeKeyDownImpl, handleKeyboardInteractiveSubmitImpl, handleKeyboardInteractiveCancelImpl, handlePassphraseSubmitImpl, handlePassphraseCancelImpl, handlePassphraseSkipImpl, createLocalTerminalWithCurrentShellImpl, splitSessionWithCurrentShellImpl, copySessionWithCurrentShellImpl, duplicateSessionWithCurrentShellImpl, copyWorkspaceWithCurrentShellImpl, copySessionToNewWindowWithCurrentShellImpl, confirmIfBusyLocalTerminalImpl, closeTabsBatchImpl, executeHotkeyActionImpl, handleCreateLocalTerminalImpl, handleConnectToHostImpl, handleTerminalDataCaptureImpl, hasMultipleProtocolsImpl, handleHostConnectWithProtocolCheckImpl, handleProtocolSelectImpl, handleRootContextMenuImpl, markForwardedNativeShortcutEvent } from './AppHandlers';
 
 type OpenSessionInNewWindowPayload = {
   title?: string;
@@ -201,6 +202,7 @@ export function AppSideEffects() {
     addConnectionLog,
     updateConnectionLog,
     updateHostLastConnected,
+    updateHostDistro,
     importDataFromString,
     readPersistedHosts,
     groupConfigs,
@@ -502,12 +504,13 @@ export function AppSideEffects() {
             importVaultData: importDataFromString,
             importPortForwardingRules,
             onSettingsApplied: settings.rehydrateAllFromStorage,
-          }),
+          }, { currentHosts: hosts }),
         translateProtectiveBackupFailure: (message) =>
           t('cloudSync.localBackups.protectiveBackupFailed', { message }),
       }),
     [
       buildCurrentSyncPayload,
+      hosts,
       importDataFromString,
       importPortForwardingRules,
       settings.rehydrateAllFromStorage,
@@ -525,7 +528,7 @@ export function AppSideEffects() {
             importVaultData: importDataFromString,
             importPortForwardingRules,
             onSettingsApplied: settings.rehydrateAllFromStorage,
-          });
+          }, { currentHosts: hosts });
           await commitReplica();
         },
         translateProtectiveBackupFailure: (message) =>
@@ -533,6 +536,7 @@ export function AppSideEffects() {
       }),
     [
       buildCurrentSyncPayload,
+      hosts,
       importDataFromString,
       importPortForwardingRules,
       settings.rehydrateAllFromStorage,
@@ -596,7 +600,7 @@ export function AppSideEffects() {
   const _handleTrayPanelConnect = useEffectEvent((hostId: string) => { return handleTrayPanelConnectImpl(() => ({ addConnectionLog, connectToHost, hostId, hosts, identities, keys, resolveEffectiveHost, resolveHostAuth, systemInfoRef, t, toast }), hostId); });
   const _handleTrayPanelConnectRequest = useEffectEvent((hostId: string) => { return handleTrayPanelConnectRequestImpl(() => ({ connectNow: _handleTrayPanelConnect, hostId, isVaultInitialized, queueConnect: (queuedHostId: string) => setPendingTrayPanelConnectHostIds((prev) => [...prev, queuedHostId]) }), hostId); });
   const _handleGlobalHotkeyKeyDown = useEffectEvent((e: KeyboardEvent) => { return handleGlobalHotkeyKeyDownImpl(() => ({ HOTKEY_DEBUG, closeTabKeyStr, e, executeHotkeyAction, hotkeyScheme, keyBindings, matchesKeyBinding }), e); });
-  const _handleEscapeKeyDown = useEffectEvent((e: KeyboardEvent) => { return handleEscapeKeyDownImpl(() => ({ e, isQuickSwitcherOpen, setIsQuickSwitcherOpen }), e); });
+  const _handleEscapeKeyDown = useEffectEvent((e: KeyboardEvent) => { return handleEscapeKeyDownImpl(() => ({ e, isQuickSwitcherOpen, setIsQuickSwitcherOpen, sftpPaneMagnificationRef, terminalPaneMagnificationRef }), e); });
 
   // Vault hosts for tray / auto-start; terminalHosts (vault + ephemeral) only for
   // dedicated transfer resume so quick-connect rows do not break tray connect.
@@ -923,6 +927,8 @@ export function AppSideEffects() {
 
   const toggleScriptsSidePanelRef = useRef<(() => void) | null>(null);
   const toggleSidePanelRef = useRef<(() => void) | null>(null);
+  const terminalPaneMagnificationRef = useRef<PaneMagnificationController | null>(null);
+  const sftpPaneMagnificationRef = useRef<PaneMagnificationController | null>(null);
   const openNoteRequestIdRef = useRef(0);
   const [openNoteRequest, setOpenNoteRequest] = useState<{
     tabId: string;
@@ -953,6 +959,8 @@ export function AppSideEffects() {
   const splitSessionWithCurrentShell = useCallback((sessionId: string, direction: 'horizontal' | 'vertical') => { return splitSessionWithCurrentShellImpl(() => ({ classifyLocalShellType, direction, discoveredShells, getSessionRestoreCwd, hostById, terminalHosts, netcattyBridge, resolveShellSetting, sessionId, sessions, splitSession, terminalSettings }), sessionId, direction); }, [splitSession, terminalSettings, discoveredShells, sessions, getSessionRestoreCwd, hostById, terminalHosts]);
 
   const copySessionWithCurrentShell = useCallback((sessionId: string) => { return copySessionWithCurrentShellImpl(() => ({ classifyLocalShellType, copySession, discoveredShells, getSessionRestoreCwd, hostById, terminalHosts, netcattyBridge, resolveShellSetting, sessionId, sessions, terminalSettings }), sessionId); }, [copySession, terminalSettings, discoveredShells, sessions, getSessionRestoreCwd, hostById, terminalHosts]);
+
+  const duplicateSessionWithCurrentShell = useCallback((sessionId: string) => { return duplicateSessionWithCurrentShellImpl(() => ({ classifyLocalShellType, copySession, discoveredShells, getSessionRestoreCwd, hostById, terminalHosts, netcattyBridge, resolveShellSetting, sessionId, sessions, terminalSettings }), sessionId); }, [copySession, terminalSettings, discoveredShells, sessions, getSessionRestoreCwd, hostById, terminalHosts]);
 
   const copyWorkspaceWithCurrentShell = useCallback((workspaceId: string) => { return copyWorkspaceWithCurrentShellImpl(() => ({ classifyLocalShellType, collectSessionIds, copyWorkspace, discoveredShells, getSessionRestoreCwd, hostById, terminalHosts, netcattyBridge, resolveShellSetting, sessions, terminalSettings, workspaces }), workspaceId); }, [copyWorkspace, terminalSettings, discoveredShells, sessions, workspaces, getSessionRestoreCwd, hostById, terminalHosts]);
 
@@ -1065,8 +1073,10 @@ export function AppSideEffects() {
         showSftpTab: showSftpTabRef.current,
         shellOnlyTabNumberShortcuts: shellOnlyTabNumberShortcutsRef.current,
       },
+      sftpPaneMagnificationRef,
       splitSessionWithCurrentShell,
       systemInfoRef,
+      terminalPaneMagnificationRef,
       toEditorTabId,
       toggleBroadcast,
       toggleScriptsSidePanelRef,
@@ -1091,10 +1101,6 @@ export function AppSideEffects() {
     const openDialogs = Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"][data-state="open"]'));
     const topmostOpenDialog = openDialogs[openDialogs.length - 1] ?? null;
     const topmostDialogClose = topmostOpenDialog?.querySelector<HTMLElement>('[data-dialog-close="true"]');
-    if (topmostDialogClose) {
-      topmostDialogClose.click();
-      return;
-    }
 
     const intent = resolveWindowCommandCloseIntent({
       activeTabId: activeTabStore.getActiveTabId(),
@@ -1103,7 +1109,28 @@ export function AppSideEffects() {
       workspaceIds: workspaces.map((workspace) => workspace.id),
       logViewIds: logViews.map((logView) => logView.id),
       pluginViewTabIds: pluginViewTabs.map((tab) => tab.id),
+      hasOpenDialog: Boolean(topmostDialogClose),
+      closeTabShortcutEnabled: isPrimaryModifierWBinding(closeTabKeyStr, matchesKeyBinding, true),
     });
+
+    if (intent.kind === 'forwardShortcut') {
+      // The native macOS menu accelerator consumed the original key event.
+      // Re-dispatch it so a freed Cmd+W can still be assigned to another action.
+      const forwardedEvent = markForwardedNativeShortcutEvent(new KeyboardEvent('keydown', {
+        key: 'w',
+        code: 'KeyW',
+        metaKey: true,
+        bubbles: true,
+        cancelable: true,
+      }));
+      (document.activeElement ?? window).dispatchEvent(forwardedEvent);
+      return;
+    }
+
+    if (intent.kind === 'closeDialog') {
+      topmostDialogClose?.click();
+      return;
+    }
 
     if (intent.kind === 'closeTab') {
       executeHotkeyAction('closeTab', new KeyboardEvent('keydown', { key: 'w', metaKey: true }));
@@ -1116,7 +1143,7 @@ export function AppSideEffects() {
     }
 
     await netcattyBridge.get()?.windowClose?.();
-  }, [closeLogView, editorTabs, executeHotkeyAction, logViews, pluginViewTabs, sessions, workspaces]);
+  }, [closeLogView, closeTabKeyStr, editorTabs, executeHotkeyAction, logViews, pluginViewTabs, sessions, workspaces]);
 
   useEffect(() => {
     // Cmd/Ctrl+W from the app menu arrives via IPC, not the keydown listener.
@@ -1148,11 +1175,21 @@ export function AppSideEffects() {
 
   useEffect(() => {
     if (appLockLocked) return;
+    const onCaptureKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      const target = e.target;
+      if (!(target instanceof HTMLElement) || !target.closest('.xterm')) return;
+      _handleEscapeKeyDown(e);
+    };
     const onKeyDown = (e: KeyboardEvent) => {
       _handleEscapeKeyDown(e);
     };
+    window.addEventListener('keydown', onCaptureKeyDown, true);
     window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('keydown', onCaptureKeyDown, true);
+      window.removeEventListener('keydown', onKeyDown);
+    };
   }, [appLockLocked]);
 
   const handleDeleteHost = useCallback((hostId: string) => {
@@ -1715,6 +1752,14 @@ export function AppSideEffects() {
     updateHosts(vaultHosts);
   }, [ephemeralHostIds, updateHosts]);
 
+  const updateTerminalHostDistro = useCallback((hostId: string, distro: string) => {
+    if (ephemeralHostIds.has(hostId)) {
+      setEphemeralHosts((previous) => applyEphemeralHostDistroUpdate(previous, hostId, distro));
+      return;
+    }
+    updateHostDistro(hostId, distro);
+  }, [ephemeralHostIds, updateHostDistro]);
+
   // Wrapper to create serial session with logging
   const handleConnectSerial = useCallback((config: SerialConfig, options?: { charset?: string }) => {
     const { username, hostname } = systemInfoRef.current;
@@ -1837,6 +1882,7 @@ export function AppSideEffects() {
       // Terminal glue
       closeTabsBatch,
       copySessionWithCurrentShell,
+      duplicateSessionWithCurrentShell,
       copyWorkspaceWithCurrentShell,
       copySessionToNewWindowWithCurrentShell,
       createWorkspaceFromTargets: createWorkspaceFromEffectiveTargets,
@@ -1849,10 +1895,13 @@ export function AppSideEffects() {
       handleTerminalDataCapture,
       handleUpdateHostFromTerminal,
       updateTerminalHosts,
+      updateTerminalHostDistro,
       runSnippet: handleRunSnippet,
       splitSessionWithCurrentShell,
       toggleScriptsSidePanelRef,
       toggleSidePanelRef,
+      terminalPaneMagnificationRef,
+      sftpPaneMagnificationRef,
       // Chrome glue
       handleEndSessionDrag,
       handleOpenQuickSwitcher,
@@ -1910,6 +1959,7 @@ export function AppSideEffects() {
     unmanageSource,
     closeTabsBatch,
     copySessionWithCurrentShell,
+    duplicateSessionWithCurrentShell,
     copyWorkspaceWithCurrentShell,
     copySessionToNewWindowWithCurrentShell,
     createWorkspaceFromEffectiveTargets,
@@ -1922,6 +1972,7 @@ export function AppSideEffects() {
     handleTerminalDataCapture,
     handleUpdateHostFromTerminal,
     updateTerminalHosts,
+    updateTerminalHostDistro,
     handleRunSnippet,
     splitSessionWithCurrentShell,
     handleEndSessionDrag,

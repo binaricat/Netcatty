@@ -920,13 +920,34 @@ export async function unlockImpl(this: any,password: string): Promise<boolean> {
       return true;
     }
 
+    // The master key configuration can rotate while the derivation below is
+    // in flight (e.g. a peer window re-encrypts with the same password and
+    // the storage event lands mid-await). Capture the config and security
+    // generation up front so a late-completing call cannot install a key
+    // derived from a stale configuration over the active one.
+    const configAtStart = this.state.masterKeyConfig;
+    const generationAtStart = this.getSyncSecurityGeneration?.();
+
     const unlockedKey = await EncryptionService.unlockMasterKey(
       password,
-      this.state.masterKeyConfig
+      configAtStart
     );
 
-    if (!unlockedKey) {
-      return false;
+    // Superseded derivations are not password failures. Callers discard the
+    // shared session password only after false, so report stale work as an
+    // error before interpreting either a valid or invalid old-config result.
+    if (
+      this.state.masterKeyConfig !== configAtStart
+      || (generationAtStart !== undefined
+        && this.getSyncSecurityGeneration?.() !== generationAtStart)
+      || (this.state.securityState !== 'LOCKED' && this.state.securityState !== 'UNLOCKED')
+    ) {
+      throw new Error('Vault changed while unlocking. Try again.');
+    }
+    if (!unlockedKey) return false;
+    if (this.state.securityState === 'UNLOCKED') {
+      // Another unlock with the same config won the race; nothing to install.
+      return true;
     }
 
     this.state.unlockedKey = unlockedKey;

@@ -1,6 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { computeLivePreviewWrite } from "./autocomplete/livePreviewSequence.ts";
+import {
+  computeLivePreviewWrite,
+  isWindowsShellLineInput,
+  shouldWriteAutocompleteLivePreview,
+} from "./autocomplete/livePreviewSequence.ts";
+
+test("network-device sessions skip live-preview PTY writes (#1193)", () => {
+  assert.equal(shouldWriteAutocompleteLivePreview(true, false), true);
+  assert.equal(shouldWriteAutocompleteLivePreview(true, true), false);
+  assert.equal(shouldWriteAutocompleteLivePreview(false, false), false);
+  assert.equal(shouldWriteAutocompleteLivePreview(false, true), false);
+});
 
 test("appends only the tail when the candidate continues the current line", () => {
   assert.equal(
@@ -42,4 +53,55 @@ test("Windows uses backspaces sized to the current line, not Ctrl-U", () => {
     computeLivePreviewWrite({ currentLine: "abc", candidate: "xy", os: "windows" }),
     "\b\b\bxy",
   );
+});
+
+test("a Windows prompt clears with backspaces even when the host OS flag is mislabeled (#3184)", () => {
+  // PowerShell on Windows SSH with the saved host left at the os:"linux"
+  // default: Ctrl-U renders literally and visited suggestions accumulate.
+  assert.equal(
+    computeLivePreviewWrite({
+      currentLine: "uv run tkauto video sync-fs",
+      candidate: "uv run tkauto video daily",
+      os: "linux",
+      promptText: "(base) PS C:\\Users\\Administrator>",
+    }),
+    "\b".repeat("uv run tkauto video sync-fs".length) + "uv run tkauto video daily",
+  );
+  // cmd.exe prompt form.
+  assert.equal(
+    computeLivePreviewWrite({
+      currentLine: "echo",
+      candidate: "cls",
+      os: "linux",
+      promptText: "C:\\Users\\Administrator>",
+    }),
+    "\b\b\b\bcls",
+  );
+});
+
+test("a POSIX prompt keeps the Ctrl-U clear when the host OS flag is linux", () => {
+  assert.equal(
+    computeLivePreviewWrite({
+      currentLine: "docker",
+      candidate: "df",
+      os: "linux",
+      promptText: "root@web:~#",
+    }),
+    "\x15df",
+  );
+  assert.equal(
+    computeLivePreviewWrite({
+      currentLine: "docker",
+      candidate: "df",
+      os: "linux",
+      promptText: "user@host:/mnt/c/Users",
+    }),
+    "\x15df",
+  );
+});
+
+test("isWindowsShellLineInput treats an explicit windows flag as authoritative", () => {
+  assert.equal(isWindowsShellLineInput("windows", "root@web:~#"), true);
+  assert.equal(isWindowsShellLineInput("linux"), false);
+  assert.equal(isWindowsShellLineInput("linux", null), false);
 });

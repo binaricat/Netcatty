@@ -12,6 +12,9 @@
  */
 
 const CSI_FINAL_RE = /[@-~]/;
+// ANSI palette colors are emitted as CSS variables (with hex fallbacks) so the
+// wrapping HTML page can provide light and dark palettes. Indexes 0-7 are the
+// basic colors, 8-15 the bright colors.
 const DEFAULT_FOREGROUND = "#d4d4d4";
 const DEFAULT_BACKGROUND = "#1e1e1e";
 const BASIC_COLORS = [
@@ -34,6 +37,11 @@ const BRIGHT_COLORS = [
   "#29b8db",
   "#ffffff",
 ];
+
+function ansiColorVar(index) {
+  const fallback = index < 8 ? BASIC_COLORS[index] : BRIGHT_COLORS[index - 8];
+  return `var(--ansi-${index}, ${fallback})`;
+}
 
 class TerminalTextRenderer {
   constructor(options = {}) {
@@ -307,17 +315,17 @@ class TerminalTextRenderer {
       } else if (code === 27) {
         this.style.inverse = false;
       } else if (code >= 30 && code <= 37) {
-        this.style.fg = BASIC_COLORS[code - 30];
+        this.style.fg = ansiColorVar(code - 30);
       } else if (code === 39) {
         this.style.fg = null;
       } else if (code >= 40 && code <= 47) {
-        this.style.bg = BASIC_COLORS[code - 40];
+        this.style.bg = ansiColorVar(code - 40);
       } else if (code === 49) {
         this.style.bg = null;
       } else if (code >= 90 && code <= 97) {
-        this.style.fg = BRIGHT_COLORS[code - 90];
+        this.style.fg = ansiColorVar(8 + code - 90);
       } else if (code >= 100 && code <= 107) {
-        this.style.bg = BRIGHT_COLORS[code - 100];
+        this.style.bg = ansiColorVar(8 + code - 100);
       } else if ((code === 38 || code === 48) && codes[i + 1] === 5) {
         const color = colorFromAnsi256(codes[i + 2]);
         if (color) {
@@ -585,8 +593,23 @@ function getTrimmedLineLength(line) {
 function styleToCss(style) {
   if (!style) return "";
   const declarations = [];
-  const fg = style.inverse ? (style.bg || DEFAULT_BACKGROUND) : style.fg;
-  const bg = style.inverse ? (style.fg || DEFAULT_FOREGROUND) : style.bg;
+  let fg = style.inverse
+    ? (style.bg || `var(--term-default-bg, ${DEFAULT_BACKGROUND})`)
+    : style.fg;
+  let bg = style.inverse
+    ? (style.fg || `var(--term-default-fg, ${DEFAULT_FOREGROUND})`)
+    : style.bg;
+  // Theme the normal page foreground, but preserve the original color pair
+  // when output supplies a background (including a foreground inverted into
+  // one). Darkening foregrounds independently can make these runs unreadable.
+  if (style.bg || (style.inverse && style.fg)) {
+    const originalColor = (color) => color?.replace(/var\(--[\w-]+, (#[a-f0-9]{6})\)/g, "$1");
+    fg = originalColor(fg) || DEFAULT_FOREGROUND;
+    bg = originalColor(bg);
+  } else if (fg?.startsWith("#")) {
+    // The wrapper supplies a readable light variant for extended/true colors.
+    fg = `var(--term-custom-${fg.slice(1)}, ${fg})`;
+  }
   if (fg) declarations.push(`color: ${fg}`);
   if (bg) declarations.push(`background-color: ${bg}`);
   if (style.bold) declarations.push("font-weight: 700");
@@ -608,8 +631,7 @@ function stylesEqual(a, b) {
 
 function colorFromAnsi256(value) {
   if (!Number.isInteger(value) || value < 0 || value > 255) return null;
-  if (value < 8) return BASIC_COLORS[value];
-  if (value < 16) return BRIGHT_COLORS[value - 8];
+  if (value < 16) return ansiColorVar(value);
   if (value < 232) {
     const n = value - 16;
     const r = Math.floor(n / 36);

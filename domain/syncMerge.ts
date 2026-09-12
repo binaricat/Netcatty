@@ -20,7 +20,11 @@
  */
 
 import { carryForwardSyncDeletions, getDeletedEntityIds } from './syncReliability';
-import type { CloudSyncPayloadEntityKey, SyncPayload } from './sync';
+import {
+  sanitizeHostsForSync,
+  type CloudSyncPayloadEntityKey,
+  type SyncPayload,
+} from './sync';
 import { mergePluginSyncSidecarsThreeWay } from './pluginSyncSidecar';
 
 // ---------------------------------------------------------------------------
@@ -445,7 +449,17 @@ export function mergeSyncPayloads(
   });
 
   // Merge each entity type
-  const hosts = mergeEntityArrays(b.hosts ?? [], local.hosts ?? [], remote.hosts ?? [], tombstones('hosts'));
+  // Normalize host telemetry on all three sides (#2629): the stored base and
+  // older remote payloads still carry `lastConnectedAt`, while upgraded local
+  // payloads strip it. Without normalization an otherwise-unchanged host looks
+  // locally modified, the merge prefers the sanitized local copy, and a real
+  // remote edit to that host is silently overwritten on the round trip.
+  const hosts = mergeEntityArrays(
+    sanitizeHostsForSync(b.hosts) ?? [],
+    sanitizeHostsForSync(local.hosts) ?? [],
+    sanitizeHostsForSync(remote.hosts) ?? [],
+    tombstones('hosts'),
+  );
   const keys = mergeEntityArrays(b.keys ?? [], local.keys ?? [], remote.keys ?? [], tombstones('keys'));
   const baseIdentities = b.identities ?? [];
   const identities = mergeEntityArrays(

@@ -51,7 +51,7 @@ export const TerminalFontSelect: React.FC<TerminalFontSelectProps> = ({
     // the version (isFontInstalled reads module state).
     void availabilityVersion;
     const filtered = fonts.filter(
-      (font) => font.id === value || isFontInstalled(extractPrimaryFamily(font.family)),
+      (font) => font.id === "" || font.id === value || isFontInstalled(extractPrimaryFamily(font.family)),
     );
     if (hasAuthoritativeData()) return filtered;
     return filtered.length >= 1 ? filtered : fonts;

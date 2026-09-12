@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { formatSerialLocalEcho, backspaceCellsForChar } from "./serialLocalEcho";
+import { formatSerialLocalEcho } from "./serialLocalEcho";
 
 test("formatSerialLocalEcho echoes printable input and normalizes newlines", () => {
   assert.equal(formatSerialLocalEcho("show version"), "show version");
@@ -36,18 +36,8 @@ test("formatSerialLocalEcho erases 2 cells for wide-character backspace", () => 
   assert.equal(formatSerialLocalEcho("\b", 2), "\b \b\b \b");
 });
 
-test("backspaceCellsForChar returns 1 for ASCII characters", () => {
-  assert.equal(backspaceCellsForChar("a"), 1);
-  assert.equal(backspaceCellsForChar(" "), 1);
-  assert.equal(backspaceCellsForChar("."), 1);
-});
-
-test("backspaceCellsForChar returns 2 for CJK characters", () => {
-  assert.equal(backspaceCellsForChar("你"), 2);
-  assert.equal(backspaceCellsForChar("好"), 2);
-  assert.equal(backspaceCellsForChar("中"), 2);
-});
-
-test("backspaceCellsForChar returns 2 for emoji", () => {
-  assert.equal(backspaceCellsForChar("\u{1F600}"), 2);
+test("serial byte deletion metadata is forwarded through the runtime input loop", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const source = await readFile(new URL("./createXTermRuntime.ts", import.meta.url), "utf8");
+  assert.match(source, /writeToSession\(id, chunk, \{ sensitive, serialEraseChar \}\)/);
 });

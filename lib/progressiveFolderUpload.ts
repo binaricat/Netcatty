@@ -13,11 +13,21 @@ import {
   describeSftpIncomingKind,
   getSftpConflictTypeKey,
 } from "../domain/sftpConflict";
+import {
+  DEFAULT_SFTP_FILE_TRANSFER_CONCURRENCY,
+  resolveSftpTransferConcurrency,
+} from "../domain/sftpTransferConcurrency";
+import { isMissingStatError } from "../domain/sftpStatError";
 
 const formatUploadError = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
-const UPLOAD_CONCURRENCY = 2;
+/** Keep progressive worker admission aligned with the user-visible transfer limit. */
+export const DEFAULT_PROGRESSIVE_FOLDER_UPLOAD_CONCURRENCY = DEFAULT_SFTP_FILE_TRANSFER_CONCURRENCY;
+
+export const resolveProgressiveFolderUploadConcurrency = (
+  savedValue: number | null | undefined,
+): number => resolveSftpTransferConcurrency(() => savedValue);
 /** Pause discovery when the upload queue grows this large (memory backpressure). */
 const QUEUE_HIGH_WATER = 2_000;
 /** Resume discovery once the queue drains to this size. */
@@ -43,6 +53,8 @@ export type ProgressiveFolderUploadConfig = {
   targetPath: string;
   sftpId: string | null;
   targetHostId?: string;
+  /** Maximum number of file transfers this upload may start at once. */
+  fileTransferConcurrency?: number;
   isLocal: boolean;
   bridge: UploadBridge;
   joinPath: (base: string, name: string) => string;
@@ -93,6 +105,7 @@ export async function uploadLocalFoldersProgressively(
     targetPath,
     sftpId,
     targetHostId,
+    fileTransferConcurrency,
     isLocal,
     bridge,
     joinPath,
@@ -140,17 +153,23 @@ export async function uploadLocalFoldersProgressively(
 
   const statTarget = async (path: string) => {
     try {
-      if (isLocal) return await bridge.statLocal?.(path) ?? null;
-      if (sftpId) return await bridge.statSftp?.(sftpId, path) ?? null;
-    } catch {
-      return null;
+      // Prefer no-follow lstat so Replace cannot write through a symlink.
+      if (isLocal) return await (bridge.lstatLocal ?? bridge.statLocal)?.(path) ?? null;
+      if (sftpId) return await (bridge.lstatSftp ?? bridge.statSftp)?.(sftpId, path) ?? null;
+    } catch (error) {
+      if (isMissingStatError(error)) return null;
+      // Unknown target state must fail closed rather than bypass conflict handling.
+      throw error;
     }
     return null;
   };
 
-  const deleteTarget = async (path: string) => {
-    if (isLocal) await bridge.deleteLocalFile?.(path);
-    else if (sftpId) await bridge.deleteSftp?.(sftpId, path);
+  const deleteTarget = async (
+    path: string,
+    expectedType?: "file" | "directory" | "symlink",
+  ) => {
+    if (isLocal) await bridge.deleteLocalFile?.(path, expectedType);
+    else if (sftpId) await bridge.deleteSftp?.(sftpId, path, expectedType);
   };
 
   const getDuplicateName = async (name: string) => {
@@ -226,7 +245,7 @@ export async function uploadLocalFoldersProgressively(
           }
           continue;
         }
-        await deleteTarget(joinPath(targetPath, root.name));
+        await deleteTarget(joinPath(targetPath, root.name), existing.type);
         destRootNameBySource.set(root.name, root.name);
         kept.push(root);
         continue;
@@ -568,7 +587,8 @@ export async function uploadLocalFoldersProgressively(
     }
   };
 
-  const workers = Array.from({ length: UPLOAD_CONCURRENCY }, async () => {
+  const uploadConcurrency = resolveProgressiveFolderUploadConcurrency(fileTransferConcurrency);
+  const workers = Array.from({ length: uploadConcurrency }, async () => {
     while (true) {
       if (isStopped()) {
         fileQueue.length = 0;

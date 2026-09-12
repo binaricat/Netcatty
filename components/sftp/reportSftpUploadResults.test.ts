@@ -58,6 +58,25 @@ test("toasts multi-file success count", () => {
   assert.deepEqual(calls, [{ type: "success", message: "sftp.uploadFiles: 2" }]);
 });
 
+test("terminal drop success names the exact remote destination", () => {
+  const calls: Array<{ type: string; message: string }> = [];
+  reportSftpUploadResults({
+    results: [{ fileName: "release.tgz", success: true }],
+    targetPath: "/srv/releases",
+    t,
+    toast: {
+      success: (message) => calls.push({ type: "success", message }),
+      error: (message) => calls.push({ type: "error", message }),
+      info: (message) => calls.push({ type: "info", message }),
+    },
+  });
+
+  assert.deepEqual(calls, [{
+    type: "success",
+    message: "sftp.upload: release.tgz (/srv/releases)",
+  }]);
+});
+
 test("toasts failures and partial success separately", () => {
   const calls: Array<{ type: string; message: string }> = [];
   reportSftpUploadResults({
@@ -75,4 +94,26 @@ test("toasts failures and partial success separately", () => {
   assert.equal(calls[0]?.type, "error");
   assert.equal(calls[1]?.type, "info");
   assert.match(calls[1]?.message ?? "", /partial 1\/1/);
+});
+
+test("partial terminal drop success names the exact remote destination", () => {
+  const calls: Array<{ type: string; message: string }> = [];
+  reportSftpUploadResults({
+    results: [
+      { fileName: "a", success: true },
+      { fileName: "b", success: false, error: "boom" },
+    ],
+    targetPath: "/srv/releases",
+    t,
+    toast: {
+      success: (message) => calls.push({ type: "success", message }),
+      error: (message) => calls.push({ type: "error", message }),
+      info: (message) => calls.push({ type: "info", message }),
+    },
+  });
+
+  assert.deepEqual(calls[1], {
+    type: "info",
+    message: "partial 1/1 (/srv/releases)",
+  });
 });

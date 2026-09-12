@@ -329,6 +329,8 @@ declare global {
         automated?: boolean;
         /** Host-classified secret/no-echo input; always bypasses plugin observers and interceptors. */
         sensitive?: boolean;
+        /** Whole character to erase on an explicitly byte-oriented serial device. */
+        serialEraseChar?: string;
         lineDelayMs?: number;
         logRewrite?: { sentCommand: string; displayCommand: string };
       },
@@ -486,6 +488,8 @@ declare global {
           droppedOutputAlternateScreenAction?: "enter" | "leave";
           /** True while Mosh is still on the ephemeral SSH handshake PTY. */
           moshHandshake?: boolean;
+          /** The Mosh SSH bootstrap is blocked on input that Netcatty cannot answer automatically. */
+          moshHandshakeRequiresUserInput?: boolean;
           terminalPerf?: NetcattyTerminalOutputPerfMeta;
           /** Original host output units acknowledged even when an interceptor changes display length. */
           pluginPipelineIngressBytes?: number;

@@ -2,6 +2,7 @@
 const {
   windowsFramelessContentChromeOptions,
 } = require("./windowsWindowChrome.cjs");
+const { attachDisplayRecovery } = require("./displayRecovery.cjs");
 
 const TERMINAL_KEYBOARD_FOCUS = Symbol("netcattyTerminalKeyboardFocus");
 
@@ -38,6 +39,7 @@ function createMainWindowApi(ctx) {
         registerAsMainWindow = true,
         persistWindowState = registerAsMainWindow,
         registerAsAppContentWindow = true,
+        startHidden = false,
       } = options;
       const rendererHash = typeof route === "string" && route.trim()
         ? `#/${route.trim().replace(/^#?\/*/, "")}`
@@ -177,8 +179,24 @@ function createMainWindowApi(ctx) {
         registerAppContentWindow(win, { queryDirtyEditors: true });
       }
     
+      // Multi-monitor recovery (#3244): Windows lock/sleep can temporarily
+      // tear down a secondary display and the OS relocates the window onto
+      // the primary display. When the display comes back, put the window back
+      // where the user left it.
+      let detachDisplayRecovery = null;
+      try {
+        detachDisplayRecovery = attachDisplayRecovery({ win, screen });
+      } catch {
+        detachDisplayRecovery = null;
+      }
+
       // Clear reference when the main window is destroyed
       win.on('closed', () => {
+        try {
+          detachDisplayRecovery?.();
+        } catch {
+          // ignore
+        }
         try {
           if (win?.webContents?.id) {
             unhealthyWebContentsIds.delete(win.webContents.id);
@@ -468,6 +486,17 @@ function createMainWindowApi(ctx) {
 
       win.on("show", () => {
         safeSend("netcatty:window:shown");
+        if (startHidden) {
+          // The hidden-launch tray pin exists so a --hidden cold start is
+          // never a windowless, trayless zombie; once this window is
+          // actually visible that concern no longer applies, so hand tray
+          // lifetime back to the user's normal close-to-tray preference.
+          try {
+            getGlobalShortcutBridge().releaseHiddenLaunchTrayPin?.();
+          } catch (err) {
+            console.warn("[MainWindow] Failed to release hidden-launch tray pin:", err?.message || err);
+          }
+        }
       });
     
       // Ensure native background matches frontend background, even before first paint.
@@ -481,7 +510,7 @@ function createMainWindowApi(ctx) {
     
       // Defer show until renderer is ready; use fallback timeout to avoid keeping window hidden forever.
       // Production gets a shorter timeout since the splash screen provides visual feedback.
-      setupDeferredShow(win, { timeoutMs: isDev ? 3000 : 1500 });
+      setupDeferredShow(win, { timeoutMs: isDev ? 3000 : 1500, startHidden });
     
       win.webContents.on("did-create-window", (childWindow) => {
         try {
@@ -520,7 +549,20 @@ function createMainWindowApi(ctx) {
       // Register IPC handlers BEFORE loading any URL so the renderer never
       // calls a handler that hasn't been registered yet.
       onRegisterBridge?.(win);
-    
+
+      if (startHidden) {
+        // Belt-and-suspenders: guarantee a tray icon exists as soon as
+        // bridges (and electronModule) are ready, and keep it pinned
+        // (independent of the user's separate close-to-tray preference)
+        // until this window is actually shown — see releaseHiddenLaunchTrayPin
+        // in the "show" handler below.
+        try {
+          getGlobalShortcutBridge().pinTrayForHiddenLaunch?.();
+        } catch (err) {
+          console.warn("[MainWindow] Failed to create tray for hidden launch:", err?.message || err);
+        }
+      }
+
       if (isDev) {
         try {
           await win.loadURL(`${getDevRendererBaseUrl(devServerUrl)}${rendererHash}`);

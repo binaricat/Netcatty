@@ -980,6 +980,24 @@ test("creating the first app lock password enables app lock", async () => {
   assert.equal(typeof saved.passwordVerifier?.hash, "string");
 });
 
+test("creating the first app lock password accepts a single space", async () => {
+  const { controller } = await createControllerHarness({
+    enabled: false,
+    passwordVerifier: null,
+  });
+
+  assert.deepEqual(
+    await controller.requestPasswordChange({ nextPassword: "" }),
+    { ok: false, error: "empty-next" },
+  );
+
+  const saved = await controller.requestPasswordChange({ nextPassword: " " });
+
+  assert.equal(saved.enabled, true);
+  assert.equal(typeof saved.passwordVerifier?.hash, "string");
+  assert.deepEqual(await controller.requestUnlock(" "), { ok: true });
+});
+
 test("a queued password change cannot revive a concurrently disabled lock", async () => {
   const { controller } = await createControllerHarness();
   await controller.requestPasswordChange({ nextPassword: "alpha" });

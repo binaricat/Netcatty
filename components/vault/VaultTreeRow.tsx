@@ -102,6 +102,7 @@ type VaultTreeGroupRowProps = Omit<React.HTMLAttributes<HTMLDivElement>, "childr
   labelActions?: React.ReactNode;
   icon?: React.ReactNode;
   iconSize?: number;
+  iconClassName?: string;
   meta?: React.ReactNode;
   rowRef?: React.Ref<HTMLDivElement>;
   onToggle?: () => void;
@@ -122,6 +123,7 @@ export const VaultTreeGroupRow: React.FC<VaultTreeGroupRowProps> = ({
   labelActions,
   icon,
   iconSize = 18,
+  iconClassName,
   meta,
   rowRef,
   className,
@@ -146,14 +148,14 @@ export const VaultTreeGroupRow: React.FC<VaultTreeGroupRowProps> = ({
       data-expanded={expanded ? "true" : "false"}
       {...props}
     >
-      <div className="mr-1 flex h-5 w-4 flex-shrink-0 items-center justify-center text-muted-foreground">
+      <div className="mr-1 flex w-4 shrink-0 items-center justify-center text-muted-foreground">
         {canExpand && (
           <div className={cn("transition-transform duration-200", expanded ? "rotate-90" : "")}>
             <ChevronRight size={14} />
           </div>
         )}
       </div>
-      <div className="mr-2 flex h-5 w-5 shrink-0 items-center justify-center text-current transition-colors">
+      <div className={cn("mr-2 flex shrink-0 items-center text-current", iconClassName)}>
         {icon ?? (expanded ? (
           <FolderOpen size={iconSize} strokeWidth={1.9} />
         ) : (
@@ -169,8 +171,8 @@ export const VaultTreeGroupRow: React.FC<VaultTreeGroupRowProps> = ({
         />
       ) : (
         // leading-5 (not leading-none): CJK fallbacks like PingFang paint outside a 1.0 em box and get clipped by truncate.
-        <span className="flex min-h-5 min-w-0 flex-1 items-center gap-1.5 leading-5">
-          <span className="min-w-0 truncate" title={name}>{name}</span>
+        <span className="flex min-w-0 flex-1 items-center gap-1.5 leading-5">
+          <span className="min-w-0 truncate translate-y-px" title={name}>{name}</span>
           {labelActions ? <span className="shrink-0">{labelActions}</span> : null}
         </span>
       )}
@@ -190,6 +192,7 @@ type VaultTreeItemRowProps = Omit<React.HTMLAttributes<HTMLDivElement>, "childre
   depth: number;
   selected?: boolean;
   icon?: React.ReactNode;
+  iconClassName?: string;
   leading?: React.ReactNode;
   detail?: React.ReactNode;
   actions?: React.ReactNode;
@@ -205,6 +208,7 @@ export const VaultTreeItemRow: React.FC<VaultTreeItemRowProps> = ({
   depth,
   selected = false,
   icon,
+  iconClassName,
   leading,
   detail,
   actions,
@@ -230,8 +234,10 @@ export const VaultTreeItemRow: React.FC<VaultTreeItemRowProps> = ({
     data-selected={selected ? "true" : "false"}
     {...props}
   >
-    {leading ?? <div className="mr-1 h-5 w-4 flex-shrink-0" />}
-    {icon ? <div className="mr-2 flex shrink-0 items-center self-center">{icon}</div> : <FileText size={14} className="mr-2 shrink-0 text-muted-foreground" />}
+    {leading ?? <div className="mr-1 w-4 shrink-0" />}
+    <div className={cn("mr-2 flex shrink-0 items-center", !icon && "text-muted-foreground", iconClassName)}>
+      {icon ?? <FileText size={14} />}
+    </div>
     {content ?? (
       <div className="min-w-0 flex-1 overflow-hidden">
         {editing && onRenameCommit && onRenameCancel ? (
@@ -242,7 +248,7 @@ export const VaultTreeItemRow: React.FC<VaultTreeItemRowProps> = ({
           />
         ) : (
           // leading-5 keeps CJK glyphs inside the line box under truncate overflow.
-          <div className="min-w-0 truncate leading-5" title={label}>{label}</div>
+          <div className="min-w-0 flex-1 truncate leading-5 translate-y-px" title={label}>{label}</div>
         )}
         {detail && <div className="truncate text-xs leading-4 text-muted-foreground">{detail}</div>}
       </div>

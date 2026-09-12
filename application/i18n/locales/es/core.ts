@@ -279,6 +279,12 @@ export const esCoreMessages: Messages = {
   'settings.vault.showHostTreeSidebarDesc': 'Muestra la barra lateral de lista de hosts y su alternador en la barra superior en las pestañas de terminal y editor.',
   'settings.vault.autoImportSystemKnownHosts': 'Importar automáticamente known_hosts del sistema',
   'settings.vault.autoImportSystemKnownHostsDesc': 'Cuando se carga el Vault, importa en silencio las entradas del archivo known_hosts de OpenSSH. Desactívalo para mantener los hosts conocidos de Netcatty separados; Escanear sistema sigue importando a pedido.',
+  'settings.vault.notesFont': 'Fuente de código',
+  'settings.vault.notesFontDesc': 'Familia tipográfica para bloques de código y código en línea en notas',
+  'settings.vault.notesFontSize': 'Tamaño de fuente de notas',
+  'settings.vault.notesFontSizeDesc': 'Tamaño de fuente para el cuerpo de texto de las notas',
+  'settings.vault.notesCodeFontSize': 'Tamaño de fuente de código',
+  'settings.vault.notesCodeFontSizeDesc': 'Tamaño de fuente para bloques de código y código en línea en notas',
 
   // Update notifications
   'update.available.title': 'Actualización disponible',
@@ -564,6 +570,11 @@ Resalta el panel dividido enfocado:
   'settings.terminal.behavior.autoCloseOnExit': 'Cerrar la terminal automáticamente al salir',
   'settings.terminal.behavior.autoCloseOnExit.desc':
     'Permite que las pestañas y ventanas de terminal se cierren automáticamente después de que la sesión termina. Desactívalo para mantenerlas abiertas después de cada salida.',
+  'settings.terminal.behavior.disconnectedNotice': 'Cuando se desconecta una conexión',
+  'settings.terminal.behavior.disconnectedNotice.desc':
+    'Muestra un aviso compacto en terminales ya conectadas o usa el diálogo completo. Los fallos de conexión iniciales siguen usando el diálogo.',
+  'settings.terminal.behavior.disconnectedNotice.terminal': 'Aviso en terminal',
+  'settings.terminal.behavior.disconnectedNotice.dialog': 'Diálogo',
   'settings.terminal.behavior.rightClick.menu': 'Mostrar menú',
   'settings.terminal.behavior.rightClick.paste': 'Pegar',
   'settings.terminal.behavior.rightClick.selectWord': 'Seleccionar palabra',
@@ -1029,6 +1040,7 @@ Resalta el panel dividido enfocado:
   // Vault hosts header/actions
   'vault.hosts.search.placeholder': 'Busca un host o escribe ssh usuario@hostname / ssh -p 2222 usuario@hostname...',
   'vault.hosts.connect': 'Conectar',
+  'vault.hosts.openSftp': 'Abrir SFTP',
   'vault.view.grid': 'Cuadrícula',
   'vault.view.list': 'Lista',
   'vault.view.tree': 'Árbol',

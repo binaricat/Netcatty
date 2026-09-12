@@ -23,6 +23,7 @@ interface ImportVaultHostFilesOptions {
   files: File[];
   relativePaths?: string[];
   encoding?: VaultImportFileEncoding;
+  masterPassword?: string;
   onProgress?: (progress: VaultImportBatchProgress) => void;
 }
 
@@ -65,6 +66,7 @@ export async function importVaultHostFiles({
   files,
   relativePaths,
   encoding,
+  masterPassword,
   onProgress,
 }: ImportVaultHostFilesOptions): Promise<VaultImportResult> {
   const sourceFiles = files.map((file, index) => ({
@@ -86,7 +88,10 @@ export async function importVaultHostFiles({
     const { file, relativePath } = selectedFiles[index];
     try {
       const text = await readVaultImportFile(format, file, encoding);
-      const result = importVaultHostsFromText(format, text, { fileName: file.name });
+      const result = importVaultHostsFromText(format, text, {
+        fileName: file.name,
+        masterPassword,
+      });
       const group = format === "securecrt"
         ? secureCrtGroupFromFile(file, relativePath)
         : undefined;

@@ -239,3 +239,23 @@ test("shows restored session copy for disconnected restored placeholders", () =>
   assert.match(markup, /This terminal is disconnected/);
   assert.match(markup, /Reconnect/);
 });
+
+test("disconnected observer surfaces do not advertise a reconnect they cannot perform", () => {
+  const markup = renderDialog({
+    status: "disconnected",
+    error: "Observed session ended.",
+    showEnterReconnectHint: false,
+    progressProps: {
+      timeLeft: 0,
+      isCancelling: false,
+      progressLogs: [],
+      onCancelConnect: () => {},
+      onCloseSession: () => {},
+      onRetry: undefined,
+    },
+  });
+
+  assert.equal(markup.includes("Press Enter to reconnect"), false);
+  assert.equal(markup.includes("Start over"), false);
+  assert.match(markup, /Close session/);
+});

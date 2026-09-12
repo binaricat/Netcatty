@@ -1,4 +1,5 @@
 import { Host, Snippet, TerminalSettings } from './models';
+import type { HostOperatingSystem, HostOsSelection } from './models/connection';
 import { sanitizeHostIconFields } from './hostIcon';
 import { migrateHostConnectScriptIds } from './hostConnectScripts.ts';
 import { migrateDeprecatedFontOverride } from '../infrastructure/config/fonts';
@@ -105,6 +106,7 @@ export const normalizeDistroId = (value?: string) => {
   ) {
     return 'macos';
   }
+  if (v === 'windows' || v === 'win32' || /^openssh_for_windows(?:_|$)/.test(v)) return 'windows';
   if (v.includes('freebsd')) return 'freebsd';
   if (v.includes('ubuntu')) return 'ubuntu';
   if (v.includes('debian')) return 'debian';
@@ -214,6 +216,29 @@ export const classifyDistroId = (distroId?: string): DeviceClass => {
   if ((LINUX_LIKE_RUNTIME_PLATFORM_OPTIONS as readonly string[]).includes(v)) return 'linux-like';
   return 'other';
 };
+
+export const HOST_OS_SELECTIONS = ['auto', 'linux', 'windows', 'macos', 'freebsd', 'unknown'] as const;
+
+export function getHostOsSelection(host?: Pick<Host, 'os' | 'osOverride'> | null): HostOsSelection {
+  if (host?.osOverride && (HOST_OS_SELECTIONS as readonly string[]).includes(host.osOverride)) {
+    return host.osOverride;
+  }
+  return host?.os === 'windows' || host?.os === 'macos' ? host.os : 'auto';
+}
+
+/** Resolve system facts separately from cosmetic manualDistro/icon choices. */
+export function resolveHostOs(
+  host?: Pick<Host, 'os' | 'osOverride' | 'distro' | 'deviceType' | 'protocol'> | null,
+): HostOperatingSystem {
+  if (host?.protocol === 'local') return host.os;
+  const selection = getHostOsSelection(host);
+  if (selection !== 'auto') return selection;
+  if (host?.deviceType === 'network' || classifyDistroId(host?.distro) === 'network-device') return 'unknown';
+  const distro = normalizeDistroId(host?.distro);
+  if (distro === 'windows' || distro === 'macos' || distro === 'freebsd') return distro;
+  if ((LINUX_DISTRO_OPTIONS as readonly string[]).includes(distro)) return 'linux';
+  return 'unknown';
+}
 
 /**
  * Decide whether to offer the "enable Network Device Mode" suggestion after
@@ -430,6 +455,7 @@ export const sanitizeHost = (host: Host, snippets: Snippet[] = []): Host => {
         ? 'auto'
         : undefined;
   const cleanHostIcon = sanitizeHostIconFields(host);
+  const osSelection = getHostOsSelection(host);
   const migrated = migrateDeprecatedFontOverride(host);
   // Before explicit per-host authentication modes existed, new hosts were
   // persisted with authMethod="password" even though an empty password still
@@ -468,6 +494,8 @@ export const sanitizeHost = (host: Host, snippets: Snippet[] = []): Host => {
       : migrated.authMethod ?? inferredLegacyAuthMethod,
     authPolicyVersion: 1,
     hostname: cleanHostname,
+    osOverride: osSelection,
+    os: osSelection === 'linux' || osSelection === 'windows' || osSelection === 'macos' ? osSelection : host.os,
     distro: cleanDistro,
     distroMode: cleanDistroMode,
     manualDistro: cleanManualDistro || undefined,

@@ -301,6 +301,45 @@ test("openSftpForSession skips a mismatched source hint and reuses another sessi
   await sftpBridge.closeSftp(null, { sftpId: opened.sftpId });
 });
 
+test("strict openSftpForSession never substitutes another matching live session", async () => {
+  let alternateOpened = false;
+  const connection = {
+    sftp(callback) {
+      alternateOpened = true;
+      callback(null, createSessionChannel().channel);
+    },
+  };
+  const options = {
+    hostId: "same-host",
+    hostname: "target.example",
+    port: 22,
+    username: "alice",
+    authMethod: "password",
+    password: "target-password",
+    verifyHostKeys: false,
+  };
+  const endpoint = normalizeEndpoint(buildConnectionReuseEndpoint(options));
+  const sftpClients = new Map();
+  sftpBridge.init({
+    electronModule: { webContents: { fromId: () => null } },
+    sessions: new Map([["matching-alternate", { conn: connection, _reuseEndpoint: endpoint }]]),
+    sftpClients,
+  });
+
+  await assert.rejects(
+    sftpBridge.openSftpForSession(null, {
+      sessionId: "missing-requested-session",
+      expectedEndpoint: options,
+      requireExactSourceSession: true,
+      fileProtocol: "sftp",
+    }),
+    (error) => error?.code === "ERR_SFTP_SOURCE_ROUTE_MISMATCH",
+  );
+
+  assert.equal(alternateOpened, false);
+  assert.equal(sftpClients.size, 0);
+});
+
 test("openSftpForSession reuses the hinted session when its full route and security identity match", async () => {
   let openedChannel = false;
   const connection = {

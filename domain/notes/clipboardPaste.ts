@@ -896,7 +896,7 @@ export const resolveNoteClipboardPaste = (input: {
 };
 
 export const shouldInterceptResolvedNotePaste = (input: {
-  editorMode: "edit" | "preview";
+  editorMode: "edit" | "preview" | "source" | "live" | string;
   pasteInsideCodeBlock: boolean;
   payload: NoteClipboardPastePayload;
 }): boolean => {

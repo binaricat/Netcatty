@@ -7,6 +7,7 @@ import {
   createTerminalSelectionAttachment,
   decodeTerminalSelectionAttachment,
 } from "./terminalSelectionAttachment.ts";
+import { createVaultNoteAttachment, formatVaultNoteReferences } from "./vaultNoteAttachment.ts";
 
 test("createTerminalSelectionAttachment returns null for blank selections", () => {
   assert.equal(createTerminalSelectionAttachment("   \n\t"), null);
@@ -48,5 +49,15 @@ test("buildPromptWithTerminalSelectionAttachments supports terminal-only prompts
   assert.equal(
     buildPromptWithTerminalSelectionAttachments("", [attachment]),
     `[Terminal selection: ${attachment.filename}]\nsystemctl status nginx`,
+  );
+});
+
+test("buildPromptWithTerminalSelectionAttachments keeps empty Vault note blocks", () => {
+  const attachment = createVaultNoteAttachment({ id: "note-1", title: "Runbook" });
+
+  assert.ok(attachment);
+  assert.equal(
+    buildPromptWithTerminalSelectionAttachments("add deployment steps to this note", [attachment]),
+    `add deployment steps to this note\n\n${formatVaultNoteReferences([attachment])}`,
   );
 });

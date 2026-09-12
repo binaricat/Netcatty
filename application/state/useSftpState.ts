@@ -18,11 +18,13 @@ import {
   joinPath,
 } from "./sftp/utils";
 import { useSftpTabsState } from "./sftp/useSftpTabsState";
+import { useSftpBrowseConnectionLifecycle } from "./sftp/useSftpBrowseConnectionLifecycle";
 import { isSessionError } from "./sftp/errors";
 import { useSftpExternalOperations } from "./sftp/useSftpExternalOperations";
 import { useSftpTransfers } from "./sftp/useSftpTransfers";
 import { useSftpPaneActions } from "./sftp/useSftpPaneActions";
 import {
+  closeSftpTabLifecycle,
   releaseSftpConnectionMetadata,
   useSftpConnections,
 } from "./sftp/useSftpConnections";
@@ -181,12 +183,6 @@ export const useSftpState = (
     return null;
   }, [leftTabsRef, rightTabsRef]);
 
-  // Ref to track pending reconnections to avoid multiple reconnect attempts
-  const reconnectingRef = useRef<{ left: boolean; right: boolean }>({
-    left: false,
-    right: false,
-  });
-
   // Map connectionId → cache key, set at connect time so each tab's
   // navigateTo can use the correct cache key even when multiple tabs
   // share the same hostId with different session-time overrides.
@@ -195,6 +191,8 @@ export const useSftpState = (
   // Full Host used when each tab connected (includes session-time overrides).
   // Tab ids are stable across reconnect; connection ids are not.
   const connectedHostByTabIdRef = useRef<Map<string, Host | "local">>(new Map());
+  const connectInFlightRef = useRef<Map<string, Promise<void>>>(new Map());
+  const connectRequestByTabIdRef = useRef<Map<string, symbol>>(new Map());
 
   // Full endpoint key captured at connect time (hostId:hostname:port:…).
   const getConnectionCacheKey = useCallback((connectionId: string) => {
@@ -234,20 +232,29 @@ export const useSftpState = (
 
   const closeTabAndClearHost = useCallback(async (side: "left" | "right", tabId: string) => {
     const pane = getPaneByTabId(tabId);
-    connectedHostByTabIdRef.current.delete(tabId);
-    if (pane?.connection) {
-      await releaseSftpTabConnection({
-        connectionId: pane.connection.id,
-        isLocal: pane.connection.isLocal,
-        sftpSessions: sftpSessionsRef.current,
-        connectionCacheKeys: connectionCacheKeyMapRef.current,
-        clearCacheForConnection,
-        closeSftp: async (sftpId) => netcattyBridge.get()?.closeSftp(sftpId),
-        onRemoteSessionClosed: (sftpId) => forgetExternalEditTempsForSftpRef.current(sftpId),
-      });
-    }
-    closeTab(side, tabId);
-  }, [clearCacheForConnection, closeTab, getPaneByTabId]);
+    await closeSftpTabLifecycle({
+      requestedSide: side,
+      tabId,
+      leftTabs: leftTabsRef.current.tabs,
+      rightTabs: rightTabsRef.current.tabs,
+      connectRequests: connectRequestByTabIdRef.current,
+      connectInFlight: connectInFlightRef.current,
+      connectedHosts: connectedHostByTabIdRef.current,
+      closeTab: (liveSide) => closeTab(liveSide, tabId),
+      releaseConnection: async () => {
+        if (!pane?.connection) return;
+        await releaseSftpTabConnection({
+          connectionId: pane.connection.id,
+          isLocal: pane.connection.isLocal,
+          sftpSessions: sftpSessionsRef.current,
+          connectionCacheKeys: connectionCacheKeyMapRef.current,
+          clearCacheForConnection,
+          closeSftp: async (sftpId) => netcattyBridge.get()?.closeSftp(sftpId),
+          onRemoteSessionClosed: (sftpId) => forgetExternalEditTempsForSftpRef.current(sftpId),
+        });
+      },
+    });
+  }, [clearCacheForConnection, closeTab, getPaneByTabId, leftTabsRef, rightTabsRef]);
 
   const releaseConnection = useCallback(async (connectionId: string) => {
     await releaseSftpConnectionMetadata({
@@ -267,11 +274,10 @@ export const useSftpState = (
     updateActiveTab,
     navSeqRef,
     lastConnectedHostRef,
-    reconnectingRef,
     releaseConnection,
   });
 
-  useSftpSessionCleanup(sftpSessionsRef);
+  const sftpDisposedRef = useSftpSessionCleanup(sftpSessionsRef);
   useSftpFileWatch(options);
 
   // Transfer channel pool (max concurrent sftpIds per host, short idle reuse).
@@ -398,6 +404,8 @@ export const useSftpState = (
   );
 
   /** True after browse channels were soft-closed while this owner stayed mounted. */
+  const interactive = options?.interactive !== false;
+  const browseConnectionLifecycleRef = useSftpBrowseConnectionLifecycle(interactive);
   const browseParkedRef = useRef(false);
   const browseLifecycleGenRef = useRef(0);
 
@@ -430,10 +438,13 @@ export const useSftpState = (
     navSeqRef,
     dirCacheRef,
     sftpSessionsRef,
+    disposedRef: sftpDisposedRef,
+    browseConnectionLifecycleRef,
     lastConnectedHostRef,
     connectionCacheKeyMapRef,
     connectedHostByTabIdRef,
-    reconnectingRef,
+    connectInFlightRef,
+    connectRequestByTabIdRef,
     makeCacheKey,
     clearCacheForConnection,
     createEmptyPane: createPane,
@@ -474,7 +485,6 @@ export const useSftpState = (
     sftpSessionsRef,
     lastConnectedHostRef,
     connectionCacheKeyMapRef,
-    reconnectingRef,
     makeCacheKey,
     clearCacheForConnection,
     listLocalFiles,
@@ -637,7 +647,6 @@ export const useSftpState = (
   // has unfinished transfers so pre-lease prep (conflict/stat) cannot race a
   // hard-close of the browse id. In-flight streams also soft-close via leases;
   // pool handles bulk I/O.
-  const interactive = options?.interactive !== false;
   useEffect(() => {
     const gen = ++browseLifecycleGenRef.current;
 

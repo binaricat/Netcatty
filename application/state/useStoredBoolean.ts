@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { localStorageAdapter } from "../../infrastructure/persistence/localStorageAdapter";
 
 /**
@@ -17,30 +17,37 @@ export const useStoredBoolean = (
         const stored = localStorageAdapter.readBoolean(storageKey);
         return stored ?? fallback;
     });
+    const valueRef = useRef(value);
 
     const setAndPersist = useCallback((next: boolean | ((prev: boolean) => boolean)) => {
-        setValue((prev) => {
-            const resolved = typeof next === "function" ? next(prev) : next;
-            localStorageAdapter.writeBoolean(storageKey, resolved);
-            // Notify other same-window consumers
-            window.dispatchEvent(
-                new CustomEvent("stored-boolean-change", { detail: { key: storageKey, value: resolved } }),
-            );
-            return resolved;
-        });
+        // Resolve functional updates before scheduling React state. The updater
+        // must stay pure because React may evaluate it while rendering.
+        const resolved = typeof next === "function" ? next(valueRef.current) : next;
+        valueRef.current = resolved;
+        setValue(resolved);
+        localStorageAdapter.writeBoolean(storageKey, resolved);
+        // Notify other same-window consumers outside the state updater.
+        window.dispatchEvent(
+            new CustomEvent("stored-boolean-change", { detail: { key: storageKey, value: resolved } }),
+        );
     }, [storageKey]);
 
     useEffect(() => {
         // Sync from other components in the same window
         const handleCustom = (e: Event) => {
             const { key, value: newValue } = (e as CustomEvent).detail;
-            if (key === storageKey) setValue(newValue);
+            if (key === storageKey) {
+                valueRef.current = newValue;
+                setValue(newValue);
+            }
         };
         // Sync from other windows
         const handleStorage = (e: StorageEvent) => {
             if (e.key === storageKey) {
                 const stored = localStorageAdapter.readBoolean(storageKey);
-                setValue(stored ?? fallback);
+                const nextValue = stored ?? fallback;
+                valueRef.current = nextValue;
+                setValue(nextValue);
             }
         };
         window.addEventListener("stored-boolean-change", handleCustom);

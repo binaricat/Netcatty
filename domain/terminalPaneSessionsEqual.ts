@@ -41,6 +41,7 @@ export type TerminalPaneSessionFields = Pick<
   | 'pendingScriptId'
   | 'pendingScript'
   | 'reuseConnectionFromSessionId'
+  | 'requireFreshConnection'
   | 'autoOpenSidePanel'
 >;
 
@@ -79,6 +80,7 @@ function paneFieldEqual(
     && a.pendingScriptId === b.pendingScriptId
     && a.pendingScript === b.pendingScript
     && a.reuseConnectionFromSessionId === b.reuseConnectionFromSessionId
+    && Boolean(a.requireFreshConnection) === Boolean(b.requireFreshConnection)
     && a.autoOpenSidePanel === b.autoOpenSidePanel;
 }
 

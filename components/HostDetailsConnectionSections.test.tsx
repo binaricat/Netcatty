@@ -111,6 +111,11 @@ test("color and icon settings render for non-Linux hosts", () => {
   assert.match(markup, /hostDetails\.icon\.manualLabel/);
 });
 
+test("basic connection settings do not require operating system selection", () => {
+  const markup = renderConnectionSections({ os: "windows" });
+  assert.doesNotMatch(markup, /hostDetails\.os\./);
+});
+
 test("host credentials expose automatic and password-only choices", () => {
   const markup = renderConnectionSections({
     authMethod: "auto",

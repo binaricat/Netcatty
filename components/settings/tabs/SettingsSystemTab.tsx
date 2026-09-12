@@ -121,6 +121,9 @@ interface SettingsSystemTabProps {
   setToggleWindowHotkey: (hotkey: string) => void;
   closeToTray: boolean;
   setCloseToTray: (enabled: boolean) => void;
+  autoLaunchEnabled: boolean;
+  setAutoLaunchEnabled: (enabled: boolean) => void;
+  autoLaunchSupported: boolean;
   httpNetworkProxy: HttpNetworkProxySettings;
   setHttpNetworkProxy: (settings: HttpNetworkProxySettings | ((prev: HttpNetworkProxySettings) => HttpNetworkProxySettings)) => void;
   hotkeyRegistrationError: string | null;
@@ -170,6 +173,9 @@ const SettingsSystemTab: React.FC<SettingsSystemTabProps> = ({
   setToggleWindowHotkey,
   closeToTray,
   setCloseToTray,
+  autoLaunchEnabled,
+  setAutoLaunchEnabled,
+  autoLaunchSupported,
   httpNetworkProxy,
   setHttpNetworkProxy,
   hotkeyRegistrationError,
@@ -602,6 +608,25 @@ const SettingsSystemTab: React.FC<SettingsSystemTabProps> = ({
               )}
               {t('settings.update.hint')}
             </SettingHint>
+
+          <SectionHeader title={t("settings.autoLaunch.title")} />
+            <SettingCard className="py-4">
+              <SettingRow
+                anchorId="system-auto-launch"
+                label={t("settings.autoLaunch.enabled")}
+                description={
+                  autoLaunchSupported
+                    ? t("settings.autoLaunch.enabledDesc")
+                    : t("settings.autoLaunch.unsupportedDesc")
+                }
+              >
+                <Toggle
+                  checked={autoLaunchEnabled}
+                  onChange={setAutoLaunchEnabled}
+                  disabled={!autoLaunchSupported}
+                />
+              </SettingRow>
+            </SettingCard>
 
           <SectionHeader title={t("settings.system.networkProxy.title")} />
             <SettingCard className="space-y-4 py-4">

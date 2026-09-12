@@ -27,6 +27,7 @@ const TOOL_OUTPUT_READ_MAX_CHARS = 12_000;
 const TOOL_OUTPUT_SEARCH_CONTEXT_CHARS = 320;
 const TOOL_OUTPUT_SEARCH_MAX_MATCHES = 20;
 const TOOL_OUTPUT_SIGNING_KEY_FILE = ".tool-output-signing-key";
+const TOOL_OUTPUT_TEMP_DIR_REBOUND = "NETCATTY_TEMP_DIR_REBOUND";
 
 // Cached temp directory path
 let cachedTempDir = null;
@@ -34,7 +35,9 @@ let cachedTempDirIdentity = null;
 let tempFileCounter = 0;
 let toolOutputSigningKeyPromise = Promise.resolve(crypto.randomBytes(32));
 let toolOutputSigningKeyRecoveryPromise = null;
+let toolOutputSigningKeyRecoveryGeneration = null;
 let toolOutputSafeStorage = null;
+let tempDirRebindGeneration = 0;
 const toolOutputSessionDeletions = new Map();
 const toolOutputChatDeletionGenerations = new Map();
 const closedToolOutputTerminalSessions = new Set();
@@ -50,28 +53,94 @@ function getToolOutputChatDeletionGeneration(chatSessionId) {
   return toolOutputChatDeletionGenerations.get(chatSessionId) ?? 0;
 }
 
+function createTempDirReboundError() {
+  const error = new Error("Temporary directory was replaced while saving output.");
+  error.code = TOOL_OUTPUT_TEMP_DIR_REBOUND;
+  return error;
+}
+
+async function readFileAtMost(file, maxBytes) {
+  const buffer = Buffer.alloc(maxBytes + 1);
+  const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
+  return bytesRead > maxBytes ? null : buffer.subarray(0, bytesRead);
+}
+
+async function listPendingSigningKeyFiles(keyPath) {
+  try {
+    const files = await fs.promises.readdir(path.dirname(keyPath));
+    return files.filter(file => (
+      file.startsWith(`${TOOL_OUTPUT_SIGNING_KEY_FILE}.`)
+      && file.endsWith(".pending")
+    )).map(file => path.join(path.dirname(keyPath), file));
+  } catch {
+    return [];
+  }
+}
+
+async function hasPendingSigningKeyFile(keyPath, expectedStat) {
+  const keyStat = expectedStat ?? await fs.promises.lstat(keyPath).catch(() => null);
+  if (!keyStat) return false;
+  for (const pendingPath of await listPendingSigningKeyFiles(keyPath)) {
+    try {
+      const pendingStat = await fs.promises.lstat(pendingPath);
+      if (pendingStat.dev === keyStat.dev && pendingStat.ino === keyStat.ino) return true;
+    } catch {
+      // Another publisher may have removed the pending link concurrently.
+    }
+  }
+  return false;
+}
+
+async function cleanupPendingSigningKeyFiles(keyPath, expectedStat) {
+  const keyStat = expectedStat ?? await fs.promises.lstat(keyPath).catch(() => null);
+  if (!keyStat) return;
+  for (const pendingPath of await listPendingSigningKeyFiles(keyPath)) {
+    try {
+      const pendingStat = await fs.promises.lstat(pendingPath);
+      if (pendingStat.dev === keyStat.dev && pendingStat.ino === keyStat.ino) {
+        await safeUnlink(pendingPath);
+      }
+    } catch {
+      // Best effort; the key remains usable even if cleanup loses a race.
+    }
+  }
+}
+
 async function loadOrCreateToolOutputSigningKey(safeStorage) {
   if (!isSecureToolOutputStorageAvailable(safeStorage)) return null;
   const keyPath = path.join(getTempDir(), TOOL_OUTPUT_SIGNING_KEY_FILE);
+  const generation = tempDirRebindGeneration;
+  const isCurrentGeneration = () => generation === tempDirRebindGeneration;
+  const isCurrentTempDir = () => {
+    try {
+      return isCurrentGeneration() && getTempDir() === path.dirname(keyPath);
+    } catch {
+      return false;
+    }
+  };
   try {
     const stat = await fs.promises.lstat(keyPath);
-    if (stat.isFile() && !stat.isSymbolicLink() && stat.nlink === 1 && stat.size <= 4096) {
-      let encrypted;
+    if (stat.isFile() && !stat.isSymbolicLink() && (stat.nlink === 1 || stat.nlink === 2) && stat.size <= 4096) {
+      const opened = await openSafeToolOutputFile(keyPath, 4096, false, true);
+      if (!opened) return null;
       try {
-        encrypted = await fs.promises.readFile(keyPath);
-      } catch {
-        // A transient read failure must not destroy the only key for existing output.
-        return null;
-      }
-      try {
+        const encrypted = await readFileAtMost(opened.file, 4096);
+        if (!encrypted) return null;
+        if (!isCurrentTempDir()) return null;
         const decoded = Buffer.from(safeStorage.decryptString(encrypted), "base64");
-        if (decoded.length === 32) return decoded;
+        if (decoded.length === 32 && isCurrentTempDir()) {
+          if (stat.nlink === 2) await cleanupPendingSigningKeyFiles(keyPath, stat);
+          return decoded;
+        }
       } catch {
         // A locked or temporarily unavailable OS keychain must not destroy the
         // only key capable of verifying previously persisted output.
         return null;
+      } finally {
+        await opened.file.close().catch(() => {});
       }
     }
+    if (!isCurrentTempDir()) return null;
     if ((stat.isFile() || stat.isSymbolicLink())) {
       await fs.promises.unlink(keyPath);
     } else {
@@ -84,17 +153,31 @@ async function loadOrCreateToolOutputSigningKey(safeStorage) {
   const key = crypto.randomBytes(32);
   const pendingPath = `${keyPath}.${process.pid}.${crypto.randomBytes(6).toString("hex")}.pending`;
   try {
+    if (!isCurrentTempDir()) return null;
     const encrypted = safeStorage.encryptString(key.toString("base64"));
     await fs.promises.writeFile(pendingPath, encrypted, { mode: 0o600, flag: "wx" });
-    await fs.promises.rename(pendingPath, keyPath);
+    if (!isCurrentTempDir()) return null;
+    await fs.promises.link(pendingPath, keyPath);
+    await safeUnlink(pendingPath);
     return key;
   } catch (error) {
     await safeUnlink(pendingPath);
     if (error?.code !== "EEXIST") return null;
+    if (!isCurrentTempDir()) return null;
     try {
-      const encrypted = await fs.promises.readFile(keyPath);
-      const decoded = Buffer.from(safeStorage.decryptString(encrypted), "base64");
-      return decoded.length === 32 ? decoded : null;
+      const opened = await openSafeToolOutputFile(keyPath, 4096, false);
+      if (!opened) return null;
+      try {
+        const encrypted = await readFileAtMost(opened.file, 4096);
+        if (!encrypted) return null;
+        if (!isCurrentTempDir()) return null;
+        const decoded = Buffer.from(safeStorage.decryptString(encrypted), "base64");
+        if (decoded.length !== 32 || !isCurrentTempDir()) return null;
+        await cleanupPendingSigningKeyFiles(keyPath, await fs.promises.lstat(keyPath).catch(() => null));
+        return decoded;
+      } finally {
+        await opened.file.close().catch(() => {});
+      }
     } catch {
       return null;
     }
@@ -104,35 +187,63 @@ async function loadOrCreateToolOutputSigningKey(safeStorage) {
 function configureToolOutputSigningKey(electronModule) {
   if (!electronModule) return;
   toolOutputSafeStorage = electronModule.safeStorage;
-  toolOutputSigningKeyRecoveryPromise = null;
   toolOutputSigningKeyPromise = loadOrCreateToolOutputSigningKey(toolOutputSafeStorage);
 }
 
 async function getToolOutputSigningKey({ retry = true } = {}) {
+  const generation = tempDirRebindGeneration;
   const key = await toolOutputSigningKeyPromise.catch(() => null);
+  if (generation !== tempDirRebindGeneration) {
+    return retry ? getToolOutputSigningKey({ retry }) : null;
+  }
   if (key || !retry || !toolOutputSafeStorage) return key;
-  if (toolOutputSigningKeyRecoveryPromise) return toolOutputSigningKeyRecoveryPromise;
+  if (toolOutputSigningKeyRecoveryPromise && toolOutputSigningKeyRecoveryGeneration === generation) {
+    return toolOutputSigningKeyRecoveryPromise;
+  }
   const recovery = loadOrCreateToolOutputSigningKey(toolOutputSafeStorage).catch(() => null);
+  const recoveryGeneration = tempDirRebindGeneration;
   toolOutputSigningKeyRecoveryPromise = recovery;
+  toolOutputSigningKeyRecoveryGeneration = recoveryGeneration;
   try {
     const recovered = await recovery;
+    if (recoveryGeneration !== tempDirRebindGeneration) {
+      return retry ? getToolOutputSigningKey({ retry }) : null;
+    }
     toolOutputSigningKeyPromise = Promise.resolve(recovered);
     return recovered;
   } finally {
     if (toolOutputSigningKeyRecoveryPromise === recovery) {
       toolOutputSigningKeyRecoveryPromise = null;
+      toolOutputSigningKeyRecoveryGeneration = null;
     }
   }
 }
 
-async function ensureToolOutputSigningKeyFile(key) {
+async function ensureToolOutputSigningKeyFile(key, expectedGeneration = tempDirRebindGeneration) {
   if (!isSecureToolOutputStorageAvailable(toolOutputSafeStorage)) return true;
   const keyPath = path.join(getTempDir(), TOOL_OUTPUT_SIGNING_KEY_FILE);
+  const mustRevalidateKey = expectedGeneration !== tempDirRebindGeneration;
   try {
     const stat = await fs.promises.lstat(keyPath);
-    return stat.isFile() && !stat.isSymbolicLink() && stat.nlink === 1;
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 4096) return false;
+    if (stat.nlink !== 1 && !(stat.nlink === 2 && await hasPendingSigningKeyFile(keyPath, stat))) return false;
+    if (!mustRevalidateKey) return true;
+    const opened = await openSafeToolOutputFile(keyPath, 4096, false);
+    if (!opened) return false;
+    try {
+      const encrypted = await readFileAtMost(opened.file, 4096);
+      if (!encrypted) return false;
+      const persistedKey = Buffer.from(toolOutputSafeStorage.decryptString(encrypted), "base64");
+      return persistedKey.length === key.length
+        && crypto.timingSafeEqual(persistedKey, key);
+    } finally {
+      await opened.file.close().catch(() => {});
+    }
   } catch (error) {
-    if (error?.code !== "ENOENT") return false;
+    if (error?.code !== "ENOENT" || mustRevalidateKey) return false;
+  }
+  if (mustRevalidateKey) {
+    return false;
   }
   try {
     const encrypted = toolOutputSafeStorage.encryptString(key.toString("base64"));
@@ -193,9 +304,17 @@ function getTempDir() {
       assertSafeTempDir(cachedTempDir, cachedTempDirIdentity);
       return cachedTempDir;
     } catch (error) {
-      if (error?.code !== "ENOENT") throw error;
+      // ENOENT: OS/temp cleaner removed the directory. Identity mismatch: the
+      // path still exists but was deleted and recreated (new inode). Both are
+      // recoverable if the replacement still passes full safety checks below.
+      const identityChanged = error?.message === "Netcatty temp directory identity changed during this process.";
+      if (error?.code !== "ENOENT" && !identityChanged) throw error;
       cachedTempDir = null;
       cachedTempDirIdentity = null;
+      // The previous key file lived on the old inode (or vanished with ENOENT).
+      // Drop it so the next getToolOutputSigningKey() reloads from the rebound root.
+      tempDirRebindGeneration += 1;
+      toolOutputSigningKeyPromise = Promise.resolve(null);
     }
   }
   
@@ -214,6 +333,10 @@ function getTempDir() {
     console.error(`[TempDir] Failed to create temp directory:`, err.message);
     throw err;
   }
+}
+
+function getTempDirRebindGeneration() {
+  return tempDirRebindGeneration;
 }
 
 function assertSafeTempDir(tempDir, expectedIdentity) {
@@ -357,7 +480,12 @@ function isNetcattyTempPath(filePath) {
   return relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative);
 }
 
-async function openSafeToolOutputFile(filePath) {
+async function openSafeToolOutputFile(
+  filePath,
+  maxBytes = MAX_TOOL_OUTPUT_TEMP_BYTES,
+  requireEvenBytes = true,
+  allowSigningKeyPublication = false,
+) {
   if (!isNetcattyTempPath(filePath)) return null;
   let file;
   try {
@@ -370,7 +498,15 @@ async function openSafeToolOutputFile(filePath) {
       await file.close();
       return null;
     }
-    if (!stat.isFile() || stat.nlink !== 1 || stat.size > MAX_TOOL_OUTPUT_TEMP_BYTES || stat.size % 2 !== 0) {
+    const publishedSigningKey = allowSigningKeyPublication
+      && stat.nlink === 2
+      && await hasPendingSigningKeyFile(filePath, stat);
+    if (
+      !stat.isFile()
+      || (!publishedSigningKey && stat.nlink !== 1)
+      || stat.size > maxBytes
+      || (requireEvenBytes && stat.size % 2 !== 0)
+    ) {
       await file.close();
       return null;
     }
@@ -420,6 +556,7 @@ function toolOutputOwnershipMarker(chatSessionId, terminalSessionId) {
 
 async function deleteToolOutputsByOwnership(chatSessionId, terminalSessionId) {
   const tempDir = getTempDir();
+  const generation = tempDirRebindGeneration;
   const marker = terminalSessionId == null
     ? `_tool-output-${crypto.createHash("sha256").update(chatSessionId).digest("hex").slice(0, 24)}-`
     : toolOutputOwnershipMarker(chatSessionId, terminalSessionId);
@@ -432,13 +569,14 @@ async function deleteToolOutputsByOwnership(chatSessionId, terminalSessionId) {
   }
   for (const file of files) {
     if (!file.includes(marker) || !file.endsWith(".log")) continue;
-    if (await deleteToolOutputPair(path.join(tempDir, file))) deletedCount += 1;
+    if (await deleteToolOutputPair(path.join(tempDir, file), generation)) deletedCount += 1;
   }
   return { deletedCount };
 }
 
 async function deleteToolOutputsByTerminal(terminalSessionId) {
   const tempDir = getTempDir();
+  const generation = tempDirRebindGeneration;
   const terminalHash = crypto.createHash("sha256").update(terminalSessionId).digest("hex").slice(0, 24);
   const marker = new RegExp(`_tool-output-[a-f0-9]{24}-${terminalHash}-`);
   let deletedCount = 0;
@@ -450,15 +588,20 @@ async function deleteToolOutputsByTerminal(terminalSessionId) {
   }
   for (const file of files) {
     if (!marker.test(file) || !file.endsWith(".log")) continue;
-    if (await deleteToolOutputPair(path.join(tempDir, file))) deletedCount += 1;
+    if (await deleteToolOutputPair(path.join(tempDir, file), generation)) deletedCount += 1;
   }
   return { deletedCount };
 }
 
-async function safeUnlink(filePath) {
+async function safeUnlink(filePath, expectedGeneration) {
+  // Deletion must stay bound to the generation that validated this pathname.
+  // If the temp root was rebound, the same pathname now addresses the
+  // replacement root, so the unlink must abort instead of deleting that data.
+  if (expectedGeneration != null && tempDirRebindGeneration !== expectedGeneration) return false;
   if (!isNetcattyTempPath(filePath)) return false;
   try {
     const stat = await fs.promises.lstat(filePath);
+    if (expectedGeneration != null && tempDirRebindGeneration !== expectedGeneration) return false;
     if (!stat.isFile() || stat.isSymbolicLink()) return false;
     await fs.promises.unlink(filePath);
     return true;
@@ -467,15 +610,17 @@ async function safeUnlink(filePath) {
   }
 }
 
-async function deleteToolOutputPair(filePath) {
+async function deleteToolOutputPair(filePath, expectedGeneration) {
   const manifestPath = toolOutputManifestPath(filePath);
-  const manifestDeleted = await safeUnlink(manifestPath);
-  const contentDeleted = await safeUnlink(filePath);
+  const manifestDeleted = await safeUnlink(manifestPath, expectedGeneration);
+  const contentDeleted = await safeUnlink(filePath, expectedGeneration);
   return manifestDeleted && contentDeleted;
 }
 
 async function readSafeManifest(manifestPath, signingKey) {
   if (!isNetcattyTempPath(manifestPath) || !manifestPath.endsWith(".log.meta.json")) return null;
+  const entryTempDir = getTempDir();
+  const entryGeneration = tempDirRebindGeneration;
   let file;
   try {
     const noFollow = fs.constants.O_NOFOLLOW ?? 0;
@@ -496,9 +641,17 @@ async function readSafeManifest(manifestPath, signingKey) {
     if (!Number.isSafeInteger(parsed.contentBytes) || parsed.contentBytes < 0 || parsed.contentBytes > MAX_TOOL_OUTPUT_TEMP_BYTES) return null;
     if (!isBoundedString(parsed.contentSha256, 64) || !/^[a-f0-9]{64}$/.test(parsed.contentSha256)) return null;
     if (!await hasValidToolOutputManifestSignature(parsed, signingKey)) return null;
-    const contentPath = path.join(getTempDir(), parsed.contentFile);
+    const contentPath = path.join(entryTempDir, parsed.contentFile);
     if (toolOutputManifestPath(contentPath) !== manifestPath) return null;
-    return { manifest: parsed, manifestPath, manifestStat: stat, contentPath };
+    if (entryGeneration !== tempDirRebindGeneration || getTempDir() !== entryTempDir) return null;
+    return {
+      manifest: parsed,
+      manifestPath,
+      manifestStat: stat,
+      contentPath,
+      tempDir: entryTempDir,
+      tempDirRebindGeneration: entryGeneration,
+    };
   } catch {
     return null;
   } finally {
@@ -506,14 +659,50 @@ async function readSafeManifest(manifestPath, signingKey) {
   }
 }
 
+async function readSafeManifestWithTempRootRecovery(manifestPath, signingKey, retry = true) {
+  const generation = tempDirRebindGeneration;
+  const entry = await readSafeManifest(manifestPath, signingKey);
+  if (entry || !retry) return entry;
+  try {
+    getTempDir();
+  } catch {
+    return null;
+  }
+  if (generation === tempDirRebindGeneration) return null;
+  return readSafeManifest(manifestPath);
+}
+
+function isToolOutputEntryStale(entry) {
+  if (entry.tempDir != null || entry.tempDirRebindGeneration != null) {
+    try {
+      if (entry.tempDir != null && entry.tempDir !== getTempDir()) return true;
+    } catch {
+      // The temp root cannot be resolved right now; treat the entry as stale.
+      return true;
+    }
+    if (entry.tempDirRebindGeneration != null && entry.tempDirRebindGeneration !== tempDirRebindGeneration) {
+      return true;
+    }
+  }
+  return false;
+}
+
 async function readVerifiedManifestContent(entry) {
+  if (isToolOutputEntryStale(entry)) return null;
+  const generation = tempDirRebindGeneration;
   const opened = await openSafeToolOutputFile(entry.contentPath);
   if (!opened) return null;
   try {
+    // The temp root may be rebound while the content is being read; never
+    // verify data across generations because entry.contentPath would then
+    // address the replacement root instead of the manifest's own root.
+    if (generation !== tempDirRebindGeneration) return null;
     if (opened.stat.size !== entry.manifest.contentBytes) return null;
     const contentBuffer = await opened.file.readFile();
+    if (generation !== tempDirRebindGeneration) return null;
     const digest = crypto.createHash("sha256").update(contentBuffer).digest("hex");
     if (digest !== entry.manifest.contentSha256) return null;
+    if (generation !== tempDirRebindGeneration) return null;
     return { stat: opened.stat, contentBuffer };
   } finally {
     await opened.file.close();
@@ -524,29 +713,60 @@ async function verifyManifestContent(entry) {
   return Boolean(await readVerifiedManifestContent(entry));
 }
 
-async function listToolOutputManifestEntries() {
+async function listToolOutputManifestEntries(retry = true) {
   const tempDir = getTempDir();
+  const generation = tempDirRebindGeneration;
   const entries = [];
   const signingKey = await getToolOutputSigningKey();
+  if (generation !== tempDirRebindGeneration) {
+    return retry ? listToolOutputManifestEntries(false) : [];
+  }
   if (!signingKey) return entries;
   let files = [];
   try {
     files = await fs.promises.readdir(tempDir);
   } catch {
+    if (retry) {
+      try {
+        getTempDir();
+      } catch {
+        // Return the normal empty result if the temp root cannot recover.
+      }
+      if (generation !== tempDirRebindGeneration) {
+        return listToolOutputManifestEntries(false);
+      }
+    }
     return entries;
+  }
+  if (generation !== tempDirRebindGeneration || getTempDir() !== tempDir) {
+    return retry ? listToolOutputManifestEntries(false) : [];
   }
   for (const file of files) {
     if (!file.endsWith(".log.meta.json")) continue;
-    const entry = await readSafeManifest(path.join(tempDir, file), signingKey);
+    const entry = await readSafeManifestWithTempRootRecovery(path.join(tempDir, file), signingKey);
+    if (generation !== tempDirRebindGeneration || getTempDir() !== tempDir) {
+      return retry ? listToolOutputManifestEntries(false) : [];
+    }
     if (entry) entries.push(entry);
+  }
+  if (generation !== tempDirRebindGeneration || getTempDir() !== tempDir) {
+    return retry ? listToolOutputManifestEntries(false) : [];
   }
   return entries;
 }
 
 async function touchToolOutputEntry(entry, now = new Date()) {
+  const tempDir = getTempDir();
+  const generation = tempDirRebindGeneration;
+  if (
+    (entry.tempDir && entry.tempDir !== tempDir)
+    || (entry.tempDirRebindGeneration != null && entry.tempDirRebindGeneration !== generation)
+    || path.dirname(entry.manifestPath) !== tempDir
+  ) return false;
   const key = await getToolOutputSigningKey();
-  if (!key) return false;
+  if (!key || generation !== tempDirRebindGeneration) return false;
   const pendingPath = getTempFilePath(`${entry.manifest.record.handleId}.manifest.pending`);
+  if (generation !== tempDirRebindGeneration || path.dirname(pendingPath) !== tempDir) return false;
   const manifest = {
     ...unsignedToolOutputManifest(entry.manifest),
     record: { ...entry.manifest.record, accessedAt: now.getTime() },
@@ -558,12 +778,16 @@ async function touchToolOutputEntry(entry, now = new Date()) {
       mode: 0o600,
       flag: "wx",
     });
+    getTempDir();
+    if (generation !== tempDirRebindGeneration) throw createTempDirReboundError();
     await fs.promises.rename(pendingPath, entry.manifestPath);
+    getTempDir();
+    if (generation !== tempDirRebindGeneration) throw createTempDirReboundError();
     entry.manifest = manifest;
     entry.manifestStat = await fs.promises.stat(entry.manifestPath);
     return true;
   } catch {
-    await safeUnlink(pendingPath);
+    if (generation === tempDirRebindGeneration) await safeUnlink(pendingPath, generation);
     return false;
   }
 }
@@ -583,7 +807,10 @@ async function enforcePersistedToolOutputLimits() {
   let globalChars = 0;
   for (const entry of active) {
     if (!await verifyManifestContent(entry)) {
-      await deleteToolOutputPair(entry.contentPath);
+      // Never delete a pair whose pathname may now address a rebound root.
+      if (!isToolOutputEntryStale(entry)) {
+        await deleteToolOutputPair(entry.contentPath, entry.tempDirRebindGeneration);
+      }
       continue;
     }
     const { chatSessionId, storedChars } = entry.manifest.record;
@@ -594,7 +821,7 @@ async function enforcePersistedToolOutputLimits() {
       && sessionCount < TOOL_OUTPUT_MAX_HANDLES_PER_SESSION
       && sessionTotal + storedChars <= TOOL_OUTPUT_MAX_CHARS_PER_SESSION;
     if (!keep) {
-      await deleteToolOutputPair(entry.contentPath);
+      await deleteToolOutputPair(entry.contentPath, entry.tempDirRebindGeneration);
       continue;
     }
     kept.push(entry);
@@ -606,6 +833,7 @@ async function enforcePersistedToolOutputLimits() {
 
 async function cleanupExpiredToolOutputFiles(now = Date.now()) {
   const tempDir = getTempDir();
+  const generation = tempDirRebindGeneration;
   let deletedCount = 0;
   try {
     const files = await fs.promises.readdir(tempDir);
@@ -620,7 +848,7 @@ async function cleanupExpiredToolOutputFiles(now = Date.now()) {
         try {
           const stat = await fs.promises.lstat(pendingPath);
           if (stat.isFile() && !stat.isSymbolicLink() && now - stat.mtimeMs >= TOOL_OUTPUT_ORPHAN_TTL_MS) {
-            if (await safeUnlink(pendingPath)) deletedCount += 1;
+            if (await safeUnlink(pendingPath, generation)) deletedCount += 1;
           }
         } catch {
           // Best-effort startup cleanup.
@@ -635,8 +863,8 @@ async function cleanupExpiredToolOutputFiles(now = Date.now()) {
           if (stat.isSymbolicLink() || !stat.isFile()) continue;
           const contentPath = manifestPath.slice(0, -".meta.json".length);
           if (now - stat.mtimeMs >= TOOL_OUTPUT_PERSISTED_TTL_MS) {
-            if (await safeUnlink(manifestPath)) deletedCount += 1;
-            if (await safeUnlink(contentPath)) deletedCount += 1;
+            if (await safeUnlink(manifestPath, generation)) deletedCount += 1;
+            if (await safeUnlink(contentPath, generation)) deletedCount += 1;
           } else {
             managedContent.add(path.basename(contentPath));
           }
@@ -650,7 +878,7 @@ async function cleanupExpiredToolOutputFiles(now = Date.now()) {
         try {
           const stat = await fs.promises.lstat(manifestPath);
           if (stat.isFile() && !stat.isSymbolicLink() && now - stat.mtimeMs >= TOOL_OUTPUT_ORPHAN_TTL_MS) {
-            if (await safeUnlink(manifestPath)) deletedCount += 1;
+            if (await safeUnlink(manifestPath, generation)) deletedCount += 1;
           }
         } catch {
           // Best-effort startup cleanup.
@@ -658,14 +886,17 @@ async function cleanupExpiredToolOutputFiles(now = Date.now()) {
         continue;
       }
       if (!await verifyManifestContent(entry)) {
-        if (await safeUnlink(entry.manifestPath)) deletedCount += 1;
-        if (await safeUnlink(entry.contentPath)) deletedCount += 1;
+        // Never delete a pair whose pathname may now address a rebound root.
+        if (!isToolOutputEntryStale(entry)) {
+          if (await safeUnlink(entry.manifestPath, generation)) deletedCount += 1;
+          if (await safeUnlink(entry.contentPath, generation)) deletedCount += 1;
+        }
         continue;
       }
       managedContent.add(path.basename(entry.contentPath));
       if (!isToolOutputEntryExpired(entry, now)) continue;
-      if (await safeUnlink(entry.manifestPath)) deletedCount += 1;
-      if (await safeUnlink(entry.contentPath)) deletedCount += 1;
+      if (await safeUnlink(entry.manifestPath, generation)) deletedCount += 1;
+      if (await safeUnlink(entry.contentPath, generation)) deletedCount += 1;
     }
     for (const file of files) {
       if (!file.includes("_tool-output-") || !file.endsWith(".log")) continue;
@@ -826,9 +1057,12 @@ function registerHandlers(ipcMain, shell, electronModule) {
     const ownershipMarker = toolOutputOwnershipMarker(record.chatSessionId, record.terminalSessionId);
     const chatDeletionGeneration = getToolOutputChatDeletionGeneration(record.chatSessionId);
     const filePath = getTempFilePath(`${ownershipMarker.slice(1)}${record.handleId}.log`);
-    const manifestPath = toolOutputManifestPath(filePath);
+  const manifestPath = toolOutputManifestPath(filePath);
     const pendingManifestPath = getTempFilePath(`${record.handleId}.manifest.pending`);
-    try {
+    const writeOnce = async attempt => {
+      const attemptGeneration = tempDirRebindGeneration;
+      let validatedGeneration = attemptGeneration;
+      try {
       if (record.terminalSessionId && closedToolOutputTerminalSessions.has(record.terminalSessionId)) {
         throw new Error("Terminal session is already closed.");
       }
@@ -836,12 +1070,25 @@ function registerHandlers(ipcMain, shell, electronModule) {
       if (getToolOutputChatDeletionGeneration(record.chatSessionId) !== chatDeletionGeneration) {
         throw new Error("Chat session was cleared while output was being saved.");
       }
-      const signingKey = await getToolOutputSigningKey();
+      let signingKey = await getToolOutputSigningKey();
       if (!signingKey) throw new Error("Secure local storage is unavailable.");
-      if (!await ensureToolOutputSigningKeyFile(signingKey)) {
-        throw new Error("Unable to prepare secure local storage.");
+      const signingKeyGeneration = tempDirRebindGeneration;
+      if (!await ensureToolOutputSigningKeyFile(signingKey, signingKeyGeneration)) {
+        // The temp root may have been rebound after the key was acquired.
+        // Reload once so this write cannot sign into the replacement root with
+        // a key that only belongs to the old inode.
+        toolOutputSigningKeyPromise = Promise.resolve(null);
+        signingKey = await getToolOutputSigningKey();
+        if (!signingKey || !await ensureToolOutputSigningKeyFile(signingKey, tempDirRebindGeneration)) {
+          throw new Error("Unable to prepare secure local storage.");
+        }
       }
+      validatedGeneration = tempDirRebindGeneration;
       await fs.promises.writeFile(filePath, contentBuffer, { mode: 0o600, flag: "wx" });
+      getTempDir();
+      if (tempDirRebindGeneration !== validatedGeneration) {
+        throw createTempDirReboundError();
+      }
       const manifest = {
         record,
         contentFile: path.basename(filePath),
@@ -855,130 +1102,180 @@ function registerHandlers(ipcMain, shell, electronModule) {
         flag: "wx",
       });
       await fs.promises.rename(pendingManifestPath, manifestPath);
+      getTempDir();
+      if (tempDirRebindGeneration !== validatedGeneration) {
+        throw createTempDirReboundError();
+      }
       if (getToolOutputChatDeletionGeneration(record.chatSessionId) !== chatDeletionGeneration) {
-        await deleteToolOutputPair(filePath);
+        await deleteToolOutputPair(filePath, validatedGeneration);
         throw new Error("Chat session was cleared while output was being saved.");
       }
       if (record.terminalSessionId && closedToolOutputTerminalSessions.has(record.terminalSessionId)) {
-        await deleteToolOutputPair(filePath);
+        await deleteToolOutputPair(filePath, validatedGeneration);
         throw new Error("Terminal session closed while output was being saved.");
       }
       await enforcePersistedToolOutputLimits();
+      getTempDir();
+      if (tempDirRebindGeneration !== validatedGeneration) {
+        throw createTempDirReboundError();
+      }
       const persistedEntry = await readSafeManifest(manifestPath);
+      if (tempDirRebindGeneration !== validatedGeneration) {
+        throw createTempDirReboundError();
+      }
       if (!persistedEntry || path.resolve(persistedEntry.contentPath) !== path.resolve(filePath)) {
         throw new Error("Saved output was removed while enforcing storage limits.");
       }
       if (getToolOutputChatDeletionGeneration(record.chatSessionId) !== chatDeletionGeneration) {
-        await deleteToolOutputPair(filePath);
+        await deleteToolOutputPair(filePath, validatedGeneration);
         throw new Error("Chat session was cleared while output was being saved.");
       }
       if (record.terminalSessionId && closedToolOutputTerminalSessions.has(record.terminalSessionId)) {
-        await deleteToolOutputPair(filePath);
+        await deleteToolOutputPair(filePath, validatedGeneration);
         throw new Error("Terminal session closed while output was being saved.");
       }
       return { ok: true, path: filePath, manifestPath };
-    } catch (error) {
-      await Promise.allSettled([
-        safeUnlink(pendingManifestPath),
-        safeUnlink(manifestPath),
-        safeUnlink(filePath),
-      ]);
-      return { ok: false, error: error?.message || "Unable to persist tool output." };
-    }
+      } catch (error) {
+        await Promise.allSettled([
+          safeUnlink(pendingManifestPath, validatedGeneration),
+          safeUnlink(manifestPath, validatedGeneration),
+          safeUnlink(filePath, validatedGeneration),
+        ]);
+        let tempDirWasRebound = error?.code === TOOL_OUTPUT_TEMP_DIR_REBOUND;
+        if (!tempDirWasRebound && error?.code === "ENOENT" && attempt === 0) {
+          try {
+            getTempDir();
+          } catch {
+            // The normal error is returned below if the temp root cannot recover.
+          }
+          tempDirWasRebound = tempDirRebindGeneration !== attemptGeneration;
+        }
+        if (tempDirWasRebound && attempt === 0) {
+          return writeOnce(1);
+        }
+        return { ok: false, error: error?.message || "Unable to persist tool output." };
+      }
+    };
+    return writeOnce(0);
   });
 
   ipcMain.handle("netcatty:tempdir:toolOutputRestore", async (_event, payload = {}) => {
     const handleId = String(payload.handleId ?? "");
     const chatSessionId = String(payload.chatSessionId ?? "");
     if (!isBoundedString(handleId, 200) || !isBoundedString(chatSessionId, 512)) return null;
-    const chatDeletionGeneration = getToolOutputChatDeletionGeneration(chatSessionId);
-    await toolOutputSessionDeletions.get(chatSessionId);
-    if (getToolOutputChatDeletionGeneration(chatSessionId) !== chatDeletionGeneration) return null;
-    const entries = await listToolOutputManifestEntries();
-    const entry = entries.find(candidate => (
-      candidate.manifest.record.handleId === handleId
-      && candidate.manifest.record.chatSessionId === chatSessionId
-    ));
-    if (!entry) return null;
-    if (
-      entry.manifest.record.terminalSessionId
-      && closedToolOutputTerminalSessions.has(entry.manifest.record.terminalSessionId)
-    ) {
-      await deleteToolOutputPair(entry.contentPath);
-      return null;
-    }
-    if (isToolOutputEntryExpired(entry)) {
-      await deleteToolOutputPair(entry.contentPath);
-      return null;
-    }
-    if (!await verifyManifestContent(entry)) {
-      await deleteToolOutputPair(entry.contentPath);
-      return null;
-    }
-    if (
-      entry.manifest.record.terminalSessionId
-      && closedToolOutputTerminalSessions.has(entry.manifest.record.terminalSessionId)
-    ) {
-      await deleteToolOutputPair(entry.contentPath);
-      return null;
-    }
-    await touchToolOutputEntry(entry);
-    if (getToolOutputChatDeletionGeneration(chatSessionId) !== chatDeletionGeneration) {
-      await deleteToolOutputPair(entry.contentPath);
-      return null;
-    }
-    if (
-      entry.manifest.record.terminalSessionId
-      && closedToolOutputTerminalSessions.has(entry.manifest.record.terminalSessionId)
-    ) {
-      await deleteToolOutputPair(entry.contentPath);
-      return null;
-    }
-    return {
-      path: entry.contentPath,
-      record: entry.manifest.record,
+    const restoreOnce = async (attempt) => {
+      const chatDeletionGeneration = getToolOutputChatDeletionGeneration(chatSessionId);
+      await toolOutputSessionDeletions.get(chatSessionId);
+      if (getToolOutputChatDeletionGeneration(chatSessionId) !== chatDeletionGeneration) return null;
+      const entries = await listToolOutputManifestEntries();
+      const entry = entries.find(candidate => (
+        candidate.manifest.record.handleId === handleId
+        && candidate.manifest.record.chatSessionId === chatSessionId
+      ));
+      if (!entry) return null;
+      if (
+        entry.manifest.record.terminalSessionId
+        && closedToolOutputTerminalSessions.has(entry.manifest.record.terminalSessionId)
+      ) {
+        await deleteToolOutputPair(entry.contentPath, entry.tempDirRebindGeneration);
+        return null;
+      }
+      if (isToolOutputEntryExpired(entry)) {
+        await deleteToolOutputPair(entry.contentPath, entry.tempDirRebindGeneration);
+        return null;
+      }
+      if (!await verifyManifestContent(entry)) {
+        // A rebound temp root may hold different data at the same pathname;
+        // never delete it based on a stale generation's verification failure.
+        // Retry enumeration and verification against the current generation
+        // instead of reporting a durable handle as missing.
+        if (isToolOutputEntryStale(entry)) {
+          return attempt === 0 ? restoreOnce(1) : null;
+        }
+        await deleteToolOutputPair(entry.contentPath, entry.tempDirRebindGeneration);
+        return null;
+      }
+      if (
+        entry.manifest.record.terminalSessionId
+        && closedToolOutputTerminalSessions.has(entry.manifest.record.terminalSessionId)
+      ) {
+        await deleteToolOutputPair(entry.contentPath, entry.tempDirRebindGeneration);
+        return null;
+      }
+      await touchToolOutputEntry(entry);
+      if (getToolOutputChatDeletionGeneration(chatSessionId) !== chatDeletionGeneration) {
+        await deleteToolOutputPair(entry.contentPath, entry.tempDirRebindGeneration);
+        return null;
+      }
+      if (
+        entry.manifest.record.terminalSessionId
+        && closedToolOutputTerminalSessions.has(entry.manifest.record.terminalSessionId)
+      ) {
+        await deleteToolOutputPair(entry.contentPath, entry.tempDirRebindGeneration);
+        return null;
+      }
+      return {
+        path: entry.contentPath,
+        record: entry.manifest.record,
+      };
     };
+    return restoreOnce(0);
   });
 
   ipcMain.handle("netcatty:tempdir:toolOutputRead", async (_event, payload = {}) => {
     const filePath = payload.path;
-    const manifestEntry = await readSafeManifest(toolOutputManifestPath(filePath));
-    if (!manifestEntry || path.resolve(manifestEntry.contentPath) !== path.resolve(filePath)) return null;
-    const chatSessionId = manifestEntry.manifest.record.chatSessionId;
-    const chatDeletionGeneration = getToolOutputChatDeletionGeneration(chatSessionId);
-    await toolOutputSessionDeletions.get(chatSessionId);
-    if (getToolOutputChatDeletionGeneration(chatSessionId) !== chatDeletionGeneration) return null;
-    if (
-      manifestEntry.manifest.record.terminalSessionId
-      && closedToolOutputTerminalSessions.has(manifestEntry.manifest.record.terminalSessionId)
-    ) {
-      await deleteToolOutputPair(manifestEntry.contentPath);
-      return null;
-    }
-    if (isToolOutputEntryExpired(manifestEntry)) {
-      await deleteToolOutputPair(manifestEntry.contentPath);
-      return null;
-    }
-    const verified = await readVerifiedManifestContent(manifestEntry);
-    if (!verified) {
-      await deleteToolOutputPair(manifestEntry.contentPath);
-      return null;
-    }
-    const content = verified.contentBuffer.toString("utf16le");
-    const result = !payload.request ? content : await readToolOutputChunk(content, payload.request);
-    await touchToolOutputEntry(manifestEntry);
-    if (getToolOutputChatDeletionGeneration(chatSessionId) !== chatDeletionGeneration) {
-      await deleteToolOutputPair(manifestEntry.contentPath);
-      return null;
-    }
-    if (
-      manifestEntry.manifest.record.terminalSessionId
-      && closedToolOutputTerminalSessions.has(manifestEntry.manifest.record.terminalSessionId)
-    ) {
-      await deleteToolOutputPair(manifestEntry.contentPath);
-      return null;
-    }
-    return result;
+    const readOnce = async (attempt) => {
+      const manifestEntry = await readSafeManifestWithTempRootRecovery(toolOutputManifestPath(filePath));
+      if (!manifestEntry || path.resolve(manifestEntry.contentPath) !== path.resolve(filePath)) return null;
+      const attemptGeneration = manifestEntry.tempDirRebindGeneration;
+      // Only remove persisted data while the temp root still matches the
+      // manifest's generation; after a rebind the same pathname addresses the
+      // replacement root, so the read must be retried instead of deleting
+      // current-generation data.
+      const deletePairIfCurrentGeneration = async () => {
+        if (tempDirRebindGeneration !== attemptGeneration) return;
+        await deleteToolOutputPair(manifestEntry.contentPath, attemptGeneration);
+      };
+      const chatSessionId = manifestEntry.manifest.record.chatSessionId;
+      const chatDeletionGeneration = getToolOutputChatDeletionGeneration(chatSessionId);
+      await toolOutputSessionDeletions.get(chatSessionId);
+      if (getToolOutputChatDeletionGeneration(chatSessionId) !== chatDeletionGeneration) return null;
+      if (
+        manifestEntry.manifest.record.terminalSessionId
+        && closedToolOutputTerminalSessions.has(manifestEntry.manifest.record.terminalSessionId)
+      ) {
+        await deletePairIfCurrentGeneration();
+        return null;
+      }
+      if (isToolOutputEntryExpired(manifestEntry)) {
+        await deletePairIfCurrentGeneration();
+        return null;
+      }
+      const verified = await readVerifiedManifestContent(manifestEntry);
+      if (!verified) {
+        if (tempDirRebindGeneration !== attemptGeneration) {
+          return attempt === 0 ? readOnce(1) : null;
+        }
+        await deletePairIfCurrentGeneration();
+        return null;
+      }
+      const content = verified.contentBuffer.toString("utf16le");
+      const result = !payload.request ? content : await readToolOutputChunk(content, payload.request);
+      await touchToolOutputEntry(manifestEntry);
+      if (getToolOutputChatDeletionGeneration(chatSessionId) !== chatDeletionGeneration) {
+        await deletePairIfCurrentGeneration();
+        return null;
+      }
+      if (
+        manifestEntry.manifest.record.terminalSessionId
+        && closedToolOutputTerminalSessions.has(manifestEntry.manifest.record.terminalSessionId)
+      ) {
+        await deletePairIfCurrentGeneration();
+        return null;
+      }
+      return result;
+    };
+    return readOnce(0);
   });
 
   ipcMain.handle("netcatty:tempdir:toolOutputDelete", async (_event, payload = {}) => {
@@ -1027,6 +1324,7 @@ function registerHandlers(ipcMain, shell, electronModule) {
 
 module.exports = {
   getTempDir,
+  getTempDirRebindGeneration,
   ensureTempDir,
   getTempDirInfo,
   clearTempDir,

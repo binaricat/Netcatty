@@ -21,6 +21,7 @@ import type {
   TerminalTheme,
 } from "../../types";
 import type { KittyKeyboardBroadcastInput } from "./runtime/kittyKeyboardBroadcast";
+import type { TerminalCwdChangeMeta } from "./sftpCwd";
 
 export const MAX_CONNECTION_LOG_DATA_CHARS = 1_000_000;
 export const AUTO_RUN_SNIPPET_LINE_DELAY_MS = 250;
@@ -119,6 +120,7 @@ export interface TerminalProps {
   inWorkspace?: boolean;
   isResizing?: boolean;
   isFocusMode?: boolean;
+  isPaneMagnified?: boolean;
   isFocused?: boolean;
   /**
    * Split-pane keyboard ownership for disconnected-dialog focus claims.
@@ -151,6 +153,9 @@ export interface TerminalProps {
   // source session whose authenticated connection should be reused for a new
   // shell channel — skipping a second MFA prompt (issue #1204).
   reuseConnectionFromSessionId?: string;
+  // Duplicate Session marker: never borrow a live/parked pooled transport —
+  // always dial a fresh connection (fresh auth).
+  requireFreshConnection?: boolean;
   /**
    * Attach to an already-running backend session (same PTY) instead of starting
    * a new one. Used by the AI silent-session observe popup. Must not close the
@@ -175,6 +180,7 @@ export interface TerminalProps {
   onUpdateHost?: (host: Host) => void;
   onAddKnownHost?: (knownHost: KnownHost) => void;
   onExpandToFocus?: () => void;
+  onTogglePaneMagnification?: () => void;
   onCommandExecuted?: (
     command: string,
     hostId: string,
@@ -193,9 +199,10 @@ export interface TerminalProps {
     host: Host,
     initialPath?: string,
     pendingUploadEntries?: DropEntry[],
+    originSessionId?: string,
     sourceSessionId?: string,
   ) => void;
-  onTerminalCwdChange?: (sessionId: string, cwd: string | null, meta?: { source?: 'osc7' }) => void;
+  onTerminalCwdChange?: (sessionId: string, cwd: string | null, meta?: TerminalCwdChangeMeta) => void;
   onTerminalTitleChange?: (sessionId: string, title: string | null) => void;
   onTerminalBell?: (sessionId: string) => void;
   onTerminalOutput?: (sessionId: string, chunk: string) => void;
@@ -270,18 +277,60 @@ export function shouldShowTerminalConnectionDialog({
   isLocalConnection,
   isSerialConnection,
   isDisconnectedDialogDismissed,
+  disconnectedNoticeMode,
+  hasEverConnected,
+  restoreState,
+  isReconnectActive,
+  requiresUserInput,
   hideConnectingDialogForConnectionReuse,
 }: {
   status: TerminalSession["status"];
   isLocalConnection: boolean;
   isSerialConnection: boolean;
   isDisconnectedDialogDismissed: boolean;
+  disconnectedNoticeMode?: TerminalSettings["disconnectedNoticeMode"];
+  hasEverConnected?: boolean;
+  restoreState?: TerminalSession["restoreState"];
+  isReconnectActive?: boolean;
+  requiresUserInput?: boolean;
   hideConnectingDialogForConnectionReuse?: boolean;
 }): boolean {
   return status !== "connected"
     && !(!!hideConnectingDialogForConnectionReuse && status === "connecting")
     && !((isLocalConnection || isSerialConnection) && status === "connecting")
+    && !shouldShowTerminalDisconnectedNotice({
+      status,
+      disconnectedNoticeMode,
+      hasEverConnected,
+      restoreState,
+      isReconnectActive,
+      requiresUserInput,
+    })
     && !(status === "disconnected" && isDisconnectedDialogDismissed);
+}
+
+export function shouldShowTerminalDisconnectedNotice({
+  status,
+  disconnectedNoticeMode,
+  hasEverConnected,
+  restoreState,
+  isReconnectActive,
+  requiresUserInput,
+}: {
+  status: TerminalSession["status"];
+  disconnectedNoticeMode?: TerminalSettings["disconnectedNoticeMode"];
+  hasEverConnected?: boolean;
+  restoreState?: TerminalSession["restoreState"];
+  isReconnectActive?: boolean;
+  requiresUserInput?: boolean;
+}): boolean {
+  const isDisconnectedOrReconnecting = status === "disconnected"
+    || (status === "connecting" && isReconnectActive === true);
+  return isDisconnectedOrReconnecting
+    && disconnectedNoticeMode === "terminal"
+    && hasEverConnected === true
+    && restoreState !== "restored-disconnected"
+    && requiresUserInput !== true;
 }
 
 /**
@@ -489,4 +538,85 @@ export function forceSyncRenderAfterResize(term: XTerm): void {
   } catch (err) {
     logger.warn("Sync render after resize failed", err);
   }
+}
+
+type XTermWithPrivateViewport = XTerm & {
+  _core?: {
+    _viewport?: {
+      scrollToLine?: (line: number, disableSmoothScroll?: boolean) => void;
+      _sync?: () => void;
+    };
+  };
+};
+
+/**
+ * Re-align the DOM scroll position with the buffer's viewport row.
+ *
+ * xterm's reflow adjusts the buffer's viewport row (ydisp) during resize, but
+ * the scrollable viewport keeps its stale pixel offset. Any subsequent
+ * relative scroll (wheel, scrollToLine) then applies its delta twice — once
+ * against the buffer and once against the stale DOM offset — drifting the
+ * reading position (all the way to the top while shrinking, #3299). Snapping
+ * the viewport back to the buffer row before a relative restore removes the
+ * desync.
+ */
+export function alignTerminalViewportScroll(term: XTerm): void {
+  const viewport = (term as XTermWithPrivateViewport)._core?._viewport;
+  const scrollToLine = viewport?.scrollToLine;
+  if (typeof scrollToLine !== "function") return;
+
+  // After a resize, xterm only refreshes the viewport's scroll dimensions on
+  // its queued render callback. Setting a scroll position against the stale
+  // dimensions gets clamped to the old maximum while xterm records the
+  // requested row, so the queued sync then assumes the position was already
+  // applied and the DOM offset stays stale — the next wheel scroll jumps
+  // upward by the resize delta. Sync the dimensions now, before positioning.
+  // If synchronized output (DECSET 2026) is active, _sync() above is a no-op
+  // that merely defers DOM scroll updates until the mode ends; positioning
+  // here would still record the requested row as _latestYDisp against the
+  // stale dimensions, and the deferred sync would then see
+  // ydisp === _latestYDisp and skip repositioning, leaving a stale DOM
+  // offset. Leave positioning to that deferred sync instead: after reflow the
+  // buffer's ydisp differs from the recorded _latestYDisp, so it repositions
+  // with fresh dimensions on its own.
+  if (typeof viewport._sync === "function") {
+    try {
+      viewport._sync.call(viewport);
+    } catch (err) {
+      logger.warn("Sync viewport dimensions after resize failed", err);
+    }
+  }
+  if (term.modes?.synchronizedOutputMode) return;
+
+  try {
+    scrollToLine.call(viewport, term.buffer.active.viewportY, true);
+  } catch (err) {
+    logger.warn("Align viewport scroll after resize failed", err);
+  }
+}
+
+/** Defer the whole fit while xterm keeps the visible frame frozen (DECSET 2026). */
+export function createSynchronizedOutputFitScheduler() {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const dispose = () => {
+    if (timer !== undefined) clearTimeout(timer);
+    timer = undefined;
+  };
+  return {
+    dispose,
+    defer(term: XTerm, fit: () => void): boolean {
+      dispose();
+      if (!term.modes.synchronizedOutputMode) return false;
+      // Arms xterm's own synchronized-output timeout even if the program
+      // only enabled the mode without writing visible content afterward.
+      term.refresh(0, Math.max(0, term.rows - 1));
+      timer = setTimeout(() => {
+        timer = undefined;
+        // The caller re-enters safeFit and checks the mode again, including
+        // when another synchronized frame started before this retry.
+        fit();
+      }, 32);
+      return true;
+    },
+  };
 }

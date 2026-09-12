@@ -55,8 +55,8 @@ export default function SettingsSyncTab(props: {
         importVaultData: importDataFromString,
         importPortForwardingRules,
         onSettingsApplied,
-      }),
-    [importDataFromString, importPortForwardingRules, onSettingsApplied],
+      }, { currentHosts: vault.hosts }),
+    [importDataFromString, importPortForwardingRules, onSettingsApplied, vault.hosts],
   );
 
   const onApplyPayload = useCallback(

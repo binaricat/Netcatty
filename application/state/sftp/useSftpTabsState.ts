@@ -37,6 +37,39 @@ interface SftpTabsState {
 
 const EMPTY_SELECTION = new Set<string>();
 
+export function removeSftpTabFromState(prev: SftpSideTabs, tabId: string): SftpSideTabs {
+  const tabIndex = prev.tabs.findIndex((tab) => tab.id === tabId);
+  if (tabIndex === -1) return prev;
+
+  let activeTabId: string | null = null;
+  if (prev.tabs.length > 1) {
+    if (prev.activeTabId === tabId) {
+      const nextIndex = tabIndex < prev.tabs.length - 1 ? tabIndex + 1 : tabIndex - 1;
+      activeTabId = prev.tabs[nextIndex]?.id ?? null;
+    } else {
+      activeTabId = prev.activeTabId;
+    }
+  }
+
+  return {
+    tabs: prev.tabs.filter((tab) => tab.id !== tabId),
+    activeTabId,
+  };
+}
+
+export function closeSftpTabStateImmediately(params: {
+  tabsRef: { current: SftpSideTabs };
+  tabId: string;
+  setTabs: (updater: (prev: SftpSideTabs) => SftpSideTabs) => void;
+}): void {
+  params.tabsRef.current = removeSftpTabFromState(params.tabsRef.current, params.tabId);
+  params.setTabs((prev) => {
+    const next = removeSftpTabFromState(prev, params.tabId);
+    params.tabsRef.current = next;
+    return next;
+  });
+}
+
 export const useSftpTabsState = ({
   defaultShowHiddenFiles = false,
 }: {
@@ -154,24 +187,14 @@ export const useSftpTabsState = ({
   const closeTab = useCallback(
     (side: "left" | "right", tabId: string) => {
       const setTabs = side === "left" ? setLeftTabs : setRightTabs;
-      setTabs((prev) => {
-        const tabIndex = prev.tabs.findIndex((t) => t.id === tabId);
-        if (tabIndex === -1) return prev;
-
-        let newActiveTabId: string | null = null;
-        if (prev.tabs.length > 1) {
-          if (prev.activeTabId === tabId) {
-            const nextIndex = tabIndex < prev.tabs.length - 1 ? tabIndex + 1 : tabIndex - 1;
-            newActiveTabId = prev.tabs[nextIndex]?.id || null;
-          } else {
-            newActiveTabId = prev.activeTabId;
-          }
-        }
-
-        return {
-          tabs: prev.tabs.filter((t) => t.id !== tabId),
-          activeTabId: newActiveTabId,
-        };
+      const tabsRef = side === "left" ? leftTabsRef : rightTabsRef;
+      // Make the removal visible to in-flight SFTP work immediately, before
+      // React commits the state update, so a late connection cannot register
+      // itself to a tab the user has already closed.
+      closeSftpTabStateImmediately({
+        tabsRef,
+        tabId,
+        setTabs,
       });
     },
     [],

@@ -1,3 +1,5 @@
+import { resolveSftpTransferConcurrency } from "../../../domain/sftpTransferConcurrency";
+
 type LimitReader = () => number | null | undefined;
 
 interface ScheduledJob<T> {
@@ -20,9 +22,7 @@ export interface GlobalSftpTransferScheduler {
 }
 
 function normalizeLimit(value: number | null | undefined): number {
-  return Number.isInteger(value) && value !== undefined && value !== null && value >= 1 && value <= 16
-    ? value
-    : 2;
+  return resolveSftpTransferConcurrency(() => value);
 }
 
 export function getSftpTransferResourceKeys(input: {
@@ -44,6 +44,25 @@ export function createGlobalSftpTransferScheduler(): GlobalSftpTransferScheduler
   let lastOwnerId: string | null = null;
   let prioritySequence = 0;
   const pausedJobs = new Map<string, ScheduledJob<unknown>>();
+  let pumpScheduled = false;
+  let startsSinceYield = 0;
+
+  const schedulePump = () => {
+    if (pumpScheduled || queue.length === 0) return;
+    pumpScheduled = true;
+    const run = () => {
+      pumpScheduled = false;
+      pump();
+    };
+    // Coalesce a discovery/enqueue burst into one scan. Periodically yield to
+    // input/paint as well, including when many tiny jobs resolve immediately.
+    if (startsSinceYield >= 64) {
+      startsSinceYield = 0;
+      setTimeout(run, 0);
+    } else {
+      queueMicrotask(run);
+    }
+  };
 
   const normalizeResourceKeys = (keys: readonly string[]) => [...new Set(keys.length > 0 ? keys : ["local"])];
   const canRun = (job: ScheduledJob<unknown>) => {
@@ -60,24 +79,31 @@ export function createGlobalSftpTransferScheduler(): GlobalSftpTransferScheduler
 
   const pump = () => {
     while (queue.length > 0) {
-      const runnable = queue.map((job, index) => ({ job, index })).filter(({ job }) => canRun(job));
-      if (runnable.length === 0) return;
-      const highestPriority = runnable.reduce((max, { job }) => Math.max(max, job.priority), 0);
-      const prioritizedIndexes = queue
-        .map((job, index) => ({ job, index }))
-        .filter(({ job }) => job.priority === highestPriority && canRun(job));
-      const alternate = lastOwnerId === null
-        ? undefined
-        : prioritizedIndexes.find(({ job }) => job.ownerId !== lastOwnerId);
-      const index = alternate?.index ?? prioritizedIndexes[0]?.index ?? 0;
+      let index = -1;
+      for (let candidateIndex = 0; candidateIndex < queue.length; candidateIndex += 1) {
+        const candidate = queue[candidateIndex];
+        if (!canRun(candidate)) continue;
+        const selected = queue[index];
+        if (!selected || candidate.priority > selected.priority || (
+          candidate.priority === selected.priority
+          && selected.ownerId === lastOwnerId
+          && candidate.ownerId !== lastOwnerId
+        )) index = candidateIndex;
+      }
+      if (index < 0) return;
       const [job] = queue.splice(index, 1);
       if (!job) return;
       adjustActive(job, 1);
       lastOwnerId = job.ownerId;
-      void job.work().then(job.resolve, job.reject).finally(() => {
+      startsSinceYield += 1;
+      void (async () => job.work())().then(job.resolve, job.reject).finally(() => {
         adjustActive(job, -1);
-        pump();
+        schedulePump();
       });
+      if (startsSinceYield >= 64) {
+        schedulePump();
+        return;
+      }
     }
   };
 
@@ -85,7 +111,8 @@ export function createGlobalSftpTransferScheduler(): GlobalSftpTransferScheduler
     run<T>(ownerId: string, taskId: string, resourceKeys: readonly string[], readLimit: LimitReader, work: () => Promise<T>): Promise<T> {
       return new Promise<T>((resolve, reject) => {
         queue.push({ ownerId, taskId, resourceKeys: normalizeResourceKeys(resourceKeys), priority: 0, readLimit, work, resolve, reject } as ScheduledJob<unknown>);
-        pump();
+        if (queue.length === 1 && !pumpScheduled && startsSinceYield < 64) pump();
+        else schedulePump();
       });
     },
     prioritize(taskId: string) {
@@ -93,7 +120,7 @@ export function createGlobalSftpTransferScheduler(): GlobalSftpTransferScheduler
       if (!job) return;
       prioritySequence += 1;
       job.priority = prioritySequence;
-      pump();
+      schedulePump();
     },
     pause(taskId: string) {
       const index = queue.findIndex((job) => job.taskId === taskId);
@@ -108,7 +135,7 @@ export function createGlobalSftpTransferScheduler(): GlobalSftpTransferScheduler
       if (!job) return false;
       pausedJobs.delete(taskId);
       queue.push(job);
-      pump();
+      schedulePump();
       return true;
     },
     cancel(taskId: string) {
@@ -117,7 +144,7 @@ export function createGlobalSftpTransferScheduler(): GlobalSftpTransferScheduler
       if (!job) return false;
       pausedJobs.delete(taskId);
       job.reject(new Error("Transfer cancelled"));
-      pump();
+      schedulePump();
       return true;
     },
   };

@@ -39,7 +39,6 @@ interface UseSftpPaneActionsParams {
   sftpSessionsRef: React.MutableRefObject<Map<string, string>>;
   lastConnectedHostRef: React.MutableRefObject<{ left: Host | "local" | null; right: Host | "local" | null }>;
   connectionCacheKeyMapRef: React.MutableRefObject<Map<string, string>>;
-  reconnectingRef: React.MutableRefObject<{ left: boolean; right: boolean }>;
   makeCacheKey: (connectionId: string, path: string, encoding?: SftpFilenameEncoding) => string;
   clearCacheForConnection: (connectionId: string) => void;
   listLocalFiles: (path: string) => Promise<SftpFileEntry[]>;
@@ -98,7 +97,6 @@ export const useSftpPaneActions = ({
   sftpSessionsRef,
   lastConnectedHostRef,
   connectionCacheKeyMapRef,
-  reconnectingRef,
   makeCacheKey,
   clearCacheForConnection,
   listLocalFiles,
@@ -464,8 +462,7 @@ export const useSftpPaneActions = ({
             || pane.connection.isLocal
             || (!pane.connection.isLocal && pane.connection.hostId)
           );
-          if (canReconnect && !reconnectingRef.current[side]) {
-            reconnectingRef.current[side] = true;
+          if (canReconnect) {
             updateActiveTab(side, (prev) => ({
               ...prev,
               reconnecting: true,
@@ -486,8 +483,7 @@ export const useSftpPaneActions = ({
         // when they switch back to that tab.
         if (options?.tabId) return;
         const lastHost = lastConnectedHostRef.current[side];
-        if (lastHost && !reconnectingRef.current[side]) {
-          reconnectingRef.current[side] = true;
+        if (lastHost) {
           updateActiveTab(side, (prev) => ({
             ...prev,
             reconnecting: true,
@@ -501,7 +497,7 @@ export const useSftpPaneActions = ({
         }
       }
     },
-    [getActivePane, leftTabsRef, rightTabsRef, navigateTo, updateActiveTab, lastConnectedHostRef, reconnectingRef, sftpSessionsRef],
+    [getActivePane, leftTabsRef, rightTabsRef, navigateTo, updateActiveTab, lastConnectedHostRef, sftpSessionsRef],
   );
 
   const navigateUp = useCallback(

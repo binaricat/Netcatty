@@ -34,6 +34,14 @@ test("host and AI provider deletion use in-app confirmation dialogs", () => {
   assert.match(aiSettingsSource, /import \{ ConfirmDialog \} from "\.\.\/\.\.\/ui\/confirm-dialog";/);
   assert.match(aiSettingsSource, /<ConfirmDialog[\s\S]*confirm\.removeProvider/);
   assert.doesNotMatch(functionBody(aiSettingsSource, "handleRemoveProvider"), /window\.confirm|globalThis\.confirm|\bconfirm\(/);
+
+  const cloudSyncControlsSource = readProjectFile("components/cloud-sync/CloudSyncControls.tsx");
+  assert.match(cloudSyncControlsSource, /import \{ ConfirmDialog \} from '\.\.\/ui\/confirm-dialog';/);
+  assert.match(
+    cloudSyncControlsSource,
+    /<ConfirmDialog[\s\S]*cloudSync\.provider\.disconnect\.confirmTitle[\s\S]*onDisconnect/,
+  );
+  assert.doesNotMatch(cloudSyncControlsSource, /window\.confirm|globalThis\.confirm|\bconfirm\(/);
 });
 
 test("delete confirmation dialogs constrain long names", () => {

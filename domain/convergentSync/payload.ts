@@ -1,8 +1,9 @@
-import type {
-  CloudSyncPayloadEntityKey,
-  SyncFileMeta,
-  SyncPayload,
-  SyncReliabilityMeta,
+import {
+  withHostsSanitizedForSync,
+  type CloudSyncPayloadEntityKey,
+  type SyncFileMeta,
+  type SyncPayload,
+  type SyncReliabilityMeta,
 } from '../sync';
 import { dotKey } from './clock';
 import {
@@ -135,9 +136,10 @@ function appendSettingMutations(
 }
 
 export function syncPayloadToConvergentMutations(payload: SyncPayload): ConvergentMutation[] {
+  const sanitized = withHostsSanitizedForSync(payload);
   const mutations: ConvergentMutation[] = [];
   for (const collection of CONVERGENT_ENTITY_COLLECTIONS) {
-    payloadEntityValues(payload, collection).forEach((value, position) => {
+    payloadEntityValues(sanitized, collection).forEach((value, position) => {
       const id = entityId(collection, value);
       mutations.push({
         kind: 'entity-upsert',
@@ -149,11 +151,11 @@ export function syncPayloadToConvergentMutations(payload: SyncPayload): Converge
     });
   }
   for (const collection of CONVERGENT_STRING_COLLECTIONS) {
-    payloadStringValues(payload, collection).forEach((value, position) => {
+    payloadStringValues(sanitized, collection).forEach((value, position) => {
       mutations.push({ kind: 'string-entry-add', collection, value, position });
     });
   }
-  appendSettingMutations(payload.settings, [], mutations);
+  appendSettingMutations(sanitized.settings, [], mutations);
   return mutations;
 }
 

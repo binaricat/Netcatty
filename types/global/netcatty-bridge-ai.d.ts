@@ -4,7 +4,7 @@ declare global {
   interface NetcattyBridge {
     // AI / external agents
     aiSyncProviders?(providers: Array<{ id: string; providerId: string; apiKey?: string; baseURL?: string; enabled: boolean }>): Promise<{ ok: boolean }>;
-    aiChatStream?(requestId: string, url: string, headers?: Record<string, string>, body?: string, providerId?: string): Promise<{ ok: boolean; statusCode?: number; statusText?: string; error?: string }>;
+    aiChatStream?(requestId: string, url: string, headers?: Record<string, string>, body?: string, providerId?: string, idleTimeoutMs?: number): Promise<{ ok: boolean; statusCode?: number; statusText?: string; error?: string; aborted?: boolean }>;
     aiChatCancel?(requestId: string): Promise<boolean>;
     aiFetch?(url: string, method?: string, headers?: Record<string, string>, body?: string, providerId?: string, skipHostCheck?: boolean, followRedirects?: boolean, skipTLSVerify?: boolean): Promise<{ ok: boolean; status?: number; data: string; error?: string }>;
     aiAllowlistAddHost?(baseURL: string): Promise<{ ok: boolean; error?: string }>;
@@ -181,6 +181,14 @@ declare global {
     aiUserSkillsBuildContext?(prompt: string, selectedSkillSlugs?: string[]): Promise<{
       ok: boolean;
       context?: string;
+      error?: string;
+    }>;
+    aiSkillsCliGetInvocation?(): Promise<{
+      ok: boolean;
+      skillPath?: string | null;
+      commandPrefix?: string;
+      launcherPath?: string | null;
+      usesLauncher?: boolean;
       error?: string;
     }>;
     aiSdkAgentStream?(requestId: string, chatSessionId: string, sdkBackend: string, prompt: string, cwd?: string, providerId?: string, model?: string, existingSessionId?: string, historyMessages?: Array<{ role: 'user' | 'assistant'; content: string }>, images?: Array<{ base64Data: string; mediaType: string; filename?: string; filePath?: string }>, toolIntegrationMode?: 'mcp' | 'skills', defaultTargetSession?: { sessionId: string; hostname: string; label: string; os?: string; username?: string; protocol?: string; shellType?: string; deviceType?: string; connected: boolean; source: 'scope-target' | 'only-connected-in-scope' }, userSkillsContext?: string, agentEnv?: Record<string, string>, agentCommand?: string, codexRuntime?: 'sdk' | 'app-server', permissionMode?: 'observer' | 'confirm' | 'auto', codebuddyOptions?: CodebuddyAdvancedOptions): Promise<{ ok: boolean; error?: string }>;

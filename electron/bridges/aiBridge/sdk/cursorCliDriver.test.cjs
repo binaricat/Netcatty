@@ -40,6 +40,7 @@ test("resolveCursorCliModel defaults to auto", () => {
   assert.equal(resolveCursorCliModel(undefined), "auto");
   assert.equal(resolveCursorCliModel(""), "auto");
   assert.equal(resolveCursorCliModel("composer-2.5"), "composer-2.5");
+  assert.equal(resolveCursorCliModel("gpt-5/high"), "gpt-5?effort=high");
 });
 
 test("stripCursorApiKeyFromEnv removes CURSOR_API_KEY", () => {

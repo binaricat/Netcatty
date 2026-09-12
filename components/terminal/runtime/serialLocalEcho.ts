@@ -1,5 +1,3 @@
-import { getCharDisplayWidth } from '../../../domain/serialCharMetrics';
-
 function normalizeSerialLocalEchoLineEndings(data: string): string {
   let output = "";
   for (let i = 0; i < data.length; i += 1) {
@@ -32,12 +30,4 @@ export function formatSerialLocalEcho(data: string, backspaceCells?: number): st
     return normalizeSerialLocalEchoLineEndings(data);
   }
   return "";
-}
-
-/**
- * Convenience: given the character about to be deleted, compute the number
- * of cells its local echo should erase.
- */
-export function backspaceCellsForChar(char: string): number {
-  return getCharDisplayWidth(char);
 }

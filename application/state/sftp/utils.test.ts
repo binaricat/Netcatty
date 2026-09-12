@@ -7,6 +7,7 @@ import {
   getSftpBreadcrumbSegments,
   getSftpFilterAfterPathChange,
   getSftpFilterAfterPathChangeError,
+  getSftpPathRoot,
   isConcreteTransferTargetPath,
   isSftpDescendantPath,
   isWindowsRoot,
@@ -322,4 +323,19 @@ test("SFTP filter restores when changed-directory navigation fails", () => {
 
 test("SFTP filter preserves in-flight edits when same-directory refresh fails", () => {
   assert.equal(getSftpFilterAfterPathChangeError(false, "log", "typed-while-loading"), "typed-while-loading");
+});
+
+test("getSftpPathRoot resolves the filesystem root for breadcrumb navigation", () => {
+  assert.equal(getSftpPathRoot("/var/www"), "/");
+  assert.equal(getSftpPathRoot("/"), "/");
+  assert.equal(getSftpPathRoot("//srv/share/logs"), "/");
+  assert.equal(getSftpPathRoot("C:\\Users\\alice"), "C:\\");
+  assert.equal(getSftpPathRoot("D:/"), "D:\\");
+  assert.equal(getSftpPathRoot("\\\\server\\share\\folder"), "\\\\server\\share");
+  // Forward-slash //host/share stays POSIX unless UNC is explicitly accepted.
+  assert.equal(getSftpPathRoot("//srv/share/logs"), "/");
+  assert.equal(
+    getSftpPathRoot("//srv/share/logs", { acceptForwardSlashUnc: true }),
+    "\\\\srv\\share",
+  );
 });

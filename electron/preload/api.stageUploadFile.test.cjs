@@ -219,3 +219,36 @@ test("openSftpForSession keeps the SSH source session id when options include an
   assert.equal(invoked[0].payload.sessionId, "ssh-session-1");
   assert.equal(invoked[0].payload.expectedEndpoint.sessionId, "sftp-left-browse-session");
 });
+
+test("strict openSftpForSession closes and rejects a mismatched source result", async () => {
+  const invoked = [];
+  const api = createPreloadApi({
+    webUtils: {},
+    ipcRenderer: {
+      on() {},
+      removeListener() {},
+      async invoke(channel, payload) {
+        invoked.push({ channel, payload });
+        if (channel === "netcatty:sftp:openForSession") {
+          return { sftpId: "wrong-route-sftp", sourceSessionId: "other-session" };
+        }
+        return { success: true };
+      },
+    },
+  });
+
+  await assert.rejects(
+    api.openSftpForSession("requested-session", {
+      hostname: "target.example",
+      username: "alice",
+      requireExactSourceSession: true,
+    }),
+    /requested terminal connection is no longer available/,
+  );
+
+  assert.equal(invoked[0].payload.requireExactSourceSession, true);
+  assert.deepEqual(invoked[1], {
+    channel: "netcatty:sftp:close",
+    payload: { sftpId: "wrong-route-sftp" },
+  });
+});

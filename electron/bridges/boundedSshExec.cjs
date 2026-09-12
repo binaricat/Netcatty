@@ -14,6 +14,11 @@ function terminateSshExecStream(stream) {
   // exception; the stream is terminal and will be collected with this listener.
   try { stream.once?.("error", () => {}); } catch { /* ignore */ }
   try { stream.stderr?.once?.("error", () => {}); } catch { /* ignore */ }
+  // Best-effort: ask the server to KILL the exec'd process before tearing the
+  // channel down. Servers that do not answer "signal" requests simply ignore
+  // it, so this only ever helps — some sshd builds otherwise leave the remote
+  // command running after the client gives up (#3187).
+  try { stream.signal?.("KILL"); } catch { /* ignore */ }
   try { stream.close?.(); } catch { /* ignore */ }
   try { stream.end?.(); } catch { /* ignore */ }
   try { stream.destroy?.(); } catch { /* ignore */ }
@@ -158,7 +163,7 @@ function executeBoundedSshCommand(sshClient, command, options = {}) {
       terminate: true,
       // Before the callback arrives ssh2 owns an uncancellable channel-open
       // request. Closing the physical transport is the only public cleanup.
-      invalidateTransport: !streamRef,
+      invalidateTransport: !streamRef && options.invalidateTransportOnAbort !== false,
     });
     const append = (target, chunk) => {
       if (settled) return;

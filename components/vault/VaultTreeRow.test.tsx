@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { JSDOM } from "jsdom";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
@@ -68,6 +69,20 @@ test("VaultTreeItemRow exposes shared selected item state", () => {
   assert.match(markup, /Failover checklist/);
 });
 
+test("VaultTree rows can tighten the icon-to-label gap per surface", () => {
+  const groupMarkup = renderToStaticMarkup(
+    <VaultTreeGroupRow name="Production" depth={0} iconClassName="mr-1" />,
+  );
+  const itemMarkup = renderToStaticMarkup(
+    <VaultTreeItemRow label="Failover checklist" depth={0} iconClassName="mr-1" />,
+  );
+
+  assert.match(groupMarkup, /<div class="flex shrink-0 items-center[^"]*mr-1">/);
+  assert.match(itemMarkup, /<div class="flex shrink-0 items-center[^"]*mr-1">/);
+  assert.doesNotMatch(groupMarkup, /<div class="[^"]*mr-2[^"]*flex shrink-0/);
+  assert.doesNotMatch(itemMarkup, /<div class="[^"]*mr-2[^"]*flex shrink-0/);
+});
+
 test("VaultTree labels use CJK-safe line-height under truncate", () => {
   const groupMarkup = renderToStaticMarkup(
     <VaultTreeGroupRow name="服务器配置" depth={0} count={1} />,
@@ -81,6 +96,29 @@ test("VaultTree labels use CJK-safe line-height under truncate", () => {
   assert.doesNotMatch(groupMarkup, /leading-none/);
   assert.match(itemMarkup, /leading-5/);
   assert.doesNotMatch(itemMarkup, /leading-none/);
+  assert.match(groupMarkup, /flex min-w-0 flex-1 items-center/);
+  assert.match(itemMarkup, /min-w-0 flex-1 truncate leading-5/);
+  assert.match(groupMarkup, /min-w-0 truncate translate-y-px/);
+  assert.match(itemMarkup, /min-w-0 flex-1 truncate leading-5 translate-y-px/);
+  assert.doesNotMatch(groupMarkup, /-translate-y-px/);
+  assert.doesNotMatch(itemMarkup, /-translate-y-px/);
+});
+
+test("VaultTreeItemRow does not clip the inline rename input", () => {
+  const markup = renderToStaticMarkup(
+    <VaultTreeItemRow
+      label="机器安全检查报告"
+      depth={0}
+      editing={true}
+      onRenameCommit={() => undefined}
+      onRenameCancel={() => undefined}
+    />,
+  );
+
+  const document = new JSDOM(markup).window.document;
+  const input = document.querySelector<HTMLInputElement>('[data-vault-tree-inline-edit="true"]');
+  assert.ok(input);
+  assert.equal(input.parentElement?.classList.contains("h-5"), false);
 });
 
 test("VaultTree labels expose full title and keep actions from shrinking", () => {
@@ -103,7 +141,7 @@ test("VaultTree labels expose full title and keep actions from shrinking", () =>
   assert.match(groupMarkup, /min-w-0 truncate/);
   assert.match(groupMarkup, /shrink-0[^>]*>[\s\S]*data-row-action="menu"/);
   assert.match(itemMarkup, /title="Security Audit Report - 完整版"/);
-  assert.match(itemMarkup, /min-w-0 truncate leading-5/);
+  assert.match(itemMarkup, /min-w-0 flex-1 truncate leading-5/);
   assert.match(itemMarkup, /shrink-0[^>]*>[\s\S]*data-row-action="menu"/);
 });
 

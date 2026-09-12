@@ -102,6 +102,49 @@ test("assertUploadEndpointUnchanged allows same-host reconnect with new connecti
   ));
 });
 
+test("a strict upload pin rejects a same-endpoint connection replacement", () => {
+  const map = new Map<string, string>([
+    ["conn-old", "key-a"],
+    ["conn-new", "key-a"],
+  ]);
+  const expected = captureUploadEndpoint(
+    pane({ id: "t", connectionId: "conn-old", hostId: "host-a" }).connection!,
+    map,
+    { pinConnectionId: true },
+  );
+  assert.throws(() => assertUploadEndpointUnchanged(
+    pane({ id: "t", connectionId: "conn-new", hostId: "host-a" }).connection!,
+    expected,
+    map,
+  ), /Upload target changed/);
+});
+
+test("a slow strict upload probe cannot continue after its tab is rebound", async () => {
+  const map = new Map<string, string>([
+    ["conn-old", "key-a"],
+    ["conn-new", "key-a"],
+  ]);
+  let livePane = pane({ id: "t", connectionId: "conn-old", hostId: "host-a" });
+  const expected = captureUploadEndpoint(livePane.connection!, map, {
+    pinConnectionId: true,
+  });
+  let resolveProbe!: () => void;
+  const probe = new Promise<void>((resolve) => { resolveProbe = resolve; });
+  let uploadCreated = false;
+  const start = async () => {
+    await probe;
+    assertUploadEndpointUnchanged(livePane.connection!, expected, map);
+    uploadCreated = true;
+  };
+
+  const pending = start();
+  livePane = pane({ id: "t", connectionId: "conn-new", hostId: "host-a" });
+  resolveProbe();
+
+  await assert.rejects(pending, /Upload target changed/);
+  assert.equal(uploadCreated, false);
+});
+
 test("carried endpoint pin rejects a retargeted tab mid multi-folder upload", () => {
   // Simulate paste-time pin for host-a; later folder call resolves tab on host-b.
   const mapAtPaste = new Map<string, string>([["conn-1", "key-a"]]);

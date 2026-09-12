@@ -11,6 +11,9 @@ const { createSshConnExecProbe } = require("../ai/sessionShellKind.cjs");
 const { orderSshIdentityNames, SSH_KEY_PATTERN } = require("../sshAuthHelper.cjs");
 const { fanoutSessionExit } = require("../terminalAttachRestore.cjs");
 const {
+  isUntrustedTerminalInputPrompt,
+} = require("../../../domain/terminalPromptSecurity.shared.cjs");
+const {
   buildAuthoritativeKnownHostsContent,
   buildExternalHostKeySshOptions,
   vaultPinsConnectionHosts,
@@ -78,36 +81,46 @@ function createMoshSessionApi(ctx) {
     function isMoshPasswordPrompt(tail) {
       return /(^|[\r\n]).*password:\s*$/i.test(stripMoshPromptControls(tail));
     }
+
+    function isMoshHostKeyConfirmationPrompt(tail) {
+      return /are you sure you want to continue connecting \(yes\/no(?:\/\[fingerprint\])?\)\?\s*$/i
+        .test(stripMoshPromptControls(tail));
+    }
+
+    function isMoshMfaPrompt(tail) {
+      return /(?:verification code|one[- ]time (?:password|code)|otp|passcode|authentication code|duo passcode|token):\s*$/i
+        .test(stripMoshPromptControls(tail));
+    }
     
     function createMoshSshPasswordResponder(sshPty, password, passphrase) {
-      if (
-        (typeof password !== "string" || password.length === 0) &&
-        (typeof passphrase !== "string" || passphrase.length === 0)
-      ) {
-        return () => {};
-      }
-    
       let answeredPassword = false;
       let answeredPassphrase = false;
       let tail = "";
     
       return (chunk) => {
-        if (answeredPassword && answeredPassphrase) return;
         const text = Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk || "");
-        if (!text) return;
+        if (!text) return false;
     
         tail = (tail + text).slice(-512);
-        if (typeof passphrase === "string" && passphrase.length > 0 && !answeredPassphrase && isMoshPassphrasePrompt(tail)) {
+        const passphrasePrompt = isMoshPassphrasePrompt(tail);
+        const mfaPrompt = isMoshMfaPrompt(tail);
+        const passwordPrompt = !mfaPrompt && isMoshPasswordPrompt(tail);
+        if (typeof passphrase === "string" && passphrase.length > 0 && !answeredPassphrase && passphrasePrompt) {
           answeredPassphrase = true;
           sshPty.write(`${passphrase}\r`);
-          return;
+          return false;
         }
     
-        if (typeof password !== "string" || password.length === 0 || answeredPassword) return;
-        if (!isMoshPasswordPrompt(tail)) return;
-    
-        answeredPassword = true;
-        sshPty.write(`${password}\r`);
+        if (typeof password === "string" && password.length > 0 && !answeredPassword && passwordPrompt) {
+          answeredPassword = true;
+          sshPty.write(`${password}\r`);
+          return false;
+        }
+
+        return passphrasePrompt
+          || passwordPrompt
+          || isMoshHostKeyConfirmationPrompt(tail)
+          || isUntrustedTerminalInputPrompt(tail);
       };
     }
     
@@ -613,8 +626,11 @@ function createMoshSessionApi(ctx) {
         if (visible && (visible.length || (typeof visible === "string" && visible))) {
           const str = Buffer.isBuffer(visible) ? visible.toString("utf8") : visible;
           if (str.length > 0) {
-            respondToPasswordPrompt(str);
-            bufferData(str);
+            const requiresUserInput = respondToPasswordPrompt(str);
+            bufferData(
+              str,
+              requiresUserInput ? { moshHandshakeRequiresUserInput: true } : undefined,
+            );
             sessionLogStreamManager.appendData(sessionId, str);
           }
         }

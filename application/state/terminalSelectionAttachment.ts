@@ -1,4 +1,8 @@
 import type { ChatMessageAttachment, UploadedFile } from "../../infrastructure/ai/types";
+import {
+  formatVaultNoteReferences,
+  isVaultNoteAttachment,
+} from "./vaultNoteAttachment";
 
 export const TERMINAL_SELECTION_ATTACHMENT_MEDIA_TYPE = "text/plain";
 
@@ -81,6 +85,16 @@ export function isTerminalSelectionAttachment(
   return attachment.terminalSelection === true;
 }
 
+/**
+ * Attachments whose text is inlined into the prompt instead of being sent as
+ * file parts: terminal selections and Vault note mentions.
+ */
+export function isInlineTextAttachment(
+  attachment: Pick<ChatMessageAttachment | UploadedFile, "terminalSelection" | "vaultNoteId">,
+): boolean {
+  return isTerminalSelectionAttachment(attachment) || isVaultNoteAttachment(attachment);
+}
+
 export function buildPromptWithTerminalSelectionAttachments(
   prompt: string,
   attachments: Array<ChatMessageAttachment | UploadedFile>,
@@ -95,7 +109,11 @@ export function buildPromptWithTerminalSelectionAttachments(
     })
     .filter((block): block is string => block !== null);
 
-  if (terminalBlocks.length === 0) return prompt;
-  if (!prompt.trim()) return terminalBlocks.join("").trimStart();
-  return `${prompt}${terminalBlocks.join("")}`;
+  const notes = attachments.filter(isVaultNoteAttachment);
+  const noteBlocks = notes.length ? [`\n\n${formatVaultNoteReferences(notes)}`] : [];
+
+  const blocks = [...terminalBlocks, ...noteBlocks];
+  if (blocks.length === 0) return prompt;
+  if (!prompt.trim()) return blocks.join("").trimStart();
+  return `${prompt}${blocks.join("")}`;
 }

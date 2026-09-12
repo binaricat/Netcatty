@@ -1,4 +1,4 @@
-import { classifyDistroId } from './host';
+import { classifyDistroId, resolveHostOs } from './host';
 import type { PortForwardingRule } from './models';
 import type { Host, TerminalSession } from '../types';
 
@@ -83,7 +83,7 @@ export const buildAITerminalSessionInfo = (
     hostId: session?.hostId || '',
     hostname: host?.hostname || session?.hostname || '',
     label: host?.label || session?.hostLabel || '',
-    os: host?.os || (isLocalSession ? localOs : undefined),
+    os: isLocalSession ? localOs : resolveHostOs(host),
     username: host?.username || session?.username,
     protocol,
     shellType: session?.shellType && session.shellType !== 'unknown' ? session.shellType : undefined,

@@ -24,6 +24,15 @@ interface ContextTarget {
   entry: SftpFileEntry;
   entryPath: string;
 }
+
+export const getSftpTreeEntryOpenAction = (
+  entry: SftpFileEntry,
+): 'up' | 'navigate' | 'open' => {
+  if (entry.name === '..') return 'up';
+  if (isNavigableDirectory(entry)) return 'navigate';
+  return 'open';
+};
+
 export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
   pane,
   side,
@@ -400,8 +409,13 @@ export const SftpPaneTreeView = React.memo<SftpPaneTreeViewProps>(({
     lastClickedPathRef.current = entryPath;
   }, [focusTreeContainer, pane.id]);
   const openTreeEntry = useCallback((entry: SftpFileEntry, entryPath: string) => {
-    if (entry.name === '..') {
+    const action = getSftpTreeEntryOpenAction(entry);
+    if (action === 'up') {
       onNavigateUpRef.current();
+      return;
+    }
+    if (action === 'navigate') {
+      onNavigateToRef.current(entryPath);
       return;
     }
     onOpenEntryRef.current(entry, entryPath);

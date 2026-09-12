@@ -181,6 +181,14 @@ export function TerminalLayerTabBridge({ stableRef }: { stableRef: StableRef }) 
       ?? null
     )
     : null;
+  const activeTerminalCwdSource = linkedTerminalSessionIdForSftp
+    ? (
+      terminalCwdStore.getSource(linkedTerminalSessionIdForSftp)
+      ?? s.terminalRendererCwdSourceBySessionRef.current.get(linkedTerminalSessionIdForSftp)
+    )
+    : undefined;
+  const activeTerminalCwdTrusted = activeTerminalCwdSource === 'osc7'
+    || activeTerminalCwdSource === 'backend-strict';
   void terminalCwdVersion;
 
   const historySessionId = effectiveFocusedSessionId;
@@ -252,6 +260,7 @@ export function TerminalLayerTabBridge({ stableRef }: { stableRef: StableRef }) 
     sftpActiveHost,
     activeTerminalSessionIdForSftp,
     activeTerminalCwd,
+    activeTerminalCwdTrusted,
     activeWorkspace,
     activeTerminalSessionForSystem: activeTerminalSessionForSystem ?? null,
     activeSystemSessionHost,
@@ -270,6 +279,7 @@ export function TerminalLayerTabBridge({ stableRef }: { stableRef: StableRef }) 
   }), [
     activeSystemSessionHost,
     activeTerminalCwd,
+    activeTerminalCwdTrusted,
     activeTerminalSessionForSystem,
     activeTerminalSessionIdForSftp,
     activeWorkspace,
@@ -405,6 +415,7 @@ export function TerminalLayerTabBridge({ stableRef }: { stableRef: StableRef }) 
     activeSidePanelLayout,
     activeTabId,
     activeTerminalCwd,
+    activeTerminalCwdTrusted,
     activeTerminalSessionIdForSftp,
     activeWorkspace,
     AIChatPanelsHost: s.AIChatPanelsHost,
@@ -437,6 +448,10 @@ export function TerminalLayerTabBridge({ stableRef }: { stableRef: StableRef }) 
     handleHistoryDelete: s.handleHistoryDelete,
     handleHistoryRun: s.handleHistoryRun,
     handleFocusSidePanelPane: s.handleFocusSidePanelPane,
+    handleMagnifySidePanelPane: s.handleMagnifySidePanelPane,
+    handleRestoreMagnifiedPane: s.handleRestoreMagnifiedPane,
+    handleMagnifyTerminalPane: s.handleMagnifyTerminalPane,
+    handleTerminalPaneInteraction: s.handleTerminalPaneInteraction,
     handleSplitSidePanelPane: s.handleSplitSidePanelPane,
     handleCloseSidePanelPane: s.handleCloseSidePanelPane,
     handleResizeSidePanelSplit: s.handleResizeSidePanelSplit,
@@ -521,6 +536,7 @@ export function TerminalLayerTabBridge({ stableRef }: { stableRef: StableRef }) 
     keys: s.keys,
     knownHosts: s.knownHosts,
     MessageSquare: s.MessageSquare,
+    magnifiedPane: s.magnifiedPane,
     mountedAiTabIds: s.mountedAiTabIds,
     mountedSftpTabIds: s.mountedSftpTabIds,
     notesMountedTabIds: s.notesMountedTabIds,
@@ -535,6 +551,7 @@ export function TerminalLayerTabBridge({ stableRef }: { stableRef: StableRef }) 
     onReorderWorkspaceSessions: s.onReorderWorkspaceSessions,
     onReorderTabs: s.onReorderTabs,
     onCopySession: s.onCopySession,
+    onDuplicateSession: s.onDuplicateSession,
     onCopySessionToNewWindow: s.onCopySessionToNewWindow,
     onUpdateSessionRestoreCwd: s.onUpdateSessionRestoreCwd,
     onUpdateSessionDynamicTitle: s.onUpdateSessionDynamicTitle,
@@ -618,6 +635,9 @@ export function TerminalLayerTabBridge({ stableRef }: { stableRef: StableRef }) 
     validAIScopeTargetIds: s.validAIScopeTargetIds,
     workspaceBroadcastHandlersRef: s.workspaceBroadcastHandlersRef,
     workspaceById,
+    isGlobalBroadcastEnabled: s.isGlobalBroadcastEnabled,
+    canUseGlobalBroadcast: s.canUseGlobalBroadcast,
+    onToggleGlobalBroadcast: s.onToggleGlobalBroadcastRef.current,
     // AI scope maintenance (merge/dissolve handoff) needs the full list; do not
     // rely on workspaceById alone — SidePanelStateRoot reads ctx.workspaces.
     workspaces: s.workspaces,
@@ -637,6 +657,7 @@ export function TerminalLayerTabBridge({ stableRef }: { stableRef: StableRef }) 
     activeSidePanelTab,
     activeTabId,
     activeTerminalCwd,
+    activeTerminalCwdTrusted,
     activeTerminalSessionIdForSftp,
     activeWorkspace,
     aiContextsByTabId,
@@ -652,6 +673,7 @@ export function TerminalLayerTabBridge({ stableRef }: { stableRef: StableRef }) 
     isFocusMode,
     isSidePanelOpenForCurrentTab,
     isTerminalLayerVisible,
+    s.magnifiedPane,
     resizing,
     resolveAIExecutorContext,
     sessionHostsMap,
@@ -672,6 +694,9 @@ export function TerminalLayerTabBridge({ stableRef }: { stableRef: StableRef }) 
     s.terminalTheme,
     s.resolveSessionAppearance,
     s.hostMap,
+    s.isGlobalBroadcastEnabled,
+    s.canUseGlobalBroadcast,
+    s.onToggleGlobalBroadcastRef,
   ]);
 
   return <TerminalLayerView ctx={ctx} />;

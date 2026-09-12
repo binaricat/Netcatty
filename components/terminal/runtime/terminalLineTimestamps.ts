@@ -1501,6 +1501,23 @@ export const resetTerminalLineTimestamps = (term: XTerm) => {
   resetTimestampStore(getTimestampStore(term));
 };
 
+/**
+ * Reconnect-style reattach on a reused terminal: the xterm buffer (including
+ * scrollback preserved by the reconnect flow) survives the previous session,
+ * so keep ledger stamps anchored to that history and only reset per-session
+ * recording state (segmenter line tracking, same-second gate, pending prefix).
+ * A full reset here would leave preserved scrollback rows without timestamps.
+ */
+export const resetTerminalLineTimestampRecordingState = (term: XTerm): void => {
+  const store = getTimestampStore(term);
+  store.segmenter.reset();
+  store.timestampOnlyPrefix = "";
+  store.lastStampSecondKey = null;
+  store.recordsSincePrune = 0;
+  store.disposedPendingCompact = 0;
+  notifyTimestampStore(store);
+};
+
 export const onTerminalLineTimestampsChange = (
   term: XTerm,
   listener: () => void,

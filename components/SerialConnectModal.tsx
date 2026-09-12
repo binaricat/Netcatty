@@ -68,7 +68,7 @@ export const SerialConnectModal: React.FC<SerialConnectModalProps> = ({
   const [localEcho, setLocalEcho] = useState(false);
   const [lineMode, setLineMode] = useState(false);
   const [backspaceBehavior, setBackspaceBehavior] = useState<SerialConfig['backspaceBehavior']>('default');
-  const [byteOrientedBackspace, setByteOrientedBackspace] = useState(true);
+  const [byteOrientedBackspace, setByteOrientedBackspace] = useState(false);
   const [charset, setCharset] = useState('UTF-8');
 
   // Save configuration state

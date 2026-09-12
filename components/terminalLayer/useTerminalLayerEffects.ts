@@ -24,6 +24,7 @@ import {
 import { AI_PANEL_FORCE_HIDE_SHELL } from '../ai/aiPanelDiagnostics';
 import { toast } from '../ui/toast';
 import { getTerminalSidePanelShellWidth } from './TerminalLayerSidePanelSection';
+import type { RendererCwdSource } from '../terminal/sftpCwd';
 
 type TerminalLayerEffectsContext = Record<string, any> & {
   sftpPaneClosedTabIdsRef: MutableRefObject<Set<string>>;
@@ -33,6 +34,7 @@ type RuntimeStateRef<T> = { current: Map<string, T> };
 
 export type TerminalSessionRuntimeState = {
   terminalRendererCwdBySessionRef: RuntimeStateRef<string>;
+  terminalRendererCwdSourceBySessionRef?: RuntimeStateRef<RendererCwdSource>;
   terminalOsc7SignalBySessionRef: RuntimeStateRef<number>;
   cwdProbeGenerationRef: RuntimeStateRef<number>;
   cwdProbeCancelersRef: RuntimeStateRef<() => void>;
@@ -48,6 +50,7 @@ export function clearTerminalSessionRuntimeState(
   state.cwdProbeGenerationRef.current.delete(sessionId);
   state.terminalOsc7SignalBySessionRef.current.delete(sessionId);
   state.terminalRendererCwdBySessionRef.current.delete(sessionId);
+  state.terminalRendererCwdSourceBySessionRef?.current.delete(sessionId);
 
   // Keep terminalCwdStore in sync so SFTP follow does not reuse a closed session path.
   terminalCwdStore.setCwd(sessionId, null);
@@ -67,6 +70,7 @@ export function pruneTerminalSessionRuntimeState(
 ): void {
   const trackedSessionIds = new Set<string>([
     ...state.terminalRendererCwdBySessionRef.current.keys(),
+    ...(state.terminalRendererCwdSourceBySessionRef?.current.keys() ?? []),
     ...state.terminalOsc7SignalBySessionRef.current.keys(),
     ...state.cwdProbeGenerationRef.current.keys(),
     ...state.cwdProbeCancelersRef.current.keys(),

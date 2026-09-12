@@ -74,6 +74,7 @@ if (!process.versions.electron) {
     }).outputFiles[0].text;
 
     const result = await window.webContents.executeJavaScript(`(async () => {
+      try {
       const { Terminal } = require(${JSON.stringify(xtermPath)});
       const { WebglAddon } = require(${JSON.stringify(webglPath)});
       const { SerializeAddon } = require(${JSON.stringify(serializePath)});
@@ -105,8 +106,91 @@ if (!process.versions.electron) {
       }];
       const blueRules = redRules.map(rule => ({ ...rule, color: "#60A5FA" }));
       highlighter.setRules(redRules, true);
+      const originalRecolorRange = highlighter.recolorRange.bind(highlighter);
+      let measuredRecolorRows = 0;
+      let measuredRefreshes = 0;
+      highlighter.recolorRange = (startY, endY, refresh, force) => {
+        measuredRecolorRows += Math.abs(endY - startY) + 1;
+        if (refresh) measuredRefreshes += 1;
+        return originalRecolorRange(startY, endY, refresh, force);
+      };
       const write = data => new Promise(resolve => term.write(data, resolve));
       const waitPaint = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
+      // #3271: inspect the first actual renderer frame for tail -200f and
+      // subsequent coalesced log ticks, before the deferred catch-up can run.
+      let streamingFrames = 0;
+      let uncoloredStreamingFrame = false;
+      const streamingRender = term.onRender(() => {
+        streamingFrames += 1;
+        for (let row = 0; row < term.rows; row += 1) {
+          const line = term.buffer.active.getLine(term.buffer.active.viewportY + row);
+          const column = line?.translateToString(true).indexOf("ERROR") ?? -1;
+          if (column >= 0 && line.getCell(column).getFgColor() !== 0xf87171) {
+            uncoloredStreamingFrame = true;
+          }
+        }
+      });
+      for (const lines of [200, 12, 12, 12]) {
+        const batch = Array.from({ length: lines }, () => "log ERROR").join("\\r\\n") + "\\r\\n";
+        noteTerminalOutputPressureData(term, batch);
+        await write(batch);
+        await waitPaint();
+        await new Promise(resolve => setTimeout(resolve, 120));
+      }
+      streamingRender.dispose();
+      if (uncoloredStreamingFrame) throw new Error("Streaming output rendered before keyword color");
+      if (streamingFrames < 4) throw new Error("Streaming renderer frames were not observed");
+      await highlighter.whenSettled();
+      term.reset();
+
+      await write("row-1 ERROR\\r\\nrow-2 ERROR\\r\\nrow-3 ERROR\\r\\nrow-4 ERROR");
+      await write("\\x1b[1;");
+      await write(
+        "1Hrow-2 ERROR\\x1b[2;1Hrow-3 ERROR"
+          + "\\x1b[3;1Hrow-4 ERROR\\x1b[4;1Hprompt ER",
+      );
+      await write("ROR\\x1b[1;1H");
+      await waitPaint();
+      const moshFrame = serializer.serialize({ scrollback: 0 });
+      const moshHighlightCount = (moshFrame.match(/38;2;248;113;113m/g) || []).length;
+      term.reset();
+
+      const moshRows = 40;
+      const seedMoshRows = async () => {
+        await write(Array.from(
+          { length: moshRows },
+          (_, index) => "old-" + (index + 1) + " ERROR",
+        ).join("\\r\\n"));
+      };
+      const rowFrames = Array.from(
+        { length: moshRows },
+        (_, index) => "\\x1b[" + (index + 1) + ";1Hnew-" + (index + 1)
+          + " ERROR\\x1b[1;1H",
+      );
+      await seedMoshRows();
+      measuredRecolorRows = 0;
+      measuredRefreshes = 0;
+      const mergedMoshStart = performance.now();
+      await write(rowFrames.join(""));
+      await waitPaint();
+      const mergedMoshMs = performance.now() - mergedMoshStart;
+      const mergedMoshRecolorRows = measuredRecolorRows;
+      const mergedMoshRefreshes = measuredRefreshes;
+      term.reset();
+      await seedMoshRows();
+      measuredRecolorRows = 0;
+      measuredRefreshes = 0;
+      const splitMoshStart = performance.now();
+      for (const rowFrame of rowFrames) await write(rowFrame);
+      await waitPaint();
+      const splitMoshMs = performance.now() - splitMoshStart;
+      const splitMoshRecolorRows = measuredRecolorRows;
+      const splitMoshRefreshes = measuredRefreshes;
+      const splitMoshFrame = serializer.serialize({ scrollback: 0 });
+      const splitMoshHighlightCount = (splitMoshFrame.match(/38;2;248;113;113m/g) || []).length;
+      term.reset();
+
       let history = "";
       for (let line = 0; line < 10000; line += 1) {
         history += "2026-08-13 worker=" + (line % 32) + " ERROR failed from 10.2." + (line % 255) + "." + ((line * 7) % 255) + "\\r\\n";
@@ -141,6 +225,14 @@ if (!process.versions.electron) {
       const pristine = highlighter.serializeAddon.serialize({ scrollback: 10000 });
       const state = {
         renderer,
+        moshHighlightCount,
+        mergedMoshMs,
+        mergedMoshRecolorRows,
+        mergedMoshRefreshes,
+        splitMoshMs,
+        splitMoshRecolorRows,
+        splitMoshRefreshes,
+        splitMoshHighlightCount,
         rawChars: history.length,
         initialWriteMs,
         rebuildsBeforeEnter,
@@ -154,11 +246,20 @@ if (!process.versions.electron) {
       highlighter.dispose();
       term.dispose();
       return state;
+      } catch (error) {
+        return { executionError: String(error && (error.stack || error)) };
+      }
     })()`);
 
+    assert.equal(result.executionError, undefined, JSON.stringify(result));
     if (process.env.NETCATTY_TERMINAL_PERF_REQUIRE_WEBGL === "1") {
       assert.equal(result.renderer, "webgl", JSON.stringify(result));
     }
+    assert.ok(result.moshHighlightCount >= 4, JSON.stringify(result));
+    assert.ok(result.splitMoshHighlightCount >= 40, JSON.stringify(result));
+    assert.ok(result.splitMoshRecolorRows <= 80, JSON.stringify(result));
+    assert.ok(result.splitMoshRefreshes <= 80, JSON.stringify(result));
+    assert.ok(result.splitMoshMs < 500, `split Mosh repaint regressed: ${JSON.stringify(result)}`);
     assert.equal(result.enterRebuildCount, result.rebuildsBeforeEnter, JSON.stringify(result));
     assert.equal(result.rebuildCount, result.rebuildsBeforeEnter + 1, JSON.stringify(result));
     assert.ok(result.blueMatchCount >= 10000, JSON.stringify(result));

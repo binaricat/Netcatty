@@ -67,6 +67,7 @@ import { ThemeSidePanel } from './terminal/ThemeSidePanel';
 import { focusTerminalSessionInput } from './terminal/focusTerminalSession';
 import { TerminalComposeBar } from './terminal/TerminalComposeBar';
 import { resolveTerminalFontSizeUpdateTarget } from './terminalLayer/terminalFontSizeUpdate';
+import { resolveTerminalBroadcastTargetIds } from '../domain/terminalBroadcast';
 import {
   AUTO_RUN_SNIPPET_LINE_DELAY_MS,
   shouldDelayAutoRunSnippetInput,
@@ -106,13 +107,24 @@ import {
   resolveTerminalSidePanelAutoOpen,
 } from '../domain/terminalSidePanelAutoOpen';
 import { shouldProbeCommandCwd } from './terminalLayer/commandCwdProbe';
-import { resolvePreferredTerminalCwd, scheduleBackendCwdProbeAfterCommand } from './terminal/sftpCwd';
+import {
+  resolvePreferredTerminalCwd,
+  scheduleBackendCwdProbeAfterCommand,
+  type RendererCwdSource,
+  type TerminalCwdChangeMeta,
+} from './terminal/sftpCwd';
 import { classifyDistroId, shouldProbeSessionCwd } from '../domain/host';
 import {
   collectSidePanelPanes,
   sidePanelLayoutHasTool,
   type SidePanelSplitDirection,
 } from '../domain/sidePanelLayout';
+import {
+  isPaneMagnificationSelectionValid,
+  resolvePaneMagnificationCandidate,
+  type PaneMagnificationController,
+  type PaneMagnificationTarget,
+} from '../domain/paneMagnification';
 import { useTerminalSidePanelLayoutState } from '../application/state/useTerminalSidePanelLayoutState';
 import {
   TERMINAL_SIDE_PANEL_MAX_WIDTH,
@@ -228,12 +240,16 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   onReorderWorkspaceSessions,
   onReorderTabs,
   onCopySession,
+  onDuplicateSession,
   onCopySessionToNewWindow,
   onSplitSession,
   onConnectToHost,
   onCreateLocalTerminal,
   isBroadcastEnabled,
   onToggleBroadcast,
+  isGlobalBroadcastEnabled,
+  onToggleGlobalBroadcast,
+  canUseGlobalBroadcast,
   updateHosts,
   updateSnippets,
   updateSnippetPackages,
@@ -257,12 +273,20 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   showHostTreeSidebar = true,
   toggleScriptsSidePanelRef,
   toggleSidePanelRef,
+  paneMagnificationRef,
   // Session rename props
   onStartSessionRename,
   onSubmitSessionRename,
   onRemoveSessionFromWorkspace,
 }) => {
   const { t } = useI18n();
+  const [magnifiedPane, setMagnifiedPane] = useState<{
+    tabId: string;
+    target: PaneMagnificationTarget;
+  } | null>(null);
+  const magnifiedPaneRef = useRef(magnifiedPane);
+  magnifiedPaneRef.current = magnifiedPane;
+  const lastInteractedPaneRef = useRef<Map<string, PaneMagnificationTarget>>(new Map());
   // Side panel state must be initialized before any callbacks reference its
   // setters or refs in their dependency arrays.
   const {
@@ -277,7 +301,23 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     closePane: closeSidePanelPaneForTab,
     resizeSplit: resizeSidePanelSplitForTab,
   } = useTerminalSidePanelLayoutState();
+  useEffect(() => {
+    setMagnifiedPane((current) => {
+      if (!current) return current;
+      const terminalPanes = sessions.map((session) => ({
+        tabId: session.workspaceId ?? session.id,
+        sessionId: session.id,
+      }));
+      const sidePanelPanes = Array.from(sidePanelLayouts.entries()).flatMap(([tabId, layout]) => (
+        collectSidePanelPanes(layout.root).map((pane) => ({ tabId, paneId: pane.id }))
+      ));
+      return isPaneMagnificationSelectionValid(current, terminalPanes, sidePanelPanes)
+        ? current
+        : null;
+    });
+  }, [sessions, sidePanelLayouts]);
   const terminalRendererCwdBySessionRef = useRef<Map<string, string>>(new Map());
+  const terminalRendererCwdSourceBySessionRef = useRef<Map<string, RendererCwdSource>>(new Map());
   const stableRef = useRef<Record<string, unknown>>({});
   const activeTabIdRef = useRef(activeTabStore.getActiveTabId());
   const activeWorkspaceRef = useRef<Workspace | undefined>(undefined);
@@ -291,6 +331,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     const liveSessionIds = new Set(sessions.map((session) => session.id));
     pruneTerminalSessionRuntimeState({
       terminalRendererCwdBySessionRef,
+      terminalRendererCwdSourceBySessionRef,
       terminalOsc7SignalBySessionRef,
       cwdProbeGenerationRef,
       cwdProbeCancelersRef,
@@ -311,7 +352,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   const handleTerminalCwdChange = useCallback((
     sessionId: string,
     cwd: string | null,
-    meta?: { source?: 'osc7' },
+    meta?: TerminalCwdChangeMeta,
   ) => {
     if (meta?.source === 'osc7') {
       // Bump on every OSC 7 report, even when the decoded path is unchanged.
@@ -324,23 +365,27 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
 
     const currentCwd = terminalRendererCwdBySessionRef.current.get(sessionId) ?? null;
     const nextCwd = cwd && cwd.trim().length > 0 ? cwd : null;
+    const nextCwdSource: RendererCwdSource = meta?.source ?? 'backend';
     if (currentCwd === nextCwd) {
-      // Heal store drift if ref already has this path but the store does not.
-      if (terminalCwdStore.getCwd(sessionId) !== nextCwd) {
-        terminalCwdStore.setCwd(sessionId, nextCwd);
+      if (nextCwd) {
+        terminalRendererCwdSourceBySessionRef.current.set(sessionId, nextCwdSource);
       }
+      // Heal store drift and publish provenance changes even when the path is unchanged.
+      terminalCwdStore.setCwd(sessionId, nextCwd, nextCwd ? nextCwdSource : undefined);
       return;
     }
 
     if (nextCwd) {
       terminalRendererCwdBySessionRef.current.set(sessionId, nextCwd);
+      terminalRendererCwdSourceBySessionRef.current.set(sessionId, nextCwdSource);
     } else {
       terminalRendererCwdBySessionRef.current.delete(sessionId);
+      terminalRendererCwdSourceBySessionRef.current.delete(sessionId);
     }
     onUpdateSessionRestoreCwd?.(sessionId, nextCwd);
     // External store: side-panel live snapshot subscribers update without
     // re-rendering TerminalLayerInner.
-    terminalCwdStore.setCwd(sessionId, nextCwd);
+    terminalCwdStore.setCwd(sessionId, nextCwd, nextCwd ? nextCwdSource : undefined);
   }, [onUpdateSessionRestoreCwd]);
 
   // Stable while only presentation fields (title/provider) change.
@@ -368,6 +413,16 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
 
   // Stable callback references for Terminal components
   const handleCloseSession = useCallback((sessionId: string) => {
+    setMagnifiedPane((current) => (
+      current?.target.kind === 'terminal' && current.target.sessionId === sessionId
+        ? null
+        : current
+    ));
+    for (const [tabId, target] of lastInteractedPaneRef.current) {
+      if (target.kind === 'terminal' && target.sessionId === sessionId) {
+        lastInteractedPaneRef.current.delete(tabId);
+      }
+    }
     clearTerminalSessionRuntimeState({
       terminalRendererCwdBySessionRef,
       terminalOsc7SignalBySessionRef,
@@ -570,7 +625,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     Map<string, { hostId: string; path: string }>
   >(new Map());
   const [sftpPendingUploadsForTab, setSftpPendingUploadsForTab] = useState<
-    Map<string, PendingSftpUpload>
+    Map<string, PendingSftpUpload[]>
   >(new Map());
   const [pendingTerminalSelectionForAI, setPendingTerminalSelectionForAI] =
     useState<PendingTerminalSelectionForAI | null>(null);
@@ -591,11 +646,11 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     host: Host;
     initialPath?: string;
     pendingUploadEntries?: DropEntry[];
-    sourceSessionId?: string | null;
+    originSessionId?: string | null;
   }) => {
-    const { tabId, host, initialPath, pendingUploadEntries, sourceSessionId } = params;
+    const { tabId, host, initialPath, pendingUploadEntries, originSessionId } = params;
     const connectionKey = buildCacheKey(host.id, host.hostname, host.port, host.protocol, host.sftpSudo, host.username, host.sftpFileProtocol);
-    const memoryKey = getSftpReopenMemoryKey({ tabId, sourceSessionId });
+    const memoryKey = getSftpReopenMemoryKey({ tabId, sourceSessionId: originSessionId });
     const effectiveInitialPath = resolveSftpOpenLocation({
       hostId: host.id,
       connectionKey,
@@ -783,17 +838,23 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     setIsComposeBarOpen(prev => !prev);
   }, [setIsComposeBarOpen]);
 
-  const handleOpenSftp = useCallback((host: Host, initialPath?: string, pendingUploadEntries?: DropEntry[], sourceSessionId?: string) => {
+  const handleOpenSftp = useCallback((
+    host: Host,
+    initialPath?: string,
+    pendingUploadEntries?: DropEntry[],
+    originSessionId?: string,
+    sourceSessionId?: string,
+  ) => {
     const tabId = activeTabIdRef.current;
     if (!tabId) return;
 
     // When SFTP is opened from a non-focused workspace pane (toolbar click
     // or drag-drop), switch focus first so the SFTP panel binds to the
-    // correct host.
-    if (sourceSessionId) {
+    // originating terminal.
+    if (originSessionId) {
       const ws = activeWorkspaceRef.current;
-      if (ws && ws.focusedSessionId !== sourceSessionId) {
-        onSetWorkspaceFocusedSessionRef.current?.(ws.id, sourceSessionId);
+      if (ws && ws.focusedSessionId !== originSessionId) {
+        onSetWorkspaceFocusedSessionRef.current?.(ws.id, originSessionId);
       }
     }
 
@@ -854,7 +915,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       host,
       initialPath,
       pendingUploadEntries,
-      sourceSessionId,
+      originSessionId,
     });
 
     setSftpInitialLocationForTab(prev => {
@@ -868,31 +929,47 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     });
 
     setSftpPendingUploadsForTab(prev => {
-      const next = new Map(prev);
       if (!pendingUploadEntries?.length) {
-        // Clear any stale pending upload when opening without new files.
-        next.delete(tabId);
-      } else {
-        next.set(tabId, {
+        // Opening the panel without new files must not discard drops that are
+        // still queued and waiting to upload; leave the queue untouched.
+        // Stale entries are cancelled by the panel itself (with a toast) when
+        // their host/connection no longer matches.
+        return prev;
+      }
+      const next = new Map(prev);
+      // Queue the drop behind any earlier pending request for this tab so a
+      // second drop that arrives before the first has started uploading
+      // cannot silently discard the first batch.
+      const queue = prev.get(tabId) ?? [];
+      next.set(tabId, [
+        ...queue,
+        {
           requestId: crypto.randomUUID(),
           hostId: host.id,
           connectionKey,
+          originSessionId,
+          sourceSessionId,
           targetPath: initialPath,
           entries: pendingUploadEntries,
-        });
-      }
+        },
+      ]);
       return next;
     });
   }, [closeTerminalSidePanelTab, resolveSftpOpenTarget, setSidePanelOpenTabs, sidePanelLayoutsRef, sidePanelOpenTabsRef]);
 
   const handlePendingUploadHandled = useCallback((tabId: string, requestId: string) => {
     setSftpPendingUploadsForTab(prev => {
-      const current = prev.get(tabId);
-      if (!current || current.requestId !== requestId) {
-        return prev;
-      }
+      const queue = prev.get(tabId);
+      if (!queue?.length) return prev;
+      const index = queue.findIndex(item => item.requestId === requestId);
+      if (index === -1) return prev;
       const next = new Map(prev);
-      next.delete(tabId);
+      const remaining = queue.filter((_, itemIndex) => itemIndex !== index);
+      if (remaining.length) {
+        next.set(tabId, remaining);
+      } else {
+        next.delete(tabId);
+      }
       return next;
     });
   }, []);
@@ -976,27 +1053,25 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   const sessionHostsMapRef = useRef(sessionHostsMap);
   sessionHostsMapRef.current = sessionHostsMap;
 
-  // Handle broadcast input - write to all other sessions in the source workspace.
+  // Resolve the active broadcast mode, then write to its target sessions.
   const handleBroadcastInput = useCallback((
     data: string,
     sourceSessionId: string,
     options?: TerminalBroadcastInputOptions,
   ) => {
-    const directTargetIds = options?.kittyKeyboardTargetSessionIds;
-    const sourceSession = directTargetIds
-      ? undefined
-      : sessionsRef.current.find((session) => session.id === sourceSessionId);
-    const workspaceId = sourceSession?.workspaceId;
-    if (!directTargetIds && !workspaceId) return [];
-    const directTargetSet = directTargetIds ? new Set(directTargetIds) : null;
+    const targetSessionIds = resolveTerminalBroadcastTargetIds({
+      sessions: sessionsRef.current,
+      sourceSessionId,
+      globalBroadcastEnabled: isGlobalBroadcastEnabled,
+      directTargetSessionIds: options?.kittyKeyboardTargetSessionIds,
+    });
+    if (targetSessionIds.length === 0) return [];
+
+    const targetSessionIdSet = new Set(targetSessionIds);
     const deliveredSessionIds: string[] = [];
 
     for (const session of sessionsRef.current) {
-      if (directTargetSet) {
-        if (!directTargetSet.has(session.id)) continue;
-      } else if (session.workspaceId !== workspaceId || session.id === sourceSessionId) {
-        continue;
-      }
+      if (!targetSessionIdSet.has(session.id)) continue;
       if (!canUseDirectSessionWriteFallback(session)) continue;
 
       if (options?.kittyKeyboardInput) {
@@ -1034,7 +1109,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       deliveredSessionIds.push(session.id);
     }
     return deliveredSessionIds;
-  }, [terminalBackend]);
+  }, [terminalBackend, isGlobalBroadcastEnabled]);
 
   const handleCommandSubmitted = useCallback((command: string, _hostId: string, _hostLabel: string, sessionId: string) => {
     codingCliSignalController.handleCommandSubmitted(sessionId, command);
@@ -1079,7 +1154,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
         if (cwdProbeGenerationRef.current.get(sessionId) !== probeGeneration) return;
         const existing = terminalRendererCwdBySessionRef.current.get(sessionId);
         if (existing === cwd) return;
-        handleTerminalCwdChange(sessionId, cwd);
+        handleTerminalCwdChange(sessionId, cwd, { source: 'backend-strict' });
       },
     });
     cwdProbeCancelersRef.current.set(sessionId, cancelProbe);
@@ -1092,6 +1167,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   useEffect(() => () => {
     pruneTerminalSessionRuntimeState({
       terminalRendererCwdBySessionRef,
+      terminalRendererCwdSourceBySessionRef,
       terminalOsc7SignalBySessionRef,
       cwdProbeGenerationRef,
       cwdProbeCancelersRef,
@@ -1223,6 +1299,9 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   onToggleBroadcastRef.current = onToggleBroadcast;
   const workspaceBroadcastHandlersRef = useRef<Map<string, () => void>>(new Map());
 
+  const onToggleGlobalBroadcastRef = useRef(onToggleGlobalBroadcast);
+  onToggleGlobalBroadcastRef.current = onToggleGlobalBroadcast;
+
   const mountedSftpTabIds = useMemo(
     () => Array.from(sftpHostForTab.keys()),
     [sftpHostForTab],
@@ -1273,14 +1352,19 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   const getTerminalCwd = useCallback(async (options?: {
     preferFreshBackend?: boolean;
     allowRendererFallback?: boolean;
+    requireActiveShellCwd?: boolean;
   }): Promise<string | null> => {
     const sessionId = getActiveTerminalSessionId();
     return resolvePreferredTerminalCwd({
       rendererCwd: sessionId ? terminalRendererCwdBySessionRef.current.get(sessionId) : undefined,
+      rendererCwdSource: sessionId
+        ? terminalRendererCwdSourceBySessionRef.current.get(sessionId)
+        : undefined,
       sessionId,
       getSessionPwd: (id, options) => terminalBackend.getSessionPwd(id, options),
       preferFreshBackend: options?.preferFreshBackend,
       allowRendererFallback: options?.allowRendererFallback,
+      requireActiveShellCwd: options?.requireActiveShellCwd,
     });
   }, [getActiveTerminalSessionId, terminalBackend]);
 
@@ -1302,6 +1386,11 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   const handleCloseSidePanel = useCallback(() => {
     const activeTabId = activeTabIdRef.current;
     if (!activeTabId) return;
+    setMagnifiedPane((current) => (
+      current?.tabId === activeTabId && current.target.kind === 'side-panel'
+        ? null
+        : current
+    ));
     const sessionIdToRefocus = getActiveTerminalSessionId();
     syncWorkspaceFocusIfNeeded(sessionIdToRefocus);
     closeTerminalSidePanelTab(activeTabId);
@@ -1351,7 +1440,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       const { effectiveInitialPath } = resolveSftpOpenTarget({
         tabId,
         host,
-        sourceSessionId,
+        originSessionId: sourceSessionId,
       });
       setSftpInitialLocationForTab(prev => {
         const next = new Map(prev);
@@ -1394,8 +1483,125 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   const handleFocusSidePanelPane = useCallback((paneId: string) => {
     const tabId = activeTabIdRef.current;
     if (!tabId) return;
+    const layout = sidePanelLayoutsRef.current.get(tabId);
+    const pane = layout
+      ? collectSidePanelPanes(layout.root).find((candidate) => candidate.id === paneId)
+      : undefined;
+    if (pane) {
+      lastInteractedPaneRef.current.set(tabId, {
+        kind: 'side-panel',
+        paneId: pane.id,
+        tool: pane.tool,
+      });
+    }
     focusSidePanelPaneForTab(tabId, paneId);
-  }, [focusSidePanelPaneForTab]);
+  }, [focusSidePanelPaneForTab, sidePanelLayoutsRef]);
+
+  const handleTerminalPaneInteraction = useCallback((tabId: string, sessionId: string) => {
+    lastInteractedPaneRef.current.set(tabId, { kind: 'terminal', sessionId });
+  }, []);
+
+  const handleMagnifyTerminalPane = useCallback((tabId: string, sessionId: string) => {
+    const target: PaneMagnificationTarget = { kind: 'terminal', sessionId };
+    lastInteractedPaneRef.current.set(tabId, target);
+    setMagnifiedPane((current) => (
+      current?.tabId === tabId
+      && current.target.kind === 'terminal'
+      && current.target.sessionId === sessionId
+        ? null
+        : { tabId, target }
+    ));
+  }, []);
+
+  const handleMagnifySidePanelPane = useCallback((paneId: string) => {
+    const tabId = activeTabIdRef.current;
+    if (!tabId) return;
+    const layout = sidePanelLayoutsRef.current.get(tabId);
+    const pane = layout
+      ? collectSidePanelPanes(layout.root).find((candidate) => candidate.id === paneId)
+      : undefined;
+    if (!pane) return;
+    const target: PaneMagnificationTarget = {
+      kind: 'side-panel',
+      paneId: pane.id,
+      tool: pane.tool,
+    };
+    lastInteractedPaneRef.current.set(tabId, target);
+    setMagnifiedPane((current) => (
+      current?.tabId === tabId
+      && current.target.kind === 'side-panel'
+      && current.target.paneId === paneId
+        ? null
+        : { tabId, target }
+    ));
+  }, [sidePanelLayoutsRef]);
+
+  const handleRestoreMagnifiedPane = useCallback(() => {
+    const tabId = activeTabIdRef.current;
+    setMagnifiedPane((current) => current?.tabId === tabId ? null : current);
+  }, []);
+
+  useEffect(() => {
+    if (!paneMagnificationRef) return undefined;
+    const getTarget = (): { tabId: string; target: PaneMagnificationTarget; focused: boolean } | null => {
+      const tabId = activeTabStore.getActiveTabId();
+      if (!tabId) return null;
+      const workspace = workspacesRef.current.find((candidate) => candidate.id === tabId);
+      const hasCurrentMagnification = magnifiedPaneRef.current?.tabId === tabId;
+      if (workspace?.viewMode === 'focus' && !hasCurrentMagnification) return null;
+      const workspaceSessionIds = workspace ? collectSessionIds(workspace.root) : [];
+      const standaloneSession = sessionsRef.current.find((candidate) => (
+        candidate.id === tabId && !candidate.workspaceId
+      ));
+      const terminalSessionIds = workspaceSessionIds.length > 0
+        ? workspaceSessionIds
+        : standaloneSession ? [standaloneSession.id] : [];
+      const layout = sidePanelLayoutsRef.current.get(tabId);
+      const sidePanelPanes = layout ? collectSidePanelPanes(layout.root) : [];
+      const focusedSidePanelPane = sidePanelPanes.find((candidate) => (
+        candidate.id === layout?.focusedPaneId
+      ));
+      const candidate = resolvePaneMagnificationCandidate({
+        tabId,
+        terminalSessionIds,
+        focusedSessionId: workspace?.focusedSessionId,
+        sidePanelPanes: focusedSidePanelPane
+          ? [focusedSidePanelPane, ...sidePanelPanes.filter((pane) => pane !== focusedSidePanelPane)]
+          : sidePanelPanes,
+        lastTarget: lastInteractedPaneRef.current.get(tabId),
+        current: magnifiedPaneRef.current,
+      });
+      return candidate ? { tabId, ...candidate } : null;
+    };
+    const controller: PaneMagnificationController = {
+      getState: () => {
+        const target = getTarget();
+        return target ? (target.focused ? 'focused' : 'focusable') : 'unavailable';
+      },
+      focus: () => {
+        const target = getTarget();
+        if (!target || target.focused) return false;
+        setMagnifiedPane({ tabId: target.tabId, target: target.target });
+        return true;
+      },
+      restore: () => {
+        const target = getTarget();
+        if (!target?.focused) return false;
+        setMagnifiedPane(null);
+        return true;
+      },
+      toggle: () => {
+        const target = getTarget();
+        if (!target) return false;
+        setMagnifiedPane(target.focused ? null : { tabId: target.tabId, target: target.target });
+        return true;
+      },
+    };
+    paneMagnificationRef.current = controller;
+    return () => {
+      if (paneMagnificationRef.current === controller) paneMagnificationRef.current = null;
+    };
+  }, [paneMagnificationRef, sidePanelLayoutsRef]);
 
   const handleSplitSidePanelPane = useCallback((
     tool: SidePanelTab,
@@ -1421,6 +1627,13 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     const closingPane = layout
       ? collectSidePanelPanes(layout.root).find((pane) => pane.id === paneId)
       : undefined;
+    setMagnifiedPane((current) => (
+      current?.tabId === tabId
+      && current.target.kind === 'side-panel'
+      && current.target.paneId === paneId
+        ? null
+        : current
+    ));
     const closesWholePanel = closeSidePanelPaneForTab(tabId, paneId);
     if (closesWholePanel) {
       handleCloseSidePanel();
@@ -2037,6 +2250,10 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     handleOpenSystem,
     handleOpenNotes,
     handleFocusSidePanelPane,
+    handleMagnifySidePanelPane,
+    handleRestoreMagnifiedPane,
+    handleMagnifyTerminalPane,
+    handleTerminalPaneInteraction,
     handleSplitSidePanelPane,
     handleCloseSidePanelPane,
     handleResizeSidePanelSplit,
@@ -2086,6 +2303,8 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     restoreTerminalCwd,
     identities,
     isBroadcastEnabled,
+    isGlobalBroadcastEnabled,
+    canUseGlobalBroadcast,
     isComposeBarOpen,
     keyBindings,
     keys,
@@ -2093,6 +2312,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     lastSidePanelTabRef,
     mountedAiTabIds: aiMountedTabIds,
     mountedSftpTabIds,
+    magnifiedPane,
     notesMountedTabIds,
     notesOpenNoteByTab,
     scriptsMountedTabIds,
@@ -2106,6 +2326,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     onReorderWorkspaceSessions,
     onReorderTabs,
     onCopySession,
+    onDuplicateSession,
     onCopySessionToNewWindow,
     onRequestAddToWorkspace,
     onAppendHostToWorkspace,
@@ -2120,6 +2341,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     onSplitSession,
     onSplitSessionRef,
     onToggleBroadcastRef,
+    onToggleGlobalBroadcastRef,
     onToggleWorkspaceViewMode,
     onToggleWorkspaceViewModeRef,
     onUpdateHost,
@@ -2197,6 +2419,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     TerminalPanesHost,
     terminalFontFamilyId,
     terminalRendererCwdBySessionRef,
+    terminalRendererCwdSourceBySessionRef,
     terminalSettings,
     terminalTheme,
     terminalThemeId,

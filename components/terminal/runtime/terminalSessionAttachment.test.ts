@@ -20,7 +20,10 @@ import {
   writeSessionData,
 } from "./terminalSessionAttachment.ts";
 import { getVisibleTerminalLineTimestampRows } from "./terminalLineTimestamps.ts";
-import { noteTerminalOutputPressureData } from "./terminalOutputPressure.ts";
+import {
+  getTerminalOutputPressure,
+  noteTerminalOutputPressureData,
+} from "./terminalOutputPressure.ts";
 
 import {
   clearTerminalSessionFlowAck,
@@ -1539,6 +1542,50 @@ test("writeSessionData keeps the hidden flush gate after coalescer reset and flu
   clearTerminalSessionFlowAck("session-1");
 });
 
+test("writeSessionData refreshes pressure visibility when hidden output flushes after reveal", () => {
+  clearTerminalSessionFlowAck("session-1");
+  const payload = "x".repeat(XTERM_WRITE_CALLBACK_FAST_PATH_MAX_BYTES + 1);
+  const writes: string[] = [];
+  const term = {
+    buffer: { active: { type: "normal" } },
+    write(data: string, callback?: () => void) {
+      writes.push(data);
+      callback?.();
+    },
+    scrollToBottom() {},
+  } as unknown as XTerm;
+  const ctx = {
+    ...createContext(false),
+    isVisibleRef: { current: false },
+    sessionRef: { current: "session-1" },
+    terminalBackend: {
+      ackSessionFlow: () => {},
+    },
+  };
+
+  getFlowController(ctx as never, term);
+  resetTerminalWriteCoalescer(term);
+  withAnimationFrameQueue(() => {
+    withDocumentVisibility("visible", () => {
+      writeSessionData(ctx as never, term, payload);
+    });
+    // The ingress snapshot records the pane as hidden.
+    assert.equal(getTerminalOutputPressure(term).background, true);
+    assert.deepEqual(writes, []);
+
+    ctx.isVisibleRef.current = true;
+    withDocumentVisibility("visible", () => {
+      flushPendingTerminalWritesOnResume(term);
+    });
+    // The batch is actually parsed after reveal, so the flush must clear the
+    // stale hidden flag: bulk write callbacks (e.g. keyword highlight) gate
+    // their in-frame viewport recolor on this state (#3272).
+    assert.deepEqual(writes, [payload]);
+    assert.equal(getTerminalOutputPressure(term).background, false);
+  });
+  clearTerminalSessionFlowAck("session-1");
+});
+
 test("hidden tab output marks pending scroll without scrolling immediately", async () => {
   const writes: string[] = [];
   let scrollCalls = 0;
@@ -2051,6 +2098,49 @@ test("attachSessionToTerminal resets timestamp state for a reused terminal", () 
   assert.equal(writes[1], "fresh");
 });
 
+test("attachSessionToTerminal keeps timestamps for scrollback preserved by reconnect", () => {
+  const { term } = createFakeTerm();
+  const ctx = {
+    ...createContext(false, { showLineTimestamps: true }),
+    sessionId: "session-1",
+    sessionRef: { current: null },
+    hasConnectedRef: { current: true },
+    hasRunStartupCommandRef: { current: false },
+    disposeDataRef: { current: null },
+    disposeExitRef: { current: null },
+    fitAddonRef: { current: null },
+    serializeAddonRef: { current: null },
+    pendingAuthRef: { current: null },
+    terminalBackend: {
+      onSessionData: () => () => {},
+      onSessionExit: () => () => {},
+    },
+    updateStatus: () => {},
+    setError: () => {},
+    onSessionExit: () => {},
+  };
+  const originalDateNow = Date.now;
+
+  try {
+    Date.now = () => new Date(2026, 0, 1, 12, 0, 59, 800).getTime();
+    writeSessionData(ctx as never, term, "before reconnect\r\n");
+
+    // Reconnect reuses the same xterm (scrollback preserved by the caller).
+    attachSessionToTerminal(ctx as never, term, "session-2");
+
+    Date.now = () => new Date(2026, 0, 1, 12, 1, 30, 0).getTime();
+    writeSessionData(ctx as never, term, "after reconnect\r\n");
+
+    assert.deepEqual(getVisibleTerminalLineTimestampRows(term), [
+      { row: 0, label: "12:00:59" },
+      { row: 1, label: "12:01:30" },
+    ]);
+  } finally {
+    Date.now = originalDateNow;
+    resetTerminalWriteCoalescer(term);
+  }
+});
+
 test("attachSessionToTerminal clears the backend id before reporting exit", () => {
   const { term } = createFakeTerm();
   let onExit: ((evt: { reason?: string }) => void) | null = null;
@@ -2448,4 +2538,55 @@ test("attachSessionToTerminal marks connected on metadata-only or visible first 
   onData?.("ssh handshake banner\r\n", { moshHandshake: true });
   assert.deepEqual(statuses, ["connected"]);
   assert.equal(ctx.hasConnectedRef.current, true);
+});
+
+test("Mosh handshake stays connecting until ready unless the backend needs terminal input", () => {
+  const { term } = createFakeTerm();
+  const statuses: string[] = [];
+  let onData: ((data: string, meta?: {
+    moshHandshake?: boolean;
+    moshHandshakeRequiresUserInput?: boolean;
+  }) => void) | null = null;
+  const ctx = {
+    ...createContext(false),
+    sessionId: "mosh-session",
+    sessionRef: { current: null as string | null },
+    hasConnectedRef: { current: false },
+    hasRunStartupCommandRef: { current: false },
+    disposeDataRef: { current: null as (() => void) | null },
+    disposeExitRef: { current: null as (() => void) | null },
+    fitAddonRef: { current: null },
+    serializeAddonRef: { current: null },
+    pendingAuthRef: { current: null },
+    terminalBackend: {
+      onSessionData: (_id: string, cb: typeof onData) => {
+        onData = cb;
+        return () => {};
+      },
+      onSessionExit: () => () => {},
+      writeToSession: () => {},
+      resizeSession: () => {},
+      setSessionFlowPaused: () => {},
+      ackSessionFlow: () => {},
+    },
+    updateStatus: (status: string) => {
+      statuses.push(status);
+      if (status === "connected") ctx.hasConnectedRef.current = true;
+    },
+    setError: () => {},
+    onSessionExit: () => {},
+  };
+
+  attachSessionToTerminal(ctx as never, term, "mosh-session", {
+    deferConnectionDuringMoshHandshake: true,
+  });
+  onData?.("login banner\r\n", { moshHandshake: true });
+  assert.deepEqual(statuses, []);
+  onData?.("Password:", { moshHandshake: true });
+  assert.deepEqual(statuses, []);
+  onData?.("Verification code:", {
+    moshHandshake: true,
+    moshHandshakeRequiresUserInput: true,
+  });
+  assert.deepEqual(statuses, ["connected"]);
 });

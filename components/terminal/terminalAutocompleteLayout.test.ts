@@ -4,10 +4,13 @@ import assert from "node:assert/strict";
 import {
   clampAutocompletePopupGeometry,
   computeAutocompletePopupPlacement,
+  nextAutocompletePopupAnchorViewport,
   resolveAutocompleteAnchorInViewport,
   resolveAutocompleteClampViewport,
+  resolveAutocompleteCommandStartRow,
   resolveAutocompleteCursorCell,
   resolveAutocompleteCursorColumn,
+  resolveAutocompletePopupAnchorInViewport,
   resolvePreservedSuggestionIndex,
   type PopupPlacementInput,
 } from "./autocomplete/terminalAutocompleteLayout.ts";
@@ -86,6 +89,20 @@ test("clamps height to the larger side when neither side fully fits", () => {
     assert.ok(p.top + contentHeight <= 300 - baseInput.viewportPadding + 0.001);
   }
   assert.ok(p.maxHeight > 0);
+});
+
+test("forceExpandUpward keeps the popup above the command-start when below fully fits", () => {
+  const p = computeAutocompletePopupPlacement({
+    ...baseInput,
+    anchorTop: 100,
+    anchorBottom: 120,
+    desiredHeight: 80,
+    expandUpwardHint: true,
+    forceExpandUpward: true,
+  });
+  assert.equal(p.renderUpward, true, "must not flip below the command-start anchor");
+  const contentHeight = Math.min(p.maxHeight, 80);
+  assert.ok(p.top + contentHeight <= 100 - baseInput.anchorGap + 0.001);
 });
 
 test("honors the upward hint to break ties when neither side fits", () => {
@@ -674,4 +691,186 @@ test("resolvePreservedSuggestionIndex returns -1 when selection is absent or dro
   const next = [suggestion({ text: "kept", source: "path", fileType: "file" })];
   assert.equal(resolvePreservedSuggestionIndex(previous, -1, next), -1);
   assert.equal(resolvePreservedSuggestionIndex(previous, 0, next), -1);
+});
+
+function makeWrappedCommandTerm(options: {
+  cursorY: number;
+  baseY: number;
+  viewportY: number;
+  wrapped: boolean;
+  rows?: number;
+  cols?: number;
+  cellWidth?: number;
+  cellHeight?: number;
+  screenTop?: number;
+}) {
+  const rows = options.rows ?? 24;
+  const cols = options.cols ?? 80;
+  const cellWidth = options.cellWidth ?? 8;
+  const cellHeight = options.cellHeight ?? 20;
+  const screenTop = options.screenTop ?? 100;
+  const absY = options.cursorY + options.baseY;
+  const lines: Record<number, { isWrapped?: boolean; text: string }> = {
+    [absY]: {
+      isWrapped: options.wrapped,
+      text: options.wrapped ? "mmand that wraps" : "$ a-long-command",
+    },
+  };
+  if (options.wrapped) {
+    lines[absY - 1] = { text: "$ a-long-co" };
+  }
+  const screen = {
+    clientWidth: cols * cellWidth,
+    clientHeight: rows * cellHeight,
+    getBoundingClientRect: () => ({
+      left: 40,
+      top: screenTop,
+      right: 40 + cols * cellWidth,
+      bottom: screenTop + rows * cellHeight,
+      width: cols * cellWidth,
+      height: rows * cellHeight,
+      x: 40,
+      y: screenTop,
+      toJSON: () => ({}),
+    }),
+  };
+  const container = {
+    querySelector: (selector: string) => (selector === ".xterm-screen" ? screen : null),
+  } as unknown as HTMLElement;
+  const term = {
+    element: {
+      querySelector: () => null,
+    },
+    cols,
+    rows,
+    buffer: {
+      active: {
+        cursorX: options.wrapped ? 16 : 16,
+        cursorY: options.cursorY,
+        baseY: options.baseY,
+        viewportY: options.viewportY,
+        getLine: (y: number) => {
+          const row = lines[y];
+          if (!row) return undefined;
+          return {
+            isWrapped: row.isWrapped,
+            translateToString: () => row.text,
+          };
+        },
+      },
+    },
+    _core: {
+      _renderService: {
+        dimensions: {
+          css: {
+            cell: { width: cellWidth, height: cellHeight },
+          },
+        },
+      },
+    },
+  };
+  return { term, container, cellHeight, screenTop };
+}
+
+test("resolveAutocompleteCommandStartRow follows wrap-induced viewport scroll", () => {
+  const before = makeWrappedCommandTerm({
+    cursorY: 23,
+    baseY: 100,
+    viewportY: 100,
+    wrapped: false,
+  });
+  assert.equal(resolveAutocompleteCommandStartRow(before.term as never), 23);
+
+  const after = makeWrappedCommandTerm({
+    cursorY: 23,
+    baseY: 101,
+    viewportY: 101,
+    wrapped: true,
+  });
+  assert.equal(resolveAutocompleteCommandStartRow(after.term as never), 22);
+});
+
+test("popup viewport follows the command start row after wrap-induced scroll", () => {
+  const before = makeWrappedCommandTerm({
+    cursorY: 23,
+    baseY: 100,
+    viewportY: 100,
+    wrapped: false,
+  });
+  const after = makeWrappedCommandTerm({
+    cursorY: 23,
+    baseY: 101,
+    viewportY: 101,
+    wrapped: true,
+  });
+
+  const beforeAnchor = resolveAutocompletePopupAnchorInViewport(
+    before.term as never,
+    before.container,
+    5,
+    16,
+    23,
+  );
+  const afterAnchor = resolveAutocompletePopupAnchorInViewport(
+    after.term as never,
+    after.container,
+    5,
+    16,
+    23,
+  );
+
+  assert.equal(beforeAnchor.expandUpward, true);
+  assert.equal(afterAnchor.expandUpward, true);
+  assert.equal(beforeAnchor.anchorTop, before.screenTop + 23 * before.cellHeight);
+  assert.equal(afterAnchor.anchorTop, after.screenTop + 22 * after.cellHeight);
+  assert.equal(afterAnchor.anchorTop, beforeAnchor.anchorTop - after.cellHeight);
+
+  const stored = nextAutocompletePopupAnchorViewport(
+    {
+      left: beforeAnchor.anchorLeft,
+      top: beforeAnchor.anchorTop,
+      bottom: beforeAnchor.anchorBottom,
+    },
+    beforeAnchor.expandUpward,
+    afterAnchor,
+  );
+  assert.ok(stored, "stored viewport should update when the command start row moves");
+  assert.equal(stored?.viewport.top, afterAnchor.anchorTop);
+  assert.equal(stored?.expandUpward, true);
+});
+
+test("resolveAutocompleteAnchorInViewport pins an upward popup to the wrapped command start", () => {
+  const { term, container, cellHeight, screenTop } = makeWrappedCommandTerm({
+    cursorY: 23,
+    baseY: 101,
+    viewportY: 101,
+    wrapped: true,
+  });
+  const atCursor = resolveAutocompleteAnchorInViewport(term as never, container, 5, 16, 23, 23);
+  const atStart = resolveAutocompleteAnchorInViewport(term as never, container, 5, 16, 23, 22);
+  assert.equal(atCursor.expandUpward, true);
+  assert.equal(atStart.expandUpward, true);
+  assert.equal(atCursor.anchorTop, screenTop + 23 * cellHeight);
+  assert.equal(atStart.anchorTop, screenTop + 22 * cellHeight);
+  assert.ok(
+    atStart.anchorTop < atCursor.anchorTop,
+    "command-start anchor must sit above the cursor so the popup cannot cover the first wrapped line",
+  );
+});
+
+test("nextAutocompletePopupAnchorViewport is a no-op when the stored viewport is already current", () => {
+  const anchor = {
+    anchorLeft: 10,
+    anchorTop: 20,
+    anchorBottom: 40,
+    expandUpward: true,
+  };
+  assert.equal(
+    nextAutocompletePopupAnchorViewport(
+      { left: 10, top: 20, bottom: 40 },
+      true,
+      anchor,
+    ),
+    null,
+  );
 });

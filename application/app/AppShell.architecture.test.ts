@@ -225,3 +225,9 @@ test('AppShell uses default memo (store-driven), not always-rerender comparator'
   assert.match(appShellSource, /memo\s*\(\s*AppShellView\s*\)/);
   assert.doesNotMatch(appShellSource, /memo\s*\(\s*AppShellView\s*,\s*\(\s*\)\s*=>\s*false\s*\)/);
 });
+
+test('terminal system detection routes through the owner of temporary hosts', () => {
+  const sideEffects = readFileSync(join(here, 'AppSideEffects.tsx'), 'utf8');
+  assert.match(hostSources['TerminalHost.tsx'], /updateHostDistro: handlers\.updateTerminalHostDistro/);
+  assert.match(sideEffects, /if \(ephemeralHostIds\.has\(hostId\)\) \{\s*setEphemeralHosts\([\s\S]*?applyEphemeralHostDistroUpdate[\s\S]*?return;\s*\}\s*updateHostDistro\(hostId, distro\)/);
+});

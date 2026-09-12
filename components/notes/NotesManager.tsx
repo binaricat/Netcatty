@@ -6,12 +6,13 @@ import {
   FileText,
   Folder,
   FolderPlus,
-  Glasses,
+  Hash,
+  ListTree,
   MoreHorizontal,
   Minimize2,
-  PencilLine,
   Plus,
   Search,
+  Trash2,
   Upload,
   X,
 } from "lucide-react";
@@ -20,6 +21,12 @@ import { useI18n } from "../../application/i18n/I18nProvider";
 import { useApplicationBackend } from "../../application/state/useApplicationBackend";
 import { useStoredNumber } from "../../application/state/useStoredNumber";
 import { useStoredString } from "../../application/state/useStoredString";
+import { useAvailableFonts } from "../../application/state/fontStore";
+import { resolveNoteFontFamily } from "../../domain/noteFonts";
+import { NoteOutline } from "./NoteOutline";
+import { NoteExportMenu } from "./NoteExportMenu";
+import { NoteModeDropdown, NoteToolbar } from "./NoteToolbar";
+import type { NoteSourceEditorHandle } from "./NoteSourceEditor";
 import {
   ancestorNoteGroupPaths,
   buildVaultNoteMarkdownExportFiles,
@@ -35,11 +42,16 @@ import {
   replaceNoteGroupPrefix,
   resolveMovedNoteGroupPath,
   sanitizeNoteExportFileNamePart,
+  type MarkdownActionType,
+  type NoteHeadingItem,
   type VaultNotesExportScope,
 } from "../../domain/notes";
 import { getNextVaultOrder, reorderVaultItems, reorderVaultStrings, sortByVaultOrder } from "../../domain/vaultOrder";
 import {
   STORAGE_KEY_VAULT_NOTES_EDITOR_MODE,
+  STORAGE_KEY_VAULT_NOTES_FONT_FAMILY,
+  STORAGE_KEY_VAULT_NOTES_FONT_SIZE,
+  STORAGE_KEY_VAULT_NOTES_CODE_FONT_SIZE,
   STORAGE_KEY_VAULT_NOTES_TREE_WIDTH,
 } from "../../infrastructure/config/storageKeys";
 import { logger } from "../../lib/logger";
@@ -76,16 +88,21 @@ import {
   markVaultDropIndicator,
   markVaultInsideDropIndicator,
 } from "../vault/vaultReorderDrag";
-import type { NoteEditorMode } from "./InlineMarkdownEditor";
+import type {
+  ActiveTextFormats,
+  InlineMarkdownEditorHandle,
+  NoteEditorMode,
+} from "./noteEditorTypes";
+import { EMPTY_ACTIVE_FORMATS } from "./noteEditorTypes";
 import { NoteTitleInput } from "./NoteTitleInput";
 
 const InlineMarkdownEditor = lazy(() =>
-  import("./InlineMarkdownEditor").then((module) => ({ default: module.InlineMarkdownEditor })),
+  import("./InlineMarkdownEditor.lazy").then((module) => ({ default: module.InlineMarkdownEditor })),
 );
 
 /** Warm the MDXEditor chunk before Suspense. */
 export function prefetchInlineMarkdownEditor(): void {
-  void import("./InlineMarkdownEditor");
+  void import("./InlineMarkdownEditor.lazy");
 }
 
 interface NoteFolderNode {
@@ -99,6 +116,8 @@ type NotesToolbarPanel = "search" | null;
 
 const toolbarIconButtonClass = "netcatty-tab h-6 w-6 shrink-0 rounded-md p-0 hover:bg-transparent";
 const menuItemClass = "flex h-8 w-full items-center rounded-md px-3 text-left text-sm hover:bg-secondary";
+const noteMetadataPillClass = "inline-flex h-5 items-center gap-1 rounded-md bg-muted/70 px-2 text-[11px] font-medium leading-none";
+const noteMetadataLabelClass = "translate-y-px";
 const NOTES_TREE_DEFAULT_WIDTH = 300;
 /** Narrow enough for nested folders + ellipsis; toolbar scrolls if needed. */
 const NOTES_TREE_MIN_WIDTH = 160;
@@ -111,10 +130,14 @@ export function clampNotesTreeWidth(value: number): number {
 }
 
 export const normalizeNoteEditorMode = (value: string | null): NoteEditorMode | null =>
-  value === "edit" || value === "preview" ? value : null;
+  value === "live"
+    ? "edit"
+    : value === "edit" || value === "preview" || value === "source"
+      ? value
+      : null;
 
-const isNoteEditorMode = (value: string | null): value is NoteEditorMode =>
-  normalizeNoteEditorMode(value) !== null;
+export const isNoteEditorMode = (value: string | null): value is NoteEditorMode =>
+  value === "edit" || value === "preview" || value === "source";
 
 const InlineMarkdownEditorFallback = () => (
   <div
@@ -372,6 +395,7 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
     "edit",
     isNoteEditorMode,
   );
+  const [activeFormats, setActiveFormats] = useState<ActiveTextFormats>(EMPTY_ACTIVE_FORMATS);
   const [overlayNoteId, setOverlayNoteId] = useState<string | null>(() => initialOpenNoteId);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(
     () => new Set(notes.flatMap((note) => note.group ? ancestorNoteGroupPaths(note.group) : [])),
@@ -388,11 +412,41 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
     id: string;
     name: string;
   } | null>(null);
+  const [showOutline, setShowOutline] = useState(false);
+  const [tagInputOpen, setTagInputOpen] = useState(false);
+  const [newTagText, setNewTagText] = useState("");
   const [treeWidth, setTreeWidth, persistTreeWidth] = useStoredNumber(
     STORAGE_KEY_VAULT_NOTES_TREE_WIDTH,
     NOTES_TREE_DEFAULT_WIDTH,
     { min: NOTES_TREE_MIN_WIDTH, max: NOTES_TREE_MAX_WIDTH },
   );
+  const [noteFontFamily, setNoteFontFamily] = useStoredString<string>(
+    STORAGE_KEY_VAULT_NOTES_FONT_FAMILY,
+    "",
+  );
+  const availableNoteFonts = useAvailableFonts();
+  const resolvedNoteFontFamily = useMemo(
+    () => resolveNoteFontFamily(availableNoteFonts, noteFontFamily),
+    [availableNoteFonts, noteFontFamily],
+  );
+  const [noteFontSize, setNoteFontSize, persistNoteFontSize] = useStoredNumber(
+    STORAGE_KEY_VAULT_NOTES_FONT_SIZE,
+    14,
+    { min: 10, max: 32 },
+  );
+  const handleSetNoteFontSize = useCallback((size: number) => {
+    setNoteFontSize(size);
+    persistNoteFontSize(size);
+  }, [persistNoteFontSize, setNoteFontSize]);
+  const [noteCodeFontSize, setNoteCodeFontSize, persistNoteCodeFontSize] = useStoredNumber(
+    STORAGE_KEY_VAULT_NOTES_CODE_FONT_SIZE,
+    13,
+    { min: 10, max: 32 },
+  );
+  const handleSetNoteCodeFontSize = useCallback((size: number) => {
+    setNoteCodeFontSize(size);
+    persistNoteCodeFontSize(size);
+  }, [persistNoteCodeFontSize, setNoteCodeFontSize]);
   const treeAsideRef = useRef<HTMLElement | null>(null);
   const treeWidthRef = useRef(treeWidth);
   treeWidthRef.current = treeWidth;
@@ -417,6 +471,26 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
     onUpdateNotes(cleaned);
     return cleaned;
   }, [onUpdateNotes]);
+
+  const addTagToNote = useCallback((noteId: string, tag: string) => {
+    const clean = tag.trim();
+    if (!clean) return;
+    commitNotes(sortedNotesRef.current.map((n) => {
+      if (n.id !== noteId) return n;
+      const existing = n.tags ?? [];
+      if (existing.includes(clean)) return n;
+      return { ...n, tags: [...existing, clean], updatedAt: Date.now() };
+    }));
+  }, [commitNotes]);
+
+  const removeTagFromNote = useCallback((noteId: string, tagToRemove: string) => {
+    commitNotes(sortedNotesRef.current.map((n) => {
+      if (n.id !== noteId) return n;
+      const existing = n.tags ?? [];
+      const nextTags = existing.filter((t) => t !== tagToRemove);
+      return { ...n, tags: nextTags.length ? nextTags : undefined, updatedAt: Date.now() };
+    }));
+  }, [commitNotes]);
 
   const NOTE_DRAFT_DEBOUNCE_MS = 300;
   const draftNoteIdRef = useRef<string | null>(null);
@@ -523,18 +597,21 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
   }, [groupOrderByPath, groups, sortedNotes]);
   const selectedNote = getSelectedVaultNote(sortedNotes, selectedNoteId);
   const overlayNote = sortedNotes.find((note) => note.id === overlayNoteId) ?? null;
-  const selectedNoteView = selectedNote && draftNoteId === selectedNote.id
-    ? {
-        ...selectedNote,
-        ...(draftTitle !== null ? { title: draftTitle } : {}),
-      }
-    : selectedNote;
-  const overlayNoteView = overlayNote && draftNoteId === overlayNote.id
-    ? {
-        ...overlayNote,
-        ...(draftTitle !== null ? { title: draftTitle } : {}),
-      }
-    : overlayNote;
+  const selectedNoteView = useMemo(() => {
+    if (!selectedNote) return null;
+    if (draftNoteId === selectedNote.id && draftTitle !== null) {
+      return { ...selectedNote, title: draftTitle };
+    }
+    return selectedNote;
+  }, [draftNoteId, draftTitle, selectedNote]);
+
+  const overlayNoteView = useMemo(() => {
+    if (!overlayNote) return null;
+    if (draftNoteId === overlayNote.id && draftTitle !== null) {
+      return { ...overlayNote, title: draftTitle };
+    }
+    return overlayNote;
+  }, [draftNoteId, draftTitle, overlayNote]);
 
   useEffect(() => {
     if (!draftNoteIdRef.current) return;
@@ -667,34 +744,21 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
     onOpenHost?.(host, { noteId });
   }, [onOpenHost]);
 
-  const renderNoteModeToggle = () => {
-    const label = noteEditorMode === "edit" ? t("notes.mode.preview") : t("notes.mode.edit");
-    const Icon = noteEditorMode === "edit" ? Glasses : PencilLine;
+  const sourceEditorRef = useRef<NoteSourceEditorHandle>(null);
+  const inlineEditorRef = useRef<InlineMarkdownEditorHandle>(null);
+  const overlayEditorRef = useRef<InlineMarkdownEditorHandle>(null);
 
-    return (
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            data-note-mode-switch
-            aria-label={label}
-            className="app-no-drag h-8 w-8 shrink-0 rounded-md p-0 text-muted-foreground transition-colors hover:bg-secondary/70 hover:text-foreground"
-            onClick={() => {
-              flushNoteDraft();
-              setNoteEditorMode((currentMode) => (
-                currentMode === "edit" ? "preview" : "edit"
-              ));
-            }}
-          >
-            <Icon size={16} />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent side="bottom">{label}</TooltipContent>
-      </Tooltip>
-    );
-  };
+  const handleToolbarAction = useCallback((action: MarkdownActionType) => {
+    if (isSidebarMode && overlayNoteView) {
+      overlayEditorRef.current?.executeAction(action);
+    } else {
+      inlineEditorRef.current?.executeAction(action);
+    }
+  }, [isSidebarMode, overlayNoteView]);
+
+  const handleOutlineHeadingSelect = useCallback((heading: NoteHeadingItem, index: number) => {
+    inlineEditorRef.current?.scrollToHeading(heading, index);
+  }, []);
 
   const addNoteToGroup = (group: string | null) => {
     let created: VaultNote | null = null;
@@ -860,24 +924,6 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
   const exportGroupNotes = useCallback((groupPath: string) => {
     exportNotesToZip({ type: "group", group: groupPath }, groupPath);
   }, [exportNotesToZip]);
-
-  const renderNoteExportButton = (note: VaultNote) => (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          aria-label={t("notes.action.exportNote")}
-          className="app-no-drag h-8 w-8 shrink-0 rounded-md p-0 text-muted-foreground transition-colors hover:bg-secondary/70 hover:text-foreground"
-          onClick={() => exportNoteToMarkdown(note)}
-        >
-          <Download size={16} />
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent side="bottom">{t("notes.action.exportNote")}</TooltipContent>
-    </Tooltip>
-  );
 
   const duplicateNoteById = (noteId: string) => {
     flushNoteDraft();
@@ -1244,7 +1290,7 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
         style={{ paddingLeft: depth * 16 + 4 }}
       >
         <div className="mr-1 h-5 w-4 shrink-0" />
-        <div className="mr-2 flex h-5 w-5 shrink-0 items-center justify-center text-current">
+        <div className="mr-1 flex shrink-0 items-center text-current">
           <Folder size={16} strokeWidth={1.9} />
         </div>
         <VaultTreeInlineRenameInput
@@ -1274,7 +1320,8 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
               renameNoteFromTree(note.id, name);
             }}
             onRenameCancel={() => setEditingNoteId(null)}
-            icon={<FileText size={16} className="mr-2 shrink-0 text-muted-foreground" />}
+            icon={<FileText size={16} className="shrink-0 text-muted-foreground" />}
+            iconClassName="mr-1"
             data-note-id={note.id}
             data-notes-drag-kind="note"
             data-notes-context-menu="note"
@@ -1351,6 +1398,7 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
               selected={isNoteFolderTreeSelected(selectedGroup, selectedNoteId, node.path)}
               hasChildren={hasChildren}
               iconSize={16}
+              iconClassName="mr-1"
               editing={editingGroupPath === node.path}
               editingInitialName={node.name}
               onRenameCommit={(name) => renameGroup(node.path, name)}
@@ -1742,7 +1790,7 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
         >
           {selectedNoteView ? (
             <>
-              <div className="flex min-h-[54px] shrink-0 items-center gap-3 px-8 pt-6 pb-1" data-note-title-row>
+              <div className="flex min-h-[54px] shrink-0 items-center gap-2 px-8 pt-6 pb-1" data-note-title-row>
                 <div className="min-w-0 flex-1">
                   <NoteTitleInput
                     noteId={selectedNoteView.id}
@@ -1754,35 +1802,226 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
                     onBlur={() => flushNoteDraft()}
                   />
                 </div>
-                {renderNoteExportButton(selectedNoteView)}
-                {renderNoteModeToggle()}
-              </div>
-              <ScrollArea className="min-h-0 flex-1">
-                <div
-                  className="min-h-full w-full px-8 pt-2 pb-6"
-                  onBlur={(event) => {
-                    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-                      flushNoteDraft();
-                    }
+
+                <NoteModeDropdown
+                  editorMode={noteEditorMode}
+                  onChangeMode={(mode) => {
+                    flushNoteDraft();
+                    setNoteEditorMode(mode);
                   }}
-                >
-                  <LazyLoadBoundary name="Notes editor" resetKey="notes-editor">
-                    <Suspense fallback={<InlineMarkdownEditorFallback />}>
-                      <InlineMarkdownEditor
-                        noteId={selectedNoteView.id}
-                        value={selectedNoteView.content}
-                        placeholder={t("notes.editor.placeholder")}
-                        editorMode={noteEditorMode}
-                        previewEmptyLabel={t("notes.preview.empty")}
-                        onChange={(content) => saveNoteContentDraft(selectedNoteView.id, content)}
-                        hosts={hosts}
-                        onOpenHost={(host) => handleOpenHostFromNote(host, selectedNoteView.id)}
-                        onOpenExternalLink={openExternal}
-                      />
-                    </Suspense>
-                  </LazyLoadBoundary>
-                </div>
-              </ScrollArea>
+                />
+
+                {/* Outline Toggle */}
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      aria-label={t("notes.outline.title")}
+                      className={cn(
+                        "app-no-drag h-8 w-8 shrink-0 rounded-md p-0 transition-colors hover:bg-secondary/70",
+                        showOutline ? "bg-secondary text-primary font-medium" : "text-muted-foreground hover:text-foreground",
+                      )}
+                      onClick={() => setShowOutline((prev) => !prev)}
+                    >
+                      <ListTree size={16} />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">{t("notes.outline.title")}</TooltipContent>
+                </Tooltip>
+
+                {/* Export Menu */}
+                <NoteExportMenu
+                  note={selectedNoteView}
+                  allNotes={sortedNotes}
+                  onExportNote={exportNoteToMarkdown}
+                  onExportAll={exportAllNotes}
+                />
+
+                {/* Delete Note */}
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      aria-label={t("action.delete")}
+                      className="app-no-drag h-8 w-8 shrink-0 rounded-md p-0 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                      onClick={() => requestDeleteNoteById(selectedNoteView.id)}
+                    >
+                      <Trash2 size={16} />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">{t("action.delete")}</TooltipContent>
+                </Tooltip>
+              </div>
+
+              {/* Tags & Folder Breadcrumb Header */}
+              <div className="flex flex-wrap items-center gap-1.5 px-8 pb-2 text-xs text-muted-foreground">
+                {selectedNoteView.group && (
+                  <span
+                    data-note-metadata-pill="folder"
+                    className={cn(noteMetadataPillClass, "text-foreground")}
+                  >
+                    <Folder size={12} className="text-amber-500" />
+                    <span className={noteMetadataLabelClass}>{selectedNoteView.group}</span>
+                  </span>
+                )}
+
+                {selectedNoteView.tags?.map((tag) => (
+                  <span
+                    key={tag}
+                    data-note-metadata-pill="tag"
+                    className={cn(noteMetadataPillClass, "text-foreground")}
+                  >
+                    <Hash size={12} className="opacity-70" />
+                    <span className={noteMetadataLabelClass}>{tag}</span>
+                    <button
+                      type="button"
+                      className="-mr-0.5 inline-flex h-3.5 w-3.5 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground"
+                      onClick={() => removeTagFromNote(selectedNoteView.id, tag)}
+                      title={t("notes.tag.remove")}
+                    >
+                      <X size={10} />
+                    </button>
+                  </span>
+                ))}
+
+                {tagInputOpen ? (
+                  <div className="inline-flex h-5 items-center gap-1 rounded-md border border-primary/60 bg-background px-1.5 leading-none">
+                    <Hash size={12} className="text-muted-foreground" />
+                    <input
+                      type="text"
+                      autoFocus
+                      value={newTagText}
+                      onChange={(e) => setNewTagText(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          if (newTagText.trim()) {
+                            addTagToNote(selectedNoteView.id, newTagText.trim());
+                            setNewTagText("");
+                            setTagInputOpen(false);
+                          }
+                        } else if (e.key === "Escape") {
+                          setTagInputOpen(false);
+                          setNewTagText("");
+                        }
+                      }}
+                      onBlur={() => {
+                        if (newTagText.trim()) {
+                          addTagToNote(selectedNoteView.id, newTagText.trim());
+                        }
+                        setTagInputOpen(false);
+                        setNewTagText("");
+                      }}
+                      placeholder={t("notes.tag.placeholder")}
+                      className="w-20 translate-y-px bg-transparent text-[11px] text-foreground outline-none placeholder:text-muted-foreground/60"
+                    />
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    data-note-metadata-pill="add-tag"
+                    className={cn(noteMetadataPillClass, "text-foreground transition-colors hover:bg-muted")}
+                    onClick={() => setTagInputOpen(true)}
+                  >
+                    <Plus size={12} />
+                    <span className={noteMetadataLabelClass}>{t("notes.tag.add")}</span>
+                  </button>
+                )}
+              </div>
+
+              {/* Cherry Studio Style Note Toolbar */}
+              <NoteToolbar
+                editorMode={noteEditorMode}
+                onAction={handleToolbarAction}
+                activeFormats={activeFormats}
+                noteFontFamily={resolvedNoteFontFamily}
+                onChangeNoteFontFamily={(font) => setNoteFontFamily(font)}
+                noteFontSize={noteFontSize}
+                onChangeNoteFontSize={handleSetNoteFontSize}
+                noteCodeFontSize={noteCodeFontSize}
+                onChangeNoteCodeFontSize={handleSetNoteCodeFontSize}
+              />
+
+              <div className="flex flex-1 min-h-0 min-w-0">
+                {noteEditorMode === "source" ? (
+                  <div
+                    className="flex-1 min-h-0 min-w-0 h-full"
+                    onBlur={(event) => {
+                      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                        flushNoteDraft();
+                      }
+                    }}
+                  >
+                    <LazyLoadBoundary name="Notes editor" resetKey="notes-editor">
+                      <Suspense fallback={<InlineMarkdownEditorFallback />}>
+                        <InlineMarkdownEditor
+                          ref={inlineEditorRef}
+                          noteId={selectedNoteView.id}
+                          value={selectedNoteView.content}
+                          placeholder={t("notes.editor.placeholder")}
+                          editorMode={noteEditorMode}
+                          previewEmptyLabel={t("notes.preview.empty")}
+                          onChange={(content) => saveNoteContentDraft(selectedNoteView.id, content)}
+                          hosts={hosts}
+                          onOpenHost={(host) => handleOpenHostFromNote(host, selectedNoteView.id)}
+                          onOpenExternalLink={openExternal}
+                          sourceEditorRef={sourceEditorRef}
+                          noteFontFamily={resolvedNoteFontFamily}
+                          noteFontSize={noteFontSize}
+                          noteCodeFontSize={noteCodeFontSize}
+                          onActiveFormatsChange={setActiveFormats}
+                        />
+                      </Suspense>
+                    </LazyLoadBoundary>
+                  </div>
+                ) : (
+                  <ScrollArea className="min-h-0 flex-1">
+                    <div
+                      className="min-h-full w-full px-8 pt-2 pb-6"
+                      onBlur={(event) => {
+                        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                          flushNoteDraft();
+                        }
+                      }}
+                    >
+                      <LazyLoadBoundary name="Notes editor" resetKey="notes-editor">
+                        <Suspense fallback={<InlineMarkdownEditorFallback />}>
+                          <InlineMarkdownEditor
+                            ref={inlineEditorRef}
+                            noteId={selectedNoteView.id}
+                            value={selectedNoteView.content}
+                            placeholder={t("notes.editor.placeholder")}
+                            editorMode={noteEditorMode}
+                            previewEmptyLabel={t("notes.preview.empty")}
+                            onChange={(content) => saveNoteContentDraft(selectedNoteView.id, content)}
+                            hosts={hosts}
+                            onOpenHost={(host) => handleOpenHostFromNote(host, selectedNoteView.id)}
+                            onOpenExternalLink={openExternal}
+                            sourceEditorRef={sourceEditorRef}
+                            noteFontFamily={resolvedNoteFontFamily}
+                            noteFontSize={noteFontSize}
+                            noteCodeFontSize={noteCodeFontSize}
+                            onActiveFormatsChange={setActiveFormats}
+                          />
+                        </Suspense>
+                      </LazyLoadBoundary>
+                    </div>
+                  </ScrollArea>
+                )}
+
+                {showOutline && (
+                  <div className="h-full w-64 shrink-0">
+                    <NoteOutline
+                      content={selectedNoteView.content}
+                      onSelectHeading={handleOutlineHeadingSelect}
+                      onClose={() => setShowOutline(false)}
+                    />
+                  </div>
+                )}
+              </div>
             </>
           ) : (
             <div className="flex flex-1 items-center justify-center px-4">
@@ -1833,7 +2072,7 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
             </div>
           </div>
           <div className="flex min-h-0 flex-1 flex-col bg-background">
-            <div className="flex min-h-[54px] shrink-0 items-center gap-3 px-4 pt-5 pb-1" data-note-title-row>
+            <div className="flex min-h-[54px] shrink-0 items-center gap-2 px-4 pt-5 pb-1" data-note-title-row>
               <div className="min-w-0 flex-1">
                 <NoteTitleInput
                   noteId={overlayNoteView.id}
@@ -1845,12 +2084,39 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
                   onBlur={() => flushNoteDraft()}
                 />
               </div>
-              {renderNoteExportButton(overlayNoteView)}
-              {renderNoteModeToggle()}
+
+              <NoteModeDropdown
+                editorMode={noteEditorMode}
+                onChangeMode={(mode) => {
+                  flushNoteDraft();
+                  setNoteEditorMode(mode);
+                }}
+              />
+
+              <NoteExportMenu
+                note={overlayNoteView}
+                allNotes={sortedNotes}
+                onExportNote={exportNoteToMarkdown}
+                onExportAll={exportAllNotes}
+              />
             </div>
-            <ScrollArea className="min-h-0 flex-1">
+
+            {/* Note Toolbar in Overlay */}
+            <NoteToolbar
+              editorMode={noteEditorMode}
+              onAction={handleToolbarAction}
+              activeFormats={activeFormats}
+              noteFontFamily={resolvedNoteFontFamily}
+              onChangeNoteFontFamily={(font) => setNoteFontFamily(font)}
+              noteFontSize={noteFontSize}
+              onChangeNoteFontSize={handleSetNoteFontSize}
+              noteCodeFontSize={noteCodeFontSize}
+              onChangeNoteCodeFontSize={handleSetNoteCodeFontSize}
+            />
+
+            {noteEditorMode === "source" ? (
               <div
-                className="min-h-full w-full px-4 pt-2 pb-6"
+                className="flex-1 min-h-0 min-w-0 h-full"
                 onBlur={(event) => {
                   if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
                     flushNoteDraft();
@@ -1860,6 +2126,7 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
                 <LazyLoadBoundary name="Notes editor" resetKey="notes-overlay-editor">
                   <Suspense fallback={<InlineMarkdownEditorFallback />}>
                     <InlineMarkdownEditor
+                      ref={overlayEditorRef}
                       noteId={overlayNoteView.id}
                       value={overlayNoteView.content}
                       placeholder={t("notes.editor.placeholder")}
@@ -1869,11 +2136,49 @@ export const NotesManager: React.FC<NotesManagerProps> = ({
                       hosts={hosts}
                       onOpenHost={(host) => handleOpenHostFromNote(host, overlayNoteView.id)}
                       onOpenExternalLink={openExternal}
+                      sourceEditorRef={sourceEditorRef}
+                      noteFontFamily={resolvedNoteFontFamily}
+                      noteFontSize={noteFontSize}
+                      noteCodeFontSize={noteCodeFontSize}
+                      onActiveFormatsChange={setActiveFormats}
                     />
                   </Suspense>
                 </LazyLoadBoundary>
               </div>
-            </ScrollArea>
+            ) : (
+              <ScrollArea className="min-h-0 flex-1">
+                <div
+                  className="min-h-full w-full px-4 pt-2 pb-6"
+                  onBlur={(event) => {
+                    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                      flushNoteDraft();
+                    }
+                  }}
+                >
+                  <LazyLoadBoundary name="Notes editor" resetKey="notes-overlay-editor">
+                    <Suspense fallback={<InlineMarkdownEditorFallback />}>
+                      <InlineMarkdownEditor
+                        ref={overlayEditorRef}
+                        noteId={overlayNoteView.id}
+                        value={overlayNoteView.content}
+                        placeholder={t("notes.editor.placeholder")}
+                        editorMode={noteEditorMode}
+                        onChange={(content) => saveNoteContentDraft(overlayNoteView.id, content)}
+                        previewEmptyLabel={t("notes.preview.empty")}
+                        hosts={hosts}
+                        onOpenHost={(host) => handleOpenHostFromNote(host, overlayNoteView.id)}
+                        onOpenExternalLink={openExternal}
+                        sourceEditorRef={sourceEditorRef}
+                        noteFontFamily={resolvedNoteFontFamily}
+                        noteFontSize={noteFontSize}
+                        noteCodeFontSize={noteCodeFontSize}
+                        onActiveFormatsChange={setActiveFormats}
+                      />
+                    </Suspense>
+                  </LazyLoadBoundary>
+                </div>
+              </ScrollArea>
+            )}
           </div>
         </div>
       )}

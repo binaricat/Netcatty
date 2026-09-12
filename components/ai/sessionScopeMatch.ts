@@ -18,15 +18,19 @@ export function getSessionScopeMatchRank(
    * member chats as exact workspace matches keeps history/resume working.
    */
   workspaceMemberTerminalIds?: Set<string>,
+  /** Chats currently selected by workspace members, including resumed history. */
+  workspaceMemberActiveSessionIds?: Set<string>,
 ): number {
   // After a terminal merge the AI panel flips to workspace scope, but chats
-  // created on the member terminals remain terminal-scoped. Rank those as
+  // created or resumed on member terminals remain terminal-scoped. Rank them as
   // exact matches so they stay visible and preferred over stale workspaces.
   if (
     scopeType === "workspace"
     && session.scope.type === "terminal"
-    && session.scope.targetId
-    && workspaceMemberTerminalIds?.has(session.scope.targetId)
+    && (
+      (session.scope.targetId && workspaceMemberTerminalIds?.has(session.scope.targetId))
+      || workspaceMemberActiveSessionIds?.has(session.id)
+    )
   ) {
     return 3;
   }

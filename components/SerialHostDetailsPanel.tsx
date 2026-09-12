@@ -91,7 +91,7 @@ export const SerialHostDetailsPanel: React.FC<SerialHostDetailsPanelPropsWithRes
   );
   const [backspaceBehaviorChanged, setBackspaceBehaviorChanged] = useState(false);
   const [byteOrientedBackspace, setByteOrientedBackspace] = useState(
-    initialData.serialConfig?.byteOrientedBackspace ?? true,
+    initialData.serialConfig?.byteOrientedBackspace ?? false,
   );
   const [charset, setCharset] = useState(initialData.charset || 'UTF-8');
   const [tags, setTags] = useState<string[]>(initialData.tags || []);

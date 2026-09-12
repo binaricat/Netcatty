@@ -1,4 +1,5 @@
 import type { Snippet } from "./models";
+import { getSnippetPackageAncestors } from "./snippetPackage.ts";
 import { normalizeVaultOrder } from "./vaultOrder";
 import { normalizeGroupTargetPaths } from "./hostGroupPathMutations";
 
@@ -61,17 +62,6 @@ const uniqueStrings = (values: unknown[]): string[] => {
   return result;
 };
 
-const getPackageAncestors = (path: string): string[] => {
-  const normalized = path.trim().replace(/\/+$/g, "");
-  if (!normalized) return [];
-  const isAbsolute = normalized.startsWith("/");
-  const parts = normalized.split("/").filter(Boolean);
-  return parts.map((_, index) => {
-    const joined = parts.slice(0, index + 1).join("/");
-    return isAbsolute ? `/${joined}` : joined;
-  });
-};
-
 export const collectSnippetPackagePaths = (
   snippets: Pick<SnippetExportItem, "package">[],
   snippetPackages: string[] = [],
@@ -80,7 +70,7 @@ export const collectSnippetPackagePaths = (
   snippets.forEach((snippet) => {
     const packagePath = snippet.package?.trim();
     if (!packagePath) return;
-    getPackageAncestors(packagePath).forEach((path) => referenced.add(path));
+    getSnippetPackageAncestors(packagePath).forEach((path) => referenced.add(path));
   });
 
   const ordered = uniqueStrings([
@@ -93,7 +83,7 @@ export const collectSnippetPackagePaths = (
 const mergeSnippetPackagePaths = (...groups: string[][]): string[] => {
   const paths: string[] = [];
   groups.flat().forEach((path) => {
-    getPackageAncestors(path).forEach((ancestor) => paths.push(ancestor));
+    getSnippetPackageAncestors(path).forEach((ancestor) => paths.push(ancestor));
   });
   return uniqueStrings(paths);
 };

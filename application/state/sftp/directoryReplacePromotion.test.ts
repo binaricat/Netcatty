@@ -127,3 +127,13 @@ test("live and restart-resume directory replacement both call the shared promoti
   assert.match(liveSource, /promoteDirectoryReplacePaths\(\{/);
   assert.match(resumeSource, /promoteDirectoryReplacePaths\(\{/);
 });
+
+test("live directory replacement bypasses the merge-only same-host copy shortcut", () => {
+  const liveSource = fs.readFileSync(new URL("./useSftpTransfers.ts", import.meta.url), "utf8");
+  const sameHostCopyGuard = liveSource.slice(
+    liveSource.indexOf("if (\n        task.isDirectory"),
+    liveSource.indexOf("sameHostCopyDirectory!", liveSource.indexOf("if (\n        task.isDirectory")),
+  );
+
+  assert.match(sameHostCopyGuard, /!task\.replaceExistingTarget/);
+});

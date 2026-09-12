@@ -132,11 +132,11 @@ export const AppLockSettingsSection: React.FC<AppLockSettingsSectionProps> = ({
 
   const handleSavePassword = useCallback(async () => {
     setError(null);
-    if (!newPassword.trim()) {
+    if (newPassword.length === 0) {
       setError(t('settings.appLock.validation.newRequired'));
       return;
     }
-    if (!confirmPassword.trim()) {
+    if (confirmPassword.length === 0) {
       setError(t('settings.appLock.validation.confirmRequired'));
       return;
     }

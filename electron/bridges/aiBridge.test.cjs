@@ -309,6 +309,20 @@ test("AI stream default total timeout is long enough for extended reasoning", ()
   }
 });
 
+test("AI stream total timeout never undercuts the configured idle timeout", () => {
+  const { bridge, restore } = loadBridgeWithMocks();
+  try {
+    const timeouts = bridge._resolveAIStreamTimeoutsForTests({
+      idleTimeoutMs: 60 * 60 * 1000,
+      totalTimeoutMs: 30 * 60 * 1000,
+    });
+    assert.equal(timeouts.idleTimeoutMs, 60 * 60 * 1000);
+    assert.ok(timeouts.totalTimeoutMs > timeouts.idleTimeoutMs);
+  } finally {
+    restore();
+  }
+});
+
 test("streaming requests enforce a total deadline even while bytes keep arriving", async () => {
   let requestClosed = false;
   let resolveRequestClosed;
@@ -513,6 +527,74 @@ test("streaming requests abort after the idle deadline when no more bytes arrive
     restore();
     await new Promise((resolve) => server.close(resolve));
   }
+});
+
+test("streaming chat handler forwards the configured idle deadline", { timeout: 5_000 }, async (t) => {
+  const sentEvents = [];
+  const server = http.createServer((request, response) => {
+    request.resume();
+    request.on("end", () => {
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      response.write('data:{"choices":[{"delta":{"content":"start"}}]}\n\n');
+    });
+  });
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+
+  const { bridge, restore } = loadBridgeWithMocks({
+    safeSend: (_sender, channel, payload) => sentEvents.push({ channel, payload }),
+  });
+  t.after(restore);
+  const ipcMain = createIpcMainStub();
+  bridge.init({
+    sessions: new Map(),
+    sftpClients: new Map(),
+    electronModule: { app: { getPath: () => process.cwd() }, session: {} },
+  });
+  bridge.registerHandlers(ipcMain);
+
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const baseURL = `http://127.0.0.1:${address.port}`;
+  const sender = { id: 1 };
+  await ipcMain.handlers.get("netcatty:ai:sync-providers")(
+    { sender },
+    { providers: [{ id: "custom-idle", baseURL }] },
+  );
+
+  const result = await ipcMain.handlers.get("netcatty:ai:chat:stream")(
+    { sender },
+    {
+      requestId: "custom-idle-request",
+      url: `${baseURL}/v1/chat/completions`,
+      headers: { "content-type": "application/json" },
+      body: '{"stream":true}',
+      providerId: "custom-idle",
+      idleTimeoutMs: 40,
+    },
+  );
+  assert.equal(result.ok, true);
+
+  const error = await new Promise((resolve, reject) => {
+    const started = Date.now();
+    const poll = () => {
+      const event = sentEvents.find(({ channel }) => channel === "netcatty:ai:stream:error");
+      if (event) {
+        resolve(event.payload.error);
+        return;
+      }
+      if (Date.now() - started > 1_000) {
+        reject(new Error("configured stream idle deadline was not forwarded"));
+        return;
+      }
+      setTimeout(poll, 10);
+    };
+    poll();
+  });
+  assert.match(error, /idle deadline exceeded|request timeout/i);
 });
 
 test("mcp attachment update handler forwards current chat attachments", async () => {
@@ -1059,6 +1141,33 @@ test("resolve-cli probes Windows Claude exe paths with spaces", { skip: process.
   }
 });
 
+test("resolve-cli reports Cursor Agent CLI on PATH as installed without CLI login", async () => {
+  const { bridge, restore } = loadBridgeWithMocks({
+    resolveCliFromPath: () => null,
+    probeCursorCliAuth: () => ({
+      authenticated: false,
+      authSource: null,
+      email: null,
+      binPath: "/usr/local/bin/cursor-agent",
+    }),
+  });
+  const ipcMain = createIpcMainStub();
+  bridge.init({ sessions: new Map(), sftpClients: new Map(), electronModule: { app: { getPath: () => process.cwd() } } });
+  bridge.registerHandlers(ipcMain);
+
+  try {
+    const resolveCli = ipcMain.handlers.get("netcatty:ai:resolve-cli");
+    const result = await resolveCli({ sender: { id: 1 } }, { command: "cursor", customPath: "" });
+    assert.equal(result.installed, true);
+    assert.equal(result.sdkInstalled, true);
+    assert.equal(result.cliBinPath, "/usr/local/bin/cursor-agent");
+    assert.equal(result.cliLoginOk, false);
+    assert.equal(result.available, false);
+  } finally {
+    restore();
+  }
+});
+
 test("resolve-cli reports Cursor SDK installed but unavailable without an API key", async () => {
   const { bridge, restore } = loadBridgeWithMocks({
     resolveCliFromPath: () => null,
@@ -1075,7 +1184,7 @@ test("resolve-cli reports Cursor SDK installed but unavailable without an API ke
       binPath: "cursor",
       version: "Cursor SDK",
       available: false,
-      installed: true,
+      installed: false,
       authenticated: false,
       authSource: null,
       cliEmail: null,
@@ -1109,7 +1218,7 @@ test("resolve-cli separates Cursor SDK installation from API key availability", 
       binPath: "cursor",
       version: "Cursor SDK",
       available: false,
-      installed: true,
+      installed: false,
       authenticated: false,
       authSource: null,
       cliEmail: null,
@@ -1144,7 +1253,7 @@ test("resolve-cli ignores custom Cursor paths and stores the SDK sentinel path",
       binPath: "cursor",
       version: "Cursor SDK",
       available: true,
-      installed: true,
+      installed: false,
       authenticated: true,
       authSource: "CURSOR_API_KEY",
       cliEmail: null,
@@ -1175,7 +1284,7 @@ test("resolve-cli exposes Cursor SDK support when installed and authenticated", 
       binPath: "cursor",
       version: "Cursor SDK",
       available: true,
-      installed: true,
+      installed: false,
       authenticated: true,
       authSource: "CURSOR_API_KEY",
       cliEmail: null,
@@ -1208,7 +1317,7 @@ test("resolve-cli exposes Cursor SDK support when API key is saved in settings",
       binPath: "/usr/local/bin/cursor",
       version: "Cursor SDK",
       available: true,
-      installed: true,
+      installed: false,
       authenticated: true,
       authSource: "settings",
       cliEmail: null,
@@ -1291,6 +1400,7 @@ test("discover exposes Cursor when CLI login succeeds without API key", async ()
     const cursor = agents.find((agent) => agent.command === "cursor");
 
     assert.equal(cursor?.available, true);
+    assert.equal(cursor?.installed, true);
     assert.equal(cursor?.authenticated, true);
     assert.equal(cursor?.authSource, "cli-login");
     assert.equal(cursor?.path, "/Users/me/.local/bin/agent");
@@ -1315,6 +1425,8 @@ test("discover exposes Cursor SDK support when API key is saved in settings", as
 
     assert.equal(cursor?.path, "cursor");
     assert.equal(cursor?.available, true);
+    assert.equal(cursor?.installed, false);
+    assert.equal(cursor?.sdkInstalled, true);
     assert.equal(cursor?.authenticated, true);
     assert.equal(cursor?.authSource, "settings");
   } finally {
@@ -1340,6 +1452,7 @@ test("resolve-cli exposes Cursor CLI login without API key", async () => {
     const resolveCli = ipcMain.handlers.get("netcatty:ai:resolve-cli");
     const result = await resolveCli({ sender: { id: 1 } }, { command: "cursor", customPath: "" });
     assert.equal(result.available, true);
+    assert.equal(result.installed, true);
     assert.equal(result.authenticated, true);
     assert.equal(result.authSource, "cli-login");
     assert.equal(result.path, "/Users/me/.local/bin/agent");

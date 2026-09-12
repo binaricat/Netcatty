@@ -40,6 +40,10 @@ on:
   pull_request:
     paths:
       - ".github/workflows/build.yml"
+      - "components/AppLockGate.tsx"
+      - "components/TrayPanel.tsx"
+      - "index.tsx"
+      - "index.css"
       - "build/**"
       - "electron-builder.config.cjs"
       - "electron/**"
@@ -71,11 +75,14 @@ on:
       - "scripts/linux/**"
       - "scripts/mosh-extra-resources.cjs"
       - "scripts/nodePtyConptyPatch.cjs"
+      - "scripts/patch-xterm-macos-column-selection.cjs"
       - "scripts/patch-xterm-webgl-atlas.cjs"
       - "scripts/rebuildPatchedNodePty.cjs"
       - "scripts/resolve-et-bin-release.cjs"
       - "scripts/resolve-mosh-bin-release.cjs"
+      - "scripts/tray-panel-layout.live.test.cjs"
       - "scripts/verify-linux-*.sh"
+      - "scripts/xterm-macos-column-selection.live.test.cjs"
       - "skills/**"
 
 # A newer run for the same main push or PR cancels older in-progress work.
@@ -243,6 +250,10 @@ jobs:
       - name: Install deps
         run: npm ci
 
+      - name: Test macOS Option column selection
+        if: matrix.name == 'macos'
+        run: npm run test:xterm-macos-selection
+
       - name: Compile ConPTY test helpers
         if: matrix.name == 'windows'
         shell: pwsh
@@ -311,6 +322,15 @@ jobs:
           APPLE_APP_SPECIFIC_PASSWORD: ${{ matrix.name == 'macos' && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
           APPLE_TEAM_ID: ${{ matrix.name == 'macos' && secrets.APPLE_TEAM_ID || '' }}
         run: npm run ${{ matrix.pack_script }}
+
+      - name: Test tray panel layout
+        run: npm run test:tray-panel-layout
+
+      - name: Test tray panel layout at 200% scale on Windows
+        if: matrix.name == 'windows'
+        env:
+          NETCATTY_TRAY_LAYOUT_SCALE: "2"
+        run: npm run test:tray-panel-layout
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
@@ -675,6 +695,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Security CDN endpoints can lack files advertised in their indexes.
+          # Fall back per file, with the final Bullseye security snapshot for packages only.
+          # Live signed indexes still select versions and verify every download.
+          printf 'http://deb.debian.org/debian-security\tpriority:1\nhttp://security.debian.org/debian-security\tpriority:2\nhttp://snapshot.debian.org/archive/debian-security/20260901T000000Z/\tpriority:3 type:deb\n' > /etc/apt/security-mirrors.txt
+          sed -i 's|http://deb.debian.org/debian-security|mirror+file:/etc/apt/security-mirrors.txt|g' /etc/apt/sources.list
           apt-get -o Acquire::Retries=4 update
           apt-get -o Acquire::Retries=4 install -y curl build-essential python3 git libfuse2 file rpm \
             libarchive-tools \

@@ -102,6 +102,7 @@ declare global {
     // Cloud sync master password (stored in-memory + persisted via Electron safeStorage)
     cloudSyncSetSessionPassword?(password: string): Promise<boolean>;
     cloudSyncGetSessionPassword?(): Promise<string | null>;
+    onCloudSyncSessionPasswordAvailable?(callback: () => void): () => void;
     cloudSyncClearSessionPassword?(): Promise<boolean>;
 
     // Cloud sync network operations (proxied via main process)

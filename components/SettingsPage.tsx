@@ -25,6 +25,8 @@ import { useExternalMcpGrantPersister } from "./ai/useExternalMcpGrantPersister"
 import { setupMcpApprovalBridge } from "../infrastructure/ai/shared/approvalGate";
 import { usePluginContributions } from "../application/state/usePluginContributions";
 import { PluginContributionHost } from "./plugins/PluginContributionHost";
+import { matchesKeyBinding } from "../domain/models";
+import { isPrimaryModifierWBinding } from "../application/state/windowCommandClose";
 
 const LazySettingsApplicationTab = lazy(() => import("./SettingsApplicationTab"));
 const LazySettingsAppearanceTab = lazy(() => import("./settings/tabs/SettingsAppearanceTab"));
@@ -220,6 +222,8 @@ const SettingsAITabContainer: React.FC = () => {
                 setCommandBlocklist={aiState.setCommandBlocklist}
                 commandTimeout={aiState.commandTimeout}
                 setCommandTimeout={aiState.setCommandTimeout}
+                responseIdleTimeout={aiState.responseIdleTimeout}
+                setResponseIdleTimeout={aiState.setResponseIdleTimeout}
                 maxIterations={aiState.maxIterations}
                 setMaxIterations={aiState.setMaxIterations}
                 webSearchConfig={aiState.webSearchConfig}
@@ -312,6 +316,13 @@ const SettingsPageContent: React.FC<{ settings: SettingsState; appLock?: AppLock
     const [activeTab, setActiveTab] = useState("application");
     const [mountedTabs, setMountedTabs] = useState(() => new Set(["application"]));
     const { available: pluginRuntimeAvailable } = usePluginContributions();
+    const closeTabKeyStr = useMemo(() => {
+        if (settings.hotkeyScheme === "disabled") return null;
+        const binding = settings.keyBindings.find((item) => item.action === "closeTab");
+        if (!binding) return null;
+        return settings.hotkeyScheme === "mac" ? binding.mac : binding.pc;
+    }, [settings.hotkeyScheme, settings.keyBindings]);
+    const nativeCommandWClosesSettings = isPrimaryModifierWBinding(closeTabKeyStr, matchesKeyBinding, true);
 
     useEffect(() => {
         notifyRendererReady();
@@ -336,10 +347,20 @@ const SettingsPageContent: React.FC<{ settings: SettingsState; appLock?: AppLock
 
     useEffect(() => {
         const unsubscribe = onWindowCommandCloseRequested(() => {
+            if (!nativeCommandWClosesSettings) {
+                (document.activeElement ?? window).dispatchEvent(new KeyboardEvent("keydown", {
+                    key: "w",
+                    code: "KeyW",
+                    metaKey: true,
+                    bubbles: true,
+                    cancelable: true,
+                }));
+                return;
+            }
             void closeSettingsWindow();
         });
         return () => unsubscribe?.();
-    }, [closeSettingsWindow, onWindowCommandCloseRequested]);
+    }, [closeSettingsWindow, nativeCommandWClosesSettings, onWindowCommandCloseRequested]);
 
     useEffect(() => {
         setMountedTabs((prev) => {
@@ -640,6 +661,9 @@ const SettingsPageContent: React.FC<{ settings: SettingsState; appLock?: AppLock
                                 setToggleWindowHotkey={settings.setToggleWindowHotkey}
                                 closeToTray={settings.closeToTray}
                                 setCloseToTray={settings.setCloseToTray}
+                                autoLaunchEnabled={settings.autoLaunchEnabled}
+                                setAutoLaunchEnabled={settings.setAutoLaunchEnabled}
+                                autoLaunchSupported={settings.autoLaunchSupported}
                                 httpNetworkProxy={settings.httpNetworkProxy}
                                 setHttpNetworkProxy={settings.setHttpNetworkProxy}
                                 hotkeyRegistrationError={settings.hotkeyRegistrationError}

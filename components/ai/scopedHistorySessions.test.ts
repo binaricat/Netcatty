@@ -173,3 +173,52 @@ test("terminal scoped history cache has a hard LRU bound", () => {
   }
   assert.ok(_getScopedHistoryCacheSizeForTests(sessions) <= 64);
 });
+
+test("workspace history retains chats resumed by members from older terminals", () => {
+  const resumed = createSession("resumed", {
+    type: "terminal", targetId: "closed-terminal", hostIds: ["host-a"],
+  }, 1);
+  const unrelated = createSession("unrelated", {
+    type: "terminal", targetId: "another-closed-terminal", hostIds: ["host-a"],
+  }, 2);
+  const staleWorkspace = createSession("stale-workspace", {
+    type: "workspace", targetId: "old-workspace",
+  }, 99);
+  const sessions = [staleWorkspace, unrelated, resumed];
+  const members = new Set(["terminal-a", "terminal-b"]);
+  const selected = {
+    "terminal:terminal-a": "resumed",
+    "terminal:terminal-outside": "unrelated",
+  };
+
+  assert.ok(getScopedHistorySessions(
+    sessions, "terminal", "terminal-a", ["host-a"], new Set(["unrelated"]),
+  ).includes(resumed));
+  assert.deepEqual(getScopedHistorySessions(
+    sessions, "workspace", "merged", ["host-a"], new Set(Object.values(selected)),
+    members, selected,
+  ), [resumed, staleWorkspace]);
+  // Returning to A makes the same stored conversation available again.
+  assert.ok(getScopedHistorySessions(
+    sessions, "terminal", "terminal-a", ["host-a"], new Set(["unrelated"]),
+  ).includes(resumed));
+  assert.equal(resumed.scope.targetId, "closed-terminal");
+});
+
+test("workspace history cache tracks member selections but ignores unrelated selections", () => {
+  const sessions = [createSession("resumed", { type: "terminal", targetId: "closed" }, 1)];
+  const members = new Set(["terminal-a"]);
+  const history = (selected: Record<string, string | null>) => getScopedHistorySessions(
+    sessions, "workspace", "merged", undefined, new Set(), members, selected,
+  );
+  const empty = history({});
+  assert.deepEqual(empty, []);
+  const inherited = history({ "terminal:terminal-a": "resumed" });
+  assert.deepEqual(inherited, sessions);
+  assert.equal(history({
+    "terminal:terminal-a": "resumed", "terminal:outside": "other",
+  }), inherited);
+  assert.equal(history({ "terminal:terminal-a": null }), empty);
+  assert.equal(history({ "workspace:unrelated": "resumed" }), empty);
+  assert.equal(_getScopedHistoryCacheSizeForTests(sessions), 2);
+});

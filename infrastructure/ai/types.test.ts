@@ -16,6 +16,14 @@ import {
   resolveDiscoveredAgentCliVersion,
 } from './types';
 
+test('Claude presets advertise effort levels separately from the model id', () => {
+  for (const preset of CLAUDE_MODEL_PRESETS) {
+    assert.deepEqual(preset.thinkingLevels, ['low', 'medium', 'high', 'max']);
+    assert.ok(preset.defaultThinkingLevel);
+  }
+  assert.equal(resolveAgentModelSelection(CLAUDE_MODEL_PRESETS[0]!), 'default/medium');
+});
+
 test('getAgentModelPresets returns CodeBuddy fallback models for command paths', () => {
   assert.deepEqual(
     getAgentModelPresets('/opt/homebrew/bin/codebuddy'),
@@ -30,6 +38,14 @@ test('getAgentModelPresets returns Cursor presets for cursor-agent paths and sdk
   // Bare `agent` is no longer treated as Cursor without an explicit sdkBackend.
   assert.deepEqual(getAgentModelPresets('/Users/me/.local/bin/agent'), []);
   assert.equal(getAgentModelPresets('/Users/me/.local/bin/agent', 'cursor')[0]?.id, 'auto');
+  assert.deepEqual(
+    getAgentModelPresets(undefined, 'cursor').find((model) => model.id === 'gpt-5.5')?.thinkingLevels,
+    ['low', 'medium', 'high'],
+  );
+  assert.deepEqual(
+    getAgentModelPresets(undefined, 'codebuddy')[0]?.thinkingLevels,
+    ['low', 'medium', 'high', 'xhigh'],
+  );
 });
 
 test('getAgentModelPresets keeps Codex presets separate from CodeBuddy presets', () => {
@@ -129,6 +145,16 @@ test('resolveAgentModelSelection uses catalog default effort, not last array ent
   assert.equal(
     resolveAgentModelSelection({ id: 'plain', name: 'Plain' }),
     'plain',
+  );
+  assert.equal(
+    resolveAgentModelSelection({
+      id: 'glm-5.1',
+      name: 'GLM 5.1',
+      thinkingLevels: ['low', 'medium', 'high'],
+      defaultThinkingLevel: 'medium',
+      encodeDefaultThinking: false,
+    }),
+    'glm-5.1',
   );
 });
 

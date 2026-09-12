@@ -253,3 +253,13 @@ test("startup snippet order backfill uses the locked vault writer", () => {
     /const orderedSnippets = normalizeVaultOrder\(savedSnippets\);\s*setSnippets\(orderedSnippets\);\s*localStorageAdapter\.write\(STORAGE_KEY_SNIPPETS, orderedSnippets\);/,
   );
 });
+
+test("importData preserves device-local lastConnectedAt when a cloud payload omits it", () => {
+  // Cloud payloads no longer carry lastConnectedAt (#2629), but any remote
+  // reconciliation replaces the whole local host array. Import must re-attach
+  // each matching local host's device-local timestamp instead of dropping it.
+  assert.match(
+    source,
+    /retainLocalHostLastConnectedAt\(payload\.hosts,\s*hostsRef\.current\)/,
+  );
+});

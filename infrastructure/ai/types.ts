@@ -1,5 +1,5 @@
 // AI Provider types
-import defaultCommandBlocklist from '../../lib/commandBlocklist.json';
+import commandBlocklistTable from '../../lib/commandBlocklist.json';
 import type { AgentActivity, AgentUsage } from '../../domain/agentActivity';
 import type { ProviderContinuation } from './providerContinuation';
 
@@ -105,6 +105,10 @@ export interface ChatMessageAttachment {
   filename?: string;
   filePath?: string;    // original filesystem path, when available
   terminalSelection?: boolean;
+  /** Set when the attachment was created from a Vault → Notes mention. */
+  vaultNoteId?: string;
+  /** Original note title, for display and prompt labels. */
+  vaultNoteTitle?: string;
   previewText?: string;
   lineCount?: number;
 }
@@ -117,6 +121,10 @@ export interface UploadedFile {
   mediaType: string;
   filePath?: string;
   terminalSelection?: boolean;
+  /** Set when the attachment was created from a Vault → Notes mention. */
+  vaultNoteId?: string;
+  /** Original note title, for display and prompt labels. */
+  vaultNoteTitle?: string;
   previewText?: string;
   lineCount?: number;
 }
@@ -381,20 +389,31 @@ export interface AISettings {
   defaultAgentId: string;
   commandBlocklist: string[];    // global command blocklist patterns
   commandTimeout: number;        // seconds, default 60
+  responseIdleTimeout: number;   // seconds without response data, default 120
   maxIterations: number;         // doom loop prevention, default 20
   webSearchConfig?: WebSearchConfig;
 }
 
 export const DEFAULT_COMMAND_BLOCKLIST = [
-  ...defaultCommandBlocklist,
+  ...commandBlocklistTable.common,
+  ...commandBlocklistTable.posixNative,
+  ...commandBlocklistTable.posix,
+  ...commandBlocklistTable.powershell,
 ];
 
 export const DEFAULT_COMMAND_TIMEOUT_SECONDS = 60;
 export const MAX_COMMAND_TIMEOUT_SECONDS = 24 * 60 * 60;
+export const DEFAULT_RESPONSE_IDLE_TIMEOUT_SECONDS = 2 * 60;
+export const MAX_RESPONSE_IDLE_TIMEOUT_SECONDS = 24 * 60 * 60;
 
 export function normalizeCommandTimeoutSeconds(value: number): number {
   if (!Number.isFinite(value)) return DEFAULT_COMMAND_TIMEOUT_SECONDS;
   return Math.min(MAX_COMMAND_TIMEOUT_SECONDS, Math.max(1, value));
+}
+
+export function normalizeResponseIdleTimeoutSeconds(value: number): number {
+  if (!Number.isFinite(value)) return DEFAULT_RESPONSE_IDLE_TIMEOUT_SECONDS;
+  return Math.min(MAX_RESPONSE_IDLE_TIMEOUT_SECONDS, Math.max(1, value));
 }
 
 export const DEFAULT_AI_SETTINGS: AISettings = {
@@ -407,6 +426,7 @@ export const DEFAULT_AI_SETTINGS: AISettings = {
   defaultAgentId: 'catty',
   commandBlocklist: [...DEFAULT_COMMAND_BLOCKLIST],
   commandTimeout: DEFAULT_COMMAND_TIMEOUT_SECONDS,
+  responseIdleTimeout: DEFAULT_RESPONSE_IDLE_TIMEOUT_SECONDS,
   maxIterations: 20,
 };
 
@@ -516,16 +536,41 @@ export interface AgentModelPreset {
    */
   defaultThinkingLevel?: string;
   /**
+   * When false, a stored bare model id stays unsuffixed so the driver can
+   * apply its own settings-level effort. Defaults to true.
+   */
+  encodeDefaultThinking?: boolean;
+  /**
    * Minimum agent CLI version that advertises this model (semver core).
    * Netcatty is BYO-CLI: the packaged SDK does not replace the user's binary.
    */
   minCliVersion?: string;
 }
 
+const CLAUDE_REASONING_LEVELS = ['low', 'medium', 'high', 'max'] as const;
+
 export const CLAUDE_MODEL_PRESETS: AgentModelPreset[] = [
-  { id: 'default', name: 'Opus 4.6', description: 'Recommended' },
-  { id: 'sonnet', name: 'Sonnet 4.6', description: 'Everyday tasks' },
-  { id: 'haiku', name: 'Haiku 4.5', description: 'Fastest' },
+  {
+    id: 'default',
+    name: 'Opus 4.6',
+    description: 'Recommended',
+    thinkingLevels: [...CLAUDE_REASONING_LEVELS],
+    defaultThinkingLevel: 'medium',
+  },
+  {
+    id: 'sonnet',
+    name: 'Sonnet 4.6',
+    description: 'Everyday tasks',
+    thinkingLevels: [...CLAUDE_REASONING_LEVELS],
+    defaultThinkingLevel: 'medium',
+  },
+  {
+    id: 'haiku',
+    name: 'Haiku 4.5',
+    description: 'Fastest',
+    thinkingLevels: [...CLAUDE_REASONING_LEVELS],
+    defaultThinkingLevel: 'low',
+  },
 ];
 
 // Curated codex model list (codex-sdk has no enumeration API). IDs/efforts
@@ -623,6 +668,7 @@ export function filterAgentModelPresetsForCliVersion(
 export function resolveAgentModelSelection(preset: AgentModelPreset): string {
   const levels = preset.thinkingLevels;
   if (!levels?.length) return preset.id;
+  if (preset.encodeDefaultThinking === false) return preset.id;
   const preferred = preset.defaultThinkingLevel;
   if (preferred && levels.includes(preferred)) {
     return `${preset.id}/${preferred}`;
@@ -688,31 +734,76 @@ export function resolveAgentCliVersion(
   return resolveDiscoveredAgentCliVersion(agent, discovered);
 }
 
+const CURSOR_REASONING_LEVELS = ['low', 'medium', 'high'] as const;
+
 export const CURSOR_MODEL_PRESETS: AgentModelPreset[] = [
   { id: 'auto', name: 'Auto', description: 'Recommended for CLI login / subscription quota' },
   { id: 'composer-2.5', name: 'Composer 2.5', description: 'Recommended for API key' },
-  { id: 'gpt-5.5', name: 'GPT-5.5' },
-  { id: 'gpt-5.2', name: 'GPT-5.2' },
-  { id: 'gpt-5.1', name: 'GPT-5.1' },
-  { id: 'claude-opus-4.6', name: 'Claude Opus 4.6' },
-  { id: 'claude-sonnet-4.6', name: 'Claude Sonnet 4.6' },
+  {
+    id: 'gpt-5',
+    name: 'GPT-5',
+    thinkingLevels: [...CURSOR_REASONING_LEVELS],
+    defaultThinkingLevel: 'medium',
+  },
+  {
+    id: 'gpt-5.5',
+    name: 'GPT-5.5',
+    thinkingLevels: [...CURSOR_REASONING_LEVELS],
+    defaultThinkingLevel: 'medium',
+  },
+  {
+    id: 'gpt-5.2',
+    name: 'GPT-5.2',
+    thinkingLevels: [...CURSOR_REASONING_LEVELS],
+    defaultThinkingLevel: 'medium',
+  },
+  {
+    id: 'gpt-5.1',
+    name: 'GPT-5.1',
+    thinkingLevels: [...CURSOR_REASONING_LEVELS],
+    defaultThinkingLevel: 'medium',
+  },
+  {
+    id: 'claude-opus-4.6',
+    name: 'Claude Opus 4.6',
+    thinkingLevels: [...CURSOR_REASONING_LEVELS],
+    defaultThinkingLevel: 'medium',
+  },
+  {
+    id: 'claude-sonnet-4.6',
+    name: 'Claude Sonnet 4.6',
+    thinkingLevels: [...CURSOR_REASONING_LEVELS],
+    defaultThinkingLevel: 'medium',
+  },
 ];
 
 // CodeBuddy's SDK model enumeration can be empty depending on CLI/account
 // state; keep a CLI-supported fallback list so users can still pass --model.
+const CODEBUDDY_REASONING_LEVELS = ['low', 'medium', 'high', 'xhigh'] as const;
+
+function codebuddyPreset(id: string, name: string): AgentModelPreset {
+  return {
+    id,
+    name,
+    thinkingLevels: [...CODEBUDDY_REASONING_LEVELS],
+    defaultThinkingLevel: 'medium',
+    encodeDefaultThinking: false,
+  };
+}
+
 export const CODEBUDDY_MODEL_PRESETS: AgentModelPreset[] = [
-  { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro' },
-  { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash' },
-  { id: 'deepseek-v3-2-volc', name: 'DeepSeek V3.2' },
-  { id: 'glm-5.1', name: 'GLM 5.1' },
-  { id: 'glm-5.0', name: 'GLM 5.0' },
-  { id: 'glm-5.0-turbo', name: 'GLM 5.0 Turbo' },
-  { id: 'glm-5v-turbo', name: 'GLM 5V Turbo' },
-  { id: 'glm-4.7', name: 'GLM 4.7' },
-  { id: 'minimax-m3-pay', name: 'MiniMax M3' },
-  { id: 'minimax-m2.7', name: 'MiniMax M2.7' },
-  { id: 'kimi-k2.6', name: 'Kimi K2.6' },
-  { id: 'hy3-preview', name: 'Hy3 Preview' },
+  codebuddyPreset('deepseek-v4-pro', 'DeepSeek V4 Pro'),
+  codebuddyPreset('deepseek-v4-flash', 'DeepSeek V4 Flash'),
+  codebuddyPreset('deepseek-v3-2-volc', 'DeepSeek V3.2'),
+  codebuddyPreset('glm-5.1', 'GLM 5.1'),
+  codebuddyPreset('glm-5.0', 'GLM 5.0'),
+  codebuddyPreset('glm-5.0-turbo', 'GLM 5.0 Turbo'),
+  codebuddyPreset('glm-5v-turbo', 'GLM 5V Turbo'),
+  codebuddyPreset('glm-4.7', 'GLM 4.7'),
+  codebuddyPreset('minimax-m3-pay', 'MiniMax M3'),
+  codebuddyPreset('minimax-m2.7', 'MiniMax M2.7'),
+  codebuddyPreset('kimi-k2.6', 'Kimi K2.6'),
+  codebuddyPreset('hy3-preview', 'Hy3 Preview'),
 ];
 
 export const OPENCODE_MODEL_PRESETS: AgentModelPreset[] = [

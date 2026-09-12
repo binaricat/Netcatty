@@ -29,6 +29,7 @@ import type {
 } from "../../domain/vaultImport";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
+import { Input } from "../ui/input";
 import {
   Dialog,
   DialogContent,
@@ -55,7 +56,7 @@ const OPTIONS: ImportOption[] = [
     format: "mobaxterm",
     label: "MobaXterm",
     iconSrc: "/import/moba.jpg",
-    accept: ".ini,.mxtsessions,.txt",
+    accept: ".ini,.mxtsessions,.txt,.mobaconf",
   },
   {
     format: "csv",
@@ -406,6 +407,7 @@ export const ImportVaultDialog: React.FC<ImportVaultDialogProps> = ({
   const existingGroupQueryRef = useRef(existingGroupQuery);
   existingGroupQueryRef.current = existingGroupQuery;
   const [newGroup, setNewGroup] = useState("");
+  const [mobaMasterPassword, setMobaMasterPassword] = useState("");
   const destination = buildVaultImportDestination({
     mode: destinationMode,
     existingGroup,
@@ -438,6 +440,7 @@ export const ImportVaultDialog: React.FC<ImportVaultDialogProps> = ({
     setExistingGroup(groups[0] ?? "");
     setExistingGroupQuery(groups[0] ?? "");
     setNewGroup("");
+    setMobaMasterPassword("");
   }, [groups, open]);
   const pluginImporter = usePluginVaultImporter({
     open,
@@ -511,9 +514,12 @@ export const ImportVaultDialog: React.FC<ImportVaultDialogProps> = ({
   const handleMobaEncodingChoice = useCallback(
     (encoding: VaultImportFileEncoding) => {
       setStep("format");
-      pickFile("mobaxterm", ".ini,.mxtsessions,.txt", { encoding });
+      pickFile("mobaxterm", ".ini,.mxtsessions,.txt,.mobaconf", {
+        encoding,
+        masterPassword: mobaMasterPassword === "" ? undefined : mobaMasterPassword,
+      });
     },
-    [pickFile],
+    [mobaMasterPassword, pickFile],
   );
 
   const handleSecureCrtChoice = useCallback(
@@ -845,6 +851,25 @@ export const ImportVaultDialog: React.FC<ImportVaultDialogProps> = ({
                         </div>
                       </button>
                     ))}
+                  </div>
+                  <div className="space-y-2">
+                    <label
+                      htmlFor="moba-master-password"
+                      className="block text-center text-sm font-medium text-muted-foreground"
+                    >
+                      {t("vault.import.mobaxterm.masterPassword")}
+                    </label>
+                    <Input
+                      id="moba-master-password"
+                      type="password"
+                      autoComplete="off"
+                      value={mobaMasterPassword}
+                      onChange={(event) => setMobaMasterPassword(event.target.value)}
+                      placeholder={t("vault.import.mobaxterm.masterPasswordPlaceholder")}
+                    />
+                    <p className="text-center text-xs text-muted-foreground">
+                      {t("vault.import.mobaxterm.masterPasswordHint")}
+                    </p>
                   </div>
                   <button
                     type="button"

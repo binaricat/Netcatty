@@ -14,14 +14,25 @@
  * - components/sftp/SftpHostPicker.tsx - Host selection dialog
  */
 
-import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "../application/i18n/I18nProvider";
-import { useIsSftpActive } from "../application/state/activeTabStore";
+import { activeTabStore as globalActiveTabStore, useIsSftpActive } from "../application/state/activeTabStore";
 import { useSftpState } from "../application/state/useSftpState";
 import { useSftpBackend } from "../application/state/useSftpBackend";
 import { getParentPath, isConcreteTransferTargetPath } from "../application/state/sftp/utils";
+import { buildCacheKey } from "../application/state/sftp/sharedRemoteHostCache";
 import { HotkeyScheme, KeyBinding, TerminalSession } from "../domain/models";
+import {
+  getPaneMagnificationShortcutLabel,
+  resolveTwoPaneMagnificationStyle,
+  type PaneMagnificationController,
+} from "../domain/paneMagnification";
 import { listSftpConnectedHosts, resolveSftpTransferSourceSessionId, sftpPickerSessionsEqual } from "../domain/sftpConnectedHosts";
+import { applyDualPaneSftpOpen, dualPaneTabFromPane } from "../domain/sftpDualPaneOpen";
+import {
+  consumePendingDualPaneSftpRequest,
+  subscribeDualPaneSftpOpen,
+} from "../application/state/sftp/sftpDualPaneOpenStore";
 import { logger } from "../lib/logger";
 import { useRenderTracker } from "../lib/useRenderTracker";
 import { cn } from "../lib/utils";
@@ -73,6 +84,7 @@ interface SftpViewProps {
   editorWordWrap: boolean;
   setEditorWordWrap: (enabled: boolean) => void;
   terminalSettings?: { verifyHostKeys: boolean; keepaliveInterval: number; keepaliveCountMax: number };
+  paneMagnificationRef?: React.MutableRefObject<PaneMagnificationController | null>;
 }
 
 const SftpViewInner: React.FC<SftpViewProps> = ({
@@ -96,8 +108,10 @@ const SftpViewInner: React.FC<SftpViewProps> = ({
   editorWordWrap,
   setEditorWordWrap,
   terminalSettings,
+  paneMagnificationRef,
 }) => {
   const { t } = useI18n();
+  const paneMagnificationShortcutLabel = getPaneMagnificationShortcutLabel(keyBindings, hotkeyScheme);
   const isActive = useIsSftpActive();
   const rootRef = useRef<HTMLDivElement>(null);
   const dialogActionScopeIdRef = useRef("sftp-main-view");
@@ -185,6 +199,54 @@ const SftpViewInner: React.FC<SftpViewProps> = ({
   // without needing to re-create when sftp changes
   const sftpRef = useRef(sftp);
   sftpRef.current = sftp;
+  const effectiveHostsRef = useRef(effectiveHosts);
+  effectiveHostsRef.current = effectiveHosts;
+
+  useEffect(() => {
+    const toTabs = (panes: Array<{
+      id: string;
+      connection: { id: string; isLocal?: boolean; hostId?: string | null; status?: string | null } | null;
+    }>, getEndpointKey: (connectionId: string) => string | null) => panes.map(
+      (pane) => dualPaneTabFromPane(
+        pane,
+        pane.connection ? getEndpointKey(pane.connection.id) : null,
+      ),
+    );
+
+    const applyRequest = (request: { hostId: string } | null) => {
+      if (!request) return;
+      const host = effectiveHostsRef.current.find((candidate) => candidate.id === request.hostId);
+      if (!host) return;
+      const current = sftpRef.current;
+      const hostEndpointKey = buildCacheKey(
+        host.id,
+        host.hostname,
+        host.port,
+        host.protocol,
+        host.sftpSudo,
+        host.username,
+        host.sftpFileProtocol,
+      );
+      // External "Open SFTP" promises a visible local-left / host-right pair.
+      // Clear a stale single-pane magnification before selecting or connecting.
+      setMagnifiedSide(null);
+      applyDualPaneSftpOpen(
+        {
+          leftTabs: toTabs(current.leftTabs.tabs, current.getConnectionCacheKey),
+          rightTabs: toTabs(current.rightTabs.tabs, current.getConnectionCacheKey),
+          selectTab: current.selectTab,
+          connect: (side, nextHost, options) => {
+            void current.connect(side, nextHost === "local" ? "local" : host, options);
+          },
+        },
+        host,
+        hostEndpointKey,
+      );
+    };
+
+    applyRequest(consumePendingDualPaneSftpRequest());
+    return subscribeDualPaneSftpOpen(applyRequest);
+  }, []);
 
   // Register this useSftpState's writeTextFileByConnection with the bridge so
   // the editor tab's save path can reach the active SFTP session. The bridge
@@ -222,12 +284,71 @@ const SftpViewInner: React.FC<SftpViewProps> = ({
 
   // Subscribe to focused side for visual indicator
   const focusedSide = useSftpFocusedSide();
+  const [magnifiedSide, setMagnifiedSide] = useState<SftpFocusedSide | null>(null);
+  const focusedSideRef = useRef(focusedSide);
+  const magnifiedSideRef = useRef(magnifiedSide);
+  focusedSideRef.current = focusedSide;
+  magnifiedSideRef.current = magnifiedSide;
+  const [isWideSplit, setIsWideSplit] = useState(true);
+  const [showMagnificationHint, setShowMagnificationHint] = useState(false);
+  const splitSurfaceRef = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    const surface = splitSurfaceRef.current;
+    if (!surface) return undefined;
+    const update = () => setIsWideSplit(surface.clientWidth >= 1024);
+    update();
+    if (typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver(update);
+    observer.observe(surface);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!magnifiedSide) {
+      setShowMagnificationHint(false);
+      return undefined;
+    }
+    setShowMagnificationHint(true);
+    const timerId = window.setTimeout(() => setShowMagnificationHint(false), 1800);
+    return () => window.clearTimeout(timerId);
+  }, [magnifiedSide]);
+
+  useEffect(() => {
+    if (!paneMagnificationRef) return undefined;
+    const controller: PaneMagnificationController = {
+      getState: () => {
+        if (globalActiveTabStore.getActiveTabId() !== 'sftp') return 'unavailable';
+        return magnifiedSideRef.current ? 'focused' : 'focusable';
+      },
+      focus: () => {
+        if (globalActiveTabStore.getActiveTabId() !== 'sftp' || magnifiedSideRef.current) return false;
+        setMagnifiedSide(focusedSideRef.current);
+        return true;
+      },
+      restore: () => {
+        if (globalActiveTabStore.getActiveTabId() !== 'sftp' || !magnifiedSideRef.current) return false;
+        setMagnifiedSide(null);
+        return true;
+      },
+      toggle: () => {
+        if (globalActiveTabStore.getActiveTabId() !== 'sftp') return false;
+        setMagnifiedSide((current) => current ? null : focusedSideRef.current);
+        return true;
+      },
+    };
+    paneMagnificationRef.current = controller;
+    return () => {
+      if (paneMagnificationRef.current === controller) paneMagnificationRef.current = null;
+    };
+  }, [paneMagnificationRef]);
 
   // Handle pane focus when clicking on a pane container
   // Clear the opposite side's selection so file operations only affect the focused pane
   const handlePaneFocus = useCallback((side: SftpFocusedSide, targetTabId?: string) => {
     const prevSide = sftpFocusStore.getFocusedSide();
     sftpFocusStore.setFocusedSide(side);
+    setMagnifiedSide((current) => current ? side : null);
     if (prevSide !== side) {
       if (targetTabId) {
         keepOnlyPaneSelections(sftpRef.current, { side, tabId: targetTabId });
@@ -481,10 +602,26 @@ const SftpViewInner: React.FC<SftpViewProps> = ({
         )}
         style={containerStyle}
       >
-        <div className="flex-1 grid grid-cols-1 lg:grid-cols-2 min-h-0 border-t border-border/70">
+        <div
+          ref={splitSurfaceRef}
+          className="relative flex-1 min-h-0 border-t border-border/70 overflow-hidden"
+          data-section="sftp-main-split"
+          data-magnified-side={magnifiedSide ?? undefined}
+        >
+          {magnifiedSide && (
+            <div
+              className="absolute inset-0 z-40 bg-background/55 backdrop-blur-[1px]"
+              aria-hidden="true"
+              data-section="pane-magnification-backdrop"
+            />
+          )}
           <div
-            className="relative border-r border-border/70 flex flex-col"
+            className="absolute min-w-0 border-r border-border/70 bg-background flex flex-col transition-[left,top,width,height] duration-150 ease-out"
+            style={resolveTwoPaneMagnificationStyle('left', isWideSplit, magnifiedSide === 'left')}
+            data-sftp-pane-side="left"
+            inert={magnifiedSide === 'right' ? true : undefined}
             onClick={() => handlePaneFocus("left")}
+            onFocusCapture={() => handlePaneFocus("left")}
           >
             {/* Focus indicator triangle */}
             {focusedSide === "left" && (
@@ -544,8 +681,12 @@ const SftpViewInner: React.FC<SftpViewProps> = ({
             </div>
           </div>
           <div
-            className="relative flex flex-col"
+            className="absolute min-w-0 bg-background flex flex-col transition-[left,top,width,height] duration-150 ease-out"
+            style={resolveTwoPaneMagnificationStyle('right', isWideSplit, magnifiedSide === 'right')}
+            data-sftp-pane-side="right"
+            inert={magnifiedSide === 'left' ? true : undefined}
             onClick={() => handlePaneFocus("right")}
+            onFocusCapture={() => handlePaneFocus("right")}
           >
             {/* Focus indicator triangle */}
             {focusedSide === "right" && (
@@ -604,6 +745,15 @@ const SftpViewInner: React.FC<SftpViewProps> = ({
               )}
             </div>
           </div>
+          {magnifiedSide && showMagnificationHint && (
+            <div
+              className="pointer-events-none absolute bottom-4 right-4 z-[60] rounded border border-border/70 bg-background/90 px-2 py-1 text-[10px] text-muted-foreground shadow-sm animate-in fade-in duration-150"
+              data-section="pane-magnification-hint"
+            >
+              {t('terminal.paneMagnification.hint')}: {t('terminal.layer.sftp')}
+              {paneMagnificationShortcutLabel ? ` · ${paneMagnificationShortcutLabel} / Esc` : ' · Esc'}
+            </div>
+          )}
         </div>
 
         <SftpOverlays
@@ -669,6 +819,7 @@ export const sftpViewAreEqual = (prev: SftpViewProps, next: SftpViewProps): bool
   prev.sftpUseCompressedUpload === next.sftpUseCompressedUpload &&
   prev.hotkeyScheme === next.hotkeyScheme &&
   prev.keyBindings === next.keyBindings &&
+  prev.paneMagnificationRef === next.paneMagnificationRef &&
   prev.editorWordWrap === next.editorWordWrap &&
   prev.setEditorWordWrap === next.setEditorWordWrap &&
   // Only these terminal connection settings affect SFTP connection

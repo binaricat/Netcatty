@@ -21,6 +21,13 @@ function channelAbortError(signal, label) {
   return error;
 }
 
+function monotonicNow() {
+  if (typeof performance !== "undefined" && typeof performance.now === "function") {
+    return performance.now();
+  }
+  return Date.now();
+}
+
 /**
  * Bastion / jump hosts sometimes reject rapid session channel opens with a
  * distinctive rate-limit message. The common Chinese bastion typo "offen"
@@ -32,9 +39,37 @@ function isSshChannelOpenRateLimitedError(error) {
     || /channelOpen\s+too\s+often\b/i.test(message);
 }
 
-function sleep(ms, sleepFn = null) {
-  if (typeof sleepFn === "function") return Promise.resolve(sleepFn(ms));
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function sleep(ms, sleepFn = null, signal = null, label = "SSH channel retry") {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let timer = null;
+    const cleanup = () => {
+      if (timer) clearTimeout(timer);
+      timer = null;
+      signal?.removeEventListener?.("abort", onAbort);
+    };
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      if (error) reject(error);
+      else resolve();
+    };
+    const onAbort = () => finish(channelAbortError(signal, label));
+
+    if (signal?.aborted) {
+      finish(channelAbortError(signal, label));
+      return;
+    }
+    signal?.addEventListener?.("abort", onAbort, { once: true });
+    if (typeof sleepFn === "function") {
+      void Promise.resolve()
+        .then(() => sleepFn(ms))
+        .then(() => finish(), (error) => finish(error));
+      return;
+    }
+    timer = setTimeout(() => finish(), ms);
+  });
 }
 
 function openBoundedSshChannel(sshClient, invoke, options = {}) {
@@ -46,31 +81,47 @@ function openBoundedSshChannel(sshClient, invoke, options = {}) {
   const signal = options.signal || null;
   const closeLateResult = options.closeLateResult || closeLateChannel;
   const timeoutCode = options.timeoutCode || "SSH_CHANNEL_OPEN_TIMEOUT";
+  const invalidateOnAbort = options.invalidateOnAbort !== false;
+  const invalidateOnTimeout = options.invalidateOnTimeout !== false;
   const setTimeoutFn = options.setTimeoutFn || setTimeout;
   const clearTimeoutFn = options.clearTimeoutFn || clearTimeout;
 
   return new Promise((resolve, reject) => {
     let settled = false;
+    let invoked = false;
+    let abandoned = false;
     let timer = null;
     const cleanup = () => {
       if (timer) clearTimeoutFn(timer);
       timer = null;
       signal?.removeEventListener?.("abort", onAbort);
     };
-    const finish = (error, result, { invalidate = false } = {}) => {
+    const finish = (error, result, { invalidate = false, abandon = false } = {}) => {
       if (settled) {
         if (result) closeLateResult(result);
+        if (abandoned) {
+          abandoned = false;
+          try { options.onAbandonedOpenSettled?.(); } catch { /* ignore */ }
+        }
         return false;
       }
       settled = true;
       cleanup();
       if (error && result) closeLateResult(result);
+      if (abandon && invoked) {
+        abandoned = true;
+        try { options.onAbandonedOpen?.(); } catch { /* ignore */ }
+      }
       if (invalidate) invalidateSshTransport(sshClient);
       if (error) reject(error);
       else resolve(result);
       return true;
     };
-    const onAbort = () => finish(channelAbortError(signal, label), null, { invalidate: true });
+    const onAbort = () => finish(
+      channelAbortError(signal, label),
+      null,
+      { invalidate: invalidateOnAbort, abandon: !invalidateOnAbort },
+    );
 
     if (signal?.aborted) {
       finish(channelAbortError(signal, label));
@@ -83,10 +134,14 @@ function openBoundedSshChannel(sshClient, invoke, options = {}) {
     timer = setTimeoutFn(() => {
       const error = new Error(`${label} timed out after ${timeoutMs} ms`);
       error.code = timeoutCode;
-      finish(error, null, { invalidate: true });
+      finish(error, null, {
+        invalidate: invalidateOnTimeout,
+        abandon: !invalidateOnTimeout,
+      });
     }, timeoutMs);
 
     try {
+      invoked = true;
       invoke((error, result) => finish(error, result));
     } catch (error) {
       finish(error);
@@ -95,40 +150,96 @@ function openBoundedSshChannel(sshClient, invoke, options = {}) {
 }
 
 async function openBoundedSshShell(sshClient, windowOptions, shellOptions, options = {}) {
+  const hasRateLimitRetryTimeout = Number.isFinite(options.rateLimitRetryTimeoutMs);
+  const hasExplicitRateLimitRetries = Number.isFinite(options.rateLimitRetries);
   const rateLimitRetries = Math.max(
     0,
-    Number.isFinite(options.rateLimitRetries)
+    hasExplicitRateLimitRetries
       ? Number(options.rateLimitRetries)
-      : DEFAULT_SSH_CHANNEL_OPEN_RATE_LIMIT_RETRIES,
+      : hasRateLimitRetryTimeout
+        ? Number.POSITIVE_INFINITY
+        : DEFAULT_SSH_CHANNEL_OPEN_RATE_LIMIT_RETRIES,
   );
+  const rateLimitRetryTimeoutMs = hasRateLimitRetryTimeout
+    ? Math.max(0, Number(options.rateLimitRetryTimeoutMs))
+    : null;
   const rateLimitBackoffMs = Math.max(
     1,
     Number(options.rateLimitBackoffMs) || DEFAULT_SSH_CHANNEL_OPEN_RATE_LIMIT_BACKOFF_MS,
   );
   const sleepFn = options.sleepFn || null;
+  const nowFn = typeof options.nowFn === "function" ? options.nowFn : monotonicNow;
+  const retryStartedAt = nowFn();
+  const retryDeadline = rateLimitRetryTimeoutMs === null
+    ? null
+    : retryStartedAt + rateLimitRetryTimeoutMs;
   let attempt = 0;
+  let lastRateLimitError = null;
 
   for (;;) {
+    const attemptStartedAt = nowFn();
+    if (
+      lastRateLimitError
+      && retryDeadline !== null
+      && attemptStartedAt >= retryDeadline
+    ) {
+      throw lastRateLimitError;
+    }
+    const configuredAttemptTimeoutMs = Math.max(
+      1,
+      Number(options.timeoutMs) || DEFAULT_SSH_CHANNEL_OPEN_TIMEOUT_MS,
+    );
+    const isRateLimitRetry = lastRateLimitError !== null;
+    const attemptTimeoutMs = retryDeadline === null || !isRateLimitRetry
+      ? configuredAttemptTimeoutMs
+      : Math.max(
+          1,
+          Math.min(configuredAttemptTimeoutMs, Math.ceil(retryDeadline - attemptStartedAt)),
+        );
+    const retryBudgetConstrainsAttempt = isRateLimitRetry
+      && attemptTimeoutMs < configuredAttemptTimeoutMs;
     try {
       return await openBoundedSshChannel(
         sshClient,
         (callback) => sshClient.shell(windowOptions, shellOptions, callback),
         {
           ...options,
+          timeoutMs: attemptTimeoutMs,
+          invalidateOnTimeout: retryBudgetConstrainsAttempt
+            ? false
+            : options.invalidateOnTimeout,
           label: options.label || "SSH shell channel open",
           timeoutCode: "SSH_SHELL_OPEN_TIMEOUT",
         },
       );
     } catch (error) {
       if (
+        retryBudgetConstrainsAttempt
+        && error?.code === "SSH_SHELL_OPEN_TIMEOUT"
+        && lastRateLimitError
+      ) {
+        throw lastRateLimitError;
+      }
+      if (!isSshChannelOpenRateLimitedError(error) || options.signal?.aborted) {
+        throw error;
+      }
+      lastRateLimitError = error;
+      const nextDelayMs = rateLimitBackoffMs * (attempt + 1);
+      const retryTimeoutExpired = rateLimitRetryTimeoutMs !== null
+        && nowFn() + nextDelayMs >= retryDeadline;
+      if (
         attempt >= rateLimitRetries
-        || !isSshChannelOpenRateLimitedError(error)
-        || options.signal?.aborted
+        || retryTimeoutExpired
       ) {
         throw error;
       }
       attempt += 1;
-      await sleep(rateLimitBackoffMs * attempt, sleepFn);
+      await sleep(
+        nextDelayMs,
+        sleepFn,
+        options.signal,
+        options.label || "SSH shell channel retry",
+      );
     }
   }
 }

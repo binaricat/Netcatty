@@ -352,7 +352,7 @@ test("openSftpForSession rejects sudo with forced SCP before opening a channel",
   assert.equal(sftpClients.size, 0);
 });
 
-test("openSftpForSession falls back to standard SFTP when sudo sftp-server exits 127", async () => {
+test("openSftpForSession fails clearly instead of silently dropping sudo mode", async () => {
   let sudoCalls = 0;
   let sftpCalls = 0;
   const bridge = loadSftpBridgeWithProxySocket(null, {
@@ -377,22 +377,17 @@ test("openSftpForSession falls back to standard SFTP when sudo sftp-server exits
     electronModule: {},
   });
 
-  const opened = await bridge.openSftpForSession(null, {
-    sessionId: "session-sudo-127",
-    sudo: true,
-    password: "secret",
-  });
-
-  assert.equal(opened.ok, true);
-  assert.equal(opened.fileProtocol, "sftp");
-  assert.equal(opened.sourceSessionId, "session-sudo-127");
+  await assert.rejects(
+    () => bridge.openSftpForSession(null, {
+      sessionId: "session-sudo-127",
+      sudo: true,
+      password: "secret",
+    }),
+    /exit code 127.*sftp-server not found/i,
+  );
   assert.equal(sudoCalls, 1);
-  assert.equal(sftpCalls, 1);
-  const client = sftpClients.get(opened.sftpId);
-  assert.equal(client?.__netcattyFileProtocol, "sftp");
-  assert.equal(client?.__netcattySudoMode, false);
-  assert.equal(client?.sftp, fakeSftp);
-  await bridge.closeSftp(null, { sftpId: opened.sftpId });
+  assert.equal(sftpCalls, 0);
+  assert.equal(sftpClients.size, 0);
 });
 
 test("openSftpForSession does not fall back to standard SFTP on non-127 sudo errors", async () => {

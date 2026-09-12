@@ -13,6 +13,8 @@ function createStream() {
   stream.stderr = new EventEmitter();
   stream.closed = 0;
   stream.destroyed = 0;
+  stream.signals = [];
+  stream.signal = (name) => { stream.signals.push(name); };
   stream.close = () => { stream.closed += 1; };
   stream.destroy = () => { stream.destroyed += 1; };
   return stream;
@@ -138,6 +140,9 @@ test("bounded SSH exec times out a live command and removes data listeners", asy
   assert.equal(stream.listenerCount("data"), 0);
   assert.equal(stream.stderr.listenerCount("data"), 0);
   assert.ok(stream.closed > 0 || stream.destroyed > 0);
+  // Best-effort remote kill: servers that answer "signal" channel requests
+  // stop the abandoned command instead of leaving it running (#3187).
+  assert.deepEqual(stream.signals, ["KILL"]);
 });
 
 test("bounded SSH exec caps combined stdout and stderr and terminates the stream", async () => {
@@ -190,6 +195,23 @@ test("bounded SSH exec aborts before callback and terminates a late stream", asy
   callback(null, stream);
   assert.ok(stream.closed > 0 || stream.destroyed > 0);
   assert.equal(timers.active.size, 0);
+});
+
+test("bounded SSH exec can abort a shared-channel probe without invalidating the transport", async () => {
+  let invalidations = 0;
+  const controller = new AbortController();
+  const sshClient = {
+    exec() {},
+    destroy() { invalidations += 1; },
+  };
+  const result = executeBoundedSshCommand(sshClient, "probe", {
+    signal: controller.signal,
+    invalidateTransportOnAbort: false,
+  });
+
+  controller.abort(new Error("cancelled"));
+  await assert.rejects(result, /cancelled/);
+  assert.equal(invalidations, 0);
 });
 
 test("bounded SSH exec clears its run deadline after normal completion", async () => {

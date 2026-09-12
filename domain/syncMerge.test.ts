@@ -572,3 +572,51 @@ test("mergeSyncPayloads treats missing optional arrays as legacy payloads, not d
   assert.deepEqual(result.payload.portForwardingRules, [rule]);
   assert.deepEqual(result.payload.groupConfigs, [{ path: "prod", username: "root" }]);
 });
+
+const hostWithTelemetry = (lastConnectedAt?: number) => ({
+  id: "host-1",
+  label: "prod",
+  hostname: "prod.example.com",
+  username: "root",
+  tags: [],
+  os: "linux" as const,
+  protocol: "ssh" as const,
+  ...(lastConnectedAt === undefined ? {} : { lastConnectedAt }),
+});
+
+test("mergeSyncPayloads normalizes lastConnectedAt across base and remote so sanitized local does not shadow remote edits", () => {
+  // Legacy base + old-device remote still carry the legacy telemetry field;
+  // the upgraded local payload strips it. A remote edit to the same host
+  // must not be classified as a local-modified conflict and overwritten.
+  const base = payload({
+    hosts: [hostWithTelemetry(1_000)],
+  });
+  // Local is otherwise unchanged — it only lost the telemetry field to the
+  // new sanitize-on-build behavior.
+  const local = payload({
+    hosts: [hostWithTelemetry()],
+  });
+  const remote = payload({
+    hosts: [{ ...hostWithTelemetry(1_000), label: "prod-renamed-by-remote" }],
+  });
+
+  const result = mergeSyncPayloads(base, local, remote);
+
+  // Remote edit survives: the telemetry-only local delta must not classify
+  // this host as locally modified and shadow the remote rename.
+  assert.equal(result.payload.hosts[0]?.label, "prod-renamed-by-remote");
+  assert.equal(result.summary.modified.local, 0);
+  assert.equal(result.summary.modified.remote, 1);
+});
+
+test("mergeSyncPayloads keeps host telemetry off merged payloads", () => {
+  const base = payload({ hosts: [hostWithTelemetry(1_000)] });
+
+  const unchanged = mergeSyncPayloads(
+    base,
+    payload({ hosts: [hostWithTelemetry(2_000)] }),
+    payload({ hosts: [hostWithTelemetry(1_000)] }),
+  );
+  assert.equal(unchanged.payload.hosts[0]?.lastConnectedAt, undefined);
+  assert.equal(unchanged.summary.modified.local, 0);
+});

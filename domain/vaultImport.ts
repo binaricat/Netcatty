@@ -16,6 +16,7 @@ export {
 import { parseQuickConnectInput } from "./quickConnect";
 import { findExactHeaderIndex, findHeaderIndex, parseCsv } from "./vaultImport/csvUtils";
 import { decodeCsvKeyPath, decodeCsvPassphrase } from "./vaultImport/csvCredentialFields";
+import { attachMobaXtermPasswords } from "./vaultImport/mobaXtermPasswords";
 export {
   exportHostsToCsvWithStats,
   getVaultCsvTemplate,
@@ -1104,13 +1105,20 @@ const importFromSecureCrt = (text: string, fileName?: string): VaultImportResult
   };
 };
 
-const importFromMobaXterm = (text: string): VaultImportResult => {
+const importFromMobaXterm = (
+  text: string,
+  options?: { masterPassword?: string },
+): VaultImportResult => {
   const issues: VaultImportIssue[] = [];
   const lines = text.split(/\r?\n/);
 
   type Entry = { section: string; key: string; value: string };
   const entries: Entry[] = [];
   const sectionGroups = new Map<string, string | undefined>();
+  const passwordEntries = new Map<string, string>();
+  const credentialEntries = new Map<string, { username: string; ciphertext: string }>();
+  const misc = new Map<string, string>();
+  let hasSesspass = false;
 
   let section = "";
   for (const line of lines) {
@@ -1128,13 +1136,36 @@ const importFromMobaXterm = (text: string): VaultImportResult => {
     if (!mKv) continue;
     const key = mKv[1].trim();
     const value = mKv[2].trim();
-    const isBookmarkSection = /^bookmarks(?:_\d+)?$/i.test(section.trim());
+    const sectionName = section.trim();
+    const isBookmarkSection = /^bookmarks(?:_\d+)?$/i.test(sectionName);
 
     if (isBookmarkSection && key.toLowerCase() === "subrep") {
       sectionGroups.set(section, normalizeGroupPath(value));
       continue;
     }
     if (isBookmarkSection && key.toLowerCase() === "imgnum") continue;
+    if (/^passwords$/i.test(sectionName) && key && value) {
+      passwordEntries.set(key, value);
+      continue;
+    }
+    if (/^credentials$/i.test(sectionName) && key && value) {
+      const colon = value.indexOf(":");
+      if (colon > 0) {
+        credentialEntries.set(key, {
+          username: value.slice(0, colon),
+          ciphertext: value.slice(colon + 1),
+        });
+      }
+      continue;
+    }
+    if (/^misc$/i.test(sectionName)) {
+      misc.set(key.toLowerCase(), value);
+      continue;
+    }
+    if (/^sesspass$/i.test(sectionName)) {
+      hasSesspass = true;
+      continue;
+    }
 
     entries.push({ section, key, value });
   }
@@ -1253,7 +1284,18 @@ const importFromMobaXterm = (text: string): VaultImportResult => {
     );
   }
 
-  const { hosts, duplicates } = dedupeHosts(parsedHosts);
+  const { hosts: uniqueHosts, duplicates } = dedupeHosts(parsedHosts);
+  const attached = attachMobaXtermPasswords(uniqueHosts, {
+    passwords: passwordEntries,
+    credentials: credentialEntries,
+    sessionP: misc.get("sessionp"),
+    sysUsername: misc.get("mpsetaccount"),
+    sysHostname: misc.get("mpsetcomputer"),
+    passwordsInRegistry: misc.get("passwordsinregistry") === "1",
+    hasSesspass,
+  }, { masterPassword: options?.masterPassword });
+  issues.push(...attached.issues);
+  const hosts = attached.hosts;
   const groups = uniq(hosts.map((h) => h.group).filter(Boolean) as string[]);
   return {
     hosts,
@@ -1266,7 +1308,7 @@ const importFromMobaXterm = (text: string): VaultImportResult => {
 export const importVaultHostsFromText = (
   format: VaultImportFormat,
   text: string,
-  options?: { fileName?: string },
+  options?: { fileName?: string; masterPassword?: string },
 ): VaultImportResult => {
   const input = text ?? "";
   switch (format) {
@@ -1279,7 +1321,7 @@ export const importVaultHostsFromText = (
     case "securecrt":
       return importFromSecureCrt(input, options?.fileName);
     case "mobaxterm":
-      return importFromMobaXterm(input);
+      return importFromMobaXterm(input, options);
     default: {
       const _exhaustive: never = format;
       return _exhaustive;
@@ -1301,9 +1343,12 @@ export function detectVaultImportFormat(text: string): VaultImportFormat | null 
   const hasMobaBookmarkSection = /^\[Bookmarks(?:_\d+)?\]\s*$/im.test(input);
   const hasMobaBookmarkMetadata = /^SubRep=.*$/im.test(input) && /^ImgNum=\d+\s*$/im.test(input);
   const hasMobaSessionLine = /^[^=\r\n]+=\s*(?:; logout)?\s*#\d+#\d+%[^%\r\n]+%\d+/im.test(input);
+  const hasMobaFullConfig = /^\[Misc\]\s*$/im.test(input)
+    && (/^SessionP=/im.test(input) || /^\[Passwords\]\s*$/im.test(input) || /^\[Credentials\]\s*$/im.test(input));
   if (
     /\[MobaXterm\]/i.test(input)
-    || (hasMobaBookmarkSection && (hasMobaBookmarkMetadata || hasMobaSessionLine))
+    || (hasMobaBookmarkSection && (hasMobaBookmarkMetadata || hasMobaSessionLine || hasMobaFullConfig))
+    || (hasMobaFullConfig && hasMobaBookmarkSection)
   ) {
     return "mobaxterm";
   }

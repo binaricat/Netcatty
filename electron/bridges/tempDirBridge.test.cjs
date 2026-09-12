@@ -5,6 +5,17 @@ const fs = require("node:fs");
 const { spawnSync } = require("node:child_process");
 const tempDirBridge = require("./tempDirBridge.cjs");
 
+function isolatedTempChildEnv(root, home, extra = {}) {
+  return {
+    ...process.env,
+    TMPDIR: root,
+    TEMP: root,
+    TMP: root,
+    HOME: home,
+    ...extra,
+  };
+}
+
 test("getTempFilePath is unique for duplicate names in the same millisecond", () => {
   const originalNow = Date.now;
   Date.now = () => 1234567890;
@@ -60,10 +71,303 @@ test("cached temp root is recreated after OS cleanup", async () => {
     ].join("\n");
     const result = spawnSync(process.execPath, ["-e", script], {
       cwd: path.resolve(__dirname, "../.."),
-      env: { ...process.env, TMPDIR: root, HOME: fakeHome },
+      env: isolatedTempChildEnv(root, fakeHome),
       encoding: "utf8",
     });
     assert.equal(result.status, 0, result.stderr || result.stdout);
+  } finally {
+    await fs.promises.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("cached temp root is rebound after inode replacement", async () => {
+  const root = await fs.promises.mkdtemp(path.join(require("node:os").tmpdir(), "netcatty-replaced-root-"));
+  const fakeHome = path.join(root, "home");
+  await fs.promises.mkdir(fakeHome);
+  await fs.promises.chmod(root, 0o700);
+  try {
+    const script = [
+      'const fs = require("node:fs");',
+      'const path = require("node:path");',
+      'const bridge = require("./electron/bridges/tempDirBridge.cjs");',
+      'const first = bridge.getTempDir();',
+      'const oldPath = `${first}.old`;',
+      'fs.renameSync(first, oldPath);',
+      'fs.mkdirSync(first, { recursive: true, mode: 0o700 });',
+      'const oldStat = fs.lstatSync(oldPath);',
+      'const second = bridge.getTempDir();',
+      'const newStat = fs.lstatSync(second);',
+      'if (!newStat.isDirectory()) process.exit(2);',
+      'if (oldStat.dev === newStat.dev && oldStat.ino === newStat.ino) process.exit(4);',
+      'const downloadPath = bridge.getTempFilePath("download.bin");',
+      'const relative = path.relative(second, downloadPath);',
+      'if (relative === "" || relative.startsWith("..") || path.isAbsolute(relative)) process.exit(3);',
+    ].join("\n");
+    const result = spawnSync(process.execPath, ["-e", script], {
+      cwd: path.resolve(__dirname, "../.."),
+      env: isolatedTempChildEnv(root, fakeHome),
+      encoding: "utf8",
+    });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+  } finally {
+    await fs.promises.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("tool output signing key reloads when the temp root inode is replaced", async () => {
+  const root = await fs.promises.mkdtemp(path.join(require("node:os").tmpdir(), "netcatty-rebind-key-"));
+  const fakeHome = path.join(root, "home");
+  await fs.promises.mkdir(fakeHome);
+  await fs.promises.chmod(root, 0o700);
+  const script = [
+    'const fs = require("node:fs");',
+    'const path = require("node:path");',
+    'const bridge = require("./electron/bridges/tempDirBridge.cjs");',
+    'const handlers = new Map();',
+    'const secret = process.env.FAKE_SAFE_STORAGE_SECRET;',
+    'const safeStorage = {',
+    '  isEncryptionAvailable: () => true,',
+    '  encryptString: value => Buffer.from(`${secret}:${value}`, "utf8"),',
+    '  decryptString: value => {',
+    '    const text = value.toString("utf8");',
+    '    if (!text.startsWith(`${secret}:`)) throw new Error("wrong key");',
+    '    return text.slice(secret.length + 1);',
+    '  },',
+    '};',
+    'bridge.registerHandlers({ handle: (channel, handler) => handlers.set(channel, handler) }, undefined, { safeStorage });',
+    '(async () => {',
+    '  if (process.env.PHASE === "write") {',
+    '    const first = bridge.getTempDir();',
+    '    const now = Date.now();',
+    '    const before = await handlers.get("netcatty:tempdir:toolOutputWrite")({}, {',
+    '      record: { schemaVersion: 1, handleId: "before-rebind", chatSessionId: "rebind-chat", capabilityId: "terminal.execute", totalChars: 6, storedChars: 6, sourceTruncated: false, preview: "before", storedAt: now, accessedAt: now },',
+    '      content: "before",',
+    '    });',
+    '    if (!before.ok) throw new Error(before.error);',
+    '    const oldPath = `${first}.old`;',
+    '    fs.renameSync(first, oldPath);',
+    '    fs.mkdirSync(first, { recursive: true, mode: 0o700 });',
+    '    const replacementKey = Buffer.alloc(32, 7);',
+    '    fs.writeFileSync(path.join(first, ".tool-output-signing-key"), safeStorage.encryptString(replacementKey.toString("base64")), { mode: 0o600 });',
+    '    bridge.getTempDir();',
+    '    const after = await handlers.get("netcatty:tempdir:toolOutputWrite")({}, {',
+    '      record: { schemaVersion: 1, handleId: "after-rebind", chatSessionId: "rebind-chat", capabilityId: "terminal.execute", totalChars: 5, storedChars: 5, sourceTruncated: false, preview: "after", storedAt: now, accessedAt: now },',
+    '      content: "after",',
+    '    });',
+    '    console.log(`RESULT:${JSON.stringify(after)}`);',
+    '    return;',
+    '  }',
+    '  const restored = await handlers.get("netcatty:tempdir:toolOutputRestore")({}, { handleId: "after-rebind", chatSessionId: "rebind-chat" });',
+    '  const content = restored ? await handlers.get("netcatty:tempdir:toolOutputRead")({}, { path: restored.path }) : null;',
+    '  console.log(`RESULT:${JSON.stringify({ restored: Boolean(restored), content })}`);',
+    '})().catch(error => { console.error(error); process.exit(1); });',
+  ].join("\n");
+  const run = phase => spawnSync(process.execPath, ["-e", script], {
+    cwd: path.resolve(__dirname, "../.."),
+    env: isolatedTempChildEnv(root, fakeHome, {
+      PHASE: phase,
+      FAKE_SAFE_STORAGE_SECRET: "rebind-secret",
+    }),
+    encoding: "utf8",
+  });
+  try {
+    const written = run("write");
+    assert.equal(written.status, 0, written.stderr || written.stdout);
+    assert.match(written.stdout, /RESULT:.*"ok":true/);
+    const reopened = run("read");
+    assert.equal(reopened.status, 0, reopened.stderr || reopened.stdout);
+    assert.match(reopened.stdout, /RESULT:.*"restored":true.*"content":"after"/);
+  } finally {
+    await fs.promises.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("tool output write retries when the temp root is replaced after key loading starts", async () => {
+  const root = await fs.promises.mkdtemp(path.join(require("node:os").tmpdir(), "netcatty-rebind-write-"));
+  const fakeHome = path.join(root, "home");
+  await fs.promises.mkdir(fakeHome);
+  await fs.promises.chmod(root, 0o700);
+  const script = [
+    'const fs = require("node:fs");',
+    'const path = require("node:path");',
+    'const bridge = require("./electron/bridges/tempDirBridge.cjs");',
+    'const handlers = new Map();',
+    'const secret = process.env.FAKE_SAFE_STORAGE_SECRET;',
+    'const safeStorage = {',
+    '  isEncryptionAvailable: () => true,',
+    '  encryptString: value => Buffer.from(`${secret}:${value}`, "utf8"),',
+    '  decryptString: value => {',
+    '    const text = value.toString("utf8");',
+    '    if (!text.startsWith(`${secret}:`)) throw new Error("wrong key");',
+    '    return text.slice(secret.length + 1);',
+    '  },',
+    '};',
+    'bridge.registerHandlers({ handle: (channel, handler) => handlers.set(channel, handler) }, undefined, { safeStorage });',
+    '(async () => {',
+    '  const now = Date.now();',
+    '  const first = bridge.getTempDir();',
+    '  const before = await handlers.get("netcatty:tempdir:toolOutputWrite")({}, {',
+    '    record: { schemaVersion: 1, handleId: "before-rebind-write", chatSessionId: "rebind-write-chat", capabilityId: "terminal.execute", totalChars: 6, storedChars: 6, sourceTruncated: false, preview: "before", storedAt: now, accessedAt: now },',
+    '    content: "before",',
+    '  });',
+    '  if (!before.ok) throw new Error(before.error);',
+    '  const originalOpen = fs.promises.open;',
+    '  let replaced = false;',
+    '  fs.promises.open = async (filePath, ...args) => {',
+    '    const opened = await originalOpen(filePath, ...args);',
+    '    if (replaced || path.basename(filePath) !== ".tool-output-signing-key") return opened;',
+    '    const originalRead = opened.read.bind(opened);',
+    '    opened.read = async (...readArgs) => {',
+    '      const oldKeyFile = await originalRead(...readArgs);',
+    '      replaced = true;',
+    '      const oldPath = `${first}.old`;',
+    '      fs.renameSync(first, oldPath);',
+    '      fs.mkdirSync(first, { recursive: true, mode: 0o700 });',
+    '      const replacementKey = Buffer.alloc(32, 7);',
+    '      fs.writeFileSync(path.join(first, ".tool-output-signing-key"), safeStorage.encryptString(replacementKey.toString("base64")), { mode: 0o600 });',
+    '      return oldKeyFile;',
+    '    };',
+    '    return opened;',
+    '  };',
+    '  bridge.registerHandlers({ handle: (channel, handler) => handlers.set(channel, handler) }, undefined, { safeStorage });',
+    '  const after = await handlers.get("netcatty:tempdir:toolOutputWrite")({}, {',
+    '    record: { schemaVersion: 1, handleId: "after-rebind-write", chatSessionId: "rebind-write-chat", capabilityId: "terminal.execute", totalChars: 5, storedChars: 5, sourceTruncated: false, preview: "after", storedAt: now, accessedAt: now },',
+    '    content: "after",',
+    '  });',
+    '  const restored = await handlers.get("netcatty:tempdir:toolOutputRestore")({}, { handleId: "after-rebind-write", chatSessionId: "rebind-write-chat" });',
+    '  const content = restored ? await handlers.get("netcatty:tempdir:toolOutputRead")({}, { path: restored.path }) : null;',
+    '  console.log(`RESULT:${JSON.stringify({ write: after, replaced, restored: Boolean(restored), content })}`);',
+    '})().catch(error => { console.error(error); process.exit(1); });',
+  ].join("\n");
+  try {
+    const result = spawnSync(process.execPath, ["-e", script], {
+      cwd: path.resolve(__dirname, "../.."),
+      env: isolatedTempChildEnv(root, fakeHome, { FAKE_SAFE_STORAGE_SECRET: "rebind-write-secret" }),
+      encoding: "utf8",
+    });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.match(result.stdout, /RESULT:.*"write":\{"ok":true,.*"replaced":true.*"restored":true.*"content":"after"/);
+  } finally {
+    await fs.promises.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("tool output restore retries when the temp root is replaced during content verification", async () => {
+  const root = await fs.promises.mkdtemp(path.join(require("node:os").tmpdir(), "netcatty-rebind-restore-"));
+  const fakeHome = path.join(root, "home");
+  await fs.promises.mkdir(fakeHome);
+  await fs.promises.chmod(root, 0o700);
+  const script = [
+    'const fs = require("node:fs");',
+    'const path = require("node:path");',
+    'const crypto = require("node:crypto");',
+    'const bridge = require("./electron/bridges/tempDirBridge.cjs");',
+    'const handlers = new Map();',
+    'const secret = process.env.FAKE_SAFE_STORAGE_SECRET;',
+    'const safeStorage = {',
+    '  isEncryptionAvailable: () => true,',
+    '  encryptString: value => Buffer.from(`${secret}:${value}`, "utf8"),',
+    '  decryptString: value => {',
+    '    const text = value.toString("utf8");',
+    '    if (!text.startsWith(`${secret}:`)) throw new Error("wrong key");',
+    '    return text.slice(secret.length + 1);',
+    '  },',
+    '};',
+    'bridge.registerHandlers({ handle: (channel, handler) => handlers.set(channel, handler) }, undefined, { safeStorage });',
+    '(async () => {',
+    '  const now = Date.now();',
+    '  const first = bridge.getTempDir();',
+    '  const record = { schemaVersion: 1, handleId: "restore-rebind", chatSessionId: "restore-rebind-chat", capabilityId: "terminal.execute", totalChars: 6, storedChars: 6, sourceTruncated: false, preview: "before", storedAt: now, accessedAt: now };',
+    '  const saved = await handlers.get("netcatty:tempdir:toolOutputWrite")({}, { record, content: "before" });',
+    '  if (!saved.ok) throw new Error(saved.error);',
+    '  const originalOpen = fs.promises.open;',
+    '  let rebound = false;',
+    '  fs.promises.open = async (filePath, ...args) => {',
+    '    const opened = await originalOpen(filePath, ...args);',
+    '    if (rebound || path.resolve(String(filePath)) !== path.resolve(saved.path)) return opened;',
+    '    rebound = true;',
+    '    const oldPath = `${first}.old`;',
+    '    fs.renameSync(first, oldPath);',
+    '    fs.mkdirSync(first, { recursive: true, mode: 0o700 });',
+    '    const replacementKey = Buffer.alloc(32, 7);',
+    '    fs.writeFileSync(path.join(first, ".tool-output-signing-key"), safeStorage.encryptString(replacementKey.toString("base64")), { mode: 0o600 });',
+    '    bridge.getTempDir();',
+    '    const contentBuffer = Buffer.from("after", "utf16le");',
+    '    fs.writeFileSync(saved.path, contentBuffer, { mode: 0o600, flag: "wx" });',
+    '    const manifest = {',
+    '      record,',
+    '      contentFile: path.basename(saved.path),',
+    '      contentBytes: contentBuffer.length,',
+    '      contentSha256: crypto.createHash("sha256").update(contentBuffer).digest("hex"),',
+    '    };',
+    '    manifest.signature = crypto.createHmac("sha256", replacementKey)',
+    '      .update(JSON.stringify({ record: manifest.record, contentFile: manifest.contentFile, contentBytes: manifest.contentBytes, contentSha256: manifest.contentSha256 }))',
+    '      .digest("hex");',
+    '    fs.writeFileSync(`${saved.path}.meta.json`, JSON.stringify(manifest), { mode: 0o600, flag: "wx" });',
+    '    return opened;',
+    '  };',
+    '  const restored = await handlers.get("netcatty:tempdir:toolOutputRestore")({}, { handleId: "restore-rebind", chatSessionId: "restore-rebind-chat" });',
+    '  const content = restored ? await handlers.get("netcatty:tempdir:toolOutputRead")({}, { path: restored.path }) : null;',
+    '  console.log(`RESULT:${JSON.stringify({ rebound, restored: Boolean(restored), content })}`);',
+    '})().catch(error => { console.error(error); process.exit(1); });',
+  ].join("\n");
+  try {
+    const result = spawnSync(process.execPath, ["-e", script], {
+      cwd: path.resolve(__dirname, "../.."),
+      env: isolatedTempChildEnv(root, fakeHome, { FAKE_SAFE_STORAGE_SECRET: "rebind-restore-secret" }),
+      encoding: "utf8",
+    });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.match(result.stdout, /RESULT:.*"rebound":true.*"restored":true.*"content":"after"/);
+  } finally {
+    await fs.promises.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("tool output write keeps the loaded key during a temporary keychain failure", async () => {
+  const root = await fs.promises.mkdtemp(path.join(require("node:os").tmpdir(), "netcatty-keychain-write-"));
+  const fakeHome = path.join(root, "home");
+  await fs.promises.mkdir(fakeHome);
+  await fs.promises.chmod(root, 0o700);
+  const script = [
+    'const bridge = require("./electron/bridges/tempDirBridge.cjs");',
+    'const handlers = new Map();',
+    'const secret = process.env.FAKE_SAFE_STORAGE_SECRET;',
+    'let keychainLocked = false;',
+    'const safeStorage = {',
+    '  isEncryptionAvailable: () => true,',
+    '  encryptString: value => Buffer.from(`${secret}:${value}`, "utf8"),',
+    '  decryptString: value => {',
+    '    if (keychainLocked) throw new Error("keychain locked");',
+    '    const text = value.toString("utf8");',
+    '    if (!text.startsWith(`${secret}:`)) throw new Error("wrong key");',
+    '    return text.slice(secret.length + 1);',
+    '  },',
+    '};',
+    'bridge.registerHandlers({ handle: (channel, handler) => handlers.set(channel, handler) }, undefined, { safeStorage });',
+    '(async () => {',
+    '  const now = Date.now();',
+    '  const before = await handlers.get("netcatty:tempdir:toolOutputWrite")({}, {',
+    '    record: { schemaVersion: 1, handleId: "before-keychain-lock", chatSessionId: "keychain-write-chat", capabilityId: "terminal.execute", totalChars: 6, storedChars: 6, sourceTruncated: false, preview: "before", storedAt: now, accessedAt: now },',
+    '    content: "before",',
+    '  });',
+    '  if (!before.ok) throw new Error(before.error);',
+    '  keychainLocked = true;',
+    '  const after = await handlers.get("netcatty:tempdir:toolOutputWrite")({}, {',
+    '    record: { schemaVersion: 1, handleId: "after-keychain-lock", chatSessionId: "keychain-write-chat", capabilityId: "terminal.execute", totalChars: 5, storedChars: 5, sourceTruncated: false, preview: "after", storedAt: now, accessedAt: now },',
+    '    content: "after",',
+    '  });',
+    '  console.log(`RESULT:${JSON.stringify(after)}`);',
+    '})().catch(error => { console.error(error); process.exit(1); });',
+  ].join("\n");
+  try {
+    const result = spawnSync(process.execPath, ["-e", script], {
+      cwd: path.resolve(__dirname, "../.."),
+      env: isolatedTempChildEnv(root, fakeHome, { FAKE_SAFE_STORAGE_SECRET: "keychain-write-secret" }),
+      encoding: "utf8",
+    });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.match(result.stdout, /RESULT:.*"ok":true/);
   } finally {
     await fs.promises.rm(root, { recursive: true, force: true });
   }
@@ -335,7 +639,7 @@ test("startup cleanup still expires tool outputs when secure storage is unavaila
     ].join("\n");
     const result = spawnSync(process.execPath, ["-e", script], {
       cwd: path.resolve(__dirname, "../.."),
-      env: { ...process.env, TMPDIR: root, HOME: fakeHome },
+      env: isolatedTempChildEnv(root, fakeHome),
       encoding: "utf8",
     });
     assert.equal(result.status, 0, result.stderr || result.stdout);
@@ -644,13 +948,10 @@ test("tool output signing key survives a real process restart", async () => {
   ].join("\n");
   const run = (phase, secret) => spawnSync(process.execPath, ["-e", script], {
     cwd: path.resolve(__dirname, "../.."),
-    env: {
-      ...process.env,
-      TMPDIR: root,
-      HOME: fakeHome,
+    env: isolatedTempChildEnv(root, fakeHome, {
       PHASE: phase,
       FAKE_SAFE_STORAGE_SECRET: secret,
-    },
+    }),
     encoding: "utf8",
   });
   try {

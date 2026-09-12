@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createCipheriv, createHash } from "node:crypto";
 
 import {
   importVaultHostsFromText,
@@ -771,6 +772,132 @@ test("MobaXterm import handles incomplete standard session records safely", () =
   assert.equal(result.hosts[0].port, 22);
   assert.equal(result.hosts[0].label, "short");
   assert.equal(result.issues.length, 3);
+});
+
+test("MobaXterm import attaches master-password secrets from a full config export", () => {
+  const result = importVaultHostsFromText("mobaxterm", [
+    "[Misc]",
+    "SessionP=165821882556840",
+    "[Sesspass]",
+    "Administrator@WIN=dummy",
+    "[Passwords]",
+    "deploy@10.0.0.20=1du11XKQBOxud/FWh4ouWA==",
+    "[Credentials]",
+    "prod=root:0XROpGmLAYVx",
+    "[Bookmarks]",
+    "SubRep=",
+    "ImgNum=42",
+    `web-server=${mobaXtermSshSession("10.0.0.20", 2222, "deploy")}`,
+    `root-server=${mobaXtermSshSession("root.example.com", 22, "root")}`,
+  ].join("\n"), { masterPassword: "12345678" });
+
+  assert.equal(result.hosts.length, 2);
+  const web = result.hosts.find((host) => host.label === "web-server");
+  const root = result.hosts.find((host) => host.label === "root-server");
+  assert.equal(web?.password, "Lw3+cZ2s.w@U@f]U");
+  assert.equal(web?.savePassword, true);
+  assert.equal(root?.password, "HyperSine");
+});
+
+test("MobaXterm import does not save garbage passwords for a wrong master password", () => {
+  const source = [
+    "[Misc]",
+    "SessionP=165821882556840",
+    "[Sesspass]",
+    "Administrator@WIN=dummy",
+    "[Passwords]",
+    "deploy@10.0.0.20=1du11XKQBOxud/FWh4ouWA==",
+    "[Credentials]",
+    "prod=root:0XROpGmLAYVx",
+    "[Bookmarks]",
+    "SubRep=",
+    "ImgNum=42",
+    `web-server=${mobaXtermSshSession("10.0.0.20", 2222, "deploy")}`,
+    `root-server=${mobaXtermSshSession("root.example.com", 22, "root")}`,
+  ].join("\n");
+
+  for (const masterPassword of ["wrong0", "wrong25", "wrong-password"]) {
+    const result = importVaultHostsFromText("mobaxterm", source, { masterPassword });
+    assert.equal(result.hosts.length, 2, masterPassword);
+    assert.equal(result.hosts.every((host) => host.password === undefined), true, masterPassword);
+    assert.match(result.issues[0]?.message ?? "", /master password/i, masterPassword);
+  }
+});
+
+test("MobaXterm import does not save a truncated UTF-8 prefix from a lone credential", () => {
+  const result = importVaultHostsFromText("mobaxterm", [
+    "[Sesspass]",
+    "Administrator@WIN=dummy",
+    "[Credentials]",
+    "prod=root:0XROpGmLAYVx",
+    "[Bookmarks]",
+    "SubRep=",
+    "ImgNum=42",
+    `root-server=${mobaXtermSshSession("root.example.com", 22, "root")}`,
+  ].join("\n"), { masterPassword: "wrong25" });
+
+  assert.equal(result.hosts.length, 1);
+  assert.equal(result.hosts[0].password, undefined);
+  assert.match(result.issues[0]?.message ?? "", /master password/i);
+});
+
+test("MobaXterm import keeps leading whitespace in the master password", () => {
+  const masterPassword = " 12345678";
+  const key = createHash("sha512").update(masterPassword, "utf8").digest().subarray(0, 32);
+  const iv = createCipheriv("aes-256-ecb", key, null).update(Buffer.alloc(16));
+  const cipher = createCipheriv("aes-256-cfb8", key, iv);
+  cipher.setAutoPadding(false);
+  const ciphertext = Buffer.concat([
+    cipher.update("spaced-secret", "utf8"),
+    cipher.final(),
+  ]).toString("base64");
+
+  const result = importVaultHostsFromText("mobaxterm", [
+    "[Sesspass]",
+    "Administrator@WIN=dummy",
+    "[Passwords]",
+    `deploy@10.0.0.20=${ciphertext}`,
+    "[Bookmarks]",
+    "SubRep=",
+    "ImgNum=42",
+    `web-server=${mobaXtermSshSession("10.0.0.20", 2222, "deploy")}`,
+  ].join("\n"), { masterPassword });
+
+  assert.equal(result.hosts[0]?.password, "spaced-secret");
+  assert.equal(result.hosts[0]?.savePassword, true);
+});
+
+test("MobaXterm import leaves sessions intact when encrypted passwords need a master password", () => {
+  const result = importVaultHostsFromText("mobaxterm", [
+    "[Sesspass]",
+    "Administrator@WIN=dummy",
+    "[Passwords]",
+    "deploy@10.0.0.20=1du11XKQBOxud/FWh4ouWA==",
+    "[Bookmarks]",
+    "SubRep=",
+    "ImgNum=42",
+    `web-server=${mobaXtermSshSession("10.0.0.20", 2222, "deploy")}`,
+  ].join("\n"));
+
+  assert.equal(result.hosts.length, 1);
+  assert.equal(result.hosts[0].password, undefined);
+  assert.match(result.issues[0]?.message ?? "", /master password/i);
+});
+
+test("detectVaultImportFormat recognizes full MobaXterm configuration exports", () => {
+  assert.equal(
+    detectVaultImportFormat([
+      "[Misc]",
+      "SessionP=165821882556840",
+      "[Passwords]",
+      "deploy@10.0.0.20=1du11XKQBOxud/FWh4ouWA==",
+      "[Bookmarks]",
+      "SubRep=",
+      "ImgNum=42",
+      `server=${mobaXtermSshSession("10.0.0.1")}`,
+    ].join("\n")),
+    "mobaxterm",
+  );
 });
 
 test("applyVaultHostImport skips duplicates by default", () => {

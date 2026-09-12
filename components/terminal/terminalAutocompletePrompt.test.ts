@@ -225,3 +225,18 @@ test("computeAutocompleteAcceptWrite refuses line replacement when disabled", ()
     null,
   );
 });
+
+test("computeAutocompleteAcceptWrite clears with backspaces on a mislabeled Windows shell (#3184)", () => {
+  // Windows PowerShell host saved with the os:"linux" default: the detected
+  // drive-letter prompt must route the clear to backspaces, not Ctrl-U.
+  assert.equal(
+    computeAutocompleteAcceptWrite({
+      prompt: atPrompt("tkn", "(base) PS C:\\Users\\Administrator>"),
+      typedBuffer: "tkn",
+      typedBufferReliable: true,
+      candidate: "uv run tkauto video sync-fs",
+      os: "linux",
+    }),
+    "\b\b\buv run tkauto video sync-fs",
+  );
+});

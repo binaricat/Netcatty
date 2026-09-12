@@ -67,6 +67,7 @@ import {
   STORAGE_KEY_EXPLORER_CONTEXT_MENU_ENABLED,
   STORAGE_KEY_TOGGLE_WINDOW_HOTKEY,
   STORAGE_KEY_CLOSE_TO_TRAY,
+  STORAGE_KEY_AUTO_LAUNCH_ENABLED,
   STORAGE_KEY_HTTP_NETWORK_PROXY,
   STORAGE_KEY_GLOBAL_HOTKEY_ENABLED,
   STORAGE_KEY_WINDOW_OPACITY,
@@ -539,6 +540,13 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
     if (stored === null) return true;
     return stored === 'true';
   });
+  // Optimistic cache for first paint; useSystemSettingsEffects hydrates this
+  // from app.getLoginItemSettings() (the real source of truth) on mount.
+  const [autoLaunchEnabled, setAutoLaunchEnabled] = useState<boolean>(() => {
+    const stored = readStoredString(STORAGE_KEY_AUTO_LAUNCH_ENABLED);
+    return stored === 'true';
+  });
+  const [autoLaunchSupported, setAutoLaunchSupported] = useState<boolean>(true);
   const [httpNetworkProxy, setHttpNetworkProxyState] = useState<HttpNetworkProxySettings>(() => {
     const stored = localStorageAdapter.read<unknown>(STORAGE_KEY_HTTP_NETWORK_PROXY);
     return normalizeHttpNetworkProxySettings(stored ?? DEFAULT_HTTP_NETWORK_PROXY);
@@ -1184,6 +1192,7 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
     setWindowOpacity: applyIncomingWindowOpacity,
     setAppIconVariant,
     setAutoUpdateEnabled,
+    setAutoLaunchEnabled,
     setHttpNetworkProxy,
     setSftpAutoOpenSidebar,
     setSftpFollowTerminalCwd,
@@ -1747,6 +1756,7 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
     toggleWindowHotkey,
     globalHotkeyEnabled,
     closeToTray,
+    autoLaunchEnabled,
     windowOpacityRecord,
     windowOpacityMutationSourceRef,
     appIconVariant,
@@ -1756,6 +1766,8 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
     setHotkeyRegistrationError,
     setAutoUpdateEnabled,
     setAppIconVariant,
+    setAutoLaunchEnabled,
+    setAutoLaunchSupported,
     notifySettingsChanged,
   });
 
@@ -2101,6 +2113,9 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
     setToggleWindowHotkey,
     closeToTray,
     setCloseToTray,
+    autoLaunchEnabled,
+    setAutoLaunchEnabled,
+    autoLaunchSupported,
     httpNetworkProxy,
     setHttpNetworkProxy,
     autoUpdateEnabled,

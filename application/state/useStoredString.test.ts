@@ -104,3 +104,16 @@ test("stored string helpers read fallback and resolve updater-style toggles", (t
     "edit",
   );
 });
+
+test("stored string helpers work with default validator when isAllowedValue is omitted", (t) => {
+  const env = installLocalStorage();
+  t.after(() => env.restore());
+
+  const storageKey = "netcatty:test-font";
+  assert.equal(readStoredStringValue(storageKey, "default-font"), "default-font");
+  assert.equal(readOptionalStoredStringValue(storageKey), null);
+
+  env.storage.setItem(storageKey, "Inter");
+  assert.equal(readStoredStringValue(storageKey, "default-font"), "Inter");
+  assert.equal(readOptionalStoredStringValue(storageKey), "Inter");
+});

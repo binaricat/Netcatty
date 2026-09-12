@@ -5,7 +5,7 @@ import { decryptField } from "../../../../infrastructure/persistence/secureField
 import type { CursorAuthMode } from "../../../../infrastructure/ai/types";
 import { Button } from "../../../ui/button";
 import { cn } from "../../../../lib/utils";
-import type { AgentPathInfo } from "./types";
+import { isCursorRuntimeInstalled, type AgentPathInfo } from "./types";
 
 export const CursorSdkCard: React.FC<{
   pathInfo: AgentPathInfo | null;
@@ -54,7 +54,7 @@ export const CursorSdkCard: React.FC<{
     };
   }, [encryptedApiKey]);
 
-  const installed = Boolean(pathInfo?.installed || pathInfo?.sdkInstalled || pathInfo?.cliBinPath);
+  const installed = isCursorRuntimeInstalled(pathInfo);
   const hasStoredApiKey = Boolean(encryptedApiKey);
   const usesEnvApiKey = pathInfo?.authSource === "CURSOR_API_KEY" || (
     pathInfo?.apiKeyOk && !hasStoredApiKey && pathInfo?.authSource !== "settings"
@@ -71,7 +71,7 @@ export const CursorSdkCard: React.FC<{
   const isCliMode = authMode === "cli-login";
   const available = isCliMode
     ? hasCliLogin
-    : (hasAnyApiKey && Boolean(pathInfo?.sdkInstalled ?? pathInfo?.installed));
+    : (hasAnyApiKey && Boolean(pathInfo?.sdkInstalled ?? true));
   const canSave = isApiKeyMode && !isSaving && !isDecrypting && (Boolean(apiKeyDraft.trim()) || hasStoredApiKey);
 
   const installStatus = isResolvingPath
@@ -161,7 +161,7 @@ export const CursorSdkCard: React.FC<{
         <p className="text-xs text-amber-500">
           {isCliMode
             ? t("ai.cursor.cliLoginHint")
-            : installed
+            : (Boolean(pathInfo?.sdkInstalled) || installed)
               ? t("ai.cursor.notFoundHint")
               : t("ai.cursor.notInstalledHint")}
         </p>

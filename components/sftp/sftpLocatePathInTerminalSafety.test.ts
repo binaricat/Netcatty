@@ -42,6 +42,6 @@ test("locate-path uses focused session fallback when SFTP cannot reuse the termi
   assert.match(sidePanelSource, /resolveLocateSftpPathSessionId\(\{\s*activeSessionId,\s*focusedSessionId,/);
   assert.match(
     slotSource,
-    /focusedSessionId=\{isVisible \? live\.focusedSessionId : null\}/,
+    /focusedSessionId=\{panelFocusedSessionId\}/,
   );
 });

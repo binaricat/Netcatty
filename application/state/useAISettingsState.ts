@@ -10,6 +10,7 @@ import {
   STORAGE_KEY_AI_DEFAULT_AGENT,
   STORAGE_KEY_AI_COMMAND_BLOCKLIST,
   STORAGE_KEY_AI_COMMAND_TIMEOUT,
+  STORAGE_KEY_AI_RESPONSE_IDLE_TIMEOUT,
   STORAGE_KEY_AI_MAX_ITERATIONS,
   STORAGE_KEY_AI_AGENT_MODEL_MAP,
   STORAGE_KEY_AI_AGENT_PROVIDER_MAP,
@@ -27,14 +28,19 @@ import type {
   WebSearchConfig,
 } from '../../infrastructure/ai/types';
 import {
-  DEFAULT_COMMAND_BLOCKLIST,
   DEFAULT_COMMAND_TIMEOUT_SECONDS,
+  DEFAULT_RESPONSE_IDLE_TIMEOUT_SECONDS,
   normalizeCommandTimeoutSeconds,
+  normalizeResponseIdleTimeoutSeconds,
 } from '../../infrastructure/ai/types';
 import { removeProviderReferences } from './aiProviderCleanup';
 import { AI_STATE_CHANGED_EVENT, emitAIStateChanged } from './aiStateEvents';
 import { getAIBridge } from './aiStateSnapshots';
 import { useStoredBoolean } from './useStoredBoolean';
+import {
+  persistCommandBlocklistSetting,
+  readCommandBlocklistSetting,
+} from './commandBlocklistSettings';
 
 function readPermissionMode(): AIPermissionMode {
   const stored = localStorageAdapter.readString(STORAGE_KEY_AI_PERMISSION_MODE);
@@ -66,12 +72,16 @@ export function useAISettingsState() {
   const [defaultAgentId, setDefaultAgentIdRaw] = useState<string>(() =>
     localStorageAdapter.readString(STORAGE_KEY_AI_DEFAULT_AGENT) ?? 'catty'
   );
-  const [commandBlocklist, setCommandBlocklistRaw] = useState<string[]>(() =>
-    localStorageAdapter.read<string[]>(STORAGE_KEY_AI_COMMAND_BLOCKLIST) ?? [...DEFAULT_COMMAND_BLOCKLIST]
-  );
+  const [commandBlocklist, setCommandBlocklistRaw] = useState<string[]>(readCommandBlocklistSetting);
   const [commandTimeout, setCommandTimeoutRaw] = useState<number>(() =>
     normalizeCommandTimeoutSeconds(
       localStorageAdapter.readNumber(STORAGE_KEY_AI_COMMAND_TIMEOUT) ?? DEFAULT_COMMAND_TIMEOUT_SECONDS,
+    )
+  );
+  const [responseIdleTimeout, setResponseIdleTimeoutRaw] = useState<number>(() =>
+    normalizeResponseIdleTimeoutSeconds(
+      localStorageAdapter.readNumber(STORAGE_KEY_AI_RESPONSE_IDLE_TIMEOUT)
+        ?? DEFAULT_RESPONSE_IDLE_TIMEOUT_SECONDS,
     )
   );
   const [maxIterations, setMaxIterationsRaw] = useState<number>(() =>
@@ -164,7 +174,7 @@ export function useAISettingsState() {
 
   const setCommandBlocklist = useCallback((value: string[]) => {
     setCommandBlocklistRaw(value);
-    localStorageAdapter.write(STORAGE_KEY_AI_COMMAND_BLOCKLIST, value);
+    persistCommandBlocklistSetting(value);
     getAIBridge()?.aiMcpSetCommandBlocklist?.(value);
   }, []);
 
@@ -173,6 +183,12 @@ export function useAISettingsState() {
     setCommandTimeoutRaw(normalizedValue);
     localStorageAdapter.writeNumber(STORAGE_KEY_AI_COMMAND_TIMEOUT, normalizedValue);
     getAIBridge()?.aiMcpSetCommandTimeout?.(normalizedValue);
+  }, []);
+
+  const setResponseIdleTimeout = useCallback((value: number) => {
+    const normalizedValue = normalizeResponseIdleTimeoutSeconds(value);
+    setResponseIdleTimeoutRaw(normalizedValue);
+    localStorageAdapter.writeNumber(STORAGE_KEY_AI_RESPONSE_IDLE_TIMEOUT, normalizedValue);
   }, []);
 
   const setMaxIterations = useCallback((value: number) => {
@@ -234,9 +250,7 @@ export function useAISettingsState() {
             setDefaultAgentIdRaw(localStorageAdapter.readString(STORAGE_KEY_AI_DEFAULT_AGENT) ?? 'catty');
             break;
           case STORAGE_KEY_AI_COMMAND_BLOCKLIST: {
-            const list = localStorageAdapter.read<string[]>(STORAGE_KEY_AI_COMMAND_BLOCKLIST);
-            if (list != null && !Array.isArray(list)) break;
-            const blocklist = list ?? [...DEFAULT_COMMAND_BLOCKLIST];
+            const blocklist = readCommandBlocklistSetting();
             setCommandBlocklistRaw(blocklist);
             getAIBridge()?.aiMcpSetCommandBlocklist?.(blocklist);
             break;
@@ -247,6 +261,13 @@ export function useAISettingsState() {
             const normalizedTimeout = normalizeCommandTimeoutSeconds(timeout);
             setCommandTimeoutRaw(normalizedTimeout);
             getAIBridge()?.aiMcpSetCommandTimeout?.(normalizedTimeout);
+            break;
+          }
+          case STORAGE_KEY_AI_RESPONSE_IDLE_TIMEOUT: {
+            const timeout = localStorageAdapter.readNumber(STORAGE_KEY_AI_RESPONSE_IDLE_TIMEOUT)
+              ?? DEFAULT_RESPONSE_IDLE_TIMEOUT_SECONDS;
+            if (!Number.isFinite(timeout)) break;
+            setResponseIdleTimeoutRaw(normalizeResponseIdleTimeoutSeconds(timeout));
             break;
           }
           case STORAGE_KEY_AI_MAX_ITERATIONS: {
@@ -315,6 +336,8 @@ export function useAISettingsState() {
     setCommandBlocklist,
     commandTimeout,
     setCommandTimeout,
+    responseIdleTimeout,
+    setResponseIdleTimeout,
     maxIterations,
     setMaxIterations,
     webSearchConfig,
@@ -346,6 +369,8 @@ export function useAISettingsState() {
     setCommandBlocklist,
     commandTimeout,
     setCommandTimeout,
+    responseIdleTimeout,
+    setResponseIdleTimeout,
     maxIterations,
     setMaxIterations,
     webSearchConfig,

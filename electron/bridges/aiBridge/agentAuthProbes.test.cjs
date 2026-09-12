@@ -273,6 +273,27 @@ test("probeCursorCliAuth: status command failure -> not authenticated", () => {
     runStatus: () => ({ exitCode: 1, stdout: "", stderr: "boom" }),
   });
   assert.equal(r.authenticated, false);
+  assert.equal(r.binPath, "/bin/cursor-agent");
+});
+
+test("probeCursorCliAuth: unrecognized status stdout keeps resolved binPath", () => {
+  const r = probeCursorCliAuth({
+    resolveBinary: () => "/bin/cursor-agent",
+    runStatus: () => ({ exitCode: 0, stdout: "cursor-agent 1.2.3\nnot json" }),
+  });
+  assert.equal(r.authenticated, false);
+  assert.equal(r.authSource, null);
+  assert.equal(r.binPath, "/bin/cursor-agent");
+});
+
+test("probeCursorCliAuth: thrown status probe keeps resolved binPath", () => {
+  const r = probeCursorCliAuth({
+    resolveBinary: () => "/bin/cursor-agent",
+    runStatus: () => { throw new Error("timeout"); },
+  });
+  assert.equal(r.authenticated, false);
+  assert.equal(r.authSource, null);
+  assert.equal(r.binPath, "/bin/cursor-agent");
 });
 
 test("probeCursorCliAuth: extracts authenticated JSON wrapped in cmd noise", () => {

@@ -203,6 +203,12 @@ export interface PopupPlacementInput {
    * ties when neither side can fully fit the desired height.
    */
   expandUpwardHint: boolean;
+  /**
+   * When true, keep rendering above the supplied anchor even if there is a
+   * full fit below. Used after a wrap pins the anchor to the command start
+   * so placement cannot flip down over the continuation rows (#3061).
+   */
+  forceExpandUpward?: boolean;
 }
 
 export interface PopupPlacement {
@@ -289,6 +295,7 @@ export function computeAutocompletePopupPlacement(
     anchorGap,
     viewportPadding,
     expandUpwardHint,
+    forceExpandUpward = false,
     clampViewport,
     clampWidth,
   } = input;
@@ -308,13 +315,15 @@ export function computeAutocompletePopupPlacement(
   const spaceBelow = Math.max(0, boundsBottom - anchorBottom - viewportPadding - anchorGap);
   const canFullyRenderAbove = spaceAbove >= cappedDesiredHeight;
   const canFullyRenderBelow = spaceBelow >= cappedDesiredHeight;
-  const renderUpward = canFullyRenderBelow
-    ? false
-    : canFullyRenderAbove
-      ? true
-      : expandUpwardHint
-        ? spaceAbove >= Math.min(spaceBelow, 80)
-        : spaceAbove > spaceBelow;
+  const renderUpward = forceExpandUpward && spaceAbove > 0
+    ? true
+    : canFullyRenderBelow
+      ? false
+      : canFullyRenderAbove
+        ? true
+        : expandUpwardHint
+          ? spaceAbove >= Math.min(spaceBelow, 80)
+          : spaceAbove > spaceBelow;
 
   const availableVerticalSpace = renderUpward ? spaceAbove : spaceBelow;
   const availableViewportHeight = Math.max(0, bounds.height - viewportPadding * 2);
@@ -373,6 +382,37 @@ export type AutocompleteCursorCell = {
   row: number;
 };
 
+function clampAutocompleteViewportRow(row: number, termRows: number): number {
+  if (Number.isFinite(termRows) && termRows > 0) {
+    return Math.max(0, Math.min(row, termRows - 1));
+  }
+  return Math.max(0, row);
+}
+
+/** Absolute buffer index of the first physical row of the current wrapped line. */
+function resolveWrappedCommandStartAbsY(term: XTerm): number {
+  const buffer = term.buffer.active;
+  let startAbsY = buffer.cursorY + buffer.baseY;
+  let startLine = buffer.getLine(startAbsY);
+  while (startLine?.isWrapped && startAbsY > 0) {
+    startAbsY -= 1;
+    startLine = buffer.getLine(startAbsY);
+  }
+  return startAbsY;
+}
+
+/**
+ * Viewport row of the command start (prompt / first physical line). After a
+ * wrap at the bottom, xterm keeps the cursor on `term.rows - 1` and scrolls;
+ * this row moves up with the wrapped command so the popup cannot cover it.
+ */
+export function resolveAutocompleteCommandStartRow(term: XTerm): number {
+  const buffer = term.buffer.active;
+  const startAbsY = resolveWrappedCommandStartAbsY(term);
+  const viewportOrigin = Number.isFinite(buffer.viewportY) ? buffer.viewportY : buffer.baseY;
+  return clampAutocompleteViewportRow(startAbsY - viewportOrigin, Number(term.rows));
+}
+
 /**
  * Best-effort cursor cell for popup anchoring. xterm's helper textarea and
  * buffer.cursorX can lag behind the keystroke that triggered completion, so
@@ -396,13 +436,7 @@ export function resolveAutocompleteCursorCell(
   const termRows = Number(term.rows);
   const absY = buffer.cursorY + buffer.baseY;
 
-  // Walk back to the first physical row of this soft-wrapped logical line.
-  let startAbsY = absY;
-  let startLine = buffer.getLine(startAbsY);
-  while (startLine?.isWrapped && startAbsY > 0) {
-    startAbsY -= 1;
-    startLine = buffer.getLine(startAbsY);
-  }
+  const startAbsY = resolveWrappedCommandStartAbsY(term);
   const startRowY = startAbsY - buffer.baseY;
 
   let fromLine = (buffer.cursorY - startRowY) * cols + buffer.cursorX;
@@ -425,12 +459,9 @@ export function resolveAutocompleteCursorCell(
   const predictedRow = Math.max(0, startRowY + Math.floor(rawColumn / cols));
   // Only clamp when the terminal reports a real viewport height; missing
   // `rows` (tests/mocks) must not collapse every wrap onto row 0.
-  const row = Number.isFinite(termRows) && termRows > 0
-    ? Math.min(predictedRow, termRows - 1)
-    : predictedRow;
   return {
     column: rawColumn % cols,
-    row,
+    row: clampAutocompleteViewportRow(predictedRow, termRows),
   };
 }
 
@@ -481,6 +512,11 @@ export function resolveAutocompleteClampViewport(container: HTMLElement | null):
 /**
  * Resolve the autocomplete anchor in viewport coordinates so split panes and
  * padded xterm screens stay aligned with the real cursor.
+ *
+ * When `commandStartRow` is above `cursorRow` (a wrapped command), an
+ * upward popup pins to the start row so it cannot cover the first physical
+ * line after a wrap-induced scroll (#3061). Downward popups still pin to
+ * the cursor row so they sit below the whole command.
  */
 export function resolveAutocompleteAnchorInViewport(
   term: XTerm,
@@ -488,6 +524,7 @@ export function resolveAutocompleteAnchorInViewport(
   itemCount: number,
   cursorColumn = term.buffer.active.cursorX,
   cursorRow = term.buffer.active.cursorY,
+  commandStartRow = cursorRow,
 ): AutocompleteViewportAnchor {
   const empty: AutocompleteViewportAnchor = {
     anchorLeft: 0,
@@ -506,16 +543,68 @@ export function resolveAutocompleteAnchorInViewport(
     ?? term.element.querySelector<HTMLElement>(".xterm-screen")
     ?? container;
   const screenRect = screen.getBoundingClientRect();
+  const upwardRow = Math.min(commandStartRow, cursorRow);
+  const downwardRow = Math.max(commandStartRow, cursorRow);
+  const spaceBelow = Math.max(0, (rows - downwardRow - 1) * dims.height);
+  const spaceAbove = Math.max(0, upwardRow * dims.height);
+  const expandUpward = shouldExpandAutocompleteUpward(
+    downwardRow,
+    spaceBelow,
+    spaceAbove,
+    estimatedPopupHeight,
+  );
+  const anchorRow = expandUpward ? upwardRow : downwardRow;
   const anchorLeft = screenRect.left + cursorColumn * dims.width;
-  const anchorTop = screenRect.top + cursorRow * dims.height;
-  const anchorBottom = screenRect.top + (cursorRow + 1) * dims.height;
-  const spaceBelow = Math.max(0, (rows - cursorRow - 1) * dims.height);
-  const spaceAbove = Math.max(0, cursorRow * dims.height);
+  const anchorTop = screenRect.top + anchorRow * dims.height;
+  const anchorBottom = screenRect.top + (anchorRow + 1) * dims.height;
 
   return {
     anchorLeft,
     anchorTop,
     anchorBottom,
-    expandUpward: shouldExpandAutocompleteUpward(cursorRow, spaceBelow, spaceAbove, estimatedPopupHeight),
+    expandUpward,
   };
+}
+
+/** Popup viewport anchor using the live wrapped command-start row (#3061). */
+export function resolveAutocompletePopupAnchorInViewport(
+  term: XTerm,
+  container: HTMLElement | null,
+  itemCount: number,
+  cursorColumn: number,
+  cursorRow: number,
+): AutocompleteViewportAnchor {
+  return resolveAutocompleteAnchorInViewport(
+    term,
+    container,
+    itemCount,
+    cursorColumn,
+    cursorRow,
+    resolveAutocompleteCommandStartRow(term),
+  );
+}
+
+/**
+ * Next stored popup viewport when the command-start / cursor anchor moves.
+ * Returns `prev` when nothing changed so callers can skip a React update.
+ */
+export function nextAutocompletePopupAnchorViewport(
+  prev: { left: number; top: number; bottom: number },
+  expandUpward: boolean,
+  anchor: AutocompleteViewportAnchor,
+): { viewport: { left: number; top: number; bottom: number }; expandUpward: boolean } | null {
+  const viewport = {
+    left: anchor.anchorLeft,
+    top: anchor.anchorTop,
+    bottom: anchor.anchorBottom,
+  };
+  if (
+    prev.left === viewport.left
+    && prev.top === viewport.top
+    && prev.bottom === viewport.bottom
+    && expandUpward === anchor.expandUpward
+  ) {
+    return null;
+  }
+  return { viewport, expandUpward: anchor.expandUpward };
 }

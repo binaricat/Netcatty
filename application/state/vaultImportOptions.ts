@@ -6,6 +6,7 @@ export type VaultImportOptions = {
   managed?: boolean;
   filePath?: string;
   encoding?: VaultImportFileEncoding;
+  masterPassword?: string;
   destination?: VaultImportDestination;
 };
 

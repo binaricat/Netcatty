@@ -88,7 +88,7 @@ const TOOL_INPUT_FIELDS = Object.freeze({
     hosts: {
       type: "string",
       description:
-        "JSON array of host objects you extracted from the user's text. Each object: hostname (required; host/ip aliases accepted), label (name alias accepted), port, username, password, keyPath or keypath (local private-key file path), passphrase (saved passphrase for that key path), group, tags (array or comma-separated string), notes (Host Details remarks — NOT Vault sidebar Notes), protocol (ssh|telnet|local).",
+        "JSON array of host objects you extracted from the user's text. Each object: hostname (required; host/ip aliases accepted), label (name alias accepted), port, username, password, keyPath or keypath (local private-key file path), passphrase (saved passphrase for that key path), group, tags (array or comma-separated string), notes (Host Details remarks — NOT Vault sidebar Notes), protocol (ssh|telnet|local), os (linux|windows|macos).",
     },
     dryRun: {
       type: "string",
@@ -119,6 +119,7 @@ const TOOL_INPUT_FIELDS = Object.freeze({
     tags: { type: "string", optional: true, description: "JSON array or comma-separated tag names. Empty string clears tags." },
     notes: { type: "string", optional: true, description: "Host Details remarks. Empty string clears notes." },
     protocol: { type: "string", optional: true, description: "New protocol: ssh, telnet, local, or serial." },
+    os: { type: "string", optional: true, description: "Operating system override: auto (default), linux, windows, macos, freebsd, or unknown. Use auto to use detected system information; network device mode is separate." },
     identityId: { type: "string", optional: true, description: "Reusable identity ID from vault_identities_list. Empty string detaches the identity." },
     jumpHostIds: { type: "string", optional: true, description: "JSON array of vault host IDs in jump order. Empty array clears the chain." },
     proxyProfileId: { type: "string", optional: true, description: "Reusable proxy ID from vault_proxy_profiles_list. Empty string clears it." },
@@ -166,6 +167,10 @@ const TOOL_INPUT_FIELDS = Object.freeze({
   "vault.note.list": {},
   "vault.note.get": {
     noteId: { type: "string", description: "Vault note ID from vault_notes_list." },
+    offset: { type: "number", optional: true, description: "Zero-based UTF-16 offset; default 0. Continue with returned nextOffset." },
+    maxChars: { type: "number", optional: true, description: "Maximum excerpt length in UTF-16 units, at least 2; default and hard cap 6000." },
+    query: { type: "string", optional: true, description: "Optional case-sensitive literal search, 1-200 UTF-16 units. Returns an excerpt starting at the next match at/after offset; matchOffset=null means no match. Keep query when continuing search." },
+    expectedUpdatedAt: { type: "number", optional: true, description: "Pass note.updatedAt from the first read on subsequent reads to detect changes; restart if it changed." },
   },
   "vault.note.create": {
     title: { type: "string", description: "Note title shown in Vault → Notes." },

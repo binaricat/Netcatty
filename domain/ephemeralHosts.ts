@@ -1,3 +1,4 @@
+import { normalizeDistroId } from "./host";
 import type { Host } from "./models";
 
 /**
@@ -36,4 +37,11 @@ export const applyEphemeralHostsUpdate = (
   if (updated.length === 0) return previous;
   const updatedById = new Map(updated.map((host) => [host.id, host]));
   return previous.map((host) => updatedById.get(host.id) ?? host);
+};
+
+/** Detection updates stay in memory and never create a host after its session closes. */
+export const applyEphemeralHostDistroUpdate = (previous: Host[], hostId: string, distro: string): Host[] => {
+  const normalized = normalizeDistroId(distro);
+  if (!previous.some((host) => host.id === hostId && host.distro !== normalized)) return previous;
+  return previous.map((host) => host.id === hostId ? { ...host, distro: normalized } : host);
 };

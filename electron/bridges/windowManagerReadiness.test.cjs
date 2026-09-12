@@ -358,6 +358,9 @@ test("buildAppMenu sends Cmd+W to any registered main window renderer", () => {
   const firstMainWindow = {
     isDestroyed() { return false; },
     on() {},
+    close() {
+      calls.push("first:close");
+    },
     webContents: {
       isDestroyed() { return false; },
       send(channel) {
@@ -383,9 +386,16 @@ test("buildAppMenu sends Cmd+W to any registered main window renderer", () => {
     const windowMenu = capturedTemplate.find((item) => item.label === "Window");
     const closeItem = windowMenu.submenu.find((item) => item.accelerator === "CommandOrControl+W");
 
-    closeItem.click(null, firstMainWindow);
+    closeItem.click(null, firstMainWindow, { triggeredByAccelerator: true });
 
     assert.deepEqual(calls, ["first:netcatty:window:command-close"]);
+
+    closeItem.click(null, firstMainWindow, { triggeredByAccelerator: false });
+
+    assert.deepEqual(calls, [
+      "first:netcatty:window:command-close",
+      "first:close",
+    ]);
   } finally {
     unregisterMainWindow(firstMainWindow);
     unregisterMainWindow(secondMainWindow);

@@ -171,6 +171,7 @@ export function useVaultImportHandlers({
             format,
             files,
             encoding: options?.encoding,
+            masterPassword: options?.masterPassword,
             signal,
             onProgress: (progress) => {
               if (!signal.aborted) updateProgress(progress);

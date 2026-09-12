@@ -211,6 +211,32 @@ test("an unshared terminal remembers the shell pid discovered by its cwd probe",
   assert.equal(session.shellPid, "3131");
 });
 
+test("cwd probe forces POSIX sh, captures sshd PPID, and keeps the watchdog", async () => {
+  let command = "";
+  const session = {
+    connRef: { count: 1 },
+    stream: {},
+    conn: {
+      exec(nextCommand, callback) {
+        command = nextCommand;
+        callback(null, makePwdStream("/home/alice/project", "3131"));
+      },
+    },
+  };
+  const api = makeApi(session);
+
+  const result = await api.getSessionPwd(null, { sessionId: "session-1" });
+
+  assert.deepEqual(result, { success: true, cwd: "/home/alice/project" });
+  assert.ok(command.startsWith("exec sh -c "), command.slice(0, 80));
+  assert.ok(command.includes("export NC_SSHD_PPID=$PPID"));
+  assert.ok(command.includes("( sleep 5 &&"), "cwd watchdog bound must match the 5s default timeout");
+  assert.ok(command.includes('kill -9 $nc_tree "$$"'));
+  assert.ok(command.includes(") </dev/null >/dev/null 2>&1 & nc_watchdog_pid=$!"));
+  assert.ok(command.includes('kill -9 $nc_kids "$nc_watchdog_pid"'));
+  assert.ok(command.includes('find_login_shell "${NC_SSHD_PPID:-$PPID}"'));
+});
+
 test("immediate parked reconnect does not guess cwd from an exiting shell", async () => {
   let execCalls = 0;
   const session = {

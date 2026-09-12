@@ -256,6 +256,38 @@ test('legacy writers cannot silently overwrite convergent or future cloud schema
   );
 });
 
+test('cloudSyncPayloadsEqual ignores lastConnectedAt telemetry', () => {
+  const left = payload();
+  const right = {
+    ...payload(),
+    hosts: [{ ...payload().hosts[0], lastConnectedAt: NOW }],
+  };
+
+  assert.equal(cloudSyncPayloadsEqual(left, right), true);
+});
+
+test('createConvergentSyncStateFromPayload does not persist lastConnectedAt', () => {
+  const withTelemetry = {
+    ...payload(),
+    hosts: [{ ...payload().hosts[0], lastConnectedAt: NOW }],
+  };
+  const state = createConvergentSyncStateFromPayload(withTelemetry, 'device-a', NOW);
+  const materialized = materializeSyncPayloadFromConvergentState(state, { syncedAt: NOW });
+
+  assert.equal(materialized.hosts[0].lastConnectedAt, undefined);
+  assert.equal('lastConnectedAt' in materialized.hosts[0], false);
+});
+
+test('diffLegacySyncPayload ignores lastConnectedAt-only host changes', () => {
+  const baseline = payload();
+  const legacy = {
+    ...payload(),
+    hosts: [{ ...payload().hosts[0], lastConnectedAt: NOW + 1 }],
+  };
+
+  assert.deepEqual(diffLegacySyncPayload(baseline, legacy), []);
+});
+
 test('trusted legacy diff becomes causal CRDT writes without carrying transport metadata', () => {
   const baseline = payload('Before');
   const state = createConvergentSyncStateFromPayload(baseline, 'seed', NOW);

@@ -4,6 +4,7 @@ import { parseCustomKeyBindingsStorageRecord } from '../../domain/customKeyBindi
 import { resolveSupportedLocale } from '../../infrastructure/config/i18n';
 import {
   STORAGE_KEY_ACCENT_MODE,
+  STORAGE_KEY_AUTO_LAUNCH_ENABLED,
   STORAGE_KEY_AUTO_UPDATE_ENABLED,
   STORAGE_KEY_COLOR,
   STORAGE_KEY_CUSTOM_CSS,
@@ -93,6 +94,7 @@ interface UseSettingsIpcSyncParams {
   setWindowOpacity: (raw: unknown) => void;
   setAppIconVariant: Dispatch<SetStateAction<AppIconVariant>>;
   setAutoUpdateEnabled: Dispatch<SetStateAction<boolean>>;
+  setAutoLaunchEnabled: Dispatch<SetStateAction<boolean>>;
   setHttpNetworkProxy: Dispatch<SetStateAction<HttpNetworkProxySettings>>;
   setSftpAutoOpenSidebar: Dispatch<SetStateAction<boolean>>;
   setSftpFollowTerminalCwd: Dispatch<SetStateAction<boolean>>;
@@ -138,6 +140,7 @@ export function useSettingsIpcSync({
   setWindowOpacity,
   setAppIconVariant,
   setAutoUpdateEnabled,
+  setAutoLaunchEnabled,
   setHttpNetworkProxy,
   setSftpAutoOpenSidebar,
   setSftpFollowTerminalCwd,
@@ -270,6 +273,13 @@ export function useSettingsIpcSync({
       if (key === STORAGE_KEY_AUTO_UPDATE_ENABLED && typeof value === 'boolean') {
         setAutoUpdateEnabled((prev) => (prev === value ? prev : value));
       }
+      if (key === STORAGE_KEY_AUTO_LAUNCH_ENABLED && typeof value === 'boolean') {
+        // Peer windows (main, tray panel, terminal popups) all mount
+        // useSettingsState via AppLockGate even though the toggle is only
+        // ever rendered in the Settings window — keep their in-memory copy
+        // in sync so it's not stale if anything reads it later.
+        setAutoLaunchEnabled((prev) => (prev === value ? prev : value));
+      }
       if (key === STORAGE_KEY_HTTP_NETWORK_PROXY) {
         const next = normalizeHttpNetworkProxySettings(value);
         setHttpNetworkProxy((prev) => (
@@ -330,6 +340,7 @@ export function useSettingsIpcSync({
     applyIncomingCustomKeyBindings,
     mergeIncomingTerminalSettings,
     setAutoUpdateEnabled,
+    setAutoLaunchEnabled,
     setHttpNetworkProxy,
     setEditorWordWrapState,
     setFollowAppTerminalThemeState,

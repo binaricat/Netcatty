@@ -1,13 +1,4 @@
 import {
-  BlockTypeSelect,
-  BoldItalicUnderlineToggles,
-  CodeToggle,
-  CreateLink,
-  InsertCodeBlock,
-  InsertImage,
-  InsertTable,
-  InsertThematicBreak,
-  ListsToggle,
   codeBlockPlugin,
   codeMirrorPlugin,
   headingsPlugin,
@@ -18,16 +9,16 @@ import {
   markdownShortcutPlugin,
   MDXEditor,
   type MDXEditorMethods,
+  openNewImageDialog$,
+  openLinkEditDialog$,
   quotePlugin,
-  Separator,
+  realmPlugin,
   tablePlugin,
   thematicBreakPlugin,
-  toolbarPlugin,
-  UndoRedo,
 } from "@mdxeditor/editor";
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { tags } from "@lezer/highlight";
-import { ExternalLink } from "lucide-react";
+import { AlertTriangle, ExternalLink } from "lucide-react";
 import {
   $createRangeSelection,
   $getNearestNodeFromDOMNode,
@@ -36,12 +27,18 @@ import {
   $isTextNode,
   $setSelection,
   CLEAR_HISTORY_COMMAND,
+  COMMAND_PRIORITY_LOW,
+  FORMAT_TEXT_COMMAND,
+  REDO_COMMAND,
+  SELECTION_CHANGE_COMMAND,
+  UNDO_COMMAND,
   getNearestEditorFromDOMNode,
 } from "lexical";
 import React, {
   startTransition,
   useCallback,
   useEffect,
+  useImperativeHandle,
   useMemo,
   useRef,
   useState,
@@ -65,6 +62,14 @@ import {
   shouldInterceptResolvedNotePaste,
 } from "./noteClipboardPaste";
 import { annotateNoteImageSizes } from "./noteImageLayout";
+import { renderNoteMathFormula } from "./noteMathRenderer";
+import { createNoteCodeTooltipExtensions } from "./noteCodeTooltips";
+import {
+  EMPTY_ACTIVE_FORMATS,
+  type ActiveTextFormats,
+  type InlineMarkdownEditorHandle,
+  type NoteEditorMode,
+} from "./noteEditorTypes";
 
 export {
   annotateNoteImageSizes,
@@ -79,6 +84,51 @@ export {
   convertClipboardHtmlToMarkdown,
 } from "./noteClipboardPaste";
 
+import { NoteSourceEditor, type NoteSourceEditorHandle } from "./NoteSourceEditor";
+import {
+  extractNoteHeadings,
+  formatMarkdownListSelection,
+  formatMarkdownQuoteSelection,
+  normalizeNoteHeadingText,
+  type MarkdownActionType,
+  type NoteHeadingItem,
+} from "../../domain/notes";
+
+export { NoteSourceEditor, type NoteSourceEditorHandle };
+
+const NOTE_HEADING_SELECTOR = [1, 2, 3, 4, 5, 6]
+  .map((level) => `.netcatty-mdx-content h${level}`)
+  .join(", ");
+
+export const getRenderedNoteHeadingText = (element: HTMLElement): string => {
+  const readNode = (node: Node): string => {
+    if (node.nodeType === 3) return node.textContent ?? "";
+    const nodeElement = node as Element;
+    if (nodeElement.tagName?.toLowerCase() === "img") {
+      return nodeElement.getAttribute("alt") ?? "";
+    }
+    return Array.from(node.childNodes ?? []).map(readNode).join("");
+  };
+  const childNodes = Array.from(element.childNodes ?? []);
+  return childNodes.length > 0
+    ? childNodes.map(readNode).join("")
+    : element.textContent ?? "";
+};
+
+export const scrollNoteHeadingIntoView = (
+  root: { querySelectorAll: (selector: string) => ArrayLike<HTMLElement> } | null,
+  heading: Pick<NoteHeadingItem, "level" | "text">,
+  occurrence = 0,
+): boolean => {
+  if (!root || occurrence < 0) return false;
+  const target = Array.from(root.querySelectorAll(NOTE_HEADING_SELECTOR))
+    .filter((element) => element.tagName.toLowerCase() === `h${heading.level}`
+      && normalizeNoteHeadingText(getRenderedNoteHeadingText(element)) === normalizeNoteHeadingText(heading.text))[occurrence];
+  if (!target) return false;
+  target.scrollIntoView({ behavior: "smooth", block: "start", inline: "nearest" });
+  return true;
+};
+
 export interface InlineMarkdownEditorProps {
   value: string;
   placeholder: string;
@@ -90,9 +140,114 @@ export interface InlineMarkdownEditorProps {
   onOpenHost?: (host: Host) => void;
   onOpenExternalLink?: (url: string) => void | Promise<void>;
   previewEmptyLabel?: string;
+  sourceEditorRef?: React.RefObject<NoteSourceEditorHandle | null>;
+  noteFontFamily?: string;
+  noteFontSize?: number;
+  noteCodeFontSize?: number;
+  /** Reports the active text-format toggles at the current selection (toolbar highlight). */
+  onActiveFormatsChange?: (formats: ActiveTextFormats) => void;
 }
 
-export type NoteEditorMode = "edit" | "preview";
+export const NOTE_EDIT_DECORATION_DEBOUNCE_MS = 160;
+
+export const shouldApplyMdxParseFailure = (input: {
+  currentNoteId?: string;
+  failedNoteId?: string;
+  currentMarkdown: string;
+  failedMarkdown: string;
+}): boolean => input.currentNoteId === input.failedNoteId
+  && input.currentMarkdown.trim() === input.failedMarkdown.trim();
+
+export const getNoteDecorationMutationDelay = (editorMode: NoteEditorMode): number =>
+  editorMode === "edit" || editorMode === "live" ? NOTE_EDIT_DECORATION_DEBOUNCE_MS : 0;
+
+export const shouldApplyExternalNoteMarkdown = (input: {
+  latestMarkdown: string;
+  syncedMarkdown: string;
+  latestSourceMarkdown: string;
+  syncedSourceMarkdown: string;
+  nextSourceMarkdown: string;
+}): boolean => input.latestSourceMarkdown === input.nextSourceMarkdown
+  || (
+    input.latestMarkdown === input.syncedMarkdown
+    && input.latestSourceMarkdown === input.syncedSourceMarkdown
+  );
+
+export interface NoteDecorationSchedulerRuntime {
+  requestFrame: (callback: () => void) => number;
+  cancelFrame: (id: number) => void;
+  setTimer: (callback: () => void, delay: number) => number;
+  clearTimer: (id: number) => void;
+}
+
+export const createNoteDecorationMutationScheduler = (
+  editorMode: NoteEditorMode,
+  runDecorations: () => void,
+  runtime: NoteDecorationSchedulerRuntime,
+): { schedule: () => void; cancel: () => void } => {
+  let frame = 0;
+  let timer = 0;
+  let cancelled = false;
+
+  return {
+    schedule: () => {
+      if (cancelled) return;
+      const delay = getNoteDecorationMutationDelay(editorMode);
+      if (delay > 0) {
+        if (timer) runtime.clearTimer(timer);
+        timer = runtime.setTimer(() => {
+          timer = 0;
+          if (!cancelled) runDecorations();
+        }, delay);
+        return;
+      }
+      if (frame) return;
+      frame = runtime.requestFrame(() => {
+        frame = 0;
+        if (!cancelled) runDecorations();
+      });
+    },
+    cancel: () => {
+      cancelled = true;
+      if (timer) runtime.clearTimer(timer);
+      if (frame) runtime.cancelFrame(frame);
+      timer = 0;
+      frame = 0;
+    },
+  };
+};
+
+export interface NoteEditorDialogActions {
+  openImageDialog: () => void;
+  openLinkDialog: () => void;
+}
+
+export const invokeNoteEditorDialogAction = (
+  action: MarkdownActionType,
+  dialogActions: NoteEditorDialogActions | null,
+): boolean => {
+  if (!dialogActions) return false;
+  if (action === "image") {
+    dialogActions.openImageDialog();
+    return true;
+  }
+  if (action === "link") {
+    dialogActions.openLinkDialog();
+    return true;
+  }
+  return false;
+};
+
+const noteEditorDialogBridgePlugin = realmPlugin<{
+  setDialogActions: (actions: NoteEditorDialogActions) => void;
+}>({
+  init: (realm, params) => {
+    params?.setDialogActions({
+      openImageDialog: () => realm.pub(openNewImageDialog$),
+      openLinkDialog: () => realm.pub(openLinkEditDialog$),
+    });
+  },
+});
 
 type HostPickerState = {
   open: boolean;
@@ -138,6 +293,7 @@ const NOTE_CODE_BLOCK_LANGUAGES = {
   js: "JavaScript",
   json: "JSON",
   jsx: "JavaScript (React)",
+  latex: "LaTeX",
   markdown: "Markdown",
   md: "Markdown",
   nginx: "Nginx",
@@ -147,6 +303,7 @@ const NOTE_CODE_BLOCK_LANGUAGES = {
   sh: "Shell",
   shell: "Shell",
   sql: "SQL",
+  tex: "TeX",
   toml: "TOML",
   ts: "TypeScript",
   tsx: "TypeScript (React)",
@@ -177,27 +334,6 @@ const noteCodeHighlightStyle = HighlightStyle.define([
 const NOTE_CODE_MIRROR_EXTENSIONS = [syntaxHighlighting(noteCodeHighlightStyle)];
 
 type RectLike = Pick<DOMRect, "bottom" | "height" | "left" | "top" | "width">;
-
-const NoteMarkdownToolbar = React.memo(function NoteMarkdownToolbar() {
-  return (
-    <>
-      <UndoRedo />
-      <Separator />
-      <BlockTypeSelect />
-      <Separator />
-      <BoldItalicUnderlineToggles options={["Bold", "Italic"]} />
-      <CodeToggle />
-      <Separator />
-      <ListsToggle options={["bullet", "number", "check"]} />
-      <Separator />
-      <CreateLink />
-      <InsertImage />
-      <InsertCodeBlock />
-      <InsertTable />
-      <InsertThematicBreak />
-    </>
-  );
-});
 
 const isSshCandidateHost = (host: Host): boolean =>
   Boolean(host.hostname?.trim()) && (host.protocol === undefined || host.protocol === "ssh");
@@ -485,8 +621,21 @@ export const getCodeMirrorBlockText = (wrapper: Element): string => {
       .join("\n");
   }
 
-  const content = wrapper.querySelector(".cm-content");
-  return content?.textContent?.replace(/\u00a0/g, " ") ?? "";
+  const cmContent = wrapper.querySelector(".cm-content");
+  if (cmContent) {
+    return cmContent.textContent?.replace(/\u00a0/g, " ") ?? "";
+  }
+
+  const codeEl = wrapper.querySelector("code");
+  if (codeEl) {
+    return codeEl.textContent?.replace(/\u00a0/g, " ") ?? "";
+  }
+
+  if (wrapper.tagName.toLowerCase() === "pre") {
+    return wrapper.textContent?.replace(/\u00a0/g, " ") ?? "";
+  }
+
+  return "";
 };
 
 const clearNoteCodeBlockCopyResetTimer = (button: HTMLElement): void => {
@@ -506,6 +655,61 @@ export const removeNoteCodeBlockCopyButtons = (container: HTMLElement): void => 
   });
 };
 
+const COPY_ICON_SVG = `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>`;
+const CHECK_ICON_SVG = `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
+const DELETE_ICON_SVG = `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>`;
+
+function createCopyButton(
+  wrapper: HTMLElement,
+  {
+    copyLabel,
+    copiedLabel,
+    copyFailedLabel,
+    onCopy,
+  }: {
+    copyLabel: string;
+    copiedLabel: string;
+    copyFailedLabel: string;
+    onCopy: (text: string) => Promise<boolean>;
+  },
+): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.dataset.noteCodeCopy = "true";
+  button.className = "netcatty-note-code-copy";
+  button.title = copyLabel;
+  button.setAttribute("aria-label", copyLabel);
+  button.innerHTML = COPY_ICON_SVG;
+
+  button.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    void (async () => {
+      clearNoteCodeBlockCopyResetTimer(button);
+      const text = getCodeMirrorBlockText(wrapper);
+      const ok = await onCopy(text);
+      if (!ok) {
+        toast.error(copyFailedLabel);
+        return;
+      }
+      button.dataset.copied = "true";
+      button.innerHTML = CHECK_ICON_SVG;
+      button.title = copiedLabel;
+      button.setAttribute("aria-label", copiedLabel);
+      const timerId = window.setTimeout(() => {
+        delete button.dataset.copied;
+        delete button.dataset.resetTimerId;
+        button.innerHTML = COPY_ICON_SVG;
+        button.title = copyLabel;
+        button.setAttribute("aria-label", copyLabel);
+      }, 1500);
+      button.dataset.resetTimerId = String(timerId);
+    })();
+  });
+
+  return button;
+}
+
 export const annotateNoteCodeBlockCopyButtons = (
   container: HTMLElement,
   {
@@ -520,46 +724,151 @@ export const annotateNoteCodeBlockCopyButtons = (
     onCopy: (text: string) => Promise<boolean>;
   },
 ): void => {
-  container.querySelectorAll('[class*="_codeMirrorWrapper_"]').forEach((wrapper) => {
-    if (!(wrapper instanceof HTMLElement)) return;
-    if (wrapper.querySelector("[data-note-code-copy]")) return;
+  container.querySelectorAll('[class*="_codeMirrorWrapper_"], pre').forEach((rawNode) => {
+    if (!(rawNode instanceof HTMLElement)) return;
 
-    const button = document.createElement("button");
-    button.type = "button";
-    button.dataset.noteCodeCopy = "true";
-    button.className = "netcatty-note-code-copy";
-    button.title = copyLabel;
-    button.setAttribute("aria-label", copyLabel);
-    button.textContent = copyLabel;
+    const wrapper = rawNode;
+    const toolbar = wrapper.querySelector('[class*="_codeMirrorToolbar_"]');
+    // In preview/read-only mode MDXEditor still renders the CodeMirror toolbar
+    // in the DOM but CSS hides it (display: none). A copy button appended to a
+    // hidden toolbar would never be visible, so treat a hidden toolbar as absent.
+    const toolbarVisible =
+      toolbar instanceof HTMLElement && getComputedStyle(toolbar).display !== "none";
 
-    button.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      void (async () => {
-        clearNoteCodeBlockCopyResetTimer(button);
-        const text = getCodeMirrorBlockText(wrapper);
-        const ok = await onCopy(text);
-        if (!ok) {
-          toast.error(copyFailedLabel);
-          return;
+    if (toolbarVisible) {
+      // Live edit mode with toolbar
+      const existingInToolbar = toolbar.querySelector("[data-note-code-copy]");
+      wrapper.querySelectorAll("[data-note-code-copy]").forEach((btn) => {
+        if (btn !== existingInToolbar) {
+          clearNoteCodeBlockCopyResetTimer(btn as HTMLElement);
+          btn.remove();
         }
-        button.dataset.copied = "true";
-        button.textContent = copiedLabel;
-        button.title = copiedLabel;
-        button.setAttribute("aria-label", copiedLabel);
-        const timerId = window.setTimeout(() => {
-          delete button.dataset.copied;
-          delete button.dataset.resetTimerId;
-          button.textContent = copyLabel;
-          button.title = copyLabel;
-          button.setAttribute("aria-label", copyLabel);
-        }, 1500);
-        button.dataset.resetTimerId = String(timerId);
-      })();
-    });
+      });
 
-    wrapper.appendChild(button);
+      if (existingInToolbar) {
+        if (toolbar.lastElementChild !== existingInToolbar) {
+          toolbar.appendChild(existingInToolbar);
+        }
+        return;
+      }
+
+      const button = createCopyButton(wrapper, { copyLabel, copiedLabel, copyFailedLabel, onCopy });
+      toolbar.appendChild(button);
+    } else {
+      // Reading / preview mode without toolbar (or toolbar hidden by CSS)
+      const existingButtons = wrapper.querySelectorAll("[data-note-code-copy]");
+      if (existingButtons.length > 0) {
+        // A button may have been appended to the hidden toolbar earlier; move it
+        // onto the wrapper so it is visible in read-only mode.
+        const firstButton = existingButtons[0] as HTMLElement;
+        if (firstButton.parentElement !== wrapper) {
+          wrapper.appendChild(firstButton);
+        }
+        for (let idx = 1; idx < existingButtons.length; idx++) {
+          clearNoteCodeBlockCopyResetTimer(existingButtons[idx] as HTMLElement);
+          existingButtons[idx].remove();
+        }
+        return;
+      }
+
+      if (getComputedStyle(wrapper).position === "static") {
+        wrapper.style.position = "relative";
+      }
+
+      const button = createCopyButton(wrapper, { copyLabel, copiedLabel, copyFailedLabel, onCopy });
+      wrapper.appendChild(button);
+    }
   });
+};
+
+/**
+ * Replaces MDXEditor's built-in filled-path delete icon with a standard
+ * lucide-style stroke SVG so it matches the copy button in the toolbar.
+ * The click handler (lexicalNode.remove()) is left untouched.
+ */
+export const annotateNoteCodeBlockDeleteButtons = (container: HTMLElement): void => {
+  container.querySelectorAll('[class*="_codeMirrorToolbar_"]').forEach((toolbar) => {
+    if (!(toolbar instanceof HTMLElement)) return;
+    if (toolbar.querySelector("[data-note-code-delete]")) return;
+
+    const deleteButton = Array.from(toolbar.querySelectorAll("button")).find(
+      (button) =>
+        !button.hasAttribute("data-note-code-copy") &&
+        !button.hasAttribute("data-note-code-delete") &&
+        !button.className.includes("_selectTrigger_") &&
+        !button.className.includes("_toolbarCodeBlockLanguageSelectTrigger_"),
+    );
+    if (!deleteButton) return;
+
+    deleteButton.dataset.noteCodeDelete = "true";
+    deleteButton.innerHTML = DELETE_ICON_SVG;
+  });
+};
+
+export const isNoteMathLanguageLabel = (value: string): boolean => {
+  const normalized = value.toLowerCase().trim();
+  if (!normalized) return false;
+  return normalized === "latex"
+    || normalized === "tex"
+    || /(?:^|\s)language-(?:latex|tex)(?:\s|$)/.test(normalized);
+};
+
+export const shouldRenderNoteMathFormula = (
+  languageLabel: string,
+): boolean => isNoteMathLanguageLabel(languageLabel);
+
+export const annotateMathFormulaBlocks = (container: HTMLElement, editorMode: string): void => {
+  container.querySelectorAll('[class*="_codeMirrorWrapper_"], pre').forEach((wrapper) => {
+    if (!(wrapper instanceof HTMLElement)) return;
+
+    const langTrigger = wrapper.querySelector('[class*="_toolbarCodeBlockLanguageSelectTrigger_"], [class*="_selectTrigger_"], select');
+    const triggerText = langTrigger?.textContent?.trim() ?? "";
+    const dataLanguage = wrapper.getAttribute("data-language")?.trim() ?? "";
+    const codeLanguage = /(?:^|\s)language-([^\s]+)/i.exec(
+      wrapper.querySelector("code")?.className ?? "",
+    )?.[1] ?? "";
+    const selectLanguage = langTrigger instanceof HTMLSelectElement
+      ? langTrigger.value.trim()
+      : "";
+    const lang = (dataLanguage || codeLanguage || selectLanguage || triggerText).toLowerCase();
+
+    const text = getCodeMirrorBlockText(wrapper).trim();
+
+    const isMathBlock = shouldRenderNoteMathFormula(lang);
+    if (!isMathBlock) {
+      const existingPreview = wrapper.querySelector(".netcatty-math-formula-preview");
+      if (existingPreview) existingPreview.remove();
+      wrapper.classList.remove("netcatty-math-reading-mode");
+      return;
+    }
+
+    const formulaSource = text;
+    if (!formulaSource) {
+      const existingPreview = wrapper.querySelector(".netcatty-math-formula-preview");
+      if (existingPreview) existingPreview.remove();
+      wrapper.classList.remove("netcatty-math-reading-mode");
+      return;
+    }
+
+    let preview = wrapper.querySelector(".netcatty-math-formula-preview") as HTMLElement | null;
+    if (!preview) {
+      preview = document.createElement("div");
+      preview.className = "netcatty-math-formula-preview";
+      wrapper.appendChild(preview);
+    }
+
+    if (preview.dataset.formulaSource !== formulaSource) {
+      preview.dataset.formulaSource = formulaSource;
+      preview.innerHTML = renderNoteMathFormula(formulaSource);
+    }
+
+    if (editorMode === "preview") {
+      wrapper.classList.add("netcatty-math-reading-mode");
+    } else {
+      wrapper.classList.remove("netcatty-math-reading-mode");
+    }
+  });
+
 };
 
 const deleteLexicalTextRange = (range: Range, onUpdate: () => void): boolean => {
@@ -588,41 +897,202 @@ const deleteLexicalTextRange = (range: Range, onUpdate: () => void): boolean => 
   return didDelete;
 };
 
-export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
-  value,
-  placeholder,
-  onChange,
-  noteId,
-  hosts = [],
-  editorMode: controlledEditorMode,
-  onOpenHost,
-  onOpenExternalLink,
-  previewEmptyLabel,
-}: InlineMarkdownEditorProps) {
-  const { t } = useI18n();
-  const editorRef = useRef<MDXEditorMethods>(null);
-  // Display-normalized space (same as setMarkdown / public-asset rewrite).
-  const latestMarkdownRef = useRef(normalizeNotePublicAssetPaths(value));
-  const syncedPropValueRef = useRef(normalizeNotePublicAssetPaths(value));
-  const noteIdRef = useRef(noteId);
-  // Bumped on unmount / external value sync so deferred paste recovery cannot
-  // commit into a switched or unmounted note.
-  const pasteRecoveryGenerationRef = useRef(0);
-  // Invalidates in-flight deferred setMarkdown when the user switches again.
-  const contentSwapTokenRef = useRef(0);
-  const contentSwapPendingRef = useRef(false);
-  /** Latest markdown the in-flight note-switch import should apply (refreshed on external value). */
-  const contentSwapScheduledRef = useRef<{
-    token: number;
-    noteId: string;
-    markdown: string;
-  } | null>(null);
-  const contentSwapFramesRef = useRef<{ outer: number; inner: number }>({
-    outer: 0,
-    inner: 0,
-  });
+export const InlineMarkdownEditor = React.memo(
+  React.forwardRef<InlineMarkdownEditorHandle, InlineMarkdownEditorProps>(function InlineMarkdownEditor(
+    {
+      value,
+      placeholder,
+      onChange,
+      noteId,
+      hosts = [],
+      editorMode: controlledEditorMode,
+      onOpenHost,
+      onOpenExternalLink,
+      previewEmptyLabel,
+      sourceEditorRef,
+      noteFontFamily,
+      noteFontSize,
+      noteCodeFontSize,
+      onActiveFormatsChange,
+    }: InlineMarkdownEditorProps,
+    ref,
+  ) {
+    const { t } = useI18n();
+    const editorRef = useRef<MDXEditorMethods>(null);
+    const dialogActionsRef = useRef<NoteEditorDialogActions | null>(null);
+    // Display-normalized space (same as setMarkdown / public-asset rewrite).
+    const latestMarkdownRef = useRef(normalizeNotePublicAssetPaths(value));
+    const syncedPropValueRef = useRef(normalizeNotePublicAssetPaths(value));
+    // Raw persisted space used by source mode so display-only path rewrites
+    // never suppress an intentional source edit.
+    const latestSourceMarkdownRef = useRef(value);
+    const syncedSourceMarkdownRef = useRef(value);
+    const noteIdRef = useRef(noteId);
+    // Bumped on unmount / external value sync so deferred paste recovery cannot
+    // commit into a switched or unmounted note.
+    const pasteRecoveryGenerationRef = useRef(0);
+    // Invalidates in-flight deferred setMarkdown when the user switches again.
+    const contentSwapTokenRef = useRef(0);
+    const contentSwapPendingRef = useRef(false);
+    /** Latest markdown the in-flight note-switch import should apply (refreshed on external value). */
+    const contentSwapScheduledRef = useRef<{
+      token: number;
+      noteId: string;
+      markdown: string;
+    } | null>(null);
+    const contentSwapFramesRef = useRef<{ outer: number; inner: number }>({
+      outer: 0,
+      inner: 0,
+    });
 
-  const containerRef = useRef<HTMLDivElement>(null);
+    const containerRef = useRef<HTMLDivElement>(null);
+
+    const getSelectedText = useCallback((): string => {
+      const container = containerRef.current;
+      const domSelection = window.getSelection();
+      const domText = domSelection?.toString() || "";
+      if (domText) {
+        if (domSelection && domSelection.rangeCount > 0 && container) {
+          const range = domSelection.getRangeAt(0);
+          if (container.contains(range.startContainer) && container.contains(range.endContainer)) {
+            return domText;
+          }
+        }
+        return "";
+      }
+
+      const editable = container?.querySelector("[contenteditable]");
+      const lexicalEditor = editable ? getNearestEditorFromDOMNode(editable) : null;
+      if (lexicalEditor) {
+        let lexicalText = "";
+        lexicalEditor.getEditorState().read(() => {
+          const selection = $getSelection();
+          if ($isRangeSelection(selection)) {
+            lexicalText = selection.getTextContent();
+          }
+        });
+        if (lexicalText) return lexicalText;
+      }
+      return "";
+    }, []);
+
+    useImperativeHandle(
+      ref,
+      () => ({
+        executeAction: (action: MarkdownActionType) => {
+          if (controlledEditorMode === "source") {
+            if (sourceEditorRef && "current" in sourceEditorRef && sourceEditorRef.current) {
+              sourceEditorRef.current.insertAction(action);
+            }
+            return;
+          }
+
+          // Unrenderable-markdown fallback: the raw source editor is mounted.
+          if (mdxFallbackActiveRef.current) {
+            fallbackSourceEditorRef.current?.insertAction(action);
+            return;
+          }
+
+          const container = containerRef.current;
+          const editable = container?.querySelector("[contenteditable]");
+          const lexicalEditor = editable ? getNearestEditorFromDOMNode(editable) : null;
+
+          if (action === "undo" || action === "redo") {
+            if (lexicalEditor) {
+              lexicalEditor.dispatchCommand(action === "undo" ? UNDO_COMMAND : REDO_COMMAND, undefined);
+            }
+            return;
+          }
+
+          if (
+            action === "bold" ||
+            action === "italic" ||
+            action === "underline" ||
+            action === "strikethrough" ||
+            action === "code"
+          ) {
+            if (lexicalEditor) {
+              lexicalEditor.dispatchCommand(FORMAT_TEXT_COMMAND, action);
+              return;
+            }
+          }
+
+          const editor = editorRef.current;
+          if (editor) {
+            const rawSelection = getSelectedText();
+            const sel = rawSelection.trim();
+            const blockSelection = (fallback: string): string => sel ? rawSelection : fallback;
+            switch (action) {
+              case "h1":
+                editor.insertMarkdown(`\n# ${sel || "Heading 1"}\n`);
+                break;
+              case "h2":
+                editor.insertMarkdown(`\n## ${sel || "Heading 2"}\n`);
+                break;
+              case "h3":
+                editor.insertMarkdown(`\n### ${sel || "Heading 3"}\n`);
+                break;
+              case "h4":
+                editor.insertMarkdown(`\n#### ${sel || "Heading 4"}\n`);
+                break;
+              case "quote":
+                editor.insertMarkdown(`\n${formatMarkdownQuoteSelection(blockSelection("Quote"))}\n`);
+                break;
+              case "bullet":
+                editor.insertMarkdown(`\n${formatMarkdownListSelection(blockSelection("List item"), "bullet")}\n`);
+                break;
+              case "number":
+                editor.insertMarkdown(`\n${formatMarkdownListSelection(blockSelection("List item"), "number")}\n`);
+                break;
+              case "task":
+                editor.insertMarkdown(`\n${formatMarkdownListSelection(blockSelection("Task"), "task")}\n`);
+                break;
+              case "codeblock":
+                editor.insertMarkdown(`\n\`\`\`bash\n${sel}\n\`\`\`\n`);
+                break;
+              case "table":
+                editor.insertMarkdown("\n| Column 1 | Column 2 | Column 3 |\n| :--- | :--- | :--- |\n| Cell 1 | Cell 2 | Cell 3 |\n");
+                break;
+              case "divider":
+                editor.insertMarkdown("\n---\n");
+                break;
+              case "link":
+                invokeNoteEditorDialogAction(action, dialogActionsRef.current);
+                break;
+              case "image":
+                invokeNoteEditorDialogAction(action, dialogActionsRef.current);
+                break;
+              case "math":
+                editor.insertMarkdown(`\n\`\`\`latex\n${sel}\n\`\`\`\n`);
+                break;
+              default:
+                break;
+            }
+          }
+        },
+        focus: () => {
+          if (mdxFallbackActiveRef.current) {
+            fallbackSourceEditorRef.current?.focus();
+            return;
+          }
+          editorRef.current?.focus();
+        },
+        scrollToHeading: (heading: NoteHeadingItem, headingIndex: number) => {
+          if (controlledEditorMode === "source") {
+            return sourceEditorRef?.current?.scrollToLine(heading.line) ?? false;
+          }
+          if (mdxFallbackActiveRef.current) {
+            return fallbackSourceEditorRef.current?.scrollToLine(heading.line) ?? false;
+          }
+          const occurrence = extractNoteHeadings(value)
+            .slice(0, headingIndex)
+            .filter((item) => item.level === heading.level && item.text === heading.text)
+            .length;
+          return scrollNoteHeadingIntoView(containerRef.current, heading, occurrence);
+        },
+      }),
+      [controlledEditorMode, getSelectedText, sourceEditorRef, value],
+    );
   const lastLinkActivationRef = useRef<{ href: string; at: number } | null>(null);
   const [hostPicker, setHostPicker] = useState<HostPickerState>({
     open: false,
@@ -633,15 +1103,77 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
     top: 32,
   });
   const [linkAction, setLinkAction] = useState<LinkActionState | null>(null);
+  const [acceptedSourceMarkdown, setAcceptedSourceMarkdown] = useState(value);
   const [isContentSwapping, setIsContentSwapping] = useState(false);
+  // MDX (the rich editor's parser) rejects some CommonMark — e.g. unbalanced
+  // angle tags like `<host>` in prose. MDXEditor then renders an EMPTY document
+  // and only reports the failure through onError, which made such notes look
+  // like they had lost their content. Track the failure and fall back to the
+  // raw markdown source view so the content always stays visible.
+  const [mdxParseFailure, setMdxParseFailure] = useState<string | null>(null);
   const linkActionRef = useRef<LinkActionState | null>(null);
   linkActionRef.current = linkAction;
   const mouseMoveFrameRef = useRef(0);
   const editorMode = controlledEditorMode ?? "edit";
+  const mdxFallbackActive = mdxParseFailure !== null && editorMode !== "source";
+  const mdxFallbackActiveRef = useRef(false);
+  mdxFallbackActiveRef.current = mdxFallbackActive;
+  const fallbackSourceEditorRef = useRef<NoteSourceEditorHandle | null>(null);
   const hostPickerRangeRef = useRef<Range | null>(null);
   const hostPickerListRef = useRef<FixedSizeVirtualListHandle>(null);
   const hostsRef = useRef(hosts);
   hostsRef.current = hosts;
+
+  // Report active text-format toggles (bold/italic/underline/strikethrough/
+  // code) at the current selection so the toolbar can highlight enabled
+  // buttons. Listens to Lexical selection/update changes in edit/live modes.
+  useEffect(() => {
+    if (!onActiveFormatsChange) return;
+    if (mdxFallbackActive || (editorMode !== "edit" && editorMode !== "live")) {
+      onActiveFormatsChange(EMPTY_ACTIVE_FORMATS);
+      return;
+    }
+
+    const container = containerRef.current;
+    const editable = container?.querySelector("[contenteditable]");
+    const lexicalEditor = editable ? getNearestEditorFromDOMNode(editable) : null;
+    if (!lexicalEditor) return;
+
+    const readFormats = (): ActiveTextFormats => {
+      const formats: ActiveTextFormats = { ...EMPTY_ACTIVE_FORMATS };
+      lexicalEditor.getEditorState().read(() => {
+        const selection = $getSelection();
+        if ($isRangeSelection(selection)) {
+          formats.bold = selection.hasFormat("bold");
+          formats.italic = selection.hasFormat("italic");
+          formats.underline = selection.hasFormat("underline");
+          formats.strikethrough = selection.hasFormat("strikethrough");
+          formats.code = selection.hasFormat("code");
+        }
+      });
+      return formats;
+    };
+
+    const report = () => {
+      onActiveFormatsChange(readFormats());
+    };
+
+    const unregisterUpdate = lexicalEditor.registerUpdateListener(report);
+    const unregisterSelection = lexicalEditor.registerCommand(
+      SELECTION_CHANGE_COMMAND,
+      () => {
+        report();
+        return false;
+      },
+      COMMAND_PRIORITY_LOW,
+    );
+    report();
+
+    return () => {
+      unregisterUpdate();
+      unregisterSelection();
+    };
+  }, [editorMode, mdxFallbackActive, onActiveFormatsChange]);
 
   const setLinkActionIfChanged = useCallback((next: LinkActionState | null) => {
     if (linkActionStatesEqual(linkActionRef.current, next)) return;
@@ -672,16 +1204,24 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
     codeBlockPlugin({ defaultCodeBlockLanguage: "" }),
     codeMirrorPlugin({
       codeBlockLanguages: NOTE_CODE_BLOCK_LANGUAGES,
-      codeMirrorExtensions: NOTE_CODE_MIRROR_EXTENSIONS,
+      codeMirrorExtensions: [
+        ...NOTE_CODE_MIRROR_EXTENSIONS,
+        ...createNoteCodeTooltipExtensions(
+          typeof document === "undefined" ? undefined : document.body,
+          // Tooltips escape clipped code blocks via the body parent; bound
+          // their placement to this notes editor so a completion near a pane
+          // edge flips or shrinks instead of rendering over an adjacent pane.
+          () => containerRef.current,
+        ),
+      ],
     }),
-    ...(editorMode === "edit" ? [
-      toolbarPlugin({
-        toolbarContents: () => <NoteMarkdownToolbar />,
-        toolbarClassName: "netcatty-note-markdown-toolbar",
-      }),
-    ] : []),
     markdownShortcutPlugin(),
-  ], [editorMode]);
+    noteEditorDialogBridgePlugin({
+      setDialogActions: (actions) => {
+        dialogActionsRef.current = actions;
+      },
+    }),
+  ], []);
   const hostCandidates = useMemo(
     () => hosts.filter(isSshCandidateHost),
     [hosts],
@@ -727,10 +1267,17 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
       const scheduledNoteId = noteId;
       noteIdRef.current = noteId;
       pasteRecoveryGenerationRef.current += 1;
+      // The new note's markdown gets a fresh MDX import; clear a previous
+      // note's unrenderable-markdown fallback.
+      setMdxParseFailure(null);
+      setMdxRetry(null);
       // Keep both refs in displayMarkdown space so public-path normalization
       // does not look like a divergent local draft.
       latestMarkdownRef.current = markdown;
       syncedPropValueRef.current = markdown;
+      latestSourceMarkdownRef.current = value;
+      syncedSourceMarkdownRef.current = value;
+      setAcceptedSourceMarkdown(value);
       setHostPicker((current) => (
         current.open
           ? { ...current, open: false, query: "", selectedIndex: 0 }
@@ -795,22 +1342,41 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
         };
         latestMarkdownRef.current = markdown;
         syncedPropValueRef.current = markdown;
+        latestSourceMarkdownRef.current = value;
+        syncedSourceMarkdownRef.current = value;
+        setAcceptedSourceMarkdown(value);
       }
       return;
     }
 
-    if (latestMarkdownRef.current === value || latestMarkdownRef.current === markdown) {
-      latestMarkdownRef.current = markdown;
-      syncedPropValueRef.current = markdown;
+    // Local display or source draft diverged from the last external value —
+    // do not clobber it unless this value is the parent's echo of that draft.
+    if (!shouldApplyExternalNoteMarkdown({
+      latestMarkdown: latestMarkdownRef.current,
+      syncedMarkdown: syncedPropValueRef.current,
+      latestSourceMarkdown: latestSourceMarkdownRef.current,
+      syncedSourceMarkdown: syncedSourceMarkdownRef.current,
+      nextSourceMarkdown: value,
+    })) {
       return;
     }
-    // Local draft diverged from last external value — do not clobber.
-    if (latestMarkdownRef.current !== syncedPropValueRef.current) {
-      return;
-    }
+    const displayChanged = latestMarkdownRef.current !== markdown;
     pasteRecoveryGenerationRef.current += 1;
     syncedPropValueRef.current = markdown;
     latestMarkdownRef.current = markdown;
+    latestSourceMarkdownRef.current = value;
+    syncedSourceMarkdownRef.current = value;
+    setAcceptedSourceMarkdown(value);
+    if (displayChanged && mdxFallbackActiveRef.current) {
+      // A sync/publish update replaced this note's unrenderable markdown while
+      // the source fallback was active. editorRef.setMarkdown below would hit
+      // the unmounted MDXEditor, so clear the failure instead: the rich editor
+      // remounts with the new markdown. If it is still unrenderable, onError
+      // re-arms the fallback.
+      setMdxParseFailure(null);
+      setMdxRetry(null);
+    }
+    if (!displayChanged) return;
     try {
       editorRef.current?.setMarkdown(markdown);
       clearLexicalHistory();
@@ -859,6 +1425,10 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
 
   useEffect(() => {
     setLinkAction(null);
+    // Mode changes remount the rich editor (key={editorMode}); give its MDX
+    // import a fresh chance after an unrenderable-markdown fallback.
+    setMdxParseFailure(null);
+    setMdxRetry(null);
   }, [editorMode]);
 
   const getHostPickerContext = useCallback(() => {
@@ -969,52 +1539,43 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
     const container = containerRef.current;
     if (!container) return;
 
-    let frame = 0;
-    let debounceTimer = 0;
-    const EDIT_DECORATION_DEBOUNCE_MS = 180;
-
     const runDecorations = (includeHostLinks: boolean) => {
       annotateNoteImageSizes(container);
       if (includeHostLinks) annotateHostLinks();
-      if (editorMode === "preview") {
-        annotateCodeBlockCopyButtons();
-      } else {
-        removeNoteCodeBlockCopyButtons(container);
-      }
+      annotateCodeBlockCopyButtons();
+      annotateNoteCodeBlockDeleteButtons(container);
+      annotateMathFormulaBlocks(container, editorMode);
     };
 
-    const scheduleFromMutation = () => {
-      if (editorMode === "preview") {
-        if (frame) return;
-        frame = window.requestAnimationFrame(() => {
-          frame = 0;
-          runDecorations(true);
-        });
-        return;
-      }
-      // Debounced: still re-annotate host links after setMarkdown swaps in edit
-      // mode (childList) and after image width/height edits (attributes).
-      if (debounceTimer) window.clearTimeout(debounceTimer);
-      debounceTimer = window.setTimeout(() => {
-        debounceTimer = 0;
-        runDecorations(true);
-      }, EDIT_DECORATION_DEBOUNCE_MS);
-    };
+    const mutationScheduler = createNoteDecorationMutationScheduler(
+      editorMode,
+      () => runDecorations(true),
+      {
+        requestFrame: (callback) => window.requestAnimationFrame(callback),
+        cancelFrame: (id) => window.cancelAnimationFrame(id),
+        setTimer: (callback, delay) => window.setTimeout(callback, delay),
+        clearTimer: (id) => window.clearTimeout(id),
+      },
+    );
 
     runDecorations(true);
 
-    const observer = new MutationObserver(scheduleFromMutation);
+    const timer1 = window.setTimeout(() => runDecorations(true), 80);
+    const timer2 = window.setTimeout(() => runDecorations(true), 300);
+
+    const observer = new MutationObserver(mutationScheduler.schedule);
     observer.observe(container, {
       childList: true,
       subtree: true,
+      characterData: true,
       attributes: true,
-      attributeFilter: ["width", "height", "src", "href"],
+      attributeFilter: ["width", "height", "src", "href", "data-language"],
     });
     return () => {
       observer.disconnect();
-      if (frame) window.cancelAnimationFrame(frame);
-      if (debounceTimer) window.clearTimeout(debounceTimer);
-      removeNoteCodeBlockCopyButtons(container);
+      window.clearTimeout(timer1);
+      window.clearTimeout(timer2);
+      mutationScheduler.cancel();
     };
   }, [annotateCodeBlockCopyButtons, annotateHostLinks, editorMode]);
 
@@ -1029,8 +1590,52 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
     if (contentSwapPendingRef.current) return;
     if (markdown === latestMarkdownRef.current) return;
     latestMarkdownRef.current = markdown;
+    latestSourceMarkdownRef.current = markdown;
+    setAcceptedSourceMarkdown(markdown);
     onChange(markdown);
   }, [onChange]);
+
+  const commitSourceMarkdown = useCallback((markdown: string) => {
+    if (contentSwapPendingRef.current) return;
+    if (markdown === latestSourceMarkdownRef.current) return;
+    latestSourceMarkdownRef.current = markdown;
+    latestMarkdownRef.current = normalizeNotePublicAssetPaths(markdown);
+    setAcceptedSourceMarkdown(markdown);
+    onChange(markdown);
+  }, [onChange]);
+
+  // MDXEditor reports markdown it cannot import through onError (the lexical
+  // document is left empty). Switch to the raw source view so the note content
+  // is never silently hidden; the user can retry or edit the raw markdown.
+  // The failure is reported while MDXEditor's realm is still rendering, so a
+  // synchronous setState here would be dropped — defer it to a timer.
+  const handleMdxParseError = useCallback((payload: { error: string; source: string }) => {
+    const failedNoteId = noteIdRef.current;
+    const failedMarkdown = normalizeNotePublicAssetPaths(payload.source);
+    window.setTimeout(() => {
+      if (!shouldApplyMdxParseFailure({
+        currentNoteId: noteIdRef.current,
+        failedNoteId,
+        currentMarkdown: latestMarkdownRef.current,
+        failedMarkdown,
+      })) return;
+      // The same note can receive a newer external value before the deferred
+      // callback runs. Do not show the old import failure over that content.
+      setMdxParseFailure((current) => current ?? payload.error);
+    }, 0);
+  }, []);
+
+  // One-shot markdown for the retry after a fallback: NotesManager debounces
+  // source drafts, so the `value` prop can still hold the pre-fix body when
+  // the user retries right after editing in the fallback. Seed that retry
+  // import from the editor's own latest accepted source instead, but only while
+  // the parent prop is still the stale body that originally failed.
+  const [mdxRetry, setMdxRetry] = useState<{ markdown: string; staleValue: string } | null>(null);
+
+  const retryRichNoteEditor = useCallback(() => {
+    setMdxRetry({ markdown: latestSourceMarkdownRef.current, staleValue: value });
+    setMdxParseFailure(null);
+  }, [value]);
 
   const insertHostLink = useCallback((host: Host) => {
     const link = `[${getHostLinkLabel(host)}](${formatSshDeepLinkForHost(host)})`;
@@ -1460,6 +2065,11 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
     <div
       ref={containerRef}
       className="relative flex h-full flex-col"
+      style={{
+        ["--note-font-family" as string]: noteFontFamily || undefined,
+        ["--note-font-size" as string]: noteFontSize ? `${noteFontSize}px` : undefined,
+        ["--note-code-font-size" as string]: noteCodeFontSize ? `${noteCodeFontSize}px` : undefined,
+      }}
       aria-busy={isContentSwapping || undefined}
       onBlurCapture={handleBlurCapture}
       onClickCapture={(event) => {
@@ -1536,7 +2146,7 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
               {filteredHosts.length === 0 ? (
                 <div className="px-3 py-2 text-sm text-muted-foreground">没有匹配的主机</div>
               ) : (
-                <FixedSizeVirtualList
+                <FixedSizeVirtualList<Host>
                   ref={hostPickerListRef}
                   items={filteredHosts}
                   itemHeight={HOST_PICKER_ROW_HEIGHT}
@@ -1564,7 +2174,48 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
             </div>
         </div>
       )}
-      {editorMode === "preview" && !displayMarkdown.trim() ? (
+      {editorMode === "source" ? (
+        <NoteSourceEditor
+          ref={sourceEditorRef}
+          noteId={noteId}
+          value={noteId !== undefined && noteId !== noteIdRef.current ? value : acceptedSourceMarkdown}
+          placeholder={placeholder}
+          onChange={commitSourceMarkdown}
+          noteFontFamily={noteFontFamily}
+          noteFontSize={noteCodeFontSize || noteFontSize}
+        />
+      ) : mdxFallbackActive ? (
+        <div
+          data-note-markdown-source-fallback="true"
+          className="flex min-h-[calc(100vh-15rem)] min-w-0 flex-1 flex-col"
+        >
+          <div
+            data-note-markdown-source-notice="true"
+            className="flex items-start gap-2 border-b border-border/60 bg-muted/40 px-4 py-2 text-xs text-muted-foreground"
+          >
+            <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+            <span className="min-w-0 flex-1">{t("notes.editor.unrenderableMarkdown")}</span>
+            <button
+              type="button"
+              data-note-markdown-source-retry="true"
+              className="shrink-0 rounded px-1.5 py-0.5 text-xs text-foreground underline decoration-dotted hover:bg-secondary"
+              onClick={retryRichNoteEditor}
+            >
+              {t("notes.editor.retryRichView")}
+            </button>
+          </div>
+          <NoteSourceEditor
+            ref={fallbackSourceEditorRef}
+            noteId={noteId}
+            value={noteId !== undefined && noteId !== noteIdRef.current ? value : acceptedSourceMarkdown}
+            placeholder={placeholder}
+            onChange={commitSourceMarkdown}
+            readOnly={editorMode === "preview"}
+            noteFontFamily={noteFontFamily}
+            noteFontSize={noteCodeFontSize || noteFontSize}
+          />
+        </div>
+      ) : editorMode === "preview" && !displayMarkdown.trim() ? (
         <div className="netcatty-note-preview-empty">
           {previewEmptyLabel ?? placeholder}
         </div>
@@ -1572,7 +2223,11 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
         <MDXEditor
           key={editorMode}
           ref={editorRef}
-          markdown={displayMarkdown}
+          markdown={
+            mdxRetry !== null && value === mdxRetry.staleValue
+              ? normalizeNotePublicAssetPaths(mdxRetry.markdown)
+              : displayMarkdown
+          }
           placeholder={placeholder}
           plugins={plugins}
           readOnly={editorMode === "preview"}
@@ -1581,9 +2236,16 @@ export const InlineMarkdownEditor = React.memo(function InlineMarkdownEditor({
             editorMode === "preview" && "netcatty-mdx-editor--preview",
           )}
           contentEditableClassName="netcatty-mdx-content"
-          onChange={commitMarkdown}
+          onChange={(markdown, initialMarkdownNormalize) => {
+            // Importing Markdown may escape literal comparisons on export.
+            // Keep the user's source until they actually edit the rich view.
+            if (!initialMarkdownNormalize && editorMode !== "preview") {
+              commitMarkdown(markdown);
+            }
+          }}
+          onError={handleMdxParseError}
         />
       )}
     </div>
   );
-});
+}));

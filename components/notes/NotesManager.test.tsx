@@ -1,10 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { JSDOM } from "jsdom";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { I18nProvider } from "../../application/i18n/I18nProvider.tsx";
+import { readStoredStringValue } from "../../application/state/useStoredString.ts";
+import { STORAGE_KEY_VAULT_NOTES_EDITOR_MODE } from "../../infrastructure/config/storageKeys.ts";
 import type { VaultNote } from "../../types.ts";
 import { TooltipProvider } from "../ui/tooltip.tsx";
 import {
@@ -17,6 +20,8 @@ import {
   getValidatedNoteSelectionState,
   getSelectedVaultNote,
   isNoteFolderTreeSelected,
+  isNoteEditorMode,
+  normalizeNoteEditorMode,
   NotesManager,
 } from "./NotesManager.tsx";
 
@@ -82,6 +87,45 @@ test("NotesManager balances folder and note tree icon sizes", () => {
 
   assert.match(markup, /width="16" height="16"[^>]*class="lucide lucide-folder/);
   assert.match(markup, /width="16" height="16"[^>]*class="lucide lucide-file-text/);
+  assert.match(markup, /<div class="flex shrink-0 items-center[^"]*mr-1">/);
+  assert.doesNotMatch(markup, /lucide lucide-file-text[^"]*mr-2/);
+});
+
+test("NotesManager gives folder and tag metadata pills the same compact style", () => {
+  const markup = renderNotes([note({ tags: ["inspection"] })]);
+  const document = new JSDOM(markup).window.document;
+  const folderPill = document.querySelector<HTMLElement>('[data-note-metadata-pill="folder"]');
+  const tagPill = document.querySelector<HTMLElement>('[data-note-metadata-pill="tag"]');
+  const addTagPill = document.querySelector<HTMLElement>('[data-note-metadata-pill="add-tag"]');
+
+  assert.ok(folderPill);
+  assert.ok(tagPill);
+  assert.ok(addTagPill);
+  for (const className of [
+    "inline-flex",
+    "h-5",
+    "items-center",
+    "gap-1",
+    "rounded-md",
+    "bg-muted/70",
+    "px-2",
+    "text-[11px]",
+    "font-medium",
+    "leading-none",
+  ]) {
+    assert.ok(folderPill.classList.contains(className), `folder pill should include ${className}`);
+    assert.ok(tagPill.classList.contains(className), `tag pill should include ${className}`);
+    assert.ok(addTagPill.classList.contains(className), `add-tag pill should include ${className}`);
+  }
+  assert.ok(tagPill.classList.contains("text-foreground"));
+  assert.ok(addTagPill.classList.contains("text-foreground"));
+  assert.equal(tagPill.classList.contains("border"), false);
+  assert.equal(tagPill.classList.contains("bg-primary/10"), false);
+  assert.equal(folderPill.querySelector("svg")?.classList.contains("-translate-y-px"), false);
+  assert.equal(tagPill.querySelector("svg")?.classList.contains("-translate-y-px"), false);
+  assert.ok([...folderPill.querySelectorAll("span")].some((node) => node.classList.contains("translate-y-px")));
+  assert.ok([...tagPill.querySelectorAll("span")].some((node) => node.classList.contains("translate-y-px")));
+  assert.ok([...addTagPill.querySelectorAll("span")].some((node) => node.classList.contains("translate-y-px")));
 });
 
 test("NotesManager tree scroll area constrains width so titles can truncate", () => {
@@ -112,6 +156,36 @@ test("clampNotesTreeWidth keeps the sidebar within the design range", () => {
   assert.equal(clampNotesTreeWidth(100), 160);
   assert.equal(clampNotesTreeWidth(300), 300);
   assert.equal(clampNotesTreeWidth(900), 520);
+});
+
+test("normalizeNoteEditorMode migrates the legacy live mode to edit", () => {
+  assert.equal(normalizeNoteEditorMode("live"), "edit");
+  assert.equal(isNoteEditorMode("live"), false);
+  assert.equal(isNoteEditorMode("edit"), true);
+  assert.equal(normalizeNoteEditorMode("preview"), "preview");
+  assert.equal(normalizeNoteEditorMode("invalid"), null);
+});
+
+test("stored legacy live mode falls back to edit on the real read path", (t) => {
+  const previousLocalStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+  Object.defineProperty(globalThis, "localStorage", {
+    configurable: true,
+    value: {
+      getItem: (key: string) => key === STORAGE_KEY_VAULT_NOTES_EDITOR_MODE ? "live" : null,
+    } as Storage,
+  });
+  t.after(() => {
+    if (previousLocalStorage) {
+      Object.defineProperty(globalThis, "localStorage", previousLocalStorage);
+    } else {
+      Reflect.deleteProperty(globalThis, "localStorage");
+    }
+  });
+
+  assert.equal(
+    readStoredStringValue(STORAGE_KEY_VAULT_NOTES_EDITOR_MODE, "edit", isNoteEditorMode),
+    "edit",
+  );
 });
 
 test("NotesManager selection helpers keep note and folder selection exclusive", () => {
@@ -351,4 +425,6 @@ test("NotesManager can re-open the same sidebar note when the request id changes
 
   assert.match(source, /openNoteRequestId\?: number \| null/);
   assert.match(source, /\[isSidebarMode, onOpenNoteIdHandled, openNoteId, openNoteRequestId, sortedNotes\]/);
+  assert.match(source, /if \(isSidebarMode && overlayNoteView\)/);
+  assert.match(source, /\[isSidebarMode, overlayNoteView\]/);
 });

@@ -954,3 +954,78 @@ test("alternate-screen history preview stays selectable and copyable", async () 
   assert.match(source, /HISTORY_PREVIEW_HIDE_EVENT/);
   assert.match(source, /document\.addEventListener\("copy", handlePreviewNativeCopy, true\)/);
 });
+
+test("alternate-screen history preview falls back to the captured session output", async () => {
+  const { readFileSync } = await import("node:fs");
+  const source = readFileSync(new URL("./createXTermRuntime.ts", import.meta.url), "utf8");
+
+  // The fallback only applies while the app owns the alternate buffer and the
+  // normal buffer has no scrollback above the viewport (#2516).
+  assert.match(source, /bufferHasPreviewScrollback\(normalBuffer\)/);
+  assert.match(source, /outputHistory\.getPreviewRowCount\(term\.cols\)/);
+  assert.match(source, /outputHistory\.getPreviewRows\(\{/);
+  assert.match(source, /nextOutputHistoryPreviewTop\(/);
+});
+
+test("xterm scroll and line-feed reposition the autocomplete popup (#3061)", async () => {
+  const { readFileSync } = await import("node:fs");
+  const source = readFileSync(new URL("./createXTermRuntime.ts", import.meta.url), "utf8");
+  const terminalSource = readFileSync(new URL("../../Terminal.tsx", import.meta.url), "utf8");
+  const effectsSource = readFileSync(new URL("../useTerminalEffects.ts", import.meta.url), "utf8");
+  assert.match(source, /onAutocompleteReposition\?: \(\) => void/);
+  assert.match(source, /term\.onScroll\(scheduleAutocompleteReposition\)/);
+  assert.match(source, /term\.onLineFeed\?\.\(scheduleAutocompleteReposition\)/);
+  assert.match(source, /if \(autocompleteRepositionFrame\) return;/);
+  assert.match(source, /cancelAutocompleteReposition\(\)/);
+  assert.match(terminalSource, /onAutocompleteReposition: \(\) => autocompleteRepositionRef\.current\?\.\(\)/);
+  assert.match(effectsSource, /onAutocompleteReposition: \(\) => autocompleteRepositionRef\.current\?\.\(\)/);
+});
+
+test("multi-character plain text goes out as per-character writes (#3077)", async () => {
+  const { readFileSync } = await import("node:fs");
+  const source = readFileSync(new URL("./createXTermRuntime.ts", import.meta.url), "utf8");
+
+  // Strict bastion prompts (QAX) treat one channel write as one keystroke and
+  // drop multi-character chunks, so IME commits and short raw pastes must be
+  // sent one character per write instead of one write per commit.
+  assert.match(source, /perCharacterWrites\?: boolean/);
+  assert.match(
+    source,
+    /getTextInputWireChunks\(outData, options\?\.perCharacterWrites === true\)/,
+  );
+  // Every chunk carries the same write options as the original single write.
+  const writeLoopIdx = source.indexOf("for (const chunk of getTextInputWireChunks(outData");
+  assert.ok(writeLoopIdx >= 0);
+  const writeLoop = source.slice(writeLoopIdx, writeLoopIdx + 320);
+  assert.match(writeLoop, /for \(const chunk of/);
+  assert.match(writeLoop, /writeToSession\(id, chunk, \{ sensitive \}\)/);
+
+  // IME commits split the committed glyph, not the Kitty CSI-u encoding.
+  assert.match(
+    source,
+    /handleTerminalInputData\(text, \{ perCharacterWrites: shouldSplitImeTextInputForWire\(text\) \}\)/,
+  );
+  // Raw onData (unbracketed paste / committed composition) uses the capped
+  // raw-paste rule; the composition fallback uses the uncapped IME rule.
+  assert.match(
+    source,
+    /handleTerminalInputData\(sanitizedRawData, \{\s*perCharacterWrites: shouldSplitRawPasteInputForWire\(sanitizedRawData\),?\s*\}\)/,
+  );
+  assert.match(
+    source,
+    /handleTerminalInputData\(sanitizedData, \{\s*perCharacterWrites: shouldSplitImeTextInputForWire\(sanitizedData\),?\s*\}\)/,
+  );
+  // Negotiated Kitty paths keep their single write: CSI-u associated text and
+  // forwarded key sequences must never be split across writes.
+  const compositionIdx = source.indexOf(
+    "handleTerminalInputData(encoded, { source: \"kitty\" })",
+  );
+  assert.ok(compositionIdx >= 0);
+  assert.doesNotMatch(source.slice(0, compositionIdx + 60), /handleTerminalInputData\(encoded, \{ perCharacterWrites/);
+  assert.doesNotMatch(source, /handleTerminalInputData\(sequence, \{ perCharacterWrites/);
+  // Bookkeeping sees the original string exactly once: the command buffer and
+  // broadcast keep using the unsplit payload.
+  const writeSite = source.slice(writeLoopIdx - 600, writeLoopIdx + 320);
+  assert.match(writeSite, /ctx\.onOutputTriggerUserInputRef\?\.current\?\.\(outData\)/);
+  assert.match(source, /onBroadcastInput\?\.\(broadcastData, ctx\.sessionId\)/);
+});

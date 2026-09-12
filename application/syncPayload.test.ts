@@ -5,6 +5,7 @@ import type { SyncPayload } from "../domain/sync.ts";
 import type { KnownHost } from "../domain/models.ts";
 import type { SyncableVaultData } from "./syncPayload.ts";
 import { parseTerminalFontSizeRecord } from "./state/terminalFontSizeSync.ts";
+import commandBlocklistTable from "../lib/commandBlocklist.json";
 
 type LocalStorageMock = {
   clear(): void;
@@ -45,6 +46,8 @@ const {
   buildCloudSyncPayload,
   withPluginSyncSidecars,
   buildSyncPayload,
+  sanitizeHostsForSync,
+  retainLocalHostLastConnectedAt,
   hasCloudSyncEntityData,
   hasMeaningfulCloudSyncData,
   hasMeaningfulSyncData,
@@ -54,6 +57,7 @@ const {
 const storageKeys = await import("../infrastructure/config/storageKeys.ts");
 const { SYNC_STORAGE_KEYS } = await import("../domain/sync.ts");
 const { localStorageAdapter } = await import("../infrastructure/persistence/localStorageAdapter.ts");
+const { readCommandBlocklistSetting } = await import("./state/commandBlocklistSettings.ts");
 
 const knownHost = (id = "kh-1"): KnownHost => ({
   id,
@@ -93,6 +97,136 @@ test("buildSyncPayload treats known hosts as local-only data", () => {
   assert.equal("knownHosts" in payload, false);
 });
 
+test("buildSyncPayload strips lastConnectedAt so connecting a host does not dirty cloud sync", () => {
+  const host = {
+    id: "host-1",
+    label: "prod",
+    hostname: "prod.example.com",
+    username: "root",
+    tags: [],
+    os: "linux" as const,
+    protocol: "ssh" as const,
+    lastConnectedAt: 1_700_000_000_000,
+    pinned: true,
+  };
+
+  const payload = buildSyncPayload({ ...vault([]), hosts: [host] });
+
+  assert.equal(payload.hosts[0]?.lastConnectedAt, undefined);
+  assert.equal(payload.hosts[0]?.pinned, true);
+  assert.equal(payload.hosts[0]?.hostname, "prod.example.com");
+});
+
+test("buildCloudSyncPayload strips lastConnectedAt like port-forward lastUsedAt", async () => {
+  const host = {
+    id: "host-2",
+    label: "db",
+    hostname: "db.example.com",
+    username: "ubuntu",
+    tags: [],
+    os: "linux" as const,
+    protocol: "ssh" as const,
+    lastConnectedAt: 42,
+  };
+
+  const payload = await buildCloudSyncPayload({ ...vault([]), hosts: [host] });
+  const serializedHosts = JSON.parse(JSON.stringify(payload.hosts ?? []));
+
+  assert.equal(payload.hosts[0]?.lastConnectedAt, undefined);
+  assert.equal("lastConnectedAt" in (serializedHosts[0] ?? {}), false);
+});
+
+test("sanitizeHostsForSync hashes equal when hosts differ only by lastConnectedAt", () => {
+  const base = {
+    id: "host-hash",
+    label: "edge",
+    hostname: "edge.example.com",
+    username: "ops",
+    tags: [],
+    os: "linux" as const,
+    protocol: "ssh" as const,
+    pinned: true,
+  };
+
+  const sanitizedA = sanitizeHostsForSync([{ ...base, lastConnectedAt: 11 }]);
+  const sanitizedB = sanitizeHostsForSync([{ ...base, lastConnectedAt: 99 }]);
+  const payloadA = buildSyncPayload({ ...vault([]), hosts: [{ ...base, lastConnectedAt: 11 }] });
+  const payloadB = buildSyncPayload({ ...vault([]), hosts: [{ ...base, lastConnectedAt: 99 }] });
+
+  assert.equal(JSON.stringify(sanitizedA), JSON.stringify(sanitizedB));
+  assert.equal(JSON.stringify(payloadA.hosts), JSON.stringify(payloadB.hosts));
+});
+
+test("buildLocalVaultPayload keeps lastConnectedAt for local backups", () => {
+  const host = {
+    id: "host-3",
+    label: "lab",
+    hostname: "lab.example.com",
+    username: "lab",
+    tags: [],
+    os: "linux" as const,
+    protocol: "ssh" as const,
+    lastConnectedAt: 99,
+  };
+
+  const payload = buildLocalVaultPayload({ ...vault([]), hosts: [host] });
+
+  assert.equal(payload.hosts[0]?.lastConnectedAt, 99);
+});
+
+test("applySyncPayload keeps local lastConnectedAt when the cloud host omits it", async () => {
+  const localHost = {
+    id: "host-apply",
+    label: "prod",
+    hostname: "prod.example.com",
+    username: "root",
+    tags: [],
+    os: "linux" as const,
+    protocol: "ssh" as const,
+    lastConnectedAt: 77,
+  };
+  const remoteHost = {
+    ...localHost,
+    label: "prod-renamed",
+    lastConnectedAt: undefined,
+  };
+
+  const payload = buildSyncPayload({ ...vault([]), hosts: [remoteHost] });
+  let imported: { hosts?: Array<{ lastConnectedAt?: number; label?: string }> } | null = null;
+  await applySyncPayload(
+    payload,
+    { importVaultData: (json) => { imported = JSON.parse(json); } },
+    { currentHosts: [localHost] },
+  );
+
+  assert.equal(imported?.hosts?.[0]?.lastConnectedAt, 77);
+  assert.equal(imported?.hosts?.[0]?.label, "prod-renamed");
+});
+
+test("retainLocalHostLastConnectedAt does not invent timestamps for unknown hosts", () => {
+  const incoming = [{
+    id: "new-host",
+    label: "new",
+    hostname: "new.example.com",
+    username: "root",
+    tags: [],
+    os: "linux" as const,
+    protocol: "ssh" as const,
+  }];
+  const retained = retainLocalHostLastConnectedAt(incoming, [{
+    id: "other",
+    label: "other",
+    hostname: "other.example.com",
+    username: "root",
+    tags: [],
+    os: "linux" as const,
+    protocol: "ssh" as const,
+    lastConnectedAt: 5,
+  }]);
+
+  assert.equal(retained?.[0]?.lastConnectedAt, undefined);
+});
+
 test("buildSyncPayload includes reusable proxy profiles", () => {
   const proxyProfiles = [
     {
@@ -130,7 +264,7 @@ test("sync payloads preserve opaque plugin hosts without requiring the plugin to
     },
   };
   const payload = buildSyncPayload({ ...vault([]), hosts: [pluginHost] });
-  assert.deepEqual(payload.hosts, [pluginHost]);
+  assert.deepEqual(JSON.parse(JSON.stringify(payload.hosts)), [pluginHost]);
 
   let imported: Record<string, unknown> | null = null;
   await applySyncPayload(payload, {
@@ -231,9 +365,11 @@ test("buildSyncPayload includes AI configuration settings", () => {
   localStorage.setItem(storageKeys.STORAGE_KEY_AI_DEFAULT_AGENT, "codex");
   localStorage.setItem(storageKeys.STORAGE_KEY_AI_COMMAND_BLOCKLIST, JSON.stringify(["rm -rf"]));
   localStorage.setItem(storageKeys.STORAGE_KEY_AI_COMMAND_TIMEOUT, "120");
+  localStorage.setItem(storageKeys.STORAGE_KEY_AI_RESPONSE_IDLE_TIMEOUT, "600");
   localStorage.setItem(storageKeys.STORAGE_KEY_AI_MAX_ITERATIONS, "10");
   localStorage.setItem(storageKeys.STORAGE_KEY_AI_AGENT_MODEL_MAP, JSON.stringify({ codex: "gpt-test" }));
   localStorage.setItem(storageKeys.STORAGE_KEY_AI_AGENT_PROVIDER_MAP, JSON.stringify({ catty: "openai-main" }));
+  localStorage.setItem(storageKeys.STORAGE_KEY_AI_AGENT_THINKING_MAP, JSON.stringify({ catty: "high" }));
   localStorage.setItem(storageKeys.STORAGE_KEY_AI_WEB_SEARCH, JSON.stringify(webSearch));
   localStorage.setItem(storageKeys.STORAGE_KEY_AI_SHOW_TERMINAL_SELECTION_ACTION, "false");
 
@@ -251,9 +387,11 @@ test("buildSyncPayload includes AI configuration settings", () => {
     defaultAgentId: "codex",
     commandBlocklist: ["rm -rf"],
     commandTimeout: 120,
+    responseIdleTimeout: 600,
     maxIterations: 10,
     agentModelMap: { codex: "gpt-test" },
     agentProviderMap: { catty: "openai-main" },
+    agentThinkingMap: { catty: "high" },
     webSearchConfig: webSearchWithoutKey,
     showTerminalSelectionAction: false,
   });
@@ -263,6 +401,14 @@ test("terminal selection AI preference is syncable for auto-sync detection", () 
   assert.ok(
     (SYNCABLE_SETTING_STORAGE_KEYS as readonly string[]).includes(
       storageKeys.STORAGE_KEY_AI_SHOW_TERMINAL_SELECTION_ACTION,
+    ),
+  );
+});
+
+test("AI response wait time is syncable for auto-sync detection", () => {
+  assert.ok(
+    (SYNCABLE_SETTING_STORAGE_KEYS as readonly string[]).includes(
+      storageKeys.STORAGE_KEY_AI_RESPONSE_IDLE_TIMEOUT,
     ),
   );
 });
@@ -278,6 +424,30 @@ test("terminal side panel auto-open settings are syncable for auto-sync detectio
       storageKeys.STORAGE_KEY_TERMINAL_SIDE_PANEL_AUTO_OPEN_TAB,
     ),
   );
+});
+
+test("note appearance settings survive sync and trigger auto-sync", async () => {
+  localStorage.setItem(storageKeys.STORAGE_KEY_VAULT_NOTES_FONT_FAMILY, "Menlo, monospace");
+  localStorage.setItem(storageKeys.STORAGE_KEY_VAULT_NOTES_FONT_SIZE, "16");
+  localStorage.setItem(storageKeys.STORAGE_KEY_VAULT_NOTES_CODE_FONT_SIZE, "14");
+
+  const payload = buildSyncPayload(vault([]));
+  assert.equal(payload.settings?.noteFontFamily, "Menlo, monospace");
+  assert.equal(payload.settings?.noteFontSize, 16);
+  assert.equal(payload.settings?.noteCodeFontSize, 14);
+  for (const key of [
+    storageKeys.STORAGE_KEY_VAULT_NOTES_FONT_FAMILY,
+    storageKeys.STORAGE_KEY_VAULT_NOTES_FONT_SIZE,
+    storageKeys.STORAGE_KEY_VAULT_NOTES_CODE_FONT_SIZE,
+  ]) {
+    assert.ok((SYNCABLE_SETTING_STORAGE_KEYS as readonly string[]).includes(key));
+  }
+
+  localStorage.clear();
+  await applySyncPayload(payload, { importVaultData: () => {} });
+  assert.equal(localStorage.getItem(storageKeys.STORAGE_KEY_VAULT_NOTES_FONT_FAMILY), "Menlo, monospace");
+  assert.equal(localStorage.getItem(storageKeys.STORAGE_KEY_VAULT_NOTES_FONT_SIZE), "16");
+  assert.equal(localStorage.getItem(storageKeys.STORAGE_KEY_VAULT_NOTES_CODE_FONT_SIZE), "14");
 });
 
 test("buildSyncPayload includes host tree sidebar visibility setting", () => {
@@ -445,6 +615,7 @@ test("applySyncPayload restores AI configuration settings", async () => {
         defaultAgentId: "claude",
         commandBlocklist: ["shutdown"],
         commandTimeout: 30,
+        responseIdleTimeout: 900,
         maxIterations: 5,
         agentModelMap: { claude: "claude-test" },
         agentProviderMap: { catty: "anthropic-main" },
@@ -465,11 +636,93 @@ test("applySyncPayload restores AI configuration settings", async () => {
   assert.equal(localStorage.getItem(storageKeys.STORAGE_KEY_AI_DEFAULT_AGENT), "claude");
   assert.deepEqual(JSON.parse(localStorage.getItem(storageKeys.STORAGE_KEY_AI_COMMAND_BLOCKLIST)!), ["shutdown"]);
   assert.equal(localStorage.getItem(storageKeys.STORAGE_KEY_AI_COMMAND_TIMEOUT), "30");
+  assert.equal(localStorage.getItem(storageKeys.STORAGE_KEY_AI_RESPONSE_IDLE_TIMEOUT), "900");
   assert.equal(localStorage.getItem(storageKeys.STORAGE_KEY_AI_MAX_ITERATIONS), "5");
   assert.deepEqual(JSON.parse(localStorage.getItem(storageKeys.STORAGE_KEY_AI_AGENT_MODEL_MAP)!), { claude: "claude-test" });
   assert.deepEqual(JSON.parse(localStorage.getItem(storageKeys.STORAGE_KEY_AI_AGENT_PROVIDER_MAP)!), { catty: "anthropic-main" });
   assert.deepEqual(JSON.parse(localStorage.getItem(storageKeys.STORAGE_KEY_AI_WEB_SEARCH)!), webSearch);
   assert.equal(localStorage.getItem(storageKeys.STORAGE_KEY_AI_SHOW_TERMINAL_SELECTION_ACTION), "false");
+});
+
+test("applySyncPayload migrates an untouched legacy command blocklist", async () => {
+  const legacyDefaults = [
+    ...commandBlocklistTable.common,
+    ...commandBlocklistTable.posixNative,
+    ...commandBlocklistTable.posix,
+  ];
+
+  await applySyncPayload({
+    hosts: [],
+    keys: [],
+    identities: [],
+    snippets: [],
+    customGroups: [],
+    settings: {
+      ai: {
+        commandBlocklist: legacyDefaults,
+      },
+    },
+    syncedAt: 1,
+  } as SyncPayload, { importVaultData: () => {} });
+
+  assert.deepEqual(
+    JSON.parse(localStorage.getItem(storageKeys.STORAGE_KEY_AI_COMMAND_BLOCKLIST)!),
+    [...legacyDefaults, ...commandBlocklistTable.powershell],
+  );
+  assert.deepEqual(
+    readCommandBlocklistSetting(),
+    [...legacyDefaults, ...commandBlocklistTable.powershell],
+  );
+});
+
+test("command blocklist read migrates an untouched local legacy list", () => {
+  const legacyDefaults = [
+    ...commandBlocklistTable.common,
+    ...commandBlocklistTable.posixNative,
+    ...commandBlocklistTable.posix,
+  ];
+  const currentDefaults = [...legacyDefaults, ...commandBlocklistTable.powershell];
+
+  assert.deepEqual(readCommandBlocklistSetting(), currentDefaults);
+  assert.deepEqual(
+    JSON.parse(localStorage.getItem(storageKeys.STORAGE_KEY_AI_COMMAND_BLOCKLIST)!),
+    currentDefaults,
+  );
+
+  localStorage.setItem(
+    storageKeys.STORAGE_KEY_AI_COMMAND_BLOCKLIST,
+    JSON.stringify([...legacyDefaults, "old-client-user-rule"]),
+  );
+  assert.deepEqual(readCommandBlocklistSetting(), [
+    ...legacyDefaults,
+    "old-client-user-rule",
+    ...commandBlocklistTable.powershell,
+  ]);
+});
+
+test("applySyncPayload preserves a customized PowerShell blocklist", async () => {
+  const currentCustomized = [
+    ...commandBlocklistTable.common,
+    ...commandBlocklistTable.posixNative,
+    ...commandBlocklistTable.posix,
+    ...commandBlocklistTable.powershell.slice(1),
+  ];
+
+  await applySyncPayload({
+    hosts: [],
+    keys: [],
+    identities: [],
+    snippets: [],
+    customGroups: [],
+    settings: {
+      ai: {
+        commandBlocklist: currentCustomized,
+      },
+    },
+    syncedAt: 1,
+  } as SyncPayload, { importVaultData: () => {} });
+
+  assert.deepEqual(readCommandBlocklistSetting(), currentCustomized);
 });
 
 test("applySyncPayload encrypts synced plaintext AI API keys before saving locally", async () => {
@@ -1283,6 +1536,26 @@ test("terminal auto-close preference survives sync round-trip", async () => {
 
   const restored = JSON.parse(localStorage.getItem(storageKeys.STORAGE_KEY_TERM_SETTINGS)!);
   assert.equal(restored.autoCloseOnExit, false);
+});
+
+test("terminal disconnected notice preference survives sync round-trip", async () => {
+  localStorage.setItem(
+    storageKeys.STORAGE_KEY_TERM_SETTINGS,
+    JSON.stringify({ disconnectedNoticeMode: "dialog" }),
+  );
+
+  const payload = buildSyncPayload(vault());
+  const termSettings = (payload.settings?.terminalSettings ?? {}) as Record<string, unknown>;
+  assert.equal(termSettings.disconnectedNoticeMode, "dialog");
+
+  localStorage.setItem(
+    storageKeys.STORAGE_KEY_TERM_SETTINGS,
+    JSON.stringify({ disconnectedNoticeMode: "terminal" }),
+  );
+  await applySyncPayload(payload, { importVaultData: () => {} });
+
+  const restored = JSON.parse(localStorage.getItem(storageKeys.STORAGE_KEY_TERM_SETTINGS)!);
+  assert.equal(restored.disconnectedNoticeMode, "dialog");
 });
 
 test("applySyncPayload restores the terminal host information bar preference", async () => {

@@ -137,6 +137,7 @@ interface TopTabsProps {
   onCloseSession: (sessionId: string, e?: React.MouseEvent) => void;
   onRenameSession: (sessionId: string) => void;
   onCopySession: (sessionId: string) => void;
+  onDuplicateSession?: (sessionId: string) => void;
   onCopySessionToNewWindow: (sessionId: string) => void;
   onEditHost?: (host: Host) => void;
   onRenameWorkspace: (workspaceId: string) => void;
@@ -188,6 +189,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
   onCloseSession,
   onRenameSession,
   onCopySession,
+  onDuplicateSession,
   onCopySessionToNewWindow,
   onEditHost,
   onRenameWorkspace,
@@ -885,6 +887,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
             onCloseSession={onCloseSession}
             onRenameSession={onRenameSession}
             onCopySession={onCopySession}
+            onDuplicateSession={onDuplicateSession}
             onCopySessionToNewWindow={onCopySessionToNewWindow}
             onEditHost={onEditHost}
             renderBulkCloseItems={renderBulkCloseItems}
@@ -1275,6 +1278,7 @@ export const topTabsAreEqual = (prev: TopTabsProps, next: TopTabsProps): boolean
     prev.draggingSessionId === next.draggingSessionId &&
     prev.isMacClient === next.isMacClient &&
     prev.onCopySession === next.onCopySession &&
+    prev.onDuplicateSession === next.onDuplicateSession &&
     prev.onCopySessionToNewWindow === next.onCopySessionToNewWindow &&
     prev.onEditHost === next.onEditHost &&
     prev.onAppendHostToWorkspace === next.onAppendHostToWorkspace &&

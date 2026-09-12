@@ -656,7 +656,7 @@ test("attach snapshots preserve cwd and title updates including explicit clears"
   );
   assert.match(
     effectsSource,
-    /snap\.cwd !== undefined[\s\S]*?setRendererCwd\(snap\.cwd\)[\s\S]*?snap\.title !== undefined/,
+    /snap\.cwd !== undefined[\s\S]*?setRendererCwd\(snap\.cwd,\s*"snapshot"\)[\s\S]*?snap\.title !== undefined/,
   );
   assert.match(
     effectsSource,
@@ -664,6 +664,6 @@ test("attach snapshots preserve cwd and title updates including explicit clears"
   );
   assert.match(
     terminalSource,
-    /payload\.cwd !== undefined[\s\S]*?setRendererCwd\(payload\.cwd\)[\s\S]*?payload\.title !== undefined/,
+    /payload\.cwd !== undefined[\s\S]*?setRendererCwd\(payload\.cwd,\s*"snapshot"\)[\s\S]*?payload\.title !== undefined/,
   );
 });

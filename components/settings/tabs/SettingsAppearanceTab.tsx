@@ -1,19 +1,29 @@
-import React, { memo, useCallback, useState } from "react";
+import React, { memo, useCallback, useMemo, useState } from "react";
 import { applyCustomCssToDocument } from "../../../lib/customCss";
 import { DebouncedTextarea } from "../DebouncedTextarea";
 import { Check, HelpCircle, Monitor, Moon, Palette, Sun } from "lucide-react";
 import { useI18n } from "../../../application/i18n/I18nProvider";
 import { useStoredBoolean } from "../../../application/state/useStoredBoolean";
+import { useStoredString } from "../../../application/state/useStoredString";
+import { useStoredNumber } from "../../../application/state/useStoredNumber";
 import { DARK_UI_THEMES, LIGHT_UI_THEMES } from "../../../infrastructure/config/uiThemes";
 import { useAvailableUIFonts } from "../../../application/state/uiFontStore";
+import { useAvailableFonts } from "../../../application/state/fontStore";
 import { SUPPORTED_UI_LOCALES } from "../../../infrastructure/config/i18n";
 import { APP_ICON_VARIANT_ASSET_PATH, APP_ICON_VARIANT_GROUPS, APP_ICON_VARIANT_I18N_KEY } from "../../../infrastructure/config/appIconVariants";
-import { STORAGE_KEY_AUTO_IMPORT_SYSTEM_KNOWN_HOSTS } from "../../../infrastructure/config/storageKeys";
+import {
+  STORAGE_KEY_AUTO_IMPORT_SYSTEM_KNOWN_HOSTS,
+  STORAGE_KEY_VAULT_NOTES_FONT_FAMILY,
+  STORAGE_KEY_VAULT_NOTES_FONT_SIZE,
+  STORAGE_KEY_VAULT_NOTES_CODE_FONT_SIZE,
+} from "../../../infrastructure/config/storageKeys";
 import { resolveAppIconVariant, type AppIconVariant } from "../../../domain/appIconVariant";
+import { resolveNoteFontSelectionFamily, resolveNoteFontSelectionId } from "../../../domain/noteFonts";
 import { DEFAULT_AUTO_IMPORT_SYSTEM_KNOWN_HOSTS } from "../../../domain/systemKnownHostsAutoImport";
 import { cn } from "../../../lib/utils";
 import { SectionHeader, SettingsAnchor, SettingsTabContent, SettingRow, Toggle, Select } from "../settings-ui";
 import { FontSelect } from "../FontSelect";
+import { TerminalFontSelect } from "../TerminalFontSelect";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../ui/tooltip";
 import {
   Dialog,
@@ -61,11 +71,40 @@ function SettingsAppearanceTab(props: {
 }) {
   const { t } = useI18n();
   const availableUIFonts = useAvailableUIFonts();
+  // Note code fonts come from the monospace-only store (fontStore); the note
+  // body font follows the UI font setting instead.
+  const availableMonoFonts = useAvailableFonts();
+  const noteFontOptions = useMemo(() => [
+    { id: "", name: t("notes.toolbar.defaultFont"), family: "", description: "", category: "monospace" as const },
+    ...availableMonoFonts,
+  ], [availableMonoFonts, t]);
   const [customCssHelpOpen, setCustomCssHelpOpen] = useState(false);
   const [autoImportSystemKnownHosts, setAutoImportSystemKnownHosts] = useStoredBoolean(
     STORAGE_KEY_AUTO_IMPORT_SYSTEM_KNOWN_HOSTS,
     DEFAULT_AUTO_IMPORT_SYSTEM_KNOWN_HOSTS,
   );
+  const [noteFontFamily, setNoteFontFamily] = useStoredString<string>(
+    STORAGE_KEY_VAULT_NOTES_FONT_FAMILY,
+    "",
+  );
+  const [noteFontSize, setNoteFontSize, persistNoteFontSize] = useStoredNumber(
+    STORAGE_KEY_VAULT_NOTES_FONT_SIZE,
+    14,
+    { min: 10, max: 32 },
+  );
+  const handleSetNoteFontSize = useCallback((size: number) => {
+    setNoteFontSize(size);
+    persistNoteFontSize(size);
+  }, [persistNoteFontSize, setNoteFontSize]);
+  const [noteCodeFontSize, setNoteCodeFontSize, persistNoteCodeFontSize] = useStoredNumber(
+    STORAGE_KEY_VAULT_NOTES_CODE_FONT_SIZE,
+    13,
+    { min: 10, max: 32 },
+  );
+  const handleSetNoteCodeFontSize = useCallback((size: number) => {
+    setNoteCodeFontSize(size);
+    persistNoteCodeFontSize(size);
+  }, [persistNoteCodeFontSize, setNoteCodeFontSize]);
   const {
     theme,
     resolvedTheme,
@@ -463,6 +502,59 @@ function SettingsAppearanceTab(props: {
             checked={autoImportSystemKnownHosts}
             onChange={setAutoImportSystemKnownHosts}
           />
+        </SettingRow>
+        <SettingRow
+          anchorId="appearance-vault-notes-font"
+          label={t('settings.vault.notesFont')}
+          description={t('settings.vault.notesFontDesc')}
+        >
+          <TerminalFontSelect
+            value={resolveNoteFontSelectionId(noteFontOptions, noteFontFamily)}
+            fonts={noteFontOptions}
+            onChange={(v) => setNoteFontFamily(resolveNoteFontSelectionFamily(noteFontOptions, v))}
+            className="w-48"
+            ariaLabel={t('settings.vault.notesFont')}
+          />
+        </SettingRow>
+        <SettingRow
+          anchorId="appearance-vault-notes-font-size"
+          label={t('settings.vault.notesFontSize')}
+          description={t('settings.vault.notesFontSizeDesc')}
+        >
+          <div className="flex items-center gap-2">
+            <input
+              type="range"
+              min={12}
+              max={22}
+              step={1}
+              value={noteFontSize}
+              onChange={(e) => handleSetNoteFontSize(Number(e.target.value))}
+              className="w-28 accent-primary"
+            />
+            <span className="text-sm text-muted-foreground w-10 text-right tabular-nums">
+              {noteFontSize}px
+            </span>
+          </div>
+        </SettingRow>
+        <SettingRow
+          anchorId="appearance-vault-notes-code-font-size"
+          label={t('settings.vault.notesCodeFontSize')}
+          description={t('settings.vault.notesCodeFontSizeDesc')}
+        >
+          <div className="flex items-center gap-2">
+            <input
+              type="range"
+              min={10}
+              max={22}
+              step={1}
+              value={noteCodeFontSize}
+              onChange={(e) => handleSetNoteCodeFontSize(Number(e.target.value))}
+              className="w-28 accent-primary"
+            />
+            <span className="text-sm text-muted-foreground w-10 text-right tabular-nums">
+              {noteCodeFontSize}px
+            </span>
+          </div>
         </SettingRow>
       </div>
 

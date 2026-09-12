@@ -1,7 +1,7 @@
 import type { Terminal as XTerm } from "@xterm/xterm";
 import type { ProviderValidationIssue } from "@netcatty/plugin-contract";
 import { logger } from "../../../lib/logger";
-import type { Host, SSHKey } from "../../../types";
+import type { Host, Identity, SSHKey } from "../../../types";
 import type { TerminalSessionExitEvent } from "../../../application/state/resolveTerminalSessionExitIntent";
 import { setTerminalBootEpoch } from "../../../domain/terminalBootEpoch";
 import type { TerminalSessionStartersContext } from "./createTerminalSessionStarters.types";
@@ -33,6 +33,7 @@ import { resolveStartupCommand, scheduleStartupCommand } from "./terminalStartup
 import { markPromptLineBreakCommandPending } from "./promptLineBreak";
 import {
   isEncryptedCredentialPlaceholder,
+  needsVaultStoredKeyHydration,
   sanitizeCredentialValue,
 } from "../../../domain/credentials";
 import { resolveBridgeSshAgentAuth, resolveHostAuth } from "../../../domain/sshAuth";
@@ -58,6 +59,46 @@ import {
 import { hasConnectionPassedTcpDial } from "../connectionTimeouts";
 import { resolveHostSshConnectionTimeouts } from "../../../domain/sshConnectionTimeouts";
 import { isPluginHostProtocol, sanitizePluginConnection } from "../../../domain/pluginConnection";
+import { hydrateVaultStoredKeys } from "../../../infrastructure/persistence/secureFieldAdapter";
+
+const collectConnectKeyIds = (
+  host: Host,
+  jumpHosts: Host[],
+  identities: Identity[] | undefined,
+  pendingAuth: { authMethod?: string; keyId?: string } | null,
+): Set<string> => {
+  const ids = new Set<string>();
+  const addHostKeyId = (
+    candidate: Host,
+    override?: { authMethod?: string; keyId?: string } | null,
+  ) => {
+    const identity = candidate.identityId
+      ? identities?.find((item) => item.id === candidate.identityId)
+      : undefined;
+    const selectedAuthMethod = override?.authMethod || identity?.authMethod || candidate.authMethod;
+    if (selectedAuthMethod === "password") return;
+    const keyId = override?.keyId || identity?.keyId || candidate.identityFileId;
+    if (keyId) ids.add(keyId);
+  };
+  addHostKeyId(host, pendingAuth);
+  for (const jumpHost of jumpHosts) addHostKeyId(jumpHost);
+  return ids;
+};
+
+const hydrateConnectKeysIfNeeded = (
+  sourceKeys: SSHKey[],
+  keyIds: Set<string>,
+) => {
+  const candidates = sourceKeys.filter((key) => keyIds.has(key.id));
+  if (!candidates.some((key) => needsVaultStoredKeyHydration(key))) return null;
+  return hydrateVaultStoredKeys(candidates).then(({ keys: hydrated, unreadableKeyIds }) => {
+    const byId = new Map(hydrated.map((key) => [key.id, key] as const));
+    return {
+      keys: sourceKeys.map((key) => byId.get(key.id) ?? key),
+      unreadableKeyIds,
+    };
+  });
+};
 
 const TELNET_SESSION_REPLACED_ERROR = "Telnet session start was replaced";
 const JUMP_HOST_AUTH_FAILED_PREFIX = "Jump host authentication failed";
@@ -249,9 +290,17 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
     }
 
     const pendingAuth = ctx.pendingAuthRef.current;
+    const pendingKeyHydration = hydrateConnectKeysIfNeeded(
+      ctx.keys,
+      collectConnectKeyIds(ctx.host, ctx.resolvedChainHosts, ctx.identities, pendingAuth),
+    );
+    const { keys, unreadableKeyIds } = pendingKeyHydration
+      ? await pendingKeyHydration
+      : { keys: ctx.keys, unreadableKeyIds: new Set<string>() };
+    if (pendingKeyHydration && !isCurrentAttempt()) return;
     const resolvedAuth = resolveHostAuth({
       host: ctx.host,
-      keys: ctx.keys,
+      keys,
       identities: ctx.identities,
       override: pendingAuth
         ? {
@@ -269,7 +318,9 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
     const effectivePassword = sanitizeCredentialValue(resolvedAuth.password);
     const effectivePassphrase = sanitizeCredentialValue(resolvedAuth.passphrase);
     const hasEncryptedPrimaryPassword = isEncryptedCredentialPlaceholder(resolvedAuth.password);
-    const hasEncryptedPrimaryKey = isEncryptedCredentialPlaceholder(key?.privateKey);
+    const hasEncryptedPrimaryKey = Boolean(
+      key && (unreadableKeyIds.has(key.id) || isEncryptedCredentialPlaceholder(key.privateKey)),
+    );
 
     const isAuthError = (err: unknown): boolean => {
       if (!(err instanceof Error)) return false;
@@ -337,7 +388,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
     const jumpHosts = ctx.resolvedChainHosts.map<NetcattyJumpHost>((jumpHost, index) => {
       const jumpAuth = resolveHostAuth({
         host: jumpHost,
-        keys: ctx.keys,
+        keys,
         identities: ctx.identities,
       });
       const jumpKey = jumpAuth.key;
@@ -372,6 +423,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
       const hasEncryptedJumpCredential =
         isEncryptedCredentialPlaceholder(rawJumpPassword) ||
         isEncryptedCredentialPlaceholder(rawJumpPrivateKey) ||
+        Boolean(jumpKey && unreadableKeyIds.has(jumpKey.id)) ||
         isEncryptedCredentialPlaceholder(rawJumpPassphrase);
 
       if (hasEncryptedJumpProxyCredential || (
@@ -564,22 +616,20 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
             ? ctx.host.identityFilePaths
             : undefined;
 
-      let sourceReuseAttemptedWithinStart = false;
       const startAttempt = async (attempt: {
         password?: string;
         key?: SSHKey;
         useIdentityFiles?: boolean;
         useSshAgent?: boolean;
       }): Promise<string> => {
-        const sourceSessionId = ctx.reuseConnectionFromSessionIdRef?.current;
-        const sourceReuseAttempted = ctx.reuseConnectionSourceAttemptedRef?.current
-          ?? sourceReuseAttemptedWithinStart;
-        const isFallbackAfterSourceReuse = sourceReuseAttempted && !sourceSessionId;
+        // Reconnect supersedes a Copy/Split intent that was still waiting for credentials.
+        const sourceSessionId = ctx.requireFreshConnectionOnReconnectRef?.current
+          ? undefined
+          : ctx.reuseConnectionFromSessionIdRef?.current;
         if (ctx.reuseConnectionFromSessionIdRef) {
           ctx.reuseConnectionFromSessionIdRef.current = undefined;
         }
         if (sourceSessionId) {
-          sourceReuseAttemptedWithinStart = true;
           if (ctx.reuseConnectionSourceAttemptedRef) {
             ctx.reuseConnectionSourceAttemptedRef.current = true;
           }
@@ -607,7 +657,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
           requiresMfa: !!ctx.host.requiresMfa,
           port: ctx.host.port || 22,
           password: attempt.password,
-          privateKey: attempt.key?.source === 'reference' ? undefined : sanitizeCredentialValue(attempt.key?.privateKey),
+          privateKey: attempt.key?.source === 'reference' ? undefined : (sanitizeCredentialValue(attempt.key?.privateKey) || undefined),
           certificate: attempt.key?.certificate,
           publicKey: attempt.key?.publicKey,
           keyId: attempt.key?.id,
@@ -652,18 +702,14 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
           // bridge silently falls back to a fresh connection if the source is
           // gone, so reconnect/retry after the source closed still works.
           sourceSessionId,
-          // Connect-time automation must see the complete login sequence. An
-          // explicit Copy/Split keeps its source-session reuse contract, while
-          // an ordinary open bypasses endpoint/idle transport reuse.
-          reuseTransport: !sourceSessionId && (requiresFreshSshConnection || isFallbackAfterSourceReuse)
-            ? false
-            : undefined,
+          // Only an explicit Copy/Split may share an existing login. Ordinary
+          // opens and reconnects must authenticate again to refresh remote groups.
+          reuseTransport: sourceSessionId ? undefined : false,
           skipShellPidDiscovery: ctx.isNetworkDevice === true,
         });
         if (!requiresFreshSshConnection) {
           ctx.onConnectAutomationSnapshotCommitted?.();
         }
-        sourceReuseAttemptedWithinStart = false;
         if (ctx.reuseConnectionSourceAttemptedRef) {
           ctx.reuseConnectionSourceAttemptedRef.current = false;
         }
@@ -1077,9 +1123,17 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
       }
 
       const pendingAuth = ctx.pendingAuthRef.current;
+      const pendingKeyHydration = hydrateConnectKeysIfNeeded(
+        ctx.keys,
+        collectConnectKeyIds(ctx.host, ctx.resolvedChainHosts, ctx.identities, pendingAuth),
+      );
+      const { keys, unreadableKeyIds } = pendingKeyHydration
+        ? await pendingKeyHydration
+        : { keys: ctx.keys, unreadableKeyIds: new Set<string>() };
+      if (pendingKeyHydration && !isCurrentAttempt()) return;
       const resolvedAuth = resolveHostAuth({
         host: ctx.host,
-        keys: ctx.keys,
+        keys,
         identities: ctx.identities,
         override: pendingAuth
           ? {
@@ -1096,7 +1150,9 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
       const authMethod = resolvedAuth.authMethod;
       const key = authMethod === "password" ? undefined : resolvedAuth.key;
       const hasEncryptedPrimaryPassword = isEncryptedCredentialPlaceholder(resolvedAuth.password);
-      const hasEncryptedPrimaryKey = isEncryptedCredentialPlaceholder(resolvedAuth.key?.privateKey);
+      const hasEncryptedPrimaryKey = Boolean(
+        key && (unreadableKeyIds.has(key.id) || isEncryptedCredentialPlaceholder(key.privateKey)),
+      );
       const allowsLocalIdentityFallback = !resolvedAuth.keyId;
       const moshReferenceKeyPath = key?.source === 'reference' ? key.filePath : undefined;
       const moshIdentityFilePaths = authMethod === "password"
@@ -1137,10 +1193,9 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
       // handshake uses an ephemeral SSH PTY first; writing too early lands
       // input on that PTY and is lost on the swap (issue #2199).
       //
-      // Do not gate status=connected on ready: interactive password/OTP
-      // prompts during the SSH handshake need the overlay dismissed so the
-      // user can type into the terminal. Scripts wait on moshShellReady in
-      // Terminal.tsx instead.
+      // Keep the progress overlay until mosh-client is ready. The attachment
+      // path still dismisses it early for an interactive password/OTP prompt
+      // so the user can type into the terminal.
       //
       // Subscribe BEFORE startMoshSession: a fast passwordless handshake can
       // emit ready before the await returns, and the event is not replayed.
@@ -1153,9 +1208,17 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         cancelPendingStartupCommand?.();
         cancelPendingStartupCommand = undefined;
       };
+      const detectMoshSystem = () => {
+        if (!isCurrentAttempt()) return;
+        const token = registerConnectionToken(attachedSessionId);
+        void runDistroDetection(ctx, attachedSessionId, token);
+      };
       const runMoshStartup = () => {
+        detectMoshSystem();
         disposeMoshReady?.();
         disposeMoshReady = undefined;
+        ctx.setIsConnectionAwaitingUserInput?.(false);
+        if (!ctx.hasConnectedRef.current) ctx.updateStatus("connected");
         cancelPendingStartupCommand = scheduleStartupCommand(ctx, term, attachedSessionId, () => {
           cancelPendingStartupCommand = undefined;
         });
@@ -1185,7 +1248,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         authMethod,
         requiresMfa: !!ctx.host.requiresMfa,
         password: effectivePassword,
-        privateKey: (usesSystemAgent && !key?.certificate) || key?.source === 'reference' ? undefined : sanitizeCredentialValue(key?.privateKey),
+        privateKey: (usesSystemAgent && !key?.certificate) || key?.source === 'reference' ? undefined : (sanitizeCredentialValue(key?.privateKey) || undefined),
         certificate: key?.certificate,
         keyId: key?.id,
         passphrase: key && (!usesSystemAgent || Boolean(key.certificate))
@@ -1226,6 +1289,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         // hibernate detaches exit listeners without closing the session and
         // would otherwise cancel a still-pending startup command.
         onExit: cleanupMoshStartupWait,
+        deferConnectionDuringMoshHandshake: Boolean(ctx.terminalBackend.onMoshSessionReady),
         sudoAutofillPassword: resolveSavedSudoAutofillPassword(),
         sudoAutofillCandidates: resolveSudoAutofillCandidates(),
       })) {
@@ -1240,7 +1304,8 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
           runMoshStartup();
         }
       } else {
-        // Older bridges without the ready event: keep previous behavior.
+        // Older bridges without the ready event: the start call completed the handshake.
+        detectMoshSystem();
         scheduleStartupCommand(ctx, term, id);
       }
     } catch (err) {
@@ -1349,9 +1414,17 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
       }
 
       const pendingAuth = ctx.pendingAuthRef.current;
+      const pendingKeyHydration = hydrateConnectKeysIfNeeded(
+        ctx.keys,
+        collectConnectKeyIds(ctx.host, ctx.resolvedChainHosts, ctx.identities, pendingAuth),
+      );
+      const { keys, unreadableKeyIds } = pendingKeyHydration
+        ? await pendingKeyHydration
+        : { keys: ctx.keys, unreadableKeyIds: new Set<string>() };
+      if (pendingKeyHydration && !isCurrentAttempt()) return;
       const resolvedAuth = resolveHostAuth({
         host: ctx.host,
-        keys: ctx.keys,
+        keys,
         identities: ctx.identities,
         override: pendingAuth
           ? {
@@ -1368,7 +1441,9 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
       const authMethod = resolvedAuth.authMethod;
       const key = authMethod === "password" ? undefined : resolvedAuth.key;
       const hasEncryptedPrimaryPassword = isEncryptedCredentialPlaceholder(resolvedAuth.password);
-      const hasEncryptedPrimaryKey = isEncryptedCredentialPlaceholder(resolvedAuth.key?.privateKey);
+      const hasEncryptedPrimaryKey = Boolean(
+        key && (unreadableKeyIds.has(key.id) || isEncryptedCredentialPlaceholder(key.privateKey)),
+      );
       const allowsLocalIdentityFallback = !resolvedAuth.keyId;
       const etReferenceKeyPath = key?.source === 'reference' ? key.filePath : undefined;
       const etIdentityFilePaths = authMethod === "password"
@@ -1408,7 +1483,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
       const jumpHosts = ctx.resolvedChainHosts.map<NetcattyJumpHost>((jumpHost) => {
         const jumpAuth = resolveHostAuth({
           host: jumpHost,
-          keys: ctx.keys,
+          keys,
           identities: ctx.identities,
         });
         const jumpKey = jumpAuth.key;
@@ -1426,6 +1501,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         const hasEncryptedJumpCredential =
           isEncryptedCredentialPlaceholder(rawJumpPassword) ||
           isEncryptedCredentialPlaceholder(rawJumpPrivateKey) ||
+          Boolean(jumpKey && unreadableKeyIds.has(jumpKey.id)) ||
           isEncryptedCredentialPlaceholder(rawJumpPassphrase);
         const jumpAgentAuth = resolveBridgeSshAgentAuth(jumpHost, jumpKey, jumpAuth.authMethod);
         if (
@@ -1505,7 +1581,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         hostId: ctx.host.id,
         username: resolvedAuth.username || "root",
         password: effectivePassword,
-        privateKey: (usesSystemAgent && !key?.certificate) || key?.source === 'reference' ? undefined : sanitizeCredentialValue(key?.privateKey),
+        privateKey: (usesSystemAgent && !key?.certificate) || key?.source === 'reference' ? undefined : (sanitizeCredentialValue(key?.privateKey) || undefined),
         certificate: key?.certificate,
         keyId: key?.id,
         passphrase: key && (!usesSystemAgent || Boolean(key.certificate))

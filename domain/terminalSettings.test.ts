@@ -7,6 +7,28 @@ test("normalizeTerminalSettings disables cursor line highlight by default", () =
   assert.equal(normalizeTerminalSettings().highlightCursorLine, false);
 });
 
+test("normalizeTerminalSettings defaults disconnected sessions to a terminal notice", () => {
+  assert.equal(normalizeTerminalSettings().disconnectedNoticeMode, "terminal");
+});
+
+test("normalizeTerminalSettings preserves supported disconnected notice modes", () => {
+  assert.equal(
+    normalizeTerminalSettings({ disconnectedNoticeMode: "terminal" }).disconnectedNoticeMode,
+    "terminal",
+  );
+  assert.equal(
+    normalizeTerminalSettings({ disconnectedNoticeMode: "dialog" }).disconnectedNoticeMode,
+    "dialog",
+  );
+});
+
+test("normalizeTerminalSettings rejects unsupported disconnected notice modes", () => {
+  assert.equal(
+    normalizeTerminalSettings({ disconnectedNoticeMode: "toast" as never }).disconnectedNoticeMode,
+    "terminal",
+  );
+});
+
 test("normalizeTerminalSettings preserves enabled cursor line highlight", () => {
   assert.equal(normalizeTerminalSettings({ highlightCursorLine: true }).highlightCursorLine, true);
 });

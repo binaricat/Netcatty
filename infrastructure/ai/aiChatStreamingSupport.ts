@@ -141,7 +141,7 @@ export type StreamChunk =
   | ToolApprovalResponseChunk
   | ErrorChunk
   | RawChunk
-  | { type: 'reasoning-end' | 'text-start' | 'text-end' | 'start' | 'finish' | 'start-step' | 'finish-step' | 'tool-approval-request'; approvalId?: string; toolCallId?: string; toolName?: string; approved?: boolean; toolCall?: StreamChunkToolCallRef; input?: unknown; args?: unknown };
+  | { type: 'reasoning-end' | 'text-start' | 'text-end' | 'start' | 'finish' | 'start-step' | 'finish-step' | 'tool-approval-request'; approvalId?: string; toolCallId?: string; toolName?: string; approved?: boolean; toolCall?: StreamChunkToolCallRef; input?: unknown; args?: unknown; providerMetadata?: unknown };
 
 /** Shape of the netcatty bridge exposed on `window` (panel-specific subset). */
 export interface PanelBridge extends NetcattyBridge {
@@ -220,6 +220,7 @@ export interface DefaultTargetSessionHint extends TerminalSessionInfo {
 
 export interface CattyProviderContinuationContext {
   source: ProviderContinuationSource;
+  usesOpenAIResponses: boolean;
   openAIChatAssistantFields: Array<OpenAIChatAssistantFields | undefined>;
 }
 

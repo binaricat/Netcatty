@@ -131,6 +131,7 @@ test("system overview stats run for Linux and macOS targets", () => {
       {
         id: "host-1",
         label: "Linux",
+        distro: "ubuntu",
         hostname: "linux.local",
         username: "root",
         tags: [],
@@ -171,4 +172,12 @@ test("FreeBSD icon detection does not enable unsupported system features", () =>
 
   assert.equal(shouldCollectServerStats(host, undefined, null), false);
   assert.deepEqual(buildSystemManagerTabs(host, undefined, null), ["overview", "processes"]);
+});
+
+test('default Linux and cosmetic icons cannot enable Linux commands before detection', () => {
+  const host = {id:'unknown', label:'Host', hostname:'host', username:'user', tags:[], os:'linux' as const, manualDistro:'ubuntu', distroMode:'manual' as const};
+  assert.equal(shouldCollectServerStats(host, undefined, null), false);
+  assert.deepEqual(buildSystemManagerTabs(host, undefined, null), ['overview','processes']);
+  assert.equal(shouldCollectServerStats({...host,distro:'ubuntu'},undefined,null),true);
+  assert.equal(shouldCollectServerStats({...host,distro:'ubuntu',osOverride:'windows'},undefined,null),false);
 });

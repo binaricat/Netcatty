@@ -72,6 +72,15 @@ interface UseSftpViewPaneActionsResult {
   onReceiveFromOtherPaneRight: (files: SftpTransferSource[]) => void;
 }
 
+export async function disconnectSftpPaneAfterConfirmation(params: {
+  confirmClose: () => Promise<boolean>;
+  disconnect: () => Promise<void>;
+}): Promise<boolean> {
+  if (!await params.confirmClose()) return false;
+  await params.disconnect();
+  return true;
+}
+
 export const useSftpViewPaneActions = ({
   sftpRef,
   t,
@@ -181,16 +190,16 @@ export const useSftpViewPaneActions = ({
     );
   }, [sftpRef]);
   const onDisconnectLeft = useCallback(async (): Promise<boolean> => {
-    const ok = await confirmCloseActivePaneEditors("left");
-    if (!ok) return false;
-    sftpRef.current.disconnect("left");
-    return true;
+    return disconnectSftpPaneAfterConfirmation({
+      confirmClose: () => confirmCloseActivePaneEditors("left"),
+      disconnect: () => sftpRef.current.disconnect("left"),
+    });
   }, [confirmCloseActivePaneEditors, sftpRef]);
   const onDisconnectRight = useCallback(async (): Promise<boolean> => {
-    const ok = await confirmCloseActivePaneEditors("right");
-    if (!ok) return false;
-    sftpRef.current.disconnect("right");
-    return true;
+    return disconnectSftpPaneAfterConfirmation({
+      confirmClose: () => confirmCloseActivePaneEditors("right"),
+      disconnect: () => sftpRef.current.disconnect("right"),
+    });
   }, [confirmCloseActivePaneEditors, sftpRef]);
   const onPrepareSelectionLeft = useCallback(() => {
     keepOnlyActivePaneSelections(sftpRef.current, "left");

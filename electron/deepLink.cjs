@@ -65,6 +65,36 @@ function collectPuttyStyleDeepLinkUrls(argv) {
   return { ssh: [parsed.url], telnet: [] };
 }
 
+/**
+ * Build the pending-queue items for ssh/telnet connections requested by the
+ * current launch arguments. PuTTY-style CLI args (-ssh user@host -P 22 -pw
+ * pass) are an explicit launch method and must connect regardless of whether
+ * Netcatty is the registered ssh:// protocol client, so those items are only
+ * gated by includeSchemeUrls through the scheme-URL part of the queue.
+ */
+function collectSshDeepLinkQueueItems(argv, { includeSchemeUrls = true } = {}) {
+  const puttyStyleDeepLinks = collectPuttyStyleDeepLinkUrls(argv);
+  const queueItems = {
+    ssh: [],
+    telnet: [],
+  };
+  if (includeSchemeUrls) {
+    collectSshDeepLinkUrls(argv).forEach((rawUrl) => {
+      queueItems.ssh.push({ rawUrl, viaCommandLine: false });
+    });
+    collectTelnetDeepLinkUrls(argv).forEach((rawUrl) => {
+      queueItems.telnet.push({ rawUrl, viaCommandLine: false });
+    });
+  }
+  puttyStyleDeepLinks.ssh.forEach((rawUrl) => {
+    queueItems.ssh.push({ rawUrl, viaCommandLine: true });
+  });
+  puttyStyleDeepLinks.telnet.forEach((rawUrl) => {
+    queueItems.telnet.push({ rawUrl, viaCommandLine: true });
+  });
+  return queueItems;
+}
+
 function registerProtocolClient({
   app,
   protocol,
@@ -407,6 +437,7 @@ module.exports = {
   getSshDeepLinkRendererReadyTimeoutMs,
   collectJmsDeepLinkUrls,
   collectPuttyStyleDeepLinkUrls,
+  collectSshDeepLinkQueueItems,
   collectSshDeepLinkUrls,
   collectTelnetDeepLinkUrls,
   redactPuttyCommandLinePasswords,

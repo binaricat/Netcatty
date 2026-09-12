@@ -11,6 +11,7 @@ function buildHistoryCacheKey(
   scopeHostIds: string[] | undefined,
   activeTerminalSessionIds: Set<string>,
   workspaceMemberTerminalIds: Set<string> | undefined,
+  workspaceMemberActiveSessionIds: Set<string>,
 ): HistoryCacheKey {
   const hostKey = scopeHostIds ? [...scopeHostIds].sort().join(',') : '';
   const terminalKey = scopeType === 'terminal'
@@ -19,7 +20,8 @@ function buildHistoryCacheKey(
   const memberKey = scopeType === 'workspace' && workspaceMemberTerminalIds
     ? [...workspaceMemberTerminalIds].sort().join(',')
     : '';
-  return `${scopeType}:${scopeTargetId ?? ''}:${hostKey}:${terminalKey}:${memberKey}`;
+  const memberActiveKey = [...workspaceMemberActiveSessionIds].sort().join(',');
+  return `${scopeType}:${scopeTargetId ?? ''}:${hostKey}:${terminalKey}:${memberKey}:${memberActiveKey}`;
 }
 
 export function getScopedHistorySessions(
@@ -29,7 +31,18 @@ export function getScopedHistorySessions(
   scopeHostIds: string[] | undefined,
   activeTerminalSessionIds: Set<string>,
   workspaceMemberTerminalIds?: Set<string>,
+  activeSessionIdMap?: Readonly<Record<string, string | null | undefined>>,
 ): AISession[] {
+  // A member can be continuing history created on an older terminal. Its
+  // selected chat belongs in workspace history even though scope.targetId
+  // still identifies that older terminal. Do not include nonmember selections.
+  const workspaceMemberActiveSessionIds = new Set<string>();
+  if (scopeType === 'workspace' && workspaceMemberTerminalIds && activeSessionIdMap) {
+    for (const terminalId of workspaceMemberTerminalIds) {
+      const sessionId = activeSessionIdMap[`terminal:${terminalId}`];
+      if (sessionId) workspaceMemberActiveSessionIds.add(sessionId);
+    }
+  }
   let scopeCache = historyCache.get(sessions);
   if (!scopeCache) {
     scopeCache = new Map();
@@ -42,6 +55,7 @@ export function getScopedHistorySessions(
     scopeHostIds,
     activeTerminalSessionIds,
     workspaceMemberTerminalIds,
+    workspaceMemberActiveSessionIds,
   );
   const cached = scopeCache.get(cacheKey);
   if (cached) {
@@ -60,6 +74,7 @@ export function getScopedHistorySessions(
         scopeHostIds,
         activeTerminalSessionIds,
         workspaceMemberTerminalIds,
+        workspaceMemberActiveSessionIds,
       ),
     }))
     .filter(({ matchRank }) => matchRank > 0)

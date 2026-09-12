@@ -1669,3 +1669,104 @@ test("macOS tray click still opens the panel below a top menu-bar icon", async (
     }
   });
 });
+
+test("pinTrayForHiddenLaunch creates a tray even when close-to-tray is off", () => {
+  const bridge = loadBridge();
+  const electronModule = createElectronStub();
+  bridge.init({ electronModule, getMainWindow: () => null });
+
+  try {
+    assert.equal(bridge.getTray(), null);
+    bridge.pinTrayForHiddenLaunch();
+    assert.notEqual(bridge.getTray(), null);
+  } finally {
+    bridge.cleanup();
+  }
+});
+
+test("a hidden-launch tray pin survives close-to-tray being turned off", async () => {
+  const bridge = loadBridge();
+  const electronModule = createElectronStub();
+  bridge.init({ electronModule, getMainWindow: () => null });
+  const ipcMain = createIpcMainStub();
+  bridge.registerHandlers(ipcMain);
+
+  try {
+    bridge.pinTrayForHiddenLaunch();
+    assert.notEqual(bridge.getTray(), null, "hidden-launch cold start must have a tray");
+
+    // The renderer's close-to-tray effect runs on mount and can disable the
+    // preference before the pin is released — the tray must not disappear,
+    // or a hidden auto-launch becomes an unreachable zombie process.
+    await ipcMain.handlers.get("netcatty:tray:setCloseToTray")(null, { enabled: false });
+    assert.notEqual(bridge.getTray(), null, "the pin must outlive close-to-tray being disabled");
+  } finally {
+    bridge.cleanup();
+  }
+});
+
+test("releasing the hidden-launch tray pin destroys the tray if close-to-tray is off", async () => {
+  const bridge = loadBridge();
+  const electronModule = createElectronStub();
+  bridge.init({ electronModule, getMainWindow: () => null });
+  const ipcMain = createIpcMainStub();
+  bridge.registerHandlers(ipcMain);
+
+  try {
+    bridge.pinTrayForHiddenLaunch();
+    await ipcMain.handlers.get("netcatty:tray:setCloseToTray")(null, { enabled: false });
+    assert.notEqual(bridge.getTray(), null);
+
+    bridge.releaseHiddenLaunchTrayPin();
+
+    assert.equal(bridge.getTray(), null, "once the window is shown, close-to-tray=off should win");
+  } finally {
+    bridge.cleanup();
+  }
+});
+
+test("releasing the hidden-launch tray pin keeps the tray if close-to-tray is on", async () => {
+  const bridge = loadBridge();
+  const electronModule = createElectronStub();
+  bridge.init({ electronModule, getMainWindow: () => null });
+  const { ipcMain } = await enableCloseToTray(bridge, electronModule);
+
+  try {
+    bridge.pinTrayForHiddenLaunch();
+    assert.notEqual(bridge.getTray(), null);
+
+    bridge.releaseHiddenLaunchTrayPin();
+
+    assert.notEqual(bridge.getTray(), null, "close-to-tray=on should keep the tray regardless of the pin");
+    void ipcMain;
+  } finally {
+    bridge.cleanup();
+  }
+});
+
+test("releaseHiddenLaunchTrayPin is a no-op when the pin was never set", () => {
+  const bridge = loadBridge();
+  const electronModule = createElectronStub();
+  bridge.init({ electronModule, getMainWindow: () => null });
+
+  try {
+    assert.doesNotThrow(() => bridge.releaseHiddenLaunchTrayPin());
+    assert.equal(bridge.getTray(), null);
+  } finally {
+    bridge.cleanup();
+  }
+});
+
+test("setCloseToTray(false) still destroys an unpinned tray as before", async () => {
+  const bridge = loadBridge();
+  const electronModule = createElectronStub();
+  const { ipcMain } = await enableCloseToTray(bridge, electronModule);
+
+  try {
+    assert.notEqual(bridge.getTray(), null);
+    await ipcMain.handlers.get("netcatty:tray:setCloseToTray")(null, { enabled: false });
+    assert.equal(bridge.getTray(), null);
+  } finally {
+    bridge.cleanup();
+  }
+});

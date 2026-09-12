@@ -220,7 +220,7 @@ function quoteShellArg(value: string) {
   return `"${value.replaceAll("\\", "\\\\").replaceAll("\"", "\\\"")}"`;
 }
 
-const EXTERNAL_MCP_DISCOVERY_ENV_VAR = "NETCATTY_EXTERNAL_MCP_DISCOVERY_FILE";
+export const EXTERNAL_MCP_DISCOVERY_ENV_VAR = "NETCATTY_EXTERNAL_MCP_DISCOVERY_FILE";
 
 export function formatCodexAddCommand(launcherPath: string, discoveryPath?: string | null) {
   const envFlags = discoveryPath

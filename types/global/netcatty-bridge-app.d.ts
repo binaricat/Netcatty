@@ -66,6 +66,10 @@ declare global {
     setCloseToTray?(enabled: boolean): Promise<{ success: boolean; enabled: boolean }>;
     isCloseToTray?(): Promise<{ enabled: boolean }>;
 
+    // Auto Launch at system login (hidden to tray)
+    getAutoLaunch?(): Promise<{ success: boolean; enabled: boolean; supported: boolean }>;
+    setAutoLaunch?(enabled: boolean): Promise<{ success: boolean; enabled: boolean; supported: boolean }>;
+
     // App-level HTTP(S) network proxy (cloud sync / AI — not SSH ProxyJump)
     setHttpNetworkProxy?(settings: {
       mode: 'system' | 'direct' | 'custom';

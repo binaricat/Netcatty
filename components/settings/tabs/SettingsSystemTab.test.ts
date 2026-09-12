@@ -62,6 +62,15 @@ test("app lock page uses settings rows and moves password forms into a dialog", 
   assert.match(source, /settings\.appLock\.currentPasswordForChangePlaceholder/);
 });
 
+test("app lock password setup keeps whitespace as password content", () => {
+  const source = readAppLockSectionSource();
+
+  assert.ok(source.includes("newPassword.length === 0"));
+  assert.ok(source.includes("confirmPassword.length === 0"));
+  assert.ok(!source.includes("newPassword.trim()"));
+  assert.ok(!source.includes("confirmPassword.trim()"));
+});
+
 test("app lock system unlock setting uses bridge-provided platform label", () => {
   const source = readAppLockSectionSource();
 

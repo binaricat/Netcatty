@@ -30,7 +30,7 @@ test("failed locked launch-intent deliveries return to their queues", () => {
   const terminalFlush = readFunction("flushPendingOpenTerminalPaths", "hasPendingColdStartLaunchIntents");
 
   assert.match(jmsFlush, /pendingJmsDeepLinkUrls\.unshift\(rawUrl\)/);
-  assert.match(telnetFlush, /pendingTelnetDeepLinkUrls\.unshift\(rawUrl\)/);
+  assert.match(telnetFlush, /pendingTelnetDeepLinkUrls\.unshift\(item\)/);
   assert.match(terminalFlush, /pendingOpenTerminalPaths\.unshift\(targetPath\)/);
 });
 

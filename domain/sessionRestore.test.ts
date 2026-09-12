@@ -41,6 +41,36 @@ test("buildSessionRestorePayload stores restored sessions as disconnected and dr
   assert.equal(payload.sessions[0].restoreState, "restored-disconnected");
 });
 
+test("restore keeps the duplicate-session fresh-connection marker and sanitizes it on load", () => {
+  const payload = buildSessionRestorePayload({
+    sessions: [{ ...session("s1"), requireFreshConnection: true }],
+    workspaces: [],
+    tabOrder: ["s1"],
+    activeTabId: "s1",
+    now: 123,
+  });
+
+  assert.equal(payload.sessions[0].requireFreshConnection, true);
+
+  const restored = sanitizeSessionRestorePayload({
+    version: 1,
+    savedAt: 123,
+    activeTabId: "s1",
+    tabOrder: ["s1"],
+    sessions: [payload.sessions[0] as unknown as Record<string, unknown>],
+  });
+  assert.equal(restored.sessions[0].requireFreshConnection, true);
+
+  const corrupted = sanitizeSessionRestorePayload({
+    version: 1,
+    savedAt: 123,
+    activeTabId: "s1",
+    tabOrder: ["s1"],
+    sessions: [{ ...payload.sessions[0], requireFreshConnection: "yes" } as unknown as Record<string, unknown>],
+  });
+  assert.equal(corrupted.sessions[0].requireFreshConnection, undefined);
+});
+
 test("buildSessionRestorePayload excludes ephemeral-host sessions and their tabs", () => {
   const payload = buildSessionRestorePayload({
     sessions: [
@@ -326,6 +356,44 @@ test("sanitizeSessionRestorePayload preserves explicit workspace autoTitle acros
 
   assert.equal(sanitized.workspaces.length, 1);
   assert.equal(sanitized.workspaces[0].autoTitle, false);
+});
+
+test("generated workspace titles survive JSON restore only with a valid boolean flag", () => {
+  const workspace: Workspace = {
+    id: "ws-1",
+    title: "01/02",
+    autoTitle: false,
+    generatedTitle: true,
+    root: {
+      id: "split-1",
+      type: "split",
+      direction: "vertical",
+      children: [
+        { id: "pane-1", type: "pane", sessionId: "s1" },
+        { id: "pane-2", type: "pane", sessionId: "s2" },
+      ],
+    },
+    focusedSessionId: "s1",
+    focusSessionOrder: ["s1", "s2"],
+  };
+  const payload = buildSessionRestorePayload({
+    sessions: [session("s1", "ws-1"), session("s2", "ws-1")],
+    workspaces: [workspace],
+    tabOrder: ["ws-1"],
+    activeTabId: "ws-1",
+    now: 123,
+  });
+
+  const restored = sanitizeSessionRestorePayload(JSON.parse(JSON.stringify(payload)));
+  assert.equal(restored.workspaces[0].title, "01/02");
+  assert.equal(restored.workspaces[0].autoTitle, false);
+  assert.equal(restored.workspaces[0].generatedTitle, true);
+
+  const malformed = sanitizeSessionRestorePayload({
+    ...payload,
+    workspaces: [{ ...payload.workspaces[0], generatedTitle: "true" }],
+  });
+  assert.equal(malformed.workspaces[0].generatedTitle, undefined);
 });
 
 test("sanitizeSessionRestorePayload leaves legacy workspaces without an autoTitle flag", () => {
@@ -641,6 +709,21 @@ test("shouldAttemptRestoreCwd allows restored local and unix ssh sessions only w
     session: { ...session("s1"), status: "disconnected", restoreState: "restored-disconnected", lastCwd: "/srv/app" },
     isNetworkDevice: false,
   }), false);
+});
+
+test("restored fresh SSH duplicates retain metadata without injecting the previous target directory", () => {
+  for (const protocol of ["ssh", undefined, "local"] as const) {
+    const payload = buildSessionRestorePayload({
+      sessions: [{ ...session("s1"), protocol, requireFreshConnection: true, lastCwd: "/srv/old-target" }],
+      workspaces: [], tabOrder: ["s1"], activeTabId: "s1",
+    });
+    const restored = sanitizeSessionRestorePayload(JSON.parse(JSON.stringify(payload))).sessions[0];
+    assert.equal(restored.requireFreshConnection, true);
+    assert.equal(restored.lastCwd, "/srv/old-target");
+    const intent = resolveRestoreCwdIntent({ enabled: true, session: restored, isNetworkDevice: false });
+    if (protocol === "local") assert.equal(intent?.command, "cd -- '/srv/old-target'");
+    else assert.equal(intent, null, "a fresh bastion login must await target selection");
+  }
 });
 
 test("shouldAttemptRestoreCwd skips ineligible protocols and network devices", () => {

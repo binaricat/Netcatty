@@ -20,7 +20,7 @@ import {
 } from "./SftpContext";
 import type { SftpPane } from "../../application/state/sftp/types";
 import { joinPath, getParentPath } from "../../application/state/sftp/utils";
-import type { Host } from "../../domain/models";
+import type { Host, SftpBookmark } from "../../domain/models";
 import { useSftpPaneDialogs } from "./hooks/useSftpPaneDialogs";
 import { useSftpPaneDragAndSelect } from "./hooks/useSftpPaneDragAndSelect";
 import { useSftpPaneFiles } from "./hooks/useSftpPaneFiles";
@@ -33,6 +33,7 @@ import { useSftpBookmarks } from "./hooks/useSftpBookmarks";
 import { useLocalSftpBookmarks } from "../../application/state/sftp/localSftpBookmarks";
 import { useGlobalSftpBookmarks } from "./hooks/useGlobalSftpBookmarks";
 import { useSftpHostViewMode } from "../../application/state/sftp/sftpHostViewModeStore";
+import { useSftpListDensity } from "../../application/state/sftp/sftpListDensityStore";
 import { sftpListOrderStore } from "./hooks/useSftpListOrderStore";
 import { sftpTreeSelectionStore } from "../../application/state/sftp/sftpTreeSelectionStore";
 import { sftpClipboardUploadStore } from "./clipboardUpload";
@@ -117,6 +118,7 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
   const [showFilterBar, setShowFilterBar] = useState(false);
   const initialViewMode = hostViewMode ?? sftpDefaultViewMode ?? 'list';
   const [viewMode, setViewMode] = useState<'list' | 'tree'>(initialViewMode);
+  const { density: listDensity, setDensity: setListDensity } = useSftpListDensity();
   const [treeReloadRequest, setTreeReloadRequest] = useState<TreeReloadRequest>({ token: 0, full: true });
   // Lazy-mount: only render the tree component once tree mode has been activated
   const [treeEverMounted, setTreeEverMounted] = useState(initialViewMode === 'tree');
@@ -195,7 +197,10 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
   });
   const hostBookmarks = pane.connection?.isLocal ? localBookmarks : remoteBookmarks;
   const mergedBookmarks = useMemo(
-    () => [...globalBookmarks.bookmarks.map((b) => ({ ...b, global: true as const })), ...hostBookmarks.bookmarks],
+    () => [
+      ...globalBookmarks.bookmarks.map((b) => ({ ...b, global: true as const })),
+      ...hostBookmarks.bookmarks.map((b) => ({ ...b, global: false as const })),
+    ],
     [hostBookmarks.bookmarks, globalBookmarks.bookmarks],
   );
   const isCurrentPathBookmarked = hostBookmarks.isCurrentPathBookmarked || globalBookmarks.isCurrentPathBookmarked;
@@ -211,11 +216,31 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
     }
   }, [hostBookmarks, globalBookmarks, pane.connection?.currentPath]);
   const deleteBookmark = useCallback(
-    (id: string) => {
-      if (id.startsWith("gbm-")) {
-        globalBookmarks.deleteBookmark(id);
+    (bookmark: SftpBookmark) => {
+      if (bookmark.global) {
+        globalBookmarks.deleteBookmark(bookmark.id);
       } else {
-        hostBookmarks.deleteBookmark(id);
+        hostBookmarks.deleteBookmark(bookmark.id);
+      }
+    },
+    [hostBookmarks, globalBookmarks],
+  );
+  const reorderBookmark = useCallback(
+    (from: SftpBookmark, to: SftpBookmark) => {
+      if (from.global && to.global) {
+        globalBookmarks.reorderBookmark(from.id, to.id);
+      } else if (!from.global && !to.global) {
+        hostBookmarks.reorderBookmark(from.id, to.id);
+      }
+    },
+    [hostBookmarks, globalBookmarks],
+  );
+  const renameBookmark = useCallback(
+    (bookmark: SftpBookmark, label: string) => {
+      if (bookmark.global) {
+        globalBookmarks.renameBookmark(bookmark.id, label);
+      } else {
+        hostBookmarks.renameBookmark(bookmark.id, label);
       }
     },
     [hostBookmarks, globalBookmarks],
@@ -376,6 +401,7 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
     isActive,
     enabled: viewMode === 'list',
     sortedDisplayFiles,
+    layoutKey: listDensity,
   });
 
   const toFullPath = useCallback(
@@ -574,6 +600,8 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
         isCurrentPathGlobalBookmarked={globalBookmarks.isCurrentPathBookmarked}
         onNavigateToBookmark={callbacks.onNavigateTo}
         onDeleteBookmark={deleteBookmark}
+        onReorderBookmark={reorderBookmark}
+        onRenameBookmark={renameBookmark}
         showHiddenFiles={pane.showHiddenFiles}
         onToggleShowHiddenFiles={onToggleShowHiddenFiles}
         onGoToTerminalCwd={onGoToTerminalCwd}
@@ -582,6 +610,8 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
         onToggleFollowTerminalCwd={onToggleFollowTerminalCwd}
         viewMode={viewMode}
         onSetViewMode={handleSetViewMode}
+        listDensity={listDensity}
+        onSetListDensity={setListDensity}
         onListDrives={callbacks.onListDrives}
       />
 
@@ -671,6 +701,7 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
           openDeleteConfirm={openDeleteConfirm}
           rowHeight={rowHeight}
           visibleRows={visibleRows}
+          listDensity={listDensity}
         />
       </div>
 

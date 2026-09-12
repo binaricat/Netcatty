@@ -5,6 +5,12 @@
  */
 
 import { Host, Identity, KnownHost, PortForwardingRule, SSHKey, TerminalSettings } from '../../domain/models';
+import {
+  isPortForwardingRuleStartable,
+  isPortForwardingRuntimeBusy,
+  selectStartablePortForwardingRules,
+  selectStoppablePortForwardingRules,
+} from '../../domain/portForwardingBulkActions';
 import { isEncryptedCredentialPlaceholder, sanitizeCredentialValue } from '../../domain/credentials';
 import { resolveBridgeKeyAuth, resolveBridgeSshAgentAuth, resolveHostAuth } from '../../domain/sshAuth';
 import { resolveHostKeepalive } from '../../domain/host';
@@ -44,6 +50,7 @@ export interface PortForwardingConnection {
   reconnectDueAt?: number;
   reconnectTimerCallback?: () => void;
   reconnectStartAuthorized?: boolean;
+  reconnectSuppressed?: boolean;
   syncedShouldReconnect?: () => boolean;
   syncedOnStatusChange?: (
     status: PortForwardingRule['status'],
@@ -59,6 +66,7 @@ const activeConnections = new Map<string, PortForwardingConnection>();
 const exhaustedReconnectRules = new Set<string>();
 const rulesPendingCleanup = new Set<string>();
 const manualStopsInProgress = new Set<string>();
+const stopAllInProgress = new Set<string>();
 const ruleCleanupPromises = new Map<string, Promise<{ success: boolean; error?: string }>>();
 const deferredReconnects = new Map<string, {
   enableReconnect: boolean;
@@ -74,14 +82,17 @@ let reconnectCallback: ((
   ruleId: string,
   onStatusChange: (status: PortForwardingRule['status'], error?: string) => void
 ) => Promise<{ success: boolean; error?: string }>) | null = null;
+let shouldReconnectRule: ((ruleId: string) => boolean) | undefined;
 
 /**
  * Set the reconnect callback (called by state hook to enable auto-reconnect)
  */
 export const setReconnectCallback = (
-  callback: typeof reconnectCallback
+  callback: typeof reconnectCallback,
+  shouldReconnect?: (ruleId: string) => boolean,
 ): void => {
   reconnectCallback = callback;
+  shouldReconnectRule = callback ? shouldReconnect : undefined;
 };
 
 /**
@@ -204,7 +215,7 @@ const scheduleReconnectIfNeeded = (
   enableReconnect: boolean,
   onStatusChange: (status: PortForwardingRule['status'], error?: string) => void,
 ): boolean => {
-  if (!enableReconnect || !reconnectCallback) {
+  if (!enableReconnect || !reconnectCallback || shouldReconnectRule?.(ruleId) === false) {
     return false;
   }
   if (rulesPendingCleanup.has(ruleId)) {
@@ -213,6 +224,12 @@ const scheduleReconnectIfNeeded = (
   }
 
   const currentConn = activeConnections.get(ruleId);
+  if (currentConn?.reconnectSuppressed) return false;
+  if (currentConn?.reconnectTimerCallback) {
+    currentConn.status = 'connecting';
+    currentConn.error = `Reconnecting (${currentConn.reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`;
+    return true;
+  }
   const attempts = (currentConn?.reconnectAttempts ?? 0) + 1;
 
   if (attempts <= MAX_RECONNECT_ATTEMPTS) {
@@ -233,6 +250,13 @@ const scheduleReconnectIfNeeded = (
       currentConn.reconnectTimeoutId = undefined;
       currentConn.reconnectDueAt = undefined;
       currentConn.reconnectTimerCallback = undefined;
+      if (activeConnections.get(ruleId) !== currentConn) return;
+      if (shouldReconnectRule?.(ruleId) === false) {
+        currentConn.unsubscribe?.();
+        activeConnections.delete(ruleId);
+        onStatusChange('inactive');
+        return;
+      }
       if (reconnectCallback) {
         currentConn.reconnectStartAuthorized = true;
         reconnectCallback(ruleId, onStatusChange);
@@ -274,6 +298,12 @@ export const getActiveRuleIds = (): string[] => {
     .map(([ruleId]) => ruleId);
 };
 
+/** Return whether any tracked runtime still needs to be stopped. */
+export const hasActivePortForwardRuntime = (): boolean =>
+  Array.from(activeConnections.values()).some((connection) =>
+    isPortForwardingRuntimeBusy(connection),
+  );
+
 const finishRuleCleanup = (ruleId: string): void => {
   exhaustedReconnectRules.delete(ruleId);
   rulesPendingCleanup.delete(ruleId);
@@ -296,6 +326,7 @@ const preserveFailedStopConnection = (
     status: 'error' as const,
   };
   failedConnection.reconnectStartAuthorized = false;
+  failedConnection.reconnectSuppressed = true;
   failedConnection.status = 'error';
   failedConnection.error = error;
   activeConnections.set(ruleId, failedConnection);
@@ -606,6 +637,10 @@ const subscribeSyncedConnection = async (
         current.status = status;
         current.error = error ?? undefined;
         if (status === 'error') {
+          if (stopAllInProgress.has(ruleId)) {
+            onStatusChange(status, error ?? undefined);
+            return;
+          }
           const reconnectScheduled = scheduleReconnectIfNeeded(
             ruleId,
             connection.syncedShouldReconnect?.() ?? false,
@@ -840,7 +875,10 @@ export const startPortForward = async (
     onStatusChange(existingConnection.status, existingConnection.error);
     return { success: true };
   }
-  if (existingConnection) existingConnection.reconnectStartAuthorized = false;
+  if (existingConnection) {
+    existingConnection.reconnectStartAuthorized = false;
+    existingConnection.reconnectSuppressed = false;
+  }
   
   // Clear any existing reconnect timer
   clearReconnectTimer(rule.id);
@@ -995,6 +1033,22 @@ export const startPortForward = async (
           conn.locallyInitiated = false;
           return;
         }
+        if (
+          !manualStopsInProgress.has(rule.id)
+          && !rulesPendingCleanup.has(rule.id)
+          && !exhaustedReconnectRules.has(rule.id)
+        ) {
+          const reconnectScheduled = scheduleReconnectIfNeeded(
+            rule.id,
+            enableReconnect,
+            onStatusChange,
+          );
+          if (reconnectScheduled) {
+            conn?.unsubscribe?.();
+            if (conn) conn.unsubscribe = undefined;
+            return;
+          }
+        }
         conn?.unsubscribe?.();
         clearReconnectTimer(rule.id);
         activeConnections.delete(rule.id);
@@ -1009,6 +1063,10 @@ export const startPortForward = async (
       
       // Handle auto-reconnect on error/disconnect
       if (status === 'error') {
+        if (stopAllInProgress.has(rule.id)) {
+          onStatusChange(status, error ?? undefined);
+          return;
+        }
         const reconnectScheduled = scheduleReconnectIfNeeded(rule.id, enableReconnect, onStatusChange);
         if (reconnectScheduled) {
           return;
@@ -1250,28 +1308,223 @@ export const isBackendAvailable = (): boolean => {
   return !!(netcattyBridge.get()?.startPortForward);
 };
 
+export type BulkPortForwardRuleError = {
+  ruleId: string;
+  label: string;
+  error: string;
+};
+
+export type StartAllPortForwardsResult = {
+  started: number;
+  skipped: number;
+  failed: number;
+  errors: BulkPortForwardRuleError[];
+};
+
+export type StopAllActivePortForwardsResult = {
+  stopped: number;
+  failed: number;
+  errors: BulkPortForwardRuleError[];
+};
+
+export type StopAllPortForwardsResult = {
+  backendStopAllFailed: boolean;
+  directStopAttemptedRuleIds: string[];
+  directStopFailures: BulkPortForwardRuleError[];
+  error?: string;
+};
+
+type StartAllPortForwardHostResolver = (rule: PortForwardingRule) => Host | undefined;
+type StartAllPortForwardRuleLookup = (ruleId: string) => PortForwardingRule | undefined;
+
+const isTrackedRuntimeBusy = (ruleId: string): boolean =>
+  isPortForwardingRuntimeBusy(getActiveConnection(ruleId));
+
+/**
+ * Start each inactive/error rule sequentially via startPortForward.
+ * Re-reads the live rule before each start so deletes/edits during the
+ * queue are honored. Skips tracked active, connecting, or error runtimes.
+ */
+export const startAllPortForwards = async (
+  rules: PortForwardingRule[],
+  resolveHost: StartAllPortForwardHostResolver,
+  hosts: Host[],
+  keys: SSHKey[],
+  identities: Identity[],
+  onStatusChange: (ruleId: string, status: PortForwardingRule['status'], error?: string) => void,
+  terminalSettings?: Pick<TerminalSettings, 'verifyHostKeys' | 'keepaliveInterval' | 'keepaliveCountMax'>,
+  knownHosts?: KnownHost[],
+  getRule?: StartAllPortForwardRuleLookup,
+  hostNotFoundMessage?: string,
+): Promise<StartAllPortForwardsResult> => {
+  const result: StartAllPortForwardsResult = {
+    started: 0,
+    skipped: 0,
+    failed: 0,
+    errors: [],
+  };
+  const queuedIds = selectStartablePortForwardingRules(rules, isTrackedRuntimeBusy)
+    .map((rule) => rule.id);
+  result.skipped = rules.length - queuedIds.length;
+  const resolveLiveRule = (ruleId: string): PortForwardingRule | undefined =>
+    getRule ? getRule(ruleId) : rules.find((rule) => rule.id === ruleId);
+
+  for (const ruleId of queuedIds) {
+    const rule = resolveLiveRule(ruleId);
+    if (!rule || !isPortForwardingRuleStartable(rule, isTrackedRuntimeBusy(rule.id))) {
+      result.skipped += 1;
+      continue;
+    }
+
+    const host = resolveHost(rule);
+    if (!host) {
+      const error = hostNotFoundMessage ?? 'Host not found';
+      onStatusChange(rule.id, 'error', error);
+      result.failed += 1;
+      result.errors.push({ ruleId: rule.id, label: rule.label, error });
+      continue;
+    }
+
+    const startResult = await startPortForward(
+      rule,
+      host,
+      hosts,
+      keys,
+      identities,
+      (status, error) => onStatusChange(rule.id, status, error),
+      Boolean(rule.autoStart),
+      terminalSettings,
+      knownHosts,
+    );
+    if (startResult.success) {
+      result.started += 1;
+    } else {
+      result.failed += 1;
+      result.errors.push({
+        ruleId: rule.id,
+        label: rule.label,
+        error: startResult.error || 'Failed to start',
+      });
+    }
+  }
+
+  return result;
+};
+
+/**
+ * Stop running tunnels one-by-one, then call stopAllPortForwards as a safety net.
+ */
+export const stopAllActivePortForwards = async (
+  rules: PortForwardingRule[],
+  onStatusChange: (ruleId: string, status: PortForwardingRule['status'], error?: string) => void,
+): Promise<StopAllActivePortForwardsResult> => {
+  const targets = selectStoppablePortForwardingRules(rules, isTrackedRuntimeBusy);
+  const result: StopAllActivePortForwardsResult = {
+    stopped: 0,
+    failed: 0,
+    errors: [],
+  };
+  const failedTargetErrors = new Map<string, BulkPortForwardRuleError>();
+
+  for (const rule of targets) {
+    stopAllInProgress.add(rule.id);
+    let stopResult: { success: boolean; error?: string };
+    try {
+      stopResult = await stopPortForward(rule.id, (status, error) => {
+        onStatusChange(rule.id, status, error);
+      });
+    } finally {
+      stopAllInProgress.delete(rule.id);
+    }
+    if (stopResult.success) {
+      result.stopped += 1;
+    } else {
+      failedTargetErrors.set(rule.id, {
+        ruleId: rule.id,
+        label: rule.label,
+        error: stopResult.error || 'Failed to stop',
+      });
+    }
+  }
+
+  const cleanupResult = await stopAllPortForwards();
+  const cleanupFailures = new Map(
+    cleanupResult.directStopFailures.map((error) => [error.ruleId, error]),
+  );
+  for (const [ruleId, error] of failedTargetErrors) {
+    if (
+      cleanupResult.directStopAttemptedRuleIds.includes(ruleId)
+      && !cleanupFailures.has(ruleId)
+    ) {
+      result.stopped += 1;
+      continue;
+    }
+    result.failed += 1;
+    result.errors.push(error);
+  }
+  const reportedRuleIds = new Set(result.errors.map((error) => error.ruleId));
+  for (const error of cleanupResult.directStopFailures) {
+    if (reportedRuleIds.has(error.ruleId)) continue;
+    result.failed += 1;
+    result.errors.push(error);
+  }
+  if (cleanupResult.backendStopAllFailed) {
+    result.failed += 1;
+    result.errors.push({
+      ruleId: 'backend-stop-all',
+      label: 'All port forwarding tunnels',
+      error: cleanupResult.error || 'Failed to stop all port forwarding tunnels',
+    });
+  }
+  return result;
+};
+
 /**
  * Stop all active tunnels (cleanup on unmount)
  */
-export const stopAllPortForwards = async (): Promise<void> => {
+export const stopAllPortForwards = async (): Promise<StopAllPortForwardsResult> => {
   const bridge = netcattyBridge.get();
+  const result: StopAllPortForwardsResult = {
+    backendStopAllFailed: false,
+    directStopAttemptedRuleIds: [],
+    directStopFailures: [],
+  };
+  const guardedRuleIds = new Set<string>();
   
   // Stop everything the renderer knows about
   for (const [ruleId, conn] of activeConnections) {
     // Clear any pending reconnect timer
     clearReconnectTimer(ruleId);
+    manualStopsInProgress.add(ruleId);
+    stopAllInProgress.add(ruleId);
+    guardedRuleIds.add(ruleId);
     
     try {
       if (bridge?.stopPortForward) {
-        await bridge.stopPortForward(conn.tunnelId);
+        result.directStopAttemptedRuleIds.push(ruleId);
+        const stopResult = await bridge.stopPortForward(conn.tunnelId);
+        if (stopResult && !stopResult.success) {
+          throw new Error(stopResult.error || `Failed to stop tunnel ${conn.tunnelId}`);
+        }
       }
       conn.unsubscribe?.();
+      activeConnections.delete(ruleId);
     } catch (err) {
+      result.directStopFailures.push({
+        ruleId,
+        label: ruleId,
+        error: err instanceof Error ? err.message : String(err),
+      });
       logger.warn(`[PortForwardingService] Failed to stop tunnel ${conn.tunnelId}:`, err);
+      preserveFailedStopConnection(
+        ruleId,
+        conn,
+        err instanceof Error ? err.message : String(err),
+      );
+    } finally {
+      manualStopsInProgress.delete(ruleId);
     }
   }
-  
-  activeConnections.clear();
 
   // Also ask the backend to stop ALL tunnels it knows about.
   // This covers tunnels that were started by other windows or that
@@ -1281,9 +1534,13 @@ export const stopAllPortForwards = async (): Promise<void> => {
     try {
       await bridge.stopAllPortForwards();
     } catch (err) {
+      result.backendStopAllFailed = true;
+      result.error = err instanceof Error ? err.message : String(err);
       logger.warn('[PortForwardingService] Backend stopAllPortForwards failed:', err);
     }
   }
+  for (const ruleId of guardedRuleIds) stopAllInProgress.delete(ruleId);
+  return result;
 };
 
 /**
@@ -1318,10 +1575,12 @@ const simulateConnection = async (
 
 export default {
   startPortForward,
+  startAllPortForwards,
   stopPortForward,
   getPortForwardStatus,
   isBackendAvailable,
   stopAllPortForwards,
+  stopAllActivePortForwards,
   setReconnectCallback,
   clearReconnectTimer,
 };

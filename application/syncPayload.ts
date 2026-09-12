@@ -24,8 +24,11 @@ import {
   SYNC_PAYLOAD_ENTITY_KEYS,
   SYNC_STORAGE_KEYS,
   hasSyncPayloadEntityData,
+  retainLocalHostLastConnectedAt,
+  sanitizeHostsForSync,
   type SyncPayload,
 } from '../domain/sync';
+import { migrateLegacyCommandBlocklist } from '../domain/commandBlocklist';
 import { migrateHostsFromLegacyLineTimestamps } from '../domain/host';
 import { toPersistedPortForwardingRules } from '../domain/portForwardingPersistence';
 import {
@@ -41,6 +44,10 @@ import { localStorageAdapter } from '../infrastructure/persistence/localStorageA
 import { decryptField, encryptField } from '../infrastructure/persistence/secureFieldAdapter';
 import { sanitizeQuickMessages } from '../infrastructure/ai/quickMessages';
 import { emitAIStateChanged } from './state/aiStateEvents';
+import {
+  persistCommandBlocklistSetting,
+  readCommandBlocklistSetting,
+} from './state/commandBlocklistSettings';
 import { rehydrateGlobalSftpBookmarks } from './state/sftp/globalSftpBookmarks';
 import {
   nextTerminalFontSizeSyncVersion,
@@ -99,13 +106,18 @@ import {
   STORAGE_KEY_AI_DEFAULT_AGENT,
   STORAGE_KEY_AI_COMMAND_BLOCKLIST,
   STORAGE_KEY_AI_COMMAND_TIMEOUT,
+  STORAGE_KEY_AI_RESPONSE_IDLE_TIMEOUT,
   STORAGE_KEY_AI_MAX_ITERATIONS,
   STORAGE_KEY_AI_AGENT_MODEL_MAP,
   STORAGE_KEY_AI_AGENT_PROVIDER_MAP,
+  STORAGE_KEY_AI_AGENT_THINKING_MAP,
   STORAGE_KEY_AI_WEB_SEARCH,
   STORAGE_KEY_AI_QUICK_MESSAGES,
   STORAGE_KEY_AI_SHOW_TERMINAL_SELECTION_ACTION,
   STORAGE_KEY_PORT_FORWARDING,
+  STORAGE_KEY_VAULT_NOTES_FONT_FAMILY,
+  STORAGE_KEY_VAULT_NOTES_FONT_SIZE,
+  STORAGE_KEY_VAULT_NOTES_CODE_FONT_SIZE,
 } from '../infrastructure/config/storageKeys';
 import { isTerminalSidePanelAutoOpenTab } from '../domain/terminalSidePanelAutoOpen';
 import { prepareRestoredPayloadConvergentWrites } from './convergentSyncReplica';
@@ -207,6 +219,8 @@ export function sanitizePortForwardingRulesForSync(
   }));
 }
 
+export { retainLocalHostLastConnectedAt, sanitizeHostsForSync };
+
 export function getEffectivePortForwardingRulesForSync(
   rules: PortForwardingRule[] | undefined,
 ): PortForwardingRule[] | undefined {
@@ -250,7 +264,7 @@ const SYNCABLE_TERMINAL_KEYS = [
   'keepaliveInterval', 'keepaliveCountMax', 'disableBracketedPaste', 'clearWipesScrollback',
   'autoUploadClipboardImageOnPaste',
   'preserveSelectionOnInput', 'forcePromptNewLine', 'osc52Clipboard', 'oscNotifications', 'dynamicTabTitleMode',
-  'autoCloseOnExit',
+  'autoCloseOnExit', 'disconnectedNoticeMode',
   'showHostInfoBar', 'hostInfoBarTitleMode', 'showServerStats',
   'serverStatsRefreshInterval',
   'systemManagerProcessRefreshInterval', 'systemManagerTmuxRefreshInterval',
@@ -273,6 +287,9 @@ export const SYNCABLE_SETTING_STORAGE_KEYS = [
   STORAGE_KEY_UI_FONT_FAMILY,
   STORAGE_KEY_UI_LANGUAGE,
   STORAGE_KEY_CUSTOM_CSS,
+  STORAGE_KEY_VAULT_NOTES_FONT_FAMILY,
+  STORAGE_KEY_VAULT_NOTES_FONT_SIZE,
+  STORAGE_KEY_VAULT_NOTES_CODE_FONT_SIZE,
   STORAGE_KEY_TERM_THEME,
   STORAGE_KEY_TERM_FOLLOW_APP_THEME,
   STORAGE_KEY_TERM_THEME_DARK,
@@ -310,9 +327,11 @@ export const SYNCABLE_SETTING_STORAGE_KEYS = [
   STORAGE_KEY_AI_DEFAULT_AGENT,
   STORAGE_KEY_AI_COMMAND_BLOCKLIST,
   STORAGE_KEY_AI_COMMAND_TIMEOUT,
+  STORAGE_KEY_AI_RESPONSE_IDLE_TIMEOUT,
   STORAGE_KEY_AI_MAX_ITERATIONS,
   STORAGE_KEY_AI_AGENT_MODEL_MAP,
   STORAGE_KEY_AI_AGENT_PROVIDER_MAP,
+  STORAGE_KEY_AI_AGENT_THINKING_MAP,
   STORAGE_KEY_AI_WEB_SEARCH,
   STORAGE_KEY_AI_QUICK_MESSAGES,
   STORAGE_KEY_AI_SHOW_TERMINAL_SELECTION_ACTION,
@@ -428,6 +447,12 @@ export function collectSyncableSettings(): SyncPayload['settings'] {
   if (lang) settings.uiLanguage = lang;
   const css = localStorageAdapter.readString(STORAGE_KEY_CUSTOM_CSS);
   if (css != null) settings.customCSS = css;
+  const noteFontFamily = localStorageAdapter.readString(STORAGE_KEY_VAULT_NOTES_FONT_FAMILY);
+  if (noteFontFamily != null) settings.noteFontFamily = noteFontFamily;
+  const noteFontSize = localStorageAdapter.readNumber(STORAGE_KEY_VAULT_NOTES_FONT_SIZE);
+  if (noteFontSize != null && noteFontSize >= 10 && noteFontSize <= 32) settings.noteFontSize = noteFontSize;
+  const noteCodeFontSize = localStorageAdapter.readNumber(STORAGE_KEY_VAULT_NOTES_CODE_FONT_SIZE);
+  if (noteCodeFontSize != null && noteCodeFontSize >= 10 && noteCodeFontSize <= 32) settings.noteCodeFontSize = noteCodeFontSize;
 
   // Terminal
   const termTheme = localStorageAdapter.readString(STORAGE_KEY_TERM_THEME);
@@ -552,16 +577,24 @@ export function collectSyncableSettings(): SyncPayload['settings'] {
   // externalAgents intentionally not collected: command/args/env are device-local.
   const defaultAgentId = localStorageAdapter.readString(STORAGE_KEY_AI_DEFAULT_AGENT);
   if (defaultAgentId != null) ai.defaultAgentId = defaultAgentId;
-  const commandBlocklist = localStorageAdapter.read<string[]>(STORAGE_KEY_AI_COMMAND_BLOCKLIST);
-  if (Array.isArray(commandBlocklist)) ai.commandBlocklist = commandBlocklist;
+  const storedCommandBlocklist = localStorageAdapter.read<string[]>(STORAGE_KEY_AI_COMMAND_BLOCKLIST);
+  if (Array.isArray(storedCommandBlocklist)) {
+    ai.commandBlocklist = readCommandBlocklistSetting();
+  }
   const commandTimeout = localStorageAdapter.readNumber(STORAGE_KEY_AI_COMMAND_TIMEOUT);
   if (commandTimeout != null && Number.isFinite(commandTimeout)) ai.commandTimeout = commandTimeout;
+  const responseIdleTimeout = localStorageAdapter.readNumber(STORAGE_KEY_AI_RESPONSE_IDLE_TIMEOUT);
+  if (responseIdleTimeout != null && Number.isFinite(responseIdleTimeout)) {
+    ai.responseIdleTimeout = responseIdleTimeout;
+  }
   const maxIterations = localStorageAdapter.readNumber(STORAGE_KEY_AI_MAX_ITERATIONS);
   if (maxIterations != null && Number.isFinite(maxIterations)) ai.maxIterations = maxIterations;
   const agentModelMap = readRecordSetting<Record<string, string>>(STORAGE_KEY_AI_AGENT_MODEL_MAP);
   if (agentModelMap) ai.agentModelMap = agentModelMap;
   const agentProviderMap = readRecordSetting<Record<string, string>>(STORAGE_KEY_AI_AGENT_PROVIDER_MAP);
   if (agentProviderMap) ai.agentProviderMap = agentProviderMap;
+  const agentThinkingMap = readRecordSetting<Record<string, string>>(STORAGE_KEY_AI_AGENT_THINKING_MAP);
+  if (agentThinkingMap) ai.agentThinkingMap = agentThinkingMap;
   const webSearchConfig = readRecordSetting(STORAGE_KEY_AI_WEB_SEARCH);
   if (webSearchConfig) ai.webSearchConfig = stripDeviceBoundApiKey(webSearchConfig);
   const quickMessages = readArraySetting(STORAGE_KEY_AI_QUICK_MESSAGES);
@@ -645,6 +678,13 @@ async function applySyncableSettings(settings: NonNullable<SyncPayload['settings
   if (settings.uiFontFamilyId != null) localStorageAdapter.writeString(STORAGE_KEY_UI_FONT_FAMILY, settings.uiFontFamilyId);
   if (settings.uiLanguage != null) localStorageAdapter.writeString(STORAGE_KEY_UI_LANGUAGE, settings.uiLanguage);
   if (settings.customCSS != null) localStorageAdapter.writeString(STORAGE_KEY_CUSTOM_CSS, settings.customCSS);
+  if (settings.noteFontFamily != null) localStorageAdapter.writeString(STORAGE_KEY_VAULT_NOTES_FONT_FAMILY, settings.noteFontFamily);
+  if (settings.noteFontSize != null && settings.noteFontSize >= 10 && settings.noteFontSize <= 32) {
+    localStorageAdapter.writeNumber(STORAGE_KEY_VAULT_NOTES_FONT_SIZE, settings.noteFontSize);
+  }
+  if (settings.noteCodeFontSize != null && settings.noteCodeFontSize >= 10 && settings.noteCodeFontSize <= 32) {
+    localStorageAdapter.writeNumber(STORAGE_KEY_VAULT_NOTES_CODE_FONT_SIZE, settings.noteCodeFontSize);
+  }
 
   // Terminal
   if (settings.terminalTheme != null) localStorageAdapter.writeString(STORAGE_KEY_TERM_THEME, settings.terminalTheme);
@@ -791,11 +831,17 @@ async function applySyncableSettings(settings: NonNullable<SyncPayload['settings
     // externalAgents intentionally not applied: device-local. Legacy snapshots
     // that still carry an `externalAgents` field are silently ignored.
     if (ai.defaultAgentId != null) localStorageAdapter.writeString(STORAGE_KEY_AI_DEFAULT_AGENT, ai.defaultAgentId);
-    if (ai.commandBlocklist != null) localStorageAdapter.write(STORAGE_KEY_AI_COMMAND_BLOCKLIST, ai.commandBlocklist);
+    if (ai.commandBlocklist != null) {
+      persistCommandBlocklistSetting(migrateLegacyCommandBlocklist(ai.commandBlocklist));
+    }
     if (ai.commandTimeout != null) localStorageAdapter.writeNumber(STORAGE_KEY_AI_COMMAND_TIMEOUT, ai.commandTimeout);
+    if (ai.responseIdleTimeout != null) {
+      localStorageAdapter.writeNumber(STORAGE_KEY_AI_RESPONSE_IDLE_TIMEOUT, ai.responseIdleTimeout);
+    }
     if (ai.maxIterations != null) localStorageAdapter.writeNumber(STORAGE_KEY_AI_MAX_ITERATIONS, ai.maxIterations);
     if (ai.agentModelMap != null) localStorageAdapter.write(STORAGE_KEY_AI_AGENT_MODEL_MAP, ai.agentModelMap);
     if (ai.agentProviderMap != null) localStorageAdapter.write(STORAGE_KEY_AI_AGENT_PROVIDER_MAP, ai.agentProviderMap);
+    if (ai.agentThinkingMap != null) localStorageAdapter.write(STORAGE_KEY_AI_AGENT_THINKING_MAP, ai.agentThinkingMap);
     if (ai.webSearchConfig !== undefined) {
       if (ai.webSearchConfig === null) {
         localStorageAdapter.remove(STORAGE_KEY_AI_WEB_SEARCH);
@@ -845,8 +891,10 @@ function notifyAIStateAfterSync(ai: NonNullable<SyncPayload['settings']>['ai']):
   if (ai.defaultAgentId != null) touched.push(STORAGE_KEY_AI_DEFAULT_AGENT);
   if (ai.commandBlocklist != null) touched.push(STORAGE_KEY_AI_COMMAND_BLOCKLIST);
   if (ai.commandTimeout != null) touched.push(STORAGE_KEY_AI_COMMAND_TIMEOUT);
+  if (ai.responseIdleTimeout != null) touched.push(STORAGE_KEY_AI_RESPONSE_IDLE_TIMEOUT);
   if (ai.maxIterations != null) touched.push(STORAGE_KEY_AI_MAX_ITERATIONS);
   if (ai.agentModelMap != null) touched.push(STORAGE_KEY_AI_AGENT_MODEL_MAP);
+  if (ai.agentThinkingMap != null) touched.push(STORAGE_KEY_AI_AGENT_THINKING_MAP);
   // agentProviderMap is *always* potentially mutated because the reconcile
   // step may have pruned it even if the payload didn't ship one.
   touched.push(STORAGE_KEY_AI_AGENT_PROVIDER_MAP);
@@ -916,7 +964,7 @@ export function buildSyncPayload(
   portForwardingRules?: PortForwardingRule[],
 ): SyncPayload {
   return {
-    hosts: vault.hosts,
+    hosts: sanitizeHostsForSync(vault.hosts),
     keys: vault.keys,
     identities: vault.identities,
     proxyProfiles: vault.proxyProfiles,
@@ -1001,7 +1049,7 @@ export async function buildCloudSyncPayload(
   },
 ): Promise<SyncPayload> {
   const base: SyncPayload = {
-    hosts: vault.hosts,
+    hosts: sanitizeHostsForSync(vault.hosts),
     keys: vault.keys,
     identities: vault.identities,
     proxyProfiles: vault.proxyProfiles,
@@ -1027,6 +1075,8 @@ export function buildLocalVaultPayload(
 ): SyncPayload {
   const base: SyncPayload = {
     ...buildSyncPayload(vault, portForwardingRules),
+    // Keep device-local recent-connection timestamps in protective backups.
+    hosts: vault.hosts,
     settings: collectLocalBackupSettings(),
     knownHosts: vault.knownHosts,
   };
@@ -1093,6 +1143,7 @@ function applyPayload(
   options: {
     includeLocalOnlyData: boolean;
     applyPluginSidecars?: PluginSyncSidecarApplier;
+    currentHosts?: Host[];
   },
 ): Promise<void> {
   // Portable payloads must never keep device-bound enc:v1 blobs. Strip them
@@ -1100,10 +1151,14 @@ function applyPayload(
   // shells and let the user re-enter secrets (#2702).
   const sanitizedPayload = stripSyncPayloadEncryptedCredentials(payload);
   const legacyLineTimestampsEnabled = sanitizedPayload.settings?.terminalSettings?.showLineTimestamps === true;
+  let hosts = migrateHostsFromLegacyLineTimestamps(sanitizedPayload.hosts, legacyLineTimestampsEnabled);
+  if (!options.includeLocalOnlyData) {
+    hosts = retainLocalHostLastConnectedAt(hosts, options.currentHosts) ?? hosts;
+  }
   // Build the vault import object. Cloud sync intentionally ignores
   // local-only trust records even if legacy cloud snapshots still carry them.
   const vaultImport: Record<string, unknown> = {
-    hosts: migrateHostsFromLegacyLineTimestamps(sanitizedPayload.hosts, legacyLineTimestampsEnabled),
+    hosts,
     keys: sanitizedPayload.keys,
     identities: sanitizedPayload.identities,
     proxyProfiles: sanitizedPayload.proxyProfiles,
@@ -1157,11 +1212,13 @@ export function applySyncPayload(
   importers: SyncPayloadImporters,
   options?: {
     applyPluginSidecars?: PluginSyncSidecarApplier;
+    currentHosts?: Host[];
   },
 ): Promise<void> {
   return applyPayload(payload, importers, {
     includeLocalOnlyData: false,
     applyPluginSidecars: options?.applyPluginSidecars,
+    currentHosts: options?.currentHosts,
   });
 }
 

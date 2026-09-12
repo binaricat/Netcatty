@@ -219,19 +219,30 @@ function probeCursorCliAuth({ env, resolveBinary, runStatus } = {}) {
   const resolve = resolveBinary || ((name) => defaultResolveCursorCliBinary(name, e));
   const run = runStatus || ((bin) => defaultRunCursorStatus(bin, e));
 
-  let cursorShapedBinPath = null;
+  // A resolved cursor-agent path is a user install even when status JSON is
+  // missing, unrecognized, or the status command throws.
+  let resolvedBinPath = null;
   for (const name of CURSOR_CLI_BINARY_CANDIDATES) {
-    const binPath = resolve(name);
+    let binPath = null;
+    try {
+      binPath = resolve(name);
+    } catch {
+      continue;
+    }
     if (!binPath) continue;
+    if (!resolvedBinPath) resolvedBinPath = binPath;
 
-    const res = run(binPath);
+    let res = null;
+    try {
+      res = run(binPath);
+    } catch {
+      continue;
+    }
     if (!res) continue;
 
     // Accept JSON even on non-zero exit if present (some CLIs exit 1 when logged out).
     const parsed = parseCursorStatusJson(res.stdout);
     if (!parsed) continue;
-
-    if (!cursorShapedBinPath) cursorShapedBinPath = binPath;
 
     const authenticated = Boolean(
       parsed.isAuthenticated === true || parsed.status === "authenticated",
@@ -246,7 +257,7 @@ function probeCursorCliAuth({ env, resolveBinary, runStatus } = {}) {
     authenticated: false,
     authSource: null,
     email: null,
-    binPath: cursorShapedBinPath,
+    binPath: resolvedBinPath,
   };
 }
 

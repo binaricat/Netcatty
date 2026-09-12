@@ -154,7 +154,7 @@ export function createAppLockGate(deps: AppLockGateDeps): React.FC<AppLockGatePr
                 // subtree is non-interactive and removed from sequential focus.
                 inert={lockedBackground ? true : undefined}
                 aria-hidden={lockedBackground || undefined}
-                className={lockedBackground ? 'pointer-events-none' : undefined}
+                className={lockedBackground ? 'h-full pointer-events-none' : 'h-full'}
                 data-app-lock-background={lockedBackground ? 'locked' : 'unlocked'}
               >
                 {children({ settings, appLock })}

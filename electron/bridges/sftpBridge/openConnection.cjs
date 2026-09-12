@@ -72,6 +72,21 @@ function shouldRegisterFreshSftpTransport(options) {
   return options?.reuseTransport !== false && !options?.sudo;
 }
 
+/** Sudo is part of the requested connection contract; never downgrade it. */
+async function openRequiredSudoSftp({
+  connectSudoSftp,
+  sshClient,
+  password,
+  closeFreshClient,
+}) {
+  try {
+    return await connectSudoSftp(sshClient, password);
+  } catch (error) {
+    closeFreshClient();
+    throw error;
+  }
+}
+
 function createOpenConnectionApi(ctx) {
   with (ctx) {
     /**
@@ -1235,28 +1250,19 @@ function createOpenConnectionApi(ctx) {
               (async () => {
                 try {
                   const sudoPass = options.password || "";
-                  const sftpWrapper = await connectSudoSftp(sshClient, sudoPass);
+                  const sftpWrapper = await openRequiredSudoSftp({
+                    connectSudoSftp,
+                    sshClient,
+                    password: sudoPass,
+                    closeFreshClient,
+                  });
                   sftpWrapper.on('close', () => client.end());
                   finishSftp(sftpWrapper);
                 } catch (e) {
-                  // Fallback: if sftp-server binary is missing (exit code 127),
-                  // try standard SFTP subsystem instead of failing completely.
-                  // This handles systems like ESXi that don't have sftp-server
-                  // but support the SFTP subsystem natively.
-                  if (e.message && e.message.includes('exit code 127')) {
-                    console.warn('[SFTP] sftp-server not found, falling back to standard SFTP subsystem');
-                    options.sudo = false; // Mark as non-sudo for downstream logic
-                    openBoundedSftpChannel(sshClient).then((sftp) => {
-                      finishSftp(sftp);
-                    }).catch((sftpErr) => {
-                        // Do not drop to SCP after a sudo-mode open: elevation was requested.
-                        closeFreshClient();
-                        reject(sftpErr);
-                    });
-                  } else {
-                    closeFreshClient();
-                    reject(e);
-                  }
+                  // Elevation is part of the requested connection contract. A
+                  // standard SFTP fallback would look successful while silently
+                  // losing access to the requested destination.
+                  reject(e);
                 }
               })();
             } else {

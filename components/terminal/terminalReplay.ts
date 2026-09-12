@@ -12,10 +12,20 @@ const scheduleFrame = (): Promise<void> => new Promise((resolve) => {
   setTimeout(resolve, 0);
 });
 
+// The highlighter snapshots this flag synchronously when term.write enters.
+// Replay has no PTY pressure samples, so it must not look like live log output.
+const replayWrites = new WeakSet<XTerm>();
+export const isTerminalReplayWrite = (term: XTerm): boolean => replayWrites.has(term);
+
 const writeChunk = (term: XTerm, data: string): Promise<void> => {
   if (!data) return Promise.resolve();
   return new Promise((resolve) => {
-    term.write(data, () => resolve());
+    replayWrites.add(term);
+    try {
+      term.write(data, () => resolve());
+    } finally {
+      replayWrites.delete(term);
+    }
   });
 };
 

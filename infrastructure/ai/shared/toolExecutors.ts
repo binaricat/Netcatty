@@ -9,7 +9,7 @@
 
 import type { NetcattyBridge, ExecutorContext } from '../cattyAgent/executor';
 import type { AIPermissionMode, WebSearchConfig } from '../types';
-import { checkCommandSafety } from '../cattyAgent/safety';
+import { checkCommandSafety, checkCommandSafetyCommonOnly } from '../cattyAgent/safety';
 import { executeWebSearchProvider } from './webSearchProviders';
 
 // ---------------------------------------------------------------------------
@@ -87,7 +87,12 @@ export async function executeTerminalExecute(
   const isSshOrSerial = proto === 'ssh' || proto === 'serial';
   const isNetworkDevice = proto === 'serial' || (targetSession?.deviceType === 'network' && isSshOrSerial);
   if (!isNetworkDevice) {
-    const safety = checkCommandSafety(command, commandBlocklist);
+    // Remote renderer metadata often has no shell type until the main/worker
+    // process probes the live session. Pre-filter user/common rules here and
+    // defer shell-specific defaults to that authoritative live check.
+    const safety = targetSession?.shellType
+      ? checkCommandSafety(command, commandBlocklist, targetSession.shellType)
+      : checkCommandSafetyCommonOnly(command, commandBlocklist);
     if (safety.blocked) {
       return { ok: false, error: `Command blocked by safety policy. Matched pattern: ${safety.matchedPattern}` };
     }

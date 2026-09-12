@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { runInNewContext } from "node:vm";
+import { resolveRestoreCwdIntent } from "../../domain/sessionRestore.ts";
 
 import {
   getInitialTerminalStatus,
@@ -10,6 +12,34 @@ import {
   shouldStartTerminalBackend,
 } from "./restoredSessionGate.ts";
 import { setVaultInitialized } from "../../application/state/vaultInitStore.ts";
+
+test("Terminal restore preparation honors fresh login while preserving ordinary and local cwd restore", () => {
+  const source = readFileSync(new URL("../Terminal.tsx", import.meta.url), "utf8");
+  const start = source.indexOf("const prepareRestoredReconnect = useCallback");
+  const end = source.indexOf("// Set only once the inherited", start);
+  assert.ok(start >= 0 && end > start);
+  for (const protocol of ["ssh", undefined, "local"] as const) {
+    for (const requireFreshConnection of [false, true]) {
+      const restoreCwdIntentRef: { current: { command: string } | null } = { current: null };
+      runInNewContext(`${source.slice(start, end)}\nprepareRestoredReconnect();`, {
+        useCallback: (fn: () => void) => fn,
+        shouldSuppressHostStartupCommandOnReconnect,
+        resolveRestoreCwdIntent,
+        suppressHostStartupCommandRef: { current: false },
+        restoreCwdIntentRef,
+        restoreState: "restored-disconnected",
+        restoreTerminalCwd: true,
+        host: { protocol },
+        shellType: "posix",
+        lastCwd: "/srv/old-target",
+        isNetworkDevice: false,
+        requireFreshConnection,
+      });
+      if (requireFreshConnection && protocol !== "local") assert.equal(restoreCwdIntentRef.current, null);
+      else assert.equal(restoreCwdIntentRef.current?.command, "cd -- '/srv/old-target'");
+    }
+  }
+});
 
 test("restored disconnected sessions initialize as connecting", () => {
   assert.equal(
@@ -76,7 +106,10 @@ test("manual reconnect resets connect automation before opening a new session", 
     "await cancelConnectAutomationBatch(connectAutomationBatch)",
     reconnectIndex,
   );
-  const manualBranchIndex = source.indexOf('if (mode === "manual")', reconnectIndex);
+  const manualBranchIndex = source.indexOf(
+    'if (mode === "manual") {\n      clearAutoReconnect',
+    cancelBatchIndex,
+  );
   const stopFailureRetryIndex = source.indexOf(
     'if (mode === "auto" && retryTokenStillCurrent())',
     cancelBatchIndex,
@@ -129,7 +162,7 @@ test("manual reconnect resets connect automation before opening a new session", 
   );
   assert.ok(
     resetConsumedIndex < connectingIndex && resetCompletedIndex < connectingIndex,
-    "manual reconnect must clear connect-automation consumption before status becomes connecting",
+    "manual reconnect must clear connect-automation consumption before the new session boot continues",
   );
   assert.ok(
     autoElseIndex < autoSuppressIndex && autoSuppressIndex < connectingIndex,
@@ -260,7 +293,8 @@ test("reconnect wakes a hibernated terminal before requiring a terminal instance
   const staleWakeDisposeGuardIndex = source.indexOf('reconnectWakeInvalidateModeRef.current === "dispose"', staleWakeGuardIndex);
   const staleWakeDisposeIndex = source.indexOf("disposeRuntimeOnly();", staleWakeDisposeGuardIndex);
   const disconnectKeepModeIndex = source.indexOf('reconnectWakeInvalidateModeRef.current = "keep"', source.indexOf("const handleDisconnect"));
-  const missingTermReturnIndex = source.indexOf("if (!termRef.current) return;", reconnectIndex);
+  const missingTermGuardIndex = source.indexOf("if (!termRef.current) {", reconnectIndex);
+  const missingTermReturnIndex = source.indexOf("return;", missingTermGuardIndex);
 
   assert.notEqual(wakePromiseRefIndex, -1);
   assert.notEqual(wakeGuardRefIndex, -1);
@@ -281,9 +315,10 @@ test("reconnect wakes a hibernated terminal before requiring a terminal instance
   assert.notEqual(staleWakeDisposeGuardIndex, -1);
   assert.notEqual(staleWakeDisposeIndex, -1);
   assert.notEqual(disconnectKeepModeIndex, -1);
+  assert.notEqual(missingTermGuardIndex, -1);
   assert.notEqual(missingTermReturnIndex, -1);
   assert.ok(
-    hibernatedBranchIndex < missingTermReturnIndex && wakeCallIndex < missingTermReturnIndex,
+    hibernatedBranchIndex < missingTermGuardIndex && wakeCallIndex < missingTermGuardIndex,
     "manual and auto reconnect must wake fully hibernated sessions before the terminal guard can stop the retry",
   );
   assert.ok(

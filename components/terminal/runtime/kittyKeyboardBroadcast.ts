@@ -9,13 +9,20 @@ import {
 import type { TerminalSettings } from "../../../domain/models";
 import {
   isBareShiftEnterLineEnding,
-  resolveShiftEnterPayload,
+  resolveShiftEnterText,
   shouldSendShiftEnterText,
 } from "./shiftEnterText";
 
 export type KittyKeyboardBroadcastInput =
   | {
       kind: "key";
+      event: KittyKeyboardEvent;
+      fallbackToLegacy?: boolean;
+      urgentInterrupt?: boolean;
+    }
+  | {
+      kind: "win32";
+      data: string;
       event: KittyKeyboardEvent;
       fallbackToLegacy?: boolean;
       urgentInterrupt?: boolean;
@@ -36,6 +43,9 @@ export type ResolvedKittyKeyboardBroadcastInput = {
   data: string;
   kittyEncoded: boolean;
   urgentInterrupt: boolean;
+  logicalData?: string | null;
+  /** Let the target xterm encode this event with its active Win32 mode. */
+  win32Event?: KittyKeyboardEvent;
 };
 
 export const createKittyKeyboardBroadcastForwarder = (options: {
@@ -202,12 +212,28 @@ type ResolveKittyKeyboardBroadcastOptions = {
   applicationCursorMode: boolean;
   encodedKeys: Set<string>;
   legacySuppressedKeys?: Set<string>;
-  /** Target buffer: remap Shift+Enter per peer, not from the broadcast source. */
-  alternateScreen?: boolean;
+  win32InputMode?: boolean;
   shiftEnterSettings?: Pick<
     TerminalSettings,
     "shiftEnterNewlineEnabled" | "shiftEnterNewlineText"
   >;
+};
+
+export const resolveWin32InputLogicalData = (
+  event: KittyKeyboardEvent,
+  applicationCursorMode: boolean,
+): string | null => {
+  if (event.type === "keyup") return null;
+  if (
+    event.key === "Enter" &&
+    (event.shiftKey || event.altKey || event.ctrlKey || event.metaKey)
+  ) {
+    // The native record carries semantics that a legacy CR cannot express.
+    // Treating a modified Enter as CR would make Netcatty record a command
+    // submission even when the TUI only inserted a line break.
+    return null;
+  }
+  return encodeLegacyKeyboardEvent(event, applicationCursorMode);
 };
 
 const resolveShiftEnterBroadcastPayload = (
@@ -222,13 +248,11 @@ const resolveShiftEnterBroadcastPayload = (
   ) {
     return null;
   }
-  const payload = resolveShiftEnterPayload(options.shiftEnterSettings, {
-    alternateScreen: options.alternateScreen === true,
-  });
-  if (!payload.data) return null;
+  const data = resolveShiftEnterText(options.shiftEnterSettings);
+  if (!data) return null;
   return {
-    data: payload.data,
-    kittyEncoded: payload.kind === "key",
+    data,
+    kittyEncoded: false,
     urgentInterrupt: false,
   };
 };
@@ -255,6 +279,36 @@ export const resolveKittyKeyboardBroadcastInput = (
     };
   }
 
+  if (input.kind === "win32") {
+    if (options.win32InputMode) {
+      const identity = input.event.code || input.event.key;
+      const legacySuppressedKeys = options.legacySuppressedKeys ?? options.encodedKeys;
+      if (input.event.type === "keyup") {
+        const hasPairedKeyDown = options.encodedKeys.delete(identity);
+        legacySuppressedKeys.delete(identity);
+        if (!hasPairedKeyDown) return null;
+      } else {
+        options.encodedKeys.add(identity);
+        legacySuppressedKeys.add(identity);
+      }
+      return {
+        data: input.data,
+        kittyEncoded: false,
+        urgentInterrupt: input.urgentInterrupt === true,
+        logicalData: resolveWin32InputLogicalData(
+          input.event,
+          options.applicationCursorMode,
+        ),
+      };
+    }
+    return resolveKittyKeyboardBroadcastInput({
+      kind: "key",
+      event: input.event,
+      fallbackToLegacy: input.fallbackToLegacy,
+      urgentInterrupt: input.urgentInterrupt,
+    }, options);
+  }
+
   const identity = input.event.code || input.event.key;
   const legacySuppressedKeys = options.legacySuppressedKeys ?? options.encodedKeys;
   const hasPairedKeyDown = input.event.type === "keyup"
@@ -262,6 +316,22 @@ export const resolveKittyKeyboardBroadcastInput = (
     : false;
   if (input.event.type === "keyup") legacySuppressedKeys.delete(identity);
   if (input.event.type === "keyup" && !hasPairedKeyDown) return null;
+  if (options.win32InputMode) {
+    if (input.event.type !== "keyup") {
+      options.encodedKeys.add(identity);
+      legacySuppressedKeys.add(identity);
+    }
+    return {
+      data: "",
+      kittyEncoded: false,
+      urgentInterrupt: false,
+      logicalData: resolveWin32InputLogicalData(
+        input.event,
+        options.applicationCursorMode,
+      ),
+      win32Event: input.event,
+    };
+  }
   const encoded = options.kittyProtocolEnabled
     ? encodeKittyKeyEvent(options.kittyMode, {
         ...input.event,
@@ -300,11 +370,14 @@ export const createKittyKeyboardBroadcastHandler = (options: {
   isRuntimeDisposed: () => boolean;
   interruptSession?: (sessionId: string) => void;
   writeDisposed: (sessionId: string, data: string) => void;
-  writeActive: (data: string) => void;
+  writeActive: (data: string, logicalData?: string | null) => void;
+  writeWin32Event?: (event: KittyKeyboardEvent, logicalData: string | null) => void;
 }): KittyKeyboardBroadcastHandler => (input, dispatchOptions) => {
   const sessionId = options.getSessionId();
   if (!sessionId || !options.isConnected()) return;
-  const isPairedRelease = input.kind === "key" && input.event.type === "keyup";
+  const isPairedRelease =
+    (input.kind === "key" || input.kind === "win32") &&
+    input.event.type === "keyup";
   if (!isPairedRelease && options.isSensitiveInput?.() === true) return;
   const resolved = resolveKittyKeyboardBroadcastInput(input, options.resolveOptions());
   if (!resolved) return;
@@ -313,11 +386,20 @@ export const createKittyKeyboardBroadcastHandler = (options: {
     options.interruptSession(sessionId);
     return;
   }
+  if (resolved.win32Event) {
+    if (!options.isRuntimeDisposed()) {
+      options.writeWin32Event?.(
+        resolved.win32Event,
+        resolved.logicalData ?? null,
+      );
+    }
+    return;
+  }
   if (options.isRuntimeDisposed()) {
     options.writeDisposed(sessionId, resolved.data);
     return;
   }
-  options.writeActive(resolved.data);
+  options.writeActive(resolved.data, resolved.logicalData);
 };
 
 const handlers = new Map<string, KittyKeyboardBroadcastHandler>();

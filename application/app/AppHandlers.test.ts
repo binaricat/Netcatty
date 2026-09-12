@@ -1,8 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { copySessionWithCurrentShellImpl, copyWorkspaceWithCurrentShellImpl, splitSessionWithCurrentShellImpl } from "./AppHandlers";
+import { copySessionWithCurrentShellImpl, copyWorkspaceWithCurrentShellImpl, duplicateSessionWithCurrentShellImpl, splitSessionWithCurrentShellImpl } from "./AppHandlers";
+import { createCopiedTerminalSessionClone } from "../state/terminalConnectionReuse";
+import type { TerminalSession } from "../../domain/models";
 
-type CloneOpts = { localShellType?: string; inheritedCwd?: string };
+type CloneOpts = { localShellType?: string; inheritedCwd?: string; reuseConnection?: boolean };
 type Calls = {
   copy?: { id: string; opts: CloneOpts };
   split?: { id: string; dir: string; opts: CloneOpts };
@@ -53,6 +55,47 @@ test("live tracked cwd is preferred over the probe", async () => {
   await copySessionWithCurrentShellImpl(getCtx, "src");
   assert.equal(calls.copy?.opts.inheritedCwd, "/live/tracked");
   assert.equal(calls.probed, false, "must not probe when live cwd is known");
+});
+
+for (const protocol of ["ssh", undefined] as const) {
+  for (const liveCwd of ["/srv/old-target", undefined]) {
+    test(`duplicate SSH session does not capture or inject the old target directory (${protocol}, ${liveCwd})`, async () => {
+      const source: TerminalSession = {
+        id: "src", hostId: "bastion", hostLabel: "Bastion", hostname: "bastion.test",
+        username: "alice", protocol, status: "connected", lastCwd: "/saved/old-target",
+      };
+      let cwdReads = 0;
+      let bridgeReads = 0;
+      const { getCtx, calls } = ctxFactory({
+        sessions: [source],
+        getSessionRestoreCwd: () => { cwdReads += 1; return liveCwd; },
+        netcattyBridge: { get: () => { bridgeReads += 1; return {}; } },
+      });
+      await duplicateSessionWithCurrentShellImpl(getCtx, "src");
+      assert.equal(calls.copy?.id, "src");
+      assert.equal(calls.copy?.opts.reuseConnection, false);
+      assert.equal(calls.copy?.opts.inheritedCwd, undefined);
+      assert.equal(cwdReads, 0, "fresh remote login must not read the previous target's directory");
+      assert.equal(bridgeReads, 0, "fresh remote login must not probe the previous target");
+      const clone = createCopiedTerminalSessionClone(source, {
+        id: "duplicate",
+        inheritedCwd: calls.copy?.opts.inheritedCwd,
+        reuseConnection: calls.copy?.opts.reuseConnection,
+      });
+      assert.equal(clone.requireFreshConnection, true);
+      assert.equal(clone.pendingInitialCwd, undefined);
+    });
+  }
+}
+
+test("duplicate local session retains the current working directory", async () => {
+  const { getCtx, calls } = ctxFactory({
+    sessions: [{ id: "src", protocol: "local", status: "connected", localStartDir: "/home/alice" }],
+    getSessionRestoreCwd: () => "/home/alice/project",
+  });
+  await duplicateSessionWithCurrentShellImpl(getCtx, "src");
+  assert.equal(calls.copy?.opts.inheritedCwd, "/home/alice/project");
+  assert.equal(calls.probed, false);
 });
 
 test("network device (by deviceType) is never probed", async () => {

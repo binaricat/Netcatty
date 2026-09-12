@@ -38,7 +38,7 @@ test("password-prompt input is classified before prompt state reset and cannot b
   );
   assert.match(
     runtimeSource,
-    /writeToSession\(id, outData, \{ sensitive \}\)/u,
+    /for \(const chunk of getTextInputWireChunks\(outData, options\?\.perCharacterWrites === true\)\) \{\s*ctx\.terminalBackend\.writeToSession\(id, chunk, \{ sensitive \}\);\s*\}/u,
   );
   assert.match(
     runtimeSource,

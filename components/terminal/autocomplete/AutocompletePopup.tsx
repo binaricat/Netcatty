@@ -318,6 +318,7 @@ const AutocompletePopup: React.FC<AutocompletePopupProps> = ({
     anchorGap,
     viewportPadding,
     expandUpwardHint: expandUpward,
+    forceExpandUpward: expandUpward,
   });
   const renderUpward = placement.renderUpward;
   const effectiveMaxHeight = placement.maxHeight;

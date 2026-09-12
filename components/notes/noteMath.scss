@@ -1,0 +1,5 @@
+@use "katex/src/styles/katex.scss" with (
+  $font-folder: "katex/dist/fonts",
+  $use-woff: false,
+  $use-ttf: false,
+);

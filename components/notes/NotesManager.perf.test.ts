@@ -180,7 +180,11 @@ test("host-link annotation does not re-run on every markdown value keystroke", (
   );
   assert.match(
     editorSource,
-    /latestMarkdownRef\.current !== syncedPropValueRef\.current/,
+    /shouldApplyExternalNoteMarkdown/,
+  );
+  assert.match(
+    editorSource,
+    /syncedSourceMarkdownRef/,
   );
 });
 

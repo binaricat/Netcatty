@@ -143,7 +143,7 @@ function shouldLockOnBackgroundHide(settings) {
 }
 
 async function createAppLockPasswordVerifier(password) {
-  if (typeof password !== "string" || password.trim() === "") {
+  if (typeof password !== "string" || password.length === 0) {
     throw new Error("App lock password is required");
   }
 

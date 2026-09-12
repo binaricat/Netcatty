@@ -103,6 +103,7 @@ export interface TerminalToolbarProps {
   onUpdateHost?: (host: Host) => void;
   showClose?: boolean;
   onClose?: () => void;
+  closeLabel?: string;
   // Search functionality
   isSearchOpen?: boolean;
   onToggleSearch?: () => void;
@@ -141,6 +142,7 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
   onUpdateHost,
   showClose,
   onClose,
+  closeLabel,
   isSearchOpen,
   onToggleSearch,
   showLogButton = false,
@@ -1056,6 +1058,7 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
               variant="ghost"
               size="icon"
               className="h-6 w-6 text-[color:var(--terminal-toolbar-fg)] hover:bg-transparent"
+              aria-label={closeLabel ?? t('terminal.toolbar.closeSession')}
               onClick={(e) => {
                 e.stopPropagation();
                 onClose();
@@ -1064,7 +1067,7 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
               <X size={11} />
             </Button>
           </TooltipTrigger>
-          <TooltipContent side="bottom">{t('terminal.toolbar.closeSession')}</TooltipContent>
+          <TooltipContent side="bottom">{closeLabel ?? t('terminal.toolbar.closeSession')}</TooltipContent>
         </Tooltip>
         )}
       </TooltipProvider>

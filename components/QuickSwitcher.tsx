@@ -2,6 +2,8 @@ import {
   Folder,
   FolderLock,
   LayoutGrid,
+  Maximize2,
+  Minimize2,
   Plus,
   Search,
   Terminal,
@@ -11,6 +13,7 @@ import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "
 import { useI18n } from "../application/i18n/I18nProvider";
 import { Host, TerminalSession, TerminalSettings, Workspace } from "../types";
 import { KeyBinding } from "../domain/models";
+import type { PaneMagnificationState } from "../domain/paneMagnification";
 import { matchesSearchQuery } from "../lib/searchMatcher";
 import { buildQuickSwitcherShells, useDiscoveredShells, getShellIconPath, isMonochromeShellIcon } from "../lib/useDiscoveredShells";
 import { usePluginContributions } from "../application/state/usePluginContributions";
@@ -33,6 +36,19 @@ type QuickSwitcherItem = QuickSwitcherItemBase & (
   | { type: "plugin-command"; commandId: string }
   | { type: "host" | "tab" | "workspace" | "action" | "shell" | "plugin-view"; commandId?: never }
 );
+
+export function buildPaneMagnificationPaletteAction(
+  state: PaneMagnificationState,
+  t: (key: string) => string,
+): QuickSwitcherItem | null {
+  if (state === 'focusable') {
+    return { type: 'action', id: 'magnify-current-pane', title: t('terminal.paneMagnification.magnify') };
+  }
+  if (state === 'focused') {
+    return { type: 'action', id: 'restore-magnified-pane', title: t('terminal.paneMagnification.restore') };
+  }
+  return null;
+}
 
 export function getQuickSwitcherRowStateClass(
   isSelected: boolean,
@@ -146,6 +162,9 @@ interface QuickSwitcherProps {
   keyBindings?: KeyBinding[];
   showSftpTab: boolean;
   terminalSettings?: Pick<TerminalSettings, "localShell" | "localShellArgs">;
+  paneMagnificationState?: PaneMagnificationState;
+  onMagnifyCurrentPane?: () => void;
+  onRestoreMagnifiedPane?: () => void;
 }
 
 const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
@@ -164,6 +183,9 @@ const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
   keyBindings,
   showSftpTab,
   terminalSettings,
+  paneMagnificationState = 'unavailable',
+  onMagnifyCurrentPane,
+  onRestoreMagnifiedPane,
 }) => {
   const { t } = useI18n();
   const discoveredShells = useDiscoveredShells();
@@ -287,6 +309,10 @@ const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
     pluginContributions.snapshot.plugins,
     trimmedQuery,
   ), [pluginContributions.snapshot.plugins, trimmedQuery]);
+  const paneMagnificationAction = useMemo(
+    () => buildPaneMagnificationPaletteAction(paneMagnificationState, t),
+    [paneMagnificationState, t],
+  );
 
   // Memoize flat selectable items + visual rows (headers + items) for virtualization.
   const { flatItems, visualRows, itemIndexToVisualIndex } = useMemo(() => {
@@ -343,6 +369,14 @@ const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
       pushItem({ type: "action", id: "local-terminal" });
     }
 
+    if (paneMagnificationAction && (
+      !trimmedQuery
+      || matchesSearchQuery(trimmedQuery, paneMagnificationAction.title ?? '', 'pane', 'magnify', 'zoom')
+    )) {
+      pushHeader("header:pane-actions", t("settings.shortcuts.category.navigation"));
+      pushItem(paneMagnificationAction);
+    }
+
     if (pluginPaletteItems.length > 0) {
       pushHeader("header:plugins", t("settings.tab.plugins"));
       pluginPaletteItems.forEach((item) => pushItem(item));
@@ -359,9 +393,11 @@ const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
     filteredShells,
     filteredWorkspaces,
     pluginPaletteItems,
+    paneMagnificationAction,
     results,
     shouldShowLocalTerminalFallback,
     t,
+    trimmedQuery,
   ]);
 
   useEffect(() => {
@@ -420,6 +456,12 @@ const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
       case "action":
         if (item.id === "local-terminal" && onCreateLocalTerminal) {
           onCreateLocalTerminal();
+          onClose();
+        } else if (item.id === 'magnify-current-pane' && onMagnifyCurrentPane) {
+          onMagnifyCurrentPane();
+          onClose();
+        } else if (item.id === 'restore-magnified-pane' && onRestoreMagnifiedPane) {
+          onRestoreMagnifiedPane();
           onClose();
         }
         break;
@@ -676,6 +718,27 @@ const QuickSwitcherInner: React.FC<QuickSwitcherProps> = ({
                     </div>
                     <span className="truncate text-sm font-medium">{t("qs.localTerminal")}</span>
                   </div>
+                );
+              }
+
+              if (item.type === 'action' && (
+                item.id === 'magnify-current-pane' || item.id === 'restore-magnified-pane'
+              )) {
+                const restoring = item.id === 'restore-magnified-pane';
+                return (
+                  <button
+                    type="button"
+                    className={`${rowClass} flex h-full w-full items-center gap-3 px-4 text-left`}
+                    onClick={() => handleItemSelect(item)}
+                  >
+                    <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground">
+                      {restoring ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+                    </div>
+                    <span className="min-w-0 flex-1 truncate text-sm font-medium">{item.title}</span>
+                    <kbd className="shrink-0 text-[10px] text-muted-foreground">
+                      {getHotkeyLabel('toggle-pane-zoom').replace(/ \+ /g, '+')}
+                    </kbd>
+                  </button>
                 );
               }
 

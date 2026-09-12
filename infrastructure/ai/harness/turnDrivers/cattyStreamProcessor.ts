@@ -9,6 +9,7 @@ import {
 import { mapCattyStreamChunkToAgentEvents } from '../agentEventAdapter';
 import type { AgentEvent } from '../types';
 import type { ProviderAdvancedParams } from '../../types';
+import type { CattyReasoningProviderOptions } from '../../cattyReasoning';
 import { createModelFromConfig } from '../../sdk/providers';
 import type { CattyToolsBundle } from '../capabilityTools';
 import { buildCattyToolApproval } from '../cattyToolApproval';
@@ -57,9 +58,11 @@ export interface ProcessCattyStreamInput {
   currentAssistantMsgId: string;
   maxIterations: number;
   advancedParams?: ProviderAdvancedParams;
+  reasoningProviderOptions?: CattyReasoningProviderOptions;
   continuationContext?: CattyProviderContinuationContext;
   turnId?: string;
   commandTimeoutMs?: number;
+  responseIdleTimeoutMs?: number;
   runtimeContext: CattyRuntimeContext;
   onAgentEvent?: (event: AgentEvent) => void;
   prepareStep?: (args: {
@@ -89,6 +92,19 @@ export function shouldEmitAgentEventsForStreamChunk(chunk: StreamChunk): boolean
   return !isSdkStreamStateError((chunk as ErrorChunk).error);
 }
 
+/**
+ * Detect provider metadata that actually carries replayable reasoning
+ * ciphertext (e.g. `openai.reasoningEncryptedContent`). A null/absent payload
+ * must not be persisted: merging it over a previously captured ciphertext
+ * would invalidate the stateless reasoning replay.
+ */
+function hasReasoningEncryptedContent(options: Record<string, Record<string, unknown>>): boolean {
+  return Object.values(options).some(providerOptions =>
+    typeof providerOptions?.reasoningEncryptedContent === 'string'
+    && providerOptions.reasoningEncryptedContent.length > 0,
+  );
+}
+
 export async function processCattyStream(input: ProcessCattyStreamInput): Promise<ProcessCattyStreamResult> {
   const {
     streamSessionId,
@@ -100,9 +116,11 @@ export async function processCattyStream(input: ProcessCattyStreamInput): Promis
     currentAssistantMsgId,
     maxIterations,
     advancedParams,
+    reasoningProviderOptions,
     continuationContext,
     turnId,
     commandTimeoutMs,
+    responseIdleTimeoutMs,
     runtimeContext: initialRuntimeContext,
     onAgentEvent,
     prepareStep,
@@ -129,6 +147,7 @@ export async function processCattyStream(input: ProcessCattyStreamInput): Promis
     timeout: buildCattyStreamTimeouts({
       permissionMode: runtimeContext.permissionMode,
       commandTimeoutMs,
+      responseIdleTimeoutMs,
       maxIterations,
     }),
     telemetry: {
@@ -206,6 +225,7 @@ export async function processCattyStream(input: ProcessCattyStreamInput): Promis
     ...(advancedParams?.topP != null && { topP: advancedParams.topP }),
     ...(advancedParams?.frequencyPenalty != null && { frequencyPenalty: advancedParams.frequencyPenalty }),
     ...(advancedParams?.presencePenalty != null && { presencePenalty: advancedParams.presencePenalty }),
+    ...(reasoningProviderOptions ? { providerOptions: reasoningProviderOptions } : {}),
   });
 
   let activeMsgId = currentAssistantMsgId;
@@ -402,7 +422,25 @@ export async function processCattyStream(input: ProcessCattyStreamInput): Promis
           }
           break;
         }
-        case 'reasoning-end':
+        case 'reasoning-end': {
+          // With Responses `store: false`, the SDK delivers the reasoning
+          // item's encrypted content on the reasoning-end chunk (via
+          // output_item.done). It must be merged into the persisted reasoning
+          // parts or the stateless replay silently drops the reasoning item.
+          // Skip metadata without ciphertext (e.g. store:true item ids) so a
+          // null payload cannot overwrite a previously captured one.
+          const typedChunk = chunk as { providerMetadata?: unknown };
+          const providerOptions = normalizeProviderContinuationOptions(typedChunk.providerMetadata);
+          if (providerOptions && hasReasoningEncryptedContent(providerOptions)) {
+            cancelPendingFlush();
+            flushText();
+            const messageId = ensureAssistantMessage();
+            updateAssistantContinuation(messageId, {
+              reasoningParts: [{ text: '', providerOptions }],
+            });
+          }
+          break;
+        }
         case 'text-start':
         case 'text-end':
         case 'start':

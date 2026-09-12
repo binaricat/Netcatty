@@ -59,6 +59,7 @@ const { detectShellKind } = require("./ai/ptyExec.cjs");
 const { stripAnsi, trackSessionIdlePrompt } = require("./ai/shellUtils.cjs");
 const { createZmodemSentry } = require("./zmodemHelper.cjs");
 const { discoverShells } = require("./shellDiscovery.cjs");
+const { isWindowsAppExecutionAliasPath } = require("../../lib/localShell.cjs");
 const moshHandshake = require("./moshHandshake.cjs");
 const tempDirBridge = require("./tempDirBridge.cjs");
 const { createTelnetAutoLogin } = require("./telnetAutoLogin.cjs");
@@ -66,7 +67,7 @@ const telnetProtocol = require("./telnetProtocol.cjs");
 const { createPtyOutputBuffer } = require("./ptyOutputBuffer.cjs");
 const { enableTcpNoDelay } = require("./tcpNoDelay.cjs");
 const { releaseConnectionRef } = require("./sshConnectionPool.cjs");
-const { normalizeTerminalEncoding, encodeTerminalInput } = require("./terminalEncoding.cjs");
+const { normalizeTerminalEncoding, encodeTerminalInput, expandSerialBackspace } = require("./terminalEncoding.cjs");
 const { isTerminalReportSequence } = require("./terminalReportSequence.cjs");
 const { receiveYmodemFiles, sendYmodemCancel, sendYmodemFile } = require("./ymodemTransfer.cjs");
 const {
@@ -741,22 +742,9 @@ function resolvePosixExecutable(name, opts = {}) {
 /**
  * Find executable path on Windows
  */
-function isWindowsAppExecutionAlias(filePath) {
-  if (!filePath || process.platform !== "win32") return false;
-
-  const normalizedPath = path.normalize(filePath).toLowerCase();
-  const windowsAppsDir = path.join(
-    process.env.LOCALAPPDATA || "",
-    "Microsoft",
-    "WindowsApps",
-  ).toLowerCase();
-
-  return !!windowsAppsDir && normalizedPath.startsWith(`${windowsAppsDir}${path.sep}`);
-}
-
 function findExecutable(name, opts = {}) {
   if (process.platform !== "win32") return name;
-  
+
   const { execFileSync } = require("child_process");
   try {
     const pathOverride = Object.prototype.hasOwnProperty.call(opts, "pathOverride")
@@ -776,11 +764,20 @@ function findExecutable(name, opts = {}) {
       .map((line) => line.trim())
       .filter(Boolean);
 
+    // Windows App Execution Aliases (MSIX/Store installs, e.g. winget pwsh 7)
+    // fail fs.existsSync() because they are reparse points, yet ConPTY can
+    // spawn the alias path directly. Keep the first alias as a last resort
+    // behind any regular executable found on the PATH.
+    let aliasCandidate = null;
     for (const candidate of candidates) {
+      if (isWindowsAppExecutionAliasPath(candidate)) {
+        aliasCandidate ??= candidate;
+        continue;
+      }
       if (!fs.existsSync(candidate)) continue;
-      if (name === "pwsh" && isWindowsAppExecutionAlias(candidate)) continue;
       return candidate;
     }
+    if (aliasCandidate) return aliasCandidate;
   } catch (err) {
     console.warn(`Could not find ${name} via where.exe:`, err.message);
   }
@@ -1563,7 +1560,10 @@ function writeToSessionNow(payload, data, logRewrite = payload.logRewrite) {
       }
       session.socket.write(wireData);
     } else if (session.serialPort) {
-      session.serialPort.write(outgoing);
+      session.serialPort.write(encodeTerminalInput(
+        expandSerialBackspace(inputData, payload.serialEraseChar, session.encoding),
+        session.encoding,
+      ));
     }
   } catch (err) {
     logTerminalInterruptDebug("write-session-error", {
@@ -2535,6 +2535,7 @@ module.exports = {
   init,
   registerHandlers,
   findExecutable,
+  getDefaultLocalShell,
   startLocalSession,
   startTelnetSession,
   startMoshSession,

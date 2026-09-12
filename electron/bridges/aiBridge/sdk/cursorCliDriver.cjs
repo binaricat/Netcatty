@@ -12,6 +12,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { resolveCursorCliSpawnSpec } = require("../cursorCliSpawn.cjs");
 const { mcpEnvPairsToObject } = require("./injectMcp.cjs");
+const { encodeCursorCliModel } = require("./cursorDriver.cjs");
 
 const DEFAULT_CURSOR_CLI_MODEL = "auto";
 const NETCATTY_MCP_NAME = "netcatty-remote-hosts";
@@ -67,8 +68,8 @@ function spawnCursorCliProcess(spawnImpl, cliPath, args, options = {}) {
 }
 
 function resolveCursorCliModel(model) {
-  const raw = String(model || "").trim();
-  return raw || DEFAULT_CURSOR_CLI_MODEL;
+  const encoded = encodeCursorCliModel(model);
+  return encoded || DEFAULT_CURSOR_CLI_MODEL;
 }
 
 /** Map Netcatty permission mode → Cursor CLI execution class. */

@@ -708,6 +708,7 @@ interface SessionTopTabProps {
   onCloseSession: (sessionId: string, e?: React.MouseEvent) => void;
   onRenameSession: (sessionId: string) => void;
   onCopySession: (sessionId: string) => void;
+  onDuplicateSession?: (sessionId: string) => void;
   onCopySessionToNewWindow: (sessionId: string) => void;
   onEditHost?: (host: Host) => void;
   renderBulkCloseItems: RenderBulkCloseItems;
@@ -733,6 +734,7 @@ export const SessionTopTab: React.FC<SessionTopTabProps> = memo(({
   onCloseSession,
   onRenameSession,
   onCopySession,
+  onDuplicateSession,
   onCopySessionToNewWindow,
   onEditHost,
   renderBulkCloseItems,
@@ -743,6 +745,11 @@ export const SessionTopTab: React.FC<SessionTopTabProps> = memo(({
 }) => {
   // Per-session presentation: sibling title/provider updates do not re-render this tab.
   const session = usePresentedSession(sessionProp);
+  const reconnectActive = React.useSyncExternalStore(
+    terminalReconnectRegistry.subscribe,
+    () => terminalReconnectRegistry.isActive(session.id),
+    () => false,
+  );
   const isActive = useIsTabActive(session.id);
   // Per-session store snapshot so sibling activity dots do not re-render this tab.
   const hasActivity = useSessionActivity(session.id);
@@ -863,9 +870,11 @@ export const SessionTopTab: React.FC<SessionTopTabProps> = memo(({
         sessionId={session.id}
         onCloseSession={onCloseSession}
         onCopySession={onCopySession}
+        onDuplicateSession={onDuplicateSession}
         onCopySessionToNewWindow={onCopySessionToNewWindow}
         onReconnectSession={terminalReconnectRegistry.request}
         sessionStatus={session.status}
+        reconnectActive={reconnectActive}
         onRenameSession={onRenameSession}
         editHost={host}
         onEditHost={onEditHost}

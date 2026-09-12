@@ -24,6 +24,9 @@ const KEYS = [
   "vault.import.progress.persistFailed",
   "vault.import.progress.rollbackFailed",
   "vault.import.sshConfig.managedDestinationHint",
+  "vault.import.mobaxterm.masterPassword",
+  "vault.import.mobaxterm.masterPasswordPlaceholder",
+  "vault.import.mobaxterm.masterPasswordHint",
 ] as const;
 
 test("bulk vault import and group-selection copy exists in every locale", () => {

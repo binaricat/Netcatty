@@ -102,6 +102,8 @@ const baseProps = (overrides: Partial<AIChatSidePanelProps> = {}): AIChatSidePan
   setAgentModel: () => undefined,
   agentProviderMap: {},
   setAgentProvider: () => undefined,
+  agentThinkingMap: {},
+  setAgentThinking: () => undefined,
   globalPermissionMode: 'auto',
   scopeType: 'terminal',
   scopeTargetId: 'terminal-1',
@@ -277,6 +279,18 @@ test('AI side panel re-renders when command timeout changes', () => {
   ), false);
 });
 
+test('AI side panel re-renders when response wait time changes', () => {
+  const props = baseProps({
+    isVisible: true,
+    responseIdleTimeout: 120,
+  });
+
+  assert.equal(aiChatSidePanelPropsAreEqual(
+    props,
+    { ...props, responseIdleTimeout: 600 },
+  ), false);
+});
+
 test('AI side panel skips re-render when only a sibling scope session object changes', () => {
   const own = session({ id: 'session-1', scope: { type: 'terminal', targetId: 'terminal-1' } });
   const siblingA = session({ id: 'session-2', scope: { type: 'terminal', targetId: 'terminal-2' } });
@@ -319,7 +333,7 @@ test('AI side panel skips re-render when only the composer draft text changes', 
   assert.equal(aiChatSidePanelPropsAreEqual(prev, next), true);
 });
 
-test('workspace AI panel memo follows visible inherited session, not hidden terminal maps', () => {
+test('workspace AI panel memo follows visible inherited session, not nonmember terminal maps', () => {
   const visibleMemberChat = session({
     id: 'chat-visible',
     scope: { type: 'terminal', targetId: 'terminal-b', hostIds: ['host-b'] },
@@ -350,7 +364,7 @@ test('workspace AI panel memo follows visible inherited session, not hidden term
       },
     ],
     activeSessionIdMap: {
-      'terminal:terminal-a': 'chat-hidden',
+      'terminal:terminal-outside': 'chat-hidden',
       'terminal:terminal-b': 'chat-visible',
     },
     sessions: [visibleMemberChat, hiddenFocusedChat],
@@ -365,4 +379,40 @@ test('workspace AI panel memo follows visible inherited session, not hidden term
     aiChatSidePanelPropsAreEqual(prev, { ...prev, sessions: [streamedVisible, hiddenFocusedChat] }),
     false,
   );
+});
+
+test('merged AI panel displays a member chat resumed from an older terminal', () => {
+  const resumed = session({
+    id: 'resumed-chat',
+    scope: { type: 'terminal', targetId: 'closed-terminal', hostIds: ['host-a'] },
+    messages: [{ id: 'm1', role: 'user', content: 'keep-resumed-conversation', timestamp: 1 }],
+  });
+  const props = baseProps({
+    isVisible: true,
+    scopeType: 'workspace',
+    scopeTargetId: 'merged',
+    focusedSessionId: 'terminal-a',
+    scopeHostIds: ['host-a'],
+    terminalSessions: [{ sessionId: 'terminal-a', hostId: 'host-a', hostname: 'a', label: 'A', connected: true }],
+    sessions: [resumed],
+    activeSessionIdMap: { 'terminal:terminal-a': resumed.id },
+  });
+  const render = (panelProps: AIChatSidePanelProps) => renderToStaticMarkup(
+    React.createElement(I18nProvider, { locale: 'en' },
+      React.createElement(TooltipProvider, null,
+        React.createElement(AIChatSidePanel, panelProps))),
+  );
+  // Check both the first workspace paint and the explicit merge handoff.
+  assert.match(render(props), /keep-resumed-conversation/);
+  assert.match(render({
+    ...props,
+    activeSessionIdMap: { ...props.activeSessionIdMap, 'workspace:merged': resumed.id },
+    panelViewByScope: { 'workspace:merged': { mode: 'session', sessionId: resumed.id } },
+  }), /keep-resumed-conversation/);
+  assert.equal(aiChatSidePanelPropsAreEqual(props, {
+    ...props,
+    sessions: [{ ...resumed, messages: [...resumed.messages, {
+      id: 'm2', role: 'assistant', content: 'continued response', timestamp: 2,
+    }] }],
+  }), false);
 });

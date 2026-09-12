@@ -229,6 +229,40 @@ function main() {
     throw new Error("Terminal worker requires process.parentPort");
   }
 
+  // Every session lives in this shared worker, so a single stray async error
+  // must never hit Node's default exit-with-code-1 behavior. Install the same
+  // guards as the main process; without them one unhandled error disconnects
+  // all sessions simultaneously ("Terminal worker exited with code 1").
+  // Errors are reported to main so they still land in the crash log.
+  // Startup errors (before the bridges load and runtime.start() completes)
+  // are not suppressed: the guards re-throw those so the worker exits and the
+  // manager can reject or replace it instead of hanging pending requests.
+  const { installTerminalWorkerErrorGuards } = require("./workerProcessGuards.cjs");
+
+  const reportWorkerError = (origin, err, reason) => {
+    try {
+      parentPort.postMessage({
+        kind: "worker-error",
+        origin,
+        reason,
+        message: err?.message || String(err),
+        ...(err?.stack ? { stack: err.stack } : {}),
+        ...(err?.code ? { code: err.code } : {}),
+        ...(err?.level ? { level: err.level } : {}),
+      });
+    } catch {
+      // Reporting must never be able to escalate into a worker crash.
+    }
+  };
+
+  let startupComplete = false;
+  installTerminalWorkerErrorGuards({
+    isRuntimeStarted: () => startupComplete,
+    report(origin, err, decision) {
+      reportWorkerError(origin, err, decision?.reason);
+    },
+  });
+
   const sessions = new Map();
   const sftpClients = new Map();
   const { createTerminalDataPipeline } = require("./terminalDataPipeline.cjs");
@@ -272,6 +306,9 @@ function main() {
   runtime = createTerminalWorkerRuntime({
     parentPort,
     terminalDataPipeline,
+    reportSuppressedError(origin, err, reason) {
+      reportWorkerError(origin, err, reason);
+    },
     registerBridges(ipcMain) {
       sshBridge.init(deps);
       terminalBridge.init(deps);
@@ -368,6 +405,9 @@ function main() {
     },
   });
   runtime.start();
+  // Only after the message listener is installed and all bridges registered
+  // is it safe to suppress process-level errors.
+  startupComplete = true;
 }
 
 if (require.main === module) {

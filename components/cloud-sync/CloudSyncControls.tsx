@@ -35,6 +35,7 @@ import { useCloudSync } from '../../application/state/useCloudSync';
 import { type CloudProvider, type ConflictInfo, type SyncChangeEntityKey, type SyncEntityChangeCounts, formatLastSync } from '../../domain/sync';
 import { cn } from '../../lib/utils';
 import { Button } from '../ui/button';
+import { ConfirmDialog } from '../ui/confirm-dialog';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import { toast } from '../ui/toast';
@@ -302,6 +303,7 @@ export const ProviderCard: React.FC<ProviderCardProps> = ({
     extraActions,
 }) => {
     const { t } = useI18n();
+    const [disconnectConfirmOpen, setDisconnectConfirmOpen] = useState(false);
     const formatLastSyncLabel = (timestamp?: number): string => {
         if (!timestamp) return t('cloudSync.lastSync.never');
         const now = Date.now();
@@ -408,8 +410,9 @@ export const ProviderCard: React.FC<ProviderCardProps> = ({
                         <Button
                             size="sm"
                             variant="ghost"
-                            onClick={onDisconnect}
+                            onClick={() => setDisconnectConfirmOpen(true)}
                             className="text-muted-foreground hover:text-red-500"
+                            aria-label={t('cloudSync.provider.disconnect')}
                         >
                             <CloudOff size={14} />
                         </Button>
@@ -436,6 +439,18 @@ export const ProviderCard: React.FC<ProviderCardProps> = ({
                     </Button>
                 )}
             </div>
+            <ConfirmDialog
+                open={disconnectConfirmOpen}
+                title={t('cloudSync.provider.disconnect.confirmTitle', { name })}
+                message={t('cloudSync.provider.disconnect.confirmMessage', { name })}
+                confirmLabel={t('cloudSync.provider.disconnect.confirmAction')}
+                destructive
+                onOpenChange={setDisconnectConfirmOpen}
+                onConfirm={() => {
+                    setDisconnectConfirmOpen(false);
+                    onDisconnect();
+                }}
+            />
         </div>
     );
 };

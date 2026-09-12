@@ -23,14 +23,14 @@ jobs:
         uses: actions/checkout@v7
         with:
           sparse-checkout: |
-            scripts/cursor-automation.cjs
+            scripts/ai-automation.cjs
           sparse-checkout-cone-mode: false
 
       - name: Validate title and body
         uses: actions/github-script@v9
         with:
           script: |
-            const auto = require(`${process.env.GITHUB_WORKSPACE}/scripts/cursor-automation.cjs`);
+            const auto = require(`${process.env.GITHUB_WORKSPACE}/scripts/ai-automation.cjs`);
             const issue = context.payload.issue;
             const errors = auto.getIssueFormatErrors(issue);
             const labels = new Set(
@@ -58,14 +58,14 @@ jobs:
                   await github.rest.actions.createWorkflowDispatch({
                     owner: context.repo.owner,
                     repo: context.repo.repo,
-                    workflow_id: 'cursor-automation.yml',
+                    workflow_id: 'ai-automation.yml',
                     ref,
                     inputs: {
                       issue_number: String(issue.number),
                     },
                   });
                   core.info(
-                    `Dispatched cursor-automation for recovered issue #${issue.number}`,
+                    `Dispatched ai-automation for recovered issue #${issue.number}`,
                   );
                 } catch (err) {
                   core.setFailed(

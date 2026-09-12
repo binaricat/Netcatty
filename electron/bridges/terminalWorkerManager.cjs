@@ -1282,6 +1282,10 @@ function createTerminalWorkerManager(options = {}) {
       recordSupersedingSessionGeneration(message);
       return;
     }
+    if (message.kind === "worker-error") {
+      recordWorkerErrorReport(message);
+      return;
+    }
     if (message.kind === "response") {
       const entry = pending.get(message.requestId);
       if (!entry) return;
@@ -1638,11 +1642,34 @@ function createTerminalWorkerManager(options = {}) {
     try { worker.kill?.(); } catch {}
   }
 
+  function recordWorkerErrorReport(message) {
+    try {
+      const crashLogBridge = require("./crashLogBridge.cjs");
+      const err = new Error(message?.message || "Terminal worker async error");
+      if (message?.stack) err.stack = message.stack;
+      if (message?.code) err.code = message.code;
+      if (message?.level) err.level = message.level;
+      crashLogBridge.captureError("terminal-worker-async-error", err, {
+        origin: message?.origin,
+        classification: message?.reason,
+        activeSessionCount: workerSessionIds.size,
+      });
+    } catch {
+      // Crash logging must never be able to escalate the worker failure.
+    }
+  }
+
   function handleExit(code, cause = null) {
     const error = cause instanceof Error
       ? cause
       : new Error(`Terminal worker exited${Number.isFinite(code) ? ` with code ${code}` : ""}`);
     const exitCode = Number.isFinite(code) ? code : 1;
+    try {
+      const crashLogBridge = require("./crashLogBridge.cjs");
+      crashLogBridge.captureError("terminal-worker-exit", error, { exitCode });
+    } catch {
+      // Crash logging must never interfere with session teardown.
+    }
     for (const listener of [...workerExitListeners]) {
       try { listener(error); } catch {}
     }

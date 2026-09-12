@@ -115,6 +115,22 @@ export const sanitizeCredentialValue = (
   return value;
 };
 
+export const isVaultStoredKeySource = (
+  source: string | undefined,
+): source is "imported" | "generated" =>
+  source === "imported" || source === "generated";
+
+/**
+ * Imported/generated keys store private material in the vault. Empty or
+ * still-encrypted privateKey means hydration has not finished (or failed).
+ */
+export const needsVaultStoredKeyHydration = (
+  key?: { source?: string; privateKey?: string } | null,
+): boolean => {
+  if (!key || !isVaultStoredKeySource(key.source)) return false;
+  return !key.privateKey || isEncryptedCredentialPlaceholder(key.privateKey);
+};
+
 /**
  * Scan a sync payload for any fields that still carry device-bound
  * enc:v1: ciphertext.  Returns the dotted paths of offending fields.

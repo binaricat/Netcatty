@@ -213,6 +213,7 @@ const SIDE_PANEL_LIVE_CTX_KEYS = [
   'sftpActiveHost',
   'activeTerminalSessionIdForSftp',
   'activeTerminalCwd',
+  'activeTerminalCwdTrusted',
   'activeWorkspace',
   'focusedFontFamilyId',
   'focusedFontFamilyOverridden',
@@ -313,6 +314,8 @@ const SIDE_PANEL_STABLE_CTX_KEYS = [
   'handleOpenSystem',
   'handleCloseSidePanel',
   'handleFocusSidePanelPane',
+  'handleMagnifySidePanelPane',
+  'handleRestoreMagnifiedPane',
   'handleSplitSidePanelPane',
   'handleCloseSidePanelPane',
   'handleResizeSidePanelSplit',
@@ -320,6 +323,7 @@ const SIDE_PANEL_STABLE_CTX_KEYS = [
   'handleSftpInitialLocationApplied',
   'handlePendingUploadHandled',
   'validAIScopeTargetIds',
+  'magnifiedPane',
   'AISidePanelStateRoot',
   'NotesManager',
   // notes / noteGroups / updateNotes / updateNoteGroups come from notesStore.
@@ -331,7 +335,9 @@ const SIDE_PANEL_STABLE_CTX_KEYS = [
 ] as const;
 
 const WORKSPACE_CTX_KEYS = [
+  'activeTabId',
   'workspaceInnerRef',
+  'workspaceOuterRef',
   'workspaceOverlayRef',
   'draggingSessionId',
   'isFocusMode',
@@ -347,6 +353,10 @@ const WORKSPACE_CTX_KEYS = [
   'workspaceById',
   'workspaceRectsById',
   'isTerminalLayerVisible',
+  'magnifiedPane',
+  'handleMagnifyTerminalPane',
+  'handleTerminalPaneInteraction',
+  'handleRestoreMagnifiedPane',
   'workspaceFocusHandlersRef',
   'workspaceBroadcastHandlersRef',
   'splitHorizontalHandlersRef',
@@ -420,6 +430,9 @@ const WORKSPACE_CTX_KEYS = [
   'onReorderTabs',
   'onStartSessionDrag',
   'onEndSessionDrag',
+  'isGlobalBroadcastEnabled',
+  'canUseGlobalBroadcast',
+  'onToggleGlobalBroadcast',
 ] as const;
 
 export function terminalLayerSidePanelStableCtxEqual(prev: Ctx, next: Ctx): boolean {
@@ -489,6 +502,7 @@ export function terminalLayerFocusSidebarPropsEqual(prev: Ctx, next: Ctx): boole
     && eq(prev, next, 'onAppendHostToWorkspace')
     && eq(prev, next, 'handleCloseSession')
     && eq(prev, next, 'onCopySession')
+    && eq(prev, next, 'onDuplicateSession')
     && eq(prev, next, 'onCopySessionToNewWindow')
     && eq(prev, next, 'onRemoveSessionFromWorkspace')
     && eq(prev, next, 'onSetWorkspaceFocusedSession')

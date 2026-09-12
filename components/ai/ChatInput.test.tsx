@@ -154,7 +154,7 @@ test('renders separate steer and stop actions for a running Codex App Server tur
   assert.match(html, /aria-label="ai\.codex\.steer\.addInstruction"/);
   assert.match(html, /placeholder="ai\.codex\.steer\.placeholder"/);
   assert.match(html, /aria-label="Stop"/);
-  assert.match(html, /disabled=""[^>]*aria-label="Select model"/);
+  assert.match(html, /disabled=""[^>]*aria-label="ai\.chat\.selectModel"/);
 });
 
 test('allows terminal-selection-only steering submissions', () => {
@@ -222,6 +222,108 @@ test('slash picker system commands clear the local composer', () => {
   assert.match(source, /if \(command === 'stop'\) onStop\?\.\(\);\s*commitComposerText\(''\);/s);
 });
 
+test('keeps thinking on a separate chip instead of mixing it into the model list', () => {
+  const html = renderToStaticMarkup(
+    <TooltipProvider>
+      <ChatInput
+        value=""
+        onChange={() => {}}
+        onSend={() => {}}
+        agentName="Codex"
+        modelPresets={[{
+          id: 'gpt-5.5',
+          name: 'GPT-5.5',
+          thinkingLevels: ['low', 'medium', 'high'],
+        }]}
+        selectedModelId="gpt-5.5/high"
+        onModelSelect={() => {}}
+      />
+    </TooltipProvider>,
+  );
+
+  assert.match(html, /aria-label="ai\.chat\.selectModel"/);
+  assert.match(html, /aria-label="ai\.chat\.thinkingLevel"/);
+  assert.match(html, />High</);
+  assert.doesNotMatch(html, /GPT-5\.5 \/ High/);
+});
+
+test('Catty composer exposes a provider switcher without a mixed thinking submenu', () => {
+  const source = readFileSync(new URL('./ChatInput.tsx', import.meta.url), 'utf8');
+  assert.match(source, /ComposerModelPicker/);
+  assert.match(source, /ComposerThinkingChip/);
+  assert.match(source, /cattyReasoningLevelsForSelection/);
+  assert.match(source, /if \(!thinkingLevel\) return;/);
+  assert.doesNotMatch(source, /showThinkingLevels/);
+});
+
+test('Catty thinking chip is hidden for OpenAI models that reject reasoningEffort', () => {
+  const openai = {
+    id: 'p1',
+    providerId: 'openai' as const,
+    name: 'OpenAI',
+    enabled: true,
+  };
+  const gpt4o = renderToStaticMarkup(
+    <TooltipProvider>
+      <ChatInput
+        value=""
+        onChange={() => {}}
+        onSend={() => {}}
+        agentName="Catty Agent"
+        thinkingLevel="high"
+        onThinkingLevelChange={() => {}}
+        providerSwitcher={{
+          providers: [openai],
+          selectedProviderId: 'p1',
+          selectedModelId: 'gpt-4o',
+          onSelect: () => {},
+        }}
+      />
+    </TooltipProvider>,
+  );
+  assert.doesNotMatch(gpt4o, /aria-label="ai\.chat\.thinkingLevel"/);
+
+  const gpt51Chat = renderToStaticMarkup(
+    <TooltipProvider>
+      <ChatInput
+        value=""
+        onChange={() => {}}
+        onSend={() => {}}
+        agentName="Catty Agent"
+        thinkingLevel="high"
+        onThinkingLevelChange={() => {}}
+        providerSwitcher={{
+          providers: [openai],
+          selectedProviderId: 'p1',
+          selectedModelId: 'gpt-5.1-chat-latest',
+          onSelect: () => {},
+        }}
+      />
+    </TooltipProvider>,
+  );
+  assert.doesNotMatch(gpt51Chat, /aria-label="ai\.chat\.thinkingLevel"/);
+
+  const gpt55 = renderToStaticMarkup(
+    <TooltipProvider>
+      <ChatInput
+        value=""
+        onChange={() => {}}
+        onSend={() => {}}
+        agentName="Catty Agent"
+        thinkingLevel="high"
+        onThinkingLevelChange={() => {}}
+        providerSwitcher={{
+          providers: [openai],
+          selectedProviderId: 'p1',
+          selectedModelId: 'gpt-5.5',
+          onSelect: () => {},
+        }}
+      />
+    </TooltipProvider>,
+  );
+  assert.match(gpt55, /aria-label="ai\.chat\.thinkingLevel"/);
+});
+
 test('ChatInput wires /compact through getSystemSlashCommand and canCompact', () => {
   const source = readFileSync(new URL('./ChatInput.tsx', import.meta.url), 'utf8');
   assert.match(source, /getSystemSlashCommand/);
@@ -229,4 +331,22 @@ test('ChatInput wires /compact through getSystemSlashCommand and canCompact', ()
   assert.match(source, /canCompact/);
   assert.match(source, /onCompact\?\.\(\)/);
   assert.match(source, /command\.slug !== 'compact' \|\| canCompact/);
+});
+
+test('renders a Mention Note picker entry with a searchable note list', () => {
+  const source = readFileSync(new URL('./ChatInput.tsx', import.meta.url), 'utf8');
+
+  assert.match(source, /openInputPanelMenu\('noteMention'\)/);
+  assert.match(source, /ai\.chat\.menuMentionNote/);
+  assert.match(source, /aria-activedescendant=\{noteMentionItems\[activeMenuIndex\] \? `\$\{noteListId\}/);
+  assert.match(source, /createVaultNoteSearchIndex\(notes\)/);
+  assert.match(source, /onClick=\{\(\) => handleSelectNoteMention\(note\)\}/);
+  assert.match(source, /onKeyDown=\{handleNoteMentionKeyDown\}/);
+});
+
+test('renders vault note attachment chips with the note title', () => {
+  const source = readFileSync(new URL('./ChatInput.tsx', import.meta.url), 'utf8');
+
+  assert.match(source, /file\.vaultNoteId \? \(/);
+  assert.match(source, /\{file\.vaultNoteTitle \|\| file\.filename\}/);
 });

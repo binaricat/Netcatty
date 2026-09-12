@@ -521,7 +521,7 @@ test("enhanced sources can fall back to reliable legacy data for plain targets",
   }
 });
 
-test("Shift+Enter broadcast remaps from each target buffer when Kitty collapses the chord", () => {
+test("Shift+Enter broadcast uses CSI-u only after the target negotiated a preserving mode", () => {
   const alternateOnly = createKittyKeyboardModeState();
   setKittyKeyboardModeFlags(alternateOnly, 0b00100);
   const shiftEnter = {
@@ -540,10 +540,9 @@ test("Shift+Enter broadcast remaps from each target buffer when Kitty collapses 
     kittyMode: alternateOnly,
     applicationCursorMode: false,
     encodedKeys: new Set<string>(),
-    alternateScreen: true,
   }), {
-    data: SHIFT_ENTER_CSI_U_SEQUENCE,
-    kittyEncoded: true,
+    data: "\n",
+    kittyEncoded: false,
     urgentInterrupt: false,
   });
 
@@ -552,7 +551,6 @@ test("Shift+Enter broadcast remaps from each target buffer when Kitty collapses 
     kittyMode: createKittyKeyboardModeState(),
     applicationCursorMode: false,
     encodedKeys: new Set<string>(),
-    alternateScreen: false,
   }), {
     data: "\n",
     kittyEncoded: false,
@@ -566,12 +564,183 @@ test("Shift+Enter broadcast remaps from each target buffer when Kitty collapses 
     kittyMode: disambiguate,
     applicationCursorMode: false,
     encodedKeys: new Set<string>(),
-    alternateScreen: true,
   }), {
     data: SHIFT_ENTER_CSI_U_SEQUENCE,
     kittyEncoded: true,
     urgentInterrupt: false,
   });
+});
+
+test("Win32 input broadcast preserves native records for Win32 targets", () => {
+  const shiftEnterRecord = "\u001b[13;28;13;1;16;1_";
+  const shiftEnter = {
+    kind: "win32" as const,
+    data: shiftEnterRecord,
+    fallbackToLegacy: true,
+    event: {
+      type: "keydown" as const,
+      key: "Enter",
+      code: "Enter",
+      shiftKey: true,
+    },
+  };
+
+  const win32TargetOptions = {
+    kittyProtocolEnabled: false,
+    kittyMode: createKittyKeyboardModeState(),
+    applicationCursorMode: false,
+    encodedKeys: new Set<string>(),
+    win32InputMode: true,
+  };
+  assert.deepEqual(resolveKittyKeyboardBroadcastInput(shiftEnter, win32TargetOptions), {
+    data: shiftEnterRecord,
+    kittyEncoded: false,
+    urgentInterrupt: false,
+    logicalData: null,
+  });
+
+  const normalizedShiftEnter = {
+    kind: "key" as const,
+    fallbackToLegacy: true,
+    event: shiftEnter.event,
+  };
+  const normalizedTargetOptions = {
+    ...win32TargetOptions,
+    encodedKeys: new Set<string>(),
+  };
+  assert.deepEqual(
+    resolveKittyKeyboardBroadcastInput(normalizedShiftEnter, normalizedTargetOptions),
+    {
+      data: "",
+      kittyEncoded: false,
+      urgentInterrupt: false,
+      logicalData: null,
+      win32Event: shiftEnter.event,
+    },
+  );
+
+  const disambiguate = createKittyKeyboardModeState();
+  setKittyKeyboardModeFlags(disambiguate, 0b00001);
+  assert.deepEqual(resolveKittyKeyboardBroadcastInput(shiftEnter, {
+    kittyProtocolEnabled: true,
+    kittyMode: disambiguate,
+    applicationCursorMode: false,
+    encodedKeys: new Set<string>(),
+    win32InputMode: false,
+  }), {
+    data: SHIFT_ENTER_CSI_U_SEQUENCE,
+    kittyEncoded: true,
+    urgentInterrupt: false,
+  });
+});
+
+test("Win32 input keeps plain Enter bookkeeping without misclassifying modified Enter", () => {
+  const options = () => ({
+    kittyProtocolEnabled: false,
+    kittyMode: createKittyKeyboardModeState(),
+    applicationCursorMode: false,
+    encodedKeys: new Set<string>(),
+    win32InputMode: true,
+  });
+  const resolveEnter = (modifiers: Partial<{
+    shiftKey: boolean;
+    altKey: boolean;
+    ctrlKey: boolean;
+    metaKey: boolean;
+  }>) => resolveKittyKeyboardBroadcastInput({
+    kind: "win32",
+    data: "\u001b[13;28;13;1;0;1_",
+    event: {
+      type: "keydown",
+      key: "Enter",
+      code: "Enter",
+      ...modifiers,
+    },
+  }, options())?.logicalData;
+
+  assert.equal(resolveEnter({}), "\r");
+  assert.equal(resolveEnter({ shiftKey: true }), null);
+  assert.equal(resolveEnter({ ctrlKey: true }), null);
+  assert.equal(resolveEnter({ altKey: true }), null);
+});
+
+test("Win32 key-up broadcast remains a native release with no editing semantics", () => {
+  const options = {
+    kittyProtocolEnabled: true,
+    kittyMode: createKittyKeyboardModeState(),
+    applicationCursorMode: false,
+    encodedKeys: new Set<string>(),
+    win32InputMode: true,
+  };
+  assert.ok(resolveKittyKeyboardBroadcastInput({
+    kind: "win32",
+    data: "\u001b[13;28;13;1;16;1_",
+    event: {
+      type: "keydown",
+      key: "Enter",
+      code: "Enter",
+      shiftKey: true,
+    },
+  }, options));
+  const releaseRecord = "\u001b[13;28;13;0;16;1_";
+  assert.deepEqual(resolveKittyKeyboardBroadcastInput({
+    kind: "win32",
+    data: releaseRecord,
+    fallbackToLegacy: true,
+    event: {
+      type: "keyup",
+      key: "Enter",
+      code: "Enter",
+      shiftKey: true,
+    },
+  }, options), {
+    data: releaseRecord,
+    kittyEncoded: false,
+    urgentInterrupt: false,
+    logicalData: null,
+  });
+});
+
+test("Win32 broadcast targets encode normalized keys and release them during sensitive input", () => {
+  const encodedKeys = new Set<string>();
+  const delivered: Array<{ type?: string; logicalData: string | null }> = [];
+  const writes: string[] = [];
+  let sensitive = false;
+  const handler = createKittyKeyboardBroadcastHandler({
+    resolveOptions: () => ({
+      kittyProtocolEnabled: false,
+      kittyMode: createKittyKeyboardModeState(),
+      applicationCursorMode: false,
+      encodedKeys,
+      win32InputMode: true,
+    }),
+    getSessionId: () => "win32-target",
+    isSensitiveInput: () => sensitive,
+    isConnected: () => true,
+    isRuntimeDisposed: () => false,
+    writeDisposed: (_sessionId, data) => writes.push(data),
+    writeActive: (data) => writes.push(data),
+    writeWin32Event: (event, logicalData) => {
+      delivered.push({ type: event.type, logicalData });
+    },
+  });
+
+  handler({
+    kind: "key",
+    event: { type: "keydown", key: "Enter", code: "Enter", shiftKey: true },
+  });
+  sensitive = true;
+  handler({
+    kind: "key",
+    event: { type: "keyup", key: "Enter", code: "Enter", shiftKey: true },
+  });
+
+  assert.deepEqual(delivered, [
+    { type: "keydown", logicalData: null },
+    { type: "keyup", logicalData: null },
+  ]);
+  assert.deepEqual(writes, []);
+  assert.equal(encodedKeys.size, 0);
 });
 
 test("plain Kitty targets preserve modified non-ASCII keys without a legacy fallback", () => {

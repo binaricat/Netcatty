@@ -127,7 +127,7 @@ export interface SerialConfig {
   lineMode?: boolean; // Line mode - buffer input and send on Enter (default: false)
   // Store the default explicitly so an open/restored session keeps its launch-time behavior.
   backspaceBehavior?: 'default' | 'ctrl-h';
-  // Byte-oriented backspace: when true (default), a Backspace deletes the
+  // Byte-oriented backspace: when explicitly enabled, a Backspace deletes the
   // whole multi-byte character by sending one DEL per wire byte (correct for
   // MCUs/routers that remove bytes).  Set to false for character-aware line
   // editors (e.g. a Linux console with readline) where one DEL already
@@ -157,6 +157,9 @@ export interface SftpBookmark {
 
 export type HostAuthMethod = 'auto' | 'password' | 'key' | 'certificate';
 
+export type HostOperatingSystem = 'linux' | 'windows' | 'macos' | 'freebsd' | 'unknown';
+export type HostOsSelection = 'auto' | HostOperatingSystem;
+
 export interface Host {
   id: string;
   label: string;
@@ -167,7 +170,10 @@ export interface Host {
   identityId?: string;
   group?: string;
   tags: string[];
+  // Legacy compatibility value; use resolveHostOs for runtime decisions.
   os: 'linux' | 'windows' | 'macos';
+  // Absent on old records: preserve Windows/macOS, treat old Linux defaults as auto.
+  osOverride?: HostOsSelection;
   // Device type: 'general' for standard servers, 'network' for switches/routers/firewalls.
   // Network devices use raw command execution (no shell wrapping) for AI agent compatibility.
   deviceType?: 'general' | 'network';
@@ -386,6 +392,7 @@ export interface VaultNote {
   createdAt: number;
   updatedAt: number;
   order?: number;
+  isPinned?: boolean;
 }
 
 export interface ChatMessage {

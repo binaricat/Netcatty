@@ -156,6 +156,7 @@ export function computeAutocompleteAcceptWrite(options: {
     currentLine,
     candidate: options.candidate,
     os: options.os,
+    promptText: options.prompt.promptText,
   });
   if (!options.execute) return body;
   return body ? `${body}\r` : "\r";

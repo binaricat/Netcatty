@@ -8,23 +8,27 @@ type StoredStringSetter<T extends string> = (nextValue: T | ((currentValue: T) =
 
 const canUseLocalStorage = () => typeof globalThis.localStorage !== "undefined";
 
-export const readStoredStringValue = <T extends string>(
+const defaultIsAllowedString = <T extends string>(value: string | null): value is T => typeof value === "string";
+
+export const readStoredStringValue = <T extends string = string>(
   storageKey: string,
   fallback: T,
-  isAllowedValue: (value: string | null) => value is T,
+  isAllowedValue: (value: string | null) => value is T = defaultIsAllowedString,
 ): T => {
   if (!canUseLocalStorage()) return fallback;
   const stored = localStorageAdapter.readString(storageKey);
-  return isAllowedValue(stored) ? stored : fallback;
+  const validator = isAllowedValue ?? defaultIsAllowedString;
+  return validator(stored) ? stored : fallback;
 };
 
-export const readOptionalStoredStringValue = <T extends string>(
+export const readOptionalStoredStringValue = <T extends string = string>(
   storageKey: string,
-  isAllowedValue: (value: string | null) => value is T,
+  isAllowedValue: (value: string | null) => value is T = defaultIsAllowedString,
 ): T | null => {
   if (!canUseLocalStorage()) return null;
   const stored = localStorageAdapter.readString(storageKey);
-  return isAllowedValue(stored) ? stored : null;
+  const validator = isAllowedValue ?? defaultIsAllowedString;
+  return validator(stored) ? stored : null;
 };
 
 export const resolveStoredStringUpdate = <T extends string>(
@@ -47,11 +51,12 @@ export const createStoredStringSyncHandlers = <T extends string>({
 }: {
   storageKey: string;
   fallback: T;
-  isAllowedValue: (value: string | null) => value is T;
+  isAllowedValue?: (value: string | null) => value is T;
   onValue: (value: T) => void;
 }) => {
+  const validator = isAllowedValue ?? defaultIsAllowedString;
   const syncFromStorage = () => {
-    onValue(readStoredStringValue(storageKey, fallback, isAllowedValue));
+    onValue(readStoredStringValue(storageKey, fallback, validator));
   };
 
   return {
@@ -64,15 +69,16 @@ export const createStoredStringSyncHandlers = <T extends string>({
   };
 };
 
-export const useStoredString = <T extends string>(
+export const useStoredString = <T extends string = string>(
   storageKey: string,
   fallback: T,
-  isAllowedValue: (value: string | null) => value is T,
+  isAllowedValue?: (value: string | null) => value is T,
 ) => {
+  const validator = isAllowedValue ?? defaultIsAllowedString;
   const [value, setValue] = useState<T>(() => readStoredStringValue(
     storageKey,
     fallback,
-    isAllowedValue,
+    validator,
   ));
 
   const setAndPersist = useCallback<StoredStringSetter<T>>((nextValue) => {
@@ -98,7 +104,7 @@ export const useStoredString = <T extends string>(
     } = createStoredStringSyncHandlers({
       storageKey,
       fallback,
-      isAllowedValue,
+      isAllowedValue: validator,
       onValue: setValue,
     });
 
@@ -108,7 +114,7 @@ export const useStoredString = <T extends string>(
       target.removeEventListener?.(LOCAL_STORAGE_ADAPTER_CHANGED_EVENT, handleAdapterChange);
       target.removeEventListener?.("storage", handleBrowserStorage);
     };
-  }, [fallback, isAllowedValue, storageKey]);
+  }, [fallback, storageKey, validator]);
 
   return [value, setAndPersist] as const;
 };

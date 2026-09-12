@@ -4,11 +4,14 @@ export type UploadEndpointPin = {
   isLocal: boolean;
   hostId: string | null;
   cacheKey: string | null;
+  /** When present, reconnecting the same tab is still a target change. */
+  connectionId?: string;
 };
 
 export function captureUploadEndpoint(
   connection: NonNullable<SftpPane["connection"]>,
   connectionCacheKeyMap: Map<string, string>,
+  options?: { pinConnectionId?: boolean },
 ): UploadEndpointPin {
   return {
     isLocal: connection.isLocal,
@@ -16,6 +19,7 @@ export function captureUploadEndpoint(
     cacheKey: connection.isLocal
       ? "local"
       : (connectionCacheKeyMap.get(connection.id) ?? null),
+    ...(options?.pinConnectionId ? { connectionId: connection.id } : undefined),
   };
 }
 
@@ -24,6 +28,9 @@ export function assertUploadEndpointUnchanged(
   expected: UploadEndpointPin,
   connectionCacheKeyMap: Map<string, string>,
 ): void {
+  if (expected.connectionId && connection.id !== expected.connectionId) {
+    throw new Error("Upload target changed before the transfer started");
+  }
   if (connection.isLocal !== expected.isLocal) {
     throw new Error("Upload target changed before the transfer started");
   }

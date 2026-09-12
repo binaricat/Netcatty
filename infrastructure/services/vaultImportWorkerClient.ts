@@ -21,6 +21,7 @@ export type VaultImportWorkerRequest = {
   files: File[];
   relativePaths: string[];
   encoding: VaultImportFileEncoding | undefined;
+  masterPassword?: string;
 };
 
 export type VaultImportWorkerResponse =
@@ -42,6 +43,7 @@ interface ImportVaultHostsInWorkerOptions {
   format: VaultImportFormat;
   files: File[];
   encoding?: VaultImportFileEncoding;
+  masterPassword?: string;
   signal?: AbortSignal;
   createWorker?: () => VaultImportWorkerLike;
   onProgress?: (progress: VaultImportWorkerProgress) => void;
@@ -57,6 +59,7 @@ export function importVaultHostsInWorker({
   format,
   files,
   encoding,
+  masterPassword,
   signal,
   createWorker = createVaultImportWorker,
   onProgress,
@@ -110,6 +113,7 @@ export function importVaultHostsInWorker({
       files,
       relativePaths: files.map((file) => file.webkitRelativePath),
       encoding,
+      ...(masterPassword ? { masterPassword } : {}),
     });
   });
 }

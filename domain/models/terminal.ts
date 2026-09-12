@@ -48,6 +48,8 @@ export type AutocompleteHistoryScope = 'host' | 'global';
  * - always: honor every notification (default; matches iTerm2 / Ghostty / Codex osc9)
  */
 export type OscNotificationMode = 'off' | 'unfocused' | 'always';
+/** How an established terminal session reports a later disconnect. */
+export type DisconnectedNoticeMode = 'terminal' | 'dialog';
 
 export const DEFAULT_TERMINAL_WORD_SEPARATORS = ' ()[]{}\'"';
 
@@ -118,6 +120,7 @@ export interface TerminalSettings {
   wordSeparators: string; // Characters for word selection
   linkModifier: LinkModifier; // Modifier key to click links
   autoCloseOnExit: boolean; // Automatically close terminal UI after eligible session exits
+  disconnectedNoticeMode: DisconnectedNoticeMode; // Non-blocking terminal line or legacy dialog after disconnect
 
   // Keyword Highlighting
   keywordHighlightEnabled: boolean;
@@ -376,6 +379,10 @@ const isOscNotificationMode = (value: unknown): value is OscNotificationMode => 
   value === 'always'
 );
 
+const isDisconnectedNoticeMode = (value: unknown): value is DisconnectedNoticeMode => (
+  value === 'terminal' || value === 'dialog'
+);
+
 export const normalizeTerminalSettings = (
   settings?: Partial<TerminalSettings> | null,
 ): TerminalSettings => {
@@ -408,6 +415,9 @@ export const normalizeTerminalSettings = (
     oscNotifications: isOscNotificationMode(settings?.oscNotifications)
       ? settings.oscNotifications
       : DEFAULT_TERMINAL_SETTINGS.oscNotifications,
+    disconnectedNoticeMode: isDisconnectedNoticeMode(settings?.disconnectedNoticeMode)
+      ? settings.disconnectedNoticeMode
+      : DEFAULT_TERMINAL_SETTINGS.disconnectedNoticeMode,
   };
 
   // Migrate legacy 'canvas' renderer to 'dom' (canvas removed in xterm.js 6.0)
@@ -489,6 +499,8 @@ const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
   wordSeparators: DEFAULT_TERMINAL_WORD_SEPARATORS,
   linkModifier: 'none',
   autoCloseOnExit: true,
+  // Issue #3087: keep terminal history visible after an established session disconnects.
+  disconnectedNoticeMode: 'terminal',
   keywordHighlightEnabled: true,
   keywordHighlightRules: DEFAULT_KEYWORD_HIGHLIGHT_RULES,
   localShell: '', // Empty = use system default
@@ -615,6 +627,11 @@ export interface TerminalSession {
   // falls back to a fresh connection — so this also applies on reconnect: a
   // reconnect reuses the source again if still connected, else dials fresh.
   reuseConnectionFromSessionId?: string;
+  // Marker for "Duplicate Session" clones: never multiplex onto any live,
+  // parked, or in-flight pooled transport (including the source's own
+  // connection) — always dial a brand-new connection with fresh auth. The
+  // starter turns this into `reuseTransport: false` on every attempt.
+  requireFreshConnection?: boolean;
   // Per-pane font size override (workspace splits only; not persisted to vault hosts).
   fontSize?: number;
   fontSizeOverride?: boolean;

@@ -4,6 +4,18 @@ const { spawnSync } = require("node:child_process");
 const { EventEmitter } = require("node:events");
 
 const { createSessionOpsApi } = require("./sessionOps.cjs");
+
+function quoteShellArg(value) {
+  return "'" + String(value).replace(/'/g, "'\\''") + "'";
+}
+
+function unwrapExecShC(command) {
+  const prefix = "exec sh -c ";
+  if (!String(command).startsWith(prefix)) return command;
+  const quoted = command.slice(prefix.length);
+  if (!quoted.startsWith("'") || !quoted.endsWith("'")) return command;
+  return quoted.slice(1, -1).replace(/'\\''/g, "'");
+}
 const { selectServerStatsFixtureOutput } = require("./serverStatsTestHelpers.cjs");
 const {
   borrowTransport,
@@ -55,12 +67,14 @@ function makeSessionOps(sessions) {
     setTimeout,
     clearTimeout,
     Buffer,
+    quoteShellArg,
     measureTcpConnectLatency: async () => 3,
     // The rest of the sessionOps surface isn't exercised by getServerStats.
   });
 }
 
 function runStatsCommandWithBusyBoxTools(command) {
+  command = unwrapExecShC(command);
   const script = [
     "uname() { printf '%s\\n' Linux; }",
     "nproc() { printf '%s\\n' 4; }",
@@ -85,6 +99,7 @@ function runStatsCommandWithBusyBoxTools(command) {
 }
 
 function runStatsCommandWithBusyBoxSmpTop(command) {
+  command = unwrapExecShC(command);
   const script = [
     "uname() { printf '%s\\n' Linux; }",
     "nproc() { printf '%s\\n' 4; }",
@@ -104,6 +119,7 @@ function runStatsCommandWithBusyBoxSmpTop(command) {
 // Proxmox LXC (CT) guests often expose ZFS datasets / host bind mounts as the
 // df "Filesystem" column instead of /dev/* block devices.
 function runStatsCommandWithPveCtDf(command) {
+  command = unwrapExecShC(command);
   const script = [
     "uname() { printf '%s\\n' Linux; }",
     "nproc() { printf '%s\\n' 2; }",
@@ -207,6 +223,7 @@ test("getServerStats keeps PVE CT ZFS/bind mounts and recovers dash Capacity", a
 // rclone / CloudDrive / union-style FUSE mounts expose cloud quotas that should
 // not inflate System Overview disk totals after the PVE CT filter broadening.
 function runStatsCommandWithNetworkFuseDf(command, { forceLegacy = false } = {}) {
+  command = unwrapExecShC(command);
   const script = [
     "uname() { printf '%s\\n' Linux; }",
     "nproc() { printf '%s\\n' 2; }",
@@ -280,6 +297,7 @@ function runStatsCommandWithNetworkFuseDf(command, { forceLegacy = false } = {})
 }
 
 function runStatsCommandWithRootFuseDf(command, filesystemType = "fuse.rclone") {
+  command = unwrapExecShC(command);
   const script = [
     "uname() { printf '%s\\n' Linux; }",
     "nproc() { printf '%s\\n' 2; }",
@@ -351,6 +369,7 @@ test("getServerStats uses mount metadata when df filesystem types are unavailabl
 });
 
 function runStatsCommandWithUntypedScopedIpv6NfsDf(command) {
+  command = unwrapExecShC(command);
   const script = [
     "uname() { printf '%s\\n' Linux; }",
     "nproc() { printf '%s\\n' 2; }",
@@ -447,6 +466,7 @@ test("getServerStats keeps a local fuseblk root filesystem", async () => {
 });
 
 function runStatsCommandWithLoopRootDf(command) {
+  command = unwrapExecShC(command);
   const script = [
     "uname() { printf '%s\\n' Linux; }",
     "nproc() { printf '%s\\n' 2; }",
@@ -526,6 +546,7 @@ test("getServerStats opens a Mosh stats companion connection when session.conn i
     setTimeout,
     clearTimeout,
     Buffer,
+    quoteShellArg,
     ensureMoshStatsConnection: async (s, id) => {
       ensureCalls += 1;
       assert.equal(s, session);
@@ -561,6 +582,7 @@ test("getServerStats fails gracefully when the companion connection cannot be es
     setTimeout,
     clearTimeout,
     Buffer,
+    quoteShellArg,
     ensureMoshStatsConnection: async () => null, // no usable auth, etc.
   });
 
@@ -583,6 +605,7 @@ test("getServerStats does not touch the companion path for a normal SSH session"
     setTimeout,
     clearTimeout,
     Buffer,
+    quoteShellArg,
     ensureMoshStatsConnection: async () => {
       ensureCalls += 1;
       return null;
@@ -611,6 +634,7 @@ test("getServerStats measures TCP connectivity instead of SSH protocol latency",
     setTimeout,
     clearTimeout,
     Buffer,
+    quoteShellArg,
     measureTcpConnectLatency: async (target) => {
       probes.push(target);
       return 2;
@@ -636,6 +660,7 @@ test("getServerStats skips a misleading direct probe for jump-host sessions", as
     setTimeout,
     clearTimeout,
     Buffer,
+    quoteShellArg,
     measureTcpConnectLatency: async () => {
       probeCalls += 1;
       return 2;
@@ -665,6 +690,7 @@ test("getServerStats closes a blocked probe channel when stats time out", async 
     },
     clearTimeout: () => {},
     Buffer,
+    quoteShellArg,
   });
 
   const pending = api.getServerStats({ sender: {} }, { sessionId: "sid" });
@@ -692,6 +718,7 @@ test("getServerStats closes a stats stream delivered after timeout", async () =>
     },
     clearTimeout: () => {},
     Buffer,
+    quoteShellArg,
   });
 
   const pending = api.getServerStats({ sender: {} }, { sessionId: "sid" });
@@ -737,6 +764,7 @@ test("three stats retries on an unresponsive exec open leave no pooled transport
     },
     clearTimeout: (timer) => { if (timer) timer.cleared = true; },
     Buffer,
+    quoteShellArg,
   });
 
   const first = api.getServerStats({ sender: {} }, { sessionId: "sid" });
@@ -928,6 +956,7 @@ test("getServerStats reports pending (not a hard failure) for a Mosh session bef
     setTimeout,
     clearTimeout,
     Buffer,
+    quoteShellArg,
     ensureMoshStatsConnection: async () => {
       ensureCalls += 1;
       return null; // nothing to connect with yet
@@ -957,6 +986,7 @@ test("getServerStats reports a hard failure (not pending) once the companion per
     setTimeout,
     clearTimeout,
     Buffer,
+    quoteShellArg,
     ensureMoshStatsConnection: async () => null,
   });
 
@@ -974,3 +1004,163 @@ test("getServerStats returns an error for an unknown session", async () => {
 
   assert.equal(result.success, false);
 });
+
+test("getServerStats wraps probes in a remote watchdog matching the client timeout", async () => {
+  const commands = [];
+  const sessions = new Map();
+  sessions.set("sid", {
+    type: "ssh",
+    _reuseEndpoint: { hostname: "slow.example", port: 22 },
+    conn: {
+      exec(command, cb) {
+        commands.push(command);
+        cb(null, fakeStream(LINUX_STATS));
+      },
+    },
+  });
+
+  const api = makeSessionOps(sessions);
+  const result = await api.getServerStats({ sender: {} }, { sessionId: "sid" });
+
+  assert.equal(result.success, true);
+  assert.equal(commands.length, 2);
+  for (const command of commands) {
+    // The watchdog must be armed before the probe and killed after it, with
+    // the same 10s bound the client enforces, so an abandoned probe cannot
+    // linger and burn CPU on the remote host (#3187). It must also kill the
+    // probe's whole descendant tree: a probe blocked in an external child
+    // (df, ps, lsof, ...) would otherwise survive `kill -9 $$` and keep
+    // holding the channel's output descriptors.
+    assert.ok(
+      command.startsWith('exec sh -c '),
+      `missing POSIX sh wrap: ${command.slice(0, 120)}`,
+    );
+    assert.ok(
+      command.includes('( sleep 10 &&'),
+      `missing watchdog arm: ${command.slice(0, 160)}`,
+    );
+    assert.ok(
+      command.includes('kill -9 $nc_tree "$$"'),
+      "watchdog must kill the probe's descendant tree, not only the shell",
+    );
+    // The watchdog's stdio must be detached from the channel so its `sleep`
+    // child cannot hold the channel's output descriptors open.
+    assert.ok(
+      command.includes(") </dev/null >/dev/null 2>&1 & nc_watchdog_pid=$!"),
+      "watchdog subshell must not inherit the channel's stdio",
+    );
+    // Cleanup must reap the watchdog's pending `sleep` (before killing the
+    // subshell, while the PPID walk can still find it): killing only the
+    // subshell would leave the `sleep` alive for the full watchdog duration,
+    // delaying the channel close and racing the client-side timeout.
+    assert.ok(
+      command.includes('kill -9 $nc_kids "$nc_watchdog_pid"'),
+      "watchdog cleanup must reap the watchdog's pending sleep child",
+    );
+    assert.ok(
+      command.includes("exit $nc_status"),
+      "watchdog cleanup must preserve the probe exit status",
+    );
+    assert.ok(command.includes("( sleep 10 &&"), "watchdog bound must match the 10s stats run timeout");
+  }
+  assert.ok(commands[0].includes("NC_LATENCY_MARK"));
+  assert.ok(commands[1].includes('echo "DISKS:$disks"'));
+});
+
+test("getSessionDistroInfo wraps the os-release probe in a remote watchdog", async () => {
+  const commands = [];
+  const sessions = new Map();
+  sessions.set("sid", {
+    type: "ssh",
+    conn: {
+      exec(command, cb) {
+        commands.push(command);
+        cb(null, fakeStream('NAME="UnionTech OS Server 20"\nID=uos'));
+      },
+    },
+  });
+
+  const api = makeSessionOps(sessions);
+  const result = await api.getSessionDistroInfo({ sender: {} }, { sessionId: "sid" });
+
+  assert.equal(result.success, true);
+  assert.equal(commands.length, 1);
+  assert.ok(
+    commands[0].startsWith('exec sh -c '),
+    "distro probe must force POSIX sh so fish/zsh login shells can parse it",
+  );
+  assert.ok(
+    commands[0].includes('( sleep 5 &&'),
+    "distro probe must carry a 5s remote watchdog",
+  );
+  assert.ok(
+    commands[0].includes('kill -9 $nc_tree "$$"'),
+    "distro watchdog must kill the probe's descendant tree, not only the shell",
+  );
+  assert.ok(
+    commands[0].includes(") </dev/null >/dev/null 2>&1 & nc_watchdog_pid=$!"),
+    "distro watchdog subshell must not inherit the channel's stdio",
+  );
+  assert.ok(
+    commands[0].includes('kill -9 $nc_kids "$nc_watchdog_pid"'),
+    "distro watchdog cleanup must reap the watchdog's pending sleep child",
+  );
+  assert.ok(commands[0].includes("cat /etc/os-release"));
+});
+
+for (const blocked of [false, true]) {
+  test(`real distro probe ${blocked ? 'kills blocked children' : 'cleans its watchdog after success'}`, {
+    skip: process.platform === 'win32', timeout: 10000,
+  }, async () => {
+    const fs = require('node:fs');
+    const path = require('node:path');
+    const { spawn } = require('node:child_process');
+    const directory = require('../tempDirBridge.cjs').getTempFilePath('watchdog-test');
+    fs.mkdirSync(directory, { mode: 0o700 });
+    fs.writeFileSync(path.join(directory, 'cat'), blocked
+      ? '#!/bin/sh\nexec /bin/sleep 30\n'
+      : '#!/bin/sh\nprintf probe_completed\n', { mode: 0o700 });
+    const commands = [];
+    const api = makeSessionOps(new Map([['watchdog-smoke', {
+      type: 'ssh', conn: { exec(command, cb) { commands.push(command); cb(null, fakeStream('fixture')); } },
+    }]]));
+    const captured = await api.getSessionDistroInfo({}, { sessionId: 'watchdog-smoke' });
+    assert.equal(captured.success, true);
+    assert.equal(commands.length, 1);
+    const started = Date.now();
+    const child = spawn('/bin/sh', ['-c', commands[0]], {
+      detached: true, env: { ...process.env, PATH: `${directory}:${process.env.PATH}` },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let output = '', outcome = null;
+    child.stdout.on('data', data => { output += data; });
+    child.stderr.resume();
+    const finished = new Promise((resolve, reject) => {
+      child.once('error', reject);
+      child.once('close', (code, signal) => { outcome = { code, signal }; resolve(); });
+    });
+    let timer;
+    try {
+      await Promise.race([finished, new Promise(resolve => { timer = setTimeout(resolve, 7000); })]);
+      const ps = spawnSync('ps', ['-axo', 'pid=,pgid=,stat='], { encoding: 'utf8' });
+      assert.equal(ps.status, 0, ps.stderr);
+      const living = ps.stdout.split('\n').map(line => line.trim().split(/\s+/))
+        .filter(row => Number(row[1]) === child.pid && !row[2].startsWith('Z'));
+      assert.ok(outcome, `probe did not close; descendants still alive: ${JSON.stringify(living)}`);
+      assert.deepEqual(living, [], 'probe must not leave a child or watchdog sleep running');
+      if (blocked) {
+        assert.equal(outcome.signal, 'SIGKILL');
+        assert.ok(Date.now() - started >= 4500, 'remote watchdog must own the timeout');
+      } else {
+        assert.equal(outcome.code, 0);
+        assert.equal(output, 'probe_completed');
+        assert.ok(Date.now() - started < 2000, 'success must not wait for the watchdog deadline');
+      }
+    } finally {
+      clearTimeout(timer);
+      try { process.kill(-child.pid, 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') throw error; }
+      await finished;
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+}

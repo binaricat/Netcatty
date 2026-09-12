@@ -8,7 +8,6 @@ import {
   getShiftEnterSubmittedInput,
   isBareShiftEnterLineEnding,
   isShiftEnterLineContinuationText,
-  resolveShiftEnterPayload,
   resolveShiftEnterText,
   SHIFT_ENTER_CSI_U_SEQUENCE,
   shouldSendShiftEnterText,
@@ -100,44 +99,6 @@ test("Kitty encodings that collapse Shift+Enter to CR/LF do not preserve the cho
   assert.equal(doesKittyEncodingPreserveShiftEnter(SHIFT_ENTER_CSI_U_SEQUENCE), true);
 });
 
-test("main-buffer Shift+Enter keeps configured send text", () => {
-  assert.deepEqual(resolveShiftEnterPayload(), {
-    kind: "text",
-    data: "\n",
-  });
-  assert.deepEqual(
-    resolveShiftEnterPayload(
-      { shiftEnterNewlineText: " \\\\\\n" },
-      { alternateScreen: false },
-    ),
-    { kind: "text", data: " \\\n" },
-  );
-});
-
-test("alternate-screen Shift+Enter sends CSI-u when configured text is a bare line ending", () => {
-  assert.deepEqual(
-    resolveShiftEnterPayload(undefined, { alternateScreen: true }),
-    { kind: "key", data: SHIFT_ENTER_CSI_U_SEQUENCE },
-  );
-  assert.deepEqual(
-    resolveShiftEnterPayload(
-      { shiftEnterNewlineText: "\\r\\n" },
-      { alternateScreen: true },
-    ),
-    { kind: "key", data: SHIFT_ENTER_CSI_U_SEQUENCE },
-  );
-});
-
-test("alternate-screen Shift+Enter keeps custom non-line-ending send text", () => {
-  assert.deepEqual(
-    resolveShiftEnterPayload(
-      { shiftEnterNewlineText: " \\\\\\n" },
-      { alternateScreen: true },
-    ),
-    { kind: "text", data: " \\\n" },
-  );
-});
-
 test("runtime routes Shift+Enter text through the shared input handler", () => {
   const source = readFileSync(
     new URL("./createXTermRuntime.ts", import.meta.url),
@@ -146,16 +107,24 @@ test("runtime routes Shift+Enter text through the shared input handler", () => {
 
   assert.match(
     source,
-    /const handleTerminalInputData = \(\s+data: string,\s+options\?: \{\s+source\?: "terminal" \| "shift-enter" \| "kitty";\s+[\s\S]*?skipBroadcast\?: boolean;\s+\},\s+\) => \{/s,
+    /const handleTerminalInputData = \(\s+data: string,\s+options\?: \{\s+source\?: "terminal" \| "shift-enter" \| "kitty";\s+[\s\S]*?skipBroadcast\?: boolean;\s+[\s\S]*?perCharacterWrites\?: boolean;\s+\},\s+\) => \{/s,
   );
   // Remap when Kitty encoding does not preserve Shift+Enter (not merely flags===0).
   assert.match(
     source,
-    /if \(\s*shouldSendShiftEnterText\([\s\S]*?\) &&\s*!doesKittyEncodingPreserveShiftEnter\(kittySequenceForKeyDown\)\s*\) \{[\s\S]*?const shiftEnterPayload = resolveShiftEnterPayload\([\s\S]*?\)[\s\S]*?\}\s*if \(kittySequenceForKeyDown\)/s,
+    /if \(\s*shouldSendShiftEnterText\([\s\S]*?\) &&\s*!term\.modes\.win32InputMode &&\s*!doesKittyEncodingPreserveShiftEnter\(kittySequenceForKeyDown\)\s*\) \{[\s\S]*?const shiftEnterText = resolveShiftEnterText\([\s\S]*?\)[\s\S]*?\}\s*if \(kittySequenceForKeyDown\)/s,
   );
   assert.match(
     source,
-    /if \(shiftEnterPayload\.kind === "key"\) \{[\s\S]*?handleTerminalInputData\(shiftEnterPayload\.data, \{ source: "kitty" \}\);[\s\S]*?\} else \{[\s\S]*?handleTerminalInputData\(shiftEnterPayload\.data, \{\s*source: "shift-enter",\s*skipBroadcast: true,\s*\}\);[\s\S]*?\}\s*const forwarded = broadcastKittyInput\(\{\s*kind: "key",\s*event: kittyEvent,\s*fallbackToLegacy: true,\s*\}\);/s,
+    /vtExtensions: \{\s*win32InputMode: windowsPty\?\.backend === "conpty",\s*\},/s,
+  );
+  assert.match(
+    source,
+    /const kittySequenceForKeyDown =\s*!term\.modes\.win32InputMode &&\s*kittyKeyboardProtocolEnabled/s,
+  );
+  assert.match(
+    source,
+    /const shiftEnterText = resolveShiftEnterText\([\s\S]*?if \(shiftEnterText\) \{[\s\S]*?handleTerminalInputData\(shiftEnterText, \{\s*source: "shift-enter",\s*skipBroadcast: true,\s*\}\);\s*const forwarded = broadcastKittyInput\(\{\s*kind: "key",\s*event: kittyEvent,\s*fallbackToLegacy: true,\s*\}\);/s,
   );
   assert.match(
     source,
@@ -163,9 +132,10 @@ test("runtime routes Shift+Enter text through the shared input handler", () => {
   );
   assert.match(
     source,
-    /alternateScreen: term\.buffer\.active\.type === "alternate",\s*shiftEnterSettings: ctx\.terminalSettingsRef\.current,/s,
+    /resolveOptions: \(\) => \(\{[\s\S]*?shiftEnterSettings: ctx\.terminalSettingsRef\.current,[\s\S]*?\}\),/s,
   );
-  assert.match(source, /getShiftEnterSubmittedInput\(data\)/);
+  assert.doesNotMatch(source, /resolveShiftEnterText\([\s\S]*?alternateScreen:/s);
+  assert.match(source, /getShiftEnterSubmittedInput\(logicalData\)/);
   assert.match(source, /inputSource !== "shift-enter"/);
   assert.match(
     source,
@@ -173,11 +143,44 @@ test("runtime routes Shift+Enter text through the shared input handler", () => {
   );
   assert.match(
     source,
-    /term\.onData\(\(data\) => \{[\s\S]*handleTerminalInputData\(data\);\s+\}\);/,
+    /term\.onData\(\(data\) => \{[\s\S]*const sanitizedRawData = sanitizeTerminalInput\(data\);[\s\S]*handleTerminalInputData\(sanitizedRawData, \{\s*perCharacterWrites: shouldSplitRawPasteInputForWire\(sanitizedRawData\),?\s*\}\);\s+\}\);/,
   );
   assert.match(
     source,
-    /const sanitizedData = sanitizeTerminalInput\(data\);[\s\S]*const encoded = encodeKittyCompositionText\(kittyKeyboardMode, sanitizedData\);[\s\S]*if \(encoded\) \{[\s\S]*handleTerminalInputData\(encoded, \{ source: "kitty" \}\);[\s\S]*\} else \{[\s\S]*handleTerminalInputData\(sanitizedData\);[\s\S]*broadcastKittyInput\(\{ kind: "text", text: sanitizedData \}\);/,
+    /const sanitizedData = sanitizeTerminalInput\(data\);[\s\S]*const encoded = term\.modes\.win32InputMode\s*\? null\s*:\s*encodeKittyCompositionText\(kittyKeyboardMode, sanitizedData\);[\s\S]*if \(encoded\) \{[\s\S]*handleTerminalInputData\(encoded, \{ source: "kitty" \}\);[\s\S]*\} else \{[\s\S]*handleTerminalInputData\(sanitizedData, \{\s*perCharacterWrites: shouldSplitImeTextInputForWire\(sanitizedData\),?\s*\}\);[\s\S]*broadcastKittyInput\(\{ kind: "text", text: sanitizedData \}\);/,
+  );
+  assert.match(
+    source,
+    /if \(term\.modes\.win32InputMode\) \{[\s\S]*win32InputModePendingEvent = \{\s*event: normalizedKittyEvent,\s*logicalData: resolveWin32InputLogicalData\(/s,
+  );
+  assert.match(
+    source,
+    /const broadcastInput: KittyKeyboardBroadcastInput = \{\s*kind: "win32",\s*data,\s*event: win32Input\.event,[\s\S]*handleTerminalInputData\(data, \{\s*logicalData: win32Input\.logicalData,\s*skipBroadcast: true,/s,
+  );
+  assert.match(
+    source,
+    /const hasForwardedWin32KeyDown = win32InputModeForwardedKeys\.delete\(identity\);[\s\S]*if \(term\.modes\.win32InputMode\) \{[\s\S]*releaseForwardedKittyPress\([\s\S]*if \(!hasForwardedWin32KeyDown\) \{[\s\S]*win32InputModePendingEvent = null;[\s\S]*return false;[\s\S]*logicalData: null,[\s\S]*return true;[\s\S]*releaseForwardedKittyPress/s,
+  );
+  assert.match(
+    source,
+    /if \(win32Input\.event\.type === "keydown"\) \{\s*upsertKittyKeyboardForwardedPress\(\s*win32InputModeForwardedKeys,\s*win32Input\.event\.code \|\| win32Input\.event\.key,\s*win32Input\.event,\s*\[\],/s,
+  );
+  assert.match(
+    source,
+    /if \(term\.modes\.win32InputMode\) \{[\s\S]*flushKittyKeyboardBroadcastReleases\(\s*win32InputModeForwardedKeys,[\s\S]*writeWin32InputModeEvent\(input\.event, null\);/s,
+  );
+  assert.match(source, /win32InputMode: term\.modes\.win32InputMode,/);
+  assert.match(
+    source,
+    /const win32BroadcastForwardedKeys = new Map<string, KittyKeyboardForwardedPress>\(\);/,
+  );
+  assert.match(
+    source,
+    /const forwardedPress = win32BroadcastForwardedKeys\.get\(identity\);[\s\S]*broadcastKittyInput\(\s*broadcastInput,\s*true,\s*forwardedPress\.targetSessionIds,/s,
+  );
+  assert.match(
+    source,
+    /upsertKittyKeyboardForwardedPress\(\s*win32BroadcastForwardedKeys,[\s\S]*forwarded\.targetSessionIds,/s,
   );
   assert.match(source, /ctx\.container\.addEventListener\("input", markKittyTextInput, true\);/);
   assert.match(

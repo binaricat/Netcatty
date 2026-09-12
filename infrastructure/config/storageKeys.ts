@@ -58,6 +58,9 @@ export const STORAGE_KEY_VAULT_NOTES_VIEW_MODE = 'netcatty_vault_notes_view_mode
 export const STORAGE_KEY_VAULT_NOTES_EDITOR_MODE = 'netcatty_vault_notes_editor_mode_v1';
 export const STORAGE_KEY_VAULT_NOTES_SELECTED_GROUP = 'netcatty_vault_notes_selected_group_v1';
 export const STORAGE_KEY_VAULT_NOTES_TREE_WIDTH = 'netcatty_vault_notes_tree_width_v1';
+export const STORAGE_KEY_VAULT_NOTES_FONT_FAMILY = 'netcatty_vault_notes_font_family_v1';
+export const STORAGE_KEY_VAULT_NOTES_FONT_SIZE = 'netcatty_vault_notes_font_size_v1';
+export const STORAGE_KEY_VAULT_NOTES_CODE_FONT_SIZE = 'netcatty_vault_notes_code_font_size_v1';
 /** Inline snippet/script edit panel width (px). */
 export const STORAGE_KEY_SNIPPETS_PANEL_WIDTH = 'netcatty_snippets_panel_width_v1';
 /** Inline vault host/group details panel width (px). */
@@ -126,6 +129,8 @@ export const STORAGE_KEY_SFTP_TRANSFER_CENTER = 'netcatty_sftp_transfer_center_v
 export const STORAGE_KEY_SFTP_AUTO_OPEN_SIDEBAR = 'netcatty_sftp_auto_open_sidebar_v1';
 export const STORAGE_KEY_SFTP_FOLLOW_TERMINAL_CWD = 'netcatty_sftp_follow_terminal_cwd_v1';
 export const STORAGE_KEY_SFTP_DEFAULT_VIEW_MODE = 'netcatty_sftp_default_view_mode_v1';
+/** Compact vs comfortable SFTP file-list row density. */
+export const STORAGE_KEY_SFTP_LIST_DENSITY = 'netcatty_sftp_list_density_v1';
 export const STORAGE_KEY_SFTP_HOST_VIEW_MODES = 'netcatty_sftp_host_view_modes_v1';
 export const STORAGE_KEY_SFTP_VISIBLE_COLUMNS = 'netcatty_sftp_visible_columns_v1';
 export const STORAGE_KEY_SFTP_DIRECTORIES_FIRST = 'netcatty_sftp_directories_first_v1';
@@ -166,6 +171,8 @@ export const STORAGE_KEY_MANAGED_SOURCES = 'netcatty_managed_sources_v1';
 // Global Toggle Window Settings (Quake Mode)
 export const STORAGE_KEY_TOGGLE_WINDOW_HOTKEY = 'netcatty_toggle_window_hotkey_v1';
 export const STORAGE_KEY_CLOSE_TO_TRAY = 'netcatty_close_to_tray_v1';
+/** Optimistic cache only — the source of truth is app.getLoginItemSettings() in the main process. */
+export const STORAGE_KEY_AUTO_LAUNCH_ENABLED = 'netcatty_auto_launch_enabled_v1';
 /** App-level HTTP(S) proxy for cloud sync / AI (not SSH ProxyJump). */
 export const STORAGE_KEY_HTTP_NETWORK_PROXY = 'netcatty_http_network_proxy_v1';
 export const STORAGE_KEY_GLOBAL_HOTKEY_ENABLED = 'netcatty_global_hotkey_enabled_v1';
@@ -185,11 +192,14 @@ export const STORAGE_KEY_AI_EXTERNAL_AGENTS = 'netcatty_ai_external_agents_v1';
 export const STORAGE_KEY_AI_DEFAULT_AGENT = 'netcatty_ai_default_agent_v1';
 export const STORAGE_KEY_AI_COMMAND_BLOCKLIST = 'netcatty_ai_command_blocklist_v1';
 export const STORAGE_KEY_AI_COMMAND_TIMEOUT = 'netcatty_ai_command_timeout_v1';
+export const STORAGE_KEY_AI_RESPONSE_IDLE_TIMEOUT = 'netcatty_ai_response_idle_timeout_v1';
 export const STORAGE_KEY_AI_MAX_ITERATIONS = 'netcatty_ai_max_iterations_v1';
 export const STORAGE_KEY_AI_SESSIONS = 'netcatty_ai_sessions_v1';
 export const STORAGE_KEY_AI_ACTIVE_SESSION_MAP = 'netcatty_ai_active_session_map_v1';
 export const STORAGE_KEY_AI_AGENT_MODEL_MAP = 'netcatty_ai_agent_model_map_v1';
 export const STORAGE_KEY_AI_AGENT_PROVIDER_MAP = 'netcatty_ai_agent_provider_map_v1';
+export const STORAGE_KEY_AI_AGENT_THINKING_MAP = 'netcatty_ai_agent_thinking_map_v1';
+export const STORAGE_KEY_AI_COMPOSER_MODEL_PREFS = 'netcatty_ai_composer_model_prefs_v1';
 export const STORAGE_KEY_AI_WEB_SEARCH = 'netcatty_ai_web_search_v1';
 export const STORAGE_KEY_AI_QUICK_MESSAGES = 'netcatty_ai_quick_messages_v1';
 /** Confirm-mode permission grant memory (capability + session/command patterns). */

@@ -154,7 +154,8 @@ export const useAvailableFonts = (): TerminalFont[] => {
   
   return useSyncExternalStore(
     fontStore.subscribe,
-    fontStore.getAvailableFonts
+    fontStore.getAvailableFonts,
+    fontStore.getAvailableFonts,
   );
 };
 
@@ -164,6 +165,7 @@ export const useInstalledFontFamilies = (): string[] | null => {
   }
   return useSyncExternalStore(
     fontStore.subscribe,
+    fontStore.getInstalledFontFamilies,
     fontStore.getInstalledFontFamilies,
   );
 };

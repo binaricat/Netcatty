@@ -1,3 +1,4 @@
+import { getHostOsSelection, HOST_OS_SELECTIONS, resolveHostOs } from '../domain/host';
 import React from "react";
 import { AlertTriangle, ChevronDown, ChevronUp, Forward, Globe, HeartPulse, KeyRound, Link2, Palette, Plus, Router, ShieldAlert, TerminalSquare, Timer, Wifi, X, Variable } from "lucide-react";
 import { customThemeStore } from "../application/state/customThemeStore";
@@ -350,26 +351,59 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
           </HostDetailsSection>
         )}
 
-        {/* Network Device Mode — only for SSH hosts without Mosh / ET (serial already uses raw mode) */}
-        {(!form.protocol || form.protocol === 'ssh') && !form.moshEnabled && !form.etEnabled && (
+        {(!form.protocol || ['ssh', 'telnet', 'mosh', 'et'].includes(form.protocol)) && (
         <HostDetailsSection
           icon={<Router size={14} className="text-muted-foreground" />}
           title={t("hostDetails.section.deviceType")}
         >
-          <ToggleRow
-            label={t("hostDetails.deviceType")}
-            hint={t("hostDetails.deviceType.desc")}
-            enabled={effectiveDeviceType === 'network'}
-            onToggle={() => update("deviceType", effectiveDeviceType === 'network' ? 'general' : 'network')}
-          />
-          {effectiveDeviceType === 'network' && (
-            <div className="flex items-start gap-2 p-2 rounded-md bg-yellow-500/10 border border-yellow-500/20">
-              <AlertTriangle size={14} className="text-yellow-500 mt-0.5 flex-shrink-0" />
-              <p className="text-xs text-yellow-600 dark:text-yellow-400 break-words">
-                {t("hostDetails.deviceType.warning")}
+          {(!form.protocol || form.protocol === 'ssh') && !form.moshEnabled && !form.etEnabled && (<>
+            <ToggleRow
+              label={t("hostDetails.deviceType")}
+              hint={t("hostDetails.deviceType.desc")}
+              enabled={effectiveDeviceType === 'network'}
+              onToggle={() => update("deviceType", effectiveDeviceType === 'network' ? 'general' : 'network')}
+            />
+            {effectiveDeviceType === 'network' && (
+              <div className="flex items-start gap-2 p-2 rounded-md bg-yellow-500/10 border border-yellow-500/20">
+                <AlertTriangle size={14} className="text-yellow-500 mt-0.5 flex-shrink-0" />
+                <p className="text-xs text-yellow-600 dark:text-yellow-400 break-words">
+                  {t("hostDetails.deviceType.warning")}
+                </p>
+              </div>
+            )}
+          </>)}
+          <Collapsible>
+            <CollapsibleTrigger asChild>
+              <Button
+                variant="ghost"
+                className="group w-full justify-between h-8 px-2 hover:bg-accent/50"
+                aria-label={t("hostDetails.os.title")}
+              >
+                <span className="text-xs font-medium text-muted-foreground">{t("hostDetails.os.title")}</span>
+                <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  {t(`hostDetails.os.${getHostOsSelection(form)}`)}
+                  <ChevronDown size={14} className="group-data-[state=open]:rotate-180" />
+                </span>
+              </Button>
+            </CollapsibleTrigger>
+            <CollapsibleContent className="mt-2 space-y-2">
+              <HostDetailsSettingRow label={t("hostDetails.os.selection")} hint={t("hostDetails.os.desc")}>
+                <Select value={getHostOsSelection(form)} onValueChange={(value) => update("osOverride", value)}>
+                  <SelectTrigger className="h-8 w-36 text-xs" aria-label={t("hostDetails.os.selection")}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {HOST_OS_SELECTIONS.map((value) => (
+                      <SelectItem key={value} value={value}>{t(`hostDetails.os.${value}`)}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </HostDetailsSettingRow>
+              <p className="text-xs text-muted-foreground">
+                {t("hostDetails.os.current")}: {t(`hostDetails.os.${resolveHostOs({ ...form, deviceType: effectiveDeviceType })}`)}
               </p>
-            </div>
-          )}
+            </CollapsibleContent>
+          </Collapsible>
         </HostDetailsSection>
         )}
 

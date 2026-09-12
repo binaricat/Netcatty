@@ -46,6 +46,8 @@ interface TerminalAutocompleteProps {
   isPluginCompletionProviderAvailable?: () => boolean;
   sensitiveInputActiveRef: RefObject<boolean>;
   allowHostStyleGreaterThanPrompt?: boolean;
+  /** Vendor CLI / network-device session: skip live-preview PTY rewrites (#1193). */
+  isNetworkDevice?: boolean;
 }
 
 /**
@@ -87,6 +89,7 @@ export function TerminalAutocomplete({
   isPluginCompletionProviderAvailable,
   sensitiveInputActiveRef,
   allowHostStyleGreaterThanPrompt = false,
+  isNetworkDevice = false,
 }: TerminalAutocompleteProps) {
   // Self-subscribe to this pane's visibility so toggling it doesn't have to
   // flow through (and re-render) the TerminalView ctx. Popup / standalone
@@ -145,6 +148,7 @@ export function TerminalAutocomplete({
     getCwd,
     sensitiveInputActiveRef,
     provideCompletions,
+    isNetworkDevice,
   });
 
   // Surface the handlers for runtime wiring. They have stable identities

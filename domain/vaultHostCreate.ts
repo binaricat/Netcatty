@@ -1,5 +1,6 @@
 import type { GroupConfig, Host, HostProtocol, Identity, ManagedSource, ProxyProfile } from './models';
 import { sanitizeHost } from './host';
+import type { HostOsSelection } from './models/connection';
 import {
   findIntroducedVaultJumpGraphIssue,
   findVaultGroupConfigJumpReference,
@@ -40,6 +41,7 @@ export interface VaultHostDraft {
   tags?: unknown;
   notes?: unknown;
   protocol?: unknown;
+  os?: unknown;
 }
 
 export interface VaultHostUpdatePatch extends VaultHostDraft {
@@ -89,6 +91,16 @@ const normalizeProtocol = (raw: unknown): VaultHostDraftProtocol | undefined => 
   if (value === 'ssh' || value === 'ssh2') return 'ssh';
   if (value === 'telnet') return 'telnet';
   if (value === 'local') return 'local';
+  return undefined;
+};
+
+const normalizeOs = (raw: unknown): HostOsSelection | undefined => {
+  if (typeof raw !== 'string') return undefined;
+  const value = raw.trim().toLowerCase();
+  if (value === 'auto' || value === 'freebsd' || value === 'unknown') return value;
+  if (value === 'linux') return 'linux';
+  if (value === 'windows' || value === 'win') return 'windows';
+  if (value === 'macos' || value === 'mac' || value === 'osx' || value === 'darwin') return 'macos';
   return undefined;
 };
 
@@ -214,6 +226,14 @@ export function buildVaultHostFromDraft(
     return { ok: false, error: 'protocol must be ssh, telnet, or local.' };
   }
   const protocol = parsedProtocol ?? 'ssh';
+  const parsedOs = normalizeOs(draft.os);
+  const hasOsInput = draft.os !== undefined
+    && draft.os !== null
+    && !(typeof draft.os === 'string' && !draft.os.trim());
+  if (hasOsInput && parsedOs === undefined) {
+    return { ok: false, error: 'os must be auto, linux, windows, macos, freebsd, or unknown.' };
+  }
+  const os = parsedOs === 'windows' || parsedOs === 'macos' ? parsedOs : 'linux';
   const parsedPort = parsePort(draft.port);
   const hasPortInput = draft.port !== undefined
     && draft.port !== null
@@ -289,7 +309,8 @@ export function buildVaultHostFromDraft(
       ...(savePassword !== undefined ? { savePassword } : {}),
       group: normalizeGroupPath(draft.group),
       tags: tags.tags,
-      os: 'linux',
+      os,
+      osOverride: parsedOs ?? 'auto',
       protocol,
       createdAt: now,
       ...(keyPath
@@ -332,6 +353,7 @@ export function applyVaultHostUpdate(
   const tags = firstProvided(source, ['tags']);
   const notes = firstProvided(source, ['notes']);
   const protocol = firstProvided(source, ['protocol']);
+  const os = firstProvided(source, ['os']);
   const identityId = firstProvided(source, ['identityId']);
   const jumpHostIds = firstProvided(source, ['jumpHostIds']);
   const proxyProfileId = firstProvided(source, ['proxyProfileId']);
@@ -343,7 +365,7 @@ export function applyVaultHostUpdate(
   const etEnabled = firstProvided(source, ['etEnabled']);
   const etPort = firstProvided(source, ['etPort']);
   const serialConfig = firstProvided(source, ['serialConfig']);
-  const provided = [label, hostname, port, username, password, savePassword, keyPath, group, tags, notes, protocol,
+  const provided = [label, hostname, port, username, password, savePassword, keyPath, group, tags, notes, protocol, os,
     identityId, jumpHostIds, proxyProfileId, startupCommand, startupCommandRunMode, environmentVariables,
     moshEnabled, moshServerPath, etEnabled, etPort, serialConfig]
     .some((entry) => entry.provided);
@@ -414,6 +436,15 @@ export function applyVaultHostUpdate(
       updated.moshEnabled = false;
       updated.etEnabled = false;
     }
+  }
+
+  if (os.provided) {
+    const nextOs = normalizeOs(os.value);
+    if (!nextOs) {
+      return { ok: false, error: 'os must be auto, linux, windows, macos, freebsd, or unknown.' };
+    }
+    updated.osOverride = nextOs;
+    updated.os = nextOs === 'windows' || nextOs === 'macos' ? nextOs : 'linux';
   }
 
   if (identityId.provided) {

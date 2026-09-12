@@ -563,7 +563,7 @@ function createAppLockController({
     const currentPassword = typeof input.currentPassword === "string" ? input.currentPassword : "";
     const hadVerifierAtRequest = Boolean(getSettings().passwordVerifier);
 
-    if (nextPassword.trim() === "") {
+    if (nextPassword.length === 0) {
       return { ok: false, error: "empty-next" };
     }
     let fail = null;

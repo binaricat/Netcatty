@@ -92,7 +92,14 @@ export interface SftpExternalOperationsResult {
   uploadExternalEntries: (
     side: "left" | "right",
     entries: DropEntry[],
-    options?: { targetPath?: string; connectionId?: string; tabId?: string; endpointPin?: UploadEndpointPin },
+    options?: {
+      targetPath?: string;
+      connectionId?: string;
+      tabId?: string;
+      endpointPin?: UploadEndpointPin;
+      /** Fail closed if the selected tab is rebound before upload work starts. */
+      strictConnectionPin?: boolean;
+    },
   ) => Promise<UploadResult[]>;
   cancelExternalUpload: (taskId?: string) => Promise<void>;
   selectApplication: () => Promise<{ path: string; name: string } | null>;

@@ -4,6 +4,8 @@ import {
   findSyncPayloadEncryptedCredentialPaths,
   healPoisonedSecretsForMerge,
   isEncryptedCredentialPlaceholder,
+  isVaultStoredKeySource,
+  needsVaultStoredKeyHydration,
   stripSyncPayloadEncryptedCredentials,
 } from "./credentials.ts";
 import type { SyncPayload } from "./sync.ts";
@@ -71,6 +73,28 @@ test("isEncryptedCredentialPlaceholder detects real Windows DPAPI base64 prefixe
 
 test("isEncryptedCredentialPlaceholder rejects header-only enc:v1 payloads", () => {
   assert.equal(isEncryptedCredentialPlaceholder("enc:v1:djEw"), false);
+});
+
+test("needsVaultStoredKeyHydration waits for imported or generated ciphertext and empty keys", () => {
+  assert.equal(isVaultStoredKeySource("imported"), true);
+  assert.equal(isVaultStoredKeySource("generated"), true);
+  assert.equal(isVaultStoredKeySource("reference"), false);
+  assert.equal(needsVaultStoredKeyHydration({
+    source: "imported",
+    privateKey: ENC,
+  }), true);
+  assert.equal(needsVaultStoredKeyHydration({
+    source: "generated",
+    privateKey: "",
+  }), true);
+  assert.equal(needsVaultStoredKeyHydration({
+    source: "imported",
+    privateKey: "-----BEGIN OPENSSH PRIVATE KEY-----",
+  }), false);
+  assert.equal(needsVaultStoredKeyHydration({
+    source: "reference",
+    privateKey: ENC,
+  }), false);
 });
 
 test("findSyncPayloadEncryptedCredentialPaths reports host and key secrets", () => {

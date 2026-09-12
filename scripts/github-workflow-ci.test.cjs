@@ -8,7 +8,7 @@ const readWorkflow = (name) => fs.readFileSync(path.join(workflowsDir, name), "u
 
 const testWorkflow = readWorkflow("test.yml");
 const buildWorkflow = readWorkflow("build.yml");
-const cursorWorkflow = readWorkflow("cursor-automation.yml");
+const aiWorkflow = readWorkflow("ai-automation.yml");
 const etWorkflow = readWorkflow("build-et-binaries.yml");
 const appBuilderPatch = fs.readFileSync(
   path.join(__dirname, "..", "patches", "app-builder-lib+26.15.2.patch"),
@@ -78,6 +78,10 @@ test("PR validation runs once per commit and includes a production build", () =>
     testWorkflow,
     /- name: Test terminal keyword highlight performance\s*\n\s*env:\s*\n\s*NETCATTY_TERMINAL_PERF_SHOW_WINDOW: "1"\s*\n\s*# GitHub-hosted runners do not configure Electron's SUID sandbox helper\.\s*\n\s*run: xvfb-run -a \.\/node_modules\/\.bin\/electron --no-sandbox scripts\/xterm-keyword-highlight-performance\.live\.test\.cjs/,
   );
+  assert.match(
+    buildWorkflow,
+    /- name: Test macOS Option column selection\s*\n\s*if: matrix\.name == 'macos'\s*\n\s*run: npm run test:xterm-macos-selection/,
+  );
   assert.match(testWorkflow, /- name: Build\s*\n\s*run: npm run build/);
   assert.doesNotMatch(testWorkflow, /\n  mosh-windows-conpty:/);
 });
@@ -112,6 +116,8 @@ test("package validation avoids duplicate branch runs and scopes PR builds", () 
     "scripts/afterPackMacUuid.cjs",
     "scripts/beforePackCursorSdk.cjs",
     "scripts/nodePtyConptyPatch.cjs",
+    "scripts/patch-xterm-macos-column-selection.cjs",
+    "scripts/xterm-macos-column-selection.live.test.cjs",
     "scripts/linux/**",
     "skills/**",
   ]) {
@@ -272,7 +278,7 @@ test("Homebrew tap updates retry push races without downgrading newer releases",
 });
 
 test("Codex fix publishing treats a moved PR head as a stale result", () => {
-  const publishJob = cursorWorkflow.match(/\n  publish_codex_fix:\n[\s\S]*?(?=\n  own_rerequest_codex:)/);
+  const publishJob = aiWorkflow.match(/\n  publish_codex_fix:\n[\s\S]*?(?=\n  own_rerequest_codex:)/);
   assert.ok(publishJob, "publish_codex_fix job must exist before own_rerequest_codex");
   assert.match(publishJob[0], /--force-with-lease/);
   assert.match(publishJob[0], /published=false/);
@@ -282,7 +288,7 @@ test("Codex fix publishing treats a moved PR head as a stale result", () => {
 });
 
 test("issue implementation publishing tolerates competing automation runs", () => {
-  const publishJob = cursorWorkflow.match(/\n  publish_implement:\n[\s\S]*?(?=\n  codex_loop:)/);
+  const publishJob = aiWorkflow.match(/\n  publish_implement:\n[\s\S]*?(?=\n  codex_loop:)/);
   assert.ok(publishJob, "publish_implement job must exist before codex_loop");
   assert.match(publishJob[0], /--force-with-lease/);
   assert.match(publishJob[0], /candidate_tree/);
@@ -305,10 +311,10 @@ test("issue implementation publishing tolerates competing automation runs", () =
   assert.doesNotMatch(publishJob[0], /steps\.publish\.outcome == 'failure'/);
   assert.match(publishJob[0], /labels: \['ready-for-human'\]/);
   assert.match(publishJob[0], /could not safely publish the implementation branch/);
-  assert.match(publishJob[0], /cursor-publish-handoff:/);
+  assert.match(publishJob[0], /ai-publish-handoff:/);
   assert.match(publishJob[0], /github\.paginate\(github\.rest\.issues\.listComments/);
   assert.match(publishJob[0], /steps\.publish\.outputs\.published == 'true'/);
-  assert.match(publishJob[0], /group: cursor-codex-head-/);
+  assert.match(publishJob[0], /group: ai-codex-head-/);
   assert.match(publishJob[0], /status === 403 && createPermissionDenied/);
   assert.match(publishJob[0], /resource not accessible by integration/);
   assert.match(publishJob[0], /resource not accessible by personal access token/);
@@ -316,7 +322,7 @@ test("issue implementation publishing tolerates competing automation runs", () =
 });
 
 test("reused automation PRs still receive labels and one source-issue backlink", () => {
-  const openPr = cursorWorkflow.match(
+  const openPr = aiWorkflow.match(
     /\n      - name: Open draft PR[\s\S]*?(?=\n      - name: Request Codex review on implement PR)/,
   );
   assert.ok(openPr, "open-PR step must exist before Codex review request");
@@ -327,7 +333,7 @@ test("reused automation PRs still receive labels and one source-issue backlink",
 });
 
 test("reused implementation PRs do not duplicate Codex requests for the same head", () => {
-  const requestCodex = cursorWorkflow.match(
+  const requestCodex = aiWorkflow.match(
     /\n      - name: Request Codex review on implement PR[\s\S]*?(?=\n  codex_loop:)/,
   );
   assert.ok(requestCodex, "implement Codex request step must exist before codex_loop");
@@ -340,31 +346,31 @@ test("reused implementation PRs do not duplicate Codex requests for the same hea
 });
 
 test("all own-PR Codex request paths serialize on the head branch", () => {
-  const codexLoop = cursorWorkflow.match(/\n  codex_loop:\n[\s\S]*?(?=\n  publish_codex_fix:)/);
-  const ownRerequest = cursorWorkflow.match(/\n  own_rerequest_codex:\n[\s\S]*?(?=\n  external_rerequest_codex:)/);
+  const codexLoop = aiWorkflow.match(/\n  codex_loop:\n[\s\S]*?(?=\n  publish_codex_fix:)/);
+  const ownRerequest = aiWorkflow.match(/\n  own_rerequest_codex:\n[\s\S]*?(?=\n  external_rerequest_codex:)/);
   assert.ok(codexLoop, "codex_loop job must exist before publish_codex_fix");
   assert.ok(ownRerequest, "own_rerequest_codex must exist before external_rerequest_codex");
-  assert.match(cursorWorkflow, /head_ref: \$\{\{ steps\.decide\.outputs\.head_ref \}\}/);
-  assert.match(codexLoop[0], /group: cursor-codex-head-/);
-  assert.match(ownRerequest[0], /group: cursor-codex-head-/);
+  assert.match(aiWorkflow, /head_ref: \$\{\{ steps\.decide\.outputs\.head_ref \}\}/);
+  assert.match(codexLoop[0], /group: ai-codex-head-/);
+  assert.match(ownRerequest[0], /group: ai-codex-head-/);
   assert.match(codexLoop[0], /needs\.route\.outputs\.head_ref/);
   assert.match(ownRerequest[0], /needs\.route\.outputs\.head_ref/);
-  assert.match(cursorWorkflow, /head_ref: pr\.head\?\.ref \|\| ''/);
+  assert.match(aiWorkflow, /head_ref: pr\.head\?\.ref \|\| ''/);
   assert.match(
-    cursorWorkflow,
+    aiWorkflow,
     /issue_comment[\s\S]*?github\.rest\.pulls\.get[\s\S]*?head_ref: pr\.head\?\.ref \|\| ''/,
   );
 });
 
 test("scheduled Codex polling ignores review comments remapped from old heads", () => {
-  const pollJob = cursorWorkflow.match(/\n  codex_poll:\n[\s\S]*$/);
+  const pollJob = aiWorkflow.match(/\n  codex_poll:\n[\s\S]*$/);
   assert.ok(pollJob, "codex_poll job must exist");
   assert.match(pollJob[0], /auto\.filterCodexReviewCommentsForHead\(\s*reviewComments,\s*pr\.head\.sha/);
   assert.doesNotMatch(pollJob[0], /c\.commit_id \|\| c\.original_commit_id/);
 });
 
 test("clean Codex handoff updates labels without GraphQL-only organization scopes", () => {
-  const markReady = cursorWorkflow.match(/\n      - name: Mark PR ready after clean Codex[\s\S]*?(?=\n      - name: Give up after max rounds)/);
+  const markReady = aiWorkflow.match(/\n      - name: Mark PR ready after clean Codex[\s\S]*?(?=\n      - name: Give up after max rounds)/);
   assert.ok(markReady, "mark-ready step must exist before give-up step");
   assert.match(markReady[0], /gh api/);
   assert.match(markReady[0], /issues\/\$\{PULL_NUMBER\}\/labels/);
@@ -378,9 +384,9 @@ test("clean Codex handoff updates labels without GraphQL-only organization scope
 });
 
 test("permission handoffs use the established ready-for-human label", () => {
-  assert.doesNotMatch(cursorWorkflow, /automation:needs-human/);
-  assert.match(cursorWorkflow, /labels: \['ready-for-human'\]/);
-  assert.match(cursorWorkflow, /-f 'labels\[\]=ready-for-human'/);
+  assert.doesNotMatch(aiWorkflow, /automation:needs-human/);
+  assert.match(aiWorkflow, /labels: \['ready-for-human'\]/);
+  assert.match(aiWorkflow, /-f 'labels\[\]=ready-for-human'/);
 });
 
 test("ET binary validation runs once and retries transient container pulls", () => {

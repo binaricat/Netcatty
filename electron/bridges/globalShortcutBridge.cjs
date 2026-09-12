@@ -21,6 +21,11 @@ let tray = null;
 let closeToTray = false;
 let currentHotkey = null;
 let hotkeyEnabled = false;
+// True while a hidden auto-launch cold start has no visible window yet.
+// Keeps the tray alive even if the user's separate close-to-tray preference
+// is off, so a --hidden login-item launch is never a windowless, trayless
+// zombie process. Released once the main window is actually shown.
+let hiddenLaunchTrayPinned = false;
 
 const STATUS_TEXT = {
   session: {
@@ -1141,11 +1146,39 @@ function setCloseToTray(enabled) {
     }
   } else {
     clearPendingFullscreenHide(getMainWindow());
-    // Destroy tray if it exists
-    destroyTray();
+    // A hidden auto-launch cold start pins the tray regardless of this
+    // preference until its window is actually shown once — otherwise a user
+    // with close-to-tray off would get a windowless, trayless zombie process.
+    if (!hiddenLaunchTrayPinned) {
+      destroyTray();
+    }
   }
 
   return { success: true, enabled: closeToTray };
+}
+
+/**
+ * Force-create the tray for a hidden auto-launch cold start and keep it
+ * alive even if close-to-tray is later disabled, until the pin is released.
+ */
+function pinTrayForHiddenLaunch() {
+  hiddenLaunchTrayPinned = true;
+  if (!tray) {
+    createTray();
+  }
+}
+
+/**
+ * Release the hidden-launch tray pin once its window has been shown. If the
+ * user's close-to-tray preference is off, the tray is destroyed now instead
+ * of lingering until the next close-to-tray toggle.
+ */
+function releaseHiddenLaunchTrayPin() {
+  if (!hiddenLaunchTrayPinned) return;
+  hiddenLaunchTrayPinned = false;
+  if (!closeToTray) {
+    destroyTray();
+  }
 }
 
 /**
@@ -1305,6 +1338,9 @@ module.exports = {
   handleWindowClose,
   clearPendingFullscreenHide,
   cleanup,
+  createTray,
+  pinTrayForHiddenLaunch,
+  releaseHiddenLaunchTrayPin,
   getTray: () => tray,
   getTrayPanelWindow: () => trayPanelWindow,
   // Test helpers

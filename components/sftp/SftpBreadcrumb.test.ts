@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { JSDOM } from "jsdom";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -145,4 +146,129 @@ test("breadcrumb pins leading chrome and only scrolls trailing chips", () => {
     },
   } as HTMLElement);
   assert.deepEqual(shortCalls, [0]);
+});
+
+test("breadcrumb root button navigates to the filesystem root", async () => {
+  const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', {
+    pretendToBeVisual: true,
+    url: "http://localhost",
+  });
+  const window = dom.window;
+  const previousGlobals = new Map<string, PropertyDescriptor | undefined>();
+  const installGlobal = (key: string, value: unknown) => {
+    previousGlobals.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
+    Object.defineProperty(globalThis, key, {
+      configurable: true,
+      writable: true,
+      value,
+    });
+  };
+
+  class ResizeObserverStub {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+
+  installGlobal("window", window);
+  installGlobal("document", window.document);
+  installGlobal("navigator", window.navigator);
+  installGlobal("HTMLElement", window.HTMLElement);
+  installGlobal("Element", window.Element);
+  installGlobal("SVGElement", window.SVGElement);
+  installGlobal("Node", window.Node);
+  installGlobal("NodeFilter", window.NodeFilter);
+  installGlobal("MutationObserver", window.MutationObserver);
+  installGlobal("CustomEvent", window.CustomEvent);
+  installGlobal("Event", window.Event);
+  installGlobal("getComputedStyle", window.getComputedStyle.bind(window));
+  installGlobal("requestAnimationFrame", window.requestAnimationFrame.bind(window));
+  installGlobal("cancelAnimationFrame", window.cancelAnimationFrame.bind(window));
+  installGlobal("ResizeObserver", ResizeObserverStub);
+  installGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+
+  const { default: React, act } = await import("react");
+  const { createRoot } = await import("react-dom/client");
+  const { SftpBreadcrumb } = await import("./SftpBreadcrumb.tsx");
+  const { TooltipProvider } = await import("../ui/tooltip.tsx");
+  const rootNode = window.document.getElementById("root");
+  assert.ok(rootNode);
+  const root = createRoot(rootNode);
+  const navigatedPaths: string[] = [];
+
+  try {
+    await act(async () => {
+      root.render(
+        React.createElement(
+          TooltipProvider,
+          null,
+          React.createElement(SftpBreadcrumb, {
+            path: "/var/www/apps",
+            onNavigate: (path: string) => navigatedPaths.push(path),
+            onHome: () => {},
+          }),
+        ),
+      );
+    });
+
+    const rootButton = Array.from(window.document.querySelectorAll("button")).find(
+      (button) => button.textContent === "/",
+    );
+    assert.ok(rootButton, "root button should be rendered next to the home button");
+    assert.equal(rootButton.disabled, false);
+    await act(async () => rootButton.click());
+
+    assert.deepEqual(navigatedPaths, ["/"]);
+
+    // A preserved double-slash POSIX path must still be able to navigate to /.
+    await act(async () => {
+      root.render(
+        React.createElement(
+          TooltipProvider,
+          null,
+          React.createElement(SftpBreadcrumb, {
+            path: "//",
+            onNavigate: (path: string) => navigatedPaths.push(path),
+            onHome: () => {},
+          }),
+        ),
+      );
+    });
+    const rootButtonAtDoubleSlash = Array.from(window.document.querySelectorAll("button")).find(
+      (button) => button.textContent === "/",
+    );
+    assert.ok(rootButtonAtDoubleSlash, "root button should stay visible at //");
+    assert.equal(rootButtonAtDoubleSlash.disabled, false, "// must not disable navigation to /");
+    await act(async () => rootButtonAtDoubleSlash.click());
+    assert.deepEqual(navigatedPaths, ["/", "/"]);
+
+    // Already at the root: the button is disabled so it stays a no-op.
+    await act(async () => {
+      root.render(
+        React.createElement(
+          TooltipProvider,
+          null,
+          React.createElement(SftpBreadcrumb, {
+            path: "/",
+            onNavigate: (path: string) => navigatedPaths.push(path),
+            onHome: () => {},
+          }),
+        ),
+      );
+    });
+    const rootButtonAtRoot = Array.from(window.document.querySelectorAll("button")).find(
+      (button) => button.textContent === "/",
+    );
+    assert.ok(rootButtonAtRoot, "root button should stay visible at /");
+    assert.equal(rootButtonAtRoot.disabled, true);
+    await act(async () => rootButtonAtRoot.click());
+    assert.deepEqual(navigatedPaths, ["/", "/"]);
+  } finally {
+    await act(async () => root.unmount());
+    dom.window.close();
+    for (const [key, descriptor] of previousGlobals) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else delete (globalThis as Record<string, unknown>)[key];
+    }
+  }
 });

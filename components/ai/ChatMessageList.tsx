@@ -6,7 +6,7 @@
  * No avatars. Thinking blocks are collapsible.
  */
 
-import { AlertCircle, FileText, RotateCcw, SquareTerminal, X, ZoomIn, ZoomOut } from 'lucide-react';
+import { AlertCircle, BookOpen, FileText, RotateCcw, SquareTerminal, X, ZoomIn, ZoomOut } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import type { ChatMessage, ToolCall as AgentToolCall } from '../../infrastructure/ai/types';
@@ -700,6 +700,14 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({
                         >
                           <SquareTerminal size={12} className="text-muted-foreground/60 shrink-0" />
                           <span className="truncate max-w-[150px]">{att.filename || 'terminal selection'}</span>
+                        </div>
+                      ) : att.vaultNoteId ? (
+                        <div
+                          key={att.filename ? `${att.filename}-${i}` : `att-${message.id}-${i}`}
+                          className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md bg-muted/20 border border-border/20 text-[11px] text-foreground/70"
+                        >
+                          <BookOpen size={12} className="text-muted-foreground/60 shrink-0" />
+                          <span className="truncate max-w-[150px]">{att.vaultNoteTitle || att.filename || 'note'}</span>
                         </div>
                       ) : att.mediaType.startsWith('image/') ? (
                         <img

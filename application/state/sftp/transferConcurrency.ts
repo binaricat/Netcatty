@@ -1,6 +1,11 @@
-export const DEFAULT_SFTP_FILE_TRANSFER_CONCURRENCY = 2;
-export const MIN_SFTP_FILE_TRANSFER_CONCURRENCY = 1;
-export const MAX_SFTP_FILE_TRANSFER_CONCURRENCY = 16;
+import { resolveSftpTransferConcurrency } from "../../../domain/sftpTransferConcurrency";
+
+export {
+  DEFAULT_SFTP_FILE_TRANSFER_CONCURRENCY,
+  MAX_SFTP_FILE_TRANSFER_CONCURRENCY,
+  MIN_SFTP_FILE_TRANSFER_CONCURRENCY,
+  resolveSftpTransferConcurrency,
+} from "../../../domain/sftpTransferConcurrency";
 
 /**
  * Bounded parallel directory listings while walking a folder tree.
@@ -15,15 +20,6 @@ export const MAX_SFTP_DIRECTORY_LISTING_CONCURRENCY = 8;
 
 /** Default on: skip size+mtime matches like rsync's generator. */
 export const DEFAULT_SFTP_SKIP_UNCHANGED = true;
-
-export function resolveSftpTransferConcurrency(readStoredValue: () => number | null | undefined): number {
-  const stored = readStoredValue();
-  return stored != null &&
-    stored >= MIN_SFTP_FILE_TRANSFER_CONCURRENCY &&
-    stored <= MAX_SFTP_FILE_TRANSFER_CONCURRENCY
-    ? stored
-    : DEFAULT_SFTP_FILE_TRANSFER_CONCURRENCY;
-}
 
 export function resolveSftpDirectoryListingConcurrency(
   readStoredValue?: () => number | null | undefined,

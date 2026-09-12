@@ -26,6 +26,8 @@ export interface SftpConnection {
   homeDir?: string;
   /** True when this SFTP connection reuses an existing terminal SSH session */
   reusedConnection?: boolean;
+  /** Terminal session whose confirmed SSH transport backs this connection. */
+  sourceSessionId?: string;
   fileProtocol?: 'auto' | 'sftp' | 'scp';
 }
 

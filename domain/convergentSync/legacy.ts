@@ -1,4 +1,4 @@
-import type { SyncPayload } from '../sync';
+import { withHostsSanitizedForSync, type SyncPayload } from '../sync';
 import { normalizeJsonValue } from './json';
 import { encodeSettingPath } from './serialization';
 import { applyConvergentMutations } from './state';
@@ -119,16 +119,19 @@ function flattenSettings(
 
 /** Compare only cloud materialized data; timestamps and reliability metadata are transport details. */
 export function cloudSyncPayloadsEqual(left: SyncPayload, right: SyncPayload): boolean {
-  const project = (payload: SyncPayload) => ({
-    ...Object.fromEntries(
-      [...CONVERGENT_ENTITY_COLLECTIONS, ...CONVERGENT_STRING_COLLECTIONS]
-        .map((key) => [key, (payload as unknown as Record<string, unknown>)[key] ?? []]),
-    ),
-    settings: payload.settings ?? {},
-    // Plugin sidecars are host-owned opaque data on the encrypted blob and
-    // must participate in migration freshness / equality checks.
-    pluginSidecars: payload.pluginSidecars ?? { version: 1, entries: [] },
-  });
+  const project = (payload: SyncPayload) => {
+    const sanitized = withHostsSanitizedForSync(payload);
+    return {
+      ...Object.fromEntries(
+        [...CONVERGENT_ENTITY_COLLECTIONS, ...CONVERGENT_STRING_COLLECTIONS]
+          .map((key) => [key, (sanitized as unknown as Record<string, unknown>)[key] ?? []]),
+      ),
+      settings: sanitized.settings ?? {},
+      // Plugin sidecars are host-owned opaque data on the encrypted blob and
+      // must participate in migration freshness / equality checks.
+      pluginSidecars: sanitized.pluginSidecars ?? { version: 1, entries: [] },
+    };
+  };
   return fingerprint(project(left)) === fingerprint(project(right));
 }
 
@@ -143,10 +146,12 @@ export function diffLegacySyncPayload(
   legacy: SyncPayload,
 ): ConvergentMutation[] {
   const mutations: ConvergentMutation[] = [];
+  const sanitizedBaseline = withHostsSanitizedForSync(baseline);
+  const sanitizedLegacy = withHostsSanitizedForSync(legacy);
   for (const collection of CONVERGENT_ENTITY_COLLECTIONS) {
     if (!hasDefinedOwnProperty(legacy, collection)) continue;
-    const before = entityMap(baseline, collection);
-    const after = entityMap(legacy, collection);
+    const before = entityMap(sanitizedBaseline, collection);
+    const after = entityMap(sanitizedLegacy, collection);
     const beforePositions = positionMap(before.keys());
     const afterPositions = positionMap(after.keys());
     const ids = new Set([...before.keys(), ...after.keys()]);

@@ -63,7 +63,7 @@ test("sanitizeTerminalInput preserves CJK and emoji characters", () => {
   assert.equal(sanitizeTerminalInput("你好"), "你好");
   assert.equal(sanitizeTerminalInput("😀"), "😀");
   // Full-width punctuation (common CJK IME output) is preserved
-  assert.equal(sanitizeTerminalInput("，。！？"), "，。！");
+  assert.equal(sanitizeTerminalInput("，。！？"), "，。！？");
 });
 
 test("sanitizeTerminalInput preserves Kitty escape sequences", () => {

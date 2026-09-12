@@ -6,6 +6,7 @@ import {
   sanitizeHost,
 } from "../../domain/host";
 import { isEncryptedCredentialPlaceholder } from "../../domain/credentials";
+import { retainLocalHostLastConnectedAt } from "../../domain/sync";
 import { sanitizeGroupConfig } from "../../domain/groupConfig";
 import { normalizeKnownHosts } from "../../domain/knownHosts";
 import { normalizeNoteGroups, normalizeVaultNotes } from "../../domain/notes";
@@ -93,6 +94,7 @@ import {
   encryptIdentities,
   encryptKeys,
   encryptProxyProfiles,
+  notifyKeysEncryptedWritePending,
 } from "../../infrastructure/persistence/secureFieldAdapter";
 import { pluginExtensionBridge } from "./pluginExtensionBridge";
 import type { PluginImporterCommitRequest } from "./usePluginImporterCommit";
@@ -580,6 +582,9 @@ export const useVaultState = () => {
       });
     });
     keysWritePendingRef.current = writePromise;
+    // Stored-key hydration must not read a stale persisted key snapshot over
+    // this new state before its encrypted write lands.
+    notifyKeysEncryptedWritePending(writePromise);
     return writePromise;
   }, []);
 
@@ -623,6 +628,7 @@ export const useVaultState = () => {
       });
     });
     keysWritePendingRef.current = writePromise;
+    notifyKeysEncryptedWritePending(writePromise);
     return newKey;
   }, [keys]);
 
@@ -1920,7 +1926,19 @@ export const useVaultState = () => {
   const importData = useCallback(
     (payload: Partial<ExportableVaultData>): Promise<void> => {
       const encryptedWrites: Promise<void>[] = [];
-      if (payload.hosts) encryptedWrites.push(updateHosts(payload.hosts).then(() => undefined));
+      if (payload.hosts) {
+        // Cloud payloads no longer carry `lastConnectedAt` (#2629), but any
+        // remote reconciliation replaces the whole local host array. Re-attach
+        // each matching local host's device-local timestamp so applying a
+        // remote snippet/settings change cannot clear this device's recent-
+        // hosts list. Timestamps present on the incoming hosts (local backups,
+        // legacy cloud snapshots) still win as before.
+        encryptedWrites.push(
+          updateHosts(
+            retainLocalHostLastConnectedAt(payload.hosts, hostsRef.current) ?? payload.hosts,
+          ).then(() => undefined),
+        );
+      }
       if (payload.keys) encryptedWrites.push(updateKeys(payload.keys));
       if (payload.identities) encryptedWrites.push(updateIdentities(payload.identities));
       if (Array.isArray(payload.proxyProfiles)) encryptedWrites.push(updateProxyProfiles(payload.proxyProfiles));

@@ -5,6 +5,7 @@ interface UseSftpPaneVirtualListParams {
   isActive: boolean;
   enabled?: boolean;
   sortedDisplayFiles: SftpFileEntry[];
+  layoutKey?: string;
 }
 
 interface UseSftpPaneVirtualListResult {
@@ -20,6 +21,7 @@ export const useSftpPaneVirtualList = ({
   isActive,
   enabled = true,
   sortedDisplayFiles,
+  layoutKey,
 }: UseSftpPaneVirtualListParams): UseSftpPaneVirtualListResult => {
   const fileListRef = useRef<HTMLDivElement>(null);
   const [rowHeight, setRowHeight] = useState(0);
@@ -39,7 +41,7 @@ export const useSftpPaneVirtualList = ({
       resizeObserver.disconnect();
       window.cancelAnimationFrame(raf);
     };
-  }, [enabled, isActive, sortedDisplayFiles.length]);
+  }, [enabled, isActive, layoutKey, sortedDisplayFiles.length]);
 
   useLayoutEffect(() => {
     const container = fileListRef.current;
@@ -55,7 +57,7 @@ export const useSftpPaneVirtualList = ({
       }
     });
     return () => window.cancelAnimationFrame(raf);
-  }, [enabled, isActive, rowHeight, sortedDisplayFiles.length]);
+  }, [enabled, isActive, layoutKey, rowHeight, sortedDisplayFiles.length]);
 
   useEffect(() => {
     return () => {

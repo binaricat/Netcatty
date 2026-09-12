@@ -10,10 +10,13 @@ interface SessionTabContextMenuContentProps {
   sessionId: string;
   onCloseSession: (sessionId: string) => void;
   onCopySession?: (sessionId: string) => void;
+  /** Duplicate the session with a brand-new connection (fresh auth, e.g. a new bastion login). */
+  onDuplicateSession?: (sessionId: string) => void;
   onCopySessionToNewWindow?: (sessionId: string) => void;
   onDetachSession?: (sessionId: string) => void;
   onReconnectSession: (sessionId: string) => void;
   sessionStatus: TerminalSession['status'];
+  reconnectActive?: boolean;
   onRenameSession: (sessionId: string) => void;
   /** Vault host for this session; omit edit when missing (e.g. local shell). */
   editHost?: Host;
@@ -26,10 +29,12 @@ export function SessionTabContextMenuContent({
   sessionId,
   onCloseSession,
   onCopySession,
+  onDuplicateSession,
   onCopySessionToNewWindow,
   onDetachSession,
   onReconnectSession,
   sessionStatus,
+  reconnectActive = false,
   onRenameSession,
   editHost,
   onEditHost,
@@ -39,7 +44,7 @@ export function SessionTabContextMenuContent({
   return (
     <ContextMenuContent>
       <ContextMenuItem
-        disabled={isSessionReconnectDisabled(sessionStatus)}
+        disabled={isSessionReconnectDisabled(sessionStatus, reconnectActive)}
         onClick={() => onReconnectSession(sessionId)}
       >
         {t('terminal.menu.reconnect')}
@@ -55,6 +60,11 @@ export function SessionTabContextMenuContent({
       {onCopySession && (
         <ContextMenuItem onClick={() => onCopySession(sessionId)}>
           {t('tabs.copyTab')}
+        </ContextMenuItem>
+      )}
+      {onDuplicateSession && (
+        <ContextMenuItem onClick={() => onDuplicateSession(sessionId)}>
+          {t('tabs.duplicateSession')}
         </ContextMenuItem>
       )}
       {onCopySessionToNewWindow && (
@@ -75,6 +85,9 @@ export function SessionTabContextMenuContent({
   );
 }
 
-export const isSessionReconnectDisabled = (status: TerminalSession['status']): boolean => (
-  status === 'connecting'
+export const isSessionReconnectDisabled = (
+  status: TerminalSession['status'],
+  reconnectActive = false,
+): boolean => (
+  status === 'connecting' || reconnectActive
 );

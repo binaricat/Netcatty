@@ -75,6 +75,40 @@ test('buildVaultHostFromDraft accepts host aliases and a referenced key path', (
   assert.equal(built.host.password, undefined);
 });
 
+test('buildVaultHostFromDraft accepts an explicit host operating system', () => {
+  const cases: Array<[string, Host['os']]> = [
+    ['windows', 'windows'],
+    ['win', 'windows'],
+    [' Windows ', 'windows'],
+    ['macos', 'macos'],
+    ['darwin', 'macos'],
+    ['linux', 'linux'],
+  ];
+  for (const [input, expected] of cases) {
+    const built = buildVaultHostFromDraft({ hostname: '10.0.0.20', os: input });
+
+    assert.equal(built.ok, true);
+    if (!built.ok) continue;
+    assert.equal(built.host.os, expected);
+  }
+});
+
+test('buildVaultHostFromDraft defaults the operating system to linux', () => {
+  const built = buildVaultHostFromDraft({ hostname: '10.0.0.20' });
+
+  assert.equal(built.ok, true);
+  if (!built.ok) return;
+  assert.equal(built.host.os, 'linux');
+});
+
+test('buildVaultHostFromDraft rejects an unknown operating system', () => {
+  const built = buildVaultHostFromDraft({ hostname: '10.0.0.20', os: 'solaris' });
+
+  assert.equal(built.ok, false);
+  if (built.ok) return;
+  assert.match(built.error, /os must be/i);
+});
+
 test('buildVaultHostFromDraft does not retain a password when saving is disabled', () => {
   const built = buildVaultHostFromDraft({
     hostname: '10.0.0.20',
@@ -847,6 +881,49 @@ test('applyVaultHostUpdate parses JSON array tag strings', () => {
   assert.equal(result.ok, true);
   if (!result.ok) return;
   assert.deepEqual(result.updatedHost.tags, ['prod', 'api']);
+});
+
+test('applyVaultHostUpdate sets and normalizes the host operating system', () => {
+  const existing: Host = {
+    id: 'host-1',
+    label: 'host',
+    hostname: '10.0.0.1',
+    username: 'root',
+    tags: [],
+    os: 'linux',
+  };
+
+  const windowsResult = applyVaultHostUpdate([existing], [], 'host-1', { os: 'windows' });
+  assert.equal(windowsResult.ok, true);
+  if (!windowsResult.ok) return;
+  assert.equal(windowsResult.updatedHost.os, 'windows');
+
+  const aliasResult = applyVaultHostUpdate([existing], [], 'host-1', { os: 'mac' });
+  assert.equal(aliasResult.ok, true);
+  if (!aliasResult.ok) return;
+  assert.equal(aliasResult.updatedHost.os, 'macos');
+
+  const untouchedResult = applyVaultHostUpdate([existing], [], 'host-1', { label: 'renamed' });
+  assert.equal(untouchedResult.ok, true);
+  if (!untouchedResult.ok) return;
+  assert.equal(untouchedResult.updatedHost.os, 'linux');
+});
+
+test('applyVaultHostUpdate rejects an unknown operating system', () => {
+  const existing: Host = {
+    id: 'host-1',
+    label: 'host',
+    hostname: '10.0.0.1',
+    username: 'root',
+    tags: [],
+    os: 'linux',
+  };
+
+  const result = applyVaultHostUpdate([existing], [], 'host-1', { os: 'solaris' });
+
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.match(result.error, /os must be/i);
 });
 
 test('applyVaultHostUpdate rejects malformed JSON tag strings', () => {

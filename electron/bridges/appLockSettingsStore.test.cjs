@@ -168,3 +168,14 @@ test("createAppLockPasswordVerifier stores a verifier that verifyAppLockPassword
   assert.equal(await verifyAppLockPassword("correct horse battery staple", verifier), true);
   assert.equal(await verifyAppLockPassword("wrong password", verifier), false);
 });
+
+test("createAppLockPasswordVerifier preserves a whitespace-only password", async () => {
+  const verifier = await createAppLockPasswordVerifier(" ");
+
+  assert.equal(await verifyAppLockPassword(" ", verifier), true);
+  assert.equal(await verifyAppLockPassword("", verifier), false);
+  await assert.rejects(
+    () => createAppLockPasswordVerifier(""),
+    /App lock password is required/,
+  );
+});

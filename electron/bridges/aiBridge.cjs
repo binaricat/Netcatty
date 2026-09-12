@@ -527,6 +527,24 @@ const DEFAULT_AI_STREAM_TOTAL_TIMEOUT_MS = 30 * 60 * 1000;
 // Abort only after this much silence. Thinking tokens re-arm the timer, so an
 // active reasoning stream is not cut off at two minutes (issue #3051).
 const DEFAULT_AI_STREAM_IDLE_TIMEOUT_MS = 2 * 60 * 1000;
+const MAX_AI_STREAM_IDLE_TIMEOUT_MS = 24 * 60 * 60 * 1000;
+const AI_STREAM_IDLE_TOTAL_HEADROOM_MS = 90 * 1000;
+
+function resolveAIStreamTimeouts(options = {}) {
+  const requestedIdleTimeoutMs = Number(options.idleTimeoutMs);
+  const hasExplicitIdleTimeout = options.idleTimeoutMs != null && Number.isFinite(requestedIdleTimeoutMs);
+  const idleTimeoutMs = Number.isFinite(requestedIdleTimeoutMs)
+    ? Math.min(MAX_AI_STREAM_IDLE_TIMEOUT_MS, Math.max(1, requestedIdleTimeoutMs))
+    : DEFAULT_AI_STREAM_IDLE_TIMEOUT_MS;
+  const requestedTotalTimeoutMs = Number(options.totalTimeoutMs);
+  const totalTimeoutBudgetMs = Number.isFinite(requestedTotalTimeoutMs) && requestedTotalTimeoutMs > 0
+    ? requestedTotalTimeoutMs
+    : DEFAULT_AI_STREAM_TOTAL_TIMEOUT_MS;
+  const totalTimeoutMs = hasExplicitIdleTimeout
+    ? Math.max(idleTimeoutMs + AI_STREAM_IDLE_TOTAL_HEADROOM_MS, totalTimeoutBudgetMs)
+    : totalTimeoutBudgetMs;
+  return { idleTimeoutMs, totalTimeoutMs };
+}
 
 /**
  * Start a streaming HTTP request. The returned promise resolves as soon as
@@ -581,8 +599,7 @@ async function streamRequest(url, options, event, requestId, skipTLS) {
   const parsedUrl = new URL(url);
   // Register cancellation before any await so Stop during PAC/proxy lookup works.
   const controller = new AbortController();
-  const totalTimeoutMs = Math.max(1, Number(options.totalTimeoutMs) || DEFAULT_AI_STREAM_TOTAL_TIMEOUT_MS);
-  const idleTimeoutMs = Math.max(1, Number(options.idleTimeoutMs) || DEFAULT_AI_STREAM_IDLE_TIMEOUT_MS);
+  const { idleTimeoutMs, totalTimeoutMs } = resolveAIStreamTimeouts(options);
   const maxErrorBodyBytes = Math.max(1, Number(options.maxErrorBodyBytes) || 64 * 1024);
   let lifecycleFinished = false;
   let idleTimer;
@@ -687,7 +704,7 @@ async function streamRequest(url, options, event, requestId, skipTLS) {
     const reqOpts = {
         method: options.method || "POST",
         headers: withContentLength(options.headers || {}, options.body),
-        timeout: 120000, // 2 min connection timeout
+        timeout: idleTimeoutMs,
     };
     if (skipTLS && isHttps) reqOpts.rejectUnauthorized = false;
     if (proxyAgent) reqOpts.agent = proxyAgent;
@@ -807,7 +824,7 @@ async function streamRequest(url, options, event, requestId, skipTLS) {
     req.on("error", (err) => failStream(err, { destroy: false }));
 
     req.on("timeout", () => {
-      failStream(new Error("Request timeout"));
+      failStream(new Error(`AI stream idle deadline exceeded after ${idleTimeoutMs} ms`));
     });
 
     try {
@@ -1023,6 +1040,7 @@ module.exports = {
   buildExternalAgentSystemContext,
   buildExternalAgentContextualPrompt,
   _streamRequestForTests: streamRequest,
+  _resolveAIStreamTimeoutsForTests: resolveAIStreamTimeouts,
   _getActiveStreamCountForTests: () => activeStreams.size,
   DEFAULT_AI_STREAM_TOTAL_TIMEOUT_MS,
   DEFAULT_AI_STREAM_IDLE_TIMEOUT_MS,

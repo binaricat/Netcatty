@@ -349,6 +349,11 @@ function createTerminalWorkerRuntime(options = {}) {
     registerBridges,
     terminalDataPipeline,
   } = options;
+  // Optional hook for suppressed-but-diagnostic failures so they still reach
+  // the main process's persistent crash log via the "worker-error" channel.
+  const reportSuppressedError = typeof options.reportSuppressedError === "function"
+    ? options.reportSuppressedError
+    : null;
   const ipcMain = createIpcMainHarness();
   let started = false;
   const outputPorts = createOutputPortRegistry();
@@ -686,19 +691,33 @@ function createTerminalWorkerRuntime(options = {}) {
     if (message.channel === "netcatty:close" && message.payload?.sessionId) {
       invalidateSessionOutput(message.payload.sessionId);
     }
-    listener({
-      sender: createSender(
-        parentPort,
-        message.webContentsId,
-        outputPorts,
-        terminalDataPipeline,
-        pendingOutputBySession,
-        sessionOutputGenerations,
-        sessionRequestIds,
-        null,
-        finalizeNaturalSessionExit,
-      ),
-    }, message.payload);
+    try {
+      listener({
+        sender: createSender(
+          parentPort,
+          message.webContentsId,
+          outputPorts,
+          terminalDataPipeline,
+          pendingOutputBySession,
+          sessionOutputGenerations,
+          sessionRequestIds,
+          null,
+          finalizeNaturalSessionExit,
+        ),
+      }, message.payload);
+    } catch (err) {
+      // Send listeners (write/resize/flow/close) are fire-and-forget; a throw
+      // here is synchronous and would otherwise escape as an uncaught
+      // exception on the worker's message loop.
+      console.error(`[TerminalWorker] send listener failed for ${message.channel}:`, err);
+      if (reportSuppressedError) {
+        try {
+          reportSuppressedError("send-listener", err, `send listener failed for ${message.channel}`);
+        } catch {
+          // Reporting must never be able to escalate into a worker crash.
+        }
+      }
+    }
   }
 
   function handleUrgentInput(webContentsId, message) {

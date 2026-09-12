@@ -77,7 +77,41 @@ function terminalPlainTextToHtml(plainText, hostLabel, timestamp) {
   return wrapTerminalHtmlContent(htmlContent, hostLabel, timestamp);
 }
 
+function buildExtendedForegroundPalette(htmlContent) {
+  const colors = new Set(Array.from(
+    htmlContent.matchAll(/var\(--term-custom-([a-f0-9]{6}), #[a-f0-9]{6}\)/g),
+    (match) => match[1],
+  ));
+  const light = [];
+  const dark = [];
+  for (const hex of colors) {
+    const channels = hex.match(/../g).map((channel) => parseInt(channel, 16));
+    const linearChannels = channels.map((channel) => {
+      const value = channel / 255;
+      return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+    });
+    const luminance = linearChannels[0] * 0.2126 + linearChannels[1] * 0.7152 + linearChannels[2] * 0.0722;
+    const maxLuminance = 1.05 / 4.5 - 0.05;
+    let adjusted = channels;
+    // A single linear-light scaling reaches the contrast target without an
+    // iterative search for every color on each streaming snapshot.
+    if (luminance > maxLuminance) {
+      const scale = maxLuminance / luminance;
+      adjusted = linearChannels.map((channel) => {
+        const value = channel * scale;
+        const srgb = value <= 0.0031308 ? value * 12.92 : 1.055 * value ** (1 / 2.4) - 0.055;
+        return Math.floor(srgb * 255);
+      });
+    }
+    const lightHex = adjusted.map((channel) => channel.toString(16).padStart(2, "0")).join("");
+    light.push(`--term-custom-${hex}: #${lightHex};`);
+    dark.push(`--term-custom-${hex}: #${hex};`);
+  }
+  return { light: light.join("\n      "), dark: dark.join("\n        ") };
+}
+
 function wrapTerminalHtmlContent(htmlContent, hostLabel, timestamp) {
+  const extendedPalette = buildExtendedForegroundPalette(htmlContent);
   const dateStr = new Date(timestamp).toLocaleString();
   const safeHostLabel = escapeHtml(hostLabel || "Unknown");
   const safeDateStr = escapeHtml(dateStr);
@@ -86,23 +120,76 @@ function wrapTerminalHtmlContent(htmlContent, hostLabel, timestamp) {
 <html>
 <head>
   <meta charset="utf-8">
+  <meta name="color-scheme" content="light dark">
   <title>Session Log - ${safeHostLabel}</title>
   <style>
+    :root {
+      color-scheme: light dark;
+      /* Day palette (default): readable on light browser/OS themes. */
+      --term-default-bg: #ffffff;
+      --term-default-fg: #24292f;
+      --term-header-fg: #6a737d;
+      --term-border: #d0d7de;
+      /* ANSI palette (basic 0-7, bright 8-15) tuned for the light background. */
+      --ansi-0: #000000;
+      --ansi-1: #cd3131;
+      --ansi-2: #008000;
+      --ansi-3: #747700;
+      --ansi-4: #0451a5;
+      --ansi-5: #bc05bc;
+      --ansi-6: #007c9b;
+      --ansi-7: #555555;
+      --ansi-8: #666666;
+      --ansi-9: #cd3131;
+      --ansi-10: #008500;
+      --ansi-11: #797600;
+      --ansi-12: #0451a5;
+      --ansi-13: #bc05bc;
+      --ansi-14: #007c9b;
+      --ansi-15: #767676;
+      ${extendedPalette.light}
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --term-default-bg: #1e1e1e;
+        --term-default-fg: #d4d4d4;
+        --term-header-fg: #888888;
+        --term-border: #444444;
+        --ansi-0: #000000;
+        --ansi-1: #cd3131;
+        --ansi-2: #0dbc79;
+        --ansi-3: #e5e510;
+        --ansi-4: #2472c8;
+        --ansi-5: #bc3fbc;
+        --ansi-6: #11a8cd;
+        --ansi-7: #e5e5e5;
+        --ansi-8: #666666;
+        --ansi-9: #f14c4c;
+        --ansi-10: #23d18b;
+        --ansi-11: #f5f543;
+        --ansi-12: #3b8eea;
+        --ansi-13: #d670d6;
+        --ansi-14: #29b8db;
+        --ansi-15: #ffffff;
+        ${extendedPalette.dark}
+      }
+    }
     body {
-      background: #1e1e1e;
-      color: #d4d4d4;
-      font-family: 'JetBrains Mono', 'SF Mono', Monaco, Menlo, monospace;
+      background: var(--term-default-bg);
+      color: var(--term-default-fg);
+      font-family: ui-monospace, 'Cascadia Mono', 'JetBrains Mono', 'SF Mono',
+        Consolas, Monaco, Menlo, monospace;
       font-size: 13px;
-      line-height: 1.4;
+      line-height: 1.5;
       padding: 20px;
       white-space: pre-wrap;
       word-wrap: break-word;
     }
     .header {
-      border-bottom: 1px solid #444;
+      border-bottom: 1px solid var(--term-border);
       padding-bottom: 10px;
       margin-bottom: 20px;
-      color: #888;
+      color: var(--term-header-fg);
     }
   </style>
 </head>

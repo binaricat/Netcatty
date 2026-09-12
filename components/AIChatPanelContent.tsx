@@ -72,7 +72,9 @@ interface AIChatPanelContentProps {
   cattyConfiguredProviders: ProviderConfig[];
   effectiveActiveProvider?: ProviderConfig;
   effectiveActiveModelId?: string;
-  handleAgentProviderModelSelect: (providerId: string, modelId: string) => void;
+  handleAgentProviderModelSelect: (providerId: string, modelId: string, contextWindow?: number) => void;
+  selectedCattyThinking?: string;
+  handleCattyThinkingSelect?: (level: string) => void;
   files: UploadedFile[];
   addFiles: (inputFiles: File[]) => Promise<void>;
   removeFile: (fileId: string) => void;
@@ -86,6 +88,8 @@ interface AIChatPanelContentProps {
   setGlobalPermissionMode?: (mode: AIPermissionMode) => void;
   notes?: VaultNote[];
   hosts?: Host[];
+  /** Mention Note: attach a Vault → Notes entry as inline context. */
+  onMentionNote?: (note: VaultNote) => void;
   onOpenVaultNote?: (noteId: string) => void;
   onOpenVaultHost?: (hostId: string) => void;
   onOpenVaultSection?: (section: 'notes' | 'hosts') => void;
@@ -140,6 +144,8 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
   effectiveActiveProvider,
   effectiveActiveModelId,
   handleAgentProviderModelSelect,
+  selectedCattyThinking,
+  handleCattyThinkingSelect,
   files,
   addFiles,
   removeFile,
@@ -153,6 +159,7 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
   setGlobalPermissionMode,
   notes = [],
   hosts = [],
+  onMentionNote,
   onOpenVaultNote,
   onOpenVaultHost,
   onOpenVaultSection,
@@ -350,10 +357,15 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
                   selectedModelId={selectedAgentModel}
                   onModelSelect={handleAgentModelSelect}
                   providerSwitcher={providerSwitcher}
+                  pickerScope={currentAgentId}
+                  thinkingLevel={currentAgentId === 'catty' ? selectedCattyThinking : undefined}
+                  onThinkingLevelChange={currentAgentId === 'catty' ? handleCattyThinkingSelect : undefined}
                   files={files}
                   onAddFiles={addFiles}
                   onRemoveFile={removeFile}
                   hosts={mentionHosts}
+                  notes={notes}
+                  onMentionNote={onMentionNote}
                   selectedUserSkills={selectedUserSkills}
                   userSkills={userSkillOptions}
                   quickMessages={quickMessages}

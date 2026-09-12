@@ -80,28 +80,216 @@ export function connectionKeyMatchesHost(
  * looks connected.
  */
 export function shouldAcceptPendingSftpUpload(params: {
+  ownerPanelOpen: boolean;
   pendingHostId: string;
   pendingConnectionKey: string;
+  pendingSourceSessionId?: string;
   activeHostId: string | null | undefined;
   connection: {
     hostId?: string | null;
     isLocal?: boolean;
     status?: string;
+    sourceSessionId?: string;
   } | null | undefined;
   paneConnectionKey: string | null | undefined;
 }): boolean {
   const {
+    ownerPanelOpen,
     pendingHostId,
     pendingConnectionKey,
+    pendingSourceSessionId,
     activeHostId,
     connection,
     paneConnectionKey,
   } = params;
+  if (!ownerPanelOpen) return false;
   if (!activeHostId || pendingHostId !== activeHostId) return false;
   if (!connection || connection.isLocal || connection.hostId !== activeHostId) return false;
   if (connection.status !== "connected") return false;
   if (!paneConnectionKey || paneConnectionKey !== pendingConnectionKey) return false;
+  if (pendingSourceSessionId && connection.sourceSessionId !== pendingSourceSessionId) return false;
   return true;
+}
+
+/** Wait until the drop's origin pane is focused before binding SFTP. */
+export function shouldDeferPendingSftpUploadForOriginFocus(params: {
+  originSessionId?: string;
+  focusedSessionId?: string | null;
+}): boolean {
+  if (!params.originSessionId || !params.focusedSessionId) return false;
+  return params.focusedSessionId !== params.originSessionId;
+}
+
+export type PendingSftpUploadCancellationReason = "source-changed" | "connection-failed";
+
+/** Old-pane failures are ignored until a strict replacement has finished binding. */
+export function shouldCancelPendingSftpUpload(
+  reason: PendingSftpUploadCancellationReason | null,
+  waitingForStrictRebind: boolean,
+): boolean {
+  if (reason === "source-changed") return true;
+  return reason === "connection-failed" && !waitingForStrictRebind;
+}
+
+/** Return a terminal-drop cancellation only for terminal or connection changes that cannot recover. */
+export function resolvePendingSftpUploadCancellation(params: {
+  pendingHostId: string;
+  pendingOriginSessionId?: string;
+  pendingSourceSessionId?: string;
+  /**
+   * Status of the origin terminal session while the drop is pending: the
+   * session's live status, `null` once it no longer exists, or `undefined`
+   * when the caller does not track it.
+   */
+  originSessionStatus?: string | null;
+  activeHostId: string | null | undefined;
+  activeSessionId: string | null | undefined;
+  focusedSessionId?: string | null;
+  panelVisible?: boolean;
+  /**
+   * True while this drop's own focus switch has not landed yet. A live focus
+   * still sitting on another same-host session is then lag, not a user leave.
+   */
+  waitingForOriginFocus?: boolean;
+  /**
+   * True while the drop's originating SSH session has not yet become the
+   * panel's active session. Distinguishes scheduled rebind from a real switch.
+   */
+  waitingForSourceSession?: boolean;
+  connection: {
+    hostId?: string | null;
+    sourceSessionId?: string;
+    status?: string;
+  } | null | undefined;
+}): PendingSftpUploadCancellationReason | null {
+  if (params.activeHostId !== params.pendingHostId) return "source-changed";
+  if (
+    params.panelVisible
+    && params.pendingOriginSessionId
+    && params.focusedSessionId
+    && params.focusedSessionId !== params.pendingOriginSessionId
+    && !params.waitingForOriginFocus
+  ) return "source-changed";
+  if (
+    params.pendingSourceSessionId
+    && params.activeSessionId
+    && params.activeSessionId !== params.pendingSourceSessionId
+    && !params.waitingForSourceSession
+  ) return "source-changed";
+  // A Mosh/ET (or local) origin has no reusable SSH source session, so the
+  // origin terminal itself is the only evidence of the drop's destination
+  // route. If it disconnects or disappears while the standalone SFTP rebind
+  // is pending, cancel instead of uploading into a route that is gone. SSH
+  // origins are excluded: their same-tab reconnect rebind is expected to
+  // pass through non-connected statuses.
+  if (params.pendingOriginSessionId && !params.pendingSourceSessionId) {
+    if (
+      params.originSessionStatus === null
+      || params.originSessionStatus === "disconnected"
+    ) return "source-changed";
+  }
+  if (
+    params.connection?.hostId === params.pendingHostId
+    && (!params.pendingSourceSessionId
+      || params.connection.sourceSessionId === params.pendingSourceSessionId)
+    && (params.connection.status === "error" || params.connection.status === "disconnected")
+  ) return "connection-failed";
+  return null;
+}
+
+/** Block an old SFTP connection while the same terminal tab is replacing its SSH route. */
+export function shouldBlockPendingSftpUploadForSourceRebind(params: {
+  pendingSourceSessionId?: string;
+  previousSessionId?: string | null;
+  activeSessionId?: string | null;
+  previousStatus?: string | null;
+  activeStatus?: string | null;
+}): boolean {
+  if (!params.pendingSourceSessionId) return false;
+  if (params.activeSessionId !== params.pendingSourceSessionId) return false;
+  return shouldRebindSftpSidePanelSourceSession({
+    previousSessionId: params.previousSessionId,
+    nextSessionId: params.activeSessionId,
+    previousStatus: params.previousStatus,
+    nextStatus: params.activeStatus,
+  });
+}
+
+export function shouldStartPendingSftpUploadRebind(params: {
+  pendingMatchesTarget: boolean;
+  requestId: string;
+  startedRequestId?: string | null;
+  originSessionId?: string;
+  sourceSessionId?: string;
+}): boolean {
+  return Boolean(
+    params.pendingMatchesTarget
+    && (params.originSessionId || params.sourceSessionId)
+    && params.startedRequestId !== params.requestId
+  );
+}
+
+/** A terminal drop must wait until its forced route rebind has finished. */
+export function shouldWaitForPendingSftpRebind(params: {
+  pendingRequiresRebind?: boolean;
+  pendingSourceSessionId?: string;
+  requestId: string;
+  startedRequestId?: string | null;
+  settledRequestId?: string | null;
+  connectionId?: string | null;
+  tabId?: string | null;
+  barrierRequestId?: string | null;
+  previousConnectionId?: string | null;
+  targetTabId?: string | null;
+  targetConnectionId?: string | null;
+}): boolean {
+  const pendingRequiresRebind = params.pendingRequiresRebind
+    ?? Boolean(params.pendingSourceSessionId);
+  if (!pendingRequiresRebind) return false;
+  if (params.startedRequestId !== params.requestId) return true;
+  if (params.barrierRequestId !== params.requestId) return true;
+  if (params.settledRequestId !== params.requestId) return true;
+  if (!params.targetTabId || !params.targetConnectionId) return true;
+  return params.tabId !== params.targetTabId
+    || params.connectionId !== params.targetConnectionId;
+}
+
+/** A completed forced connect cannot recover after its exact target was closed. */
+export function shouldCancelSettledPendingSftpRebindWithoutTarget(params: {
+  pendingRequiresRebind: boolean;
+  requestId: string;
+  startedRequestId?: string | null;
+  settledRequestId?: string | null;
+  barrierRequestId?: string | null;
+  targetTabId?: string | null;
+  targetConnectionId?: string | null;
+  targetExists: boolean;
+}): boolean {
+  return Boolean(
+    params.pendingRequiresRebind
+    && params.startedRequestId === params.requestId
+    && params.settledRequestId === params.requestId
+    && params.barrierRequestId === params.requestId
+    && (
+      !params.targetTabId
+      || !params.targetConnectionId
+      || !params.targetExists
+    )
+  );
+}
+
+/** Locate an exact forced-connect target even if its tab moved between panes. */
+export function findPendingSftpRebindTargetPane(
+  leftTabs: ReadonlyArray<SftpPane>,
+  rightTabs: ReadonlyArray<SftpPane>,
+  targetTabId?: string | null,
+  targetConnectionId?: string | null,
+): SftpPane | null {
+  if (!targetTabId || !targetConnectionId) return null;
+  return [...leftTabs, ...rightTabs].find((pane) => (
+    pane.id === targetTabId
+    && pane.connection?.id === targetConnectionId
+  )) ?? null;
 }
 
 export function findReusableSftpSidePanelTab(

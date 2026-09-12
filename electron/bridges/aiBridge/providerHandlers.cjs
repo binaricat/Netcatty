@@ -1,4 +1,6 @@
 /* eslint-disable no-undef */
+const { existsSync } = require("node:fs");
+
 function registerProviderHandlers(ctx) {
   with (ctx) {
   ipcMain.handle("netcatty:ai:user-skills:status", async (event) => {
@@ -31,6 +33,22 @@ function registerProviderHandlers(ctx) {
     try {
       const { context, status } = await buildUserSkillsContext(electronModule?.app, prompt, selectedSkillSlugs);
       return { ok: true, context, status: toPublicUserSkillsStatus(status) };
+    } catch (err) {
+      return { ok: false, error: err?.message || String(err) };
+    }
+  });
+
+  ipcMain.handle("netcatty:ai:skills-cli:invocation", async (event) => {
+    if (!validateSenderOrSettings(event)) return { ok: false, error: "Unauthorized IPC sender" };
+    try {
+      const invocation = getSkillsCliInvocation();
+      return {
+        ok: true,
+        skillPath: existsSync(NETCATTY_TOOL_SKILL_PATH) ? NETCATTY_TOOL_SKILL_PATH : null,
+        commandPrefix: invocation.commandPrefix,
+        launcherPath: invocation.launcherPath,
+        usesLauncher: invocation.usesLauncher,
+      };
     } catch (err) {
       return { ok: false, error: err?.message || String(err) };
     }
@@ -319,7 +337,14 @@ function registerProviderHandlers(ctx) {
   }
 
   // Start a streaming chat request (proxied through main process)
-  ipcMain.handle("netcatty:ai:chat:stream", async (event, { requestId, url, headers, body, providerId }) => {
+  ipcMain.handle("netcatty:ai:chat:stream", async (event, {
+    requestId,
+    url,
+    headers,
+    body,
+    providerId,
+    idleTimeoutMs,
+  }) => {
     // Validate IPC sender (Issue #17)
     if (!validateSender(event)) {
       return { ok: false, error: "Unauthorized IPC sender" };
@@ -346,7 +371,13 @@ function registerProviderHandlers(ctx) {
       }
 
       const skipTLS = shouldSkipTLSVerify(providerId);
-      const { statusCode, statusText } = await streamRequest(resolvedUrl, { method: "POST", headers: resolvedHeaders, body }, event, requestId, skipTLS);
+      const { statusCode, statusText } = await streamRequest(
+        resolvedUrl,
+        { method: "POST", headers: resolvedHeaders, body, idleTimeoutMs },
+        event,
+        requestId,
+        skipTLS,
+      );
       return { ok: true, statusCode, statusText };
     } catch (err) {
       if (err?.name === "AbortError") {

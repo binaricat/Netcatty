@@ -1,18 +1,219 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { JSDOM } from "jsdom";
 
 import {
+  annotateNoteCodeBlockDeleteButtons,
+  createNoteDecorationMutationScheduler,
   getHostPickerTriggerRange,
+  getNoteDecorationMutationDelay,
+  getRenderedNoteHeadingText,
   isNoteSmallImageWidth,
+  isNoteMathLanguageLabel,
   isSupportedNoteExternalHref,
   isPointerInsideLinkActionHoverZone,
+  invokeNoteEditorDialogAction,
   linkActionStatesEqual,
   NOTE_SMALL_IMAGE_MAX_WIDTH,
+  NOTE_EDIT_DECORATION_DEBOUNCE_MS,
   resolveHostPickerPopupPosition,
+  scrollNoteHeadingIntoView,
+  shouldApplyExternalNoteMarkdown,
+  shouldRenderNoteMathFormula,
   shouldInsertClipboardTextAsMarkdown,
   shouldHandleHostPickerNavigationKey,
 } from "./InlineMarkdownEditor.tsx";
+import { getSourceEditDelta, shouldCoalesceSourceUndoStep } from "./NoteSourceEditor.tsx";
+
+test("source undo history coalesces only adjacent edits of the same typing kind", () => {
+  const previous = { inputType: "insertText", at: 1_000, caret: 2 };
+  const adjacentInsert = getSourceEditDelta("ab", "abc");
+  const movedCaretInsert = getSourceEditDelta("ab", "axb");
+  assert.equal(shouldCoalesceSourceUndoStep(previous, "insertText", 1_500, adjacentInsert), true);
+  assert.equal(shouldCoalesceSourceUndoStep(previous, "insertText", 1_500, movedCaretInsert), false);
+  assert.equal(shouldCoalesceSourceUndoStep(previous, "insertText", 1_751, adjacentInsert), false);
+  assert.equal(shouldCoalesceSourceUndoStep(previous, "deleteContentBackward", 1_100, adjacentInsert), false);
+  assert.equal(shouldCoalesceSourceUndoStep(previous, "insertFromPaste", 1_100, adjacentInsert), false);
+  assert.equal(shouldCoalesceSourceUndoStep(null, "insertText", 1_100, adjacentInsert), false);
+});
+
+test("math language detection does not mistake plain text blocks for TeX", () => {
+  assert.equal(isNoteMathLanguageLabel("math"), false);
+  assert.equal(isNoteMathLanguageLabel("Math (LaTeX)"), false);
+  assert.equal(isNoteMathLanguageLabel("language-latex"), true);
+  assert.equal(isNoteMathLanguageLabel("language-tex highlighted"), true);
+  assert.equal(isNoteMathLanguageLabel("latex"), true);
+  assert.equal(isNoteMathLanguageLabel("tex"), true);
+  assert.equal(isNoteMathLanguageLabel("公式"), false);
+  assert.equal(isNoteMathLanguageLabel("text"), false);
+  assert.equal(isNoteMathLanguageLabel("plaintext"), false);
+  assert.equal(isNoteMathLanguageLabel("typescript"), false);
+  assert.equal(shouldRenderNoteMathFormula("Plain text"), false);
+  assert.equal(shouldRenderNoteMathFormula("plaintext"), false);
+  assert.equal(shouldRenderNoteMathFormula(""), false);
+  assert.equal(shouldRenderNoteMathFormula("math"), false);
+  assert.equal(shouldRenderNoteMathFormula("latex"), true);
+  assert.equal(shouldRenderNoteMathFormula("tex"), true);
+});
+
+test("live note decoration scans are debounced while preview mounts stay immediate", () => {
+  assert.equal(getNoteDecorationMutationDelay("edit"), NOTE_EDIT_DECORATION_DEBOUNCE_MS);
+  assert.equal(getNoteDecorationMutationDelay("live"), NOTE_EDIT_DECORATION_DEBOUNCE_MS);
+  assert.equal(getNoteDecorationMutationDelay("preview"), 0);
+
+  let nextId = 1;
+  let runCount = 0;
+  const timers = new Map<number, () => void>();
+  const frames = new Map<number, () => void>();
+  const runtime = {
+    requestFrame: (callback: () => void) => {
+      const id = nextId++;
+      frames.set(id, callback);
+      return id;
+    },
+    cancelFrame: (id: number) => { frames.delete(id); },
+    setTimer: (callback: () => void, delay: number) => {
+      assert.equal(delay, NOTE_EDIT_DECORATION_DEBOUNCE_MS);
+      const id = nextId++;
+      timers.set(id, callback);
+      return id;
+    },
+    clearTimer: (id: number) => { timers.delete(id); },
+  };
+
+  const editScheduler = createNoteDecorationMutationScheduler("edit", () => { runCount += 1; }, runtime);
+  editScheduler.schedule();
+  editScheduler.schedule();
+  editScheduler.schedule();
+  assert.equal(runCount, 0);
+  assert.equal(timers.size, 1);
+  const pendingEdit = [...timers.values()][0];
+  timers.clear();
+  pendingEdit();
+  assert.equal(runCount, 1);
+
+  editScheduler.schedule();
+  assert.equal(timers.size, 1);
+  const cancelledEdit = [...timers.values()][0];
+  editScheduler.cancel();
+  assert.equal(timers.size, 0);
+  cancelledEdit();
+  assert.equal(runCount, 1);
+
+  const previewScheduler = createNoteDecorationMutationScheduler("preview", () => { runCount += 1; }, runtime);
+  previewScheduler.schedule();
+  previewScheduler.schedule();
+  assert.equal(frames.size, 1);
+  const pendingPreview = [...frames.values()][0];
+  frames.clear();
+  pendingPreview();
+  assert.equal(runCount, 2);
+});
+
+test("note link and image actions open the editor dialogs", () => {
+  const opened: string[] = [];
+  const dialogs = {
+    openImageDialog: () => opened.push("image"),
+    openLinkDialog: () => opened.push("link"),
+  };
+
+  assert.equal(invokeNoteEditorDialogAction("link", dialogs), true);
+  assert.equal(invokeNoteEditorDialogAction("image", dialogs), true);
+  assert.equal(invokeNoteEditorDialogAction("bold", dialogs), false);
+  assert.equal(invokeNoteEditorDialogAction("link", null), false);
+  assert.deepEqual(opened, ["link", "image"]);
+});
+
+test("toolbar text selection is restricted to the note editor", () => {
+  const source = readFileSync(new URL("./InlineMarkdownEditor.tsx", import.meta.url), "utf8");
+
+  assert.match(source, /if \(domText\) \{/);
+  assert.match(source, /domSelection && domSelection\.rangeCount > 0 && container/);
+  assert.match(source, /container\.contains\(range\.startContainer\)/);
+  assert.match(source, /container\.contains\(range\.endContainer\)/);
+  assert.match(source, /return domText;[\s\S]*return "";[\s\S]*querySelector\("\[contenteditable\]"\)/);
+});
+
+test("note outline jumps to the matching rendered heading", () => {
+  let scrollOptions: ScrollIntoViewOptions | undefined;
+  const first = {
+    tagName: "H1",
+    textContent: "Quoted",
+    scrollIntoView: () => undefined,
+  } as unknown as HTMLElement;
+  const second = {
+    tagName: "H2",
+    textContent: "Real",
+    scrollIntoView: (options?: ScrollIntoViewOptions) => {
+      scrollOptions = options;
+    },
+  } as unknown as HTMLElement;
+  const root = {
+    querySelectorAll: (selector: string) => {
+      assert.match(selector, /\.netcatty-mdx-content h1/);
+      assert.match(selector, /\.netcatty-mdx-content h6/);
+      return [first, second];
+    },
+  };
+
+  assert.equal(scrollNoteHeadingIntoView(root, { level: 2, text: "Real" }), true);
+  assert.deepEqual(scrollOptions, {
+    behavior: "smooth",
+    block: "start",
+    inline: "nearest",
+  });
+  assert.equal(scrollNoteHeadingIntoView(root, { level: 3, text: "Missing" }), false);
+  assert.equal(scrollNoteHeadingIntoView(null, { level: 1, text: "None" }), false);
+});
+
+test("note outline matches rendered whitespace and strikethrough heading text", () => {
+  let scrolled = false;
+  const renderedHeading = {
+    tagName: "H2",
+    textContent: "Removed\n title",
+    scrollIntoView: () => {
+      scrolled = true;
+    },
+  } as unknown as HTMLElement;
+  const root = {
+    querySelectorAll: () => [renderedHeading],
+  };
+
+  assert.equal(scrollNoteHeadingIntoView(root, { level: 2, text: "Removed title" }), true);
+  assert.equal(scrolled, true);
+});
+
+test("note outline matches image alt text inside rendered headings", () => {
+  const textNode = (textContent: string) => ({ nodeType: 3, textContent, childNodes: [] });
+  const imageNode = (alt: string) => ({
+    nodeType: 1,
+    tagName: "IMG",
+    textContent: "",
+    childNodes: [],
+    getAttribute: (name: string) => name === "alt" ? alt : null,
+  });
+  let scrolled = 0;
+  const imageHeading = {
+    tagName: "H2",
+    textContent: "",
+    childNodes: [imageNode("Logo")],
+    scrollIntoView: () => { scrolled += 1; },
+  } as unknown as HTMLElement;
+  const mixedHeading = {
+    tagName: "H2",
+    textContent: "Release  notes",
+    childNodes: [textNode("Release "), imageNode("Logo"), textNode(" notes")],
+    scrollIntoView: () => { scrolled += 1; },
+  } as unknown as HTMLElement;
+  const root = { querySelectorAll: () => [imageHeading, mixedHeading] };
+
+  assert.equal(getRenderedNoteHeadingText(imageHeading), "Logo");
+  assert.equal(getRenderedNoteHeadingText(mixedHeading), "Release Logo notes");
+  assert.equal(scrollNoteHeadingIntoView(root, { level: 2, text: "Logo" }), true);
+  assert.equal(scrollNoteHeadingIntoView(root, { level: 2, text: "Release Logo notes" }), true);
+  assert.equal(scrolled, 2);
+});
 
 test("host picker navigation keys are handled even before a query is typed", () => {
   assert.equal(shouldHandleHostPickerNavigationKey(true, "ArrowDown", 3), true);
@@ -72,6 +273,35 @@ test("small note image width threshold matches README badge sizes", () => {
   assert.equal(isNoteSmallImageWidth(2000), false);
   assert.equal(isNoteSmallImageWidth(""), false);
   assert.equal(isNoteSmallImageWidth(null), false);
+});
+
+test("note image actions use a bordered toolbar shown only on hover or focus", () => {
+  const styles = readFileSync(new URL("../../index.css", import.meta.url), "utf8");
+
+  assert.match(
+    styles,
+    /\[data-editor-block-type="image"\] \[class\*="_editImageToolbar_"\][\s\S]*?gap:\s*0\.0625rem;[\s\S]*?padding:\s*0\.125rem;[\s\S]*?opacity:\s*0;[\s\S]*?pointer-events:\s*none;[\s\S]*?border:\s*1px solid/s,
+  );
+  assert.match(
+    styles,
+    /\[data-editor-block-type="image"\] \[class\*="_editImageToolbar_"\] button,[\s\S]*?width:\s*1\.375rem;[\s\S]*?height:\s*1\.375rem;/s,
+  );
+  assert.match(
+    styles,
+    /\[data-editor-block-type="image"\] \[class\*="_editImageToolbar_"\] button svg,[\s\S]*?width:\s*0\.875rem;[\s\S]*?height:\s*0\.875rem;/s,
+  );
+  assert.match(
+    styles,
+    /\[data-editor-block-type="image"\]:hover \[class\*="_editImageToolbar_"\][\s\S]*?opacity:\s*1;[\s\S]*?pointer-events:\s*auto;/s,
+  );
+  assert.match(
+    styles,
+    /\[data-editor-block-type="image"\]:focus-within \[class\*="_editImageToolbar_"\]/,
+  );
+  assert.doesNotMatch(
+    styles,
+    /\[data-editor-block-type="image"\]\[data-note-img-size="sm"\] \[class\*="_editImageToolbar_"\]/,
+  );
 });
 
 test("host picker trigger range only covers the typed trigger and query", () => {
@@ -137,44 +367,57 @@ test("note editor registers a code block editor for pasted fenced code", () => {
     source,
     /codeBlockPlugin\([^)]*\),\s*codeMirrorPlugin\(\{\s*codeBlockLanguages:/s,
   );
-  assert.match(source, /codeMirrorExtensions:\s*NOTE_CODE_MIRROR_EXTENSIONS/);
+  assert.match(source, /codeMirrorExtensions:\s*\[\s*\.\.\.NOTE_CODE_MIRROR_EXTENSIONS,/);
   assert.match(source, /syntaxHighlighting\(noteCodeHighlightStyle\)/);
+  // Tooltips mount on body to escape clipped code blocks, so their placement
+  // must be bounded to this editor instead of the whole window.
+  assert.match(
+    source,
+    /createNoteCodeTooltipExtensions\(\s*typeof document === "undefined" \? undefined : document\.body,/,
+  );
+  assert.match(source, /\(\) => containerRef\.current,/);
 });
 
 test("note editor enables image plugin for remote markdown images", () => {
   const source = readFileSync(new URL("./InlineMarkdownEditor.tsx", import.meta.url), "utf8");
   assert.match(source, /imagePlugin\(\{\s*allowSetImageDimensions:\s*true/);
-  assert.match(source, /InsertImage/);
 });
 
-test("note editor exposes preview and edit modes with a markdown toolbar in edit mode", () => {
+test("note editor exposes its modes from a borderless title-row dropdown", () => {
   const source = readFileSync(new URL("./InlineMarkdownEditor.tsx", import.meta.url), "utf8");
   const managerSource = readFileSync(new URL("./NotesManager.tsx", import.meta.url), "utf8");
+  const toolbarSource = readFileSync(new URL("./NoteToolbar.tsx", import.meta.url), "utf8");
 
-  assert.match(source, /type NoteEditorMode = "edit" \| "preview"/);
-  assert.match(source, /toolbarPlugin\(\{\s*toolbarContents:/s);
+  assert.match(source, /type NoteEditorMode/);
+  // The app-owned NoteToolbar (not MDXEditor's toolbarPlugin) hosts the
+  // formatting controls; MDXEditor must not render its own toolbar.
+  assert.doesNotMatch(source, /toolbarPlugin\(/);
+  assert.match(toolbarSource, /onAction\?\.\("undo"\)/);
+  assert.match(toolbarSource, /onAction\?\.\("redo"\)/);
+  assert.match(toolbarSource, /<Undo2 size=\{14\} \/>/);
+  assert.match(toolbarSource, /<Redo2 size=\{14\} \/>/);
   // Preview and edit both use MDXEditor (readOnly in preview).
   assert.match(source, /readOnly=\{editorMode === "preview"\}/);
   assert.match(source, /key=\{editorMode\}/);
   assert.match(source, /netcatty-mdx-editor--preview/);
   assert.doesNotMatch(source, /NoteMarkdownPreview|react-markdown|github-markdown/);
-  assert.match(source, /<BlockTypeSelect \/>/);
-  assert.match(source, /<BoldItalicUnderlineToggles /);
-  assert.match(source, /<ListsToggle /);
-  assert.match(source, /<InsertCodeBlock \/>/);
-  assert.match(source, /<InsertTable \/>/);
   assert.match(source, /editorMode = controlledEditorMode \?\? "edit"/);
   assert.doesNotMatch(source, /data-note-mode-switch/);
   assert.doesNotMatch(source, /absolute -top-9/);
   assert.match(managerSource, /data-note-title-row/);
-  assert.match(managerSource, /data-note-mode-switch/);
-  assert.match(managerSource, /Glasses/);
-  assert.match(managerSource, /PencilLine/);
-  assert.match(managerSource, /setNoteEditorMode\(\(currentMode\) => \(/);
-  assert.match(managerSource, /currentMode === "edit" \? "preview" : "edit"/);
+  assert.match(toolbarSource, /data-note-mode-dropdown-trigger/);
+  assert.match(toolbarSource, /data-note-mode-option=\{option\.mode\}/);
+  assert.match(toolbarSource, /gap-1\.5 border-0 bg-transparent px-2/);
+  assert.match(toolbarSource, /<SelectContent align="end" className="w-max min-w-\[10rem\]">/);
+  assert.match(
+    toolbarSource,
+    /data-note-mode-option=\{option\.mode\}[\s\S]*?className="h-9 whitespace-nowrap"/,
+  );
+  assert.match(toolbarSource, /<Select value=\{normalizedMode\}/);
+  assert.doesNotMatch(toolbarSource, /data-note-mode-switch=/);
+  assert.match(managerSource, /data-note-title-row[\s\S]*?<NoteModeDropdown[\s\S]*?<NoteToolbar/);
+  assert.match(managerSource, /<NoteModeDropdown[\s\S]*?editorMode=\{noteEditorMode\}/);
   assert.match(managerSource, /editorMode=\{noteEditorMode\}/);
-  assert.match(managerSource, /className="app-no-drag h-8 w-8 shrink-0 rounded-md p-0 text-muted-foreground transition-colors hover:bg-secondary\/70 hover:text-foreground"/);
-  assert.doesNotMatch(managerSource, /data-note-mode-switch[\s\S]{0,500}border/);
   assert.doesNotMatch(`${source}\n${managerSource}`, /role="tablist"|role="tab"|renderModeButton/);
   assert.doesNotMatch(`${source}\n${managerSource}`, /className="mb-2 flex shrink-0 items-center justify-end"/);
 });
@@ -182,6 +425,7 @@ test("note editor exposes preview and edit modes with a markdown toolbar in edit
 test("note markdown toolbar remains usable in narrow panes", () => {
   const styles = readFileSync(new URL("../../index.css", import.meta.url), "utf8");
   const source = readFileSync(new URL("./InlineMarkdownEditor.tsx", import.meta.url), "utf8");
+  const toolbarSource = readFileSync(new URL("./NoteToolbar.tsx", import.meta.url), "utf8");
 
   assert.doesNotMatch(source, /MoreHorizontal|data-note-toolbar-more|netcatty-note-toolbar-more/);
 
@@ -195,29 +439,23 @@ test("note markdown toolbar remains usable in narrow panes", () => {
     styles,
     /\.netcatty-mdx-editor\s*\{[^}]*transform:\s*translateZ\(0\);/s,
   );
+  // The app-owned NoteToolbar scrolls horizontally when the pane is narrow so
+  // formatting buttons are never clipped; the scrollbar stays visible.
   assert.match(
-    styles,
-    /\.netcatty-note-markdown-toolbar\s*\{[^}]*max-width:\s*100%;[^}]*height:\s*auto\s*!important;[^}]*overflow:\s*visible\s*!important;/s,
+    toolbarSource,
+    /overflow-x-auto [^"]*\[scrollbar-width:thin\]/,
   );
   assert.match(
-    styles,
-    /\.netcatty-note-markdown-toolbar\s*\{[^}]*box-sizing:\s*border-box;[^}]*display:\s*flex\s*!important;[^}]*flex-wrap:\s*wrap\s*!important;[^}]*align-content:\s*flex-start\s*!important;/s,
+    toolbarSource,
+    /\[&::-webkit-scrollbar\]:h-1\.5/,
   );
   assert.match(
-    styles,
-    /\.netcatty-note-markdown-toolbar\s*>\s*\*\s*\{[^}]*flex-shrink:\s*0;/s,
+    toolbarSource,
+    /\[&::-webkit-scrollbar-thumb\]:bg-border\/70/,
   );
   assert.match(
-    styles,
-    /@container\s*\(max-width:\s*34rem\)\s*\{[\s\S]*\.netcatty-note-markdown-toolbar\s*\{[^}]*gap:\s*0\.125rem\s*!important;/s,
-  );
-  assert.match(
-    styles,
-    /@container\s*\(max-width:\s*34rem\)\s*\{[\s\S]*\.netcatty-note-markdown-toolbar\s*\{[^}]*flex-wrap:\s*wrap\s*!important;[^}]*align-content:\s*flex-start\s*!important;/s,
-  );
-  assert.match(
-    styles,
-    /@container\s*\(max-width:\s*34rem\)\s*\{[\s\S]*\.netcatty-note-markdown-toolbar\s+button,[\s\S]*\.netcatty-note-markdown-toolbar\s+\[role="button"\][\s\S]*height:\s*1\.75rem\s*!important;/s,
+    toolbarSource,
+    /flex flex-1 items-center gap-0\.5 min-w-0 overflow-x-auto/,
   );
 });
 
@@ -291,15 +529,23 @@ test("note code block frame is borderless and language picker is compact", () =>
 
   assert.match(
     styles,
-    /\.netcatty-mdx-editor\s+\[class\*="_codeMirrorWrapper_"\]\s*\{[^}]*border:\s*0\s*!important;[^}]*padding:\s*0\s*!important;/s,
+    /\.netcatty-mdx-editor\s+\[class\*="_codeMirrorWrapper_"\]\s*\{[^}]*border:\s*0\s*!important;[^}]*background:\s*transparent\s*!important;[^}]*padding:\s*0\s*!important;/s,
   );
   assert.match(
     styles,
-    /\.netcatty-mdx-editor\s+\.cm-editor\s*\{[^}]*border:\s*0\s*!important;/s,
+    /\.netcatty-mdx-editor\s+\.cm-editor\s*\{[^}]*border:\s*0\s*!important;[^}]*background:\s*transparent\s*!important;/s,
   );
   assert.match(
     styles,
-    /\.netcatty-mdx-editor\s+\[class\*="_codeMirrorToolbar_"\]\s*\{[^}]*position:\s*static\s*!important;[^}]*padding:\s*0\.125rem;/s,
+    /\.netcatty-mdx-content\s+pre\s*\{[^}]*border:\s*0;[^}]*background:\s*transparent;[^}]*padding:\s*0;/s,
+  );
+  assert.match(
+    styles,
+    /\.netcatty-note-code-copy\s*\{[^}]*border:\s*0\s*!important;[^}]*background:\s*transparent\s*!important;[^}]*box-shadow:\s*none\s*!important;/s,
+  );
+  assert.match(
+    styles,
+    /\.netcatty-mdx-editor:not\(\.netcatty-mdx-editor--preview\)\s+\[class\*="_codeMirrorToolbar_"\]\s*\{[^}]*position:\s*absolute\s*!important;/s,
   );
   assert.match(
     styles,
@@ -307,7 +553,11 @@ test("note code block frame is borderless and language picker is compact", () =>
   );
   assert.match(
     styles,
-    /\.netcatty-mdx-editor:not\(\.netcatty-mdx-editor--preview\)\s+\[class\*="_codeMirrorToolbar_"\]\s+\[class\*="_selectTrigger_"\]\s*\{[^}]*width:\s*auto\s*!important;[^}]*min-width:\s*fit-content\s*!important;/s,
+    /\.netcatty-mdx-editor \[class\*="_codeMirrorToolbar_"\] \[class\*="_tooltipTrigger_"\]\s*\{[^}]*display:\s*inline-flex\s*!important;[^}]*align-items:\s*center\s*!important;[^}]*align-self:\s*center\s*!important;/s,
+  );
+  assert.match(
+    styles,
+    /\.netcatty-mdx-editor \[class\*="_codeMirrorToolbar_"\]\s+\[class\*="_selectTrigger_"\]\s*\{[^}]*width:\s*auto\s*!important;[^}]*min-width:\s*0\s*!important;/s,
   );
   assert.match(
     styles,
@@ -331,7 +581,7 @@ test("note code block frame is borderless and language picker is compact", () =>
   );
   assert.match(
     styles,
-    /\.netcatty-mdx-editor:not\(\.netcatty-mdx-editor--preview\)\s+\[class\*="_codeMirrorWrapper_"\]\s*\{[^}]*gap:\s*0;[^}]*margin:\s*0\.3rem\s+0\s+0\.65rem;/s,
+    /\.netcatty-mdx-editor:not\(\.netcatty-mdx-editor--preview\)\s+\[class\*="_codeMirrorWrapper_"\]\s*\{[^}]*gap:\s*0;[^}]*margin:\s*0\.25rem\s+0\s+0\.55rem;/s,
   );
   assert.match(
     styles,
@@ -339,11 +589,34 @@ test("note code block frame is borderless and language picker is compact", () =>
   );
   assert.match(
     styles,
-    /\.netcatty-mdx-editor\s+\.cm-gutters\s*\{[^}]*padding:\s*0\s*!important;/s,
+    /\.netcatty-mdx-editor\s+\.cm-gutters\s*\{[^}]*background:\s*transparent\s*!important;[^}]*padding:\s*0\s*!important;/s,
   );
   assert.match(
     styles,
     /\.netcatty-mdx-editor--preview\s+\[class\*="_codeMirrorToolbar_"\]\s*\{[^}]*display:\s*none\s*!important;/s,
+  );
+});
+
+test("note formulas render without framed surfaces", () => {
+  const styles = readFileSync(new URL("../../index.css", import.meta.url), "utf8");
+
+  assert.doesNotMatch(styles, /data-language="math"/);
+  assert.match(
+    styles,
+    /\.netcatty-math-formula-preview\s*\{[^}]*background:\s*transparent;[^}]*border:\s*0;/s,
+  );
+  assert.match(
+    styles,
+    /\.netcatty-math-reading-mode\s*\{[^}]*background:\s*transparent\s*!important;[^}]*border:\s*none\s*!important;[^}]*padding:\s*0\s*!important;/s,
+  );
+  assert.match(
+    styles,
+    /\.netcatty-math-reading-mode\s+\.netcatty-math-formula-preview\s*\{[^}]*background:\s*transparent;/s,
+  );
+  assert.match(styles, /\.netcatty-math-formula-preview\s*\{[^}]*justify-content:\s*safe center;[^}]*overflow-x:\s*auto;/s);
+  assert.match(
+    styles,
+    /\.netcatty-math-reading-mode\s*>\s*\.netcatty-note-code-copy\s*\{[^}]*display:\s*none\s*!important;/s,
   );
 });
 
@@ -362,6 +635,62 @@ test("annotateNoteCodeBlockCopyButtons adds a copy action to code blocks", () =>
   assert.match(source, /data-note-code-copy/);
   assert.match(source, /getCodeMirrorBlockText\(wrapper\)/);
   assert.match(source, /onCopy\(text\)/);
+});
+
+test("annotateNoteCodeBlockCopyButtons treats a CSS-hidden toolbar as absent so preview shows the copy button", () => {
+  const source = readFileSync(new URL("./InlineMarkdownEditor.tsx", import.meta.url), "utf8");
+
+  assert.match(source, /getComputedStyle\(toolbar\)\.display !== "none"/);
+  assert.match(source, /toolbarVisible/);
+  assert.match(source, /firstButton\.parentElement !== wrapper/);
+  assert.match(source, /wrapper\.appendChild\(firstButton\)/);
+});
+
+test("annotateNoteCodeBlockDeleteButtons swaps the delete icon only once", () => {
+  const source = readFileSync(new URL("./InlineMarkdownEditor.tsx", import.meta.url), "utf8");
+  const dom = new JSDOM(`
+    <div id="container">
+      <div class="_codeMirrorToolbar_test">
+        <button class="_toolbarCodeBlockLanguageSelectTrigger_test"></button>
+        <button id="delete"></button>
+      </div>
+    </div>
+  `);
+  const previousHTMLElement = Object.getOwnPropertyDescriptor(globalThis, "HTMLElement");
+  Object.defineProperty(globalThis, "HTMLElement", {
+    configurable: true,
+    value: dom.window.HTMLElement,
+  });
+
+  try {
+    const container = dom.window.document.querySelector("#container") as HTMLElement;
+    const deleteButton = dom.window.document.querySelector("#delete") as HTMLButtonElement;
+    annotateNoteCodeBlockDeleteButtons(container);
+    const installedIcon = deleteButton.firstElementChild;
+    assert.equal(deleteButton.dataset.noteCodeDelete, "true");
+    assert.equal(installedIcon?.nodeName.toLowerCase(), "svg");
+    const observer = new dom.window.MutationObserver(() => {});
+    observer.observe(deleteButton, { attributes: true, childList: true, subtree: true });
+
+    annotateNoteCodeBlockDeleteButtons(container);
+
+    assert.equal(observer.takeRecords().length, 0);
+    assert.equal(deleteButton.firstElementChild, installedIcon);
+    observer.disconnect();
+  } finally {
+    if (previousHTMLElement) {
+      Object.defineProperty(globalThis, "HTMLElement", previousHTMLElement);
+    } else {
+      delete (globalThis as { HTMLElement?: unknown }).HTMLElement;
+    }
+    dom.window.close();
+  }
+
+  assert.match(source, /export const annotateNoteCodeBlockDeleteButtons/);
+  assert.match(source, /data-note-code-delete/);
+  assert.match(source, /DELETE_ICON_SVG/);
+  assert.match(source, /stroke="currentColor"/);
+  assert.match(source, /stroke-width="2"/);
 });
 
 test("note preview uses MDX readOnly with code-copy chrome", () => {
@@ -385,18 +714,73 @@ test("note preview uses MDX readOnly with code-copy chrome", () => {
   );
   assert.match(
     styles,
-    /\.netcatty-mdx-editor:not\(\.netcatty-mdx-editor--preview\)\s+\[class\*="_codeMirrorToolbar_"\]\s*\{[^}]*position:\s*static\s*!important;[^}]*justify-content:\s*flex-end;/s,
+    /\.netcatty-mdx-editor:not\(\.netcatty-mdx-editor--preview\)\s+\[class\*="_codeMirrorToolbar_"\]\s*\{[^}]*justify-content:\s*flex-end;/s,
   );
   assert.match(
     styles,
-    /\.netcatty-mdx-editor:not\(\.netcatty-mdx-editor--preview\)\s+\[class\*="_codeMirrorToolbar_"\]\s+\[class\*="_selectTrigger_"\]\s*\{[^}]*font-size:\s*11px\s*!important;/s,
+    /\.netcatty-mdx-editor\s+\[class\*="_codeMirrorToolbar_"\]\s+\[class\*="_selectTrigger_"\]\s*\{[^}]*font-size:\s*11px\s*!important;/s,
   );
   assert.match(
     styles,
-    /\.netcatty-mdx-editor:not\(\.netcatty-mdx-editor--preview\)\s+\[class\*="_codeMirrorToolbar_"\]\s+button\s*\{[^}]*height:\s*1\.35rem\s*!important;/s,
+    /\.netcatty-mdx-editor\s+\[class\*="_codeMirrorToolbar_"\]\s+button[^{]*\{[^}]*height:\s*1\.4rem\s*!important;/s,
   );
   assert.match(
     styles,
-    /\.netcatty-mdx-editor:not\(\.netcatty-mdx-editor--preview\)\s+\[class\*="_codeMirrorToolbar_"\]\s+button\s+svg\s*\{[^}]*width:\s*14px\s*!important;/s,
+    /\.netcatty-mdx-editor\s+\[class\*="_codeMirrorToolbar_"\][^{]*svg\s*\{[^}]*width:\s*10px\s*!important;/s,
   );
+});
+
+test("annotateMathFormulaBlocks handles empty math blocks and avoids reading toolbar text", () => {
+  const source = readFileSync(new URL("./InlineMarkdownEditor.tsx", import.meta.url), "utf8");
+
+  assert.match(source, /export const annotateMathFormulaBlocks/);
+  assert.match(source, /const text = getCodeMirrorBlockText\(wrapper\)\.trim\(\);/);
+  assert.match(source, /if \(!formulaSource\) \{/);
+  assert.match(source, /existingPreview\.remove\(\)/);
+});
+
+test("NoteSourceEditor manages local draft state to prevent cursor jumping on debounced commits", () => {
+  const source = readFileSync(new URL("./NoteSourceEditor.tsx", import.meta.url), "utf8");
+
+  assert.match(source, /const \[localValue, setLocalValue\] = useState\(value\);/);
+  assert.match(source, /value=\{localValue\}/);
+  assert.match(source, /onChange=\{handleChange\}/);
+  assert.match(source, /prevNoteIdRef\.current/);
+  assert.match(source, /prevValueRef\.current/);
+});
+
+test("source mode compares raw markdown separately from display-normalized markdown", () => {
+  const source = readFileSync(new URL("./InlineMarkdownEditor.tsx", import.meta.url), "utf8");
+
+  assert.match(source, /const latestSourceMarkdownRef = useRef\(value\)/);
+  assert.match(source, /markdown === latestSourceMarkdownRef\.current/);
+  assert.match(source, /latestMarkdownRef\.current = normalizeNotePublicAssetPaths\(markdown\)/);
+  assert.match(source, /setAcceptedSourceMarkdown\(markdown\)/);
+  assert.match(
+    source,
+    /<NoteSourceEditor[\s\S]*?value=\{noteId !== undefined && noteId !== noteIdRef\.current \? value : acceptedSourceMarkdown\}[\s\S]*?onChange=\{commitSourceMarkdown\}/,
+  );
+});
+
+test("raw source drafts are not overwritten by external values with equivalent display markdown", () => {
+  const base = {
+    latestMarkdown: "![x](/x.png)",
+    syncedMarkdown: "![x](/x.png)",
+    latestSourceMarkdown: "![x](/x.png)",
+    syncedSourceMarkdown: "![x](/public/x.png)",
+  };
+
+  assert.equal(shouldApplyExternalNoteMarkdown({
+    ...base,
+    nextSourceMarkdown: "# Remote",
+  }), false);
+  assert.equal(shouldApplyExternalNoteMarkdown({
+    ...base,
+    nextSourceMarkdown: "![x](/x.png)",
+  }), true);
+  assert.equal(shouldApplyExternalNoteMarkdown({
+    ...base,
+    latestSourceMarkdown: "![x](/public/x.png)",
+    nextSourceMarkdown: "![x](/x.png)",
+  }), true);
 });

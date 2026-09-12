@@ -3,10 +3,26 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import {
+  buildPaneMagnificationPaletteAction,
   buildPluginPaletteItems,
   getQuickSwitcherRowStateClass,
   shouldUseQuickSwitcherPointerNavigation,
 } from './QuickSwitcher';
+
+test('command palette follows the active pane magnification state', () => {
+  const t = (key: string) => key;
+  assert.equal(buildPaneMagnificationPaletteAction('unavailable', t), null);
+  assert.deepEqual(buildPaneMagnificationPaletteAction('focusable', t), {
+    type: 'action',
+    id: 'magnify-current-pane',
+    title: 'terminal.paneMagnification.magnify',
+  });
+  assert.deepEqual(buildPaneMagnificationPaletteAction('focused', t), {
+    type: 'action',
+    id: 'restore-magnified-pane',
+    title: 'terminal.paneMagnification.restore',
+  });
+});
 
 test('keeps the new workspace action outside the scrollable results', () => {
   const source = readFileSync(new URL('./QuickSwitcher.tsx', import.meta.url), 'utf8');

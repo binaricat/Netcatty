@@ -302,6 +302,9 @@ export interface SyncPayload {
     uiFontFamilyId?: string;
     uiLanguage?: string;
     customCSS?: string;
+    noteFontFamily?: string;
+    noteFontSize?: number;
+    noteCodeFontSize?: number;
     // Terminal
     terminalTheme?: string;
     followAppTerminalTheme?: boolean;
@@ -358,9 +361,11 @@ export interface SyncPayload {
       defaultAgentId?: string;
       commandBlocklist?: string[];
       commandTimeout?: number;
+      responseIdleTimeout?: number;
       maxIterations?: number;
       agentModelMap?: Record<string, string>;
       agentProviderMap?: Record<string, string>;
+      agentThinkingMap?: Record<string, string>;
       webSearchConfig?: Record<string, unknown> | null;
       quickMessages?: Array<Record<string, unknown>>;
       showTerminalSelectionAction?: boolean;
@@ -381,6 +386,48 @@ export interface SyncPayload {
 
   /** Encrypted convergent-sync metadata. The adjacent fields remain a complete v1 snapshot. */
   convergentSync?: ConvergentSyncEnvelopeV2;
+}
+
+/**
+ * Strip device-local connection telemetry from hosts before any sync
+ * comparison or upload (#2629). `lastConnectedAt` updates on every successful
+ * SSH connect and must not dirty auto-sync hashes, three-way merges, or
+ * inflate cloud versions. Legacy stored bases / remote payloads still carry
+ * the field, so all three merge sides are normalized with this helper.
+ */
+export function sanitizeHostsForSync(
+  hosts: import('./models').Host[] | undefined,
+): import('./models').Host[] | undefined {
+  if (!hosts) return hosts;
+  return hosts.map((host) => ({ ...host, lastConnectedAt: undefined }));
+}
+
+/** Copy a payload with device-local host telemetry stripped for compare/convert. */
+export function withHostsSanitizedForSync(payload: SyncPayload): SyncPayload {
+  return {
+    ...payload,
+    hosts: sanitizeHostsForSync(payload.hosts) ?? payload.hosts,
+  };
+}
+
+/**
+ * Re-attach this device's Recently Connected timestamps when a cloud payload
+ * omits `lastConnectedAt`. Incoming timestamps (local backups, legacy cloud
+ * snapshots) still win when present.
+ */
+export function retainLocalHostLastConnectedAt(
+  incoming: import('./models').Host[] | undefined,
+  local: import('./models').Host[] | undefined,
+): import('./models').Host[] | undefined {
+  if (!incoming) return incoming;
+  if (!local?.length) return incoming;
+  const localById = new Map(local.map((host) => [host.id, host.lastConnectedAt]));
+  return incoming.map((host) => {
+    if (host.lastConnectedAt != null) return host;
+    const localTs = localById.get(host.id);
+    if (localTs == null) return host;
+    return { ...host, lastConnectedAt: localTs };
+  });
 }
 
 export const SYNC_PAYLOAD_ENTITY_KEYS = [

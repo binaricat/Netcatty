@@ -178,6 +178,46 @@ test("summarizeSyncChanges reports both-added conflicts by entity type", () => {
   }]);
 });
 
+test("summarizeSyncChanges ignores lastConnectedAt-only host diffs", () => {
+  const host = {
+    id: "host-1",
+    label: "prod",
+    hostname: "prod.example.com",
+    username: "root",
+    tags: [],
+    os: "linux" as const,
+  };
+  const base = payload({ hosts: [{ ...host, lastConnectedAt: 10 }] });
+  const local = payload({ hosts: [host] });
+  const remote = payload({ hosts: [{ ...host, lastConnectedAt: 99 }] });
+
+  const summary = summarizeSyncChanges(base, local, remote);
+
+  assert.equal(summary.hasLocalChanges, false);
+  assert.equal(summary.hasRemoteChanges, false);
+  assert.equal(summary.hasConflicts, false);
+});
+
+test("summarizeSyncChanges still reports a real remote host edit after stripping lastConnectedAt", () => {
+  const host = {
+    id: "host-1",
+    label: "prod",
+    hostname: "prod.example.com",
+    username: "root",
+    tags: [],
+    os: "linux" as const,
+  };
+  const summary = summarizeSyncChanges(
+    payload({ hosts: [{ ...host, lastConnectedAt: 10 }] }),
+    payload({ hosts: [host] }),
+    payload({ hosts: [{ ...host, lastConnectedAt: 10, label: "prod-renamed" }] }),
+  );
+
+  assert.equal(summary.hasLocalChanges, false);
+  assert.equal(summary.hasRemoteChanges, true);
+  assert.equal(summary.hasConflicts, false);
+});
+
 test("withSyncReliabilityMeta carries old deletion records until the entity is recreated", () => {
   const current = payload({
     syncMeta: {

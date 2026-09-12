@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   DEFAULT_WORKSPACE_TITLE,
+  buildMergedWorkspaceTitle,
+  buildMergedWorkspaceTitleFromSessions,
   getSessionConnectionLabel,
   resolveCodingCliProviderIconUpdate,
   resolveSessionTabTitle,
@@ -197,5 +199,60 @@ test('resolveWorkspaceTabLabel falls back to the default title with no sessions'
   assert.equal(
     resolveWorkspaceTabLabel({ title: DEFAULT_WORKSPACE_TITLE, focusedSessionId: null }, []),
     DEFAULT_WORKSPACE_TITLE,
+  );
+});
+
+test('buildMergedWorkspaceTitle joins both tab labels with a slash', () => {
+  assert.equal(buildMergedWorkspaceTitle('01', '02'), '01/02');
+  assert.equal(buildMergedWorkspaceTitle('web-01', 'db-02'), 'web-01/db-02');
+});
+
+test('buildMergedWorkspaceTitle collapses identical labels to one name', () => {
+  assert.equal(buildMergedWorkspaceTitle('web-01', 'web-01'), 'web-01');
+});
+
+test('buildMergedWorkspaceTitle falls back to the labeled side', () => {
+  assert.equal(buildMergedWorkspaceTitle('', '02'), '02');
+  assert.equal(buildMergedWorkspaceTitle('01', ''), '01');
+});
+
+test('buildMergedWorkspaceTitle returns null when neither tab has a label', () => {
+  assert.equal(buildMergedWorkspaceTitle('', ''), null);
+});
+
+test('buildMergedWorkspaceTitleFromSessions recomputes from live membership', () => {
+  const sessions = [
+    { id: 'a', customName: '01', hostLabel: '01', hostId: 'h1' },
+    { id: 'b', customName: '02', hostLabel: '02', hostId: 'h2' },
+  ];
+  assert.equal(buildMergedWorkspaceTitleFromSessions(sessions), '01/02');
+  // After renaming pane "02" the composed title follows.
+  assert.equal(
+    buildMergedWorkspaceTitleFromSessions([
+      sessions[0],
+      { ...sessions[1], customName: 'prod', hostLabel: 'prod' },
+    ]),
+    '01/prod',
+  );
+  // After removing a pane the title collapses to the remaining label.
+  assert.equal(buildMergedWorkspaceTitleFromSessions([sessions[1]]), '02');
+  // Identical labels still collapse; unlabeled panes are skipped.
+  assert.equal(
+    buildMergedWorkspaceTitleFromSessions([
+      sessions[0],
+      { id: 'c', customName: '', hostLabel: '', hostId: 'h3' },
+      { ...sessions[0], id: 'd' },
+    ]),
+    '01',
+  );
+  assert.equal(buildMergedWorkspaceTitleFromSessions([]), null);
+  // A third pane whose label duplicates a non-adjacent member is collapsed too.
+  assert.equal(
+    buildMergedWorkspaceTitleFromSessions([
+      sessions[0],
+      sessions[1],
+      { ...sessions[0], id: 'd' },
+    ]),
+    '01/02',
   );
 });

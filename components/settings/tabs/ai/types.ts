@@ -58,6 +58,7 @@ export interface AgentPathInfo {
   binPath?: string | null;
   version: string | null;
   available: boolean;
+  /** True when the user's Cursor Agent CLI is on PATH or logged in. */
   installed?: boolean;
   authenticated?: boolean;
   authSource?: string | null;
@@ -69,6 +70,11 @@ export interface AgentPathInfo {
   apiKeyOk?: boolean;
   /** True when @cursor/sdk platform package is importable. */
   sdkInstalled?: boolean;
+}
+
+/** User-environment Cursor Agent CLI, not Netcatty's bundled @cursor/sdk. */
+export function isCursorRuntimeInstalled(pathInfo: AgentPathInfo | null | undefined): boolean {
+  return Boolean(pathInfo?.cliBinPath || pathInfo?.cliLoginOk);
 }
 
 /** Mode-aware Cursor availability for Settings enablement. */
@@ -87,9 +93,11 @@ export function isCursorAvailableForMode(
     || pathInfo.authSource === "settings"
     || pathInfo.authSource === "CURSOR_API_KEY",
   );
+  // Missing sdkInstalled means the probe has not filled it yet. API-key mode
+  // uses Netcatty's bundled SDK and must not wait for Cursor.app.
   const sdkOk = pathInfo.sdkInstalled !== undefined
     ? Boolean(pathInfo.sdkInstalled)
-    : Boolean(pathInfo.installed);
+    : true;
   return hasKey && sdkOk;
 }
 
@@ -154,6 +162,14 @@ export interface NetcattyAiBridge {
   codexAppServerGetStatus?: (agentCommand?: string, agentEnv?: Record<string, string>) => Promise<{ ok: boolean; available: boolean; error?: string }>;
   aiUserSkillsGetStatus?: () => Promise<UserSkillsStatusResult>;
   aiUserSkillsOpenFolder?: () => Promise<UserSkillsStatusResult>;
+  aiSkillsCliGetInvocation?: () => Promise<{
+    ok: boolean;
+    skillPath?: string | null;
+    commandPrefix?: string;
+    launcherPath?: string | null;
+    usesLauncher?: boolean;
+    error?: string;
+  }>;
   openExternal?: (url: string) => Promise<void>;
   externalMcpGetStatus?: () => Promise<Record<string, unknown>>;
   externalMcpSetEnabled?: (enabled: boolean) => Promise<Record<string, unknown>>;

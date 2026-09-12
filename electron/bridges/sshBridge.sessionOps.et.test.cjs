@@ -307,3 +307,21 @@ test("readRemoteHistory reports pending while the Mosh handshake is still in pro
   assert.equal(result.pending, true);
   assert.equal(session.conn, undefined);
 });
+
+test("getSessionDistroInfo uses and reuses the Mosh stats companion", async () => {
+  const session = { type: "mosh", moshStatsAuth: { hostname: "h" } };
+  let connections = 0;
+  const api = makeApi(session, async () => { throw new Error("not ET"); }, {
+    ensureMoshStatsConnection: async (target) => {
+      connections++;
+      target.moshStatsConn = fakeConn('ID=ubuntu');
+    },
+  });
+  for (let i = 0; i < 2; i++) {
+    const result = await api.getSessionDistroInfo(null, { sessionId: 'et-1' });
+    assert.equal(result.success, true);
+    assert.equal(result.stdout, 'ID=ubuntu');
+  }
+  assert.equal(connections, 1);
+  assert.equal(session.conn, undefined);
+});

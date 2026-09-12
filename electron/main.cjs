@@ -73,10 +73,8 @@ const {
   applyJmsProtocolClientPreference,
   applySshProtocolClientPreference,
   collectJmsDeepLinkUrls,
-  collectPuttyStyleDeepLinkUrls,
-  collectSshDeepLinkUrls,
+  collectSshDeepLinkQueueItems,
   getSshDeepLinkRendererReadyTimeoutMs,
-  collectTelnetDeepLinkUrls,
   redactPuttyCommandLinePasswords,
   isJmsDeepLinkUrl,
   isSshDeepLinkUrl,
@@ -110,6 +108,10 @@ const {
   updateExplorerContextMenuEnabledPreference,
   writeExplorerContextMenuEnabledPreference,
 } = require("./explorerContextMenu.cjs");
+const {
+  registerHandlers: registerAutoLaunchHandlers,
+  wasLaunchedHidden,
+} = require("./autoLaunch.cjs");
 
 try {
   protocol?.registerSchemesAsPrivileged?.([
@@ -572,7 +574,7 @@ const registerBridges = createBridgeRegistrar({
 /**
  * Create the main application window
  */
-async function createWindow() {
+async function createWindow({ startHidden = false } = {}) {
   const windowManager = getWindowManager();
   windowManager.setAppContentWindowClosedHandler(createAppContentWindowClosedHandler({
     app,
@@ -586,8 +588,9 @@ async function createWindow() {
     isMac,
     electronDir,
     onRegisterBridge: registerBridges,
+    startHidden,
   });
-  
+
   return win;
 }
 
@@ -651,16 +654,28 @@ async function createAndShowMainWindow() {
     return existingWin;
   }
 
+  const startHidden = consumeColdStartHiddenLaunch();
+
   mainWindowStartupPromise = (async () => {
     processErrorController.beginMainWindowStartup();
     try {
-      const win = await createWindow();
-      await waitForWindowToShow(win);
+      const win = await createWindow({ startHidden });
+      // A hidden cold start never fires "show" — waiting for it would hang
+      // startup forever, so only wait when the window is meant to appear.
+      if (!startHidden) await waitForWindowToShow(win);
       void getWindowManager().waitForRendererReady(win, {
         timeoutMs: isDev ? 30000 : 15000,
       }).catch((err) => {
         console.warn("[Main] Renderer ready signal was late or missing after first show:", err?.message || err);
       });
+      // windowShown latches process-error-guard protection on for the rest
+      // of the app's life (see processErrorGuards.cjs), so a hidden cold
+      // start must still report true here: createWindow() above already
+      // succeeded (window created, page loaded) — a deliberately hidden
+      // window is a completed startup, not a failure. Passing false would
+      // leave the guard permanently "strict", classifying any later
+      // non-network error as fatal and killing an otherwise healthy
+      // tray-only session that never happened to show a window.
       processErrorController.completeMainWindowStartup({ windowShown: true });
       return win;
     } catch (err) {
@@ -675,23 +690,28 @@ async function createAndShowMainWindow() {
 }
 
 let sshDeepLinkEnabled = readSshDeepLinkEnabledPreference({ app });
-const puttyStyleDeepLinks = sshDeepLinkEnabled
-  ? collectPuttyStyleDeepLinkUrls(process.argv)
-  : { ssh: [], telnet: [] };
-const pendingSshDeepLinkUrls = sshDeepLinkEnabled
-  ? [...collectSshDeepLinkUrls(process.argv), ...puttyStyleDeepLinks.ssh]
-  : [];
-const pendingTelnetDeepLinkUrls = sshDeepLinkEnabled
-  ? [...collectTelnetDeepLinkUrls(process.argv), ...puttyStyleDeepLinks.telnet]
-  : [];
-if (sshDeepLinkEnabled) {
-  redactPuttyCommandLinePasswords(process.argv);
-}
+// PuTTY-style CLI args (-ssh user@host -P 22 -pw pass) are an explicit launch
+// method for bastion/PAM callers (#3044). They must connect even when Netcatty
+// is not the registered ssh:// protocol client (or that registration failed),
+// including when a second launch hands its argv to an already-running
+// instance. Only scheme URLs (ssh:// … / telnet:// …) follow the preference.
+const initialDeepLinkQueueItems = collectSshDeepLinkQueueItems(process.argv, {
+  includeSchemeUrls: sshDeepLinkEnabled,
+});
+const pendingSshDeepLinkUrls = [...initialDeepLinkQueueItems.ssh];
+const pendingTelnetDeepLinkUrls = [...initialDeepLinkQueueItems.telnet];
+// Snapshot the pristine argv before scrubbing it in place below: the
+// single-instance handoff forwards this list to the running instance and a
+// redacted copy would make warm PuTTY-style launches authenticate with the
+// masked password.
+const rawLaunchArgvForHandoff = [...process.argv];
+redactPuttyCommandLinePasswords(process.argv);
 const pendingOpenTerminalPaths = resolveOpenTerminalPathsFromArgs(process.argv);
 let flushingSshDeepLinks = false;
 let flushingTelnetDeepLinks = false;
 let flushingOpenTerminalPaths = false;
-let sshDeepLinkDeliveryGeneration = 0;
+// Only scheme-originated requests are invalidated by the protocol preference.
+let sshSchemeDeliveryGeneration = 0;
 
 let jmsDeepLinkEnabled = readJmsDeepLinkEnabledPreference({ app });
 const pendingJmsDeepLinkUrls = jmsDeepLinkEnabled ? collectJmsDeepLinkUrls(process.argv) : [];
@@ -700,19 +720,19 @@ let jmsDeepLinkDeliveryGeneration = 0;
 
 let explorerContextMenuEnabled = resolveExplorerContextMenuEnabled({ app }).enabled === true;
 
-function queueSshDeepLink(rawUrl) {
-  if (!sshDeepLinkEnabled) return;
+function queueSshDeepLink(rawUrl, { viaCommandLine = false } = {}) {
+  if (!viaCommandLine && !sshDeepLinkEnabled) return;
   if (!isSshDeepLinkUrl(rawUrl)) return;
-  pendingSshDeepLinkUrls.push(rawUrl);
+  pendingSshDeepLinkUrls.push({ rawUrl, viaCommandLine });
   if (app.isReady?.()) {
     void flushPendingSshDeepLinks();
   }
 }
 
-function queueTelnetDeepLink(rawUrl) {
-  if (!sshDeepLinkEnabled) return;
+function queueTelnetDeepLink(rawUrl, { viaCommandLine = false } = {}) {
+  if (!viaCommandLine && !sshDeepLinkEnabled) return;
   if (!isTelnetDeepLinkUrl(rawUrl)) return;
-  pendingTelnetDeepLinkUrls.push(rawUrl);
+  pendingTelnetDeepLinkUrls.push({ rawUrl, viaCommandLine });
   if (app.isReady?.()) {
     void flushPendingTelnetDeepLinks();
   }
@@ -735,6 +755,22 @@ function queueResolvedOpenTerminalPaths(paths) {
   }
 }
 
+// Drops preference-gated pending links while keeping command-line launches
+// queued — CLI args may still be delivered after the ssh:// preference flips.
+function dropSchemePendingDeepLinks() {
+  // Permanently cancel requests already waiting for a window or renderer,
+  // even if protocol handling is enabled again before that wait completes.
+  sshSchemeDeliveryGeneration += 1;
+  for (let index = pendingSshDeepLinkUrls.length - 1; index >= 0; index -= 1) {
+    if (pendingSshDeepLinkUrls[index]?.viaCommandLine === true) continue;
+    pendingSshDeepLinkUrls.splice(index, 1);
+  }
+  for (let index = pendingTelnetDeepLinkUrls.length - 1; index >= 0; index -= 1) {
+    if (pendingTelnetDeepLinkUrls[index]?.viaCommandLine === true) continue;
+    pendingTelnetDeepLinkUrls.splice(index, 1);
+  }
+}
+
 ipcMain?.handle?.("netcatty:deepLink:ssh:setEnabled", async (_event, payload) => {
   const enabled = payload?.enabled !== false;
   const result = updateSshDeepLinkEnabledPreference({
@@ -742,11 +778,7 @@ ipcMain?.handle?.("netcatty:deepLink:ssh:setEnabled", async (_event, payload) =>
     enabled,
     applyPreference: (nextEnabled) => applySshProtocolClientPreference({ app, enabled: nextEnabled, isDev }),
     writePreference: (nextEnabled) => writeSshDeepLinkEnabledPreference({ app, enabled: nextEnabled }),
-    clearPending: () => {
-      pendingSshDeepLinkUrls.length = 0;
-      pendingTelnetDeepLinkUrls.length = 0;
-      sshDeepLinkDeliveryGeneration += 1;
-    },
+    clearPending: dropSchemePendingDeepLinks,
   });
   sshDeepLinkEnabled = result.enabled;
   return result;
@@ -807,6 +839,27 @@ ipcMain?.handle?.("netcatty:explorerContextMenu:getEnabled", async () => ({
   enabled: explorerContextMenuEnabled,
   supported: process.platform === "win32",
 }));
+
+if (ipcMain) registerAutoLaunchHandlers(ipcMain, { app });
+
+// Cold-start only: true when the OS login item launched us hidden (--hidden
+// on Windows, wasOpenedAsHidden on macOS). Consumed exactly once by whichever
+// createAndShowMainWindow() call reaches it first — this is NOT guaranteed to
+// be the default bootstrap call near the bottom of this file: a genuine
+// second instance (or a Dock reopen) can arrive after app.whenReady() but
+// before the bootstrap's own await chain gets there, racing it. Any caller
+// that represents an explicit foreground request (second-instance, activate,
+// deep links, ...) must re-focus after creation regardless of which flag it
+// happened to consume, or a user-triggered relaunch can silently create a
+// hidden window with nothing to show it.
+let consumeColdStartHiddenLaunch = (() => {
+  let pending = wasLaunchedHidden({ argv: process.argv, app });
+  return () => {
+    const value = pending;
+    pending = false;
+    return value;
+  };
+})();
 
 async function deliverJmsDeepLink(rawUrl, expectedGeneration = jmsDeepLinkDeliveryGeneration) {
   if (!shouldDeliverJmsDeepLink({
@@ -879,20 +932,20 @@ async function flushPendingJmsDeepLinks() {
   }
 }
 
-async function deliverSshDeepLink(rawUrl, expectedGeneration = sshDeepLinkDeliveryGeneration) {
-  if (!shouldDeliverSshDeepLink({
+async function deliverSshDeepLink(rawUrl, expectedGeneration = sshSchemeDeliveryGeneration, { viaCommandLine = false } = {}) {
+  // The ssh:// preference can flip while a delivery is waiting for the
+  // renderer, so re-check it at every gate instead of reusing the queue-time
+  // snapshot. Command-line (PuTTY-style) launches bypass the preference.
+  const shouldDeliver = () => viaCommandLine === true || shouldDeliverSshDeepLink({
     enabled: sshDeepLinkEnabled,
-    deliveryGeneration: sshDeepLinkDeliveryGeneration,
+    deliveryGeneration: sshSchemeDeliveryGeneration,
     expectedGeneration,
-  })) {
+  });
+  if (!shouldDeliver()) {
     return { success: false, reason: "ssh-deep-link-disabled" };
   }
   const win = await createAndShowMainWindow();
-  if (!shouldDeliverSshDeepLink({
-    enabled: sshDeepLinkEnabled,
-    deliveryGeneration: sshDeepLinkDeliveryGeneration,
-    expectedGeneration,
-  })) {
+  if (!shouldDeliver()) {
     return { success: false, reason: "ssh-deep-link-disabled" };
   }
   focusMainWindow();
@@ -905,11 +958,7 @@ async function deliverSshDeepLink(rawUrl, expectedGeneration = sshDeepLinkDelive
     { url: rawUrl },
     {
       timeoutMs: getSshDeepLinkRendererReadyTimeoutMs({ isDev }),
-      shouldSend: () => shouldDeliverSshDeepLink({
-        enabled: sshDeepLinkEnabled,
-        deliveryGeneration: sshDeepLinkDeliveryGeneration,
-        expectedGeneration,
-      }),
+      shouldSend: shouldDeliver,
       cancelReason: "ssh-deep-link-disabled",
     },
   );
@@ -919,18 +968,18 @@ async function deliverSshDeepLink(rawUrl, expectedGeneration = sshDeepLinkDelive
   return result || { success: true };
 }
 
-async function deliverTelnetDeepLink(rawUrl, expectedGeneration = sshDeepLinkDeliveryGeneration) {
-  if (!shouldDeliverTelnetDeepLink({
+async function deliverTelnetDeepLink(rawUrl, expectedGeneration = sshSchemeDeliveryGeneration, { viaCommandLine = false } = {}) {
+  // Mirror deliverSshDeepLink: gate on the live preference so disabling
+  // protocol handling cancels in-flight scheme deliveries, while
+  // command-line launches stay deliverable.
+  const shouldDeliver = () => viaCommandLine === true || shouldDeliverTelnetDeepLink({
     enabled: sshDeepLinkEnabled,
-    deliveryGeneration: sshDeepLinkDeliveryGeneration,
+    deliveryGeneration: sshSchemeDeliveryGeneration,
     expectedGeneration,
-  })) return;
+  });
+  if (!shouldDeliver()) return;
   const win = await createAndShowMainWindow();
-  if (!shouldDeliverTelnetDeepLink({
-    enabled: sshDeepLinkEnabled,
-    deliveryGeneration: sshDeepLinkDeliveryGeneration,
-    expectedGeneration,
-  })) return;
+  if (!shouldDeliver()) return;
   focusMainWindow();
   const windowManager = getWindowManager();
   const result = await windowManager.sendWhenRendererReady?.(
@@ -939,11 +988,7 @@ async function deliverTelnetDeepLink(rawUrl, expectedGeneration = sshDeepLinkDel
     { url: rawUrl },
     {
       timeoutMs: 0,
-      shouldSend: () => shouldDeliverTelnetDeepLink({
-        enabled: sshDeepLinkEnabled,
-        deliveryGeneration: sshDeepLinkDeliveryGeneration,
-        expectedGeneration,
-      }),
+      shouldSend: shouldDeliver,
       cancelReason: "telnet-deep-link-disabled",
     },
   );
@@ -958,20 +1003,26 @@ async function flushPendingSshDeepLinks() {
   flushingSshDeepLinks = true;
   let requeueDelayMs = 0;
   try {
-    while (sshDeepLinkEnabled && pendingSshDeepLinkUrls.length > 0) {
-      const rawUrl = pendingSshDeepLinkUrls.shift();
-      if (!rawUrl) continue;
-      const result = await deliverSshDeepLink(rawUrl, sshDeepLinkDeliveryGeneration);
+    while (pendingSshDeepLinkUrls.length > 0) {
+      const item = pendingSshDeepLinkUrls.shift();
+      if (!item?.rawUrl) continue;
+      // Command-line launches bypass the ssh:// protocol-client preference;
+      // scheme-originated deliveries gate on it and are cancelled once it is
+      // disabled (deliverSshDeepLink re-checks the live preference).
+      const expectedGeneration = sshSchemeDeliveryGeneration;
+      const result = await deliverSshDeepLink(item.rawUrl, expectedGeneration, {
+        viaCommandLine: item.viaCommandLine === true,
+      });
       if (shouldRequeueFailedSshDeepLinkDelivery({
-        enabled: sshDeepLinkEnabled,
-        deliveryGeneration: sshDeepLinkDeliveryGeneration,
-        expectedGeneration: sshDeepLinkDeliveryGeneration,
+        enabled: item.viaCommandLine === true || sshDeepLinkEnabled,
+        deliveryGeneration: item.viaCommandLine === true ? expectedGeneration : sshSchemeDeliveryGeneration,
+        expectedGeneration,
         result,
         cancelReason: "ssh-deep-link-disabled",
       })) {
         // Window died or delivery failed while the link is still valid — keep it
         // queued for the next successful window/renderer ready cycle.
-        pendingSshDeepLinkUrls.unshift(rawUrl);
+        pendingSshDeepLinkUrls.unshift(item);
         requeueDelayMs = 1000;
         break;
       }
@@ -980,7 +1031,7 @@ async function flushPendingSshDeepLinks() {
     console.warn("[Main] Failed to process ssh:// deep link:", err);
   } finally {
     flushingSshDeepLinks = false;
-    if (sshDeepLinkEnabled && pendingSshDeepLinkUrls.length > 0) {
+    if (pendingSshDeepLinkUrls.length > 0) {
       if (requeueDelayMs > 0) {
         setTimeout(() => {
           void flushPendingSshDeepLinks();
@@ -997,18 +1048,24 @@ async function flushPendingTelnetDeepLinks() {
   flushingTelnetDeepLinks = true;
   let requeueDelayMs = 0;
   try {
-    while (sshDeepLinkEnabled && pendingTelnetDeepLinkUrls.length > 0) {
-      const rawUrl = pendingTelnetDeepLinkUrls.shift();
-      if (!rawUrl) continue;
-      const result = await deliverTelnetDeepLink(rawUrl, sshDeepLinkDeliveryGeneration);
+    while (pendingTelnetDeepLinkUrls.length > 0) {
+      const item = pendingTelnetDeepLinkUrls.shift();
+      if (!item?.rawUrl) continue;
+      // Command-line launches bypass the ssh:// protocol-client preference;
+      // scheme-originated deliveries gate on it and are cancelled once it is
+      // disabled (deliverTelnetDeepLink re-checks the live preference).
+      const expectedGeneration = sshSchemeDeliveryGeneration;
+      const result = await deliverTelnetDeepLink(item.rawUrl, expectedGeneration, {
+        viaCommandLine: item.viaCommandLine === true,
+      });
       if (shouldRequeueFailedSshDeepLinkDelivery({
-        enabled: sshDeepLinkEnabled,
-        deliveryGeneration: sshDeepLinkDeliveryGeneration,
-        expectedGeneration: sshDeepLinkDeliveryGeneration,
+        enabled: item.viaCommandLine === true || sshDeepLinkEnabled,
+        deliveryGeneration: item.viaCommandLine === true ? expectedGeneration : sshSchemeDeliveryGeneration,
+        expectedGeneration,
         result,
         cancelReason: "telnet-deep-link-disabled",
       })) {
-        pendingTelnetDeepLinkUrls.unshift(rawUrl);
+        pendingTelnetDeepLinkUrls.unshift(item);
         requeueDelayMs = 1000;
         break;
       }
@@ -1017,7 +1074,7 @@ async function flushPendingTelnetDeepLinks() {
     console.warn("[Main] Failed to process telnet:// deep link:", err);
   } finally {
     flushingTelnetDeepLinks = false;
-    if (sshDeepLinkEnabled && pendingTelnetDeepLinkUrls.length > 0) {
+    if (pendingTelnetDeepLinkUrls.length > 0) {
       if (requeueDelayMs > 0) {
         setTimeout(() => {
           void flushPendingTelnetDeepLinks();
@@ -1141,7 +1198,15 @@ function showStartupError(err) {
 // Ensure single-instance behavior — must run before app.whenReady() so
 // the second instance never attempts to register the app:// protocol or
 // create a BrowserWindow (which would fail with ERR_FAILED).
-const gotLock = app.requestSingleInstanceLock();
+// The raw argument list rides along as additionalData: the second-instance
+// event delivers Chromium-regrouped argv (all dash switches before positional
+// args), which separates PuTTY-style flags from their values and breaks the
+// CLI connection parser. The second process's own process.argv preserves the
+// original order.
+const gotLock = app.requestSingleInstanceLock({ rawLaunchArgv: rawLaunchArgvForHandoff.slice(1) });
+// Electron has synchronously copied the handoff data. Release our pristine
+// snapshot so a primary instance does not retain the launch password forever.
+rawLaunchArgvForHandoff.length = 0;
 if (!gotLock) {
   app.quit();
 } else {
@@ -1163,19 +1228,28 @@ if (!gotLock) {
     queueOpenTerminalPath(filePath);
   });
 
-  app.on("second-instance", (_event, argv, workingDirectory) => {
-    const jmsDeepLinkUrls = collectJmsDeepLinkUrls(argv);
-    const puttyStyleDeepLinks = collectPuttyStyleDeepLinkUrls(argv);
-    const telnetDeepLinkUrls = [
-      ...collectTelnetDeepLinkUrls(argv),
-      ...puttyStyleDeepLinks.telnet,
-    ];
-    const sshDeepLinkUrls = [
-      ...collectSshDeepLinkUrls(argv),
-      ...puttyStyleDeepLinks.ssh,
-    ];
-    if (jmsDeepLinkUrls.length > 0 || sshDeepLinkUrls.length > 0 || telnetDeepLinkUrls.length > 0) {
-      redactPuttyCommandLinePasswords(argv);
+  app.on("second-instance", (_event, argv, workingDirectory, additionalData) => {
+    // Prefer the raw argument list forwarded by the second process (see the
+    // requestSingleInstanceLock comment) — the regrouped event argv separates
+    // PuTTY-style flags from their values, so fall back only when the second
+    // instance predates the raw-argv handoff.
+    const rawLaunchArgv = Array.isArray(additionalData?.rawLaunchArgv)
+      ? additionalData.rawLaunchArgv
+      : null;
+    const secondInstanceArgv = rawLaunchArgv ? [argv[0], ...rawLaunchArgv] : argv;
+    const jmsDeepLinkUrls = collectJmsDeepLinkUrls(secondInstanceArgv);
+    // Scheme URLs follow the ssh:// protocol-client preference; PuTTY-style
+    // CLI args from a bastion/PAM launch always queue (viaCommandLine).
+    const deepLinkQueueItems = collectSshDeepLinkQueueItems(secondInstanceArgv, {
+      includeSchemeUrls: sshDeepLinkEnabled,
+    });
+    redactPuttyCommandLinePasswords(secondInstanceArgv);
+    if (rawLaunchArgv) {
+      // Parsing and subsequent routing use the independent ordered copy.
+      // Release both consumed transport buffers: Chromium may have moved the
+      // password away from -pw, so adjacency-based redaction is unsafe here.
+      rawLaunchArgv.length = 0;
+      argv.length = 0;
     }
     if (jmsDeepLinkUrls.length > 0) {
       if (jmsDeepLinkEnabled) {
@@ -1183,29 +1257,36 @@ if (!gotLock) {
       }
       return;
     }
-    if (telnetDeepLinkUrls.length > 0) {
-      if (sshDeepLinkEnabled) {
-        telnetDeepLinkUrls.forEach(queueTelnetDeepLink);
-      }
+    if (deepLinkQueueItems.telnet.length > 0) {
+      deepLinkQueueItems.telnet.forEach((item) => {
+        queueTelnetDeepLink(item.rawUrl, { viaCommandLine: item.viaCommandLine });
+      });
       return;
     }
-    if (sshDeepLinkUrls.length > 0) {
-      if (sshDeepLinkEnabled) {
-        sshDeepLinkUrls.forEach(queueSshDeepLink);
-      }
+    if (deepLinkQueueItems.ssh.length > 0) {
+      deepLinkQueueItems.ssh.forEach((item) => {
+        queueSshDeepLink(item.rawUrl, { viaCommandLine: item.viaCommandLine });
+      });
       return;
     }
-    if (collectOpenTerminalPathArgs(argv).length > 0) {
+    if (collectOpenTerminalPathArgs(secondInstanceArgv).length > 0) {
       const baseDirectory = typeof workingDirectory === "string" ? workingDirectory : undefined;
-      const openTerminalPaths = resolveOpenTerminalPathsFromArgs(argv, { baseDirectory });
+      const openTerminalPaths = resolveOpenTerminalPathsFromArgs(secondInstanceArgv, { baseDirectory });
       if (openTerminalPaths.length > 0) {
         queueResolvedOpenTerminalPaths(openTerminalPaths);
       } else {
         // Still bring the app forward when Explorer launched us but the path
         // failed validation — silent no-op feels like a broken menu item.
-        console.warn("[Main] Open-terminal-path args present but no valid path resolved:", argv);
+        console.warn("[Main] Open-terminal-path args present but no valid path resolved:", secondInstanceArgv);
         if (!focusMainWindow()) {
-          void createAndShowMainWindow().catch((err) => {
+          // Explicit foreground request (a second instance launch): if a
+          // still-pending hidden auto-launch cold start races ahead of the
+          // normal bootstrap and consumes the --hidden flag here, the window
+          // would otherwise get created hidden with nothing to show it —
+          // focus again to guarantee visibility either way.
+          void createAndShowMainWindow().then(() => {
+            focusMainWindow();
+          }).catch((err) => {
             console.error("[Main] Failed to recreate window on open-terminal-path:", err);
           });
         }
@@ -1213,8 +1294,13 @@ if (!gotLock) {
       return;
     }
     if (!focusMainWindow()) {
-      // Window is missing or crashed — try to recreate it
-      void createAndShowMainWindow().catch((err) => {
+      // Window is missing or crashed — try to recreate it. Same
+      // hidden-launch race guard as above: this is an explicit foreground
+      // request, so re-focus after creation regardless of which flag this
+      // particular call happened to consume.
+      void createAndShowMainWindow().then(() => {
+        focusMainWindow();
+      }).catch((err) => {
         console.error("[Main] Failed to recreate window on second-instance:", err);
         showStartupError(err);
         if (!hasUsableWindow()) {
@@ -1230,10 +1316,10 @@ if (!gotLock) {
     const initialSshDeepLinkPreference = applyInitialSshDeepLinkPreference({
       enabled: sshDeepLinkEnabled,
       applyPreference: (enabled) => applySshProtocolClientPreference({ app, enabled, isDev }),
+      // Failed protocol registration must not drop command-line launch intents
+      // (they do not depend on being the ssh:// protocol client).
       clearPending: () => {
-        pendingSshDeepLinkUrls.length = 0;
-        pendingTelnetDeepLinkUrls.length = 0;
-        sshDeepLinkDeliveryGeneration += 1;
+        dropSchemePendingDeepLinks();
       },
     });
     sshDeepLinkEnabled = initialSshDeepLinkPreference.enabled;
@@ -1471,8 +1557,13 @@ if (!gotLock) {
       } catch {}
 
       if (focusMainWindow()) return;
-      // Main window doesn't exist — create it even if other windows (e.g. settings) are open
-      void createAndShowMainWindow().catch((err) => {
+      // Main window doesn't exist — create it even if other windows (e.g.
+      // settings) are open. Explicit foreground request (Dock reopen/click):
+      // guard against the same hidden-launch race as the second-instance
+      // handler above by re-focusing after creation.
+      void createAndShowMainWindow().then(() => {
+        focusMainWindow();
+      }).catch((err) => {
         console.error("[Main] Failed to create window on activate:", err);
         showStartupError(err);
         if (!hasUsableWindow()) {

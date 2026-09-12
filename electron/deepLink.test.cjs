@@ -9,6 +9,7 @@ const {
   getSshDeepLinkRendererReadyTimeoutMs,
   collectJmsDeepLinkUrls,
   collectPuttyStyleDeepLinkUrls,
+  collectSshDeepLinkQueueItems,
   collectSshDeepLinkUrls,
   collectTelnetDeepLinkUrls,
   isJmsDeepLinkUrl,
@@ -72,6 +73,39 @@ test("collectPuttyStyleDeepLinkUrls leaves ssh:// tokens to the existing collect
     ]),
     { ssh: [], telnet: [] },
   );
+});
+
+test("collectSshDeepLinkQueueItems keeps PuTTY CLI launches when scheme URLs are disabled", () => {
+  // Warm second-instance case: the running app forwarded another launch's
+  // argv while the ssh:// protocol-client preference is disabled.
+  assert.deepEqual(
+    collectSshDeepLinkQueueItems([
+      String.raw`C:\Program Files\Netcatty\Netcatty.exe`,
+      "-ssh",
+      "alice@10.0.0.8",
+      "-P",
+      "2222",
+      "-pw",
+      "s3cret",
+    ], { includeSchemeUrls: false }),
+    { ssh: [{ rawUrl: "ssh://alice:s3cret@10.0.0.8:2222", viaCommandLine: true }], telnet: [] },
+  );
+});
+
+test("collectSshDeepLinkQueueItems keeps scheme URL gating separate from CLI launches", () => {
+  const queueItems = collectSshDeepLinkQueueItems(
+    ["/Applications/Netcatty.app/Contents/MacOS/Netcatty", "ssh://alice@example.com"],
+    { includeSchemeUrls: true },
+  );
+  assert.deepEqual(queueItems.ssh, [{ rawUrl: "ssh://alice@example.com", viaCommandLine: false }]);
+  assert.deepEqual(queueItems.telnet, []);
+
+  const disabledQueueItems = collectSshDeepLinkQueueItems(
+    ["/Applications/Netcatty.app/Contents/MacOS/Netcatty", "ssh://alice@example.com"],
+    { includeSchemeUrls: false },
+  );
+  assert.deepEqual(disabledQueueItems.ssh, []);
+  assert.deepEqual(disabledQueueItems.telnet, []);
 });
 
 test("applySshProtocolClientPreference registers or removes ssh and telnet handlers", () => {

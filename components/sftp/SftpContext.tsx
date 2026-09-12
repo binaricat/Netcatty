@@ -20,7 +20,10 @@ export interface SftpTransferSource {
 }
 
 export type SftpConnectTarget = Host | "local";
-export type SftpConnectHostOptions = Pick<SftpConnectOptions, "sourceSessionId">;
+export type SftpConnectHostOptions = Pick<
+  SftpConnectOptions,
+  "sourceSessionId" | "requireSourceSessionReuse"
+>;
 
 // Types for the context
 export interface SftpPaneCallbacks {

@@ -196,6 +196,12 @@ export const ruCoreMessages: Messages = {
   'settings.appLock.validation.mismatch': 'Новые пароли не совпадают.',
   'settings.appLock.validation.incorrect': 'Текущий пароль блокировки неверен.',
 
+  // Settings > System > Auto Launch
+  'settings.autoLaunch.title': 'Запуск при входе в систему',
+  'settings.autoLaunch.enabled': 'Запускать при старте системы',
+  'settings.autoLaunch.enabledDesc': 'Автоматически запускать Netcatty при входе в систему, свернутым в системный трей.',
+  'settings.autoLaunch.unsupportedDesc': 'Недоступно на этой платформе или в сборке для разработки.',
+
   // Settings > System > Network Proxy
   'settings.system.networkProxy.title': 'Сетевой прокси',
   'settings.system.networkProxy.description': 'HTTP(S)-прокси для облачной синхронизации и AI-провайдеров. Не связан с SSH ProxyJump / ProxyCommand.',
@@ -342,6 +348,12 @@ export const ruCoreMessages: Messages = {
   'settings.vault.showHostTreeSidebarDesc': 'Показывать список хостов и кнопку в верхней панели для вкладок терминала и редактора.',
   'settings.vault.autoImportSystemKnownHosts': 'Автоимпорт системного known_hosts',
   'settings.vault.autoImportSystemKnownHostsDesc': 'При открытии хранилища тихо импортировать записи из OpenSSH known_hosts. Отключите, чтобы держать известные хосты Netcatty отдельно; кнопка «Сканировать систему» по-прежнему импортирует вручную.',
+  'settings.vault.notesFont': 'Шрифт кода',
+  'settings.vault.notesFontDesc': 'Шрифт для блоков кода и встроенного кода в заметках',
+  'settings.vault.notesFontSize': 'Размер шрифта заметок',
+  'settings.vault.notesFontSizeDesc': 'Размер шрифта для основного текста заметок',
+  'settings.vault.notesCodeFontSize': 'Размер шрифта кода',
+  'settings.vault.notesCodeFontSizeDesc': 'Размер шрифта для блоков кода и встроенного кода в заметках',
 
   // Update notifications
   'update.available.title': 'Доступно обновление',
@@ -600,6 +612,11 @@ export const ruCoreMessages: Messages = {
   'settings.terminal.behavior.autoCloseOnExit': 'Автоматически закрывать терминал при выходе',
   'settings.terminal.behavior.autoCloseOnExit.desc':
     'Разрешить автоматическое закрытие вкладок и окон терминала после завершения сеанса. Отключите, чтобы сохранять их после любого выхода.',
+  'settings.terminal.behavior.disconnectedNotice': 'При разрыве соединения',
+  'settings.terminal.behavior.disconnectedNotice.desc':
+    'Показывать компактное уведомление внутри уже подключённого терминала или полный диалог. Ошибки первого подключения по-прежнему показываются в диалоге.',
+  'settings.terminal.behavior.disconnectedNotice.terminal': 'В терминале',
+  'settings.terminal.behavior.disconnectedNotice.dialog': 'Диалог',
   'settings.terminal.behavior.rightClick.menu': 'Показать меню',
   'settings.terminal.behavior.rightClick.paste': 'Вставить',
   'settings.terminal.behavior.rightClick.selectWord': 'Выбрать слово',

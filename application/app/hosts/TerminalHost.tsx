@@ -20,7 +20,6 @@ import {
 import { useThemeRuntime, useTerminalAppearanceInjection } from '../../state/useThemeRuntime';
 import {
   useVaultSnapshot,
-  useVaultSnapshotActions,
 } from '../../state/vaultSnapshotStore';
 import { getAppHandlers, subscribeAppHandlers } from '../appHandlersBridge';
 import { publishAppShellDomainSlice } from '../appShellPropsStore';
@@ -37,7 +36,6 @@ export function TerminalHost() {
   const session = useSessionSnapshot();
   const sessionActions = useSessionSnapshotActions();
   const vault = useVaultSnapshot();
-  const vaultActions = useVaultSnapshotActions();
   const terminalSettings = useTerminalSettingsStore();
   const terminalSettingsActions = useTerminalSettingsActions();
   const {
@@ -180,6 +178,7 @@ export function TerminalHost() {
       copySessionWithCurrentShell: handlers.copySessionWithCurrentShell,
       copyWorkspaceWithCurrentShell: handlers.copyWorkspaceWithCurrentShell,
       copySessionToNewWindowWithCurrentShell: handlers.copySessionToNewWindowWithCurrentShell,
+      duplicateSessionWithCurrentShell: handlers.duplicateSessionWithCurrentShell,
       closeWorkspace: sessionActions?.closeWorkspace,
       createWorkspaceFromSessions: sessionActions?.createWorkspaceFromSessions,
       createWorkspaceFromTargets: handlers.createWorkspaceFromTargets,
@@ -206,6 +205,8 @@ export function TerminalHost() {
       updateTerminalHosts: handlers.updateTerminalHosts,
       hotkeyScheme: terminalSettings.hotkeyScheme,
       isBroadcastEnabled: sessionActions?.isBroadcastEnabled,
+      isGlobalBroadcastEnabled: sessionActions?.isGlobalBroadcastEnabled,
+      canUseGlobalBroadcast: sessionActions?.canUseGlobalBroadcast,
       keyBindings: terminalSettings.keyBindings,
       openNoteRequest: local.openNoteRequest,
       portForwardingRules: local.portForwardingRules,
@@ -237,10 +238,14 @@ export function TerminalHost() {
       terminalSettings: terminalSettings.terminalSettings,
       terminalThemeId: terminalSettings.terminalThemeId,
       toggleBroadcast: sessionActions?.toggleBroadcast,
+      toggleGlobalBroadcast: sessionActions?.toggleGlobalBroadcast,
+      onToggleGlobalBroadcast: sessionActions?.toggleGlobalBroadcast,
       toggleScriptsSidePanelRef: handlers.toggleScriptsSidePanelRef,
       toggleSidePanelRef: handlers.toggleSidePanelRef,
+      terminalPaneMagnificationRef: handlers.terminalPaneMagnificationRef,
+      sftpPaneMagnificationRef: handlers.sftpPaneMagnificationRef,
       toggleWorkspaceViewMode: sessionActions?.toggleWorkspaceViewMode,
-      updateHostDistro: vaultActions?.updateHostDistro,
+      updateHostDistro: handlers.updateTerminalHostDistro,
       updateSplitSizes: sessionActions?.updateSplitSizes,
       updateSessionFontSize: sessionActions?.updateSessionFontSize,
       updateSessionRestoreCwd: sessionActions?.updateSessionRestoreCwd,
@@ -268,7 +273,6 @@ export function TerminalHost() {
     terminalHosts,
     terminalSettings,
     terminalSettingsActions,
-    vaultActions,
   ]);
 
   useLayoutEffect(() => {

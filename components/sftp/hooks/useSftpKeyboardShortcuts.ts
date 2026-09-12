@@ -16,6 +16,7 @@ import { sftpDialogActionStore } from "../../../application/state/sftp/sftpDialo
 import { sftpTreeSelectionStore } from "../../../application/state/sftp/sftpTreeSelectionStore";
 import { sftpListOrderStore } from "./useSftpListOrderStore";
 import { sftpPaneViewModeStore } from "../../../application/state/sftp/sftpPaneViewModeStore";
+import { sftpFilterFocusStore } from "../../../application/state/sftp/sftpFilterFocusStore";
 import { keepOnlyPaneSelections } from "./selectionScope";
 import type { SftpStateApi } from "../../../application/state/useSftpState";
 import type { UploadEndpointPin } from "../../../application/state/sftp/uploadTargetPin";
@@ -546,15 +547,39 @@ export const useSftpKeyboardShortcuts = ({
       // even if the user has disabled global/custom hotkeys.
       if (!isActive) return;
 
-      // Skip if focus is on an input element
       const target = e.target as HTMLElement;
-      if (isEditableShortcutTarget(target)) {
-        return;
-      }
 
       // Skip when a dialog or overlay is open to prevent SFTP shortcuts from
       // firing while interacting with unrelated dialogs (e.g. settings, confirm).
       if (hasOpenDialog()) {
+        return;
+      }
+
+      const isEditableTarget = isEditableShortcutTarget(target);
+      const isSftpSearchTarget = Boolean(target.closest?.(
+        '[data-section="terminal-sftp-path"], [data-section="terminal-sftp-filter-bar"]',
+      ));
+      if (isEditableTarget && !isSftpSearchTarget) {
+        return;
+      }
+
+      if (hotkeyScheme !== "disabled") {
+        const isMac = hotkeyScheme === "mac";
+        const searchBinding = keyBindings.find((binding) => binding.action === "searchTerminal");
+        const searchKey = searchBinding ? (isMac ? searchBinding.mac : searchBinding.pc) : null;
+        if (searchKey && matchesKeyBinding(e, searchKey, isMac)) {
+          const { pane } = getFocusedPane();
+          if (!pane?.connection) return;
+
+          e.preventDefault();
+          e.stopPropagation();
+          sftpFilterFocusStore.request(pane.id);
+          return;
+        }
+      }
+
+      // Path/filter inputs may handle search above, but no other SFTP shortcut.
+      if (isEditableTarget) {
         return;
       }
 

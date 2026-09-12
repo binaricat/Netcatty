@@ -308,6 +308,14 @@ export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
     sectionKey: "settings.terminal.section.behavior",
   },
   {
+    id: "terminal-disconnected-notice",
+    tab: "terminal",
+    labelKey: "settings.terminal.behavior.disconnectedNotice",
+    descriptionKey: "settings.terminal.behavior.disconnectedNotice.desc",
+    sectionKey: "settings.terminal.section.behavior",
+    keywords: ["disconnect", "connection lost", "dialog", "popup", "断开连接", "断线", "弹窗", "提醒"],
+  },
+  {
     id: "terminal-right-click",
     tab: "terminal",
     labelKey: "settings.terminal.behavior.rightClick",
@@ -724,6 +732,15 @@ export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
     sectionKey: "ai.safety.title",
   },
   {
+    id: "ai-safety-response-idle-timeout",
+    tab: "ai",
+    aiSubTab: "safety",
+    labelKey: "ai.safety.responseIdleTimeout",
+    descriptionKey: "ai.safety.responseIdleTimeout.description",
+    sectionKey: "ai.safety.title",
+    keywords: ["response", "request", "idle", "timeout", "响应", "请求", "超时"],
+  },
+  {
     id: "ai-safety-blocklist",
     tab: "ai",
     aiSubTab: "safety",
@@ -792,6 +809,14 @@ export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
     labelKey: "settings.update.autoUpdateEnabled",
     descriptionKey: "settings.update.autoUpdateEnabledDesc",
     sectionKey: "settings.update.title",
+  },
+  {
+    id: "system-auto-launch",
+    tab: "system",
+    labelKey: "settings.autoLaunch.enabled",
+    descriptionKey: "settings.autoLaunch.enabledDesc",
+    sectionKey: "settings.autoLaunch.title",
+    keywords: ["startup", "login", "autostart", "boot", "开机", "自启动", "开机启动"],
   },
   {
     id: "system-network-proxy-mode",

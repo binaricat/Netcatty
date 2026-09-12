@@ -364,7 +364,12 @@ export function useExternalMcpToggleState() {
     // the main-process External MCP lifecycle.
     if (isPeerSessionWindow) return;
     externalMcpEnableGeneration += 1;
-    void netcattyBridge.get()?.externalMcpSetEnabled?.(nextEnabled);
+    // Re-emit after the lifecycle IPC settles so consumers that refetch runtime
+    // status (e.g. Tool Access guidance) do not act on the pre-IPC storage
+    // event, which can still observe the previous enabled state.
+    void Promise.resolve(netcattyBridge.get()?.externalMcpSetEnabled?.(nextEnabled)).finally(() => {
+      emitAIStateChanged(STORAGE_KEY_AI_EXTERNAL_MCP_ENABLED);
+    });
   }, [isPeerSessionWindow, persistEnabled]);
 
   useEffect(() => {

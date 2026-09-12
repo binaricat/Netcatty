@@ -91,30 +91,6 @@ export function doesKittyEncodingPreserveShiftEnter(
     && !isBareShiftEnterLineEnding(encoded);
 }
 
-export type ShiftEnterPayload =
-  | { kind: "text"; data: string }
-  | { kind: "key"; data: string };
-
-/**
- * Resolve what Shift+Enter should write.
- *
- * On the main buffer, keep the configured send-text (default LF) so shell /
- * Claude-style multiline prompts keep working. On the alternate screen (full-
- * screen TUIs), bare line-ending remaps collapse Shift+Enter into Ctrl+Enter /
- * LF for apps like Codex; send CSI-u Shift+Enter instead so the TUI can see
- * the real chord. Custom send-text (e.g. shell continuation) is unchanged.
- */
-export function resolveShiftEnterPayload(
-  settings?: Pick<TerminalSettings, "shiftEnterNewlineText">,
-  options?: { alternateScreen?: boolean },
-): ShiftEnterPayload {
-  const text = resolveShiftEnterText(settings);
-  if (options?.alternateScreen && isBareShiftEnterLineEnding(text)) {
-    return { kind: "key", data: SHIFT_ENTER_CSI_U_SEQUENCE };
-  }
-  return { kind: "text", data: text };
-}
-
 export function isShiftEnterLineContinuationText(text: string): boolean {
   return /\\(?:\r\n|\r|\n)$/.test(text);
 }

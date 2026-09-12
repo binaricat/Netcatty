@@ -5,7 +5,7 @@
 import { ChevronDown, ChevronRight, Home, MoreHorizontal } from 'lucide-react';
 import React, { memo, useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
-import { getSftpBreadcrumbSegments } from '../../application/state/sftp/utils';
+import { getSftpBreadcrumbSegments, getSftpPathRoot, isWindowsPath, isWindowsRoot } from '../../application/state/sftp/utils';
 import type { SftpWindowsPathOptions } from '../../application/state/sftp/utils';
 import { Dropdown, DropdownContent, DropdownTrigger } from '../ui/dropdown';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
@@ -189,6 +189,18 @@ const SftpBreadcrumbInner: React.FC<SftpBreadcrumbProps> = ({
 
     const showDriveDropdown = isWindowsDrive && isLocal && !!onListDrives;
 
+    // Dedicated "go to filesystem root" target: "/" on POSIX, drive / share root on Windows.
+    const rootPath = useMemo(
+        () => getSftpPathRoot(path, pathOptions),
+        [path, pathOptions],
+    );
+    const atRoot = useMemo(() => {
+        if (rootPath === null) return false;
+        return isWindowsPath(path, pathOptions)
+            ? isWindowsRoot(path, pathOptions)
+            : path === rootPath;
+    }, [path, pathOptions, rootPath]);
+
     const renderSegmentButton = (
         part: SftpBreadcrumbVisiblePart,
         { showTrailingChevron }: { showTrailingChevron: boolean },
@@ -261,6 +273,20 @@ const SftpBreadcrumbInner: React.FC<SftpBreadcrumbProps> = ({
                             </TooltipTrigger>
                             <TooltipContent>{t("sftp.goHome")}</TooltipContent>
                         </Tooltip>
+                        {rootPath && (
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <button
+                                        onClick={() => onNavigate(rootPath)}
+                                        disabled={atRoot}
+                                        className="hover:text-foreground p-1 rounded hover:bg-secondary/60 shrink-0 text-[10px] leading-none font-semibold disabled:pointer-events-none disabled:opacity-40"
+                                    >
+                                        /
+                                    </button>
+                                </TooltipTrigger>
+                                <TooltipContent>{t("sftp.goRoot")}</TooltipContent>
+                            </Tooltip>
+                        )}
                         <ChevronRight size={12} className="opacity-40 shrink-0" />
                         {leadingPart && renderSegmentButton(leadingPart, {
                             showTrailingChevron: showEllipsis || trailingParts.length > 0,

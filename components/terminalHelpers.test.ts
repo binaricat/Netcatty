@@ -11,6 +11,7 @@ import {
   shouldDelayAutoRunSnippetInput,
   shouldReconnectDisconnectedDialogOnEnterKey,
   shouldRestoreDisconnectedDialogTerminalFocus,
+  shouldShowTerminalDisconnectedNotice,
   shouldShowTerminalConnectionDialog,
 } from "./terminal/terminalHelpers";
 
@@ -417,6 +418,169 @@ test("connection dialog keeps existing local and disconnected behavior", () => {
       isDisconnectedDialogDismissed: true,
     }),
     false,
+  );
+});
+
+test("established sessions use the selected disconnected presentation", () => {
+  const base = {
+    status: "disconnected" as const,
+    hasEverConnected: true,
+  };
+
+  assert.equal(
+    shouldShowTerminalDisconnectedNotice({
+      ...base,
+      disconnectedNoticeMode: "terminal",
+    }),
+    true,
+  );
+  assert.equal(
+    shouldShowTerminalConnectionDialog({
+      ...base,
+      disconnectedNoticeMode: "terminal",
+      isLocalConnection: false,
+      isSerialConnection: false,
+      isDisconnectedDialogDismissed: false,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldShowTerminalDisconnectedNotice({
+      ...base,
+      disconnectedNoticeMode: "dialog",
+    }),
+    false,
+  );
+  assert.equal(
+    shouldShowTerminalConnectionDialog({
+      ...base,
+      disconnectedNoticeMode: "dialog",
+      isLocalConnection: false,
+      isSerialConnection: false,
+      isDisconnectedDialogDismissed: false,
+    }),
+    true,
+  );
+});
+
+test("terminal notice never hides first-connect failures or restored session guidance", () => {
+  const dialogArgs = {
+    status: "disconnected" as const,
+    disconnectedNoticeMode: "terminal" as const,
+    isLocalConnection: false,
+    isSerialConnection: false,
+    isDisconnectedDialogDismissed: false,
+  };
+
+  assert.equal(
+    shouldShowTerminalDisconnectedNotice({
+      status: "disconnected",
+      disconnectedNoticeMode: "terminal",
+      hasEverConnected: false,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldShowTerminalConnectionDialog({ ...dialogArgs, hasEverConnected: false }),
+    true,
+  );
+  assert.equal(
+    shouldShowTerminalDisconnectedNotice({
+      status: "disconnected",
+      disconnectedNoticeMode: "terminal",
+      hasEverConnected: true,
+      restoreState: "restored-disconnected",
+    }),
+    false,
+  );
+  assert.equal(
+    shouldShowTerminalConnectionDialog({
+      ...dialogArgs,
+      hasEverConnected: true,
+      restoreState: "restored-disconnected",
+    }),
+    true,
+  );
+});
+
+test("terminal notice is absent while connected", () => {
+  assert.equal(
+    shouldShowTerminalDisconnectedNotice({
+      status: "connected",
+      disconnectedNoticeMode: "terminal",
+      hasEverConnected: true,
+    }),
+    false,
+  );
+});
+
+test("established manual reconnect stays non-blocking until input is required", () => {
+  const base = {
+    status: "connecting" as const,
+    disconnectedNoticeMode: "terminal" as const,
+    hasEverConnected: true,
+    isReconnectActive: true,
+  };
+
+  assert.equal(shouldShowTerminalDisconnectedNotice(base), true);
+  assert.equal(
+    shouldShowTerminalConnectionDialog({
+      ...base,
+      isLocalConnection: false,
+      isSerialConnection: false,
+      isDisconnectedDialogDismissed: false,
+    }),
+    false,
+  );
+
+  assert.equal(
+    shouldShowTerminalDisconnectedNotice({ ...base, requiresUserInput: true }),
+    false,
+  );
+  assert.equal(
+    shouldShowTerminalConnectionDialog({
+      ...base,
+      requiresUserInput: true,
+      isLocalConnection: false,
+      isSerialConnection: false,
+      isDisconnectedDialogDismissed: false,
+    }),
+    true,
+  );
+});
+
+test("established automatic reconnect stays non-blocking until input is required", () => {
+  const base = {
+    status: "connecting" as const,
+    disconnectedNoticeMode: "terminal" as const,
+    hasEverConnected: true,
+    isReconnectActive: true,
+  };
+
+  assert.equal(shouldShowTerminalDisconnectedNotice(base), true);
+  assert.equal(
+    shouldShowTerminalConnectionDialog({
+      ...base,
+      isLocalConnection: false,
+      isSerialConnection: false,
+      isDisconnectedDialogDismissed: false,
+    }),
+    false,
+  );
+
+  assert.equal(
+    shouldShowTerminalDisconnectedNotice({ ...base, requiresUserInput: true }),
+    false,
+  );
+  assert.equal(
+    shouldShowTerminalConnectionDialog({
+      ...base,
+      requiresUserInput: true,
+      isLocalConnection: false,
+      isSerialConnection: false,
+      isDisconnectedDialogDismissed: false,
+    }),
+    true,
   );
 });
 

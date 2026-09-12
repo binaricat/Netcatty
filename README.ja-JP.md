@@ -24,7 +24,7 @@
 
 <p align="center">
   <a href="https://github.com/binaricat/Netcatty/releases/latest">
-    <img src="https://img.shields.io/github/v/release/binaricat/Netcatty?style=for-the-badge&logo=github&label=最新版をダウンロード&color=success" alt="最新版をダウンロード">
+    <img src="https://img.shields.io/github/v/release/binaricat/Netcatty?style=for-the-badge&logo=github&label=%E6%9C%80%E6%96%B0%E7%89%88%E3%82%92%E3%83%80%E3%82%A6%E3%83%B3%E3%83%AD%E3%83%BC%E3%83%89&color=success" alt="最新版をダウンロード">
   </a>
 </p>
 
@@ -35,7 +35,7 @@
 </p>
 
 <p align="center">
-  <a href="./README.md">English</a> · <a href="./README.zh-CN.md">简体中文</a> · <a href="./README.ja-JP.md">日本語</a>
+  <a href="./README.md">English</a> · <a href="./README.zh-CN.md">简体中文</a> · <a href="./README.zh-TW.md">繁體中文</a> · <a href="./README.ja-JP.md">日本語</a>
 </p>
 
 ---
@@ -295,7 +295,7 @@ npm run pack:linux   # Linux (AppImage + DEB + RPM)
 4. ブランチにプッシュ (`git push origin feature/amazing-feature`)
 5. Pull Request をオープン
 
-アーキテクチャの概要とコーディング規約については [agents.md](agents.md) を参照してください。
+アーキテクチャの概要とコーディング規約については [AGENTS.md](AGENTS.md) を参照してください。
 
 ---
 

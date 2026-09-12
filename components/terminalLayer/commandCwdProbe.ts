@@ -1,4 +1,4 @@
-import { resolveHostFollowTerminalCwd, resolveSftpFollowTerminalCwdTargetHost } from "../sftp/sftpFollowTerminalCwd";
+import { resolveHostFollowTerminalCwd, resolveSftpFollowTerminalCwdTargetHost } from "../../domain/sftpFollowTerminalCwd";
 
 type FollowTerminalCwdHost = {
   sftpFollowTerminalCwd?: boolean;

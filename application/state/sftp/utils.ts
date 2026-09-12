@@ -212,6 +212,23 @@ const normalizeWindowsRoot = (path: string): string => {
   return normalized;
 };
 
+/**
+ * Filesystem root for the given path, used by the breadcrumb "go to root" affordance:
+ * "/" on POSIX panes, the drive root (C:\) or UNC share root on Windows panes.
+ * Returns null when no root can be derived (e.g. a relative Windows path).
+ */
+export const getSftpPathRoot = (
+  path: string,
+  options?: SftpWindowsPathOptions,
+): string | null => {
+  if (!isWindowsPath(path, options)) return "/";
+  const normalized = path.replace(/\//g, "\\");
+  const uncRoot = getWindowsUncRoot(normalized, options);
+  if (uncRoot) return uncRoot;
+  const drive = normalized.match(/^[A-Za-z]:/);
+  return drive ? `${drive[0]}\\` : null;
+};
+
 export const isWindowsRoot = (
   path: string,
   options?: SftpWindowsPathOptions,

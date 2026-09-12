@@ -106,3 +106,43 @@ test("runDistroDetection normalizes FreeBSD uname output", async () => {
 
   assert.deepEqual(detected, ["freebsd"]);
 });
+
+test("Windows OpenSSH is identified without sending POSIX probes", async () => {
+  const detected: string[] = [];
+  await runDistroDetection({
+    host: { id: 'windows', os: 'linux' },
+    terminalBackend: {
+      getSessionRemoteInfo: async () => ({ success: true, remoteSshVersion: 'SSH-2.0-OpenSSH_for_Windows_9.5' }),
+      getSessionDistroInfo: async () => { throw new Error('must not probe Windows with POSIX commands'); },
+    },
+    onOsDetected: (_id: string, distro: string) => detected.push(distro),
+  } as never, 'windows', registerConnectionToken('windows'));
+  assert.deepEqual(detected, ['windows']);
+});
+
+test("failed or unrecognized probes do not invent an operating system", async () => {
+  const detected: string[] = [];
+  await runDistroDetection({
+    host: { id: 'unknown', os: 'linux' },
+    terminalBackend: {
+      getSessionDistroInfo: async () => ({ success: true, stdout: '', stderr: 'Linux command not found' }),
+    },
+    onOsDetected: (_id: string, distro: string) => detected.push(distro),
+  } as never, 'unknown', registerConnectionToken('unknown'));
+  assert.deepEqual(detected, []);
+});
+
+test("a superseded Windows detection cannot update the newer connection", async () => {
+  const detected: string[] = [];
+  await runDistroDetection({
+    host: { id: 'windows', os: 'linux' },
+    terminalBackend: {
+      getSessionRemoteInfo: async () => {
+        registerConnectionToken('reconnected');
+        return { success: true, remoteSshVersion: 'OpenSSH_for_Windows_9.5' };
+      },
+    },
+    onOsDetected: (_id: string, distro: string) => detected.push(distro),
+  } as never, 'reconnected', registerConnectionToken('reconnected'));
+  assert.deepEqual(detected, []);
+});

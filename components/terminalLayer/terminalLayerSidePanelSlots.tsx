@@ -1,11 +1,12 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import React, { memo, useCallback, useSyncExternalStore } from 'react';
+import React, { memo, useCallback, useRef, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 
 import { activeTabStore } from '../../application/state/activeTabStore';
 import { getSftpCurrentPathMemoryKey } from '../../application/state/sftp/sftpReopenLocation';
 import {
   getSidePanelLiveSnapshot,
+  SIDE_PANEL_INACTIVE_LIVE_SNAPSHOT,
   subscribeSidePanelLiveSnapshot,
 } from '../../application/state/sidePanelLiveStore';
 import {
@@ -26,7 +27,7 @@ import { shouldKeepTerminalBackgroundWorkActive } from '../../domain/terminalHib
 import { resolveTerminalFontFamilyId } from '../../infrastructure/config/fonts';
 import type { Host, TerminalSession, Workspace } from '../../types';
 import { SystemManagerSidePanel } from '../systemManager/SystemManagerSidePanel';
-import { resolveSftpFollowTerminalCwdTargetHost } from '../sftp/sftpFollowTerminalCwd';
+import { resolveSftpFollowTerminalCwdTargetHost } from '../../domain/sftpFollowTerminalCwd';
 import { AI_PANEL_FORCE_HIDE_SHELL } from '../ai/aiPanelDiagnostics';
 import type { SidePanelTab } from './TerminalLayerSupport';
 import {
@@ -49,10 +50,18 @@ const subscribeShellHistoryNoop = () => () => {};
 const getEmptyShellHistorySnapshot = () => EMPTY_SHELL_HISTORY;
 
 function useSidePanelLiveSnapshotForTab(tabId: string, subscribe: boolean) {
-  const getSnapshot = useCallback(
-    () => getSidePanelLiveSnapshot(subscribe),
-    [subscribe],
-  );
+  const retainedSnapshot = useRef({ tabId, snapshot: SIDE_PANEL_INACTIVE_LIVE_SNAPSHOT });
+  const getSnapshot = useCallback(() => {
+    if (!subscribe) return SIDE_PANEL_INACTIVE_LIVE_SNAPSHOT;
+    const snapshot = getSidePanelLiveSnapshot(true);
+    const snapshotTabId = snapshot.activeWorkspace?.id ?? snapshot.focusedSessionId;
+    // Tab visibility changes before the live publisher commits its next snapshot.
+    // Keep this panel's last context until its own terminal/workspace catches up.
+    if (snapshotTabId === tabId) retainedSnapshot.current = { tabId, snapshot };
+    return retainedSnapshot.current.tabId === tabId
+      ? retainedSnapshot.current.snapshot
+      : SIDE_PANEL_INACTIVE_LIVE_SNAPSHOT;
+  }, [subscribe, tabId]);
   return useSyncExternalStore(
     (listener) => subscribeSidePanelLiveSnapshot(subscribe, listener),
     getSnapshot,
@@ -112,6 +121,11 @@ function SidePanelSftpSlotInner({
   const panelActiveHost = isVisible
     ? (live.sftpActiveHost ?? storedSftpHost)
     : storedSftpHost;
+  const panelActiveSessionId = isVisible ? live.activeTerminalSessionIdForSftp : null;
+  const panelFocusedSessionId = isVisible ? live.focusedSessionId : null;
+  // Only the head of the per-tab pending upload queue is surfaced at a time;
+  // the panel advances the queue by reporting each request as handled.
+  const pendingUpload = sftpPendingUploadsForTab.get(tabId)?.[0] ?? null;
 
   const handleFollowTerminalCwdChange = useCallback((enabled: boolean, visibleHost?: Host | null) => {
     const isActive = activeTabStore.getActiveTabId() === tabId;
@@ -155,13 +169,13 @@ function SidePanelSftpSlotInner({
       handleSftpCurrentPathChange(
         getSftpCurrentPathMemoryKey({
           tabId,
-          activeTerminalSessionIdForSftp: live.activeTerminalSessionIdForSftp,
-          focusedSessionId: live.focusedSessionId,
+          activeTerminalSessionIdForSftp: panelActiveSessionId,
+          focusedSessionId: panelFocusedSessionId,
         }),
         location,
       );
     },
-    [handleSftpCurrentPathChange, live.activeTerminalSessionIdForSftp, live.focusedSessionId, tabId],
+    [handleSftpCurrentPathChange, panelActiveSessionId, panelFocusedSessionId, tabId],
   );
 
   const handleActiveTransfersChange = useCallback(
@@ -192,8 +206,8 @@ function SidePanelSftpSlotInner({
         onAddKnownHost={handleAddKnownHost}
         sftpDefaultViewMode={sftpDefaultViewMode}
         activeHost={panelActiveHost}
-        activeSessionId={isVisible ? live.activeTerminalSessionIdForSftp : null}
-        focusedSessionId={isVisible ? live.focusedSessionId : null}
+        activeSessionId={panelActiveSessionId}
+        focusedSessionId={panelFocusedSessionId}
         initialLocation={isVisible ? (sftpInitialLocationForTab.get(tabId) ?? null) : null}
         onInitialLocationApplied={handleInitialLocationApplied}
         onCurrentPathChange={handleCurrentPathChange}
@@ -203,7 +217,7 @@ function SidePanelSftpSlotInner({
         isVisible={isVisible}
         ownerPanelOpen={ownerPanelOpen}
         renderOverlays={isVisible}
-        pendingUpload={sftpPendingUploadsForTab.get(tabId) ?? null}
+        pendingUpload={pendingUpload}
         onPendingUploadHandled={handlePendingUploadHandledForTab}
         sftpDoubleClickBehavior={sftpDoubleClickBehavior}
         sftpAutoSync={isVisible ? sftpAutoSync : false}
@@ -215,6 +229,7 @@ function SidePanelSftpSlotInner({
         setEditorWordWrap={setEditorWordWrap}
         onGetTerminalCwd={getTerminalCwd}
         activeTerminalCwd={isVisible ? live.activeTerminalCwd : null}
+        activeTerminalCwdTrusted={isVisible ? live.activeTerminalCwdTrusted : false}
         sftpFollowTerminalCwd={sftpFollowTerminalCwd}
         onSftpFollowTerminalCwdChange={handleFollowTerminalCwdChange}
         onRequestTerminalFocus={refocusActiveTerminalSession}
@@ -594,6 +609,26 @@ function SidePanelAiSlotInner({
 export const SidePanelAiSlot = memo(SidePanelAiSlotInner);
 SidePanelAiSlot.displayName = 'SidePanelAiSlot';
 
+export function getFocusedPortalDescendant(
+  mountNode: HTMLElement,
+  activeElement: Element | null,
+): HTMLElement | null {
+  return activeElement instanceof HTMLElement && mountNode.contains(activeElement)
+    ? activeElement
+    : null;
+}
+
+export function movePersistentPortalNode(
+  mountNode: HTMLElement,
+  target: HTMLElement,
+  focusToRestore: HTMLElement | null,
+) {
+  target.appendChild(mountNode);
+  if (focusToRestore && document.activeElement !== focusToRestore) {
+    focusToRestore.focus({ preventScroll: true });
+  }
+}
+
 function PersistentSidePanelPortal({
   portalKey,
   target,
@@ -609,6 +644,7 @@ function PersistentSidePanelPortal({
     node.dataset.sidePanelPortal = portalKey;
     return node;
   });
+  const focusRestoreRef = React.useRef<HTMLElement | null>(null);
 
   // The React portal always targets the same detached node. Moving that node
   // between a pane host and the hidden parking host preserves the mounted
@@ -616,9 +652,16 @@ function PersistentSidePanelPortal({
   // the focused pane changes.
   React.useLayoutEffect(() => {
     if (!target) return;
-    target.appendChild(mountNode);
+    const activeElement = document.activeElement;
+    const focusedDescendant = focusRestoreRef.current
+      ?? getFocusedPortalDescendant(mountNode, activeElement);
+    movePersistentPortalNode(mountNode, target, focusedDescendant);
+    focusRestoreRef.current = null;
     return () => {
-      if (mountNode.parentNode === target) mountNode.remove();
+      if (mountNode.parentNode !== target) return;
+      const currentActiveElement = document.activeElement;
+      focusRestoreRef.current = getFocusedPortalDescendant(mountNode, currentActiveElement);
+      mountNode.remove();
     };
   }, [mountNode, target]);
 
