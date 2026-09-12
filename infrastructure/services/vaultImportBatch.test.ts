@@ -159,3 +159,50 @@ test("SecureCRT keeps a real nested Sessions folder when that folder was selecte
   assert.equal(result.hosts[0]?.group, "Sessions");
   assert.deepEqual(result.groups, ["Sessions"]);
 });
+
+test("FinalShell conn directory import reads JSON files, preserves nested groups, and continues past damage", async () => {
+  const finalShellFile = (relativePath: string, host: string) => {
+    const file = new File([JSON.stringify({
+      name: relativePath.split("/").at(-1)?.replace(/\.json$/u, ""),
+      host,
+      port: 22,
+      user_name: "root",
+      conection_type: 100,
+    })], relativePath.split("/").at(-1) ?? "connection.json");
+    Object.defineProperty(file, "webkitRelativePath", { value: relativePath });
+    return file;
+  };
+  const ignored = new File(["ignored"], "notes.txt");
+  Object.defineProperty(ignored, "webkitRelativePath", { value: "conn/Prod/notes.txt" });
+  const broken = new File(["{"], "broken.json");
+  Object.defineProperty(broken, "webkitRelativePath", { value: "conn/Broken/broken.json" });
+
+  const result = await importVaultHostFiles({
+    format: "finalshell",
+    files: [
+      finalShellFile("conn/Prod/Web/web.json", "web.example.com"),
+      broken,
+      ignored,
+      finalShellFile("conn/Staging/db.json", "db.example.com"),
+    ],
+  });
+
+  assert.deepEqual(result.hosts.map(({ hostname, group }) => ({ hostname, group })), [
+    { hostname: "web.example.com", group: "Prod/Web" },
+    { hostname: "db.example.com", group: "Staging" },
+  ]);
+  assert.deepEqual(result.groups, ["Prod/Web", "Staging"]);
+  assert.equal(result.stats.imported, 2);
+  assert.equal(result.stats.skipped, 1);
+  assert.match(result.issues[0]?.message ?? "", /broken\.json/i);
+});
+
+test("FinalShell preserves separately named profiles for the same endpoint", async () => {
+  const files = ["Primary", "Fallback"].map((name) => new File([JSON.stringify({
+    name, host: "shared.example.com", port: 22, user_name: "root", conection_type: 100,
+  })], `${name}.json`));
+  const result = await importVaultHostFiles({ format: "finalshell", files });
+  assert.deepEqual(result.hosts.map((host) => host.label), ["Primary", "Fallback"]);
+  assert.equal(result.stats.imported, 2);
+  assert.equal(result.stats.duplicates, 0);
+});

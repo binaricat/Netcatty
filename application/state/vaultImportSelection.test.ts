@@ -25,6 +25,23 @@ test("SecureCRT uses a directory picker and keeps every selected session file", 
   assert.deepEqual(selectVaultImportFiles("csv", files), [files[0]]);
 });
 
+test("FinalShell supports conn directory and single JSON file selection", () => {
+  const files = [
+    new File(["{}"], "one.json"),
+    new File(["{}"], "two.json"),
+  ];
+
+  assert.deepEqual(getVaultImportPickerMode("finalshell"), {
+    directory: true,
+    multiple: true,
+  });
+  assert.deepEqual(getVaultImportPickerMode("finalshell", "file"), {
+    directory: false,
+    multiple: false,
+  });
+  assert.deepEqual(selectVaultImportFiles("finalshell", files), files);
+});
+
 test("vault import destination supports preserve, existing, and new groups", () => {
   assert.deepEqual(buildVaultImportDestination({ mode: "preserve" }), {
     mode: "preserve",
