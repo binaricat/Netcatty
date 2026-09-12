@@ -18,7 +18,9 @@ test("tree activation enters directories and keeps file opening separate", () =>
   assert.equal(getSftpTreeEntryOpenAction(entry("notes.txt", "file")), "open");
 });
 
-test("tree row double click routes through the open action", () => {
+test("tree row double click expands directories in place", () => {
   const source = fs.readFileSync(new URL("./SftpPaneTreeNode.tsx", import.meta.url), "utf8");
-  assert.match(source, /onDoubleClick=\{\(\) => onOpenEntry\(entry, entryPath\)\}/);
+  assert.match(source, /onDoubleClick=\{\(\) => \{/);
+  assert.match(source, /if \(isParentEntry\) \{ onOpenEntry\(entry, entryPath\); return; \}/);
+  assert.match(source, /if \(isDir\) void onToggleExpand\(entry, entryPath\);/);
 });
