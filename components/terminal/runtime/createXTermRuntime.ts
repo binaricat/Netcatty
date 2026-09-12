@@ -2279,7 +2279,9 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     if (lineJumpSequence && ctx.sessionRef.current) {
       e.preventDefault();
       e.stopPropagation();
-      handleTerminalInputData(lineJumpSequence);
+      // This is a local shell editing shortcut. Peers may be running a TUI
+      // or another keyboard protocol, so do not fan out the mapped Ctrl key.
+      handleTerminalInputData(lineJumpSequence, { skipBroadcast: true });
       scrollToBottomAfterInput(lineJumpSequence);
       return false;
     }

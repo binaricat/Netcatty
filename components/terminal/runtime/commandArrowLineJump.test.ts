@@ -46,7 +46,10 @@ for (const mode of ["shell", "alternate", "kitty", "win32", "disconnected", "non
       isKittyKeyboardModeActive: () => mode === "kitty",
       isMacPlatform: () => mode !== "non-mac",
       commandArrowLineJumpSequence,
-      handleTerminalInputData: (data: string) => writes.push(data),
+      handleTerminalInputData: (data: string, options: { skipBroadcast: boolean }) => {
+        assert.equal(options.skipBroadcast, true, "a peer TUI must not receive mapped Ctrl+A/E");
+        writes.push(data);
+      },
       scrollToBottomAfterInput: () => {},
     });
     assert.equal(result, mode !== "shell");
