@@ -327,16 +327,57 @@ function parseLsLaOutput(stdout, { basePath = "" } = {}) {
   return results;
 }
 
-function parseStatRecord(stdout) {
+function parseStatRecord(stdout, { stderr = "", exitCode = null } = {}) {
   const line = String(stdout || "").trim().split(/\r?\n/)[0] || "";
+  const stderrText = String(stderr || "").trim();
+  // A missing path emits an ENOENT marker and exits 2. Shell startup
+  // messages may precede it on either stream; exit status alone is not enough.
+  const hasMissingMarker = line === "ENOENT"
+    || stderrText.split(/\r?\n/).some((entry) => entry.trim() === "ENOENT");
+  if (hasMissingMarker && (exitCode == null || exitCode === 2)) {
+    throw new ScpShellError("No such file", "ENOENT");
+  }
   if (!line || line === "ENOENT") {
-    const err = new ScpShellError("No such file", "ENOENT");
-    err.code = "ENOENT";
+    const detail = [
+      "exec channel returned empty response",
+      exitCode != null ? `exit ${exitCode}` : null,
+      stderrText ? `stderr: ${stderrText.slice(0, 200)}` : null,
+    ].filter(Boolean).join("; ");
+    const err = new ScpShellError(detail, "EMPTY_RESPONSE");
+    err.code = "EMPTY_RESPONSE";
+    err.exitCode = exitCode;
+    err.stderr = stderrText;
+    throw err;
+  }
+  // Any other nonzero status is a remote execution failure — even when stdout
+  // looks like a valid record (e.g. a forced-command wrapper that forwards the
+  // stat record before failing). Such metadata is untrustworthy, so reject it
+  // instead of letting the caller proceed on it.
+  if (exitCode != null && exitCode !== 0) {
+    const detail = [
+      `stat command exited ${exitCode}`,
+      stderrText ? `stderr: ${stderrText.slice(0, 200)}` : null,
+    ].filter(Boolean).join("; ");
+    const err = new ScpShellError(detail);
+    err.exitCode = exitCode;
+    err.stderr = stderrText;
     throw err;
   }
   const parts = line.split("|");
   if (parts.length < 5) {
-    throw new ScpShellError(`Malformed stat record: ${line.slice(0, 80)}`);
+    // Non-empty stdout that isn't a stat record: the remote command may have
+    // failed (nonzero exit, e.g. a restricted shell printing a banner) while
+    // still writing to stdout. Preserve exit code and stderr so failures with
+    // output aren't reduced to a bare "malformed" message.
+    const detail = [
+      `Malformed stat record: ${line.slice(0, 80)}`,
+      exitCode != null ? `exit ${exitCode}` : null,
+      stderrText ? `stderr: ${stderrText.slice(0, 200)}` : null,
+    ].filter(Boolean).join("; ");
+    const err = new ScpShellError(detail);
+    err.exitCode = exitCode;
+    err.stderr = stderrText;
+    throw err;
   }
   const [t, modeStr, sizeStr, mtimeStr, abs, inoStr] = parts;
   const ino = inoStr && /^\d+$/.test(String(inoStr).trim())

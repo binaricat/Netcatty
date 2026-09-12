@@ -175,6 +175,137 @@ describe("scpBackend browse/manage with fake exec", () => {
     assert.match(statCommand, /\[ ! -L "\$p" \]/, "broken symlinks must not be reported as missing");
   });
 
+  it("reports ENOENT when the stat command exits 2 with an ENOENT marker", async () => {
+    const missingBackend = createScpBackend({
+      exec: async () => ({ stdout: "", stderr: "ENOENT\n", code: 2 }),
+      execStream: async () => createMockStream(),
+    });
+    await assert.rejects(
+      () => missingBackend.stat("/home/test/gone.txt"),
+      (err) => err.code === "ENOENT" && err.message === "No such file",
+    );
+  });
+
+  it("reports ENOENT when a shell banner precedes the marker on stderr", async () => {
+    // Codex: non-interactive shells may print warnings before the command, so
+    // the ENOENT marker can appear on a later stderr line.
+    const bannerBackend = createScpBackend({
+      exec: async () => ({ stdout: "", stderr: "warning: env cleared\nENOENT\n", code: 2 }),
+      execStream: async () => createMockStream(),
+    });
+    await assert.rejects(
+      () => bannerBackend.stat("/home/test/gone.txt"),
+      (err) => err.code === "ENOENT" && err.message === "No such file",
+    );
+  });
+
+  it("reports ENOENT when stdout contains a login banner", async () => {
+    const bannerBackend = createScpBackend({
+      exec: async () => ({ stdout: "Welcome\n", stderr: "ENOENT\n", code: 2 }),
+      execStream: async () => createMockStream(),
+    });
+    await assert.rejects(
+      () => bannerBackend.stat("/home/test/gone.txt"),
+      (err) => err.code === "ENOENT",
+    );
+  });
+
+  it("does not mask an empty exec response as ENOENT in stat", async () => {
+    const emptyBackend = createScpBackend({
+      // Simulates the reporter's case: the exec channel returns no output at
+      // all (e.g. channel negotiation failure) — not a missing file.
+      exec: async () => ({ stdout: "", stderr: "", code: 0 }),
+      execStream: async () => createMockStream(),
+    });
+    await assert.rejects(
+      () => emptyBackend.stat("/home/test/readme.txt"),
+      (err) => {
+        assert.equal(err.code, "EMPTY_RESPONSE");
+        assert.match(err.message, /empty response/);
+        assert.ok(!(err instanceof Error && err.message === "No such file"));
+        return true;
+      },
+    );
+  });
+
+  it("surfaces stderr and exit code when the stat command fails without output", async () => {
+    const failingBackend = createScpBackend({
+      exec: async () => ({ stdout: "", stderr: "sh: syntax error\n", code: 1 }),
+      execStream: async () => createMockStream(),
+    });
+    await assert.rejects(
+      () => failingBackend.stat("/home/test/readme.txt"),
+      (err) => {
+        assert.equal(err.code, "EMPTY_RESPONSE");
+        assert.match(err.message, /exit 1/);
+        assert.match(err.message, /syntax error/);
+        assert.equal(err.exitCode, 1);
+        assert.equal(err.stderr, "sh: syntax error");
+        return true;
+      },
+    );
+  });
+
+  it("does not treat exit 2 without an ENOENT marker as a missing file", async () => {
+    // Codex: a remote shell failure (e.g. syntax/usage error) can also exit 2;
+    // without the ENOENT marker it must surface the real stderr, not ENOENT.
+    const shellFailBackend = createScpBackend({
+      exec: async () => ({ stdout: "", stderr: "sh: syntax error\n", code: 2 }),
+      execStream: async () => createMockStream(),
+    });
+    await assert.rejects(
+      () => shellFailBackend.stat("/home/test/readme.txt"),
+      (err) => {
+        assert.equal(err.code, "EMPTY_RESPONSE");
+        assert.match(err.message, /exit 2/);
+        assert.match(err.message, /syntax error/);
+        assert.equal(err.exitCode, 2);
+        assert.equal(err.stderr, "sh: syntax error");
+        return true;
+      },
+    );
+  });
+
+  it("does not treat a stdout ENOENT marker with a nonzero, non-2 exit as missing", async () => {
+    // Codex: a forced-command wrapper can print "ENOENT" on stdout before
+    // failing with another status; it must not be reported as ENOENT.
+    const wrapperBackend = createScpBackend({
+      exec: async () => ({ stdout: "ENOENT\n", stderr: "denied\n", code: 126 }),
+      execStream: async () => createMockStream(),
+    });
+    await assert.rejects(
+      () => wrapperBackend.stat("/home/test/readme.txt"),
+      (err) => {
+        assert.notEqual(err.code, "ENOENT");
+        assert.equal(err.exitCode, 126);
+        return true;
+      },
+    );
+  });
+
+  it("rejects stat metadata forwarded by a wrapper that exits nonzero", async () => {
+    // Codex: a forced-command wrapper can forward the stat record but exit
+    // nonzero; the metadata is untrustworthy and must not be returned.
+    const wrapperBackend = createScpBackend({
+      exec: async () => ({
+        stdout: "f|-rw-r--r--|5|1700000000|/home/test/readme.txt|12345\n",
+        stderr: "forced command failed\n",
+        code: 1,
+      }),
+      execStream: async () => createMockStream(),
+    });
+    await assert.rejects(
+      () => wrapperBackend.stat("/home/test/readme.txt"),
+      (err) => {
+        assert.match(err.message, /exited 1/);
+        assert.match(err.message, /forced command failed/);
+        assert.equal(err.exitCode, 1);
+        assert.equal(err.stderr, "forced command failed");
+        return true;
+      },
+    );
+  });
+
   it("resolves home directory", async () => {
     const home = await backend.homeDir();
     assert.equal(home, "/home/test");

@@ -301,6 +301,7 @@ function main() {
     selectZmodemUploadFiles,
     selectZmodemDownloadDirectory,
     terminalDataPipeline,
+    reportSuppressedError: reportWorkerError,
   };
 
   runtime = createTerminalWorkerRuntime({

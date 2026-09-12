@@ -190,8 +190,16 @@ function createScpBackend(deps = {}) {
   async function stat(remotePath, options = {}) {
     const signal = options.signal || null;
     const encoding = options.encoding || "utf-8";
-    const result = await runOrThrow(buildStatCommand(remotePath, encoding), { signal });
-    return parseStatRecord(result.stdout);
+    // allowNonZero: parseStatRecord needs the exit code + stderr to tell a real
+    // ENOENT (exit 2) apart from an empty exec-channel response.
+    const result = await runOrThrow(buildStatCommand(remotePath, encoding), {
+      allowNonZero: true,
+      signal,
+    });
+    return parseStatRecord(result.stdout, {
+      stderr: result.stderr,
+      exitCode: result.code,
+    });
   }
 
   async function mkdir(remotePath, options = {}) {
