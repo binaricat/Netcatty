@@ -84,6 +84,31 @@ export function useSftpTransferConflictOps() {
     [splitNameForDuplicate, statTargetPath],
   );
 
+  const isSameSourceEntry = useCallback(async (
+    task: TransferTask,
+    targetPane: SftpPane,
+    targetSftpId: string | null,
+    targetEncoding: SftpFilenameEncoding,
+  ): Promise<boolean> => {
+    if (!targetPane.connection || task.sourceConnectionId !== task.targetConnectionId) return false;
+    if (isSameSftpPath(task.sourcePath, task.targetPath)) return true;
+    const bridge = netcattyBridge.get();
+    const resolve = targetPane.connection.isLocal
+      ? bridge?.realpathLocal
+      : targetSftpId && bridge?.realpathSftp
+        ? (value: string) => bridge.realpathSftp!(targetSftpId, value, targetEncoding)
+        : undefined;
+    const [sourceParent, targetParent] = await Promise.all(
+      [getParentPath(task.sourcePath), getParentPath(task.targetPath)].map(
+        (value) => resolve ? resolve(value) : Promise.resolve(value),
+      ),
+    );
+    return isSameSftpPath(
+      joinPath(sourceParent, getFileName(task.sourcePath)),
+      joinPath(targetParent, getFileName(task.targetPath)),
+    );
+  }, []);
+
   const deleteTargetPath = useCallback(
     async (
       task: TransferTask,
@@ -95,24 +120,8 @@ export function useSftpTransferConflictOps() {
       if (!targetPane.connection) return;
       // Replace unlinks symlinks before copying. Never unlink the source entry
       // when a clipboard copy is pasted back into its own directory.
-      if (expectedType === "symlink" && task.sourceConnectionId === task.targetConnectionId) {
-        const bridge = netcattyBridge.get();
-        const resolve = targetPane.connection.isLocal
-          ? bridge?.realpathLocal
-          : targetSftpId && bridge?.realpathSftp
-            ? (value: string) => bridge.realpathSftp!(targetSftpId, value, targetEncoding)
-            : undefined;
-        const [sourceParent, targetParent] = await Promise.all(
-          [getParentPath(task.sourcePath), getParentPath(task.targetPath)].map(
-            (value) => resolve ? resolve(value) : Promise.resolve(value),
-          ),
-        );
-        if (isSameSftpPath(
-          joinPath(sourceParent, getFileName(task.sourcePath)),
-          joinPath(targetParent, getFileName(task.targetPath)),
-        )) {
-          throw new Error("Cannot replace the source link with itself. Choose Duplicate or Skip.");
-        }
+      if (expectedType === "symlink" && await isSameSourceEntry(task, targetPane, targetSftpId, targetEncoding)) {
+        throw new Error("Cannot replace the source link with itself. Choose Duplicate or Skip.");
       }
       if (targetPane.connection.isLocal) {
         const deleteLocalFile = netcattyBridge.get()?.deleteLocalFile;
@@ -125,9 +134,9 @@ export function useSftpTransferConflictOps() {
       if (!deleteSftp) throw new Error("SFTP delete unavailable");
       await deleteSftp(targetSftpId, task.targetPath, targetEncoding, expectedType);
     },
-    [],
+    [isSameSourceEntry],
   );
 
 
-  return { statTargetPath, getDuplicateTarget, deleteTargetPath };
+  return { statTargetPath, getDuplicateTarget, deleteTargetPath, isSameSourceEntry };
 }
