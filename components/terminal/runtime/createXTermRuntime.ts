@@ -1156,11 +1156,18 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   // moved away from the tail, so we conservatively assume it is not).
   let lastInputWasPrintable = !ctx.commandBufferRef?.current;
 
+  const restoreSerialTailForEmptyInput = (data: string) => {
+    // Apply the same rule to typed text, pasted text, and editable snippets.
+    // Preserve uncertainty when inserting into an existing edited line.
+    if (!ctx.commandBufferRef.current &&
+      (isPrintableInput(data) || getSingleBracketedPasteLine(data))) {
+      lastInputWasPrintable = true;
+    }
+  };
+
   const recordSerialSnippetInput = (data: string) => {
     if (!ctx.commandBufferRef) return;
-    // Empty pending input has no earlier tracked characters to move through.
-    // Preserve uncertainty when appending to an existing edited line.
-    if (!ctx.commandBufferRef.current) lastInputWasPrintable = true;
+    restoreSerialTailForEmptyInput(data);
     ctx.commandBufferRef.current += data;
     if (ctx.serialLocalEcho) writeLocalTerminalData(data);
   };
@@ -1203,6 +1210,8 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     if (logicalData) {
       ctx.sudoAutofillRef?.current?.dismissOnUserContentInput(logicalData);
     }
+
+    if (logicalData !== null) restoreSerialTailForEmptyInput(logicalData);
 
     const inputSource = options?.source ?? "terminal";
     const id = ctx.sessionRef.current;

@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { isPrintableInput } from "../../../domain/serialCharMetrics";
+import { getSingleBracketedPasteLine } from "./terminalSudoAutofill";
 import { formatSerialLocalEcho } from "./serialLocalEcho";
 
 test("formatSerialLocalEcho echoes printable input and normalizes newlines", () => {
@@ -110,6 +112,9 @@ test("serial snippets restore an empty tail but preserve uncertainty on an edite
   const end = source.indexOf("\n  };", start);
   assert.ok(start > 0 && end > start);
   const body = source.slice(source.indexOf("{", start) + 1, end);
+  const helperStart = source.indexOf("const restoreSerialTailForEmptyInput = (data: string) => {");
+  const helperEnd = source.indexOf("\n  };", helperStart);
+  const helper = source.slice(helperStart, helperEnd + 5).replace("data: string", "data");
   for (const [pending, confident, localEcho, expected] of [
     ["", false, true, true],
     ["", false, false, true],
@@ -118,7 +123,7 @@ test("serial snippets restore an empty tail but preserve uncertainty on an edite
   ] as const) {
     const echoed: string[] = [];
     const state = {ctx: {commandBufferRef: {current: pending}, serialLocalEcho: localEcho}, lastInputWasPrintable: confident, data: "你", writeLocalTerminalData: (text: string) => echoed.push(text)};
-    runInNewContext(`(() => { ${body} })()`, state);
+    runInNewContext(`(() => { ${helper} ${body} })()`, {...state, isPrintableInput, getSingleBracketedPasteLine, ctx: state.ctx, get lastInputWasPrintable() {return state.lastInputWasPrintable;}, set lastInputWasPrintable(value) {state.lastInputWasPrintable = value;}});
     assert.equal(state.lastInputWasPrintable, expected);
     assert.equal(state.ctx.commandBufferRef.current, pending + "你");
     assert.deepEqual(echoed, localEcho ? ["你"] : []);
