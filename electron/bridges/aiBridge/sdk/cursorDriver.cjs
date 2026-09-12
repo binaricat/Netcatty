@@ -5,7 +5,7 @@
  *
  * Cursor SDK local agents use Agent.create({ apiKey, model, local:{cwd},
  * mcpServers }) and stream SDKMessage events from run.stream().
- * Each local turn runs in its own worker with a host-supplied environment.
+ * Each local turn runs in its own utility process with a host-supplied environment.
  * Stopping a stalled SDK startup cannot block another chat or leak its tenant.
  */
 const { mcpEnvPairsToObject } = require("./injectMcp.cjs");
