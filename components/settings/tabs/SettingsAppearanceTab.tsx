@@ -60,6 +60,8 @@ function SettingsAppearanceTab(props: {
   setHostClickBehavior: (behavior: "connect" | "select") => void;
   showOnlyUngroupedHostsInRoot: boolean;
   setShowOnlyUngroupedHostsInRoot: (enabled: boolean) => void;
+  tabBarPosition: 'top' | 'bottom';
+  setTabBarPosition: (position: 'top' | 'bottom') => void;
   showSftpTab: boolean;
   setShowSftpTab: (enabled: boolean) => void;
   showHostTreeSidebar: boolean;
@@ -129,6 +131,8 @@ function SettingsAppearanceTab(props: {
     setHostClickBehavior,
     showOnlyUngroupedHostsInRoot,
     setShowOnlyUngroupedHostsInRoot,
+    tabBarPosition,
+    setTabBarPosition,
     showSftpTab,
     setShowSftpTab,
     showHostTreeSidebar,
@@ -478,6 +482,29 @@ function SettingsAppearanceTab(props: {
             checked={showOnlyUngroupedHostsInRoot}
             onChange={setShowOnlyUngroupedHostsInRoot}
           />
+        </SettingRow>
+        <SettingRow
+          anchorId="appearance-tab-bar-position"
+          label={t('settings.appearance.tabBarPosition')}
+        >
+          <div className="flex items-center rounded-lg border border-border bg-muted/50 p-0.5">
+            {(['top', 'bottom'] as const).map((position) => (
+              <button
+                key={position}
+                type="button"
+                aria-pressed={tabBarPosition === position}
+                onClick={() => setTabBarPosition(position)}
+                className={cn(
+                  "px-2.5 py-1 rounded-md text-xs font-medium transition-colors",
+                  tabBarPosition === position
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {t(`settings.appearance.tabBarPosition.${position}`)}
+              </button>
+            ))}
+          </div>
         </SettingRow>
         <SettingRow
           anchorId="appearance-vault-show-sftp-tab"

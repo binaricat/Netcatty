@@ -226,6 +226,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
   const { t } = useI18n();
   const { maximize, isFullscreen, onFullscreenChanged } = useWindowControls();
   const {
+    tabBarPosition,
     hotkeyScheme,
     showTabNumberBadges,
     shellOnlyTabNumberShortcuts,
@@ -267,7 +268,8 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
   const [hostTreeChromeReady, setHostTreeChromeReady] = useState(false);
   const [hostTreeGutterExiting, setHostTreeGutterExiting] = useState(false);
   const [rootTabsCompact, setRootTabsCompact] = useState(false);
-  const showWindowControls = !isMacClient;
+  const tabsAtBottom = tabBarPosition === 'bottom';
+  const showWindowControls = !isMacClient && !tabsAtBottom;
 
   // Tab reorder drag state
   const [dropIndicator, setDropIndicator] = useState<{ tabId: string; position: 'before' | 'after' } | null>(null);
@@ -994,12 +996,26 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
   }, [isMacClient, maximize]);
 
   return (
+    <>
+      {tabsAtBottom && (
+        <div
+          data-tab-window-titlebar
+          data-section="top-tabs"
+          className="h-9 shrink-0 flex items-end justify-end bg-secondary app-drag"
+          style={dragRegionNoSelect}
+          onDoubleClick={handleTitleBarDoubleClick}
+        >
+          {!isMacClient && <WindowControls />}
+        </div>
+      )}
     <div
       data-top-tabs-root
+      data-position={tabBarPosition}
       data-section="top-tabs"
-      className="relative w-full bg-secondary app-drag"
+      className="relative w-full shrink-0 bg-secondary app-drag"
       style={{
         ...dragRegionNoSelect,
+        order: tabsAtBottom ? 2 : undefined,
         backgroundColor: 'var(--top-tabs-bg, hsl(var(--secondary)))',
         color: 'var(--top-tabs-fg, hsl(var(--foreground)))',
       }}
@@ -1010,12 +1026,12 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
         updateScrollState={updateScrollState}
       />
       {/* Always-on drag stripe so the window can be moved even when tabs fill the bar */}
-      <div className="absolute inset-x-0 top-0 h-1 app-drag pointer-events-auto z-10" style={dragRegionStyle} aria-hidden />
+      <div className={cn("absolute inset-x-0 h-1 app-drag pointer-events-auto z-10", tabsAtBottom ? "bottom-0" : "top-0")} style={dragRegionStyle} aria-hidden />
       <div
-        className="h-9 flex items-end gap-0 app-drag overflow-visible"
+        className={cn("h-9 flex gap-0 app-drag overflow-visible", tabsAtBottom ? "items-start" : "items-end")}
         style={{
           ...dragRegionStyle,
-          paddingLeft: isMacClient && !isWindowFullscreen ? 76 : 12,
+          paddingLeft: isMacClient && !isWindowFullscreen && !tabsAtBottom ? 76 : 12,
           paddingRight: showWindowControls ? 0 : 12,
         }}
       >
@@ -1262,6 +1278,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
         )}
       </div>
     </div>
+    </>
   );
 };
 
