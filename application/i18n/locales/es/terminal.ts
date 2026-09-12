@@ -251,6 +251,7 @@ export const esTerminalMessages: Messages = {
   'terminal.customTheme.group.bright': 'Colores brillantes',
   'terminal.customTheme.color.background': 'Fondo',
   'terminal.customTheme.color.foreground': 'Primer plano',
+  'terminal.customTheme.color.foregroundIntense': 'Primer plano intenso (negrita)',
   'terminal.customTheme.color.cursor': 'Cursor',
   'terminal.customTheme.color.selection': 'Selección',
   'terminal.customTheme.color.black': 'Negro',

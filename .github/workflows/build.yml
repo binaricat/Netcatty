@@ -76,6 +76,7 @@ on:
       - "scripts/mosh-extra-resources.cjs"
       - "scripts/nodePtyConptyPatch.cjs"
       - "scripts/patch-xterm-macos-column-selection.cjs"
+      - "scripts/patch-xterm-foreground-intense.cjs"
       - "scripts/patch-xterm-webgl-atlas.cjs"
       - "scripts/rebuildPatchedNodePty.cjs"
       - "scripts/resolve-et-bin-release.cjs"

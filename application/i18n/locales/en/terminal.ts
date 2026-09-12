@@ -251,6 +251,7 @@ export const enTerminalMessages: Messages = {
   'terminal.customTheme.group.bright': 'Bright Colors',
   'terminal.customTheme.color.background': 'Background',
   'terminal.customTheme.color.foreground': 'Foreground',
+  'terminal.customTheme.color.foregroundIntense': 'Intense foreground (bold)',
   'terminal.customTheme.color.cursor': 'Cursor',
   'terminal.customTheme.color.selection': 'Selection',
   'terminal.customTheme.color.black': 'Black',
