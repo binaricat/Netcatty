@@ -992,7 +992,7 @@ const importFromSshConfig = (text: string): VaultImportResult => {
 const importFromFinalShell = (text: string): VaultImportResult => {
   let connection: Record<string, unknown>;
   try {
-    const parsed = JSON.parse(text) as unknown;
+    const parsed = JSON.parse(text.trim()) as unknown;
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
       throw new Error("FinalShell connection must be a JSON object.");
     }

@@ -196,3 +196,13 @@ test("FinalShell conn directory import reads JSON files, preserves nested groups
   assert.equal(result.stats.skipped, 1);
   assert.match(result.issues[0]?.message ?? "", /broken\.json/i);
 });
+
+test("FinalShell preserves separately named profiles for the same endpoint", async () => {
+  const files = ["Primary", "Fallback"].map((name) => new File([JSON.stringify({
+    name, host: "shared.example.com", port: 22, user_name: "root", conection_type: 100,
+  })], `${name}.json`));
+  const result = await importVaultHostFiles({ format: "finalshell", files });
+  assert.deepEqual(result.hosts.map((host) => host.label), ["Primary", "Fallback"]);
+  assert.equal(result.stats.imported, 2);
+  assert.equal(result.stats.duplicates, 0);
+});

@@ -267,6 +267,12 @@ test("FinalShell import skips non-SSH connection types", () => {
   assert.match(result.issues[0]?.message ?? "", /unsupported.*type/i);
 });
 
+test("FinalShell detection and parsing accept a UTF-8 BOM", () => {
+  const text = "\uFEFF" + JSON.stringify({ host: "bom.example.com", conection_type: 100 });
+  assert.equal(detectVaultImportFormat(text), "finalshell");
+  assert.equal(importVaultHostsFromText("finalshell", text).hosts[0]?.hostname, "bom.example.com");
+});
+
 test("FinalShell auto-detection accepts missing and null usernames", () => {
   for (const user_name of [undefined, null]) {
     const text = JSON.stringify({ host: "optional-user.example.com", conection_type: 100, user_name });

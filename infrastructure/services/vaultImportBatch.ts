@@ -152,7 +152,7 @@ export async function importVaultHostFiles({
   }
 
   const seen = new Set<string>();
-  const uniqueHosts = format === "securecrt"
+  const uniqueHosts = format === "securecrt" || format === "finalshell"
     ? hosts
     : hosts.filter((host) => {
       const key = buildVaultHostMergeKey(host);
