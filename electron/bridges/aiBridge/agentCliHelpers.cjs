@@ -1,4 +1,5 @@
 /* eslint-disable no-undef */
+const { createHash } = require("node:crypto");
 const { StringDecoder } = require("node:string_decoder");
 
 const DEFAULT_CODEX_CLI_TIMEOUT_MS = 10_000;
@@ -8,6 +9,7 @@ const MAX_AGENT_CLI_BUFFER_CHARS = 10 * 1024 * 1024;
 function createAgentCliHelpers(ctx) {
   with (ctx) {
   const codexAuthValidationInFlight = new Map();
+  let codexValidationKey = null;
   async function runCommand(command, args, options) {
     return await new Promise((resolve, reject) => {
       let settled = false;
@@ -172,14 +174,21 @@ function createAgentCliHelpers(ctx) {
   }
 
   async function validateCodexChatGptAuth(options) {
-    // Agent-specific credentials must never reuse the default shell's result.
-    const cacheValidation = (result) => {
-      if (!options?.env) setCodexValidationCache(result);
-    };
+    const shellEnv = options?.env || await getShellEnv();
+    // Hash sorted entries so equivalent env objects share probes without
+    // retaining raw credentials in cache keys.
+    const envKey = createHash("sha256")
+      .update(JSON.stringify(Object.entries(shellEnv).sort(([a], [b]) => a.localeCompare(b))))
+      .digest("hex");
     const maxAgeMs = options?.maxAgeMs ?? 30000;
     const now = Date.now();
     const rawRequestedCodexPath = String(options?.codexPath || "").trim();
     const requestedCodexPath = rawRequestedCodexPath ? normalizeCliPathForPlatform?.(rawRequestedCodexPath) : null;
+    const validationKey = JSON.stringify([requestedCodexPath, envKey]);
+    const cacheValidation = (result) => {
+      codexValidationKey = validationKey;
+      setCodexValidationCache(result);
+    };
     if (rawRequestedCodexPath && !requestedCodexPath) {
       const result = {
         ok: false,
@@ -188,17 +197,15 @@ function createAgentCliHelpers(ctx) {
         error: `Codex CLI path not found: ${rawRequestedCodexPath}`,
         code: "ENOENT",
       };
-      cacheValidation(result);
       return result;
     }
     const cached = getCodexValidationCache();
-    if (!options?.env && cached && now - cached.checkedAt < maxAgeMs && (cached.codexPath || null) === requestedCodexPath) return cached;
-    const inFlightKey = options?.env ? Symbol() : requestedCodexPath || "__auto__";
+    if (codexValidationKey === validationKey && cached && now - cached.checkedAt < maxAgeMs) return cached;
+    const inFlightKey = validationKey;
     const existingValidation = codexAuthValidationInFlight.get(inFlightKey);
     if (existingValidation) return existingValidation;
 
     const validationPromise = (async () => {
-      const shellEnv = options?.env || await getShellEnv();
       const rawCodexPath = requestedCodexPath || await resolveSdkBinPathAsync("codex", shellEnv);
       const codexPath = rawCodexPath && typeof resolveCodexExecutableForSdk === "function"
         ? resolveCodexExecutableForSdk(rawCodexPath) || null

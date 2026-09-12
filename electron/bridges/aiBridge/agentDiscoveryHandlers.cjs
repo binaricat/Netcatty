@@ -360,11 +360,16 @@ function registerAgentDiscoveryHandlers(ctx) {
       const codexCliPath = requestedCodexPath
         || await resolveCliFromPathAsync("codex", shellEnv)
         || "codex";
+      const credentialHomeKey = shellEnv.CODEX_HOME?.trim()
+        || require("node:path").join(shellEnv.HOME || shellEnv.USERPROFILE || require("node:os").homedir(), ".codex");
       const existingSession = getActiveCodexLoginSession();
       if (existingSession) {
         const existingPath = existingSession.codexPath || null;
         if (existingPath && codexCliPath !== existingPath) {
           return { ok: false, error: "A Codex login is already running for a different CLI path." };
+        }
+        if (existingSession.credentialHomeKey !== credentialHomeKey) {
+          return { ok: false, error: "A Codex login is already running for a different credential home." };
         }
         return { ok: true, session: toCodexLoginSessionResponse(existingSession) };
       }
@@ -387,6 +392,7 @@ function registerAgentDiscoveryHandlers(ctx) {
         error: null,
         exitCode: null,
         codexPath: codexCliPath,
+        credentialHomeKey,
       };
 
       const stdoutDecoder = createCodexLoginOutputDecoder(session);

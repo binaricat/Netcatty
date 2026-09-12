@@ -977,6 +977,46 @@ test("codex login does not reuse an active session from a different resolved pat
   }
 });
 
+for (const homeVariable of ["HOME", "CODEX_HOME"]) {
+  for (const sameHome of [true, false]) {
+    test(`codex login ${sameHome ? "reuses" : "rejects"} an active session with ${sameHome ? "matching" : "changed"} ${homeVariable}`, async () => {
+      const originalHome = path.join(os.tmpdir(), "codex-login-original");
+      const requestedHome = sameHome ? originalHome : path.join(os.tmpdir(), "codex-login-other");
+      const existingSession = {
+        id: "codex_login_existing",
+        state: "running",
+        process: { killed: false },
+        codexPath: "/fixture/codex",
+        credentialHomeKey: homeVariable === "HOME" ? path.join(originalHome, ".codex") : originalHome,
+      };
+      const { bridge, restore } = loadBridgeWithMocks({
+        shellEnv: { HOME: originalHome },
+        resolveCliFromPathAsync: () => existingSession.codexPath,
+        getActiveCodexLoginSession: () => existingSession,
+        prepareCommandForSpawn: () => { throw new Error("An active login must not spawn another process"); },
+      });
+      const ipcMain = createIpcMainStub();
+      bridge.init({ sessions: new Map(), sftpClients: new Map(), electronModule: { app: { getPath: () => process.cwd() } } });
+      bridge.registerHandlers(ipcMain);
+      try {
+        const result = await ipcMain.handlers.get("netcatty:ai:codex:start-login")(
+          { sender: { id: 1 } },
+          { agentEnv: { [homeVariable]: requestedHome } },
+        );
+        assert.equal(result.ok, sameHome, JSON.stringify(result));
+        if (sameHome) {
+          assert.equal(result.session.sessionId, existingSession.id);
+        } else {
+          assert.match(result.error, /different credential home/);
+          assert.equal(result.session, undefined);
+        }
+      } finally {
+        restore();
+      }
+    });
+  }
+}
+
 for (const action of ["start-login", "logout"]) {
   test(`codex ${action} child processes use the requested agent home`, async (t) => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-codex-agent-home-"));
