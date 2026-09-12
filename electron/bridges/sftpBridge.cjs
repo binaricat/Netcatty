@@ -759,7 +759,13 @@ function findRemoteSftpSourceByEndpoint(sourceSessionId, expectedEndpoint, requi
     const actualEndpoint = session?._reuseEndpoint || session?.connRef?.endpoint;
     return Boolean(
       actualEndpoint
-      && endpointAllowsReuse(expectedEndpoint, actualEndpoint, "channel"),
+      && (endpointAllowsReuse(expectedEndpoint, actualEndpoint, "channel")
+        || (session._sftpReuseEndpoint
+          && endpointAllowsReuse({
+            ...session._sftpReuseEndpoint,
+            authFingerprint: actualEndpoint.authFingerprint,
+          }, actualEndpoint, "channel")
+          && endpointAllowsReuse(expectedEndpoint, session._sftpReuseEndpoint, "channel"))),
     );
   };
   const hasLiveSftpConnection = (session) => {
@@ -2374,7 +2380,28 @@ const openConnectionApi = createOpenConnectionApi({
   buildConnectionReuseEndpoint,
   resolveConnectionKeepalivePolicy,
 });
-const { connectThroughChainForSftp, connectSudoSftp, openSftp } = openConnectionApi;
+const { connectThroughChainForSftp, connectSudoSftp } = openConnectionApi;
+async function openSftp(event, options) {
+  // The main SFTP page has no explicit terminal hint. Look for the original
+  // profile of a live, temporarily authenticated terminal before dialing.
+  if (options.reuseTransport !== false) {
+    const endpoint = buildConnectionReuseEndpoint(options);
+    const source = findRemoteSftpSourceByEndpoint(options.sourceSessionId, endpoint);
+    if (source?.session._sftpReuseEndpoint) {
+      try {
+        return await openSftpForSession(event, {
+          ...options,
+          sessionId: source.sessionId,
+          expectedEndpoint: options,
+          requireExactSourceSession: true,
+        });
+      } catch {
+        // Preserve the normal fresh-connection fallback if the channel fails.
+      }
+    }
+  }
+  return openConnectionApi.openSftp(event, options);
+}
 const { createFileOpsApi } = require("./sftpBridge/fileOps.cjs");
 const fileOpsApi = createFileOpsApi({
   get sftpClients() { return sftpClients; },

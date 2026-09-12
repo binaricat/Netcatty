@@ -2811,6 +2811,7 @@ test("startSSH enables sudo autofill only with the host saved password", async (
 test("startSSH does not use unsaved retry passwords for sudo autofill", async () => {
   let onData: ((data: string) => void) | null = null;
   const sent: string[] = [];
+  let captured: NetcattySSHOptions | undefined;
   const terminalBackend = {
     backendAvailable: () => true,
     telnetAvailable: () => true,
@@ -2818,7 +2819,7 @@ test("startSSH does not use unsaved retry passwords for sudo autofill", async ()
     localAvailable: () => true,
     serialAvailable: () => true,
     execAvailable: () => true,
-    startSSHSession: async () => "ssh-session",
+    startSSHSession: async (options: NetcattySSHOptions) => { captured = options; return "ssh-session"; },
     startTelnetSession: async () => "telnet-session",
     startMoshSession: async () => "mosh-session",
     startLocalSession: async () => "local-session",
@@ -2856,6 +2857,18 @@ test("startSSH does not use unsaved retry passwords for sudo autofill", async ()
   onData?.("[sudo] password for alice: ");
 
   assert.deepEqual(sent, []);
+  assert.equal(captured?.password, "temporary-secret");
+  assert.equal(captured?.sftpReuseOptions?.hostId, "host-1");
+  assert.equal(captured?.sftpReuseOptions?.password, undefined);
+  assert.equal(JSON.stringify(captured?.sftpReuseOptions).includes("temporary-secret"), false);
+  assert.equal("password" in ctx.host, false);
+
+  // An unreadable saved credential must not block a manual password override.
+  Object.assign(ctx.host, { password: ENCRYPTED_CREDENTIAL_PLACEHOLDER });
+  captured = undefined;
+  await createTerminalSessionStarters(ctx as never).startSSH(createTermStub() as never);
+  assert.equal(captured?.password, "temporary-secret");
+  assert.equal(captured?.sftpReuseOptions, undefined);
 });
 
 test("startSSH uses pending saved auth for sudo autofill on the first saved connection", async () => {
