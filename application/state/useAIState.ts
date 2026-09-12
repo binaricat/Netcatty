@@ -23,6 +23,7 @@ import {
 } from '../../infrastructure/config/storageKeys';
 import type { AIQuickMessage } from '../../infrastructure/ai/quickMessages';
 import { sanitizeQuickMessages } from '../../infrastructure/ai/quickMessages';
+import { migrateLegacyProviderHeaders } from '../../infrastructure/ai/providerHeaderCredentials';
 import type {
   AIDraft,
   AISessionContextCompaction,
@@ -642,6 +643,27 @@ export function useAIState() {
         ? 'skills'
         : 'mcp';
     bridge?.aiMcpSetToolIntegrationMode?.(initialToolMode);
+  }, []);
+
+  // ── One-time migration: encrypt legacy plaintext custom headers ──
+  useEffect(() => {
+    let cancelled = false;
+    migrateLegacyProviderHeaders(
+      localStorageAdapter.read<ProviderConfig[]>(STORAGE_KEY_AI_PROVIDERS) ?? [],
+    )
+      .then((migrated) => {
+        if (cancelled || migrated == null) return;
+        // Write storage first so cross-window sync readers never observe the
+        // migration result without its encryption.
+        localStorageAdapter.write(STORAGE_KEY_AI_PROVIDERS, migrated);
+        setProvidersRaw(migrated);
+      })
+      .catch((err) => {
+        console.warn('[useAIState] Legacy custom header encryption migration failed', err);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // ── Session CRUD ──

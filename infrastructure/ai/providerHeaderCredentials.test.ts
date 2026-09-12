@@ -1,6 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseProviderHeaderRows, encryptProviderHeaders, decryptProviderHeaders } from './providerHeaderCredentials';
+import {
+  parseProviderHeaderRows,
+  encryptProviderHeaders,
+  decryptProviderHeaders,
+  hasLegacyPlaintextHeaderValues,
+  migrateLegacyProviderHeaders,
+} from './providerHeaderCredentials';
 
 const encrypted = `enc:v1:${Buffer.concat([Buffer.from('v10'), Buffer.alloc(32, 1)]).toString('base64')}`;
 function bridge(value: object) {
@@ -32,4 +38,32 @@ test('missing or failed encryption blocks saving; unread encrypted headers block
   bridge({ credentialsEncrypt: async () => { throw Error('locked'); }, credentialsDecrypt: async (value: string) => value });
   await assert.rejects(encryptProviderHeaders({ Authorization: 'secret' }));
   await assert.rejects(decryptProviderHeaders({ Authorization: encrypted }));
+});
+
+test('legacy plaintext header values are detected and migrated without re-encrypting ciphertext', async () => {
+  bridge({ credentialsEncrypt: async () => encrypted, credentialsDecrypt: async () => { throw Error('unused'); } });
+  assert.equal(hasLegacyPlaintextHeaderValues(undefined), false);
+  assert.equal(hasLegacyPlaintextHeaderValues({ 'X-Empty': '' }), false);
+  assert.equal(hasLegacyPlaintextHeaderValues({ 'X-Tenant': encrypted }), false);
+  assert.equal(hasLegacyPlaintextHeaderValues({ 'X-Tenant': 'secret', 'X-Cipher': encrypted }), true);
+
+  const providers = [
+    { id: 'a', customHeaders: { 'X-Tenant': 'secret', 'X-Cipher': encrypted } },
+    { id: 'b' },
+    { id: 'c', customHeaders: { 'X-Plain': 'tenant' } },
+  ];
+  const migrated = await migrateLegacyProviderHeaders(providers as never[]);
+  assert.ok(migrated);
+  assert.deepEqual(migrated[0].customHeaders, { 'X-Tenant': encrypted, 'X-Cipher': encrypted });
+  assert.deepEqual(migrated[1].customHeaders, undefined);
+  assert.deepEqual(migrated[2].customHeaders, { 'X-Plain': encrypted });
+  // Already-migrated providers are left untouched (idempotent).
+  assert.equal(await migrateLegacyProviderHeaders(migrated as never[]), null);
+  assert.equal(await migrateLegacyProviderHeaders(providers.slice(1, 2) as never[]), null);
+});
+
+test('migration keeps legacy headers usable when secure storage is unavailable', async () => {
+  bridge({});
+  const provider = { id: 'a', customHeaders: { Authorization: 'secret' } };
+  assert.deepEqual(await migrateLegacyProviderHeaders([provider] as never[]), null);
 });
