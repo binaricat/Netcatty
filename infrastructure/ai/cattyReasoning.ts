@@ -123,7 +123,7 @@ export function buildCattyReasoningProviderOptions(
     if (modelId && openaiModelKnownUnsupportedReasoning(modelId)) return undefined;
     const explicitDefault = ['low', 'medium', 'high'].includes(provider.advancedParams?.reasoningEffort ?? '');
     const unrecognizedModel = !!modelId && !openaiModelLikelySupportsReasoning(modelId);
-    if (unrecognizedModel && !explicitDefault) return undefined;
+    if (unrecognizedModel && !(provider.providerId === 'custom' && explicitDefault)) return undefined;
     if (resolved === 'off') {
       if (modelId && openaiModelSupportsNoneReasoning(modelId)) {
         return { openai: { reasoningEffort: 'none' } };
@@ -267,7 +267,7 @@ export function cattyReasoningLevelsForSelection(
   if (style === 'openai') {
     if (!modelId || openaiModelKnownUnsupportedReasoning(modelId)) return [];
     if (!openaiModelLikelySupportsReasoning(modelId)) {
-      return ['low', 'medium', 'high'].includes(provider.advancedParams?.reasoningEffort ?? '')
+      return provider.providerId === 'custom' && ['low', 'medium', 'high'].includes(provider.advancedParams?.reasoningEffort ?? '')
         ? LEVELS_LOW_MEDIUM_HIGH
         : [];
     }

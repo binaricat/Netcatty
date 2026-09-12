@@ -408,3 +408,11 @@ test('provider defaults do not enable reasoning on known unsupported OpenAI mode
     }
   }
 });
+
+
+test('built-in providers retain capability checks when a default is configured', () => {
+  const provider = { providerId: 'deepseek' as const, advancedParams: { reasoningEffort: 'high' } };
+  assert.equal(buildCattyReasoningProviderOptions(provider, 'high', 'deepseek-chat'), undefined);
+  assert.deepEqual(cattyReasoningLevelsForSelection(provider, 'deepseek-chat'), []);
+  assert.deepEqual(buildCattyReasoningProviderOptions(provider, 'high', 'deepseek-reasoner'), { openai: { reasoningEffort: 'high' } });
+});
