@@ -45,7 +45,7 @@ declare global {
         authHash: string | null;
       } | null;
     }>;
-    aiCodexStartLogin?(options?: { codexPath?: string }): Promise<{
+    aiCodexStartLogin?(options?: { codexPath?: string; agentEnv?: Record<string, string> }): Promise<{
       ok: boolean;
       session?: {
         sessionId: string;
@@ -85,7 +85,7 @@ declare global {
       };
       error?: string;
     }>;
-    aiCodexLogout?(options?: { codexPath?: string }): Promise<{
+    aiCodexLogout?(options?: { codexPath?: string; agentEnv?: Record<string, string> }): Promise<{
       ok: boolean;
       state?: 'connected_chatgpt' | 'connected_api_key' | 'connected_custom_config' | 'not_logged_in' | 'unknown';
       isConnected?: boolean;

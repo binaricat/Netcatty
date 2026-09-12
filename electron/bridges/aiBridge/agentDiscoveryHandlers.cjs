@@ -78,6 +78,14 @@ async function probeCursorSdkAvailability(shellEnv, options = {}) {
 
 function registerAgentDiscoveryHandlers(ctx) {
   with (ctx) {
+  async function getCodexAgentEnv(options) {
+    return buildSdkAgentEnv({
+      shellEnv: await getShellEnv(),
+      requestedAgentEnv: normalizeAgentEnv(options?.agentEnv),
+      withCliDiscoveryEnv,
+    });
+  }
+
   ipcMain.handle("netcatty:ai:agents:discover", async (event, options = {}) => {
     if (!validateSenderOrSettings(event)) return { ok: false, error: "Unauthorized IPC sender" };
     if (options?.refreshShellEnv) {
@@ -265,17 +273,8 @@ function registerAgentDiscoveryHandlers(ctx) {
       invalidateShellEnvCache();
     }
     try {
-      const shellEnv = await getShellEnv();
-      // A managed Codex agent may override CODEX_HOME/HOME in its env. The
-      // SDK run-turn path merges those overrides into the subprocess env
-      // (sdkStreamHandlers → buildSdkAgentEnv), so this probe must resolve
-      // auth.json/config.toml from the same home the agent will actually
-      // use — otherwise it reports the shell's default config.
-      const effectiveEnv = buildSdkAgentEnv({
-        shellEnv,
-        requestedAgentEnv: normalizeAgentEnv(options?.agentEnv),
-        withCliDiscoveryEnv,
-      });
+      // Probe the same config and credentials as the managed agent's turns.
+      const effectiveEnv = await getCodexAgentEnv(options);
       const codexCliOptions = { codexPath: options?.codexPath, env: effectiveEnv };
       const result = await runCodexCli(["login", "status"], codexCliOptions);
       const rawOutput = [result.stdout, result.stderr]
@@ -357,7 +356,7 @@ function registerAgentDiscoveryHandlers(ctx) {
     }
 
     try {
-      const shellEnv = await getShellEnv();
+      const shellEnv = await getCodexAgentEnv(options);
       const codexCliPath = requestedCodexPath
         || await resolveCliFromPathAsync("codex", shellEnv)
         || "codex";
@@ -469,7 +468,7 @@ function registerAgentDiscoveryHandlers(ctx) {
   ipcMain.handle("netcatty:ai:codex:logout", async (event, options = {}) => {
     if (!validateSenderOrSettings(event)) return { ok: false, error: "Unauthorized IPC sender" };
     try {
-      const codexCliOptions = { codexPath: options?.codexPath };
+      const codexCliOptions = { codexPath: options?.codexPath, env: await getCodexAgentEnv(options) };
       const logoutResult = await runCodexCli(["logout"], codexCliOptions);
       invalidateCodexValidationCache();
       const statusResult = await runCodexCli(["login", "status"], codexCliOptions);
