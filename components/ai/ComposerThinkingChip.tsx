@@ -1,4 +1,4 @@
-import { Brain, Check, ChevronDown } from 'lucide-react';
+import { Brain, Check, ChevronDown, CircleSlash } from 'lucide-react';
 import React, { useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useI18n } from '../../application/i18n/I18nProvider';
@@ -9,6 +9,8 @@ export interface ComposerThinkingChipProps {
   levels: readonly string[];
   selectedLevel?: string;
   disabled?: boolean;
+  /** Offer a "provider default" entry that clears the override (empty selection). */
+  allowDefault?: boolean;
   open: boolean;
   menuPos: { left: number; bottom: number } | null;
   onToggle: (rect: DOMRect | undefined) => void;
@@ -23,6 +25,7 @@ export const ComposerThinkingChip: React.FC<ComposerThinkingChipProps> = ({
   levels,
   selectedLevel,
   disabled = false,
+  allowDefault = false,
   open,
   menuPos,
   onToggle,
@@ -71,16 +74,17 @@ export const ComposerThinkingChip: React.FC<ComposerThinkingChipProps> = ({
             className="fixed z-[1000] min-w-[148px] rounded-lg border border-border/50 bg-popover shadow-lg py-1"
             style={{ left: menuPos.left, bottom: menuPos.bottom }}
           >
-            {levels.map((level) => {
-              const isSelected = selectedLevel === level;
+            {(allowDefault ? [undefined, ...levels] : levels).map((level) => {
+              const isDefault = level === undefined;
+              const isSelected = isDefault ? !selectedLevel : selectedLevel === level;
               return (
                 <button
-                  key={level}
+                  key={isDefault ? '__default__' : level}
                   type="button"
                   role="option"
                   aria-selected={isSelected}
                   onClick={() => {
-                    if (!isSelected) onSelect(level);
+                    if (!isSelected) onSelect(isDefault ? '' : level);
                     else onClose();
                   }}
                   className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left text-[12px] hover:bg-muted/30 transition-colors cursor-pointer"
@@ -88,8 +92,12 @@ export const ComposerThinkingChip: React.FC<ComposerThinkingChipProps> = ({
                   {isSelected
                     ? <Check size={11} className="text-primary shrink-0" />
                     : <span className="w-[11px] shrink-0" />}
-                  <Brain size={12} className="text-violet-400/70 shrink-0" />
-                  <span className="text-foreground/85">{formatLevel(level)}</span>
+                  {isDefault
+                    ? <CircleSlash size={12} className="text-muted-foreground/60 shrink-0" />
+                    : <Brain size={12} className="text-violet-400/70 shrink-0" />}
+                  <span className="text-foreground/85">
+                    {isDefault ? t('ai.chat.thinkingDefault') : formatLevel(level)}
+                  </span>
                 </button>
               );
             })}
