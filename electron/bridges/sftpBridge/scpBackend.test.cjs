@@ -199,6 +199,17 @@ describe("scpBackend browse/manage with fake exec", () => {
     );
   });
 
+  it("reports ENOENT when stdout contains a login banner", async () => {
+    const bannerBackend = createScpBackend({
+      exec: async () => ({ stdout: "Welcome\n", stderr: "ENOENT\n", code: 2 }),
+      execStream: async () => createMockStream(),
+    });
+    await assert.rejects(
+      () => bannerBackend.stat("/home/test/gone.txt"),
+      (err) => err.code === "ENOENT",
+    );
+  });
+
   it("does not mask an empty exec response as ENOENT in stat", async () => {
     const emptyBackend = createScpBackend({
       // Simulates the reporter's case: the exec channel returns no output at

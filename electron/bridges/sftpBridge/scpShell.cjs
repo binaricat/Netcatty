@@ -330,28 +330,14 @@ function parseLsLaOutput(stdout, { basePath = "" } = {}) {
 function parseStatRecord(stdout, { stderr = "", exitCode = null } = {}) {
   const line = String(stdout || "").trim().split(/\r?\n/)[0] || "";
   const stderrText = String(stderr || "").trim();
+  // A missing path emits an ENOENT marker and exits 2. Shell startup
+  // messages may precede it on either stream; exit status alone is not enough.
+  const hasMissingMarker = line === "ENOENT"
+    || stderrText.split(/\r?\n/).some((entry) => entry.trim() === "ENOENT");
+  if (hasMissingMarker && (exitCode == null || exitCode === 2)) {
+    throw new ScpShellError("No such file", "ENOENT");
+  }
   if (!line || line === "ENOENT") {
-    // Real missing path: the stat command prints ENOENT on stderr and exits 2.
-    // Only report ENOENT when the remote actually said so — an empty exec
-    // response (e.g. channel negotiation failure) is a transport problem, not
-    // a missing file, and must not be masked as ENOENT.
-    // Accept the ENOENT marker on any stderr line: non-interactive shells may
-    // print banners/warnings before running the command, so the marker is not
-    // always on the first line. When the exit code is known it must be 2 (the
-    // value the stat command exits with), so an unrelated error is not masked.
-    const stderrLines = stderrText.split(/\r?\n/).map((entry) => entry.trim());
-    // Apply the same exit-2-or-unknown requirement to the stdout marker: a
-    // forced-command wrapper that writes "ENOENT" on stdout before failing
-    // must not be reported as a missing path.
-    const markerOnStderr = stderrLines.includes("ENOENT")
-      && (exitCode == null || exitCode === 2);
-    const markerOnStdout = line === "ENOENT"
-      && (exitCode == null || exitCode === 2);
-    if (markerOnStdout || markerOnStderr) {
-      const err = new ScpShellError("No such file", "ENOENT");
-      err.code = "ENOENT";
-      throw err;
-    }
     const detail = [
       "exec channel returned empty response",
       exitCode != null ? `exit ${exitCode}` : null,

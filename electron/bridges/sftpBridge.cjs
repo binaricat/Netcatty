@@ -55,6 +55,7 @@ let sftpClients = null;
 let electronModule = null;
 let sessions = null;
 let reportOpenedSessionActivity = null;
+let reportSuppressedError = null;
 const rendererSftpSourceSessions = new Map();
 const REMOTE_DELETE_EXEC_OPEN_TIMEOUT_MS = 15_000;
 const REMOTE_DELETE_EXEC_RUN_TIMEOUT_MS = 10 * 60_000;
@@ -733,6 +734,9 @@ function init(deps) {
   sessions = deps.sessions;
   reportOpenedSessionActivity = typeof deps.reportOpenedSessionActivity === "function"
     ? deps.reportOpenedSessionActivity
+    : null;
+  reportSuppressedError = typeof deps.reportSuppressedError === "function"
+    ? deps.reportSuppressedError
     : null;
   rendererSftpSourceSessions.clear();
 }
@@ -2015,10 +2019,14 @@ async function openSftpForSession(_event, payload) {
     }
 
     try {
-      await requireSftpChannel(client, {
+      // This is a fresh client: retain the initial channel-open error instead
+      // of passing through recovery, which replaces it with a generic error.
+      const channel = await tryOpenSftpChannel(client, {
         signal: payload?.abortSignal,
         timeoutMs: payload?.timeoutMs,
       });
+      if (!hasSftpChannelApi(channel)) throw new Error("SFTP channel unavailable");
+      client.sftp = channel;
       client.__netcattyFileProtocol = "sftp";
     } catch (sftpErr) {
       if (fileProtocol === "sftp") throw sftpErr;
@@ -2027,22 +2035,22 @@ async function openSftpForSession(_event, payload) {
         `[SFTP] openSftpForSession SFTP channel failed for ${sessionId}; falling back to SCP mode:`,
         sftpErr?.message || String(sftpErr),
       );
-      // Persist the real failure reason: packaged builds do not keep
-      // main-process console output, so this diagnostic is the only trace of
-      // why the first-hop SFTP channel negotiation failed.
+      // The terminal worker has no Electron app: forward to main's logger.
       try {
-        require("./crashLogBridge.cjs").captureDiagnostic(
-          "sftpBridge.openSftpForSession",
-          `SFTP channel failed for ${sessionId}; falling back to SCP mode`,
-          {
+        const source = "sftpBridge.openSftpForSession";
+        const message = `SFTP channel failed for ${sourceSessionId}; falling back to SCP mode (${fileProtocol})`;
+        if (reportSuppressedError) {
+          reportSuppressedError(source, sftpErr, message);
+        } else {
+          require("./crashLogBridge.cjs").captureDiagnostic(source, message, {
             sessionId: sourceSessionId,
             fileProtocol,
             reason: sftpErr?.message || String(sftpErr),
             reasonCode: sftpErr?.code ?? sftpErr?.level ?? undefined,
-          },
-        );
+          });
+        }
       } catch {
-        // Crash log unavailable (e.g. tests without Electron) — console.warn above still applies.
+        // Diagnostic failures must not prevent the fallback.
       }
       client.__netcattyFileProtocol = "scp";
       client.sftp = null;
