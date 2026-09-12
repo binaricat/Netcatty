@@ -64,6 +64,7 @@
     "bench:sync-crdt": "tsx scripts/bench-sync-crdt.ts",
     "test:ssh-mfa-models": "node --test electron/bridges/sshMfaModels.live.test.cjs",
     "test:ssh-mfa-models:live": "SSH_MFA_LIVE=1 node --test electron/bridges/sshMfaModels.live.test.cjs",
+    "test:local-file-drag:electron": "electron scripts/local-file-drag.live.test.cjs",
     "test:tray-panel-layout": "electron scripts/tray-panel-layout.live.test.cjs",
     "test:xterm-foreground-intense": "electron scripts/xterm-foreground-intense.live.test.cjs",
     "test:terminal-background-rendering": "electron scripts/terminal-background-rendering.live.test.cjs",

@@ -131,6 +131,8 @@ declare global {
 
     // Get file path from File object (for drag-and-drop, uses Electron's webUtils)
     getPathForFile?(file: File): string | undefined;
+    startLocalFileDrag?(payload: { requestId: string; paths: string[] }): Promise<{ started: boolean; error?: string }>;
+    cancelLocalFileDrag?(requestId: string): void;
     showSystemNotification?(payload: {
       title: string;
       body: string;

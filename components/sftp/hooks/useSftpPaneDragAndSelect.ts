@@ -2,13 +2,16 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { SftpFileEntry } from "../../../types";
 import type { SftpPaneCallbacks, SftpDragCallbacks, SftpTransferSource } from "../SftpContext";
 import { isNavigableDirectory } from "../utils";
+import { toast } from "../../ui/toast";
+import { startSftpFileDrag, localFileDragMoveEffect, getLocalFileDragSources, takeLocalFileDragSources, clearLocalFileDragForPane, type LocalDragSource } from "../../../application/state/sftp/localFileDrag";
 import { joinPath } from "../../../application/state/sftp/utils";
 
 interface UseSftpPaneDragAndSelectParams {
   side: "left" | "right";
   pane: {
+    id: string;
     selectedFiles: Set<string>;
-    connection?: { currentPath: string; id: string } | null;
+    connection?: { currentPath: string; id: string; isLocal?: boolean } | null;
   };
   sortedDisplayFiles: SftpFileEntry[];
   draggedFiles: (SftpTransferSource & { side: "left" | "right" })[] | null;
@@ -73,8 +76,10 @@ export const useSftpPaneDragAndSelect = ({
     }
   }, [pane.selectedFiles.size]);
 
-  const getSamePaneDragPaths = useCallback((): string[] | null => {
-    const dragged = draggedFilesRef.current;
+  useEffect(() => () => clearLocalFileDragForPane(pane.id),
+    [pane.id, pane.connection?.id, pane.connection?.isLocal, pane.connection?.currentPath]);
+
+  const getSamePaneDragPaths = useCallback((dragged: LocalDragSource[] | null): string[] | null => {
     if (!dragged || dragged.length === 0) return null;
     if (dragged[0]?.side !== side) return null;
 
@@ -115,9 +120,10 @@ export const useSftpPaneDragAndSelect = ({
     setIsDragOverPane(false);
     setDragOverEntry(null);
 
-    if (draggedFilesRef.current && draggedFilesRef.current.length > 0) {
-      if (draggedFilesRef.current[0]?.side !== side) {
-        onReceiveRef.current(draggedFilesRef.current);
+    const sources = draggedFilesRef.current ?? takeLocalFileDragSources(e.dataTransfer);
+    if (sources && sources.length > 0) {
+      if (sources[0]?.side !== side) {
+        onReceiveRef.current(sources);
       }
       return;
     }
@@ -153,26 +159,28 @@ export const useSftpPaneDragAndSelect = ({
             side,
           },
         ];
-      e.dataTransfer.effectAllowed = "copyMove";
-      e.dataTransfer.setData("text/plain", files.map((f) => f.name).join("\n"));
-      onDragStart(files, side);
+      startSftpFileDrag({ event: e, paneId: pane.id, connection: pane.connection,
+        sources: files, side, onRemoteDrag: onDragStart,
+        onError: (message) => toast.error(message, "SFTP"),
+      });
     },
-    [onDragStart, pane.connection?.currentPath, pane.connection?.id, side],
+    [onDragStart, pane.id, pane.connection, side],
   );
 
   const handleEntryDragOver = useCallback(
     (entry: SftpFileEntry, e: React.DragEvent) => {
-      const samePaneDragPaths = getSamePaneDragPaths();
+      const sources = draggedFilesRef.current ?? getLocalFileDragSources(e.dataTransfer);
+      const samePaneDragPaths = getSamePaneDragPaths(sources);
       if (samePaneDragPaths && isNavigableDirectory(entry) && entry.name !== "..") {
         e.preventDefault();
         e.stopPropagation();
-        e.dataTransfer.dropEffect = "move";
+        e.dataTransfer.dropEffect = draggedFilesRef.current ? "move" : localFileDragMoveEffect(e.dataTransfer);
         setDragOverEntry(entry.name);
         return;
       }
 
       // Handle cross-pane internal drag
-      if (draggedFilesRef.current && draggedFilesRef.current[0]?.side !== side) {
+      if (sources && sources[0]?.side !== side) {
         if (isNavigableDirectory(entry) && entry.name !== "..") {
           e.preventDefault();
           e.stopPropagation();
@@ -194,7 +202,10 @@ export const useSftpPaneDragAndSelect = ({
 
   const handleEntryDrop = useCallback(
     async (entry: SftpFileEntry, e: React.DragEvent) => {
-      const samePaneDragPaths = getSamePaneDragPaths();
+      // Let a non-directory drop bubble to the pane before consuming a native gesture.
+      const sources = draggedFilesRef.current ?? (isNavigableDirectory(entry) && entry.name !== ".."
+        ? takeLocalFileDragSources(e.dataTransfer) : null);
+      const samePaneDragPaths = getSamePaneDragPaths(sources);
       if (samePaneDragPaths && isNavigableDirectory(entry) && entry.name !== "..") {
         e.preventDefault();
         e.stopPropagation();
@@ -210,7 +221,7 @@ export const useSftpPaneDragAndSelect = ({
       }
 
       // Handle cross-pane internal drag
-      if (draggedFilesRef.current && draggedFilesRef.current[0]?.side !== side) {
+      if (sources && sources[0]?.side !== side) {
         if (isNavigableDirectory(entry) && entry.name !== "..") {
           e.preventDefault();
           e.stopPropagation();
@@ -220,7 +231,7 @@ export const useSftpPaneDragAndSelect = ({
             ? joinPath(pane.connection.currentPath, entry.name)
             : undefined;
           onReceiveRef.current(
-            draggedFilesRef.current.map((file) => ({ ...file, targetPath })),
+            sources.map((file) => ({ ...file, targetPath })),
           );
         }
         return;
