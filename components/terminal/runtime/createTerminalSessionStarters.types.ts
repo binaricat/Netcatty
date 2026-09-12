@@ -176,6 +176,7 @@ export type TerminalSessionStartersContext = {
   isNetworkDevice?: boolean;
   startupCommand?: string;
   noAutoRun?: boolean;
+  recordSerialSnippetInput?: (data: string) => void;
   multiLineRunMode?: TerminalSession["multiLineRunMode"];
   shellType?: TerminalSession["shellType"];
   suppressHostStartupCommandRef?: RefObject<boolean>;

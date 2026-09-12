@@ -519,6 +519,7 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
           // Serial-specific options
           serialLocalEcho: serialConfig?.localEcho,
           serialLineMode: serialConfig?.lineMode,
+          serialByteOrientedBackspace: serialConfig?.byteOrientedBackspace ?? false,
           serialLineBufferRef,
           telnetLocalEchoRef,
           onTerminalLogData: captureTerminalLogData,
@@ -1047,7 +1048,7 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
   }, [status]);
 
 
-  const effectiveThemeKey = `${effectiveTheme.id}:${effectiveTheme.colors.background}:${effectiveTheme.colors.foreground}:${effectiveTheme.colors.cursor}`;
+  const effectiveThemeKey = `${effectiveTheme.id}:${effectiveTheme.colors.background}:${effectiveTheme.colors.foreground}:${effectiveTheme.colors.foregroundIntense ?? ""}:${effectiveTheme.colors.cursor}`;
 
   // Sync xterm theme before browser paint; apply synchronously on visible panes.
   useLayoutEffect(() => {

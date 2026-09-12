@@ -7,15 +7,16 @@ export type VaultImportDestinationMode = "preserve" | "existing" | "new";
 
 export function getVaultImportPickerMode(
   format: VaultImportFormat,
-  secureCrtSource: "folder" | "file" = "folder",
+  source: "folder" | "file" = "folder",
 ): {
   directory: boolean;
   multiple: boolean;
 } {
-  const isSecureCrtFolder = format === "securecrt" && secureCrtSource === "folder";
+  const isBatchFolder = (format === "securecrt" || format === "finalshell")
+    && source === "folder";
   return {
-    directory: isSecureCrtFolder,
-    multiple: isSecureCrtFolder,
+    directory: isBatchFolder,
+    multiple: isBatchFolder,
   };
 }
 
@@ -24,7 +25,9 @@ export function selectVaultImportFiles(
   files: ArrayLike<File>,
 ): File[] {
   const selected = Array.from(files);
-  return format === "securecrt" ? selected : selected.slice(0, 1);
+  return format === "securecrt" || format === "finalshell"
+    ? selected
+    : selected.slice(0, 1);
 }
 
 const normalizeGroup = (raw: string | undefined): string | undefined => {

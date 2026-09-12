@@ -68,6 +68,7 @@ export const SerialConnectModal: React.FC<SerialConnectModalProps> = ({
   const [localEcho, setLocalEcho] = useState(false);
   const [lineMode, setLineMode] = useState(false);
   const [backspaceBehavior, setBackspaceBehavior] = useState<SerialConfig['backspaceBehavior']>('default');
+  const [byteOrientedBackspace, setByteOrientedBackspace] = useState(false);
   const [charset, setCharset] = useState('UTF-8');
 
   // Save configuration state
@@ -119,6 +120,7 @@ export const SerialConnectModal: React.FC<SerialConnectModalProps> = ({
       localEcho,
       lineMode,
       backspaceBehavior,
+      byteOrientedBackspace,
     };
 
     // Save as host if checkbox is checked and onSaveHost is provided
@@ -368,6 +370,24 @@ export const SerialConnectModal: React.FC<SerialConnectModalProps> = ({
                   <p className="text-xs text-muted-foreground">
                     {t('serial.field.backspaceBehaviorDesc')}
                   </p>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <Label htmlFor="byte-oriented-backspace" className="text-sm font-medium cursor-pointer">
+                      {t('serial.field.byteOrientedBackspace')}
+                    </Label>
+                    <p className="text-xs text-muted-foreground">
+                      {t('serial.field.byteOrientedBackspaceDesc')}
+                    </p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    id="byte-oriented-backspace"
+                    checked={byteOrientedBackspace}
+                    onChange={(e) => setByteOrientedBackspace(e.target.checked)}
+                    className="h-4 w-4 rounded border-input"
+                  />
                 </div>
 
                 <div className="flex items-center justify-between">

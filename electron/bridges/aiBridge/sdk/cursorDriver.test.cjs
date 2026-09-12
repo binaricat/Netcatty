@@ -130,6 +130,66 @@ test("runCursorTurn exposes runtime env while creating and sending", async () =>
   ]);
 });
 
+test("runCursorTurn isolates runtime env across concurrent chats", async () => {
+  const original = process.env.NETCATTY_CLI_CHAT_SESSION_ID;
+  delete process.env.NETCATTY_CLI_CHAT_SESSION_ID;
+  const seen = { a: [], b: [] };
+  let releaseA;
+  const holdA = new Promise((resolve) => { releaseA = resolve; });
+
+  function makeSdk(label) {
+    return {
+      Agent: {
+        async create() {
+          seen[label].push(["create", process.env.NETCATTY_CLI_CHAT_SESSION_ID]);
+          if (label === "a") await holdA;
+          return {
+            agentId: `agent-${label}`,
+            async send() {
+              seen[label].push(["send", process.env.NETCATTY_CLI_CHAT_SESSION_ID]);
+              return { async *stream() {} };
+            },
+            close() {},
+          };
+        },
+      },
+    };
+  }
+
+  try {
+    const turnA = runCursorTurn({
+      prompt: "a",
+      agentOptions: { apiKey: "key", model: { id: "composer-2.5" }, local: { cwd: "/repo" } },
+      runtimeEnv: { NETCATTY_CLI_CHAT_SESSION_ID: "chat-a" },
+      emitter: makeEmitter(),
+      sdkModule: makeSdk("a"),
+    });
+    while (seen.a.length === 0) await new Promise((resolve) => setImmediate(resolve));
+    const turnB = runCursorTurn({
+      prompt: "b",
+      agentOptions: { apiKey: "key", model: { id: "composer-2.5" }, local: { cwd: "/repo" } },
+      runtimeEnv: { NETCATTY_CLI_CHAT_SESSION_ID: "chat-b" },
+      emitter: makeEmitter(),
+      sdkModule: makeSdk("b"),
+    });
+
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(seen.a, [["create", "chat-a"]]);
+    assert.deepEqual(seen.b, []);
+    assert.equal(process.env.NETCATTY_CLI_CHAT_SESSION_ID, "chat-a");
+
+    releaseA();
+    await Promise.all([turnA, turnB]);
+
+    assert.deepEqual(seen.a, [["create", "chat-a"], ["send", "chat-a"]]);
+    assert.deepEqual(seen.b, [["create", "chat-b"], ["send", "chat-b"]]);
+    assert.equal(process.env.NETCATTY_CLI_CHAT_SESSION_ID, undefined);
+  } finally {
+    if (original === undefined) delete process.env.NETCATTY_CLI_CHAT_SESSION_ID;
+    else process.env.NETCATTY_CLI_CHAT_SESSION_ID = original;
+  }
+});
+
 test("translateCursorEvent maps assistant, thinking, and tool events", () => {
   const emitter = makeEmitter();
   const state = {};
@@ -373,6 +433,7 @@ test("runCursorTurn returns when aborted while creating an agent", async () => {
     sdkModule,
   });
 
+  await new Promise((resolve) => setImmediate(resolve));
   controller.abort();
   const result = await turnPromise;
   assert.deepEqual(result, { sessionId: null });
@@ -384,14 +445,15 @@ test("runCursorTurn returns when aborted while creating an agent", async () => {
   assert.equal(closed, true);
 });
 
-test("runCursorTurn restores runtime env when aborted while creating an agent", async () => {
+test("runCursorTurn keeps env isolated until aborted startup settles", async () => {
   const emitter = makeEmitter();
   const original = process.env.NETCATTY_CURSOR_ABORT_ENV;
   delete process.env.NETCATTY_CURSOR_ABORT_ENV;
+  let resolveCreate;
   const sdkModule = {
     Agent: {
       create() {
-        return new Promise(() => {});
+        return new Promise((resolve) => { resolveCreate = resolve; });
       },
     },
   };
@@ -405,10 +467,15 @@ test("runCursorTurn restores runtime env when aborted while creating an agent", 
     sdkModule,
   });
 
-  await new Promise((resolve) => setTimeout(resolve, 0));
+  for (let i = 0; i < 50 && process.env.NETCATTY_CURSOR_ABORT_ENV !== "present"; i += 1) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
   assert.equal(process.env.NETCATTY_CURSOR_ABORT_ENV, "present");
   controller.abort();
   await turnPromise;
+  assert.equal(process.env.NETCATTY_CURSOR_ABORT_ENV, "present");
+  resolveCreate({ close() {} });
+  await new Promise((resolve) => setImmediate(resolve));
   assert.equal(process.env.NETCATTY_CURSOR_ABORT_ENV, undefined);
   if (original !== undefined) process.env.NETCATTY_CURSOR_ABORT_ENV = original;
 });
@@ -545,4 +612,60 @@ test("parseCursorModelSelection accepts query and slash effort encodings", () =>
     params: [{ id: "effort", value: "low" }],
   });
   assert.equal(encodeCursorCliModel("gpt-5/high"), "gpt-5?effort=high");
+});
+
+
+test("stopping a queued Cursor turn returns before another startup and never creates an agent", async () => {
+  const { withExclusiveProcessEnv } = require("./processEnvGate.cjs");
+  let release;
+  const held = withExclusiveProcessEnv({}, () => new Promise((resolve) => { release = resolve; }));
+  await new Promise((resolve) => setImmediate(resolve));
+  const controller = new AbortController();
+  let creates = 0;
+  const turn = runCursorTurn({
+    prompt: "hello", agentOptions: {}, runtimeEnv: {}, emitter: makeEmitter(),
+    signal: controller.signal,
+    sdkModule: { Agent: { create: async () => { creates++; return { close() {} }; } } },
+  });
+  controller.abort();
+  try {
+    const outcome = await Promise.race([
+      turn.then(() => "stopped"),
+      new Promise((resolve) => setTimeout(() => resolve("waiting"), 100)),
+    ]);
+    assert.equal(outcome, "stopped");
+  } finally {
+    release();
+    await held;
+    await turn;
+  }
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(creates, 0);
+});
+
+
+test("cancelled Cursor resume cannot retry creation inside another chat environment", async () => {
+  const { withExclusiveProcessEnv } = require("./processEnvGate.cjs");
+  let rejectResume;
+  let creates = 0;
+  const controller = new AbortController();
+  const turn = runCursorTurn({
+    prompt: "hello", agentOptions: {}, runtimeEnv: { NETCATTY_CLI_CHAT_SESSION_ID: "a" },
+    resumeSessionId: "old", emitter: makeEmitter(), signal: controller.signal,
+    sdkModule: { Agent: {
+      resume: () => new Promise((_, reject) => { rejectResume = reject; }),
+      create: async () => { creates++; return { close() {} }; },
+    } },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  controller.abort();
+  await turn;
+  let bStarted = false;
+  const next = withExclusiveProcessEnv({ NETCATTY_CLI_CHAT_SESSION_ID: "b" }, () => { bStarted = true; });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(bStarted, false);
+  rejectResume(new Error("Agent old not found"));
+  await next;
+  assert.equal(creates, 0);
+  assert.equal(bStarted, true);
 });

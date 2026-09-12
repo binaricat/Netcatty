@@ -581,6 +581,12 @@ export function applyVaultHostUpdate(
     if (backspaceBehavior !== undefined && !['default', 'ctrl-h'].includes(backspaceBehavior)) {
       return { ok: false, error: 'serialConfig.backspaceBehavior must be default or ctrl-h.' };
     }
+    const byteOrientedBackspace = config.byteOrientedBackspace === undefined
+      ? updated.serialConfig?.byteOrientedBackspace
+      : parseBoolean(config.byteOrientedBackspace);
+    if (config.byteOrientedBackspace !== undefined && byteOrientedBackspace === undefined) {
+      return { ok: false, error: 'serialConfig.byteOrientedBackspace must be true or false.' };
+    }
     updated.serialConfig = {
       path,
       baudRate,
@@ -591,6 +597,7 @@ export function applyVaultHostUpdate(
       ...(localEcho !== undefined ? { localEcho } : {}),
       ...(lineMode !== undefined ? { lineMode } : {}),
       ...(backspaceBehavior !== undefined ? { backspaceBehavior: backspaceBehavior as 'default' | 'ctrl-h' } : {}),
+      ...(byteOrientedBackspace !== undefined ? { byteOrientedBackspace } : {}),
     };
   }
   if (updated.protocol === 'serial' && updated.serialConfig) {

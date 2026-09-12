@@ -7,7 +7,7 @@
 const VAULT_HOSTS_VS_NOTES_GUIDANCE =
   "Vault → Hosts vs Vault → Notes: When the user asks to add/create/import a host "
   + "(创建主机、添加主机、保存 SSH 连接凭据), use vault_hosts_create with dryRun=true first, "
-  + "or vault_hosts_import for known export formats (PuTTY, MobaXterm, CSV, SecureCRT, ssh_config) — "
+  + "or vault_hosts_import for known export formats (PuTTY, MobaXterm, CSV, SecureCRT, FinalShell, ssh_config) — "
   + "NOT vault_notes_create. For attached host files, use vault_hosts_import only when the attachment is a known export format; "
   + "for unknown attached host/server text, read the attachment content, extract hostname, username, password, port, group, tags, and label yourself, "
   + "then call vault_hosts_create with dryRun=true first. Extract hostname, username, password or local keyPath, port, group, tags, and label from the user's text; "

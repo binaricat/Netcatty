@@ -4,6 +4,7 @@ import { createGoogle } from '@ai-sdk/google';
 import type { ProviderConfig, ProviderStyle } from '../types';
 import { resolveOpenAIApi, resolveProviderStyle } from '../types';
 import { normalizeAnthropicSdkBaseURL } from '../anthropicCompatBaseUrl';
+import { buildSdkRequestHeaders } from '../providerRequestHeaders';
 import { normalizeOllamaSdkBaseURL } from '../ollamaCompatBaseUrl';
 
 export { normalizeOllamaSdkBaseURL };
@@ -19,6 +20,8 @@ import {
 export interface ProviderRequestContext {
   getOpenAIChatAssistantFields?: () => Array<OpenAIChatAssistantFields | undefined>;
   streamIdleTimeoutMs?: number;
+  /** Stable per-conversation id; used e.g. for OpenCode's x-opencode-session header. */
+  chatSessionId?: string;
 }
 
 /**
@@ -669,6 +672,7 @@ export function createModelFromConfig(
   const modelId = config.defaultModel || '';
   const style = resolveProviderStyle(config);
   const { baseURL, apiKey } = resolveProviderEndpoint(config, style, safeApiKey);
+  const sdkHeaders = buildSdkRequestHeaders(config, requestContext?.chatSessionId);
 
   switch (style) {
     case 'openai': {
@@ -676,6 +680,7 @@ export function createModelFromConfig(
         apiKey,
         baseURL,
         fetch: customFetch,
+        headers: sdkHeaders,
       });
       // Chat Completions stays the default so OpenAI-compatible proxies keep
       // working. Responses is opt-in for relays that cache better on /v1/responses.
@@ -689,6 +694,7 @@ export function createModelFromConfig(
         apiKey,
         baseURL,
         fetch: customFetch,
+        headers: sdkHeaders,
       })(modelId);
 
     case 'google':
@@ -696,6 +702,7 @@ export function createModelFromConfig(
         apiKey,
         baseURL,
         fetch: customFetch,
+        headers: sdkHeaders,
       })(modelId);
 
     default: {

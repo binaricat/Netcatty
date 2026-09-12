@@ -76,7 +76,7 @@ export const ruCoreMessages: Messages = {
   'field.selectHosts': 'Выбрать хосты',
   'placeholder.workspaceName': 'Имя рабочего пространства',
   'placeholder.sessionName': 'Имя сессии',
-  'placeholder.searchHosts': 'Поиск хостов...',
+  'placeholder.searchHosts': 'Поиск хостов или тегов...',
   'toast.settingsUnavailable': 'Окно настроек недоступно на этой платформе.',
   'credentials.protectionUnavailable.title': 'Защита учётных данных недоступна',
   'credentials.protectionUnavailable.message': 'Сохранённые пароли и ключи не могут быть автоматически расшифрованы на этом устройстве. Перед подключением введите учётные данные заново.',

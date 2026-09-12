@@ -67,7 +67,7 @@ const telnetProtocol = require("./telnetProtocol.cjs");
 const { createPtyOutputBuffer } = require("./ptyOutputBuffer.cjs");
 const { enableTcpNoDelay } = require("./tcpNoDelay.cjs");
 const { releaseConnectionRef } = require("./sshConnectionPool.cjs");
-const { normalizeTerminalEncoding, encodeTerminalInput } = require("./terminalEncoding.cjs");
+const { normalizeTerminalEncoding, encodeTerminalInput, expandSerialBackspace } = require("./terminalEncoding.cjs");
 const { isTerminalReportSequence } = require("./terminalReportSequence.cjs");
 const { receiveYmodemFiles, sendYmodemCancel, sendYmodemFile } = require("./ymodemTransfer.cjs");
 const {
@@ -1560,7 +1560,10 @@ function writeToSessionNow(payload, data, logRewrite = payload.logRewrite) {
       }
       session.socket.write(wireData);
     } else if (session.serialPort) {
-      session.serialPort.write(outgoing);
+      session.serialPort.write(encodeTerminalInput(
+        expandSerialBackspace(inputData, payload.serialEraseChar, session.encoding),
+        session.encoding,
+      ));
     }
   } catch (err) {
     logTerminalInterruptDebug("write-session-error", {

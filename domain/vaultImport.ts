@@ -17,6 +17,7 @@ import { parseQuickConnectInput } from "./quickConnect";
 import { findExactHeaderIndex, findHeaderIndex, parseCsv } from "./vaultImport/csvUtils";
 import { decodeCsvKeyPath, decodeCsvPassphrase } from "./vaultImport/csvCredentialFields";
 import { attachMobaXtermPasswords } from "./vaultImport/mobaXtermPasswords";
+import { decodeFinalShellPassword } from "./finalShellPassword";
 export {
   exportHostsToCsvWithStats,
   getVaultCsvTemplate,
@@ -103,6 +104,7 @@ export type VaultImportFormat =
   | "mobaxterm"
   | "csv"
   | "securecrt"
+  | "finalshell"
   | "ssh_config";
 
 export const VAULT_IMPORT_FORMATS: VaultImportFormat[] = [
@@ -110,6 +112,7 @@ export const VAULT_IMPORT_FORMATS: VaultImportFormat[] = [
   "putty",
   "mobaxterm",
   "securecrt",
+  "finalshell",
   "ssh_config",
 ];
 
@@ -986,6 +989,70 @@ const importFromSshConfig = (text: string): VaultImportResult => {
   };
 };
 
+const importFromFinalShell = (text: string): VaultImportResult => {
+  let connection: Record<string, unknown>;
+  try {
+    const parsed = JSON.parse(text.trim()) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("FinalShell connection must be a JSON object.");
+    }
+    connection = parsed as Record<string, unknown>;
+  } catch (error) {
+    throw new Error(error instanceof SyntaxError ? "Invalid FinalShell JSON." : String(error));
+  }
+
+  const issues: VaultImportIssue[] = [];
+  const connectionType = Number(connection.conection_type);
+  if (connectionType !== 100) {
+    return {
+      hosts: [],
+      groups: [],
+      issues: [{ level: "warning", message: "FinalShell connection: unsupported connection type." }],
+      stats: { parsed: 1, imported: 0, skipped: 1, duplicates: 0 },
+    };
+  }
+
+  const hostname = typeof connection.host === "string" ? connection.host.trim() : "";
+  if (!hostname) {
+    return {
+      hosts: [],
+      groups: [],
+      issues: [{ level: "warning", message: "FinalShell connection: missing host." }],
+      stats: { parsed: 1, imported: 0, skipped: 1, duplicates: 0 },
+    };
+  }
+
+  const encryptedPassword = typeof connection.password === "string"
+    ? connection.password.trim()
+    : "";
+  const password = encryptedPassword ? decodeFinalShellPassword(encryptedPassword) : undefined;
+  if (encryptedPassword && password === undefined) {
+    issues.push({
+      level: "warning",
+      message: "FinalShell password could not be decrypted and was skipped.",
+    });
+  }
+
+  const port = typeof connection.port === "number" || typeof connection.port === "string"
+    ? parsePort(String(connection.port))
+    : undefined;
+  const host = createHost({
+    label: typeof connection.name === "string" ? connection.name : undefined,
+    hostname,
+    port,
+    username: typeof connection.user_name === "string" ? connection.user_name : undefined,
+    password,
+    notes: typeof connection.description === "string" ? connection.description : undefined,
+    protocol: "ssh",
+  });
+  return {
+    hosts: [host],
+    groups: [],
+    issues,
+    stats: { parsed: 1, imported: 1, skipped: 0, duplicates: 0 },
+  };
+};
+
 const importFromSecureCrt = (text: string, fileName?: string): VaultImportResult => {
   const issues: VaultImportIssue[] = [];
   const lines = text.split(/\r?\n/);
@@ -1320,6 +1387,8 @@ export const importVaultHostsFromText = (
       return importFromSshConfig(input);
     case "securecrt":
       return importFromSecureCrt(input, options?.fileName);
+    case "finalshell":
+      return importFromFinalShell(input);
     case "mobaxterm":
       return importFromMobaXterm(input, options);
     default: {
@@ -1361,9 +1430,26 @@ export function detectVaultImportFormat(text: string): VaultImportFormat | null 
     return "securecrt";
   }
 
+  try {
+    const candidate = JSON.parse(input) as unknown;
+    if (
+      candidate
+      && typeof candidate === "object"
+      && !Array.isArray(candidate)
+      && Object.prototype.hasOwnProperty.call(candidate, "conection_type")
+      && typeof (candidate as Record<string, unknown>).host === "string"
+    ) {
+      return "finalshell";
+    }
+  } catch {
+    // Not JSON; continue with text formats.
+  }
+
   const firstLine = input.split(/\r?\n/, 1)[0] ?? "";
   if (
-    /hostname|host(name)?|server/i.test(firstLine)
+    !input.startsWith("{")
+    && !input.startsWith("[")
+    && /hostname|host(name)?|server/i.test(firstLine)
     && (firstLine.includes(",") || firstLine.includes("\t"))
   ) {
     return "csv";
