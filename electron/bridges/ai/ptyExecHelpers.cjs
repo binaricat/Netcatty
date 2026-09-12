@@ -265,7 +265,7 @@ function buildPosixWrapperBody(command, marker, startFormat) {
   // Emit a short standalone input marker before the shell reads any PS2
   // continuation. A leading newline separates it from concurrent PTY echo.
   return `${marker}=0; printf '\\n%s\\n' '${marker}_I'\n` + [
-    `: '${marker}'; ${cmdAssign}`,
+    ` : '${marker}'; ${cmdAssign}`,
     `{ printf '${startFormat}' '${marker}_S'; trap ':' INT; ( ${noPager}eval "$${marker}_cmd" ); __NCMCP_rc=$?; trap - INT`,
     `printf '%s\\n' '${marker}_E:'"$__NCMCP_rc"`,
     historyCleanup,
