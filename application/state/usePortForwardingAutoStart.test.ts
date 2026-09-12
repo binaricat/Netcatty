@@ -180,6 +180,7 @@ test("reconnect eligibility follows the current auto-start setting", () => {
 
 test("reconnect is requested for auto-start and auto-reconnect rules only", () => {
   assert.equal(isPortForwardingReconnectRequested([rule({ autoStart: true })], "rule-1"), true);
+  assert.equal(isPortForwardingReconnectRequested([rule({ autoStart: true, autoReconnect: false })], "rule-1"), false);
   assert.equal(isPortForwardingReconnectRequested([rule({ autoStart: false, autoReconnect: true })], "rule-1"), true);
   assert.equal(isPortForwardingReconnectRequested([rule({ autoStart: false, autoReconnect: false })], "rule-1"), false);
   assert.equal(isPortForwardingReconnectRequested([rule({ autoStart: false })], "rule-1"), false);

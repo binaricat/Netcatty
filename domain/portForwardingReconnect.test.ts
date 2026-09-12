@@ -9,7 +9,10 @@ describe("isPortForwardingAutoReconnectEnabled", () => {
 
   it("returns true for auto-start rules (pre-existing behavior)", () => {
     assert.equal(isPortForwardingAutoReconnectEnabled({ autoStart: true }), true);
-    assert.equal(isPortForwardingAutoReconnectEnabled({ autoStart: true, autoReconnect: false }), true);
+  });
+
+  it("honors explicit disable even for auto-start rules", () => {
+    assert.equal(isPortForwardingAutoReconnectEnabled({ autoStart: true, autoReconnect: false }), false);
   });
 
   it("returns false when neither flag opts in", () => {

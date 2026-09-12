@@ -4,6 +4,7 @@
  */
 import { ChevronDown,Copy,Trash2 } from 'lucide-react';
 import React from 'react';
+import { isPortForwardingAutoReconnectEnabled } from '../../domain/portForwardingReconnect';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import { Host,PortForwardingRule } from '../../domain/models';
 import { DistroAvatar } from '../DistroAvatar';
@@ -190,7 +191,7 @@ export const EditPanel: React.FC<EditPanelProps> = ({
                         <p className="text-[10px] text-muted-foreground">{t('pf.form.autoReconnectDesc')}</p>
                     </div>
                     <Switch
-                        checked={draft.autoReconnect ?? false}
+                        checked={isPortForwardingAutoReconnectEnabled(draft)}
                         onCheckedChange={checked => onDraftChange({ autoReconnect: checked })}
                     />
                 </div>
