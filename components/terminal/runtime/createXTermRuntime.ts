@@ -240,7 +240,7 @@ export type XTermRuntime = {
   serializeAddon: SerializeAddon;
   searchAddon: SearchAddon;
   dispose: () => void;
-  /** Track a single-line serial snippet already sent and left for editing. */
+  /** Track the pending final line of a serial snippet left for editing. */
   recordSerialSnippetInput: (data: string) => void;
   /** Current working directory detected via OSC 7 */
   currentCwd: string | undefined;
@@ -1165,11 +1165,24 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     }
   };
 
+  const recordSerialTextInput = (data: string) => {
+    const text = data.startsWith("\x1b[200~") && data.endsWith("\x1b[201~")
+      ? data.slice(6, -6)
+      : data;
+    const lastLineBreak = Math.max(text.lastIndexOf("\r"), text.lastIndexOf("\n"));
+    if (lastLineBreak >= 0) {
+      ctx.commandBufferRef.current = "";
+      lastInputWasPrintable = true;
+    }
+    const pendingText = text.slice(lastLineBreak + 1);
+    restoreSerialTailForEmptyInput(pendingText);
+    ctx.commandBufferRef.current += pendingText;
+    return text;
+  };
+
   const recordSerialSnippetInput = (data: string) => {
-    if (!ctx.commandBufferRef) return;
-    restoreSerialTailForEmptyInput(data);
-    ctx.commandBufferRef.current += data;
-    if (ctx.serialLocalEcho) writeLocalTerminalData(data);
+    const text = recordSerialTextInput(data);
+    if (ctx.serialLocalEcho) writeLocalTerminalData(formatSerialLocalEcho(text));
   };
 
   const handleTerminalInputData = (
@@ -1437,6 +1450,12 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
           ctx.commandBufferRef.current = "";
           ctx.scriptRecorderRef?.current?.recordClearLine();
           lastInputWasPrintable = true;
+        } else if (ctx.host.protocol === "serial" && (
+          isPrintableInput(logicalData) || /[\r\n]/.test(logicalData) ||
+          (logicalData.startsWith("\x1b[200~") && logicalData.endsWith("\x1b[201~"))
+        )) {
+          recordSerialTextInput(logicalData);
+          ctx.scriptRecorderRef?.current?.recordInput(logicalData);
         } else if (logicalData.length === 1 && logicalData.charCodeAt(0) >= 32) {
           ctx.commandBufferRef.current += logicalData;
           ctx.scriptRecorderRef?.current?.recordInput(logicalData);

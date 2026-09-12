@@ -3326,8 +3326,8 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       sensitive,
       ...(lineDelayMs ? { lineDelayMs } : {}),
     });
-    // Single-line snippets left for editing share the serial typed-input buffer.
-    if (host.protocol === 'serial' && noAutoRun && !isMultiLine && !serialConfig?.lineMode) {
+    // Snippets left for editing share the serial typed-input buffer.
+    if (host.protocol === 'serial' && noAutoRun && !serialConfig?.lineMode) {
       xtermRuntimeRef.current?.recordSerialSnippetInput(data);
     }
     scrollToBottomAfterProgrammaticInput(data);

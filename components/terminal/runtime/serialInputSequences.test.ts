@@ -21,7 +21,7 @@ const start=source.indexOf('let lastInputWasPrintable =');
 const end=source.indexOf('  let kittyCompositionPending',start);
 const code=ts.transpileModule(source.slice(start,end)+ '\n globalThis.api = {handleTerminalInputData,recordSerialSnippetInput,getConfidence:()=>lastInputWasPrintable};',{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText;
 for (const encoding of ['utf-8','gb18030']) {
-for (const insert of ['typed','raw','bracketed','snippet','startup']) {
+for (const insert of ['typed','raw','bracketed','snippet','startup','multi-snippet','multi-startup','bracketed-snippet','multi-raw','multi-bracketed']) {
 for (const prefix of ['fresh','empty-arrow','submit','paste-submit','interrupt','clear']) {
  let wire=Buffer.alloc(0);
  const session={encoding, serialPort:{write(data: string | Buffer){for(const byte of Buffer.from(data)) { if(byte===127||byte===8) wire=wire.subarray(0,Math.max(0,wire.length-1)); else wire=Buffer.concat([wire,Buffer.from([byte])]);}}}};
@@ -37,11 +37,15 @@ for (const prefix of ['fresh','empty-arrow','submit','paste-submit','interrupt',
  assert.equal(ctx.commandBufferRef.current,''); wire=Buffer.alloc(0);
  if(insert==='typed') {input('a');input('b');input('你');input('好');}
  if(insert==='raw') input('ab你好');
+ if(insert==='multi-raw') input('旧\nab你好');
+ if(insert==='multi-bracketed') input('\x1b[200~旧\nab你好\x1b[201~');
  if(insert==='bracketed') input('\x1b[200~ab你好\x1b[201~');
  if(insert==='snippet') {ctx.terminalBackend.writeToSession('s','ab你好',{});snippet('ab你好');}
- if(insert==='startup') await new Promise<void>(resolve => {Object.assign({}, ...modules).scheduleStartupCommand({...ctx, noAutoRun:true, startupCommand:'ab你好', hasRunStartupCommandRef:{current:false}, terminalSettings:{startupCommandDelayMs:0}, recordSerialSnippetInput:snippet}, env.term, 's', resolve);});
+ if(insert==='multi-snippet'||insert==='bracketed-snippet') {const text=insert==='multi-snippet'?'旧\nab你好':'\x1b[200~旧\nab你好\x1b[201~';ctx.terminalBackend.writeToSession('s',text,{});snippet(text);}
+ if(insert==='startup'||insert==='multi-startup') await new Promise<void>(resolve => {Object.assign({}, ...modules).scheduleStartupCommand({...ctx, noAutoRun:true, startupCommand:insert==='multi-startup'?'旧\nab你好':'ab你好', hasRunStartupCommandRef:{current:false}, terminalSettings:{startupCommandDelayMs:0}, recordSerialSnippetInput:snippet}, env.term, 's', resolve);});
  // Device paste framing is a transport protocol, remove it from our byte-deleting model.
- if(insert==='bracketed') wire=wire.subarray(6,wire.length-6);
+ if(insert==='bracketed'||insert==='bracketed-snippet'||insert==='multi-bracketed') wire=wire.subarray(6,wire.length-6);
+ if(insert==='multi-snippet'||insert==='multi-startup'||insert==='bracketed-snippet'||insert==='multi-raw'||insert==='multi-bracketed') wire=wire.subarray(wire.lastIndexOf(10)+1);
  input('\x7f');input('\x7f');
  assert.equal(ctx.commandBufferRef.current,'ab',`${encoding}/${insert}/${prefix} buffer`);
  assert.equal(wire.toString(),'ab',`${encoding}/${insert}/${prefix} device`);
