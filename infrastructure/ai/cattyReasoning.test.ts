@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import type { SharedV4ProviderOptions } from '@ai-sdk/provider';
 
 import {
   applyResponsesApiStatelessStoreOption,
@@ -243,7 +244,7 @@ test('buildCattyReasoningProviderOptions maps Anthropic thinking budgets', () =>
 
 test('buildCattyReasoningProviderOptions respects an explicit style override', () => {
   assert.deepEqual(
-    buildCattyReasoningProviderOptions({ providerId: 'custom', style: 'openai' }, 'low'),
+    buildCattyReasoningProviderOptions({ providerId: 'custom' as const, style: 'openai' }, 'low'),
     { openai: { reasoningEffort: 'low' } },
   );
 });
@@ -358,7 +359,7 @@ test('applyResponsesApiStatelessStoreOption always requests encrypted reasoning 
 });
 
 test('explicit provider effort exposes controls for a custom OpenAI model', () => {
-  const provider = { providerId: 'custom', style: 'openai' as const, advancedParams: { reasoningEffort: 'low' } };
+  const provider = { providerId: 'custom' as const, style: 'openai' as const, advancedParams: { reasoningEffort: 'low' } };
   assert.deepEqual(cattyReasoningLevelsForSelection(provider, 'relay-model'), ['low', 'medium', 'high']);
   assert.deepEqual(cattyReasoningLevelsForSelection({ ...provider, advancedParams: {} }, 'relay-model'), []);
 });
@@ -378,11 +379,11 @@ test('custom model requests send explicit effort for Chat and Responses and omit
         body = JSON.parse(String(init?.body));
         throw new Error('captured request');
       } });
-      const provider = { providerId: 'custom', style: 'openai' as const, openaiApi: api, advancedParams: { reasoningEffort: fallback } };
+      const provider = { providerId: 'custom' as const, style: 'openai' as const, openaiApi: api, advancedParams: { reasoningEffort: fallback } };
       const options = buildCattyReasoningProviderOptions(provider, resolveEffectiveCattyReasoningEffort(chip, fallback), 'relay-model');
-      await assert.rejects(openai[api]('relay-model').doGenerate({
+      await assert.rejects(async () => await openai[api]('relay-model').doGenerate({
         prompt: [{ role: 'user', content: [{ type: 'text', text: 'hello' }] }],
-        providerOptions: options,
+        providerOptions: options as SharedV4ProviderOptions,
         temperature: 0.4,
         topP: 0.8,
       }), /captured request/);
@@ -400,7 +401,7 @@ test('custom model requests send explicit effort for Chat and Responses and omit
 
 test('provider defaults do not enable reasoning on known unsupported OpenAI models', () => {
   for (const openaiApi of ['chat', 'responses'] as const) {
-    const provider = { providerId: 'custom', style: 'openai' as const, openaiApi, advancedParams: { reasoningEffort: 'high' } };
+    const provider = { providerId: 'custom' as const, style: 'openai' as const, openaiApi, advancedParams: { reasoningEffort: 'high' } };
     for (const model of ['gpt-4o', 'gpt-4o-mini', 'gpt-4.1', 'gpt-4-turbo', 'gpt-3.5-turbo', 'openai/gpt-4o', 'gpt-5-chat-latest']) {
       assert.equal(buildCattyReasoningProviderOptions(provider, 'high', model), undefined, model);
       assert.deepEqual(cattyReasoningLevelsForSelection(provider, model), [], model);
