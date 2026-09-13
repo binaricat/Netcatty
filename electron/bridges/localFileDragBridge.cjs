@@ -17,8 +17,10 @@ function validateDragPayload(payload, pathApi = path) {
         || /^[\\/]{2}[?.][\\/]/.test(value))) {
       throw new Error("Drag paths must identify a drive or a network share");
     }
-    // Preserve spelling and symlinks; do not resolve to a different file.
-    return pathApi.normalize(value);
+    // Preserve the exact path for both stat and startDrag. Lexically collapsing
+    // link/.. can select a different file because the filesystem follows the
+    // symlink before traversing its parent. Deduplicate only identical strings.
+    return value;
   });
   return [...new Set(paths)];
 }

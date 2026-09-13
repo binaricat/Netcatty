@@ -12,6 +12,9 @@ copy is involved in the new drag path.
 - Metadata validation accepts existing files, directories, and valid symlinks,
   preserving the link path. It rejects relative paths, Windows device paths,
   broken links and special files. It does not read content or traverse folders.
+- Absolute path spelling is passed unchanged to metadata validation and Electron.
+  Dot segments are not normalized: `link/../file` can identify a different file
+  from the lexically simplified path. Only identical path strings are deduplicated.
 - Input tracking in the main process prevents asynchronous metadata validation
   from starting a drag after mouse release, Escape, or a replacement gesture.
 - Chromium can emit a synthetic `mouseup` when HTML `dragstart` is canceled.
@@ -102,3 +105,17 @@ Run on macOS, Windows 11, and Linux using a desktop file manager and the full ap
 - Windows 11 and Linux desktop runtime checks were completed successfully by
   the contributor, as reported after implementation. These are manual validation
   results supplied by the contributor; the agent did not run those desktop checks.
+
+## PR review follow-up: symlink-aware paths
+
+The review identified that lexical normalization could replace the selected
+file when a local path contains a symlink followed by `..`. The regression was
+reproduced with a real filesystem symlink and two distinct files, then corrected
+by preserving the original absolute path for both `stat` and `startDrag`.
+The tests also reject a missing selected file even when its normalized path
+names an existing file, preserve POSIX/Windows/UNC path spelling, and check
+renderer matching for a returning path with dot segments.
+
+The affected/regression suite passed 188 tests after this correction. These are
+automated checks; the new symlink-parent case has not been retested through a
+physical desktop drag.

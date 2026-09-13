@@ -57,6 +57,16 @@ test('local multi-selection retains individual tree paths and never exports plai
   assert.equal(getLocalFileDragSources(payload), null);
 });
 
+test('native paths retain symlink-parent segments and match the returning internal drop', (t) => {
+  const h = setup(t);
+  const sources = [{ ...h.sources[0], sourcePath: '/local/link/.././folder' }];
+  h.start(true, sources);
+  assert.deepEqual(h.calls[0].paths, ['/local/link/.././folder/certificate.txt']);
+  const payload = h.transfer(h.calls[0].paths);
+  assert.deepEqual(takeLocalFileDragSources(payload), sources.map(source => ({ ...source, side: 'left' })));
+  assert.equal(takeLocalFileDragSources(payload), null);
+});
+
 test('remote origin preserves HTML payload and callbacks, including absent isLocal', (t) => {
   const h = setup(t);
   h.start(false);
