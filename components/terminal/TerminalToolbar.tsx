@@ -212,7 +212,7 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
   // (test daemons, forwarded endpoints) still have a real backend
   // decoder we can drive.
   const encodingSwitchSupported = !isLocalTerminal && !isMoshSession && !isEtSession && !isPluginConnection;
-  const hidesSftp = isLocalTerminal || isSerialTerminal || isPluginConnection;
+  const hidesSftp = isSerialTerminal || isPluginConnection;
   const historySupported =
     !!onOpenHistory && !isLocalTerminal && !isSerialTerminal && !isPluginConnection && host?.protocol !== 'telnet';
   const unavailableYmodemSendLabel = `${t('terminal.toolbar.sendYmodem')} - ${t('terminal.toolbar.availableAfterConnect')}`;
