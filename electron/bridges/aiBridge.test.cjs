@@ -1836,3 +1836,32 @@ test("non-streaming AI requests send Content-Length instead of chunked encoding"
     ctx.restore();
   }
 });
+
+test('custom provider headers are decrypted before HTTP and override auth case-insensitively', async () => {
+  let context;
+  const { bridge, restore } = loadBridgeWithMocks({ registerSdkStreamHandlers: (ctx) => { context = ctx; } });
+  const ipcMain = createIpcMainStub();
+  bridge.init({ sessions: new Map(), sftpClients: new Map(), electronModule: {
+    app: { getPath: () => process.cwd() }, session: {},
+    safeStorage: { isEncryptionAvailable: () => true, decryptString: () => 'Bearer tenant-secret' },
+  } });
+  bridge.registerHandlers(ipcMain);
+  const sealed = 'enc:v1:' + Buffer.from('ciphertext').toString('base64');
+  context.providerConfigs = [{ id: 'header-test', apiKey: 'key', customHeaders: { authorization: sealed, 'X-Tenant': 'tenant' } }];
+  const server = http.createServer((req, res) => { res.end(JSON.stringify(req.headers)); });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const request = context.injectApiKeyIntoRequest(`http://127.0.0.1:${server.address().port}`, { Authorization: 'Bearer __IPC_SECURED__', 'X-Other': 'keep' }, 'header-test');
+    assert.equal(request.headers.Authorization, undefined);
+    const response = await fetch(request.url, { headers: request.headers });
+    const headers = await response.json();
+    assert.equal(headers.authorization, 'Bearer tenant-secret');
+    assert.equal(headers['x-tenant'], 'tenant');
+    assert.equal(headers['x-other'], 'keep');
+    context.electronModule.safeStorage.isEncryptionAvailable = () => false;
+    assert.throws(() => context.injectApiKeyIntoRequest(request.url, {}, 'header-test'), /Unable to decrypt/);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    restore();
+  }
+});

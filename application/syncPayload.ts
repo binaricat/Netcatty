@@ -1,4 +1,5 @@
 import { normalizeTabBarPosition } from '../domain/tabBarPosition';
+import { decryptProviderHeaders, encryptProviderHeaders } from '../infrastructure/ai/providerHeaderCredentials';
 /**
  * Sync Payload Builders - Single source of truth for constructing and applying
  * the encrypted cloud-sync payload.
@@ -402,13 +403,13 @@ const mergeAiProvidersPreservingLocalApiKeys = (
     if (typeof provider?.id === 'string') localById.set(provider.id, provider);
   }
   return incoming.map((provider) => {
-    if (provider.apiKey != null) return provider;
     const id = typeof provider.id === 'string' ? provider.id : undefined;
     const localProvider = id != null ? localById.get(id) : undefined;
-    if (localProvider && typeof localProvider.apiKey === 'string') {
-      return { ...provider, apiKey: localProvider.apiKey };
-    }
-    return provider;
+    return {
+      ...provider,
+      ...(provider.apiKey == null && typeof localProvider?.apiKey === 'string' ? { apiKey: localProvider.apiKey } : {}),
+      ...(provider.customHeaders == null && localProvider?.customHeaders != null ? { customHeaders: localProvider.customHeaders } : {}),
+    };
   });
 };
 
@@ -564,7 +565,11 @@ export function collectSyncableSettings(): SyncPayload['settings'] {
 
   const ai: NonNullable<SyncPayload['settings']>['ai'] = {};
   const providers = readArraySetting(STORAGE_KEY_AI_PROVIDERS);
-  if (providers) ai.providers = providers.map(stripDeviceBoundApiKey);
+  if (providers) ai.providers = providers.map((provider) => {
+    const next = { ...stripDeviceBoundApiKey(provider) };
+    delete next.customHeaders;
+    return next;
+  });
   const activeProviderId = localStorageAdapter.readString(STORAGE_KEY_AI_ACTIVE_PROVIDER);
   if (activeProviderId != null) ai.activeProviderId = activeProviderId;
   const activeModelId = localStorageAdapter.readString(STORAGE_KEY_AI_ACTIVE_MODEL);
@@ -626,7 +631,12 @@ export async function collectCloudSyncableSettings(): Promise<SyncPayload['setti
   };
 
   if (providers) {
-    ai.providers = await Promise.all(providers.map(withPortableApiKey));
+    ai.providers = await Promise.all(providers.map(async (provider) => {
+      const next = await withPortableApiKey(provider);
+      return isRecord(provider.customHeaders)
+        ? { ...next, customHeaders: await decryptProviderHeaders(provider.customHeaders as Record<string, string>) }
+        : next;
+    }));
   }
   if (webSearchConfig) {
     ai.webSearchConfig = await withPortableApiKey(webSearchConfig);
@@ -663,7 +673,10 @@ function collectLocalBackupSettings(): SyncPayload['settings'] {
  * Apply synced settings to localStorage. Merges terminal settings
  * to preserve platform-specific fields.
  */
-async function applySyncableSettings(settings: NonNullable<SyncPayload['settings']>): Promise<void> {
+async function applySyncableSettings(
+  settings: NonNullable<SyncPayload['settings']>,
+  preparedProviders: Record<string, unknown>[] | undefined,
+): Promise<void> {
   // Theme & Appearance
   if (settings.theme != null) localStorageAdapter.writeString(STORAGE_KEY_THEME, settings.theme);
   if (settings.lightUiThemeId != null) localStorageAdapter.writeString(STORAGE_KEY_UI_THEME_LIGHT, settings.lightUiThemeId);
@@ -824,11 +837,10 @@ async function applySyncableSettings(settings: NonNullable<SyncPayload['settings
 
   const ai = settings.ai;
   if (ai) {
-    if (ai.providers != null) {
-      const providers = await Promise.all(ai.providers.map(withLocalEncryptedApiKey));
+    if (preparedProviders != null) {
       localStorageAdapter.write(
         STORAGE_KEY_AI_PROVIDERS,
-        mergeAiProvidersPreservingLocalApiKeys(providers),
+        mergeAiProvidersPreservingLocalApiKeys(preparedProviders),
       );
     }
     if (ai.activeProviderId != null) localStorageAdapter.writeString(STORAGE_KEY_AI_ACTIVE_PROVIDER, ai.activeProviderId);
@@ -1145,7 +1157,7 @@ export async function buildLocalVaultPayloadAsync(
  * This ensures both vault data and port-forwarding rules are imported
  * consistently across windows.
  */
-function applyPayload(
+async function applyPayload(
   payload: SyncPayload,
   importers: SyncPayloadImporters,
   options: {
@@ -1158,6 +1170,15 @@ function applyPayload(
   // so a previously poisoned cloud/backup snapshot can still restore host
   // shells and let the user re-enter secrets (#2702).
   const sanitizedPayload = stripSyncPayloadEncryptedCredentials(payload);
+  // Prepare credentials before any vault or settings mutation. Encryption can
+  // fail when local credential storage is unavailable; reuse the result below.
+  const providers = sanitizedPayload.settings?.ai?.providers;
+  const preparedProviders = providers == null ? undefined : await Promise.all(providers.map(async (provider) => {
+    const next = await withLocalEncryptedApiKey(provider);
+    return isRecord(provider.customHeaders)
+      ? { ...next, customHeaders: await encryptProviderHeaders(await decryptProviderHeaders(provider.customHeaders as Record<string, string>)) }
+      : next;
+  }));
   const legacyLineTimestampsEnabled = sanitizedPayload.settings?.terminalSettings?.showLineTimestamps === true;
   let hosts = migrateHostsFromLegacyLineTimestamps(sanitizedPayload.hosts, legacyLineTimestampsEnabled);
   if (!options.includeLocalOnlyData) {
@@ -1200,7 +1221,7 @@ function applyPayload(
 
     // Apply synced settings
     if (sanitizedPayload.settings) {
-      await applySyncableSettings(sanitizedPayload.settings);
+      await applySyncableSettings(sanitizedPayload.settings, preparedProviders);
       // Rehydrate in-memory bookmark snapshot after localStorage was updated
       if (sanitizedPayload.settings.sftpGlobalBookmarks != null) rehydrateGlobalSftpBookmarks();
       importers.onSettingsApplied?.();

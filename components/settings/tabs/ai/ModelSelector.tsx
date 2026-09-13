@@ -95,12 +95,13 @@ export const ModelSelector: React.FC<{
   presetModels?: readonly string[];
   placeholder?: string;
   apiKey?: string;
+  customHeaders?: Record<string, string>;
   providerId?: AIProviderId;
   /** Optional protocol-family override; falls back to `providerId` via {@link resolveProviderStyle}. */
   style?: ProviderStyle;
   skipTLSVerify?: boolean;
   onModelMetadata?: (model: FetchedModel) => void;
-}> = ({ value, onChange, baseURL, modelsEndpoint, presetModels, placeholder, apiKey, providerId, style, skipTLSVerify, onModelMetadata }) => {
+}> = ({ value, onChange, baseURL, modelsEndpoint, presetModels, placeholder, apiKey, customHeaders, providerId, style, skipTLSVerify, onModelMetadata }) => {
   const { t } = useI18n();
   const [models, setModels] = useState<FetchedModel[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -124,6 +125,7 @@ export const ModelSelector: React.FC<{
     baseURL,
     effectiveModelsEndpoint,
     apiKey,
+    customHeaders,
     resolvedStyle,
     skipTLSVerify,
   });
@@ -152,7 +154,7 @@ export const ModelSelector: React.FC<{
         await bridge.aiAllowlistAddHost(baseURL);
       }
       const url = buildProviderProbeUrl(baseURL, effectiveModelsEndpoint);
-      const headers = buildModelDiscoveryHeaders(resolvedStyle, apiKey);
+      const headers = buildModelDiscoveryHeaders(resolvedStyle, apiKey, customHeaders);
       const result = await bridge.aiFetch(url, "GET", headers, undefined, undefined, undefined, undefined, skipTLSVerify);
       if (!result.ok) {
         if (discoveryKeyRef.current !== requestKey) return;
@@ -171,7 +173,7 @@ export const ModelSelector: React.FC<{
     } finally {
       if (discoveryKeyRef.current === requestKey) setIsLoading(false);
     }
-  }, [baseURL, effectiveModelsEndpoint, apiKey, resolvedStyle, skipTLSVerify, discoveryKey]);
+  }, [baseURL, effectiveModelsEndpoint, apiKey, customHeaders, resolvedStyle, skipTLSVerify, discoveryKey]);
 
   // Auto-fetch when dropdown first opens
   useEffect(() => {
