@@ -57,3 +57,26 @@ test("readActiveTerminalBufferTextRange reads the active alternate buffer withou
     "vim title\nfile body\n:",
   );
 });
+
+import { readTerminalScreenText } from "./terminalContextBuffer.ts";
+
+test("screen export follows the scrolled viewport and excludes hidden history", () => {
+  const buffer = { ...createBuffer(["old", "visible one", "  visible two", "newest"]),
+    viewportY: 1, length: 4, type: "normal" };
+  assert.equal(readTerminalScreenText({ cols: 80, rows: 2, buffer: { active: buffer } } as never),
+    "visible one\n  visible two");
+});
+
+test("screen export preserves blank and wrapped physical rows and clips hidden columns", () => {
+  const buffer = { ...createBuffer(["123456", "78", "", "end", ""]),
+    viewportY: 0, length: 5, type: "normal" };
+  assert.equal(readTerminalScreenText({ cols: 4, rows: 5, buffer: { active: buffer } } as never),
+    "1234\n78\n\nend\n");
+});
+
+test("screen export reads only the alternate screen while fullscreen apps are active", () => {
+  const buffer = { ...createBuffer(["vim", "text", ""]),
+    viewportY: 0, length: 3, type: "alternate" };
+  assert.equal(readTerminalScreenText({ cols: 80, rows: 3, buffer: { active: buffer } } as never),
+    "vim\ntext\n");
+});

@@ -1,6 +1,8 @@
 import type { Messages } from '../types';
 
 export const ruTerminalMessages: Messages = {
+  'terminal.menu.saveScreen': 'Сохранить текущий экран',
+  'terminal.saveScreen.failed': 'Не удалось сохранить экран терминала.',
   'terminal.sudoHint.pressEnter': 'Нажмите Enter, чтобы вставить сохранённый пароль',
   'terminal.passwordPicker.title': 'Сохранённые пароли',
   'terminal.passwordPicker.empty': 'Нет сохранённых паролей',

@@ -80,6 +80,8 @@ declare global {
 
     // Session Logs
     exportSessionLog?(payload: {
+      /** Already rendered screen text; preserve row boundaries without replaying controls. */
+      plainText?: boolean;
       terminalData: string;
       hostLabel: string;
       hostname: string;

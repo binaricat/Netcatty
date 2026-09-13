@@ -1,6 +1,8 @@
 import type { Messages } from '../types';
 
 export const zhTWTerminalMessages: Messages = {
+  'terminal.menu.saveScreen': '儲存目前畫面',
+  'terminal.saveScreen.failed': '儲存終端畫面失敗。',
   'terminal.sudoHint.pressEnter': '按 Enter 貼上已儲存的密碼',
   'terminal.passwordPicker.title': '已儲存的密碼',
   'terminal.passwordPicker.empty': '沒有已儲存的密碼',

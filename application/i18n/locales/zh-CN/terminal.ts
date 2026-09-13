@@ -1,6 +1,8 @@
 import type { Messages } from '../types';
 
 export const zhCNTerminalMessages: Messages = {
+  'terminal.menu.saveScreen': '保存当前屏幕',
+  'terminal.saveScreen.failed': '保存终端屏幕失败。',
   'terminal.sudoHint.pressEnter': '按 Enter 粘贴已保存的密码',
   'terminal.passwordPicker.title': '已保存的密码',
   'terminal.passwordPicker.empty': '没有已保存的密码',

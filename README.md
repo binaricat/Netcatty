@@ -127,6 +127,7 @@ If you regularly work with a fleet of servers, Netcatty is built for speed and f
 ### 🖥️ Terminal Workspaces
 - **Split panes** — horizontal and vertical splits for multi-tasking
 - **Session management** — run multiple connections side-by-side
+- **Save current screen** — right-click a terminal to save the visible final text, without replaying keystrokes or overwritten output; scroll first to save an earlier screen.
 - **Inline images** — render Kitty graphics, SIXEL and iTerm inline images from remote programs
 
 ### 📁 SFTP + Built-in Editor
