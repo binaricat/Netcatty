@@ -261,6 +261,8 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   sftpAutoOpenSidebar,
   terminalSidePanelAutoOpen = false,
   terminalSidePanelAutoOpenTab = DEFAULT_TERMINAL_SIDE_PANEL_AUTO_OPEN_TAB,
+  localShellSidePanelAutoOpen = false,
+  localShellSidePanelAutoOpenTab = 'scripts',
   sftpFollowTerminalCwd,
   setSftpFollowTerminalCwd,
   editorWordWrap,
@@ -440,6 +442,10 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   terminalSidePanelAutoOpenRef.current = terminalSidePanelAutoOpen;
   const terminalSidePanelAutoOpenTabRef = useRef(terminalSidePanelAutoOpenTab);
   terminalSidePanelAutoOpenTabRef.current = terminalSidePanelAutoOpenTab;
+  const localShellSidePanelAutoOpenRef = useRef(localShellSidePanelAutoOpen);
+  localShellSidePanelAutoOpenRef.current = localShellSidePanelAutoOpen;
+  const localShellSidePanelAutoOpenTabRef = useRef(localShellSidePanelAutoOpenTab);
+  localShellSidePanelAutoOpenTabRef.current = localShellSidePanelAutoOpenTab;
   const sftpFollowTerminalCwdRef = useRef(sftpFollowTerminalCwd);
   sftpFollowTerminalCwdRef.current = sftpFollowTerminalCwd;
 
@@ -451,15 +457,16 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     const session = sessionsRef.current.find(s => s.id === sessionId);
     if (!session) return;
     const proto = session.protocol;
-    const sftpAvailable = proto === 'ssh' || proto === 'mosh';
+    const isLocalShell = proto === 'local' || proto === undefined;
+    const sftpAvailable = proto === 'ssh' || proto === 'mosh' || isLocalShell;
     const tabId = session.workspaceId || sessionId;
 
     if (sidePanelOpenTabsRef.current.has(tabId)) return;
 
     const sessionAutoOpenTarget = session.autoOpenSidePanel === 'sftp' && sftpAvailable ? 'sftp' : null;
     const autoOpenTarget = sessionAutoOpenTarget ?? resolveTerminalSidePanelAutoOpen({
-      enabled: terminalSidePanelAutoOpenRef.current,
-      selectedTab: terminalSidePanelAutoOpenTabRef.current,
+      enabled: isLocalShell ? localShellSidePanelAutoOpenRef.current : terminalSidePanelAutoOpenRef.current,
+      selectedTab: isLocalShell ? localShellSidePanelAutoOpenTabRef.current : terminalSidePanelAutoOpenTabRef.current,
       sftpAvailable,
     });
     const targetPanel = autoOpenTarget ?? (sftpAutoOpenSidebarRef.current && sftpAvailable ? 'sftp' : null);

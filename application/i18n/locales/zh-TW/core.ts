@@ -121,6 +121,12 @@ export const zhTWCoreMessages: Messages = {
   'settings.terminal.sidePanel.pane.system': '系統',
   'settings.terminal.sidePanel.pane.notes': '筆記',
   'settings.terminal.sidePanel.pane.ai': 'AI',
+  'settings.terminal.section.localShellSidePanel': '本機 Shell 側邊欄',
+  'settings.terminal.localShellSidePanel.autoOpen': '開啟本機 Shell 時展開側邊欄',
+  'settings.terminal.localShellSidePanel.autoOpen.desc': '開啟本機 Shell 後自動開啟一個側邊欄。',
+  'settings.terminal.localShellSidePanel.autoOpenPane': '預設側邊欄',
+  'settings.terminal.localShellSidePanel.autoOpenPane.desc': '選擇優先開啟哪個面板。',
+  'settings.terminal.localShellSidePanel.pane.files': '檔案',
 
   // Settings > System
   'settings.system.title': '系統',

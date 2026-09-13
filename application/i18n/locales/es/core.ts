@@ -560,6 +560,12 @@ Resalta el panel dividido enfocado:
   'settings.terminal.sidePanel.pane.system': 'Sistema',
   'settings.terminal.sidePanel.pane.notes': 'Notas',
   'settings.terminal.sidePanel.pane.ai': 'IA',
+  'settings.terminal.section.localShellSidePanel': 'Panel lateral de Shell local',
+  'settings.terminal.localShellSidePanel.autoOpen': 'Expandir panel lateral al abrir Shell local',
+  'settings.terminal.localShellSidePanel.autoOpen.desc': 'Abre automáticamente un panel lateral después de abrir el Shell local.',
+  'settings.terminal.localShellSidePanel.autoOpenPane': 'Panel lateral predeterminado',
+  'settings.terminal.localShellSidePanel.autoOpenPane.desc': 'Elige qué panel se abre primero.',
+  'settings.terminal.localShellSidePanel.pane.files': 'Archivos',
   'settings.terminal.accessibility.minimumContrastRatio.desc':
     'Ajusta los colores para cumplir con los requisitos de contraste (1 = desactivado, 21 = máximo)',
   'settings.terminal.behavior.rightClick': 'Comportamiento del clic derecho',
