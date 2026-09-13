@@ -5,6 +5,8 @@
  */
 import { GripHorizontal, Pin, Plus, Radio, Search, X } from 'lucide-react';
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useComposeBarHistory } from '../../application/state/useComposeBarHistory';
+import { canNavigateComposeBarHistory } from '../../domain/composeBarHistory';
 import { useComposeBarHeight } from '../../application/state/useComposeBarHeight';
 import { useComposeBarPinnedSnippets } from '../../application/state/useComposeBarPinnedSnippets';
 import { useI18n } from '../../application/i18n/I18nProvider';
@@ -267,7 +269,9 @@ const ComposeBarSnippetManagePopover = memo(function ComposeBarSnippetManagePopo
 });
 
 export interface TerminalComposeBarProps {
-  onSend: (text: string) => void;
+  // Return false for rejected or sensitive input so it is not recalled.
+  onSend: (text: string) => boolean | void | Promise<boolean | void>;
+  sessionId: string;
   onClose: () => void;
   onSnippetClick?: (snippet: Snippet) => void;
   snippets?: Snippet[];
@@ -280,6 +284,7 @@ export interface TerminalComposeBarProps {
 
 export const TerminalComposeBar: React.FC<TerminalComposeBarProps> = ({
   onSend,
+  sessionId,
   onClose,
   onSnippetClick,
   snippets = [],
@@ -288,6 +293,10 @@ export const TerminalComposeBar: React.FC<TerminalComposeBarProps> = ({
 }) => {
   const { t } = useI18n();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const restoreDraft = useCallback((draft: string) => {
+    if (textareaRef.current) textareaRef.current.value = draft;
+  }, []);
+  const { prepareRecord, navigate, reset } = useComposeBarHistory(sessionId, restoreDraft);
   const isComposingRef = useRef(false);
   const resizeCleanupRef = useRef<(() => void) | null>(null);
   const [barHeight, setBarHeight, persistBarHeight] = useComposeBarHeight();
@@ -338,18 +347,33 @@ export const TerminalComposeBar: React.FC<TerminalComposeBarProps> = ({
     if (!el) return;
     const text = el.value;
     if (!text) return;
-    onSend(text);
+    const recordSent = prepareRecord();
+    let result: ReturnType<typeof onSend>;
+    try {
+      result = onSend(text);
+    } catch (error) {
+      recordSent();
+      throw error;
+    }
+    void Promise.resolve(result).then((sent) => {
+      recordSent(sent !== false ? text : undefined);
+    }).catch((error: unknown) => {
+      recordSent();
+      console.error('Compose bar send failed', error);
+    });
+    reset();
     el.value = '';
     el.focus();
-  }, [onSend]);
+  }, [onSend, prepareRecord, reset]);
 
   const insertCommand = useCallback((command: string) => {
     const el = textareaRef.current;
     if (!el) return;
+    reset();
     const prefix = el.value && !el.value.endsWith('\n') ? '\n' : '';
     el.value = el.value ? `${el.value}${prefix}${command}` : command;
     el.focus();
-  }, []);
+  }, [reset]);
 
   const handleSnippetActivate = useCallback(async (snippet: Snippet, sendImmediately: boolean) => {
     if (sendImmediately) {
@@ -368,6 +392,22 @@ export const TerminalComposeBar: React.FC<TerminalComposeBarProps> = ({
   }, [insertCommand, onSend, onSnippetClick]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (isComposingRef.current || e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return;
+    if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') &&
+        !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
+      const el = e.currentTarget;
+      const direction = e.key === 'ArrowUp' ? 'up' : 'down';
+      if (canNavigateComposeBarHistory(el.value, el.selectionStart, direction, el.selectionEnd)) {
+        const value = navigate(el.value, direction);
+        if (value !== undefined) {
+          e.preventDefault();
+          el.value = value;
+          const position = direction === 'up' ? 0 : value.length;
+          el.setSelectionRange(position, position);
+        }
+      }
+      return;
+    }
     if (e.key === 'Enter' && !e.shiftKey && !isComposingRef.current) {
       e.preventDefault();
       handleSend();
@@ -375,7 +415,7 @@ export const TerminalComposeBar: React.FC<TerminalComposeBarProps> = ({
       e.preventDefault();
       onClose();
     }
-  }, [handleSend, onClose]);
+  }, [handleSend, navigate, onClose]);
 
   const handleResizeStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -489,6 +529,7 @@ export const TerminalComposeBar: React.FC<TerminalComposeBarProps> = ({
             style={{ color: theme.resolvedFg }}
             placeholder={t('terminal.composeBar.placeholder')}
             onKeyDown={handleKeyDown}
+            onInput={reset}
             onCompositionStart={() => { isComposingRef.current = true; }}
             onCompositionEnd={() => { isComposingRef.current = false; }}
           />
