@@ -88,7 +88,10 @@ export const TreeNode = React.memo<TreeNodeProps>(({
         className="flex min-w-0 items-center gap-1"
         style={{ paddingLeft: depth * 16 + 8 }}
       >
-        <span className="shrink-0 w-4 flex items-center justify-center">
+        <span
+          className="shrink-0 w-4 flex items-center justify-center"
+          onDoubleClick={e => { if (!isParentEntry && isDir) e.stopPropagation(); }}
+        >
           {isParentEntry ? (
             <CornerUpLeft size={14} className="text-muted-foreground" />
           ) : isDir ? (
