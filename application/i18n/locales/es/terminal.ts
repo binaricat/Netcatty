@@ -1,6 +1,8 @@
 import type { Messages } from '../types';
 
 export const esTerminalMessages: Messages = {
+  'terminal.menu.saveScreen': 'Guardar pantalla actual',
+  'terminal.saveScreen.failed': 'No se pudo guardar la pantalla del terminal.',
   'terminal.sudoHint.pressEnter': 'Presiona Enter para pegar la contraseña guardada',
   'terminal.passwordPicker.title': 'Contraseñas guardadas',
   'terminal.passwordPicker.empty': 'No hay contraseñas guardadas',

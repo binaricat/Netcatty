@@ -51,6 +51,7 @@ export interface TerminalContextMenuProps {
   getMouseTrackingMode?: () => string | undefined;
   /** When true, show the app context menu even while a fullscreen app (tmux/vim) holds mouse tracking. */
   showContextMenuOverFullscreenApps?: boolean;
+  onSaveScreen?: () => void;
   onCopy?: () => void;
   onPaste?: () => void;
   onUploadClipboardImage?: () => void;
@@ -209,6 +210,7 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
   isAlternateScreen = false,
   getMouseTrackingMode,
   showContextMenuOverFullscreenApps = false,
+  onSaveScreen,
   onCopy,
   onPaste,
   onUploadClipboardImage,
@@ -452,6 +454,12 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
 
           <ContextMenuSeparator />
 
+          {onSaveScreen && (
+            <ContextMenuItem onClick={onSaveScreen}>
+              <Download size={14} className="mr-2" />
+              {t('terminal.menu.saveScreen')}
+            </ContextMenuItem>
+          )}
           <ContextMenuItem onClick={onClear}>
             <Trash2 size={14} className="mr-2" />
             {t('terminal.menu.clearBuffer')}

@@ -423,6 +423,7 @@ export const ruAiMessages: Messages = {
   'ai.chat.useCustomModel': 'Использовать «{id}»',
   'ai.chat.thinkingLevel': 'Мышление',
   'ai.chat.thinkingOff': 'Выкл.',
+  'ai.chat.thinkingDefault': 'По умолчанию провайдера',
   'ai.chat.pinModel': 'Закрепить модель',
   'ai.chat.unpinModel': 'Открепить модель',
   'ai.chat.loadingModels': 'Загрузка моделей...',

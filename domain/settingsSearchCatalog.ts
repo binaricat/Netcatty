@@ -159,6 +159,12 @@ export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
     sectionKey: "settings.vault.title",
   },
   {
+    id: "appearance-tab-bar-position",
+    tab: "appearance",
+    labelKey: "settings.appearance.tabBarPosition",
+    sectionKey: "settings.vault.title",
+  },
+  {
     id: "appearance-vault-show-sftp-tab",
     tab: "appearance",
     labelKey: "settings.vault.showSftpTab",

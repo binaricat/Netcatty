@@ -19,6 +19,7 @@ import {
   applyResponsesApiStatelessStoreOption,
   buildCattyReasoningProviderOptions,
   estimateReasoningOutputReserve,
+  resolveEffectiveCattyReasoningEffort,
 } from '../../cattyReasoning';
 import { createModelFromConfig } from '../../sdk/providers';
 import { createCattyToolsFromCatalog } from '../capabilityTools';
@@ -266,7 +267,10 @@ async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Prom
       context.activeProvider,
       buildCattyReasoningProviderOptions(
         context.activeProvider,
-        context.reasoningEffort,
+        resolveEffectiveCattyReasoningEffort(
+          context.reasoningEffort,
+          context.activeProvider?.advancedParams?.reasoningEffort,
+        ),
         activeModelId,
       ),
     );

@@ -168,6 +168,7 @@ test("HostTreeView shows selected groups in multi-select mode", () => {
         children: {},
         hosts: [],
       }]}
+      groupConfigs={[{ path: "production", notes: "# VPN instructions" }]}
       hosts={[]}
       expandedPaths={new Set<string>()}
       onTogglePath={() => undefined}
@@ -188,6 +189,7 @@ test("HostTreeView shows selected groups in multi-select mode", () => {
     />,
   );
 
+  assert.match(markup, /aria-label="Group notes"/);
   assert.match(markup, /data-selected="true"/);
   assert.match(markup, /data-group-path="production"/);
   assert.match(markup, /role="tree"/);
@@ -477,4 +479,21 @@ test("HostTreeView announces sibling position within each tree level", () => {
   // Child of prod/east: only host C
   assert.equal(byKey.get("host:host-c")?.posInSet, 1);
   assert.equal(byKey.get("host:host-c")?.setSize, 1);
+});
+
+test("HostTreeView IP sorting stays inside each group and leaves manual order intact", () => {
+  const pair = (prefix: string, group = ""): Host[] => [
+    { ...baseHost, id: `${prefix}-ten`, label: "Alpha", hostname: "10.0.0.10", group, order: 1 },
+    { ...baseHost, id: `${prefix}-two`, label: "Zulu", hostname: "10.0.0.2", group, order: 2 },
+  ];
+  const groupTree: GroupNode[] = [{
+    name: "prod", path: "prod", hosts: pair("prod", "prod"),
+    children: { east: { name: "east", path: "prod/east", hosts: pair("east", "prod/east"), children: {} } },
+  }];
+  const options = {
+    groupTree, ungroupedHosts: pair("root"), expandedPaths: new Set(["prod", "prod/east"]), groupConfigs: [],
+  };
+  const keys = (sortMode: "ip" | "manual") => buildVisibleHostTreeItems({ ...options, sortMode }).map(item => item.key);
+  assert.deepEqual(keys("ip"), ["group:prod", "group:prod/east", "host:east-two", "host:east-ten", "host:prod-two", "host:prod-ten", "host:root-two", "host:root-ten"]);
+  assert.deepEqual(keys("manual"), ["group:prod", "group:prod/east", "host:east-ten", "host:east-two", "host:prod-ten", "host:prod-two", "host:root-ten", "host:root-two"]);
 });

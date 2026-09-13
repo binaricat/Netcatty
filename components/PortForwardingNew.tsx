@@ -880,7 +880,7 @@ const PortForwarding: React.FC<PortForwardingProps> = ({
             <SortDropdown
               value={sortMode}
               onChange={(mode) => {
-                if (mode !== "group") setSortMode(mode);
+                if (mode !== "group" && mode !== "ip") setSortMode(mode);
               }}
               modes={["manual", "az", "za", "newest", "oldest"]}
               className={vaultHeaderIconButtonClass}

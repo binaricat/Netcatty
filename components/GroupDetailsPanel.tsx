@@ -57,6 +57,7 @@ import { Switch } from "./ui/switch";
 import { TerminalFontSelect } from "./settings/TerminalFontSelect";
 import { useAvailableFonts } from "../application/state/fontStore";
 import { toast } from "./ui/toast";
+import { HostNotesEditor } from "./host/HostNotesEditor";
 import { GroupSshSettingsSection } from "./GroupSshSettingsSection";
 import { prepareProxyConfigForSave } from "./HostDetailsPanel.helpers";
 import { TerminalEncodingSelect } from "./TerminalEncodingSelect";
@@ -547,6 +548,7 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelPropsWithResize> = ({
 
     const result: GroupConfig = {
       path: newPath,
+      notes: form.notes?.trim() || undefined,
       // Only include SSH fields if SSH section is enabled
       ...(sshEnabled && {
         protocol: 'ssh' as const,
@@ -993,6 +995,12 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelPropsWithResize> = ({
           </HostDetailsSettingRow>
         </HostDetailsSection>
         </>)}
+
+        <HostNotesEditor
+          panelKey={groupPath}
+          value={form.notes ?? ""}
+          onChange={(notes) => update("notes", notes)}
+        />
 
         {/* Add Protocol Button — always at the bottom */}
         {addableProtocols.length > 0 && (

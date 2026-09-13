@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { ChevronsLeft, GripVertical, Minimize2, Network, PanelLeft, X as XIcon } from 'lucide-react';
+import { isTerminalSensitiveInputActive } from './runtime/terminalSensitiveInputRegistry';
 import { isSessionReconnectDisabled } from '../top-tabs/SessionTabContextMenuContent';
 
 import { resolveEffectiveTerminalProtocol } from '../../domain/terminalProtocol';
@@ -583,6 +584,7 @@ function TerminalViewInner({ ctx, isPaneMagnified = false }: { ctx: TerminalView
       isAlternateScreen={hasMouseTracking}
       getMouseTrackingMode={() => termRef.current?.modes.mouseTrackingMode}
       showContextMenuOverFullscreenApps={terminalSettings?.showContextMenuOverFullscreenApps}
+      onSaveScreen={terminalContextActions.onSaveScreen}
       onCopy={terminalContextActions.onCopy}
       onPaste={terminalContextActions.onPaste}
       onUploadClipboardImage={status === "connected" ? terminalContextActions.onUploadClipboardImage : undefined}
@@ -1305,10 +1307,15 @@ function TerminalViewInner({ ctx, isPaneMagnified = false }: { ctx: TerminalView
         {/* Compose Bar (solo sessions only; workspace uses TerminalLayer's global bar) */}
         {isComposeBarOpen && !inWorkspace && (
           <TerminalComposeBar
-            onSend={(text) => {
+            key={sessionId}
+            sessionId={sessionId}
+            onSend={async (text) => {
               if (sessionRef.current) {
-                executeSnippetCommand(text, false);
+                const sensitive = isTerminalSensitiveInputActive(sessionId);
+                const sent = await executeSnippetCommand(text, false);
+                return sent && !sensitive && !isTerminalSensitiveInputActive(sessionId);
               }
+              return false;
             }}
             onSnippetClick={(snippet) => void executeSnippet(snippet)}
             snippets={snippets}

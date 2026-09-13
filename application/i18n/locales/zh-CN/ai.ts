@@ -471,6 +471,7 @@ export const zhCNAiMessages: Messages = {
   'ai.chat.useCustomModel': '使用 “{id}”',
   'ai.chat.thinkingLevel': '思考强度',
   'ai.chat.thinkingOff': '关闭',
+  'ai.chat.thinkingDefault': '跟随提供商默认',
   'ai.chat.pinModel': '固定模型',
   'ai.chat.unpinModel': '取消固定',
   'ai.chat.loadingModels': '正在加载模型...',

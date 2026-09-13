@@ -217,7 +217,7 @@ function terminalDataToHtml(terminalData, hostLabel, timestamp) {
 async function exportSessionLog(event, payload) {
   const { terminalData, hostLabel, hostname, startTime, format } = payload;
 
-  if (!terminalData) {
+  if (!terminalData && !(payload.plainText === true && terminalData === "")) {
     throw new Error("No terminal data to export");
   }
 
@@ -248,13 +248,15 @@ async function exportSessionLog(event, payload) {
   const actualFormat = path.extname(result.filePath).slice(1) || format;
 
   if (actualFormat === "html") {
-    content = terminalDataToHtml(terminalData, hostLabel, startTime);
+    content = payload.plainText === true
+      ? terminalPlainTextToHtml(terminalData, hostLabel, startTime)
+      : terminalDataToHtml(terminalData, hostLabel, startTime);
   } else if (actualFormat === "log" || actualFormat === "raw") {
     // Raw format preserves ANSI codes
     content = terminalData;
   } else {
     // Plain text - apply terminal text controls and remove escape sequences
-    content = terminalDataToPlainText(terminalData);
+    content = payload.plainText === true ? terminalData : terminalDataToPlainText(terminalData);
   }
 
   await fs.promises.writeFile(result.filePath, content, "utf8");

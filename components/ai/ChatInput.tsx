@@ -1612,6 +1612,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
               <ComposerThinkingChip
                 levels={thinkingLevels}
                 selectedLevel={visibleThinking}
+                allowDefault={hasProviderSwitcher && !!onThinkingLevelChange}
                 disabled={lockTurnConfiguration}
                 open={showThinkingPicker}
                 menuPos={showThinkingPicker ? menuPos : null}
