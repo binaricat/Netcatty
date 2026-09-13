@@ -291,6 +291,8 @@ export const zhTWTerminalMessages: Messages = {
   'settings.terminal.accessibility.minimumContrastRatio.desc': '調整顏色以滿足對比度要求 (1 = 停用, 21 = 最大)',
   'settings.terminal.behavior.rightClick': '右鍵行為',
   'settings.terminal.behavior.rightClick.desc': '在終端中右鍵時執行的操作',
+  'settings.terminal.behavior.rightClick.longPressMenu': '右鍵長按顯示選單',
+  'settings.terminal.behavior.rightClick.longPressMenu.desc': '右鍵設為貼上或選詞時，按住半秒開啟選單。不影響接管滑鼠的終端應用。',
   'settings.terminal.behavior.rightClick.fullscreenMenu': '在全螢幕應用中也顯示選單',
   'settings.terminal.behavior.rightClick.fullscreenMenu.desc':
     '即使 tmux、vim 等全螢幕應用接管了滑鼠，也顯示右鍵選單。關閉時右鍵會交給應用處理（Shift+右鍵仍可開啟選單）。',

@@ -291,6 +291,8 @@ export const zhCNTerminalMessages: Messages = {
   'settings.terminal.accessibility.minimumContrastRatio.desc': '调整颜色以满足对比度要求 (1 = 禁用, 21 = 最大)',
   'settings.terminal.behavior.rightClick': '右键行为',
   'settings.terminal.behavior.rightClick.desc': '在终端中右键时执行的操作',
+  'settings.terminal.behavior.rightClick.longPressMenu': '右键长按显示菜单',
+  'settings.terminal.behavior.rightClick.longPressMenu.desc': '右键设为粘贴或选词时，按住半秒打开菜单。不影响接管鼠标的终端应用。',
   'settings.terminal.behavior.rightClick.fullscreenMenu': '在全屏应用中也显示菜单',
   'settings.terminal.behavior.rightClick.fullscreenMenu.desc':
     '即使 tmux、vim 等全屏应用接管了鼠标，也显示右键菜单。关闭时右键会交给应用处理（Shift+右键仍可打开菜单）。',

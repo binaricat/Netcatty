@@ -568,6 +568,8 @@ Resalta el panel dividido enfocado:
     'Ajusta los colores para cumplir con los requisitos de contraste (1 = desactivado, 21 = máximo)',
   'settings.terminal.behavior.rightClick': 'Comportamiento del clic derecho',
   'settings.terminal.behavior.rightClick.desc': 'Acción al hacer clic derecho en la terminal',
+  'settings.terminal.behavior.rightClick.longPressMenu': 'Mantener clic derecho abre el menú',
+  'settings.terminal.behavior.rightClick.longPressMenu.desc': 'Si el clic derecho pega o selecciona una palabra, mantén pulsado medio segundo para abrir el menú. No afecta a las aplicaciones que capturan el ratón.',
   'settings.terminal.behavior.rightClick.fullscreenMenu': 'Mostrar menú sobre aplicaciones en pantalla completa',
   'settings.terminal.behavior.rightClick.fullscreenMenu.desc':
     'Muestra el menú contextual incluso cuando tmux, vim u otras aplicaciones en pantalla completa toman el control del mouse. Cuando está desactivado, el clic derecho se pasa a la aplicación (Shift+Clic derecho sigue abriendo el menú).',

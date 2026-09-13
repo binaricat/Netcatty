@@ -1981,3 +1981,17 @@ test("tab bar position survives settings export and import, with a safe fallback
   await applySyncPayload({ ...payload, settings: {} }, { importVaultData: () => {} });
   assert.equal(localStorage.getItem(storageKeys.STORAGE_KEY_TAB_BAR_POSITION), "bottom");
 });
+
+for (const enabled of [true, false]) {
+  test(`right-click long press preference survives sync (${enabled})`, async () => {
+    localStorage.setItem(storageKeys.STORAGE_KEY_TERM_SETTINGS,
+      JSON.stringify({ rightClickLongPressMenu: enabled }));
+    const payload = buildSyncPayload(vault());
+    assert.equal(payload.settings?.terminalSettings?.rightClickLongPressMenu, enabled);
+    localStorage.setItem(storageKeys.STORAGE_KEY_TERM_SETTINGS,
+      JSON.stringify({ rightClickLongPressMenu: !enabled }));
+    await applySyncPayload(payload, { importVaultData: () => {} });
+    const restored = JSON.parse(localStorage.getItem(storageKeys.STORAGE_KEY_TERM_SETTINGS)!);
+    assert.equal(restored.rightClickLongPressMenu, enabled);
+  });
+}

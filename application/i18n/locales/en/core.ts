@@ -653,6 +653,8 @@ Highlight the focused split pane:
     'Adjust colors to meet contrast requirements (1 = disabled, 21 = max)',
   'settings.terminal.behavior.rightClick': 'Right-click behavior',
   'settings.terminal.behavior.rightClick.desc': 'Action when right-clicking in terminal',
+  'settings.terminal.behavior.rightClick.longPressMenu': 'Right-click hold opens menu',
+  'settings.terminal.behavior.rightClick.longPressMenu.desc': 'When right-click pastes or selects a word, hold for half a second to open the menu. Does not override terminal apps that capture the mouse.',
   'settings.terminal.behavior.rightClick.fullscreenMenu': 'Show menu over fullscreen apps',
   'settings.terminal.behavior.rightClick.fullscreenMenu.desc':
     'Show the context menu even when tmux, vim or other fullscreen apps take over the mouse. When off, right-click is passed to the app (Shift+Right-Click still opens the menu).',

@@ -84,6 +84,16 @@ export const TerminalBehaviorSettings: React.FC<TerminalBehaviorSettingsProps> =
         </SettingRow>
 
         <SettingRow
+          label={t("settings.terminal.behavior.rightClick.longPressMenu")}
+          description={t("settings.terminal.behavior.rightClick.longPressMenu.desc")}
+        >
+          <Toggle
+            checked={terminalSettings.rightClickLongPressMenu ?? false}
+            onChange={(v) => updateTerminalSetting("rightClickLongPressMenu", v)}
+          />
+        </SettingRow>
+
+        <SettingRow
           label={t("settings.terminal.behavior.rightClick.fullscreenMenu")}
           description={t("settings.terminal.behavior.rightClick.fullscreenMenu.desc")}
         >
