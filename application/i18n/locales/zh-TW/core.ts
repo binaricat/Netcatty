@@ -1052,6 +1052,7 @@ export const zhTWCoreMessages: Messages = {
   'sftp.goUp': '上一級',
   'sftp.goToTerminalCwd': '定位到終端目前目錄',
   'sftp.locatePathInTerminal': '定位路徑到終端',
+  'sftp.refreshAfterCommand': '終端命令完成後重新整理',
   'sftp.followTerminalCwd': '追隨終端目錄',
   'sftp.followTerminalCwd.enable': '開啟追隨終端目錄',
   'sftp.followTerminalCwd.disable': '關閉追隨終端目錄',

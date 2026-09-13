@@ -1050,6 +1050,7 @@ export const zhCNCoreMessages: Messages = {
   'sftp.goUp': '上一级',
   'sftp.goToTerminalCwd': '定位到终端当前目录',
   'sftp.locatePathInTerminal': '定位路径到终端',
+  'sftp.refreshAfterCommand': '终端命令完成后刷新',
   'sftp.followTerminalCwd': '追随终端目录',
   'sftp.followTerminalCwd.enable': '开启追随终端目录',
   'sftp.followTerminalCwd.disable': '关闭追随终端目录',
