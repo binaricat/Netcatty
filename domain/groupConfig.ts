@@ -116,7 +116,7 @@ export function resolveGroupDefaults(
         ) {
           continue;
         }
-        if (key !== 'path' && value !== undefined) {
+        if (key !== 'path' && key !== 'notes' && value !== undefined) {
           if (key === 'proxyProfileId') {
             delete merged.proxyConfig;
           }

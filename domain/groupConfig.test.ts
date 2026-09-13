@@ -581,3 +581,10 @@ test("applyGroupDefaults keeps host algorithm overrides instead of inheriting", 
   );
   assert.deepEqual(result.algorithms, hostOverrides);
 });
+
+test("group notes survive sanitization but are not connection defaults", () => {
+  const config = { path: "Project", notes: "# VPN\nConnect before SSH.", username: "admin" };
+  assert.equal(sanitizeGroupConfig(config).notes, config.notes);
+  assert.equal(resolveGroupDefaults("Project", [config]).notes, undefined);
+  assert.equal(resolveGroupDefaults("Project/Servers", [config]).notes, undefined);
+});

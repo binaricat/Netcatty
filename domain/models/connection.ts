@@ -412,6 +412,8 @@ export interface GroupNode {
 /** Default configuration for a group. Hosts in this group inherit these values when not explicitly set. */
 export interface GroupConfig {
   path: string;
+  /** Markdown notes for this group only; not inherited by hosts or subgroups. */
+  notes?: string;
   order?: number;
   username?: string;
   password?: string;
