@@ -293,6 +293,13 @@ function createPreloadApi(ctx) {
     markTerminalDataSessionOpen(result?.sessionId);
     return result.sessionId;
   },
+  testConnection: async (options) => {
+    const result = await ipcRenderer.invoke("netcatty:test-connection", options);
+    return result.sessionId;
+  },
+  cancelTestConnection: async (sessionId) => {
+    return ipcRenderer.invoke("netcatty:test-connection:cancel", sessionId);
+  },
   startTelnetSession: async (options) => {
     markRequestedTerminalDataSessionOpen(options);
     const result = await ipcRenderer.invoke("netcatty:telnet:start", options);

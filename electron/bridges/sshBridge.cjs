@@ -991,7 +991,7 @@ const startSessionApi = createStartSessionApi({
   get removeRemoteFiles() { return removeRemoteFiles; },
   get restoreRemoteModes() { return restoreRemoteModes; },
 });
-const { startSSHSession } = startSessionApi;
+const { startSSHSession, cancelTestConnection } = startSessionApi;
 const { createExecCommandApi } = require("./sshBridge/execCommand.cjs");
 const execCommandApi = createExecCommandApi({
   SSHClient, NetcattyAgent, randomUUID, console, setTimeout, clearTimeout, Error,
@@ -1362,6 +1362,27 @@ async function startSSHSessionWrapper(event, options) {
 }
 
 /**
+ * Headless "test connection" for the host editor. Establishes a fresh SSH
+ * connection through the same dial/auth/host-key/jump-host/proxy machinery as
+ * a terminal session (`startSSHSession`), reports success the moment
+ * authentication completes, and tears down without ever opening a shell.
+ * Connection reuse and retry wrappers are deliberately skipped so a test is
+ * always an honest fresh dial. The renderer consumes `netcatty:test:result`
+ * plus the shared `netcatty:chain:progress` / host-key / keyboard-interactive
+ * channels.
+ */
+async function testConnection(event, options) {
+  const payload = options && typeof options === "object" ? options : {};
+  const sessionId = payload.sessionId || require("node:crypto").randomUUID();
+  return startSSHSession(event, {
+    ...payload,
+    sessionId,
+    testMode: true,
+    reuseTransport: false,
+  });
+}
+
+/**
  * Get current working directory from an active SSH session
  * This sends 'pwd' to the existing shell stream and captures the output
  * using unique markers to identify the command output boundaries
@@ -1517,6 +1538,8 @@ function registerHandlers(ipcMain, options = {}) {
     hostKeyVerifier.registerHandler(ipcMain);
   }
   ipcMain.handle("netcatty:key:generate", generateKeyPair);
+  ipcMain.handle("netcatty:test-connection", testConnection);
+  ipcMain.handle("netcatty:test-connection:cancel", (_event, sessionId) => cancelTestConnection(sessionId));
   ipcMain.handle("netcatty:sshDebugLog:info", getSshDebugLogInfo);
   ipcMain.handle("netcatty:sshDebugLog:openDir", openSshDebugLogDir);
   ipcMain.handle("netcatty:ssh:check-agent", async (_event, options = {}) => {

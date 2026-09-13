@@ -370,6 +370,7 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
     knownHosts,
     NotebookText,
     NotesManager,
+    onAddKnownHost,
     onOpenHostFromNote,
     onOpenNoteIdHandled,
     onOpenSnippetIdHandled,
@@ -1456,6 +1457,9 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
                 onSnippetsChange={onUpdateSnippets}
                 onHostsChange={onUpdateHosts}
                 onImportKey={onImportOrReuseKey}
+                knownHosts={knownHosts}
+                onAddKnownHost={onAddKnownHost}
+                terminalSettings={terminalSettings}
                 onSave={(host) => {
                   const latestHost = hosts.find(
                     (entry: { id: string }) => entry.id === host.id,

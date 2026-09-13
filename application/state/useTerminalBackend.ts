@@ -133,6 +133,18 @@ export const useTerminalBackend = () => {
     return bridge.startSSHSession(options);
   }, []);
 
+  const testConnection = useCallback(async (options: NetcattySSHOptions) => {
+    const bridge = netcattyBridge.get();
+    if (!bridge?.testConnection) throw new Error("testConnection unavailable");
+    return bridge.testConnection(options);
+  }, []);
+
+  const cancelTestConnection = useCallback(async (sessionId: string) => {
+    const bridge = netcattyBridge.get();
+    if (!bridge?.cancelTestConnection) return { success: false, error: "cancelTestConnection unavailable" };
+    return bridge.cancelTestConnection(sessionId);
+  }, []);
+
   const startTelnetSession = useCallback(async (options: Parameters<NonNullable<NetcattyBridge["startTelnetSession"]>>[0]) => {
     const bridge = netcattyBridge.get();
     if (!bridge?.startTelnetSession) throw new Error("startTelnetSession unavailable");
@@ -566,6 +578,8 @@ export const useTerminalBackend = () => {
         execAvailable,
         openExternalAvailable,
         startSSHSession,
+        testConnection,
+        cancelTestConnection,
         startTelnetSession,
         startMoshSession,
         startEtSession,
@@ -648,6 +662,8 @@ export const useTerminalBackend = () => {
       execAvailable,
       openExternalAvailable,
       startSSHSession,
+      testConnection,
+      cancelTestConnection,
       startTelnetSession,
       startMoshSession,
       startEtSession,
