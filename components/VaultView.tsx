@@ -207,7 +207,8 @@ const isSortMode = (value: string): value is SortMode =>
   value === "za" ||
   value === "newest" ||
   value === "oldest" ||
-  value === "group";
+  value === "group" ||
+  value === "ip";
 
 // Props without isActive - it's now subscribed internally
 interface VaultViewProps {
