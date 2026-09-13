@@ -337,6 +337,7 @@ export interface SyncPayload {
     // Vault: root list shows only ungrouped hosts
     showOnlyUngroupedHostsInRoot?: boolean;
     // Top tabs: show standalone SFTP view tab
+    tabBarPosition?: 'top' | 'bottom';
     showSftpTab?: boolean;
     // Shortcuts: Cmd/Ctrl+[1...9] and Ctrl+Tab skip pinned Vault/SFTP tabs
     shellOnlyTabNumberShortcuts?: boolean;
