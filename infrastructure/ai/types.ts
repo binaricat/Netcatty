@@ -41,6 +41,8 @@ export interface ProviderAdvancedParams {
   topP?: number;              // 0–1
   frequencyPenalty?: number;  // -2–2
   presencePenalty?: number;   // -2–2
+  /** Provider-level default thinking depth; omitted = API default (not sent). */
+  reasoningEffort?: string;   // 'low' | 'medium' | 'high'
 }
 
 export interface ProviderConfig {

@@ -471,6 +471,7 @@ export const esAiMessages: Messages = {
   'ai.chat.useCustomModel': 'Usar "{id}"',
   'ai.chat.thinkingLevel': 'Razonamiento',
   'ai.chat.thinkingOff': 'Off',
+  'ai.chat.thinkingDefault': 'Predeterminado del proveedor',
   'ai.chat.pinModel': 'Fijar modelo',
   'ai.chat.unpinModel': 'Quitar modelo fijado',
   'ai.chat.loadingModels': 'Cargando modelos...',

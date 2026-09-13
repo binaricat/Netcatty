@@ -471,6 +471,7 @@ export const enAiMessages: Messages = {
   'ai.chat.useCustomModel': 'Use "{id}"',
   'ai.chat.thinkingLevel': 'Thinking',
   'ai.chat.thinkingOff': 'Off',
+  'ai.chat.thinkingDefault': 'Provider default',
   'ai.chat.pinModel': 'Pin model',
   'ai.chat.unpinModel': 'Unpin model',
   'ai.chat.loadingModels': 'Loading models...',

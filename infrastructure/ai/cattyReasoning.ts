@@ -22,6 +22,24 @@ const LEVELS_MINIMAL_HIGH = ['minimal', 'high'] as const;
 
 export type CattyReasoningProviderOptions = Record<string, Record<string, unknown>>;
 
+/**
+ * Effective reasoning effort for a turn: the composer thinking chip wins when
+ * the user picked a level; otherwise fall back to the provider-level default
+ * configured under advanced parameters. `default` / blank provider values are
+ * dropped so the request body stays untouched (avoids 400s on models that do
+ * not accept reasoning_effort).
+ */
+export function resolveEffectiveCattyReasoningEffort(
+  chipEffort: string | null | undefined,
+  providerDefaultEffort: string | null | undefined,
+): string | undefined {
+  const chip = typeof chipEffort === 'string' ? chipEffort.trim() : '';
+  if (chip) return chip;
+  const fallback = typeof providerDefaultEffort === 'string' ? providerDefaultEffort.trim().toLowerCase() : '';
+  if (!fallback || fallback === 'default') return undefined;
+  return fallback;
+}
+
 /** Extra completion tokens the SDK will add on top of maxTokens for thinking. */
 export function estimateReasoningOutputReserve(
   options: CattyReasoningProviderOptions | undefined,
@@ -87,7 +105,7 @@ export function applyResponsesApiStatelessStoreOption(
 }
 
 export function buildCattyReasoningProviderOptions(
-  provider: Pick<ProviderConfig, 'providerId' | 'style'> | null | undefined,
+  provider: Pick<ProviderConfig, 'providerId' | 'style' | 'advancedParams' | 'openaiApi'> | null | undefined,
   effort: string | null | undefined,
   modelId?: string,
 ): CattyReasoningProviderOptions | undefined {
@@ -102,14 +120,17 @@ export function buildCattyReasoningProviderOptions(
   if (!resolved) return undefined;
 
   if (style === 'openai') {
-    if (modelId && !openaiModelLikelySupportsReasoning(modelId)) return undefined;
+    if (modelId && openaiModelKnownUnsupportedReasoning(modelId)) return undefined;
+    const explicitDefault = ['low', 'medium', 'high'].includes(provider.advancedParams?.reasoningEffort ?? '');
+    const unrecognizedModel = !!modelId && !openaiModelLikelySupportsReasoning(modelId);
+    if (unrecognizedModel && !(provider.providerId === 'custom' && explicitDefault)) return undefined;
     if (resolved === 'off') {
       if (modelId && openaiModelSupportsNoneReasoning(modelId)) {
         return { openai: { reasoningEffort: 'none' } };
       }
       return undefined;
     }
-    return { openai: { reasoningEffort: resolved } };
+    return { openai: { reasoningEffort: resolved, ...(explicitDefault && resolveOpenAIApi(provider) === 'responses' ? { forceReasoning: true } : {}) } };
   }
 
   if (style === 'anthropic') {
@@ -227,7 +248,7 @@ export function openaiModelLikelySupportsReasoning(modelId: string): boolean {
 
 /** Levels shown on the Catty thinking chip, or empty when the model cannot take them. */
 export function cattyReasoningLevelsForSelection(
-  provider: Pick<ProviderConfig, 'providerId' | 'style'> | null | undefined,
+  provider: Pick<ProviderConfig, 'providerId' | 'style' | 'advancedParams' | 'openaiApi'> | null | undefined,
   modelId?: string,
 ): readonly string[] {
   if (!provider) return [];
@@ -244,7 +265,12 @@ export function cattyReasoningLevelsForSelection(
     return CATTY_REASONING_LEVELS;
   }
   if (style === 'openai') {
-    if (!modelId || !openaiModelLikelySupportsReasoning(modelId)) return [];
+    if (!modelId || openaiModelKnownUnsupportedReasoning(modelId)) return [];
+    if (!openaiModelLikelySupportsReasoning(modelId)) {
+      return provider.providerId === 'custom' && ['low', 'medium', 'high'].includes(provider.advancedParams?.reasoningEffort ?? '')
+        ? LEVELS_LOW_MEDIUM_HIGH
+        : [];
+    }
     if (openaiModelSupportsNoneReasoning(modelId)) return CATTY_REASONING_LEVELS;
     if (openaiModelSupportsMinimalReasoning(modelId)) return LEVELS_MINIMAL_LOW_MEDIUM_HIGH;
     return LEVELS_LOW_MEDIUM_HIGH;
@@ -277,6 +303,12 @@ export function resolveVisibleCattyThinkingLevel(
     if (levels.includes(REASONING_RANK[i])) return REASONING_RANK[i];
   }
   return levels[0];
+}
+
+// Explicit defaults may enable relay aliases, but not known non-reasoning families.
+function openaiModelKnownUnsupportedReasoning(modelId: string): boolean {
+  const id = modelId.trim().toLowerCase();
+  return openaiModelIsChatSnapshot(id) || /(^|\/)(?:chat)?gpt-(?:4(?:o|[.-]|$)|3\.5(?:[.-]|$))/.test(id);
 }
 
 function openaiModelIsChatSnapshot(modelId: string): boolean {
