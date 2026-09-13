@@ -2020,3 +2020,50 @@ test('custom provider headers use portable cloud secrets and local encryption wi
   await applySyncPayload(cloud, { importVaultData: () => {} });
   assert.deepEqual(read().customHeaders, {});
 });
+
+for (const localRestore of [false, true]) {
+  test(`header encryption failure leaves vault and settings untouched (${localRestore ? 'restore' : 'sync'})`, async () => {
+    localStorage.clear();
+    localStorage.setItem(storageKeys.STORAGE_KEY_THEME, 'light');
+    localStorage.setItem(storageKeys.STORAGE_KEY_AI_PROVIDERS, '[]');
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: {
+      netcatty: { credentialsEncrypt: async () => { throw new Error('keychain locked'); } },
+      dispatchEvent: () => true,
+    } });
+    const payload: SyncPayload = { ...vault([]), syncedAt: 1, settings: {
+      theme: 'dark', ai: { providers: [{ id: 'custom', customHeaders: { Authorization: 'secret' } }] },
+    } };
+    const original = JSON.stringify(payload);
+    let imports = 0;
+    let completed = 0;
+    let commits = 0;
+    const importers = { importVaultData: () => { imports++; }, onSettingsApplied: () => { completed++; } };
+    await assert.rejects(localRestore
+      ? applyLocalVaultPayload(payload, importers, { prepareConvergentRestore: async () => async () => { commits++; } })
+      : applySyncPayload(payload, importers));
+    assert.equal(imports, 0);
+    assert.equal(completed, 0);
+    assert.equal(commits, 0);
+    assert.equal(localStorage.getItem(storageKeys.STORAGE_KEY_THEME), 'light');
+    assert.equal(localStorage.getItem(storageKeys.STORAGE_KEY_AI_PROVIDERS), '[]');
+    assert.equal(JSON.stringify(payload), original);
+  });
+}
+
+test('sync prepares header encryption once before importing and leaves input unchanged', async () => {
+  localStorage.clear();
+  const sealed = `enc:v1:${Buffer.concat([Buffer.from('v10'), Buffer.alloc(32, 4)]).toString('base64')}`;
+  const events: string[] = [];
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: {
+    netcatty: { credentialsEncrypt: async () => { events.push('encrypt'); return sealed; } },
+    dispatchEvent: () => true,
+  } });
+  const payload: SyncPayload = { ...vault([]), syncedAt: 1, settings: {
+    theme: 'dark', ai: { providers: [{ id: 'custom', customHeaders: { 'X-Tenant': 'secret' } }] },
+  } };
+  const original = JSON.stringify(payload);
+  await applySyncPayload(payload, { importVaultData: () => { events.push('import'); } });
+  assert.deepEqual(events, ['encrypt', 'import']);
+  assert.equal(JSON.stringify(payload), original);
+  assert.deepEqual(JSON.parse(localStorage.getItem(storageKeys.STORAGE_KEY_AI_PROVIDERS)!)[0].customHeaders, { 'X-Tenant': sealed });
+});
