@@ -1,5 +1,5 @@
 import type { Terminal as XTerm } from "@xterm/xterm";
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 import type { RefObject } from "react";
 import { netcattyBridge } from "../../../infrastructure/services/netcattyBridge";
 import { logger } from "../../../lib/logger";
@@ -18,6 +18,10 @@ import {
   selectHistoryPreviewAll,
   findHistoryPreviewOverlay,
 } from "../runtime/terminalHistoryScrollOverride";
+
+import { readTerminalScreenText } from "../terminalContextBuffer";
+import { useI18n } from "../../../application/i18n/I18nProvider";
+import { toast } from "../../ui/toast";
 
 type BroadcastPasteRefs = {
   sourceSessionId: string;
@@ -52,6 +56,7 @@ export const broadcastTerminalPasteData = (
 export const useTerminalContextActions = ({
   termRef,
   sourceSessionId,
+  sessionName,
   sessionRef,
   onHasSelectionChange,
   scrollOnPasteRef,
@@ -71,6 +76,7 @@ export const useTerminalContextActions = ({
   termRef: RefObject<XTerm | null>;
   sourceSessionId: string;
   sessionRef: RefObject<string | null>;
+  sessionName?: string;
   onHasSelectionChange?: (hasSelection: boolean) => void;
   scrollOnPasteRef?: RefObject<boolean>;
   isBroadcastEnabledRef?: RefObject<boolean | undefined>;
@@ -91,6 +97,35 @@ export const useTerminalContextActions = ({
   scrollToBottomAfterProgrammaticInput?: (data: string) => void;
   onClipboardImageUploadResult?: (result: RemoteClipboardImageUploadResult) => void;
 }) => {
+  const { t } = useI18n();
+  const savingScreenRef = useRef(false);
+  const onSaveScreen = useCallback(async () => {
+    const term = termRef.current;
+    if (!term || savingScreenRef.current) return;
+    // Capture before opening the dialog: output may continue while it is open.
+    const preview = findHistoryPreviewOverlay(term.element?.parentElement);
+    const terminalData = preview?.textContent ?? readTerminalScreenText(term);
+    savingScreenRef.current = true;
+    try {
+      const bridge = netcattyBridge.get();
+      if (!bridge?.exportSessionLog) throw new Error("Screen export unavailable");
+      const result = await bridge.exportSessionLog({
+        terminalData,
+        hostLabel: sessionName || "terminal-screen",
+        hostname: "",
+        startTime: Date.now(),
+        format: "txt",
+        plainText: true,
+      });
+      if (!result.success && !result.canceled) throw new Error("Screen export failed");
+    } catch (err) {
+      logger.warn("Failed to save terminal screen", err);
+      toast.error(t("terminal.saveScreen.failed"));
+    } finally {
+      savingScreenRef.current = false;
+    }
+  }, [sessionName, t, termRef]);
+
   const broadcastUserPasteData = useCallback((data: string) => {
     return broadcastTerminalPasteData(data, {
       sourceSessionId,
@@ -239,6 +274,7 @@ export const useTerminalContextActions = ({
   }, [onHasSelectionChange, termRef]);
 
   return {
+    onSaveScreen,
     onCopy,
     onPaste,
     onUploadClipboardImage: supportsRemoteImagePaste ? onUploadClipboardImage : undefined,

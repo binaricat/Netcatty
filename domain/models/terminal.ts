@@ -106,6 +106,7 @@ export interface TerminalSettings {
 
   // Mouse
   rightClickBehavior: RightClickBehavior;
+  rightClickLongPressMenu?: boolean;
   // Show the app context menu even when a fullscreen app (tmux/vim) holds mouse tracking
   showContextMenuOverFullscreenApps: boolean;
   middleClickBehavior: MiddleClickBehavior;
@@ -491,6 +492,7 @@ const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
   scrollOnPaste: true,
   smoothScrolling: false,
   rightClickBehavior: 'context-menu',
+  rightClickLongPressMenu: false,
   showContextMenuOverFullscreenApps: false,
   middleClickBehavior: 'paste',
   copyOnSelect: false,

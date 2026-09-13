@@ -70,23 +70,31 @@ const TOP_TABS_THEME_PROPERTIES = [
   '--muted-foreground',
 ] as const;
 
+export function getTopTabsChromeRoots(): HTMLElement[] {
+  if (typeof document === 'undefined') return [];
+  return [
+    document.querySelector<HTMLElement>('[data-top-tabs-root]'),
+    document.querySelector<HTMLElement>('[data-tab-window-titlebar]'),
+  ].filter((root): root is HTMLElement => root !== null);
+}
+
 let topTabsChromeThemeVarsApplied = false;
 
 export function clearTopTabsChromeThemeVars(): void {
   if (typeof document === 'undefined') return;
   if (!topTabsChromeThemeVarsApplied) return;
-  const tabsRoot = document.querySelector<HTMLElement>('[data-top-tabs-root]');
-  if (!tabsRoot) return;
-  for (const property of TOP_TABS_THEME_PROPERTIES) {
-    removeStylePropertyIfSet(tabsRoot, property);
+  for (const root of getTopTabsChromeRoots()) {
+    for (const property of TOP_TABS_THEME_PROPERTIES) {
+      removeStylePropertyIfSet(root, property);
+    }
   }
   topTabsChromeThemeVarsApplied = false;
 }
 
 export function applyTopTabsChromeThemeVars(theme: TerminalTheme): void {
   if (typeof document === 'undefined') return;
-  const tabsRoot = document.querySelector<HTMLElement>('[data-top-tabs-root]');
-  if (!tabsRoot) return;
+  const roots = getTopTabsChromeRoots();
+  if (roots.length === 0) return;
 
   const bg = hexToHslToken(theme.colors.background);
   const fg = hexToHslToken(theme.colors.foreground);
@@ -97,19 +105,21 @@ export function applyTopTabsChromeThemeVars(theme: TerminalTheme): void {
   const border = adjustLightnessToken(bg, isDark ? 12 : -10);
   const mutedFg = adjustSaturationToken(adjustLightnessToken(fg, isDark ? -20 : 20), 0.5);
 
-  setStylePropertyIfChanged(tabsRoot, '--background', bg);
-  setStylePropertyIfChanged(tabsRoot, '--foreground', fg);
-  setStylePropertyIfChanged(tabsRoot, '--accent', accent);
-  setStylePropertyIfChanged(tabsRoot, '--accent-foreground', accentForeground);
-  setStylePropertyIfChanged(tabsRoot, '--primary', accent);
-  setStylePropertyIfChanged(tabsRoot, '--primary-foreground', accentForeground);
-  setStylePropertyIfChanged(tabsRoot, '--secondary', secondary);
-  setStylePropertyIfChanged(tabsRoot, '--border', border);
-  setStylePropertyIfChanged(tabsRoot, '--muted-foreground', mutedFg);
-  setStylePropertyIfChanged(tabsRoot, '--top-tabs-bg', 'hsl(var(--secondary))');
-  setStylePropertyIfChanged(tabsRoot, '--top-tabs-fg', 'hsl(var(--foreground))');
-  setStylePropertyIfChanged(tabsRoot, '--top-tabs-muted', 'hsl(var(--muted-foreground))');
-  setStylePropertyIfChanged(tabsRoot, '--top-tabs-active-bg', 'hsl(var(--background))');
-  setStylePropertyIfChanged(tabsRoot, '--top-tabs-accent', 'hsl(var(--accent))');
+  for (const tabsRoot of roots) {
+    setStylePropertyIfChanged(tabsRoot, '--background', bg);
+    setStylePropertyIfChanged(tabsRoot, '--foreground', fg);
+    setStylePropertyIfChanged(tabsRoot, '--accent', accent);
+    setStylePropertyIfChanged(tabsRoot, '--accent-foreground', accentForeground);
+    setStylePropertyIfChanged(tabsRoot, '--primary', accent);
+    setStylePropertyIfChanged(tabsRoot, '--primary-foreground', accentForeground);
+    setStylePropertyIfChanged(tabsRoot, '--secondary', secondary);
+    setStylePropertyIfChanged(tabsRoot, '--border', border);
+    setStylePropertyIfChanged(tabsRoot, '--muted-foreground', mutedFg);
+    setStylePropertyIfChanged(tabsRoot, '--top-tabs-bg', 'hsl(var(--secondary))');
+    setStylePropertyIfChanged(tabsRoot, '--top-tabs-fg', 'hsl(var(--foreground))');
+    setStylePropertyIfChanged(tabsRoot, '--top-tabs-muted', 'hsl(var(--muted-foreground))');
+    setStylePropertyIfChanged(tabsRoot, '--top-tabs-active-bg', 'hsl(var(--background))');
+    setStylePropertyIfChanged(tabsRoot, '--top-tabs-accent', 'hsl(var(--accent))');
+  }
   topTabsChromeThemeVarsApplied = true;
 }

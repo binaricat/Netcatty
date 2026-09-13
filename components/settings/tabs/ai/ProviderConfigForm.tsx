@@ -57,6 +57,8 @@ async function compressIconFileToDataUrl(file: File): Promise<string> {
 
 const STYLE_OPTIONS: ReadonlyArray<ProviderStyle> = ["anthropic", "openai", "google"];
 const OPENAI_API_OPTIONS: ReadonlyArray<OpenAIApiFormat> = ["chat", "responses"];
+/** Selectable thinking-depth levels; empty string means "provider default" (field not sent). */
+const REASONING_EFFORT_OPTIONS = ["low", "medium", "high"] as const;
 
 /** Same box as the h-8 fields above. Transparent border keeps primary aligned with outline. */
 const PROVIDER_ACTION_CLASS = "box-border h-8 px-3 gap-1.5 text-sm font-medium leading-none";
@@ -209,7 +211,8 @@ export const ProviderConfigForm: React.FC<{
   }, [probeFingerprint]);
 
   const [advancedParamRaw, setAdvancedParamRaw] = useState<Record<string, string>>({});
-  const handleAdvancedParam = useCallback((key: keyof ProviderAdvancedParams, raw: string) => {
+  /** Numeric advanced params; the string-valued reasoningEffort uses {@link handleAdvancedParamSelect}. */
+  const handleAdvancedParam = useCallback((key: Exclude<keyof ProviderAdvancedParams, "reasoningEffort">, raw: string) => {
     setAdvancedParamRaw((prev) => ({ ...prev, [key]: raw }));
     setForm((prev) => {
       const next = { ...prev.advancedParams };
@@ -220,6 +223,17 @@ export const ProviderConfigForm: React.FC<{
         if (!Number.isNaN(num)) {
           next[key] = num;
         }
+      }
+      return { ...prev, advancedParams: next };
+    });
+  }, []);
+  const handleAdvancedParamSelect = useCallback((raw: string) => {
+    setForm((prev) => {
+      const next = { ...prev.advancedParams };
+      if (raw) {
+        next.reasoningEffort = raw;
+      } else {
+        delete next.reasoningEffort;
       }
       return { ...prev, advancedParams: next };
     });
@@ -349,6 +363,9 @@ export const ProviderConfigForm: React.FC<{
     if (ap.topP != null) cleanedParams.topP = Math.min(1, Math.max(0, ap.topP));
     if (ap.frequencyPenalty != null) cleanedParams.frequencyPenalty = Math.min(2, Math.max(-2, ap.frequencyPenalty));
     if (ap.presencePenalty != null) cleanedParams.presencePenalty = Math.min(2, Math.max(-2, ap.presencePenalty));
+    if (ap.reasoningEffort && (REASONING_EFFORT_OPTIONS as readonly string[]).includes(ap.reasoningEffort)) {
+      cleanedParams.reasoningEffort = ap.reasoningEffort;
+    }
 
     const trimmedName = form.name.trim();
     const defaultName = PROVIDER_PRESETS[provider.providerId]?.name ?? "";
@@ -747,6 +764,20 @@ export const ProviderConfigForm: React.FC<{
                 placeholder={t('ai.providers.advancedParams.default')}
                 className="w-full h-8 rounded-md border border-input bg-background px-3 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               />
+            </div>
+            {/* reasoning_effort */}
+            <div className="space-y-1 pl-3">
+              <label className="text-xs text-muted-foreground">reasoning_effort</label>
+              <select
+                value={form.advancedParams.reasoningEffort ?? ""}
+                onChange={(e) => handleAdvancedParamSelect(e.target.value)}
+                className="w-full h-8 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              >
+                <option value="">{t('ai.providers.advancedParams.default')}</option>
+                {REASONING_EFFORT_OPTIONS.map((level) => (
+                  <option key={level} value={level}>{level}</option>
+                ))}
+              </select>
             </div>
           </div>
         )}

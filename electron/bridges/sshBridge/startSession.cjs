@@ -339,6 +339,11 @@ function createStartSessionApi(ctx) {
         _reuseEndpoint: normalizeEndpoint(buildConnectionReuseEndpoint(options, {
           agentForwarding: options._actualAgentForwarding ?? options.agentForwarding,
         })),
+        // Only live SFTP borrowers may use the original password-less profile.
+        // Do not alias the pool: new terminals must still authenticate normally.
+        _sftpReuseEndpoint: options.sftpReuseOptions && !options.sftpReuseOptions.password
+          ? normalizeEndpoint(buildConnectionReuseEndpoint(options.sftpReuseOptions))
+          : null,
         cols: options.cols || 80,
         rows: options.rows || 24,
       };

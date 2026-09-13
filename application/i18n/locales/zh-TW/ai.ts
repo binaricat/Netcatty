@@ -470,6 +470,7 @@ export const zhTWAiMessages: Messages = {
   'ai.chat.useCustomModel': '使用「{id}」',
   'ai.chat.thinkingLevel': '思考強度',
   'ai.chat.thinkingOff': '關閉',
+  'ai.chat.thinkingDefault': '跟隨提供商預設',
   'ai.chat.pinModel': '釘選模型',
   'ai.chat.unpinModel': '取消釘選',
   'ai.chat.loadingModels': '正在載入模型...',

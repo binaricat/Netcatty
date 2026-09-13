@@ -1,5 +1,6 @@
 import React, { useCallback, useMemo } from "react";
 
+import { compareHostAddresses } from "../../domain/hostAddressSort";
 import { upsertKnownHost } from "../../domain/knownHosts";
 import { sortByVaultOrder, sortVaultStringsByOrder } from "../../domain/vaultOrder";
 import { matchesHostSearchQuery, matchesSearchQuery } from "../../lib/searchMatcher";
@@ -122,6 +123,10 @@ export function useVaultHostCollections({
           const groupB = b.group || "";
           const groupCmp = groupA.localeCompare(groupB);
           return groupCmp !== 0 ? groupCmp : a.label.localeCompare(b.label);
+        }
+        case "ip": {
+          const addrCmp = compareHostAddresses(a.hostname, b.hostname);
+          return addrCmp !== 0 ? addrCmp : a.label.localeCompare(b.label);
         }
         default:
           return 0;

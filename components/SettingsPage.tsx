@@ -545,6 +545,8 @@ const SettingsPageContent: React.FC<{ settings: SettingsState; appLock?: AppLock
                                 setHostClickBehavior={settings.setHostClickBehavior}
                                 showOnlyUngroupedHostsInRoot={settings.showOnlyUngroupedHostsInRoot}
                                 setShowOnlyUngroupedHostsInRoot={settings.setShowOnlyUngroupedHostsInRoot}
+                                tabBarPosition={settings.tabBarPosition}
+                                setTabBarPosition={settings.setTabBarPosition}
                                 showSftpTab={settings.showSftpTab}
                                 setShowSftpTab={settings.setShowSftpTab}
                                 showHostTreeSidebar={settings.showHostTreeSidebar}

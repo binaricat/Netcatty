@@ -961,3 +961,43 @@ test("all light-mode ANSI foregrounds remain readable on the default background"
   }
   assert.match(html, /color: var\(--term-custom-ffffff, #ffffff\)[^>]*>white/);
 });
+
+test("screen export preserves rendered rows exactly, including empty screens", async () => {
+  fs.mkdirSync(TEMP_ROOT, { recursive: true });
+  const directory = fs.mkdtempSync(path.join(TEMP_ROOT, "screen-export-"));
+  const filePath = path.join(directory, "screen.txt");
+  const { exportSessionLog } = loadBridgeWithDialog({
+    showSaveDialog: async () => ({ canceled: false, filePath }),
+  });
+  try {
+    for (const terminalData of ["  中文 😀\n\nend\n\n", ""]) {
+      const result = await exportSessionLog(null, {
+        terminalData, plainText: true, hostLabel: "screen", startTime: Date.now(), format: "txt",
+      });
+      assert.equal(result.success, true);
+      assert.equal(fs.readFileSync(filePath, "utf8"), terminalData);
+    }
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("screen export escapes HTML when the user selects an HTML filename", async () => {
+  fs.mkdirSync(TEMP_ROOT, { recursive: true });
+  const directory = fs.mkdtempSync(path.join(TEMP_ROOT, "screen-html-"));
+  const filePath = path.join(directory, "screen.html");
+  const { exportSessionLog } = loadBridgeWithDialog({
+    showSaveDialog: async () => ({ canceled: false, filePath }),
+  });
+  try {
+    await exportSessionLog(null, {
+      terminalData: "<script>alert(1)</script>\n\n", plainText: true,
+      hostLabel: "screen", startTime: Date.now(), format: "txt",
+    });
+    const html = fs.readFileSync(filePath, "utf8");
+    assert.ok(html.includes("&lt;script&gt;alert(1)&lt;/script&gt;\n\n"));
+    assert.ok(!html.includes("<script>"));
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});

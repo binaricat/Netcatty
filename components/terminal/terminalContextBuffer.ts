@@ -40,3 +40,13 @@ export function readTerminalBufferTextRange(
   }
   return lines.join("\n");
 }
+
+/** Read the rendered viewport, preserving its physical row boundaries. */
+export function readTerminalScreenText(term: Pick<XTerm, "buffer" | "cols" | "rows">): string {
+  const buffer = term.buffer.active;
+  const startLine = buffer.type === "alternate" ? 0 : buffer.viewportY;
+  return readActiveTerminalBufferTextRange(term, {
+    startLine,
+    endLine: Math.min(buffer.length, startLine + term.rows) - 1,
+  });
+}

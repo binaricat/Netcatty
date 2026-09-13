@@ -417,6 +417,7 @@ export const enVaultMessages: Messages = {
   'sftp.goUp': 'Go up',
   'sftp.goToTerminalCwd': 'Go to terminal directory',
   'sftp.locatePathInTerminal': 'Open path in terminal',
+  'sftp.refreshAfterCommand': 'Refresh after terminal commands',
   'sftp.followTerminalCwd': 'Follow terminal directory',
   'sftp.followTerminalCwd.enable': 'Enable follow terminal directory',
   'sftp.followTerminalCwd.disable': 'Disable follow terminal directory',

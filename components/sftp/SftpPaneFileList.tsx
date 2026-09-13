@@ -196,7 +196,23 @@ export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = React.memo(({
     return () => sftpListOrderStore.clearPane(pane.id);
   }, [sortedDisplayFiles, pane.id]);
 
+  const selectionScrollContext = useMemo(() => ({
+    paneId: pane.id, filter: pane.filter, showHiddenFiles: pane.showHiddenFiles,
+    sortField, sortOrder, directoriesFirst, rowHeight, shouldVirtualize,
+  }), [
+    pane.id, pane.filter, pane.showHiddenFiles, sortField, sortOrder,
+    directoriesFirst, rowHeight, shouldVirtualize,
+  ]);
+  const lastScrolledSelectionRef = useRef<{
+    selection: Set<string>;
+    context: object;
+  } | null>(null);
   useEffect(() => {
+    // Refreshes preserve selection identity; explicit sorting/filter/layout
+    // changes still reveal the selected row using the usual behavior.
+    const last = lastScrolledSelectionRef.current;
+    if (last?.selection === pane.selectedFiles && last.context === selectionScrollContext) return;
+    lastScrolledSelectionRef.current = { selection: pane.selectedFiles, context: selectionScrollContext };
     if (pane.selectedFiles.size !== 1) return;
     const selectedName = Array.from(pane.selectedFiles)[0];
     if (!selectedName) return;
@@ -220,7 +236,7 @@ export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = React.memo(({
       currentScrollTop: container.scrollTop,
       viewportHeight: container.clientHeight,
     });
-  }, [fileListRef, pane.selectedFiles, rowHeight, shouldVirtualize, sortedDisplayFiles]);
+  }, [fileListRef, pane.selectedFiles, rowHeight, selectionScrollContext, shouldVirtualize, sortedDisplayFiles]);
 
   // Use refs for frequently-changing values in context-menu actions
   const selectedFilesRef = useRef(pane.selectedFiles);
