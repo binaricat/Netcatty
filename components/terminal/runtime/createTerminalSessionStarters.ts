@@ -60,6 +60,7 @@ import { hasConnectionPassedTcpDial } from "../connectionTimeouts";
 import { resolveHostSshConnectionTimeouts } from "../../../domain/sshConnectionTimeouts";
 import { isPluginHostProtocol, sanitizePluginConnection } from "../../../domain/pluginConnection";
 import { hydrateVaultStoredKeys } from "../../../infrastructure/persistence/secureFieldAdapter";
+import { buildSftpHostCredentials } from "../../../application/state/sftp/useSftpHostCredentials";
 
 const collectConnectKeyIds = (
   host: Host,
@@ -647,6 +648,23 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         );
         const connectionTimeouts = resolveHostSshConnectionTimeouts(ctx.host);
         const requiresFreshSshConnection = ctx.shouldUseFreshSshConnection?.() === true;
+        // Keep the original profile identity for SFTP borrowing when the user
+        // supplies a password for this terminal only. Never persist that password.
+        let sftpReuseOptions: NetcattySSHOptions | undefined;
+        if (pendingAuth?.authMethod === "password" && !pendingAuth.savedToHost) {
+          try {
+            sftpReuseOptions = buildSftpHostCredentials({
+              host: ctx.host,
+              hosts: ctx.resolvedChainHosts,
+              keys,
+              identities: ctx.identities ?? [],
+              knownHosts: ctx.knownHosts,
+              terminalSettings: globalTerminalSettings,
+            });
+          } catch {
+            // A broken saved credential must not prevent a manual SSH login.
+          }
+        }
         const startedSessionId = await ctx.terminalBackend.startSSHSession({
           sessionId: ctx.sessionId,
           hostLabel: ctx.host.label,
@@ -657,6 +675,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
           requiresMfa: !!ctx.host.requiresMfa,
           port: ctx.host.port || 22,
           password: attempt.password,
+          sftpReuseOptions: sftpReuseOptions?.password ? undefined : sftpReuseOptions,
           privateKey: attempt.key?.source === 'reference' ? undefined : (sanitizeCredentialValue(attempt.key?.privateKey) || undefined),
           certificate: attempt.key?.certificate,
           publicKey: attempt.key?.publicKey,
