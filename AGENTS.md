@@ -94,7 +94,7 @@ Placement rules (`resolveAgentKinds` in `toolSurfaces.cjs`):
 |---------|-------------------|--------|
 | Catty (sidebar) tools | `npm run generate:capability-tools` → `infrastructure/ai/harness/generated/cattyToolSpecs.json` | Sidebar agent tool set. CI verifies JSON drift. |
 | Global agent tools | same script → `globalAgentToolSpecs.json` | Prepared for future global agent runtime; shared RPC tools only today. |
-| MCP stdio | `electron/capabilities/codegen/mcpToolRegistry.cjs` → `electron/mcp/netcatty-mcp-server.cjs` | Registry-driven; external agents. Harness tools are **not** on MCP. |
+| MCP stdio | `electron/capabilities/codegen/mcpToolRegistry.cjs` → `electron/mcp/netcatty-mcp-server.cjs` | Registry-driven; external agents. Only `harness.terminal.read_context` is also on MCP. |
 | CLI | `electron/cli/netcatty-tool-cli.cjs` + `electron/capabilities/adapters/cliAdapter.cjs` | **30** catalog commands; exec/sftp/session remain special-case; vault/portforward/snippets use catalog fallback dispatch |
 | RPC dispatch | `electron/bridges/mcpServerBridge.cjs` + `capabilityRpcDispatch.cjs` | `netcatty/*` builtin handlers via `buildBuiltinRpcHandlerRegistry` (catalog-aligned); `public/*`, `vault/*`, `portforward/*` → services |
 | Vault bridge | `electron/bridges/aiBridge/vaultAgentBridge.cjs` + `infrastructure/ai/vaultAgentBridgeClient.ts` | Renderer vault state; **never** returns password/privateKey |
@@ -104,7 +104,7 @@ Placement rules (`resolveAgentKinds` in `toolSurfaces.cjs`):
 
 **Handles:** `ToolOutputStore` persists across turns per chat session; cleared on chat session delete. Large `sftp.read` results spill to `tool_output_read`.
 
-**Harness domain (`catalog/harness.cjs`):** Catty-only surface (`surfaces.catty.toolName`). Registered in the capability catalog but executed locally in `capabilityTools.executeLocalCattyCapability` (not MCP/CLI). `harness.web.search` is omitted when web search is not configured.
+**Harness domain (`catalog/harness.cjs`):** Catty executes these locally in `capabilityTools.executeLocalCattyCapability`. The read-only `harness.terminal.read_context` also exposes `netcatty/readContext` to MCP, with scope validation before and after the existing renderer bridge call. It reuses the sidebar reader through the screen snapshot registry (80 rows by default, maximum 300); no script or command runs. Other harness tools remain Catty-only. `harness.web.search` is omitted when web search is not configured.
 
 ## Plugin host runtime (internal preview)
 

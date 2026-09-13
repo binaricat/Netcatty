@@ -2841,8 +2841,8 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         currentRow: buffer.baseY + buffer.cursorY,
         lines,
       };
-    });
-  }, [sessionId]);
+    }, readTerminalContext);
+  }, [readTerminalContext, sessionId]);
 
   useEffect(() => {
     const startHandler = (event: Event) => {

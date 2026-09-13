@@ -2256,8 +2256,8 @@
   {
     "capabilityId": "harness.terminal.read_context",
     "toolName": "terminal_read_context",
-    "rpcMethod": null,
-    "localExecution": true,
+    "rpcMethod": "netcatty/readContext",
+    "localExecution": false,
     "description": "Read a bounded slice of the current terminal screen or scrollback from the active AI scope.",
     "inputShape": {
       "sessionId": {

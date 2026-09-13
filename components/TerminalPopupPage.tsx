@@ -1,3 +1,4 @@
+import { setupVaultAgentBridge } from "../infrastructure/ai/vaultAgentBridgeClient";
 import { Copy, Minus, Square, Unplug, X } from 'lucide-react';
 import React, { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { I18nProvider, useI18n } from '../application/i18n/I18nProvider';
@@ -537,6 +538,8 @@ export default function TerminalPopupPage({
   settings: SettingsState;
   allowTerminalStart?: boolean;
 }) {
+  useEffect(() => setupVaultAgentBridge(), []);
+
   return (
     <I18nProvider locale={settings.uiLanguage}>
       <TerminalPopupPageInner
