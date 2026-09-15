@@ -183,6 +183,8 @@ declare global {
     name: string;
     type: 'file' | 'directory' | 'symlink';
     size: number;
+    /** False when the endpoint cannot report a size (stat-less SCP); size is a placeholder 0. */
+    sizeKnown?: boolean;
     lastModified: number; // timestamp
     permissions?: string; // e.g., "rwxr-xr-x"
     owner?: string;

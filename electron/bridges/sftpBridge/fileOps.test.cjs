@@ -512,3 +512,62 @@ test("listSftp includes owner from longname and falls back to uid", async () => 
   assert.equal(entries[1].name, "uid-only.bin");
   assert.equal(entries[1].owner, "1000");
 });
+
+test("statSftp maps an unknown SCP stat size to 0 at the renderer boundary", async () => {
+  // A stat-less SCP host reports size: undefined internally so backend
+  // size-sensitive checks can skip it, but SftpStatResult.size must stay a
+  // number for the renderer (conflict dialog / TransferTask.totalBytes).
+  const client = { __netcattyFileProtocol: "scp" };
+  client.__netcattyScpBackend = {
+    stat: async () => ({
+      type: "file",
+      isDirectory: false,
+      isSymbolicLink: false,
+      size: undefined,
+      modifyTime: 1000,
+      mode: 0o100644,
+      permissions: "rw-r--r--",
+      path: "/tmp/data.bin",
+    }),
+  };
+  const api = createFileOpsApi({
+    sftpClients: new Map([["scp-1", client]]),
+    path: require("node:path"),
+    resolveEncodingForRequest: () => "utf-8",
+    encodePath: (remotePath) => remotePath,
+    requireSftpChannel: async () => { throw new Error("SFTP channel must not be used in SCP mode"); },
+  });
+
+  const result = await api.statSftp(null, { sftpId: "scp-1", path: "/tmp/data.bin" });
+  assert.equal(result.size, 0);
+  assert.equal(typeof result.size, "number");
+  assert.equal(result.sizeKnown, false);
+  assert.equal(result.type, "file");
+});
+
+test("statSftp marks a real SCP stat size as known", async () => {
+  const client = { __netcattyFileProtocol: "scp" };
+  client.__netcattyScpBackend = {
+    stat: async () => ({
+      type: "file",
+      isDirectory: false,
+      isSymbolicLink: false,
+      size: 4096,
+      modifyTime: 1000,
+      mode: 0o100644,
+      permissions: "rw-r--r--",
+      path: "/tmp/data.bin",
+    }),
+  };
+  const api = createFileOpsApi({
+    sftpClients: new Map([["scp-1", client]]),
+    path: require("node:path"),
+    resolveEncodingForRequest: () => "utf-8",
+    encodePath: (remotePath) => remotePath,
+    requireSftpChannel: async () => { throw new Error("SFTP channel must not be used in SCP mode"); },
+  });
+
+  const result = await api.statSftp(null, { sftpId: "scp-1", path: "/tmp/data.bin" });
+  assert.equal(result.size, 4096);
+  assert.equal(result.sizeKnown, true);
+});

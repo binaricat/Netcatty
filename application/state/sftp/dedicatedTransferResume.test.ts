@@ -696,6 +696,67 @@ test("single-file restart resume continues from checkpoint without page callback
   }
 });
 
+test("stat-less SCP download resume keeps saved progress instead of restarting", async (t) => {
+  resetDedicatedSessionOpenGateForTests();
+  const previousLocalStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+  Object.defineProperty(globalThis, "localStorage", {
+    configurable: true,
+    value: { getItem: () => "2", setItem: () => {}, removeItem: () => {} },
+  });
+  t.after(() => {
+    if (previousLocalStorage) Object.defineProperty(globalThis, "localStorage", previousLocalStorage);
+    else Reflect.deleteProperty(globalThis, "localStorage");
+  });
+  const originalGet = netcattyBridge.get;
+  let startOptions: Record<string, unknown> | undefined;
+  (netcattyBridge as { get: () => unknown }).get = () => ({
+    openSftp: async () => "dedicated-sftp",
+    closeSftp: async () => {},
+    // Stat-less SCP host: size cannot be measured, so the bridge reports the
+    // placeholder 0 with sizeKnown false.
+    statSftp: async () => ({ type: "file", size: 0, lastModified: 5, sizeKnown: false }),
+    startStreamTransfer: async (options: Record<string, unknown>) => {
+      startOptions = options;
+      return { transferId: "scp-download-resume" };
+    },
+  });
+  try {
+    const result = await resumeTransferWithDedicatedSession({
+      id: "scp-download-resume",
+      fileName: "file.bin",
+      sourcePath: "/remote/file.bin",
+      targetPath: "/local/file.bin",
+      sourceConnectionId: "old-sftp",
+      sourceHostId: "h1",
+      sourceHostLabel: "box",
+      targetConnectionId: "local",
+      direction: "download",
+      status: "interrupted",
+      totalBytes: 100,
+      transferredBytes: 20,
+      checkpointBytes: 20,
+      sourceLastModified: 5,
+      speed: 0,
+      startTime: 1,
+      isDirectory: false,
+      reconnectRequired: true,
+    }, {
+      hosts: [host("h1", "box", "1.2.3.4")],
+      keys: [],
+      identities: [],
+    });
+
+    assert.equal(result.success, true, result.error);
+    // Unknown size must not misread the saved checkpoint as a shrunk source;
+    // the download resumes from byte 20 instead of silently restarting.
+    assert.equal(startOptions?.checkpointBytes, 20);
+    assert.equal(startOptions?.totalBytes, 100);
+  } finally {
+    (netcattyBridge as { get: typeof originalGet }).get = originalGet;
+    resetDedicatedSessionOpenGateForTests();
+  }
+});
+
 test("folder restart resume reports file-count progress without child page callbacks", async (t) => {
   resetDedicatedSessionOpenGateForTests();
   const previousLocalStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");

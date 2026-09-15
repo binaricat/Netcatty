@@ -671,6 +671,7 @@ async function resumeSingleFileWithDedicatedSession(
             const validationError = validateTransferResumeSource(task, {
               size: sourceStat.size,
               lastModified: sourceStat.lastModified,
+              sizeKnown: sourceStat.sizeKnown,
             }, { allowSourceGrowth });
             const classified = classifyResumeSourceValidationError(validationError);
             if (classified.kind === "modified") {
@@ -1206,6 +1207,7 @@ async function resumeDirectoryWithDedicatedSession(
               const validationError = validateTransferResumeSource(childBase, {
                 size: sourceStat.size,
                 lastModified: sourceStat.lastModified,
+                sizeKnown: sourceStat.sizeKnown,
               }, { allowSourceGrowth });
               const classified = classifyResumeSourceValidationError(validationError);
               if (classified.kind === "restart") {
@@ -1236,16 +1238,23 @@ async function resumeDirectoryWithDedicatedSession(
                 // zero-byte plans (`||` would incorrectly promote to grown size).
                 const plannedBytes = Number(childBase.totalBytes);
                 const hasPlannedBytes = Number.isFinite(plannedBytes) && plannedBytes >= 0;
+                // Stat-less SCP sources report size as a placeholder 0; keep the
+                // planned size rather than re-planning to a fake zero.
+                const sourceSizeKnown = sourceStat.sizeKnown !== false && Number.isFinite(sourceStat.size);
                 childBase = {
                   ...childBase,
-                  totalBytes: allowSourceGrowth
-                    ? (hasPlannedBytes ? plannedBytes : sourceStat.size)
-                    : (sourceStat.size || childBase.totalBytes),
-                  sourceLastModified: allowSourceGrowth
-                    && hasPlannedBytes
-                    && sourceStat.size > plannedBytes
-                    ? (childBase.sourceLastModified ?? sourceStat.lastModified)
-                    : (sourceStat.lastModified ?? childBase.sourceLastModified),
+                  totalBytes: !sourceSizeKnown
+                    ? childBase.totalBytes
+                    : allowSourceGrowth
+                      ? (hasPlannedBytes ? plannedBytes : sourceStat.size)
+                      : (sourceStat.size || childBase.totalBytes),
+                  sourceLastModified: !sourceSizeKnown
+                    ? (sourceStat.lastModified ?? childBase.sourceLastModified)
+                    : allowSourceGrowth
+                      && hasPlannedBytes
+                      && sourceStat.size > plannedBytes
+                      ? (childBase.sourceLastModified ?? sourceStat.lastModified)
+                      : (sourceStat.lastModified ?? childBase.sourceLastModified),
                 };
               }
 

@@ -1132,6 +1132,45 @@ test("SCP upload aborts while staged size verification is pending", async () => 
   assert.equal(removedStage, true);
 });
 
+test("SCP upload succeeds when the remote cannot report file sizes", async () => {
+  // #3399: devices without SFTP (and without a usable stat binary) report the
+  // "?" unknown-size marker after a successful scp -t upload. The staged size
+  // verification must skip instead of failing with "Upload size mismatch ...
+  // got 0" while download on the same device works.
+  let renameCalls = 0;
+  let uploadCalls = 0;
+  const backend = {
+    async stat(remotePath) {
+      if (String(remotePath).includes(".netcatty-backup-")) {
+        const error = new Error("No such file");
+        error.code = "ENOENT";
+        throw error;
+      }
+      // Mimic parseStatRecord on a stat-less device: type/mode known, size unknown.
+      return { type: "file", isDirectory: false, isSymbolicLink: false, size: undefined };
+    },
+    async rename() {
+      renameCalls += 1;
+    },
+    async remove() {},
+  };
+  const client = {
+    __netcattyFileProtocol: "scp",
+    __netcattyScpBackend: backend,
+  };
+
+  const result = await sftpBridge.runRemoteUploadTransaction(client, "/tmp/local.bin", "/tmp/remote.bin", {
+    expectedSize: 7,
+    async uploadFile() {
+      uploadCalls += 1;
+    },
+  });
+  assert.equal(result?.staged, true);
+  assert.equal(uploadCalls, 1);
+  // Existing target moves to backup, then the stage promotes to the final path.
+  assert.equal(renameCalls, 2);
+});
+
 test("staged basenames stay within the remote NAME_MAX budget", async (t) => {
   const tempRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-long-name-"));
   t.after(async () => {

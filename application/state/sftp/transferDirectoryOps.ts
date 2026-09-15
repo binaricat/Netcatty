@@ -118,6 +118,10 @@ async function tryStatTransferPath(
     if (!sftpId) return null;
     const stat = await netcattyBridge.get()?.statSftp?.(sftpId, filePath, encoding);
     if (!stat || stat.type === "directory") return null;
+    // Stat-less SCP endpoints report size as a placeholder 0 (sizeKnown false).
+    // Treat that as missing metadata so skip-unchanged is disabled rather than
+    // comparing a fake zero against the other endpoint (Codex P1).
+    if (stat.sizeKnown === false) return null;
     return { size: Number(stat.size) || 0, lastModified: Number(stat.lastModified) || 0, type: stat.type };
   } catch {
     return null;
