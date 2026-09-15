@@ -298,6 +298,12 @@ function createWorkerAiExecHandler({
             data: `${marker}_R\n`,
           });
         },
+        onEchoSuppressionPrime: (marker) => {
+          event?.sender?.send?.("netcatty:data", {
+            sessionId,
+            data: `${marker}_I\n`,
+          });
+        },
         chatSessionId,
         expectedPrompt: getFreshIdlePrompt(session),
         typedInput: true,
@@ -500,6 +506,12 @@ function createWorkerAiJobStartHandler({
           event?.sender?.send?.("netcatty:data", {
             sessionId,
             data: `${marker}_R\n`,
+          });
+        },
+        onEchoSuppressionPrime: (marker) => {
+          event?.sender?.send?.("netcatty:data", {
+            sessionId,
+            data: `${marker}_I\n`,
           });
         },
         chatSessionId,

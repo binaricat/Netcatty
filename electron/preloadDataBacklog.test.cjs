@@ -1802,6 +1802,34 @@ test("OpenWrt bounded wrapper continuations stay hidden across fragmented echoes
   }
 });
 
+test("primed suppression hides BusyBox ash echo wrapped mid-marker (#3384)", () => {
+  const preload = loadPreloadWithFakeElectron();
+  try {
+    const received = [];
+    const sessionId = 'ash-wrap';
+    const marker = '__NCMCP_mttikd5b_ccbc892e865a115a80c88afdc77b96a6__';
+    preload.api.onSessionData(sessionId, chunk => received.push(chunk));
+    // The exec bridge primes display suppression over the data channel before
+    // the wrapper is typed, mirroring onEchoSuppressionPrime in ptyExec.cjs.
+    preload.handlers.get('netcatty:data')({}, { sessionId, data: `${marker}_I\n` });
+    // BusyBox ash's line editor breaks the echoed first wrapper line at the
+    // terminal width, so the second PTY line carries no complete __NCMCP_
+    // marker and the per-line echo filter alone cannot drop it.
+    const firstLine = ` ${marker}=0; printf '\\n%s\\n' '${marker}_I'`;
+    const secondLine = ` : '${marker}'; ${marker}_cmd='echo visible-output'; \\`;
+    const echo = `${firstLine.slice(0, 55)}\r\n${firstLine.slice(55)}\r\n`
+      + `${secondLine.slice(0, 70)}\r\n${secondLine.slice(70)}\r\n`
+      + `> : '${marker}'; printf '%s\\n' '${marker}_S'\r\n`;
+    const data = `${echo}\n${marker}_S\r\nvisible-output\r\n${marker}_E:0\r\n`;
+    for (let offset = 0; offset < data.length; offset += 7) {
+      preload.handlers.get('netcatty:data')({}, { sessionId, data: data.slice(offset, offset + 7) });
+    }
+    assert.equal(received.join(''), 'visible-output\r\n');
+  } finally {
+    preload.cleanup();
+  }
+});
+
 
 test("ordinary text resembling an OpenWrt continuation is released", async () => {
   const preload = loadPreloadWithFakeElectron();

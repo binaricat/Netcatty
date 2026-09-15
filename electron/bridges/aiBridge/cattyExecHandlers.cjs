@@ -182,6 +182,10 @@ function registerCattyExecHandlers(ctx) {
               const contents = electronModule?.webContents?.fromId?.(session.webContentsId);
               safeSend(contents, "netcatty:data", { sessionId, data: `${marker}_R\n` });
             },
+            onEchoSuppressionPrime: (marker) => {
+              const contents = electronModule?.webContents?.fromId?.(session.webContentsId);
+              safeSend(contents, "netcatty:data", { sessionId, data: `${marker}_I\n` });
+            },
             chatSessionId,
             expectedPrompt: getFreshIdlePrompt(session),
             typedInput: true,

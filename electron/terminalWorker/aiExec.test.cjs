@@ -145,6 +145,7 @@ test("worker AI background jobs start, poll, stop, and block overlapping exec", 
   assert.equal(started.command, "npm test");
   assert.equal(started.status, "running");
   assert.equal(started.outputMode, "foreground-mirrored");
+  const marker = await extractMarker(pty.writes);
   assert.deepEqual(event.rendererMessages, [
     {
       channel: "netcatty:data",
@@ -154,9 +155,14 @@ test("worker AI background jobs start, poll, stop, and block overlapping exec", 
         syntheticEcho: true,
       },
     },
+    {
+      channel: "netcatty:data",
+      payload: {
+        sessionId: "ssh-1",
+        data: `${marker}_I\n`,
+      },
+    },
   ]);
-
-  const marker = await extractMarker(pty.writes);
   pty.emit("data", `${marker}_S\r\nready\r\n`);
   await nextTick();
 

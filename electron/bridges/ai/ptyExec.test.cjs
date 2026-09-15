@@ -1420,3 +1420,44 @@ test("startPtyJob types the wrapper one code point per write for strict bastions
   assert.equal(result.ok, false);
   assert.equal(result.error, "Cancelled");
 });
+
+test("echo suppression prime is delivered before the first typed input (#3384)", async () => {
+  for (const probeLiveShell of [false, true]) {
+    const pty = new EventEmitter();
+    const events = [];
+    pty.write = (data) => {
+      if (data === "\x03") return;
+      events.push(`write:${data}`);
+    };
+    const job = startPtyJob(pty, "echo prime-order", {
+      shellKind: "posix",
+      probeLiveShell,
+      timeoutMs: 1000,
+      onEchoSuppressionPrime: (marker) => events.push(`prime:${marker}`),
+    });
+    assert.equal(events[0], `prime:${job.marker}`, "prime precedes every typed byte");
+    assert.ok((events[1] || "").startsWith("write:"), "first write follows the prime");
+    assert.equal(events.filter((event) => event.startsWith("prime:")).length, 1);
+    if (probeLiveShell) {
+      pty.emit("data", `${job.marker}_P:sh\n${job.marker}_Q`);
+    }
+    pty.emit("data", `${job.marker}_S\ndone\n${job.marker}_E:0\n`);
+    const result = await job.resultPromise;
+    assert.equal(result.ok, true, JSON.stringify(result));
+  }
+});
+
+test("a throwing echo suppression prime callback still types the command (#3384)", () => {
+  const writes = [];
+  const pty = new EventEmitter();
+  pty.write = (data) => writes.push(String(data));
+  const job = startPtyJob(pty, "echo resilient", {
+    shellKind: "posix",
+    timeoutMs: 1000,
+    onEchoSuppressionPrime: () => {
+      throw new Error("Renderer closed");
+    },
+  });
+  assert.ok(writes.some((data) => data.includes("echo resilient")));
+  job.cancel();
+});

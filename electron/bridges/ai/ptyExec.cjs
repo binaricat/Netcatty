@@ -64,6 +64,7 @@ function startPtyJob(ptyStream, command, options) {
     expectedPrompt,
     typedInput = false,
     echoCommand,
+    onEchoSuppressionPrime,
     maxBufferedChars = 0,
     normalizeFinalOutput = true,
     enforceWallTimeout = false,
@@ -812,6 +813,21 @@ function startPtyJob(ptyStream, command, options) {
     writeInput(`${buildPendingInputClearPrefix(resolvedShellKind)}${wrapped}`);
   }
 
+  // Prime the renderer's display suppression before the first byte is typed
+  // (issue #3384). Shells whose line editor echoes input, such as BusyBox ash
+  // on OpenWrt, break long echoed lines at the terminal width with CR/LF; the
+  // wrapped fragments no longer contain the marker and would leak through the
+  // per-line echo filter as visible "variables" until the wrapper's own
+  // _I printf runs. Delivering the _I line over the data channel up front
+  // suppresses the whole echo; the _S output releases it, and finish() sends
+  // the _R reset (onProbeAborted) when the command never starts.
+  if (typeof onEchoSuppressionPrime === "function") {
+    try {
+      onEchoSuppressionPrime(marker);
+    } catch {
+      // Display suppression must never prevent the command from starting.
+    }
+  }
   if (probingShell) {
     writeInput(`${buildPendingInputClearPrefix(resolvedShellKind)}${buildLiveShellProbe(marker)}`);
   } else {
