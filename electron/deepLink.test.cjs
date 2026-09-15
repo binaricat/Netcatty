@@ -92,6 +92,142 @@ test("collectSshDeepLinkQueueItems keeps PuTTY CLI launches when scheme URLs are
   );
 });
 
+test("collectPuttyStyleDeepLinkUrls converts SecureCRT-style argv", () => {
+  assert.deepEqual(
+    collectPuttyStyleDeepLinkUrls([
+      String.raw`C:\Program Files\Netcatty\Netcatty.exe`,
+      "/SSH2",
+      "/L",
+      "alice",
+      "/P",
+      "2222",
+      "/PASSWORD",
+      "s3cret",
+      "10.0.0.8",
+    ]),
+    { ssh: ["ssh://alice:s3cret@10.0.0.8:2222"], telnet: [] },
+  );
+});
+
+test("collectPuttyStyleDeepLinkUrls routes SecureCRT /TELNET to the telnet queue", () => {
+  assert.deepEqual(
+    collectPuttyStyleDeepLinkUrls([
+      "Netcatty.exe",
+      "/TELNET",
+      "old.example.com",
+      "/P",
+      "2323",
+    ]),
+    { ssh: [], telnet: ["telnet://old.example.com:2323"] },
+  );
+});
+
+test("collectSshDeepLinkQueueItems keeps SecureCRT CLI launches when scheme URLs are disabled", () => {
+  assert.deepEqual(
+    collectSshDeepLinkQueueItems([
+      "Netcatty.exe",
+      "/SSH2",
+      "/L",
+      "alice",
+      "/P",
+      "2222",
+      "/PASSWORD",
+      "s3cret",
+      "10.0.0.8",
+    ], { includeSchemeUrls: false }),
+    { ssh: [{ rawUrl: "ssh://alice:s3cret@10.0.0.8:2222", viaCommandLine: true }], telnet: [] },
+  );
+});
+
+test("collectPuttyStyleDeepLinkUrls connects SecureCRT launches whose password looks like a scheme URL", () => {
+  // (#3391) A /PASSWORD value starting with ssh:// must never win the
+  // scheme-token early return: the whole CLI launch would be dropped.
+  assert.deepEqual(
+    collectPuttyStyleDeepLinkUrls([
+      "Netcatty.exe",
+      "/SSH2",
+      "/L",
+      "alice",
+      "/PASSWORD",
+      "ssh://s3cret",
+      "10.0.0.8",
+    ]),
+    { ssh: ["ssh://alice:ssh%3A%2F%2Fs3cret@10.0.0.8"], telnet: [] },
+  );
+});
+
+test("collectSshDeepLinkQueueItems does not queue SecureCRT password values as scheme links", () => {
+  // (#3391) With scheme handling enabled, the password operand must not be
+  // queued as a standalone ssh:// link to host "s3cret".
+  assert.deepEqual(
+    collectSshDeepLinkQueueItems([
+      "Netcatty.exe",
+      "/SSH2",
+      "/L",
+      "alice",
+      "/PASSWORD",
+      "ssh://s3cret",
+      "10.0.0.8",
+    ], { includeSchemeUrls: true }),
+    { ssh: [{ rawUrl: "ssh://alice:ssh%3A%2F%2Fs3cret@10.0.0.8", viaCommandLine: true }], telnet: [] },
+  );
+});
+
+test("collectSshDeepLinkQueueItems filters password operands even when the SecureCRT parse fails", () => {
+  // (#3391) `/P 99999` makes the launch unparseable, but the /PASSWORD value
+  // was already consumed as a credential: it must not be queued as a
+  // standalone ssh:// link to host "s3cret".
+  assert.deepEqual(
+    collectSshDeepLinkQueueItems([
+      "Netcatty.exe",
+      "/SSH2",
+      "/PASSWORD",
+      "ssh://s3cret",
+      "/P",
+      "99999",
+      "10.0.0.8",
+    ], { includeSchemeUrls: true }),
+    { ssh: [], telnet: [] },
+  );
+});
+
+test("collectSshDeepLinkQueueItems keeps genuine scheme links alongside a failed SecureCRT parse", () => {
+  // A failed parse must only filter credential operands, not every consumed
+  // index, so genuine scheme links in the same argv still queue.
+  assert.deepEqual(
+    collectSshDeepLinkQueueItems([
+      "Netcatty.exe",
+      "/SSH2",
+      "/PASSWORD",
+      "s3cret",
+      "/P",
+      "99999",
+      "10.0.0.8",
+      "ssh://bob@example.com",
+    ], { includeSchemeUrls: true }),
+    { ssh: [{ rawUrl: "ssh://bob@example.com", viaCommandLine: false }], telnet: [] },
+  );
+});
+
+test("collectSshDeepLinkQueueItems does not double-queue tokens a SecureCRT parse consumed", () => {
+  // A scheme-shaped positional is part of the command line (host spec), so it
+  // must not also be queued as a standalone scheme link.
+  assert.deepEqual(
+    collectSshDeepLinkQueueItems([
+      "Netcatty.exe",
+      "/SSH2",
+      "/PASSWORD",
+      "s3cret",
+      "10.0.0.8",
+      "ssh://bob@example.com",
+    ], { includeSchemeUrls: true }),
+    // parseHostSpec treats "ssh://bob@example.com" as user "ssh://bob" (the
+    // pre-existing best-host-score behavior); the point is it is not also
+    // queued as a standalone scheme link.
+    { ssh: [{ rawUrl: "ssh://ssh%3A%2F%2Fbob:s3cret@example.com", viaCommandLine: true }], telnet: [] },
+  );
+});
+
 test("collectSshDeepLinkQueueItems keeps scheme URL gating separate from CLI launches", () => {
   const queueItems = collectSshDeepLinkQueueItems(
     ["/Applications/Netcatty.app/Contents/MacOS/Netcatty", "ssh://alice@example.com"],

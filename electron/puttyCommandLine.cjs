@@ -268,6 +268,11 @@ function redactPuttyCommandLinePasswords(argv) {
 }
 
 module.exports = {
+  parseHostSpec,
+  hostCandidateScore,
+  isElectronNoiseArg,
+  parsePort,
   parsePuttyCommandLine,
   redactPuttyCommandLinePasswords,
+  toDeepLinkUrl,
 };

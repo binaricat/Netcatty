@@ -7,6 +7,7 @@ const vm = require("node:vm");
 const {
   collectSshDeepLinkQueueItems,
   redactPuttyCommandLinePasswords,
+  redactSecureCrtCommandLinePasswords,
 } = require("./deepLink.cjs");
 
 test("second instance forwards its raw argv through the single-instance lock", () => {
@@ -94,6 +95,7 @@ for (const gotLock of [true, false]) {
     const context = vm.createContext({
       process: { argv },
       redactPuttyCommandLinePasswords,
+      redactSecureCrtCommandLinePasswords,
       app: {
         requestSingleInstanceLock(data) {
           // Electron serializes additionalData synchronously in this call.

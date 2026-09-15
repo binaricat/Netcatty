@@ -76,6 +76,7 @@ const {
   collectSshDeepLinkQueueItems,
   getSshDeepLinkRendererReadyTimeoutMs,
   redactPuttyCommandLinePasswords,
+  redactSecureCrtCommandLinePasswords,
   isJmsDeepLinkUrl,
   isSshDeepLinkUrl,
   isTelnetDeepLinkUrl,
@@ -706,6 +707,7 @@ const pendingTelnetDeepLinkUrls = [...initialDeepLinkQueueItems.telnet];
 // masked password.
 const rawLaunchArgvForHandoff = [...process.argv];
 redactPuttyCommandLinePasswords(process.argv);
+redactSecureCrtCommandLinePasswords(process.argv);
 const pendingOpenTerminalPaths = resolveOpenTerminalPathsFromArgs(process.argv);
 let flushingSshDeepLinks = false;
 let flushingTelnetDeepLinks = false;
@@ -1244,6 +1246,7 @@ if (!gotLock) {
       includeSchemeUrls: sshDeepLinkEnabled,
     });
     redactPuttyCommandLinePasswords(secondInstanceArgv);
+    redactSecureCrtCommandLinePasswords(secondInstanceArgv);
     if (rawLaunchArgv) {
       // Parsing and subsequent routing use the independent ordered copy.
       // Release both consumed transport buffers: Chromium may have moved the
