@@ -407,3 +407,83 @@ test("abortTerminalWriteQueue reports ingress accounting instead of display sche
 
   assert.deepEqual(dropped, [80]);
 });
+
+test("replacePendingKey keeps only the newest pending frame and reports ingress bytes", () => {
+  const term = createFakeTerm();
+  const order: string[] = [];
+  const dropped: number[] = [];
+  let releaseActive: (() => void) | null = null;
+
+  enqueueTerminalWrite(term, 1, (done) => {
+    order.push("active");
+    releaseActive = done;
+  });
+  enqueueTerminalWrite(term, 10, (done) => {
+    order.push("old-frame");
+    done();
+  }, {
+    dropBytes: 100,
+    replacePendingKey: "tui-frame",
+    onDropped: (bytes) => dropped.push(bytes),
+  });
+  enqueueTerminalWrite(term, 2, (done) => {
+    order.push("ordinary-output");
+    done();
+  });
+  enqueueTerminalWrite(term, 20, (done) => {
+    order.push("new-frame");
+    done();
+  }, {
+    dropBytes: 200,
+    replacePendingKey: "tui-frame",
+  });
+
+  assert.deepEqual(order, ["active"]);
+  assert.deepEqual(dropped, [100]);
+  releaseActive?.();
+  assert.deepEqual(order, ["active", "ordinary-output", "new-frame"]);
+});
+
+test("replacePendingKey removes superseded steps from a merged flood item", async () => {
+  const term = createFakeTerm();
+  const order: string[] = [];
+  const dropped: number[] = [];
+  let releaseActive: (() => void) | null = null;
+
+  enqueueTerminalWrite(term, 1, (done) => {
+    releaseActive = done;
+  });
+  enqueueTerminalWrite(term, 10, (done) => {
+    order.push("old-frame");
+    done();
+  }, {
+    dropBytes: 75,
+    replacePendingKey: "tui-frame",
+    onDropped: (bytes) => dropped.push(bytes),
+  });
+  for (let index = 0; index < MAX_WRITE_QUEUE_ITEMS; index += 1) {
+    enqueueTerminalWrite(term, 1, (done) => {
+      order.push(`ordinary-${index}`);
+      done();
+    });
+  }
+  assert.equal(isTerminalWriteQueueInFloodMode(term), true);
+  assert.equal(getTerminalWriteQueueDepth(term), 1);
+
+  enqueueTerminalWrite(term, 20, (done) => {
+    order.push("new-frame");
+    done();
+  }, {
+    dropBytes: 125,
+    replacePendingKey: "tui-frame",
+  });
+
+  assert.deepEqual(dropped, [75]);
+  releaseActive?.();
+  for (let guard = 0; guard < 10 && order.length < MAX_WRITE_QUEUE_ITEMS + 1; guard += 1) {
+    await waitForQueuedWriteYield();
+  }
+  assert.equal(order.includes("old-frame"), false);
+  assert.equal(order.filter((entry) => entry.startsWith("ordinary-")).length, MAX_WRITE_QUEUE_ITEMS);
+  assert.equal(order.at(-1), "new-frame");
+});
