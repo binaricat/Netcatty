@@ -23,6 +23,24 @@ function isSuccessfulCommandResult(result) {
   return result?.success && (result.code === 0 || result.code === null || result.code === undefined);
 }
 
+// Docker list commands on a slow host (lazy daemon, snap docker, many images,
+// slow SSH link) can legitimately take longer than the previous fixed 12 s
+// window, so the lists get more headroom (#3387).
+const DOCKER_LIST_TIMEOUT_MS = 30000;
+
+function isSshExecTimeoutResult(result) {
+  if (result?.timedOut === true) return true;
+  const text = `${result?.error || ""}\n${result?.stderr || ""}`;
+  // Only command-execution timeouts mean docker never finished; the daemon
+  // hint is appropriate there. Channel-open timeouts are SSH transport
+  // failures and keep their specific error instead of the Docker hint.
+  return text.includes("SSH command execution timed out");
+}
+
+function buildDockerTimeoutError(timeoutMs) {
+  return `Docker command timed out after ${timeoutMs} ms; the Docker daemon may be stopped or unresponsive on the remote host`;
+}
+
 function dockerCommandError(result, fallback) {
   return (result?.stderr || result?.error || "").trim() || fallback;
 }
@@ -173,9 +191,23 @@ function createDockerOpsApi({ execOnSession, getSession }) {
     const result = await execOnSession(event, sessionId, cmd, timeoutMs);
     if (isSuccessfulCommandResult(result)) return result;
 
+    if (isSshExecTimeoutResult(result)) {
+      return {
+        success: false,
+        error: buildDockerTimeoutError(timeoutMs),
+        stderr: result?.stderr,
+      };
+    }
+
     if (isDockerSocketPermissionError(result)) {
       const sudoPassword = getSessionSudoPassword(getSession?.(sessionId));
       let lastSudoResult = null;
+
+      const sudoTimeoutResult = () => ({
+        success: false,
+        error: buildDockerTimeoutError(timeoutMs),
+        stderr: lastSudoResult?.stderr,
+      });
 
       const nopasswdResult = await execOnSession(
         event,
@@ -185,6 +217,7 @@ function createDockerOpsApi({ execOnSession, getSession }) {
       );
       if (isSuccessfulCommandResult(nopasswdResult)) return nopasswdResult;
       lastSudoResult = nopasswdResult;
+      if (isSshExecTimeoutResult(nopasswdResult)) return sudoTimeoutResult();
 
       if (sudoPassword) {
         const sudoResult = await execOnSession(
@@ -196,6 +229,7 @@ function createDockerOpsApi({ execOnSession, getSession }) {
         );
         if (isSuccessfulCommandResult(sudoResult)) return sudoResult;
         lastSudoResult = sudoResult;
+        if (isSshExecTimeoutResult(sudoResult)) return sudoTimeoutResult();
       }
 
       return {
@@ -217,13 +251,13 @@ function createDockerOpsApi({ execOnSession, getSession }) {
   }
 
   async function listContainers(event, sessionId) {
-    const result = await runDocker(event, sessionId, "ps -a --format '{{json .}}'", 12000);
+    const result = await runDocker(event, sessionId, "ps -a --format '{{json .}}'", DOCKER_LIST_TIMEOUT_MS);
     if (!result.success) return { success: false, error: result.error };
     return { success: true, containers: parseDockerContainers(result.stdout) };
   }
 
   async function listImages(event, sessionId) {
-    const result = await runDocker(event, sessionId, "images --format '{{json .}}'", 12000);
+    const result = await runDocker(event, sessionId, "images --format '{{json .}}'", DOCKER_LIST_TIMEOUT_MS);
     if (!result.success) return { success: false, error: result.error };
     return { success: true, images: parseDockerImages(result.stdout) };
   }
