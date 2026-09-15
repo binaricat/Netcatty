@@ -73,6 +73,7 @@ import {
   upsertHostById,
 } from "../domain/host";
 import { exportHostsToCsvWithStats } from "../domain/vaultImport";
+import { upsertKnownHost } from "../domain/knownHosts";
 import {
   remapSnippetTargetGroupPaths,
 } from "../domain/hostGroupPathMutations";
@@ -662,6 +663,13 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
     setEditingHost(host);
     setIsHostPanelOpen(true);
   }, []);
+
+  const handleAddKnownHost = useCallback(
+    (kh: KnownHost) => {
+      onUpdateKnownHosts(upsertKnownHost(knownHosts, kh));
+    },
+    [knownHosts, onUpdateKnownHosts],
+  );
 
   const handleDuplicateHost = useCallback(
     (host: Host) => {
@@ -1488,6 +1496,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
           keys,
           knownHosts,
           knownHostsManagerElement,
+          onAddKnownHost: handleAddKnownHost,
           Label,
           lastPinnedId,
           LayoutGrid,
