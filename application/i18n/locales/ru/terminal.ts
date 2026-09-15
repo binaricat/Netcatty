@@ -3,6 +3,13 @@ import type { Messages } from '../types';
 export const ruTerminalMessages: Messages = {
   'terminal.menu.saveScreen': 'Сохранить текущий экран',
   'terminal.saveScreen.failed': 'Не удалось сохранить экран терминала.',
+  // Диалог подтверждения многострочной вставки (#3398)
+  'terminal.pasteConfirm.title': 'Вставить несколько строк?',
+  'terminal.pasteConfirm.summary': 'В сессию будет отправлено строк: {lines} (символов: {chars}).',
+  'terminal.pasteConfirm.preview': 'Предпросмотр (можно изменить)',
+  'terminal.pasteConfirm.send': 'Отправить',
+  'terminal.pasteConfirm.sendLineByLine': 'Отправить построчно',
+  'terminal.pasteConfirm.cancel': 'Отмена',
   'terminal.sudoHint.pressEnter': 'Нажмите Enter, чтобы вставить сохранённый пароль',
   'terminal.passwordPicker.title': 'Сохранённые пароли',
   'terminal.passwordPicker.empty': 'Нет сохранённых паролей',

@@ -46,7 +46,7 @@ test("password-prompt input is classified before prompt state reset and cannot b
   );
   assert.match(
     runtimeSource,
-    /const broadcastUserPasteData = \(data: string\) => \{[\s\S]*?passwordPromptActiveRef\?\.current !== true[\s\S]*?onBroadcastInputRef\.current/u,
+    /const broadcastUserPasteData = \(\s*data: string,\s*options\?: TerminalBroadcastInputOptions,\s*\) => \{[\s\S]*?passwordPromptActiveRef\?\.current !== true[\s\S]*?onBroadcastInputRef\.current\(\s*data,\s*ctx\.sessionId,\s*options\)/u,
   );
   assert.match(
     terminalSource,

@@ -3,6 +3,13 @@ import type { Messages } from '../types';
 export const esTerminalMessages: Messages = {
   'terminal.menu.saveScreen': 'Guardar pantalla actual',
   'terminal.saveScreen.failed': 'No se pudo guardar la pantalla del terminal.',
+  // Diálogo de confirmación de pegado multilínea (#3398)
+  'terminal.pasteConfirm.title': '¿Pegar varias líneas?',
+  'terminal.pasteConfirm.summary': 'Se enviarán {lines} líneas ({chars} caracteres) a la sesión.',
+  'terminal.pasteConfirm.preview': 'Vista previa (editable)',
+  'terminal.pasteConfirm.send': 'Enviar',
+  'terminal.pasteConfirm.sendLineByLine': 'Enviar línea por línea',
+  'terminal.pasteConfirm.cancel': 'Cancelar',
   'terminal.sudoHint.pressEnter': 'Presiona Enter para pegar la contraseña guardada',
   'terminal.passwordPicker.title': 'Contraseñas guardadas',
   'terminal.passwordPicker.empty': 'No hay contraseñas guardadas',

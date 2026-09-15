@@ -691,6 +691,12 @@ Highlight the focused split pane:
   'settings.terminal.behavior.autoUploadClipboardImage': 'Auto-upload clipboard images on paste',
   'settings.terminal.behavior.autoUploadClipboardImage.desc':
     'When the clipboard holds an image, pasting in a remote session uploads it via SFTP to .netcatty-paste-images/ under the remote working directory and inserts the remote path instead of pasting text.',
+  'settings.terminal.behavior.confirmMultilinePaste': 'Ask before pasting multiple lines',
+  'settings.terminal.behavior.confirmMultilinePaste.desc':
+    'Show a confirmation dialog before pasting multiple lines, with the line/character count, an editable preview, and Send / Send line by line / Cancel actions. Protects switch and firewall CLIs (Cisco IOS, Huawei VRP, H3C Comware) that do not support bracketed paste.',
+  'settings.terminal.behavior.confirmMultilinePasteMinLines': 'Confirmation threshold (lines)',
+  'settings.terminal.behavior.confirmMultilinePasteMinLines.desc':
+    'Ask for confirmation when a paste contains at least this many lines.',
   'settings.terminal.behavior.shiftEnterNewline': 'Shift+Enter text',
   'settings.terminal.behavior.shiftEnterNewline.desc':
     'Send configured text instead of normal Enter when pressing Shift+Enter in the terminal.',

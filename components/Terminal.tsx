@@ -52,6 +52,7 @@ import { CONNECTION_PROGRESS_START } from "./terminal/connectionProgress";
 import { supportsZmodemTerminalDragDrop } from "../lib/zmodemDragDrop";
 import { resolveHostAuth, resolveHostAutofillPassword } from "../domain/sshAuth";
 import { resolveEffectiveTerminalProtocol } from "../domain/terminalProtocol";
+import { MULTILINE_PASTE_CONFIRM_MIN_LINES_DEFAULT } from "../domain/terminalPasteConfirm";
 import { isPluginHostProtocol } from "../domain/pluginConnection";
 import { clearTerminalBootEpoch, setTerminalBootEpoch } from "../domain/terminalBootEpoch";
 import {
@@ -3216,6 +3217,14 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   normalizeTextOnCopyRef.current = terminalSettings?.normalizeTextOnCopy ?? true;
   const autoUploadClipboardImageOnPasteRef = useRef(terminalSettings?.autoUploadClipboardImageOnPaste ?? false);
   autoUploadClipboardImageOnPasteRef.current = terminalSettings?.autoUploadClipboardImageOnPaste ?? false;
+  const multilinePasteConfirmRef = useRef({
+    enabled: terminalSettings?.confirmBeforeMultilinePaste ?? false,
+    minLines: terminalSettings?.multilinePasteConfirmMinLines ?? MULTILINE_PASTE_CONFIRM_MIN_LINES_DEFAULT,
+  });
+  multilinePasteConfirmRef.current = {
+    enabled: terminalSettings?.confirmBeforeMultilinePaste ?? false,
+    minLines: terminalSettings?.multilinePasteConfirmMinLines ?? MULTILINE_PASTE_CONFIRM_MIN_LINES_DEFAULT,
+  };
 
   const scrollToBottomAfterProgrammaticInput = useCallback((data: string) => {
     if (!termRef.current) return;
@@ -3240,14 +3249,17 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     termRef.current?.scrollToBottom();
   }, [activeScriptRun]);
 
-  const broadcastUserPasteData = useCallback((data: string) => {
+  const broadcastUserPasteData = useCallback((
+    data: string,
+    options?: { lineDelayMs?: number },
+  ) => {
     if (
       !passwordPromptActiveRef.current
       && sessionRef.current
       && isBroadcastEnabledRef.current
       && onBroadcastInputRef.current
     ) {
-      onBroadcastInputRef.current(data, sessionId);
+      onBroadcastInputRef.current(data, sessionId, options);
       return true;
     }
     return false;
@@ -3391,6 +3403,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     isLocalConnection,
     supportsRemoteImagePaste,
     autoUploadClipboardImageOnPasteRef,
+    multilinePasteConfirmRef,
     terminalBackend,
     getRemoteCwd: () => resolveSftpInitialPath({ preferFreshBackend: true }),
     scrollToBottomAfterProgrammaticInput,
@@ -3972,6 +3985,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     containerRef,
     autoUploadClipboardImage:
       supportsRemoteImagePaste && terminalSettings?.autoUploadClipboardImageOnPaste === true,
+    multilinePasteConfirmRef,
     getRemoteCwd: () => resolveSftpInitialPath({ preferFreshBackend: true }),
     onClipboardImageUploadResult: handleClipboardImageUploadResult,
   });

@@ -1,4 +1,5 @@
 import { stringCellWidth } from "../autocomplete/terminalStringCellWidth";
+import type { TerminalBroadcastInputOptions } from "../terminalHelpers";
 import { FitAddon } from "@xterm/addon-fit";
 import { ImageAddon } from "@xterm/addon-image";
 import { SearchAddon } from "@xterm/addon-search";
@@ -177,10 +178,11 @@ import {
 } from "./terminalOutputPipeline";
 import {
   markExpectedTerminalCursorPositionReport,
-  pasteTextIntoTerminal,
   shouldBroadcastTerminalUserInput,
   shouldSuppressTerminalInputScrollForUserPaste,
 } from "./terminalUserPaste";
+import { pasteTextWithMultilineConfirm } from "../terminalClipboardPaste";
+import { requestMultilinePasteConfirm } from "../../../application/state/multilinePasteConfirmStore";
 import {
   consumeOsc133CommandCompletion,
   type PromptLineBreakState,
@@ -314,7 +316,7 @@ export type CreateXTermRuntimeContext = {
     ((
       data: string,
       sourceSessionId: string,
-      options?: { kittyKeyboardInput?: KittyKeyboardBroadcastInput },
+      options?: TerminalBroadcastInputOptions,
     ) => void) | undefined
   >;
 
@@ -926,13 +928,16 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
 
   const appLevelActions = getAppLevelActions();
   const terminalActions = getTerminalPassthroughActions();
-  const broadcastUserPasteData = (data: string) => {
+  const broadcastUserPasteData = (
+    data: string,
+    options?: TerminalBroadcastInputOptions,
+  ) => {
     if (
       ctx.passwordPromptActiveRef?.current !== true
       && ctx.isBroadcastEnabledRef.current
       && ctx.onBroadcastInputRef.current
     ) {
-      ctx.onBroadcastInputRef.current(data, ctx.sessionId);
+      ctx.onBroadcastInputRef.current(data, ctx.sessionId, options);
       return true;
     }
     return false;
@@ -2146,9 +2151,24 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
               const id = ctx.sessionRef.current;
               if (selection && id) {
                 hideHistoryPreview();
-                pasteTextIntoTerminal(term, selection, {
-                  scrollOnPaste: shouldScrollOnTerminalPaste(ctx.terminalSettingsRef.current),
+                // Route through the multi-line paste confirmation gate
+                // (#3398) so a selected multi-line region cannot be sent to
+                // the session (and broadcast peers) without review, just
+                // like the clipboard paste path.
+                void pasteTextWithMultilineConfirm(selection, {
+                  confirmMultilinePaste: {
+                    enabled: ctx.terminalSettingsRef.current?.confirmBeforeMultilinePaste === true,
+                    minLines: ctx.terminalSettingsRef.current?.multilinePasteConfirmMinLines,
+                    requestConfirm: requestMultilinePasteConfirm,
+                  },
+                  getCurrentSessionId: () => ctx.sessionRef.current,
+                  isSensitiveInput: () => ctx.passwordPromptActiveRef?.current === true,
                   onPasteData: broadcastUserPasteData,
+                  scrollOnPaste: shouldScrollOnTerminalPaste(ctx.terminalSettingsRef.current),
+                  scrollToBottomAfterProgrammaticInput: scrollToBottomAfterInput,
+                  sessionId: id,
+                  terminalBackend: ctx.terminalBackend,
+                  term,
                 });
               }
               break;

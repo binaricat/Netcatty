@@ -371,6 +371,13 @@ export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
     sectionKey: "settings.terminal.section.behavior",
   },
   {
+    id: "terminal-confirm-multiline-paste",
+    tab: "terminal",
+    labelKey: "settings.terminal.behavior.confirmMultilinePaste",
+    descriptionKey: "settings.terminal.behavior.confirmMultilinePaste.desc",
+    sectionKey: "settings.terminal.section.behavior",
+  },
+  {
     id: "terminal-shift-enter-newline",
     tab: "terminal",
     labelKey: "settings.terminal.behavior.shiftEnterNewline",

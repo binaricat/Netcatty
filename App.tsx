@@ -11,6 +11,7 @@ import { TooltipProvider } from './components/ui/tooltip';
 import { ScriptAutomationRoot } from './components/scripts/ScriptAutomationRoot';
 import { ExternalMcpApprovalsHost } from './components/ai/ExternalMcpApprovalsHost';
 import { PluginAuthenticationHost } from './components/plugins/PluginAuthenticationHost';
+import { MultilinePasteConfirmHost } from './components/terminal/MultilinePasteConfirmDialog';
 import { useExternalMcpGrantPersister } from './components/ai/useExternalMcpGrantPersister';
 import { setupMcpApprovalBridge } from './infrastructure/ai/shared/approvalGate';
 import { setupCodexAppServerInteractionBridge } from './infrastructure/ai/shared/codexAppServerInteractions';
@@ -81,6 +82,7 @@ function AppWithProviders({ settings, appLock }: { settings: SettingsState; appL
               <ScriptAutomationRoot />
               <ExternalMcpApprovalsHost />
               <PluginAuthenticationHost />
+              <MultilinePasteConfirmHost />
               <VaultPublisher>
                 <SessionPublisher persistSessionRestore={!isPeerSessionWindow}>
                   <App />

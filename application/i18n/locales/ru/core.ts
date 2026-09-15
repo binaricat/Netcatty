@@ -648,6 +648,12 @@ export const ruCoreMessages: Messages = {
   'settings.terminal.behavior.autoUploadClipboardImage': 'Авто-загрузка изображений буфера обмена при вставке',
   'settings.terminal.behavior.autoUploadClipboardImage.desc':
     'Когда в буфере обмена есть изображение, вставка в удалённой сессии загружает его по SFTP в каталог .netcatty-paste-images/ в текущем удалённом каталоге и вводит удалённый путь вместо вставки текста.',
+  'settings.terminal.behavior.confirmMultilinePaste': 'Спрашивать перед вставкой нескольких строк',
+  'settings.terminal.behavior.confirmMultilinePaste.desc':
+    'Перед вставкой нескольких строк показывать диалог подтверждения с количеством строк и символов, редактируемым предпросмотром и действиями «Отправить» / «Отправить построчно» / «Отмена». Защищает CLI сетевых устройств (Cisco IOS, Huawei VRP, H3C Comware), не поддерживающих bracketed paste.',
+  'settings.terminal.behavior.confirmMultilinePasteMinLines': 'Порог подтверждения (строк)',
+  'settings.terminal.behavior.confirmMultilinePasteMinLines.desc':
+    'Запрашивать подтверждение, если вставка содержит не меньше этого числа строк.',
   'settings.terminal.behavior.shiftEnterNewline': 'Текст для Shift+Enter',
   'settings.terminal.behavior.shiftEnterNewline.desc':
     'Отправлять настроенный текст вместо обычного Enter при нажатии Shift+Enter в терминале.',

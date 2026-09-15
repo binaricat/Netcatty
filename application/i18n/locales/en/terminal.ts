@@ -3,6 +3,13 @@ import type { Messages } from '../types';
 export const enTerminalMessages: Messages = {
   'terminal.menu.saveScreen': 'Save current screen',
   'terminal.saveScreen.failed': 'Failed to save terminal screen.',
+  // Multi-line paste confirmation dialog (#3398)
+  'terminal.pasteConfirm.title': 'Paste multiple lines?',
+  'terminal.pasteConfirm.summary': '{lines} lines ({chars} characters) will be sent to the session.',
+  'terminal.pasteConfirm.preview': 'Preview (editable)',
+  'terminal.pasteConfirm.send': 'Send',
+  'terminal.pasteConfirm.sendLineByLine': 'Send line by line',
+  'terminal.pasteConfirm.cancel': 'Cancel',
   'terminal.sudoHint.pressEnter': 'Press Enter to paste saved password',
   'terminal.passwordPicker.title': 'Saved passwords',
   'terminal.passwordPicker.empty': 'No saved passwords',

@@ -1,15 +1,17 @@
 import type { Terminal as XTerm } from "@xterm/xterm";
 import { useCallback, useRef } from "react";
 import type { RefObject } from "react";
+import { requestMultilinePasteConfirm } from "../../../application/state/multilinePasteConfirmStore";
 import { netcattyBridge } from "../../../infrastructure/services/netcattyBridge";
 import { logger } from "../../../lib/logger";
-import { pasteTextIntoTerminal } from "../runtime/terminalUserPaste";
+import type { MultilinePasteConfirmGate } from "../terminalClipboardPaste";
+import type { TerminalBroadcastInputOptions } from "../terminalHelpers";
 import { clearTerminalViewportAndSyncPty } from "../clearTerminalViewport";
 import {
   handleRemoteClipboardImageUpload,
   type RemoteClipboardImageUploadResult,
 } from "../clipboardImagePaste";
-import { handleTerminalClipboardPaste } from "../terminalClipboardPaste";
+import { handleTerminalClipboardPaste, pasteTextWithMultilineConfirm } from "../terminalClipboardPaste";
 import { pulseCopyOnSelectUserCommand } from "../copyOnSelect";
 import { getTerminalSelectionForClipboard } from "../normalizeTerminalSelection";
 import {
@@ -27,7 +29,9 @@ type BroadcastPasteRefs = {
   sourceSessionId: string;
   sessionRef: RefObject<string | null>;
   isBroadcastEnabledRef?: RefObject<boolean | undefined>;
-  onBroadcastInputRef?: RefObject<((data: string, sourceSessionId: string) => void) | undefined>;
+  onBroadcastInputRef?: RefObject<
+    ((data: string, sourceSessionId: string, options?: TerminalBroadcastInputOptions) => void) | undefined
+  >;
   passwordPromptActiveRef?: RefObject<boolean | undefined>;
 };
 
@@ -40,6 +44,7 @@ export const broadcastTerminalPasteData = (
     onBroadcastInputRef,
     passwordPromptActiveRef,
   }: BroadcastPasteRefs,
+  options?: TerminalBroadcastInputOptions,
 ): boolean => {
   if (
     passwordPromptActiveRef?.current !== true
@@ -47,7 +52,7 @@ export const broadcastTerminalPasteData = (
     && isBroadcastEnabledRef?.current
     && onBroadcastInputRef?.current
   ) {
-    onBroadcastInputRef.current(data, sourceSessionId);
+    onBroadcastInputRef.current(data, sourceSessionId, options);
     return true;
   }
   return false;
@@ -66,6 +71,7 @@ export const useTerminalContextActions = ({
   isLocalConnection,
   supportsRemoteImagePaste,
   autoUploadClipboardImageOnPasteRef,
+  multilinePasteConfirmRef,
   clearWipesScrollbackRef,
   normalizeTextOnCopyRef,
   terminalBackend,
@@ -80,12 +86,16 @@ export const useTerminalContextActions = ({
   onHasSelectionChange?: (hasSelection: boolean) => void;
   scrollOnPasteRef?: RefObject<boolean>;
   isBroadcastEnabledRef?: RefObject<boolean | undefined>;
-  onBroadcastInputRef?: RefObject<((data: string, sourceSessionId: string) => void) | undefined>;
+  onBroadcastInputRef?: RefObject<
+    ((data: string, sourceSessionId: string, options?: TerminalBroadcastInputOptions) => void) | undefined
+  >;
   passwordPromptActiveRef?: RefObject<boolean | undefined>;
   isLocalConnection: boolean;
   supportsRemoteImagePaste: boolean;
   /** When true, paste auto-uploads a clipboard image (remote sessions only). */
   autoUploadClipboardImageOnPasteRef?: RefObject<boolean | undefined>;
+  /** Multi-line paste confirmation gate (#3398); undefined keeps confirm off. */
+  multilinePasteConfirmRef?: RefObject<Omit<MultilinePasteConfirmGate, "requestConfirm"> | undefined>;
   clearWipesScrollbackRef?: RefObject<boolean | undefined>;
   /** When false, copy uses raw getSelection(). Default true when unset. */
   normalizeTextOnCopyRef?: RefObject<boolean | undefined>;
@@ -126,14 +136,14 @@ export const useTerminalContextActions = ({
     }
   }, [sessionName, t, termRef]);
 
-  const broadcastUserPasteData = useCallback((data: string) => {
+  const broadcastUserPasteData = useCallback((data: string, options?: TerminalBroadcastInputOptions) => {
     return broadcastTerminalPasteData(data, {
       sourceSessionId,
       sessionRef,
       isBroadcastEnabledRef,
       onBroadcastInputRef,
       passwordPromptActiveRef,
-    });
+    }, options);
   }, [isBroadcastEnabledRef, onBroadcastInputRef, passwordPromptActiveRef, sessionRef, sourceSessionId]);
 
   const onCopy = useCallback(() => {
@@ -161,6 +171,10 @@ export const useTerminalContextActions = ({
         autoUploadClipboardImage:
           supportsRemoteImagePaste && autoUploadClipboardImageOnPasteRef?.current === true,
         clipboardImageBridge: bridge ?? undefined,
+        confirmMultilinePaste: multilinePasteConfirmRef?.current
+          ? { ...multilinePasteConfirmRef.current, requestConfirm: requestMultilinePasteConfirm }
+          : undefined,
+        getCurrentSessionId: () => sessionRef.current,
         getRemoteCwd,
         isLocalConnection,
         isSensitiveInput: () => passwordPromptActiveRef?.current === true,
@@ -179,6 +193,7 @@ export const useTerminalContextActions = ({
   }, [
     autoUploadClipboardImageOnPasteRef,
     broadcastUserPasteData,
+    multilinePasteConfirmRef,
     getRemoteCwd,
     isLocalConnection,
     onClipboardImageUploadResult,
@@ -221,7 +236,7 @@ export const useTerminalContextActions = ({
     terminalBackend,
   ]);
 
-  const onPasteSelection = useCallback(() => {
+  const onPasteSelection = useCallback(async () => {
     const term = termRef.current;
     if (!term) return;
     const selection = getHistoryPreviewSelectionFromRoot(term.element?.parentElement)
@@ -232,11 +247,33 @@ export const useTerminalContextActions = ({
     if (!selection || !sessionRef.current) return;
     requestHistoryPreviewHide(term.element?.parentElement);
     term.focus();
-    pasteTextIntoTerminal(term, selection, {
-      scrollOnPaste: scrollOnPasteRef?.current ?? false,
+    // Route through the multi-line paste confirmation gate (#3398) so a
+    // selected multi-line region cannot be sent without review, just like
+    // the clipboard paste path.
+    await pasteTextWithMultilineConfirm(selection, {
+      confirmMultilinePaste: multilinePasteConfirmRef?.current
+        ? { ...multilinePasteConfirmRef.current, requestConfirm: requestMultilinePasteConfirm }
+        : undefined,
+      getCurrentSessionId: () => sessionRef.current,
+      isSensitiveInput: () => passwordPromptActiveRef?.current === true,
       onPasteData: broadcastUserPasteData,
+      scrollOnPaste: scrollOnPasteRef?.current ?? false,
+      scrollToBottomAfterProgrammaticInput,
+      sessionId: sessionRef.current,
+      terminalBackend,
+      term,
     });
-  }, [broadcastUserPasteData, normalizeTextOnCopyRef, sessionRef, termRef, scrollOnPasteRef]);
+  }, [
+    broadcastUserPasteData,
+    multilinePasteConfirmRef,
+    normalizeTextOnCopyRef,
+    passwordPromptActiveRef,
+    scrollToBottomAfterProgrammaticInput,
+    sessionRef,
+    termRef,
+    scrollOnPasteRef,
+    terminalBackend,
+  ]);
 
   const onSelectAll = useCallback(() => {
     const term = termRef.current;

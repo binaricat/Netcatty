@@ -606,6 +606,12 @@ Resalta el panel dividido enfocado:
   'settings.terminal.behavior.autoUploadClipboardImage': 'Subir automáticamente imágenes del portapapeles al pegar',
   'settings.terminal.behavior.autoUploadClipboardImage.desc':
     'Cuando el portapapeles contiene una imagen, pegarla en una sesión remota la sube por SFTP a .netcatty-paste-images/ dentro del directorio de trabajo remoto e inserta la ruta remota en lugar de pegar texto.',
+  'settings.terminal.behavior.confirmMultilinePaste': 'Preguntar antes de pegar varias líneas',
+  'settings.terminal.behavior.confirmMultilinePaste.desc':
+    'Muestra un diálogo de confirmación antes de pegar varias líneas, con el número de líneas y caracteres, una vista previa editable y las acciones Enviar / Enviar línea por línea / Cancelar. Protege las CLI de dispositivos de red (Cisco IOS, Huawei VRP, H3C Comware) que no admiten bracketed paste.',
+  'settings.terminal.behavior.confirmMultilinePasteMinLines': 'Umbral de confirmación (líneas)',
+  'settings.terminal.behavior.confirmMultilinePasteMinLines.desc':
+    'Pedir confirmación cuando el texto pegado contenga al menos esta cantidad de líneas.',
   'settings.terminal.behavior.shiftEnterNewline': 'Texto de Shift+Enter',
   'settings.terminal.behavior.shiftEnterNewline.desc':
     'Envía el texto configurado en lugar del Enter normal al presionar Shift+Enter en la terminal.',
