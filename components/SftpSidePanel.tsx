@@ -1610,10 +1610,18 @@ const SftpSidePanelInteractiveBody: React.FC<SftpSidePanelInteractiveBodyProps> 
   const canFollowTerminalCwd = useMemo(() => {
     if (!onGetTerminalCwd || !followTerminalCwdHost) return false;
     const proto = followTerminalCwdHost.protocol;
-    if (proto === "local" || proto === "serial") return false;
-    if (followTerminalCwdHost.id?.startsWith("local-") || followTerminalCwdHost.id?.startsWith("serial-")) return false;
+    // Serial connections don't support SFTP at all
+    if (proto === "serial") return false;
+    if (followTerminalCwdHost.id?.startsWith("serial-")) return false;
+    // Local connections support follow for POSIX shells (bash/zsh/fish), but not cmd/powershell
+    if (proto === "local" || followTerminalCwdHost.id?.startsWith("local-")) {
+      const session = sessions.find(s => s.id === (focusedSessionId ?? activeSessionId));
+      const shellType = session?.shellType;
+      if (shellType === "powershell" || shellType === "cmd") return false;
+      // Allow POSIX shells (bash/zsh/fish) and unknown shells (assume POSIX)
+    }
     return true;
-  }, [followTerminalCwdHost, onGetTerminalCwd]);
+  }, [followTerminalCwdHost, onGetTerminalCwd, sessions, focusedSessionId, activeSessionId]);
 
   const hasActiveWork = showTextEditor || !!permissionsState || showFileOpenerDialog
     || (sftp.activeFileWatchCountRef?.current ?? 0) > 0

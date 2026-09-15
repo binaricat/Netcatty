@@ -37,6 +37,8 @@ export type SettingsChromeSnapshot = {
   restoreTerminalCwd: boolean;
   terminalSidePanelAutoOpen: boolean;
   terminalSidePanelAutoOpenTab: TerminalSidePanelAutoOpenTab;
+  localShellSidePanelAutoOpen: boolean;
+  localShellSidePanelAutoOpenTab: TerminalSidePanelAutoOpenTab;
 };
 
 /**
@@ -70,6 +72,8 @@ export const DEFAULT_SETTINGS_CHROME_SNAPSHOT: SettingsChromeSnapshot = Object.f
   restoreTerminalCwd: true,
   terminalSidePanelAutoOpen: false,
   terminalSidePanelAutoOpenTab: 'ai',
+  localShellSidePanelAutoOpen: false,
+  localShellSidePanelAutoOpenTab: 'scripts',
 } satisfies SettingsChromeSnapshot);
 
 export function settingsChromeSnapshotsEqual(
@@ -95,7 +99,9 @@ export function settingsChromeSnapshotsEqual(
     && a.showTabNumberBadges === b.showTabNumberBadges
     && a.restoreTerminalCwd === b.restoreTerminalCwd
     && a.terminalSidePanelAutoOpen === b.terminalSidePanelAutoOpen
-    && a.terminalSidePanelAutoOpenTab === b.terminalSidePanelAutoOpenTab;
+    && a.terminalSidePanelAutoOpenTab === b.terminalSidePanelAutoOpenTab
+    && a.localShellSidePanelAutoOpen === b.localShellSidePanelAutoOpen
+    && a.localShellSidePanelAutoOpenTab === b.localShellSidePanelAutoOpenTab;
 }
 
 class SettingsChromeStore {

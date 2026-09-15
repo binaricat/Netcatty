@@ -44,13 +44,10 @@ export function canLocateSftpPathInTerminal(
 ): boolean {
   if (!options.sessionId || options.sessionStatus !== "connected") return false;
   if (options.isNetworkDevice) return false;
-  if (!resolveInteractiveTerminalCdIntent(options.path)) return false;
+  if (!resolveInteractiveTerminalCdIntent(options.path, options.shellType ?? undefined)) return false;
 
   const protocol = options.protocol ?? "ssh";
   if (protocol === "telnet" || protocol === "serial") return false;
-  if (protocol === "local" && (options.shellType === "powershell" || options.shellType === "cmd")) {
-    return false;
-  }
 
   if (options.sftpIsLocal) {
     return protocol === "local";
@@ -73,7 +70,8 @@ export function resolveLocateSftpPathInTerminalAction(
   options: LocateSftpPathInTerminalContext,
 ): { sessionId: string; data: string } | null {
   if (!canLocateSftpPathInTerminal(options) || !options.sessionId) return null;
-  const intent = resolveInteractiveTerminalCdIntent(options.path);
+  const intent = resolveInteractiveTerminalCdIntent(options.path, options.shellType ?? undefined);
   if (!intent) return null;
-  return { sessionId: options.sessionId, data: `${intent.command}\r` };
+  return { sessionId: options.sessionId, data: `${intent.command}
+` };
 }

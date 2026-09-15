@@ -230,8 +230,10 @@ const isRestoreCwdPathEligible = (cwd: string | undefined): cwd is string => {
   if (!cwd) return false;
   const trimmed = cwd.trim();
   if (!trimmed) return false;
-  if (/^[A-Za-z]:[\\/]/.test(trimmed)) return false;
-  return trimmed.startsWith("/") || trimmed === "~" || trimmed.startsWith("~/");
+  // Accept both Windows absolute paths (C:\...) and POSIX paths (/... or ~)
+  const isWindowsAbsolute = /^[A-Za-z]:[\\/]/.test(trimmed);
+  const isPosixAbsolute = trimmed.startsWith("/") || trimmed === "~" || trimmed.startsWith("~/");
+  return isWindowsAbsolute || isPosixAbsolute;
 };
 
 export function shouldAttemptRestoreCwd({
@@ -251,17 +253,26 @@ export function shouldAttemptRestoreCwd({
   return isCwdInjectionEligible({ session: { ...session, cwd: session.lastCwd }, isNetworkDevice });
 }
 
-export function quoteRestoreCwdForShell(cwd: string): string {
-  return `'${cwd.replace(/'/g, "'\\''")}'`;
+export function quoteRestoreCwdForShell(cwd: string, shellType?: string): string {
+  if (shellType === "powershell") {
+    // PowerShell: single quotes, escape single quotes as ''
+    return `'${cwd.replace(/'/g, "''")}'`;
+  }
+  if (shellType === "cmd") {
+    // CMD: double quotes, escape double quotes as ""
+    return `"${cwd.replace(/"/g, '""')}"`;
+  }
+  // POSIX/bash/fish: single quotes, escape single quotes as '\''
+  return `'${cwd.replace(/'/g, "'\\''")}\'`;
 }
 
-function quoteRestoreCwdArgument(cwd: string): string {
+function quoteRestoreCwdArgument(cwd: string, shellType?: string): string {
   if (cwd === "~") return "~";
   if (cwd.startsWith("~/")) {
     const suffix = cwd.slice(2);
-    return suffix ? `~/${quoteRestoreCwdForShell(suffix)}` : "~";
+    return suffix ? `~/${quoteRestoreCwdForShell(suffix, shellType)}` : "~";
   }
-  return quoteRestoreCwdForShell(cwd);
+  return quoteRestoreCwdForShell(cwd, shellType);
 }
 
 /** True when a path contains C0/DEL bytes that interactive readline would act on. */
@@ -276,13 +287,26 @@ function pathHasInteractivePtyControlBytes(path: string): boolean {
 /** Build a user-initiated `cd` for an absolute/home path (SFTP -> terminal). */
 export function resolveInteractiveTerminalCdIntent(
   cwd: string | null | undefined,
+  shellType?: string,
 ): { cwd: string; command: string } | null {
   // Eligibility uses a normalized view; keep the exact path for quoting so
   // trailing whitespace in POSIX names is preserved.
   if (!isRestoreCwdPathEligible(cwd)) return null;
   // Shell quoting does not protect tab/ESC/Ctrl-U while readline processes keystrokes.
   if (pathHasInteractivePtyControlBytes(cwd)) return null;
-  return { cwd, command: `cd -- ${quoteRestoreCwdArgument(cwd)}` };
+  
+  const quotedPath = quoteRestoreCwdArgument(cwd, shellType);
+  let command: string;
+  
+  if (shellType === "powershell") {
+    command = `Set-Location -LiteralPath ${quotedPath}`;
+  } else if (shellType === "cmd") {
+    command = `cd /d ${quotedPath}`;
+  } else {
+    command = `cd -- ${quotedPath}`;
+  }
+  
+  return { cwd, command };
 }
 
 export function resolveRestoreCwdIntent(options: {
@@ -292,10 +316,19 @@ export function resolveRestoreCwdIntent(options: {
 }): { cwd: string; command: string } | null {
   if (!shouldAttemptRestoreCwd(options)) return null;
   const cwd = options.session.lastCwd!.trim();
-  return {
-    cwd,
-    command: `cd -- ${quoteRestoreCwdArgument(cwd)}`,
-  };
+  const shellType = options.session.shellType;
+  const quotedPath = quoteRestoreCwdArgument(cwd, shellType);
+  
+  let command: string;
+  if (shellType === "powershell") {
+    command = `Set-Location -LiteralPath ${quotedPath}`;
+  } else if (shellType === "cmd") {
+    command = `cd /d ${quotedPath}`;
+  } else {
+    command = `cd -- ${quotedPath}`;
+  }
+  
+  return { cwd, command };
 }
 
 export function isCwdInjectionEligible({
@@ -309,9 +342,6 @@ export function isCwdInjectionEligible({
   if (!isRestoreCwdPathEligible(session.cwd)) return false;
   if (session.moshEnabled || session.etEnabled) return false;
   const protocol = session.protocol ?? "ssh";
-  if (protocol === "local" && (session.shellType === "powershell" || session.shellType === "cmd")) {
-    return false;
-  }
   return protocol === "ssh" || protocol === "local" || protocol === undefined;
 }
 
@@ -333,7 +363,19 @@ export function resolveInheritedCwdIntent(options: {
     return null;
   }
   const cwd = options.session.cwd!.trim();
-  return { cwd, command: `cd -- ${quoteRestoreCwdArgument(cwd)}` };
+  const shellType = options.session.shellType;
+  const quotedPath = quoteRestoreCwdArgument(cwd, shellType);
+  
+  let command: string;
+  if (shellType === "powershell") {
+    command = `Set-Location -LiteralPath ${quotedPath}`;
+  } else if (shellType === "cmd") {
+    command = `cd /d ${quotedPath}`;
+  } else {
+    command = `cd -- ${quotedPath}`;
+  }
+  
+  return { cwd, command };
 }
 
 const pruneNode = (node: unknown, validSessionIds: ReadonlySet<string>): WorkspaceNode | null => {
