@@ -9,6 +9,7 @@ import zhTW from './zh-TW.ts';
 
 const KEYS = [
   'vault.groups.deleteDialog.managedDesc',
+  'vault.groups.deleteDialog.mixedDesc',
   'vault.groups.deleteDialog.managedWarning',
   'vault.groups.deleteDialog.managedFile',
 ] as const;

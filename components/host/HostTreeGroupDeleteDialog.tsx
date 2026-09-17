@@ -63,7 +63,9 @@ export const HostTreeGroupDeleteDialog: React.FC<HostTreeGroupDeleteDialogProps>
           <DialogDescription className="break-words [overflow-wrap:anywhere]">
             {isManaged
               ? t('vault.groups.deleteDialog.managedDesc')
-              : t('vault.groups.deleteDialog.desc')}
+              : descendantManagedFiles.length > 0
+                ? t('vault.groups.deleteDialog.mixedDesc')
+                : t('vault.groups.deleteDialog.desc')}
           </DialogDescription>
         </DialogHeader>
         <div className="min-w-0 space-y-4 py-4">
@@ -78,14 +80,18 @@ export const HostTreeGroupDeleteDialog: React.FC<HostTreeGroupDeleteDialogProps>
                   <p className="text-sm text-destructive">
                     {t('vault.groups.deleteDialog.managedWarning')}
                   </p>
-                  {descendantManagedFiles.map((filePath) => (
-                    <p
-                      key={filePath}
-                      className="break-all font-mono text-xs text-muted-foreground"
-                    >
-                      {t('vault.groups.deleteDialog.managedFile', { file: filePath })}
-                    </p>
-                  ))}
+                  {descendantManagedFiles.length > 0 && (
+                    <div className="max-h-40 space-y-1 overflow-y-auto">
+                      {descendantManagedFiles.map((filePath) => (
+                        <p
+                          key={filePath}
+                          className="break-all font-mono text-xs text-muted-foreground"
+                        >
+                          {t('vault.groups.deleteDialog.managedFile', { file: filePath })}
+                        </p>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
               {!isManaged && (
