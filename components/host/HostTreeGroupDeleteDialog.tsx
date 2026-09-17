@@ -17,13 +17,13 @@ import {
 
 type HostTreeGroupDeleteDialogProps = {
   managedGroupPaths?: Set<string>;
-  managedFileByGroupPath?: Map<string, string>;
+  managedFilesByGroupPath?: Map<string, string[]>;
   onConfirmDelete: (groupPath: string, deleteHosts: boolean) => void | Promise<void>;
 };
 
 export const HostTreeGroupDeleteDialog: React.FC<HostTreeGroupDeleteDialogProps> = ({
   managedGroupPaths,
-  managedFileByGroupPath,
+  managedFilesByGroupPath,
   onConfirmDelete,
 }) => {
   const { t } = useI18n();
@@ -32,14 +32,19 @@ export const HostTreeGroupDeleteDialog: React.FC<HostTreeGroupDeleteDialogProps>
   const isOpen = Boolean(targetPath);
   const isManaged = Boolean(targetPath && managedGroupPaths?.has(targetPath));
   const descendantManagedFiles: string[] = [];
-  if (targetPath && managedFileByGroupPath) {
-    for (const [groupPath, filePath] of managedFileByGroupPath) {
+  if (targetPath && managedFilesByGroupPath) {
+    for (const [groupPath, files] of managedFilesByGroupPath) {
       if (
-        filePath
-        && (groupPath === targetPath || groupPath.startsWith(`${targetPath}/`))
-        && !descendantManagedFiles.includes(filePath)
+        (groupPath === targetPath || groupPath.startsWith(`${targetPath}/`))
       ) {
-        descendantManagedFiles.push(filePath);
+        for (const filePath of files) {
+          if (
+            filePath
+            && !descendantManagedFiles.includes(filePath)
+          ) {
+            descendantManagedFiles.push(filePath);
+          }
+        }
       }
     }
   }

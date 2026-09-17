@@ -680,7 +680,7 @@ export const zhTWCoreMessages: Messages = {
   'vault.groups.deleteDialogTitle': '刪除群組',
   'vault.groups.deleteDialog.desc': '這將永久刪除該群組並將所有主機移動到根層級。',
   'vault.groups.deleteDialog.managedDesc': '這是一個託管的 SSH config 群組。刪除後將同時刪除所有主機並斷開與原始檔的連線。',
-  'vault.groups.deleteDialog.mixedDesc': '該群組包含從關聯 SSH config 檔案匯入的主機。這些主機將被刪除；其餘主機將移動到根層級，除非您在下方選擇同時刪除。',
+  'vault.groups.deleteDialog.mixedDesc': '該群組包含從關聯 SSH config 檔案匯入的主機。其受管理子群組下的所有主機都將被刪除，包括不受該檔案管理的主機；其餘主機將移動到根層級，除非您在下方選擇同時刪除。',
   'vault.groups.deleteDialog.managedWarning': '刪除該群組會同時清空關聯 SSH config 檔案中的對應條目，從該檔案匯入的設定可能會遺失，其他使用該檔案的應用也會受到影響。請先備份檔案再繼續。',
   'vault.groups.deleteDialog.managedFile': '關聯檔案：{file}',
   'vault.groups.deleteDialog.deleteHosts': '同時刪除該群組下的所有主機',

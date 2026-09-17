@@ -678,7 +678,7 @@ export const zhCNCoreMessages: Messages = {
   'vault.groups.deleteDialogTitle': '删除分组',
   'vault.groups.deleteDialog.desc': '这将永久删除该分组并将所有主机移动到根级别。',
   'vault.groups.deleteDialog.managedDesc': '这是一个托管的 SSH config 分组。删除后将同时删除所有主机并断开与源文件的连接。',
-  'vault.groups.deleteDialog.mixedDesc': '该分组包含从关联 SSH config 文件导入的主机。这些主机将被删除；其余主机将移动到根级别，除非您在下方选择同时删除。',
+  'vault.groups.deleteDialog.mixedDesc': '该分组包含从关联 SSH config 文件导入的主机。其托管子分组下的所有主机都将被删除，包括不受该文件管理的主机；其余主机将移动到根级别，除非您在下方选择同时删除。',
   'vault.groups.deleteDialog.managedWarning': '删除该分组会同时清空关联 SSH config 文件中的对应条目，从该文件导入的配置可能会丢失，其他使用该文件的应用也会受到影响。请先备份文件再继续。',
   'vault.groups.deleteDialog.managedFile': '关联文件：{file}',
   'vault.groups.deleteDialog.deleteHosts': '同时删除该分组下的所有主机',
