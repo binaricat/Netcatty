@@ -177,3 +177,28 @@ test("failed single write ends without successful index", t => {
   assert.deepEqual(h.writes, []);
   assert.deepEqual(h.receipts, h.expected({ done: true }));
 });
+
+for (const dropped of [[0], [2], [0, 1, 2]]) {
+  test(`filtered empty paste chunks ${dropped.join(',')} have no receipt but preserve later chunks`, async t => {
+    let nextIndex = 0;
+    const h = harness(t, {
+      has: () => true,
+      async interceptInput(_id, data) {
+        return dropped.includes(nextIndex++) ? "" : data;
+      },
+    });
+    const chunks = ["one\r", "two\r", "three\r"];
+    h.send();
+    for (let index = 0; index < chunks.length; index++) {
+      if (index > 0) t.mock.timers.tick(100);
+      await flush();
+      const sentIndices = chunks.map((_, i) => i).filter(i => i <= index && !dropped.includes(i));
+      assert.deepEqual(h.writes, sentIndices.map(i => chunks[i]));
+      const entries = sentIndices.map(i => i === 2 ? { index: i, done: true } : { index: i });
+      if (index === 2 && dropped.includes(2)) entries.push({ done: true });
+      assert.deepEqual(h.receipts, h.expected(...entries));
+      assert.equal(h.session.pendingPasteWrites.size, index === 2 ? 0 : 1);
+    }
+    assert.equal(nextIndex, 3, "every original chunk still reaches the interceptor");
+  });
+}

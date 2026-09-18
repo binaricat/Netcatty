@@ -1441,20 +1441,21 @@ function createPasteWriteReceipt(session, payload, count) {
   let remaining = count;
   const paste = {
     active: true,
-    finish(index) {
+    finish(index, skipped = false) {
       if (!paste.active) return;
       const done = index === undefined || --remaining === 0;
       if (done) {
         paste.active = false;
         pending.delete(paste);
       }
+      if (skipped && !done) return;
       try {
         const owner = electronModule.webContents?.fromId(session.webContentsId);
         if (owner && !owner.isDestroyed?.()) {
           owner.send("netcatty:paste-write", {
             sessionId: payload.sessionId,
             requestId: payload.pasteRequestId,
-            ...(index === undefined ? {} : { index }),
+            ...(index === undefined || skipped ? {} : { index }),
             ...(done ? { done: true } : {}),
           });
         }
@@ -1632,6 +1633,11 @@ function writeToSessionWithInterception(
     const current = sessions.get(payload.sessionId);
     if (paste && (current !== expectedSession || current?.closed)) {
       paste.finish();
+      return;
+    }
+    if (paste && nextData === "") {
+      // An interceptor can drop one chunk without canceling the remaining paste.
+      paste.finish(index, true);
       return;
     }
     const written = writeToSessionNow(payload, nextData, logRewrite);
