@@ -122,6 +122,7 @@ import {
   shouldFlushDeferredImeTextInputOnKeyUp,
   shouldFlushStaleDeferredImeTextInput,
 } from "./terminalImeTextInput";
+import { keepImeCommittedTextThroughModifierKeyDowns } from "./imeModifierKeyDownSeenGuard";
 import { formatSerialLocalEcho } from "./serialLocalEcho";
 import { getLastChar, removeLastChar, isPrintableInput } from "../../../domain/serialCharMetrics";
 import { mapTerminalBackspaceInput } from "./terminalBackspaceInput";
@@ -631,6 +632,10 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     },
   });
   installSearchDecorationTracker(term);
+  // Sogou on Windows commits pending preedit text when Shift toggles
+  // Chinese/English mode; a pure modifier keydown must not arm xterm's
+  // insertText dedupe guard or the committed text is dropped (#3441).
+  keepImeCommittedTextThroughModifierKeyDowns(term);
 
   type MaybeRenderer = {
     constructor?: { name?: string };
