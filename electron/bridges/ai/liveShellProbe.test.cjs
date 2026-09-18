@@ -72,6 +72,75 @@ test('cancelled probe never injects user command after a late reply', async () =
   assert.ok(writes.every((data) => !data.includes('touch should-not-run')));
 });
 
+test('probe deadline delivers the command when the probe reply never arrives', async () => {
+  const pty = new EventEmitter();
+  const writes = [];
+  pty.write = (data) => writes.push(data);
+  const aborted = [];
+  const job = startPtyJob(pty, 'printf silent-command', {
+    shellKind: 'posix', probeLiveShell: true, timeoutMs: 5000, probeDeadlineMs: 80,
+    onProbeAborted: (marker) => aborted.push(marker),
+  });
+  assert.equal(writes.length, 1);
+  assert.ok(!writes.join('').includes('printf silent-command'));
+  // The paced probe (~1s) plus the probe deadline must pass, then the paced
+  // wrapped command is typed even though no probe reply ever came back.
+  const deadline = Date.now() + 3000;
+  while (Date.now() < deadline && !writes.join('').includes('printf silent-command')) {
+    await new Promise((resolve) => setTimeout(resolve, 30));
+  }
+  assert.ok(writes.join('').includes('printf silent-command'), writes.join('|'));
+  assert.deepEqual(aborted, [job.marker]);
+  pty.emit('data', `${job.marker}_S\r\nsilent-ok\r\n${job.marker}_E:0\r\n`);
+  const result = await job.resultPromise;
+  assert.equal(result.exitCode, 0, JSON.stringify(result));
+  assert.match(result.stdout, /silent-ok/);
+  assert.equal(aborted.length, 1, 'the display reset must not be duplicated');
+});
+
+test('late probe reply after the deadline is ignored and never double-delivers', async () => {
+  const pty = new EventEmitter();
+  const writes = [];
+  pty.write = (data) => writes.push(data);
+  const job = startPtyJob(pty, 'printf late-ok', {
+    shellKind: 'posix', probeLiveShell: true, timeoutMs: 5000, probeDeadlineMs: 60,
+  });
+  const deadline = Date.now() + 3000;
+  while (Date.now() < deadline && !writes.join('').includes('printf late-ok')) {
+    await new Promise((resolve) => setTimeout(resolve, 30));
+  }
+  assert.ok(writes.join('').includes('printf late-ok'));
+  // Let the paced wrapper delivery finish before snapshotting the writes.
+  let stable = writes.length;
+  do {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    stable = writes.length;
+  } while (writes.length !== stable);
+  const count = writes.length;
+  const delivered = writes.join('').split('printf late-ok').length - 1;
+  pty.emit('data', `${job.marker}_P:fish\n${job.marker}_Q`);
+  assert.equal(writes.length, count, 'a late reply must not re-trigger the probe');
+  pty.emit('data', `${job.marker}_S\r\nlate-ok\r\n${job.marker}_E:0\r\n`);
+  const result = await job.resultPromise;
+  assert.equal(result.exitCode, 0, JSON.stringify(result));
+  assert.match(result.stdout, /late-ok/);
+  assert.equal(writes.join('').split('printf late-ok').length - 1, delivered);
+  assert.equal(count, writes.length);
+});
+
+test('probe deadline abort reset is not duplicated when the command never starts', async () => {
+  const pty = new EventEmitter();
+  pty.write = () => {};
+  const aborted = [];
+  const job = startPtyJob(pty, 'echo never-runs', {
+    shellKind: 'posix', probeLiveShell: true, timeoutMs: 300, probeDeadlineMs: 50,
+    onProbeAborted: (marker) => aborted.push(marker),
+  });
+  const result = await job.resultPromise;
+  assert.equal(result.ok, false, JSON.stringify(result));
+  assert.equal(aborted.length, 1, aborted);
+});
+
 test('cancelling a probe completes when the idle prompt returns', async () => {
   const pty = new EventEmitter();
   pty.write = () => {};

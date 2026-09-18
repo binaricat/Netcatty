@@ -56,9 +56,13 @@ test('completed delivery still has a bounded wait for a missing probe reply', as
     pty.emit('data', 'unrelated output\n');
     t.mock.timers.tick(100);
   }
+  // The probe deadline first clears the probe state and delivers the command
+  // anyway (#3403); after the paced wrapper delivery the re-armed deadline
+  // then fails the job, so advance until the interrupt/finish happens.
+  while (!writes.includes('\x03')) t.mock.timers.tick(30);
   const result = await job.resultPromise;
-  assert.match(result.error, /Command startup timed out/);
-  assert.ok(writes.includes('\x03'));
+  assert.match(result.error, /timed out/);
+  assert.ok(writes.join('').includes('echo never'), 'a missing probe reply must still deliver the command');
 });
 
 for (const cancel of [false, true]) {

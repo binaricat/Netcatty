@@ -32,6 +32,11 @@ const { buildLiveShellProbe, parseLiveShellProbe } = require("./liveShellProbe.c
 
 const DEFAULT_FOREGROUND_PTY_CAPTURE_CHARS = 1024 * 1024;
 const END_MARKER_PROMPT_WAIT_MS = 30000;
+// Bounded deadline for the live shell probe reply. When the probe's _Q
+// completion marker never arrives (silent shells, lost or mangled marker
+// output, pending canonical input), the job must not stall until the full
+// command timeout with the command still undelivered (#3403, #3445).
+const DEFAULT_PROBE_DEADLINE_MS = 15000;
 const promptRecoveryPendingPtys = new WeakSet();
 
 function stripJobMarkerLines(text, marker) {
@@ -69,6 +74,7 @@ function startPtyJob(ptyStream, command, options) {
     maxBufferedChars = 0,
     normalizeFinalOutput = true,
     enforceWallTimeout = false,
+    probeDeadlineMs = DEFAULT_PROBE_DEADLINE_MS,
   } = options || {};
 
   const marker = `__NCMCP_${Date.now().toString(36)}_${crypto.randomBytes(16).toString('hex')}__`;
@@ -99,6 +105,9 @@ function startPtyJob(ptyStream, command, options) {
   let probingShell = usesLiveShellProbe;
   let deliveringInput = false;
   let probeOutput = "";
+  // Set once the probe is abandoned via its deadline so finish() does not
+  // send a second _R display reset for the same marker.
+  let probeAborted = false;
 
   let output = "";
   let foundStart = false;
@@ -209,9 +218,29 @@ function startPtyJob(ptyStream, command, options) {
   // startup budget instead of counting against it.
   const BG_STARTUP_TIMEOUT_MS = 30000;
   function armStartupTimeout() {
-    const startupMs = maxBufferedChars > 0 ? BG_STARTUP_TIMEOUT_MS : timeoutMs;
+    // While waiting for the live shell probe reply, the startup budget is the
+    // bounded probe deadline: a probe whose _Q reply never arrives (silent
+    // shells, lost or mangled marker output) must not stall until the full
+    // command timeout with the command still undelivered (#3403, #3445).
+    const baseMs = maxBufferedChars > 0 ? BG_STARTUP_TIMEOUT_MS : timeoutMs;
+    const startupMs = probingShell ? Math.min(probeDeadlineMs, baseMs) : baseMs;
     startupTimeoutId = setTimeout(() => {
       if (finished || foundStart) return;
+      if (probingShell) {
+        // The probe reply never arrived. Clear the probe state and deliver
+        // the wrapped command anyway so silent/zero-output commands still
+        // reach the remote shell and return instead of stalling.
+        probingShell = false;
+        probeOutput = "";
+        probeAborted = true;
+        try {
+          onProbeAborted?.(marker);
+        } catch {
+          // Display reset must never prevent the command from starting.
+        }
+        writeWrappedCommand();
+        return;
+      }
       sendInterrupt();
       const label = maxBufferedChars > 0 ? "Background job startup" : "Command startup";
       finish(preStartOutput, -1, `${label} timed out — start marker never arrived`);
@@ -431,7 +460,7 @@ function startPtyJob(ptyStream, command, options) {
   function finish(stdout, exitCode, error) {
     if (finished) return;
     finished = true;
-    if (!foundStart && typeof onProbeAborted === "function") {
+    if (!foundStart && !probeAborted && typeof onProbeAborted === "function") {
       try {
         onProbeAborted(marker);
       } catch {
