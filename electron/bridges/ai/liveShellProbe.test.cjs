@@ -1,8 +1,34 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
-const { buildLiveShellProbe, parseLiveShellProbe } = require('./liveShellProbe.cjs');
+const {
+  buildLiveShellProbe,
+  parseLiveShellProbe,
+  parsePartialLiveShellProbeKind,
+} = require('./liveShellProbe.cjs');
 const { startPtyJob } = require('./ptyExec.cjs');
+
+test('partial probe parse salvages _P shell names without the _Q sentinel', () => {
+  const marker = '__NCMCP_probe__';
+  assert.equal(parsePartialLiveShellProbeKind(`${marker}_P:/usr/bin/fish\n`, marker), 'fish');
+  assert.equal(parsePartialLiveShellProbeKind(`${marker}_P:sh\n`, marker), 'posix');
+  assert.equal(parsePartialLiveShellProbeKind(`${marker}_P:python\n${marker}_P:sh\n`, marker), 'posix');
+  assert.equal(parsePartialLiveShellProbeKind(`${marker}_P:fi`, marker), null);
+  assert.equal(parsePartialLiveShellProbeKind('unrelated output\n', marker), undefined);
+});
+
+test('probe deadline fallback keeps a partial _P shell result when _Q is lost', async () => {
+  const pty = new EventEmitter();
+  const writes = [];
+  pty.write = (data) => writes.push(data);
+  const job = startPtyJob(pty, 'printf success', { shellKind: 'posix', probeLiveShell: true, timeoutMs: 200 });
+  pty.emit('data', `${job.marker}_P:fish\n`);
+  await job.resultPromise;
+  assert.ok(writes.length >= 2, JSON.stringify(writes));
+  const wrapper = writes.slice(1).join('');
+  assert.ok(wrapper.includes('set -l'), wrapper);
+  assert.ok(!wrapper.includes("=0; printf"), wrapper);
+});
 
 test('live shell response excludes echoed commands, stale markers and partial lines', () => {
   const marker = '__NCMCP_probe__';
