@@ -639,7 +639,7 @@ function createSessionOpsApi(ctx) {
         # Only a confirmed directory name is usable as an upload destination.
         _rc_cwd=$(LC_ALL=C lsof -a -p "$1" -d cwd -Fnt 2>/dev/null | awk '
           /^f/ { is_dir=0 }
-          /^t/ { is_dir=($0 == "tDIR") }
+          /^t/ { is_dir=($0 == "tDIR" || $0 == "tVDIR") }
           /^n/ && is_dir { print substr($0, 2); exit }
         ')
         if [ -n "$_rc_cwd" ]; then printf 'NETCATTY_LSOF_CWD=%s\\n' "$_rc_cwd"; return 0; fi

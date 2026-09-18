@@ -149,6 +149,7 @@ test("lsof cwd fallback accepts only directory records, not diagnostic names (#3
     ["p4242\nfcwd\ntunknown\nn/proc/4242/cwd (readlink: No such file or directory)\n", null],
     ["p4242\nfcwd\nn/proc/4242/cwd\n", null],
     ["p4242\nfcwd\ntDIR\nn/srv/app\n", "/srv/app"],
+    ["p4242\nfcwd\ntVDIR\nn/usr/home/alice\n", "/usr/home/alice"],
     ["p4242\nfcwd\ntDIR\nn/tmp/literal (readlink: Permission denied)\n", "/tmp/literal (readlink: Permission denied)"],
     ["p4242\nfcwd\ntDIR\nn/tmp/\\xe4\\xb8\\xad\\xe6\\x96\\x87\n", "/tmp/\\xe4\\xb8\\xad\\xe6\\x96\\x87"],
   ]) {
