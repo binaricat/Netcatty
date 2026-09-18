@@ -44,8 +44,9 @@ for (const newerPause of retainedStatus === "paused" ? [false, true] : [false]) 
 for (const ownerChange of retainedStatus === "interrupted" || retainedStatus === undefined ? ["same", "active", "completed"] : ["same"]) {
 for (const completedBeforeReplacement of ownerChange === "active" ? [false, true] : [false]) {
 for (const flushBeforeReply of ownerChange === "same" || retainedStatus === undefined ? [false] : [false, true]) {
+for (const replyRejects of ownerChange !== "same" && !completedBeforeReplacement && !flushBeforeReply ? [false, true] : [false]) {
 const batchExistingIdentity = retainedStatus !== undefined;
-test(`superseded folder child settles when its completion was compacted into the parent: retained=${retainedStatus ?? "none"}, newerPause=${newerPause}, owner=${ownerChange}, flush=${flushBeforeReply}, priorComplete=${completedBeforeReplacement}`, async (t) => {
+test(`superseded folder child settles when its completion was compacted into the parent: retained=${retainedStatus ?? "none"}, newerPause=${newerPause}, owner=${ownerChange}, flush=${flushBeforeReply}, priorComplete=${completedBeforeReplacement}, reject=${replyRejects}`, async (t) => {
   const { sftpTransferCenterStore } = await import("../sftpTransferCenterStore");
   const previousLocalStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
   Object.defineProperty(globalThis, "localStorage", {
@@ -138,6 +139,7 @@ test(`superseded folder child settles when its completion was compacted into the
         } else assert.equal(sftpTransferCenterStore.getTask(childId), undefined,
           "automatic flush must not recreate the compacted new owner");
       }
+      if (replyRejects) throw new Error("old invocation transport failed");
       return completedBeforeReplacement ? {} : { superseded: true };
     },
   });
@@ -176,6 +178,7 @@ test(`superseded folder child settles when its completion was compacted into the
   assert.notEqual(result, "still-waiting", "completed compacted child must not leave its folder waiting forever");
   assert.equal((result as { success: boolean }).success, true);
 });
+}
 }
 }
 }

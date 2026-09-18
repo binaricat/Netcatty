@@ -43,6 +43,11 @@ export async function runTransferAndWaitForOwner(
       if (latest?.status === "cancelled") throw new Error("Transfer cancelled");
       await new Promise((resolve) => setTimeout(resolve, 200));
     }
+  } catch (error) {
+    // A displaced invocation can reject instead of returning superseded. Its
+    // transport error must not regain permission to write the winning row.
+    if (observation.hasIdentityConflict()) throw new TransferOwnerChangedError("Transfer identity changed while waiting for its owner");
+    throw error;
   } finally {
     observation.dispose();
   }

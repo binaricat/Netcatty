@@ -345,3 +345,14 @@ test("paused retry observes newer same-identity completion after an old failure"
   assert.equal(await settled, "completed");
   assert.equal(starts, 0, "a newer completed attempt must replace the captured old failure");
 });
+
+test("an unchanged owner retains its original transport rejection", async (t) => {
+  const { sftpTransferCenterStore: store } = await import("../sftpTransferCenterStore");
+  const { runTransferAndWaitForOwner } = await import("./waitForTransferOwner");
+  const task = { ...child(), id: "unchanged-rejected-owner", parentTaskId: undefined };
+  store.upsertTasks([task]);
+  t.after(() => { store.patchTask(task.id, { status: "completed" }); store.dismiss(task.id); });
+  const error = new Error("original transport failure");
+  await assert.rejects(runTransferAndWaitForOwner(task, async () => { throw error; }, () => false),
+    (actual) => actual === error);
+});
