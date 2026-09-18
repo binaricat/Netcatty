@@ -56,9 +56,9 @@ test("mac Command+Period chord is recognized as an interrupt", () => {
   );
 });
 
-test("mac Command+Period chord requires Meta and no other modifiers", () => {
+test("mac Command+Period chord requires Meta and rejects Ctrl or Alt", () => {
   const chord = { key: ".", code: "Period", ctrlKey: false, metaKey: true };
-  assert.equal(isMacCommandPeriodInterruptChord(key({ ...chord, shiftKey: true })), false);
+  assert.equal(isMacCommandPeriodInterruptChord(key({ ...chord, shiftKey: true })), true);
   assert.equal(isMacCommandPeriodInterruptChord(key({ ...chord, altKey: true })), false);
   assert.equal(isMacCommandPeriodInterruptChord(key({ ...chord, ctrlKey: true })), false);
   assert.equal(isMacCommandPeriodInterruptChord(key({ key: ".", code: "Period", metaKey: false })), false);
@@ -77,4 +77,16 @@ test("mac Command+Period chord prefers the layout character over the physical ke
     isMacCommandPeriodInterruptChord(key({ key: "\u044e", code: "Period", ctrlKey: false, metaKey: true })),
     true,
   );
+});
+
+test("mac Command+Period accepts Shift when it produces the logical period", () => {
+  assert.equal(isMacCommandPeriodInterruptChord(key({
+    key: ".", code: "Semicolon", ctrlKey: false, metaKey: true, shiftKey: true,
+  })), true);
+  assert.equal(isMacCommandPeriodInterruptChord(key({
+    key: ">", code: "Period", ctrlKey: false, metaKey: true, shiftKey: true,
+  })), false);
+  assert.equal(isMacCommandPeriodInterruptChord(key({
+    key: "\u3002", code: "Period", ctrlKey: false, metaKey: true, shiftKey: true,
+  })), false);
 });

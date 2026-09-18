@@ -2137,14 +2137,15 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         const identity = kittyKeyIdentity(interruptEventForKitty);
         // The normalized press shares the Ctrl+C event identity (KeyC) with a
         // possibly outstanding physical KeyC press; record it under a dedicated
-        // map key so the Period keyup releases (and deletes) only the
+        // map key even when the layout maps period to physical KeyC. Its keyup
+        // releases (and deletes) only the
         // interrupt press instead of the held physical key's entry (#3409).
         const pressIdentity =
-          macCommandPeriodInterrupt && identity !== kittyKeyIdentity(e)
+          macCommandPeriodInterrupt
             ? kittyNormalizedPressIdentity(identity)
             : identity;
         if (pressIdentity !== identity) {
-          // The physical release will arrive under the Period identity while
+          // The physical release arrives under its original layout key while
           // the press was recorded as the normalized Ctrl+C event; pair them
           // at keyup so the interrupt release is not lost (#3408).
           kittyNormalizedPressAliases.set(kittyKeyIdentity(e), pressIdentity);

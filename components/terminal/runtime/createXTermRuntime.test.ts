@@ -1040,7 +1040,7 @@ test("Command+Period interrupt press is keyed apart from an outstanding physical
   // Period keyup deleted that shared entry while C was still down.
   assert.match(
     source,
-    /const pressIdentity =\s*macCommandPeriodInterrupt && identity !== kittyKeyIdentity\(e\)\s*\?\s*kittyNormalizedPressIdentity\(identity\)\s*:\s*identity,?/,
+    /const pressIdentity =\s*macCommandPeriodInterrupt\s*\?\s*kittyNormalizedPressIdentity\(identity\)\s*:\s*identity,?/,
   );
   assert.match(source, /kittyNormalizedPressAliases\.set\(kittyKeyIdentity\(e\), pressIdentity\)/);
   assert.match(

@@ -47,8 +47,9 @@ if (!process.versions.electron || process.platform !== "darwin") {
       ((module,exports)=>{${bundle}})(loaded,loaded.exports);
       const {createXTermRuntime,DEFAULT_TERMINAL_SETTINGS,dispatchKittyKeyboardBroadcastInput} = loaded.exports;
       // Force a non-QWERTY layout: physical KeyC maps to j.
+      const layoutMap=new Map([['KeyC','j'],['Period','.']]);
       Object.defineProperty(navigator,'keyboard',{configurable:true,value:{
-        getLayoutMap:async()=>new Map([['KeyC','j'],['Period','.']]),
+        getLayoutMap:async()=>layoutMap,
       }});
       const ref = current => ({current});
       const panes = [];
@@ -119,6 +120,31 @@ if (!process.versions.electron || process.platform !== "darwin") {
         assert.ok(peer.writes.slice(before).some(s=>/\\[106;\\d+:3u/.test(s)),
           mode+' physical C (layout j) remains paired independently');
       }
+      await write(source,'\\x1b[>11u');
+      layoutMap.set('KeyC','.');
+      source.writes.length=0;peer.writes.length=0;
+      key(source,'keydown','.','KeyC');
+      source.r.term.textarea.dispatchEvent(new InputEvent('input',{
+        bubbles:true,inputType:'insertText',data:'.',
+      }));
+      key(source,'keydown','.','KeyC',{metaKey:true,repeat:true});
+      key(source,'keyup','.','KeyC',{metaKey:true});
+      for(const pane of [source,peer]) {
+        assert.ok(pane.writes.some(s=>s.includes('[99;5:3u')),
+          'logical period on physical C releases normalized C');
+        assert.ok(pane.writes.some(s=>/\\[46;\\d+:3u/.test(s)),
+          'logical period on physical C also releases the original period');
+      }
+      layoutMap.set('KeyC','j');
+      layoutMap.set('Semicolon',';');
+      source.writes.length=0;peer.writes.length=0;
+      key(source,'keydown','.','Semicolon',{metaKey:true,shiftKey:true});
+      key(source,'keyup','.','Semicolon',{metaKey:true,shiftKey:true});
+      assert.ok(source.writes.includes('\\x03'),'Shift-produced period interrupts');
+      assert.ok(peer.writes.some(s=>s.includes('[99;5u')),'Shift-produced period broadcasts Ctrl+C');
+      assert.ok(peer.writes.some(s=>s.includes('[99;5:3u')),'Shift-produced period releases Ctrl+C');
+      summary.push({periodOnPhysicalC:true,shiftProducedPeriod:true});
+      await write(source,'\\x1b[<u');
       await write(source,'selected output\\r\\n');
       source.r.term.selectAll();
       assert.ok(source.r.term.hasSelection(),'selection scenario is active');

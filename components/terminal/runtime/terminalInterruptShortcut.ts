@@ -8,9 +8,11 @@ type InterruptShortcutEvent = Pick<KeyboardEvent, "altKey" | "code" | "ctrlKey" 
 export function isMacCommandPeriodInterruptChord(
   event: InterruptShortcutEvent,
 ): boolean {
-  if (!event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return false;
+  if (!event.metaKey || event.ctrlKey || event.altKey) return false;
+  // Shift can produce the logical period (for example on AZERTY).
+  // Only the physical-key fallback requires an unshifted event.
   if (/^[\x20-\x7e]$/.test(event.key)) return event.key === ".";
-  return event.code === "Period" || event.key === ".";
+  return !event.shiftKey && event.code === "Period";
 }
 
 export function shouldUseUrgentTerminalInterrupt(
