@@ -51,8 +51,13 @@ const PROBE_RECOVERY_RESERVE_MS = 3000;
 // waits RPC_TIMEOUT_BUFFER_MS (5s, capabilities/rpcTimeouts.cjs) beyond the
 // operation timeout before giving up. An absolute deadline stays armed from
 // job start during pacing so delivery cannot outlast the client while the
-// server keeps typing the command and holds the session lock (#3449).
-const PACED_INPUT_DEADLINE_GRACE_MS = 5000;
+// server keeps typing the command and holds the session lock (#3449). The
+// grace must stay strictly below RPC_TIMEOUT_BUFFER_MS (5s): the rest of the
+// transport buffer is needed for request/response transit and the bridge's
+// interrupt + structured timeout reply, otherwise the client reports
+// RPC_TIMEOUT at the same instant the paced deadline fires and the
+// structured result is lost (#3449).
+const PACED_INPUT_DEADLINE_GRACE_MS = 2000;
 const promptRecoveryPendingPtys = new WeakSet();
 
 function stripJobMarkerLines(text, marker) {
