@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { Suspense, lazy, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, Download, Trash2 } from 'lucide-react';
-import { activeTabStore, toEditorTabId, fromEditorTabId, isEditorTabId, useIsEditorTabActive, useActiveTabId } from '../state/activeTabStore';
+import { activeTabStore, toEditorTabId, useIsEditorTabActive } from '../state/activeTabStore';
 import { editorTabStore, tabIsDirty } from '../state/editorTabStore';
 import { releaseEditorTabSaveCoordinator, saveEditorTab } from '../state/editorTabSave';
 import { focusEditorInWindow, popOutEditorTab } from '../state/editorWindowClient';
@@ -72,20 +72,6 @@ const TextEditorTabFallback = ({ tabId }: { tabId: string }) => {
       aria-hidden="true"
     />
   );
-};
-
-const DetachedEditorFocusRedirect = () => {
-  const activeTabId = useActiveTabId();
-  useEffect(() => {
-    if (!isEditorTabId(activeTabId)) return;
-    const editorId = fromEditorTabId(activeTabId);
-    if (!editorId) return;
-    const tab = editorTabStore.getTab(editorId);
-    if (tab?.placement !== "window") return;
-    void focusEditorInWindow(editorId);
-    activeTabStore.setActiveTabId("vault");
-  }, [activeTabId]);
-  return null;
 };
 
 /** Local draft so keystrokes do not rebuild App chrome domain every character. */
@@ -531,7 +517,6 @@ function AppViewInner({ domains }: AppViewProps) {
     <UnsavedChangesProvider>
       {() => (
     <div className="flex flex-col h-screen text-foreground font-sans netcatty-shell" data-terminal-appearance-root onContextMenu={handleRootContextMenu}>
-      <DetachedEditorFocusRedirect />
       <TopTabs
         theme={resolvedTheme}
         themePreference={themePreference}
