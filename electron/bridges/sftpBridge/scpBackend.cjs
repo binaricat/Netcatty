@@ -11,6 +11,7 @@
 
 const fs = require("node:fs");
 const path = require("node:path");
+const { statLocal, createLocalReadStream } = require("../asarSafeFs.cjs");
 const { executeBoundedSshCommand, terminateSshExecStream } = require("../boundedSshExec.cjs");
 const { invalidateSshTransport } = require("../sshTransportInvalidation.cjs");
 const {
@@ -384,7 +385,8 @@ function createScpBackend(deps = {}) {
   async function uploadFile(localPath, remotePath, options = {}) {
     // Always use a fresh size for the SCP wire header so a shrinking/growing
     // file between enqueue and open cannot desync the remote scp -t peer.
-    const st = await fsModule.promises.stat(localPath);
+    // asarSafeFs: real *.asar sources must not stat/read as archives (#3450).
+    const st = await statLocal(localPath);
     const hasProvidedReadStream = typeof options.openReadStream === "function";
     const fileSize = hasProvidedReadStream ? Number(options.fileSize) : st.size;
     if (!Number.isSafeInteger(fileSize) || fileSize < 0) {
@@ -444,7 +446,7 @@ function createScpBackend(deps = {}) {
       const streamDone = new Promise((resolve, reject) => {
         const openedReadStream = hasProvidedReadStream
           ? options.openReadStream()
-          : fsModule.createReadStream(localPath, { highWaterMark: 256 * 1024 });
+          : createLocalReadStream(localPath, { highWaterMark: 256 * 1024 });
         const readStream = openedReadStream?.stream || openedReadStream;
         activeReadCompletion = Promise.resolve(openedReadStream?.completed);
         activeReadStream = readStream;

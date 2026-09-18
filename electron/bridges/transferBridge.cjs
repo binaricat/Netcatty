@@ -16,6 +16,13 @@ const {
   resolveEncodingForRequest,
 } = require("./sftpBridge.cjs");
 const { isScpModeClient, getScpBackendForClient } = require("./sftpBridge/scpBackend.cjs");
+const {
+  statLocal,
+  openLocal,
+  createLocalReadStream,
+  openLocalReadStream,
+  fastPutLocal,
+} = require("./asarSafeFs.cjs");
 const { executeBoundedSshCommand } = require("./boundedSshExec.cjs");
 const { openBoundedSftpChannel } = require("./boundedSftpOpen.cjs");
 const {
@@ -730,14 +737,18 @@ async function hashReadable(readable, options = {}) {
 
 const EMPTY_SHA256_HEX = crypto.createHash("sha256").update("").digest("hex");
 
+// Local source reads go through asarSafeFs so real files named *.asar are not
+// mistaken for asar archives by Electron's fs wrapper (#3450).
 function hashLocalPrefix(filePath, bytes, options) {
   if (!Number.isFinite(bytes) || bytes < 0) return Promise.resolve(null);
   if (bytes === 0) return Promise.resolve(EMPTY_SHA256_HEX);
-  return hashReadable(fs.createReadStream(filePath, { start: 0, end: bytes - 1 }), options);
+  return openLocalReadStream(filePath, { start: 0, end: bytes - 1 })
+    .then((stream) => hashReadable(stream, options));
 }
 
 function hashLocalFile(filePath, options = {}) {
-  return hashReadable(fs.createReadStream(filePath), options);
+  return openLocalReadStream(filePath)
+    .then((stream) => hashReadable(stream, options));
 }
 
 async function hashRemotePrefixViaSshCommand(client, remotePath, bytes, options = {}) {
@@ -2204,7 +2215,9 @@ async function uploadViaFastPut(localPath, remotePath, sftp, fileSize, transfer,
       return;
     }
 
-    sftp.fastPut(localPath, remotePath, {
+    // ssh2 resolves asar-ness via fs.open inside fastXfer (synchronous), so a
+    // scoped noAsar toggle makes real *.asar files readable (#3450).
+    fastPutLocal(sftp, localPath, remotePath, {
       chunkSize: TRANSFER_CHUNK_SIZE,
       concurrency: UPLOAD_TRANSFER_CONCURRENCY,
       step: (transferred, _chunk, total) => {
@@ -2275,7 +2288,8 @@ async function uploadFile(
       encoding,
       signal: transfer.signal,
       openReadStream: () => {
-        const stream = fs.createReadStream(localPath, { highWaterMark: 256 * 1024 });
+        // asarSafeFs: real *.asar sources must not be read as archives (#3450).
+        const stream = createLocalReadStream(localPath, { highWaterMark: 256 * 1024 });
         return { stream, completed: Promise.resolve() };
       },
       onProgress: (transferred, total) => sendProgress(transferred, total || fileSize),
@@ -2291,7 +2305,7 @@ async function uploadFile(
   transfer.pauseSupported = Boolean(transfer.resumable);
   const originalLocalPath = localPath;
   const initialSource = (transfer.resumable || !transfer.sourceIsOwnedTemp)
-    ? await fs.promises.stat(originalLocalPath)
+    ? await statLocal(originalLocalPath)
     : null;
 
   /** @type {Error | null} */
@@ -2307,7 +2321,7 @@ async function uploadFile(
 
   const finishSuccessfulUpload = async () => {
     if (initialSource) {
-      const latestSource = await fs.promises.stat(originalLocalPath);
+      const latestSource = await statLocal(originalLocalPath);
       // Soft size + mtime/ino (no full-file re-hash). Do not claim separate
       // content proof — same-size rewrites that bump mtime still fail closed.
       // ignoreCtime: macOS xattr/Spotlight noise must not abort a true match.
@@ -4435,7 +4449,8 @@ async function uploadFileConcurrent(
   try {
     if (transfer.cancelled) throw new Error("Transfer cancelled");
     try {
-      localHandle = await fs.promises.open(localPath, "r");
+      // asarSafeFs: real *.asar sources must not be opened as archives (#3450).
+      localHandle = await openLocal(localPath, "r");
     } catch (error) {
       failed = true;
       noTransferFallback = true;
@@ -5510,7 +5525,7 @@ async function startTransferNow(event, payload, onProgress) {
   const SOFT_RESUME_SAMPLE_BYTES = 256 * 1024;
   const readSourceSoftIdentity = async () => {
     if (sourceType === "local") {
-      const st = await fs.promises.stat(sourcePath);
+      const st = await statLocal(sourcePath);
       const sampleBytes = Math.min(SOFT_RESUME_SAMPLE_BYTES, Math.max(0, st.size));
       const sample = sampleBytes > 0
         ? await hashLocalPrefix(sourcePath, sampleBytes, { signal: transfer.signal })
@@ -5778,7 +5793,8 @@ async function startTransferNow(event, payload, onProgress) {
 
     if (!hasExplicitTotal) {
       if (sourceType === 'local') {
-        const stat = await fs.promises.stat(sourcePath);
+        // asarSafeFs: local *.asar sources stat as archive roots otherwise (#3450).
+        const stat = await statLocal(sourcePath);
         fileSize = stat.size;
       } else if (sourceType === 'sftp') {
         const client = sftpClients.get(sourceSftpId);
