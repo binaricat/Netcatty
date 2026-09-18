@@ -768,8 +768,14 @@ function startPtyJob(ptyStream, command, options) {
       clearProbeTimeout();
       clearProbeResumeTimeout();
       probeOutput = "";
+      // A completed parse with no kind means the _Q sentinel arrived but the
+      // _P line was evicted from the rolling buffer by subsequent output; the
+      // retained kind from the _P line is still the probe's detection, so use
+      // it instead of falling back to the pre-probe shell kind.
+      const completedKind = probe.kind
+        ?? (partialProbeKind === undefined ? null : partialProbeKind);
       partialProbeKind = undefined;
-      if (probe.kind) resolvedShellKind = probe.kind;
+      if (completedKind) resolvedShellKind = completedKind;
       if (finished || cancelRequested) return;
       writeWrappedCommand();
       return;
