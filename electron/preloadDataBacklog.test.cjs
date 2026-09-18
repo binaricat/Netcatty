@@ -1901,3 +1901,61 @@ test("aborted input releases custom prompts and ignores a late input marker", ()
     assert.equal(received.join(""), "normal output\nlate prompt\n");
   } finally { preload.cleanup(); }
 });
+
+test('real OpenWrt ash hides wrapped input and preserves output with priming (#3384)', {
+  skip: !process.env.NETCATTY_OPENWRT_SSH_PORT,
+  timeout: 60000,
+}, async () => {
+  const { Client } = require('ssh2');
+  const { execViaPty } = require('./bridges/ai/ptyExec.cjs');
+  const client = new Client();
+  await new Promise((resolve, reject) => client.once('ready', resolve).once('error', reject).connect({
+    host: '127.0.0.1', port: Number(process.env.NETCATTY_OPENWRT_SSH_PORT), username: 'root', password: '',
+  }));
+  try {
+    for (const cols of [80, 120]) {
+      for (const probeLiveShell of [false, true]) {
+        const preload = loadPreloadWithFakeElectron();
+        const stream = await new Promise((resolve, reject) => client.shell({ term: 'xterm', cols, rows: 30 },
+          (error, value) => error ? reject(error) : resolve(value)));
+        try {
+          await new Promise((resolve, reject) => {
+            let output = '';
+            const timer = setTimeout(() => reject(new Error('OpenWrt prompt missing')), 5000);
+            const onData = data => {
+              output += data;
+              if (output.includes(':~# ')) {
+                clearTimeout(timer);
+                stream.removeListener('data', onData);
+                resolve();
+              }
+            };
+            stream.on('data', onData);
+          });
+          const received = [];
+          const sessionId = `openwrt-${cols}-${probeLiveShell}`;
+          preload.api.onSessionData(sessionId, chunk => received.push(chunk));
+          const deliver = data => preload.handlers.get('netcatty:data')({}, { sessionId, data: String(data) });
+          stream.on('data', deliver);
+          const result = await execViaPty(stream, "printf 'visible-output\\n'", {
+            shellKind: 'posix', probeLiveShell, typedInput: true, timeoutMs: 5000,
+            onEchoSuppressionPrime: marker => deliver(`${marker}_I\n`),
+            onProbeAborted: marker => deliver(`${marker}_R\n`),
+          });
+          await sleep(150);
+          assert.equal(result.ok, true, JSON.stringify(result));
+          assert.equal(result.stdout.trim(), 'visible-output');
+          const display = received.join('');
+          assert.match(display, /visible-output/);
+          assert.doesNotMatch(display, /__nc_|__NCMCP_|printf|eval|unset|_cmd=|_d=/,
+            JSON.stringify({ cols, probeLiveShell, display }));
+        } finally {
+          stream.close();
+          preload.cleanup();
+        }
+      }
+    }
+  } finally {
+    client.end();
+  }
+});

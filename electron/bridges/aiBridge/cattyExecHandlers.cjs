@@ -2,6 +2,7 @@
 // Module-level require on purpose: code inside registerCattyExecHandlers
 // runs under `with (ctx)` where bare `require` resolves to ctx.require
 // (based in electron/bridges/). Requiring here keeps the path unambiguous.
+const { emitTerminalSessionData } = require("../emitTerminalSessionData.cjs");
 const { formatSyntheticEcho } = require("../ai/shellUtils.cjs");
 const { remoteDisallowsExecChannelProbe, ensureSessionShellKindForExec } = require("../ai/sessionShellKind.cjs");
 
@@ -180,11 +181,11 @@ function registerCattyExecHandlers(ctx) {
             bastionKeystrokes: remoteDisallowsExecChannelProbe(session.remoteSshVersion),
             onProbeAborted: (marker) => {
               const contents = electronModule?.webContents?.fromId?.(session.webContentsId);
-              safeSend(contents, "netcatty:data", { sessionId, data: `${marker}_R\n` });
+              emitTerminalSessionData(contents, sessionId, `${marker}_R\n`, { session });
             },
             onEchoSuppressionPrime: (marker) => {
               const contents = electronModule?.webContents?.fromId?.(session.webContentsId);
-              safeSend(contents, "netcatty:data", { sessionId, data: `${marker}_I\n` });
+              emitTerminalSessionData(contents, sessionId, `${marker}_I\n`, { session });
             },
             chatSessionId,
             expectedPrompt: getFreshIdlePrompt(session),
