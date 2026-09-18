@@ -1035,12 +1035,21 @@ function startPtyJob(ptyStream, command, options) {
   // the pre-probe shell kind so the command gets the largest possible share
   // of the remaining wall budget; when even the wrapper alone cannot fit,
   // keep the probe path (the wall timer will finish the job cleanly).
+  // A successful probe may switch the shell kind (e.g. a recorded fish
+  // session wrapping a nested POSIX shell), and writeWrappedCommand() then
+  // types the detected kind's wrapper — so reserve the worst-case wrapper
+  // delivery among {"posix", "fish"} here too, mirroring armProbeTimeout()
+  // and abortProbeToWrapper(); otherwise the probe could be sent even though
+  // the detected wrapper cannot finish typing within the remaining budget.
   if (probingShell && wallClockArmed) {
     const remainingMs = timeoutMs - (Date.now() - wallStartMs);
     const probeDeliveryMs = estimateInputDeliveryMs(
       `${buildPendingInputClearPrefix(resolvedShellKind)}${buildLiveShellProbe(marker)}`,
     );
-    const wrapperDeliveryMs = estimateInputDeliveryMs(wrappedCommandText());
+    const wrapperDeliveryMs = Math.max(
+      estimateInputDeliveryMs(wrappedCommandText("posix")),
+      estimateInputDeliveryMs(wrappedCommandText("fish")),
+    );
     if (probeDeliveryMs + wrapperDeliveryMs > remainingMs && wrapperDeliveryMs <= remainingMs) {
       probingShell = false;
       // Skipping the probe also skips abortProbeToWrapper()'s flow recovery.
