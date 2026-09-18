@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { useCallback } from "react";
 import { deleteVaultKey } from "../../application/defaultKeyPassphrases";
+import { VaultGroupDeletionConfirmationChangedError } from "../../application/state/useVaultGroupDeletion";
 import { usePluginImporterCommit } from "../../application/state/usePluginImporterCommit";
 import { preserveConcurrentHostLineTimestampUpdate } from "../../domain/host";
 import {
@@ -1726,7 +1727,9 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
                       isBulkDelete ? selectedHostIds : new Set<string>(),
                     );
                   } catch (error) {
-                    toast.error(error instanceof Error ? error.message : t("common.error"));
+                    toast.error(error instanceof VaultGroupDeletionConfirmationChangedError
+                      ? t("vault.groups.deleteDialog.sourcesChanged")
+                      : error instanceof Error ? error.message : t("common.error"));
                     return;
                   }
                   if (isBulkDelete) {

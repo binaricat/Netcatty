@@ -14,6 +14,17 @@ import {
 
 const RETRY_VAULT_GROUP_DELETION = Symbol("retry-vault-group-deletion");
 
+export class VaultGroupDeletionConfirmationChangedError extends Error {
+  constructor() {
+    super("The managed files affected by this deletion have changed. Review the files and confirm again.");
+    this.name = "VaultGroupDeletionConfirmationChangedError";
+  }
+}
+
+const managedSourceFileIdentity = (source: ManagedSource): string => (
+  JSON.stringify([source.id, source.type, source.filePath])
+);
+
 const managedSourceSnapshotsMatch = (
   left: ManagedSource[],
   right: ManagedSource[],
@@ -59,6 +70,14 @@ export function useVaultGroupDeletion({
     additionallyDeletedHostIds: ReadonlySet<string> = new Set(),
   ) => {
     const selectedPaths = [...paths];
+    // Bind confirmation to the sources rendered with this callback, not the
+    // latest persisted snapshot (which reads and retries update independently).
+    const confirmedFiles = new Set(buildVaultGroupDeletion({
+      ...latestRef.current,
+      selectedPaths,
+      deleteHosts,
+      managedSources,
+    }).sourcesToRemove.map(managedSourceFileIdentity));
     let deletedRoots: string[] = [];
     while (true) {
       let restoreManagedFiles: (() => Promise<void>) | undefined;
@@ -80,6 +99,12 @@ export function useVaultGroupDeletion({
           });
           if (deletion.selectedRoots.length === 0) {
             return { status: "empty" as const };
+          }
+
+          if (deletion.sourcesToRemove.some((source) => (
+            !confirmedFiles.has(managedSourceFileIdentity(source))
+          ))) {
+            throw new VaultGroupDeletionConfirmationChangedError();
           }
 
           if (deletion.sourcesToRemove.length > 0) {
@@ -194,6 +219,7 @@ export function useVaultGroupDeletion({
     }
     onDeletedPaths?.(deletedRoots);
   }, [
+    managedSources,
     onClearAndRemoveManagedSource,
     onClearAndRemoveManagedSources,
     onCommitVaultGroupMutation,

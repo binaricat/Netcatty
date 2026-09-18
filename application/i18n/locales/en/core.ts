@@ -1050,6 +1050,7 @@ Highlight the focused split pane:
   'vault.groups.deleteDialog.managedDesc': 'This is a managed SSH config group. Deleting it will also delete all hosts and unlink from the source file.',
   'vault.groups.deleteDialog.mixedDesc': 'This group contains hosts imported from a linked SSH config file. Every host under its managed subgroup will be deleted, even hosts not managed by that file. All other hosts will move to the root level unless you also delete them below.',
   'vault.groups.deleteDialog.managedWarning': 'Deleting this group will also clear its entries from the linked SSH config file. Entries that came from that file may be lost for other apps that use it. Back up the file before continuing.',
+  'vault.groups.deleteDialog.sourcesChanged': 'The managed files affected by this deletion have changed. Review the files and confirm again.',
   'vault.groups.deleteDialog.managedFile': 'Linked file: {file}',
   'vault.groups.deleteDialog.deleteHosts': 'Also delete all hosts in this group',
   'vault.groups.deleteDialog.bulkTitle': 'Delete Selected Groups',

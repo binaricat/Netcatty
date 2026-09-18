@@ -5,6 +5,8 @@ import {
   hostTreeInlineGroupDeleteStore,
   useHostTreeInlineGroupDeleteTarget,
 } from '../../application/state/hostTreeInlineGroupDeleteStore';
+import { VaultGroupDeletionConfirmationChangedError } from '../../application/state/useVaultGroupDeletion';
+import { toast } from '../ui/toast';
 import { Button } from '../ui/button';
 import {
   Dialog,
@@ -119,12 +121,18 @@ export const HostTreeGroupDeleteDialog: React.FC<HostTreeGroupDeleteDialogProps>
           </Button>
           <Button
             variant="destructive"
-            onClick={() => {
+            onClick={async () => {
               if (!targetPath) return;
-              void Promise.resolve(onConfirmDelete(targetPath, isManaged || deleteHosts)).finally(() => {
-                hostTreeInlineGroupDeleteStore.close();
-                setDeleteHosts(false);
-              });
+              try {
+                await onConfirmDelete(targetPath, isManaged || deleteHosts);
+              } catch (error) {
+                toast.error(error instanceof VaultGroupDeletionConfirmationChangedError
+                  ? t('vault.groups.deleteDialog.sourcesChanged')
+                  : error instanceof Error ? error.message : t('common.error'));
+                return;
+              }
+              hostTreeInlineGroupDeleteStore.close();
+              setDeleteHosts(false);
             }}
           >
             {t('common.delete')}
