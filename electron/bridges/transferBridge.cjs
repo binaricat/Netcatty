@@ -763,6 +763,16 @@ function raceLocalStreamOpenAgainstAbort(openPromise, signal) {
     };
     let lateStream = null;
     signal.addEventListener?.("abort", onAbort, { once: true });
+    // AbortSignal does not replay its event: if the signal was already aborted
+    // (e.g. while a preceding statLocal() was pending), the listener above will
+    // never fire. Reject immediately so a stalled open cannot leave the request
+    // pending; a stream that arrives later is still destroyed via lateStream.
+    if (signal.aborted) {
+      settled = true;
+      signal.removeEventListener?.("abort", onAbort);
+      reject(localStreamCancellationError());
+      return;
+    }
     openPromise.then(
       (stream) => {
         lateStream = stream;
