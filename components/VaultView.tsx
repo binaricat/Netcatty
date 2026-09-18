@@ -697,7 +697,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
       keyPassphrases,
       unreadablePassphraseCount,
     } = await buildVaultCsvCredentialOptions(hosts, keys);
-    const { csv, exportedCount, skippedCount } = exportHostsToCsvWithStats(
+    const { csv, exportedCount, skippedCount, unreadableProxyCredentialCount } = exportHostsToCsvWithStats(
       hosts,
       {
         keyPassphrases,
@@ -728,6 +728,13 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
       toast.warning(
         t("vault.hosts.export.toast.passphrasesSkipped", {
           count: unreadablePassphraseCount,
+        }),
+      );
+    }
+    if (unreadableProxyCredentialCount > 0) {
+      toast.warning(
+        t("vault.hosts.export.toast.proxyCredentialsSkipped", {
+          count: unreadableProxyCredentialCount,
         }),
       );
     }

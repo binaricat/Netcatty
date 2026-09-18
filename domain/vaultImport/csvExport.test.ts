@@ -383,6 +383,7 @@ test("CSV proxy parsing warns on paths, query strings, fragments, and invalid po
   for (const value of [
     "http://proxy.example:8080/path:80", "http://proxy.example?query:80",
     "http://proxy.example#fragment:80", "http://proxy.example:0",
+    "http://proxy.example:8080:80", "socks5://::1:1080",
     "socks5://proxy.example:65536", "http://[::1:8080", "command://",
   ]) {
     const imported = importVaultHostsFromText("csv", `Hostname,Proxy\ntarget.example.com,${value}`);
@@ -401,4 +402,26 @@ test("CSV template includes a working proxy example and legacy CSV stays compati
   assert.equal(legacy.hosts[0]?.password, "secret");
   assert.equal(legacy.hosts[0]?.proxyConfig, undefined);
   assert.deepEqual(legacy.issues, []);
+});
+
+test("CSV reports unreadable proxy passwords for exported hosts only", () => {
+  const encrypted = "enc:v1:djEwdGVzdAAAAAAAAAAAAAAAAA==";
+  const inline = { type: "http" as const, host: "proxy.example.com", port: 8080, username: "alice", password: encrypted };
+  const identityProxy = { type: "socks5" as const, host: "proxy.example.com", port: 1080, identityId: "identity-1" };
+  const result = exportHostsToCsvWithStats([
+    { ...hostDefaults, id: "inline", label: "Inline", hostname: "one.example.com", proxyConfig: inline },
+    { ...hostDefaults, id: "group", label: "Group", hostname: "two.example.com", group: "Corp" },
+    { ...hostDefaults, id: "good", label: "Readable", hostname: "three.example.com", proxyConfig: { ...inline, password: "readable" } },
+    { ...hostDefaults, id: "serial", label: "Serial", hostname: "ttyUSB0", protocol: "serial", proxyConfig: inline },
+  ], {
+    groupConfigs: [{ path: "Corp", proxyProfileId: "profile-1" }],
+    proxyProfiles: [{ id: "profile-1", label: "Profile", createdAt: 0, config: identityProxy }],
+    identities: [{ id: "identity-1", label: "Account", username: "alice", password: encrypted, authMethod: "password", created: 0 }],
+  });
+  assert.equal(result.unreadableProxyCredentialCount, 2);
+  assert.equal(result.exportedCount, 3);
+  assert.equal(result.skippedCount, 1);
+  const imported = importVaultHostsFromText("csv", result.csv);
+  assert.deepEqual(imported.hosts.map((host) => host.proxyConfig?.password), [undefined, undefined, "readable"]);
+  assert.equal(exportHostsToCsvWithStats([]).unreadableProxyCredentialCount, 0);
 });

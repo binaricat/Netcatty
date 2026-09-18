@@ -1064,6 +1064,7 @@ Resalta el panel dividido enfocado:
   'vault.hosts.export.toast.success': 'Se exportaron {count} hosts a CSV',
   'vault.hosts.export.toast.successWithSkipped': 'Se exportaron {count} hosts a CSV (se omitieron {skipped} hosts no compatibles)',
   'vault.hosts.export.toast.passphrasesSkipped': 'No se pudieron leer {count} frases de contraseña de claves guardadas y se dejaron en blanco',
+  'vault.hosts.export.toast.proxyCredentialsSkipped': 'No se pudieron leer {count} contraseñas de proxy guardadas y se dejaron en blanco',
   'vault.hosts.export.toast.noHosts': 'No hay hosts para exportar',
   'vault.hosts.allHosts': 'Todos los hosts',
   'vault.hosts.pinned': 'Fijados',

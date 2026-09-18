@@ -6,7 +6,7 @@ import { decodeCsvProxy } from "./csvCredentialFields";
 //   socks5://[user[:pass]@]host:port
 //   command://<command text, verbatim after the scheme>
 const PROXY_SCHEME_PATTERN = /^(http|socks5|command):\/\/(.*)$/is;
-const PROXY_AUTHORITY_PATTERN = /^(?:([^@:/?#\s]+)(?::([^@/?#]*))?@)?(\[[^\[\]@/?#\s]+\]|[^\[\]@/?#\s]+):(\d+)$/u;
+const PROXY_AUTHORITY_PATTERN = /^(?:([^@:/?#\s]+)(?::([^@/?#]*))?@)?(\[[^\[\]@/?#\s]+\]|[^\[\]@:/?#\s]+):(\d+)$/u;
 
 const decodeAuthorityPart = (value: string | undefined): string | undefined => {
   if (value === undefined) return undefined;

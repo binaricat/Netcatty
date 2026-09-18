@@ -1,7 +1,7 @@
 import type { GroupConfig, Host, Identity, ProxyProfile } from '../models';
 import { applyGroupDefaults, resolveGroupDefaults } from '../groupConfig';
 import { isPluginHostProtocol } from '../pluginConnection';
-import { materializeHostProxyProfile, resolveProxyConfigAuth } from '../proxyProfiles';
+import { hasUnreadableProxyCredential, materializeHostProxyProfile, resolveProxyConfigAuth } from '../proxyProfiles';
 import { encodeCsvKeyPath, encodeCsvPassphrase, encodeCsvProxy } from './csvCredentialFields';
 import { formatCsvProxy } from './csvProxy';
 
@@ -53,9 +53,10 @@ export const getVaultCsvTemplate = (
   return rows.map((r) => r.map((c) => escapeCsv(c)).join(",")).join("\r\n") + "\r\n";
 };
 
-const exportHostsToCsv = (hosts: Host[], options: VaultCsvExportOptions): string => {
+const exportHostsToCsv = (hosts: Host[], options: VaultCsvExportOptions) => {
   const header = ["Groups", "Label", "Tags", "Notes", "Hostname/IP", "Protocol", "Port", "Username", "Password", "KeyPath", "Passphrase", "Proxy"];
   const rows: string[][] = [header];
+  let unreadableProxyCredentialCount = 0;
 
   const escapeCsv = (value: string, skipFormulaGuard = false) => {
     // Prevent CSV formula injection by prefixing dangerous characters with a single quote
@@ -111,6 +112,9 @@ const exportHostsToCsv = (hosts: Host[], options: VaultCsvExportOptions): string
       ? applyGroupDefaults(host, resolveGroupDefaults(host.group, options.groupConfigs ?? [], inheritanceOptions), inheritanceOptions)
       : host;
     const proxyConfig = materializeHostProxyProfile(effectiveHost, proxyProfiles).proxyConfig;
+    if (hasUnreadableProxyCredential(proxyConfig, options.identities)) {
+      unreadableProxyCredentialCount += 1;
+    }
     const proxyValue = proxyConfig
       ? formatCsvProxy(resolveProxyConfigAuth(proxyConfig, options.identities))
       : "";
@@ -135,16 +139,18 @@ const exportHostsToCsv = (hosts: Host[], options: VaultCsvExportOptions): string
   const keyPathColIdx = header.indexOf("KeyPath");
   const passphraseColIdx = header.indexOf("Passphrase");
   const proxyColIdx = header.indexOf("Proxy");
-  return rows.map((r, rowIdx) => r.map((c, i) => escapeCsv(
+  const csv = rows.map((r, rowIdx) => r.map((c, i) => escapeCsv(
     c,
     rowIdx > 0 && (i === passwordColIdx || i === keyPathColIdx || i === passphraseColIdx || i === proxyColIdx),
   )).join(",")).join("\r\n") + "\r\n";
+  return { csv, unreadableProxyCredentialCount };
 };
 
 interface ExportHostsResult {
   csv: string;
   exportedCount: number;
   skippedCount: number;
+  unreadableProxyCredentialCount: number;
 }
 
 export const exportHostsToCsvWithStats = (
@@ -156,10 +162,12 @@ export const exportHostsToCsvWithStats = (
   const isUnsupported = (h: Host) => h.protocol === "serial" || isPluginHostProtocol(h.protocol);
   const skippedHosts = hosts.filter((h) => isUnsupported(h));
   const exportableHosts = hosts.filter((h) => !isUnsupported(h));
+  const { csv, unreadableProxyCredentialCount } = exportHostsToCsv(exportableHosts, options);
 
   return {
-    csv: UTF8_BOM + exportHostsToCsv(exportableHosts, options),
+    csv: UTF8_BOM + csv,
     exportedCount: exportableHosts.length,
     skippedCount: skippedHosts.length,
+    unreadableProxyCredentialCount,
   };
 };
