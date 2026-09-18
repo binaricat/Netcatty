@@ -3,8 +3,8 @@ const assert = require("node:assert/strict");
 const { spawnSync } = require("node:child_process");
 const { EventEmitter } = require("node:events");
 const { mkdtempSync, writeFileSync, rmSync } = require("node:fs");
-const { tmpdir } = require("node:os");
 const { join } = require("node:path");
+const { getTempFilePath } = require("../tempDirBridge.cjs");
 
 const { createSessionOpsApi } = require("./sessionOps.cjs");
 
@@ -684,7 +684,7 @@ for (const scenario of [
       t.skip("GNU/BusyBox-compatible timeout is unavailable on this test host");
       return;
     }
-    const dir = mkdtempSync(join(tmpdir(), "netcatty-gpu-stats-"));
+    const dir = mkdtempSync(getTempFilePath("gpu-stats-"));
     t.after(() => rmSync(dir, { recursive: true, force: true }));
     writeFileSync(join(dir, "nvidia-smi"), `#!/bin/sh\n${scenario.script}\n`, { mode: 0o755 });
     const sessions = new Map([["sid", {
