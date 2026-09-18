@@ -273,7 +273,7 @@ test("stale drag-drop echo suppression is dropped when the pending upload is can
   assert.deepEqual(seen, ["su - username -s /bin/bas", "h"]);
 });
 
-test("drag-drop echo suppression expires instead of eating later user echo", async () => {
+test("drag-drop echo suppression expires instead of eating later user echo", async (t) => {
   const seen = [];
   const sentry = createZmodemSentry({
     sessionId: "session-1",
@@ -282,6 +282,7 @@ test("drag-drop echo suppression expires instead of eating later user echo", asy
     getWebContents: () => null,
     pendingTerminalSuppressionTtlMs: 0,
   });
+  t.after(() => sentry.cancel({ interrupt: false }));
 
   sentry.queueDragDropUpload({
     filePaths: ["/tmp/a.txt"],
