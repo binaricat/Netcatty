@@ -56,6 +56,41 @@ test('probe waits for complete reply before choosing the first wrapper', async (
   assert.equal((await job.resultPromise).exitCode, 0);
 });
 
+test('probe deadline fallback resumes session flow control before typing the wrapper', async () => {
+  const pty = new EventEmitter();
+  const writes = [];
+  const events = [];
+  pty.write = (data) => writes.push(data);
+  const job = startPtyJob(pty, 'printf resumed', {
+    shellKind: 'posix',
+    probeLiveShell: true,
+    timeoutMs: 2000,
+    onInterrupt: () => events.push('interrupt'),
+  });
+  // The probe's _Q sentinel never arrives (renderer flow stays paused), so
+  // the probe deadline fires the fallback: it must resume the session-owned
+  // flow (clearSessionFlowState) before typing the wrapper, otherwise the
+  // buffered start/end markers cannot reach onData and the job times out
+  // even though the command executed remotely. The deadline is armed only
+  // after the paced probe delivery completes, then waits min(15s, 75% of
+  // the budget), so poll instead of sleeping a fixed interval.
+  for (let i = 0; i < 100 && !events.length; i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  assert.ok(events.includes('interrupt'), 'fallback must invoke onInterrupt');
+  // The fallback wrapper is typed with pacing; finishing the job cancels any
+  // remaining delivery, so wait for the full wrapper before completing it.
+  for (let i = 0; i < 100 && !writes.join('').includes('printf resumed'); i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  assert.ok(writes.join('').includes('printf resumed'),
+    'fallback must type the wrapper after resuming flow');
+  pty.emit('data', `${job.marker}_S\r\nresumed\r\n${job.marker}_E:0\r\n`);
+  const result = await job.resultPromise;
+  assert.equal(result.exitCode, 0, JSON.stringify(result));
+  assert.equal(events.filter((e) => e === 'interrupt').length, 1);
+});
+
 test('probe wrapper keeps the start marker separate when terminal echo is disabled', async () => {
   const { spawnSync } = require('node:child_process');
   const pty = new EventEmitter();

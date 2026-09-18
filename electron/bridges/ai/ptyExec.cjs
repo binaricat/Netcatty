@@ -271,6 +271,19 @@ function startPtyJob(ptyStream, command, options) {
     probingShell = false;
     const partialKind = parsePartialLiveShellProbeKind(stripAnsi(probeOutput), marker);
     if (partialKind) resolvedShellKind = partialKind;
+    // A paused renderer flow is one of the reasons the probe's _Q sentinel
+    // never arrives, so resuming the session-owned flow is part of this
+    // fallback: without it, buffered probe/start/end markers cannot reach
+    // onData and the wrapper may execute remotely while the job still times
+    // out waiting for its start marker. Mirrors sendInterrupt()'s best-effort
+    // recovery (the supported callers wire onInterrupt to
+    // clearSessionFlowState).
+    try {
+      onInterrupt?.();
+    } catch {
+      // Best-effort recovery must not prevent the fallback wrapper from
+      // being typed.
+    }
     writeWrappedCommand();
   }
   // The output/startup deadlines (timeoutMs for foreground jobs,
