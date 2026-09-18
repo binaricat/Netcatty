@@ -212,7 +212,7 @@ import {
 type TerminalBackendApi = {
   openExternalAvailable: () => boolean;
   openExternal: (url: string) => Promise<void>;
-  writeToSession: (sessionId: string, data: string) => void;
+  writeToSession: NetcattyBridge["writeToSession"];
   interruptSession?: (sessionId: string, trace?: NetcattyTerminalInterruptTrace) => void;
   signalPluginConnection?: (
     sessionId: string,
