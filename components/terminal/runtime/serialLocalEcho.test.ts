@@ -41,7 +41,7 @@ test("formatSerialLocalEcho erases 2 cells for wide-character backspace", () => 
 test("serial byte deletion metadata is forwarded through the runtime input loop", async () => {
   const { readFile } = await import("node:fs/promises");
   const source = await readFile(new URL("./createXTermRuntime.ts", import.meta.url), "utf8");
-  assert.match(source, /writeToSession\(id, chunk, \{ sensitive, serialEraseChar \}\)/);
+  assert.match(source, /writeToSession\(id, chunk, \{\s*sensitive,\s*serialEraseChar,[\s\S]*?\}\)/);
 });
 
 test("both Enter and submitted paste restore serial tail confidence", async () => {
