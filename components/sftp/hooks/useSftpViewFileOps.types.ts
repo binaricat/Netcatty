@@ -61,6 +61,7 @@ export interface UseSftpViewFileOpsResult {
   >;
   handleSaveTextFile: (content: string) => Promise<void>;
   onPromoteToTab: (snapshot: TextEditorModalSnapshot) => void;
+  onPopOut: (snapshot: TextEditorModalSnapshot) => void;
   handleFileOpenerSelect: (
     openerType: FileOpenerType,
     setAsDefault: boolean,

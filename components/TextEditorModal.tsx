@@ -71,6 +71,8 @@ interface TextEditorModalProps {
   keyBindings: KeyBinding[];
   /** If provided, a maximize button is shown in the Pane header. */
   onPromoteToTab?: (snapshot: TextEditorModalSnapshot) => void;
+  /** If provided, a pop-out button sends the file to the dedicated editor window. */
+  onPopOut?: (snapshot: TextEditorModalSnapshot) => void;
 }
 
 const TextEditorModal: React.FC<TextEditorModalProps> = ({
@@ -84,6 +86,7 @@ const TextEditorModal: React.FC<TextEditorModalProps> = ({
   hotkeyScheme,
   keyBindings,
   onPromoteToTab,
+  onPopOut,
 }) => {
   const { t } = useI18n();
 
@@ -229,6 +232,20 @@ const TextEditorModal: React.FC<TextEditorModalProps> = ({
     if (snapshot) onPromoteToTab(snapshot);
   }, [onPromoteToTab, fileName, languageId, editorWordWrap]);
 
+  const handlePopOut = useCallback(() => {
+    if (!onPopOut) return;
+    const snapshot = createTextEditorModalSnapshot({
+      fileName,
+      getBaselineContent: () => baselineContentRef.current,
+      getContent: () => contentRef.current,
+      languageId,
+      wordWrap: editorWordWrap,
+      getViewState: () => viewStateRef.current,
+      isSaving: () => savingRef.current,
+    });
+    if (snapshot) onPopOut(snapshot);
+  }, [onPopOut, fileName, languageId, editorWordWrap]);
+
   return (
     <Dialog open={open} onOpenChange={(isOpen) => !isOpen && handleClose()}>
       <DialogContent
@@ -255,6 +272,7 @@ const TextEditorModal: React.FC<TextEditorModalProps> = ({
           onSave={handleSave}
           onRequestClose={handleClose}
           onPromoteToTab={onPromoteToTab ? handlePromote : undefined}
+          onPopOut={onPopOut ? handlePopOut : undefined}
         />
       </DialogContent>
     </Dialog>

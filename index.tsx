@@ -17,6 +17,7 @@ import { AppLockGate } from './components/AppLockGate';
 const LazySettingsPage = lazy(() => import('./components/SettingsPage'));
 const LazyTrayPanel = lazy(() => import('./components/TrayPanel'));
 const LazyTerminalPopupPage = lazy(() => import('./components/TerminalPopupPage'));
+const LazyEditorWindowPage = lazy(() => import('./components/editor/EditorWindowPage'));
 
 function SettingsWindowFallback() {
   return (
@@ -144,6 +145,9 @@ const getRoute = () => {
   if (hash === '#/terminal-popup' || hash.startsWith('#/terminal-popup')) {
     return 'terminal-popup';
   }
+  if (hash === '#/editor-window' || hash.startsWith('#/editor-window')) {
+    return 'editor-window';
+  }
   if (hash === '#/session-window' || hash.startsWith('#/session-window')) {
     return 'main';
   }
@@ -165,10 +169,11 @@ const syncTrayWindowClass = (route: string) => {
 const renderApp = () => {
   const route = getRoute();
   const isPeerSessionWindow = window.location.hash.startsWith('#/session-window');
+  const isEditorWindow = route === 'editor-window';
   // Peer session windows must not drive the main window's settings IPC sync
   // and must not re-apply OS-level system settings effects (tray, global
   // shortcuts, …) — they follow the main window through the chrome stores.
-  const settingsOptions = isPeerSessionWindow
+  const settingsOptions = isPeerSessionWindow || isEditorWindow
     ? { enableSettingsSync: false, enableSystemEffects: false }
     : undefined;
 
@@ -216,6 +221,25 @@ const renderApp = () => {
               <LazyTerminalPopupPage
                 settings={settings}
                 allowTerminalStart={appLock.initialized && !appLock.locked}
+              />
+            </Suspense>
+          )}
+        </AppLockGate>
+      </StrictMode>
+    );
+  } else if (route === 'editor-window') {
+    root.render(
+      <StrictMode>
+        <AppLockGate
+          notifyRendererReady={false}
+          forceRenderChildren
+          settingsOptions={settingsOptions}
+        >
+          {({ settings, appLock }) => (
+            <Suspense fallback={<TerminalPopupWindowFallback />}>
+              <LazyEditorWindowPage
+                settings={settings}
+                allowEdit={appLock.initialized && !appLock.locked}
               />
             </Suspense>
           )}

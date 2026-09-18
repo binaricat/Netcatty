@@ -865,6 +865,13 @@ export const esTerminalMessages: Messages = {
   // Text Editor
   'sftp.editor.wordWrap': 'Ajuste de línea',
   'sftp.editor.maximize': 'Maximizar',
+  'sftp.editor.popOut': 'Abrir en ventana de editor',
+  'sftp.editor.dock': 'Anclar a la ventana principal',
+  'sftp.editor.focusWindow': 'Enfocar ventana de editor',
+  'sftp.editor.close': 'Cerrar',
+  'sftp.editor.windowTitle': 'Editor',
+  'sftp.editor.windowEmpty': 'No hay archivos abiertos',
+  'sftp.editor.dockFailed': 'No se pudo anclar este archivo a la ventana principal',
   'sftp.editor.unsavedTitle': 'Cambios sin guardar',
   'sftp.editor.unsavedMessage': '{fileName} tiene cambios sin guardar. ¿Guardar antes de cerrar?',
   'sftp.editor.discardChanges': 'Descartar',

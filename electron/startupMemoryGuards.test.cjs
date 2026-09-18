@@ -13,6 +13,7 @@ const WINDOW_SOURCES_WITH_SPELLCHECK = [
   'bridges/windowManager/mainWindow.cjs',
   'bridges/windowManager/settingsWindow.cjs',
   'bridges/windowManager/terminalPopupWindow.cjs',
+  'bridges/windowManager/editorWindow.cjs',
   'bridges/globalShortcutBridge.cjs',
   'bridges/windowManager/externalWindows.cjs',
   'plugins/contributionIconRasterizer.cjs',

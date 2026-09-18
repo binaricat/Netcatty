@@ -7,7 +7,9 @@ import {
   CloudUpload,
   Loader2,
   Maximize2,
+  PanelLeft,
   Search,
+  SquareArrowOutUpRight,
   WrapText,
   X,
 } from 'lucide-react';
@@ -93,8 +95,8 @@ export interface TextEditorPaneProps {
   saveError: string | null;
   hotkeyScheme: HotkeyScheme;
   keyBindings: KeyBinding[];
-  /** Layout mode — affects header chrome (modal shows close+maximize; tab-form only shows content controls since tab has its own close). */
-  chrome: 'modal' | 'tab';
+  /** Layout mode — modal has close+maximize+popout; tab has popout; window has dock. */
+  chrome: 'modal' | 'tab' | 'window';
   /** Optional secondary label shown next to the filename in muted text — used by the tab form to display `host:remotePath`. */
   subtitle?: string;
   onContentChange: (content: string, viewState: Monaco.editor.ICodeEditorViewState | null) => void;
@@ -103,6 +105,8 @@ export interface TextEditorPaneProps {
   onSave: () => void;
   onRequestClose?: () => void;   // modal only
   onPromoteToTab?: () => void;   // modal only — omit to hide the maximize button
+  onPopOut?: () => void;         // modal/tab — open in the dedicated editor window
+  onDockToMain?: () => void;     // window chrome — dock current tab back to the main window
   initialViewState?: Monaco.editor.ICodeEditorViewState | null;
 }
 
@@ -174,6 +178,8 @@ const TextEditorPaneInner: React.FC<TextEditorPaneProps> = ({
   onSave,
   onRequestClose,
   onPromoteToTab,
+  onPopOut,
+  onDockToMain,
   initialViewState,
 }) => {
   const { t } = useI18n();
@@ -437,6 +443,42 @@ const TextEditorPaneInner: React.FC<TextEditorPaneProps> = ({
                 onPromoteToTab={onPromoteToTab}
                 title={t('sftp.editor.maximize')}
               />
+            )}
+
+            {onPopOut && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6"
+                    onClick={onPopOut}
+                    disabled={saving}
+                    aria-label={t('sftp.editor.popOut')}
+                  >
+                    <SquareArrowOutUpRight size={13} />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{t('sftp.editor.popOut')}</TooltipContent>
+              </Tooltip>
+            )}
+
+            {chrome === 'window' && onDockToMain && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6"
+                    onClick={onDockToMain}
+                    disabled={saving}
+                    aria-label={t('sftp.editor.dock')}
+                  >
+                    <PanelLeft size={13} />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{t('sftp.editor.dock')}</TooltipContent>
+              </Tooltip>
             )}
 
             {/* Close button — modal chrome only */}
