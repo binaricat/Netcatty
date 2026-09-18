@@ -675,3 +675,11 @@ test("flag-shaped SecureCRT passwords do not consume genuine scheme links", () =
     "Netcatty.exe", "/SSH2", "/PASSWORD", "/L", "ssh://bob@example.com",
   ]), { ssh: [{ rawUrl: "ssh://bob@example.com", viaCommandLine: false }], telnet: [] });
 });
+
+test("ambiguous SecureCRT destinations are rejected instead of guessing a host", () => {
+  for (const names of [["Device", "bastion"], ["device.example.com", "bastion"]]) {
+    assert.deepEqual(collectSshDeepLinkQueueItems([
+      "Netcatty.exe", "/T", names[0], "/SSH2", names[1], "/L", "alice", "/PASSWORD", "secret",
+    ]), { ssh: [], telnet: [] });
+  }
+});

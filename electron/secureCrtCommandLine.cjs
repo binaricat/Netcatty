@@ -1,6 +1,5 @@
 const {
   PUTTY_VALUE_FLAGS,
-  hostCandidateScore,
   isElectronNoiseArg,
   parseHostSpec,
   parsePort,
@@ -60,7 +59,7 @@ const IGNORED_VALUE_FLAGS = new Set([
 ]);
 // Standalone switches (no separate value token).
 const SKIP_FLAGS = new Set([
-  "/t", // open in a tab (optional value stays unparsed; host comes last)
+  "/t", // open in a tab; /N supplies the tab name
   "/new",
   "/x", "/c", "/v", "/a", "/z",
 ]);
@@ -178,11 +177,11 @@ function parseSecureCrtCommandLineTokens(argv) {
     }
   }
 
-  if (positionals.length === 0) return fail();
+  // A launch describes one destination. Do not guess between multiple hosts
+  // and risk sending credentials to metadata or an unsupported option value.
+  if (positionals.length !== 1) return fail();
 
-  const hostSpec = positionals.reduce((best, candidate) => (
-    hostCandidateScore(candidate) > hostCandidateScore(best) ? candidate : best
-  ));
+  const hostSpec = positionals[0];
 
   const resolvedUsername = (username || hostSpec.username || "").trim() || undefined;
   const resolvedPort = port ?? hostSpec.port;
