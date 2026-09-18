@@ -20,18 +20,33 @@ function buildLiveShellProbe(marker) {
 
 }
 
+function probeKindFromName(name) {
+  return name === "fish" ? "fish"
+    : /^(?:ba|da|z|k|a)?sh$/.test(name) ? "posix" : null;
+}
+
 function parseLiveShellProbe(output, marker) {
   const lines = String(output).replace(/\r/g, "\n").split("\n");
   if (!lines.some((line) => line.startsWith(`${marker}_Q`))) return null;
   for (const line of lines) {
     if (!line.startsWith(`${marker}_P:`)) continue;
     const name = line.slice(marker.length + 3).trim().split("/").pop().replace(/^-/, "");
-    return {
-      kind: name === "fish" ? "fish"
-        : /^(?:ba|da|z|k|a)?sh$/.test(name) ? "posix" : null,
-    };
+    return { kind: probeKindFromName(name) };
   }
   return { kind: null };
 }
 
-module.exports = { buildLiveShellProbe, parseLiveShellProbe };
+// Recover the shell kind from a probe reply whose _Q completion marker was
+// lost or mangled: the _P line may already have arrived and identified the
+// live shell, and the fallback wrapper must still match it (#3449).
+function probeShellKindFromPartial(output, marker) {
+  const lines = String(output).replace(/\r/g, "\n").split("\n");
+  for (const line of lines) {
+    if (!line.startsWith(`${marker}_P:`)) continue;
+    const name = line.slice(marker.length + 3).trim().split("/").pop().replace(/^-/, "");
+    return probeKindFromName(name);
+  }
+  return null;
+}
+
+module.exports = { buildLiveShellProbe, parseLiveShellProbe, probeShellKindFromPartial };

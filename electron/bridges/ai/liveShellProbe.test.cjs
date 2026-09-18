@@ -72,6 +72,188 @@ test('cancelled probe never injects user command after a late reply', async () =
   assert.ok(writes.every((data) => !data.includes('touch should-not-run')));
 });
 
+test('probe deadline delivers the command when the probe reply never arrives', async () => {
+  const pty = new EventEmitter();
+  const writes = [];
+  pty.write = (data) => writes.push(data);
+  const aborted = [];
+  const job = startPtyJob(pty, 'printf silent-command', {
+    shellKind: 'posix', probeLiveShell: true, timeoutMs: 5000, probeDeadlineMs: 80,
+    onProbeAborted: (marker) => aborted.push(marker),
+  });
+  assert.equal(writes.length, 1);
+  assert.ok(!writes.join('').includes('printf silent-command'));
+  // The paced probe (~1s) plus the probe deadline must pass, then the paced
+  // wrapped command is typed even though no probe reply ever came back.
+  const deadline = Date.now() + 3000;
+  while (Date.now() < deadline && !writes.join('').includes('printf silent-command')) {
+    await new Promise((resolve) => setTimeout(resolve, 30));
+  }
+  assert.ok(writes.join('').includes('printf silent-command'), writes.join('|'));
+  // The display reset must NOT be sent when the probe is abandoned: the
+  // preload treats _R as a permanent abort for the marker, which would stop
+  // the fallback wrapper's _I from re-arming echo suppression. It is
+  // deferred to finish() and only sent when the command never starts.
+  assert.deepEqual(aborted, []);
+  pty.emit('data', `${job.marker}_S\r\nsilent-ok\r\n${job.marker}_E:0\r\n`);
+  const result = await job.resultPromise;
+  assert.equal(result.exitCode, 0, JSON.stringify(result));
+  assert.match(result.stdout, /silent-ok/);
+  assert.equal(aborted.length, 0, 'no display reset once the command has started');
+});
+
+test('probe deadline fires before the command timers for short timeouts', async () => {
+  const pty = new EventEmitter();
+  const writes = [];
+  pty.write = (data) => writes.push(data);
+  const job = startPtyJob(pty, 'printf short-timeout', {
+    shellKind: 'posix', probeLiveShell: true, timeoutMs: 2000,
+    enforceWallTimeout: true,
+  });
+  assert.equal(writes.length, 1);
+  // With a 2s command timeout (and an active wall clock), the probe deadline
+  // must fire strictly before the output/wall timers so the wrapped command
+  // is still delivered instead of the job being finished as a timeout.
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline && !writes.join('').includes('printf short-timeout')) {
+    await new Promise((resolve) => setTimeout(resolve, 30));
+  }
+  assert.ok(writes.join('').includes('printf short-timeout'), writes.join('|'));
+  assert.ok(!writes.includes('\x03'), 'the output/wall timeout must not interrupt first');
+  pty.emit('data', `${job.marker}_S\r\nok\r\n${job.marker}_E:0\r\n`);
+  const result = await job.resultPromise;
+  assert.equal(result.exitCode, 0, JSON.stringify(result));
+  assert.match(result.stdout, /ok/);
+});
+
+test('wall timeout does not finish the job before the wrapped command is delivered', async () => {
+  const pty = new EventEmitter();
+  const writes = [];
+  pty.write = (data) => writes.push(data);
+  const job = startPtyJob(pty, 'printf one-second-budget', {
+    shellKind: 'posix', probeLiveShell: true, timeoutMs: 1000,
+    enforceWallTimeout: true,
+  });
+  assert.equal(writes.length, 1);
+  // With a 1s wall budget the paced probe alone takes most of it: the wall
+  // timer must be paused during paced delivery and re-armed with the
+  // remaining wall time, and the probe recovery must fire against the
+  // remaining wall clock, so the wrapped command still gets typed instead of
+  // the job being finished as a wall timeout (#3449).
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline && !writes.join('').includes('printf one-second-budget')) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  assert.ok(writes.join('').includes('printf one-second-budget'), writes.join('|'));
+  assert.ok(!writes.includes('\x03'), 'the wall timeout must not interrupt mid-delivery');
+  pty.emit('data', `${job.marker}_S\r\nok\r\n${job.marker}_E:0\r\n`);
+  const result = await job.resultPromise;
+  assert.equal(result.exitCode, 0, JSON.stringify(result));
+  assert.match(result.stdout, /ok/);
+});
+
+test('wall timeout preserves budget for the command after paced delivery completes', async () => {
+  const pty = new EventEmitter();
+  const writes = [];
+  pty.write = (data) => writes.push(String(data));
+  const job = startPtyJob(pty, 'printf post-delivery-budget', {
+    shellKind: 'posix', probeLiveShell: true, timeoutMs: 1000,
+    enforceWallTimeout: true,
+  });
+  assert.equal(writes.length, 1);
+  // Wait for the silent probe's recovery wrapper to be fully delivered (the
+  // paced writes must have stopped before the success arrives, otherwise the
+  // paused wall clock hides the re-arm being negative).
+  let stable = 0;
+  const deadline = Date.now() + 10000;
+  while (
+    Date.now() < deadline
+    && (!writes.join('').includes('printf post-delivery-budget') || stable < 2)
+  ) {
+    const before = writes.length;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    stable = writes.length === before ? stable + 1 : 0;
+  }
+  assert.ok(writes.join('').includes('printf post-delivery-budget'), writes.join('|'));
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  assert.ok(!writes.includes('\x03'), 'the wall timeout must not fire right after delivery');
+  pty.emit('data', `${job.marker}_S\r\nok\r\n${job.marker}_E:0\r\n`);
+  const result = await job.resultPromise;
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.exitCode, 0);
+  assert.match(result.stdout, /ok/);
+});
+
+test('wall deadline stays active while paced input waits for drain', async () => {
+  const pty = new EventEmitter();
+  const writes = [];
+  let finished = false;
+  // Every write hits backpressure and drains after 300ms: without an active
+  // wall deadline the drain waits would accumulate far beyond the 1s budget.
+  pty.write = (data) => {
+    writes.push(String(data));
+    setTimeout(() => {
+      if (!finished) pty.emit('drain');
+    }, 300);
+    return false;
+  };
+  const job = startPtyJob(pty, 'printf slow-drain-command', {
+    shellKind: 'posix', probeLiveShell: true, timeoutMs: 1000,
+    enforceWallTimeout: true,
+  });
+  job.resultPromise.then(() => { finished = true; }, () => { finished = true; });
+  const start = Date.now();
+  const result = await job.resultPromise;
+  const elapsed = Date.now() - start;
+  assert.ok(writes.length >= 2, 'the probe must have been paced across drains');
+  assert.equal(result.ok, false, JSON.stringify(result));
+  assert.match(result.error, /timed out/);
+  assert.ok(elapsed < 3000, `the wall deadline must bound the drain waits (${elapsed}ms)`);
+});
+
+test('late probe reply after the deadline is ignored and never double-delivers', async () => {
+  const pty = new EventEmitter();
+  const writes = [];
+  pty.write = (data) => writes.push(data);
+  const job = startPtyJob(pty, 'printf late-ok', {
+    shellKind: 'posix', probeLiveShell: true, timeoutMs: 5000, probeDeadlineMs: 60,
+  });
+  const deadline = Date.now() + 3000;
+  while (Date.now() < deadline && !writes.join('').includes('printf late-ok')) {
+    await new Promise((resolve) => setTimeout(resolve, 30));
+  }
+  assert.ok(writes.join('').includes('printf late-ok'));
+  // Let the paced wrapper delivery finish before snapshotting the writes.
+  let stable = writes.length;
+  do {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    stable = writes.length;
+  } while (writes.length !== stable);
+  const count = writes.length;
+  const delivered = writes.join('').split('printf late-ok').length - 1;
+  pty.emit('data', `${job.marker}_P:fish\n${job.marker}_Q`);
+  assert.equal(writes.length, count, 'a late reply must not re-trigger the probe');
+  pty.emit('data', `${job.marker}_S\r\nlate-ok\r\n${job.marker}_E:0\r\n`);
+  const result = await job.resultPromise;
+  assert.equal(result.exitCode, 0, JSON.stringify(result));
+  assert.match(result.stdout, /late-ok/);
+  assert.equal(writes.join('').split('printf late-ok').length - 1, delivered);
+  assert.equal(count, writes.length);
+});
+
+test('probe deadline abort reset is not duplicated when the command never starts', async () => {
+  const pty = new EventEmitter();
+  pty.write = () => {};
+  const aborted = [];
+  const job = startPtyJob(pty, 'echo never-runs', {
+    shellKind: 'posix', probeLiveShell: true, timeoutMs: 300, probeDeadlineMs: 50,
+    onProbeAborted: (marker) => aborted.push(marker),
+  });
+  const result = await job.resultPromise;
+  assert.equal(result.ok, false, JSON.stringify(result));
+  assert.equal(aborted.length, 1, aborted);
+});
+
 test('cancelling a probe completes when the idle prompt returns', async () => {
   const pty = new EventEmitter();
   pty.write = () => {};

@@ -28,10 +28,36 @@ const {
 } = require("./ptyExecHelpers.cjs");
 const { extractTrailingIdlePrompt } = require("./shellUtils.cjs");
 
-const { buildLiveShellProbe, parseLiveShellProbe } = require("./liveShellProbe.cjs");
+const { buildLiveShellProbe, parseLiveShellProbe, probeShellKindFromPartial } = require("./liveShellProbe.cjs");
 
 const DEFAULT_FOREGROUND_PTY_CAPTURE_CHARS = 1024 * 1024;
 const END_MARKER_PROMPT_WAIT_MS = 30000;
+// Bounded deadline for the live shell probe reply. When the probe's _Q
+// completion marker never arrives (silent shells, lost or mangled marker
+// output, pending canonical input), the job must not stall until the full
+// command timeout with the command still undelivered (#3403, #3445).
+const DEFAULT_PROBE_DEADLINE_MS = 15000;
+// Time reserved after the probe deadline so the recovery path (wrapping and
+// paced-delivering the wrapped command) can still run before the command
+// deadlines fire: the output timer is armed just before the startup timer
+// with the same timeoutMs, and enforceWallTimeout callers start their wall
+// clock at job start, so a probe deadline that ties or exceeds those
+// deadlines would never deliver the wrapped command (#3449).
+const PROBE_RECOVERY_RESERVE_MS = 3000;
+// Absolute deadline grace for paced input delivery. While input is
+// paced-delivered the wall clock is paused (delivery time is excluded from
+// the caller's execution budget), but the request itself must stay inside
+// the hard tool-call budget the client advertised: the RPC transport only
+// waits RPC_TIMEOUT_BUFFER_MS (5s, capabilities/rpcTimeouts.cjs) beyond the
+// operation timeout before giving up. An absolute deadline stays armed from
+// job start during pacing so delivery cannot outlast the client while the
+// server keeps typing the command and holds the session lock (#3449). The
+// grace must stay strictly below RPC_TIMEOUT_BUFFER_MS (5s): the rest of the
+// transport buffer is needed for request/response transit and the bridge's
+// interrupt + structured timeout reply, otherwise the client reports
+// RPC_TIMEOUT at the same instant the paced deadline fires and the
+// structured result is lost (#3449).
+const PACED_INPUT_DEADLINE_GRACE_MS = 2000;
 const promptRecoveryPendingPtys = new WeakSet();
 
 function stripJobMarkerLines(text, marker) {
@@ -69,6 +95,7 @@ function startPtyJob(ptyStream, command, options) {
     maxBufferedChars = 0,
     normalizeFinalOutput = true,
     enforceWallTimeout = false,
+    probeDeadlineMs = DEFAULT_PROBE_DEADLINE_MS,
   } = options || {};
 
   const marker = `__NCMCP_${Date.now().toString(36)}_${crypto.randomBytes(16).toString('hex')}__`;
@@ -183,8 +210,34 @@ function startPtyJob(ptyStream, command, options) {
   // model can fall back to terminal_start). Default is off so existing
   // foreground execution paths (Catty Agent) keep their inactivity-based
   // timeout for long-running streaming commands.
-  function armWallTimeout() {
+  // The timer is paused while input is being paced-delivered (writeInput) and
+  // re-armed with the remaining wall time once delivery completes, so a short
+  // configured timeout cannot interrupt the probe/wrapper mid-typing (#3449).
+  let jobStartMs = Date.now();
+  // Wall-clock accounting excludes paced-input delivery time: the timer is
+  // paused in writeInput and the paused duration is subtracted from the
+  // elapsed time, so a short configured budget is preserved for the command
+  // itself instead of expiring during (or immediately after) delivery (#3449).
+  let wallPausedTotalMs = 0;
+  let wallPauseStartedAtMs = 0;
+  function pauseWallClock() {
+    if (enforceWallTimeout && maxBufferedChars <= 0 && !wallPauseStartedAtMs) {
+      wallPauseStartedAtMs = Date.now();
+    }
+  }
+  function resumeWallClock() {
+    if (!wallPauseStartedAtMs) return;
+    wallPausedTotalMs += Math.max(0, Date.now() - wallPauseStartedAtMs);
+    wallPauseStartedAtMs = 0;
+  }
+  function remainingWallMs() {
+    const pausedMs = wallPausedTotalMs
+      + (wallPauseStartedAtMs ? Math.max(0, Date.now() - wallPauseStartedAtMs) : 0);
+    return timeoutMs - ((Date.now() - jobStartMs) - pausedMs);
+  }
+  function armWallTimeout(remainingMs = timeoutMs) {
     if (!enforceWallTimeout || maxBufferedChars > 0) return;
+    clearTimeout(wallTimeoutId);
     wallTimeoutId = setTimeout(() => {
       if (finished) return;
       if (pendingEnd) {
@@ -194,7 +247,21 @@ function startPtyJob(ptyStream, command, options) {
       sendInterrupt();
       const timeoutSec = Math.round(timeoutMs / 1000);
       finish(foundStart ? output : preStartOutput, -1, `Command timed out (${timeoutSec}s)`);
-    }, timeoutMs);
+    }, Math.max(0, remainingMs));
+  }
+
+  // Absolute pacing deadline: measured from job start (not from the paused
+  // wall clock) so paced delivery cannot extend the request beyond the
+  // advertised budget plus the RPC transport's grace buffer. Delivery time
+  // still stays excluded from the execution budget: once delivery completes,
+  // completeInputDelivery re-arms a separate budget from the paused-excluded
+  // remaining wall time (#3449).
+  function pacedDeadlineRemainingMs() {
+    return jobStartMs + timeoutMs + PACED_INPUT_DEADLINE_GRACE_MS - Date.now();
+  }
+  function armPacedInputDeadline() {
+    if (!enforceWallTimeout || maxBufferedChars > 0) return;
+    armWallTimeout(pacedDeadlineRemainingMs());
   }
 
   // Bounded startup deadline: we always need a hard limit on how long we
@@ -209,9 +276,55 @@ function startPtyJob(ptyStream, command, options) {
   // startup budget instead of counting against it.
   const BG_STARTUP_TIMEOUT_MS = 30000;
   function armStartupTimeout() {
-    const startupMs = maxBufferedChars > 0 ? BG_STARTUP_TIMEOUT_MS : timeoutMs;
+    const baseMs = maxBufferedChars > 0 ? BG_STARTUP_TIMEOUT_MS : timeoutMs;
+    // While waiting for the live shell probe reply, the startup budget is the
+    // bounded probe deadline: a probe whose _Q reply never arrives (silent
+    // shells, lost or mangled marker output) must not stall until the full
+    // command timeout with the command still undelivered (#3403, #3445).
+    // The deadline must fire strictly before the competing command timers —
+    // the output timer is armed with timeoutMs just before this one (same
+    // expiry loses on insertion order) and enforceWallTimeout callers start
+    // their wall clock at job start — so the silent probe still gets its
+    // recovery delivery instead of being finished as a timeout (#3449).
+    const probeBudgetMs = Math.max(
+      Math.floor(baseMs / 2),
+      baseMs - PROBE_RECOVERY_RESERVE_MS,
+    );
+    // Wall-clock callers (enforceWallTimeout) start their wall timer at job
+    // start, so the paced probe delivery already consumed part of the budget:
+    // cap the probe deadline by the remaining wall time minus the recovery
+    // reserve so the recovery delivery still fits before the wall deadline
+    // even with short supported timeouts (#3449). The remaining time excludes
+    // the paused paced-delivery duration so pacing cannot exhaust it.
+    const wallBudgetMs = enforceWallTimeout
+      ? Math.max(1, remainingWallMs() - PROBE_RECOVERY_RESERVE_MS)
+      : Infinity;
+    const startupMs = probingShell
+      ? Math.min(probeDeadlineMs, probeBudgetMs, wallBudgetMs)
+      : baseMs;
     startupTimeoutId = setTimeout(() => {
       if (finished || foundStart) return;
+      if (probingShell) {
+        // The probe reply never arrived. Clear the probe state and deliver
+        // the wrapped command anyway so silent/zero-output commands still
+        // reach the remote shell and return instead of stalling.
+        // Do NOT send the display reset (onProbeAborted) here: the preload
+        // treats _R as a permanent abort for the marker, which would stop
+        // the fallback wrapper's _I from re-arming echo suppression and
+        // leak the wrapper echo on width-wrapping terminals (#3449). The
+        // probe's own _I prime keeps suppression armed until the wrapper's
+        // _S arrives; finish() sends _R only when the command never starts.
+        probingShell = false;
+        // The probe may already have emitted its _P line (e.g. a POSIX login
+        // where the user entered a nested fish) even though the _Q completion
+        // marker was lost or mangled. Retain the detected kind so the fallback
+        // wrapper matches the live shell instead of assuming POSIX (#3449).
+        const partialKind = probeShellKindFromPartial(stripAnsi(probeOutput), marker);
+        probeOutput = "";
+        if (partialKind) resolvedShellKind = partialKind;
+        writeWrappedCommand();
+        return;
+      }
       sendInterrupt();
       const label = maxBufferedChars > 0 ? "Background job startup" : "Command startup";
       finish(preStartOutput, -1, `${label} timed out — start marker never arrived`);
@@ -760,10 +873,19 @@ function startPtyJob(ptyStream, command, options) {
 
   function completeInputDelivery(generation) {
     // Input delivery is complete: only now does the startup deadline begin,
-    // so paced typing time never consumes the startup budget.
+    // so paced typing time never consumes the startup budget. The wall clock
+    // (enforceWallTimeout callers) is also paused during delivery and re-armed
+    // with the preserved remaining budget so pacing cannot consume it or
+    // interrupt the next delivery mid-typing with a short configured timeout
+    // (#3449). The remaining budget is measured with the paused time excluded:
+    // re-arming from raw elapsed time would leave a negative remainder after
+    // paced probe + wrapper delivery and interrupt the recovered command
+    // before it can execute.
     if (!finished && !cancelRequested && generation === inputWriteGeneration) {
       deliveringInput = false;
+      resumeWallClock();
       if (!pendingEnd) armOutputTimeout();
+      armWallTimeout(remainingWallMs());
       if (!foundStart) armStartupTimeout();
     }
   }
@@ -774,6 +896,14 @@ function startPtyJob(ptyStream, command, options) {
     // probe to wrapper. Echo may be disabled while we are still typing.
     clearStartupTimeout();
     clearTimeout(timeoutId);
+    // Pause the wall clock while paced-typing so it cannot fire mid-delivery
+    // with short enforceWallTimeout budgets (#3449); completeInputDelivery
+    // re-arms it with the preserved remaining wall time. The absolute request
+    // deadline stays armed during pacing so a long delivered command cannot
+    // outlast the client's transport buffer while the session lock is held
+    // (#3449). armWallTimeout clears any previously armed budget first.
+    pauseWallClock();
+    armPacedInputDeadline();
     deliveringInput = true;
     const generation = inputWriteGeneration;
 
@@ -799,9 +929,28 @@ function startPtyJob(ptyStream, command, options) {
           const writable = ptyStream.write(chunk);
           if (!isCurrent()) return;
           if (writable === false) {
+            // The wall clock is paused for the delivery: resume it while
+            // waiting for drain so the enforceWallTimeout hard deadline stays
+            // active — otherwise a blocked wrapper could retain the session
+            // lock for a fresh full timeoutMs beyond the advertised limit
+            // (#3449). Each drained wait re-pauses and the next write re-arms
+            // with the decreased remaining budget. The wait is also capped by
+            // the absolute pacing deadline so delivery (including drain
+            // waits) cannot outlast the client's transport buffer (#3449).
+            resumeWallClock();
+            armWallTimeout(Math.min(remainingWallMs(), pacedDeadlineRemainingMs()));
             inputDrainListener = () => {
               inputDrainListener = null;
               clearTimeout(inputWriteTimer);
+              pauseWallClock();
+              // The wall clock is paused while delivery waits to resume, so
+              // the previously armed execution budget (measured at drain
+              // time) would be stale; replace it with the fresh absolute
+              // pacing deadline so delivery stays bounded while pacing or
+              // the drain wait is active. The execution budget is re-armed
+              // by the next backpressured write or by completeInputDelivery
+              // (#3449).
+              armPacedInputDeadline();
               scheduleNext();
             };
             ptyStream.once("drain", inputDrainListener);
