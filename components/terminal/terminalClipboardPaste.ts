@@ -158,22 +158,18 @@ export async function pasteTextWithMultilineConfirm(
       const lineOptions = {
         lineDelayMs: AUTO_RUN_SNIPPET_LINE_DELAY_MS,
         sensitive: confirmedSensitive,
+        broadcast: !confirmedSensitive && !!onPasteData,
       };
       if (!dispatchTerminalLinePaste(term, lineData, lineOptions)) {
         terminalBackend.writeToSession(currentSessionId, lineData, {
           automated: false,
-          ...lineOptions,
+          lineDelayMs: lineOptions.lineDelayMs,
+          sensitive: lineOptions.sensitive,
         });
       }
-      // Broadcast mode: peers must mirror the confirmed lines too. The
-      // broadcast targets exclude the source session, so this does not
-      // double-send to the active session. Skipped when the paste was made
-      // at a sensitive prompt: callers guard broadcasts with the live
-      // passwordPromptActiveRef, which the dialog await may have cleared,
-      // so honor the pre-dialog snapshot here instead.
-      if (!lineOptions.sensitive) {
-        onPasteData?.(lineData, { lineDelayMs: AUTO_RUN_SNIPPET_LINE_DELAY_MS });
-      }
+      // The mounted runtime broadcasts each acknowledged line with fresh guards.
+      // Without a runtime there is no receipt owner, so fallback sends only to
+      // the source rather than enqueueing an unchecked batch on peers.
       scrollToBottomAfterProgrammaticInput?.(lineData);
       return;
     }

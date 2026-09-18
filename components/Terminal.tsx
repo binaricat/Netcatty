@@ -1,3 +1,4 @@
+import { clearTerminalBroadcastUserInput, markTerminalBroadcastUserInput } from "./terminal/runtime/terminalPacedBroadcast";
 import { publishTerminalCommandCompletion } from "../application/state/terminalCommandCompletion";
 import { createTerminalReflowReadingPosition } from "./terminal/terminalReflowReadingPosition";
 import { resolveHostOs } from '../domain/host';
@@ -435,6 +436,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     sessionId,
     () => passwordPromptActiveRef.current,
   ), [sessionId]);
+  useEffect(() => () => clearTerminalBroadcastUserInput(sessionId), [sessionId]);
   const sensitivePromptOutputTailRef = useRef("");
   const [activeScriptRun, setActiveScriptRun] = useState<import('@/types/global/netcatty-bridge-script.d.ts').ScriptRun | undefined>(undefined);
   const dismissedScriptRunIdsRef = useRef(new Set<string>());
@@ -999,6 +1001,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   autocompleteAcceptTextRef.current = (text: string) => {
     const id = sessionRef.current;
     if (id && text) {
+      markTerminalBroadcastUserInput(sessionId);
       if (["\r", "\n", "\b", "\x7f", "\x15"].some(control => text.includes(control))) {
         xtermRuntimeRef.current?.invalidatePendingPasteDraft();
       }
@@ -3314,6 +3317,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       ? AUTO_RUN_SNIPPET_LINE_DELAY_MS
       : undefined;
     const isMultiLine = data.includes('\n');
+    if (lineDelayMs) markTerminalBroadcastUserInput(sessionId);
     // Wrap in bracketed paste BEFORE appending \r so the Enter is sent
     // outside the paste markers — otherwise shells treat it as pasted text
     // instead of a submit action.

@@ -1,3 +1,4 @@
+import { clearTerminalBroadcastUserInput, captureTerminalBroadcastInput, isTerminalBroadcastInputCurrent, markTerminalBroadcastUserInput, type TerminalPacedBroadcast } from "./terminalPacedBroadcast";
 import { stringCellWidth } from "../autocomplete/terminalStringCellWidth";
 import type { TerminalBroadcastInputOptions } from "../terminalHelpers";
 import { FitAddon } from "@xterm/addon-fit";
@@ -1171,7 +1172,10 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   // moved away from the tail, so we conservatively assume it is not).
   let lastInputWasPrintable = !ctx.commandBufferRef?.current;
   let commandBufferRevision = 0;
-  const invalidatePendingPasteDraft = () => { commandBufferRevision += 1; };
+  const invalidatePendingPasteDraft = () => {
+    commandBufferRevision += 1;
+    markTerminalBroadcastUserInput(ctx.sessionId);
+  };
 
   const restoreSerialTailForEmptyInput = (data: string) => {
     // Apply the same rule to typed text, pasted text, and editable snippets.
@@ -1262,6 +1266,9 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     if (!options?.lineDelayMs && logicalData !== null
       && !isPrintableInput(logicalData) && !isTerminalReportSequence(logicalData)) {
       commandBufferRevision += 1;
+    }
+    if (!options?.lineDelayMs && logicalData !== null && !isTerminalReportSequence(logicalData)) {
+      markTerminalBroadcastUserInput(ctx.sessionId);
     }
     let handledSubmittedInput = false;
     const submittedInput: { text: string; lineEnding: "\r\n" | "\r" | "\n" } | null =
@@ -2781,6 +2788,8 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     firstPastedLine: string;
     pendingInput: string;
     serialPendingInput?: string;
+    sourceInput: ReturnType<typeof captureTerminalBroadcastInput>;
+    broadcast?: TerminalPacedBroadcast;
     inputRevision: number;
     sensitive: boolean;
     recorded: Set<number>;
@@ -2817,6 +2826,12 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         useProvidedCommand: true,
         acknowledgedWrite: true,
       });
+      if (pending.broadcast && isTerminalBroadcastInputCurrent(pending.sourceInput)
+        && ctx.isBroadcastEnabledRef.current && !sensitive) {
+        ctx.onBroadcastInputRef.current?.(`${index === 0 ? pending.firstPastedLine : command}\r`, ctx.sessionId, {
+          pacedBroadcast: pending.broadcast,
+        });
+      }
       void pending.recordLine?.(index === 0 ? pending.firstPastedLine : command, {
         sensitive, includePendingInput: index === 0, consumePendingInput: index === 0,
       }).catch((error) => {
@@ -2828,6 +2843,11 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   const disposeLinePasteHandler = registerTerminalLinePasteHandler(term, (data, options) => {
     const sessionId = ctx.sessionRef.current;
     if (!sessionId) return;
+    markTerminalBroadcastUserInput(ctx.sessionId);
+    const sourceInput = captureTerminalBroadcastInput(ctx.sessionId);
+    const broadcast: TerminalPacedBroadcast | undefined = options.broadcast && !options.sensitive
+      && ctx.isBroadcastEnabledRef.current ? {} : undefined;
+    if (broadcast) ctx.onBroadcastInputRef.current?.("", ctx.sessionId, { pacedBroadcast: broadcast, preparePacedBroadcast: true });
     const requestId = crypto.randomUUID();
     const commands = data.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
     if (commands.at(-1) === "") commands.pop();
@@ -2839,7 +2859,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       ? ctx.serialLineBufferRef?.current : undefined;
     const recorded = new Set<number>();
     pendingLinePastes.set(requestId, {
-      sessionId, commands, firstPastedLine, sensitive: options.sensitive, recorded, serialPendingInput,
+      sessionId, sourceInput, broadcast, commands, firstPastedLine, sensitive: options.sensitive, recorded, serialPendingInput,
       pendingInput: ctx.commandBufferRef.current, inputRevision: commandBufferRevision,
       recordLine: ctx.scriptRecorderRef?.current?.captureSubmittedLineRecorder?.(),
     });
@@ -3298,6 +3318,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       disposeLinePasteHandler?.();
       disposePasteWriteReceipts?.();
       pendingLinePastes.clear();
+      clearTerminalBroadcastUserInput(ctx.sessionId);
       resizeScheduler.dispose();
       webglController.dispose();
       term.element?.removeEventListener("copy", handleNativeCopy, true);

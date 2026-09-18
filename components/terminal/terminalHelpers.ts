@@ -1,3 +1,4 @@
+import type { TerminalPacedBroadcast } from "./runtime/terminalPacedBroadcast";
 import type { DragEvent, PointerEvent } from "react";
 import { Terminal as XTerm } from "@xterm/xterm";
 
@@ -28,6 +29,8 @@ export const AUTO_RUN_SNIPPET_LINE_DELAY_MS = 250;
 
 export interface TerminalBroadcastInputOptions {
   automated?: boolean;
+  pacedBroadcast?: TerminalPacedBroadcast;
+  preparePacedBroadcast?: boolean;
   noAutoRun?: boolean;
   lineDelayMs?: number;
   kittyKeyboardInput?: KittyKeyboardBroadcastInput;

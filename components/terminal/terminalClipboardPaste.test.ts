@@ -828,6 +828,6 @@ for (const [preview, expected] of [
       term: { paste: () => assert.fail("must use delayed writes"), scrollToBottom: () => {} },
     });
     assert.deepEqual(writes, expected ? [expected] : []);
-    assert.deepEqual(broadcasts, expected ? [expected] : []);
+    assert.deepEqual(broadcasts, [], "without a runtime receipt owner, never broadcast an unchecked batch");
   });
 }

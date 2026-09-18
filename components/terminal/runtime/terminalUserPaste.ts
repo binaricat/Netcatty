@@ -49,7 +49,7 @@ const pasteDisplayStates = new WeakMap<object, PasteDisplayState>();
 const pasteInputScrollStates = new WeakMap<object, PasteInputScrollState>();
 const pasteBroadcastStates = new WeakMap<object, PasteInputScrollState>();
 const pasteSensitiveStates = new WeakMap<object, PasteInputScrollState>();
-type LinePasteOptions = { lineDelayMs: number; sensitive: boolean };
+type LinePasteOptions = { lineDelayMs: number; sensitive: boolean; broadcast?: boolean };
 type LinePasteHandler = (data: string, options: LinePasteOptions) => void;
 const linePasteHandlers = new WeakMap<object, LinePasteHandler>();
 

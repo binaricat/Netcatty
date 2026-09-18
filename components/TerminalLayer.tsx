@@ -1,3 +1,4 @@
+import { captureTerminalBroadcastInput, isTerminalBroadcastInputCurrent, markTerminalBroadcastUserInput } from "./terminal/runtime/terminalPacedBroadcast";
 import { pruneComposeBarHistory } from '../application/state/composeBarHistoryStore';
 import { FolderTree, History, MessageSquare, PanelLeft, PanelRight, Palette, X, Zap } from 'lucide-react';
 import React, { memo, startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -1070,12 +1071,26 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     sourceSessionId: string,
     options?: TerminalBroadcastInputOptions,
   ) => {
+    const paced = options?.pacedBroadcast;
+    if (paced && !options?.preparePacedBroadcast) {
+      if (!paced.targets || isTerminalSensitiveInputActive(sourceSessionId)) return [];
+      paced.targets = paced.targets.filter(target => isTerminalBroadcastInputCurrent(target)
+        && !isTerminalSensitiveInputActive(target.sessionId));
+    }
     const targetSessionIds = resolveTerminalBroadcastTargetIds({
       sessions: sessionsRef.current,
       sourceSessionId,
       globalBroadcastEnabled: isGlobalBroadcastEnabled,
       directTargetSessionIds: options?.kittyKeyboardTargetSessionIds,
-    });
+    }).filter(id => !paced?.targets || paced.targets.some(target => target.sessionId === id));
+    if (options?.preparePacedBroadcast && paced) {
+      paced.targets = targetSessionIds.filter(id => !isTerminalSensitiveInputActive(id)).map(id => {
+        markTerminalBroadcastUserInput(id);
+        terminalBackend.interruptSession(id, undefined, { cancelPendingWritesOnly: true });
+        return captureTerminalBroadcastInput(id);
+      });
+      return paced.targets.map(target => target.sessionId);
+    }
     if (targetSessionIds.length === 0) return [];
 
     const targetSessionIdSet = new Set(targetSessionIds);
@@ -1084,6 +1099,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     for (const session of sessionsRef.current) {
       if (!targetSessionIdSet.has(session.id)) continue;
       if (!canUseDirectSessionWriteFallback(session)) continue;
+      if (!paced && (options?.automated !== true || options.lineDelayMs)) markTerminalBroadcastUserInput(session.id);
 
       if (options?.kittyKeyboardInput) {
         dispatchKittyKeyboardBroadcastInput(session.id, options.kittyKeyboardInput, {

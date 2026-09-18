@@ -14,6 +14,7 @@ const ts = require('typescript');
 const load = file => import(pathToFileURL(path.join(root, file)).href);
 const { normalizeLineEndings } = await load('lib/utils.ts');
 const { shouldDelayAutoRunSnippetInput, AUTO_RUN_SNIPPET_LINE_DELAY_MS } = await load('components/terminal/terminalHelpers.ts');
+const pacedHelpers = await load('components/terminal/runtime/terminalPacedBroadcast.ts');
 const { resolveTerminalBroadcastTargetIds } = await load('domain/terminalBroadcast.ts');
 const { canUseDirectSessionWriteFallback } = await load('components/terminalLayer/terminalLayerSessionRouting.ts');
 const sourceAt = file => readFileSync(path.join(root, file), 'utf8');
@@ -75,7 +76,7 @@ for (const mode of ['paste', 'lineDelay']) {
         bridge.writeToSession(null, { sessionId, data, ...options });
       } };
       const layerSource = sourceAt('components/TerminalLayer.tsx');
-      const layerEnv = {
+      const layerEnv = { ...pacedHelpers,
         useCallback: callback => callback, terminalBackend,
         resolveTerminalBroadcastTargetIds, canUseDirectSessionWriteFallback,
         sessionsRef: { current: ['source', 'peer'].map(id => ({ id, protocol: 'telnet', status: 'connected' })) },
@@ -85,7 +86,7 @@ for (const mode of ['paste', 'lineDelay']) {
         '  const handleBroadcastInput = useCallback(', '  const handleCommandSubmitted')
         + '\nglobalThis.broadcast = handleBroadcastInput;'), layerEnv);
       const snippetSource = sourceAt('components/Terminal.tsx');
-      const snippetEnv = {
+      const snippetEnv = { ...pacedHelpers,
         useCallback: callback => callback,
         termRef: { current: { modes: { bracketedPasteMode: false }, focus() {} } },
         sessionRef: { current: 'source' }, sessionId: 'source', hibernatedRef: { current: false },

@@ -29,7 +29,7 @@ const helpers = await Promise.all([
   "../../../domain/serialCharMetrics.ts", "./terminalReportSequence.ts", "./terminalInputSanitize.ts",
   "./terminalBackspaceInput.ts", "./terminalPerCharacterInput.ts",
   "./terminalSudoAutofill.ts", "./terminalCommandExecution.ts",
-  "./terminalInterruptInputState.ts", "./serialLocalEcho.ts", "../autocomplete/terminalStringCellWidth.ts",
+  "./terminalPacedBroadcast.ts", "./terminalInterruptInputState.ts", "./serialLocalEcho.ts", "../autocomplete/terminalStringCellWidth.ts",
   "./shiftEnterText.ts", "./serialLineInput.ts", "./telnetLocalEcho.ts",
 ].map(path => import(new URL(path, import.meta.url).href)));
 
@@ -108,7 +108,7 @@ for (const [protocol, lineMode, sensitive] of [
         },
       } },
       isBroadcastEnabledRef: { current: false },
-      onBroadcastInputRef: { current: () => assert.fail("paste must not broadcast twice") },
+      onBroadcastInputRef: { current: (data: string, _id: string, options?: { preparePacedBroadcast?: boolean }) => { if (!options?.preparePacedBroadcast) broadcast.push(data); } },
       terminalBackend: {
         notifyUserInput(sessionId: string) { loginCancellationNotices.push(sessionId); },
         interruptSession(sessionId: string, _trace: unknown, options?: { cancelPendingWritesOnly?: boolean }) {
@@ -150,13 +150,14 @@ for (const [protocol, lineMode, sensitive] of [
           return { action: "line-by-line" };
         },
       },
-      onPasteData: data => { broadcast.push(data); return true; },
+      onPasteData: () => assert.fail("paced broadcast must use actual write receipts"),
     });
     if (completion === "late-urgent") {
       ctx.isBroadcastEnabledRef.current = false;
       env.api.urgent();
       env.api.input("show new draft");
       for (const receipt of queuedReceipts.splice(0)) receiptListener?.(receipt);
+      assert.deepEqual(broadcast, [], "old successful receipts must not resume broadcast after urgent input");
       assert.equal(ctx.commandBufferRef.current, "show new draft");
       if (lineMode) assert.equal(ctx.serialLineBufferRef.current, "show new draft");
       env.api.input("\r");
@@ -223,7 +224,7 @@ for (const [protocol, lineMode, sensitive] of [
     assert.equal(writes.at(-1)?.lineDelayMs, 250);
     assert.equal(writes.at(-1)?.automated, false, "confirmed paced paste is still user input");
     assert.equal(writes.at(-1)?.sensitive, sensitive);
-    assert.deepEqual(broadcast, sensitive ? [] : ["version\nshow clock\r"]);
+    assert.deepEqual(broadcast, sensitive ? [] : ["version\r"]);
     t.mock.timers.tick(249);
     assert.deepEqual(wire, lineMode ? ["show version\r"] : ["show ", "version\r"]);
     if (completion === "replacement") {
@@ -248,6 +249,7 @@ for (const [protocol, lineMode, sensitive] of [
       assert.equal(wire.at(-1), "show clock\r");
       const secondSensitive = sensitive || completion !== "output";
       assert.deepEqual(recordingSensitivity, [sensitive, secondSensitive]);
+      assert.deepEqual(broadcast, sensitive ? [] : secondSensitive ? ["version\r"] : ["version\r", "show clock\r"]);
       assert.deepEqual(history, sensitive ? [] : secondSensitive ? ["show version"] : ["show version", "show clock"]);
       assert.deepEqual(recorded, sensitive ? [] : secondSensitive ? ["show version"] : ["show version", "show clock"]);
       return;

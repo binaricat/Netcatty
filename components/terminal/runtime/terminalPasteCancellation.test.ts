@@ -4,6 +4,9 @@ import { createRequire } from "node:module";
 import test from "node:test";
 import vm from "node:vm";
 import ts from "typescript";
+import { resolveTerminalBroadcastTargetIds } from "../../../domain/terminalBroadcast";
+import * as pacedHelpers from "./terminalPacedBroadcast";
+import { setTerminalBootEpoch } from "../../../domain/terminalBootEpoch";
 
 const require = createRequire(import.meta.url);
 const bridge = require("../../../electron/bridges/terminalBridge.cjs");
@@ -36,7 +39,7 @@ for (const path of ["source", "broadcast"] as const) {
           if (failedSignal) throw new Error("unsupported");
         },
       };
-      const env = {
+      const env = { ...pacedHelpers,
         ctx: { host: { protocol: "plugin:test" }, terminalBackend }, id: "s", interruptTrace: {},
         terminalBackend, isPluginHostProtocol: () => true,
         useCallback: (fn: unknown) => fn, resolveTerminalBroadcastTargetIds: () => ["s"],
@@ -62,7 +65,7 @@ test("ordinary broadcast typing supersedes the recipient's paced paste", t => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const writes: string[] = [];
   bridge.init({ sessions: new Map([["s", { stream: { write: (data: string) => writes.push(data) } }]]), electronModule: {} });
-  const env = {
+  const env = { ...pacedHelpers,
     terminalBackend: { writeToSession: (sessionId: string, data: string, options: object) => bridge.writeToSession(null, { sessionId, data, ...options }) },
     useCallback: (fn: unknown) => fn, resolveTerminalBroadcastTargetIds: () => ["s"],
     sessionsRef: { current: [{ id: "s", protocol: "ssh" }] }, isGlobalBroadcastEnabled: true,
@@ -89,3 +92,50 @@ test("backend hook preserves cancel-only options and never falls back to raw Ctr
   current = { writeToSession: () => assert.fail("cancel-only must not become raw Ctrl+C") };
   env.invoke("s", undefined, { cancelPendingWritesOnly: true });
 });
+
+for (const change of ["source-sensitive", "peer-sensitive", "peer-typing", "peer-interrupt", "peer-reconnect", "new-target", "removed-target", "paced-snippet"] as const) {
+  test(`receipt-paced user broadcast rechecks ${change} without rescheduling peers`, t => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const wire: Record<string, string[]> = { source: [], peer: [], newcomer: [] };
+    const sensitive = new Set<string>();
+    const batch: pacedHelpers.TerminalPacedBroadcast = {};
+    setTerminalBootEpoch("peer", 1);
+    const env = {
+      ...pacedHelpers, useCallback: (fn: unknown) => fn, resolveTerminalBroadcastTargetIds,
+      sessionsRef: { current: [{ id: "source", protocol: "ssh" }, { id: "peer", protocol: "ssh" }] as Array<{ id: string; protocol: string; workspaceId?: string }> },
+      isGlobalBroadcastEnabled: true, canUseDirectSessionWriteFallback: () => true,
+      isTerminalSensitiveInputActive: (id: string) => sensitive.has(id),
+      isPluginHostProtocol: () => false, broadcastInterruptPrioritizersRef: { current: new Map() },
+      terminalBackend: {
+        writeToSession(sessionId: string, data: string, options: object) { bridge.writeToSession(null, { sessionId, data, ...options }); },
+        interruptSession(sessionId: string, _trace?: unknown, options?: object) { bridge.interruptSession(null, { sessionId, ...options }); },
+      },
+      invoke: undefined as unknown as (data: string, source: string, options?: object) => void,
+    };
+    vm.runInNewContext(compile(layer.slice(broadcastStart, broadcastEnd) + "\nglobalThis.invoke = handleBroadcastInput;"), env);
+    bridge.init({ sessions: new Map(Object.keys(wire).map(id => [id, { webContentsId: 1, stream: { write: (data: string) => wire[id].push(data) } }])), electronModule: {
+      webContents: { fromId: () => ({ send(channel: string, receipt: { sessionId: string; index?: number }) {
+        if (channel === "netcatty:paste-write" && receipt.sessionId === "source" && receipt.index !== undefined) {
+          env.invoke(receipt.index === 0 ? "first\r" : "second\r", "source", { pacedBroadcast: batch });
+        }
+      } }) },
+    } });
+    env.invoke("", "source", { pacedBroadcast: batch, preparePacedBroadcast: true });
+    bridge.writeToSession(null, { sessionId: "source", data: "first\nsecond\r", automated: false, lineDelayMs: 250, pasteRequestId: "broadcast-test" });
+    assert.deepEqual(wire.peer, ["first\r"]);
+    if (change === "source-sensitive") sensitive.add("source");
+    if (change === "peer-sensitive") sensitive.add("peer");
+    if (change === "peer-typing" || change === "peer-interrupt") {
+      env.invoke(change === "peer-typing" ? "typed" : "\x03", "other", { kittyKeyboardTargetSessionIds: ["peer"] });
+    }
+    if (change === "peer-reconnect") setTerminalBootEpoch("peer", 2);
+    if (change === "new-target") env.sessionsRef.current.push({ id: "newcomer", protocol: "ssh" });
+    if (change === "removed-target") env.sessionsRef.current[1].workspaceId = "other-workspace";
+    if (change === "paced-snippet") env.invoke("snippet\r", "other", { automated: true, lineDelayMs: 250, kittyKeyboardTargetSessionIds: ["peer"] });
+    const before = [...wire.peer];
+    t.mock.timers.tick(250);
+    assert.deepEqual(wire.source, ["first\r", "second\r"]);
+    assert.deepEqual(wire.peer, change === "new-target" ? [...before, "second\r"] : before);
+    assert.deepEqual(wire.newcomer, []);
+  });
+}
