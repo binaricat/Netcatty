@@ -249,6 +249,30 @@ function startPtyJob(ptyStream, command, options) {
       probeTimeoutId = null;
     }
   }
+  // Mirrors writeInput()'s pacing (128-char batches every 30ms for oversized
+  // probe/wrapper input) so callers can estimate how long a text delivery
+  // takes and reserve that time inside the hard wall-clock budget.
+  const INPUT_PACING_MS = 30;
+  function estimateInputDeliveryMs(text) {
+    if (!text) return 0;
+    const batchChars = (usesLiveShellProbe || bastionKeystrokes) && text.length > 1024 ? 128 : text.length;
+    return Math.ceil(text.length / batchChars) * INPUT_PACING_MS;
+  }
+  function wrappedCommandText() {
+    return `${buildPendingInputClearPrefix(resolvedShellKind)}${buildWrappedCommand(command, resolvedShellKind, marker, probeLiveShell)}`;
+  }
+  // Fall back to typing the wrapper with the pre-probe (or partially
+  // detected) shell kind. The _Q sentinel can be lost after a complete _P
+  // shell name already arrived (lossy output); salvage that partial result so
+  // the fallback wrapper matches the shell the probe actually detected
+  // instead of the pre-probe kind — otherwise a nested fish inside a POSIX
+  // session (or vice versa) receives syntactically incompatible wrapper code.
+  function abortProbeToWrapper() {
+    probingShell = false;
+    const partialKind = parsePartialLiveShellProbeKind(stripAnsi(probeOutput), marker);
+    if (partialKind) resolvedShellKind = partialKind;
+    writeWrappedCommand();
+  }
   // The output/startup deadlines (timeoutMs for foreground jobs,
   // BG_STARTUP_TIMEOUT_MS for background jobs) are armed before the probe
   // timer, so with an equal delay they fire first (earlier registration
@@ -261,28 +285,31 @@ function startPtyJob(ptyStream, command, options) {
   // When enforceWallTimeout armed the hard wall-clock deadline (MCP
   // terminal_execute), that deadline started before the probe was typed, so
   // paced probe delivery already consumed part of the budget. Measure the
-  // fallback against the remaining wall-clock budget — with the same 25%
-  // headroom — so it still fires before finish() cancels it.
+  // fallback against the remaining wall-clock budget and reserve the
+  // fallback wrapper's own paced-delivery time inside it — the fallback must
+  // still have enough wall time to FINISH typing before finish() cancels it,
+  // not merely to start. When the remaining budget cannot fit the wrapper at
+  // all, skip the probe (or do not arm the fallback) so no partially typed
+  // wrapper is cancelled mid-delivery by the wall deadline.
   function armProbeTimeout() {
     clearProbeTimeout();
     const deadlineBudgetMs = maxBufferedChars > 0 ? BG_STARTUP_TIMEOUT_MS : timeoutMs;
     let delayMs = Math.min(PROBE_DEADLINE_MS, Math.floor(deadlineBudgetMs * 3 / 4));
     if (wallClockArmed) {
+      const wrapperDeliveryMs = estimateInputDeliveryMs(wrappedCommandText());
       const remainingMs = deadlineBudgetMs - (Date.now() - wallStartMs);
-      delayMs = Math.min(delayMs, Math.max(0, Math.floor(remainingMs * 3 / 4)));
+      if (remainingMs <= wrapperDeliveryMs) {
+        // Even an immediate fallback cannot finish typing the wrapper before
+        // the wall deadline. Leave the wrapper untyped; the hard wall timer
+        // (registered earlier) will finish the job with a timeout error.
+        return;
+      }
+      delayMs = Math.min(delayMs, remainingMs - wrapperDeliveryMs);
     }
     probeTimeoutId = setTimeout(() => {
       probeTimeoutId = null;
       if (finished || cancelRequested || !probingShell) return;
-      probingShell = false;
-      // The _Q sentinel can be lost after a complete _P shell name already
-      // arrived (lossy output). Salvage that partial result so the fallback
-      // wrapper matches the shell the probe actually detected instead of the
-      // pre-probe kind — otherwise a nested fish inside a POSIX session (or
-      // vice versa) receives syntactically incompatible wrapper code.
-      const partialKind = parsePartialLiveShellProbeKind(stripAnsi(probeOutput), marker);
-      if (partialKind) resolvedShellKind = partialKind;
-      writeWrappedCommand();
+      abortProbeToWrapper();
     }, delayMs);
   }
 
@@ -886,8 +913,7 @@ function startPtyJob(ptyStream, command, options) {
   }
 
   function writeWrappedCommand() {
-    const wrapped = buildWrappedCommand(command, resolvedShellKind, marker, probeLiveShell);
-    writeInput(`${buildPendingInputClearPrefix(resolvedShellKind)}${wrapped}`);
+    writeInput(wrappedCommandText());
   }
 
   // Prime the renderer's display suppression before the first byte is typed
@@ -903,6 +929,22 @@ function startPtyJob(ptyStream, command, options) {
       onEchoSuppressionPrime(marker);
     } catch {
       // Display suppression must never prevent the command from starting.
+    }
+  }
+  // With a hard wall-clock deadline (MCP terminal_execute), a short timeoutMs
+  // may leave room for the wrapper's delivery but not for the probe's
+  // delivery on top of it. Skip the probe and type the wrapper directly with
+  // the pre-probe shell kind so the command gets the largest possible share
+  // of the remaining wall budget; when even the wrapper alone cannot fit,
+  // keep the probe path (the wall timer will finish the job cleanly).
+  if (probingShell && wallClockArmed) {
+    const remainingMs = timeoutMs - (Date.now() - wallStartMs);
+    const probeDeliveryMs = estimateInputDeliveryMs(
+      `${buildPendingInputClearPrefix(resolvedShellKind)}${buildLiveShellProbe(marker)}`,
+    );
+    const wrapperDeliveryMs = estimateInputDeliveryMs(wrappedCommandText());
+    if (probeDeliveryMs + wrapperDeliveryMs > remainingMs && wrapperDeliveryMs <= remainingMs) {
+      probingShell = false;
     }
   }
   if (probingShell) {

@@ -1487,40 +1487,52 @@ test("live shell probe deadline falls back to typing the wrapped command (#3445)
   assert.equal(result.exitCode, 0);
 });
 
-test("live shell probe deadline respects the remaining wall-clock budget", async (t) => {
-  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
-  const writes = [];
-  const pty = new EventEmitter();
-  pty.write = (data) => {
-    if (data === "\x03") return;
-    writes.push(String(data));
-  };
-  const job = startPtyJob(pty, "mkdir /tmp/silent_dir", {
-    shellKind: "posix",
-    probeLiveShell: true,
-    timeoutMs: 1000,
-    enforceWallTimeout: true,
-  });
-  // Drain paced typing of the probe (batched at 128 chars per 30ms). With
-  // enforceWallTimeout the hard deadline was armed before delivery, so this
-  // pacing consumes wall-clock budget; the fallback delay must be measured
-  // against what remains, not the full budget.
-  while (!writes.join("").includes(`${job.marker}_Q'\n`)) t.mock.timers.tick(30);
-  assert.ok(!writes.join("").includes("mkdir /tmp/silent_dir"));
-  // Advance in pacing steps: the probe fallback must fire — and start typing
-  // the wrapped command — before the 1s wall deadline calls finish().
-  let drained = 0;
-  while (!writes.join("").includes("mkdir /tmp/silent_dir") && drained++ < 200) {
-    t.mock.timers.tick(30);
+test("live shell probe respects the remaining wall-clock budget", async (t) => {
+  const { buildPendingInputClearPrefix, buildWrappedCommand } = require("./ptyExecHelpers.cjs");
+  for (const timeoutMs of [1000, 1500]) {
+    t.mock.timers.reset();
+    t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+    const writes = [];
+    const pty = new EventEmitter();
+    pty.write = (data) => {
+      if (data === "\x03") return;
+      writes.push(String(data));
+    };
+    const job = startPtyJob(pty, "mkdir /tmp/silent_dir", {
+      shellKind: "posix",
+      probeLiveShell: true,
+      timeoutMs,
+      enforceWallTimeout: true,
+    });
+    const expectedWrapper = `${buildPendingInputClearPrefix("posix")}${buildWrappedCommand(
+      "mkdir /tmp/silent_dir",
+      "posix",
+      job.marker,
+      true,
+    )}`;
+    // Advance in pacing steps without a probe reply. The wrapped command must
+    // be COMPLETELY delivered before the wall deadline calls finish() —
+    // either the probe was skipped because the budget cannot fit both the
+    // probe's and the wrapper's paced delivery (1000ms), or the fallback was
+    // armed early enough to reserve the wrapper's delivery time (1500ms).
+    let drained = 0;
+    while (!writes.join("").includes(expectedWrapper) && drained++ < 200) {
+      t.mock.timers.tick(30);
+    }
+    assert.ok(drained < 200, `wrapper fully delivered before the wall deadline (${timeoutMs}ms)`);
+    assert.equal(
+      writes.join("").includes(`${job.marker}_Q`),
+      timeoutMs > 1000,
+      `probe typed only when the budget fits probe + wrapper (${timeoutMs}ms)`,
+    );
+    // Keep advancing past the wall deadline so the job resolves via the hard
+    // wall-clock timeout (the command never starts because the probe reply
+    // never arrives and no PTY echo follows).
+    t.mock.timers.tick(timeoutMs);
+    const result = await job.resultPromise;
+    assert.equal(result.ok, false, JSON.stringify(result));
+    assert.match(result.error, /timed out/i);
   }
-  assert.ok(drained < 200, "fallback typed the wrapper before the wall deadline");
-  // Keep advancing past the wall deadline so the job resolves via the hard
-  // wall-clock timeout (the command never starts because the probe reply
-  // never arrives).
-  t.mock.timers.tick(1000);
-  const result = await job.resultPromise;
-  assert.equal(result.ok, false);
-  assert.match(result.error, /timed out/i);
 });
 
 test("a throwing echo suppression prime callback still types the command (#3384)", () => {
