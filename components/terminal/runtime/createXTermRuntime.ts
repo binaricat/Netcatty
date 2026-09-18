@@ -359,7 +359,7 @@ export type CreateXTermRuntimeContext = {
     recordInput: (data: string) => void;
     recordBackspace: () => void;
     recordClearLine: () => void;
-    recordEnter: (options?: { sensitive?: boolean }) => Promise<void>;
+    recordEnter: (options?: { sensitive?: boolean; lineByLine?: boolean }) => Promise<void>;
   } | undefined>;
   passwordPromptActiveRef?: RefObject<boolean>;
   allowHostStyleGreaterThanPrompt?: boolean;
@@ -1281,14 +1281,17 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       // while still passing one batch to the backend's delay scheduler.
       const lines = logicalData.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
       if (lines.at(-1) === "") lines.pop();
-      for (const line of lines) {
-        ctx.scriptRecorderRef?.current?.recordInput(line);
-        if (ctx.scriptRecorderRef?.current?.isRecording) {
-          void ctx.scriptRecorderRef.current.recordEnter({ sensitive });
-        }
+      ctx.scriptRecorderRef?.current?.recordInput(logicalData);
+      if (ctx.scriptRecorderRef?.current?.isRecording) {
+        void ctx.scriptRecorderRef.current.recordEnter({ sensitive, lineByLine: true });
+      }
+      for (const [index, line] of lines.entries()) {
         recordTerminalCommandExecution(`${ctx.commandBufferRef.current}${line}`, ctx, term, {
           sensitive,
           allowHostStyleGreaterThanPrompt: ctx.allowHostStyleGreaterThanPrompt,
+          // Only the first line can refer to an existing edited prompt. Later
+          // lines have not echoed yet; the stale screen cannot override them.
+          useProvidedCommand: index > 0,
         });
       }
       if (ctx.passwordPromptActiveRef) ctx.passwordPromptActiveRef.current = false;

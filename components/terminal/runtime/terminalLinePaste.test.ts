@@ -61,8 +61,8 @@ for (const [protocol, lineMode, sensitive] of [
       onOutputTriggerUserInputRef: { current: (data: string) => outputTriggers.push(data) },
       scriptRecorderRef: { current: { isRecording: true,
         recordInput: (data: string) => { recorderInput += data; },
-        recordEnter: ({ sensitive: secret }: { sensitive: boolean }) => {
-          if (!secret) recorded.push(recorderInput);
+        recordEnter: ({ sensitive: secret, lineByLine }: { sensitive: boolean; lineByLine?: boolean }) => {
+          if (!secret) recorded.push(...(lineByLine ? recorderInput.replace(/\r/g, "\n").split("\n").slice(0, -1) : [recorderInput]));
           recorderInput = "";
         },
       } },
@@ -78,7 +78,8 @@ for (const [protocol, lineMode, sensitive] of [
     const term = {
       paste: () => assert.fail("paced serial input must not gain bracketed-paste markers"),
       scrollToBottom() {}, cols: 80,
-      buffer: { active: { cursorX: 0, cursorY: 0, baseY: 0, getLine: () => undefined } },
+      buffer: { active: { cursorX: 18, cursorY: 0, baseY: 0, getLine: (row: number) => protocol === "ssh" && row === 0
+        ? { isWrapped: false, translateToString: () => "alice@host:~$ show " } : undefined } },
     };
     const env = {
       ...Object.assign({}, ...helpers), ...userPaste, ctx, term,

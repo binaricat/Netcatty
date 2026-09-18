@@ -860,14 +860,14 @@ export const recordTerminalCommandExecution = (
   command: string,
   ctx: TerminalCommandExecutionContext,
   term?: XTerm | null,
-  options?: { sensitive?: boolean; allowHostStyleGreaterThanPrompt?: boolean },
+  options?: { sensitive?: boolean; allowHostStyleGreaterThanPrompt?: boolean; useProvidedCommand?: boolean },
 ): string | null => {
   if (options?.sensitive || isSensitiveTerminalChallenge(readCurrentLogicalTerminalLine(term))) {
     ctx.commandBufferRef.current = "";
     return null;
   }
   const lastPromptText = ctx.promptLineBreakStateRef?.current?.lastPromptText;
-  const cmd = resolveSubmittedShellCommand(command, term, lastPromptText);
+  const cmd = options?.useProvidedCommand ? command.trim() : resolveSubmittedShellCommand(command, term, lastPromptText);
   if (cmd) {
     ctx.onCommandSubmitted?.(cmd, ctx.host.id, ctx.host.label, ctx.sessionId);
   }

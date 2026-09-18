@@ -352,3 +352,49 @@ test("manual stop still returns its recording and permits a clean restart", asyn
   assert.equal(recorder!.isRecording, true);
   await act(async () => renderer!.unmount());
 });
+
+test("confirmed line-by-line recording awaits each send and prompt step in order", async (t) => {
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+  const steps: Array<{ type: string; value?: unknown; sensitive?: boolean }> = [];
+  const eventTarget = new EventTarget();
+  Object.assign(eventTarget, {
+    netcatty: {
+      scriptRecordingStart: async () => ({ ok: true }),
+      scriptRecordingAppendStep: async (_id: string, step: typeof steps[number]) => {
+        await new Promise(resolve => setImmediate(resolve));
+        steps.push(step);
+        return { stopped: false };
+      },
+    },
+    setInterval, clearInterval,
+  });
+  Object.defineProperty(globalThis, "window", { configurable: true, value: eventTarget });
+  t.after(() => {
+    if (previousWindow) Object.defineProperty(globalThis, "window", previousWindow);
+    else Reflect.deleteProperty(globalThis, "window");
+  });
+  let recorder!: Recorder;
+  let renderer!: ReactTestRenderer;
+  function Probe() { recorder = useScriptRecorder("session-1"); return null; }
+  await act(async () => { renderer = create(React.createElement(Probe)); });
+  try {
+    await act(async () => { await recorder.startRecording(); });
+    await act(async () => {
+      recorder.recordInput("echo ");
+      recorder.recordInput("first\r\ncd /tmp\r");
+      await recorder.recordEnter({ lineByLine: true });
+    });
+    assert.deepEqual(steps.map(step => [step.type, step.value]), [
+      ["send", "echo first"], ["waitForPrompt", undefined],
+      ["send", "cd /tmp"], ["waitForPrompt", undefined],
+    ]);
+    steps.length = 0;
+    await act(async () => {
+      recorder.recordInput("secret\nsecond secret\r");
+      await recorder.recordEnter({ lineByLine: true, sensitive: true });
+    });
+    assert.deepEqual(steps.filter(step => step.type === "send").map(step => step.sensitive), [true, true]);
+  } finally {
+    await act(async () => renderer.unmount());
+  }
+});

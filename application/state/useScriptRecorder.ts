@@ -196,7 +196,7 @@ export function useScriptRecorder(sessionId: string | undefined) {
     inputBufferRef.current = '';
   }, []);
 
-  const recordEnter = useCallback(async (options?: { sensitive?: boolean }) => {
+  const recordEnter = useCallback(async (options?: { sensitive?: boolean; lineByLine?: boolean }) => {
     const sid = sessionIdRef.current;
     if (!isRecordingRef.current || isPausedRef.current || isStoppingRef.current || !sid) return;
     const line = inputBufferRef.current;
@@ -206,12 +206,18 @@ export function useScriptRecorder(sessionId: string | undefined) {
     if (gap > 1000) {
       await appendStep({ type: 'sleep', value: gap });
     }
-    await appendStep({
-      type: 'send',
-      value: line,
-      sensitive: options?.sensitive,
-    });
-    await appendStep({ type: 'waitForPrompt', timeoutMs: DEFAULT_RECORDING_PROMPT_TIMEOUT_MS });
+    const lines = options?.lineByLine
+      ? line.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n')
+      : [line];
+    if (options?.lineByLine && lines.at(-1) === '') lines.pop();
+    for (const submittedLine of lines) {
+      await appendStep({
+        type: 'send',
+        value: submittedLine,
+        sensitive: options?.sensitive,
+      });
+      await appendStep({ type: 'waitForPrompt', timeoutMs: DEFAULT_RECORDING_PROMPT_TIMEOUT_MS });
+    }
     lastStepAtRef.current = now;
   }, [appendStep]);
 
