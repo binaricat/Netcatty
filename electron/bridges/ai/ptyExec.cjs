@@ -746,17 +746,22 @@ function startPtyJob(ptyStream, command, options) {
     if (!pendingEnd && !deliveringInput) armOutputTimeout();
 
     if (probingShell) {
-      probeOutput = (probeOutput + text).slice(-16384);
+      const combinedProbeOutput = probeOutput + text;
+      // Salvage the shell kind from the combined (pre-truncation) buffer:
+      // a single data event can carry the complete _P line plus more than
+      // the 16,384-char cap of subsequent output (lost _Q sentinel), and
+      // truncating first would evict the _P line before any parser saw it.
+      const preTruncationKind = parsePartialLiveShellProbeKind(
+        stripAnsi(combinedProbeOutput),
+        marker,
+      );
+      if (preTruncationKind !== undefined) partialProbeKind = preTruncationKind;
+      probeOutput = combinedProbeOutput.slice(-16384);
       if (cancelRequested && hasExpectedPromptSuffix(probeOutput, expectedPrompt)) {
         finish("", -1, "Cancelled");
         return;
       }
       const strippedProbeOutput = stripAnsi(probeOutput);
-      // Retain the shell kind from any complete _P line before the _Q
-      // sentinel arrives, so a later buffer eviction (lost _Q plus more
-      // than 16,384 chars of output) cannot lose the detection.
-      const partialKind = parsePartialLiveShellProbeKind(strippedProbeOutput, marker);
-      if (partialKind !== undefined) partialProbeKind = partialKind;
       const probe = parseLiveShellProbe(strippedProbeOutput, marker);
       if (!probe) return;
       probingShell = false;
