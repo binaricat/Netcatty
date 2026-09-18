@@ -32,37 +32,6 @@ function formatLogTimestamp(timestamp = Date.now()) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}.${String(date.getMilliseconds()).padStart(3, "0")}`;
 }
 
-function createRenderedLineTimestampPrefixer(opts = {}) {
-  const timestampProvider = typeof opts.timestampProvider === "function"
-    ? opts.timestampProvider
-    : Date.now;
-  const timestampsByLine = [];
-  const contentByLine = [];
-
-  return (content) => {
-    if (!content) return "";
-
-    const lines = content.split("\n");
-    timestampsByLine.length = lines.length;
-    contentByLine.length = lines.length;
-
-    return lines.map((line, index) => {
-      if (line.length === 0 && index === lines.length - 1 && content.endsWith("\n")) {
-        return line;
-      }
-
-      if (contentByLine[index] !== line) {
-        contentByLine[index] = line;
-        timestampsByLine[index] = timestampProvider() ?? Date.now();
-      }
-
-      return line.length === 0
-        ? line
-        : `[${formatLogTimestamp(timestampsByLine[index])}] ${line}`;
-    }).join("\n");
-  };
-}
-
 function parseSudoAutofillRewrite(input) {
   if (!input || typeof input !== "string") return null;
   const match = input.match(SUDO_AUTOFILL_REWRITE_PATTERN);
@@ -218,9 +187,11 @@ function createStreamEntry(sessionId, opts) {
     renderer: isRaw ? null : createTerminalTextRenderer({
       alternateScreenActive: opts.alternateScreenActive === true,
     }),
-    renderedTimestampPrefixer: !isRaw && opts.timestampsEnabled
-      ? createRenderedLineTimestampPrefixer({ timestampProvider: opts.timestampProvider })
+    timestampProvider: !isRaw && opts.timestampsEnabled
+      ? (opts.timestampProvider ?? Date.now)
       : null,
+    timestampedChunks: [],
+    lastArrivalTime: undefined,
     hostLabel,
     startTime,
     buffer: "",
@@ -298,7 +269,14 @@ function flushBuffer(entry) {
     if (entry.isRaw) {
       entry.writeStream.write(data);
     } else {
-      entry.renderer.feed(data);
+      if (entry.timestampProvider) {
+        for (const chunk of entry.timestampedChunks) {
+          entry.renderer.feed(chunk.data, chunk.timestamp);
+        }
+        entry.timestampedChunks = [];
+      } else {
+        entry.renderer.feed(data);
+      }
       entry.snapshotDirty = true;
       scheduleSnapshot(entry);
     }
@@ -325,13 +303,16 @@ function registerProgrammaticCommandLogRewrite(sessionId, rewrite) {
 
 function renderSnapshotContent(entry, { finalize = false } = {}) {
   if (finalize) entry.renderer.finish();
-  const renderOptions = finalize ? undefined : { includePendingClearedScreen: true };
+  const renderOptions = {
+    includePendingClearedScreen: !finalize,
+    formatLine: entry.timestampProvider
+      ? (line, timestamp) => line ? `[${formatLogTimestamp(timestamp)}] ${line}` : line
+      : undefined,
+  };
   const renderedContent = entry.isHtml
     ? entry.renderer.toHtmlContent(renderOptions)
     : entry.renderer.toString(renderOptions);
-  const content = entry.renderedTimestampPrefixer
-    ? entry.renderedTimestampPrefixer(renderedContent)
-    : renderedContent;
+  const content = renderedContent;
   return entry.isHtml
     ? wrapTerminalHtmlContent(content, entry.hostLabel, entry.startTime)
     : content;
@@ -396,14 +377,27 @@ function appendData(sessionId, dataChunk) {
 }
 
 function appendBufferedData(entry, dataChunk) {
+  if (entry.timestampProvider && dataChunk) {
+    entry.lastArrivalTime = entry.timestampProvider() ?? Date.now();
+  }
   const readableData = entry.programmaticCommandLogRewriter
     ? entry.programmaticCommandLogRewriter.append(dataChunk)
     : dataChunk;
-  entry.buffer += sanitizeSudoAutofillLogData(entry, readableData);
+  bufferReadableData(entry, sanitizeSudoAutofillLogData(entry, readableData));
 
   // Immediate flush if buffer is large
   if (entry.buffer.length + entry.sudoAutofillPending.length >= MAX_BUFFER_SIZE) {
     flushBuffer(entry);
+  }
+}
+
+// Preserve each sanitized chunk's receipt time through the periodic disk flush.
+// A command held by a rewriter uses the time of the chunk that completes it.
+function bufferReadableData(entry, data) {
+  if (!data) return;
+  entry.buffer += data;
+  if (entry.timestampProvider) {
+    entry.timestampedChunks.push({ data, timestamp: entry.lastArrivalTime });
   }
 }
 
@@ -451,9 +445,9 @@ async function stopStream(sessionId, expectedToken) {
   }
   const readablePending = entry.programmaticCommandLogRewriter?.finish();
   if (readablePending) {
-    entry.buffer += sanitizeSudoAutofillLogData(entry, readablePending);
+    bufferReadableData(entry, sanitizeSudoAutofillLogData(entry, readablePending));
   }
-  entry.buffer += sanitizeSudoAutofillLogData(entry, "", { final: true });
+  bufferReadableData(entry, sanitizeSudoAutofillLogData(entry, "", { final: true }));
   flushBuffer(entry);
   await waitForSnapshotIdle(entry);
 

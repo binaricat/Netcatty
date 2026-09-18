@@ -730,7 +730,7 @@ test("txt stream timestamps complete lines without duplicating split chunks", as
 
     assert.equal(
       fs.readFileSync(filePath, "utf8"),
-      "[2026-01-02 03:04:05.123] first line\n[2026-01-02 03:04:06.456] second line\n[2026-01-02 03:04:07.089] partial",
+      "[2026-01-02 03:04:06.456] first line\n[2026-01-02 03:04:06.456] second line\n[2026-01-02 03:04:06.456] partial",
     );
   } finally {
     await stopStream(sessionId);
@@ -903,4 +903,29 @@ function findFirstTxtFile(directory) {
     if (fileName) return path.join(hostDir, fileName);
   }
   return null;
+}
+
+for (const format of ["txt", "html"]) {
+  test(`${format} timestamps preserve arrival gaps inside one flush interval`, async () => {
+    const directory = path.join(TEMP_ROOT, `arrival-${format}-${Date.now()}`);
+    const sessionId = `arrival-${format}`;
+    let now = new Date(2026, 0, 2, 3, 4, 5, 89).getTime();
+    try {
+      startStream(sessionId, {
+        hostLabel: "host", directory, format, timestampsEnabled: true,
+        timestampProvider: () => now,
+      });
+      appendData(sessionId, "first\r\n");
+      now += 300;
+      appendData(sessionId, "second\r\n");
+      now += 100;
+      const filePath = await stopStream(sessionId);
+      const content = fs.readFileSync(filePath, "utf8");
+      assert.match(content, /\[2026-01-02 03:04:05\.089\] first/);
+      assert.match(content, /\[2026-01-02 03:04:05\.389\] second/);
+    } finally {
+      await stopStream(sessionId);
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
 }
