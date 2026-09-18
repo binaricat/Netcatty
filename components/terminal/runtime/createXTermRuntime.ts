@@ -1396,7 +1396,11 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
 
         ctx.onOutputTriggerUserInputRef?.current?.(outData);
         for (const chunk of getTextInputWireChunks(outData, options?.perCharacterWrites === true)) {
-          ctx.terminalBackend.writeToSession(id, chunk, { sensitive, serialEraseChar });
+          ctx.terminalBackend.writeToSession(id, chunk, {
+            sensitive,
+            serialEraseChar,
+            ...(options?.lineDelayMs ? { automated: true, lineDelayMs: options.lineDelayMs } : {}),
+          });
         }
 
         // Local echo for serial connections only when explicitly enabled
@@ -2597,7 +2601,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   ctx.container.addEventListener("input", markKittyTextInput, true);
   textarea?.addEventListener("blur", clearKittyTransientInputState);
 
-  const disposeLinePasteHandler = ctx.host.protocol === "serial" && ctx.serialLineMode && ctx.serialLineBufferRef
+  const disposeLinePasteHandler = ctx.host.protocol === "serial"
     ? registerTerminalLinePasteHandler(term, (data, options) => {
       handleTerminalInputData(data, { ...options, skipBroadcast: true });
     })

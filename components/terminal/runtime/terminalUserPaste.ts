@@ -53,7 +53,7 @@ type LinePasteOptions = { lineDelayMs: number; sensitive: boolean };
 type LinePasteHandler = (data: string, options: LinePasteOptions) => void;
 const linePasteHandlers = new WeakMap<object, LinePasteHandler>();
 
-/** Serial line mode must consume its pending input before scheduling writes. */
+/** Serial pastes preserve pending input and local echo before scheduling writes. */
 export function registerTerminalLinePasteHandler(term: object, handler: LinePasteHandler): () => void {
   linePasteHandlers.set(term, handler);
   return () => {

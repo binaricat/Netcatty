@@ -29,8 +29,8 @@ const helpers = await Promise.all([
   "./shiftEnterText.ts", "./serialLineInput.ts",
 ].map(path => import(new URL(path, import.meta.url).href)));
 
-for (const sensitive of [false, true]) {
-  test(`serial confirmed line paste consumes pending text with pacing (sensitive=${sensitive})`, async (t) => {
+for (const [lineMode, sensitive] of [[false, false], [false, true], [true, false], [true, true]]) {
+  test(`serial confirmed line paste consumes pending text with pacing (lineMode=${lineMode}, sensitive=${sensitive})`, async (t) => {
     t.mock.timers.enable({ apis: ["setTimeout"] });
     const wire: string[] = [];
     const echo: string[] = [];
@@ -44,7 +44,7 @@ for (const sensitive of [false, true]) {
       host: { protocol: "serial", id: "h", label: "h" }, sessionId: "tab-1",
       sessionRef: { current: "serial-1" }, statusRef: { current: "connected" },
       commandBufferRef: { current: "" }, serialLineBufferRef: { current: "" },
-      serialLineMode: true, serialLocalEcho: true,
+      serialLineMode: lineMode, serialLocalEcho: true,
       passwordPromptActiveRef: { current: sensitive },
       isBroadcastEnabledRef: { current: false },
       onBroadcastInputRef: { current: () => assert.fail("paste must not broadcast twice") },
@@ -84,21 +84,21 @@ for (const sensitive of [false, true]) {
       },
       onPasteData: data => { broadcast.push(data); return true; },
     });
-    assert.deepEqual(wire, ["show version\r"]);
+    assert.deepEqual(wire, lineMode ? ["show version\r"] : ["show ", "version\r"]);
     assert.equal(ctx.serialLineBufferRef.current, "");
     assert.equal(ctx.commandBufferRef.current, "");
     assert.equal(echo.join(""), "show version\r\nshow clock\r\n");
-    assert.equal(writes.length, 1);
-    assert.equal(writes[0].lineDelayMs, 250);
-    assert.equal(writes[0].sensitive, sensitive);
+    assert.equal(writes.length, lineMode ? 1 : 2);
+    assert.equal(writes.at(-1)?.lineDelayMs, 250);
+    assert.equal(writes.at(-1)?.sensitive, sensitive);
     assert.deepEqual(broadcast, sensitive ? [] : ["version\nshow clock\r"]);
     t.mock.timers.tick(249);
-    assert.deepEqual(wire, ["show version\r"]);
+    assert.deepEqual(wire, lineMode ? ["show version\r"] : ["show ", "version\r"]);
     t.mock.timers.tick(1);
-    assert.deepEqual(wire, ["show version\r", "show clock\r"]);
+    assert.deepEqual(wire, lineMode ? ["show version\r", "show clock\r"] : ["show ", "version\r", "show clock\r"]);
     ctx.isBroadcastEnabledRef.current = false;
     env.api.input("\r");
-    assert.deepEqual(wire, ["show version\r", "show clock\r", "\r"]);
+    assert.deepEqual(wire, lineMode ? ["show version\r", "show clock\r", "\r"] : ["show ", "version\r", "show clock\r", "\r"]);
     env.api.dispose();
     assert.equal(userPaste.dispatchTerminalLinePaste(term, "unused\r", { lineDelayMs: 250, sensitive: false }), false);
   });
