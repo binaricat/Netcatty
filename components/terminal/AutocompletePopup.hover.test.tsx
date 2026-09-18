@@ -153,6 +153,47 @@ test("autocomplete popup keeps a fixed geometry while hovering rows (#3426)", as
     assert.equal(wrapper.style.left, initialLeft);
     assert.equal(wrapper.style.top, initialTop);
 
+    // A hidden detail reserve must not intercept clicks through the wrapper.
+    assert.equal(wrapper.style.pointerEvents, "none");
+    await hoverRow(1);
+    assert.equal(findDetailPanel()?.style.pointerEvents, "none");
+    await hoverRow(0);
+    assert.equal(findDetailPanel()?.style.pointerEvents, "auto");
+
+    // Exercise pane sizes down to the supported split minimum. JSDOM cannot
+    // perform flex layout, so check the constraints that let Chromium shrink
+    // both panels without tying their size to the hovered description.
+    for (const width of [400, 240, 120]) {
+      const container = window.document.createElement("div");
+      container.getBoundingClientRect = () => ({
+        left: 0, top: 0, right: width, bottom: 600,
+        width, height: 600, x: 0, y: 0, toJSON: () => ({}),
+      });
+      await act(async () => {
+        root.render(
+          <AutocompletePopup
+            suggestions={suggestions}
+            selectedIndex={-1}
+            anchorViewport={{ left: width - 30, top: 500, bottom: 516 }}
+            visible
+            onSelect={() => {}}
+            containerRef={{ current: container }}
+          />,
+        );
+      });
+      assert.equal(findWrapper().style.maxWidth, `${width - 16}px`);
+      const list = rootNode.querySelector<HTMLElement>(".xterm-autocomplete-popup");
+      assert.ok(list);
+      assert.ok(parseFloat(list.style.minWidth) <= (width - 16) / 2);
+      for (const index of [0, 1, 2]) {
+        await hoverRow(index);
+        const detail = findDetailPanel();
+        assert.ok(detail);
+        assert.equal(detail.style.minWidth, "0px");
+        assert.equal(detail.style.flexShrink, "1");
+      }
+    }
+
     await act(async () => {
       root.unmount();
     });

@@ -295,6 +295,7 @@ const AutocompletePopup: React.FC<AutocompletePopupProps> = ({
   const viewportPadding = 8;
   const anchorGap = 8;
   const clampViewport = resolveAutocompleteClampViewport(containerRef?.current ?? null);
+  const availableWidth = Math.max(0, clampViewport.width - viewportPadding * 2);
   const estimatedPopupHeight = Math.min(maxHeight, suggestions.length * 28 + 8);
   // Reserve the detail height for the whole set (not the hovered row) so the
   // chosen direction/height stays stable while hovering.
@@ -378,6 +379,7 @@ const AutocompletePopup: React.FC<AutocompletePopupProps> = ({
         top: `${finalGeometry.top}px`,
         zIndex: 10000,
         display: "flex",
+        maxWidth: `${availableWidth}px`,
         alignItems: renderUpward ? "flex-end" : "flex-start",
         gap: "4px",
         // Hit-test transparent: the wrapper's box spans the whole assembly,
@@ -396,7 +398,7 @@ const AutocompletePopup: React.FC<AutocompletePopupProps> = ({
         style={{
           ...sharedBoxStyle,
           maxHeight: `${effectiveMaxHeight}px`,
-          minWidth: "180px",
+          minWidth: `${Math.min(180, setMayShowDetailPanel ? availableWidth / 2 : availableWidth)}px`,
           maxWidth: "400px",
           overflowY: "auto",
           overflowX: "hidden",
@@ -603,8 +605,11 @@ const AutocompletePopup: React.FC<AutocompletePopupProps> = ({
             ...sharedBoxStyle,
             padding: "10px 12px",
             width: "280px",
+            minWidth: 0,
             height: `${detailPanelHeight}px`,
-            flexShrink: 0,
+            // The width remains independent of content/hover, but can shrink
+            // with the assembly inside a narrow terminal pane.
+            flexShrink: 1,
             // Bound the tooltip too: a long multi-line snippet description must
             // scroll, not push the panel past the viewport edge (#1202).
             overflowY: "auto",
