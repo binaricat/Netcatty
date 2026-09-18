@@ -28,7 +28,7 @@ const {
 } = require("./ptyExecHelpers.cjs");
 const { extractTrailingIdlePrompt } = require("./shellUtils.cjs");
 
-const { buildLiveShellProbe, parseLiveShellProbe } = require("./liveShellProbe.cjs");
+const { buildLiveShellProbe, parseLiveShellProbe, probeShellKindFromPartial } = require("./liveShellProbe.cjs");
 
 const DEFAULT_FOREGROUND_PTY_CAPTURE_CHARS = 1024 * 1024;
 const END_MARKER_PROMPT_WAIT_MS = 30000;
@@ -310,7 +310,13 @@ function startPtyJob(ptyStream, command, options) {
         // probe's own _I prime keeps suppression armed until the wrapper's
         // _S arrives; finish() sends _R only when the command never starts.
         probingShell = false;
+        // The probe may already have emitted its _P line (e.g. a POSIX login
+        // where the user entered a nested fish) even though the _Q completion
+        // marker was lost or mangled. Retain the detected kind so the fallback
+        // wrapper matches the live shell instead of assuming POSIX (#3449).
+        const partialKind = probeShellKindFromPartial(stripAnsi(probeOutput), marker);
         probeOutput = "";
+        if (partialKind) resolvedShellKind = partialKind;
         writeWrappedCommand();
         return;
       }
