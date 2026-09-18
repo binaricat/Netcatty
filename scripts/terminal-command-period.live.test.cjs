@@ -31,6 +31,10 @@ if (!process.versions.electron || process.platform !== "darwin") {
       show: true, width: 1000, height: 600,
       webPreferences: { nodeIntegration: true, contextIsolation: false, sandbox: false },
     });
+    const rendererErrors = [];
+    win.webContents.on("console-message", details => {
+      if (details.level === "error") rendererErrors.push(details.message);
+    });
     await win.loadURL("data:text/html,<body style='background:%23111'></body>");
     await win.webContents.insertCSS(fs.readFileSync(require.resolve("@xterm/xterm/css/xterm.css"), "utf8"));
     ipcMain.once("command-period-ready", () => {
@@ -58,7 +62,7 @@ if (!process.versions.electron || process.platform !== "darwin") {
           fontFamilyId:'jetbrains-mono',resolvedFontFamily:'monospace',fontSize:14,
           terminalTheme:{colors:{background:'#111111',foreground:'#eeeeee',cursor:'#ffffff',selection:'#444444'}},
           terminalSettingsRef:ref({...DEFAULT_TERMINAL_SETTINGS,cursorBlink:false}),
-          terminalBackend:{writeToSession:(_,data)=>send(data),interruptSession:()=>send('\\x03'),resize:()=>{},openExternalAvailable:false},
+          terminalBackend:{writeToSession:(_,data)=>send(data),interruptSession:()=>send('\\x03'),resizeSession:()=>{},openExternalAvailable:false},
           sessionRef:ref(id),hotkeySchemeRef:ref('disabled'),disableTerminalFontZoomRef:ref(false),
           keyBindingsRef:ref([]),onHotkeyActionRef:ref(undefined),isBroadcastEnabledRef:ref(Boolean(broadcast)),
           onBroadcastInputRef:ref(broadcast),sessionId:id,statusRef:ref('connected'),
@@ -71,8 +75,10 @@ if (!process.versions.electron || process.platform !== "darwin") {
         bubbles:true,cancelable:true,key,code,keyCode:code==='Period'?190:67,...mods,
       }));
       const peer=make('peer');
-      const source=make('source',(_,__,options)=>{
-        dispatchKittyKeyboardBroadcastInput('peer',options.kittyKeyboardInput);return ['peer'];
+      const source=make('source',(data,__,options)=>{
+        if(options?.kittyKeyboardInput)dispatchKittyKeyboardBroadcastInput('peer',options.kittyKeyboardInput);
+        else peer.writes.push(data);
+        return ['peer'];
       });
       await write(peer,'\\x1b[>11u');
       source.r.term.options.vtExtensions={...source.r.term.options.vtExtensions,win32InputMode:true};
@@ -153,6 +159,7 @@ if (!process.versions.electron || process.platform !== "darwin") {
       panes.forEach(p=>p.r.dispose());return summary;
 
     })()`);
+    require("node:assert/strict").deepEqual(rendererErrors, [], "no renderer errors");
     console.log("COMMAND_PERIOD_OK", JSON.stringify(result));finish(0);
   }).catch(error=>{console.error(error);finish(1);});
 }
