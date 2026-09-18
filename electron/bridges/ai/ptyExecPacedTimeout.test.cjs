@@ -125,3 +125,62 @@ for (const shellKind of ['powershell', 'cmd']) {
     assert.match((await job.resultPromise).error, /Cancelled/);
   });
 }
+
+test('a missing live probe reply falls back to delivering the command (#3446)', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const pty = new EventEmitter();
+  const writes = [];
+  pty.write = (data) => {
+    if (data === '\x03') return;
+    writes.push(String(data));
+  };
+  const command = 'mkdir /tmp/nc_silent_probe_fallback';
+  const job = startPtyJob(pty, command, {
+    shellKind: 'posix', probeLiveShell: true, timeoutMs: 60000,
+  });
+  const probeLength = 2 + buildLiveShellProbe(job.marker).length;
+  while (writes.join('').length < probeLength) t.mock.timers.tick(30);
+  const writesBeforeFallback = writes.length;
+  // The probe reply never arrives. The wrapper must still be typed after the
+  // bounded probe fallback instead of holding the session for the full
+  // command timeout.
+  t.mock.timers.tick(10000);
+  const wrapped = buildWrappedCommand(command, 'posix', job.marker, true);
+  let guard = 0;
+  while (!writes.slice(writesBeforeFallback).join('').includes(wrapped) && guard++ < 500) {
+    t.mock.timers.tick(30);
+  }
+  assert.ok(
+    writes.slice(writesBeforeFallback).join('').includes(wrapped),
+    'wrapper is typed after the probe fallback window',
+  );
+  pty.emit('data', `${job.marker}_S\n${job.marker}_E:0\n`);
+  const result = await job.resultPromise;
+  assert.equal(result.ok, true);
+  assert.equal(result.exitCode, 0);
+  t.mock.timers.reset();
+  pty.emit('close');
+});
+
+test('cancelling during a stalled probe never types the command (#3446)', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const pty = new EventEmitter();
+  const writes = [];
+  pty.write = (data) => {
+    if (data === '\x03') return;
+    writes.push(String(data));
+  };
+  const command = 'echo should-not-run';
+  const job = startPtyJob(pty, command, {
+    shellKind: 'posix', probeLiveShell: true, timeoutMs: 60000,
+  });
+  const probeLength = 2 + buildLiveShellProbe(job.marker).length;
+  while (writes.join('').length < probeLength) t.mock.timers.tick(30);
+  job.cancel();
+  t.mock.timers.tick(10000);
+  assert.ok(writes.every((data) => !data.includes('echo should-not-run')));
+  const result = await job.resultPromise;
+  assert.match(result.error, /Cancelled/);
+  t.mock.timers.reset();
+  pty.emit('close');
+});

@@ -95,6 +95,15 @@ function startPtyJob(ptyStream, command, options) {
   const CANCEL_RETRY_MS = 5000;
   const CANCEL_WALL_TIMEOUT_MS = 30000;
 
+  // Bounded fallback for the live shell probe: if the probe's _Q marker never
+  // comes back (hosts that swallow or never echo the typed probe, shells that
+  // block on $PPID inspection, …), waiting for the full command timeout
+  // starves the session — the real command is never even typed (#3446). After
+  // this window, give up on the probe and deliver the wrapper with the
+  // already-resolved shell kind so the command still reaches the remote shell.
+  const PROBE_FALLBACK_TIMEOUT_MS = 10000;
+  let probeFallbackTimer = null;
+
   const usesLiveShellProbe = probeLiveShell && ["posix", "fish"].includes(resolvedShellKind);
   let probingShell = usesLiveShellProbe;
   let deliveringInput = false;
@@ -157,6 +166,24 @@ function startPtyJob(ptyStream, command, options) {
     while (cancelOneShotTimers.length) {
       clearTimeout(cancelOneShotTimers.pop());
     }
+  }
+
+  function clearProbeFallback() {
+    if (probeFallbackTimer) {
+      clearTimeout(probeFallbackTimer);
+      probeFallbackTimer = null;
+    }
+  }
+
+  function armProbeFallback() {
+    clearProbeFallback();
+    probeFallbackTimer = setTimeout(() => {
+      probeFallbackTimer = null;
+      if (finished || cancelRequested || !probingShell) return;
+      probingShell = false;
+      probeOutput = "";
+      writeWrappedCommand();
+    }, PROBE_FALLBACK_TIMEOUT_MS);
   }
 
   function finishWithoutReturnedPrompt() {
@@ -261,6 +288,7 @@ function startPtyJob(ptyStream, command, options) {
     }
     cancelRequested = true;
     clearPromptFallback();
+    clearProbeFallback();
     clearCancelRetryTimer();
     // Cancel the startup timer too — otherwise a pre-start cancel resolves
     // as "Background job startup timed out" instead of "Cancelled".
@@ -442,6 +470,7 @@ function startPtyJob(ptyStream, command, options) {
     clearTimeout(wallTimeoutId);
     clearStartupTimeout();
     clearPromptFallback();
+    clearProbeFallback();
     clearEndMarkerWait();
     clearCancelRetryTimer();
     // Clear any pending one-shot cancel timers so they do not keep the
@@ -555,6 +584,7 @@ function startPtyJob(ptyStream, command, options) {
       const probe = parseLiveShellProbe(stripAnsi(probeOutput), marker);
       if (!probe) return;
       probingShell = false;
+      clearProbeFallback();
       probeOutput = "";
       if (probe.kind) resolvedShellKind = probe.kind;
       if (finished || cancelRequested) return;
@@ -765,6 +795,7 @@ function startPtyJob(ptyStream, command, options) {
       deliveringInput = false;
       if (!pendingEnd) armOutputTimeout();
       if (!foundStart) armStartupTimeout();
+      if (probingShell) armProbeFallback();
     }
   }
 
