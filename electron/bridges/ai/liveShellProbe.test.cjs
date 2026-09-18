@@ -90,12 +90,40 @@ test('probe deadline delivers the command when the probe reply never arrives', a
     await new Promise((resolve) => setTimeout(resolve, 30));
   }
   assert.ok(writes.join('').includes('printf silent-command'), writes.join('|'));
-  assert.deepEqual(aborted, [job.marker]);
+  // The display reset must NOT be sent when the probe is abandoned: the
+  // preload treats _R as a permanent abort for the marker, which would stop
+  // the fallback wrapper's _I from re-arming echo suppression. It is
+  // deferred to finish() and only sent when the command never starts.
+  assert.deepEqual(aborted, []);
   pty.emit('data', `${job.marker}_S\r\nsilent-ok\r\n${job.marker}_E:0\r\n`);
   const result = await job.resultPromise;
   assert.equal(result.exitCode, 0, JSON.stringify(result));
   assert.match(result.stdout, /silent-ok/);
-  assert.equal(aborted.length, 1, 'the display reset must not be duplicated');
+  assert.equal(aborted.length, 0, 'no display reset once the command has started');
+});
+
+test('probe deadline fires before the command timers for short timeouts', async () => {
+  const pty = new EventEmitter();
+  const writes = [];
+  pty.write = (data) => writes.push(data);
+  const job = startPtyJob(pty, 'printf short-timeout', {
+    shellKind: 'posix', probeLiveShell: true, timeoutMs: 2000,
+    enforceWallTimeout: true,
+  });
+  assert.equal(writes.length, 1);
+  // With a 2s command timeout (and an active wall clock), the probe deadline
+  // must fire strictly before the output/wall timers so the wrapped command
+  // is still delivered instead of the job being finished as a timeout.
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline && !writes.join('').includes('printf short-timeout')) {
+    await new Promise((resolve) => setTimeout(resolve, 30));
+  }
+  assert.ok(writes.join('').includes('printf short-timeout'), writes.join('|'));
+  assert.ok(!writes.includes('\x03'), 'the output/wall timeout must not interrupt first');
+  pty.emit('data', `${job.marker}_S\r\nok\r\n${job.marker}_E:0\r\n`);
+  const result = await job.resultPromise;
+  assert.equal(result.exitCode, 0, JSON.stringify(result));
+  assert.match(result.stdout, /ok/);
 });
 
 test('late probe reply after the deadline is ignored and never double-delivers', async () => {

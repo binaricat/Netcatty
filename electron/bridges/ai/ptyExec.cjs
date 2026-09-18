@@ -37,6 +37,13 @@ const END_MARKER_PROMPT_WAIT_MS = 30000;
 // output, pending canonical input), the job must not stall until the full
 // command timeout with the command still undelivered (#3403, #3445).
 const DEFAULT_PROBE_DEADLINE_MS = 15000;
+// Time reserved after the probe deadline so the recovery path (wrapping and
+// paced-delivering the wrapped command) can still run before the command
+// deadlines fire: the output timer is armed just before the startup timer
+// with the same timeoutMs, and enforceWallTimeout callers start their wall
+// clock at job start, so a probe deadline that ties or exceeds those
+// deadlines would never deliver the wrapped command (#3449).
+const PROBE_RECOVERY_RESERVE_MS = 3000;
 const promptRecoveryPendingPtys = new WeakSet();
 
 function stripJobMarkerLines(text, marker) {
@@ -105,9 +112,6 @@ function startPtyJob(ptyStream, command, options) {
   let probingShell = usesLiveShellProbe;
   let deliveringInput = false;
   let probeOutput = "";
-  // Set once the probe is abandoned via its deadline so finish() does not
-  // send a second _R display reset for the same marker.
-  let probeAborted = false;
 
   let output = "";
   let foundStart = false;
@@ -218,26 +222,37 @@ function startPtyJob(ptyStream, command, options) {
   // startup budget instead of counting against it.
   const BG_STARTUP_TIMEOUT_MS = 30000;
   function armStartupTimeout() {
+    const baseMs = maxBufferedChars > 0 ? BG_STARTUP_TIMEOUT_MS : timeoutMs;
     // While waiting for the live shell probe reply, the startup budget is the
     // bounded probe deadline: a probe whose _Q reply never arrives (silent
     // shells, lost or mangled marker output) must not stall until the full
     // command timeout with the command still undelivered (#3403, #3445).
-    const baseMs = maxBufferedChars > 0 ? BG_STARTUP_TIMEOUT_MS : timeoutMs;
-    const startupMs = probingShell ? Math.min(probeDeadlineMs, baseMs) : baseMs;
+    // The deadline must fire strictly before the competing command timers —
+    // the output timer is armed with timeoutMs just before this one (same
+    // expiry loses on insertion order) and enforceWallTimeout callers start
+    // their wall clock at job start — so the silent probe still gets its
+    // recovery delivery instead of being finished as a timeout (#3449).
+    const probeBudgetMs = Math.max(
+      Math.floor(baseMs / 2),
+      baseMs - PROBE_RECOVERY_RESERVE_MS,
+    );
+    const startupMs = probingShell
+      ? Math.min(probeDeadlineMs, probeBudgetMs)
+      : baseMs;
     startupTimeoutId = setTimeout(() => {
       if (finished || foundStart) return;
       if (probingShell) {
         // The probe reply never arrived. Clear the probe state and deliver
         // the wrapped command anyway so silent/zero-output commands still
         // reach the remote shell and return instead of stalling.
+        // Do NOT send the display reset (onProbeAborted) here: the preload
+        // treats _R as a permanent abort for the marker, which would stop
+        // the fallback wrapper's _I from re-arming echo suppression and
+        // leak the wrapper echo on width-wrapping terminals (#3449). The
+        // probe's own _I prime keeps suppression armed until the wrapper's
+        // _S arrives; finish() sends _R only when the command never starts.
         probingShell = false;
         probeOutput = "";
-        probeAborted = true;
-        try {
-          onProbeAborted?.(marker);
-        } catch {
-          // Display reset must never prevent the command from starting.
-        }
         writeWrappedCommand();
         return;
       }
@@ -460,7 +475,7 @@ function startPtyJob(ptyStream, command, options) {
   function finish(stdout, exitCode, error) {
     if (finished) return;
     finished = true;
-    if (!foundStart && !probeAborted && typeof onProbeAborted === "function") {
+    if (!foundStart && typeof onProbeAborted === "function") {
       try {
         onProbeAborted(marker);
       } catch {
