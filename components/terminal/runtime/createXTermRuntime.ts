@@ -189,7 +189,7 @@ import {
   consumeOsc133CommandCompletion,
   type PromptLineBreakState,
 } from "./promptLineBreak";
-import { recordTerminalCommandExecution } from "./terminalCommandExecution";
+import { isSensitiveTerminalCommandInput, recordTerminalCommandExecution } from "./terminalCommandExecution";
 import {
   getSingleBracketedPasteLine,
   getSinglePastedCommand,
@@ -2634,14 +2634,18 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       && index < pending.commands.length && !pending.recorded.has(index)) {
       pending.recorded.add(index);
       const command = pending.commands[index];
+      const sensitive = isSensitiveTerminalCommandInput(
+        term, pending.sensitive || ctx.passwordPromptActiveRef?.current === true,
+      );
       // Receipts can arrive after the user starts typing another command.
       // Never consume that live input buffer or reconcile with a newer screen.
       recordTerminalCommandExecution(command, { ...ctx, commandBufferRef: { current: "" } }, term, {
-        sensitive: pending.sensitive,
+        sensitive,
         allowHostStyleGreaterThanPrompt: ctx.allowHostStyleGreaterThanPrompt,
         useProvidedCommand: true,
+        acknowledgedWrite: true,
       });
-      void pending.recordLine?.(command, { sensitive: pending.sensitive }).catch((error) => {
+      void pending.recordLine?.(command, { sensitive }).catch((error) => {
         logger.warn("Failed to record confirmed paste write", error);
       });
     }

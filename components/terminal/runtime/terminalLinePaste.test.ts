@@ -35,13 +35,16 @@ for (const [protocol, lineMode, sensitive] of [
   ["ssh", false, false], ["ssh", false, true], ["local", false, false],
   ["mosh", false, false], ["et", false, false], ["plugin:example", false, false],
 ] as const) {
-  for (const completion of ["complete", "manual", "interrupt", "replacement"] as const) {
+  for (const completion of ["complete", "manual", "interrupt", "replacement", "password-ref", "password-screen", "output"] as const) {
   test(`${completion}: ${protocol} confirmed line paste consumes pending text with pacing (lineMode=${lineMode}, sensitive=${sensitive})`, async (t) => {
     t.mock.timers.enable({ apis: ["setTimeout"] });
     const wire: string[] = [];
     const echo: string[] = [];
     const broadcast: string[] = [];
     const submitted: string[] = [];
+    const history: string[] = [];
+    const recordingSensitivity: boolean[] = [];
+    let liveLine = protocol === "ssh" ? "alice@host:~$ show " : "";
     const autocomplete: string[] = [];
     const outputTriggers: string[] = [];
     const recorded: string[] = [];
@@ -59,6 +62,7 @@ for (const [protocol, lineMode, sensitive] of [
       serialLineMode: lineMode, serialLocalEcho: true, telnetLocalEchoRef: { current: true },
       passwordPromptActiveRef: { current: sensitive },
       onCommandSubmitted: (command: string) => submitted.push(command),
+      onCommandExecuted: (command: string) => history.push(command),
       onAutocompleteInput: (data: string) => autocomplete.push(data),
       onOutputTriggerUserInputRef: { current: (data: string) => outputTriggers.push(data) },
       scriptRecorderRef: { current: { isRecording: true,
@@ -71,6 +75,7 @@ for (const [protocol, lineMode, sensitive] of [
         captureSubmittedLineRecorder: () => {
           recorderInput = "";
           return async (line: string, { sensitive: secret }: { sensitive: boolean }) => {
+            recordingSensitivity.push(secret);
             if (!secret) recorded.push(line);
           };
         },
@@ -87,8 +92,8 @@ for (const [protocol, lineMode, sensitive] of [
     const term = {
       paste: () => assert.fail("paced serial input must not gain bracketed-paste markers"),
       scrollToBottom() {}, cols: 80,
-      buffer: { active: { cursorX: 18, cursorY: 0, baseY: 0, getLine: (row: number) => protocol === "ssh" && row === 0
-        ? { isWrapped: false, translateToString: () => "alice@host:~$ show " } : undefined } },
+      buffer: { active: { cursorX: 18, cursorY: 0, baseY: 0, getLine: (row: number) => liveLine && row === 0
+        ? { isWrapped: false, translateToString: () => liveLine } : undefined } },
     };
     const env = {
       ...Object.assign({}, ...helpers), ...userPaste, ctx, term, crypto, logger: { warn() {} },
@@ -142,6 +147,17 @@ for (const [protocol, lineMode, sensitive] of [
       assert.deepEqual(wire, afterReplacement);
       assert.deepEqual(submitted, sensitive ? [] : ["show version", "replacement"]);
       assert.deepEqual(recorded, sensitive ? [] : ["show version", "replacement"]);
+      return;
+    }
+    if (completion === "password-ref" || completion === "password-screen" || completion === "output") {
+      liveLine = completion === "password-screen" ? "Password: " : "working... still producing output";
+      ctx.passwordPromptActiveRef.current = completion === "password-ref";
+      t.mock.timers.tick(1);
+      assert.equal(wire.at(-1), "show clock\r");
+      const secondSensitive = sensitive || completion !== "output";
+      assert.deepEqual(recordingSensitivity, [sensitive, secondSensitive]);
+      assert.deepEqual(history, sensitive ? [] : secondSensitive ? ["show version"] : ["show version", "show clock"]);
+      assert.deepEqual(recorded, sensitive ? [] : secondSensitive ? ["show version"] : ["show version", "show clock"]);
       return;
     }
     if (completion !== "complete") {
