@@ -49,6 +49,25 @@ const pasteDisplayStates = new WeakMap<object, PasteDisplayState>();
 const pasteInputScrollStates = new WeakMap<object, PasteInputScrollState>();
 const pasteBroadcastStates = new WeakMap<object, PasteInputScrollState>();
 const pasteSensitiveStates = new WeakMap<object, PasteInputScrollState>();
+type LinePasteOptions = { lineDelayMs: number; sensitive: boolean };
+type LinePasteHandler = (data: string, options: LinePasteOptions) => void;
+const linePasteHandlers = new WeakMap<object, LinePasteHandler>();
+
+/** Serial line mode must consume its pending input before scheduling writes. */
+export function registerTerminalLinePasteHandler(term: object, handler: LinePasteHandler): () => void {
+  linePasteHandlers.set(term, handler);
+  return () => {
+    if (linePasteHandlers.get(term) === handler) linePasteHandlers.delete(term);
+  };
+}
+
+export function dispatchTerminalLinePaste(term: object, data: string, options: LinePasteOptions): boolean {
+  const handler = linePasteHandlers.get(term);
+  if (!handler) return false;
+  handler(data, options);
+  return true;
+}
+
 const terminalProtocolReplyStates = new WeakMap<object, TerminalProtocolReplyState>();
 const LONG_PASTE_MIN_LENGTH = 200;
 const PASTE_DISPLAY_FIX_WINDOW_MS = 4000;

@@ -43,7 +43,15 @@ const MultilinePasteConfirmDialog: React.FC<{ request: MultilinePasteConfirmRequ
         if (!open) respondMultilinePasteConfirm("cancel");
       }}
     >
-      <DialogContent className="sm:max-w-[520px]">
+      <DialogContent
+        className="sm:max-w-[520px]"
+        onCloseAutoFocus={(event) => {
+          if (request.onClose) {
+            event.preventDefault();
+            request.onClose();
+          }
+        }}
+      >
         <DialogHeader>
           <DialogTitle>{t("terminal.pasteConfirm.title")}</DialogTitle>
         </DialogHeader>

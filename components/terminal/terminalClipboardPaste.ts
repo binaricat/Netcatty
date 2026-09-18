@@ -6,7 +6,7 @@ import {
   type RemoteClipboardImageUploadResult,
 } from "./clipboardImagePaste";
 import { extractRootPathsFromClipboardFiles, AUTO_RUN_SNIPPET_LINE_DELAY_MS } from "./terminalHelpers";
-import { pasteTextIntoTerminal } from "./runtime/terminalUserPaste";
+import { dispatchTerminalLinePaste, pasteTextIntoTerminal } from "./runtime/terminalUserPaste";
 import { sanitizeTerminalInput } from "./runtime/terminalInputSanitize";
 import {
   getMultilinePasteInfo,
@@ -26,7 +26,7 @@ type ClipboardFileBridge = Pick<
 >;
 
 export type MultilinePasteConfirmRequestFn = (
-  info: MultilinePasteInfo & { text: string },
+  info: MultilinePasteInfo & { text: string; onClose?: () => void },
 ) => Promise<{ action: MultilinePasteConfirmAction; text?: string }>;
 
 /**
@@ -144,47 +144,48 @@ export async function pasteTextWithMultilineConfirm(
     && shouldConfirmMultilinePaste(text, { minLines: confirmMultilinePaste.minLines })
   ) {
     const decision = confirmMultilinePaste.requestConfirm
-      ? await confirmMultilinePaste.requestConfirm({ ...getMultilinePasteInfo(text), text })
+      ? await confirmMultilinePaste.requestConfirm({ ...getMultilinePasteInfo(text), text, onClose: () => term.focus?.() })
       : null;
     if (!decision || decision.action === "cancel") return;
+    const currentSessionId = getCurrentSessionId ? getCurrentSessionId() : session;
+    if (!currentSessionId) return;
+    const confirmedSensitive = sensitive || isSensitiveInput?.() === true;
     if (decision.action === "line-by-line") {
       // An explicitly emptied preview means "send nothing"; only a missing
       // value falls back to the original clipboard text.
       const lineData = withFinalLineTerminator(normalizeLineEndings(sanitizeTerminalInput(decision.text ?? text)));
       if (!lineData) return;
-      // The dialog await can outlive the captured session: a disconnect or
-      // auto-reconnect clears and later replaces the session ref while the
-      // modal is open. Re-read the live session so the paste is not written
-      // to a defunct backend session; drop it if the session is gone.
-      const currentSessionId = getCurrentSessionId ? getCurrentSessionId() : session;
-      if (!currentSessionId) return;
-      terminalBackend.writeToSession(currentSessionId, lineData, {
-        automated: true,
+      const lineOptions = {
         lineDelayMs: AUTO_RUN_SNIPPET_LINE_DELAY_MS,
-        sensitive,
-      });
+        sensitive: confirmedSensitive,
+      };
+      if (!dispatchTerminalLinePaste(term, lineData, lineOptions)) {
+        terminalBackend.writeToSession(currentSessionId, lineData, {
+          automated: true,
+          ...lineOptions,
+        });
+      }
       // Broadcast mode: peers must mirror the confirmed lines too. The
       // broadcast targets exclude the source session, so this does not
       // double-send to the active session. Skipped when the paste was made
       // at a sensitive prompt: callers guard broadcasts with the live
       // passwordPromptActiveRef, which the dialog await may have cleared,
       // so honor the pre-dialog snapshot here instead.
-      if (!sensitive) {
+      if (!lineOptions.sensitive) {
         onPasteData?.(lineData, { lineDelayMs: AUTO_RUN_SNIPPET_LINE_DELAY_MS });
       }
       scrollToBottomAfterProgrammaticInput?.(lineData);
-      term.focus?.();
       return;
     }
     pasteTextIntoTerminal(term, decision.text ?? text, {
       scrollOnPaste,
       // Same post-await race as above: never fan a sensitive paste out to
       // broadcast peers via onPasteData.
-      onPasteData: sensitive ? undefined : onPasteData,
+      onPasteData: confirmedSensitive ? undefined : onPasteData,
       // Carry the pre-dialog sensitivity snapshot through the normal Send
       // path too: term.paste's input handler recomputes `sensitive` from the
       // live password-prompt ref, which the dialog await may have cleared.
-      sensitive,
+      sensitive: confirmedSensitive,
     });
     return;
   }

@@ -178,6 +178,7 @@ import {
 } from "./terminalOutputPipeline";
 import {
   markExpectedTerminalCursorPositionReport,
+  registerTerminalLinePasteHandler,
   shouldBroadcastTerminalUserInput,
   shouldOverrideTerminalUserPasteSensitivity,
   shouldSuppressTerminalInputScrollForUserPaste,
@@ -1204,6 +1205,9 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       logicalData?: string | null;
       /** Skip string broadcast when peers will re-resolve from a key chord. */
       skipBroadcast?: boolean;
+      /** Confirmed serial paste: preserve classification and backend pacing. */
+      sensitive?: boolean;
+      lineDelayMs?: number;
       /**
        * Send plain text as one write per character. Strict bastion prompts
        * (QAX) treat one channel write as a keystroke and drop multi-character
@@ -1242,6 +1246,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     // open, so the live ref alone would downgrade the secret to nonsensitive.
     // The override is consumed only for the flagged paste data.
     const sensitive = ctx.passwordPromptActiveRef?.current === true
+      || options?.sensitive === true
       || shouldOverrideTerminalUserPasteSensitivity(term, logicalData ?? data);
     let handledSubmittedInput = false;
     const submittedInput: { text: string; lineEnding: "\r\n" | "\r" | "\n" } | null =
@@ -1341,16 +1346,27 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         ctx.serialLineMode &&
         ctx.serialLineBufferRef
       ) {
+        const pacedWrites: string[] = [];
         handleSerialLineModeInput(dataToWrite, {
           bufferRef: ctx.serialLineBufferRef,
           localEcho: ctx.serialLocalEcho,
           writeToSession: (nextData) => {
             ctx.onOutputTriggerUserInputRef?.current?.(nextData);
-            ctx.terminalBackend.writeToSession(id, nextData, { sensitive });
+            if (options?.lineDelayMs) pacedWrites.push(nextData);
+            else ctx.terminalBackend.writeToSession(id, nextData, { sensitive });
           },
           writeToTerminal: writeLocalTerminalData,
           term,
         });
+        // Submit one batch so the backend spaces the lines apart. Separate
+        // calls would each start at delay zero and lose the paste pacing.
+        if (pacedWrites.length > 0) {
+          ctx.terminalBackend.writeToSession(id, pacedWrites.join(""), {
+            automated: true,
+            sensitive,
+            lineDelayMs: options?.lineDelayMs,
+          });
+        }
       } else {
         // Character mode sends input immediately. Byte-oriented devices opt in
         // to expansion in the backend, using the session's actual wire encoder.
@@ -2581,6 +2597,12 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   ctx.container.addEventListener("input", markKittyTextInput, true);
   textarea?.addEventListener("blur", clearKittyTransientInputState);
 
+  const disposeLinePasteHandler = ctx.host.protocol === "serial" && ctx.serialLineMode && ctx.serialLineBufferRef
+    ? registerTerminalLinePasteHandler(term, (data, options) => {
+      handleTerminalInputData(data, { ...options, skipBroadcast: true });
+    })
+    : undefined;
+
   term.onData((data) => {
     const win32Input = win32InputModePendingEvent;
     if (
@@ -3026,6 +3048,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     recordSerialSnippetInput,
     dispose: () => {
       runtimeDisposed = true;
+      disposeLinePasteHandler?.();
       resizeScheduler.dispose();
       webglController.dispose();
       term.element?.removeEventListener("copy", handleNativeCopy, true);

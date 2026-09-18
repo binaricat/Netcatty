@@ -14,6 +14,8 @@ export interface MultilinePasteConfirmRequest {
   text: string;
   lineCount: number;
   charCount: number;
+  /** Restore the originating terminal's focus after the modal releases it. */
+  onClose?: () => void;
 }
 
 export interface MultilinePasteConfirmResponse {

@@ -522,6 +522,7 @@ test("multi-line paste confirmation can send line by line with delay", async () 
   // clears the password prompt: the sensitive classification must be taken
   // before the dialog opens, not re-evaluated at send time.
   let passwordPromptActive = true;
+  let onClose: (() => void) | undefined;
 
   await handleTerminalClipboardPaste({
     isLocalConnection: false,
@@ -529,7 +530,8 @@ test("multi-line paste confirmation can send line by line with delay", async () 
     confirmMultilinePaste: {
       enabled: true,
       minLines: 2,
-      requestConfirm: async () => {
+      requestConfirm: async (info) => {
+        onClose = info.onClose;
         passwordPromptActive = false;
         return { action: "line-by-line", text: "conf t\r\nint gi0/0" };
       },
@@ -562,8 +564,66 @@ test("multi-line paste confirmation can send line by line with delay", async () 
   assert.deepEqual(broadcast, []);
   assert.deepEqual(scrolled, ["conf t\nint gi0/0\r"]);
   assert.deepEqual(pasted, []);
+  assert.equal(focused, false);
+  onClose?.();
   assert.equal(focused, true);
 });
+
+for (const action of ["send", "line-by-line"] as const) {
+  test(`${action} drops a confirmed paste when the source disconnects`, async () => {
+    let sessionId: string | null = "session-1";
+    await handleTerminalClipboardPaste({
+      isLocalConnection: false,
+      sessionId,
+      getCurrentSessionId: () => sessionId,
+      confirmMultilinePaste: {
+        enabled: true, minLines: 2,
+        requestConfirm: async () => {
+          sessionId = null;
+          return { action };
+        },
+      },
+      readClipboardText: async () => "one\ntwo",
+      onPasteData: () => assert.fail("disconnected source must not broadcast"),
+      terminalBackend: { writeToSession: () => assert.fail("disconnected source must not write") },
+      term: { paste: () => assert.fail("disconnected source must not paste"), scrollToBottom() {} },
+    });
+  });
+
+  test(`${action} preserves a password prompt that appears during confirmation`, async () => {
+    const { shouldOverrideTerminalUserPasteSensitivity } = await import("./runtime/terminalUserPaste");
+    let sensitive = false;
+    let sent = false;
+    const term = {
+      paste(data: string) {
+        // xterm normalizes pasted line endings before delivering onData.
+        assert.equal(shouldOverrideTerminalUserPasteSensitivity(term, data.replace(/\n/g, "\r")), true);
+        sent = true;
+      },
+      scrollToBottom() {},
+    };
+    await handleTerminalClipboardPaste({
+      isLocalConnection: false, sessionId: "session-1", term,
+      isSensitiveInput: () => sensitive,
+      confirmMultilinePaste: {
+        enabled: true, minLines: 2,
+        requestConfirm: async () => {
+          sensitive = true;
+          return { action };
+        },
+      },
+      readClipboardText: async () => "secret\nsecond secret",
+      onPasteData: () => assert.fail("new password prompt must suppress broadcast"),
+      terminalBackend: {
+        writeToSession(_id, _data, options) {
+          assert.equal(options?.sensitive, true);
+          sent = true;
+        },
+      },
+    });
+    assert.equal(sent, true);
+  });
+}
 
 test("line-by-line send converts a single trailing LF to CR so the last line is submitted", async () => {
   const writes: Array<{ data: string; options?: { lineDelayMs?: number } }> = [];
