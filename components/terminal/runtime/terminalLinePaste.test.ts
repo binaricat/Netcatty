@@ -16,16 +16,20 @@ const start = source.indexOf("let lastInputWasPrintable =");
 const end = source.indexOf("  let kittyCompositionPending", start);
 const registrationStart = source.indexOf("  const pendingLinePastes =");
 const registrationEnd = source.indexOf("  term.onData(", registrationStart);
+const urgentStart = source.indexOf("        clearTerminalInputStateForInterrupt({");
+const urgentEnd = source.indexOf("        const interruptEventForKitty", urgentStart);
+const urgentCode = "\nconst urgent = () => { const id = ctx.sessionRef.current; const interruptTrace = undefined; "
+  + source.slice(urgentStart, urgentEnd) + "\n};";
 const code = ts.transpileModule(
   source.slice(start, end) + source.slice(registrationStart, registrationEnd)
-    + "\nglobalThis.api = { input: handleTerminalInputData, dispose: () => { disposeLinePasteHandler(); disposePasteWriteReceipts?.(); pendingLinePastes.clear(); } };",
+    + urgentCode + "\nglobalThis.api = { urgent, input: handleTerminalInputData, dispose: () => { disposeLinePasteHandler(); disposePasteWriteReceipts?.(); pendingLinePastes.clear(); } };",
   { compilerOptions: { target: ts.ScriptTarget.ES2022 } },
 ).outputText;
 const helpers = await Promise.all([
   "../../../domain/serialCharMetrics.ts", "./terminalReportSequence.ts", "./terminalInputSanitize.ts",
   "./terminalBackspaceInput.ts", "./terminalPerCharacterInput.ts",
   "./terminalSudoAutofill.ts", "./terminalCommandExecution.ts",
-  "./serialLocalEcho.ts", "../autocomplete/terminalStringCellWidth.ts",
+  "./terminalInterruptInputState.ts", "./serialLocalEcho.ts", "../autocomplete/terminalStringCellWidth.ts",
   "./shiftEnterText.ts", "./serialLineInput.ts", "./telnetLocalEcho.ts",
 ].map(path => import(new URL(path, import.meta.url).href)));
 
@@ -35,9 +39,9 @@ for (const [protocol, lineMode, sensitive] of [
   ["ssh", false, false], ["ssh", false, true], ["local", false, false],
   ["mosh", false, false], ["et", false, false], ["plugin:example", false, false],
 ] as const) {
-  for (const completion of ["pending-manual", "pending-clear", "pending-ack", "blocked-first", "failed-first", "complete", "manual", "interrupt", "replacement", "password-ref", "password-screen", "output", "serial-text", "serial-backspace", "serial-clear", "serial-arrow", "serial-delete", "serial-report"] as const) {
+  for (const completion of ["late-urgent", "filtered-first", "pending-manual", "pending-clear", "pending-ack", "blocked-first", "failed-first", "complete", "manual", "interrupt", "replacement", "password-ref", "password-screen", "output", "serial-text", "serial-backspace", "serial-clear", "serial-arrow", "serial-delete", "serial-report"] as const) {
   if (completion.startsWith("serial-") && !lineMode) continue;
-  if (completion.startsWith("pending-") && sensitive) continue;
+  if ((completion.startsWith("pending-") || completion === "filtered-first") && sensitive) continue;
   test(`${completion}: ${protocol} confirmed line paste consumes pending text with pacing (lineMode=${lineMode}, sensitive=${sensitive})`, async (t) => {
     t.mock.timers.enable({ apis: ["setTimeout"] });
     const wire: string[] = [];
@@ -52,6 +56,7 @@ for (const [protocol, lineMode, sensitive] of [
     const outputTriggers: string[] = [];
     const recorded: string[] = [];
     let recorderInput = "";
+    const queuedReceipts: unknown[] = [];
     let receiptListener: ((event: unknown) => void) | undefined;
     const writes: Array<{ data: string; sensitive?: boolean; lineDelayMs?: number; automated?: boolean }> = [];
     let rejectPaste = false;
@@ -62,14 +67,18 @@ for (const [protocol, lineMode, sensitive] of [
       } } };
     bridge.init({
       sessions: new Map([["serial-1", session]]),
-      terminalDataPipeline: completion.startsWith("pending-") ? {
+      terminalDataPipeline: completion.startsWith("pending-") || completion === "filtered-first" ? {
         has: () => true,
         interceptInput(_id: string, data: string) {
+          if (completion === "filtered-first") return data.includes("version") ? "" : data;
           if (rejectPaste && !releaseFirst) return new Promise<string>(resolve => { releaseFirst = () => resolve(data); });
           return data;
         },
       } : undefined,
-      electronModule: { webContents: { fromId: () => ({ send(channel: string, event: unknown) { if (channel === "netcatty:paste-write") receiptListener?.(event); } }) } },
+      electronModule: { webContents: { fromId: () => ({ send(channel: string, event: unknown) { if (channel === "netcatty:paste-write") {
+        if (completion === "late-urgent") queuedReceipts.push(event);
+        else receiptListener?.(event);
+      } } }) } },
     });
     const ctx = {
       host: { protocol, id: "h", label: "h" }, sessionId: "tab-1",
@@ -118,12 +127,12 @@ for (const [protocol, lineMode, sensitive] of [
         ? { isWrapped: false, translateToString: () => liveLine } : undefined } },
     };
     const env = {
-      ...Object.assign({}, ...helpers), ...userPaste, ctx, term, crypto, logger: { warn() {} },
+      ...Object.assign({}, ...helpers), ...userPaste, ctx, term, crypto, isPluginHostProtocol: () => false, logger: { warn() {} },
       netcattyBridge: { get: () => ({ onTerminalPasteWrite: (listener: typeof receiptListener) => { receiptListener = listener; return () => { receiptListener = undefined; }; } }) },
       suppressNextTerminalDataBroadcast: false, handlingKittyBroadcast: false,
       prioritizeTerminalInput() {}, getFlowControllerForTerm: () => null,
       scrollToBottomAfterInput() {}, writeLocalTerminalData: (data: string) => echo.push(data),
-      api: undefined as unknown as { input: (data: string) => void; dispose: () => void },
+      api: undefined as unknown as { urgent: () => void; input: (data: string) => void; dispose: () => void },
     };
     vm.runInNewContext(code, env);
     t.after(() => env.api.dispose());
@@ -143,6 +152,26 @@ for (const [protocol, lineMode, sensitive] of [
       },
       onPasteData: data => { broadcast.push(data); return true; },
     });
+    if (completion === "late-urgent") {
+      ctx.isBroadcastEnabledRef.current = false;
+      env.api.urgent();
+      env.api.input("show new draft");
+      for (const receipt of queuedReceipts.splice(0)) receiptListener?.(receipt);
+      assert.equal(ctx.commandBufferRef.current, "show new draft");
+      if (lineMode) assert.equal(ctx.serialLineBufferRef.current, "show new draft");
+      env.api.input("\r");
+      if (lineMode) assert.equal(wire.at(-1), "show new draft\r");
+      return;
+    }
+    if (completion === "filtered-first") {
+      t.mock.timers.tick(250);
+      await new Promise(resolve => setImmediate(resolve));
+      assert.deepEqual(wire, lineMode ? ["show clock\r"] : ["show ", "show clock\r"]);
+      assert.equal(ctx.commandBufferRef.current, "show ");
+      if (lineMode) assert.equal(ctx.serialLineBufferRef.current, "show ");
+      assert.deepEqual(history, ["show clock"]);
+      return;
+    }
     if (completion.startsWith("pending-")) {
       assert.equal(ctx.commandBufferRef.current, "show ");
       assert.deepEqual(history, []);

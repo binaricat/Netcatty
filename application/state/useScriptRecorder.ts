@@ -247,15 +247,15 @@ export function useScriptRecorder(sessionId: string | undefined) {
     const isCurrent = () => generation === recordingGenerationRef.current
       && sid === sessionIdRef.current && isRecordingRef.current
       && !isPausedRef.current && !isStoppingRef.current;
-    return (line: string, options?: { sensitive?: boolean; includePendingInput?: boolean }): Promise<void> => {
+    return (line: string, options?: { sensitive?: boolean; includePendingInput?: boolean; consumePendingInput?: boolean }): Promise<void> => {
       // Capturing a batch is not a write. Retain its prefix if no receipt
-      // arrives; on the first write remove only the still-owned prefix.
-      if (!consumed && generation === recordingGenerationRef.current && sid === sessionIdRef.current
+      // arrives; only its prefixed first line can consume the still-owned draft.
+      if (options?.consumePendingInput !== false && !consumed && generation === recordingGenerationRef.current && sid === sessionIdRef.current
         && revision === inputRevisionRef.current && inputBufferRef.current.startsWith(pendingInput)) {
         inputBufferRef.current = inputBufferRef.current.slice(pendingInput.length);
         inputRevisionRef.current += 1;
       }
-      consumed = true;
+      if (options?.consumePendingInput !== false) consumed = true;
       if (!isCurrent()) return Promise.resolve();
       return recordEnter({ sensitive: options?.sensitive, submittedLine: options?.includePendingInput ? `${pendingInput}${line}` : line });
     };

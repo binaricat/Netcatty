@@ -999,6 +999,9 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   autocompleteAcceptTextRef.current = (text: string) => {
     const id = sessionRef.current;
     if (id && text) {
+      if (["\r", "\n", "\b", "\x7f", "\x15"].some(control => text.includes(control))) {
+        xtermRuntimeRef.current?.invalidatePendingPasteDraft();
+      }
       const sensitive = passwordPromptActiveRef.current;
       let textToWrite = text;
       let handledSubmittedInput = false;

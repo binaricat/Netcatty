@@ -499,9 +499,10 @@ test("paced recording uses its captured prefix and never imports text typed whil
       steps.length = 0;
       recorder.recordInput("prefix for a dropped first line");
       const lineRecorder = recorder.captureSubmittedLineRecorder()!;
-      await lineRecorder("second was sent");
+      await lineRecorder("second was sent", { consumePendingInput: false });
+      await recorder.recordEnter();
     });
-    assert.deepEqual(steps.filter(step => step.type === "send").map(step => step.value), ["second was sent"]);
+    assert.deepEqual(steps.filter(step => step.type === "send").map(step => step.value), ["second was sent", "prefix for a dropped first line"]);
   } finally {
     await act(async () => renderer.unmount());
   }

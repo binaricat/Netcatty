@@ -252,6 +252,7 @@ export type XTermRuntime = {
   dispose: () => void;
   /** Track the pending final line of a serial snippet left for editing. */
   recordSerialSnippetInput: (data: string) => void;
+  invalidatePendingPasteDraft: () => void;
   /** Current working directory detected via OSC 7 */
   currentCwd: string | undefined;
   keywordHighlighter: KeywordHighlighter;
@@ -365,7 +366,7 @@ export type CreateXTermRuntimeContext = {
     recordBackspace: () => void;
     recordClearLine: () => void;
     recordEnter: (options?: { sensitive?: boolean }) => Promise<void>;
-    captureSubmittedLineRecorder?: () => ((line: string, options?: { sensitive?: boolean; includePendingInput?: boolean }) => Promise<void>) | undefined;
+    captureSubmittedLineRecorder?: () => ((line: string, options?: { sensitive?: boolean; includePendingInput?: boolean; consumePendingInput?: boolean }) => Promise<void>) | undefined;
   } | undefined>;
   passwordPromptActiveRef?: RefObject<boolean>;
   allowHostStyleGreaterThanPrompt?: boolean;
@@ -1170,6 +1171,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   // moved away from the tail, so we conservatively assume it is not).
   let lastInputWasPrintable = !ctx.commandBufferRef?.current;
   let commandBufferRevision = 0;
+  const invalidatePendingPasteDraft = () => { commandBufferRevision += 1; };
 
   const restoreSerialTailForEmptyInput = (data: string) => {
     // Apply the same rule to typed text, pasted text, and editable snippets.
@@ -2161,6 +2163,8 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
           onAutocompleteInput: ctx.onAutocompleteInput,
         });
         lastInputWasPrintable = true;
+        invalidatePendingPasteDraft();
+        ctx.scriptRecorderRef?.current?.recordClearLine();
         if (ctx.passwordPromptActiveRef) {
           ctx.passwordPromptActiveRef.current = false;
         }
@@ -2780,7 +2784,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     inputRevision: number;
     sensitive: boolean;
     recorded: Set<number>;
-    recordLine?: (line: string, options?: { sensitive?: boolean; includePendingInput?: boolean }) => Promise<void>;
+    recordLine?: (line: string, options?: { sensitive?: boolean; includePendingInput?: boolean; consumePendingInput?: boolean }) => Promise<void>;
   }>();
   const disposePasteWriteReceipts = netcattyBridge.get()?.onTerminalPasteWrite?.((receipt) => {
     const pending = pendingLinePastes.get(receipt.requestId);
@@ -2792,7 +2796,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     const index = receipt.index;
     if (index !== undefined && Number.isInteger(index) && index >= 0
       && index < pending.commands.length && !pending.recorded.has(index)) {
-      if (pending.recorded.size === 0 && pending.inputRevision === commandBufferRevision
+      if (index === 0 && pending.inputRevision === commandBufferRevision
         && ctx.commandBufferRef.current.startsWith(pending.pendingInput)) {
         ctx.commandBufferRef.current = ctx.commandBufferRef.current.slice(pending.pendingInput.length);
         if (pending.serialPendingInput !== undefined && ctx.serialLineBufferRef?.current.startsWith(pending.serialPendingInput)) {
@@ -2814,7 +2818,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         acknowledgedWrite: true,
       });
       void pending.recordLine?.(index === 0 ? pending.firstPastedLine : command, {
-        sensitive, includePendingInput: index === 0,
+        sensitive, includePendingInput: index === 0, consumePendingInput: index === 0,
       }).catch((error) => {
         logger.warn("Failed to record confirmed paste write", error);
       });
@@ -3288,6 +3292,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     getKittyKeyboardProtocolEnabled: () => kittyKeyboardProtocolEnabled,
     setKittyKeyboardProtocolEnabled,
     recordSerialSnippetInput,
+    invalidatePendingPasteDraft,
     dispose: () => {
       runtimeDisposed = true;
       disposeLinePasteHandler?.();
