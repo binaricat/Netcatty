@@ -159,7 +159,7 @@ test("runtime routes Shift+Enter text through the shared input handler", () => {
   );
   assert.match(
     source,
-    /const hasForwardedWin32KeyDown = win32InputModeForwardedKeys\.delete\(\s*win32LookupIdentity,?\s*\);[\s\S]*if \(term\.modes\.win32InputMode\) \{[\s\S]*releaseForwardedKittyPress\([\s\S]*if \(!hasForwardedWin32KeyDown\) \{[\s\S]*win32InputModePendingEvent = null;[\s\S]*return false;[\s\S]*logicalData: null,[\s\S]*return true;[\s\S]*releaseForwardedKittyPress/s,
+    /const hasForwardedWin32KeyDown = win32InputModeForwardedKeys\.delete\(identity\);[\s\S]*if \(term\.modes\.win32InputMode\) \{[\s\S]*releaseForwardedKittyPress\([\s\S]*if \(!hasForwardedWin32KeyDown\) \{[\s\S]*win32InputModePendingEvent = null;[\s\S]*return false;[\s\S]*logicalData: null,[\s\S]*return true;[\s\S]*releaseForwardedKittyPress/s,
   );
   assert.match(
     source,

@@ -1786,7 +1786,6 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       // key they consumed (or drop the keyup), and an exact key match left the
       // deferral armed so every later keypress was swallowed (#3103).
       let releaseEvent: KeyboardEvent = e;
-      let aliasedReleaseIdentity: string | undefined;
       if (
         imeTextInputDeferredKey !== null &&
         shouldFlushDeferredImeTextInputOnKeyUp(imeTextInputDeferredKey, e)
@@ -1813,36 +1812,23 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
           releaseForwardedKittyPress({ ...deferredKittyEvent, type: "keyup" });
         }
       }
-      // A ⌘. interrupt press was recorded under its normalized Ctrl+C
-      // identity; pair the physical Period release from the stored event
-      // instead of leaving the press unmatched (#3408). The release must
-      // delete the press under its dedicated key so an outstanding physical
-      // KeyC press is left intact (#3409).
+      // Release the normalized interrupt separately: the same physical key
+      // may already have a forwarded press from before Command was held.
+      // Keep the saved layout-independent event rather than translating KeyC
+      // through the current keyboard layout again.
       const aliasedRelease = resolveKittyNormalizedPressRelease(e);
-      if (aliasedRelease) {
-        releaseEvent = {
-          ...aliasedRelease.event,
-          type: "keyup",
-        } as unknown as KeyboardEvent;
-        aliasedReleaseIdentity = aliasedRelease.identity;
-      }
-      // The aliased ⌘. release must be looked up under the physical key's
-      // identity: the interrupt keydown was consumed by the shortcut and
-      // never handed to ConPTY, so the rewritten KeyC identity must not
-      // consume an outstanding physical KeyC press's Win32 entry (which
-      // would release C natively and drop the real C keyup later), and the
-      // aliased interrupt release must stay orphaned (#3409).
-      const physicalIdentity = kittyKeyIdentity(e);
+      const releasedInterrupt = aliasedRelease !== null && releaseForwardedKittyPress(
+        { ...aliasedRelease.event, type: "keyup" },
+        aliasedRelease.identity,
+      );
       const identity = kittyKeyIdentity(releaseEvent);
-      const win32LookupIdentity =
-        aliasedReleaseIdentity !== undefined ? physicalIdentity : identity;
-      const hasForwardedWin32KeyDown = win32InputModeForwardedKeys.delete(win32LookupIdentity);
+      const hasForwardedWin32KeyDown = win32InputModeForwardedKeys.delete(identity);
       if (broadcastLegacyDataPending === identity) clearBroadcastLegacyDataPending();
       if (term.modes.win32InputMode) {
         // Broadcast peers may still need a paired Kitty release for a keydown
         // consumed by a Netcatty action (notably the urgent Ctrl+C path).
-        releaseForwardedKittyPress(toKittyKeyboardEvent(releaseEvent), aliasedReleaseIdentity);
-        kittyForwardedKeys.delete(win32LookupIdentity);
+        releaseForwardedKittyPress(toKittyKeyboardEvent(releaseEvent));
+        kittyForwardedKeys.delete(identity);
         // Only let xterm emit a Win32 key-up when its matching keydown was
         // previously handed to xterm. Netcatty shortcuts, sudo controls and
         // autocomplete consume their keydown and must not leak an orphaned
@@ -1857,7 +1843,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         };
         return true;
       }
-      if (releaseForwardedKittyPress(toKittyKeyboardEvent(releaseEvent), aliasedReleaseIdentity)) {
+      if (releaseForwardedKittyPress(toKittyKeyboardEvent(releaseEvent)) || releasedInterrupt) {
         e.preventDefault();
         e.stopPropagation();
         return false;

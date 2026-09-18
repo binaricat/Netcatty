@@ -1053,11 +1053,8 @@ test("⌘. interrupt press is keyed apart from an outstanding physical KeyC pres
   );
   // The aliased Period keyup releases the interrupt press under its dedicated
   // key, leaving the physical KeyC press entry intact.
-  assert.match(source, /aliasedReleaseIdentity = aliasedRelease\.identity/);
-  assert.match(
-    source,
-    /releaseForwardedKittyPress\(toKittyKeyboardEvent\(releaseEvent\), aliasedReleaseIdentity\)/,
-  );
+  assert.match(source, /\{ \.\.\.aliasedRelease\.event, type: "keyup" \},\s*aliasedRelease\.identity/);
+  assert.match(source, /releaseForwardedKittyPress\(toKittyKeyboardEvent\(releaseEvent\)\) \|\| releasedInterrupt/);
   // The dedicated identity crosses the broadcast boundary: peers key their
   // pairing state from it, so the interrupt cannot collapse with an
   // outstanding physical KeyC press on legacy or Kitty peers (#3409).
@@ -1074,17 +1071,9 @@ test("⌘. interrupt press is keyed apart from an outstanding physical KeyC pres
     source,
     /\{ kind: "key", event, keyIdentity: identity \}/,
   );
-  // The aliased release's Win32 lookup uses the physical key's identity so it
-  // neither consumes the held KeyC's native pairing nor leaks a native Ctrl+C
-  // keyup for a keydown ConPTY never received (#3409).
-  assert.match(
-    source,
-    /const win32LookupIdentity =\s*aliasedReleaseIdentity !== undefined \? physicalIdentity : identity;/,
-  );
-  assert.match(
-    source,
-    /const hasForwardedWin32KeyDown = win32InputModeForwardedKeys\.delete\(win32LookupIdentity\);/,
-  );
+  // Native keyups retain the physical event even after releasing an alias.
+  assert.match(source, /const hasForwardedWin32KeyDown = win32InputModeForwardedKeys\.delete\(identity\);/);
+
 });
 
 test("⌘. interrupt yields to a user-assigned snippet or shortcut chord (#3409)", async () => {
