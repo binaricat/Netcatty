@@ -745,3 +745,29 @@ test("multi-line paste confirmation skipped when the gate is disabled", async ()
 
   assert.deepEqual(pasted, ["line1\nline2\nline3"]);
 });
+
+for (const [preview, expected] of [
+  ["\ufeffshow\u200b run\r\nshow version", "show run\nshow version\r"],
+  ["echo 👩\u200d💻\u200c\n", "echo 👩\u200d💻\u200c\r"],
+  ["\ufeff\u200b", ""],
+]) {
+  test(`line-by-line paste sanitizes preview ${JSON.stringify(preview)}`, async () => {
+    const writes: string[] = [];
+    const broadcasts: string[] = [];
+    await handleTerminalClipboardPaste({
+      isLocalConnection: false,
+      confirmMultilinePaste: {
+        enabled: true,
+        minLines: 2,
+        requestConfirm: async () => ({ action: "line-by-line", text: preview }),
+      },
+      readClipboardText: async () => "first\nsecond",
+      sessionId: "session-1",
+      terminalBackend: { writeToSession: (_id, data) => { writes.push(data); } },
+      onPasteData: (data) => { broadcasts.push(data); },
+      term: { paste: () => assert.fail("must use delayed writes"), scrollToBottom: () => {} },
+    });
+    assert.deepEqual(writes, expected ? [expected] : []);
+    assert.deepEqual(broadcasts, expected ? [expected] : []);
+  });
+}

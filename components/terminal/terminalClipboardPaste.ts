@@ -7,6 +7,7 @@ import {
 } from "./clipboardImagePaste";
 import { extractRootPathsFromClipboardFiles, AUTO_RUN_SNIPPET_LINE_DELAY_MS } from "./terminalHelpers";
 import { pasteTextIntoTerminal } from "./runtime/terminalUserPaste";
+import { sanitizeTerminalInput } from "./runtime/terminalInputSanitize";
 import {
   getMultilinePasteInfo,
   shouldConfirmMultilinePaste,
@@ -149,7 +150,7 @@ export async function pasteTextWithMultilineConfirm(
     if (decision.action === "line-by-line") {
       // An explicitly emptied preview means "send nothing"; only a missing
       // value falls back to the original clipboard text.
-      const lineData = withFinalLineTerminator(normalizeLineEndings(decision.text ?? text));
+      const lineData = withFinalLineTerminator(normalizeLineEndings(sanitizeTerminalInput(decision.text ?? text)));
       if (!lineData) return;
       // The dialog await can outlive the captured session: a disconnect or
       // auto-reconnect clears and later replaces the session ref while the
