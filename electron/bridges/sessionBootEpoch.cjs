@@ -112,6 +112,10 @@ function disposeDisplacedSessionResources(session, sessionId) {
   if (!session || session._displacedDisposed) return;
   session._displacedDisposed = true;
   try { session.zmodemSentry?.cancel?.(); } catch { /* ignore */ }
+  // A displaced auto-login detector's expiry timer must not fire: its
+  // onIncomplete callback would otherwise report against the replacement
+  // session that now owns the registry slot.
+  try { session.autoLogin?.cancel?.(); } catch { /* ignore */ }
   try { session.discardPendingData?.(); } catch { /* ignore */ }
   try { session.releaseTelnetGeneration?.(); } catch { /* ignore */ }
   // Exit handlers for Mosh/ET/serial bail out once the registry no longer

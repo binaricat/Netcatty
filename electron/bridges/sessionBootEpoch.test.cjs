@@ -85,6 +85,21 @@ test("claimSessionSlot replaces an older boot epoch and marks it superseded", ()
   }
 });
 
+test("claimSessionSlot cancels the displaced session's auto-login detector", () => {
+  const sessions = new Map();
+  let cancelCalls = 0;
+  const older = {
+    bootEpoch: 1,
+    autoLogin: { cancel() { cancelCalls += 1; } },
+  };
+  sessions.set("s1", older);
+  const newer = {};
+  const result = claimSessionSlot(sessions, "s1", newer, 4);
+  assert.equal(result.ok, true);
+  assert.equal(sessions.get("s1"), newer);
+  assert.equal(cancelCalls, 1);
+});
+
 test("sessionMatchesBootEpoch ignores closes for a different generation", () => {
   assert.equal(sessionMatchesBootEpoch({ bootEpoch: 3 }, 1), false);
   assert.equal(sessionMatchesBootEpoch({ bootEpoch: 3 }, 3), true);

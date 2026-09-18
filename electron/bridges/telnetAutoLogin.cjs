@@ -81,8 +81,11 @@ function createTelnetAutoLogin(options = {}) {
   const write = typeof options.write === "function" ? options.write : () => {};
   const onComplete = typeof options.onComplete === "function" ? options.onComplete : () => {};
   const onUserInput = typeof options.onUserInput === "function" ? options.onUserInput : () => {};
+  const onIncomplete = typeof options.onIncomplete === "function" ? options.onIncomplete : () => {};
   const now = typeof options.now === "function" ? options.now : Date.now;
   const timeoutMs = Number.isFinite(options.timeoutMs) ? options.timeoutMs : DEFAULT_TIMEOUT_MS;
+  const setTimer = typeof options.setTimeout === "function" ? options.setTimeout : (fn, ms) => setTimeout(fn, ms);
+  const clearTimer = typeof options.clearTimeout === "function" ? options.clearTimeout : (id) => clearTimeout(id);
 
   let tail = "";
   let sentWake = false;
@@ -91,12 +94,21 @@ function createTelnetAutoLogin(options = {}) {
   let disabled = !hasCredentials;
   let completed = false;
   let userInputNotified = false;
+  let incompleteNotified = false;
+  let expiryTimer;
   const startedAt = now();
 
   const isExpired = () => timeoutMs >= 0 && now() - startedAt > timeoutMs;
+  const clearExpiryTimer = () => {
+    if (expiryTimer) {
+      clearTimer(expiryTimer);
+      expiryTimer = undefined;
+    }
+  };
   const complete = () => {
     if (completed) return;
     completed = true;
+    clearExpiryTimer();
     onComplete();
   };
   const hasSentCredentials = () => sentPassword || sentUsername;
@@ -114,11 +126,49 @@ function createTelnetAutoLogin(options = {}) {
     userInputNotified = true;
     onUserInput();
   };
+  // The exchange stalled: credentials were sent but the device still sits at
+  // a login/password prompt the detector cannot answer. Callers use this to
+  // avoid blindly running post-login actions against the pending prompt.
+  const notifyIncomplete = () => {
+    if (incompleteNotified || completed) return;
+    incompleteNotified = true;
+    onIncomplete();
+  };
+  // The expiry must not depend on the device sending more bytes: a device
+  // that rejects the saved credentials, reprints Login/Password and then goes
+  // silent never triggers the handleText-after-expiry check below, so without
+  // a timer the incomplete state is never reported and callers would blindly
+  // type their startup command into the pending login prompt.
+  const handleExpiry = () => {
+    expiryTimer = undefined;
+    if (completed || disabled) return;
+    disabled = true;
+    if (hasSentCredentials() && (isUsernamePrompt(tail) || isPasswordPrompt(tail))) {
+      notifyIncomplete();
+    }
+  };
+  if (timeoutMs >= 0) {
+    expiryTimer = setTimer(handleExpiry, timeoutMs);
+    // Do not keep the process alive just for this timer.
+    expiryTimer?.unref?.();
+  }
 
   return {
     handleText(text) {
-      if (disabled || isExpired()) {
+      if (isExpired()) {
         disabled = true;
+        // Keep observing output after expiry: a slow-booting device can
+        // surface its first Login/Password prompt after the window elapsed
+        // without any credentials having been sent. Report the pending
+        // prompt so callers can cancel deferred post-login actions instead
+        // of blindly typing them into it. Credentials are never sent here.
+        tail = `${tail}${text || ""}`.slice(-TAIL_LIMIT);
+        if (isUsernamePrompt(tail) || isPasswordPrompt(tail)) {
+          notifyIncomplete();
+        }
+        return;
+      }
+      if (disabled) {
         return;
       }
 
@@ -147,10 +197,27 @@ function createTelnetAutoLogin(options = {}) {
         sendLine(password);
         completeIfReady();
       }
+
+      // No password is configured but the device is now asking for one: the
+      // exchange cannot proceed on its own. Report the stall so callers do
+      // not schedule post-login actions that would be consumed as the
+      // password. The detector stays enabled: if the device moves on to a
+      // command prompt, completeIfReady can still fire.
+      if (!disabled && !completed && !hasPassword && isPasswordPrompt(tail)) {
+        notifyIncomplete();
+      }
     },
     handleUserInput() {
       disabled = true;
+      clearExpiryTimer();
       notifyUserInput();
+    },
+    // Tear down the detector without emitting anything: used when the owning
+    // session is displaced by a reconnect, so the stale expiry timer can no
+    // longer fire onIncomplete against the replacement session.
+    cancel() {
+      disabled = true;
+      clearExpiryTimer();
     },
   };
 }

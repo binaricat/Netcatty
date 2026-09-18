@@ -84,3 +84,12 @@ test("suppresses network deviceType for ET sessions", () => {
   );
   assert.equal(info.deviceType, undefined);
 });
+
+test("prefers a session custom name over the shared host label", () => {
+  const info = buildAITerminalSessionInfo(
+    baseSession({ customName: "Bastion - production" }),
+    baseHost({ label: "Bastion" }),
+    "linux",
+  );
+  assert.equal(info.label, "Bastion - production");
+});

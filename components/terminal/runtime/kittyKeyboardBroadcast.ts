@@ -19,6 +19,12 @@ export type KittyKeyboardBroadcastInput =
       event: KittyKeyboardEvent;
       fallbackToLegacy?: boolean;
       urgentInterrupt?: boolean;
+      /**
+       * Pairing identity for peers whose state is keyed by correlation id
+       * rather than the event's physical code. Defaults to the event's code
+       * so ordinary key broadcasts are unchanged.
+       */
+      keyIdentity?: string;
     }
   | {
       kind: "win32";
@@ -196,6 +202,10 @@ export const flushKittyKeyboardBroadcastReleases = (
     pending.delete(identity);
     forward({
       kind: "key",
+      // Keep the identity the press was recorded under so a peer whose
+      // pairing diverges from the event's physical code (e.g. a Command+Period interrupt
+      // normalized to Ctrl+C) still pairs this synthetic release (#3409).
+      keyIdentity: identity,
       event: createKittyKeyboardSyntheticRelease(
         forwardedPress.event,
         Array.from(pending.values(), (pendingPress) => pendingPress.event),
@@ -309,7 +319,7 @@ export const resolveKittyKeyboardBroadcastInput = (
     }, options);
   }
 
-  const identity = input.event.code || input.event.key;
+  const identity = input.keyIdentity ?? (input.event.code || input.event.key);
   const legacySuppressedKeys = options.legacySuppressedKeys ?? options.encodedKeys;
   const hasPairedKeyDown = input.event.type === "keyup"
     ? options.encodedKeys.delete(identity)

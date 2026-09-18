@@ -108,6 +108,7 @@ export const ruVaultMessages: Messages = {
   'vault.hosts.export.toast.success': 'Экспортировано {count} хостов в CSV',
   'vault.hosts.export.toast.successWithSkipped': 'Экспортировано {count} хостов в CSV ({skipped} неподдерживаемых хостов пропущено)',
   'vault.hosts.export.toast.passphrasesSkipped': 'Не удалось прочитать {count} сохранённых парольных фраз ключей; они оставлены пустыми',
+  'vault.hosts.export.toast.proxyCredentialsSkipped': 'Не удалось прочитать {count} сохранённых паролей прокси; они оставлены пустыми',
   'vault.hosts.export.toast.noHosts': 'Нет хостов для экспорта',
   'vault.hosts.allHosts': 'Все хосты',
   'vault.hosts.pinned': 'Закреплённые',

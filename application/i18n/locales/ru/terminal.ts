@@ -121,6 +121,7 @@ export const ruTerminalMessages: Messages = {
   'terminal.statusbar.reconnect.tooltip': 'Переподключить эту сессию',
   'terminal.serverStats.cpu': 'Использование CPU',
   'terminal.serverStats.cpuCores': 'Использование ядер CPU',
+  'terminal.serverStats.gpu': 'Использование GPU',
   'terminal.serverStats.memory': 'Использование памяти',
   'terminal.serverStats.memoryDetails': 'Сведения о памяти',
   'terminal.serverStats.memUsed': 'Использовано',
@@ -841,6 +842,10 @@ export const ruTerminalMessages: Messages = {
   'serial.field.configLabelPlaceholder': 'например, Arduino Uno',
   'serial.connectAndSave': 'Подключить и сохранить',
   'serial.edit.title': 'Настройки последовательного порта',
+  'serial.field.username': 'Имя пользователя',
+  'serial.field.password': 'Пароль',
+  'serial.field.autoLoginDesc': 'Если задано, запросы Login/Password в последовательной консоли автоматически заполняются этими сохранёнными учётными данными.',
+  'serial.field.clearPassword': 'Очистить сохранённый пароль',
 
   // Keyboard Interactive Authentication (2FA/MFA)
   'keyboard.interactive.title': 'Требуется аутентификация',

@@ -1,10 +1,10 @@
-/* eslint-disable no-control-regex -- Terminal protocol replies intentionally contain ESC and BEL. */
-// Renderer counterpart of electron/bridges/terminalReportSequence.cjs.
-// Keep both report-family recognizers aligned; parity is checked in tests.
-// Terminal-originated automatic replies travel through xterm's public onData
-// event alongside user input. Keep the current xterm report families on the
-// host-owned bypass path so plugins cannot rewrite terminal negotiation.
-export function isTerminalReportSequence(data: string) {
+/* eslint-disable no-control-regex -- classification is intentionally byte-level */
+
+// Renderer-side twin of electron/bridges/terminalReportSequence.cjs. Keep the
+// two classifiers in sync: terminal-originated automatic replies (DA1, CPR,
+// DSR, mode reports, ...) travel through xterm's public onData event alongside
+// real user input, and callers must not treat them as user keystrokes.
+function isTerminalReportSequence(data: string): boolean {
   if (typeof data !== "string" || data.length === 0) return false;
   // Focus in/out reports: ESC [ I  /  ESC [ O
   if (data === "\x1b[I" || data === "\x1b[O") return true;
@@ -23,3 +23,6 @@ export function isTerminalReportSequence(data: string) {
   return false;
 }
 
+export { isTerminalReportSequence };
+
+/* eslint-enable no-control-regex */

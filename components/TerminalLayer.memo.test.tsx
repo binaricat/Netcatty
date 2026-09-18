@@ -306,3 +306,8 @@ test("TerminalLayer re-renders when terminalFontFamilyId changes", () => {
     false,
   );
 });
+
+test("local shell auto-open preferences invalidate terminal layer memo", () => {
+  assert.equal(terminalLayerAreEqual(baseProps as never, { ...baseProps, localShellSidePanelAutoOpen: true } as never), false);
+  assert.equal(terminalLayerAreEqual(baseProps as never, { ...baseProps, localShellSidePanelAutoOpenTab: "sftp" } as never), false);
+});

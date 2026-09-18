@@ -252,6 +252,8 @@ export function AppSideEffects() {
     runSnippet,
     getOrderedWorkTabs,
     toggleBroadcast,
+    toggleGlobalBroadcast,
+    canUseGlobalBroadcast,
     logViews,
     closeLogView,
     copySession,
@@ -906,6 +908,8 @@ export function AppSideEffects() {
   // array thrash does not rebuild appTerminalDomain (see domain isolation).
   const sessionsRef = useRef(sessions);
   sessionsRef.current = sessions;
+  const canUseGlobalBroadcastRef = useRef(canUseGlobalBroadcast);
+  canUseGlobalBroadcastRef.current = canUseGlobalBroadcast;
   // Logs live in connectionLogsStore — keep a ref fresh without re-rendering App.
   const connectionLogsRef = useRef(getConnectionLogsSnapshot().connectionLogs);
   useEffect(() => {
@@ -1076,6 +1080,8 @@ export function AppSideEffects() {
       terminalPaneMagnificationRef,
       toEditorTabId,
       toggleBroadcast,
+      toggleGlobalBroadcast,
+      canUseGlobalBroadcast: canUseGlobalBroadcastRef.current,
       toggleScriptsSidePanelRef,
       toggleSidePanelRef,
       toggleWorkspaceViewMode,
@@ -1090,6 +1096,7 @@ export function AppSideEffects() {
     splitSessionWithCurrentShell,
     moveFocusInWorkspace,
     toggleBroadcast,
+    toggleGlobalBroadcast,
     toggleWorkspaceViewMode,
     confirmIfBusyLocalTerminal,
   ]);

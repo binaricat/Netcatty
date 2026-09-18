@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { useCallback } from "react";
 import { deleteVaultKey } from "../../application/defaultKeyPassphrases";
+import { VaultGroupDeletionConfirmationChangedError } from "../../application/state/useVaultGroupDeletion";
 import { usePluginImporterCommit } from "../../application/state/usePluginImporterCommit";
 import { preserveConcurrentHostLineTimestampUpdate } from "../../domain/host";
 import {
@@ -390,6 +391,19 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
         source.groupName === path || source.groupName.startsWith(path + "/"),
     ),
   );
+  const pendingDeleteManagedFiles: string[] = [];
+  for (const source of managedSources) {
+    if (
+      source.filePath
+      && !pendingDeleteManagedFiles.includes(source.filePath)
+      && pendingDeleteGroupPaths.some(
+        (path) =>
+          source.groupName === path || source.groupName.startsWith(path + "/"),
+      )
+    ) {
+      pendingDeleteManagedFiles.push(source.filePath);
+    }
+  }
   const handleNotesOpenHost = useCallback((host: any, source?: { noteId?: string }) => {
     if (source?.noteId && onOpenHostFromNote) {
       onOpenHostFromNote(host, source);
@@ -1654,6 +1668,27 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
                     })
                   )}
                 </p>
+                {pendingDeleteHasManagedGroups && (
+                  <div className="space-y-1 rounded-md border border-destructive/40 bg-destructive/10 p-3">
+                    <p className="text-sm text-destructive">
+                      {t("vault.groups.deleteDialog.managedWarning")}
+                    </p>
+                    {pendingDeleteManagedFiles.length > 0 && (
+                      <div className="max-h-40 space-y-1 overflow-y-auto">
+                        {pendingDeleteManagedFiles.map((filePath) => (
+                          <p
+                            key={filePath}
+                            className="break-all font-mono text-xs text-muted-foreground"
+                          >
+                            {t("vault.groups.deleteDialog.managedFile", {
+                              file: filePath,
+                            })}
+                          </p>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
                 {!pendingDeleteHasManagedGroups && (
                   <label className="flex items-center gap-2 text-sm cursor-pointer">
                     <input
@@ -1692,7 +1727,9 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
                       isBulkDelete ? selectedHostIds : new Set<string>(),
                     );
                   } catch (error) {
-                    toast.error(error instanceof Error ? error.message : t("common.error"));
+                    toast.error(error instanceof VaultGroupDeletionConfirmationChangedError
+                      ? t("vault.groups.deleteDialog.sourcesChanged")
+                      : error instanceof Error ? error.message : t("common.error"));
                     return;
                   }
                   if (isBulkDelete) {

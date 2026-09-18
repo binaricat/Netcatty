@@ -21,6 +21,7 @@ const {
 } = require("./ai/commandSafety.cjs");
 const { execViaPty, startPtyJob, execViaChannel, execViaRawPty } = require("./ai/ptyExec.cjs");
 const { safeSend } = require("./ipcUtils.cjs");
+const { emitTerminalSessionData } = require("./emitTerminalSessionData.cjs");
 const { getCliDiscoveryFilePath } = require("../cli/discoveryPath.cjs");
 const { EXTERNAL_MCP_CHAT_SESSION_ID } = require("../cli/externalMcpDiscoveryPath.cjs");
 const sftpBridge = require("./sftpBridge.cjs");
@@ -487,6 +488,10 @@ function shutdownHost({ preserveScopedMetadata = false } = {}) {
 function echoCommandToSession(session, sessionId, command, { syntheticEcho = true } = {}) {
   if (!electronModule || !session?.webContentsId || !command) return;
   const contents = electronModule.webContents?.fromId?.(session.webContentsId);
+  if (!syntheticEcho) {
+    emitTerminalSessionData(contents, sessionId, formatSyntheticEcho(command), { session });
+    return;
+  }
   safeSend(contents, "netcatty:data", {
     sessionId,
     data: formatSyntheticEcho(command),

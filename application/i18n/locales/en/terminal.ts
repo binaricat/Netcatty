@@ -100,6 +100,7 @@ export const enTerminalMessages: Messages = {
   'terminal.statusbar.reconnect.tooltip': 'Reconnect this session',
   'terminal.serverStats.cpu': 'CPU Usage',
   'terminal.serverStats.cpuCores': 'CPU Core Usage',
+  'terminal.serverStats.gpu': 'GPU Usage',
   'terminal.serverStats.memory': 'Memory Usage',
   'terminal.serverStats.memoryDetails': 'Memory Details',
   'terminal.serverStats.memUsed': 'Used',
@@ -834,6 +835,10 @@ export const enTerminalMessages: Messages = {
   'serial.field.configLabelPlaceholder': 'e.g. Arduino Uno',
   'serial.connectAndSave': 'Connect & Save',
   'serial.edit.title': 'Serial Port Settings',
+  'serial.field.username': 'Username',
+  'serial.field.password': 'Password',
+  'serial.field.autoLoginDesc': 'When set, Login/Password prompts on the serial console are answered automatically with these saved credentials.',
+  'serial.field.clearPassword': 'Clear saved password',
 
   // Keyboard Interactive Authentication (2FA/MFA)
   'keyboard.interactive.title': 'Authentication Required',

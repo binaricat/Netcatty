@@ -16,6 +16,12 @@ const { createExternalMcpCodexSetup } = require("./externalMcp/codexSetup.cjs");
 const { createExternalMcpClaudeSetup } = require("./externalMcp/claudeSetup.cjs");
 const { createExternalMcpGrokSetup } = require("./externalMcp/grokSetup.cjs");
 const {
+  readBundledNetcattySkillContent,
+} = require("./externalMcp/netcattySkillInstaller.cjs");
+const {
+  buildUniversalSetupPrompt,
+} = require("./externalMcp/universalSetupPrompt.cjs");
+const {
   DEFAULT_SESSION_IDLE_TIMEOUT_MINUTES,
   normalizeSessionIdleTimeoutMinutes,
 } = require("./mcpServerBridge/sessionIdleManager.cjs");
@@ -51,6 +57,8 @@ function createExternalMcpController(options = {}) {
     createCodexSetup: options.createCodexSetup || createExternalMcpCodexSetup,
     createClaudeSetup: options.createClaudeSetup || createExternalMcpClaudeSetup,
     createGrokSetup: options.createGrokSetup || createExternalMcpGrokSetup,
+    readSkillContent: options.readSkillContent || readBundledNetcattySkillContent,
+    buildUniversalSetupPrompt: options.buildUniversalSetupPrompt || buildUniversalSetupPrompt,
     randomBytes: options.randomBytes || ((size) => crypto.randomBytes(size)),
     Date: options.Date || Date,
     setTimeout: options.setTimeout || setTimeout,
@@ -506,6 +514,27 @@ function createExternalMcpController(options = {}) {
     return await grokSetup.addToGrok();
   }
 
+  async function getUniversalSetupPrompt() {
+    try {
+      const skillContent = await deps.readSkillContent();
+      return {
+        ok: true,
+        prompt: deps.buildUniversalSetupPrompt({
+          launcherPath: deps.getLauncherPath() || "",
+          discoveryPath: discoveryFilePath || "",
+          skillContent,
+        }),
+        error: null,
+      };
+    } catch (promptError) {
+      return {
+        ok: false,
+        prompt: "",
+        error: promptError?.message || String(promptError),
+      };
+    }
+  }
+
   function registerHandlers(ipcMain, validateSender) {
     const guard = typeof validateSender === "function"
       ? validateSender
@@ -522,6 +551,10 @@ function createExternalMcpController(options = {}) {
     ipcMain.handle("netcatty:external-mcp:set-config", async (event, payload) => {
       if (!guard(event)) return { ok: false, error: "Unauthorized IPC sender" };
       return setConfig(payload || {});
+    });
+    ipcMain.handle("netcatty:external-mcp:get-universal-setup-prompt", async (event) => {
+      if (!guard(event)) return { ok: false, error: "Unauthorized IPC sender" };
+      return await getUniversalSetupPrompt();
     });
     ipcMain.handle("netcatty:external-mcp:codex:get-status", async (event) => {
       if (!guard(event)) return { ok: false, error: "Unauthorized IPC sender" };
@@ -568,6 +601,7 @@ function createExternalMcpController(options = {}) {
     addToClaude,
     getGrokStatus,
     addToGrok,
+    getUniversalSetupPrompt,
     EXTERNAL_MCP_CHAT_SESSION_ID: deps.chatSessionId,
   };
 }

@@ -931,6 +931,10 @@ export const zhCNTerminalMessages: Messages = {
   'serial.field.configLabelPlaceholder': '例如 Arduino Uno',
   'serial.connectAndSave': '连接并保存',
   'serial.edit.title': '串口设置',
+  'serial.field.username': '用户名',
+  'serial.field.password': '密码',
+  'serial.field.autoLoginDesc': '设置后，串口终端出现 Login/Password 登录提示时，会自动填充此处保存的用户名和密码。',
+  'serial.field.clearPassword': '清除已保存的密码',
 
   // Keyboard Interactive Authentication (2FA/MFA)
   'keyboard.interactive.title': '需要验证',

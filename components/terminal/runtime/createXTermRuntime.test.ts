@@ -1029,3 +1029,62 @@ test("multi-character plain text goes out as per-character writes (#3077)", asyn
   assert.match(writeSite, /ctx\.onOutputTriggerUserInputRef\?\.current\?\.\(outData\)/);
   assert.match(source, /onBroadcastInput\?\.\(broadcastData, ctx\.sessionId\)/);
 });
+
+test("Command+Period interrupt press is keyed apart from an outstanding physical KeyC press (#3409)", async () => {
+  const { readFileSync } = await import("node:fs");
+  const source = readFileSync(new URL("./createXTermRuntime.ts", import.meta.url), "utf8");
+
+  // The normalized Ctrl+C press shares its event identity with a possibly
+  // outstanding physical KeyC press, so it must be recorded under a dedicated
+  // map key: upserting under "KeyC" replaced the held key's press and the
+  // Period keyup deleted that shared entry while C was still down.
+  assert.match(
+    source,
+    /const pressIdentity =\s*macCommandPeriodInterrupt\s*\?\s*kittyNormalizedPressIdentity\(identity\)\s*:\s*identity,?/,
+  );
+  assert.match(source, /kittyNormalizedPressAliases\.set\(kittyKeyIdentity\(e\), pressIdentity\)/);
+  assert.match(
+    source,
+    /upsertKittyKeyboardForwardedPress\(\s*kittyForwardedKeys,\s*pressIdentity,/,
+  );
+  assert.match(
+    source,
+    /upsertKittyKeyboardForwardedPress\(\s*broadcastForwardedKeys,\s*pressIdentity,/,
+  );
+  // The aliased Period keyup releases the interrupt press under its dedicated
+  // key, leaving the physical KeyC press entry intact.
+  assert.match(source, /\{ \.\.\.aliasedRelease\.event, type: "keyup" \},\s*aliasedRelease\.identity/);
+  assert.match(source, /releaseForwardedKittyPress\(toKittyKeyboardEvent\(releaseEvent\)\) \|\| releasedInterrupt/);
+  // The dedicated identity crosses the broadcast boundary: peers key their
+  // pairing state from it, so the interrupt cannot collapse with an
+  // outstanding physical KeyC press on legacy or Kitty peers (#3409).
+  assert.match(
+    source,
+    /broadcastKittyInput\(\{\s*kind: "key",\s*event: kittyEvent,\s*keyIdentity: pressIdentity,\s*\}\)/,
+  );
+  assert.match(
+    source,
+    /broadcastKittyInput\(\{\s*kind: "legacy",\s*data: "\\x03",\s*keyIdentity: pressIdentity,/,
+  );
+  // The paired release carries the identity the press was recorded under.
+  assert.match(
+    source,
+    /\{ kind: "key", event, keyIdentity: identity \}/,
+  );
+  // Native keyups retain the physical event even after releasing an alias.
+  assert.match(source, /const hasForwardedWin32KeyDown = win32InputModeForwardedKeys\.delete\(identity\);/);
+
+});
+
+test("Command+Period interrupt yields to a user-assigned snippet or shortcut chord (#3409)", async () => {
+  const { readFileSync } = await import("node:fs");
+  const source = readFileSync(new URL("./createXTermRuntime.ts", import.meta.url), "utf8");
+
+  // The snippet/app-shortcut editors accept Command+Period (their conflict checks only
+  // cover configured bindings), so the hard-coded interrupt must give a
+  // configured chord precedence instead of silently swallowing it (#3409).
+  assert.match(
+    source,
+    /const macCommandPeriodInterrupt =\s*isMacPlatform\(\)\s*&& isMacCommandPeriodInterruptChord\(e\)\s*&& !\(ctx\.snippetsRef\?\.current \?\? \[\]\)\.some\(\(snippet\) => \(\s*snippet\.shortkey && matchesKeyBinding\(e, snippet\.shortkey, isMac\)\s*\)\)\s*&& !\(currentScheme !== "disabled"\s*&& checkAppShortcut\(e, ctx\.keyBindingsRef\.current, isMac\) !== null\);/,
+  );
+});

@@ -14,7 +14,7 @@ const compile = (source: string) => ts.transpileModule(source, { compilerOptions
 const broadcastStart = layer.indexOf("  const handleBroadcastInput = useCallback(");
 const broadcastEnd = layer.indexOf("  const handleCommandSubmitted", broadcastStart);
 const pluginStart = runtime.indexOf('        if (isPluginHostProtocol(ctx.host.protocol) && ctx.terminalBackend.signalPluginConnection)');
-const pluginEnd = runtime.indexOf("        const kittyEvent", pluginStart);
+const pluginEnd = runtime.indexOf("        const interruptEventForKitty", pluginStart);
 const hookStart = backend.indexOf("  const interruptSession = useCallback(");
 const hookEnd = backend.indexOf("  const resizeSession", hookStart);
 

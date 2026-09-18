@@ -91,6 +91,21 @@ test("listMcpTools includes host_open for external MCP clients", () => {
   assert.equal(hostOpen.publicRpcMethod, "public/vault/hosts/open");
 });
 
+test("core MCP descriptions strongly route live terminal work through Netcatty", () => {
+  const tools = listMcpTools();
+  const environment = tools.find((tool) => tool.mcpTool === "get_environment");
+  const execute = tools.find((tool) => tool.mcpTool === "terminal_execute");
+  const start = tools.find((tool) => tool.mcpTool === "terminal_start");
+  const vaultHosts = tools.find((tool) => tool.mcpTool === "vault_hosts_list");
+
+  assert.match(environment?.description || "", /Call this first/i);
+  assert.match(environment?.description || "", /label or hostname/i);
+  assert.match(execute?.description || "", /instead of the local shell/i);
+  assert.match(execute?.description || "", /get_environment first/i);
+  assert.match(start?.description || "", /instead of the local shell/i);
+  assert.match(vaultHosts?.description || "", /host_open/i);
+});
+
 test("session_close is exposed to agents and external MCP clients", () => {
   const mcpTool = listMcpTools().find((tool) => tool.mcpTool === "session_close");
   assert.ok(mcpTool);

@@ -1,6 +1,11 @@
 "use strict";
 
 const { runBoundedCliCommand } = require("./boundedCliCommand.cjs");
+const {
+  getNetcattySkillStatus,
+  installNetcattySkill,
+  resolveUserHomeDir,
+} = require("./netcattySkillInstaller.cjs");
 
 const EXTERNAL_MCP_CODEX_NAME = "netcatty-external";
 const {
@@ -178,6 +183,9 @@ function createExternalMcpCodexSetup(options = {}) {
     prepareCommandForSpawn: options.prepareCommandForSpawn || loadShellUtils().prepareCommandForSpawn,
     spawn: options.spawn || require("node:child_process").spawn,
     stripAnsi: options.stripAnsi || loadShellUtils().stripAnsi,
+    runCodexCommand: options.runCodexCommand || null,
+    getSkillStatus: options.getSkillStatus || getNetcattySkillStatus,
+    installSkill: options.installSkill || installNetcattySkill,
   };
 
   function getManualCommand(cliPath) {
@@ -204,6 +212,9 @@ function createExternalMcpCodexSetup(options = {}) {
   }
 
   async function runCodex(codexPath, shellEnv, args) {
+    if (deps.runCodexCommand) {
+      return await deps.runCodexCommand(codexPath, shellEnv, args);
+    }
     return await runBoundedCliCommand(deps, codexPath, args, { env: shellEnv });
   }
 
@@ -245,9 +256,27 @@ function createExternalMcpCodexSetup(options = {}) {
         discoveryEnv: deps.discoveryEnv,
         commandExecutable,
       });
+      if (status.state === "configured") {
+        const skillStatus = await deps.getSkillStatus({
+          client: "codex",
+          homeDir: resolveUserHomeDir(shellEnv),
+        });
+        return {
+          ...status,
+          mcpConfigured: true,
+          skillInstalled: skillStatus.installed,
+          skillPath: skillStatus.skillPath,
+          state: skillStatus.installed ? "configured" : "not_configured",
+          ...(!skillStatus.installed && skillStatus.reason
+            ? { skillError: skillStatus.reason }
+            : {}),
+        };
+      }
       return {
         ...status,
         command: getManualCommand(commandExecutable),
+        mcpConfigured: false,
+        skillInstalled: false,
       };
     } catch (error) {
       return {
@@ -280,7 +309,17 @@ function createExternalMcpCodexSetup(options = {}) {
       };
     }
 
+    let installingSkill = false;
+    let mcpConfigured = Boolean(status.mcpConfigured);
     try {
+      if (status.mcpConfigured) {
+        installingSkill = true;
+        await deps.installSkill({
+          client: "codex",
+          homeDir: resolveUserHomeDir(shellEnv),
+        });
+        return await getStatus();
+      }
       if (status.existingCommand) {
         await runCodex(codexPath, shellEnv, ["mcp", "remove", EXTERNAL_MCP_CODEX_NAME]);
       }
@@ -300,6 +339,12 @@ function createExternalMcpCodexSetup(options = {}) {
           error: summarizeFailure(addResult, `Codex exited with code ${addResult.exitCode ?? "unknown"}`),
         };
       }
+      mcpConfigured = true;
+      installingSkill = true;
+      await deps.installSkill({
+        client: "codex",
+        homeDir: resolveUserHomeDir(shellEnv),
+      });
       return await getStatus();
     } catch (error) {
       return {
@@ -309,7 +354,11 @@ function createExternalMcpCodexSetup(options = {}) {
         launcherPath: deps.launcherPath,
         command: getManualCommand(commandExecutable),
         existingCommand: null,
-        error: error?.message || String(error),
+        mcpConfigured,
+        skillInstalled: false,
+        error: installingSkill
+          ? `Failed to install the Netcatty Codex skill: ${error?.message || String(error)}`
+          : (error?.message || String(error)),
       };
     }
   }

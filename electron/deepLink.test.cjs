@@ -92,6 +92,137 @@ test("collectSshDeepLinkQueueItems keeps PuTTY CLI launches when scheme URLs are
   );
 });
 
+test("collectPuttyStyleDeepLinkUrls converts SecureCRT-style argv", () => {
+  assert.deepEqual(
+    collectPuttyStyleDeepLinkUrls([
+      String.raw`C:\Program Files\Netcatty\Netcatty.exe`,
+      "/SSH2",
+      "/L",
+      "alice",
+      "/P",
+      "2222",
+      "/PASSWORD",
+      "s3cret",
+      "10.0.0.8",
+    ]),
+    { ssh: ["ssh://alice:s3cret@10.0.0.8:2222"], telnet: [] },
+  );
+});
+
+test("collectPuttyStyleDeepLinkUrls routes SecureCRT /TELNET to the telnet queue", () => {
+  assert.deepEqual(
+    collectPuttyStyleDeepLinkUrls([
+      "Netcatty.exe",
+      "/TELNET",
+      "old.example.com",
+      "/P",
+      "2323",
+    ]),
+    { ssh: [], telnet: ["telnet://old.example.com:2323"] },
+  );
+});
+
+test("collectSshDeepLinkQueueItems keeps SecureCRT CLI launches when scheme URLs are disabled", () => {
+  assert.deepEqual(
+    collectSshDeepLinkQueueItems([
+      "Netcatty.exe",
+      "/SSH2",
+      "/L",
+      "alice",
+      "/P",
+      "2222",
+      "/PASSWORD",
+      "s3cret",
+      "10.0.0.8",
+    ], { includeSchemeUrls: false }),
+    { ssh: [{ rawUrl: "ssh://alice:s3cret@10.0.0.8:2222", viaCommandLine: true }], telnet: [] },
+  );
+});
+
+test("collectPuttyStyleDeepLinkUrls connects SecureCRT launches whose password looks like a scheme URL", () => {
+  // (#3391) A /PASSWORD value starting with ssh:// must never win the
+  // scheme-token early return: the whole CLI launch would be dropped.
+  assert.deepEqual(
+    collectPuttyStyleDeepLinkUrls([
+      "Netcatty.exe",
+      "/SSH2",
+      "/L",
+      "alice",
+      "/PASSWORD",
+      "ssh://s3cret",
+      "10.0.0.8",
+    ]),
+    { ssh: ["ssh://alice:ssh%3A%2F%2Fs3cret@10.0.0.8"], telnet: [] },
+  );
+});
+
+test("collectSshDeepLinkQueueItems does not queue SecureCRT password values as scheme links", () => {
+  // (#3391) With scheme handling enabled, the password operand must not be
+  // queued as a standalone ssh:// link to host "s3cret".
+  assert.deepEqual(
+    collectSshDeepLinkQueueItems([
+      "Netcatty.exe",
+      "/SSH2",
+      "/L",
+      "alice",
+      "/PASSWORD",
+      "ssh://s3cret",
+      "10.0.0.8",
+    ], { includeSchemeUrls: true }),
+    { ssh: [{ rawUrl: "ssh://alice:ssh%3A%2F%2Fs3cret@10.0.0.8", viaCommandLine: true }], telnet: [] },
+  );
+});
+
+test("collectSshDeepLinkQueueItems filters password operands even when the SecureCRT parse fails", () => {
+  // (#3391) `/P 99999` makes the launch unparseable, but the /PASSWORD value
+  // was already consumed as a credential: it must not be queued as a
+  // standalone ssh:// link to host "s3cret".
+  assert.deepEqual(
+    collectSshDeepLinkQueueItems([
+      "Netcatty.exe",
+      "/SSH2",
+      "/PASSWORD",
+      "ssh://s3cret",
+      "/P",
+      "99999",
+      "10.0.0.8",
+    ], { includeSchemeUrls: true }),
+    { ssh: [], telnet: [] },
+  );
+});
+
+test("collectSshDeepLinkQueueItems keeps genuine scheme links alongside a failed SecureCRT parse", () => {
+  // A failed parse must only filter credential operands, not every consumed
+  // index, so genuine scheme links in the same argv still queue.
+  assert.deepEqual(
+    collectSshDeepLinkQueueItems([
+      "Netcatty.exe",
+      "/SSH2",
+      "/PASSWORD",
+      "s3cret",
+      "/P",
+      "99999",
+      "10.0.0.8",
+      "ssh://bob@example.com",
+    ], { includeSchemeUrls: true }),
+    { ssh: [{ rawUrl: "ssh://bob@example.com", viaCommandLine: false }], telnet: [] },
+  );
+});
+
+for (const url of ["ssh://bob@example.com", "ssh://example.com", "telnet://example.com", " ssh://bob@example.com "]) {
+  test(`standalone scheme link ${url} never inherits SecureCRT credentials`, () => {
+    const argv = ["Netcatty.exe", "/SSH2", "/L", "alice", "/PASSWORD",
+      "secret", "10.0.0.8", url];
+    const protocol = new URL(url).protocol === "ssh:" ? "ssh" : "telnet";
+    const expected = { ssh: [], telnet: [] };
+    expected[protocol].push({ rawUrl: url, viaCommandLine: false });
+    assert.deepEqual(collectSshDeepLinkQueueItems(argv), expected);
+    assert.deepEqual(collectSshDeepLinkQueueItems(argv, { includeSchemeUrls: false }), {
+      ssh: [], telnet: [],
+    });
+  });
+}
+
 test("collectSshDeepLinkQueueItems keeps scheme URL gating separate from CLI launches", () => {
   const queueItems = collectSshDeepLinkQueueItems(
     ["/Applications/Netcatty.app/Contents/MacOS/Netcatty", "ssh://alice@example.com"],
@@ -513,4 +644,57 @@ test("applyInitialJmsDeepLinkPreference does not warn when disabled startup remo
   assert.deepEqual(result, { enabled: false, success: false });
   assert.equal(cleared, false);
   assert.equal(warnings.length, 0);
+});
+
+for (const flag of ["/L", "/P", "/PASSWORD", "/PASSPHRASE", "/AUTH", "/I", "/S", "/N", "/TITLEBAR", "/LOG", "/LOGAPPEND", "/FIREWALL", "/FWFIREWALL", "/PROXY"]) {
+  for (const scheme of ["ssh", "telnet", "jms"]) {
+    test(`malformed SecureCRT launch filters ${flag} ${scheme} operands`, () => {
+      const argv = ["Netcatty.exe", "/SSH2", "/P", "99999", flag,
+        `${scheme}://option-value`, "real.example.com"];
+      assert.deepEqual(collectSshDeepLinkQueueItems(argv), { ssh: [], telnet: [] });
+      assert.deepEqual(collectJmsDeepLinkUrls(argv), []);
+    });
+  }
+}
+
+test("failed SecureCRT launch cannot reinterpret its password as a PuTTY switch", () => {
+  const argv = ["Netcatty.exe", "/SSH2", "/L", "alice", "/P", "99999", "/PASSWORD", "-ssh", "server.example.com"];
+  assert.deepEqual(collectSshDeepLinkQueueItems(argv), { ssh: [], telnet: [] });
+});
+
+for (const password of ["/SSH2", "/TELNET", "/PASSWORD", "/PASSPHRASE"]) {
+  test(`PuTTY password ${password} does not select SecureCRT parsing`, () => {
+    assert.deepEqual(collectSshDeepLinkQueueItems([
+      "Netcatty.exe", "-ssh", "-l", "alice", "-P", "2222", "-pw", password, "server.example.com",
+    ]), { ssh: [{ rawUrl: `ssh://alice:${encodeURIComponent(password)}@server.example.com:2222`, viaCommandLine: true }], telnet: [] });
+  });
+}
+
+test("flag-shaped SecureCRT passwords do not consume genuine scheme links", () => {
+  assert.deepEqual(collectSshDeepLinkQueueItems([
+    "Netcatty.exe", "/SSH2", "/PASSWORD", "/L", "ssh://bob@example.com",
+  ]), { ssh: [{ rawUrl: "ssh://bob@example.com", viaCommandLine: false }], telnet: [] });
+});
+
+test("ambiguous SecureCRT destinations are rejected instead of guessing a host", () => {
+  for (const names of [["Device", "bastion"], ["device.example.com", "bastion"]]) {
+    assert.deepEqual(collectSshDeepLinkQueueItems([
+      "Netcatty.exe", "/T", names[0], "/SSH2", names[1], "/L", "alice", "/PASSWORD", "secret",
+    ]), { ssh: [], telnet: [] });
+  }
+});
+
+test("SecureCRT launches reject mixed single-dash client switches", () => {
+  for (const flag of ["-serial", "-raw", "-telnet", "-ssh", "-unknown"]) {
+    assert.deepEqual(collectSshDeepLinkQueueItems([
+      "Netcatty.exe", "/SSH2", flag, "host", "/L", "alice", "/PASSWORD", "secret",
+    ]), { ssh: [], telnet: [] });
+  }
+});
+
+test("SecureCRT launches preserve dash-shaped values and Electron switches", () => {
+  assert.deepEqual(collectSshDeepLinkQueueItems([
+    "Netcatty.exe", "--original-process-start-time=1", "/SSH2", "host",
+    "/TITLEBAR", "-serial", "/L", "-raw", "/PASSWORD", "-telnet",
+  ]), { ssh: [{ rawUrl: "ssh://-raw:-telnet@host", viaCommandLine: true }], telnet: [] });
 });

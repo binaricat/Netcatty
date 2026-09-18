@@ -1,5 +1,5 @@
 import React from 'react';
-import { Activity, ArrowDownToLine, ArrowUpFromLine, Cpu, HardDrive, MemoryStick } from 'lucide-react';
+import { Activity, ArrowDownToLine, ArrowUpFromLine, Cpu, Gpu, HardDrive, MemoryStick } from 'lucide-react';
 
 import { useI18n } from '../../application/i18n/I18nProvider';
 import { cn } from '../../lib/utils';
@@ -122,6 +122,29 @@ export const TerminalServerStats: React.FC<TerminalServerStatsProps> = ({
                     </div>
                   </HoverCardContent>
                 </HoverCard>
+                {/* GPU — only rendered when the remote reports NVIDIA GPU data (Linux nvidia-smi) */}
+                {serverStats.gpu !== null && (
+                  <div
+                    className="flex items-center gap-0.5 min-w-0 shrink"
+                    aria-label={t("terminal.serverStats.gpu")}
+                    title={
+                      [
+                        serverStats.gpuName,
+                        serverStats.gpuMemUsed !== null && serverStats.gpuMemTotal !== null && serverStats.gpuMemTotal > 0
+                          ? `VRAM ${(serverStats.gpuMemUsed / 1024).toFixed(1)}/${(serverStats.gpuMemTotal / 1024).toFixed(1)}G`
+                          : null,
+                      ].filter(Boolean).join(' · ') || undefined
+                    }
+                  >
+                    <Gpu size={10} className="flex-shrink-0" />
+                    <span className="truncate">
+                      {serverStats.gpu}%
+                      {serverStats.gpuMemUsed !== null && serverStats.gpuMemTotal !== null && serverStats.gpuMemTotal > 0
+                        ? ` (${(serverStats.gpuMemUsed / 1024).toFixed(1)}/${(serverStats.gpuMemTotal / 1024).toFixed(1)}G)`
+                        : ''}
+                    </span>
+                  </div>
+                )}
                 {/* Memory with HoverCard for htop-style bar and top processes */}
                 <HoverCard openDelay={200} closeDelay={100}>
                   <HoverCardTrigger asChild>

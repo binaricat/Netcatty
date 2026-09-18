@@ -280,3 +280,228 @@ test("telnet auto-login works with Kylin V10 Input Password prompt from issue #1
 
   assert.deepEqual(writes, ["lybing\r", "secret\r"]);
 });
+
+test("telnet auto-login notifies incomplete when the device asks for a password that is not saved", () => {
+  const writes = [];
+  let completed = false;
+  let incomplete = 0;
+  const autoLogin = createTelnetAutoLogin({
+    username: "admin",
+    write: (data) => writes.push(data),
+    onComplete: () => { completed = true; },
+    onIncomplete: () => { incomplete += 1; },
+  });
+
+  autoLogin.handleText("Username: ");
+  autoLogin.handleText("\r\nPassword: ");
+
+  assert.deepEqual(writes, ["admin\r"]);
+  assert.equal(completed, false);
+  assert.equal(incomplete, 1);
+
+  // The detector stays alive: if the device moves on to a command prompt the
+  // exchange can still complete.
+  autoLogin.handleText("\r\nrouter# ");
+
+  assert.equal(completed, true);
+  assert.equal(incomplete, 1);
+});
+
+test("telnet auto-login notifies incomplete when the window expires mid-exchange", () => {
+  let clock = 0;
+  let incomplete = 0;
+  const autoLogin = createTelnetAutoLogin({
+    username: "admin",
+    password: "secret",
+    write: () => {},
+    now: () => clock,
+    timeoutMs: 60_000,
+    onIncomplete: () => { incomplete += 1; },
+  });
+
+  autoLogin.handleText("Username: ");
+  autoLogin.handleText("\r\nPassword: ");
+  // Login failed: the device re-prompts and the detector cannot recover.
+  autoLogin.handleText("\r\nUsername: ");
+  assert.equal(incomplete, 0);
+
+  clock = 60_001;
+  autoLogin.handleText("\r\nUsername: ");
+  assert.equal(incomplete, 1);
+
+  // Idempotent: further chunks after expiry do not re-notify.
+  autoLogin.handleText("more output");
+  assert.equal(incomplete, 1);
+});
+
+test("telnet auto-login does not notify incomplete for quiet devices", () => {
+  let clock = 0;
+  let incomplete = 0;
+  const autoLogin = createTelnetAutoLogin({
+    username: "admin",
+    write: () => {},
+    now: () => clock,
+    timeoutMs: 60_000,
+    onIncomplete: () => { incomplete += 1; },
+  });
+
+  autoLogin.handleText("\r\nWelcome banner\r\n");
+  clock = 60_001;
+  autoLogin.handleText("\r\nmore banner");
+
+  // Quiet devices never interact, so the caller's quiet-device fallback
+  // remains valid.
+  assert.equal(incomplete, 0);
+});
+
+test("telnet auto-login owns an expiry timer: rejected login gone silent reports incomplete", () => {
+  let incomplete = 0;
+  let timerFn = null;
+  const autoLogin = createTelnetAutoLogin({
+    username: "admin",
+    password: "secret",
+    write: () => {},
+    timeoutMs: 60_000,
+    onIncomplete: () => { incomplete += 1; },
+    setTimeout: (fn) => {
+      timerFn = fn;
+      return { unref: () => {} };
+    },
+    clearTimeout: () => {},
+  });
+
+  // The device rejects the saved credentials and re-prompts.
+  autoLogin.handleText("Username: ");
+  autoLogin.handleText("\r\nPassword: ");
+  autoLogin.handleText("\r\nUsername: ");
+  // Then it goes silent: no further bytes arrive, so handleText is never
+  // called after expiry. The detector's own timer must report the stall.
+  assert.equal(typeof timerFn, "function");
+  assert.equal(incomplete, 0);
+  timerFn();
+
+  assert.equal(incomplete, 1);
+});
+
+test("telnet auto-login expiry timer stays silent for quiet devices", () => {
+  let incomplete = 0;
+  let timerFn = null;
+  createTelnetAutoLogin({
+    username: "admin",
+    write: () => {},
+    timeoutMs: 60_000,
+    onIncomplete: () => { incomplete += 1; },
+    setTimeout: (fn) => {
+      timerFn = fn;
+      return { unref: () => {} };
+    },
+    clearTimeout: () => {},
+  });
+
+  // No credentials were ever sent, so the caller's quiet-device fallback
+  // (typing the startup command) remains valid.
+  timerFn();
+
+  assert.equal(incomplete, 0);
+});
+
+test("telnet auto-login expiry timer does not fire after a completed exchange", () => {
+  let completed = 0;
+  let incomplete = 0;
+  let timerFn = null;
+  const timers = [];
+  const autoLogin = createTelnetAutoLogin({
+    username: "admin",
+    password: "secret",
+    write: () => {},
+    timeoutMs: 60_000,
+    onComplete: () => { completed += 1; },
+    onIncomplete: () => { incomplete += 1; },
+    setTimeout: (fn) => {
+      timerFn = fn;
+      const id = { unref: () => {} };
+      timers.push(id);
+      return id;
+    },
+    clearTimeout: () => {
+      const index = timers.indexOf(timerFn);
+      if (index >= 0) timers.splice(index, 1);
+    },
+  });
+
+  autoLogin.handleText("Username: ");
+  autoLogin.handleText("\r\nPassword: ");
+  autoLogin.handleText("\r\nrouter# ");
+
+  assert.equal(completed, 1);
+  // The exchange completed; firing a stale timer must be a no-op.
+  timerFn();
+
+  assert.equal(completed, 1);
+  assert.equal(incomplete, 0);
+});
+
+test("cancel() disables the detector and clears the expiry timer", () => {
+  let incomplete = 0;
+  let completed = 0;
+  let timerFn;
+  const timers = [];
+  const autoLogin = createTelnetAutoLogin({
+    username: "admin",
+    password: "secret",
+    write: () => {},
+    timeoutMs: 60_000,
+    onComplete: () => { completed += 1; },
+    onIncomplete: () => { incomplete += 1; },
+    setTimeout: (fn) => {
+      timerFn = fn;
+      const id = { unref: () => {} };
+      timers.push(id);
+      return id;
+    },
+    clearTimeout: (id) => {
+      const index = timers.indexOf(id);
+      if (index >= 0) timers.splice(index, 1);
+    },
+  });
+
+  // Credentials were sent, so a later expiry would report an incomplete
+  // exchange. Cancelling (as when the session is displaced by a reconnect)
+  // must disarm that path entirely.
+  autoLogin.handleText("Username: ");
+  autoLogin.handleText("\r\nPassword: ");
+  autoLogin.cancel();
+
+  timerFn();
+  autoLogin.handleText("\r\nPassword: ");
+
+  assert.equal(completed, 0);
+  assert.equal(incomplete, 0);
+  assert.deepEqual(timers, []);
+});
+
+test("telnet auto-login keeps observing login prompts that arrive after expiry", () => {
+  let clock = 0;
+  let incomplete = 0;
+  const writes = [];
+  const autoLogin = createTelnetAutoLogin({
+    username: "admin",
+    password: "secret",
+    write: (data) => writes.push(data),
+    now: () => clock,
+    timeoutMs: 60_000,
+    onIncomplete: () => { incomplete += 1; },
+  });
+
+  // Slow-booting device: only a banner before the window expires, first
+  // login prompt arrives afterwards.
+  autoLogin.handleText("\r\nWelcome banner\r\n");
+  clock = 60_001;
+  autoLogin.handleText("\r\nUsername: ");
+  autoLogin.handleText("\r\nPassword: ");
+
+  // The pending prompt must be reported so the caller cancels its
+  // deferred startup command; no credentials may be sent after expiry.
+  assert.equal(incomplete, 1);
+  assert.deepEqual(writes, []);
+});

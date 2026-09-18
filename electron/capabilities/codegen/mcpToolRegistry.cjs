@@ -229,8 +229,7 @@ function createToolHandler(toolDef, deps) {
   };
 }
 
-function registerMcpTools(server, deps) {
-  const tools = listMcpTools();
+function registerMcpTools(server, deps, tools = listMcpTools()) {
   for (const toolDef of tools) {
     if (!toolDef.mcpTool || !toolDef.rpcMethod) continue;
     const handler = createToolHandler(toolDef, deps);

@@ -315,6 +315,8 @@ export interface SyncPayload {
     terminalSettings?: Record<string, unknown>;
     terminalSidePanelAutoOpen?: boolean;
     terminalSidePanelAutoOpenTab?: import('./terminalSidePanelAutoOpen').TerminalSidePanelAutoOpenTab;
+    localShellSidePanelAutoOpen?: boolean;
+    localShellSidePanelAutoOpenTab?: import('./terminalSidePanelAutoOpen').TerminalSidePanelAutoOpenTab;
     customTerminalThemes?: Array<{ id: string; name: string; colors: Record<string, string> }>;
     // Keyboard
     customKeyBindings?: Record<string, { mac?: string; pc?: string }>;

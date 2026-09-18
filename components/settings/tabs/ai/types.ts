@@ -178,6 +178,11 @@ export interface NetcattyAiBridge {
     idleTimeoutMinutes?: number;
     sessionIdleTimeoutMinutes?: number;
   }) => Promise<Record<string, unknown>>;
+  externalMcpGetUniversalSetupPrompt?: () => Promise<{
+    ok: boolean;
+    prompt?: string;
+    error?: string | null;
+  }>;
   externalMcpCodexGetStatus?: () => Promise<Record<string, unknown>>;
   externalMcpCodexAdd?: () => Promise<Record<string, unknown>>;
   externalMcpClaudeGetStatus?: () => Promise<Record<string, unknown>>;

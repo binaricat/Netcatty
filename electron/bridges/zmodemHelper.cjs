@@ -130,6 +130,17 @@ function createZmodemSentry(opts) {
   let transferAbortController = null;
   const pendingEchoes = [];
   let pendingTerminalSuppression = null;
+  let pendingTerminalSuppressionAt = 0;
+
+  function setPendingTerminalSuppression(buf) {
+    pendingTerminalSuppression = buf;
+    pendingTerminalSuppressionAt = Date.now();
+  }
+
+  function clearPendingTerminalSuppression() {
+    pendingTerminalSuppression = null;
+    pendingTerminalSuppressionAt = 0;
+  }
   let cancelInterruptTimer = null;
   let ignoreDetectionUntil = 0;
   // After aborting, suppress incoming data briefly so residual ZMODEM
@@ -141,9 +152,21 @@ function createZmodemSentry(opts) {
   const COOLDOWN_MS = 2000;
   const ECHO_TTL_MS = 1500;
   const ECHO_MAX_BYTES = 256;
+  /**
+   * Upper bound on how long a drag-drop echo suppression may stay armed.
+   * The suppression hides the terminal echo of the upload command, whose echo
+   * always precedes the remote rz starting. If the echo never matches (e.g. it
+   * was coalesced with a prompt, or rz is missing and the SFTP fallback kicks
+   * in), a stale suppression would keep stripping matched prefixes from later
+   * terminal output — including the echo of the user's next command (#3423).
+   */
+  const SUPPRESSION_TTL_MS = 5000;
   const dragDropStartTimeoutMs = Number.isFinite(opts.dragDropStartTimeoutMs)
     ? Math.max(0, opts.dragDropStartTimeoutMs)
     : 15000;
+  const pendingTerminalSuppressionTtlMs = Number.isFinite(
+    opts.pendingTerminalSuppressionTtlMs,
+  ) ? opts.pendingTerminalSuppressionTtlMs : SUPPRESSION_TTL_MS;
 
   function prunePendingEchoes(now = Date.now()) {
     while (pendingEchoes.length && pendingEchoes[0].expiresAt <= now) {
@@ -184,6 +207,11 @@ function createZmodemSentry(opts) {
 
   function stripPendingTerminalSuppression(data) {
     if (!pendingTerminalSuppression?.length) return data;
+
+    if (Date.now() - pendingTerminalSuppressionAt > pendingTerminalSuppressionTtlMs) {
+      clearPendingTerminalSuppression();
+      return data;
+    }
 
     let buf = Buffer.isBuffer(data) ? data : Buffer.from(data);
     const fullMatchAt = buf.indexOf(pendingTerminalSuppression);
@@ -303,6 +331,10 @@ function createZmodemSentry(opts) {
       cleanupDragDropTempFiles(dragDropUpload);
       dragDropUpload = null;
     }
+    // A pending upload that never reaches ZMODEM detection (rz missing → SFTP
+    // fallback, cancel, start timeout) must not leave its command-echo
+    // suppression armed, or it will eat the user's next typed command (#3423).
+    clearPendingTerminalSuppression();
   }
 
   function takeDragDropUpload() {
@@ -459,11 +491,11 @@ function createZmodemSentry(opts) {
       active = true;
       const zsession = detection.confirm();
       currentZSession = zsession;
-      pendingTerminalSuppression = zsession.type === "receive"
+      setPendingTerminalSuppression(zsession.type === "receive"
         ? Buffer.from(Zmodem.Header.build("ZRQINIT").to_hex())
         : zsession._last_ZRINIT?.to_hex
           ? Buffer.from(zsession._last_ZRINIT.to_hex())
-          : null;
+          : null);
 
       const transferType = zsession.type === "send" ? "upload" : "download";
 
@@ -706,12 +738,12 @@ function createZmodemSentry(opts) {
       const pendingEchoCount = pendingEchoes.length;
       try {
         rememberOutgoingEcho(cmdBuf);
-        pendingTerminalSuppression = Buffer.from(uploadCommand.replace(/\r$/, ""));
+        setPendingTerminalSuppression(Buffer.from(uploadCommand.replace(/\r$/, "")));
         writeToRemote(cmdBuf);
         scheduleDragDropStartTimeout();
       } catch (err) {
         pendingEchoes.length = pendingEchoCount;
-        pendingTerminalSuppression = null;
+        clearPendingTerminalSuppression();
         clearDragDropUpload();
         throw err;
       }

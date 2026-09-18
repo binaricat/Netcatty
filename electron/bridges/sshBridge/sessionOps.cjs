@@ -635,7 +635,13 @@ function createSessionOpsApi(ctx) {
       _rc_cwd=$(readlink "/proc/$1/cwd" 2>/dev/null)
       if [ -n "$_rc_cwd" ]; then printf '%s\\n' "$_rc_cwd"; return 0; fi
       if command -v lsof >/dev/null 2>&1; then
-        _rc_cwd=$(LC_ALL=C lsof -a -p "$1" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -n1)
+        # An unknown-type record can put a readlink error in its name field.
+        # Only a confirmed directory name is usable as an upload destination.
+        _rc_cwd=$(LC_ALL=C lsof -a -p "$1" -d cwd -Fnt 2>/dev/null | awk '
+          /^f/ { is_dir=0 }
+          /^t/ { is_dir=($0 == "tDIR" || $0 == "tVDIR") }
+          /^n/ && is_dir { print substr($0, 2); exit }
+        ')
         if [ -n "$_rc_cwd" ]; then printf 'NETCATTY_LSOF_CWD=%s\\n' "$_rc_cwd"; return 0; fi
       fi
       return 1
@@ -1214,8 +1220,17 @@ function createSessionOpsApi(ctx) {
         `kernel=$(uname -r 2>/dev/null || echo "")`,
         `uptime=$(awk '{printf "%.0f",$1}' /proc/uptime 2>/dev/null || echo "")`,
         `loadavg=$(awk '{print $1" "$2" "$3}' /proc/loadavg 2>/dev/null || echo "")`,
+        // GPU: NVIDIA GPUs expose utilization + VRAM through the driver-bundled
+        // nvidia-smi. Best-effort — empty on hosts without the tool, so the UI
+        // simply hides the GPU chip. Utilization is averaged across GPUs and
+        // VRAM is summed independently; incomplete memory totals remain unknown.
+        // The first GPU's name is kept for the tooltip.
+        // Bound GPU queries independently so a stuck driver cannot stop CPU/memory
+        // polling. Hosts without timeout also omit this optional metric.
+        // macOS is skipped: powermetrics needs root, which stats must not.
+        `gpustat=$(gpucsv=$(timeout -s KILL 2 nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total,name --format=csv,noheader,nounits 2>/dev/null) && printf '%s\\n' "$gpucsv" | awk -F', *' 'NF >= 4 {g++; if($1 ~ /^[0-9]+$/) {n++; u+=$1} if($2 ~ /^[0-9]+$/) {mu+=$2; uc++} if($3 ~ /^[0-9]+$/) {mt+=$3; tc++} if(name=="") name=$4} END{if(n>0) printf "%.0f %s %s %s", u/n, (uc==g ? sprintf("%.0f",mu) : "N/A"), (tc==g ? sprintf("%.0f",mt) : "N/A"), name}' 2>/dev/null || echo "")`,
         // Output all stats (using CPURAW and PERCORERAW instead of CPU and PERCORE)
-        `echo "CPURAW:$cpuraw|CORES:$cores|PERCORERAW:$percoreraw|MEMINFO:$meminfo|PROCS:$procs|NET:$net|HOST:$hostname_value|OS:$osname|KERNEL:$kernel|UPTIME:$uptime|LOAD:$loadavg"`
+        `echo "CPURAW:$cpuraw|CORES:$cores|PERCORERAW:$percoreraw|MEMINFO:$meminfo|PROCS:$procs|NET:$net|GPU:$gpustat|HOST:$hostname_value|OS:$osname|KERNEL:$kernel|UPTIME:$uptime|LOAD:$loadavg"`
       ].join('; ');
 
       // Client-side run bound shared by the stats and disk probes; the remote
@@ -1333,7 +1348,10 @@ function createSessionOpsApi(ctx) {
             let kernelRelease = "";
             let uptimeSeconds = null;
             let loadAverage = [];
-    
+            let gpu = null;
+            let gpuName = null;
+            let gpuMemUsed = null;
+            let gpuMemTotal = null;
             for (const part of parts) {
               if (part.startsWith('CPU:')) {
                 // macOS: command reports normalized CPU% directly (no delta needed)
@@ -1457,6 +1475,28 @@ function createSessionOpsApi(ctx) {
                       if (!isNaN(rxBytes) && !isNaN(txBytes)) {
                         networkInterfaces.push({ name, rxBytes, txBytes });
                       }
+                    }
+                  }
+                }
+              } else if (part.startsWith('GPU:')) {
+                // Linux: "<avgUtil> <sumMemUsed> <sumMemTotal> <first GPU name>"
+                const gpuStr = part.substring(4).trim();
+                if (gpuStr && gpuStr !== '') {
+                  const gpuFields = gpuStr.split(/\s+/);
+                  const util = parseInt(gpuFields[0], 10);
+                  if (!isNaN(util)) {
+                    gpu = Math.min(100, Math.max(0, util));
+                    if (gpuFields.length >= 2) {
+                      const memUsed = parseInt(gpuFields[1], 10);
+                      if (!isNaN(memUsed)) gpuMemUsed = memUsed;
+                    }
+                    if (gpuFields.length >= 3) {
+                      const memTotal = parseInt(gpuFields[2], 10);
+                      if (!isNaN(memTotal)) gpuMemTotal = memTotal;
+                    }
+                    if (gpuFields.length >= 4) {
+                      const name = gpuFields.slice(3).join(' ').trim();
+                      if (name) gpuName = name;
                     }
                   }
                 }
@@ -1608,6 +1648,10 @@ function createSessionOpsApi(ctx) {
                 cpu,           // CPU usage percentage (0-100)
                 cpuCores,      // Number of CPU cores
                 cpuPerCore,    // Per-core CPU usage array
+                gpu,           // NVIDIA GPU utilization percentage (0-100), null when unavailable
+                gpuName,       // First GPU name (tooltip), null when unavailable
+                gpuMemUsed,    // Summed VRAM used in MB, null when unavailable
+                gpuMemTotal,   // Summed VRAM total in MB, null when unavailable
                 memTotal,      // Total memory in MB
                 memUsed,       // Used memory in MB (excluding buffers/cache)
                 memFree,       // Free memory in MB

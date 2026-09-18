@@ -472,7 +472,7 @@ test("createXTermRuntime recovers a stuck IME punctuation deferral (#3103)", () 
   // Any real key release ends the deferral, not just an exact key match.
   const keyupIdx = runtimeSource.indexOf('if (e.type === "keyup")');
   assert.ok(keyupIdx >= 0);
-  const keyupSlice = runtimeSource.slice(keyupIdx, keyupIdx + 2800);
+  const keyupSlice = runtimeSource.slice(keyupIdx, keyupIdx + 3600);
   assert.match(
     keyupSlice,
     /shouldFlushDeferredImeTextInputOnKeyUp\(imeTextInputDeferredKey, e\)/,

@@ -1,6 +1,12 @@
 "use strict";
 
 const { runBoundedCliCommand } = require("./boundedCliCommand.cjs");
+const {
+  getNetcattySkillStatus,
+  installNetcattySkill,
+  resolveGrokHomeDir,
+  resolveUserHomeDir,
+} = require("./netcattySkillInstaller.cjs");
 
 const EXTERNAL_MCP_GROK_NAME = "netcatty-external";
 const {
@@ -257,6 +263,9 @@ function createExternalMcpGrokSetup(options = {}) {
     prepareCommandForSpawn: options.prepareCommandForSpawn || loadShellUtils().prepareCommandForSpawn,
     spawn: options.spawn || require("node:child_process").spawn,
     stripAnsi: options.stripAnsi || loadShellUtils().stripAnsi,
+    runGrokCommand: options.runGrokCommand || null,
+    getSkillStatus: options.getSkillStatus || getNetcattySkillStatus,
+    installSkill: options.installSkill || installNetcattySkill,
   };
 
   function getManualCommand() {
@@ -273,7 +282,38 @@ function createExternalMcpGrokSetup(options = {}) {
   }
 
   async function runGrok(grokPath, shellEnv, args) {
+    if (deps.runGrokCommand) {
+      return await deps.runGrokCommand(grokPath, shellEnv, args);
+    }
     return await runBoundedCliCommand(deps, grokPath, args, { env: shellEnv });
+  }
+
+  async function combineSkillStatus(status, shellEnv) {
+    if (status.state !== "configured") {
+      return {
+        ...status,
+        command: getManualCommand(),
+        mcpConfigured: false,
+        skillInstalled: false,
+      };
+    }
+    const homeDir = resolveUserHomeDir(shellEnv);
+    const skillStatus = await deps.getSkillStatus({
+      client: "grok",
+      homeDir,
+      grokHomeDir: resolveGrokHomeDir(shellEnv),
+    });
+    return {
+      ...status,
+      command: getManualCommand(),
+      mcpConfigured: true,
+      skillInstalled: skillStatus.installed,
+      skillPath: skillStatus.skillPath,
+      state: skillStatus.installed ? "configured" : "not_configured",
+      ...(!skillStatus.installed && skillStatus.reason
+        ? { skillError: skillStatus.reason }
+        : {}),
+    };
   }
 
   function summarizeFailure(result, fallback) {
@@ -316,10 +356,7 @@ function createExternalMcpGrokSetup(options = {}) {
           grokPath,
           discoveryEnv: deps.discoveryEnv,
         });
-        return {
-          ...status,
-          command: getManualCommand(),
-        };
+        return await combineSkillStatus(status, shellEnv);
       }
       const status = classifyGrokExternalMcpStatus({
         entries: parseGrokMcpList(result.stdout),
@@ -327,10 +364,7 @@ function createExternalMcpGrokSetup(options = {}) {
         grokPath,
         discoveryEnv: deps.discoveryEnv,
       });
-      return {
-        ...status,
-        command: getManualCommand(),
-      };
+      return await combineSkillStatus(status, shellEnv);
     } catch (error) {
       return {
         ok: true,
@@ -362,7 +396,19 @@ function createExternalMcpGrokSetup(options = {}) {
       };
     }
 
+    let installingSkill = false;
+    let mcpConfigured = Boolean(status.mcpConfigured);
     try {
+      if (status.mcpConfigured) {
+        installingSkill = true;
+        const homeDir = resolveUserHomeDir(shellEnv);
+        await deps.installSkill({
+          client: "grok",
+          homeDir,
+          grokHomeDir: resolveGrokHomeDir(shellEnv),
+        });
+        return await getStatus();
+      }
       if (status.existingCommand) {
         await runGrok(grokPath, shellEnv, ["mcp", "remove", EXTERNAL_MCP_GROK_NAME]);
       }
@@ -382,6 +428,14 @@ function createExternalMcpGrokSetup(options = {}) {
           error: summarizeFailure(addResult, `Grok exited with code ${addResult.exitCode ?? "unknown"}`),
         };
       }
+      mcpConfigured = true;
+      installingSkill = true;
+      const homeDir = resolveUserHomeDir(shellEnv);
+      await deps.installSkill({
+        client: "grok",
+        homeDir,
+        grokHomeDir: resolveGrokHomeDir(shellEnv),
+      });
       return await getStatus();
     } catch (error) {
       return {
@@ -391,7 +445,11 @@ function createExternalMcpGrokSetup(options = {}) {
         launcherPath: deps.launcherPath,
         command: getManualCommand(),
         existingCommand: null,
-        error: error?.message || String(error),
+        mcpConfigured,
+        skillInstalled: false,
+        error: installingSkill
+          ? `Failed to install the Netcatty Grok skill: ${error?.message || String(error)}`
+          : (error?.message || String(error)),
       };
     }
   }

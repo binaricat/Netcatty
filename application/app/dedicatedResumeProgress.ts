@@ -1,10 +1,12 @@
+import type { TransferOwnerObservation } from "../state/sftp/waitForTransferOwner";
 import type { TransferStatus, TransferTask } from "../../domain/models";
 
 export const DEDICATED_RESUME_LARGE_HISTORY_THRESHOLD = 4_096;
 export const DEDICATED_RESUME_CHILD_UPDATE_BATCH_SIZE = 512;
 
 export interface DedicatedResumeChildUpdateBatcher {
-  push(task: TransferTask): void;
+  push(task: TransferTask, observation?: TransferOwnerObservation): void;
+  discard(taskId: string): void;
   flush(): void;
 }
 
@@ -24,25 +26,39 @@ export function createDedicatedResumeChildUpdateBatcher(deps: {
   hasTask: (taskId: string) => boolean;
   upsertTasks: (tasks: readonly TransferTask[]) => void;
 }): DedicatedResumeChildUpdateBatcher {
-  const pending = new Map<string, TransferTask>();
+  const pending = new Map<string, { task: TransferTask; observation?: TransferOwnerObservation }>();
   const flush = () => {
     if (pending.size === 0) return;
     const batch = [...pending.values()];
     pending.clear();
-    deps.upsertTasks(batch);
+    try {
+      const updates = batch.filter(({ observation }) => !observation?.hasIdentityConflict()).map(({ task }) => task);
+      if (updates.length) deps.upsertTasks(updates);
+    } finally {
+      for (const { observation } of batch) observation?.dispose();
+    }
   };
   return {
-    push(task) {
+    push(task, observation) {
+      if (observation?.hasIdentityConflict()) {
+        pending.get(task.id)?.observation?.dispose();
+        pending.delete(task.id);
+        observation.dispose();
+        return;
+      }
       const shouldBatch = !!task.parentTaskId
         && deps.getTaskCount() >= DEDICATED_RESUME_LARGE_HISTORY_THRESHOLD
         && deps.hasTask(task.id);
       if (!shouldBatch) {
-        deps.upsertTasks([task]);
+        try { deps.upsertTasks([task]); } finally { observation?.dispose(); }
         return;
       }
-      pending.set(task.id, task);
+      const previous = pending.get(task.id);
+      if (previous?.observation && previous.observation !== observation) previous.observation.dispose();
+      pending.set(task.id, { task, observation });
       if (pending.size >= DEDICATED_RESUME_CHILD_UPDATE_BATCH_SIZE) flush();
     },
+    discard: (taskId) => { pending.get(taskId)?.observation?.dispose(); pending.delete(taskId); },
     flush,
   };
 }

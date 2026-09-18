@@ -727,6 +727,8 @@ export interface TerminalLayerProps {
   sftpAutoOpenSidebar: boolean;
   terminalSidePanelAutoOpen?: boolean;
   terminalSidePanelAutoOpenTab?: TerminalSidePanelAutoOpenTab;
+  localShellSidePanelAutoOpen?: boolean;
+  localShellSidePanelAutoOpenTab?: TerminalSidePanelAutoOpenTab;
   sftpFollowTerminalCwd: boolean;
   setSftpFollowTerminalCwd: (enabled: boolean) => void;
   editorWordWrap: boolean;

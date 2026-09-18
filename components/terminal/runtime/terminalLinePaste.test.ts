@@ -22,7 +22,7 @@ const code = ts.transpileModule(
   { compilerOptions: { target: ts.ScriptTarget.ES2022 } },
 ).outputText;
 const helpers = await Promise.all([
-  "../../../domain/serialCharMetrics.ts", "../../../domain/terminalReportSequence.ts", "./terminalInputSanitize.ts",
+  "../../../domain/serialCharMetrics.ts", "./terminalReportSequence.ts", "./terminalInputSanitize.ts",
   "./terminalBackspaceInput.ts", "./terminalPerCharacterInput.ts",
   "./terminalSudoAutofill.ts", "./terminalCommandExecution.ts",
   "./serialLocalEcho.ts", "../autocomplete/terminalStringCellWidth.ts",
@@ -45,6 +45,7 @@ for (const [protocol, lineMode, sensitive] of [
     const submitted: string[] = [];
     const history: string[] = [];
     const recordingSensitivity: boolean[] = [];
+    const loginCancellationNotices: string[] = [];
     let liveLine = protocol === "ssh" ? "alice@host:~$ show " : "";
     const autocomplete: string[] = [];
     const outputTriggers: string[] = [];
@@ -86,6 +87,7 @@ for (const [protocol, lineMode, sensitive] of [
       isBroadcastEnabledRef: { current: false },
       onBroadcastInputRef: { current: () => assert.fail("paste must not broadcast twice") },
       terminalBackend: {
+        notifyUserInput(sessionId: string) { loginCancellationNotices.push(sessionId); },
         interruptSession(sessionId: string, _trace: unknown, options?: { cancelPendingWritesOnly?: boolean }) {
           bridge.interruptSession({}, { sessionId, ...options });
         },
@@ -128,6 +130,7 @@ for (const [protocol, lineMode, sensitive] of [
     });
     assert.deepEqual(wire, lineMode ? ["show version\r"] : ["show ", "version\r"]);
     assert.equal(ctx.serialLineBufferRef.current, "");
+    assert.deepEqual(loginCancellationNotices, lineMode ? ["serial-1", "serial-1"] : []);
     assert.equal(ctx.commandBufferRef.current, "");
     assert.deepEqual(submitted, sensitive ? [] : ["show version"]);
     assert.deepEqual(recorded, sensitive ? [] : ["show version"]);

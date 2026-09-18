@@ -53,6 +53,8 @@ export const terminalLayerAreEqual = (
   prev.sftpAutoOpenSidebar === next.sftpAutoOpenSidebar &&
   prev.terminalSidePanelAutoOpen === next.terminalSidePanelAutoOpen &&
   prev.terminalSidePanelAutoOpenTab === next.terminalSidePanelAutoOpenTab &&
+  prev.localShellSidePanelAutoOpen === next.localShellSidePanelAutoOpen &&
+  prev.localShellSidePanelAutoOpenTab === next.localShellSidePanelAutoOpenTab &&
   prev.sftpFollowTerminalCwd === next.sftpFollowTerminalCwd &&
   prev.setSftpFollowTerminalCwd === next.setSftpFollowTerminalCwd &&
   prev.editorWordWrap === next.editorWordWrap &&

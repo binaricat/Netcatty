@@ -268,6 +268,11 @@ function redactPuttyCommandLinePasswords(argv) {
 }
 
 module.exports = {
+  PUTTY_VALUE_FLAGS: VALUE_FLAGS,
+  parseHostSpec,
+  isElectronNoiseArg,
+  parsePort,
   parsePuttyCommandLine,
   redactPuttyCommandLinePasswords,
+  toDeepLinkUrl,
 };

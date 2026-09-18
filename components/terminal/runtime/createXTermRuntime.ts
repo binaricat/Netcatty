@@ -1,4 +1,3 @@
-import { isTerminalReportSequence } from "../../../domain/terminalReportSequence";
 import { stringCellWidth } from "../autocomplete/terminalStringCellWidth";
 import type { TerminalBroadcastInputOptions } from "../terminalHelpers";
 import { FitAddon } from "@xterm/addon-fit";
@@ -105,6 +104,7 @@ import {
   resolveMiddleClickBehavior,
 } from "./middleClickBehavior";
 import { handleSerialLineModeInput } from "./serialLineInput";
+import { isTerminalReportSequence } from "./terminalReportSequence";
 import {
   doesKittyEncodingPreserveShiftEnter,
   getShiftEnterSubmittedInput,
@@ -163,7 +163,10 @@ import {
   type TerminalOutputHistoryPreview,
 } from "./terminalOutputHistory";
 import { shouldPassThroughCopyShortcut } from "./terminalCopyShortcut";
-import { shouldUseUrgentTerminalInterrupt } from "./terminalInterruptShortcut";
+import {
+  isMacCommandPeriodInterruptChord,
+  shouldUseUrgentTerminalInterrupt,
+} from "./terminalInterruptShortcut";
 import {
   createTerminalInterruptTrace,
   logTerminalInterruptTrace,
@@ -214,6 +217,7 @@ type TerminalBackendApi = {
   openExternalAvailable: () => boolean;
   openExternal: (url: string) => Promise<void>;
   writeToSession: NetcattyBridge["writeToSession"];
+  notifyUserInput?: (sessionId: string) => void;
   interruptSession?: NetcattyBridge["interruptSession"];
   signalPluginConnection?: (
     sessionId: string,
@@ -1363,6 +1367,20 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
             || dataToWrite.charCodeAt(0) >= 32 || dataToWrite.length > 1)) {
           ctx.terminalBackend.interruptSession?.(id, undefined, { cancelPendingWritesOnly: true });
         }
+        // Line mode never reaches writeToSession until Enter, so buffered
+        // keystrokes are invisible to the main-process auto-login detector.
+        // The first buffered keystroke means the user is taking control:
+        // cancel the detector exactly like character-mode input would.
+        // Submit (\r/\n) and Ctrl+C already write to the session, which
+        // cancels it on that path. Automatic terminal-report replies (DA1,
+        // CPR, ...) also surface through onData, but they originate from the
+        // device negotiating with xterm, not from the user — the main process
+        // excludes them from its write-path cancellation via
+        // isTerminalReportSequence, so apply the same classification here.
+        const isSessionWrite = dataToWrite === "\r" || dataToWrite === "\n" || dataToWrite === "\x03";
+        if (!isSessionWrite && !isTerminalReportSequence(dataToWrite)) {
+          ctx.terminalBackend.notifyUserInput?.(id);
+        }
         const pacedWrites: string[] = [];
         handleSerialLineModeInput(dataToWrite, {
           bufferRef: ctx.serialLineBufferRef,
@@ -1540,6 +1558,14 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   const kittyForwardedKeys = new Map<string, KittyKeyboardForwardedPress>();
   const broadcastForwardedKeys = new Map<string, KittyKeyboardForwardedPress>();
   const win32BroadcastForwardedKeys = new Map<string, KittyKeyboardForwardedPress>();
+  // Command+Period interrupt presses are recorded under their normalized Ctrl+C identity
+  // (KeyC) so broadcast legacy pairing stays matched (#3408), but under a
+  // dedicated map key so they cannot clobber an outstanding physical KeyC
+  // press; map the physical chord identity (Period) to it so the later keyup
+  // can pair the release.
+  const kittyNormalizedPressAliases = new Map<string, string>();
+  const kittyNormalizedPressIdentity = (identity: string): string =>
+    `${identity}\u0000mac-period-interrupt`;
   const broadcastEncodedKeys = new Set<string>();
   const broadcastLegacySuppressedKeys = new Set<string>();
   const kittyKeyIdentity = (event: KeyboardEvent): string => event.code || event.key;
@@ -1725,13 +1751,20 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
    */
   const releaseForwardedKittyPress = (
     event: Pick<KittyKeyboardEvent, "code" | "key"> & KittyKeyboardEvent,
+    identityOverride?: string,
   ): boolean => {
-    const identity = event.code || event.key;
+    // The Command+Period interrupt press is keyed independently from its normalized
+    // Ctrl+C event identity, so its release must delete the entry it was
+    // stored under rather than the physical key's (#3408).
+    const identity = identityOverride ?? (event.code || event.key);
     const forwardedPress = broadcastForwardedKeys.get(identity);
     if (forwardedPress) {
       broadcastForwardedKeys.delete(identity);
       broadcastKittyInput(
-        { kind: "key", event },
+        // Carry the identity the press was recorded under so peers pair this
+        // release with that press instead of the event's physical code - the
+        // Command+Period interrupt press lives under a dedicated normalized key (#3409).
+        { kind: "key", event, keyIdentity: identity },
         true,
         forwardedPress.targetSessionIds,
       );
@@ -1746,6 +1779,30 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       return true;
     }
     return false;
+  };
+  /**
+   * Resolve a forwarded press whose recorded identity is not the physical
+   * key identity: the Command+Period interrupt press was recorded as the normalized
+   * Ctrl+C event (KeyC), but the browser delivers the physical release as
+   * Period. Pair that release from the stored event so Kitty consumers do
+   * not see Ctrl+C held until focus loss (#3408).
+   */
+  const resolveKittyNormalizedPressRelease = (
+    physicalEvent: KeyboardEvent,
+  ): { event: KittyKeyboardEvent; identity: string } | null => {
+    const physicalIdentity = kittyKeyIdentity(physicalEvent);
+    const normalizedIdentity = kittyNormalizedPressAliases.get(physicalIdentity);
+    if (!normalizedIdentity) return null;
+    const forwardedPress =
+      broadcastForwardedKeys.get(normalizedIdentity)
+      ?? kittyForwardedKeys.get(normalizedIdentity);
+    // Consume the alias on every path once it has been paired (or
+    // invalidated): a later keyup for the same physical key while another
+    // KeyC press is outstanding must not be rewritten as the normalized
+    // release (#3408).
+    kittyNormalizedPressAliases.delete(physicalIdentity);
+    if (!forwardedPress) return null;
+    return { event: forwardedPress.event, identity: normalizedIdentity };
   };
 
   term.attachCustomKeyEventHandler((e: KeyboardEvent) => {
@@ -1824,6 +1881,15 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
           releaseForwardedKittyPress({ ...deferredKittyEvent, type: "keyup" });
         }
       }
+      // Release the normalized interrupt separately: the same physical key
+      // may already have a forwarded press from before Command was held.
+      // Keep the saved layout-independent event rather than translating KeyC
+      // through the current keyboard layout again.
+      const aliasedRelease = resolveKittyNormalizedPressRelease(e);
+      const releasedInterrupt = aliasedRelease !== null && releaseForwardedKittyPress(
+        { ...aliasedRelease.event, type: "keyup" },
+        aliasedRelease.identity,
+      );
       const identity = kittyKeyIdentity(releaseEvent);
       const hasForwardedWin32KeyDown = win32InputModeForwardedKeys.delete(identity);
       if (broadcastLegacyDataPending === identity) clearBroadcastLegacyDataPending();
@@ -1846,7 +1912,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         };
         return true;
       }
-      if (releaseForwardedKittyPress(toKittyKeyboardEvent(releaseEvent))) {
+      if (releaseForwardedKittyPress(toKittyKeyboardEvent(releaseEvent)) || releasedInterrupt) {
         e.preventDefault();
         e.stopPropagation();
         return false;
@@ -2035,10 +2101,27 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       kittyKeyboardProtocolEnabled
         ? encodeKittyKeyEvent(kittyKeyboardMode, toKittyKeyboardEvent(e))
         : null;
-    if (
+    const urgentInterrupt =
       (!kittySequenceForKeyDown || kittySequenceForKeyDown === "\x03") &&
-      shouldUseUrgentTerminalInterrupt(e, { hasSelection: hasCopyableSelection })
-    ) {
+      shouldUseUrgentTerminalInterrupt(e, { hasSelection: hasCopyableSelection });
+    const currentScheme = ctx.hotkeySchemeRef.current;
+    // Use shared utility for platform detection when hotkey scheme is disabled
+    const isMac = currentScheme === "mac" || (currentScheme === "disabled" && isMacPlatform());
+    // macOS Terminal convention: Command+Period interrupts the running command like
+    // Ctrl+C (#3408), including while text is selected. A
+    // user-assigned snippet or configured shortcut on this chord keeps
+    // precedence: the editors accept Command+Period (their conflict check only covers
+    // configured bindings), so the hard-coded interrupt must not silently
+    // swallow a chord the user actually assigned (#3409).
+    const macCommandPeriodInterrupt =
+      isMacPlatform()
+      && isMacCommandPeriodInterruptChord(e)
+      && !(ctx.snippetsRef?.current ?? []).some((snippet) => (
+        snippet.shortkey && matchesKeyBinding(e, snippet.shortkey, isMac)
+      ))
+      && !(currentScheme !== "disabled"
+        && checkAppShortcut(e, ctx.keyBindingsRef.current, isMac) !== null);
+    if (urgentInterrupt || macCommandPeriodInterrupt) {
       const id = ctx.sessionRef.current;
       if (id && ctx.statusRef.current === "connected") {
         const rendererKeyAt = Date.now();
@@ -2090,8 +2173,53 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         } else {
           ctx.terminalBackend.writeToSession(id, "\x03");
         }
-        const kittyEvent = toKittyKeyboardEvent(e);
-        const identity = kittyKeyIdentity(e);
+        // Report the interrupt to Kitty as Ctrl+C even when it came from the
+        // Command+Period chord: the broadcast legacy \x03 is keyed by this identity, so
+        // forwarding Super+Period would leave peers with an unmatched
+        // Super+Period press and suppress the interrupt instead (#3408).
+        const interruptEventForKitty: KeyboardEvent = macCommandPeriodInterrupt
+          ? {
+              type: e.type,
+              key: "c",
+              code: "KeyC",
+              location: e.location,
+              repeat: e.repeat,
+              isComposing: e.isComposing,
+              keyCode: 67,
+              shiftKey: false,
+              altKey: false,
+              ctrlKey: true,
+              metaKey: false,
+              getModifierState: (key: string) => key === "Control" && e.getModifierState("Control"),
+            } as unknown as KeyboardEvent
+          : e;
+        const kittyEvent = toKittyKeyboardEvent(interruptEventForKitty);
+        if (macCommandPeriodInterrupt) {
+          // The synthesized event's code ("KeyC") is the physical QWERTY
+          // position of the chord key, so toKittyKeyboardEvent()'s layout
+          // lookup returns that position's character on non-QWERTY layouts
+          // (e.g. "n" under Dvorak) and getUnicodeKeyCode() prioritizes it,
+          // encoding the interrupt as the wrong key instead of Ctrl+C's 99
+          // - a broadcast peer would then suppress the legacy \x03 fallback
+          // and never be interrupted. Force the layout-independent identity.
+          kittyEvent.unshiftedKey = "c";
+        }
+        const identity = kittyKeyIdentity(interruptEventForKitty);
+        // The normalized press shares the Ctrl+C event identity (KeyC) with a
+        // possibly outstanding physical KeyC press; record it under a dedicated
+        // map key even when the layout maps period to physical KeyC. Its keyup
+        // releases (and deletes) only the
+        // interrupt press instead of the held physical key's entry (#3409).
+        const pressIdentity =
+          macCommandPeriodInterrupt
+            ? kittyNormalizedPressIdentity(identity)
+            : identity;
+        if (pressIdentity !== identity) {
+          // The physical release arrives under its original layout key while
+          // the press was recorded as the normalized Ctrl+C event; pair them
+          // at keyup so the interrupt release is not lost (#3408).
+          kittyNormalizedPressAliases.set(kittyKeyIdentity(e), pressIdentity);
+        }
         if (
           !term.modes.win32InputMode &&
           kittyKeyboardProtocolEnabled &&
@@ -2099,23 +2227,31 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         ) {
           upsertKittyKeyboardForwardedPress(
             kittyForwardedKeys,
-            identity,
+            pressIdentity,
             kittyEvent,
             [],
           );
         }
-        const forwarded = broadcastKittyInput({ kind: "key", event: kittyEvent });
+        // The dedicated press identity must cross the broadcast boundary:
+        // peers key their pairing state from it, so broadcasting only the
+        // normalized event would collapse the interrupt with an outstanding
+        // physical KeyC press on every peer (#3409).
+        const forwarded = broadcastKittyInput({
+          kind: "key",
+          event: kittyEvent,
+          keyIdentity: pressIdentity,
+        });
         if (forwarded) {
           upsertKittyKeyboardForwardedPress(
             broadcastForwardedKeys,
-            identity,
+            pressIdentity,
             kittyEvent,
             forwarded.targetSessionIds,
           );
           broadcastKittyInput({
             kind: "legacy",
             data: "\x03",
-            keyIdentity: identity,
+            keyIdentity: pressIdentity,
             urgentInterrupt: true,
           });
         }
@@ -2123,10 +2259,6 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         return false;
       }
     }
-
-    const currentScheme = ctx.hotkeySchemeRef.current;
-    // Use shared utility for platform detection when hotkey scheme is disabled
-    const isMac = currentScheme === "mac" || (currentScheme === "disabled" && isMacPlatform());
 
     // Check snippet shortcuts first (even if hotkeys are disabled)
     const snippets = ctx.snippetsRef?.current;
@@ -2549,6 +2681,16 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     win32InputModePendingEvent = null;
     win32InputModeForwardedKeys.clear();
     kittyForwardedKeys.clear();
+    // broadcastForwardedKeys is retained so pending peer releases still pair
+    // after a reconnect; keep the aliases whose normalized press is still
+    // owed a broadcast release, otherwise the physical keyup can no longer
+    // find the dedicated identity and peers keep the key logically pressed
+    // until blur (#3409).
+    for (const [physicalIdentity, normalizedIdentity] of kittyNormalizedPressAliases) {
+      if (!broadcastForwardedKeys.has(normalizedIdentity)) {
+        kittyNormalizedPressAliases.delete(physicalIdentity);
+      }
+    }
     clearKittyKeyboardBroadcastPairingState(
       broadcastEncodedKeys,
       broadcastLegacySuppressedKeys,

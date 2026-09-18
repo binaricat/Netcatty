@@ -931,6 +931,10 @@ export const zhTWTerminalMessages: Messages = {
   'serial.field.configLabelPlaceholder': '例如 Arduino Uno',
   'serial.connectAndSave': '連線並儲存',
   'serial.edit.title': '序列埠設定',
+  'serial.field.username': '使用者名稱',
+  'serial.field.password': '密碼',
+  'serial.field.autoLoginDesc': '設定後，序列埠終端出現 Login/Password 登入提示時，會自動填入此處儲存的使用者名稱和密碼。',
+  'serial.field.clearPassword': '清除已儲存的密碼',
 
   // Keyboard Interactive Authentication (2FA/MFA)
   'keyboard.interactive.title': '需要驗證',

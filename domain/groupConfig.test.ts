@@ -588,3 +588,30 @@ test("group notes survive sanitization but are not connection defaults", () => {
   assert.equal(resolveGroupDefaults("Project", [config]).notes, undefined);
   assert.equal(resolveGroupDefaults("Project/Servers", [config]).notes, undefined);
 });
+
+test("applyGroupDefaults does not inherit group SSH credentials into serial hosts", () => {
+  const groupDefaults: Partial<GroupConfig> = {
+    username: "group-ssh-user",
+    password: "group-ssh-password",
+    savePassword: true,
+    authMethod: "password",
+  };
+
+  const result = applyGroupDefaults(
+    host({ protocol: "serial", username: undefined, password: undefined }),
+    groupDefaults,
+  );
+
+  assert.equal(result.username, undefined);
+  assert.equal(result.password, undefined);
+});
+
+test("applyGroupDefaults still inherits non-credential defaults into serial hosts", () => {
+  const result = applyGroupDefaults(
+    host({ protocol: "serial", username: undefined, charset: undefined }),
+    { username: "group-ssh-user", charset: "UTF-8" },
+  );
+
+  assert.equal(result.username, undefined);
+  assert.equal(result.charset, "UTF-8");
+});

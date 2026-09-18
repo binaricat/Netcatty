@@ -1,6 +1,7 @@
 "use strict";
 
 const crypto = require("node:crypto");
+const { clearSessionFlowState } = require("../bridges/terminalFlowAck.cjs");
 const {
   execViaPty,
   startPtyJob,
@@ -285,6 +286,7 @@ function createWorkerAiExecHandler({
         return { ok: false, error: `Command blocked by safety policy. Pattern: ${safety.matchedPattern}` };
       }
       return execViaPty(ptyStream, command, {
+        onInterrupt: () => clearSessionFlowState(session),
         stripMarkers: true,
         trackForCancellation: activePtyExecs,
         timeoutMs,
@@ -296,6 +298,12 @@ function createWorkerAiExecHandler({
           event?.sender?.send?.("netcatty:data", {
             sessionId,
             data: `${marker}_R\n`,
+          });
+        },
+        onEchoSuppressionPrime: (marker) => {
+          event?.sender?.send?.("netcatty:data", {
+            sessionId,
+            data: `${marker}_I\n`,
           });
         },
         chatSessionId,
@@ -491,6 +499,7 @@ function createWorkerAiJobStartHandler({
     let handle;
     try {
       handle = startPtyJob(ptyStream, command, {
+        onInterrupt: () => clearSessionFlowState(session),
         timeoutMs,
         shellKind: session.shellKind,
         loginShellHint: session._loginShellKind,
@@ -500,6 +509,12 @@ function createWorkerAiJobStartHandler({
           event?.sender?.send?.("netcatty:data", {
             sessionId,
             data: `${marker}_R\n`,
+          });
+        },
+        onEchoSuppressionPrime: (marker) => {
+          event?.sender?.send?.("netcatty:data", {
+            sessionId,
+            data: `${marker}_I\n`,
           });
         },
         chatSessionId,

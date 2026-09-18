@@ -1964,6 +1964,43 @@ test("applySyncPayload applies pluginSidecars through the production applier hoo
   assert.equal((applied as SyncPayload["pluginSidecars"])?.entries[0].value.clock, 3);
 });
 
+test("local shell side panel settings round-trip independently and trigger auto-sync", async () => {
+  for (const key of [storageKeys.STORAGE_KEY_LOCAL_SHELL_SIDE_PANEL_AUTO_OPEN, storageKeys.STORAGE_KEY_LOCAL_SHELL_SIDE_PANEL_AUTO_OPEN_TAB]) {
+    assert.ok((SYNCABLE_SETTING_STORAGE_KEYS as readonly string[]).includes(key));
+  }
+  for (const enabled of [true, false]) {
+    localStorage.clear();
+    localStorage.setItem(storageKeys.STORAGE_KEY_LOCAL_SHELL_SIDE_PANEL_AUTO_OPEN, String(enabled));
+    localStorage.setItem(storageKeys.STORAGE_KEY_LOCAL_SHELL_SIDE_PANEL_AUTO_OPEN_TAB, "notes");
+    localStorage.setItem(storageKeys.STORAGE_KEY_TERMINAL_SIDE_PANEL_AUTO_OPEN, String(!enabled));
+    localStorage.setItem(storageKeys.STORAGE_KEY_TERMINAL_SIDE_PANEL_AUTO_OPEN_TAB, "scripts");
+    const payload = await buildSyncPayload(vault());
+    assert.equal(payload.settings?.localShellSidePanelAutoOpen, enabled);
+    assert.equal(payload.settings?.localShellSidePanelAutoOpenTab, "notes");
+    localStorage.clear();
+    await applySyncPayload(payload, { importVaultData: () => {} });
+    assert.equal(localStorage.getItem(storageKeys.STORAGE_KEY_LOCAL_SHELL_SIDE_PANEL_AUTO_OPEN), String(enabled));
+    assert.equal(localStorage.getItem(storageKeys.STORAGE_KEY_LOCAL_SHELL_SIDE_PANEL_AUTO_OPEN_TAB), "notes");
+    assert.equal(localStorage.getItem(storageKeys.STORAGE_KEY_TERMINAL_SIDE_PANEL_AUTO_OPEN), String(!enabled));
+    assert.equal(localStorage.getItem(storageKeys.STORAGE_KEY_TERMINAL_SIDE_PANEL_AUTO_OPEN_TAB), "scripts");
+  }
+});
+
+test("missing local shell settings and invalid tabs preserve existing settings", async () => {
+  const payload = await buildSyncPayload(vault());
+  assert.equal(payload.settings?.localShellSidePanelAutoOpen, undefined);
+  assert.equal(payload.settings?.localShellSidePanelAutoOpenTab, undefined);
+  localStorage.setItem(storageKeys.STORAGE_KEY_LOCAL_SHELL_SIDE_PANEL_AUTO_OPEN, "true");
+  localStorage.setItem(storageKeys.STORAGE_KEY_LOCAL_SHELL_SIDE_PANEL_AUTO_OPEN_TAB, "notes");
+  await applySyncPayload(payload, { importVaultData: () => {} });
+  assert.equal(localStorage.getItem(storageKeys.STORAGE_KEY_LOCAL_SHELL_SIDE_PANEL_AUTO_OPEN), "true");
+  assert.equal(localStorage.getItem(storageKeys.STORAGE_KEY_LOCAL_SHELL_SIDE_PANEL_AUTO_OPEN_TAB), "notes");
+  await applySyncPayload({ ...payload, settings: { localShellSidePanelAutoOpenTab: "invalid" } } as unknown as SyncPayload, { importVaultData: () => {} });
+  assert.equal(localStorage.getItem(storageKeys.STORAGE_KEY_LOCAL_SHELL_SIDE_PANEL_AUTO_OPEN_TAB), "notes");
+  localStorage.setItem(storageKeys.STORAGE_KEY_LOCAL_SHELL_SIDE_PANEL_AUTO_OPEN_TAB, "invalid");
+  assert.equal((await buildSyncPayload(vault())).settings?.localShellSidePanelAutoOpenTab, undefined);
+});
+
 test("tab bar position survives settings export and import, with a safe fallback", async () => {
   localStorage.clear();
   localStorage.setItem(storageKeys.STORAGE_KEY_TAB_BAR_POSITION, "bottom");

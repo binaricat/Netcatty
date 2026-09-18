@@ -33,6 +33,10 @@ export interface ServerStats {
   cpu: number | null;           // CPU usage percentage (0-100)
   cpuCores: number | null;      // Number of CPU cores
   cpuPerCore: number[];         // Per-core CPU usage array
+  gpu: number | null;           // NVIDIA GPU utilization percentage (0-100), null when no GPU data
+  gpuName: string | null;       // First GPU name (tooltip)
+  gpuMemUsed: number | null;    // Summed VRAM used in MB
+  gpuMemTotal: number | null;   // Summed VRAM total in MB
   memTotal: number | null;      // Total memory in MB
   memUsed: number | null;       // Used memory in MB (excluding buffers/cache)
   memFree: number | null;       // Free memory in MB
@@ -107,6 +111,10 @@ function createEmptyServerStats(): ServerStats {
     cpu: null,
     cpuCores: null,
     cpuPerCore: [],
+    gpu: null,
+    gpuName: null,
+    gpuMemUsed: null,
+    gpuMemTotal: null,
     memTotal: null,
     memUsed: null,
     memFree: null,
@@ -200,6 +208,10 @@ function normalizeServerStats(stats: Partial<ServerStats>): ServerStats {
     cpu: stats.cpu ?? null,
     cpuCores: stats.cpuCores ?? null,
     cpuPerCore: stats.cpuPerCore || [],
+    gpu: stats.gpu ?? null,
+    gpuName: stats.gpuName ?? null,
+    gpuMemUsed: stats.gpuMemUsed ?? null,
+    gpuMemTotal: stats.gpuMemTotal ?? null,
     memTotal: stats.memTotal ?? null,
     memUsed: stats.memUsed ?? null,
     memFree: stats.memFree ?? null,

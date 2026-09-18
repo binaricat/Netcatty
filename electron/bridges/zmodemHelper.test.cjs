@@ -236,6 +236,94 @@ test("queued drag-drop upload cleans temp files when command write fails", () =>
   fs.rmSync(tempDir, { recursive: true, force: true });
 });
 
+// Issue #3423: after a drag-drop upload falls back to SFTP (rz missing, no
+// ZMODEM detection), a stale command-echo suppression must not strip matched
+// prefixes from the user's next typed command echo — the reporter's
+// "su - username -s /bin/bash" rendered as "u - username -s /bin/bas".
+test("stale drag-drop echo suppression is dropped when the pending upload is cancelled", () => {
+  const seen = [];
+  const sentry = createZmodemSentry({
+    sessionId: "session-1",
+    onData: (buf) => seen.push(Buffer.from(buf).toString("utf8")),
+    writeToRemote: () => true,
+    getWebContents: () => null,
+  });
+  const uploadCommand =
+    "sh -lc 'if command -v rz >/dev/null 2>&1; then exec rz -y; else printf marker; fi'\r";
+
+  sentry.queueDragDropUpload({
+    filePaths: ["/tmp/a.txt"],
+    remoteNames: ["a.txt"],
+    uploadCommand,
+  });
+
+  // The shell echo of the long upload command is split across two transport
+  // chunks with the prompt glued in front, so neither the full match nor the
+  // chunk-prefix partial match can consume the suppression — it leaks.
+  sentry.consume(Buffer.from("root@host:~# sh -lc 'if command -v rz >/dev/null"));
+  sentry.consume(Buffer.from(" 2>&1; then exec rz -y; else printf marker; fi'\r\n"));
+  seen.length = 0;
+
+  // rz missing → renderer watches the marker, falls back to SFTP, cancels.
+  sentry.cancel({ interrupt: false });
+
+  // User types the next command after the upload finishes.
+  sentry.consume(Buffer.from("su - username -s /bin/bas"));
+  sentry.consume(Buffer.from("h"));
+  assert.deepEqual(seen, ["su - username -s /bin/bas", "h"]);
+});
+
+test("drag-drop echo suppression expires instead of eating later user echo", async (t) => {
+  const seen = [];
+  const sentry = createZmodemSentry({
+    sessionId: "session-1",
+    onData: (buf) => seen.push(Buffer.from(buf).toString("utf8")),
+    writeToRemote: () => true,
+    getWebContents: () => null,
+    pendingTerminalSuppressionTtlMs: 0,
+  });
+  t.after(() => sentry.cancel({ interrupt: false }));
+
+  sentry.queueDragDropUpload({
+    filePaths: ["/tmp/a.txt"],
+    remoteNames: ["a.txt"],
+    uploadCommand: "sh -lc 'if command -v rz >/dev/null 2>&1; then exec rz -y; fi'\r",
+  });
+  // Split echo is never fully matched, so the suppression stays armed.
+  sentry.consume(Buffer.from("root@host:~# sh -lc 'if command -v rz >/dev/null"));
+  sentry.consume(Buffer.from(" 2>&1; then exec rz -y; fi'"));
+
+  await new Promise((resolve) => setTimeout(resolve, 5));
+
+  seen.length = 0;
+  sentry.consume(Buffer.from("su - username -s /bin/bash"));
+  assert.deepEqual(seen, ["su - username -s /bin/bash"]);
+});
+
+test("drag-drop echo suppression still hides the upload command echo", () => {
+  const seen = [];
+  const sentry = createZmodemSentry({
+    sessionId: "session-1",
+    onData: (buf) => seen.push(Buffer.from(buf).toString("utf8")),
+    writeToRemote: () => true,
+    getWebContents: () => null,
+  });
+
+  sentry.queueDragDropUpload({
+    filePaths: ["/tmp/a.txt"],
+    remoteNames: ["a.txt"],
+    uploadCommand: "rz -y\r",
+  });
+  // Echo flushed as its own chunk right after the write — must be suppressed.
+  sentry.consume(Buffer.from("rz -y"));
+  assert.deepEqual(seen, []);
+
+  // Later user input is untouched.
+  sentry.consume(Buffer.from("ls -l"));
+  assert.deepEqual(seen, ["ls -l"]);
+  sentry.cancel({ interrupt: false });
+});
+
 test("handleUpload completes when the remote confirms after progress reaches 100 percent", async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-zmodem-"));
   const filePath = path.join(tempDir, "upload.txt");
