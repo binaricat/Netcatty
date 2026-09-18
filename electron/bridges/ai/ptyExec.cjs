@@ -258,8 +258,8 @@ function startPtyJob(ptyStream, command, options) {
     const batchChars = (usesLiveShellProbe || bastionKeystrokes) && text.length > 1024 ? 128 : text.length;
     return Math.ceil(text.length / batchChars) * INPUT_PACING_MS;
   }
-  function wrappedCommandText() {
-    return `${buildPendingInputClearPrefix(resolvedShellKind)}${buildWrappedCommand(command, resolvedShellKind, marker, probeLiveShell)}`;
+  function wrappedCommandText(shellKind = resolvedShellKind) {
+    return `${buildPendingInputClearPrefix(shellKind)}${buildWrappedCommand(command, shellKind, marker, probeLiveShell)}`;
   }
   // Fall back to typing the wrapper with the pre-probe (or partially
   // detected) shell kind. The _Q sentinel can be lost after a complete _P
@@ -288,15 +288,23 @@ function startPtyJob(ptyStream, command, options) {
   // fallback against the remaining wall-clock budget and reserve the
   // fallback wrapper's own paced-delivery time inside it — the fallback must
   // still have enough wall time to FINISH typing before finish() cancels it,
-  // not merely to start. When the remaining budget cannot fit the wrapper at
-  // all, skip the probe (or do not arm the fallback) so no partially typed
-  // wrapper is cancelled mid-delivery by the wall deadline.
+  // not merely to start. abortProbeToWrapper() may salvage a different shell
+  // kind from a partial _P line (e.g. fish recorded but a nested POSIX shell
+  // detected), so reserve delivery time for the longest wrapper among the
+  // kinds the fallback could end up typing — probingShell only runs for
+  // posix/fish sessions, so that set is exactly {"posix", "fish"}. When the
+  // remaining budget cannot fit the wrapper at all, skip the probe (or do
+  // not arm the fallback) so no partially typed wrapper is cancelled
+  // mid-delivery by the wall deadline.
   function armProbeTimeout() {
     clearProbeTimeout();
     const deadlineBudgetMs = maxBufferedChars > 0 ? BG_STARTUP_TIMEOUT_MS : timeoutMs;
     let delayMs = Math.min(PROBE_DEADLINE_MS, Math.floor(deadlineBudgetMs * 3 / 4));
     if (wallClockArmed) {
-      const wrapperDeliveryMs = estimateInputDeliveryMs(wrappedCommandText());
+      const wrapperDeliveryMs = Math.max(
+        estimateInputDeliveryMs(wrappedCommandText("posix")),
+        estimateInputDeliveryMs(wrappedCommandText("fish")),
+      );
       const remainingMs = deadlineBudgetMs - (Date.now() - wallStartMs);
       if (remainingMs <= wrapperDeliveryMs) {
         // Even an immediate fallback cannot finish typing the wrapper before
