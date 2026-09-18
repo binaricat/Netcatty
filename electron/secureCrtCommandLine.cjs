@@ -161,7 +161,12 @@ function parseSecureCrtCommandLineTokens(argv) {
       continue;
     }
 
-    if (index > 0 && /^\/[a-z][a-z0-9]*$/i.test(arg)) return fail();
+    // Only the executable and Electron development entry point are paths;
+    // other slash-prefixed tokens are switches, including punctuated names.
+    const isEntryPoint = index === 1
+      && /(?:^|[/\\])electron(?:\.exe)?$/i.test(argv[0])
+      && /\.(?:js|cjs|mjs|asar)$/i.test(arg);
+    if (index > 0 && !isEntryPoint && arg.startsWith("/")) return fail();
 
     if (/^[a-z][a-z0-9+.-]*:\/\//i.test(arg.trim())) continue;
 

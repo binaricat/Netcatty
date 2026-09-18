@@ -224,3 +224,16 @@ test("redaction does not mistake a flag-shaped username for a password switch", 
   redactSecureCrtCommandLinePasswords(argv);
   assert.deepEqual(argv, ["Netcatty.exe", "/SSH2", "/L", "/PASSWORD", "/PASSWORD", "******", "server.example.com"]);
 });
+
+test("punctuated unknown SecureCRT switches are rejected", () => {
+  for (const flag of ["/UNKNOWN-FLAG", "/UNKNOWN_FLAG", "/UNKNOWN=value", "/UNKNOWN:value", "/unknown/path"]) {
+    assert.equal(parseSecureCrtCommandLine(["Netcatty.exe", "/SSH2", flag, "server.example.com"]), null);
+  }
+});
+
+test("SecureCRT launches still accept absolute Electron development entry paths", () => {
+  assert.equal(parseSecureCrtCommandLine([
+    "/Applications/Electron.app/Contents/MacOS/Electron", "/workspace/electron/main.cjs",
+    "/SSH2", "/L", "alice", "server.example.com",
+  ])?.url, "ssh://alice@server.example.com");
+});
