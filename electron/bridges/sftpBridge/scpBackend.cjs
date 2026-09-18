@@ -11,6 +11,7 @@
 
 const fs = require("node:fs");
 const path = require("node:path");
+const { statLocal, openLocalReadStream } = require("../asarSafeFs.cjs");
 const { executeBoundedSshCommand, terminateSshExecStream } = require("../boundedSshExec.cjs");
 const { invalidateSshTransport } = require("../sshTransportInvalidation.cjs");
 const {
@@ -384,7 +385,8 @@ function createScpBackend(deps = {}) {
   async function uploadFile(localPath, remotePath, options = {}) {
     // Always use a fresh size for the SCP wire header so a shrinking/growing
     // file between enqueue and open cannot desync the remote scp -t peer.
-    const st = await fsModule.promises.stat(localPath);
+    // asarSafeFs: real *.asar sources must not stat/read as archives (#3450).
+    const st = await statLocal(localPath);
     const hasProvidedReadStream = typeof options.openReadStream === "function";
     const fileSize = hasProvidedReadStream ? Number(options.fileSize) : st.size;
     if (!Number.isSafeInteger(fileSize) || fileSize < 0) {
@@ -438,13 +440,78 @@ function createScpBackend(deps = {}) {
       // Arm the final ACK listener before the trailing NUL so a fast remote cannot
       // race past waitForAck and hang the upload. Race it with the stream so a
       // mid-stream remote error/cancel does not leave an unhandled rejection.
+      const isCancelled = () => transfer?.cancelled || signal?.aborted;
       const finalAck = waitForAck(stream, transfer, signal);
+      // Attach a rejection handler immediately: if the local open below rejects
+      // (or the remote stream closes while it is pending), finalAck would
+      // otherwise reject before Promise.all starts awaiting, surfacing as a
+      // process-level unhandledRejection for an ordinary failed upload. The
+      // rejection is also forwarded to the pending-open race below so a remote
+      // disconnect settles a stalled local open instead of leaving the upload
+      // waiting until the (possibly unresponsive) local filesystem answers.
+      let onFinalAckFailure = null;
+      void finalAck.catch((ackError) => {
+        const notify = onFinalAckFailure;
+        onFinalAckFailure = null;
+        if (typeof notify === "function") notify(ackError);
+      });
       let activeReadStream = null;
       let activeReadCompletion = Promise.resolve();
+      // Open the local source asynchronously (asarSafeFs) so a slow or
+      // unresponsive filesystem never blocks the main thread; open failures
+      // reject into the outer catch, which aborts the scp stream. Race the
+      // open against cancellation so a stalled open (e.g. an unresponsive
+      // NFS/SMB mount) cannot keep the transfer stuck after the user cancels:
+      // the race rejects immediately, and a file descriptor that only arrives
+      // after cancellation is destroyed (closing its fd) instead of leaking.
+      // The race also settles on an early finalAck rejection (remote close).
+      const openedReadStream = await new Promise((resolve, reject) => {
+        const openPromise = hasProvidedReadStream
+          ? Promise.resolve().then(() => options.openReadStream())
+          : openLocalReadStream(localPath, { highWaterMark: 256 * 1024 });
+        let settled = false;
+        let poll = null;
+        const settle = (fn, value) => {
+          if (settled) return;
+          settled = true;
+          onFinalAckFailure = null;
+          if (poll) {
+            clearInterval(poll);
+            poll = null;
+          }
+          fn(value);
+        };
+        openPromise.then(
+          (result) => {
+            const readStream = result?.stream || result;
+            if (isCancelled()) {
+              try { readStream?.destroy?.(); } catch { /* ignore */ }
+              settle(reject, new Error("Transfer cancelled"));
+              return;
+            }
+            if (settled) {
+              // The race already settled (e.g. via remote ACK failure); the
+              // late-arriving descriptor must be destroyed instead of leaking.
+              try { readStream?.destroy?.(); } catch { /* ignore */ }
+              return;
+            }
+            settle(resolve, result);
+          },
+          (err) => settle(reject, err),
+        );
+        const cancel = (err) => settle(reject, err || new Error("Transfer cancelled"));
+        onFinalAckFailure = (ackError) => cancel(ackError);
+        if (isCancelled()) {
+          cancel();
+          return;
+        }
+        // Poll the cancel flag so aborts work even while the open is pending.
+        poll = setInterval(() => {
+          if (isCancelled()) cancel();
+        }, 25);
+        if (typeof poll.unref === "function") poll.unref();
+      });
       const streamDone = new Promise((resolve, reject) => {
-        const openedReadStream = hasProvidedReadStream
-          ? options.openReadStream()
-          : fsModule.createReadStream(localPath, { highWaterMark: 256 * 1024 });
         const readStream = openedReadStream?.stream || openedReadStream;
         activeReadCompletion = Promise.resolve(openedReadStream?.completed);
         activeReadStream = readStream;
