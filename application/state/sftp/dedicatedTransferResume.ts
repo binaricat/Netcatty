@@ -1007,9 +1007,6 @@ async function resumeDirectoryWithDedicatedSession(
   const pausedAtResume = new Map(sftpTransferCenterStore.getSnapshot().tasks
     .filter((child) => child.parentTaskId === parent.id && child.status === "paused")
     .map((child) => [child.id, child]));
-  const completedAtRestart = new Map(sftpTransferCenterStore.getSnapshot().tasks
-    .filter((child) => child.parentTaskId === parent.id && child.status === "completed")
-    .map((child) => [child.id, child]));
   const bridge = netcattyBridge.get();
   if (!bridge?.startStreamTransfer) {
     return { success: false, error: "Transfer bridge unavailable" };
@@ -1094,6 +1091,12 @@ async function resumeDirectoryWithDedicatedSession(
           // the source since the interrupted attempt, so rebuild it from empty.
           await resetDirectoryReplaceStage(parent, endpoints, targetSftpId);
         }
+        // Session setup and traversal may finish more children. Capture only
+        // after resetting the stage/checkpoint: all these completions refer to
+        // the discarded destination, while later completions remain valid.
+        const completedAtRestart = new Map(sftpTransferCenterStore.getSnapshot().tasks
+          .filter((child) => child.parentTaskId === parent.id && child.status === "completed")
+          .map((child) => [child.id, child]));
         const destRoot = resolveDirectoryResumeTargetRoot(parent);
         if (endpoints.isDownload) await ensureLocalDir(destRoot);
         if (targetSftpId) await ensureRemoteDir(targetSftpId, destRoot);

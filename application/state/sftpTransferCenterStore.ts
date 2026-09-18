@@ -42,6 +42,14 @@ import { restoreSftpTransferHistoryCooperatively } from "./sftp/transferHistoryR
 import { cancelExternalUploadRuntime } from "./sftp/externalUploadRuntime";
 
 type Listener = () => void;
+type TaskSettlementObserver = {
+  expected: TransferTask;
+  initialIdentity?: TransferTask;
+  settled?: TransferTask;
+  conflicted?: boolean;
+  ignoredCompletion?: TransferTask;
+  onIdentityConflict?: () => void;
+};
 
 // Ordinary bounded history restores synchronously so existing callers receive
 // it immediately. Legacy directory snapshots can contain tens of thousands of
@@ -405,7 +413,7 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
   let snapshotDirty = false;
   const listeners = new Set<Listener>();
   const progressListeners = new Set<Listener>();
-  const settlementObservers = new Map<string, Set<{ expected: TransferTask; settled?: TransferTask; conflicted?: boolean; ignoredCompletion?: TransferTask; onIdentityConflict?: () => void }>>();
+  const settlementObservers = new Map<string, Set<TaskSettlementObserver>>();
   const matchesObservedTask = (expected: TransferTask, candidate: TransferTask) => (
     expected.id === candidate.id
     && expected.sourcePath === candidate.sourcePath
@@ -416,11 +424,21 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
   );
   const captureObservedTask = (task: TransferTask) => {
     for (const observer of settlementObservers.get(task.id) ?? []) {
-      if (observer.settled || observer.conflicted || task === observer.ignoredCompletion) continue;
-      if (!matchesObservedTask(observer.expected, task)) {
+      if (observer.conflicted || task === observer.ignoredCompletion) continue;
+      const matchesExpected = matchesObservedTask(observer.expected, task);
+      // A retry may plan a new source identity while its initial stale row is
+      // still paused. Republishing that unchanged identity is not displacement.
+      if (!matchesExpected && observer.initialIdentity
+        && matchesObservedTask(observer.initialIdentity, task)) continue;
+      observer.initialIdentity = undefined;
+      if (!matchesExpected) {
         observer.conflicted = true;
         observer.onIdentityConflict?.();
-      } else if (TERMINAL_OWNER_STATUSES.has(task.status)) observer.settled = task;
+      } else if (observer.settled?.status !== "completed") {
+        // Failed/cancelled evidence belongs to the latest observed attempt. A
+        // resumed owner can supersede it; exact successful completion stays final.
+        observer.settled = TERMINAL_OWNER_STATUSES.has(task.status) ? task : undefined;
+      }
     }
   };
   const refreshBadgeSnapshot = () => {
@@ -1352,7 +1370,7 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
       if (existing && (existing.sourcePath !== incoming.sourcePath || existing.targetPath !== incoming.targetPath
         || existing.parentTaskId !== incoming.parentTaskId)) return "conflict";
       if (existing?.status === "cancelled") return "cancelled";
-      // Only the exact completion captured before rebuilding the destination is
+      // Only the exact completion captured at the destination reset is
       // stale. A newer completion or user control must keep its authority.
       const restartsCompletion = existing?.status === "completed" && existing === completedAtRestart;
       if (existing?.status === "completed" && !restartsCompletion) {
@@ -1398,7 +1416,11 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
       return "ready";
     },
     observeTaskSettlement(expected, ignoredCompletion, onIdentityConflict) {
-      const observer: { expected: TransferTask; settled?: TransferTask; conflicted?: boolean; ignoredCompletion?: TransferTask; onIdentityConflict?: () => void } = { expected: { ...expected }, ignoredCompletion, onIdentityConflict };
+      const initial = tasks.find((task) => task.id === expected.id);
+      const observer: TaskSettlementObserver = {
+        expected: { ...expected }, ignoredCompletion, onIdentityConflict,
+        initialIdentity: initial && !matchesObservedTask(expected, initial) ? { ...initial } : undefined,
+      };
       const observers = settlementObservers.get(expected.id) ?? new Set();
       observers.add(observer);
       settlementObservers.set(expected.id, observers);

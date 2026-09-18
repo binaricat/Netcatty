@@ -40,21 +40,26 @@ Windows report:
   Both bounded regressions returned `still-waiting` before the fix.
 
 Recovery now authorizes reuse of a completed row for a fresh transfer only when
-it is the exact row captured before the destination/checkpoint reset. Newer
+it is the exact row captured at the destination/checkpoint reset, after stage
+deletion has finished. This includes files completed during session setup or
+traversal. Newer
 completion, pause and cancellation still win. Reset byte checkpoints and source
 fingerprints are published with that admission. Ordinary recovery continues to
 reuse valid completed work.
 
 Settlement observations retain identity-conflict evidence before compaction,
-including explicit admission changes. A displaced invocation fails explicitly
+including explicit admission changes. Before each admission attempt, an observed identity conflict stops the old
+invocation from reclaiming an active row after a pause. A displaced invocation fails explicitly
 instead of waiting for completion evidence belonging to another file. Both live
 and dedicated walks report that failure without overwriting the new owner's
 child row; dedicated recovery discards its deferred update synchronously when
 the observation detects displacement. This also prevents an automatic 512-entry
 batch flush from publishing the old snapshot while its invoke reply is delayed.
-Existing
-exact completion evidence remains authoritative; missing rows alone still do
-not prove success. Observations remain scoped to their waiter and are disposed.
+Exact completion evidence is retained independently of later ownership changes:
+an old success still cannot overwrite a newer owner. Initial retained identities
+are distinguished from changes observed while waiting, and newer same-file
+attempts supersede old failed evidence. Missing rows alone still do not prove
+success. Observations remain scoped to their waiter and are disposed.
 
 These cases explain specific large-history recovery failures. They do not prove
 that the original Windows v1.1.82 freeze was caused by either case; its file count,

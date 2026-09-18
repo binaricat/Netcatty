@@ -252,3 +252,96 @@ test("destination rebuild waiting on pause reuses a newer compacted completion",
   assert.equal(await settled, "completed");
   assert.equal(starts, 0, "new completion after stage rebuild must be reused even when its row was compacted");
 });
+
+test("paused admission cannot reclaim an identity replaced while it waited", async (t) => {
+  const { sftpTransferCenterStore: store } = await import("../sftpTransferCenterStore");
+  const { runTransferAndWaitForOwner } = await import("./waitForTransferOwner");
+  const task = { ...child(), id: "paused-displaced", parentTaskId: undefined };
+  store.upsertTasks([{ ...task, status: "paused" }]);
+  let starts = 0;
+  let abort = false;
+  const running = runTransferAndWaitForOwner(task, async () => { starts += 1; return {}; }, () => abort);
+  const settled = running.then(() => "completed", (error: Error) => error.message);
+  t.after(async () => {
+    abort = true;
+    await settled;
+    store.patchTask(task.id, { status: "completed" });
+    store.dismiss(task.id);
+  });
+  store.upsertTasks([{ ...task, status: "transferring", directoryEntryIdentity: "b".repeat(64), lifecycleEpoch: 1 }]);
+  assert.match(await settled, /identity changed/i);
+  assert.equal(starts, 0);
+  assert.equal(store.getTask(task.id)?.directoryEntryIdentity, "b".repeat(64));
+});
+
+for (const identityChangesDuringWait of [false, true]) {
+  test(`paused recovery distinguishes initial stale identity from later ownership: changed=${identityChangesDuringWait}`, async (t) => {
+    const { sftpTransferCenterStore: store } = await import("../sftpTransferCenterStore");
+    const { runTransferAndWaitForOwner } = await import("./waitForTransferOwner");
+    const { latchTransferPause, resetTransferPauseLatchesForTests } = await import("./transferPauseLatch");
+    const task = { ...child(), id: `paused-origin-${identityChangesDuringWait}`, parentTaskId: `paused-origin-root-${identityChangesDuringWait}` };
+    const root = { ...task, id: task.parentTaskId, parentTaskId: undefined, isDirectory: true };
+    store.upsertTasks([root, {
+      ...task, status: identityChangesDuringWait ? "failed" : "paused",
+      directoryEntryIdentity: identityChangesDuringWait ? task.directoryEntryIdentity : "b".repeat(64),
+    }]);
+    latchTransferPause(task.id);
+    let starts = 0;
+    let abort = false;
+    let conflicts = 0;
+    const running = runTransferAndWaitForOwner(task, async () => { starts += 1; return {}; }, () => abort,
+      undefined, undefined, () => { conflicts += 1; });
+    const settled = running.then(() => "completed", (error: Error) => error.message);
+    t.after(async () => {
+      abort = true;
+      resetTransferPauseLatchesForTests();
+      await settled;
+      store.patchTask(root.id, { status: "completed" });
+      store.dismiss(root.id);
+    });
+    // This captures the prior failed result, or republishes the unchanged
+    // initial old identity. Neither is evidence of a replacement by itself.
+    store.patchTask(root.id, { reconnectRequired: true });
+    resetTransferPauseLatchesForTests();
+    store.patchTask(task.id, { status: "transferring", directoryEntryIdentity: "b".repeat(64), lifecycleEpoch: 1 });
+    const outcome = await settled;
+    if (identityChangesDuringWait) {
+      assert.match(outcome, /identity changed/i);
+      assert.equal(starts, 0);
+      assert.equal(conflicts, 1);
+      assert.equal(store.getTask(task.id)?.directoryEntryIdentity, "b".repeat(64));
+    } else {
+      assert.equal(outcome, "completed");
+      assert.equal(starts, 1);
+      assert.equal(conflicts, 0);
+    }
+  });
+}
+
+test("paused retry observes newer same-identity completion after an old failure", async (t) => {
+  const { sftpTransferCenterStore: store } = await import("../sftpTransferCenterStore");
+  const { runTransferAndWaitForOwner } = await import("./waitForTransferOwner");
+  const { latchTransferPause, resetTransferPauseLatchesForTests } = await import("./transferPauseLatch");
+  const task = { ...child(), id: "failed-then-completed", parentTaskId: "failed-then-completed-root" };
+  const root = { ...task, id: task.parentTaskId, parentTaskId: undefined, isDirectory: true };
+  store.upsertTasks([root, { ...task, status: "failed" }]);
+  latchTransferPause(task.id);
+  let starts = 0;
+  let abort = false;
+  const running = runTransferAndWaitForOwner(task, async () => { starts += 1; return {}; }, () => abort);
+  const settled = running.then(() => "completed", (error: Error) => error.message);
+  t.after(async () => {
+    abort = true;
+    resetTransferPauseLatchesForTests();
+    await settled;
+    store.patchTask(root.id, { status: "completed" });
+    store.dismiss(root.id);
+  });
+  store.patchTask(root.id, { reconnectRequired: true });
+  resetTransferPauseLatchesForTests();
+  store.patchTask(task.id, { status: "transferring", lifecycleEpoch: 1 });
+  store.patchTask(task.id, { status: "completed", lifecycleEpoch: 2 });
+  assert.equal(store.getTask(task.id), undefined);
+  assert.equal(await settled, "completed");
+  assert.equal(starts, 0, "a newer completed attempt must replace the captured old failure");
+});

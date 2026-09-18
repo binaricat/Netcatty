@@ -20,6 +20,7 @@ export async function runTransferAndWaitForOwner(
   try {
     for (;;) {
       if (shouldAbort()) throw new Error("Transfer cancelled");
+      if (observation.hasIdentityConflict()) throw new TransferOwnerChangedError("Transfer identity changed before dispatch");
       const admission = sftpTransferCenterStore.admitTaskRun(task, pausedAtResume, completedAtRestart);
       if (admission === "cancelled") throw new Error("Transfer cancelled");
       if (admission === "completed" || observation.read()?.status === "completed") return {};
@@ -31,6 +32,7 @@ export async function runTransferAndWaitForOwner(
     observation.dispose();
     observation = sftpTransferCenterStore.observeTaskSettlement(task, undefined, onOwnerChanged);
     const result = await start();
+    if (observation.hasIdentityConflict()) throw new TransferOwnerChangedError("Transfer identity changed while waiting for its owner");
     if (!result?.superseded) return result;
     for (;;) {
       if (shouldAbort()) throw new Error("Transfer cancelled");
