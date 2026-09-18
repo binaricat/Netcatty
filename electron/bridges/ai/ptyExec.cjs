@@ -95,6 +95,26 @@ function startPtyJob(ptyStream, command, options) {
   const CANCEL_RETRY_MS = 5000;
   const CANCEL_WALL_TIMEOUT_MS = 30000;
 
+  // Bounded fallback for the live shell probe: if the probe's _Q marker never
+  // comes back (hosts that swallow or never echo the typed probe, shells that
+  // block on $PPID inspection, …), waiting for the full command timeout
+  // starves the session — the real command is never even typed (#3446). After
+  // this window, give up on the probe and deliver the wrapper with the
+  // already-resolved shell kind so the command still reaches the remote shell.
+  // The probe runs in the foreground of the interactive shell, so a hung probe
+  // (blocked ps, stuck /proc read) leaves the shell busy: typing the wrapper
+  // right away would only queue it in the PTY. The fallback therefore
+  // interrupts the probe first and waits for the shell to return to idle
+  // before typing the wrapper.
+  const PROBE_FALLBACK_TIMEOUT_MS = 10000;
+  // Bounded settle window after the interrupt: the wrapper is delivered as
+  // soon as a fresh idle prompt is observed, or unconditionally after this
+  // delay (sessions without a known expectedPrompt can never match one).
+  const PROBE_INTERRUPT_SETTLE_MS = 2000;
+  let probeFallbackTimer = null;
+  let probeInterruptTimer = null;
+  let probeInterruptBase = -1;
+
   const usesLiveShellProbe = probeLiveShell && ["posix", "fish"].includes(resolvedShellKind);
   let probingShell = usesLiveShellProbe;
   let deliveringInput = false;
@@ -157,6 +177,44 @@ function startPtyJob(ptyStream, command, options) {
     while (cancelOneShotTimers.length) {
       clearTimeout(cancelOneShotTimers.pop());
     }
+  }
+
+  function clearProbeFallback() {
+    if (probeFallbackTimer) {
+      clearTimeout(probeFallbackTimer);
+      probeFallbackTimer = null;
+    }
+    if (probeInterruptTimer) {
+      clearTimeout(probeInterruptTimer);
+      probeInterruptTimer = null;
+    }
+    probeInterruptBase = -1;
+  }
+
+  function deliverWrapperAfterProbeInterrupt() {
+    probeInterruptTimer = null;
+    probeInterruptBase = -1;
+    if (finished || cancelRequested || !probingShell) return;
+    probingShell = false;
+    probeOutput = "";
+    writeWrappedCommand();
+  }
+
+  function armProbeFallback() {
+    clearProbeFallback();
+    probeFallbackTimer = setTimeout(() => {
+      probeFallbackTimer = null;
+      if (finished || cancelRequested || !probingShell) return;
+      // The probe may itself be the stuck foreground job. Interrupt it so the
+      // shell regains its input loop — otherwise the wrapper written below
+      // merely queues behind the hung probe and can start much later.
+      probeInterruptBase = probeOutput.length;
+      sendInterrupt();
+      probeInterruptTimer = setTimeout(
+        deliverWrapperAfterProbeInterrupt,
+        PROBE_INTERRUPT_SETTLE_MS,
+      );
+    }, PROBE_FALLBACK_TIMEOUT_MS);
   }
 
   function finishWithoutReturnedPrompt() {
@@ -261,6 +319,7 @@ function startPtyJob(ptyStream, command, options) {
     }
     cancelRequested = true;
     clearPromptFallback();
+    clearProbeFallback();
     clearCancelRetryTimer();
     // Cancel the startup timer too — otherwise a pre-start cancel resolves
     // as "Background job startup timed out" instead of "Cancelled".
@@ -442,6 +501,7 @@ function startPtyJob(ptyStream, command, options) {
     clearTimeout(wallTimeoutId);
     clearStartupTimeout();
     clearPromptFallback();
+    clearProbeFallback();
     clearEndMarkerWait();
     clearCancelRetryTimer();
     // Clear any pending one-shot cancel timers so they do not keep the
@@ -553,8 +613,21 @@ function startPtyJob(ptyStream, command, options) {
         return;
       }
       const probe = parseLiveShellProbe(stripAnsi(probeOutput), marker);
-      if (!probe) return;
+      if (!probe) {
+        // After the fallback interrupted a hung probe, a fresh idle prompt in
+        // the post-interrupt output means the shell is reading input again —
+        // deliver the wrapper immediately instead of waiting out the settle
+        // window. Only output received after the interrupt counts, so a prompt
+        // that was already in the buffer before it cannot fake an idle shell.
+        if (probeInterruptTimer !== null
+          && hasExpectedPromptSuffix(probeOutput.slice(probeInterruptBase), expectedPrompt)) {
+          clearProbeFallback();
+          deliverWrapperAfterProbeInterrupt();
+        }
+        return;
+      }
       probingShell = false;
+      clearProbeFallback();
       probeOutput = "";
       if (probe.kind) resolvedShellKind = probe.kind;
       if (finished || cancelRequested) return;
@@ -765,6 +838,7 @@ function startPtyJob(ptyStream, command, options) {
       deliveringInput = false;
       if (!pendingEnd) armOutputTimeout();
       if (!foundStart) armStartupTimeout();
+      if (probingShell) armProbeFallback();
     }
   }
 

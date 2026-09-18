@@ -125,3 +125,120 @@ for (const shellKind of ['powershell', 'cmd']) {
     assert.match((await job.resultPromise).error, /Cancelled/);
   });
 }
+
+test('a missing live probe reply falls back to delivering the command (#3446)', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const pty = new EventEmitter();
+  const writes = [];
+  const interrupts = [];
+  pty.write = (data) => {
+    if (data === '\x03') {
+      interrupts.push(data);
+      return;
+    }
+    writes.push(String(data));
+  };
+  const command = 'mkdir /tmp/nc_silent_probe_fallback';
+  const job = startPtyJob(pty, command, {
+    shellKind: 'posix', probeLiveShell: true, timeoutMs: 60000,
+  });
+  const probeLength = 2 + buildLiveShellProbe(job.marker).length;
+  while (writes.join('').length < probeLength) t.mock.timers.tick(30);
+  const writesBeforeFallback = writes.length;
+  // The probe reply never arrives. The probe runs in the foreground of the
+  // interactive shell, so the fallback must first interrupt it — otherwise
+  // the wrapper would only queue behind the hung probe — and then type the
+  // wrapper once the shell has settled back to idle.
+  t.mock.timers.tick(10000);
+  assert.equal(interrupts.length, 1, 'the stalled probe is interrupted');
+  assert.ok(
+    !writes.slice(writesBeforeFallback).join('').includes(command),
+    'the wrapper is not typed while the probe still owns the foreground',
+  );
+  const wrapped = buildWrappedCommand(command, 'posix', job.marker, true);
+  let guard = 0;
+  while (!writes.slice(writesBeforeFallback).join('').includes(wrapped) && guard++ < 500) {
+    t.mock.timers.tick(30);
+  }
+  assert.ok(
+    writes.slice(writesBeforeFallback).join('').includes(wrapped),
+    'wrapper is typed after the probe interrupt settles',
+  );
+  pty.emit('data', `${job.marker}_S\n${job.marker}_E:0\n`);
+  const result = await job.resultPromise;
+  assert.equal(result.ok, true);
+  assert.equal(result.exitCode, 0);
+  t.mock.timers.reset();
+  pty.emit('close');
+});
+
+test('the probe fallback delivers the wrapper once the shell is idle again (#3446)', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const pty = new EventEmitter();
+  const writes = [];
+  const interrupts = [];
+  pty.write = (data) => {
+    if (data === '\x03') {
+      interrupts.push(data);
+      return;
+    }
+    writes.push(String(data));
+  };
+  const command = 'echo after-idle';
+  const job = startPtyJob(pty, command, {
+    shellKind: 'posix', probeLiveShell: true, timeoutMs: 60000,
+    expectedPrompt: 'host:~$ ',
+  });
+  const probeLength = 2 + buildLiveShellProbe(job.marker).length;
+  while (writes.join('').length < probeLength) t.mock.timers.tick(30);
+  // A stale idle prompt from before the probe reply went missing must not
+  // satisfy the fallback's idle check on its own.
+  pty.emit('data', 'host:~$ ');
+  const writesBeforeFallback = writes.length;
+  t.mock.timers.tick(10000);
+  assert.equal(interrupts.length, 1, 'the stalled probe is interrupted');
+  t.mock.timers.tick(500);
+  assert.ok(
+    !writes.slice(writesBeforeFallback).join('').includes(command),
+    'the wrapper waits for a fresh idle prompt after the interrupt',
+  );
+  // The shell recovered from the interrupted probe and shows its prompt.
+  pty.emit('data', '^Chost:~$ ');
+  const wrapped = buildWrappedCommand(command, 'posix', job.marker, true);
+  let guard = 0;
+  while (!writes.slice(writesBeforeFallback).join('').includes(wrapped) && guard++ < 200) {
+    t.mock.timers.tick(30);
+  }
+  assert.ok(
+    writes.slice(writesBeforeFallback).join('').includes(wrapped),
+    'wrapper is typed as soon as the shell is idle again',
+  );
+  pty.emit('data', `${job.marker}_S\n${job.marker}_E:0\n`);
+  const result = await job.resultPromise;
+  assert.equal(result.ok, true);
+  t.mock.timers.reset();
+  pty.emit('close');
+});
+
+test('cancelling during a stalled probe never types the command (#3446)', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const pty = new EventEmitter();
+  const writes = [];
+  pty.write = (data) => {
+    if (data === '\x03') return;
+    writes.push(String(data));
+  };
+  const command = 'echo should-not-run';
+  const job = startPtyJob(pty, command, {
+    shellKind: 'posix', probeLiveShell: true, timeoutMs: 60000,
+  });
+  const probeLength = 2 + buildLiveShellProbe(job.marker).length;
+  while (writes.join('').length < probeLength) t.mock.timers.tick(30);
+  job.cancel();
+  t.mock.timers.tick(10000);
+  assert.ok(writes.every((data) => !data.includes('echo should-not-run')));
+  const result = await job.resultPromise;
+  assert.match(result.error, /Cancelled/);
+  t.mock.timers.reset();
+  pty.emit('close');
+});
