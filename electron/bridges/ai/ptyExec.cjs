@@ -114,6 +114,7 @@ function startPtyJob(ptyStream, command, options) {
   let wallTimeoutId = null;
   let startupTimeoutId = null;
   let promptFallbackTimer = null;
+  let probeTimeoutId = null;
   let endMarkerWaitTimer = null;
   let cancelRetryTimerId = null;
   // Track one-shot timers scheduled inside requestCancel so finish() can
@@ -222,6 +223,30 @@ function startPtyJob(ptyStream, command, options) {
       clearTimeout(startupTimeoutId);
       startupTimeoutId = null;
     }
+  }
+
+  // Bounded live-shell probe deadline (issue #3445): if the probe's _Q
+  // sentinel never arrives (lossy link, exotic shell, paused renderer flow,
+  // missing trailing newline on the typed probe), probingShell used to stay
+  // latched forever, so the wrapped command was never typed and the job
+  // burned the entire command timeout while holding the session lock.
+  // After a short deadline, fall back to typing the wrapper with the
+  // pre-probe shell kind so the command still gets delivered.
+  const PROBE_DEADLINE_MS = 15000;
+  function clearProbeTimeout() {
+    if (probeTimeoutId) {
+      clearTimeout(probeTimeoutId);
+      probeTimeoutId = null;
+    }
+  }
+  function armProbeTimeout() {
+    clearProbeTimeout();
+    probeTimeoutId = setTimeout(() => {
+      probeTimeoutId = null;
+      if (finished || cancelRequested || !probingShell) return;
+      probingShell = false;
+      writeWrappedCommand();
+    }, Math.min(PROBE_DEADLINE_MS, timeoutMs));
   }
 
   function sendInterrupt() {
@@ -441,6 +466,7 @@ function startPtyJob(ptyStream, command, options) {
     clearTimeout(timeoutId);
     clearTimeout(wallTimeoutId);
     clearStartupTimeout();
+    clearProbeTimeout();
     clearPromptFallback();
     clearEndMarkerWait();
     clearCancelRetryTimer();
@@ -555,6 +581,7 @@ function startPtyJob(ptyStream, command, options) {
       const probe = parseLiveShellProbe(stripAnsi(probeOutput), marker);
       if (!probe) return;
       probingShell = false;
+      clearProbeTimeout();
       probeOutput = "";
       if (probe.kind) resolvedShellKind = probe.kind;
       if (finished || cancelRequested) return;
@@ -765,6 +792,7 @@ function startPtyJob(ptyStream, command, options) {
       deliveringInput = false;
       if (!pendingEnd) armOutputTimeout();
       if (!foundStart) armStartupTimeout();
+      if (probingShell) armProbeTimeout();
     }
   }
 
