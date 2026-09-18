@@ -347,3 +347,48 @@ test("startSerial does not arm the fallback when auto-login is cancelled before 
   await new Promise((resolve) => setTimeout(resolve, 700));
   assert.deepEqual(writtenCommands, []);
 });
+
+for (const runMode of ['paste', 'lineDelay', 'noAutoRun']) {
+  test(`serial reconnect discards the previous delayed startup command (${runMode})`, async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const writes: string[] = [];
+    const completions: Array<(evt: {sessionId: string; bootEpoch: number}) => void> = [];
+    const backend = buildBackend({
+      startSerialSession: async () => 'session-1',
+      onTelnetAutoLoginComplete: (_id: string, cb: typeof completions[number]) => {
+        completions.push(cb);
+        return noop;
+      },
+      onTelnetAutoLoginCancelled: () => noop,
+      writeToSession: (_id: string, data: string) => writes.push(data),
+    });
+    const ctx = buildCtx(backend, {
+      host: { id: 'serial-1', protocol: 'serial', username: 'admin', startupCommand: 'show version', startupCommandRunMode: runMode === 'lineDelay' ? 'lineDelay' : 'paste' },
+      terminalSettings: { startupCommandDelayMs: 100 },
+      noAutoRun: runMode === 'noAutoRun',
+    });
+    const starters = createTerminalSessionStarters(ctx as never);
+    await starters.startSerial(term as never);
+    completions[0]({sessionId: 'session-1', bootEpoch: 0});
+    ctx.bootEpochRef.current = 1;
+    ctx.hasRunStartupCommandRef.current = false;
+    await starters.startSerial(term as never);
+    t.mock.timers.tick(100);
+    assert.deepEqual(writes, []);
+    completions[1]({sessionId: 'session-1', bootEpoch: 1});
+    t.mock.timers.tick(100);
+    assert.deepEqual(writes, [runMode === 'noAutoRun' ? 'show version' : 'show version\r']);
+  });
+}
+
+test('serial quick connect does not synthesize auto-login credentials', async () => {
+  const { createSerialTerminalSession } = await import('../../../application/state/sessionFactories');
+  const { resolveTerminalSessionHost } = await import('../../../domain/terminalHostResolution');
+  const session = createSerialTerminalSession('quick', {path: '/dev/ttyUSB0', baudRate: 115200});
+  const host = resolveTerminalSessionHost({session, hosts: [], groupConfigs: [], proxyProfiles: [], localOs: 'macos'});
+  let options: Record<string, unknown> = {};
+  const backend = buildBackend({startSerialSession: async (value: Record<string, unknown>) => {options = value; return 'quick';}});
+  await createTerminalSessionStarters(buildCtx(backend, {host}) as never).startSerial(term as never);
+  assert.equal(options.username, undefined);
+  assert.equal(options.password, undefined);
+});

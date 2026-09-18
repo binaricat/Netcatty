@@ -66,7 +66,7 @@ function buildFallbackHostFromSession(
     id: session.hostId,
     label: session.hostLabel || "Local Terminal",
     hostname: session.hostname || "localhost",
-    username: session.username || "local",
+    username: session.username || (fallbackProtocol === "serial" ? "" : "local"),
     port: session.port ?? 22,
     os: fallbackProtocol === "local" ? localOs : "linux",
     group: "",

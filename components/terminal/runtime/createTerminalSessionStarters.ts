@@ -1993,11 +1993,15 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
       cancelPendingStartupCommand = undefined;
     };
     const scheduleStartupAfterAutoLogin = () => {
+      if (!isCurrentAttempt()) {
+        cleanupSerialStartupWait();
+        return;
+      }
       disposeAutoLoginListener();
       cancelPendingStartupCommand = scheduleStartupCommand(ctx, term, serialSessionId, () => {
         cancelPendingStartupCommand = undefined;
         disposeAutoLoginCancelListener();
-      });
+      }, isCurrentAttempt);
     };
 
     try {
@@ -2136,7 +2140,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         }, SERIAL_AUTO_LOGIN_FALLBACK_MS);
         return;
       }
-      scheduleStartupCommand(ctx, term, id);
+      scheduleStartupCommand(ctx, term, id, undefined, isCurrentAttempt);
     } catch (err) {
       cleanupSerialStartupWait();
       if (ignoreStaleAttemptUi()) return;
