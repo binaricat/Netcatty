@@ -281,6 +281,10 @@ declare global {
         cpu: number | null;           // CPU usage percentage (0-100)
         cpuCores: number | null;      // Number of CPU cores
         cpuPerCore: number[];         // Per-core CPU usage array
+        gpu?: number | null;          // NVIDIA utilization; absent on unsupported transports
+        gpuName?: string | null;      // First GPU name
+        gpuMemUsed?: number | null;   // Summed VRAM used in MB
+        gpuMemTotal?: number | null;  // Summed VRAM total in MB
         memTotal: number | null;      // Total memory in MB
         memUsed: number | null;       // Used memory in MB (excluding buffers/cache)
         memFree: number | null;       // Free memory in MB
