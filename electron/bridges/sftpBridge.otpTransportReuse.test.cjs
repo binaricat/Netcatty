@@ -18,6 +18,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const { generateKeyPairSync } = require("node:crypto");
 const fs = require("node:fs");
 const net = require("node:net");
 const path = require("node:path");
@@ -25,7 +26,6 @@ const path = require("node:path");
 const tempDirBridge = require("./tempDirBridge.cjs");
 
 const { Server } = require("ssh2");
-const keygen = require("ssh2/lib/keygen.js");
 
 const pool = require("./sshConnectionPool.cjs");
 const kiHandler = require("./keyboardInteractiveHandler.cjs");
@@ -201,62 +201,62 @@ function makeSftpHandlers(files, dirs) {
 
 function startOtpOnlyServer() {
   return new Promise((resolve, reject) => {
-    keygen.generateKeyPair("ed25519", (err, keys) => {
-      if (err) return reject(err);
-      const files = new Map();
-      const dirs = new Set(["/", "/home", "/home/otpuser"]);
-      const handlers = makeSftpHandlers(files, dirs);
-      let keyboardInteractiveRounds = 0;
+    const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+    const files = new Map();
+    const dirs = new Set(["/", "/home", "/home/otpuser"]);
+    const handlers = makeSftpHandlers(files, dirs);
+    let keyboardInteractiveRounds = 0;
 
-      const sshServer = new Server({ hostKeys: [keys.private] }, (client) => {
-        client.on("authentication", (ctx) => {
-          if (ctx.method === "keyboard-interactive") {
-            keyboardInteractiveRounds += 1;
-            ctx.prompt(
-              [{ prompt: "Verification code (OTP):", echo: false }],
-              "OTP required",
-              "",
-              (answers) => {
-                if (answers && answers[0] === OTP_CODE) ctx.accept();
-                else ctx.reject(["keyboard-interactive"]);
-              },
-            );
-            return;
-          }
-          // The server refuses everything else: OTP is the only way in.
-          ctx.reject(["keyboard-interactive"]);
-        });
-        client.on("ready", () => {
-          client.on("session", (accept) => {
-            const session = accept();
-            session.on("sftp", (acceptChannel) => {
-              const sftp = acceptChannel();
-              handlers.attach(sftp);
-            });
+    const sshServer = new Server({
+      hostKeys: [privateKey.export({ type: "pkcs1", format: "pem" })],
+    }, (client) => {
+      client.on("authentication", (ctx) => {
+        if (ctx.method === "keyboard-interactive") {
+          keyboardInteractiveRounds += 1;
+          ctx.prompt(
+            [{ prompt: "Verification code (OTP):", echo: false }],
+            "OTP required",
+            "",
+            (answers) => {
+              if (answers && answers[0] === OTP_CODE) ctx.accept();
+              else ctx.reject(["keyboard-interactive"]);
+            },
+          );
+          return;
+        }
+        // The server refuses everything else: OTP is the only way in.
+        ctx.reject(["keyboard-interactive"]);
+      });
+      client.on("ready", () => {
+        client.on("session", (accept) => {
+          const session = accept();
+          session.on("sftp", (acceptChannel) => {
+            const sftp = acceptChannel();
+            handlers.attach(sftp);
           });
         });
       });
-
-      const sockets = new Set();
-      const server = net.createServer((socket) => {
-        sockets.add(socket);
-        socket.on("close", () => sockets.delete(socket));
-        sshServer.injectSocket(socket);
-      });
-      server.on("error", reject);
-      server.listen(0, "127.0.0.1", () => resolve({
-        port: server.address().port,
-        files,
-        dirs,
-        getKeyboardInteractiveRounds: () => keyboardInteractiveRounds,
-        close: () => new Promise((done) => {
-          // Include clients still waiting for authentication, before registration.
-          for (const socket of sockets) socket.destroy();
-          sshServer.close?.();
-          server.close(() => done());
-        }),
-      }));
     });
+
+    const sockets = new Set();
+    const server = net.createServer((socket) => {
+      sockets.add(socket);
+      socket.on("close", () => sockets.delete(socket));
+      sshServer.injectSocket(socket);
+    });
+    server.on("error", reject);
+    server.listen(0, "127.0.0.1", () => resolve({
+      port: server.address().port,
+      files,
+      dirs,
+      getKeyboardInteractiveRounds: () => keyboardInteractiveRounds,
+      close: () => new Promise((done) => {
+        // Include clients still waiting for authentication, before registration.
+        for (const socket of sockets) socket.destroy();
+        sshServer.close?.();
+        server.close(() => done());
+      }),
+    }));
   });
 }
 
