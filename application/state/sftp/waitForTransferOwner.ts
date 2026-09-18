@@ -1,6 +1,9 @@
 import type { TransferTask } from "../../../domain/models";
 import { sftpTransferCenterStore } from "../sftpTransferCenterStore";
 
+/** The displaced invocation may fail its walk, but no longer owns the child row. */
+export class TransferOwnerChangedError extends Error {}
+
 type StreamResult = { error?: string; cancelled?: boolean; superseded?: boolean } | undefined;
 
 /** A live waiter owns bounded settlement evidence; persisted history stays compact. */
@@ -9,16 +12,17 @@ export async function runTransferAndWaitForOwner(
   start: () => Promise<StreamResult>,
   shouldAbort: () => boolean,
   pausedAtResume?: TransferTask,
+  completedAtRestart?: TransferTask,
 ): Promise<StreamResult> {
   // Register before admission/start: an owner may finish while dispatch waits for resume.
-  let observation = sftpTransferCenterStore.observeTaskSettlement(task);
+  let observation = sftpTransferCenterStore.observeTaskSettlement(task, completedAtRestart);
   try {
     for (;;) {
       if (shouldAbort()) throw new Error("Transfer cancelled");
-      const admission = sftpTransferCenterStore.admitTaskRun(task, pausedAtResume);
+      const admission = sftpTransferCenterStore.admitTaskRun(task, pausedAtResume, completedAtRestart);
       if (admission === "cancelled") throw new Error("Transfer cancelled");
       if (admission === "completed" || observation.read()?.status === "completed") return {};
-      if (admission === "conflict") throw new Error("Transfer identity changed before dispatch");
+      if (admission === "conflict") throw new TransferOwnerChangedError("Transfer identity changed before dispatch");
       if (admission === "ready") break;
       await new Promise((resolve) => setTimeout(resolve, 200));
     }
@@ -29,6 +33,7 @@ export async function runTransferAndWaitForOwner(
     if (!result?.superseded) return result;
     for (;;) {
       if (shouldAbort()) throw new Error("Transfer cancelled");
+      if (observation.hasIdentityConflict()) throw new TransferOwnerChangedError("Transfer identity changed while waiting for its owner");
       const latest = observation.read();
       if (latest?.status === "completed") return { ...result, superseded: false };
       if (latest?.status === "failed") throw new Error(latest.error || "Transfer failed");

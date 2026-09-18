@@ -186,6 +186,7 @@ export function useAppStartupEffects(ctx: StartupEffectsContext) {
                 childUpdateBatcher.push({ ...child, ownerId: "dedicated-resume" });
               }
             },
+            onChildSuperseded: (taskId) => childUpdateBatcher.discard(taskId),
             onDirectoryCheckpointUpdate: (checkpoint) => {
               if (acceptsResumeCallbacks) {
                 sftpTransferCenterStore.patchTask(task.id, {

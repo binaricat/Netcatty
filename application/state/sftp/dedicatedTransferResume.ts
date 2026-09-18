@@ -1,4 +1,4 @@
-import { runTransferAndWaitForOwner } from "./waitForTransferOwner";
+import { runTransferAndWaitForOwner, TransferOwnerChangedError } from "./waitForTransferOwner";
 import type { Host, Identity, KnownHost, SSHKey, TerminalSettings, TransferTask } from "../../../domain/models";
 import { validateTransferResumeSource } from "../../../domain/sftpTransferCenter";
 import { STORAGE_KEY_SFTP_TRANSFER_CONCURRENCY } from "../../../infrastructure/config/storageKeys";
@@ -63,6 +63,7 @@ export type DedicatedResumeResult = {
 export type DedicatedResumeOptions = {
   children?: readonly TransferTask[];
   onChildUpdate?: (child: TransferTask) => void;
+  onChildSuperseded?: (taskId: string) => void;
   onDirectoryCheckpointUpdate?: (checkpoint: TransferTask["directoryResumeCheckpoint"]) => void;
   shouldAbort?: () => boolean;
 };
@@ -1006,6 +1007,9 @@ async function resumeDirectoryWithDedicatedSession(
   const pausedAtResume = new Map(sftpTransferCenterStore.getSnapshot().tasks
     .filter((child) => child.parentTaskId === parent.id && child.status === "paused")
     .map((child) => [child.id, child]));
+  const completedAtRestart = new Map(sftpTransferCenterStore.getSnapshot().tasks
+    .filter((child) => child.parentTaskId === parent.id && child.status === "completed")
+    .map((child) => [child.id, child]));
   const bridge = netcattyBridge.get();
   if (!bridge?.startStreamTransfer) {
     return { success: false, error: "Transfer bridge unavailable" };
@@ -1278,7 +1282,8 @@ async function resumeDirectoryWithDedicatedSession(
                 uploadCheckpointBytes: childBase.uploadCheckpointBytes,
                 sourceFingerprint: childBase.sourceFingerprint,
                 skipAdmission: true,
-              }), () => options?.shouldAbort?.() === true, pausedAtResume.get(childId));
+              }), () => options?.shouldAbort?.() === true, pausedAtResume.get(childId),
+                resetPersistedCheckpoint ? completedAtRestart.get(childId) : undefined);
 
               if (streamResult?.error || streamResult?.cancelled) {
                 throw new Error(streamResult.error || "Transfer cancelled");
@@ -1303,6 +1308,12 @@ async function resumeDirectoryWithDedicatedSession(
                 throw error instanceof Error ? error : new Error(String(error));
               }
               failedCount += 1;
+              // Another invocation owns this ID now. Report this walk's failure
+              // without replacing the winner or recreating its compacted row.
+              if (error instanceof TransferOwnerChangedError) {
+                options?.onChildSuperseded?.(childId);
+                return;
+              }
               options?.onChildUpdate?.({
                 ...childBase,
                 status: "failed",

@@ -1,5 +1,5 @@
 import { reconcileSupersededControls } from "./globalSftpTransferControl";
-import { runTransferAndWaitForOwner } from "./waitForTransferOwner";
+import { runTransferAndWaitForOwner, TransferOwnerChangedError } from "./waitForTransferOwner";
 import { useCallback, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
 import type { Host, SftpFileEntry, SftpFilenameEncoding, TransferStatus, TransferTask } from "../../../domain/models";
 import {
@@ -976,6 +976,10 @@ export function useSftpDirectoryTransferOps({
                 ),
               );
               errors.push(err instanceof Error ? err : new Error(message));
+              return;
+            }
+            if (err instanceof TransferOwnerChangedError) {
+              errors.push(err);
               return;
             }
             // Mark child as failed

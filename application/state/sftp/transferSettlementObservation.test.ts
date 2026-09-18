@@ -169,3 +169,86 @@ test("fresh directory recovery authorizes only an unchanged retained pause under
   store.patchTask("root", { status: "paused", lifecycleEpoch: 6 });
   assert.equal(store.admitTaskRun(task, currentPause), "paused", "parent pause still wins");
 });
+
+for (const compactNewOwner of [false, true]) {
+  test(`superseded waiter rejects a changed identity even after new owner compaction: ${compactNewOwner}`, async (t) => {
+    const { sftpTransferCenterStore: store } = await import("../sftpTransferCenterStore");
+    const { runTransferAndWaitForOwner } = await import("./waitForTransferOwner");
+    const task = { ...child(), id: `changed-owner-${compactNewOwner}`, parentTaskId: `changed-root-${compactNewOwner}` };
+    store.upsertTasks([{ ...task, id: task.parentTaskId, parentTaskId: undefined, isDirectory: true }, task]);
+    let abort = false;
+    const running = runTransferAndWaitForOwner(task, async () => {
+      const changed = { ...task, directoryEntryIdentity: "b".repeat(64) };
+      assert.equal(store.admitTaskRun(changed), "ready");
+      if (compactNewOwner) {
+        store.patchTask(changed.id, { status: "completed" });
+        assert.equal(store.getTask(changed.id), undefined);
+      }
+      return { superseded: true };
+    }, () => abort);
+    const settled = running.then(() => "completed", (error: Error) => error.message);
+    t.after(async () => {
+      abort = true;
+      await settled;
+      store.patchTask(task.parentTaskId, { status: "completed" });
+      store.dismiss(task.parentTaskId);
+    });
+    assert.match(String(await Promise.race([
+      settled, new Promise((resolve) => setTimeout(() => resolve("still-waiting"), 450)),
+    ])), /identity changed/i);
+  });
+}
+
+test("destination rebuild restarts only the captured completion and preserves newer controls", async (t) => {
+  const { latchTransferPause, resetTransferPauseLatchesForTests } = await import("./transferPauseLatch");
+  const store = createSftpTransferCenterStore();
+  const task = { ...child(), parentTaskId: undefined, status: "completed" as const, checkpointBytes: 10 };
+  store.upsertTasks([task]);
+  const captured = store.getTask(task.id)!;
+  const restart = { ...task, status: "transferring" as const, checkpointBytes: 0, transferredBytes: 0 };
+  latchTransferPause(task.id);
+  t.after(resetTransferPauseLatchesForTests);
+  assert.equal(store.admitTaskRun(restart, undefined, captured), "paused");
+  resetTransferPauseLatchesForTests();
+  assert.equal(store.admitTaskRun(restart, undefined, captured), "ready");
+  assert.equal(store.getTask(task.id)?.checkpointBytes, 0);
+  store.patchTask(task.id, { status: "completed" });
+  assert.equal(store.admitTaskRun(restart, undefined, captured), "completed", "new completion must not be restarted");
+  store.patchTask(task.id, { status: "cancelled" });
+  assert.equal(store.admitTaskRun(restart, undefined, captured), "cancelled");
+});
+
+test("destination rebuild waiting on pause reuses a newer compacted completion", async (t) => {
+  const { sftpTransferCenterStore: store } = await import("../sftpTransferCenterStore");
+  const { runTransferAndWaitForOwner } = await import("./waitForTransferOwner");
+  const { latchTransferPause, resetTransferPauseLatchesForTests } = await import("./transferPauseLatch");
+  const task = { ...child(), id: "restart-wait-child", parentTaskId: "restart-wait-root", directoryEntryIndex: 1 };
+  const root = { ...task, id: task.parentTaskId, parentTaskId: undefined, isDirectory: true };
+  store.upsertTasks([root, { ...task, status: "completed" }]);
+  const captured = store.getTask(task.id)!;
+  latchTransferPause(task.id);
+  let starts = 0;
+  let abort = false;
+  const running = runTransferAndWaitForOwner(task, async () => { starts += 1; return {}; }, () => abort, undefined, captured);
+  const settled = running.then(() => "completed", (error: Error) => error.message);
+  t.after(async () => {
+    abort = true;
+    resetTransferPauseLatchesForTests();
+    await settled;
+    store.patchTask(root.id, { status: "completed" });
+    store.dismiss(root.id);
+  });
+  // An unrelated lifecycle emit must not pin the old completion in the observation.
+  store.patchTask(root.id, { reconnectRequired: true });
+  assert.equal(await Promise.race([
+    settled, new Promise((resolve) => setTimeout(() => resolve("still-waiting"), 230)),
+  ]), "still-waiting", "old completion cannot finish recovery while a new transfer is still needed");
+  assert.equal(starts, 0);
+  resetTransferPauseLatchesForTests();
+  store.patchTask(task.id, { status: "transferring", lifecycleEpoch: 1 });
+  store.upsertTasks([{ ...task, id: "restart-wait-first", directoryEntryIndex: 0, status: "completed" }]);
+  store.patchTask(task.id, { status: "completed", lifecycleEpoch: 2 });
+  assert.equal(store.getTask(task.id), undefined);
+  assert.equal(await settled, "completed");
+  assert.equal(starts, 0, "new completion after stage rebuild must be reused even when its row was compacted");
+});

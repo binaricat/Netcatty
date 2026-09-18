@@ -5,6 +5,7 @@ export const DEDICATED_RESUME_CHILD_UPDATE_BATCH_SIZE = 512;
 
 export interface DedicatedResumeChildUpdateBatcher {
   push(task: TransferTask): void;
+  discard(taskId: string): void;
   flush(): void;
 }
 
@@ -43,6 +44,7 @@ export function createDedicatedResumeChildUpdateBatcher(deps: {
       pending.set(task.id, task);
       if (pending.size >= DEDICATED_RESUME_CHILD_UPDATE_BATCH_SIZE) flush();
     },
+    discard: (taskId) => { pending.delete(taskId); },
     flush,
   };
 }
