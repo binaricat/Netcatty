@@ -5,8 +5,8 @@ import { decodeCsvProxy } from "./csvCredentialFields";
 //   http://[user[:pass]@]host:port
 //   socks5://[user[:pass]@]host:port
 //   command://<command text, verbatim after the scheme>
-const PROXY_SCHEME_PATTERN = /^(https?|socks5|command):\/\/(.*)$/is;
-const PROXY_AUTHORITY_PATTERN = /^(?:([^@:/\s]+)(?::([^@]*))?@)?(.+):(\d+)$/u;
+const PROXY_SCHEME_PATTERN = /^(http|socks5|command):\/\/(.*)$/is;
+const PROXY_AUTHORITY_PATTERN = /^(?:([^@:/?#\s]+)(?::([^@/?#]*))?@)?(\[[^\[\]@/?#\s]+\]|[^\[\]@/?#\s]+):(\d+)$/u;
 
 const decodeAuthorityPart = (value: string | undefined): string | undefined => {
   if (value === undefined) return undefined;
@@ -26,7 +26,9 @@ export const formatCsvProxy = (config: ProxyConfig): string => {
   const auth = username
     ? `${encodeURIComponent(username)}${config.password ? `:${encodeURIComponent(config.password)}` : ""}@`
     : "";
-  return `${scheme}://${auth}${config.host.trim()}:${config.port}`;
+  const host = config.host.trim();
+  const authorityHost = host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
+  return `${scheme}://${auth}${authorityHost}:${config.port}`;
 };
 
 export const parseCsvProxy = (raw: string): ProxyConfig | undefined => {

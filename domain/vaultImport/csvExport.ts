@@ -1,7 +1,7 @@
-import type { Host, ProxyProfile } from '../models';
-import { isEncryptedCredentialPlaceholder } from '../credentials';
+import type { GroupConfig, Host, Identity, ProxyProfile } from '../models';
+import { applyGroupDefaults, resolveGroupDefaults } from '../groupConfig';
 import { isPluginHostProtocol } from '../pluginConnection';
-import { materializeHostProxyProfile } from '../proxyProfiles';
+import { materializeHostProxyProfile, resolveProxyConfigAuth } from '../proxyProfiles';
 import { encodeCsvKeyPath, encodeCsvPassphrase, encodeCsvProxy } from './csvCredentialFields';
 import { formatCsvProxy } from './csvProxy';
 
@@ -15,7 +15,9 @@ export interface VaultCsvExportOptions {
   keyPassphrases?: ReadonlyMap<string, string>;
   keyPassphrasesById?: ReadonlyMap<string, string>;
   keyPathsById?: ReadonlyMap<string, string>;
-  proxyProfiles?: readonly ProxyProfile[];
+  proxyProfiles?: ProxyProfile[];
+  identities?: Identity[];
+  groupConfigs?: GroupConfig[];
 }
 
 export const resolveVaultCsvHostKeyPath = (
@@ -84,6 +86,8 @@ const exportHostsToCsv = (hosts: Host[], options: VaultCsvExportOptions): string
     return hostname;
   };
 
+  const proxyProfiles = options.proxyProfiles ?? [];
+  const inheritanceOptions = { validProxyProfileIds: new Set(proxyProfiles.map((profile) => profile.id)) };
   for (const host of exportableHosts) {
     // For telnet hosts, use telnet-specific port and username
     const isTelnet = host.protocol === "telnet";
@@ -103,14 +107,12 @@ const exportHostsToCsv = (hosts: Host[], options: VaultCsvExportOptions): string
       : "";
     // Proxy profiles are materialized inline so the CSV stays self-contained;
     // encrypted credential placeholders are never written to the file.
-    const proxyConfig = materializeHostProxyProfile(host, options.proxyProfiles ?? []).proxyConfig;
+    const effectiveHost = host.group
+      ? applyGroupDefaults(host, resolveGroupDefaults(host.group, options.groupConfigs ?? [], inheritanceOptions), inheritanceOptions)
+      : host;
+    const proxyConfig = materializeHostProxyProfile(effectiveHost, proxyProfiles).proxyConfig;
     const proxyValue = proxyConfig
-      ? formatCsvProxy({
-        ...proxyConfig,
-        password: proxyConfig.password && !isEncryptedCredentialPlaceholder(proxyConfig.password)
-          ? proxyConfig.password
-          : undefined,
-      })
+      ? formatCsvProxy(resolveProxyConfigAuth(proxyConfig, options.identities))
       : "";
 
     rows.push([
