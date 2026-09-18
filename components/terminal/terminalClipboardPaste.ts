@@ -161,7 +161,7 @@ export async function pasteTextWithMultilineConfirm(
       };
       if (!dispatchTerminalLinePaste(term, lineData, lineOptions)) {
         terminalBackend.writeToSession(currentSessionId, lineData, {
-          automated: true,
+          automated: false,
           ...lineOptions,
         });
       }

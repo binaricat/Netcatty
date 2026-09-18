@@ -51,7 +51,7 @@ for (const [protocol, lineMode, sensitive] of [
     const recorded: string[] = [];
     let recorderInput = "";
     let receiptListener: ((event: unknown) => void) | undefined;
-    const writes: Array<{ data: string; sensitive?: boolean; lineDelayMs?: number }> = [];
+    const writes: Array<{ data: string; sensitive?: boolean; lineDelayMs?: number; automated?: boolean }> = [];
     bridge.init({
       sessions: new Map([["serial-1", { [protocol === "serial" ? "serialPort" : protocol === "telnet" ? "socket" : protocol === "local" ? "proc" : "stream"]: { write: (data: string) => wire.push(String(data)) } }]]),
       electronModule: { webContents: { fromId: () => ({ send(channel: string, event: unknown) { if (channel === "netcatty:paste-write") receiptListener?.(event); } }) } },
@@ -136,6 +136,7 @@ for (const [protocol, lineMode, sensitive] of [
     assert.equal(echo.join(""), protocol === "serial" || protocol === "telnet" ? "show version\r\nshow clock\r\n" : "");
     assert.equal(writes.length, lineMode ? 1 : 2);
     assert.equal(writes.at(-1)?.lineDelayMs, 250);
+    assert.equal(writes.at(-1)?.automated, false, "confirmed paced paste is still user input");
     assert.equal(writes.at(-1)?.sensitive, sensitive);
     assert.deepEqual(broadcast, sensitive ? [] : ["version\nshow clock\r"]);
     t.mock.timers.tick(249);

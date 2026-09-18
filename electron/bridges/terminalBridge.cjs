@@ -1438,7 +1438,7 @@ function clearPendingAutomatedWrites(session) {
 function createPasteWriteReceipt(session, payload, count) {
   const hasReceipt = typeof payload.pasteRequestId === "string" && payload.pasteRequestId.length > 0;
   // Broadcast peers may omit receipts but still need a cancellable batch.
-  if (!hasReceipt && getAutomatedLineDelayMs(payload) === 0) return null;
+  if (!hasReceipt && getTerminalLineDelayMs(payload) === 0) return null;
   const pending = session.pendingPasteWrites ||= new Set();
   let remaining = count;
   const paste = {
@@ -1490,9 +1490,10 @@ function splitTerminalInputIntoLineWrites(data) {
   return chunks.length > 0 ? chunks : [data];
 }
 
-function getAutomatedLineDelayMs(payload) {
-  if (!payload?.automated) return 0;
-  const lineDelayMs = Number(payload.lineDelayMs);
+// Pacing is independent of input origin: a confirmed paste is still user
+// input, so protocol features such as Telnet auto-login must yield to it.
+function getTerminalLineDelayMs(payload) {
+  const lineDelayMs = Number(payload?.lineDelayMs);
   return Number.isFinite(lineDelayMs) && lineDelayMs > 0 ? Math.min(lineDelayMs, 2000) : 0;
 }
 
@@ -1698,7 +1699,7 @@ function writeToSession(event, payload) {
     // Activity tracking must not interfere with terminal input.
   }
 
-  const lineDelayMs = getAutomatedLineDelayMs(payload);
+  const lineDelayMs = getTerminalLineDelayMs(payload);
   const isPasteRequest = typeof payload.pasteRequestId === "string" && payload.pasteRequestId.length > 0;
   // A replacement supersedes pending paste work even with one line, and even
   // when the transfer gate below blocks the replacement itself.

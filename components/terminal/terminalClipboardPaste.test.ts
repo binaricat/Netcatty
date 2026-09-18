@@ -557,7 +557,7 @@ test("multi-line paste confirmation can send line by line with delay", async () 
 
   assert.deepEqual(writes, [{
     data: "conf t\nint gi0/0\r",
-    options: { automated: true, lineDelayMs: 250, sensitive: true },
+    options: { automated: false, lineDelayMs: 250, sensitive: true },
   }]);
   // A paste made at a sensitive prompt must not be fanned out to broadcast
   // peers, even though the dialog await cleared the live password-prompt ref.
@@ -648,7 +648,7 @@ test("line-by-line send converts a single trailing LF to CR so the last line is 
 
   assert.deepEqual(writes, [{
     data: "show run\r",
-    options: { automated: true, lineDelayMs: 250, sensitive: false },
+    options: { automated: false, lineDelayMs: 250, sensitive: false },
   }]);
 });
 
@@ -732,7 +732,7 @@ test("line-by-line send terminates the final line when the text lacks a trailing
 
   assert.deepEqual(writes, [{
     data: "conf t\nint gi0/0\r",
-    options: { automated: true, lineDelayMs: 250, sensitive: false },
+    options: { automated: false, lineDelayMs: 250, sensitive: false },
   }]);
 });
 

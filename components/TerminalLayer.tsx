@@ -1108,7 +1108,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       }
       if (isTerminalSensitiveInputActive(session.id)) continue;
       terminalBackend.writeToSession(session.id, data, {
-        automated: Boolean(lineDelayMs),
+        automated: false,
         sensitive: false,
         ...(lineDelayMs ? { lineDelayMs } : {}),
       });

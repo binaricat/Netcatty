@@ -1379,7 +1379,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         // calls would each start at delay zero and lose the paste pacing.
         if (pacedWrites.length > 0) {
           ctx.terminalBackend.writeToSession(id, pacedWrites.join(""), {
-            automated: true,
+            automated: false,
             sensitive,
             lineDelayMs: options?.lineDelayMs,
             pasteRequestId: options?.pasteRequestId,
@@ -1418,7 +1418,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
             sensitive,
             serialEraseChar,
             ...(options?.lineDelayMs ? {
-              automated: true,
+              automated: false,
               lineDelayMs: options.lineDelayMs,
               pasteRequestId: options.pasteRequestId,
             } : {}),
