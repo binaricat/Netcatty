@@ -427,9 +427,13 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
       if (observer.conflicted || task === observer.ignoredCompletion) continue;
       const matchesExpected = matchesObservedTask(observer.expected, task);
       // A retry may plan a new source identity while its initial stale row is
-      // still paused. Republishing that unchanged identity is not displacement.
+      // still paused. Only the unchanged initial attempt is exempt: activating
+      // it or replacing its owner/epoch must not let the stale plan reclaim it.
       if (!matchesExpected && observer.initialIdentity
-        && matchesObservedTask(observer.initialIdentity, task)) continue;
+        && matchesObservedTask(observer.initialIdentity, task)
+        && observer.initialIdentity.status === task.status
+        && observer.initialIdentity.lifecycleEpoch === task.lifecycleEpoch
+        && observer.initialIdentity.ownerId === task.ownerId) continue;
       observer.initialIdentity = undefined;
       if (!matchesExpected) {
         observer.conflicted = true;

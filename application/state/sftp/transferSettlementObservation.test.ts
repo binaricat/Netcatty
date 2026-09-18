@@ -285,12 +285,13 @@ for (const identityChangesDuringWait of [false, true]) {
       ...task, status: identityChangesDuringWait ? "failed" : "paused",
       directoryEntryIdentity: identityChangesDuringWait ? task.directoryEntryIdentity : "b".repeat(64),
     }]);
+    const initialPause = store.getTask(task.id)!;
     latchTransferPause(task.id);
     let starts = 0;
     let abort = false;
     let conflicts = 0;
     const running = runTransferAndWaitForOwner(task, async () => { starts += 1; return {}; }, () => abort,
-      undefined, undefined, () => { conflicts += 1; });
+      identityChangesDuringWait ? undefined : initialPause, undefined, () => { conflicts += 1; });
     const settled = running.then(() => "completed", (error: Error) => error.message);
     t.after(async () => {
       abort = true;
@@ -303,7 +304,9 @@ for (const identityChangesDuringWait of [false, true]) {
     // initial old identity. Neither is evidence of a replacement by itself.
     store.patchTask(root.id, { reconnectRequired: true });
     resetTransferPauseLatchesForTests();
-    store.patchTask(task.id, { status: "transferring", directoryEntryIdentity: "b".repeat(64), lifecycleEpoch: 1 });
+    if (identityChangesDuringWait) {
+      store.patchTask(task.id, { status: "transferring", directoryEntryIdentity: "b".repeat(64), lifecycleEpoch: 1 });
+    }
     const outcome = await settled;
     if (identityChangesDuringWait) {
       assert.match(outcome, /identity changed/i);
@@ -355,4 +358,30 @@ test("an unchanged owner retains its original transport rejection", async (t) =>
   const error = new Error("original transport failure");
   await assert.rejects(runTransferAndWaitForOwner(task, async () => { throw error; }, () => false),
     (actual) => actual === error);
+});
+
+test("initial stale identity exemption ends when another owner activates that row", async (t) => {
+  const { sftpTransferCenterStore: store } = await import("../sftpTransferCenterStore");
+  const { runTransferAndWaitForOwner } = await import("./waitForTransferOwner");
+  const { latchTransferPause, resetTransferPauseLatchesForTests } = await import("./transferPauseLatch");
+  const task = { ...child(), id: "activated-initial-identity", parentTaskId: undefined };
+  store.upsertTasks([{ ...task, status: "paused", directoryEntryIdentity: "b".repeat(64), lifecycleEpoch: 1 }]);
+  const initial = store.getTask(task.id)!;
+  latchTransferPause(task.id);
+  let starts = 0;
+  let abort = false;
+  const running = runTransferAndWaitForOwner(task, async () => { starts += 1; return {}; }, () => abort, initial);
+  const settled = running.then(() => "completed", (error: Error) => error.message);
+  t.after(async () => {
+    abort = true;
+    resetTransferPauseLatchesForTests();
+    await settled;
+    store.patchTask(task.id, { status: "completed" });
+    store.dismiss(task.id);
+  });
+  resetTransferPauseLatchesForTests();
+  store.patchTask(task.id, { status: "transferring", lifecycleEpoch: 2 });
+  assert.match(await settled, /identity changed/i);
+  assert.equal(starts, 0);
+  assert.equal(store.getTask(task.id)?.directoryEntryIdentity, "b".repeat(64));
 });
