@@ -313,6 +313,16 @@ export function handleGlobalHotkeyKeyDownImpl(getCtx: AppContextGetter, e: Keybo
         continue;
       }
 
+      // An unavailable broadcast action must leave the chord to the terminal
+      // (notably tmux's Ctrl+B prefix). Dispatch once before consuming it.
+      if (binding.action === 'broadcast') {
+        if (executeHotkeyAction(binding.action, e) === true) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+        return;
+      }
+
       e.preventDefault();
       e.stopPropagation();
       if (HOTKEY_DEBUG) {
@@ -963,12 +973,14 @@ export function executeHotkeyActionImpl(getCtx: AppContextGetter, action: string
         const activeWs = workspaces.find(w => w.id === currentId);
         if (activeWs) {
           toggleBroadcast(activeWs.id);
+          return true;
         } else if (sessions.some((session: TerminalSession) => (
-          session.id === currentId && !session.workspaceId
+          session.id === currentId && !session.workspaceId && !session.hiddenFromTabs
         )) && canUseGlobalBroadcast) {
           toggleGlobalBroadcast();
+          return true;
         }
-        break;
+        return false;
       }
       case 'openSettings':
         handleOpenSettingsRef.current();
