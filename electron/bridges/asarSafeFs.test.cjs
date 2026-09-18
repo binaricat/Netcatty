@@ -76,6 +76,54 @@ test("createLocalReadStream streams real .asar-named files and closes its fd", a
   }
 });
 
+test("openLocalReadStream streams real .asar-named files and closes its fd", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-asar-"));
+  try {
+    const payload = "open-me-async";
+    const filePath = path.join(dir, "app.asar");
+    fs.writeFileSync(filePath, payload);
+
+    const chunks = [];
+    const stream = await openLocalReadStream(filePath);
+    for await (const chunk of stream) {
+      chunks.push(Buffer.from(chunk));
+    }
+    assert.equal(Buffer.concat(chunks).toString(), payload);
+    assert.equal(process.noAsar, undefined);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("openLocalReadStream opens its fd asynchronously, never via fs.openSync", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-asar-"));
+  try {
+    const filePath = path.join(dir, "app.asar");
+    fs.writeFileSync(filePath, "no-blocking-open");
+
+    const origOpenSync = fs.openSync;
+    let openSyncCalled = false;
+    fs.openSync = (...args) => {
+      openSyncCalled = true;
+      return origOpenSync(...args);
+    };
+    try {
+      const chunks = [];
+      const stream = await openLocalReadStream(filePath);
+      for await (const chunk of stream) {
+        chunks.push(Buffer.from(chunk));
+      }
+      assert.equal(Buffer.concat(chunks).toString(), "no-blocking-open");
+      assert.equal(openSyncCalled, false);
+    } finally {
+      fs.openSync = origOpenSync;
+    }
+    assert.equal(process.noAsar, undefined);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("open errors reject asynchronously and never leak the toggle", async () => {
   const missing = path.join(os.tmpdir(), `netcatty-asar-missing-${Date.now()}.asar`);
   await assert.rejects(() => openLocalReadStream(missing), /ENOENT/);

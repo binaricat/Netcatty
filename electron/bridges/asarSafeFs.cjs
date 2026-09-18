@@ -44,6 +44,7 @@ function openLocal(filePath, flags = "r") {
   return withNoAsar(() => fs.promises.open(filePath, flags));
 }
 
+
 /**
  * Read stream for a real local file. The fd is opened under a scoped noAsar
  * toggle (fs.openSync) because fs.createReadStream resolves asar-ness lazily
@@ -62,11 +63,22 @@ function createLocalReadStream(filePath, options = {}) {
 }
 
 /**
- * Promise-returning variant: open failures reject instead of throwing
- * synchronously, matching the error shape of the patched fs.createReadStream.
+ * Promise-returning variant. The fd is opened asynchronously via openLocal
+ * (fs.promises.open) so a slow or unresponsive filesystem (SMB/NFS, removable
+ * media) never blocks the main thread on fs.openSync, and open failures reject
+ * instead of throwing synchronously. Fd-level reads are not intercepted again,
+ * so asar-ness stays bypassed for the whole stream lifetime.
  */
-function openLocalReadStream(filePath, options = {}) {
-  return Promise.resolve().then(() => createLocalReadStream(filePath, options));
+async function openLocalReadStream(filePath, options = {}) {
+  const handle = await openLocal(filePath, "r");
+  try {
+    return fs.createReadStream(filePath, { ...options, fd: handle, autoClose: true });
+  } catch (error) {
+    // createReadStream throws synchronously on invalid options; the fd must
+    // not leak since the stream was never constructed.
+    try { handle.close(); } catch { /* ignore */ }
+    throw error;
+  }
 }
 
 /**

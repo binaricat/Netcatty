@@ -11,7 +11,7 @@
 
 const fs = require("node:fs");
 const path = require("node:path");
-const { statLocal, createLocalReadStream } = require("../asarSafeFs.cjs");
+const { statLocal, openLocalReadStream } = require("../asarSafeFs.cjs");
 const { executeBoundedSshCommand, terminateSshExecStream } = require("../boundedSshExec.cjs");
 const { invalidateSshTransport } = require("../sshTransportInvalidation.cjs");
 const {
@@ -443,10 +443,13 @@ function createScpBackend(deps = {}) {
       const finalAck = waitForAck(stream, transfer, signal);
       let activeReadStream = null;
       let activeReadCompletion = Promise.resolve();
+      // Open the local source asynchronously (asarSafeFs) so a slow or
+      // unresponsive filesystem never blocks the main thread; open failures
+      // reject into the outer catch, which aborts the scp stream.
+      const openedReadStream = hasProvidedReadStream
+        ? options.openReadStream()
+        : await openLocalReadStream(localPath, { highWaterMark: 256 * 1024 });
       const streamDone = new Promise((resolve, reject) => {
-        const openedReadStream = hasProvidedReadStream
-          ? options.openReadStream()
-          : createLocalReadStream(localPath, { highWaterMark: 256 * 1024 });
         const readStream = openedReadStream?.stream || openedReadStream;
         activeReadCompletion = Promise.resolve(openedReadStream?.completed);
         activeReadStream = readStream;
