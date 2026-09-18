@@ -447,7 +447,7 @@ function createScpBackend(deps = {}) {
       // unresponsive filesystem never blocks the main thread; open failures
       // reject into the outer catch, which aborts the scp stream.
       const openedReadStream = hasProvidedReadStream
-        ? options.openReadStream()
+        ? await options.openReadStream()
         : await openLocalReadStream(localPath, { highWaterMark: 256 * 1024 });
       const streamDone = new Promise((resolve, reject) => {
         const readStream = openedReadStream?.stream || openedReadStream;

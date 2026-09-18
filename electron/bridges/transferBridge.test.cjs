@@ -608,7 +608,7 @@ test("SCP upload streams the live local path without a pre-hash digest", async (
       uploadSourcePath = sourcePath;
       // May still receive a plain file stream helper; must not require a digest.
       if (typeof options.openReadStream === "function") {
-        const opened = options.openReadStream();
+        const opened = await options.openReadStream();
         const chunks = [];
         for await (const chunk of opened.stream) chunks.push(chunk);
         remoteFiles.set(remotePath, Buffer.concat(chunks));
@@ -670,7 +670,7 @@ test("SCP staged streaming preserves executable mode without a local snapshot", 
       uploadedSourcePath = sourcePath;
       uploadedMode = (await fs.promises.stat(sourcePath)).mode & 0o777;
       assert.equal(options.fileSize, payload.length);
-      const opened = options.openReadStream();
+      const opened = await options.openReadStream();
       const chunks = [];
       for await (const chunk of opened.stream) chunks.push(chunk);
       remoteFiles.set(remotePath, Buffer.concat(chunks));
@@ -744,7 +744,7 @@ test("SCP staged upload rechecks a deleted destination after mode setup", async 
       };
     },
     async uploadFile(_sourcePath, remotePath, options) {
-      const opened = options.openReadStream();
+      const opened = await options.openReadStream();
       const chunks = [];
       for await (const chunk of opened.stream) chunks.push(chunk);
       remoteFiles.set(remotePath, Buffer.concat(chunks));
@@ -813,7 +813,7 @@ test("SCP staged upload does not promote when AbortSignal cancels mid-stream", a
       return { type: "file", isDirectory: false, size: remoteFiles.get(remotePath).length };
     },
     async uploadFile(_sourcePath, remotePath, options) {
-      const opened = options.openReadStream();
+      const opened = await options.openReadStream();
       const chunks = [];
       let first = true;
       for await (const chunk of opened.stream) {

@@ -19,7 +19,6 @@ const { isScpModeClient, getScpBackendForClient } = require("./sftpBridge/scpBac
 const {
   statLocal,
   openLocal,
-  createLocalReadStream,
   openLocalReadStream,
   fastPutLocal,
 } = require("./asarSafeFs.cjs");
@@ -2287,9 +2286,11 @@ async function uploadFile(
       transfer,
       encoding,
       signal: transfer.signal,
-      openReadStream: () => {
+      openReadStream: async () => {
         // asarSafeFs: real *.asar sources must not be read as archives (#3450).
-        const stream = createLocalReadStream(localPath, { highWaterMark: 256 * 1024 });
+        // Open the fd asynchronously (fs.promises.open) so a slow or
+        // unresponsive filesystem never blocks the main thread on fs.openSync.
+        const stream = await openLocalReadStream(localPath, { highWaterMark: 256 * 1024 });
         return { stream, completed: Promise.resolve() };
       },
       onProgress: (transferred, total) => sendProgress(transferred, total || fileSize),
