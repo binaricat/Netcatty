@@ -32,15 +32,22 @@ const helpers = await Promise.all([
 for (const [protocol, lineMode, sensitive] of [
   ["serial", false, false], ["serial", false, true], ["serial", true, false], ["serial", true, true],
   ["telnet", false, false], ["telnet", false, true],
+  ["ssh", false, false], ["ssh", false, true], ["local", false, false],
+  ["mosh", false, false], ["et", false, false], ["plugin:example", false, false],
 ] as const) {
   test(`${protocol} confirmed line paste consumes pending text with pacing (lineMode=${lineMode}, sensitive=${sensitive})`, async (t) => {
     t.mock.timers.enable({ apis: ["setTimeout"] });
     const wire: string[] = [];
     const echo: string[] = [];
     const broadcast: string[] = [];
+    const submitted: string[] = [];
+    const autocomplete: string[] = [];
+    const outputTriggers: string[] = [];
+    const recorded: string[] = [];
+    let recorderInput = "";
     const writes: Array<{ data: string; sensitive?: boolean; lineDelayMs?: number }> = [];
     bridge.init({
-      sessions: new Map([["serial-1", { [protocol === "serial" ? "serialPort" : "socket"]: { write: (data: string) => wire.push(String(data)) } }]]),
+      sessions: new Map([["serial-1", { [protocol === "serial" ? "serialPort" : protocol === "telnet" ? "socket" : protocol === "local" ? "proc" : "stream"]: { write: (data: string) => wire.push(String(data)) } }]]),
       electronModule: { webContents: { fromId: () => ({ send() {} }) } },
     });
     const ctx = {
@@ -49,6 +56,16 @@ for (const [protocol, lineMode, sensitive] of [
       commandBufferRef: { current: "" }, serialLineBufferRef: { current: "" },
       serialLineMode: lineMode, serialLocalEcho: true, telnetLocalEchoRef: { current: true },
       passwordPromptActiveRef: { current: sensitive },
+      onCommandSubmitted: (command: string) => submitted.push(command),
+      onAutocompleteInput: (data: string) => autocomplete.push(data),
+      onOutputTriggerUserInputRef: { current: (data: string) => outputTriggers.push(data) },
+      scriptRecorderRef: { current: { isRecording: true,
+        recordInput: (data: string) => { recorderInput += data; },
+        recordEnter: ({ sensitive: secret }: { sensitive: boolean }) => {
+          if (!secret) recorded.push(recorderInput);
+          recorderInput = "";
+        },
+      } },
       isBroadcastEnabledRef: { current: false },
       onBroadcastInputRef: { current: () => assert.fail("paste must not broadcast twice") },
       terminalBackend: {
@@ -89,8 +106,12 @@ for (const [protocol, lineMode, sensitive] of [
     });
     assert.deepEqual(wire, lineMode ? ["show version\r"] : ["show ", "version\r"]);
     assert.equal(ctx.serialLineBufferRef.current, "");
-    if (protocol === "serial") assert.equal(ctx.commandBufferRef.current, "");
-    assert.equal(echo.join(""), "show version\r\nshow clock\r\n");
+    assert.equal(ctx.commandBufferRef.current, "");
+    assert.deepEqual(submitted, sensitive ? [] : ["show version", "show clock"]);
+    assert.deepEqual(recorded, sensitive ? [] : ["show version", "show clock"]);
+    assert.deepEqual(autocomplete, ["show ", "version\nshow clock\r"]);
+    assert.ok(outputTriggers.join("").includes("show clock"));
+    assert.equal(echo.join(""), protocol === "serial" || protocol === "telnet" ? "show version\r\nshow clock\r\n" : "");
     assert.equal(writes.length, lineMode ? 1 : 2);
     assert.equal(writes.at(-1)?.lineDelayMs, 250);
     assert.equal(writes.at(-1)?.sensitive, sensitive);

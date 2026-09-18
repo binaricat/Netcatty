@@ -1275,7 +1275,25 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       hasBroadcastInputHandler: !!onBroadcastInput,
     });
     const willBroadcastInput = canBroadcastInput && options?.skipBroadcast !== true;
-    if (ctx.statusRef.current === "connected" && submittedInput) {
+    if (ctx.statusRef.current === "connected" && options?.lineDelayMs && logicalData) {
+      // Confirmed paced pastes submit each line, rather than leaving a draft
+      // in readline. Keep history, CWD invalidation and recording in sync
+      // while still passing one batch to the backend's delay scheduler.
+      const lines = logicalData.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+      if (lines.at(-1) === "") lines.pop();
+      for (const line of lines) {
+        ctx.scriptRecorderRef?.current?.recordInput(line);
+        if (ctx.scriptRecorderRef?.current?.isRecording) {
+          void ctx.scriptRecorderRef.current.recordEnter({ sensitive });
+        }
+        recordTerminalCommandExecution(`${ctx.commandBufferRef.current}${line}`, ctx, term, {
+          sensitive,
+          allowHostStyleGreaterThanPrompt: ctx.allowHostStyleGreaterThanPrompt,
+        });
+      }
+      if (ctx.passwordPromptActiveRef) ctx.passwordPromptActiveRef.current = false;
+      handledSubmittedInput = true;
+    } else if (ctx.statusRef.current === "connected" && submittedInput) {
       if (submittedInput.text) {
         ctx.commandBufferRef.current += submittedInput.text;
         ctx.scriptRecorderRef?.current?.recordInput(submittedInput.text);
@@ -2601,11 +2619,9 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   ctx.container.addEventListener("input", markKittyTextInput, true);
   textarea?.addEventListener("blur", clearKittyTransientInputState);
 
-  const disposeLinePasteHandler = ctx.host.protocol === "serial" || ctx.host.protocol === "telnet"
-    ? registerTerminalLinePasteHandler(term, (data, options) => {
-      handleTerminalInputData(data, { ...options, skipBroadcast: true });
-    })
-    : undefined;
+  const disposeLinePasteHandler = registerTerminalLinePasteHandler(term, (data, options) => {
+    handleTerminalInputData(data, { ...options, skipBroadcast: true });
+  });
 
   term.onData((data) => {
     const win32Input = win32InputModePendingEvent;
