@@ -52,10 +52,15 @@ test('completed delivery still has a bounded wait for a missing probe reply', as
   const length = 2 + buildLiveShellProbe(job.marker).length;
   while (writes.join('').length < length) t.mock.timers.tick(30);
   // Unrelated output must not keep a never-started command alive forever.
-  for (let i = 0; i < 6; i++) {
+  // The probe fallback fires before the command deadline (75% of the
+  // budget) so a lost _Q sentinel still gets the wrapper typed.
+  let resolved = false;
+  job.resultPromise.then(() => { resolved = true; });
+  for (let i = 0; i < 40 && !resolved; i++) {
     pty.emit('data', 'unrelated output\n');
     t.mock.timers.tick(100);
   }
+  assert.ok(writes.join('').includes('echo never'), 'probe fallback typed the wrapped command');
   const result = await job.resultPromise;
   assert.match(result.error, /Command startup timed out/);
   assert.ok(writes.includes('\x03'));

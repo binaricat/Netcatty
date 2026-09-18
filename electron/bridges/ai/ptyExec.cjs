@@ -239,14 +239,25 @@ function startPtyJob(ptyStream, command, options) {
       probeTimeoutId = null;
     }
   }
+  // The output/startup deadlines (timeoutMs for foreground jobs,
+  // BG_STARTUP_TIMEOUT_MS for background jobs) are armed before the probe
+  // timer, so with an equal delay they fire first (earlier registration
+  // wins in the timer queue), call finish(), and clear probeTimeoutId
+  // before the fallback could type the wrapper — a lost _Q sentinel would
+  // still prevent the command from ever being sent. Cap the probe window
+  // at 75% of that budget so the fallback always wins the race with
+  // headroom; writeWrappedCommand() then re-arms a fresh full budget for
+  // the wrapped command's delivery and start marker.
   function armProbeTimeout() {
     clearProbeTimeout();
+    const deadlineBudgetMs = maxBufferedChars > 0 ? BG_STARTUP_TIMEOUT_MS : timeoutMs;
+    const delayMs = Math.min(PROBE_DEADLINE_MS, Math.floor(deadlineBudgetMs * 3 / 4));
     probeTimeoutId = setTimeout(() => {
       probeTimeoutId = null;
       if (finished || cancelRequested || !probingShell) return;
       probingShell = false;
       writeWrappedCommand();
-    }, Math.min(PROBE_DEADLINE_MS, timeoutMs));
+    }, delayMs);
   }
 
   function sendInterrupt() {
