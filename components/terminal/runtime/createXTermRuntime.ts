@@ -1489,7 +1489,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   const kittyForwardedKeys = new Map<string, KittyKeyboardForwardedPress>();
   const broadcastForwardedKeys = new Map<string, KittyKeyboardForwardedPress>();
   const win32BroadcastForwardedKeys = new Map<string, KittyKeyboardForwardedPress>();
-  // ⌘. interrupt presses are recorded under their normalized Ctrl+C identity
+  // Command+Period interrupt presses are recorded under their normalized Ctrl+C identity
   // (KeyC) so broadcast legacy pairing stays matched (#3408), but under a
   // dedicated map key so they cannot clobber an outstanding physical KeyC
   // press; map the physical chord identity (Period) to it so the later keyup
@@ -1684,7 +1684,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     event: Pick<KittyKeyboardEvent, "code" | "key"> & KittyKeyboardEvent,
     identityOverride?: string,
   ): boolean => {
-    // The ⌘. interrupt press is keyed independently from its normalized
+    // The Command+Period interrupt press is keyed independently from its normalized
     // Ctrl+C event identity, so its release must delete the entry it was
     // stored under rather than the physical key's (#3408).
     const identity = identityOverride ?? (event.code || event.key);
@@ -1693,8 +1693,8 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       broadcastForwardedKeys.delete(identity);
       broadcastKittyInput(
         // Carry the identity the press was recorded under so peers pair this
-        // release with that press instead of the event's physical code — the
-        // ⌘. interrupt press lives under a dedicated normalized key (#3409).
+        // release with that press instead of the event's physical code - the
+        // Command+Period interrupt press lives under a dedicated normalized key (#3409).
         { kind: "key", event, keyIdentity: identity },
         true,
         forwardedPress.targetSessionIds,
@@ -1713,7 +1713,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   };
   /**
    * Resolve a forwarded press whose recorded identity is not the physical
-   * key identity: the ⌘. interrupt press was recorded as the normalized
+   * key identity: the Command+Period interrupt press was recorded as the normalized
    * Ctrl+C event (KeyC), but the browser delivers the physical release as
    * Period. Pair that release from the stored event so Kitty consumers do
    * not see Ctrl+C held until focus loss (#3408).
@@ -2038,10 +2038,10 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     const currentScheme = ctx.hotkeySchemeRef.current;
     // Use shared utility for platform detection when hotkey scheme is disabled
     const isMac = currentScheme === "mac" || (currentScheme === "disabled" && isMacPlatform());
-    // macOS Terminal convention: ⌘. interrupts the running command like
+    // macOS Terminal convention: Command+Period interrupts the running command like
     // Ctrl+C (#3408), including while text is selected. A
     // user-assigned snippet or configured shortcut on this chord keeps
-    // precedence: the editors accept ⌘. (their conflict check only covers
+    // precedence: the editors accept Command+Period (their conflict check only covers
     // configured bindings), so the hard-coded interrupt must not silently
     // swallow a chord the user actually assigned (#3409).
     const macCommandPeriodInterrupt =
@@ -2104,7 +2104,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
           ctx.terminalBackend.writeToSession(id, "\x03");
         }
         // Report the interrupt to Kitty as Ctrl+C even when it came from the
-        // ⌘. chord: the broadcast legacy \x03 is keyed by this identity, so
+        // Command+Period chord: the broadcast legacy \x03 is keyed by this identity, so
         // forwarding Super+Period would leave peers with an unmatched
         // Super+Period press and suppress the interrupt instead (#3408).
         const interruptEventForKitty: KeyboardEvent = macCommandPeriodInterrupt
@@ -2130,7 +2130,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
           // lookup returns that position's character on non-QWERTY layouts
           // (e.g. "n" under Dvorak) and getUnicodeKeyCode() prioritizes it,
           // encoding the interrupt as the wrong key instead of Ctrl+C's 99
-          // — a broadcast peer would then suppress the legacy \x03 fallback
+          // - a broadcast peer would then suppress the legacy \x03 fallback
           // and never be interrupted. Force the layout-independent identity.
           kittyEvent.unshiftedKey = "c";
         }

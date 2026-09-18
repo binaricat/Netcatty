@@ -1036,7 +1036,7 @@ test("a dedicated keyIdentity pairs the interrupt press with its release (#3409)
     };
   };
 
-  // A ⌘. interrupt is normalized to a Ctrl+C event but paired under a
+  // A Command+Period interrupt is normalized to a Ctrl+C event but paired under a
   // dedicated identity, so it must not collapse with an outstanding physical
   // KeyC press on the peer: the press, the legacy suppression and the release
   // all use the propagated identity, while the physical KeyC state survives.

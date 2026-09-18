@@ -203,7 +203,7 @@ export const flushKittyKeyboardBroadcastReleases = (
     forward({
       kind: "key",
       // Keep the identity the press was recorded under so a peer whose
-      // pairing diverges from the event's physical code (e.g. a ⌘. interrupt
+      // pairing diverges from the event's physical code (e.g. a Command+Period interrupt
       // normalized to Ctrl+C) still pairs this synthetic release (#3409).
       keyIdentity: identity,
       event: createKittyKeyboardSyntheticRelease(

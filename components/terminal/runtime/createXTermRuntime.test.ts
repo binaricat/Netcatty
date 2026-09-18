@@ -1030,7 +1030,7 @@ test("multi-character plain text goes out as per-character writes (#3077)", asyn
   assert.match(source, /onBroadcastInput\?\.\(broadcastData, ctx\.sessionId\)/);
 });
 
-test("⌘. interrupt press is keyed apart from an outstanding physical KeyC press (#3409)", async () => {
+test("Command+Period interrupt press is keyed apart from an outstanding physical KeyC press (#3409)", async () => {
   const { readFileSync } = await import("node:fs");
   const source = readFileSync(new URL("./createXTermRuntime.ts", import.meta.url), "utf8");
 
@@ -1076,11 +1076,11 @@ test("⌘. interrupt press is keyed apart from an outstanding physical KeyC pres
 
 });
 
-test("⌘. interrupt yields to a user-assigned snippet or shortcut chord (#3409)", async () => {
+test("Command+Period interrupt yields to a user-assigned snippet or shortcut chord (#3409)", async () => {
   const { readFileSync } = await import("node:fs");
   const source = readFileSync(new URL("./createXTermRuntime.ts", import.meta.url), "utf8");
 
-  // The snippet/app-shortcut editors accept ⌘. (their conflict checks only
+  // The snippet/app-shortcut editors accept Command+Period (their conflict checks only
   // cover configured bindings), so the hard-coded interrupt must give a
   // configured chord precedence instead of silently swallowing it (#3409).
   assert.match(

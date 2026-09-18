@@ -51,7 +51,7 @@ test("mac Command+Period chord is recognized as an interrupt", () => {
   );
   // Non-Latin layouts may report the physical Period code with a mapped key.
   assert.equal(
-    isMacCommandPeriodInterruptChord(key({ key: "。", code: "Period", ctrlKey: false, metaKey: true })),
+    isMacCommandPeriodInterruptChord(key({ key: "\u3002", code: "Period", ctrlKey: false, metaKey: true })),
     true,
   );
 });
@@ -74,7 +74,7 @@ test("mac Command+Period chord prefers the layout character over the physical ke
     true,
   );
   assert.equal(
-    isMacCommandPeriodInterruptChord(key({ key: "ю", code: "Period", ctrlKey: false, metaKey: true })),
+    isMacCommandPeriodInterruptChord(key({ key: "\u044e", code: "Period", ctrlKey: false, metaKey: true })),
     true,
   );
 });
