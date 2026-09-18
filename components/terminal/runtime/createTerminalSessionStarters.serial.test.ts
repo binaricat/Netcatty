@@ -392,3 +392,28 @@ test('serial quick connect does not synthesize auto-login credentials', async ()
   assert.equal(options.username, undefined);
   assert.equal(options.password, undefined);
 });
+
+for (const sleepBeforeCompletion of [true, false]) {
+  test(`serial startup survives tab sleep (before completion: ${sleepBeforeCompletion})`, async (t) => {
+    t.mock.timers.enable({apis: ['setTimeout']});
+    const writes: string[] = [];
+    let complete: (evt: {sessionId: string; bootEpoch: number}) => void = noop;
+    const backend = buildBackend({
+      startSerialSession: async () => 'session-1',
+      onTelnetAutoLoginComplete: (_id: string, cb: typeof complete) => { complete = cb; return noop; },
+      onTelnetAutoLoginCancelled: () => noop,
+      writeToSession: (_id: string, data: string) => writes.push(data),
+    });
+    const isBootActiveRef = {current: true};
+    const ctx = buildCtx(backend, {
+      host: {id: 'serial-1', protocol: 'serial', username: 'admin', startupCommand: 'show version'},
+      terminalSettings: {startupCommandDelayMs: 100}, isBootActiveRef,
+    });
+    await createTerminalSessionStarters(ctx as never).startSerial(term as never);
+    if (sleepBeforeCompletion) isBootActiveRef.current = false;
+    complete({sessionId: 'session-1', bootEpoch: 0});
+    isBootActiveRef.current = false;
+    t.mock.timers.tick(100);
+    assert.deepEqual(writes, ['show version\r']);
+  });
+}

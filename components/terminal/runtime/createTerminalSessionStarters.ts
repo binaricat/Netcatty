@@ -1954,6 +1954,10 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
     // emit a completion event, so fall back after the main-process auto-login
     // window (60s) plus margin.
     const SERIAL_AUTO_LOGIN_FALLBACK_MS = 65_000;
+    // A sleeping tab keeps its established serial connection. Only an abort
+    // or a new connection generation invalidates its delayed startup work.
+    const isSerialConnectionCurrent = () => options?.signal?.aborted !== true
+      && (ctx.bootEpochRef?.current ?? 0) === bootEpoch;
     let disposeAutoLoginComplete: (() => void) | undefined;
     let disposeAutoLoginCancelled: (() => void) | undefined;
     let cancelPendingStartupCommand: (() => void) | undefined;
@@ -1993,7 +1997,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
       cancelPendingStartupCommand = undefined;
     };
     const scheduleStartupAfterAutoLogin = () => {
-      if (!isCurrentAttempt()) {
+      if (!isSerialConnectionCurrent()) {
         cleanupSerialStartupWait();
         return;
       }
@@ -2001,7 +2005,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
       cancelPendingStartupCommand = scheduleStartupCommand(ctx, term, serialSessionId, () => {
         cancelPendingStartupCommand = undefined;
         disposeAutoLoginCancelListener();
-      }, isCurrentAttempt);
+      }, isSerialConnectionCurrent);
     };
 
     try {
@@ -2140,7 +2144,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         }, SERIAL_AUTO_LOGIN_FALLBACK_MS);
         return;
       }
-      scheduleStartupCommand(ctx, term, id, undefined, isCurrentAttempt);
+      scheduleStartupCommand(ctx, term, id, undefined, isSerialConnectionCurrent);
     } catch (err) {
       cleanupSerialStartupWait();
       if (ignoreStaleAttemptUi()) return;
