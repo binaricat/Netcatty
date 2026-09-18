@@ -35,7 +35,8 @@ for (const [protocol, lineMode, sensitive] of [
   ["ssh", false, false], ["ssh", false, true], ["local", false, false],
   ["mosh", false, false], ["et", false, false], ["plugin:example", false, false],
 ] as const) {
-  for (const completion of ["complete", "manual", "interrupt", "replacement", "password-ref", "password-screen", "output"] as const) {
+  for (const completion of ["complete", "manual", "interrupt", "replacement", "password-ref", "password-screen", "output", "serial-text", "serial-backspace", "serial-clear"] as const) {
+  if (completion.startsWith("serial-") && !lineMode) continue;
   test(`${completion}: ${protocol} confirmed line paste consumes pending text with pacing (lineMode=${lineMode}, sensitive=${sensitive})`, async (t) => {
     t.mock.timers.enable({ apis: ["setTimeout"] });
     const wire: string[] = [];
@@ -67,6 +68,7 @@ for (const [protocol, lineMode, sensitive] of [
       onOutputTriggerUserInputRef: { current: (data: string) => outputTriggers.push(data) },
       scriptRecorderRef: { current: { isRecording: true,
         recordClearLine: () => { recorderInput = ""; },
+        recordBackspace: () => { recorderInput = recorderInput.slice(0, -1); },
         recordInput: (data: string) => { recorderInput += data; },
         recordEnter: async ({ sensitive: secret }: { sensitive: boolean }) => {
           if (!secret) recorded.push(recorderInput);
@@ -83,6 +85,9 @@ for (const [protocol, lineMode, sensitive] of [
       isBroadcastEnabledRef: { current: false },
       onBroadcastInputRef: { current: () => assert.fail("paste must not broadcast twice") },
       terminalBackend: {
+        interruptSession(sessionId: string, _trace: unknown, options?: { cancelPendingWritesOnly?: boolean }) {
+          bridge.interruptSession({}, { sessionId, ...options });
+        },
         writeToSession(sessionId: string, data: string, options?: { sensitive?: boolean; lineDelayMs?: number }) {
           writes.push({ data, ...options });
           bridge.writeToSession({}, { sessionId, data, ...options });
@@ -158,6 +163,17 @@ for (const [protocol, lineMode, sensitive] of [
       assert.deepEqual(recordingSensitivity, [sensitive, secondSensitive]);
       assert.deepEqual(history, sensitive ? [] : secondSensitive ? ["show version"] : ["show version", "show clock"]);
       assert.deepEqual(recorded, sensitive ? [] : secondSensitive ? ["show version"] : ["show version", "show clock"]);
+      return;
+    }
+    if (completion.startsWith("serial-")) {
+      ctx.isBroadcastEnabledRef.current = false;
+      const beforeEdit = [...wire];
+      env.api.input(completion === "serial-text" ? "x" : completion === "serial-backspace" ? "\x7f" : "\x15");
+      t.mock.timers.tick(1000);
+      assert.deepEqual(wire, beforeEdit);
+      assert.equal(ctx.serialLineBufferRef.current, completion === "serial-text" ? "x" : "");
+      assert.deepEqual(submitted, sensitive ? [] : ["show version"]);
+      assert.deepEqual(recorded, sensitive ? [] : ["show version"]);
       return;
     }
     if (completion !== "complete") {

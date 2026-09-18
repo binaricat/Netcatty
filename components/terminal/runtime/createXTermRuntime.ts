@@ -1354,6 +1354,12 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         ctx.serialLineMode &&
         ctx.serialLineBufferRef
       ) {
+        // Local line editing sends no transport write, so cancel queued paste
+        // work explicitly. Escape-prefixed terminal reports are not user text.
+        if (!options?.lineDelayMs && (dataToWrite === "\b" || dataToWrite === "\x15"
+          || dataToWrite.charCodeAt(0) >= 32)) {
+          ctx.terminalBackend.interruptSession?.(id, undefined, { cancelPendingWritesOnly: true });
+        }
         const pacedWrites: string[] = [];
         handleSerialLineModeInput(dataToWrite, {
           bufferRef: ctx.serialLineBufferRef,
