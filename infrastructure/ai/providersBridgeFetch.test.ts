@@ -1237,12 +1237,13 @@ test('re-injects the remembered tool name when the SDK missed the naming chunk',
 
 for (const indexes of [[0], [1], [1, 4], [4, 1]]) {
   test(`completes terminal_execute with streamed tool indexes ${indexes.join(',')} (#3274)`, async (t) => {
-    const originalWindow = (globalThis as typeof globalThis & { window?: unknown }).window;
-    t.after(() => { (globalThis as typeof globalThis & { window?: unknown }).window = originalWindow; });
+    const globals = globalThis as unknown as { window?: unknown };
+    const originalWindow = globals.window;
+    t.after(() => { globals.window = originalWindow; });
     const dataHandlers = new Map<string, (data: string) => void>();
     const endHandlers = new Map<string, () => void>();
     const sentBodies: Array<Record<string, unknown>> = [];
-    (globalThis as typeof globalThis & { window?: unknown }).window = {
+    globals.window = {
       netcatty: {
         aiChatCancel: async () => true,
         onAiStreamData: (id: string, cb: (data: string) => void) => {
