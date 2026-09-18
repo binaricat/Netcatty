@@ -483,6 +483,20 @@ test("paced recording uses its captured prefix and never imports text typed whil
     assert.deepEqual(steps.filter(step => step.type === "send").map(step => step.value), ["echo first", "second", "next input"]);
     steps.length = 0;
     await act(async () => {
+      recorder.recordInput("preserved ");
+      recorder.captureSubmittedLineRecorder(); // No write receipt: rejected batch.
+      recorder.recordInput("draft");
+      await recorder.recordEnter();
+      assert.equal(steps.find(step => step.type === "send")?.value, "preserved draft");
+      steps.length = 0;
+      recorder.recordInput("old ");
+      const lateReceipt = recorder.captureSubmittedLineRecorder()!;
+      recorder.recordClearLine();
+      recorder.recordInput("old new draft");
+      await lateReceipt("sent", { includePendingInput: true });
+      await recorder.recordEnter();
+      assert.deepEqual(steps.filter(step => step.type === "send").map(step => step.value), ["old sent", "old new draft"]);
+      steps.length = 0;
       recorder.recordInput("prefix for a dropped first line");
       const lineRecorder = recorder.captureSubmittedLineRecorder()!;
       await lineRecorder("second was sent");

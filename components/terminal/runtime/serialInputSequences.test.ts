@@ -10,7 +10,7 @@ const ts=require('typescript');
 const bridge=require(root+'/electron/bridges/terminalBridge.cjs');
 test('serial input combinations preserve the preceding device bytes after CJK deletion', async () => {
 const modules = await Promise.all([
-'domain/serialCharMetrics.ts', 'components/terminal/runtime/terminalInputSanitize.ts',
+'components/terminal/runtime/terminalReportSequence.ts', 'domain/serialCharMetrics.ts', 'components/terminal/runtime/terminalInputSanitize.ts',
 'components/terminal/runtime/terminalBackspaceInput.ts', 'components/terminal/runtime/terminalPerCharacterInput.ts',
 'components/terminal/runtime/terminalSudoAutofill.ts', 'components/terminal/runtime/terminalCommandExecution.ts',
 'components/terminal/runtime/serialLocalEcho.ts', 'components/terminal/autocomplete/terminalStringCellWidth.ts',

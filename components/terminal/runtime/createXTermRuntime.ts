@@ -1169,6 +1169,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   // nonempty (hibernation wake: the pre-hibernation cursor may have been
   // moved away from the tail, so we conservatively assume it is not).
   let lastInputWasPrintable = !ctx.commandBufferRef?.current;
+  let commandBufferRevision = 0;
 
   const restoreSerialTailForEmptyInput = (data: string) => {
     // Apply the same rule to typed text, pasted text, and editable snippets.
@@ -1185,6 +1186,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       : data;
     const lastLineBreak = Math.max(text.lastIndexOf("\r"), text.lastIndexOf("\n"));
     if (lastLineBreak >= 0) {
+      commandBufferRevision += 1;
       ctx.commandBufferRef.current = "";
       lastInputWasPrintable = true;
     }
@@ -1255,6 +1257,10 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     const sensitive = ctx.passwordPromptActiveRef?.current === true
       || options?.sensitive === true
       || shouldOverrideTerminalUserPasteSensitivity(term, logicalData ?? data);
+    if (!options?.lineDelayMs && logicalData !== null
+      && !isPrintableInput(logicalData) && !isTerminalReportSequence(logicalData)) {
+      commandBufferRevision += 1;
+    }
     let handledSubmittedInput = false;
     const submittedInput: { text: string; lineEnding: "\r\n" | "\r" | "\n" } | null =
       logicalData === null
@@ -1283,9 +1289,8 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     });
     const willBroadcastInput = canBroadcastInput && options?.skipBroadcast !== true;
     if (ctx.statusRef.current === "connected" && options?.lineDelayMs && logicalData) {
-      // The draft has been handed to the backend scheduler. History and
-      // recording are updated by write receipts, never for canceled lines.
-      ctx.commandBufferRef.current = "";
+      // Keep the draft until the backend confirms a write. A rejected or
+      // canceled batch must not discard input already present at the prompt.
       if (ctx.passwordPromptActiveRef) ctx.passwordPromptActiveRef.current = false;
       handledSubmittedInput = true;
     } else if (ctx.statusRef.current === "connected" && submittedInput) {
@@ -2770,6 +2775,9 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     sessionId: string;
     commands: string[];
     firstPastedLine: string;
+    pendingInput: string;
+    serialPendingInput?: string;
+    inputRevision: number;
     sensitive: boolean;
     recorded: Set<number>;
     recordLine?: (line: string, options?: { sensitive?: boolean; includePendingInput?: boolean }) => Promise<void>;
@@ -2784,6 +2792,14 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     const index = receipt.index;
     if (index !== undefined && Number.isInteger(index) && index >= 0
       && index < pending.commands.length && !pending.recorded.has(index)) {
+      if (pending.recorded.size === 0 && pending.inputRevision === commandBufferRevision
+        && ctx.commandBufferRef.current.startsWith(pending.pendingInput)) {
+        ctx.commandBufferRef.current = ctx.commandBufferRef.current.slice(pending.pendingInput.length);
+        if (pending.serialPendingInput !== undefined && ctx.serialLineBufferRef?.current.startsWith(pending.serialPendingInput)) {
+          ctx.serialLineBufferRef.current = ctx.serialLineBufferRef.current.slice(pending.serialPendingInput.length);
+        }
+        commandBufferRevision += 1;
+      }
       pending.recorded.add(index);
       const command = pending.commands[index];
       const sensitive = isSensitiveTerminalCommandInput(
@@ -2815,11 +2831,18 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     if (commands.length) {
       commands[0] = `${ctx.commandBufferRef.current}${commands[0]}`;
     }
+    const serialPendingInput = ctx.host.protocol === "serial" && ctx.serialLineMode
+      ? ctx.serialLineBufferRef?.current : undefined;
+    const recorded = new Set<number>();
     pendingLinePastes.set(requestId, {
-      sessionId, commands, firstPastedLine, sensitive: options.sensitive, recorded: new Set(),
+      sessionId, commands, firstPastedLine, sensitive: options.sensitive, recorded, serialPendingInput,
+      pendingInput: ctx.commandBufferRef.current, inputRevision: commandBufferRevision,
       recordLine: ctx.scriptRecorderRef?.current?.captureSubmittedLineRecorder?.(),
     });
     handleTerminalInputData(data, { ...options, pasteRequestId: requestId, skipBroadcast: true });
+    if (recorded.size === 0 && serialPendingInput !== undefined && ctx.serialLineBufferRef) {
+      ctx.serialLineBufferRef.current = serialPendingInput;
+    }
   });
 
   term.onData((data) => {

@@ -27,6 +27,7 @@ export function useScriptRecorder(sessionId: string | undefined) {
   const [elapsedMs, setElapsedMs] = useState(0);
   const startedAtRef = useRef<number | null>(null);
   const inputBufferRef = useRef('');
+  const inputRevisionRef = useRef(0);
   const lastStepAtRef = useRef<number>(Date.now());
   const isRecordingRef = useRef(false);
   const isPausedRef = useRef(false);
@@ -66,6 +67,7 @@ export function useScriptRecorder(sessionId: string | undefined) {
     recordingGenerationRef.current += 1;
     startedAtRef.current = Date.now();
     lastStepAtRef.current = Date.now();
+    inputRevisionRef.current += 1;
     inputBufferRef.current = '';
     setElapsedMs(0);
     setIsPaused(false);
@@ -85,6 +87,7 @@ export function useScriptRecorder(sessionId: string | undefined) {
     isPausedRef.current = false;
     setIsRecording(false);
     setIsPaused(false);
+    inputRevisionRef.current += 1;
     inputBufferRef.current = '';
     startedAtRef.current = null;
     if (!sid || !bridge?.scriptRecordingStop) {
@@ -109,6 +112,7 @@ export function useScriptRecorder(sessionId: string | undefined) {
     isDrainingRecordingRef.current = false;
     isRecordingRef.current = false;
     isPausedRef.current = false;
+    inputRevisionRef.current += 1;
     inputBufferRef.current = '';
     startedAtRef.current = null;
     setIsRecording(false);
@@ -160,6 +164,7 @@ export function useScriptRecorder(sessionId: string | undefined) {
     isStoppingRef.current = true;
     isRecordingRef.current = false;
     isPausedRef.current = false;
+    inputRevisionRef.current += 1;
     inputBufferRef.current = '';
     startedAtRef.current = null;
     setIsRecording(false);
@@ -194,11 +199,13 @@ export function useScriptRecorder(sessionId: string | undefined) {
 
   const recordBackspace = useCallback(() => {
     if (!isRecordingRef.current || isPausedRef.current || isStoppingRef.current) return;
+    inputRevisionRef.current += 1;
     inputBufferRef.current = inputBufferRef.current.slice(0, -1);
   }, []);
 
   const recordClearLine = useCallback(() => {
     if (!isRecordingRef.current || isPausedRef.current || isStoppingRef.current) return;
+    inputRevisionRef.current += 1;
     inputBufferRef.current = '';
   }, []);
 
@@ -206,7 +213,10 @@ export function useScriptRecorder(sessionId: string | undefined) {
     const sid = sessionIdRef.current;
     if (!isRecordingRef.current || isPausedRef.current || isStoppingRef.current || !sid) return;
     const line = options?.submittedLine ?? inputBufferRef.current;
-    if (options?.submittedLine === undefined) inputBufferRef.current = '';
+    if (options?.submittedLine === undefined) {
+      inputRevisionRef.current += 1;
+      inputBufferRef.current = '';
+    }
     const now = Date.now();
     const gap = now - lastStepAtRef.current;
     lastStepAtRef.current = now;
@@ -232,11 +242,20 @@ export function useScriptRecorder(sessionId: string | undefined) {
     const generation = recordingGenerationRef.current;
     const sid = sessionIdRef.current;
     const pendingInput = inputBufferRef.current;
-    inputBufferRef.current = '';
+    const revision = inputRevisionRef.current;
+    let consumed = false;
     const isCurrent = () => generation === recordingGenerationRef.current
       && sid === sessionIdRef.current && isRecordingRef.current
       && !isPausedRef.current && !isStoppingRef.current;
     return (line: string, options?: { sensitive?: boolean; includePendingInput?: boolean }): Promise<void> => {
+      // Capturing a batch is not a write. Retain its prefix if no receipt
+      // arrives; on the first write remove only the still-owned prefix.
+      if (!consumed && generation === recordingGenerationRef.current && sid === sessionIdRef.current
+        && revision === inputRevisionRef.current && inputBufferRef.current.startsWith(pendingInput)) {
+        inputBufferRef.current = inputBufferRef.current.slice(pendingInput.length);
+        inputRevisionRef.current += 1;
+      }
+      consumed = true;
       if (!isCurrent()) return Promise.resolve();
       return recordEnter({ sensitive: options?.sensitive, submittedLine: options?.includePendingInput ? `${pendingInput}${line}` : line });
     };

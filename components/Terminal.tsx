@@ -3329,6 +3329,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     const sensitive = passwordPromptActiveRef.current;
     if (!sensitive && options?.broadcast !== false && isBroadcastEnabledRef.current && onBroadcastInputRef.current) {
       onBroadcastInputRef.current(data, sessionId, {
+        automated: true,
         noAutoRun,
         ...(lineDelayMs ? { lineDelayMs } : {}),
       });

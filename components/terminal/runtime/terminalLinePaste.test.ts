@@ -35,8 +35,9 @@ for (const [protocol, lineMode, sensitive] of [
   ["ssh", false, false], ["ssh", false, true], ["local", false, false],
   ["mosh", false, false], ["et", false, false], ["plugin:example", false, false],
 ] as const) {
-  for (const completion of ["complete", "manual", "interrupt", "replacement", "password-ref", "password-screen", "output", "serial-text", "serial-backspace", "serial-clear", "serial-arrow", "serial-delete", "serial-report"] as const) {
+  for (const completion of ["pending-manual", "pending-clear", "pending-ack", "blocked-first", "failed-first", "complete", "manual", "interrupt", "replacement", "password-ref", "password-screen", "output", "serial-text", "serial-backspace", "serial-clear", "serial-arrow", "serial-delete", "serial-report"] as const) {
   if (completion.startsWith("serial-") && !lineMode) continue;
+  if (completion.startsWith("pending-") && sensitive) continue;
   test(`${completion}: ${protocol} confirmed line paste consumes pending text with pacing (lineMode=${lineMode}, sensitive=${sensitive})`, async (t) => {
     t.mock.timers.enable({ apis: ["setTimeout"] });
     const wire: string[] = [];
@@ -53,8 +54,21 @@ for (const [protocol, lineMode, sensitive] of [
     let recorderInput = "";
     let receiptListener: ((event: unknown) => void) | undefined;
     const writes: Array<{ data: string; sensitive?: boolean; lineDelayMs?: number; automated?: boolean }> = [];
+    let rejectPaste = false;
+    let releaseFirst: (() => void) | undefined;
+    const session = { zmodemSentry: { isActive: () => rejectPaste && completion === "blocked-first" }, [protocol === "serial" ? "serialPort" : protocol === "telnet" ? "socket" : protocol === "local" ? "proc" : "stream"]: { write: (data: string) => {
+        if (rejectPaste && completion === "failed-first") throw new Error("write failed");
+        wire.push(String(data));
+      } } };
     bridge.init({
-      sessions: new Map([["serial-1", { [protocol === "serial" ? "serialPort" : protocol === "telnet" ? "socket" : protocol === "local" ? "proc" : "stream"]: { write: (data: string) => wire.push(String(data)) } }]]),
+      sessions: new Map([["serial-1", session]]),
+      terminalDataPipeline: completion.startsWith("pending-") ? {
+        has: () => true,
+        interceptInput(_id: string, data: string) {
+          if (rejectPaste && !releaseFirst) return new Promise<string>(resolve => { releaseFirst = () => resolve(data); });
+          return data;
+        },
+      } : undefined,
       electronModule: { webContents: { fromId: () => ({ send(channel: string, event: unknown) { if (channel === "netcatty:paste-write") receiptListener?.(event); } }) } },
     });
     const ctx = {
@@ -115,6 +129,7 @@ for (const [protocol, lineMode, sensitive] of [
     t.after(() => env.api.dispose());
     env.api.input("show ");
     ctx.isBroadcastEnabledRef.current = true;
+    rejectPaste = true;
     await pasteTextWithMultilineConfirm("version\nshow clock", {
       term, sessionId: "serial-1", terminalBackend: ctx.terminalBackend,
       getCurrentSessionId: () => ctx.sessionRef.current,
@@ -128,6 +143,44 @@ for (const [protocol, lineMode, sensitive] of [
       },
       onPasteData: data => { broadcast.push(data); return true; },
     });
+    if (completion.startsWith("pending-")) {
+      assert.equal(ctx.commandBufferRef.current, "show ");
+      assert.deepEqual(history, []);
+      ctx.isBroadcastEnabledRef.current = false;
+      if (completion === "pending-manual") env.api.input("x");
+      if (completion === "pending-clear") {
+        env.api.input("\x15");
+        env.api.input("show new draft");
+      }
+      releaseFirst?.();
+      await new Promise(resolve => setImmediate(resolve));
+      if (completion === "pending-ack") {
+        assert.equal(ctx.commandBufferRef.current, "");
+        assert.deepEqual(history, sensitive ? [] : ["show version"]);
+        if (lineMode) assert.equal(ctx.serialLineBufferRef.current, "");
+      } else {
+        assert.equal(ctx.commandBufferRef.current, completion === "pending-manual" ? "show x" : "show new draft");
+        assert.deepEqual(history, []);
+      }
+      bridge.interruptSession({}, { sessionId: "serial-1", cancelPendingWritesOnly: true });
+      t.mock.timers.tick(1000);
+      return;
+    }
+    if (completion === "blocked-first" || completion === "failed-first") {
+      t.mock.timers.tick(1000);
+      assert.deepEqual(wire, lineMode ? [] : ["show "]);
+      assert.equal(ctx.commandBufferRef.current, "show ");
+      if (lineMode) assert.equal(ctx.serialLineBufferRef.current, "show ");
+      assert.deepEqual(history, []);
+      assert.deepEqual(recorded, []);
+      rejectPaste = false;
+      ctx.isBroadcastEnabledRef.current = false;
+      env.api.input("next");
+      assert.equal(ctx.commandBufferRef.current, "show next");
+      env.api.input("\r");
+      if (lineMode) assert.equal(wire.at(-1), "show next\r");
+      return;
+    }
     assert.deepEqual(wire, lineMode ? ["show version\r"] : ["show ", "version\r"]);
     assert.equal(ctx.serialLineBufferRef.current, "");
     assert.deepEqual(loginCancellationNotices, lineMode ? ["serial-1", "serial-1"] : []);

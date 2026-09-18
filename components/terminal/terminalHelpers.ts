@@ -27,6 +27,7 @@ export const MAX_CONNECTION_LOG_DATA_CHARS = 1_000_000;
 export const AUTO_RUN_SNIPPET_LINE_DELAY_MS = 250;
 
 export interface TerminalBroadcastInputOptions {
+  automated?: boolean;
   noAutoRun?: boolean;
   lineDelayMs?: number;
   kittyKeyboardInput?: KittyKeyboardBroadcastInput;
