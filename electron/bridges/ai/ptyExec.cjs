@@ -200,6 +200,27 @@ function startPtyJob(ptyStream, command, options) {
   // re-armed with the remaining wall time once delivery completes, so a short
   // configured timeout cannot interrupt the probe/wrapper mid-typing (#3449).
   let jobStartMs = Date.now();
+  // Wall-clock accounting excludes paced-input delivery time: the timer is
+  // paused in writeInput and the paused duration is subtracted from the
+  // elapsed time, so a short configured budget is preserved for the command
+  // itself instead of expiring during (or immediately after) delivery (#3449).
+  let wallPausedTotalMs = 0;
+  let wallPauseStartedAtMs = 0;
+  function pauseWallClock() {
+    if (enforceWallTimeout && maxBufferedChars <= 0 && !wallPauseStartedAtMs) {
+      wallPauseStartedAtMs = Date.now();
+    }
+  }
+  function resumeWallClock() {
+    if (!wallPauseStartedAtMs) return;
+    wallPausedTotalMs += Math.max(0, Date.now() - wallPauseStartedAtMs);
+    wallPauseStartedAtMs = 0;
+  }
+  function remainingWallMs() {
+    const pausedMs = wallPausedTotalMs
+      + (wallPauseStartedAtMs ? Math.max(0, Date.now() - wallPauseStartedAtMs) : 0);
+    return timeoutMs - ((Date.now() - jobStartMs) - pausedMs);
+  }
   function armWallTimeout(remainingMs = timeoutMs) {
     if (!enforceWallTimeout || maxBufferedChars > 0) return;
     clearTimeout(wallTimeoutId);
@@ -245,9 +266,10 @@ function startPtyJob(ptyStream, command, options) {
     // start, so the paced probe delivery already consumed part of the budget:
     // cap the probe deadline by the remaining wall time minus the recovery
     // reserve so the recovery delivery still fits before the wall deadline
-    // even with short supported timeouts (#3449).
+    // even with short supported timeouts (#3449). The remaining time excludes
+    // the paused paced-delivery duration so pacing cannot exhaust it.
     const wallBudgetMs = enforceWallTimeout
-      ? Math.max(1, timeoutMs - (Date.now() - jobStartMs) - PROBE_RECOVERY_RESERVE_MS)
+      ? Math.max(1, remainingWallMs() - PROBE_RECOVERY_RESERVE_MS)
       : Infinity;
     const startupMs = probingShell
       ? Math.min(probeDeadlineMs, probeBudgetMs, wallBudgetMs)
@@ -819,12 +841,17 @@ function startPtyJob(ptyStream, command, options) {
     // Input delivery is complete: only now does the startup deadline begin,
     // so paced typing time never consumes the startup budget. The wall clock
     // (enforceWallTimeout callers) is also paused during delivery and re-armed
-    // with the remaining budget so pacing cannot consume it or interrupt the
-    // next delivery mid-typing with a short configured timeout (#3449).
+    // with the preserved remaining budget so pacing cannot consume it or
+    // interrupt the next delivery mid-typing with a short configured timeout
+    // (#3449). The remaining budget is measured with the paused time excluded:
+    // re-arming from raw elapsed time would leave a negative remainder after
+    // paced probe + wrapper delivery and interrupt the recovered command
+    // before it can execute.
     if (!finished && !cancelRequested && generation === inputWriteGeneration) {
       deliveringInput = false;
+      resumeWallClock();
       if (!pendingEnd) armOutputTimeout();
-      armWallTimeout(timeoutMs - (Date.now() - jobStartMs));
+      armWallTimeout(remainingWallMs());
       if (!foundStart) armStartupTimeout();
     }
   }
@@ -837,8 +864,9 @@ function startPtyJob(ptyStream, command, options) {
     clearTimeout(timeoutId);
     // Pause the wall clock while paced-typing so it cannot fire mid-delivery
     // with short enforceWallTimeout budgets (#3449); completeInputDelivery
-    // re-arms it with the remaining wall time.
+    // re-arms it with the preserved remaining wall time.
     clearTimeout(wallTimeoutId);
+    pauseWallClock();
     deliveringInput = true;
     const generation = inputWriteGeneration;
 
@@ -864,9 +892,18 @@ function startPtyJob(ptyStream, command, options) {
           const writable = ptyStream.write(chunk);
           if (!isCurrent()) return;
           if (writable === false) {
+            // The wall clock is paused for the delivery: resume it while
+            // waiting for drain so the enforceWallTimeout hard deadline stays
+            // active — otherwise a blocked wrapper could retain the session
+            // lock for a fresh full timeoutMs beyond the advertised limit
+            // (#3449). Each drained wait re-pauses and the next write re-arms
+            // with the decreased remaining budget.
+            resumeWallClock();
+            armWallTimeout(remainingWallMs());
             inputDrainListener = () => {
               inputDrainListener = null;
               clearTimeout(inputWriteTimer);
+              pauseWallClock();
               scheduleNext();
             };
             ptyStream.once("drain", inputDrainListener);
