@@ -771,6 +771,13 @@ function raceLocalStreamOpenAgainstAbort(openPromise, signal) {
       settled = true;
       signal.removeEventListener?.("abort", onAbort);
       reject(localStreamCancellationError());
+      // Still observe the pending open: destroy a late-resolving stream so its
+      // fd is closed, and swallow its rejection so it cannot surface as a
+      // process-level unhandledRejection.
+      openPromise.then(
+        (stream) => { destroyLateStream(stream); },
+        () => { /* already rejected with the cancellation error */ },
+      );
       return;
     }
     openPromise.then(
