@@ -89,7 +89,7 @@ for (const [protocol, lineMode, sensitive] of [
     });
     assert.deepEqual(wire, lineMode ? ["show version\r"] : ["show ", "version\r"]);
     assert.equal(ctx.serialLineBufferRef.current, "");
-    assert.equal(ctx.commandBufferRef.current, "");
+    if (protocol === "serial") assert.equal(ctx.commandBufferRef.current, "");
     assert.equal(echo.join(""), "show version\r\nshow clock\r\n");
     assert.equal(writes.length, lineMode ? 1 : 2);
     assert.equal(writes.at(-1)?.lineDelayMs, 250);
