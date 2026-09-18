@@ -904,6 +904,12 @@ function startPtyJob(ptyStream, command, options) {
               inputDrainListener = null;
               clearTimeout(inputWriteTimer);
               pauseWallClock();
+              // The wall clock is paused while delivery waits to resume, so
+              // cancel the armed timer: it holds a stale budget measured at
+              // drain time and could otherwise fire while pacing or the
+              // drain wait is still active. It is re-armed by the next
+              // backpressured write or by completeInputDelivery (#3449).
+              clearTimeout(wallTimeoutId);
               scheduleNext();
             };
             ptyStream.once("drain", inputDrainListener);
