@@ -444,3 +444,51 @@ test("confirmed line-by-line recording awaits each send and prompt step in order
     await act(async () => renderer.unmount());
   }
 });
+
+test("paced recording uses its captured prefix and never imports text typed while paused", async (t) => {
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+  const steps: Array<{ type: string; value?: unknown }> = [];
+  const target = new EventTarget();
+  Object.assign(target, {
+    netcatty: {
+      scriptRecordingStart: async () => ({ ok: true }),
+      scriptRecordingAppendStep: async (_id: string, step: typeof steps[number]) => {
+        steps.push(step);
+        return { stopped: false };
+      },
+    }, setInterval, clearInterval,
+  });
+  Object.defineProperty(globalThis, "window", { configurable: true, value: target });
+  t.after(() => {
+    if (previousWindow) Object.defineProperty(globalThis, "window", previousWindow);
+    else Reflect.deleteProperty(globalThis, "window");
+  });
+  let recorder!: Recorder;
+  let renderer!: ReactTestRenderer;
+  function Probe() { recorder = useScriptRecorder("s"); return null; }
+  await act(async () => { renderer = create(React.createElement(Probe)); });
+  try {
+    await act(async () => {
+      await recorder.startRecording();
+      recorder.recordInput("echo ");
+      recorder.pauseRecording();
+      recorder.recordInput("PAUSED_");
+      recorder.resumeRecording();
+      const lineRecorder = recorder.captureSubmittedLineRecorder()!;
+      recorder.recordInput("next input");
+      await lineRecorder("first", { includePendingInput: true });
+      await lineRecorder("second");
+      await recorder.recordEnter();
+    });
+    assert.deepEqual(steps.filter(step => step.type === "send").map(step => step.value), ["echo first", "second", "next input"]);
+    steps.length = 0;
+    await act(async () => {
+      recorder.recordInput("prefix for a dropped first line");
+      const lineRecorder = recorder.captureSubmittedLineRecorder()!;
+      await lineRecorder("second was sent");
+    });
+    assert.deepEqual(steps.filter(step => step.type === "send").map(step => step.value), ["second was sent"]);
+  } finally {
+    await act(async () => renderer.unmount());
+  }
+});

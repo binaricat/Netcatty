@@ -231,13 +231,14 @@ export function useScriptRecorder(sessionId: string | undefined) {
     if (!isRecordingRef.current || isPausedRef.current || isStoppingRef.current) return undefined;
     const generation = recordingGenerationRef.current;
     const sid = sessionIdRef.current;
+    const pendingInput = inputBufferRef.current;
     inputBufferRef.current = '';
     const isCurrent = () => generation === recordingGenerationRef.current
       && sid === sessionIdRef.current && isRecordingRef.current
       && !isPausedRef.current && !isStoppingRef.current;
-    return (line: string, options?: { sensitive?: boolean }): Promise<void> => {
+    return (line: string, options?: { sensitive?: boolean; includePendingInput?: boolean }): Promise<void> => {
       if (!isCurrent()) return Promise.resolve();
-      return recordEnter({ ...options, submittedLine: line });
+      return recordEnter({ sensitive: options?.sensitive, submittedLine: options?.includePendingInput ? `${pendingInput}${line}` : line });
     };
   }, [recordEnter]);
 

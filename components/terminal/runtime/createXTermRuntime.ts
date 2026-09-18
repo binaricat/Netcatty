@@ -1,3 +1,4 @@
+import { isTerminalReportSequence } from "../../../domain/terminalReportSequence";
 import { stringCellWidth } from "../autocomplete/terminalStringCellWidth";
 import type { TerminalBroadcastInputOptions } from "../terminalHelpers";
 import { FitAddon } from "@xterm/addon-fit";
@@ -360,7 +361,7 @@ export type CreateXTermRuntimeContext = {
     recordBackspace: () => void;
     recordClearLine: () => void;
     recordEnter: (options?: { sensitive?: boolean }) => Promise<void>;
-    captureSubmittedLineRecorder?: () => ((line: string, options?: { sensitive?: boolean }) => Promise<void>) | undefined;
+    captureSubmittedLineRecorder?: () => ((line: string, options?: { sensitive?: boolean; includePendingInput?: boolean }) => Promise<void>) | undefined;
   } | undefined>;
   passwordPromptActiveRef?: RefObject<boolean>;
   allowHostStyleGreaterThanPrompt?: boolean;
@@ -1355,9 +1356,11 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         ctx.serialLineBufferRef
       ) {
         // Local line editing sends no transport write, so cancel queued paste
-        // work explicitly. Escape-prefixed terminal reports are not user text.
-        if (!options?.lineDelayMs && (dataToWrite === "\b" || dataToWrite === "\x15"
-          || dataToWrite.charCodeAt(0) >= 32)) {
+        // work explicitly. Only actual protocol replies are exempt; keyboard
+        // escape sequences also edit the local buffer.
+        if (!options?.lineDelayMs && !isTerminalReportSequence(dataToWrite)
+          && (dataToWrite === "\b" || dataToWrite === "\x15"
+            || dataToWrite.charCodeAt(0) >= 32 || dataToWrite.length > 1)) {
           ctx.terminalBackend.interruptSession?.(id, undefined, { cancelPendingWritesOnly: true });
         }
         const pacedWrites: string[] = [];
@@ -2624,9 +2627,10 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   const pendingLinePastes = new Map<string, {
     sessionId: string;
     commands: string[];
+    firstPastedLine: string;
     sensitive: boolean;
     recorded: Set<number>;
-    recordLine?: (line: string, options?: { sensitive?: boolean }) => Promise<void>;
+    recordLine?: (line: string, options?: { sensitive?: boolean; includePendingInput?: boolean }) => Promise<void>;
   }>();
   const disposePasteWriteReceipts = netcattyBridge.get()?.onTerminalPasteWrite?.((receipt) => {
     const pending = pendingLinePastes.get(receipt.requestId);
@@ -2651,7 +2655,9 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         useProvidedCommand: true,
         acknowledgedWrite: true,
       });
-      void pending.recordLine?.(command, { sensitive }).catch((error) => {
+      void pending.recordLine?.(index === 0 ? pending.firstPastedLine : command, {
+        sensitive, includePendingInput: index === 0,
+      }).catch((error) => {
         logger.warn("Failed to record confirmed paste write", error);
       });
     }
@@ -2663,11 +2669,12 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     const requestId = crypto.randomUUID();
     const commands = data.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
     if (commands.at(-1) === "") commands.pop();
+    const firstPastedLine = commands[0] ?? "";
     if (commands.length) {
       commands[0] = `${ctx.commandBufferRef.current}${commands[0]}`;
     }
     pendingLinePastes.set(requestId, {
-      sessionId, commands, sensitive: options.sensitive, recorded: new Set(),
+      sessionId, commands, firstPastedLine, sensitive: options.sensitive, recorded: new Set(),
       recordLine: ctx.scriptRecorderRef?.current?.captureSubmittedLineRecorder?.(),
     });
     handleTerminalInputData(data, { ...options, pasteRequestId: requestId, skipBroadcast: true });

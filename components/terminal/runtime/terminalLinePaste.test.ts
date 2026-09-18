@@ -22,7 +22,7 @@ const code = ts.transpileModule(
   { compilerOptions: { target: ts.ScriptTarget.ES2022 } },
 ).outputText;
 const helpers = await Promise.all([
-  "../../../domain/serialCharMetrics.ts", "./terminalInputSanitize.ts",
+  "../../../domain/serialCharMetrics.ts", "../../../domain/terminalReportSequence.ts", "./terminalInputSanitize.ts",
   "./terminalBackspaceInput.ts", "./terminalPerCharacterInput.ts",
   "./terminalSudoAutofill.ts", "./terminalCommandExecution.ts",
   "./serialLocalEcho.ts", "../autocomplete/terminalStringCellWidth.ts",
@@ -35,7 +35,7 @@ for (const [protocol, lineMode, sensitive] of [
   ["ssh", false, false], ["ssh", false, true], ["local", false, false],
   ["mosh", false, false], ["et", false, false], ["plugin:example", false, false],
 ] as const) {
-  for (const completion of ["complete", "manual", "interrupt", "replacement", "password-ref", "password-screen", "output", "serial-text", "serial-backspace", "serial-clear"] as const) {
+  for (const completion of ["complete", "manual", "interrupt", "replacement", "password-ref", "password-screen", "output", "serial-text", "serial-backspace", "serial-clear", "serial-arrow", "serial-delete", "serial-report"] as const) {
   if (completion.startsWith("serial-") && !lineMode) continue;
   test(`${completion}: ${protocol} confirmed line paste consumes pending text with pacing (lineMode=${lineMode}, sensitive=${sensitive})`, async (t) => {
     t.mock.timers.enable({ apis: ["setTimeout"] });
@@ -75,10 +75,11 @@ for (const [protocol, lineMode, sensitive] of [
           recorderInput = "";
         },
         captureSubmittedLineRecorder: () => {
+          const pendingInput = recorderInput;
           recorderInput = "";
-          return async (line: string, { sensitive: secret }: { sensitive: boolean }) => {
+          return async (line: string, { sensitive: secret, includePendingInput }: { sensitive: boolean; includePendingInput?: boolean }) => {
             recordingSensitivity.push(secret);
-            if (!secret) recorded.push(line);
+            if (!secret) recorded.push(includePendingInput ? pendingInput + line : line);
           };
         },
       } },
@@ -168,10 +169,17 @@ for (const [protocol, lineMode, sensitive] of [
     if (completion.startsWith("serial-")) {
       ctx.isBroadcastEnabledRef.current = false;
       const beforeEdit = [...wire];
-      env.api.input(completion === "serial-text" ? "x" : completion === "serial-backspace" ? "\x7f" : "\x15");
+      const edit = completion === "serial-text" ? "x" : completion === "serial-backspace" ? "\x7f"
+        : completion === "serial-arrow" ? "\x1b[D" : completion === "serial-delete" ? "\x1b[3~"
+          : completion === "serial-report" ? "\x1b[1;2R" : "\x15";
+      env.api.input(edit);
       t.mock.timers.tick(1000);
+      if (completion === "serial-report") {
+        assert.deepEqual(wire, [...beforeEdit, "show clock\r"]);
+        return;
+      }
       assert.deepEqual(wire, beforeEdit);
-      assert.equal(ctx.serialLineBufferRef.current, completion === "serial-text" ? "x" : "");
+      assert.equal(ctx.serialLineBufferRef.current, completion === "serial-backspace" || completion === "serial-clear" ? "" : edit);
       assert.deepEqual(submitted, sensitive ? [] : ["show version"]);
       assert.deepEqual(recorded, sensitive ? [] : ["show version"]);
       return;
