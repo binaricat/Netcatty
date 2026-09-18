@@ -29,7 +29,7 @@ function makeApi(session, siblingSessions = [], overrides = {}) {
     sessions,
     setTimeout: overrides.setTimeout || setTimeout,
     clearTimeout: overrides.clearTimeout || clearTimeout,
-    quoteShellArg,
+    quoteShellArg: overrides.quoteShellArg || quoteShellArg,
     log: () => {},
   });
 }
@@ -121,6 +121,46 @@ test("session cwd probe decodes the marked lsof pathname", async () => {
   const result = await api.getSessionPwd(null, { sessionId: "session-1" });
 
   assert.deepEqual(result, { success: true, cwd: "/srv/中文" });
+});
+
+test("lsof cwd fallback accepts only directory records, not diagnostic names (#3237)", async () => {
+  let script;
+  const api = makeApi({
+    shellPid: "4242",
+    connRef: { count: 1 },
+    stream: {},
+    conn: {
+      exec(_command, callback) {
+        callback(null, makePwdStream("/srv/app", "4242"));
+      },
+    },
+  }, [], {
+    quoteShellArg(value) {
+      if (!script && value.includes("read_shell_cwd()")) script = value;
+      return quoteShellArg(value);
+    },
+  });
+  await api.getSessionPwd(null, { sessionId: "session-1" });
+  const helper = script.match(/    read_shell_cwd\(\) \{[\s\S]*?\n    \}/)?.[0];
+  assert.ok(helper, "exercise the actual remote cwd helper");
+  const { spawnSync } = require("node:child_process");
+  for (const [output, expected] of [
+    ["p4242\nfcwd\ntunknown\nn/proc/4242/cwd (readlink: Permission denied)\n", null],
+    ["p4242\nfcwd\ntunknown\nn/proc/4242/cwd (readlink: No such file or directory)\n", null],
+    ["p4242\nfcwd\nn/proc/4242/cwd\n", null],
+    ["p4242\nfcwd\ntDIR\nn/srv/app\n", "/srv/app"],
+    ["p4242\nfcwd\ntDIR\nn/tmp/literal (readlink: Permission denied)\n", "/tmp/literal (readlink: Permission denied)"],
+    ["p4242\nfcwd\ntDIR\nn/tmp/\\xe4\\xb8\\xad\\xe6\\x96\\x87\n", "/tmp/\\xe4\\xb8\\xad\\xe6\\x96\\x87"],
+  ]) {
+    const result = spawnSync("sh", ["-c", `
+      readlink() { return 1; }
+      lsof() { printf '%s' "$LSOF_TEST_OUTPUT"; }
+      ${helper}
+      read_shell_cwd 4242
+    `], { encoding: "utf8", env: { ...process.env, LSOF_TEST_OUTPUT: output } });
+    assert.equal(result.status, expected === null ? 1 : 0, output);
+    assert.equal(result.stdout, expected === null ? "" : `NETCATTY_LSOF_CWD=${expected}\n`, output);
+  }
 });
 
 test("session cwd probe closes a remote command that exceeds its timeout", async () => {

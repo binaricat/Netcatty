@@ -635,7 +635,13 @@ function createSessionOpsApi(ctx) {
       _rc_cwd=$(readlink "/proc/$1/cwd" 2>/dev/null)
       if [ -n "$_rc_cwd" ]; then printf '%s\\n' "$_rc_cwd"; return 0; fi
       if command -v lsof >/dev/null 2>&1; then
-        _rc_cwd=$(LC_ALL=C lsof -a -p "$1" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -n1)
+        # An unknown-type record can put a readlink error in its name field.
+        # Only a confirmed directory name is usable as an upload destination.
+        _rc_cwd=$(LC_ALL=C lsof -a -p "$1" -d cwd -Fnt 2>/dev/null | awk '
+          /^f/ { is_dir=0 }
+          /^t/ { is_dir=($0 == "tDIR") }
+          /^n/ && is_dir { print substr($0, 2); exit }
+        ')
         if [ -n "$_rc_cwd" ]; then printf 'NETCATTY_LSOF_CWD=%s\\n' "$_rc_cwd"; return 0; fi
       fi
       return 1
