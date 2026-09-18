@@ -189,7 +189,7 @@ import {
   consumeOsc133CommandCompletion,
   type PromptLineBreakState,
 } from "./promptLineBreak";
-import { recordTerminalCommandExecution } from "./terminalCommandExecution";
+import { recordTerminalCommandExecution, resolveSubmittedShellCommand } from "./terminalCommandExecution";
 import {
   getSingleBracketedPasteLine,
   getSinglePastedCommand,
@@ -359,7 +359,8 @@ export type CreateXTermRuntimeContext = {
     recordInput: (data: string) => void;
     recordBackspace: () => void;
     recordClearLine: () => void;
-    recordEnter: (options?: { sensitive?: boolean; lineByLine?: boolean }) => Promise<void>;
+    recordEnter: (options?: { sensitive?: boolean }) => Promise<void>;
+    captureSubmittedLineRecorder?: () => ((line: string, options?: { sensitive?: boolean }) => Promise<void>) | undefined;
   } | undefined>;
   passwordPromptActiveRef?: RefObject<boolean>;
   allowHostStyleGreaterThanPrompt?: boolean;
@@ -1208,6 +1209,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       /** Confirmed paste: preserve classification and backend pacing. */
       sensitive?: boolean;
       lineDelayMs?: number;
+      pasteRequestId?: string;
       /**
        * Send plain text as one write per character. Strict bastion prompts
        * (QAX) treat one channel write as a keystroke and drop multi-character
@@ -1276,24 +1278,9 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     });
     const willBroadcastInput = canBroadcastInput && options?.skipBroadcast !== true;
     if (ctx.statusRef.current === "connected" && options?.lineDelayMs && logicalData) {
-      // Confirmed paced pastes submit each line, rather than leaving a draft
-      // in readline. Keep history, CWD invalidation and recording in sync
-      // while still passing one batch to the backend's delay scheduler.
-      const lines = logicalData.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
-      if (lines.at(-1) === "") lines.pop();
-      ctx.scriptRecorderRef?.current?.recordInput(logicalData);
-      if (ctx.scriptRecorderRef?.current?.isRecording) {
-        void ctx.scriptRecorderRef.current.recordEnter({ sensitive, lineByLine: true });
-      }
-      for (const [index, line] of lines.entries()) {
-        recordTerminalCommandExecution(`${ctx.commandBufferRef.current}${line}`, ctx, term, {
-          sensitive,
-          allowHostStyleGreaterThanPrompt: ctx.allowHostStyleGreaterThanPrompt,
-          // Only the first line can refer to an existing edited prompt. Later
-          // lines have not echoed yet; the stale screen cannot override them.
-          useProvidedCommand: index > 0,
-        });
-      }
+      // The draft has been handed to the backend scheduler. History and
+      // recording are updated by write receipts, never for canceled lines.
+      ctx.commandBufferRef.current = "";
       if (ctx.passwordPromptActiveRef) ctx.passwordPromptActiveRef.current = false;
       handledSubmittedInput = true;
     } else if (ctx.statusRef.current === "connected" && submittedInput) {
@@ -1386,6 +1373,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
             automated: true,
             sensitive,
             lineDelayMs: options?.lineDelayMs,
+            pasteRequestId: options?.pasteRequestId,
           });
         }
       } else {
@@ -1420,7 +1408,11 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
           ctx.terminalBackend.writeToSession(id, chunk, {
             sensitive,
             serialEraseChar,
-            ...(options?.lineDelayMs ? { automated: true, lineDelayMs: options.lineDelayMs } : {}),
+            ...(options?.lineDelayMs ? {
+              automated: true,
+              lineDelayMs: options.lineDelayMs,
+              pasteRequestId: options.pasteRequestId,
+            } : {}),
           });
         }
 
@@ -2622,8 +2614,52 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   ctx.container.addEventListener("input", markKittyTextInput, true);
   textarea?.addEventListener("blur", clearKittyTransientInputState);
 
+  const pendingLinePastes = new Map<string, {
+    sessionId: string;
+    commands: string[];
+    sensitive: boolean;
+    recorded: Set<number>;
+    recordLine?: (line: string, options?: { sensitive?: boolean }) => Promise<void>;
+  }>();
+  const disposePasteWriteReceipts = netcattyBridge.get()?.onTerminalPasteWrite?.((receipt) => {
+    const pending = pendingLinePastes.get(receipt.requestId);
+    if (!pending || pending.sessionId !== receipt.sessionId) return;
+    if (ctx.sessionRef.current !== pending.sessionId) {
+      pendingLinePastes.delete(receipt.requestId);
+      return;
+    }
+    const index = receipt.index;
+    if (index !== undefined && Number.isInteger(index) && index >= 0
+      && index < pending.commands.length && !pending.recorded.has(index)) {
+      pending.recorded.add(index);
+      const command = pending.commands[index];
+      // Receipts can arrive after the user starts typing another command.
+      // Never consume that live input buffer or reconcile with a newer screen.
+      recordTerminalCommandExecution(command, { ...ctx, commandBufferRef: { current: "" } }, term, {
+        sensitive: pending.sensitive,
+        allowHostStyleGreaterThanPrompt: ctx.allowHostStyleGreaterThanPrompt,
+        useProvidedCommand: true,
+      });
+      void pending.recordLine?.(command, { sensitive: pending.sensitive }).catch((error) => {
+        logger.warn("Failed to record confirmed paste write", error);
+      });
+    }
+    if (receipt.done) pendingLinePastes.delete(receipt.requestId);
+  });
   const disposeLinePasteHandler = registerTerminalLinePasteHandler(term, (data, options) => {
-    handleTerminalInputData(data, { ...options, skipBroadcast: true });
+    const sessionId = ctx.sessionRef.current;
+    if (!sessionId) return;
+    const requestId = crypto.randomUUID();
+    const commands = data.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+    if (commands.at(-1) === "") commands.pop();
+    if (commands.length) {
+      commands[0] = resolveSubmittedShellCommand(`${ctx.commandBufferRef.current}${commands[0]}`, term);
+    }
+    pendingLinePastes.set(requestId, {
+      sessionId, commands, sensitive: options.sensitive, recorded: new Set(),
+      recordLine: ctx.scriptRecorderRef?.current?.captureSubmittedLineRecorder?.(),
+    });
+    handleTerminalInputData(data, { ...options, pasteRequestId: requestId, skipBroadcast: true });
   });
 
   term.onData((data) => {
@@ -3072,6 +3108,8 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     dispose: () => {
       runtimeDisposed = true;
       disposeLinePasteHandler?.();
+      disposePasteWriteReceipts?.();
+      pendingLinePastes.clear();
       resizeScheduler.dispose();
       webglController.dispose();
       term.element?.removeEventListener("copy", handleNativeCopy, true);

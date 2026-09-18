@@ -327,6 +327,7 @@ declare global {
       data: string,
       options?: {
         automated?: boolean;
+        pasteRequestId?: string;
         /** Host-classified secret/no-echo input; always bypasses plugin observers and interceptors. */
         sensitive?: boolean;
         /** Whole character to erase on an explicitly byte-oriented serial device. */
@@ -335,6 +336,13 @@ declare global {
         logRewrite?: { sentCommand: string; displayCommand: string };
       },
     ): void;
+    /** Opt-in transport handoff receipts; cancellation ends with done and no index. */
+    onTerminalPasteWrite?(cb: (event: {
+      sessionId: string;
+      requestId: string;
+      index?: number;
+      done?: boolean;
+    }) => void): () => void;
     interruptSession?(sessionId: string, trace?: NetcattyTerminalInterruptTrace): void;
     resizeSession(sessionId: string, cols: number, rows: number): void;
     /**

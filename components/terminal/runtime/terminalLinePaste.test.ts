@@ -14,11 +14,11 @@ const source = readFileSync(new URL("./createXTermRuntime.ts", import.meta.url),
 // following serialInputSequences.test.ts's runtime extraction harness.
 const start = source.indexOf("let lastInputWasPrintable =");
 const end = source.indexOf("  let kittyCompositionPending", start);
-const registrationStart = source.indexOf("  const disposeLinePasteHandler =");
+const registrationStart = source.indexOf("  const pendingLinePastes =");
 const registrationEnd = source.indexOf("  term.onData(", registrationStart);
 const code = ts.transpileModule(
   source.slice(start, end) + source.slice(registrationStart, registrationEnd)
-    + "\nglobalThis.api = { input: handleTerminalInputData, dispose: disposeLinePasteHandler };",
+    + "\nglobalThis.api = { input: handleTerminalInputData, dispose: () => { disposeLinePasteHandler(); disposePasteWriteReceipts?.(); pendingLinePastes.clear(); } };",
   { compilerOptions: { target: ts.ScriptTarget.ES2022 } },
 ).outputText;
 const helpers = await Promise.all([
@@ -35,7 +35,8 @@ for (const [protocol, lineMode, sensitive] of [
   ["ssh", false, false], ["ssh", false, true], ["local", false, false],
   ["mosh", false, false], ["et", false, false], ["plugin:example", false, false],
 ] as const) {
-  test(`${protocol} confirmed line paste consumes pending text with pacing (lineMode=${lineMode}, sensitive=${sensitive})`, async (t) => {
+  for (const completion of ["complete", "manual", "interrupt"] as const) {
+  test(`${completion}: ${protocol} confirmed line paste consumes pending text with pacing (lineMode=${lineMode}, sensitive=${sensitive})`, async (t) => {
     t.mock.timers.enable({ apis: ["setTimeout"] });
     const wire: string[] = [];
     const echo: string[] = [];
@@ -45,10 +46,11 @@ for (const [protocol, lineMode, sensitive] of [
     const outputTriggers: string[] = [];
     const recorded: string[] = [];
     let recorderInput = "";
+    let receiptListener: ((event: unknown) => void) | undefined;
     const writes: Array<{ data: string; sensitive?: boolean; lineDelayMs?: number }> = [];
     bridge.init({
       sessions: new Map([["serial-1", { [protocol === "serial" ? "serialPort" : protocol === "telnet" ? "socket" : protocol === "local" ? "proc" : "stream"]: { write: (data: string) => wire.push(String(data)) } }]]),
-      electronModule: { webContents: { fromId: () => ({ send() {} }) } },
+      electronModule: { webContents: { fromId: () => ({ send(channel: string, event: unknown) { if (channel === "netcatty:paste-write") receiptListener?.(event); } }) } },
     });
     const ctx = {
       host: { protocol, id: "h", label: "h" }, sessionId: "tab-1",
@@ -60,10 +62,17 @@ for (const [protocol, lineMode, sensitive] of [
       onAutocompleteInput: (data: string) => autocomplete.push(data),
       onOutputTriggerUserInputRef: { current: (data: string) => outputTriggers.push(data) },
       scriptRecorderRef: { current: { isRecording: true,
+        recordClearLine: () => { recorderInput = ""; },
         recordInput: (data: string) => { recorderInput += data; },
-        recordEnter: ({ sensitive: secret, lineByLine }: { sensitive: boolean; lineByLine?: boolean }) => {
-          if (!secret) recorded.push(...(lineByLine ? recorderInput.replace(/\r/g, "\n").split("\n").slice(0, -1) : [recorderInput]));
+        recordEnter: async ({ sensitive: secret }: { sensitive: boolean }) => {
+          if (!secret) recorded.push(recorderInput);
           recorderInput = "";
+        },
+        captureSubmittedLineRecorder: () => {
+          recorderInput = "";
+          return async (line: string, { sensitive: secret }: { sensitive: boolean }) => {
+            if (!secret) recorded.push(line);
+          };
         },
       } },
       isBroadcastEnabledRef: { current: false },
@@ -82,7 +91,8 @@ for (const [protocol, lineMode, sensitive] of [
         ? { isWrapped: false, translateToString: () => "alice@host:~$ show " } : undefined } },
     };
     const env = {
-      ...Object.assign({}, ...helpers), ...userPaste, ctx, term,
+      ...Object.assign({}, ...helpers), ...userPaste, ctx, term, crypto, logger: { warn() {} },
+      netcattyBridge: { get: () => ({ onTerminalPasteWrite: (listener: typeof receiptListener) => { receiptListener = listener; return () => { receiptListener = undefined; }; } }) },
       suppressNextTerminalDataBroadcast: false, handlingKittyBroadcast: false,
       prioritizeTerminalInput() {}, getFlowControllerForTerm: () => null,
       scrollToBottomAfterInput() {}, writeLocalTerminalData: (data: string) => echo.push(data),
@@ -108,8 +118,8 @@ for (const [protocol, lineMode, sensitive] of [
     assert.deepEqual(wire, lineMode ? ["show version\r"] : ["show ", "version\r"]);
     assert.equal(ctx.serialLineBufferRef.current, "");
     assert.equal(ctx.commandBufferRef.current, "");
-    assert.deepEqual(submitted, sensitive ? [] : ["show version", "show clock"]);
-    assert.deepEqual(recorded, sensitive ? [] : ["show version", "show clock"]);
+    assert.deepEqual(submitted, sensitive ? [] : ["show version"]);
+    assert.deepEqual(recorded, sensitive ? [] : ["show version"]);
     assert.deepEqual(autocomplete, ["show ", "version\nshow clock\r"]);
     assert.ok(outputTriggers.join("").includes("show clock"));
     assert.equal(echo.join(""), protocol === "serial" || protocol === "telnet" ? "show version\r\nshow clock\r\n" : "");
@@ -119,12 +129,26 @@ for (const [protocol, lineMode, sensitive] of [
     assert.deepEqual(broadcast, sensitive ? [] : ["version\nshow clock\r"]);
     t.mock.timers.tick(249);
     assert.deepEqual(wire, lineMode ? ["show version\r"] : ["show ", "version\r"]);
+    if (completion !== "complete") {
+      ctx.isBroadcastEnabledRef.current = false;
+      if (completion === "manual") env.api.input(lineMode ? "\x03" : "x");
+      else bridge.interruptSession({}, { sessionId: "serial-1" });
+      const afterCancellation = [...wire];
+      t.mock.timers.tick(1000);
+      assert.deepEqual(wire, afterCancellation);
+      assert.deepEqual(submitted, sensitive ? [] : ["show version"]);
+      assert.deepEqual(recorded, sensitive ? [] : ["show version"]);
+      return;
+    }
     t.mock.timers.tick(1);
     assert.deepEqual(wire, lineMode ? ["show version\r", "show clock\r"] : ["show ", "version\r", "show clock\r"]);
+    assert.deepEqual(submitted, sensitive ? [] : ["show version", "show clock"]);
+    assert.deepEqual(recorded, sensitive ? [] : ["show version", "show clock"]);
     ctx.isBroadcastEnabledRef.current = false;
     env.api.input("\r");
     assert.deepEqual(wire, lineMode ? ["show version\r", "show clock\r", "\r"] : ["show ", "version\r", "show clock\r", "\r"]);
     env.api.dispose();
     assert.equal(userPaste.dispatchTerminalLinePaste(term, "unused\r", { lineDelayMs: 250, sensitive: false }), false);
   });
+  }
 }

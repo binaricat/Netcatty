@@ -33,6 +33,9 @@ export function useScriptRecorder(sessionId: string | undefined) {
   const isStoppingRef = useRef(false);
   const stopPromiseRef = useRef<Promise<ScriptRecordingResult> | null>(null);
   const sessionIdRef = useRef(sessionId);
+  const recordingGenerationRef = useRef(0);
+  const pendingRecordStepsRef = useRef(Promise.resolve());
+  const isDrainingRecordingRef = useRef(false);
 
   sessionIdRef.current = sessionId;
 
@@ -60,6 +63,7 @@ export function useScriptRecorder(sessionId: string | undefined) {
     const bridge = netcattyBridge.get();
     if (!sid || !bridge?.scriptRecordingStart) return;
     await bridge.scriptRecordingStart(sid);
+    recordingGenerationRef.current += 1;
     startedAtRef.current = Date.now();
     lastStepAtRef.current = Date.now();
     inputBufferRef.current = '';
@@ -76,6 +80,7 @@ export function useScriptRecorder(sessionId: string | undefined) {
     const sid = sessionIdRef.current;
     const bridge = netcattyBridge.get();
     isStoppingRef.current = true;
+    isDrainingRecordingRef.current = true;
     isRecordingRef.current = false;
     isPausedRef.current = false;
     setIsRecording(false);
@@ -84,19 +89,16 @@ export function useScriptRecorder(sessionId: string | undefined) {
     startedAtRef.current = null;
     if (!sid || !bridge?.scriptRecordingStop) {
       isStoppingRef.current = false;
+      isDrainingRecordingRef.current = false;
       return emptyScriptRecordingResult();
     }
-    let stopRequest: Promise<ScriptRecordingResult>;
-    try {
-      stopRequest = Promise.resolve(bridge.scriptRecordingStop(sid));
-    } catch (error) {
-      stopRequest = Promise.reject(error);
-    }
+    const stopRequest = pendingRecordStepsRef.current.catch(() => {}).then(() => bridge.scriptRecordingStop!(sid));
     let stopPromise: Promise<ScriptRecordingResult>;
     stopPromise = stopRequest.finally(() => {
       if (stopPromiseRef.current === stopPromise) {
         stopPromiseRef.current = null;
         isStoppingRef.current = false;
+        isDrainingRecordingRef.current = false;
       }
     });
     stopPromiseRef.current = stopPromise;
@@ -104,6 +106,7 @@ export function useScriptRecorder(sessionId: string | undefined) {
   }, []);
 
   const finishAutomaticStop = useCallback((detail: ScriptRecordingLimitDetail) => {
+    isDrainingRecordingRef.current = false;
     isRecordingRef.current = false;
     isPausedRef.current = false;
     inputBufferRef.current = '';
@@ -126,10 +129,13 @@ export function useScriptRecorder(sessionId: string | undefined) {
     setIsPaused(false);
   }, []);
 
-  const appendStep = useCallback(async (step: ScriptRecordingStep) => {
+  const appendStep = useCallback(async (step: ScriptRecordingStep, accepted = false) => {
     const sid = sessionIdRef.current;
-    if (!sid || !isRecordingRef.current || isPausedRef.current || isStoppingRef.current) return;
+    if (!sid || (!(accepted && isDrainingRecordingRef.current)
+      && (!isRecordingRef.current || (!accepted && isPausedRef.current) || isStoppingRef.current))) return;
+    const generation = recordingGenerationRef.current;
     const result = await netcattyBridge.get()?.scriptRecordingAppendStep?.(sid, step);
+    if (generation !== recordingGenerationRef.current || sid !== sessionIdRef.current) return;
     if (result?.stopped) {
       finishAutomaticStop({
         sessionId: sid,
@@ -196,30 +202,44 @@ export function useScriptRecorder(sessionId: string | undefined) {
     inputBufferRef.current = '';
   }, []);
 
-  const recordEnter = useCallback(async (options?: { sensitive?: boolean; lineByLine?: boolean }) => {
+  const recordEnter = useCallback(async (options?: { sensitive?: boolean; submittedLine?: string }) => {
     const sid = sessionIdRef.current;
     if (!isRecordingRef.current || isPausedRef.current || isStoppingRef.current || !sid) return;
-    const line = inputBufferRef.current;
-    inputBufferRef.current = '';
+    const line = options?.submittedLine ?? inputBufferRef.current;
+    if (options?.submittedLine === undefined) inputBufferRef.current = '';
     const now = Date.now();
     const gap = now - lastStepAtRef.current;
-    if (gap > 1000) {
-      await appendStep({ type: 'sleep', value: gap });
-    }
-    const lines = options?.lineByLine
-      ? line.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n')
-      : [line];
-    if (options?.lineByLine && lines.at(-1) === '') lines.pop();
-    for (const submittedLine of lines) {
-      await appendStep({
-        type: 'send',
-        value: submittedLine,
-        sensitive: options?.sensitive,
-      });
-      await appendStep({ type: 'waitForPrompt', timeoutMs: DEFAULT_RECORDING_PROMPT_TIMEOUT_MS });
-    }
     lastStepAtRef.current = now;
+    const generation = recordingGenerationRef.current;
+    const pending = pendingRecordStepsRef.current.catch(() => {}).then(async () => {
+      const isCurrent = () => generation === recordingGenerationRef.current && sid === sessionIdRef.current
+        && (isRecordingRef.current || isDrainingRecordingRef.current);
+      if (!isCurrent()) return;
+      if (gap > 1000) await appendStep({ type: 'sleep', value: gap }, true);
+      if (!isCurrent()) return;
+      await appendStep({ type: 'send', value: line, sensitive: options?.sensitive }, true);
+      if (!isCurrent()) return;
+      await appendStep({ type: 'waitForPrompt', timeoutMs: DEFAULT_RECORDING_PROMPT_TIMEOUT_MS }, true);
+    });
+    pendingRecordStepsRef.current = pending;
+    await pending;
   }, [appendStep]);
+
+  // Delayed paste receipts must not consume newly typed input or leak into a
+  // recording started after the paste. Each receipt records one actual write.
+  const captureSubmittedLineRecorder = useCallback(() => {
+    if (!isRecordingRef.current || isPausedRef.current || isStoppingRef.current) return undefined;
+    const generation = recordingGenerationRef.current;
+    const sid = sessionIdRef.current;
+    inputBufferRef.current = '';
+    const isCurrent = () => generation === recordingGenerationRef.current
+      && sid === sessionIdRef.current && isRecordingRef.current
+      && !isPausedRef.current && !isStoppingRef.current;
+    return (line: string, options?: { sensitive?: boolean }): Promise<void> => {
+      if (!isCurrent()) return Promise.resolve();
+      return recordEnter({ ...options, submittedLine: line });
+    };
+  }, [recordEnter]);
 
   return {
     isRecording,
@@ -233,5 +253,6 @@ export function useScriptRecorder(sessionId: string | undefined) {
     recordBackspace,
     recordClearLine,
     recordEnter,
+    captureSubmittedLineRecorder,
   };
 }
