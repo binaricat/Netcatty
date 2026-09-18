@@ -328,6 +328,7 @@ for (const [name, rendered, persisted] of [
   ["changed source id", [confirmedSource], [{ ...confirmedSource, id: "replacement" }]],
   ["added source", [confirmedSource], [confirmedSource, { ...confirmedSource, id: "added", filePath: "/tmp/added.conf" }]],
   ["first source", [], [confirmedSource]],
+  ["source moved up within selection", [{ ...confirmedSource, groupName: "Production/Sub" }], [confirmedSource]],
   ["source moved into selection", [{ ...confirmedSource, groupName: "Staging" }], [confirmedSource]],
 ] as const) {
   test(`group deletion rejects initially persisted ${name} before clearing files`, async () => {
@@ -445,5 +446,40 @@ for (const retry of ["commit", "superseded"] as const) {
     assert.equal(restores, 1);
     assert.equal(commits, 1);
     assert.equal(reported, 0);
+  });
+}
+
+for (const phase of ["snapshot", "commit"] as const) {
+  test(`group deletion rejects a managed subgroup moved to its parent during ${phase}`, async () => {
+    const subgroup = { ...confirmedSource, groupName: "Production/Sub" };
+    let persisted = [subgroup];
+    let reads = 0;
+    let restores = 0;
+    let commits = 0;
+    const cleared: string[] = [];
+    await withDeletionProbe({
+      managedSources: [subgroup],
+      onReadPersistedManagedSources: () => {
+        if (phase === "snapshot" && ++reads > 1) persisted = [confirmedSource];
+        return persisted;
+      },
+      onClearAndRemoveManagedSources: async (sources) => {
+        cleared.push(...sources.map((source) => source.groupName));
+        return async () => { restores += 1; };
+      },
+      onCommitVaultGroupMutation: async (mutate) => {
+        commits += 1;
+        persisted = [confirmedSource];
+        return mutate({
+          groups: ["Production", "Production/Sub"], configs: [], hosts: [],
+          managedSources: persisted, snippets: [],
+        });
+      },
+    }, async (getDelete) => {
+      await assert.rejects(getDelete()(["Production"]), VaultGroupDeletionConfirmationChangedError);
+    });
+    assert.deepEqual(cleared, ["Production/Sub"]);
+    assert.equal(restores, 1);
+    assert.equal(commits, phase === "snapshot" ? 0 : 1);
   });
 }

@@ -21,8 +21,8 @@ export class VaultGroupDeletionConfirmationChangedError extends Error {
   }
 }
 
-const managedSourceFileIdentity = (source: ManagedSource): string => (
-  JSON.stringify([source.id, source.type, source.filePath])
+const managedSourceDeletionIdentity = (source: ManagedSource): string => (
+  JSON.stringify([source.id, source.type, source.filePath, source.groupName])
 );
 
 const managedSourceSnapshotsMatch = (
@@ -77,7 +77,7 @@ export function useVaultGroupDeletion({
       selectedPaths,
       deleteHosts,
       managedSources,
-    }).sourcesToRemove.map(managedSourceFileIdentity));
+    }).sourcesToRemove.map(managedSourceDeletionIdentity));
     let deletedRoots: string[] = [];
     while (true) {
       let restoreManagedFiles: (() => Promise<void>) | undefined;
@@ -102,7 +102,7 @@ export function useVaultGroupDeletion({
           }
 
           if (deletion.sourcesToRemove.some((source) => (
-            !confirmedFiles.has(managedSourceFileIdentity(source))
+            !confirmedFiles.has(managedSourceDeletionIdentity(source))
           ))) {
             throw new VaultGroupDeletionConfirmationChangedError();
           }
