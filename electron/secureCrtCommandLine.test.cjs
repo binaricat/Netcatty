@@ -203,3 +203,24 @@ test("redactSecureCrtCommandLinePasswords masks /PASSWORD and /PASSPHRASE values
   redactSecureCrtCommandLinePasswords(argv);
   assert.deepEqual(argv, ["Netcatty.exe", "/SSH2", "/PASSWORD", "******", "/PASSPHRASE", "******", "host"]);
 });
+
+test("reported 4A launch uses the bastion address, never the title address", () => {
+  const result = parseSecureCrtCommandLine([
+    String.raw`C:\Program Files\Netcatty\Netcatty.exe`,
+    "/TITLEBAR", "192.0.2.10", "/N", "192.0.2.10", "/T", "/SSH2", "198.51.100.20",
+    "/P", "2200", "/L", "alice", "/PASSWORD", "example",
+  ]);
+  assert.equal(result?.url, "ssh://alice:example@198.51.100.20:2200");
+});
+
+test("unknown SecureCRT options cannot supply a host candidate", () => {
+  assert.equal(parseSecureCrtCommandLine([
+    "Netcatty.exe", "/SSH2", "/SCRIPT", "login.vbs", "/L", "alice", "/PASSWORD", "secret", "server",
+  ]), null);
+});
+
+test("redaction does not mistake a flag-shaped username for a password switch", () => {
+  const argv = ["Netcatty.exe", "/SSH2", "/L", "/PASSWORD", "/PASSWORD", "secret", "server.example.com"];
+  redactSecureCrtCommandLinePasswords(argv);
+  assert.deepEqual(argv, ["Netcatty.exe", "/SSH2", "/L", "/PASSWORD", "/PASSWORD", "******", "server.example.com"]);
+});

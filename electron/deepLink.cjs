@@ -5,7 +5,6 @@ const {
   redactPuttyCommandLinePasswords,
 } = require("./puttyCommandLine.cjs");
 const {
-  parseSecureCrtCommandLine,
   parseSecureCrtCommandLineTokens,
   redactSecureCrtCommandLinePasswords,
 } = require("./secureCrtCommandLine.cjs");
@@ -24,25 +23,15 @@ function isDeepLinkUrl(rawUrl, protocol) {
   return rawUrl.trim().toLowerCase().startsWith(`${protocol}://`);
 }
 
-/**
- * Drop argv tokens that a recognized SecureCRT-style command line consumed as
- * operands (#3391). A `/PASSWORD ssh://…` value starts with a scheme but is a
- * password, not a deep link; without this filter the scheme-token scan queues
- * it as a standalone link (or drops the whole CLI launch when scheme handling
- * is disabled) and Netcatty connects to the wrong host. A *successful*
- * SecureCRT parse filters every token it consumed. On a failed parse the full
- * consumed set is unusable (genuine scheme links must keep the previous
- * scan-everything behavior), but credential operands are still filtered: an
- * index the parser consumed as a username/password value is a credential even
- * when the overall launch is malformed, never a standalone scheme link.
- */
+// Known option values are never standalone URLs, even when parsing fails.
+// On success, also exclude the remaining consumed launch tokens.
 function collectSchemeUrlCandidates(argv) {
   if (!Array.isArray(argv)) return [];
   const tokens = parseSecureCrtCommandLineTokens(argv);
   if (!tokens) return argv;
   const filterIndices = new Set();
-  if (tokens.credentialIndices instanceof Set) {
-    for (const index of tokens.credentialIndices) filterIndices.add(index);
+  if (tokens.operandIndices instanceof Set) {
+    for (const index of tokens.operandIndices) filterIndices.add(index);
   }
   if (tokens.result && tokens.consumedIndices instanceof Set) {
     for (const index of tokens.consumedIndices) filterIndices.add(index);
@@ -92,7 +81,8 @@ function collectPuttyStyleDeepLinkUrls(argv) {
   // tried first: bastion/4A launchers configured as "SecureCRT" emit them, and
   // the flag sets are disjoint from PuTTY-style dashes, so trying SecureCRT
   // first then falling back to PuTTY covers both callers (#3390, #3044).
-  const parsed = parseSecureCrtCommandLine(argv) ?? parsePuttyCommandLine(argv);
+  const secureCrt = parseSecureCrtCommandLineTokens(argv);
+  const parsed = secureCrt ? secureCrt.result : parsePuttyCommandLine(argv);
   if (!parsed?.url) return { ssh: [], telnet: [] };
   if (parsed.protocol === TELNET_PROTOCOL) {
     return { ssh: [], telnet: [parsed.url] };

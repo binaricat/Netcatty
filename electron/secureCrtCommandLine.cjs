@@ -1,4 +1,5 @@
 const {
+  PUTTY_VALUE_FLAGS,
   hostCandidateScore,
   isElectronNoiseArg,
   parseHostSpec,
@@ -42,6 +43,7 @@ const VALUE_FLAGS = new Set([
   "/passphrase",
   "/s", // saved SecureCRT session name
   "/n", // tab name
+  "/titlebar", // window title
   "/log",
   "/logappend",
   "/firewall",
@@ -53,7 +55,7 @@ const PORT_FLAGS = new Set(["/p"]);
 const USERNAME_FLAGS = new Set(["/l"]);
 const PASSWORD_FLAGS = new Set(["/password"]);
 const IGNORED_VALUE_FLAGS = new Set([
-  "/auth", "/i", "/passphrase", "/s", "/n",
+  "/auth", "/i", "/passphrase", "/s", "/n", "/titlebar",
   "/log", "/logappend", "/firewall", "/fwfirewall", "/proxy",
 ]);
 // Standalone switches (no separate value token).
@@ -71,46 +73,34 @@ function normalizeFlag(arg) {
 
 function hasSecureCrtLaunchSignal(argv) {
   if (!Array.isArray(argv)) return false;
-  return argv.some((arg) => {
-    const flag = normalizeFlag(arg);
-    return PROTOCOL_FLAGS.has(flag) || PASSWORD_REDACT_FLAGS.has(flag);
-  });
+  for (let index = 1; index < argv.length; index += 1) {
+    const flag = normalizeFlag(argv[index]);
+    if (PROTOCOL_FLAGS.has(flag) || PASSWORD_REDACT_FLAGS.has(flag)) return true;
+    if (VALUE_FLAGS.has(flag) || PUTTY_VALUE_FLAGS.has(argv[index])) index += 1;
+  }
+  return false;
 }
 
-/**
- * Collect argv indices holding `/PASSWORD` / `/PASSPHRASE` / `/L` operand
- * values.
- * This is a plain scan (no state): credential operands must be identified even
- * when semantic parsing later fails on an earlier or later flag (#3391), e.g.
- * `/SSH2 /P 99999 /PASSWORD ssh://… host` never reaches `/PASSWORD` in the
- * parse loop, yet its value is still a credential, never a scheme link. `/L`
- * operands are included for the same reason: `/SSH2 /P 99999 /L ssh://alice
- * real.example.com` fails on the invalid port before `/L` is visited, but
- * `ssh://alice` is a username, never a standalone scheme link.
- */
-function findCredentialOperandIndices(argv) {
-  const indices = new Set();
+// Identify every known option operand before validating values, so an early
+// parse failure cannot turn a later option value into a standalone scheme URL.
+// Skip operands: a password equal to "/L" is data, not another switch.
+function findOperandIndices(argv) {
+  const operandIndices = new Set();
+  const credentialIndices = new Set();
   for (let index = 0; index < argv.length; index += 1) {
     const flag = normalizeFlag(argv[index]);
-    if (!PASSWORD_REDACT_FLAGS.has(flag) && !USERNAME_FLAGS.has(flag)) continue;
-    const value = argv[index + 1];
-    if (typeof value === "string") indices.add(index + 1);
+    if (!VALUE_FLAGS.has(flag) || typeof argv[index + 1] !== "string") continue;
+    operandIndices.add(index + 1);
+    if (PASSWORD_REDACT_FLAGS.has(flag) || USERNAME_FLAGS.has(flag)) {
+      credentialIndices.add(index + 1);
+    }
+    index += 1;
   }
-  return indices;
+  return { operandIndices, credentialIndices };
 }
 
-/**
- * Parse a SecureCRT-style command line and also report which argv indices the
- * parse consumed (flags, their operand values and recognized positionals).
- * Callers use the indices to keep operand values out of scheme-URL scanning
- * (#3391): a `/PASSWORD ssh://…` value must never be treated as a deep link.
- * `result` is null when the line is not a recognizable SecureCRT launch. Full
- * `consumedIndices` should only be used for filtering on success, but
- * `credentialIndices` (password/passphrase/username operand indices) is
- * pre-scanned up front and stays valid on failure: a credential operand is
- * still a credential even when the overall launch is malformed, never a
- * standalone scheme link (#3391).
- */
+// Consumed indices include positionals only on success. Operand indices remain
+// valid on failure and must always be excluded from standalone URL scanning.
 function parseSecureCrtCommandLineTokens(argv) {
   if (!Array.isArray(argv) || !hasSecureCrtLaunchSignal(argv)) return null;
 
@@ -120,11 +110,8 @@ function parseSecureCrtCommandLineTokens(argv) {
   let port;
   const positionals = [];
   const consumedIndices = new Set();
-  // Password/passphrase/username operands are identified by a full pre-scan so
-  // they are filtered even when the parse fails before/after visiting the flag
-  // (#3391).
-  const credentialIndices = findCredentialOperandIndices(argv);
-  const fail = () => ({ result: null, consumedIndices, credentialIndices });
+  const { operandIndices, credentialIndices } = findOperandIndices(argv);
+  const fail = () => ({ result: null, consumedIndices, operandIndices, credentialIndices });
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -175,6 +162,10 @@ function parseSecureCrtCommandLineTokens(argv) {
       continue;
     }
 
+    if (index > 0 && /^\/[a-z][a-z0-9]*$/i.test(arg)) return fail();
+
+    if (/^[a-z][a-z0-9+.-]*:\/\//i.test(arg.trim())) continue;
+
     if (isElectronNoiseArg(arg, index, argv)) {
       consumedIndices.add(index);
       continue;
@@ -216,6 +207,7 @@ function parseSecureCrtCommandLineTokens(argv) {
       ...(resolvedPort ? { port: resolvedPort } : {}),
     },
     consumedIndices,
+    operandIndices,
     credentialIndices,
   };
 }
@@ -228,10 +220,13 @@ function redactSecureCrtCommandLinePasswords(argv) {
   if (!Array.isArray(argv)) return argv;
   for (let index = 0; index < argv.length; index += 1) {
     const flag = normalizeFlag(argv[index]);
-    if (!PASSWORD_REDACT_FLAGS.has(flag)) continue;
+    if (!VALUE_FLAGS.has(flag) && !PUTTY_VALUE_FLAGS.has(argv[index])) continue;
     const next = argv[index + 1];
     if (typeof next !== "string") continue;
-    argv[index + 1] = "*".repeat(Math.min(next.length, 8)) || "********";
+    if (PASSWORD_REDACT_FLAGS.has(flag)) {
+      argv[index + 1] = "*".repeat(Math.min(next.length, 8)) || "********";
+    }
+    index += 1;
   }
   return argv;
 }
