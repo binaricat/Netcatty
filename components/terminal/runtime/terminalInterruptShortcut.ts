@@ -1,8 +1,8 @@
 type InterruptShortcutEvent = Pick<KeyboardEvent, "altKey" | "code" | "ctrlKey" | "key" | "metaKey" | "shiftKey">;
 
 /**
- * macOS Terminal convention: ⌘. (Command-Period) interrupts the running
- * command, equivalent to Ctrl+C. Netcatty does not bind ⌘. elsewhere, so on
+ * macOS Terminal convention: Command-Period interrupts the running
+ * command, equivalent to Ctrl+C. Netcatty does not bind Command-Period elsewhere, so on
  * macOS it is forwarded as a SIGINT interrupt (#3408).
  */
 export function isMacCommandPeriodInterruptChord(

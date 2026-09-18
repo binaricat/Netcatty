@@ -113,6 +113,14 @@ if (!process.versions.electron || process.platform !== "darwin") {
         assert.ok(peer.writes.slice(before).some(s=>/\\[106;\\d+:3u/.test(s)),
           mode+' physical C (layout j) remains paired independently');
       }
+      await write(source,'selected output\\r\\n');
+      source.r.term.selectAll();
+      assert.ok(source.r.term.hasSelection(),'selection scenario is active');
+      source.writes.length=0;
+      key(source,'keydown','.','Period',{metaKey:true});
+      key(source,'keyup','.','Period',{metaKey:true});
+      assert.ok(source.writes.includes('\\x03'),'Command-period interrupts with selected text');
+      summary.push({selectionInterrupt:true});
       // Native Electron input must interrupt an actual foreground command.
       const smoke=make('shell');smoke.r.term.focus();
       const pty=require(${JSON.stringify(require.resolve("node-pty"))});

@@ -2039,14 +2039,13 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     // Use shared utility for platform detection when hotkey scheme is disabled
     const isMac = currentScheme === "mac" || (currentScheme === "disabled" && isMacPlatform());
     // macOS Terminal convention: ⌘. interrupts the running command like
-    // Ctrl+C (#3408). Only when nothing is selected so copy wins first. A
+    // Ctrl+C (#3408), including while text is selected. A
     // user-assigned snippet or configured shortcut on this chord keeps
     // precedence: the editors accept ⌘. (their conflict check only covers
     // configured bindings), so the hard-coded interrupt must not silently
     // swallow a chord the user actually assigned (#3409).
     const macCommandPeriodInterrupt =
-      !hasCopyableSelection
-      && isMacPlatform()
+      isMacPlatform()
       && isMacCommandPeriodInterruptChord(e)
       && !(ctx.snippetsRef?.current ?? []).some((snippet) => (
         snippet.shortkey && matchesKeyBinding(e, snippet.shortkey, isMac)

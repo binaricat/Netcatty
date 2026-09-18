@@ -1085,6 +1085,6 @@ test("⌘. interrupt yields to a user-assigned snippet or shortcut chord (#3409)
   // configured chord precedence instead of silently swallowing it (#3409).
   assert.match(
     source,
-    /const macCommandPeriodInterrupt =\s*!hasCopyableSelection\s*&& isMacPlatform\(\)\s*&& isMacCommandPeriodInterruptChord\(e\)\s*&& !\(ctx\.snippetsRef\?\.current \?\? \[\]\)\.some\(\(snippet\) => \(\s*snippet\.shortkey && matchesKeyBinding\(e, snippet\.shortkey, isMac\)\s*\)\)\s*&& !\(currentScheme !== "disabled"\s*&& checkAppShortcut\(e, ctx\.keyBindingsRef\.current, isMac\) !== null\);/,
+    /const macCommandPeriodInterrupt =\s*isMacPlatform\(\)\s*&& isMacCommandPeriodInterruptChord\(e\)\s*&& !\(ctx\.snippetsRef\?\.current \?\? \[\]\)\.some\(\(snippet\) => \(\s*snippet\.shortkey && matchesKeyBinding\(e, snippet\.shortkey, isMac\)\s*\)\)\s*&& !\(currentScheme !== "disabled"\s*&& checkAppShortcut\(e, ctx\.keyBindingsRef\.current, isMac\) !== null\);/,
   );
 });
