@@ -184,8 +184,14 @@ function startPtyJob(ptyStream, command, options) {
   // model can fall back to terminal_start). Default is off so existing
   // foreground execution paths (Catty Agent) keep their inactivity-based
   // timeout for long-running streaming commands.
+  let wallClockArmed = false;
+  let wallStartMs = 0;
   function armWallTimeout() {
     if (!enforceWallTimeout || maxBufferedChars > 0) return;
+    // Remember when the hard deadline started so the probe fallback below can
+    // measure the remaining wall-clock budget instead of the full one.
+    wallClockArmed = true;
+    wallStartMs = Date.now();
     wallTimeoutId = setTimeout(() => {
       if (finished) return;
       if (pendingEnd) {
@@ -248,10 +254,19 @@ function startPtyJob(ptyStream, command, options) {
   // at 75% of that budget so the fallback always wins the race with
   // headroom; writeWrappedCommand() then re-arms a fresh full budget for
   // the wrapped command's delivery and start marker.
+  // When enforceWallTimeout armed the hard wall-clock deadline (MCP
+  // terminal_execute), that deadline started before the probe was typed, so
+  // paced probe delivery already consumed part of the budget. Measure the
+  // fallback against the remaining wall-clock budget — with the same 25%
+  // headroom — so it still fires before finish() cancels it.
   function armProbeTimeout() {
     clearProbeTimeout();
     const deadlineBudgetMs = maxBufferedChars > 0 ? BG_STARTUP_TIMEOUT_MS : timeoutMs;
-    const delayMs = Math.min(PROBE_DEADLINE_MS, Math.floor(deadlineBudgetMs * 3 / 4));
+    let delayMs = Math.min(PROBE_DEADLINE_MS, Math.floor(deadlineBudgetMs * 3 / 4));
+    if (wallClockArmed) {
+      const remainingMs = deadlineBudgetMs - (Date.now() - wallStartMs);
+      delayMs = Math.min(delayMs, Math.max(0, Math.floor(remainingMs * 3 / 4)));
+    }
     probeTimeoutId = setTimeout(() => {
       probeTimeoutId = null;
       if (finished || cancelRequested || !probingShell) return;
