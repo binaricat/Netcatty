@@ -35,7 +35,7 @@ for (const [protocol, lineMode, sensitive] of [
   ["ssh", false, false], ["ssh", false, true], ["local", false, false],
   ["mosh", false, false], ["et", false, false], ["plugin:example", false, false],
 ] as const) {
-  for (const completion of ["complete", "manual", "interrupt"] as const) {
+  for (const completion of ["complete", "manual", "interrupt", "replacement"] as const) {
   test(`${completion}: ${protocol} confirmed line paste consumes pending text with pacing (lineMode=${lineMode}, sensitive=${sensitive})`, async (t) => {
     t.mock.timers.enable({ apis: ["setTimeout"] });
     const wire: string[] = [];
@@ -129,6 +129,21 @@ for (const [protocol, lineMode, sensitive] of [
     assert.deepEqual(broadcast, sensitive ? [] : ["version\nshow clock\r"]);
     t.mock.timers.tick(249);
     assert.deepEqual(wire, lineMode ? ["show version\r"] : ["show ", "version\r"]);
+    if (completion === "replacement") {
+      await pasteTextWithMultilineConfirm("replacement", {
+        term, sessionId: "serial-1", terminalBackend: ctx.terminalBackend,
+        getCurrentSessionId: () => ctx.sessionRef.current,
+        isSensitiveInput: () => sensitive,
+        confirmMultilinePaste: { enabled: true, minLines: 1, requestConfirm: async () => ({ action: "line-by-line" }) },
+      });
+      const afterReplacement = [...wire];
+      assert.equal(wire.at(-1), "replacement\r");
+      t.mock.timers.tick(1000);
+      assert.deepEqual(wire, afterReplacement);
+      assert.deepEqual(submitted, sensitive ? [] : ["show version", "replacement"]);
+      assert.deepEqual(recorded, sensitive ? [] : ["show version", "replacement"]);
+      return;
+    }
     if (completion !== "complete") {
       ctx.isBroadcastEnabledRef.current = false;
       if (completion === "manual") env.api.input(lineMode ? "\x03" : "x");

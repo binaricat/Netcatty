@@ -1436,7 +1436,9 @@ function clearPendingAutomatedWrites(session) {
 // stream facades confirm handoff to main, not completion of main's input chain.
 // Receipts contain identity only; command text stays in the renderer.
 function createPasteWriteReceipt(session, payload, count) {
-  if (typeof payload.pasteRequestId !== "string" || !payload.pasteRequestId) return null;
+  const hasReceipt = typeof payload.pasteRequestId === "string" && payload.pasteRequestId.length > 0;
+  // Broadcast peers may omit receipts but still need a cancellable batch.
+  if (!hasReceipt && getAutomatedLineDelayMs(payload) === 0) return null;
   const pending = session.pendingPasteWrites ||= new Set();
   let remaining = count;
   const paste = {
@@ -1448,7 +1450,7 @@ function createPasteWriteReceipt(session, payload, count) {
         paste.active = false;
         pending.delete(paste);
       }
-      if (skipped && !done) return;
+      if (!hasReceipt || (skipped && !done)) return;
       try {
         const owner = electronModule.webContents?.fromId(session.webContentsId);
         if (owner && !owner.isDestroyed?.()) {
@@ -1696,16 +1698,18 @@ function writeToSession(event, payload) {
     // Activity tracking must not interfere with terminal input.
   }
 
-  if (!payload.automated && !isTerminalReportSequence(payload.data)) {
+  const lineDelayMs = getAutomatedLineDelayMs(payload);
+  const isPasteRequest = typeof payload.pasteRequestId === "string" && payload.pasteRequestId.length > 0;
+  // A replacement supersedes pending paste work even with one line, and even
+  // when the transfer gate below blocks the replacement itself.
+  if (isPasteRequest || lineDelayMs > 0 || (!payload.automated && !isTerminalReportSequence(payload.data))) {
     clearPendingAutomatedWrites(session);
   }
   if (shouldBlockSessionInput(session, payload.data)) {
     createPasteWriteReceipt(session, payload, 1)?.finish();
     return;
   }
-  const lineDelayMs = getAutomatedLineDelayMs(payload);
   const lineChunks = lineDelayMs > 0 ? splitTerminalInputIntoLineWrites(payload.data) : [payload.data];
-  if (lineDelayMs > 0 && lineChunks.length > 1) clearPendingAutomatedWrites(session);
   const paste = createPasteWriteReceipt(session, payload, lineChunks.length);
   if (lineDelayMs > 0 && lineChunks.length > 1) {
     session.pendingAutomatedWriteTimers = [];
@@ -1770,6 +1774,10 @@ function drainPendingOutputForInterrupt(sessionId, session, trace) {
 
 function interruptSession(event, payload) {
   const session = sessions.get(payload.sessionId);
+  if (payload.cancelPendingWritesOnly === true) {
+    clearPendingAutomatedWrites(session);
+    return;
+  }
   const trace = normalizeTrace(payload);
   if (!session) {
     logTerminalInterruptDebug("interrupt-session-missing", {

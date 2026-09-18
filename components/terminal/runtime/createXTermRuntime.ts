@@ -189,7 +189,7 @@ import {
   consumeOsc133CommandCompletion,
   type PromptLineBreakState,
 } from "./promptLineBreak";
-import { recordTerminalCommandExecution, resolveSubmittedShellCommand } from "./terminalCommandExecution";
+import { recordTerminalCommandExecution } from "./terminalCommandExecution";
 import {
   getSingleBracketedPasteLine,
   getSinglePastedCommand,
@@ -213,7 +213,7 @@ type TerminalBackendApi = {
   openExternalAvailable: () => boolean;
   openExternal: (url: string) => Promise<void>;
   writeToSession: NetcattyBridge["writeToSession"];
-  interruptSession?: (sessionId: string, trace?: NetcattyTerminalInterruptTrace) => void;
+  interruptSession?: NetcattyBridge["interruptSession"];
   signalPluginConnection?: (
     sessionId: string,
     signal?: "interrupt" | "terminate" | "kill" | "eof" | "break",
@@ -2068,6 +2068,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
           ctx.passwordPromptActiveRef.current = false;
         }
         if (isPluginHostProtocol(ctx.host.protocol) && ctx.terminalBackend.signalPluginConnection) {
+          ctx.terminalBackend.interruptSession?.(id, interruptTrace, { cancelPendingWritesOnly: true });
           void ctx.terminalBackend.signalPluginConnection(id, "interrupt").catch(() => {
             if (ctx.terminalBackend.interruptSession) {
               ctx.terminalBackend.interruptSession(id, interruptTrace);
@@ -2653,7 +2654,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     const commands = data.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
     if (commands.at(-1) === "") commands.pop();
     if (commands.length) {
-      commands[0] = resolveSubmittedShellCommand(`${ctx.commandBufferRef.current}${commands[0]}`, term);
+      commands[0] = `${ctx.commandBufferRef.current}${commands[0]}`;
     }
     pendingLinePastes.set(requestId, {
       sessionId, commands, sensitive: options.sensitive, recorded: new Set(),

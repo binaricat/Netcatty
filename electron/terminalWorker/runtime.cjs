@@ -681,7 +681,9 @@ function createTerminalWorkerRuntime(options = {}) {
     const listener = ipcMain.listeners.get(message.channel);
     if (!listener) return;
     if (message.channel === "netcatty:interrupt") {
-      terminalDataPipeline?.clearSensitiveInput?.(message.payload?.sessionId);
+      if (message.payload?.cancelPendingWritesOnly !== true) {
+        terminalDataPipeline?.clearSensitiveInput?.(message.payload?.sessionId);
+      }
       const trace = normalizeTrace(message.payload);
       logTerminalInterruptDebug("worker-received-send", {
         channel: message.channel,

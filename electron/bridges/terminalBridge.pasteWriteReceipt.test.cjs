@@ -202,3 +202,175 @@ for (const dropped of [[0], [2], [0, 1, 2]]) {
     assert.equal(nextIndex, 3, "every original chunk still reaches the interceptor");
   });
 }
+
+for (const replacement of [
+  { name: "paced single line", options: {} },
+  { name: "paced single line without receipts", options: { pasteRequestId: undefined } },
+  { name: "identified unpaced paste", options: { lineDelayMs: undefined } },
+]) {
+  test(`new ${replacement.name} cancels old delayed paste before writing`, async t => {
+    const h = harness(t);
+    h.send();
+    h.send({ data: "replacement\r", pasteRequestId: "new", ...replacement.options });
+    t.mock.timers.tick(1000);
+    await flush();
+    assert.deepEqual(h.writes, ["one\r", "replacement\r"]);
+    assert.deepEqual(h.receipts.filter(r => r.requestId === "request"), h.expected({ index: 0 }, { done: true }));
+    assert.deepEqual(h.receipts.filter(r => r.requestId === "new"), replacement.options.pasteRequestId === undefined && "pasteRequestId" in replacement.options
+      ? [] : [{ sessionId: "s", requestId: "new", index: 0, done: true }]);
+  });
+}
+
+test("single-line replacement invalidates old chunks already waiting on an interceptor", async t => {
+  let release;
+  const intercepted = [];
+  const h = harness(t, {
+    has: () => true,
+    interceptInput(_id, data) {
+      intercepted.push(data);
+      if (data === "one\r") return new Promise(resolve => { release = resolve; });
+      return Promise.resolve(data);
+    },
+  });
+  h.send();
+  await flush();
+  t.mock.timers.tick(200);
+  h.send({ data: "replacement\r", pasteRequestId: "new" });
+  release("STALE");
+  await flush();
+  assert.deepEqual(h.writes, ["replacement\r"]);
+  assert.deepEqual(intercepted, ["one\r", "replacement\r"]);
+  assert.deepEqual(h.receipts.filter(r => r.requestId === "request"), h.expected({ done: true }));
+});
+
+test("blocked replacement still cancels old paste before transfer gate", async t => {
+  let release;
+  const h = harness(t, {
+    has: () => true,
+    interceptInput() { return new Promise(resolve => { release = resolve; }); },
+  });
+  h.send();
+  await flush();
+  h.session.zmodemSentry = { isActive: () => true };
+  h.send({ data: "replacement\r", pasteRequestId: "new" });
+  h.session.zmodemSentry = null;
+  release("STALE");
+  await flush();
+  t.mock.timers.tick(1000);
+  await flush();
+  assert.deepEqual(h.writes, []);
+  assert.deepEqual(h.receipts, [
+    ...h.expected({ done: true }),
+    { sessionId: "s", requestId: "new", done: true },
+  ]);
+});
+
+for (const automatic of [false, true]) {
+  test(`ordinary empty input preserves existing ${automatic ? "automated" : "manual"} behavior`, t => {
+    const h = harness(t);
+    h.send();
+    bridge.writeToSession(null, { sessionId: "s", data: "", automated: automatic });
+    t.mock.timers.tick(1000);
+    assert.deepEqual(h.writes, automatic ? ["one\r", "", "two\r", "three\r"] : ["one\r", ""]);
+    assert.deepEqual(h.receipts, automatic
+      ? h.expected({ index: 0 }, { index: 1 }, { index: 2, done: true })
+      : h.expected({ index: 0 }, { done: true }));
+  });
+}
+
+for (const disconnected of ["removed", "closed", "replaced"]) {
+  test(`disconnect ${disconnected} blocks pending interceptor and delayed paste`, async t => {
+    let release;
+    const h = harness(t, {
+      has: () => true,
+      interceptInput() { return new Promise(resolve => { release = resolve; }); },
+    });
+    h.send();
+    await flush();
+    if (disconnected === "removed") h.sessions.delete("s");
+    if (disconnected === "closed") h.session.closed = true;
+    if (disconnected === "replaced") h.sessions.set("s", { stream: { write() { assert.fail("stale write"); } } });
+    release("STALE");
+    await flush();
+    t.mock.timers.tick(1000);
+    await flush();
+    assert.deepEqual(h.writes, []);
+    assert.deepEqual(h.receipts, h.expected({ done: true }));
+  });
+}
+
+for (const bypass of ["sensitive", "disabled-interceptor"]) {
+  test(`single-line replacement through ${bypass} does not revive canceled interceptor input`, async t => {
+    let release;
+    let enabled = true;
+    const h = harness(t, {
+      has: () => enabled,
+      interceptInput(_id, data, options) {
+        if (data === "one\r") return new Promise(resolve => { release = resolve; });
+        assert.equal(options.bypass, true);
+        return Promise.resolve(data);
+      },
+    });
+    h.send();
+    await flush();
+    t.mock.timers.tick(200);
+    if (bypass === "disabled-interceptor") enabled = false;
+    h.send({ data: "replacement\r", pasteRequestId: "new", sensitive: bypass === "sensitive" });
+    release("STALE");
+    await flush();
+    assert.deepEqual(h.writes, ["replacement\r"]);
+    assert.deepEqual(h.receipts, [
+      ...h.expected({ done: true }),
+      { sessionId: "s", requestId: "new", index: 0, done: true },
+    ]);
+  });
+}
+
+for (const cancel of ["interrupt", "manual", "replacement", "cancel-only", "removed", "closed", "replaced"]) {
+  test(`no-receipt paced batch cannot resume from interceptor after ${cancel}`, async t => {
+    let release;
+    const h = harness(t, {
+      has: () => true,
+      interceptInput(_id, data) {
+        if (data === "one\r") return new Promise(resolve => { release = resolve; });
+        return Promise.resolve(data);
+      },
+    });
+    h.send({ pasteRequestId: undefined });
+    await flush();
+    t.mock.timers.tick(200);
+    if (cancel === "interrupt") bridge.interruptSession(null, { sessionId: "s" });
+    if (cancel === "manual") bridge.writeToSession(null, { sessionId: "s", data: "x" });
+    if (cancel === "replacement") h.send({ data: "new\r", pasteRequestId: undefined });
+    if (cancel === "cancel-only") {
+      h.session.stream.signal = () => assert.fail("must not signal");
+      h.session.stream.pause = () => assert.fail("must not pause output");
+      h.session.stream.resume = () => assert.fail("must not resume output");
+      h.session.takePendingData = () => assert.fail("must not drain output");
+      bridge.interruptSession(null, { sessionId: "s", cancelPendingWritesOnly: true });
+    }
+    if (cancel === "removed") h.sessions.delete("s");
+    if (cancel === "closed") h.session.closed = true;
+    if (cancel === "replaced") h.sessions.set("s", { stream: { write() { assert.fail("stale write"); } } });
+    release("STALE");
+    await flush();
+    t.mock.timers.tick(1000);
+    await flush();
+    assert.deepEqual(h.writes, cancel === "interrupt" ? ["\x03"] : cancel === "manual" ? ["x"] : cancel === "replacement" ? ["new\r"] : []);
+    assert.deepEqual(h.receipts, []);
+    assert.equal(h.session.pendingPasteWrites.size, 0);
+  });
+}
+
+test("cancel-only ends receipt batch without raw Ctrl+C, including missing session", t => {
+  const h = harness(t);
+  h.send();
+  h.session.zmodemSentry = { isActive: () => true, cancel() { assert.fail("must not cancel transfer"); } };
+  h.session.ymodemActive = true;
+  h.session.ymodemAbortController = { abort() { assert.fail("must not abort transfer"); } };
+  bridge.interruptSession(null, { sessionId: "s", cancelPendingWritesOnly: true });
+  bridge.interruptSession(null, { sessionId: "missing", cancelPendingWritesOnly: true });
+  t.mock.timers.tick(1000);
+  assert.deepEqual(h.writes, ["one\r"]);
+  assert.deepEqual(h.receipts, h.expected({ index: 0 }, { done: true }));
+});

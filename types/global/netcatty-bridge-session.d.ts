@@ -343,7 +343,11 @@ declare global {
       index?: number;
       done?: boolean;
     }) => void): () => void;
-    interruptSession?(sessionId: string, trace?: NetcattyTerminalInterruptTrace): void;
+    interruptSession?(
+      sessionId: string,
+      trace?: NetcattyTerminalInterruptTrace,
+      options?: { cancelPendingWritesOnly?: boolean },
+    ): void;
     resizeSession(sessionId: string, cols: number, rows: number): void;
     /**
      * Sync Windows ConPTY after the renderer clears the xterm viewport.

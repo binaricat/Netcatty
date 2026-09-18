@@ -101,7 +101,7 @@ export type TerminalBackendApi = {
     cb: (sessionId: string, sourceSessionId?: string) => void,
   ) => (() => void) | undefined;
   writeToSession: (sessionId: string, data: string, options?: { automated?: boolean; sensitive?: boolean; lineDelayMs?: number; logRewrite?: ProgrammaticCommandLogRewrite }) => void;
-  interruptSession?: (sessionId: string, trace?: NetcattyTerminalInterruptTrace) => void;
+  interruptSession?: NetcattyBridge["interruptSession"];
   resizeSession: (sessionId: string, cols: number, rows: number) => void;
   closeSession: (sessionId: string, options?: { bootEpoch?: number }) => void | Promise<void>;
   /** Pause/resume the source stream for output back-pressure (optional). */

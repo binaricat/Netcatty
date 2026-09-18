@@ -362,8 +362,12 @@ function createPreloadApi(ctx) {
     ipcRenderer.on("netcatty:paste-write", listener);
     return () => ipcRenderer.removeListener("netcatty:paste-write", listener);
   },
-  interruptSession: (sessionId, trace) => {
+  interruptSession: (sessionId, trace, options) => {
     const sanitizedTrace = sanitizeInterruptTrace(trace);
+    if (options?.cancelPendingWritesOnly === true) {
+      ipcRenderer.send("netcatty:interrupt", { sessionId, trace: sanitizedTrace, cancelPendingWritesOnly: true });
+      return;
+    }
     if (ctx.terminalUrgentInputPorts?.postInterrupt?.(sessionId, sanitizedTrace)) {
       return;
     }

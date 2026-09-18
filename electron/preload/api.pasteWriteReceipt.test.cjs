@@ -26,3 +26,19 @@ test("paste ID is opt-in and receipts use direct IPC with removable subscription
   assert.equal(calls.length, 1);
   assert.equal(ipcRenderer.listenerCount("netcatty:paste-write"), 0);
 });
+
+test("cancel-only bypasses urgent raw-interrupt port while ordinary interrupt preserves it", () => {
+  const ipcRenderer = new EventEmitter();
+  const sent = [];
+  const urgent = [];
+  ipcRenderer.send = (...args) => sent.push(args);
+  const api = createPreloadApi({ ipcRenderer, webUtils: {}, terminalUrgentInputPorts: {
+    postInterrupt(...args) { urgent.push(args); return true; },
+  } });
+  api.interruptSession("s", undefined, { cancelPendingWritesOnly: true });
+  assert.deepEqual(sent, [["netcatty:interrupt", { sessionId: "s", trace: undefined, cancelPendingWritesOnly: true }]]);
+  assert.deepEqual(urgent, []);
+  api.interruptSession("s");
+  assert.equal(urgent.length, 1);
+  assert.equal(sent.length, 1);
+});

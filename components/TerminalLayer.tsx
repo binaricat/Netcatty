@@ -1094,6 +1094,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
         && isPluginHostProtocol(session.protocol)
         && terminalBackend.signalPluginConnection) {
         broadcastInterruptPrioritizersRef.current.get(session.id)?.();
+        terminalBackend.interruptSession(session.id, undefined, { cancelPendingWritesOnly: true });
         void terminalBackend.signalPluginConnection(session.id, "interrupt").catch(() => {
           terminalBackend.interruptSession(session.id);
         });
@@ -1107,7 +1108,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       }
       if (isTerminalSensitiveInputActive(session.id)) continue;
       terminalBackend.writeToSession(session.id, data, {
-        automated: true,
+        automated: Boolean(lineDelayMs),
         sensitive: false,
         ...(lineDelayMs ? { lineDelayMs } : {}),
       });
