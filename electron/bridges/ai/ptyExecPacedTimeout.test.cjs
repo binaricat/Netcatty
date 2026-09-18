@@ -5,6 +5,32 @@ const { startPtyJob } = require('./ptyExec.cjs');
 const { buildLiveShellProbe } = require('./liveShellProbe.cjs');
 const { buildWrappedCommand } = require('./ptyExecHelpers.cjs');
 
+test('short wall-clock bypass resumes session flow control before typing the wrapper', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const pty = new EventEmitter();
+  const writes = [];
+  const events = [];
+  pty.write = (data) => writes.push(String(data));
+  // The probe needs ~600ms of paced delivery and the wrapper ~330ms, so a
+  // 800ms wall budget skips the probe and types the wrapper directly. That
+  // bypass must still resume session-owned flow (clearSessionFlowState)
+  // before typing the wrapper, otherwise a renderer flow paused before the
+  // job keeps the buffered start/end markers away from onData and the job
+  // times out despite the command executing remotely.
+  const job = startPtyJob(pty, 'printf resumed', {
+    shellKind: 'posix', probeLiveShell: true, timeoutMs: 800, enforceWallTimeout: true,
+    onInterrupt: () => events.push('interrupt'),
+  });
+  assert.ok(events.includes('interrupt'), 'bypass must invoke onInterrupt before typing');
+  const totalLength = 2 + buildWrappedCommand('printf resumed', 'posix', job.marker, true).length;
+  while (writes.join('').length < totalLength) t.mock.timers.tick(30);
+  assert.ok(!writes.join('').includes('function __ncmcp_int'),
+    'bypass must skip the probe and type the wrapper directly');
+  pty.emit('data', `${job.marker}_S\r\nresumed\r\n${job.marker}_E:0\r\n`);
+  const result = await job.resultPromise;
+  assert.equal(result.exitCode, 0, JSON.stringify(result));
+});
+
 for (const background of [true, false]) {
   test(`paced ${background ? 'background' : 'silent foreground'} delivery does not consume startup time`, async (t) => {
     t.mock.timers.enable({ apis: ['setTimeout'] });

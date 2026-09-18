@@ -966,6 +966,17 @@ function startPtyJob(ptyStream, command, options) {
     const wrapperDeliveryMs = estimateInputDeliveryMs(wrappedCommandText());
     if (probeDeliveryMs + wrapperDeliveryMs > remainingMs && wrapperDeliveryMs <= remainingMs) {
       probingShell = false;
+      // Skipping the probe also skips abortProbeToWrapper()'s flow recovery.
+      // A renderer flow paused before this job (clearSessionFlowState) would
+      // keep the wrapper's buffered _S/_E markers away from onData, so the
+      // command would execute remotely while the job still reports a wall
+      // timeout. Resume session-owned flow before typing the wrapper, again
+      // best-effort so recovery can never prevent the command from starting.
+      try {
+        onInterrupt?.();
+      } catch {
+        // Best-effort recovery must not prevent the wrapper from being typed.
+      }
     }
   }
   if (probingShell) {
