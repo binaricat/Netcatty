@@ -1205,7 +1205,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       logicalData?: string | null;
       /** Skip string broadcast when peers will re-resolve from a key chord. */
       skipBroadcast?: boolean;
-      /** Confirmed serial paste: preserve classification and backend pacing. */
+      /** Confirmed paste: preserve classification and backend pacing. */
       sensitive?: boolean;
       lineDelayMs?: number;
       /**
@@ -2601,7 +2601,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   ctx.container.addEventListener("input", markKittyTextInput, true);
   textarea?.addEventListener("blur", clearKittyTransientInputState);
 
-  const disposeLinePasteHandler = ctx.host.protocol === "serial"
+  const disposeLinePasteHandler = ctx.host.protocol === "serial" || ctx.host.protocol === "telnet"
     ? registerTerminalLinePasteHandler(term, (data, options) => {
       handleTerminalInputData(data, { ...options, skipBroadcast: true });
     })

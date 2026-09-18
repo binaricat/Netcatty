@@ -26,25 +26,28 @@ const helpers = await Promise.all([
   "./terminalBackspaceInput.ts", "./terminalPerCharacterInput.ts",
   "./terminalSudoAutofill.ts", "./terminalCommandExecution.ts",
   "./serialLocalEcho.ts", "../autocomplete/terminalStringCellWidth.ts",
-  "./shiftEnterText.ts", "./serialLineInput.ts",
+  "./shiftEnterText.ts", "./serialLineInput.ts", "./telnetLocalEcho.ts",
 ].map(path => import(new URL(path, import.meta.url).href)));
 
-for (const [lineMode, sensitive] of [[false, false], [false, true], [true, false], [true, true]]) {
-  test(`serial confirmed line paste consumes pending text with pacing (lineMode=${lineMode}, sensitive=${sensitive})`, async (t) => {
+for (const [protocol, lineMode, sensitive] of [
+  ["serial", false, false], ["serial", false, true], ["serial", true, false], ["serial", true, true],
+  ["telnet", false, false], ["telnet", false, true],
+] as const) {
+  test(`${protocol} confirmed line paste consumes pending text with pacing (lineMode=${lineMode}, sensitive=${sensitive})`, async (t) => {
     t.mock.timers.enable({ apis: ["setTimeout"] });
     const wire: string[] = [];
     const echo: string[] = [];
     const broadcast: string[] = [];
     const writes: Array<{ data: string; sensitive?: boolean; lineDelayMs?: number }> = [];
     bridge.init({
-      sessions: new Map([["serial-1", { serialPort: { write: (data: string) => wire.push(String(data)) } }]]),
+      sessions: new Map([["serial-1", { [protocol === "serial" ? "serialPort" : "socket"]: { write: (data: string) => wire.push(String(data)) } }]]),
       electronModule: { webContents: { fromId: () => ({ send() {} }) } },
     });
     const ctx = {
-      host: { protocol: "serial", id: "h", label: "h" }, sessionId: "tab-1",
+      host: { protocol, id: "h", label: "h" }, sessionId: "tab-1",
       sessionRef: { current: "serial-1" }, statusRef: { current: "connected" },
       commandBufferRef: { current: "" }, serialLineBufferRef: { current: "" },
-      serialLineMode: lineMode, serialLocalEcho: true,
+      serialLineMode: lineMode, serialLocalEcho: true, telnetLocalEchoRef: { current: true },
       passwordPromptActiveRef: { current: sensitive },
       isBroadcastEnabledRef: { current: false },
       onBroadcastInputRef: { current: () => assert.fail("paste must not broadcast twice") },
