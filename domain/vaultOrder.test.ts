@@ -5,6 +5,7 @@ import {
   normalizeVaultOrder,
   reorderVaultStrings,
   reorderVaultItems,
+  canReorderVaultHosts,
   sortByVaultOrder,
 } from "./vaultOrder.ts";
 
@@ -93,4 +94,12 @@ test("reorderVaultStrings moves one value around another", () => {
     reorderVaultStrings(["ops", "prod", "dev"], "dev", "ops", "before"),
     ["dev", "ops", "prod"],
   );
+});
+
+test("canReorderVaultHosts only allows drags within the same group", () => {
+  assert.equal(canReorderVaultHosts("ops", "ops"), true);
+  assert.equal(canReorderVaultHosts("ops", "ops/web"), false);
+  assert.equal(canReorderVaultHosts("ops", ""), false);
+  assert.equal(canReorderVaultHosts("", ""), true);
+  assert.equal(canReorderVaultHosts(undefined, undefined), true);
 });

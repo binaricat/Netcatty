@@ -92,6 +92,13 @@ export const reorderVaultItems = <T extends VaultOrderedItem>(
   return renumberVaultOrder(next);
 };
 
+export const canReorderVaultHosts = (
+  sourceGroup: string | undefined,
+  targetGroup: string | undefined,
+): boolean => {
+  return (sourceGroup ?? "") === (targetGroup ?? "");
+};
+
 export const getNextVaultOrder = <T extends { order?: number }>(
   items: readonly T[],
 ): number => {
