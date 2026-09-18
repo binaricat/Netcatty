@@ -633,6 +633,11 @@ Resalta el panel dividido enfocado:
   'settings.terminal.behavior.dynamicTabTitle.off': 'Desactivado',
   'settings.terminal.behavior.dynamicTabTitle.agent': 'Solo agentes',
   'settings.terminal.behavior.dynamicTabTitle.all': 'Todas las sesiones',
+  'settings.terminal.behavior.tabDoubleClick': 'Comportamiento de doble clic en pestaña',
+  'settings.terminal.behavior.tabDoubleClick.desc': 'Elige la acción al hacer doble clic en una pestaña de terminal.',
+  'settings.terminal.behavior.tabDoubleClick.duplicate': 'Duplicar sesión (nueva conexión)',
+  'settings.terminal.behavior.tabDoubleClick.copy': 'Copiar pestaña (reutilizar conexión)',
+  'settings.terminal.behavior.tabDoubleClick.disabled': 'No hacer nada',
   'settings.terminal.behavior.oscNotifications': 'Notificaciones de escritorio OSC',
   'settings.terminal.behavior.oscNotifications.desc':
     'Muestra una notificación del sistema cuando un programa emite OSC 9, OSC 777 notify o kitty OSC 99. Lo usan Codex y otros agentes para avisos de turno completado y de aprobación.',

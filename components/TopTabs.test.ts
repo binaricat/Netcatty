@@ -32,7 +32,7 @@ const {
 } = await import("../application/state/terminalDragData.ts");
 const {
   activateLogViewTab,
-  createTopTabCopyDoubleClickHandler,
+  createTopTabSessionDoubleClickHandler,
   formatSessionTopTabLabel,
   formatSessionTopTabTooltip,
   resolveSessionTabCodingCliIconState,
@@ -41,6 +41,7 @@ const {
 const { activeTabStore } = await import("../application/state/activeTabStore.ts");
 const indexCss = readFileSync(new URL("../index.css", import.meta.url), "utf8");
 const topTabsSource = readFileSync(new URL("./TopTabs.tsx", import.meta.url), "utf8");
+const topTabItemsSource = readFileSync(new URL("./top-tabs/TopTabItems.tsx", import.meta.url), "utf8");
 const topTabsQuickControlsSource = readFileSync(new URL("./TopTabsQuickControls.tsx", import.meta.url), "utf8");
 const syncStatusButtonSource = readFileSync(new URL("./SyncStatusButton.tsx", import.meta.url), "utf8");
 const switchSource = readFileSync(new URL("./ui/switch.tsx", import.meta.url), "utf8");
@@ -53,7 +54,6 @@ const appSource = [
 ].join("\n");
 const externalMcpToggleSource = readFileSync(new URL("../application/state/useExternalMcpToggleState.ts", import.meta.url), "utf8");
 const zhTwAiSource = readFileSync(new URL("../application/i18n/locales/zh-TW/ai.ts", import.meta.url), "utf8");
-const topTabItemsSource = readFileSync(new URL("./top-tabs/TopTabItems.tsx", import.meta.url), "utf8");
 const terminalViewSource = readFileSync(new URL("./terminal/TerminalView.tsx", import.meta.url), "utf8");
 
 test("host tree tab gutter fills the remaining sidebar width", () => {
@@ -248,17 +248,37 @@ test("disabling dynamic titles freezes a stored coding CLI icon and stops title 
   );
 });
 
-test("session top tabs copy the session on double click through the existing copy handler", () => {
+test("session top tab double click dispatches the configured behavior", () => {
   const copiedSessionIds: string[] = [];
-  const handleDoubleClick = createTopTabCopyDoubleClickHandler(
-    (sessionId) => copiedSessionIds.push(sessionId),
-    "session-1",
+  const duplicatedSessionIds: string[] = [];
+  const handlers = (["duplicate", "copy", "disabled"] as const).map((behavior) =>
+    createTopTabSessionDoubleClickHandler({
+      behavior,
+      onCopySession: (sessionId) => copiedSessionIds.push(sessionId),
+      onDuplicateSession: (sessionId) => duplicatedSessionIds.push(sessionId),
+      sessionId: `session-${behavior}`,
+    }),
   );
+
+  handlers.forEach((handler) => handler({} as Parameters<typeof handler>[0]));
+
+  assert.deepEqual(duplicatedSessionIds, ["session-duplicate"]);
+  assert.deepEqual(copiedSessionIds, ["session-copy"]);
+  assert.match(topTabItemsSource, /behavior: tabDoubleClickBehavior/);
+  assert.match(topTabItemsSource, /onDoubleClick=\{handleDoubleClick\}/);
+});
+
+test("duplicate double-click behavior falls back to copying when unavailable", () => {
+  const copiedSessionIds: string[] = [];
+  const handleDoubleClick = createTopTabSessionDoubleClickHandler({
+    behavior: "duplicate",
+    onCopySession: (sessionId) => copiedSessionIds.push(sessionId),
+    sessionId: "session-1",
+  });
 
   handleDoubleClick({} as Parameters<typeof handleDoubleClick>[0]);
 
   assert.deepEqual(copiedSessionIds, ["session-1"]);
-  assert.match(topTabItemsSource, /onDoubleClick=\{handleDoubleClick\}/);
 });
 
 test("session close button double click stays on the close button", () => {

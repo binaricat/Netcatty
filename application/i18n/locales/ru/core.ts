@@ -675,6 +675,11 @@ export const ruCoreMessages: Messages = {
   'settings.terminal.behavior.dynamicTabTitle.off': 'Отключено',
   'settings.terminal.behavior.dynamicTabTitle.agent': 'Только агенты',
   'settings.terminal.behavior.dynamicTabTitle.all': 'Все сеансы',
+  'settings.terminal.behavior.tabDoubleClick': 'Действие по двойному щелчку вкладки',
+  'settings.terminal.behavior.tabDoubleClick.desc': 'Выберите действие при двойном щелчке вкладки терминала.',
+  'settings.terminal.behavior.tabDoubleClick.duplicate': 'Дублировать сеанс (новое подключение)',
+  'settings.terminal.behavior.tabDoubleClick.copy': 'Копировать вкладку (использовать подключение)',
+  'settings.terminal.behavior.tabDoubleClick.disabled': 'Ничего не делать',
   'settings.terminal.behavior.oscNotifications': 'Системные уведомления OSC',
   'settings.terminal.behavior.oscNotifications.desc':
     'Показывать системное уведомление, когда программа отправляет OSC 9, OSC 777 notify или kitty OSC 99. Так Codex и другие агенты сообщают о завершении хода и запросе подтверждения.',

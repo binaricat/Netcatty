@@ -18,6 +18,12 @@ const dynamicTabTitleModeOptions = (
   }
 ).DYNAMIC_TAB_TITLE_MODE_OPTIONS;
 
+const tabDoubleClickBehaviorOptions = (
+  terminalBehaviorSettings as {
+    TAB_DOUBLE_CLICK_BEHAVIOR_OPTIONS?: Array<{ value: string; labelKey: string }>;
+  }
+).TAB_DOUBLE_CLICK_BEHAVIOR_OPTIONS;
+
 test("middle-click settings expose only supported behaviors", () => {
   assert.ok(Array.isArray(middleClickBehaviorOptions));
   assert.deepEqual(
@@ -32,6 +38,15 @@ test("dynamic tab title settings expose off, agent-only, and all modes", () => {
     dynamicTabTitleModeOptions.map((option) => option.value),
     ["off", "agent", "all"],
   );
+});
+
+test("tab double-click settings expose duplicate, copy, and disabled modes", () => {
+  assert.ok(Array.isArray(tabDoubleClickBehaviorOptions));
+  assert.deepEqual(
+    tabDoubleClickBehaviorOptions.map((option) => option.value),
+    ["duplicate", "copy", "disabled"],
+  );
+  assert.match(source, /updateTerminalSetting\("tabDoubleClickBehavior", v as TerminalTabDoubleClickBehavior\)/);
 });
 
 test("terminal behavior settings expose word separator editing", () => {

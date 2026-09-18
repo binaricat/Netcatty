@@ -128,6 +128,23 @@ test("normalizeTerminalSettings falls back for unsupported dynamic tab title mod
   );
 });
 
+test("normalizeTerminalSettings defaults tab double click to a new connection", () => {
+  assert.equal(normalizeTerminalSettings().tabDoubleClickBehavior, "duplicate");
+});
+
+test("normalizeTerminalSettings preserves supported tab double-click behaviors", () => {
+  assert.equal(normalizeTerminalSettings({ tabDoubleClickBehavior: "duplicate" }).tabDoubleClickBehavior, "duplicate");
+  assert.equal(normalizeTerminalSettings({ tabDoubleClickBehavior: "copy" }).tabDoubleClickBehavior, "copy");
+  assert.equal(normalizeTerminalSettings({ tabDoubleClickBehavior: "disabled" }).tabDoubleClickBehavior, "disabled");
+});
+
+test("normalizeTerminalSettings rejects unsupported tab double-click behaviors", () => {
+  assert.equal(
+    normalizeTerminalSettings({ tabDoubleClickBehavior: "legacy" as never }).tabDoubleClickBehavior,
+    "duplicate",
+  );
+});
+
 test("normalizeTerminalSettings enables OSC desktop notifications by default", () => {
   assert.equal(normalizeTerminalSettings().oscNotifications, "always");
 });

@@ -68,6 +68,8 @@ export interface KeywordHighlightRule {
   customized?: boolean;
 }
 
+export type TerminalTabDoubleClickBehavior = 'duplicate' | 'copy' | 'disabled';
+
 export interface TerminalSettings {
   // Rendering
   scrollback: number; // Number of lines kept in buffer
@@ -123,6 +125,8 @@ export interface TerminalSettings {
   linkModifier: LinkModifier; // Modifier key to click links
   autoCloseOnExit: boolean; // Automatically close terminal UI after eligible session exits
   disconnectedNoticeMode: DisconnectedNoticeMode; // Non-blocking terminal line or legacy dialog after disconnect
+  /** Action when double-clicking a terminal session tab. */
+  tabDoubleClickBehavior: TerminalTabDoubleClickBehavior;
 
   // Keyword Highlighting
   keywordHighlightEnabled: boolean;
@@ -367,6 +371,12 @@ const isDynamicTabTitleMode = (value: unknown): value is DynamicTabTitleMode => 
   value === 'all'
 );
 
+const isTerminalTabDoubleClickBehavior = (value: unknown): value is TerminalTabDoubleClickBehavior => (
+  value === 'duplicate' ||
+  value === 'copy' ||
+  value === 'disabled'
+);
+
 const isHostInfoBarTitleMode = (value: unknown): value is HostInfoBarTitleMode => (
   value === 'address' ||
   value === 'label'
@@ -413,6 +423,9 @@ export const normalizeTerminalSettings = (
     dynamicTabTitleMode: isDynamicTabTitleMode(settings?.dynamicTabTitleMode)
       ? settings.dynamicTabTitleMode
       : DEFAULT_TERMINAL_SETTINGS.dynamicTabTitleMode,
+    tabDoubleClickBehavior: isTerminalTabDoubleClickBehavior(settings?.tabDoubleClickBehavior)
+      ? settings.tabDoubleClickBehavior
+      : DEFAULT_TERMINAL_SETTINGS.tabDoubleClickBehavior,
     hostInfoBarTitleMode: isHostInfoBarTitleMode(settings?.hostInfoBarTitleMode)
       ? settings.hostInfoBarTitleMode
       : DEFAULT_TERMINAL_SETTINGS.hostInfoBarTitleMode,
@@ -549,6 +562,8 @@ const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
   osc52Clipboard: 'write-only', // OSC-52: allow remote programs to write clipboard by default
   oscNotifications: 'always', // Honor OSC 9/777/99 desktop notifications by default
   dynamicTabTitleMode: 'agent',
+  // Prefer an independent SSH login so a double-click never restores the source cwd.
+  tabDoubleClickBehavior: 'duplicate',
   rendererType: 'auto', // Auto-detect best renderer based on hardware
   hibernateHiddenTabs: false,
   hibernateHiddenTabsDelaySec: 5,

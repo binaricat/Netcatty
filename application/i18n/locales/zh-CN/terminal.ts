@@ -360,6 +360,11 @@ export const zhCNTerminalMessages: Messages = {
   'settings.terminal.behavior.dynamicTabTitle.off': '关闭',
   'settings.terminal.behavior.dynamicTabTitle.agent': '仅 Agent',
   'settings.terminal.behavior.dynamicTabTitle.all': '全部会话',
+  'settings.terminal.behavior.tabDoubleClick': '标签页双击行为',
+  'settings.terminal.behavior.tabDoubleClick.desc': '选择双击顶部终端标签页时执行的操作。',
+  'settings.terminal.behavior.tabDoubleClick.duplicate': '复制会话（新建连接）',
+  'settings.terminal.behavior.tabDoubleClick.copy': '复制标签页（复用连接）',
+  'settings.terminal.behavior.tabDoubleClick.disabled': '无操作',
   'settings.terminal.behavior.oscNotifications': 'OSC 桌面通知',
   'settings.terminal.behavior.oscNotifications.desc':
     '当程序发出 OSC 9、OSC 777 notify 或 kitty OSC 99 时弹出系统通知。Codex 等 Agent 用它提示回合完成或等待审批。',

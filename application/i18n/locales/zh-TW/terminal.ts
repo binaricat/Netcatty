@@ -360,6 +360,11 @@ export const zhTWTerminalMessages: Messages = {
   'settings.terminal.behavior.dynamicTabTitle.off': '關閉',
   'settings.terminal.behavior.dynamicTabTitle.agent': '僅 Agent',
   'settings.terminal.behavior.dynamicTabTitle.all': '全部工作階段',
+  'settings.terminal.behavior.tabDoubleClick': '分頁雙擊行為',
+  'settings.terminal.behavior.tabDoubleClick.desc': '選擇雙擊頂部終端分頁時要執行的動作。',
+  'settings.terminal.behavior.tabDoubleClick.duplicate': '複製工作階段（新連線）',
+  'settings.terminal.behavior.tabDoubleClick.copy': '複製分頁（重用連線）',
+  'settings.terminal.behavior.tabDoubleClick.disabled': '無動作',
   'settings.terminal.behavior.oscNotifications': 'OSC 桌面通知',
   'settings.terminal.behavior.oscNotifications.desc':
     '當程式發出 OSC 9、OSC 777 notify 或 kitty OSC 99 時顯示系統通知。Codex 等 Agent 會用它提示回合完成或等待核准。',

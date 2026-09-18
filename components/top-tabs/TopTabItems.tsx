@@ -20,7 +20,7 @@ import { resolveSessionCodingCliProvider } from '../../domain/codingCliProviderM
 import type { CodingCliProvider } from '../../domain/codingCliProviders';
 import { resolveCodingCliActivityPhase, type CodingCliActivityPhase } from '../../domain/codingCliTitleParse';
 import { resolveSessionTabTitle, resolveWorkspaceTabLabel } from '../../domain/sessionTabTitle';
-import type { DynamicTabTitleMode } from '../../domain/models';
+import type { DynamicTabTitleMode, TerminalTabDoubleClickBehavior } from '../../domain/models';
 import { CodingCliProviderIcon } from '../icons/CodingCliProviderIcon';
 import { cn } from '../../lib/utils';
 import { Host, TerminalSession, Workspace } from '../../types';
@@ -242,9 +242,28 @@ export const formatSessionTopTabLabel = (
 };
 
 export const createTopTabCopyDoubleClickHandler = (
-  onCopySession: (sessionId: string) => void,
-  sessionId: string,
-): React.MouseEventHandler<HTMLDivElement> => () => onCopySession(sessionId);
+  onCopy: (id: string) => void,
+  id: string,
+): React.MouseEventHandler<HTMLDivElement> => () => onCopy(id);
+
+export const createTopTabSessionDoubleClickHandler = ({
+  behavior,
+  onCopySession,
+  onDuplicateSession,
+  sessionId,
+}: {
+  behavior: TerminalTabDoubleClickBehavior;
+  onCopySession: (sessionId: string) => void;
+  onDuplicateSession?: (sessionId: string) => void;
+  sessionId: string;
+}): React.MouseEventHandler<HTMLDivElement> => () => {
+  if (behavior === 'disabled') return;
+  if (behavior === 'duplicate') {
+    (onDuplicateSession ?? onCopySession)(sessionId);
+    return;
+  }
+  onCopySession(sessionId);
+};
 
 export const stopCloseButtonDoubleClickPropagation = (
   event: Pick<React.MouseEvent, 'stopPropagation'>,
@@ -713,6 +732,7 @@ interface SessionTopTabProps {
   onEditHost?: (host: Host) => void;
   renderBulkCloseItems: RenderBulkCloseItems;
   dynamicTabTitleMode?: DynamicTabTitleMode;
+  tabDoubleClickBehavior: TerminalTabDoubleClickBehavior;
   t: TranslateFn;
   tabAnimationClass?: string;
   shortcutNumber?: number;
@@ -739,6 +759,7 @@ export const SessionTopTab: React.FC<SessionTopTabProps> = memo(({
   onEditHost,
   renderBulkCloseItems,
   dynamicTabTitleMode,
+  tabDoubleClickBehavior,
   t,
   tabAnimationClass,
   shortcutNumber,
@@ -757,8 +778,13 @@ export const SessionTopTab: React.FC<SessionTopTabProps> = memo(({
     activeTabStore.setActiveTabId(session.id);
   }, [session.id]);
   const handleDoubleClick = useMemo(
-    () => createTopTabCopyDoubleClickHandler(onCopySession, session.id),
-    [onCopySession, session.id],
+    () => createTopTabSessionDoubleClickHandler({
+      behavior: tabDoubleClickBehavior,
+      onCopySession,
+      onDuplicateSession,
+      sessionId: session.id,
+    }),
+    [tabDoubleClickBehavior, onCopySession, onDuplicateSession, session.id],
   );
   const addressTooltip = formatSessionTopTabTooltip(session);
   const tabTitle = formatSessionTopTabLabel(session, dynamicTabTitleMode);

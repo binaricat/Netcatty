@@ -718,6 +718,11 @@ Highlight the focused split pane:
   'settings.terminal.behavior.dynamicTabTitle.off': 'Disabled',
   'settings.terminal.behavior.dynamicTabTitle.agent': 'Agents only',
   'settings.terminal.behavior.dynamicTabTitle.all': 'All sessions',
+  'settings.terminal.behavior.tabDoubleClick': 'Tab double-click behavior',
+  'settings.terminal.behavior.tabDoubleClick.desc': 'Choose the action when double-clicking a terminal tab.',
+  'settings.terminal.behavior.tabDoubleClick.duplicate': 'Duplicate session (new connection)',
+  'settings.terminal.behavior.tabDoubleClick.copy': 'Copy tab (reuse connection)',
+  'settings.terminal.behavior.tabDoubleClick.disabled': 'Do nothing',
   'settings.terminal.behavior.oscNotifications': 'OSC desktop notifications',
   'settings.terminal.behavior.oscNotifications.desc':
     'Show a system notification when a program emits OSC 9, OSC 777 notify, or kitty OSC 99. Used by Codex and other agents for turn-complete and approval alerts.',

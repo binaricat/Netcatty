@@ -504,6 +504,7 @@ function AppViewInner({ domains }: AppViewProps) {
         onRenameSession={startSessionRename}
         onCopySession={copySessionWithCurrentShell}
         onDuplicateSession={duplicateSessionWithCurrentShell}
+        tabDoubleClickBehavior={terminalSettings.tabDoubleClickBehavior}
         onCopySessionToNewWindow={copySessionToNewWindowWithCurrentShell}
         onEditHost={handleEditHostFromOverlay}
         onRenameWorkspace={startWorkspaceRename}

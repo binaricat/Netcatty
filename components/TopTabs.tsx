@@ -11,7 +11,7 @@ import {
   appendHostFromWorkspaceDrop,
   resolveFocusSidebarDragKind,
 } from '../domain/focusSidebarHostDrop';
-import type { DynamicTabTitleMode, KeyBinding } from '../domain/models';
+import type { DynamicTabTitleMode, KeyBinding, TerminalTabDoubleClickBehavior } from '../domain/models';
 
 import { getTopTabInsertionTarget, getWorkspaceSessionDragId, hasWorkspaceSessionDrag } from '../application/state/terminalDragData';
 import {
@@ -168,6 +168,7 @@ interface TopTabsProps {
   showHostTreeSidebar: boolean;
   switchTabKeyBinding: Pick<KeyBinding, 'mac' | 'pc'> | null;
   dynamicTabTitleMode?: DynamicTabTitleMode;
+  tabDoubleClickBehavior: TerminalTabDoubleClickBehavior;
   editorTabs: readonly EditorTabChrome[];
   pluginViewTabs: readonly PluginViewTab[];
   onClosePluginViewTab: (tabId: string) => void;
@@ -217,6 +218,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
   showHostTreeSidebar,
   switchTabKeyBinding,
   dynamicTabTitleMode,
+  tabDoubleClickBehavior,
   editorTabs,
   pluginViewTabs,
   onClosePluginViewTab,
@@ -901,6 +903,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
             onEditHost={onEditHost}
             renderBulkCloseItems={renderBulkCloseItems}
             dynamicTabTitleMode={dynamicTabTitleMode}
+            tabDoubleClickBehavior={tabDoubleClickBehavior}
             t={t}
             tabAnimationClass={getTabAnimationClass(session.id)}
             shortcutNumber={tabShortcutNumbers?.get(session.id)}
@@ -1320,6 +1323,7 @@ export const topTabsAreEqual = (prev: TopTabsProps, next: TopTabsProps): boolean
     prev.showHostTreeSidebar === next.showHostTreeSidebar &&
     prev.switchTabKeyBinding === next.switchTabKeyBinding &&
     prev.dynamicTabTitleMode === next.dynamicTabTitleMode &&
+    prev.tabDoubleClickBehavior === next.tabDoubleClickBehavior &&
     prev.hostById === next.hostById
   );
 };

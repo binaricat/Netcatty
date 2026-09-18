@@ -392,6 +392,14 @@ export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
     sectionKey: "settings.terminal.section.behavior",
   },
   {
+    id: "terminal-tab-double-click",
+    tab: "terminal",
+    labelKey: "settings.terminal.behavior.tabDoubleClick",
+    descriptionKey: "settings.terminal.behavior.tabDoubleClick.desc",
+    sectionKey: "settings.terminal.section.behavior",
+    keywords: ["tab", "double click", "复制会话", "双击"],
+  },
+  {
     id: "terminal-dynamic-tab-title",
     tab: "terminal",
     labelKey: "settings.terminal.behavior.dynamicTabTitle",

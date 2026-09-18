@@ -1,6 +1,6 @@
 import React from "react";
 import { DEFAULT_TERMINAL_WORD_SEPARATORS } from "../../../domain/models";
-import type { DisconnectedNoticeMode, DynamicTabTitleMode, LinkModifier, MiddleClickBehavior, OscNotificationMode, RightClickBehavior, TerminalSettings } from "../../../domain/models";
+import type { DisconnectedNoticeMode, DynamicTabTitleMode, LinkModifier, MiddleClickBehavior, OscNotificationMode, RightClickBehavior, TerminalSettings, TerminalTabDoubleClickBehavior } from "../../../domain/models";
 import { Input } from "../../ui/input";
 import { Label } from "../../ui/label";
 import { SectionHeader, Select, SettingsAnchor, SettingRow, Toggle } from "../settings-ui";
@@ -29,6 +29,15 @@ export const DYNAMIC_TAB_TITLE_MODE_OPTIONS: Array<{
   { value: "off", labelKey: "settings.terminal.behavior.dynamicTabTitle.off" },
   { value: "agent", labelKey: "settings.terminal.behavior.dynamicTabTitle.agent" },
   { value: "all", labelKey: "settings.terminal.behavior.dynamicTabTitle.all" },
+];
+
+export const TAB_DOUBLE_CLICK_BEHAVIOR_OPTIONS: Array<{
+  value: TerminalTabDoubleClickBehavior;
+  labelKey: string;
+}> = [
+  { value: "duplicate", labelKey: "settings.terminal.behavior.tabDoubleClick.duplicate" },
+  { value: "copy", labelKey: "settings.terminal.behavior.tabDoubleClick.copy" },
+  { value: "disabled", labelKey: "settings.terminal.behavior.tabDoubleClick.disabled" },
 ];
 
 export const TerminalBehaviorSettings: React.FC<TerminalBehaviorSettingsProps> = ({
@@ -243,6 +252,22 @@ export const TerminalBehaviorSettings: React.FC<TerminalBehaviorSettingsProps> =
           description={t("settings.terminal.behavior.forcePromptNewLine.desc")}
         >
           <Toggle checked={terminalSettings.forcePromptNewLine ?? false} onChange={(v) => updateTerminalSetting("forcePromptNewLine", v)} />
+        </SettingRow>
+
+        <SettingRow
+          anchorId="terminal-tab-double-click"
+          label={t("settings.terminal.behavior.tabDoubleClick")}
+          description={t("settings.terminal.behavior.tabDoubleClick.desc")}
+        >
+          <Select
+            value={terminalSettings.tabDoubleClickBehavior}
+            options={TAB_DOUBLE_CLICK_BEHAVIOR_OPTIONS.map((option) => ({
+              value: option.value,
+              label: t(option.labelKey),
+            }))}
+            onChange={(v) => updateTerminalSetting("tabDoubleClickBehavior", v as TerminalTabDoubleClickBehavior)}
+            className="w-44"
+          />
         </SettingRow>
 
         <SettingRow
