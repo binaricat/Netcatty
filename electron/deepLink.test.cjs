@@ -683,3 +683,18 @@ test("ambiguous SecureCRT destinations are rejected instead of guessing a host",
     ]), { ssh: [], telnet: [] });
   }
 });
+
+test("SecureCRT launches reject mixed single-dash client switches", () => {
+  for (const flag of ["-serial", "-raw", "-telnet", "-ssh", "-unknown"]) {
+    assert.deepEqual(collectSshDeepLinkQueueItems([
+      "Netcatty.exe", "/SSH2", flag, "host", "/L", "alice", "/PASSWORD", "secret",
+    ]), { ssh: [], telnet: [] });
+  }
+});
+
+test("SecureCRT launches preserve dash-shaped values and Electron switches", () => {
+  assert.deepEqual(collectSshDeepLinkQueueItems([
+    "Netcatty.exe", "--original-process-start-time=1", "/SSH2", "host",
+    "/TITLEBAR", "-serial", "/L", "-raw", "/PASSWORD", "-telnet",
+  ]), { ssh: [{ rawUrl: "ssh://-raw:-telnet@host", viaCommandLine: true }], telnet: [] });
+});

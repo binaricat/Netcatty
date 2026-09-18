@@ -175,6 +175,10 @@ function parseSecureCrtCommandLineTokens(argv) {
       continue;
     }
 
+    // Single-dash client switches are not part of SecureCRT syntax.
+    // Do not silently reinterpret a mixed-protocol launch as SSH.
+    if (arg.startsWith("-")) return fail();
+
     const spec = parseHostSpec(arg);
     if (spec) {
       positionals.push(spec);
