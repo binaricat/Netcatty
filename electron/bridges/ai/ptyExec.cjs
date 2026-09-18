@@ -119,6 +119,11 @@ function startPtyJob(ptyStream, command, options) {
   let startupTimeoutId = null;
   let promptFallbackTimer = null;
   let probeTimeoutId = null;
+  // Fallback grace timer: after the probe deadline fires, this keeps probe
+  // parsing active briefly so a complete _P/_Q response buffered in a paused
+  // renderer flow can still be consumed by onData's probe parser once
+  // onInterrupt() resumes that flow.
+  let probeResumeTimeoutId = null;
   let endMarkerWaitTimer = null;
   let cancelRetryTimerId = null;
   // Track one-shot timers scheduled inside requestCancel so finish() can
@@ -243,10 +248,28 @@ function startPtyJob(ptyStream, command, options) {
   // After a short deadline, fall back to typing the wrapper with the
   // pre-probe shell kind so the command still gets delivered.
   const PROBE_DEADLINE_MS = 15000;
+  // After the probe deadline fires, abortProbeToWrapper() resumes a paused
+  // renderer flow and keeps probe parsing active this long so a complete
+  // _P/_Q response buffered in the paused stream is consumed by onData's
+  // probe parser instead of bypassing it. Bounded so a genuinely lost
+  // sentinel still falls back to typing the wrapper promptly. The effective
+  // grace is capped at 1/8 of the deadline budget so short-timeout jobs
+  // still type the fallback wrapper before their output/startup deadline.
+  const PROBE_RESUME_GRACE_MS = 500;
+  function probeResumeGraceMs() {
+    const deadlineBudgetMs = maxBufferedChars > 0 ? BG_STARTUP_TIMEOUT_MS : timeoutMs;
+    return Math.min(PROBE_RESUME_GRACE_MS, Math.floor(deadlineBudgetMs / 8));
+  }
   function clearProbeTimeout() {
     if (probeTimeoutId) {
       clearTimeout(probeTimeoutId);
       probeTimeoutId = null;
+    }
+  }
+  function clearProbeResumeTimeout() {
+    if (probeResumeTimeoutId) {
+      clearTimeout(probeResumeTimeoutId);
+      probeResumeTimeoutId = null;
     }
   }
   // Mirrors writeInput()'s pacing (128-char batches every 30ms for oversized
@@ -267,24 +290,68 @@ function startPtyJob(ptyStream, command, options) {
   // the fallback wrapper matches the shell the probe actually detected
   // instead of the pre-probe kind — otherwise a nested fish inside a POSIX
   // session (or vice versa) receives syntactically incompatible wrapper code.
-  function abortProbeToWrapper() {
+  function finishProbeFallback() {
     probingShell = false;
     const partialKind = parsePartialLiveShellProbeKind(stripAnsi(probeOutput), marker);
     if (partialKind) resolvedShellKind = partialKind;
+    // When a hard wall-clock deadline is armed, waiting for resumed buffered
+    // probe data may have consumed part of the budget. If the remaining
+    // budget cannot fit the wrapper's paced delivery, leave it untyped and
+    // let the wall timer finish the job with a timeout error (mirrors
+    // armProbeTimeout()'s "wrapper cannot fit" handling), so no partially
+    // typed wrapper is cancelled mid-delivery by the wall deadline.
+    if (wallClockArmed) {
+      const wrapperDeliveryMs = Math.max(
+        estimateInputDeliveryMs(wrappedCommandText("posix")),
+        estimateInputDeliveryMs(wrappedCommandText("fish")),
+      );
+      const remainingMs = timeoutMs - (Date.now() - wallStartMs);
+      if (remainingMs <= wrapperDeliveryMs) return;
+    }
+    writeWrappedCommand();
+  }
+  function abortProbeToWrapper() {
     // A paused renderer flow is one of the reasons the probe's _Q sentinel
     // never arrives, so resuming the session-owned flow is part of this
     // fallback: without it, buffered probe/start/end markers cannot reach
     // onData and the wrapper may execute remotely while the job still times
     // out waiting for its start marker. Mirrors sendInterrupt()'s best-effort
     // recovery (the supported callers wire onInterrupt to
-    // clearSessionFlowState).
+    // clearSessionFlowState). Resume BEFORE leaving probe mode: when flow
+    // control is why the deadline fired, the complete _P/_Q response may
+    // already be buffered in the paused stream, and keeping probe parsing
+    // active lets onData's probe parser consume that released data and pick
+    // the live shell kind — leaving probe mode first would let the resumed
+    // response bypass parseLiveShellProbe while the partial salvage only
+    // sees the pre-resume buffer, typing the wrong wrapper for a nested
+    // shell of the other kind.
     try {
       onInterrupt?.();
     } catch {
       // Best-effort recovery must not prevent the fallback wrapper from
       // being typed.
     }
-    writeWrappedCommand();
+    clearProbeTimeout();
+    // Wait briefly for the resumed buffered response to reach onData. If the
+    // sentinel is genuinely lost (no buffered response), this small grace
+    // window then selects the fallback wrapper from the partial pre-resume
+    // buffer. With a hard wall-clock deadline, skip the grace when the
+    // remaining budget is too tight to afford grace plus the wrapper's
+    // delivery, so the fallback can still finish typing in time.
+    let graceMs = probeResumeGraceMs();
+    if (wallClockArmed) {
+      const wrapperDeliveryMs = Math.max(
+        estimateInputDeliveryMs(wrappedCommandText("posix")),
+        estimateInputDeliveryMs(wrappedCommandText("fish")),
+      );
+      const remainingMs = timeoutMs - (Date.now() - wallStartMs);
+      if (remainingMs <= wrapperDeliveryMs + PROBE_RESUME_GRACE_MS) graceMs = 0;
+    }
+    probeResumeTimeoutId = setTimeout(() => {
+      probeResumeTimeoutId = null;
+      if (finished || cancelRequested || !probingShell) return;
+      finishProbeFallback();
+    }, graceMs);
   }
   // The output/startup deadlines (timeoutMs for foreground jobs,
   // BG_STARTUP_TIMEOUT_MS for background jobs) are armed before the probe
@@ -312,7 +379,14 @@ function startPtyJob(ptyStream, command, options) {
   function armProbeTimeout() {
     clearProbeTimeout();
     const deadlineBudgetMs = maxBufferedChars > 0 ? BG_STARTUP_TIMEOUT_MS : timeoutMs;
-    let delayMs = Math.min(PROBE_DEADLINE_MS, Math.floor(deadlineBudgetMs * 3 / 4));
+    // Reserve the fallback's resume-grace window inside the 75% cap so the
+    // grace plus the wrapper's paced delivery still finish before the
+    // output/startup deadline that writeWrappedCommand() re-arms against.
+    const fallbackReserveMs = probeResumeGraceMs();
+    let delayMs = Math.min(
+      PROBE_DEADLINE_MS,
+      Math.max(0, Math.floor(deadlineBudgetMs * 3 / 4) - fallbackReserveMs),
+    );
     if (wallClockArmed) {
       const wrapperDeliveryMs = Math.max(
         estimateInputDeliveryMs(wrappedCommandText("posix")),
@@ -325,7 +399,8 @@ function startPtyJob(ptyStream, command, options) {
         // (registered earlier) will finish the job with a timeout error.
         return;
       }
-      delayMs = Math.min(delayMs, remainingMs - wrapperDeliveryMs);
+      delayMs = Math.min(delayMs, remainingMs - wrapperDeliveryMs - fallbackReserveMs);
+      if (delayMs < 0) delayMs = 0;
     }
     probeTimeoutId = setTimeout(() => {
       probeTimeoutId = null;
@@ -552,6 +627,7 @@ function startPtyJob(ptyStream, command, options) {
     clearTimeout(wallTimeoutId);
     clearStartupTimeout();
     clearProbeTimeout();
+    clearProbeResumeTimeout();
     clearPromptFallback();
     clearEndMarkerWait();
     clearCancelRetryTimer();
@@ -667,6 +743,7 @@ function startPtyJob(ptyStream, command, options) {
       if (!probe) return;
       probingShell = false;
       clearProbeTimeout();
+      clearProbeResumeTimeout();
       probeOutput = "";
       if (probe.kind) resolvedShellKind = probe.kind;
       if (finished || cancelRequested) return;

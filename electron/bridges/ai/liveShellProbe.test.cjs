@@ -56,6 +56,38 @@ test('probe waits for complete reply before choosing the first wrapper', async (
   assert.equal((await job.resultPromise).exitCode, 0);
 });
 
+test('probe deadline fallback consumes a probe reply buffered in the paused flow', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const pty = new EventEmitter();
+  const writes = [];
+  pty.write = (data) => {
+    if (data === '\x03') return;
+    writes.push(String(data));
+  };
+  const job = startPtyJob(pty, 'printf resumed', {
+    shellKind: 'posix',
+    probeLiveShell: true,
+    timeoutMs: 60000,
+    onInterrupt: () => {
+      // Resuming the session-owned flow releases the complete probe reply
+      // that was buffered while the renderer flow was paused.
+      pty.emit('data', `${job.marker}_P:fish\n${job.marker}_Q`);
+    },
+  });
+  // Drain paced typing of the full probe; the probe deadline is only armed
+  // once delivery completes.
+  while (!writes.join('').includes(`${job.marker}_Q'\n`)) t.mock.timers.tick(30);
+  t.mock.timers.tick(20000);
+  // The resumed buffered reply must still reach the probe parser and select
+  // the live shell kind, so the fallback wrapper matches the nested fish.
+  const wrapper = writes.slice(1).join('');
+  assert.ok(wrapper.includes('set -l'), wrapper);
+  assert.ok(!wrapper.includes('=0; printf'), wrapper);
+  pty.emit('data', `${job.marker}_S\r\nresumed\r\n${job.marker}_E:0\r\n`);
+  const result = await job.resultPromise;
+  assert.equal(result.exitCode, 0, JSON.stringify(result));
+});
+
 test('probe deadline fallback resumes session flow control before typing the wrapper', async () => {
   const pty = new EventEmitter();
   const writes = [];
