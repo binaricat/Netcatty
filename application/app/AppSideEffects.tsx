@@ -22,6 +22,7 @@ import { useVaultAgentBridge } from '../state/useVaultAgentBridge';
 import { useWindowControls } from '../state/useWindowControls';
 import { useTerminalKeyboardFocus } from '../state/useTerminalKeyboardFocus';
 import { editorTabStore, useEditorTabChromeList } from '../state/editorTabStore';
+import { installEditorWindowSourceListeners } from '../state/editorWindowClient';
 import { findEditorSftpOwnerTabId } from '../state/editorSftpOwnerRegistry';
 import {
   isPluginViewTabId,
@@ -632,6 +633,8 @@ export function AppSideEffects() {
     updateState,
     workspaces,
   });
+
+  useEffect(() => installEditorWindowSourceListeners(), []);
 
   const pendingTrayPortForwardsWhileLockedRef = useRef<Array<{ ruleId: string; start: boolean }>>([]);
 

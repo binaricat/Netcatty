@@ -853,6 +853,13 @@ export const enTerminalMessages: Messages = {
   // Text Editor
   'sftp.editor.wordWrap': 'Word Wrap',
   'sftp.editor.maximize': 'Maximize',
+  'sftp.editor.popOut': 'Open in editor window',
+  'sftp.editor.dock': 'Dock to main window',
+  'sftp.editor.focusWindow': 'Focus editor window',
+  'sftp.editor.close': 'Close',
+  'sftp.editor.windowTitle': 'Editor',
+  'sftp.editor.windowEmpty': 'No files open',
+  'sftp.editor.dockFailed': 'Could not dock this file back to the main window',
   'sftp.editor.unsavedTitle': 'Unsaved changes',
   'sftp.editor.unsavedMessage': '{fileName} has unsaved changes. Save before closing?',
   'sftp.editor.discardChanges': 'Discard',

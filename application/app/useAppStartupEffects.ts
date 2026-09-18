@@ -354,7 +354,7 @@ export function useAppStartupEffects(ctx: StartupEffectsContext) {
       // exactly the same outcome.
       let hasDirty = false;
       try {
-        hasDirty = editorTabStore.getTabs().some((tab) => tab.content !== tab.baselineContent);
+        hasDirty = editorTabStore.getTabs().some((tab) => tab.placement !== "window" && tab.content !== tab.baselineContent);
         if (hasDirty) toast.warning(t('sftp.editor.quitBlockedByDirty'), 'SFTP');
         if (!hasDirty) {
           const unfinishedTasks = sftpTransferCenterStore.getSnapshot().tasks.filter((task) => (

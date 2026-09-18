@@ -2,6 +2,7 @@ import { useCallback, useMemo, useSyncExternalStore } from "react";
 import type * as Monaco from "monaco-editor";
 
 import { activeTabStore, fromEditorTabId, isEditorTabId } from "./activeTabStore";
+import type { EditorTabPlacement, EditorWindowTabSnapshot } from "./editorWindowTypes";
 
 // POSIX-style normalization: collapse "/./" and duplicate slashes, not ".." (remote paths
 // may contain semantic ".." segments we don't want to resolve client-side).
@@ -23,6 +24,7 @@ export interface EditorTab {
   sftpTabId: string;
   /** Stable endpoint id; used to verify the session is still the one we opened against. */
   hostId: string;
+  hostLabel?: string;
   remotePath: string;
   fileName: string;
   languageId: string;
@@ -32,12 +34,17 @@ export interface EditorTab {
   viewState: Monaco.editor.ICodeEditorViewState | null;
   savingState: EditorSavingState;
   saveError: string | null;
+  placement?: EditorTabPlacement;
+  windowDirty?: boolean;
 }
 
 type Listener = () => void;
 
 let idCounter = 0;
 const genId = (): EditorTabId => `edt_${Date.now().toString(36)}_${(++idCounter).toString(36)}`;
+
+export const tabIsDirty = (tab: EditorTab): boolean =>
+  tab.placement === "window" ? tab.windowDirty === true : tab.content !== tab.baselineContent;
 
 export class EditorTabStore {
   private tabs: EditorTab[] = [];
@@ -79,7 +86,84 @@ export class EditorTabStore {
   };
   isDirty = (id: EditorTabId): boolean => {
     const t = this.getTab(id);
-    return !!t && t.content !== t.baselineContent;
+    return !!t && tabIsDirty(t);
+  };
+
+  listByOwner = (owner: { sessionId?: string; sftpTabId?: string }): EditorTab[] =>
+    this.tabs.filter((t) => this.tabMatchesOwner(t, owner));
+
+  markDetached = (id: EditorTabId, dirty: boolean): void => {
+    this.patch(id, {
+      placement: "window",
+      windowDirty: dirty,
+      content: "",
+      baselineContent: "",
+      viewState: null,
+    });
+    this.notifyStructural();
+  };
+
+  setWindowDirty = (id: EditorTabId, dirty: boolean): void => {
+    const tab = this.getTab(id);
+    if (!tab || tab.placement !== "window" || tab.windowDirty === dirty) return;
+    this.patch(id, { windowDirty: dirty });
+  };
+
+  upsertFromSnapshot = (
+    snapshot: EditorWindowTabSnapshot,
+    placement: EditorTabPlacement = "tab",
+  ): EditorTabId => {
+    const existingById = snapshot.editorId ? this.getTab(snapshot.editorId) : undefined;
+    const normalized = normalizePath(snapshot.remotePath);
+    const existing = existingById ?? this.tabs.find(
+      (t) => t.sessionId === snapshot.sessionId && normalizePath(t.remotePath) === normalized,
+    );
+    const next: Partial<EditorTab> = {
+      sessionId: snapshot.sessionId,
+      sftpTabId: snapshot.sftpTabId,
+      hostId: snapshot.hostId,
+      hostLabel: snapshot.hostLabel,
+      remotePath: snapshot.remotePath,
+      fileName: snapshot.fileName,
+      languageId: snapshot.languageId,
+      content: placement === "window" ? "" : snapshot.content,
+      baselineContent: placement === "window" ? "" : snapshot.baselineContent,
+      wordWrap: snapshot.wordWrap,
+      viewState: placement === "window" ? null : snapshot.viewState as EditorTab["viewState"],
+      placement,
+      windowDirty: placement === "window"
+        ? snapshot.content !== snapshot.baselineContent
+        : false,
+      savingState: "idle",
+      saveError: null,
+    };
+    if (existing) {
+      this.patch(existing.id, next);
+      if (existing.placement !== placement) this.notifyStructural();
+      return existing.id;
+    }
+    const tab: EditorTab = {
+      id: snapshot.editorId || this.makeId(),
+      kind: "editor",
+      sessionId: snapshot.sessionId,
+      sftpTabId: snapshot.sftpTabId,
+      hostId: snapshot.hostId,
+      hostLabel: snapshot.hostLabel,
+      remotePath: snapshot.remotePath,
+      fileName: snapshot.fileName,
+      languageId: snapshot.languageId,
+      content: next.content ?? "",
+      baselineContent: next.baselineContent ?? "",
+      wordWrap: snapshot.wordWrap,
+      viewState: (next.viewState ?? null) as EditorTab["viewState"],
+      savingState: "idle",
+      saveError: null,
+      placement,
+      windowDirty: next.windowDirty === true,
+    };
+    this.tabs = [...this.tabs, tab];
+    this.notifyStructural();
+    return tab.id;
   };
 
   updateContent = (
@@ -91,6 +175,11 @@ export class EditorTabStore {
   };
 
   markSaved = (id: EditorTabId, newBaseline: string) => {
+    const tab = this.getTab(id);
+    if (tab?.placement === "window") {
+      this.patch(id, { windowDirty: false, savingState: "idle", saveError: null });
+      return;
+    }
     this.patch(id, { baselineContent: newBaseline, savingState: "idle", saveError: null });
   };
 
@@ -174,17 +263,21 @@ export class EditorTabStore {
     baselineContent: string;
     wordWrap: boolean;
     viewState: Monaco.editor.ICodeEditorViewState | null;
+    placement?: EditorTabPlacement;
   }): EditorTabId => {
     const normalized = normalizePath(snapshot.remotePath);
     const existing = this.tabs.find(
       (t) => t.sessionId === snapshot.sessionId && normalizePath(t.remotePath) === normalized,
     );
     if (existing) {
+      if (existing.placement === "window") return existing.id;
       this.patch(existing.id, {
         content: snapshot.content,
         baselineContent: snapshot.baselineContent,
         wordWrap: snapshot.wordWrap,
         viewState: snapshot.viewState,
+        placement: snapshot.placement ?? existing.placement ?? "tab",
+        windowDirty: false,
         // keep languageId/hostId/fileName stable; they shouldn't change for the same path
       });
       return existing.id;
@@ -204,6 +297,8 @@ export class EditorTabStore {
       viewState: snapshot.viewState,
       savingState: "idle",
       saveError: null,
+      placement: snapshot.placement ?? "tab",
+      windowDirty: false,
     };
     this.tabs = [...this.tabs, tab];
     this.notifyStructural();
@@ -221,9 +316,9 @@ export class EditorTabStore {
     saveTab?: (tabId: EditorTabId) => Promise<void>,
     onCloseTab?: (tabId: EditorTabId) => void,
   ): Promise<boolean> => {
-    const matching = this.tabs.filter((t) => this.tabMatchesOwner(t, owner));
+    const matching = this.tabs.filter((t) => this.tabMatchesOwner(t, owner) && t.placement !== "window");
     for (const tab of matching) {
-      const dirty = tab.content !== tab.baselineContent;
+      const dirty = tabIsDirty(tab);
       if (!dirty) {
         onCloseTab?.(tab.id);
         this.close(tab.id);
@@ -332,9 +427,11 @@ export type EditorTabChrome = Pick<
   | 'sessionId'
   | 'sftpTabId'
   | 'hostId'
+  | 'hostLabel'
   | 'remotePath'
   | 'fileName'
   | 'languageId'
+  | 'placement'
 >;
 
 const projectEditorTabChrome = (tab: EditorTab): EditorTabChrome => ({
@@ -343,9 +440,11 @@ const projectEditorTabChrome = (tab: EditorTab): EditorTabChrome => ({
   sessionId: tab.sessionId,
   sftpTabId: tab.sftpTabId,
   hostId: tab.hostId,
+  hostLabel: tab.hostLabel,
   remotePath: tab.remotePath,
   fileName: tab.fileName,
   languageId: tab.languageId,
+  placement: tab.placement ?? "tab",
 });
 
 export const useHasEditorTabForSessions = (

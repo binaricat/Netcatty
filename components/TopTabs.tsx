@@ -173,6 +173,8 @@ interface TopTabsProps {
   pluginViewTabs: readonly PluginViewTab[];
   onClosePluginViewTab: (tabId: string) => void;
   onRequestCloseEditorTab: (editorTabId: string) => void;
+  onPopOutEditorTab?: (editorTabId: string) => void;
+  onFocusEditorWindowTab?: (editorTabId: string) => void;
   hostById: Map<string, Host>;
 }
 
@@ -223,6 +225,8 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
   pluginViewTabs,
   onClosePluginViewTab,
   onRequestCloseEditorTab,
+  onPopOutEditorTab,
+  onFocusEditorWindowTab,
   hostById,
 }) => {
   const { t } = useI18n();
@@ -832,6 +836,8 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
             host={host}
             suffix={suffix}
             onRequestCloseEditorTab={onRequestCloseEditorTab}
+            onPopOutEditorTab={onPopOutEditorTab}
+            onFocusEditorWindowTab={onFocusEditorWindowTab}
             isBeingDragged={isBeingDragged}
             isDraggingForReorder={isDraggingForReorder}
             shiftStyle={shiftStyle}
@@ -1298,6 +1304,8 @@ export const topTabsAreEqual = (prev: TopTabsProps, next: TopTabsProps): boolean
     // Editor open/close/fileName chrome only (presence list). Dirty dots use store.
     prev.editorTabs === next.editorTabs &&
     prev.onRequestCloseEditorTab === next.onRequestCloseEditorTab &&
+    prev.onPopOutEditorTab === next.onPopOutEditorTab &&
+    prev.onFocusEditorWindowTab === next.onFocusEditorWindowTab &&
     prev.pluginViewTabs === next.pluginViewTabs &&
     prev.onClosePluginViewTab === next.onClosePluginViewTab &&
     prev.draggingSessionId === next.draggingSessionId &&

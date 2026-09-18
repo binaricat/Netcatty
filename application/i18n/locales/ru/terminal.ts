@@ -860,6 +860,13 @@ export const ruTerminalMessages: Messages = {
   // Text Editor
   'sftp.editor.wordWrap': 'Перенос строк',
   'sftp.editor.maximize': 'Развернуть',
+  'sftp.editor.popOut': 'Открыть в окне редактора',
+  'sftp.editor.dock': 'Вернуть в главное окно',
+  'sftp.editor.focusWindow': 'Перейти к окну редактора',
+  'sftp.editor.close': 'Закрыть',
+  'sftp.editor.windowTitle': 'Редактор',
+  'sftp.editor.windowEmpty': 'Нет открытых файлов',
+  'sftp.editor.dockFailed': 'Не удалось вернуть файл в главное окно',
   'sftp.editor.unsavedTitle': 'Несохранённые изменения',
   'sftp.editor.unsavedMessage': 'В файле {fileName} есть несохранённые изменения. Сохранить перед закрытием?',
   'sftp.editor.discardChanges': 'Отбросить',

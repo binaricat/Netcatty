@@ -79,6 +79,7 @@ import { localStorageAdapter } from "../../../infrastructure/persistence/localSt
 import { STORAGE_KEY_SFTP_TRANSFER_CONCURRENCY } from "../../../infrastructure/config/storageKeys";
 import { sftpTransferCenterStore } from "../sftpTransferCenterStore";
 import { editorTabStore } from "../editorTabStore";
+import { notifyEditorWindowSessionRemap } from "../editorWindowClient";
 import {
   resolveUploadStreamTargetSftpId,
 } from "../../../domain/sftpDedicatedStreamPolicy";
@@ -443,6 +444,7 @@ export const useSftpExternalOperations = (
 
       if (liveConnectionId !== connectionId) {
         editorTabStore.remapSessionId(connectionId, liveConnectionId);
+        notifyEditorWindowSessionRemap(connectionId, liveConnectionId);
       }
 
       const bridge = netcattyBridge.get();

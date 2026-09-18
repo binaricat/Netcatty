@@ -13,6 +13,7 @@ import { getFileExtension, getLanguageId, FileOpenerType, SystemAppInfo } from "
 import { isNavigableDirectory } from "../utils";
 import { reportSftpUploadResults } from "../reportSftpUploadResults";
 import { editorTabStore } from "../../../application/state/editorTabStore";
+import { popOutEditorTab } from "../../../application/state/editorWindowClient";
 import { toEditorTabId, activeTabStore } from "../../../application/state/activeTabStore";
 import type { TextEditorModalSnapshot } from "../../TextEditorModal";
 import type { UseSftpViewFileOpsParams, UseSftpViewFileOpsResult } from "./useSftpViewFileOps.types";
@@ -246,6 +247,33 @@ export const useSftpViewFileOps = ({
     setShowTextEditor(false);
     setTextEditorTarget(null);
     setTextEditorContent("");
+  }, [sftpRef]);
+
+  const handlePopOut = useCallback((snapshot: TextEditorModalSnapshot) => {
+    const target = textEditorTargetRef.current;
+    if (!target) return;
+    const pane = target.side === "left" ? sftpRef.current.leftPane : sftpRef.current.rightPane;
+    const connection = pane.connection;
+    if (!connection || !target.hostId) return;
+
+    const editorId = editorTabStore.promoteFromModal({
+      sessionId: connection.id,
+      sftpTabId: pane.id,
+      hostId: target.hostId,
+      remotePath: target.fullPath,
+      fileName: target.file.name,
+      languageId: snapshot.languageId || getLanguageId(target.file.name),
+      content: snapshot.content,
+      baselineContent: snapshot.baselineContent,
+      wordWrap: snapshot.wordWrap,
+      viewState: snapshot.viewState,
+    });
+    void popOutEditorTab(editorId).then((ok) => {
+      if (!ok) return;
+      setShowTextEditor(false);
+      setTextEditorTarget(null);
+      setTextEditorContent("");
+    });
   }, [sftpRef]);
 
   const onEditFileLeft = useCallback(
@@ -769,6 +797,7 @@ export const useSftpViewFileOps = ({
     setFileOpenerTarget,
     handleSaveTextFile,
     onPromoteToTab: handlePromoteToTab,
+    onPopOut: handlePopOut,
     handleFileOpenerSelect,
     handleSelectSystemApp,
     onEditPermissionsLeft,

@@ -783,6 +783,81 @@ function createBridgeRegistrar(context) {
         return { success: false, error: err?.message || "Failed to open terminal popup" };
       }
     });
+
+    ipcMain.handle("netcatty:window:openEditor", async (event, payload) => {
+      try {
+        const sourceWindow = BrowserWindow.fromWebContents(event.sender);
+        return await getWindowManager().openEditorWindow(electronModule, {
+          preload,
+          devServerUrl: effectiveDevServerUrl,
+          isDev,
+          appIcon: getAppIconPath(),
+          isMac,
+          electronDir,
+          sourceWindow,
+          sourceWebContents: event.sender,
+        }, payload);
+      } catch (err) {
+        console.error("[Main] Failed to open editor window:", err);
+        return { success: false, error: err?.message || "Failed to open editor window" };
+      }
+    });
+
+    ipcMain.handle("netcatty:window:focusEditor", async (_event, payload) => {
+      try {
+        return getWindowManager().focusEditorTab(electronModule, payload?.editorId);
+      } catch (err) {
+        return { success: false, error: err?.message || "Failed to focus editor window" };
+      }
+    });
+
+    ipcMain.handle("netcatty:window:closeEditorTabs", async (_event, payload) => {
+      try {
+        return await getWindowManager().closeEditorWindowTabs(electronModule, payload);
+      } catch (err) {
+        return { success: false, cancelled: true, closedIds: [], error: err?.message || "Failed to close editor tabs" };
+      }
+    });
+
+    ipcMain.handle("netcatty:editorWindow:save", async (_event, payload) => {
+      try {
+        return await getWindowManager().saveEditorWindowTab(electronModule, payload);
+      } catch (err) {
+        return { ok: false, error: err?.message || "Save failed" };
+      }
+    });
+
+    ipcMain.handle("netcatty:editorWindow:dock", async (_event, payload) => {
+      try {
+        return await getWindowManager().dockEditorTab(electronModule, payload);
+      } catch (err) {
+        return { success: false, error: err?.message || "Failed to dock editor tab" };
+      }
+    });
+
+    ipcMain.on("netcatty:editorWindow:dirty", (_event, payload) => {
+      try {
+        getWindowManager().reportEditorDirty(electronModule, payload);
+      } catch {
+        // ignore
+      }
+    });
+
+    ipcMain.on("netcatty:editorWindow:tabsClosed", (_event, payload) => {
+      try {
+        getWindowManager().reportEditorTabsClosed(electronModule, payload);
+      } catch {
+        // ignore
+      }
+    });
+
+    ipcMain.on("netcatty:editorWindow:remapSession", (_event, payload) => {
+      try {
+        getWindowManager().remapEditorSession(electronModule, payload);
+      } catch {
+        // ignore
+      }
+    });
   
     // Cloud sync master password (stored in-memory + persisted via safeStorage)
     ipcMain.handle("netcatty:cloudSync:session:setPassword", async (_event, password) => {
