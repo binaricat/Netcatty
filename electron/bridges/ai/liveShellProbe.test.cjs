@@ -126,6 +126,32 @@ test('probe deadline fires before the command timers for short timeouts', async 
   assert.match(result.stdout, /ok/);
 });
 
+test('wall timeout does not finish the job before the wrapped command is delivered', async () => {
+  const pty = new EventEmitter();
+  const writes = [];
+  pty.write = (data) => writes.push(data);
+  const job = startPtyJob(pty, 'printf one-second-budget', {
+    shellKind: 'posix', probeLiveShell: true, timeoutMs: 1000,
+    enforceWallTimeout: true,
+  });
+  assert.equal(writes.length, 1);
+  // With a 1s wall budget the paced probe alone takes most of it: the wall
+  // timer must be paused during paced delivery and re-armed with the
+  // remaining wall time, and the probe recovery must fire against the
+  // remaining wall clock, so the wrapped command still gets typed instead of
+  // the job being finished as a wall timeout (#3449).
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline && !writes.join('').includes('printf one-second-budget')) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  assert.ok(writes.join('').includes('printf one-second-budget'), writes.join('|'));
+  assert.ok(!writes.includes('\x03'), 'the wall timeout must not interrupt mid-delivery');
+  pty.emit('data', `${job.marker}_S\r\nok\r\n${job.marker}_E:0\r\n`);
+  const result = await job.resultPromise;
+  assert.equal(result.exitCode, 0, JSON.stringify(result));
+  assert.match(result.stdout, /ok/);
+});
+
 test('late probe reply after the deadline is ignored and never double-delivers', async () => {
   const pty = new EventEmitter();
   const writes = [];

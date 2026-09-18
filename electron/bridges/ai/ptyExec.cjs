@@ -196,8 +196,13 @@ function startPtyJob(ptyStream, command, options) {
   // model can fall back to terminal_start). Default is off so existing
   // foreground execution paths (Catty Agent) keep their inactivity-based
   // timeout for long-running streaming commands.
-  function armWallTimeout() {
+  // The timer is paused while input is being paced-delivered (writeInput) and
+  // re-armed with the remaining wall time once delivery completes, so a short
+  // configured timeout cannot interrupt the probe/wrapper mid-typing (#3449).
+  let jobStartMs = Date.now();
+  function armWallTimeout(remainingMs = timeoutMs) {
     if (!enforceWallTimeout || maxBufferedChars > 0) return;
+    clearTimeout(wallTimeoutId);
     wallTimeoutId = setTimeout(() => {
       if (finished) return;
       if (pendingEnd) {
@@ -207,7 +212,7 @@ function startPtyJob(ptyStream, command, options) {
       sendInterrupt();
       const timeoutSec = Math.round(timeoutMs / 1000);
       finish(foundStart ? output : preStartOutput, -1, `Command timed out (${timeoutSec}s)`);
-    }, timeoutMs);
+    }, Math.max(0, remainingMs));
   }
 
   // Bounded startup deadline: we always need a hard limit on how long we
@@ -236,8 +241,16 @@ function startPtyJob(ptyStream, command, options) {
       Math.floor(baseMs / 2),
       baseMs - PROBE_RECOVERY_RESERVE_MS,
     );
+    // Wall-clock callers (enforceWallTimeout) start their wall timer at job
+    // start, so the paced probe delivery already consumed part of the budget:
+    // cap the probe deadline by the remaining wall time minus the recovery
+    // reserve so the recovery delivery still fits before the wall deadline
+    // even with short supported timeouts (#3449).
+    const wallBudgetMs = enforceWallTimeout
+      ? Math.max(1, timeoutMs - (Date.now() - jobStartMs) - PROBE_RECOVERY_RESERVE_MS)
+      : Infinity;
     const startupMs = probingShell
-      ? Math.min(probeDeadlineMs, probeBudgetMs)
+      ? Math.min(probeDeadlineMs, probeBudgetMs, wallBudgetMs)
       : baseMs;
     startupTimeoutId = setTimeout(() => {
       if (finished || foundStart) return;
@@ -804,10 +817,14 @@ function startPtyJob(ptyStream, command, options) {
 
   function completeInputDelivery(generation) {
     // Input delivery is complete: only now does the startup deadline begin,
-    // so paced typing time never consumes the startup budget.
+    // so paced typing time never consumes the startup budget. The wall clock
+    // (enforceWallTimeout callers) is also paused during delivery and re-armed
+    // with the remaining budget so pacing cannot consume it or interrupt the
+    // next delivery mid-typing with a short configured timeout (#3449).
     if (!finished && !cancelRequested && generation === inputWriteGeneration) {
       deliveringInput = false;
       if (!pendingEnd) armOutputTimeout();
+      armWallTimeout(timeoutMs - (Date.now() - jobStartMs));
       if (!foundStart) armStartupTimeout();
     }
   }
@@ -818,6 +835,10 @@ function startPtyJob(ptyStream, command, options) {
     // probe to wrapper. Echo may be disabled while we are still typing.
     clearStartupTimeout();
     clearTimeout(timeoutId);
+    // Pause the wall clock while paced-typing so it cannot fire mid-delivery
+    // with short enforceWallTimeout budgets (#3449); completeInputDelivery
+    // re-arms it with the remaining wall time.
+    clearTimeout(wallTimeoutId);
     deliveringInput = true;
     const generation = inputWriteGeneration;
 
