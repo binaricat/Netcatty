@@ -98,7 +98,7 @@ export interface SftpTransferCenterStore {
   /** Single task row — same object identity until that row is patched. */
   getTask(taskId: string): TransferTask | undefined;
   /** Observe exact task settlement before completed child rows are compacted. */
-  observeTaskSettlement(task: TransferTask, ignoredCompletion?: TransferTask): { read(): TransferTask | undefined; hasIdentityConflict(): boolean; dispose(): void };
+  observeTaskSettlement(task: TransferTask, ignoredCompletion?: TransferTask, onIdentityConflict?: () => void): { read(): TransferTask | undefined; hasIdentityConflict(): boolean; dispose(): void };
   /** Publish an explicit dispatch identity without flushing large child-history batches. */
   admitTaskRun(task: TransferTask, pausedAtResume?: TransferTask, completedAtRestart?: TransferTask): "ready" | "paused" | "completed" | "cancelled" | "conflict";
   getOwnerTasks(ownerId: string): TransferTask[];
@@ -405,7 +405,7 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
   let snapshotDirty = false;
   const listeners = new Set<Listener>();
   const progressListeners = new Set<Listener>();
-  const settlementObservers = new Map<string, Set<{ expected: TransferTask; settled?: TransferTask; conflicted?: boolean; ignoredCompletion?: TransferTask }>>();
+  const settlementObservers = new Map<string, Set<{ expected: TransferTask; settled?: TransferTask; conflicted?: boolean; ignoredCompletion?: TransferTask; onIdentityConflict?: () => void }>>();
   const matchesObservedTask = (expected: TransferTask, candidate: TransferTask) => (
     expected.id === candidate.id
     && expected.sourcePath === candidate.sourcePath
@@ -417,8 +417,10 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
   const captureObservedTask = (task: TransferTask) => {
     for (const observer of settlementObservers.get(task.id) ?? []) {
       if (observer.settled || observer.conflicted || task === observer.ignoredCompletion) continue;
-      if (!matchesObservedTask(observer.expected, task)) observer.conflicted = true;
-      else if (TERMINAL_OWNER_STATUSES.has(task.status)) observer.settled = task;
+      if (!matchesObservedTask(observer.expected, task)) {
+        observer.conflicted = true;
+        observer.onIdentityConflict?.();
+      } else if (TERMINAL_OWNER_STATUSES.has(task.status)) observer.settled = task;
     }
   };
   const refreshBadgeSnapshot = () => {
@@ -1395,8 +1397,8 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
       emitProgress(false);
       return "ready";
     },
-    observeTaskSettlement(expected, ignoredCompletion) {
-      const observer: { expected: TransferTask; settled?: TransferTask; conflicted?: boolean; ignoredCompletion?: TransferTask } = { expected: { ...expected }, ignoredCompletion };
+    observeTaskSettlement(expected, ignoredCompletion, onIdentityConflict) {
+      const observer: { expected: TransferTask; settled?: TransferTask; conflicted?: boolean; ignoredCompletion?: TransferTask; onIdentityConflict?: () => void } = { expected: { ...expected }, ignoredCompletion, onIdentityConflict };
       const observers = settlementObservers.get(expected.id) ?? new Set();
       observers.add(observer);
       settlementObservers.set(expected.id, observers);

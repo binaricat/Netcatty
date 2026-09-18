@@ -49,7 +49,9 @@ Settlement observations retain identity-conflict evidence before compaction,
 including explicit admission changes. A displaced invocation fails explicitly
 instead of waiting for completion evidence belonging to another file. Both live
 and dedicated walks report that failure without overwriting the new owner's
-child row; dedicated recovery also discards its deferred update for that child.
+child row; dedicated recovery discards its deferred update synchronously when
+the observation detects displacement. This also prevents an automatic 512-entry
+batch flush from publishing the old snapshot while its invoke reply is delayed.
 Existing
 exact completion evidence remains authoritative; missing rows alone still do
 not prove success. Observations remain scoped to their waiter and are disposed.

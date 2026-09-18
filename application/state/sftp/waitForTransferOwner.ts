@@ -13,9 +13,10 @@ export async function runTransferAndWaitForOwner(
   shouldAbort: () => boolean,
   pausedAtResume?: TransferTask,
   completedAtRestart?: TransferTask,
+  onOwnerChanged?: () => void,
 ): Promise<StreamResult> {
   // Register before admission/start: an owner may finish while dispatch waits for resume.
-  let observation = sftpTransferCenterStore.observeTaskSettlement(task, completedAtRestart);
+  let observation = sftpTransferCenterStore.observeTaskSettlement(task, completedAtRestart, onOwnerChanged);
   try {
     for (;;) {
       if (shouldAbort()) throw new Error("Transfer cancelled");
@@ -28,7 +29,7 @@ export async function runTransferAndWaitForOwner(
     }
     // Admission begins a new attempt; discard any previous failed settlement.
     observation.dispose();
-    observation = sftpTransferCenterStore.observeTaskSettlement(task);
+    observation = sftpTransferCenterStore.observeTaskSettlement(task, undefined, onOwnerChanged);
     const result = await start();
     if (!result?.superseded) return result;
     for (;;) {

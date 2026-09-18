@@ -42,8 +42,9 @@ const host = (id: string, label: string, hostname = label): Host => ({
 for (const retainedStatus of [undefined, "interrupted", "failed", "paused"] as const) {
 for (const newerPause of retainedStatus === "paused" ? [false, true] : [false]) {
 for (const ownerChange of retainedStatus === "interrupted" ? ["same", "active", "completed"] : ["same"]) {
+for (const flushBeforeReply of ownerChange === "same" ? [false] : [false, true]) {
 const batchExistingIdentity = retainedStatus !== undefined;
-test(`superseded folder child settles when its completion was compacted into the parent: retained=${retainedStatus ?? "none"}, newerPause=${newerPause}, owner=${ownerChange}`, async (t) => {
+test(`superseded folder child settles when its completion was compacted into the parent: retained=${retainedStatus ?? "none"}, newerPause=${newerPause}, owner=${ownerChange}, flush=${flushBeforeReply}`, async (t) => {
   const { sftpTransferCenterStore } = await import("../sftpTransferCenterStore");
   const previousLocalStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
   Object.defineProperty(globalThis, "localStorage", {
@@ -82,8 +83,10 @@ test(`superseded folder child settles when its completion was compacted into the
   // Exercise the real large-history batching branch with one relevant retained row.
   const childBatcher = createDedicatedResumeChildUpdateBatcher({
     getTaskCount: () => 4096,
-    hasTask: (id) => id === persisted.id,
-    upsertTasks: (updates) => sftpTransferCenterStore.upsertTasks(updates),
+    hasTask: (id) => id === persisted.id || id.startsWith("flush-peer-"),
+    // Peer rows only drive the real 512-entry flush; keep the relevant store
+    // fixture small so unrelated history maintenance cannot mask ownership.
+    upsertTasks: (updates) => sftpTransferCenterStore.upsertTasks(updates.filter((task) => !task.id.startsWith("flush-peer-"))),
   });
   sftpTransferCenterStore.publishOwner("compacted-owner", [parent, ...(batchExistingIdentity ? [persisted] : [])]);
   (netcattyBridge as { get: () => unknown }).get = () => ({
@@ -116,6 +119,16 @@ test(`superseded folder child settles when its completion was compacted into the
         sftpTransferCenterStore.ingestBackgroundEvent({
           type: "completed", transferId: childId, transferred: 10, totalBytes: 10, lifecycleEpoch: 0,
         });
+      }
+      if (flushBeforeReply) {
+        for (let index = 0; index < 512; index += 1) {
+          childBatcher.push({ ...persisted, id: `flush-peer-${index}`, status: "transferring" });
+        }
+        if (ownerChange === "active") {
+          assert.equal(sftpTransferCenterStore.getTask(childId)?.directoryEntryIdentity, "e".repeat(64),
+            "automatic flush before the displaced reply must preserve the new owner");
+        } else assert.equal(sftpTransferCenterStore.getTask(childId), undefined,
+          "automatic flush must not recreate the compacted new owner");
       }
       return { superseded: true };
     },
@@ -155,6 +168,7 @@ test(`superseded folder child settles when its completion was compacted into the
   assert.notEqual(result, "still-waiting", "completed compacted child must not leave its folder waiting forever");
   assert.equal((result as { success: boolean }).success, true);
 });
+}
 }
 }
 }

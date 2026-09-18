@@ -1283,7 +1283,10 @@ async function resumeDirectoryWithDedicatedSession(
                 sourceFingerprint: childBase.sourceFingerprint,
                 skipAdmission: true,
               }), () => options?.shouldAbort?.() === true, pausedAtResume.get(childId),
-                resetPersistedCheckpoint ? completedAtRestart.get(childId) : undefined);
+                resetPersistedCheckpoint ? completedAtRestart.get(childId) : undefined,
+                // Drop queued UI updates at the ownership change itself: waiting
+                // for this invocation's reply may allow an intervening batch flush.
+                () => options?.onChildSuperseded?.(childId));
 
               if (streamResult?.error || streamResult?.cancelled) {
                 throw new Error(streamResult.error || "Transfer cancelled");
