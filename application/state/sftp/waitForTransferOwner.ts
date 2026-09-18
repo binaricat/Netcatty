@@ -4,6 +4,8 @@ import { sftpTransferCenterStore } from "../sftpTransferCenterStore";
 /** The displaced invocation may fail its walk, but no longer owns the child row. */
 export class TransferOwnerChangedError extends Error {}
 
+export type TransferOwnerObservation = ReturnType<typeof sftpTransferCenterStore.observeTaskSettlement>;
+
 type StreamResult = { error?: string; cancelled?: boolean; superseded?: boolean } | undefined;
 
 /** A live waiter owns bounded settlement evidence; persisted history stays compact. */
@@ -14,9 +16,11 @@ export async function runTransferAndWaitForOwner(
   pausedAtResume?: TransferTask,
   completedAtRestart?: TransferTask,
   onOwnerChanged?: () => void,
+  retainObservation?: (observation: TransferOwnerObservation) => boolean,
+  existingObservation?: TransferOwnerObservation,
 ): Promise<StreamResult> {
   // Register before admission/start: an owner may finish while dispatch waits for resume.
-  let observation = sftpTransferCenterStore.observeTaskSettlement(task, completedAtRestart, onOwnerChanged);
+  let observation = existingObservation ?? sftpTransferCenterStore.observeTaskSettlement(task, completedAtRestart, onOwnerChanged);
   try {
     for (;;) {
       if (shouldAbort()) throw new Error("Transfer cancelled");
@@ -49,6 +53,8 @@ export async function runTransferAndWaitForOwner(
     if (observation.hasIdentityConflict()) throw new TransferOwnerChangedError("Transfer identity changed while waiting for its owner");
     throw error;
   } finally {
-    observation.dispose();
+    // A deferred child update may outlive the invocation. Its caller must either
+    // retain this evidence through the write or release it after handling exit.
+    if (!retainObservation?.(observation)) observation.dispose();
   }
 }

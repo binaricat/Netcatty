@@ -181,12 +181,14 @@ export function useAppStartupEffects(ctx: StartupEffectsContext) {
           },
           {
             children,
-            onChildUpdate: (child) => {
+            onChildUpdate: (child, observation) => {
               if (acceptsResumeCallbacks) {
-                childUpdateBatcher.push({ ...child, ownerId: "dedicated-resume" });
+                childUpdateBatcher.push({ ...child, ownerId: "dedicated-resume" }, observation);
+                return true;
               }
             },
             onChildSuperseded: (taskId) => childUpdateBatcher.discard(taskId),
+            flushChildUpdates: () => childUpdateBatcher.flush(),
             onDirectoryCheckpointUpdate: (checkpoint) => {
               if (acceptsResumeCallbacks) {
                 sftpTransferCenterStore.patchTask(task.id, {

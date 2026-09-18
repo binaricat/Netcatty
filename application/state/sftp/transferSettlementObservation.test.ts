@@ -360,7 +360,8 @@ test("an unchanged owner retains its original transport rejection", async (t) =>
     (actual) => actual === error);
 });
 
-test("initial stale identity exemption ends when another owner activates that row", async (t) => {
+for (const activation of ["patch", "progress", "owner"] as const) {
+test(`initial stale identity exemption ends when another owner activates that row: ${activation}`, async (t) => {
   const { sftpTransferCenterStore: store } = await import("../sftpTransferCenterStore");
   const { runTransferAndWaitForOwner } = await import("./waitForTransferOwner");
   const { latchTransferPause, resetTransferPauseLatchesForTests } = await import("./transferPauseLatch");
@@ -380,8 +381,72 @@ test("initial stale identity exemption ends when another owner activates that ro
     store.dismiss(task.id);
   });
   resetTransferPauseLatchesForTests();
-  store.patchTask(task.id, { status: "transferring", lifecycleEpoch: 2 });
-  assert.match(await settled, /identity changed/i);
+  if (activation === "progress") {
+    store.ingestBackgroundEvent({ type: "progress", transferId: task.id,
+      transferred: 1, lifecycleEpoch: 2, lifecycleState: "transferring" });
+  } else if (activation === "owner") store.patchTask(task.id, { ownerId: "replacement-owner" });
+  else store.patchTask(task.id, { status: "transferring", lifecycleEpoch: 2 });
+  assert.match(String(await Promise.race([
+    settled, new Promise((resolve) => setTimeout(() => resolve("still-waiting"), 450)),
+  ])), /identity changed/i);
   assert.equal(starts, 0);
   assert.equal(store.getTask(task.id)?.directoryEntryIdentity, "b".repeat(64));
 });
+
+}
+
+test("already active different identity is rejected before first admission", async (t) => {
+  const { sftpTransferCenterStore: store } = await import("../sftpTransferCenterStore");
+  const { runTransferAndWaitForOwner } = await import("./waitForTransferOwner");
+  const task = { ...child(), id: "already-active-identity", parentTaskId: undefined };
+  store.upsertTasks([{ ...task, directoryEntryIdentity: "b".repeat(64), lifecycleEpoch: 1 }]);
+  t.after(() => { store.patchTask(task.id, { status: "completed" }); store.dismiss(task.id); });
+  let starts = 0;
+  let conflicts = 0;
+  await assert.rejects(runTransferAndWaitForOwner(task, async () => { starts += 1; return {}; }, () => false,
+    undefined, undefined, () => { conflicts += 1; }), /identity changed/i);
+  assert.equal(starts, 0);
+  assert.equal(conflicts, 1);
+  assert.equal(store.getTask(task.id)?.directoryEntryIdentity, "b".repeat(64));
+});
+
+for (const replacementStatus of ["transferring", "completed"] as const) {
+  for (const oldStatus of ["completed", "failed"] as const) {
+    test(`deferred ${oldStatus} cannot overwrite a ${replacementStatus} replacement after waiter exit`, async () => {
+      const { sftpTransferCenterStore: store } = await import("../sftpTransferCenterStore");
+      const { runTransferAndWaitForOwner } = await import("./waitForTransferOwner");
+      const { createDedicatedResumeChildUpdateBatcher } = await import("../../app/dedicatedResumeProgress");
+      const task = child();
+      const root = { ...task, id: task.parentTaskId!, parentTaskId: undefined, isDirectory: true };
+      const batcher = createDedicatedResumeChildUpdateBatcher({
+        getTaskCount: () => 4096, hasTask: () => true,
+        upsertTasks: (updates) => store.upsertTasks(updates),
+      });
+      store.upsertTasks([root, task]);
+      let observation: ReturnType<typeof store.observeTaskSettlement> | undefined;
+      try {
+        await runTransferAndWaitForOwner(task, async () => {
+          store.patchTask(task.id, { status: oldStatus });
+          return {};
+        }, () => false, undefined, undefined, () => batcher.discard(task.id), (value) => {
+          observation = value;
+          return true;
+        });
+        assert.ok(observation);
+        batcher.push({ ...task, status: oldStatus }, observation);
+        store.upsertTasks([{ ...task, directoryEntryIdentity: "b".repeat(64), status: replacementStatus }]);
+        const replacement = store.getTask(task.id);
+        batcher.flush();
+        assert.equal(store.getTask(task.id), replacement);
+        if (replacementStatus === "transferring") assert.equal(replacement?.directoryEntryIdentity, "b".repeat(64));
+        else assert.equal(replacement, undefined, "the replacement remains compacted");
+        assert.equal(observation.read(), undefined, "the retained observation is disposed");
+      } finally {
+        batcher.flush();
+        observation?.dispose();
+        store.patchTask(root.id, { status: "completed" });
+        store.dismiss(root.id);
+      }
+    });
+  }
+}

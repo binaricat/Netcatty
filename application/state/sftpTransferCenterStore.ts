@@ -44,7 +44,7 @@ import { cancelExternalUploadRuntime } from "./sftp/externalUploadRuntime";
 type Listener = () => void;
 type TaskSettlementObserver = {
   expected: TransferTask;
-  initialIdentity?: TransferTask;
+  initialInactiveRow?: TransferTask;
   settled?: TransferTask;
   conflicted?: boolean;
   ignoredCompletion?: TransferTask;
@@ -429,12 +429,12 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
       // A retry may plan a new source identity while its initial stale row is
       // still paused. Only the unchanged initial attempt is exempt: activating
       // it or replacing its owner/epoch must not let the stale plan reclaim it.
-      if (!matchesExpected && observer.initialIdentity
-        && matchesObservedTask(observer.initialIdentity, task)
-        && observer.initialIdentity.status === task.status
-        && observer.initialIdentity.lifecycleEpoch === task.lifecycleEpoch
-        && observer.initialIdentity.ownerId === task.ownerId) continue;
-      observer.initialIdentity = undefined;
+      if (!matchesExpected && observer.initialInactiveRow
+        && matchesObservedTask(observer.initialInactiveRow, task)
+        && observer.initialInactiveRow.status === task.status
+        && observer.initialInactiveRow.lifecycleEpoch === task.lifecycleEpoch
+        && observer.initialInactiveRow.ownerId === task.ownerId) continue;
+      observer.initialInactiveRow = undefined;
       if (!matchesExpected) {
         observer.conflicted = true;
         observer.onIdentityConflict?.();
@@ -1423,11 +1423,15 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
       const initial = tasks.find((task) => task.id === expected.id);
       const observer: TaskSettlementObserver = {
         expected: { ...expected }, ignoredCompletion, onIdentityConflict,
-        initialIdentity: initial && !matchesObservedTask(expected, initial) ? { ...initial } : undefined,
+        initialInactiveRow: initial && ["paused", "failed", "interrupted", "attention"].includes(initial.status)
+          && !matchesObservedTask(expected, initial) ? { ...initial } : undefined,
       };
       const observers = settlementObservers.get(expected.id) ?? new Set();
       observers.add(observer);
       settlementObservers.set(expected.id, observers);
+      // A different active owner may predate registration. Detect it now,
+      // before admission can publish the stale caller's identity over it.
+      if (initial) captureObservedTask(initial);
       let disposed = false;
       return {
         read() {
@@ -1706,6 +1710,7 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
       const next = tasks.slice();
       next[index] = nextTask;
       tasks = next;
+      captureObservedTask(nextTask);
       if (changed) {
         const lifecycleChanged = (
           (updates.status !== undefined && updates.status !== task.status)
@@ -2067,7 +2072,8 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
         backgroundEventsDuringRestore.set(event.transferId, pending);
         return;
       }
-      let existing = tasks.find((task) => task.id === event.transferId);
+      let existingIndex = tasks.findIndex((task) => task.id === event.transferId);
+      let existing = tasks[existingIndex];
       const eventParent = event.parentTaskId
         ? tasks.find((task) => task.id === event.parentTaskId)
         : undefined;
@@ -2083,7 +2089,8 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
           directoryEntryIdentity: event.directoryEntryIdentity ?? task.directoryEntryIdentity,
           background: false,
         } : task);
-        existing = tasks.find((task) => task.id === event.transferId);
+        existing = tasks[existingIndex];
+        captureObservedTask(existing);
       }
       // A delayed child progress event can arrive after the renderer compacted
       // that completed child into its parent checkpoint. Never resurrect it as
@@ -2163,6 +2170,7 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
       if ((event.type === "queued" || event.type === "started" || event.type === "progress") && !existing) {
         const sourcePath = event.sourcePath ?? "";
         const targetPath = event.targetPath ?? "";
+        existingIndex = tasks.length;
         tasks.push({
           id: event.transferId,
           ownerId: eventParent?.ownerId
@@ -2396,6 +2404,9 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
           phase: undefined,
         } : task);
       }
+      // Ownership changes must be observed synchronously even when a progress
+      // event takes the lightweight UI path. Reuse the located row, not a scan.
+      if (existingIndex >= 0) captureObservedTask(tasks[existingIndex]);
       // Progress-only ticks skip prune + coalesce listener paints; lifecycle
       // events still take the full emit path so UI never lags on pause/cancel.
       if (event.type === "progress" && !persistImmediately) {
