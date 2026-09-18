@@ -1,6 +1,9 @@
-import type { Host } from '../models';
+import type { Host, ProxyProfile } from '../models';
+import { isEncryptedCredentialPlaceholder } from '../credentials';
 import { isPluginHostProtocol } from '../pluginConnection';
-import { encodeCsvKeyPath, encodeCsvPassphrase } from './csvCredentialFields';
+import { materializeHostProxyProfile } from '../proxyProfiles';
+import { encodeCsvKeyPath, encodeCsvPassphrase, encodeCsvProxy } from './csvCredentialFields';
+import { formatCsvProxy } from './csvProxy';
 
 const UTF8_BOM = "\uFEFF";
 
@@ -12,6 +15,7 @@ export interface VaultCsvExportOptions {
   keyPassphrases?: ReadonlyMap<string, string>;
   keyPassphrasesById?: ReadonlyMap<string, string>;
   keyPathsById?: ReadonlyMap<string, string>;
+  proxyProfiles?: readonly ProxyProfile[];
 }
 
 export const resolveVaultCsvHostKeyPath = (
@@ -30,10 +34,10 @@ export const getVaultCsvTemplate = (
   opts: VaultCsvTemplateOptions = {},
 ): string => {
   const includeExampleRows = opts.includeExampleRows !== false;
-  const header = ["Groups", "Label", "Tags", "Notes", "Hostname/IP", "Protocol", "Port", "Username", "Password", "KeyPath", "Passphrase"];
+  const header = ["Groups", "Label", "Tags", "Notes", "Hostname/IP", "Protocol", "Port", "Username", "Password", "KeyPath", "Passphrase", "Proxy"];
   const rows: string[][] = [header];
   if (includeExampleRows) {
-    rows.push(["Project/Dev", "Web Server (dev)", "dev,web", "Dev web tier", "192.168.1.10", "ssh", "22", "root", "", "~/.ssh/id_ed25519", ""]);
+    rows.push(["Project/Dev", "Web Server (dev)", "dev,web", "Dev web tier", "192.168.1.10", "ssh", "22", "root", "", "~/.ssh/id_ed25519", "", "socks5://127.0.0.1:1080"]);
     rows.push(["Project/Prod", "Web Server (prod)", "prod,web", "Production", "server-a.example.com", "ssh", "22", "ubuntu", "", "", ""]);
     rows.push(["Database", "DB", "db,mysql", "MySQL primary", "db.example.com", "ssh", "4567", "admin", "", "", ""]);
   }
@@ -48,7 +52,7 @@ export const getVaultCsvTemplate = (
 };
 
 const exportHostsToCsv = (hosts: Host[], options: VaultCsvExportOptions): string => {
-  const header = ["Groups", "Label", "Tags", "Notes", "Hostname/IP", "Protocol", "Port", "Username", "Password", "KeyPath", "Passphrase"];
+  const header = ["Groups", "Label", "Tags", "Notes", "Hostname/IP", "Protocol", "Port", "Username", "Password", "KeyPath", "Passphrase", "Proxy"];
   const rows: string[][] = [header];
 
   const escapeCsv = (value: string, skipFormulaGuard = false) => {
@@ -97,6 +101,17 @@ const exportHostsToCsv = (hosts: Host[], options: VaultCsvExportOptions): string
             : (options.keyPassphrases?.get(keyPath) ?? "")
         )
       : "";
+    // Proxy profiles are materialized inline so the CSV stays self-contained;
+    // encrypted credential placeholders are never written to the file.
+    const proxyConfig = materializeHostProxyProfile(host, options.proxyProfiles ?? []).proxyConfig;
+    const proxyValue = proxyConfig
+      ? formatCsvProxy({
+        ...proxyConfig,
+        password: proxyConfig.password && !isEncryptedCredentialPlaceholder(proxyConfig.password)
+          ? proxyConfig.password
+          : undefined,
+      })
+      : "";
 
     rows.push([
       host.group ?? "",
@@ -110,15 +125,17 @@ const exportHostsToCsv = (hosts: Host[], options: VaultCsvExportOptions): string
       host.password ?? "",
       encodeCsvKeyPath(keyPath),
       encodeCsvPassphrase(passphrase),
+      encodeCsvProxy(proxyValue),
     ]);
   }
 
   const passwordColIdx = header.indexOf("Password");
   const keyPathColIdx = header.indexOf("KeyPath");
   const passphraseColIdx = header.indexOf("Passphrase");
+  const proxyColIdx = header.indexOf("Proxy");
   return rows.map((r, rowIdx) => r.map((c, i) => escapeCsv(
     c,
-    rowIdx > 0 && (i === passwordColIdx || i === keyPathColIdx || i === passphraseColIdx),
+    rowIdx > 0 && (i === passwordColIdx || i === keyPathColIdx || i === passphraseColIdx || i === proxyColIdx),
   )).join(",")).join("\r\n") + "\r\n";
 };
 

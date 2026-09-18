@@ -703,6 +703,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
         keyPassphrases,
         keyPassphrasesById,
         keyPathsById,
+        proxyProfiles,
       },
     );
 
@@ -740,7 +741,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
         t("vault.hosts.export.toast.success", { count: exportedCount }),
       );
     }
-  }, [hosts, keys, t]);
+  }, [hosts, keys, proxyProfiles, t]);
 
   // Copy hostname/IP for cross-host paste without opening the editor
   const handleCopyHostname = useCallback(

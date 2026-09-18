@@ -16,6 +16,7 @@ export {
 import { parseQuickConnectInput } from "./quickConnect";
 import { findExactHeaderIndex, findHeaderIndex, parseCsv } from "./vaultImport/csvUtils";
 import { decodeCsvKeyPath, decodeCsvPassphrase } from "./vaultImport/csvCredentialFields";
+import { parseCsvProxy } from "./vaultImport/csvProxy";
 import { attachMobaXtermPasswords } from "./vaultImport/mobaXtermPasswords";
 import { decodeFinalShellPassword } from "./finalShellPassword";
 export {
@@ -444,6 +445,7 @@ const importFromCsv = (text: string): VaultImportResult => {
   const usernameIdx = findHeaderIndex(header, ["username", "user", "login"]);
   const keyPathIdx = findExactHeaderIndex(header, ["keypath", "key path", "identityfile", "identity file"]);
   const explicitPassphraseIdx = findExactHeaderIndex(header, ["passphrase", "keypassphrase", "key passphrase"]);
+  const proxyIdx = findExactHeaderIndex(header, ["proxy", "proxyserver", "proxy server"]);
   const passphraseIdx = keyPathIdx >= 0 ? explicitPassphraseIdx : -1;
   const exactPasswordIdx = findExactHeaderIndex(header, ["password", "pass", "passwd"]);
   const fuzzyNamedPasswordIdx = findHeaderIndex(header, ["password", "passwd"]);
@@ -526,6 +528,14 @@ const importFromCsv = (text: string): VaultImportResult => {
     const passphrase = decodedPassphrase && !isEncryptedCredentialPlaceholder(decodedPassphrase)
       ? decodedPassphrase
       : undefined;
+    const proxyRaw = (proxyIdx >= 0 ? row[proxyIdx] : undefined)?.trim();
+    const proxyConfig = proxyRaw ? parseCsvProxy(proxyRaw) : undefined;
+    if (proxyRaw && !proxyConfig) {
+      issues.push({
+        level: "warning",
+        message: `CSV row ${i + 2}: Proxy was ignored because it is not a valid http://, socks5://, or command:// value.`,
+      });
+    }
 
     if (decodedPassphrase && isEncryptedCredentialPlaceholder(decodedPassphrase)) {
       issues.push({
@@ -553,6 +563,7 @@ const importFromCsv = (text: string): VaultImportResult => {
       tags,
       notes,
     });
+    if (proxyConfig) host.proxyConfig = proxyConfig;
     parsedHosts.push(host);
     if (keyPath && passphrase) {
       const keyPathKey = normalizeKeyPathKey(keyPath);

@@ -174,3 +174,114 @@ test("CSV export skips plugin hosts instead of discarding opaque provider config
   assert.equal(result.skippedCount, 1);
   assert.equal(result.csv.includes("opaque://target"), false);
 });
+
+test("CSV round-trips inline HTTP and SOCKS5 proxy configuration", () => {
+  const host: Host = {
+    id: "host-proxy",
+    label: "Proxied host",
+    hostname: "target.example.com",
+    username: "root",
+    port: 22,
+    proxyConfig: {
+      type: "http",
+      host: "proxy.example.com",
+      port: 8080,
+      username: "ali=ce",
+      password: "p@a,s\"s",
+    },
+  };
+
+  const { csv } = exportHostsToCsvWithStats([host]);
+  assert.ok(csv.includes("http://ali%3Dce:p%40a%2Cs%22s@proxy.example.com:8080"));
+  assert.ok(csv.includes("Proxy"));
+
+  const imported = importVaultHostsFromText("csv", csv);
+  assert.deepEqual(imported.hosts[0]?.proxyConfig, {
+    type: "http",
+    host: "proxy.example.com",
+    port: 8080,
+    username: "ali=ce",
+    password: "p@a,s\"s",
+  });
+});
+
+test("CSV round-trips command and socks5 proxy configuration", () => {
+  const commandHost: Host = {
+    id: "host-command-proxy",
+    label: "Command proxy host",
+    hostname: "target.example.com",
+    username: "root",
+    port: 22,
+    proxyConfig: {
+      type: "command",
+      host: "",
+      port: 0,
+      command: "nc -X connect -x 10.0.0.9:1080 %h %p",
+    },
+  };
+  const socksHost: Host = {
+    id: "host-socks-proxy",
+    label: "Socks proxy host",
+    hostname: "target2.example.com",
+    username: "root",
+    port: 22,
+    proxyConfig: {
+      type: "socks5",
+      host: "127.0.0.1",
+      port: 1080,
+    },
+  };
+
+  const { csv } = exportHostsToCsvWithStats([commandHost, socksHost]);
+  const imported = importVaultHostsFromText("csv", csv);
+  assert.deepEqual(imported.hosts[0]?.proxyConfig, commandHost.proxyConfig);
+  assert.deepEqual(imported.hosts[1]?.proxyConfig, socksHost.proxyConfig);
+});
+
+test("CSV export materializes a referenced proxy profile and never writes encrypted placeholders", () => {
+  const host: Host = {
+    id: "host-profile-proxy",
+    label: "Profile proxy host",
+    hostname: "target.example.com",
+    username: "root",
+    port: 22,
+    proxyProfileId: "profile-1",
+  };
+
+  const { csv } = exportHostsToCsvWithStats([host], {
+    proxyProfiles: [{
+      id: "profile-1",
+      label: "Corp proxy",
+      createdAt: 0,
+      config: {
+        type: "http",
+        host: "proxy.example.com",
+        port: 8080,
+        username: "alice",
+        password: "enc:v1:djEwdGVzdAAAAAAAAAAAAAAAAA==",
+      },
+    }],
+  });
+  assert.ok(csv.includes("http://alice@proxy.example.com:8080"));
+  assert.equal(csv.includes("enc:v1:"), false);
+
+  const imported = importVaultHostsFromText("csv", csv);
+  assert.deepEqual(imported.hosts[0]?.proxyConfig, {
+    type: "http",
+    host: "proxy.example.com",
+    port: 8080,
+    username: "alice",
+  });
+});
+
+test("CSV import warns and skips an unrecognized Proxy value", () => {
+  const csv = [
+    "Groups,Label,Tags,Notes,Hostname/IP,Protocol,Port,Username,Password,KeyPath,Passphrase,Proxy",
+    ',"Bad proxy",,,bad.example.com,ssh,22,root,,,,"not a proxy"',
+  ].join("\r\n");
+
+  const imported = importVaultHostsFromText("csv", csv);
+  assert.equal(imported.hosts.length, 1);
+  assert.equal(imported.hosts[0]?.proxyConfig, undefined);
+  assert.ok(imported.issues.some((issue) => issue.message.includes("row 2") && issue.message.includes("Proxy")));
+});
