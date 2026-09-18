@@ -103,6 +103,14 @@ function startPtyJob(ptyStream, command, options) {
   let probingShell = usesLiveShellProbe;
   let deliveringInput = false;
   let probeOutput = "";
+  // Retained result of the last complete _P line seen while probing. The
+  // rolling probeOutput buffer caps at 16,384 chars, so a lost _Q sentinel
+  // followed by a burst of terminal output can evict the _P line before
+  // finishProbeFallback()'s salvage reparse runs; keeping each parsed kind
+  // as it arrives preserves the probe's detection across such eviction.
+  // undefined = no _P line arrived yet (keep the pre-probe shell kind);
+  // null = a _P line arrived but its shell name is unrecognized.
+  let partialProbeKind;
 
   let output = "";
   let foundStart = false;
@@ -292,7 +300,11 @@ function startPtyJob(ptyStream, command, options) {
   // session (or vice versa) receives syntactically incompatible wrapper code.
   function finishProbeFallback() {
     probingShell = false;
-    const partialKind = parsePartialLiveShellProbeKind(stripAnsi(probeOutput), marker);
+    // Prefer the kind retained when each _P line first arrived; the buffer
+    // reparse is only a fallback for chunks that never reached onData.
+    const partialKind = partialProbeKind !== undefined
+      ? partialProbeKind
+      : parsePartialLiveShellProbeKind(stripAnsi(probeOutput), marker);
     if (partialKind) resolvedShellKind = partialKind;
     // When a hard wall-clock deadline is armed, waiting for resumed buffered
     // probe data may have consumed part of the budget. If the remaining
@@ -739,12 +751,19 @@ function startPtyJob(ptyStream, command, options) {
         finish("", -1, "Cancelled");
         return;
       }
-      const probe = parseLiveShellProbe(stripAnsi(probeOutput), marker);
+      const strippedProbeOutput = stripAnsi(probeOutput);
+      // Retain the shell kind from any complete _P line before the _Q
+      // sentinel arrives, so a later buffer eviction (lost _Q plus more
+      // than 16,384 chars of output) cannot lose the detection.
+      const partialKind = parsePartialLiveShellProbeKind(strippedProbeOutput, marker);
+      if (partialKind !== undefined) partialProbeKind = partialKind;
+      const probe = parseLiveShellProbe(strippedProbeOutput, marker);
       if (!probe) return;
       probingShell = false;
       clearProbeTimeout();
       clearProbeResumeTimeout();
       probeOutput = "";
+      partialProbeKind = undefined;
       if (probe.kind) resolvedShellKind = probe.kind;
       if (finished || cancelRequested) return;
       writeWrappedCommand();
