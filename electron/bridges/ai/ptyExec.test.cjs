@@ -1447,6 +1447,129 @@ test("echo suppression prime is delivered before the first typed input (#3384)",
   }
 });
 
+test("live shell probe deadline falls back to typing the wrapped command (#3445)", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const writes = [];
+  const pty = new EventEmitter();
+  pty.write = (data) => {
+    if (data === "\x03") return;
+    writes.push(String(data));
+  };
+  const job = startPtyJob(pty, "mkdir /tmp/silent_dir", {
+    shellKind: "posix",
+    probeLiveShell: true,
+    timeoutMs: 60000,
+  });
+  // Drain paced typing of the full probe (batched at 128 chars per 30ms);
+  // the probe deadline is only armed once delivery completes.
+  while (!writes.join("").includes(`${job.marker}_Q'\n`)) t.mock.timers.tick(30);
+  assert.ok(!writes.join("").includes("mkdir /tmp/silent_dir"));
+  // Advance past the 15s probe deadline without the probe's _Q sentinel.
+  t.mock.timers.tick(15000);
+  // The wrapped command must now be typed with the pre-probe shell kind.
+  // Keep draining pacing ticks so the full wrapper delivery completes.
+  let drain = 0;
+  while (!writes.join("").includes("mkdir /tmp/silent_dir") && drain++ < 200) {
+    t.mock.timers.tick(30);
+  }
+  assert.ok(drain <= 200, "wrapper delivery drained");
+  // A late probe reply must not re-trigger probing or a second injection.
+  pty.emit("data", `${job.marker}_P:fish\n${job.marker}_Q`);
+  t.mock.timers.tick(30);
+  assert.equal(
+    writes.join("").split("mkdir /tmp/silent_dir").length - 1,
+    1,
+    "wrapper typed exactly once",
+  );
+  pty.emit("data", Buffer.from(`${job.marker}_S\n${job.marker}_E:0\n`));
+  const result = await job.resultPromise;
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.exitCode, 0);
+});
+
+test("live shell probe salvages the _P kind from an oversized chunk when _Q is lost (#3447)", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const writes = [];
+  const pty = new EventEmitter();
+  pty.write = (data) => {
+    if (data === "\x03") return;
+    writes.push(String(data));
+  };
+  const job = startPtyJob(pty, "mkdir /tmp/silent_dir", {
+    shellKind: "posix",
+    probeLiveShell: true,
+    timeoutMs: 60000,
+  });
+  while (!writes.join("").includes(`${job.marker}_Q'\n`)) t.mock.timers.tick(30);
+  // A single data event carries the complete _P:fish line followed by more
+  // than the 16,384-char probe buffer cap of terminal output, with the _Q
+  // sentinel lost. Truncating before parsing would evict the _P line and
+  // the fallback would then type a POSIX wrapper into the nested fish shell.
+  pty.emit("data", `${job.marker}_P:fish\n${"x".repeat(20000)}`);
+  // Advance past the 15s probe deadline plus the resume grace window.
+  t.mock.timers.tick(15000);
+  let drain = 0;
+  while (!writes.join("").includes("mkdir /tmp/silent_dir") && drain++ < 400) {
+    t.mock.timers.tick(30);
+  }
+  assert.ok(drain <= 400, "wrapper delivery drained");
+  const typed = writes.join("");
+  assert.ok(typed.includes("set -l"), "fish wrapper typed for detected fish shell");
+  assert.ok(!typed.includes(`${job.marker}=0`), "POSIX wrapper not typed");
+  pty.emit("data", Buffer.from(`${job.marker}_S\n${job.marker}_E:0\n`));
+  const result = await job.resultPromise;
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.exitCode, 0);
+});
+
+test("live shell probe respects the remaining wall-clock budget", async (t) => {
+  const { buildPendingInputClearPrefix, buildWrappedCommand } = require("./ptyExecHelpers.cjs");
+  for (const timeoutMs of [1000, 1500]) {
+    t.mock.timers.reset();
+    t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+    const writes = [];
+    const pty = new EventEmitter();
+    pty.write = (data) => {
+      if (data === "\x03") return;
+      writes.push(String(data));
+    };
+    const job = startPtyJob(pty, "mkdir /tmp/silent_dir", {
+      shellKind: "posix",
+      probeLiveShell: true,
+      timeoutMs,
+      enforceWallTimeout: true,
+    });
+    const expectedWrapper = `${buildPendingInputClearPrefix("posix")}${buildWrappedCommand(
+      "mkdir /tmp/silent_dir",
+      "posix",
+      job.marker,
+      true,
+    )}`;
+    // Advance in pacing steps without a probe reply. The wrapped command must
+    // be COMPLETELY delivered before the wall deadline calls finish() —
+    // either the probe was skipped because the budget cannot fit both the
+    // probe's and the wrapper's paced delivery (1000ms), or the fallback was
+    // armed early enough to reserve the wrapper's delivery time (1500ms).
+    let drained = 0;
+    while (!writes.join("").includes(expectedWrapper) && drained++ < 200) {
+      t.mock.timers.tick(30);
+    }
+    assert.ok(drained < 200, `wrapper fully delivered before the wall deadline (${timeoutMs}ms)`);
+    assert.equal(
+      writes.join("").includes(`${job.marker}_Q`),
+      timeoutMs > 1000,
+      `probe typed only when the budget fits probe + wrapper (${timeoutMs}ms)`,
+    );
+    // Keep advancing past the wall deadline so the job resolves via the hard
+    // wall-clock timeout (the command never starts because the probe reply
+    // never arrives and no PTY echo follows).
+    t.mock.timers.tick(timeoutMs);
+    const result = await job.resultPromise;
+    assert.equal(result.ok, false, JSON.stringify(result));
+    assert.match(result.error, /timed out/i);
+  }
+});
+
 test("a throwing echo suppression prime callback still types the command (#3384)", () => {
   const writes = [];
   const pty = new EventEmitter();

@@ -1,8 +1,34 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
-const { buildLiveShellProbe, parseLiveShellProbe } = require('./liveShellProbe.cjs');
+const {
+  buildLiveShellProbe,
+  parseLiveShellProbe,
+  parsePartialLiveShellProbeKind,
+} = require('./liveShellProbe.cjs');
 const { startPtyJob } = require('./ptyExec.cjs');
+
+test('partial probe parse salvages _P shell names without the _Q sentinel', () => {
+  const marker = '__NCMCP_probe__';
+  assert.equal(parsePartialLiveShellProbeKind(`${marker}_P:/usr/bin/fish\n`, marker), 'fish');
+  assert.equal(parsePartialLiveShellProbeKind(`${marker}_P:sh\n`, marker), 'posix');
+  assert.equal(parsePartialLiveShellProbeKind(`${marker}_P:python\n${marker}_P:sh\n`, marker), 'posix');
+  assert.equal(parsePartialLiveShellProbeKind(`${marker}_P:fi`, marker), null);
+  assert.equal(parsePartialLiveShellProbeKind('unrelated output\n', marker), undefined);
+});
+
+test('probe deadline fallback keeps a partial _P shell result when _Q is lost', async () => {
+  const pty = new EventEmitter();
+  const writes = [];
+  pty.write = (data) => writes.push(data);
+  const job = startPtyJob(pty, 'printf success', { shellKind: 'posix', probeLiveShell: true, timeoutMs: 200 });
+  pty.emit('data', `${job.marker}_P:fish\n`);
+  await job.resultPromise;
+  assert.ok(writes.length >= 2, JSON.stringify(writes));
+  const wrapper = writes.slice(1).join('');
+  assert.ok(wrapper.includes('set -l'), wrapper);
+  assert.ok(!wrapper.includes("=0; printf"), wrapper);
+});
 
 test('live shell response excludes echoed commands, stale markers and partial lines', () => {
   const marker = '__NCMCP_probe__';
@@ -28,6 +54,73 @@ test('probe waits for complete reply before choosing the first wrapper', async (
   assert.ok(writes[1].includes('function __ncmcp_int'));
   pty.emit('data', `${job.marker}_S\r\nsuccess\r\n${job.marker}_E:0\r\n`);
   assert.equal((await job.resultPromise).exitCode, 0);
+});
+
+test('probe deadline fallback consumes a probe reply buffered in the paused flow', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const pty = new EventEmitter();
+  const writes = [];
+  pty.write = (data) => {
+    if (data === '\x03') return;
+    writes.push(String(data));
+  };
+  const job = startPtyJob(pty, 'printf resumed', {
+    shellKind: 'posix',
+    probeLiveShell: true,
+    timeoutMs: 60000,
+    onInterrupt: () => {
+      // Resuming the session-owned flow releases the complete probe reply
+      // that was buffered while the renderer flow was paused.
+      pty.emit('data', `${job.marker}_P:fish\n${job.marker}_Q`);
+    },
+  });
+  // Drain paced typing of the full probe; the probe deadline is only armed
+  // once delivery completes.
+  while (!writes.join('').includes(`${job.marker}_Q'\n`)) t.mock.timers.tick(30);
+  t.mock.timers.tick(20000);
+  // The resumed buffered reply must still reach the probe parser and select
+  // the live shell kind, so the fallback wrapper matches the nested fish.
+  const wrapper = writes.slice(1).join('');
+  assert.ok(wrapper.includes('set -l'), wrapper);
+  assert.ok(!wrapper.includes('=0; printf'), wrapper);
+  pty.emit('data', `${job.marker}_S\r\nresumed\r\n${job.marker}_E:0\r\n`);
+  const result = await job.resultPromise;
+  assert.equal(result.exitCode, 0, JSON.stringify(result));
+});
+
+test('probe deadline fallback resumes session flow control before typing the wrapper', async () => {
+  const pty = new EventEmitter();
+  const writes = [];
+  const events = [];
+  pty.write = (data) => writes.push(data);
+  const job = startPtyJob(pty, 'printf resumed', {
+    shellKind: 'posix',
+    probeLiveShell: true,
+    timeoutMs: 2000,
+    onInterrupt: () => events.push('interrupt'),
+  });
+  // The probe's _Q sentinel never arrives (renderer flow stays paused), so
+  // the probe deadline fires the fallback: it must resume the session-owned
+  // flow (clearSessionFlowState) before typing the wrapper, otherwise the
+  // buffered start/end markers cannot reach onData and the job times out
+  // even though the command executed remotely. The deadline is armed only
+  // after the paced probe delivery completes, then waits min(15s, 75% of
+  // the budget), so poll instead of sleeping a fixed interval.
+  for (let i = 0; i < 100 && !events.length; i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  assert.ok(events.includes('interrupt'), 'fallback must invoke onInterrupt');
+  // The fallback wrapper is typed with pacing; finishing the job cancels any
+  // remaining delivery, so wait for the full wrapper before completing it.
+  for (let i = 0; i < 100 && !writes.join('').includes('printf resumed'); i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  assert.ok(writes.join('').includes('printf resumed'),
+    'fallback must type the wrapper after resuming flow');
+  pty.emit('data', `${job.marker}_S\r\nresumed\r\n${job.marker}_E:0\r\n`);
+  const result = await job.resultPromise;
+  assert.equal(result.exitCode, 0, JSON.stringify(result));
+  assert.equal(events.filter((e) => e === 'interrupt').length, 1);
 });
 
 test('probe wrapper keeps the start marker separate when terminal echo is disabled', async () => {

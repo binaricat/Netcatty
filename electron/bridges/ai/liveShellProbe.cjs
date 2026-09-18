@@ -34,4 +34,21 @@ function parseLiveShellProbe(output, marker) {
   return { kind: null };
 }
 
-module.exports = { buildLiveShellProbe, parseLiveShellProbe };
+// Deadline fallback for a lost _Q sentinel: salvage the shell name from a
+// complete _P line so the fallback wrapper matches the shell the probe
+// actually detected instead of the pre-probe kind. Returns "fish", "posix",
+// or null for the last complete _P line, or undefined when no _P line
+// arrived (the caller then keeps the pre-probe shell kind).
+function parsePartialLiveShellProbeKind(output, marker) {
+  const lines = String(output).replace(/\r/g, "\n").split("\n");
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const line = lines[index];
+    if (!line.startsWith(`${marker}_P:`)) continue;
+    const name = line.slice(marker.length + 3).trim().split("/").pop().replace(/^-/, "");
+    return name === "fish" ? "fish"
+      : /^(?:ba|da|z|k|a)?sh$/.test(name) ? "posix" : null;
+  }
+  return undefined;
+}
+
+module.exports = { buildLiveShellProbe, parseLiveShellProbe, parsePartialLiveShellProbeKind };
