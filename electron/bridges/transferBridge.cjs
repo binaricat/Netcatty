@@ -736,18 +736,79 @@ async function hashReadable(readable, options = {}) {
 
 const EMPTY_SHA256_HEX = crypto.createHash("sha256").update("").digest("hex");
 
-// Local source reads go through asarSafeFs so real files named *.asar are not
-// mistaken for asar archives by Electron's fs wrapper (#3450).
-function hashLocalPrefix(filePath, bytes, options) {
-  if (!Number.isFinite(bytes) || bytes < 0) return Promise.resolve(null);
-  if (bytes === 0) return Promise.resolve(EMPTY_SHA256_HEX);
-  return openLocalReadStream(filePath, { start: 0, end: bytes - 1 })
-    .then((stream) => hashReadable(stream, options));
+function localStreamCancellationError() {
+  const error = new Error("Transfer cancelled");
+  error.code = "ABORT_ERR";
+  return error;
 }
 
-function hashLocalFile(filePath, options = {}) {
-  return openLocalReadStream(filePath)
-    .then((stream) => hashReadable(stream, options));
+// Local fingerprint reads go through asarSafeFs, whose fd open is asynchronous
+// and can stay pending for a long time on an unresponsive filesystem (NFS/SMB,
+// removable media). Race that open against the cancellation signal so aborting
+// the transfer rejects immediately instead of waiting for the open to settle;
+// a stream that only arrives after cancellation is destroyed (closing its fd)
+// instead of leaking. hashReadable() only covers the post-open stream lifetime.
+function raceLocalStreamOpenAgainstAbort(openPromise, signal) {
+  if (!signal) return openPromise;
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const destroyLateStream = (stream) => {
+      try { stream?.destroy?.(); } catch { /* ignore */ }
+    };
+    const onAbort = () => {
+      if (settled) return;
+      settled = true;
+      if (lateStream) destroyLateStream(lateStream);
+      reject(localStreamCancellationError());
+    };
+    let lateStream = null;
+    signal.addEventListener?.("abort", onAbort, { once: true });
+    openPromise.then(
+      (stream) => {
+        lateStream = stream;
+        if (settled) {
+          destroyLateStream(stream);
+          return;
+        }
+        if (signal.aborted) {
+          settled = true;
+          destroyLateStream(stream);
+          signal.removeEventListener?.("abort", onAbort);
+          reject(localStreamCancellationError());
+          return;
+        }
+        settled = true;
+        signal.removeEventListener?.("abort", onAbort);
+        resolve(stream);
+      },
+      (error) => {
+        if (settled) return;
+        settled = true;
+        signal.removeEventListener?.("abort", onAbort);
+        reject(error);
+      },
+    );
+  });
+}
+
+// Local source reads go through asarSafeFs so real files named *.asar are not
+// mistaken for asar archives by Electron's fs wrapper (#3450).
+async function hashLocalPrefix(filePath, bytes, options) {
+  if (!Number.isFinite(bytes) || bytes < 0) return Promise.resolve(null);
+  if (bytes === 0) return Promise.resolve(EMPTY_SHA256_HEX);
+  const stream = await raceLocalStreamOpenAgainstAbort(
+    openLocalReadStream(filePath, { start: 0, end: bytes - 1 }),
+    options?.signal,
+  );
+  return hashReadable(stream, options);
+}
+
+async function hashLocalFile(filePath, options = {}) {
+  const stream = await raceLocalStreamOpenAgainstAbort(
+    openLocalReadStream(filePath),
+    options.signal,
+  );
+  return hashReadable(stream, options);
 }
 
 async function hashRemotePrefixViaSshCommand(client, remotePath, bytes, options = {}) {

@@ -445,8 +445,16 @@ function createScpBackend(deps = {}) {
       // Attach a rejection handler immediately: if the local open below rejects
       // (or the remote stream closes while it is pending), finalAck would
       // otherwise reject before Promise.all starts awaiting, surfacing as a
-      // process-level unhandledRejection for an ordinary failed upload.
-      void finalAck.catch(() => {});
+      // process-level unhandledRejection for an ordinary failed upload. The
+      // rejection is also forwarded to the pending-open race below so a remote
+      // disconnect settles a stalled local open instead of leaving the upload
+      // waiting until the (possibly unresponsive) local filesystem answers.
+      let onFinalAckFailure = null;
+      void finalAck.catch((ackError) => {
+        const notify = onFinalAckFailure;
+        onFinalAckFailure = null;
+        if (typeof notify === "function") notify(ackError);
+      });
       let activeReadStream = null;
       let activeReadCompletion = Promise.resolve();
       // Open the local source asynchronously (asarSafeFs) so a slow or
@@ -456,6 +464,7 @@ function createScpBackend(deps = {}) {
       // NFS/SMB mount) cannot keep the transfer stuck after the user cancels:
       // the race rejects immediately, and a file descriptor that only arrives
       // after cancellation is destroyed (closing its fd) instead of leaking.
+      // The race also settles on an early finalAck rejection (remote close).
       const openedReadStream = await new Promise((resolve, reject) => {
         const openPromise = hasProvidedReadStream
           ? Promise.resolve().then(() => options.openReadStream())
@@ -465,6 +474,7 @@ function createScpBackend(deps = {}) {
         const settle = (fn, value) => {
           if (settled) return;
           settled = true;
+          onFinalAckFailure = null;
           if (poll) {
             clearInterval(poll);
             poll = null;
@@ -473,17 +483,24 @@ function createScpBackend(deps = {}) {
         };
         openPromise.then(
           (result) => {
+            const readStream = result?.stream || result;
             if (isCancelled()) {
-              const readStream = result?.stream || result;
               try { readStream?.destroy?.(); } catch { /* ignore */ }
               settle(reject, new Error("Transfer cancelled"));
+              return;
+            }
+            if (settled) {
+              // The race already settled (e.g. via remote ACK failure); the
+              // late-arriving descriptor must be destroyed instead of leaking.
+              try { readStream?.destroy?.(); } catch { /* ignore */ }
               return;
             }
             settle(resolve, result);
           },
           (err) => settle(reject, err),
         );
-        const cancel = () => settle(reject, new Error("Transfer cancelled"));
+        const cancel = (err) => settle(reject, err || new Error("Transfer cancelled"));
+        onFinalAckFailure = (ackError) => cancel(ackError);
         if (isCancelled()) {
           cancel();
           return;
