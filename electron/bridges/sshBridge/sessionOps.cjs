@@ -1218,8 +1218,10 @@ function createSessionOpsApi(ctx) {
         // nvidia-smi. Best-effort — empty on hosts without the tool, so the UI
         // simply hides the GPU chip. Utilization is averaged across GPUs and
         // VRAM is summed; the first GPU's name is kept for the tooltip.
+        // Bound GPU queries independently so a stuck driver cannot stop CPU/memory
+        // polling. Hosts without timeout also omit this optional metric.
         // macOS is skipped: powermetrics needs root, which stats must not.
-        `gpustat=$(nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total,name --format=csv,noheader,nounits 2>/dev/null | awk -F', *' '$1 ~ /^[0-9]+$/ {n++; u+=$1; if($2 ~ /^[0-9]+$/) mu+=$2; if($3 ~ /^[0-9]+$/) mt+=$3; if(name=="") name=$4} END{if(n>0) printf "%.0f %d %d %s", u/n, mu, mt, name}' 2>/dev/null || echo "")`,
+        `gpustat=$(gpucsv=$(timeout -s KILL 2 nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total,name --format=csv,noheader,nounits 2>/dev/null) && printf '%s\\n' "$gpucsv" | awk -F', *' '$1 ~ /^[0-9]+$/ {n++; u+=$1; if($2 ~ /^[0-9]+$/) mu+=$2; if($3 ~ /^[0-9]+$/) mt+=$3; if(name=="") name=$4} END{if(n>0) printf "%.0f %d %d %s", u/n, mu, mt, name}' 2>/dev/null || echo "")`,
         // Output all stats (using CPURAW and PERCORERAW instead of CPU and PERCORE)
         `echo "CPURAW:$cpuraw|CORES:$cores|PERCORERAW:$percoreraw|MEMINFO:$meminfo|PROCS:$procs|NET:$net|GPU:$gpustat|HOST:$hostname_value|OS:$osname|KERNEL:$kernel|UPTIME:$uptime|LOAD:$loadavg"`
       ].join('; ');

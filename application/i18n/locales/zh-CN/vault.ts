@@ -503,6 +503,7 @@ export const zhCNVaultMessages: Messages = {
   'terminal.statusbar.reconnect.tooltip': '重新连接当前会话',
   'terminal.serverStats.cpu': 'CPU 使用率',
   'terminal.serverStats.cpuCores': 'CPU 核心使用率',
+  'terminal.serverStats.gpu': 'GPU 使用率',
   'terminal.serverStats.memory': '内存使用',
   'terminal.serverStats.memoryDetails': '内存详情',
   'terminal.serverStats.memUsed': '已用',
