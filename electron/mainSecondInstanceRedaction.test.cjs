@@ -96,3 +96,11 @@ for (const useHandoff of [true, false]) {
     if (data) assert.equal(data.rawLaunchArgv.length, 0);
   });
 }
+
+test("legacy SecureCRT startup clears passwords after PuTTY-shaped metadata", () => {
+  const h = createHarness();
+  const argv = ["netcatty", "/SSH2", "/L", "-pw", "/TITLEBAR", "-pw", "/PASSWORD", "secret", "server.example.com"];
+  h.handle(null, argv, "/working-directory");
+  assert.deepEqual(h.queued, ["ssh://-pw:secret@server.example.com"]);
+  assert.equal(argv.includes("secret"), false);
+});

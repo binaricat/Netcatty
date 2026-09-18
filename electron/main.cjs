@@ -706,8 +706,9 @@ const pendingTelnetDeepLinkUrls = [...initialDeepLinkQueueItems.telnet];
 // redacted copy would make warm PuTTY-style launches authenticate with the
 // masked password.
 const rawLaunchArgvForHandoff = [...process.argv];
-redactPuttyCommandLinePasswords(process.argv);
+// SecureCRT operands may contain PuTTY switch names; scrub them first.
 redactSecureCrtCommandLinePasswords(process.argv);
+redactPuttyCommandLinePasswords(process.argv);
 const pendingOpenTerminalPaths = resolveOpenTerminalPathsFromArgs(process.argv);
 let flushingSshDeepLinks = false;
 let flushingTelnetDeepLinks = false;
@@ -1245,8 +1246,8 @@ if (!gotLock) {
     const deepLinkQueueItems = collectSshDeepLinkQueueItems(secondInstanceArgv, {
       includeSchemeUrls: sshDeepLinkEnabled,
     });
-    redactPuttyCommandLinePasswords(secondInstanceArgv);
     redactSecureCrtCommandLinePasswords(secondInstanceArgv);
+    redactPuttyCommandLinePasswords(secondInstanceArgv);
     if (rawLaunchArgv) {
       // Parsing and subsequent routing use the independent ordered copy.
       // Release both consumed transport buffers: Chromium may have moved the
