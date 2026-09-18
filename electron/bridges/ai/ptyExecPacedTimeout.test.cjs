@@ -41,6 +41,36 @@ for (const background of [true, false]) {
   });
 }
 
+test('paced delivery with enforceWallTimeout stays inside the absolute request deadline', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const pty = new EventEmitter();
+  const writes = [];
+  pty.write = (data) => writes.push(String(data));
+  // Long enough that paced delivery (128 chars / 30ms) exceeds the absolute
+  // deadline (timeoutMs + 5s transport grace) from job start.
+  const command = `echo ${'x'.repeat(40000)}`;
+  const job = startPtyJob(pty, command, {
+    shellKind: 'posix', probeLiveShell: true, timeoutMs: 500, enforceWallTimeout: true,
+  });
+  try {
+    const probeLength = 2 + buildLiveShellProbe(job.marker).length;
+    while (writes.join('').length < probeLength && !writes.includes('\x03')) t.mock.timers.tick(30);
+    pty.emit('data', `${job.marker}_P:sh\n${job.marker}_Q`);
+    const totalLength = probeLength + 2 + buildWrappedCommand(command, 'posix', job.marker, true).length;
+    // Delivery takes ~10s of mock time; the absolute deadline (~5.5s) must
+    // interrupt mid-pacing instead of letting delivery outlast the client.
+    while (!writes.includes('\x03') && writes.join('').length < totalLength) t.mock.timers.tick(30);
+    assert.ok(writes.includes('\x03'), 'paced delivery was not bounded by the absolute deadline');
+    assert.ok(writes.join('').length < totalLength, 'delivery continued past the absolute deadline');
+    const result = await job.resultPromise;
+    assert.equal(result.ok, false);
+    assert.match(result.error, /timed out/);
+  } finally {
+    pty.emit('close');
+    t.mock.timers.reset();
+  }
+});
+
 test('completed delivery still has a bounded wait for a missing probe reply', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const pty = new EventEmitter();

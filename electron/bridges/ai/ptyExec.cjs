@@ -44,6 +44,15 @@ const DEFAULT_PROBE_DEADLINE_MS = 15000;
 // clock at job start, so a probe deadline that ties or exceeds those
 // deadlines would never deliver the wrapped command (#3449).
 const PROBE_RECOVERY_RESERVE_MS = 3000;
+// Absolute deadline grace for paced input delivery. While input is
+// paced-delivered the wall clock is paused (delivery time is excluded from
+// the caller's execution budget), but the request itself must stay inside
+// the hard tool-call budget the client advertised: the RPC transport only
+// waits RPC_TIMEOUT_BUFFER_MS (5s, capabilities/rpcTimeouts.cjs) beyond the
+// operation timeout before giving up. An absolute deadline stays armed from
+// job start during pacing so delivery cannot outlast the client while the
+// server keeps typing the command and holds the session lock (#3449).
+const PACED_INPUT_DEADLINE_GRACE_MS = 5000;
 const promptRecoveryPendingPtys = new WeakSet();
 
 function stripJobMarkerLines(text, marker) {
@@ -234,6 +243,20 @@ function startPtyJob(ptyStream, command, options) {
       const timeoutSec = Math.round(timeoutMs / 1000);
       finish(foundStart ? output : preStartOutput, -1, `Command timed out (${timeoutSec}s)`);
     }, Math.max(0, remainingMs));
+  }
+
+  // Absolute pacing deadline: measured from job start (not from the paused
+  // wall clock) so paced delivery cannot extend the request beyond the
+  // advertised budget plus the RPC transport's grace buffer. Delivery time
+  // still stays excluded from the execution budget: once delivery completes,
+  // completeInputDelivery re-arms a separate budget from the paused-excluded
+  // remaining wall time (#3449).
+  function pacedDeadlineRemainingMs() {
+    return jobStartMs + timeoutMs + PACED_INPUT_DEADLINE_GRACE_MS - Date.now();
+  }
+  function armPacedInputDeadline() {
+    if (!enforceWallTimeout || maxBufferedChars > 0) return;
+    armWallTimeout(pacedDeadlineRemainingMs());
   }
 
   // Bounded startup deadline: we always need a hard limit on how long we
@@ -864,9 +887,12 @@ function startPtyJob(ptyStream, command, options) {
     clearTimeout(timeoutId);
     // Pause the wall clock while paced-typing so it cannot fire mid-delivery
     // with short enforceWallTimeout budgets (#3449); completeInputDelivery
-    // re-arms it with the preserved remaining wall time.
-    clearTimeout(wallTimeoutId);
+    // re-arms it with the preserved remaining wall time. The absolute request
+    // deadline stays armed during pacing so a long delivered command cannot
+    // outlast the client's transport buffer while the session lock is held
+    // (#3449). armWallTimeout clears any previously armed budget first.
     pauseWallClock();
+    armPacedInputDeadline();
     deliveringInput = true;
     const generation = inputWriteGeneration;
 
@@ -897,19 +923,23 @@ function startPtyJob(ptyStream, command, options) {
             // active — otherwise a blocked wrapper could retain the session
             // lock for a fresh full timeoutMs beyond the advertised limit
             // (#3449). Each drained wait re-pauses and the next write re-arms
-            // with the decreased remaining budget.
+            // with the decreased remaining budget. The wait is also capped by
+            // the absolute pacing deadline so delivery (including drain
+            // waits) cannot outlast the client's transport buffer (#3449).
             resumeWallClock();
-            armWallTimeout(remainingWallMs());
+            armWallTimeout(Math.min(remainingWallMs(), pacedDeadlineRemainingMs()));
             inputDrainListener = () => {
               inputDrainListener = null;
               clearTimeout(inputWriteTimer);
               pauseWallClock();
               // The wall clock is paused while delivery waits to resume, so
-              // cancel the armed timer: it holds a stale budget measured at
-              // drain time and could otherwise fire while pacing or the
-              // drain wait is still active. It is re-armed by the next
-              // backpressured write or by completeInputDelivery (#3449).
-              clearTimeout(wallTimeoutId);
+              // the previously armed execution budget (measured at drain
+              // time) would be stale; replace it with the fresh absolute
+              // pacing deadline so delivery stays bounded while pacing or
+              // the drain wait is active. The execution budget is re-armed
+              // by the next backpressured write or by completeInputDelivery
+              // (#3449).
+              armPacedInputDeadline();
               scheduleNext();
             };
             ptyStream.once("drain", inputDrainListener);
