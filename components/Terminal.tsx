@@ -1130,7 +1130,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     protocol: effectiveTerminalProtocol,
     terminalSettings,
     systemUnknown: resolvedAutocompleteOs === 'unknown',
-    isNetworkDevice: host.deviceType === 'network'
+    isNetworkDevice: hostRestrictsExtraSshChannels(host)
       || classifyDistroId(host.distro) === 'network-device',
   });
 
