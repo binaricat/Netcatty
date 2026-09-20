@@ -55,6 +55,8 @@ export type SftpNavigateOptions = {
   force?: boolean;
   tabId?: string;
   shouldApply?: () => boolean;
+  /** Restore the previous listing without showing a pane error. */
+  quiet?: boolean;
 };
 
 interface UseSftpPaneActionsResult {
@@ -416,8 +418,9 @@ export const useSftpPaneActions = ({
             files: previousFiles,
             selectedFiles: previousSelection,
             filter: getSftpFilterAfterPathChangeError(clearFilterForPathChange, previousFilter, prev.filter),
-            error:
-              err instanceof Error ? err.message : "Failed to list directory",
+            error: options?.quiet
+              ? previousError
+              : err instanceof Error ? err.message : "Failed to list directory",
             loading: false,
           };
         });

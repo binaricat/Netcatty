@@ -4,7 +4,6 @@ import assert from "node:assert/strict";
 import {
   createTerminalCwdTracker,
   invalidateTerminalCwdAfterCommand,
-  OSC7_PWD_PROBE_COMMAND,
   probeBackendSessionCwdAfterCommand,
   resolvePreferredTerminalCwd,
 } from "./sftpCwd";
@@ -304,10 +303,4 @@ test("active-shell cwd resolution trusts a live prompt cwd without extra exec", 
 
   assert.equal(cwd, "~");
   assert.equal(backendCalls, 0);
-});
-
-test("OSC7 pwd probe asks the interactive shell for PWD without extra exec", () => {
-  assert.match(OSC7_PWD_PROBE_COMMAND, /\$PWD/);
-  assert.match(OSC7_PWD_PROBE_COMMAND, /]7;file:\/\/localhost/);
-  assert.equal(OSC7_PWD_PROBE_COMMAND.endsWith("\r") || OSC7_PWD_PROBE_COMMAND.includes("\r") || OSC7_PWD_PROBE_COMMAND.charCodeAt(OSC7_PWD_PROBE_COMMAND.length - 1) === 13, true);
 });

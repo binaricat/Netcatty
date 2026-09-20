@@ -200,7 +200,8 @@ export function TerminalLayerTabBridge({ stableRef }: { stableRef: StableRef }) 
     )
     : undefined;
   const activeTerminalCwdTrusted = activeTerminalCwdSource === 'osc7'
-    || activeTerminalCwdSource === 'backend-strict';
+    || activeTerminalCwdSource === 'backend-strict'
+    || activeTerminalCwdSource === 'inferred';
   void terminalCwdVersion;
 
   const historySessionId = effectiveFocusedSessionId;

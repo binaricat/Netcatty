@@ -23,15 +23,13 @@ export { resolveTerminalCwdForSftp };
 export type TerminalCwdChangeMeta = { source?: RendererCwdSource };
 
 export const isLiveTerminalCwdSource = (source?: RendererCwdSource | null): boolean =>
-  source === "osc7" || source === "prompt";
+  source === "osc7" || source === "prompt" || source === "inferred";
 
 export const isUsablePosixPromptCwd = (cwd?: string | null): cwd is string => {
   if (typeof cwd !== "string" || cwd.trim().length === 0) return false;
   return cwd === "~" || cwd.startsWith("~/") || cwd.startsWith("/");
 };
 
-/** One-shot PTY probe: ask the interactive shell to emit OSC 7 for $PWD. */
-export const OSC7_PWD_PROBE_COMMAND = " printf '\\x1b]7;file://localhost%s\\x07' \"$PWD\"\r";
 
 const firstUsablePromptCwd = (...candidates: Array<string | null | undefined>): string | null => {
   for (const candidate of candidates) {
