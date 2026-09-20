@@ -118,20 +118,11 @@ import {
 import { classifyDistroId, shouldProbeSessionCwd } from '../domain/host';
 import {
   collectSidePanelPanes,
-  getFocusedSidePanelPane,
   sidePanelLayoutHasTool,
   type SidePanelLayout,
   type SidePanelSplitDirection,
 } from '../domain/sidePanelLayout';
-import {
-  createWorkspaceLayoutPreset,
-  rekeySidePanelLayout,
-  withoutUnavailableSidePanelTools,
-} from '../domain/workspaceLayoutPreset';
-import {
-  readWorkspaceLayoutPreset,
-  writeWorkspaceLayoutPreset,
-} from '../application/state/workspaceLayoutPresetStore';
+import { useWorkspaceLayoutPresetState } from '../application/state/useWorkspaceLayoutPresetState';
 import {
   isPaneMagnificationSelectionValid,
   resolvePaneMagnificationCandidate,
@@ -466,23 +457,14 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   const sftpFollowTerminalCwdRef = useRef(sftpFollowTerminalCwd);
   sftpFollowTerminalCwdRef.current = sftpFollowTerminalCwd;
 
+  const workspaceLayoutPresetState = useWorkspaceLayoutPresetState();
+
   const applyWorkspaceLayoutPresetForSession = useCallback((session: TerminalSession, tabId: string) => {
-    const preset = readWorkspaceLayoutPreset();
-    if (!preset) return false;
-
-    // Keep SFTP panes only when the session can actually serve them, mirroring
-    // the single-tool auto-open availability rules.
-    const proto = session.protocol ?? 'ssh';
-    const sftpAvailable = proto === 'local' || proto === 'ssh' || proto === 'mosh';
-    const usable = withoutUnavailableSidePanelTools(
-      preset.layout,
-      (tool) => tool !== 'sftp' || sftpAvailable,
-    );
-    if (!usable) return false;
-
-    // Fresh ids so several workspaces can run the same preset in parallel.
-    const layout = rekeySidePanelLayout(usable, () => crypto.randomUUID());
-    const focusedTool = getFocusedSidePanelPane(layout).tool;
+    // Preset persistence and resolution live in the application layer; the
+    // component only mounts the resolved panes into its UI state.
+    const resolved = workspaceLayoutPresetState.resolveDefaultLayoutForSession(session);
+    if (!resolved) return false;
+    const { layout, focusedTool, protocol: proto } = resolved;
 
     for (const pane of collectSidePanelPanes(layout.root)) {
       if (pane.tool === 'ai') {
@@ -534,18 +516,16 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       return next;
     });
     return true;
-  }, [setSidePanelLayouts, setSidePanelOpenTabs]);
+  }, [workspaceLayoutPresetState, setSidePanelLayouts, setSidePanelOpenTabs]);
 
   const handleSaveWorkspaceLayoutAsDefault = useCallback((layout: SidePanelLayout): boolean => {
-    const preset = createWorkspaceLayoutPreset(layout);
-    if (!preset) return false;
-    if (!writeWorkspaceLayoutPreset(preset)) {
+    if (!workspaceLayoutPresetState.saveWorkspaceLayoutAsDefault(layout)) {
       toast.error(t('terminal.layer.layoutSaveFailed'));
       return false;
     }
     toast.success(t('terminal.layer.layoutSavedAsDefault'));
     return true;
-  }, [t]);
+  }, [workspaceLayoutPresetState, t]);
 
   const handleStatusChange = useCallback((sessionId: string, status: TerminalSession['status']) => {
     onUpdateSessionStatus(sessionId, status);
