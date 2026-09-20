@@ -1154,6 +1154,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       visibleSftpHost,
       sessionHost,
       globalSftpFollowTerminalCwd: sftpFollowTerminalCwdRef.current,
+      restrictExtraSshChannels: hostRestrictsExtraSshChannels(sessionHost),
     })) return;
 
     const osc7SignalAtCommand = terminalOsc7SignalBySessionRef.current.get(sessionId) ?? 0;

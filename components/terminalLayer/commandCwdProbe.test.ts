@@ -50,3 +50,16 @@ test("visible SFTP host override can disable command cwd probing", () => {
     false,
   );
 });
+
+test("does not probe command cwd on single-channel SSH hosts", () => {
+  assert.equal(
+    shouldProbeCommandCwd({
+      restoreTerminalCwd: true,
+      visibleSftpHost: { sftpFollowTerminalCwd: true },
+      sessionHost: { sftpFollowTerminalCwd: true },
+      globalSftpFollowTerminalCwd: true,
+      restrictExtraSshChannels: true,
+    }),
+    false,
+  );
+});
