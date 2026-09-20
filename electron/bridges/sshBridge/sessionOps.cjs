@@ -328,6 +328,10 @@ function createSessionOpsApi(ctx) {
       if (!session || !session.conn) {
         return { success: false, error: 'Session not found or not connected' };
       }
+      log('getSessionPwd invoked', {
+        sessionId,
+        singleChannelSsh: !!session.singleChannelSsh,
+      });
       const bastionPwdBlock = extraExecUnsupportedError(session);
       if (bastionPwdBlock) return bastionPwdBlock;
       if (
