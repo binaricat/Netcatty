@@ -16,6 +16,13 @@ class TerminalCwdStore {
 
   getVersion = (): number => this.version;
 
+  subscribe = (listener: Listener): (() => void) => {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  };
+
   getCwd = (sessionId: string | null | undefined): string | null => {
     if (!sessionId) return null;
     return this.cwdBySession.get(sessionId) ?? null;
