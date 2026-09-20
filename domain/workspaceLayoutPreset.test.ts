@@ -112,6 +112,28 @@ test('sanitize rejects duplicate node ids', () => {
   );
 });
 
+test('sanitize rejects duplicate pane tools', () => {
+  assert.equal(
+    sanitizeWorkspaceLayoutPreset({
+      version: 1,
+      layout: {
+        root: {
+          id: 's',
+          type: 'split',
+          direction: 'horizontal',
+          children: [
+            { id: 'a', type: 'pane', tool: 'notes' },
+            { id: 'b', type: 'pane', tool: 'notes' },
+          ],
+          sizes: [0.5, 0.5],
+        },
+        focusedPaneId: 'a',
+      },
+    }),
+    null,
+  );
+});
+
 test('rekey keeps structure, sizes and focused ordinal with fresh ids', () => {
   const source = buildSplitLayout();
   const sourceFocusedTool = getFocusedSidePanelPane(source).tool;

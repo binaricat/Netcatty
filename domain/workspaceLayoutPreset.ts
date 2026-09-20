@@ -37,6 +37,7 @@ function isSidePanelTool(value: unknown): value is SidePanelTool {
 function sanitizeSidePanelLayoutNode(
   raw: unknown,
   seenIds: Set<string>,
+  seenTools: Set<SidePanelTool>,
 ): SidePanelLayoutNode | null {
   if (!raw || typeof raw !== 'object') return null;
   const node = raw as Record<string, unknown>;
@@ -44,7 +45,8 @@ function sanitizeSidePanelLayoutNode(
   seenIds.add(node.id);
 
   if (node.type === 'pane') {
-    if (!isSidePanelTool(node.tool)) return null;
+    if (!isSidePanelTool(node.tool) || seenTools.has(node.tool)) return null;
+    seenTools.add(node.tool);
     return { id: node.id, type: 'pane', tool: node.tool };
   }
 
@@ -56,7 +58,7 @@ function sanitizeSidePanelLayoutNode(
   const children: SidePanelLayoutNode[] = [];
   const sizes: number[] = [];
   for (let index = 0; index < node.children.length; index += 1) {
-    const child = sanitizeSidePanelLayoutNode(node.children[index], seenIds);
+    const child = sanitizeSidePanelLayoutNode(node.children[index], seenIds, seenTools);
     if (!child) return null;
     const size = node.sizes[index];
     if (typeof size !== 'number' || !Number.isFinite(size) || size <= 0) return null;
@@ -75,7 +77,12 @@ export function sanitizeWorkspaceLayoutPreset(raw: unknown): WorkspaceLayoutPres
   const layoutRaw = value.layout;
   if (!layoutRaw || typeof layoutRaw !== 'object') return null;
   const seenIds = new Set<string>();
-  const root = sanitizeSidePanelLayoutNode((layoutRaw as Record<string, unknown>).root, seenIds);
+  const seenTools = new Set<SidePanelTool>();
+  const root = sanitizeSidePanelLayoutNode(
+    (layoutRaw as Record<string, unknown>).root,
+    seenIds,
+    seenTools,
+  );
   if (!root) return null;
 
   const panes = collectSidePanelPanes(root);
