@@ -106,6 +106,26 @@ test("network devices hide processes until OS probe confirms a real target", () 
   );
 });
 
+
+test("system overview stats skip single-channel SSH hosts", () => {
+  assert.equal(
+    shouldCollectServerStats(
+      {
+        id: "host-1",
+        label: "Bastion",
+        hostname: "bastion.local",
+        username: "user",
+        tags: [],
+        os: "linux",
+        singleChannelSsh: true,
+      },
+      undefined,
+      null,
+    ),
+    false,
+  );
+});
+
 test("system overview stats skip network devices even when a Linux icon was selected", () => {
   assert.equal(
     shouldCollectServerStats(
