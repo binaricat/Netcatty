@@ -457,12 +457,17 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   const sftpFollowTerminalCwdRef = useRef(sftpFollowTerminalCwd);
   sftpFollowTerminalCwdRef.current = sftpFollowTerminalCwd;
 
-  const workspaceLayoutPresetState = useWorkspaceLayoutPresetState();
+  // Destructure the stable hook callbacks: the hook returns a fresh object
+  // each render, and depending on that object would recreate the preset
+  // callbacks (and in turn handleStatusChange) on unrelated state updates,
+  // defeating the terminal pane memoization.
+  const { resolveDefaultLayoutForSession, saveWorkspaceLayoutAsDefault: persistWorkspaceLayoutAsDefault } =
+    useWorkspaceLayoutPresetState();
 
   const applyWorkspaceLayoutPresetForSession = useCallback((session: TerminalSession, tabId: string) => {
     // Preset persistence and resolution live in the application layer; the
     // component only mounts the resolved panes into its UI state.
-    const resolved = workspaceLayoutPresetState.resolveDefaultLayoutForSession(session);
+    const resolved = resolveDefaultLayoutForSession(session);
     if (!resolved) return false;
     const { layout, focusedTool, protocol: proto } = resolved;
 
@@ -529,16 +534,16 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       return next;
     });
     return true;
-  }, [workspaceLayoutPresetState, setSidePanelLayouts, setSidePanelOpenTabs]);
+  }, [resolveDefaultLayoutForSession, setSidePanelLayouts, setSidePanelOpenTabs]);
 
   const handleSaveWorkspaceLayoutAsDefault = useCallback((layout: SidePanelLayout): boolean => {
-    if (!workspaceLayoutPresetState.saveWorkspaceLayoutAsDefault(layout)) {
+    if (!persistWorkspaceLayoutAsDefault(layout)) {
       toast.error(t('terminal.layer.layoutSaveFailed'));
       return false;
     }
     toast.success(t('terminal.layer.layoutSavedAsDefault'));
     return true;
-  }, [workspaceLayoutPresetState, t]);
+  }, [persistWorkspaceLayoutAsDefault, t]);
 
   const handleStatusChange = useCallback((sessionId: string, status: TerminalSession['status']) => {
     onUpdateSessionStatus(sessionId, status);
