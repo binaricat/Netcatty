@@ -14,6 +14,12 @@ test('live shell response excludes echoed commands, stale markers and partial li
   assert.deepEqual(parseLiveShellProbe(`${marker}_P:\n${marker}_Q`, marker), { kind: null });
 });
 
+test('live shell probe handles secondary prompts in interactive PTY', () => {
+  const marker = '__NCMCP_probe__';
+  assert.deepEqual(parseLiveShellProbe(`> ${marker}_P:bash\r\n> ${marker}_Q`, marker), { kind: 'posix' });
+  assert.deepEqual(parseLiveShellProbe(`> ${marker}_P:/usr/bin/fish\n> ${marker}_Q`, marker), { kind: 'fish' });
+});
+
 test('probe waits for complete reply before choosing the first wrapper', async () => {
   const pty = new EventEmitter();
   const writes = [];

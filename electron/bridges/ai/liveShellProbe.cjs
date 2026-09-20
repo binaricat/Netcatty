@@ -14,18 +14,19 @@ function buildLiveShellProbe(marker) {
   const { dispatcher } = bashHistoryScratchNames(marker);
   const clear = `[ -z "\${${dispatcher}-}" ]||$${dispatcher} unset ${dispatcher}`;
   const fallback = `[ "\${${dispatcher}-}" = command ]||{ ${cleanup}; };${clear}`;
-  // Start display suppression in the PTY before any continuation is read,
-  // independently of PS2 and echo mode. Keep every later physical line short.
-  return ` true ${marker}; printf '\\n%s\\n' '${marker}_I'\n : '${marker}'; command sh -c '${script}' 2>/dev/null; \\\n: '${marker}'; \\command eval '${cleanup}' 2>/dev/null || true; \\\n: '${marker}'; \\eval '${fallback}' 2>/dev/null || true; \\\n: '${marker}'; \\command eval '${clear}' 2>/dev/null || true; printf '%s' '${marker}_Q'\n`;
-
+  // Keep probe on a single logical line to avoid triggering Bash PS2 ('> ')
+  // continuation prompts in interactive PTYs, which can break prefix matching.
+  return ` true ${marker}; printf '\\n%s\\n' '${marker}_I'; command sh -c '${script}' 2>/dev/null; : '${marker}'; \\command eval '${cleanup}' 2>/dev/null || true; : '${marker}'; \\eval '${fallback}' 2>/dev/null || true; : '${marker}'; \\command eval '${clear}' 2>/dev/null || true; printf '%s' '${marker}_Q'\n`;
 }
 
 function parseLiveShellProbe(output, marker) {
   const lines = String(output).replace(/\r/g, "\n").split("\n");
-  if (!lines.some((line) => line.startsWith(`${marker}_Q`))) return null;
+  const normalize = (line) => line.replace(/^[>#$%\s]+/, "");
+  if (!lines.some((line) => normalize(line).startsWith(`${marker}_Q`))) return null;
   for (const line of lines) {
-    if (!line.startsWith(`${marker}_P:`)) continue;
-    const name = line.slice(marker.length + 3).trim().split("/").pop().replace(/^-/, "");
+    const clean = normalize(line);
+    if (!clean.startsWith(`${marker}_P:`)) continue;
+    const name = clean.slice(marker.length + 3).trim().split("/").pop().replace(/^-/, "");
     return {
       kind: name === "fish" ? "fish"
         : /^(?:ba|da|z|k|a)?sh$/.test(name) ? "posix" : null,
