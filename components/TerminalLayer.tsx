@@ -110,11 +110,14 @@ import {
 } from '../domain/terminalSidePanelAutoOpen';
 import { shouldProbeCommandCwd } from './terminalLayer/commandCwdProbe';
 import {
+  isUsablePosixPromptCwd,
+  OSC7_PWD_PROBE_COMMAND,
   resolvePreferredTerminalCwd,
   scheduleBackendCwdProbeAfterCommand,
   type RendererCwdSource,
   type TerminalCwdChangeMeta,
 } from './terminal/sftpCwd';
+import { isTerminalReadyForCommandInjection } from './terminal/runtime/terminalCommandInjectionReadyRegistry';
 import { classifyDistroId, hostRestrictsExtraSshChannels, shouldProbeSessionCwd } from '../domain/host';
 import {
   collectSidePanelPanes,
@@ -1387,8 +1390,8 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     const sessionId = getActiveTerminalSessionId();
     const host = sessionId ? sessionHostsMapRef.current.get(sessionId) : undefined;
     const skipBackendPwd = hostRestrictsExtraSshChannels(host);
-    const promptCwd = skipBackendPwd ? terminalCwdStore.readLiveCwd(sessionId) : null;
-    return resolvePreferredTerminalCwd({
+    const promptCwd = terminalCwdStore.readLiveCwd(sessionId);
+    const cwd = await resolvePreferredTerminalCwd({
       rendererCwd: promptCwd
         ?? (sessionId ? terminalRendererCwdBySessionRef.current.get(sessionId) : undefined),
       rendererCwdSource: promptCwd
@@ -1402,6 +1405,17 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       allowRendererFallback: options?.allowRendererFallback,
       requireActiveShellCwd: options?.requireActiveShellCwd,
     });
+    if (isUsablePosixPromptCwd(cwd) && cwd.startsWith("/")) return cwd;
+    if (!sessionId) return cwd;
+    if (!isTerminalReadyForCommandInjection(sessionId)) return cwd;
+    const minVersion = terminalCwdStore.getVersion();
+    const probed = terminalCwdStore.waitForCwd(sessionId, {
+      timeoutMs: 1500,
+      minVersion,
+      accept: (next, source) => source === "osc7" && next.startsWith("/"),
+    });
+    terminalBackend.writeToSession(sessionId, OSC7_PWD_PROBE_COMMAND, { automated: true });
+    return (await probed) ?? cwd;
   }, [getActiveTerminalSessionId, terminalBackend]);
 
   const refocusTerminalSession = useCallback((sessionId?: string | null) => {
