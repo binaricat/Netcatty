@@ -85,6 +85,60 @@ test("first-open follow uses a fresh terminal cwd instead of the cached home pat
   await act(async () => renderer?.unmount());
 });
 
+test("first-open follow stays put when the terminal cwd is still an unresolved ~", async () => {
+  const navigatedPaths: string[] = [];
+  const connection = {
+    id: "conn-1",
+    hostId: "host-1",
+    currentPath: "/root",
+    homeDir: "/root",
+    status: "connected",
+    isLocal: false,
+  };
+  const sftpRef = {
+    current: {
+      leftPane: { connection, loading: false },
+      navigateTo: async (_side: "left", path: string) => {
+        navigatedPaths.push(path);
+        connection.currentPath = path;
+        return "reached" as const;
+      },
+    },
+  };
+  let renderer: ReactTestRenderer | null = null;
+
+  function Probe() {
+    useSftpFollowTerminalCwd({
+      activeSessionId: "session-1",
+      activeTerminalCwd: "~",
+      canFollowTerminalCwd: true,
+      connectionId: connection.id,
+      connectionIsLocal: connection.isLocal,
+      connectionLoading: false,
+      connectionPath: connection.currentPath,
+      connectionStatus: connection.status,
+      effectiveFollowTerminalCwd: true,
+      followTerminalCwdHost: host,
+      hasActiveWork: false,
+      isVisible: true,
+      ownerPanelOpen: true,
+      onGetTerminalCwd: async () => "~",
+      onPendingFollowOverride: () => {},
+      sftpRef,
+    });
+    return null;
+  }
+
+  await act(async () => {
+    renderer = create(React.createElement(Probe));
+    await new Promise((resolve) => setImmediate(resolve));
+  });
+
+  assert.deepEqual(navigatedPaths, []);
+  assert.equal(connection.currentPath, "/root");
+  await act(async () => renderer?.unmount());
+});
+
 test("first-open follow does not use a stale cached cwd while the fresh probe is pending", async () => {
   let resolveCwd: ((cwd: string) => void) | null = null;
   const navigatedPaths: string[] = [];

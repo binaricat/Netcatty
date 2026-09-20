@@ -270,6 +270,10 @@ export const shouldFollowTerminalCwdNavigate = ({
 };
 
 /** Best-effort home from an already-open SFTP path when echo ~ is unavailable. */
+export const isSftpFollowTargetPath = (path: string): boolean => (
+  path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(path)
+);
+
 export const guessUnixHomeDirFromPath = (path?: string | null): string | null => {
   if (!path || !path.startsWith("/")) return null;
   if (path === "/root" || path.startsWith("/root/")) return "/root";
