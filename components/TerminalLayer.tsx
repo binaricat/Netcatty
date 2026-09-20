@@ -478,6 +478,16 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       } else if (pane.tool === 'notes') {
         setNotesMountedTabIds((prev) => addMountedSidePanelTabId(prev, tabId));
       } else if (pane.tool === 'sftp') {
+        // Mirror the normal SFTP open path: a previously retained panel (kept
+        // mounted while transfers or external edits finished after close) must
+        // not keep suppressing command-triggered refreshes once the preset
+        // reopens SFTP for this tab.
+        const cleanupTimer = sftpRetainedCleanupTimersRef.current.get(tabId);
+        if (cleanupTimer !== undefined) {
+          window.clearTimeout(cleanupTimer);
+          sftpRetainedCleanupTimersRef.current.delete(tabId);
+        }
+        sftpRetainedAfterCloseTabIdsRef.current.delete(tabId);
         sftpPaneClosedTabIdsRef.current.delete(tabId);
         const host = hostsRef.current.find(h => h.id === session.hostId);
         const hostWithOverrides: Host = host
