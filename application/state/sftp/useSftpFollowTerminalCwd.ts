@@ -16,6 +16,7 @@ import {
   shouldReleaseInitialFollowSyncAttempt,
   shouldResetInitialFollowTerminalCwdSync,
   type SftpFollowTerminalCwdBlock,
+  resolveTerminalCwdForSftp,
 } from "../../../domain/sftpFollowTerminalCwd";
 import type { Host } from "../../../types";
 import type { SftpNavigateOptions, SftpNavigateResult } from "./useSftpPaneActions";
@@ -23,6 +24,7 @@ import type { SftpNavigateOptions, SftpNavigateResult } from "./useSftpPaneActio
 type FollowConnection = {
   id: string;
   currentPath?: string | null;
+  homeDir?: string | null;
   status: string;
   isLocal?: boolean;
 };
@@ -257,7 +259,12 @@ export function useSftpFollowTerminalCwd({
     });
     if (!cwd) return;
     if (!shouldApply()) return;
-    const navigateResult = await sftpRef.current.navigateTo("left", cwd, { shouldApply });
+    const targetPath = resolveTerminalCwdForSftp(
+      cwd,
+      sftpRef.current.leftPane.connection?.homeDir,
+    );
+    if (targetPath === "~" || targetPath.startsWith("~/")) return;
+    const navigateResult = await sftpRef.current.navigateTo("left", targetPath, { shouldApply });
     if (navigateResult !== "reached" || !shouldApply()) return;
     blockedFollowRef.current = null;
     const connection = sftpRef.current.leftPane.connection;

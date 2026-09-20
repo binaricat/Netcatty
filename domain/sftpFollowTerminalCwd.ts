@@ -268,3 +268,15 @@ export const shouldFollowTerminalCwdNavigate = ({
   if (!currentPath || currentPath === terminalCwd) return false;
   return true;
 };
+
+/** Expand a prompt `~` so SFTP navigate does not turn it into `/~`. */
+export const resolveTerminalCwdForSftp = (
+  cwd: string,
+  homeDir?: string | null,
+): string => {
+  if (cwd === "~") return homeDir && homeDir.length > 0 ? homeDir : cwd;
+  if (cwd.startsWith("~/") && homeDir && homeDir.length > 0) {
+    return `${homeDir.replace(/\/+$/, "")}/${cwd.slice(2)}`;
+  }
+  return cwd;
+};

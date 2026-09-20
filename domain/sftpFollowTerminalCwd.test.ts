@@ -12,6 +12,7 @@ import {
   shouldLatchInitialFollowInterruption,
   shouldReleaseInitialFollowSyncAttempt,
   shouldResetInitialFollowTerminalCwdSync,
+  resolveTerminalCwdForSftp,
 } from "./sftpFollowTerminalCwd";
 
 const base = {
@@ -548,4 +549,11 @@ test("first-open probe is latched as interrupted on a hide with the owner panel 
     shouldLatchInitialFollowInterruption({ isVisible: false, ownerPanelOpen: false }),
     false,
   );
+});
+
+test("resolveTerminalCwdForSftp expands a prompt home shortcut", () => {
+  assert.equal(resolveTerminalCwdForSftp("~", "/root"), "/root");
+  assert.equal(resolveTerminalCwdForSftp("~/codes", "/root/"), "/root/codes");
+  assert.equal(resolveTerminalCwdForSftp("/var/log", "/root"), "/var/log");
+  assert.equal(resolveTerminalCwdForSftp("~", null), "~");
 });
