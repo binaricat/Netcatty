@@ -12,7 +12,6 @@ import {
   resolveAutocompleteCursorColumn,
   resolveAutocompletePopupAnchorInViewport,
   resolvePreservedSuggestionIndex,
-  extractPosixCwdFromPrompt,
   type PopupPlacementInput,
 } from "./autocomplete/terminalAutocompleteLayout.ts";
 
@@ -874,9 +873,4 @@ test("nextAutocompletePopupAnchorViewport is a no-op when the stored viewport is
     ),
     null,
   );
-});
-
-test("extractPosixCwdFromPrompt reads a bash [user@host ~] prompt", () => {
-  assert.equal(extractPosixCwdFromPrompt("[root@zncxb-codebase ~]# "), "~");
-  assert.equal(extractPosixCwdFromPrompt("alice@box:/var/log$ "), "/var/log");
 });

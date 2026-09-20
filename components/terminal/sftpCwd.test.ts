@@ -286,11 +286,11 @@ test("probeBackendSessionCwdAfterCommand still probes when cwd path is unchanged
   assert.equal(cwd, "/srv/app");
 });
 
-test("active-shell cwd resolution trusts a live prompt cwd without extra exec", async () => {
+test("active-shell cwd resolution trusts an inferred cwd without extra exec", async () => {
   let backendCalls = 0;
   const cwd = await resolvePreferredTerminalCwd({
-    rendererCwd: "~",
-    rendererCwdSource: "prompt",
+    rendererCwd: "/data/docker",
+    rendererCwdSource: "inferred",
     sessionId: "session-1",
     preferFreshBackend: true,
     allowRendererFallback: false,
@@ -301,6 +301,6 @@ test("active-shell cwd resolution trusts a live prompt cwd without extra exec", 
     },
   });
 
-  assert.equal(cwd, "~");
+  assert.equal(cwd, "/data/docker");
   assert.equal(backendCalls, 0);
 });

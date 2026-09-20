@@ -57,7 +57,7 @@ function chooseAutocompleteCwdWithSource(
   return { cwd: fallbackCwd, source: fallbackCwd ? "fallback" : "none" };
 }
 
-export function extractPosixCwdFromPrompt(promptText: string): string | undefined {
+function extractPosixCwdFromPrompt(promptText: string): string | undefined {
   const trimmed = promptText.trimEnd().replace(/[#$%>]\s*$/, "");
   if (!trimmed) return undefined;
 

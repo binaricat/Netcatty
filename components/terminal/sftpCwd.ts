@@ -1,8 +1,4 @@
-import type { Terminal as XTerm } from "@xterm/xterm";
 import type { TerminalCwdSource } from "../../application/state/terminalCwdStore";
-import { resolveTerminalCwdForSftp } from "../../domain/sftpFollowTerminalCwd";
-import { extractPosixCwdFromPrompt } from "./autocomplete/terminalAutocompleteLayout";
-import { getAlignedPrompt } from "./autocomplete/promptDetector";
 
 type SessionPwdResult = {
   success: boolean;
@@ -19,40 +15,10 @@ type SessionPwdOptions = {
 };
 
 export type RendererCwdSource = TerminalCwdSource;
-export { resolveTerminalCwdForSftp };
 export type TerminalCwdChangeMeta = { source?: RendererCwdSource };
 
-export const isLiveTerminalCwdSource = (source?: RendererCwdSource | null): boolean =>
-  source === "osc7" || source === "prompt" || source === "inferred";
-
-export const isUsablePosixPromptCwd = (cwd?: string | null): cwd is string => {
-  if (typeof cwd !== "string" || cwd.trim().length === 0) return false;
-  return cwd === "~" || cwd.startsWith("~/") || cwd.startsWith("/");
-};
-
-
-const firstUsablePromptCwd = (...candidates: Array<string | null | undefined>): string | null => {
-  for (const candidate of candidates) {
-    if (isUsablePosixPromptCwd(candidate)) return candidate;
-  }
-  return null;
-};
-
-const readCursorLineText = (term: XTerm): string => {
-  const buffer = term.buffer.active;
-  const line = buffer.getLine(buffer.cursorY + buffer.baseY);
-  return line ? line.translateToString(true).trimEnd() : "";
-};
-
-/** Read cwd from the visible shell prompt. Used when extra exec pwd is unsafe. */
-export const readPromptCwdFromXterm = (term?: XTerm | null): string | null => {
-  if (!term) return null;
-  const { prompt } = getAlignedPrompt(term, "", true);
-  return firstUsablePromptCwd(
-    extractPosixCwdFromPrompt(prompt.promptText || ""),
-    extractPosixCwdFromPrompt(readCursorLineText(term)),
-  );
-};
+const isLiveTerminalCwdSource = (source?: RendererCwdSource | null): boolean =>
+  source === "osc7" || source === "inferred";
 
 type ResolvePreferredTerminalCwdOptions = {
   rendererCwd?: string | null;
