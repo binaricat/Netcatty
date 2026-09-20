@@ -820,3 +820,20 @@ test("cwd probe couples login-shell fallback to home fallback when unset", async
   assert.match(command, /ALLOW_HOME_FALLBACK=0/);
   assert.match(command, /ALLOW_LOGIN_FALLBACK=0/);
 });
+
+test("getSessionPwd skips extra exec when singleChannelSsh is set", async () => {
+  let execCalls = 0;
+  const api = makeApi({
+    singleChannelSsh: true, remoteSshVersion: "SSH-2.0-CLOUDBILITY-4.14",
+    stream: {},
+    conn: {
+      exec() { execCalls += 1; },
+    },
+  });
+
+  const result = await api.getSessionPwd(null, { sessionId: "session-1" });
+
+  assert.equal(result.success, false);
+  assert.match(result.error, /extra exec channels/);
+  assert.equal(execCalls, 0);
+});

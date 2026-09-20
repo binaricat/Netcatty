@@ -14,6 +14,7 @@ import {
   buildSystemManagerTabs,
   shouldCollectServerStats,
 } from '../../domain/systemManager/systemTarget';
+import { hostRestrictsExtraSshChannels } from '../../domain/host';
 import { partitionToolbarItems } from '../../domain/toolbarItemLayout';
 import { STORAGE_KEY_SYSTEM_MANAGER_TAB_LAYOUT } from '../../infrastructure/config/storageKeys';
 import type { Snippet, TerminalSession } from '../../types';
@@ -80,10 +81,17 @@ export const SystemManagerSidePanel = memo(function SystemManagerSidePanel({
   const backend = useSystemManagerBackend();
   const sessionId = session?.id ?? null;
   const isConnected = session?.status === 'connected';
+  const systemManagerSupported = !hostRestrictsExtraSshChannels(sessionHost);
 
   const capabilitiesTtlMs = terminalSettings.systemManagerProcessRefreshInterval * 1000;
 
-  const { capabilities, refreshCapabilities } = useSessionCapabilities(sessionId, isConnected, backend, isVisible, capabilitiesTtlMs);
+  const { capabilities, refreshCapabilities } = useSessionCapabilities(
+    sessionId,
+    isConnected,
+    backend,
+    isVisible && systemManagerSupported,
+    capabilitiesTtlMs,
+  );
 
   const availableTabs = useMemo(
     () => buildSystemManagerTabs(sessionHost, capabilities, session),
@@ -352,6 +360,15 @@ export const SystemManagerSidePanel = memo(function SystemManagerSidePanel({
       <SystemPanelShell section="system-manager-panel">
         {workspaceHostHeader}
         <SystemPanelEmpty icon={Activity} message={t('systemManager.notConnected')} />
+      </SystemPanelShell>
+    );
+  }
+
+  if (!systemManagerSupported) {
+    return (
+      <SystemPanelShell section="system-manager-panel">
+        {workspaceHostHeader}
+        <SystemPanelEmpty icon={Activity} message={t('systemManager.unsupportedRemote')} />
       </SystemPanelShell>
     );
   }

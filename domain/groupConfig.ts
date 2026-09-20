@@ -145,7 +145,7 @@ export function resolveGroupDefaults(
 
 const INHERITABLE_KEYS: (keyof GroupConfig)[] = [
   'username', 'password', 'savePassword', 'authMethod', 'identityId', 'identityFileId', 'identityFilePaths',
-  'port', 'protocol', 'deviceType', 'agentForwarding', 'proxyProfileId', 'proxyConfig', 'hostChain', 'startupCommand', 'startupCommandRunMode',
+  'port', 'protocol', 'deviceType', 'singleChannelSsh', 'agentForwarding', 'proxyProfileId', 'proxyConfig', 'hostChain', 'startupCommand', 'startupCommandRunMode',
   'legacyAlgorithms', 'skipEcdsaHostKey', 'algorithms',
   'environmentVariables', 'charset', 'moshEnabled', 'moshServerPath',
   'etEnabled', 'etPort',

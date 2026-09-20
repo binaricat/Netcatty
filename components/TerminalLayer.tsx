@@ -117,7 +117,7 @@ import {
   type RendererCwdSource,
   type TerminalCwdChangeMeta,
 } from './terminal/sftpCwd';
-import { classifyDistroId, shouldProbeSessionCwd } from '../domain/host';
+import { classifyDistroId, hostRestrictsExtraSshChannels, shouldProbeSessionCwd } from '../domain/host';
 import {
   collectSidePanelPanes,
   sidePanelLayoutHasTool,
@@ -1345,6 +1345,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
         return shouldProbeSessionCwd({
           isNetworkDevice,
           remoteSshVersion: info?.remoteSshVersion,
+          restrictExtraSshChannels: hostRestrictsExtraSshChannels(host),
         });
       },
       onProbedCwd: (cwd) => {

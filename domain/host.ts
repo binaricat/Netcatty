@@ -269,12 +269,18 @@ export const shouldSuggestNetworkDeviceMode = (opts: {
   return classifyDistroId(opts.detectedDistro) === 'network-device';
 };
 
+/** True when extra SSH exec/SFTP channels on the terminal transport are unsafe. */
+export const hostRestrictsExtraSshChannels = (
+  host?: Pick<Host, 'singleChannelSsh' | 'deviceType'> | null,
+): boolean => host?.singleChannelSsh === true || host?.deviceType === 'network';
+
 /**
  * Decide whether it is safe to run the post-connect `pwd` probe that
  * discovers the session's working directory. The probe opens an extra exec
  * channel running a POSIX-shell script; strict network-device CLIs such as
  * Huawei VRP respond by closing the whole SSH session (#1043), so it must be
- * skipped for them.
+ * skipped for them. Hosts with `singleChannelSsh` (bastion / PAM) have the
+ * same constraint.
  *
  * `isNetworkDevice` covers hosts we already classified (a reconnect, or an
  * explicit `deviceType: 'network'`). On a brand-new host that field is not
@@ -284,8 +290,11 @@ export const shouldSuggestNetworkDeviceMode = (opts: {
 export const shouldProbeSessionCwd = (opts: {
   isNetworkDevice: boolean;
   remoteSshVersion?: string;
+  restrictExtraSshChannels?: boolean;
 }): boolean =>
-  !opts.isNetworkDevice && !detectVendorFromSshVersion(opts.remoteSshVersion);
+  !opts.isNetworkDevice
+  && !opts.restrictExtraSshChannels
+  && !detectVendorFromSshVersion(opts.remoteSshVersion);
 
 export const getEffectiveHostDistro = (
   host?: Pick<Host, 'distro' | 'manualDistro' | 'distroMode'> | null,

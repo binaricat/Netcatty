@@ -47,6 +47,35 @@ test("home discovery rejects non-listable root so candidate probing can run", as
   assert.match(result.error || "", /Could not determine home directory/);
 });
 
+test("home discovery skips SSH exec when singleChannelSsh is set", async () => {
+  let execCalls = 0;
+  const channel = {};
+  const api = createFileOpsApi({
+    sftpClients: new Map([["cloudbility", {
+      sftp: channel,
+      __netcattySingleChannelSsh: true,
+      client: {
+        _remoteVer: "CLOUDBILITY-4.14",
+        exec() {
+          execCalls += 1;
+          throw new Error("must not exec on Cloudbility");
+        },
+      },
+    }]]),
+    throwIfAborted() {},
+    requireSftpChannel: async () => channel,
+    realpathAsync: async () => "/root",
+    readdirAsync: async () => {
+      throw new Error("must not list after non-root realpath");
+    },
+  });
+
+  const result = await api.getSftpHomeDir(null, { sftpId: "cloudbility" });
+
+  assert.deepEqual(result, { success: true, homeDir: "/root" });
+  assert.equal(execCalls, 0);
+});
+
 test("home discovery still accepts non-root realpath without listing", async () => {
   const channel = {};
   let readdirCalls = 0;

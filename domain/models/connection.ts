@@ -177,6 +177,9 @@ export interface Host {
   // Device type: 'general' for standard servers, 'network' for switches/routers/firewalls.
   // Network devices use raw command execution (no shell wrapping) for AI agent compatibility.
   deviceType?: 'general' | 'network';
+  // Bastion / PAM hosts that allow only one SSH session channel.
+  // Extra exec/SFTP on the terminal transport disconnects the shell.
+  singleChannelSsh?: boolean;
   identityFileId?: string; // Reference to SSHKey
   protocol?: HostProtocol; // Default/primary protocol, including namespaced plugin protocols
   pluginConnection?: PluginConnectionConfig;
@@ -425,6 +428,7 @@ export interface GroupConfig {
   port?: number;
   protocol?: 'ssh' | 'telnet';
   deviceType?: 'general' | 'network';
+  singleChannelSsh?: boolean;
   agentForwarding?: boolean;
   proxyProfileId?: string;
   proxyConfig?: ProxyConfig;

@@ -97,6 +97,11 @@ function endpointAllowsIdlePark(endpointOrKey, remoteSshVersion) {
 
 function applyIdleParkPolicy(transport, remoteSshVersion) {
   if (!transport) return false;
+  if (transport.endpoint?.singleChannelSsh) {
+    transport.allowIdlePark = false;
+    if (transport.endpointKey) noIdleParkEndpointKeys.add(transport.endpointKey);
+    return false;
+  }
   const remoteVer = remoteSshVersion
     || (typeof transport.conn?._remoteVer === "string" ? transport.conn._remoteVer : "");
   const allowed = endpointAllowsIdlePark(transport.endpointKey || transport.endpoint, remoteVer);
@@ -552,6 +557,7 @@ function buildConnectionReuseEndpoint(options = {}, overrides = {}) {
     legacyAlgorithms: options.legacyAlgorithms,
     skipEcdsaHostKey: options.skipEcdsaHostKey,
     algorithmOverrides: options.algorithmOverrides,
+    singleChannelSsh: Boolean(options.singleChannelSsh),
   };
 }
 
@@ -578,6 +584,7 @@ function normalizeEndpoint(endpoint) {
     username: endpoint.username || "root",
     protocol: endpoint.protocol || "ssh",
     sftpSudo: Boolean(endpoint.sftpSudo),
+    singleChannelSsh: Boolean(endpoint.singleChannelSsh),
     jumpFingerprint: endpoint.jumpFingerprint
       ? String(endpoint.jumpFingerprint)
       : fingerprintJumpHosts(endpoint.jumpHosts),

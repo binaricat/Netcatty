@@ -100,7 +100,7 @@ export const hasGroupTelnetFields = (c: Partial<GroupConfig>): boolean =>
 export const hasGroupSshFields = (c: Partial<GroupConfig>): boolean =>
   c.protocol === 'ssh' ||
   c.port !== undefined || !!c.username || !!c.password || !!c.identityFileId ||
-  c.deviceType !== undefined ||
+  c.deviceType !== undefined || c.singleChannelSsh !== undefined ||
   c.agentForwarding !== undefined || c.authMethod !== undefined || c.identityId !== undefined ||
   !!c.proxyProfileId || !!c.proxyConfig || !!c.hostChain || !!c.startupCommand || c.startupCommandRunMode !== undefined || c.legacyAlgorithms !== undefined || c.skipEcdsaHostKey !== undefined || c.algorithms !== undefined || c.backspaceBehavior !== undefined ||
   Boolean(c.environmentVariables && c.environmentVariables.length > 0) ||
@@ -260,6 +260,7 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelPropsWithResize> = ({
       delete next.identityFileId;
       delete next.identityFilePaths;
       delete next.deviceType;
+      delete next.singleChannelSsh;
       delete next.agentForwarding;
       delete next.startupCommand;
       delete next.startupCommandRunMode;
@@ -502,6 +503,11 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelPropsWithResize> = ({
     return resolveGroupDefaults(parentGroup, groupConfigs).deviceType;
   }, [groupConfigs, parentGroup]);
   const effectiveDeviceType = form.deviceType ?? inheritedDeviceType;
+  const inheritedSingleChannelSsh = useMemo(() => {
+    if (!parentGroup || groupConfigs.length === 0) return false;
+    return !!resolveGroupDefaults(parentGroup, groupConfigs).singleChannelSsh;
+  }, [groupConfigs, parentGroup]);
+  const effectiveSingleChannelSsh = form.singleChannelSsh ?? inheritedSingleChannelSsh;
   const effectiveThemeId = form.themeOverride === false
     ? inheritedThemeId
     : (form.theme || inheritedThemeId);
@@ -561,6 +567,7 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelPropsWithResize> = ({
         ...(form.identityFileId !== undefined && { identityFileId: form.identityFileId }),
         ...(form.identityFilePaths !== undefined && { identityFilePaths: form.identityFilePaths }),
         ...(form.deviceType !== undefined && { deviceType: form.deviceType }),
+        ...(form.singleChannelSsh !== undefined && { singleChannelSsh: form.singleChannelSsh }),
         ...(form.agentForwarding !== undefined && { agentForwarding: form.agentForwarding }),
         ...(form.startupCommand !== undefined && { startupCommand: form.startupCommand }),
         ...(form.startupCommandRunMode !== undefined && { startupCommandRunMode: form.startupCommandRunMode }),
@@ -797,6 +804,20 @@ const GroupDetailsPanel: React.FC<GroupDetailsPanelPropsWithResize> = ({
                 <AlertTriangle size={14} className="text-yellow-500 mt-0.5 flex-shrink-0" />
                 <p className="text-xs text-yellow-600 dark:text-yellow-400 break-words">
                   {t("hostDetails.deviceType.warning")}
+                </p>
+              </div>
+            )}
+            <ToggleRow
+              label={t("hostDetails.singleChannelSsh")}
+              hint={t("hostDetails.singleChannelSsh.desc")}
+              enabled={!!effectiveSingleChannelSsh}
+              onToggle={() => update("singleChannelSsh", !effectiveSingleChannelSsh)}
+            />
+            {!!effectiveSingleChannelSsh && (
+              <div className="flex items-start gap-2 p-2 rounded-md bg-yellow-500/10 border border-yellow-500/20">
+                <AlertTriangle size={14} className="text-yellow-500 mt-0.5 flex-shrink-0" />
+                <p className="text-xs text-yellow-600 dark:text-yellow-400 break-words">
+                  {t("hostDetails.singleChannelSsh.warning")}
                 </p>
               </div>
             )}

@@ -6,6 +6,39 @@ import {
   runDistroDetection,
 } from "./terminalDistroDetection.ts";
 
+test("runDistroDetection skips POSIX probes when singleChannelSsh is enabled", async () => {
+  let distroProbeCalls = 0;
+  const detected: string[] = [];
+  const token = registerConnectionToken("bastion-session");
+
+  await runDistroDetection({
+    host: {
+      id: "bastion-1",
+      label: "Bastion",
+      hostname: "bastion.example.com",
+      username: "user",
+      singleChannelSsh: true,
+    },
+    terminalBackend: {
+      getSessionRemoteInfo: async () => ({
+        success: true,
+        remoteSshVersion: "CLOUDBILITY-4.14",
+      }),
+      getSessionDistroInfo: async () => {
+        distroProbeCalls += 1;
+        return { success: false, error: "must not probe single-channel SSH" };
+      },
+    },
+    onOsDetected: (_hostId: string, distro: string) => {
+      detected.push(distro);
+    },
+  } as never, "bastion-session", token);
+
+  assert.equal(distroProbeCalls, 0);
+  assert.deepEqual(detected, []);
+});
+
+
 test("runDistroDetection uses SSH banner but skips POSIX probes for manually marked network devices", async () => {
   let remoteInfoCalls = 0;
   let distroProbeCalls = 0;

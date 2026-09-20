@@ -62,6 +62,8 @@ export interface SftpConnectOptions {
   sourceSessionId?: string;
   /** Fail instead of opening a new route when the requested terminal transport cannot be reused. */
   requireSourceSessionReuse?: boolean;
+  /** When false, never attach SFTP to a live terminal SSH transport. */
+  reuseTransport?: boolean;
   /** Prevent a forced terminal-drop route rebind from sharing an older open. */
   connectRequestKey?: string;
   /** Identifies the exact tab and connection created for a route-bound request. */
@@ -1074,6 +1076,7 @@ export const useSftpConnections = ({
             openOptions: {
               sessionId: sftpSessionId,
               ...credentials,
+              ...(options?.reuseTransport === false ? { reuseTransport: false } : {}),
             },
           });
 

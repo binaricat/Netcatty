@@ -152,6 +152,7 @@ export function stripBuiltInConnectionFieldsForPluginHost(host: Host): Host {
     telnetPassword: _telnetPassword,
     serialConfig: _serialConfig,
     sftpSudo: _sftpSudo,
+    singleChannelSsh: _singleChannelSsh,
     legacyAlgorithms: _legacyAlgorithms,
     skipEcdsaHostKey: _skipEcdsaHostKey,
     algorithms: _algorithms,
