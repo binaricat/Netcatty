@@ -1438,7 +1438,9 @@ function createStartSessionApi(ctx) {
         const totalHops = jumpHosts.length + 1; // +1 for final target
 
         // Build base connection options for final target
-        const keepalivePolicy = resolveConnectionKeepalivePolicy(options);
+        const keepalivePolicy = options.singleChannelSsh
+          ? { keepaliveIntervalMs: 0, keepaliveCountMax: 0 }
+          : resolveConnectionKeepalivePolicy(options);
         const connectOpts = {
           host: options.hostname,
           port: options.port || 22,
@@ -2181,6 +2183,13 @@ function createStartSessionApi(ctx) {
                 elapsedMs: Date.now() - connectionStartedAt,
                 authReadyTimeoutMs,
               });
+              if (options.singleChannelSsh) {
+                try { conn._sock?.setKeepAlive?.(true, 15000); } catch { /* ignore */ }
+                log("disabling SSH keepalive for single-channel SSH", {
+                  sessionId,
+                  hostname: options.hostname,
+                });
+              }
               sendProgress(totalHops, totalHops, options.hostname, 'tcp-connected');
               enableSshNoDelay(conn);
             });

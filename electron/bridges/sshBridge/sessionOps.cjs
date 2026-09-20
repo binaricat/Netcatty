@@ -3,6 +3,7 @@ const { executeBoundedSshCommand } = require("../boundedSshExec.cjs");
 const { listInteractiveShellPids } = require("../sshInteractiveShells.cjs");
 function extraExecUnsupportedError(session) {
   if (!session?.singleChannelSsh) return null;
+  console.log("[SSH] skipped extra exec on single-channel session", session.hostname || "");
   return {
     success: false,
     error: "Remote SSH server does not support extra exec channels",
