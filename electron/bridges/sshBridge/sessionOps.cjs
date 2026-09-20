@@ -1,6 +1,13 @@
 /* eslint-disable no-undef */
 const { executeBoundedSshCommand } = require("../boundedSshExec.cjs");
 const { listInteractiveShellPids } = require("../sshInteractiveShells.cjs");
+function extraExecUnsupportedError(session) {
+  if (!session?.singleChannelSsh) return null;
+  return {
+    success: false,
+    error: "Remote SSH server does not support extra exec channels",
+  };
+}
 function decodeLsofFileName(value) {
   if (typeof value !== 'string') return null;
   // lsof's caret form is ambiguous: a BEL byte and the literal characters
@@ -149,6 +156,8 @@ function createSessionOpsApi(ctx) {
     async function getSessionDistroInfo(_event, payload) {
       const { sessionId } = payload || {};
       const session = sessions.get(sessionId);
+      const bastionBlock = extraExecUnsupportedError(session);
+      if (bastionBlock) return bastionBlock;
       if (session?.type === "et") {
         if (typeof execOnEtSession !== "function") {
           return { success: false, error: "ET command executor unavailable" };
@@ -318,6 +327,8 @@ function createSessionOpsApi(ctx) {
       if (!session || !session.conn) {
         return { success: false, error: 'Session not found or not connected' };
       }
+      const bastionPwdBlock = extraExecUnsupportedError(session);
+      if (bastionPwdBlock) return bastionPwdBlock;
       if (
         session.blockUntargetedCwdProbe
         && session.cwdRecoveryPromise

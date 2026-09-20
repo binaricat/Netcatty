@@ -38,6 +38,7 @@ import {
 } from "../../../domain/credentials";
 import { resolveBridgeSshAgentAuth, resolveHostAuth } from "../../../domain/sshAuth";
 import {
+  hostRestrictsExtraSshChannels,
   resolveHostKeepalive,
   resolveTelnetPassword,
   resolveTelnetPort,
@@ -695,6 +696,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
           charset: ctx.host.charset,
           // Persist for session-backed SFTP opens (AI tools / clipboard paste).
           sftpFileProtocol: ctx.host.sftpFileProtocol || "auto",
+          singleChannelSsh: hostRestrictsExtraSshChannels(ctx.host),
           env: termEnv,
           proxy: proxyConfig,
           jumpHosts: jumpHosts.length > 0 ? jumpHosts : undefined,

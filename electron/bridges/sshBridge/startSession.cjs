@@ -32,6 +32,20 @@ const SSH_AUTH_READY_TIMEOUT_MS = 120000;
 const MAX_SSH_CONNECTION_TIMEOUT_MS = 3600000;
 const COPY_TAB_RATE_LIMIT_RETRY_TIMEOUT_MS = 30000;
 
+function buildInteractiveShellOptions(options) {
+  const shellOptions = {};
+  // Hosts with singleChannelSsh (bastion/PAM) may drop the transport on
+  // CHANNEL_REQUEST env. Skip COLORTERM / caller env there.
+  if (!options.singleChannelSsh) {
+    shellOptions.env = {
+      COLORTERM: "truecolor",
+      ...(options.env || {}),
+    };
+  }
+  return shellOptions;
+}
+
+
 /**
  * Fan out netcatty:exit to the primary contents plus any attach-home owner
  * (AI observe popup rebind) so neither side is left stale.
@@ -332,6 +346,7 @@ function createStartSessionApi(ctx) {
         // additional exec channels. See domain/host.ts
         // `detectVendorFromSshVersion`.
         remoteSshVersion: (conn && typeof conn._remoteVer === 'string') ? conn._remoteVer : '',
+        singleChannelSsh: !!options.singleChannelSsh,
         // The actual SSH target this connection authenticated to. Used to make
         // sure a "Copy Tab" reuse opens its channel on a connection going to the
         // *same* host — a saved host edited after the source connected must not
@@ -747,12 +762,7 @@ function createStartSessionApi(ctx) {
 
       sendProgress('shell');
 
-      const shellOptions = {
-        env: {
-          COLORTERM: "truecolor",
-          ...(options.env || {}),
-        },
-      };
+      const shellOptions = buildInteractiveShellOptions(options);
 
       // Pin the shared connection *before* issuing the async shell request.
       // Otherwise, if the source tab is closed while conn.shell() is pending,
@@ -2242,12 +2252,13 @@ function createStartSessionApi(ctx) {
               });
             }
 
-            const shellOptions = {
-              env: {
-                COLORTERM: "truecolor",
-                ...(options.env || {}),
-              },
-            };
+            const shellOptions = buildInteractiveShellOptions(options);
+            if (options.singleChannelSsh) {
+              log("skipping shell env for single-channel SSH", {
+                sessionId,
+                hostname: options.hostname,
+              });
+            }
 
             if (options.x11Forwarding) {
               shellOptions.x11 = {

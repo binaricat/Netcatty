@@ -1801,6 +1801,7 @@ function createSessionBackedSftpClient(sessionId, sshClient, options = {}) {
     client: sshClient,
     sftp: null,
     __netcattySessionBacked: true,
+    __netcattySingleChannelSsh: !!options?.singleChannelSsh,
     __netcattySourceSessionId: options?.sourceSessionId,
     __netcattyRefHolder: refHolder,
     __netcattyDisposed: false,
@@ -1940,6 +1941,13 @@ async function openSftpForSession(_event, payload) {
     source = { sessionId, ...ensureRemoteSftpSupport(sessionId) };
   }
   const { session, sshClient } = source;
+  if (session.singleChannelSsh) {
+    const err = new Error(
+      "This host is configured for single-channel SSH. Opening SFTP on the terminal connection would disconnect it.",
+    );
+    err.code = "ERR_SFTP_SINGLE_CHANNEL_BASTION";
+    throw err;
+  }
   const actualEndpoint = session._reuseEndpoint || session.connRef?.endpoint;
   const sftpId = `${sourceSessionId}-sftp-${randomUUID()}`;
   const refHolder = { id: sftpId, __sshLeaseKind: "sftp" };
@@ -1949,6 +1957,7 @@ async function openSftpForSession(_event, payload) {
   const client = createSessionBackedSftpClient(sourceSessionId, sshClient, {
     refHolder,
     sourceSessionId,
+    singleChannelSsh: !!session.singleChannelSsh,
   });
   client.__netcattyEndpointKey = session.connRef?.endpointKey || buildEndpointKey(actualEndpoint);
   const { normalizeFileProtocol } = require("./sftpBridge/scpShell.cjs");

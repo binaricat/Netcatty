@@ -76,7 +76,7 @@ import {
   resolveLocateSftpPathInTerminalAction,
   resolveLocateSftpPathSessionId,
 } from "../domain/sftpLocatePathInTerminal";
-import { classifyDistroId } from "../domain/host";
+import { classifyDistroId, hostRestrictsExtraSshChannels } from "../domain/host";
 import { useTerminalBackend } from "../application/state/useTerminalBackend";
 import { isTerminalSensitiveInputActive } from "./terminal/runtime/terminalSensitiveInputRegistry";
 import { isTerminalReadyForCommandInjection } from "./terminal/runtime/terminalCommandInjectionReadyRegistry";
@@ -869,13 +869,19 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
 
     connectedKeyRef.current = connectionKey;
     connectedHostObjRef.current = activeHost;
+    const isNetworkDeviceHost = hostRestrictsExtraSshChannels(activeHost);
+    const reuseTerminalTransport = !isNetworkDeviceHost && (
+      Boolean(pendingStrictSourceSessionId) || activeSessionStatus === "connected"
+    );
     const connect = (
       connectRequestKey?: string,
       onConnectionCreated?: (target: { tabId: string; connectionId: string }) => void,
     ) => s.connect("left", activeHost, {
-      sourceSessionId: pendingStrictSourceSessionId
-        ?? (activeSessionStatus === "connected" ? (activeSessionId ?? undefined) : undefined),
-      requireSourceSessionReuse: Boolean(pendingStrictSourceSessionId),
+      sourceSessionId: reuseTerminalTransport
+        ? (pendingStrictSourceSessionId ?? (activeSessionId ?? undefined))
+        : undefined,
+      requireSourceSessionReuse: reuseTerminalTransport && Boolean(pendingStrictSourceSessionId),
+      ...(reuseTerminalTransport ? {} : { reuseTransport: false }),
       ...(connectRequestKey ? { connectRequestKey } : undefined),
       onConnectionCreated,
       ...(initialPath ? { initialPath } : undefined),

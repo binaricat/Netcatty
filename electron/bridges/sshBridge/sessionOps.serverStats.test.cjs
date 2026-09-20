@@ -1189,6 +1189,28 @@ test("getServerStats wraps probes in a remote watchdog matching the client timeo
   assert.ok(commands[1].includes('echo "DISKS:$disks"'));
 });
 
+test("getSessionDistroInfo skips extra exec when singleChannelSsh is set", async () => {
+  let execCalls = 0;
+  const sessions = new Map();
+  sessions.set("sid", {
+    type: "ssh",
+    singleChannelSsh: true, remoteSshVersion: "CLOUDBILITY-4.14",
+    conn: {
+      exec() {
+        execCalls += 1;
+        throw new Error("must not exec on Cloudbility");
+      },
+    },
+  });
+
+  const api = makeSessionOps(sessions);
+  const result = await api.getSessionDistroInfo({ sender: {} }, { sessionId: "sid" });
+
+  assert.equal(result.success, false);
+  assert.match(result.error, /extra exec channels/);
+  assert.equal(execCalls, 0);
+});
+
 test("getSessionDistroInfo wraps the os-release probe in a remote watchdog", async () => {
   const commands = [];
   const sessions = new Map();

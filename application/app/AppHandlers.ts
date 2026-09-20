@@ -3,7 +3,7 @@ import type React from 'react';
 import type { Host, HostProtocol, TerminalSession } from '../../types';
 import type { PassphraseRequest } from '../../components/PassphraseModal';
 import type { TerminalPopupPayload } from '../../domain/systemManager/types';
-import { getEffectiveHostDistro, classifyDistroId, shouldProbeSessionCwd } from '../../domain/host';
+import { getEffectiveHostDistro, classifyDistroId, hostRestrictsExtraSshChannels, shouldProbeSessionCwd } from '../../domain/host';
 import { getAvailablePaneMagnificationController } from '../../domain/paneMagnification';
 import { sanitizeHostIconFields } from '../../domain/hostIcon';
 import { resolveEffectiveTerminalProtocol } from '../../domain/terminalProtocol';
@@ -535,7 +535,11 @@ async function captureCtxInheritedCwd(getCtx: AppContextGetter, sessionId: strin
   if (!liveCwd && isConnectedSsh && !isNetworkDevice) {
     try {
       const info = await bridge?.getSessionRemoteInfo?.(sessionId);
-      allowSshProbe = shouldProbeSessionCwd({ isNetworkDevice: false, remoteSshVersion: info?.remoteSshVersion });
+      allowSshProbe = shouldProbeSessionCwd({
+        isNetworkDevice: false,
+        remoteSshVersion: info?.remoteSshVersion,
+        restrictExtraSshChannels: hostRestrictsExtraSshChannels(host),
+      });
     } catch {
       allowSshProbe = false;
     }

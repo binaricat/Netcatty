@@ -1127,9 +1127,15 @@ function createFileOpsApi(ctx) {
       }
     
       // Method 1: SSH exec `echo ~` (with 5s timeout to avoid hanging on
-      // hosts with blocking shell init scripts or forced commands)
+      // hosts with blocking shell init scripts or forced commands).
+      // Skip on single-channel PAM bastions: the extra exec drops the SFTP
+      // transport (Cloudbility / QiZhi), same class as JumpServer exec denial.
       const sshClient = client.client;
-      if (sshClient && typeof sshClient.exec === "function") {
+      if (
+        sshClient
+        && typeof sshClient.exec === "function"
+        && !client.__netcattySingleChannelSsh
+      ) {
         let execStream = null;
         try {
           const result = await executeBoundedSshCommand(sshClient, "echo ~", {

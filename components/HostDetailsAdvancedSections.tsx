@@ -57,6 +57,8 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
 }) => {
   const inheritedDeviceType = effectiveGroupDefaults?.deviceType;
   const effectiveDeviceType = form.deviceType ?? inheritedDeviceType;
+  const inheritedSingleChannelSsh = effectiveGroupDefaults?.singleChannelSsh;
+  const effectiveSingleChannelSsh = form.singleChannelSsh ?? inheritedSingleChannelSsh;
   const inheritedStartupCommandRunMode = effectiveGroupDefaults?.startupCommandRunMode ?? "paste";
   const effectiveStartupCommandRunMode = form.startupCommandRunMode ?? inheritedStartupCommandRunMode;
   const systemSshAgentSupported = effectiveAuthMethod === "auto" || effectiveAuthMethod === "key";
@@ -368,6 +370,20 @@ export const HostDetailsAdvancedSections: React.FC<HostDetailsAdvancedSectionsPr
                 <AlertTriangle size={14} className="text-yellow-500 mt-0.5 flex-shrink-0" />
                 <p className="text-xs text-yellow-600 dark:text-yellow-400 break-words">
                   {t("hostDetails.deviceType.warning")}
+                </p>
+              </div>
+            )}
+            <ToggleRow
+              label={t("hostDetails.singleChannelSsh")}
+              hint={t("hostDetails.singleChannelSsh.desc")}
+              enabled={!!effectiveSingleChannelSsh}
+              onToggle={() => update("singleChannelSsh", !effectiveSingleChannelSsh)}
+            />
+            {!!effectiveSingleChannelSsh && (
+              <div className="flex items-start gap-2 p-2 rounded-md bg-yellow-500/10 border border-yellow-500/20">
+                <AlertTriangle size={14} className="text-yellow-500 mt-0.5 flex-shrink-0" />
+                <p className="text-xs text-yellow-600 dark:text-yellow-400 break-words">
+                  {t("hostDetails.singleChannelSsh.warning")}
                 </p>
               </div>
             )}
