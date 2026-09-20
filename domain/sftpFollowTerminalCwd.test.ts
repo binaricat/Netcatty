@@ -13,6 +13,7 @@ import {
   shouldReleaseInitialFollowSyncAttempt,
   shouldResetInitialFollowTerminalCwdSync,
   resolveTerminalCwdForSftp,
+  guessUnixHomeDirFromPath,
 } from "./sftpFollowTerminalCwd";
 
 const base = {
@@ -555,5 +556,6 @@ test("resolveTerminalCwdForSftp expands a prompt home shortcut", () => {
   assert.equal(resolveTerminalCwdForSftp("~", "/root"), "/root");
   assert.equal(resolveTerminalCwdForSftp("~/codes", "/root/"), "/root/codes");
   assert.equal(resolveTerminalCwdForSftp("/var/log", "/root"), "/var/log");
+  assert.equal(resolveTerminalCwdForSftp("~", null, "/root/projects"), "/root");
   assert.equal(resolveTerminalCwdForSftp("~", null), "~");
 });

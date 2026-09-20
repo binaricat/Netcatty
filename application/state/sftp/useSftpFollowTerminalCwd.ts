@@ -259,15 +259,16 @@ export function useSftpFollowTerminalCwd({
     });
     if (!cwd) return;
     if (!shouldApply()) return;
+    const connection = sftpRef.current.leftPane.connection;
     const targetPath = resolveTerminalCwdForSftp(
       cwd,
-      sftpRef.current.leftPane.connection?.homeDir,
+      connection?.homeDir,
+      connection?.currentPath,
     );
-    if (targetPath === "~" || targetPath.startsWith("~/")) return;
+    if (!targetPath.startsWith("/") && !/^[A-Za-z]:[\\/]/.test(targetPath)) return;
     const navigateResult = await sftpRef.current.navigateTo("left", targetPath, { shouldApply });
     if (navigateResult !== "reached" || !shouldApply()) return;
     blockedFollowRef.current = null;
-    const connection = sftpRef.current.leftPane.connection;
     if (connection?.id) {
       handledFollowRef.current = { connectionId: connection.id, terminalCwd: cwd };
     }

@@ -30,12 +30,30 @@ export const isUsablePosixPromptCwd = (cwd?: string | null): cwd is string => {
   return cwd === "~" || cwd.startsWith("~/") || cwd.startsWith("/");
 };
 
+/** One-shot PTY probe: ask the interactive shell to emit OSC 7 for $PWD. */
+export const OSC7_PWD_PROBE_COMMAND = " printf '\\x1b]7;file://localhost%s\\x07' \"$PWD\"\r";
+
+const firstUsablePromptCwd = (...candidates: Array<string | null | undefined>): string | null => {
+  for (const candidate of candidates) {
+    if (isUsablePosixPromptCwd(candidate)) return candidate;
+  }
+  return null;
+};
+
+const readCursorLineText = (term: XTerm): string => {
+  const buffer = term.buffer.active;
+  const line = buffer.getLine(buffer.cursorY + buffer.baseY);
+  return line ? line.translateToString(true).trimEnd() : "";
+};
+
 /** Read cwd from the visible shell prompt. Used when extra exec pwd is unsafe. */
 export const readPromptCwdFromXterm = (term?: XTerm | null): string | null => {
   if (!term) return null;
   const { prompt } = getAlignedPrompt(term, "", true);
-  const cwd = extractPosixCwdFromPrompt(prompt.promptText || "");
-  return isUsablePosixPromptCwd(cwd) ? cwd : null;
+  return firstUsablePromptCwd(
+    extractPosixCwdFromPrompt(prompt.promptText || ""),
+    extractPosixCwdFromPrompt(readCursorLineText(term)),
+  );
 };
 
 type ResolvePreferredTerminalCwdOptions = {
