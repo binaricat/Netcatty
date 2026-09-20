@@ -196,11 +196,9 @@ import {
 import {
   createTerminalCwdTracker,
   invalidateTerminalCwdAfterCommand,
-  readPromptCwdFromXterm,
   resolvePreferredTerminalCwd,
   type TerminalCwdChangeMeta,
 } from "./terminal/sftpCwd";
-import { terminalCwdStore } from "../application/state/terminalCwdStore";
 import { useTerminalEffects } from "./terminal/useTerminalEffects";
 import { useTerminalHibernateEffect } from "./terminal/useTerminalHibernateEffect";
 import { readActiveTerminalBufferTextRange } from "./terminal/terminalContextBuffer";
@@ -487,11 +485,6 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const searchAddonRef = useRef<SearchAddon | null>(null);
   const xtermRuntimeRef = useRef<XTermRuntime | null>(null);
   const terminalCwdTracker = useMemo(() => createTerminalCwdTracker(), []);
-  useEffect(() => {
-    return terminalCwdStore.registerLiveCwdReader(sessionId, () => (
-      readPromptCwdFromXterm(termRef.current)
-    ));
-  }, [sessionId]);
   const knownCwdRef = useRef<string | undefined>(undefined);
   const disposeDataRef = useRef<(() => void) | null>(null);
   const disposeExitRef = useRef<(() => void) | null>(null);
@@ -1142,10 +1135,9 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     requireActiveShellCwd?: boolean;
   }): Promise<string | undefined> => {
     const skipBackendPwd = hostRestrictsExtraSshChannels(host);
-    const promptCwd = skipBackendPwd ? readPromptCwdFromXterm(termRef.current) : null;
     const cwd = await resolvePreferredTerminalCwd({
-      rendererCwd: promptCwd ?? terminalCwdTracker.getRendererCwd(),
-      rendererCwdSource: promptCwd ? "prompt" : terminalCwdTracker.getRendererCwdSource(),
+      rendererCwd: terminalCwdTracker.getRendererCwd(),
+      rendererCwdSource: terminalCwdTracker.getRendererCwdSource(),
       sessionId: sessionRef.current,
       getSessionPwd: skipBackendPwd
         ? async () => ({ success: false })
