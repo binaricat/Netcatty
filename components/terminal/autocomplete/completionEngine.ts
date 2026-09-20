@@ -251,6 +251,8 @@ export async function getCompletions(
     sessionId?: string;
     /** Connection protocol (ssh, local, telnet, serial) */
     protocol?: string;
+    /** Skip remote/local path listings that need extra SSH exec (single-channel bastions). */
+    skipPathCompletion?: boolean;
     /** Current working directory (from OSC 7) */
     cwd?: string;
     cwdSource?: AutocompleteCwdSource;
@@ -339,7 +341,7 @@ export async function getCompletions(
     }
   }
 
-  const canQueryPaths = options.protocol === "local" || options.sessionId !== undefined;
+  const canQueryPaths = !options.skipPathCompletion && (options.protocol === "local" || options.sessionId !== undefined);
 
   const pathEntries = canQueryPaths && pathCheck.shouldComplete
     ? await getPathSuggestionsWithinBudget(

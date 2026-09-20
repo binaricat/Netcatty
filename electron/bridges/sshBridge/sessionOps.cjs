@@ -201,6 +201,8 @@ function createSessionOpsApi(ctx) {
       if (!session) {
         return { success: false, error: 'Session not found' };
       }
+      const bastionHistoryBlock = extraExecUnsupportedError(session);
+      if (bastionHistoryBlock) return bastionHistoryBlock;
 
       const safeLimit =
         Number.isFinite(limit) && limit > 0 && limit <= 10000 ? Math.floor(limit) : 1000;
@@ -892,6 +894,8 @@ function createSessionOpsApi(ctx) {
       if (!session || !session.conn) {
         return { success: false, entries: [], error: 'Session not found' };
       }
+      const bastionListBlock = extraExecUnsupportedError(session);
+      if (bastionListBlock) return { ...bastionListBlock, entries: [] };
     
       if (typeof dirPath !== "string" || dirPath.length === 0) {
         return { success: false, entries: [], error: 'Invalid directory path' };
