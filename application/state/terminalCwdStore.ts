@@ -1,6 +1,6 @@
 type Listener = () => void;
 
-export type TerminalCwdSource = "osc7" | "prompt" | "backend-strict" | "backend" | "snapshot" | "stale" | "unknown";
+export type TerminalCwdSource = "osc7" | "prompt" | "inferred" | "backend-strict" | "backend" | "snapshot" | "stale" | "unknown";
 
 /**
  * Live terminal CWD map + version token.

@@ -110,14 +110,13 @@ import {
 } from '../domain/terminalSidePanelAutoOpen';
 import { shouldProbeCommandCwd } from './terminalLayer/commandCwdProbe';
 import {
-  isUsablePosixPromptCwd,
-  OSC7_PWD_PROBE_COMMAND,
   resolvePreferredTerminalCwd,
   scheduleBackendCwdProbeAfterCommand,
   type RendererCwdSource,
   type TerminalCwdChangeMeta,
 } from './terminal/sftpCwd';
-import { isTerminalReadyForCommandInjection } from './terminal/runtime/terminalCommandInjectionReadyRegistry';
+import { applyPosixCwdFromCommand } from '../domain/posixCwdFromCommand';
+import { guessUnixHomeDirFromPath } from '../domain/sftpFollowTerminalCwd';
 import { classifyDistroId, hostRestrictsExtraSshChannels, shouldProbeSessionCwd } from '../domain/host';
 import {
   collectSidePanelPanes,
@@ -1145,6 +1144,20 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   const handleCommandSubmitted = useCallback((command: string, _hostId: string, _hostLabel: string, sessionId: string) => {
     codingCliSignalController.handleCommandSubmitted(sessionId, command);
 
+    const currentCwd = terminalCwdStore.getCwd(sessionId)
+      ?? terminalRendererCwdBySessionRef.current.get(sessionId)
+      ?? terminalCwdStore.readLiveCwd(sessionId);
+    const inferredCwd = applyPosixCwdFromCommand({
+      command,
+      currentCwd,
+      homeDir: guessUnixHomeDirFromPath(currentCwd) ?? undefined,
+    });
+    if (inferredCwd && inferredCwd.startsWith('/')) {
+      handleTerminalCwdChange(sessionId, inferredCwd, { source: 'inferred' });
+    } else if (inferredCwd === '~') {
+      handleTerminalCwdChange(sessionId, inferredCwd, { source: 'inferred' });
+    }
+
     const tabId = activeTabIdRef.current;
     const session = sessionsRef.current.find((candidate) => candidate.id === sessionId);
     if (!session || !canReuseTerminalConnection(session)) return;
@@ -1390,13 +1403,15 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     const sessionId = getActiveTerminalSessionId();
     const host = sessionId ? sessionHostsMapRef.current.get(sessionId) : undefined;
     const skipBackendPwd = hostRestrictsExtraSshChannels(host);
+    const storedCwd = sessionId ? terminalRendererCwdBySessionRef.current.get(sessionId) : undefined;
+    const storedSource = sessionId ? terminalRendererCwdSourceBySessionRef.current.get(sessionId) : undefined;
     const promptCwd = terminalCwdStore.readLiveCwd(sessionId);
+    const preferStored = storedCwd?.startsWith('/') && (
+      storedSource === 'inferred' || storedSource === 'osc7' || storedSource === 'backend-strict'
+    );
     const cwd = await resolvePreferredTerminalCwd({
-      rendererCwd: promptCwd
-        ?? (sessionId ? terminalRendererCwdBySessionRef.current.get(sessionId) : undefined),
-      rendererCwdSource: promptCwd
-        ? "prompt"
-        : (sessionId ? terminalRendererCwdSourceBySessionRef.current.get(sessionId) : undefined),
+      rendererCwd: preferStored ? storedCwd : (promptCwd ?? storedCwd),
+      rendererCwdSource: preferStored ? storedSource : (promptCwd ? "prompt" : storedSource),
       sessionId,
       getSessionPwd: skipBackendPwd
         ? async () => ({ success: false })
@@ -1405,17 +1420,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       allowRendererFallback: options?.allowRendererFallback,
       requireActiveShellCwd: options?.requireActiveShellCwd,
     });
-    if (isUsablePosixPromptCwd(cwd) && cwd.startsWith("/")) return cwd;
-    if (!sessionId) return cwd;
-    if (!isTerminalReadyForCommandInjection(sessionId)) return cwd;
-    const minVersion = terminalCwdStore.getVersion();
-    const probed = terminalCwdStore.waitForCwd(sessionId, {
-      timeoutMs: 1500,
-      minVersion,
-      accept: (next, source) => source === "osc7" && next.startsWith("/"),
-    });
-    terminalBackend.writeToSession(sessionId, OSC7_PWD_PROBE_COMMAND, { automated: true });
-    return (await probed) ?? cwd;
+    return cwd;
   }, [getActiveTerminalSessionId, terminalBackend]);
 
   const refocusTerminalSession = useCallback((sessionId?: string | null) => {

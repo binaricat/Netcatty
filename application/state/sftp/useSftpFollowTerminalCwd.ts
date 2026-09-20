@@ -343,20 +343,28 @@ export function useSftpFollowTerminalCwd({
       liveTerminalCwd: activeTerminalCwdRef.current,
       requireLiveTerminalCwd: usesLiveTerminalCwd,
     });
-    const navigateResult = await sftpRef.current.navigateTo("left", terminalCwd, {
+    if (!connection) return;
+    const targetPath = resolveTerminalCwdForSftp(
+      terminalCwd,
+      connection.homeDir,
+      connection.currentPath,
+    );
+    if (!targetPath.startsWith("/") && !/^[A-Za-z]:[\/]/.test(targetPath)) return;
+    const navigateResult = await sftpRef.current.navigateTo("left", targetPath, {
       shouldApply: shouldApplyCurrentFollowSync,
+      quiet: true,
     });
     if (!shouldApplyCurrentFollowSync()) return;
 
     const currentConnection = sftpRef.current.leftPane.connection;
     if (!currentConnection || currentConnection.id !== connection?.id) return;
     if (navigateResult === "failed") {
-      blockedFollowRef.current = { connectionId: currentConnection.id, terminalCwd };
+      blockedFollowRef.current = { connectionId: currentConnection.id, terminalCwd: targetPath };
     } else if (navigateResult === "superseded") {
-      handledFollowRef.current = { connectionId: currentConnection.id, terminalCwd };
+      handledFollowRef.current = { connectionId: currentConnection.id, terminalCwd: targetPath };
     } else if (navigateResult === "reached") {
       blockedFollowRef.current = null;
-      handledFollowRef.current = { connectionId: currentConnection.id, terminalCwd };
+      handledFollowRef.current = { connectionId: currentConnection.id, terminalCwd: targetPath };
     }
   }, [
     activeTerminalCwd,
