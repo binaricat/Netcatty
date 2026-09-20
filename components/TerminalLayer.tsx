@@ -481,12 +481,15 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
         // Mirror the normal SFTP open path: a previously retained panel (kept
         // mounted while transfers or external edits finished after close) must
         // not keep suppressing command-triggered refreshes once the preset
-        // reopens SFTP for this tab.
+        // reopens SFTP for this tab. Mark the tab as opening first so an
+        // activity callback firing before React commits the open state still
+        // sees the panel as open instead of pruning the retained host state.
         const cleanupTimer = sftpRetainedCleanupTimersRef.current.get(tabId);
         if (cleanupTimer !== undefined) {
           window.clearTimeout(cleanupTimer);
           sftpRetainedCleanupTimersRef.current.delete(tabId);
         }
+        sftpOpeningTabIdsRef.current.add(tabId);
         sftpRetainedAfterCloseTabIdsRef.current.delete(tabId);
         sftpPaneClosedTabIdsRef.current.delete(tabId);
         const host = hostsRef.current.find(h => h.id === session.hostId);
@@ -544,16 +547,30 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
 
     const session = sessionsRef.current.find(s => s.id === sessionId);
     if (!session) return;
-    const proto = session.protocol ?? 'ssh';
-    const tabId = session.workspaceId || sessionId;
+    const workspaceId = session.workspaceId;
+    const tabId = workspaceId || sessionId;
+
+    // Within a workspace every member session maps to the same tab id, so the
+    // preset (and any auto-open host binding) must come from the workspace's
+    // focused session; otherwise whichever pane connects first would decide
+    // SFTP pruning and host selection regardless of focus.
+    let presetSession = session;
+    if (workspaceId) {
+      const focusedSessionId = workspacesRef.current.find(ws => ws.id === workspaceId)?.focusedSessionId;
+      const focusedSession = focusedSessionId
+        ? sessionsRef.current.find(s => s.id === focusedSessionId)
+        : undefined;
+      if (focusedSession) presetSession = focusedSession;
+    }
+    const proto = presetSession.protocol ?? 'ssh';
 
     if (sidePanelOpenTabsRef.current.has(tabId)) return;
 
     // A saved default layout wins over the single-tool auto-open preference.
-    if (applyWorkspaceLayoutPresetForSession(session, tabId)) return;
+    if (applyWorkspaceLayoutPresetForSession(presetSession, tabId)) return;
 
     const targetPanel = resolveSessionSidePanelAutoOpen({
-      session,
+      session: presetSession,
       terminalEnabled: terminalSidePanelAutoOpenRef.current,
       terminalTab: terminalSidePanelAutoOpenTabRef.current,
       localEnabled: localShellSidePanelAutoOpenRef.current,
