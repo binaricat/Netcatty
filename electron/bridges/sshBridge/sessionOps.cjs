@@ -1009,6 +1009,8 @@ function createSessionOpsApi(ctx) {
       if (!session) {
         return { success: false, error: 'Session not found or not connected' };
       }
+      const bastionStatsBlock = extraExecUnsupportedError(session);
+      if (bastionStatsBlock) return bastionStatsBlock;
 
       const isEtSession = session.type === "et";
       const etUsesExecFallback = isEtSession && session.etStatsAuth?.hasJumpHost;

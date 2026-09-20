@@ -1189,6 +1189,28 @@ test("getServerStats wraps probes in a remote watchdog matching the client timeo
   assert.ok(commands[1].includes('echo "DISKS:$disks"'));
 });
 
+test("getServerStats skips extra exec when singleChannelSsh is set", async () => {
+  let execCalls = 0;
+  const sessions = new Map();
+  sessions.set("sid", {
+    type: "ssh",
+    singleChannelSsh: true,
+    conn: {
+      exec() {
+        execCalls += 1;
+        throw new Error("must not exec on single-channel SSH");
+      },
+    },
+  });
+
+  const api = makeSessionOps(sessions);
+  const result = await api.getServerStats({ sender: {} }, { sessionId: "sid" });
+
+  assert.equal(result.success, false);
+  assert.match(result.error, /extra exec channels/);
+  assert.equal(execCalls, 0);
+});
+
 test("getSessionDistroInfo skips extra exec when singleChannelSsh is set", async () => {
   let execCalls = 0;
   const sessions = new Map();
