@@ -1384,14 +1384,18 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     requireActiveShellCwd?: boolean;
   }): Promise<string | null> => {
     const sessionId = getActiveTerminalSessionId();
+    const host = sessionId ? sessionHostsMapRef.current.get(sessionId) : undefined;
+    const skipBackendPwd = hostRestrictsExtraSshChannels(host);
     return resolvePreferredTerminalCwd({
       rendererCwd: sessionId ? terminalRendererCwdBySessionRef.current.get(sessionId) : undefined,
       rendererCwdSource: sessionId
         ? terminalRendererCwdSourceBySessionRef.current.get(sessionId)
         : undefined,
       sessionId,
-      getSessionPwd: (id, options) => terminalBackend.getSessionPwd(id, options),
-      preferFreshBackend: options?.preferFreshBackend,
+      getSessionPwd: skipBackendPwd
+        ? async () => ({ success: false })
+        : (id, pwdOptions) => terminalBackend.getSessionPwd(id, pwdOptions),
+      preferFreshBackend: skipBackendPwd ? false : options?.preferFreshBackend,
       allowRendererFallback: options?.allowRendererFallback,
       requireActiveShellCwd: options?.requireActiveShellCwd,
     });

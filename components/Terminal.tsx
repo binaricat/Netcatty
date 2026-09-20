@@ -46,7 +46,7 @@ import {
   resolveTerminalContextLineWindow,
   type TerminalContextReader,
 } from "../domain/terminalContextRead";
-import { classifyDistroId, shouldProbeSessionCwd } from "../domain/host";
+import { classifyDistroId, hostRestrictsExtraSshChannels, shouldProbeSessionCwd } from "../domain/host";
 import { shouldCollectServerStats } from "../domain/systemManager/systemTarget";
 import { resolveHostSshConnectionTimeouts } from "../domain/sshConnectionTimeouts";
 import { CONNECTION_PROGRESS_START } from "./terminal/connectionProgress";
@@ -1134,12 +1134,15 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     allowRendererFallback?: boolean;
     requireActiveShellCwd?: boolean;
   }): Promise<string | undefined> => {
+    const skipBackendPwd = hostRestrictsExtraSshChannels(host);
     const cwd = await resolvePreferredTerminalCwd({
       rendererCwd: terminalCwdTracker.getRendererCwd(),
       rendererCwdSource: terminalCwdTracker.getRendererCwdSource(),
       sessionId: sessionRef.current,
-      getSessionPwd: (id, options) => terminalBackend.getSessionPwd(id, options),
-      preferFreshBackend: options?.preferFreshBackend,
+      getSessionPwd: skipBackendPwd
+        ? async () => ({ success: false })
+        : (id, pwdOptions) => terminalBackend.getSessionPwd(id, pwdOptions),
+      preferFreshBackend: skipBackendPwd ? false : options?.preferFreshBackend,
       allowRendererFallback: options?.allowRendererFallback,
       requireActiveShellCwd: options?.requireActiveShellCwd,
     });
