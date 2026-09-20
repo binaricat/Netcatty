@@ -68,3 +68,16 @@ test("mount effect re-arms disposedRef after dispose cleanup (HMR / StrictMode)"
   assert.ok(source.includes("disposedRef.current = false;"));
   assert.ok(source.includes("return () => { dispose(); };"));
 });
+
+test("single-channel / network-device sessions skip remote path listings", () => {
+  const source = readFileSync(
+    fileURLToPath(new URL("./autocomplete/useTerminalAutocomplete.ts", import.meta.url)),
+    "utf8",
+  );
+  assert.match(
+    source,
+    /const fetchDirEntries = useCallback\(async \(dirPath: string\): Promise<SubDirEntry\[\]> => \{\s*if \(isNetworkDeviceRef\.current\) return \[\];/,
+  );
+  assert.match(source, /skipPathCompletion: isNetworkDeviceRef\.current,/);
+});
+

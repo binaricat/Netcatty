@@ -554,6 +554,7 @@ export function useTerminalAutocomplete(
 
   /** Fetch directory listing via IPC. */
   const fetchDirEntries = useCallback(async (dirPath: string): Promise<SubDirEntry[]> => {
+    if (isNetworkDeviceRef.current) return [];
     return listDirectoryEntries(dirPath, {
       sessionId: sessionIdRef.current,
       protocol: protocolRef.current,
@@ -1159,6 +1160,7 @@ export function useTerminalAutocomplete(
         historyScope: settingsRef.current.historyScope,
         sessionId: sessionIdRef.current,
         protocol: protocolRef.current,
+        skipPathCompletion: isNetworkDeviceRef.current,
         cwd: cwdResolution.cwd,
         cwdSource: cwdResolution.source,
         snippets: snippetsRef.current,

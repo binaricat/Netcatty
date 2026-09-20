@@ -837,3 +837,21 @@ test("getSessionPwd skips extra exec when singleChannelSsh is set", async () => 
   assert.match(result.error, /extra exec channels/);
   assert.equal(execCalls, 0);
 });
+
+test("listSessionDir skips extra exec when singleChannelSsh is set", async () => {
+  let execCalls = 0;
+  const api = makeApi({
+    singleChannelSsh: true, remoteSshVersion: "SSH-2.0-CLOUDBILITY-4.14",
+    stream: {},
+    conn: {
+      exec() { execCalls += 1; },
+    },
+  });
+
+  const result = await api.listSessionDir(null, { sessionId: "session-1", path: "." });
+
+  assert.equal(result.success, false);
+  assert.match(result.error, /extra exec channels/);
+  assert.deepEqual(result.entries, []);
+  assert.equal(execCalls, 0);
+});

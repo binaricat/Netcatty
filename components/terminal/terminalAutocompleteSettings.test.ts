@@ -52,7 +52,7 @@ test("keeps network-device autocomplete popup but disables live preview (#1193)"
       showGhostText: false,
       showPopupMenu: true,
       livePreview: false,
-      allowLineReplacement: true,
+      allowLineReplacement: false,
       debounceMs: 100,
       minChars: 1,
       maxSuggestions: 8,
@@ -65,7 +65,7 @@ test("keeps network-device autocomplete popup but disables live preview (#1193)"
       protocol: "ssh",
       isNetworkDevice: true,
     }),
-    { livePreview: false },
+    { livePreview: false, allowLineReplacement: false },
   );
 });
 
