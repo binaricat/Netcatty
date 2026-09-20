@@ -242,6 +242,13 @@ export const STORAGE_KEY_SSH_TRANSPORT_IDLE_TTL_MS = 'netcatty_ssh_transport_idl
 // Workspace Focus Indicator Style
 export const STORAGE_KEY_WORKSPACE_FOCUS_STYLE = 'netcatty_workspace_focus_style_v1';
 
+/**
+ * Default side panel layout (split panes + tools) the user promoted from a
+ * live workspace; applied automatically to freshly connected sessions.
+ * Device-local only, not part of the sync payload.
+ */
+export const STORAGE_KEY_WORKSPACE_LAYOUT_PRESET = 'netcatty_workspace_layout_preset_v1';
+
 // Vault: Show Recently Connected hosts section
 export const STORAGE_KEY_SHOW_RECENT_HOSTS = 'netcatty_show_recent_hosts_v1';
 export const STORAGE_KEY_HOST_CLICK_BEHAVIOR = 'netcatty_host_click_behavior_v1';

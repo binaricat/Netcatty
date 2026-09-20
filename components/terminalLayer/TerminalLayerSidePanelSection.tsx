@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { Activity, FolderTree, History, Maximize2, MessageSquare, Minimize2, NotebookText, Palette, PanelLeft, PanelRight, Play, SplitSquareHorizontal, SplitSquareVertical, X } from 'lucide-react';
+import { Activity, FolderTree, History, Maximize2, MessageSquare, Minimize2, NotebookText, Palette, PanelLeft, PanelRight, Play, Save, SplitSquareHorizontal, SplitSquareVertical, X } from 'lucide-react';
 import {
   buildSidePanelChromeThemeFromTerminalTheme,
   buildTerminalSidePanelCssVars,
@@ -1203,6 +1203,28 @@ function TerminalLayerSidePanelInner({ ctx }: { ctx: SidePanelContext }) {
                 t={t}
                 buttonColor={sidePanelTheme.mutedFg}
               />
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Btn
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 rounded-md p-0 hover:bg-transparent"
+                    style={{ color: sidePanelTheme.mutedFg }}
+                    disabled={!activeSidePanelLayout || !ctx.onSaveWorkspaceLayoutAsDefault}
+                    aria-label={t('terminal.layer.saveLayoutAsDefault')}
+                    onClick={() => {
+                      if (activeSidePanelLayout) {
+                        ctx.onSaveWorkspaceLayoutAsDefault?.(activeSidePanelLayout);
+                      }
+                    }}
+                  >
+                    <Save size={15} />
+                  </Btn>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">
+                  {t('terminal.layer.saveLayoutAsDefault')}
+                </TooltipContent>
+              </Tooltip>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Btn

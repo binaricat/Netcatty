@@ -118,9 +118,20 @@ import {
 import { classifyDistroId, shouldProbeSessionCwd } from '../domain/host';
 import {
   collectSidePanelPanes,
+  getFocusedSidePanelPane,
   sidePanelLayoutHasTool,
+  type SidePanelLayout,
   type SidePanelSplitDirection,
 } from '../domain/sidePanelLayout';
+import {
+  createWorkspaceLayoutPreset,
+  rekeySidePanelLayout,
+  withoutUnavailableSidePanelTools,
+} from '../domain/workspaceLayoutPreset';
+import {
+  readWorkspaceLayoutPreset,
+  writeWorkspaceLayoutPreset,
+} from '../application/state/workspaceLayoutPresetStore';
 import {
   isPaneMagnificationSelectionValid,
   resolvePaneMagnificationCandidate,
@@ -455,6 +466,87 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   const sftpFollowTerminalCwdRef = useRef(sftpFollowTerminalCwd);
   sftpFollowTerminalCwdRef.current = sftpFollowTerminalCwd;
 
+  const applyWorkspaceLayoutPresetForSession = useCallback((session: TerminalSession, tabId: string) => {
+    const preset = readWorkspaceLayoutPreset();
+    if (!preset) return false;
+
+    // Keep SFTP panes only when the session can actually serve them, mirroring
+    // the single-tool auto-open availability rules.
+    const proto = session.protocol ?? 'ssh';
+    const sftpAvailable = proto === 'local' || proto === 'ssh' || proto === 'mosh';
+    const usable = withoutUnavailableSidePanelTools(
+      preset.layout,
+      (tool) => tool !== 'sftp' || sftpAvailable,
+    );
+    if (!usable) return false;
+
+    // Fresh ids so several workspaces can run the same preset in parallel.
+    const layout = rekeySidePanelLayout(usable, () => crypto.randomUUID());
+    const focusedTool = getFocusedSidePanelPane(layout).tool;
+
+    for (const pane of collectSidePanelPanes(layout.root)) {
+      if (pane.tool === 'ai') {
+        setAiMountedTabIds((prev) => addMountedSidePanelTabId(prev, tabId));
+      } else if (pane.tool === 'scripts') {
+        setScriptsMountedTabIds((prev) => addMountedSidePanelTabId(prev, tabId));
+      } else if (pane.tool === 'theme') {
+        setThemeMountedTabIds((prev) => addMountedSidePanelTabId(prev, tabId));
+      } else if (pane.tool === 'system') {
+        setSystemMountedTabIds((prev) => addMountedSidePanelTabId(prev, tabId));
+      } else if (pane.tool === 'notes') {
+        setNotesMountedTabIds((prev) => addMountedSidePanelTabId(prev, tabId));
+      } else if (pane.tool === 'sftp') {
+        sftpPaneClosedTabIdsRef.current.delete(tabId);
+        const host = hostsRef.current.find(h => h.id === session.hostId);
+        const hostWithOverrides: Host = host
+          ? {
+            ...host,
+            protocol: session.protocol ?? host.protocol,
+            port: session.port ?? host.port,
+            moshEnabled: session.moshEnabled ?? host.moshEnabled,
+            etEnabled: session.etEnabled ?? host.etEnabled,
+          }
+          : {
+            id: session.hostId || session.id,
+            hostname: session.hostname,
+            username: session.username,
+            port: session.port ?? 22,
+            protocol: proto,
+            label: session.customName || session.hostLabel || session.hostname,
+          } as Host;
+        setSftpHostForTab(prev => {
+          const next = new Map(prev);
+          next.set(tabId, hostWithOverrides);
+          return next;
+        });
+      }
+    }
+
+    setSidePanelLayouts((prev) => {
+      const next = new Map(prev);
+      next.set(tabId, layout);
+      return next;
+    });
+    lastSidePanelTabRef.current.set(tabId, focusedTool);
+    setSidePanelOpenTabs(prev => {
+      const next = new Map(prev);
+      next.set(tabId, focusedTool);
+      return next;
+    });
+    return true;
+  }, [setSidePanelLayouts, setSidePanelOpenTabs]);
+
+  const handleSaveWorkspaceLayoutAsDefault = useCallback((layout: SidePanelLayout): boolean => {
+    const preset = createWorkspaceLayoutPreset(layout);
+    if (!preset) return false;
+    if (!writeWorkspaceLayoutPreset(preset)) {
+      toast.error(t('terminal.layer.layoutSaveFailed'));
+      return false;
+    }
+    toast.success(t('terminal.layer.layoutSavedAsDefault'));
+    return true;
+  }, [t]);
+
   const handleStatusChange = useCallback((sessionId: string, status: TerminalSession['status']) => {
     onUpdateSessionStatus(sessionId, status);
 
@@ -466,6 +558,9 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     const tabId = session.workspaceId || sessionId;
 
     if (sidePanelOpenTabsRef.current.has(tabId)) return;
+
+    // A saved default layout wins over the single-tool auto-open preference.
+    if (applyWorkspaceLayoutPresetForSession(session, tabId)) return;
 
     const targetPanel = resolveSessionSidePanelAutoOpen({
       session,
@@ -521,7 +616,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       next.set(tabId, targetPanel);
       return next;
     });
-  }, [onUpdateSessionStatus, setSidePanelOpenTabs, sidePanelOpenTabsRef]);
+  }, [applyWorkspaceLayoutPresetForSession, onUpdateSessionStatus, setSidePanelOpenTabs, sidePanelOpenTabsRef]);
 
   const handleSessionExit = useCallback((sessionId: string, evt: TerminalSessionExitEvent) => {
     const intent = resolveTerminalSessionExitIntent(
@@ -2423,6 +2518,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     setSftpFollowTerminalCwd,
     setSftpHostForTab,
     setSftpInitialLocationForTab,
+    onSaveWorkspaceLayoutAsDefault: handleSaveWorkspaceLayoutAsDefault,
     setSftpPendingUploadsForTab,
     showHostTreeSidebar,
     sidePanelOpenTabs,
