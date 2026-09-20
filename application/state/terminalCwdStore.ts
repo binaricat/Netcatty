@@ -1,6 +1,6 @@
 type Listener = () => void;
 
-export type TerminalCwdSource = "osc7" | "backend-strict" | "backend" | "snapshot" | "stale" | "unknown";
+export type TerminalCwdSource = "osc7" | "prompt" | "backend-strict" | "backend" | "snapshot" | "stale" | "unknown";
 
 /**
  * Live terminal CWD map + version token.
@@ -10,6 +10,7 @@ export type TerminalCwdSource = "osc7" | "backend-strict" | "backend" | "snapsho
 class TerminalCwdStore {
   private cwdBySession = new Map<string, string>();
   private sourceBySession = new Map<string, TerminalCwdSource>();
+  private liveCwdReaders = new Map<string, () => string | null>();
   private version = 0;
   private listeners = new Set<Listener>();
 
@@ -23,6 +24,25 @@ class TerminalCwdStore {
   getSource = (sessionId: string | null | undefined): TerminalCwdSource | undefined => {
     if (!sessionId) return undefined;
     return this.sourceBySession.get(sessionId);
+  };
+
+  registerLiveCwdReader = (sessionId: string, reader: () => string | null): (() => void) => {
+    this.liveCwdReaders.set(sessionId, reader);
+    return () => {
+      if (this.liveCwdReaders.get(sessionId) === reader) {
+        this.liveCwdReaders.delete(sessionId);
+      }
+    };
+  };
+
+  readLiveCwd = (sessionId: string | null | undefined): string | null => {
+    if (!sessionId) return null;
+    try {
+      const cwd = this.liveCwdReaders.get(sessionId)?.() ?? null;
+      return cwd && cwd.trim().length > 0 ? cwd : null;
+    } catch {
+      return null;
+    }
   };
 
   subscribe = (listener: Listener): (() => void) => {
@@ -61,6 +81,13 @@ class TerminalCwdStore {
       if (!validSessionIds.has(sessionId)) {
         this.cwdBySession.delete(sessionId);
         this.sourceBySession.delete(sessionId);
+        this.liveCwdReaders.delete(sessionId);
+        changed = true;
+      }
+    }
+    for (const sessionId of [...this.liveCwdReaders.keys()]) {
+      if (!validSessionIds.has(sessionId)) {
+        this.liveCwdReaders.delete(sessionId);
         changed = true;
       }
     }

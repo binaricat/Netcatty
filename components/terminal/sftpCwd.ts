@@ -1,4 +1,8 @@
+import type { Terminal as XTerm } from "@xterm/xterm";
 import type { TerminalCwdSource } from "../../application/state/terminalCwdStore";
+import { resolveTerminalCwdForSftp } from "../../domain/sftpFollowTerminalCwd";
+import { extractPosixCwdFromPrompt } from "./autocomplete/terminalAutocompleteLayout";
+import { getAlignedPrompt } from "./autocomplete/promptDetector";
 
 type SessionPwdResult = {
   success: boolean;
@@ -15,7 +19,24 @@ type SessionPwdOptions = {
 };
 
 export type RendererCwdSource = TerminalCwdSource;
+export { resolveTerminalCwdForSftp };
 export type TerminalCwdChangeMeta = { source?: RendererCwdSource };
+
+export const isLiveTerminalCwdSource = (source?: RendererCwdSource | null): boolean =>
+  source === "osc7" || source === "prompt";
+
+export const isUsablePosixPromptCwd = (cwd?: string | null): cwd is string => {
+  if (typeof cwd !== "string" || cwd.trim().length === 0) return false;
+  return cwd === "~" || cwd.startsWith("~/") || cwd.startsWith("/");
+};
+
+/** Read cwd from the visible shell prompt. Used when extra exec pwd is unsafe. */
+export const readPromptCwdFromXterm = (term?: XTerm | null): string | null => {
+  if (!term) return null;
+  const { prompt } = getAlignedPrompt(term, "", true);
+  const cwd = extractPosixCwdFromPrompt(prompt.promptText || "");
+  return isUsablePosixPromptCwd(cwd) ? cwd : null;
+};
 
 type ResolvePreferredTerminalCwdOptions = {
   rendererCwd?: string | null;
@@ -90,11 +111,11 @@ export const resolvePreferredTerminalCwd = async ({
   requireActiveShellCwd = false,
 }: ResolvePreferredTerminalCwdOptions): Promise<string | null> => {
   const knownCwd = normalizeCwd(rendererCwd);
-  if (requireActiveShellCwd && knownCwd && rendererCwdSource === "osc7") {
+  if (requireActiveShellCwd && knownCwd && isLiveTerminalCwdSource(rendererCwdSource)) {
     return knownCwd;
   }
   const canUseRendererFallback = allowRendererFallback && (
-    !requireActiveShellCwd || rendererCwdSource === "osc7"
+    !requireActiveShellCwd || isLiveTerminalCwdSource(rendererCwdSource)
   );
   if (!preferFreshBackend && knownCwd && canUseRendererFallback) return knownCwd;
   if (!sessionId) return canUseRendererFallback ? knownCwd : null;

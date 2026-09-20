@@ -285,3 +285,22 @@ test("probeBackendSessionCwdAfterCommand still probes when cwd path is unchanged
 
   assert.equal(cwd, "/srv/app");
 });
+
+test("active-shell cwd resolution trusts a live prompt cwd without extra exec", async () => {
+  let backendCalls = 0;
+  const cwd = await resolvePreferredTerminalCwd({
+    rendererCwd: "~",
+    rendererCwdSource: "prompt",
+    sessionId: "session-1",
+    preferFreshBackend: true,
+    allowRendererFallback: false,
+    requireActiveShellCwd: true,
+    getSessionPwd: async () => {
+      backendCalls += 1;
+      return { success: false, error: "extra exec channels" };
+    },
+  });
+
+  assert.equal(cwd, "~");
+  assert.equal(backendCalls, 0);
+});

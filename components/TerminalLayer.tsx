@@ -1387,11 +1387,13 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     const sessionId = getActiveTerminalSessionId();
     const host = sessionId ? sessionHostsMapRef.current.get(sessionId) : undefined;
     const skipBackendPwd = hostRestrictsExtraSshChannels(host);
+    const promptCwd = skipBackendPwd ? terminalCwdStore.readLiveCwd(sessionId) : null;
     return resolvePreferredTerminalCwd({
-      rendererCwd: sessionId ? terminalRendererCwdBySessionRef.current.get(sessionId) : undefined,
-      rendererCwdSource: sessionId
-        ? terminalRendererCwdSourceBySessionRef.current.get(sessionId)
-        : undefined,
+      rendererCwd: promptCwd
+        ?? (sessionId ? terminalRendererCwdBySessionRef.current.get(sessionId) : undefined),
+      rendererCwdSource: promptCwd
+        ? "prompt"
+        : (sessionId ? terminalRendererCwdSourceBySessionRef.current.get(sessionId) : undefined),
       sessionId,
       getSessionPwd: skipBackendPwd
         ? async () => ({ success: false })
