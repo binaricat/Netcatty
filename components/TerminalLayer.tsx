@@ -583,22 +583,22 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
 
     if (targetPanel === 'sftp') {
       sftpPaneClosedTabIdsRef.current.delete(tabId);
-      const host = hostsRef.current.find(h => h.id === session.hostId);
+      const host = hostsRef.current.find(h => h.id === presetSession.hostId);
       const hostWithOverrides: Host = host
         ? {
           ...host,
-          protocol: session.protocol ?? host.protocol,
-          port: session.port ?? host.port,
-          moshEnabled: session.moshEnabled ?? host.moshEnabled,
-          etEnabled: session.etEnabled ?? host.etEnabled,
+          protocol: presetSession.protocol ?? host.protocol,
+          port: presetSession.port ?? host.port,
+          moshEnabled: presetSession.moshEnabled ?? host.moshEnabled,
+          etEnabled: presetSession.etEnabled ?? host.etEnabled,
         }
         : {
-          id: session.hostId || sessionId,
-          hostname: session.hostname,
-          username: session.username,
-          port: session.port ?? 22,
+          id: presetSession.hostId || presetSession.id,
+          hostname: presetSession.hostname,
+          username: presetSession.username,
+          port: presetSession.port ?? 22,
           protocol: proto,
-          label: session.label || session.hostname,
+          label: presetSession.customName || presetSession.hostLabel || presetSession.hostname,
         } as Host;
 
       setSftpHostForTab(prev => {
