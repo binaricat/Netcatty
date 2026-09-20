@@ -566,6 +566,7 @@ export function TerminalLayerTabBridge({ stableRef }: { stableRef: StableRef }) 
     onOpenVaultHostFromChat: s.onOpenVaultHostFromChat,
     onOpenVaultSectionFromChat: s.onOpenVaultSectionFromChat,
     onOpenVaultSnippetFromChat: s.onOpenVaultSnippetFromChat,
+    onSaveWorkspaceLayoutAsDefault: s.onSaveWorkspaceLayoutAsDefault,
     onStartSessionDrag: s.onStartSessionDrag,
     onEndSessionDrag: s.onEndSessionDrag,
     onSplitSession: s.onSplitSession,
