@@ -571,8 +571,12 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
 
     if (sidePanelOpenTabsRef.current.has(tabId)) return;
 
-    // A saved default layout wins over the single-tool auto-open preference.
-    if (applyWorkspaceLayoutPresetForSession(presetSession, tabId)) return;
+    // Explicit SFTP (JumpServer deep link / host.autoOpenSftpPanel) wins over a
+    // saved default that may omit file transfer. Ordinary auto-open still
+    // yields to the saved default.
+    if (presetSession.autoOpenSidePanel !== "sftp") {
+      if (applyWorkspaceLayoutPresetForSession(presetSession, tabId)) return;
+    }
 
     const targetPanel = resolveSessionSidePanelAutoOpen({
       session: presetSession,
