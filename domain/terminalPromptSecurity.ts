@@ -192,6 +192,9 @@ export function isUntrustedTerminalInputPrompt(
   const prompt = lastLogicalLine(value).trim();
   if (!prompt) return false;
   if (isSensitiveTerminalChallenge(prompt)) return true;
+  // Vim/ex command-line (`:` / `:w`). Broadcast paused here because the
+  // fail-closed colon heuristic treated it as `Password:`-shaped input (#3422).
+  if (/^:/.test(prompt)) return false;
   if (!/[:：>›»]\s*$/u.test(prompt)) return false;
   // Mid-command punctuation after a real shell prompt must keep broadcasting
   // (#2709). Standalone `Label:` / `Custom>` challenges still fail closed.

@@ -112,6 +112,9 @@ function isUntrustedTerminalInputPrompt(value, options = {}) {
   const prompt = lastLogicalLine(value).trim();
   if (!prompt) return false;
   if (isSensitiveTerminalChallenge(prompt)) return true;
+  // Vim/ex command-line (`:` / `:w`). Broadcast paused here because the
+  // fail-closed colon heuristic treated it as `Password:`-shaped input (#3422).
+  if (/^:/.test(prompt)) return false;
   if (!/[:：>›»]\s*$/u.test(prompt)) return false;
   if (hasTypedInputAfterConfirmedPrompt(prompt, options)) return false;
   return !isConfirmedTerminalShellPrompt(prompt, options);
