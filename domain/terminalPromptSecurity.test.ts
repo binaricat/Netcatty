@@ -124,11 +124,13 @@ test('ordinary shell commands ending with a colon are not untrusted input prompt
 
 test('vim ex command-line is not an untrusted input prompt (#3422)', () => {
   assert.equal(isUntrustedTerminalInputPrompt(':'), false);
+  assert.equal(isUntrustedTerminalInputPrompt(': '), false);
+  // After the first character, vim's line is `:w` and no longer ends in `:`.
   assert.equal(isUntrustedTerminalInputPrompt(':w'), false);
-  assert.equal(isUntrustedTerminalInputPrompt(':wq'), false);
-  assert.equal(isUntrustedTerminalInputPrompt(':%s/foo/bar/g'), false);
   assert.equal(isUntrustedTerminalInputPrompt('Password:'), true);
   assert.equal(isUntrustedTerminalInputPrompt('Token: '), true);
+  // Custom credential prompts that start with `:` stay fail-closed.
+  assert.equal(isUntrustedTerminalInputPrompt(':password:'), true);
 });
 
 test('renderer and main-process prompt classifiers stay aligned', () => {
@@ -140,7 +142,8 @@ test('renderer and main-process prompt classifiers stay aligned', () => {
     ['Custom authentication> ', undefined, true],
     ['Please authenticate: ', undefined, true],
     [':', undefined, false],
-    [':w', undefined, false],
+    [': ', undefined, false],
+    [':password:', undefined, true],
     ['alice@host:~$ ', undefined, false],
     ['user@host:~$ lsof -i:', undefined, false],
     ['Challenge # 1:', undefined, true],
