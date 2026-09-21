@@ -924,6 +924,52 @@ const applyLocaleDefaults = (env) => {
 };
 
 /**
+ * Compose the environment for a local terminal / PTY child.
+ *
+ * A terminal should see the PATH a brand-new cmd/PowerShell would inherit, not
+ * the snapshot the Electron main process captured at launch: a GUI-launched or
+ * auto-started Netcatty keeps that snapshot for its entire lifetime, so CLIs
+ * installed or upgraded afterwards stay invisible inside local terminals while
+ * resolving fine in an external shell. `resolveWindowsLivePath` re-reads the
+ * registry on Windows to close that gap.
+ *
+ * Host-level `environmentVariables` overrides are applied on top, and an
+ * explicit PATH among them always wins — widening it would defeat the override.
+ */
+function buildLocalSessionEnv(
+  payload,
+  { baseEnv = process.env, platform = process.platform, refreshWindowsPath } = {},
+) {
+  const { buildTerminalProcessEnv } = require("./httpNetworkProxyBridge.cjs");
+  const env = { ...buildTerminalProcessEnv(baseEnv), ...(payload?.env || {}) };
+  if (platform !== "win32") return env;
+
+  const { getPathEnvKey, resolveWindowsLivePath } = require("./ai/shellUtils.cjs");
+  // The override's own spelling wins so collapsing duplicates below can never
+  // discard the value the user asked for.
+  const overridePathKey = Object.keys(payload?.env || {}).find(
+    (key) => key.toLowerCase() === "path",
+  );
+  const pathKey = overridePathKey || getPathEnvKey(env, platform);
+
+  if (!overridePathKey) {
+    const livePath = (refreshWindowsPath || resolveWindowsLivePath)({
+      basePath: env[pathKey],
+      env,
+      platform,
+    });
+    if (livePath) env[pathKey] = livePath;
+  }
+
+  // Windows compares variable names case-insensitively, so keeping both `Path`
+  // and `PATH` in the block leaves the effective value arbitrary.
+  for (const key of Object.keys(env)) {
+    if (key !== pathKey && key.toLowerCase() === "path") delete env[key];
+  }
+  return env;
+}
+
+/**
  * Start a local terminal session
  */
 function startLocalSession(event, payload) {
@@ -949,10 +995,8 @@ function startLocalSession(event, payload) {
     requestedCwd,
   );
   const shellKind = detectShellKind(shell);
-  const { buildTerminalProcessEnv } = require("./httpNetworkProxyBridge.cjs");
   const env = applyLocaleDefaults({
-    ...buildTerminalProcessEnv(process.env),
-    ...(payload?.env || {}),
+    ...buildLocalSessionEnv(payload),
     TERM: "xterm-256color",
     COLORTERM: "truecolor",
   });
@@ -2749,6 +2793,7 @@ module.exports = {
   findExecutable,
   getDefaultLocalShell,
   getWslLaunchArgs,
+  buildLocalSessionEnv,
   startLocalSession,
   startTelnetSession,
   startMoshSession,

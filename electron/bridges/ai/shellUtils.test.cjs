@@ -21,6 +21,8 @@ const {
   expandWindowsEnvRefs,
   mergeWindowsPath,
   readWindowsRegistryPath,
+  readWindowsRegistryPathSync,
+  resolveWindowsLivePath,
   trackSessionIdlePrompt,
 } = require("./shellUtils.cjs");
 const fs = require("node:fs");
@@ -599,6 +601,79 @@ test("readWindowsRegistryPath tolerates a failing hive query", async () => {
   };
   const out = await readWindowsRegistryPath({ exec, env: {} });
   assert.equal(out, "C:\\tools");
+});
+
+test("readWindowsRegistryPathSync mirrors the async reader for non-awaiting callers", () => {
+  const exec = (cmd, args) => {
+    assert.equal(cmd, "reg");
+    if (args[1] === "HKCU\\Environment") {
+      return "    Path    REG_EXPAND_SZ    %APPDATA%\\npm\r\n";
+    }
+    return "    Path    REG_EXPAND_SZ    C:\\Windows\\System32\r\n";
+  };
+  const out = readWindowsRegistryPathSync({ exec, env: { APPDATA: "C:\\Roaming" } });
+  assert.equal(out, "C:\\Roaming\\npm;C:\\Windows\\System32");
+});
+
+test("readWindowsRegistryPathSync tolerates a failing hive query", () => {
+  const exec = (cmd, args) => {
+    if (args[1] === "HKCU\\Environment") throw new Error("ERROR: cannot read");
+    return "    Path    REG_SZ    C:\\tools\r\n";
+  };
+  assert.equal(readWindowsRegistryPathSync({ exec, env: {} }), "C:\\tools");
+});
+
+test("resolveWindowsLivePath front-loads a freshly installed CLI over the stale PATH", () => {
+  // The reported regression: a long-running app captured a PATH whose herdr
+  // entry still points at the previous release directory, which the upgrade
+  // removed, so the stale entry no longer resolves anything.
+  const stalePath = "C:\\Users\\me\\.herdr\\packages\\standalone\\releases\\0.8.2-x86_64;C:\\Windows\\System32";
+  const exec = (cmd, args) => {
+    if (args[1] === "HKCU\\Environment") {
+      return "    Path    REG_EXPAND_SZ    C:\\Users\\me\\.herdr\\packages\\standalone\\releases\\0.9.1-x86_64\r\n";
+    }
+    return "    Path    REG_EXPAND_SZ    C:\\Windows\\System32\r\n";
+  };
+
+  const out = resolveWindowsLivePath({
+    basePath: stalePath,
+    exec,
+    env: {},
+    platform: "win32",
+    knownCliDirs: () => [],
+  });
+
+  assert.equal(
+    out,
+    "C:\\Users\\me\\.herdr\\packages\\standalone\\releases\\0.9.1-x86_64;C:\\Windows\\System32;"
+      + "C:\\Users\\me\\.herdr\\packages\\standalone\\releases\\0.8.2-x86_64",
+  );
+});
+
+test("resolveWindowsLivePath keeps the captured PATH off Windows", () => {
+  const exec = () => {
+    throw new Error("the registry must not be queried off Windows");
+  };
+  const out = resolveWindowsLivePath({
+    basePath: "/usr/local/bin:/usr/bin",
+    exec,
+    platform: "darwin",
+  });
+  assert.equal(out, "/usr/local/bin:/usr/bin");
+});
+
+test("resolveWindowsLivePath falls back to the captured PATH when the registry is unreadable", () => {
+  const exec = () => {
+    throw new Error("access denied");
+  };
+  const out = resolveWindowsLivePath({
+    basePath: "C:\\Windows\\System32",
+    exec,
+    env: {},
+    platform: "win32",
+    knownCliDirs: () => [],
+  });
+  assert.equal(out, "C:\\Windows\\System32");
 });
 
 test("tracks PowerShell idle prompt after SSH output", () => {

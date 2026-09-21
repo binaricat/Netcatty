@@ -832,25 +832,91 @@ function getWindowsKnownCliPathDirs(env = process.env) {
   return dirs.filter((dir) => existsSync(dir));
 }
 
+// The hives a brand-new shell reads its PATH from, in Windows' own order:
+// user scope first, then machine scope.
+const WINDOWS_PATH_HIVES = [
+  "HKCU\\Environment",
+  "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment",
+];
+
+function collectWindowsRegistryPath(stdout, env, parts) {
+  const raw = parseRegQueryPath(stdout);
+  if (raw) parts.push(expandWindowsEnvRefs(raw, env));
+}
+
 async function readWindowsRegistryPath({ exec = execFileAsync, env = process.env } = {}) {
-  const hives = [
-    "HKCU\\Environment",
-    "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment",
-  ];
   const parts = [];
-  for (const hive of hives) {
+  for (const hive of WINDOWS_PATH_HIVES) {
     try {
       const { stdout } = await exec("reg", ["query", hive, "/v", "Path"], {
         encoding: "utf8",
         timeout: 3000,
       });
-      const raw = parseRegQueryPath(stdout);
-      if (raw) parts.push(expandWindowsEnvRefs(raw, env));
+      collectWindowsRegistryPath(stdout, env, parts);
     } catch {
       // Hive unreadable / value missing — skip and rely on other sources.
     }
   }
   return parts.join(";");
+}
+
+/**
+ * Synchronous twin of readWindowsRegistryPath() for callers that cannot await,
+ * such as local terminal startup, which spawns the PTY inline.
+ */
+function readWindowsRegistryPathSync({ exec = execFileSync, env = process.env } = {}) {
+  const parts = [];
+  for (const hive of WINDOWS_PATH_HIVES) {
+    try {
+      const stdout = exec("reg", ["query", hive, "/v", "Path"], {
+        encoding: "utf8",
+        timeout: 3000,
+        windowsHide: true,
+      });
+      collectWindowsRegistryPath(stdout, env, parts);
+    } catch {
+      // Hive unreadable / value missing — skip and rely on other sources.
+    }
+  }
+  return parts.join(";");
+}
+
+/**
+ * Windows only: put the live registry PATH ahead of an already-captured PATH.
+ *
+ * Long-lived processes keep the PATH they were launched with, so anything the
+ * user installs or upgrades afterwards is invisible to them — including tools
+ * whose installer rewrites a versioned user-PATH entry, where the stale entry
+ * points at a directory the upgrade removed. Merging the registry value (what
+ * a fresh shell inherits) ahead of the captured one resolves those CLIs
+ * without a restart. Returns `basePath` unchanged off Windows, or when the
+ * registry cannot be read.
+ */
+function resolveWindowsLivePath({
+  basePath,
+  exec,
+  env = process.env,
+  platform = process.platform,
+  knownCliDirs = getWindowsKnownCliPathDirs,
+} = {}) {
+  if (platform !== "win32") return basePath;
+
+  let registryPath = "";
+  try {
+    registryPath = readWindowsRegistryPathSync({ exec, env });
+  } catch {
+    registryPath = "";
+  }
+
+  let knownDirs = "";
+  try {
+    knownDirs = (knownCliDirs(env) || []).join(";");
+  } catch {
+    knownDirs = "";
+  }
+
+  if (!registryPath && !knownDirs) return basePath;
+  return mergeWindowsPath(registryPath, knownDirs, basePath || "");
 }
 
 async function getShellEnv() {
@@ -991,10 +1057,13 @@ module.exports = {
   toUnpackedAsarPath,
   isPlausibleCliVersionOutput,
   mergeLoginShellPath,
+  getPathEnvKey,
   parseRegQueryPath,
   expandWindowsEnvRefs,
   mergeWindowsPath,
   readWindowsRegistryPath,
+  readWindowsRegistryPathSync,
+  resolveWindowsLivePath,
   getShellEnv,
   invalidateShellEnvCache,
 };
