@@ -68,7 +68,7 @@ function collectJmsDeepLinkUrls(argv) {
   return collectDeepLinkUrls(argv, JMS_PROTOCOL);
 }
 
-function collectPuttyStyleDeepLinkUrls(argv) {
+function collectPuttyStyleDeepLinkIntents(argv) {
   if (
     collectSshDeepLinkUrls(argv).length > 0
     || collectTelnetDeepLinkUrls(argv).length > 0
@@ -84,10 +84,19 @@ function collectPuttyStyleDeepLinkUrls(argv) {
   const secureCrt = parseSecureCrtCommandLineTokens(argv);
   const parsed = secureCrt ? secureCrt.result : parsePuttyCommandLine(argv);
   if (!parsed?.url) return { ssh: [], telnet: [] };
+  const intent = { rawUrl: parsed.url, tabName: parsed.tabName };
   if (parsed.protocol === TELNET_PROTOCOL) {
-    return { ssh: [], telnet: [parsed.url] };
+    return { ssh: [], telnet: [intent] };
   }
-  return { ssh: [parsed.url], telnet: [] };
+  return { ssh: [intent], telnet: [] };
+}
+
+function collectPuttyStyleDeepLinkUrls(argv) {
+  const intents = collectPuttyStyleDeepLinkIntents(argv);
+  return {
+    ssh: intents.ssh.map((intent) => intent.rawUrl),
+    telnet: intents.telnet.map((intent) => intent.rawUrl),
+  };
 }
 
 /**
@@ -98,7 +107,7 @@ function collectPuttyStyleDeepLinkUrls(argv) {
  * gated by includeSchemeUrls through the scheme-URL part of the queue.
  */
 function collectSshDeepLinkQueueItems(argv, { includeSchemeUrls = true } = {}) {
-  const puttyStyleDeepLinks = collectPuttyStyleDeepLinkUrls(argv);
+  const puttyStyleDeepLinks = collectPuttyStyleDeepLinkIntents(argv);
   const queueItems = {
     ssh: [],
     telnet: [],
@@ -111,11 +120,19 @@ function collectSshDeepLinkQueueItems(argv, { includeSchemeUrls = true } = {}) {
       queueItems.telnet.push({ rawUrl, viaCommandLine: false });
     });
   }
-  puttyStyleDeepLinks.ssh.forEach((rawUrl) => {
-    queueItems.ssh.push({ rawUrl, viaCommandLine: true });
+  puttyStyleDeepLinks.ssh.forEach((intent) => {
+    queueItems.ssh.push({
+      rawUrl: intent.rawUrl,
+      viaCommandLine: true,
+      ...(intent.tabName ? { tabName: intent.tabName } : {}),
+    });
   });
-  puttyStyleDeepLinks.telnet.forEach((rawUrl) => {
-    queueItems.telnet.push({ rawUrl, viaCommandLine: true });
+  puttyStyleDeepLinks.telnet.forEach((intent) => {
+    queueItems.telnet.push({
+      rawUrl: intent.rawUrl,
+      viaCommandLine: true,
+      ...(intent.tabName ? { tabName: intent.tabName } : {}),
+    });
   });
   return queueItems;
 }
