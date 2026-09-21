@@ -165,6 +165,7 @@ import {
   type TerminalOutputHistoryPreview,
 } from "./terminalOutputHistory";
 import { shouldPassThroughCopyShortcut } from "./terminalCopyShortcut";
+import { isPlainCtrlVPasteChord } from "./terminalPasteChord";
 import {
   isMacCommandPeriodInterruptChord,
   shouldUseUrgentTerminalInterrupt,
@@ -2416,6 +2417,36 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
             return false;
           }
         }
+      }
+    }
+
+    // Windows dictation / voice tools (Wispr Flow, Typeless, ...) deliver
+    // their transcript by placing it on the clipboard and simulating the
+    // system paste chord, plain Ctrl+V. While the terminal owns keyboard
+    // focus the window ignores menu shortcuts, so the chord is not turned
+    // into a browser paste event and xterm's legacy path forwards it to the
+    // remote as \x16 (readline quoted-insert) — the transcript never lands
+    // (#3468). Route the unmodified Ctrl+V through the shared paste pipeline
+    // like the Ctrl+Shift+V binding: text pastes, and a local image-only
+    // clipboard still forwards raw Ctrl+V to nested TUIs. Kitty and
+    // negotiated Win32 input modes keep their own raw encoding of the chord.
+    if (
+      !isMac
+      && !kittySequenceForKeyDown
+      && !term.modes.win32InputMode
+      && !e.isComposing
+      && e.keyCode !== 229
+      && isPlainCtrlVPasteChord(e)
+    ) {
+      const id = ctx.sessionRef.current;
+      if (id && ctx.statusRef.current === "connected") {
+        e.preventDefault();
+        e.stopPropagation();
+        // Always share the context-menu paste path so local image-only
+        // clipboard can forward Ctrl+V, and remote auto-upload stays
+        // gated inside handleTerminalClipboardPaste.
+        void ctx.terminalContextActionsRef?.current?.onPaste?.();
+        return false;
       }
     }
 
