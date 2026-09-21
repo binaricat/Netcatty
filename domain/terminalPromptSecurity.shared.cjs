@@ -112,10 +112,9 @@ function isUntrustedTerminalInputPrompt(value, options = {}) {
   const prompt = lastLogicalLine(value).trim();
   if (!prompt) return false;
   if (isSensitiveTerminalChallenge(prompt)) return true;
-  // Vim/ex command-mode entry. The last line is a bare `:`; further keys
-  // (`:w`) no longer match the trailing-colon heuristic. Do not exempt
-  // arbitrary `:`-prefixed prompts (`sudo -p ':'`).
-  if (/^:\s*$/.test(prompt)) return false;
+  // Vim command-mode entry on the alternate screen. A bare `:` on the
+  // primary screen stays fail-closed (`sudo -p ':'`).
+  if (options.alternateScreen && /^:\s*$/.test(prompt)) return false;
   if (!/[:：>›»]\s*$/u.test(prompt)) return false;
   if (hasTypedInputAfterConfirmedPrompt(prompt, options)) return false;
   return !isConfirmedTerminalShellPrompt(prompt, options);

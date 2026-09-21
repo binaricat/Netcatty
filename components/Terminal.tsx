@@ -1960,7 +1960,12 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       sensitivePromptOutputTailRef.current,
       chunk,
     );
-    const promptSecurityOptions = { allowHostStyleGreaterThan: isNetworkDevice };
+    const promptSecurityOptions = {
+      allowHostStyleGreaterThan: isNetworkDevice,
+      alternateScreen: termRef.current
+        ? isTerminalAlternateScreenActive(termRef.current)
+        : false,
+    };
     if (typeof meta?.pluginPipelineSensitiveInput === "boolean") {
       passwordPromptActiveRef.current = meta.pluginPipelineSensitiveInput;
       if (meta.pluginPipelineSensitiveInput) {
