@@ -168,7 +168,10 @@ test('password-prompt input is consumed before every semantic command callback',
 });
 
 test('terminal output treats unknown prompt-shaped input boundaries as sensitive', () => {
-  assert.match(terminalSource, /const promptSecurityOptions = \{ allowHostStyleGreaterThan: isNetworkDevice \};/);
+  assert.match(
+    terminalSource,
+    /const promptSecurityOptions = \{\s*allowHostStyleGreaterThan: isNetworkDevice,\s*alternateScreen: termRef\.current\s*\? isTerminalAlternateScreenActive\(termRef\.current\)\s*: false,\s*\};/,
+  );
   assert.match(terminalSource, /isUntrustedTerminalInputPrompt\([\s\S]*?promptSecurityOptions/);
   assert.match(terminalSource, /passwordPromptActiveRef\.current = true;[\s\S]*?autocompleteCloseRef\.current\?\.\(\);/);
   assert.match(terminalSource, /isConfirmedTerminalShellPrompt\([\s\S]*?passwordPromptActiveRef\.current = false;/);
