@@ -571,13 +571,6 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
 
     if (sidePanelOpenTabsRef.current.has(tabId)) return;
 
-    // Explicit SFTP (JumpServer deep link / host.autoOpenSftpPanel) wins over a
-    // saved default that may omit file transfer. Ordinary auto-open still
-    // yields to the saved default.
-    if (presetSession.autoOpenSidePanel !== "sftp") {
-      if (applyWorkspaceLayoutPresetForSession(presetSession, tabId)) return;
-    }
-
     const targetPanel = resolveSessionSidePanelAutoOpen({
       session: presetSession,
       terminalEnabled: terminalSidePanelAutoOpenRef.current,
@@ -586,7 +579,14 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       localTab: localShellSidePanelAutoOpenTabRef.current,
       legacySftpEnabled: sftpAutoOpenSidebarRef.current,
     });
-    if (!targetPanel) return;
+
+    // Explicit SFTP (JumpServer deep link / host.autoOpenSftpPanel) wins over a
+    // saved default that may omit file transfer — only when SFTP is actually
+    // available. Ordinary auto-open still yields to the saved default.
+    if (targetPanel !== "sftp") {
+      if (applyWorkspaceLayoutPresetForSession(presetSession, tabId)) return;
+      if (!targetPanel) return;
+    }
 
     lastSidePanelTabRef.current.set(tabId, targetPanel);
 
