@@ -412,7 +412,7 @@ const MODEL_DESCRIPTION_HINTS = Object.freeze({
   "vault.note.update":
     "Update an existing Vault → Notes entry (visible in the vault notes sidebar).",
   "vault.snippets.run":
-    "Text snippets (kind=snippet) paste shell commands with optional {{variables}}. Scripts (kind=script) run via nct JavaScript runtime — use scripts_run for script-only workflows.",
+    "Text snippets (kind=snippet) paste shell commands with optional named placeholders. Scripts (kind=script) run via nct JavaScript runtime — use scripts_run for script-only workflows.",
   "vault.snippets.create":
     "Create vault snippets (shell text) or scripts (kind=script, nct JavaScript). For multi-step terminal automation use kind=script and call scripts_reference.",
   "vault.scripts.run":

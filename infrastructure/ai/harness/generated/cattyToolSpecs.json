@@ -1231,7 +1231,7 @@
     "toolName": "snippets_run",
     "rpcMethod": "vault/snippets/run",
     "localExecution": false,
-    "description": "Run a vault snippet or automation script in a terminal session. Text snippets paste shell commands; scripts (kind=script) run via the nct JavaScript runtime. Text snippets (kind=snippet) paste shell commands with optional {{variables}}. Scripts (kind=script) run via nct JavaScript runtime — use scripts_run for script-only workflows.",
+    "description": "Run a vault snippet or automation script in a terminal session. Text snippets paste shell commands; scripts (kind=script) run via the nct JavaScript runtime. Text snippets (kind=snippet) paste shell commands with optional named placeholders. Scripts (kind=script) run via nct JavaScript runtime — use scripts_run for script-only workflows.",
     "inputShape": {
       "snippetId": {
         "type": "string",
