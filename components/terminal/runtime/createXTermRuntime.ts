@@ -2430,8 +2430,11 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     // like the Ctrl+Shift+V binding: text pastes, and a local image-only
     // clipboard still forwards raw Ctrl+V to nested TUIs. Kitty and
     // negotiated Win32 input modes keep their own raw encoding of the chord.
+    // Gate on the actual OS: on other platforms plain Ctrl+V is a live
+    // terminal key (readline quoted-insert, Vim visual-block), so it must
+    // keep forwarding as \x16 regardless of the configured hotkey scheme.
     if (
-      !isMac
+      platform === "win32"
       && !kittySequenceForKeyDown
       && !term.modes.win32InputMode
       && !e.isComposing
