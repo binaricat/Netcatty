@@ -194,6 +194,7 @@ export const useTerminalContextActions = ({
         getRemoteCwd,
         isLocalConnection,
         isSensitiveInput: () => passwordPromptActiveRef?.current === true,
+        broadcastPasswordBypass: () => broadcastPasswordBypassRef?.current === true,
         onClipboardImageUploadResult,
         readClipboardText: () => navigator.clipboard.readText(),
         scrollOnPaste: scrollOnPasteRef?.current ?? false,
@@ -208,6 +209,7 @@ export const useTerminalContextActions = ({
     }
   }, [
     autoUploadClipboardImageOnPasteRef,
+    broadcastPasswordBypassRef,
     broadcastUserPasteData,
     multilinePasteConfirmRef,
     getRemoteCwd,
@@ -272,6 +274,7 @@ export const useTerminalContextActions = ({
         : undefined,
       getCurrentSessionId: () => sessionRef.current,
       isSensitiveInput: () => passwordPromptActiveRef?.current === true,
+      broadcastPasswordBypass: () => broadcastPasswordBypassRef?.current === true,
       onPasteData: broadcastUserPasteData,
       scrollOnPaste: scrollOnPasteRef?.current ?? false,
       scrollToBottomAfterProgrammaticInput,
@@ -280,6 +283,7 @@ export const useTerminalContextActions = ({
       term,
     });
   }, [
+    broadcastPasswordBypassRef,
     broadcastUserPasteData,
     multilinePasteConfirmRef,
     normalizeTextOnCopyRef,

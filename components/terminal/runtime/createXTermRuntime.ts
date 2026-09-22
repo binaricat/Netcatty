@@ -2401,6 +2401,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
                   },
                   getCurrentSessionId: () => ctx.sessionRef.current,
                   isSensitiveInput: () => ctx.passwordPromptActiveRef?.current === true,
+                  broadcastPasswordBypass: () => ctx.broadcastPasswordBypassRef?.current === true,
                   onPasteData: broadcastUserPasteData,
                   scrollOnPaste: shouldScrollOnTerminalPaste(ctx.terminalSettingsRef.current),
                   scrollToBottomAfterProgrammaticInput: scrollToBottomAfterInput,
@@ -2874,9 +2875,15 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         acknowledgedWrite: true,
       });
       if (pending.broadcast && isTerminalBroadcastInputCurrent(pending.sourceInput)
-        && ctx.isBroadcastEnabledRef.current && !sensitive) {
+        && ctx.isBroadcastEnabledRef.current
+        // The #3488 bypass keeps the paced fan-out alive when this line was
+        // confirmed at (or lands on) a sensitive prompt.
+        && (!sensitive || ctx.broadcastPasswordBypassRef?.current === true)) {
         ctx.onBroadcastInputRef.current?.(`${index === 0 ? pending.firstPastedLine : command}\r`, ctx.sessionId, {
           pacedBroadcast: pending.broadcast,
+          // Bypassed sensitive fan-out (#3488): tag the line so peer writes
+          // keep input interceptors skipped, like raw-string broadcast does.
+          ...(sensitive ? { sourceSensitive: true } : {}),
         });
       }
       void pending.recordLine?.(index === 0 ? pending.firstPastedLine : command, {
@@ -2892,7 +2899,11 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     if (!sessionId) return;
     markTerminalBroadcastUserInput(ctx.sessionId);
     const sourceInput = captureTerminalBroadcastInput(ctx.sessionId);
-    const broadcast: TerminalPacedBroadcast | undefined = options.broadcast && !options.sensitive
+    // The #3488 bypass lets a paste confirmed at a sensitive prompt keep the
+    // paced fan-out: each acknowledged line is re-guarded on its receipt and
+    // the dispatcher keeps peer writes sensitive via the source marker.
+    const broadcast: TerminalPacedBroadcast | undefined = options.broadcast
+      && (!options.sensitive || ctx.broadcastPasswordBypassRef?.current === true)
       && ctx.isBroadcastEnabledRef.current ? {} : undefined;
     if (broadcast) ctx.onBroadcastInputRef.current?.("", ctx.sessionId, { pacedBroadcast: broadcast, preparePacedBroadcast: true });
     const requestId = crypto.randomUUID();

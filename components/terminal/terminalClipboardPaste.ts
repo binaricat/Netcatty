@@ -74,6 +74,8 @@ type TerminalClipboardPasteOptions = {
   getRemoteCwd?: () => Promise<string | null | undefined>;
   isLocalConnection: boolean;
   isSensitiveInput?: () => boolean;
+  /** Live #3488 bypass probe; forwarded to the multiline-confirm gate. */
+  broadcastPasswordBypass?: () => boolean;
   onClipboardImageUploadResult?: (result: RemoteClipboardImageUploadResult) => void;
   onPasteData?: (data: string, options?: { lineDelayMs?: number }) => boolean | void;
   readClipboardText: () => Promise<string>;
@@ -96,6 +98,13 @@ type MultilineGatedPasteOptions = {
    */
   getCurrentSessionId?: () => string | null | undefined;
   isSensitiveInput?: () => boolean;
+  /**
+   * Live probe for the opt-in #3488 "broadcast without password protection"
+   * bypass. When true, a paste confirmed at a sensitive prompt still fans out
+   * to broadcast peers through onPasteData / the paced line broadcast, while
+   * the paste itself keeps its sensitive marker for the source write.
+   */
+  broadcastPasswordBypass?: () => boolean;
   onPasteData?: (data: string, options?: { lineDelayMs?: number }) => boolean | void;
   scrollOnPaste?: boolean;
   scrollToBottomAfterProgrammaticInput?: (data: string) => void;
@@ -118,6 +127,7 @@ export async function pasteTextWithMultilineConfirm(
     confirmMultilinePaste,
     getCurrentSessionId,
     isSensitiveInput,
+    broadcastPasswordBypass,
     onPasteData,
     scrollOnPaste = false,
     scrollToBottomAfterProgrammaticInput,
@@ -150,6 +160,11 @@ export async function pasteTextWithMultilineConfirm(
     const currentSessionId = getCurrentSessionId ? getCurrentSessionId() : session;
     if (!currentSessionId) return;
     const confirmedSensitive = sensitive || isSensitiveInput?.() === true;
+    // The #3488 bypass keeps the broadcast fan-out alive for a paste
+    // confirmed at a sensitive prompt: onPasteData / the paced line
+    // broadcast re-check broadcast state and re-guard targets at dispatch
+    // time, and the sensitive marker below still governs the source write.
+    const broadcastBypassActive = broadcastPasswordBypass?.() === true;
     if (decision.action === "line-by-line") {
       // An explicitly emptied preview means "send nothing"; only a missing
       // value falls back to the original clipboard text.
@@ -158,7 +173,7 @@ export async function pasteTextWithMultilineConfirm(
       const lineOptions = {
         lineDelayMs: AUTO_RUN_SNIPPET_LINE_DELAY_MS,
         sensitive: confirmedSensitive,
-        broadcast: !confirmedSensitive && !!onPasteData,
+        broadcast: (!confirmedSensitive || broadcastBypassActive) && !!onPasteData,
       };
       if (!dispatchTerminalLinePaste(term, lineData, lineOptions)) {
         terminalBackend.writeToSession(currentSessionId, lineData, {
@@ -176,8 +191,9 @@ export async function pasteTextWithMultilineConfirm(
     pasteTextIntoTerminal(term, decision.text ?? text, {
       scrollOnPaste,
       // Same post-await race as above: never fan a sensitive paste out to
-      // broadcast peers via onPasteData.
-      onPasteData: confirmedSensitive ? undefined : onPasteData,
+      // broadcast peers via onPasteData — unless the #3488 bypass is active,
+      // in which case the dispatcher tags the payload and re-guards targets.
+      onPasteData: confirmedSensitive && !broadcastBypassActive ? undefined : onPasteData,
       // Carry the pre-dialog sensitivity snapshot through the normal Send
       // path too: term.paste's input handler recomputes `sensitive` from the
       // live password-prompt ref, which the dialog await may have cleared.
@@ -200,6 +216,7 @@ export async function handleTerminalClipboardPaste({
   getRemoteCwd,
   isLocalConnection,
   isSensitiveInput,
+  broadcastPasswordBypass,
   onClipboardImageUploadResult,
   onPasteData,
   readClipboardText,
@@ -278,6 +295,7 @@ export async function handleTerminalClipboardPaste({
       confirmMultilinePaste,
       getCurrentSessionId,
       isSensitiveInput,
+      broadcastPasswordBypass,
       onPasteData,
       scrollOnPaste,
       scrollToBottomAfterProgrammaticInput,
@@ -315,6 +333,7 @@ export async function handleTerminalClipboardPaste({
       confirmMultilinePaste,
       getCurrentSessionId,
       isSensitiveInput,
+      broadcastPasswordBypass,
       onPasteData,
       scrollOnPaste,
       scrollToBottomAfterProgrammaticInput,

@@ -831,3 +831,119 @@ for (const [preview, expected] of [
     assert.deepEqual(broadcasts, [], "without a runtime receipt owner, never broadcast an unchecked batch");
   });
 }
+
+test("bypassed paste confirmed at a sensitive prompt still fans out but keeps its sensitive marker (#3488)", async () => {
+  const { shouldOverrideTerminalUserPasteSensitivity } = await import("./runtime/terminalUserPaste");
+  const pasted: string[] = [];
+  const broadcasted: string[] = [];
+  const term = {
+    paste(data: string) {
+      // xterm normalizes pasted line endings before delivering onData.
+      assert.equal(shouldOverrideTerminalUserPasteSensitivity(term, data.replace(/\n/g, "\r")), true);
+      pasted.push(data);
+    },
+    scrollToBottom() {},
+  };
+  await handleTerminalClipboardPaste({
+    isLocalConnection: false,
+    sessionId: "session-1",
+    term,
+    isSensitiveInput: () => true,
+    broadcastPasswordBypass: () => true,
+    confirmMultilinePaste: {
+      enabled: true,
+      minLines: 2,
+      requestConfirm: async () => ({ action: "send" }),
+    },
+    readClipboardText: async () => "secret\nsecond secret",
+    onPasteData: (data) => {
+      broadcasted.push(data);
+      return true;
+    },
+    terminalBackend: {
+      writeToSession: () => assert.fail("normal send should use xterm paste handling"),
+    },
+  });
+  assert.deepEqual(pasted, ["secret\nsecond secret"]);
+  assert.deepEqual(broadcasted, ["secret\rsecond secret"]);
+});
+
+test("bypassed line-by-line paste keeps the paced broadcast flag with the sensitive marker (#3488)", async () => {
+  const { registerTerminalLinePasteHandler } = await import("./runtime/terminalUserPaste");
+  const lineOptions: Array<{ lineDelayMs: number; sensitive: boolean; broadcast?: boolean }> = [];
+  const writes: Array<{ data: string; options?: { sensitive?: boolean; lineDelayMs?: number } }> = [];
+  const term = {
+    paste: () => assert.fail("line-by-line must use delayed writes"),
+    scrollToBottom() {},
+  };
+  const dispose = registerTerminalLinePasteHandler(term, (_data, options) => lineOptions.push(options));
+  try {
+    await handleTerminalClipboardPaste({
+      isLocalConnection: false,
+      sessionId: "session-1",
+      term,
+      isSensitiveInput: () => true,
+      broadcastPasswordBypass: () => true,
+      confirmMultilinePaste: {
+        enabled: true,
+        minLines: 2,
+        requestConfirm: async () => ({ action: "line-by-line", text: "conf t\nint gi0/0" }),
+      },
+      readClipboardText: async () => "conf t\nint gi0/0",
+      onPasteData: () => assert.fail("paced broadcast must use actual write receipts"),
+      terminalBackend: {
+        writeToSession: (_id, data, options) => writes.push({ data, options }),
+      },
+    });
+    assert.deepEqual(lineOptions, [{
+      lineDelayMs: 250,
+      sensitive: true,
+      broadcast: true,
+    }]);
+    assert.deepEqual(writes, []);
+  } finally {
+    dispose();
+  }
+});
+
+test("without the bypass, a paste confirmed at a sensitive prompt still broadcasts only to the source (#3488)", async () => {
+  const { registerTerminalLinePasteHandler } = await import("./runtime/terminalUserPaste");
+  const lineOptions: Array<{ lineDelayMs: number; sensitive: boolean; broadcast?: boolean }> = [];
+  const pasted: string[] = [];
+  const term = {
+    paste: (text: string) => pasted.push(text),
+    scrollToBottom() {},
+  };
+  const dispose = registerTerminalLinePasteHandler(term, (_data, options) => lineOptions.push(options));
+  try {
+    await handleTerminalClipboardPaste({
+      isLocalConnection: false,
+      sessionId: "session-1",
+      term,
+      isSensitiveInput: () => true,
+      confirmMultilinePaste: {
+        enabled: true,
+        minLines: 2,
+        requestConfirm: async () => ({ action: "line-by-line", text: "conf t\nint gi0/0" }),
+      },
+      readClipboardText: async () => "conf t\nint gi0/0",
+      onPasteData: () => assert.fail("unbypassed sensitive paste must not fan out"),
+      terminalBackend: {
+        writeToSession: (_id, data, options) => {
+          // The registered line-paste handler owns the paced path in this
+          // test, so the backend fallback must not be used.
+          void data;
+          void options;
+        },
+      },
+    });
+    assert.deepEqual(lineOptions, [{
+      lineDelayMs: 250,
+      sensitive: true,
+      broadcast: false,
+    }]);
+    assert.deepEqual(pasted, []);
+  } finally {
+    dispose();
+  }
+});

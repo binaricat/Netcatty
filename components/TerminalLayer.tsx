@@ -2344,7 +2344,12 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
           if (!session || !canUseDirectSessionWriteFallback(session)) continue;
           // Keep the source-sensitive marker when the #3488 bypass let a
           // password-prompt payload through, so interceptors stay skipped.
-          terminalBackend.writeToSession(sid, payload, { sensitive: focusedSensitive });
+          // A non-sensitive focused pane can still fan into a sensitive peer
+          // (its password/MFA input): mark the peer's write sensitive too,
+          // like the broadcast dispatcher does for its executor writes.
+          terminalBackend.writeToSession(sid, payload, {
+            sensitive: focusedSensitive || recipientSensitive,
+          });
           recordHistory = recordHistory || session.status === 'connected';
         }
       }
