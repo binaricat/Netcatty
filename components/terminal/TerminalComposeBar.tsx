@@ -7,6 +7,8 @@ import { GripHorizontal, Pin, Plus, Radio, Search, X } from 'lucide-react';
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useComposeBarHistory } from '../../application/state/useComposeBarHistory';
 import { canNavigateComposeBarHistory } from '../../domain/composeBarHistory';
+import { BROADCAST_PASSWORD_BYPASS_STORAGE_KEY } from '../../domain/terminalBroadcast';
+import { useStoredBoolean } from '../../application/state/useStoredBoolean';
 import { useComposeBarHeight } from '../../application/state/useComposeBarHeight';
 import { useComposeBarPinnedSnippets } from '../../application/state/useComposeBarPinnedSnippets';
 import { useI18n } from '../../application/i18n/I18nProvider';
@@ -319,6 +321,39 @@ export const TerminalComposeBar: React.FC<TerminalComposeBarProps> = ({
 
   const theme = useMemo(() => buildTheme(themeColors), [themeColors]);
 
+  // Opt-in "broadcast without password protection" (#3488). Shared storage key
+  // with the terminal runtime, which reads it to keep broadcasting during
+  // password / interactive prompts while this switch is on.
+  const [allowPasswordBroadcast, setAllowPasswordBroadcast] = useStoredBoolean(
+    BROADCAST_PASSWORD_BYPASS_STORAGE_KEY,
+    false,
+  );
+  const [broadcastMenuAnchor, setBroadcastMenuAnchor] = useState<{ x: number; y: number } | null>(null);
+
+  useEffect(() => {
+    if (!broadcastMenuAnchor) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      if (event.target instanceof Element && event.target.closest('[data-compose-broadcast-menu]')) return;
+      setBroadcastMenuAnchor(null);
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setBroadcastMenuAnchor(null);
+    };
+    window.addEventListener('pointerdown', handlePointerDown);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [broadcastMenuAnchor]);
+
+  const handleBroadcastContextMenu = useCallback((event: React.MouseEvent) => {
+    if (!isBroadcastEnabled) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setBroadcastMenuAnchor({ x: event.clientX, y: event.clientY });
+  }, [isBroadcastEnabled]);
+
   const snippetsById = useMemo(
     () => mergeComposeBarSnippetMap(snippets),
     [snippets],
@@ -458,6 +493,7 @@ export const TerminalComposeBar: React.FC<TerminalComposeBarProps> = ({
         backgroundColor: theme.resolvedBg,
         borderTop: `1px solid ${theme.borderColor}`,
       }}
+      onContextMenu={handleBroadcastContextMenu}
     >
       <div
         role="separator"
@@ -560,6 +596,35 @@ export const TerminalComposeBar: React.FC<TerminalComposeBarProps> = ({
           </Tooltip>
         </div>
       </div>
+
+      {broadcastMenuAnchor && (
+        <div
+          data-compose-broadcast-menu
+          className="fixed z-[120] min-w-[240px] rounded-md border py-1 shadow-lg"
+          style={{
+            left: broadcastMenuAnchor.x,
+            top: Math.max(4, Math.min(broadcastMenuAnchor.y, window.innerHeight - 48)),
+            backgroundColor: theme.resolvedBg,
+            borderColor: theme.borderColor,
+            color: theme.resolvedFg,
+          }}
+          onContextMenu={(e) => e.preventDefault()}
+        >
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-[11px] transition-colors duration-150 hover:bg-black/20"
+            onClick={() => {
+              setAllowPasswordBroadcast((prev) => !prev);
+              setBroadcastMenuAnchor(null);
+            }}
+          >
+            <span className="w-3 shrink-0 text-center" aria-hidden="true">
+              {allowPasswordBroadcast ? '✓' : ''}
+            </span>
+            {t('terminal.composeBar.broadcastAllowPassword')}
+          </button>
+        </div>
+      )}
     </div>
   );
 };

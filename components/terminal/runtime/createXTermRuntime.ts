@@ -371,6 +371,11 @@ export type CreateXTermRuntimeContext = {
     captureSubmittedLineRecorder?: () => ((line: string, options?: { sensitive?: boolean; includePendingInput?: boolean; consumePendingInput?: boolean }) => Promise<void>) | undefined;
   } | undefined>;
   passwordPromptActiveRef?: RefObject<boolean>;
+  /**
+   * Opt-in "broadcast without password protection" (#3488). When true, an
+   * active password prompt no longer pauses raw-string broadcast fan-out.
+   */
+  broadcastPasswordBypassRef?: RefObject<boolean>;
   allowHostStyleGreaterThanPrompt?: boolean;
   onOutputTriggerUserInputRef?: RefObject<((data: string) => void) | undefined>;
   sudoAutofillRef?: RefObject<SudoPasswordAutofill | null>;
@@ -947,8 +952,10 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     data: string,
     options?: TerminalBroadcastInputOptions,
   ) => {
+    // Password bypass (#3488): the opt-in lifts the password-prompt pause.
     if (
-      ctx.passwordPromptActiveRef?.current !== true
+      (ctx.passwordPromptActiveRef?.current !== true
+        || ctx.broadcastPasswordBypassRef?.current === true)
       && ctx.isBroadcastEnabledRef.current
       && ctx.onBroadcastInputRef.current
     ) {
@@ -1293,7 +1300,11 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     if (suppressTerminalBroadcast) suppressNextTerminalDataBroadcast = false;
     // skipBroadcast only suppresses the raw-string fan-out. Peers still receive
     // the Shift+Enter chord, so sudo autofill must treat this as a broadcast.
-    const canBroadcastInput = !sensitive &&
+    // The password bypass (#3488) only lifts the live password-prompt pause.
+    // Explicitly classified sensitive payloads (confirmed pastes, preloaded
+    // sudo credentials) stay non-broadcastable regardless of the opt-in.
+    const canBroadcastInput = (!sensitive
+      || (ctx.broadcastPasswordBypassRef?.current === true && options?.sensitive !== true)) &&
       inputSource !== "kitty" &&
       !handlingKittyBroadcast &&
       !suppressTerminalBroadcast &&

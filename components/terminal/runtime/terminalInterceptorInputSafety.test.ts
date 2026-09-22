@@ -34,7 +34,7 @@ test("password-prompt input is classified before prompt state reset and cannot b
   );
   assert.match(
     runtimeSource,
-    /const sensitive = ctx\.passwordPromptActiveRef\?\.current === true[\s\S]*?const canBroadcastInput = !sensitive &&[\s\S]*?const willBroadcastInput = canBroadcastInput && options\?\.skipBroadcast !== true;/u,
+    /const sensitive = ctx\.passwordPromptActiveRef\?\.current === true[\s\S]*?const canBroadcastInput = \(!sensitive\s*\|\|\s*\(ctx\.broadcastPasswordBypassRef\?\.current === true && options\?\.sensitive !== true\)\) &&[\s\S]*?const willBroadcastInput = canBroadcastInput && options\?\.skipBroadcast !== true;/u,
   );
   assert.match(
     runtimeSource,
@@ -46,11 +46,11 @@ test("password-prompt input is classified before prompt state reset and cannot b
   );
   assert.match(
     runtimeSource,
-    /const broadcastUserPasteData = \(\s*data: string,\s*options\?: TerminalBroadcastInputOptions,\s*\) => \{[\s\S]*?passwordPromptActiveRef\?\.current !== true[\s\S]*?onBroadcastInputRef\.current\(\s*data,\s*ctx\.sessionId,\s*options\)/u,
+    /const broadcastUserPasteData = \(\s*data: string,\s*options\?: TerminalBroadcastInputOptions,\s*\) => \{[\s\S]*?ctx\.passwordPromptActiveRef\?\.current !== true\s*\|\| ctx\.broadcastPasswordBypassRef\?\.current === true[\s\S]*?onBroadcastInputRef\.current\(\s*data,\s*ctx\.sessionId,\s*options\)/u,
   );
   assert.match(
     terminalSource,
-    /const sensitive = passwordPromptActiveRef\.current;[\s\S]*?!sensitive && isBroadcastEnabledRef\.current[\s\S]*?writeToSession\(id, data, \{[\s\S]*?sensitive,/u,
+    /const sensitive = passwordPromptActiveRef\.current;[\s\S]*?shouldBroadcastDuringSensitivePrompt\(\{[\s\S]*?isBroadcastEnabledRef\.current[\s\S]*?writeToSession\(id, data, \{[\s\S]*?sensitive,/u,
   );
 });
 

@@ -22,6 +22,7 @@ import {
 } from "../runtime/terminalHistoryScrollOverride";
 
 import { readTerminalScreenText } from "../terminalContextBuffer";
+import { shouldBroadcastDuringSensitivePrompt } from "../../../domain/terminalBroadcast";
 import { useI18n } from "../../../application/i18n/I18nProvider";
 import { toast } from "../../ui/toast";
 
@@ -33,6 +34,7 @@ type BroadcastPasteRefs = {
     ((data: string, sourceSessionId: string, options?: TerminalBroadcastInputOptions) => void) | undefined
   >;
   passwordPromptActiveRef?: RefObject<boolean | undefined>;
+  broadcastPasswordBypassRef?: RefObject<boolean | undefined>;
 };
 
 export const broadcastTerminalPasteData = (
@@ -43,11 +45,15 @@ export const broadcastTerminalPasteData = (
     isBroadcastEnabledRef,
     onBroadcastInputRef,
     passwordPromptActiveRef,
+    broadcastPasswordBypassRef,
   }: BroadcastPasteRefs,
   options?: TerminalBroadcastInputOptions,
 ): boolean => {
   if (
-    passwordPromptActiveRef?.current !== true
+    shouldBroadcastDuringSensitivePrompt({
+      sensitivePromptActive: passwordPromptActiveRef?.current === true,
+      broadcastPasswordBypass: broadcastPasswordBypassRef?.current === true,
+    })
     && sessionRef.current
     && isBroadcastEnabledRef?.current
     && onBroadcastInputRef?.current
@@ -68,6 +74,7 @@ export const useTerminalContextActions = ({
   isBroadcastEnabledRef,
   onBroadcastInputRef,
   passwordPromptActiveRef,
+  broadcastPasswordBypassRef,
   isLocalConnection,
   supportsRemoteImagePaste,
   autoUploadClipboardImageOnPasteRef,
@@ -90,6 +97,7 @@ export const useTerminalContextActions = ({
     ((data: string, sourceSessionId: string, options?: TerminalBroadcastInputOptions) => void) | undefined
   >;
   passwordPromptActiveRef?: RefObject<boolean | undefined>;
+  broadcastPasswordBypassRef?: RefObject<boolean | undefined>;
   isLocalConnection: boolean;
   supportsRemoteImagePaste: boolean;
   /** When true, paste auto-uploads a clipboard image (remote sessions only). */
@@ -143,8 +151,9 @@ export const useTerminalContextActions = ({
       isBroadcastEnabledRef,
       onBroadcastInputRef,
       passwordPromptActiveRef,
+      broadcastPasswordBypassRef,
     }, options);
-  }, [isBroadcastEnabledRef, onBroadcastInputRef, passwordPromptActiveRef, sessionRef, sourceSessionId]);
+  }, [isBroadcastEnabledRef, onBroadcastInputRef, passwordPromptActiveRef, broadcastPasswordBypassRef, sessionRef, sourceSessionId]);
 
   const onCopy = useCallback(() => {
     const term = termRef.current;

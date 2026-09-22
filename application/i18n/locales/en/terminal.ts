@@ -61,6 +61,7 @@ export const enTerminalMessages: Messages = {
   'terminal.composeBar.send': 'Send',
   'terminal.composeBar.close': 'Close compose bar',
   'terminal.composeBar.broadcasting': 'Broadcasting to all sessions',
+  'terminal.composeBar.broadcastAllowPassword': 'Broadcast without password protection',
   'terminal.composeBar.resize': 'Resize compose bar height',
   'terminal.composeBar.manageSnippets': 'Manage quick snippets',
   'terminal.composeBar.searchSnippets': 'Search snippets...',

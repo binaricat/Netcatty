@@ -26,6 +26,7 @@ import { detectLocalOs } from '../lib/localShell';
 import { useStoredString } from '../application/state/useStoredString';
 import { useStoredNumber } from '../application/state/useStoredNumber';
 import { useStoredBoolean } from '../application/state/useStoredBoolean';
+import { BROADCAST_PASSWORD_BYPASS_STORAGE_KEY } from '../domain/terminalBroadcast';
 import {
   STORAGE_KEY_SIDE_PANEL_WIDTH,
   STORAGE_KEY_TERMINAL_COMPOSE_BAR_OPEN,
@@ -710,6 +711,14 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     STORAGE_KEY_TERMINAL_COMPOSE_BAR_OPEN,
     false,
   );
+  // Opt-in "broadcast without password protection" (#3488): when enabled, the
+  // fail-closed password-prompt heuristic no longer pauses workspace broadcast.
+  const [broadcastPasswordBypass] = useStoredBoolean(
+    BROADCAST_PASSWORD_BYPASS_STORAGE_KEY,
+    false,
+  );
+  const broadcastPasswordBypassRef = useRef(broadcastPasswordBypass);
+  broadcastPasswordBypassRef.current = broadcastPasswordBypass;
   const sessionsRef = useRef(sessions);
   sessionsRef.current = sessions;
   const workspacesRef = useRef(workspaces);
@@ -2284,20 +2293,21 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     const payload = text + '\r';
     const broadcastEnabled = isBroadcastEnabled?.(activeWorkspace.id);
     const focusedSessionId = activeWorkspace.focusedSessionId;
+    const broadcastPasswordBypass = broadcastPasswordBypassRef.current;
     const focusedSensitive = focusedSessionId
       ? isTerminalSensitiveInputActive(focusedSessionId)
       : false;
 
-    if (broadcastEnabled && !focusedSensitive) {
+    if (broadcastEnabled && (broadcastPasswordBypass || !focusedSensitive)) {
       const allSessionIds = sessionsRef.current
         .filter((session) => session.workspaceId === activeWorkspace.id)
         .map((session) => session.id);
       for (const sid of allSessionIds) {
-        if (isTerminalSensitiveInputActive(sid)) continue;
+        if (!broadcastPasswordBypass && isTerminalSensitiveInputActive(sid)) continue;
         const executor = snippetExecutorsRef.current.get(sid);
         if (executor) {
           pendingSends.push(Promise.resolve(executor(text, false, { broadcast: false })).then(
-            (sent) => sent && !isTerminalSensitiveInputActive(sid),
+            (sent) => sent && (broadcastPasswordBypass || !isTerminalSensitiveInputActive(sid)),
           ));
         } else {
           const session = sessionsRef.current.find((candidate) => candidate.id === sid);
