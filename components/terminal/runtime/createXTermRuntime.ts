@@ -1238,6 +1238,13 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       skipBroadcast?: boolean;
       /** Confirmed paste: preserve classification and backend pacing. */
       sensitive?: boolean;
+      /**
+       * The sensitive marker came from a source-sensitive broadcast peer
+       * (#3488), not from this session's own prompt detector. Semantic input
+       * consumers such as autocomplete must not see the secret payload: their
+       * gate only checks this peer's own prompt state (#3491).
+       */
+      sourceSensitiveBroadcast?: boolean;
       lineDelayMs?: number;
       pasteRequestId?: string;
       /**
@@ -1539,8 +1546,11 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         scrollToBottomAfterInput(logicalData);
       }
 
-      // Notify autocomplete of input
-      if (logicalData !== null) ctx.onAutocompleteInput?.(logicalData);
+      // Notify autocomplete of input. Payloads whose sensitivity arrived from
+      // a source-sensitive broadcast peer (#3488) stay out of autocomplete:
+      // this peer's own prompt gate has not latched, so the secret could reach
+      // enabled plugin completion providers (#3491).
+      if (logicalData !== null && !options?.sourceSensitiveBroadcast) ctx.onAutocompleteInput?.(logicalData);
 
       if (ctx.statusRef.current === "connected" && logicalData !== null) {
         if (handledSubmittedInput || submittedInput) {
@@ -2956,7 +2966,9 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         skipBroadcast: true,
         // A bypassed source-prompt fan-out (#3488) forces the sensitive marker
         // so this peer's write keeps input interceptors skipped.
-        ...(win32Input.sensitive === true ? { sensitive: true } : {}),
+        ...(win32Input.sensitive === true
+          ? { sensitive: true, sourceSensitiveBroadcast: true }
+          : {}),
       });
       return;
     }
@@ -3046,7 +3058,9 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       logicalData,
       // A bypassed source-prompt fan-out (#3488) forces the sensitive marker so
       // this peer's write keeps input interceptors skipped.
-      ...(writeOptions?.sensitive === true ? { sensitive: true } : {}),
+      ...(writeOptions?.sensitive === true
+        ? { sensitive: true, sourceSensitiveBroadcast: true }
+        : {}),
     }),
     writeWin32Event: (event, logicalData, writeOptions) => {
       writeWin32InputModeEvent(event, logicalData, writeOptions);

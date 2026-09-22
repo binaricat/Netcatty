@@ -1258,8 +1258,11 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       terminalBackend.writeToSession(session.id, data, {
         automated: options?.automated === true,
         // Retain the source-sensitive marker (bypassed password fan-out, #3488)
-        // so peer input interceptors stay skipped for the secret payload.
-        sensitive: options?.sourceSensitive === true,
+        // so peer input interceptors stay skipped for the secret payload. A
+        // target that is itself awaiting a secret keeps its classification:
+        // bypassing the fan-out pause must not downgrade its own sensitive
+        // state (#3491).
+        sensitive: options?.sourceSensitive === true || isTerminalSensitiveInputActive(session.id),
         ...(lineDelayMs ? { lineDelayMs } : {}),
       });
       deliveredSessionIds.push(session.id);

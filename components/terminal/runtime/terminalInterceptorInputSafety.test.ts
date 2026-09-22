@@ -128,6 +128,6 @@ test("active and hibernated output share host-owned sensitive prompt classificat
 test("ordinary broadcast skips targets that are waiting for sensitive input", () => {
   assert.match(
     terminalLayerSource,
-    /if \(!passwordBypass && isTerminalSensitiveInputActive\(session\.id\)\) continue;[\s\S]*?writeToSession\(session\.id, data, \{[\s\S]*?sensitive: options\?\.sourceSensitive === true,/u,
+    /if \(!passwordBypass && isTerminalSensitiveInputActive\(session\.id\)\) continue;[\s\S]*?writeToSession\(session\.id, data, \{[\s\S]*?sensitive: options\?\.sourceSensitive === true \|\| isTerminalSensitiveInputActive\(session\.id\),/u,
   );
 });
