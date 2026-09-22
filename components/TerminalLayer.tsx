@@ -27,6 +27,7 @@ import { useStoredString } from '../application/state/useStoredString';
 import { useStoredNumber } from '../application/state/useStoredNumber';
 import { useStoredBoolean } from '../application/state/useStoredBoolean';
 import {
+  STORAGE_KEY_SIDE_PANEL_HEIGHT,
   STORAGE_KEY_SIDE_PANEL_WIDTH,
   STORAGE_KEY_TERMINAL_COMPOSE_BAR_OPEN,
 } from '../infrastructure/config/storageKeys';
@@ -741,7 +742,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     isSidePanelDockPosition,
   );
   const [sidePanelHeight, setSidePanelHeight, persistSidePanelHeight] = useStoredNumber(
-    'netcatty_side_panel_height',
+    STORAGE_KEY_SIDE_PANEL_HEIGHT,
     360,
     { min: TERMINAL_SIDE_PANEL_MIN_HEIGHT, max: TERMINAL_SIDE_PANEL_MAX_HEIGHT },
   );

@@ -1104,7 +1104,11 @@ function TerminalLayerSidePanelInner({ ctx }: { ctx: SidePanelContext }) {
         'flex-shrink-0 relative z-20',
         isBottomDock ? 'w-full' : 'h-full',
         shellSize === 0 && 'overflow-hidden',
-        !isBottomDock && sidePanelPosition === 'right' && 'order-last',
+        // Bottom dock: the section is the first child of the outer flex-col
+        // (stable tree position across dock changes); order-last keeps it
+        // visually below the workspace row. Side dock: order-last moves it to
+        // the right edge when docked right.
+        (sidePanelPosition === 'right' || isBottomDock) && 'order-last',
       )}
       data-section="terminal-side-panel-shell"
       data-side-panel-position={sidePanelPosition}

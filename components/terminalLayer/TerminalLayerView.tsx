@@ -30,21 +30,16 @@ function TerminalLayerViewInner({ ctx }: { ctx: TerminalLayerViewContext }) {
         left: hostTreeLayoutWidth,
       }}
     >
-      {isBottomDock ? (
-        <>
-          <div className="flex min-h-0 w-full flex-1">
-            <TerminalLayerFocusSidebarSection ctx={ctx} />
-            <TerminalLayerWorkspaceSection ctx={ctx} />
-          </div>
-          <TerminalLayerSidePanelSection ctx={ctx} />
-        </>
-      ) : (
-        <>
-          <TerminalLayerSidePanelSection ctx={ctx} />
-          <TerminalLayerFocusSidebarSection ctx={ctx} />
-          <TerminalLayerWorkspaceSection ctx={ctx} />
-        </>
-      )}
+      {/* Keep TerminalLayerSidePanelSection at a stable tree position (first
+          child) so cycling between side and bottom docks reorders it via flex
+          `order` instead of unmounting/recreating it. The wrapper below uses
+          `display: contents` in side-dock mode so its children participate in
+          the outer flex row exactly like direct children. */}
+      <TerminalLayerSidePanelSection ctx={ctx} />
+      <div className={isBottomDock ? 'flex min-h-0 w-full flex-1' : 'contents'}>
+        <TerminalLayerFocusSidebarSection ctx={ctx} />
+        <TerminalLayerWorkspaceSection ctx={ctx} />
+      </div>
     </div>
   );
 }
