@@ -21,6 +21,7 @@ test("keeps only password identities with a usable stored password", () => {
     passwordIdentity({ id: "id-3", authMethod: "key", keyId: "key-1" }),
     passwordIdentity({ id: "id-4", password: undefined }),
     passwordIdentity({ id: "id-5", password: "" }),
+    passwordIdentity({ id: "id-6", password: "enc:v1:djEwdGVzdAAAAAAAAAAAAAAAAA==" }),
   ];
 
   const result = listPasswordAuthIdentities(identities);
