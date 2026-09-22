@@ -124,7 +124,7 @@ test("runtime routes Shift+Enter text through the shared input handler", () => {
   );
   assert.match(
     source,
-    /const shiftEnterText = resolveShiftEnterText\([\s\S]*?if \(shiftEnterText\) \{[\s\S]*?handleTerminalInputData\(shiftEnterText, \{\s*source: "shift-enter",\s*skipBroadcast: true,\s*\}\);\s*const forwarded = broadcastKittyInput\(\{\s*kind: "key",\s*event: kittyEvent,\s*fallbackToLegacy: true,\s*\}\);/s,
+    /const shiftEnterText = resolveShiftEnterText\([\s\S]*?if \(shiftEnterText\) \{[\s\S]*?const sourceSensitivePrompt = ctx\.passwordPromptActiveRef\?\.current === true;[\s\S]*?handleTerminalInputData\(shiftEnterText, \{\s*source: "shift-enter",\s*skipBroadcast: true,\s*\}\);\s*const forwarded = broadcastKittyInput\(\{\s*kind: "key",\s*event: kittyEvent,\s*fallbackToLegacy: true,\s*\}, false, undefined, sourceSensitivePrompt \? \{ sourceSensitive: true \} : undefined\);/s,
   );
   assert.match(
     source,

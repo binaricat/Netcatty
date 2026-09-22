@@ -2488,6 +2488,13 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
           ctx.terminalSettingsRef.current,
         );
         if (shiftEnterText) {
+          // Snapshot source-prompt sensitivity before the local write (#3491):
+          // the default bare-newline send-text reaches the PTY as a
+          // submission that clears passwordPromptActiveRef, so the live
+          // prompt-source check in broadcastKittyInput would report this
+          // Shift+Enter as nonsensitive and a peer would commit its buffered
+          // source-sensitive password characters as ordinary input.
+          const sourceSensitivePrompt = ctx.passwordPromptActiveRef?.current === true;
           // Skip string broadcast: peers resolve Shift+Enter from their own
           // negotiated keyboard mode via the key chord below.
           handleTerminalInputData(shiftEnterText, {
@@ -2498,7 +2505,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
             kind: "key",
             event: kittyEvent,
             fallbackToLegacy: true,
-          });
+          }, false, undefined, sourceSensitivePrompt ? { sourceSensitive: true } : undefined);
           if (forwarded) {
             upsertKittyKeyboardForwardedPress(
               broadcastForwardedKeys,

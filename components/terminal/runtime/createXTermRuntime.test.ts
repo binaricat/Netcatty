@@ -1088,3 +1088,28 @@ test("Command+Period interrupt yields to a user-assigned snippet or shortcut cho
     /const macCommandPeriodInterrupt =\s*isMacPlatform\(\)\s*&& isMacCommandPeriodInterruptChord\(e\)\s*&& !\(ctx\.snippetsRef\?\.current \?\? \[\]\)\.some\(\(snippet\) => \(\s*snippet\.shortkey && matchesKeyBinding\(e, snippet\.shortkey, isMac\)\s*\)\)\s*&& !\(currentScheme !== "disabled"\s*&& checkAppShortcut\(e, ctx\.keyBindingsRef\.current, isMac\) !== null\);/,
   );
 });
+
+test("Shift+Enter send-text fallback snapshots prompt sensitivity before the local write (#3491)", async () => {
+  const { readFileSync } = await import("node:fs");
+  const source = readFileSync(new URL("./createXTermRuntime.ts", import.meta.url), "utf8");
+
+  // The Shift+Enter fallback reaches the PTY as a bare newline via
+  // handleTerminalInputData, which submits synchronously and clears
+  // passwordPromptActiveRef. The subsequent key-chord broadcast must carry a
+  // pre-write sensitivity snapshot, otherwise the live prompt-source check
+  // reports the dispatch as nonsensitive and a peer commits its buffered
+  // password characters as ordinary input.
+  const fallbackIdx = source.indexOf(
+    'handleTerminalInputData(shiftEnterText, {',
+  );
+  assert.ok(fallbackIdx >= 0);
+  const fallback = source.slice(fallbackIdx, fallbackIdx + 400);
+  const snapshotIdx = source.slice(0, fallbackIdx).lastIndexOf(
+    "const sourceSensitivePrompt = ctx.passwordPromptActiveRef?.current === true;",
+  );
+  assert.ok(snapshotIdx >= 0, "snapshot must precede the local Shift+Enter write");
+  assert.match(
+    fallback,
+    /broadcastKittyInput\(\s*\{\s*kind: "key",\s*event: kittyEvent,\s*fallbackToLegacy: true,\s*\},\s*false,\s*undefined,\s*sourceSensitivePrompt \? \{ sourceSensitive: true \} : undefined\)/,
+  );
+});
