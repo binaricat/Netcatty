@@ -441,6 +441,8 @@ export const esVaultMessages: Messages = {
   'sftp.deleteConfirm.descSingle': 'Esta acción no se puede deshacer.',
   'sftp.deleteConfirm.host': 'Host',
   'sftp.deleteConfirm.path': 'Ruta',
+  'sftp.deleteConfirm.terminalBusy': 'La terminal está ocupada. Vuelve al prompt e inténtalo de nuevo.',
+  'sftp.deleteConfirm.terminalUnavailable': 'Los hosts de un solo canal se eliminan por la terminal conectada. Conéctate a este host y espera el prompt.',
   'sftp.error.loadFailed': 'No se pudo cargar el directorio',
   'sftp.error.downloadFailed': 'No se pudo descargar',
   'sftp.error.uploadFailed': 'No se pudo subir',

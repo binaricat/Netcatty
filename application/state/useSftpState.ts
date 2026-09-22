@@ -469,6 +469,7 @@ export const useSftpState = (
     createFileAtPath,
     deleteFiles,
     deleteFilesAtPath,
+    removeListedNames,
     renameFile,
     renameFileAtPath,
     moveEntriesToPath,
@@ -781,6 +782,7 @@ export const useSftpState = (
     createFileAtPath,
     deleteFiles,
     deleteFilesAtPath,
+    removeListedNames,
     renameFile,
     renameFileAtPath,
     moveEntriesToPath,
@@ -857,6 +859,8 @@ export const useSftpState = (
     deleteFiles: (...args: Parameters<typeof deleteFiles>) => methodsRef.current.deleteFiles(...args),
     deleteFilesAtPath: (...args: Parameters<typeof deleteFilesAtPath>) =>
       methodsRef.current.deleteFilesAtPath(...args),
+    removeListedNames: (...args: Parameters<typeof removeListedNames>) =>
+      methodsRef.current.removeListedNames(...args),
     renameFile: (...args: Parameters<typeof renameFile>) => methodsRef.current.renameFile(...args),
     renameFileAtPath: (...args: Parameters<typeof renameFileAtPath>) => methodsRef.current.renameFileAtPath(...args),
     moveEntriesToPath: (...args: Parameters<typeof moveEntriesToPath>) => methodsRef.current.moveEntriesToPath(...args),

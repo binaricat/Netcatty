@@ -479,6 +479,8 @@ export const ruVaultMessages: Messages = {
   'sftp.deleteConfirm.descSingle': 'Это действие нельзя отменить.',
   'sftp.deleteConfirm.host': 'Хост',
   'sftp.deleteConfirm.path': 'Путь',
+  'sftp.deleteConfirm.terminalBusy': 'Терминал занят. Вернитесь к приглашению оболочки и повторите.',
+  'sftp.deleteConfirm.terminalUnavailable': 'На одноканальных хостах удаление идет через подключенный терминал. Подключитесь к этому хосту и дождитесь приглашения.',
   'sftp.error.loadFailed': 'Не удалось загрузить каталог',
   'sftp.error.downloadFailed': 'Ошибка скачивания',
   'sftp.error.uploadFailed': 'Ошибка загрузки',

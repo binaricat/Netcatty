@@ -451,7 +451,10 @@ async function checkRemoteTarAvailable(sftpId, signal) {
   try {
     const client = sftpClients.get(sftpId);
     if (!client) throw new Error("SFTP session not found");
-    
+    // Extra exec on a single-channel bastion drops the whole SFTP login.
+    // Folder uploads then fall back to per-file SFTP.
+    if (client.__netcattySingleChannelSsh) return false;
+
     // Try to execute tar --version via SSH
     const sshClient = client.client; // Get underlying SSH2 client
     if (!sshClient) throw new Error("SSH client not available");
@@ -1150,6 +1153,7 @@ module.exports = {
   registerHandlers,
   pauseCompression,
   resumeCompression,
+  _checkCompressedUploadSupportForTests: checkCompressedUploadSupport,
   _runRemoteExecForTests: runRemoteExec,
   _buildAtomicRemoteExtractionCommandForTests: buildAtomicRemoteExtractionCommand,
   _buildRemoteArchivePathForTests: buildRemoteArchivePath,

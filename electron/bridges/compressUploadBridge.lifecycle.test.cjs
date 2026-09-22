@@ -530,3 +530,30 @@ test("a late cancel after completion cannot overwrite the completed terminal eve
   ));
   assert.deepEqual(terminalAfter.map((event) => event.type), ["completed"]);
 });
+
+test("compressed upload skips remote tar exec on single-channel SSH", async () => {
+  let execCalls = 0;
+  compressUploadBridge._resetCompressionSupportCacheForTests();
+  compressUploadBridge.init({
+    sftpClients: new Map([
+      ["sftp-1", {
+        __netcattySingleChannelSsh: true,
+        client: {
+          exec() {
+            execCalls += 1;
+            throw new Error("must not exec on single-channel SSH");
+          },
+        },
+      }],
+    ]),
+    transferBridge: {},
+  });
+
+  const result = await compressUploadBridge._checkCompressedUploadSupportForTests(null, {
+    sftpId: "sftp-1",
+  });
+
+  assert.equal(result.supported, false);
+  assert.equal(result.remoteTar, false);
+  assert.equal(execCalls, 0);
+});

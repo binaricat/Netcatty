@@ -230,6 +230,11 @@ const getSftpChannel = async (client, options = {}) => {
     return null;
   }
 
+  // A second SFTP channel on a single-channel bastion drops the whole login.
+  if (client.__netcattySingleChannelSsh || client.client?.__netcattySingleChannelSsh) {
+    return null;
+  }
+
   // Do not treat ssh2's "client.sftp" method as a channel object.
   // Re-open a fresh channel when the cached channel is stale.
   if (!client.client || typeof client.client.sftp !== "function") {
@@ -637,6 +642,8 @@ async function execRemoteShellCommand(sshClient, command, optionsOrSignal = null
 async function tryFastShellDirectoryDelete(client, remotePath, encoding = "utf-8", signal = null) {
   const sshClient = client?.client;
   if (!sshClient || typeof sshClient.exec !== "function") return false;
+  // Extra exec drops a single-channel bastion login. Use the SFTP walk instead.
+  if (client.__netcattySingleChannelSsh || sshClient.__netcattySingleChannelSsh) return false;
   const enc = !encoding || encoding === "auto" ? "utf-8" : encoding;
   if (enc !== "utf-8") return false;
   if (typeof remotePath !== "string" || !remotePath || remotePath === "/" || remotePath === ".") {
@@ -2711,6 +2718,7 @@ module.exports = {
   extractSftpArchive,
   getSftpHomeDir,
   resolveEncodingForRequest,
+  _tryFastShellDirectoryDeleteForTests: tryFastShellDirectoryDelete,
   _execRemoteShellCommandForTests: execRemoteShellCommand,
   _tryRemoteSha256SumForTests: tryRemoteSha256Sum,
 };
