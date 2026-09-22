@@ -685,6 +685,10 @@ export function TerminalLayerTabBridge({ stableRef }: { stableRef: StableRef }) 
     sidePanelLayouts,
     s.resolvedSessionHostIds,
     sessions,
+    // Dock geometry lives in stableRef state; without these deps the memoized
+    // ctx keeps stale values after dock-cycle / bottom-height-drag updates.
+    s.sidePanelHeight,
+    s.sidePanelPosition,
     s.terminalSettings,
     showHostTreeSidebar,
     sftpActiveHost,
