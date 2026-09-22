@@ -4040,6 +4040,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     terminalBackend,
     isSensitiveInput: () => passwordPromptActiveRef.current,
     scrollOnPasteRef,
+    broadcastPasswordBypassRef,
     onPasteData: broadcastUserPasteData,
     scrollToBottomAfterProgrammaticInput,
     containerRef,

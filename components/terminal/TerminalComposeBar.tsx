@@ -605,7 +605,9 @@ export const TerminalComposeBar: React.FC<TerminalComposeBarProps> = ({
           data-compose-broadcast-menu
           className="fixed z-[120] min-w-[240px] rounded-md border py-1 shadow-lg"
           style={{
-            left: broadcastMenuAnchor.x,
+            // Clamp horizontally so the 240px-min menu stays on-screen even
+            // when the compose bar is right-clicked near the right edge.
+            left: Math.max(4, Math.min(broadcastMenuAnchor.x, window.innerWidth - 244)),
             top: Math.max(4, Math.min(broadcastMenuAnchor.y, window.innerHeight - 48)),
             backgroundColor: theme.resolvedBg,
             borderColor: theme.borderColor,
