@@ -48,6 +48,13 @@ export interface TerminalBroadcastInputOptions {
    * the dispatcher tags the payload sourceSensitive.
    */
   sensitive?: boolean;
+  /**
+   * Observer for the sessions that actually received the payload (#3491):
+   * the solo compose bar uses it to detect a fan-out delivered into a peer's
+   * sensitive prompt (its password/MFA input) and keep that send
+   * history-ineligible.
+   */
+  onBroadcastDelivered?: (sessionIds: readonly string[]) => void;
 }
 
 export { resolveSessionTabTitle };

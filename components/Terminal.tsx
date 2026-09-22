@@ -3317,6 +3317,8 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       focus?: boolean;
       /** Force sensitive classification on the write (bypassed password fan-out, #3488). */
       sensitive?: boolean;
+      /** Observer for the broadcast recipients that received the payload (#3491). */
+      onBroadcastDelivered?: (sessionIds: readonly string[]) => void;
     },
   ): Promise<boolean> => {
     // Hidden-tab hibernation clears termRef. Wake via the *connected* path so
@@ -3383,7 +3385,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       && isBroadcastEnabledRef.current
       && onBroadcastInputRef.current
     ) {
-      onBroadcastInputRef.current(data, sessionId, {
+      const broadcastDeliveredSessionIds = onBroadcastInputRef.current(data, sessionId, {
         automated: true,
         noAutoRun,
         // Bypassed password fan-out (#3488): retain the sensitive marker so
@@ -3391,6 +3393,12 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         ...(sensitive ? { sourceSensitive: true } : {}),
         ...(lineDelayMs ? { lineDelayMs } : {}),
       });
+      // #3491: report the sessions that received the fan-out so callers (the
+      // solo compose bar) can detect a payload delivered into a sensitive
+      // peer prompt and keep it out of send history.
+      if (broadcastDeliveredSessionIds) {
+        options?.onBroadcastDelivered?.(broadcastDeliveredSessionIds);
+      }
     }
 
     data = prepareProgrammaticSudoInput(data);

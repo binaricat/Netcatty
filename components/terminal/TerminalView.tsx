@@ -1312,8 +1312,28 @@ function TerminalViewInner({ ctx, isPaneMagnified = false }: { ctx: TerminalView
             onSend={async (text) => {
               if (sessionRef.current) {
                 const sensitive = isTerminalSensitiveInputActive(sessionId);
-                const sent = await executeSnippetCommand(text, false);
-                return sent && !sensitive && !isTerminalSensitiveInputActive(sessionId);
+                // A bypassed fan-out (#3488) can deliver the payload into a
+                // peer's sensitive prompt even when this source session is
+                // non-sensitive (#3491): that payload is the peer's
+                // password/MFA input, so the send must stay history-
+                // ineligible, like the workspace compose path does.
+                let anyRecipientSensitive = false;
+                let broadcastRecipientIds: readonly string[] = [];
+                const sent = await executeSnippetCommand(text, false, {
+                  onBroadcastDelivered: (sessionIds) => {
+                    broadcastRecipientIds = sessionIds;
+                    if (sessionIds.some((id) => isTerminalSensitiveInputActive(id))) {
+                      anyRecipientSensitive = true;
+                    }
+                  },
+                });
+                // A lagging peer can reach its password prompt by delivery
+                // time; re-check the recorded recipients after the send.
+                if (broadcastRecipientIds.some((id) => isTerminalSensitiveInputActive(id))) {
+                  anyRecipientSensitive = true;
+                }
+                return sent && !sensitive && !anyRecipientSensitive
+                  && !isTerminalSensitiveInputActive(sessionId);
               }
               return false;
             }}
