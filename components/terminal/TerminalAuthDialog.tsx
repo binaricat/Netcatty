@@ -2,11 +2,12 @@
  * Terminal Authentication Dialog
  * Displays auth form with password/key selection for SSH connection
  */
-import { BadgeCheck, ChevronDown, Eye, EyeOff, Key, Lock, Unplug } from 'lucide-react';
+import { BadgeCheck, ChevronDown, Eye, EyeOff, Key, Lock, Unplug, UserRound } from 'lucide-react';
 import React from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import { cn } from '../../lib/utils';
-import { SSHKey } from '../../types';
+import { Identity, SSHKey } from '../../types';
+import { listPasswordAuthIdentities } from '../../domain/authIdentityPicker';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
@@ -32,6 +33,8 @@ export interface TerminalAuthDialogProps {
     setShowAuthPassword: (show: boolean) => void;
     authRetryMessage: string | null;
     keys: SSHKey[];
+    /** Keychain password identities offered for reuse on re-authentication (#3475). */
+    identities?: Identity[];
     onSubmit: () => void;
     onSubmitWithoutSave?: () => void;
     onCancel: () => void;
@@ -55,6 +58,7 @@ export const TerminalAuthDialog: React.FC<TerminalAuthDialogProps> = ({
     setShowAuthPassword,
     authRetryMessage,
     keys,
+    identities,
     onSubmit,
     onSubmitWithoutSave,
     onCancel,
@@ -76,8 +80,30 @@ export const TerminalAuthDialog: React.FC<TerminalAuthDialogProps> = ({
 
     const [keyDropdownOpen, setKeyDropdownOpen] = React.useState(false);
     const [submitOptionsOpen, setSubmitOptionsOpen] = React.useState(false);
+    const [identityDropdownOpen, setIdentityDropdownOpen] = React.useState(false);
+    const [selectedIdentityId, setSelectedIdentityId] = React.useState<string | null>(null);
 
     const selectedKey = authKeyId ? keys.find((k) => k.id === authKeyId) : null;
+
+    // Password identities reusable on re-authentication (#3475). Only rendered
+    // when at least one usable saved password exists; manual entry stays.
+    const passwordIdentities = React.useMemo(
+        () => listPasswordAuthIdentities(identities),
+        [identities],
+    );
+    const selectedIdentity = selectedIdentityId
+        ? passwordIdentities.find((identity) => identity.id === selectedIdentityId)
+        : null;
+
+    const handleSelectIdentity = (identity: Identity) => {
+        setAuthMethod('password');
+        if (identity.username) {
+            setAuthUsername(identity.username);
+        }
+        setAuthPassword(identity.password || '');
+        setSelectedIdentityId(identity.id);
+        setIdentityDropdownOpen(false);
+    };
 
     return (
         <>
@@ -154,6 +180,68 @@ export const TerminalAuthDialog: React.FC<TerminalAuthDialogProps> = ({
                                 {showAuthPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                             </button>
                         </div>
+                        {passwordIdentities.length > 0 && (
+                            <Popover open={identityDropdownOpen} onOpenChange={setIdentityDropdownOpen}>
+                                <PopoverTrigger asChild>
+                                    <button
+                                        type="button"
+                                        className={cn(
+                                            "w-full flex items-center gap-2.5 px-3 py-2 rounded-lg border transition-colors text-left",
+                                            selectedIdentity
+                                                ? "border-primary bg-primary/5"
+                                                : "border-border/50 hover:bg-secondary/50"
+                                        )}
+                                    >
+                                        <div className="h-6 w-6 rounded-md flex items-center justify-center shrink-0 bg-primary/20 text-primary">
+                                            <UserRound size={12} />
+                                        </div>
+                                        <span
+                                            className={cn(
+                                                "flex-1 min-w-0 truncate text-sm",
+                                                selectedIdentity ? "font-medium" : "text-muted-foreground"
+                                            )}
+                                        >
+                                            {selectedIdentity
+                                                ? selectedIdentity.label
+                                                : t("terminal.auth.selectIdentity")}
+                                        </span>
+                                        {selectedIdentity?.username && (
+                                            <span className="shrink-0 font-mono text-xs text-muted-foreground">
+                                                {selectedIdentity.username}
+                                            </span>
+                                        )}
+                                        <ChevronDown size={14} className="text-muted-foreground shrink-0" />
+                                    </button>
+                                </PopoverTrigger>
+                                <PopoverContent className="p-1" align="start" style={{ width: 'var(--radix-popover-trigger-width)' }}>
+                                    <div className="max-h-60 overflow-y-auto">
+                                        {passwordIdentities.map((identity) => (
+                                            <button
+                                                key={identity.id}
+                                                className={cn(
+                                                    "w-full flex items-center gap-3 px-3 py-2 rounded-md transition-colors text-left",
+                                                    selectedIdentityId === identity.id
+                                                        ? "bg-primary/10 text-primary"
+                                                        : "hover:bg-secondary/80"
+                                                )}
+                                                onClick={() => handleSelectIdentity(identity)}
+                                            >
+                                                <div className="h-7 w-7 rounded-md flex items-center justify-center shrink-0 bg-primary/20 text-primary">
+                                                    <UserRound size={12} />
+                                                </div>
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="text-sm font-medium truncate">{identity.label}</div>
+                                                    {identity.username && (
+                                                        <div className="text-xs text-muted-foreground truncate">{identity.username}</div>
+                                                    )}
+                                                </div>
+                                                <span className="shrink-0 font-mono text-xs text-muted-foreground">••••••••</span>
+                                            </button>
+                                        ))}
+                                    </div>
+                                </PopoverContent>
+                            </Popover>
+                        )}
                     </div>
                 ) : (
                     <>
