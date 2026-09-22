@@ -690,6 +690,14 @@ function TerminalLayerSidePanelInner({ ctx }: { ctx: SidePanelContext }) {
       ? null
       : new MutationObserver(updateAvailableWidth);
     mutationObserver?.observe(terminalLayer, { childList: true });
+    // The focus sidebar is nested inside the workspace row wrapper, so a
+    // focus-mode toggle mutates the wrapper rather than the terminal layer
+    // (whose own dimensions stay unchanged). Watch the wrapper as well so the
+    // nested sidebar is discovered and observed when it mounts/unmounts.
+    const workspaceRow = terminalLayer.querySelector(
+      '[data-section="terminal-workspace-row"]',
+    );
+    if (workspaceRow) mutationObserver?.observe(workspaceRow, { childList: true });
     return () => {
       resizeObserver?.disconnect();
       mutationObserver?.disconnect();

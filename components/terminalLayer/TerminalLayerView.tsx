@@ -36,7 +36,10 @@ function TerminalLayerViewInner({ ctx }: { ctx: TerminalLayerViewContext }) {
           `display: contents` in side-dock mode so its children participate in
           the outer flex row exactly like direct children. */}
       <TerminalLayerSidePanelSection ctx={ctx} />
-      <div className={isBottomDock ? 'flex min-h-0 w-full flex-1' : 'contents'}>
+      <div
+        data-section="terminal-workspace-row"
+        className={isBottomDock ? 'flex min-h-0 w-full flex-1' : 'contents'}
+      >
         <TerminalLayerFocusSidebarSection ctx={ctx} />
         <TerminalLayerWorkspaceSection ctx={ctx} />
       </div>
