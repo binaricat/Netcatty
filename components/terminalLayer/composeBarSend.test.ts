@@ -75,6 +75,19 @@ test('the password bypass delivers sensitive sends but keeps them out of compose
   assert.equal(executorCalls, 1);
 });
 
+test('bypassed fan-out into a lagging sensitive peer keeps the whole send out of history', async () => {
+  // Focused session 0 is non-sensitive; lagging peer 1 sits at a password
+  // prompt. The bypass delivers the payload there, but that text is peer 1's
+  // password input, so the send must not be recallable via ArrowUp.
+  for (const executorOwner of ['0', '1'] as const) {
+    const executors = new Map<string, Executor>([[executorOwner, async () => true]]);
+    assert.equal(
+      await setup(['connected', 'connected'], true, executors, new Set(['1']), true).send('secret'),
+      false,
+    );
+  }
+});
+
 test('without the password bypass sensitive input is excluded for executor and fallback paths', async () => {
   for (const broadcast of [false, true]) {
     for (const executors of [new Map<string, Executor>(), new Map<string, Executor>([['0', async () => true]])]) {
