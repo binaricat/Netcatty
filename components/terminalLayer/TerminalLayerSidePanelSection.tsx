@@ -656,15 +656,38 @@ function TerminalLayerSidePanelInner({ ctx }: { ctx: SidePanelContext }) {
     setOverlayRoot(terminalLayer);
 
     let observedFocusSidebar: Element | null = null;
+    let observedComposeBar: Element | null = null;
+    let observedWorkspaceColumn: Element | null = null;
     const resizeObserver = typeof ResizeObserver === 'undefined'
       ? null
       : new ResizeObserver(() => updateAvailableWidth());
+    const mutationObserver = typeof MutationObserver === 'undefined'
+      ? null
+      : new MutationObserver(() => updateAvailableWidth());
     const updateAvailableWidth = () => {
       const focusSidebar = terminalLayer.querySelector('[data-section="terminal-workspace-sidebar"]');
       if (resizeObserver && focusSidebar !== observedFocusSidebar) {
         if (observedFocusSidebar) resizeObserver.unobserve(observedFocusSidebar);
         observedFocusSidebar = focusSidebar;
         if (focusSidebar) resizeObserver.observe(focusSidebar);
+      }
+      // The workspace compose bar is a flex-shrink-0 sibling of the terminal
+      // area inside the workspace column; re-discover it on mount/unmount and
+      // measure it on its own resize so the dock never starves the terminal.
+      const composeBar = terminalLayer.querySelector('[data-section="terminal-compose-bar"]');
+      if (resizeObserver && composeBar !== observedComposeBar) {
+        if (observedComposeBar) resizeObserver.unobserve(observedComposeBar);
+        observedComposeBar = composeBar;
+        if (composeBar) resizeObserver.observe(composeBar);
+      }
+      const workspaceColumn = terminalLayer.querySelector(
+        '[data-section="terminal-workspace-column"]',
+      );
+      // MutationObserver has no unobserve; observe() on a node replaces its
+      // previous registration, so only newly seen columns need registering.
+      if (mutationObserver && workspaceColumn && workspaceColumn !== observedWorkspaceColumn) {
+        observedWorkspaceColumn = workspaceColumn;
+        mutationObserver.observe(workspaceColumn, { childList: true });
       }
       const layerWidth = terminalLayer.getBoundingClientRect().width;
       const nextWidth = getTerminalSidePanelAvailableWidth(
@@ -675,20 +698,19 @@ function TerminalLayerSidePanelInner({ ctx }: { ctx: SidePanelContext }) {
       availableSurfaceWidthRef.current = nextWidth;
       setAvailableSurfaceWidth((current) => current === nextWidth ? current : nextWidth);
       // Bottom dock shares the full terminal layer height; only the host-tree
-      // sidebar overlaps horizontally, so no sibling height is subtracted.
+      // sidebar overlaps horizontally. The compose bar is a flex-shrink-0
+      // sibling below the terminal area, though, so its height is reserved
+      // too — otherwise the MIN_TERMINAL_HEIGHT floor applies to the whole
+      // workspace row and a tall compose bar can collapse the terminal.
       const nextHeight = getTerminalSidePanelAvailableHeight(
         terminalLayer.getBoundingClientRect().height,
-        0,
+        composeBar?.getBoundingClientRect().height ?? 0,
       );
       availableSurfaceHeightRef.current = nextHeight;
       setAvailableSurfaceHeight((current) => current === nextHeight ? current : nextHeight);
     };
 
-    updateAvailableWidth();
     resizeObserver?.observe(terminalLayer);
-    const mutationObserver = typeof MutationObserver === 'undefined'
-      ? null
-      : new MutationObserver(updateAvailableWidth);
     mutationObserver?.observe(terminalLayer, { childList: true });
     // The focus sidebar is nested inside the workspace row wrapper, so a
     // focus-mode toggle mutates the wrapper rather than the terminal layer
@@ -698,10 +720,13 @@ function TerminalLayerSidePanelInner({ ctx }: { ctx: SidePanelContext }) {
       '[data-section="terminal-workspace-row"]',
     );
     if (workspaceRow) mutationObserver?.observe(workspaceRow, { childList: true });
+    updateAvailableWidth();
     return () => {
       resizeObserver?.disconnect();
       mutationObserver?.disconnect();
       observedFocusSidebar = null;
+      observedComposeBar = null;
+      observedWorkspaceColumn = null;
       setOverlayRoot(null);
     };
   }, []);
