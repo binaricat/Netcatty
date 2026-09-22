@@ -1158,3 +1158,42 @@ test("a source-sensitive Kitty dispatch forces sensitive peer writes", () => {
     { data: "secret", sensitive: true },
   ]);
 });
+
+test("a source-sensitive dispatch forces sensitive Win32 peer writes", () => {
+  const encodedKeys = new Set<string>();
+  const win32Writes: Array<{ type?: string; sensitive?: boolean }> = [];
+  const handler = createKittyKeyboardBroadcastHandler({
+    resolveOptions: () => ({
+      kittyProtocolEnabled: false,
+      kittyMode: createKittyKeyboardModeState(),
+      applicationCursorMode: false,
+      encodedKeys,
+      win32InputMode: true,
+    }),
+    getSessionId: () => "win32-peer",
+    // The peer has not classified its own prompt as sensitive.
+    isSensitiveInput: () => false,
+    isConnected: () => true,
+    isRuntimeDisposed: () => false,
+    writeDisposed: () => {},
+    writeActive: () => {},
+    writeWin32Event: (event, _logicalData, writeOptions) => {
+      win32Writes.push({
+        type: event.type,
+        sensitive: writeOptions?.sensitive === true,
+      });
+    },
+  });
+
+  handler({ kind: "key", event: { type: "keydown", key: "Enter", code: "Enter", shiftKey: true } });
+  assert.deepEqual(win32Writes, [{ type: "keydown", sensitive: false }]);
+
+  handler(
+    { kind: "key", event: { type: "keydown", key: "Enter", code: "Enter", shiftKey: true } },
+    { sourceSensitive: true },
+  );
+  assert.deepEqual(win32Writes, [
+    { type: "keydown", sensitive: false },
+    { type: "keydown", sensitive: true },
+  ]);
+});

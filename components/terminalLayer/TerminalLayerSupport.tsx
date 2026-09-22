@@ -114,6 +114,12 @@ export type SnippetExecutor = (
     multiLineRunMode?: Snippet["multiLineRunMode"];
     /** When false, do not steal keyboard focus (multi-tab fan-out). Default true. */
     focus?: boolean;
+    /**
+     * Force sensitive classification on the target's own write (bypassed
+     * password fan-out, #3488): the peer has not necessarily classified its
+     * own prompt as sensitive, so it must keep input interceptors skipped.
+     */
+    sensitive?: boolean;
   },
   /**
    * Returns true when the command was written to the session. False means the

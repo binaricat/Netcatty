@@ -398,7 +398,11 @@ export const createKittyKeyboardBroadcastHandler = (options: {
     logicalData?: string | null,
     writeOptions?: { sensitive?: boolean },
   ) => void;
-  writeWin32Event?: (event: KittyKeyboardEvent, logicalData: string | null) => void;
+  writeWin32Event?: (
+    event: KittyKeyboardEvent,
+    logicalData: string | null,
+    writeOptions?: { sensitive?: boolean },
+  ) => void;
 }): KittyKeyboardBroadcastHandler => (input, dispatchOptions) => {
   const sessionId = options.getSessionId();
   if (!sessionId || !options.isConnected()) return;
@@ -413,19 +417,21 @@ export const createKittyKeyboardBroadcastHandler = (options: {
     options.interruptSession(sessionId);
     return;
   }
+  // The source dispatched from a bypassed password prompt: keep the sensitive
+  // marker on the peer write even when this peer's own prompt is not (yet)
+  // classified sensitive, so input interceptors stay skipped for the secret.
+  // Computed before the Win32 branch so its write stays sensitive too.
+  const forceSensitiveWrite = dispatchOptions?.sourceSensitive === true;
   if (resolved.win32Event) {
     if (!options.isRuntimeDisposed()) {
       options.writeWin32Event?.(
         resolved.win32Event,
         resolved.logicalData ?? null,
+        forceSensitiveWrite ? { sensitive: true } : undefined,
       );
     }
     return;
   }
-  // The source dispatched from a bypassed password prompt: keep the sensitive
-  // marker on the peer write even when this peer's own prompt is not (yet)
-  // classified sensitive, so input interceptors stay skipped for the secret.
-  const forceSensitiveWrite = dispatchOptions?.sourceSensitive === true;
   if (options.isRuntimeDisposed()) {
     options.writeDisposed(
       sessionId,

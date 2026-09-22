@@ -1590,6 +1590,8 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   let win32InputModePendingEvent: {
     event: KittyKeyboardEvent;
     logicalData: string | null;
+    /** Forced sensitive marker from a bypassed password-prompt source (#3488). */
+    sensitive?: boolean;
   } | null = null;
   const win32InputModeForwardedKeys = new Map<string, KittyKeyboardForwardedPress>();
   const kittyForwardedKeys = new Map<string, KittyKeyboardForwardedPress>();
@@ -2709,8 +2711,15 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   const writeWin32InputModeEvent = (
     event: KittyKeyboardEvent,
     logicalData: string | null,
+    writeOptions?: { sensitive?: boolean },
   ) => {
-    const pending = { event, logicalData };
+    const pending = {
+      event,
+      logicalData,
+      // A bypassed source-prompt fan-out (#3488) forces the sensitive marker so
+      // this peer's Win32 write keeps input interceptors skipped.
+      ...(writeOptions?.sensitive === true ? { sensitive: true } : {}),
+    };
     win32InputModePendingEvent = pending;
     dispatchWin32InputModeEvent(term, event);
     if (win32InputModePendingEvent === pending) {
@@ -2945,6 +2954,9 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       handleTerminalInputData(data, {
         logicalData: win32Input.logicalData,
         skipBroadcast: true,
+        // A bypassed source-prompt fan-out (#3488) forces the sensitive marker
+        // so this peer's write keeps input interceptors skipped.
+        ...(win32Input.sensitive === true ? { sensitive: true } : {}),
       });
       return;
     }
@@ -3036,8 +3048,8 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       // this peer's write keeps input interceptors skipped.
       ...(writeOptions?.sensitive === true ? { sensitive: true } : {}),
     }),
-    writeWin32Event: (event, logicalData) => {
-      writeWin32InputModeEvent(event, logicalData);
+    writeWin32Event: (event, logicalData, writeOptions) => {
+      writeWin32InputModeEvent(event, logicalData, writeOptions);
     },
   });
   registerKittyKeyboardBroadcastHandler(

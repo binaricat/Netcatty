@@ -3311,6 +3311,8 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       multiLineRunMode?: Snippet["multiLineRunMode"];
       /** When false, skip term.focus() so multi-tab fan-out does not steal focus. */
       focus?: boolean;
+      /** Force sensitive classification on the write (bypassed password fan-out, #3488). */
+      sensitive?: boolean;
     },
   ): Promise<boolean> => {
     // Hidden-tab hibernation clears termRef. Wake via the *connected* path so
@@ -3365,7 +3367,9 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     // without re-wrapping. Without broadcasting at all, accepting a snippet in
     // broadcast mode would clear peer input (the clear keystrokes already go
     // through the broadcast-aware path) but never send the command.
-    const sensitive = passwordPromptActiveRef.current;
+    // A bypassed password fan-out (#3488) forces the sensitive marker even
+    // when this target has not itself classified its prompt as sensitive.
+    const sensitive = passwordPromptActiveRef.current || options?.sensitive === true;
     if (
       shouldBroadcastDuringSensitivePrompt({
         sensitivePromptActive: sensitive,

@@ -2314,7 +2314,13 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
         if (!broadcastPasswordBypass && isTerminalSensitiveInputActive(sid)) continue;
         const executor = snippetExecutorsRef.current.get(sid);
         if (executor) {
-          pendingSends.push(Promise.resolve(executor(text, false, { broadcast: false })).then(
+          pendingSends.push(Promise.resolve(executor(text, false, {
+            broadcast: false,
+            // Bypassed password fan-out (#3488): the peer's executor derives
+            // sensitivity from its own prompt, so force the focused session's
+            // sensitive marker to keep input interceptors skipped on its write.
+            ...(focusedSensitive ? { sensitive: true } : {}),
+          })).then(
             (sent) => sent && (broadcastPasswordBypass || !isTerminalSensitiveInputActive(sid)),
           ));
         } else {
