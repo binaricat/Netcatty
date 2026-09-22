@@ -29,6 +29,7 @@ import {
   getTerminalSidePanelMaxShownTools,
   getTerminalSidePanelMaxHeight,
   getTerminalSidePanelMaxWidth,
+  TERMINAL_SIDE_PANEL_TOOLBAR_HEIGHT,
 } from '../../application/state/terminalSidePanelWidth';
 import { terminalLayoutSuppressStore } from '../../application/state/terminalLayoutSuppressStore';
 import { AI_PANEL_FORCE_HIDE_SHELL } from '../ai/aiPanelDiagnostics';
@@ -631,6 +632,9 @@ function TerminalLayerSidePanelInner({ ctx }: { ctx: SidePanelContext }) {
   const shellResizeCleanupRef = useRef<(() => void) | null>(null);
   const [availableSurfaceWidth, setAvailableSurfaceWidth] = useState(0);
   const availableSurfaceWidthRef = useRef(availableSurfaceWidth);
+  // Full terminal-layer width; unlike `availableSurfaceWidth` this does not
+  // subtract the workspace focus sidebar (relevant for the bottom dock).
+  const [terminalLayerWidth, setTerminalLayerWidth] = useState(0);
   const [availableSurfaceHeight, setAvailableSurfaceHeight] = useState(0);
   const availableSurfaceHeightRef = useRef(availableSurfaceHeight);
   const [paneHosts, setPaneHosts] = useState<Map<SidePanelTab, HTMLElement>>(new Map());
@@ -662,10 +666,12 @@ function TerminalLayerSidePanelInner({ ctx }: { ctx: SidePanelContext }) {
         observedFocusSidebar = focusSidebar;
         if (focusSidebar) resizeObserver.observe(focusSidebar);
       }
+      const layerWidth = terminalLayer.getBoundingClientRect().width;
       const nextWidth = getTerminalSidePanelAvailableWidth(
-        terminalLayer.getBoundingClientRect().width,
+        layerWidth,
         focusSidebar?.getBoundingClientRect().width ?? 0,
       );
+      setTerminalLayerWidth((current) => current === layerWidth ? current : layerWidth);
       availableSurfaceWidthRef.current = nextWidth;
       setAvailableSurfaceWidth((current) => current === nextWidth ? current : nextWidth);
       // Bottom dock shares the full terminal layer height; only the host-tree
@@ -768,6 +774,8 @@ function TerminalLayerSidePanelInner({ ctx }: { ctx: SidePanelContext }) {
     : 0;
   const sidePanelContentMinimumHeight = activeSidePanelLayout
     ? getSidePanelNodeMinimumPixels(activeSidePanelLayout.root, 'horizontal')
+      // The shared toolbar sits above the pane tree and consumes shell height.
+      + TERMINAL_SIDE_PANEL_TOOLBAR_HEIGHT
     : 0;
   const shellWidth = requestedShellWidth > 0
     ? clampTerminalSidePanelWidth(
@@ -1053,8 +1061,9 @@ function TerminalLayerSidePanelInner({ ctx }: { ctx: SidePanelContext }) {
     }
     return parts;
   }, [activeSidePanelTab, partitionSidePanelTabs]);
-  // Bottom dock spans the full layer width, so tab overflow fits everything.
-  const sidePanelTabFitWidth = isBottomDock ? availableSurfaceWidth : shellWidth;
+  // Bottom dock spans the full layer width (below the workspace focus
+  // sidebar row), so measure tab overflow against the terminal layer itself.
+  const sidePanelTabFitWidth = isBottomDock ? terminalLayerWidth : shellWidth;
   const { shown: shownSidePanelTabs, collapsed: collapsedSidePanelTabs } = useMemo(
     () => fitTerminalSidePanelTabs({
       shown: configuredShownSidePanelTabs,

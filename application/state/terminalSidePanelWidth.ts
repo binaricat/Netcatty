@@ -45,6 +45,8 @@ export function getTerminalSidePanelMaxShownTools(panelWidth: number): number {
 export const TERMINAL_SIDE_PANEL_MIN_HEIGHT = 200;
 export const TERMINAL_SIDE_PANEL_MAX_HEIGHT = 1200;
 export const TERMINAL_SIDE_PANEL_MIN_TERMINAL_HEIGHT = 240;
+// Shared tab toolbar rendered above the pane tree (`h-9`).
+export const TERMINAL_SIDE_PANEL_TOOLBAR_HEIGHT = 36;
 
 export function getTerminalSidePanelAvailableHeight(
   terminalLayerHeight: number,
