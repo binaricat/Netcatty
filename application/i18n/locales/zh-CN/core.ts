@@ -1086,6 +1086,8 @@ export const zhCNCoreMessages: Messages = {
   'sftp.deleteConfirm.descSingle': '此操作不可撤销。',
   'sftp.deleteConfirm.host': '主机',
   'sftp.deleteConfirm.path': '路径',
+  'sftp.deleteConfirm.terminalBusy': '终端正忙，请回到提示符后再试。',
+  'sftp.deleteConfirm.terminalUnavailable': '单通道主机需要用已连接的终端删除。请先连上同一台主机，并停在提示符。',
   'sftp.error.loadFailed': '加载目录失败',
   'sftp.error.downloadFailed': '下载失败',
   'sftp.error.uploadFailed': '上传失败',

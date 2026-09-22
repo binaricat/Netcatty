@@ -76,6 +76,7 @@ import {
   resolveLocateSftpPathInTerminalAction,
   resolveLocateSftpPathSessionId,
 } from "../domain/sftpLocatePathInTerminal";
+import { resolveInteractiveTerminalDelete } from "../domain/sftpTerminalDelete";
 import { classifyDistroId, hostRestrictsExtraSshChannels } from "../domain/host";
 import { useTerminalBackend } from "../application/state/useTerminalBackend";
 import { isTerminalSensitiveInputActive } from "./terminal/runtime/terminalSensitiveInputRegistry";
@@ -1778,6 +1779,65 @@ const SftpSidePanelInteractiveBody: React.FC<SftpSidePanelInteractiveBodyProps> 
     terminalBackend,
   ]);
 
+  const handleDeleteViaTerminal = useCallback((paths: string[]): "sent" | "busy" | "unavailable" | "fallback" => {
+    const plan = resolveInteractiveTerminalDelete(paths);
+    if (!plan) return "fallback";
+    const connection = sftpRef.current.leftPane.connection;
+    const locateSessionId = resolveLocateSftpPathSessionId({
+      activeSessionId,
+      focusedSessionId,
+    });
+    const session = sessions.find((candidate) => candidate.id === locateSessionId) ?? null;
+    const host = displayHost ?? activeHost;
+    const isNetworkDevice = host?.deviceType === "network"
+      || classifyDistroId(host?.distro) === "network-device";
+    const allowed = canLocateSftpPathInTerminal({
+      path: connection?.currentPath || plan.directories[0]?.parentPath,
+      sessionId: locateSessionId,
+      sessionStatus: session?.status,
+      sessionHostId: session?.hostId,
+      sftpHostId: connection?.hostId,
+      sftpIsLocal: Boolean(connection?.isLocal),
+      protocol: session?.protocol ?? host?.protocol,
+      shellType: session?.shellType,
+      isNetworkDevice,
+      moshEnabled: session?.moshEnabled,
+      etEnabled: session?.etEnabled,
+      sessionHostname: session?.hostname,
+      sessionUsername: session?.username,
+      sessionPort: session?.port,
+      sftpHostname: host?.hostname,
+      sftpUsername: host?.username,
+      sftpPort: host?.port,
+    });
+    if (!allowed || !locateSessionId) return "unavailable";
+    if (
+      isTerminalSensitiveInputActive(locateSessionId)
+      || !isTerminalReadyForCommandInjection(locateSessionId)
+    ) {
+      return "busy";
+    }
+    terminalBackend.writeToSession(locateSessionId, plan.command + "\r", { automated: true });
+    for (const directory of plan.directories) {
+      sftp.removeListedNames("left", directory.parentPath, directory.names);
+    }
+    window.setTimeout(() => {
+      void sftp.refresh("left");
+    }, 500);
+    scheduleDeferredTerminalFocus(onRequestTerminalFocus);
+    return "sent";
+  }, [
+    activeHost,
+    activeSessionId,
+    displayHost,
+    focusedSessionId,
+    onRequestTerminalFocus,
+    sessions,
+    sftp,
+    sftpRef,
+    terminalBackend,
+  ]);
+
   const MAX_VISIBLE_TRANSFERS = 5;
   const visibleTransfers = useMemo(() => {
     const connection = sftp.leftPane.connection;
@@ -1941,6 +2001,7 @@ const SftpSidePanelInteractiveBody: React.FC<SftpSidePanelInteractiveBodyProps> 
                   onToggleShowHiddenFiles={() => handleToggleHiddenFiles(pane.id)}
                   onGoToTerminalCwd={onGetTerminalCwd ? handleGoToTerminalCwd : undefined}
                   onLocatePathInTerminal={canLocatePathInTerminal ? handleLocatePathInTerminal : undefined}
+                  onDeleteViaTerminal={(displayHost ?? activeHost)?.singleChannelSsh ? handleDeleteViaTerminal : undefined}
                   followTerminalCwd={canFollowTerminalCwd ? effectiveFollowTerminalCwd : undefined}
                   onToggleFollowTerminalCwd={canFollowTerminalCwd ? handleToggleFollowTerminalCwd : undefined}
                 />

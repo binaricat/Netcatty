@@ -1088,6 +1088,8 @@ export const zhTWCoreMessages: Messages = {
   'sftp.deleteConfirm.descSingle': '此操作不可復原。',
   'sftp.deleteConfirm.host': '主機',
   'sftp.deleteConfirm.path': '路徑',
+  'sftp.deleteConfirm.terminalBusy': '終端正忙，請回到提示字元後再試。',
+  'sftp.deleteConfirm.terminalUnavailable': '單通道主機需要用已連線的終端刪除。請先連上同一台主機，並停在提示字元。',
   'sftp.error.loadFailed': '載入目錄失敗',
   'sftp.error.downloadFailed': '下載失敗',
   'sftp.error.uploadFailed': '上傳失敗',

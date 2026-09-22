@@ -490,3 +490,19 @@ test("openSftpForSession keeps sudo mode when connectSudoSftp succeeds", async (
   assert.equal(closeBound, true);
   await bridge.closeSftp(null, { sftpId: opened.sftpId });
 });
+
+test("single-channel directory delete does not open a shell exec", async () => {
+  const bridge = require("./sftpBridge.cjs");
+  let execCalls = 0;
+  const removed = await bridge._tryFastShellDirectoryDeleteForTests({
+    __netcattySingleChannelSsh: true,
+    client: {
+      exec() {
+        execCalls += 1;
+        throw new Error("must not exec on single-channel SSH");
+      },
+    },
+  }, "/home/app/static/folder");
+  assert.equal(removed, false);
+  assert.equal(execCalls, 0);
+});

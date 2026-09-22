@@ -51,6 +51,7 @@ interface SftpPaneDialogsProps {
   showDeleteConfirm: boolean;
   setShowDeleteConfirm: (open: boolean) => void;
   deleteTargets: string[];
+  deleteError?: string | null;
   handleDelete: () => void;
   isDeleting: boolean;
   // Host picker (connected view)
@@ -104,6 +105,7 @@ export const SftpPaneDialogs: React.FC<SftpPaneDialogsProps> = ({
   showDeleteConfirm,
   setShowDeleteConfirm,
   deleteTargets,
+  deleteError,
   handleDelete,
   isDeleting,
   showHostPicker,
@@ -351,16 +353,24 @@ export const SftpPaneDialogs: React.FC<SftpPaneDialogsProps> = ({
               ))}
             </div>
           ) : null}
+          {deleteError ? (
+            <p className="break-words text-xs text-destructive [overflow-wrap:anywhere]">
+              {deleteError}
+            </p>
+          ) : null}
         </div>
         <DialogFooter>
           <Button
+            type="button"
             variant="outline"
             onClick={() => setShowDeleteConfirm(false)}
+            disabled={isDeleting}
           >
             {t("common.cancel")}
           </Button>
           <Button
             ref={deleteConfirmButtonRef}
+            type="button"
             variant="destructive"
             onClick={handleDelete}
             disabled={isDeleting}

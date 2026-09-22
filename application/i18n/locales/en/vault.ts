@@ -442,6 +442,8 @@ export const enVaultMessages: Messages = {
   'sftp.deleteConfirm.descSingle': 'This action cannot be undone.',
   'sftp.deleteConfirm.host': 'Host',
   'sftp.deleteConfirm.path': 'Path',
+  'sftp.deleteConfirm.terminalBusy': 'The terminal is busy. Return to the shell prompt and try again.',
+  'sftp.deleteConfirm.terminalUnavailable': 'Single-channel hosts delete through the connected terminal. Connect to this host and wait for a shell prompt.',
   'sftp.error.loadFailed': 'Failed to load directory',
   'sftp.error.downloadFailed': 'Download failed',
   'sftp.error.uploadFailed': 'Upload failed',

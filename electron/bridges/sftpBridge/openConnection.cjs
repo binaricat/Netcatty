@@ -1358,6 +1358,9 @@ function createOpenConnectionApi(ctx) {
         }
 
         client.__netcattySingleChannelSsh = !!options.singleChannelSsh;
+        if (client.client) {
+          client.client.__netcattySingleChannelSsh = !!options.singleChannelSsh;
+        }
         sftpClients.set(connId, client);
     
         // Store jump connections for cleanup when SFTP is closed (legacy path

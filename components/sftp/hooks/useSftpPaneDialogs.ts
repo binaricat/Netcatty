@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 import type { SftpPaneCallbacks } from "../SftpContext";
 import type { SftpPane } from "../../../application/state/sftp/types";
+import { isSessionError, unwrapSftpIpcError } from "../../../application/state/sftp/errors";
 import { getFileName, getParentPath } from "../../../application/state/sftp/utils";
 import { logger } from "../../../lib/logger";
 
@@ -40,6 +41,7 @@ interface UseSftpPaneDialogsParams {
   onRenameFileAtPath: SftpPaneCallbacks["onRenameFileAtPath"];
   onDeleteFilesAtPath: SftpPaneCallbacks["onDeleteFilesAtPath"];
   onClearSelection: SftpPaneCallbacks["onClearSelection"];
+  onDeleteViaTerminal?: (paths: string[]) => "sent" | "busy" | "unavailable" | "fallback";
   onMutateSuccess?: (paths?: string[]) => void;
 }
 
@@ -62,6 +64,7 @@ interface UseSftpPaneDialogsResult {
   isCreatingFile: boolean;
   isRenaming: boolean;
   isDeleting: boolean;
+  deleteError: string | null;
   setShowHostPicker: (open: boolean) => void;
   setHostSearch: (value: string) => void;
   setShowNewFolderDialog: (open: boolean) => void;
@@ -95,6 +98,7 @@ export const useSftpPaneDialogs = ({
   onRenameFileAtPath,
   onDeleteFilesAtPath,
   onClearSelection,
+  onDeleteViaTerminal,
   onMutateSuccess,
 }: UseSftpPaneDialogsParams): UseSftpPaneDialogsResult => {
   const [showHostPicker, setShowHostPicker] = useState(false);
@@ -110,8 +114,13 @@ export const useSftpPaneDialogs = ({
   const [showRenameDialog, setShowRenameDialog] = useState(false);
   const [renameTarget, setRenameTarget] = useState<string | null>(null);
   const [renameName, setRenameName] = useState("");
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirmState] = useState(false);
   const [deleteTargets, setDeleteTargets] = useState<string[]>([]);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const setShowDeleteConfirm = useCallback((open: boolean) => {
+    if (!open) setDeleteError(null);
+    setShowDeleteConfirmState(open);
+  }, []);
   const [isCreating, setIsCreating] = useState(false);
   const [isCreatingFile, setIsCreatingFile] = useState(false);
   const [isRenaming, setIsRenaming] = useState(false);
@@ -262,8 +271,28 @@ export const useSftpPaneDialogs = ({
   const handleDelete = useCallback(async () => {
     if (deleteTargetsRef.current.length === 0 || isDeleting) return;
     setIsDeleting(true);
+    setDeleteError(null);
     try {
-      // deleteTargets are full paths; group by parent dir and use path-aware variant
+      if (onDeleteViaTerminal) {
+        const result = onDeleteViaTerminal(deleteTargetsRef.current);
+        if (result === "sent") {
+          const parents = new Set<string>();
+          for (const fullPath of deleteTargetsRef.current) parents.add(getParentPath(fullPath));
+          onMutateSuccess?.(Array.from(parents));
+          setDeleteTargets([]);
+          onClearSelection();
+          setShowDeleteConfirm(false);
+          return;
+        }
+        if (result === "busy") {
+          setDeleteError(t("sftp.deleteConfirm.terminalBusy"));
+          return;
+        }
+        if (result !== "fallback") {
+          setDeleteError(t("sftp.deleteConfirm.terminalUnavailable"));
+          return;
+        }
+      }
       const byDir = new Map<string, string[]>();
       for (const fullPath of deleteTargetsRef.current) {
         const dir = getParentPath(fullPath);
@@ -280,15 +309,22 @@ export const useSftpPaneDialogs = ({
         await onDeleteFilesAtPath(connectionId, dir, names);
       }
       onMutateSuccess?.(Array.from(byDir.keys()));
+      setDeleteError(null);
       setShowDeleteConfirm(false);
       setDeleteTargets([]);
       onClearSelection();
     } catch (err) {
       logger.warn("Failed to delete files", err);
+      if (isSessionError(err)) {
+        setDeleteTargets([]);
+        setShowDeleteConfirm(false);
+        return;
+      }
+      setDeleteError(`${t("sftp.error.deleteFailed")}: ${unwrapSftpIpcError(err)}`);
     } finally {
       setIsDeleting(false);
     }
-  }, [isDeleting, onDeleteFilesAtPath, onMutateSuccess, onClearSelection]);
+  }, [isDeleting, onClearSelection, onDeleteFilesAtPath, onDeleteViaTerminal, onMutateSuccess, t]);
 
   // entryPath is the full path; renameName is initialized to the basename
   const openRenameDialog = useCallback((entryPath: string) => {
@@ -325,6 +361,7 @@ export const useSftpPaneDialogs = ({
   }, []);
 
   const openDeleteConfirm = useCallback((names: string[]) => {
+    setDeleteError(null);
     setDeleteTargets(names);
     setShowDeleteConfirm(true);
   }, []);
@@ -344,6 +381,7 @@ export const useSftpPaneDialogs = ({
     renameName,
     showDeleteConfirm,
     deleteTargets,
+    deleteError,
     isCreating,
     isCreatingFile,
     isRenaming,
