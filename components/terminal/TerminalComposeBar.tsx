@@ -7,7 +7,7 @@ import { GripHorizontal, Pin, Plus, Radio, Search, X } from 'lucide-react';
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useComposeBarHistory } from '../../application/state/useComposeBarHistory';
 import { canNavigateComposeBarHistory } from '../../domain/composeBarHistory';
-import { BROADCAST_PASSWORD_BYPASS_STORAGE_KEY } from '../../domain/terminalBroadcast';
+import { STORAGE_KEY_TERMINAL_BROADCAST_PASSWORD_BYPASS } from '../../infrastructure/config/storageKeys';
 import { useStoredBoolean } from '../../application/state/useStoredBoolean';
 import { useComposeBarHeight } from '../../application/state/useComposeBarHeight';
 import { useComposeBarPinnedSnippets } from '../../application/state/useComposeBarPinnedSnippets';
@@ -325,7 +325,7 @@ export const TerminalComposeBar: React.FC<TerminalComposeBarProps> = ({
   // with the terminal runtime, which reads it to keep broadcasting during
   // password / interactive prompts while this switch is on.
   const [allowPasswordBroadcast, setAllowPasswordBroadcast] = useStoredBoolean(
-    BROADCAST_PASSWORD_BYPASS_STORAGE_KEY,
+    STORAGE_KEY_TERMINAL_BROADCAST_PASSWORD_BYPASS,
     false,
   );
   const [broadcastMenuAnchor, setBroadcastMenuAnchor] = useState<{ x: number; y: number } | null>(null);

@@ -3,13 +3,6 @@ import type { TerminalSession } from './models';
 type BroadcastSession = Pick<TerminalSession, 'id' | 'workspaceId' | 'hiddenFromTabs'>;
 
 /**
- * localStorage key backing the opt-in "broadcast without password protection"
- * switch shown in the compose-bar right-click menu (issue #3488). Read by both
- * the compose bar (toggle UI) and the terminal runtime (broadcast gating).
- */
-export const BROADCAST_PASSWORD_BYPASS_STORAGE_KEY = 'terminal.broadcastAllowPasswordBroadcast';
-
-/**
  * The fail-closed password-prompt heuristic pauses broadcasting while an
  * untrusted prompt is on screen. With the opt-in bypass enabled (SecureCRT
  * "Send commands to all sessions" style), input keeps flowing to peer tabs

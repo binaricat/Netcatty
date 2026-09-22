@@ -1,8 +1,6 @@
 import { clearTerminalBroadcastUserInput, markTerminalBroadcastUserInput } from "./terminal/runtime/terminalPacedBroadcast";
-import {
-  BROADCAST_PASSWORD_BYPASS_STORAGE_KEY,
-  shouldBroadcastDuringSensitivePrompt,
-} from "../domain/terminalBroadcast";
+import { shouldBroadcastDuringSensitivePrompt } from "../domain/terminalBroadcast";
+import { STORAGE_KEY_TERMINAL_BROADCAST_PASSWORD_BYPASS } from "../infrastructure/config/storageKeys";
 import { publishTerminalCommandCompletion } from "../application/state/terminalCommandCompletion";
 import { createTerminalReflowReadingPosition } from "./terminal/terminalReflowReadingPosition";
 import { resolveHostOs } from '../domain/host';
@@ -837,7 +835,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   // Opt-in "broadcast without password protection" (#3488): when enabled, the
   // fail-closed password-prompt heuristic no longer pauses broadcast fan-out.
   const [broadcastPasswordBypass] = useStoredBoolean(
-    BROADCAST_PASSWORD_BYPASS_STORAGE_KEY,
+    STORAGE_KEY_TERMINAL_BROADCAST_PASSWORD_BYPASS,
     false,
   );
   const broadcastPasswordBypassRef = useRef(broadcastPasswordBypass);
@@ -1081,7 +1079,9 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         && isBroadcastEnabledRef.current
         && onBroadcastInputRef.current
       ) {
-        onBroadcastInputRef.current(text, sessionId);
+        // Bypassed password fan-out (#3488): retain the sensitive marker so
+        // peer writes keep skipping input interceptors.
+        onBroadcastInputRef.current(text, sessionId, sensitive ? { sourceSensitive: true } : undefined);
       }
 
       // ESC-prefixed writes (Esc+. yank-last-arg) are shell editor commands.
@@ -3293,7 +3293,11 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       && isBroadcastEnabledRef.current
       && onBroadcastInputRef.current
     ) {
-      onBroadcastInputRef.current(data, sessionId, options);
+      // Bypassed password fan-out (#3488): retain the sensitive marker so
+      // peer writes keep skipping input interceptors.
+      onBroadcastInputRef.current(data, sessionId, passwordPromptActiveRef.current
+        ? { ...options, sourceSensitive: true }
+        : options);
       return true;
     }
     return false;
@@ -3374,6 +3378,9 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       onBroadcastInputRef.current(data, sessionId, {
         automated: true,
         noAutoRun,
+        // Bypassed password fan-out (#3488): retain the sensitive marker so
+        // peer writes keep skipping input interceptors.
+        ...(sensitive ? { sourceSensitive: true } : {}),
         ...(lineDelayMs ? { lineDelayMs } : {}),
       });
     }

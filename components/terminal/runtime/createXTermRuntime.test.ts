@@ -1027,7 +1027,7 @@ test("multi-character plain text goes out as per-character writes (#3077)", asyn
   // broadcast keep using the unsplit payload.
   const writeSite = source.slice(writeLoopIdx - 600, writeLoopIdx + 320);
   assert.match(writeSite, /ctx\.onOutputTriggerUserInputRef\?\.current\?\.\(outData\)/);
-  assert.match(source, /onBroadcastInput\?\.\(broadcastData, ctx\.sessionId\)/);
+  assert.match(source, /onBroadcastInput\?\.\(broadcastData, ctx\.sessionId, sensitive \? \{ sourceSensitive: true \} : undefined\)/);
 });
 
 test("Command+Period interrupt press is keyed apart from an outstanding physical KeyC press (#3409)", async () => {

@@ -26,7 +26,7 @@ import { detectLocalOs } from '../lib/localShell';
 import { useStoredString } from '../application/state/useStoredString';
 import { useStoredNumber } from '../application/state/useStoredNumber';
 import { useStoredBoolean } from '../application/state/useStoredBoolean';
-import { BROADCAST_PASSWORD_BYPASS_STORAGE_KEY } from '../domain/terminalBroadcast';
+import { STORAGE_KEY_TERMINAL_BROADCAST_PASSWORD_BYPASS } from '../infrastructure/config/storageKeys';
 import {
   STORAGE_KEY_SIDE_PANEL_WIDTH,
   STORAGE_KEY_TERMINAL_COMPOSE_BAR_OPEN,
@@ -714,7 +714,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   // Opt-in "broadcast without password protection" (#3488): when enabled, the
   // fail-closed password-prompt heuristic no longer pauses workspace broadcast.
   const [broadcastPasswordBypass] = useStoredBoolean(
-    BROADCAST_PASSWORD_BYPASS_STORAGE_KEY,
+    STORAGE_KEY_TERMINAL_BROADCAST_PASSWORD_BYPASS,
     false,
   );
   const broadcastPasswordBypassRef = useRef(broadcastPasswordBypass);
@@ -1192,10 +1192,13 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     options?: TerminalBroadcastInputOptions,
   ) => {
     const paced = options?.pacedBroadcast;
+    // Opt-in #3488 bypass: when enabled, sensitive-prompt targets stay in the
+    // fan-out instead of being silently dropped here.
+    const passwordBypass = broadcastPasswordBypassRef.current === true;
     if (paced && !options?.preparePacedBroadcast) {
-      if (!paced.targets || isTerminalSensitiveInputActive(sourceSessionId)) return [];
+      if (!paced.targets || (!passwordBypass && isTerminalSensitiveInputActive(sourceSessionId))) return [];
       paced.targets = paced.targets.filter(target => isTerminalBroadcastInputCurrent(target)
-        && !isTerminalSensitiveInputActive(target.sessionId));
+        && (passwordBypass || !isTerminalSensitiveInputActive(target.sessionId)));
     }
     const targetSessionIds = resolveTerminalBroadcastTargetIds({
       sessions: sessionsRef.current,
@@ -1204,7 +1207,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       directTargetSessionIds: options?.kittyKeyboardTargetSessionIds,
     }).filter(id => !paced?.targets || paced.targets.some(target => target.sessionId === id));
     if (options?.preparePacedBroadcast && paced) {
-      paced.targets = targetSessionIds.filter(id => !isTerminalSensitiveInputActive(id)).map(id => {
+      paced.targets = targetSessionIds.filter(id => passwordBypass || !isTerminalSensitiveInputActive(id)).map(id => {
         markTerminalBroadcastUserInput(id);
         terminalBackend.interruptSession(id, undefined, { cancelPendingWritesOnly: true });
         return captureTerminalBroadcastInput(id);
@@ -1248,10 +1251,12 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
         terminalBackend.interruptSession(session.id);
         continue;
       }
-      if (isTerminalSensitiveInputActive(session.id)) continue;
+      if (!passwordBypass && isTerminalSensitiveInputActive(session.id)) continue;
       terminalBackend.writeToSession(session.id, data, {
         automated: options?.automated === true,
-        sensitive: false,
+        // Retain the source-sensitive marker (bypassed password fan-out, #3488)
+        // so peer input interceptors stay skipped for the secret payload.
+        sensitive: options?.sourceSensitive === true,
         ...(lineDelayMs ? { lineDelayMs } : {}),
       });
       deliveredSessionIds.push(session.id);
@@ -2312,7 +2317,9 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
         } else {
           const session = sessionsRef.current.find((candidate) => candidate.id === sid);
           if (!session || !canUseDirectSessionWriteFallback(session)) continue;
-          terminalBackend.writeToSession(sid, payload, { sensitive: false });
+          // Keep the source-sensitive marker when the #3488 bypass let a
+          // password-prompt payload through, so interceptors stay skipped.
+          terminalBackend.writeToSession(sid, payload, { sensitive: focusedSensitive });
           recordHistory = recordHistory || session.status === 'connected';
         }
       }

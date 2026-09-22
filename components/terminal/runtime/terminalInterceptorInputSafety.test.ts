@@ -46,7 +46,7 @@ test("password-prompt input is classified before prompt state reset and cannot b
   );
   assert.match(
     runtimeSource,
-    /const broadcastUserPasteData = \(\s*data: string,\s*options\?: TerminalBroadcastInputOptions,\s*\) => \{[\s\S]*?ctx\.passwordPromptActiveRef\?\.current !== true\s*\|\| ctx\.broadcastPasswordBypassRef\?\.current === true[\s\S]*?onBroadcastInputRef\.current\(\s*data,\s*ctx\.sessionId,\s*options\)/u,
+    /const broadcastUserPasteData = \(\s*data: string,\s*options\?: TerminalBroadcastInputOptions,\s*\) => \{[\s\S]*?const dispatchingFromPasswordPrompt = ctx\.passwordPromptActiveRef\?\.current === true;[\s\S]*?\|\| ctx\.broadcastPasswordBypassRef\?\.current === true\)[\s\S]*?onBroadcastInputRef\.current\(\s*data,\s*ctx\.sessionId,\s*dispatchingFromPasswordPrompt[\s\S]*?sourceSensitive: true/u,
   );
   assert.match(
     terminalSource,
@@ -128,6 +128,6 @@ test("active and hibernated output share host-owned sensitive prompt classificat
 test("ordinary broadcast skips targets that are waiting for sensitive input", () => {
   assert.match(
     terminalLayerSource,
-    /if \(isTerminalSensitiveInputActive\(session\.id\)\) continue;[\s\S]*?writeToSession\(session\.id, data/u,
+    /if \(!passwordBypass && isTerminalSensitiveInputActive\(session\.id\)\) continue;[\s\S]*?writeToSession\(session\.id, data, \{[\s\S]*?sensitive: options\?\.sourceSensitive === true,/u,
   );
 });

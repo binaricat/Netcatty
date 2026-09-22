@@ -953,13 +953,18 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     options?: TerminalBroadcastInputOptions,
   ) => {
     // Password bypass (#3488): the opt-in lifts the password-prompt pause.
+    // Payloads dispatched from an active prompt stay marked sourceSensitive so
+    // peer writes keep skipping input interceptors.
+    const dispatchingFromPasswordPrompt = ctx.passwordPromptActiveRef?.current === true;
     if (
-      (ctx.passwordPromptActiveRef?.current !== true
+      (!dispatchingFromPasswordPrompt
         || ctx.broadcastPasswordBypassRef?.current === true)
       && ctx.isBroadcastEnabledRef.current
       && ctx.onBroadcastInputRef.current
     ) {
-      ctx.onBroadcastInputRef.current(data, ctx.sessionId, options);
+      ctx.onBroadcastInputRef.current(data, ctx.sessionId, dispatchingFromPasswordPrompt
+        ? { ...options, sourceSensitive: true }
+        : options);
       return true;
     }
     return false;
@@ -1522,7 +1527,9 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         ctx.host.backspaceBehavior,
       );
       if (willBroadcastInput) {
-        onBroadcastInput?.(broadcastData, ctx.sessionId);
+        // If the bypass (#3488) let a password-prompt payload through, keep the
+        // sensitive marker on peer writes so input interceptors stay skipped.
+        onBroadcastInput?.(broadcastData, ctx.sessionId, sensitive ? { sourceSensitive: true } : undefined);
       }
 
       if (
@@ -1629,7 +1636,9 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     sourceSessionId: ctx.sessionId,
     isHandlingBroadcast: () => handlingKittyBroadcast,
     isBroadcastEnabled: () => ctx.isBroadcastEnabledRef.current,
-    isSensitiveInput: () => ctx.passwordPromptActiveRef?.current === true,
+    // The #3488 bypass lifts the password-prompt pause for Kitty key fan-out too.
+    isSensitiveInput: () => ctx.passwordPromptActiveRef?.current === true
+      && ctx.broadcastPasswordBypassRef?.current !== true,
     getDispatcher: () => ctx.onBroadcastInputRef.current,
   });
 
@@ -3001,7 +3010,9 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       shiftEnterSettings: ctx.terminalSettingsRef.current,
     }),
     getSessionId: () => ctx.sessionRef.current,
-    isSensitiveInput: () => ctx.passwordPromptActiveRef?.current === true,
+    // Receiving side: the #3488 bypass lets Kitty broadcast land at password prompts too.
+    isSensitiveInput: () => ctx.passwordPromptActiveRef?.current === true
+      && ctx.broadcastPasswordBypassRef?.current !== true,
     isConnected: () => ctx.statusRef.current === "connected",
     isRuntimeDisposed: () => runtimeDisposed,
     interruptSession: ctx.terminalBackend.interruptSession

@@ -35,6 +35,12 @@ export interface TerminalBroadcastInputOptions {
   lineDelayMs?: number;
   kittyKeyboardInput?: KittyKeyboardBroadcastInput;
   kittyKeyboardTargetSessionIds?: string[];
+  /**
+   * Source session captured the payload at a password / sensitive prompt (the
+   * #3488 bypass allowed the fan-out). Peer writes must retain that marker so
+   * input interceptors on the receiving side stay skipped.
+   */
+  sourceSensitive?: boolean;
 }
 
 export { resolveSessionTabTitle };
