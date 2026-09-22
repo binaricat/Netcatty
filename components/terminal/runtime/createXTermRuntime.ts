@@ -2522,6 +2522,13 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         kittyEvent,
         [],
       );
+      // Snapshot source-prompt sensitivity before the local write (#3491):
+      // a Kitty-encoded Enter that reaches the PTY as bare CR submits here
+      // and clears passwordPromptActiveRef, so the live prompt-source check
+      // in broadcastKittyInput would report this Enter as nonsensitive and
+      // a peer would commit its buffered source-sensitive password
+      // characters as ordinary command/script bookkeeping.
+      const sourceSensitivePrompt = ctx.passwordPromptActiveRef?.current === true;
       handleTerminalInputData(kittySequenceForKeyDown, { source: "kitty" });
       const forwarded = broadcastKittyInput({
         kind: "key",
@@ -2530,7 +2537,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         urgentInterrupt: shouldUseUrgentTerminalInterrupt(e, {
           hasSelection: hasCopyableSelection,
         }),
-      });
+      }, false, undefined, sourceSensitivePrompt ? { sourceSensitive: true } : undefined);
       if (forwarded) {
         upsertKittyKeyboardForwardedPress(
           broadcastForwardedKeys,

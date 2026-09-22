@@ -82,6 +82,13 @@ export const createKittyKeyboardBroadcastForwarder = (options: {
     input: KittyKeyboardBroadcastInput,
     forcePairedRelease = false,
     targetSessionIds?: string[],
+    /**
+     * Source-prompt sensitivity snapshotted before the source's own local
+     * write (#3491): a submitting key such as Enter clears the live prompt
+     * flag before this dispatch runs, so the live check alone would report
+     * the payload as nonsensitive.
+     */
+    dispatchOptions?: { sourceSensitive?: boolean },
   ): { targetSessionIds: string[] } | null => {
     const currentDispatcher = options.getDispatcher();
     if (currentDispatcher) lastDispatcher = currentDispatcher;
@@ -93,8 +100,11 @@ export const createKittyKeyboardBroadcastForwarder = (options: {
       !dispatcher
     ) return null;
     // Bypassed password fan-out (#3488): tag the dispatch so peer writes keep
-    // input interceptors skipped for the secret keystrokes.
-    const sourceSensitive = options.isSensitivePromptSource?.() === true;
+    // input interceptors skipped for the secret keystrokes. A pre-write
+    // snapshot wins (#3491): the local submission may have already cleared
+    // the live prompt flag by the time this dispatch runs.
+    const sourceSensitive = dispatchOptions?.sourceSensitive === true
+      || options.isSensitivePromptSource?.() === true;
     const deliveredSessionIds = dispatcher("", options.sourceSessionId, {
       kittyKeyboardInput: input,
       ...(sourceSensitive ? { sourceSensitive: true } : {}),

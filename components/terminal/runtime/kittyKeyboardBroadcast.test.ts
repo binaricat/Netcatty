@@ -1128,6 +1128,43 @@ test("a bypassed password-prompt source tags Kitty broadcasts as sourceSensitive
   ]);
 });
 
+test("a pre-write sensitivity snapshot tags the Kitty dispatch as sourceSensitive", () => {
+  const dispatched: Array<{
+    kittyKeyboardInput?: KittyKeyboardBroadcastInput;
+    sourceSensitive?: boolean;
+  }> = [];
+  const forward = createKittyKeyboardBroadcastForwarder({
+    sourceSessionId: "source",
+    isHandlingBroadcast: () => false,
+    isBroadcastEnabled: () => true,
+    isSensitiveInput: () => false,
+    // #3491: the source's local Enter submission already cleared the live
+    // prompt flag before this dispatch runs, so the live check reports
+    // nonsensitive and only the pre-write snapshot can restore the tag.
+    isSensitivePromptSource: () => false,
+    getDispatcher: () => (_data, _sourceSessionId, dispatchOptions) => {
+      dispatched.push(dispatchOptions);
+      return ["target-a"];
+    },
+  });
+  const enter: KittyKeyboardBroadcastInput = {
+    kind: "key",
+    event: { type: "keydown", key: "Enter", code: "Enter" },
+  };
+
+  // Snapshot taken before the local write says the source sat at a prompt.
+  assert.deepEqual(
+    forward(enter, false, undefined, { sourceSensitive: true }),
+    { targetSessionIds: ["target-a"] },
+  );
+  // Without a snapshot the dispatch stays nonsensitive (live flag is false).
+  forward(enter);
+  assert.deepEqual(dispatched, [
+    { kittyKeyboardInput: enter, sourceSensitive: true },
+    { kittyKeyboardInput: enter },
+  ]);
+});
+
 test("a source-sensitive Kitty dispatch forces sensitive peer writes", () => {
   const mode = createKittyKeyboardModeState();
   const activeWrites: Array<{ data: string; sensitive?: boolean }> = [];
