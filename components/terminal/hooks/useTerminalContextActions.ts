@@ -59,12 +59,16 @@ export const broadcastTerminalPasteData = (
     && onBroadcastInputRef?.current
   ) {
     // Bypassed password fan-out (#3488): when the prompt itself is sensitive,
-    // tag the payload so peer writes keep input interceptors skipped.
+    // tag the payload so peer writes keep input interceptors skipped. A paste
+    // confirmed at a sensitive prompt keeps its pre-dialog snapshot (#3491),
+    // so its carried sensitivity tags the fan-out even when the dialog await
+    // cleared the live prompt ref.
     const dispatchingFromPasswordPrompt = passwordPromptActiveRef?.current === true;
+    const sourceSensitive = dispatchingFromPasswordPrompt || options?.sensitive === true;
     onBroadcastInputRef.current(
       data,
       sourceSessionId,
-      dispatchingFromPasswordPrompt ? { ...options, sourceSensitive: true } : options,
+      sourceSensitive ? { ...options, sourceSensitive: true } : options,
     );
     return true;
   }

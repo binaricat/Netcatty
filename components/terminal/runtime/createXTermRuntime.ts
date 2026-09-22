@@ -956,13 +956,17 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     // Payloads dispatched from an active prompt stay marked sourceSensitive so
     // peer writes keep skipping input interceptors.
     const dispatchingFromPasswordPrompt = ctx.passwordPromptActiveRef?.current === true;
+    // A paste confirmed at a sensitive prompt keeps its pre-dialog snapshot
+    // (#3491): the dialog await can clear the live prompt ref, so the saved
+    // classification carried in the paste options must still tag the fan-out.
+    const sourceSensitive = dispatchingFromPasswordPrompt || options?.sensitive === true;
     if (
       (!dispatchingFromPasswordPrompt
         || ctx.broadcastPasswordBypassRef?.current === true)
       && ctx.isBroadcastEnabledRef.current
       && ctx.onBroadcastInputRef.current
     ) {
-      ctx.onBroadcastInputRef.current(data, ctx.sessionId, dispatchingFromPasswordPrompt
+      ctx.onBroadcastInputRef.current(data, ctx.sessionId, sourceSensitive
         ? { ...options, sourceSensitive: true }
         : options);
       return true;
@@ -3079,10 +3083,14 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   });
   registerKittyKeyboardBroadcastHandler(
     ctx.sessionId,
-    (input) => {
+    // Forward the dispatch options (#3488): source-prompt fan-outs tag their
+    // payload with sourceSensitive / beforeUrgentInterrupt, and dropping the
+    // second argument here would downgrade bypassed password keystrokes to
+    // ordinary peer input (leaving input interceptors / autocomplete exposed).
+    (input, dispatchOptions) => {
       handlingKittyBroadcast = true;
       try {
-        handleKittyKeyboardBroadcast(input);
+        handleKittyKeyboardBroadcast(input, dispatchOptions);
       } finally {
         handlingKittyBroadcast = false;
       }

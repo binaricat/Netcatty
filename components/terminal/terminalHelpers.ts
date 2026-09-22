@@ -41,6 +41,13 @@ export interface TerminalBroadcastInputOptions {
    * input interceptors on the receiving side stay skipped.
    */
   sourceSensitive?: boolean;
+  /**
+   * Paste payload classified sensitive before a confirm-dialog await (#3491):
+   * the callback resolves the live prompt state itself, which the dialog can
+   * have cleared, so the saved classification rides into the broadcast and
+   * the dispatcher tags the payload sourceSensitive.
+   */
+  sensitive?: boolean;
 }
 
 export { resolveSessionTabTitle };

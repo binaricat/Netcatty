@@ -3282,7 +3282,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
   const broadcastUserPasteData = useCallback((
     data: string,
-    options?: { lineDelayMs?: number },
+    options?: { lineDelayMs?: number; sensitive?: boolean },
   ) => {
     if (
       shouldBroadcastDuringSensitivePrompt({
@@ -3294,8 +3294,12 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       && onBroadcastInputRef.current
     ) {
       // Bypassed password fan-out (#3488): retain the sensitive marker so
-      // peer writes keep skipping input interceptors.
-      onBroadcastInputRef.current(data, sessionId, passwordPromptActiveRef.current
+      // peer writes keep skipping input interceptors. A paste confirmed at
+      // a sensitive prompt keeps its pre-dialog snapshot (#3491), so its
+      // carried sensitivity tags the fan-out even when the dialog await
+      // cleared the live prompt ref.
+      const sourceSensitive = passwordPromptActiveRef.current || options?.sensitive === true;
+      onBroadcastInputRef.current(data, sessionId, sourceSensitive
         ? { ...options, sourceSensitive: true }
         : options);
       return true;

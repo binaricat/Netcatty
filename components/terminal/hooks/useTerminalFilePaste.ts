@@ -20,7 +20,7 @@ interface UseTerminalFilePasteOptions {
   };
   isSensitiveInput?: () => boolean;
   scrollOnPasteRef?: React.RefObject<boolean>;
-  onPasteData?: (data: string, options?: { lineDelayMs?: number }) => boolean | void;
+  onPasteData?: (data: string, options?: { lineDelayMs?: number; sensitive?: boolean }) => boolean | void;
   scrollToBottomAfterProgrammaticInput: (data: string) => void;
   containerRef: React.RefObject<HTMLDivElement | null>;
   /** Remote sessions only: auto-upload a clipboard image on paste. */

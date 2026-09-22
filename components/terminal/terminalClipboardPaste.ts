@@ -77,7 +77,7 @@ type TerminalClipboardPasteOptions = {
   /** Live #3488 bypass probe; forwarded to the multiline-confirm gate. */
   broadcastPasswordBypass?: () => boolean;
   onClipboardImageUploadResult?: (result: RemoteClipboardImageUploadResult) => void;
-  onPasteData?: (data: string, options?: { lineDelayMs?: number }) => boolean | void;
+  onPasteData?: (data: string, options?: { lineDelayMs?: number; sensitive?: boolean }) => boolean | void;
   readClipboardText: () => Promise<string>;
   scrollOnPaste?: boolean;
   scrollToBottomAfterProgrammaticInput?: (data: string) => void;
@@ -105,7 +105,7 @@ type MultilineGatedPasteOptions = {
    * the paste itself keeps its sensitive marker for the source write.
    */
   broadcastPasswordBypass?: () => boolean;
-  onPasteData?: (data: string, options?: { lineDelayMs?: number }) => boolean | void;
+  onPasteData?: (data: string, options?: { lineDelayMs?: number; sensitive?: boolean }) => boolean | void;
   scrollOnPaste?: boolean;
   scrollToBottomAfterProgrammaticInput?: (data: string) => void;
   sessionId: string | null | undefined;
