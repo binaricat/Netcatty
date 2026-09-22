@@ -1639,6 +1639,9 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     // The #3488 bypass lifts the password-prompt pause for Kitty key fan-out too.
     isSensitiveInput: () => ctx.passwordPromptActiveRef?.current === true
       && ctx.broadcastPasswordBypassRef?.current !== true,
+    // Dispatching from an active prompt under the bypass must tag the payload
+    // so peer writes keep input interceptors skipped.
+    isSensitivePromptSource: () => ctx.passwordPromptActiveRef?.current === true,
     getDispatcher: () => ctx.onBroadcastInputRef.current,
   });
 
@@ -3018,14 +3021,20 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     interruptSession: ctx.terminalBackend.interruptSession
       ? (id) => ctx.terminalBackend.interruptSession?.(id)
       : undefined,
-    writeDisposed: (id, data) => ctx.terminalBackend.writeToSession(
+    writeDisposed: (id, data, writeOptions) => ctx.terminalBackend.writeToSession(
       id,
       mapTerminalBackspaceInput(data, ctx.host.backspaceBehavior),
-      { sensitive: ctx.passwordPromptActiveRef?.current === true },
+      {
+        sensitive: ctx.passwordPromptActiveRef?.current === true
+          || writeOptions?.sensitive === true,
+      },
     ),
-    writeActive: (data, logicalData) => handleTerminalInputData(data, {
+    writeActive: (data, logicalData, writeOptions) => handleTerminalInputData(data, {
       source: "kitty",
       logicalData,
+      // A bypassed source-prompt fan-out (#3488) forces the sensitive marker so
+      // this peer's write keeps input interceptors skipped.
+      ...(writeOptions?.sensitive === true ? { sensitive: true } : {}),
     }),
     writeWin32Event: (event, logicalData) => {
       writeWin32InputModeEvent(event, logicalData);

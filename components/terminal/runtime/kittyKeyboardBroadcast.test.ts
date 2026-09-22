@@ -1098,3 +1098,63 @@ test("a dedicated keyIdentity pairs the interrupt press with its release (#3409)
   assert.equal(defaultRelease?.data, "\x1b[97;1:3u");
   assert.equal(defaultOptions.encodedKeys.has("KeyA"), false);
 });
+
+test("a bypassed password-prompt source tags Kitty broadcasts as sourceSensitive", () => {
+  const dispatched: Array<{
+    kittyKeyboardInput?: KittyKeyboardBroadcastInput;
+    sourceSensitive?: boolean;
+  }> = [];
+  const forward = createKittyKeyboardBroadcastForwarder({
+    sourceSessionId: "source",
+    isHandlingBroadcast: () => false,
+    isBroadcastEnabled: () => true,
+    // #3488 bypass: the sensitive-prompt pause is lifted, but the source still
+    // tags the dispatch so peers keep input interceptors skipped.
+    isSensitiveInput: () => false,
+    isSensitivePromptSource: () => true,
+    getDispatcher: () => (_data, _sourceSessionId, dispatchOptions) => {
+      dispatched.push(dispatchOptions);
+      return ["target-a"];
+    },
+  });
+  const press: KittyKeyboardBroadcastInput = {
+    kind: "key",
+    event: { type: "keydown", key: "x", code: "KeyX" },
+  };
+
+  assert.deepEqual(forward(press), { targetSessionIds: ["target-a"] });
+  assert.deepEqual(dispatched, [
+    { kittyKeyboardInput: press, sourceSensitive: true },
+  ]);
+});
+
+test("a source-sensitive Kitty dispatch forces sensitive peer writes", () => {
+  const mode = createKittyKeyboardModeState();
+  const activeWrites: Array<{ data: string; sensitive?: boolean }> = [];
+  const handler = createKittyKeyboardBroadcastHandler({
+    resolveOptions: () => ({
+      kittyProtocolEnabled: false,
+      kittyMode: mode,
+      applicationCursorMode: false,
+      encodedKeys: new Set<string>(),
+    }),
+    getSessionId: () => "peer-session",
+    // The peer has not classified its own prompt as sensitive.
+    isSensitiveInput: () => false,
+    isConnected: () => true,
+    isRuntimeDisposed: () => false,
+    writeDisposed: () => {},
+    writeActive: (data, _logicalData, writeOptions) => {
+      activeWrites.push({ data, sensitive: writeOptions?.sensitive === true });
+    },
+  });
+
+  handler({ kind: "text", text: "secret" });
+  assert.deepEqual(activeWrites, [{ data: "secret", sensitive: false }]);
+
+  handler({ kind: "text", text: "secret" }, { sourceSensitive: true });
+  assert.deepEqual(activeWrites, [
+    { data: "secret", sensitive: false },
+    { data: "secret", sensitive: true },
+  ]);
+});

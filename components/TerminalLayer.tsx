@@ -1229,6 +1229,9 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
           beforeUrgentInterrupt: () => {
             broadcastInterruptPrioritizersRef.current.get(session.id)?.();
           },
+          // Bypassed password fan-out (#3488): the receiver forces sensitive
+          // writes so its input interceptors stay skipped for the secret.
+          ...(options?.sourceSensitive === true ? { sourceSensitive: true } : {}),
         });
         deliveredSessionIds.push(session.id);
         continue;
@@ -2347,7 +2350,12 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       }
     }
     const results = await Promise.allSettled(pendingSends);
-    return recordHistory || results.some((result) => result.status === 'fulfilled' && result.value);
+    const delivered = recordHistory || results.some((result) => result.status === 'fulfilled' && result.value);
+    // A bypassed send typed at a sensitive prompt (#3488) was delivered but
+    // must not be recallable from compose history via ArrowUp, so report no
+    // history eligibility for it.
+    if (focusedSensitive) return false;
+    return delivered;
   }, [isBroadcastEnabled, terminalBackend]);
 
   const sessionLogConfig = useMemo(

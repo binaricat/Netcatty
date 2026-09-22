@@ -58,7 +58,14 @@ export const broadcastTerminalPasteData = (
     && isBroadcastEnabledRef?.current
     && onBroadcastInputRef?.current
   ) {
-    onBroadcastInputRef.current(data, sourceSessionId, options);
+    // Bypassed password fan-out (#3488): when the prompt itself is sensitive,
+    // tag the payload so peer writes keep input interceptors skipped.
+    const dispatchingFromPasswordPrompt = passwordPromptActiveRef?.current === true;
+    onBroadcastInputRef.current(
+      data,
+      sourceSessionId,
+      dispatchingFromPasswordPrompt ? { ...options, sourceSensitive: true } : options,
+    );
     return true;
   }
   return false;

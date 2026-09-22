@@ -60,12 +60,19 @@ test('a disconnected broadcast peer cannot undo another successful fallback', as
   assert.equal(await setup(['connected', 'disconnected'], true).send('command'), true);
 });
 
-test('the password bypass lets sensitive sessions receive broadcast sends (#3488)', async () => {
-  const executors = new Map<string, Executor>([['0', async () => true]]);
+test('the password bypass delivers sensitive sends but keeps them out of compose history (#3488)', async () => {
+  let executorCalls = 0;
+  const executors = new Map<string, Executor>([['0', async () => {
+    executorCalls += 1;
+    return true;
+  }]]);
+  // The payload was delivered (the executor ran), but the send originates from
+  // a sensitive prompt, so the compose bar must not record it for ArrowUp.
   assert.equal(
     await setup(['connected'], true, executors, new Set(['0']), true).send('secret'),
-    true,
+    false,
   );
+  assert.equal(executorCalls, 1);
 });
 
 test('without the password bypass sensitive input is excluded for executor and fallback paths', async () => {
