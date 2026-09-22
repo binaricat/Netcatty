@@ -349,6 +349,9 @@ export const TerminalComposeBar: React.FC<TerminalComposeBarProps> = ({
 
   const handleBroadcastContextMenu = useCallback((event: React.MouseEvent) => {
     if (!isBroadcastEnabled) return;
+    // Let the compose textarea keep the platform cut/copy/paste context menu;
+    // the broadcast bypass menu only applies to the rest of the bar.
+    if (event.target instanceof Element && event.target.closest('textarea')) return;
     event.preventDefault();
     event.stopPropagation();
     setBroadcastMenuAnchor({ x: event.clientX, y: event.clientY });
