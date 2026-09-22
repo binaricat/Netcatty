@@ -600,6 +600,7 @@ export const enAiMessages: Messages = {
   'terminal.layer.aiChat': 'AI Chat',
   'terminal.layer.movePanelLeft': 'Move panel to left',
   'terminal.layer.movePanelRight': 'Move panel to right',
+  'terminal.layer.movePanelBottom': 'Move panel to bottom',
   'terminal.layer.closePanel': 'Close panel',
   'terminal.layer.closePane': 'Close split',
   'terminal.layer.saveLayoutAsDefault': 'Save layout as default',

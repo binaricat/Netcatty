@@ -590,6 +590,7 @@ export const zhTWAiMessages: Messages = {
   'terminal.layer.aiChat': 'AI 助手',
   'terminal.layer.movePanelLeft': '面板移至左側',
   'terminal.layer.movePanelRight': '面板移至右側',
+  'terminal.layer.movePanelBottom': '面板移至底部',
   'terminal.layer.closePanel': '關閉面板',
   'terminal.layer.closePane': '關閉分割',
   'terminal.layer.saveLayoutAsDefault': '將佈局儲存為預設',

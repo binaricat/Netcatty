@@ -41,3 +41,35 @@ export function getTerminalSidePanelMaxShownTools(panelWidth: number): number {
     ),
   );
 }
+
+export const TERMINAL_SIDE_PANEL_MIN_HEIGHT = 200;
+export const TERMINAL_SIDE_PANEL_MAX_HEIGHT = 1200;
+export const TERMINAL_SIDE_PANEL_MIN_TERMINAL_HEIGHT = 240;
+
+export function getTerminalSidePanelAvailableHeight(
+  terminalLayerHeight: number,
+  occupiedSiblingHeight: number,
+): number {
+  return Math.max(0, terminalLayerHeight - occupiedSiblingHeight);
+}
+
+export function getTerminalSidePanelMaxHeight(availableSurfaceHeight: number): number {
+  const availableHeight = availableSurfaceHeight - TERMINAL_SIDE_PANEL_MIN_TERMINAL_HEIGHT;
+  return Math.max(
+    TERMINAL_SIDE_PANEL_MIN_HEIGHT,
+    Math.min(TERMINAL_SIDE_PANEL_MAX_HEIGHT, availableHeight),
+  );
+}
+
+export function clampTerminalSidePanelHeight(
+  height: number,
+  availableSurfaceHeight: number,
+  contentMinimumHeight = TERMINAL_SIDE_PANEL_MIN_HEIGHT,
+): number {
+  const maximumHeight = getTerminalSidePanelMaxHeight(availableSurfaceHeight);
+  const minimumHeight = Math.min(
+    maximumHeight,
+    Math.max(TERMINAL_SIDE_PANEL_MIN_HEIGHT, contentMinimumHeight),
+  );
+  return Math.max(minimumHeight, Math.min(maximumHeight, height));
+}

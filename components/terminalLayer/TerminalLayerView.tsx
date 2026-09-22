@@ -17,10 +17,12 @@ function TerminalLayerViewInner({ ctx }: { ctx: TerminalLayerViewContext }) {
     ctx.hibernateHiddenTabs,
   );
 
+  const isBottomDock = ctx.sidePanelPosition === 'bottom';
+
   return (
     <div
       ref={ctx.workspaceOuterRef}
-      className="absolute inset-0 bg-background flex min-h-0"
+      className={`absolute inset-0 bg-background flex min-h-0${isBottomDock ? ' flex-col' : ''}`}
       data-section="terminal-workspace"
       inert={ctx.isTerminalLayerVisible ? undefined : true}
       style={{
@@ -28,9 +30,21 @@ function TerminalLayerViewInner({ ctx }: { ctx: TerminalLayerViewContext }) {
         left: hostTreeLayoutWidth,
       }}
     >
-      <TerminalLayerSidePanelSection ctx={ctx} />
-      <TerminalLayerFocusSidebarSection ctx={ctx} />
-      <TerminalLayerWorkspaceSection ctx={ctx} />
+      {isBottomDock ? (
+        <>
+          <div className="flex min-h-0 w-full flex-1">
+            <TerminalLayerFocusSidebarSection ctx={ctx} />
+            <TerminalLayerWorkspaceSection ctx={ctx} />
+          </div>
+          <TerminalLayerSidePanelSection ctx={ctx} />
+        </>
+      ) : (
+        <>
+          <TerminalLayerSidePanelSection ctx={ctx} />
+          <TerminalLayerFocusSidebarSection ctx={ctx} />
+          <TerminalLayerWorkspaceSection ctx={ctx} />
+        </>
+      )}
     </div>
   );
 }

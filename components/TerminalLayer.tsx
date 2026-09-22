@@ -131,9 +131,12 @@ import {
 } from '../domain/paneMagnification';
 import { useTerminalSidePanelLayoutState } from '../application/state/useTerminalSidePanelLayoutState';
 import {
+  TERMINAL_SIDE_PANEL_MAX_HEIGHT,
   TERMINAL_SIDE_PANEL_MAX_WIDTH,
+  TERMINAL_SIDE_PANEL_MIN_HEIGHT,
   TERMINAL_SIDE_PANEL_MIN_WIDTH,
 } from '../application/state/terminalSidePanelWidth';
+import { isSidePanelDockPosition } from '../domain/sidePanelLayout';
 
 import {
   AIChatPanelsHost,
@@ -732,10 +735,15 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     420,
     { min: TERMINAL_SIDE_PANEL_MIN_WIDTH, max: TERMINAL_SIDE_PANEL_MAX_WIDTH },
   );
-  const [sidePanelPosition, setSidePanelPosition] = useStoredString<'left' | 'right'>(
+  const [sidePanelPosition, setSidePanelPosition] = useStoredString<'left' | 'right' | 'bottom'>(
     'netcatty_side_panel_position',
     'left',
-    (v): v is 'left' | 'right' => v === 'left' || v === 'right',
+    isSidePanelDockPosition,
+  );
+  const [sidePanelHeight, setSidePanelHeight, persistSidePanelHeight] = useStoredNumber(
+    'netcatty_side_panel_height',
+    360,
+    { min: TERMINAL_SIDE_PANEL_MIN_HEIGHT, max: TERMINAL_SIDE_PANEL_MAX_HEIGHT },
   );
   // Remember the last sub-panel shown per tab so the toggle shortcut can
   // restore it after a close. Overwritten on open, never cleared on close.
@@ -2418,6 +2426,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     handleSftpActiveExternalEditsChange,
     handleSftpInitialLocationApplied,
     persistSidePanelWidth,
+    persistSidePanelHeight,
     handleSnippetClickForFocusedSession,
     handleSnippetFromPanel,
     handleRunScriptFromPanel,
@@ -2531,6 +2540,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     setSidePanelOpenTabs,
     setSidePanelLayouts,
     setSidePanelWidth,
+    setSidePanelHeight,
     setSftpFollowTerminalCwd,
     setSftpHostForTab,
     setSftpInitialLocationForTab,
@@ -2541,6 +2551,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     sidePanelLayouts,
     sidePanelPosition,
     sidePanelWidth,
+    sidePanelHeight,
     sftpAutoSync,
     sftpDefaultViewMode,
     sftpDoubleClickBehavior,
