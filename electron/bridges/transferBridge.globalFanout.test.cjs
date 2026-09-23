@@ -381,3 +381,23 @@ for (const action of ["pause", "resume"]) {
     assert.equal((await older).supersededBy, action === "pause" ? "resume" : "pause");
   });
 }
+
+test("same-host directory copy skips exec on a single-channel SFTP login", async () => {
+  const bridge = require("./transferBridge.cjs");
+  const sftpClients = new Map();
+  bridge.init({ sftpClients });
+  let execCalls = 0;
+  sftpClients.set("single-sftp", {
+    __netcattySingleChannelSsh: true,
+    client: { exec() { execCalls += 1; throw new Error("must not exec"); } },
+  });
+  const result = await bridge.sameHostCopyDirectory({ sender: { send() {} } }, {
+    sftpId: "single-sftp",
+    sourcePath: "/source",
+    targetPath: "/target",
+    encoding: "utf-8",
+  });
+  assert.equal(result.success, false);
+  assert.equal(execCalls, 0);
+});
+

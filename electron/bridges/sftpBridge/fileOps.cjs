@@ -1061,14 +1061,6 @@ function createFileOpsApi(ctx) {
       const signal = payload?.abortSignal || null;
       throwIfAborted(signal);
 
-      const sshClient = client.client;
-      if (!sshClient || typeof sshClient.exec !== "function") {
-        throw new Error("SSH exec unavailable");
-      }
-      if (typeof execRemoteShellCommand !== "function") {
-        throw new Error("SSH exec unavailable");
-      }
-
       let archiveSize = 0;
       try {
         if (!isScpModeClient(client) && typeof lstatAsync === "function") {
@@ -1079,6 +1071,29 @@ function createFileOpsApi(ctx) {
         }
       } catch {
         archiveSize = 0;
+      }
+
+if (client.__netcattySingleChannelSsh || client.client?.__netcattySingleChannelSsh) {
+        const { runIdleShellCommand } = require("../singleChannelShell.cjs");
+        const shellResult = await runIdleShellCommand(client, command, {
+          waitMs: 15000,
+          timeoutMs: computeExtractTimeoutMs(archiveSize),
+          signal,
+        });
+        if (!shellResult) {
+          throw new Error("No idle terminal is available to extract the archive over SSH");
+        }
+        if (shellResult.code !== 0) {
+          throw new Error("Remote extraction failed: exit code " + shellResult.code);
+        }
+        return { success: true };
+      }
+      const sshClient = client.client;
+      if (!sshClient || typeof sshClient.exec !== "function") {
+        throw new Error("SSH exec unavailable");
+      }
+      if (typeof execRemoteShellCommand !== "function") {
+        throw new Error("SSH exec unavailable");
       }
 
       await execRemoteShellCommand(sshClient, command, {

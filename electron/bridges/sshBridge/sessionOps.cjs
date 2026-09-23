@@ -798,6 +798,25 @@ function createSessionOpsApi(ctx) {
     done`;
         const argv = names.map((n) => quoteShellArg(n)).join(" ");
         const cmd = `exec sh -c ${quoteShellArg(script)} sh ${argv}`;
+        if (session.singleChannelSsh) {
+          try {
+            const { runOnShellSession } = require("../singleChannelShell.cjs");
+            const result = await runOnShellSession(session, cmd, { waitMs: 5000, timeoutMs: 5000, signal });
+            const out = result && result.output || "";
+            let dir = null; const existing = []; const modes = {};
+            for (const line of out.split("\n")) {
+              const [tag, val, mode] = line.split("\t");
+              if (tag === "DIR") dir = val;
+              else if (tag === "EXIST" && val) {
+                existing.push(val);
+                if (mode && /^[0-7]{3,4}$/.test(mode)) modes[val] = mode;
+              }
+            }
+            return dir ? { dir, existing, modes } : null;
+          } catch {
+            return null;
+          }
+        }
         try {
             const { stdout: out } = await executeBoundedSshCommand(session.conn, cmd, {
               openingTimeoutMs: 5000,
@@ -825,6 +844,11 @@ function createSessionOpsApi(ctx) {
     async function removeRemoteFiles(session, paths, { signal } = {}) {
         if (!session || !session.conn || !Array.isArray(paths) || paths.length === 0) return;
         const argv = paths.map((p) => quoteShellArg(p)).join(" ");
+        if (session.singleChannelSsh) {
+          const { runOnShellSession } = require("../singleChannelShell.cjs");
+          await runOnShellSession(session, "rm -f -- " + argv, { waitMs: 5000, timeoutMs: 5000, signal });
+          return;
+        }
         const commitToken = "NETCATTY_ZMODEM_COMMIT";
         const command = `exec sh -c ${quoteShellArg(
           `IFS= read -r token || exit 125; ` +
@@ -856,6 +880,13 @@ function createSessionOpsApi(ctx) {
           args.push(quoteShellArg(e.path));
         }
         if (args.length === 0) return;
+        if (session.singleChannelSsh) {
+          const pairs = [];
+          for (let index = 0; index < args.length; index += 2) pairs.push("chmod " + args[index] + " " + args[index + 1]);
+          const { runOnShellSession } = require("../singleChannelShell.cjs");
+          await runOnShellSession(session, pairs.join(" && "), { waitMs: 5000, timeoutMs: 5000, signal });
+          return;
+        }
         const script = 'while [ "$#" -ge 2 ]; do chmod "$1" "$2" 2>/dev/null; shift 2; done';
         const commitToken = "NETCATTY_ZMODEM_COMMIT";
         const command = `exec sh -c ${quoteShellArg(
