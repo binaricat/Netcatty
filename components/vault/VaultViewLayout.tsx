@@ -21,6 +21,10 @@ import {
 } from "./VaultPageHeader";
 import { useConnectionLogsStore } from "../../application/state/connectionLogsStore";
 import { useNotesStore } from "../../application/state/notesStore";
+import { activeTabStore, useIsSftpActive } from "../../application/state/activeTabStore";
+import { useSettingsChromeStore } from "../../application/state/settingsChromeStore";
+import { vaultSidebarLayoutStore } from "../../application/state/vaultSidebarLayoutStore";
+import { Folder } from "lucide-react";
 import { LazyLoadBoundary } from "../ui/lazy-load-boundary";
 import { toast } from "../ui/toast";
 import { AppWordmark } from "../AppWordmark";
@@ -462,6 +466,19 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
     sidebarMinWidth,
     Math.min(sidebarMaxWidth, Number(sidebarWidth) || 208),
   );
+  const { showSftpTab, sftpInSidebar } = useSettingsChromeStore();
+  const isSftpSurfaceActive = useIsSftpActive();
+  const showSftpSidebarNav = Boolean(showSftpTab && sftpInSidebar);
+  // While the SFTP tab is active, the vault view renders as a rail-only
+  // surface: the sidebar stays visible beside the root SFTP view so vault
+  // sections remain one click away.
+  const sftpRailMode = showSftpSidebarNav && isSftpSurfaceActive;
+  const openVaultSectionFromSftpRail = React.useCallback(() => {
+    if (isSftpSurfaceActive) activeTabStore.setActiveTabId("vault");
+  }, [isSftpSurfaceActive]);
+  React.useEffect(() => {
+    vaultSidebarLayoutStore.setLayoutWidth(effectiveSidebarWidth);
+  }, [effectiveSidebarWidth]);
   const handleDeleteVaultKey = React.useCallback(
     (keyId: string) => {
       void deleteVaultKey({
@@ -534,8 +551,13 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
   return (
     <div
       ref={rootRef}
-      className="absolute inset-0 min-h-0 flex bg-secondary"
+      className={cn(
+        "absolute inset-0 min-h-0 flex bg-secondary",
+        sftpRailMode && "overflow-hidden",
+      )}
+      style={sftpRailMode ? { width: effectiveSidebarWidth } : undefined}
       data-section="vault-view"
+      data-sftp-rail-mode={sftpRailMode ? "true" : undefined}
     >
       {/* Sidebar */}
       <TooltipProvider delayDuration={100}>
@@ -592,6 +614,7 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
                       "bg-foreground/10 text-foreground hover:bg-foreground/15 border-border/40",
                   )}
                   onClick={() => {
+                    openVaultSectionFromSftpRail();
                     setCurrentSection("hosts");
                     setSelectedGroupPath(null);
                   }}
@@ -606,6 +629,35 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
                 </TooltipContent>
               )}
             </Tooltip>
+            {showSftpSidebarNav && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <RippleButton
+                    variant={isSftpSurfaceActive ? "secondary" : "ghost"}
+                    className={cn(
+                      "w-full h-10",
+                      sidebarCollapsed
+                        ? "justify-center p-0"
+                        : "justify-start gap-3",
+                      isSftpSurfaceActive &&
+                        "bg-foreground/10 text-foreground hover:bg-foreground/15 border-border/40",
+                    )}
+                    onClick={() => {
+                      if (!isSftpSurfaceActive) activeTabStore.setActiveTabId("sftp");
+                    }}
+                    aria-pressed={isSftpSurfaceActive}
+                  >
+                    <Folder size={16} className="flex-shrink-0" />
+                    {!sidebarCollapsed && t("vault.nav.sftp")}
+                  </RippleButton>
+                </TooltipTrigger>
+                {sidebarCollapsed && (
+                  <TooltipContent side="right">
+                    {t("vault.nav.sftp")}
+                  </TooltipContent>
+                )}
+              </Tooltip>
+            )}
             <Tooltip>
               <TooltipTrigger asChild>
                 <RippleButton
@@ -619,6 +671,7 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
                       "bg-foreground/10 text-foreground hover:bg-foreground/15 border-border/40",
                   )}
                   onClick={() => {
+                    openVaultSectionFromSftpRail();
                     setCurrentSection("keys");
                   }}
                 >
@@ -645,6 +698,7 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
                       "bg-foreground/10 text-foreground hover:bg-foreground/15 border-border/40",
                   )}
                   onClick={() => {
+                    openVaultSectionFromSftpRail();
                     setCurrentSection("proxies");
                   }}
                 >
@@ -670,7 +724,10 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
                     currentSection === "port" &&
                       "bg-foreground/10 text-foreground hover:bg-foreground/15 border-border/40",
                   )}
-                  onClick={() => setCurrentSection("port")}
+                  onClick={() => {
+                    openVaultSectionFromSftpRail();
+                    setCurrentSection("port");
+                  }}
                 >
                   <Plug size={16} className="flex-shrink-0" />
                   {!sidebarCollapsed && t("vault.nav.portForwarding")}
@@ -697,6 +754,7 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
                       "bg-foreground/10 text-foreground hover:bg-foreground/15 border-border/40",
                   )}
                   onClick={() => {
+                    openVaultSectionFromSftpRail();
                     setCurrentSection("snippets");
                   }}
                 >
@@ -723,6 +781,7 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
                       "bg-foreground/10 text-foreground hover:bg-foreground/15 border-border/40",
                   )}
                   onClick={() => {
+                    openVaultSectionFromSftpRail();
                     setCurrentSection("notes");
                   }}
                 >
@@ -750,7 +809,10 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
                     currentSection === "knownhosts" &&
                       "bg-foreground/10 text-foreground hover:bg-foreground/15 border-border/40",
                   )}
-                  onClick={() => setCurrentSection("knownhosts")}
+                  onClick={() => {
+                    openVaultSectionFromSftpRail();
+                    setCurrentSection("knownhosts");
+                  }}
                 >
                   <BookMarked size={16} className="flex-shrink-0" />
                   {!sidebarCollapsed && t("vault.nav.knownHosts")}
@@ -774,7 +836,10 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
                     currentSection === "logs" &&
                       "bg-foreground/10 text-foreground hover:bg-foreground/15 border-border/40",
                   )}
-                  onClick={() => setCurrentSection("logs")}
+                  onClick={() => {
+                    openVaultSectionFromSftpRail();
+                    setCurrentSection("logs");
+                  }}
                 >
                   <Activity size={16} className="flex-shrink-0" />
                   {!sidebarCollapsed && t("vault.nav.logs")}

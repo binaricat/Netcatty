@@ -257,6 +257,7 @@ export const STORAGE_KEY_SHOW_ONLY_UNGROUPED_HOSTS_IN_ROOT = 'netcatty_show_only
 // Top tabs: Show standalone SFTP view tab
 export const STORAGE_KEY_TAB_BAR_POSITION = 'netcatty_tab_bar_position_v1';
 export const STORAGE_KEY_SHOW_SFTP_TAB = 'netcatty_show_sftp_tab_v1';
+export const STORAGE_KEY_SFTP_IN_SIDEBAR = 'netcatty_sftp_in_sidebar_v1';
 export const STORAGE_KEY_SHOW_HOST_TREE_SIDEBAR = 'netcatty_show_host_tree_sidebar_v1';
 
 // Shortcuts: Cmd/Ctrl+[1...9] and Ctrl+Tab skip pinned Vault/SFTP tabs

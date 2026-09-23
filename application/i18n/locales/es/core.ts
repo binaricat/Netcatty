@@ -277,8 +277,8 @@ export const esCoreMessages: Messages = {
   'settings.appearance.tabBarPosition': 'Posición de la barra de pestañas',
   'settings.appearance.tabBarPosition.top': 'Arriba',
   'settings.appearance.tabBarPosition.bottom': 'Abajo',
-  'settings.vault.showSftpTab': 'Mostrar pestaña SFTP',
-  'settings.vault.showSftpTabDesc': 'Muestra la vista SFTP independiente en la barra de pestañas superior. Cuando está oculta, usa el panel lateral SFTP dentro de la sesión.',
+  'settings.vault.sftpInSidebar': 'Mantener SFTP en la barra lateral',
+  'settings.vault.sftpInSidebarDesc': 'Oculta la pestaña SFTP superior y muestra SFTP en la barra lateral del depósito, de modo que la barra lateral siga visible mientras SFTP está abierto.',
   'settings.vault.showHostTreeSidebar': 'Mostrar barra lateral de lista de hosts',
   'settings.vault.showHostTreeSidebarDesc': 'Muestra la barra lateral de lista de hosts y su alternador en la barra superior en las pestañas de terminal y editor.',
   'settings.vault.autoImportSystemKnownHosts': 'Importar automáticamente known_hosts del sistema',
@@ -985,6 +985,7 @@ Resalta el panel dividido enfocado:
   'vault.nav.snippets': 'Scripts',
   'vault.nav.notes': 'Notas',
   'vault.nav.knownHosts': 'Hosts conocidos',
+  'vault.nav.sftp': 'SFTP',
   'vault.nav.logs': 'Registros',
 
   'proxyProfiles.action.add': 'Agregar proxy',
