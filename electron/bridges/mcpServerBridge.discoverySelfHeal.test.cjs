@@ -71,6 +71,7 @@ test("ensureCliDiscoveryFile does nothing while the host is down", async (t) => 
   // A fresh host can still be started after cleanup and rewrites discovery.
   const newPort = await bridge.getOrCreateHost();
   assert.ok(Number.isInteger(newPort) && newPort > 0);
-  assert.notEqual(newPort, port);
+  // Note: newPort may legitimately equal port (OS can reuse the ephemeral port
+  // once the old listener closed), so don't assert they differ.
   assert.equal(readDiscovery(discoveryPath).port, newPort);
 });
