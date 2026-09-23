@@ -24,8 +24,9 @@ export interface HostTreeHostContextMenuHandlers {
 
 export const OpenDualPaneSftpMenuItem: React.FC<{ host: Host }> = ({ host }) => {
   const { t } = useI18n();
-  const { showSftpTab } = useSettingsChromeStore();
-  if (!showSftpTab || !canOpenDualPaneSftp(host)) return null;
+  const { showSftpTab, sftpInSidebar } = useSettingsChromeStore();
+  // Effective availability: SFTP is reachable as a top tab or in the sidebar.
+  if ((!showSftpTab && !sftpInSidebar) || !canOpenDualPaneSftp(host)) return null;
   return (
     <ContextMenuItem onClick={() => requestOpenDualPaneSftp(host.id)}>
       <Files className="mr-2 h-4 w-4" /> {t('vault.hosts.openSftp')}

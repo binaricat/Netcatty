@@ -925,7 +925,9 @@ export function executeHotkeyActionImpl(getCtx: AppContextGetter, action: string
         setActiveTabId('vault');
         break;
       case 'openSftp':
-        if (settings.showSftpTab) {
+        // Effective availability: the SFTP tab is reachable either as a top
+        // tab (showSftpTab) or inside the vault sidebar (sftpInSidebar).
+        if ((settings.showSftpTab ?? true) || settings.sftpInSidebar) {
           setActiveTabId('sftp');
         }
         break;

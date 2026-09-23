@@ -892,7 +892,7 @@ function AppViewInner({ domains }: AppViewProps) {
               results={quickResults}
               sessions={sessions}
               workspaces={workspaces}
-              showSftpTab={showSftpTab}
+              showSftpTab={showSftpTab || sftpInSidebar}
               onQueryChange={setQuickSearch}
               onSelect={handleHostConnectWithProtocolCheck}
               onEditHost={(host) => {
