@@ -147,6 +147,38 @@ test("mapClaudeModels maps {value,displayName,description} -> {id,name,descripti
   assert.deepEqual(mapClaudeModels(null), []);
 });
 
+test("mapClaudeModels accepts the CLI's runtime {id,name} shape (Claude Code 2.x)", () => {
+  const out = mapClaudeModels([
+    { id: "claude-opus-5-5", name: "Opus 5.5" },
+    { modelId: "claude-sonnet-5", name: "Sonnet 5", description: "Everyday tasks" },
+    { id: "claude-haiku-4-5" },
+    { name: "no id -> dropped" },
+  ]);
+  assert.deepEqual(out, [
+    {
+      id: "claude-opus-5-5",
+      name: "Opus 5.5",
+      description: undefined,
+      thinkingLevels: ["low", "medium", "high", "max"],
+      defaultThinkingLevel: "medium",
+    },
+    {
+      id: "claude-sonnet-5",
+      name: "Sonnet 5",
+      description: "Everyday tasks",
+      thinkingLevels: ["low", "medium", "high", "max"],
+      defaultThinkingLevel: "medium",
+    },
+    {
+      id: "claude-haiku-4-5",
+      name: "claude-haiku-4-5",
+      description: undefined,
+      thinkingLevels: ["low", "medium", "high", "max"],
+      defaultThinkingLevel: "medium",
+    },
+  ]);
+});
+
 test("splitClaudeModelSelection only treats known trailing effort as thinking", () => {
   assert.deepEqual(splitClaudeModelSelection("sonnet/high"), { model: "sonnet", effort: "high" });
   assert.deepEqual(splitClaudeModelSelection("claude-opus-4-6"), {

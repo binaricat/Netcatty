@@ -944,6 +944,11 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
             next[target.agentId] = t('ai.codex.appServer.modelCatalogWarning');
             console.warn('[AIChatSidePanel] Codex App Server model catalog unavailable:', result.warning);
           } else {
+            if (result.warning) {
+              // Live catalog fetch failed for another backend; presets still
+              // cover the picker, but keep the cause visible in the console.
+              console.warn('[AIChatSidePanel] SDK model catalog unavailable:', result.warning);
+            }
             delete next[target.agentId];
           }
           return next;

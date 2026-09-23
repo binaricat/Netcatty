@@ -68,16 +68,17 @@ test('getAgentModelPresets returns curated Grok fallback when runtime catalog is
   assert.deepEqual(getAgentModelPresets(undefined, 'grok'), GROK_MODEL_PRESETS);
   assert.deepEqual(getAgentModelPresets('/usr/local/bin/grok'), GROK_MODEL_PRESETS);
   assert.deepEqual(getAgentModelPresets('C:\\\\Tools\\\\grok.exe', 'grok'), GROK_MODEL_PRESETS);
-  assert.equal(getAgentModelPresets(undefined, 'grok')[0]?.id, 'grok-4.5');
+  assert.equal(getAgentModelPresets(undefined, 'grok')[0]?.id, 'grok-4.7');
   assert.deepEqual(getAgentModelPresets(undefined, 'grok')[0]?.thinkingLevels, [
+    'xhigh',
     'high',
     'medium',
     'low',
   ]);
   assert.equal(getAgentModelPresets(undefined, 'grok')[0]?.defaultThinkingLevel, 'high');
   assert.deepEqual(getAgentModelPresets(undefined, 'grok')[1], {
-    id: 'grok-4.6',
-    name: 'Grok 4.6',
+    id: 'grok-4.7-build-fast',
+    name: 'Grok 4.7 Build Fast',
     thinkingLevels: ['xhigh', 'high', 'medium', 'low'],
     defaultThinkingLevel: 'high',
   });
