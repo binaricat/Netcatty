@@ -1,5 +1,6 @@
 import { clearTerminalBroadcastUserInput, markTerminalBroadcastUserInput } from "./terminal/runtime/terminalPacedBroadcast";
 import { publishTerminalCommandCompletion } from "../application/state/terminalCommandCompletion";
+import { terminalCwdStore } from "../application/state/terminalCwdStore";
 import { createTerminalReflowReadingPosition } from "./terminal/terminalReflowReadingPosition";
 import { resolveHostOs } from '../domain/host';
 import { Terminal as XTerm } from "@xterm/xterm";
@@ -2369,13 +2370,19 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const cwdAwareOnCommandSubmitted = useCallback((
     ...args: Parameters<NonNullable<typeof onCommandSubmitted>>
   ) => {
+    // Relative `cd app` is resolved against the directory before this command.
+    // Invalidation clears that directory, so capture it first.
+    const previousCwd = terminalCwdStore.getCwd(sessionId)
+      ?? terminalCwdTracker.getRendererCwd()
+      ?? knownCwdRef.current;
     invalidateTerminalCwdAfterCommand(
       terminalCwdTracker,
       sessionId,
       () => { knownCwdRef.current = undefined; },
       onTerminalCwdChange,
     );
-    onCommandSubmitted?.(...args);
+    const [command, hostId, hostLabel, submittedSessionId] = args;
+    onCommandSubmitted?.(command, hostId, hostLabel, submittedSessionId, previousCwd);
   }, [onCommandSubmitted, onTerminalCwdChange, sessionId, terminalCwdTracker]);
   const pluginAwareOnCommandCompleted = useCallback(() => {
     publishTerminalCommandCompletion(sessionId);

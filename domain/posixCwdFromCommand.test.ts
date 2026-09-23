@@ -25,6 +25,14 @@ test("applyPosixCwdFromCommand tracks simple cd paths", () => {
   assert.equal(applyPosixCwdFromCommand({ command: "cd /tmp && ls" }), null);
 });
 
+test("relative cd keeps following after an absolute cd", () => {
+  const afterAbsolute = applyPosixCwdFromCommand({ command: "cd /data" });
+  assert.equal(applyPosixCwdFromCommand({
+    command: "cd app",
+    currentCwd: afterAbsolute,
+  }), "/data/app");
+});
+
 test("normalizePosixCwd collapses dot segments", () => {
   assert.equal(normalizePosixCwd("/data/docker/../bin"), "/data/bin");
   assert.equal(normalizePosixCwd("/"), "/");

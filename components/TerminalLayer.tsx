@@ -1141,10 +1141,11 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     return deliveredSessionIds;
   }, [terminalBackend, isGlobalBroadcastEnabled]);
 
-  const handleCommandSubmitted = useCallback((command: string, _hostId: string, _hostLabel: string, sessionId: string) => {
+  const handleCommandSubmitted = useCallback((command: string, _hostId: string, _hostLabel: string, sessionId: string, previousCwd?: string) => {
     codingCliSignalController.handleCommandSubmitted(sessionId, command);
 
-    const currentCwd = terminalCwdStore.getCwd(sessionId)
+    const currentCwd = previousCwd
+      ?? terminalCwdStore.getCwd(sessionId)
       ?? terminalRendererCwdBySessionRef.current.get(sessionId);
     const inferredCwd = applyPosixCwdFromCommand({
       command,
