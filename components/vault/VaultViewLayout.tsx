@@ -476,6 +476,11 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
   // surface: the sidebar stays visible beside the root SFTP view so vault
   // sections remain one click away.
   const sftpRailMode = showSftpSidebarNav && isSftpSurfaceActive;
+  // While the SFTP rail is active the vault section still points at the
+  // previously selected section, but the rail's SFTP button is the one that
+  // must appear selected — suppress vault-section highlight to avoid two
+  // active destinations in the rail.
+  const vaultNavSection = sftpRailMode ? null : currentSection;
   const openVaultSectionFromSftpRail = React.useCallback(() => {
     if (isSftpSurfaceActive) activeTabStore.setActiveTabId("vault");
   }, [isSftpSurfaceActive]);
@@ -607,13 +612,13 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
             <Tooltip>
               <TooltipTrigger asChild>
                 <RippleButton
-                  variant={currentSection === "hosts" ? "secondary" : "ghost"}
+                  variant={vaultNavSection === "hosts" ? "secondary" : "ghost"}
                   className={cn(
                     "w-full h-10",
                     sidebarCollapsed
                       ? "justify-center p-0"
                       : "justify-start gap-3",
-                    currentSection === "hosts" &&
+                    vaultNavSection === "hosts" &&
                       "bg-foreground/10 text-foreground hover:bg-foreground/15 border-border/40",
                   )}
                   onClick={() => {
@@ -664,13 +669,13 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
             <Tooltip>
               <TooltipTrigger asChild>
                 <RippleButton
-                  variant={currentSection === "keys" ? "secondary" : "ghost"}
+                  variant={vaultNavSection === "keys" ? "secondary" : "ghost"}
                   className={cn(
                     "w-full h-10",
                     sidebarCollapsed
                       ? "justify-center p-0"
                       : "justify-start gap-3",
-                    currentSection === "keys" &&
+                    vaultNavSection === "keys" &&
                       "bg-foreground/10 text-foreground hover:bg-foreground/15 border-border/40",
                   )}
                   onClick={() => {
@@ -691,13 +696,13 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
             <Tooltip>
               <TooltipTrigger asChild>
                 <RippleButton
-                  variant={currentSection === "proxies" ? "secondary" : "ghost"}
+                  variant={vaultNavSection === "proxies" ? "secondary" : "ghost"}
                   className={cn(
                     "w-full h-10",
                     sidebarCollapsed
                       ? "justify-center p-0"
                       : "justify-start gap-3",
-                    currentSection === "proxies" &&
+                    vaultNavSection === "proxies" &&
                       "bg-foreground/10 text-foreground hover:bg-foreground/15 border-border/40",
                   )}
                   onClick={() => {
@@ -718,13 +723,13 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
             <Tooltip>
               <TooltipTrigger asChild>
                 <RippleButton
-                  variant={currentSection === "port" ? "secondary" : "ghost"}
+                  variant={vaultNavSection === "port" ? "secondary" : "ghost"}
                   className={cn(
                     "w-full h-10",
                     sidebarCollapsed
                       ? "justify-center p-0"
                       : "justify-start gap-3",
-                    currentSection === "port" &&
+                    vaultNavSection === "port" &&
                       "bg-foreground/10 text-foreground hover:bg-foreground/15 border-border/40",
                   )}
                   onClick={() => {
@@ -746,14 +751,14 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
               <TooltipTrigger asChild>
                 <RippleButton
                   variant={
-                    currentSection === "snippets" ? "secondary" : "ghost"
+                    vaultNavSection === "snippets" ? "secondary" : "ghost"
                   }
                   className={cn(
                     "w-full h-10",
                     sidebarCollapsed
                       ? "justify-center p-0"
                       : "justify-start gap-3",
-                    currentSection === "snippets" &&
+                    vaultNavSection === "snippets" &&
                       "bg-foreground/10 text-foreground hover:bg-foreground/15 border-border/40",
                   )}
                   onClick={() => {
@@ -774,13 +779,13 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
             <Tooltip>
               <TooltipTrigger asChild>
                 <RippleButton
-                  variant={currentSection === "notes" ? "secondary" : "ghost"}
+                  variant={vaultNavSection === "notes" ? "secondary" : "ghost"}
                   className={cn(
                     "w-full h-10",
                     sidebarCollapsed
                       ? "justify-center p-0"
                       : "justify-start gap-3",
-                    currentSection === "notes" &&
+                    vaultNavSection === "notes" &&
                       "bg-foreground/10 text-foreground hover:bg-foreground/15 border-border/40",
                   )}
                   onClick={() => {
@@ -802,14 +807,14 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
               <TooltipTrigger asChild>
                 <RippleButton
                   variant={
-                    currentSection === "knownhosts" ? "secondary" : "ghost"
+                    vaultNavSection === "knownhosts" ? "secondary" : "ghost"
                   }
                   className={cn(
                     "w-full h-10",
                     sidebarCollapsed
                       ? "justify-center p-0"
                       : "justify-start gap-3",
-                    currentSection === "knownhosts" &&
+                    vaultNavSection === "knownhosts" &&
                       "bg-foreground/10 text-foreground hover:bg-foreground/15 border-border/40",
                   )}
                   onClick={() => {
@@ -830,13 +835,13 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
             <Tooltip>
               <TooltipTrigger asChild>
                 <RippleButton
-                  variant={currentSection === "logs" ? "secondary" : "ghost"}
+                  variant={vaultNavSection === "logs" ? "secondary" : "ghost"}
                   className={cn(
                     "w-full h-10",
                     sidebarCollapsed
                       ? "justify-center p-0"
                       : "justify-start gap-3",
-                    currentSection === "logs" &&
+                    vaultNavSection === "logs" &&
                       "bg-foreground/10 text-foreground hover:bg-foreground/15 border-border/40",
                   )}
                   onClick={() => {
