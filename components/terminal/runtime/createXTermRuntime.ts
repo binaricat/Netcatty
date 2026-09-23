@@ -348,6 +348,7 @@ export type CreateXTermRuntimeContext = {
     hostId: string,
     hostLabel: string,
     sessionId: string,
+    previousCwd?: string,
   ) => void;
   onTrustedCommandSubmitted?: (
     command: string,
