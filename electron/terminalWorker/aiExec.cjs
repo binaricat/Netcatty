@@ -11,7 +11,7 @@ const {
 const { getFreshIdlePrompt, formatSyntheticEcho } = require("../bridges/ai/shellUtils.cjs");
 const {
   ensureSessionShellKind,
-  remoteDisallowsExecChannelProbe, ensureSessionShellKindForExec,
+  remoteDisallowsExecChannelProbe, sessionDisallowsExtraSshChannel, ensureSessionShellKindForExec,
 } = require("../bridges/ai/sessionShellKind.cjs");
 const {
   checkBlocklistForShell,
@@ -294,6 +294,7 @@ function createWorkerAiExecHandler({
         loginShellHint: session._loginShellKind,
         probeLiveShell: true,
         bastionKeystrokes: remoteDisallowsExecChannelProbe(session.remoteSshVersion),
+        skipPendingInputClear: session.singleChannelSsh === true,
         onProbeAborted: (marker) => {
           event?.sender?.send?.("netcatty:data", {
             sessionId,
@@ -325,7 +326,7 @@ function createWorkerAiExecHandler({
     }
 
     const sshClient = session.sshClient || session.conn;
-    if (sshClient && typeof sshClient.exec === "function") {
+    if (!session.singleChannelSsh && sshClient && typeof sshClient.exec === "function") {
       const probed = await ensureSessionShellKindForExec(session, {
         trackForCancellation: activePtyExecs,
         chatSessionId,
@@ -505,6 +506,7 @@ function createWorkerAiJobStartHandler({
         loginShellHint: session._loginShellKind,
         probeLiveShell: true,
         bastionKeystrokes: remoteDisallowsExecChannelProbe(session.remoteSshVersion),
+        skipPendingInputClear: session.singleChannelSsh === true,
         onProbeAborted: (marker) => {
           event?.sender?.send?.("netcatty:data", {
             sessionId,

@@ -58,6 +58,7 @@ function startPtyJob(ptyStream, command, options) {
     loginShellHint,
     probeLiveShell = false,
     bastionKeystrokes = false,
+    skipPendingInputClear = false,
     onProbeAborted,
     onInterrupt,
     chatSessionId,
@@ -822,7 +823,7 @@ function startPtyJob(ptyStream, command, options) {
 
   function writeWrappedCommand() {
     const wrapped = buildWrappedCommand(command, resolvedShellKind, marker, probeLiveShell);
-    writeInput(`${buildPendingInputClearPrefix(resolvedShellKind)}${wrapped}`);
+    writeInput(`${(skipPendingInputClear ? "" : buildPendingInputClearPrefix(resolvedShellKind))}${wrapped}`);
   }
 
   // Prime the renderer's display suppression before the first byte is typed
@@ -841,7 +842,7 @@ function startPtyJob(ptyStream, command, options) {
     }
   }
   if (probingShell) {
-    writeInput(`${buildPendingInputClearPrefix(resolvedShellKind)}${buildLiveShellProbe(marker)}`);
+    writeInput(`${(skipPendingInputClear ? "" : buildPendingInputClearPrefix(resolvedShellKind))}${buildLiveShellProbe(marker)}`);
   } else {
     writeWrappedCommand();
   }

@@ -60,6 +60,13 @@ function isWindowsOpenSshRemote(remoteSshVersion) {
   return /openssh_for_windows/i.test(String(remoteSshVersion || ""));
 }
 
+// Hosts marked single-channel, and known bastion banners, drop the shell
+// when a second SSH channel opens.
+function sessionDisallowsExtraSshChannel(session) {
+  return session?.singleChannelSsh === true
+    || remoteDisallowsExecChannelProbe(session?.remoteSshVersion);
+}
+
 /**
  * Whether this SSH banner identifies a bastion that binds the transport to the
  * first interactive session and tears it down when a second channel opens
@@ -205,7 +212,7 @@ function createSessionExecProbe(session) {
   // down when a second SSH channel opens. Our exec-channel login-shell probe
   // would disconnect them before the command ever runs, so skip it and let the
   // PTY live shell probe (probeLiveShell) determine the wrapper (#3146).
-  if (remoteDisallowsExecChannelProbe(session.remoteSshVersion)) return null;
+  if (sessionDisallowsExtraSshChannel(session)) return null;
   return (
     createSshConnExecProbe(session.conn)
     || createSshConnExecProbe(session.sshClient)
@@ -470,6 +477,7 @@ module.exports = {
   isConfirmedShellKind,
   isWindowsOpenSshRemote,
   remoteDisallowsExecChannelProbe,
+  sessionDisallowsExtraSshChannel,
   classifyShellKindFromRemotePath,
   buildRemoteLoginShellProbeCommand,
   buildRemoteWindowsLoginShellProbeCommand,
