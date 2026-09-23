@@ -903,6 +903,8 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
       <div
         className="flex min-w-0 flex-1 py-0 pr-2 pb-2 pl-0"
         data-section="vault-stage"
+        aria-hidden={sftpRailMode ? true : undefined}
+        inert={sftpRailMode ? true : undefined}
       >
         <div
           className="relative flex min-h-0 flex-1 overflow-hidden rounded-xl border border-border/60 bg-background shadow-sm"
