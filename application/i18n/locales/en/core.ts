@@ -362,6 +362,8 @@ export const enCoreMessages: Messages = {
   'settings.appearance.tabBarPosition': 'Tab bar position',
   'settings.appearance.tabBarPosition.top': 'Top',
   'settings.appearance.tabBarPosition.bottom': 'Bottom',
+  'settings.vault.showSftpTab': 'Show SFTP tab',
+  'settings.vault.showSftpTabDesc': 'Display the standalone SFTP view in the top tab bar. When hidden, use the in-session SFTP side panel instead.',
   'settings.vault.sftpInSidebar': 'Keep SFTP in the sidebar',
   'settings.vault.sftpInSidebarDesc': 'Hide the top SFTP tab and show SFTP in the vault sidebar instead, so the sidebar stays visible while SFTP is open.',
   'settings.vault.showHostTreeSidebar': 'Show host list sidebar',

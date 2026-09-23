@@ -776,7 +776,9 @@ export function executeHotkeyActionImpl(getCtx: AppContextGetter, action: string
   const { IS_DEV, MOVE_FOCUS_DEBOUNCE_MS, activeTabStore, addConnectionLogRef, canUseGlobalBroadcast, closePluginViewTab, closeSession, closeTabInFlightRef, closeWorkspace, collectSessionIds, confirmIfBusyLocalTerminal, createLocalTerminalWithCurrentShell, editorTabs, fromEditorTabId, handleOpenSettingsRef, handleRequestCloseEditorTabRef, isEditorTabId, isPluginViewTabId, isQuickSwitcherOpen, lastMoveFocusTimeRef, moveFocusInWorkspace, orderedTabs, resolveCloseIntent, resolveSnippetsShortcutIntent, sessions, setActiveTabId, setAddToWorkspaceDialog, setIsQuickSwitcherOpen, setNavigateToSection, settings, sftpPaneMagnificationRef, splitSessionWithCurrentShell, systemInfoRef, terminalPaneMagnificationRef, toEditorTabId, toggleBroadcast, toggleGlobalBroadcast, toggleScriptsSidePanelRef, toggleSidePanelRef, workspaces } = getCtx();
 {
     const shortcutTabs = buildNumberShortcutTabTargets({
-      showSftpTab: settings.showSftpTab ?? true,
+      // Match the TopTabs badge map: when the sidebar hosts SFTP, the top tab
+      // is hidden and work tabs shift up in the Cmd/Ctrl+[1...9] numbering.
+      showSftpTab: (settings.showSftpTab ?? true) && !settings.sftpInSidebar,
       shellOnlyTabNumberShortcuts: settings.shellOnlyTabNumberShortcuts ?? false,
       orderedTabs,
       editorTabIds: editorTabs.map((t) => toEditorTabId(t.id)),

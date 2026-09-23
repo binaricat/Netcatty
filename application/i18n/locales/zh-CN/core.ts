@@ -366,6 +366,8 @@ export const zhCNCoreMessages: Messages = {
   'settings.appearance.tabBarPosition': '标签栏位置',
   'settings.appearance.tabBarPosition.top': '顶部',
   'settings.appearance.tabBarPosition.bottom': '底部',
+  'settings.vault.showSftpTab': '显示 SFTP 标签页',
+  'settings.vault.showSftpTabDesc': '在顶部标签栏显示独立的 SFTP 视图。关闭后可改用会话内左侧的 SFTP 侧栏。',
   'settings.vault.sftpInSidebar': '将 SFTP 放入侧边栏',
   'settings.vault.sftpInSidebarDesc': '隐藏顶部的 SFTP 标签页，改为在侧边栏显示 SFTP，打开 SFTP 时侧边栏保持可见，可直接切换到其他功能页面。',
   'settings.vault.showHostTreeSidebar': '显示主机列表侧栏',

@@ -466,9 +466,12 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
     sidebarMinWidth,
     Math.min(sidebarMaxWidth, Number(sidebarWidth) || 208),
   );
-  const { showSftpTab, sftpInSidebar } = useSettingsChromeStore();
+  const { sftpInSidebar } = useSettingsChromeStore();
   const isSftpSurfaceActive = useIsSftpActive();
-  const showSftpSidebarNav = Boolean(showSftpTab && sftpInSidebar);
+  // Sidebar SFTP placement is independent of the legacy "Show SFTP tab"
+  // toggle: the whole point of the sidebar item is to host the SFTP surface
+  // when the top tab is hidden or replaced.
+  const showSftpSidebarNav = Boolean(sftpInSidebar);
   // While the SFTP tab is active, the vault view renders as a rail-only
   // surface: the sidebar stays visible beside the root SFTP view so vault
   // sections remain one click away.

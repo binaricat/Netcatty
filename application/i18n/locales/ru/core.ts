@@ -346,6 +346,8 @@ export const ruCoreMessages: Messages = {
   'settings.appearance.tabBarPosition': 'Расположение панели вкладок',
   'settings.appearance.tabBarPosition.top': 'Сверху',
   'settings.appearance.tabBarPosition.bottom': 'Снизу',
+  'settings.vault.showSftpTab': 'Показывать вкладку SFTP',
+  'settings.vault.showSftpTabDesc': 'Показывать отдельный SFTP-вид в верхней панели вкладок. Если скрыто, используйте боковую панель SFTP внутри сессии.',
   'settings.vault.sftpInSidebar': 'Держать SFTP в боковой панели',
   'settings.vault.sftpInSidebarDesc': 'Скрывает верхнюю вкладку SFTP и показывает SFTP в боковой панели хранилища, чтобы панель оставалась видимой, пока открыт SFTP.',
   'settings.vault.showHostTreeSidebar': 'Показывать боковую панель хостов',
