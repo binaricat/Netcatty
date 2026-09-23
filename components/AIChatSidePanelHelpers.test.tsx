@@ -137,7 +137,7 @@ test('shouldLoadSdkRuntimeModels includes SDK agents with model catalogs', () =>
   assert.equal(shouldLoadSdkRuntimeModels(agent('codebuddy')), true);
   assert.equal(shouldLoadSdkRuntimeModels(agent('opencode')), true);
   assert.equal(shouldLoadSdkRuntimeModels(agent('grok')), true);
-  assert.equal(shouldLoadSdkRuntimeModels(agent('codex')), false);
+  assert.equal(shouldLoadSdkRuntimeModels(agent('codex')), true);
   assert.equal(shouldLoadSdkRuntimeModels({ ...agent('codex'), codexRuntime: 'app-server' }), true);
   assert.equal(shouldLoadSdkRuntimeModels(undefined), false);
 });

@@ -253,7 +253,10 @@ export function normalizeStoredAgentModelSelection(
 
 export function shouldLoadSdkRuntimeModels(agent?: ExternalAgentConfig): boolean {
   const sdkBackend = getExternalAgentSdkBackend(agent);
-  return (sdkBackend === 'codex' && agent?.codexRuntime === 'app-server')
+  // Codex on the default `sdk` runtime also serves a live catalog: its driver
+  // falls back to the App Server runtime's model/list in main (#3496), so
+  // quick sends must await it instead of running with build-time presets.
+  return sdkBackend === 'codex'
     || sdkBackend === 'claude'
     || sdkBackend === 'copilot'
     || sdkBackend === 'cursor'
