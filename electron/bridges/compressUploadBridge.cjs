@@ -11,6 +11,7 @@ const { spawn } = require("node:child_process");
 const { StringDecoder } = require("node:string_decoder");
 const { getTempFilePath } = require("./tempDirBridge.cjs");
 const { invalidateSshTransport } = require("./sshTransportInvalidation.cjs");
+const { getFreshIdlePrompt, stripAnsi } = require("./ai/shellUtils.cjs");
 
 /**
  * Escape shell arguments to prevent injection attacks
@@ -98,6 +99,7 @@ function buildAtomicRemoteExtractionCommand({
 // Shared references
 let sftpClients = null;
 let transferBridge = null;
+let sessions = null;
 
 // Active compress operations
 const activeCompressions = new Map();
@@ -108,6 +110,7 @@ const COMPRESSION_SUPPORT_CACHE_TTL_MS = 10_000;
 const MAX_COMPRESSION_SUPPORT_CACHE_ENTRIES = 64;
 const REMOTE_TAR_PROBE_TIMEOUT_MS = 15_000;
 const REMOTE_CLEANUP_TIMEOUT_MS = 15_000;
+const INTERACTIVE_SHELL_WAIT_MS = 15_000;
 const LOCAL_TAR_PROBE_TIMEOUT_MS = 10_000;
 const LOCAL_TAR_KILL_GRACE_MS = 750;
 const MAX_REMOTE_EXEC_STDERR_BYTES = 64 * 1024;
@@ -393,6 +396,7 @@ function terminateCompressionProcess(compression) {
 function init(deps) {
   sftpClients = deps.sftpClients;
   transferBridge = deps.transferBridge;
+  sessions = deps.sessions || null;
 }
 
 /**
@@ -444,6 +448,119 @@ async function checkTarAvailable(signal) {
   });
 }
 
+
+function isShellIdleForInjection(session) {
+  if (getFreshIdlePrompt(session)) return true;
+  const tail = stripAnsi(String(session && session._promptTrackTail || "")).replace(/\r/g, "\n");
+  if (!tail || tail.endsWith("\n")) return false;
+  const lastLine = tail.split("\n").pop() || "";
+  // 标准提示符认不出时（例如 [user@host ~]$），只在行尾停在提示符、没有后续输入时注入。
+  return lastLine.length <= 180 && /[#$%]\s*$/.test(lastLine);
+}
+
+function listSingleChannelShells(client) {
+  if (!sessions || typeof sessions.values !== "function") return [];
+  const endpointKey = client && client.__netcattyEndpointKey || "";
+  const shells = [];
+  for (const session of sessions.values()) {
+    if (!session || !session.stream || session.stream.writable === false) continue;
+    if (typeof session.stream.write !== "function") continue;
+    if (session.singleChannelSsh !== true) continue;
+    shells.push(session);
+  }
+  if (endpointKey) {
+    return shells.filter((session) => session.connRef && session.connRef.endpointKey === endpointKey);
+  }
+  return shells.length === 1 ? shells : [];
+}
+
+function findIdleInteractiveShellSession(client) {
+  return listSingleChannelShells(client).find((session) => isShellIdleForInjection(session)) || null;
+}
+
+function delayForInteractiveShell(ms, signal) {
+  return new Promise((resolve, reject) => {
+    if (signal && signal.aborted) {
+      reject(signal.reason instanceof Error ? signal.reason : new Error("Upload cancelled"));
+      return;
+    }
+    const timer = setTimeout(() => {
+      if (signal && signal.removeEventListener) signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    if (timer.unref) timer.unref();
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal.reason instanceof Error ? signal.reason : new Error("Upload cancelled"));
+    };
+    if (signal && signal.addEventListener) signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+async function waitForIdleInteractiveShell(client, timeoutMs, signal) {
+  const deadline = Date.now() + timeoutMs;
+  while (true) {
+    const session = findIdleInteractiveShellSession(client);
+    if (session) return session;
+    if (Date.now() >= deadline) return null;
+    await delayForInteractiveShell(Math.min(200, Math.max(0, deadline - Date.now())), signal);
+  }
+}
+
+function writeInteractiveShellCommand(session, command, timeoutMs, signal) {
+  const marker = "NETCATTY_EXTRACT_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 10);
+  // 只发普通按键和回车。单通道堡垒机会把 Ctrl-U / 额外 exec 当成踢线条件。
+  const line = command + "; printf '%s %s\\n' " + escapeShellArg(marker) + " \"$?\"\r";
+  return new Promise((resolve, reject) => {
+    let buffer = "";
+    let settled = false;
+    const markerPattern = new RegExp("" + marker + " (\\d+)", "g");
+    const finish = (error, code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (signal && signal.removeEventListener) signal.removeEventListener("abort", onAbort);
+      try { session.stream.removeListener("data", onData); } catch { /* ignore */ }
+      if (error) reject(error);
+      else resolve(code);
+    };
+    const onData = (chunk) => {
+      buffer += Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);
+      if (buffer.length > 65536) buffer = buffer.slice(-32768);
+      markerPattern.lastIndex = 0;
+      let match = null;
+      let found = null;
+      while ((match = markerPattern.exec(buffer))) found = match;
+      if (!found) return;
+      finish(null, Number(found[1]));
+    };
+    const onAbort = () => finish(signal && signal.reason instanceof Error ? signal.reason : new Error("Upload cancelled"));
+    const timer = setTimeout(() => {
+      finish(new Error("Remote extraction timed out after " + Math.round(timeoutMs / 1000) + " seconds"));
+    }, timeoutMs);
+    if (timer.unref) timer.unref();
+    if (signal && signal.aborted) {
+      onAbort();
+      return;
+    }
+    if (signal && signal.addEventListener) signal.addEventListener("abort", onAbort, { once: true });
+    session.stream.on("data", onData);
+    try {
+      session.stream.write(line);
+    } catch (error) {
+      finish(error);
+    }
+  });
+}
+
+function buildInteractiveExtractCommand(archivePath, targetDir) {
+  return "tar -xzf " + escapeShellArg(archivePath)
+    + " -C " + escapeShellArg(targetDir)
+    + " --exclude='._*' --exclude='.DS_Store'"
+    + " && rm -f -- " + escapeShellArg(archivePath);
+}
+
+
 /**
  * Check if tar command is available on remote server
  */
@@ -453,7 +570,9 @@ async function checkRemoteTarAvailable(sftpId, signal) {
     if (!client) throw new Error("SFTP session not found");
     // Extra exec on a single-channel bastion drops the whole SFTP login.
     // Folder uploads then fall back to per-file SFTP.
-    if (client.__netcattySingleChannelSsh) return false;
+    if (client.__netcattySingleChannelSsh) {
+      return Boolean(findIdleInteractiveShellSession(client));
+    }
 
     // Try to execute tar --version via SSH
     const sshClient = client.client; // Get underlying SSH2 client
@@ -570,6 +689,7 @@ async function extractRemoteArchive(
 
   const sshClient = client.client;
   if (!sshClient) throw new Error("SSH client not available");
+  const singleChannel = client.__netcattySingleChannelSsh === true;
 
   // Calculate timeout based on archive size
   // Base: 60 seconds minimum
@@ -583,6 +703,21 @@ async function extractRemoteArchive(
   // Extract into a sibling staging directory, then atomically swap the complete
   // folder into place. Existing directory contents are copied into the stage so
   // compressed upload keeps its historical merge semantics.
+  if (singleChannel) {
+    const session = await waitForIdleInteractiveShell(client, Math.min(INTERACTIVE_SHELL_WAIT_MS, extractionTimeout), signal);
+    if (!session) {
+      throw new Error("No idle terminal is available to extract the archive over SSH");
+    }
+    const code = await writeInteractiveShellCommand(
+      session,
+      buildInteractiveExtractCommand(archivePath, targetDir),
+      extractionTimeout,
+      signal,
+    );
+    if (code === 0) return;
+    throw new Error("Remote extraction failed: exit code " + code);
+  }
+
   const command = buildAtomicRemoteExtractionCommand({
     compressionId,
     archivePath,
@@ -845,7 +980,7 @@ async function startCompressedUpload(event, payload) {
     // pre-existing files whose names happen to begin with "._".
     try {
       const client = sftpClients.get(sftpId);
-      if (client && client.client && client.client.writable !== false) {
+      if (client && !client.__netcattySingleChannelSsh && client.client && client.client.writable !== false) {
         await runRemoteExec(client.client, `rm -f ${escapeShellArg(remoteArchivePath)}`, {
           timeoutMs: REMOTE_CLEANUP_TIMEOUT_MS,
           signal: compression.remoteExecAbortController.signal,
