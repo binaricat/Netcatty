@@ -123,7 +123,7 @@ test("session cwd probe decodes the marked lsof pathname", async () => {
   assert.deepEqual(result, { success: true, cwd: "/srv/中文" });
 });
 
-test("lsof cwd fallback accepts only directory records, not diagnostic names (#3237)", async () => {
+test("lsof cwd fallback accepts only directory records, not diagnostic names (#3237, #3493)", async () => {
   let script;
   const api = makeApi({
     shellPid: "4242",
@@ -147,10 +147,16 @@ test("lsof cwd fallback accepts only directory records, not diagnostic names (#3
   for (const [output, expected] of [
     ["p4242\nfcwd\ntunknown\nn/proc/4242/cwd (readlink: Permission denied)\n", null],
     ["p4242\nfcwd\ntunknown\nn/proc/4242/cwd (readlink: No such file or directory)\n", null],
+    // AL2023: lsof reports the VDIR type from the fd but annotates the name
+    // when the login user cannot readlink a root-owned shell's cwd (#3493).
+    ["p683339\nfcwd\ntVDIR\nn/proc/683339/cwd (readlink: Permission denied)\n", null],
+    ["p4242\nfcwd\ntDIR\nn/proc/4242/cwd (readlink: Permission denied)\n", null],
+    ["p4242\nfcwd\ntDIR\nn/proc/4242/cwd (readlink: No such file or directory)\n", null],
+    ["p4242\nfcwd\ntDIR\nn/srv/app (stat: Operation not permitted)\n", null],
     ["p4242\nfcwd\nn/proc/4242/cwd\n", null],
     ["p4242\nfcwd\ntDIR\nn/srv/app\n", "/srv/app"],
     ["p4242\nfcwd\ntVDIR\nn/usr/home/alice\n", "/usr/home/alice"],
-    ["p4242\nfcwd\ntDIR\nn/tmp/literal (readlink: Permission denied)\n", "/tmp/literal (readlink: Permission denied)"],
+    ["p4242\nfcwd\ntDIR\nn/srv/backup (old)\n", "/srv/backup (old)"],
     ["p4242\nfcwd\ntDIR\nn/tmp/\\xe4\\xb8\\xad\\xe6\\x96\\x87\n", "/tmp/\\xe4\\xb8\\xad\\xe6\\x96\\x87"],
   ]) {
     const result = spawnSync("sh", ["-c", `

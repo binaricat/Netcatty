@@ -635,12 +635,20 @@ function createSessionOpsApi(ctx) {
       _rc_cwd=$(readlink "/proc/$1/cwd" 2>/dev/null)
       if [ -n "$_rc_cwd" ]; then printf '%s\\n' "$_rc_cwd"; return 0; fi
       if command -v lsof >/dev/null 2>&1; then
-        # An unknown-type record can put a readlink error in its name field.
         # Only a confirmed directory name is usable as an upload destination.
+        # lsof annotates the name field with " (verb: message)" when it cannot
+        # resolve the path itself (e.g. a root-owned shell probed by the login
+        # user on AL2023: "/proc/<pid>/cwd (readlink: Permission denied)").
+        # Treat any such trailing comment as an error, not a directory (#3493).
+        # Names that merely contain parentheses ("/srv/backup (old)") stay valid.
         _rc_cwd=$(LC_ALL=C lsof -a -p "$1" -d cwd -Fnt 2>/dev/null | awk '
           /^f/ { is_dir=0 }
           /^t/ { is_dir=($0 == "tDIR" || $0 == "tVDIR") }
-          /^n/ && is_dir { print substr($0, 2); exit }
+          /^n/ && is_dir {
+            name=substr($0, 2)
+            if (name ~ / \\([A-Za-z][A-Za-z0-9]*: .*\\)$/) exit
+            print name; exit
+          }
         ')
         if [ -n "$_rc_cwd" ]; then printf 'NETCATTY_LSOF_CWD=%s\\n' "$_rc_cwd"; return 0; fi
       fi
