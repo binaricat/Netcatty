@@ -846,6 +846,24 @@ async function hashRemotePrefixViaSshCommand(client, remotePath, bytes, options 
     `if command -v head >/dev/null 2>&1 && command -v openssl >/dev/null 2>&1; then head -c ${byteCount} '${escapedPath}' | openssl dgst -sha256; else exit 127; fi`,
   ];
 
+  if (client?.__netcattySingleChannelSsh || client?.client?.__netcattySingleChannelSsh) {
+    const { runIdleShellCommand } = require("./singleChannelShell.cjs");
+    for (const command of commands) {
+      const shellResult = await runIdleShellCommand(client, command, {
+        waitMs: 0,
+        timeoutMs: Number(options.sshDigestRunTimeoutMs) > 0 ? Number(options.sshDigestRunTimeoutMs) : 10 * 60_000,
+        signal: options.signal,
+      });
+      if (!shellResult || shellResult.code !== 0) continue;
+      const shellMatch = String(shellResult.output || "").match(/\b([a-fA-F0-9]{64})\b/);
+      if (!shellMatch) continue;
+      const shellDigest = shellMatch[1].toLowerCase();
+      if (shellDigest === EMPTY_SHA256_HEX) continue;
+      return shellDigest;
+    }
+    return null;
+  }
+
   for (const command of commands) {
     try {
       const result = await executeBoundedSshCommand(sshClient, command, {
@@ -895,7 +913,20 @@ async function hashRemoteFile(client, sftpId, filePath, encoding, options = {}) 
   // The server-side helper has no portable byte progress and its command stream
   // is not consistently abortable across SSH backends. Visible/cancellable
   // verification therefore uses the SFTP stream path below.
-  if (!options.signal && !options.onProgress && sshClient && typeof sshClient.exec === "function") {
+  if (!options.signal && !options.onProgress && (client.__netcattySingleChannelSsh || sshClient?.__netcattySingleChannelSsh)) {
+    const { runIdleShellCommand } = require("./singleChannelShell.cjs");
+    const escapedShellPath = String(filePath).replace(/'/g, "'\\''");
+    const shellResult = await runIdleShellCommand(client, "sha256sum -- '" + escapedShellPath + "'", {
+      waitMs: 0,
+      timeoutMs: 10 * 60_000,
+      signal: options.signal,
+    });
+    const shellMatch = shellResult && shellResult.code === 0
+      ? String(shellResult.output || "").match(/\b([a-fA-F0-9]{64})\b/)
+      : null;
+    if (shellMatch) return shellMatch[1].toLowerCase();
+  }
+  if (!options.signal && !options.onProgress && sshClient && typeof sshClient.exec === "function" && !client.__netcattySingleChannelSsh && !sshClient.__netcattySingleChannelSsh) {
     const escapedPath = String(filePath).replace(/'/g, "'\\''");
     const digest = await executeBoundedSshCommand(
       sshClient,
@@ -1263,7 +1294,7 @@ async function preserveTransferredDestinationMtime(transfer, options = {}) {
     if (isScpModeClient(client)) {
       // SCP has no SETSTAT; best-effort touch via the SSH session.
       const sshClient = client.client;
-      if (!sshClient || typeof sshClient.exec !== "function") return;
+      if (!sshClient || typeof sshClient.exec !== "function" || client.__netcattySingleChannelSsh || sshClient.__netcattySingleChannelSsh) return;
       const escaped = String(transfer.targetPath).replace(/'/g, "'\\''");
       const command = `touch -d @${mtimeSec} -- '${escaped}' 2>/dev/null || `
         + `touch -t "$(date -u -r ${mtimeSec} +%Y%m%d%H%M.%S 2>/dev/null `
@@ -6279,7 +6310,13 @@ async function startTransferNow(event, payload, onProgress) {
             const escapedTarget = targetPath.replace(/'/g, "'\\''");
             const command = `cp -a '${escapedSource}' '${escapedTarget}'`;
 
-            const result = await execSshCommandCancellable(sshClient, command, transfer);
+            const singleChannelCopy = srcClient.__netcattySingleChannelSsh || sshClient.__netcattySingleChannelSsh;
+            const result = singleChannelCopy
+              ? await require("./singleChannelShell.cjs").runIdleShellCommand(srcClient, command, {
+                waitMs: 0,
+                signal: transfer.signal,
+              }) || { code: 1 }
+              : await execSshCommandCancellable(sshClient, command, transfer);
             if (result.code === 0) {
               sendProgress(fileSize, fileSize);
               sameHostDone = true;
@@ -7251,9 +7288,14 @@ async function sameHostCopyDirectory(event, payload) {
     const client = sftpClients.get(sftpId);
     if (!client) return { success: false };
     if (cpUnavailableSet.has(client)) return { success: false };
+    const singleChannelDirectoryCopy = client.__netcattySingleChannelSsh || client.client?.__netcattySingleChannelSsh;
 
     const sshClient = client.client;
-    if (!sshClient || typeof sshClient.exec !== 'function') {
+    if (!singleChannelDirectoryCopy && (!sshClient || typeof sshClient.exec !== 'function')) {
+      return { success: false };
+    }
+
+    if (singleChannelDirectoryCopy && !require("./singleChannelShell.cjs").findIdleInteractiveShellSession(client)) {
       return { success: false };
     }
 
@@ -7289,7 +7331,12 @@ async function sameHostCopyDirectory(event, payload) {
     const command = `cp -ra '${escapedSource}/.' '${escapedTarget}/'`;
 
     try {
-      const result = await execSshCommandCancellable(sshClient, command, transfer);
+      const result = singleChannelDirectoryCopy
+        ? await require("./singleChannelShell.cjs").runIdleShellCommand(client, command, {
+          waitMs: 0,
+          signal: transfer.signal,
+        }) || { code: 1 }
+        : await execSshCommandCancellable(sshClient, command, transfer);
       if (result.code === 127) {
         cpUnavailableSet.add(client);
         return { success: false };

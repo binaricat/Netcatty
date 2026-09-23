@@ -739,6 +739,7 @@ function init(deps) {
   sftpClients = deps.sftpClients;
   electronModule = deps.electronModule;
   sessions = deps.sessions;
+  require("./singleChannelShell.cjs").init(sessions);
   reportOpenedSessionActivity = typeof deps.reportOpenedSessionActivity === "function"
     ? deps.reportOpenedSessionActivity
     : null;
@@ -1097,7 +1098,21 @@ async function hashReadableForDigest(readable, signal = null) {
   }
 }
 
-async function tryRemoteSha256Sum(sshClient, remotePath, signal = null) {
+async function tryRemoteSha256Sum(sshClient, remotePath, signal = null, owner = null) {
+  if (sshClient?.__netcattySingleChannelSsh || owner?.__netcattySingleChannelSsh) {
+    const { runIdleShellCommand } = require("./singleChannelShell.cjs");
+    const escapedPath = String(remotePath).replace(/'/g, "'\\''");
+    const shellClient = owner && owner.__netcattyEndpointKey ? owner : { __netcattySingleChannelSsh: true };
+    const shellResult = await runIdleShellCommand(shellClient, "sha256sum -- '" + escapedPath + "'", {
+      waitMs: 0,
+      timeoutMs: 10 * 60_000,
+      signal,
+    });
+    const match = shellResult && shellResult.code === 0
+      ? String(shellResult.output || "").match(/\b([a-fA-F0-9]{64})\b/)
+      : null;
+    return match ? match[1].toLowerCase() : null;
+  }
   if (!sshClient || typeof sshClient.exec !== "function") return null;
   const escapedPath = String(remotePath).replace(/'/g, "'\\''");
   try {
@@ -1128,7 +1143,7 @@ async function tryRemoteSha256Sum(sshClient, remotePath, signal = null) {
 async function computeRemoteContentDigest(client, encodedPath, remotePath, options = {}) {
   const signal = options.signal || null;
   throwIfAborted(signal);
-  const digest = await tryRemoteSha256Sum(client?.client, remotePath, signal);
+  const digest = await tryRemoteSha256Sum(client?.client, remotePath, signal, client);
   if (digest) {
     throwIfAborted(signal);
     return digest;

@@ -1368,3 +1368,17 @@ for (const keepaliveInterval of [0, 10000]) {
     assert.equal(result.stats.latencyMs, keepaliveInterval === 0 ? null : 2);
   });
 }
+
+test("zmodem remote exec helpers do nothing on single-channel SSH", async () => {
+  let execCalls = 0;
+  const session = {
+    singleChannelSsh: true,
+    conn: { exec() { execCalls += 1; } },
+  };
+  const api = makeSessionOps(new Map([["s1", session]]));
+  assert.equal(await api.probeReceiveConflicts(session, ["file.txt"]), null);
+  await api.removeRemoteFiles(session, ["/tmp/file.txt"]);
+  await api.restoreRemoteModes(session, [{ path: "/tmp/file.txt", mode: "644" }]);
+  assert.equal(execCalls, 0);
+});
+
