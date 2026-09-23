@@ -14,6 +14,7 @@ const {
   parseRemoteWindowsLoginShellProbeOutput,
   isWindowsOpenSshRemote,
   remoteDisallowsExecChannelProbe,
+  sessionDisallowsExtraSshChannel,
   createSshConnExecProbe,
   createSessionExecProbe,
   ensureSessionShellKind,
@@ -908,3 +909,16 @@ test(
     assert.match(result.stdout, new RegExp(`${marker}_E:0`));
   },
 );
+
+test("createSessionExecProbe skips the exec channel when singleChannelSsh is set", () => {
+  let execCalls = 0;
+  const session = {
+    singleChannelSsh: true,
+    remoteSshVersion: "CLOUDBILITY-4.14",
+    conn: { exec() { execCalls += 1; } },
+  };
+  assert.equal(sessionDisallowsExtraSshChannel(session), true);
+  assert.equal(createSessionExecProbe(session), null);
+  assert.equal(execCalls, 0);
+});
+

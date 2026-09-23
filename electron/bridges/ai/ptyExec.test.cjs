@@ -1461,3 +1461,25 @@ test("a throwing echo suppression prime callback still types the command (#3384)
   assert.ok(writes.some((data) => data.includes("echo resilient")));
   job.cancel();
 });
+
+test("skipPendingInputClear does not send line-kill keys", async () => {
+  const writes = [];
+  const pty = new EventEmitter();
+  pty.write = (data) => {
+    writes.push(String(data));
+    return true;
+  };
+  const job = startPtyJob(pty, "echo hi", {
+    shellKind: "posix",
+    probeLiveShell: false,
+    skipPendingInputClear: true,
+    timeoutMs: 300,
+  });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  const input = writes.join("");
+  assert.equal(input.includes("\u0015"), false);
+  assert.equal(input.includes("\u000b"), false);
+  assert.match(input, /echo hi/);
+  job.cancel();
+});
+

@@ -4,7 +4,7 @@
 const { clearSessionFlowState } = require("../terminalFlowAck.cjs");
 const {
   ensureSessionShellKind,
-  remoteDisallowsExecChannelProbe, ensureSessionShellKindForExec,
+  remoteDisallowsExecChannelProbe, sessionDisallowsExtraSshChannel, ensureSessionShellKindForExec,
 } = require("../ai/sessionShellKind.cjs");
 
 function createExecHandlerApi(ctx) {
@@ -150,6 +150,7 @@ function createExecHandlerApi(ctx) {
             loginShellHint: session._loginShellKind,
             probeLiveShell: true,
             bastionKeystrokes: remoteDisallowsExecChannelProbe(session.remoteSshVersion),
+            skipPendingInputClear: session.singleChannelSsh === true,
             onProbeAborted: (marker) => echoCommandToSession(session, sessionId, `${marker}_R`, { syntheticEcho: false }),
             onEchoSuppressionPrime: (marker) => echoCommandToSession(session, sessionId, `${marker}_I`, { syntheticEcho: false }),
             expectedPrompt: getFreshIdlePrompt(session),
@@ -173,7 +174,7 @@ function createExecHandlerApi(ctx) {
     
       // Fallback: SSH exec channel (invisible to terminal).
       // At this point ptyStream is not writable (already returned above if it was).
-      if (sshClient && typeof sshClient.exec === "function") {
+      if (!session.singleChannelSsh && sshClient && typeof sshClient.exec === "function") {
         return runExecution(async () => {
           const probed = await ensureSessionShellKindForExec(session, {
             trackForCancellation: activePtyExecs,
@@ -322,6 +323,7 @@ function createExecHandlerApi(ctx) {
             loginShellHint: session._loginShellKind,
             probeLiveShell: true,
             bastionKeystrokes: remoteDisallowsExecChannelProbe(session.remoteSshVersion),
+            skipPendingInputClear: session.singleChannelSsh === true,
             onProbeAborted: (marker) => echoCommandToSession(session, sessionId, `${marker}_R`, { syntheticEcho: false }),
             onEchoSuppressionPrime: (marker) => echoCommandToSession(session, sessionId, `${marker}_I`, { syntheticEcho: false }),
             chatSessionId,
