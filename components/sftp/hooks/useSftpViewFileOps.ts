@@ -11,6 +11,12 @@ import { toast } from "../../ui/toast";
 import { netcattyBridge } from "../../../infrastructure/services/netcattyBridge";
 import { getFileExtension, getLanguageId, FileOpenerType, SystemAppInfo } from "../../../lib/sftpFileUtils";
 import { isNavigableDirectory } from "../utils";
+import {
+  getRememberedDownloadTargetDir,
+  makeDownloadTargetMemoryKey,
+  rememberDownloadTargetDir,
+  resolveDownloadSourceSnapshot,
+} from "../sftpDownloadSourceFreshness";
 import { reportSftpUploadResults } from "../reportSftpUploadResults";
 import { editorTabStore } from "../../../application/state/editorTabStore";
 import { toEditorTabId, activeTabStore } from "../../../application/state/activeTabStore";
@@ -404,7 +410,7 @@ export const useSftpViewFileOps = ({
       if (!pane.connection) return;
 
       const resolvedFullPath = fullPath ?? sftpRef.current.joinPath(pane.connection.currentPath, file.name);
-      const isDirectory = isNavigableDirectory(file);
+      let isDirectory = isNavigableDirectory(file);
 
       try {
         // For local files, use blob download.
@@ -440,6 +446,19 @@ export const useSftpViewFileOps = ({
         const sftpId = getSftpIdForConnection(pane.connection.id);
         if (!sftpId) {
           throw new Error("SFTP session not found");
+        }
+
+        // The listed entry can be stale when the file was deleted / recreated
+        // in the terminal without refreshing the side panel. Re-stat so the
+        // planned snapshot size and entry type match the real source.
+        const sourceSnapshot = await resolveDownloadSourceSnapshot(
+          netcattyBridge.get()?.statSftp,
+          sftpId,
+          resolvedFullPath,
+          pane.filenameEncoding,
+        );
+        if (sourceSnapshot.isDirectory !== null) {
+          isDirectory = sourceSnapshot.isDirectory;
         }
 
         if (isDirectory) {
@@ -481,14 +500,25 @@ export const useSftpViewFileOps = ({
 
           return;
         }
-        // Show save dialog to get target path
-        const targetPath = await showSaveDialog(file.name);
-        if (!targetPath) {
-          // User cancelled
-          return;
+        // Repeat download of the same source: overwrite the previous copy
+        // directly instead of re-showing the save dialog's overwrite confirm.
+        const memoryKey = makeDownloadTargetMemoryKey(pane.connection.hostId, resolvedFullPath);
+        const rememberedDir = getRememberedDownloadTargetDir(memoryKey);
+        let targetPath: string | null;
+        if (rememberedDir) {
+          targetPath = joinFsPath(rememberedDir, file.name);
+        } else {
+          // Show save dialog to get target path
+          targetPath = await showSaveDialog(file.name);
+          if (!targetPath) {
+            // User cancelled
+            return;
+          }
+          rememberDownloadTargetDir(memoryKey, getParentPath(targetPath));
         }
 
-        const fileSize = typeof file.size === "string" ? parseInt(file.size, 10) || 0 : (file.size || 0);
+        const listedSize = typeof file.size === "string" ? parseInt(file.size, 10) || 0 : (file.size || 0);
+        const fileSize = sourceSnapshot.size ?? listedSize;
         // Route through downloadToLocal so FileZilla-style transfer pool
         // sessions are used (browse session stays free for listing).
         const status = await sftpRef.current.downloadToLocal({
@@ -633,8 +663,17 @@ export const useSftpViewFileOps = ({
           try {
             const sourcePath = sftpRef.current.joinPath(pane.connection.currentPath, file.name);
             const targetPath = joinFsPath(selectedDirectory, file.name);
-            const isDirectory = isNavigableDirectory(file);
-            const fileSize = typeof file.size === "string" ? parseInt(file.size, 10) || 0 : (file.size || 0);
+            // Re-stat each root: the listed entries can be stale after
+            // terminal-side delete + recreate without a refresh.
+            const sourceSnapshot = await resolveDownloadSourceSnapshot(
+              netcattyBridge.get()?.statSftp,
+              sftpId,
+              sourcePath,
+              pane.filenameEncoding,
+            );
+            const isDirectory = sourceSnapshot.isDirectory ?? isNavigableDirectory(file);
+            const listedSize = typeof file.size === "string" ? parseInt(file.size, 10) || 0 : (file.size || 0);
+            const fileSize = sourceSnapshot.size ?? listedSize;
 
             const status = await sftpRef.current.downloadToLocal({
               fileName: file.name,
