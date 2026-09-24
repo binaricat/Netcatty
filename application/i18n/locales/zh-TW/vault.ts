@@ -109,6 +109,7 @@ export const zhTWVaultMessages: Messages = {
   'quickConnect.knownHost.addAndContinue': '加入並繼續',
   'quickConnect.addKey': '新增 key',
   'quickConnect.warning.unparsedOptions': '部分 SSH 引數已被忽略: {options}',
+  'quickConnect.viaJump': '經由跳板機: {jumps}',
   'quickConnect.identity.label': '憑據預設',
   'quickConnect.identity.placeholder': '選擇已儲存的身分',
   'quickConnect.identity.empty': '沒有可用的身分',

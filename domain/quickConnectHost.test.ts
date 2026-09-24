@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   buildQuickConnectHost,
+  buildQuickConnectJumpHost,
   isQuickConnectIdentityUsable,
 } from "./quickConnectHost.ts";
 import { resolveHostAuth } from "./sshAuth.ts";
@@ -148,4 +149,52 @@ test("quick connect never applies an SSH identity to Telnet", () => {
   assert.equal(host.username, "telnet-user");
   assert.equal(host.password, "telnet-secret");
   assert.equal(host.telnetPort, 2323);
+});
+
+test("quick connect attaches a jump chain by id when given", () => {
+  const host = buildQuickConnectHost({
+    id: "quick-jump-target",
+    createdAt: 1,
+    target: { hostname: "10.2.0.8", username: "root" },
+    protocol: "ssh",
+    port: 22,
+    username: "root",
+    authMethod: "password",
+    chainHostIds: ["quick-jump-1"],
+  });
+
+  assert.deepEqual(host.hostChain, { hostIds: ["quick-jump-1"] });
+});
+
+test("quick connect builds an ephemeral SSH host for a jump hop", () => {
+  const jumpHost = buildQuickConnectJumpHost({
+    id: "quick-jump-1",
+    createdAt: 42,
+    jump: { hostname: "devjumpserver.example.cn", username: "chenyi", port: 2200 },
+  });
+
+  assert.equal(jumpHost.id, "quick-jump-1");
+  assert.equal(jumpHost.hostname, "devjumpserver.example.cn");
+  assert.equal(jumpHost.username, "chenyi");
+  assert.equal(jumpHost.port, 2200);
+  assert.equal(jumpHost.protocol, "ssh");
+  assert.equal(jumpHost.ephemeral, true);
+  assert.equal(jumpHost.label, "chenyi@devjumpserver.example.cn");
+
+  const anonymousJump = buildQuickConnectJumpHost({
+    id: "quick-jump-2",
+    createdAt: 1,
+    jump: { hostname: "jump.corp.example" },
+  });
+  assert.equal(anonymousJump.username, "");
+  assert.equal(anonymousJump.port, 22);
+  assert.equal(anonymousJump.label, "jump.corp.example");
+
+  const savedJump = buildQuickConnectJumpHost({
+    id: "quick-jump-3",
+    createdAt: 1,
+    jump: { hostname: "jump.corp.example" },
+    save: true,
+  });
+  assert.equal(savedJump.ephemeral, false);
 });

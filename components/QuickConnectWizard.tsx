@@ -15,6 +15,7 @@ import type { QuickConnectTarget } from "../domain/quickConnect";
 import { formatHostPort } from "../domain/host";
 import {
   buildQuickConnectHost,
+  buildQuickConnectJumpHost,
   getQuickConnectDefaultPort,
   isQuickConnectIdentityUsable,
   type QuickConnectAuthMethod,
@@ -41,8 +42,8 @@ interface QuickConnectWizardProps {
   keys: SSHKey[];
   identities: Identity[];
   warnings?: string[];
-  onConnect: (host: Host) => void;
-  onSaveHost?: (host: Host) => void;
+  onConnect: (host: Host, chainHosts?: Host[]) => void;
+  onSaveHost?: (host: Host, chainHosts?: Host[]) => void;
   onAddKey?: () => void;
   onClose: () => void;
 }
@@ -204,6 +205,16 @@ const QuickConnectWizard: React.FC<QuickConnectWizardProps> = ({
     const effectiveUsername = username || target.username || "root";
     const effectivePort = port || getQuickConnectDefaultPort(protocol);
     const now = Date.now();
+    // Multi-@ targets carry jump hops; build an ephemeral host per hop so the
+    // jump chain machinery can resolve them by id (issue #3523).
+    const chainHosts = (target.jumps ?? []).map((jump, index) =>
+      buildQuickConnectJumpHost({
+        id: `quick-jump-${now}-${index}-${Math.random().toString(36).slice(2, 11)}`,
+        createdAt: now,
+        jump,
+        save,
+      }),
+    );
     const tempHost = buildQuickConnectHost({
       id: `quick-${now}-${Math.random().toString(36).slice(2, 11)}`,
       createdAt: now,
@@ -215,14 +226,15 @@ const QuickConnectWizard: React.FC<QuickConnectWizardProps> = ({
       password,
       selectedKeyId,
       selectedIdentityId: selectedIdentity?.id,
+      chainHostIds: chainHosts.map((chainHost) => chainHost.id),
       save,
     });
 
     if (save && onSaveHost) {
-      onSaveHost(tempHost);
+      onSaveHost(tempHost, chainHosts.length > 0 ? chainHosts : undefined);
     }
 
-    onConnect(tempHost);
+    onConnect(tempHost, chainHosts.length > 0 ? chainHosts : undefined);
     onClose();
   };
 
@@ -696,6 +708,18 @@ const QuickConnectWizard: React.FC<QuickConnectWizardProps> = ({
           </div>
         </div>
 
+
+        {(target.jumps?.length ?? 0) > 0 && (
+          <div className="px-6 pb-2">
+            <div className="text-xs text-muted-foreground font-mono">
+              {t("quickConnect.viaJump", {
+                jumps: target.jumps!
+                  .map((jump) => jump.username ? `${jump.username}@${jump.hostname}` : jump.hostname)
+                  .join(" → "),
+              })}
+            </div>
+          </div>
+        )}
 
         {warnings && warnings.length > 0 && (
           <div className="px-6 pb-2">

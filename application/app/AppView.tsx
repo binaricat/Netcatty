@@ -37,6 +37,7 @@ import { selectPluginThemeTokens } from '../state/pluginContributionEnvironment'
 import { netcattyBridge } from '../../infrastructure/services/netcattyBridge';
 import { resolveEffectiveTerminalHost } from '../../domain/terminalHostResolution';
 import { getAvailablePaneMagnificationController } from '../../domain/paneMagnification';
+import type { Host } from '../../domain/models';
 import { pluginViewTabStore, usePluginViewTabs } from '../state/pluginViewTabStore';
 import { buildPluginSettingScopeCatalog } from '../state/usePluginSettingScopeCatalog';
 import { useWorkSurfaceHostEditor } from '../state/useWorkSurfaceHostEditor';
@@ -282,6 +283,16 @@ function AppViewInner({ domains }: AppViewProps) {
     updateProxyProfiles, updateSnippetPackages, updateSnippets, updateSplitSizes, updateTerminalSetting, vaultFocusRequest, workspaceRenameTarget, workspaces,
     VaultViewContainer, SftpViewMount, TerminalLayerMount, LogViewWrapper,
   } = ctx;
+
+  // VaultView quick connect may carry an inline jump chain (multi-@ target,
+  // issue #3523); route it through the dedicated chainHosts parameter instead
+  // of the alreadyEffective/hidden flags.
+  const handleVaultConnectToHost = useCallback(
+    (host: Host, chainHosts?: Host[]) => {
+      handleConnectToHost(host, false, false, chainHosts);
+    },
+    [handleConnectToHost],
+  );
 
   // Chrome-visible settings slice comes from settingsChromeStore, not from the
   // App chrome domain bag — the whole `settings` object changes identity on
@@ -608,7 +619,7 @@ function AppViewInner({ domains }: AppViewProps) {
             onCreateLocalTerminal={handleCreateLocalTerminal}
             onConnectSerial={handleConnectSerial}
             onDeleteHost={handleDeleteHost}
-            onConnect={handleConnectToHost}
+            onConnect={handleVaultConnectToHost}
             onOpenHostFromNote={handleOpenHostFromVaultNote}
             groupConfigs={groupConfigs}
             onUpdateGroupConfigs={updateGroupConfigs}

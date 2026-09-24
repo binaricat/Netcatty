@@ -2,6 +2,8 @@ export interface QuickConnectTarget {
   hostname: string;
   username?: string;
   port?: number;
+  /** Jump/bastion hops parsed from a multi-@ target string, in connection order. */
+  jumps?: QuickConnectTarget[];
 }
 
 interface QuickConnectParseResult {
@@ -76,6 +78,59 @@ const parseDirectTarget = (input: string): QuickConnectTarget | null => {
     port,
   };
 };
+
+/** Username segment inside a multi-@ target: no whitespace or separators. */
+const USERNAME_SEGMENT_RE = /^[^\s:/@]+$/;
+
+/**
+ * Parse a JumpServer-style multi-@ jump chain (issue #3523):
+ *   user@target@jump
+ *   jumpUser@targetUser@target@jump
+ *
+ * Segments are anchored to the right: the last segment is the jump/bastion
+ * host, the second-to-last is the final target host, and the remaining
+ * leftmost segment(s) are usernames (target user, then jump user). Each
+ * host segment accepts an optional :port suffix. Anything with more than
+ * 3 "@" separators is left unhandled (it parses like before this helper).
+ */
+export const parseMultiAtJumpTarget = (input: string): QuickConnectTarget | null => {
+  const trimmed = input.trim();
+  const atCount = (trimmed.match(/@/g) || []).length;
+  if (atCount < 2 || atCount > 3) return null;
+
+  const segments = trimmed.split("@");
+  const jumpSegment = segments[segments.length - 1];
+  const targetSegment = segments[segments.length - 2];
+  const targetUserSegment = segments[segments.length - 3];
+  const jumpUserSegment = segments.length === 4 ? segments[0] : undefined;
+
+  const jump = parseDirectTarget(jumpSegment);
+  const target = parseDirectTarget(targetSegment);
+  if (!jump || !target) return null;
+
+  const isValidUserSegment = (segment: string | undefined): boolean =>
+    segment === undefined || (segment.length > 0 && USERNAME_SEGMENT_RE.test(segment));
+  if (!isValidUserSegment(targetUserSegment) || !isValidUserSegment(jumpUserSegment)) {
+    return null;
+  }
+  const username = targetUserSegment;
+  const jumpUsername = jumpUserSegment;
+
+  return {
+    hostname: target.hostname,
+    username: username ?? target.username,
+    port: target.port,
+    jumps: [{
+      hostname: jump.hostname,
+      username: jumpUsername ?? jump.username,
+      port: jump.port,
+    }],
+  };
+};
+
+/** Parse a quick connect target, accepting multi-@ jump chains. */
+const parseTargetWithJumps = (input: string): QuickConnectTarget | null =>
+  parseMultiAtJumpTarget(input) ?? parseDirectTarget(input);
 
 const sshArgOptions = new Set([
   "-b",
@@ -250,7 +305,7 @@ const parseSshCommand = (input: string): QuickConnectParseResult | null => {
 
   const base = optionHostname
     ? parseDirectTarget(optionHostname)
-    : parseDirectTarget(hostToken);
+    : parseTargetWithJumps(hostToken);
   if (!base) return null;
 
   if (portInvalid) return null;
@@ -273,6 +328,7 @@ const parseSshCommand = (input: string): QuickConnectParseResult | null => {
       hostname: base.hostname,
       username: optionUsername || username || base.username,
       port: resolvedPort,
+      ...(base.jumps ? { jumps: base.jumps } : {}),
     },
     warnings: Array.from(new Set(warnings)),
   };
@@ -288,7 +344,7 @@ export function parseQuickConnectInputWithWarnings(
   const sshTarget = parseSshCommand(trimmed);
   if (sshTarget) return sshTarget;
 
-  return { target: parseDirectTarget(trimmed), warnings: [] };
+  return { target: parseTargetWithJumps(trimmed), warnings: [] };
 }
 
 // Parse user@host:port or ssh command formats

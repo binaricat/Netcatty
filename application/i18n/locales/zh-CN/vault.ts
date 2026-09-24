@@ -109,6 +109,7 @@ export const zhCNVaultMessages: Messages = {
   'quickConnect.knownHost.addAndContinue': '加入并继续',
   'quickConnect.addKey': '添加 key',
   'quickConnect.warning.unparsedOptions': '部分 SSH 参数已被忽略: {options}',
+  'quickConnect.viaJump': '经由跳板机: {jumps}',
   'quickConnect.identity.label': '凭据预设',
   'quickConnect.identity.placeholder': '选择已保存的身份',
   'quickConnect.identity.empty': '没有可用的身份',

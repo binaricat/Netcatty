@@ -689,6 +689,7 @@ export const esVaultMessages: Messages = {
   'quickConnect.knownHost.addAndContinue': 'Agregar y continuar',
   'quickConnect.addKey': 'Agregar clave',
   'quickConnect.warning.unparsedOptions': 'Se ignoraron algunos argumentos SSH: {options}',
+  'quickConnect.viaJump': 'vía host de salto: {jumps}',
   'quickConnect.identity.label': 'Preajuste de credenciales',
   'quickConnect.identity.placeholder': 'Elige una identidad guardada',
   'quickConnect.identity.empty': 'No se encontraron identidades guardadas',
