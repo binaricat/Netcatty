@@ -1,10 +1,11 @@
-import type { TransferStatus, TransferTask } from "../../../domain/models";
+import type { LocalDownloadTargetExpectation, TransferStatus, TransferTask } from "../../../domain/models";
 
 export interface DirectDownloadTransferTaskInput {
   id: string;
   fileName: string;
   sourcePath: string;
   targetPath: string;
+  expectedLocalTarget?: LocalDownloadTargetExpectation;
   sourceConnectionId: string;
   sourceHostId: string;
   sourceHostLabel: string;
@@ -21,6 +22,7 @@ export function createDirectDownloadTransferTask(
     originalFileName: input.fileName,
     sourcePath: input.sourcePath,
     targetPath: input.targetPath,
+    expectedLocalTarget: input.expectedLocalTarget,
     sourceConnectionId: input.sourceConnectionId,
     targetConnectionId: "local",
     sourceHostId: input.sourceHostId,

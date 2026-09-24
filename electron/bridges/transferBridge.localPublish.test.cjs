@@ -6,6 +6,85 @@ const path = require("node:path");
 const bridge = require("./transferBridge.cjs");
 const temp = require("./tempDirBridge.cjs");
 
+test("remembered download replaces the same verified local file", async (t) => {
+  const root = fs.mkdtempSync(`${temp.getTempFilePath("remembered-publish")}-`);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const staged = path.join(root, "staged");
+  const target = path.join(root, "target");
+  fs.writeFileSync(staged, "download");
+  fs.writeFileSync(target, "original");
+  const parentStat = fs.statSync(root);
+  const originalStat = fs.lstatSync(target);
+  await bridge._promoteLocalTransferForTests(staged, target, {
+    requestedTargetPath: target,
+    expectedLocalTarget: {
+      parentRealPath: fs.realpathSync(root),
+      parentIdentity: `${parentStat.dev}:${parentStat.ino}`,
+      targetIdentity: `${originalStat.dev}:${originalStat.ino}`,
+    },
+  });
+  assert.equal(fs.readFileSync(target, "utf8"), "download");
+});
+
+test("remembered download does not replace a different file created during transfer", async (t) => {
+  const root = fs.mkdtempSync(`${temp.getTempFilePath("remembered-race")}-`);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const staged = path.join(root, "staged");
+  const target = path.join(root, "target");
+  fs.writeFileSync(staged, "download");
+  fs.writeFileSync(target, "original");
+  const parentStat = fs.statSync(root);
+  const originalStat = fs.lstatSync(target);
+  const expectedLocalTarget = {
+    parentRealPath: fs.realpathSync(root),
+    parentIdentity: `${parentStat.dev}:${parentStat.ino}`,
+    targetIdentity: `${originalStat.dev}:${originalStat.ino}`,
+  };
+
+  fs.renameSync(target, path.join(root, "moved-original"));
+  fs.writeFileSync(target, "unrelated");
+  await assert.rejects(
+    () => bridge._promoteLocalTransferForTests(staged, target, {
+      requestedTargetPath: target,
+      expectedLocalTarget,
+    }),
+    /Remembered local download target changed/,
+  );
+  assert.equal(fs.readFileSync(target, "utf8"), "unrelated");
+  assert.equal(fs.readFileSync(path.join(root, "moved-original"), "utf8"), "original");
+});
+
+test("remembered download rejects a replaced parent even when the file is the same", async (t) => {
+  const root = fs.mkdtempSync(`${temp.getTempFilePath("remembered-parent")}-`);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const parent = path.join(root, "selected");
+  const movedParent = path.join(root, "moved");
+  const target = path.join(parent, "target");
+  const staged = path.join(root, "staged");
+  fs.mkdirSync(parent);
+  fs.writeFileSync(target, "original");
+  fs.writeFileSync(staged, "download");
+  const parentStat = fs.statSync(parent);
+  const targetStat = fs.lstatSync(target);
+  const expectedLocalTarget = {
+    parentRealPath: fs.realpathSync(parent),
+    parentIdentity: `${parentStat.dev}:${parentStat.ino}`,
+    targetIdentity: `${targetStat.dev}:${targetStat.ino}`,
+  };
+
+  fs.renameSync(parent, movedParent);
+  fs.mkdirSync(parent);
+  fs.linkSync(path.join(movedParent, "target"), target);
+  await assert.rejects(
+    () => bridge._promoteLocalTransferForTests(staged, target, {
+      requestedTargetPath: target,
+      expectedLocalTarget,
+    }),
+    /Remembered local download target changed/,
+  );
+  assert.equal(fs.readFileSync(target, "utf8"), "original");
+});
+
 for (const restore of [false, true]) {
   test(`local ${restore ? "restore" : "publish"} never overwrites a last-moment concurrent file`, async (t) => {
     const root = fs.mkdtempSync(`${temp.getTempFilePath("publish-race")}-`);

@@ -3,6 +3,7 @@ import test from "node:test";
 import React from "react";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import type { SftpFileEntry } from "../../../types";
+import type { LocalDownloadTargetExpectation } from "../../../domain/models";
 import type { SftpStateApi } from "../../../application/state/useSftpState";
 import { STORAGE_KEY_SFTP_QUICK_DOWNLOAD } from "../../../infrastructure/config/storageKeys";
 import { useSftpViewFileOps } from "./useSftpViewFileOps";
@@ -26,7 +27,10 @@ test("quick download reuses only the exact target selected for the same remote f
   const realParents = new Map([["/downloads", "/downloads"], ["/batch", "/batch"]]);
   const parentInodes = new Map([["/downloads", 100], ["/batch", 200]]);
   const remoteTypes = new Map<string, "file" | "directory">([["/remote/folder", "directory"]]);
-  const downloads: Array<{ sourcePath: string; targetPath: string; isDirectory: boolean }> = [];
+  const downloads: Array<{
+    sourcePath: string; targetPath: string; isDirectory: boolean;
+    expectedLocalTarget?: LocalDownloadTargetExpectation;
+  }> = [];
   const savePaths = [
     "/downloads/renamed.txt",
     "/downloads/other.txt",
@@ -49,7 +53,10 @@ test("quick download reuses only the exact target selected for the same remote f
     leftPane: pane, rightPane: pane,
     getConnectionCacheKey: () => endpointKey,
     joinPath: (parent: string, name: string) => `${parent}/${name}`,
-    downloadToLocal: async (params: { sourcePath: string; targetPath: string; isDirectory: boolean }) => {
+    downloadToLocal: async (params: {
+      sourcePath: string; targetPath: string; isDirectory: boolean;
+      expectedLocalTarget?: LocalDownloadTargetExpectation;
+    }) => {
       downloads.push(params);
       existingFiles.set(params.targetPath, params.isDirectory ? "directory" : "file");
       if (!params.isDirectory) fileInodes.set(params.targetPath, nextFileInode++);
@@ -114,6 +121,9 @@ test("quick download reuses only the exact target selected for the same remote f
     assert.deepEqual(downloads.slice(0, 2).map((entry) => entry.targetPath), [
       "/downloads/renamed.txt", "/downloads/renamed.txt",
     ]);
+    assert.equal(downloads[0].expectedLocalTarget, undefined);
+    assert.equal(downloads[1].expectedLocalTarget?.targetIdentity, "1:1000");
+    assert.equal(downloads[2].expectedLocalTarget?.targetIdentity, "1:1001");
 
     await act(async () => { await single(file("report.txt"), "/other/report.txt"); });
     assert.equal(saveCalls, 2, "another remote source still opens Save As");

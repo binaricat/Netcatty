@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction 
 import {
   FileConflict,
   FileConflictAction,
+  LocalDownloadTargetExpectation,
   SftpFilenameEncoding,
   TransferDirection,
   TransferStatus,
@@ -1750,6 +1751,7 @@ export const useSftpTransfers = ({
       fileName: string;
       sourcePath: string;
       targetPath: string;
+      expectedLocalTarget?: LocalDownloadTargetExpectation;
       sftpId: string;
       connectionId: string;
       sourceHostId: string;
@@ -1782,6 +1784,7 @@ export const useSftpTransfers = ({
         fileName: params.fileName,
         sourcePath: params.sourcePath,
         targetPath: params.targetPath,
+        expectedLocalTarget: params.expectedLocalTarget,
         sourceConnectionId: params.connectionId,
         sourceHostId: params.sourceHostId,
         sourceHostLabel: params.sourceHostLabel,

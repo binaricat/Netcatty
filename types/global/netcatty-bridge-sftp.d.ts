@@ -63,6 +63,7 @@ declare global {
         transferId: string;
         sourcePath: string;
         targetPath: string;
+        expectedLocalTarget?: import("../../domain/models/sftp").LocalDownloadTargetExpectation;
         sourceType: 'local' | 'sftp';
         targetType: 'local' | 'sftp';
         sourceSftpId?: string;

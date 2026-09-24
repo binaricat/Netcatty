@@ -1,13 +1,10 @@
 import { useCallback, useMemo, useRef } from "react";
-import type { SftpFilenameEncoding } from "../../../domain/models/sftp";
+import type { LocalDownloadTargetExpectation, SftpFilenameEncoding } from "../../../domain/models/sftp";
 import { netcattyBridge } from "../../../infrastructure/services/netcattyBridge";
 import { getParentPath } from "./utils";
 
-type RememberedTarget = {
+type RememberedTarget = LocalDownloadTargetExpectation & {
   targetPath: string;
-  parentRealPath: string;
-  parentIdentity: string | null;
-  targetIdentity: string;
 };
 
 const TARGET_LIMIT = 200;
@@ -46,12 +43,13 @@ export function useSftpQuickDownloadTargets() {
         bridge.realpathLocal(parentPath),
       ]);
       if (parent?.type !== "directory" || target?.type !== "file" || !parentRealPath) return;
+      const parentIdentity = filesystemIdentity(parent);
       const targetIdentity = filesystemIdentity(target);
-      if (!targetIdentity) return;
+      if (!parentIdentity || !targetIdentity) return;
       const targets = targetsRef.current;
       targets.set(key, {
         targetPath, parentRealPath,
-        parentIdentity: filesystemIdentity(parent), targetIdentity,
+        parentIdentity, targetIdentity,
       });
       while (targets.size > TARGET_LIMIT) {
         const oldest = targets.keys().next().value;
@@ -68,7 +66,7 @@ export function useSftpQuickDownloadTargets() {
     sourcePath: string,
     sftpId: string,
     encoding: SftpFilenameEncoding | undefined,
-  ): Promise<string | null> => {
+  ): Promise<RememberedTarget | null> => {
     const key = sourceKey(endpointKey, sourcePath, encoding);
     if (!key) return null;
     const targets = targetsRef.current;
@@ -90,15 +88,14 @@ export function useSftpQuickDownloadTargets() {
         || target?.type !== "file"
         || filesystemIdentity(target) !== remembered.targetIdentity
         || parentRealPath !== remembered.parentRealPath
-        || (remembered.parentIdentity !== null
-          && filesystemIdentity(parent) !== remembered.parentIdentity)
+        || filesystemIdentity(parent) !== remembered.parentIdentity
       ) {
         targets.delete(key);
         return null;
       }
       targets.delete(key);
       targets.set(key, remembered);
-      return remembered.targetPath;
+      return remembered;
     } catch {
       targets.delete(key);
       return null;

@@ -1037,6 +1037,28 @@ function stableLocalFileIdentity(statLike) {
   return [statLike.dev, statLike.ino, statLike.size].join(":");
 }
 
+async function assertExpectedLocalDownloadTarget(requestedPath, expected, inspectedTarget) {
+  if (!expected) return;
+  const validIdentity = (value) => typeof value === "string" && /^\d+:\d+$/.test(value);
+  if (!validIdentity(expected.targetIdentity) || !validIdentity(expected.parentIdentity)
+    || typeof expected.parentRealPath !== "string" || !expected.parentRealPath) {
+    throw new Error("Invalid remembered local download target identity");
+  }
+  const parentPath = path.dirname(requestedPath);
+  const [parentStat, parentRealPath, target] = await Promise.all([
+    fs.promises.stat(parentPath),
+    fs.promises.realpath(parentPath),
+    inspectedTarget ?? inspectLocalPromotionTarget(requestedPath),
+  ]);
+  const parentIdentity = `${parentStat.dev}:${parentStat.ino}`;
+  const targetIdentity = target.stableIdentity?.split(":").slice(0, 2).join(":");
+  if (!parentStat.isDirectory() || parentRealPath !== expected.parentRealPath
+    || parentIdentity !== expected.parentIdentity
+    || targetIdentity !== expected.targetIdentity) {
+    throw new Error("Remembered local download target changed before replacement");
+  }
+}
+
 async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
   const { publishLocalFileExclusive } = require("./localFilePublish.cjs");
   const assertNotCancelled = options.assertNotCancelled || (() => {});
@@ -1079,6 +1101,11 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
       validatedTarget = typeof options.validateTarget === "function"
         ? await options.validateTarget()
         : undefined;
+      await assertExpectedLocalDownloadTarget(
+        options.requestedTargetPath || targetPath,
+        options.expectedLocalTarget,
+        validatedTarget,
+      );
       const mode = Number.isInteger(validatedTarget?.existingMode)
         ? validatedTarget.existingMode & 0o7777
         : Number.isInteger(options.existingMode) ? options.existingMode & 0o7777 : null;
@@ -6130,6 +6157,8 @@ async function startTransferNow(event, payload, onProgress) {
         await promoteLocalTransfer(downloadTargetPath, promotionTargetPath, {
           sourceSoftIdentity: transfer.sourceSoftIdentity,
           existingMode,
+          requestedTargetPath: targetPath,
+          expectedLocalTarget: payload.expectedLocalTarget,
           async validateTarget() {
             const latestTarget = await inspectLocalPromotionTarget(targetPath);
             if (latestTarget.promotionTargetPath !== promotionTargetPath) {

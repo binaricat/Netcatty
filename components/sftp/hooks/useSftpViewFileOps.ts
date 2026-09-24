@@ -521,7 +521,7 @@ export const useSftpViewFileOps = ({
               endpointKey, resolvedFullPath, sftpId, pane.filenameEncoding,
             )
           : null;
-        const targetPath = rememberedTarget ?? await showSaveDialog(file.name);
+        const targetPath = rememberedTarget?.targetPath ?? await showSaveDialog(file.name);
 
         if (!targetPath) return;
 
@@ -539,6 +539,11 @@ export const useSftpViewFileOps = ({
           fileName: file.name,
           sourcePath: resolvedFullPath,
           targetPath,
+          expectedLocalTarget: rememberedTarget ? {
+            parentRealPath: rememberedTarget.parentRealPath,
+            parentIdentity: rememberedTarget.parentIdentity,
+            targetIdentity: rememberedTarget.targetIdentity,
+          } : undefined,
           sftpId,
           connectionId: pane.connection.id,
           sourceHostId: pane.connection.hostId,
