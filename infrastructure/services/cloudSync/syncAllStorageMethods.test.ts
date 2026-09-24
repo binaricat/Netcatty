@@ -913,10 +913,11 @@ test("syncAllProviders skips the upload when the payload already matches the pro
   const originalEncryptPayload = EncryptionService.encryptPayload;
   const checkedRemote = remoteFile("github", 7, 700);
   const localPayload = payload("local");
-  const storedBase = payload("local");
+  let storedBase = payload("local");
   let checkedRemotePayload = storedBase;
   let uploads = 0;
   let encryptCalls = 0;
+  const encryptedPayloads: SyncPayload[] = [];
   const savedBases: SyncPayload[] = [];
   const anchored: SyncedFile[] = [];
   const connections: CloudProvider[] = [];
@@ -925,8 +926,9 @@ test("syncAllProviders skips the upload when the payload already matches the pro
     assert.equal(file, checkedRemote);
     return checkedRemotePayload;
   };
-  EncryptionService.encryptPayload = async () => {
+  EncryptionService.encryptPayload = async (outgoing: SyncPayload) => {
     encryptCalls += 1;
+    encryptedPayloads.push(outgoing);
     return remoteFile("github", 8, 800);
   };
 
@@ -960,6 +962,7 @@ test("syncAllProviders skips the upload when the payload already matches the pro
       loadSyncBase: async () => storedBase,
       saveSyncBase: async (incoming: SyncPayload) => {
         savedBases.push(incoming);
+        storedBase = incoming;
       },
       saveSyncAnchor: async (_provider: CloudProvider, file: SyncedFile) => {
         anchored.push(file);
@@ -1004,6 +1007,14 @@ test("syncAllProviders skips the upload when the payload already matches the pro
     assert.equal(metadataOnlyResult.get("github")?.action, "none");
     assert.deepEqual(savedBases, [checkedRemotePayload]);
     assert.equal(uploads, 0);
+
+    const editedPayload = payloadWithHosts(["local", "new"]);
+    const editedResult = await syncAllProvidersImpl.call(manager, editedPayload);
+    assert.equal(editedResult.get("github")?.action, "upload");
+    assert.deepEqual(
+      encryptedPayloads[0]?.syncMeta?.deletions.map(({ entityType, id }) => [entityType, id]),
+      [["hosts", "deleted"]],
+    );
   } finally {
     EncryptionService.decryptPayload = originalDecryptPayload;
     EncryptionService.encryptPayload = originalEncryptPayload;
