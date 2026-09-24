@@ -179,11 +179,16 @@ export async function uploadToProviderImpl(this: any,
       assertSyncSecurityGeneration(this, syncSecurityGeneration);
       this.state.lastError = null;
 
-      // Update local state (safe to do multiple times if values are same)
-      this.state.localVersion = syncedFile.meta.version;
-      this.state.localUpdatedAt = syncedFile.meta.updatedAt;
-      this.state.remoteVersion = syncedFile.meta.version;
-      this.state.remoteUpdatedAt = syncedFile.meta.updatedAt;
+      // Update local state. Use a monotonic max: with multiple providers
+      // uploading in parallel from different bases, a later completion from a
+      // stale base must not lower the global version that a concurrent
+      // no-op/merge completion already advanced (e.g. v10) — otherwise the
+      // next edit mints a revision below an anchored remote and regresses
+      // the cloud file.
+      this.state.localVersion = Math.max(this.state.localVersion ?? 0, syncedFile.meta.version);
+      this.state.localUpdatedAt = Math.max(this.state.localUpdatedAt ?? 0, syncedFile.meta.updatedAt);
+      this.state.remoteVersion = Math.max(this.state.remoteVersion ?? 0, syncedFile.meta.version);
+      this.state.remoteUpdatedAt = Math.max(this.state.remoteUpdatedAt ?? 0, syncedFile.meta.updatedAt);
       // Invalidate any pending provider decrypt so it cannot overwrite
       // the lastSync/lastSyncVersion we are about to set.
       ++this.providerDecryptSeq[provider];

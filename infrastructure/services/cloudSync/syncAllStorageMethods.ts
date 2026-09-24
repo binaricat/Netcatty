@@ -555,6 +555,17 @@ export async function syncAllProvidersImpl(this: any,
         if (rv > baseVersion) baseVersion = rv;
       }
     }
+    // Multi-provider guard: one provider can take the identical-payload no-op
+    // path below and advance the global version to a higher remote (e.g. v10)
+    // while another provider still uploads from a stale shared base (v7 → v8).
+    // Mint above the highest remote version observed during the check phase so
+    // a replacement upload can never regress any provider's cloud file, and
+    // so uploadToProvider cannot later lower the global version with a stale
+    // revision (its state update is monotonic).
+    for (const entry of checkResults) {
+      const rv = entry.check?.remoteFile?.meta?.version ?? 0;
+      if (rv > baseVersion) baseVersion = rv;
+    }
 
     // 4. Parallel Uploads — each provider gets metadata derived from its own
     // base, then that exact payload is persisted as the provider base
@@ -591,11 +602,16 @@ export async function syncAllProvidersImpl(this: any,
               if (!providerBase || !cloudSyncPayloadsEqual(providerBase, checkedRemotePayload)) {
                 await this.saveSyncBase(checkedRemotePayload, provider);
               }
-              await this.saveSyncAnchor(
-                provider,
-                checkedRemoteFile,
-                adapter.resourceId || this.state.providers[provider]?.resourceId || null,
-              );
+              // Mirror commitRemoteInspection/uploadToProvider: the preflight
+              // download may have lazily discovered an existing gist/file and
+              // exposed its ID via adapter.resourceId — persist it so a
+              // restart does not lose the identity (GitHub then searches only
+              // the first 100 matching gists and may miss the original
+              // resource or create a duplicate).
+              const resolvedResourceId = adapter.resourceId
+                || this.state.providers[provider]?.resourceId
+                || null;
+              await this.saveSyncAnchor(provider, checkedRemoteFile, resolvedResourceId);
               // Accepting an identical remote that is ahead of the local
               // version must advance the local version/timestamp too (as
               // commitRemoteInspection does). Otherwise the next local edit
@@ -624,6 +640,7 @@ export async function syncAllProvidersImpl(this: any,
               this.updateProviderStatus(provider, 'connected');
               this.state.providers[provider] = {
                 ...this.state.providers[provider],
+                ...(resolvedResourceId ? { resourceId: resolvedResourceId } : {}),
                 lastSync: Date.now(),
                 lastSyncVersion: checkedRemoteFile.meta.version,
               };
