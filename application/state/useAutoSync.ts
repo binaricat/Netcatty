@@ -734,20 +734,29 @@ export const useAutoSync = (config: AutoSyncConfig) => {
             );
           }
           if (convergentRemoteUnchanged) {
-            const currentHash = await getDataHashRef.current();
-            const hashDecision = resolveAutoSyncHashDecision({
-              currentHash,
-              lastSyncedHash: lastSyncedDataRef.current,
-              appliedSkipHash: skipNextSyncHashRef.current,
-            });
-            if (hashDecision !== 'sync') {
-              if (hashDecision === 'skip-applied' && skipNextSyncHashRef.current !== null) {
-                // The applied-remote data is fully synced; absorb it into the
-                // baseline so the next tick does not re-evaluate the same hash.
-                skipNextSyncHashRef.current = null;
-                lastSyncedDataRef.current = currentHash;
+            // A prior convergent cycle can leave one provider stale
+            // (`pendingLocalSync` stays set after a transient upload or
+            // verification failure) while every remote still matches its
+            // per-provider baseline. Skipping the join on that condition would
+            // never retry the stale provider, so only short-circuit when the
+            // runtime reports no pending convergence.
+            const pendingConvergence = manager.getState().pendingLocalSync === true;
+            if (!pendingConvergence) {
+              const currentHash = await getDataHashRef.current();
+              const hashDecision = resolveAutoSyncHashDecision({
+                currentHash,
+                lastSyncedHash: lastSyncedDataRef.current,
+                appliedSkipHash: skipNextSyncHashRef.current,
+              });
+              if (hashDecision !== 'sync') {
+                if (hashDecision === 'skip-applied' && skipNextSyncHashRef.current !== null) {
+                  // The applied-remote data is fully synced; absorb it into the
+                  // baseline so the next tick does not re-evaluate the same hash.
+                  skipNextSyncHashRef.current = null;
+                  lastSyncedDataRef.current = currentHash;
+                }
+                return;
               }
-              return;
             }
           }
         }
