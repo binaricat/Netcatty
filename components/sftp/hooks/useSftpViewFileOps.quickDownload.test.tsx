@@ -25,7 +25,7 @@ test("quick download reuses only the exact target selected for the same remote f
   const existingDirectories = new Set(["/downloads", "/batch"]);
   const realParents = new Map([["/downloads", "/downloads"], ["/batch", "/batch"]]);
   const parentInodes = new Map([["/downloads", 100], ["/batch", 200]]);
-  const remoteTypes = new Map<string, "file" | "directory">();
+  const remoteTypes = new Map<string, "file" | "directory">([["/remote/folder", "directory"]]);
   const downloads: Array<{ sourcePath: string; targetPath: string; isDirectory: boolean }> = [];
   const savePaths = [
     "/downloads/renamed.txt",
@@ -92,6 +92,12 @@ test("quick download reuses only the exact target selected for the same remote f
       showSaveDialog: async () => savePaths[saveCalls++] ?? null,
       selectDirectory: async () => { directoryCalls++; return "/batch"; },
       getSftpIdForConnection: () => "sftp-1",
+      statSftp: async (_id, path) => ({
+        name: path.split("/").at(-1) ?? "",
+        type: remoteTypes.get(path) ?? "file",
+        size: 3,
+        lastModified: 0,
+      }),
     });
     return null;
   }
