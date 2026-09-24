@@ -7,6 +7,7 @@ import {
 import packageJson from '../../../package.json';
 import { EncryptionService } from '../EncryptionService';
 import { mergeSyncPayloads } from '../../../domain/syncMerge';
+import { cloudSyncPayloadsEqual } from '../../../domain/convergentSync';
 import { stripSyncPayloadEncryptedCredentials, healPoisonedSecretsForMerge } from '../../../domain/credentials';
 import {
   SYNC_SNAPSHOT_LIMIT,
@@ -564,6 +565,69 @@ export async function syncAllProvidersImpl(this: any,
     const uploadTasks = validUploads.map(async ({ provider, adapter }) => {
       try {
         const entry = checkResults.find((result) => result.provider === provider);
+        const checkedRemoteFile = entry?.check?.remoteFile;
+        // No-op guard (#3519): when the outgoing payload is already identical
+        // to the provider's current remote payload, uploading would only mint
+        // a fresh cloud revision for unchanged data. This is exactly what the
+        // periodic remote check's download-remote round-trip and a smart-merge
+        // without a real diff produce, so the cloud version inflated every
+        // cycle while the app sat idle. Only skip when the remote version is
+        // not behind the local one, so keep-local resolutions keep their
+        // monotonic version bump.
+        if (
+          checkedRemoteFile
+          && checkedRemoteFile.meta.version >= (Number(this.state.localVersion) || 0)
+        ) {
+          try {
+            assertSyncSecurityGeneration(this, syncSecurityGeneration);
+            const checkedRemotePayload = await EncryptionService.decryptPayload(
+              checkedRemoteFile,
+              this.masterPassword,
+            );
+            assertSyncSecurityGeneration(this, syncSecurityGeneration);
+            if (cloudSyncPayloadsEqual(payload, checkedRemotePayload)) {
+              const providerBase = await this.loadSyncBase(provider);
+              assertSyncSecurityGeneration(this, syncSecurityGeneration);
+              if (!providerBase || !cloudSyncPayloadsEqual(providerBase, checkedRemotePayload)) {
+                await this.saveSyncBase(checkedRemotePayload, provider);
+              }
+              await this.saveSyncAnchor(
+                provider,
+                checkedRemoteFile,
+                adapter.resourceId || this.state.providers[provider]?.resourceId || null,
+              );
+              this.state.remoteVersion = Math.max(
+                this.state.remoteVersion ?? 0,
+                checkedRemoteFile.meta.version,
+              );
+              this.state.remoteUpdatedAt = Math.max(
+                this.state.remoteUpdatedAt ?? 0,
+                checkedRemoteFile.meta.updatedAt,
+              );
+              this.state.providers[provider] = {
+                ...this.state.providers[provider],
+                lastSync: Date.now(),
+                lastSyncVersion: checkedRemoteFile.meta.version,
+              };
+              this.saveSyncConfig();
+              await this.saveProviderConnection(provider, this.state.providers[provider]);
+              this.notifyStateChange();
+              const noOpResult: SyncResult = {
+                success: true,
+                provider,
+                action: 'none',
+                version: checkedRemoteFile.meta.version,
+              };
+              this.emit({ type: 'SYNC_COMPLETED', provider, result: noOpResult });
+              results.set(provider, noOpResult);
+              return;
+            }
+          } catch {
+            // Could not prove the payloads identical (decrypt failure, storage
+            // failure). Fall through to the normal upload path — a real data
+            // change must never be dropped because this guard failed.
+          }
+        }
         assertConvergentSyncWriteCompatible(entry?.check?.remoteFile?.meta, payload);
         const providerBase = await this.loadSyncBase(provider);
         let providerRemoteRef: SyncPayload | null = null;

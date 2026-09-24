@@ -906,3 +906,151 @@ test("syncAllProviders smart-merge strips device-bound enc:v1 secrets before upl
     EncryptionService.encryptPayload = originalEncryptPayload;
   }
 });
+
+test("syncAllProviders skips the upload when the payload already matches the provider remote", async () => {
+  const originalDecryptPayload = EncryptionService.decryptPayload;
+  const originalEncryptPayload = EncryptionService.encryptPayload;
+  const checkedRemote = remoteFile("github", 7, 700);
+  const localPayload = payload("local");
+  const checkedRemotePayload = payload("local");
+  let uploads = 0;
+  let encryptCalls = 0;
+  const savedBases: SyncPayload[] = [];
+  const anchored: SyncedFile[] = [];
+  const connections: CloudProvider[] = [];
+
+  EncryptionService.decryptPayload = async (file: SyncedFile) => {
+    assert.equal(file, checkedRemote);
+    return checkedRemotePayload;
+  };
+  EncryptionService.encryptPayload = async () => {
+    encryptCalls += 1;
+    return remoteFile("github", 8, 800);
+  };
+
+  try {
+    const manager = {
+      masterPassword: "pw",
+      adapters: new Map(),
+      state: {
+        securityState: "UNLOCKED",
+        providers: {
+          github: { enabled: true, connected: true, status: "connected" },
+          google: { enabled: false, connected: false, status: "disconnected" },
+          onedrive: { enabled: false, connected: false, status: "disconnected" },
+          webdav: { enabled: false, connected: false, status: "disconnected" },
+          s3: { enabled: false, connected: false, status: "disconnected" },
+        },
+        lastError: null,
+        syncState: "IDLE",
+        syncStrategy: "smartMerge",
+        localVersion: 7,
+        remoteVersion: 7,
+        remoteUpdatedAt: 700,
+        deviceId: "local-device",
+        deviceName: "Local",
+      },
+      getConnectedAdapter: async (provider: CloudProvider) => ({ provider, resourceId: "resource-7" }),
+      updateProviderStatus: () => {},
+      emit: () => {},
+      checkProviderConflict: async () => ({ conflict: false, remoteFile: checkedRemote }),
+      loadSyncBase: async () => checkedRemotePayload,
+      saveSyncBase: async (_incoming: SyncPayload, provider: CloudProvider) => {
+        savedBases.push(provider as CloudProvider);
+      },
+      saveSyncAnchor: async (_provider: CloudProvider, file: SyncedFile) => {
+        anchored.push(file);
+      },
+      saveProviderConnection: async (provider: CloudProvider) => {
+        connections.push(provider);
+      },
+      saveSyncConfig: () => {},
+      uploadToProvider: async () => {
+        uploads += 1;
+        return { success: true, provider: "github" as const, action: "upload" as const, version: 8 };
+      },
+      exitBlockedState: () => {},
+      notifyStateChange: () => {},
+    };
+
+    const results = await syncAllProvidersImpl.call(manager, localPayload);
+
+    assert.equal(results.get("github")?.success, true);
+    assert.equal(results.get("github")?.action, "none");
+    assert.equal(results.get("github")?.version, 7);
+    assert.equal(uploads, 0);
+    assert.equal(encryptCalls, 0);
+    // Base and anchor are already current; the anchor still advances so the
+    // observation stays committed.
+    assert.deepEqual(savedBases, []);
+    assert.deepEqual(anchored, [checkedRemote]);
+    assert.deepEqual(connections, ["github"]);
+    assert.equal(manager.state.syncState, "IDLE");
+    assert.equal(manager.state.providers.github.lastSyncVersion, 7);
+  } finally {
+    EncryptionService.decryptPayload = originalDecryptPayload;
+    EncryptionService.encryptPayload = originalEncryptPayload;
+  }
+});
+
+test("syncAllProviders still uploads when the remote version is behind the local version", async () => {
+  const originalDecryptPayload = EncryptionService.decryptPayload;
+  const originalEncryptPayload = EncryptionService.encryptPayload;
+  const checkedRemote = remoteFile("github", 3, 300);
+  const localPayload = payload("local");
+  let uploads = 0;
+
+  EncryptionService.decryptPayload = async () => payload("local");
+  EncryptionService.encryptPayload = async (outgoing: SyncPayload) => ({
+    ...remoteFile("github", 11, 1100),
+    payload: JSON.stringify(outgoing),
+  });
+
+  try {
+    const manager = {
+      masterPassword: "pw",
+      adapters: new Map(),
+      state: {
+        securityState: "UNLOCKED",
+        providers: {
+          github: { enabled: true, connected: true, status: "connected" },
+          google: { enabled: false, connected: false, status: "disconnected" },
+          onedrive: { enabled: false, connected: false, status: "disconnected" },
+          webdav: { enabled: false, connected: false, status: "disconnected" },
+          s3: { enabled: false, connected: false, status: "disconnected" },
+        },
+        lastError: null,
+        syncState: "IDLE",
+        syncStrategy: "smartMerge",
+        localVersion: 10,
+        deviceId: "local-device",
+        deviceName: "Local",
+      },
+      getConnectedAdapter: async (provider: CloudProvider) => ({ provider }),
+      updateProviderStatus: () => {},
+      emit: () => {},
+      checkProviderConflict: async () => ({ conflict: false, remoteFile: checkedRemote }),
+      loadSyncBase: async () => payload("local"),
+      saveSyncBase: async () => {},
+      saveSyncAnchor: async () => {},
+      saveProviderConnection: async () => {},
+      saveSyncConfig: () => {},
+      uploadToProvider: async () => {
+        uploads += 1;
+        return { success: true, provider: "github" as const, action: "upload" as const, version: 11 };
+      },
+      exitBlockedState: () => {},
+      notifyStateChange: () => {},
+    };
+
+    const results = await syncAllProvidersImpl.call(manager, localPayload);
+
+    // Identical data but the remote version is behind: keep the monotonic
+    // upload so the version counter never regresses.
+    assert.equal(uploads, 1);
+    assert.equal(results.get("github")?.action, "upload");
+  } finally {
+    EncryptionService.decryptPayload = originalDecryptPayload;
+    EncryptionService.encryptPayload = originalEncryptPayload;
+  }
+});
