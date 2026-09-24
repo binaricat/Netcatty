@@ -123,6 +123,31 @@ test("restoring a paused task also marks it interrupted after restart", () => {
   assert.equal(restored.tasks[0]?.lifecycleEpoch, undefined);
 });
 
+test("remembered local target identity survives transfer persistence", () => {
+  const original = {
+    ...task("guarded-download", "transferring", 1),
+    direction: "download" as const,
+    expectedLocalTarget: {
+      parentRealPath: "/target",
+      parentIdentity: "1:2",
+      targetIdentity: "1:3",
+    },
+  };
+  const restored = deserializeSftpTransferCenter(serializeSftpTransferCenter([original]));
+  assert.equal(restored.tasks[0]?.status, "interrupted");
+  assert.deepEqual(restored.tasks[0]?.expectedLocalTarget, original.expectedLocalTarget);
+});
+
+test("malformed saved target identity fails closed", () => {
+  const restored = deserializeSftpTransferCenter(JSON.stringify({
+    version: 1,
+    tasks: [{ ...task("guarded-download", "paused", 1), expectedLocalTarget: { targetIdentity: "1:3" } }],
+  }));
+  assert.deepEqual(restored.tasks[0]?.expectedLocalTarget, {
+    parentRealPath: "", parentIdentity: "", targetIdentity: "",
+  });
+});
+
 test("restoring terminal tasks strips stale conflict payloads (skip-without-clear legacy)", () => {
   const conflict = {
     transferId: "css-dir",

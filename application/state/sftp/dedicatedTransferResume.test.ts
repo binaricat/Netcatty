@@ -792,6 +792,11 @@ test("stat-less SCP download resume keeps saved progress instead of restarting",
       startTime: 1,
       isDirectory: false,
       reconnectRequired: true,
+      expectedLocalTarget: {
+        parentRealPath: "/local",
+        parentIdentity: "1:2",
+        targetIdentity: "1:3",
+      },
     }, {
       hosts: [host("h1", "box", "1.2.3.4")],
       keys: [],
@@ -803,6 +808,9 @@ test("stat-less SCP download resume keeps saved progress instead of restarting",
     // the download resumes from byte 20 instead of silently restarting.
     assert.equal(startOptions?.checkpointBytes, 20);
     assert.equal(startOptions?.totalBytes, 100);
+    assert.deepEqual(startOptions?.expectedLocalTarget, {
+      parentRealPath: "/local", parentIdentity: "1:2", targetIdentity: "1:3",
+    });
   } finally {
     (netcattyBridge as { get: typeof originalGet }).get = originalGet;
     resetDedicatedSessionOpenGateForTests();

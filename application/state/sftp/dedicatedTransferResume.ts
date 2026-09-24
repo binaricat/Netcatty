@@ -710,6 +710,7 @@ async function resumeSingleFileWithDedicatedSession(
             downloadCheckpointBytes: task.downloadCheckpointBytes,
             uploadCheckpointBytes: task.uploadCheckpointBytes,
             sourceFingerprint: task.sourceFingerprint,
+            expectedLocalTarget: task.expectedLocalTarget,
             skipAdmission: true,
           });
 
