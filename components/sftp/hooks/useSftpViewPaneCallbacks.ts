@@ -28,6 +28,7 @@ interface UseSftpViewPaneCallbacksParams {
   showSaveDialog?: (defaultPath: string, filters?: Array<{ name: string; extensions: string[] }>) => Promise<string | null>;
   selectDirectory?: (title?: string, defaultPath?: string) => Promise<string | null>;
   getSftpIdForConnection?: (connectionId: string) => string | undefined;
+  statSftp?: (sftpId: string, path: string, encoding?: SftpFilenameEncoding) => Promise<SftpStatResult>;
   listLocalFiles: (path: string) => Promise<RemoteFile[]>;
   mkdirLocal?: (path: string) => Promise<void>;
   deleteLocalFile?: (path: string) => Promise<void>;
@@ -45,6 +46,7 @@ export const useSftpViewPaneCallbacks = ({
   showSaveDialog,
   selectDirectory,
   getSftpIdForConnection,
+  statSftp,
   listLocalFiles,
   listDrives,
 }: UseSftpViewPaneCallbacksParams) => {
@@ -59,6 +61,7 @@ export const useSftpViewPaneCallbacks = ({
     showSaveDialog,
     selectDirectory,
     getSftpIdForConnection,
+    statSftp,
   });
 
   const listLocalFilesRef = useRef(listLocalFiles);

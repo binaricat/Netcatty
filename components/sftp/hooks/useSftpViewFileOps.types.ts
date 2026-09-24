@@ -1,6 +1,6 @@
 import type React from "react";
 import type { MutableRefObject } from "react";
-import type { SftpFileEntry } from "../../../types";
+import type { SftpFileEntry, SftpFilenameEncoding } from "../../../types";
 import type { SftpStateApi } from "../../../application/state/useSftpState";
 import type { FileOpenerType, SystemAppInfo } from "../../../lib/sftpFileUtils";
 import type { TextEditorModalSnapshot } from "../../TextEditorModal";
@@ -21,6 +21,8 @@ export interface UseSftpViewFileOpsParams {
   showSaveDialog?: (defaultPath: string, filters?: Array<{ name: string; extensions: string[] }>) => Promise<string | null>;
   selectDirectory?: (title?: string, defaultPath?: string) => Promise<string | null>;
   getSftpIdForConnection?: (connectionId: string) => string | undefined;
+  /** Application-layer fresh stat for download source snapshots (kept off the raw bridge). */
+  statSftp?: (sftpId: string, path: string, encoding?: SftpFilenameEncoding) => Promise<SftpStatResult>;
 }
 
 export interface UseSftpViewFileOpsResult {

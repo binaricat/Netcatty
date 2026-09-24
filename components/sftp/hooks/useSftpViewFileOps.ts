@@ -15,9 +15,8 @@ import {
   resolveDownloadSourceSnapshot,
 } from "../sftpDownloadSourceFreshness";
 import {
-  getRememberedDownloadTarget,
   makeDownloadTargetMemoryKey,
-  rememberDownloadTarget,
+  useSftpDownloadTargetMemory,
 } from "../../../application/state/sftpDownloadTargetMemory";
 import { reportSftpUploadResults } from "../reportSftpUploadResults";
 import { editorTabStore } from "../../../application/state/editorTabStore";
@@ -44,7 +43,10 @@ export const useSftpViewFileOps = ({
   showSaveDialog,
   selectDirectory,
   getSftpIdForConnection,
+  statSftp,
 }: UseSftpViewFileOpsParams): UseSftpViewFileOpsResult => {
+  const downloadTargetMemory = useSftpDownloadTargetMemory();
+
   const [permissionsState, setPermissionsState] = useState<{
     file: SftpFileEntry;
     side: "left" | "right";
@@ -454,7 +456,7 @@ export const useSftpViewFileOps = ({
         // in the terminal without refreshing the side panel. Re-stat so the
         // planned snapshot size and entry type match the real source.
         const sourceSnapshot = await resolveDownloadSourceSnapshot(
-          netcattyBridge.get()?.statSftp,
+          statSftp,
           sftpId,
           resolvedFullPath,
           pane.filenameEncoding,
@@ -508,7 +510,7 @@ export const useSftpViewFileOps = ({
         // so a basename renamed in the dialog is preserved and a remote name
         // with separator lookalikes cannot escape the remembered directory.
         const memoryKey = makeDownloadTargetMemoryKey(pane.connection.hostId, resolvedFullPath);
-        const rememberedTarget = getRememberedDownloadTarget(memoryKey);
+        const rememberedTarget = downloadTargetMemory.getRememberedDownloadTarget(memoryKey);
         let targetPath: string | null;
         if (rememberedTarget) {
           targetPath = rememberedTarget;
@@ -519,7 +521,7 @@ export const useSftpViewFileOps = ({
             // User cancelled
             return;
           }
-          rememberDownloadTarget(memoryKey, targetPath);
+          downloadTargetMemory.rememberDownloadTarget(memoryKey, targetPath);
         }
 
         const listedSize = typeof file.size === "string" ? parseInt(file.size, 10) || 0 : (file.size || 0);
@@ -558,6 +560,8 @@ export const useSftpViewFileOps = ({
       showSaveDialog,
       selectDirectory,
       getSftpIdForConnection,
+      statSftp,
+      downloadTargetMemory,
     ],
   );
 
@@ -671,7 +675,7 @@ export const useSftpViewFileOps = ({
             // Re-stat each root: the listed entries can be stale after
             // terminal-side delete + recreate without a refresh.
             const sourceSnapshot = await resolveDownloadSourceSnapshot(
-              netcattyBridge.get()?.statSftp,
+              statSftp,
               sftpId,
               sourcePath,
               pane.filenameEncoding,
@@ -723,6 +727,7 @@ export const useSftpViewFileOps = ({
       t,
       selectDirectory,
       getSftpIdForConnection,
+      statSftp,
       handleDownloadFileForSide,
     ],
   );
