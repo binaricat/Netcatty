@@ -53,6 +53,15 @@ function assertSyncSecurityGeneration(manager: any, generation?: number): void {
   }
 }
 
+function remoteCoversSyncDeletions(outgoing: SyncPayload, remote: SyncPayload): boolean {
+  const remoteDeletions = new Set(
+    (remote.syncMeta?.deletions ?? []).map(({ entityType, id }) => JSON.stringify([entityType, id])),
+  );
+  return (outgoing.syncMeta?.deletions ?? []).every(({ entityType, id }) =>
+    remoteDeletions.has(JSON.stringify([entityType, id])),
+  );
+}
+
 async function downloadRemoteForSyncAllImpl(this: any,
   provider: CloudProvider,
   remoteFile: SyncedFile,
@@ -593,8 +602,18 @@ export async function syncAllProvidersImpl(this: any,
               this.masterPassword,
             );
             assertSyncSecurityGeneration(this, syncSecurityGeneration);
-            if (cloudSyncPayloadsEqual(payload, checkedRemotePayload)) {
-              const providerBase = await this.loadSyncBase(provider);
+            const payloadMatches = cloudSyncPayloadsEqual(payload, checkedRemotePayload);
+            const providerBase = payloadMatches ? await this.loadSyncBase(provider) : null;
+            const deletionsCovered = payloadMatches && remoteCoversSyncDeletions(
+              withSyncReliabilityMeta(payload, providerBase ?? checkedRemotePayload, {
+                deviceId: this.state.deviceId,
+                now: Date.now(),
+              }),
+              checkedRemotePayload,
+            );
+            // Materialized data can match while one provider still lacks a
+            // deletion record needed to reject a stale copy on a later merge.
+            if (payloadMatches && deletionsCovered) {
               assertSyncSecurityGeneration(this, syncSecurityGeneration);
               if (!providerBase || !cloudSyncPayloadsEqual(providerBase, checkedRemotePayload)) {
                 await this.saveSyncBase(checkedRemotePayload, provider);

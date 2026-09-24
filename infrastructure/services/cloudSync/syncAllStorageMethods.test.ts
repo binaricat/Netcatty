@@ -996,6 +996,74 @@ test("syncAllProviders skips the upload when the payload already matches the pro
   }
 });
 
+test("syncAllProviders uploads missing deletion records, then skips once the remote has them", async () => {
+  const originalDecryptPayload = EncryptionService.decryptPayload;
+  const originalEncryptPayload = EncryptionService.encryptPayload;
+  const localPayload = payload("kept");
+  const oldBase = payloadWithHosts(["kept", "deleted"]);
+  let checkedRemote = remoteFile("github", 7, 700);
+  let checkedRemotePayload = payload("kept");
+  let uploads = 0;
+
+  EncryptionService.decryptPayload = async () => checkedRemotePayload;
+  EncryptionService.encryptPayload = async (outgoing: SyncPayload, _password: string,
+    _deviceId: string, _deviceName: string, _appVersion: string, baseVersion: number) => {
+    checkedRemotePayload = outgoing;
+    checkedRemote = remoteFile("github", baseVersion + 1, 800);
+    return checkedRemote;
+  };
+
+  try {
+    const manager = {
+      masterPassword: "pw",
+      adapters: new Map(),
+      providerDecryptSeq: { github: 0 },
+      state: {
+        securityState: "UNLOCKED",
+        providers: {
+          github: { enabled: true, connected: true, status: "connected" },
+        },
+        lastError: null,
+        syncState: "IDLE",
+        syncStrategy: "smartMerge",
+        localVersion: 7,
+        deviceId: "local-device",
+        deviceName: "Local",
+      },
+      getConnectedAdapter: async () => ({ provider: "github" }),
+      updateProviderStatus: () => {},
+      emit: () => {},
+      checkProviderConflict: async () => ({ conflict: false, remoteFile: checkedRemote }),
+      loadSyncBase: async () => oldBase,
+      saveSyncBase: async () => {},
+      saveSyncAnchor: async () => {},
+      saveProviderConnection: async () => {},
+      saveSyncConfig: () => {},
+      uploadToProvider: async () => {
+        uploads += 1;
+        return { success: true, provider: "github" as const, action: "upload" as const };
+      },
+      exitBlockedState: () => {},
+      notifyStateChange: () => {},
+    };
+
+    const first = await syncAllProvidersImpl.call(manager, localPayload);
+    assert.equal(first.get("github")?.action, "upload");
+    assert.deepEqual(
+      checkedRemotePayload.syncMeta?.deletions.map(({ entityType, id }) => [entityType, id]),
+      [["hosts", "deleted"]],
+    );
+    assert.equal(uploads, 1);
+
+    const second = await syncAllProvidersImpl.call(manager, localPayload);
+    assert.equal(second.get("github")?.action, "none");
+    assert.equal(uploads, 1);
+  } finally {
+    EncryptionService.decryptPayload = originalDecryptPayload;
+    EncryptionService.encryptPayload = originalEncryptPayload;
+  }
+});
+
 test("syncAllProviders skips an identical remote even when its version is behind another provider", async () => {
   const originalDecryptPayload = EncryptionService.decryptPayload;
   const originalEncryptPayload = EncryptionService.encryptPayload;
