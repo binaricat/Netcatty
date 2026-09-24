@@ -24,6 +24,26 @@ import { assertSftpFileFitsBuiltinEditor } from "../sftpEditorFileLimits";
 
 /** Local multi-select blob downloads read whole files into ArrayBuffers. */
 const LOCAL_BLOB_DOWNLOAD_CONCURRENCY = 1;
+
+/**
+ * A remembered quick-download directory can go stale (unmounted network
+ * share, deleted folder). Validate it is still a directory before letting
+ * quick download bypass the native picker; otherwise fall back to the
+ * picker so the transfer bridge never writes into a path that no longer
+ * exists (or under a missing mount point).
+ */
+const resolveQuickDownloadDir = async (): Promise<string | null> => {
+  const dir = readSftpQuickDownloadDir();
+  if (!dir) return null;
+  try {
+    const stat = await netcattyBridge.get()?.statLocal?.(dir);
+    if (stat?.type === "directory") return dir;
+  } catch (error) {
+    logger.warn("[SftpView] Remembered quick-download directory is no longer usable:", error);
+  }
+  return null;
+};
+
 /**
  * Multi-select roots each start their own interleaved folder walk / session
  * work. Bound them so many selected directories cannot stampede the scheduler.
@@ -437,9 +457,10 @@ export const useSftpViewFileOps = ({
         // For remote SFTP files/directories, use transfer-center downloads
         // (dedicated pool sessions via downloadToLocal).
         // Quick download skips the native pickers and writes straight into the
-        // remembered download directory; existing files still surface the
-        // in-app conflict prompt (Replace / Keep Both / Skip).
-        const quickDownloadDir = readSftpQuickDownloadDir();
+        // remembered download directory (validated to still exist); existing
+        // files still surface the in-app conflict prompt (Replace / Keep Both /
+        // Skip).
+        const quickDownloadDir = await resolveQuickDownloadDir();
         if (!getSftpIdForConnection || (!showSaveDialog && !quickDownloadDir)) {
           toast.error(t("sftp.error.downloadFailed"), "SFTP");
           return;
@@ -633,9 +654,10 @@ export const useSftpViewFileOps = ({
         return;
       }
 
-      // Quick download reuses the remembered directory instead of asking each
-      // batch; the in-app conflict prompt still guards existing files.
-      const quickDownloadDir = readSftpQuickDownloadDir();
+      // Quick download reuses the remembered directory (validated to still
+      // exist) instead of asking each batch; the in-app conflict prompt still
+      // guards existing files.
+      const quickDownloadDir = await resolveQuickDownloadDir();
       if (!getSftpIdForConnection || (!selectDirectory && !quickDownloadDir)) {
         toast.error(t("sftp.error.downloadFailed"), "SFTP");
         return;

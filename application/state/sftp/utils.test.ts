@@ -30,6 +30,12 @@ test("directory targets cannot escape the selected local root", () => {
     ".. ",
     ". ",
     "safe.txt:alternate-stream",
+    // Win32 reserved device names reject downloads that would target a
+    // device path instead of a regular file.
+    "NUL",
+    "CON.txt",
+    "COM1",
+    "aux.tar.gz",
   ]) {
     assert.throws(
       () => joinTransferTargetPath(windowsRoot, relativePath),
@@ -37,6 +43,12 @@ test("directory targets cannot escape the selected local root", () => {
       relativePath,
     );
   }
+  // Reserved device names are only a Win32 hazard; POSIX destinations keep
+  // them as ordinary filenames.
+  assert.equal(
+    joinTransferTargetPath("/srv/downloads", "NUL"),
+    "/srv/downloads/NUL",
+  );
   assert.equal(
     joinTransferTargetPath(windowsRoot, "nested/report.txt"),
     "C:\\Users\\alice\\Downloads\\folder\\nested\\report.txt",
