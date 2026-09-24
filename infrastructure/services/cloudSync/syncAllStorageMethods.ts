@@ -596,6 +596,20 @@ export async function syncAllProvidersImpl(this: any,
                 checkedRemoteFile,
                 adapter.resourceId || this.state.providers[provider]?.resourceId || null,
               );
+              // Accepting an identical remote that is ahead of the local
+              // version must advance the local version/timestamp too (as
+              // commitRemoteInspection does). Otherwise the next local edit
+              // derives baseVersion from the stale local version and mints a
+              // lower revision than the accepted remote, regressing the cloud
+              // file via the adapters' replacement uploads.
+              this.state.localVersion = Math.max(
+                this.state.localVersion ?? 0,
+                checkedRemoteFile.meta.version,
+              );
+              this.state.localUpdatedAt = Math.max(
+                this.state.localUpdatedAt ?? 0,
+                checkedRemoteFile.meta.updatedAt,
+              );
               this.state.remoteVersion = Math.max(
                 this.state.remoteVersion ?? 0,
                 checkedRemoteFile.meta.version,
@@ -604,6 +618,10 @@ export async function syncAllProvidersImpl(this: any,
                 this.state.remoteUpdatedAt ?? 0,
                 checkedRemoteFile.meta.updatedAt,
               );
+              // Mirror uploadToProvider's success path: clear the 'syncing'
+              // status set during the preflight so the provider (and its
+              // manual Sync button) does not stay stuck after a no-op sync.
+              this.updateProviderStatus(provider, 'connected');
               this.state.providers[provider] = {
                 ...this.state.providers[provider],
                 lastSync: Date.now(),
