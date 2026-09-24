@@ -703,6 +703,9 @@ export const ruVaultMessages: Messages = {
   'settings.sftp.skipUnchanged.enable': 'Пропускать неизменённые файлы',
   'settings.sftp.skipUnchanged.enableDesc': 'Пропускать файлы, у которых размер и время изменения уже совпадают с назначением (в стиле rsync). Отключается при замене папки во временный путь.',
 
+  'settings.sftp.quickDownload.enable': 'Быстрая загрузка (перезаписывать по умолчанию)',
+  'settings.sftp.quickDownload.enableDesc': 'Загружать сразу в последнюю использованную папку без диалога «Сохранить как» для каждого файла. Для существующих файлов по-прежнему один раз за сеанс показывается запрос конфликта передачи (Заменить / Сохранить оба / Пропустить).',
+
   // Quick Switcher
   'qs.search.placeholder': 'Поиск хостов или вкладок',
   'qs.jumpTo': 'Перейти к',

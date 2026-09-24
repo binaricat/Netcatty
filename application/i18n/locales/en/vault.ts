@@ -666,6 +666,9 @@ export const enVaultMessages: Messages = {
   'settings.sftp.skipUnchanged.enable': 'Skip unchanged files',
   'settings.sftp.skipUnchanged.enableDesc': 'Skip files whose size and modification time already match the destination (rsync-style). Disabled when replacing a folder into a staging path.',
 
+  'settings.sftp.quickDownload.enable': 'Quick download (overwrite by default)',
+  'settings.sftp.quickDownload.enableDesc': 'Download straight into the last used directory without showing the Save As dialog for every file. Existing files still ask once per session via the transfer conflict prompt (Replace / Keep Both / Skip).',
+
   // Quick Switcher
   'qs.search.placeholder': 'Search hosts or tabs',
   'qs.jumpTo': 'Jump To',

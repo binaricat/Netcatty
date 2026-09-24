@@ -51,6 +51,7 @@ import {
   STORAGE_KEY_SFTP_FOLLOW_TERMINAL_CWD,
   STORAGE_KEY_SFTP_TRANSFER_CONCURRENCY,
   STORAGE_KEY_SFTP_SKIP_UNCHANGED,
+  STORAGE_KEY_SFTP_QUICK_DOWNLOAD,
   STORAGE_KEY_SSH_TRANSPORT_IDLE_TTL_MS,
   STORAGE_KEY_SFTP_TRANSFER_POOL_IDLE_TTL_MS,
   STORAGE_KEY_SFTP_DEFAULT_VIEW_MODE,
@@ -110,6 +111,9 @@ import {
   resolveSftpTransferConcurrency,
   resolveSftpSkipUnchangedEnabled,
 } from './sftp/transferConcurrency';
+import {
+  resolveSftpQuickDownloadEnabled,
+} from './sftp/quickDownloadPreference';
 import { resolveSshTransportIdleTtlMs } from '../../infrastructure/config/sshTransportIdleTtl';
 import {
   DEFAULT_ACCENT_MODE,
@@ -477,6 +481,9 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
   // top-level files queue against each other and against folder children.
   const [sftpSkipUnchanged, setSftpSkipUnchanged] = useState<boolean>(() =>
     resolveSftpSkipUnchangedEnabled(() => localStorageAdapter.readBoolean(STORAGE_KEY_SFTP_SKIP_UNCHANGED)),
+  );
+  const [sftpQuickDownload, setSftpQuickDownloadState] = useState<boolean>(() =>
+    resolveSftpQuickDownloadEnabled(localStorageAdapter.readBoolean(STORAGE_KEY_SFTP_QUICK_DOWNLOAD)),
   );
 
   const [sshTransportIdleTtlMs, setSshTransportIdleTtlMsState] = useState<number>(() => {
@@ -1011,6 +1018,8 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
     if (storedCompress === 'true' || storedCompress === 'false') setSftpUseCompressedUpload(storedCompress === 'true');
     const storedSkipUnchanged = localStorageAdapter.readBoolean(STORAGE_KEY_SFTP_SKIP_UNCHANGED);
     if (storedSkipUnchanged != null) setSftpSkipUnchanged(storedSkipUnchanged);
+    const storedQuickDownload = localStorageAdapter.readBoolean(STORAGE_KEY_SFTP_QUICK_DOWNLOAD);
+    if (storedQuickDownload != null) setSftpQuickDownloadState(storedQuickDownload);
     const storedAutoOpenSidebar = readStoredString(STORAGE_KEY_SFTP_AUTO_OPEN_SIDEBAR);
     if (storedAutoOpenSidebar === 'true' || storedAutoOpenSidebar === 'false') setSftpAutoOpenSidebar(storedAutoOpenSidebar === 'true');
     const storedFollowTerminalCwd = readStoredString(STORAGE_KEY_SFTP_FOLLOW_TERMINAL_CWD);
@@ -1561,6 +1570,13 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
     notifySettingsChanged(STORAGE_KEY_SFTP_SKIP_UNCHANGED, sftpSkipUnchanged);
   }, [sftpSkipUnchanged, notifySettingsChanged]);
 
+  // Persist SFTP quick download setting
+  useEffect(() => {
+    localStorageAdapter.writeBoolean(STORAGE_KEY_SFTP_QUICK_DOWNLOAD, sftpQuickDownload);
+    if (!persistMountedRef.current) return;
+    notifySettingsChanged(STORAGE_KEY_SFTP_QUICK_DOWNLOAD, sftpQuickDownload);
+  }, [sftpQuickDownload, notifySettingsChanged]);
+
   // Persist SFTP auto-open sidebar setting
   useEffect(() => {
     localStorageAdapter.writeString(STORAGE_KEY_SFTP_AUTO_OPEN_SIDEBAR, sftpAutoOpenSidebar ? 'true' : 'false');
@@ -2107,6 +2123,8 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
     setSftpUseCompressedUpload,
     sftpSkipUnchanged,
     setSftpSkipUnchanged,
+    sftpQuickDownload,
+    setSftpQuickDownload: setSftpQuickDownloadState,
     sftpAutoOpenSidebar,
     setSftpAutoOpenSidebar,
     sftpFollowTerminalCwd,
@@ -2200,7 +2218,7 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
       uiFontFamilyId, uiLanguage, customCSS,
       terminalThemeId, terminalFontFamilyId, terminalFontSize, terminalSettings,
       customKeyBindings, editorWordWrap,
-      sftpDoubleClickBehavior, sftpAutoSync, sftpShowHiddenFiles, sftpUseCompressedUpload, sftpSkipUnchanged, sftpAutoOpenSidebar, sftpFollowTerminalCwd, sftpDefaultViewMode,
+      sftpDoubleClickBehavior, sftpAutoSync, sftpShowHiddenFiles, sftpUseCompressedUpload, sftpSkipUnchanged, sftpQuickDownload, sftpAutoOpenSidebar, sftpFollowTerminalCwd, sftpDefaultViewMode,
       showRecentHosts, hostClickBehavior, showOnlyUngroupedHostsInRoot, tabBarPosition, showSftpTab, showHostTreeSidebar, terminalSidePanelAutoOpen, terminalSidePanelAutoOpenTab, localShellSidePanelAutoOpen, localShellSidePanelAutoOpenTab, shellOnlyTabNumberShortcuts, showTabNumberBadges, disableTerminalFontZoom,
       customThemes, workspaceFocusStyle, sessionLogsTimestampsEnabled, sshDebugLogsEnabled, sshDeepLinkEnabled, jmsDeepLinkEnabled, explorerContextMenuEnabled,
     ]),

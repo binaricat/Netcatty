@@ -3,6 +3,10 @@ import type { SftpFileEntry } from "../../../types";
 import type { TransferStatus } from "../../../domain/models";
 import { getParentPath, joinPath as joinFsPath } from "../../../application/state/sftp/utils";
 import {
+  readSftpQuickDownloadDir,
+  rememberSftpLastDownloadDir,
+} from "../../../application/state/sftp/quickDownloadPreference";
+import {
   DEFAULT_SFTP_FILE_TRANSFER_CONCURRENCY,
   runBoundedConcurrency,
 } from "../../../application/state/sftp/transferConcurrency";
@@ -432,7 +436,11 @@ export const useSftpViewFileOps = ({
 
         // For remote SFTP files/directories, use transfer-center downloads
         // (dedicated pool sessions via downloadToLocal).
-        if (!showSaveDialog || !getSftpIdForConnection) {
+        // Quick download skips the native pickers and writes straight into the
+        // remembered download directory; existing files still surface the
+        // in-app conflict prompt (Replace / Keep Both / Skip).
+        const quickDownloadDir = readSftpQuickDownloadDir();
+        if (!getSftpIdForConnection || (!showSaveDialog && !quickDownloadDir)) {
           toast.error(t("sftp.error.downloadFailed"), "SFTP");
           return;
         }
@@ -443,12 +451,15 @@ export const useSftpViewFileOps = ({
         }
 
         if (isDirectory) {
-          if (!selectDirectory) {
-            toast.error(t("sftp.error.downloadFailed"), "SFTP");
-            return;
+          let selectedDirectory = quickDownloadDir;
+          if (!selectedDirectory) {
+            if (!selectDirectory) {
+              toast.error(t("sftp.error.downloadFailed"), "SFTP");
+              return;
+            }
+            selectedDirectory = await selectDirectory(t("sftp.context.download"));
+            rememberSftpLastDownloadDir(selectedDirectory);
           }
-
-          const selectedDirectory = await selectDirectory(t("sftp.context.download"));
           if (!selectedDirectory) return;
 
           const targetPath = joinFsPath(selectedDirectory, file.name);
@@ -481,11 +492,18 @@ export const useSftpViewFileOps = ({
 
           return;
         }
-        // Show save dialog to get target path
-        const targetPath = await showSaveDialog(file.name);
+        // Quick download goes straight to the remembered directory; otherwise
+        // show the save dialog to get target path.
+        let targetPath: string | null = quickDownloadDir
+          ? joinFsPath(quickDownloadDir, file.name)
+          : null;
         if (!targetPath) {
-          // User cancelled
-          return;
+          targetPath = await showSaveDialog(file.name);
+          if (!targetPath) {
+            // User cancelled
+            return;
+          }
+          rememberSftpLastDownloadDir(getParentPath(targetPath));
         }
 
         const fileSize = typeof file.size === "string" ? parseInt(file.size, 10) || 0 : (file.size || 0);
@@ -609,7 +627,10 @@ export const useSftpViewFileOps = ({
         return;
       }
 
-      if (!selectDirectory || !getSftpIdForConnection) {
+      // Quick download reuses the remembered directory instead of asking each
+      // batch; the in-app conflict prompt still guards existing files.
+      const quickDownloadDir = readSftpQuickDownloadDir();
+      if (!getSftpIdForConnection || (!selectDirectory && !quickDownloadDir)) {
         toast.error(t("sftp.error.downloadFailed"), "SFTP");
         return;
       }
@@ -620,7 +641,11 @@ export const useSftpViewFileOps = ({
         return;
       }
 
-      const selectedDirectory = await selectDirectory(t("sftp.context.download"));
+      let selectedDirectory = quickDownloadDir;
+      if (!selectedDirectory) {
+        selectedDirectory = await selectDirectory?.(t("sftp.context.download")) ?? null;
+        rememberSftpLastDownloadDir(selectedDirectory);
+      }
       if (!selectedDirectory) return;
 
       // Bound root jobs: each directory root walks and transfers independently,

@@ -219,6 +219,9 @@ export const zhCNTerminalMessages: Messages = {
   'settings.sftp.skipUnchanged.enable': '跳过未改文件',
   'settings.sftp.skipUnchanged.enableDesc': '当目标文件的大小与修改时间已与源一致时跳过传输（类似 rsync）。替换到暂存路径时自动禁用。',
 
+  'settings.sftp.quickDownload.enable': '快速下载（默认覆盖）',
+  'settings.sftp.quickDownload.enableDesc': '下载时不再弹出“另存为”对话框，直接保存到上次使用的目录并覆盖同名文件。已存在的文件仍会通过传输冲突提示确认（替换 / 保留两者 / 跳过），同一会话内选择“应用到全部”后不再重复询问。',
+
   // Settings > Terminal
   'settings.terminal.section.theme': '终端主题',
   'settings.terminal.themeModal.title': '选择主题',
