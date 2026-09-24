@@ -727,7 +727,6 @@ export const ruVaultMessages: Messages = {
   'quickConnect.knownHost.addAndContinue': 'Добавить и продолжить',
   'quickConnect.addKey': 'Добавить ключ',
   'quickConnect.warning.unparsedOptions': 'Некоторые аргументы SSH были проигнорированы: {options}',
-  'quickConnect.viaJump': 'через jump-хост: {jumps}',
   'quickConnect.identity.label': 'Набор учётных данных',
   'quickConnect.identity.placeholder': 'Выберите сохранённый профиль',
   'quickConnect.identity.empty': 'Сохранённые профили не найдены',

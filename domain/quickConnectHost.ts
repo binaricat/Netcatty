@@ -32,8 +32,6 @@ type BuildQuickConnectHostInput = {
   password?: string;
   selectedKeyId?: string | null;
   selectedIdentityId?: string | null;
-  /** Host IDs of the jump chain (first = closest to client). */
-  chainHostIds?: string[];
   save?: boolean;
 };
 
@@ -48,7 +46,6 @@ export const buildQuickConnectHost = ({
   password,
   selectedKeyId,
   selectedIdentityId,
-  chainHostIds,
   save = false,
 }: BuildQuickConnectHostInput): Host => {
   const isTelnet = protocol === "telnet";
@@ -76,41 +73,7 @@ export const buildQuickConnectHost = ({
     etPort: protocol === "et" ? 2022 : undefined,
     telnetEnabled: isTelnet,
     telnetPort: isTelnet ? port : undefined,
-    ...(chainHostIds && chainHostIds.length > 0
-      ? { hostChain: { hostIds: chainHostIds } }
-      : {}),
     ephemeral: !save,
     createdAt,
   };
 };
-
-/**
- * SSH hosts for the jump hops of a multi-@ quick connect target
- * (issue #3523). They are registered alongside the quick connect host so the
- * existing jump chain machinery can resolve them by id. Jump hops for a
- * one-off connect stay ephemeral; hops saved with the host become vault hosts.
- */
-export const buildQuickConnectJumpHost = ({
-  id,
-  createdAt,
-  jump,
-  save = false,
-}: {
-  id: string;
-  createdAt: number;
-  jump: QuickConnectTarget;
-  save?: boolean;
-}): Host => ({
-  id,
-  label: jump.username ? `${jump.username}@${jump.hostname}` : jump.hostname,
-  hostname: jump.hostname,
-  port: jump.port ?? getQuickConnectDefaultPort("ssh"),
-  username: jump.username ?? "",
-  group: "",
-  tags: [],
-  os: "linux",
-  protocol: "ssh",
-  authMethod: "auto",
-  ephemeral: !save,
-  createdAt,
-});

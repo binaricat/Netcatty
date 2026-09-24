@@ -1375,19 +1375,12 @@ export function AppSideEffects() {
   ), [createWorkspaceFromTargets, resolveEffectiveHost]);
 
   // Wrapper to connect to host with logging
-  const handleConnectToHost = useCallback((host: Host, alreadyEffective = false, hidden = false, chainHosts: Host[] = []) => {
-    // Register ephemeral hosts (quick connect + its jump chain, issue #3523)
-    // before the session starts so chain resolution can find them by id.
-    // Non-ephemeral chain hops arrive with the vault update itself.
-    const ephemeralCandidates = [
-      ...(host.ephemeral ? [host] : []),
-      ...chainHosts.filter((candidate) => candidate.ephemeral),
-    ];
-    for (const ephemeralHost of ephemeralCandidates) {
+  const handleConnectToHost = useCallback((host: Host, alreadyEffective = false, hidden = false) => {
+    if (host.ephemeral) {
       setEphemeralHosts((previous) => {
-        const existingIndex = previous.findIndex((candidate) => candidate.id === ephemeralHost.id);
-        if (existingIndex < 0) return [...previous, ephemeralHost];
-        return previous.map((candidate, index) => index === existingIndex ? ephemeralHost : candidate);
+        const existingIndex = previous.findIndex((candidate) => candidate.id === host.id);
+        if (existingIndex < 0) return [...previous, host];
+        return previous.map((candidate, index) => index === existingIndex ? host : candidate);
       });
     }
     const effectiveHostResolver = alreadyEffective

@@ -114,7 +114,6 @@ import QuickConnectWizard from "./QuickConnectWizard";
 import {
   isQuickConnectInput,
   parseQuickConnectInputWithWarnings,
-  type QuickConnectTarget,
 } from "../domain/quickConnect";
 import SerialConnectModal from "./SerialConnectModal";
 import SerialHostDetailsPanel from "./SerialHostDetailsPanel";
@@ -236,7 +235,7 @@ interface VaultViewProps {
     options?: { charset?: string },
   ) => void;
   onDeleteHost: (id: string) => void;
-  onConnect: (host: Host, chainHosts?: Host[]) => void;
+  onConnect: (host: Host) => void;
   onOpenHostFromNote?: (host: Host, source?: { noteId: string }) => void;
   onUpdateHosts: (hosts: Host[]) => VaultHostPersistenceResult | Promise<VaultHostPersistenceResult>;
   onReadPersistedHosts: () => Promise<Host[]>;
@@ -534,9 +533,11 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
     [proxyProfiles],
   );
   // Quick connect state
-  const [quickConnectTarget, setQuickConnectTarget] = useState<QuickConnectTarget | null>(
-    null,
-  );
+  const [quickConnectTarget, setQuickConnectTarget] = useState<{
+    hostname: string;
+    username?: string;
+    port?: number;
+  } | null>(null);
   const [isQuickConnectOpen, setIsQuickConnectOpen] = useState(false);
   const [quickConnectWarnings, setQuickConnectWarnings] = useState<string[]>(
     [],
@@ -630,8 +631,8 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
 
   // Handle quick connect
   const handleQuickConnect = useCallback(
-    (host: Host, chainHosts?: Host[]) => {
-      onConnect(host, chainHosts);
+    (host: Host) => {
+      onConnect(host);
       setIsQuickConnectOpen(false);
       setQuickConnectTarget(null);
       setQuickConnectWarnings([]);
@@ -642,10 +643,8 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
 
   // Handle quick connect save host
   const handleQuickConnectSaveHost = useCallback(
-    (host: Host, chainHosts?: Host[]) => {
-      // Saved jump hops must be persisted with the host so its jump chain
-      // still resolves after a restart (issue #3523).
-      onUpdateHosts([...hosts, ...(chainHosts ?? []), host]);
+    (host: Host) => {
+      onUpdateHosts([...hosts, host]);
     },
     [hosts, onUpdateHosts],
   );

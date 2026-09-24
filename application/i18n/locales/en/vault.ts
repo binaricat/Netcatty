@@ -690,7 +690,6 @@ export const enVaultMessages: Messages = {
   'quickConnect.knownHost.addAndContinue': 'Add and continue',
   'quickConnect.addKey': 'Add key',
   'quickConnect.warning.unparsedOptions': 'Some SSH arguments were ignored: {options}',
-  'quickConnect.viaJump': 'via jump host: {jumps}',
   'quickConnect.identity.label': 'Credential preset',
   'quickConnect.identity.placeholder': 'Choose a saved identity',
   'quickConnect.identity.empty': 'No saved identities found',
