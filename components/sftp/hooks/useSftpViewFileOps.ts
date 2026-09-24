@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 import type { SftpFileEntry } from "../../../types";
 import type { TransferStatus } from "../../../domain/models";
-import { getParentPath, joinPath as joinFsPath, joinTransferTargetPath } from "../../../application/state/sftp/utils";
+import { getParentPath, joinTransferTargetPath } from "../../../application/state/sftp/utils";
 import {
   readSftpQuickDownloadDir,
   rememberSftpLastDownloadDir,
@@ -462,7 +462,10 @@ export const useSftpViewFileOps = ({
           }
           if (!selectedDirectory) return;
 
-          const targetPath = joinFsPath(selectedDirectory, file.name);
+          // The directory name comes from the remote server and may contain
+          // Windows-unsafe segments (e.g. "..\Startup\payload"); the guarded
+          // join prevents escaping the selected/remembered download directory.
+          const targetPath = joinTransferTargetPath(selectedDirectory, file.name);
 
           try {
             const status = await sftpRef.current.downloadToLocal({
@@ -660,7 +663,9 @@ export const useSftpViewFileOps = ({
         async (file, index) => {
           try {
             const sourcePath = sftpRef.current.joinPath(pane.connection.currentPath, file.name);
-            const targetPath = joinFsPath(selectedDirectory, file.name);
+            // Same guarded join as single downloads: remote names may contain
+            // Windows-unsafe segments and must not escape the download dir.
+            const targetPath = joinTransferTargetPath(selectedDirectory, file.name);
             const isDirectory = isNavigableDirectory(file);
             const fileSize = typeof file.size === "string" ? parseInt(file.size, 10) || 0 : (file.size || 0);
 
