@@ -1,6 +1,6 @@
 import type React from "react";
 import type { MutableRefObject } from "react";
-import type { SftpFileEntry, SftpFilenameEncoding } from "../../../types";
+import type { RemoteFile, SftpFileEntry, SftpFilenameEncoding } from "../../../types";
 import type { SftpStateApi } from "../../../application/state/useSftpState";
 import type { FileOpenerType, SystemAppInfo } from "../../../lib/sftpFileUtils";
 import type { TextEditorModalSnapshot } from "../../TextEditorModal";
@@ -23,6 +23,7 @@ export interface UseSftpViewFileOpsParams {
   getSftpIdForConnection?: (connectionId: string) => string | undefined;
   /** Application-layer fresh stat for download source snapshots (kept off the raw bridge). */
   statSftp?: (sftpId: string, path: string, encoding?: SftpFilenameEncoding) => Promise<SftpStatResult>;
+  listSftp?: (sftpId: string, path: string, encoding?: SftpFilenameEncoding) => Promise<RemoteFile[]>;
 }
 
 export interface UseSftpViewFileOpsResult {

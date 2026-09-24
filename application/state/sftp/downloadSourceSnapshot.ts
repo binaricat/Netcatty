@@ -1,4 +1,6 @@
-import type { SftpFileEntry, SftpFilenameEncoding } from "../../../domain/models/sftp";
+import type { SftpFilenameEncoding } from "../../../domain/models/sftp";
+import type { RemoteFile } from "../../../domain/models/workspace";
+import { getFileName, getParentPath } from "./utils";
 
 export type DownloadSourceSnapshot = {
   /** Unknown for stat-less SCP files and links; the transfer reads its wire size. */
@@ -11,6 +13,11 @@ type StatSftp = (
   path: string,
   encoding?: SftpFilenameEncoding,
 ) => Promise<SftpStatResult>;
+type ListSftp = (
+  sftpId: string,
+  path: string,
+  encoding?: SftpFilenameEncoding,
+) => Promise<RemoteFile[]>;
 
 const sourceUnavailable = () => new Error("Cannot verify the current remote source before download");
 
@@ -20,7 +27,7 @@ export const resolveDownloadSourceSnapshot = async (
   sftpId: string,
   sourcePath: string,
   encoding: SftpFilenameEncoding | undefined,
-  listedSymlinkTarget?: SftpFileEntry["linkTarget"],
+  listSftp?: ListSftp,
 ): Promise<DownloadSourceSnapshot> => {
   if (!statSftp) throw sourceUnavailable();
 
@@ -36,12 +43,22 @@ export const resolveDownloadSourceSnapshot = async (
   }
   if (stat.type === "directory") return { size: 0, isDirectory: true };
   if (stat.type === "symlink") {
-    // SFTP STAT follows links, but legacy SCP reports the link node. Its
-    // listing resolves the target kind; SCP's wire header verifies file bytes.
-    if (listedSymlinkTarget !== "file" && listedSymlinkTarget !== "directory") {
+    // SFTP STAT follows links; legacy SCP describes the link node. Re-list its
+    // parent to resolve the current target kind rather than trusting the pane.
+    if (!listSftp) throw sourceUnavailable();
+    let entries: RemoteFile[];
+    try {
+      entries = await listSftp(sftpId, getParentPath(sourcePath), encoding);
+    } catch (cause) {
+      throw new Error("Cannot verify the current remote source before download", { cause });
+    }
+    const current = entries.find((entry) => entry.name === getFileName(sourcePath));
+    if (current?.type !== "symlink"
+      || (current.linkTarget !== "file" && current.linkTarget !== "directory")) {
       throw sourceUnavailable();
     }
-    return { size: undefined, isDirectory: listedSymlinkTarget === "directory" };
+    // The link's own size is never a valid file plan; SCP's wire header is.
+    return { size: undefined, isDirectory: current.linkTarget === "directory" };
   }
   if (stat.type !== "file") throw sourceUnavailable();
   if (stat.sizeKnown === false) return { size: undefined, isDirectory: false };

@@ -57,6 +57,13 @@ test("single and batch downloads route by current remote type and size", async (
       selectDirectory: async () => { directoryCalls++; return "/downloads"; },
       getSftpIdForConnection: () => "sftp-1",
       statSftp: async (_id, path) => current.get(path) ?? null as unknown as SftpStatResult,
+      listSftp: async (_id, parent) => {
+        assert.equal(parent, "/remote");
+        return [
+          { name: "file-link", type: "symlink", linkTarget: "file", size: "9 bytes", lastModified: "" },
+          { name: "dir-link", type: "symlink", linkTarget: "directory", size: "9 bytes", lastModified: "" },
+        ];
+      },
     });
     return null;
   }
@@ -90,7 +97,7 @@ test("single and batch downloads route by current remote type and size", async (
 
     await act(async () => { await single(file("statless", 100_000)); });
     assert.equal(downloads.at(-1)?.totalBytes, undefined, "stat-less SCP does not use listed size");
-    await act(async () => { await single(file("file-link", 9, "symlink", "file")); });
+    await act(async () => { await single(file("file-link", 9, "symlink", "directory")); });
     assert.equal(downloads.at(-1)?.isDirectory, false);
     assert.equal(downloads.at(-1)?.totalBytes, undefined, "link node size is not file size");
 
@@ -102,7 +109,7 @@ test("single and batch downloads route by current remote type and size", async (
       await batch([
         file("became-file", 0, "directory"),
         file("missing", 100_000),
-        file("dir-link", 9, "symlink", "directory"),
+        file("dir-link", 9, "symlink", "file"),
       ]);
     });
     assert.equal(directoryCalls, 2, "batch chooses one directory");

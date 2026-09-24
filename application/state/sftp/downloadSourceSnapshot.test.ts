@@ -72,9 +72,30 @@ test("SCP links retain their resolved file or directory routing without using li
   for (const target of ["file", "directory"] as const) {
     const snapshot = await resolveDownloadSourceSnapshot(
       async () => stat({ type: "symlink", size: 8 }),
-      "scp-1", "/tmp/link", "auto", target,
+      "scp-1", "/tmp/link", "auto",
+      async (_id, parent, encoding) => {
+        assert.equal(parent, "/tmp");
+        assert.equal(encoding, "auto");
+        return [{ name: "link", type: "symlink", linkTarget: target, size: "8 bytes", lastModified: "" }];
+      },
     );
     assert.deepEqual(snapshot, { size: undefined, isDirectory: target === "directory" });
+  }
+});
+
+test("SCP link whose current target cannot be confirmed stops safely", async () => {
+  for (const entries of [
+    [],
+    [{ name: "link", type: "symlink" as const, linkTarget: null, size: "8 bytes", lastModified: "" }],
+    [{ name: "link", type: "file" as const, size: "8 bytes", lastModified: "" }],
+  ]) {
+    await assert.rejects(
+      resolveDownloadSourceSnapshot(
+        async () => stat({ type: "symlink" }),
+        "scp-1", "/tmp/link", "auto", async () => entries,
+      ),
+      /Cannot verify the current remote source before download/,
+    );
   }
 });
 

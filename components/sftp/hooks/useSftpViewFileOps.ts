@@ -38,6 +38,7 @@ export const useSftpViewFileOps = ({
   selectDirectory,
   getSftpIdForConnection,
   statSftp,
+  listSftp,
 }: UseSftpViewFileOpsParams): UseSftpViewFileOpsResult => {
   const [permissionsState, setPermissionsState] = useState<{
     file: SftpFileEntry;
@@ -452,7 +453,7 @@ export const useSftpViewFileOps = ({
           sftpId,
           resolvedFullPath,
           pane.filenameEncoding,
-          file.type === "symlink" ? file.linkTarget : undefined,
+          listSftp,
         );
         isDirectory = sourceSnapshot.isDirectory;
 
@@ -469,7 +470,7 @@ export const useSftpViewFileOps = ({
           const selectedSnapshot = await resolveDownloadSourceSnapshot(
             statSftp,
             sftpId, resolvedFullPath, pane.filenameEncoding,
-            file.type === "symlink" ? file.linkTarget : undefined,
+            listSftp,
           );
           if (!selectedSnapshot.isDirectory) {
             throw new Error("Remote source changed while choosing the download target");
@@ -510,7 +511,7 @@ export const useSftpViewFileOps = ({
         const selectedSnapshot = await resolveDownloadSourceSnapshot(
           statSftp,
           sftpId, resolvedFullPath, pane.filenameEncoding,
-          file.type === "symlink" ? file.linkTarget : undefined,
+          listSftp,
         );
         if (selectedSnapshot.isDirectory) {
           throw new Error("Remote source changed while choosing the download target");
@@ -550,6 +551,7 @@ export const useSftpViewFileOps = ({
       selectDirectory,
       getSftpIdForConnection,
       statSftp,
+      listSftp,
     ],
   );
 
@@ -667,7 +669,7 @@ export const useSftpViewFileOps = ({
               sftpId,
               sourcePath,
               pane.filenameEncoding,
-              file.type === "symlink" ? file.linkTarget : undefined,
+              listSftp,
             );
             const isDirectory = sourceSnapshot.isDirectory;
 
@@ -715,6 +717,7 @@ export const useSftpViewFileOps = ({
       selectDirectory,
       getSftpIdForConnection,
       statSftp,
+      listSftp,
       handleDownloadFileForSide,
     ],
   );

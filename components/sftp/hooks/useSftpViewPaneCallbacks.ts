@@ -62,6 +62,7 @@ export const useSftpViewPaneCallbacks = ({
     selectDirectory,
     getSftpIdForConnection,
     statSftp,
+    listSftp,
   });
 
   const listLocalFilesRef = useRef(listLocalFiles);
