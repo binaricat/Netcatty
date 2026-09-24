@@ -90,7 +90,13 @@ declare global {
         /** When true, skip main-process admission (renderer already scheduled). */
         skipAdmission?: boolean;
       }
-    ): Promise<{ transferId: string; totalBytes?: number; error?: string; cancelled?: boolean }>;
+    ): Promise<{
+      transferId: string;
+      totalBytes?: number;
+      error?: string;
+      cancelled?: boolean;
+      publishedLocalIdentity?: import("../../domain/models/sftp").LocalPublishedFileIdentity;
+    }>;
     pauseTransfer?(transferId: string): Promise<{
       success: boolean;
       superseded?: boolean;

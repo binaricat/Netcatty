@@ -1,5 +1,5 @@
 import type { MutableRefObject } from "react";
-import type { FileConflict, FileConflictAction, LocalDownloadTargetExpectation, SftpFileEntry, SftpFilenameEncoding, TransferStatus, TransferTask } from "../../../domain/models";
+import type { FileConflict, FileConflictAction, LocalDownloadTargetExpectation, LocalPublishedFileIdentity, SftpFileEntry, SftpFilenameEncoding, TransferStatus, TransferTask } from "../../../domain/models";
 import type { SftpPane } from "./types";
 import type { AcquireTransferSessionFn } from "./transferDirectoryOps";
 
@@ -44,6 +44,7 @@ export interface UseSftpTransfersResult {
     sourcePath: string;
     targetPath: string;
     expectedLocalTarget?: LocalDownloadTargetExpectation;
+    onPublishedLocalFile?: (identity: LocalPublishedFileIdentity) => void;
     sftpId: string;
     connectionId: string;
     sourceHostId: string;

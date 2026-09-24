@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef } from "react";
-import type { LocalDownloadTargetExpectation, SftpFilenameEncoding } from "../../../domain/models/sftp";
+import type { LocalDownloadTargetExpectation, LocalPublishedFileIdentity, SftpFilenameEncoding } from "../../../domain/models/sftp";
 import { netcattyBridge } from "../../../infrastructure/services/netcattyBridge";
 import { getParentPath } from "./utils";
 
@@ -32,6 +32,7 @@ export function useSftpQuickDownloadTargets() {
     sourcePath: string,
     encoding: SftpFilenameEncoding | undefined,
     targetPath: string,
+    published: LocalPublishedFileIdentity,
   ): Promise<void> => {
     const key = sourceKey(endpointKey, sourcePath, encoding);
     if (!key) return;
@@ -49,6 +50,8 @@ export function useSftpQuickDownloadTargets() {
       const parentIdentity = filesystemIdentity(parent);
       const targetIdentity = filesystemIdentity(target);
       if (!parentIdentity || !targetIdentity
+        || target.dev !== published.dev || target.ino !== published.ino
+        || target.birthtimeNs !== published.birthtimeNs
         || !validTimestamp(parent.birthtimeNs)
         || !validTimestamp(target.birthtimeNs)
         || !validTimestamp(target.ctimeNs)) return;

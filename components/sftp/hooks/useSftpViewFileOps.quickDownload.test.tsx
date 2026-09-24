@@ -24,6 +24,7 @@ test("quick download reuses only the exact target selected for the same remote f
   const fileInodes = new Map<string, number>();
   const fileBirthtimes = new Map<string, string>();
   let nextFileInode = 1000;
+  let replaceAfterPublication = false;
   const existingDirectories = new Set(["/downloads", "/batch"]);
   const realParents = new Map([["/downloads", "/downloads"], ["/batch", "/batch"]]);
   const parentInodes = new Map([["/downloads", 100], ["/batch", 200]]);
@@ -45,6 +46,7 @@ test("quick download reuses only the exact target selected for the same remote f
     "/downloads/re-enabled.txt",
     "/downloads/replaced-reselected.txt",
     "/downloads/reused-inode-reselected.txt",
+    "/downloads/post-publication-reselected.txt",
   ];
   let saveCalls = 0;
   let directoryCalls = 0;
@@ -58,6 +60,7 @@ test("quick download reuses only the exact target selected for the same remote f
     downloadToLocal: async (params: {
       sourcePath: string; targetPath: string; isDirectory: boolean;
       expectedLocalTarget?: LocalDownloadTargetExpectation;
+      onPublishedLocalFile?: (identity: { dev: number; ino: number; birthtimeNs: string }) => void;
     }) => {
       downloads.push(params);
       existingFiles.set(params.targetPath, params.isDirectory ? "directory" : "file");
@@ -65,6 +68,12 @@ test("quick download reuses only the exact target selected for the same remote f
         const inode = nextFileInode++;
         fileInodes.set(params.targetPath, inode);
         fileBirthtimes.set(params.targetPath, String(inode * 1000));
+        params.onPublishedLocalFile?.({ dev: 1, ino: inode, birthtimeNs: String(inode * 1000) });
+        if (replaceAfterPublication) {
+          replaceAfterPublication = false;
+          fileInodes.set(params.targetPath, 555);
+          fileBirthtimes.set(params.targetPath, "555000");
+        }
       }
       return "completed";
     },
@@ -186,6 +195,13 @@ test("quick download reuses only the exact target selected for the same remote f
     await act(async () => { await single(file("report.txt")); });
     assert.equal(saveCalls, 12, "a new file reusing the same inode still opens Save As");
     assert.equal(downloads.at(-1)?.targetPath, "/downloads/reused-inode-reselected.txt");
+
+    replaceAfterPublication = true;
+    await act(async () => { await single(file("report.txt")); });
+    assert.equal(saveCalls, 12, "the published file initially uses the remembered destination");
+    await act(async () => { await single(file("report.txt")); });
+    assert.equal(saveCalls, 13, "a file replaced after publication is never remembered");
+    assert.equal(downloads.at(-1)?.targetPath, "/downloads/post-publication-reselected.txt");
   } finally {
     await act(async () => { renderer?.unmount(); });
     (globalThis as { window?: unknown }).window = oldWindow;

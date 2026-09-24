@@ -6573,7 +6573,12 @@ async function startTransferNow(event, payload, onProgress) {
     });
     sendComplete();
 
-    return { transferId, totalBytes: fileSize };
+    return {
+      transferId,
+      totalBytes: fileSize,
+      ...(targetType === "local" && transfer.publishedLocalIdentity
+        ? { publishedLocalIdentity: transfer.publishedLocalIdentity } : {}),
+    };
   } catch (err) {
     logTransferDiag(transfer, transfer.cancelled ? "cancelled" : "error", {
       transferred: transfer.diagLastTransferred,

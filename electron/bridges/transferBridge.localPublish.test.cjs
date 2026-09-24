@@ -26,11 +26,18 @@ test("remembered download replaces the same verified local file", async (t) => {
   const target = path.join(root, "target");
   fs.writeFileSync(staged, "download");
   fs.writeFileSync(target, "original");
+  let publishedIdentity;
   await bridge._promoteLocalTransferForTests(staged, target, {
     requestedTargetPath: target,
     expectedLocalTarget: rememberedExpectation(root, target),
+    onCommit(identity) { publishedIdentity = identity; },
   });
   assert.equal(fs.readFileSync(target, "utf8"), "download");
+  const publishedStat = fs.lstatSync(target, { bigint: true });
+  assert.deepEqual(publishedIdentity, {
+    dev: Number(publishedStat.dev), ino: Number(publishedStat.ino),
+    size: Number(publishedStat.size), birthtimeNs: String(publishedStat.birthtimeNs),
+  });
 });
 
 test("remembered download does not replace a different file created during transfer", async (t) => {

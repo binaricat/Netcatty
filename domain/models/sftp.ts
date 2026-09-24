@@ -57,6 +57,13 @@ export interface LocalDownloadTargetExpectation {
   targetCtimeNs: string;
 }
 
+/** Identity of the file actually published by a completed local download. */
+export interface LocalPublishedFileIdentity {
+  dev: number;
+  ino: number;
+  birthtimeNs: string;
+}
+
 export interface DirectoryResumeCheckpoint {
   /** Version 1 used a full SHA-256 digest for every appended entry. Version 2
    * keeps the SHA-256 compression state so adding another fixed-width identity

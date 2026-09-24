@@ -3,6 +3,7 @@ import {
   FileConflict,
   FileConflictAction,
   LocalDownloadTargetExpectation,
+  LocalPublishedFileIdentity,
   SftpFilenameEncoding,
   TransferDirection,
   TransferStatus,
@@ -1752,6 +1753,7 @@ export const useSftpTransfers = ({
       sourcePath: string;
       targetPath: string;
       expectedLocalTarget?: LocalDownloadTargetExpectation;
+      onPublishedLocalFile?: (identity: LocalPublishedFileIdentity) => void;
       sftpId: string;
       connectionId: string;
       sourceHostId: string;
@@ -1864,6 +1866,8 @@ export const useSftpTransfers = ({
               sourceEncoding,
               "auto",
               task.id,
+              false,
+              params.onPublishedLocalFile,
             );
           }
 
