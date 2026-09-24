@@ -80,6 +80,17 @@ const parseDirectTarget = (input: string): QuickConnectTarget | null => {
 /** Non-empty pieces of a JumpServer login name. */
 const USERNAME_SEGMENT_RE = /^[^\s@]+$/;
 
+const parseUsernameFromHostToken = (input: string): string | undefined => {
+  const segments = input.trim().split("@");
+  if (segments.length < 2 || segments.length > 4 || !segments[segments.length - 1]) {
+    return undefined;
+  }
+  const usernameSegments = segments.slice(0, -1);
+  return usernameSegments.every((segment) => USERNAME_SEGMENT_RE.test(segment))
+    ? usernameSegments.join("@")
+    : undefined;
+};
+
 /**
  * JumpServer selects the asset from the SSH login name. OpenSSH connects to
  * the final host and sends every preceding segment as one username, including
@@ -92,12 +103,12 @@ const parseJumpServerTarget = (input: string): QuickConnectTarget | null => {
 
   const segments = trimmed.split("@");
   const host = parseDirectTarget(segments[segments.length - 1]);
-  const usernameSegments = segments.slice(0, -1);
-  if (!host || usernameSegments.some((segment) => !USERNAME_SEGMENT_RE.test(segment))) return null;
+  const username = parseUsernameFromHostToken(trimmed);
+  if (!host || !username) return null;
 
   return {
     hostname: host.hostname,
-    username: usernameSegments.join("@"),
+    username,
     port: host.port,
   };
 };
@@ -282,7 +293,9 @@ const parseSshCommand = (input: string): QuickConnectParseResult | null => {
   const base = optionHostname
     ? hostnameOverride && {
         ...hostnameOverride,
-        username: hostTokenTarget?.username ?? hostnameOverride.username,
+        username: hostTokenTarget?.username
+          ?? parseUsernameFromHostToken(hostToken)
+          ?? hostnameOverride.username,
       }
     : hostTokenTarget;
   if (!base) return null;

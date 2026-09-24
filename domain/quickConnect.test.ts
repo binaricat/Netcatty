@@ -68,6 +68,14 @@ test("ssh HostName override keeps the JumpServer login name", () => {
       port: 2222,
     },
   );
+  assert.deepEqual(
+    parseQuickConnectInput("ssh -o HostName=actual-jump.example chenyi@root@10.2.0.8@alias_name"),
+    {
+      hostname: "actual-jump.example",
+      username: "chenyi@root@10.2.0.8",
+      port: undefined,
+    },
+  );
 });
 
 test("ordinary SSH options still resolve single-@ targets", () => {
@@ -77,6 +85,11 @@ test("ordinary SSH options still resolve single-@ targets", () => {
     port: 2200,
   });
   assert.deepEqual(parseQuickConnectInput("ssh -o HostName=actual.example -l deploy alias"), {
+    hostname: "actual.example",
+    username: "deploy",
+    port: undefined,
+  });
+  assert.deepEqual(parseQuickConnectInput("ssh -o HostName=actual.example deploy@alias_name"), {
     hostname: "actual.example",
     username: "deploy",
     port: undefined,
