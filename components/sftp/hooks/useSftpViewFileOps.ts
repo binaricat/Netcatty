@@ -489,9 +489,13 @@ export const useSftpViewFileOps = ({
         // Only an explicit opt-in and this exact remote source may reuse the
         // full path chosen earlier in Save As, including a renamed basename.
         const quickDownloadEnabled = readSftpQuickDownloadEnabled();
+        const endpointKey = sftpRef.current.getConnectionCacheKey?.(pane.connection.id);
+        if (!quickDownloadEnabled) {
+          quickDownloadTargets.forget(endpointKey, resolvedFullPath, pane.filenameEncoding);
+        }
         const rememberedTarget = quickDownloadEnabled
           ? await quickDownloadTargets.findValidTarget(
-              pane.connection.hostId, resolvedFullPath, sftpId, pane.filenameEncoding,
+              endpointKey, resolvedFullPath, sftpId, pane.filenameEncoding,
             )
           : null;
         const targetPath = rememberedTarget ?? await showSaveDialog(file.name);
@@ -514,7 +518,9 @@ export const useSftpViewFileOps = ({
         });
         if (status === "completed") {
           if (!rememberedTarget && quickDownloadEnabled && readSftpQuickDownloadEnabled()) {
-            await quickDownloadTargets.remember(pane.connection.hostId, resolvedFullPath, targetPath);
+            await quickDownloadTargets.remember(
+              endpointKey, resolvedFullPath, pane.filenameEncoding, targetPath,
+            );
           }
           toast.success(`${t("sftp.context.download")}: ${file.name}`, "SFTP");
         } else if (status === "failed") {

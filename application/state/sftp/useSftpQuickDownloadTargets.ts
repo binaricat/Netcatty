@@ -11,8 +11,13 @@ type RememberedTarget = {
 
 const TARGET_LIMIT = 200;
 
-const sourceKey = (hostId: string | undefined, sourcePath: string): string | null =>
-  hostId && sourcePath ? `${hostId}\0${sourcePath}` : null;
+const sourceKey = (
+  endpointKey: string | null | undefined,
+  sourcePath: string,
+  encoding: SftpFilenameEncoding | undefined,
+): string | null => endpointKey && sourcePath
+  ? JSON.stringify([endpointKey, sourcePath, encoding ?? "auto"])
+  : null;
 
 const filesystemIdentity = (stat: SftpStatResult): string | null =>
   stat.dev !== undefined && stat.ino !== undefined ? `${stat.dev}:${stat.ino}` : null;
@@ -22,11 +27,12 @@ export function useSftpQuickDownloadTargets() {
   const targetsRef = useRef(new Map<string, RememberedTarget>());
 
   const remember = useCallback(async (
-    hostId: string | undefined,
+    endpointKey: string | null | undefined,
     sourcePath: string,
+    encoding: SftpFilenameEncoding | undefined,
     targetPath: string,
   ): Promise<void> => {
-    const key = sourceKey(hostId, sourcePath);
+    const key = sourceKey(endpointKey, sourcePath, encoding);
     const bridge = netcattyBridge.get();
     if (!key || !targetPath || !bridge?.statLocal || !bridge.lstatLocal || !bridge.realpathLocal) return;
     try {
@@ -51,12 +57,12 @@ export function useSftpQuickDownloadTargets() {
   }, []);
 
   const findValidTarget = useCallback(async (
-    hostId: string | undefined,
+    endpointKey: string | null | undefined,
     sourcePath: string,
     sftpId: string,
     encoding: SftpFilenameEncoding | undefined,
   ): Promise<string | null> => {
-    const key = sourceKey(hostId, sourcePath);
+    const key = sourceKey(endpointKey, sourcePath, encoding);
     if (!key) return null;
     const targets = targetsRef.current;
     const remembered = targets.get(key);
@@ -91,5 +97,14 @@ export function useSftpQuickDownloadTargets() {
     }
   }, []);
 
-  return useMemo(() => ({ remember, findValidTarget }), [remember, findValidTarget]);
+  const forget = useCallback((
+    endpointKey: string | null | undefined,
+    sourcePath: string,
+    encoding: SftpFilenameEncoding | undefined,
+  ): void => {
+    const key = sourceKey(endpointKey, sourcePath, encoding);
+    if (key) targetsRef.current.delete(key);
+  }, []);
+
+  return useMemo(() => ({ remember, findValidTarget, forget }), [remember, findValidTarget, forget]);
 }

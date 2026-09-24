@@ -28,19 +28,23 @@ test("quick download reuses only the exact target selected for the same remote f
   const savePaths = [
     "/downloads/renamed.txt",
     "/downloads/other.txt",
-    "/downloads/disabled.txt",
     "/downloads/reselected.txt",
     "/downloads/type-reselected.txt",
     "/downloads/moved-reselected.txt",
     "/downloads/parent-restored.txt",
     "/downloads/mount-reselected.txt",
+    "/downloads/other-endpoint.txt",
+    "/downloads/disabled.txt",
+    "/downloads/re-enabled.txt",
   ];
   let saveCalls = 0;
   let directoryCalls = 0;
+  let endpointKey = "host-1:server-a:22:ssh::user:sftp";
   const connection = { id: "conn-1", hostId: "host-1", hostLabel: "Host", currentPath: "/remote", isLocal: false };
   const pane = { connection, filenameEncoding: "auto" };
   const sftpRef = { current: {
     leftPane: pane, rightPane: pane,
+    getConnectionCacheKey: () => endpointKey,
     joinPath: (parent: string, name: string) => `${parent}/${name}`,
     downloadToLocal: async (params: { sourcePath: string; targetPath: string; isDirectory: boolean }) => {
       downloads.push(params);
@@ -103,34 +107,45 @@ test("quick download reuses only the exact target selected for the same remote f
     await act(async () => { await single(file("report.txt"), "/other/report.txt"); });
     assert.equal(saveCalls, 2, "another remote source still opens Save As");
 
-    storage.set(STORAGE_KEY_SFTP_QUICK_DOWNLOAD, "false");
-    await act(async () => { await single(file("report.txt")); });
-    assert.equal(saveCalls, 3, "turning off the option restores Save As");
-    storage.set(STORAGE_KEY_SFTP_QUICK_DOWNLOAD, "true");
-
     existingFiles.delete("/downloads/renamed.txt");
     await act(async () => { await single(file("report.txt")); });
-    assert.equal(saveCalls, 4, "a deleted target returns to Save As");
+    assert.equal(saveCalls, 3, "a deleted target returns to Save As");
 
     existingFiles.set("/downloads/reselected.txt", "directory");
     await act(async () => { await single(file("report.txt")); });
-    assert.equal(saveCalls, 5, "a target that changed type returns to Save As");
+    assert.equal(saveCalls, 4, "a target that changed type returns to Save As");
 
     realParents.set("/downloads", "/different-mount");
     await act(async () => { await single(file("report.txt")); });
-    assert.equal(saveCalls, 6, "a redirected parent returns to Save As");
+    assert.equal(saveCalls, 5, "a redirected parent returns to Save As");
 
     realParents.set("/downloads", "/downloads");
     await act(async () => { await single(file("report.txt")); });
-    assert.equal(saveCalls, 7);
+    assert.equal(saveCalls, 6);
     parentInodes.set("/downloads", 101);
     await act(async () => { await single(file("report.txt")); });
-    assert.equal(saveCalls, 8, "a changed mount beneath the same path returns to Save As");
+    assert.equal(saveCalls, 7, "a changed mount beneath the same path returns to Save As");
 
     await act(async () => { await single(file("folder", "directory")); });
     await act(async () => { await batch([file("a"), file("b")]); });
     assert.equal(directoryCalls, 2, "folder and batch downloads still pick a directory");
     assert.equal(downloads.at(-1)?.targetPath, "/batch/b");
+
+    endpointKey = "host-1:server-b:22:ssh::user:sftp";
+    await act(async () => { await single(file("report.txt")); });
+    assert.equal(saveCalls, 8, "another endpoint with the same host ID still opens Save As");
+    endpointKey = "host-1:server-a:22:ssh::user:sftp";
+    await act(async () => { await single(file("report.txt")); });
+    assert.equal(saveCalls, 8, "the original endpoint retains only its own target");
+    assert.equal(downloads.at(-1)?.targetPath, "/downloads/mount-reselected.txt");
+
+    storage.set(STORAGE_KEY_SFTP_QUICK_DOWNLOAD, "false");
+    await act(async () => { await single(file("report.txt")); });
+    assert.equal(saveCalls, 9, "turning off the option restores Save As");
+    storage.set(STORAGE_KEY_SFTP_QUICK_DOWNLOAD, "true");
+    await act(async () => { await single(file("report.txt")); });
+    assert.equal(saveCalls, 10, "the old target is forgotten while the option is disabled");
+    assert.equal(downloads.at(-1)?.targetPath, "/downloads/re-enabled.txt");
   } finally {
     await act(async () => { renderer?.unmount(); });
     (globalThis as { window?: unknown }).window = oldWindow;
