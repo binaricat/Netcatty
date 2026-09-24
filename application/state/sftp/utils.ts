@@ -306,6 +306,8 @@ export function joinTransferTargetPath(
     if (parts.some((part) => (
       part.includes("\\")
       || part.includes(":")
+      || /[<>"|?*]/.test(part)
+      || Array.from(part).some((char) => char.charCodeAt(0) < 32)
       || /[. ]$/.test(part)
       || isWindowsReservedDeviceName(part)
     ))) return unsafe();

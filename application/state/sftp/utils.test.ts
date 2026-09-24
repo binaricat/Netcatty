@@ -30,6 +30,12 @@ test("directory targets cannot escape the selected local root", () => {
     ".. ",
     ". ",
     "safe.txt:alternate-stream",
+    "question?.txt",
+    "star*.txt",
+    "quote\".txt",
+    "less<greater>.txt",
+    "pipe|.txt",
+    "control\u0001.txt",
     // Win32 reserved device names reject downloads that would target a
     // device path instead of a regular file.
     "NUL",
@@ -49,6 +55,7 @@ test("directory targets cannot escape the selected local root", () => {
     joinTransferTargetPath("/srv/downloads", "NUL"),
     "/srv/downloads/NUL",
   );
+  assert.equal(joinTransferTargetPath("/srv/downloads", "question?.txt"), "/srv/downloads/question?.txt");
   assert.equal(
     joinTransferTargetPath(windowsRoot, "nested/report.txt"),
     "C:\\Users\\alice\\Downloads\\folder\\nested\\report.txt",

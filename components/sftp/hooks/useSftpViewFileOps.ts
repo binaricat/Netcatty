@@ -2,10 +2,8 @@ import { useCallback, useRef, useState } from "react";
 import type { SftpFileEntry } from "../../../types";
 import type { TransferStatus } from "../../../domain/models";
 import { getParentPath, joinTransferTargetPath } from "../../../application/state/sftp/utils";
-import {
-  readSftpQuickDownloadDir,
-  rememberSftpLastDownloadDir,
-} from "../../../application/state/sftp/quickDownloadPreference";
+import { readSftpQuickDownloadEnabled } from "../../../application/state/sftp/quickDownloadPreference";
+import { useSftpQuickDownloadTargets } from "../../../application/state/sftp/useSftpQuickDownloadTargets";
 import {
   DEFAULT_SFTP_FILE_TRANSFER_CONCURRENCY,
   runBoundedConcurrency,
@@ -26,25 +24,6 @@ import { assertSftpFileFitsBuiltinEditor } from "../sftpEditorFileLimits";
 const LOCAL_BLOB_DOWNLOAD_CONCURRENCY = 1;
 
 /**
- * A remembered quick-download directory can go stale (unmounted network
- * share, deleted folder). Validate it is still a directory before letting
- * quick download bypass the native picker; otherwise fall back to the
- * picker so the transfer bridge never writes into a path that no longer
- * exists (or under a missing mount point).
- */
-const resolveQuickDownloadDir = async (): Promise<string | null> => {
-  const dir = readSftpQuickDownloadDir();
-  if (!dir) return null;
-  try {
-    const stat = await netcattyBridge.get()?.statLocal?.(dir);
-    if (stat?.type === "directory") return dir;
-  } catch (error) {
-    logger.warn("[SftpView] Remembered quick-download directory is no longer usable:", error);
-  }
-  return null;
-};
-
-/**
  * Multi-select roots each start their own interleaved folder walk / session
  * work. Bound them so many selected directories cannot stampede the scheduler.
  */
@@ -61,6 +40,7 @@ export const useSftpViewFileOps = ({
   selectDirectory,
   getSftpIdForConnection,
 }: UseSftpViewFileOpsParams): UseSftpViewFileOpsResult => {
+  const quickDownloadTargets = useSftpQuickDownloadTargets();
   const [permissionsState, setPermissionsState] = useState<{
     file: SftpFileEntry;
     side: "left" | "right";
@@ -456,12 +436,7 @@ export const useSftpViewFileOps = ({
 
         // For remote SFTP files/directories, use transfer-center downloads
         // (dedicated pool sessions via downloadToLocal).
-        // Quick download skips the native pickers and writes straight into the
-        // remembered download directory (validated to still exist); existing
-        // files still surface the in-app conflict prompt (Replace / Keep Both /
-        // Skip).
-        const quickDownloadDir = await resolveQuickDownloadDir();
-        if (!getSftpIdForConnection || (!showSaveDialog && !quickDownloadDir)) {
+        if (!getSftpIdForConnection || !showSaveDialog) {
           toast.error(t("sftp.error.downloadFailed"), "SFTP");
           return;
         }
@@ -472,20 +447,15 @@ export const useSftpViewFileOps = ({
         }
 
         if (isDirectory) {
-          let selectedDirectory = quickDownloadDir;
-          if (!selectedDirectory) {
-            if (!selectDirectory) {
-              toast.error(t("sftp.error.downloadFailed"), "SFTP");
-              return;
-            }
-            selectedDirectory = await selectDirectory(t("sftp.context.download"));
-            rememberSftpLastDownloadDir(selectedDirectory);
+          if (!selectDirectory) {
+            toast.error(t("sftp.error.downloadFailed"), "SFTP");
+            return;
           }
+          const selectedDirectory = await selectDirectory(t("sftp.context.download"));
           if (!selectedDirectory) return;
 
           // The directory name comes from the remote server and may contain
-          // Windows-unsafe segments (e.g. "..\Startup\payload"); the guarded
-          // join prevents escaping the selected/remembered download directory.
+          // Windows-unsafe segments (e.g. "..\Startup\payload").
           const targetPath = joinTransferTargetPath(selectedDirectory, file.name);
 
           try {
@@ -516,22 +486,16 @@ export const useSftpViewFileOps = ({
 
           return;
         }
-        // Quick download goes straight to the remembered directory; otherwise
-        // show the save dialog to get target path.
-        let targetPath: string | null = quickDownloadDir
-          // The filename comes from the remote server and may contain
-          // Windows-unsafe segments (e.g. "..\foo\bar"); the guarded join
-          // prevents escaping the remembered quick-download directory.
-          ? joinTransferTargetPath(quickDownloadDir, file.name)
+        // Only an explicit opt-in and this exact remote source may reuse the
+        // full path chosen earlier in Save As, including a renamed basename.
+        const quickDownloadEnabled = readSftpQuickDownloadEnabled();
+        const rememberedTarget = quickDownloadEnabled
+          ? await quickDownloadTargets.findValidTarget(
+              pane.connection.hostId, resolvedFullPath, sftpId, pane.filenameEncoding,
+            )
           : null;
-        if (!targetPath) {
-          targetPath = await showSaveDialog(file.name);
-          if (!targetPath) {
-            // User cancelled
-            return;
-          }
-          rememberSftpLastDownloadDir(getParentPath(targetPath));
-        }
+        const targetPath = rememberedTarget ?? await showSaveDialog(file.name);
+        if (!targetPath) return;
 
         const fileSize = typeof file.size === "string" ? parseInt(file.size, 10) || 0 : (file.size || 0);
         // Route through downloadToLocal so FileZilla-style transfer pool
@@ -549,6 +513,9 @@ export const useSftpViewFileOps = ({
           totalBytes: fileSize,
         });
         if (status === "completed") {
+          if (!rememberedTarget && quickDownloadEnabled && readSftpQuickDownloadEnabled()) {
+            await quickDownloadTargets.remember(pane.connection.hostId, resolvedFullPath, targetPath);
+          }
           toast.success(`${t("sftp.context.download")}: ${file.name}`, "SFTP");
         } else if (status === "failed") {
           toast.error(`${t("sftp.error.downloadFailed")}: ${file.name}`, "SFTP");
@@ -568,6 +535,7 @@ export const useSftpViewFileOps = ({
       showSaveDialog,
       selectDirectory,
       getSftpIdForConnection,
+      quickDownloadTargets,
     ],
   );
 
@@ -654,11 +622,7 @@ export const useSftpViewFileOps = ({
         return;
       }
 
-      // Quick download reuses the remembered directory (validated to still
-      // exist) instead of asking each batch; the in-app conflict prompt still
-      // guards existing files.
-      const quickDownloadDir = await resolveQuickDownloadDir();
-      if (!getSftpIdForConnection || (!selectDirectory && !quickDownloadDir)) {
+      if (!getSftpIdForConnection || !selectDirectory) {
         toast.error(t("sftp.error.downloadFailed"), "SFTP");
         return;
       }
@@ -669,11 +633,7 @@ export const useSftpViewFileOps = ({
         return;
       }
 
-      let selectedDirectory = quickDownloadDir;
-      if (!selectedDirectory) {
-        selectedDirectory = await selectDirectory?.(t("sftp.context.download")) ?? null;
-        rememberSftpLastDownloadDir(selectedDirectory);
-      }
+      const selectedDirectory = await selectDirectory(t("sftp.context.download"));
       if (!selectedDirectory) return;
 
       // Bound root jobs: each directory root walks and transfers independently,

@@ -219,8 +219,8 @@ export const zhTWTerminalMessages: Messages = {
   'settings.sftp.skipUnchanged.enable': '跳過未改檔案',
   'settings.sftp.skipUnchanged.enableDesc': '當目標檔案的大小與修改時間已與來源一致時跳過傳輸（類似 rsync）。替換到暫存路徑時自動停用。',
 
-  'settings.sftp.quickDownload.enable': '快速下載（預設覆蓋）',
-  'settings.sftp.quickDownload.enableDesc': '下載時不再彈出「另存為」對話框，直接儲存到上次使用的目錄並覆蓋同名檔案。已存在的檔案仍會透過傳輸衝突提示確認（替換 / 保留兩者 / 跳過），同一工作階段內選擇「套用到全部」後不再重複詢問。',
+  'settings.sftp.quickDownload.enable': '重複下載時直接取代',
+  'settings.sftp.quickDownload.enableDesc': '選定遠端檔案的儲存位置後，在目前 SFTP 檢視再次下載同一檔案，會直接取代上次選定的完整路徑，不再確認。首次、其他檔案、資料夾及批次下載仍需選擇位置。',
 
   // Settings > Terminal
   'settings.terminal.section.theme': '終端主題',
