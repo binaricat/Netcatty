@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import React from "react";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
-import type { SftpFileEntry } from "../../../types";
-import type { SftpStateApi } from "../../../application/state/useSftpState";
-import { useSftpViewFileOps } from "./useSftpViewFileOps";
+import type { SftpFileEntry } from "../../types";
+import type { SftpStateApi } from "../../application/state/useSftpState";
+import { useSftpViewFileOps } from "./hooks/useSftpViewFileOps";
 
 const file = (
   name: string, size: number, type: SftpFileEntry["type"] = "file",
