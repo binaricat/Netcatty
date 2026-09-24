@@ -695,14 +695,19 @@ async function applySyncableSettings(
   if (settings.accentMode != null) localStorageAdapter.writeString(STORAGE_KEY_ACCENT_MODE, settings.accentMode);
   if (settings.customAccent != null) {
     const existing = parseCustomAccentRecord(localStorageAdapter.readString(STORAGE_KEY_COLOR));
-    localStorageAdapter.writeString(
-      STORAGE_KEY_COLOR,
-      serializeCustomAccentRecord({
-        color: parseCustomAccentRecord(settings.customAccent).color,
-        // Bump so peer windows' version gates accept the synced value.
-        version: Math.max(existing.version, 0) + 1,
-      }),
-    );
+    const incomingColor = parseCustomAccentRecord(settings.customAccent).color;
+    // Only write if the color actually changed to avoid triggering a
+    // LOCAL_STORAGE_ADAPTER_CHANGED_EVENT that would start a redundant sync cycle.
+    if (incomingColor !== existing.color) {
+      localStorageAdapter.writeString(
+        STORAGE_KEY_COLOR,
+        serializeCustomAccentRecord({
+          color: incomingColor,
+          // Bump so peer windows' version gates accept the synced value.
+          version: Math.max(existing.version, 0) + 1,
+        }),
+      );
+    }
   }
   if (settings.uiFontFamilyId != null) localStorageAdapter.writeString(STORAGE_KEY_UI_FONT_FAMILY, settings.uiFontFamilyId);
   if (settings.uiLanguage != null) localStorageAdapter.writeString(STORAGE_KEY_UI_LANGUAGE, settings.uiLanguage);
@@ -727,15 +732,19 @@ async function applySyncableSettings(
     const existing = parseTerminalFontSizeRecord(
       localStorageAdapter.readString(STORAGE_KEY_TERM_FONT_SIZE),
     );
-    localStorageAdapter.writeString(
-      STORAGE_KEY_TERM_FONT_SIZE,
-      serializeTerminalFontSizeRecord({
-        fontSize: settings.terminalFontSize,
-        // Bump so peer windows' version gates accept the synced value.
-        version: nextTerminalFontSizeSyncVersion(existing.version, existing.version),
-        origin: 'sync-payload',
-      }),
-    );
+    // Only write if the font size actually changed to avoid triggering a
+    // redundant sync cycle via LOCAL_STORAGE_ADAPTER_CHANGED_EVENT.
+    if (settings.terminalFontSize !== existing.fontSize) {
+      localStorageAdapter.writeString(
+        STORAGE_KEY_TERM_FONT_SIZE,
+        serializeTerminalFontSizeRecord({
+          fontSize: settings.terminalFontSize,
+          // Bump so peer windows' version gates accept the synced value.
+          version: nextTerminalFontSizeSyncVersion(existing.version, existing.version),
+          origin: 'sync-payload',
+        }),
+      );
+    }
   }
   if (settings.terminalSidePanelAutoOpen != null) {
     localStorageAdapter.writeBoolean(STORAGE_KEY_TERMINAL_SIDE_PANEL_AUTO_OPEN, settings.terminalSidePanelAutoOpen);
@@ -792,14 +801,20 @@ async function applySyncableSettings(
     const previous = parseCustomKeyBindingsStorageRecord(
       localStorageAdapter.readString(STORAGE_KEY_CUSTOM_KEY_BINDINGS),
     );
-    localStorageAdapter.writeString(
-      STORAGE_KEY_CUSTOM_KEY_BINDINGS,
-      serializeCustomKeyBindingsStorageRecord({
-        version: nextCustomKeyBindingsSyncVersion(previous?.version || 0),
-        origin: CUSTOM_KEY_BINDINGS_SYNC_PAYLOAD_ORIGIN,
-        bindings: settings.customKeyBindings,
-      }),
-    );
+    // Only write if bindings actually changed to avoid triggering a
+    // redundant sync cycle via LOCAL_STORAGE_ADAPTER_CHANGED_EVENT.
+    const incomingBindings = JSON.stringify(settings.customKeyBindings);
+    const existingBindings = JSON.stringify(previous?.bindings ?? []);
+    if (incomingBindings !== existingBindings) {
+      localStorageAdapter.writeString(
+        STORAGE_KEY_CUSTOM_KEY_BINDINGS,
+        serializeCustomKeyBindingsStorageRecord({
+          version: nextCustomKeyBindingsSyncVersion(previous?.version || 0),
+          origin: CUSTOM_KEY_BINDINGS_SYNC_PAYLOAD_ORIGIN,
+          bindings: settings.customKeyBindings,
+        }),
+      );
+    }
   }
 
   // Editor
