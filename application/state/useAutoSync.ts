@@ -723,6 +723,11 @@ export const useAutoSync = (config: AutoSyncConfig) => {
               }
             }
           } catch (error) {
+            // Inspection of an earlier provider may throw while later
+            // providers are still reachable; clearing the flag here matches
+            // the warning below and lets the full join cycle run so those
+            // providers are not silently skipped on this tick.
+            convergentRemoteUnchanged = false;
             console.warn(
               '[AutoSync] Convergent remote-unchanged pre-check failed; falling back to a full sync cycle:',
               error,
