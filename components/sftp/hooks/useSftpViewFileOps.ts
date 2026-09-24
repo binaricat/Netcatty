@@ -542,7 +542,10 @@ export const useSftpViewFileOps = ({
           expectedLocalTarget: rememberedTarget ? {
             parentRealPath: rememberedTarget.parentRealPath,
             parentIdentity: rememberedTarget.parentIdentity,
+            parentBirthtimeNs: rememberedTarget.parentBirthtimeNs,
             targetIdentity: rememberedTarget.targetIdentity,
+            targetBirthtimeNs: rememberedTarget.targetBirthtimeNs,
+            targetCtimeNs: rememberedTarget.targetCtimeNs,
           } : undefined,
           sftpId,
           connectionId: pane.connection.id,

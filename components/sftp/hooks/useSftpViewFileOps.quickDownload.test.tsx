@@ -22,6 +22,7 @@ test("quick download reuses only the exact target selected for the same remote f
   const storage = new Map<string, string>([[STORAGE_KEY_SFTP_QUICK_DOWNLOAD, "true"]]);
   const existingFiles = new Map<string, "file" | "directory" | "symlink">();
   const fileInodes = new Map<string, number>();
+  const fileBirthtimes = new Map<string, string>();
   let nextFileInode = 1000;
   const existingDirectories = new Set(["/downloads", "/batch"]);
   const realParents = new Map([["/downloads", "/downloads"], ["/batch", "/batch"]]);
@@ -43,6 +44,7 @@ test("quick download reuses only the exact target selected for the same remote f
     "/downloads/disabled.txt",
     "/downloads/re-enabled.txt",
     "/downloads/replaced-reselected.txt",
+    "/downloads/reused-inode-reselected.txt",
   ];
   let saveCalls = 0;
   let directoryCalls = 0;
@@ -59,7 +61,11 @@ test("quick download reuses only the exact target selected for the same remote f
     }) => {
       downloads.push(params);
       existingFiles.set(params.targetPath, params.isDirectory ? "directory" : "file");
-      if (!params.isDirectory) fileInodes.set(params.targetPath, nextFileInode++);
+      if (!params.isDirectory) {
+        const inode = nextFileInode++;
+        fileInodes.set(params.targetPath, inode);
+        fileBirthtimes.set(params.targetPath, String(inode * 1000));
+      }
       return "completed";
     },
   } as unknown as SftpStateApi };
@@ -71,12 +77,13 @@ test("quick download reuses only the exact target selected for the same remote f
   (globalThis as { window?: unknown }).window = { netcatty: {
     statLocal: async (path: string) => {
       if (!existingDirectories.has(path)) throw new Error("ENOENT");
-      return { type: "directory", dev: 1, ino: parentInodes.get(path) };
+      return { type: "directory", dev: 1, ino: parentInodes.get(path), birthtimeNs: String(parentInodes.get(path)! * 1000) };
     },
     lstatLocal: async (path: string) => {
       const type = existingFiles.get(path);
       if (!type) throw new Error("ENOENT");
-      return { type, dev: 1, ino: fileInodes.get(path) };
+      return { type, dev: 1, ino: fileInodes.get(path),
+        birthtimeNs: fileBirthtimes.get(path), ctimeNs: fileBirthtimes.get(path) };
     },
     realpathLocal: async (path: string) => {
       const real = realParents.get(path);
@@ -123,6 +130,7 @@ test("quick download reuses only the exact target selected for the same remote f
     ]);
     assert.equal(downloads[0].expectedLocalTarget, undefined);
     assert.equal(downloads[1].expectedLocalTarget?.targetIdentity, "1:1000");
+    assert.equal(downloads[1].expectedLocalTarget?.targetBirthtimeNs, "1000000");
     assert.equal(downloads[2].expectedLocalTarget?.targetIdentity, "1:1001");
 
     await act(async () => { await single(file("report.txt"), "/other/report.txt"); });
@@ -172,6 +180,12 @@ test("quick download reuses only the exact target selected for the same remote f
     await act(async () => { await single(file("report.txt")); });
     assert.equal(saveCalls, 11, "a different file at the remembered path returns to Save As");
     assert.equal(downloads.at(-1)?.targetPath, "/downloads/replaced-reselected.txt");
+
+    const reusedPath = "/downloads/replaced-reselected.txt";
+    fileBirthtimes.set(reusedPath, "9999999");
+    await act(async () => { await single(file("report.txt")); });
+    assert.equal(saveCalls, 12, "a new file reusing the same inode still opens Save As");
+    assert.equal(downloads.at(-1)?.targetPath, "/downloads/reused-inode-reselected.txt");
   } finally {
     await act(async () => { renderer?.unmount(); });
     (globalThis as { window?: unknown }).window = oldWindow;

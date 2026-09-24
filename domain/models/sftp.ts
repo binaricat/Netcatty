@@ -51,7 +51,10 @@ export type TransferControlKind = 'stream' | 'compressed-upload';
 export interface LocalDownloadTargetExpectation {
   parentRealPath: string;
   parentIdentity: string;
+  parentBirthtimeNs: string;
   targetIdentity: string;
+  targetBirthtimeNs: string;
+  targetCtimeNs: string;
 }
 
 export interface DirectoryResumeCheckpoint {

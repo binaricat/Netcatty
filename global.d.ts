@@ -192,6 +192,9 @@ declare global {
     /** Local-only filesystem identity; undefined for remote SFTP stats. */
     dev?: number;
     ino?: number;
+    /** Local-only nanosecond timestamps used to reject reused inode numbers. */
+    birthtimeNs?: string;
+    ctimeNs?: string;
   }
 
   interface SftpTransferProgress {

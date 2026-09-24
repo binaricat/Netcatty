@@ -1040,13 +1040,16 @@ function stableLocalFileIdentity(statLike) {
 async function assertExpectedLocalDownloadTarget(requestedPath, expected, inspectedTarget) {
   if (!expected) return;
   const validIdentity = (value) => typeof value === "string" && /^\d+:\d+$/.test(value);
+  const validTimestamp = (value) => typeof value === "string" && /^[1-9]\d*$/.test(value);
   if (!validIdentity(expected.targetIdentity) || !validIdentity(expected.parentIdentity)
+    || !validTimestamp(expected.targetBirthtimeNs) || !validTimestamp(expected.targetCtimeNs)
+    || !validTimestamp(expected.parentBirthtimeNs)
     || typeof expected.parentRealPath !== "string" || !expected.parentRealPath) {
     throw new Error("Invalid remembered local download target identity");
   }
   const parentPath = path.dirname(requestedPath);
   const [parentStat, parentRealPath, target] = await Promise.all([
-    fs.promises.stat(parentPath),
+    fs.promises.stat(parentPath, { bigint: true }),
     fs.promises.realpath(parentPath),
     inspectedTarget ?? inspectLocalPromotionTarget(requestedPath),
   ]);
@@ -1054,7 +1057,10 @@ async function assertExpectedLocalDownloadTarget(requestedPath, expected, inspec
   const targetIdentity = target.stableIdentity?.split(":").slice(0, 2).join(":");
   if (!parentStat.isDirectory() || parentRealPath !== expected.parentRealPath
     || parentIdentity !== expected.parentIdentity
-    || targetIdentity !== expected.targetIdentity) {
+    || String(parentStat.birthtimeNs) !== expected.parentBirthtimeNs
+    || targetIdentity !== expected.targetIdentity
+    || target.birthtimeNs !== expected.targetBirthtimeNs
+    || target.ctimeNs !== expected.targetCtimeNs) {
     throw new Error("Remembered local download target changed before replacement");
   }
 }
@@ -1349,7 +1355,7 @@ async function inspectLocalPromotionTarget(targetPath) {
     const candidatePath = path.join(currentPath, nextPart);
     let targetLstat;
     try {
-      targetLstat = await fs.promises.lstat(candidatePath);
+      targetLstat = await fs.promises.lstat(candidatePath, { bigint: true });
     } catch (error) {
       if (error?.code !== "ENOENT") throw error;
       return {
@@ -1397,8 +1403,10 @@ async function inspectLocalPromotionTarget(targetPath) {
     }
     return {
       promotionTargetPath: candidatePath,
-      existingMode: targetLstat.mode & 0o7777,
+      existingMode: Number(targetLstat.mode) & 0o7777,
       stableIdentity: stableLocalFileIdentity(targetLstat),
+      birthtimeNs: String(targetLstat.birthtimeNs),
+      ctimeNs: String(targetLstat.ctimeNs),
       targetIdentity: [
         targetLstat.dev,
         targetLstat.ino,
@@ -1409,7 +1417,7 @@ async function inspectLocalPromotionTarget(targetPath) {
     };
   }
 
-  const rootStat = await fs.promises.lstat(currentPath);
+  const rootStat = await fs.promises.lstat(currentPath, { bigint: true });
   if (!rootStat.isFile()) {
     const error = new Error(`Local download target is not a regular file: ${currentPath}`);
     error.code = rootStat.isDirectory() ? "EISDIR" : "EINVAL";
@@ -1417,8 +1425,10 @@ async function inspectLocalPromotionTarget(targetPath) {
   }
   return {
     promotionTargetPath: currentPath,
-    existingMode: rootStat.mode & 0o7777,
+    existingMode: Number(rootStat.mode) & 0o7777,
     stableIdentity: stableLocalFileIdentity(rootStat),
+    birthtimeNs: String(rootStat.birthtimeNs),
+    ctimeNs: String(rootStat.ctimeNs),
     targetIdentity: [
       rootStat.dev,
       rootStat.ino,

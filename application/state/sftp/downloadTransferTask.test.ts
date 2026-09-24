@@ -15,7 +15,10 @@ test("download tasks retain the remote host needed for reconnecting after the or
     expectedLocalTarget: {
       parentRealPath: "/local",
       parentIdentity: "1:2",
+      parentBirthtimeNs: "100",
       targetIdentity: "1:3",
+      targetBirthtimeNs: "200",
+      targetCtimeNs: "201",
     },
     sourceConnectionId: "connection-1",
     sourceHostId: "host-1",

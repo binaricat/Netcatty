@@ -6,6 +6,19 @@ const path = require("node:path");
 const bridge = require("./transferBridge.cjs");
 const temp = require("./tempDirBridge.cjs");
 
+function rememberedExpectation(parent, target) {
+  const parentStat = fs.statSync(parent, { bigint: true });
+  const targetStat = fs.lstatSync(target, { bigint: true });
+  return {
+    parentRealPath: fs.realpathSync(parent),
+    parentIdentity: `${parentStat.dev}:${parentStat.ino}`,
+    parentBirthtimeNs: String(parentStat.birthtimeNs),
+    targetIdentity: `${targetStat.dev}:${targetStat.ino}`,
+    targetBirthtimeNs: String(targetStat.birthtimeNs),
+    targetCtimeNs: String(targetStat.ctimeNs),
+  };
+}
+
 test("remembered download replaces the same verified local file", async (t) => {
   const root = fs.mkdtempSync(`${temp.getTempFilePath("remembered-publish")}-`);
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -13,15 +26,9 @@ test("remembered download replaces the same verified local file", async (t) => {
   const target = path.join(root, "target");
   fs.writeFileSync(staged, "download");
   fs.writeFileSync(target, "original");
-  const parentStat = fs.statSync(root);
-  const originalStat = fs.lstatSync(target);
   await bridge._promoteLocalTransferForTests(staged, target, {
     requestedTargetPath: target,
-    expectedLocalTarget: {
-      parentRealPath: fs.realpathSync(root),
-      parentIdentity: `${parentStat.dev}:${parentStat.ino}`,
-      targetIdentity: `${originalStat.dev}:${originalStat.ino}`,
-    },
+    expectedLocalTarget: rememberedExpectation(root, target),
   });
   assert.equal(fs.readFileSync(target, "utf8"), "download");
 });
@@ -33,13 +40,7 @@ test("remembered download does not replace a different file created during trans
   const target = path.join(root, "target");
   fs.writeFileSync(staged, "download");
   fs.writeFileSync(target, "original");
-  const parentStat = fs.statSync(root);
-  const originalStat = fs.lstatSync(target);
-  const expectedLocalTarget = {
-    parentRealPath: fs.realpathSync(root),
-    parentIdentity: `${parentStat.dev}:${parentStat.ino}`,
-    targetIdentity: `${originalStat.dev}:${originalStat.ino}`,
-  };
+  const expectedLocalTarget = rememberedExpectation(root, target);
 
   fs.renameSync(target, path.join(root, "moved-original"));
   fs.writeFileSync(target, "unrelated");
@@ -54,6 +55,22 @@ test("remembered download does not replace a different file created during trans
   assert.equal(fs.readFileSync(path.join(root, "moved-original"), "utf8"), "original");
 });
 
+test("remembered download rejects a reused file number with a different creation time", async (t) => {
+  const root = fs.mkdtempSync(`${temp.getTempFilePath("remembered-inode")}-`);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const staged = path.join(root, "staged");
+  const target = path.join(root, "target");
+  fs.writeFileSync(staged, "download");
+  fs.writeFileSync(target, "unrelated");
+  const expectedLocalTarget = rememberedExpectation(root, target);
+  expectedLocalTarget.targetBirthtimeNs = String(BigInt(expectedLocalTarget.targetBirthtimeNs) - 1n);
+  await assert.rejects(() => bridge._promoteLocalTransferForTests(staged, target, {
+    requestedTargetPath: target,
+    expectedLocalTarget,
+  }), /Remembered local download target changed/);
+  assert.equal(fs.readFileSync(target, "utf8"), "unrelated");
+});
+
 test("remembered download rejects a replaced parent even when the file is the same", async (t) => {
   const root = fs.mkdtempSync(`${temp.getTempFilePath("remembered-parent")}-`);
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -64,13 +81,7 @@ test("remembered download rejects a replaced parent even when the file is the sa
   fs.mkdirSync(parent);
   fs.writeFileSync(target, "original");
   fs.writeFileSync(staged, "download");
-  const parentStat = fs.statSync(parent);
-  const targetStat = fs.lstatSync(target);
-  const expectedLocalTarget = {
-    parentRealPath: fs.realpathSync(parent),
-    parentIdentity: `${parentStat.dev}:${parentStat.ino}`,
-    targetIdentity: `${targetStat.dev}:${targetStat.ino}`,
-  };
+  const expectedLocalTarget = rememberedExpectation(parent, target);
 
   fs.renameSync(parent, movedParent);
   fs.mkdirSync(parent);

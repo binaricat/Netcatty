@@ -328,16 +328,20 @@ async function mkdirLocal(event, payload) {
  * Resume and upload sizing rely on target bytes, not the link node.
  */
 async function statLocal(event, payload) {
-  const stat = await fs.promises.stat(payload.path);
+  const stat = await fs.promises.stat(payload.path, { bigint: true });
   return {
     name: path.basename(payload.path),
     type: stat.isDirectory() ? "directory" : "file",
-    size: stat.size,
-    lastModified: stat.mtime.getTime(),
+    size: Number(stat.size),
+    lastModified: Math.round(Number(stat.mtimeNs) / 1e6),
     // Filesystem identity for same-pane paste guards: realpath cannot see
     // through bind mounts, but dev/ino name the same directory regardless of
     // the mount path used. Windows dev/ino are unreliable, so omit them there.
-    ...(process.platform === "win32" ? {} : { dev: stat.dev, ino: stat.ino }),
+    ...(process.platform === "win32" ? {} : {
+      dev: Number(stat.dev), ino: Number(stat.ino),
+      birthtimeNs: stat.birthtimeNs > 0n ? String(stat.birthtimeNs) : undefined,
+      ctimeNs: stat.ctimeNs > 0n ? String(stat.ctimeNs) : undefined,
+    }),
   };
 }
 
@@ -347,14 +351,18 @@ async function statLocal(event, payload) {
  * writing through it via writeLocalFile.
  */
 async function lstatLocal(event, payload) {
-  const stat = await fs.promises.lstat(payload.path);
+  const stat = await fs.promises.lstat(payload.path, { bigint: true });
   return {
     name: path.basename(payload.path),
     type: stat.isDirectory() ? "directory" : stat.isSymbolicLink() ? "symlink" : "file",
-    size: stat.size,
-    lastModified: stat.mtime.getTime(),
+    size: Number(stat.size),
+    lastModified: Math.round(Number(stat.mtimeNs) / 1e6),
     // Mirror statLocal so guards comparing identities work with either stat.
-    ...(process.platform === "win32" ? {} : { dev: stat.dev, ino: stat.ino }),
+    ...(process.platform === "win32" ? {} : {
+      dev: Number(stat.dev), ino: Number(stat.ino),
+      birthtimeNs: stat.birthtimeNs > 0n ? String(stat.birthtimeNs) : undefined,
+      ctimeNs: stat.ctimeNs > 0n ? String(stat.ctimeNs) : undefined,
+    }),
   };
 }
 
