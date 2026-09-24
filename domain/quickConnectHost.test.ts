@@ -2,11 +2,32 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   buildQuickConnectHost,
+  isQuickConnectIdentityCompatible,
   isQuickConnectIdentityUsable,
 } from "./quickConnectHost.ts";
 import { resolveHostAuth } from "./sshAuth.ts";
 
 const target = { hostname: "example.com" };
+
+test("JumpServer login only offers identities with the full asset selector", () => {
+  const identity = {
+    id: "jump-user",
+    label: "Jump user",
+    username: "chenyi",
+    authMethod: "password" as const,
+    password: "secret",
+    created: 1,
+  };
+  const jumpTarget = { hostname: "jump.example", username: "chenyi@root@10.2.0.8" };
+  assert.equal(isQuickConnectIdentityCompatible(identity, jumpTarget), false);
+  assert.equal(isQuickConnectIdentityCompatible(
+    { ...identity, username: "other" }, jumpTarget,
+  ), false);
+  assert.equal(isQuickConnectIdentityCompatible(
+    { ...identity, username: jumpTarget.username }, jumpTarget,
+  ), true);
+  assert.equal(isQuickConnectIdentityCompatible(identity, { hostname: "jump.example", username: "chenyi" }), true);
+});
 
 test("quick connect keeps a selected credential preset as the host identity", () => {
   const host = buildQuickConnectHost({

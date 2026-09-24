@@ -21,6 +21,12 @@ export const isQuickConnectIdentityUsable = (
   return Boolean(identity.keyId && keys.some((key) => key.id === identity.keyId));
 };
 
+export const isQuickConnectIdentityCompatible = (
+  identity: Identity,
+  target: QuickConnectTarget,
+): boolean => !target.username?.includes("@")
+  || identity.username === target.username;
+
 type BuildQuickConnectHostInput = {
   id: string;
   createdAt: number;

@@ -70,6 +70,19 @@ test("ssh HostName override keeps the JumpServer login name", () => {
   );
 });
 
+test("ordinary SSH options still resolve single-@ targets", () => {
+  assert.deepEqual(parseQuickConnectInput("ssh -p 2200 deploy@host.example"), {
+    hostname: "host.example",
+    username: "deploy",
+    port: 2200,
+  });
+  assert.deepEqual(parseQuickConnectInput("ssh -o HostName=actual.example -l deploy alias"), {
+    hostname: "actual.example",
+    username: "deploy",
+    port: undefined,
+  });
+});
+
 test("quick connect rejects malformed multi-@ inputs", () => {
   assert.equal(parseQuickConnectInput("a@b@c@d@e"), null);
   assert.equal(parseQuickConnectInput("bad user@10.2.0.8@jump"), null);
