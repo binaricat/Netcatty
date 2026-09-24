@@ -6,12 +6,16 @@ import { getParentPath } from "./utils";
 type RememberedTarget = {
   targetPath: string;
   parentRealPath: string;
+  parentIdentity: string | null;
 };
 
 const TARGET_LIMIT = 200;
 
 const sourceKey = (hostId: string | undefined, sourcePath: string): string | null =>
   hostId && sourcePath ? `${hostId}\0${sourcePath}` : null;
+
+const filesystemIdentity = (stat: SftpStatResult): string | null =>
+  stat.dev !== undefined && stat.ino !== undefined ? `${stat.dev}:${stat.ino}` : null;
 
 /** Each SFTP view remembers only targets that its user selected successfully. */
 export function useSftpQuickDownloadTargets() {
@@ -35,7 +39,7 @@ export function useSftpQuickDownloadTargets() {
       if (parent?.type !== "directory" || target?.type !== "file" || !parentRealPath) return;
       const targets = targetsRef.current;
       targets.delete(key);
-      targets.set(key, { targetPath, parentRealPath });
+      targets.set(key, { targetPath, parentRealPath, parentIdentity: filesystemIdentity(parent) });
       while (targets.size > TARGET_LIMIT) {
         const oldest = targets.keys().next().value;
         if (oldest === undefined) break;
@@ -72,6 +76,8 @@ export function useSftpQuickDownloadTargets() {
         || parent?.type !== "directory"
         || target?.type !== "file"
         || parentRealPath !== remembered.parentRealPath
+        || (remembered.parentIdentity !== null
+          && filesystemIdentity(parent) !== remembered.parentIdentity)
       ) {
         targets.delete(key);
         return null;

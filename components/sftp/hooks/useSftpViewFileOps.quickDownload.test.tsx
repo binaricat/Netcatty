@@ -22,6 +22,7 @@ test("quick download reuses only the exact target selected for the same remote f
   const existingFiles = new Map<string, "file" | "directory" | "symlink">();
   const existingDirectories = new Set(["/downloads", "/batch"]);
   const realParents = new Map([["/downloads", "/downloads"], ["/batch", "/batch"]]);
+  const parentInodes = new Map([["/downloads", 100], ["/batch", 200]]);
   const remoteTypes = new Map<string, "file" | "directory">();
   const downloads: Array<{ sourcePath: string; targetPath: string; isDirectory: boolean }> = [];
   const savePaths = [
@@ -31,6 +32,8 @@ test("quick download reuses only the exact target selected for the same remote f
     "/downloads/reselected.txt",
     "/downloads/type-reselected.txt",
     "/downloads/moved-reselected.txt",
+    "/downloads/parent-restored.txt",
+    "/downloads/mount-reselected.txt",
   ];
   let saveCalls = 0;
   let directoryCalls = 0;
@@ -53,7 +56,7 @@ test("quick download reuses only the exact target selected for the same remote f
   (globalThis as { window?: unknown }).window = { netcatty: {
     statLocal: async (path: string) => {
       if (!existingDirectories.has(path)) throw new Error("ENOENT");
-      return { type: "directory" };
+      return { type: "directory", dev: 1, ino: parentInodes.get(path) };
     },
     lstatLocal: async (path: string) => {
       const type = existingFiles.get(path);
@@ -116,6 +119,13 @@ test("quick download reuses only the exact target selected for the same remote f
     realParents.set("/downloads", "/different-mount");
     await act(async () => { await single(file("report.txt")); });
     assert.equal(saveCalls, 6, "a redirected parent returns to Save As");
+
+    realParents.set("/downloads", "/downloads");
+    await act(async () => { await single(file("report.txt")); });
+    assert.equal(saveCalls, 7);
+    parentInodes.set("/downloads", 101);
+    await act(async () => { await single(file("report.txt")); });
+    assert.equal(saveCalls, 8, "a changed mount beneath the same path returns to Save As");
 
     await act(async () => { await single(file("folder", "directory")); });
     await act(async () => { await batch([file("a"), file("b")]); });
