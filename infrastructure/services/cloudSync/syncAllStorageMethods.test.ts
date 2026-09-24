@@ -932,6 +932,7 @@ test("syncAllProviders skips the upload when the payload already matches the pro
     const manager = {
       masterPassword: "pw",
       adapters: new Map(),
+      providerDecryptSeq: { github: 4 },
       state: {
         securityState: "UNLOCKED",
         providers: {
@@ -987,6 +988,8 @@ test("syncAllProviders skips the upload when the payload already matches the pro
     assert.deepEqual(connections, ["github"]);
     assert.equal(manager.state.syncState, "IDLE");
     assert.equal(manager.state.providers.github.lastSyncVersion, 7);
+    assert.equal(Reflect.get(manager.state.providers.github, "resourceId"), "resource-7");
+    assert.equal(manager.providerDecryptSeq.github, 5);
   } finally {
     EncryptionService.decryptPayload = originalDecryptPayload;
     EncryptionService.encryptPayload = originalEncryptPayload;
@@ -1010,6 +1013,7 @@ test("syncAllProviders skips an identical remote even when its version is behind
     const manager = {
       masterPassword: "pw",
       adapters: new Map(),
+      providerDecryptSeq: { github: 0 },
       state: {
         securityState: "UNLOCKED",
         providers: {
@@ -1075,6 +1079,7 @@ test("syncAllProviders leaves two converged providers idle across repeated cycle
     const manager = {
       masterPassword: "pw",
       adapters: new Map(),
+      providerDecryptSeq: { github: 0, google: 0 },
       state: {
         securityState: "UNLOCKED",
         providers: {

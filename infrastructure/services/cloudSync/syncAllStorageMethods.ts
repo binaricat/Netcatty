@@ -631,6 +631,9 @@ export async function syncAllProvidersImpl(this: any,
                 this.state.remoteUpdatedAt ?? 0,
                 checkedRemoteFile.meta.updatedAt,
               );
+              // Discard any earlier provider-secret decrypt that could write
+              // back a connection without the resource ID or sync version.
+              ++this.providerDecryptSeq[provider];
               // Mirror uploadToProvider's success path: clear the 'syncing'
               // status set during the preflight so the provider (and its
               // manual Sync button) does not stay stuck after a no-op sync.
