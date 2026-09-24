@@ -258,8 +258,16 @@ test("periodic convergent runtime checks skip the join when neither side changed
     checkIndex,
   );
   const gateIndex = source.indexOf("if (options?.periodic === true)", convergentGuardIndex);
+  const allProvidersIndex = source.indexOf(
+    "const convergentProviders = (Object.keys(state.providers) as CloudProvider[])",
+    gateIndex,
+  );
+  const loopIndex = source.indexOf(
+    "for (const provider of convergentProviders)",
+    gateIndex,
+  );
   const baselineIndex = source.indexOf(
-    "manager.loadConvergentProviderBaseline(connectedProvider)",
+    "manager.loadConvergentProviderBaseline(provider)",
     gateIndex,
   );
   const remoteMetaIndex = source.indexOf("baseline.remoteUpdatedAt", gateIndex);
@@ -277,12 +285,18 @@ test("periodic convergent runtime checks skip the join when neither side changed
   assert.notEqual(checkIndex, -1);
   assert.notEqual(convergentGuardIndex, -1);
   assert.notEqual(gateIndex, -1);
+  assert.notEqual(allProvidersIndex, -1);
+  assert.notEqual(loopIndex, -1);
   assert.notEqual(baselineIndex, -1);
   assert.notEqual(remoteMetaIndex, -1);
   assert.notEqual(hashDecisionIndex, -1);
   assert.notEqual(skipReturnIndex, -1);
   assert.notEqual(buildPayloadIndex, -1);
   assert.notEqual(syncNowIndex, -1);
+  assert.ok(
+    allProvidersIndex < loopIndex && loopIndex < baselineIndex,
+    "the no-op gate must inspect every connected provider, not only the preferred one",
+  );
   assert.ok(
     gateIndex < baselineIndex && baselineIndex < remoteMetaIndex,
     "the no-op gate must compare the fresh remote meta against the verified provider baseline",

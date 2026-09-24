@@ -693,18 +693,34 @@ export const useAutoSync = (config: AutoSyncConfig) => {
         // remote moved since the last verified baseline, the gate falls
         // through to the full join.
         if (options?.periodic === true) {
-          let convergentRemoteUnchanged = false;
+          // The convergent runtime joins every connected provider
+          // (`connectedProviders` in convergentSyncRuntimeMethods), so the
+          // short-circuit must establish that ALL connected providers are
+          // unchanged — not just the preferred one picked above. Checking a
+          // single provider would suppress the join while another provider's
+          // remote moved, never pulling those changes on periodic ticks.
+          const convergentProviders = (Object.keys(state.providers) as CloudProvider[])
+            .filter((id) => isProviderReadyForSync(state.providers[id]));
+          let convergentRemoteUnchanged = convergentProviders.length > 0;
           try {
-            const baseline = await manager.loadConvergentProviderBaseline(connectedProvider);
-            if (baseline) {
-              const inspection = await manager.inspectProviderRemote(connectedProvider);
+            for (const provider of convergentProviders) {
+              const baseline = await manager.loadConvergentProviderBaseline(provider);
+              if (!baseline) {
+                convergentRemoteUnchanged = false;
+                break;
+              }
+              const inspection = await manager.inspectProviderRemote(provider);
               const meta = inspection.remoteFile?.meta;
-              convergentRemoteUnchanged = Boolean(
+              const providerUnchanged = Boolean(
                 meta
                   && meta.version === baseline.remoteVersion
                   && meta.updatedAt === baseline.remoteUpdatedAt
                   && (meta.deviceId ?? null) === (baseline.remoteDeviceId ?? null),
               );
+              if (!providerUnchanged) {
+                convergentRemoteUnchanged = false;
+                break;
+              }
             }
           } catch (error) {
             console.warn(
