@@ -15,6 +15,10 @@ configuration UI.
   while also noting that it may still be protected as a trademark in some
   jurisdictions.
 
+## From [Requesty](https://www.requesty.ai/)
+
+- `requesty.svg`: Requesty logo glyph, adapted for monochrome UI display.
+
 ## From [lobehub/lobe-icons](https://github.com/lobehub/lobe-icons) (MIT)
 
 Copyright (c) 2023 LobeHub. Used under the MIT License. The full text is

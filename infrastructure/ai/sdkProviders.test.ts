@@ -93,6 +93,24 @@ test("resolveProviderEndpoint keeps an explicit openrouter baseURL untouched", (
   assert.equal(result.baseURL, "https://proxy.example/v1");
 });
 
+test("resolveProviderEndpoint applies the requesty URL fallback when baseURL is empty", () => {
+  const result = resolveProviderEndpoint(
+    { id: "p", providerId: "requesty", name: "Requesty", enabled: true },
+    "openai",
+    "rqsty-test",
+  );
+  assert.equal(result.baseURL, "https://router.requesty.ai/v1");
+});
+
+test("resolveProviderEndpoint keeps an explicit requesty regional baseURL untouched", () => {
+  const result = resolveProviderEndpoint(
+    { id: "p", providerId: "requesty", name: "Requesty", enabled: true, baseURL: "https://router.eu.requesty.ai/v1" },
+    "openai",
+    "rqsty-test",
+  );
+  assert.equal(result.baseURL, "https://router.eu.requesty.ai/v1");
+});
+
 test("resolveProviderEndpoint normalizes Anthropic-compat Base URL for @ai-sdk/anthropic", () => {
   // Claude Code style (bare host) must gain /v1 so chat hits …/v1/messages.
   assert.equal(
