@@ -80,6 +80,31 @@ test("parseArgs consumes dynamic script group targets", () => {
   assert.equal(opts.json, true);
 });
 
+test("parseArgs consumes vault note import flags", () => {
+  const { positionals, opts } = parseArgs([
+    "node",
+    "netcatty-tool-cli",
+    "notes",
+    "import",
+    "--file-name",
+    "runbook.md",
+    "--title",
+    "Runbook",
+    "--content",
+    "# Steps",
+    "--group",
+    "ops",
+    "--json",
+  ]);
+
+  assert.deepEqual(positionals, ["notes", "import"]);
+  assert.equal(opts.fileName, "runbook.md");
+  assert.equal(opts.title, "Runbook");
+  assert.equal(opts.content, "# Steps");
+  assert.equal(opts.group, "ops");
+  assert.equal(opts.json, true);
+});
+
 test("requireChatSession accepts a resolved id", () => {
   assert.equal(requireChatSession({ chatSessionId: "chat-1" }, "env"), "chat-1");
 });

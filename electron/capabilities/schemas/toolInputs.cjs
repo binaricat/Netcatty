@@ -190,6 +190,29 @@ const TOOL_INPUT_FIELDS = Object.freeze({
   "vault.note.delete": {
     noteId: { type: "string", description: "Vault note ID to delete." },
   },
+  "vault.note.import": {
+    content: {
+      type: "string",
+      optional: true,
+      description: "Markdown body for a single document. Omit when documents is set.",
+    },
+    fileName: {
+      type: "string",
+      optional: true,
+      description: "Source file name for a single document, such as runbook.md. Used when the body has no heading.",
+    },
+    title: {
+      type: "string",
+      optional: true,
+      description: "Optional title override for a single document. Otherwise the first heading or file name is used.",
+    },
+    documents: {
+      type: "string",
+      optional: true,
+      description: "JSON array of {fileName, content, title?} for a batch import. Do not combine with content.",
+    },
+    group: { type: "string", optional: true, description: "Optional folder path applied to every imported note." },
+  },
   "vault.identity.list": {},
   "vault.proxyProfile.list": {},
   "vault.group.list": {},
@@ -411,6 +434,8 @@ const MODEL_DESCRIPTION_HINTS = Object.freeze({
     "Use ONLY when the user wants markdown documentation in Vault → Notes sidebar (保险箱笔记). Do NOT use when the user asked to create/add a host — use vault_hosts_create instead.",
   "vault.note.update":
     "Update an existing Vault → Notes entry (visible in the vault notes sidebar).",
+  "vault.note.import":
+    "Import generated or attached markdown into Vault → Notes. Use content plus fileName for one document, or documents for a batch. This creates notes; it does not add SSH hosts. Confirm mode asks the user to approve the import.",
   "vault.snippets.run":
     "Text snippets (kind=snippet) paste shell commands with optional named placeholders written with two curly braces on each side. Scripts (kind=script) run via nct JavaScript runtime — use scripts_run for script-only workflows.",
   "vault.snippets.create":

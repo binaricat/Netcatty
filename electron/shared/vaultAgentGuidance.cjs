@@ -14,8 +14,24 @@ const VAULT_HOSTS_VS_NOTES_GUIDANCE =
   + "put long admin tables or remarks in the host notes field (host_notes_set / Host Details metadata), "
   + "not Vault sidebar Notes. Use vault_notes_create or vault_notes_update ONLY when the user explicitly wants "
   + "markdown documentation in Vault → Notes (保险箱笔记 sidebar). "
+  + "Use vault_notes_import to import generated or attached markdown as one or more sidebar notes. "
   + "Use vault_hosts_list to resolve hostId before vault_hosts_update or vault_hosts_delete. "
   + "If vault_hosts_create or vault_hosts_import fails, report the error — do not silently create a Vault note instead.";
+
+/**
+ * Skills + CLI wording for the same Vault Notes rules as VAULT_HOSTS_VS_NOTES_GUIDANCE.
+ * Keep the selection rules aligned when either string changes.
+ */
+const VAULT_NOTES_CLI_GUIDANCE =
+  "Vault sidebar Notes vs host metadata: use notes create or notes update ONLY when the user explicitly wants "
+  + "markdown documentation in Vault → Notes. Use notes import to import generated or attached markdown as one or more sidebar notes "
+  + "(--content plus --file-name for one document, or --documents for a batch). "
+  + "Read a note with notes get --note-id using the exact id from notes list; follow nextOffset with --expected-updated-at until null "
+  + "before summarizing or replacing the whole note. "
+  + "Host Details metadata uses vault host-notes set, not notes create. "
+  + "Do not create or import a Vault note when the user asked to add a host. "
+  + "If a host operation fails, report the error — do not silently create a Vault note instead. "
+  + "notes create, notes update, notes delete, and notes import require user approval; if approval is denied, stop.";
 
 const VAULT_SCRIPTS_GUIDANCE =
   "Snippets vs automation scripts: snippets_* for shell command text (optional named placeholders written with two curly braces on each side). "
@@ -40,6 +56,7 @@ function appendVaultAgentGuidance(description) {
 
 module.exports = {
   VAULT_HOSTS_VS_NOTES_GUIDANCE,
+  VAULT_NOTES_CLI_GUIDANCE,
   VAULT_SCRIPTS_GUIDANCE,
   appendVaultAgentGuidance,
 };

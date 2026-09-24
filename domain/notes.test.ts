@@ -300,6 +300,18 @@ test("importMarkdownPayloadsToVaultNotes appends notes from pre-read payloads", 
   assert.equal(result.notes[1].group, "Ops");
 });
 
+test("importMarkdownPayloadsToVaultNotes prefers an explicit title over the first heading", () => {
+  const result = importMarkdownPayloadsToVaultNotes(
+    [{ fileName: "imported.md", content: "# Heading\n\nBody", title: "Runbook" }],
+    [],
+    null,
+  );
+
+  assert.equal(result.importedCount, 1);
+  assert.equal(result.notes[0].title, "Runbook");
+  assert.equal(result.notes[0].content, "# Heading\n\nBody");
+});
+
 test("importMarkdownFilesToVaultNotes appends notes and skips unsupported files", async () => {
   const existing = [sanitizeVaultNote({
     id: "existing",

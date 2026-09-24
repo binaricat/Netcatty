@@ -62,6 +62,22 @@ test("vault service delegates host update and delete to vault agent bridge", asy
   assert.deepEqual(calls[1].params, { hostId: "host-1" });
 });
 
+test("vault service delegates note import", async () => {
+  let invokedOp = null;
+  let invokedParams = null;
+  const service = createVaultService({
+    invokeVaultAgent: async (op, params) => {
+      invokedOp = op;
+      invokedParams = params;
+      return { ok: true, importedCount: 1 };
+    },
+  });
+  const result = await service.importNotes({ content: "# Steps", fileName: "runbook.md" });
+  assert.equal(invokedOp, "note.import");
+  assert.equal(invokedParams.fileName, "runbook.md");
+  assert.equal(result.importedCount, 1);
+});
+
 test("vault service delegates identities, groups, proxies, and note deletion", async () => {
   const calls = [];
   const service = createVaultService({

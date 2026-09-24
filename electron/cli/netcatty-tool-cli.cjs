@@ -35,6 +35,7 @@ function printHelp() {
     "  netcatty-tool-cli vault host get --host-id host_123 --json\n" +
     "  netcatty-tool-cli vault host open --host-id host_123 --json\n" +
     "  netcatty-tool-cli snippets run --snippet-id snip_1 --session sess_123 --json\n" +
+    "  netcatty-tool-cli notes import --file-name runbook.md --title \"Runbook\" --content \"# Runbook\" --json\n" +
     "  netcatty-tool-cli portforward rules list --json\n\n" +
     "Notes:\n" +
     "  - Start the Netcatty desktop app before using this CLI.\n" +
@@ -45,7 +46,8 @@ function printHelp() {
     "  - `job-start` always requires --session <id>, plus NETCATTY_CLI_CHAT_SESSION_ID.\n" +
     "  - `job-poll` and `job-stop` always require --job <id>, plus NETCATTY_CLI_CHAT_SESSION_ID.\n" +
     "  - Every `sftp <op>` always requires --session <id>, plus NETCATTY_CLI_CHAT_SESSION_ID, and only works on connected SSH-backed sessions.\n" +
-    "  - Vault/portforward/snippet commands use catalog-driven dispatch; see `capabilities --json` for the full list.\n" +
+    "  - Vault/portforward/snippet/notes commands use catalog-driven dispatch; see `capabilities --json` for the full list.\n" +
+    "  - notes create, update, delete, and import change Vault notes and require user approval in confirm mode.\n" +
     "  - After `--`, pass exactly one shell-ready command string. Preserve quoting inside that one argument.\n" +
     "  - `cancel` stops in-flight execs, session-backed SFTP transfers, and running jobs for that chat session, then blocks further execs until `resume`.\n",
   );
@@ -87,6 +89,16 @@ function parseArgs(argv) {
     scriptId: null,
     ruleId: null,
     notes: null,
+    noteId: null,
+    title: null,
+    group: null,
+    linkedHostIds: null,
+    tags: null,
+    maxChars: null,
+    query: null,
+    expectedUpdatedAt: null,
+    fileName: null,
+    documents: null,
     variables: null,
     targetGroups: null,
     multiLineRunMode: null,
@@ -206,6 +218,58 @@ function parseArgs(argv) {
     }
     if (arg === "--multi-line-run-mode") {
       opts.multiLineRunMode = readFlagValue(args, i + 1);
+      i += 1;
+      continue;
+    }
+    if (arg === "--note-id") {
+      opts.noteId = readFlagValue(args, i + 1);
+      i += 1;
+      continue;
+    }
+    if (arg === "--title") {
+      opts.title = readFlagValue(args, i + 1);
+      i += 1;
+      continue;
+    }
+    if (arg === "--group") {
+      opts.group = readFlagValue(args, i + 1);
+      i += 1;
+      continue;
+    }
+    if (arg === "--linked-host-ids") {
+      opts.linkedHostIds = readFlagValue(args, i + 1);
+      i += 1;
+      continue;
+    }
+    if (arg === "--tags") {
+      opts.tags = readFlagValue(args, i + 1);
+      i += 1;
+      continue;
+    }
+    if (arg === "--max-chars") {
+      const value = readFlagValue(args, i + 1);
+      opts.maxChars = value == null ? null : Number(value);
+      i += 1;
+      continue;
+    }
+    if (arg === "--query") {
+      opts.query = readFlagValue(args, i + 1);
+      i += 1;
+      continue;
+    }
+    if (arg === "--expected-updated-at") {
+      const value = readFlagValue(args, i + 1);
+      opts.expectedUpdatedAt = value == null ? null : Number(value);
+      i += 1;
+      continue;
+    }
+    if (arg === "--file-name") {
+      opts.fileName = readFlagValue(args, i + 1);
+      i += 1;
+      continue;
+    }
+    if (arg === "--documents") {
+      opts.documents = readFlagValue(args, i + 1);
       i += 1;
       continue;
     }

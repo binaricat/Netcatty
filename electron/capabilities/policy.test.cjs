@@ -17,7 +17,7 @@ const { ALL_CAPABILITIES } = require("./catalog/index.cjs");
 test("new vault management writes use the standard permission policy", () => {
   const ids = [
     "portforward.rules.create", "portforward.rules.update", "portforward.rules.duplicate", "portforward.rules.delete",
-    "vault.note.delete", "vault.group.create", "vault.group.update", "vault.group.delete",
+    "vault.note.delete", "vault.note.import", "vault.group.create", "vault.group.update", "vault.group.delete",
   ];
   for (const id of ids) {
     const capability = ALL_CAPABILITIES.find((entry) => entry.id === id);
@@ -187,6 +187,31 @@ test("confirm mode requires approval for portforward start and host notes set", 
     params: { chatSessionId: "chat-1", hostId: "host-1" },
   });
   assert.equal(publicNotesDecision.requiresApproval, true);
+
+  const noteCreateDecision = evaluateRpcPermission({
+    rpcMethod: "vault/notes/create",
+    surface: CAPABILITY_SURFACES.GLOBAL,
+    permissionMode: PERMISSION_MODES.CONFIRM,
+    params: { chatSessionId: "chat-1", title: "Runbook", content: "# Steps" },
+  });
+  assert.equal(noteCreateDecision.requiresApproval, true);
+
+  const noteImportDecision = evaluateRpcPermission({
+    rpcMethod: "vault/notes/import",
+    surface: CAPABILITY_SURFACES.GLOBAL,
+    permissionMode: PERMISSION_MODES.CONFIRM,
+    params: { chatSessionId: "chat-1", content: "# Steps", fileName: "runbook.md" },
+  });
+  assert.equal(noteImportDecision.requiresApproval, true);
+
+  const observerImport = evaluateRpcPermission({
+    rpcMethod: "vault/notes/import",
+    surface: CAPABILITY_SURFACES.GLOBAL,
+    permissionMode: PERMISSION_MODES.OBSERVER,
+    params: { chatSessionId: "chat-1", content: "# Steps" },
+  });
+  assert.equal(observerImport.allowed, false);
+  assert.equal(observerImport.error, OBSERVER_DENY_MESSAGE);
 });
 
 test("evaluatePermissionWithGrants skips approval when a grant matches", () => {

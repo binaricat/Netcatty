@@ -16,6 +16,16 @@ const CLI_FIELD_BINDINGS = Object.freeze({
   runId: { flag: "--run-id", optKey: "runId" },
   ruleId: { flag: "--rule-id", optKey: "ruleId" },
   notes: { flag: "--notes", optKey: "notes" },
+  noteId: { flag: "--note-id", optKey: "noteId" },
+  title: { flag: "--title", optKey: "title" },
+  group: { flag: "--group", optKey: "group" },
+  linkedHostIds: { flag: "--linked-host-ids", optKey: "linkedHostIds" },
+  tags: { flag: "--tags", optKey: "tags" },
+  maxChars: { flag: "--max-chars", optKey: "maxChars" },
+  query: { flag: "--query", optKey: "query" },
+  expectedUpdatedAt: { flag: "--expected-updated-at", optKey: "expectedUpdatedAt" },
+  fileName: { flag: "--file-name", optKey: "fileName" },
+  documents: { flag: "--documents", optKey: "documents" },
   sessionId: { flag: "--session", optKey: "sessionId" },
   variables: { flag: "--variables", optKey: "variables" },
   wait: { flag: "--wait", optKey: "wait" },
@@ -105,7 +115,7 @@ function buildCatalogCliParams(capabilityId, opts, createError) {
         throw createError("INVALID_ARGUMENT", `--variables must be valid JSON for ${capabilityId}.`);
       }
     }
-    if (fieldName === "offset" && value != null) {
+    if ((fieldName === "offset" || fieldName === "maxChars" || fieldName === "expectedUpdatedAt") && value != null) {
       value = Number(value);
     }
 

@@ -16,6 +16,20 @@ test('parseVaultToolArtifact maps note create results', () => {
   });
 });
 
+test('parseVaultToolArtifact maps a single note import', () => {
+  const artifact = parseVaultToolArtifact('vault_notes_import', {
+    ok: true,
+    importedCount: 1,
+    notes: [{ id: 'note-2', title: 'Runbook', group: 'ops' }],
+  });
+  assert.deepEqual(artifact, {
+    kind: 'vault.note',
+    noteId: 'note-2',
+    title: 'Runbook',
+    group: 'ops',
+  });
+});
+
 test('parseVaultToolArtifact maps single host create to host artifact', () => {
   const artifact = parseVaultToolArtifact('vault_hosts_create', {
     ok: true,

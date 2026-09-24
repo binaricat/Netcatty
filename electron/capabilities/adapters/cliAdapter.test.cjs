@@ -83,6 +83,40 @@ test("buildCatalogCliParams maps dynamic script group targets", () => {
   assert.equal(params.targetGroups, '["Production","Staging/Web"]');
 });
 
+test("buildCatalogCliParams maps vault note create and import flags", () => {
+  const created = buildCatalogCliParams("vault.note.create", {
+    title: "Runbook",
+    content: "# Steps",
+    group: "ops",
+  }, fakeCreateError);
+  assert.equal(created.title, "Runbook");
+  assert.equal(created.content, "# Steps");
+  assert.equal(created.group, "ops");
+
+  const imported = buildCatalogCliParams("vault.note.import", {
+    fileName: "runbook.md",
+    content: "# Steps",
+    documents: "[{\"fileName\":\"a.md\",\"content\":\"# A\"}]",
+  }, fakeCreateError);
+  assert.equal(imported.fileName, "runbook.md");
+  assert.equal(imported.documents, "[{\"fileName\":\"a.md\",\"content\":\"# A\"}]");
+});
+
+test("buildCatalogCliParams maps vault note read continuation flags", () => {
+  const params = buildCatalogCliParams("vault.note.get", {
+    noteId: "note-1",
+    offset: "6000",
+    maxChars: "2000",
+    expectedUpdatedAt: "10",
+    query: "Steps",
+  }, fakeCreateError);
+  assert.equal(params.noteId, "note-1");
+  assert.equal(params.offset, 6000);
+  assert.equal(params.maxChars, 2000);
+  assert.equal(params.expectedUpdatedAt, 10);
+  assert.equal(params.query, "Steps");
+});
+
 test("buildCatalogCliParams throws for missing required fields", () => {
   assert.throws(
     () => buildCatalogCliParams("vault.host.get", {}, fakeCreateError),

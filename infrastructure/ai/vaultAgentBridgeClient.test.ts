@@ -262,6 +262,39 @@ describe('handleVaultAgentOp vault notes', () => {
     assert.deepEqual(deps.getNotes().map((note) => note.id), ['note-2']);
   });
 
+  it('note.import appends generated markdown and keeps the explicit title', async () => {
+    const deps = createDeps({
+      notes: [{ id: 'note-1', title: 'Existing', content: 'keep', createdAt: 1, updatedAt: 1 }],
+    });
+
+    const result = await handleVaultAgentOp('note.import', {
+      fileName: 'runbook.md',
+      title: 'Deploy runbook',
+      content: '# Heading\n\n1. Connect',
+      group: 'ops',
+    }, deps);
+
+    assert.equal(result.ok, true);
+    assert.equal((result as { importedCount?: number }).importedCount, 1);
+    const imported = (result as { notes?: Array<{ title: string; content: string; group?: string }> }).notes;
+    assert.equal(imported?.[0]?.title, 'Deploy runbook');
+    assert.equal(imported?.[0]?.content, '# Heading\n\n1. Connect');
+    assert.equal(imported?.[0]?.group, 'ops');
+    assert.equal(deps.getNotes().length, 2);
+    assert.equal(deps.getNotes()[0]?.title, 'Existing');
+  });
+
+  it('note.import rejects a batch mixed with a single content body', async () => {
+    const deps = createDeps({ notes: [] });
+    const result = await handleVaultAgentOp('note.import', {
+      content: '# One',
+      documents: JSON.stringify([{ fileName: 'two.md', content: '# Two' }]),
+    }, deps);
+    assert.equal(result.ok, false);
+    assert.match(String((result as { error?: string }).error), /not both/);
+    assert.equal(deps.getNotes().length, 0);
+  });
+
   it('sequential note.create calls accumulate instead of overwriting prior notes', async () => {
     const deps = createDeps({ notes: [] });
 

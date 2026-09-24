@@ -84,6 +84,62 @@ test("dispatchCapabilityRpc routes public vault host notes set through approval"
   assert.equal(result.notes, "updated");
 });
 
+test("dispatchCapabilityRpc asks for approval before importing vault notes from the CLI rpc", async () => {
+  const approvalCalls = [];
+  let invokedOp = null;
+  const dispatch = createTestDispatcher({
+    evaluatePermissionWithGrants: () => ({
+      allowed: true,
+      requiresApproval: true,
+    }),
+    requestApprovalFromRenderer: async (toolName, args, chatSessionId) => {
+      approvalCalls.push({ toolName, args, chatSessionId });
+      return true;
+    },
+    invokeVaultAgent: async (op) => {
+      invokedOp = op;
+      return { ok: true, importedCount: 1, notes: [] };
+    },
+  });
+
+  const result = await dispatch("vault/notes/import", {
+    chatSessionId: "chat-1",
+    content: "# Steps",
+    fileName: "runbook.md",
+  });
+
+  assert.equal(approvalCalls.length, 1);
+  assert.equal(approvalCalls[0].toolName, "vault_notes_import");
+  assert.equal(approvalCalls[0].chatSessionId, "chat-1");
+  assert.equal(approvalCalls[0].args.content, "# Steps");
+  assert.equal(invokedOp, "note.import");
+  assert.equal(result.importedCount, 1);
+});
+
+test("dispatchCapabilityRpc denies vault note import when the user rejects it", async () => {
+  let invoked = false;
+  const dispatch = createTestDispatcher({
+    evaluatePermissionWithGrants: () => ({
+      allowed: true,
+      requiresApproval: true,
+    }),
+    requestApprovalFromRenderer: async () => false,
+    invokeVaultAgent: async () => {
+      invoked = true;
+      return { ok: true };
+    },
+  });
+
+  const result = await dispatch("vault/notes/import", {
+    chatSessionId: "chat-1",
+    content: "# Steps",
+  });
+
+  assert.equal(invoked, false);
+  assert.equal(result.ok, false);
+  assert.match(result.error, /denied/i);
+});
+
 test("dispatchCapabilityRpc denies public vault host notes set when approval rejected", async () => {
   const dispatch = createTestDispatcher({
     evaluatePermissionWithGrants: () => ({

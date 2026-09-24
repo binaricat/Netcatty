@@ -444,20 +444,22 @@ export const buildVaultNoteFromMarkdownImport = ({
 };
 
 export const importMarkdownPayloadsToVaultNotes = (
-  payloads: Array<{ fileName: string; content: string }>,
+  payloads: Array<{ fileName: string; content: string; title?: string }>,
   existingNotes: VaultNote[],
   targetGroup: string | null,
 ): { notes: VaultNote[]; importedCount: number } => {
   const imported: VaultNote[] = [];
   let orderBase = existingNotes;
 
-  for (const { fileName, content } of payloads) {
+  for (const { fileName, content, title } of payloads) {
     const note = buildVaultNoteFromMarkdownImport({
       fileName,
       content,
       group: targetGroup,
       order: getNextVaultOrder([...orderBase, ...imported]),
     });
+    const explicitTitle = sanitizeNoteTitle(title);
+    if (explicitTitle) note.title = explicitTitle;
     imported.push(note);
     orderBase = [...orderBase, note];
   }

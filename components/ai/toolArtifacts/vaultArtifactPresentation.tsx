@@ -26,6 +26,7 @@ export type VaultArtifactVisualKind =
   | 'noteUpdate'
   | 'noteRead'
   | 'noteList'
+  | 'noteImport'
   | 'host'
   | 'hostCreate'
   | 'hostImport'
@@ -54,6 +55,7 @@ const VISUAL_STYLES: Record<VaultArtifactVisualKind, { wrapper: string; icon: st
   noteUpdate: { wrapper: 'bg-violet-500/10', icon: 'text-violet-300/90' },
   noteRead: { wrapper: 'bg-violet-500/10', icon: 'text-violet-300/80' },
   noteList: { wrapper: 'bg-muted/30', icon: 'text-muted-foreground/70' },
+  noteImport: { wrapper: 'bg-violet-500/12', icon: 'text-violet-400' },
   host: { wrapper: 'bg-emerald-500/12', icon: 'text-emerald-400' },
   hostCreate: { wrapper: 'bg-sky-500/12', icon: 'text-sky-400' },
   hostImport: { wrapper: 'bg-amber-500/12', icon: 'text-amber-400' },
@@ -83,6 +85,7 @@ export function resolveVaultArtifactVisualKind(
   if (artifact.kind === 'error') return 'error';
 
   if (artifact.kind === 'vault.note') {
+    if (toolName === 'vault_notes_import') return 'noteImport';
     if (toolName === 'vault_notes_create') return 'noteCreate';
     if (toolName === 'vault_notes_update') return 'noteUpdate';
     return 'noteRead';
@@ -98,6 +101,7 @@ export function resolveVaultArtifactVisualKind(
   }
 
   if (artifact.kind === 'vault.summary') {
+    if (toolName === 'vault_notes_import') return 'noteImport';
     if (artifact.section === 'notes') return 'noteList';
     if (artifact.section === 'hosts') return 'hostList';
     if (artifact.section === 'snippets') return 'snippetList';
@@ -139,6 +143,8 @@ function renderVisualIcon(kind: VaultArtifactVisualKind): React.ReactNode {
       return <FileText size={ARTIFACT_ICON_SIZE} className={className} />;
     case 'noteList':
       return <Library size={ARTIFACT_ICON_SIZE} className={className} />;
+    case 'noteImport':
+      return <FolderInput size={ARTIFACT_ICON_SIZE} className={className} />;
     case 'host':
       return <Server size={ARTIFACT_ICON_SIZE} className={className} />;
     case 'hostCreate':
