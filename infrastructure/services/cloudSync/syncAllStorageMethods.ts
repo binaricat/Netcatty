@@ -615,7 +615,11 @@ export async function syncAllProvidersImpl(this: any,
             // deletion record needed to reject a stale copy on a later merge.
             if (payloadMatches && deletionsCovered) {
               assertSyncSecurityGeneration(this, syncSecurityGeneration);
-              if (!providerBase || !cloudSyncPayloadsEqual(providerBase, checkedRemotePayload)) {
+              if (
+                !providerBase
+                || !cloudSyncPayloadsEqual(providerBase, checkedRemotePayload)
+                || !remoteCoversSyncDeletions(checkedRemotePayload, providerBase)
+              ) {
                 await this.saveSyncBase(checkedRemotePayload, provider);
               }
               // Mirror commitRemoteInspection/uploadToProvider: the preflight

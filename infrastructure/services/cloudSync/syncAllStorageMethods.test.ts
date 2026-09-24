@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { EncryptionService } from "../EncryptionService.ts";
+import { withSyncReliabilityMeta } from "../../../domain/syncReliability.ts";
 import {
   clearProviderMergeStateImpl,
   commitRemoteInspectionImpl,
@@ -912,7 +913,8 @@ test("syncAllProviders skips the upload when the payload already matches the pro
   const originalEncryptPayload = EncryptionService.encryptPayload;
   const checkedRemote = remoteFile("github", 7, 700);
   const localPayload = payload("local");
-  const checkedRemotePayload = payload("local");
+  const storedBase = payload("local");
+  let checkedRemotePayload = storedBase;
   let uploads = 0;
   let encryptCalls = 0;
   const savedBases: SyncPayload[] = [];
@@ -955,9 +957,9 @@ test("syncAllProviders skips the upload when the payload already matches the pro
       updateProviderStatus: () => {},
       emit: () => {},
       checkProviderConflict: async () => ({ conflict: false, remoteFile: checkedRemote }),
-      loadSyncBase: async () => checkedRemotePayload,
-      saveSyncBase: async (_incoming: SyncPayload, provider: CloudProvider) => {
-        savedBases.push(provider as CloudProvider);
+      loadSyncBase: async () => storedBase,
+      saveSyncBase: async (incoming: SyncPayload) => {
+        savedBases.push(incoming);
       },
       saveSyncAnchor: async (_provider: CloudProvider, file: SyncedFile) => {
         anchored.push(file);
@@ -987,9 +989,21 @@ test("syncAllProviders skips the upload when the payload already matches the pro
     assert.deepEqual(anchored, [checkedRemote]);
     assert.deepEqual(connections, ["github"]);
     assert.equal(manager.state.syncState, "IDLE");
-    assert.equal(manager.state.providers.github.lastSyncVersion, 7);
+    assert.equal(Reflect.get(manager.state.providers.github, "lastSyncVersion"), 7);
     assert.equal(Reflect.get(manager.state.providers.github, "resourceId"), "resource-7");
     assert.equal(manager.providerDecryptSeq.github, 5);
+
+    // A remote learned a deletion elsewhere while this device's base still
+    // has the same materialized data. Its newer base must be kept locally.
+    checkedRemotePayload = withSyncReliabilityMeta(
+      storedBase,
+      payloadWithHosts(["local", "deleted"]),
+      { deviceId: "other-device", now: 800 },
+    );
+    const metadataOnlyResult = await syncAllProvidersImpl.call(manager, localPayload);
+    assert.equal(metadataOnlyResult.get("github")?.action, "none");
+    assert.deepEqual(savedBases, [checkedRemotePayload]);
+    assert.equal(uploads, 0);
   } finally {
     EncryptionService.decryptPayload = originalDecryptPayload;
     EncryptionService.encryptPayload = originalEncryptPayload;
