@@ -32,10 +32,12 @@ export function readSftpQuickDownloadDir(): string | null {
 
 /** Remember the directory used for a download (Save As / folder picker). */
 export function rememberSftpLastDownloadDir(dir: string | null | undefined): void {
-  const trimmed = typeof dir === "string" ? dir.trim() : "";
-  if (!trimmed) return;
+  // Store verbatim: POSIX directory names may legitimately end in whitespace,
+  // and trimming would redirect later quick downloads to a different path.
+  // Only an actually empty value is rejected.
+  if (typeof dir !== "string" || !dir) return;
   try {
-    localStorageAdapter.writeString(STORAGE_KEY_SFTP_LAST_DOWNLOAD_DIR, trimmed);
+    localStorageAdapter.writeString(STORAGE_KEY_SFTP_LAST_DOWNLOAD_DIR, dir);
   } catch {
     // Persistence is best-effort; quick download just falls back to the dialog.
   }

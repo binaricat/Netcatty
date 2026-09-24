@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 import type { SftpFileEntry } from "../../../types";
 import type { TransferStatus } from "../../../domain/models";
-import { getParentPath, joinPath as joinFsPath } from "../../../application/state/sftp/utils";
+import { getParentPath, joinPath as joinFsPath, joinTransferTargetPath } from "../../../application/state/sftp/utils";
 import {
   readSftpQuickDownloadDir,
   rememberSftpLastDownloadDir,
@@ -495,7 +495,10 @@ export const useSftpViewFileOps = ({
         // Quick download goes straight to the remembered directory; otherwise
         // show the save dialog to get target path.
         let targetPath: string | null = quickDownloadDir
-          ? joinFsPath(quickDownloadDir, file.name)
+          // The filename comes from the remote server and may contain
+          // Windows-unsafe segments (e.g. "..\foo\bar"); the guarded join
+          // prevents escaping the remembered quick-download directory.
+          ? joinTransferTargetPath(quickDownloadDir, file.name)
           : null;
         if (!targetPath) {
           targetPath = await showSaveDialog(file.name);
