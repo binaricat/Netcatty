@@ -18,7 +18,7 @@ test("JumpServer login only offers identities with the full asset selector", () 
     password: "secret",
     created: 1,
   };
-  const jumpTarget = { hostname: "jump.example", username: "chenyi@root@10.2.0.8" };
+  const jumpTarget = { hostname: "jump.example", username: "chenyi@root@10.2.0.8", isJumpServerLogin: true as const };
   assert.equal(isQuickConnectIdentityCompatible(identity, jumpTarget), false);
   assert.equal(isQuickConnectIdentityCompatible(
     { ...identity, username: "other" }, jumpTarget,
@@ -27,6 +27,7 @@ test("JumpServer login only offers identities with the full asset selector", () 
     { ...identity, username: jumpTarget.username }, jumpTarget,
   ), true);
   assert.equal(isQuickConnectIdentityCompatible(identity, { hostname: "jump.example", username: "chenyi" }), true);
+  assert.equal(isQuickConnectIdentityCompatible(identity, { hostname: "host.example", username: "user@realm" }), true);
 });
 
 test("quick connect keeps a selected credential preset as the host identity", () => {

@@ -23,6 +23,7 @@ test("quick connect keeps the asset selector in the JumpServer username", () => 
     hostname: "jump.corp.example",
     username: "root@10.2.0.8",
     port: undefined,
+    isJumpServerLogin: true,
   });
   assert.equal(isQuickConnectInput("root@10.2.0.8@jump.corp.example"), true);
 });
@@ -34,6 +35,7 @@ test("quick connect parses the four-part JumpServer login from issue 3523", () =
       hostname: "devjumpserver.example.cn",
       username: "chenyi@root@10.2.0.8",
       port: undefined,
+      isJumpServerLogin: true,
     },
   );
 });
@@ -43,6 +45,7 @@ test("quick connect applies a suffix port to the JumpServer endpoint", () => {
     hostname: "jump",
     username: "chenyi@root@10.2.0.8",
     port: 2222,
+    isJumpServerLogin: true,
   });
 });
 
@@ -51,11 +54,13 @@ test("ssh command ports apply to the JumpServer endpoint", () => {
     hostname: "jump.corp.example",
     username: "chenyi@root@10.2.0.8",
     port: 2222,
+    isJumpServerLogin: true,
   });
   assert.deepEqual(parseQuickConnectInput("ssh -o Port=2200 chenyi@root@10.2.0.8@jump"), {
     hostname: "jump",
     username: "chenyi@root@10.2.0.8",
     port: 2200,
+    isJumpServerLogin: true,
   });
 });
 
@@ -66,6 +71,7 @@ test("ssh HostName override keeps the JumpServer login name", () => {
       hostname: "actual-jump.example",
       username: "chenyi@root@10.2.0.8",
       port: 2222,
+      isJumpServerLogin: true,
     },
   );
   assert.deepEqual(
@@ -74,6 +80,7 @@ test("ssh HostName override keeps the JumpServer login name", () => {
       hostname: "actual-jump.example",
       username: "chenyi@root@10.2.0.8",
       port: undefined,
+      isJumpServerLogin: true,
     },
   );
 });
@@ -92,6 +99,16 @@ test("ordinary SSH options still resolve single-@ targets", () => {
   assert.deepEqual(parseQuickConnectInput("ssh -o HostName=actual.example deploy@alias_name"), {
     hostname: "actual.example",
     username: "deploy",
+    port: undefined,
+  });
+  assert.deepEqual(parseQuickConnectInput("ssh -l user@realm host.example"), {
+    hostname: "host.example",
+    username: "user@realm",
+    port: undefined,
+  });
+  assert.deepEqual(parseQuickConnectInput("ssh -o User=user@realm host.example"), {
+    hostname: "host.example",
+    username: "user@realm",
     port: undefined,
   });
 });

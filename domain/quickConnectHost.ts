@@ -24,7 +24,7 @@ export const isQuickConnectIdentityUsable = (
 export const isQuickConnectIdentityCompatible = (
   identity: Identity,
   target: QuickConnectTarget,
-): boolean => !target.username?.includes("@")
+): boolean => !target.isJumpServerLogin
   || identity.username === target.username;
 
 type BuildQuickConnectHostInput = {

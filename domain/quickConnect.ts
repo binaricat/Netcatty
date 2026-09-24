@@ -2,6 +2,8 @@ export interface QuickConnectTarget {
   hostname: string;
   username?: string;
   port?: number;
+  /** The @ separators in the address are part of a JumpServer login name. */
+  isJumpServerLogin?: true;
 }
 
 interface QuickConnectParseResult {
@@ -110,6 +112,7 @@ const parseJumpServerTarget = (input: string): QuickConnectTarget | null => {
     hostname: host.hostname,
     username,
     port: host.port,
+    isJumpServerLogin: true,
   };
 };
 
@@ -289,6 +292,10 @@ const parseSshCommand = (input: string): QuickConnectParseResult | null => {
   if (!hostToken) return null;
 
   const hostTokenTarget = parseTargetWithCompositeUser(hostToken);
+  const hostTokenAtCount = (hostToken.match(/@/g) || []).length;
+  const hasCompositeHostToken = hostTokenAtCount >= 2
+    && hostTokenAtCount <= 3
+    && Boolean(parseUsernameFromHostToken(hostToken));
   const hostnameOverride = optionHostname ? parseDirectTarget(optionHostname) : null;
   const base = optionHostname
     ? hostnameOverride && {
@@ -296,6 +303,7 @@ const parseSshCommand = (input: string): QuickConnectParseResult | null => {
         username: hostTokenTarget?.username
           ?? parseUsernameFromHostToken(hostToken)
           ?? hostnameOverride.username,
+        ...(hasCompositeHostToken ? { isJumpServerLogin: true as const } : {}),
       }
     : hostTokenTarget;
   if (!base) return null;
@@ -320,6 +328,9 @@ const parseSshCommand = (input: string): QuickConnectParseResult | null => {
       hostname: base.hostname,
       username: optionUsername || username || base.username,
       port: resolvedPort,
+      ...(base.isJumpServerLogin && !optionUsername && !username
+        ? { isJumpServerLogin: true as const }
+        : {}),
     },
     warnings: Array.from(new Set(warnings)),
   };
