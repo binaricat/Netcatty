@@ -582,13 +582,10 @@ export async function syncAllProvidersImpl(this: any,
         // a fresh cloud revision for unchanged data. This is exactly what the
         // periodic remote check's download-remote round-trip and a smart-merge
         // without a real diff produce, so the cloud version inflated every
-        // cycle while the app sat idle. Only skip when the remote version is
-        // not behind the local one, so keep-local resolutions keep their
-        // monotonic version bump.
-        if (
-          checkedRemoteFile
-          && checkedRemoteFile.meta.version >= (Number(this.state.localVersion) || 0)
-        ) {
+        // cycle while the app sat idle. Providers may hold the same payload at
+        // different versions; requiring this remote version to match the global
+        // local version would make them upload in turns forever.
+        if (checkedRemoteFile) {
           try {
             assertSyncSecurityGeneration(this, syncSecurityGeneration);
             const checkedRemotePayload = await EncryptionService.decryptPayload(

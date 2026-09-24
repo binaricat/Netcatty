@@ -993,7 +993,7 @@ test("syncAllProviders skips the upload when the payload already matches the pro
   }
 });
 
-test("syncAllProviders still uploads when the remote version is behind the local version", async () => {
+test("syncAllProviders skips an identical remote even when its version is behind another provider", async () => {
   const originalDecryptPayload = EncryptionService.decryptPayload;
   const originalEncryptPayload = EncryptionService.encryptPayload;
   const checkedRemote = remoteFile("github", 3, 300);
@@ -1045,10 +1045,85 @@ test("syncAllProviders still uploads when the remote version is behind the local
 
     const results = await syncAllProvidersImpl.call(manager, localPayload);
 
-    // Identical data but the remote version is behind: keep the monotonic
-    // upload so the version counter never regresses.
+    assert.equal(uploads, 0);
+    assert.equal(results.get("github")?.action, "none");
+    assert.equal(results.get("github")?.version, 3);
+    assert.equal(manager.state.localVersion, 10);
+  } finally {
+    EncryptionService.decryptPayload = originalDecryptPayload;
+    EncryptionService.encryptPayload = originalEncryptPayload;
+  }
+});
+
+test("syncAllProviders leaves two converged providers idle across repeated cycles", async () => {
+  const originalDecryptPayload = EncryptionService.decryptPayload;
+  const originalEncryptPayload = EncryptionService.encryptPayload;
+  const localPayload = payload("local");
+  const remotes = {
+    github: remoteFile("github", 10, 1000),
+    google: remoteFile("google", 7, 700),
+  };
+  let uploads = 0;
+
+  EncryptionService.decryptPayload = async (file: SyncedFile) =>
+    file === remotes.github ? localPayload : payload("old-google");
+  EncryptionService.encryptPayload = async (_outgoing: SyncPayload, _password: string,
+    _deviceId: string, _deviceName: string, _appVersion: string, baseVersion: number) =>
+    remoteFile("google", baseVersion + 1, 1100);
+
+  try {
+    const manager = {
+      masterPassword: "pw",
+      adapters: new Map(),
+      state: {
+        securityState: "UNLOCKED",
+        providers: {
+          github: { enabled: true, connected: true, status: "connected" },
+          google: { enabled: true, connected: true, status: "connected" },
+        },
+        lastError: null,
+        syncState: "IDLE",
+        syncStrategy: "smartMerge",
+        localVersion: 10,
+        deviceId: "local-device",
+        deviceName: "Local",
+      },
+      getConnectedAdapter: async (provider: CloudProvider) => ({ provider }),
+      updateProviderStatus: () => {},
+      emit: () => {},
+      checkProviderConflict: async (provider: "github" | "google") => ({
+        conflict: false,
+        remoteFile: remotes[provider],
+      }),
+      loadSyncBase: async () => localPayload,
+      saveSyncBase: async () => {},
+      saveSyncAnchor: async () => {},
+      saveProviderConnection: async () => {},
+      saveSyncConfig: () => {},
+      uploadToProvider: async (provider: CloudProvider, _adapter: unknown, file: SyncedFile) => {
+        uploads += 1;
+        remotes[provider as "github" | "google"] = file;
+        manager.state.localVersion = file.meta.version;
+        return { success: true, provider, action: "upload" as const, version: file.meta.version };
+      },
+      exitBlockedState: () => {},
+      notifyStateChange: () => {},
+    };
+
+    const first = await syncAllProvidersImpl.call(manager, localPayload);
+    assert.equal(first.get("github")?.action, "none");
+    assert.equal(first.get("google")?.action, "upload");
     assert.equal(uploads, 1);
-    assert.equal(results.get("github")?.action, "upload");
+    assert.equal(manager.state.localVersion, 11);
+
+    EncryptionService.decryptPayload = async () => localPayload;
+    for (let cycle = 0; cycle < 3; cycle += 1) {
+      const result = await syncAllProvidersImpl.call(manager, localPayload);
+      assert.equal(result.get("github")?.action, "none");
+      assert.equal(result.get("google")?.action, "none");
+    }
+    assert.equal(uploads, 1);
+    assert.equal(manager.state.localVersion, 11);
   } finally {
     EncryptionService.decryptPayload = originalDecryptPayload;
     EncryptionService.encryptPayload = originalEncryptPayload;
