@@ -174,6 +174,8 @@ interface SyncNowOptions {
 interface RemoteVersionCheckOptions {
   force?: boolean;
   notifyOnFailure?: boolean;
+  /** True when the invocation is a periodic runtime check, not startup reconciliation. */
+  periodic?: boolean;
 }
 
 export const useAutoSync = (config: AutoSyncConfig) => {
@@ -681,6 +683,53 @@ export const useAutoSync = (config: AutoSyncConfig) => {
     };
     try {
       if (currentConvergentConfig.initialized && currentConvergentConfig.enabled) {
+        // Periodic runtime checks (#3527): a converged provider must not run a
+        // full CRDT join cycle every timer tick when nothing changed on either
+        // side. Every join flips the UI into SYNCING, records a merge history
+        // entry, persists the replica, and can publish a fresh cloud revision
+        // whenever its verification pass misses — so an unchanged vault plus an
+        // unchanged remote must short-circuit, the same way the legacy branch
+        // short-circuits on `remoteChanged` below. Pulls still happen: if the
+        // remote moved since the last verified baseline, the gate falls
+        // through to the full join.
+        if (options?.periodic === true) {
+          let convergentRemoteUnchanged = false;
+          try {
+            const baseline = await manager.loadConvergentProviderBaseline(connectedProvider);
+            if (baseline) {
+              const inspection = await manager.inspectProviderRemote(connectedProvider);
+              const meta = inspection.remoteFile?.meta;
+              convergentRemoteUnchanged = Boolean(
+                meta
+                  && meta.version === baseline.remoteVersion
+                  && meta.updatedAt === baseline.remoteUpdatedAt
+                  && (meta.deviceId ?? null) === (baseline.remoteDeviceId ?? null),
+              );
+            }
+          } catch (error) {
+            console.warn(
+              '[AutoSync] Convergent remote-unchanged pre-check failed; falling back to a full sync cycle:',
+              error,
+            );
+          }
+          if (convergentRemoteUnchanged) {
+            const currentHash = await getDataHashRef.current();
+            const hashDecision = resolveAutoSyncHashDecision({
+              currentHash,
+              lastSyncedHash: lastSyncedDataRef.current,
+              appliedSkipHash: skipNextSyncHashRef.current,
+            });
+            if (hashDecision !== 'sync') {
+              if (hashDecision === 'skip-applied' && skipNextSyncHashRef.current !== null) {
+                // The applied-remote data is fully synced; absorb it into the
+                // baseline so the next tick does not re-evaluate the same hash.
+                skipNextSyncHashRef.current = null;
+                lastSyncedDataRef.current = currentHash;
+              }
+              return;
+            }
+          }
+        }
         // A v2 remote check must join the provider replicas through the CRDT
         // runtime. Inspecting the materialized v1 snapshot here would discard
         // retained candidates and could turn the deterministic winner into a
@@ -1221,7 +1270,7 @@ export const useAutoSync = (config: AutoSyncConfig) => {
     }
 
     lastRuntimeRemoteCheckAtRef.current = now;
-    await checkRemoteVersion({ force: true, notifyOnFailure: false });
+    await checkRemoteVersion({ force: true, notifyOnFailure: false, periodic: true });
   }, [
     checkRemoteVersion,
     enabled,

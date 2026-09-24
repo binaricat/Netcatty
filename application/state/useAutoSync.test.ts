@@ -250,6 +250,74 @@ test("auto syncNow and debounce re-check manager autoSyncEnabled before pushing"
   );
 });
 
+test("periodic convergent runtime checks skip the join when neither side changed", () => {
+  const source = readFileSync(new URL("./useAutoSync.ts", import.meta.url), "utf8");
+  const checkIndex = source.indexOf("const checkRemoteVersion = useCallback");
+  const convergentGuardIndex = source.indexOf(
+    "if (currentConvergentConfig.initialized && currentConvergentConfig.enabled)",
+    checkIndex,
+  );
+  const gateIndex = source.indexOf("if (options?.periodic === true)", convergentGuardIndex);
+  const baselineIndex = source.indexOf(
+    "manager.loadConvergentProviderBaseline(connectedProvider)",
+    gateIndex,
+  );
+  const remoteMetaIndex = source.indexOf("baseline.remoteUpdatedAt", gateIndex);
+  const hashDecisionIndex = source.indexOf("resolveAutoSyncHashDecision({", gateIndex);
+  const skipReturnIndex = source.indexOf("if (hashDecision !== 'sync')", gateIndex);
+  const buildPayloadIndex = source.indexOf(
+    "const localPayload = await buildPayloadRef.current()",
+    gateIndex,
+  );
+  const syncNowIndex = source.indexOf(
+    "syncNowRef.current({ notifyOnFailure, allowEmptyConvergentSync })",
+    gateIndex,
+  );
+
+  assert.notEqual(checkIndex, -1);
+  assert.notEqual(convergentGuardIndex, -1);
+  assert.notEqual(gateIndex, -1);
+  assert.notEqual(baselineIndex, -1);
+  assert.notEqual(remoteMetaIndex, -1);
+  assert.notEqual(hashDecisionIndex, -1);
+  assert.notEqual(skipReturnIndex, -1);
+  assert.notEqual(buildPayloadIndex, -1);
+  assert.notEqual(syncNowIndex, -1);
+  assert.ok(
+    gateIndex < baselineIndex && baselineIndex < remoteMetaIndex,
+    "the no-op gate must compare the fresh remote meta against the verified provider baseline",
+  );
+  assert.ok(
+    remoteMetaIndex < hashDecisionIndex && hashDecisionIndex < skipReturnIndex,
+    "remote-unchanged must be paired with the local hash decision before skipping",
+  );
+  assert.ok(
+    gateIndex < buildPayloadIndex && buildPayloadIndex < syncNowIndex,
+    "an unchanged periodic check must skip the expensive payload build and CRDT join",
+  );
+});
+
+test("periodic runtime remote checks pass the periodic flag to checkRemoteVersion", () => {
+  const source = readFileSync(new URL("./useAutoSync.ts", import.meta.url), "utf8");
+  const runRuntimeIndex = source.indexOf("const runRuntimeRemoteCheck = useCallback");
+  const callIndex = source.indexOf(
+    "checkRemoteVersion({ force: true, notifyOnFailure: false, periodic: true })",
+    runRuntimeIndex,
+  );
+  const retryEffectIndex = source.indexOf(
+    "checkRemoteVersionRef.current(\n          notifyOnFailure ? undefined : { notifyOnFailure: false },\n        );",
+  );
+
+  assert.notEqual(runRuntimeIndex, -1);
+  assert.notEqual(callIndex, -1);
+  assert.notEqual(retryEffectIndex, -1);
+  assert.equal(
+    source.slice(retryEffectIndex, retryEffectIndex + 200).includes("periodic"),
+    false,
+    "startup retries must stay unmarked so the no-op gate cannot suppress reconciliation",
+  );
+});
+
 test("startup local-wins and merge round-trips refuse device-bound credential placeholders", () => {
   const source = readFileSync(new URL("./useAutoSync.ts", import.meta.url), "utf8");
   const uploadLocalIndex = source.indexOf("if (conflictAction === 'upload-local')");
