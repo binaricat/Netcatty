@@ -517,10 +517,14 @@ export const useSftpViewFileOps = ({
           totalBytes: fileSize,
         });
         if (status === "completed") {
-          if (!rememberedTarget && quickDownloadEnabled && readSftpQuickDownloadEnabled()) {
-            await quickDownloadTargets.remember(
-              endpointKey, resolvedFullPath, pane.filenameEncoding, targetPath,
-            );
+          if (quickDownloadEnabled) {
+            if (readSftpQuickDownloadEnabled()) {
+              await quickDownloadTargets.remember(
+                endpointKey, resolvedFullPath, pane.filenameEncoding, targetPath,
+              );
+            } else {
+              quickDownloadTargets.forget(endpointKey, resolvedFullPath, pane.filenameEncoding);
+            }
           }
           toast.success(`${t("sftp.context.download")}: ${file.name}`, "SFTP");
         } else if (status === "failed") {

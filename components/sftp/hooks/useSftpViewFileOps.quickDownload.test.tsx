@@ -20,6 +20,8 @@ test("quick download reuses only the exact target selected for the same remote f
 
   const storage = new Map<string, string>([[STORAGE_KEY_SFTP_QUICK_DOWNLOAD, "true"]]);
   const existingFiles = new Map<string, "file" | "directory" | "symlink">();
+  const fileInodes = new Map<string, number>();
+  let nextFileInode = 1000;
   const existingDirectories = new Set(["/downloads", "/batch"]);
   const realParents = new Map([["/downloads", "/downloads"], ["/batch", "/batch"]]);
   const parentInodes = new Map([["/downloads", 100], ["/batch", 200]]);
@@ -36,6 +38,7 @@ test("quick download reuses only the exact target selected for the same remote f
     "/downloads/other-endpoint.txt",
     "/downloads/disabled.txt",
     "/downloads/re-enabled.txt",
+    "/downloads/replaced-reselected.txt",
   ];
   let saveCalls = 0;
   let directoryCalls = 0;
@@ -49,6 +52,7 @@ test("quick download reuses only the exact target selected for the same remote f
     downloadToLocal: async (params: { sourcePath: string; targetPath: string; isDirectory: boolean }) => {
       downloads.push(params);
       existingFiles.set(params.targetPath, params.isDirectory ? "directory" : "file");
+      if (!params.isDirectory) fileInodes.set(params.targetPath, nextFileInode++);
       return "completed";
     },
   } as unknown as SftpStateApi };
@@ -65,7 +69,7 @@ test("quick download reuses only the exact target selected for the same remote f
     lstatLocal: async (path: string) => {
       const type = existingFiles.get(path);
       if (!type) throw new Error("ENOENT");
-      return { type };
+      return { type, dev: 1, ino: fileInodes.get(path) };
     },
     realpathLocal: async (path: string) => {
       const real = realParents.get(path);
@@ -97,6 +101,7 @@ test("quick download reuses only the exact target selected for the same remote f
     const single = ops!.onDownloadFileLeft as unknown as (entry: SftpFileEntry, path?: string) => Promise<void>;
     const batch = ops!.onDownloadFilesLeft as unknown as (entries: SftpFileEntry[]) => Promise<void>;
 
+    await act(async () => { await single(file("report.txt")); });
     await act(async () => { await single(file("report.txt")); });
     await act(async () => { await single(file("report.txt")); });
     assert.equal(saveCalls, 1);
@@ -146,6 +151,11 @@ test("quick download reuses only the exact target selected for the same remote f
     await act(async () => { await single(file("report.txt")); });
     assert.equal(saveCalls, 10, "the old target is forgotten while the option is disabled");
     assert.equal(downloads.at(-1)?.targetPath, "/downloads/re-enabled.txt");
+
+    fileInodes.set("/downloads/re-enabled.txt", 99999);
+    await act(async () => { await single(file("report.txt")); });
+    assert.equal(saveCalls, 11, "a different file at the remembered path returns to Save As");
+    assert.equal(downloads.at(-1)?.targetPath, "/downloads/replaced-reselected.txt");
   } finally {
     await act(async () => { renderer?.unmount(); });
     (globalThis as { window?: unknown }).window = oldWindow;

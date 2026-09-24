@@ -7,6 +7,7 @@ type RememberedTarget = {
   targetPath: string;
   parentRealPath: string;
   parentIdentity: string | null;
+  targetIdentity: string;
 };
 
 const TARGET_LIMIT = 200;
@@ -33,8 +34,10 @@ export function useSftpQuickDownloadTargets() {
     targetPath: string,
   ): Promise<void> => {
     const key = sourceKey(endpointKey, sourcePath, encoding);
+    if (!key) return;
+    targetsRef.current.delete(key);
     const bridge = netcattyBridge.get();
-    if (!key || !targetPath || !bridge?.statLocal || !bridge.lstatLocal || !bridge.realpathLocal) return;
+    if (!targetPath || !bridge?.statLocal || !bridge.lstatLocal || !bridge.realpathLocal) return;
     try {
       const parentPath = getParentPath(targetPath);
       const [parent, target, parentRealPath] = await Promise.all([
@@ -43,9 +46,13 @@ export function useSftpQuickDownloadTargets() {
         bridge.realpathLocal(parentPath),
       ]);
       if (parent?.type !== "directory" || target?.type !== "file" || !parentRealPath) return;
+      const targetIdentity = filesystemIdentity(target);
+      if (!targetIdentity) return;
       const targets = targetsRef.current;
-      targets.delete(key);
-      targets.set(key, { targetPath, parentRealPath, parentIdentity: filesystemIdentity(parent) });
+      targets.set(key, {
+        targetPath, parentRealPath,
+        parentIdentity: filesystemIdentity(parent), targetIdentity,
+      });
       while (targets.size > TARGET_LIMIT) {
         const oldest = targets.keys().next().value;
         if (oldest === undefined) break;
@@ -81,6 +88,7 @@ export function useSftpQuickDownloadTargets() {
         source?.type !== "file"
         || parent?.type !== "directory"
         || target?.type !== "file"
+        || filesystemIdentity(target) !== remembered.targetIdentity
         || parentRealPath !== remembered.parentRealPath
         || (remembered.parentIdentity !== null
           && filesystemIdentity(parent) !== remembered.parentIdentity)
