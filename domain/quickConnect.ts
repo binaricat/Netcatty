@@ -277,9 +277,14 @@ const parseSshCommand = (input: string): QuickConnectParseResult | null => {
 
   if (!hostToken) return null;
 
+  const hostTokenTarget = parseTargetWithCompositeUser(hostToken);
+  const hostnameOverride = optionHostname ? parseDirectTarget(optionHostname) : null;
   const base = optionHostname
-    ? parseDirectTarget(optionHostname)
-    : parseTargetWithCompositeUser(hostToken);
+    ? hostnameOverride && {
+        ...hostnameOverride,
+        username: hostTokenTarget?.username ?? hostnameOverride.username,
+      }
+    : hostTokenTarget;
   if (!base) return null;
 
   if (portInvalid) return null;

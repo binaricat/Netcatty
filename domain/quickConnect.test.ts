@@ -59,6 +59,17 @@ test("ssh command ports apply to the JumpServer endpoint", () => {
   });
 });
 
+test("ssh HostName override keeps the JumpServer login name", () => {
+  assert.deepEqual(
+    parseQuickConnectInput("ssh -o HostName=actual-jump.example -p 2222 chenyi@root@10.2.0.8@jump"),
+    {
+      hostname: "actual-jump.example",
+      username: "chenyi@root@10.2.0.8",
+      port: 2222,
+    },
+  );
+});
+
 test("quick connect rejects malformed multi-@ inputs", () => {
   assert.equal(parseQuickConnectInput("a@b@c@d@e"), null);
   assert.equal(parseQuickConnectInput("bad user@10.2.0.8@jump"), null);
