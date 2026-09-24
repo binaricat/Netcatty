@@ -11,13 +11,7 @@ import { toast } from "../../ui/toast";
 import { netcattyBridge } from "../../../infrastructure/services/netcattyBridge";
 import { getFileExtension, getLanguageId, FileOpenerType, SystemAppInfo } from "../../../lib/sftpFileUtils";
 import { isNavigableDirectory } from "../utils";
-import {
-  resolveDownloadSourceSnapshot,
-} from "../sftpDownloadSourceFreshness";
-import {
-  makeDownloadTargetMemoryKey,
-  useSftpDownloadTargetMemory,
-} from "../../../application/state/sftpDownloadTargetMemory";
+import { resolveDownloadSourceSnapshot } from "../../../application/state/sftp/downloadSourceSnapshot";
 import { reportSftpUploadResults } from "../reportSftpUploadResults";
 import { editorTabStore } from "../../../application/state/editorTabStore";
 import { toEditorTabId, activeTabStore } from "../../../application/state/activeTabStore";
@@ -45,8 +39,6 @@ export const useSftpViewFileOps = ({
   getSftpIdForConnection,
   statSftp,
 }: UseSftpViewFileOpsParams): UseSftpViewFileOpsResult => {
-  const downloadTargetMemory = useSftpDownloadTargetMemory();
-
   const [permissionsState, setPermissionsState] = useState<{
     file: SftpFileEntry;
     side: "left" | "right";
@@ -460,10 +452,9 @@ export const useSftpViewFileOps = ({
           sftpId,
           resolvedFullPath,
           pane.filenameEncoding,
+          file.type === "symlink" ? file.linkTarget : undefined,
         );
-        if (sourceSnapshot.isDirectory !== null) {
-          isDirectory = sourceSnapshot.isDirectory;
-        }
+        isDirectory = sourceSnapshot.isDirectory;
 
         if (isDirectory) {
           if (!selectDirectory) {
@@ -474,6 +465,15 @@ export const useSftpViewFileOps = ({
           const selectedDirectory = await selectDirectory(t("sftp.context.download"));
           if (!selectedDirectory) return;
 
+          // The picker may stay open while the remote entry changes again.
+          const selectedSnapshot = await resolveDownloadSourceSnapshot(
+            statSftp,
+            sftpId, resolvedFullPath, pane.filenameEncoding,
+            file.type === "symlink" ? file.linkTarget : undefined,
+          );
+          if (!selectedSnapshot.isDirectory) {
+            throw new Error("Remote source changed while choosing the download target");
+          }
           const targetPath = joinFsPath(selectedDirectory, file.name);
 
           try {
@@ -504,28 +504,17 @@ export const useSftpViewFileOps = ({
 
           return;
         }
-        // Repeat download of the same source: overwrite the previous copy
-        // directly instead of re-showing the save dialog's overwrite confirm.
-        // The exact selected target path is reused (not its parent directory)
-        // so a basename renamed in the dialog is preserved and a remote name
-        // with separator lookalikes cannot escape the remembered directory.
-        const memoryKey = makeDownloadTargetMemoryKey(pane.connection.hostId, resolvedFullPath);
-        const rememberedTarget = downloadTargetMemory.getRememberedDownloadTarget(memoryKey);
-        let targetPath: string | null;
-        if (rememberedTarget) {
-          targetPath = rememberedTarget;
-        } else {
-          // Show save dialog to get target path
-          targetPath = await showSaveDialog(file.name);
-          if (!targetPath) {
-            // User cancelled
-            return;
-          }
-          downloadTargetMemory.rememberDownloadTarget(memoryKey, targetPath);
-        }
+        const targetPath = await showSaveDialog(file.name);
+        if (!targetPath) return;
 
-        const listedSize = typeof file.size === "string" ? parseInt(file.size, 10) || 0 : (file.size || 0);
-        const fileSize = sourceSnapshot.size ?? listedSize;
+        const selectedSnapshot = await resolveDownloadSourceSnapshot(
+          statSftp,
+          sftpId, resolvedFullPath, pane.filenameEncoding,
+          file.type === "symlink" ? file.linkTarget : undefined,
+        );
+        if (selectedSnapshot.isDirectory) {
+          throw new Error("Remote source changed while choosing the download target");
+        }
         // Route through downloadToLocal so FileZilla-style transfer pool
         // sessions are used (browse session stays free for listing).
         const status = await sftpRef.current.downloadToLocal({
@@ -538,7 +527,7 @@ export const useSftpViewFileOps = ({
           sourceHostLabel: pane.connection.hostLabel,
           sourceEncoding: pane.filenameEncoding,
           isDirectory: false,
-          totalBytes: fileSize,
+          totalBytes: selectedSnapshot.size,
         });
         if (status === "completed") {
           toast.success(`${t("sftp.context.download")}: ${file.name}`, "SFTP");
@@ -561,7 +550,6 @@ export const useSftpViewFileOps = ({
       selectDirectory,
       getSftpIdForConnection,
       statSftp,
-      downloadTargetMemory,
     ],
   );
 
@@ -679,10 +667,9 @@ export const useSftpViewFileOps = ({
               sftpId,
               sourcePath,
               pane.filenameEncoding,
+              file.type === "symlink" ? file.linkTarget : undefined,
             );
-            const isDirectory = sourceSnapshot.isDirectory ?? isNavigableDirectory(file);
-            const listedSize = typeof file.size === "string" ? parseInt(file.size, 10) || 0 : (file.size || 0);
-            const fileSize = sourceSnapshot.size ?? listedSize;
+            const isDirectory = sourceSnapshot.isDirectory;
 
             const status = await sftpRef.current.downloadToLocal({
               fileName: file.name,
@@ -694,7 +681,7 @@ export const useSftpViewFileOps = ({
               sourceHostLabel: pane.connection.hostLabel,
               sourceEncoding: pane.filenameEncoding,
               isDirectory,
-              totalBytes: isDirectory ? undefined : fileSize,
+              totalBytes: isDirectory ? undefined : sourceSnapshot.size,
             });
             results[index] = { status: "fulfilled", value: { file, status } };
           } catch (reason) {
