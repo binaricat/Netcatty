@@ -2,10 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  DOWNLOAD_TARGET_MEMORY_LIMIT,
-  getRememberedDownloadTargetDir,
-  makeDownloadTargetMemoryKey,
-  rememberDownloadTargetDir,
   resolveDownloadSourceSnapshot,
 } from "./sftpDownloadSourceFreshness.ts";
 
@@ -77,25 +73,4 @@ test("unknown size (sizeKnown=false) and stat failures fall back to the listed e
     "auto",
   );
   assert.deepEqual(nullStat, { size: null, isDirectory: null });
-});
-
-test("target dir memory keys on host + source path and is LRU-bounded", () => {
-  const key = makeDownloadTargetMemoryKey("host-1", "/tmp/f.log");
-  assert.equal(getRememberedDownloadTargetDir(key), undefined);
-
-  rememberDownloadTargetDir(key, "/downloads");
-  assert.equal(getRememberedDownloadTargetDir(key), "/downloads");
-  // Re-remembering refreshes instead of failing.
-  rememberDownloadTargetDir(key, "/other");
-  assert.equal(getRememberedDownloadTargetDir(key), "/other");
-
-  const first = makeDownloadTargetMemoryKey("host-1", "/first");
-  rememberDownloadTargetDir(first, "/a");
-  for (let i = 0; i < DOWNLOAD_TARGET_MEMORY_LIMIT; i++) {
-    rememberDownloadTargetDir(makeDownloadTargetMemoryKey("host-2", `/p/${i}`), `/d/${i}`);
-  }
-  // Oldest entry was evicted; the most recent insertions survive.
-  assert.equal(getRememberedDownloadTargetDir(first), undefined);
-  const lastKey = makeDownloadTargetMemoryKey("host-2", `/p/${DOWNLOAD_TARGET_MEMORY_LIMIT - 1}`);
-  assert.equal(getRememberedDownloadTargetDir(lastKey), `/d/${DOWNLOAD_TARGET_MEMORY_LIMIT - 1}`);
 });

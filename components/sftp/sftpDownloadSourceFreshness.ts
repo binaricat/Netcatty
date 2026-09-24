@@ -51,33 +51,3 @@ export const resolveDownloadSourceSnapshot = async (
     return NO_SNAPSHOT;
   }
 };
-
-export const makeDownloadTargetMemoryKey = (
-  hostId: string | undefined,
-  sourcePath: string,
-): string => `${hostId ?? ""}:${sourcePath}`;
-
-/** Bounded so very long sessions cannot grow the map without limit. */
-export const DOWNLOAD_TARGET_MEMORY_LIMIT = 200;
-
-const downloadTargetDirBySource = new Map<string, string>();
-
-export const getRememberedDownloadTargetDir = (key: string): string | undefined =>
-  downloadTargetDirBySource.get(key);
-
-/**
- * Remember the local directory chosen for a given remote source path so
- * re-downloading the same file overwrites the previous copy directly instead
- * of re-showing the save dialog's overwrite confirmation.
- */
-export const rememberDownloadTargetDir = (key: string, dir: string): void => {
-  if (!key || !dir) return;
-  // Re-insert to refresh recency for the LRU bound.
-  downloadTargetDirBySource.delete(key);
-  downloadTargetDirBySource.set(key, dir);
-  while (downloadTargetDirBySource.size > DOWNLOAD_TARGET_MEMORY_LIMIT) {
-    const oldest = downloadTargetDirBySource.keys().next().value;
-    if (oldest === undefined) break;
-    downloadTargetDirBySource.delete(oldest);
-  }
-};

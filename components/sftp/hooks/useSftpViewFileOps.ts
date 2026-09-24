@@ -12,11 +12,13 @@ import { netcattyBridge } from "../../../infrastructure/services/netcattyBridge"
 import { getFileExtension, getLanguageId, FileOpenerType, SystemAppInfo } from "../../../lib/sftpFileUtils";
 import { isNavigableDirectory } from "../utils";
 import {
-  getRememberedDownloadTargetDir,
-  makeDownloadTargetMemoryKey,
-  rememberDownloadTargetDir,
   resolveDownloadSourceSnapshot,
 } from "../sftpDownloadSourceFreshness";
+import {
+  getRememberedDownloadTarget,
+  makeDownloadTargetMemoryKey,
+  rememberDownloadTarget,
+} from "../../../application/state/sftpDownloadTargetMemory";
 import { reportSftpUploadResults } from "../reportSftpUploadResults";
 import { editorTabStore } from "../../../application/state/editorTabStore";
 import { toEditorTabId, activeTabStore } from "../../../application/state/activeTabStore";
@@ -502,11 +504,14 @@ export const useSftpViewFileOps = ({
         }
         // Repeat download of the same source: overwrite the previous copy
         // directly instead of re-showing the save dialog's overwrite confirm.
+        // The exact selected target path is reused (not its parent directory)
+        // so a basename renamed in the dialog is preserved and a remote name
+        // with separator lookalikes cannot escape the remembered directory.
         const memoryKey = makeDownloadTargetMemoryKey(pane.connection.hostId, resolvedFullPath);
-        const rememberedDir = getRememberedDownloadTargetDir(memoryKey);
+        const rememberedTarget = getRememberedDownloadTarget(memoryKey);
         let targetPath: string | null;
-        if (rememberedDir) {
-          targetPath = joinFsPath(rememberedDir, file.name);
+        if (rememberedTarget) {
+          targetPath = rememberedTarget;
         } else {
           // Show save dialog to get target path
           targetPath = await showSaveDialog(file.name);
@@ -514,7 +519,7 @@ export const useSftpViewFileOps = ({
             // User cancelled
             return;
           }
-          rememberDownloadTargetDir(memoryKey, getParentPath(targetPath));
+          rememberDownloadTarget(memoryKey, targetPath);
         }
 
         const listedSize = typeof file.size === "string" ? parseInt(file.size, 10) || 0 : (file.size || 0);
