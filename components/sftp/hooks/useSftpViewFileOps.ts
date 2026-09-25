@@ -550,6 +550,7 @@ export const useSftpViewFileOps = ({
             targetCtimeNs: rememberedTarget.targetCtimeNs,
             targetMtimeNs: rememberedTarget.targetMtimeNs,
           } : undefined,
+          expectedSourceEndpointKey: rememberedTarget ? endpointKey ?? undefined : undefined,
           onPublishedLocalFile: (identity) => { publishedIdentity = identity; },
           sftpId,
           connectionId: pane.connection.id,

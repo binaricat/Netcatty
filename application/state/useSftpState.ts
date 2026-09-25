@@ -562,6 +562,7 @@ export const useSftpState = (
     getPaneByConnectionId,
     getTabByConnectionId,
     resolveConnectedHost: (tabId) => connectedHostByTabIdRef.current.get(tabId) ?? null,
+    getTransferPoolKeyForHost,
     updateTab,
     refresh,
     clearCacheForConnection,

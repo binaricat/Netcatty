@@ -166,6 +166,7 @@ export const useSftpTransfers = ({
   getPaneByConnectionId,
   getTabByConnectionId,
   resolveConnectedHost,
+  getTransferPoolKeyForHost,
   updateTab,
   refresh,
   clearCacheForConnection,
@@ -1754,6 +1755,7 @@ export const useSftpTransfers = ({
       sourcePath: string;
       targetPath: string;
       expectedLocalTarget?: LocalDownloadTargetExpectation;
+      expectedSourceEndpointKey?: string;
       onPublishedLocalFile?: (identity: LocalPublishedFileIdentity) => void;
       sftpId: string;
       connectionId: string;
@@ -1840,6 +1842,12 @@ export const useSftpTransfers = ({
           // exact connect-time route that identified the browsed source.
           if (params.expectedLocalTarget && !sourceConnectHost) {
             throw new Error("Download source connection changed; choose the destination again");
+          }
+          if (params.expectedLocalTarget) {
+            const actualKey = sourceConnectHost && await getTransferPoolKeyForHost?.(sourceConnectHost);
+            if (!actualKey || actualKey !== params.expectedSourceEndpointKey) {
+              throw new Error("Download source route changed; choose the destination again");
+            }
           }
           if (acquireTransferSession && params.sourceHostId) {
             sourceWorkLease = await acquireTransferSession(
@@ -1937,7 +1945,7 @@ export const useSftpTransfers = ({
       return result;
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [sftpSessionsRef, acquireTransferSession, getTabByConnectionId, resolveConnectedHost],
+    [sftpSessionsRef, acquireTransferSession, getTabByConnectionId, resolveConnectedHost, getTransferPoolKeyForHost],
   );
 
   // Publish only on owner change / mount. Do NOT re-publish on every `transfers`

@@ -33,6 +33,7 @@ test("direct download opens both pooled reads through the tab's connected host",
       getPaneByConnectionId: () => null,
       getTabByConnectionId: () => ({ side: "left", tabId: "tab-1", pane: {} as never }),
       resolveConnectedHost: () => connectedHost,
+      getTransferPoolKeyForHost: async () => "route-new",
       acquireTransferSession: async (_hostId, _transferId, host) => {
         seenHosts.push(host);
         return { poolKey: "connected-host", sftpId: `pooled-${seenHosts.length}`, release: () => undefined, discard: () => undefined };
@@ -55,6 +56,19 @@ test("direct download opens both pooled reads through the tab's connected host",
     });
     assert.equal(seenHosts.length, 2);
     assert.ok(seenHosts.every((host) => host === connectedHost));
+    await act(async () => {
+      assert.equal(await ops!.downloadToLocal({
+        fileName: "other.bin", sourcePath: "/remote/other.bin", targetPath: "/local/other.bin",
+        expectedLocalTarget: {
+          parentRealPath: "/local", parentIdentity: "1:2", parentBirthtimeNs: "100",
+          targetIdentity: "1:3", targetBirthtimeNs: "200", targetCtimeNs: "201", targetMtimeNs: "202",
+        },
+        expectedSourceEndpointKey: "route-old",
+        sftpId: "browse", connectionId: "ssh", sourceHostId: "host", sourceHostLabel: "Host",
+        isDirectory: false, totalBytes: 1,
+      }), "failed");
+    });
+    assert.equal(seenHosts.length, 2, "route mismatch must fail before opening another transfer connection");
   } finally {
     await act(async () => { renderer?.unmount(); });
     for (const task of sftpTransferCenterStore.getOwnerTasks("direct-connected-host-owner")) {
