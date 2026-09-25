@@ -4,6 +4,7 @@ export const esAiMessages: Messages = {
   // AI Settings
   'ai.agentSettings': 'Configuración del agente',
   'ai.chat.preparing': 'Preparando…',
+  'ai.chat.modelCatalogWarning': 'No se pudo actualizar la lista de modelos. Se muestran los últimos modelos disponibles o los integrados.',
   'ai.chat.compactingContext': 'Compactando el contexto anterior…',
   'ai.chat.compactingStep': 'Recortando el contexto para el siguiente paso…',
   'ai.chat.compactionRetry': 'La petición era demasiado grande. Compactando el contexto y reintentando…',
@@ -591,6 +592,7 @@ export const esAiMessages: Messages = {
   'terminal.layer.aiChat': 'Chat de IA',
   'terminal.layer.movePanelLeft': 'Mover panel a la izquierda',
   'terminal.layer.movePanelRight': 'Mover panel a la derecha',
+  'terminal.layer.movePanelBottom': 'Mover panel a la parte inferior',
   'terminal.layer.closePanel': 'Cerrar panel',
   'terminal.layer.closePane': 'Cerrar división',
   'terminal.layer.resizeSplit': 'Redimensionar división',

@@ -16,6 +16,7 @@ import { formatHostPort } from "../domain/host";
 import {
   buildQuickConnectHost,
   getQuickConnectDefaultPort,
+  isQuickConnectIdentityCompatible,
   isQuickConnectIdentityUsable,
   type QuickConnectAuthMethod,
   type QuickConnectProtocol,
@@ -104,13 +105,13 @@ const QuickConnectWizard: React.FC<QuickConnectWizardProps> = ({
     [keys, protocol, selectedIdentity],
   );
   const identityOptions = useMemo(
-    () => identities.map((identity) => ({
+    () => identities.filter((identity) => isQuickConnectIdentityCompatible(identity, target)).map((identity) => ({
       value: identity.id,
       label: identity.label,
       sublabel: identity.username,
       icon: <User size={14} />,
     })),
-    [identities],
+    [identities, target],
   );
 
   const detachSelectedIdentity = () => {
@@ -131,7 +132,7 @@ const QuickConnectWizard: React.FC<QuickConnectWizardProps> = ({
       return;
     }
     const identity = identities.find((candidate) => candidate.id === identityId);
-    if (!identity) return;
+    if (!identity || !isQuickConnectIdentityCompatible(identity, target)) return;
     setSelectedIdentityId(identity.id);
     setUsername(identity.username);
     setAuthMethod(identity.authMethod);
@@ -431,7 +432,7 @@ const QuickConnectWizard: React.FC<QuickConnectWizardProps> = ({
       </div>
       </div>
 
-      {protocol !== "telnet" && identities.length > 0 && (
+      {protocol !== "telnet" && identityOptions.length > 0 && (
         <div className="flex flex-col gap-4">
           <div className="flex flex-col gap-3">
             <Label className="text-sm font-medium">{t("quickConnect.identity.label")}</Label>

@@ -78,7 +78,7 @@ function parseClaudeSettings(settings) {
   return str;
 }
 
-const CLAUDE_REASONING_LEVELS = new Set(["low", "medium", "high", "max"]);
+const CLAUDE_REASONING_LEVELS = new Set(["low", "medium", "high", "xhigh", "max"]);
 
 function splitClaudeModelSelection(model) {
   if (typeof model !== "string" || !model) {
@@ -286,15 +286,31 @@ async function runClaudeTurn({ prompt, attachments, options, emitter, queryFn })
 /** Map claude-agent-sdk ModelInfo[] -> renderer preset shape {id,name,description}. */
 function mapClaudeModels(models) {
   if (!Array.isArray(models)) return [];
+  // SDK types declare {value, displayName, description}, but Claude Code's
+  // supportedModels() control response actually returns {id, name} at runtime
+  // (same CLI lineage as CodeBuddy — see mapCodebuddyModels). Accept both
+  // shapes so a live catalog is never filtered into an empty list, which
+  // would silently degrade the picker to build-time curated presets (#3496).
   return models
-    .filter((m) => m && m.value)
-    .map((m) => ({
-      id: m.value,
-      name: m.displayName || m.value,
-      description: m.description,
-      thinkingLevels: ["low", "medium", "high", "max"],
-      defaultThinkingLevel: "medium",
-    }));
+    .map((m) => {
+      if (!m) return null;
+      const id = m.value || m.id || m.modelId;
+      if (!id) return null;
+      const advertisedLevels = m.supportedEffortLevels || m.thinking?.effort_options;
+      const thinkingLevels = m.supportsEffort === false
+        ? []
+        : Array.isArray(advertisedLevels)
+          ? advertisedLevels.filter((level) => CLAUDE_REASONING_LEVELS.has(level))
+          : ["low", "medium", "high", "max"];
+      return {
+        id,
+        name: m.displayName || m.name || id,
+        description: m.description,
+        thinkingLevels,
+        ...(thinkingLevels.length > 0 ? { defaultThinkingLevel: thinkingLevels.includes("medium") ? "medium" : thinkingLevels[0] } : {}),
+      };
+    })
+    .filter(Boolean);
 }
 
 /**

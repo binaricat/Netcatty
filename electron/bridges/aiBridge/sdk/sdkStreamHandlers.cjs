@@ -79,6 +79,11 @@ const SDK_MODEL_CACHE_ENV_KEYS = [
   "HOME",
   "USERPROFILE",
   "XDG_CONFIG_HOME",
+  "CODEX_HOME",
+  "CLAUDE_CONFIG_DIR",
+  "ANTHROPIC_API_KEY",
+  "ANTHROPIC_AUTH_TOKEN",
+  "CLAUDE_CODE_OAUTH_TOKEN",
   "OPENCODE_BIN",
   "OPENCODE_CONFIG",
   "OPENCODE_CONFIG_DIR",
@@ -137,6 +142,47 @@ function normalizeSdkListModelsResult(raw) {
   const currentModelId = Array.isArray(raw) ? null : raw?.currentModelId || null;
   const models = Array.isArray(rawModels) ? rawModels.filter((m) => m && m.id) : [];
   return { currentModelId, models };
+}
+
+/**
+ * Fetch a runtime model catalog for one SDK backend. For Codex on the default
+ * `sdk` runtime, the codex-sdk exposes no model catalog (its driver always
+ * returns []), so fall back to the App Server runtime's live `model/list`
+ * catalog — otherwise the picker stays pinned to build-time curated presets
+ * and cannot follow the installed CLI (#3496).
+ */
+async function fetchSdkModelCatalog({
+  backendKey,
+  codexRuntime,
+  driver,
+  binPath,
+  env,
+  abortController,
+  cursorAuthMode,
+  cursorCliBinPath,
+  codexAppServerRuntime: appServerRuntime,
+}) {
+  let raw;
+  if (codexRuntime === "app-server") {
+    raw = await appServerRuntime.listModels({ binPath, env });
+  } else {
+    raw = await driver.listModels({
+      binPath,
+      env,
+      abortController,
+      cursorAuthMode: backendKey === "cursor" ? cursorAuthMode : undefined,
+      cursorCliBinPath: backendKey === "cursor" ? cursorCliBinPath : undefined,
+    });
+    const sdkCatalog = normalizeSdkListModelsResult(raw);
+    if (backendKey === "codex" && sdkCatalog.models.length === 0 && !sdkCatalog.currentModelId) {
+      raw = await appServerRuntime.listModels({ binPath, env });
+    }
+  }
+  const { currentModelId, models } = normalizeSdkListModelsResult(raw);
+  if (models.length === 0 && !currentModelId) {
+    throw new Error("The live model catalog returned no models");
+  }
+  return raw;
 }
 
 function resolveSdkPromptPlacement({
@@ -888,9 +934,10 @@ function registerSdkStreamHandlers(ctx) {
         const codexRuntime = backendKey === "codex" && requestedCodexRuntime === "app-server"
           ? "app-server"
           : "sdk";
-        // claude/copilot/opencode enumerate models via the SDK; codex has no
-        // catalog (its driver returns []), so the renderer falls back to curated
-        // presets. Cache + in-flight coalescing avoid spawn storms (#2184).
+        // claude/copilot/opencode enumerate models via the SDK; codex's sdk
+        // driver returns [] and falls back to the App Server catalog (see
+        // fetchSdkModelCatalog). Cache + in-flight coalescing avoid spawn
+        // storms (#2184).
         const cacheKey = buildSdkModelCacheKey(
           backendKey,
           cursorAuthMode === "cli-login" ? (cursorCliBinPath || binPath) : binPath,
@@ -910,15 +957,17 @@ function registerSdkStreamHandlers(ctx) {
           const abortController = new AbortController();
           try {
             const raw = await withTimeout(
-              codexRuntime === "app-server"
-                ? codexAppServerRuntime.listModels({ binPath, env })
-                : driver.listModels({
-                  binPath,
-                  env,
-                  abortController,
-                  cursorAuthMode: backendKey === "cursor" ? cursorAuthMode : undefined,
-                  cursorCliBinPath: backendKey === "cursor" ? cursorCliBinPath : undefined,
-                }),
+              fetchSdkModelCatalog({
+                backendKey,
+                codexRuntime,
+                driver,
+                binPath,
+                env,
+                abortController,
+                cursorAuthMode: backendKey === "cursor" ? cursorAuthMode : undefined,
+                cursorCliBinPath: backendKey === "cursor" ? cursorCliBinPath : undefined,
+                codexAppServerRuntime,
+              }),
               MODEL_LIST_TIMEOUT_MS,
               abortController,
             );
@@ -938,7 +987,7 @@ function registerSdkStreamHandlers(ctx) {
               ok: true,
               currentModelId: null,
               models: [],
-              warning: codexRuntime === "app-server" ? (err?.message || String(err)) : undefined,
+              warning: err?.message || String(err),
             };
           }
         })();
@@ -958,9 +1007,7 @@ function registerSdkStreamHandlers(ctx) {
           ok: true,
           currentModelId: null,
           models: [],
-          warning: backendKey === "codex" && requestedCodexRuntime === "app-server"
-            ? (err?.message || String(err))
-            : undefined,
+          warning: err?.message || String(err),
         };
       }
     });
@@ -1233,6 +1280,7 @@ module.exports = {
   expireSiblingCursorCliModeSessions,
   expireSiblingGrokRuntimeSessions,
   shouldCacheSdkRuntimeModels,
+  fetchSdkModelCatalog,
   normalizeHistoryMessages,
   formatSdkHistoryReplaySection,
   buildSdkTurnPrompt,

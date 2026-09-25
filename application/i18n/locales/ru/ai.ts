@@ -5,6 +5,7 @@ export const ruAiMessages: Messages = {
   // AI Settings
   'ai.agentSettings': 'Настройки агента',
   'ai.chat.preparing': 'Подготовка…',
+  'ai.chat.modelCatalogWarning': 'Не удалось обновить список моделей. Показаны последние доступные или встроенные модели.',
   'ai.chat.contextCompacted': 'Контекст сжат',
   'ai.title': 'AI',
   'ai.description': 'Настройка AI-провайдеров, агентов и параметров безопасности',
@@ -559,6 +560,7 @@ export const ruAiMessages: Messages = {
   'terminal.layer.aiChat': 'AI-чат',
   'terminal.layer.movePanelLeft': 'Переместить панель влево',
   'terminal.layer.movePanelRight': 'Переместить панель вправо',
+  'terminal.layer.movePanelBottom': 'Переместить панель вниз',
   'terminal.layer.closePanel': 'Закрыть панель',
   'terminal.layer.closePane': 'Закрыть область',
   'terminal.layer.resizeSplit': 'Изменить размер области',

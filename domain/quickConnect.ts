@@ -2,6 +2,8 @@ export interface QuickConnectTarget {
   hostname: string;
   username?: string;
   port?: number;
+  /** The @ separators in the address are part of a JumpServer login name. */
+  isJumpServerLogin?: true;
 }
 
 interface QuickConnectParseResult {
@@ -76,6 +78,47 @@ const parseDirectTarget = (input: string): QuickConnectTarget | null => {
     port,
   };
 };
+
+/** Non-empty pieces of a JumpServer login name. */
+const USERNAME_SEGMENT_RE = /^[^\s@]+$/;
+
+const parseUsernameFromHostToken = (input: string): string | undefined => {
+  const segments = input.trim().split("@");
+  if (segments.length < 2 || segments.length > 4 || !segments[segments.length - 1]) {
+    return undefined;
+  }
+  const usernameSegments = segments.slice(0, -1);
+  return usernameSegments.every((segment) => USERNAME_SEGMENT_RE.test(segment))
+    ? usernameSegments.join("@")
+    : undefined;
+};
+
+/**
+ * JumpServer selects the asset from the SSH login name. OpenSSH connects to
+ * the final host and sends every preceding segment as one username, including
+ * the @ separators. This is a single SSH connection, not a ProxyJump chain.
+ */
+const parseJumpServerTarget = (input: string): QuickConnectTarget | null => {
+  const trimmed = input.trim();
+  const atCount = (trimmed.match(/@/g) || []).length;
+  if (atCount < 2 || atCount > 3) return null;
+
+  const segments = trimmed.split("@");
+  const host = parseDirectTarget(segments[segments.length - 1]);
+  const username = parseUsernameFromHostToken(trimmed);
+  if (!host || !username) return null;
+
+  return {
+    hostname: host.hostname,
+    username,
+    port: host.port,
+    isJumpServerLogin: true,
+  };
+};
+
+/** Parse a quick connect target, accepting JumpServer login names. */
+const parseTargetWithCompositeUser = (input: string): QuickConnectTarget | null =>
+  parseJumpServerTarget(input) ?? parseDirectTarget(input);
 
 const sshArgOptions = new Set([
   "-b",
@@ -248,9 +291,21 @@ const parseSshCommand = (input: string): QuickConnectParseResult | null => {
 
   if (!hostToken) return null;
 
+  const hostTokenTarget = parseTargetWithCompositeUser(hostToken);
+  const hostTokenAtCount = (hostToken.match(/@/g) || []).length;
+  const hasCompositeHostToken = hostTokenAtCount >= 2
+    && hostTokenAtCount <= 3
+    && Boolean(parseUsernameFromHostToken(hostToken));
+  const hostnameOverride = optionHostname ? parseDirectTarget(optionHostname) : null;
   const base = optionHostname
-    ? parseDirectTarget(optionHostname)
-    : parseDirectTarget(hostToken);
+    ? hostnameOverride && {
+        ...hostnameOverride,
+        username: hostTokenTarget?.username
+          ?? parseUsernameFromHostToken(hostToken)
+          ?? hostnameOverride.username,
+        ...(hasCompositeHostToken ? { isJumpServerLogin: true as const } : {}),
+      }
+    : hostTokenTarget;
   if (!base) return null;
 
   if (portInvalid) return null;
@@ -273,6 +328,9 @@ const parseSshCommand = (input: string): QuickConnectParseResult | null => {
       hostname: base.hostname,
       username: optionUsername || username || base.username,
       port: resolvedPort,
+      ...(base.isJumpServerLogin && !optionUsername && !username
+        ? { isJumpServerLogin: true as const }
+        : {}),
     },
     warnings: Array.from(new Set(warnings)),
   };
@@ -288,7 +346,7 @@ export function parseQuickConnectInputWithWarnings(
   const sshTarget = parseSshCommand(trimmed);
   if (sshTarget) return sshTarget;
 
-  return { target: parseDirectTarget(trimmed), warnings: [] };
+  return { target: parseTargetWithCompositeUser(trimmed), warnings: [] };
 }
 
 // Parse user@host:port or ssh command formats

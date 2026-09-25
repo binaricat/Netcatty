@@ -347,6 +347,7 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
     listLocalDir,
     listDrives,
     openPath,
+    statSftp,
   } = useSftpBackend();
 
   const sftpRef = useRef(sftp);
@@ -1337,6 +1338,7 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
         selectDirectory={selectDirectory}
         listLocalDir={listLocalDir}
         listDrives={listDrives}
+        statSftp={statSftp}
         openPath={openPath}
         t={t}
       />
@@ -1389,6 +1391,7 @@ type SftpSidePanelInteractiveBodyProps = {
   selectDirectory: ReturnType<typeof useSftpBackend>["selectDirectory"];
   listLocalDir: ReturnType<typeof useSftpBackend>["listLocalDir"];
   listDrives: ReturnType<typeof useSftpBackend>["listDrives"];
+  statSftp: ReturnType<typeof useSftpBackend>["statSftp"];
   openPath: ReturnType<typeof useSftpBackend>["openPath"];
   t: ReturnType<typeof useI18n>["t"];
 };
@@ -1431,6 +1434,7 @@ const SftpSidePanelInteractiveBody: React.FC<SftpSidePanelInteractiveBodyProps> 
   selectDirectory,
   listLocalDir,
   listDrives,
+  statSftp,
   openPath,
   t,
 }) => {
@@ -1540,6 +1544,7 @@ const SftpSidePanelInteractiveBody: React.FC<SftpSidePanelInteractiveBodyProps> 
     showSaveDialog,
     selectDirectory,
     getSftpIdForConnection: sftp.getSftpIdForConnection,
+    statSftp,
     listLocalFiles: listLocalDir,
     listDrives,
   });

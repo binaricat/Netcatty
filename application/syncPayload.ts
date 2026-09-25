@@ -96,6 +96,7 @@ import {
   STORAGE_KEY_HOST_CLICK_BEHAVIOR,
   STORAGE_KEY_SHOW_ONLY_UNGROUPED_HOSTS_IN_ROOT,
   STORAGE_KEY_SHOW_SFTP_TAB,
+  STORAGE_KEY_SFTP_IN_SIDEBAR,
   STORAGE_KEY_TAB_BAR_POSITION,
   STORAGE_KEY_SHOW_HOST_TREE_SIDEBAR,
   STORAGE_KEY_SHELL_ONLY_TAB_NUMBER_SHORTCUTS,
@@ -323,6 +324,7 @@ export const SYNCABLE_SETTING_STORAGE_KEYS = [
   STORAGE_KEY_HOST_CLICK_BEHAVIOR,
   STORAGE_KEY_SHOW_ONLY_UNGROUPED_HOSTS_IN_ROOT,
   STORAGE_KEY_SHOW_SFTP_TAB,
+  STORAGE_KEY_SFTP_IN_SIDEBAR,
   STORAGE_KEY_TAB_BAR_POSITION,
   STORAGE_KEY_SHELL_ONLY_TAB_NUMBER_SHORTCUTS,
   STORAGE_KEY_SHOW_TAB_NUMBER_BADGES,
@@ -561,6 +563,8 @@ export function collectSyncableSettings(): SyncPayload['settings'] {
   if (tabBarPosition != null) settings.tabBarPosition = normalizeTabBarPosition(tabBarPosition);
   const showSftpTab = localStorageAdapter.readBoolean(STORAGE_KEY_SHOW_SFTP_TAB);
   if (showSftpTab != null) settings.showSftpTab = showSftpTab;
+  const sftpInSidebar = localStorageAdapter.readBoolean(STORAGE_KEY_SFTP_IN_SIDEBAR);
+  if (sftpInSidebar != null) settings.sftpInSidebar = sftpInSidebar;
   const shellOnlyTabNumberShortcuts = localStorageAdapter.readBoolean(STORAGE_KEY_SHELL_ONLY_TAB_NUMBER_SHORTCUTS);
   if (shellOnlyTabNumberShortcuts != null) settings.shellOnlyTabNumberShortcuts = shellOnlyTabNumberShortcuts;
   const showTabNumberBadges = localStorageAdapter.readBoolean(STORAGE_KEY_SHOW_TAB_NUMBER_BADGES);
@@ -835,6 +839,9 @@ async function applySyncableSettings(
   }
   if (settings.showSftpTab != null) {
     localStorageAdapter.writeBoolean(STORAGE_KEY_SHOW_SFTP_TAB, settings.showSftpTab);
+  }
+  if (settings.sftpInSidebar != null) {
+    localStorageAdapter.writeBoolean(STORAGE_KEY_SFTP_IN_SIDEBAR, settings.sftpInSidebar);
   }
   if (settings.shellOnlyTabNumberShortcuts != null) {
     localStorageAdapter.writeBoolean(STORAGE_KEY_SHELL_ONLY_TAB_NUMBER_SHORTCUTS, settings.shellOnlyTabNumberShortcuts);

@@ -1,5 +1,7 @@
 import React, { Suspense, lazy, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useActiveTabId, useIsSftpActive, useIsVaultActive } from '../state/activeTabStore';
+import { useSettingsChromeStore } from '../state/settingsChromeStore';
+import { computeSftpViewRailOffset, useVaultSidebarLayoutWidth } from '../state/vaultSidebarLayoutStore';
 import { useTerminalHostTreeLayoutWidth } from '../state/terminalHostTreeStore';
 import { isTerminalContentTabSurface } from './workTabSurface';
 import { cn } from '../../lib/utils';
@@ -14,13 +16,20 @@ export const VaultViewContainer: React.FC<{
   children: React.ReactNode;
   appThemeStyle?: React.CSSProperties;
 }> = ({ children, appThemeStyle }) => {
-  const isActive = useIsVaultActive();
+  const isVaultActive = useIsVaultActive();
+  const { sftpInSidebar } = useSettingsChromeStore();
+  const isSftpActive = useIsSftpActive();
+  const vaultRailWidth = useVaultSidebarLayoutWidth();
+  // With the "SFTP in sidebar" setting, the vault sidebar rail stays visible
+  // next to the root SFTP view while the SFTP tab is active.
+  const sftpRailMode = !!sftpInSidebar && isSftpActive;
+  const isActive = isVaultActive || sftpRailMode;
   const wasActiveRef = useRef(isActive);
   const [suppressActiveTransition, setSuppressActiveTransition] = useState(false);
   const isActivating = isActive && !wasActiveRef.current;
   const shouldSuppressTransition = isActivating || suppressActiveTransition;
   const containerStyle: React.CSSProperties = isActive
-    ? {}
+    ? (sftpRailMode ? { left: 0, top: 0, bottom: 0, width: vaultRailWidth } : {})
     : { visibility: 'hidden', pointerEvents: 'none', position: 'absolute', zIndex: -1 };
 
   useLayoutEffect(() => {
@@ -146,6 +155,8 @@ export function shouldRenderTerminalLayerMount(
 
 export const SftpViewMount: React.FC<SftpViewProps> = (props) => {
   const isActive = useIsSftpActive();
+  const { sftpInSidebar } = useSettingsChromeStore();
+  const vaultRailWidth = useVaultSidebarLayoutWidth();
   const [shouldMount, setShouldMount] = useState(isActive);
 
   useEffect(() => {
@@ -154,12 +165,25 @@ export const SftpViewMount: React.FC<SftpViewProps> = (props) => {
 
   if (!shouldMount) return null;
 
+  const railOffset = computeSftpViewRailOffset({
+    sftpInSidebar: !!sftpInSidebar,
+    isSftpActive: isActive,
+    vaultRailWidth,
+  });
+
   return (
-    <LazyLoadBoundary name="SFTP" resetKey={isActive ? "active" : "idle"}>
-      <Suspense fallback={<SftpViewFallback visible={isActive} />}>
-        <LazySftpView {...props} />
-      </Suspense>
-    </LazyLoadBoundary>
+    <div
+      className="absolute inset-0"
+      // The inactive terminal layer remains painted at z=0. Place SFTP above
+      // it, while the vault rail at z=20 keeps its resize handle interactive.
+      style={{ left: railOffset, zIndex: railOffset > 0 ? 10 : undefined }}
+    >
+      <LazyLoadBoundary name="SFTP" resetKey={isActive ? "active" : "idle"}>
+        <Suspense fallback={<SftpViewFallback visible={isActive} />}>
+          <LazySftpView {...props} />
+        </Suspense>
+      </LazyLoadBoundary>
+    </div>
   );
 };
 

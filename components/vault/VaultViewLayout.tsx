@@ -21,6 +21,10 @@ import {
 } from "./VaultPageHeader";
 import { useConnectionLogsStore } from "../../application/state/connectionLogsStore";
 import { useNotesStore } from "../../application/state/notesStore";
+import { activeTabStore, useIsSftpActive } from "../../application/state/activeTabStore";
+import { useSettingsChromeStore } from "../../application/state/settingsChromeStore";
+import { vaultSidebarLayoutStore } from "../../application/state/vaultSidebarLayoutStore";
+import { Folder } from "lucide-react";
 import { LazyLoadBoundary } from "../ui/lazy-load-boundary";
 import { toast } from "../ui/toast";
 import { AppWordmark } from "../AppWordmark";
@@ -462,6 +466,27 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
     sidebarMinWidth,
     Math.min(sidebarMaxWidth, Number(sidebarWidth) || 208),
   );
+  const { sftpInSidebar } = useSettingsChromeStore();
+  const isSftpSurfaceActive = useIsSftpActive();
+  // Sidebar SFTP placement is independent of the legacy "Show SFTP tab"
+  // toggle: the whole point of the sidebar item is to host the SFTP surface
+  // when the top tab is hidden or replaced.
+  const showSftpSidebarNav = Boolean(sftpInSidebar);
+  // While the SFTP tab is active, the vault view renders as a rail-only
+  // surface: the sidebar stays visible beside the root SFTP view so vault
+  // sections remain one click away.
+  const sftpRailMode = showSftpSidebarNav && isSftpSurfaceActive;
+  // While the SFTP rail is active the vault section still points at the
+  // previously selected section, but the rail's SFTP button is the one that
+  // must appear selected — suppress vault-section highlight to avoid two
+  // active destinations in the rail.
+  const vaultNavSection = sftpRailMode ? null : currentSection;
+  const openVaultSectionFromSftpRail = React.useCallback(() => {
+    if (isSftpSurfaceActive) activeTabStore.setActiveTabId("vault");
+  }, [isSftpSurfaceActive]);
+  React.useEffect(() => {
+    vaultSidebarLayoutStore.setLayoutWidth(effectiveSidebarWidth);
+  }, [effectiveSidebarWidth]);
   const handleDeleteVaultKey = React.useCallback(
     (keyId: string) => {
       void deleteVaultKey({
@@ -534,8 +559,13 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
   return (
     <div
       ref={rootRef}
-      className="absolute inset-0 min-h-0 flex bg-secondary"
+      className={cn(
+        "absolute inset-0 min-h-0 flex bg-secondary",
+        sftpRailMode && "overflow-hidden",
+      )}
+      style={sftpRailMode ? { width: effectiveSidebarWidth } : undefined}
       data-section="vault-view"
+      data-sftp-rail-mode={sftpRailMode ? "true" : undefined}
     >
       {/* Sidebar */}
       <TooltipProvider delayDuration={100}>
@@ -582,16 +612,17 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
             <Tooltip>
               <TooltipTrigger asChild>
                 <RippleButton
-                  variant={currentSection === "hosts" ? "secondary" : "ghost"}
+                  variant={vaultNavSection === "hosts" ? "secondary" : "ghost"}
                   className={cn(
                     "w-full h-10",
                     sidebarCollapsed
                       ? "justify-center p-0"
                       : "justify-start gap-3",
-                    currentSection === "hosts" &&
+                    vaultNavSection === "hosts" &&
                       "bg-foreground/10 text-foreground hover:bg-foreground/15 border-border/40",
                   )}
                   onClick={() => {
+                    openVaultSectionFromSftpRail();
                     setCurrentSection("hosts");
                     setSelectedGroupPath(null);
                   }}
@@ -606,19 +637,49 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
                 </TooltipContent>
               )}
             </Tooltip>
+            {showSftpSidebarNav && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <RippleButton
+                    variant={isSftpSurfaceActive ? "secondary" : "ghost"}
+                    className={cn(
+                      "w-full h-10",
+                      sidebarCollapsed
+                        ? "justify-center p-0"
+                        : "justify-start gap-3",
+                      isSftpSurfaceActive &&
+                        "bg-foreground/10 text-foreground hover:bg-foreground/15 border-border/40",
+                    )}
+                    onClick={() => {
+                      if (!isSftpSurfaceActive) activeTabStore.setActiveTabId("sftp");
+                    }}
+                    aria-pressed={isSftpSurfaceActive}
+                  >
+                    <Folder size={16} className="flex-shrink-0" />
+                    {!sidebarCollapsed && t("vault.nav.sftp")}
+                  </RippleButton>
+                </TooltipTrigger>
+                {sidebarCollapsed && (
+                  <TooltipContent side="right">
+                    {t("vault.nav.sftp")}
+                  </TooltipContent>
+                )}
+              </Tooltip>
+            )}
             <Tooltip>
               <TooltipTrigger asChild>
                 <RippleButton
-                  variant={currentSection === "keys" ? "secondary" : "ghost"}
+                  variant={vaultNavSection === "keys" ? "secondary" : "ghost"}
                   className={cn(
                     "w-full h-10",
                     sidebarCollapsed
                       ? "justify-center p-0"
                       : "justify-start gap-3",
-                    currentSection === "keys" &&
+                    vaultNavSection === "keys" &&
                       "bg-foreground/10 text-foreground hover:bg-foreground/15 border-border/40",
                   )}
                   onClick={() => {
+                    openVaultSectionFromSftpRail();
                     setCurrentSection("keys");
                   }}
                 >
@@ -635,16 +696,17 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
             <Tooltip>
               <TooltipTrigger asChild>
                 <RippleButton
-                  variant={currentSection === "proxies" ? "secondary" : "ghost"}
+                  variant={vaultNavSection === "proxies" ? "secondary" : "ghost"}
                   className={cn(
                     "w-full h-10",
                     sidebarCollapsed
                       ? "justify-center p-0"
                       : "justify-start gap-3",
-                    currentSection === "proxies" &&
+                    vaultNavSection === "proxies" &&
                       "bg-foreground/10 text-foreground hover:bg-foreground/15 border-border/40",
                   )}
                   onClick={() => {
+                    openVaultSectionFromSftpRail();
                     setCurrentSection("proxies");
                   }}
                 >
@@ -661,16 +723,19 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
             <Tooltip>
               <TooltipTrigger asChild>
                 <RippleButton
-                  variant={currentSection === "port" ? "secondary" : "ghost"}
+                  variant={vaultNavSection === "port" ? "secondary" : "ghost"}
                   className={cn(
                     "w-full h-10",
                     sidebarCollapsed
                       ? "justify-center p-0"
                       : "justify-start gap-3",
-                    currentSection === "port" &&
+                    vaultNavSection === "port" &&
                       "bg-foreground/10 text-foreground hover:bg-foreground/15 border-border/40",
                   )}
-                  onClick={() => setCurrentSection("port")}
+                  onClick={() => {
+                    openVaultSectionFromSftpRail();
+                    setCurrentSection("port");
+                  }}
                 >
                   <Plug size={16} className="flex-shrink-0" />
                   {!sidebarCollapsed && t("vault.nav.portForwarding")}
@@ -686,17 +751,18 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
               <TooltipTrigger asChild>
                 <RippleButton
                   variant={
-                    currentSection === "snippets" ? "secondary" : "ghost"
+                    vaultNavSection === "snippets" ? "secondary" : "ghost"
                   }
                   className={cn(
                     "w-full h-10",
                     sidebarCollapsed
                       ? "justify-center p-0"
                       : "justify-start gap-3",
-                    currentSection === "snippets" &&
+                    vaultNavSection === "snippets" &&
                       "bg-foreground/10 text-foreground hover:bg-foreground/15 border-border/40",
                   )}
                   onClick={() => {
+                    openVaultSectionFromSftpRail();
                     setCurrentSection("snippets");
                   }}
                 >
@@ -713,16 +779,17 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
             <Tooltip>
               <TooltipTrigger asChild>
                 <RippleButton
-                  variant={currentSection === "notes" ? "secondary" : "ghost"}
+                  variant={vaultNavSection === "notes" ? "secondary" : "ghost"}
                   className={cn(
                     "w-full h-10",
                     sidebarCollapsed
                       ? "justify-center p-0"
                       : "justify-start gap-3",
-                    currentSection === "notes" &&
+                    vaultNavSection === "notes" &&
                       "bg-foreground/10 text-foreground hover:bg-foreground/15 border-border/40",
                   )}
                   onClick={() => {
+                    openVaultSectionFromSftpRail();
                     setCurrentSection("notes");
                   }}
                 >
@@ -740,17 +807,20 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
               <TooltipTrigger asChild>
                 <RippleButton
                   variant={
-                    currentSection === "knownhosts" ? "secondary" : "ghost"
+                    vaultNavSection === "knownhosts" ? "secondary" : "ghost"
                   }
                   className={cn(
                     "w-full h-10",
                     sidebarCollapsed
                       ? "justify-center p-0"
                       : "justify-start gap-3",
-                    currentSection === "knownhosts" &&
+                    vaultNavSection === "knownhosts" &&
                       "bg-foreground/10 text-foreground hover:bg-foreground/15 border-border/40",
                   )}
-                  onClick={() => setCurrentSection("knownhosts")}
+                  onClick={() => {
+                    openVaultSectionFromSftpRail();
+                    setCurrentSection("knownhosts");
+                  }}
                 >
                   <BookMarked size={16} className="flex-shrink-0" />
                   {!sidebarCollapsed && t("vault.nav.knownHosts")}
@@ -765,16 +835,19 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
             <Tooltip>
               <TooltipTrigger asChild>
                 <RippleButton
-                  variant={currentSection === "logs" ? "secondary" : "ghost"}
+                  variant={vaultNavSection === "logs" ? "secondary" : "ghost"}
                   className={cn(
                     "w-full h-10",
                     sidebarCollapsed
                       ? "justify-center p-0"
                       : "justify-start gap-3",
-                    currentSection === "logs" &&
+                    vaultNavSection === "logs" &&
                       "bg-foreground/10 text-foreground hover:bg-foreground/15 border-border/40",
                   )}
-                  onClick={() => setCurrentSection("logs")}
+                  onClick={() => {
+                    openVaultSectionFromSftpRail();
+                    setCurrentSection("logs");
+                  }}
                 >
                   <Activity size={16} className="flex-shrink-0" />
                   {!sidebarCollapsed && t("vault.nav.logs")}
@@ -835,6 +908,8 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
       <div
         className="flex min-w-0 flex-1 py-0 pr-2 pb-2 pl-0"
         data-section="vault-stage"
+        aria-hidden={sftpRailMode ? true : undefined}
+        inert={sftpRailMode ? true : undefined}
       >
         <div
           className="relative flex min-h-0 flex-1 overflow-hidden rounded-xl border border-border/60 bg-background shadow-sm"

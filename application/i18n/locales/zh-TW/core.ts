@@ -370,6 +370,8 @@ export const zhTWCoreMessages: Messages = {
   'settings.appearance.tabBarPosition.bottom': '底部',
   'settings.vault.showSftpTab': '顯示 SFTP 分頁',
   'settings.vault.showSftpTabDesc': '在頂部分頁列顯示獨立的 SFTP 檢視。關閉後可改用工作階段內左側的 SFTP 側欄。',
+  'settings.vault.sftpInSidebar': '將 SFTP 放入側邊欄',
+  'settings.vault.sftpInSidebarDesc': '隱藏頂部的 SFTP 分頁，改為在側邊欄顯示 SFTP，開啟 SFTP 時側邊欄保持可見，可直接切換到其他功能頁面。',
   'settings.vault.showHostTreeSidebar': '顯示主機列表側欄',
   'settings.vault.showHostTreeSidebarDesc': '在終端和編輯器分頁顯示主機列表側欄及頂部開關。',
   'settings.vault.autoImportSystemKnownHosts': '自動匯入系統 known_hosts',
@@ -653,6 +655,7 @@ export const zhTWCoreMessages: Messages = {
   'vault.nav.snippets': '程式碼片段',
   'vault.nav.notes': '筆記',
   'vault.nav.knownHosts': '已知主機',
+  'vault.nav.sftp': 'SFTP',
   'vault.nav.logs': '日誌',
 
   'proxyProfiles.action.add': '新增代理',
