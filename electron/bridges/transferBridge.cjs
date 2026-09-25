@@ -1538,10 +1538,14 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
         // that proves it is ours. Recreate the marker exclusively so a
         // symlink swapped in at that pathname is never followed (Codex P2).
         if (supersededBackupPath) {
-          // A failed rename must not be swallowed: the marker below would
+          // A failed restore must not be swallowed: the marker below would
           // otherwise describe a backup that never returned to the fixed
-          // name (Codex P2 on PR #3516).
-          await fs.promises.rename(supersededBackupPath, backupPath);
+          // name (Codex P2 on PR #3516). Publish exclusively and unlink the
+          // source only after success, so a file another process created at
+          // the fixed backup name after the rollback unlink is never
+          // silently replaced by rename (Codex P2 on PR #3516).
+          await publishLocalFileExclusive(supersededBackupPath, backupPath);
+          await fs.promises.unlink(supersededBackupPath).catch(() => {});
           supersededBackupPath = null;
           if (wroteOwnerMarker) {
             // This replacement wrote its own marker for the backup it just
@@ -1574,10 +1578,14 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
       // an undisclosed versioned name. Recreate the marker exclusively so a
       // symlink swapped in at that pathname is never followed (Codex P2).
       try {
-        // A failed rename must not be swallowed: the marker below would
+        // A failed restore must not be swallowed: the marker below would
         // otherwise describe a backup that never returned to the fixed
-        // name (Codex P2 on PR #3516).
-        await fs.promises.rename(supersededBackupPath, backupPath);
+        // name (Codex P2 on PR #3516). Publish exclusively and unlink the
+        // source only after success, so a file another process created at
+        // the fixed backup name is never silently replaced by rename
+        // (Codex P2 on PR #3516).
+        await publishLocalFileExclusive(supersededBackupPath, backupPath);
+        await fs.promises.unlink(supersededBackupPath).catch(() => {});
         supersededBackupPath = null;
         if (supersededBackupOwnerMarker !== null) {
           await writeLocalBackupOwnerMarkerContent(backupOwnerMarkerPath, supersededBackupOwnerMarker);
