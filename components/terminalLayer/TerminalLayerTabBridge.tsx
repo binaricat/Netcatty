@@ -675,6 +675,7 @@ export function TerminalLayerTabBridge({ stableRef }: { stableRef: StableRef }) 
     handleTerminalContextReaderChange,
     hibernateHiddenTabs,
     historySessionId,
+    s.isComposeBarOpen,
     isFocusMode,
     isSidePanelOpenForCurrentTab,
     isTerminalLayerVisible,
