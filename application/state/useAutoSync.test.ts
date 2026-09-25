@@ -294,3 +294,95 @@ test("startup local-wins and merge round-trips refuse device-bound credential pl
     "startup merge must heal local+remote secrets, then strip, then upload",
   );
 });
+
+test("post-merge round-trip is gated behind cloudSyncPayloadsEqual", () => {
+  const source = readFileSync(new URL("./useAutoSync.ts", import.meta.url), "utf8");
+  const importIndex = source.indexOf("cloudSyncPayloadsEqual");
+  const mergeResultGuard = source.indexOf("if (mergeResult.payload)", importIndex);
+  const equalityCheckIndex = source.indexOf(
+    "cloudSyncPayloadsEqual(portableMerge, remotePayload)",
+    mergeResultGuard,
+  );
+  const hasLocalGuardIndex = source.indexOf(
+    "if (hasLocalChangesToUpload)",
+    equalityCheckIndex,
+  );
+  const syncAllIndex = source.indexOf(
+    "manager.syncAllProviders(portableMerge)",
+    hasLocalGuardIndex,
+  );
+  const elseIndex = source.indexOf(
+    "// No local-only additions",
+    syncAllIndex,
+  );
+  const markSyncedIndex = source.indexOf(
+    "markCurrentDataSynced = true;",
+    elseIndex,
+  );
+
+  assert.notEqual(importIndex, -1, "cloudSyncPayloadsEqual must be imported");
+  assert.notEqual(equalityCheckIndex, -1, "equality check must exist after merge guard");
+  assert.notEqual(hasLocalGuardIndex, -1, "hasLocalChangesToUpload guard must exist");
+  assert.notEqual(syncAllIndex, -1, "syncAllProviders must be called inside the guard");
+  assert.notEqual(elseIndex, -1, "else branch must skip upload when payloads match");
+  assert.notEqual(markSyncedIndex, -1, "else branch must mark data as synced");
+  assert.ok(
+    equalityCheckIndex < hasLocalGuardIndex
+      && hasLocalGuardIndex < syncAllIndex
+      && syncAllIndex < elseIndex
+      && elseIndex < markSyncedIndex,
+    "post-merge upload must be skipped when merged payload equals remote payload",
+  );
+});
+
+test("download-remote round-trip is skipped for single-provider setups", () => {
+  const source = readFileSync(new URL("./useAutoSync.ts", import.meta.url), "utf8");
+  const downloadRemoteIndex = source.indexOf("if (conflictAction === 'download-remote')");
+  const readyProvidersIndex = source.indexOf(
+    "readyProviders.length > 1",
+    downloadRemoteIndex,
+  );
+  const syncAllIndex = source.indexOf(
+    "manager.syncAllProviders(remotePayload",
+    readyProvidersIndex,
+  );
+  const singleProviderElse = source.indexOf(
+    "// Single provider: no need to round-trip",
+    syncAllIndex,
+  );
+
+  assert.notEqual(downloadRemoteIndex, -1);
+  assert.notEqual(readyProvidersIndex, -1, "must check provider count before round-trip");
+  assert.notEqual(syncAllIndex, -1, "syncAllProviders must be inside multi-provider guard");
+  assert.notEqual(singleProviderElse, -1, "single-provider path must skip upload");
+  assert.ok(
+    downloadRemoteIndex < readyProvidersIndex
+      && readyProvidersIndex < syncAllIndex
+      && syncAllIndex < singleProviderElse,
+    "download-remote must gate round-trip behind provider count",
+  );
+});
+
+test("applySyncableSettings guards versioned writes with change detection", () => {
+  const source = readFileSync(
+    new URL("../syncPayload.ts", import.meta.url),
+    "utf8",
+  );
+
+  // customAccent: must compare colors before writing
+  const accentGuardIndex = source.indexOf("if (incomingColor !== existing.color)");
+  assert.notEqual(accentGuardIndex, -1, "customAccent must check color equality before write");
+
+  // terminalFontSize: must compare fontSize before writing
+  const fontSizeGuardIndex = source.indexOf("if (settings.terminalFontSize !== existing.fontSize)");
+  assert.notEqual(fontSizeGuardIndex, -1, "terminalFontSize must check fontSize equality before write");
+
+  // customKeyBindings: must compare serialized bindings before writing
+  const bindingsGuardIndex = source.indexOf("if (incomingBindings !== existingBindings)");
+  assert.notEqual(bindingsGuardIndex, -1, "customKeyBindings must check bindings equality before write");
+
+  assert.ok(
+    accentGuardIndex < fontSizeGuardIndex && fontSizeGuardIndex < bindingsGuardIndex,
+    "all three versioned setting writes must be guarded with change detection",
+  );
+});
