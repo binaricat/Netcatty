@@ -16,7 +16,9 @@ const file = (
 test("single and batch downloads route by current remote type and size", async () => {
   const globals = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
   const previousAct = globals.IS_REACT_ACT_ENVIRONMENT;
+  const previousStorage = globalThis.localStorage;
   globals.IS_REACT_ACT_ENVIRONMENT = true;
+  (globalThis as { localStorage?: unknown }).localStorage = { getItem: () => null };
 
   const current = new Map<string, SftpStatResult>([
     ["/remote/smaller", { name: "smaller", size: 50_000, sizeKnown: true, type: "file", lastModified: 0 }],
@@ -121,5 +123,6 @@ test("single and batch downloads route by current remote type and size", async (
   } finally {
     await act(async () => { renderer?.unmount(); });
     globals.IS_REACT_ACT_ENVIRONMENT = previousAct;
+    (globalThis as { localStorage?: unknown }).localStorage = previousStorage;
   }
 });

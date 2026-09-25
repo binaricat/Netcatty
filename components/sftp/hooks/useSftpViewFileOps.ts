@@ -1,7 +1,10 @@
 import { useCallback, useRef, useState } from "react";
 import type { SftpFileEntry } from "../../../types";
 import type { TransferStatus } from "../../../domain/models";
-import { getParentPath, joinPath as joinFsPath } from "../../../application/state/sftp/utils";
+import { getParentPath, joinTransferTargetPath } from "../../../application/state/sftp/utils";
+import { readSftpQuickDownloadEnabled } from "../../../application/state/sftp/quickDownloadPreference";
+import { useSftpQuickDownloadTargets } from "../../../application/state/sftp/useSftpQuickDownloadTargets";
+import type { LocalPublishedFileIdentity } from "../../../domain/models/sftp";
 import {
   DEFAULT_SFTP_FILE_TRANSFER_CONCURRENCY,
   runBoundedConcurrency,
@@ -21,6 +24,7 @@ import { assertSftpFileFitsBuiltinEditor } from "../sftpEditorFileLimits";
 
 /** Local multi-select blob downloads read whole files into ArrayBuffers. */
 const LOCAL_BLOB_DOWNLOAD_CONCURRENCY = 1;
+
 /**
  * Multi-select roots each start their own interleaved folder walk / session
  * work. Bound them so many selected directories cannot stampede the scheduler.
@@ -40,6 +44,7 @@ export const useSftpViewFileOps = ({
   statSftp,
   listSftp,
 }: UseSftpViewFileOpsParams): UseSftpViewFileOpsResult => {
+  const quickDownloadTargets = useSftpQuickDownloadTargets();
   const [permissionsState, setPermissionsState] = useState<{
     file: SftpFileEntry;
     side: "left" | "right";
@@ -435,7 +440,7 @@ export const useSftpViewFileOps = ({
 
         // For remote SFTP files/directories, use transfer-center downloads
         // (dedicated pool sessions via downloadToLocal).
-        if (!showSaveDialog || !getSftpIdForConnection) {
+        if (!getSftpIdForConnection || !showSaveDialog) {
           toast.error(t("sftp.error.downloadFailed"), "SFTP");
           return;
         }
@@ -462,7 +467,6 @@ export const useSftpViewFileOps = ({
             toast.error(t("sftp.error.downloadFailed"), "SFTP");
             return;
           }
-
           const selectedDirectory = await selectDirectory(t("sftp.context.download"));
           if (!selectedDirectory) return;
 
@@ -475,7 +479,8 @@ export const useSftpViewFileOps = ({
           if (!selectedSnapshot.isDirectory) {
             throw new Error("Remote source changed while choosing the download target");
           }
-          const targetPath = joinFsPath(selectedDirectory, file.name);
+          const targetPath = joinTransferTargetPath(selectedDirectory, file.name);
+
 
           try {
             const status = await sftpRef.current.downloadToLocal({
@@ -505,7 +510,20 @@ export const useSftpViewFileOps = ({
 
           return;
         }
-        const targetPath = await showSaveDialog(file.name);
+        // Only an explicit opt-in and this exact remote source may reuse the
+        // full path chosen earlier in Save As, including a renamed basename.
+        const quickDownloadEnabled = readSftpQuickDownloadEnabled();
+        const endpointKey = await sftpRef.current.getDownloadEndpointKey?.(pane.connection.id) ?? null;
+        if (!quickDownloadEnabled) {
+          quickDownloadTargets.forget(endpointKey, resolvedFullPath, pane.filenameEncoding);
+        }
+        const rememberedTarget = quickDownloadEnabled
+          ? await quickDownloadTargets.findValidTarget(
+              endpointKey, resolvedFullPath, sftpId, pane.filenameEncoding,
+            )
+          : null;
+        const targetPath = rememberedTarget?.targetPath ?? await showSaveDialog(file.name);
+
         if (!targetPath) return;
 
         const selectedSnapshot = await resolveDownloadSourceSnapshot(
@@ -518,10 +536,25 @@ export const useSftpViewFileOps = ({
         }
         // Route through downloadToLocal so FileZilla-style transfer pool
         // sessions are used (browse session stays free for listing).
+        let publishedIdentity: LocalPublishedFileIdentity | undefined;
         const status = await sftpRef.current.downloadToLocal({
           fileName: file.name,
           sourcePath: resolvedFullPath,
           targetPath,
+          expectedLocalTarget: rememberedTarget ? {
+            parentRealPath: rememberedTarget.parentRealPath,
+            parentIdentity: rememberedTarget.parentIdentity,
+            parentBirthtimeNs: rememberedTarget.parentBirthtimeNs,
+            targetIdentity: rememberedTarget.targetIdentity,
+            targetBirthtimeNs: rememberedTarget.targetBirthtimeNs,
+            targetCtimeNs: rememberedTarget.targetCtimeNs,
+            targetMtimeNs: rememberedTarget.targetMtimeNs,
+            targetSha256: rememberedTarget.targetSha256,
+          } : undefined,
+          expectedSourceEndpointKey: quickDownloadEnabled ? endpointKey ?? undefined : undefined,
+          onPublishedLocalFile: quickDownloadEnabled
+            ? (identity) => { publishedIdentity = identity; }
+            : undefined,
           sftpId,
           connectionId: pane.connection.id,
           sourceHostId: pane.connection.hostId,
@@ -531,6 +564,17 @@ export const useSftpViewFileOps = ({
           totalBytes: selectedSnapshot.size,
         });
         if (status === "completed") {
+          if (quickDownloadEnabled) {
+            if (readSftpQuickDownloadEnabled()) {
+              if (publishedIdentity) {
+                await quickDownloadTargets.remember(
+                  endpointKey, resolvedFullPath, pane.filenameEncoding, targetPath, publishedIdentity,
+                );
+              }
+            } else {
+              quickDownloadTargets.forget(endpointKey, resolvedFullPath, pane.filenameEncoding);
+            }
+          }
           toast.success(`${t("sftp.context.download")}: ${file.name}`, "SFTP");
         } else if (status === "failed") {
           toast.error(`${t("sftp.error.downloadFailed")}: ${file.name}`, "SFTP");
@@ -550,8 +594,10 @@ export const useSftpViewFileOps = ({
       showSaveDialog,
       selectDirectory,
       getSftpIdForConnection,
+      quickDownloadTargets,
       statSftp,
       listSftp,
+
     ],
   );
 
@@ -638,7 +684,7 @@ export const useSftpViewFileOps = ({
         return;
       }
 
-      if (!selectDirectory || !getSftpIdForConnection) {
+      if (!getSftpIdForConnection || !selectDirectory) {
         toast.error(t("sftp.error.downloadFailed"), "SFTP");
         return;
       }
@@ -661,7 +707,7 @@ export const useSftpViewFileOps = ({
         async (file, index) => {
           try {
             const sourcePath = sftpRef.current.joinPath(pane.connection.currentPath, file.name);
-            const targetPath = joinFsPath(selectedDirectory, file.name);
+            const targetPath = joinTransferTargetPath(selectedDirectory, file.name);
             // Re-stat each root: the listed entries can be stale after
             // terminal-side delete + recreate without a refresh.
             const sourceSnapshot = await resolveDownloadSourceSnapshot(
@@ -672,6 +718,7 @@ export const useSftpViewFileOps = ({
               listSftp,
             );
             const isDirectory = sourceSnapshot.isDirectory;
+
 
             const status = await sftpRef.current.downloadToLocal({
               fileName: file.name,

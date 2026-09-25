@@ -63,6 +63,7 @@ declare global {
         transferId: string;
         sourcePath: string;
         targetPath: string;
+        expectedLocalTarget?: import("../../domain/models/sftp").LocalDownloadTargetExpectation;
         sourceType: 'local' | 'sftp';
         targetType: 'local' | 'sftp';
         sourceSftpId?: string;
@@ -89,7 +90,13 @@ declare global {
         /** When true, skip main-process admission (renderer already scheduled). */
         skipAdmission?: boolean;
       }
-    ): Promise<{ transferId: string; totalBytes?: number; error?: string; cancelled?: boolean }>;
+    ): Promise<{
+      transferId: string;
+      totalBytes?: number;
+      error?: string;
+      cancelled?: boolean;
+      publishedLocalIdentity?: import("../../domain/models/sftp").LocalPublishedFileIdentity;
+    }>;
     pauseTransfer?(transferId: string): Promise<{
       success: boolean;
       superseded?: boolean;

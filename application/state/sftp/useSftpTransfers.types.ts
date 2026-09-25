@@ -1,5 +1,5 @@
 import type { MutableRefObject } from "react";
-import type { FileConflict, FileConflictAction, SftpFileEntry, SftpFilenameEncoding, TransferStatus, TransferTask } from "../../../domain/models";
+import type { FileConflict, FileConflictAction, Host, LocalDownloadTargetExpectation, LocalPublishedFileIdentity, SftpFileEntry, SftpFilenameEncoding, TransferStatus, TransferTask } from "../../../domain/models";
 import type { SftpPane } from "./types";
 import type { AcquireTransferSessionFn } from "./transferDirectoryOps";
 
@@ -11,6 +11,8 @@ export interface UseSftpTransfersParams {
   getActivePane: (side: "left" | "right") => SftpPane | null;
   getPaneByConnectionId: (connectionId: string) => SftpPane | null;
   getTabByConnectionId: (connectionId: string) => { side: "left" | "right"; tabId: string; pane: SftpPane } | null;
+  resolveConnectedHost?: (tabId: string) => Host | "local" | null;
+  getTransferPoolKeyForHost?: (host: Host) => Promise<string>;
   updateTab: (side: "left" | "right", tabId: string, updater: (pane: SftpPane) => SftpPane) => void;
   refresh: (side: "left" | "right", options?: { tabId?: string }) => Promise<void>;
   clearCacheForConnection: (connectionId: string) => void;
@@ -43,6 +45,9 @@ export interface UseSftpTransfersResult {
     fileName: string;
     sourcePath: string;
     targetPath: string;
+    expectedLocalTarget?: LocalDownloadTargetExpectation;
+    expectedSourceEndpointKey?: string;
+    onPublishedLocalFile?: (identity: LocalPublishedFileIdentity) => void;
     sftpId: string;
     connectionId: string;
     sourceHostId: string;

@@ -13,8 +13,12 @@ async function publishLocalFileExclusive(source, target, assertNotCancelled = ()
   try {
     await fs.promises.link(source, target);
     // The hardlink shares the published inode; stat either name.
-    const linkedStat = await fs.promises.lstat(source);
-    return { dev: linkedStat.dev, ino: linkedStat.ino, size: linkedStat.size };
+    const linkedStat = await fs.promises.lstat(source, { bigint: true });
+    return {
+      dev: String(linkedStat.dev), ino: String(linkedStat.ino), size: Number(linkedStat.size),
+      birthtimeNs: String(linkedStat.birthtimeNs),
+      ctimeNs: String(linkedStat.ctimeNs), mtimeNs: String(linkedStat.mtimeNs),
+    };
   } catch (error) {
     if (!["ENOTSUP", "EOPNOTSUPP", "ENOSYS", "EPERM", "EACCES", "EXDEV"].includes(error?.code)) throw error;
   }
@@ -48,12 +52,16 @@ async function publishLocalFileExclusive(source, target, assertNotCancelled = ()
     // through the owned handle rather than a potentially replaced pathname.
     await output.chmod(stat.mode & 0o7777);
     await output.utimes(stat.atime, stat.mtime);
-    const ownedStat = await output.stat();
-    const targetStat = await fs.promises.lstat(target);
+    const ownedStat = await output.stat({ bigint: true });
+    const targetStat = await fs.promises.lstat(target, { bigint: true });
     if (!targetStat.isFile() || targetStat.dev !== ownedStat.dev || targetStat.ino !== ownedStat.ino) {
       throw new Error("Local download target changed during replacement");
     }
-    publishedIdentity = { dev: ownedStat.dev, ino: ownedStat.ino, size: ownedStat.size };
+    publishedIdentity = {
+      dev: String(ownedStat.dev), ino: String(ownedStat.ino), size: Number(ownedStat.size),
+      birthtimeNs: String(ownedStat.birthtimeNs),
+      ctimeNs: String(ownedStat.ctimeNs), mtimeNs: String(ownedStat.mtimeNs),
+    };
   } catch (error) {
     failure = error;
   } finally {

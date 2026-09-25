@@ -703,6 +703,9 @@ export const ruVaultMessages: Messages = {
   'settings.sftp.skipUnchanged.enable': 'Пропускать неизменённые файлы',
   'settings.sftp.skipUnchanged.enableDesc': 'Пропускать файлы, у которых размер и время изменения уже совпадают с назначением (в стиле rsync). Отключается при замене папки во временный путь.',
 
+  'settings.sftp.quickDownload.enable': 'Заменять повторные загрузки',
+  'settings.sftp.quickDownload.enableDesc': 'После выбора места для удалённого файла его повторная загрузка в этом окне SFTP заменит выбранную копию без нового подтверждения. Первая загрузка, другие файлы, папки и группы файлов по-прежнему требуют выбора места.',
+
   // Quick Switcher
   'qs.search.placeholder': 'Поиск хостов или вкладок',
   'qs.jumpTo': 'Перейти к',

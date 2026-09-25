@@ -46,6 +46,8 @@ const SAFE_TASK_KEYS: ReadonlySet<keyof TransferTask> = new Set([
   "directoryEntryIndex",
   "directoryEntryIdentity",
   "directoryResumeCheckpoint",
+  "expectedLocalTarget",
+  "requireOriginalSourceForResume",
 ]);
 
 export function sanitizeSftpTransferTask(value: unknown): TransferTask | null {
@@ -58,6 +60,35 @@ export function sanitizeSftpTransferTask(value: unknown): TransferTask | null {
     if (source[key] !== undefined) sanitized[key] = source[key];
   }
   const task = sanitized as unknown as TransferTask;
+  if (source.expectedLocalTarget !== undefined) {
+    const expected = source.expectedLocalTarget as Record<string, unknown> | null;
+    if (!expected || typeof expected.parentRealPath !== "string" || !expected.parentRealPath
+      || typeof expected.parentIdentity !== "string" || !/^\d+:\d+$/.test(expected.parentIdentity)
+      || typeof expected.parentBirthtimeNs !== "string" || !/^[1-9]\d*$/.test(expected.parentBirthtimeNs)
+      || typeof expected.targetIdentity !== "string" || !/^\d+:\d+$/.test(expected.targetIdentity)
+      || typeof expected.targetBirthtimeNs !== "string" || !/^[1-9]\d*$/.test(expected.targetBirthtimeNs)
+      || typeof expected.targetCtimeNs !== "string" || !/^[1-9]\d*$/.test(expected.targetCtimeNs)
+      || typeof expected.targetMtimeNs !== "string" || !/^[1-9]\d*$/.test(expected.targetMtimeNs)
+      || typeof expected.targetSha256 !== "string" || !/^[a-f0-9]{64}$/.test(expected.targetSha256)) {
+      // An incomplete saved guard must never become an unguarded overwrite.
+      task.expectedLocalTarget = {
+        parentRealPath: "", parentIdentity: "", parentBirthtimeNs: "",
+        targetIdentity: "", targetBirthtimeNs: "", targetCtimeNs: "", targetMtimeNs: "", targetSha256: "",
+      };
+    } else {
+      task.expectedLocalTarget = {
+        parentRealPath: expected.parentRealPath,
+        parentIdentity: expected.parentIdentity,
+        parentBirthtimeNs: expected.parentBirthtimeNs,
+        targetIdentity: expected.targetIdentity,
+        targetBirthtimeNs: expected.targetBirthtimeNs,
+        targetCtimeNs: expected.targetCtimeNs,
+        targetMtimeNs: expected.targetMtimeNs,
+        targetSha256: expected.targetSha256,
+      };
+    }
+  }
+  if (task.expectedLocalTarget) task.requireOriginalSourceForResume = true;
   if (!Number.isSafeInteger(task.directoryEntryIndex) || (task.directoryEntryIndex ?? -1) < 0) {
     task.directoryEntryIndex = undefined;
   }

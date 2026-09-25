@@ -47,6 +47,28 @@ export type TransferOrigin = 'manual' | 'drag-drop' | 'editor-sync' | 'agent' | 
 export type TransferPhase = 'scanning' | 'compressing' | 'uploading' | 'transferring' | 'extracting' | 'verifying';
 export type TransferControlKind = 'stream' | 'compressed-upload';
 
+/** Original local file selected for an opt-in repeat download. */
+export interface LocalDownloadTargetExpectation {
+  parentRealPath: string;
+  parentIdentity: string;
+  parentBirthtimeNs: string;
+  targetIdentity: string;
+  targetBirthtimeNs: string;
+  targetCtimeNs: string;
+  targetMtimeNs: string;
+  targetSha256: string;
+}
+
+/** Identity of the file actually published by a completed local download. */
+export interface LocalPublishedFileIdentity {
+  dev: string;
+  ino: string;
+  birthtimeNs: string;
+  ctimeNs: string;
+  mtimeNs: string;
+  sha256: string;
+}
+
 export interface DirectoryResumeCheckpoint {
   /** Version 1 used a full SHA-256 digest for every appended entry. Version 2
    * keeps the SHA-256 compression state so adding another fixed-width identity
@@ -67,6 +89,9 @@ export interface TransferTask {
   originalFileName?: string;
   sourcePath: string;
   targetPath: string;
+  expectedLocalTarget?: LocalDownloadTargetExpectation;
+  /** A remembered download target must not reconnect through an unverified route. */
+  requireOriginalSourceForResume?: boolean;
   sourceConnectionId: string;
   targetConnectionId: string;
   targetHostId?: string;

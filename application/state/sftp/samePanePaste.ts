@@ -16,8 +16,8 @@ export interface SamePanePasteFile {
 
 /** Filesystem identity of a directory (stat dev/ino). */
 export interface SamePanePasteIdentity {
-  dev: number;
-  ino: number;
+  dev: string | number;
+  ino: string | number;
 }
 
 /**
@@ -158,14 +158,14 @@ export const resolveSamePanePasteAction = async (params: {
     try {
       const identity = await statIdentity(path);
       if (!identity || identity.dev === undefined || identity.ino === undefined) return null;
-      if (identity.dev === 0 && identity.ino === 0) return null;
+      if (String(identity.dev) === "0" && String(identity.ino) === "0") return null;
       return identity;
     } catch {
       return null;
     }
   };
   const sameIdentity = (a: SamePanePasteIdentity, b: SamePanePasteIdentity): boolean =>
-    a.dev === b.dev && a.ino === b.ino;
+    String(a.dev) === String(b.dev) && String(a.ino) === String(b.ino);
 
   if (params.operation === "cut") {
     const [targetIdentity, sourceIdentity] = await Promise.all([

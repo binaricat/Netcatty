@@ -665,6 +665,9 @@ export const esVaultMessages: Messages = {
   'settings.sftp.skipUnchanged.enable': 'Omitir archivos sin cambios',
   'settings.sftp.skipUnchanged.enableDesc': 'Omite los archivos cuyo tamaño y hora de modificación ya coinciden con el destino (estilo rsync). Deshabilitado al reemplazar una carpeta en una ruta de staging.',
 
+  'settings.sftp.quickDownload.enable': 'Reemplazar descargas repetidas',
+  'settings.sftp.quickDownload.enableDesc': 'Tras elegir dónde guardar un archivo remoto, descargar ese mismo archivo de nuevo en esta vista SFTP reemplaza la copia elegida sin otra confirmación. La primera descarga, otros archivos, carpetas y lotes siguen pidiendo un destino.',
+
   // Quick Switcher
   'qs.search.placeholder': 'Buscar hosts o pestañas',
   'qs.jumpTo': 'Ir a',

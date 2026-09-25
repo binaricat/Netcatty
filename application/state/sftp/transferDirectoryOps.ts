@@ -1,7 +1,7 @@
 import { reconcileSupersededControls } from "./globalSftpTransferControl";
 import { runTransferAndWaitForOwner, TransferOwnerChangedError } from "./waitForTransferOwner";
 import { useCallback, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
-import type { Host, SftpFileEntry, SftpFilenameEncoding, TransferStatus, TransferTask } from "../../../domain/models";
+import type { Host, LocalPublishedFileIdentity, SftpFileEntry, SftpFilenameEncoding, TransferStatus, TransferTask } from "../../../domain/models";
 import {
   accountSftpDirectoryEntries,
   claimSftpDirectoryVisit,
@@ -268,6 +268,8 @@ export function useSftpDirectoryTransferOps({
     targetEncoding: SftpFilenameEncoding,
     rootTaskId: string, // The original top-level task ID for cancellation checking
     sameHost?: boolean,
+    onPublishedLocalFile?: (identity: LocalPublishedFileIdentity) => void,
+    sourceConnectHost?: Host,
   ): Promise<void> => {
     // Check if task or root task was cancelled before starting
     if (cancelledTasksRef.current.has(task.id) || cancelledTasksRef.current.has(rootTaskId)) {
@@ -315,7 +317,7 @@ export function useSftpDirectoryTransferOps({
           // Dedicated pool only for remote ends — panel/browse sessions die when
           // the SFTP tab is closed, which freezes global transfer center rows.
           if (acquireTransferSession && !sourceIsLocal && task.sourceHostId) {
-            sourceLease = await acquireTransferSession(task.sourceHostId, task.id);
+            sourceLease = await acquireTransferSession(task.sourceHostId, task.id, sourceConnectHost);
           }
           if (acquireTransferSession && !targetIsLocal && task.targetHostId) {
             targetLease = await acquireTransferSession(task.targetHostId, task.id);
@@ -382,6 +384,8 @@ export function useSftpDirectoryTransferOps({
               transferId: task.id,
               sourcePath: task.sourcePath,
               targetPath: task.targetPath,
+              expectedLocalTarget: task.expectedLocalTarget,
+              capturePublishedContentHash: !!onPublishedLocalFile,
               sourceType: sourceIsLocal ? ("local" as const) : ("sftp" as const),
               targetType: targetIsLocal ? ("local" as const) : ("sftp" as const),
               sourceSftpId: effectiveSourceSftpId || undefined,
@@ -474,7 +478,10 @@ export function useSftpDirectoryTransferOps({
                     await new Promise((resolve) => setTimeout(resolve, 80));
                   }
                 })();
-                let result: { error?: string; cancelled?: boolean; superseded?: boolean } | undefined;
+                let result: {
+                  error?: string; cancelled?: boolean; superseded?: boolean;
+                  publishedLocalIdentity?: LocalPublishedFileIdentity;
+                } | undefined;
                 try {
                   result = await transferPromise;
                 } finally {
@@ -483,6 +490,9 @@ export function useSftpDirectoryTransferOps({
                 }
                 if (result?.error || result?.cancelled) {
                   throw new Error(result.error || "Transfer cancelled");
+                }
+                if (result?.publishedLocalIdentity) {
+                  onPublishedLocalFile?.(result.publishedLocalIdentity);
                 }
                 // Soft-drain can complete this file while folder is still latched.
                 // Park before the worker loop claims another index.
@@ -541,6 +551,7 @@ export function useSftpDirectoryTransferOps({
     followSymlinks = false, // Only true for downloadToLocal — uploads/copies treat symlinks as files
     discoveryProgress?: DirectoryDiscoveryProgress,
     traversalBudget?: SftpDirectoryTraversalBudget,
+    sourceConnectHost?: Host,
   ) => {
     // Check if task or root task was cancelled before starting
     if (cancelledTasksRef.current.has(task.id) || cancelledTasksRef.current.has(rootTaskId)) {
@@ -698,6 +709,7 @@ export function useSftpDirectoryTransferOps({
           followSymlinks,
           progress,
           traversal,
+          sourceConnectHost,
         );
       }
     } finally {
@@ -925,6 +937,8 @@ export function useSftpDirectoryTransferOps({
               targetEncoding,
               rootTaskId,
               sameHost,
+              undefined,
+              sourceConnectHost,
             );
 
             activeChildIdsRef.current.get(rootTaskId)?.delete(fileId);

@@ -27,6 +27,7 @@ import {
   STORAGE_KEY_JMS_DEEP_LINK_ENABLED,
   STORAGE_KEY_EXPLORER_CONTEXT_MENU_ENABLED,
   STORAGE_KEY_SFTP_AUTO_OPEN_SIDEBAR,
+  STORAGE_KEY_SFTP_QUICK_DOWNLOAD,
   STORAGE_KEY_SFTP_FOLLOW_TERMINAL_CWD,
   STORAGE_KEY_SFTP_DEFAULT_VIEW_MODE,
   STORAGE_KEY_SFTP_TRANSFER_CONCURRENCY,
@@ -102,6 +103,7 @@ interface UseSettingsIpcSyncParams {
   setHttpNetworkProxy: Dispatch<SetStateAction<HttpNetworkProxySettings>>;
   setSftpAutoOpenSidebar: Dispatch<SetStateAction<boolean>>;
   setSftpFollowTerminalCwd: Dispatch<SetStateAction<boolean>>;
+  setSftpQuickDownload: Dispatch<SetStateAction<boolean>>;
   setSftpDefaultViewMode: Dispatch<SetStateAction<'list' | 'tree'>>;
   setWorkspaceFocusStyleState: Dispatch<SetStateAction<'dim' | 'border'>>;
   setTabBarPositionState: Dispatch<SetStateAction<TabBarPosition>>;
@@ -151,6 +153,7 @@ export function useSettingsIpcSync({
   setHttpNetworkProxy,
   setSftpAutoOpenSidebar,
   setSftpFollowTerminalCwd,
+  setSftpQuickDownload,
   setSftpDefaultViewMode,
   setWorkspaceFocusStyleState,
   setTabBarPositionState,
@@ -302,6 +305,9 @@ export function useSettingsIpcSync({
       if (key === STORAGE_KEY_SFTP_FOLLOW_TERMINAL_CWD && typeof value === 'boolean') {
         setSftpFollowTerminalCwd((prev) => (prev === value ? prev : value));
       }
+      if (key === STORAGE_KEY_SFTP_QUICK_DOWNLOAD && typeof value === 'boolean') {
+        setSftpQuickDownload((prev) => (prev === value ? prev : value));
+      }
       if (key === STORAGE_KEY_SFTP_DEFAULT_VIEW_MODE && typeof value === 'string') {
         if (value === 'list' || value === 'tree') {
           setSftpDefaultViewMode((prev) => (prev === value ? prev : value));
@@ -378,6 +384,7 @@ export function useSettingsIpcSync({
     setSshDebugLogsEnabled,
     setSftpAutoOpenSidebar,
     setSftpFollowTerminalCwd,
+    setSftpQuickDownload,
     setSftpDefaultViewMode,
     setTabBarPositionState,
     setShowHostTreeSidebarState,

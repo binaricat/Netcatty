@@ -115,7 +115,8 @@ export function useSftpTransferConflictOps() {
         bridge.statLocal(sourceParent), bridge.statLocal(targetParent),
       ]);
       return sourceStat.dev !== undefined && sourceStat.ino !== undefined
-        && sourceStat.dev === targetStat.dev && sourceStat.ino === targetStat.ino;
+        && String(sourceStat.dev) === String(targetStat.dev)
+        && String(sourceStat.ino) === String(targetStat.ino);
     }
     return false;
   }, []);

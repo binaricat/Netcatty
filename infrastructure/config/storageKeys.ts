@@ -232,6 +232,11 @@ export const STORAGE_KEY_SFTP_FOLDER_PRESCAN = 'netcatty_sftp_folder_prescan_v1'
 /** Skip files when target size + mtime already match the source (rsync-like). */
 export const STORAGE_KEY_SFTP_SKIP_UNCHANGED = 'netcatty_sftp_skip_unchanged_v1';
 /**
+ * Opt in to reusing the exact Save As target for repeat downloads of one
+ * remote file within the current SFTP view.
+ */
+export const STORAGE_KEY_SFTP_QUICK_DOWNLOAD = 'netcatty_sftp_quick_download_v1';
+/**
  * @deprecated Legacy transfer-pool idle TTL. No longer read; SSH keep-alive uses
  * STORAGE_KEY_SSH_TRANSPORT_IDLE_TTL_MS. Kept so old localStorage entries are ignored safely.
  */

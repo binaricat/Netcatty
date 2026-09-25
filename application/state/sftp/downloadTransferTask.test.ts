@@ -12,6 +12,16 @@ test("download tasks retain the remote host needed for reconnecting after the or
     fileName: "archive.bin",
     sourcePath: "/remote/archive.bin",
     targetPath: "/local/archive.bin",
+    expectedLocalTarget: {
+      parentRealPath: "/local",
+      parentIdentity: "1:2",
+      parentBirthtimeNs: "100",
+      targetIdentity: "1:3",
+      targetBirthtimeNs: "200",
+      targetCtimeNs: "201",
+      targetMtimeNs: "202",
+      targetSha256: "a".repeat(64),
+    },
     sourceConnectionId: "connection-1",
     sourceHostId: "host-1",
     sourceHostLabel: "Production",
@@ -24,6 +34,8 @@ test("download tasks retain the remote host needed for reconnecting after the or
   assert.equal(task.targetConnectionId, "local");
   assert.equal(task.resumable, true);
   assert.equal(task.status, "queued");
+  assert.equal(task.expectedLocalTarget?.targetIdentity, "1:3");
+  assert.equal(task.requireOriginalSourceForResume, true);
   assert.equal(task.phase, undefined);
 });
 

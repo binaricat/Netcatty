@@ -250,6 +250,27 @@ export const joinPath = (base: string, name: string): string => {
 };
 
 /**
+ * Win32 reserved device names: a filename like "NUL", "CON.txt", or "COM1"
+ * resolves to a device path instead of a regular file, so a download queued
+ * with such a name can never produce the expected local file. POSIX
+ * destinations are unaffected (these are just ordinary names there).
+ */
+const WINDOWS_RESERVED_DEVICE_NAMES = new Set([
+  "CON", "PRN", "AUX", "NUL",
+  "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+  "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+  "COM¹", "COM²", "COM³",
+  "LPT¹", "LPT²", "LPT³",
+]);
+
+const isWindowsReservedDeviceName = (part: string): boolean => {
+  // Win32 keeps the device meaning even with an extension ("CON.txt");
+  // trailing dots/spaces are rejected separately below.
+  const stem = part.split(".", 1)[0];
+  return WINDOWS_RESERVED_DEVICE_NAMES.has(stem.toUpperCase());
+};
+
+/**
  * Join a discovered directory entry to a transfer target without allowing a
  * server-controlled filename to escape the user-selected destination root.
  * Forward slashes are the traversal's internal separators; a backslash is a
@@ -285,7 +306,10 @@ export function joinTransferTargetPath(
     if (parts.some((part) => (
       part.includes("\\")
       || part.includes(":")
+      || /[<>"|?*]/.test(part)
+      || Array.from(part).some((char) => char.charCodeAt(0) < 32)
       || /[. ]$/.test(part)
+      || isWindowsReservedDeviceName(part)
     ))) return unsafe();
   }
   if (windowsBase) {

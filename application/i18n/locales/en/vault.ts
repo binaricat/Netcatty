@@ -666,6 +666,9 @@ export const enVaultMessages: Messages = {
   'settings.sftp.skipUnchanged.enable': 'Skip unchanged files',
   'settings.sftp.skipUnchanged.enableDesc': 'Skip files whose size and modification time already match the destination (rsync-style). Disabled when replacing a folder into a staging path.',
 
+  'settings.sftp.quickDownload.enable': 'Replace repeat downloads',
+  'settings.sftp.quickDownload.enableDesc': 'After you choose where to save a remote file, downloading that same file again in this SFTP view replaces the exact saved copy without another prompt. First, other, folder, and batch downloads still ask where to save.',
+
   // Quick Switcher
   'qs.search.placeholder': 'Search hosts or tabs',
   'qs.jumpTo': 'Jump To',

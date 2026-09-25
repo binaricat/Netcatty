@@ -6,6 +6,89 @@ import { useSftpTransfers } from "./useSftpTransfers";
 import { transferRuntime } from "./transferRuntime";
 import { sftpTransferCenterStore } from "../sftpTransferCenterStore";
 import { releaseTransferPauseTree } from "./transferPauseLatch";
+import type { Host } from "../../../domain/models";
+
+test("direct download opens both pooled reads through the tab's connected host", async () => {
+  const previousWindow = globalThis.window;
+  const previousStorage = globalThis.localStorage;
+  const globals = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
+  const previousAct = globals.IS_REACT_ACT_ENVIRONMENT;
+  globals.IS_REACT_ACT_ENVIRONMENT = true;
+  const connectedHost = { id: "host", hostname: "same.example", proxyConfig: { type: "socks5", host: "proxy-b", port: 1080 } } as Host;
+  const seenHosts: Array<Host | undefined> = [];
+  (globalThis as { localStorage?: unknown }).localStorage = {
+    getItem: () => null, setItem: () => undefined, removeItem: () => undefined,
+  };
+  (globalThis as { window?: unknown }).window = { netcatty: {
+    startStreamTransfer: async (options: { transferId: string }) => {
+      sftpTransferCenterStore.ingestBackgroundEvent({ type: "completed", transferId: options.transferId, transferred: 1, totalBytes: 1, lifecycleEpoch: 0 });
+      return {};
+    },
+  } };
+  let ops: ReturnType<typeof useSftpTransfers> | undefined;
+  let renderer: ReactTestRenderer | undefined;
+  function Probe() {
+    ops = useSftpTransfers({
+      ownerId: "direct-connected-host-owner", getActivePane: () => null,
+      getPaneByConnectionId: () => null,
+      getTabByConnectionId: () => ({ side: "left", tabId: "tab-1", pane: {} as never }),
+      resolveConnectedHost: () => connectedHost,
+      getTransferPoolKeyForHost: async () => "route-new",
+      acquireTransferSession: async (_hostId, _transferId, host) => {
+        seenHosts.push(host);
+        return { poolKey: "connected-host", sftpId: `pooled-${seenHosts.length}`, release: () => undefined, discard: () => undefined };
+      },
+      updateTab: () => undefined, refresh: async () => undefined,
+      clearCacheForConnection: () => undefined, handleSessionError: () => undefined,
+      sftpSessionsRef: { current: new Map() }, connectionCacheKeyMapRef: { current: new Map() },
+      listLocalFiles: async () => [], listRemoteFiles: async () => [],
+    });
+    return null;
+  }
+  try {
+    await act(async () => { renderer = create(React.createElement(Probe)); });
+    await act(async () => {
+      assert.equal(await ops!.downloadToLocal({
+        fileName: "file.bin", sourcePath: "/remote/file.bin", targetPath: "/local/file.bin",
+        sftpId: "browse", connectionId: "ssh", sourceHostId: "host", sourceHostLabel: "Host",
+        isDirectory: false, totalBytes: 1,
+      }), "completed");
+    });
+    assert.equal(seenHosts.length, 2);
+    assert.ok(seenHosts.every((host) => host === connectedHost));
+    await act(async () => {
+      assert.equal(await ops!.downloadToLocal({
+        fileName: "other.bin", sourcePath: "/remote/other.bin", targetPath: "/local/other.bin",
+        expectedLocalTarget: {
+          parentRealPath: "/local", parentIdentity: "1:2", parentBirthtimeNs: "100",
+          targetIdentity: "1:3", targetBirthtimeNs: "200", targetCtimeNs: "201", targetMtimeNs: "202",
+          targetSha256: "a".repeat(64),
+        },
+        expectedSourceEndpointKey: "route-old",
+        sftpId: "browse", connectionId: "ssh", sourceHostId: "host", sourceHostLabel: "Host",
+        isDirectory: false, totalBytes: 1,
+      }), "failed");
+    });
+    assert.equal(seenHosts.length, 2, "route mismatch must fail before opening another transfer connection");
+    await act(async () => {
+      assert.equal(await ops!.downloadToLocal({
+        fileName: "first.bin", sourcePath: "/remote/first.bin", targetPath: "/local/first.bin",
+        expectedSourceEndpointKey: "route-old",
+        sftpId: "browse", connectionId: "ssh", sourceHostId: "host", sourceHostLabel: "Host",
+        isDirectory: false, totalBytes: 1,
+      }), "failed");
+    });
+    assert.equal(seenHosts.length, 2, "a first Save As route mismatch must not start a transfer");
+  } finally {
+    await act(async () => { renderer?.unmount(); });
+    for (const task of sftpTransferCenterStore.getOwnerTasks("direct-connected-host-owner")) {
+      sftpTransferCenterStore.dismiss(task.id);
+    }
+    (globalThis as { window?: unknown }).window = previousWindow;
+    (globalThis as { localStorage?: unknown }).localStorage = previousStorage;
+    globals.IS_REACT_ACT_ENVIRONMENT = previousAct;
+  }
+});
 
 for (const closePanel of [false, true]) {
   test(`direct folder download resumes discovery with panel ${closePanel ? "closed" : "open"}`, async () => {

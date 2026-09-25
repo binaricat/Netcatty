@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction 
 import {
   FileConflict,
   FileConflictAction,
+  LocalDownloadTargetExpectation,
+  LocalPublishedFileIdentity,
   SftpFilenameEncoding,
   TransferDirection,
   TransferStatus,
@@ -163,6 +165,8 @@ export const useSftpTransfers = ({
   getActivePane,
   getPaneByConnectionId,
   getTabByConnectionId,
+  resolveConnectedHost,
+  getTransferPoolKeyForHost,
   updateTab,
   refresh,
   clearCacheForConnection,
@@ -1750,6 +1754,9 @@ export const useSftpTransfers = ({
       fileName: string;
       sourcePath: string;
       targetPath: string;
+      expectedLocalTarget?: LocalDownloadTargetExpectation;
+      expectedSourceEndpointKey?: string;
+      onPublishedLocalFile?: (identity: LocalPublishedFileIdentity) => void;
       sftpId: string;
       connectionId: string;
       sourceHostId: string;
@@ -1782,6 +1789,7 @@ export const useSftpTransfers = ({
         fileName: params.fileName,
         sourcePath: params.sourcePath,
         targetPath: params.targetPath,
+        expectedLocalTarget: params.expectedLocalTarget,
         sourceConnectionId: params.connectionId,
         sourceHostId: params.sourceHostId,
         sourceHostLabel: params.sourceHostLabel,
@@ -1817,6 +1825,10 @@ export const useSftpTransfers = ({
       };
       const executeDownload = async (): Promise<TransferStatus> => {
         const sourceEncoding = params.sourceEncoding ?? "auto";
+        const sourceTab = getTabByConnectionId(params.connectionId);
+        const connectedHost = sourceTab && resolveConnectedHost?.(sourceTab.tabId);
+        const sourceConnectHost = connectedHost && connectedHost !== "local"
+          && connectedHost.id === params.sourceHostId ? connectedHost : undefined;
         // Mutable counter to track child failures outside React state,
         // so the final status check doesn't depend on render timing.
         let childFailureCount = 0;
@@ -1826,10 +1838,22 @@ export const useSftpTransfers = ({
         let sourceWorkLease: TransferConnectionLease | null = null;
         let workingSourceSftpId = params.sftpId;
         try {
+          // A remembered target is safe only when the transfer can use the
+          // exact connect-time route that identified the browsed source.
+          if (params.expectedLocalTarget && (!sourceConnectHost || !params.expectedSourceEndpointKey)) {
+            throw new Error("Download source connection changed; choose the destination again");
+          }
+          if (params.expectedSourceEndpointKey) {
+            const actualKey = sourceConnectHost && await getTransferPoolKeyForHost?.(sourceConnectHost);
+            if (!actualKey || actualKey !== params.expectedSourceEndpointKey) {
+              throw new Error("Download source route changed; choose the destination again");
+            }
+          }
           if (acquireTransferSession && params.sourceHostId) {
             sourceWorkLease = await acquireTransferSession(
               params.sourceHostId,
               `${task.id}:work-source`,
+              sourceConnectHost,
             );
             workingSourceSftpId = sourceWorkLease.sftpId;
           }
@@ -1850,6 +1874,9 @@ export const useSftpTransfers = ({
               false,       // sameHost
               0,           // symlinkDepth
               true,        // followSymlinks — download should expand symlink dirs
+              undefined,
+              undefined,
+              sourceConnectHost,
             );
           } else {
             await transferFile(
@@ -1861,6 +1888,9 @@ export const useSftpTransfers = ({
               sourceEncoding,
               "auto",
               task.id,
+              false,
+              params.onPublishedLocalFile,
+              sourceConnectHost,
             );
           }
 
@@ -1915,7 +1945,7 @@ export const useSftpTransfers = ({
       return result;
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [sftpSessionsRef, acquireTransferSession],
+    [sftpSessionsRef, acquireTransferSession, getTabByConnectionId, resolveConnectedHost, getTransferPoolKeyForHost],
   );
 
   // Publish only on owner change / mount. Do NOT re-publish on every `transfers`

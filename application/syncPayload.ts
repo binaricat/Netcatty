@@ -87,6 +87,7 @@ import {
   STORAGE_KEY_SFTP_SHOW_HIDDEN_FILES,
   STORAGE_KEY_SFTP_USE_COMPRESSED_UPLOAD,
   STORAGE_KEY_SFTP_SKIP_UNCHANGED,
+  STORAGE_KEY_SFTP_QUICK_DOWNLOAD,
   STORAGE_KEY_SFTP_AUTO_OPEN_SIDEBAR,
   STORAGE_KEY_SFTP_FOLLOW_TERMINAL_CWD,
   STORAGE_KEY_SFTP_DEFAULT_VIEW_MODE,
@@ -315,6 +316,7 @@ export const SYNCABLE_SETTING_STORAGE_KEYS = [
   STORAGE_KEY_SFTP_SHOW_HIDDEN_FILES,
   STORAGE_KEY_SFTP_USE_COMPRESSED_UPLOAD,
   STORAGE_KEY_SFTP_SKIP_UNCHANGED,
+  STORAGE_KEY_SFTP_QUICK_DOWNLOAD,
   STORAGE_KEY_SFTP_AUTO_OPEN_SIDEBAR,
   STORAGE_KEY_SFTP_FOLLOW_TERMINAL_CWD,
   STORAGE_KEY_SFTP_DEFAULT_VIEW_MODE,
@@ -537,6 +539,8 @@ export function collectSyncableSettings(): SyncPayload['settings'] {
   if (compress === 'true' || compress === 'false') settings.sftpUseCompressedUpload = compress === 'true';
   const skipUnchanged = localStorageAdapter.readBoolean(STORAGE_KEY_SFTP_SKIP_UNCHANGED);
   if (skipUnchanged != null) settings.sftpSkipUnchanged = skipUnchanged;
+  const quickDownload = localStorageAdapter.readBoolean(STORAGE_KEY_SFTP_QUICK_DOWNLOAD);
+  if (quickDownload != null) settings.sftpQuickDownload = quickDownload;
   const autoOpenSidebar = localStorageAdapter.readString(STORAGE_KEY_SFTP_AUTO_OPEN_SIDEBAR);
   if (autoOpenSidebar === 'true' || autoOpenSidebar === 'false') settings.sftpAutoOpenSidebar = autoOpenSidebar === 'true';
   const followTerminalCwd = localStorageAdapter.readString(STORAGE_KEY_SFTP_FOLLOW_TERMINAL_CWD);
@@ -811,6 +815,7 @@ async function applySyncableSettings(
   if (settings.sftpShowHiddenFiles != null) localStorageAdapter.writeString(STORAGE_KEY_SFTP_SHOW_HIDDEN_FILES, String(settings.sftpShowHiddenFiles));
   if (settings.sftpUseCompressedUpload != null) localStorageAdapter.writeString(STORAGE_KEY_SFTP_USE_COMPRESSED_UPLOAD, String(settings.sftpUseCompressedUpload));
   if (settings.sftpSkipUnchanged != null) localStorageAdapter.writeBoolean(STORAGE_KEY_SFTP_SKIP_UNCHANGED, settings.sftpSkipUnchanged);
+  if (settings.sftpQuickDownload != null) localStorageAdapter.writeBoolean(STORAGE_KEY_SFTP_QUICK_DOWNLOAD, settings.sftpQuickDownload);
   if (settings.sftpAutoOpenSidebar != null) localStorageAdapter.writeString(STORAGE_KEY_SFTP_AUTO_OPEN_SIDEBAR, String(settings.sftpAutoOpenSidebar));
   if (settings.sftpFollowTerminalCwd != null) localStorageAdapter.writeString(STORAGE_KEY_SFTP_FOLLOW_TERMINAL_CWD, String(settings.sftpFollowTerminalCwd));
   if (settings.sftpDefaultViewMode != null) {

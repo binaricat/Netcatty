@@ -1,4 +1,4 @@
-import type { TransferTask } from "../../../domain/models";
+import type { LocalPublishedFileIdentity, TransferTask } from "../../../domain/models";
 import { sftpTransferCenterStore } from "../sftpTransferCenterStore";
 
 /** The displaced invocation may fail its walk, but no longer owns the child row. */
@@ -6,7 +6,12 @@ export class TransferOwnerChangedError extends Error {}
 
 export type TransferOwnerObservation = ReturnType<typeof sftpTransferCenterStore.observeTaskSettlement>;
 
-type StreamResult = { error?: string; cancelled?: boolean; superseded?: boolean } | undefined;
+type StreamResult = {
+  error?: string;
+  cancelled?: boolean;
+  superseded?: boolean;
+  publishedLocalIdentity?: LocalPublishedFileIdentity;
+} | undefined;
 
 /** A live waiter owns bounded settlement evidence; persisted history stays compact. */
 export async function runTransferAndWaitForOwner(

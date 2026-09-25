@@ -514,6 +514,8 @@ test("statLocal follows symlinks and reports target size for resume sizing", asy
     assert.equal(result.type, "file");
     assert.equal(result.size, targetStat.size);
     assert.equal(result.lastModified, targetStat.mtime.getTime());
+    assert.equal(result.dev, String(targetStat.dev));
+    assert.equal(result.ino, String(targetStat.ino));
   } finally {
     await fs.promises.rm(root, { recursive: true, force: true });
   }
@@ -541,6 +543,8 @@ test("lstatLocal classifies symlinks without following the target", async (t) =>
     assert.equal(result.type, "symlink");
     assert.equal(result.size, linkStat.size);
     assert.equal(result.lastModified, linkStat.mtime.getTime());
+    assert.equal(result.dev, String(linkStat.dev));
+    assert.equal(result.ino, String(linkStat.ino));
   } finally {
     await fs.promises.rm(root, { recursive: true, force: true });
   }

@@ -1037,6 +1037,51 @@ function stableLocalFileIdentity(statLike) {
   return [statLike.dev, statLike.ino, statLike.size].join(":");
 }
 
+async function hashOpenLocalFile(handle, assertNotCancelled = () => {}) {
+  const hash = crypto.createHash("sha256");
+  const buffer = Buffer.allocUnsafe(1024 * 1024);
+  let position = 0;
+  for (;;) {
+    assertNotCancelled();
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, position);
+    if (!bytesRead) break;
+    hash.update(buffer.subarray(0, bytesRead));
+    position += bytesRead;
+  }
+  return hash.digest("hex");
+}
+
+async function assertExpectedLocalDownloadTarget(requestedPath, expected, inspectedTarget) {
+  if (!expected) return;
+  const validIdentity = (value) => typeof value === "string" && /^\d+:\d+$/.test(value);
+  const validTimestamp = (value) => typeof value === "string" && /^[1-9]\d*$/.test(value);
+  if (!validIdentity(expected.targetIdentity) || !validIdentity(expected.parentIdentity)
+    || !validTimestamp(expected.targetBirthtimeNs) || !validTimestamp(expected.targetCtimeNs)
+    || !validTimestamp(expected.targetMtimeNs)
+    || typeof expected.targetSha256 !== "string" || !/^[a-f0-9]{64}$/.test(expected.targetSha256)
+    || !validTimestamp(expected.parentBirthtimeNs)
+    || typeof expected.parentRealPath !== "string" || !expected.parentRealPath) {
+    throw new Error("Invalid remembered local download target identity");
+  }
+  const parentPath = path.dirname(requestedPath);
+  const [parentStat, parentRealPath, target] = await Promise.all([
+    fs.promises.stat(parentPath, { bigint: true }),
+    fs.promises.realpath(parentPath),
+    inspectedTarget ?? inspectLocalPromotionTarget(requestedPath),
+  ]);
+  const parentIdentity = `${parentStat.dev}:${parentStat.ino}`;
+  const targetIdentity = target.stableIdentity?.split(":").slice(0, 2).join(":");
+  if (!parentStat.isDirectory() || parentRealPath !== expected.parentRealPath
+    || parentIdentity !== expected.parentIdentity
+    || String(parentStat.birthtimeNs) !== expected.parentBirthtimeNs
+    || targetIdentity !== expected.targetIdentity
+    || target.birthtimeNs !== expected.targetBirthtimeNs
+    || target.ctimeNs !== expected.targetCtimeNs
+    || target.mtimeNs !== expected.targetMtimeNs) {
+    throw new Error("Remembered local download target changed before replacement");
+  }
+}
+
 async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
   const { publishLocalFileExclusive } = require("./localFilePublish.cjs");
   const assertNotCancelled = options.assertNotCancelled || (() => {});
@@ -1072,6 +1117,9 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
     // Keep read access to our private bytes before destination permissions
     // can remove it; the no-hardlink fallback copies through this handle.
     preparedHandle = await fs.promises.open(readyPath, "r");
+    const preparedHash = options.capturePublishedContentHash
+      ? await hashOpenLocalFile(preparedHandle, assertNotCancelled)
+      : null;
     let appliedMode = null;
     let validatedTarget;
     let stable = false;
@@ -1079,6 +1127,11 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
       validatedTarget = typeof options.validateTarget === "function"
         ? await options.validateTarget()
         : undefined;
+      await assertExpectedLocalDownloadTarget(
+        options.requestedTargetPath || targetPath,
+        options.expectedLocalTarget,
+        validatedTarget,
+      );
       const mode = Number.isInteger(validatedTarget?.existingMode)
         ? validatedTarget.existingMode & 0o7777
         : Number.isInteger(options.existingMode) ? options.existingMode & 0o7777 : null;
@@ -1095,6 +1148,7 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
     const expectedAbsent = validatedTarget?.targetIdentity === "missing" || validatedTarget?.targetIdentity === null;
     const expectedIdentity = validatedTarget?.stableIdentity
       || (validatedTarget?.targetIdentity ? String(validatedTarget.targetIdentity).split(":").slice(0, 3).join(":") : null);
+    let verifiedBackupCtimeNs = null;
     if (!expectedAbsent) {
       try {
         originalHandle = await fs.promises.open(targetPath, "r");
@@ -1119,11 +1173,43 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
       } catch (error) {
         if (error?.code !== "ENOENT") throw error;
       }
+      if (options.expectedLocalTarget && !backedUp) {
+        throw new Error("Remembered local download target disappeared during replacement");
+      }
     }
-    if (backedUp && expectedIdentity) {
-      const stat = await fs.promises.lstat(backupPath);
-      if (!stat.isFile() || stableLocalFileIdentity(stat) !== expectedIdentity) {
+    if (backedUp && (expectedIdentity || options.expectedLocalTarget)) {
+      const stat = await fs.promises.lstat(backupPath, { bigint: true });
+      if (!stat.isFile() || (expectedIdentity && stableLocalFileIdentity(stat) !== expectedIdentity)
+        || (options.expectedLocalTarget
+          && (`${stat.dev}:${stat.ino}` !== options.expectedLocalTarget.targetIdentity
+            || String(stat.birthtimeNs) !== options.expectedLocalTarget.targetBirthtimeNs
+            || String(stat.mtimeNs) !== options.expectedLocalTarget.targetMtimeNs))) {
         throw new Error("Local download target changed during replacement");
+      }
+      if (options.expectedLocalTarget) {
+        let backupHandle;
+        try {
+          const heldStat = originalHandle && await originalHandle.stat({ bigint: true });
+          backupHandle = heldStat && stableLocalFileIdentity(heldStat) === stableLocalFileIdentity(stat)
+            ? originalHandle : await fs.promises.open(backupPath, "r");
+          const before = await backupHandle.stat({ bigint: true });
+          const backupHash = await hashOpenLocalFile(backupHandle, assertNotCancelled);
+          const [after, pathStat] = await Promise.all([
+            backupHandle.stat({ bigint: true }),
+            fs.promises.lstat(backupPath, { bigint: true }),
+          ]);
+          if (backupHash !== options.expectedLocalTarget.targetSha256
+            || stableLocalFileIdentity(before) !== stableLocalFileIdentity(after)
+            || stableLocalFileIdentity(after) !== stableLocalFileIdentity(pathStat)
+            || `${pathStat.dev}:${pathStat.ino}` !== options.expectedLocalTarget.targetIdentity
+            || before.ctimeNs !== after.ctimeNs || after.ctimeNs !== pathStat.ctimeNs
+            || before.mtimeNs !== after.mtimeNs || after.mtimeNs !== pathStat.mtimeNs) {
+            throw new Error("Local download target content changed during replacement");
+          }
+          verifiedBackupCtimeNs = String(pathStat.ctimeNs);
+        } finally {
+          if (backupHandle && backupHandle !== originalHandle) await backupHandle.close().catch(() => {});
+        }
       }
     }
     assertNotCancelled();
@@ -1142,10 +1228,87 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
     committed = true;
     // Hand the published inode identity to the caller for descriptor-based
     // metadata stamping after publication.
-    options.onCommit?.(publishedIdentity, localMtimePrepared);
-    if (backedUp) await fs.promises.unlink(backupPath).catch(() => {});
+    if (backedUp && options.expectedLocalTarget) {
+      let backupHandle;
+      try {
+        const pathBefore = await fs.promises.lstat(backupPath, { bigint: true });
+        const heldStat = originalHandle && await originalHandle.stat({ bigint: true });
+        backupHandle = heldStat && stableLocalFileIdentity(heldStat) === stableLocalFileIdentity(pathBefore)
+          ? originalHandle : await fs.promises.open(backupPath, "r");
+        const before = await backupHandle.stat({ bigint: true });
+        const backupHash = await hashOpenLocalFile(backupHandle);
+        const [after, pathAfter] = await Promise.all([
+          backupHandle.stat({ bigint: true }),
+          fs.promises.lstat(backupPath, { bigint: true }),
+        ]);
+        if (backupHash !== options.expectedLocalTarget.targetSha256
+          || String(pathBefore.ctimeNs) !== verifiedBackupCtimeNs
+          || stableLocalFileIdentity(before) !== stableLocalFileIdentity(after)
+          || stableLocalFileIdentity(after) !== stableLocalFileIdentity(pathAfter)
+          || `${pathAfter.dev}:${pathAfter.ino}` !== options.expectedLocalTarget.targetIdentity
+          || before.ctimeNs !== after.ctimeNs || after.ctimeNs !== pathAfter.ctimeNs
+          || before.mtimeNs !== after.mtimeNs || after.mtimeNs !== pathAfter.mtimeNs) {
+          throw new Error("Original local file changed after publication");
+        }
+      } catch (error) {
+        options.onCommit?.(null, localMtimePrepared);
+        const recovery = new Error(`Original local file changed after publication. Recovery backup preserved: ${backupPath}`, { cause: error });
+        recovery.recoveryFailed = true;
+        recovery.remoteBackupPath = backupPath;
+        throw recovery;
+      } finally {
+        if (backupHandle && backupHandle !== originalHandle) await backupHandle.close().catch(() => {});
+      }
+    }
+    // The post-publication verification above only samples the backup; it
+    // cannot atomically guard the deletion below. A writer still holding the
+    // original inode open can land an edit between the final stat/hash and
+    // this unlink, destroying the only remaining name for that edit. Keep the
+    // verified backup instead; the next replacement of this target supersedes
+    // it, and a failure path above already preserves it for recovery.
+    if (backedUp && !options.expectedLocalTarget) await fs.promises.unlink(backupPath).catch(() => {});
     await fs.promises.unlink(readyPath).catch(() => {});
     await fs.promises.unlink(stagedPath).catch(() => {});
+    // Removing the prepared hardlink advances ctime on the published inode.
+    // Capture the final metadata only after cleanup, and refuse to remember
+    // an inode whose bytes or name changed after publication.
+    if (publishedIdentity) {
+      const stat = await fs.promises.lstat(targetPath, { bigint: true }).catch(() => null);
+      publishedIdentity = stat?.isFile()
+        && stableLocalFileIdentity(stat) === stableLocalFileIdentity(publishedIdentity)
+        && String(stat.birthtimeNs) === publishedIdentity.birthtimeNs
+        && String(stat.mtimeNs) === publishedIdentity.mtimeNs
+        ? { ...publishedIdentity, ctimeNs: String(stat.ctimeNs) }
+        : null;
+      if (publishedIdentity && preparedHash) {
+        let targetHandle;
+        try {
+          const preparedStat = await preparedHandle.stat({ bigint: true });
+          targetHandle = stableLocalFileIdentity(preparedStat) === stableLocalFileIdentity(stat)
+            ? preparedHandle : await fs.promises.open(targetPath, "r");
+          const before = await targetHandle.stat({ bigint: true });
+          const actualHash = await hashOpenLocalFile(targetHandle);
+          const [after, pathStat] = await Promise.all([
+            targetHandle.stat({ bigint: true }),
+            fs.promises.lstat(targetPath, { bigint: true }),
+          ]);
+          publishedIdentity = actualHash === preparedHash
+            && stableLocalFileIdentity(before) === stableLocalFileIdentity(after)
+            && stableLocalFileIdentity(after) === stableLocalFileIdentity(pathStat)
+            && before.ctimeNs === after.ctimeNs && after.ctimeNs === pathStat.ctimeNs
+            && before.mtimeNs === after.mtimeNs && after.mtimeNs === pathStat.mtimeNs
+            ? { ...publishedIdentity, sha256: preparedHash, ctimeNs: String(pathStat.ctimeNs) }
+            : null;
+        } catch {
+          // Publication already committed; simply decline to remember a
+          // target whose content cannot be verified.
+          publishedIdentity = null;
+        } finally {
+          if (targetHandle && targetHandle !== preparedHandle) await targetHandle.close().catch(() => {});
+        }
+      }
+    }
+    options.onCommit?.(publishedIdentity, localMtimePrepared);
   } catch (error) {
     if (committed) throw error;
     if (backedUp && !keepRecoveryFiles) {
@@ -1155,7 +1318,7 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
         let restoreHandle;
         if (originalHandle) {
           const [heldStat, backupStat] = await Promise.all([
-            originalHandle.stat(), fs.promises.lstat(backupPath),
+            originalHandle.stat({ bigint: true }), fs.promises.lstat(backupPath, { bigint: true }),
           ]);
           if (stableLocalFileIdentity(heldStat) === stableLocalFileIdentity(backupStat)) restoreHandle = originalHandle;
         }
@@ -1240,7 +1403,7 @@ async function preserveTransferredDestinationMtime(transfer, options = {}) {
           handle = await fs.promises.open(transfer.targetPath, fs.constants.O_WRONLY);
         }
         try {
-          const currentStat = await handle.stat();
+          const currentStat = await handle.stat({ bigint: true });
           const publishedIdentity = transfer.publishedLocalIdentity;
           const expectedIdentity = typeof publishedIdentity === "string"
             ? publishedIdentity : stableLocalFileIdentity(publishedIdentity);
@@ -1322,7 +1485,7 @@ async function inspectLocalPromotionTarget(targetPath) {
     const candidatePath = path.join(currentPath, nextPart);
     let targetLstat;
     try {
-      targetLstat = await fs.promises.lstat(candidatePath);
+      targetLstat = await fs.promises.lstat(candidatePath, { bigint: true });
     } catch (error) {
       if (error?.code !== "ENOENT") throw error;
       return {
@@ -1370,8 +1533,11 @@ async function inspectLocalPromotionTarget(targetPath) {
     }
     return {
       promotionTargetPath: candidatePath,
-      existingMode: targetLstat.mode & 0o7777,
+      existingMode: Number(targetLstat.mode) & 0o7777,
       stableIdentity: stableLocalFileIdentity(targetLstat),
+      birthtimeNs: String(targetLstat.birthtimeNs),
+      ctimeNs: String(targetLstat.ctimeNs),
+      mtimeNs: String(targetLstat.mtimeNs),
       targetIdentity: [
         targetLstat.dev,
         targetLstat.ino,
@@ -1382,7 +1548,7 @@ async function inspectLocalPromotionTarget(targetPath) {
     };
   }
 
-  const rootStat = await fs.promises.lstat(currentPath);
+  const rootStat = await fs.promises.lstat(currentPath, { bigint: true });
   if (!rootStat.isFile()) {
     const error = new Error(`Local download target is not a regular file: ${currentPath}`);
     error.code = rootStat.isDirectory() ? "EISDIR" : "EINVAL";
@@ -1390,8 +1556,10 @@ async function inspectLocalPromotionTarget(targetPath) {
   }
   return {
     promotionTargetPath: currentPath,
-    existingMode: rootStat.mode & 0o7777,
+    existingMode: Number(rootStat.mode) & 0o7777,
     stableIdentity: stableLocalFileIdentity(rootStat),
+    birthtimeNs: String(rootStat.birthtimeNs),
+    ctimeNs: String(rootStat.ctimeNs),
     targetIdentity: [
       rootStat.dev,
       rootStat.ino,
@@ -6130,6 +6298,9 @@ async function startTransferNow(event, payload, onProgress) {
         await promoteLocalTransfer(downloadTargetPath, promotionTargetPath, {
           sourceSoftIdentity: transfer.sourceSoftIdentity,
           existingMode,
+          requestedTargetPath: targetPath,
+          expectedLocalTarget: payload.expectedLocalTarget,
+          capturePublishedContentHash: payload.capturePublishedContentHash === true,
           async validateTarget() {
             const latestTarget = await inspectLocalPromotionTarget(targetPath);
             if (latestTarget.promotionTargetPath !== promotionTargetPath) {
@@ -6534,7 +6705,12 @@ async function startTransferNow(event, payload, onProgress) {
     });
     sendComplete();
 
-    return { transferId, totalBytes: fileSize };
+    return {
+      transferId,
+      totalBytes: fileSize,
+      ...(targetType === "local" && transfer.publishedLocalIdentity
+        ? { publishedLocalIdentity: transfer.publishedLocalIdentity } : {}),
+    };
   } catch (err) {
     logTransferDiag(transfer, transfer.cancelled ? "cancelled" : "error", {
       transferred: transfer.diagLastTransferred,

@@ -121,6 +121,7 @@ test("buildTransferPoolKey separates every transport security identity", async (
     variant({ keepaliveInterval: 60 }),
     variant({ algorithmOverrides: { kex: ["diffie-hellman-group14-sha256"] } }),
     variant({ jumpHosts: [{ hostname: "jump-b", port: 22, username: "jump" }] }),
+    variant({ proxy: { type: "socks5", host: "proxy-b", port: 1080 } as NetcattySSHOptions["proxy"] }),
     variant({ verifyHostKeys: false }),
     variant({ knownHosts: [{
       id: "known-b",

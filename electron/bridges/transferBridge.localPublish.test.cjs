@@ -6,6 +6,301 @@ const path = require("node:path");
 const bridge = require("./transferBridge.cjs");
 const temp = require("./tempDirBridge.cjs");
 
+function rememberedExpectation(parent, target) {
+  const parentStat = fs.statSync(parent, { bigint: true });
+  const targetStat = fs.lstatSync(target, { bigint: true });
+  return {
+    parentRealPath: fs.realpathSync(parent),
+    parentIdentity: `${parentStat.dev}:${parentStat.ino}`,
+    parentBirthtimeNs: String(parentStat.birthtimeNs),
+    targetIdentity: `${targetStat.dev}:${targetStat.ino}`,
+    targetBirthtimeNs: String(targetStat.birthtimeNs),
+    targetCtimeNs: String(targetStat.ctimeNs),
+    targetMtimeNs: String(targetStat.mtimeNs),
+    targetSha256: require("node:crypto").createHash("sha256").update(fs.readFileSync(target)).digest("hex"),
+  };
+}
+
+test("remembered download replaces the same verified local file", async (t) => {
+  const root = fs.mkdtempSync(`${temp.getTempFilePath("remembered-publish")}-`);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const staged = path.join(root, "staged");
+  const target = path.join(root, "target");
+  fs.writeFileSync(staged, "download");
+  fs.writeFileSync(target, "original");
+  let publishedIdentity;
+  await bridge._promoteLocalTransferForTests(staged, target, {
+    requestedTargetPath: target,
+    expectedLocalTarget: rememberedExpectation(root, target),
+    capturePublishedContentHash: true,
+    onCommit(identity) { publishedIdentity = identity; },
+  });
+  assert.equal(fs.readFileSync(target, "utf8"), "download");
+  const publishedStat = fs.lstatSync(target, { bigint: true });
+  assert.deepEqual(publishedIdentity, {
+    dev: String(publishedStat.dev), ino: String(publishedStat.ino),
+    size: Number(publishedStat.size), birthtimeNs: String(publishedStat.birthtimeNs),
+    ctimeNs: String(publishedStat.ctimeNs), mtimeNs: String(publishedStat.mtimeNs),
+    sha256: require("node:crypto").createHash("sha256").update("download").digest("hex"),
+  });
+});
+
+test("verified remembered download retains its backup after publication", async (t) => {
+  const root = fs.mkdtempSync(`${temp.getTempFilePath("remembered-retain-backup")}-`);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const staged = path.join(root, "staged");
+  const target = path.join(root, "target");
+  fs.writeFileSync(staged, "download");
+  fs.writeFileSync(target, "original");
+  await bridge._promoteLocalTransferForTests(staged, target, {
+    requestedTargetPath: target,
+    expectedLocalTarget: rememberedExpectation(root, target),
+  });
+  assert.equal(fs.readFileSync(target, "utf8"), "download");
+  // The verification snapshot cannot guard the backup deletion: a late write
+  // from a process holding the original inode open would otherwise lose its
+  // only remaining name. The verified backup must therefore be retained.
+  const backupName = fs.readdirSync(root).find((name) => name.endsWith(".backup"));
+  assert.ok(backupName, "retain the verified backup for late writers");
+  assert.equal(fs.readFileSync(path.join(root, backupName), "utf8"), "original");
+});
+
+test("published file edited with restored mtime is never remembered", async (t) => {
+  const root = fs.mkdtempSync(`${temp.getTempFilePath("published-restored-mtime")}-`);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const staged = path.join(root, "staged");
+  const target = path.join(root, "target");
+  fs.writeFileSync(staged, "download");
+  const unlink = fs.promises.unlink;
+  t.after(() => { fs.promises.unlink = unlink; });
+  let edited = false;
+  fs.promises.unlink = async (file) => {
+    const result = await unlink(file);
+    if (!edited && String(file).endsWith(".ready")) {
+      edited = true;
+      const originalMtime = fs.statSync(target).mtime;
+      fs.writeFileSync(target, "modified");
+      fs.utimesSync(target, originalMtime, originalMtime);
+    }
+    return result;
+  };
+  let publishedIdentity = "unset";
+  await bridge._promoteLocalTransferForTests(staged, target, {
+    capturePublishedContentHash: true,
+    onCommit(identity) { publishedIdentity = identity; },
+  });
+  assert.equal(edited, true);
+  assert.equal(fs.readFileSync(target, "utf8"), "modified");
+  assert.equal(publishedIdentity, null);
+});
+
+test("remembered download preserves an in-place edit just before moving the original", async (t) => {
+  const root = fs.mkdtempSync(`${temp.getTempFilePath("remembered-inplace-race")}-`);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const staged = path.join(root, "staged");
+  const target = path.join(root, "target");
+  fs.writeFileSync(staged, "download");
+  fs.writeFileSync(target, "original");
+  const expectedLocalTarget = rememberedExpectation(root, target);
+  const rename = fs.promises.rename;
+  t.after(() => { fs.promises.rename = rename; });
+  let edited = false;
+  fs.promises.rename = async (from, to) => {
+    if (!edited && from === target && String(to).endsWith(".backup")) {
+      edited = true;
+      fs.writeFileSync(target, "modified"); // same inode and byte length
+      // Some filesystems coalesce immediate timestamp updates. Ensure this
+      // simulated external write has an observable change in file metadata.
+      fs.utimesSync(target, new Date(Date.now() + 1000), new Date(Date.now() + 1000));
+    }
+    return rename(from, to);
+  };
+  await assert.rejects(() => bridge._promoteLocalTransferForTests(staged, target, {
+    requestedTargetPath: target, expectedLocalTarget,
+  }), /Local download target changed during replacement/);
+  assert.equal(edited, true);
+  assert.equal(fs.readFileSync(target, "utf8"), "modified");
+});
+
+test("remembered download checks backup bytes even when its mtime appears unchanged", async (t) => {
+  const root = fs.mkdtempSync(`${temp.getTempFilePath("remembered-backup-hash")}-`);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const staged = path.join(root, "staged");
+  const target = path.join(root, "target");
+  fs.writeFileSync(staged, "download");
+  fs.writeFileSync(target, "original");
+  const expectedLocalTarget = rememberedExpectation(root, target);
+  const rename = fs.promises.rename;
+  const lstat = fs.promises.lstat;
+  t.after(() => { fs.promises.rename = rename; fs.promises.lstat = lstat; });
+  fs.promises.rename = async (from, to) => {
+    if (from === target && String(to).endsWith(".backup")) {
+      fs.writeFileSync(target, "modified"); // same file number and byte length
+    }
+    return rename(from, to);
+  };
+  // Model an external editor that restores mtime after its write. The backup
+  // metadata alone must not authorize replacing these different bytes.
+  fs.promises.lstat = async (file, options) => {
+    const stat = await lstat(file, options);
+    if (!String(file).endsWith(".backup")) return stat;
+    return new Proxy(stat, { get(value, key) {
+      if (key === "mtimeNs") return BigInt(expectedLocalTarget.targetMtimeNs);
+      return Reflect.get(value, key);
+    } });
+  };
+  await assert.rejects(() => bridge._promoteLocalTransferForTests(staged, target, {
+    requestedTargetPath: target, expectedLocalTarget,
+  }), /Local download target content changed during replacement/);
+  assert.equal(fs.readFileSync(target, "utf8"), "modified");
+});
+
+test("remembered download stops if the selected file disappears at replacement", async (t) => {
+  const root = fs.mkdtempSync(`${temp.getTempFilePath("remembered-disappeared")}-`);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const staged = path.join(root, "staged");
+  const target = path.join(root, "target");
+  fs.writeFileSync(staged, "download");
+  fs.writeFileSync(target, "original");
+  const expectedLocalTarget = rememberedExpectation(root, target);
+  const rename = fs.promises.rename;
+  t.after(() => { fs.promises.rename = rename; });
+  fs.promises.rename = async (from, to) => {
+    if (from === target && String(to).endsWith(".backup")) fs.unlinkSync(target);
+    return rename(from, to);
+  };
+  await assert.rejects(() => bridge._promoteLocalTransferForTests(staged, target, {
+    requestedTargetPath: target, expectedLocalTarget,
+  }), /Remembered local download target disappeared/);
+  assert.equal(fs.existsSync(target), false);
+});
+
+test("remembered download keeps a backup edited after publication", async (t) => {
+  const root = fs.mkdtempSync(`${temp.getTempFilePath("remembered-late-edit")}-`);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const staged = path.join(root, "staged");
+  const target = path.join(root, "target");
+  fs.writeFileSync(staged, "download");
+  fs.writeFileSync(target, "original");
+  const expectedLocalTarget = rememberedExpectation(root, target);
+  const link = fs.promises.link;
+  t.after(() => { fs.promises.link = link; });
+  let edited = false;
+  fs.promises.link = async (from, to) => {
+    const result = await link(from, to);
+    if (!edited && to === target && String(from).endsWith(".ready")) {
+      edited = true;
+      const backupName = fs.readdirSync(root).find((name) => name.endsWith(".backup"));
+      assert.ok(backupName);
+      fs.writeFileSync(path.join(root, backupName), "modified");
+    }
+    return result;
+  };
+  await assert.rejects(() => bridge._promoteLocalTransferForTests(staged, target, {
+    requestedTargetPath: target, expectedLocalTarget,
+  }), /Recovery backup preserved/);
+  assert.equal(edited, true);
+  assert.equal(fs.readFileSync(target, "utf8"), "download");
+  const backupName = fs.readdirSync(root).find((name) => name.endsWith(".backup"));
+  assert.ok(backupName);
+  assert.equal(fs.readFileSync(path.join(root, backupName), "utf8"), "modified");
+});
+
+test("replacement keeps large file numbers exact when checking its backup", async (t) => {
+  const root = fs.mkdtempSync(`${temp.getTempFilePath("large-backup-identity")}-`);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const staged = path.join(root, "staged");
+  const target = path.join(root, "target");
+  fs.writeFileSync(staged, "download");
+  fs.writeFileSync(target, "original");
+  const dev = 9007199254740993n;
+  const ino = 9007199254740995n;
+  const originalLstat = fs.promises.lstat;
+  t.after(() => { fs.promises.lstat = originalLstat; });
+  fs.promises.lstat = async (candidate, options) => {
+    const stat = await originalLstat(candidate, options);
+    if (!String(candidate).endsWith(".backup")) return stat;
+    return new Proxy(stat, {
+      get(value, key) {
+        if (key === "dev") return options?.bigint ? dev : Number(dev);
+        if (key === "ino") return options?.bigint ? ino : Number(ino);
+        return Reflect.get(value, key);
+      },
+    });
+  };
+  await bridge._promoteLocalTransferForTests(staged, target, {
+    validateTarget: async () => ({
+      stableIdentity: `${dev}:${ino}:${fs.statSync(target).size}`,
+      existingMode: 0o644,
+      targetIdentity: `${dev}:${ino}:original`,
+    }),
+  });
+  assert.equal(fs.readFileSync(target, "utf8"), "download");
+});
+
+test("remembered download does not replace a different file created during transfer", async (t) => {
+  const root = fs.mkdtempSync(`${temp.getTempFilePath("remembered-race")}-`);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const staged = path.join(root, "staged");
+  const target = path.join(root, "target");
+  fs.writeFileSync(staged, "download");
+  fs.writeFileSync(target, "original");
+  const expectedLocalTarget = rememberedExpectation(root, target);
+
+  fs.renameSync(target, path.join(root, "moved-original"));
+  fs.writeFileSync(target, "unrelated");
+  await assert.rejects(
+    () => bridge._promoteLocalTransferForTests(staged, target, {
+      requestedTargetPath: target,
+      expectedLocalTarget,
+    }),
+    /Remembered local download target changed/,
+  );
+  assert.equal(fs.readFileSync(target, "utf8"), "unrelated");
+  assert.equal(fs.readFileSync(path.join(root, "moved-original"), "utf8"), "original");
+});
+
+test("remembered download rejects a reused file number with a different creation time", async (t) => {
+  const root = fs.mkdtempSync(`${temp.getTempFilePath("remembered-inode")}-`);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const staged = path.join(root, "staged");
+  const target = path.join(root, "target");
+  fs.writeFileSync(staged, "download");
+  fs.writeFileSync(target, "unrelated");
+  const expectedLocalTarget = rememberedExpectation(root, target);
+  expectedLocalTarget.targetBirthtimeNs = String(BigInt(expectedLocalTarget.targetBirthtimeNs) - 1n);
+  await assert.rejects(() => bridge._promoteLocalTransferForTests(staged, target, {
+    requestedTargetPath: target,
+    expectedLocalTarget,
+  }), /Remembered local download target changed/);
+  assert.equal(fs.readFileSync(target, "utf8"), "unrelated");
+});
+
+test("remembered download rejects a replaced parent even when the file is the same", async (t) => {
+  const root = fs.mkdtempSync(`${temp.getTempFilePath("remembered-parent")}-`);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const parent = path.join(root, "selected");
+  const movedParent = path.join(root, "moved");
+  const target = path.join(parent, "target");
+  const staged = path.join(root, "staged");
+  fs.mkdirSync(parent);
+  fs.writeFileSync(target, "original");
+  fs.writeFileSync(staged, "download");
+  const expectedLocalTarget = rememberedExpectation(parent, target);
+
+  fs.renameSync(parent, movedParent);
+  fs.mkdirSync(parent);
+  fs.linkSync(path.join(movedParent, "target"), target);
+  await assert.rejects(
+    () => bridge._promoteLocalTransferForTests(staged, target, {
+      requestedTargetPath: target,
+      expectedLocalTarget,
+    }),
+    /Remembered local download target changed/,
+  );
+  assert.equal(fs.readFileSync(target, "utf8"), "original");
+});
+
 for (const restore of [false, true]) {
   test(`local ${restore ? "restore" : "publish"} never overwrites a last-moment concurrent file`, async (t) => {
     const root = fs.mkdtempSync(`${temp.getTempFilePath("publish-race")}-`);
@@ -84,8 +379,14 @@ for (const failCopy of [false, true]) {
       assert.deepEqual(fs.readFileSync(path.join(root, names.find(name => name.endsWith(".ready")))), payload);
       assert.equal(fs.readFileSync(path.join(root, names.find(name => name.endsWith(".backup"))), "utf8"), "original");
     } else {
-      await bridge._promoteLocalTransferForTests(staged, target);
+      let publishedIdentity;
+      await bridge._promoteLocalTransferForTests(staged, target, {
+        capturePublishedContentHash: true,
+        onCommit(identity) { publishedIdentity = identity; },
+      });
       assert.deepEqual(fs.readFileSync(target), payload);
+      assert.equal(publishedIdentity?.sha256,
+        require("node:crypto").createHash("sha256").update(payload).digest("hex"));
       assert.deepEqual(fs.readdirSync(root), ["target"]);
     }
   });

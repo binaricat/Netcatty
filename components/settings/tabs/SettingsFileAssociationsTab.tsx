@@ -42,6 +42,7 @@ export default function SettingsFileAssociationsTab() {
     sftpUseCompressedUpload, setSftpUseCompressedUpload,
 
     sftpSkipUnchanged, setSftpSkipUnchanged,
+    sftpQuickDownload, setSftpQuickDownload,
     sftpAutoOpenSidebar, setSftpAutoOpenSidebar,
     sftpFollowTerminalCwd, setSftpFollowTerminalCwd,
     sftpDefaultViewMode, setSftpDefaultViewMode,
@@ -229,6 +230,12 @@ export default function SettingsFileAssociationsTab() {
           description={t('settings.sftp.skipUnchanged.enableDesc')}
         >
           <Toggle checked={sftpSkipUnchanged} onChange={setSftpSkipUnchanged} />
+        </SettingRow>
+        <SettingRow
+          label={t('settings.sftp.quickDownload.enable')}
+          description={t('settings.sftp.quickDownload.enableDesc')}
+        >
+          <Toggle checked={sftpQuickDownload} onChange={setSftpQuickDownload} />
         </SettingRow>
         <SettingRow
           label={t('settings.ssh.transportIdleTtl')}

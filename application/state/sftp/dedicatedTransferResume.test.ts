@@ -39,6 +39,22 @@ const host = (id: string, label: string, hostname = label): Host => ({
   protocol: "ssh",
 } as Host);
 
+test("repeat download refuses hard reconnect when its original route cannot be checked", async () => {
+  const task: TransferTask = {
+    id: "guarded-repeat", fileName: "file.bin",
+    sourcePath: "/remote/file.bin", targetPath: "/local/file.bin",
+    sourceConnectionId: "old-sftp", sourceHostId: "h1", sourceHostLabel: "box",
+    targetConnectionId: "local", direction: "download", status: "interrupted",
+    totalBytes: 100, transferredBytes: 20, speed: 0, startTime: 1,
+    isDirectory: false, requireOriginalSourceForResume: true,
+  };
+  const result = await resumeTransferWithDedicatedSession(task, {
+    hosts: [host("h1", "box", "1.2.3.4")], keys: [], identities: [],
+  });
+  assert.equal(result.success, false);
+  assert.match(result.error ?? "", /source cannot be verified/);
+});
+
 for (const retainedStatus of [undefined, "interrupted", "failed", "paused"] as const) {
 for (const newerPause of retainedStatus === "paused" ? [false, true] : [false]) {
 for (const ownerChange of retainedStatus === "interrupted" || retainedStatus === undefined ? ["same", "active", "completed"] : ["same"]) {
@@ -792,6 +808,16 @@ test("stat-less SCP download resume keeps saved progress instead of restarting",
       startTime: 1,
       isDirectory: false,
       reconnectRequired: true,
+      expectedLocalTarget: {
+        parentRealPath: "/local",
+        parentIdentity: "1:2",
+        parentBirthtimeNs: "100",
+        targetIdentity: "1:3",
+        targetBirthtimeNs: "200",
+        targetCtimeNs: "201",
+        targetMtimeNs: "202",
+        targetSha256: "a".repeat(64),
+      },
     }, {
       hosts: [host("h1", "box", "1.2.3.4")],
       keys: [],
@@ -803,6 +829,10 @@ test("stat-less SCP download resume keeps saved progress instead of restarting",
     // the download resumes from byte 20 instead of silently restarting.
     assert.equal(startOptions?.checkpointBytes, 20);
     assert.equal(startOptions?.totalBytes, 100);
+    assert.deepEqual(startOptions?.expectedLocalTarget, {
+      parentRealPath: "/local", parentIdentity: "1:2", parentBirthtimeNs: "100",
+      targetIdentity: "1:3", targetBirthtimeNs: "200", targetCtimeNs: "201", targetMtimeNs: "202", targetSha256: "a".repeat(64),
+    });
   } finally {
     (netcattyBridge as { get: typeof originalGet }).get = originalGet;
     resetDedicatedSessionOpenGateForTests();
