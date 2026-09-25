@@ -102,6 +102,38 @@ test("buildCatalogCliParams maps vault note create and import flags", () => {
   assert.equal(imported.documents, "[{\"fileName\":\"a.md\",\"content\":\"# A\"}]");
 });
 
+test("buildCatalogCliParams keeps explicit empty note clears and empty imports", () => {
+  const cleared = buildCatalogCliParams("vault.note.update", {
+    noteId: "n1",
+    content: "",
+    group: "",
+  }, fakeCreateError);
+  assert.equal(cleared.noteId, "n1");
+  assert.equal(cleared.content, "");
+  assert.equal(cleared.group, "");
+  assert.equal("title" in cleared, false);
+
+  const imported = buildCatalogCliParams("vault.note.import", {
+    fileName: "empty.md",
+    content: "",
+  }, fakeCreateError);
+  assert.equal(imported.fileName, "empty.md");
+  assert.equal(imported.content, "");
+});
+
+test("buildCatalogCliParams still omits absent note fields and other empty optionals", () => {
+  const updated = buildCatalogCliParams("vault.note.update", {
+    noteId: "n1",
+  }, fakeCreateError);
+  assert.deepEqual(updated, { noteId: "n1" });
+
+  const searched = buildCatalogCliParams("vault.note.get", {
+    noteId: "note-1",
+    query: "",
+  }, fakeCreateError);
+  assert.deepEqual(searched, { noteId: "note-1" });
+});
+
 test("buildCatalogCliParams maps vault note read continuation flags", () => {
   const params = buildCatalogCliParams("vault.note.get", {
     noteId: "note-1",

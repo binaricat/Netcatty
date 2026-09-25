@@ -31,6 +31,7 @@ const VAULT_NOTES_CLI_GUIDANCE =
   + "Host Details metadata uses vault host-notes set, not notes create. "
   + "Do not create or import a Vault note when the user asked to add a host. "
   + "If a host operation fails, report the error — do not silently create a Vault note instead. "
+  + "On notes update, an explicit empty --content clears the body and an explicit empty --group clears the folder; omit those flags to keep the current values. notes import accepts an empty --content. "
   + "notes create, notes update, notes delete, and notes import require user approval; if approval is denied, stop.";
 
 const VAULT_SCRIPTS_GUIDANCE =

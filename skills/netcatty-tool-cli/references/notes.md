@@ -21,11 +21,11 @@ Do not use them to add SSH hosts. Host Details metadata uses `vault host-notes g
   - `<netcatty-cli-prefix> notes get --note-id <id> --json`
 - Create a note when the title is already known. `--title` and `--content` are required. Optional: `--group`, `--tags`, `--linked-host-ids` (JSON arrays):
   - `<netcatty-cli-prefix> notes create --title "<title>" --content "<markdown>" --json`
-- Update by exact id. Send only the fields that change:
+- Update by exact id. Send only the fields that change. An explicit empty `--content` clears the body and an explicit empty `--group` clears the folder; omitting a flag keeps the current value:
   - `<netcatty-cli-prefix> notes update --note-id <id> --content "<markdown>" --json`
 - Delete by exact id:
   - `<netcatty-cli-prefix> notes delete --note-id <id> --json`
-- Import generated or attached markdown. Use `--content` plus `--file-name` for one document, or `--documents` for a JSON array of `{fileName, content, title?}`. Do not send both. Optional `--title` overrides the first heading or file name. `--group` applies to every imported note:
+- Import generated or attached markdown. Use `--content` plus `--file-name` for one document, or `--documents` for a JSON array of `{fileName, content, title?}`. Do not send both. `--content ""` imports an empty note. Optional `--title` overrides the first heading or file name. `--group` applies to every imported note:
   - `<netcatty-cli-prefix> notes import --file-name runbook.md --content "<markdown>" --json`
 
 ## Approval

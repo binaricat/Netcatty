@@ -995,12 +995,12 @@
       "content": {
         "type": "string",
         "optional": true,
-        "description": "New markdown body."
+        "description": "New markdown body. An empty string clears the body."
       },
       "group": {
         "type": "string",
         "optional": true,
-        "description": "New folder path."
+        "description": "New folder path. An empty string clears the folder."
       },
       "linkedHostIds": {
         "type": "string",
@@ -1056,7 +1056,7 @@
       "content": {
         "type": "string",
         "optional": true,
-        "description": "Markdown body for a single document. Omit when documents is set."
+        "description": "Markdown body for a single document. An empty string is valid. Omit when documents is set."
       },
       "fileName": {
         "type": "string",

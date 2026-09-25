@@ -119,7 +119,9 @@ function buildCatalogCliParams(capabilityId, opts, createError) {
       value = Number(value);
     }
 
-    if (value == null || value === "") {
+    // A supplied empty string is absent unless the field treats "" as a value
+    // (note update clear, empty markdown import). Omitted flags stay null.
+    if (value == null || (value === "" && !fieldDef.allowEmpty)) {
       if (!fieldDef.optional) {
         throw createError(
           "INVALID_ARGUMENT",

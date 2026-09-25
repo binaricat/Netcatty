@@ -182,8 +182,8 @@ const TOOL_INPUT_FIELDS = Object.freeze({
   "vault.note.update": {
     noteId: { type: "string", description: "Vault note ID to update." },
     title: { type: "string", optional: true, description: "New title." },
-    content: { type: "string", optional: true, description: "New markdown body." },
-    group: { type: "string", optional: true, description: "New folder path." },
+    content: { type: "string", optional: true, allowEmpty: true, description: "New markdown body. An empty string clears the body." },
+    group: { type: "string", optional: true, allowEmpty: true, description: "New folder path. An empty string clears the folder." },
     linkedHostIds: { type: "string", optional: true, description: "Optional JSON array of vault host IDs to link." },
     tags: { type: "string", optional: true, description: "Optional JSON array of tag strings." },
   },
@@ -194,7 +194,8 @@ const TOOL_INPUT_FIELDS = Object.freeze({
     content: {
       type: "string",
       optional: true,
-      description: "Markdown body for a single document. Omit when documents is set.",
+      allowEmpty: true,
+      description: "Markdown body for a single document. An empty string is valid. Omit when documents is set.",
     },
     fileName: {
       type: "string",

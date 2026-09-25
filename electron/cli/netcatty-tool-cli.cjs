@@ -48,6 +48,7 @@ function printHelp() {
     "  - Every `sftp <op>` always requires --session <id>, plus NETCATTY_CLI_CHAT_SESSION_ID, and only works on connected SSH-backed sessions.\n" +
     "  - Vault/portforward/snippet/notes commands use catalog-driven dispatch; see `capabilities --json` for the full list.\n" +
     "  - notes create, update, delete, and import change Vault notes and require user approval in confirm mode.\n" +
+    "  - notes update --content \"\" clears the body and --group \"\" clears the folder; omitting those flags keeps the current values. notes import accepts --content \"\".\n" +
     "  - After `--`, pass exactly one shell-ready command string. Preserve quoting inside that one argument.\n" +
     "  - `cancel` stops in-flight execs, session-backed SFTP transfers, and running jobs for that chat session, then blocks further execs until `resume`.\n",
   );
