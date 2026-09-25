@@ -230,6 +230,93 @@ test("remembered download re-homes the superseded backup when the target disappe
   );
 });
 
+test("remembered download refuses to overwrite a foreign owner-marker entry", async (t) => {
+  const root = fs.mkdtempSync(`${temp.getTempFilePath("remembered-foreign-marker")}-`);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const staged = path.join(root, "staged");
+  const target = path.join(root, "target");
+  const markerPath = path.join(root, ".target.netcatty.backup.owner");
+  fs.writeFileSync(staged, "download");
+  fs.writeFileSync(target, "original");
+  // A foreign symlink occupies the predictable marker pathname before the
+  // first remembered replacement. The marker write must neither truncate the
+  // victim through the link nor replace the entry.
+  const victim = path.join(root, "victim");
+  fs.writeFileSync(victim, "mine");
+  fs.symlinkSync(victim, markerPath);
+  await assert.rejects(
+    () => bridge._promoteLocalTransferForTests(staged, target, {
+      requestedTargetPath: target,
+      expectedLocalTarget: rememberedExpectation(root, target),
+    }),
+    /refusing to overwrite/,
+  );
+  assert.equal(fs.readFileSync(victim, "utf8"), "mine", "symlink victim untouched");
+  assert.ok(fs.lstatSync(markerPath).isSymbolicLink(), "marker entry untouched");
+  assert.equal(fs.readFileSync(target, "utf8"), "original", "target rolled back");
+});
+
+test("remembered download refuses to truncate a foreign owner-marker file", async (t) => {
+  const root = fs.mkdtempSync(`${temp.getTempFilePath("remembered-foreign-marker-file")}-`);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const staged = path.join(root, "staged");
+  const target = path.join(root, "target");
+  const markerPath = path.join(root, ".target.netcatty.backup.owner");
+  fs.writeFileSync(staged, "download");
+  fs.writeFileSync(target, "original");
+  fs.writeFileSync(markerPath, "mine");
+  await assert.rejects(
+    () => bridge._promoteLocalTransferForTests(staged, target, {
+      requestedTargetPath: target,
+      expectedLocalTarget: rememberedExpectation(root, target),
+    }),
+    /refusing to overwrite/,
+  );
+  assert.equal(fs.readFileSync(markerPath, "utf8"), "mine", "foreign marker file untouched");
+  assert.equal(fs.readFileSync(target, "utf8"), "original", "target rolled back");
+});
+
+test("superseded recovery copy is retired into Netcatty temp storage, not destroyed", async (t) => {
+  const root = fs.mkdtempSync(`${temp.getTempFilePath("remembered-superseded-retire")}-`);
+  const tempDir = temp.getTempDir();
+  const tempBefore = new Set(fs.readdirSync(tempDir));
+  t.after(() => {
+    fs.rmSync(root, { recursive: true, force: true });
+    for (const name of fs.readdirSync(tempDir)) {
+      if (!tempBefore.has(name)) fs.rmSync(path.join(tempDir, name), { force: true });
+    }
+  });
+  const staged = path.join(root, "staged");
+  const target = path.join(root, "target");
+  fs.writeFileSync(staged, "second");
+  fs.writeFileSync(target, "first");
+  await bridge._promoteLocalTransferForTests(staged, target, {
+    requestedTargetPath: target,
+    expectedLocalTarget: rememberedExpectation(root, target),
+  });
+  fs.writeFileSync(staged, "third");
+  await bridge._promoteLocalTransferForTests(staged, target, {
+    requestedTargetPath: target,
+    expectedLocalTarget: rememberedExpectation(root, target),
+  });
+  assert.equal(fs.readFileSync(target, "utf8"), "third");
+  assert.equal(
+    fs.readdirSync(root).filter((name) => name.startsWith(".target.netcatty.backup.")
+      && name !== ".target.netcatty.backup" && name !== ".target.netcatty.backup.owner").length,
+    0,
+    "leave no versioned copy beside the destination",
+  );
+  // An editor may still hold the superseded inode open, so its content must
+  // stay reachable through the managed temporary store after retirement.
+  const retired = fs.readdirSync(tempDir)
+    .filter((name) => !tempBefore.has(name) && name.includes("superseded-.target.netcatty.backup."))
+    .map((name) => path.join(tempDir, name))
+    .find((candidate) => {
+      try { return fs.readFileSync(candidate, "utf8") === "first"; } catch { return false; }
+    });
+  assert.ok(retired, "superseded copy remains reachable in Netcatty temp storage");
+});
+
 test("published file edited with restored mtime is never remembered", async (t) => {
   const root = fs.mkdtempSync(`${temp.getTempFilePath("published-restored-mtime")}-`);
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
