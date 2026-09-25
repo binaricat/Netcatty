@@ -20,6 +20,7 @@ test("quick download reuses only the exact target selected for the same remote f
   globals.IS_REACT_ACT_ENVIRONMENT = true;
 
   const storage = new Map<string, string>([[STORAGE_KEY_SFTP_QUICK_DOWNLOAD, "true"]]);
+  const deviceId = "9007199254740993";
   const existingFiles = new Map<string, "file" | "directory" | "symlink">();
   const fileInodes = new Map<string, number>();
   const fileBirthtimes = new Map<string, string>();
@@ -60,7 +61,7 @@ test("quick download reuses only the exact target selected for the same remote f
     downloadToLocal: async (params: {
       sourcePath: string; targetPath: string; isDirectory: boolean;
       expectedLocalTarget?: LocalDownloadTargetExpectation;
-      onPublishedLocalFile?: (identity: { dev: number; ino: number; birthtimeNs: string }) => void;
+      onPublishedLocalFile?: (identity: { dev: string; ino: string; birthtimeNs: string }) => void;
     }) => {
       downloads.push(params);
       existingFiles.set(params.targetPath, params.isDirectory ? "directory" : "file");
@@ -68,7 +69,7 @@ test("quick download reuses only the exact target selected for the same remote f
         const inode = nextFileInode++;
         fileInodes.set(params.targetPath, inode);
         fileBirthtimes.set(params.targetPath, String(inode * 1000));
-        params.onPublishedLocalFile?.({ dev: 1, ino: inode, birthtimeNs: String(inode * 1000) });
+        params.onPublishedLocalFile?.({ dev: deviceId, ino: String(inode), birthtimeNs: String(inode * 1000) });
         if (replaceAfterPublication) {
           replaceAfterPublication = false;
           fileInodes.set(params.targetPath, 555);
@@ -86,12 +87,12 @@ test("quick download reuses only the exact target selected for the same remote f
   (globalThis as { window?: unknown }).window = { netcatty: {
     statLocal: async (path: string) => {
       if (!existingDirectories.has(path)) throw new Error("ENOENT");
-      return { type: "directory", dev: 1, ino: parentInodes.get(path), birthtimeNs: String(parentInodes.get(path)! * 1000) };
+      return { type: "directory", dev: deviceId, ino: String(parentInodes.get(path)), birthtimeNs: String(parentInodes.get(path)! * 1000) };
     },
     lstatLocal: async (path: string) => {
       const type = existingFiles.get(path);
       if (!type) throw new Error("ENOENT");
-      return { type, dev: 1, ino: fileInodes.get(path),
+      return { type, dev: deviceId, ino: String(fileInodes.get(path)),
         birthtimeNs: fileBirthtimes.get(path), ctimeNs: fileBirthtimes.get(path) };
     },
     realpathLocal: async (path: string) => {
@@ -138,9 +139,9 @@ test("quick download reuses only the exact target selected for the same remote f
       "/downloads/renamed.txt", "/downloads/renamed.txt",
     ]);
     assert.equal(downloads[0].expectedLocalTarget, undefined);
-    assert.equal(downloads[1].expectedLocalTarget?.targetIdentity, "1:1000");
+    assert.equal(downloads[1].expectedLocalTarget?.targetIdentity, `${deviceId}:1000`);
     assert.equal(downloads[1].expectedLocalTarget?.targetBirthtimeNs, "1000000");
-    assert.equal(downloads[2].expectedLocalTarget?.targetIdentity, "1:1001");
+    assert.equal(downloads[2].expectedLocalTarget?.targetIdentity, `${deviceId}:1001`);
 
     await act(async () => { await single(file("report.txt"), "/other/report.txt"); });
     assert.equal(saveCalls, 2, "another remote source still opens Save As");

@@ -59,8 +59,8 @@ export interface LocalDownloadTargetExpectation {
 
 /** Identity of the file actually published by a completed local download. */
 export interface LocalPublishedFileIdentity {
-  dev: number;
-  ino: number;
+  dev: string;
+  ino: string;
   birthtimeNs: string;
 }
 

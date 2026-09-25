@@ -190,8 +190,8 @@ declare global {
     owner?: string;
     group?: string;
     /** Local-only filesystem identity; undefined for remote SFTP stats. */
-    dev?: number;
-    ino?: number;
+    dev?: string | number;
+    ino?: string | number;
     /** Local-only nanosecond timestamps used to reject reused inode numbers. */
     birthtimeNs?: string;
     ctimeNs?: string;

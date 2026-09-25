@@ -15,7 +15,7 @@ async function publishLocalFileExclusive(source, target, assertNotCancelled = ()
     // The hardlink shares the published inode; stat either name.
     const linkedStat = await fs.promises.lstat(source, { bigint: true });
     return {
-      dev: Number(linkedStat.dev), ino: Number(linkedStat.ino), size: Number(linkedStat.size),
+      dev: String(linkedStat.dev), ino: String(linkedStat.ino), size: Number(linkedStat.size),
       birthtimeNs: String(linkedStat.birthtimeNs),
     };
   } catch (error) {
@@ -57,7 +57,7 @@ async function publishLocalFileExclusive(source, target, assertNotCancelled = ()
       throw new Error("Local download target changed during replacement");
     }
     publishedIdentity = {
-      dev: Number(ownedStat.dev), ino: Number(ownedStat.ino), size: Number(ownedStat.size),
+      dev: String(ownedStat.dev), ino: String(ownedStat.ino), size: Number(ownedStat.size),
       birthtimeNs: String(ownedStat.birthtimeNs),
     };
   } catch (error) {

@@ -400,8 +400,11 @@ test("same-pane cut into a bind-mount alias of the source folder is blocked", as
   // realpath cannot see through bind mounts: /mnt/alias is bind-mounted to /a,
   // so both sides resolve to themselves and only stat identities match.
   const resolver = (path: string) => Promise.resolve(path);
+  const largeDeviceId = "9007199254740993";
   const statIdentity = (path: string) => Promise.resolve(
-    path === "/a" || path === "/mnt/alias" ? { dev: 42, ino: 7 } : { dev: 42, ino: 9 },
+    path === "/a" || path === "/mnt/alias"
+      ? { dev: largeDeviceId, ino: "9007199254740995" }
+      : { dev: largeDeviceId, ino: "9007199254740997" },
   );
   assert.equal(
     await resolveSamePanePasteAction({
