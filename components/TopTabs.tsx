@@ -1202,9 +1202,13 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
           </div>
         )}
 
-        {/* Fixed right controls — utility icons + window controls share one h-7 row */}
+        {/* Keep window controls above the top drag stripe so their full height remains clickable. */}
         <div
-          className={cn("flex-shrink-0 flex items-center gap-0.5 app-drag h-7 overflow-visible", tabsAtBottom ? "self-start" : "self-end")}
+          className={cn(
+            "flex-shrink-0 flex items-center gap-0.5 app-drag overflow-visible",
+            showWindowControls ? "relative z-20 h-9" : "h-7",
+            tabsAtBottom ? "self-start" : "self-end",
+          )}
           style={dragRegionStyle}
           data-section="top-tabs-toolbar-actions"
         >
