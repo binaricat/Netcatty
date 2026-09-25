@@ -1790,6 +1790,7 @@ export const useSftpTransfers = ({
         sourcePath: params.sourcePath,
         targetPath: params.targetPath,
         expectedLocalTarget: params.expectedLocalTarget,
+        expectedSourceEndpointKey: params.expectedSourceEndpointKey,
         sourceConnectionId: params.connectionId,
         sourceHostId: params.sourceHostId,
         sourceHostLabel: params.sourceHostLabel,

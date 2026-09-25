@@ -6,6 +6,8 @@ export interface DirectDownloadTransferTaskInput {
   sourcePath: string;
   targetPath: string;
   expectedLocalTarget?: LocalDownloadTargetExpectation;
+  /** Connect-time route key (proxy/jump) that identified the browsed source. */
+  expectedSourceEndpointKey?: string;
   sourceConnectionId: string;
   sourceHostId: string;
   sourceHostLabel: string;
@@ -23,7 +25,13 @@ export function createDirectDownloadTransferTask(
     sourcePath: input.sourcePath,
     targetPath: input.targetPath,
     expectedLocalTarget: input.expectedLocalTarget,
-    requireOriginalSourceForResume: !!input.expectedLocalTarget,
+    // A remembered target is safe only when the exact connect-time route that
+    // identified the source can be re-established, so a task that was
+    // validated against a session-only proxy/jump route must never be
+    // hard-reconnected from the vault host alone: the replacement bytes could
+    // come from a different server's identical path (Codex P1 on PR #3516).
+    requireOriginalSourceForResume:
+      !!input.expectedLocalTarget || !!input.expectedSourceEndpointKey,
     sourceConnectionId: input.sourceConnectionId,
     targetConnectionId: "local",
     sourceHostId: input.sourceHostId,

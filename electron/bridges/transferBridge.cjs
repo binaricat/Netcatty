@@ -1366,11 +1366,15 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
       const retiredPath = tempDirBridge.getTempFilePath(
         `superseded-${path.basename(supersededBackupPath)}`,
       );
+      let sourceNameDropped = false;
       try {
+        let hardLinked = false;
         try {
           await fs.promises.link(supersededBackupPath, retiredPath);
+          hardLinked = true;
         } catch {
           let stableCopy = false;
+          let after = null;
           for (let attempt = 0; attempt < 3 && !stableCopy; attempt += 1) {
             const before = await fs.promises.lstat(supersededBackupPath, { bigint: true })
               .catch(() => null);
@@ -1380,13 +1384,30 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
               break;
             }
             await fs.promises.copyFile(supersededBackupPath, retiredPath);
-            const after = await fs.promises.lstat(supersededBackupPath, { bigint: true });
+            after = await fs.promises.lstat(supersededBackupPath, { bigint: true });
             stableCopy = stableLocalFileIdentity(before) === stableLocalFileIdentity(after)
               && before.ctimeNs === after.ctimeNs && before.mtimeNs === after.mtimeNs;
           }
           if (!stableCopy) throw new Error("Superseded recovery copy kept changing during retirement");
+          // The cross-filesystem retired copy cannot keep the source inode
+          // reachable, so dropping the beside-destination name makes any edit
+          // that lands through a still-held descriptor unreachable. The copy
+          // loop above cannot see such a late write, so re-stat one last time
+          // immediately before the unlink and only drop the name while the
+          // inode still matches the retired copy (Codex P1 on PR #3516). If
+          // it changed after the copy, keep the source beside the
+          // destination for the next repeat to supersede again.
+          const finalStat = await fs.promises.lstat(supersededBackupPath, { bigint: true })
+            .catch(() => null);
+          if (finalStat
+            && stableLocalFileIdentity(finalStat) === stableLocalFileIdentity(after)
+            && finalStat.ctimeNs === after.ctimeNs && finalStat.mtimeNs === after.mtimeNs) {
+            sourceNameDropped = true;
+          }
         }
-        await fs.promises.unlink(supersededBackupPath).catch(() => {});
+        if (hardLinked || sourceNameDropped) {
+          await fs.promises.unlink(supersededBackupPath).catch(() => {});
+        }
       } catch {
         await fs.promises.unlink(retiredPath).catch(() => {});
         // Keep the superseded copy reachable beside the destination.

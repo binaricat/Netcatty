@@ -39,6 +39,43 @@ test("download tasks retain the remote host needed for reconnecting after the or
   assert.equal(task.phase, undefined);
 });
 
+test("route-bound download tasks refuse dedicated resume even without a remembered target", () => {
+  // First Save As through a session-only proxy/jump route validates the route
+  // but has no remembered target yet; hard reconnect could not verify that
+  // the replacement bytes still come from that route's server.
+  const task = createDirectDownloadTransferTask({
+    id: "download-2",
+    fileName: "archive.bin",
+    sourcePath: "/remote/archive.bin",
+    targetPath: "/local/archive.bin",
+    expectedSourceEndpointKey: "route-key-1",
+    sourceConnectionId: "connection-1",
+    sourceHostId: "host-1",
+    sourceHostLabel: "Production",
+    totalBytes: 128,
+    isDirectory: false,
+  });
+
+  assert.equal(task.expectedLocalTarget, undefined);
+  assert.equal(task.requireOriginalSourceForResume, true);
+});
+
+test("plain download tasks without a remembered target or route stay hard-resumable", () => {
+  const task = createDirectDownloadTransferTask({
+    id: "download-3",
+    fileName: "archive.bin",
+    sourcePath: "/remote/archive.bin",
+    targetPath: "/local/archive.bin",
+    sourceConnectionId: "connection-1",
+    sourceHostId: "host-1",
+    sourceHostLabel: "Production",
+    totalBytes: 128,
+    isDirectory: false,
+  });
+
+  assert.equal(task.requireOriginalSourceForResume, false);
+});
+
 test("directory download final status stays cancelled when parent was cancelled mid-tree", () => {
   // transferDirectory counts cancelled children as errors; parent cancel must win.
   const resolved = resolveDirectDirectoryDownloadFinalStatus({
