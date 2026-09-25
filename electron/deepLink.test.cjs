@@ -75,6 +75,52 @@ test("collectPuttyStyleDeepLinkUrls leaves ssh:// tokens to the existing collect
   );
 });
 
+test("collectSshDeepLinkQueueItems preserves tolerated PuTTY-style -newtab names", () => {
+  assert.deepEqual(
+    collectSshDeepLinkQueueItems([
+      "Netcatty.exe",
+      "-newtab",
+      "Production",
+      "-ssh",
+      "root@192.168.1.122",
+      "-P",
+      "22",
+    ], { includeSchemeUrls: false }),
+    {
+      ssh: [{
+        rawUrl: "ssh://root@192.168.1.122:22",
+        viaCommandLine: true,
+        tabName: "Production",
+      }],
+      telnet: [],
+    },
+  );
+});
+
+test("collectSshDeepLinkQueueItems preserves SecureCRT /N names", () => {
+  assert.deepEqual(
+    collectSshDeepLinkQueueItems([
+      "Netcatty.exe",
+      "/SSH2",
+      "/L",
+      "root",
+      "/P",
+      "22",
+      "/N",
+      "Production",
+      "192.168.1.122",
+    ], { includeSchemeUrls: false }),
+    {
+      ssh: [{
+        rawUrl: "ssh://root@192.168.1.122:22",
+        viaCommandLine: true,
+        tabName: "Production",
+      }],
+      telnet: [],
+    },
+  );
+});
+
 test("collectSshDeepLinkQueueItems keeps PuTTY CLI launches when scheme URLs are disabled", () => {
   // Warm second-instance case: the running app forwarded another launch's
   // argv while the ssh:// protocol-client preference is disabled.

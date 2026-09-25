@@ -48,6 +48,7 @@ test("parseSecureCrtCommandLine accepts PAM-style /T /N /SSH2 line", () => {
   assert.equal(parsed?.username, "root");
   assert.equal(parsed?.password, undefined);
   assert.equal(parsed?.port, 22);
+  assert.equal(parsed?.tabName, "Device");
 });
 
 test("parseSecureCrtCommandLine accepts case-insensitive flags and user@host positional", () => {

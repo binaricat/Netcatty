@@ -107,6 +107,7 @@ function parseSecureCrtCommandLineTokens(argv) {
   let username;
   let password;
   let port;
+  let tabName;
   const positionals = [];
   const consumedIndices = new Set();
   const { operandIndices, credentialIndices } = findOperandIndices(argv);
@@ -156,6 +157,9 @@ function parseSecureCrtCommandLineTokens(argv) {
         if (value === "") return fail();
         password = value;
         continue;
+      }
+      if (flag === "/n") {
+        tabName = value.trim();
       }
       if (!IGNORED_VALUE_FLAGS.has(flag) || !value.trim()) return fail();
       continue;
@@ -213,6 +217,7 @@ function parseSecureCrtCommandLineTokens(argv) {
       ...(resolvedUsername ? { username: resolvedUsername } : {}),
       ...(password !== undefined ? { password } : {}),
       ...(resolvedPort ? { port: resolvedPort } : {}),
+      ...(tabName ? { tabName } : {}),
     },
     consumedIndices,
     operandIndices,
