@@ -29,6 +29,7 @@ import {
   getTerminalSidePanelMaxShownTools,
   getTerminalSidePanelMaxHeight,
   getTerminalSidePanelMaxWidth,
+  TERMINAL_SIDE_PANEL_MIN_HEIGHT,
   TERMINAL_SIDE_PANEL_TOOLBAR_HEIGHT,
 } from '../../application/state/terminalSidePanelWidth';
 import { terminalLayoutSuppressStore } from '../../application/state/terminalLayoutSuppressStore';
@@ -876,8 +877,12 @@ function TerminalLayerSidePanelInner({ ctx }: { ctx: SidePanelContext }) {
         if (shellResizeCleanupRef.current === cleanup) shellResizeCleanupRef.current = null;
       };
       const finish = () => {
-        setSidePanelHeight(lastHeight);
-        persistSidePanelHeight(lastHeight);
+        // A narrow viewport may temporarily force the shell below its saved
+        // height. A click or blur must not overwrite that preference.
+        if (lastHeight !== startHeight && lastHeight >= TERMINAL_SIDE_PANEL_MIN_HEIGHT) {
+          setSidePanelHeight(lastHeight);
+          persistSidePanelHeight(lastHeight);
+        }
         setResizePreviewHeight(null);
         cleanup();
       };
