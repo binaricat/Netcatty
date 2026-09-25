@@ -1037,6 +1037,20 @@ function stableLocalFileIdentity(statLike) {
   return [statLike.dev, statLike.ino, statLike.size].join(":");
 }
 
+async function hashOpenLocalFile(handle, assertNotCancelled = () => {}) {
+  const hash = crypto.createHash("sha256");
+  const buffer = Buffer.allocUnsafe(1024 * 1024);
+  let position = 0;
+  for (;;) {
+    assertNotCancelled();
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, position);
+    if (!bytesRead) break;
+    hash.update(buffer.subarray(0, bytesRead));
+    position += bytesRead;
+  }
+  return hash.digest("hex");
+}
+
 async function assertExpectedLocalDownloadTarget(requestedPath, expected, inspectedTarget) {
   if (!expected) return;
   const validIdentity = (value) => typeof value === "string" && /^\d+:\d+$/.test(value);
@@ -1102,6 +1116,9 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
     // Keep read access to our private bytes before destination permissions
     // can remove it; the no-hardlink fallback copies through this handle.
     preparedHandle = await fs.promises.open(readyPath, "r");
+    const preparedHash = options.capturePublishedContentHash
+      ? await hashOpenLocalFile(preparedHandle, assertNotCancelled)
+      : null;
     let appliedMode = null;
     let validatedTarget;
     let stable = false;
@@ -1195,6 +1212,33 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
         && String(stat.mtimeNs) === publishedIdentity.mtimeNs
         ? { ...publishedIdentity, ctimeNs: String(stat.ctimeNs) }
         : null;
+      if (publishedIdentity && preparedHash) {
+        let targetHandle;
+        try {
+          const preparedStat = await preparedHandle.stat({ bigint: true });
+          targetHandle = stableLocalFileIdentity(preparedStat) === stableLocalFileIdentity(stat)
+            ? preparedHandle : await fs.promises.open(targetPath, "r");
+          const before = await targetHandle.stat({ bigint: true });
+          const actualHash = await hashOpenLocalFile(targetHandle);
+          const [after, pathStat] = await Promise.all([
+            targetHandle.stat({ bigint: true }),
+            fs.promises.lstat(targetPath, { bigint: true }),
+          ]);
+          publishedIdentity = actualHash === preparedHash
+            && stableLocalFileIdentity(before) === stableLocalFileIdentity(after)
+            && stableLocalFileIdentity(after) === stableLocalFileIdentity(pathStat)
+            && before.ctimeNs === after.ctimeNs && after.ctimeNs === pathStat.ctimeNs
+            && before.mtimeNs === after.mtimeNs && after.mtimeNs === pathStat.mtimeNs
+            ? { ...publishedIdentity, sha256: preparedHash, ctimeNs: String(pathStat.ctimeNs) }
+            : null;
+        } catch {
+          // Publication already committed; simply decline to remember a
+          // target whose content cannot be verified.
+          publishedIdentity = null;
+        } finally {
+          if (targetHandle && targetHandle !== preparedHandle) await targetHandle.close().catch(() => {});
+        }
+      }
     }
     options.onCommit?.(publishedIdentity, localMtimePrepared);
   } catch (error) {
@@ -6188,6 +6232,7 @@ async function startTransferNow(event, payload, onProgress) {
           existingMode,
           requestedTargetPath: targetPath,
           expectedLocalTarget: payload.expectedLocalTarget,
+          capturePublishedContentHash: payload.capturePublishedContentHash === true,
           async validateTarget() {
             const latestTarget = await inspectLocalPromotionTarget(targetPath);
             if (latestTarget.promotionTargetPath !== promotionTargetPath) {

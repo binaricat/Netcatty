@@ -38,7 +38,8 @@ export function useSftpQuickDownloadTargets() {
     if (!key) return;
     targetsRef.current.delete(key);
     const bridge = netcattyBridge.get();
-    if (!targetPath || !bridge?.statLocal || !bridge.lstatLocal || !bridge.realpathLocal) return;
+    if (!targetPath || !/^[a-f0-9]{64}$/.test(published.sha256)
+      || !bridge?.statLocal || !bridge.lstatLocal || !bridge.realpathLocal) return;
     try {
       const parentPath = getParentPath(targetPath);
       const [parent, target, parentRealPath] = await Promise.all([

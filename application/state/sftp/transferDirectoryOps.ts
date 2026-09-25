@@ -385,6 +385,7 @@ export function useSftpDirectoryTransferOps({
               sourcePath: task.sourcePath,
               targetPath: task.targetPath,
               expectedLocalTarget: task.expectedLocalTarget,
+              capturePublishedContentHash: !!onPublishedLocalFile,
               sourceType: sourceIsLocal ? ("local" as const) : ("sftp" as const),
               targetType: targetIsLocal ? ("local" as const) : ("sftp" as const),
               sourceSftpId: effectiveSourceSftpId || undefined,

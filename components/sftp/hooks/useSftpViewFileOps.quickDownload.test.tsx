@@ -65,7 +65,7 @@ test("quick download reuses only the exact target selected for the same remote f
     downloadToLocal: async (params: {
       sourcePath: string; targetPath: string; isDirectory: boolean;
       expectedLocalTarget?: LocalDownloadTargetExpectation;
-      onPublishedLocalFile?: (identity: { dev: string; ino: string; birthtimeNs: string; ctimeNs: string; mtimeNs: string }) => void;
+      onPublishedLocalFile?: (identity: { dev: string; ino: string; birthtimeNs: string; ctimeNs: string; mtimeNs: string; sha256: string }) => void;
     }) => {
       downloads.push(params);
       existingFiles.set(params.targetPath, params.isDirectory ? "directory" : "file");
@@ -76,7 +76,7 @@ test("quick download reuses only the exact target selected for the same remote f
         fileCtimes.set(params.targetPath, String(inode * 1000));
         fileMtimes.set(params.targetPath, String(inode * 1000));
         params.onPublishedLocalFile?.({ dev: deviceId, ino: String(inode), birthtimeNs: String(inode * 1000),
-          ctimeNs: String(inode * 1000), mtimeNs: String(inode * 1000) });
+          ctimeNs: String(inode * 1000), mtimeNs: String(inode * 1000), sha256: "a".repeat(64) });
         if (modifyAfterPublication) {
           modifyAfterPublication = false;
           fileCtimes.set(params.targetPath, String(inode * 1000 + 1));

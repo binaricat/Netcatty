@@ -31,6 +31,7 @@ test("remembered download replaces the same verified local file", async (t) => {
   await bridge._promoteLocalTransferForTests(staged, target, {
     requestedTargetPath: target,
     expectedLocalTarget: rememberedExpectation(root, target),
+    capturePublishedContentHash: true,
     onCommit(identity) { publishedIdentity = identity; },
   });
   assert.equal(fs.readFileSync(target, "utf8"), "download");
@@ -39,7 +40,37 @@ test("remembered download replaces the same verified local file", async (t) => {
     dev: String(publishedStat.dev), ino: String(publishedStat.ino),
     size: Number(publishedStat.size), birthtimeNs: String(publishedStat.birthtimeNs),
     ctimeNs: String(publishedStat.ctimeNs), mtimeNs: String(publishedStat.mtimeNs),
+    sha256: require("node:crypto").createHash("sha256").update("download").digest("hex"),
   });
+});
+
+test("published file edited with restored mtime is never remembered", async (t) => {
+  const root = fs.mkdtempSync(`${temp.getTempFilePath("published-restored-mtime")}-`);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const staged = path.join(root, "staged");
+  const target = path.join(root, "target");
+  fs.writeFileSync(staged, "download");
+  const unlink = fs.promises.unlink;
+  t.after(() => { fs.promises.unlink = unlink; });
+  let edited = false;
+  fs.promises.unlink = async (file) => {
+    const result = await unlink(file);
+    if (!edited && String(file).endsWith(".ready")) {
+      edited = true;
+      const originalMtime = fs.statSync(target).mtime;
+      fs.writeFileSync(target, "modified");
+      fs.utimesSync(target, originalMtime, originalMtime);
+    }
+    return result;
+  };
+  let publishedIdentity = "unset";
+  await bridge._promoteLocalTransferForTests(staged, target, {
+    capturePublishedContentHash: true,
+    onCommit(identity) { publishedIdentity = identity; },
+  });
+  assert.equal(edited, true);
+  assert.equal(fs.readFileSync(target, "utf8"), "modified");
+  assert.equal(publishedIdentity, null);
 });
 
 test("remembered download preserves an in-place edit just before moving the original", async (t) => {
@@ -243,8 +274,14 @@ for (const failCopy of [false, true]) {
       assert.deepEqual(fs.readFileSync(path.join(root, names.find(name => name.endsWith(".ready")))), payload);
       assert.equal(fs.readFileSync(path.join(root, names.find(name => name.endsWith(".backup"))), "utf8"), "original");
     } else {
-      await bridge._promoteLocalTransferForTests(staged, target);
+      let publishedIdentity;
+      await bridge._promoteLocalTransferForTests(staged, target, {
+        capturePublishedContentHash: true,
+        onCommit(identity) { publishedIdentity = identity; },
+      });
       assert.deepEqual(fs.readFileSync(target), payload);
+      assert.equal(publishedIdentity?.sha256,
+        require("node:crypto").createHash("sha256").update(payload).digest("hex"));
       assert.deepEqual(fs.readdirSync(root), ["target"]);
     }
   });

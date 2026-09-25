@@ -65,6 +65,7 @@ export interface LocalPublishedFileIdentity {
   birthtimeNs: string;
   ctimeNs: string;
   mtimeNs: string;
+  sha256: string;
 }
 
 export interface DirectoryResumeCheckpoint {
