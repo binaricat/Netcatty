@@ -92,7 +92,11 @@ export const TerminalAuthDialog: React.FC<TerminalAuthDialogProps> = ({
         [identities],
     );
     const selectedIdentity = selectedIdentityId
-        ? passwordIdentities.find((identity) => identity.id === selectedIdentityId)
+        ? passwordIdentities.find((identity) =>
+            identity.id === selectedIdentityId
+            && identity.password === authPassword
+            && (!identity.username || identity.username === authUsername)
+        )
         : null;
 
     const handleSelectIdentity = (identity: Identity) => {
@@ -220,7 +224,7 @@ export const TerminalAuthDialog: React.FC<TerminalAuthDialogProps> = ({
                                                 key={identity.id}
                                                 className={cn(
                                                     "w-full flex items-center gap-3 px-3 py-2 rounded-md transition-colors text-left",
-                                                    selectedIdentityId === identity.id
+                                                    selectedIdentity?.id === identity.id
                                                         ? "bg-primary/10 text-primary"
                                                         : "hover:bg-secondary/80"
                                                 )}
@@ -235,7 +239,7 @@ export const TerminalAuthDialog: React.FC<TerminalAuthDialogProps> = ({
                                                         <div className="text-xs text-muted-foreground truncate">{identity.username}</div>
                                                     )}
                                                 </div>
-                                                <span className="shrink-0 font-mono text-xs text-muted-foreground">••••••••</span>
+                                                <span className="shrink-0 font-mono text-xs text-muted-foreground">{'\u2022'.repeat(8)}</span>
                                             </button>
                                         ))}
                                     </div>
