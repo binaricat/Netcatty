@@ -1154,7 +1154,7 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
       }
     }
     if (backedUp && expectedIdentity) {
-      const stat = await fs.promises.lstat(backupPath);
+      const stat = await fs.promises.lstat(backupPath, { bigint: true });
       if (!stat.isFile() || stableLocalFileIdentity(stat) !== expectedIdentity) {
         throw new Error("Local download target changed during replacement");
       }
@@ -1188,7 +1188,7 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
         let restoreHandle;
         if (originalHandle) {
           const [heldStat, backupStat] = await Promise.all([
-            originalHandle.stat(), fs.promises.lstat(backupPath),
+            originalHandle.stat({ bigint: true }), fs.promises.lstat(backupPath, { bigint: true }),
           ]);
           if (stableLocalFileIdentity(heldStat) === stableLocalFileIdentity(backupStat)) restoreHandle = originalHandle;
         }
@@ -1273,7 +1273,7 @@ async function preserveTransferredDestinationMtime(transfer, options = {}) {
           handle = await fs.promises.open(transfer.targetPath, fs.constants.O_WRONLY);
         }
         try {
-          const currentStat = await handle.stat();
+          const currentStat = await handle.stat({ bigint: true });
           const publishedIdentity = transfer.publishedLocalIdentity;
           const expectedIdentity = typeof publishedIdentity === "string"
             ? publishedIdentity : stableLocalFileIdentity(publishedIdentity);

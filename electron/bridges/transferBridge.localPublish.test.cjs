@@ -40,6 +40,38 @@ test("remembered download replaces the same verified local file", async (t) => {
   });
 });
 
+test("replacement keeps large file numbers exact when checking its backup", async (t) => {
+  const root = fs.mkdtempSync(`${temp.getTempFilePath("large-backup-identity")}-`);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const staged = path.join(root, "staged");
+  const target = path.join(root, "target");
+  fs.writeFileSync(staged, "download");
+  fs.writeFileSync(target, "original");
+  const dev = 9007199254740993n;
+  const ino = 9007199254740995n;
+  const originalLstat = fs.promises.lstat;
+  t.after(() => { fs.promises.lstat = originalLstat; });
+  fs.promises.lstat = async (candidate, options) => {
+    const stat = await originalLstat(candidate, options);
+    if (!String(candidate).endsWith(".backup")) return stat;
+    return new Proxy(stat, {
+      get(value, key) {
+        if (key === "dev") return options?.bigint ? dev : Number(dev);
+        if (key === "ino") return options?.bigint ? ino : Number(ino);
+        return Reflect.get(value, key);
+      },
+    });
+  };
+  await bridge._promoteLocalTransferForTests(staged, target, {
+    validateTarget: async () => ({
+      stableIdentity: `${dev}:${ino}:${fs.statSync(target).size}`,
+      existingMode: 0o644,
+      targetIdentity: `${dev}:${ino}:original`,
+    }),
+  });
+  assert.equal(fs.readFileSync(target, "utf8"), "download");
+});
+
 test("remembered download does not replace a different file created during transfer", async (t) => {
   const root = fs.mkdtempSync(`${temp.getTempFilePath("remembered-race")}-`);
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
