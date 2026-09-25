@@ -1840,10 +1840,10 @@ export const useSftpTransfers = ({
         try {
           // A remembered target is safe only when the transfer can use the
           // exact connect-time route that identified the browsed source.
-          if (params.expectedLocalTarget && !sourceConnectHost) {
+          if (params.expectedLocalTarget && (!sourceConnectHost || !params.expectedSourceEndpointKey)) {
             throw new Error("Download source connection changed; choose the destination again");
           }
-          if (params.expectedLocalTarget) {
+          if (params.expectedSourceEndpointKey) {
             const actualKey = sourceConnectHost && await getTransferPoolKeyForHost?.(sourceConnectHost);
             if (!actualKey || actualKey !== params.expectedSourceEndpointKey) {
               throw new Error("Download source route changed; choose the destination again");

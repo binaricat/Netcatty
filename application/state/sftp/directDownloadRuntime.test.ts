@@ -69,6 +69,15 @@ test("direct download opens both pooled reads through the tab's connected host",
       }), "failed");
     });
     assert.equal(seenHosts.length, 2, "route mismatch must fail before opening another transfer connection");
+    await act(async () => {
+      assert.equal(await ops!.downloadToLocal({
+        fileName: "first.bin", sourcePath: "/remote/first.bin", targetPath: "/local/first.bin",
+        expectedSourceEndpointKey: "route-old",
+        sftpId: "browse", connectionId: "ssh", sourceHostId: "host", sourceHostLabel: "Host",
+        isDirectory: false, totalBytes: 1,
+      }), "failed");
+    });
+    assert.equal(seenHosts.length, 2, "a first Save As route mismatch must not start a transfer");
   } finally {
     await act(async () => { renderer?.unmount(); });
     for (const task of sftpTransferCenterStore.getOwnerTasks("direct-connected-host-owner")) {

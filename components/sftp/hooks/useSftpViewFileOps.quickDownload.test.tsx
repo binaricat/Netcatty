@@ -36,6 +36,7 @@ test("quick download reuses only the exact target selected for the same remote f
   const downloads: Array<{
     sourcePath: string; targetPath: string; isDirectory: boolean;
     expectedLocalTarget?: LocalDownloadTargetExpectation;
+    expectedSourceEndpointKey?: string;
   }> = [];
   const savePaths = [
     "/downloads/renamed.txt",
@@ -65,6 +66,7 @@ test("quick download reuses only the exact target selected for the same remote f
     downloadToLocal: async (params: {
       sourcePath: string; targetPath: string; isDirectory: boolean;
       expectedLocalTarget?: LocalDownloadTargetExpectation;
+      expectedSourceEndpointKey?: string;
       onPublishedLocalFile?: (identity: { dev: string; ino: string; birthtimeNs: string; ctimeNs: string; mtimeNs: string; sha256: string }) => void;
     }) => {
       downloads.push(params);
@@ -151,6 +153,7 @@ test("quick download reuses only the exact target selected for the same remote f
       "/downloads/renamed.txt", "/downloads/renamed.txt",
     ]);
     assert.equal(downloads[0].expectedLocalTarget, undefined);
+    assert.equal(downloads[0].expectedSourceEndpointKey, endpointKey);
     assert.equal(downloads[1].expectedLocalTarget?.targetIdentity, `${deviceId}:1000`);
     assert.equal(downloads[1].expectedLocalTarget?.targetBirthtimeNs, "1000000");
     assert.equal(downloads[2].expectedLocalTarget?.targetIdentity, `${deviceId}:1001`);
