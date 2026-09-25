@@ -1138,7 +1138,61 @@ async function removeOrphanedLocalBackupOwnerMarker(markerPath) {
   const birthtimeNs = marker?.birthtimeNs;
   if (typeof identity !== "string" || !/^\d+:\d+$/.test(identity)
     || typeof birthtimeNs !== "string" || !/^\d+$/.test(birthtimeNs)) return;
+  // Bind the deletion to the inspected inode: another process may replace
+  // the pathname between the read above and the unlink, and the contents
+  // validated earlier say nothing about that replacement (Codex P2 on PR
+  // #3516). Fail closed — a changed pathname leaves the late entry in place
+  // and the exclusive marker write below keeps refusing it.
+  let currentStat = null;
+  try {
+    currentStat = await fs.promises.lstat(markerPath, { bigint: true });
+  } catch (error) {
+    if (error?.code === "ENOENT") return;
+    throw error;
+  }
+  if (`${currentStat.dev}:${currentStat.ino}` !== `${stat.dev}:${stat.ino}`
+    || String(currentStat.birthtimeNs) !== String(stat.birthtimeNs)
+    || currentStat.ctimeNs !== stat.ctimeNs
+    || currentStat.mtimeNs !== stat.mtimeNs) return;
   await fs.promises.unlink(markerPath).catch(() => {});
+}
+
+// Move the original target to its recovery-backup name without ever
+// replacing an entry that appears at that pathname. POSIX rename would
+// silently replace a file another process creates at the fixed backup
+// pathname after the existing-backup check above but before the move,
+// destroying the late arrival's only link (Codex P2 on PR #3516). link()
+// refuses an occupied destination, and the source name is dropped only
+// after the backup name is in place, so a late arrival can never be
+// replaced. Filesystems without hard-link support keep the previous
+// replacing rename: exclusive publication is unavailable there, and the
+// owner-marker pre-check plus the post-move identity verification still
+// fail closed on a foreign replacement.
+async function publishLocalBackupExclusive(source, target) {
+  const sourceStat = await fs.promises.lstat(source, { bigint: true });
+  try {
+    await fs.promises.link(source, target);
+  } catch (error) {
+    if (["ENOTSUP", "EOPNOTSUPP", "ENOSYS", "EPERM", "EACCES", "EXDEV"].includes(error?.code)) {
+      await fs.promises.rename(source, target);
+      return;
+    }
+    throw error;
+  }
+  try {
+    await fs.promises.unlink(source);
+  } catch (error) {
+    if (error?.code === "ENOENT") return;
+    // Undo the link we created so the caller's state matches its backedUp
+    // flag; never touch a replacement that appeared at the pathname.
+    const placedStat = await fs.promises.lstat(target, { bigint: true }).catch(() => null);
+    if (placedStat
+      && `${placedStat.dev}:${placedStat.ino}` === `${sourceStat.dev}:${sourceStat.ino}`
+      && String(placedStat.birthtimeNs) === String(sourceStat.birthtimeNs)) {
+      await fs.promises.unlink(target).catch(() => {});
+    }
+    throw error;
+  }
 }
 
 async function assertExpectedLocalDownloadTarget(requestedPath, expected, inspectedTarget) {
@@ -1342,9 +1396,24 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
         }
       }
       try {
-        await fs.promises.rename(targetPath, backupPath);
+        // The fixed recovery-backup name is shared across repeats, so a
+        // late arrival at that pathname must never be replaced (Codex P2 on
+        // PR #3516). The token-unique per-transfer backup name has no such
+        // race, so it keeps the atomic single-name rename.
+        if (options.expectedLocalTarget) {
+          await publishLocalBackupExclusive(targetPath, backupPath);
+        } else {
+          await fs.promises.rename(targetPath, backupPath);
+        }
         backedUp = true;
       } catch (error) {
+        if (error?.code === "EEXIST") {
+          throw new Error(
+            `An unrecognized file already exists at the recovery backup location ${backupPath}; `
+            + "refusing to replace it. Remove or rename that file if it was not created by Netcatty.",
+            { cause: error },
+          );
+        }
         if (error?.code !== "ENOENT") throw error;
       }
       if (options.expectedLocalTarget && !backedUp) {

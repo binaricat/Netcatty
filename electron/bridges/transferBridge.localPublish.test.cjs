@@ -238,11 +238,11 @@ test("remembered download re-homes the superseded backup when the target disappe
     expectedLocalTarget: rememberedExpectation(root, target),
   });
   fs.writeFileSync(staged, "third");
-  const rename = fs.promises.rename;
-  t.after(() => { fs.promises.rename = rename; });
-  fs.promises.rename = async (from, to) => {
+  const link = fs.promises.link;
+  t.after(() => { fs.promises.link = link; });
+  fs.promises.link = async (from, to) => {
     if (from === target && String(to).endsWith(".backup")) fs.unlinkSync(target);
-    return rename(from, to);
+    return link(from, to);
   };
   await assert.rejects(
     () => bridge._promoteLocalTransferForTests(staged, target, {
@@ -545,10 +545,10 @@ test("remembered download preserves an in-place edit just before moving the orig
   fs.writeFileSync(staged, "download");
   fs.writeFileSync(target, "original");
   const expectedLocalTarget = rememberedExpectation(root, target);
-  const rename = fs.promises.rename;
-  t.after(() => { fs.promises.rename = rename; });
+  const link = fs.promises.link;
+  t.after(() => { fs.promises.link = link; });
   let edited = false;
-  fs.promises.rename = async (from, to) => {
+  fs.promises.link = async (from, to) => {
     if (!edited && from === target && String(to).endsWith(".backup")) {
       edited = true;
       fs.writeFileSync(target, "modified"); // same inode and byte length
@@ -556,7 +556,7 @@ test("remembered download preserves an in-place edit just before moving the orig
       // simulated external write has an observable change in file metadata.
       fs.utimesSync(target, new Date(Date.now() + 1000), new Date(Date.now() + 1000));
     }
-    return rename(from, to);
+    return link(from, to);
   };
   await assert.rejects(() => bridge._promoteLocalTransferForTests(staged, target, {
     requestedTargetPath: target, expectedLocalTarget,
@@ -573,14 +573,14 @@ test("remembered download checks backup bytes even when its mtime appears unchan
   fs.writeFileSync(staged, "download");
   fs.writeFileSync(target, "original");
   const expectedLocalTarget = rememberedExpectation(root, target);
-  const rename = fs.promises.rename;
+  const link = fs.promises.link;
   const lstat = fs.promises.lstat;
-  t.after(() => { fs.promises.rename = rename; fs.promises.lstat = lstat; });
-  fs.promises.rename = async (from, to) => {
+  t.after(() => { fs.promises.link = link; fs.promises.lstat = lstat; });
+  fs.promises.link = async (from, to) => {
     if (from === target && String(to).endsWith(".backup")) {
       fs.writeFileSync(target, "modified"); // same file number and byte length
     }
-    return rename(from, to);
+    return link(from, to);
   };
   // Model an external editor that restores mtime after its write. The backup
   // metadata alone must not authorize replacing these different bytes.
@@ -606,11 +606,11 @@ test("remembered download stops if the selected file disappears at replacement",
   fs.writeFileSync(staged, "download");
   fs.writeFileSync(target, "original");
   const expectedLocalTarget = rememberedExpectation(root, target);
-  const rename = fs.promises.rename;
-  t.after(() => { fs.promises.rename = rename; });
-  fs.promises.rename = async (from, to) => {
+  const link = fs.promises.link;
+  t.after(() => { fs.promises.link = link; });
+  fs.promises.link = async (from, to) => {
     if (from === target && String(to).endsWith(".backup")) fs.unlinkSync(target);
-    return rename(from, to);
+    return link(from, to);
   };
   await assert.rejects(() => bridge._promoteLocalTransferForTests(staged, target, {
     requestedTargetPath: target, expectedLocalTarget,
