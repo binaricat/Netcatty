@@ -621,6 +621,7 @@ export async function syncAllProvidersImpl(this: any,
                 || !remoteCoversSyncDeletions(checkedRemotePayload, providerBase)
               ) {
                 await this.saveSyncBase(checkedRemotePayload, provider);
+                assertSyncSecurityGeneration(this, syncSecurityGeneration);
               }
               // Mirror commitRemoteInspection/uploadToProvider: the preflight
               // download may have lazily discovered an existing gist/file and
@@ -632,6 +633,17 @@ export async function syncAllProvidersImpl(this: any,
                 || this.state.providers[provider]?.resourceId
                 || null;
               await this.saveSyncAnchor(provider, checkedRemoteFile, resolvedResourceId);
+              assertSyncSecurityGeneration(this, syncSecurityGeneration);
+              const connection = {
+                ...this.state.providers[provider],
+                status: 'connected' as const,
+                error: undefined,
+                ...(resolvedResourceId ? { resourceId: resolvedResourceId } : {}),
+                lastSync: Date.now(),
+                lastSyncVersion: checkedRemoteFile.meta.version,
+              };
+              await this.saveProviderConnection(provider, connection);
+              assertSyncSecurityGeneration(this, syncSecurityGeneration);
               // Accepting an identical remote that is ahead of the local
               // version must advance the local version/timestamp too (as
               // commitRemoteInspection does). Otherwise the next local edit
@@ -664,11 +676,10 @@ export async function syncAllProvidersImpl(this: any,
               this.state.providers[provider] = {
                 ...this.state.providers[provider],
                 ...(resolvedResourceId ? { resourceId: resolvedResourceId } : {}),
-                lastSync: Date.now(),
+                lastSync: connection.lastSync,
                 lastSyncVersion: checkedRemoteFile.meta.version,
               };
               this.saveSyncConfig();
-              await this.saveProviderConnection(provider, this.state.providers[provider]);
               this.notifyStateChange();
               const noOpResult: SyncResult = {
                 success: true,
@@ -681,6 +692,7 @@ export async function syncAllProvidersImpl(this: any,
               return;
             }
           } catch {
+            assertSyncSecurityGeneration(this, syncSecurityGeneration);
             // Could not prove the payloads identical (decrypt failure, storage
             // failure). Fall through to the normal upload path — a real data
             // change must never be dropped because this guard failed.
@@ -720,6 +732,7 @@ export async function syncAllProvidersImpl(this: any,
         const result = await this.uploadToProvider(provider, adapter, syncedFile, providerPayload, syncSecurityGeneration);
         results.set(provider, result);
       } catch (error) {
+        assertSyncSecurityGeneration(this, syncSecurityGeneration);
         const msg = String(error);
         this.state.lastError = msg;
         this.updateProviderStatus(provider, 'error', msg);

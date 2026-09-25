@@ -1021,6 +1021,85 @@ test("syncAllProviders skips the upload when the payload already matches the pro
   }
 });
 
+test("no-op sync stops when the vault locks during persistence", async () => {
+  const originalDecryptPayload = EncryptionService.decryptPayload;
+  const localPayload = payload("local");
+  const checkedRemote = remoteFile("github", 7, 700);
+  EncryptionService.decryptPayload = async () => localPayload;
+
+  try {
+    for (const lockDuring of ["anchor", "connection"] as const) {
+      let generation = 0;
+      let uploads = 0;
+      const completed: string[] = [];
+      const connected: string[] = [];
+      const manager = {
+        masterPassword: "pw",
+        adapters: new Map(),
+        providerDecryptSeq: { github: 0 },
+        state: {
+          securityState: "UNLOCKED",
+          providers: {
+            github: { enabled: true, connected: true, status: "connected" },
+          },
+          lastError: null,
+          syncState: "IDLE",
+          syncStrategy: "smartMerge",
+          localVersion: 2,
+          remoteVersion: 2,
+          deviceId: "local-device",
+          deviceName: "Local",
+        },
+        getSyncSecurityGeneration: () => generation,
+        assertSyncSecurityGeneration: (expected: number) => {
+          if (generation !== expected) throw new Error("Sync cancelled because master key changed");
+        },
+        getConnectedAdapter: async () => ({ provider: "github" }),
+        updateProviderStatus: (_provider: CloudProvider, status: string) => {
+          if (status === "connected") connected.push(status);
+        },
+        emit: (event: { type: string }) => {
+          if (event.type === "SYNC_COMPLETED") completed.push(event.type);
+        },
+        checkProviderConflict: async () => ({ conflict: false, remoteFile: checkedRemote }),
+        loadSyncBase: async () => localPayload,
+        saveSyncBase: async () => {},
+        saveSyncAnchor: async () => {
+          if (lockDuring === "anchor") {
+            generation += 1;
+            manager.state.securityState = "LOCKED";
+          }
+        },
+        saveProviderConnection: async () => {
+          if (lockDuring === "connection") {
+            generation += 1;
+            manager.state.securityState = "LOCKED";
+          }
+        },
+        saveSyncConfig: () => {},
+        uploadToProvider: async () => {
+          uploads += 1;
+          return { success: true, provider: "github" as const, action: "upload" as const };
+        },
+        exitBlockedState: () => {},
+        notifyStateChange: () => {},
+      };
+
+      await assert.rejects(
+        () => syncAllProvidersImpl.call(manager, localPayload),
+        /master key changed/,
+      );
+      assert.equal(manager.state.localVersion, 2, lockDuring);
+      assert.equal(manager.state.remoteVersion, 2, lockDuring);
+      assert.equal(uploads, 0, lockDuring);
+      assert.deepEqual(completed, [], lockDuring);
+      assert.deepEqual(connected, [], lockDuring);
+    }
+  } finally {
+    EncryptionService.decryptPayload = originalDecryptPayload;
+  }
+});
+
 test("syncAllProviders uploads missing deletion records, then skips once the remote has them", async () => {
   const originalDecryptPayload = EncryptionService.decryptPayload;
   const originalEncryptPayload = EncryptionService.encryptPayload;
