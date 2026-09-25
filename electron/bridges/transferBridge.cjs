@@ -1260,7 +1260,13 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
         if (backupHandle && backupHandle !== originalHandle) await backupHandle.close().catch(() => {});
       }
     }
-    if (backedUp) await fs.promises.unlink(backupPath).catch(() => {});
+    // The post-publication verification above only samples the backup; it
+    // cannot atomically guard the deletion below. A writer still holding the
+    // original inode open can land an edit between the final stat/hash and
+    // this unlink, destroying the only remaining name for that edit. Keep the
+    // verified backup instead; the next replacement of this target supersedes
+    // it, and a failure path above already preserves it for recovery.
+    if (backedUp && !options.expectedLocalTarget) await fs.promises.unlink(backupPath).catch(() => {});
     await fs.promises.unlink(readyPath).catch(() => {});
     await fs.promises.unlink(stagedPath).catch(() => {});
     // Removing the prepared hardlink advances ctime on the published inode.

@@ -45,6 +45,26 @@ test("remembered download replaces the same verified local file", async (t) => {
   });
 });
 
+test("verified remembered download retains its backup after publication", async (t) => {
+  const root = fs.mkdtempSync(`${temp.getTempFilePath("remembered-retain-backup")}-`);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const staged = path.join(root, "staged");
+  const target = path.join(root, "target");
+  fs.writeFileSync(staged, "download");
+  fs.writeFileSync(target, "original");
+  await bridge._promoteLocalTransferForTests(staged, target, {
+    requestedTargetPath: target,
+    expectedLocalTarget: rememberedExpectation(root, target),
+  });
+  assert.equal(fs.readFileSync(target, "utf8"), "download");
+  // The verification snapshot cannot guard the backup deletion: a late write
+  // from a process holding the original inode open would otherwise lose its
+  // only remaining name. The verified backup must therefore be retained.
+  const backupName = fs.readdirSync(root).find((name) => name.endsWith(".backup"));
+  assert.ok(backupName, "retain the verified backup for late writers");
+  assert.equal(fs.readFileSync(path.join(root, backupName), "utf8"), "original");
+});
+
 test("published file edited with restored mtime is never remembered", async (t) => {
   const root = fs.mkdtempSync(`${temp.getTempFilePath("published-restored-mtime")}-`);
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
