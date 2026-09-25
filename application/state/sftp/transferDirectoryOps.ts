@@ -268,7 +268,7 @@ export function useSftpDirectoryTransferOps({
     targetEncoding: SftpFilenameEncoding,
     rootTaskId: string, // The original top-level task ID for cancellation checking
     sameHost?: boolean,
-    onPublishedLocalFile?: (identity: LocalPublishedFileIdentity) => void,
+    onPublishedLocalFile?: (identity: LocalPublishedFileIdentity) => void | Promise<void>,
     sourceConnectHost?: Host,
   ): Promise<void> => {
     // Check if task or root task was cancelled before starting
@@ -492,7 +492,12 @@ export function useSftpDirectoryTransferOps({
                   throw new Error(result.error || "Transfer cancelled");
                 }
                 if (result?.publishedLocalIdentity) {
-                  onPublishedLocalFile?.(result.publishedLocalIdentity);
+                  // Await registration so the transfer only reports completion
+                  // after the quick-download target is usable again; a
+                  // fire-and-forget callback let an immediate repeat download
+                  // find no remembered target and open Save As (Codex P2 on
+                  // PR #3516).
+                  await onPublishedLocalFile?.(result.publishedLocalIdentity);
                 }
                 // Soft-drain can complete this file while folder is still latched.
                 // Park before the worker loop claims another index.

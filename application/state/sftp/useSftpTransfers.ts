@@ -285,7 +285,7 @@ export const useSftpTransfers = ({
   // closure that originally held the onPublishedLocalFile callback, so a
   // successful retry would otherwise replace the destination without
   // refreshing the remembered quick-download identity.
-  const publicationHandlersRef = useRef<Map<string, (identity: LocalPublishedFileIdentity) => void>>(new Map());
+  const publicationHandlersRef = useRef<Map<string, (identity: LocalPublishedFileIdentity) => void | Promise<void>>>(new Map());
   const conflictDefaultsRef = useRef<TransferConflictDefaults>(new Map());
   const deferredConflictAttemptsRef = useRef<DeferredTransferAttemptQueue | null>(null);
 
@@ -1854,7 +1854,7 @@ export const useSftpTransfers = ({
       targetPath: string;
       expectedLocalTarget?: LocalDownloadTargetExpectation;
       expectedSourceEndpointKey?: string;
-      onPublishedLocalFile?: (identity: LocalPublishedFileIdentity) => void;
+      onPublishedLocalFile?: (identity: LocalPublishedFileIdentity) => void | Promise<void>;
       sftpId: string;
       connectionId: string;
       sourceHostId: string;

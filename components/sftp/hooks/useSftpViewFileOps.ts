@@ -555,11 +555,15 @@ export const useSftpViewFileOps = ({
           // lifecycle, and a successful retry must refresh the remembered
           // inode/hash too (Codex P2 on PR #3516).
           onPublishedLocalFile: quickDownloadEnabled
-            ? (identity) => {
-                void quickDownloadTargets.remember(
+            ? (identity) =>
+                // Return the registration promise so completion is reported
+                // only after the remembered target is usable again; a
+                // fire-and-forget callback let an immediate repeat download
+                // find no remembered target and open Save As (Codex P2 on
+                // PR #3516).
+                quickDownloadTargets.remember(
                   endpointKey, resolvedFullPath, pane.filenameEncoding, targetPath, identity,
-                );
-              }
+                )
             : undefined,
           sftpId,
           connectionId: pane.connection.id,

@@ -47,7 +47,7 @@ export interface UseSftpTransfersResult {
     targetPath: string;
     expectedLocalTarget?: LocalDownloadTargetExpectation;
     expectedSourceEndpointKey?: string;
-    onPublishedLocalFile?: (identity: LocalPublishedFileIdentity) => void;
+    onPublishedLocalFile?: (identity: LocalPublishedFileIdentity) => void | Promise<void>;
     sftpId: string;
     connectionId: string;
     sourceHostId: string;

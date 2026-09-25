@@ -67,7 +67,7 @@ test("quick download reuses only the exact target selected for the same remote f
       sourcePath: string; targetPath: string; isDirectory: boolean;
       expectedLocalTarget?: LocalDownloadTargetExpectation;
       expectedSourceEndpointKey?: string;
-      onPublishedLocalFile?: (identity: { dev: string; ino: string; birthtimeNs: string; ctimeNs: string; mtimeNs: string; sha256: string }) => void;
+      onPublishedLocalFile?: (identity: { dev: string; ino: string; birthtimeNs: string; ctimeNs: string; mtimeNs: string; sha256: string }) => void | Promise<void>;
     }) => {
       downloads.push(params);
       existingFiles.set(params.targetPath, params.isDirectory ? "directory" : "file");
@@ -77,7 +77,9 @@ test("quick download reuses only the exact target selected for the same remote f
         fileBirthtimes.set(params.targetPath, String(inode * 1000));
         fileCtimes.set(params.targetPath, String(inode * 1000));
         fileMtimes.set(params.targetPath, String(inode * 1000));
-        params.onPublishedLocalFile?.({ dev: deviceId, ino: String(inode), birthtimeNs: String(inode * 1000),
+        // Mirror the real pipeline: a downloadToLocal caller must observe
+        // completion only after the publication callback resolves.
+        await params.onPublishedLocalFile?.({ dev: deviceId, ino: String(inode), birthtimeNs: String(inode * 1000),
           ctimeNs: String(inode * 1000), mtimeNs: String(inode * 1000), sha256: "a".repeat(64) });
         if (modifyAfterPublication) {
           modifyAfterPublication = false;
