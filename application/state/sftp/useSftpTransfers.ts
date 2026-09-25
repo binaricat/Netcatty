@@ -167,7 +167,7 @@ export const useSftpTransfers = ({
   getPaneByConnectionId,
   getTabByConnectionId,
   resolveConnectedHost,
-  getTransferPoolKeyForHost,
+  getTransferRouteKeyForHost,
   updateTab,
   refresh,
   clearCacheForConnection,
@@ -1373,14 +1373,14 @@ export const useSftpTransfers = ({
         ? resolveConnectedHost?.(sourceTab.tabId)
         : undefined;
       const actualKey = connectedHost && connectedHost !== "local" && connectedHost.id === task.sourceHostId
-        ? await getTransferPoolKeyForHost?.(connectedHost)
+        ? await getTransferRouteKeyForHost?.(connectedHost)
         : undefined;
       if (!connectedHost || connectedHost === "local" || !expectedKey || !actualKey || actualKey !== expectedKey) {
         return undefined;
       }
       return connectedHost;
     },
-    [getTabByConnectionId, resolveConnectedHost, getTransferPoolKeyForHost],
+    [getTabByConnectionId, resolveConnectedHost, getTransferRouteKeyForHost],
   );
 
   const retryTransfer = useCallback(
@@ -1512,7 +1512,7 @@ export const useSftpTransfers = ({
       if (retryStatus === "completed") publicationHandlersRef.current.delete(retriedTask.id);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- processTransfer is defined inline
-    [acquireTransferSession, cleanupTaskArtifacts, getTabByConnectionId, getTransferPoolKeyForHost, ownerId, resolveConnectedHost, resolveTaskEndpoints, resolveVerifiedSourceConnectHost, setTransfers, sftpSessionsRef],
+    [acquireTransferSession, cleanupTaskArtifacts, getTabByConnectionId, getTransferRouteKeyForHost, ownerId, resolveConnectedHost, resolveTaskEndpoints, resolveVerifiedSourceConnectHost, setTransfers, sftpSessionsRef],
   );
 
   const clearCompletedTransfers = useCallback(() => {
@@ -1963,7 +1963,10 @@ export const useSftpTransfers = ({
             throw new Error("Download source connection changed; choose the destination again");
           }
           if (params.expectedSourceEndpointKey) {
-            const actualKey = sourceConnectHost && await getTransferPoolKeyForHost?.(sourceConnectHost);
+            // Compare against the persistable route identity, not the pool
+            // key: the persisted expected key must never be a credential
+            // digest (Codex P2 on PR #3516).
+            const actualKey = sourceConnectHost && await getTransferRouteKeyForHost?.(sourceConnectHost);
             if (!actualKey || actualKey !== params.expectedSourceEndpointKey) {
               throw new Error("Download source route changed; choose the destination again");
             }
@@ -2074,7 +2077,7 @@ export const useSftpTransfers = ({
       return attempt.status;
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [sftpSessionsRef, acquireTransferSession, getTabByConnectionId, resolveConnectedHost, getTransferPoolKeyForHost],
+    [sftpSessionsRef, acquireTransferSession, getTabByConnectionId, resolveConnectedHost, getTransferRouteKeyForHost],
   );
 
   // Publish only on owner change / mount. Do NOT re-publish on every `transfers`

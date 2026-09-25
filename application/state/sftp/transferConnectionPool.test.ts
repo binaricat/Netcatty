@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   buildTransferPoolKey,
+  buildTransferRouteKey,
   createTransferConnectionPool,
   createTransferPoolKeyCache,
   DEFAULT_MAX_IDLE_TRANSFER_CONNECTIONS,
@@ -135,6 +136,68 @@ test("buildTransferPoolKey separates every transport security identity", async (
   ];
   for (const connectionOptions of variants) {
     assert.notEqual(await buildTransferPoolKey({ ...base, connectionOptions }), key);
+  }
+});
+
+test("buildTransferRouteKey persists without credential-derived material", async () => {
+  const connectionOptions = {
+    hostname: "target.example",
+    port: 22,
+    username: "root",
+    password: "secret-a",
+    privateKey: "PRIVATE KEY A",
+    passphrase: "passphrase-a",
+    certificate: "CERT A",
+    sudoAutofillPassword: "sudo-a",
+    keyId: "key-1",
+    jumpHosts: [{
+      hostname: "jump-a", port: 22, username: "jump",
+      password: "jump-secret-a", privateKey: "JUMP KEY A", keyId: "jump-key-1",
+    }],
+    proxy: { type: "socks5", host: "proxy-a", port: 1080, username: "pu", password: "pp" },
+  } as unknown as NetcattySSHOptions;
+  const base = {
+    hostId: "h1",
+    hostname: "target.example",
+    port: 22,
+    username: "root",
+    connectionOptions,
+  };
+  const route = await buildTransferRouteKey(base);
+  assert.match(route, /^host:h1\|ep:target\.example:22:root:ssh:nosudo\|route:[a-f0-9]{64}$/);
+  // Secret rotations must not change the persistable route identity: the
+  // digest must stay useless as an offline verifier for credential guesses.
+  const secretVariants: NetcattySSHOptions[] = [
+    { ...connectionOptions, password: "secret-b" },
+    { ...connectionOptions, privateKey: "PRIVATE KEY B", passphrase: "passphrase-b" },
+    { ...connectionOptions, certificate: "CERT B", sudoAutofillPassword: "sudo-b" },
+    {
+      ...connectionOptions,
+      jumpHosts: [{
+        hostname: "jump-a", port: 22, username: "jump",
+        password: "other", keyId: "jump-key-1",
+      }],
+    },
+    {
+      ...connectionOptions,
+      proxy: { type: "socks5", host: "proxy-a", port: 1080, username: "pu", password: "other" },
+    },
+  ];
+  for (const connectionOptions of secretVariants) {
+    assert.equal(await buildTransferRouteKey({ ...base, connectionOptions }), route);
+  }
+  // Non-secret route structure still changes the identity.
+  const structuralVariants: NetcattySSHOptions[] = [
+    { ...connectionOptions, keyId: "key-2" },
+    { ...connectionOptions, jumpHosts: [{ ...connectionOptions.jumpHosts![0], hostname: "jump-b" }] },
+    { ...connectionOptions, proxy: { ...connectionOptions.proxy!, host: "proxy-b" } },
+  ];
+  for (const connectionOptions of structuralVariants) {
+    assert.notEqual(
+      await buildTransferRouteKey({ ...base, connectionOptions }),
+      route,
+      "non-secret route change must change the route identity",
+    );
   }
 });
 

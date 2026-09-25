@@ -12,7 +12,13 @@ export interface UseSftpTransfersParams {
   getPaneByConnectionId: (connectionId: string) => SftpPane | null;
   getTabByConnectionId: (connectionId: string) => { side: "left" | "right"; tabId: string; pane: SftpPane } | null;
   resolveConnectedHost?: (tabId: string) => Host | "local" | null;
-  getTransferPoolKeyForHost?: (host: Host) => Promise<string>;
+  /**
+   * Persistable source-route identity derived only from non-secret
+   * endpoint/proxy attributes (Codex P2 on PR #3516). Used for the
+   * expectedSourceEndpointKey guard; connection pooling keeps using the
+   * full pool key inside useSftpState.
+   */
+  getTransferRouteKeyForHost?: (host: Host) => Promise<string>;
   updateTab: (side: "left" | "right", tabId: string, updater: (pane: SftpPane) => SftpPane) => void;
   refresh: (side: "left" | "right", options?: { tabId?: string }) => Promise<void>;
   clearCacheForConnection: (connectionId: string) => void;

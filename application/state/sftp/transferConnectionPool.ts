@@ -533,31 +533,80 @@ export function resetSharedTransferConnectionPoolForTests(): void {
   sharedPool = null;
 }
 
+/** Deterministic serializer shared by the pool key and the route identity. */
+const stableSerialize = (value: unknown): string => {
+  if (value === undefined) return '"__undefined__"';
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableSerialize).join(",")}]`;
+  const entries = Object.entries(value as Record<string, unknown>)
+    .filter(([key]) => key !== "sessionId")
+    .sort(([left], [right]) => left.localeCompare(right));
+  return `{${entries.map(([key, item]) => `${JSON.stringify(key)}:${stableSerialize(item)}`).join(",")}}`;
+};
+
+/**
+ * Secret fields never contribute to the persisted route identity
+ * (`buildTransferRouteKey`). Their digests could act as offline verifiers for
+ * credential guesses if the route identity leaks through localStorage-backed
+ * transfer history (Codex P2 on PR #3516). Non-secret identity references
+ * (auth method, keyId, keySource, identity file paths) stay in so a credential
+ * *switch* still changes the route identity.
+ */
+const TRANSFER_ROUTE_SECRET_KEYS: ReadonlySet<string> = new Set([
+  "password",
+  "privateKey",
+  "passphrase",
+  "certificate",
+  "sudoAutofillPassword",
+]);
+
+const stripTransferRouteSecrets = (value: unknown): unknown => {
+  if (value === null || typeof value !== "object") return value;
+  if (Array.isArray(value)) return value.map(stripTransferRouteSecrets);
+  const out: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+    if (TRANSFER_ROUTE_SECRET_KEYS.has(key)) continue;
+    out[key] = stripTransferRouteSecrets(item);
+  }
+  return out;
+};
+
+const transferIdentityBase = (input: TransferPoolKeyInput): string => {
+  const port = input.port || 22;
+  const user = input.username || "root";
+  const protocol = input.protocol || "ssh";
+  const sudo = input.sftpSudo ? "sudo" : "nosudo";
+  const ep = `${input.hostname}:${port}:${user}:${protocol}:${sudo}`;
+  return input.hostId ? `host:${input.hostId}|ep:${ep}` : `ep:${ep}`;
+};
+
+const sha256Hex = async (value: string): Promise<string> => {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+};
+
 export async function buildTransferPoolKey(input: TransferPoolKeyInput): Promise<string> {
-  const stableSerialize = (value: unknown): string => {
-    if (value === undefined) return '"__undefined__"';
-    if (value === null || typeof value !== "object") return JSON.stringify(value);
-    if (Array.isArray(value)) return `[${value.map(stableSerialize).join(",")}]`;
-    const entries = Object.entries(value as Record<string, unknown>)
-      .filter(([key]) => key !== "sessionId")
-      .sort(([left], [right]) => left.localeCompare(right));
-    return `{${entries.map(([key, item]) => `${JSON.stringify(key)}:${stableSerialize(item)}`).join(",")}}`;
-  };
   // Include endpoint identity whenever hostname is known so session-time
   // hostname/port/username overrides do not share a pool with the vault host.
   if (input.hostname) {
-    const port = input.port || 22;
-    const user = input.username || "root";
-    const protocol = input.protocol || "ssh";
-    const sudo = input.sftpSudo ? "sudo" : "nosudo";
-    const ep = `${input.hostname}:${port}:${user}:${protocol}:${sudo}`;
-    const base = input.hostId ? `host:${input.hostId}|ep:${ep}` : `ep:${ep}`;
+    const base = transferIdentityBase(input);
     if (!input.connectionOptions) return base;
-    const encoded = new TextEncoder().encode(stableSerialize(input.connectionOptions));
-    const digest = await crypto.subtle.digest("SHA-256", encoded);
-    const fingerprint = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
-    return `${base}|identity:${fingerprint}`;
+    return `${base}|identity:${await sha256Hex(stableSerialize(input.connectionOptions))}`;
   }
   if (input.hostId) return `host:${input.hostId}`;
   return "ep:unknown:22:root:ssh:nosudo";
+}
+
+/**
+ * Persistable route identity for the download source-route guard. Same
+ * endpoint base as the pool key, but the digest covers only non-secret
+ * endpoint/proxy attributes so it can survive in localStorage-backed transfer
+ * history without exposing a credential-derived verifier (Codex P2 on
+ * PR #3516).
+ */
+export async function buildTransferRouteKey(input: TransferPoolKeyInput): Promise<string> {
+  if (!input.hostname) return input.hostId ? `host:${input.hostId}` : "route:unknown";
+  const base = transferIdentityBase(input);
+  if (!input.connectionOptions) return base;
+  return `${base}|route:${await sha256Hex(stableSerialize(stripTransferRouteSecrets(input.connectionOptions)))}`;
 }

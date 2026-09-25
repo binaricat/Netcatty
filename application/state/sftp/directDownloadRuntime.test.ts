@@ -33,7 +33,7 @@ test("direct download opens both pooled reads through the tab's connected host",
       getPaneByConnectionId: () => null,
       getTabByConnectionId: () => ({ side: "left", tabId: "tab-1", pane: {} as never }),
       resolveConnectedHost: () => connectedHost,
-      getTransferPoolKeyForHost: async () => "route-new",
+      getTransferRouteKeyForHost: async () => "route-new",
       acquireTransferSession: async (_hostId, _transferId, host) => {
         seenHosts.push(host);
         return { poolKey: "connected-host", sftpId: `pooled-${seenHosts.length}`, release: () => undefined, discard: () => undefined };

@@ -35,6 +35,7 @@ import { useSftpSessionErrors } from "./sftp/useSftpSessionErrors";
 import { ensureRemoteSftpSession, probeSftpSession } from "./sftp/ensureRemoteSftpSession";
 import { openTransferSftpSession } from "./sftp/dedicatedTransferResume";
 import {
+  buildTransferRouteKey,
   createTransferPoolKeyCache,
   getSharedTransferConnectionPool,
 } from "./sftp/transferConnectionPool";
@@ -314,6 +315,13 @@ export const useSftpState = (
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [hosts, identities, keys, transferKnownHosts, transferTerminalSettings],
   );
+  // Route identity cache: same scope as the pool key cache but the digest
+  // covers only non-secret attributes, so it is safe to persist (see below).
+  const transferRouteKeyCache = useMemo(
+    () => createTransferPoolKeyCache(buildTransferRouteKey),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [hosts, identities, keys, transferKnownHosts, transferTerminalSettings],
+  );
   const resolveTransferSourceSessionId = options?.resolveTransferSourceSessionId;
   const resolveBrowseSourceSessionId = options?.resolveBrowseSourceSessionId;
 
@@ -389,12 +397,36 @@ export const useSftpState = (
 
   // The quick-download source must have the same identity as the pooled
   // connection that will actually read its bytes, including proxy/jump route.
+  // The persisted guard key is a route identity derived only from non-secret
+  // endpoint/proxy attributes: a digest of resolved credentials could act as
+  // an offline verifier for password guesses once transfer history lands in
+  // localStorage (Codex P2 on PR #3516).
+  const getTransferRouteKeyForHost = useCallback(
+    (host: Host) => transferRouteKeyCache.get(host, () => ({
+        hostId: host.id,
+        hostname: host.hostname,
+        port: host.port,
+        username: host.username,
+        protocol: host.protocol,
+        sftpSudo: host.sftpSudo,
+        connectionOptions: buildSftpHostCredentials({
+          host,
+          hosts,
+          keys,
+          identities,
+          knownHosts: transferKnownHosts,
+          terminalSettings: transferTerminalSettings,
+        }),
+      })),
+    [hosts, identities, keys, transferKnownHosts, transferRouteKeyCache, transferTerminalSettings],
+  );
+
   const getDownloadEndpointKey = useCallback(async (connectionId: string) => {
     const tab = getTabByConnectionId(connectionId);
     const host = tab && connectedHostByTabIdRef.current.get(tab.tabId);
     if (!host || host === "local" || host.id !== tab?.pane.connection?.hostId) return null;
-    return getTransferPoolKeyForHost(host);
-  }, [getTabByConnectionId, getTransferPoolKeyForHost]);
+    return getTransferRouteKeyForHost(host);
+  }, [getTabByConnectionId, getTransferRouteKeyForHost]);
 
   const acquireTransferSession = useCallback(
     async (hostId: string, transferId: string, connectHost?: Host) => {
@@ -562,7 +594,7 @@ export const useSftpState = (
     getPaneByConnectionId,
     getTabByConnectionId,
     resolveConnectedHost: (tabId) => connectedHostByTabIdRef.current.get(tabId) ?? null,
-    getTransferPoolKeyForHost,
+    getTransferRouteKeyForHost,
     updateTab,
     refresh,
     clearCacheForConnection,
