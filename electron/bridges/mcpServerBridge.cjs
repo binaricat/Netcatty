@@ -49,7 +49,13 @@ let authToken = null;  // Random token generated when TCP server starts
 let externalAuthToken = null;
 let pendingHostStart = null; // { promise, server, cancel }
 let electronModule = null;
-let cliDiscoveryFilePath = getCliDiscoveryFilePath();
+// Resolved on demand rather than frozen at load time. The path used to be
+// captured here, so merely requiring this module (including from `node --test`)
+// inherited the INSTALLED app's live discovery file and `cleanup()` deleted it.
+let cliDiscoveryFilePathOverride = null;
+function getActiveCliDiscoveryFilePath() {
+  return cliDiscoveryFilePathOverride || getCliDiscoveryFilePath();
+}
 let discoverySelfHealTimer = null;
 const DISCOVERY_SELF_HEAL_INTERVAL_MS = 15000;
 
@@ -387,7 +393,7 @@ function init(deps) {
   terminalWorkerManager = deps.terminalWorkerManager || null;
   fileTransferBridge = deps.transferBridge || null;
   electronModule = deps.electronModule || null;
-  cliDiscoveryFilePath = deps.cliDiscoveryFilePath || getCliDiscoveryFilePath();
+  cliDiscoveryFilePathOverride = deps.cliDiscoveryFilePath || null;
   debugLog("init", { hasSessions: Boolean(sessions), hasElectron: Boolean(electronModule) });
   if (deps.commandBlocklist) {
     commandBlocklist = deps.commandBlocklist;
@@ -425,6 +431,7 @@ async function listActivePortForwards() {
 }
 
 function writeCliDiscoveryFile() {
+  const cliDiscoveryFilePath = getActiveCliDiscoveryFilePath();
   if (!tcpPort || !authToken || !cliDiscoveryFilePath) return;
   const payload = {
     port: tcpPort,
@@ -442,6 +449,7 @@ function writeCliDiscoveryFile() {
 }
 
 function removeCliDiscoveryFile() {
+  const cliDiscoveryFilePath = getActiveCliDiscoveryFilePath();
   if (!cliDiscoveryFilePath) return;
   try {
     fs.rmSync(cliDiscoveryFilePath, { force: true });
@@ -451,6 +459,7 @@ function removeCliDiscoveryFile() {
 }
 
 function isCliDiscoveryFileCurrent() {
+  const cliDiscoveryFilePath = getActiveCliDiscoveryFilePath();
   if (!cliDiscoveryFilePath) return true;
   let raw;
   try {
@@ -473,6 +482,7 @@ function isCliDiscoveryFileCurrent() {
 // listening. Rewrite it from the in-memory port/token so tool CLI does not
 // report a misleading APP_NOT_RUNNING / "sessions gone" error.
 function ensureCliDiscoveryFile() {
+  const cliDiscoveryFilePath = getActiveCliDiscoveryFilePath();
   if (!tcpPort || !authToken || !cliDiscoveryFilePath) return;
   if (isCliDiscoveryFileCurrent()) return;
   debugLog("self-healing CLI discovery file");
@@ -2180,6 +2190,7 @@ async function handleGetContext(params) {
 }
 
 function handleGetStatus() {
+  const cliDiscoveryFilePath = getActiveCliDiscoveryFilePath();
   // Repair the discovery pointer before reporting on it, so a mid-session
   // out-of-band deletion is visible to callers as already self-healed.
   ensureCliDiscoveryFile();

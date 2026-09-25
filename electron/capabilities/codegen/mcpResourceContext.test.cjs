@@ -3,6 +3,10 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
+// Keep bridge discovery writes/deletes off the installed app's live file.
+const { isolateCliDiscoveryFile } = require("../../bridges/cliDiscoveryTestIsolation.cjs");
+isolateCliDiscoveryFile();
+
 function loadFreshBridge() {
   const bridgePath = require.resolve("../../bridges/mcpServerBridge.cjs");
   delete require.cache[bridgePath];

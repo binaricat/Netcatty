@@ -4,6 +4,10 @@ const test = require('node:test');
 const { configureTerminalSessionDataEmitter, emitTerminalSessionData } = require('./emitTerminalSessionData.cjs');
 const { registerCattyExecHandlers } = require('./aiBridge/cattyExecHandlers.cjs');
 const { execViaPty } = require('./ai/ptyExec.cjs');
+// Keep bridge discovery writes/deletes off the installed app's live file.
+const { isolateCliDiscoveryFile } = require('./cliDiscoveryTestIsolation.cjs');
+isolateCliDiscoveryFile();
+
 const bridge = require('./mcpServerBridge.cjs');
 
 for (const surface of ['catty', 'mcp-exec', 'mcp-job']) {
