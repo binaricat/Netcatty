@@ -1354,16 +1354,41 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
     // first (zero copy; the inode keeps a reachable name there until the
     // temp store is cleared), and only then drop the beside-destination
     // name. If the link cannot be made (different volume, unsupported
-    // filesystem), leave the artifact where it is instead of destroying a
-    // late writer's only name (Codex P1 on PR #3516).
+    // filesystem), copy the bytes into the managed temporary store and
+    // then drop the beside-destination name anyway, so repeats on such a
+    // destination stop leaving a versioned full-size copy per run behind
+    // (Codex P1 on PR #3516). Re-stat the source around the copy and retry
+    // while it keeps changing, so an edit still landing through a held
+    // descriptor never loses its only remaining name; if it is still
+    // changing after the retries, leave the copy beside the destination
+    // for the next repeat to supersede again.
     if (supersededBackupPath) {
+      const retiredPath = tempDirBridge.getTempFilePath(
+        `superseded-${path.basename(supersededBackupPath)}`,
+      );
       try {
-        const retiredPath = tempDirBridge.getTempFilePath(
-          `superseded-${path.basename(supersededBackupPath)}`,
-        );
-        await fs.promises.link(supersededBackupPath, retiredPath);
+        try {
+          await fs.promises.link(supersededBackupPath, retiredPath);
+        } catch {
+          let stableCopy = false;
+          for (let attempt = 0; attempt < 3 && !stableCopy; attempt += 1) {
+            const before = await fs.promises.lstat(supersededBackupPath, { bigint: true })
+              .catch(() => null);
+            if (!before) {
+              // The copy was removed concurrently; nothing to preserve.
+              stableCopy = true;
+              break;
+            }
+            await fs.promises.copyFile(supersededBackupPath, retiredPath);
+            const after = await fs.promises.lstat(supersededBackupPath, { bigint: true });
+            stableCopy = stableLocalFileIdentity(before) === stableLocalFileIdentity(after)
+              && before.ctimeNs === after.ctimeNs && before.mtimeNs === after.mtimeNs;
+          }
+          if (!stableCopy) throw new Error("Superseded recovery copy kept changing during retirement");
+        }
         await fs.promises.unlink(supersededBackupPath).catch(() => {});
       } catch {
+        await fs.promises.unlink(retiredPath).catch(() => {});
         // Keep the superseded copy reachable beside the destination.
       }
       supersededBackupPath = null;
@@ -1473,11 +1498,23 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
         // that proves it is ours. Recreate the marker exclusively so a
         // symlink swapped in at that pathname is never followed (Codex P2).
         if (supersededBackupPath) {
-          await fs.promises.rename(supersededBackupPath, backupPath).catch(() => {});
+          // A failed rename must not be swallowed: the marker below would
+          // otherwise describe a backup that never returned to the fixed
+          // name (Codex P2 on PR #3516).
+          await fs.promises.rename(supersededBackupPath, backupPath);
           supersededBackupPath = null;
+          if (wroteOwnerMarker) {
+            // This replacement wrote its own marker for the backup it just
+            // rolled back. Remove it so the saved marker can be recreated
+            // exclusively instead of failing with EEXIST and leaving the
+            // restored backup paired with the wrong identity (Codex P2 on
+            // PR #3516).
+            await fs.promises.unlink(backupOwnerMarkerPath).catch((markerError) => {
+              if (markerError?.code !== "ENOENT") throw markerError;
+            });
+          }
           if (supersededBackupOwnerMarker !== null) {
-            await writeLocalBackupOwnerMarkerContent(backupOwnerMarkerPath, supersededBackupOwnerMarker)
-              .catch(() => {});
+            await writeLocalBackupOwnerMarkerContent(backupOwnerMarkerPath, supersededBackupOwnerMarker);
           } else {
             await fs.promises.unlink(backupOwnerMarkerPath).catch(() => {});
           }
@@ -1496,15 +1533,22 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
       // recovery backup back at its fixed name instead of stranding it under
       // an undisclosed versioned name. Recreate the marker exclusively so a
       // symlink swapped in at that pathname is never followed (Codex P2).
-      await fs.promises.rename(supersededBackupPath, backupPath).catch(() => {});
-      supersededBackupPath = null;
-      if (supersededBackupOwnerMarker !== null) {
-        await writeLocalBackupOwnerMarkerContent(backupOwnerMarkerPath, supersededBackupOwnerMarker)
-          .catch(() => {});
-      } else {
-        await fs.promises.unlink(backupOwnerMarkerPath).catch(() => {});
+      try {
+        // A failed rename must not be swallowed: the marker below would
+        // otherwise describe a backup that never returned to the fixed
+        // name (Codex P2 on PR #3516).
+        await fs.promises.rename(supersededBackupPath, backupPath);
+        supersededBackupPath = null;
+        if (supersededBackupOwnerMarker !== null) {
+          await writeLocalBackupOwnerMarkerContent(backupOwnerMarkerPath, supersededBackupOwnerMarker);
+        } else {
+          await fs.promises.unlink(backupOwnerMarkerPath).catch(() => {});
+        }
+        supersededBackupOwnerMarker = null;
+      } catch (restoreError) {
+        keepRecoveryFiles = true;
+        error.cause ??= restoreError;
       }
-      supersededBackupOwnerMarker = null;
     }
     if (keepRecoveryFiles) {
       const failure = new Error(
