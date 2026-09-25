@@ -241,6 +241,7 @@ const SIDE_PANEL_STABLE_CTX_KEYS = [
   'sidePanelWidth',
   'sidePanelHeight',
   'sidePanelPosition',
+  'isComposeBarOpen',
   'sidePanelOpenTabs',
   'sidePanelLayouts',
   'sftpHostForTab',

@@ -630,6 +630,7 @@ function TerminalLayerSidePanelInner({ ctx }: { ctx: SidePanelContext }) {
   const isBottomDock = sidePanelPosition === 'bottom';
   const shellRef = useRef<HTMLDivElement>(null);
   const shellResizeCleanupRef = useRef<(() => void) | null>(null);
+  const updateAvailableSurfaceRef = useRef<() => void>(() => {});
   const [availableSurfaceWidth, setAvailableSurfaceWidth] = useState(0);
   const availableSurfaceWidthRef = useRef(availableSurfaceWidth);
   // Full terminal-layer width; unlike `availableSurfaceWidth` this does not
@@ -709,6 +710,7 @@ function TerminalLayerSidePanelInner({ ctx }: { ctx: SidePanelContext }) {
       availableSurfaceHeightRef.current = nextHeight;
       setAvailableSurfaceHeight((current) => current === nextHeight ? current : nextHeight);
     };
+    updateAvailableSurfaceRef.current = updateAvailableWidth;
 
     resizeObserver?.observe(terminalLayer);
     mutationObserver?.observe(terminalLayer, { childList: true });
@@ -727,9 +729,20 @@ function TerminalLayerSidePanelInner({ ctx }: { ctx: SidePanelContext }) {
       observedFocusSidebar = null;
       observedComposeBar = null;
       observedWorkspaceColumn = null;
+      updateAvailableSurfaceRef.current = () => {};
       setOverlayRoot(null);
     };
   }, []);
+  // The compose bar mounts inside the terminal pane, below the observed
+  // workspace column. Remeasure when it opens/closes or the active tab changes;
+  // the ResizeObserver above then follows subsequent compose-bar height drags.
+  useLayoutEffect(() => {
+    updateAvailableSurfaceRef.current();
+    // The compose bar is rendered by a sibling subtree. Its mount can land
+    // after this layout effect, so measure again once that commit has painted.
+    const frame = requestAnimationFrame(() => updateAvailableSurfaceRef.current());
+    return () => cancelAnimationFrame(frame);
+  }, [activeTabId, ctx.isComposeBarOpen]);
   const handlePaneHostChange = useCallback((tool: SidePanelTab, host: HTMLElement | null) => {
     setPaneHosts((current) => {
       if (host && current.get(tool) === host) return current;
