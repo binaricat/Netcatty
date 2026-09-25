@@ -1051,6 +1051,32 @@ async function hashOpenLocalFile(handle, assertNotCancelled = () => {}) {
   return hash.digest("hex");
 }
 
+// Writes the small marker that proves a recovery backup beside the
+// destination was created by this app, so later repeat downloads can reuse
+// the fixed backup name without touching unrelated files.
+async function writeLocalBackupOwnerMarker(markerPath, stat) {
+  await fs.promises.writeFile(markerPath, JSON.stringify({
+    identity: `${stat.dev}:${stat.ino}`,
+    birthtimeNs: String(stat.birthtimeNs),
+  }), "utf8");
+}
+
+async function localBackupOwnerMarkerMatches(markerPath, stat) {
+  let raw;
+  try {
+    raw = await fs.promises.readFile(markerPath, "utf8");
+  } catch {
+    return false;
+  }
+  try {
+    const marker = JSON.parse(raw);
+    return marker?.identity === `${stat.dev}:${stat.ino}`
+      && marker?.birthtimeNs === String(stat.birthtimeNs);
+  } catch {
+    return false;
+  }
+}
+
 async function assertExpectedLocalDownloadTarget(requestedPath, expected, inspectedTarget) {
   if (!expected) return;
   const validIdentity = (value) => typeof value === "string" && /^\d+:\d+$/.test(value);
@@ -1100,6 +1126,13 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
   let committed = false;
   let keepRecoveryFiles = false;
   let supersededBackupPath = null;
+  // The fixed recovery-backup name is only reused when the file already there
+  // can be proven to be the backup this app wrote earlier. The marker file
+  // records the backed-up inode's identity so a repeat download refuses to
+  // touch a foreign file that a user or another application placed at the
+  // predictable hidden pathname (Codex P2 on PR #3516).
+  const backupOwnerMarkerPath = `${backupPath}.owner`;
+  let supersededBackupOwnerMarker = null;
   let preparedHandle;
   let originalHandle;
   let restoreProbeCreated = false;
@@ -1177,16 +1210,40 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
       // A previous remembered replacement retained its verified backup at
       // this fixed name. rename(targetPath, backupPath) would atomically
       // unlink that inode, so an editor still holding it open would silently
-      // lose edits (and any unrelated file squatting on the predictable name
-      // would vanish too). Relink the old artifact to a unique name first so
-      // its content stays reachable through recovery (Codex P1 on PR #3516).
+      // lose edits. Roll the old artifact to a unique name first so its
+      // content stays reachable through recovery — but only after proving
+      // with the owner marker that this app wrote that backup; a foreign
+      // file at the predictable hidden pathname is never moved or replaced
+      // (Codex P1/P2 on PR #3516).
       if (options.expectedLocalTarget) {
-        supersededBackupPath = `${backupPath}.${token}`;
+        let existingBackupStat = null;
         try {
-          await fs.promises.rename(backupPath, supersededBackupPath);
+          existingBackupStat = await fs.promises.lstat(backupPath, { bigint: true });
         } catch (error) {
           if (error?.code !== "ENOENT") throw error;
-          supersededBackupPath = null;
+        }
+        if (existingBackupStat) {
+          const ownsExistingBackup = await localBackupOwnerMarkerMatches(
+            backupOwnerMarkerPath, existingBackupStat,
+          );
+          if (!existingBackupStat.isFile() || !ownsExistingBackup) {
+            throw new Error(
+              `An unrecognized file already exists at the recovery backup location ${backupPath}; `
+              + "refusing to move or replace it. Remove or rename that file if it was not created by Netcatty.",
+            );
+          }
+          supersededBackupPath = `${backupPath}.${token}`;
+          try {
+            await fs.promises.rename(backupPath, supersededBackupPath);
+          } catch (error) {
+            if (error?.code !== "ENOENT") throw error;
+            // Our own backup was removed concurrently; nothing to supersede.
+            supersededBackupPath = null;
+          }
+          if (supersededBackupPath) {
+            supersededBackupOwnerMarker = await fs.promises.readFile(backupOwnerMarkerPath, "utf8")
+              .catch(() => null);
+          }
         }
       }
       try {
@@ -1229,6 +1286,11 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
             throw new Error("Local download target content changed during replacement");
           }
           verifiedBackupCtimeNs = String(pathStat.ctimeNs);
+          // Record this app's ownership of the fixed-name recovery backup so
+          // the next repeat download can prove the file at that pathname is
+          // ours before rolling it aside. Written before the commit boundary,
+          // so a failure here still rolls the original target back.
+          await writeLocalBackupOwnerMarker(backupOwnerMarkerPath, pathStat);
         } finally {
           if (backupHandle && backupHandle !== originalHandle) await backupHandle.close().catch(() => {});
         }
@@ -1248,6 +1310,19 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
     // Publication is the commit boundary. A late cancel must not perform a
     // check-then-unlink rollback against a name another process may now own.
     committed = true;
+    // The superseded recovery copy only exists to roll this replacement back
+    // before the commit boundary, so drop it once the replacement is
+    // committed. Retaining one versioned copy per successful repeat would
+    // leave unbounded full-size files beside the destination and eventually
+    // exhaust that volume (Codex P1 on PR #3516). The verified backup at the
+    // fixed name remains the single bounded recovery artifact and is never
+    // unlinked here, so late edits to the immediately previous version stay
+    // reachable.
+    if (supersededBackupPath) {
+      await fs.promises.unlink(supersededBackupPath).catch(() => {});
+      supersededBackupPath = null;
+      supersededBackupOwnerMarker = null;
+    }
     // Hand the published inode identity to the caller for descriptor-based
     // metadata stamping after publication.
     if (backedUp && options.expectedLocalTarget) {
@@ -1348,15 +1423,40 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
         await fs.promises.unlink(backupPath).catch(() => {});
         backedUp = false;
         // The original target was restored, so put the superseded recovery
-        // backup back where this transfer found it.
+        // backup back where this transfer found it, with the owner marker
+        // that proves it is ours.
         if (supersededBackupPath) {
           await fs.promises.rename(supersededBackupPath, backupPath).catch(() => {});
           supersededBackupPath = null;
+          if (supersededBackupOwnerMarker !== null) {
+            await fs.promises.writeFile(backupOwnerMarkerPath, supersededBackupOwnerMarker, "utf8")
+              .catch(() => {});
+          } else {
+            await fs.promises.unlink(backupOwnerMarkerPath).catch(() => {});
+          }
+          supersededBackupOwnerMarker = null;
+        } else {
+          // The rollover marker no longer matches any retained backup.
+          await fs.promises.unlink(backupOwnerMarkerPath).catch(() => {});
         }
       } catch (restoreError) {
         keepRecoveryFiles = true;
         error.cause ??= restoreError;
       }
+    } else if (!backedUp && !keepRecoveryFiles && supersededBackupPath) {
+      // The remembered target disappeared before it could be backed up, so
+      // there is nothing to restore over the target; put the superseded
+      // recovery backup back at its fixed name instead of stranding it under
+      // an undisclosed versioned name.
+      await fs.promises.rename(supersededBackupPath, backupPath).catch(() => {});
+      supersededBackupPath = null;
+      if (supersededBackupOwnerMarker !== null) {
+        await fs.promises.writeFile(backupOwnerMarkerPath, supersededBackupOwnerMarker, "utf8")
+          .catch(() => {});
+      } else {
+        await fs.promises.unlink(backupOwnerMarkerPath).catch(() => {});
+      }
+      supersededBackupOwnerMarker = null;
     }
     if (keepRecoveryFiles) {
       const failure = new Error(

@@ -85,13 +85,16 @@ test("repeated remembered downloads supersede the previous backup", async (t) =>
   assert.equal(fs.readFileSync(target, "utf8"), "third");
   const backups = fs.readdirSync(root).filter((name) => name.includes("netcatty.backup"));
   const fixed = backups.find((name) => name === ".target.netcatty.backup");
-  const versioned = backups.find((name) => name.startsWith(".target.netcatty.backup."));
+  const versioned = backups.find((name) => name.startsWith(".target.netcatty.backup.")
+    && name !== ".target.netcatty.backup.owner");
   assert.ok(fixed, "keep the verified backup of the latest replacement");
   assert.equal(fs.readFileSync(path.join(root, fixed), "utf8"), "second");
-  // The rollover must not unlink the previous recovery copy: an editor still
-  // holding its inode open could land an edit that would lose its only name.
-  assert.ok(versioned, "preserve the previous recovery backup under a versioned name");
-  assert.equal(fs.readFileSync(path.join(root, versioned), "utf8"), "first");
+  // Once the replacement is committed, the superseded copy is dropped so
+  // repeated downloads keep a bounded recovery set instead of leaving one
+  // permanent full-size file per version beside the destination. The verified
+  // backup at the fixed name is retained for late writers.
+  assert.ok(!versioned, "remove the superseded recovery copy after commit");
+  assert.equal(backups.length, 2, "keep only the bounded backup and its owner marker");
 });
 
 test("failed remembered replacement restores the superseded backup", async (t) => {
@@ -123,9 +126,107 @@ test("failed remembered replacement restores the superseded backup", async (t) =
     fs.readFileSync(path.join(root, ".target.netcatty.backup"), "utf8"), "first",
     "put the superseded backup back at the fixed name",
   );
+  const remainingBackups = fs.readdirSync(root)
+    .filter((name) => name.includes("netcatty.backup") && name !== ".target.netcatty.backup.owner");
+  assert.equal(remainingBackups.length, 1, "leave no orphaned versioned recovery copy");
+});
+
+test("remembered download refuses to move a foreign file at the backup pathname", async (t) => {
+  const root = fs.mkdtempSync(`${temp.getTempFilePath("remembered-foreign-backup")}-`);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const staged = path.join(root, "staged");
+  const target = path.join(root, "target");
+  const backupPath = path.join(root, ".target.netcatty.backup");
+  fs.writeFileSync(staged, "second");
+  fs.writeFileSync(target, "first");
+  await bridge._promoteLocalTransferForTests(staged, target, {
+    requestedTargetPath: target,
+    expectedLocalTarget: rememberedExpectation(root, target),
+  });
+  assert.equal(fs.readFileSync(backupPath, "utf8"), "first");
+  // A user or another application takes over the hidden pathname. Without a
+  // matching owner marker Netcatty must neither move it aside nor replace it.
+  fs.writeFileSync(backupPath, "mine");
+  fs.rmSync(`${backupPath}.owner`);
+  fs.writeFileSync(staged, "third");
+  await assert.rejects(
+    () => bridge._promoteLocalTransferForTests(staged, target, {
+      requestedTargetPath: target,
+      expectedLocalTarget: rememberedExpectation(root, target),
+    }),
+    /refusing to move or replace/,
+  );
+  assert.equal(fs.readFileSync(backupPath, "utf8"), "mine", "leave the foreign file untouched");
+  assert.equal(fs.readFileSync(target, "utf8"), "second", "leave the target untouched");
   assert.equal(
-    fs.readdirSync(root).filter((name) => name.includes("netcatty.backup")).length, 1,
-    "leave no orphaned versioned recovery copy",
+    fs.readdirSync(root).filter((name) => name.startsWith(".target.netcatty.backup.")).length, 0,
+    "scatter no versioned copies of the foreign file",
+  );
+});
+
+test("remembered download refuses a backup whose inode no longer matches its owner marker", async (t) => {
+  const root = fs.mkdtempSync(`${temp.getTempFilePath("remembered-stale-marker")}-`);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const staged = path.join(root, "staged");
+  const target = path.join(root, "target");
+  const backupPath = path.join(root, ".target.netcatty.backup");
+  fs.writeFileSync(staged, "second");
+  fs.writeFileSync(target, "first");
+  await bridge._promoteLocalTransferForTests(staged, target, {
+    requestedTargetPath: target,
+    expectedLocalTarget: rememberedExpectation(root, target),
+  });
+  // Swap in a different inode while keeping the previous owner marker.
+  fs.renameSync(backupPath, `${backupPath}.held`);
+  fs.writeFileSync(backupPath, "unrelated");
+  fs.writeFileSync(staged, "third");
+  await assert.rejects(
+    () => bridge._promoteLocalTransferForTests(staged, target, {
+      requestedTargetPath: target,
+      expectedLocalTarget: rememberedExpectation(root, target),
+    }),
+    /refusing to move or replace/,
+  );
+  assert.equal(fs.readFileSync(backupPath, "utf8"), "unrelated", "leave the swapped-in file untouched");
+  assert.equal(fs.readFileSync(`${backupPath}.held`, "utf8"), "first", "keep the real backup reachable");
+  assert.equal(fs.readFileSync(target, "utf8"), "second", "leave the target untouched");
+});
+
+test("remembered download re-homes the superseded backup when the target disappears", async (t) => {
+  const root = fs.mkdtempSync(`${temp.getTempFilePath("remembered-vanish-target")}-`);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const staged = path.join(root, "staged");
+  const target = path.join(root, "target");
+  const backupPath = path.join(root, ".target.netcatty.backup");
+  fs.writeFileSync(staged, "second");
+  fs.writeFileSync(target, "first");
+  await bridge._promoteLocalTransferForTests(staged, target, {
+    requestedTargetPath: target,
+    expectedLocalTarget: rememberedExpectation(root, target),
+  });
+  fs.writeFileSync(staged, "third");
+  const rename = fs.promises.rename;
+  t.after(() => { fs.promises.rename = rename; });
+  fs.promises.rename = async (from, to) => {
+    if (from === target && String(to).endsWith(".backup")) fs.unlinkSync(target);
+    return rename(from, to);
+  };
+  await assert.rejects(
+    () => bridge._promoteLocalTransferForTests(staged, target, {
+      requestedTargetPath: target,
+      expectedLocalTarget: rememberedExpectation(root, target),
+    }),
+    /Remembered local download target disappeared/,
+  );
+  assert.equal(fs.existsSync(target), false);
+  assert.equal(fs.readFileSync(backupPath, "utf8"), "first",
+    "put the superseded backup back at the fixed name");
+  assert.equal(
+    fs.readdirSync(root)
+      .filter((name) => name.startsWith(".target.netcatty.backup.")
+        && name !== ".target.netcatty.backup.owner").length,
+    0,
+    "leave no versioned recovery copy stranded",
   );
 });
 
