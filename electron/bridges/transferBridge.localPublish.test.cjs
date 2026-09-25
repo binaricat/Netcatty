@@ -155,6 +155,37 @@ test("remembered download stops if the selected file disappears at replacement",
   assert.equal(fs.existsSync(target), false);
 });
 
+test("remembered download keeps a backup edited after publication", async (t) => {
+  const root = fs.mkdtempSync(`${temp.getTempFilePath("remembered-late-edit")}-`);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const staged = path.join(root, "staged");
+  const target = path.join(root, "target");
+  fs.writeFileSync(staged, "download");
+  fs.writeFileSync(target, "original");
+  const expectedLocalTarget = rememberedExpectation(root, target);
+  const link = fs.promises.link;
+  t.after(() => { fs.promises.link = link; });
+  let edited = false;
+  fs.promises.link = async (from, to) => {
+    const result = await link(from, to);
+    if (!edited && to === target && String(from).endsWith(".ready")) {
+      edited = true;
+      const backupName = fs.readdirSync(root).find((name) => name.endsWith(".backup"));
+      assert.ok(backupName);
+      fs.writeFileSync(path.join(root, backupName), "modified");
+    }
+    return result;
+  };
+  await assert.rejects(() => bridge._promoteLocalTransferForTests(staged, target, {
+    requestedTargetPath: target, expectedLocalTarget,
+  }), /Recovery backup preserved/);
+  assert.equal(edited, true);
+  assert.equal(fs.readFileSync(target, "utf8"), "download");
+  const backupName = fs.readdirSync(root).find((name) => name.endsWith(".backup"));
+  assert.ok(backupName);
+  assert.equal(fs.readFileSync(path.join(root, backupName), "utf8"), "modified");
+});
+
 test("replacement keeps large file numbers exact when checking its backup", async (t) => {
   const root = fs.mkdtempSync(`${temp.getTempFilePath("large-backup-identity")}-`);
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));

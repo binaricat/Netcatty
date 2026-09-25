@@ -1148,6 +1148,7 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
     const expectedAbsent = validatedTarget?.targetIdentity === "missing" || validatedTarget?.targetIdentity === null;
     const expectedIdentity = validatedTarget?.stableIdentity
       || (validatedTarget?.targetIdentity ? String(validatedTarget.targetIdentity).split(":").slice(0, 3).join(":") : null);
+    let verifiedBackupCtimeNs = null;
     if (!expectedAbsent) {
       try {
         originalHandle = await fs.promises.open(targetPath, "r");
@@ -1205,6 +1206,7 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
             || before.mtimeNs !== after.mtimeNs || after.mtimeNs !== pathStat.mtimeNs) {
             throw new Error("Local download target content changed during replacement");
           }
+          verifiedBackupCtimeNs = String(pathStat.ctimeNs);
         } finally {
           if (backupHandle && backupHandle !== originalHandle) await backupHandle.close().catch(() => {});
         }
@@ -1226,6 +1228,38 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
     committed = true;
     // Hand the published inode identity to the caller for descriptor-based
     // metadata stamping after publication.
+    if (backedUp && options.expectedLocalTarget) {
+      let backupHandle;
+      try {
+        const pathBefore = await fs.promises.lstat(backupPath, { bigint: true });
+        const heldStat = originalHandle && await originalHandle.stat({ bigint: true });
+        backupHandle = heldStat && stableLocalFileIdentity(heldStat) === stableLocalFileIdentity(pathBefore)
+          ? originalHandle : await fs.promises.open(backupPath, "r");
+        const before = await backupHandle.stat({ bigint: true });
+        const backupHash = await hashOpenLocalFile(backupHandle);
+        const [after, pathAfter] = await Promise.all([
+          backupHandle.stat({ bigint: true }),
+          fs.promises.lstat(backupPath, { bigint: true }),
+        ]);
+        if (backupHash !== options.expectedLocalTarget.targetSha256
+          || String(pathBefore.ctimeNs) !== verifiedBackupCtimeNs
+          || stableLocalFileIdentity(before) !== stableLocalFileIdentity(after)
+          || stableLocalFileIdentity(after) !== stableLocalFileIdentity(pathAfter)
+          || `${pathAfter.dev}:${pathAfter.ino}` !== options.expectedLocalTarget.targetIdentity
+          || before.ctimeNs !== after.ctimeNs || after.ctimeNs !== pathAfter.ctimeNs
+          || before.mtimeNs !== after.mtimeNs || after.mtimeNs !== pathAfter.mtimeNs) {
+          throw new Error("Original local file changed after publication");
+        }
+      } catch (error) {
+        options.onCommit?.(null, localMtimePrepared);
+        const recovery = new Error(`Original local file changed after publication. Recovery backup preserved: ${backupPath}`, { cause: error });
+        recovery.recoveryFailed = true;
+        recovery.remoteBackupPath = backupPath;
+        throw recovery;
+      } finally {
+        if (backupHandle && backupHandle !== originalHandle) await backupHandle.close().catch(() => {});
+      }
+    }
     if (backedUp) await fs.promises.unlink(backupPath).catch(() => {});
     await fs.promises.unlink(readyPath).catch(() => {});
     await fs.promises.unlink(stagedPath).catch(() => {});
