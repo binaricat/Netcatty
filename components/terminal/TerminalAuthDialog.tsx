@@ -101,9 +101,7 @@ export const TerminalAuthDialog: React.FC<TerminalAuthDialogProps> = ({
 
     const handleSelectIdentity = (identity: Identity) => {
         setAuthMethod('password');
-        if (identity.username) {
-            setAuthUsername(identity.username);
-        }
+        setAuthUsername(identity.username);
         setAuthPassword(identity.password || '');
         setSelectedIdentityId(identity.id);
         setIdentityDropdownOpen(false);
