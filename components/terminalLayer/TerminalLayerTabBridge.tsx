@@ -386,6 +386,7 @@ export function TerminalLayerTabBridge({ stableRef }: { stableRef: StableRef }) 
     Set,
     setDropHint,
     setSftpHostForTab: s.setSftpHostForTab,
+    setSftpHostSourceSessionForTab: s.setSftpHostSourceSessionForTab,
     setSftpInitialLocationForTab: s.setSftpInitialLocationForTab,
     setSftpPendingUploadsForTab: s.setSftpPendingUploadsForTab,
     setAiMountedTabIds: s.setAiMountedTabIds,
