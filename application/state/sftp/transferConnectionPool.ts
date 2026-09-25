@@ -548,12 +548,8 @@ const stableSerialize = (value: unknown): string => {
  * Secret fields never contribute to the persisted route identity
  * (`buildTransferRouteKey`). Their digests could act as offline verifiers for
  * credential guesses if the route identity leaks through localStorage-backed
- * transfer history (Codex P2 on PR #3516). `command` is included because a
- * command proxy's `ProxyCommand` line routinely embeds credentials (password
- * prompts, tokens), and the vault itself treats command-proxy contents as
- * secret; a rotated proxy command therefore no longer changes the route
- * identity, which is acceptable for a persistable value. Non-secret identity
- * references (auth method, keyId, keySource, identity file paths) stay in so a
+ * transfer history (Codex P2 on PR #3516). Non-secret identity references
+ * (auth method, keyId, keySource, identity file paths) stay in so a
  * credential *switch* still changes the route identity.
  */
 const TRANSFER_ROUTE_SECRET_KEYS: ReadonlySet<string> = new Set([
@@ -562,18 +558,63 @@ const TRANSFER_ROUTE_SECRET_KEYS: ReadonlySet<string> = new Set([
   "passphrase",
   "certificate",
   "sudoAutofillPassword",
-  "command",
 ]);
 
-const stripTransferRouteSecrets = (value: unknown): unknown => {
-  if (value === null || typeof value !== "object") return value;
-  if (Array.isArray(value)) return value.map(stripTransferRouteSecrets);
-  const out: Record<string, unknown> = {};
-  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
-    if (TRANSFER_ROUTE_SECRET_KEYS.has(key)) continue;
-    out[key] = stripTransferRouteSecrets(item);
+/**
+ * `command` cannot simply be dropped: command proxies normalize to an empty
+ * `host` and zero `port`, so without it every command proxy for the same
+ * target produced the same persisted route key, and switching a pane between
+ * commands that reach different bastions or backends still passed the
+ * quick-download route guard — the remembered local file could be replaced
+ * with bytes from a different server (Codex P1 on PR #3516). The
+ * `ProxyCommand` line itself is secret (it routinely embeds credentials), so
+ * an unsalted digest would act as an offline credential verifier once the
+ * route key lands in localStorage-backed transfer history. Digest command
+ * payloads under a key that stays in memory for the current renderer
+ * session instead: routes remain distinguishable within the session, while
+ * the persisted digest is useless offline and intentionally fails closed
+ * (the route guard rejects the transfer) after a restart.
+ */
+const routeCommandDigestKey = Array.from(
+  crypto.getRandomValues(new Uint8Array(32)),
+  (byte) => byte.toString(16).padStart(2, "0"),
+).join("");
+
+const routeCommandDigests = new Map<string, Promise<string>>();
+
+const routeCommandDigest = (command: string): Promise<string> => {
+  let digest = routeCommandDigests.get(command);
+  if (!digest) {
+    digest = sha256Hex(`${routeCommandDigestKey}:${command}`);
+    routeCommandDigests.set(command, digest);
   }
-  return out;
+  return digest;
+};
+
+/**
+ * Deterministic serializer for the persisted route identity: secret fields
+ * are dropped, while command-proxy payloads are replaced by session-keyed
+ * digests so different proxy commands still produce different route keys
+ * (Codex P1 on PR #3516).
+ */
+const stableRouteSerialize = async (value: unknown): Promise<string> => {
+  if (value === undefined) return '"__undefined__"';
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) {
+    const items = await Promise.all(value.map(stableRouteSerialize));
+    return `[${items.join(",")}]`;
+  }
+  const entries = await Promise.all(
+    Object.entries(value as Record<string, unknown>)
+      .filter(([key]) => key !== "sessionId" && !TRANSFER_ROUTE_SECRET_KEYS.has(key))
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(async ([key, item]) => `${JSON.stringify(key)}:${
+        key === "command" && typeof item === "string"
+          ? await routeCommandDigest(item)
+          : await stableRouteSerialize(item)
+      }`),
+  );
+  return `{${entries.join(",")}}`;
 };
 
 const transferIdentityBase = (input: TransferPoolKeyInput): string => {
@@ -605,13 +646,15 @@ export async function buildTransferPoolKey(input: TransferPoolKeyInput): Promise
 /**
  * Persistable route identity for the download source-route guard. Same
  * endpoint base as the pool key, but the digest covers only non-secret
- * endpoint/proxy attributes so it can survive in localStorage-backed transfer
- * history without exposing a credential-derived verifier (Codex P2 on
- * PR #3516).
+ * endpoint/proxy attributes (plus session-keyed command digests) so it can
+ * survive in localStorage-backed transfer history without exposing a
+ * credential-derived verifier (Codex P2 on PR #3516). Command digests are
+ * session-keyed, so a remembered route from a previous session fails closed
+ * instead of silently reusing a re-resolved proxy route.
  */
 export async function buildTransferRouteKey(input: TransferPoolKeyInput): Promise<string> {
   if (!input.hostname) return input.hostId ? `host:${input.hostId}` : "route:unknown";
   const base = transferIdentityBase(input);
   if (!input.connectionOptions) return base;
-  return `${base}|route:${await sha256Hex(stableSerialize(stripTransferRouteSecrets(input.connectionOptions)))}`;
+  return `${base}|route:${await sha256Hex(await stableRouteSerialize(input.connectionOptions))}`;
 }

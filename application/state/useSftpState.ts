@@ -398,9 +398,11 @@ export const useSftpState = (
   // The quick-download source must have the same identity as the pooled
   // connection that will actually read its bytes, including proxy/jump route.
   // The persisted guard key is a route identity derived only from non-secret
-  // endpoint/proxy attributes: a digest of resolved credentials could act as
-  // an offline verifier for password guesses once transfer history lands in
-  // localStorage (Codex P2 on PR #3516).
+  // endpoint/proxy attributes plus session-keyed proxy-command digests: a
+  // digest of resolved credentials could act as an offline verifier for
+  // password guesses once transfer history lands in localStorage (Codex P2
+  // on PR #3516), and a dropped proxy command would collapse every command
+  // proxy for the same target onto one route (Codex P1 on PR #3516).
   const getTransferRouteKeyForHost = useCallback(
     (host: Host) => transferRouteKeyCache.get(host, () => ({
         hostId: host.id,

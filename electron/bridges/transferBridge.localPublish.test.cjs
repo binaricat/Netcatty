@@ -164,6 +164,66 @@ test("remembered download refuses to move a foreign file at the backup pathname"
   );
 });
 
+test("remembered download fails closed when hard links are unavailable", async (t) => {
+  const root = fs.mkdtempSync(`${temp.getTempFilePath("remembered-no-hardlinks")}-`);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const staged = path.join(root, "staged");
+  const target = path.join(root, "target");
+  fs.writeFileSync(staged, "second");
+  fs.writeFileSync(target, "first");
+  const link = fs.promises.link;
+  fs.promises.link = async () => {
+    throw Object.assign(new Error("hardlinks unavailable"), { code: "ENOTSUP" });
+  };
+  t.after(() => { fs.promises.link = link; });
+  // Without hard-link support there is no exclusive publication: a
+  // replacing rename() could destroy a file another process creates at the
+  // fixed backup pathname inside the check-to-move window, so the
+  // remembered replacement must be refused instead (Codex P1 on PR #3516).
+  await assert.rejects(
+    () => bridge._promoteLocalTransferForTests(staged, target, {
+      requestedTargetPath: target,
+      expectedLocalTarget: rememberedExpectation(root, target),
+    }),
+    /cannot be published exclusively/,
+  );
+  assert.equal(fs.readFileSync(target, "utf8"), "first", "leave the original target untouched");
+  assert.ok(!fs.existsSync(path.join(root, ".target.netcatty.backup")),
+    "create no backup entry on the refused replacement");
+});
+
+test("a failed owner marker write removes its exclusively created marker", async (t) => {
+  const root = fs.mkdtempSync(`${temp.getTempFilePath("remembered-marker-fail")}-`);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const staged = path.join(root, "staged");
+  const target = path.join(root, "target");
+  fs.writeFileSync(staged, "second");
+  fs.writeFileSync(target, "first");
+  const open = fs.promises.open;
+  fs.promises.open = async (...args) => {
+    const handle = await open.apply(fs.promises, args);
+    if (String(args[0]).endsWith(".owner")) {
+      handle.writeFile = async () => {
+        throw Object.assign(new Error("destination volume full"), { code: "ENOSPC" });
+      };
+    }
+    return handle;
+  };
+  t.after(() => { fs.promises.open = open; });
+  await assert.rejects(
+    () => bridge._promoteLocalTransferForTests(staged, target, {
+      requestedTargetPath: target,
+      expectedLocalTarget: rememberedExpectation(root, target),
+    }),
+  );
+  // An empty marker whose write failed would otherwise block every later
+  // repeat download against the permanently unrecognized marker (Codex P2
+  // on PR #3516), so the exclusively created marker must be removed.
+  assert.ok(!fs.existsSync(path.join(root, ".target.netcatty.backup.owner")),
+    "remove the marker whose write failed");
+  assert.equal(fs.readFileSync(target, "utf8"), "first", "restore the original target");
+});
+
 test("remembered download refuses a backup whose inode no longer matches its owner marker", async (t) => {
   const root = fs.mkdtempSync(`${temp.getTempFilePath("remembered-stale-marker")}-`);
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));

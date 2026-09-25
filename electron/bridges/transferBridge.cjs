@@ -1061,11 +1061,37 @@ async function writeLocalBackupOwnerMarkerContent(markerPath, content) {
   const exclusiveFlags = fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL
     | (fs.constants.O_NOFOLLOW || 0);
   const handle = await fs.promises.open(markerPath, exclusiveFlags, 0o600);
+  let failure = null;
   try {
     await handle.writeFile(content, "utf8");
-  } finally {
-    await handle.close().catch(() => {});
+  } catch (error) {
+    failure = error;
   }
+  // Pin the opened inode before dropping the handle: a full destination
+  // volume can leave an empty or partially written marker behind, and
+  // orphan recovery refuses malformed JSON, so every later repeat download
+  // would fail against the permanently unrecognized marker until the user
+  // removes the hidden file by hand (Codex P2 on PR #3516). Remove the
+  // marker we exclusively created, bound to the opened inode so a
+  // concurrent replacement at the pathname is never destroyed.
+  let ownedStat = null;
+  try {
+    ownedStat = await handle.stat({ bigint: true });
+  } catch (error) {
+    failure ??= error;
+  }
+  try {
+    await handle.close();
+  } catch (error) {
+    failure ??= error;
+  }
+  if (failure && ownedStat) {
+    await removeLocalPathnameBoundToIdentity(markerPath, [{
+      dev: String(ownedStat.dev), ino: String(ownedStat.ino),
+      birthtimeNs: String(ownedStat.birthtimeNs),
+    }]).catch(() => {});
+  }
+  if (failure) throw failure;
 }
 
 async function writeLocalBackupOwnerMarker(markerPath, stat) {
@@ -1213,18 +1239,27 @@ async function removeLocalPathnameBoundToIdentity(pathname, expectedIdentities) 
 // destroying the late arrival's only link (Codex P2 on PR #3516). link()
 // refuses an occupied destination, and the source name is dropped only
 // after the backup name is in place, so a late arrival can never be
-// replaced. Filesystems without hard-link support keep the previous
-// replacing rename: exclusive publication is unavailable there, and the
-// owner-marker pre-check plus the post-move identity verification still
-// fail closed on a foreign replacement.
+// replaced. Filesystems without hard-link support get no replacing-rename
+// fallback: a rename over the occupied backup pathname would destroy a
+// concurrent arrival's only link, and copy-based publication cannot
+// preserve the inode identity the caller verifies for the retained backup
+// (Codex P1 on PR #3516). Fail closed instead — the untouched target and
+// the remembered identity stay valid, so the transfer fails without
+// losing either file.
 async function publishLocalBackupExclusive(source, target) {
   const sourceStat = await fs.promises.lstat(source, { bigint: true });
   try {
     await fs.promises.link(source, target);
   } catch (error) {
     if (["ENOTSUP", "EOPNOTSUPP", "ENOSYS", "EPERM", "EACCES", "EXDEV"].includes(error?.code)) {
-      await fs.promises.rename(source, target);
-      return;
+      throw new Error(
+        `The recovery backup at ${target} cannot be published exclusively: `
+        + "this filesystem does not support hard links, so the previous file "
+        + "cannot be moved aside without risking the loss of a file another "
+        + "process writes at that pathname. The download was refused; the "
+        + "existing local file was left untouched.",
+        { cause: error },
+      );
     }
     throw error;
   }

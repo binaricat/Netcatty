@@ -185,7 +185,7 @@ test("buildTransferRouteKey persists without credential-derived material", async
       ...connectionOptions,
       proxy: {
         type: "command", host: "proxy-a", port: 1080, username: "pu",
-        password: "other", command: "proxy-command-secret-b",
+        password: "other", command: "proxy-command-secret-a",
       },
     },
   ];
@@ -205,6 +205,55 @@ test("buildTransferRouteKey persists without credential-derived material", async
       "non-secret route change must change the route identity",
     );
   }
+});
+
+test("buildTransferRouteKey distinguishes command proxies for the same target", async () => {
+  const connectionOptions = (command: string) => ({
+    hostname: "target.example",
+    port: 22,
+    username: "root",
+    password: "secret-a",
+    proxy: {
+      type: "command", host: "", port: 0,
+      username: "pu", password: "pp", command,
+    },
+  } as unknown as NetcattySSHOptions);
+  const base = {
+    hostId: "h1",
+    hostname: "target.example",
+    port: 22,
+    username: "root",
+    connectionOptions: connectionOptions("ssh -J bastion-a target.example"),
+  };
+  const route = await buildTransferRouteKey(base);
+  assert.match(route, /^host:h1\|ep:target\.example:22:root:ssh:nosudo\|route:[a-f0-9]{64}$/);
+  // The same command keeps a stable identity for the session.
+  assert.equal(await buildTransferRouteKey(base), route);
+  // Command proxies normalize to an empty host and zero port, so switching
+  // between commands that reach different bastions must change the route
+  // identity; otherwise the quick-download guard would accept replacement
+  // bytes read through a different proxy route (Codex P1 on PR #3516).
+  const otherBastion = {
+    ...base,
+    connectionOptions: connectionOptions("ssh -J bastion-b target.example"),
+  };
+  assert.notEqual(await buildTransferRouteKey(otherBastion), route);
+  // Proxy credential rotations must not change the identity, and the
+  // persisted digest must not be a pure function of the command: it is
+  // keyed under a session-scoped secret that never reaches storage, so a
+  // leaked route key is useless as an offline credential verifier.
+  const rotatedProxySecret = {
+    ...base,
+    connectionOptions: connectionOptions("ssh -J bastion-a target.example"),
+  };
+  (rotatedProxySecret.connectionOptions as { proxy: { password: string } }).proxy.password = "other";
+  assert.equal(await buildTransferRouteKey(rotatedProxySecret), route);
+  const commandLine = "ssh -J bastion-a target.example";
+  const unsaltedDigest = Array.from(
+    new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(commandLine))),
+    (byte) => byte.toString(16).padStart(2, "0"),
+  ).join("");
+  assert.ok(!route.includes(unsaltedDigest), "command digest must be session-keyed");
 });
 
 test("pool opens at most maxPerHost channels and multiplexes when busy", async () => {
