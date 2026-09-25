@@ -1,6 +1,9 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { EventEmitter } = require("node:events");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
 
 const { createSessionOpsApi, decodeLsofFileName } = require("./sessionOps.cjs");
 
@@ -123,7 +126,7 @@ test("session cwd probe decodes the marked lsof pathname", async () => {
   assert.deepEqual(result, { success: true, cwd: "/srv/中文" });
 });
 
-test("lsof cwd fallback accepts only directory records, not diagnostic names (#3237, #3493)", async () => {
+test("lsof cwd fallback accepts only directory records, not diagnostic names (#3237, #3493)", async (t) => {
   let script;
   const api = makeApi({
     shellPid: "4242",
@@ -144,6 +147,16 @@ test("lsof cwd fallback accepts only directory records, not diagnostic names (#3
   const helper = script.match(/    read_shell_cwd\(\) \{[\s\S]*?\n    \}/)?.[0];
   assert.ok(helper, "exercise the actual remote cwd helper");
   const { spawnSync } = require("node:child_process");
+  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-lsof-cwd-"));
+  t.after(() => fs.rmSync(fixtureRoot, { recursive: true, force: true }));
+  const realParenthesizedPath = path.join(fixtureRoot, "release (owner: alice)");
+  const realDiagnosticShapedPath = path.join(fixtureRoot, "job (stat: ready)");
+  const realErrorShapedPath = path.join(fixtureRoot, "job (readlink: Permission denied)");
+  const realUnicodePath = path.join(fixtureRoot, "中文 (owner: alice)");
+  fs.mkdirSync(realParenthesizedPath);
+  fs.mkdirSync(realDiagnosticShapedPath);
+  fs.mkdirSync(realErrorShapedPath);
+  fs.mkdirSync(realUnicodePath);
   for (const [output, expected] of [
     ["p4242\nfcwd\ntunknown\nn/proc/4242/cwd (readlink: Permission denied)\n", null],
     ["p4242\nfcwd\ntunknown\nn/proc/4242/cwd (readlink: No such file or directory)\n", null],
@@ -152,11 +165,17 @@ test("lsof cwd fallback accepts only directory records, not diagnostic names (#3
     ["p683339\nfcwd\ntVDIR\nn/proc/683339/cwd (readlink: Permission denied)\n", null],
     ["p4242\nfcwd\ntDIR\nn/proc/4242/cwd (readlink: Permission denied)\n", null],
     ["p4242\nfcwd\ntDIR\nn/proc/4242/cwd (readlink: No such file or directory)\n", null],
+    ["p4242\nfcwd\ntDIR\nn/proc/4242/cwd (stat: Operation not permitted)\n", null],
     ["p4242\nfcwd\ntDIR\nn/srv/app (stat: Operation not permitted)\n", null],
+    ["p4242\nfcwd\ntDIR\nn/srv/app (readlink: Permission denied)\n", null],
     ["p4242\nfcwd\nn/proc/4242/cwd\n", null],
     ["p4242\nfcwd\ntDIR\nn/srv/app\n", "/srv/app"],
     ["p4242\nfcwd\ntVDIR\nn/usr/home/alice\n", "/usr/home/alice"],
     ["p4242\nfcwd\ntDIR\nn/srv/backup (old)\n", "/srv/backup (old)"],
+    ["p4242\nfcwd\ntDIR\nn" + realParenthesizedPath + "\n", realParenthesizedPath],
+    ["p4242\nfcwd\ntDIR\nn" + realDiagnosticShapedPath + "\n", realDiagnosticShapedPath],
+    ["p4242\nfcwd\ntDIR\nn" + realErrorShapedPath + "\n", realErrorShapedPath],
+    ["p4242\nfcwd\ntDIR\nn" + realUnicodePath.replace("中文", "\\xe4\\xb8\\xad\\xe6\\x96\\x87") + "\n", realUnicodePath.replace("中文", "\\xe4\\xb8\\xad\\xe6\\x96\\x87")],
     ["p4242\nfcwd\ntDIR\nn/tmp/\\xe4\\xb8\\xad\\xe6\\x96\\x87\n", "/tmp/\\xe4\\xb8\\xad\\xe6\\x96\\x87"],
   ]) {
     const result = spawnSync("sh", ["-c", `
@@ -165,7 +184,7 @@ test("lsof cwd fallback accepts only directory records, not diagnostic names (#3
       ${helper}
       read_shell_cwd 4242
     `], { encoding: "utf8", env: { ...process.env, LSOF_TEST_OUTPUT: output } });
-    assert.equal(result.status, expected === null ? 1 : 0, output);
+    assert.equal(result.status, expected === null ? 1 : 0, `${output}\n${result.stderr}`);
     assert.equal(result.stdout, expected === null ? "" : `NETCATTY_LSOF_CWD=${expected}\n`, output);
   }
 });
