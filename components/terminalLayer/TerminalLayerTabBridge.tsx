@@ -11,6 +11,7 @@ import { useSystemCapabilitiesWarmup } from '../../application/state/useSystemMa
 import { cn } from '../../lib/utils';
 import type { Host, TerminalSession, Workspace } from '../../types';
 import { resolveTerminalHibernateEnabled } from '../../domain/terminalHibernate';
+import { resolveTerminalSftpHost } from '../../domain/sftpTerminalIdentity';
 import { shouldMeasureTerminalLayerLayout } from '../terminalPaneVisibility';
 import { TerminalLayerView } from './TerminalLayerView';
 import { useTerminalAiContexts } from '../../application/state/useTerminalAiContexts';
@@ -48,6 +49,7 @@ export function TerminalLayerTabBridge({ stableRef }: { stableRef: StableRef }) 
   const sessionHostsMap = s.sessionHostsMap as Map<string, Host>;
   const sftpHostForTab = s.sftpHostForTab as Map<string, Host>;
   const sftpHostSourceSessionForTab = s.sftpHostSourceSessionForTab as Map<string, string>;
+  const sftpAuthHostBySessionId = s.sftpAuthHostBySessionId as Map<string, Host>;
   const sidePanelOpenTabs = s.sidePanelOpenTabs as Map<string, SidePanelTab>;
   const sidePanelLayouts = s.sidePanelLayouts as Map<string, SidePanelLayout>;
   const showHostTreeSidebar = s.showHostTreeSidebar as boolean | undefined;
@@ -138,14 +140,16 @@ export function TerminalLayerTabBridge({ stableRef }: { stableRef: StableRef }) 
     const sessionId = activeWorkspace ? focusedSessionId : activeSession?.id;
     const sessionHost = sessionId ? sessionHostsMap.get(sessionId) : null;
     const stored = sftpHostForTab.get(activeTabId);
-    if (sessionId && sftpHostSourceSessionForTab.get(activeTabId) === sessionId
-      && stored && sessionHost && stored.id === sessionHost.id
-      && stored.hostname === sessionHost.hostname && (stored.port || 22) === (sessionHost.port || 22)
-      && (stored.username !== sessionHost.username || stored.identityId !== sessionHost.identityId)) {
-      return stored;
-    }
-    return sessionHost ?? stored ?? null;
-  }, [activeSession?.id, activeTabId, activeWorkspace, focusedSessionId, isSftpOpenForCurrentTab, sessionHostsMap, sftpHostForTab, sftpHostSourceSessionForTab]);
+    const authHost = sessionId && sftpHostSourceSessionForTab.has(activeTabId)
+      ? sftpAuthHostBySessionId.get(sessionId)
+      : undefined;
+    return resolveTerminalSftpHost({
+      sessionHost,
+      storedHost: stored,
+      authenticatedHost: authHost,
+      followsTerminal: sftpHostSourceSessionForTab.has(activeTabId),
+    });
+  }, [activeSession?.id, activeTabId, activeWorkspace, focusedSessionId, isSftpOpenForCurrentTab, sessionHostsMap, sftpAuthHostBySessionId, sftpHostForTab, sftpHostSourceSessionForTab]);
 
   // Keep the same-endpoint SSH session id across disconnected/connecting so
   // SftpSidePanel can observe status transitions and rebind after Start over.
@@ -159,13 +163,14 @@ export function TerminalLayerTabBridge({ stableRef }: { stableRef: StableRef }) 
     const sessionHost = sessionHostsMap.get(session.id);
     if (!sessionHost) return null;
     const sameEndpoint =
-      sessionHost.hostname === sftpActiveHost.hostname
+      sessionHost.id === sftpActiveHost.id
+      && sessionHost.hostname === sftpActiveHost.hostname
       && (sessionHost.port || 22) === (sftpActiveHost.port || 22)
       && ((sessionHost.username || 'root') === (sftpActiveHost.username || 'root')
-        || (sftpHostSourceSessionForTab.get(activeTabId!) === session.id
-          && sftpHostForTab.get(activeTabId!) === sftpActiveHost));
+        || (activeTabId && sftpHostSourceSessionForTab.has(activeTabId)
+          && sftpAuthHostBySessionId.get(session.id) === sftpActiveHost));
     return sameEndpoint ? session.id : null;
-  }, [activeSession?.id, activeTabId, activeWorkspace, focusedSessionId, isSftpOpenForCurrentTab, sessions, sessionHostsMap, sftpActiveHost, sftpHostForTab, sftpHostSourceSessionForTab]);
+  }, [activeSession?.id, activeTabId, activeWorkspace, focusedSessionId, isSftpOpenForCurrentTab, sessions, sessionHostsMap, sftpActiveHost, sftpAuthHostBySessionId, sftpHostSourceSessionForTab]);
 
   const linkedTerminalSessionIdForSftp = useMemo((): string | null => {
     if (!isSftpOpenForCurrentTab) return null;

@@ -1439,8 +1439,11 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       hasEverConnectedRef.current = true;
       clearAutoReconnect();
     }
-    onStatusChange?.(sessionId, next);
-  }, [clearAutoReconnect, onStatusChange, sessionId]);
+    const sftpHost = next === "connected"
+      ? resolvePasswordAuthSftpHost(host, identities, pendingAuthRef.current)
+      : host;
+    onStatusChange?.(sessionId, next, sftpHost === host ? undefined : sftpHost);
+  }, [clearAutoReconnect, host, identities, onStatusChange, sessionId]);
   const updateStatusRef = useRef(updateStatus);
   updateStatusRef.current = updateStatus;
 
@@ -3968,6 +3971,9 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const dragDropSftpHost = status === 'connected'
     ? resolvePasswordAuthSftpHost(host, identities, pendingAuthRef.current)
     : host;
+  const dragDropSudoPassword = dragDropSftpHost === host
+    ? resolvedSudoAutofillPassword
+    : identities.find(identity => identity.id === dragDropSftpHost.identityId)?.password;
 
   const {
     handleDragEnter,
@@ -3978,7 +3984,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   } = useTerminalDragDrop({
     host: dragDropSftpHost,
     resolvedLoginUsername: dragDropSftpHost === host ? resolvedLoginUsername : dragDropSftpHost.username,
-    resolvedSudoPassword: resolvedSudoAutofillPassword,
+    resolvedSudoPassword: dragDropSudoPassword,
     isLocalConnection,
     isNetworkDevice,
     onOpenSftp,

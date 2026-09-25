@@ -545,10 +545,17 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     return true;
   }, [persistWorkspaceLayoutAsDefault, t]);
 
-  const handleStatusChange = useCallback((sessionId: string, status: TerminalSession['status']) => {
+  const handleStatusChange = useCallback((sessionId: string, status: TerminalSession['status'], sftpHostOverride?: Host) => {
     onUpdateSessionStatus(sessionId, status);
 
     if (status !== 'connected') return;
+
+    setSftpAuthHostBySessionId(prev => {
+      const next = new Map(prev);
+      if (sftpHostOverride) next.set(sessionId, sftpHostOverride);
+      else next.delete(sessionId);
+      return next;
+    });
 
     const session = sessionsRef.current.find(s => s.id === sessionId);
     if (!session) return;
@@ -568,6 +575,19 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       if (focusedSession) presetSession = focusedSession;
     }
     const proto = presetSession.protocol ?? 'ssh';
+
+    if (presetSession.id === sessionId && (sftpHostOverride || sftpHostSourceSessionForTabRef.current.get(tabId) === sessionId)) {
+      const connectedHost = sftpHostOverride ?? sessionHostsMapRef.current.get(sessionId);
+      if (connectedHost) {
+        setSftpHostForTab(prev => new Map(prev).set(tabId, connectedHost));
+      }
+      setSftpHostSourceSessionForTab(prev => {
+        if (!sftpHostOverride) return prev;
+        const next = new Map(prev);
+        next.set(tabId, sessionId);
+        return next;
+      });
+    }
 
     if (sidePanelOpenTabsRef.current.has(tabId)) return;
 
@@ -592,6 +612,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
 
     if (targetPanel === 'sftp') {
       sftpPaneClosedTabIdsRef.current.delete(tabId);
+      setSftpHostSourceSessionForTab(prev => new Map(prev).set(tabId, presetSession.id));
       const host = hostsRef.current.find(h => h.id === presetSession.hostId);
       const hostWithOverrides: Host = host
         ? {
@@ -612,7 +633,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
 
       setSftpHostForTab(prev => {
         const next = new Map(prev);
-        next.set(tabId, hostWithOverrides);
+        next.set(tabId, presetSession.id === sessionId && sftpHostOverride ? sftpHostOverride : hostWithOverrides);
         return next;
       });
     } else if (targetPanel === 'ai') {
@@ -745,6 +766,14 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   // The host to pass to the SFTP panel - stored when the user opens SFTP
   const [sftpHostForTab, setSftpHostForTab] = useState<Map<string, Host>>(new Map());
   const [sftpHostSourceSessionForTab, setSftpHostSourceSessionForTab] = useState<Map<string, string>>(new Map());
+  const [sftpAuthHostBySessionId, setSftpAuthHostBySessionId] = useState<Map<string, Host>>(new Map());
+  useEffect(() => {
+    setSftpAuthHostBySessionId(prev => {
+      const liveIds = new Set(sessions.map(session => session.id));
+      const next = new Map([...prev].filter(([id]) => liveIds.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [sessions]);
   const [sftpInitialLocationForTab, setSftpInitialLocationForTab] = useState<
     Map<string, { hostId: string; path: string }>
   >(new Map());
@@ -757,6 +786,8 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   const notesOpenRequestIdRef = useRef(0);
   const sftpHostForTabRef = useRef(sftpHostForTab);
   sftpHostForTabRef.current = sftpHostForTab;
+  const sftpHostSourceSessionForTabRef = useRef(sftpHostSourceSessionForTab);
+  sftpHostSourceSessionForTabRef.current = sftpHostSourceSessionForTab;
   const sftpActiveTransfersByTabRef = useRef<Map<string, number>>(new Map());
   const sftpActiveExternalEditsByTabRef = useRef<Map<string, number>>(new Map());
   const sftpRetainedAfterCloseTabIdsRef = useRef<Set<string>>(new Set());
@@ -1045,6 +1076,12 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       else next.delete(tabId);
       return next;
     });
+    if (originSessionId) {
+      const sessionHost = sessionHostsMapRef.current.get(originSessionId);
+      if (sessionHost && (host.username !== sessionHost.username || host.identityId !== sessionHost.identityId)) {
+        setSftpAuthHostBySessionId(prev => new Map(prev).set(originSessionId, host));
+      }
+    }
 
     const { connectionKey, effectiveInitialPath } = resolveSftpOpenTarget({
       tabId,
@@ -1579,16 +1616,35 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       sftpPaneClosedTabIdsRef.current.delete(tabId);
     }
 
+    if (tab === 'sftp') {
+      const sourceSessionId = getActiveTerminalSessionId();
+      const sessionHost = sourceSessionId ? sessionHostsMapRef.current.get(sourceSessionId) : undefined;
+      const authHost = sourceSessionId ? sftpAuthHostBySessionId.get(sourceSessionId) : undefined;
+      const storedHost = sftpHostForTabRef.current.get(tabId);
+      if (sourceSessionId && sessionHost && authHost
+        && (!storedHost || sftpHostSourceSessionForTabRef.current.has(tabId)
+          || (storedHost.id === sessionHost.id
+            && storedHost.hostname === sessionHost.hostname
+            && (storedHost.port || 22) === (sessionHost.port || 22)))) {
+        setSftpHostForTab(prev => new Map(prev).set(tabId, authHost));
+        setSftpHostSourceSessionForTab(prev => new Map(prev).set(tabId, sourceSessionId));
+      }
+    }
+
     // If switching to SFTP and no host is stored yet, resolve it
     if (tab === 'sftp' && !sftpHostForTabRef.current.has(tabId)) {
-      const host = resolveSftpHostForTab(tabId);
+      const sourceSessionId = getActiveTerminalSessionId();
+      const host = (sourceSessionId && sftpAuthHostBySessionId.get(sourceSessionId))
+        ?? resolveSftpHostForTab(tabId);
       if (!host) return;
+      if (sourceSessionId) {
+        setSftpHostSourceSessionForTab(prev => new Map(prev).set(tabId, sourceSessionId));
+      }
       setSftpHostForTab(prev => {
         const next = new Map(prev);
         next.set(tabId, host);
         return next;
       });
-      const sourceSessionId = getActiveTerminalSessionId();
       const { effectiveInitialPath } = resolveSftpOpenTarget({
         tabId,
         host,
@@ -1610,7 +1666,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     // explicitly closes the now-idle panel, preserving the completed history.
     markSidePanelSubTabOpened(tabId, tab);
     return true;
-  }, [getActiveTerminalSessionId, markSidePanelSubTabOpened, resolveSftpHostForTab, resolveSftpOpenTarget]);
+  }, [getActiveTerminalSessionId, markSidePanelSubTabOpened, resolveSftpHostForTab, resolveSftpOpenTarget, sftpAuthHostBySessionId]);
 
   // Switch only the focused pane. If the tool is already open elsewhere in
   // the tree, the domain helper focuses that pane instead of duplicating it.
@@ -2546,6 +2602,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     setSidePanelWidth,
     setSftpFollowTerminalCwd,
     setSftpHostForTab,
+    setSftpHostSourceSessionForTab,
     setSftpInitialLocationForTab,
     onSaveWorkspaceLayoutAsDefault: handleSaveWorkspaceLayoutAsDefault,
     setSftpPendingUploadsForTab,
@@ -2560,6 +2617,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     sftpFollowTerminalCwd,
     sftpHostForTab,
     sftpHostSourceSessionForTab,
+    sftpAuthHostBySessionId,
     sftpInitialLocationForTab,
     sftpPendingUploadsForTab,
     sftpPaneClosedTabIdsRef,
