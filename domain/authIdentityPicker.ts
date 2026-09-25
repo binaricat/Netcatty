@@ -1,4 +1,4 @@
-import type { Identity } from "./models";
+import type { Host, Identity } from "./models";
 import { sanitizeCredentialValue } from "./credentials";
 
 /**
@@ -20,3 +20,18 @@ export const listPasswordAuthIdentities = (
       && typeof identity.password === "string"
       && (sanitizeCredentialValue(identity.password) ?? "").length > 0,
   );
+
+/** Use the temporary saved identity for SFTP opened from its authenticated terminal. */
+export const resolvePasswordAuthSftpHost = (
+  host: Host,
+  identities: readonly Identity[] | undefined,
+  auth: { authMethod: string; username: string; password?: string; savedToHost?: boolean } | null,
+): Host => {
+  if (!auth || auth.authMethod !== "password" || auth.savedToHost) return host;
+  const identity = listPasswordAuthIdentities(identities).find(
+    (candidate) => candidate.username === auth.username && candidate.password === auth.password,
+  );
+  return identity
+    ? { ...host, username: identity.username, identityId: identity.id }
+    : host;
+};

@@ -744,6 +744,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
 
   // The host to pass to the SFTP panel - stored when the user opens SFTP
   const [sftpHostForTab, setSftpHostForTab] = useState<Map<string, Host>>(new Map());
+  const [sftpHostSourceSessionForTab, setSftpHostSourceSessionForTab] = useState<Map<string, string>>(new Map());
   const [sftpInitialLocationForTab, setSftpInitialLocationForTab] = useState<
     Map<string, { hostId: string; path: string }>
   >(new Map());
@@ -798,6 +799,12 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     sftpPaneClosedTabIdsRef.current.delete(tabId);
     sftpOpeningTabIdsRef.current.delete(tabId);
     setSftpHostForTab(prev => {
+      if (!prev.has(tabId)) return prev;
+      const next = new Map(prev);
+      next.delete(tabId);
+      return next;
+    });
+    setSftpHostSourceSessionForTab(prev => {
       if (!prev.has(tabId)) return prev;
       const next = new Map(prev);
       next.delete(tabId);
@@ -1030,6 +1037,12 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     setSftpHostForTab(prev => {
       const next = new Map(prev);
       next.set(tabId, host);
+      return next;
+    });
+    setSftpHostSourceSessionForTab(prev => {
+      const next = new Map(prev);
+      if (originSessionId) next.set(tabId, originSessionId);
+      else next.delete(tabId);
       return next;
     });
 
@@ -2546,6 +2559,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     sftpDoubleClickBehavior,
     sftpFollowTerminalCwd,
     sftpHostForTab,
+    sftpHostSourceSessionForTab,
     sftpInitialLocationForTab,
     sftpPendingUploadsForTab,
     sftpPaneClosedTabIdsRef,

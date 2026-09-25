@@ -82,6 +82,7 @@ import { usePluginTerminalProviders } from "../application/state/usePluginTermin
 import type { PluginTerminalDecorationRule } from "../domain/pluginTerminalProviders";
 import { terminalReconnectRegistry } from "../application/state/terminalReconnectRegistry";
 import { resolveSftpReuseSourceSessionId } from "../application/state/terminalConnectionReuse";
+import { resolvePasswordAuthSftpHost } from "../domain/authIdentityPicker";
 // SFTPModal removed - SFTP is now handled by SftpSidePanel in TerminalLayer
 import { Button } from "./ui/button";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "./ui/hover-card";
@@ -3467,8 +3468,11 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     if (onOpenSftp) {
       // Delegate to parent (TerminalLayer) for shared SFTP side panel
       const initialPath = await resolveSftpInitialPath();
+      const sftpHost = statusRef.current === 'connected'
+        ? resolvePasswordAuthSftpHost(host, identities, pendingAuthRef.current)
+        : host;
       onOpenSftp(
-        host,
+        sftpHost,
         initialPath,
         undefined,
         sessionId,
@@ -3483,7 +3487,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       return;
     }
     setShowSFTP(true);
-  }, [host, onOpenSftp, resolveSftpInitialPath, sessionId, showSFTP]);
+  }, [host, identities, onOpenSftp, resolveSftpInitialPath, sessionId, showSFTP]);
 
   const handleSendYmodem = useCallback(async () => {
     if (!isSerialConnection || statusRef.current !== "connected") return;
@@ -3961,6 +3965,10 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     requiresUserInput: auth.needsAuth || needsHostKeyVerification || isConnectionAwaitingUserInput,
   });
 
+  const dragDropSftpHost = status === 'connected'
+    ? resolvePasswordAuthSftpHost(host, identities, pendingAuthRef.current)
+    : host;
+
   const {
     handleDragEnter,
     handleDragLeave,
@@ -3968,8 +3976,8 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     handleDrop,
     isDraggingOver,
   } = useTerminalDragDrop({
-    host,
-    resolvedLoginUsername,
+    host: dragDropSftpHost,
+    resolvedLoginUsername: dragDropSftpHost === host ? resolvedLoginUsername : dragDropSftpHost.username,
     resolvedSudoPassword: resolvedSudoAutofillPassword,
     isLocalConnection,
     isNetworkDevice,

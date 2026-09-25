@@ -2869,6 +2869,14 @@ test("startSSH does not use unsaved retry passwords for sudo autofill", async ()
   await createTerminalSessionStarters(ctx as never).startSSH(createTermStub() as never);
   assert.equal(captured?.password, "temporary-secret");
   assert.equal(captured?.sftpReuseOptions, undefined);
+
+  // A different login user must never alias the original profile to SFTP.
+  Object.assign(ctx.host, { password: undefined });
+  ctx.pendingAuthRef.current.username = "deploy";
+  captured = undefined;
+  await createTerminalSessionStarters(ctx as never).startSSH(createTermStub() as never);
+  assert.equal(captured?.username, "deploy");
+  assert.equal(captured?.sftpReuseOptions, undefined);
 });
 
 test("startSSH uses pending saved auth for sudo autofill on the first saved connection", async () => {

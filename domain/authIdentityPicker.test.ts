@@ -1,8 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { listPasswordAuthIdentities } from "./authIdentityPicker.ts";
+import { listPasswordAuthIdentities, resolvePasswordAuthSftpHost } from "./authIdentityPicker.ts";
 import type { Identity } from "./models.ts";
+import type { Host } from "./models.ts";
 
 const passwordIdentity = (overrides: Partial<Identity> = {}): Identity => ({
   id: "id-1",
@@ -37,4 +38,21 @@ test("keeps only password identities with a usable stored password", () => {
 test("tolerates missing identity lists", () => {
   assert.deepEqual(listPasswordAuthIdentities(undefined), []);
   assert.deepEqual(listPasswordAuthIdentities([]), []);
+});
+
+test("temporary deploy identity carries into SFTP without changing the saved host", () => {
+  const host = { id: "host-1", hostname: "example.test", username: "root", identityId: "root-id" } as Host;
+  const identities = [
+    passwordIdentity({ id: "root-id", password: "bad-root" }),
+    passwordIdentity({ id: "deploy-id", username: "deploy", password: "good-deploy" }),
+  ];
+  const auth = { authMethod: "password", username: "deploy", password: "good-deploy", savedToHost: false };
+  assert.deepEqual(resolvePasswordAuthSftpHost(host, identities, auth), {
+    ...host, username: "deploy", identityId: "deploy-id",
+  });
+  assert.equal(host.username, "root");
+  assert.equal(host.identityId, "root-id");
+  assert.equal(resolvePasswordAuthSftpHost(host, identities, { ...auth, password: "manual" }), host);
+  assert.equal(resolvePasswordAuthSftpHost(host, identities, { ...auth, savedToHost: true }), host);
+  assert.equal(resolvePasswordAuthSftpHost(host, identities, null), host);
 });
