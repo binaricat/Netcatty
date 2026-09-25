@@ -1520,6 +1520,15 @@ export const useSftpTransfers = ({
       const unfinishedParents = new Set(
         prev.filter((t) => !["completed", "cancelled", "failed"].includes(t.status)).map((t) => t.id),
       );
+      // Cleared rows can no longer be retried, so their retained
+      // quick-download publication callbacks are unreachable state (Codex P2
+      // on PR #3516).
+      for (const t of prev) {
+        if (t.parentTaskId && unfinishedParents.has(t.parentTaskId)) continue;
+        if (t.status === "completed" || t.status === "cancelled") {
+          publicationHandlersRef.current.delete(t.id);
+        }
+      }
       // Keep non-compacted terminal exceptions of unfinished directory parents;
       // compacted completions already live in the bounded parent checkpoint.
       return prev.filter((t) => {
