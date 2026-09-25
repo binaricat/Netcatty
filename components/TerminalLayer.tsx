@@ -464,7 +464,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   const { resolveDefaultLayoutForSession, saveWorkspaceLayoutAsDefault: persistWorkspaceLayoutAsDefault } =
     useWorkspaceLayoutPresetState();
 
-  const applyWorkspaceLayoutPresetForSession = useCallback((session: TerminalSession, tabId: string) => {
+  const applyWorkspaceLayoutPresetForSession = useCallback((session: TerminalSession, tabId: string, sftpHostOverride?: Host) => {
     // Preset persistence and resolution live in the application layer; the
     // component only mounts the resolved panes into its UI state.
     const resolved = resolveDefaultLayoutForSession(session);
@@ -497,6 +497,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
         sftpOpeningTabIdsRef.current.add(tabId);
         sftpRetainedAfterCloseTabIdsRef.current.delete(tabId);
         sftpPaneClosedTabIdsRef.current.delete(tabId);
+        setSftpHostSourceSessionForTab(prev => new Map(prev).set(tabId, session.id));
         const host = hostsRef.current.find(h => h.id === session.hostId);
         const hostWithOverrides: Host = host
           ? {
@@ -516,7 +517,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
           } as Host;
         setSftpHostForTab(prev => {
           const next = new Map(prev);
-          next.set(tabId, hostWithOverrides);
+          next.set(tabId, sftpHostOverride ?? hostWithOverrides);
           return next;
         });
       }
@@ -604,7 +605,11 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     // saved default that may omit file transfer — only when SFTP is actually
     // available. Ordinary auto-open still yields to the saved default.
     if (targetPanel !== "sftp") {
-      if (applyWorkspaceLayoutPresetForSession(presetSession, tabId)) return;
+      if (applyWorkspaceLayoutPresetForSession(
+        presetSession,
+        tabId,
+        presetSession.id === sessionId ? sftpHostOverride : undefined,
+      )) return;
       if (!targetPanel) return;
     }
 
