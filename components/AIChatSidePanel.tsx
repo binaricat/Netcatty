@@ -1024,7 +1024,9 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   const agentModelPresets = useMemo(() => {
     const target = buildExternalAgentRuntimeModelTarget(currentAgentConfig);
     const runtimeEntry = runtimeAgentModelPresets[currentAgentId];
-    const runtimePresets = runtimeEntry?.cacheKey === target?.cacheKey ? runtimeEntry.models : undefined;
+    const runtimePresets = runtimeEntry && target && runtimeEntry.cacheKey === target.cacheKey
+      ? runtimeEntry.models
+      : undefined;
     if (hasCodexCustomConfig && codexConfigModel) {
       return [{ id: codexConfigModel, name: codexConfigModel }];
     }
@@ -1733,7 +1735,8 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         canSendCurrentAgent={canSendCurrentAgent}
         providerDisplayName={providerDisplayName}
         modelDisplayName={modelDisplayName}
-        modelCatalogWarning={runtimeModelWarnings[currentAgentId]?.cacheKey === buildExternalAgentRuntimeModelTarget(currentAgentConfig)?.cacheKey
+        modelCatalogWarning={runtimeModelWarnings[currentAgentId]
+          && runtimeModelWarnings[currentAgentId].cacheKey === buildExternalAgentRuntimeModelTarget(currentAgentConfig)?.cacheKey
           ? runtimeModelWarnings[currentAgentId].message
           : undefined}
         agentModelPresets={agentModelPresets}
