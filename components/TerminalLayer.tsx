@@ -26,6 +26,7 @@ import { detectLocalOs } from '../lib/localShell';
 import { useStoredString } from '../application/state/useStoredString';
 import { useStoredNumber } from '../application/state/useStoredNumber';
 import { useStoredBoolean } from '../application/state/useStoredBoolean';
+import { STORAGE_KEY_TERMINAL_BROADCAST_PASSWORD_BYPASS } from '../infrastructure/config/storageKeys';
 import {
   STORAGE_KEY_SIDE_PANEL_WIDTH,
   STORAGE_KEY_TERMINAL_COMPOSE_BAR_OPEN,
@@ -710,6 +711,14 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     STORAGE_KEY_TERMINAL_COMPOSE_BAR_OPEN,
     false,
   );
+  // Opt-in "broadcast without password protection" (#3488): when enabled, the
+  // fail-closed password-prompt heuristic no longer pauses workspace broadcast.
+  const [broadcastPasswordBypass] = useStoredBoolean(
+    STORAGE_KEY_TERMINAL_BROADCAST_PASSWORD_BYPASS,
+    false,
+  );
+  const broadcastPasswordBypassRef = useRef(broadcastPasswordBypass);
+  broadcastPasswordBypassRef.current = broadcastPasswordBypass;
   const sessionsRef = useRef(sessions);
   sessionsRef.current = sessions;
   const workspacesRef = useRef(workspaces);
@@ -1183,10 +1192,13 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     options?: TerminalBroadcastInputOptions,
   ) => {
     const paced = options?.pacedBroadcast;
+    // Opt-in #3488 bypass: when enabled, sensitive-prompt targets stay in the
+    // fan-out instead of being silently dropped here.
+    const passwordBypass = broadcastPasswordBypassRef.current === true;
     if (paced && !options?.preparePacedBroadcast) {
-      if (!paced.targets || isTerminalSensitiveInputActive(sourceSessionId)) return [];
+      if (!paced.targets || (!passwordBypass && isTerminalSensitiveInputActive(sourceSessionId))) return [];
       paced.targets = paced.targets.filter(target => isTerminalBroadcastInputCurrent(target)
-        && !isTerminalSensitiveInputActive(target.sessionId));
+        && (passwordBypass || !isTerminalSensitiveInputActive(target.sessionId)));
     }
     const targetSessionIds = resolveTerminalBroadcastTargetIds({
       sessions: sessionsRef.current,
@@ -1195,7 +1207,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       directTargetSessionIds: options?.kittyKeyboardTargetSessionIds,
     }).filter(id => !paced?.targets || paced.targets.some(target => target.sessionId === id));
     if (options?.preparePacedBroadcast && paced) {
-      paced.targets = targetSessionIds.filter(id => !isTerminalSensitiveInputActive(id)).map(id => {
+      paced.targets = targetSessionIds.filter(id => passwordBypass || !isTerminalSensitiveInputActive(id)).map(id => {
         markTerminalBroadcastUserInput(id);
         terminalBackend.interruptSession(id, undefined, { cancelPendingWritesOnly: true });
         return captureTerminalBroadcastInput(id);
@@ -1217,6 +1229,9 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
           beforeUrgentInterrupt: () => {
             broadcastInterruptPrioritizersRef.current.get(session.id)?.();
           },
+          // Bypassed password fan-out (#3488): the receiver forces sensitive
+          // writes so its input interceptors stay skipped for the secret.
+          ...(options?.sourceSensitive === true ? { sourceSensitive: true } : {}),
         });
         deliveredSessionIds.push(session.id);
         continue;
@@ -1239,10 +1254,15 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
         terminalBackend.interruptSession(session.id);
         continue;
       }
-      if (isTerminalSensitiveInputActive(session.id)) continue;
+      if (!passwordBypass && isTerminalSensitiveInputActive(session.id)) continue;
       terminalBackend.writeToSession(session.id, data, {
         automated: options?.automated === true,
-        sensitive: false,
+        // Retain the source-sensitive marker (bypassed password fan-out, #3488)
+        // so peer input interceptors stay skipped for the secret payload. A
+        // target that is itself awaiting a secret keeps its classification:
+        // bypassing the fan-out pause must not downgrade its own sensitive
+        // state (#3491).
+        sensitive: options?.sourceSensitive === true || isTerminalSensitiveInputActive(session.id),
         ...(lineDelayMs ? { lineDelayMs } : {}),
       });
       deliveredSessionIds.push(session.id);
@@ -2280,29 +2300,56 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     const activeWorkspace = activeWorkspaceRef.current;
     if (!activeWorkspace) return false;
     let recordHistory = false;
+    // Any recipient at a sensitive prompt turns the fan-out into a secret
+    // delivery: the payload is that peer's password/MFA input and must not be
+    // recallable from compose history, even if the focused session itself is
+    // non-sensitive.
+    let anyRecipientSensitive = false;
     const pendingSends: Promise<boolean>[] = [];
     const payload = text + '\r';
     const broadcastEnabled = isBroadcastEnabled?.(activeWorkspace.id);
     const focusedSessionId = activeWorkspace.focusedSessionId;
+    const broadcastPasswordBypass = broadcastPasswordBypassRef.current;
     const focusedSensitive = focusedSessionId
       ? isTerminalSensitiveInputActive(focusedSessionId)
       : false;
 
-    if (broadcastEnabled && !focusedSensitive) {
+    if (broadcastEnabled && (broadcastPasswordBypass || !focusedSensitive)) {
       const allSessionIds = sessionsRef.current
         .filter((session) => session.workspaceId === activeWorkspace.id)
         .map((session) => session.id);
       for (const sid of allSessionIds) {
-        if (isTerminalSensitiveInputActive(sid)) continue;
+        const recipientSensitive = isTerminalSensitiveInputActive(sid);
+        if (!broadcastPasswordBypass && recipientSensitive) continue;
+        if (recipientSensitive) anyRecipientSensitive = true;
         const executor = snippetExecutorsRef.current.get(sid);
         if (executor) {
-          pendingSends.push(Promise.resolve(executor(text, false, { broadcast: false })).then(
-            (sent) => sent && !isTerminalSensitiveInputActive(sid),
+          pendingSends.push(Promise.resolve(executor(text, false, {
+            broadcast: false,
+            // Bypassed password fan-out (#3488): the peer's executor derives
+            // sensitivity from its own prompt, so force the focused session's
+            // sensitive marker to keep input interceptors skipped on its write.
+            ...(focusedSensitive ? { sensitive: true } : {}),
+          })).then(
+            (sent) => {
+              // A lagging peer can reach its password prompt by delivery time;
+              // anything it receives there is its secret input, so mark the
+              // whole fan-out as history-ineligible.
+              if (sent && isTerminalSensitiveInputActive(sid)) anyRecipientSensitive = true;
+              return sent && (broadcastPasswordBypass || !isTerminalSensitiveInputActive(sid));
+            },
           ));
         } else {
           const session = sessionsRef.current.find((candidate) => candidate.id === sid);
           if (!session || !canUseDirectSessionWriteFallback(session)) continue;
-          terminalBackend.writeToSession(sid, payload, { sensitive: false });
+          // Keep the source-sensitive marker when the #3488 bypass let a
+          // password-prompt payload through, so interceptors stay skipped.
+          // A non-sensitive focused pane can still fan into a sensitive peer
+          // (its password/MFA input): mark the peer's write sensitive too,
+          // like the broadcast dispatcher does for its executor writes.
+          terminalBackend.writeToSession(sid, payload, {
+            sensitive: focusedSensitive || recipientSensitive,
+          });
           recordHistory = recordHistory || session.status === 'connected';
         }
       }
@@ -2330,7 +2377,13 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       }
     }
     const results = await Promise.allSettled(pendingSends);
-    return recordHistory || results.some((result) => result.status === 'fulfilled' && result.value);
+    const delivered = recordHistory || results.some((result) => result.status === 'fulfilled' && result.value);
+    // A bypassed send typed at a sensitive prompt (#3488), or delivered into
+    // any recipient's sensitive prompt, was delivered but must not be
+    // recallable from compose history via ArrowUp, so report no history
+    // eligibility for it.
+    if (focusedSensitive || anyRecipientSensitive) return false;
+    return delivered;
   }, [isBroadcastEnabled, terminalBackend]);
 
   const sessionLogConfig = useMemo(

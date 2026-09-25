@@ -82,6 +82,7 @@ export const ruTerminalMessages: Messages = {
   'terminal.composeBar.send': 'Отправить',
   'terminal.composeBar.close': 'Закрыть строку ввода',
   'terminal.composeBar.broadcasting': 'Трансляция во все сессии',
+  'terminal.composeBar.broadcastAllowPassword': 'Транслировать без защиты пароля',
   'terminal.composeBar.resize': 'Изменить высоту строки ввода',
   'terminal.composeBar.manageSnippets': 'Управление быстрыми сниппетами',
   'terminal.composeBar.searchSnippets': 'Поиск сниппетов...',

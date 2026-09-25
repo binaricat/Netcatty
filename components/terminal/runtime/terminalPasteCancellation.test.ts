@@ -44,7 +44,7 @@ for (const path of ["source", "broadcast"] as const) {
         terminalBackend, isPluginHostProtocol: () => true,
         useCallback: (fn: unknown) => fn, resolveTerminalBroadcastTargetIds: () => ["s"],
         sessionsRef: { current: [{ id: "s", protocol: "plugin:test" }] }, isGlobalBroadcastEnabled: true,
-        canUseDirectSessionWriteFallback: () => true, broadcastInterruptPrioritizersRef: { current: new Map() },
+        canUseDirectSessionWriteFallback: () => true, broadcastPasswordBypassRef: { current: false }, broadcastInterruptPrioritizersRef: { current: new Map() },
         isTerminalSensitiveInputActive: () => false,
         invoke: undefined as unknown as (data: string, source: string) => void,
       };
@@ -69,7 +69,7 @@ test("ordinary broadcast typing supersedes the recipient's paced paste", t => {
     terminalBackend: { writeToSession: (sessionId: string, data: string, options: object) => bridge.writeToSession(null, { sessionId, data, ...options }) },
     useCallback: (fn: unknown) => fn, resolveTerminalBroadcastTargetIds: () => ["s"],
     sessionsRef: { current: [{ id: "s", protocol: "ssh" }] }, isGlobalBroadcastEnabled: true,
-    canUseDirectSessionWriteFallback: () => true, isTerminalSensitiveInputActive: () => false,
+    canUseDirectSessionWriteFallback: () => true, broadcastPasswordBypassRef: { current: false }, isTerminalSensitiveInputActive: () => false,
     invoke: undefined as unknown as (data: string, source: string, options?: object) => void,
   };
   vm.runInNewContext(compile(layer.slice(broadcastStart, broadcastEnd) + "\nglobalThis.invoke = handleBroadcastInput;"), env);
@@ -103,7 +103,7 @@ for (const change of ["source-sensitive", "peer-sensitive", "peer-typing", "peer
     const env = {
       ...pacedHelpers, useCallback: (fn: unknown) => fn, resolveTerminalBroadcastTargetIds,
       sessionsRef: { current: [{ id: "source", protocol: "ssh" }, { id: "peer", protocol: "ssh" }] as Array<{ id: string; protocol: string; workspaceId?: string }> },
-      isGlobalBroadcastEnabled: true, canUseDirectSessionWriteFallback: () => true,
+      isGlobalBroadcastEnabled: true, canUseDirectSessionWriteFallback: () => true, broadcastPasswordBypassRef: { current: false },
       isTerminalSensitiveInputActive: (id: string) => sensitive.has(id),
       isPluginHostProtocol: () => false, broadcastInterruptPrioritizersRef: { current: new Map() },
       terminalBackend: {

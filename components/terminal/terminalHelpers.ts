@@ -35,6 +35,26 @@ export interface TerminalBroadcastInputOptions {
   lineDelayMs?: number;
   kittyKeyboardInput?: KittyKeyboardBroadcastInput;
   kittyKeyboardTargetSessionIds?: string[];
+  /**
+   * Source session captured the payload at a password / sensitive prompt (the
+   * #3488 bypass allowed the fan-out). Peer writes must retain that marker so
+   * input interceptors on the receiving side stay skipped.
+   */
+  sourceSensitive?: boolean;
+  /**
+   * Paste payload classified sensitive before a confirm-dialog await (#3491):
+   * the callback resolves the live prompt state itself, which the dialog can
+   * have cleared, so the saved classification rides into the broadcast and
+   * the dispatcher tags the payload sourceSensitive.
+   */
+  sensitive?: boolean;
+  /**
+   * Observer for the sessions that actually received the payload (#3491):
+   * the solo compose bar uses it to detect a fan-out delivered into a peer's
+   * sensitive prompt (its password/MFA input) and keep that send
+   * history-ineligible.
+   */
+  onBroadcastDelivered?: (sessionIds: readonly string[]) => void;
 }
 
 export { resolveSessionTabTitle };

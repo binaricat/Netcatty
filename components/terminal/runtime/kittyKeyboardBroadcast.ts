@@ -38,6 +38,12 @@ export type KittyKeyboardBroadcastInput =
 
 type KittyKeyboardBroadcastDispatchOptions = {
   beforeUrgentInterrupt?: () => void;
+  /**
+   * The source session dispatched this input from an active password /
+   * sensitive prompt under the #3488 bypass. The receiving peer must keep the
+   * sensitive marker on its own writes so input interceptors stay skipped.
+   */
+  sourceSensitive?: boolean;
 };
 
 type KittyKeyboardBroadcastHandler = (
@@ -59,12 +65,15 @@ export const createKittyKeyboardBroadcastForwarder = (options: {
   isHandlingBroadcast: () => boolean;
   isBroadcastEnabled: () => boolean;
   isSensitiveInput?: () => boolean;
+  /** True while the source session sits at an active password / sensitive prompt. */
+  isSensitivePromptSource?: () => boolean;
   getDispatcher: () => ((
     data: string,
     sourceSessionId: string,
     options: {
       kittyKeyboardInput: KittyKeyboardBroadcastInput;
       kittyKeyboardTargetSessionIds?: string[];
+      sourceSensitive?: boolean;
     },
   ) => string[] | void) | null | undefined;
 }) => {
@@ -73,6 +82,13 @@ export const createKittyKeyboardBroadcastForwarder = (options: {
     input: KittyKeyboardBroadcastInput,
     forcePairedRelease = false,
     targetSessionIds?: string[],
+    /**
+     * Source-prompt sensitivity snapshotted before the source's own local
+     * write (#3491): a submitting key such as Enter clears the live prompt
+     * flag before this dispatch runs, so the live check alone would report
+     * the payload as nonsensitive.
+     */
+    dispatchOptions?: { sourceSensitive?: boolean },
   ): { targetSessionIds: string[] } | null => {
     const currentDispatcher = options.getDispatcher();
     if (currentDispatcher) lastDispatcher = currentDispatcher;
@@ -83,8 +99,15 @@ export const createKittyKeyboardBroadcastForwarder = (options: {
       (!forcePairedRelease && !options.isBroadcastEnabled()) ||
       !dispatcher
     ) return null;
+    // Bypassed password fan-out (#3488): tag the dispatch so peer writes keep
+    // input interceptors skipped for the secret keystrokes. A pre-write
+    // snapshot wins (#3491): the local submission may have already cleared
+    // the live prompt flag by the time this dispatch runs.
+    const sourceSensitive = dispatchOptions?.sourceSensitive === true
+      || options.isSensitivePromptSource?.() === true;
     const deliveredSessionIds = dispatcher("", options.sourceSessionId, {
       kittyKeyboardInput: input,
+      ...(sourceSensitive ? { sourceSensitive: true } : {}),
       ...(targetSessionIds ? { kittyKeyboardTargetSessionIds: targetSessionIds } : {}),
     });
     return { targetSessionIds: deliveredSessionIds ?? targetSessionIds ?? [] };
@@ -379,9 +402,17 @@ export const createKittyKeyboardBroadcastHandler = (options: {
   isConnected: () => boolean;
   isRuntimeDisposed: () => boolean;
   interruptSession?: (sessionId: string) => void;
-  writeDisposed: (sessionId: string, data: string) => void;
-  writeActive: (data: string, logicalData?: string | null) => void;
-  writeWin32Event?: (event: KittyKeyboardEvent, logicalData: string | null) => void;
+  writeDisposed: (sessionId: string, data: string, writeOptions?: { sensitive?: boolean }) => void;
+  writeActive: (
+    data: string,
+    logicalData?: string | null,
+    writeOptions?: { sensitive?: boolean },
+  ) => void;
+  writeWin32Event?: (
+    event: KittyKeyboardEvent,
+    logicalData: string | null,
+    writeOptions?: { sensitive?: boolean },
+  ) => void;
 }): KittyKeyboardBroadcastHandler => (input, dispatchOptions) => {
   const sessionId = options.getSessionId();
   if (!sessionId || !options.isConnected()) return;
@@ -396,20 +427,34 @@ export const createKittyKeyboardBroadcastHandler = (options: {
     options.interruptSession(sessionId);
     return;
   }
+  // The source dispatched from a bypassed password prompt: keep the sensitive
+  // marker on the peer write even when this peer's own prompt is not (yet)
+  // classified sensitive, so input interceptors stay skipped for the secret.
+  // Computed before the Win32 branch so its write stays sensitive too.
+  const forceSensitiveWrite = dispatchOptions?.sourceSensitive === true;
   if (resolved.win32Event) {
     if (!options.isRuntimeDisposed()) {
       options.writeWin32Event?.(
         resolved.win32Event,
         resolved.logicalData ?? null,
+        forceSensitiveWrite ? { sensitive: true } : undefined,
       );
     }
     return;
   }
   if (options.isRuntimeDisposed()) {
-    options.writeDisposed(sessionId, resolved.data);
+    options.writeDisposed(
+      sessionId,
+      resolved.data,
+      forceSensitiveWrite ? { sensitive: true } : undefined,
+    );
     return;
   }
-  options.writeActive(resolved.data, resolved.logicalData);
+  options.writeActive(
+    resolved.data,
+    resolved.logicalData,
+    forceSensitiveWrite ? { sensitive: true } : undefined,
+  );
 };
 
 const handlers = new Map<string, KittyKeyboardBroadcastHandler>();

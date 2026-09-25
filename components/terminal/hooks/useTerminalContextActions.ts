@@ -22,6 +22,7 @@ import {
 } from "../runtime/terminalHistoryScrollOverride";
 
 import { readTerminalScreenText } from "../terminalContextBuffer";
+import { shouldBroadcastDuringSensitivePrompt } from "../../../domain/terminalBroadcast";
 import { useI18n } from "../../../application/i18n/I18nProvider";
 import { toast } from "../../ui/toast";
 
@@ -33,6 +34,7 @@ type BroadcastPasteRefs = {
     ((data: string, sourceSessionId: string, options?: TerminalBroadcastInputOptions) => void) | undefined
   >;
   passwordPromptActiveRef?: RefObject<boolean | undefined>;
+  broadcastPasswordBypassRef?: RefObject<boolean | undefined>;
 };
 
 export const broadcastTerminalPasteData = (
@@ -43,16 +45,31 @@ export const broadcastTerminalPasteData = (
     isBroadcastEnabledRef,
     onBroadcastInputRef,
     passwordPromptActiveRef,
+    broadcastPasswordBypassRef,
   }: BroadcastPasteRefs,
   options?: TerminalBroadcastInputOptions,
 ): boolean => {
   if (
-    passwordPromptActiveRef?.current !== true
+    shouldBroadcastDuringSensitivePrompt({
+      sensitivePromptActive: passwordPromptActiveRef?.current === true,
+      broadcastPasswordBypass: broadcastPasswordBypassRef?.current === true,
+    })
     && sessionRef.current
     && isBroadcastEnabledRef?.current
     && onBroadcastInputRef?.current
   ) {
-    onBroadcastInputRef.current(data, sourceSessionId, options);
+    // Bypassed password fan-out (#3488): when the prompt itself is sensitive,
+    // tag the payload so peer writes keep input interceptors skipped. A paste
+    // confirmed at a sensitive prompt keeps its pre-dialog snapshot (#3491),
+    // so its carried sensitivity tags the fan-out even when the dialog await
+    // cleared the live prompt ref.
+    const dispatchingFromPasswordPrompt = passwordPromptActiveRef?.current === true;
+    const sourceSensitive = dispatchingFromPasswordPrompt || options?.sensitive === true;
+    onBroadcastInputRef.current(
+      data,
+      sourceSessionId,
+      sourceSensitive ? { ...options, sourceSensitive: true } : options,
+    );
     return true;
   }
   return false;
@@ -68,6 +85,7 @@ export const useTerminalContextActions = ({
   isBroadcastEnabledRef,
   onBroadcastInputRef,
   passwordPromptActiveRef,
+  broadcastPasswordBypassRef,
   isLocalConnection,
   supportsRemoteImagePaste,
   autoUploadClipboardImageOnPasteRef,
@@ -90,6 +108,7 @@ export const useTerminalContextActions = ({
     ((data: string, sourceSessionId: string, options?: TerminalBroadcastInputOptions) => void) | undefined
   >;
   passwordPromptActiveRef?: RefObject<boolean | undefined>;
+  broadcastPasswordBypassRef?: RefObject<boolean | undefined>;
   isLocalConnection: boolean;
   supportsRemoteImagePaste: boolean;
   /** When true, paste auto-uploads a clipboard image (remote sessions only). */
@@ -143,8 +162,9 @@ export const useTerminalContextActions = ({
       isBroadcastEnabledRef,
       onBroadcastInputRef,
       passwordPromptActiveRef,
+      broadcastPasswordBypassRef,
     }, options);
-  }, [isBroadcastEnabledRef, onBroadcastInputRef, passwordPromptActiveRef, sessionRef, sourceSessionId]);
+  }, [isBroadcastEnabledRef, onBroadcastInputRef, passwordPromptActiveRef, broadcastPasswordBypassRef, sessionRef, sourceSessionId]);
 
   const onCopy = useCallback(() => {
     const term = termRef.current;
@@ -178,6 +198,7 @@ export const useTerminalContextActions = ({
         getRemoteCwd,
         isLocalConnection,
         isSensitiveInput: () => passwordPromptActiveRef?.current === true,
+        broadcastPasswordBypass: () => broadcastPasswordBypassRef?.current === true,
         onClipboardImageUploadResult,
         readClipboardText: () => navigator.clipboard.readText(),
         scrollOnPaste: scrollOnPasteRef?.current ?? false,
@@ -192,6 +213,7 @@ export const useTerminalContextActions = ({
     }
   }, [
     autoUploadClipboardImageOnPasteRef,
+    broadcastPasswordBypassRef,
     broadcastUserPasteData,
     multilinePasteConfirmRef,
     getRemoteCwd,
@@ -256,6 +278,7 @@ export const useTerminalContextActions = ({
         : undefined,
       getCurrentSessionId: () => sessionRef.current,
       isSensitiveInput: () => passwordPromptActiveRef?.current === true,
+      broadcastPasswordBypass: () => broadcastPasswordBypassRef?.current === true,
       onPasteData: broadcastUserPasteData,
       scrollOnPaste: scrollOnPasteRef?.current ?? false,
       scrollToBottomAfterProgrammaticInput,
@@ -264,6 +287,7 @@ export const useTerminalContextActions = ({
       term,
     });
   }, [
+    broadcastPasswordBypassRef,
     broadcastUserPasteData,
     multilinePasteConfirmRef,
     normalizeTextOnCopyRef,

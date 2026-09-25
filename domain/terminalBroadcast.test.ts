@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { resolveTerminalBroadcastTargetIds } from './terminalBroadcast.ts';
+import {
+  resolveTerminalBroadcastTargetIds,
+  shouldBroadcastDuringSensitivePrompt,
+} from './terminalBroadcast.ts';
 import type { TerminalSession } from './models.ts';
 
 const session = (
@@ -87,5 +90,29 @@ test('missing or hidden global sources do not fan out', () => {
       globalBroadcastEnabled: true,
     }),
     [],
+  );
+});
+
+test('sensitive prompts pause broadcasting unless the password bypass is on', () => {
+  assert.equal(
+    shouldBroadcastDuringSensitivePrompt({
+      sensitivePromptActive: false,
+      broadcastPasswordBypass: false,
+    }),
+    true,
+  );
+  assert.equal(
+    shouldBroadcastDuringSensitivePrompt({
+      sensitivePromptActive: true,
+      broadcastPasswordBypass: false,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldBroadcastDuringSensitivePrompt({
+      sensitivePromptActive: true,
+      broadcastPasswordBypass: true,
+    }),
+    true,
   );
 });

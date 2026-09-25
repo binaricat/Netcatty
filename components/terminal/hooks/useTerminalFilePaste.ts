@@ -20,7 +20,9 @@ interface UseTerminalFilePasteOptions {
   };
   isSensitiveInput?: () => boolean;
   scrollOnPasteRef?: React.RefObject<boolean>;
-  onPasteData?: (data: string, options?: { lineDelayMs?: number }) => boolean | void;
+  /** Live #3488 bypass probe; forwarded to the multiline-confirm gate. */
+  broadcastPasswordBypassRef?: React.RefObject<boolean | undefined>;
+  onPasteData?: (data: string, options?: { lineDelayMs?: number; sensitive?: boolean }) => boolean | void;
   scrollToBottomAfterProgrammaticInput: (data: string) => void;
   containerRef: React.RefObject<HTMLDivElement | null>;
   /** Remote sessions only: auto-upload a clipboard image on paste. */
@@ -39,6 +41,7 @@ export function useTerminalFilePaste({
   terminalBackend,
   isSensitiveInput,
   scrollOnPasteRef,
+  broadcastPasswordBypassRef,
   onPasteData,
   scrollToBottomAfterProgrammaticInput,
   containerRef,
@@ -100,6 +103,10 @@ export function useTerminalFilePaste({
             getRemoteCwd,
             isLocalConnection,
             isSensitiveInput,
+            // Forward the #3488 bypass probe so a paste confirmed at a
+            // sensitive prompt still fans out to broadcast peers, matching
+            // the context-menu and shortcut paste paths.
+            broadcastPasswordBypass: () => broadcastPasswordBypassRef?.current === true,
             onClipboardImageUploadResult,
             readClipboardText: async () => {
               if (eventText) return eventText;

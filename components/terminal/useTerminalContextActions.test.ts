@@ -90,3 +90,24 @@ test("terminal context paste never broadcasts password-prompt input", () => {
 
   assert.equal(didBroadcast, false);
 });
+
+test("bypassed context paste at a password prompt is marked sourceSensitive (#3488)", () => {
+  const broadcasted: Array<{ options?: { sourceSensitive?: boolean } }> = [];
+  const didBroadcast = broadcastTerminalPasteData("secret", {
+    sourceSessionId: "workspace-session-1",
+    sessionRef: { current: "session-1" },
+    isBroadcastEnabledRef: { current: true },
+    passwordPromptActiveRef: { current: true },
+    broadcastPasswordBypassRef: { current: true },
+    onBroadcastInputRef: {
+      current: (_data, _sourceSessionId, options) => {
+        broadcasted.push({ options });
+      },
+    },
+  }, { lineDelayMs: 250 });
+
+  assert.equal(didBroadcast, true);
+  assert.deepEqual(broadcasted, [
+    { options: { lineDelayMs: 250, sourceSensitive: true } },
+  ]);
+});

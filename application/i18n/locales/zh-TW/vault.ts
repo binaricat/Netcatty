@@ -466,6 +466,7 @@ export const zhTWVaultMessages: Messages = {
   'terminal.composeBar.send': '傳送',
   'terminal.composeBar.close': '關閉撰寫欄',
   'terminal.composeBar.broadcasting': '正在廣播到所有工作階段',
+  'terminal.composeBar.broadcastAllowPassword': '廣播時不對密碼進行保護',
   'terminal.composeBar.resize': '拖曳調整撰寫欄高度',
   'terminal.composeBar.manageSnippets': '管理快捷程式碼片段',
   'terminal.composeBar.searchSnippets': '搜尋程式碼片段...',

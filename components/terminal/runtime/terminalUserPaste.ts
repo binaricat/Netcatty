@@ -11,7 +11,7 @@ type PasteTarget = Pick<XTerm, "paste" | "scrollToBottom"> &
 type PasteOptions = {
   scrollOnPaste?: boolean;
   requestAnimationFrame?: (callback: () => void) => unknown;
-  onPasteData?: (data: string) => boolean | void;
+  onPasteData?: (data: string, options?: { sensitive?: boolean }) => boolean | void;
   /**
    * Pre-computed sensitivity for this paste. When true, the terminal input
    * handler must treat the pasted bytes as sensitive even if its live
@@ -342,7 +342,13 @@ export function pasteTextIntoTerminal(
 
   if (options.onPasteData) {
     const pasteData = getPasteInputData(term, text);
-    const didBroadcast = options.onPasteData(pasteData) === true;
+    // Forward the pre-dialog sensitivity snapshot (#3491): the broadcast
+    // callback re-reads the live password-prompt ref, which the confirm
+    // dialog await may have cleared, so the saved classification must ride
+    // along to keep the peer fan-out tagged sourceSensitive.
+    const didBroadcast = options.onPasteData(pasteData, {
+      sensitive: options.sensitive === true,
+    }) === true;
     if (didBroadcast) {
       pasteBroadcastStates.set(term, {
         expiresAt: getNow() + PASTE_INPUT_SCROLL_WINDOW_MS,

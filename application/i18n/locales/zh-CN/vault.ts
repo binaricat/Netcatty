@@ -466,6 +466,7 @@ export const zhCNVaultMessages: Messages = {
   'terminal.composeBar.send': '发送',
   'terminal.composeBar.close': '关闭撰写栏',
   'terminal.composeBar.broadcasting': '正在广播到所有会话',
+  'terminal.composeBar.broadcastAllowPassword': '广播时不对密码进行保护',
   'terminal.composeBar.resize': '拖拽调整撰写栏高度',
   'terminal.composeBar.manageSnippets': '管理快捷代码片段',
   'terminal.composeBar.searchSnippets': '搜索代码片段...',

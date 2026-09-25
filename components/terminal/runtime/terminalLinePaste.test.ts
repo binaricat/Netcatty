@@ -295,3 +295,80 @@ for (const [protocol, lineMode, sensitive] of [
   });
   }
 }
+
+test("bypassed sensitive line paste keeps the paced fan-out with sourceSensitive tagging (#3488)", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const wire: string[] = [];
+  const broadcast: Array<{ data: string; options?: { sourceSensitive?: boolean } }> = [];
+  const writes: Array<{ data: string; sensitive?: boolean; lineDelayMs?: number; automated?: boolean }> = [];
+  let receiptListener: ((event: unknown) => void) | undefined;
+  const session = { socket: { write: (data: string) => wire.push(String(data)) } };
+  bridge.init({
+    sessions: new Map([["serial-1", session]]),
+    electronModule: { webContents: { fromId: () => ({ send(channel: string, event: unknown) {
+      if (channel === "netcatty:paste-write") receiptListener?.(event);
+    } }) } },
+  });
+  const ctx = {
+    host: { protocol: "telnet", id: "h", label: "h" }, sessionId: "tab-1",
+    sessionRef: { current: "serial-1" }, statusRef: { current: "connected" },
+    commandBufferRef: { current: "" }, serialLineBufferRef: { current: "" },
+    serialLineMode: false, serialLocalEcho: false, telnetLocalEchoRef: { current: false },
+    passwordPromptActiveRef: { current: true },
+    broadcastPasswordBypassRef: { current: true },
+    onCommandSubmitted: () => {}, onCommandExecuted: () => {},
+    onAutocompleteInput: () => {},
+    onOutputTriggerUserInputRef: { current: () => {} },
+    scriptRecorderRef: { current: { isRecording: false } },
+    isBroadcastEnabledRef: { current: true },
+    onBroadcastInputRef: { current: (data: string, _id: string, options?: { sourceSensitive?: boolean; preparePacedBroadcast?: boolean }) => {
+      if (!options?.preparePacedBroadcast) broadcast.push({ data, options });
+    } },
+    terminalBackend: {
+      notifyUserInput() {},
+      interruptSession(_id: string, _trace?: unknown, options?: { cancelPendingWritesOnly?: boolean }) {
+        bridge.interruptSession({}, { sessionId: "serial-1", ...options });
+      },
+      writeToSession(sessionId: string, data: string, options?: { sensitive?: boolean; lineDelayMs?: number; automated?: boolean }) {
+        writes.push({ data, ...options });
+        bridge.writeToSession({}, { sessionId, data, ...options });
+      },
+    },
+  };
+  const term = {
+    paste: () => assert.fail("paced paste must not gain bracketed-paste markers"),
+    scrollToBottom() {}, cols: 80,
+    buffer: { active: { cursorX: 0, cursorY: 0, baseY: 0, getLine: () => undefined } },
+  };
+  const env = {
+    ...Object.assign({}, ...helpers), ...userPaste, ctx, term, crypto, isPluginHostProtocol: () => false, logger: { warn() {} },
+    netcattyBridge: { get: () => ({ onTerminalPasteWrite: (listener: typeof receiptListener) => { receiptListener = listener; return () => { receiptListener = undefined; }; } }) },
+    suppressNextTerminalDataBroadcast: false, handlingKittyBroadcast: false,
+    prioritizeTerminalInput() {}, getFlowControllerForTerm: () => null,
+    scrollToBottomAfterInput() {}, writeLocalTerminalData: () => {},
+    api: undefined as unknown as { urgent: () => void; input: (data: string) => void; dispose: () => void },
+  };
+  vm.runInNewContext(code, env);
+  t.after(() => env.api.dispose());
+  await pasteTextWithMultilineConfirm("version\nshow clock", {
+    term, sessionId: "serial-1", terminalBackend: ctx.terminalBackend,
+    getCurrentSessionId: () => ctx.sessionRef.current,
+    isSensitiveInput: () => ctx.passwordPromptActiveRef.current,
+    broadcastPasswordBypass: () => ctx.broadcastPasswordBypassRef?.current === true,
+    confirmMultilinePaste: {
+      enabled: true, minLines: 2,
+      requestConfirm: async () => ({ action: "line-by-line" }),
+    },
+    onPasteData: () => assert.fail("paced broadcast must use actual write receipts"),
+  });
+  assert.equal(writes[0]?.sensitive, true);
+  assert.equal(writes[0]?.automated, false);
+  assert.equal(writes[0]?.lineDelayMs, 250);
+  t.mock.timers.tick(1000);
+  await new Promise(resolve => setImmediate(resolve));
+  // The bypassed fan-out stays alive at the sensitive prompt, and each line
+  // keeps the source-sensitive marker so peer writes skip interceptors.
+  assert.deepEqual(broadcast.map((entry) => entry.data), ["version\r", "show clock\r"]);
+  for (const entry of broadcast) assert.equal(entry.options?.sourceSensitive, true);
+  env.api.dispose();
+});
