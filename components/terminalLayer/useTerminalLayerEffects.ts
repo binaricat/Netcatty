@@ -13,6 +13,7 @@ import {
   resolveSftpTransferNavigationTarget,
 } from '../../domain/sftpTransferNavigation';
 import { collectSidePanelPanes, sidePanelLayoutHasTool } from '../../domain/sidePanelLayout';
+import { isSameSftpHostSelection } from '../../domain/sftpTerminalIdentity';
 import { collectSessionIds } from '../../domain/workspace';
 import {
   moveSidePanelTabMap,
@@ -484,10 +485,7 @@ export function useTerminalLayerEffects(ctx: TerminalLayerEffectsContext) {
       if (!activeTabId || !sftpActiveHost) return;
       if (!sidePanelLayoutHasTool(activeSidePanelLayout, 'sftp')) return;
       const stored = sftpHostForTab.get(activeTabId);
-      if (stored?.id === sftpActiveHost.id
-        && stored?.hostname === sftpActiveHost.hostname
-        && stored?.port === sftpActiveHost.port
-        && stored?.protocol === sftpActiveHost.protocol) return;
+      if (isSameSftpHostSelection(stored, sftpActiveHost)) return;
       setSftpHostForTab(prev => {
         const next = new Map(prev);
         next.set(activeTabId, sftpActiveHost);

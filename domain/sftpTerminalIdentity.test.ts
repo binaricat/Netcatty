@@ -1,11 +1,22 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { Host } from "./models.ts";
-import { resolveTerminalSftpHost } from "./sftpTerminalIdentity.ts";
+import { isSameSftpHostSelection, resolveTerminalSftpHost } from "./sftpTerminalIdentity.ts";
 
 const host = (id: string, username: string): Host => ({
   id, label: id, hostname: `${id}.example.test`, port: 22, username,
   tags: [], os: "linux",
+});
+
+test("SFTP target changes when a focused session uses another saved identity", () => {
+  const root = host("shared", "root");
+  const deploy = { ...root, username: "deploy", identityId: "deploy-id" };
+  const alternateDeploy = { ...deploy, identityId: "alternate-deploy-id" };
+
+  assert.equal(isSameSftpHostSelection(root, deploy), false);
+  assert.equal(isSameSftpHostSelection(deploy, alternateDeploy), false);
+  assert.equal(isSameSftpHostSelection(deploy, { ...deploy }), true);
+  assert.equal(isSameSftpHostSelection(deploy, { ...deploy, port: 2222 }), false);
 });
 
 test("SFTP follows each focused terminal's authenticated identity across focus changes", () => {

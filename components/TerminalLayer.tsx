@@ -20,6 +20,7 @@ import {
 } from '../application/state/codingCliSessionSignalController';
 import { collectSessionIds } from '../domain/workspace';
 import { isPluginHostProtocol } from '../domain/pluginConnection';
+import { isSameSftpHostSelection } from '../domain/sftpTerminalIdentity';
 
 import { cn, normalizeLineEndings } from '../lib/utils';
 import { detectLocalOs } from '../lib/localShell';
@@ -1031,14 +1032,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     // Compare full endpoint identity so that session-time overrides
     // (different port/protocol for the same host ID) trigger a switch
     // instead of toggling the panel closed.
-    const isSameEndpoint = currentHost
-      && currentHost.id === host.id
-      && currentHost.hostname === host.hostname
-      && currentHost.port === host.port
-      && currentHost.protocol === host.protocol
-      && currentHost.username === host.username
-      && currentHost.sftpSudo === host.sftpSudo
-      && (currentHost.sftpFileProtocol || "auto") === (host.sftpFileProtocol || "auto");
+    const isSameEndpoint = isSameSftpHostSelection(currentHost, host);
 
     const currentLayout = sidePanelLayoutsRef.current.get(tabId);
     const paneCount = currentLayout
