@@ -174,9 +174,9 @@ export const SftpViewMount: React.FC<SftpViewProps> = (props) => {
   return (
     <div
       className="absolute inset-0"
-      // Keep the offset SFTP view below the vault rail so the rail's resize
-      // handle (which protrudes into the SFTP area) stays interactive.
-      style={{ left: railOffset, zIndex: railOffset > 0 ? 0 : undefined }}
+      // The inactive terminal layer remains painted at z=0. Place SFTP above
+      // it, while the vault rail at z=20 keeps its resize handle interactive.
+      style={{ left: railOffset, zIndex: railOffset > 0 ? 10 : undefined }}
     >
       <LazyLoadBoundary name="SFTP" resetKey={isActive ? "active" : "idle"}>
         <Suspense fallback={<SftpViewFallback visible={isActive} />}>
