@@ -65,6 +65,29 @@ test("verified remembered download retains its backup after publication", async 
   assert.equal(fs.readFileSync(path.join(root, backupName), "utf8"), "original");
 });
 
+test("repeated remembered downloads supersede the previous backup", async (t) => {
+  const root = fs.mkdtempSync(`${temp.getTempFilePath("remembered-rolling-backup")}-`);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const staged = path.join(root, "staged");
+  const target = path.join(root, "target");
+  fs.writeFileSync(staged, "second");
+  fs.writeFileSync(target, "first");
+  await bridge._promoteLocalTransferForTests(staged, target, {
+    requestedTargetPath: target,
+    expectedLocalTarget: rememberedExpectation(root, target),
+  });
+  // The renderer re-remembers the published target before the next repeat.
+  fs.writeFileSync(staged, "third");
+  await bridge._promoteLocalTransferForTests(staged, target, {
+    requestedTargetPath: target,
+    expectedLocalTarget: rememberedExpectation(root, target),
+  });
+  assert.equal(fs.readFileSync(target, "utf8"), "third");
+  const backups = fs.readdirSync(root).filter((name) => name.endsWith(".backup"));
+  assert.equal(backups.length, 1, "roll over to a single managed recovery copy");
+  assert.equal(fs.readFileSync(path.join(root, backups[0]), "utf8"), "second");
+});
+
 test("published file edited with restored mtime is never remembered", async (t) => {
   const root = fs.mkdtempSync(`${temp.getTempFilePath("published-restored-mtime")}-`);
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));

@@ -1088,7 +1088,13 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
   const token = crypto.randomUUID().replace(/-/g, "");
   const base = path.join(path.dirname(targetPath), `.${path.basename(targetPath)}.netcatty-${token}`);
   const readyPath = `${base}.ready`;
-  const backupPath = `${base}.backup`;
+  // A remembered replacement retains its verified backup after publication.
+  // Using one fixed backup name makes each repeat supersede the previous
+  // recovery copy instead of accumulating an unbounded series of full-size
+  // hidden backups beside the destination (Codex P1 on PR #3516).
+  const backupPath = options.expectedLocalTarget
+    ? path.join(path.dirname(targetPath), `.${path.basename(targetPath)}.netcatty.backup`)
+    : `${base}.backup`;
   const restoreProbePath = `${base}.restore-check`;
   let backedUp = false;
   let committed = false;
