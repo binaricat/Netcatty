@@ -1043,6 +1043,7 @@ async function assertExpectedLocalDownloadTarget(requestedPath, expected, inspec
   const validTimestamp = (value) => typeof value === "string" && /^[1-9]\d*$/.test(value);
   if (!validIdentity(expected.targetIdentity) || !validIdentity(expected.parentIdentity)
     || !validTimestamp(expected.targetBirthtimeNs) || !validTimestamp(expected.targetCtimeNs)
+    || !validTimestamp(expected.targetMtimeNs)
     || !validTimestamp(expected.parentBirthtimeNs)
     || typeof expected.parentRealPath !== "string" || !expected.parentRealPath) {
     throw new Error("Invalid remembered local download target identity");
@@ -1060,7 +1061,8 @@ async function assertExpectedLocalDownloadTarget(requestedPath, expected, inspec
     || String(parentStat.birthtimeNs) !== expected.parentBirthtimeNs
     || targetIdentity !== expected.targetIdentity
     || target.birthtimeNs !== expected.targetBirthtimeNs
-    || target.ctimeNs !== expected.targetCtimeNs) {
+    || target.ctimeNs !== expected.targetCtimeNs
+    || target.mtimeNs !== expected.targetMtimeNs) {
     throw new Error("Remembered local download target changed before replacement");
   }
 }
@@ -1153,9 +1155,13 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
         if (error?.code !== "ENOENT") throw error;
       }
     }
-    if (backedUp && expectedIdentity) {
+    if (backedUp && (expectedIdentity || options.expectedLocalTarget)) {
       const stat = await fs.promises.lstat(backupPath, { bigint: true });
-      if (!stat.isFile() || stableLocalFileIdentity(stat) !== expectedIdentity) {
+      if (!stat.isFile() || (expectedIdentity && stableLocalFileIdentity(stat) !== expectedIdentity)
+        || (options.expectedLocalTarget
+          && (`${stat.dev}:${stat.ino}` !== options.expectedLocalTarget.targetIdentity
+            || String(stat.birthtimeNs) !== options.expectedLocalTarget.targetBirthtimeNs
+            || String(stat.mtimeNs) !== options.expectedLocalTarget.targetMtimeNs))) {
         throw new Error("Local download target changed during replacement");
       }
     }
@@ -1175,10 +1181,22 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
     committed = true;
     // Hand the published inode identity to the caller for descriptor-based
     // metadata stamping after publication.
-    options.onCommit?.(publishedIdentity, localMtimePrepared);
     if (backedUp) await fs.promises.unlink(backupPath).catch(() => {});
     await fs.promises.unlink(readyPath).catch(() => {});
     await fs.promises.unlink(stagedPath).catch(() => {});
+    // Removing the prepared hardlink advances ctime on the published inode.
+    // Capture the final metadata only after cleanup, and refuse to remember
+    // an inode whose bytes or name changed after publication.
+    if (publishedIdentity) {
+      const stat = await fs.promises.lstat(targetPath, { bigint: true }).catch(() => null);
+      publishedIdentity = stat?.isFile()
+        && stableLocalFileIdentity(stat) === stableLocalFileIdentity(publishedIdentity)
+        && String(stat.birthtimeNs) === publishedIdentity.birthtimeNs
+        && String(stat.mtimeNs) === publishedIdentity.mtimeNs
+        ? { ...publishedIdentity, ctimeNs: String(stat.ctimeNs) }
+        : null;
+    }
+    options.onCommit?.(publishedIdentity, localMtimePrepared);
   } catch (error) {
     if (committed) throw error;
     if (backedUp && !keepRecoveryFiles) {
@@ -1407,6 +1425,7 @@ async function inspectLocalPromotionTarget(targetPath) {
       stableIdentity: stableLocalFileIdentity(targetLstat),
       birthtimeNs: String(targetLstat.birthtimeNs),
       ctimeNs: String(targetLstat.ctimeNs),
+      mtimeNs: String(targetLstat.mtimeNs),
       targetIdentity: [
         targetLstat.dev,
         targetLstat.ino,

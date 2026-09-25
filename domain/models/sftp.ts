@@ -55,6 +55,7 @@ export interface LocalDownloadTargetExpectation {
   targetIdentity: string;
   targetBirthtimeNs: string;
   targetCtimeNs: string;
+  targetMtimeNs: string;
 }
 
 /** Identity of the file actually published by a completed local download. */
@@ -62,6 +63,8 @@ export interface LocalPublishedFileIdentity {
   dev: string;
   ino: string;
   birthtimeNs: string;
+  ctimeNs: string;
+  mtimeNs: string;
 }
 
 export interface DirectoryResumeCheckpoint {

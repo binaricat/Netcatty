@@ -341,6 +341,7 @@ async function statLocal(event, payload) {
       dev: String(stat.dev), ino: String(stat.ino),
       birthtimeNs: stat.birthtimeNs > 0n ? String(stat.birthtimeNs) : undefined,
       ctimeNs: stat.ctimeNs > 0n ? String(stat.ctimeNs) : undefined,
+      mtimeNs: stat.mtimeNs > 0n ? String(stat.mtimeNs) : undefined,
     }),
   };
 }
@@ -362,6 +363,7 @@ async function lstatLocal(event, payload) {
       dev: String(stat.dev), ino: String(stat.ino),
       birthtimeNs: stat.birthtimeNs > 0n ? String(stat.birthtimeNs) : undefined,
       ctimeNs: stat.ctimeNs > 0n ? String(stat.ctimeNs) : undefined,
+      mtimeNs: stat.mtimeNs > 0n ? String(stat.mtimeNs) : undefined,
     }),
   };
 }

@@ -16,6 +16,7 @@ function rememberedExpectation(parent, target) {
     targetIdentity: `${targetStat.dev}:${targetStat.ino}`,
     targetBirthtimeNs: String(targetStat.birthtimeNs),
     targetCtimeNs: String(targetStat.ctimeNs),
+    targetMtimeNs: String(targetStat.mtimeNs),
   };
 }
 
@@ -37,7 +38,36 @@ test("remembered download replaces the same verified local file", async (t) => {
   assert.deepEqual(publishedIdentity, {
     dev: String(publishedStat.dev), ino: String(publishedStat.ino),
     size: Number(publishedStat.size), birthtimeNs: String(publishedStat.birthtimeNs),
+    ctimeNs: String(publishedStat.ctimeNs), mtimeNs: String(publishedStat.mtimeNs),
   });
+});
+
+test("remembered download preserves an in-place edit just before moving the original", async (t) => {
+  const root = fs.mkdtempSync(`${temp.getTempFilePath("remembered-inplace-race")}-`);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const staged = path.join(root, "staged");
+  const target = path.join(root, "target");
+  fs.writeFileSync(staged, "download");
+  fs.writeFileSync(target, "original");
+  const expectedLocalTarget = rememberedExpectation(root, target);
+  const rename = fs.promises.rename;
+  t.after(() => { fs.promises.rename = rename; });
+  let edited = false;
+  fs.promises.rename = async (from, to) => {
+    if (!edited && from === target && String(to).endsWith(".backup")) {
+      edited = true;
+      fs.writeFileSync(target, "modified"); // same inode and byte length
+      // Some filesystems coalesce immediate timestamp updates. Ensure this
+      // simulated external write has an observable change in file metadata.
+      fs.utimesSync(target, new Date(Date.now() + 1000), new Date(Date.now() + 1000));
+    }
+    return rename(from, to);
+  };
+  await assert.rejects(() => bridge._promoteLocalTransferForTests(staged, target, {
+    requestedTargetPath: target, expectedLocalTarget,
+  }), /Local download target changed during replacement/);
+  assert.equal(edited, true);
+  assert.equal(fs.readFileSync(target, "utf8"), "modified");
 });
 
 test("replacement keeps large file numbers exact when checking its backup", async (t) => {

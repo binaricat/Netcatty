@@ -134,11 +134,13 @@ test("remembered local target identity survives transfer persistence", () => {
       targetIdentity: "1:3",
       targetBirthtimeNs: "200",
       targetCtimeNs: "201",
+      targetMtimeNs: "202",
     },
   };
   const restored = deserializeSftpTransferCenter(serializeSftpTransferCenter([original]));
   assert.equal(restored.tasks[0]?.status, "interrupted");
   assert.deepEqual(restored.tasks[0]?.expectedLocalTarget, original.expectedLocalTarget);
+  assert.equal(restored.tasks[0]?.requireOriginalSourceForResume, true);
 });
 
 test("malformed saved target identity fails closed", () => {
@@ -148,7 +150,7 @@ test("malformed saved target identity fails closed", () => {
   }));
   assert.deepEqual(restored.tasks[0]?.expectedLocalTarget, {
     parentRealPath: "", parentIdentity: "", parentBirthtimeNs: "",
-    targetIdentity: "", targetBirthtimeNs: "", targetCtimeNs: "",
+    targetIdentity: "", targetBirthtimeNs: "", targetCtimeNs: "", targetMtimeNs: "",
   });
 });
 

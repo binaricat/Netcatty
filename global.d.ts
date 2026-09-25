@@ -195,6 +195,7 @@ declare global {
     /** Local-only nanosecond timestamps used to reject reused inode numbers. */
     birthtimeNs?: string;
     ctimeNs?: string;
+    mtimeNs?: string;
   }
 
   interface SftpTransferProgress {

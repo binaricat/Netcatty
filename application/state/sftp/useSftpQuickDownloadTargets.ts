@@ -52,15 +52,19 @@ export function useSftpQuickDownloadTargets() {
       if (!parentIdentity || !targetIdentity
         || target.dev !== published.dev || target.ino !== published.ino
         || target.birthtimeNs !== published.birthtimeNs
+        || target.ctimeNs !== published.ctimeNs
+        || target.mtimeNs !== published.mtimeNs
         || !validTimestamp(parent.birthtimeNs)
         || !validTimestamp(target.birthtimeNs)
-        || !validTimestamp(target.ctimeNs)) return;
+        || !validTimestamp(target.ctimeNs)
+        || !validTimestamp(target.mtimeNs)) return;
       const targets = targetsRef.current;
       targets.set(key, {
         targetPath, parentRealPath,
         parentIdentity, parentBirthtimeNs: parent.birthtimeNs,
         targetIdentity, targetBirthtimeNs: target.birthtimeNs,
         targetCtimeNs: target.ctimeNs,
+        targetMtimeNs: target.mtimeNs,
       });
       while (targets.size > TARGET_LIMIT) {
         const oldest = targets.keys().next().value;
@@ -100,6 +104,7 @@ export function useSftpQuickDownloadTargets() {
         || filesystemIdentity(target) !== remembered.targetIdentity
         || target.birthtimeNs !== remembered.targetBirthtimeNs
         || target.ctimeNs !== remembered.targetCtimeNs
+        || target.mtimeNs !== remembered.targetMtimeNs
         || parentRealPath !== remembered.parentRealPath
         || filesystemIdentity(parent) !== remembered.parentIdentity
         || parent.birthtimeNs !== remembered.parentBirthtimeNs

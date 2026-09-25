@@ -47,6 +47,7 @@ const SAFE_TASK_KEYS: ReadonlySet<keyof TransferTask> = new Set([
   "directoryEntryIdentity",
   "directoryResumeCheckpoint",
   "expectedLocalTarget",
+  "requireOriginalSourceForResume",
 ]);
 
 export function sanitizeSftpTransferTask(value: unknown): TransferTask | null {
@@ -66,11 +67,12 @@ export function sanitizeSftpTransferTask(value: unknown): TransferTask | null {
       || typeof expected.parentBirthtimeNs !== "string" || !/^[1-9]\d*$/.test(expected.parentBirthtimeNs)
       || typeof expected.targetIdentity !== "string" || !/^\d+:\d+$/.test(expected.targetIdentity)
       || typeof expected.targetBirthtimeNs !== "string" || !/^[1-9]\d*$/.test(expected.targetBirthtimeNs)
-      || typeof expected.targetCtimeNs !== "string" || !/^[1-9]\d*$/.test(expected.targetCtimeNs)) {
+      || typeof expected.targetCtimeNs !== "string" || !/^[1-9]\d*$/.test(expected.targetCtimeNs)
+      || typeof expected.targetMtimeNs !== "string" || !/^[1-9]\d*$/.test(expected.targetMtimeNs)) {
       // An incomplete saved guard must never become an unguarded overwrite.
       task.expectedLocalTarget = {
         parentRealPath: "", parentIdentity: "", parentBirthtimeNs: "",
-        targetIdentity: "", targetBirthtimeNs: "", targetCtimeNs: "",
+        targetIdentity: "", targetBirthtimeNs: "", targetCtimeNs: "", targetMtimeNs: "",
       };
     } else {
       task.expectedLocalTarget = {
@@ -80,9 +82,11 @@ export function sanitizeSftpTransferTask(value: unknown): TransferTask | null {
         targetIdentity: expected.targetIdentity,
         targetBirthtimeNs: expected.targetBirthtimeNs,
         targetCtimeNs: expected.targetCtimeNs,
+        targetMtimeNs: expected.targetMtimeNs,
       };
     }
   }
+  if (task.expectedLocalTarget) task.requireOriginalSourceForResume = true;
   if (!Number.isSafeInteger(task.directoryEntryIndex) || (task.directoryEntryIndex ?? -1) < 0) {
     task.directoryEntryIndex = undefined;
   }

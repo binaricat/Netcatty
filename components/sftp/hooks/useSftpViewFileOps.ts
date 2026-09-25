@@ -548,6 +548,7 @@ export const useSftpViewFileOps = ({
             targetIdentity: rememberedTarget.targetIdentity,
             targetBirthtimeNs: rememberedTarget.targetBirthtimeNs,
             targetCtimeNs: rememberedTarget.targetCtimeNs,
+            targetMtimeNs: rememberedTarget.targetMtimeNs,
           } : undefined,
           onPublishedLocalFile: (identity) => { publishedIdentity = identity; },
           sftpId,

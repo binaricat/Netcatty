@@ -24,8 +24,11 @@ test("quick download reuses only the exact target selected for the same remote f
   const existingFiles = new Map<string, "file" | "directory" | "symlink">();
   const fileInodes = new Map<string, number>();
   const fileBirthtimes = new Map<string, string>();
+  const fileCtimes = new Map<string, string>();
+  const fileMtimes = new Map<string, string>();
   let nextFileInode = 1000;
   let replaceAfterPublication = false;
+  let modifyAfterPublication = false;
   const existingDirectories = new Set(["/downloads", "/batch"]);
   const realParents = new Map([["/downloads", "/downloads"], ["/batch", "/batch"]]);
   const parentInodes = new Map([["/downloads", 100], ["/batch", 200]]);
@@ -48,6 +51,7 @@ test("quick download reuses only the exact target selected for the same remote f
     "/downloads/replaced-reselected.txt",
     "/downloads/reused-inode-reselected.txt",
     "/downloads/post-publication-reselected.txt",
+    "/downloads/in-place-reselected.txt",
   ];
   let saveCalls = 0;
   let directoryCalls = 0;
@@ -61,7 +65,7 @@ test("quick download reuses only the exact target selected for the same remote f
     downloadToLocal: async (params: {
       sourcePath: string; targetPath: string; isDirectory: boolean;
       expectedLocalTarget?: LocalDownloadTargetExpectation;
-      onPublishedLocalFile?: (identity: { dev: string; ino: string; birthtimeNs: string }) => void;
+      onPublishedLocalFile?: (identity: { dev: string; ino: string; birthtimeNs: string; ctimeNs: string; mtimeNs: string }) => void;
     }) => {
       downloads.push(params);
       existingFiles.set(params.targetPath, params.isDirectory ? "directory" : "file");
@@ -69,7 +73,15 @@ test("quick download reuses only the exact target selected for the same remote f
         const inode = nextFileInode++;
         fileInodes.set(params.targetPath, inode);
         fileBirthtimes.set(params.targetPath, String(inode * 1000));
-        params.onPublishedLocalFile?.({ dev: deviceId, ino: String(inode), birthtimeNs: String(inode * 1000) });
+        fileCtimes.set(params.targetPath, String(inode * 1000));
+        fileMtimes.set(params.targetPath, String(inode * 1000));
+        params.onPublishedLocalFile?.({ dev: deviceId, ino: String(inode), birthtimeNs: String(inode * 1000),
+          ctimeNs: String(inode * 1000), mtimeNs: String(inode * 1000) });
+        if (modifyAfterPublication) {
+          modifyAfterPublication = false;
+          fileCtimes.set(params.targetPath, String(inode * 1000 + 1));
+          fileMtimes.set(params.targetPath, String(inode * 1000 + 1));
+        }
         if (replaceAfterPublication) {
           replaceAfterPublication = false;
           fileInodes.set(params.targetPath, 555);
@@ -93,7 +105,7 @@ test("quick download reuses only the exact target selected for the same remote f
       const type = existingFiles.get(path);
       if (!type) throw new Error("ENOENT");
       return { type, dev: deviceId, ino: String(fileInodes.get(path)),
-        birthtimeNs: fileBirthtimes.get(path), ctimeNs: fileBirthtimes.get(path) };
+        birthtimeNs: fileBirthtimes.get(path), ctimeNs: fileCtimes.get(path), mtimeNs: fileMtimes.get(path) };
     },
     realpathLocal: async (path: string) => {
       const real = realParents.get(path);
@@ -203,6 +215,10 @@ test("quick download reuses only the exact target selected for the same remote f
     await act(async () => { await single(file("report.txt")); });
     assert.equal(saveCalls, 13, "a file replaced after publication is never remembered");
     assert.equal(downloads.at(-1)?.targetPath, "/downloads/post-publication-reselected.txt");
+    modifyAfterPublication = true;
+    await act(async () => { await single(file("report.txt")); });
+    await act(async () => { await single(file("report.txt")); });
+    assert.equal(saveCalls, 14, "an in-place edit after publication is not remembered");
   } finally {
     await act(async () => { renderer?.unmount(); });
     (globalThis as { window?: unknown }).window = oldWindow;

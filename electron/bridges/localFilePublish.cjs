@@ -17,6 +17,7 @@ async function publishLocalFileExclusive(source, target, assertNotCancelled = ()
     return {
       dev: String(linkedStat.dev), ino: String(linkedStat.ino), size: Number(linkedStat.size),
       birthtimeNs: String(linkedStat.birthtimeNs),
+      ctimeNs: String(linkedStat.ctimeNs), mtimeNs: String(linkedStat.mtimeNs),
     };
   } catch (error) {
     if (!["ENOTSUP", "EOPNOTSUPP", "ENOSYS", "EPERM", "EACCES", "EXDEV"].includes(error?.code)) throw error;
@@ -59,6 +60,7 @@ async function publishLocalFileExclusive(source, target, assertNotCancelled = ()
     publishedIdentity = {
       dev: String(ownedStat.dev), ino: String(ownedStat.ino), size: Number(ownedStat.size),
       birthtimeNs: String(ownedStat.birthtimeNs),
+      ctimeNs: String(ownedStat.ctimeNs), mtimeNs: String(ownedStat.mtimeNs),
     };
   } catch (error) {
     failure = error;
