@@ -286,10 +286,13 @@ export function withSyncReliabilityMeta(
   const changeSummary = summarizeSyncChanges(base, payload);
   const deletions = mergeDeletionRecords(
     payload,
-    collectSyncDeletions(base, payload, {
-      deletedAt: generatedAt,
-      ...(opts.deviceId ? { deviceId: opts.deviceId } : {}),
-    }),
+    [
+      ...(base?.syncMeta?.deletions ?? []),
+      ...collectSyncDeletions(base, payload, {
+        deletedAt: generatedAt,
+        ...(opts.deviceId ? { deviceId: opts.deviceId } : {}),
+      }),
+    ],
   );
   const meta: SyncReliabilityMeta = {
     schemaVersion: 1,

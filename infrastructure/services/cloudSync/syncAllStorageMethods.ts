@@ -7,6 +7,7 @@ import {
 import packageJson from '../../../package.json';
 import { EncryptionService } from '../EncryptionService';
 import { mergeSyncPayloads } from '../../../domain/syncMerge';
+import { cloudSyncPayloadsEqual } from '../../../domain/convergentSync';
 import { stripSyncPayloadEncryptedCredentials, healPoisonedSecretsForMerge } from '../../../domain/credentials';
 import {
   SYNC_SNAPSHOT_LIMIT,
@@ -50,6 +51,15 @@ function assertSyncSecurityGeneration(manager: any, generation?: number): void {
   if (typeof manager.assertSyncSecurityGeneration === 'function') {
     manager.assertSyncSecurityGeneration(generation);
   }
+}
+
+function remoteCoversSyncDeletions(outgoing: SyncPayload, remote: SyncPayload): boolean {
+  const remoteDeletions = new Set(
+    (remote.syncMeta?.deletions ?? []).map(({ entityType, id }) => JSON.stringify([entityType, id])),
+  );
+  return (outgoing.syncMeta?.deletions ?? []).every(({ entityType, id }) =>
+    remoteDeletions.has(JSON.stringify([entityType, id])),
+  );
 }
 
 async function downloadRemoteForSyncAllImpl(this: any,
@@ -554,6 +564,17 @@ export async function syncAllProvidersImpl(this: any,
         if (rv > baseVersion) baseVersion = rv;
       }
     }
+    // Multi-provider guard: one provider can take the identical-payload no-op
+    // path below and advance the global version to a higher remote (e.g. v10)
+    // while another provider still uploads from a stale shared base (v7 → v8).
+    // Mint above the highest remote version observed during the check phase so
+    // a replacement upload can never regress any provider's cloud file, and
+    // so uploadToProvider cannot later lower the global version with a stale
+    // revision (its state update is monotonic).
+    for (const entry of checkResults) {
+      const rv = entry.check?.remoteFile?.meta?.version ?? 0;
+      if (rv > baseVersion) baseVersion = rv;
+    }
 
     // 4. Parallel Uploads — each provider gets metadata derived from its own
     // base, then that exact payload is persisted as the provider base
@@ -564,6 +585,119 @@ export async function syncAllProvidersImpl(this: any,
     const uploadTasks = validUploads.map(async ({ provider, adapter }) => {
       try {
         const entry = checkResults.find((result) => result.provider === provider);
+        const checkedRemoteFile = entry?.check?.remoteFile;
+        // No-op guard (#3519): when the outgoing payload is already identical
+        // to the provider's current remote payload, uploading would only mint
+        // a fresh cloud revision for unchanged data. This is exactly what the
+        // periodic remote check's download-remote round-trip and a smart-merge
+        // without a real diff produce, so the cloud version inflated every
+        // cycle while the app sat idle. Providers may hold the same payload at
+        // different versions; requiring this remote version to match the global
+        // local version would make them upload in turns forever.
+        if (checkedRemoteFile) {
+          try {
+            assertSyncSecurityGeneration(this, syncSecurityGeneration);
+            const checkedRemotePayload = await EncryptionService.decryptPayload(
+              checkedRemoteFile,
+              this.masterPassword,
+            );
+            assertSyncSecurityGeneration(this, syncSecurityGeneration);
+            const payloadMatches = cloudSyncPayloadsEqual(payload, checkedRemotePayload);
+            const providerBase = payloadMatches ? await this.loadSyncBase(provider) : null;
+            const deletionsCovered = payloadMatches && remoteCoversSyncDeletions(
+              withSyncReliabilityMeta(payload, providerBase ?? checkedRemotePayload, {
+                deviceId: this.state.deviceId,
+                now: Date.now(),
+              }),
+              checkedRemotePayload,
+            );
+            // Materialized data can match while one provider still lacks a
+            // deletion record needed to reject a stale copy on a later merge.
+            if (payloadMatches && deletionsCovered) {
+              assertSyncSecurityGeneration(this, syncSecurityGeneration);
+              if (
+                !providerBase
+                || !cloudSyncPayloadsEqual(providerBase, checkedRemotePayload)
+                || !remoteCoversSyncDeletions(checkedRemotePayload, providerBase)
+              ) {
+                await this.saveSyncBase(checkedRemotePayload, provider);
+                assertSyncSecurityGeneration(this, syncSecurityGeneration);
+              }
+              // Mirror commitRemoteInspection/uploadToProvider: the preflight
+              // download may have lazily discovered an existing gist/file and
+              // exposed its ID via adapter.resourceId — persist it so a
+              // restart does not lose the identity (GitHub then searches only
+              // the first 100 matching gists and may miss the original
+              // resource or create a duplicate).
+              const resolvedResourceId = adapter.resourceId
+                || this.state.providers[provider]?.resourceId
+                || null;
+              await this.saveSyncAnchor(provider, checkedRemoteFile, resolvedResourceId);
+              assertSyncSecurityGeneration(this, syncSecurityGeneration);
+              const connection = {
+                ...this.state.providers[provider],
+                status: 'connected' as const,
+                error: undefined,
+                ...(resolvedResourceId ? { resourceId: resolvedResourceId } : {}),
+                lastSync: Date.now(),
+                lastSyncVersion: checkedRemoteFile.meta.version,
+              };
+              await this.saveProviderConnection(provider, connection);
+              assertSyncSecurityGeneration(this, syncSecurityGeneration);
+              // Accepting an identical remote that is ahead of the local
+              // version must advance the local version/timestamp too (as
+              // commitRemoteInspection does). Otherwise the next local edit
+              // derives baseVersion from the stale local version and mints a
+              // lower revision than the accepted remote, regressing the cloud
+              // file via the adapters' replacement uploads.
+              this.state.localVersion = Math.max(
+                this.state.localVersion ?? 0,
+                checkedRemoteFile.meta.version,
+              );
+              this.state.localUpdatedAt = Math.max(
+                this.state.localUpdatedAt ?? 0,
+                checkedRemoteFile.meta.updatedAt,
+              );
+              this.state.remoteVersion = Math.max(
+                this.state.remoteVersion ?? 0,
+                checkedRemoteFile.meta.version,
+              );
+              this.state.remoteUpdatedAt = Math.max(
+                this.state.remoteUpdatedAt ?? 0,
+                checkedRemoteFile.meta.updatedAt,
+              );
+              // Discard any earlier provider-secret decrypt that could write
+              // back a connection without the resource ID or sync version.
+              ++this.providerDecryptSeq[provider];
+              // Mirror uploadToProvider's success path: clear the 'syncing'
+              // status set during the preflight so the provider (and its
+              // manual Sync button) does not stay stuck after a no-op sync.
+              this.updateProviderStatus(provider, 'connected');
+              this.state.providers[provider] = {
+                ...this.state.providers[provider],
+                ...(resolvedResourceId ? { resourceId: resolvedResourceId } : {}),
+                lastSync: connection.lastSync,
+                lastSyncVersion: checkedRemoteFile.meta.version,
+              };
+              this.saveSyncConfig();
+              this.notifyStateChange();
+              const noOpResult: SyncResult = {
+                success: true,
+                provider,
+                action: 'none',
+                version: checkedRemoteFile.meta.version,
+              };
+              this.emit({ type: 'SYNC_COMPLETED', provider, result: noOpResult });
+              results.set(provider, noOpResult);
+              return;
+            }
+          } catch {
+            assertSyncSecurityGeneration(this, syncSecurityGeneration);
+            // Could not prove the payloads identical (decrypt failure, storage
+            // failure). Fall through to the normal upload path — a real data
+            // change must never be dropped because this guard failed.
+          }
+        }
         assertConvergentSyncWriteCompatible(entry?.check?.remoteFile?.meta, payload);
         const providerBase = await this.loadSyncBase(provider);
         let providerRemoteRef: SyncPayload | null = null;
@@ -598,6 +732,7 @@ export async function syncAllProvidersImpl(this: any,
         const result = await this.uploadToProvider(provider, adapter, syncedFile, providerPayload, syncSecurityGeneration);
         results.set(provider, result);
       } catch (error) {
+        assertSyncSecurityGeneration(this, syncSecurityGeneration);
         const msg = String(error);
         this.state.lastError = msg;
         this.updateProviderStatus(provider, 'error', msg);
