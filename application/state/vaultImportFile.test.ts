@@ -79,6 +79,20 @@ test("CSV import keeps valid UTF-8 Chinese group names", async () => {
   assert.equal(result.hosts[0]?.group, "中文组");
 });
 
+test("ssh_config import keeps UTF-8 host names when a comment has invalid bytes", async () => {
+  const file = new File([
+    new TextEncoder().encode("# legacy comment "),
+    new Uint8Array([0xff]),
+    new TextEncoder().encode("\nHost 中文组\n  HostName example.com\n"),
+  ], "config", { type: "text/plain" });
+
+  const text = await readVaultImportFile("ssh_config", file);
+  const result = importVaultHostsFromText("ssh_config", text);
+
+  assert.equal(result.hosts[0]?.label, "中文组");
+  assert.equal(result.hosts[0]?.hostname, "example.com");
+});
+
 test("MobaXterm import can force GB18030 for ambiguous legacy Chinese text", async () => {
   const prefix = new TextEncoder().encode("[Bookmarks]\nSubRep=\nImgNum=42\n");
   const suffix = new TextEncoder().encode(`prod=${sessionValue}`);
