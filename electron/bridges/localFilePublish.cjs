@@ -16,7 +16,10 @@ async function publishLocalFileExclusive(source, target, assertNotCancelled = ()
     const linkedStat = await fs.promises.lstat(source);
     return { dev: linkedStat.dev, ino: linkedStat.ino, size: linkedStat.size };
   } catch (error) {
-    if (!["ENOTSUP", "EOPNOTSUPP", "ENOSYS", "EPERM", "EACCES", "EXDEV"].includes(error?.code)) throw error;
+    // EISDIR is the misleading libuv mapping for Win32 ERROR_INVALID_FUNCTION
+    // when the volume has no hard-link support (exFAT/FAT32); the source here
+    // is always a regular prepared file, never a directory (nodejs/node#65817).
+    if (!["ENOTSUP", "EOPNOTSUPP", "ENOSYS", "EPERM", "EACCES", "EXDEV", "EISDIR"].includes(error?.code)) throw error;
   }
 
   let input;
