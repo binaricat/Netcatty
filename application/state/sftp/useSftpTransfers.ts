@@ -825,7 +825,9 @@ export const useSftpTransfers = ({
                 : t,
             ),
           );
-          return processTransfer(updatedTask, sourcePane, targetPane, targetSide);
+          // Carry the verified source route into the continuation attempt —
+          // the route guard rejects guarded repeat downloads without it.
+          return processTransfer(updatedTask, sourcePane, targetPane, targetSide, sourceConnectHost);
         }
 
         if (cancelledTasksRef.current.has(task.id)) return "cancelled";
@@ -1328,6 +1330,32 @@ export const useSftpTransfers = ({
     });
   }, [setTransfers]);
 
+  // Route-guarded direct downloads (Codex P1 on PR #3516): the vault hostId
+  // alone cannot prove the bytes still come from the connect-time proxy/jump
+  // route that identified the source. Re-resolve the live route and verify it
+  // against the persisted endpoint key before every attempt — including
+  // conflict continuations, whose verified host cannot be carried across the
+  // UI await (Codex P2 on PR #3516). Returns undefined when the route cannot
+  // be verified; callers must not fall back to the vault host.
+  const resolveVerifiedSourceConnectHost = useCallback(
+    async (task: TransferTask): Promise<Host | undefined> => {
+      if (!task.requireOriginalSourceForResume) return undefined;
+      const expectedKey = task.expectedSourceEndpointKey;
+      const sourceTab = expectedKey ? getTabByConnectionId(task.sourceConnectionId) : undefined;
+      const connectedHost = sourceTab && expectedKey
+        ? resolveConnectedHost?.(sourceTab.tabId)
+        : undefined;
+      const actualKey = connectedHost && connectedHost !== "local" && connectedHost.id === task.sourceHostId
+        ? await getTransferPoolKeyForHost?.(connectedHost)
+        : undefined;
+      if (!connectedHost || connectedHost === "local" || !expectedKey || !actualKey || actualKey !== expectedKey) {
+        return undefined;
+      }
+      return connectedHost;
+    },
+    [getTabByConnectionId, resolveConnectedHost, getTransferPoolKeyForHost],
+  );
+
   const retryTransfer = useCallback(
     async (transferId: string) => {
       // Prefer the live owner list; fall back to the center store (drag-drop
@@ -1393,22 +1421,14 @@ export const useSftpTransfers = ({
       // route against the persisted key and pin the retry lease to it.
       let retrySourceConnectHost: Host | undefined;
       if (task.requireOriginalSourceForResume) {
-        const expectedKey = task.expectedSourceEndpointKey;
-        const sourceTab = expectedKey ? getTabByConnectionId(task.sourceConnectionId) : undefined;
-        const connectedHost = sourceTab && expectedKey
-          ? resolveConnectedHost?.(sourceTab.tabId)
-          : undefined;
-        const actualKey = connectedHost && connectedHost !== "local" && connectedHost.id === task.sourceHostId
-          ? await getTransferPoolKeyForHost?.(connectedHost)
-          : undefined;
-        if (!connectedHost || connectedHost === "local" || !expectedKey || !actualKey || actualKey !== expectedKey) {
+        retrySourceConnectHost = await resolveVerifiedSourceConnectHost(task);
+        if (!retrySourceConnectHost) {
           notify.warning(
             "Repeat download source cannot be verified; start a new download",
             "SFTP",
           );
           return;
         }
-        retrySourceConnectHost = connectedHost;
       }
 
       await cleanupTaskArtifacts(task);
@@ -1456,7 +1476,7 @@ export const useSftpTransfers = ({
       await processTransfer(retriedTask, sourcePane, targetPane, targetSide, retrySourceConnectHost);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- processTransfer is defined inline
-    [acquireTransferSession, cleanupTaskArtifacts, getTabByConnectionId, getTransferPoolKeyForHost, ownerId, resolveConnectedHost, resolveTaskEndpoints, setTransfers, sftpSessionsRef],
+    [acquireTransferSession, cleanupTaskArtifacts, getTabByConnectionId, getTransferPoolKeyForHost, ownerId, resolveConnectedHost, resolveTaskEndpoints, resolveVerifiedSourceConnectHost, setTransfers, sftpSessionsRef],
   );
 
   const clearCompletedTransfers = useCallback(() => {
@@ -1753,11 +1773,18 @@ export const useSftpTransfers = ({
           async () => {
             const attempt = resolveCurrentAttempt();
             if (!attempt) return;
+            // The verified connect-time host of the interrupted attempt is
+            // stack-local and cannot survive the conflict UI await. Re-resolve
+            // and re-verify it for the resumed attempt; if verification now
+            // fails, the route guard inside processTransfer fails the row
+            // instead of silently re-acquiring from the vault host (Codex P2).
+            const verifiedSourceConnectHost = await resolveVerifiedSourceConnectHost(attempt.current);
             await processTransfer(
               attempt.current,
               attempt.endpoints.sourcePane,
               attempt.endpoints.targetPane,
               attempt.endpoints.targetSide,
+              verifiedSourceConnectHost,
             );
           },
         );
@@ -1772,6 +1799,7 @@ export const useSftpTransfers = ({
       markBatchStopped,
       ownerId,
       resolveTaskEndpoints,
+      resolveVerifiedSourceConnectHost,
       sftpSessionsRef,
     ],
   );
