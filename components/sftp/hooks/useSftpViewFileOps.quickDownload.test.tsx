@@ -56,7 +56,7 @@ test("quick download reuses only the exact target selected for the same remote f
   const pane = { connection, filenameEncoding: "auto" };
   const sftpRef = { current: {
     leftPane: pane, rightPane: pane,
-    getConnectionCacheKey: () => endpointKey,
+    getDownloadEndpointKey: async () => endpointKey,
     joinPath: (parent: string, name: string) => `${parent}/${name}`,
     downloadToLocal: async (params: {
       sourcePath: string; targetPath: string; isDirectory: boolean;

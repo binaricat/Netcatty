@@ -513,7 +513,7 @@ export const useSftpViewFileOps = ({
         // Only an explicit opt-in and this exact remote source may reuse the
         // full path chosen earlier in Save As, including a renamed basename.
         const quickDownloadEnabled = readSftpQuickDownloadEnabled();
-        const endpointKey = sftpRef.current.getConnectionCacheKey?.(pane.connection.id);
+        const endpointKey = await sftpRef.current.getDownloadEndpointKey?.(pane.connection.id) ?? null;
         if (!quickDownloadEnabled) {
           quickDownloadTargets.forget(endpointKey, resolvedFullPath, pane.filenameEncoding);
         }

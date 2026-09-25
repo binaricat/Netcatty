@@ -428,6 +428,12 @@ export async function resumeTransferWithDedicatedSession(
   onProgress?: (progress: DedicatedResumeProgress) => void,
   options?: DedicatedResumeOptions,
 ): Promise<DedicatedResumeResult> {
+  // The original source may have used a session-only proxy or jump route.
+  // Hard reconnect has only the vault host, so it cannot establish that the
+  // replacement bytes come from the source whose target was remembered.
+  if (task.requireOriginalSourceForResume) {
+    return { success: false, error: "Repeat download source cannot be verified after reconnect; start a new download" };
+  }
   if (task.isDirectory) {
     return resumeDirectoryWithDedicatedSession(task, deps, onProgress, options);
   }

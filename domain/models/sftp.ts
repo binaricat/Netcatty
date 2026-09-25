@@ -85,6 +85,8 @@ export interface TransferTask {
   sourcePath: string;
   targetPath: string;
   expectedLocalTarget?: LocalDownloadTargetExpectation;
+  /** A remembered download target must not reconnect through an unverified route. */
+  requireOriginalSourceForResume?: boolean;
   sourceConnectionId: string;
   targetConnectionId: string;
   targetHostId?: string;

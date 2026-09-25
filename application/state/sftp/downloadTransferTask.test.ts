@@ -33,6 +33,7 @@ test("download tasks retain the remote host needed for reconnecting after the or
   assert.equal(task.resumable, true);
   assert.equal(task.status, "queued");
   assert.equal(task.expectedLocalTarget?.targetIdentity, "1:3");
+  assert.equal(task.requireOriginalSourceForResume, true);
   assert.equal(task.phase, undefined);
 });
 

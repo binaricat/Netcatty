@@ -269,6 +269,7 @@ export function useSftpDirectoryTransferOps({
     rootTaskId: string, // The original top-level task ID for cancellation checking
     sameHost?: boolean,
     onPublishedLocalFile?: (identity: LocalPublishedFileIdentity) => void,
+    sourceConnectHost?: Host,
   ): Promise<void> => {
     // Check if task or root task was cancelled before starting
     if (cancelledTasksRef.current.has(task.id) || cancelledTasksRef.current.has(rootTaskId)) {
@@ -316,7 +317,7 @@ export function useSftpDirectoryTransferOps({
           // Dedicated pool only for remote ends — panel/browse sessions die when
           // the SFTP tab is closed, which freezes global transfer center rows.
           if (acquireTransferSession && !sourceIsLocal && task.sourceHostId) {
-            sourceLease = await acquireTransferSession(task.sourceHostId, task.id);
+            sourceLease = await acquireTransferSession(task.sourceHostId, task.id, sourceConnectHost);
           }
           if (acquireTransferSession && !targetIsLocal && task.targetHostId) {
             targetLease = await acquireTransferSession(task.targetHostId, task.id);
@@ -549,6 +550,7 @@ export function useSftpDirectoryTransferOps({
     followSymlinks = false, // Only true for downloadToLocal — uploads/copies treat symlinks as files
     discoveryProgress?: DirectoryDiscoveryProgress,
     traversalBudget?: SftpDirectoryTraversalBudget,
+    sourceConnectHost?: Host,
   ) => {
     // Check if task or root task was cancelled before starting
     if (cancelledTasksRef.current.has(task.id) || cancelledTasksRef.current.has(rootTaskId)) {
@@ -706,6 +708,7 @@ export function useSftpDirectoryTransferOps({
           followSymlinks,
           progress,
           traversal,
+          sourceConnectHost,
         );
       }
     } finally {
@@ -933,6 +936,8 @@ export function useSftpDirectoryTransferOps({
               targetEncoding,
               rootTaskId,
               sameHost,
+              undefined,
+              sourceConnectHost,
             );
 
             activeChildIdsRef.current.get(rootTaskId)?.delete(fileId);

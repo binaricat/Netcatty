@@ -367,22 +367,8 @@ export const useSftpState = (
     [hosts, identities, keys, resolveTransferSourceSessionId, transferKnownHosts, transferTerminalSettings],
   );
 
-  const acquireTransferSession = useCallback(
-    async (hostId: string, transferId: string, connectHost?: Host) => {
-      // Prefer the connect-time Host (terminal session overrides) so pooled
-      // uploads open the same endpoint as the browse tab, not the vault entry.
-      const host = connectHost && connectHost.id === hostId
-        ? connectHost
-        : hosts.find((candidate) => candidate.id === hostId);
-      if (!host) {
-        throw new Error(`Host not found for transfer session: ${hostId}`);
-      }
-      if (connectHost && connectHost.id !== hostId) {
-        throw new Error(
-          `Transfer connect host id mismatch: expected ${hostId}, got ${connectHost.id}`,
-        );
-      }
-      const poolKey = await transferPoolKeyCache.get(host, () => ({
+  const getTransferPoolKeyForHost = useCallback(
+    (host: Host) => transferPoolKeyCache.get(host, () => ({
         hostId: host.id,
         hostname: host.hostname,
         port: host.port,
@@ -397,10 +383,38 @@ export const useSftpState = (
           knownHosts: transferKnownHosts,
           terminalSettings: transferTerminalSettings,
         }),
-      }));
+      })),
+    [hosts, identities, keys, transferKnownHosts, transferPoolKeyCache, transferTerminalSettings],
+  );
+
+  // The quick-download source must have the same identity as the pooled
+  // connection that will actually read its bytes, including proxy/jump route.
+  const getDownloadEndpointKey = useCallback(async (connectionId: string) => {
+    const tab = getTabByConnectionId(connectionId);
+    const host = tab && connectedHostByTabIdRef.current.get(tab.tabId);
+    if (!host || host === "local" || host.id !== tab?.pane.connection?.hostId) return null;
+    return getTransferPoolKeyForHost(host);
+  }, [getTabByConnectionId, getTransferPoolKeyForHost]);
+
+  const acquireTransferSession = useCallback(
+    async (hostId: string, transferId: string, connectHost?: Host) => {
+      // Prefer the connect-time Host (terminal session overrides) so pooled
+      // downloads/uploads open the same endpoint as the browse tab.
+      const host = connectHost && connectHost.id === hostId
+        ? connectHost
+        : hosts.find((candidate) => candidate.id === hostId);
+      if (!host) {
+        throw new Error(`Host not found for transfer session: ${hostId}`);
+      }
+      if (connectHost && connectHost.id !== hostId) {
+        throw new Error(
+          `Transfer connect host id mismatch: expected ${hostId}, got ${connectHost.id}`,
+        );
+      }
+      const poolKey = await getTransferPoolKeyForHost(host);
       return transferPoolRef.current.acquire(poolKey, transferId, () => openPoolSftpSession(host));
     },
-    [hosts, identities, keys, openPoolSftpSession, transferKnownHosts, transferPoolKeyCache, transferTerminalSettings],
+    [getTransferPoolKeyForHost, hosts, openPoolSftpSession],
   );
 
   /** True after browse channels were soft-closed while this owner stayed mounted. */
@@ -547,6 +561,7 @@ export const useSftpState = (
     getActivePane,
     getPaneByConnectionId,
     getTabByConnectionId,
+    resolveConnectedHost: (tabId) => connectedHostByTabIdRef.current.get(tabId) ?? null,
     updateTab,
     refresh,
     clearCacheForConnection,
@@ -810,6 +825,7 @@ export const useSftpState = (
     resolveConflict: resolveAnyConflict,
     getSftpIdForConnection,
     getConnectionCacheKey,
+    getDownloadEndpointKey,
     setLastConnectedHost,
     reportSessionError: handleSessionError,
     rejectHostKeyVerification,
@@ -892,6 +908,7 @@ export const useSftpState = (
     resolveConflict: (...args: Parameters<typeof resolveAnyConflict>) => methodsRef.current.resolveConflict(...args),
     getSftpIdForConnection: (...args: Parameters<typeof getSftpIdForConnection>) => methodsRef.current.getSftpIdForConnection(...args),
     getConnectionCacheKey: (...args: Parameters<typeof getConnectionCacheKey>) => methodsRef.current.getConnectionCacheKey(...args),
+    getDownloadEndpointKey: (...args: Parameters<typeof getDownloadEndpointKey>) => methodsRef.current.getDownloadEndpointKey(...args),
     setLastConnectedHost: (...args: Parameters<typeof setLastConnectedHost>) => methodsRef.current.setLastConnectedHost(...args),
     reportSessionError: (...args: Parameters<typeof handleSessionError>) => methodsRef.current.reportSessionError(...args),
     rejectHostKeyVerification: () => methodsRef.current.rejectHostKeyVerification(),

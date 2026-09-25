@@ -23,6 +23,7 @@ export function createDirectDownloadTransferTask(
     sourcePath: input.sourcePath,
     targetPath: input.targetPath,
     expectedLocalTarget: input.expectedLocalTarget,
+    requireOriginalSourceForResume: !!input.expectedLocalTarget,
     sourceConnectionId: input.sourceConnectionId,
     targetConnectionId: "local",
     sourceHostId: input.sourceHostId,

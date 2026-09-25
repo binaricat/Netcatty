@@ -39,6 +39,22 @@ const host = (id: string, label: string, hostname = label): Host => ({
   protocol: "ssh",
 } as Host);
 
+test("repeat download refuses hard reconnect when its original route cannot be checked", async () => {
+  const task: TransferTask = {
+    id: "guarded-repeat", fileName: "file.bin",
+    sourcePath: "/remote/file.bin", targetPath: "/local/file.bin",
+    sourceConnectionId: "old-sftp", sourceHostId: "h1", sourceHostLabel: "box",
+    targetConnectionId: "local", direction: "download", status: "interrupted",
+    totalBytes: 100, transferredBytes: 20, speed: 0, startTime: 1,
+    isDirectory: false, requireOriginalSourceForResume: true,
+  };
+  const result = await resumeTransferWithDedicatedSession(task, {
+    hosts: [host("h1", "box", "1.2.3.4")], keys: [], identities: [],
+  });
+  assert.equal(result.success, false);
+  assert.match(result.error ?? "", /source cannot be verified/);
+});
+
 for (const retainedStatus of [undefined, "interrupted", "failed", "paused"] as const) {
 for (const newerPause of retainedStatus === "paused" ? [false, true] : [false]) {
 for (const ownerChange of retainedStatus === "interrupted" || retainedStatus === undefined ? ["same", "active", "completed"] : ["same"]) {
