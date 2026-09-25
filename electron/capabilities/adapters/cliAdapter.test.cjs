@@ -83,6 +83,72 @@ test("buildCatalogCliParams maps dynamic script group targets", () => {
   assert.equal(params.targetGroups, '["Production","Staging/Web"]');
 });
 
+test("buildCatalogCliParams maps vault note create and import flags", () => {
+  const created = buildCatalogCliParams("vault.note.create", {
+    title: "Runbook",
+    content: "# Steps",
+    group: "ops",
+  }, fakeCreateError);
+  assert.equal(created.title, "Runbook");
+  assert.equal(created.content, "# Steps");
+  assert.equal(created.group, "ops");
+
+  const imported = buildCatalogCliParams("vault.note.import", {
+    fileName: "runbook.md",
+    content: "# Steps",
+    documents: "[{\"fileName\":\"a.md\",\"content\":\"# A\"}]",
+  }, fakeCreateError);
+  assert.equal(imported.fileName, "runbook.md");
+  assert.equal(imported.documents, "[{\"fileName\":\"a.md\",\"content\":\"# A\"}]");
+});
+
+test("buildCatalogCliParams keeps explicit empty note clears and empty imports", () => {
+  const cleared = buildCatalogCliParams("vault.note.update", {
+    noteId: "n1",
+    content: "",
+    group: "",
+  }, fakeCreateError);
+  assert.equal(cleared.noteId, "n1");
+  assert.equal(cleared.content, "");
+  assert.equal(cleared.group, "");
+  assert.equal("title" in cleared, false);
+
+  const imported = buildCatalogCliParams("vault.note.import", {
+    fileName: "empty.md",
+    content: "",
+  }, fakeCreateError);
+  assert.equal(imported.fileName, "empty.md");
+  assert.equal(imported.content, "");
+});
+
+test("buildCatalogCliParams still omits absent note fields and other empty optionals", () => {
+  const updated = buildCatalogCliParams("vault.note.update", {
+    noteId: "n1",
+  }, fakeCreateError);
+  assert.deepEqual(updated, { noteId: "n1" });
+
+  const searched = buildCatalogCliParams("vault.note.get", {
+    noteId: "note-1",
+    query: "",
+  }, fakeCreateError);
+  assert.deepEqual(searched, { noteId: "note-1" });
+});
+
+test("buildCatalogCliParams maps vault note read continuation flags", () => {
+  const params = buildCatalogCliParams("vault.note.get", {
+    noteId: "note-1",
+    offset: "6000",
+    maxChars: "2000",
+    expectedUpdatedAt: "10",
+    query: "Steps",
+  }, fakeCreateError);
+  assert.equal(params.noteId, "note-1");
+  assert.equal(params.offset, 6000);
+  assert.equal(params.maxChars, 2000);
+  assert.equal(params.expectedUpdatedAt, 10);
+  assert.equal(params.query, "Steps");
+});
+
 test("buildCatalogCliParams throws for missing required fields", () => {
   assert.throws(
     () => buildCatalogCliParams("vault.host.get", {}, fakeCreateError),

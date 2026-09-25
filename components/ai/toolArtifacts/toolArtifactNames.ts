@@ -6,6 +6,8 @@ const KNOWN_ARTIFACT_TOOL_NAMES = [
   'vault_notes_update',
   'vault_notes_get',
   'vault_notes_list',
+  'vault_notes_delete',
+  'vault_notes_import',
   'vault_hosts_create',
   'vault_hosts_import',
   'vault_hosts_list',
@@ -32,6 +34,12 @@ const KNOWN_ARTIFACT_TOOL_NAMES = [
 
 const CLI_ARTIFACT_TOOL_NAMES = new Map<string, string>([
   ['vault host get', 'host_get'],
+  ['notes list', 'vault_notes_list'],
+  ['notes get', 'vault_notes_get'],
+  ['notes create', 'vault_notes_create'],
+  ['notes update', 'vault_notes_update'],
+  ['notes delete', 'vault_notes_delete'],
+  ['notes import', 'vault_notes_import'],
 ]);
 
 function readCommandString(args: Record<string, unknown> | undefined): string | null {
@@ -95,11 +103,13 @@ export function inferArtifactToolNameFromCliArgs(
   if (!cliMatch) return undefined;
 
   const afterCli = stripWrappingQuote(cliMatch[1] ?? '').replace(/^["']?\s*/, '');
-  const commandKey = afterCli
-    .split(/\s+/)
-    .filter((part) => part && !part.startsWith('-'))
-    .slice(0, 3)
-    .join(' ');
+  const commandWords: string[] = [];
+  for (const part of afterCli.split(/\s+/)) {
+    if (!part || part.startsWith('-')) break;
+    commandWords.push(part);
+    if (commandWords.length === 3) break;
+  }
+  const commandKey = commandWords.join(' ');
 
   return CLI_ARTIFACT_TOOL_NAMES.get(commandKey);
 }

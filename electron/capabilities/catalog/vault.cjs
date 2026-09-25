@@ -198,6 +198,7 @@ const VAULT_CAPABILITIES = [
       bypassesChatCancel: true,
     },
     surfaces: {
+      cli: { command: ["notes", "list"] },
       global: { rpcMethod: "vault/notes/list" },
       public: { rpcMethod: "public/vault/notes/list", mcpTool: "vault_notes_list" },
     },
@@ -217,6 +218,7 @@ const VAULT_CAPABILITIES = [
       bypassesChatCancel: true,
     },
     surfaces: {
+      cli: { command: ["notes", "get"] },
       global: { rpcMethod: "vault/notes/get" },
       public: { rpcMethod: "public/vault/notes/get", mcpTool: "vault_notes_get" },
     },
@@ -236,6 +238,7 @@ const VAULT_CAPABILITIES = [
       bypassesChatCancel: false,
     },
     surfaces: {
+      cli: { command: ["notes", "create"] },
       global: { rpcMethod: "vault/notes/create" },
       public: { rpcMethod: "public/vault/notes/create", mcpTool: "vault_notes_create" },
     },
@@ -255,6 +258,7 @@ const VAULT_CAPABILITIES = [
       bypassesChatCancel: false,
     },
     surfaces: {
+      cli: { command: ["notes", "update"] },
       global: { rpcMethod: "vault/notes/update" },
       public: { rpcMethod: "public/vault/notes/update", mcpTool: "vault_notes_update" },
     },
@@ -266,8 +270,29 @@ const VAULT_CAPABILITIES = [
     description: "Delete a Vault → Notes entry by id.",
     policy: { write: true, sensitiveRead: false, longRunning: false, requiresChatSession: false, bypassesObserverBlock: false, bypassesApproval: false, bypassesChatCancel: false },
     surfaces: {
+      cli: { command: ["notes", "delete"] },
       global: { rpcMethod: "vault/notes/delete" },
       public: { rpcMethod: "public/vault/notes/delete", mcpTool: "vault_notes_delete" },
+    },
+  },
+  {
+    id: "vault.note.import",
+    domain: "vault",
+    status: CAPABILITY_STATUS.IMPLEMENTED,
+    description: "Import one or more markdown documents into Vault → Notes. Titles come from an explicit title, the first heading, or the file name. NOT for adding SSH hosts.",
+    policy: {
+      write: true,
+      sensitiveRead: false,
+      longRunning: false,
+      requiresChatSession: false,
+      bypassesObserverBlock: false,
+      bypassesApproval: false,
+      bypassesChatCancel: false,
+    },
+    surfaces: {
+      cli: { command: ["notes", "import"] },
+      global: { rpcMethod: "vault/notes/import" },
+      public: { rpcMethod: "public/vault/notes/import", mcpTool: "vault_notes_import" },
     },
   },
   {

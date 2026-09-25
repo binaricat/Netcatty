@@ -84,6 +84,7 @@ const VAULT_ARTIFACT_TOOL_NAMES = new Set([
   'vault_notes_update',
   'vault_notes_get',
   'vault_notes_list',
+  'vault_notes_import',
   'vault_hosts_create',
   'vault_hosts_import',
   'vault_hosts_list',
@@ -220,6 +221,13 @@ export function parseVaultToolArtifact(
     case 'vault_notes_list': {
       const notes = Array.isArray(payload.notes) ? payload.notes : [];
       return { kind: 'vault.summary', section: 'notes', count: notes.length };
+    }
+    case 'vault_notes_import': {
+      const notes = Array.isArray(payload.notes) ? payload.notes : [];
+      if (notes.length === 1) return parseNoteArtifact(notes[0]);
+      const count = readNumber(payload.importedCount) ?? notes.length;
+      if (count <= 0) return null;
+      return { kind: 'vault.summary', section: 'notes', count };
     }
     case 'vault_hosts_create':
     case 'vault_hosts_import': {

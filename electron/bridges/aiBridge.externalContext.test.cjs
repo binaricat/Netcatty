@@ -39,4 +39,9 @@ test("buildExternalAgentSystemContext (skills mode) routes attachments through N
   assert.match(context, /already bound in this process via the host environment/i);
   assert.doesNotMatch(context, /--chat-session/);
   assert.match(context, /Use the local shell only to invoke Netcatty CLI commands/i);
+  assert.match(context, /notes list\|get\|create\|update\|delete\|import --json/);
+  assert.match(context, /notes create or notes update ONLY when the user explicitly wants/i);
+  assert.match(context, /notes import to import generated or attached markdown/i);
+  assert.match(context, /do not silently create a Vault note/i);
+  assert.match(context, /if approval is denied, stop/i);
 });

@@ -4,6 +4,7 @@ import { resolveHostOs } from '../../domain/host';
 import type { GroupConfig, Host, Identity, KnownHost, ManagedSource, PortForwardingRule, ProxyProfile, Snippet, SSHKey, TerminalSettings, VaultNote } from '../../domain/models';
 import type { RememberImportedKeyPassphraseResult } from '../../application/defaultKeyPassphrases';
 import {
+  importMarkdownPayloadsToVaultNotes,
   normalizeVaultNotes,
   sanitizeNoteTitle,
   sanitizeVaultNote,
@@ -296,6 +297,70 @@ function parseSnippetVariableValues(
   } catch {
     return { error: 'variables must be a JSON object string.' };
   }
+}
+
+const MAX_NOTE_IMPORT_DOCUMENTS = 20;
+const MAX_NOTE_IMPORT_CHARS = 512_000;
+
+function parseNoteImportDocuments(params: Record<string, unknown>):
+  | Array<{ fileName: string; content: string; title?: string }>
+  | { error: string } {
+  const hasContent = typeof params.content === 'string';
+  const hasDocuments = params.documents !== undefined && params.documents !== null && params.documents !== '';
+  if (hasContent && hasDocuments) {
+    return { error: 'Pass either content or documents, not both.' };
+  }
+
+  let rawDocuments: unknown[] | null = null;
+  if (hasDocuments) {
+    const documents = params.documents;
+    if (typeof documents === 'string') {
+      try {
+        const parsed = JSON.parse(documents) as unknown;
+        if (!Array.isArray(parsed)) return { error: 'documents must be a JSON array.' };
+        rawDocuments = parsed;
+      } catch {
+        return { error: 'documents must be valid JSON.' };
+      }
+    } else if (Array.isArray(documents)) {
+      rawDocuments = documents;
+    } else {
+      return { error: 'documents must be a JSON array.' };
+    }
+  } else if (hasContent) {
+    rawDocuments = [{
+      fileName: params.fileName,
+      content: params.content,
+      title: params.title,
+    }];
+  } else {
+    return { error: 'content or documents is required.' };
+  }
+
+  if (rawDocuments.length === 0) return { error: 'At least one markdown document is required.' };
+  if (rawDocuments.length > MAX_NOTE_IMPORT_DOCUMENTS) {
+    return { error: `Import at most ${MAX_NOTE_IMPORT_DOCUMENTS} documents at a time.` };
+  }
+
+  const payloads: Array<{ fileName: string; content: string; title?: string }> = [];
+  for (const entry of rawDocuments) {
+    if (!entry || typeof entry !== 'object') {
+      return { error: 'Each document must be an object with content.' };
+    }
+    const record = entry as Record<string, unknown>;
+    if (typeof record.content !== 'string') {
+      return { error: 'Each document needs a string content field.' };
+    }
+    if (record.content.length > MAX_NOTE_IMPORT_CHARS) {
+      return { error: `Each document must be at most ${MAX_NOTE_IMPORT_CHARS} characters.` };
+    }
+    const fileName = typeof record.fileName === 'string' && record.fileName.trim()
+      ? record.fileName.trim()
+      : 'imported.md';
+    const title = typeof record.title === 'string' ? record.title : undefined;
+    payloads.push({ fileName, content: record.content, title });
+  }
+  return payloads;
 }
 
 function parseOptionalStringArray(
@@ -994,6 +1059,21 @@ export async function handleVaultAgentOp(
       }
       deps.updateNotes(normalizeVaultNotes(deps.getNotes().filter((note) => note.id !== noteId)));
       return { ok: true, noteId };
+    }
+    case 'note.import': {
+      const payloads = parseNoteImportDocuments(params);
+      if ('error' in payloads) return { ok: false, error: payloads.error };
+      const group = typeof params.group === 'string' && params.group.trim() ? params.group.trim() : null;
+      const existingIds = new Set(deps.getNotes().map((note) => note.id));
+      const imported = importMarkdownPayloadsToVaultNotes(payloads, deps.getNotes(), group);
+      deps.updateNotes(imported.notes);
+      return {
+        ok: true,
+        importedCount: imported.importedCount,
+        notes: imported.notes
+          .filter((note) => !existingIds.has(note.id))
+          .map(serializeVaultNoteForAgent),
+      };
     }
     case 'identity.list': {
       return {

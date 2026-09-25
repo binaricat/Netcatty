@@ -995,12 +995,12 @@
       "content": {
         "type": "string",
         "optional": true,
-        "description": "New markdown body."
+        "description": "New markdown body. An empty string clears the body."
       },
       "group": {
         "type": "string",
         "optional": true,
-        "description": "New folder path."
+        "description": "New folder path. An empty string clears the folder."
       },
       "linkedHostIds": {
         "type": "string",
@@ -1034,6 +1034,49 @@
         "type": "string",
         "optional": false,
         "description": "Vault note ID to delete."
+      }
+    },
+    "policy": {
+      "write": true,
+      "sensitiveRead": false,
+      "longRunning": false,
+      "requiresChatSession": false,
+      "bypassesObserverBlock": false,
+      "bypassesApproval": false,
+      "bypassesChatCancel": false
+    }
+  },
+  {
+    "capabilityId": "vault.note.import",
+    "toolName": "vault_notes_import",
+    "rpcMethod": "vault/notes/import",
+    "localExecution": false,
+    "description": "Import one or more markdown documents into Vault → Notes. Titles come from an explicit title, the first heading, or the file name. NOT for adding SSH hosts. Import generated or attached markdown into Vault → Notes. Use content plus fileName for one document, or documents for a batch. This creates notes; it does not add SSH hosts. Confirm mode asks the user to approve the import.",
+    "inputShape": {
+      "content": {
+        "type": "string",
+        "optional": true,
+        "description": "Markdown body for a single document. An empty string is valid. Omit when documents is set."
+      },
+      "fileName": {
+        "type": "string",
+        "optional": true,
+        "description": "Source file name for a single document, such as runbook.md. Used when the body has no heading."
+      },
+      "title": {
+        "type": "string",
+        "optional": true,
+        "description": "Optional title override for a single document. Otherwise the first heading or file name is used."
+      },
+      "documents": {
+        "type": "string",
+        "optional": true,
+        "description": "JSON array of {fileName, content, title?} for a batch import. Do not combine with content."
+      },
+      "group": {
+        "type": "string",
+        "optional": true,
+        "description": "Optional folder path applied to every imported note."
       }
     },
     "policy": {
