@@ -58,7 +58,7 @@ export function getTerminalSidePanelAvailableHeight(
 export function getTerminalSidePanelMaxHeight(availableSurfaceHeight: number): number {
   const availableHeight = availableSurfaceHeight - TERMINAL_SIDE_PANEL_MIN_TERMINAL_HEIGHT;
   return Math.max(
-    TERMINAL_SIDE_PANEL_MIN_HEIGHT,
+    0,
     Math.min(TERMINAL_SIDE_PANEL_MAX_HEIGHT, availableHeight),
   );
 }

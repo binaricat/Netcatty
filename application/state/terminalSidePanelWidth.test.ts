@@ -47,4 +47,9 @@ test('terminal side panel bottom dock clamps height against surface height', () 
   assert.equal(clampTerminalSidePanelHeight(100, 1000), TERMINAL_SIDE_PANEL_MIN_HEIGHT);
   assert.equal(clampTerminalSidePanelHeight(300, 1000, 500), 500);
   assert.equal(clampTerminalSidePanelHeight(5000, 4000), TERMINAL_SIDE_PANEL_MAX_HEIGHT);
+  // A tall compose bar in the smallest window leaves less than the nominal
+  // panel minimum; the terminal's 240px reserve must still win.
+  assert.equal(getTerminalSidePanelMaxHeight(244), 4);
+  assert.equal(clampTerminalSidePanelHeight(560, 244), 4);
+  assert.equal(clampTerminalSidePanelHeight(560, 220), 0);
 });
