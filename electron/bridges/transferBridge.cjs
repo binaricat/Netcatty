@@ -1099,6 +1099,7 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
   let backedUp = false;
   let committed = false;
   let keepRecoveryFiles = false;
+  let supersededBackupPath = null;
   let preparedHandle;
   let originalHandle;
   let restoreProbeCreated = false;
@@ -1173,6 +1174,21 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
         } else if (error?.code !== "ENOENT") throw error;
       }
       assertNotCancelled();
+      // A previous remembered replacement retained its verified backup at
+      // this fixed name. rename(targetPath, backupPath) would atomically
+      // unlink that inode, so an editor still holding it open would silently
+      // lose edits (and any unrelated file squatting on the predictable name
+      // would vanish too). Relink the old artifact to a unique name first so
+      // its content stays reachable through recovery (Codex P1 on PR #3516).
+      if (options.expectedLocalTarget) {
+        supersededBackupPath = `${backupPath}.${token}`;
+        try {
+          await fs.promises.rename(backupPath, supersededBackupPath);
+        } catch (error) {
+          if (error?.code !== "ENOENT") throw error;
+          supersededBackupPath = null;
+        }
+      }
       try {
         await fs.promises.rename(targetPath, backupPath);
         backedUp = true;
@@ -1331,6 +1347,12 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
         await publishLocalFileExclusive(backupPath, targetPath, undefined, restoreHandle);
         await fs.promises.unlink(backupPath).catch(() => {});
         backedUp = false;
+        // The original target was restored, so put the superseded recovery
+        // backup back where this transfer found it.
+        if (supersededBackupPath) {
+          await fs.promises.rename(supersededBackupPath, backupPath).catch(() => {});
+          supersededBackupPath = null;
+        }
       } catch (restoreError) {
         keepRecoveryFiles = true;
         error.cause ??= restoreError;

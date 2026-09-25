@@ -83,9 +83,50 @@ test("repeated remembered downloads supersede the previous backup", async (t) =>
     expectedLocalTarget: rememberedExpectation(root, target),
   });
   assert.equal(fs.readFileSync(target, "utf8"), "third");
-  const backups = fs.readdirSync(root).filter((name) => name.endsWith(".backup"));
-  assert.equal(backups.length, 1, "roll over to a single managed recovery copy");
-  assert.equal(fs.readFileSync(path.join(root, backups[0]), "utf8"), "second");
+  const backups = fs.readdirSync(root).filter((name) => name.includes("netcatty.backup"));
+  const fixed = backups.find((name) => name === ".target.netcatty.backup");
+  const versioned = backups.find((name) => name.startsWith(".target.netcatty.backup."));
+  assert.ok(fixed, "keep the verified backup of the latest replacement");
+  assert.equal(fs.readFileSync(path.join(root, fixed), "utf8"), "second");
+  // The rollover must not unlink the previous recovery copy: an editor still
+  // holding its inode open could land an edit that would lose its only name.
+  assert.ok(versioned, "preserve the previous recovery backup under a versioned name");
+  assert.equal(fs.readFileSync(path.join(root, versioned), "utf8"), "first");
+});
+
+test("failed remembered replacement restores the superseded backup", async (t) => {
+  const root = fs.mkdtempSync(`${temp.getTempFilePath("remembered-rollback-backup")}-`);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const staged = path.join(root, "staged");
+  const target = path.join(root, "target");
+  fs.writeFileSync(staged, "second");
+  fs.writeFileSync(target, "first");
+  await bridge._promoteLocalTransferForTests(staged, target, {
+    requestedTargetPath: target,
+    expectedLocalTarget: rememberedExpectation(root, target),
+  });
+  // The renderer re-remembers the published target before the next repeat,
+  // but the remembered digest no longer matches the bytes on disk.
+  fs.writeFileSync(staged, "third");
+  fs.writeFileSync(target, "tampered");
+  const expectation = rememberedExpectation(root, target);
+  expectation.targetSha256 = require("node:crypto").createHash("sha256").update("stale").digest("hex");
+  await assert.rejects(
+    bridge._promoteLocalTransferForTests(staged, target, {
+      requestedTargetPath: target,
+      expectedLocalTarget: expectation,
+    }),
+    (error) => error?.message?.includes("changed during replacement"),
+  );
+  assert.equal(fs.readFileSync(target, "utf8"), "tampered", "restore the pre-transfer target bytes");
+  assert.equal(
+    fs.readFileSync(path.join(root, ".target.netcatty.backup"), "utf8"), "first",
+    "put the superseded backup back at the fixed name",
+  );
+  assert.equal(
+    fs.readdirSync(root).filter((name) => name.includes("netcatty.backup")).length, 1,
+    "leave no orphaned versioned recovery copy",
+  );
 });
 
 test("published file edited with restored mtime is never remembered", async (t) => {
