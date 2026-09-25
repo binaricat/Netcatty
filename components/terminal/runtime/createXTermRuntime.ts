@@ -165,7 +165,7 @@ import {
   type TerminalOutputHistoryPreview,
 } from "./terminalOutputHistory";
 import { shouldPassThroughCopyShortcut } from "./terminalCopyShortcut";
-import { isPlainCtrlVPasteChord } from "./terminalPasteChord";
+import { shouldPastePlainCtrlV } from "./terminalPasteChord";
 import {
   isMacCommandPeriodInterruptChord,
   shouldUseUrgentTerminalInterrupt,
@@ -303,6 +303,7 @@ export const resetKittyKeyboardModeStateForSession = (
 export type CreateXTermRuntimeContext = {
   container: HTMLDivElement;
   host: Host;
+  localShellType?: TerminalSession["shellType"];
   fontFamilyId: string;
   resolvedFontFamily: string;
   fontSize: number;
@@ -2425,23 +2426,22 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     // confirmed this path for Wispr Flow by remapping Paste to Ctrl+V.
     // In xterm's legacy key path, plain Ctrl+V can reach the remote as \x16
     // (readline quoted-insert) instead of a paste (#3468). Route the chord
-    // through the shared paste pipeline
-    // like the Ctrl+Shift+V binding: text pastes, and a local image-only
-    // clipboard still forwards raw Ctrl+V to nested TUIs. Kitty and
-    // negotiated Win32 input modes keep their own raw encoding of the chord.
+    // through the shared paste pipeline like the Ctrl+Shift+V binding: text
+    // pastes, and a local image-only clipboard forwards raw Ctrl+V to nested
+    // TUIs. Kitty and native Windows shells in Win32 input mode retain their
+    // own encoding of the chord.
     // Gate on the actual OS: on other platforms plain Ctrl+V is a live
     // terminal key (readline quoted-insert, Vim visual-block), so it must
     // keep forwarding as \x16 regardless of the configured hotkey scheme.
-    if (
-      platform === "win32"
-      && !kittySequenceForKeyDown
-      && !term.modes.win32InputMode
-      && !e.isComposing
-      && e.keyCode !== 229
-      && isPlainCtrlVPasteChord(e)
-    ) {
+    if (shouldPastePlainCtrlV(e, {
+      platform,
+      connected: Boolean(ctx.sessionRef.current) && ctx.statusRef.current === "connected",
+      kittySequenceForKeyDown,
+      win32InputMode: term.modes.win32InputMode,
+      localShellType: ctx.localShellType,
+    })) {
       const id = ctx.sessionRef.current;
-      if (id && ctx.statusRef.current === "connected") {
+      if (id) {
         e.preventDefault();
         e.stopPropagation();
         // Always share the context-menu paste path so local image-only

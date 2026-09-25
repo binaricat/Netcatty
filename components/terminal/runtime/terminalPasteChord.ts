@@ -1,7 +1,15 @@
 type PasteChordKeyEvent = Pick<
   KeyboardEvent,
-  "key" | "code" | "ctrlKey" | "shiftKey" | "altKey" | "metaKey"
+  "key" | "code" | "ctrlKey" | "shiftKey" | "altKey" | "metaKey" | "isComposing" | "keyCode"
 >;
+
+type PasteChordContext = {
+  platform: "darwin" | "linux" | "win32";
+  connected: boolean;
+  kittySequenceForKeyDown: string | null;
+  win32InputMode: boolean;
+  localShellType?: "posix" | "fish" | "powershell" | "cmd" | "unknown";
+};
 
 function isPhysicalVKey(e: PasteChordKeyEvent): boolean {
   return e.key.toLowerCase() === "v" || e.code === "KeyV";
@@ -25,4 +33,14 @@ export function isPlainCtrlVPasteChord(e: PasteChordKeyEvent): boolean {
     && !e.altKey
     && !e.metaKey
     && isPhysicalVKey(e);
+}
+
+export function shouldPastePlainCtrlV(e: PasteChordKeyEvent, context: PasteChordContext): boolean {
+  return context.platform === "win32"
+    && context.connected
+    && !context.kittySequenceForKeyDown
+    && (!context.win32InputMode || context.localShellType === "posix" || context.localShellType === "fish")
+    && !e.isComposing
+    && e.keyCode !== 229
+    && isPlainCtrlVPasteChord(e);
 }

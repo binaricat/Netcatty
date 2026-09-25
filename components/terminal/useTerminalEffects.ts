@@ -473,6 +473,7 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
         const runtime = createXTermRuntime({
           container: containerRef.current,
           host,
+          localShellType: ctx.shellType,
           fontFamilyId,
           resolvedFontFamily,
           fontSize,
