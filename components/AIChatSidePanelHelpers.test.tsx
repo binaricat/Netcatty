@@ -175,6 +175,16 @@ test('Claude model cache keys isolate configuration directories under one home',
   );
 });
 
+test('Claude model cache keys isolate credentials without exposing them', () => {
+  const agent = { id: 'discovered_claude', sdkBackend: 'claude', command: '/bin/claude' };
+  for (const name of ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN']) {
+    const first = buildSdkRuntimeModelCacheKey({ ...agent, env: { [name]: 'secret-one' } });
+    const second = buildSdkRuntimeModelCacheKey({ ...agent, env: { [name]: 'secret-two' } });
+    assert.notEqual(first, second, `${name} must separate cache entries`);
+    assert.doesNotMatch(first, /secret-one/);
+  }
+});
+
 test('shouldAdoptSdkCurrentModel keeps SDK defaults when no runtime list is returned', () => {
   assert.equal(shouldAdoptSdkCurrentModel('openai/gpt-5.1', undefined, []), true);
   assert.equal(shouldAdoptSdkCurrentModel('openai/gpt-5.1', 'openai/gpt-5.1', []), true);

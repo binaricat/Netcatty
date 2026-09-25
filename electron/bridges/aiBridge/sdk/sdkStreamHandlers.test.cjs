@@ -138,6 +138,15 @@ test("SDK model cache keys include catalog-affecting agent environment", () => {
   );
 });
 
+test("Claude model cache keys separate authentication without exposing values", () => {
+  for (const name of ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"]) {
+    const first = buildSdkModelCacheKey("claude", "/usr/bin/claude", { [name]: "secret-one" });
+    const second = buildSdkModelCacheKey("claude", "/usr/bin/claude", { [name]: "secret-two" });
+    assert.notEqual(first, second, `${name} must separate cache entries`);
+    assert.doesNotMatch(first, /secret-one/);
+  }
+});
+
 test("SDK model cache removes expired entries instead of retaining tombstones", () => {
   const cache = new Map([
     ["expired", { at: 1, currentModelId: null, models: [{ id: "old" }] }],
