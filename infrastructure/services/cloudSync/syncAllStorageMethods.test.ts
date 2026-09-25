@@ -1152,6 +1152,78 @@ test("syncAllProviders skips an identical remote even when its version is behind
   }
 });
 
+test("download-remote round trip skips its source but updates a stale peer", async () => {
+  const originalDecryptPayload = EncryptionService.decryptPayload;
+  const originalEncryptPayload = EncryptionService.encryptPayload;
+  const downloadedPayload = payload("downloaded");
+  const remotes = {
+    onedrive: remoteFile("onedrive", 4, 400),
+    google: remoteFile("google", 3, 300),
+  };
+  const uploads: CloudProvider[] = [];
+  const anchors: CloudProvider[] = [];
+
+  EncryptionService.decryptPayload = async (file: SyncedFile) =>
+    file === remotes.onedrive ? downloadedPayload : payload("old-peer");
+  EncryptionService.encryptPayload = async (_outgoing: SyncPayload, _password: string,
+    _deviceId: string, _deviceName: string, _appVersion: string, baseVersion: number) =>
+    remoteFile("google", baseVersion + 1, 500);
+
+  try {
+    const manager = {
+      masterPassword: "pw",
+      adapters: new Map(),
+      providerDecryptSeq: { onedrive: 0, google: 0 },
+      state: {
+        securityState: "UNLOCKED",
+        providers: {
+          onedrive: { enabled: true, connected: true, status: "connected" },
+          google: { enabled: true, connected: true, status: "connected" },
+        },
+        lastError: null,
+        syncState: "IDLE",
+        syncStrategy: "smartMerge",
+        localVersion: 4,
+        deviceId: "local-device",
+        deviceName: "Local",
+      },
+      getConnectedAdapter: async (provider: CloudProvider) => ({ provider }),
+      updateProviderStatus: () => {},
+      emit: () => {},
+      checkProviderConflict: async (provider: "onedrive" | "google") => ({
+        conflict: false,
+        remoteFile: remotes[provider],
+      }),
+      loadSyncBase: async () => downloadedPayload,
+      saveSyncBase: async () => {},
+      saveSyncAnchor: async (provider: CloudProvider) => { anchors.push(provider); },
+      saveProviderConnection: async () => {},
+      saveSyncConfig: () => {},
+      uploadToProvider: async (provider: CloudProvider, _adapter: unknown, file: SyncedFile) => {
+        uploads.push(provider);
+        return { success: true, provider, action: "upload" as const, version: file.meta.version };
+      },
+      exitBlockedState: () => {},
+      notifyStateChange: () => {},
+    };
+
+    // useAutoSync has just downloaded and committed the OneDrive file, then
+    // calls this ordinary provider sync with upload-local to update its peers.
+    const results = await syncAllProvidersImpl.call(manager, downloadedPayload, {
+      conflictActionOverride: "upload-local",
+    });
+
+    assert.equal(results.get("onedrive")?.action, "none");
+    assert.equal(results.get("google")?.action, "upload");
+    assert.deepEqual(uploads, ["google"]);
+    assert.deepEqual(anchors, ["onedrive"]);
+    assert.equal(results.get("google")?.version, 5);
+  } finally {
+    EncryptionService.decryptPayload = originalDecryptPayload;
+    EncryptionService.encryptPayload = originalEncryptPayload;
+  }
+});
+
 test("syncAllProviders leaves two converged providers idle across repeated cycles", async () => {
   const originalDecryptPayload = EncryptionService.decryptPayload;
   const originalEncryptPayload = EncryptionService.encryptPayload;
