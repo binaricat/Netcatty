@@ -1,0 +1,6 @@
+<svg width="300" height="300" viewBox="0 0 300 300" fill="none" xmlns="http://www.w3.org/2000/svg">
+<title>MiMo Code</title>
+<!-- Placeholder mark, originally authored for netcatty: rounded square with an "M" stroke. Not a vendor logo — replace with the official MiMo Code asset when one is published under a clear licence. -->
+<rect x="34" y="34" width="232" height="232" rx="64" stroke="currentColor" stroke-width="26"/>
+<path d="M92 206V104L150 176L208 104V206" stroke="currentColor" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

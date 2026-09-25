@@ -83,6 +83,7 @@
     "@fontsource/mona-sans": "^5.2.8",
     "@fontsource/space-grotesk": "^5.2.10",
     "@mdxeditor/editor": "^4.0.4",
+    "@mimo-ai/sdk": "^0.1.15",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@monaco-editor/react": "^4.7.0",
     "@netcatty/plugin-cli": "0.1.0-internal",

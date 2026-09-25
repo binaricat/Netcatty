@@ -107,6 +107,8 @@ function registerAgentDiscoveryHandlers(ctx) {
         description: "Open source coding agent via the official OpenCode SDK", sdkBackend: "opencode", args: [] },
       { command: "grok", name: "Grok Build", icon: "grok",
         description: "xAI's Grok Build coding agent CLI", sdkBackend: "grok", args: [] },
+      { command: "mimo", name: "MiMo Code", icon: "mimo",
+        description: "Xiaomi's MiMo Code CLI, an OpenCode fork", sdkBackend: "mimo", args: [] },
     ];
 
     const shellEnv = await getShellEnv();
@@ -155,6 +157,10 @@ function registerAgentDiscoveryHandlers(ctx) {
           auth = probeCodebuddyAuth({ env: shellEnv });
         } else if (agent.command === "opencode") {
           auth = { authenticated: true, authSource: "opencode-config" };
+        } else if (agent.command === "mimo") {
+          // MiMo Code reads its own config dir (~/.config/mimocode); there is no
+          // `mimo auth` probe to gate on, so mirror the OpenCode assumption.
+          auth = { authenticated: true, authSource: "mimo-config" };
         } else if (agent.command === "grok") {
           auth = probeGrokAuth({ env: shellEnv });
         }

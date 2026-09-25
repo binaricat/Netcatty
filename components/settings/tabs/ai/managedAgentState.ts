@@ -111,7 +111,9 @@ export function buildManagedAgentState(
         ? { ...(existingManaged?.env ?? {}), CODEBUDDY_CODE_PATH: pathInfo.path }
         : agentKey === "opencode"
           ? { ...(existingManaged?.env ?? {}), OPENCODE_BIN: pathInfo.path }
-          : existingManaged?.env;
+          : agentKey === "mimo"
+            ? { ...(existingManaged?.env ?? {}), MIMOCODE_BIN: pathInfo.path }
+            : existingManaged?.env;
   const cursorAuthMode = agentKey === "cursor"
     ? (existingManaged?.cursorAuthMode
       ?? (pathInfo.authSource === "cli-login" || pathInfo.cliLoginOk ? "cli-login" : "api-key"))
@@ -235,5 +237,6 @@ export function getInitialManagedAgentPaths(agents: ExternalAgentConfig[]) {
     codebuddy: getAutoManagedAgentStoredPath(agents, "codebuddy") ?? "",
     opencode: getAutoManagedAgentStoredPath(agents, "opencode") ?? "",
     grok: getAutoManagedAgentStoredPath(agents, "grok") ?? "",
+    mimo: getAutoManagedAgentStoredPath(agents, "mimo") ?? "",
   };
 }

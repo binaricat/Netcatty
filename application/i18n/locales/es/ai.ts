@@ -279,6 +279,18 @@ export const esAiMessages: Messages = {
   'ai.opencode.check': 'Verificar',
   'ai.opencode.resetPath': 'Restablecer',
 
+  // AI MiMo Code (CLI de Xiaomi MiMo Code — fork de OpenCode)
+  'ai.mimo.title': 'MiMo Code',
+  'ai.mimo.description': 'CLI de MiMo Code de Xiaomi, un fork de OpenCode. Instálalo y configura los proveedores en su propia configuración, luego selecciónalo como agente de codificación externo.',
+  'ai.mimo.detecting': 'Detectando...',
+  'ai.mimo.detected': 'Detectado',
+  'ai.mimo.notFound': 'No encontrado',
+  'ai.mimo.path': 'Ruta:',
+  'ai.mimo.notFoundHint': 'No se pudo encontrar mimo en el PATH. Instálalo o especifica la ruta del ejecutable a continuación.',
+  'ai.mimo.customPathPlaceholder': 'p. ej. /usr/local/bin/mimo',
+  'ai.mimo.check': 'Verificar',
+  'ai.mimo.resetPath': 'Restablecer',
+
   // AI Grok Build (in-app managed agent — distinct from External MCP client install)
   'ai.grok.title': 'Grok Build',
   'ai.grok.description': "La CLI de agente de codificación Grok Build de xAI. Instala la CLI de Grok, inicia sesión con `grok login` o define XAI_API_KEY, y luego selecciónala como agente externo.",

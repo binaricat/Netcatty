@@ -288,6 +288,18 @@ export const enAiMessages: Messages = {
   'ai.opencode.check': 'Check',
   'ai.opencode.resetPath': 'Reset',
 
+  // AI MiMo Code (Xiaomi MiMo Code CLI — OpenCode fork)
+  'ai.mimo.title': 'MiMo Code',
+  'ai.mimo.description': "Xiaomi's MiMo Code CLI, an OpenCode fork. Install it and configure providers in its own config, then select it as an external coding agent.",
+  'ai.mimo.detecting': 'Detecting...',
+  'ai.mimo.detected': 'Detected',
+  'ai.mimo.notFound': 'Not found',
+  'ai.mimo.path': 'Path:',
+  'ai.mimo.notFoundHint': 'Could not find mimo in PATH. Install it or specify the executable path below.',
+  'ai.mimo.customPathPlaceholder': 'e.g. /usr/local/bin/mimo',
+  'ai.mimo.check': 'Check',
+  'ai.mimo.resetPath': 'Reset',
+
   // AI Grok Build (in-app managed agent — distinct from External MCP client install)
   'ai.grok.title': 'Grok Build',
   'ai.grok.description': "xAI's Grok Build coding agent CLI. Install the Grok CLI, sign in with `grok login` or set XAI_API_KEY, then select it as an external agent.",

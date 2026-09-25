@@ -279,6 +279,18 @@ export const zhTWAiMessages: Messages = {
   'ai.opencode.check': '檢查',
   'ai.opencode.resetPath': '重設',
 
+  // AI MiMo Code（小米 MiMo Code CLI，OpenCode 分支）
+  'ai.mimo.title': 'MiMo Code',
+  'ai.mimo.description': '小米 MiMo Code CLI（OpenCode 分支）。安裝後在它自己的設定裡設定 provider 和金鑰，偵測到後即可作為外部程式設計 Agent 使用。',
+  'ai.mimo.detecting': '偵測中...',
+  'ai.mimo.detected': '已偵測到',
+  'ai.mimo.notFound': '未找到',
+  'ai.mimo.path': '路徑：',
+  'ai.mimo.notFoundHint': '在 PATH 中未找到 mimo。請安裝或在下方指定執行檔路徑。',
+  'ai.mimo.customPathPlaceholder': '例如 /usr/local/bin/mimo',
+  'ai.mimo.check': '檢查',
+  'ai.mimo.resetPath': '重設',
+
   // AI Grok Build（應用內託管 Agent，與 External MCP「新增到 Grok」不同）
   'ai.grok.title': 'Grok Build',
   'ai.grok.description': 'xAI 的 Grok Build 程式設計 Agent CLI。安裝 Grok CLI，使用 `grok login` 登入或設定 XAI_API_KEY 後，即可作為外部 Agent 選擇。',

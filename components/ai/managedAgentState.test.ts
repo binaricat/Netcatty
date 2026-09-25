@@ -345,6 +345,23 @@ test('buildManagedAgentState stores OPENCODE_BIN for opencode', () => {
   });
 });
 
+test('buildManagedAgentState stores MIMOCODE_BIN for mimo', () => {
+  const state = buildManagedAgentState(
+    [],
+    'catty',
+    'mimo',
+    { path: '/opt/homebrew/bin/mimo', version: '1.0.0', available: true },
+  );
+
+  assert.equal(state.agents.length, 1);
+  assert.equal(state.agents[0].id, 'discovered_mimo');
+  assert.equal(state.agents[0].command, '/opt/homebrew/bin/mimo');
+  assert.equal(state.agents[0].sdkBackend, 'mimo');
+  assert.deepEqual(state.agents[0].env, {
+    MIMOCODE_BIN: '/opt/homebrew/bin/mimo',
+  });
+});
+
 test('updateCodebuddyManagedEnv creates a disabled managed entry before CLI detection', () => {
   const state = updateCodebuddyManagedEnv([], 'internal', 'CODEBUDDY_API_KEY=secret');
 

@@ -271,7 +271,8 @@ export function shouldLoadSdkRuntimeModels(agent?: ExternalAgentConfig): boolean
     || sdkBackend === 'cursor'
     || sdkBackend === 'codebuddy'
     || sdkBackend === 'opencode'
-    || sdkBackend === 'grok';
+    || sdkBackend === 'grok'
+    || sdkBackend === 'mimo';
 }
 
 export function shouldAdoptSdkCurrentModel(

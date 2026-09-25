@@ -14,7 +14,7 @@ export const CopilotCliCard: React.FC<{
   onCustomPathChange: (path: string) => void;
   onRecheckPath: () => void;
   onResetPath?: () => void;
-  i18nPrefix?: "ai.copilot" | "ai.cursor" | "ai.opencode" | "ai.grok";
+  i18nPrefix?: "ai.copilot" | "ai.cursor" | "ai.opencode" | "ai.grok" | "ai.mimo";
   allowEmptyCheck?: boolean;
   showCustomPathInput?: boolean;
   /** Grok only: ACP (default) vs headless streaming-json. */

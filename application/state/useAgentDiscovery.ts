@@ -174,10 +174,13 @@ export function useAgentDiscovery(
           ? { ...(ea.env ?? {}), CLAUDE_CODE_EXECUTABLE: matchPath }
           : match.command === 'opencode'
             ? { ...(ea.env ?? {}), OPENCODE_BIN: matchPath }
-            : ea.env;
+            : match.command === 'mimo'
+              ? { ...(ea.env ?? {}), MIMOCODE_BIN: matchPath }
+              : ea.env;
         const envChanged =
           (match.command === 'claude' && ea.env?.CLAUDE_CODE_EXECUTABLE !== matchPath)
-          || (match.command === 'opencode' && ea.env?.OPENCODE_BIN !== matchPath);
+          || (match.command === 'opencode' && ea.env?.OPENCODE_BIN !== matchPath)
+          || (match.command === 'mimo' && ea.env?.MIMOCODE_BIN !== matchPath);
         const versionChanged = Boolean(match.version) && ea.cliVersion !== match.version;
         if (currentArgs !== newArgs || backendChanged || envChanged || versionChanged) {
           changed = true;
@@ -220,7 +223,9 @@ export function useAgentDiscovery(
           ? { env: { CLAUDE_CODE_EXECUTABLE: agent.binPath || agent.path || '' } }
           : agent.command === 'opencode'
             ? { env: { OPENCODE_BIN: agent.binPath || agent.path || '' } }
-          : {}),
+            : agent.command === 'mimo'
+              ? { env: { MIMOCODE_BIN: agent.binPath || agent.path || '' } }
+              : {}),
       };
     },
     [],
