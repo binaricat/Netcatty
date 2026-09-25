@@ -6,6 +6,7 @@ import React, { useCallback, useMemo, useState } from "react";
 import { useI18n } from "../../../application/i18n/I18nProvider";
 import { useSftpFileAssociations } from "../../../application/state/useSftpFileAssociations";
 import { useSettingsState } from "../../../application/state/useSettingsState";
+import { isSftpQuickDownloadPlatformSupported } from "../../../application/state/sftp/quickDownloadPreference";
 import type { FileOpenerType, SystemAppInfo } from "../../../lib/sftpFileUtils";
 import { netcattyBridge } from "../../../infrastructure/services/netcattyBridge";
 import { Button } from "../../ui/button";
@@ -231,12 +232,14 @@ export default function SettingsFileAssociationsTab() {
         >
           <Toggle checked={sftpSkipUnchanged} onChange={setSftpSkipUnchanged} />
         </SettingRow>
-        <SettingRow
-          label={t('settings.sftp.quickDownload.enable')}
-          description={t('settings.sftp.quickDownload.enableDesc')}
-        >
-          <Toggle checked={sftpQuickDownload} onChange={setSftpQuickDownload} />
-        </SettingRow>
+        {isSftpQuickDownloadPlatformSupported() && (
+          <SettingRow
+            label={t('settings.sftp.quickDownload.enable')}
+            description={t('settings.sftp.quickDownload.enableDesc')}
+          >
+            <Toggle checked={sftpQuickDownload} onChange={setSftpQuickDownload} />
+          </SettingRow>
+        )}
         <SettingRow
           label={t('settings.ssh.transportIdleTtl')}
           description={t('settings.ssh.transportIdleTtl.desc')}
