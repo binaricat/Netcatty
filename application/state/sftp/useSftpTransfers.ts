@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction 
 import {
   FileConflict,
   FileConflictAction,
+  Host,
   LocalDownloadTargetExpectation,
   LocalPublishedFileIdentity,
   SftpFilenameEncoding,
@@ -466,6 +467,7 @@ export const useSftpTransfers = ({
     sourcePane: SftpPane,
     targetPane: SftpPane,
     targetSide: "left" | "right",
+    sourceConnectHost?: Host,
   ): Promise<TransferStatus> => {
     if (cancelledTasksRef.current.has(task.id)) {
       return "cancelled";
@@ -524,7 +526,7 @@ export const useSftpTransfers = ({
 
       let walkStatus: TransferStatus = "transferring";
       await transferRuntime.runWalk(task.id, async () => {
-        walkStatus = await processTransferBody(task, sourcePane, targetPane, targetSide, updateTask);
+        walkStatus = await processTransferBody(task, sourcePane, targetPane, targetSide, updateTask, sourceConnectHost);
       });
       return walkStatus;
     });
@@ -536,6 +538,7 @@ export const useSftpTransfers = ({
     targetPane: SftpPane,
     targetSide: "left" | "right",
     updateTask: (updates: Partial<TransferTask>) => void,
+    sourceConnectHost?: Host,
   ): Promise<TransferStatus> => {
 
     // Initialize encoding early to avoid temporal dead zone issues
@@ -592,8 +595,14 @@ export const useSftpTransfers = ({
     // survive browse park and tab hide (pool holders, not panel map ids).
     if (!sourcePane.connection?.isLocal) {
       const sourceHostId = task.sourceHostId || sourcePane.connection?.hostId;
+      // Route-guarded direct downloads must never re-acquire their source from
+      // the vault host alone: only the connect-time Host carries the session
+      // proxy/jump route that identified the source (Codex P1 on PR #3516).
+      if (task.requireOriginalSourceForResume && !sourceConnectHost) {
+        throw new Error("Download source route cannot be verified; start a new download");
+      }
       if (acquireTransferSession && sourceHostId) {
-        sourceWorkLease = await acquireTransferSession(sourceHostId, `${task.id}:work-source`);
+        sourceWorkLease = await acquireTransferSession(sourceHostId, `${task.id}:work-source`, sourceConnectHost);
         sourceSftpId = sourceWorkLease.sftpId;
       }
       if (!sourceSftpId) {
@@ -1377,6 +1386,31 @@ export const useSftpTransfers = ({
         return;
       }
 
+      // Route-guarded direct downloads (Codex P1 on PR #3516): the generic
+      // retry below re-acquires the source lease from the vault hostId alone,
+      // which cannot prove the bytes still come from the connect-time
+      // proxy/jump route that identified the source. Revalidate the live
+      // route against the persisted key and pin the retry lease to it.
+      let retrySourceConnectHost: Host | undefined;
+      if (task.requireOriginalSourceForResume) {
+        const expectedKey = task.expectedSourceEndpointKey;
+        const sourceTab = expectedKey ? getTabByConnectionId(task.sourceConnectionId) : undefined;
+        const connectedHost = sourceTab && expectedKey
+          ? resolveConnectedHost?.(sourceTab.tabId)
+          : undefined;
+        const actualKey = connectedHost && connectedHost !== "local" && connectedHost.id === task.sourceHostId
+          ? await getTransferPoolKeyForHost?.(connectedHost)
+          : undefined;
+        if (!connectedHost || connectedHost === "local" || !expectedKey || !actualKey || actualKey !== expectedKey) {
+          notify.warning(
+            "Repeat download source cannot be verified; start a new download",
+            "SFTP",
+          );
+          return;
+        }
+        retrySourceConnectHost = connectedHost;
+      }
+
       await cleanupTaskArtifacts(task);
 
       const retriedTask: TransferTask = {
@@ -1419,10 +1453,10 @@ export const useSftpTransfers = ({
             : t,
         ),
       );
-      await processTransfer(retriedTask, sourcePane, targetPane, targetSide);
+      await processTransfer(retriedTask, sourcePane, targetPane, targetSide, retrySourceConnectHost);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- processTransfer is defined inline
-    [acquireTransferSession, cleanupTaskArtifacts, ownerId, resolveTaskEndpoints, setTransfers, sftpSessionsRef],
+    [acquireTransferSession, cleanupTaskArtifacts, getTabByConnectionId, getTransferPoolKeyForHost, ownerId, resolveConnectedHost, resolveTaskEndpoints, setTransfers, sftpSessionsRef],
   );
 
   const clearCompletedTransfers = useCallback(() => {

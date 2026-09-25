@@ -155,6 +155,22 @@ test("malformed saved target identity fails closed", () => {
   });
 });
 
+test("connect-time source route key survives persistence and drops corrupt values", () => {
+  const original = {
+    ...task("routed-download", "transferring", 1),
+    direction: "download" as const,
+    expectedSourceEndpointKey: "route-key-1",
+  };
+  const restored = deserializeSftpTransferCenter(serializeSftpTransferCenter([original]));
+  assert.equal(restored.tasks[0]?.expectedSourceEndpointKey, "route-key-1");
+
+  const corrupt = deserializeSftpTransferCenter(JSON.stringify({
+    version: 1,
+    tasks: [{ ...task("routed-download", "paused", 1), expectedSourceEndpointKey: 42 }],
+  }));
+  assert.equal(corrupt.tasks[0]?.expectedSourceEndpointKey, undefined);
+});
+
 test("restoring terminal tasks strips stale conflict payloads (skip-without-clear legacy)", () => {
   const conflict = {
     transferId: "css-dir",

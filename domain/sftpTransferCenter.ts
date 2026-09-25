@@ -48,6 +48,7 @@ const SAFE_TASK_KEYS: ReadonlySet<keyof TransferTask> = new Set([
   "directoryResumeCheckpoint",
   "expectedLocalTarget",
   "requireOriginalSourceForResume",
+  "expectedSourceEndpointKey",
 ]);
 
 export function sanitizeSftpTransferTask(value: unknown): TransferTask | null {
@@ -89,6 +90,10 @@ export function sanitizeSftpTransferTask(value: unknown): TransferTask | null {
     }
   }
   if (task.expectedLocalTarget) task.requireOriginalSourceForResume = true;
+  // A corrupt or empty route key must not pass as a verified route later.
+  if (typeof task.expectedSourceEndpointKey !== "string" || !task.expectedSourceEndpointKey) {
+    task.expectedSourceEndpointKey = undefined;
+  }
   if (!Number.isSafeInteger(task.directoryEntryIndex) || (task.directoryEntryIndex ?? -1) < 0) {
     task.directoryEntryIndex = undefined;
   }

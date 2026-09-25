@@ -32,6 +32,9 @@ export function createDirectDownloadTransferTask(
     // come from a different server's identical path (Codex P1 on PR #3516).
     requireOriginalSourceForResume:
       !!input.expectedLocalTarget || !!input.expectedSourceEndpointKey,
+    // Persisted so a retry can revalidate the live route against the exact
+    // connect-time route that identified the source (Codex P1 on PR #3516).
+    expectedSourceEndpointKey: input.expectedSourceEndpointKey,
     sourceConnectionId: input.sourceConnectionId,
     targetConnectionId: "local",
     sourceHostId: input.sourceHostId,

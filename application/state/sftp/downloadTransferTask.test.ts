@@ -58,6 +58,8 @@ test("route-bound download tasks refuse dedicated resume even without a remember
 
   assert.equal(task.expectedLocalTarget, undefined);
   assert.equal(task.requireOriginalSourceForResume, true);
+  // Persisted so a retry can revalidate the live route against this key.
+  assert.equal(task.expectedSourceEndpointKey, "route-key-1");
 });
 
 test("plain download tasks without a remembered target or route stay hard-resumable", () => {

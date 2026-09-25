@@ -92,6 +92,9 @@ export interface TransferTask {
   expectedLocalTarget?: LocalDownloadTargetExpectation;
   /** A remembered download target must not reconnect through an unverified route. */
   requireOriginalSourceForResume?: boolean;
+  /** Connect-time route key (proxy/jump) that identified the download source.
+   * Persisted so a retry can prove the bytes still come from the same route. */
+  expectedSourceEndpointKey?: string;
   sourceConnectionId: string;
   targetConnectionId: string;
   targetHostId?: string;
