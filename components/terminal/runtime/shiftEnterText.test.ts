@@ -9,7 +9,9 @@ import {
   isBareShiftEnterLineEnding,
   isShiftEnterLineContinuationText,
   resolveShiftEnterText,
+  resolveWin32ForcedShiftEnterText,
   SHIFT_ENTER_CSI_U_SEQUENCE,
+  shouldClaimShiftEnterForText,
   shouldSendShiftEnterText,
 } from "./shiftEnterText";
 
@@ -33,6 +35,11 @@ test("shift enter text decodes newline, tab, carriage return, and backslash esca
     decodeTerminalTextEscapes("line\\nnext\\tindent\\rreturn\\\\slash"),
     "line\nnext\tindent\rreturn\\slash",
   );
+});
+
+test("shift enter text decodes the escape escape as ESC", () => {
+  assert.equal(decodeTerminalTextEscapes("\\e\r"), "\u001b\r");
+  assert.equal(decodeTerminalTextEscapes("\\e[13;2u"), SHIFT_ENTER_CSI_U_SEQUENCE);
 });
 
 test("shift enter text can represent Tabby-style shell continuation", () => {
@@ -99,6 +106,65 @@ test("Kitty encodings that collapse Shift+Enter to CR/LF do not preserve the cho
   assert.equal(doesKittyEncodingPreserveShiftEnter(SHIFT_ENTER_CSI_U_SEQUENCE), true);
 });
 
+test("force-text opt-out only overrides the Win32 hand-off", () => {
+  const forced = {
+    shiftEnterNewlineEnabled: true,
+    shiftEnterForceText: true,
+  };
+  const notForced = { ...forced, shiftEnterForceText: false };
+
+  // Regression: a negotiated Kitty encoding that preserves Shift+Enter (an
+  // SSH/TUI session outside ConPTY) must keep that encoding even when the
+  // Win32 opt-out is enabled.
+  assert.equal(
+    shouldClaimShiftEnterForText(keyEvent(), forced, {
+      win32InputMode: false,
+      kittySequenceForKeyDown: SHIFT_ENTER_CSI_U_SEQUENCE,
+    }),
+    false,
+  );
+  // Outside Win32 mode the existing collapse fallback is unchanged by the
+  // opt-out in either direction.
+  for (const settings of [forced, notForced]) {
+    for (const kittySequenceForKeyDown of ["\r", null]) {
+      assert.equal(
+        shouldClaimShiftEnterForText(keyEvent(), settings, {
+          win32InputMode: false,
+          kittySequenceForKeyDown,
+        }),
+        true,
+      );
+    }
+  }
+  // Win32 input mode keeps the native record unless the user opted out.
+  const win32 = { win32InputMode: true, kittySequenceForKeyDown: null };
+  assert.equal(shouldClaimShiftEnterForText(keyEvent(), notForced, win32), false);
+  assert.equal(shouldClaimShiftEnterForText(keyEvent(), forced, win32), true);
+  assert.equal(
+    shouldClaimShiftEnterForText(keyEvent(), { ...forced, shiftEnterNewlineEnabled: false }, win32),
+    false,
+  );
+  assert.equal(shouldClaimShiftEnterForText(keyEvent({ ctrlKey: true }), forced, win32), false);
+});
+
+test("Win32 forced Shift+Enter text requires the opt-out and non-empty text", () => {
+  const settings = {
+    shiftEnterNewlineEnabled: true,
+    shiftEnterNewlineText: "\\e\\r",
+    shiftEnterForceText: true,
+  };
+  assert.equal(resolveWin32ForcedShiftEnterText(keyEvent(), settings), "\u001b\r");
+  assert.equal(
+    resolveWin32ForcedShiftEnterText(keyEvent(), { ...settings, shiftEnterForceText: false }),
+    null,
+  );
+  assert.equal(
+    resolveWin32ForcedShiftEnterText(keyEvent(), { ...settings, shiftEnterNewlineText: "" }),
+    null,
+  );
+  assert.equal(resolveWin32ForcedShiftEnterText(keyEvent({ type: "keyup" }), settings), null);
+});
+
 test("runtime routes Shift+Enter text through the shared input handler", () => {
   const source = readFileSync(
     new URL("./createXTermRuntime.ts", import.meta.url),
@@ -109,10 +175,35 @@ test("runtime routes Shift+Enter text through the shared input handler", () => {
     source,
     /const handleTerminalInputData = \(\s+data: string,\s+options\?: \{\s+source\?: "terminal" \| "shift-enter" \| "kitty";\s+[\s\S]*?skipBroadcast\?: boolean;\s+[\s\S]*?perCharacterWrites\?: boolean;\s+\},\s+\) => \{/s,
   );
-  // Remap when Kitty encoding does not preserve Shift+Enter (not merely flags===0).
+  // Remap when Kitty encoding does not preserve Shift+Enter (not merely flags===0),
+  // skipping the ConPTY Win32 hand-off only when the force-text opt-out is on.
   assert.match(
     source,
-    /if \(\s*shouldSendShiftEnterText\([\s\S]*?\) &&\s*!term\.modes\.win32InputMode &&\s*!doesKittyEncodingPreserveShiftEnter\(kittySequenceForKeyDown\)\s*\) \{[\s\S]*?const shiftEnterText = resolveShiftEnterText\([\s\S]*?\)[\s\S]*?\}\s*if \(kittySequenceForKeyDown\)/s,
+    /if \(\s*shouldClaimShiftEnterForText\(e, ctx\.terminalSettingsRef\.current, \{\s*win32InputMode: term\.modes\.win32InputMode,\s*kittySequenceForKeyDown,\s*\}\)\s*\) \{[\s\S]*?const shiftEnterText = resolveShiftEnterText\([\s\S]*?\)[\s\S]*?\}\s*if \(kittySequenceForKeyDown\)/s,
+  );
+  // The gate above only decides whether Shift+Enter is *eligible* for send-text.
+  // It must then claim the keydown only when resolveShiftEnterText() returned
+  // actual text: preventDefault/write/broadcast/return false all belong inside
+  // `if (shiftEnterText)`. Empty configured text falls through to the Win32 and
+  // Kitty paths below, so the press still yields a plain Enter instead of being
+  // consumed with nothing written — which looks like a dead feature.
+  const gateBlock = source.slice(
+    source.search(/shouldClaimShiftEnterForText\(e, ctx\.terminalSettingsRef\.current/),
+    source.indexOf("if (kittySequenceForKeyDown) {"),
+  );
+  const interceptionStart = gateBlock.indexOf("if (shiftEnterText) {");
+  assert.notEqual(interceptionStart, -1);
+  const interception = gateBlock.slice(interceptionStart);
+
+  assert.doesNotMatch(
+    gateBlock.slice(0, interceptionStart),
+    /e\.preventDefault\(\)|return false/,
+  );
+  assert.match(interception, /^if \(shiftEnterText\) \{\s*e\.preventDefault\(\);/);
+  assert.match(interception, /return false;\s*\}\s*\}\s*\}\s*$/);
+  assert.match(
+    source,
+    /shiftEnterForceText opts out of the Win32 hand-off for runtimes that/s,
   );
   assert.match(
     source,

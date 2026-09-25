@@ -153,3 +153,54 @@ node --test --import tsx \
 - 本报告的源码和 JSDOM 字节测试确认了因果链，但没有代替真实 Windows UI/ConPTY 运行验证。
 - `win32-input-mode` 在 xterm.js 与 VS Code 中仍属较新的实验能力；本机 ConPTY 的窄范围启用降低了外溢风险。
 - 若未来收到“Netcatty → SSH → 远端 Windows ConPTY”同类报告，需要单独确认 `CSI ?9001h` 是否穿过该 SSH/PTY 实现，并决定是否在已识别的远端 Windows 会话启用 capability。那是后续覆盖面，不是当前 #2974 是否修复的否定条件。
+
+## 9. Follow-up (2026-09-21): libuv readers, the opt-out setting, and why negotiation cannot reach them
+
+> 补记时间：2026-09-21。测量时间：2026-09-20/21。环境：Windows 11 26200、Netcatty 本机 PowerShell（ConPTY 之上）、Claude Code 2.1.278 原生安装。
+
+### 9.1 §3 的 ConPTY 路径已经验证有效
+
+#3247 落地后，本机 Windows 会话会进入 `win32-input-mode`。在同一会话里用 .NET 的 `[Console]::ReadKey` 探针读取 Shift+Enter，报告 `mods=Shift`；Codex 在同一会话中插入换行。两者一致说明 ConPTY 确实按 §3 的链路把 Win32 输入序列重建成带 `SHIFT_PRESSED` 的 `INPUT_RECORD`，终端侧不再是丢掉 Shift 的一方。#2974 的原始复现路径（Netcatty 本机 PowerShell → Codex/Grok）已由 #3247 覆盖。
+
+### 9.2 剩下的缺口在 libuv，不在 ConPTY
+
+Node/Bun 写的 CLI 不直接读 `INPUT_RECORD`，而是经过 libuv 读 stdin。libuv 把 `INPUT_RECORD` 翻译成 VT 字节时丢弃修饰键状态，应用最终只收到一个裸 CR。实测受影响的有 Claude Code、CodeBuddy、Antigravity CLI。这与 [anthropics/claude-code#92771](https://github.com/anthropics/claude-code/issues/92771) 是同一根因，该 issue 在 2.1.278 上仍 open。
+
+要强调的边界是：丢失发生在 `INPUT_RECORD` **之后**、libuv 的翻译过程中；ConPTY 那一侧是正确的。§7 的字节级结论与这里的实测并不矛盾，它们测的是链路的不同两段。
+
+### 9.3 内容级测量结果
+
+在 Win32 模式生效、并用本次新增的 `shiftEnterForceText` 强制走文本分支的条件下：
+
+| 发送的文本 | Claude Code 中的结果 |
+|---|---|
+| `\n` | 仍然提交（LF 对这个 reader 不可区分）|
+| `\u001b[13;2u`（Kitty CSI-u）| 无效果，没有到达应用 |
+| `\u001b\r`（ESC + CR，旧式 Alt+Enter 编码），且 `~/.claude/keybindings.json` 含 `"alt+enter": "chat:newline"` | **插入换行** |
+
+对照组：发送 `XYZ` 会出现在 shell 里，说明回退分支与写入通路本身工作正常，不是通路故障造成的假阴性。
+
+`\u001b\r` 之所以有效，是因为 conhost 把 ESC + CR 映射回旧式的 Alt+Enter 键盘记录，之后由应用自己把 `alt+enter` 解释为换行。也就是说，真正生效的是**应用自己的按键映射**，而不是终端把修饰键传了过去。
+
+由此可以下一个明确结论：**在 Windows ConPTY 下，任何终端侧协商都无法触达基于 libuv 的 CLI。** `?9001h`、Kitty flags push、CSI-u 注入都不行——写进 ConPTY 输入流的字节会丢掉 ESC 前缀，而原生 `INPUT_RECORD` 读取者不受影响。终端无法修复这类运行时，必须由 CLI 自己的输入读取层改。
+
+### 9.4 为什么做成显式开关，而不是进程名识别
+
+既然终端侧无能为力，能给用户的就只剩“允许在 Win32 模式下仍然发送配置文本”这一条内容级通道。本次以显式 opt-out 交付：`shiftEnterForceText`，默认 `false`。
+
+这与 §6「暂不需要做」里的“不做 Codex/Grok/Claude/OpenCode 应用名识别”一致：按进程名猜会不断过期，也会误伤同一终端里的其它程序。
+
+为什么必须是 Shift+Enter 这个物理键：
+
+- **Alt+Enter 不能当作物理键使用。** Windows Terminal 与 conhost 会把它吃掉当作全屏切换，用户无法把它作为实际按下的组合键送到应用。
+- **Ctrl+J 常被其它绑定占用**，也不是用户心智中的换行键。
+
+所以用户要的是 Shift+Enter，而本开关做的事情是：让用户把 Shift+Enter 映射成一段自己能处理的文本。
+
+### 9.5 需要直说的取舍
+
+- 这是**内容级 workaround，不是修饰键透传**。它发送的是文本，依赖应用侧（例如 `keybindings.json`）把这段文本解释成换行。
+- 默认关闭，因此 #2974 为 Codex/Grok 修好的原生记录路径完全不被触碰；开启后该会话的 Shift+Enter 不再发出原生记录（keydown 被消费，不会同时产生文本和记录）。
+- 开关只作用于 Win32 输入模式。非 Win32 会话（例如 SSH 里已协商、能保留 Shift+Enter 的 Kitty 键盘协议）仍按原逻辑发送 Kitty 编码，开关不会覆盖它。
+- 广播时由每个目标按**自己的**设置决定：开启了开关的 Win32 目标发送自己配置的文本并吞掉对应的松开事件（不产生孤立的原生 key-up）；未开启的 Win32 目标仍收到原生按下/松开记录，与源会话的设置无关。
+- 真正的修复点仍在这些 CLI 的 libuv 输入层。本开关只是在那之前给出一个可选的用户侧出路，不应被当作 #2974 根因的替代答案。

@@ -10,6 +10,7 @@ import type { TerminalSettings } from "../../../domain/models";
 import {
   isBareShiftEnterLineEnding,
   resolveShiftEnterText,
+  resolveWin32ForcedShiftEnterText,
   shouldSendShiftEnterText,
 } from "./shiftEnterText";
 
@@ -94,9 +95,11 @@ export const createKittyKeyboardBroadcastForwarder = (options: {
 export const clearKittyKeyboardBroadcastPairingState = (
   encodedKeys: Set<string>,
   legacySuppressedKeys: Set<string>,
+  win32ShiftEnterTextKeys?: Set<string>,
 ): void => {
   encodedKeys.clear();
   legacySuppressedKeys.clear();
+  win32ShiftEnterTextKeys?.clear();
 };
 
 const SNAPSHOT_MODIFIERS = [
@@ -225,8 +228,14 @@ type ResolveKittyKeyboardBroadcastOptions = {
   win32InputMode?: boolean;
   shiftEnterSettings?: Pick<
     TerminalSettings,
-    "shiftEnterNewlineEnabled" | "shiftEnterNewlineText"
+    "shiftEnterNewlineEnabled" | "shiftEnterNewlineText" | "shiftEnterForceText"
   >;
+  /**
+   * Presses this Win32 target turned into its configured Shift+Enter text
+   * instead of a native record. Their paired releases are dropped so ConPTY
+   * never sees a native key-up without the matching key-down.
+   */
+  win32ShiftEnterTextKeys?: Set<string>;
 };
 
 export const resolveWin32InputLogicalData = (
@@ -267,6 +276,28 @@ const resolveShiftEnterBroadcastPayload = (
   };
 };
 
+/**
+ * On a Win32 target, decide Shift+Enter from the target's own
+ * shiftEnterForceText setting rather than the source's, so each peer gets the
+ * input its own TUI can read. Returns undefined when the native record should
+ * be kept.
+ */
+const resolveWin32ForcedShiftEnterBroadcast = (
+  event: KittyKeyboardEvent,
+  identity: string,
+  options: ResolveKittyKeyboardBroadcastOptions,
+): ResolvedKittyKeyboardBroadcastInput | null | undefined => {
+  if (event.type === "keyup") {
+    return options.win32ShiftEnterTextKeys?.delete(identity) ? null : undefined;
+  }
+  const data = resolveWin32ForcedShiftEnterText(event, options.shiftEnterSettings);
+  if (!data) return undefined;
+  options.encodedKeys.add(identity);
+  (options.legacySuppressedKeys ?? options.encodedKeys).add(identity);
+  options.win32ShiftEnterTextKeys?.add(identity);
+  return { data, kittyEncoded: false, urgentInterrupt: false };
+};
+
 export const resolveKittyKeyboardBroadcastInput = (
   input: KittyKeyboardBroadcastInput,
   options: ResolveKittyKeyboardBroadcastOptions,
@@ -297,7 +328,11 @@ export const resolveKittyKeyboardBroadcastInput = (
         const hasPairedKeyDown = options.encodedKeys.delete(identity);
         legacySuppressedKeys.delete(identity);
         if (!hasPairedKeyDown) return null;
+        const forced = resolveWin32ForcedShiftEnterBroadcast(input.event, identity, options);
+        if (forced !== undefined) return forced;
       } else {
+        const forced = resolveWin32ForcedShiftEnterBroadcast(input.event, identity, options);
+        if (forced !== undefined) return forced;
         options.encodedKeys.add(identity);
         legacySuppressedKeys.add(identity);
       }
@@ -327,6 +362,8 @@ export const resolveKittyKeyboardBroadcastInput = (
   if (input.event.type === "keyup") legacySuppressedKeys.delete(identity);
   if (input.event.type === "keyup" && !hasPairedKeyDown) return null;
   if (options.win32InputMode) {
+    const forced = resolveWin32ForcedShiftEnterBroadcast(input.event, identity, options);
+    if (forced !== undefined) return forced;
     if (input.event.type !== "keyup") {
       options.encodedKeys.add(identity);
       legacySuppressedKeys.add(identity);

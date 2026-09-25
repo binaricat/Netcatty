@@ -233,6 +233,17 @@ export const TerminalBehaviorSettings: React.FC<TerminalBehaviorSettingsProps> =
         </SettingRow>
 
         <SettingRow
+          anchorId="terminal-shift-enter-force-text"
+          label={t("settings.terminal.behavior.shiftEnterForceText")}
+          description={t("settings.terminal.behavior.shiftEnterForceText.desc")}
+        >
+          <Toggle
+            checked={terminalSettings.shiftEnterForceText ?? false}
+            onChange={(v) => updateTerminalSetting("shiftEnterForceText", v)}
+          />
+        </SettingRow>
+
+        <SettingRow
           anchorId="terminal-clear-wipes-scrollback"
           label={t("settings.terminal.behavior.clearWipesScrollback")}
           description={t("settings.terminal.behavior.clearWipesScrollback.desc")}

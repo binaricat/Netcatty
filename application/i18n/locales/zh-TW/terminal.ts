@@ -344,7 +344,10 @@ export const zhTWTerminalMessages: Messages = {
     '在終端中按 Shift+Enter 時傳送設定的文字，而不是一般 Enter。',
   'settings.terminal.behavior.shiftEnterNewlineText': '傳送內容',
   'settings.terminal.behavior.shiftEnterNewlineText.desc':
-    '使用 \\n 表示換行，\\t 表示 Tab，\\\\ 表示反斜線。',
+    '使用 \\n 表示換行，\\t 表示 Tab，\\e 表示 ESC，\\\\ 表示反斜線。',
+  'settings.terminal.behavior.shiftEnterForceText': '在 Win32 輸入模式下也傳送文字',
+  'settings.terminal.behavior.shiftEnterForceText.desc':
+    '本機 Windows ConPTY 工作階段協商 Win32 輸入模式時，仍然傳送上面的文字。Node/Bun 寫的 CLI（Claude Code、CodeBuddy）讀不到主控台輸入記錄中的修飾鍵，需要這個開關才能區分 Shift+Enter。',
   'settings.terminal.behavior.clearWipesScrollback': '`clear` 同時清空捲動緩衝',
   'settings.terminal.behavior.clearWipesScrollback.desc':
     '`clear` 指令同時清空捲動緩衝（POSIX 預設行為）。關閉則保留歷史。',

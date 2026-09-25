@@ -710,7 +710,10 @@ Highlight the focused split pane:
     'Send configured text instead of normal Enter when pressing Shift+Enter in the terminal.',
   'settings.terminal.behavior.shiftEnterNewlineText': 'Text to send',
   'settings.terminal.behavior.shiftEnterNewlineText.desc':
-    'Use \\n for newline, \\t for tab, and \\\\ for backslash.',
+    'Use \\n for newline, \\t for tab, \\e for Escape, and \\\\ for backslash.',
+  'settings.terminal.behavior.shiftEnterForceText': 'Send text in Win32 input mode',
+  'settings.terminal.behavior.shiftEnterForceText.desc':
+    'Also send the text above when a local Windows ConPTY session negotiates Win32 input mode. Needed for Node/Bun CLIs (Claude Code, CodeBuddy) that cannot read modifier keys from console input records.',
   'settings.terminal.behavior.clearWipesScrollback': '`clear` wipes scrollback',
   'settings.terminal.behavior.clearWipesScrollback.desc':
     'Make `clear` also wipe the scrollback buffer (POSIX default). Disable to keep history visible after `clear`.',

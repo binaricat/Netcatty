@@ -262,6 +262,7 @@ const SYNCABLE_TERMINAL_KEYS = [
   'fontLigatures', 'fontSmoothing', 'fontWeight', 'fontWeightBold', 'fallbackFont',
   'linePadding', 'cursorShape', 'cursorBlink', 'highlightCursorLine', 'minimumContrastRatio',
   'altAsMeta', 'optionArrowWordJump', 'shiftEnterNewlineEnabled', 'shiftEnterNewlineText',
+  'shiftEnterForceText',
   'kittyKeyboardProtocolEnabled',
   'scrollOnInput', 'scrollOnOutput', 'scrollOnKeyPress', 'scrollOnPaste',
   'smoothScrolling',

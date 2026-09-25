@@ -33,6 +33,11 @@ test("normalizeTerminalSettings preserves enabled cursor line highlight", () => 
   assert.equal(normalizeTerminalSettings({ highlightCursorLine: true }).highlightCursorLine, true);
 });
 
+test("normalizeTerminalSettings keeps Shift+Enter text opt-in for Win32 input mode", () => {
+  assert.equal(normalizeTerminalSettings().shiftEnterForceText, false);
+  assert.equal(normalizeTerminalSettings({ shiftEnterForceText: true }).shiftEnterForceText, true);
+});
+
 test("normalizeTerminalSettings disables prompt line breaks by default", () => {
   const settings = normalizeTerminalSettings();
 
