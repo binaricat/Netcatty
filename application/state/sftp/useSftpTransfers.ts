@@ -813,6 +813,13 @@ export const useSftpTransfers = ({
               ? {
                   fileName: duplicateTarget.fileName,
                   targetPath: duplicateTarget.targetPath,
+                  // The duplicate writes to a fresh path, so the remembered
+                  // identity of the original target no longer applies;
+                  // assertExpectedLocalDownloadTarget would reject the new
+                  // path against the old file's identity (Codex P2 on PR
+                  // #3516). The source-route guard (expectedSourceEndpointKey)
+                  // is retained.
+                  expectedLocalTarget: undefined,
                 }
               : null),
             skipConflictCheck: true,
@@ -1636,6 +1643,12 @@ export const useSftpTransfers = ({
             ...affectedTask,
             fileName: duplicateTarget.fileName,
             targetPath: duplicateTarget.targetPath,
+            // The duplicate writes to a fresh path, so the remembered identity
+            // of the original target no longer applies;
+            // assertExpectedLocalDownloadTarget would reject the new path
+            // against the old file's identity (Codex P2 on PR #3516). The
+            // source-route guard (expectedSourceEndpointKey) is retained.
+            expectedLocalTarget: undefined,
             skipConflictCheck: true,
           };
         } else if (action === "replace") {
