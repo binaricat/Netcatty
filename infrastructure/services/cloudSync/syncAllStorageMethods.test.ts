@@ -1024,11 +1024,16 @@ test("syncAllProviders skips the upload when the payload already matches the pro
 test("no-op sync stops when the vault locks during persistence", async () => {
   const originalDecryptPayload = EncryptionService.decryptPayload;
   const localPayload = payload("local");
+  const checkedRemotePayload = withSyncReliabilityMeta(
+    localPayload,
+    payloadWithHosts(["local", "deleted"]),
+    { deviceId: "remote-device", now: 700 },
+  );
   const checkedRemote = remoteFile("github", 7, 700);
-  EncryptionService.decryptPayload = async () => localPayload;
+  EncryptionService.decryptPayload = async () => checkedRemotePayload;
 
   try {
-    for (const lockDuring of ["anchor", "connection"] as const) {
+    for (const lockDuring of ["base", "anchor", "connection"] as const) {
       let generation = 0;
       let uploads = 0;
       const completed: string[] = [];
@@ -1063,7 +1068,12 @@ test("no-op sync stops when the vault locks during persistence", async () => {
         },
         checkProviderConflict: async () => ({ conflict: false, remoteFile: checkedRemote }),
         loadSyncBase: async () => localPayload,
-        saveSyncBase: async () => {},
+        saveSyncBase: async () => {
+          if (lockDuring === "base") {
+            generation += 1;
+            manager.state.securityState = "LOCKED";
+          }
+        },
         saveSyncAnchor: async () => {
           if (lockDuring === "anchor") {
             generation += 1;
