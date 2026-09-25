@@ -813,6 +813,17 @@ export const useSftpTransfers = ({
             ? await getDuplicateTarget(task, targetPane, targetSftpId, targetEncoding)
             : null;
           if (cancelledTasksRef.current.has(task.id)) return "cancelled";
+          if (duplicateTarget) {
+            // Mirror the explicit Duplicate resolution: the retained
+            // publication callback still remembers the original target path,
+            // so after publishing the duplicate it would delete the
+            // remembered association for this source and then fail its
+            // identity check against the duplicate's inode, making later
+            // quick downloads reopen Save As (Codex P2 on PR #3516). Drop
+            // the handler; a fresh duplicate path has no remembered identity
+            // to refresh.
+            publicationHandlersRef.current.delete(task.id);
+          }
           const updatedTask: TransferTask = {
             ...task,
             ...(duplicateTarget

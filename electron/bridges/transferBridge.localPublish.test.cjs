@@ -192,6 +192,39 @@ test("remembered download refuses a backup whose inode no longer matches its own
   assert.equal(fs.readFileSync(target, "utf8"), "second", "leave the target untouched");
 });
 
+test("remembered download recovers an owner marker orphaned by an interrupted rollover", async (t) => {
+  const root = fs.mkdtempSync(`${temp.getTempFilePath("remembered-orphan-marker")}-`);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const staged = path.join(root, "staged");
+  const target = path.join(root, "target");
+  const backupPath = path.join(root, ".target.netcatty.backup");
+  fs.writeFileSync(staged, "second");
+  fs.writeFileSync(target, "first");
+  await bridge._promoteLocalTransferForTests(staged, target, {
+    requestedTargetPath: target,
+    expectedLocalTarget: rememberedExpectation(root, target),
+  });
+  assert.equal(fs.readFileSync(backupPath, "utf8"), "first");
+  // Simulate an interrupted rollover: the process exits after renaming the
+  // backup aside but before dropping its owner marker, leaving the stale
+  // marker stranded beside the destination.
+  fs.renameSync(backupPath, `${backupPath}.interrupted`);
+  assert.ok(fs.existsSync(`${backupPath}.owner`), "marker survives the interrupted rollover");
+  fs.writeFileSync(staged, "third");
+  await bridge._promoteLocalTransferForTests(staged, target, {
+    requestedTargetPath: target,
+    expectedLocalTarget: rememberedExpectation(root, target),
+  });
+  assert.equal(fs.readFileSync(target, "utf8"), "third",
+    "the repeat succeeds despite the orphaned marker");
+  assert.equal(fs.readFileSync(backupPath, "utf8"), "second",
+    "retain the verified backup of the completed replacement");
+  const marker = JSON.parse(fs.readFileSync(`${backupPath}.owner`, "utf8"));
+  const backupStat = fs.lstatSync(backupPath, { bigint: true });
+  assert.equal(marker.identity, `${backupStat.dev}:${backupStat.ino}`,
+    "the fresh marker names the retained backup's inode");
+});
+
 test("remembered download re-homes the superseded backup when the target disappears", async (t) => {
   const root = fs.mkdtempSync(`${temp.getTempFilePath("remembered-vanish-target")}-`);
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));

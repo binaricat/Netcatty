@@ -1103,6 +1103,44 @@ async function localBackupOwnerMarkerMatches(markerPath, stat) {
   }
 }
 
+// An interrupted rollover can leave the owner marker beside the destination
+// after its backup has already been renamed away (the process exits between
+// the rollover rename and the marker unlink). The next repeat download sees
+// no backup at the fixed name, skips rollover entirely, and the fresh
+// exclusive marker write then fails against the stale marker, rolls the
+// replacement back, and every subsequent repeat keeps failing the same way
+// until the hidden marker is removed by hand (Codex P2 on PR #3516). Clear
+// the orphan only when it still reads as one of our marker payloads, so a
+// foreign file or symlink at the predictable pathname is never touched and
+// the later marker write keeps failing closed on it.
+async function removeOrphanedLocalBackupOwnerMarker(markerPath) {
+  let stat = null;
+  try {
+    stat = await fs.promises.lstat(markerPath, { bigint: true });
+  } catch (error) {
+    if (error?.code === "ENOENT") return;
+    throw error;
+  }
+  if (!stat.isFile()) return;
+  let raw = null;
+  try {
+    raw = await fs.promises.readFile(markerPath, "utf8");
+  } catch {
+    return;
+  }
+  let marker = null;
+  try {
+    marker = JSON.parse(raw);
+  } catch {
+    return;
+  }
+  const identity = marker?.identity;
+  const birthtimeNs = marker?.birthtimeNs;
+  if (typeof identity !== "string" || !/^\d+:\d+$/.test(identity)
+    || typeof birthtimeNs !== "string" || !/^\d+$/.test(birthtimeNs)) return;
+  await fs.promises.unlink(markerPath).catch(() => {});
+}
+
 async function assertExpectedLocalDownloadTarget(requestedPath, expected, inspectedTarget) {
   if (!expected) return;
   const validIdentity = (value) => typeof value === "string" && /^\d+:\d+$/.test(value);
@@ -1294,6 +1332,13 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
             // a new inode, Codex P2 on PR #3516).
             await fs.promises.unlink(backupOwnerMarkerPath).catch(() => {});
           }
+        } else {
+          // No backup at the fixed name, but the owner marker from an
+          // interrupted rollover may still be in place. Clear it when it
+          // still reads as ours, so the fresh exclusive marker write below
+          // is not permanently blocked by a stale identity (Codex P2 on PR
+          // #3516). A foreign entry at the marker pathname is left alone.
+          await removeOrphanedLocalBackupOwnerMarker(backupOwnerMarkerPath);
         }
       }
       try {
