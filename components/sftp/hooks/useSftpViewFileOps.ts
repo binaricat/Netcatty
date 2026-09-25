@@ -4,7 +4,6 @@ import type { TransferStatus } from "../../../domain/models";
 import { getParentPath, joinTransferTargetPath } from "../../../application/state/sftp/utils";
 import { readSftpQuickDownloadEnabled } from "../../../application/state/sftp/quickDownloadPreference";
 import { useSftpQuickDownloadTargets } from "../../../application/state/sftp/useSftpQuickDownloadTargets";
-import type { LocalPublishedFileIdentity } from "../../../domain/models/sftp";
 import {
   DEFAULT_SFTP_FILE_TRANSFER_CONCURRENCY,
   runBoundedConcurrency,
@@ -536,7 +535,6 @@ export const useSftpViewFileOps = ({
         }
         // Route through downloadToLocal so FileZilla-style transfer pool
         // sessions are used (browse session stays free for listing).
-        let publishedIdentity: LocalPublishedFileIdentity | undefined;
         const status = await sftpRef.current.downloadToLocal({
           fileName: file.name,
           sourcePath: resolvedFullPath,
@@ -552,8 +550,16 @@ export const useSftpViewFileOps = ({
             targetSha256: rememberedTarget.targetSha256,
           } : undefined,
           expectedSourceEndpointKey: quickDownloadEnabled ? endpointKey ?? undefined : undefined,
+          // Remember at publication time, not after downloadToLocal returns:
+          // the generic retry re-runs this exact callback through a fresh task
+          // lifecycle, and a successful retry must refresh the remembered
+          // inode/hash too (Codex P2 on PR #3516).
           onPublishedLocalFile: quickDownloadEnabled
-            ? (identity) => { publishedIdentity = identity; }
+            ? (identity) => {
+                void quickDownloadTargets.remember(
+                  endpointKey, resolvedFullPath, pane.filenameEncoding, targetPath, identity,
+                );
+              }
             : undefined,
           sftpId,
           connectionId: pane.connection.id,
@@ -564,16 +570,9 @@ export const useSftpViewFileOps = ({
           totalBytes: selectedSnapshot.size,
         });
         if (status === "completed") {
-          if (quickDownloadEnabled) {
-            if (readSftpQuickDownloadEnabled()) {
-              if (publishedIdentity) {
-                await quickDownloadTargets.remember(
-                  endpointKey, resolvedFullPath, pane.filenameEncoding, targetPath, publishedIdentity,
-                );
-              }
-            } else {
-              quickDownloadTargets.forget(endpointKey, resolvedFullPath, pane.filenameEncoding);
-            }
+          if (quickDownloadEnabled && !readSftpQuickDownloadEnabled()) {
+            // Quick download was disabled while this transfer ran.
+            quickDownloadTargets.forget(endpointKey, resolvedFullPath, pane.filenameEncoding);
           }
           toast.success(`${t("sftp.context.download")}: ${file.name}`, "SFTP");
         } else if (status === "failed") {

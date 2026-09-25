@@ -1269,6 +1269,25 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
             await fs.promises.unlink(backupOwnerMarkerPath).catch(() => {});
           }
           if (supersededBackupPath) {
+            // Revalidate the moved inode: a concurrent writer may have replaced
+            // the backup after the marker check but before the rename above,
+            // and the rename would have moved that unrelated replacement
+            // aside, where post-commit retirement would remove it (Codex P1
+            // on PR #3516). Compare the exact identity the marker validated.
+            const movedStat = await fs.promises.lstat(supersededBackupPath, { bigint: true })
+              .catch(() => null);
+            if (!movedStat || !movedStat.isFile()
+              || `${movedStat.dev}:${movedStat.ino}`
+                !== `${existingBackupStat.dev}:${existingBackupStat.ino}`
+              || String(movedStat.birthtimeNs) !== String(existingBackupStat.birthtimeNs)) {
+              // Leave the moved artifact in place; the pre-commit rollback
+              // below returns it to the fixed backup name (and fails closed
+              // on the owner marker), so nothing unverifiable gets retired.
+              throw new Error(
+                `The recovery backup at ${backupPath} changed between validation and rollover; `
+                + "refusing to supersede it. Remove or rename that file if it was not created by Netcatty.",
+              );
+            }
             supersededBackupOwnerMarker = await fs.promises.readFile(backupOwnerMarkerPath, "utf8")
               .catch(() => null);
             // Free the fixed marker pathname for the exclusive marker write

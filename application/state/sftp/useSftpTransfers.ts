@@ -280,6 +280,12 @@ export const useSftpTransfers = ({
   }, []);
 
   const completionHandlersRef = useRef<Map<string, (result: TransferResult) => void | Promise<void>>>(new Map());
+  // Publication callbacks for quick-download targets (Codex P2 on PR #3516):
+  // the generic retry re-runs processTransfer outside the downloadToLocal
+  // closure that originally held the onPublishedLocalFile callback, so a
+  // successful retry would otherwise replace the destination without
+  // refreshing the remembered quick-download identity.
+  const publicationHandlersRef = useRef<Map<string, (identity: LocalPublishedFileIdentity) => void>>(new Map());
   const conflictDefaultsRef = useRef<TransferConflictDefaults>(new Map());
   const deferredConflictAttemptsRef = useRef<DeferredTransferAttemptQueue | null>(null);
 
@@ -961,6 +967,9 @@ export const useSftpTransfers = ({
           targetEncoding,
           task.id, // rootTaskId - this is the top-level task
           sameHost,
+          // Quick-download retry: refresh the remembered target identity when
+          // this attempt publishes the destination (Codex P2 on PR #3516).
+          publicationHandlersRef.current.get(task.id),
         );
       }
 
@@ -1472,6 +1481,14 @@ export const useSftpTransfers = ({
         completionHandlersRef.current.set(retriedTask.id, completionHandler);
         completionHandlersRef.current.delete(transferId);
       }
+      // Carry the quick-download publication callback into the retried task so
+      // a successful retry refreshes the remembered target identity instead of
+      // leaving the old inode/hash remembered (Codex P2 on PR #3516).
+      const publicationHandler = publicationHandlersRef.current.get(transferId);
+      if (publicationHandler) {
+        publicationHandlersRef.current.set(retriedTask.id, publicationHandler);
+        publicationHandlersRef.current.delete(transferId);
+      }
 
       setTransfers((prev) =>
         prev.map((t) =>
@@ -1480,7 +1497,8 @@ export const useSftpTransfers = ({
             : t,
         ),
       );
-      await processTransfer(retriedTask, sourcePane, targetPane, targetSide, retrySourceConnectHost);
+      const retryStatus = await processTransfer(retriedTask, sourcePane, targetPane, targetSide, retrySourceConnectHost);
+      if (retryStatus === "completed") publicationHandlersRef.current.delete(retriedTask.id);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- processTransfer is defined inline
     [acquireTransferSession, cleanupTaskArtifacts, getTabByConnectionId, getTransferPoolKeyForHost, ownerId, resolveConnectedHost, resolveTaskEndpoints, resolveVerifiedSourceConnectHost, setTransfers, sftpSessionsRef],
@@ -1503,12 +1521,17 @@ export const useSftpTransfers = ({
   const dismissTransfer = useCallback((transferId: string) => {
     const task = transfersRef.current.find((candidate) => candidate.id === transferId);
     if (task) void cleanupTaskArtifacts(task);
+    publicationHandlersRef.current.delete(transferId);
     setTransfers((prev) => prev.filter((t) => t.id !== transferId && t.parentTaskId !== transferId));
   }, [cleanupTaskArtifacts, setTransfers]);
 
   const dismissTransfers = useCallback((prunedTasks: readonly TransferTask[]) => {
     if (prunedTasks.length === 0) return;
     const removing = new Set(prunedTasks.map((task) => task.id));
+    // Dropped history rows can no longer be retried, so their retained
+    // quick-download publication callbacks are unreachable state (Codex P2
+    // on PR #3516).
+    for (const id of removing) publicationHandlersRef.current.delete(id);
     const artifactTasks = prunedTasks.filter((task) => task.status !== "completed");
     // This callback is used only for automatic history eviction. Completed
     // streams already cleaned their staging files; sending one cleanup IPC per
@@ -2012,13 +2035,23 @@ export const useSftpTransfers = ({
           sourceWorkLease = null;
         }
       };
-      let result: TransferStatus = "failed";
+      // Holder object: TS narrowing keeps `let result` at its initializer
+      // type even though the walk callback reassigns it.
+      const attempt = { status: "failed" as TransferStatus };
+      // Keep the publication callback reachable for the generic retry: it
+      // re-runs processTransfer with a fresh task id and needs this exact
+      // closure to refresh the remembered quick-download identity (Codex P2
+      // on PR #3516). Terminal success removes it; failure retains it.
+      if (params.onPublishedLocalFile) {
+        publicationHandlersRef.current.set(task.id, params.onPublishedLocalFile);
+      }
       await runTrackedTransferAttempt(inFlightTransferIdsRef.current, task.id, () =>
         transferRuntime.runWalk(task.id, async () => {
-          result = await executeDownload();
+          attempt.status = await executeDownload();
         }),
       );
-      return result;
+      if (attempt.status === "completed") publicationHandlersRef.current.delete(task.id);
+      return attempt.status;
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [sftpSessionsRef, acquireTransferSession, getTabByConnectionId, resolveConnectedHost, getTransferPoolKeyForHost],
