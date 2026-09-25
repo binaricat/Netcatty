@@ -135,6 +135,7 @@ test("remembered local target identity survives transfer persistence", () => {
       targetBirthtimeNs: "200",
       targetCtimeNs: "201",
       targetMtimeNs: "202",
+      targetSha256: "a".repeat(64),
     },
   };
   const restored = deserializeSftpTransferCenter(serializeSftpTransferCenter([original]));
@@ -150,7 +151,7 @@ test("malformed saved target identity fails closed", () => {
   }));
   assert.deepEqual(restored.tasks[0]?.expectedLocalTarget, {
     parentRealPath: "", parentIdentity: "", parentBirthtimeNs: "",
-    targetIdentity: "", targetBirthtimeNs: "", targetCtimeNs: "", targetMtimeNs: "",
+    targetIdentity: "", targetBirthtimeNs: "", targetCtimeNs: "", targetMtimeNs: "", targetSha256: "",
   });
 });
 

@@ -17,6 +17,7 @@ function rememberedExpectation(parent, target) {
     targetBirthtimeNs: String(targetStat.birthtimeNs),
     targetCtimeNs: String(targetStat.ctimeNs),
     targetMtimeNs: String(targetStat.mtimeNs),
+    targetSha256: require("node:crypto").createHash("sha256").update(fs.readFileSync(target)).digest("hex"),
   };
 }
 
@@ -98,6 +99,39 @@ test("remembered download preserves an in-place edit just before moving the orig
     requestedTargetPath: target, expectedLocalTarget,
   }), /Local download target changed during replacement/);
   assert.equal(edited, true);
+  assert.equal(fs.readFileSync(target, "utf8"), "modified");
+});
+
+test("remembered download checks backup bytes even when its mtime appears unchanged", async (t) => {
+  const root = fs.mkdtempSync(`${temp.getTempFilePath("remembered-backup-hash")}-`);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const staged = path.join(root, "staged");
+  const target = path.join(root, "target");
+  fs.writeFileSync(staged, "download");
+  fs.writeFileSync(target, "original");
+  const expectedLocalTarget = rememberedExpectation(root, target);
+  const rename = fs.promises.rename;
+  const lstat = fs.promises.lstat;
+  t.after(() => { fs.promises.rename = rename; fs.promises.lstat = lstat; });
+  fs.promises.rename = async (from, to) => {
+    if (from === target && String(to).endsWith(".backup")) {
+      fs.writeFileSync(target, "modified"); // same file number and byte length
+    }
+    return rename(from, to);
+  };
+  // Model an external editor that restores mtime after its write. The backup
+  // metadata alone must not authorize replacing these different bytes.
+  fs.promises.lstat = async (file, options) => {
+    const stat = await lstat(file, options);
+    if (!String(file).endsWith(".backup")) return stat;
+    return new Proxy(stat, { get(value, key) {
+      if (key === "mtimeNs") return BigInt(expectedLocalTarget.targetMtimeNs);
+      return Reflect.get(value, key);
+    } });
+  };
+  await assert.rejects(() => bridge._promoteLocalTransferForTests(staged, target, {
+    requestedTargetPath: target, expectedLocalTarget,
+  }), /Local download target content changed during replacement/);
   assert.equal(fs.readFileSync(target, "utf8"), "modified");
 });
 

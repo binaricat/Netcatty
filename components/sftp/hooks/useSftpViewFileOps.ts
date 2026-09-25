@@ -549,6 +549,7 @@ export const useSftpViewFileOps = ({
             targetBirthtimeNs: rememberedTarget.targetBirthtimeNs,
             targetCtimeNs: rememberedTarget.targetCtimeNs,
             targetMtimeNs: rememberedTarget.targetMtimeNs,
+            targetSha256: rememberedTarget.targetSha256,
           } : undefined,
           expectedSourceEndpointKey: quickDownloadEnabled ? endpointKey ?? undefined : undefined,
           onPublishedLocalFile: quickDownloadEnabled

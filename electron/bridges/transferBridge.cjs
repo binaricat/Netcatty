@@ -1058,6 +1058,7 @@ async function assertExpectedLocalDownloadTarget(requestedPath, expected, inspec
   if (!validIdentity(expected.targetIdentity) || !validIdentity(expected.parentIdentity)
     || !validTimestamp(expected.targetBirthtimeNs) || !validTimestamp(expected.targetCtimeNs)
     || !validTimestamp(expected.targetMtimeNs)
+    || typeof expected.targetSha256 !== "string" || !/^[a-f0-9]{64}$/.test(expected.targetSha256)
     || !validTimestamp(expected.parentBirthtimeNs)
     || typeof expected.parentRealPath !== "string" || !expected.parentRealPath) {
     throw new Error("Invalid remembered local download target identity");
@@ -1180,6 +1181,24 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
             || String(stat.birthtimeNs) !== options.expectedLocalTarget.targetBirthtimeNs
             || String(stat.mtimeNs) !== options.expectedLocalTarget.targetMtimeNs))) {
         throw new Error("Local download target changed during replacement");
+      }
+      if (options.expectedLocalTarget) {
+        let backupHandle;
+        try {
+          const heldStat = originalHandle && await originalHandle.stat({ bigint: true });
+          backupHandle = heldStat && stableLocalFileIdentity(heldStat) === stableLocalFileIdentity(stat)
+            ? originalHandle : await fs.promises.open(backupPath, "r");
+          const before = await backupHandle.stat({ bigint: true });
+          const backupHash = await hashOpenLocalFile(backupHandle, assertNotCancelled);
+          const after = await backupHandle.stat({ bigint: true });
+          if (backupHash !== options.expectedLocalTarget.targetSha256
+            || stableLocalFileIdentity(before) !== stableLocalFileIdentity(after)
+            || before.ctimeNs !== after.ctimeNs || before.mtimeNs !== after.mtimeNs) {
+            throw new Error("Local download target content changed during replacement");
+          }
+        } finally {
+          if (backupHandle && backupHandle !== originalHandle) await backupHandle.close().catch(() => {});
+        }
       }
     }
     assertNotCancelled();

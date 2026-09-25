@@ -62,6 +62,7 @@ test("direct download opens both pooled reads through the tab's connected host",
         expectedLocalTarget: {
           parentRealPath: "/local", parentIdentity: "1:2", parentBirthtimeNs: "100",
           targetIdentity: "1:3", targetBirthtimeNs: "200", targetCtimeNs: "201", targetMtimeNs: "202",
+          targetSha256: "a".repeat(64),
         },
         expectedSourceEndpointKey: "route-old",
         sftpId: "browse", connectionId: "ssh", sourceHostId: "host", sourceHostLabel: "Host",

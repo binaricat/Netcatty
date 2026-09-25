@@ -66,6 +66,7 @@ export function useSftpQuickDownloadTargets() {
         targetIdentity, targetBirthtimeNs: target.birthtimeNs,
         targetCtimeNs: target.ctimeNs,
         targetMtimeNs: target.mtimeNs,
+        targetSha256: published.sha256,
       });
       while (targets.size > TARGET_LIMIT) {
         const oldest = targets.keys().next().value;

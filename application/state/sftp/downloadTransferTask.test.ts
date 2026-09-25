@@ -20,6 +20,7 @@ test("download tasks retain the remote host needed for reconnecting after the or
       targetBirthtimeNs: "200",
       targetCtimeNs: "201",
       targetMtimeNs: "202",
+      targetSha256: "a".repeat(64),
     },
     sourceConnectionId: "connection-1",
     sourceHostId: "host-1",

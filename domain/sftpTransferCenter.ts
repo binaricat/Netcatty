@@ -68,11 +68,12 @@ export function sanitizeSftpTransferTask(value: unknown): TransferTask | null {
       || typeof expected.targetIdentity !== "string" || !/^\d+:\d+$/.test(expected.targetIdentity)
       || typeof expected.targetBirthtimeNs !== "string" || !/^[1-9]\d*$/.test(expected.targetBirthtimeNs)
       || typeof expected.targetCtimeNs !== "string" || !/^[1-9]\d*$/.test(expected.targetCtimeNs)
-      || typeof expected.targetMtimeNs !== "string" || !/^[1-9]\d*$/.test(expected.targetMtimeNs)) {
+      || typeof expected.targetMtimeNs !== "string" || !/^[1-9]\d*$/.test(expected.targetMtimeNs)
+      || typeof expected.targetSha256 !== "string" || !/^[a-f0-9]{64}$/.test(expected.targetSha256)) {
       // An incomplete saved guard must never become an unguarded overwrite.
       task.expectedLocalTarget = {
         parentRealPath: "", parentIdentity: "", parentBirthtimeNs: "",
-        targetIdentity: "", targetBirthtimeNs: "", targetCtimeNs: "", targetMtimeNs: "",
+        targetIdentity: "", targetBirthtimeNs: "", targetCtimeNs: "", targetMtimeNs: "", targetSha256: "",
       };
     } else {
       task.expectedLocalTarget = {
@@ -83,6 +84,7 @@ export function sanitizeSftpTransferTask(value: unknown): TransferTask | null {
         targetBirthtimeNs: expected.targetBirthtimeNs,
         targetCtimeNs: expected.targetCtimeNs,
         targetMtimeNs: expected.targetMtimeNs,
+        targetSha256: expected.targetSha256,
       };
     }
   }

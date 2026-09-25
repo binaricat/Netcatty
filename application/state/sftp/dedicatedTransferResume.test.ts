@@ -816,6 +816,7 @@ test("stat-less SCP download resume keeps saved progress instead of restarting",
         targetBirthtimeNs: "200",
         targetCtimeNs: "201",
         targetMtimeNs: "202",
+        targetSha256: "a".repeat(64),
       },
     }, {
       hosts: [host("h1", "box", "1.2.3.4")],
@@ -830,7 +831,7 @@ test("stat-less SCP download resume keeps saved progress instead of restarting",
     assert.equal(startOptions?.totalBytes, 100);
     assert.deepEqual(startOptions?.expectedLocalTarget, {
       parentRealPath: "/local", parentIdentity: "1:2", parentBirthtimeNs: "100",
-      targetIdentity: "1:3", targetBirthtimeNs: "200", targetCtimeNs: "201", targetMtimeNs: "202",
+      targetIdentity: "1:3", targetBirthtimeNs: "200", targetCtimeNs: "201", targetMtimeNs: "202", targetSha256: "a".repeat(64),
     });
   } finally {
     (netcattyBridge as { get: typeof originalGet }).get = originalGet;

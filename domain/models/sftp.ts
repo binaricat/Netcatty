@@ -56,6 +56,7 @@ export interface LocalDownloadTargetExpectation {
   targetBirthtimeNs: string;
   targetCtimeNs: string;
   targetMtimeNs: string;
+  targetSha256: string;
 }
 
 /** Identity of the file actually published by a completed local download. */
