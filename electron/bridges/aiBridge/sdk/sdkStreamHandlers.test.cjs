@@ -128,6 +128,10 @@ test("SDK model cache keys include catalog-affecting agent environment", () => {
     buildSdkModelCacheKey("cursor", "/usr/bin/cursor", { CURSOR_API_KEY: "very-secret-key" }),
     /very-secret-key/,
   );
+  assert.notEqual(
+    buildSdkModelCacheKey("codex", "/usr/bin/codex", { HOME: "/shared", CODEX_HOME: "/profiles/a" }),
+    buildSdkModelCacheKey("codex", "/usr/bin/codex", { HOME: "/shared", CODEX_HOME: "/profiles/b" }),
+  );
 });
 
 test("SDK model cache removes expired entries instead of retaining tombstones", () => {
@@ -170,7 +174,7 @@ test("fetchSdkModelCatalog falls back to the App Server catalog when codex-sdk r
     currentModelId: "gpt-5.6-sol/high",
     models: [{ id: "gpt-5.6-sol", name: "GPT-5.6 Sol" }],
   };
-  const appServerRuntime = { listModels: async ({ binPath }) => ({ calledWith: binPath, ...appServerCatalog }) };
+  const appServerRuntime = { listModels: async ({ binPath, env }) => ({ calledWith: binPath, profile: env.CODEX_HOME, ...appServerCatalog }) };
   const codexDriver = { listModels: async () => [] };
 
   // codex sdk runtime: empty catalog triggers the App Server fallback (#3496).
@@ -179,10 +183,11 @@ test("fetchSdkModelCatalog falls back to the App Server catalog when codex-sdk r
     codexRuntime: "sdk",
     driver: codexDriver,
     binPath: "/cli/codex",
-    env: {},
+    env: { CODEX_HOME: "/profiles/b" },
     codexAppServerRuntime: appServerRuntime,
   });
   assert.equal(codexFallback.calledWith, "/cli/codex");
+  assert.equal(codexFallback.profile, "/profiles/b");
   assert.deepEqual(normalizeSdkListModelsResult(codexFallback), appServerCatalog);
 
   // Non-empty sdk catalog or app-server runtime: no fallback round-trip.
@@ -231,6 +236,32 @@ test("fetchSdkModelCatalog falls back to the App Server catalog when codex-sdk r
   });
   assert.equal(driverCalls, 1);
   assert.equal(appServerCalls, 1);
+});
+
+test("empty or failed live catalogs surface a failure for the warning path", async () => {
+  const base = {
+    binPath: "/cli/agent",
+    env: {},
+    driver: { listModels: async () => [] },
+    codexAppServerRuntime: { listModels: async () => [] },
+  };
+  await assert.rejects(
+    fetchSdkModelCatalog({ ...base, backendKey: "claude", codexRuntime: "sdk" }),
+    /returned no models/,
+  );
+  await assert.rejects(
+    fetchSdkModelCatalog({ ...base, backendKey: "codex", codexRuntime: "sdk" }),
+    /returned no models/,
+  );
+  await assert.rejects(
+    fetchSdkModelCatalog({
+      ...base,
+      backendKey: "codex",
+      codexRuntime: "sdk",
+      codexAppServerRuntime: { listModels: async () => { throw new Error("model/list unavailable"); } },
+    }),
+    /model\/list unavailable/,
+  );
 });
 
 test("CodeBuddy and OpenCode keep Netcatty context in the system prompt only", () => {

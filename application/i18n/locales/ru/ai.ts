@@ -5,6 +5,7 @@ export const ruAiMessages: Messages = {
   // AI Settings
   'ai.agentSettings': 'Настройки агента',
   'ai.chat.preparing': 'Подготовка…',
+  'ai.chat.modelCatalogWarning': 'Не удалось обновить список моделей. Показаны последние доступные или встроенные модели.',
   'ai.chat.contextCompacted': 'Контекст сжат',
   'ai.title': 'AI',
   'ai.description': 'Настройка AI-провайдеров, агентов и параметров безопасности',

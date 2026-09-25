@@ -158,19 +158,25 @@ async function fetchSdkModelCatalog({
   cursorCliBinPath,
   codexAppServerRuntime: appServerRuntime,
 }) {
+  let raw;
   if (codexRuntime === "app-server") {
-    return appServerRuntime.listModels({ binPath, env });
+    raw = await appServerRuntime.listModels({ binPath, env });
+  } else {
+    raw = await driver.listModels({
+      binPath,
+      env,
+      abortController,
+      cursorAuthMode: backendKey === "cursor" ? cursorAuthMode : undefined,
+      cursorCliBinPath: backendKey === "cursor" ? cursorCliBinPath : undefined,
+    });
+    const sdkCatalog = normalizeSdkListModelsResult(raw);
+    if (backendKey === "codex" && sdkCatalog.models.length === 0 && !sdkCatalog.currentModelId) {
+      raw = await appServerRuntime.listModels({ binPath, env });
+    }
   }
-  const raw = await driver.listModels({
-    binPath,
-    env,
-    abortController,
-    cursorAuthMode: backendKey === "cursor" ? cursorAuthMode : undefined,
-    cursorCliBinPath: backendKey === "cursor" ? cursorCliBinPath : undefined,
-  });
   const { currentModelId, models } = normalizeSdkListModelsResult(raw);
-  if (backendKey === "codex" && models.length === 0 && !currentModelId) {
-    return appServerRuntime.listModels({ binPath, env });
+  if (models.length === 0 && !currentModelId) {
+    throw new Error("The live model catalog returned no models");
   }
   return raw;
 }

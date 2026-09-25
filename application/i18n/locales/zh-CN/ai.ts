@@ -4,6 +4,7 @@ export const zhCNAiMessages: Messages = {
   // AI Settings
   'ai.agentSettings': 'Agent 设置',
   'ai.chat.preparing': '准备中…',
+  'ai.chat.modelCatalogWarning': '暂时无法更新实时模型列表，当前显示上次可用或内置的模型。',
   'ai.chat.compactingContext': '正在压缩较早的上下文…',
   'ai.chat.compactingStep': '正在为下一步整理上下文…',
   'ai.chat.compactionRetry': '请求过大，正在压缩上下文并重试…',

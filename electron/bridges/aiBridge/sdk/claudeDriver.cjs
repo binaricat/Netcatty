@@ -296,12 +296,18 @@ function mapClaudeModels(models) {
       if (!m) return null;
       const id = m.value || m.id || m.modelId;
       if (!id) return null;
+      const advertisedLevels = m.supportedEffortLevels || m.thinking?.effort_options;
+      const thinkingLevels = m.supportsEffort === false
+        ? []
+        : Array.isArray(advertisedLevels)
+          ? advertisedLevels.filter((level) => ["low", "medium", "high", "xhigh", "max"].includes(level))
+          : ["low", "medium", "high", "max"];
       return {
         id,
         name: m.displayName || m.name || id,
         description: m.description,
-        thinkingLevels: ["low", "medium", "high", "max"],
-        defaultThinkingLevel: "medium",
+        thinkingLevels,
+        ...(thinkingLevels.length > 0 ? { defaultThinkingLevel: thinkingLevels.includes("medium") ? "medium" : thinkingLevels[0] } : {}),
       };
     })
     .filter(Boolean);

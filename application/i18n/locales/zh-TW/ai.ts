@@ -4,6 +4,7 @@ export const zhTWAiMessages: Messages = {
   // AI Settings
   'ai.agentSettings': 'Agent 設定',
   'ai.chat.preparing': '準備中…',
+  'ai.chat.modelCatalogWarning': '暫時無法更新即時模型清單，目前顯示上次可用或內建的模型。',
   'ai.chat.compactingContext': '正在壓縮較早的上下文…',
   'ai.chat.compactingStep': '正在為下一步整理上下文…',
   'ai.chat.compactionRetry': '請求過大，正在壓縮上下文並重試…',

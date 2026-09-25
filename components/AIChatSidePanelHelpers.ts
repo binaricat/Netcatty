@@ -191,7 +191,7 @@ export function mergeFallbackThinkingLevels(
   const byId = new Map(fallbacks.map((preset) => [preset.id, preset]));
   let changed = false;
   const next = runtime.map((preset) => {
-    if (preset.thinkingLevels?.length) return preset;
+    if (preset.thinkingLevels !== undefined) return preset;
     const fallback = byId.get(preset.id);
     if (!fallback?.thinkingLevels?.length) return preset;
     changed = true;

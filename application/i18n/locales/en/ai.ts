@@ -4,6 +4,7 @@ export const enAiMessages: Messages = {
   // AI Settings
   'ai.agentSettings': 'Agent Settings',
   'ai.chat.preparing': 'Preparing…',
+  'ai.chat.modelCatalogWarning': 'Could not refresh the live model list. Showing the last available or built-in models.',
   'ai.chat.compactingContext': 'Compacting earlier context…',
   'ai.chat.compactingStep': 'Trimming context for next step…',
   'ai.chat.compactionRetry': 'Request was too large. Compacting context and retrying…',

@@ -89,6 +89,11 @@ test('mergeFallbackThinkingLevels fills missing runtime effort catalogs', () => 
     [{ id: 'gpt-5.5', name: 'GPT-5.5', thinkingLevels: ['low', 'medium', 'high'], defaultThinkingLevel: 'medium' }],
   );
   assert.deepEqual(partial[0]?.thinkingLevels, ['low']);
+  const unsupported = mergeFallbackThinkingLevels(
+    [{ id: 'gpt-5.5', name: 'GPT-5.5', thinkingLevels: [] }],
+    [{ id: 'gpt-5.5', name: 'GPT-5.5', thinkingLevels: ['low', 'high'] }],
+  );
+  assert.deepEqual(unsupported[0]?.thinkingLevels, []);
   assert.deepEqual(mergeFallbackThinkingLevels([], [{ id: 'gpt-5.5', name: 'GPT-5.5' }]), []);
   const alreadyFilled = [{ id: 'gpt-5.5', name: 'GPT-5.5', thinkingLevels: ['low'] }];
   assert.equal(
@@ -156,6 +161,10 @@ test('Codex App Server model discovery uses a separate cache identity', () => {
     codexRuntime: 'app-server',
   });
   assert.notEqual(sdk, appServer);
+  assert.notEqual(
+    buildSdkRuntimeModelCacheKey({ id: 'discovered_codex', sdkBackend: 'codex', command: '/bin/codex', env: { HOME: '/shared', CODEX_HOME: '/profiles/a' } }),
+    buildSdkRuntimeModelCacheKey({ id: 'discovered_codex', sdkBackend: 'codex', command: '/bin/codex', env: { HOME: '/shared', CODEX_HOME: '/profiles/b' } }),
+  );
 });
 
 test('shouldAdoptSdkCurrentModel keeps SDK defaults when no runtime list is returned', () => {

@@ -311,8 +311,8 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
 
   const [showHistory, setShowHistory] = useState(false);
   const [isSending, setIsSending] = useState(false);
-  const [runtimeAgentModelPresets, setRuntimeAgentModelPresets] = useState<Record<string, AgentModelPreset[]>>({});
-  const [runtimeModelWarnings, setRuntimeModelWarnings] = useState<Record<string, string>>({});
+  const [runtimeAgentModelPresets, setRuntimeAgentModelPresets] = useState<Record<string, { cacheKey: string; models: AgentModelPreset[] }>>({});
+  const [runtimeModelWarnings, setRuntimeModelWarnings] = useState<Record<string, { cacheKey: string; message: string }>>({});
   const [steerWarnings, setSteerWarnings] = useState<Record<string, SteerWarning>>({});
   const [steeringSessionId, setSteeringSessionId] = useState<string | null>(null);
   const [userSkillOptions, setUserSkillOptions] = useState<UserSkillOption[]>([]);
@@ -874,11 +874,13 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   externalAgentsRef.current = externalAgents;
 
   const applySdkRuntimeModelCatalog = useCallback((
-    agentId: string,
+    target: SdkRuntimeModelTarget,
     catalog: SdkRuntimeModelCatalog,
     options: { adoptCurrentModel?: boolean } = {},
   ) => {
-    const agent = externalAgentsRef.current.find((item) => item.id === agentId);
+    const agent = externalAgentsRef.current.find((item) => item.id === target.agentId);
+    if (buildExternalAgentRuntimeModelTarget(agent)?.cacheKey !== target.cacheKey) return;
+    const agentId = target.agentId;
     const runtimePresets = mergeFallbackThinkingLevels(
       normalizeSdkRuntimeModelPresets(catalog.models, catalog.currentModelId),
       getAgentModelPresets(agent?.command, getExternalAgentSdkBackend(agent)),
@@ -892,9 +894,10 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
       });
     } else {
       setRuntimeAgentModelPresets((prev) => (
-        agentModelPresetsShallowEqual(prev[agentId], runtimePresets)
+        prev[agentId]?.cacheKey === target.cacheKey
+          && agentModelPresetsShallowEqual(prev[agentId].models, runtimePresets)
           ? prev
-          : { ...prev, [agentId]: runtimePresets }
+          : { ...prev, [agentId]: { cacheKey: target.cacheKey, models: runtimePresets } }
       ));
     }
 
@@ -914,7 +917,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     ) {
       setAgentModel(agentId, catalog.currentModelId);
     }
-  }, [setAgentModel]);
+  }, [setAgentModel, buildExternalAgentRuntimeModelTarget]);
 
   const loadSdkRuntimeModelCatalog = useCallback((
     target: SdkRuntimeModelTarget,
@@ -939,16 +942,16 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
           throw new Error(result?.error || 'Failed to load SDK agent models');
         }
         setRuntimeModelWarnings((current) => {
+          const agent = externalAgentsRef.current.find((item) => item.id === target.agentId);
+          if (buildExternalAgentRuntimeModelTarget(agent)?.cacheKey !== target.cacheKey) return current;
           const next = { ...current };
-          if (result.warning && target.codexRuntime === 'app-server') {
-            next[target.agentId] = t('ai.codex.appServer.modelCatalogWarning');
-            console.warn('[AIChatSidePanel] Codex App Server model catalog unavailable:', result.warning);
+          if (result.warning) {
+            next[target.agentId] = {
+              cacheKey: target.cacheKey,
+              message: t('ai.chat.modelCatalogWarning'),
+            };
+            console.warn('[AIChatSidePanel] SDK model catalog unavailable:', result.warning);
           } else {
-            if (result.warning) {
-              // Live catalog fetch failed for another backend; presets still
-              // cover the picker, but keep the cause visible in the console.
-              console.warn('[AIChatSidePanel] SDK model catalog unavailable:', result.warning);
-            }
             delete next[target.agentId];
           }
           return next;
@@ -960,18 +963,20 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
       },
       { force: options.force },
     ).catch((err) => {
-      if (target.codexRuntime === 'app-server') {
-        setRuntimeModelWarnings((current) => ({
+      setRuntimeModelWarnings((current) => {
+        const agent = externalAgentsRef.current.find((item) => item.id === target.agentId);
+        if (buildExternalAgentRuntimeModelTarget(agent)?.cacheKey !== target.cacheKey) return current;
+        return {
           ...current,
-          [target.agentId]: t('ai.codex.appServer.modelCatalogWarning'),
-        }));
-      }
+          [target.agentId]: { cacheKey: target.cacheKey, message: t('ai.chat.modelCatalogWarning') },
+        };
+      });
       if (options.logErrors !== false) {
         console.warn('[AIChatSidePanel] Failed to load SDK agent models:', err);
       }
       return null;
     });
-  }, [t]);
+  }, [t, buildExternalAgentRuntimeModelTarget]);
 
   useEffect(() => {
     if (!isVisible) return;
@@ -983,7 +988,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
 
     const cached = sdkRuntimeModelCache.read(target.cacheKey);
     if (cached) {
-      applySdkRuntimeModelCatalog(target.agentId, cached);
+      applySdkRuntimeModelCatalog(target, cached);
     }
 
     // Respect renderer TTL / in-flight coalescing for all SDK agents including
@@ -995,7 +1000,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     const cancelIdle = scheduleWhenAiComposerIdle(() => {
       void loadSdkRuntimeModelCatalog(target).then((catalog) => {
         if (cancelled || !catalog) return;
-        applySdkRuntimeModelCatalog(target.agentId, catalog, { adoptCurrentModel: true });
+        applySdkRuntimeModelCatalog(target, catalog, { adoptCurrentModel: true });
       });
     });
 
@@ -1017,7 +1022,9 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   const hasCodexCustomConfig = Boolean(codexConfigModel) && isCodexManagedAgent;
 
   const agentModelPresets = useMemo(() => {
-    const runtimePresets = runtimeAgentModelPresets[currentAgentId];
+    const target = buildExternalAgentRuntimeModelTarget(currentAgentConfig);
+    const runtimeEntry = runtimeAgentModelPresets[currentAgentId];
+    const runtimePresets = runtimeEntry?.cacheKey === target?.cacheKey ? runtimeEntry.models : undefined;
     if (hasCodexCustomConfig && codexConfigModel) {
       return [{ id: codexConfigModel, name: codexConfigModel }];
     }
@@ -1033,6 +1040,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     currentAgentConfig,
     currentAgentId,
     runtimeAgentModelPresets,
+    buildExternalAgentRuntimeModelTarget,
     hasCodexCustomConfig,
     codexConfigModel,
     discoveredAgents,
@@ -1218,7 +1226,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         if (runtimeTarget) {
           const catalog = await loadSdkRuntimeModelCatalog(runtimeTarget);
           if (catalog) {
-            applySdkRuntimeModelCatalog(runtimeTarget.agentId, catalog, { adoptCurrentModel: true });
+            applySdkRuntimeModelCatalog(runtimeTarget, catalog, { adoptCurrentModel: true });
             const runtimePresets = mergeFallbackThinkingLevels(
               normalizeSdkRuntimeModelPresets(catalog.models, catalog.currentModelId),
               getAgentModelPresets(
@@ -1725,7 +1733,9 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         canSendCurrentAgent={canSendCurrentAgent}
         providerDisplayName={providerDisplayName}
         modelDisplayName={modelDisplayName}
-        modelCatalogWarning={runtimeModelWarnings[currentAgentId]}
+        modelCatalogWarning={runtimeModelWarnings[currentAgentId]?.cacheKey === buildExternalAgentRuntimeModelTarget(currentAgentConfig)?.cacheKey
+          ? runtimeModelWarnings[currentAgentId].message
+          : undefined}
         agentModelPresets={agentModelPresets}
         selectedAgentModel={selectedAgentModel}
         handleAgentModelSelect={handleAgentModelSelect}

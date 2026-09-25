@@ -179,6 +179,19 @@ test("mapClaudeModels accepts the CLI's runtime {id,name} shape (Claude Code 2.x
   ]);
 });
 
+test("mapClaudeModels preserves each live model's supported effort levels", () => {
+  const out = mapClaudeModels([
+    { value: "opus", displayName: "Opus", supportsEffort: true, supportedEffortLevels: ["low", "medium", "high", "xhigh", "max"] },
+    { id: "fable", name: "Fable", thinking: { effort_options: ["high", "xhigh"] } },
+    { value: "fast", displayName: "Fast", supportsEffort: false },
+  ]);
+  assert.deepEqual(out.map((model) => [model.id, model.thinkingLevels, model.defaultThinkingLevel]), [
+    ["opus", ["low", "medium", "high", "xhigh", "max"], "medium"],
+    ["fable", ["high", "xhigh"], "high"],
+    ["fast", [], undefined],
+  ]);
+});
+
 test("splitClaudeModelSelection only treats known trailing effort as thinking", () => {
   assert.deepEqual(splitClaudeModelSelection("sonnet/high"), { model: "sonnet", effort: "high" });
   assert.deepEqual(splitClaudeModelSelection("claude-opus-4-6"), {
