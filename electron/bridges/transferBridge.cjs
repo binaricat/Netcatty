@@ -1172,6 +1172,9 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
       } catch (error) {
         if (error?.code !== "ENOENT") throw error;
       }
+      if (options.expectedLocalTarget && !backedUp) {
+        throw new Error("Remembered local download target disappeared during replacement");
+      }
     }
     if (backedUp && (expectedIdentity || options.expectedLocalTarget)) {
       const stat = await fs.promises.lstat(backupPath, { bigint: true });
@@ -1190,10 +1193,16 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
             ? originalHandle : await fs.promises.open(backupPath, "r");
           const before = await backupHandle.stat({ bigint: true });
           const backupHash = await hashOpenLocalFile(backupHandle, assertNotCancelled);
-          const after = await backupHandle.stat({ bigint: true });
+          const [after, pathStat] = await Promise.all([
+            backupHandle.stat({ bigint: true }),
+            fs.promises.lstat(backupPath, { bigint: true }),
+          ]);
           if (backupHash !== options.expectedLocalTarget.targetSha256
             || stableLocalFileIdentity(before) !== stableLocalFileIdentity(after)
-            || before.ctimeNs !== after.ctimeNs || before.mtimeNs !== after.mtimeNs) {
+            || stableLocalFileIdentity(after) !== stableLocalFileIdentity(pathStat)
+            || `${pathStat.dev}:${pathStat.ino}` !== options.expectedLocalTarget.targetIdentity
+            || before.ctimeNs !== after.ctimeNs || after.ctimeNs !== pathStat.ctimeNs
+            || before.mtimeNs !== after.mtimeNs || after.mtimeNs !== pathStat.mtimeNs) {
             throw new Error("Local download target content changed during replacement");
           }
         } finally {

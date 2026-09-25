@@ -135,6 +135,26 @@ test("remembered download checks backup bytes even when its mtime appears unchan
   assert.equal(fs.readFileSync(target, "utf8"), "modified");
 });
 
+test("remembered download stops if the selected file disappears at replacement", async (t) => {
+  const root = fs.mkdtempSync(`${temp.getTempFilePath("remembered-disappeared")}-`);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const staged = path.join(root, "staged");
+  const target = path.join(root, "target");
+  fs.writeFileSync(staged, "download");
+  fs.writeFileSync(target, "original");
+  const expectedLocalTarget = rememberedExpectation(root, target);
+  const rename = fs.promises.rename;
+  t.after(() => { fs.promises.rename = rename; });
+  fs.promises.rename = async (from, to) => {
+    if (from === target && String(to).endsWith(".backup")) fs.unlinkSync(target);
+    return rename(from, to);
+  };
+  await assert.rejects(() => bridge._promoteLocalTransferForTests(staged, target, {
+    requestedTargetPath: target, expectedLocalTarget,
+  }), /Remembered local download target disappeared/);
+  assert.equal(fs.existsSync(target), false);
+});
+
 test("replacement keeps large file numbers exact when checking its backup", async (t) => {
   const root = fs.mkdtempSync(`${temp.getTempFilePath("large-backup-identity")}-`);
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
