@@ -54,6 +54,18 @@ test("OpenSSH RSA keys stay RSA", () => {
   assert.deepEqual(detectSshKeyType(rsa), { type: "RSA" });
 });
 
+test("OpenSSH RSA comment cannot override the public-key algorithm", () => {
+  const body = rsa.split(/\r?\n/).filter((line) => !line.includes("-----")).join("");
+  const decoded = atob(body);
+  const originalComment = "runner@runnervmlun5";
+  const misleadingComment = "ecdsa-sha2-nistp256";
+  assert.equal(decoded.includes(originalComment), true);
+  assert.equal(originalComment.length, misleadingComment.length);
+  const changedBody = btoa(decoded.replace(originalComment, misleadingComment));
+  const key = `-----BEGIN OPENSSH PRIVATE KEY-----\n${changedBody}\n-----END OPENSSH PRIVATE KEY-----`;
+  assert.deepEqual(detectSshKeyType(key), { type: "RSA" });
+});
+
 test("public key algorithm prefix is used as a fallback", () => {
   assert.deepEqual(
     detectSshKeyType("not a key", "ecdsa-sha2-nistp256 AAAAB2 user@host"),

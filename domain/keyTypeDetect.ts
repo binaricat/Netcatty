@@ -4,7 +4,7 @@
  * Modern OpenSSH private keys ("-----BEGIN OPENSSH PRIVATE KEY-----") store the
  * algorithm name inside the base64 body (RFC 5656 / PROTOCOL.key), so text-only
  * heuristics on the PEM armor misdetect ECDSA keys as ED25519. Decode the base64
- * body and match the embedded ASCII algorithm names; fall back to DER OIDs for
+ * body and read its public-key algorithm field; fall back to DER OIDs for
  * PKCS#8 / SEC1 PEM bodies, then to the public key's algorithm prefix.
  */
 
@@ -57,15 +57,39 @@ const decodeBase64Body = (pem: string): string | undefined => {
     }
 };
 
+const readSshString = (binary: string, offset: number): { value: string; end: number } | undefined => {
+    if (offset + 4 > binary.length) return undefined;
+    const length = binary.charCodeAt(offset) * 0x1000000
+        + binary.charCodeAt(offset + 1) * 0x10000
+        + binary.charCodeAt(offset + 2) * 0x100
+        + binary.charCodeAt(offset + 3);
+    const end = offset + 4 + length;
+    if (end > binary.length) return undefined;
+    return { value: binary.slice(offset + 4, end), end };
+};
+
 const detectFromOpenSshBody = (binary: string): SshKeyTypeInfo | undefined => {
-    const raw = binary.toLowerCase();
+    const magic = 'openssh-key-v1\0';
+    if (!binary.startsWith(magic)) return undefined;
+    let offset = magic.length;
+    for (let i = 0; i < 3; i++) {
+        const field = readSshString(binary, offset); // cipher, KDF, KDF options
+        if (!field) return undefined;
+        offset = field.end;
+    }
+    if (offset + 4 > binary.length || binary.slice(offset, offset + 4) === '\0\0\0\0') {
+        return undefined; // no public keys
+    }
+    const publicKey = readSshString(binary, offset + 4);
+    const algorithm = publicKey && readSshString(publicKey.value, 0)?.value;
+    if (!algorithm) return undefined;
     for (const curve of ECDSA_CURVES) {
-        if (raw.includes(curve.name)) {
+        if (algorithm === curve.name) {
             return { type: 'ECDSA', keySize: curve.keySize };
         }
     }
-    if (raw.includes('ssh-ed25519')) return { type: 'ED25519' };
-    if (raw.includes('ssh-rsa')) return { type: 'RSA' };
+    if (algorithm === 'ssh-ed25519') return { type: 'ED25519' };
+    if (algorithm === 'ssh-rsa') return { type: 'RSA' };
     return undefined;
 };
 
