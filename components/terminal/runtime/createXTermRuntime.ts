@@ -2420,13 +2420,12 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       }
     }
 
-    // Windows dictation / voice tools (Wispr Flow, Typeless, ...) deliver
-    // their transcript by placing it on the clipboard and simulating the
-    // system paste chord, plain Ctrl+V. While the terminal owns keyboard
-    // focus the window ignores menu shortcuts, so the chord is not turned
-    // into a browser paste event and xterm's legacy path forwards it to the
-    // remote as \x16 (readline quoted-insert) — the transcript never lands
-    // (#3468). Route the unmodified Ctrl+V through the shared paste pipeline
+    // Clipboard-based dictation tools can deliver a transcript by placing it
+    // on the clipboard and simulating plain Ctrl+V. The #3468 reporter
+    // confirmed this path for Wispr Flow by remapping Paste to Ctrl+V.
+    // In xterm's legacy key path, plain Ctrl+V can reach the remote as \x16
+    // (readline quoted-insert) instead of a paste (#3468). Route the chord
+    // through the shared paste pipeline
     // like the Ctrl+Shift+V binding: text pastes, and a local image-only
     // clipboard still forwards raw Ctrl+V to nested TUIs. Kitty and
     // negotiated Win32 input modes keep their own raw encoding of the chord.

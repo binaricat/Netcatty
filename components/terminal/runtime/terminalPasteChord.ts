@@ -10,12 +10,11 @@ function isPhysicalVKey(e: PasteChordKeyEvent): boolean {
 /**
  * Unmodified Ctrl+V — the system paste chord on Windows.
  *
- * Windows dictation / voice tools (Wispr Flow, Typeless, ...) deliver their
- * transcript by placing it on the clipboard and simulating the system paste
- * shortcut. While the terminal owns keyboard focus the window ignores menu
- * shortcuts, so the chord is not turned into a browser paste event and xterm's
- * legacy path forwards it to the remote as \x16 (readline quoted-insert) — the
- * transcript never lands in the terminal (#3468).
+ * Clipboard-based dictation tools can deliver their transcript by placing it
+ * on the clipboard and simulating the system paste shortcut. The #3468
+ * reporter confirmed this path for Wispr Flow by remapping Paste to Ctrl+V.
+ * In xterm's legacy key path, plain Ctrl+V can reach the remote as \x16
+ * (readline quoted-insert) instead of a paste (#3468).
  *
  * Also matches non-Latin layouts via the physical KeyV code, mirroring
  * isPlainCtrlCInterruptChord.
