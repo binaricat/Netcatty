@@ -1180,6 +1180,23 @@ async function publishLocalBackupExclusive(source, target) {
     throw error;
   }
   try {
+    // An editor can atomically save a new version by renaming it over the
+    // source pathname after the link above succeeds but before this unlink.
+    // The backup still references the expected old inode, so the later
+    // identity checks pass, while a blind unlink would remove the editor's
+    // newly installed file and silently lose the local edit (Codex P1 on PR
+    // #3516). POSIX offers no unlink primitive bound to an inode, so re-stat
+    // the source immediately before unlinking and only drop the name while
+    // it still refers to the linked inode. A replacement is left in place:
+    // the exclusive publication of the prepared file then fails closed on
+    // the occupied destination, and the backup at the target pathname stays
+    // reachable for recovery.
+    const currentSourceStat = await fs.promises.lstat(source, { bigint: true });
+    if (`${currentSourceStat.dev}:${currentSourceStat.ino}`
+      !== `${sourceStat.dev}:${sourceStat.ino}`
+      || String(currentSourceStat.birthtimeNs) !== String(sourceStat.birthtimeNs)) {
+      return;
+    }
     await fs.promises.unlink(source);
   } catch (error) {
     if (error?.code === "ENOENT") return;
