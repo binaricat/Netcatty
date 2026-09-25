@@ -1157,6 +1157,55 @@ async function removeOrphanedLocalBackupOwnerMarker(markerPath) {
   await fs.promises.unlink(markerPath).catch(() => {});
 }
 
+// Atomically remove a pathname only while it still names one of the given
+// inodes (Codex P1/P2 on PR #3516). A stat immediately before unlink() is
+// still a separate syscall, so a concurrent atomic save can replace the
+// pathname inside that gap and a blind unlink would then delete the
+// replacement's only link. rename() to a unique private name moves whatever
+// entry currently sits at the pathname without ever destroying it; the moved
+// entry is then unlinked through its now unshared name only when it matches
+// one of the expected identities, and otherwise restored to its original
+// pathname through an exclusively created hardlink (which fails closed on an
+// occupied destination) before the private name is dropped. No step can
+// destroy an entry this process did not pin. Resolves with the moved entry's
+// identity when the pathname was vacated, or null when a foreign replacement
+// was moved aside and given its name back.
+async function removeLocalPathnameBoundToIdentity(pathname, expectedIdentities) {
+  const privatePath = `${pathname}.${crypto.randomUUID().replace(/-/g, "")}.retiring`;
+  try {
+    await fs.promises.rename(pathname, privatePath);
+  } catch (error) {
+    if (error?.code === "ENOENT") return { vacated: true, moved: null };
+    throw error;
+  }
+  const movedStat = await fs.promises.lstat(privatePath, { bigint: true }).catch(() => null);
+  if (!movedStat) return { vacated: true, moved: null };
+  const movedIdentity = {
+    dev: String(movedStat.dev), ino: String(movedStat.ino),
+    birthtimeNs: String(movedStat.birthtimeNs),
+  };
+  const matches = expectedIdentities.some((identity) => identity
+    && `${movedIdentity.dev}:${movedIdentity.ino}` === `${identity.dev}:${identity.ino}`
+    && movedIdentity.birthtimeNs === String(identity.birthtimeNs));
+  if (matches) {
+    // The private name is unique to this call, so no other process can race
+    // a replacement in between this stat and the unlink.
+    await fs.promises.unlink(privatePath).catch(() => {});
+    return { vacated: true, moved: movedIdentity };
+  }
+  // A concurrent replacement got moved aside: give it its original pathname
+  // back through a link, which refuses an occupied destination, and only
+  // drop the private name once the restore is in place. If the pathname is
+  // occupied again, the moved entry stays reachable under the private name.
+  try {
+    await fs.promises.link(privatePath, pathname);
+  } catch {
+    return { vacated: false, moved: movedIdentity, quarantinedAt: privatePath };
+  }
+  await fs.promises.unlink(privatePath).catch(() => {});
+  return { vacated: false, moved: movedIdentity };
+}
+
 // Move the original target to its recovery-backup name without ever
 // replacing an entry that appears at that pathname. POSIX rename would
 // silently replace a file another process creates at the fixed backup
@@ -1181,23 +1230,23 @@ async function publishLocalBackupExclusive(source, target) {
   }
   try {
     // An editor can atomically save a new version by renaming it over the
-    // source pathname after the link above succeeds but before this unlink.
-    // The backup still references the expected old inode, so the later
-    // identity checks pass, while a blind unlink would remove the editor's
-    // newly installed file and silently lose the local edit (Codex P1 on PR
-    // #3516). POSIX offers no unlink primitive bound to an inode, so re-stat
-    // the source immediately before unlinking and only drop the name while
-    // it still refers to the linked inode. A replacement is left in place:
-    // the exclusive publication of the prepared file then fails closed on
-    // the occupied destination, and the backup at the target pathname stays
-    // reachable for recovery.
-    const currentSourceStat = await fs.promises.lstat(source, { bigint: true });
-    if (`${currentSourceStat.dev}:${currentSourceStat.ino}`
-      !== `${sourceStat.dev}:${sourceStat.ino}`
-      || String(currentSourceStat.birthtimeNs) !== String(sourceStat.birthtimeNs)) {
-      return;
-    }
-    await fs.promises.unlink(source);
+    // source pathname after the link above succeeds but before the source
+    // name is dropped. The backup still references the expected old inode,
+    // so the later identity checks pass, while a blind unlink would remove
+    // the editor's newly installed file and silently lose the local edit
+    // (Codex P1 on PR #3516). POSIX offers no unlink primitive bound to an
+    // inode, and even a re-stat immediately before unlinking leaves a
+    // check-to-unlink gap, so vacate the source name atomically instead:
+    // rename moves whatever sits at the source pathname (the linked inode or
+    // an editor's replacement) without destroying it, and the pinned inode
+    // is only unlinked through its private, unshared name. A replacement is
+    // given its name back: the exclusive publication of the prepared file
+    // then fails closed on the occupied destination, and the backup at the
+    // target pathname stays reachable for recovery.
+    await removeLocalPathnameBoundToIdentity(source, [{
+      dev: String(sourceStat.dev), ino: String(sourceStat.ino),
+      birthtimeNs: String(sourceStat.birthtimeNs),
+    }]);
   } catch (error) {
     if (error?.code === "ENOENT") return;
     // Undo the link we created so the caller's state matches its backedUp
@@ -1659,8 +1708,28 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
           ]);
           if (stableLocalFileIdentity(heldStat) === stableLocalFileIdentity(backupStat)) restoreHandle = originalHandle;
         }
-        await publishLocalFileExclusive(backupPath, targetPath, undefined, restoreHandle);
-        await fs.promises.unlink(backupPath).catch(() => {});
+        const restoredTargetIdentity = await publishLocalFileExclusive(
+          backupPath, targetPath, undefined, restoreHandle,
+        );
+        // Another process can atomically replace the predictable fixed
+        // backup pathname after the restore above but before the backup name
+        // is dropped, and a blind unlink would then delete that unrelated
+        // replacement (Codex P2 on PR #3516). Vacate the pathname atomically
+        // and unlink the moved entry only while it still names the inode
+        // that was published (hardlink publication) or the backup inode
+        // observed just before the restore (copy-based publication); a
+        // foreign replacement is given its name back instead.
+        const backupBeforeRestoreStat = originalHandle
+          ? await originalHandle.stat({ bigint: true }).catch(() => null)
+          : null;
+        await removeLocalPathnameBoundToIdentity(backupPath, [
+          restoredTargetIdentity,
+          backupBeforeRestoreStat && {
+            dev: String(backupBeforeRestoreStat.dev),
+            ino: String(backupBeforeRestoreStat.ino),
+            birthtimeNs: String(backupBeforeRestoreStat.birthtimeNs),
+          },
+        ]);
         backedUp = false;
         // The original target was restored, so put the superseded recovery
         // backup back where this transfer found it, with the owner marker

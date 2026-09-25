@@ -154,7 +154,10 @@ test("buildTransferRouteKey persists without credential-derived material", async
       hostname: "jump-a", port: 22, username: "jump",
       password: "jump-secret-a", privateKey: "JUMP KEY A", keyId: "jump-key-1",
     }],
-    proxy: { type: "socks5", host: "proxy-a", port: 1080, username: "pu", password: "pp" },
+    proxy: {
+      type: "command", host: "proxy-a", port: 1080, username: "pu",
+      password: "pp", command: "proxy-command-secret-a",
+    },
   } as unknown as NetcattySSHOptions;
   const base = {
     hostId: "h1",
@@ -180,7 +183,10 @@ test("buildTransferRouteKey persists without credential-derived material", async
     },
     {
       ...connectionOptions,
-      proxy: { type: "socks5", host: "proxy-a", port: 1080, username: "pu", password: "other" },
+      proxy: {
+        type: "command", host: "proxy-a", port: 1080, username: "pu",
+        password: "other", command: "proxy-command-secret-b",
+      },
     },
   ];
   for (const connectionOptions of secretVariants) {

@@ -548,9 +548,13 @@ const stableSerialize = (value: unknown): string => {
  * Secret fields never contribute to the persisted route identity
  * (`buildTransferRouteKey`). Their digests could act as offline verifiers for
  * credential guesses if the route identity leaks through localStorage-backed
- * transfer history (Codex P2 on PR #3516). Non-secret identity references
- * (auth method, keyId, keySource, identity file paths) stay in so a credential
- * *switch* still changes the route identity.
+ * transfer history (Codex P2 on PR #3516). `command` is included because a
+ * command proxy's `ProxyCommand` line routinely embeds credentials (password
+ * prompts, tokens), and the vault itself treats command-proxy contents as
+ * secret; a rotated proxy command therefore no longer changes the route
+ * identity, which is acceptable for a persistable value. Non-secret identity
+ * references (auth method, keyId, keySource, identity file paths) stay in so a
+ * credential *switch* still changes the route identity.
  */
 const TRANSFER_ROUTE_SECRET_KEYS: ReadonlySet<string> = new Set([
   "password",
@@ -558,6 +562,7 @@ const TRANSFER_ROUTE_SECRET_KEYS: ReadonlySet<string> = new Set([
   "passphrase",
   "certificate",
   "sudoAutofillPassword",
+  "command",
 ]);
 
 const stripTransferRouteSecrets = (value: unknown): unknown => {
