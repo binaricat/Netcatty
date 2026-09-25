@@ -78,7 +78,7 @@ function parseClaudeSettings(settings) {
   return str;
 }
 
-const CLAUDE_REASONING_LEVELS = new Set(["low", "medium", "high", "max"]);
+const CLAUDE_REASONING_LEVELS = new Set(["low", "medium", "high", "xhigh", "max"]);
 
 function splitClaudeModelSelection(model) {
   if (typeof model !== "string" || !model) {
@@ -300,7 +300,7 @@ function mapClaudeModels(models) {
       const thinkingLevels = m.supportsEffort === false
         ? []
         : Array.isArray(advertisedLevels)
-          ? advertisedLevels.filter((level) => ["low", "medium", "high", "xhigh", "max"].includes(level))
+          ? advertisedLevels.filter((level) => CLAUDE_REASONING_LEVELS.has(level))
           : ["low", "medium", "high", "max"];
       return {
         id,

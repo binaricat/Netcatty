@@ -194,6 +194,7 @@ test("mapClaudeModels preserves each live model's supported effort levels", () =
 
 test("splitClaudeModelSelection only treats known trailing effort as thinking", () => {
   assert.deepEqual(splitClaudeModelSelection("sonnet/high"), { model: "sonnet", effort: "high" });
+  assert.deepEqual(splitClaudeModelSelection("opus/xhigh"), { model: "opus", effort: "xhigh" });
   assert.deepEqual(splitClaudeModelSelection("claude-opus-4-6"), {
     model: "claude-opus-4-6",
     effort: undefined,
@@ -214,6 +215,9 @@ test("buildClaudeQueryOptions splits model/effort into model + settings.effort",
   assert.equal(opts.model, "sonnet");
   assert.equal(opts.effort, "high");
   assert.deepEqual(opts.settings, { model: "sonnet", effort: "high" });
+  const xhigh = buildClaudeQueryOptions({ cwd: "/tmp", model: "opus/xhigh", env: {} });
+  assert.equal(xhigh.model, "opus");
+  assert.equal(xhigh.effort, "xhigh");
 });
 
 test("parseClaudeSettings: path string, inline JSON object, empty, and bad JSON", () => {

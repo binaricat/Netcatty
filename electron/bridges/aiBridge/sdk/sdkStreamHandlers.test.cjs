@@ -132,6 +132,10 @@ test("SDK model cache keys include catalog-affecting agent environment", () => {
     buildSdkModelCacheKey("codex", "/usr/bin/codex", { HOME: "/shared", CODEX_HOME: "/profiles/a" }),
     buildSdkModelCacheKey("codex", "/usr/bin/codex", { HOME: "/shared", CODEX_HOME: "/profiles/b" }),
   );
+  assert.notEqual(
+    buildSdkModelCacheKey("claude", "/usr/bin/claude", { HOME: "/shared", CLAUDE_CONFIG_DIR: "/profiles/a" }),
+    buildSdkModelCacheKey("claude", "/usr/bin/claude", { HOME: "/shared", CLAUDE_CONFIG_DIR: "/profiles/b" }),
+  );
 });
 
 test("SDK model cache removes expired entries instead of retaining tombstones", () => {

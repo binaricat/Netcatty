@@ -167,6 +167,14 @@ test('Codex App Server model discovery uses a separate cache identity', () => {
   );
 });
 
+test('Claude model cache keys isolate configuration directories under one home', () => {
+  const agent = { id: 'discovered_claude', sdkBackend: 'claude', command: '/bin/claude' };
+  assert.notEqual(
+    buildSdkRuntimeModelCacheKey({ ...agent, env: { HOME: '/shared', CLAUDE_CONFIG_DIR: '/profiles/a' } }),
+    buildSdkRuntimeModelCacheKey({ ...agent, env: { HOME: '/shared', CLAUDE_CONFIG_DIR: '/profiles/b' } }),
+  );
+});
+
 test('shouldAdoptSdkCurrentModel keeps SDK defaults when no runtime list is returned', () => {
   assert.equal(shouldAdoptSdkCurrentModel('openai/gpt-5.1', undefined, []), true);
   assert.equal(shouldAdoptSdkCurrentModel('openai/gpt-5.1', 'openai/gpt-5.1', []), true);
