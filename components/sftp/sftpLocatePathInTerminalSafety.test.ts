@@ -45,3 +45,12 @@ test("locate-path uses focused session fallback when SFTP cannot reuse the termi
     /focusedSessionId=\{panelFocusedSessionId\}/,
   );
 });
+
+test("restricted SFTP opens a dedicated connection instead of the terminal channel", () => {
+  assert.match(sidePanelSource, /hostRestrictsExtraSshChannels\(activeHost\)/);
+  assert.match(sidePanelSource, /reuseTransport: false/);
+  assert.match(
+    sidePanelSource,
+    /const reuseTerminalTransport = !isNetworkDeviceHost &&/,
+  );
+});

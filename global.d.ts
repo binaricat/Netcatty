@@ -175,6 +175,8 @@ declare global {
      * Default true (normal terminal, browse, and MFA-skip reuse).
      */
     reuseTransport?: boolean;
+    /** Bastion/PAM hosts: do not open extra exec/SFTP channels on the terminal transport. */
+    singleChannelSsh?: boolean;
     /** Original unsaved-password profile; main retains only its digest for live SFTP borrowing. */
     sftpReuseOptions?: NetcattySSHOptions;
   }

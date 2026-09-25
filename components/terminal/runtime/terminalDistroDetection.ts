@@ -1,6 +1,7 @@
 import {
   classifyDistroId,
   detectVendorFromSshVersion,
+  hostRestrictsExtraSshChannels,
   normalizeDistroId,
 } from "../../../domain/host";
 import { logger } from "../../../lib/logger";
@@ -72,13 +73,16 @@ export const runDistroDetection = async (
         ctx.onOsDetected?.(ctx.host.id, vendor);
         return;
       }
+      if (hostRestrictsExtraSshChannels(ctx.host)) {
+        return;
+      }
     }
   } catch (err) {
     logger.warn("SSH banner vendor detection failed", err);
   }
 
   if (!isStillCurrent()) return;
-  if (isKnownNetworkDevice) return;
+  if (isKnownNetworkDevice || hostRestrictsExtraSshChannels(ctx.host)) return;
 
   // Step 2: unknown or generic OpenSSH/Dropbear — fall back to the
   // /etc/os-release probe to pick a distro-specific icon. We deliberately

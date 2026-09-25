@@ -269,6 +269,32 @@ test("openSftpForSession holds a shared SSH connection until the SFTP handle clo
   setDefaultTransportIdleTtlMs(60_000);
 });
 
+test("openSftpForSession refuses extra channels when singleChannelSsh is set", async () => {
+  const bridge = loadSftpBridgeWithProxySocket(null);
+  const sftpClients = new Map();
+  let sftpCalls = 0;
+  const conn = {
+    _remoteVer: "CLOUDBILITY-4.14",
+    sftp(cb) {
+      sftpCalls += 1;
+      cb(null, { end() {} });
+    },
+    end() {},
+  };
+  const session = {
+    conn,
+    singleChannelSsh: true, remoteSshVersion: "CLOUDBILITY-4.14",
+    stream: {},
+  };
+  const sessions = new Map([["session-bastion", session]]);
+  bridge.init({ sftpClients, sessions, electronModule: {} });
+
+  await assert.rejects(
+    bridge.openSftpForSession(null, { sessionId: "session-bastion" }),
+    (err) => err && err.code === "ERR_SFTP_SINGLE_CHANNEL_BASTION" && sftpCalls === 0,
+  );
+});
+
 test("openSftpForSession honors session.sftpFileProtocol when payload omits fileProtocol", async () => {
   const bridge = loadSftpBridgeWithProxySocket(null);
   const sftpClients = new Map();
@@ -463,4 +489,20 @@ test("openSftpForSession keeps sudo mode when connectSudoSftp succeeds", async (
   assert.equal(client?.sftp, sudoWrapper);
   assert.equal(closeBound, true);
   await bridge.closeSftp(null, { sftpId: opened.sftpId });
+});
+
+test("single-channel directory delete does not open a shell exec", async () => {
+  const bridge = require("./sftpBridge.cjs");
+  let execCalls = 0;
+  const removed = await bridge._tryFastShellDirectoryDeleteForTests({
+    __netcattySingleChannelSsh: true,
+    client: {
+      exec() {
+        execCalls += 1;
+        throw new Error("must not exec on single-channel SSH");
+      },
+    },
+  }, "/home/app/static/folder");
+  assert.equal(removed, false);
+  assert.equal(execCalls, 0);
 });

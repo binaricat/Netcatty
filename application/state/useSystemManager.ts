@@ -15,6 +15,9 @@ function delay(ms: number): Promise<void> {
 function normalizePollingErrorMessage(error: unknown, t: I18nContextValue['t']): string {
   const message = error instanceof Error ? error.message : String(error || 'Unknown error');
   const lower = message.toLowerCase();
+  if (lower.includes('extra exec channels')) {
+    return t('systemManager.unsupportedRemote');
+  }
   if (lower.includes('channel open failure') || lower.includes('unable to exec')) {
     return t('systemManager.errors.sshChannelUnavailable');
   }

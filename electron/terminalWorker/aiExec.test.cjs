@@ -563,3 +563,32 @@ test("worker exec on an unclassified posix session still blocks command substitu
     "blocked commands must not reach the PTY",
   );
 });
+
+test("single-channel worker exec does not open an exec channel or send line-kill keys", async () => {
+  let execCalls = 0;
+  const pty = new FakePty();
+  const sessions = new Map([["ssh-single", {
+    protocol: "ssh",
+    singleChannelSsh: true,
+    remoteSshVersion: "CLOUDBILITY-4.14",
+    stream: pty,
+    shellKind: "",
+    conn: { exec() { execCalls += 1; throw new Error("exec channel"); } },
+  }]]);
+  const ipcMain = createFakeIpcMain();
+  registerWorkerAiExecHandlers(ipcMain, { sessions });
+  const execution = ipcMain.handlers.get("netcatty:ai:exec")(createFakeEvent(), {
+    sessionId: "ssh-single",
+    command: "uname -a",
+    chatSessionId: "chat-single",
+    commandTimeoutMs: 300,
+  });
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  assert.equal(execCalls, 0);
+  const input = pty.writes.join("");
+  assert.equal(input.includes("\u0015"), false);
+  assert.equal(input.includes("\u000b"), false);
+  assert.ok(input.length > 0);
+  await execution.catch(() => {});
+});
+

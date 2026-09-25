@@ -230,6 +230,11 @@ const getSftpChannel = async (client, options = {}) => {
     return null;
   }
 
+  // A second SFTP channel on a single-channel bastion drops the whole login.
+  if (client.__netcattySingleChannelSsh || client.client?.__netcattySingleChannelSsh) {
+    return null;
+  }
+
   // Do not treat ssh2's "client.sftp" method as a channel object.
   // Re-open a fresh channel when the cached channel is stale.
   if (!client.client || typeof client.client.sftp !== "function") {
@@ -637,6 +642,8 @@ async function execRemoteShellCommand(sshClient, command, optionsOrSignal = null
 async function tryFastShellDirectoryDelete(client, remotePath, encoding = "utf-8", signal = null) {
   const sshClient = client?.client;
   if (!sshClient || typeof sshClient.exec !== "function") return false;
+  // Extra exec drops a single-channel bastion login. Use the SFTP walk instead.
+  if (client.__netcattySingleChannelSsh || sshClient.__netcattySingleChannelSsh) return false;
   const enc = !encoding || encoding === "auto" ? "utf-8" : encoding;
   if (enc !== "utf-8") return false;
   if (typeof remotePath !== "string" || !remotePath || remotePath === "/" || remotePath === ".") {
@@ -732,6 +739,7 @@ function init(deps) {
   sftpClients = deps.sftpClients;
   electronModule = deps.electronModule;
   sessions = deps.sessions;
+  require("./singleChannelShell.cjs").init(sessions);
   reportOpenedSessionActivity = typeof deps.reportOpenedSessionActivity === "function"
     ? deps.reportOpenedSessionActivity
     : null;
@@ -1090,7 +1098,21 @@ async function hashReadableForDigest(readable, signal = null) {
   }
 }
 
-async function tryRemoteSha256Sum(sshClient, remotePath, signal = null) {
+async function tryRemoteSha256Sum(sshClient, remotePath, signal = null, owner = null) {
+  if (sshClient?.__netcattySingleChannelSsh || owner?.__netcattySingleChannelSsh) {
+    const { runIdleShellCommand } = require("./singleChannelShell.cjs");
+    const escapedPath = String(remotePath).replace(/'/g, "'\\''");
+    const shellClient = owner && owner.__netcattyEndpointKey ? owner : { __netcattySingleChannelSsh: true };
+    const shellResult = await runIdleShellCommand(shellClient, "sha256sum -- '" + escapedPath + "'", {
+      waitMs: 0,
+      timeoutMs: 10 * 60_000,
+      signal,
+    });
+    const match = shellResult && shellResult.code === 0
+      ? String(shellResult.output || "").match(/\b([a-fA-F0-9]{64})\b/)
+      : null;
+    return match ? match[1].toLowerCase() : null;
+  }
   if (!sshClient || typeof sshClient.exec !== "function") return null;
   const escapedPath = String(remotePath).replace(/'/g, "'\\''");
   try {
@@ -1121,7 +1143,7 @@ async function tryRemoteSha256Sum(sshClient, remotePath, signal = null) {
 async function computeRemoteContentDigest(client, encodedPath, remotePath, options = {}) {
   const signal = options.signal || null;
   throwIfAborted(signal);
-  const digest = await tryRemoteSha256Sum(client?.client, remotePath, signal);
+  const digest = await tryRemoteSha256Sum(client?.client, remotePath, signal, client);
   if (digest) {
     throwIfAborted(signal);
     return digest;
@@ -1801,6 +1823,7 @@ function createSessionBackedSftpClient(sessionId, sshClient, options = {}) {
     client: sshClient,
     sftp: null,
     __netcattySessionBacked: true,
+    __netcattySingleChannelSsh: !!options?.singleChannelSsh,
     __netcattySourceSessionId: options?.sourceSessionId,
     __netcattyRefHolder: refHolder,
     __netcattyDisposed: false,
@@ -1940,6 +1963,13 @@ async function openSftpForSession(_event, payload) {
     source = { sessionId, ...ensureRemoteSftpSupport(sessionId) };
   }
   const { session, sshClient } = source;
+  if (session.singleChannelSsh) {
+    const err = new Error(
+      "This host is configured for single-channel SSH. Opening SFTP on the terminal connection would disconnect it.",
+    );
+    err.code = "ERR_SFTP_SINGLE_CHANNEL_BASTION";
+    throw err;
+  }
   const actualEndpoint = session._reuseEndpoint || session.connRef?.endpoint;
   const sftpId = `${sourceSessionId}-sftp-${randomUUID()}`;
   const refHolder = { id: sftpId, __sshLeaseKind: "sftp" };
@@ -1949,6 +1979,7 @@ async function openSftpForSession(_event, payload) {
   const client = createSessionBackedSftpClient(sourceSessionId, sshClient, {
     refHolder,
     sourceSessionId,
+    singleChannelSsh: !!session.singleChannelSsh,
   });
   client.__netcattyEndpointKey = session.connRef?.endpointKey || buildEndpointKey(actualEndpoint);
   const { normalizeFileProtocol } = require("./sftpBridge/scpShell.cjs");
@@ -2702,6 +2733,7 @@ module.exports = {
   extractSftpArchive,
   getSftpHomeDir,
   resolveEncodingForRequest,
+  _tryFastShellDirectoryDeleteForTests: tryFastShellDirectoryDelete,
   _execRemoteShellCommandForTests: execRemoteShellCommand,
   _tryRemoteSha256SumForTests: tryRemoteSha256Sum,
 };

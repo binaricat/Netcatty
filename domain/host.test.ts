@@ -16,6 +16,7 @@ import {
   resolveTelnetPassword,
   resolveTelnetUsername,
   sanitizeHost,
+  hostRestrictsExtraSshChannels,
   shouldProbeSessionCwd,
   shouldSuggestNetworkDeviceMode,
   upsertHostById,
@@ -296,7 +297,7 @@ test("sanitizeHost removes hidden built-in credentials and transport state from 
     "identitiesOnly", "addKeysToAgent", "useKeychain", "agentForwarding", "x11Forwarding",
     "proxyProfileId", "proxyConfig", "hostChain", "moshEnabled", "moshServerPath", "etEnabled",
     "etPort", "telnetEnabled", "telnetPort", "telnetIdentityId", "telnetUsername",
-    "telnetPassword", "sftpSudo", "legacyAlgorithms", "skipEcdsaHostKey", "algorithms",
+    "telnetPassword", "sftpSudo", "singleChannelSsh", "legacyAlgorithms", "skipEcdsaHostKey", "algorithms",
     "keepaliveOverride", "keepaliveInterval", "keepaliveCountMax", "sshTcpConnectTimeoutSeconds",
     "sshAuthReadyTimeoutSeconds",
   ]) {
@@ -641,6 +642,24 @@ test("shouldProbeSessionCwd skips the probe when the SSH banner reveals a networ
   assert.equal(
     shouldProbeSessionCwd({ isNetworkDevice: false, remoteSshVersion: "SSH-1.99--" }),
     false,
+  );
+});
+
+test("hostRestrictsExtraSshChannels follows the host toggle and network-device mode", () => {
+  assert.equal(hostRestrictsExtraSshChannels({ singleChannelSsh: true }), true);
+  assert.equal(hostRestrictsExtraSshChannels({ deviceType: "network" }), true);
+  assert.equal(hostRestrictsExtraSshChannels({ singleChannelSsh: false, deviceType: "general" }), false);
+  assert.equal(hostRestrictsExtraSshChannels(undefined), false);
+});
+
+test("shouldProbeSessionCwd skips the probe when extra SSH channels are restricted", () => {
+  assert.equal(
+    shouldProbeSessionCwd({ isNetworkDevice: false, remoteSshVersion: "OpenSSH_9.6", restrictExtraSshChannels: true }),
+    false,
+  );
+  assert.equal(
+    shouldProbeSessionCwd({ isNetworkDevice: false, remoteSshVersion: "CLOUDBILITY-4.14" }),
+    true,
   );
 });
 

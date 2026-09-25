@@ -115,7 +115,9 @@ import {
   type RendererCwdSource,
   type TerminalCwdChangeMeta,
 } from './terminal/sftpCwd';
-import { classifyDistroId, shouldProbeSessionCwd } from '../domain/host';
+import { applyPosixCwdFromCommand } from '../domain/posixCwdFromCommand';
+import { guessUnixHomeDirFromPath } from '../domain/sftpFollowTerminalCwd';
+import { classifyDistroId, hostRestrictsExtraSshChannels, shouldProbeSessionCwd } from '../domain/host';
 import {
   collectSidePanelPanes,
   sidePanelLayoutHasTool,
@@ -1250,8 +1252,22 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     return deliveredSessionIds;
   }, [terminalBackend, isGlobalBroadcastEnabled]);
 
-  const handleCommandSubmitted = useCallback((command: string, _hostId: string, _hostLabel: string, sessionId: string) => {
+  const handleCommandSubmitted = useCallback((command: string, _hostId: string, _hostLabel: string, sessionId: string, previousCwd?: string) => {
     codingCliSignalController.handleCommandSubmitted(sessionId, command);
+
+    const currentCwd = previousCwd
+      ?? terminalCwdStore.getCwd(sessionId)
+      ?? terminalRendererCwdBySessionRef.current.get(sessionId);
+    const inferredCwd = applyPosixCwdFromCommand({
+      command,
+      currentCwd,
+      homeDir: guessUnixHomeDirFromPath(currentCwd) ?? undefined,
+    });
+    if (inferredCwd && inferredCwd.startsWith('/')) {
+      handleTerminalCwdChange(sessionId, inferredCwd, { source: 'inferred' });
+    } else if (inferredCwd === '~') {
+      handleTerminalCwdChange(sessionId, inferredCwd, { source: 'inferred' });
+    }
 
     const tabId = activeTabIdRef.current;
     const session = sessionsRef.current.find((candidate) => candidate.id === sessionId);
@@ -1265,6 +1281,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       visibleSftpHost,
       sessionHost,
       globalSftpFollowTerminalCwd: sftpFollowTerminalCwdRef.current,
+      restrictExtraSshChannels: hostRestrictsExtraSshChannels(sessionHost),
     })) return;
 
     const osc7SignalAtCommand = terminalOsc7SignalBySessionRef.current.get(sessionId) ?? 0;
@@ -1287,6 +1304,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
         return shouldProbeSessionCwd({
           isNetworkDevice,
           remoteSshVersion: info?.remoteSshVersion,
+          restrictExtraSshChannels: hostRestrictsExtraSshChannels(host),
         });
       },
       onProbedCwd: (cwd) => {
@@ -1494,14 +1512,18 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     requireActiveShellCwd?: boolean;
   }): Promise<string | null> => {
     const sessionId = getActiveTerminalSessionId();
+    const host = sessionId ? sessionHostsMapRef.current.get(sessionId) : undefined;
+    const skipBackendPwd = hostRestrictsExtraSshChannels(host);
     return resolvePreferredTerminalCwd({
       rendererCwd: sessionId ? terminalRendererCwdBySessionRef.current.get(sessionId) : undefined,
       rendererCwdSource: sessionId
         ? terminalRendererCwdSourceBySessionRef.current.get(sessionId)
         : undefined,
       sessionId,
-      getSessionPwd: (id, options) => terminalBackend.getSessionPwd(id, options),
-      preferFreshBackend: options?.preferFreshBackend,
+      getSessionPwd: skipBackendPwd
+        ? async () => ({ success: false })
+        : (id, pwdOptions) => terminalBackend.getSessionPwd(id, pwdOptions),
+      preferFreshBackend: skipBackendPwd ? false : options?.preferFreshBackend,
       allowRendererFallback: options?.allowRendererFallback,
       requireActiveShellCwd: options?.requireActiveShellCwd,
     });

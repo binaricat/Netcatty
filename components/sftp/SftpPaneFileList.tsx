@@ -694,27 +694,48 @@ export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = React.memo(({
                 </div>
               )}
             </div>
-          ) : pane.error && !pane.reconnecting ? (
+          ) : pane.error && !pane.reconnecting && pane.files.length === 0 ? (
             <SftpErrorWithLogs
               error={pane.error}
               connectionLogs={pane.connectionLogs}
               onRetry={onRefresh}
               t={t}
             />
-          ) : sortedDisplayFiles.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-              <Folder size={32} className="mb-2 opacity-50" />
-              <span className="text-sm">{t("sftp.emptyDirectory")}</span>
-            </div>
           ) : (
-            <div
-              className={cn(
-                shouldVirtualize ? "relative" : "divide-y divide-border/30",
+            <>
+              {pane.error && !pane.reconnecting ? (
+                <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-destructive/30 bg-destructive/10 px-3 py-1.5 text-xs text-destructive">
+                  <span className="min-w-0 flex-1 break-words [overflow-wrap:anywhere]">{t(pane.error)}</span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 shrink-0 px-2 text-xs"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onRefresh();
+                    }}
+                  >
+                    {t("sftp.retry")}
+                  </Button>
+                </div>
+              ) : null}
+              {sortedDisplayFiles.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+                  <Folder size={32} className="mb-2 opacity-50" />
+                  <span className="text-sm">{t("sftp.emptyDirectory")}</span>
+                </div>
+              ) : (
+                <div
+                  className={cn(
+                    shouldVirtualize ? "relative" : "divide-y divide-border/30",
+                  )}
+                  style={shouldVirtualize ? { height: totalHeight } : undefined}
+                >
+                  {fileRows}
+                </div>
               )}
-              style={shouldVirtualize ? { height: totalHeight } : undefined}
-            >
-              {fileRows}
-            </div>
+            </>
           )}
 
           {/* Drop overlay */}

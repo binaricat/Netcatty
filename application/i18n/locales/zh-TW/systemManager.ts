@@ -31,6 +31,7 @@ export const zhTwSystemManagerMessages: Messages = {
   'systemManager.errors.loadPorts': '載入監聽連接埠失敗',
   'systemManager.errors.loadServices': '載入 systemd 服務失敗',
   'systemManager.errors.sshChannelUnavailable': '伺服器拒絕開啟新的執行通道。請稍後重試，或重新連線目前主機。',
+  'systemManager.unsupportedRemote': '此主機不允許額外的 SSH 執行通道，系統面板無法使用。開啟此面板不會再中斷目前終端。',
 
   'systemManager.overview.empty': '暫無系統概覽資料。',
   'systemManager.overview.loading': '正在載入系統概覽…',

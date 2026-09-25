@@ -1,5 +1,6 @@
 import { clearTerminalBroadcastUserInput, markTerminalBroadcastUserInput } from "./terminal/runtime/terminalPacedBroadcast";
 import { publishTerminalCommandCompletion } from "../application/state/terminalCommandCompletion";
+import { terminalCwdStore } from "../application/state/terminalCwdStore";
 import { createTerminalReflowReadingPosition } from "./terminal/terminalReflowReadingPosition";
 import { resolveHostOs } from '../domain/host';
 import { Terminal as XTerm } from "@xterm/xterm";
@@ -46,7 +47,7 @@ import {
   resolveTerminalContextLineWindow,
   type TerminalContextReader,
 } from "../domain/terminalContextRead";
-import { classifyDistroId, shouldProbeSessionCwd } from "../domain/host";
+import { classifyDistroId, hostRestrictsExtraSshChannels, shouldProbeSessionCwd } from "../domain/host";
 import { shouldCollectServerStats } from "../domain/systemManager/systemTarget";
 import { resolveHostSshConnectionTimeouts } from "../domain/sshConnectionTimeouts";
 import { CONNECTION_PROGRESS_START } from "./terminal/connectionProgress";
@@ -1125,7 +1126,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     protocol: effectiveTerminalProtocol,
     terminalSettings,
     systemUnknown: resolvedAutocompleteOs === 'unknown',
-    isNetworkDevice: host.deviceType === 'network'
+    isNetworkDevice: hostRestrictsExtraSshChannels(host)
       || classifyDistroId(host.distro) === 'network-device',
   });
 
@@ -1134,12 +1135,15 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     allowRendererFallback?: boolean;
     requireActiveShellCwd?: boolean;
   }): Promise<string | undefined> => {
+    const skipBackendPwd = hostRestrictsExtraSshChannels(host);
     const cwd = await resolvePreferredTerminalCwd({
       rendererCwd: terminalCwdTracker.getRendererCwd(),
       rendererCwdSource: terminalCwdTracker.getRendererCwdSource(),
       sessionId: sessionRef.current,
-      getSessionPwd: (id, options) => terminalBackend.getSessionPwd(id, options),
-      preferFreshBackend: options?.preferFreshBackend,
+      getSessionPwd: skipBackendPwd
+        ? async () => ({ success: false })
+        : (id, pwdOptions) => terminalBackend.getSessionPwd(id, pwdOptions),
+      preferFreshBackend: skipBackendPwd ? false : options?.preferFreshBackend,
       allowRendererFallback: options?.allowRendererFallback,
       requireActiveShellCwd: options?.requireActiveShellCwd,
     });
@@ -2371,13 +2375,19 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   const cwdAwareOnCommandSubmitted = useCallback((
     ...args: Parameters<NonNullable<typeof onCommandSubmitted>>
   ) => {
+    // Relative `cd app` is resolved against the directory before this command.
+    // Invalidation clears that directory, so capture it first.
+    const previousCwd = terminalCwdStore.getCwd(sessionId)
+      ?? terminalCwdTracker.getRendererCwd()
+      ?? knownCwdRef.current;
     invalidateTerminalCwdAfterCommand(
       terminalCwdTracker,
       sessionId,
       () => { knownCwdRef.current = undefined; },
       onTerminalCwdChange,
     );
-    onCommandSubmitted?.(...args);
+    const [command, hostId, hostLabel, submittedSessionId] = args;
+    onCommandSubmitted?.(command, hostId, hostLabel, submittedSessionId, previousCwd);
   }, [onCommandSubmitted, onTerminalCwdChange, sessionId, terminalCwdTracker]);
   const pluginAwareOnCommandCompleted = useCallback(() => {
     publishTerminalCommandCompletion(sessionId);

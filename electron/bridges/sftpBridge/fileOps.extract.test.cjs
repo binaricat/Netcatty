@@ -56,3 +56,49 @@ test("extractSftpArchive requires an open SFTP session", async () => {
     /SFTP session not found/,
   );
 });
+
+
+test("extractSftpArchive sends tar through the idle terminal on single-channel SSH", async () => {
+  const { EventEmitter } = require("node:events");
+  const shell = require("../singleChannelShell.cjs");
+  const writes = [];
+  const stream = new EventEmitter();
+  stream.writable = true;
+  stream.write = (line) => {
+    writes.push(String(line));
+    const marker = String(line).match(/NETCATTY_EXTRACT_[a-z0-9_]+/i);
+    if (marker) {
+      process.nextTick(() => stream.emit("data", Buffer.from("\n" + marker[0] + " 0\n")));
+    }
+    return true;
+  };
+  shell.init(new Map([[
+    "term-1",
+    {
+      singleChannelSsh: true,
+      connRef: { endpointKey: "ep-extract" },
+      _promptTrackTail: "[dev@host ~]$ ",
+      stream,
+    },
+  ]]));
+  let execCalls = 0;
+  const { api, commands } = createExtractApi({
+    clients: new Map([[
+      "sftp-1",
+      {
+        __netcattySingleChannelSsh: true,
+        __netcattyEndpointKey: "ep-extract",
+        client: { exec() { execCalls += 1; } },
+      },
+    ]]),
+  });
+  const result = await api.extractSftpArchive(null, {
+    sftpId: "sftp-1",
+    path: "/home/app/backup.tar.gz",
+  });
+  assert.deepEqual(result, { success: true });
+  assert.equal(commands.length, 0);
+  assert.equal(execCalls, 0);
+  assert.equal(writes.length, 1);
+  assert.match(writes[0], /tar -xzf /);
+});

@@ -16,7 +16,7 @@ type TerminalAutocompleteSettingFields = {
 export function resolveTerminalAutocompleteSettings(input: {
   protocol?: string;
   terminalSettings?: TerminalAutocompleteSettingFields;
-  /** Vendor CLI / network-device session: skip live-preview PTY rewrites (#1193). */
+  /** Vendor CLI / single-channel / network-device: skip live-preview and line-replacement PTY rewrites (#1193). */
   isNetworkDevice?: boolean;
   systemUnknown?: boolean;
 }): Partial<AutocompleteSettings> | undefined {
@@ -38,7 +38,7 @@ export function resolveTerminalAutocompleteSettings(input: {
   }
 
   if (!terminalSettings) {
-    return isNetworkDevice ? { livePreview: false } : undefined;
+    return isNetworkDevice ? { livePreview: false, allowLineReplacement: false } : undefined;
   }
 
   return {
@@ -46,7 +46,7 @@ export function resolveTerminalAutocompleteSettings(input: {
     showGhostText: terminalSettings.autocompleteGhostText ?? true,
     showPopupMenu: terminalSettings.autocompletePopupMenu ?? true,
     livePreview: shouldWriteAutocompleteLivePreview(true, isNetworkDevice),
-    allowLineReplacement: true,
+    allowLineReplacement: !isNetworkDevice,
     debounceMs: terminalSettings.autocompleteDebounceMs ?? 100,
     minChars: terminalSettings.autocompleteMinChars ?? 1,
     maxSuggestions: terminalSettings.autocompleteMaxSuggestions ?? 50,

@@ -530,3 +530,170 @@ test("a late cancel after completion cannot overwrite the completed terminal eve
   ));
   assert.deepEqual(terminalAfter.map((event) => event.type), ["completed"]);
 });
+
+test("compressed upload skips remote tar exec on single-channel SSH", async () => {
+  let execCalls = 0;
+  compressUploadBridge._resetCompressionSupportCacheForTests();
+  compressUploadBridge.init({
+    sftpClients: new Map([
+      ["sftp-1", {
+        __netcattySingleChannelSsh: true,
+        client: {
+          exec() {
+            execCalls += 1;
+            throw new Error("must not exec on single-channel SSH");
+          },
+        },
+      }],
+    ]),
+    transferBridge: {},
+  });
+
+  const result = await compressUploadBridge._checkCompressedUploadSupportForTests(null, {
+    sftpId: "sftp-1",
+  });
+
+  assert.equal(result.supported, false);
+  assert.equal(result.remoteTar, false);
+  assert.equal(execCalls, 0);
+});
+
+test("single-channel compressed upload stays on an idle terminal shell", async () => {
+  let execCalls = 0;
+  const prompt = "[dev@host ~]$ ";
+  compressUploadBridge._resetCompressionSupportCacheForTests();
+  compressUploadBridge.init({
+    sftpClients: new Map([
+      ["sftp-shell", {
+        __netcattySingleChannelSsh: true,
+        __netcattyEndpointKey: "ep-shell",
+        client: {
+          exec() {
+            execCalls += 1;
+            throw new Error("must not exec on single-channel SSH");
+          },
+        },
+      }],
+    ]),
+    sessions: new Map([
+      ["term-shell", {
+        singleChannelSsh: true,
+        connRef: { endpointKey: "ep-shell" },
+        _promptTrackTail: prompt,
+        stream: { writable: true, write() {}, on() {}, removeListener() {} },
+      }],
+    ]),
+    transferBridge: {},
+  });
+
+  const result = await compressUploadBridge._checkCompressedUploadSupportForTests(null, {
+    sftpId: "sftp-shell",
+  });
+
+  assert.equal(result.supported, true);
+  assert.equal(result.remoteTar, true);
+  assert.equal(execCalls, 0);
+});
+
+test("single-channel compressed upload falls back while the terminal line is busy", async () => {
+  let execCalls = 0;
+  compressUploadBridge._resetCompressionSupportCacheForTests();
+  compressUploadBridge.init({
+    sftpClients: new Map([
+      ["sftp-busy", {
+        __netcattySingleChannelSsh: true,
+        __netcattyEndpointKey: "ep-busy",
+        client: { exec() { execCalls += 1; throw new Error("must not exec"); } },
+      }],
+    ]),
+    sessions: new Map([
+      ["term-busy", {
+        singleChannelSsh: true,
+        connRef: { endpointKey: "ep-busy" },
+        _promptTrackTail: "[dev@host ~]$ ll ",
+        stream: { writable: true, write() {}, on() {}, removeListener() {} },
+      }],
+    ]),
+    transferBridge: {},
+  });
+
+  const result = await compressUploadBridge._checkCompressedUploadSupportForTests(null, {
+    sftpId: "sftp-busy",
+  });
+
+  assert.equal(result.remoteTar, false);
+  assert.equal(execCalls, 0);
+});
+
+test("single-channel compressed upload extracts through the terminal and does not exec", async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-compress-shell-"));
+  const folderPath = path.join(root, "folder");
+  fs.mkdirSync(folderPath);
+  fs.writeFileSync(path.join(folderPath, "file.txt"), "payload");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  let execCalls = 0;
+  const writes = [];
+  const stream = new EventEmitter();
+  stream.writable = true;
+  stream.write = (line) => {
+    writes.push(String(line));
+    const marker = String(line).match(/NETCATTY_EXTRACT_[a-z0-9_]+/i);
+    if (!marker) return true;
+    process.nextTick(() => stream.emit("data", Buffer.from("\n" + marker[0] + " 0\n")));
+    return true;
+  };
+
+  const handlers = new Map();
+  compressUploadBridge._resetCompressionSupportCacheForTests();
+  compressUploadBridge.init({
+    sftpClients: new Map([
+      ["sftp-extract", {
+        __netcattySingleChannelSsh: true,
+        __netcattyEndpointKey: "ep-extract",
+        client: {
+          writable: true,
+          exec() {
+            execCalls += 1;
+            throw new Error("must not exec on single-channel SSH");
+          },
+        },
+      }],
+    ]),
+    sessions: new Map([
+      ["term-extract", {
+        singleChannelSsh: true,
+        connRef: { endpointKey: "ep-extract" },
+        _promptTrackTail: "[dev@host ~]$ ",
+        stream,
+      }],
+    ]),
+    transferBridge: {
+      acquireTransferSessionLeases() { return ["sftp-extract"]; },
+      releaseTransferSessionLeases() {},
+      async startInternalTransfer() { return { success: true }; },
+      async cancelTransfer() { return { success: true }; },
+      broadcastGlobalTransferEvent() {},
+    },
+  });
+  compressUploadBridge.registerHandlers({
+    handle(channel, handler) { handlers.set(channel, handler); },
+  });
+
+  const result = await handlers.get("netcatty:compress:start")({ sender: { id: 1, send() {} } }, {
+    compressionId: "shell-extract",
+    folderPath,
+    targetPath: "/tmp",
+    sftpId: "sftp-extract",
+    folderName: "folder",
+    totalBytes: 7,
+  });
+
+  assert.equal(result.success, true);
+  assert.equal(execCalls, 0);
+  assert.equal(writes.length, 1);
+  assert.match(writes[0], /tar -xzf /);
+  assert.match(writes[0], /rm -f -- /);
+  assert.equal(writes[0].includes("\u0015"), false);
+  assert.equal(writes[0].includes("\u000b"), false);
+});

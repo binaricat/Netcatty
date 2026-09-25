@@ -765,6 +765,13 @@ function createOpenConnectionApi(ctx) {
       let pendingDialCoordination = options._pendingDialCoordination || null;
 
       const openOnSharedTransport = async (transport, detail = "reusing shared SSH transport") => {
+        if (options.singleChannelSsh || transport.endpoint?.singleChannelSsh) {
+          const err = new Error(
+            "This host is configured for single-channel SSH. Opening SFTP on the terminal connection would disconnect it.",
+          );
+          err.code = "ERR_SFTP_SINGLE_CHANNEL_BASTION";
+          throw err;
+        }
         const refHolder = {
           id: connId,
           __sshLeaseKind: "sftp",
@@ -774,6 +781,7 @@ function createOpenConnectionApi(ctx) {
         const reusedClient = createSessionBackedSftpClient(connId, transport.conn, {
           refHolder,
           sourceSessionId: options.sourceSessionId || null,
+          singleChannelSsh: !!(options.singleChannelSsh || transport.endpoint?.singleChannelSsh),
         });
         reusedClient.__netcattyEndpointKey = transport.endpointKey || buildEndpointKey(reuseEndpoint);
         reusedClient.__netcattyTransportManaged = true;
@@ -1271,6 +1279,12 @@ function createOpenConnectionApi(ctx) {
                 finishSftp(sftp);
               }).catch((err) => {
                   if (fileProtocol === "auto") {
+                    if (options.singleChannelSsh) {
+                      reject(new Error(
+                        `SFTP subsystem unavailable (${err.message}). This host is configured for single-channel SSH, so SCP fallback is disabled.`,
+                      ));
+                      return;
+                    }
                     void finishScp(`SFTP subsystem unavailable (${err.message})`);
                     return;
                   }
@@ -1343,6 +1357,10 @@ function createOpenConnectionApi(ctx) {
           }
         }
 
+        client.__netcattySingleChannelSsh = !!options.singleChannelSsh;
+        if (client.client) {
+          client.client.__netcattySingleChannelSsh = !!options.singleChannelSsh;
+        }
         sftpClients.set(connId, client);
     
         // Store jump connections for cleanup when SFTP is closed (legacy path

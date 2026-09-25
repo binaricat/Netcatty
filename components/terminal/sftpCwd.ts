@@ -17,6 +17,9 @@ type SessionPwdOptions = {
 export type RendererCwdSource = TerminalCwdSource;
 export type TerminalCwdChangeMeta = { source?: RendererCwdSource };
 
+const isLiveTerminalCwdSource = (source?: RendererCwdSource | null): boolean =>
+  source === "osc7" || source === "inferred";
+
 type ResolvePreferredTerminalCwdOptions = {
   rendererCwd?: string | null;
   rendererCwdSource?: RendererCwdSource;
@@ -90,11 +93,11 @@ export const resolvePreferredTerminalCwd = async ({
   requireActiveShellCwd = false,
 }: ResolvePreferredTerminalCwdOptions): Promise<string | null> => {
   const knownCwd = normalizeCwd(rendererCwd);
-  if (requireActiveShellCwd && knownCwd && rendererCwdSource === "osc7") {
+  if (requireActiveShellCwd && knownCwd && isLiveTerminalCwdSource(rendererCwdSource)) {
     return knownCwd;
   }
   const canUseRendererFallback = allowRendererFallback && (
-    !requireActiveShellCwd || rendererCwdSource === "osc7"
+    !requireActiveShellCwd || isLiveTerminalCwdSource(rendererCwdSource)
   );
   if (!preferFreshBackend && knownCwd && canUseRendererFallback) return knownCwd;
   if (!sessionId) return canUseRendererFallback ? knownCwd : null;

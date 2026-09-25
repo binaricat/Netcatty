@@ -38,6 +38,7 @@ import {
 } from "../../../domain/credentials";
 import { resolveBridgeSshAgentAuth, resolveHostAuth } from "../../../domain/sshAuth";
 import {
+  hostRestrictsExtraSshChannels,
   resolveHostKeepalive,
   resolveTelnetPassword,
   resolveTelnetPort,
@@ -695,6 +696,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
           charset: ctx.host.charset,
           // Persist for session-backed SFTP opens (AI tools / clipboard paste).
           sftpFileProtocol: ctx.host.sftpFileProtocol || "auto",
+          singleChannelSsh: hostRestrictsExtraSshChannels(ctx.host),
           env: termEnv,
           proxy: proxyConfig,
           jumpHosts: jumpHosts.length > 0 ? jumpHosts : undefined,
@@ -724,7 +726,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
           // Only an explicit Copy/Split may share an existing login. Ordinary
           // opens and reconnects must authenticate again to refresh remote groups.
           reuseTransport: sourceSessionId ? undefined : false,
-          skipShellPidDiscovery: ctx.isNetworkDevice === true,
+          skipShellPidDiscovery: ctx.isNetworkDevice === true || hostRestrictsExtraSshChannels(ctx.host),
         });
         if (!requiresFreshSshConnection) {
           ctx.onConnectAutomationSnapshotCommitted?.();

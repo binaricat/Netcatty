@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isMissingStatError } from "./errors";
+import { isMissingStatError, unwrapSftpIpcError } from "./errors";
 
 test("isMissingStatError accepts only true path absence codes", () => {
   for (const code of [2, "ENOENT", "NO_SUCH_FILE", "SSH_FX_NO_SUCH_FILE"] as const) {
@@ -63,4 +63,16 @@ test("isMissingStatError rejects unsupported LSTAT and other failures", () => {
     ),
     false,
   );
+});
+
+
+test("unwrapSftpIpcError strips the Electron IPC wrapper", () => {
+  assert.equal(
+    unwrapSftpIpcError(
+      new Error("Error invoking remote method 'netcatty:sftp:delete': Error: Permission denied"),
+    ),
+    "Permission denied",
+  );
+  assert.equal(unwrapSftpIpcError(new Error("Permission denied")), "Permission denied");
+  assert.equal(unwrapSftpIpcError("channel closed"), "channel closed");
 });
