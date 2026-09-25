@@ -1158,7 +1158,6 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
   // touch a foreign file that a user or another application placed at the
   // predictable hidden pathname (Codex P2 on PR #3516).
   const backupOwnerMarkerPath = `${backupPath}.owner`;
-  let supersededBackupOwnerMarker = null;
   let wroteOwnerMarker = false;
   let preparedHandle;
   let originalHandle;
@@ -1288,11 +1287,11 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
                 + "refusing to supersede it. Remove or rename that file if it was not created by Netcatty.",
               );
             }
-            supersededBackupOwnerMarker = await fs.promises.readFile(backupOwnerMarkerPath, "utf8")
-              .catch(() => null);
             // Free the fixed marker pathname for the exclusive marker write
-            // below; the saved content is restored if this replacement is
-            // rolled back before the commit boundary.
+            // below; a fresh marker for the restored backup's actual identity
+            // is recreated if this replacement is rolled back before the
+            // commit boundary (copy-based publication gives the restored file
+            // a new inode, Codex P2 on PR #3516).
             await fs.promises.unlink(backupOwnerMarkerPath).catch(() => {});
           }
         }
@@ -1432,7 +1431,6 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
         // Keep the superseded copy reachable beside the destination.
       }
       supersededBackupPath = null;
-      supersededBackupOwnerMarker = null;
     }
     // Hand the published inode identity to the caller for descriptor-based
     // metadata stamping after publication.
@@ -1557,12 +1555,24 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
               if (markerError?.code !== "ENOENT") throw markerError;
             });
           }
-          if (supersededBackupOwnerMarker !== null) {
-            await writeLocalBackupOwnerMarkerContent(backupOwnerMarkerPath, supersededBackupOwnerMarker);
+          // Copy-based publication (filesystems without hard links) gives the
+          // restored backup a fresh inode, so restoring the saved marker
+          // verbatim would pair the fixed backup name with an identity it can
+          // never match again, and the next repeat download would permanently
+          // reject the recovery backup until the hidden files are removed
+          // (Codex P2 on PR #3516). Stat the restored file and write a marker
+          // for its actual identity instead. Recreated exclusively so a
+          // symlink swapped in at that pathname is never followed (Codex P2).
+          const restoredBackupStat = await fs.promises.lstat(backupPath, { bigint: true })
+            .catch(() => null);
+          if (restoredBackupStat?.isFile()) {
+            await writeLocalBackupOwnerMarker(backupOwnerMarkerPath, restoredBackupStat);
           } else {
+            // Fail closed: without a matching marker the next repeat download
+            // refuses to touch the restored backup instead of replacing a
+            // foreign file.
             await fs.promises.unlink(backupOwnerMarkerPath).catch(() => {});
           }
-          supersededBackupOwnerMarker = null;
         } else if (wroteOwnerMarker) {
           // The rollover marker no longer matches any retained backup.
           await fs.promises.unlink(backupOwnerMarkerPath).catch(() => {});
@@ -1587,12 +1597,19 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
         await publishLocalFileExclusive(supersededBackupPath, backupPath);
         await fs.promises.unlink(supersededBackupPath).catch(() => {});
         supersededBackupPath = null;
-        if (supersededBackupOwnerMarker !== null) {
-          await writeLocalBackupOwnerMarkerContent(backupOwnerMarkerPath, supersededBackupOwnerMarker);
+        // Copy-based publication gives the restored backup a fresh inode, so
+        // a saved marker for the superseded inode would never match again
+        // (Codex P2 on PR #3516). Stat the restored file and write a marker
+        // for its actual identity; without one the next repeat download
+        // refuses to touch the restored backup instead of replacing a
+        // foreign file.
+        const restoredBackupStat = await fs.promises.lstat(backupPath, { bigint: true })
+          .catch(() => null);
+        if (restoredBackupStat?.isFile()) {
+          await writeLocalBackupOwnerMarker(backupOwnerMarkerPath, restoredBackupStat);
         } else {
           await fs.promises.unlink(backupOwnerMarkerPath).catch(() => {});
         }
-        supersededBackupOwnerMarker = null;
       } catch (restoreError) {
         keepRecoveryFiles = true;
         error.cause ??= restoreError;

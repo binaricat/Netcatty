@@ -1652,6 +1652,15 @@ export const useSftpTransfers = ({
         const affectedConflict = affectedConflictById.get(affectedTask.id);
 
         if (action === "duplicate") {
+          // The duplicate publishes at a fresh path, but the retained
+          // publication callback still remembers the original target path:
+          // after publishing the duplicate it would delete the remembered
+          // association for this source and then fail its identity check
+          // against the duplicate's inode, so later quick downloads
+          // unexpectedly reopen Save As (Codex P2 on PR #3516). Drop the
+          // handler; there is no remembered identity to refresh for a fresh
+          // duplicate path.
+          publicationHandlersRef.current.delete(affectedTask.id);
           const endpoints = resolveTaskEndpoints(affectedTask);
           if (!endpoints) continue;
           const targetSftpId = endpoints.targetPane.connection?.isLocal
