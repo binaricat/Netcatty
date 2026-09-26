@@ -626,6 +626,8 @@ Highlight the focused split pane:
   'settings.terminal.cursor.style.block': 'Block',
   'settings.terminal.cursor.style.bar': 'Bar',
   'settings.terminal.cursor.style.underline': 'Underline',
+  'settings.terminal.cursor.barWidth': 'Bar cursor width',
+  'settings.terminal.cursor.barWidth.desc': 'Width of bar cursors used by applications such as vi (1-4 px)',
   'settings.terminal.cursor.blink': 'Cursor blink',
   'settings.terminal.cursor.highlightLine': 'Highlight current line',
   'settings.terminal.cursor.highlightLine.desc':

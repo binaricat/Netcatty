@@ -594,6 +594,8 @@ export const ruCoreMessages: Messages = {
   'settings.terminal.cursor.style.block': 'Блок',
   'settings.terminal.cursor.style.bar': 'Полоса',
   'settings.terminal.cursor.style.underline': 'Подчёркивание',
+  'settings.terminal.cursor.barWidth': 'Толщина курсора-полосы',
+  'settings.terminal.cursor.barWidth.desc': 'Ширина курсоров-полос, используемых приложениями вроде vi (1-4 пикс.)',
   'settings.terminal.cursor.blink': 'Мигание курсора',
   'settings.terminal.cursor.highlightLine': 'Подсветка текущей строки',
   'settings.terminal.cursor.highlightLine.desc':

@@ -88,6 +88,8 @@ export interface TerminalSettings {
   // Cursor
   cursorShape: CursorShape;
   cursorBlink: boolean;
+  /** Width in pixels for a bar cursor; applications can still choose the shape. */
+  cursorBarWidth: number;
   /** Highlight the buffer row under the cursor (WindTerm-style decoration). */
   highlightCursorLine: boolean;
 
@@ -403,6 +405,11 @@ const isDisconnectedNoticeMode = (value: unknown): value is DisconnectedNoticeMo
   value === 'terminal' || value === 'dialog'
 );
 
+export const normalizeCursorBarWidth = (value: unknown): number => {
+  const width = typeof value === 'number' ? value : DEFAULT_TERMINAL_SETTINGS.cursorBarWidth;
+  return Number.isFinite(width) ? Math.min(4, Math.max(1, Math.round(width))) : DEFAULT_TERMINAL_SETTINGS.cursorBarWidth;
+};
+
 export const normalizeTerminalSettings = (
   settings?: Partial<TerminalSettings> | null,
 ): TerminalSettings => {
@@ -420,6 +427,7 @@ export const normalizeTerminalSettings = (
     middleClickPaste: middleClickBehavior === 'paste',
     wordSeparators,
     shiftEnterNewlineText,
+    cursorBarWidth: normalizeCursorBarWidth(settings?.cursorBarWidth),
     dynamicTabTitleMode: isDynamicTabTitleMode(settings?.dynamicTabTitleMode)
       ? settings.dynamicTabTitleMode
       : DEFAULT_TERMINAL_SETTINGS.dynamicTabTitleMode,
@@ -504,6 +512,7 @@ const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
   fallbackFont: '',
   cursorShape: 'block',
   cursorBlink: true,
+  cursorBarWidth: 2,
   highlightCursorLine: false,
   minimumContrastRatio: 1,
   altAsMeta: false,

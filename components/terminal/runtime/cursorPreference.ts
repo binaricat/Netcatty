@@ -2,12 +2,14 @@ import type { IDisposable, Terminal as XTerm } from "@xterm/xterm";
 import type { RefObject } from "react";
 
 import type { TerminalSettings } from "../../../types";
+import { normalizeCursorBarWidth } from "../../../domain/models/terminal";
 
-type CursorPreferenceSettings = Pick<TerminalSettings, "cursorShape" | "cursorBlink">;
+type CursorPreferenceSettings = Pick<TerminalSettings, "cursorShape" | "cursorBlink" | "cursorBarWidth">;
 
 type MutableCursorOptions = {
   cursorStyle?: "block" | "bar" | "underline";
   cursorBlink?: boolean;
+  cursorWidth?: number;
 };
 
 type TerminalLike = {
@@ -50,6 +52,7 @@ export const resolveUserCursorPreference = (
 ): Required<CursorPreferenceSettings> => ({
   cursorShape: settings?.cursorShape ?? "block",
   cursorBlink: settings?.cursorBlink ?? true,
+  cursorBarWidth: normalizeCursorBarWidth(settings?.cursorBarWidth),
 });
 
 export const applyUserCursorPreference = (
@@ -64,6 +67,14 @@ export const applyUserCursorPreference = (
   }
   term.options.cursorStyle = preference.cursorShape;
   term.options.cursorBlink = preference.cursorBlink;
+  term.options.cursorWidth = preference.cursorBarWidth;
+};
+
+export const applyUserCursorWidthPreference = (
+  term: TerminalLike,
+  settings: Partial<CursorPreferenceSettings> | undefined,
+): void => {
+  term.options.cursorWidth = resolveUserCursorPreference(settings).cursorBarWidth;
 };
 
 export const applyUserCursorBlinkPreference = (

@@ -285,6 +285,8 @@ export const zhCNTerminalMessages: Messages = {
   'settings.terminal.cursor.style.block': '块',
   'settings.terminal.cursor.style.bar': '竖线',
   'settings.terminal.cursor.style.underline': '下划线',
+  'settings.terminal.cursor.barWidth': '竖线光标粗细',
+  'settings.terminal.cursor.barWidth.desc': 'vi 等应用使用竖线光标时的宽度（1-4 像素）',
   'settings.terminal.cursor.blink': '光标闪烁',
   'settings.terminal.cursor.highlightLine': '高亮当前行',
   'settings.terminal.cursor.highlightLine.desc': '为光标所在行加上淡色背景，方便定位当前输入位置',

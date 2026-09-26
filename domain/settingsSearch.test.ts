@@ -19,6 +19,9 @@ const EN: Record<string, string> = {
   "settings.appearance.uiTheme": "UI theme",
   "settings.terminal.behavior.copyOnSelect": "Copy on select",
   "settings.terminal.behavior.copyOnSelect.desc": "Copy selected text automatically",
+  "settings.terminal.cursor.barWidth": "Bar cursor width",
+  "settings.terminal.cursor.barWidth.desc": "Width of bar cursors used by applications such as vi (1-4 px)",
+  "settings.terminal.section.cursor": "Cursor",
   "settings.terminal.behavior.disconnectedNotice": "When a connection disconnects",
   "settings.terminal.behavior.disconnectedNotice.desc": "Show a terminal notice or dialog",
   "settings.terminal.section.behavior": "Behavior",
@@ -38,6 +41,9 @@ const ZH: Record<string, string> = {
   ...EN,
   "settings.appearance.theme": "主题",
   "settings.terminal.behavior.copyOnSelect": "选中即复制",
+  "settings.terminal.cursor.barWidth": "竖线光标粗细",
+  "settings.terminal.cursor.barWidth.desc": "vi 等应用使用竖线光标时的宽度（1-4 像素）",
+  "settings.terminal.section.cursor": "光标",
   "settings.terminal.behavior.disconnectedNotice": "连接断开时",
   "settings.terminal.behavior.disconnectedNotice.desc": "在终端内显示简短提示，或使用完整弹窗",
   "settings.system.networkProxy.mode": "代理模式",
@@ -69,6 +75,14 @@ test("settings search finds the disconnected notice preference", () => {
 
   const byPopupAlias = filterSettingsSearchCatalog("弹窗提醒", tZh);
   assert.ok(byPopupAlias.some((hit) => hit.entry.id === "terminal-disconnected-notice"));
+});
+
+test("settings search finds bar cursor width in English and Chinese", () => {
+  const byEnglish = filterSettingsSearchCatalog("bar cursor width", tEn);
+  assert.ok(byEnglish.some((hit) => hit.entry.id === "terminal-cursor-bar-width"));
+
+  const byChinese = filterSettingsSearchCatalog("竖线光标粗细", tZh);
+  assert.ok(byChinese.some((hit) => hit.entry.id === "terminal-cursor-bar-width"));
 });
 
 test("filterSettingsSearchCatalog matches Chinese labels and pinyin", () => {

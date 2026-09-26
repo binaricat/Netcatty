@@ -1585,6 +1585,26 @@ test("applySyncPayload restores the terminal host information bar preference", a
   assert.equal(parsed.scrollback, 5000);
 });
 
+test("bar cursor width survives terminal settings sync round-trip", async () => {
+  localStorage.setItem(
+    storageKeys.STORAGE_KEY_TERM_SETTINGS,
+    JSON.stringify({ cursorBarWidth: 3 }),
+  );
+
+  const payload = buildSyncPayload(vault());
+  const termSettings = (payload.settings?.terminalSettings ?? {}) as Record<string, unknown>;
+  assert.equal(termSettings.cursorBarWidth, 3);
+
+  localStorage.setItem(
+    storageKeys.STORAGE_KEY_TERM_SETTINGS,
+    JSON.stringify({ cursorBarWidth: 1 }),
+  );
+  await applySyncPayload(payload, { importVaultData: () => {} });
+
+  const restored = JSON.parse(localStorage.getItem(storageKeys.STORAGE_KEY_TERM_SETTINGS)!);
+  assert.equal(restored.cursorBarWidth, 3);
+});
+
 test("buildSyncPayload omits fallbackFont when TERM_SETTINGS does not set it", () => {
   localStorage.setItem(
     storageKeys.STORAGE_KEY_TERM_SETTINGS,

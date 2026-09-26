@@ -10,6 +10,15 @@ test("terminal settings expose cursor line highlight toggle", () => {
   assert.match(source, /updateTerminalSetting\("highlightCursorLine", v\)/);
 });
 
+test("terminal settings expose a bounded bar cursor width control", () => {
+  assert.match(source, /settings\.terminal\.cursor\.barWidth/);
+  assert.match(source, /min=\{1\}/);
+  assert.match(source, /max=\{4\}/);
+  assert.match(source, /value=\{terminalSettings\.cursorBarWidth\}/);
+  assert.match(source, /aria-label=\{t\("settings\.terminal\.cursor\.barWidth"\)\}/);
+  assert.match(source, /updateTerminalSetting\("cursorBarWidth", parseInt\(e\.target\.value\)\)/);
+});
+
 test("terminal settings hide terminal theme pickers while following app theme", () => {
   assert.match(source, /\{!followAppTerminalTheme && \(/);
   assert.doesNotMatch(source, /settings\.terminal\.theme\.followingTheme/);

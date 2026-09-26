@@ -20,6 +20,7 @@ import { KeywordHighlighter } from "../keywordHighlight";
 import { installSearchDecorationTracker } from "../hooks/useTerminalSearch";
 import { CursorLineHighlighter } from "./cursorLineHighlight";
 import { resolveCursorLineHighlightBackground } from "../../../domain/cursorLineHighlight";
+import { normalizeCursorBarWidth } from "../../../domain/models/terminal";
 import {
   registerPluginTerminalLinkProvider,
   type PluginTerminalLinkProviderHost,
@@ -508,6 +509,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
 
   const cursorStyle = settings?.cursorShape ?? "block";
   const cursorBlink = settings?.cursorBlink ?? true;
+  const cursorWidth = normalizeCursorBarWidth(settings?.cursorBarWidth);
   const rawScrollback = settings?.scrollback ?? DEFAULT_TERMINAL_SCROLLBACK;
   const scrollback = resolveXTermScrollback(rawScrollback);
   const drawBoldTextInBrightColors = settings?.drawBoldInBrightColors ?? true;
@@ -609,6 +611,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     lineHeight,
     cursorStyle,
     cursorBlink,
+    cursorWidth,
     scrollback,
     // Cursor-line rendering and Unicode width handling use proposed APIs.
     allowProposedApi: true,

@@ -541,6 +541,8 @@ Resalta el panel dividido enfocado:
   'settings.terminal.cursor.style.block': 'Bloque',
   'settings.terminal.cursor.style.bar': 'Barra',
   'settings.terminal.cursor.style.underline': 'Subrayado',
+  'settings.terminal.cursor.barWidth': 'Ancho del cursor de barra',
+  'settings.terminal.cursor.barWidth.desc': 'Ancho de los cursores de barra utilizados por aplicaciones como vi (1-4 px)',
   'settings.terminal.cursor.blink': 'Parpadeo del cursor',
   'settings.terminal.cursor.highlightLine': 'Resaltar línea actual',
   'settings.terminal.cursor.highlightLine.desc':

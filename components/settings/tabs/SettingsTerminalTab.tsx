@@ -652,6 +652,28 @@ function SettingsTerminalTab(props: {
           />
         </SettingRow>
 
+        <SettingRow
+          anchorId="terminal-cursor-bar-width"
+          label={t("settings.terminal.cursor.barWidth")}
+          description={t("settings.terminal.cursor.barWidth.desc")}
+        >
+          <div className="flex items-center gap-2">
+            <input
+              type="range"
+              aria-label={t("settings.terminal.cursor.barWidth")}
+              min={1}
+              max={4}
+              step={1}
+              value={terminalSettings.cursorBarWidth}
+              onChange={(e) => updateTerminalSetting("cursorBarWidth", parseInt(e.target.value))}
+              className="w-24 accent-primary"
+            />
+            <span className="w-6 text-center text-sm text-muted-foreground">
+              {terminalSettings.cursorBarWidth}px
+            </span>
+          </div>
+        </SettingRow>
+
         <SettingRow anchorId="terminal-cursor-blink" label={t("settings.terminal.cursor.blink")}>
           <Toggle
             checked={terminalSettings.cursorBlink}

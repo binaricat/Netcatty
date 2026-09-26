@@ -264,11 +264,20 @@ export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
     labelKey: "settings.terminal.font.emulationType",
     sectionKey: "settings.terminal.section.font",
   },
+
   {
     id: "terminal-cursor-style",
     tab: "terminal",
     labelKey: "settings.terminal.cursor.style",
     sectionKey: "settings.terminal.section.cursor",
+  },
+  {
+    id: "terminal-cursor-bar-width",
+    tab: "terminal",
+    labelKey: "settings.terminal.cursor.barWidth",
+    descriptionKey: "settings.terminal.cursor.barWidth.desc",
+    sectionKey: "settings.terminal.section.cursor",
+    keywords: ["bar cursor", "cursor width", "vi", "vim", "竖线光标", "光标粗细"],
   },
   {
     id: "terminal-cursor-blink",

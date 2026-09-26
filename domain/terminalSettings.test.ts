@@ -7,6 +7,12 @@ test("normalizeTerminalSettings disables cursor line highlight by default", () =
   assert.equal(normalizeTerminalSettings().highlightCursorLine, false);
 });
 
+test("normalizeTerminalSettings defaults and clamps the bar cursor width", () => {
+  assert.equal(normalizeTerminalSettings().cursorBarWidth, 2);
+  assert.equal(normalizeTerminalSettings({ cursorBarWidth: 0 }).cursorBarWidth, 1);
+  assert.equal(normalizeTerminalSettings({ cursorBarWidth: 6 }).cursorBarWidth, 4);
+});
+
 test("normalizeTerminalSettings defaults disconnected sessions to a terminal notice", () => {
   assert.equal(normalizeTerminalSettings().disconnectedNoticeMode, "terminal");
 });

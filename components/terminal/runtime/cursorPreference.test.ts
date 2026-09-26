@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   applyUserCursorBlinkPreference,
   applyUserCursorPreference,
+  applyUserCursorWidthPreference,
   installUserCursorPreferenceGuard,
   resolveUserCursorPreference,
 } from "./cursorPreference";
@@ -12,6 +13,7 @@ test("resolveUserCursorPreference defaults to a blinking block cursor", () => {
   assert.deepEqual(resolveUserCursorPreference(undefined), {
     cursorShape: "block",
     cursorBlink: true,
+    cursorBarWidth: 2,
   });
 });
 
@@ -38,8 +40,38 @@ test("applyUserCursorPreference clears terminal-side cursor overrides before app
 
   assert.equal(term.options.cursorStyle, "underline");
   assert.equal(term.options.cursorBlink, true);
+  assert.equal((term.options as { cursorWidth?: number }).cursorWidth, 2);
   assert.equal(term._core.coreService.decPrivateModes.cursorStyle, undefined);
   assert.equal(term._core.coreService.decPrivateModes.cursorBlink, undefined);
+});
+
+test("resolveUserCursorPreference clamps bar cursor width to the supported range", () => {
+  assert.equal(resolveUserCursorPreference({ cursorBarWidth: 9 }).cursorBarWidth, 4);
+  assert.equal(resolveUserCursorPreference({ cursorBarWidth: 0 }).cursorBarWidth, 1);
+});
+
+test("applyUserCursorWidthPreference preserves a remote DEC cursor-style override", () => {
+  const term = {
+    options: {
+      cursorStyle: "block" as const,
+      cursorBlink: true,
+    },
+    _core: {
+      coreService: {
+        decPrivateModes: {
+          cursorStyle: "bar" as const,
+          cursorBlink: false,
+        },
+      },
+    },
+  };
+
+  applyUserCursorWidthPreference(term, { cursorBarWidth: 3 });
+
+  assert.equal((term.options as { cursorWidth?: number }).cursorWidth, 3);
+  assert.equal(term.options.cursorStyle, "block");
+  assert.equal(term._core.coreService.decPrivateModes.cursorStyle, "bar");
+  assert.equal(term._core.coreService.decPrivateModes.cursorBlink, false);
 });
 
 test("applyUserCursorBlinkPreference keeps remote cursor shape overrides intact", () => {
