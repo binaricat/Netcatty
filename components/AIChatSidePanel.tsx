@@ -851,7 +851,11 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     [currentAgentConfig],
   );
 
-  const { model: codexConfigModel, loadModel: loadCodexConfigModel } = useCodexConfigModel(
+  const {
+    model: codexConfigModel,
+    loadModel: loadCodexConfigModel,
+    isPending: isCodexConfigModelPending,
+  } = useCodexConfigModel(
     currentAgentConfig, isVisible,
   );
 
@@ -1049,6 +1053,12 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   const isCodexAppServer = isCodexManagedAgent && currentAgentConfig?.codexRuntime === 'app-server';
   const canSteerCurrentTurn = Boolean(activeSessionId && isStreaming && isCodexAppServer);
   const hasCodexCustomConfig = Boolean(codexConfigModel) && isCodexManagedAgent;
+  // `codexConfigModel` is null both while the config probe is pending and when
+  // the managed Codex config has no locked model. Keep the manual-entry action
+  // hidden until the probe resolves so a pick made in the interim can't be
+  // silently overridden by the config model on send (#3535).
+  const allowCustomModelEntry = !isCodexManagedAgent
+    || (!isCodexConfigModelPending && !hasCodexCustomConfig);
 
   const agentModelPresets = useMemo(() => {
     const target = buildExternalAgentRuntimeModelTarget(currentAgentConfig);
@@ -1787,7 +1797,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         agentModelPresets={agentModelPresets}
         // A managed Codex config's `model` field overrides every selection on
         // send, so the manual-entry action would be a silent no-op.
-        allowCustomModelEntry={!hasCodexCustomConfig}
+        allowCustomModelEntry={allowCustomModelEntry}
         selectedAgentModel={selectedAgentModel}
         handleAgentModelSelect={handleAgentModelSelect}
         cattyConfiguredProviders={cattyConfiguredProviders}
