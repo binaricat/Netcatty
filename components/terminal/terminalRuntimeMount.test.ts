@@ -159,7 +159,7 @@ test('trusted command delivery reaches plugin providers without duplicating the 
 test('password-prompt input is consumed before every semantic command callback', () => {
   assert.match(
     xtermRuntimeSource,
-    /const sensitive = ctx\.passwordPromptActiveRef\?\.current === true;[\s\S]*?recordTerminalCommandExecution\([\s\S]*?\{ sensitive, allowHostStyleGreaterThanPrompt: ctx\.allowHostStyleGreaterThanPrompt \},\s*\);/,
+    /const sensitive = ctx\.passwordPromptActiveRef\?\.current === true[\s\S]*?recordTerminalCommandExecution\([\s\S]*?\{ sensitive, allowHostStyleGreaterThanPrompt: ctx\.allowHostStyleGreaterThanPrompt \},\s*\);/,
   );
   assert.match(
     terminalSource,
@@ -168,7 +168,10 @@ test('password-prompt input is consumed before every semantic command callback',
 });
 
 test('terminal output treats unknown prompt-shaped input boundaries as sensitive', () => {
-  assert.match(terminalSource, /const promptSecurityOptions = \{ allowHostStyleGreaterThan: isNetworkDevice \};/);
+  assert.match(
+    terminalSource,
+    /const promptSecurityOptions = \{\s*allowHostStyleGreaterThan: isNetworkDevice,\s*alternateScreen: termRef\.current\s*\? isTerminalAlternateScreenActive\(termRef\.current\)\s*: false,\s*\};/,
+  );
   assert.match(terminalSource, /isUntrustedTerminalInputPrompt\([\s\S]*?promptSecurityOptions/);
   assert.match(terminalSource, /passwordPromptActiveRef\.current = true;[\s\S]*?autocompleteCloseRef\.current\?\.\(\);/);
   assert.match(terminalSource, /isConfirmedTerminalShellPrompt\([\s\S]*?passwordPromptActiveRef\.current = false;/);

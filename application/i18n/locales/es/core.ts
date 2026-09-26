@@ -279,6 +279,8 @@ export const esCoreMessages: Messages = {
   'settings.appearance.tabBarPosition.bottom': 'Abajo',
   'settings.vault.showSftpTab': 'Mostrar pestaña SFTP',
   'settings.vault.showSftpTabDesc': 'Muestra la vista SFTP independiente en la barra de pestañas superior. Cuando está oculta, usa el panel lateral SFTP dentro de la sesión.',
+  'settings.vault.sftpInSidebar': 'Mantener SFTP en la barra lateral',
+  'settings.vault.sftpInSidebarDesc': 'Oculta la pestaña SFTP superior y muestra SFTP en la barra lateral del depósito, de modo que la barra lateral siga visible mientras SFTP está abierto.',
   'settings.vault.showHostTreeSidebar': 'Mostrar barra lateral de lista de hosts',
   'settings.vault.showHostTreeSidebarDesc': 'Muestra la barra lateral de lista de hosts y su alternador en la barra superior en las pestañas de terminal y editor.',
   'settings.vault.autoImportSystemKnownHosts': 'Importar automáticamente known_hosts del sistema',
@@ -564,6 +566,12 @@ Resalta el panel dividido enfocado:
   'settings.terminal.sidePanel.pane.system': 'Sistema',
   'settings.terminal.sidePanel.pane.notes': 'Notas',
   'settings.terminal.sidePanel.pane.ai': 'IA',
+  'settings.terminal.section.localShellSidePanel': 'Panel lateral de Shell local',
+  'settings.terminal.localShellSidePanel.autoOpen': 'Expandir panel lateral al abrir Shell local',
+  'settings.terminal.localShellSidePanel.autoOpen.desc': 'Abre automáticamente un panel lateral después de abrir el Shell local.',
+  'settings.terminal.localShellSidePanel.autoOpenPane': 'Panel lateral predeterminado',
+  'settings.terminal.localShellSidePanel.autoOpenPane.desc': 'Elige qué panel se abre primero.',
+  'settings.terminal.localShellSidePanel.pane.files': 'Archivos',
   'settings.terminal.accessibility.minimumContrastRatio.desc':
     'Ajusta los colores para cumplir con los requisitos de contraste (1 = desactivado, 21 = máximo)',
   'settings.terminal.behavior.rightClick': 'Comportamiento del clic derecho',
@@ -606,6 +614,12 @@ Resalta el panel dividido enfocado:
   'settings.terminal.behavior.autoUploadClipboardImage': 'Subir automáticamente imágenes del portapapeles al pegar',
   'settings.terminal.behavior.autoUploadClipboardImage.desc':
     'Cuando el portapapeles contiene una imagen, pegarla en una sesión remota la sube por SFTP a .netcatty-paste-images/ dentro del directorio de trabajo remoto e inserta la ruta remota en lugar de pegar texto.',
+  'settings.terminal.behavior.confirmMultilinePaste': 'Preguntar antes de pegar varias líneas',
+  'settings.terminal.behavior.confirmMultilinePaste.desc':
+    'Muestra un diálogo de confirmación antes de pegar varias líneas, con el número de líneas y caracteres, una vista previa editable y las acciones Enviar / Enviar línea por línea / Cancelar. Protege las CLI de dispositivos de red (Cisco IOS, Huawei VRP, H3C Comware) que no admiten bracketed paste.',
+  'settings.terminal.behavior.confirmMultilinePasteMinLines': 'Umbral de confirmación (líneas)',
+  'settings.terminal.behavior.confirmMultilinePasteMinLines.desc':
+    'Pedir confirmación cuando el texto pegado contenga al menos esta cantidad de líneas.',
   'settings.terminal.behavior.shiftEnterNewline': 'Texto de Shift+Enter',
   'settings.terminal.behavior.shiftEnterNewline.desc':
     'Envía el texto configurado en lugar del Enter normal al presionar Shift+Enter en la terminal.',
@@ -973,6 +987,7 @@ Resalta el panel dividido enfocado:
   'vault.nav.snippets': 'Scripts',
   'vault.nav.notes': 'Notas',
   'vault.nav.knownHosts': 'Hosts conocidos',
+  'vault.nav.sftp': 'SFTP',
   'vault.nav.logs': 'Registros',
 
   'proxyProfiles.action.add': 'Agregar proxy',
@@ -1006,6 +1021,10 @@ Resalta el panel dividido enfocado:
   'vault.groups.deleteDialogTitle': 'Eliminar grupo',
   'vault.groups.deleteDialog.desc': 'Esto eliminará permanentemente el grupo y moverá todos los hosts al nivel raíz.',
   'vault.groups.deleteDialog.managedDesc': 'Este es un grupo administrado de configuración SSH. Eliminarlo también eliminará todos los hosts y lo desvinculará del archivo de origen.',
+  'vault.groups.deleteDialog.mixedDesc': 'Este grupo contiene hosts importados de un archivo de configuración SSH vinculado. Todos los hosts bajo su subgrupo administrado se eliminarán, incluso los hosts no administrados por ese archivo. Los demás hosts se moverán al nivel raíz a menos que también los elimine abajo.',
+  'vault.groups.deleteDialog.managedWarning': 'Al eliminar este grupo también se borrarán sus entradas del archivo de configuración SSH vinculado. Las entradas provenientes de ese archivo pueden perderse y también afectará a otras aplicaciones que lo usen. Haz una copia de seguridad del archivo antes de continuar.',
+  'vault.groups.deleteDialog.sourcesChanged': 'Los archivos administrados afectados por esta eliminación han cambiado. Revisa los archivos y vuelve a confirmar.',
+  'vault.groups.deleteDialog.managedFile': 'Archivo vinculado: {file}',
   'vault.groups.deleteDialog.deleteHosts': 'También eliminar todos los hosts de este grupo',
   'vault.groups.deleteDialog.bulkTitle': 'Eliminar grupos seleccionados',
   'vault.groups.deleteDialog.bulkDesc': 'Esto eliminará permanentemente los grupos seleccionados y moverá sus hosts al nivel raíz.',
@@ -1064,6 +1083,7 @@ Resalta el panel dividido enfocado:
   'vault.hosts.export.toast.success': 'Se exportaron {count} hosts a CSV',
   'vault.hosts.export.toast.successWithSkipped': 'Se exportaron {count} hosts a CSV (se omitieron {skipped} hosts no compatibles)',
   'vault.hosts.export.toast.passphrasesSkipped': 'No se pudieron leer {count} frases de contraseña de claves guardadas y se dejaron en blanco',
+  'vault.hosts.export.toast.proxyCredentialsSkipped': 'No se pudieron leer {count} contraseñas de proxy guardadas y se dejaron en blanco',
   'vault.hosts.export.toast.noHosts': 'No hay hosts para exportar',
   'vault.hosts.allHosts': 'Todos los hosts',
   'vault.hosts.pinned': 'Fijados',

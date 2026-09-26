@@ -856,18 +856,23 @@ export const resolveSubmittedShellCommand = (
   return live;
 };
 
+export const isSensitiveTerminalCommandInput = (
+  term?: XTerm | null,
+  sensitive = false,
+): boolean => sensitive || isSensitiveTerminalChallenge(readCurrentLogicalTerminalLine(term));
+
 export const recordTerminalCommandExecution = (
   command: string,
   ctx: TerminalCommandExecutionContext,
   term?: XTerm | null,
-  options?: { sensitive?: boolean; allowHostStyleGreaterThanPrompt?: boolean },
+  options?: { sensitive?: boolean; allowHostStyleGreaterThanPrompt?: boolean; useProvidedCommand?: boolean; acknowledgedWrite?: boolean },
 ): string | null => {
-  if (options?.sensitive || isSensitiveTerminalChallenge(readCurrentLogicalTerminalLine(term))) {
+  if (isSensitiveTerminalCommandInput(term, options?.sensitive)) {
     ctx.commandBufferRef.current = "";
     return null;
   }
   const lastPromptText = ctx.promptLineBreakStateRef?.current?.lastPromptText;
-  const cmd = resolveSubmittedShellCommand(command, term, lastPromptText);
+  const cmd = options?.useProvidedCommand ? command.trim() : resolveSubmittedShellCommand(command, term, lastPromptText);
   if (cmd) {
     ctx.onCommandSubmitted?.(cmd, ctx.host.id, ctx.host.label, ctx.sessionId);
   }
@@ -878,7 +883,7 @@ export const recordTerminalCommandExecution = (
       allowHostStyleGreaterThan: options?.allowHostStyleGreaterThanPrompt,
     }),
   );
-  if (cmd && shouldRecordShellHistory(cmd, term)) {
+  if (cmd && (options?.acknowledgedWrite || shouldRecordShellHistory(cmd, term))) {
     if (trustedPrompt) {
       ctx.onTrustedCommandSubmitted?.(cmd, ctx.host.id, ctx.host.label, ctx.sessionId);
     }

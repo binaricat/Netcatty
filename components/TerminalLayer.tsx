@@ -1,3 +1,4 @@
+import { captureTerminalBroadcastInput, isTerminalBroadcastInputCurrent, markTerminalBroadcastUserInput } from "./terminal/runtime/terminalPacedBroadcast";
 import { pruneComposeBarHistory } from '../application/state/composeBarHistoryStore';
 import { FolderTree, History, MessageSquare, PanelLeft, PanelRight, Palette, X, Zap } from 'lucide-react';
 import React, { memo, startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -26,6 +27,7 @@ import { useStoredString } from '../application/state/useStoredString';
 import { useStoredNumber } from '../application/state/useStoredNumber';
 import { useStoredBoolean } from '../application/state/useStoredBoolean';
 import {
+  STORAGE_KEY_SIDE_PANEL_HEIGHT,
   STORAGE_KEY_SIDE_PANEL_WIDTH,
   STORAGE_KEY_TERMINAL_COMPOSE_BAR_OPEN,
 } from '../infrastructure/config/storageKeys';
@@ -105,7 +107,7 @@ import {
 } from './terminalLayer/terminalLayerSessionRouting';
 import {
   DEFAULT_TERMINAL_SIDE_PANEL_AUTO_OPEN_TAB,
-  resolveTerminalSidePanelAutoOpen,
+  resolveSessionSidePanelAutoOpen,
 } from '../domain/terminalSidePanelAutoOpen';
 import { shouldProbeCommandCwd } from './terminalLayer/commandCwdProbe';
 import {
@@ -118,8 +120,10 @@ import { classifyDistroId, shouldProbeSessionCwd } from '../domain/host';
 import {
   collectSidePanelPanes,
   sidePanelLayoutHasTool,
+  type SidePanelLayout,
   type SidePanelSplitDirection,
 } from '../domain/sidePanelLayout';
+import { useWorkspaceLayoutPresetState } from '../application/state/useWorkspaceLayoutPresetState';
 import {
   isPaneMagnificationSelectionValid,
   resolvePaneMagnificationCandidate,
@@ -128,9 +132,12 @@ import {
 } from '../domain/paneMagnification';
 import { useTerminalSidePanelLayoutState } from '../application/state/useTerminalSidePanelLayoutState';
 import {
+  TERMINAL_SIDE_PANEL_MAX_HEIGHT,
   TERMINAL_SIDE_PANEL_MAX_WIDTH,
+  TERMINAL_SIDE_PANEL_MIN_HEIGHT,
   TERMINAL_SIDE_PANEL_MIN_WIDTH,
 } from '../application/state/terminalSidePanelWidth';
+import { isSidePanelDockPosition } from '../domain/sidePanelLayout';
 
 import {
   AIChatPanelsHost,
@@ -262,6 +269,8 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   sftpAutoOpenSidebar,
   terminalSidePanelAutoOpen = false,
   terminalSidePanelAutoOpenTab = DEFAULT_TERMINAL_SIDE_PANEL_AUTO_OPEN_TAB,
+  localShellSidePanelAutoOpen = false,
+  localShellSidePanelAutoOpenTab = 'scripts',
   sftpFollowTerminalCwd,
   setSftpFollowTerminalCwd,
   editorWordWrap,
@@ -445,8 +454,100 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   terminalSidePanelAutoOpenRef.current = terminalSidePanelAutoOpen;
   const terminalSidePanelAutoOpenTabRef = useRef(terminalSidePanelAutoOpenTab);
   terminalSidePanelAutoOpenTabRef.current = terminalSidePanelAutoOpenTab;
+  const localShellSidePanelAutoOpenRef = useRef(localShellSidePanelAutoOpen);
+  localShellSidePanelAutoOpenRef.current = localShellSidePanelAutoOpen;
+  const localShellSidePanelAutoOpenTabRef = useRef(localShellSidePanelAutoOpenTab);
+  localShellSidePanelAutoOpenTabRef.current = localShellSidePanelAutoOpenTab;
   const sftpFollowTerminalCwdRef = useRef(sftpFollowTerminalCwd);
   sftpFollowTerminalCwdRef.current = sftpFollowTerminalCwd;
+
+  // Destructure the stable hook callbacks: the hook returns a fresh object
+  // each render, and depending on that object would recreate the preset
+  // callbacks (and in turn handleStatusChange) on unrelated state updates,
+  // defeating the terminal pane memoization.
+  const { resolveDefaultLayoutForSession, saveWorkspaceLayoutAsDefault: persistWorkspaceLayoutAsDefault } =
+    useWorkspaceLayoutPresetState();
+
+  const applyWorkspaceLayoutPresetForSession = useCallback((session: TerminalSession, tabId: string) => {
+    // Preset persistence and resolution live in the application layer; the
+    // component only mounts the resolved panes into its UI state.
+    const resolved = resolveDefaultLayoutForSession(session);
+    if (!resolved) return false;
+    const { layout, focusedTool, protocol: proto } = resolved;
+
+    for (const pane of collectSidePanelPanes(layout.root)) {
+      if (pane.tool === 'ai') {
+        setAiMountedTabIds((prev) => addMountedSidePanelTabId(prev, tabId));
+      } else if (pane.tool === 'scripts') {
+        setScriptsMountedTabIds((prev) => addMountedSidePanelTabId(prev, tabId));
+      } else if (pane.tool === 'theme') {
+        setThemeMountedTabIds((prev) => addMountedSidePanelTabId(prev, tabId));
+      } else if (pane.tool === 'system') {
+        setSystemMountedTabIds((prev) => addMountedSidePanelTabId(prev, tabId));
+      } else if (pane.tool === 'notes') {
+        setNotesMountedTabIds((prev) => addMountedSidePanelTabId(prev, tabId));
+      } else if (pane.tool === 'sftp') {
+        // Mirror the normal SFTP open path: a previously retained panel (kept
+        // mounted while transfers or external edits finished after close) must
+        // not keep suppressing command-triggered refreshes once the preset
+        // reopens SFTP for this tab. Mark the tab as opening first so an
+        // activity callback firing before React commits the open state still
+        // sees the panel as open instead of pruning the retained host state.
+        const cleanupTimer = sftpRetainedCleanupTimersRef.current.get(tabId);
+        if (cleanupTimer !== undefined) {
+          window.clearTimeout(cleanupTimer);
+          sftpRetainedCleanupTimersRef.current.delete(tabId);
+        }
+        sftpOpeningTabIdsRef.current.add(tabId);
+        sftpRetainedAfterCloseTabIdsRef.current.delete(tabId);
+        sftpPaneClosedTabIdsRef.current.delete(tabId);
+        const host = hostsRef.current.find(h => h.id === session.hostId);
+        const hostWithOverrides: Host = host
+          ? {
+            ...host,
+            protocol: session.protocol ?? host.protocol,
+            port: session.port ?? host.port,
+            moshEnabled: session.moshEnabled ?? host.moshEnabled,
+            etEnabled: session.etEnabled ?? host.etEnabled,
+          }
+          : {
+            id: session.hostId || session.id,
+            hostname: session.hostname,
+            username: session.username,
+            port: session.port ?? 22,
+            protocol: proto,
+            label: session.customName || session.hostLabel || session.hostname,
+          } as Host;
+        setSftpHostForTab(prev => {
+          const next = new Map(prev);
+          next.set(tabId, hostWithOverrides);
+          return next;
+        });
+      }
+    }
+
+    setSidePanelLayouts((prev) => {
+      const next = new Map(prev);
+      next.set(tabId, layout);
+      return next;
+    });
+    lastSidePanelTabRef.current.set(tabId, focusedTool);
+    setSidePanelOpenTabs(prev => {
+      const next = new Map(prev);
+      next.set(tabId, focusedTool);
+      return next;
+    });
+    return true;
+  }, [resolveDefaultLayoutForSession, setSidePanelLayouts, setSidePanelOpenTabs]);
+
+  const handleSaveWorkspaceLayoutAsDefault = useCallback((layout: SidePanelLayout): boolean => {
+    if (!persistWorkspaceLayoutAsDefault(layout)) {
+      toast.error(t('terminal.layer.layoutSaveFailed'));
+      return false;
+    }
+    toast.success(t('terminal.layer.layoutSavedAsDefault'));
+    return true;
+  }, [persistWorkspaceLayoutAsDefault, t]);
 
   const handleStatusChange = useCallback((sessionId: string, status: TerminalSession['status']) => {
     onUpdateSessionStatus(sessionId, status);
@@ -455,41 +556,62 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
 
     const session = sessionsRef.current.find(s => s.id === sessionId);
     if (!session) return;
-    const proto = session.protocol;
-    const sftpAvailable = proto === 'ssh' || proto === 'mosh';
-    const tabId = session.workspaceId || sessionId;
+    const workspaceId = session.workspaceId;
+    const tabId = workspaceId || sessionId;
+
+    // Within a workspace every member session maps to the same tab id, so the
+    // preset (and any auto-open host binding) must come from the workspace's
+    // focused session; otherwise whichever pane connects first would decide
+    // SFTP pruning and host selection regardless of focus.
+    let presetSession = session;
+    if (workspaceId) {
+      const focusedSessionId = workspacesRef.current.find(ws => ws.id === workspaceId)?.focusedSessionId;
+      const focusedSession = focusedSessionId
+        ? sessionsRef.current.find(s => s.id === focusedSessionId)
+        : undefined;
+      if (focusedSession) presetSession = focusedSession;
+    }
+    const proto = presetSession.protocol ?? 'ssh';
 
     if (sidePanelOpenTabsRef.current.has(tabId)) return;
 
-    const sessionAutoOpenTarget = session.autoOpenSidePanel === 'sftp' && sftpAvailable ? 'sftp' : null;
-    const autoOpenTarget = sessionAutoOpenTarget ?? resolveTerminalSidePanelAutoOpen({
-      enabled: terminalSidePanelAutoOpenRef.current,
-      selectedTab: terminalSidePanelAutoOpenTabRef.current,
-      sftpAvailable,
+    const targetPanel = resolveSessionSidePanelAutoOpen({
+      session: presetSession,
+      terminalEnabled: terminalSidePanelAutoOpenRef.current,
+      terminalTab: terminalSidePanelAutoOpenTabRef.current,
+      localEnabled: localShellSidePanelAutoOpenRef.current,
+      localTab: localShellSidePanelAutoOpenTabRef.current,
+      legacySftpEnabled: sftpAutoOpenSidebarRef.current,
     });
-    const targetPanel = autoOpenTarget ?? (sftpAutoOpenSidebarRef.current && sftpAvailable ? 'sftp' : null);
-    if (!targetPanel) return;
+
+    // Explicit SFTP (JumpServer deep link / host.autoOpenSftpPanel) wins over a
+    // saved default that may omit file transfer — only when SFTP is actually
+    // available. Ordinary auto-open still yields to the saved default.
+    if (targetPanel !== "sftp") {
+      if (applyWorkspaceLayoutPresetForSession(presetSession, tabId)) return;
+      if (!targetPanel) return;
+    }
 
     lastSidePanelTabRef.current.set(tabId, targetPanel);
 
     if (targetPanel === 'sftp') {
       sftpPaneClosedTabIdsRef.current.delete(tabId);
-      const host = hostsRef.current.find(h => h.id === session.hostId);
+      const host = hostsRef.current.find(h => h.id === presetSession.hostId);
       const hostWithOverrides: Host = host
         ? {
           ...host,
-          protocol: session.protocol ?? host.protocol,
-          port: session.port ?? host.port,
-          moshEnabled: session.moshEnabled ?? host.moshEnabled,
-          etEnabled: session.etEnabled ?? host.etEnabled,
+          protocol: presetSession.protocol ?? host.protocol,
+          port: presetSession.port ?? host.port,
+          moshEnabled: presetSession.moshEnabled ?? host.moshEnabled,
+          etEnabled: presetSession.etEnabled ?? host.etEnabled,
         }
         : {
-          id: session.hostId || sessionId,
-          hostname: session.hostname,
-          username: session.username,
-          port: session.port ?? 22,
+          id: presetSession.hostId || presetSession.id,
+          hostname: presetSession.hostname,
+          username: presetSession.username,
+          port: presetSession.port ?? 22,
           protocol: proto,
-          label: session.label || session.hostname,
+          label: presetSession.customName || presetSession.hostLabel || presetSession.hostname,
         } as Host;
 
       setSftpHostForTab(prev => {
@@ -514,7 +636,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       next.set(tabId, targetPanel);
       return next;
     });
-  }, [onUpdateSessionStatus, setSidePanelOpenTabs, sidePanelOpenTabsRef]);
+  }, [applyWorkspaceLayoutPresetForSession, onUpdateSessionStatus, setSidePanelOpenTabs, sidePanelOpenTabsRef]);
 
   const handleSessionExit = useCallback((sessionId: string, evt: TerminalSessionExitEvent) => {
     const intent = resolveTerminalSessionExitIntent(
@@ -614,10 +736,15 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     420,
     { min: TERMINAL_SIDE_PANEL_MIN_WIDTH, max: TERMINAL_SIDE_PANEL_MAX_WIDTH },
   );
-  const [sidePanelPosition, setSidePanelPosition] = useStoredString<'left' | 'right'>(
+  const [sidePanelPosition, setSidePanelPosition] = useStoredString<'left' | 'right' | 'bottom'>(
     'netcatty_side_panel_position',
     'left',
-    (v): v is 'left' | 'right' => v === 'left' || v === 'right',
+    isSidePanelDockPosition,
+  );
+  const [sidePanelHeight, setSidePanelHeight, persistSidePanelHeight] = useStoredNumber(
+    STORAGE_KEY_SIDE_PANEL_HEIGHT,
+    360,
+    { min: TERMINAL_SIDE_PANEL_MIN_HEIGHT, max: TERMINAL_SIDE_PANEL_MAX_HEIGHT },
   );
   // Remember the last sub-panel shown per tab so the toggle shortcut can
   // restore it after a close. Overwritten on open, never cleared on close.
@@ -1064,12 +1191,26 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     sourceSessionId: string,
     options?: TerminalBroadcastInputOptions,
   ) => {
+    const paced = options?.pacedBroadcast;
+    if (paced && !options?.preparePacedBroadcast) {
+      if (!paced.targets || isTerminalSensitiveInputActive(sourceSessionId)) return [];
+      paced.targets = paced.targets.filter(target => isTerminalBroadcastInputCurrent(target)
+        && !isTerminalSensitiveInputActive(target.sessionId));
+    }
     const targetSessionIds = resolveTerminalBroadcastTargetIds({
       sessions: sessionsRef.current,
       sourceSessionId,
       globalBroadcastEnabled: isGlobalBroadcastEnabled,
       directTargetSessionIds: options?.kittyKeyboardTargetSessionIds,
-    });
+    }).filter(id => !paced?.targets || paced.targets.some(target => target.sessionId === id));
+    if (options?.preparePacedBroadcast && paced) {
+      paced.targets = targetSessionIds.filter(id => !isTerminalSensitiveInputActive(id)).map(id => {
+        markTerminalBroadcastUserInput(id);
+        terminalBackend.interruptSession(id, undefined, { cancelPendingWritesOnly: true });
+        return captureTerminalBroadcastInput(id);
+      });
+      return paced.targets.map(target => target.sessionId);
+    }
     if (targetSessionIds.length === 0) return [];
 
     const targetSessionIdSet = new Set(targetSessionIds);
@@ -1078,6 +1219,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     for (const session of sessionsRef.current) {
       if (!targetSessionIdSet.has(session.id)) continue;
       if (!canUseDirectSessionWriteFallback(session)) continue;
+      if (!paced && (options?.automated !== true || options.lineDelayMs)) markTerminalBroadcastUserInput(session.id);
 
       if (options?.kittyKeyboardInput) {
         dispatchKittyKeyboardBroadcastInput(session.id, options.kittyKeyboardInput, {
@@ -1094,6 +1236,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
         && isPluginHostProtocol(session.protocol)
         && terminalBackend.signalPluginConnection) {
         broadcastInterruptPrioritizersRef.current.get(session.id)?.();
+        terminalBackend.interruptSession(session.id, undefined, { cancelPendingWritesOnly: true });
         void terminalBackend.signalPluginConnection(session.id, "interrupt").catch(() => {
           terminalBackend.interruptSession(session.id);
         });
@@ -1107,7 +1250,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       }
       if (isTerminalSensitiveInputActive(session.id)) continue;
       terminalBackend.writeToSession(session.id, data, {
-        automated: true,
+        automated: options?.automated === true,
         sensitive: false,
         ...(lineDelayMs ? { lineDelayMs } : {}),
       });
@@ -2284,6 +2427,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     handleSftpActiveExternalEditsChange,
     handleSftpInitialLocationApplied,
     persistSidePanelWidth,
+    persistSidePanelHeight,
     handleSnippetClickForFocusedSession,
     handleSnippetFromPanel,
     handleRunScriptFromPanel,
@@ -2397,15 +2541,18 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     setSidePanelOpenTabs,
     setSidePanelLayouts,
     setSidePanelWidth,
+    setSidePanelHeight,
     setSftpFollowTerminalCwd,
     setSftpHostForTab,
     setSftpInitialLocationForTab,
+    onSaveWorkspaceLayoutAsDefault: handleSaveWorkspaceLayoutAsDefault,
     setSftpPendingUploadsForTab,
     showHostTreeSidebar,
     sidePanelOpenTabs,
     sidePanelLayouts,
     sidePanelPosition,
     sidePanelWidth,
+    sidePanelHeight,
     sftpAutoSync,
     sftpDefaultViewMode,
     sftpDoubleClickBehavior,

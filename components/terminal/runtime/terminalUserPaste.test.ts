@@ -7,9 +7,11 @@ import {
   pasteTextIntoTerminal,
   prepareTerminalDataForUserPasteDisplay,
   shouldBroadcastTerminalUserInput,
+  shouldOverrideTerminalUserPasteSensitivity,
   shouldSuppressTerminalBroadcastForUserPaste,
   shouldSuppressTerminalInputScrollForUserPaste,
 } from "./terminalUserPaste";
+import { sanitizeTerminalInput } from "./terminalInputSanitize";
 
 test("user paste delegates raw clipboard text to xterm paste handling", () => {
   const pasted: string[] = [];
@@ -444,4 +446,44 @@ test("long multi-line paste clears cursor-right residue after terminal echo", ()
   clearPasteResidualAfterTerminalWrite(term);
 
   assert.deepEqual(writes, ["\x1b[K"]);
+});
+
+test("sensitive paste override matches sanitized data containing zero-width characters", () => {
+  const term = {
+    paste: () => {},
+    scrollToBottom: () => {},
+  };
+
+  const rawText = "pa​ss\nwo﻿rd\n";
+  pasteTextIntoTerminal(term, rawText, { sensitive: true });
+
+  // The input handler sanitizes chunk data before consulting the override,
+  // so the lookup uses the sanitized, newline-prepared variants.
+  const sanitizedPrepared = sanitizeTerminalInput(rawText).replace(/\r?\n/g, "\r");
+  assert.equal(shouldOverrideTerminalUserPasteSensitivity(term, sanitizedPrepared), true);
+
+  const termBracketed = {
+    modes: { bracketedPasteMode: true },
+    paste: () => {},
+    scrollToBottom: () => {},
+  };
+  pasteTextIntoTerminal(termBracketed, rawText, { sensitive: true });
+  assert.equal(
+    shouldOverrideTerminalUserPasteSensitivity(
+      termBracketed,
+      `\x1b[200~${sanitizedPrepared}\x1b[201~`,
+    ),
+    true,
+  );
+});
+
+test("sensitive paste override does not leak to later unrelated input", () => {
+  const term = {
+    paste: () => {},
+    scrollToBottom: () => {},
+  };
+
+  pasteTextIntoTerminal(term, "secret", { sensitive: true });
+  assert.equal(shouldOverrideTerminalUserPasteSensitivity(term, "secret"), true);
+  assert.equal(shouldOverrideTerminalUserPasteSensitivity(term, "secret"), false);
 });

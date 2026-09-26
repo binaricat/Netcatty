@@ -21,6 +21,26 @@ test("terminal context paste reports whether it broadcast to peers", () => {
   assert.deepEqual(broadcasted, [{ data: "line one", sessionId: "workspace-session-1" }]);
 });
 
+test("terminal context paste forwards paste options to the broadcast handler", () => {
+  const broadcasted: Array<{ data: string; sessionId: string; options?: { lineDelayMs?: number } }> = [];
+
+  const didBroadcast = broadcastTerminalPasteData("line one", {
+    sourceSessionId: "workspace-session-1",
+    sessionRef: { current: "backend-session-1" },
+    isBroadcastEnabledRef: { current: true },
+    onBroadcastInputRef: {
+      current: (data, sourceSessionId, options) => {
+        broadcasted.push({ data, sessionId: sourceSessionId, options });
+      },
+    },
+  }, { lineDelayMs: 250 });
+
+  assert.equal(didBroadcast, true);
+  assert.deepEqual(broadcasted, [
+    { data: "line one", sessionId: "workspace-session-1", options: { lineDelayMs: 250 } },
+  ]);
+});
+
 test("terminal context paste reports false when broadcast is disabled", () => {
   const didBroadcast = broadcastTerminalPasteData("line one", {
     sourceSessionId: "workspace-session-1",
@@ -41,6 +61,18 @@ test("paste selection dismisses the history preview before sending text", async 
   const source = readFileSync(new URL("./hooks/useTerminalContextActions.ts", import.meta.url), "utf8");
   assert.match(source, /requestHistoryPreviewHide\(term\.element\?\.parentElement\)/);
   assert.equal(source.split("requestHistoryPreviewHide(term.element?.parentElement)").length - 1, 2);
+});
+
+test("paste selection routes through the multi-line paste confirmation gate", async () => {
+  const { readFileSync } = await import("node:fs");
+  const source = readFileSync(new URL("./hooks/useTerminalContextActions.ts", import.meta.url), "utf8");
+  const runtimeSource = readFileSync(new URL("./runtime/createXTermRuntime.ts", import.meta.url), "utf8");
+  // Context-menu Paste Selection goes through the shared #3398 gate.
+  assert.match(source, /const onPasteSelection = useCallback\(async \(\) => \{[\s\S]*?pasteTextWithMultilineConfirm\(selection, \{[\s\S]*?requestMultilinePasteConfirm/u);
+  // The pasteSelection shortcut applies the same gate instead of pasting
+  // the selected text directly into the session.
+  assert.match(runtimeSource, /case "pasteSelection": \{[\s\S]*?pasteTextWithMultilineConfirm\(selection, \{/u);
+  assert.doesNotMatch(runtimeSource, /case "pasteSelection":[\s\S]*?pasteTextIntoTerminal/u);
 });
 
 test("terminal context paste never broadcasts password-prompt input", () => {

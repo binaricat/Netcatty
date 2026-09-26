@@ -313,6 +313,16 @@ export function handleGlobalHotkeyKeyDownImpl(getCtx: AppContextGetter, e: Keybo
         continue;
       }
 
+      // An unavailable broadcast action must leave the chord to the terminal
+      // (notably tmux's Ctrl+B prefix). Dispatch once before consuming it.
+      if (binding.action === 'broadcast') {
+        if (executeHotkeyAction(binding.action, e) === true) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+        return;
+      }
+
       e.preventDefault();
       e.stopPropagation();
       if (HOTKEY_DEBUG) {
@@ -766,7 +776,9 @@ export function executeHotkeyActionImpl(getCtx: AppContextGetter, action: string
   const { IS_DEV, MOVE_FOCUS_DEBOUNCE_MS, activeTabStore, addConnectionLogRef, canUseGlobalBroadcast, closePluginViewTab, closeSession, closeTabInFlightRef, closeWorkspace, collectSessionIds, confirmIfBusyLocalTerminal, createLocalTerminalWithCurrentShell, editorTabs, fromEditorTabId, handleOpenSettingsRef, handleRequestCloseEditorTabRef, isEditorTabId, isPluginViewTabId, isQuickSwitcherOpen, lastMoveFocusTimeRef, moveFocusInWorkspace, orderedTabs, resolveCloseIntent, resolveSnippetsShortcutIntent, sessions, setActiveTabId, setAddToWorkspaceDialog, setIsQuickSwitcherOpen, setNavigateToSection, settings, sftpPaneMagnificationRef, splitSessionWithCurrentShell, systemInfoRef, terminalPaneMagnificationRef, toEditorTabId, toggleBroadcast, toggleGlobalBroadcast, toggleScriptsSidePanelRef, toggleSidePanelRef, workspaces } = getCtx();
 {
     const shortcutTabs = buildNumberShortcutTabTargets({
-      showSftpTab: settings.showSftpTab ?? true,
+      // Match the TopTabs badge map: when the sidebar hosts SFTP, the top tab
+      // is hidden and work tabs shift up in the Cmd/Ctrl+[1...9] numbering.
+      showSftpTab: (settings.showSftpTab ?? true) && !settings.sftpInSidebar,
       shellOnlyTabNumberShortcuts: settings.shellOnlyTabNumberShortcuts ?? false,
       orderedTabs,
       editorTabIds: editorTabs.map((t) => toEditorTabId(t.id)),
@@ -913,7 +925,9 @@ export function executeHotkeyActionImpl(getCtx: AppContextGetter, action: string
         setActiveTabId('vault');
         break;
       case 'openSftp':
-        if (settings.showSftpTab) {
+        // Effective availability: the SFTP tab is reachable either as a top
+        // tab (showSftpTab) or inside the vault sidebar (sftpInSidebar).
+        if ((settings.showSftpTab ?? true) || settings.sftpInSidebar) {
           setActiveTabId('sftp');
         }
         break;
@@ -963,12 +977,14 @@ export function executeHotkeyActionImpl(getCtx: AppContextGetter, action: string
         const activeWs = workspaces.find(w => w.id === currentId);
         if (activeWs) {
           toggleBroadcast(activeWs.id);
+          return true;
         } else if (sessions.some((session: TerminalSession) => (
-          session.id === currentId && !session.workspaceId
+          session.id === currentId && !session.workspaceId && !session.hiddenFromTabs
         )) && canUseGlobalBroadcast) {
           toggleGlobalBroadcast();
+          return true;
         }
-        break;
+        return false;
       }
       case 'openSettings':
         handleOpenSettingsRef.current();

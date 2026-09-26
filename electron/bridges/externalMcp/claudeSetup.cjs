@@ -1,6 +1,11 @@
 "use strict";
 
 const { runBoundedCliCommand } = require("./boundedCliCommand.cjs");
+const {
+  getNetcattySkillStatus,
+  installNetcattySkill,
+  resolveUserHomeDir,
+} = require("./netcattySkillInstaller.cjs");
 
 const EXTERNAL_MCP_CLAUDE_NAME = "netcatty-external";
 const {
@@ -280,6 +285,9 @@ function createExternalMcpClaudeSetup(options = {}) {
     prepareCommandForSpawn: options.prepareCommandForSpawn || loadShellUtils().prepareCommandForSpawn,
     spawn: options.spawn || require("node:child_process").spawn,
     stripAnsi: options.stripAnsi || loadShellUtils().stripAnsi,
+    runClaudeCommand: options.runClaudeCommand || null,
+    getSkillStatus: options.getSkillStatus || getNetcattySkillStatus,
+    installSkill: options.installSkill || installNetcattySkill,
   };
 
   function getManualCommand(cliPath) {
@@ -306,6 +314,9 @@ function createExternalMcpClaudeSetup(options = {}) {
   }
 
   async function runClaude(claudePath, shellEnv, args) {
+    if (deps.runClaudeCommand) {
+      return await deps.runClaudeCommand(claudePath, shellEnv, args);
+    }
     return await runBoundedCliCommand(deps, claudePath, args, { env: shellEnv });
   }
 
@@ -338,9 +349,29 @@ function createExternalMcpClaudeSetup(options = {}) {
         discoveryEnv: deps.discoveryEnv,
         commandExecutable,
       });
+      if (status.state === "configured") {
+        const skillStatus = await deps.getSkillStatus({
+          client: "claude",
+          homeDir: resolveUserHomeDir(shellEnv),
+          claudeConfigDir: shellEnv.CLAUDE_CONFIG_DIR,
+        });
+        return {
+          ...status,
+          command: getManualCommand(commandExecutable),
+          mcpConfigured: true,
+          skillInstalled: skillStatus.installed,
+          skillPath: skillStatus.skillPath,
+          state: skillStatus.installed ? "configured" : "not_configured",
+          ...(!skillStatus.installed && skillStatus.reason
+            ? { skillError: skillStatus.reason }
+            : {}),
+        };
+      }
       return {
         ...status,
         command: getManualCommand(commandExecutable),
+        mcpConfigured: false,
+        skillInstalled: false,
       };
     } catch (error) {
       return {
@@ -373,7 +404,18 @@ function createExternalMcpClaudeSetup(options = {}) {
       };
     }
 
+    let installingSkill = false;
+    let mcpConfigured = Boolean(status.mcpConfigured);
     try {
+      if (status.mcpConfigured) {
+        installingSkill = true;
+        await deps.installSkill({
+          client: "claude",
+          homeDir: resolveUserHomeDir(shellEnv),
+          claudeConfigDir: shellEnv.CLAUDE_CONFIG_DIR,
+        });
+        return await getStatus();
+      }
       if (status.existingCommand) {
         const scopes = status.existingScope
           ? [status.existingScope]
@@ -404,6 +446,13 @@ function createExternalMcpClaudeSetup(options = {}) {
           error: summarizeFailure(addResult, `Claude exited with code ${addResult.exitCode ?? "unknown"}`),
         };
       }
+      mcpConfigured = true;
+      installingSkill = true;
+      await deps.installSkill({
+        client: "claude",
+        homeDir: resolveUserHomeDir(shellEnv),
+        claudeConfigDir: shellEnv.CLAUDE_CONFIG_DIR,
+      });
       return await getStatus();
     } catch (error) {
       return {
@@ -413,7 +462,11 @@ function createExternalMcpClaudeSetup(options = {}) {
         launcherPath: deps.launcherPath,
         command: getManualCommand(commandExecutable),
         existingCommand: null,
-        error: error?.message || String(error),
+        mcpConfigured,
+        skillInstalled: false,
+        error: installingSkill
+          ? `Failed to install the Netcatty Claude Code skill: ${error?.message || String(error)}`
+          : (error?.message || String(error)),
       };
     }
   }

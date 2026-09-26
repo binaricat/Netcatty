@@ -135,6 +135,10 @@ type TerminalTabSettingsProps = Pick<
     | 'setTerminalSidePanelAutoOpen'
     | 'terminalSidePanelAutoOpenTab'
     | 'setTerminalSidePanelAutoOpenTab'
+    | 'localShellSidePanelAutoOpen'
+    | 'setLocalShellSidePanelAutoOpen'
+    | 'localShellSidePanelAutoOpenTab'
+    | 'setLocalShellSidePanelAutoOpenTab'
     | 'workspaceFocusStyle'
     | 'setWorkspaceFocusStyle'
 >;
@@ -161,6 +165,10 @@ const SettingsTerminalTabContainer = React.memo<TerminalTabSettingsProps>(functi
     setTerminalSidePanelAutoOpen,
     terminalSidePanelAutoOpenTab,
     setTerminalSidePanelAutoOpenTab,
+    localShellSidePanelAutoOpen,
+    setLocalShellSidePanelAutoOpen,
+    localShellSidePanelAutoOpenTab,
+    setLocalShellSidePanelAutoOpenTab,
     workspaceFocusStyle,
     setWorkspaceFocusStyle,
 }) {
@@ -189,6 +197,10 @@ const SettingsTerminalTabContainer = React.memo<TerminalTabSettingsProps>(functi
             setTerminalSidePanelAutoOpen={setTerminalSidePanelAutoOpen}
             terminalSidePanelAutoOpenTab={terminalSidePanelAutoOpenTab}
             setTerminalSidePanelAutoOpenTab={setTerminalSidePanelAutoOpenTab}
+            localShellSidePanelAutoOpen={localShellSidePanelAutoOpen}
+            setLocalShellSidePanelAutoOpen={setLocalShellSidePanelAutoOpen}
+            localShellSidePanelAutoOpenTab={localShellSidePanelAutoOpenTab}
+            setLocalShellSidePanelAutoOpenTab={setLocalShellSidePanelAutoOpenTab}
             availableFonts={availableFonts}
             workspaceFocusStyle={workspaceFocusStyle}
             setWorkspaceFocusStyle={setWorkspaceFocusStyle}
@@ -549,6 +561,8 @@ const SettingsPageContent: React.FC<{ settings: SettingsState; appLock?: AppLock
                                 setTabBarPosition={settings.setTabBarPosition}
                                 showSftpTab={settings.showSftpTab}
                                 setShowSftpTab={settings.setShowSftpTab}
+                                sftpInSidebar={settings.sftpInSidebar}
+                                setSftpInSidebar={settings.setSftpInSidebar}
                                 showHostTreeSidebar={settings.showHostTreeSidebar}
                                 setShowHostTreeSidebar={settings.setShowHostTreeSidebar}
                                 windowOpacity={settings.windowOpacity}
@@ -583,6 +597,10 @@ const SettingsPageContent: React.FC<{ settings: SettingsState; appLock?: AppLock
                                 setTerminalSidePanelAutoOpen={settings.setTerminalSidePanelAutoOpen}
                                 terminalSidePanelAutoOpenTab={settings.terminalSidePanelAutoOpenTab}
                                 setTerminalSidePanelAutoOpenTab={settings.setTerminalSidePanelAutoOpenTab}
+                                localShellSidePanelAutoOpen={settings.localShellSidePanelAutoOpen}
+                                setLocalShellSidePanelAutoOpen={settings.setLocalShellSidePanelAutoOpen}
+                                localShellSidePanelAutoOpenTab={settings.localShellSidePanelAutoOpenTab}
+                                setLocalShellSidePanelAutoOpenTab={settings.setLocalShellSidePanelAutoOpenTab}
                                 workspaceFocusStyle={settings.workspaceFocusStyle}
                                 setWorkspaceFocusStyle={settings.setWorkspaceFocusStyle}
                             />

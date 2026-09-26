@@ -851,6 +851,52 @@ function getLocalShellArgs(shellPath) {
   return [];
 }
 
+function isWslExecutable(shellPath) {
+  if (process.platform !== "win32" || typeof shellPath !== "string") return false;
+  return /(?:^|[\\/])wsl(?:\.exe)?$/i.test(shellPath.trim());
+}
+
+function getWslLaunchArgs(shellPath, shellArgs, hasExplicitCwd) {
+  const args = Array.isArray(shellArgs) ? [...shellArgs] : [];
+  // Without --cd, wsl.exe translates the parent Windows cwd. That can fail
+  // before the Linux shell starts (for example, when the Windows home is not
+  // mounted or accessible to the selected distro). Start at Linux $HOME unless
+  // the caller deliberately supplied a working directory or --cd option.
+  if (!isWslExecutable(shellPath) || hasExplicitCwd) {
+    return args;
+  }
+
+  // WSL consumes an optional legacy distro GUID, then a home-directory ~,
+  // before parsing normal options. Keep both in their original positions.
+  const firstOptionIndex = /^\{?[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}\}?$/i.test(args[0] || "") ? 1 : 0;
+  if (args[firstOptionIndex] === "~") return args;
+
+  // The tokens following --/--exec/-e, or the first bare command, are passed to
+  // Linux verbatim. Account for WSL options with a separate value before
+  // locating that boundary, then insert --cd before it rather than accidentally
+  // passing --cd to the shell or command.
+  let commandIndex = -1;
+  for (let index = firstOptionIndex; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "--" || arg === "--exec" || arg === "-e" || !arg.startsWith("-")) {
+      commandIndex = index;
+      break;
+    }
+    // Only WSL's directory option is explicit; a Linux command may itself
+    // accept --cd without changing the directory WSL starts in.
+    if (arg === "--cd" || arg.startsWith("--cd=")) return args;
+    if (
+      arg === "--distribution" || arg === "-d" || arg === "--distribution-id" ||
+      arg === "--user" || arg === "-u" || arg === "--shell-type"
+    ) {
+      index += 1;
+    }
+  }
+  const insertAt = commandIndex === -1 ? args.length : commandIndex;
+  args.splice(insertAt, 0, "--cd", "~");
+  return args;
+}
+
 const isUtf8Locale = (value) => typeof value === "string" && /utf-?8/i.test(value);
 
 const isEmptyLocale = (value) => {
@@ -896,7 +942,12 @@ function startLocalSession(event, payload) {
     }
   }
   const shell = normalizeExecutablePath(resolvedShell) || defaultShell;
-  const shellArgs = resolvedArgs ?? getLocalShellArgs(shell);
+  const requestedCwd = typeof payload?.cwd === "string" && payload.cwd.trim().length > 0;
+  const shellArgs = getWslLaunchArgs(
+    shell,
+    resolvedArgs ?? getLocalShellArgs(shell),
+    requestedCwd,
+  );
   const shellKind = detectShellKind(shell);
   const { buildTerminalProcessEnv } = require("./httpNetworkProxyBridge.cjs");
   const env = applyLocaleDefaults({
@@ -1061,6 +1112,7 @@ function startLocalSession(event, payload) {
       sessionLogStreamManager.stopStream(sessionId, logStreamToken);
       if (sessions.get(sessionId) !== session) return;
       ptyProcessTree.unregisterPid(sessionId);
+      clearPendingAutomatedWrites(session);
       sessions.delete(sessionId);
       if (session.closed) return;
       // Signal present = killed externally (show disconnected UI).
@@ -1310,6 +1362,8 @@ async function startSerialSession(event, options) {
           onData(buf) {
             const decoded = serialDecoderRef.current.write(buf);
             if (!decoded) return;
+            const liveSession = sessions.get(sessionId);
+            liveSession?.autoLogin?.handleText(decoded);
             const contents = electronModule.webContents.fromId(session.webContentsId);
             emitTerminalSessionData(contents, sessionId, decoded, {
               session,
@@ -1334,6 +1388,52 @@ async function startSerialSession(event, options) {
         });
         session.zmodemSentry = serialZmodemSentry;
 
+        // Serial auto-login (issue #3417): reuse the Telnet login-assist
+        // detector to answer Login/Password prompts with the credentials saved
+        // on the host. Writes go straight to the port (not writeToSession) so
+        // they are not treated as user input and cannot cancel themselves.
+        const hasSerialAutoLoginCredentials =
+          (typeof options.username === "string" && options.username.trim().length > 0)
+          || typeof options.password === "string";
+        if (hasSerialAutoLoginCredentials) {
+          const emitAutoLoginEvent = (channel) => {
+            // Guard against this session having been displaced by a serial
+            // reconnect that reused the same sessionId: the replacement owns
+            // the registry slot and its bootEpoch, so a stale event stamped
+            // with the new epoch would make the renderer cancel the
+            // replacement session's pending startup command.
+            if (sessions.get(sessionId) !== session) return;
+            const contents = electronModule.webContents.fromId(session.webContentsId);
+            contents?.send(channel, {
+              sessionId,
+              bootEpoch: session.bootEpoch ?? options.bootEpoch,
+            });
+          };
+          session.autoLogin = createTelnetAutoLogin({
+            username: options.username,
+            password: options.password,
+            write(data) {
+              try {
+                serialPort.write(encodeTerminalInput(data, session.encoding));
+              } catch { /* port closing — ignore */ }
+            },
+            onComplete() {
+              emitAutoLoginEvent("netcatty:telnet:auto-login-complete");
+            },
+            onUserInput() {
+              emitAutoLoginEvent("netcatty:telnet:auto-login-cancelled");
+            },
+            onIncomplete() {
+              // Stalled/expired exchange (e.g. the device asks for a password
+              // but none is saved, or the auto-login window elapsed while the
+              // device still sits at a login prompt). Treat it like a
+              // cancellation so the renderer does not blindly run the startup
+              // command against the pending prompt.
+              emitAutoLoginEvent("netcatty:telnet:auto-login-cancelled");
+            },
+          });
+        }
+
         serialPort.on('data', (data) => {
           if (sessions.get(sessionId) !== session) return;
           if (session.ymodemActive) return;
@@ -1351,6 +1451,7 @@ async function startSerialSession(event, options) {
           sessionLogStreamManager.stopStream(sessionId, logStreamToken);
           const primaryId = session.webContentsId;
           ptyProcessTree.unregisterPid(sessionId);
+          clearPendingAutomatedWrites(session);
           sessions.delete(sessionId);
           if (session.closed) return;
           fanoutSessionLifecycleEvent(
@@ -1423,10 +1524,49 @@ function pauseSshOutputForInterrupt(session, trace) {
 }
 
 function clearPendingAutomatedWrites(session) {
+  for (const paste of session?.pendingPasteWrites || []) paste.finish();
   const timers = session?.pendingAutomatedWriteTimers;
   if (!Array.isArray(timers) || timers.length === 0) return;
   for (const timer of timers) clearTimeout(timer);
   session.pendingAutomatedWriteTimers = [];
+}
+
+// Receipts confirm a transport write returned, not remote execution. Plugin
+// stream facades confirm handoff to main, not completion of main's input chain.
+// Receipts contain identity only; command text stays in the renderer.
+function createPasteWriteReceipt(session, payload, count) {
+  const hasReceipt = typeof payload.pasteRequestId === "string" && payload.pasteRequestId.length > 0;
+  // Broadcast peers may omit receipts but still need a cancellable batch.
+  if (!hasReceipt && getTerminalLineDelayMs(payload) === 0) return null;
+  const pending = session.pendingPasteWrites ||= new Set();
+  let remaining = count;
+  const paste = {
+    active: true,
+    finish(index, skipped = false) {
+      if (!paste.active) return;
+      const done = index === undefined || --remaining === 0;
+      if (done) {
+        paste.active = false;
+        pending.delete(paste);
+      }
+      if (!hasReceipt || (skipped && !done)) return;
+      try {
+        const owner = electronModule.webContents?.fromId(session.webContentsId);
+        if (owner && !owner.isDestroyed?.()) {
+          owner.send("netcatty:paste-write", {
+            sessionId: payload.sessionId,
+            requestId: payload.pasteRequestId,
+            ...(index === undefined || skipped ? {} : { index }),
+            ...(done ? { done: true } : {}),
+          });
+        }
+      } catch {
+        // A closed renderer must not affect transport writes.
+      }
+    },
+  };
+  pending.add(paste);
+  return paste;
 }
 
 function splitTerminalInputIntoLineWrites(data) {
@@ -1449,9 +1589,10 @@ function splitTerminalInputIntoLineWrites(data) {
   return chunks.length > 0 ? chunks : [data];
 }
 
-function getAutomatedLineDelayMs(payload) {
-  if (!payload?.automated) return 0;
-  const lineDelayMs = Number(payload.lineDelayMs);
+// Pacing is independent of input origin: a confirmed paste is still user
+// input, so protocol features such as Telnet auto-login must yield to it.
+function getTerminalLineDelayMs(payload) {
+  const lineDelayMs = Number(payload?.lineDelayMs);
   return Number.isFinite(lineDelayMs) && lineDelayMs > 0 ? Math.min(lineDelayMs, 2000) : 0;
 }
 
@@ -1497,7 +1638,11 @@ function writeToSessionNow(payload, data, logRewrite = payload.logRewrite) {
   }
 
   try {
-    if (session.type === 'telnet-native' && !payload.automated) {
+    if (
+      (session.type === 'telnet-native' || session.type === 'serial')
+      && !payload.automated
+      && !isTerminalReportSequence(data)
+    ) {
       session.autoLogin?.handleUserInput();
     }
 
@@ -1564,7 +1709,10 @@ function writeToSessionNow(payload, data, logRewrite = payload.logRewrite) {
         expandSerialBackspace(inputData, payload.serialEraseChar, session.encoding),
         session.encoding,
       ));
+    } else {
+      return false;
     }
+    return true;
   } catch (err) {
     logTerminalInterruptDebug("write-session-error", {
       sessionId: payload.sessionId,
@@ -1583,7 +1731,24 @@ function writeToSessionWithInterception(
   data,
   logRewrite = payload.logRewrite,
   expectedSession = sessions.get(payload.sessionId),
+  paste = null,
+  index = 0,
 ) {
+  const writeWithReceipt = (nextData) => {
+    if (paste && !paste.active) return;
+    const current = sessions.get(payload.sessionId);
+    if (paste && (current !== expectedSession || current?.closed)) {
+      paste.finish();
+      return;
+    }
+    if (paste && nextData === "") {
+      // An interceptor can drop one chunk without canceling the remaining paste.
+      paste.finish(index, true);
+      return;
+    }
+    const written = writeToSessionNow(payload, nextData, logRewrite);
+    if (paste) paste.finish(written ? index : undefined);
+  };
   const bypass = payload?.sensitive === true || isTerminalReportSequence(data);
   const hasInterceptor = Boolean(
     terminalDataPipeline?.interceptInput
@@ -1591,15 +1756,34 @@ function writeToSessionWithInterception(
   );
   const previous = terminalInputPipelineBarriers.get(payload.sessionId);
   if (!hasInterceptor && !previous) {
-    writeToSessionNow(payload, data, logRewrite);
+    writeWithReceipt(data);
     return;
+  }
+  // Cancel the auto-login detector at input ingress, before the asynchronous
+  // interception pipeline: a slow interceptor would otherwise leave the
+  // detector armed while the user's keystrokes are queued, letting a login
+  // prompt that arrives during that wait trigger a saved-credential
+  // transmission after the user has already taken over. Same guard
+  // conditions as writeToSessionNow; handleUserInput is idempotent, so the
+  // later call there stays a no-op.
+  if (
+    expectedSession
+    && (expectedSession.type === 'telnet-native' || expectedSession.type === 'serial')
+    && !payload.automated
+    && !isTerminalReportSequence(data)
+  ) {
+    expectedSession.autoLogin?.handleUserInput();
   }
   const writeIfCurrent = (nextData) => {
     const current = sessions.get(payload.sessionId);
-    if (!current || current !== expectedSession || current.closed) return;
-    writeToSessionNow(payload, nextData, logRewrite);
+    if (!current || current !== expectedSession || current.closed) {
+      paste?.finish();
+      return;
+    }
+    writeWithReceipt(nextData);
   };
   const write = async () => {
+    if (paste && !paste.active) return;
     if (!hasInterceptor) {
       writeIfCurrent(data);
       return;
@@ -1623,6 +1807,19 @@ function writeToSessionWithInterception(
   });
 }
 
+// Line-mode serial input is buffered in the renderer and only reaches
+// writeToSession on Enter, so the auto-login detector would otherwise stay
+// armed while the user is already typing. The renderer notifies us on the
+// first buffered keystroke so the detector is cancelled the same way it is
+// for character-mode input.
+function notifySessionUserInput(event, payload) {
+  const session = sessions.get(payload?.sessionId);
+  if (!session) return;
+  if (session.type === 'telnet-native' || session.type === 'serial') {
+    session.autoLogin?.handleUserInput();
+  }
+}
+
 function writeToSession(event, payload) {
   const session = sessions.get(payload.sessionId);
   if (!session) return;
@@ -1633,27 +1830,36 @@ function writeToSession(event, payload) {
     // Activity tracking must not interfere with terminal input.
   }
 
-  if (!payload.automated && !isTerminalReportSequence(payload.data)) {
+  const lineDelayMs = getTerminalLineDelayMs(payload);
+  const isPasteRequest = typeof payload.pasteRequestId === "string" && payload.pasteRequestId.length > 0;
+  // A replacement supersedes pending paste work even with one line, and even
+  // when the transfer gate below blocks the replacement itself.
+  if (isPasteRequest || lineDelayMs > 0 || (!payload.automated && !isTerminalReportSequence(payload.data))) {
     clearPendingAutomatedWrites(session);
   }
   if (shouldBlockSessionInput(session, payload.data)) {
+    createPasteWriteReceipt(session, payload, 1)?.finish();
     return;
   }
-
-  const lineDelayMs = getAutomatedLineDelayMs(payload);
   const lineChunks = lineDelayMs > 0 ? splitTerminalInputIntoLineWrites(payload.data) : [payload.data];
+  const paste = createPasteWriteReceipt(session, payload, lineChunks.length);
   if (lineDelayMs > 0 && lineChunks.length > 1) {
-    clearPendingAutomatedWrites(session);
     session.pendingAutomatedWriteTimers = [];
     lineChunks.forEach((chunk, index) => {
       const sendChunk = () => {
         const current = sessions.get(payload.sessionId);
-        if (!current) return;
+        if (paste && !paste.active) return;
+        if (!current || (paste && current !== session)) {
+          paste?.finish();
+          return;
+        }
         writeToSessionWithInterception(
           { ...payload, lineDelayMs: undefined },
           chunk,
           index === 0 ? payload.logRewrite : undefined,
           current,
+          paste,
+          index,
         );
       };
       if (index === 0) {
@@ -1666,7 +1872,7 @@ function writeToSession(event, payload) {
     return;
   }
 
-  writeToSessionWithInterception(payload, payload.data, payload.logRewrite, session);
+  writeToSessionWithInterception(payload, payload.data, payload.logRewrite, session, paste);
 }
 
 function drainPendingOutputForInterrupt(sessionId, session, trace) {
@@ -1700,6 +1906,10 @@ function drainPendingOutputForInterrupt(sessionId, session, trace) {
 
 function interruptSession(event, payload) {
   const session = sessions.get(payload.sessionId);
+  if (payload.cancelPendingWritesOnly === true) {
+    clearPendingAutomatedWrites(session);
+    return;
+  }
   const trace = normalizeTrace(payload);
   if (!session) {
     logTerminalInterruptDebug("interrupt-session-missing", {
@@ -2336,6 +2546,7 @@ function registerHandlers(ipcMain, options = {}) {
       "netcatty:resize",
       "netcatty:pty:clear",
       "netcatty:flow:ack",
+      "netcatty:terminal:user-input",
     ].forEach((channel) => registerWorkerSend(ipcMain, terminalWorkerManager, channel));
     ipcMain.on("netcatty:flow", (event, payload) => {
       if (payload?._flowArbitrated === true) {
@@ -2371,6 +2582,7 @@ function registerHandlers(ipcMain, options = {}) {
   ipcMain.handle("netcatty:terminal:setEncoding", setSessionEncoding);
   ipcMain.handle("netcatty:telnet:getEchoMode", getTelnetEchoMode);
   ipcMain.on("netcatty:write", writeToSession);
+  ipcMain.on("netcatty:terminal:user-input", notifySessionUserInput);
   ipcMain.on("netcatty:interrupt", interruptSession);
   ipcMain.on("netcatty:resize", resizeSession);
   ipcMain.on("netcatty:pty:clear", clearSessionPtyBuffer);
@@ -2536,6 +2748,7 @@ module.exports = {
   registerHandlers,
   findExecutable,
   getDefaultLocalShell,
+  getWslLaunchArgs,
   startLocalSession,
   startTelnetSession,
   startMoshSession,
@@ -2551,6 +2764,7 @@ module.exports = {
   receiveSerialYmodem,
   listSerialPorts,
   writeToSession,
+  notifySessionUserInput,
   setSessionEncoding,
   resizeSession,
   clearSessionPtyBuffer,

@@ -1021,3 +1021,80 @@ test("a key pressed while disconnected cannot produce an orphan release after re
   });
   assert.deepEqual(writes, []);
 });
+
+test("a dedicated keyIdentity pairs the interrupt press with its release (#3409)", () => {
+  const options = () => {
+    // Disambiguate + event-type flags so Ctrl+C press/release encode as CSI-u.
+    const mode = createKittyKeyboardModeState();
+    setKittyKeyboardModeFlags(mode, 1 | 2);
+    return {
+      kittyProtocolEnabled: true,
+      kittyMode: mode,
+      applicationCursorMode: false,
+      encodedKeys: new Set<string>(),
+      legacySuppressedKeys: new Set<string>(),
+    };
+  };
+
+  // A Command+Period interrupt is normalized to a Ctrl+C event but paired under a
+  // dedicated identity, so it must not collapse with an outstanding physical
+  // KeyC press on the peer: the press, the legacy suppression and the release
+  // all use the propagated identity, while the physical KeyC state survives.
+  const pressOptions = options();
+  const interruptPress = resolveKittyKeyboardBroadcastInput({
+    kind: "key",
+    event: { type: "keydown", key: "c", code: "KeyC", ctrlKey: true },
+    keyIdentity: "KeyC mac-period-interrupt",
+    urgentInterrupt: true,
+  }, pressOptions);
+  assert.equal(interruptPress?.data, "\x1b[99;5u");
+  assert.ok(pressOptions.encodedKeys.has("KeyC mac-period-interrupt"));
+  assert.ok(pressOptions.legacySuppressedKeys.has("KeyC mac-period-interrupt"));
+
+  // The physical KeyC press keeps its own entry.
+  assert.equal(pressOptions.encodedKeys.has("KeyC"), false);
+
+  // The legacy \x03 fan-out under the dedicated identity is suppressed on a
+  // Kitty peer (already encoded) but delivered on a legacy peer.
+  assert.equal(resolveKittyKeyboardBroadcastInput({
+    kind: "legacy",
+    data: "\x03",
+    keyIdentity: "KeyC mac-period-interrupt",
+    urgentInterrupt: true,
+  }, pressOptions), null);
+
+  const legacyPeerOptions = options();
+  const legacyInterrupt = resolveKittyKeyboardBroadcastInput({
+    kind: "legacy",
+    data: "\x03",
+    keyIdentity: "KeyC mac-period-interrupt",
+    urgentInterrupt: true,
+  }, legacyPeerOptions);
+  assert.equal(legacyInterrupt?.data, "\x03");
+  assert.equal(legacyInterrupt?.urgentInterrupt, true);
+
+  // The release pairs under the dedicated identity, leaving the physical
+  // KeyC press entry intact for its own keyup.
+  const releaseOptions = options();
+  releaseOptions.encodedKeys.add("KeyC mac-period-interrupt");
+  releaseOptions.encodedKeys.add("KeyC");
+  releaseOptions.legacySuppressedKeys.add("KeyC");
+  const interruptRelease = resolveKittyKeyboardBroadcastInput({
+    kind: "key",
+    event: { type: "keyup", key: "c", code: "KeyC", ctrlKey: true },
+    keyIdentity: "KeyC mac-period-interrupt",
+  }, releaseOptions);
+  assert.equal(interruptRelease?.data, "\x1b[99;5:3u");
+  assert.ok(releaseOptions.encodedKeys.has("KeyC"));
+  assert.equal(releaseOptions.encodedKeys.has("KeyC mac-period-interrupt"), false);
+
+  // Without an explicit identity, pairing still keys from the event code.
+  const defaultOptions = options();
+  defaultOptions.encodedKeys.add("KeyA");
+  const defaultRelease = resolveKittyKeyboardBroadcastInput({
+    kind: "key",
+    event: { type: "keyup", key: "a", code: "KeyA" },
+  }, defaultOptions);
+  assert.equal(defaultRelease?.data, "\x1b[97;1:3u");
+  assert.equal(defaultOptions.encodedKeys.has("KeyA"), false);
+});

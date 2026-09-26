@@ -334,7 +334,8 @@ test("live directory download rejects a Windows backslash traversal entry", asyn
   }
 });
 
-test("live folder settles a superseded child whose completed row was compacted", async () => {
+for (const ownerChange of ["same", "changed-active", "changed-completed"] as const) {
+test(`live folder settles superseded ownership without clobbering its replacement: ${ownerChange}`, async () => {
   const { sftpTransferCenterStore } = await import("../sftpTransferCenterStore");
   const previousWindow = (globalThis as { window?: unknown }).window;
   const previousLocalStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
@@ -355,10 +356,18 @@ test("live folder settles a superseded child whose completed row was compacted",
     startStreamTransfer: async (options: { transferId: string }) => {
       childId = options.transferId;
       sftpTransferCenterStore.publishOwner("live-compacted-owner", tasks);
-      // The winning invocation has already completed; history compaction drops its row.
-      sftpTransferCenterStore.ingestBackgroundEvent({
-        type: "completed", transferId: childId, transferred: 1, totalBytes: 1, lifecycleEpoch: 0,
-      });
+      if (ownerChange !== "same") {
+        const current = sftpTransferCenterStore.getTask(childId)!;
+        sftpTransferCenterStore.admitTaskRun({ ...current, directoryEntryIdentity: "b".repeat(64) });
+      }
+      if (ownerChange !== "changed-active") {
+        // The winning invocation completed; history compaction drops its row.
+        sftpTransferCenterStore.ingestBackgroundEvent({
+          type: "completed", transferId: childId, transferred: 1, totalBytes: 1, lifecycleEpoch: 0,
+        });
+      }
+      tasks = [...sftpTransferCenterStore.getSnapshot().tasks];
+      transfersRef.current = tasks;
       return { superseded: true };
     },
   } };
@@ -387,10 +396,15 @@ test("live folder settles a superseded child whose completed row was compacted",
       new Promise<"still-waiting">((resolve) => setTimeout(() => resolve("still-waiting"), 450)),
     ]);
     assert.ok(childId);
-    assert.equal(sftpTransferCenterStore.getTask(childId), undefined);
-    assert.equal(sftpTransferCenterStore.getTask(root.id)?.directoryResumeCheckpoint?.completedEntries, 1);
+    if (ownerChange === "changed-active") {
+      assert.equal(tasks.find((task) => task.id === childId)?.status, "transferring");
+      assert.equal(tasks.find((task) => task.id === childId)?.directoryEntryIdentity, "b".repeat(64));
+    } else {
+      assert.equal(tasks.find((task) => task.id === childId), undefined, "old waiter must not reinsert a compacted child");
+      assert.equal(sftpTransferCenterStore.getTask(root.id)?.directoryResumeCheckpoint?.completedEntries, 1);
+    }
     assert.notEqual(result, "still-waiting", "compacted completion must settle the live folder");
-    assert.equal(result, 0);
+    assert.equal(result, ownerChange === "same" ? 0 : 1);
   } finally {
     cancelledTasksRef.current.add(root.id);
     await running?.catch(() => {});
@@ -404,3 +418,4 @@ test("live folder settles a superseded child whose completed row was compacted",
   }
 });
 
+}

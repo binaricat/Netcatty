@@ -383,10 +383,12 @@ const TOOL_INPUT_FIELDS = Object.freeze({
 
 /** Long-form model guidance appended to terminal tool descriptions from catalog. */
 const MODEL_DESCRIPTION_HINTS = Object.freeze({
+  "session.environment":
+    "Call this first for any task involving a live Netcatty terminal, remote server, SSH session, SFTP path, or terminal tab. Select the target by label or hostname, then pass its sessionId to terminal and SFTP tools. Call it again after the user opens, closes, or renames a session.",
   "terminal.execute":
-    "Use only for commands expected to finish within about 60 seconds. For long-running commands use terminal_start and terminal_poll. Commands run in an isolated subshell of the visible terminal: the user sees the output live, but shell state such as cd, export, or set does not persist between calls — use absolute paths or combine cd with the command (cd /path && cmd).",
+    "Use this instead of the local shell when the command is intended for a Netcatty terminal or remote host. Call get_environment first to resolve the sessionId. Use only for commands expected to finish within about 60 seconds. For long-running commands use terminal_start and terminal_poll. Commands run in an isolated subshell of the visible terminal: the user sees the output live, but shell state such as cd, export, or set does not persist between calls — use absolute paths or combine cd with the command (cd /path && cmd).",
   "terminal.start":
-    "Prefer for builds, scans, log-following, or anything likely to exceed about 2 minutes. Shell state such as cd or export does not persist between calls — combine cd with the command.",
+    "Use this instead of the local shell for long-running commands on a Netcatty terminal or remote host. Call get_environment first to resolve the sessionId. Prefer for builds, scans, log-following, or anything likely to exceed about 2 minutes. Shell state such as cd or export does not persist between calls — combine cd with the command.",
   "terminal.poll":
     "Wait at least about 30 seconds between polls unless output justifies checking sooner.",
   "vault.host.notes.get":
@@ -395,6 +397,8 @@ const MODEL_DESCRIPTION_HINTS = Object.freeze({
     "Host metadata notes on a saved host — not Vault → Notes sidebar entries. Prefer vault_notes_create/update when the user wants vault notes they can open in the Notes sidebar.",
   "vault.host.open":
     "Opens a terminal tab for a saved vault host (same as clicking the host in Netcatty). Connection may still be establishing when the tool returns — use get_environment or wait briefly before terminal_execute if needed. Call session_close with the returned sessionId when the task is finished. Auth prompts (passphrase / keyboard-interactive) still require the user in the Netcatty UI.",
+  "vault.host.list":
+    "Use when the user names a saved Netcatty host but get_environment has no matching live session. Resolve the hostId here, call host_open, then call get_environment to obtain the new sessionId.",
   "vault.host.import":
     "Only for text in known export formats (PuTTY reg, MobaXterm ini, CSV template, SecureCRT, FinalShell JSON, ssh_config). If attached host text is unknown or auto-detection fails, use read_attachment content, extract fields yourself, and call vault_hosts_create.",
   "vault.hosts.create":
@@ -408,7 +412,7 @@ const MODEL_DESCRIPTION_HINTS = Object.freeze({
   "vault.note.update":
     "Update an existing Vault → Notes entry (visible in the vault notes sidebar).",
   "vault.snippets.run":
-    "Text snippets (kind=snippet) paste shell commands with optional {{variables}}. Scripts (kind=script) run via nct JavaScript runtime — use scripts_run for script-only workflows.",
+    "Text snippets (kind=snippet) paste shell commands with optional named placeholders written with two curly braces on each side. Scripts (kind=script) run via nct JavaScript runtime — use scripts_run for script-only workflows.",
   "vault.snippets.create":
     "Create vault snippets (shell text) or scripts (kind=script, nct JavaScript). For multi-step terminal automation use kind=script and call scripts_reference.",
   "vault.scripts.run":

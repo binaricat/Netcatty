@@ -2,6 +2,9 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { spawnSync } = require("node:child_process");
 const { EventEmitter } = require("node:events");
+const { mkdtempSync, writeFileSync, rmSync } = require("node:fs");
+const { join } = require("node:path");
+const { getTempFilePath } = require("../tempDirBridge.cjs");
 
 const { createSessionOpsApi } = require("./sessionOps.cjs");
 
@@ -618,6 +621,105 @@ test("getServerStats does not touch the companion path for a normal SSH session"
   assert.equal(ensureCalls, 0);
   assert.equal(result.success, true);
 });
+
+test("getServerStats reports null GPU fields when the host has no nvidia-smi data", async () => {
+  const sessions = new Map();
+  sessions.set("sid", { type: "ssh", conn: fakeConn(LINUX_STATS) });
+
+  const api = makeSessionOps(sessions);
+  const result = await api.getServerStats({ sender: {} }, { sessionId: "sid" });
+
+  assert.equal(result.success, true);
+  assert.equal(result.stats.gpu, null);
+  assert.equal(result.stats.gpuName, null);
+  assert.equal(result.stats.gpuMemUsed, null);
+  assert.equal(result.stats.gpuMemTotal, null);
+});
+
+test("getServerStats parses NVIDIA GPU utilization and VRAM from the stats line", async () => {
+  // Mirrors the remote line: nvidia-smi CSV is space-squeezed to
+  // "<avgUtil> <sumMemUsed> <sumMemTotal> <first GPU name>".
+  const sessions = new Map();
+  sessions.set("sid", {
+    type: "ssh",
+    conn: fakeConn(`${LINUX_STATS}|GPU:73 2048 24576 NVIDIA GeForce RTX 4090`),
+  });
+
+  const api = makeSessionOps(sessions);
+  const result = await api.getServerStats({ sender: {} }, { sessionId: "sid" });
+
+  assert.equal(result.success, true);
+  assert.equal(result.stats.gpu, 73);
+  assert.equal(result.stats.gpuName, "NVIDIA GeForce RTX 4090");
+  assert.equal(result.stats.gpuMemUsed, 2048);
+  assert.equal(result.stats.gpuMemTotal, 24576);
+});
+
+test("getServerStats tolerates a malformed GPU section", async () => {
+  const sessions = new Map();
+  sessions.set("sid", {
+    type: "ssh",
+    conn: fakeConn(`${LINUX_STATS}|GPU:[Not Supported]`),
+  });
+
+  const api = makeSessionOps(sessions);
+  const result = await api.getServerStats({ sender: {} }, { sessionId: "sid" });
+
+  assert.equal(result.success, true);
+  assert.equal(result.stats.gpu, null);
+  assert.equal(result.stats.gpuName, null);
+});
+
+for (const scenario of [
+  { name: "multiple GPUs", script: "printf '%s\\n' '73, 2048, 24576, NVIDIA RTX 4090' '71, 1024, 24576, NVIDIA RTX 4090'", gpu: 72, used: 3072, total: 49152 },
+  { name: "idle GPU", script: "printf '%s\\n' '0, 0, 24576, NVIDIA RTX 4090'", gpu: 0, used: 0, total: 24576 },
+  { name: "mixed utilization availability", script: "printf '%s\\n' '73, 2048, 24576, NVIDIA RTX 4090' '[N/A], 1024, 8192, NVIDIA A100 MIG'", gpu: 73, used: 3072, total: 32768 },
+  { name: "unavailable memory usage", script: "printf '%s\\n' '73, [N/A], 24576, NVIDIA RTX 4090'", gpu: 73, total: 24576 },
+  { name: "partial memory totals", script: "printf '%s\\n' '73, 2048, 24576, NVIDIA RTX 4090' '71, 1024, [N/A], NVIDIA RTX 4090'", gpu: 72, used: 3072 },
+  { name: "unsupported utilization", script: "printf '%s\\n' '[N/A], 2048, 24576, NVIDIA RTX 4090'", gpu: null },
+  { name: "failed query with partial output", script: "printf '%s\\n' '73, 2048, 24576, NVIDIA RTX 4090'; exit 1", gpu: null },
+  { name: "missing query tool", script: "exit 127", gpu: null },
+  { name: "missing timeout tool", script: "exec sleep 20", gpu: null, noTimeout: true },
+  { name: "blocked GPU query", script: "trap '' TERM; exec sleep 20", gpu: null },
+]) {
+  test(`real stats shell preserves other metrics with ${scenario.name}`, async (t) => {
+    if (spawnSync("timeout", ["-s", "KILL", "2", "true"]).status !== 0) {
+      t.skip("GNU/BusyBox-compatible timeout is unavailable on this test host");
+      return;
+    }
+    const dir = mkdtempSync(getTempFilePath("gpu-stats-"));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    writeFileSync(join(dir, "nvidia-smi"), `#!/bin/sh\n${scenario.script}\n`, { mode: 0o755 });
+    const sessions = new Map([["sid", {
+      type: "ssh",
+      conn: {
+        exec(command, cb) {
+          const execution = spawnSync("sh", ["-c", [
+            "uname() { printf '%s\\n' Linux; }",
+            "nproc() { printf '%s\\n' 4; }",
+            "top() { return 1; }",
+            "df() { return 1; }",
+            scenario.noTimeout
+              ? unwrapExecShC(command).replace("timeout -s KILL 2 nvidia-smi", "nc_missing_timeout -s KILL 2 nvidia-smi")
+              : unwrapExecShC(command),
+          ].join("\n")], {
+            encoding: "utf8",
+            env: { ...process.env, PATH: `${dir}:${process.env.PATH}` },
+            timeout: 7000,
+          });
+          assert.equal(execution.status, 0, execution.stderr);
+          cb(null, fakeStream(execution.stdout));
+        },
+      },
+    }]]);
+    const result = await makeSessionOps(sessions).getServerStats({ sender: {} }, { sessionId: "sid" });
+    assert.equal(result.success, true);
+    assert.equal(result.stats.cpuCores, 4);
+    assert.equal(result.stats.gpu, scenario.gpu);
+    assert.equal(result.stats.gpuMemUsed, scenario.used ?? null);
+    assert.equal(result.stats.gpuMemTotal, scenario.total ?? null);
+  });
+}
 
 test("getServerStats measures latency by pinging the stats connection", async () => {
   const sessions = new Map();

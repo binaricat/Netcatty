@@ -136,6 +136,7 @@ function createOpenAIChatToolCallNormalizer(requestId: string): (data: string) =
   // Keys forwarded inside choices array position 0 — the only element the
   // AI SDK reads. Tool calls living at position > 0 are invisible to it.
   const sdkVisibleKeys = new Set<string>();
+  const sdkIndexesByKey = new Map<string, number>();
   const requestIdToken = requestId.replace(/[^a-zA-Z0-9_-]/g, '_');
 
   return (data: string): string => {
@@ -165,6 +166,23 @@ function createOpenAIChatToolCallNormalizer(requestId: string): (data: string) =
       const choiceIndex = typeof choiceRecord.index === 'number' ? choiceRecord.index : choicePosition;
       let deltaChanged = false;
       const normalizedToolCalls: unknown[] = [];
+      const forwardToolCall = (toolCall: Record<string, unknown>, key: string) => {
+        // The SDK reads only choices[0] and stores calls in a dense array.
+        // Assign indexes only when forwarding a named call to that array.
+        if (choicePosition === 0) {
+          let sdkIndex = sdkIndexesByKey.get(key);
+          if (sdkIndex === undefined) {
+            sdkIndex = sdkIndexesByKey.size;
+            sdkIndexesByKey.set(key, sdkIndex);
+          }
+          if (toolCall.index !== sdkIndex) {
+            toolCall = { ...toolCall, index: sdkIndex };
+            changed = true;
+            deltaChanged = true;
+          }
+        }
+        normalizedToolCalls.push(toolCall);
+      };
       for (const [toolCallPosition, toolCall] of deltaRecord.tool_calls.entries()) {
         if (!toolCall || typeof toolCall !== 'object') {
           normalizedToolCalls.push(toolCall);
@@ -209,11 +227,11 @@ function createOpenAIChatToolCallNormalizer(requestId: string): (data: string) =
             normalizedToolCall.function === toolCallRecord.function &&
             (!rememberedName || hasFunctionName(toolCallRecord))
           ) {
-            normalizedToolCalls.push(toolCall);
+            forwardToolCall(toolCallRecord, key);
           } else {
             changed = true;
             deltaChanged = true;
-            normalizedToolCalls.push(normalizedToolCall);
+            forwardToolCall(normalizedToolCall, key);
           }
           continue;
         }
@@ -254,13 +272,13 @@ function createOpenAIChatToolCallNormalizer(requestId: string): (data: string) =
           normalizedToolCall.type === toolCallRecord.type &&
           normalizedToolCall.function === toolCallRecord.function
         ) {
-          normalizedToolCalls.push(toolCall);
+          forwardToolCall(toolCallRecord, key);
           continue;
         }
 
         changed = true;
         deltaChanged = true;
-        normalizedToolCalls.push(normalizedToolCall);
+        forwardToolCall(normalizedToolCall, key);
       }
 
       if (!deltaChanged) return choice;

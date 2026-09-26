@@ -10,7 +10,7 @@ const ts=require('typescript');
 const bridge=require(root+'/electron/bridges/terminalBridge.cjs');
 test('serial input combinations preserve the preceding device bytes after CJK deletion', async () => {
 const modules = await Promise.all([
-'domain/serialCharMetrics.ts', 'components/terminal/runtime/terminalInputSanitize.ts',
+'components/terminal/runtime/terminalPacedBroadcast.ts', 'components/terminal/runtime/terminalReportSequence.ts', 'domain/serialCharMetrics.ts', 'components/terminal/runtime/terminalInputSanitize.ts',
 'components/terminal/runtime/terminalBackspaceInput.ts', 'components/terminal/runtime/terminalPerCharacterInput.ts',
 'components/terminal/runtime/terminalSudoAutofill.ts', 'components/terminal/runtime/terminalCommandExecution.ts',
 'components/terminal/runtime/serialLocalEcho.ts', 'components/terminal/autocomplete/terminalStringCellWidth.ts',
@@ -27,7 +27,7 @@ for (const prefix of ['fresh','empty-arrow','submit','paste-submit','interrupt',
  const session={encoding, serialPort:{write(data: string | Buffer){for(const byte of Buffer.from(data)) { if(byte===127||byte===8) wire=wire.subarray(0,Math.max(0,wire.length-1)); else wire=Buffer.concat([wire,Buffer.from([byte])]);}}}};
  bridge.init({sessions:new Map([['s',session]]),electronModule:{}});
  const ctx={host:{protocol:'serial',id:'h',label:'h'},sessionId:'s',sessionRef:{current:'s'},statusRef:{current:'connected'},commandBufferRef:{current:''},onBroadcastInputRef:{current:null},isBroadcastEnabledRef:{current:false},terminalBackend:{writeToSession(id:string,data:string,opts: {serialEraseChar?: string; sensitive?: boolean}){bridge.writeToSession({}, {sessionId:id,data,...opts})}},serialByteOrientedBackspace:true,serialLocalEcho:false};
- const env={...Object.assign({},...modules),api: undefined as unknown as {handleTerminalInputData: (data: string) => void; recordSerialSnippetInput: (data: string) => void},ctx,term:{buffer:{active:{cursorX:0,cursorY:0,baseY:0,getLine:()=>undefined}},cols:80},suppressNextTerminalDataBroadcast:false,handlingKittyBroadcast:false,shouldBroadcastTerminalUserInput:()=>false,prioritizeTerminalInput:()=>{},getFlowControllerForTerm:()=>null,shouldSuppressTerminalInputScrollForUserPaste:()=>true,scrollToBottomAfterInput:()=>{},writeLocalTerminalData:()=>{}};
+ const env={...Object.assign({},...modules),api: undefined as unknown as {handleTerminalInputData: (data: string) => void; recordSerialSnippetInput: (data: string) => void},ctx,term:{buffer:{active:{cursorX:0,cursorY:0,baseY:0,getLine:()=>undefined}},cols:80},suppressNextTerminalDataBroadcast:false,handlingKittyBroadcast:false,shouldBroadcastTerminalUserInput:()=>false,prioritizeTerminalInput:()=>{},getFlowControllerForTerm:()=>null,shouldSuppressTerminalInputScrollForUserPaste:()=>true,shouldOverrideTerminalUserPasteSensitivity:()=>false,scrollToBottomAfterInput:()=>{},writeLocalTerminalData:()=>{}};
  vm.runInNewContext(code,env); const {handleTerminalInputData:input,recordSerialSnippetInput:snippet}=env.api;
  if(prefix==='empty-arrow') input('\x1b[D');
  if(prefix==='submit') {input('旧');input('\x1b[D');input('\r');}

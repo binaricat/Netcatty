@@ -1,6 +1,7 @@
 /* eslint-disable no-undef */
 // Module-level require: code inside createExecHandlerApi runs under `with (ctx)`
 // where bare `require` resolves to ctx.require (based in electron/bridges/).
+const { clearSessionFlowState } = require("../terminalFlowAck.cjs");
 const {
   ensureSessionShellKind,
   remoteDisallowsExecChannelProbe, ensureSessionShellKindForExec,
@@ -142,6 +143,7 @@ function createExecHandlerApi(ctx) {
             return { ok: false, error: `Command blocked by safety policy. Pattern: ${safety.matchedPattern}` };
           }
           return execViaPty(ptyStream, command, {
+            onInterrupt: () => clearSessionFlowState(session),
             trackForCancellation: activePtyExecs,
             timeoutMs: commandTimeoutMs,
             shellKind: session.shellKind,
@@ -149,6 +151,7 @@ function createExecHandlerApi(ctx) {
             probeLiveShell: true,
             bastionKeystrokes: remoteDisallowsExecChannelProbe(session.remoteSshVersion),
             onProbeAborted: (marker) => echoCommandToSession(session, sessionId, `${marker}_R`, { syntheticEcho: false }),
+            onEchoSuppressionPrime: (marker) => echoCommandToSession(session, sessionId, `${marker}_I`, { syntheticEcho: false }),
             expectedPrompt: getFreshIdlePrompt(session),
             typedInput: true,
             echoCommand: (rawCommand) => echoCommandToSession(session, sessionId, rawCommand),
@@ -309,6 +312,7 @@ function createExecHandlerApi(ctx) {
         let handle;
         try {
           handle = startPtyJob(ptyStream, command, {
+            onInterrupt: () => clearSessionFlowState(session),
             // Intentionally do NOT register in activePtyExecs: terminal_start jobs
             // are designed to survive SDK agent "Stop" so the model can stop polling
             // without aborting a long-running build/scan/log stream. The job is
@@ -319,6 +323,7 @@ function createExecHandlerApi(ctx) {
             probeLiveShell: true,
             bastionKeystrokes: remoteDisallowsExecChannelProbe(session.remoteSshVersion),
             onProbeAborted: (marker) => echoCommandToSession(session, sessionId, `${marker}_R`, { syntheticEcho: false }),
+            onEchoSuppressionPrime: (marker) => echoCommandToSession(session, sessionId, `${marker}_I`, { syntheticEcho: false }),
             chatSessionId,
             expectedPrompt: getFreshIdlePrompt(session),
             typedInput: true,

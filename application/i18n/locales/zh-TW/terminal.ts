@@ -3,6 +3,13 @@ import type { Messages } from '../types';
 export const zhTWTerminalMessages: Messages = {
   'terminal.menu.saveScreen': '儲存目前畫面',
   'terminal.saveScreen.failed': '儲存終端畫面失敗。',
+  // 多行貼上確認對話框（#3398）
+  'terminal.pasteConfirm.title': '要貼上多行文字嗎？',
+  'terminal.pasteConfirm.summary': '將向工作階段傳送 {lines} 行（{chars} 個字元）。',
+  'terminal.pasteConfirm.preview': '預覽（可編輯）',
+  'terminal.pasteConfirm.send': '傳送',
+  'terminal.pasteConfirm.sendLineByLine': '逐行傳送',
+  'terminal.pasteConfirm.cancel': '取消',
   'terminal.sudoHint.pressEnter': '按 Enter 貼上已儲存的密碼',
   'terminal.passwordPicker.title': '已儲存的密碼',
   'terminal.passwordPicker.empty': '沒有已儲存的密碼',
@@ -326,6 +333,12 @@ export const zhTWTerminalMessages: Messages = {
   'settings.terminal.behavior.autoUploadClipboardImage': '貼上時自動上傳剪貼簿圖片',
   'settings.terminal.behavior.autoUploadClipboardImage.desc':
     '當剪貼簿包含圖片時，在遠端工作階段中貼上會透過 SFTP 將圖片上傳到遠端目前目錄的 .netcatty-paste-images/ 資料夾，並在終端輸入遠端路徑，而不是貼上文字。',
+  'settings.terminal.behavior.confirmMultilinePaste': '貼上多行前先詢問',
+  'settings.terminal.behavior.confirmMultilinePaste.desc':
+    '貼上多行文字時先彈出確認對話框，顯示行數和字元數、可編輯的預覽，並提供傳送 / 逐行傳送 / 取消操作。可保護不支援括號貼上的網路設備 CLI（Cisco IOS、華為 VRP、H3C Comware）。',
+  'settings.terminal.behavior.confirmMultilinePasteMinLines': '確認門檻（行數）',
+  'settings.terminal.behavior.confirmMultilinePasteMinLines.desc':
+    '貼上內容達到該行數時才彈出確認對話框。',
   'settings.terminal.behavior.shiftEnterNewline': 'Shift+Enter 傳送文字',
   'settings.terminal.behavior.shiftEnterNewline.desc':
     '在終端中按 Shift+Enter 時傳送設定的文字，而不是一般 Enter。',
@@ -918,6 +931,10 @@ export const zhTWTerminalMessages: Messages = {
   'serial.field.configLabelPlaceholder': '例如 Arduino Uno',
   'serial.connectAndSave': '連線並儲存',
   'serial.edit.title': '序列埠設定',
+  'serial.field.username': '使用者名稱',
+  'serial.field.password': '密碼',
+  'serial.field.autoLoginDesc': '設定後，序列埠終端出現 Login/Password 登入提示時，會自動填入此處儲存的使用者名稱和密碼。',
+  'serial.field.clearPassword': '清除已儲存的密碼',
 
   // Keyboard Interactive Authentication (2FA/MFA)
   'keyboard.interactive.title': '需要驗證',

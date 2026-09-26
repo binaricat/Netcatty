@@ -35,3 +35,8 @@ test("VAULT_SCRIPTS_GUIDANCE prefers explicit wait APIs", () => {
   assert.match(VAULT_SCRIPTS_GUIDANCE, /waitForText\/waitForRegex/);
   assert.doesNotMatch(VAULT_SCRIPTS_GUIDANCE, /sendLine,\s*waitFor,\s*dialogs/);
 });
+
+test("VAULT_SCRIPTS_GUIDANCE avoids mustache template braces", () => {
+  assert.doesNotMatch(VAULT_SCRIPTS_GUIDANCE, /\{\{/);
+  assert.doesNotMatch(appendVaultAgentGuidance("Netcatty terminal manager."), /\{\{/);
+});

@@ -21,9 +21,9 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "../../../ui/tooltip";
 import { Select, SettingCard, SettingRow, Toggle } from "../../../settings/settings-ui";
 import { getBridge } from "./types";
 
-type ExternalMcpClient = "codex" | "claude" | "grok" | "cursor";
+type ExternalMcpClient = "codex" | "claude" | "grok" | "cursor" | "other";
 
-const CLIENT_TABS: ExternalMcpClient[] = ["codex", "claude", "grok", "cursor"];
+const CLIENT_TABS: ExternalMcpClient[] = ["codex", "claude", "grok", "cursor", "other"];
 
 type CopyableCodeBlockProps = {
   label?: string;
@@ -304,6 +304,7 @@ export const ExternalMcpCard: React.FC = () => {
   const [codexStatus, setCodexStatus] = useState<ClientSetupStatus | null>(null);
   const [claudeStatus, setClaudeStatus] = useState<ClientSetupStatus | null>(null);
   const [grokStatus, setGrokStatus] = useState<ClientSetupStatus | null>(null);
+  const [universalSetupPrompt, setUniversalSetupPrompt] = useState("");
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isAddingCodex, setIsAddingCodex] = useState(false);
   const [isAddingClaude, setIsAddingClaude] = useState(false);
@@ -386,11 +387,19 @@ export const ExternalMcpCard: React.FC = () => {
     if (!options?.quiet) setIsRefreshing(true);
     try {
       if (includeClients) {
-        const [nextStatus, nextCodexStatus, nextClaudeStatus, nextGrokStatus] = await Promise.all([
+        const [
+          nextStatus,
+          nextCodexStatus,
+          nextClaudeStatus,
+          nextGrokStatus,
+          nextUniversalPrompt,
+        ] = await Promise.all([
           bridge.externalMcpGetStatus(),
           bridge.externalMcpCodexGetStatus(),
           bridge.externalMcpClaudeGetStatus(),
           bridge.externalMcpGrokGetStatus(),
+          bridge.externalMcpGetUniversalSetupPrompt?.()
+            ?? Promise.resolve({ ok: false, prompt: "" }),
         ]);
         setStatus(nextStatus as ExternalMcpStatus);
         if (enabled && nextStatus?.ok && !nextStatus.enabled) {
@@ -399,6 +408,11 @@ export const ExternalMcpCard: React.FC = () => {
         setCodexStatus(nextCodexStatus as ClientSetupStatus);
         setClaudeStatus(nextClaudeStatus as ClientSetupStatus);
         setGrokStatus(nextGrokStatus as ClientSetupStatus);
+        setUniversalSetupPrompt(
+          nextUniversalPrompt.ok && typeof nextUniversalPrompt.prompt === "string"
+            ? nextUniversalPrompt.prompt
+            : "",
+        );
       } else {
         const nextStatus = await bridge.externalMcpGetStatus();
         setStatus(nextStatus as ExternalMcpStatus);
@@ -540,7 +554,7 @@ export const ExternalMcpCard: React.FC = () => {
   }, [refreshStatus, t]);
 
   const selectedClientMeta = useMemo(() => {
-    if (selectedClient === "cursor") {
+    if (selectedClient === "cursor" || selectedClient === "other") {
       return {
         kind: "snippet" as const,
         statusView: null as StatusView | null,
@@ -817,7 +831,7 @@ export const ExternalMcpCard: React.FC = () => {
         <div
           role="tablist"
           aria-label={t("ai.externalMcp.clientConfiguration")}
-          className="grid grid-cols-4 gap-1 rounded-md bg-muted p-1"
+          className="grid grid-cols-5 gap-1 rounded-md bg-muted p-1"
         >
           {CLIENT_TABS.map((client) => {
             const active = selectedClient === client;
@@ -866,7 +880,9 @@ export const ExternalMcpCard: React.FC = () => {
             </div>
           ) : (
             <p className="text-xs text-muted-foreground leading-5">
-              {t("ai.externalMcp.cursor.description")}
+              {t(selectedClient === "other"
+                ? "ai.externalMcp.other.description"
+                : "ai.externalMcp.cursor.description")}
             </p>
           )}
 
@@ -894,16 +910,30 @@ export const ExternalMcpCard: React.FC = () => {
               />
             </>
           ) : (
-            <CopyableCodeBlock
-              label={t("ai.externalMcp.configSnippet")}
-              value={selectedClientMeta.snippet}
-              copyKey="cursor"
-              copied={copied}
-              onCopy={copyText}
-              copyLabel={t("ai.externalMcp.copy")}
-              copiedLabel={t("ai.externalMcp.copied")}
-              emptyLabel={t("ai.externalMcp.unavailable")}
-            />
+            <>
+              <CopyableCodeBlock
+                label={t("ai.externalMcp.configSnippet")}
+                value={selectedClientMeta.snippet}
+                copyKey="cursor"
+                copied={copied}
+                onCopy={copyText}
+                copyLabel={t("ai.externalMcp.copy")}
+                copiedLabel={t("ai.externalMcp.copied")}
+                emptyLabel={t("ai.externalMcp.unavailable")}
+              />
+              {selectedClient === "other" ? (
+                <CopyableCodeBlock
+                  label={t("ai.externalMcp.universalSetupPrompt")}
+                  value={universalSetupPrompt}
+                  copyKey="universal-setup-prompt"
+                  copied={copied}
+                  onCopy={copyText}
+                  copyLabel={t("ai.externalMcp.copy")}
+                  copiedLabel={t("ai.externalMcp.copied")}
+                  emptyLabel={t("ai.externalMcp.unavailable")}
+                />
+              ) : null}
+            </>
           )}
         </div>
       </div>

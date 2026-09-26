@@ -503,6 +503,7 @@ export const zhTWVaultMessages: Messages = {
   'terminal.statusbar.reconnect.tooltip': '重新連線目前工作階段',
   'terminal.serverStats.cpu': 'CPU 使用率',
   'terminal.serverStats.cpuCores': 'CPU 核心使用率',
+  'terminal.serverStats.gpu': 'GPU 使用率',
   'terminal.serverStats.memory': '記憶體使用',
   'terminal.serverStats.memoryDetails': '記憶體詳情',
   'terminal.serverStats.memUsed': '已用',

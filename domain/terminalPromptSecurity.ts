@@ -96,6 +96,11 @@ export function isSensitiveTerminalChallenge(value: string): boolean {
 type ConfirmedPromptOptions = {
   /** Network-device shells commonly use a bare host name followed by `>`. */
   allowHostStyleGreaterThan?: boolean;
+  /**
+   * True when the terminal is on the alternate screen (DEC 1049). Used to
+   * tell vim's command-line `:` from a custom `sudo -p ':'` prompt.
+   */
+  alternateScreen?: boolean;
 };
 
 /**
@@ -192,6 +197,9 @@ export function isUntrustedTerminalInputPrompt(
   const prompt = lastLogicalLine(value).trim();
   if (!prompt) return false;
   if (isSensitiveTerminalChallenge(prompt)) return true;
+  // Vim command-mode entry on the alternate screen. A bare `:` on the
+  // primary screen stays fail-closed (`sudo -p ':'`).
+  if (options.alternateScreen && /^:\s*$/.test(prompt)) return false;
   if (!/[:：>›»]\s*$/u.test(prompt)) return false;
   // Mid-command punctuation after a real shell prompt must keep broadcasting
   // (#2709). Standalone `Label:` / `Custom>` challenges still fail closed.

@@ -13,6 +13,7 @@ import {
   TERMINAL_INLINE_IMAGE_SEQUENCE_LIMIT_MB_DEFAULT,
   TERMINAL_INLINE_IMAGE_STORAGE_LIMIT_MB_DEFAULT,
 } from '../terminalInlineImages';
+import { normalizeMultilinePasteConfirmMinLines } from '../terminalPasteConfirm';
 
 // Terminal appearance settings
 export type CursorShape = 'block' | 'bar' | 'underline';
@@ -168,6 +169,14 @@ export interface TerminalSettings {
   // the "Upload clipboard image" action (SFTP upload + remote-path paste)
   // instead of falling back to a text paste. Remote SSH sessions only.
   autoUploadClipboardImageOnPaste: boolean;
+
+  // When true, pasting multiple lines first shows a confirmation dialog with
+  // a line/character summary, an editable preview, and send / send-line-by-line
+  // / cancel actions. Protects network-device CLIs (Cisco IOS, Huawei VRP,
+  // H3C Comware) that do not implement bracketed paste (#3398).
+  confirmBeforeMultilinePaste: boolean;
+  /** Minimum line count that triggers the multi-line paste confirmation. */
+  multilinePasteConfirmMinLines: number;
 
   // Shell `clear` command behavior — controls whether CSI 3 J (erase scrollback)
   // from the shell is honored. Default true matches POSIX/ncurses since 2013:
@@ -449,6 +458,9 @@ export const normalizeTerminalSettings = (
     ...mergedSettings,
     rendererType,
     autocompleteMaxSuggestions,
+    multilinePasteConfirmMinLines: normalizeMultilinePasteConfirmMinLines(
+      mergedSettings.multilinePasteConfirmMinLines,
+    ),
     hibernateHiddenTabsDelaySec: normalizeHibernateHiddenTabsDelaySec(
       mergedSettings.hibernateHiddenTabsDelaySec,
     ),
@@ -542,6 +554,8 @@ const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
   systemManagerDockerStatsRefreshInterval: 3,
   disableBracketedPaste: false, // Bracketed paste enabled by default
   autoUploadClipboardImageOnPaste: false, // Opt-in: image in clipboard auto-uploads on paste (remote sessions)
+  confirmBeforeMultilinePaste: false, // Opt-in: ask before pasting multiple lines (#3398)
+  multilinePasteConfirmMinLines: 2, // Paste of 2+ lines asks for confirmation
   clearWipesScrollback: true, // POSIX-standard: shell `clear` clears scrollback too
   preserveSelectionOnInput: false, // Opt-in: keep selection alive when typing
   forcePromptNewLine: false, // Opt-in: keep the next shell prompt visually separated from unterminated final output lines

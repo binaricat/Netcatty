@@ -708,9 +708,9 @@ test("txt stream timestamps complete lines without duplicating split chunks", as
   const directory = path.join(TEMP_ROOT, `stream-timestamps-${Date.now()}-${Math.random().toString(16).slice(2)}`);
   const sessionId = `session-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const times = [
-    new Date(2026, 0, 2, 3, 4, 5).getTime(),
-    new Date(2026, 0, 2, 3, 4, 6).getTime(),
-    new Date(2026, 0, 2, 3, 4, 7).getTime(),
+    new Date(2026, 0, 2, 3, 4, 5, 123).getTime(),
+    new Date(2026, 0, 2, 3, 4, 6, 456).getTime(),
+    new Date(2026, 0, 2, 3, 4, 7, 89).getTime(),
   ];
 
   try {
@@ -730,7 +730,7 @@ test("txt stream timestamps complete lines without duplicating split chunks", as
 
     assert.equal(
       fs.readFileSync(filePath, "utf8"),
-      "[2026-01-02 03:04:05] first line\n[2026-01-02 03:04:06] second line\n[2026-01-02 03:04:07] partial",
+      "[2026-01-02 03:04:06.456] first line\n[2026-01-02 03:04:06.456] second line\n[2026-01-02 03:04:06.456] partial",
     );
   } finally {
     await stopStream(sessionId);
@@ -758,7 +758,7 @@ test("txt stream timestamps rendered lines after carriage-return rewrites", asyn
 
     assert.equal(
       fs.readFileSync(filePath, "utf8"),
-      "[2026-01-02 03:04:05] docker denied",
+      "[2026-01-02 03:04:05.000] docker denied",
     );
   } finally {
     await stopStream(sessionId);
@@ -785,14 +785,14 @@ test("txt stream updates a line timestamp when a later snapshot rewrites that li
       timestampProvider: () => times.shift(),
     });
     appendData(sessionId, "old prompt");
-    await waitForFileContent(directory, "[2026-01-02 03:04:05] old prompt");
+    await waitForFileContent(directory, "[2026-01-02 03:04:05.000] old prompt");
     appendData(sessionId, "\rdocker denied");
 
     const filePath = await stopStream(sessionId);
 
     assert.equal(
       fs.readFileSync(filePath, "utf8"),
-      "[2026-01-02 03:04:06] docker denied",
+      "[2026-01-02 03:04:06.000] docker denied",
     );
   } finally {
     await stopStream(sessionId);
@@ -819,7 +819,7 @@ test("html stream includes line timestamps in rendered content", async () => {
     const filePath = await stopStream(sessionId);
     const html = fs.readFileSync(filePath, "utf8");
 
-    assert.match(html, /\[2026-01-02 03:04:05\] line/);
+    assert.match(html, /\[2026-01-02 03:04:05\.000\] line/);
   } finally {
     await stopStream(sessionId);
     fs.rmSync(directory, { recursive: true, force: true });
@@ -845,7 +845,7 @@ test("html stream timestamps rendered lines after carriage-return rewrites", asy
     const filePath = await stopStream(sessionId);
     const html = fs.readFileSync(filePath, "utf8");
 
-    assert.match(html, /\[2026-01-02 03:04:05\] docker denied/);
+    assert.match(html, /\[2026-01-02 03:04:05\.000\] docker denied/);
     assert.doesNotMatch(html, /old prompt/);
   } finally {
     await stopStream(sessionId);
@@ -903,4 +903,29 @@ function findFirstTxtFile(directory) {
     if (fileName) return path.join(hostDir, fileName);
   }
   return null;
+}
+
+for (const format of ["txt", "html"]) {
+  test(`${format} timestamps preserve arrival gaps inside one flush interval`, async () => {
+    const directory = path.join(TEMP_ROOT, `arrival-${format}-${Date.now()}`);
+    const sessionId = `arrival-${format}`;
+    let now = new Date(2026, 0, 2, 3, 4, 5, 89).getTime();
+    try {
+      startStream(sessionId, {
+        hostLabel: "host", directory, format, timestampsEnabled: true,
+        timestampProvider: () => now,
+      });
+      appendData(sessionId, "first\r\n");
+      now += 300;
+      appendData(sessionId, "second\r\n");
+      now += 100;
+      const filePath = await stopStream(sessionId);
+      const content = fs.readFileSync(filePath, "utf8");
+      assert.match(content, /\[2026-01-02 03:04:05\.089\] first/);
+      assert.match(content, /\[2026-01-02 03:04:05\.389\] second/);
+    } finally {
+      await stopStream(sessionId);
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
 }

@@ -60,8 +60,9 @@ class TerminalTextRenderer {
     this.alternateScreenActive = options.alternateScreenActive === true;
   }
 
-  feed(input) {
+  feed(input, timestamp) {
     if (!input) return;
+    this.timestamp = timestamp;
 
     for (const ch of input) {
       this.#consume(ch);
@@ -75,18 +76,18 @@ class TerminalTextRenderer {
     return this.toString();
   }
 
-  toString({ includePendingClearedScreen = false } = {}) {
+  toString({ includePendingClearedScreen = false, formatLine = (line) => line } = {}) {
     const lines = includePendingClearedScreen ? this.#linesWithPendingClearedScreen() : this.lines;
     return lines
-      .map((line) => line.map((cell) => cell?.ch || " ").join("").replace(/[ \t]+$/g, ""))
+      .map((line) => formatLine(line.map((cell) => cell?.ch || " ").join("").replace(/[ \t]+$/g, ""), line.timestamp))
       .join("\n")
       .replace(/\n+$/g, "");
   }
 
-  toHtmlContent({ includePendingClearedScreen = false } = {}) {
+  toHtmlContent({ includePendingClearedScreen = false, formatLine = (line) => line } = {}) {
     const lines = includePendingClearedScreen ? this.#linesWithPendingClearedScreen() : this.lines;
     return lines
-      .map((line) => renderLineHtml(line))
+      .map((line) => formatLine(renderLineHtml(line), line.timestamp))
       .join("\n")
       .replace(/\n+$/g, "");
   }
@@ -347,6 +348,7 @@ class TerminalTextRenderer {
   #writeText(text) {
     this.#ensureLine();
     const line = this.lines[this.row];
+    if (this.timestamp !== undefined) line.timestamp = this.timestamp;
     while (line.length < this.col) line.push(createCell(" ", createDefaultStyle()));
     for (const ch of text) {
       line[this.col] = createCell(ch, this.style);
@@ -359,6 +361,12 @@ class TerminalTextRenderer {
   #eraseLine(mode) {
     this.#ensureLine();
     const line = this.lines[this.row];
+    const changesContent = mode === 1
+      ? line.slice(0, Math.min(this.col + 1, getTrimmedLineLength(line))).some((cell) =>
+        cell && (cell.ch !== " " || !stylesEqual(cell.style, createDefaultStyle()))
+      )
+      : mode === 2 ? getTrimmedLineLength(line) > 0 : this.col < getTrimmedLineLength(line);
+    if (changesContent && this.timestamp !== undefined) line.timestamp = this.timestamp;
     if (mode === 1) {
       for (let i = 0; i <= this.col && i < line.length; i += 1) {
         line[i] = createCell(" ", createDefaultStyle());
@@ -541,7 +549,11 @@ function createCell(ch, style) {
 }
 
 function cloneLines(lines) {
-  return lines.map((line) => line.map((cell) => (cell ? createCell(cell.ch, cell.style) : cell)));
+  return lines.map((line) => {
+    const clone = line.map((cell) => (cell ? createCell(cell.ch, cell.style) : cell));
+    if (line.timestamp !== undefined) clone.timestamp = line.timestamp;
+    return clone;
+  });
 }
 
 function trimTrailingBlankLines(lines) {

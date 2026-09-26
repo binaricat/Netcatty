@@ -215,18 +215,59 @@ function executeBoundedSshCommand(sshClient, command, options = {}) {
           null,
           { terminate: true },
         );
+        // A well-behaved sshd closes the channel right after the command
+        // exits, and the ssh2 client answers that CHANNEL_CLOSE, so the
+        // channel never outlives the command on a direct connection.
+        // Some relays (JumpServer-style) open a full downstream SSH
+        // connection per exec channel but never propagate CHANNEL_CLOSE
+        // back upstream — the client then keeps the channel (and the
+        // relay's downstream session) open until the run timeout, leaking
+        // one `sshd: user@notty` pair per auxiliary command (#3459). The
+        // command is complete once the remote reports its exit status and
+        // both output streams have hit EOF, so settle at that point and
+        // hang the channel up ourselves instead of waiting for the run
+        // timeout. Waiting for both guards against servers that report
+        // exit-status while a background child still holds the pipe.
+        let exitSeen = false;
+        let exitCode = null;
+        let stdoutEnded = false;
+        let stderrEnded = !stream.stderr;
+        const maybeFinishAfterEof = () => {
+          if (exitSeen && stdoutEnded && stderrEnded) {
+            finish(null, exitCode, { terminate: true });
+          }
+        };
+        const onExit = (code) => {
+          exitSeen = true;
+          if (typeof code === "number") exitCode = code;
+          maybeFinishAfterEof();
+        };
+        const onStdoutEnd = () => {
+          stdoutEnded = true;
+          maybeFinishAfterEof();
+        };
+        const onStderrEnd = () => {
+          stderrEnded = true;
+          maybeFinishAfterEof();
+        };
         cleanupStreamListeners = () => {
           stream.removeListener?.("data", onStdout);
           stream.removeListener?.("close", onClose);
           stream.removeListener?.("error", onError);
+          stream.removeListener?.("exit", onExit);
+          stream.removeListener?.("end", onStdoutEnd);
           stream.stderr?.removeListener?.("data", onStderr);
           stream.stderr?.removeListener?.("error", onError);
+          stream.stderr?.removeListener?.("end", onStderrEnd);
         };
         stream.on("data", onStdout);
         stream.on("close", onClose);
         stream.on("error", onError);
+        stream.on("exit", onExit);
+        stream.on("end", onStdoutEnd);
         stream.stderr?.on?.("data", onStderr);
         stream.stderr?.on?.("error", onError);
+        stream.stderr?.on?.("end", onStderrEnd);
         runTimer = setTimeoutFn(() => {
           const timeoutError = new Error(`SSH command execution timed out after ${runTimeoutMs} ms`);
           timeoutError.code = "SSH_EXEC_RUN_TIMEOUT";

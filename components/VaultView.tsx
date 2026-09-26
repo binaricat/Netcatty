@@ -77,6 +77,7 @@ import {
   remapSnippetTargetGroupPaths,
 } from "../domain/hostGroupPathMutations";
 import {
+  canReorderVaultHosts,
   reorderVaultItems,
   reorderVaultStrings,
   type VaultOrderPosition,
@@ -697,12 +698,15 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
       keyPassphrases,
       unreadablePassphraseCount,
     } = await buildVaultCsvCredentialOptions(hosts, keys);
-    const { csv, exportedCount, skippedCount } = exportHostsToCsvWithStats(
+    const { csv, exportedCount, skippedCount, unreadableProxyCredentialCount } = exportHostsToCsvWithStats(
       hosts,
       {
         keyPassphrases,
         keyPassphrasesById,
         keyPathsById,
+        proxyProfiles,
+        identities,
+        groupConfigs,
       },
     );
 
@@ -728,6 +732,13 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
         }),
       );
     }
+    if (unreadableProxyCredentialCount > 0) {
+      toast.warning(
+        t("vault.hosts.export.toast.proxyCredentialsSkipped", {
+          count: unreadableProxyCredentialCount,
+        }),
+      );
+    }
     if (skippedCount > 0) {
       toast.warning(
         t("vault.hosts.export.toast.successWithSkipped", {
@@ -740,7 +751,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
         t("vault.hosts.export.toast.success", { count: exportedCount }),
       );
     }
-  }, [hosts, keys, t]);
+  }, [hosts, keys, proxyProfiles, identities, groupConfigs, t]);
 
   // Copy hostname/IP for cross-host paste without opening the editor
   const handleCopyHostname = useCallback(
@@ -1181,34 +1192,13 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
       const source = hostsRef.current.find((host) => host.id === sourceHostId);
       const target = hostsRef.current.find((host) => host.id === targetHostId);
       if (!source || !target) return;
-      const targetGroup = target.group || "";
-      const targetManagedSource = managedSources
-        .filter(
-          (sourceInfo) =>
-            targetGroup === sourceInfo.groupName ||
-            targetGroup.startsWith(`${sourceInfo.groupName}/`),
-        )
-        .sort((a, b) => b.groupName.length - a.groupName.length)[0];
-      const updatedHosts = hostsRef.current.map((host) =>
-        host.id === sourceHostId
-          ? {
-              ...host,
-              label:
-                targetManagedSource &&
-                (!host.protocol || host.protocol === "ssh")
-                  ? host.label.replace(/\s/g, "")
-                  : host.label,
-              group: targetGroup,
-              managedSourceId:
-                targetManagedSource &&
-                (!host.protocol || host.protocol === "ssh")
-                  ? targetManagedSource.id
-                  : undefined,
-            }
-          : host,
-      );
+      // Card-to-card drags only reorder hosts within the same group; moving a
+      // host into a different group must go through the group folder drop
+      // (moveHostToGroup), otherwise dragging two grouped cards past each
+      // other silently swaps their group membership.
+      if (!canReorderVaultHosts(source.group, target.group)) return;
       const reorderedHosts = reorderVaultItems<Host>(
-        updatedHosts,
+        hostsRef.current,
         sourceHostId,
         targetHostId,
         position,
@@ -1217,7 +1207,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
       onUpdateHosts(reorderedHosts);
       setSortMode("manual");
     },
-    [managedSources, onUpdateHosts, setSortMode],
+    [onUpdateHosts, setSortMode],
   );
 
   const reorderGroup = useCallback(
@@ -1288,6 +1278,21 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
     onUpdateManagedSources,
     t,
   });
+
+  const managedFilesByGroupPath = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const source of managedSources) {
+      if (source.filePath) {
+        const files = map.get(source.groupName);
+        if (files) {
+          files.push(source.filePath);
+        } else {
+          map.set(source.groupName, [source.filePath]);
+        }
+      }
+    }
+    return map;
+  }, [managedSources]);
 
   const {
     startInlineNewGroup,
@@ -1380,6 +1385,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
     <>
       <HostTreeGroupDeleteDialog
         managedGroupPaths={managedGroupPaths}
+        managedFilesByGroupPath={managedFilesByGroupPath}
         onConfirmDelete={deleteGroupPath}
       />
       <VaultViewLayout

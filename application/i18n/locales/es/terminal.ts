@@ -3,6 +3,13 @@ import type { Messages } from '../types';
 export const esTerminalMessages: Messages = {
   'terminal.menu.saveScreen': 'Guardar pantalla actual',
   'terminal.saveScreen.failed': 'No se pudo guardar la pantalla del terminal.',
+  // Diálogo de confirmación de pegado multilínea (#3398)
+  'terminal.pasteConfirm.title': '¿Pegar varias líneas?',
+  'terminal.pasteConfirm.summary': 'Se enviarán {lines} líneas ({chars} caracteres) a la sesión.',
+  'terminal.pasteConfirm.preview': 'Vista previa (editable)',
+  'terminal.pasteConfirm.send': 'Enviar',
+  'terminal.pasteConfirm.sendLineByLine': 'Enviar línea por línea',
+  'terminal.pasteConfirm.cancel': 'Cancelar',
   'terminal.sudoHint.pressEnter': 'Presiona Enter para pegar la contraseña guardada',
   'terminal.passwordPicker.title': 'Contraseñas guardadas',
   'terminal.passwordPicker.empty': 'No hay contraseñas guardadas',
@@ -93,6 +100,7 @@ export const esTerminalMessages: Messages = {
   'terminal.statusbar.reconnect.tooltip': 'Reconectar esta sesión',
   'terminal.serverStats.cpu': 'Uso de CPU',
   'terminal.serverStats.cpuCores': 'Uso de núcleos de CPU',
+  'terminal.serverStats.gpu': 'Uso de GPU',
   'terminal.serverStats.memory': 'Uso de memoria',
   'terminal.serverStats.memoryDetails': 'Detalles de memoria',
   'terminal.serverStats.memUsed': 'Usada',
@@ -827,6 +835,10 @@ export const esTerminalMessages: Messages = {
   'serial.field.configLabelPlaceholder': 'p. ej., Arduino Uno',
   'serial.connectAndSave': 'Conectar y guardar',
   'serial.edit.title': 'Configuración del puerto serial',
+  'serial.field.username': 'Usuario',
+  'serial.field.password': 'Contraseña',
+  'serial.field.autoLoginDesc': 'Si se establecen, los mensajes Login/Password de la consola serial se responden automáticamente con estas credenciales guardadas.',
+  'serial.field.clearPassword': 'Borrar la contraseña guardada',
 
   // Keyboard Interactive Authentication (2FA/MFA)
   'keyboard.interactive.title': 'Se requiere autenticación',

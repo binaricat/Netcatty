@@ -2,7 +2,9 @@
 
 const assert = require("node:assert/strict");
 const { EventEmitter } = require("node:events");
+const { Duplex } = require("node:stream");
 const test = require("node:test");
+const { setRendererFlowPaused, clearSessionFlowState } = require("../bridges/terminalFlowAck.cjs");
 
 const {
   createWorkerAiJobStartHandler,
@@ -76,6 +78,58 @@ function nextTick() {
   return new Promise((resolve) => setImmediate(resolve));
 }
 
+test("worker job stop receives cancellation output while renderer flow is paused", async () => {
+  class PausablePty extends Duplex {
+    constructor() { super(); this.writes = []; }
+    _read() {}
+    _write(chunk, _encoding, done) {
+      const text = chunk.toString();
+      this.writes.push(text);
+      if (text === "\x03") {
+        this.push(`${this.marker}_E:130\r\nroot@test:~# `);
+      } else {
+        const input = this.writes.join("");
+        if (!this.probeReplied && input.includes("command sh -c") && input.endsWith("_Q'\n")) {
+          this.probeReplied = true;
+          this.marker = input.match(/(__NCMCP_[A-Za-z0-9_]+__)/)[1];
+          this.push(`${this.marker}_P:\n${this.marker}_Q`);
+        }
+      }
+      done();
+    }
+  }
+  const pty = new PausablePty();
+  const session = { protocol: "ssh", stream: pty, shellKind: "posix" };
+  const ipcMain = createFakeIpcMain();
+  registerWorkerAiExecHandlers(ipcMain, { sessions: new Map([["ssh-paused", session]]) });
+  const event = createFakeEvent();
+  const started = await ipcMain.handlers.get("netcatty:ai:jobStart")(event, {
+    sessionId: "ssh-paused", command: "sleep 60", chatSessionId: "chat-paused",
+  });
+  const marker = await extractMarker(pty.writes);
+  pty.push(`${marker}_S\r\nstarted\r\n`);
+  await nextTick();
+  setRendererFlowPaused(session, true);
+  assert.equal(pty.isPaused(), true);
+  try {
+    await ipcMain.handlers.get("netcatty:ai:jobStop")(event, {
+      jobId: started.jobId, chatSessionId: "chat-paused",
+    });
+    await nextTick();
+    const polled = await ipcMain.handlers.get("netcatty:ai:jobPoll")(event, {
+      jobId: started.jobId, chatSessionId: "chat-paused",
+    });
+    assert.equal(polled.status, "cancelled");
+    assert.equal(polled.completed, true);
+    assert.equal(polled.error, "Cancelled");
+    assert.equal(pty.writes.filter(data => data === "\x03").length, 1);
+  } finally {
+    clearSessionFlowState(session);
+    await nextTick();
+    pty.destroy();
+  }
+});
+
 function createShellProbeConn(stdout = `${PROBE_OUTPUT_MARKER}/usr/bin/fish\n`) {
   const conn = {
     exec(_command, callback) {
@@ -145,6 +199,7 @@ test("worker AI background jobs start, poll, stop, and block overlapping exec", 
   assert.equal(started.command, "npm test");
   assert.equal(started.status, "running");
   assert.equal(started.outputMode, "foreground-mirrored");
+  const marker = await extractMarker(pty.writes);
   assert.deepEqual(event.rendererMessages, [
     {
       channel: "netcatty:data",
@@ -154,9 +209,14 @@ test("worker AI background jobs start, poll, stop, and block overlapping exec", 
         syntheticEcho: true,
       },
     },
+    {
+      channel: "netcatty:data",
+      payload: {
+        sessionId: "ssh-1",
+        data: `${marker}_I\n`,
+      },
+    },
   ]);
-
-  const marker = await extractMarker(pty.writes);
   pty.emit("data", `${marker}_S\r\nready\r\n`);
   await nextTick();
 

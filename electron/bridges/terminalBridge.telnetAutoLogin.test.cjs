@@ -299,3 +299,50 @@ test("manual Telnet writes cancel auto-login", async () => {
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+for (const source of ["confirmed", "broadcast"]) {
+  test(`paced ${source} user paste cancels saved login without losing line spacing`, async () => {
+    const sockets = new Set();
+    const received = [];
+    let prompted = false;
+    const server = net.createServer(socket => {
+      sockets.add(socket);
+      socket.setEncoding("utf8");
+      socket.on("error", () => {});
+      socket.on("close", () => sockets.delete(socket));
+      socket.on("data", chunk => {
+        received.push(chunk);
+        if (!prompted && received.join("").includes("first\r\n")) {
+          prompted = true;
+          // The saved login is still awaiting its first challenge when the
+          // user's first paced line arrives. Never inject saved credentials.
+          socket.write("\r\nUsername: \r\nPassword: ");
+        }
+      });
+    });
+    const port = await listen(server);
+    const events = [];
+    terminalBridge.init({ sessions: new Map(), electronModule: {
+      webContents: { fromId: () => ({ send: (channel, payload) => events.push({ channel, payload }) }) },
+    } });
+    const sessionId = `telnet-paced-${source}`;
+    try {
+      await terminalBridge.startTelnetSession({ sender: { id: 1 } }, {
+        sessionId, hostname: "127.0.0.1", port, username: "saved-user", password: "saved-secret",
+      });
+      terminalBridge.writeToSession({}, {
+        sessionId, data: "first\nsecond\r", automated: false, lineDelayMs: 150,
+        ...(source === "confirmed" ? { pasteRequestId: "user-paste" } : {}),
+      });
+      await waitFor(() => received.join("").includes("first\r\n"));
+      assert.equal(received.join(""), "first\r\n", "second line must remain paced");
+      await waitFor(() => received.join("").includes("second\r\n"));
+      assert.equal(received.join(""), "first\r\nsecond\r\n");
+      assert.ok(events.some(event => event.channel === "netcatty:telnet:auto-login-cancelled"));
+    } finally {
+      terminalBridge.cleanupAllSessions();
+      for (const socket of sockets) socket.destroy();
+      await new Promise(resolve => server.close(resolve));
+    }
+  });
+}

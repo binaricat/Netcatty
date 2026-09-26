@@ -3,6 +3,13 @@ import type { Messages } from '../types';
 export const zhCNTerminalMessages: Messages = {
   'terminal.menu.saveScreen': '保存当前屏幕',
   'terminal.saveScreen.failed': '保存终端屏幕失败。',
+  // 多行粘贴确认对话框（#3398）
+  'terminal.pasteConfirm.title': '要粘贴多行文本吗？',
+  'terminal.pasteConfirm.summary': '将向会话发送 {lines} 行（{chars} 个字符）。',
+  'terminal.pasteConfirm.preview': '预览（可编辑）',
+  'terminal.pasteConfirm.send': '发送',
+  'terminal.pasteConfirm.sendLineByLine': '逐行发送',
+  'terminal.pasteConfirm.cancel': '取消',
   'terminal.sudoHint.pressEnter': '按 Enter 粘贴已保存的密码',
   'terminal.passwordPicker.title': '已保存的密码',
   'terminal.passwordPicker.empty': '没有已保存的密码',
@@ -326,6 +333,12 @@ export const zhCNTerminalMessages: Messages = {
   'settings.terminal.behavior.autoUploadClipboardImage': '粘贴时自动上传剪贴板图片',
   'settings.terminal.behavior.autoUploadClipboardImage.desc':
     '当剪贴板包含图片时，在远程会话中粘贴会通过 SFTP 将图片上传到远端当前目录的 .netcatty-paste-images/ 文件夹，并在终端输入远端路径，而不是粘贴文本。',
+  'settings.terminal.behavior.confirmMultilinePaste': '粘贴多行前先询问',
+  'settings.terminal.behavior.confirmMultilinePaste.desc':
+    '粘贴多行文本时先弹出确认对话框，显示行数和字符数、可编辑的预览，并提供发送 / 逐行发送 / 取消操作。可保护不支持括号粘贴的网络设备 CLI（Cisco IOS、华为 VRP、H3C Comware）。',
+  'settings.terminal.behavior.confirmMultilinePasteMinLines': '确认阈值（行数）',
+  'settings.terminal.behavior.confirmMultilinePasteMinLines.desc':
+    '粘贴内容达到该行数时才弹出确认对话框。',
   'settings.terminal.behavior.shiftEnterNewline': 'Shift+Enter 发送文本',
   'settings.terminal.behavior.shiftEnterNewline.desc':
     '在终端中按 Shift+Enter 时发送配置的文本，而不是普通回车。',
@@ -918,6 +931,10 @@ export const zhCNTerminalMessages: Messages = {
   'serial.field.configLabelPlaceholder': '例如 Arduino Uno',
   'serial.connectAndSave': '连接并保存',
   'serial.edit.title': '串口设置',
+  'serial.field.username': '用户名',
+  'serial.field.password': '密码',
+  'serial.field.autoLoginDesc': '设置后，串口终端出现 Login/Password 登录提示时，会自动填充此处保存的用户名和密码。',
+  'serial.field.clearPassword': '清除已保存的密码',
 
   // Keyboard Interactive Authentication (2FA/MFA)
   'keyboard.interactive.title': '需要验证',

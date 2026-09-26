@@ -348,6 +348,8 @@ export const ruCoreMessages: Messages = {
   'settings.appearance.tabBarPosition.bottom': 'Снизу',
   'settings.vault.showSftpTab': 'Показывать вкладку SFTP',
   'settings.vault.showSftpTabDesc': 'Показывать отдельный SFTP-вид в верхней панели вкладок. Если скрыто, используйте боковую панель SFTP внутри сессии.',
+  'settings.vault.sftpInSidebar': 'Держать SFTP в боковой панели',
+  'settings.vault.sftpInSidebarDesc': 'Скрывает верхнюю вкладку SFTP и показывает SFTP в боковой панели хранилища, чтобы панель оставалась видимой, пока открыт SFTP.',
   'settings.vault.showHostTreeSidebar': 'Показывать боковую панель хостов',
   'settings.vault.showHostTreeSidebarDesc': 'Показывать список хостов и кнопку в верхней панели для вкладок терминала и редактора.',
   'settings.vault.autoImportSystemKnownHosts': 'Автоимпорт системного known_hosts',
@@ -648,6 +650,12 @@ export const ruCoreMessages: Messages = {
   'settings.terminal.behavior.autoUploadClipboardImage': 'Авто-загрузка изображений буфера обмена при вставке',
   'settings.terminal.behavior.autoUploadClipboardImage.desc':
     'Когда в буфере обмена есть изображение, вставка в удалённой сессии загружает его по SFTP в каталог .netcatty-paste-images/ в текущем удалённом каталоге и вводит удалённый путь вместо вставки текста.',
+  'settings.terminal.behavior.confirmMultilinePaste': 'Спрашивать перед вставкой нескольких строк',
+  'settings.terminal.behavior.confirmMultilinePaste.desc':
+    'Перед вставкой нескольких строк показывать диалог подтверждения с количеством строк и символов, редактируемым предпросмотром и действиями «Отправить» / «Отправить построчно» / «Отмена». Защищает CLI сетевых устройств (Cisco IOS, Huawei VRP, H3C Comware), не поддерживающих bracketed paste.',
+  'settings.terminal.behavior.confirmMultilinePasteMinLines': 'Порог подтверждения (строк)',
+  'settings.terminal.behavior.confirmMultilinePasteMinLines.desc':
+    'Запрашивать подтверждение, если вставка содержит не меньше этого числа строк.',
   'settings.terminal.behavior.shiftEnterNewline': 'Текст для Shift+Enter',
   'settings.terminal.behavior.shiftEnterNewline.desc':
     'Отправлять настроенный текст вместо обычного Enter при нажатии Shift+Enter в терминале.',
@@ -750,6 +758,12 @@ export const ruCoreMessages: Messages = {
   'settings.terminal.localShell.startDir.placeholder': 'Домашний каталог',
   'settings.terminal.localShell.startDir.notFound': 'Каталог не найден',
   'settings.terminal.localShell.startDir.isFile': 'Путь указывает на файл, а не на каталог',
+  'settings.terminal.section.localShellSidePanel': 'Боковая панель локальной оболочки',
+  'settings.terminal.localShellSidePanel.autoOpen': 'Развернуть боковую панель при открытии локальной оболочки',
+  'settings.terminal.localShellSidePanel.autoOpen.desc': 'Автоматически открывать боковую панель после открытия локальной оболочки.',
+  'settings.terminal.localShellSidePanel.autoOpenPane': 'Боковая панель по умолчанию',
+  'settings.terminal.localShellSidePanel.autoOpenPane.desc': 'Выберите, какую панель открывать в первую очередь.',
+  'settings.terminal.localShellSidePanel.pane.files': 'Файлы',
   'settings.terminal.section.connection': 'Подключение',
   'settings.terminal.connection.keepaliveInterval': 'Интервал keepalive',
   'settings.terminal.connection.keepaliveInterval.desc': 'Как часто (в секундах) отправлять keepalive-пакеты на уровне SSH. Установите 0, чтобы отключить глобально. Учтите, что отдельные хосты могут переопределять это значение в своих настройках.',
@@ -998,6 +1012,7 @@ export const ruCoreMessages: Messages = {
   'vault.nav.snippets': 'Сниппеты',
   'vault.nav.notes': 'Заметки',
   'vault.nav.knownHosts': 'Известные хосты',
+  'vault.nav.sftp': 'SFTP',
   'vault.nav.logs': 'Журналы',
 
   'proxyProfiles.action.add': 'Добавить прокси',
@@ -1030,6 +1045,10 @@ export const ruCoreMessages: Messages = {
   'vault.groups.deleteDialogTitle': 'Удалить группу',
   'vault.groups.deleteDialog.desc': 'Группа будет безвозвратно удалена, а все хосты будут перемещены в корень.',
   'vault.groups.deleteDialog.managedDesc': 'Это управляемая группа SSH-конфига. При её удалении также будут удалены все хосты и снята связь с исходным файлом.',
+  'vault.groups.deleteDialog.mixedDesc': 'Эта группа содержит хосты, импортированные из связанного SSH-конфига. Все хосты под управляемой подгруппой будут удалены, включая хосты, не управляемые этим файлом. Остальные хосты будут перемещены в корень, если вы также не удалите их ниже.',
+  'vault.groups.deleteDialog.managedWarning': 'При удалении этой группы её записи также будут удалены из связанного файла конфигурации SSH. Записи, импортированные из этого файла, могут быть утеряны, это затронет и другие приложения, использующие файл. Сделайте резервную копию файла перед продолжением.',
+  'vault.groups.deleteDialog.sourcesChanged': 'Управляемые файлы, затрагиваемые этим удалением, изменились. Проверьте файлы и подтвердите удаление снова.',
+  'vault.groups.deleteDialog.managedFile': 'Связанный файл: {file}',
   'vault.groups.deleteDialog.deleteHosts': 'Также удалить все хосты в этой группе',
   'vault.groups.deleteDialog.bulkTitle': 'Удалить выбранные группы',
   'vault.groups.deleteDialog.bulkDesc': 'Выбранные группы будут безвозвратно удалены, а их хосты перемещены в корень.',

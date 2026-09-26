@@ -50,7 +50,9 @@ export const scheduleStartupCommand = (
   term: XTerm,
   id: string,
   onSettled?: () => void,
+  isCurrentAttempt?: () => boolean,
 ): (() => void) | undefined => {
+  if (isCurrentAttempt && !isCurrentAttempt()) return undefined;
   const commandToRun = resolveStartupCommand(ctx, { consumeSuppressHostStartupCommand: true });
   if (!commandToRun || ctx.hasRunStartupCommandRef.current) return undefined;
 
@@ -62,7 +64,8 @@ export const scheduleStartupCommand = (
   let cancelled = false;
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
   const sessionIsCurrent = () =>
-    !!ctx.sessionRef.current && ctx.sessionRef.current === scheduledSessionId;
+    !!ctx.sessionRef.current && ctx.sessionRef.current === scheduledSessionId
+    && (!isCurrentAttempt || isCurrentAttempt());
 
   // noAutoRun (snippet "type but don't execute"): type the command as-is, no
   // Enter and no line-splitting — unchanged behavior.

@@ -3,6 +3,13 @@ import type { Messages } from '../types';
 export const enTerminalMessages: Messages = {
   'terminal.menu.saveScreen': 'Save current screen',
   'terminal.saveScreen.failed': 'Failed to save terminal screen.',
+  // Multi-line paste confirmation dialog (#3398)
+  'terminal.pasteConfirm.title': 'Paste multiple lines?',
+  'terminal.pasteConfirm.summary': '{lines} lines ({chars} characters) will be sent to the session.',
+  'terminal.pasteConfirm.preview': 'Preview (editable)',
+  'terminal.pasteConfirm.send': 'Send',
+  'terminal.pasteConfirm.sendLineByLine': 'Send line by line',
+  'terminal.pasteConfirm.cancel': 'Cancel',
   'terminal.sudoHint.pressEnter': 'Press Enter to paste saved password',
   'terminal.passwordPicker.title': 'Saved passwords',
   'terminal.passwordPicker.empty': 'No saved passwords',
@@ -93,6 +100,7 @@ export const enTerminalMessages: Messages = {
   'terminal.statusbar.reconnect.tooltip': 'Reconnect this session',
   'terminal.serverStats.cpu': 'CPU Usage',
   'terminal.serverStats.cpuCores': 'CPU Core Usage',
+  'terminal.serverStats.gpu': 'GPU Usage',
   'terminal.serverStats.memory': 'Memory Usage',
   'terminal.serverStats.memoryDetails': 'Memory Details',
   'terminal.serverStats.memUsed': 'Used',
@@ -827,6 +835,10 @@ export const enTerminalMessages: Messages = {
   'serial.field.configLabelPlaceholder': 'e.g. Arduino Uno',
   'serial.connectAndSave': 'Connect & Save',
   'serial.edit.title': 'Serial Port Settings',
+  'serial.field.username': 'Username',
+  'serial.field.password': 'Password',
+  'serial.field.autoLoginDesc': 'When set, Login/Password prompts on the serial console are answered automatically with these saved credentials.',
+  'serial.field.clearPassword': 'Clear saved password',
 
   // Keyboard Interactive Authentication (2FA/MFA)
   'keyboard.interactive.title': 'Authentication Required',

@@ -1802,6 +1802,34 @@ test("OpenWrt bounded wrapper continuations stay hidden across fragmented echoes
   }
 });
 
+test("primed suppression hides BusyBox ash echo wrapped mid-marker (#3384)", () => {
+  const preload = loadPreloadWithFakeElectron();
+  try {
+    const received = [];
+    const sessionId = 'ash-wrap';
+    const marker = '__NCMCP_mttikd5b_ccbc892e865a115a80c88afdc77b96a6__';
+    preload.api.onSessionData(sessionId, chunk => received.push(chunk));
+    // The exec bridge primes display suppression over the data channel before
+    // the wrapper is typed, mirroring onEchoSuppressionPrime in ptyExec.cjs.
+    preload.handlers.get('netcatty:data')({}, { sessionId, data: `${marker}_I\n` });
+    // BusyBox ash's line editor breaks the echoed first wrapper line at the
+    // terminal width, so the second PTY line carries no complete __NCMCP_
+    // marker and the per-line echo filter alone cannot drop it.
+    const firstLine = ` ${marker}=0; printf '\\n%s\\n' '${marker}_I'`;
+    const secondLine = ` : '${marker}'; ${marker}_cmd='echo visible-output'; \\`;
+    const echo = `${firstLine.slice(0, 55)}\r\n${firstLine.slice(55)}\r\n`
+      + `${secondLine.slice(0, 70)}\r\n${secondLine.slice(70)}\r\n`
+      + `> : '${marker}'; printf '%s\\n' '${marker}_S'\r\n`;
+    const data = `${echo}\n${marker}_S\r\nvisible-output\r\n${marker}_E:0\r\n`;
+    for (let offset = 0; offset < data.length; offset += 7) {
+      preload.handlers.get('netcatty:data')({}, { sessionId, data: data.slice(offset, offset + 7) });
+    }
+    assert.equal(received.join(''), 'visible-output\r\n');
+  } finally {
+    preload.cleanup();
+  }
+});
+
 
 test("ordinary text resembling an OpenWrt continuation is released", async () => {
   const preload = loadPreloadWithFakeElectron();
@@ -1872,4 +1900,62 @@ test("aborted input releases custom prompts and ignores a late input marker", ()
     send("__NCMCP_input___I\nlate prompt\n");
     assert.equal(received.join(""), "normal output\nlate prompt\n");
   } finally { preload.cleanup(); }
+});
+
+test('real OpenWrt ash hides wrapped input and preserves output with priming (#3384)', {
+  skip: !process.env.NETCATTY_OPENWRT_SSH_PORT,
+  timeout: 60000,
+}, async () => {
+  const { Client } = require('ssh2');
+  const { execViaPty } = require('./bridges/ai/ptyExec.cjs');
+  const client = new Client();
+  await new Promise((resolve, reject) => client.once('ready', resolve).once('error', reject).connect({
+    host: '127.0.0.1', port: Number(process.env.NETCATTY_OPENWRT_SSH_PORT), username: 'root', password: '',
+  }));
+  try {
+    for (const cols of [80, 120]) {
+      for (const probeLiveShell of [false, true]) {
+        const preload = loadPreloadWithFakeElectron();
+        const stream = await new Promise((resolve, reject) => client.shell({ term: 'xterm', cols, rows: 30 },
+          (error, value) => error ? reject(error) : resolve(value)));
+        try {
+          await new Promise((resolve, reject) => {
+            let output = '';
+            const timer = setTimeout(() => reject(new Error('OpenWrt prompt missing')), 5000);
+            const onData = data => {
+              output += data;
+              if (output.includes(':~# ')) {
+                clearTimeout(timer);
+                stream.removeListener('data', onData);
+                resolve();
+              }
+            };
+            stream.on('data', onData);
+          });
+          const received = [];
+          const sessionId = `openwrt-${cols}-${probeLiveShell}`;
+          preload.api.onSessionData(sessionId, chunk => received.push(chunk));
+          const deliver = data => preload.handlers.get('netcatty:data')({}, { sessionId, data: String(data) });
+          stream.on('data', deliver);
+          const result = await execViaPty(stream, "printf 'visible-output\\n'", {
+            shellKind: 'posix', probeLiveShell, typedInput: true, timeoutMs: 5000,
+            onEchoSuppressionPrime: marker => deliver(`${marker}_I\n`),
+            onProbeAborted: marker => deliver(`${marker}_R\n`),
+          });
+          await sleep(150);
+          assert.equal(result.ok, true, JSON.stringify(result));
+          assert.equal(result.stdout.trim(), 'visible-output');
+          const display = received.join('');
+          assert.match(display, /visible-output/);
+          assert.doesNotMatch(display, /__nc_|__NCMCP_|printf|eval|unset|_cmd=|_d=/,
+            JSON.stringify({ cols, probeLiveShell, display }));
+        } finally {
+          stream.close();
+          preload.cleanup();
+        }
+      }
+    }
+  } finally {
+    client.end();
+  }
 });

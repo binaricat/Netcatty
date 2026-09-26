@@ -108,14 +108,14 @@ test("marks manual session log button active while logging", () => {
   );
 });
 
-test("hides SFTP for local terminal sessions", () => {
+test("shows SFTP for local terminal sessions", () => {
   const markup = renderToolbar({
     ...sshHost,
     id: "local-1",
     protocol: "local",
   });
 
-  assert.equal(markup.includes('aria-label="Open SFTP"'), false);
+  assert.equal(markup.includes('aria-label="Open SFTP"'), true);
 });
 
 test("hides SSH history for plugin terminal sessions", () => {
@@ -192,3 +192,9 @@ test("compact scripts popover hosts bulk-delete confirm outside the popover", ()
     false,
   );
 });
+
+for (const host of [serialHost, pluginHost]) {
+  test(`hides SFTP for ${host.protocol} sessions`, () => {
+    assert.equal(renderToolbar(host).includes('aria-label="Open SFTP"'), false);
+  });
+}

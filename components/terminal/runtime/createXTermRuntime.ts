@@ -1,4 +1,6 @@
+import { clearTerminalBroadcastUserInput, captureTerminalBroadcastInput, isTerminalBroadcastInputCurrent, markTerminalBroadcastUserInput, type TerminalPacedBroadcast } from "./terminalPacedBroadcast";
 import { stringCellWidth } from "../autocomplete/terminalStringCellWidth";
+import type { TerminalBroadcastInputOptions } from "../terminalHelpers";
 import { FitAddon } from "@xterm/addon-fit";
 import { ImageAddon } from "@xterm/addon-image";
 import { SearchAddon } from "@xterm/addon-search";
@@ -103,6 +105,7 @@ import {
   resolveMiddleClickBehavior,
 } from "./middleClickBehavior";
 import { handleSerialLineModeInput } from "./serialLineInput";
+import { isTerminalReportSequence } from "./terminalReportSequence";
 import {
   doesKittyEncodingPreserveShiftEnter,
   getShiftEnterSubmittedInput,
@@ -119,6 +122,7 @@ import {
   shouldFlushDeferredImeTextInputOnKeyUp,
   shouldFlushStaleDeferredImeTextInput,
 } from "./terminalImeTextInput";
+import { keepImeCommittedTextThroughModifierKeyDowns } from "./imeModifierKeyDownSeenGuard";
 import { formatSerialLocalEcho } from "./serialLocalEcho";
 import { getLastChar, removeLastChar, isPrintableInput } from "../../../domain/serialCharMetrics";
 import { mapTerminalBackspaceInput } from "./terminalBackspaceInput";
@@ -161,7 +165,10 @@ import {
   type TerminalOutputHistoryPreview,
 } from "./terminalOutputHistory";
 import { shouldPassThroughCopyShortcut } from "./terminalCopyShortcut";
-import { shouldUseUrgentTerminalInterrupt } from "./terminalInterruptShortcut";
+import {
+  isMacCommandPeriodInterruptChord,
+  shouldUseUrgentTerminalInterrupt,
+} from "./terminalInterruptShortcut";
 import {
   createTerminalInterruptTrace,
   logTerminalInterruptTrace,
@@ -177,15 +184,18 @@ import {
 } from "./terminalOutputPipeline";
 import {
   markExpectedTerminalCursorPositionReport,
-  pasteTextIntoTerminal,
+  registerTerminalLinePasteHandler,
   shouldBroadcastTerminalUserInput,
+  shouldOverrideTerminalUserPasteSensitivity,
   shouldSuppressTerminalInputScrollForUserPaste,
 } from "./terminalUserPaste";
+import { pasteTextWithMultilineConfirm } from "../terminalClipboardPaste";
+import { requestMultilinePasteConfirm } from "../../../application/state/multilinePasteConfirmStore";
 import {
   consumeOsc133CommandCompletion,
   type PromptLineBreakState,
 } from "./promptLineBreak";
-import { recordTerminalCommandExecution } from "./terminalCommandExecution";
+import { isSensitiveTerminalCommandInput, recordTerminalCommandExecution } from "./terminalCommandExecution";
 import {
   getSingleBracketedPasteLine,
   getSinglePastedCommand,
@@ -208,8 +218,9 @@ import {
 type TerminalBackendApi = {
   openExternalAvailable: () => boolean;
   openExternal: (url: string) => Promise<void>;
-  writeToSession: (sessionId: string, data: string) => void;
-  interruptSession?: (sessionId: string, trace?: NetcattyTerminalInterruptTrace) => void;
+  writeToSession: NetcattyBridge["writeToSession"];
+  notifyUserInput?: (sessionId: string) => void;
+  interruptSession?: NetcattyBridge["interruptSession"];
   signalPluginConnection?: (
     sessionId: string,
     signal?: "interrupt" | "terminate" | "kill" | "eof" | "break",
@@ -243,6 +254,7 @@ export type XTermRuntime = {
   dispose: () => void;
   /** Track the pending final line of a serial snippet left for editing. */
   recordSerialSnippetInput: (data: string) => void;
+  invalidatePendingPasteDraft: () => void;
   /** Current working directory detected via OSC 7 */
   currentCwd: string | undefined;
   keywordHighlighter: KeywordHighlighter;
@@ -314,7 +326,7 @@ export type CreateXTermRuntimeContext = {
     ((
       data: string,
       sourceSessionId: string,
-      options?: { kittyKeyboardInput?: KittyKeyboardBroadcastInput },
+      options?: TerminalBroadcastInputOptions,
     ) => void) | undefined
   >;
 
@@ -356,6 +368,7 @@ export type CreateXTermRuntimeContext = {
     recordBackspace: () => void;
     recordClearLine: () => void;
     recordEnter: (options?: { sensitive?: boolean }) => Promise<void>;
+    captureSubmittedLineRecorder?: () => ((line: string, options?: { sensitive?: boolean; includePendingInput?: boolean; consumePendingInput?: boolean }) => Promise<void>) | undefined;
   } | undefined>;
   passwordPromptActiveRef?: RefObject<boolean>;
   allowHostStyleGreaterThanPrompt?: boolean;
@@ -619,6 +632,10 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     },
   });
   installSearchDecorationTracker(term);
+  // Sogou on Windows commits pending preedit text when Shift toggles
+  // Chinese/English mode; a pure modifier keydown must not arm xterm's
+  // insertText dedupe guard or the committed text is dropped (#3441).
+  keepImeCommittedTextThroughModifierKeyDowns(term);
 
   type MaybeRenderer = {
     constructor?: { name?: string };
@@ -926,13 +943,16 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
 
   const appLevelActions = getAppLevelActions();
   const terminalActions = getTerminalPassthroughActions();
-  const broadcastUserPasteData = (data: string) => {
+  const broadcastUserPasteData = (
+    data: string,
+    options?: TerminalBroadcastInputOptions,
+  ) => {
     if (
       ctx.passwordPromptActiveRef?.current !== true
       && ctx.isBroadcastEnabledRef.current
       && ctx.onBroadcastInputRef.current
     ) {
-      ctx.onBroadcastInputRef.current(data, ctx.sessionId);
+      ctx.onBroadcastInputRef.current(data, ctx.sessionId, options);
       return true;
     }
     return false;
@@ -1156,6 +1176,11 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   // nonempty (hibernation wake: the pre-hibernation cursor may have been
   // moved away from the tail, so we conservatively assume it is not).
   let lastInputWasPrintable = !ctx.commandBufferRef?.current;
+  let commandBufferRevision = 0;
+  const invalidatePendingPasteDraft = () => {
+    commandBufferRevision += 1;
+    markTerminalBroadcastUserInput(ctx.sessionId);
+  };
 
   const restoreSerialTailForEmptyInput = (data: string) => {
     // Apply the same rule to typed text, pasted text, and editable snippets.
@@ -1172,6 +1197,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       : data;
     const lastLineBreak = Math.max(text.lastIndexOf("\r"), text.lastIndexOf("\n"));
     if (lastLineBreak >= 0) {
+      commandBufferRevision += 1;
       ctx.commandBufferRef.current = "";
       lastInputWasPrintable = true;
     }
@@ -1198,6 +1224,10 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       logicalData?: string | null;
       /** Skip string broadcast when peers will re-resolve from a key chord. */
       skipBroadcast?: boolean;
+      /** Confirmed paste: preserve classification and backend pacing. */
+      sensitive?: boolean;
+      lineDelayMs?: number;
+      pasteRequestId?: string;
       /**
        * Send plain text as one write per character. Strict bastion prompts
        * (QAX) treat one channel write as a keystroke and drop multi-character
@@ -1230,7 +1260,21 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     const inputSource = options?.source ?? "terminal";
     const id = ctx.sessionRef.current;
     const dataToWrite = data;
-    const sensitive = ctx.passwordPromptActiveRef?.current === true;
+    // A programmatic paste can carry a sensitivity snapshot taken before a
+    // confirm-dialog await (terminalUserPaste.ts): remote output or a
+    // reconnect may have cleared passwordPromptActiveRef while the dialog was
+    // open, so the live ref alone would downgrade the secret to nonsensitive.
+    // The override is consumed only for the flagged paste data.
+    const sensitive = ctx.passwordPromptActiveRef?.current === true
+      || options?.sensitive === true
+      || shouldOverrideTerminalUserPasteSensitivity(term, logicalData ?? data);
+    if (!options?.lineDelayMs && logicalData !== null
+      && !isPrintableInput(logicalData) && !isTerminalReportSequence(logicalData)) {
+      commandBufferRevision += 1;
+    }
+    if (!options?.lineDelayMs && logicalData !== null && !isTerminalReportSequence(logicalData)) {
+      markTerminalBroadcastUserInput(ctx.sessionId);
+    }
     let handledSubmittedInput = false;
     const submittedInput: { text: string; lineEnding: "\r\n" | "\r" | "\n" } | null =
       logicalData === null
@@ -1258,7 +1302,12 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       hasBroadcastInputHandler: !!onBroadcastInput,
     });
     const willBroadcastInput = canBroadcastInput && options?.skipBroadcast !== true;
-    if (ctx.statusRef.current === "connected" && submittedInput) {
+    if (ctx.statusRef.current === "connected" && options?.lineDelayMs && logicalData) {
+      // Keep the draft until the backend confirms a write. A rejected or
+      // canceled batch must not discard input already present at the prompt.
+      if (ctx.passwordPromptActiveRef) ctx.passwordPromptActiveRef.current = false;
+      handledSubmittedInput = true;
+    } else if (ctx.statusRef.current === "connected" && submittedInput) {
       if (submittedInput.text) {
         ctx.commandBufferRef.current += submittedInput.text;
         ctx.scriptRecorderRef?.current?.recordInput(submittedInput.text);
@@ -1329,16 +1378,50 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         ctx.serialLineMode &&
         ctx.serialLineBufferRef
       ) {
+        // Local line editing sends no transport write, so cancel queued paste
+        // work explicitly. Only actual protocol replies are exempt; keyboard
+        // escape sequences also edit the local buffer.
+        if (!options?.lineDelayMs && !isTerminalReportSequence(dataToWrite)
+          && (dataToWrite === "\b" || dataToWrite === "\x15"
+            || dataToWrite.charCodeAt(0) >= 32 || dataToWrite.length > 1)) {
+          ctx.terminalBackend.interruptSession?.(id, undefined, { cancelPendingWritesOnly: true });
+        }
+        // Line mode never reaches writeToSession until Enter, so buffered
+        // keystrokes are invisible to the main-process auto-login detector.
+        // The first buffered keystroke means the user is taking control:
+        // cancel the detector exactly like character-mode input would.
+        // Submit (\r/\n) and Ctrl+C already write to the session, which
+        // cancels it on that path. Automatic terminal-report replies (DA1,
+        // CPR, ...) also surface through onData, but they originate from the
+        // device negotiating with xterm, not from the user — the main process
+        // excludes them from its write-path cancellation via
+        // isTerminalReportSequence, so apply the same classification here.
+        const isSessionWrite = dataToWrite === "\r" || dataToWrite === "\n" || dataToWrite === "\x03";
+        if (!isSessionWrite && !isTerminalReportSequence(dataToWrite)) {
+          ctx.terminalBackend.notifyUserInput?.(id);
+        }
+        const pacedWrites: string[] = [];
         handleSerialLineModeInput(dataToWrite, {
           bufferRef: ctx.serialLineBufferRef,
           localEcho: ctx.serialLocalEcho,
           writeToSession: (nextData) => {
             ctx.onOutputTriggerUserInputRef?.current?.(nextData);
-            ctx.terminalBackend.writeToSession(id, nextData, { sensitive });
+            if (options?.lineDelayMs) pacedWrites.push(nextData);
+            else ctx.terminalBackend.writeToSession(id, nextData, { sensitive });
           },
           writeToTerminal: writeLocalTerminalData,
           term,
         });
+        // Submit one batch so the backend spaces the lines apart. Separate
+        // calls would each start at delay zero and lose the paste pacing.
+        if (pacedWrites.length > 0) {
+          ctx.terminalBackend.writeToSession(id, pacedWrites.join(""), {
+            automated: false,
+            sensitive,
+            lineDelayMs: options?.lineDelayMs,
+            pasteRequestId: options?.pasteRequestId,
+          });
+        }
       } else {
         // Character mode sends input immediately. Byte-oriented devices opt in
         // to expansion in the backend, using the session's actual wire encoder.
@@ -1368,7 +1451,15 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
 
         ctx.onOutputTriggerUserInputRef?.current?.(outData);
         for (const chunk of getTextInputWireChunks(outData, options?.perCharacterWrites === true)) {
-          ctx.terminalBackend.writeToSession(id, chunk, { sensitive, serialEraseChar });
+          ctx.terminalBackend.writeToSession(id, chunk, {
+            sensitive,
+            serialEraseChar,
+            ...(options?.lineDelayMs ? {
+              automated: false,
+              lineDelayMs: options.lineDelayMs,
+              pasteRequestId: options.pasteRequestId,
+            } : {}),
+          });
         }
 
         // Local echo for serial connections only when explicitly enabled
@@ -1486,6 +1577,14 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   const kittyForwardedKeys = new Map<string, KittyKeyboardForwardedPress>();
   const broadcastForwardedKeys = new Map<string, KittyKeyboardForwardedPress>();
   const win32BroadcastForwardedKeys = new Map<string, KittyKeyboardForwardedPress>();
+  // Command+Period interrupt presses are recorded under their normalized Ctrl+C identity
+  // (KeyC) so broadcast legacy pairing stays matched (#3408), but under a
+  // dedicated map key so they cannot clobber an outstanding physical KeyC
+  // press; map the physical chord identity (Period) to it so the later keyup
+  // can pair the release.
+  const kittyNormalizedPressAliases = new Map<string, string>();
+  const kittyNormalizedPressIdentity = (identity: string): string =>
+    `${identity}\u0000mac-period-interrupt`;
   const broadcastEncodedKeys = new Set<string>();
   const broadcastLegacySuppressedKeys = new Set<string>();
   const kittyKeyIdentity = (event: KeyboardEvent): string => event.code || event.key;
@@ -1671,13 +1770,20 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
    */
   const releaseForwardedKittyPress = (
     event: Pick<KittyKeyboardEvent, "code" | "key"> & KittyKeyboardEvent,
+    identityOverride?: string,
   ): boolean => {
-    const identity = event.code || event.key;
+    // The Command+Period interrupt press is keyed independently from its normalized
+    // Ctrl+C event identity, so its release must delete the entry it was
+    // stored under rather than the physical key's (#3408).
+    const identity = identityOverride ?? (event.code || event.key);
     const forwardedPress = broadcastForwardedKeys.get(identity);
     if (forwardedPress) {
       broadcastForwardedKeys.delete(identity);
       broadcastKittyInput(
-        { kind: "key", event },
+        // Carry the identity the press was recorded under so peers pair this
+        // release with that press instead of the event's physical code - the
+        // Command+Period interrupt press lives under a dedicated normalized key (#3409).
+        { kind: "key", event, keyIdentity: identity },
         true,
         forwardedPress.targetSessionIds,
       );
@@ -1692,6 +1798,30 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       return true;
     }
     return false;
+  };
+  /**
+   * Resolve a forwarded press whose recorded identity is not the physical
+   * key identity: the Command+Period interrupt press was recorded as the normalized
+   * Ctrl+C event (KeyC), but the browser delivers the physical release as
+   * Period. Pair that release from the stored event so Kitty consumers do
+   * not see Ctrl+C held until focus loss (#3408).
+   */
+  const resolveKittyNormalizedPressRelease = (
+    physicalEvent: KeyboardEvent,
+  ): { event: KittyKeyboardEvent; identity: string } | null => {
+    const physicalIdentity = kittyKeyIdentity(physicalEvent);
+    const normalizedIdentity = kittyNormalizedPressAliases.get(physicalIdentity);
+    if (!normalizedIdentity) return null;
+    const forwardedPress =
+      broadcastForwardedKeys.get(normalizedIdentity)
+      ?? kittyForwardedKeys.get(normalizedIdentity);
+    // Consume the alias on every path once it has been paired (or
+    // invalidated): a later keyup for the same physical key while another
+    // KeyC press is outstanding must not be rewritten as the normalized
+    // release (#3408).
+    kittyNormalizedPressAliases.delete(physicalIdentity);
+    if (!forwardedPress) return null;
+    return { event: forwardedPress.event, identity: normalizedIdentity };
   };
 
   term.attachCustomKeyEventHandler((e: KeyboardEvent) => {
@@ -1770,6 +1900,15 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
           releaseForwardedKittyPress({ ...deferredKittyEvent, type: "keyup" });
         }
       }
+      // Release the normalized interrupt separately: the same physical key
+      // may already have a forwarded press from before Command was held.
+      // Keep the saved layout-independent event rather than translating KeyC
+      // through the current keyboard layout again.
+      const aliasedRelease = resolveKittyNormalizedPressRelease(e);
+      const releasedInterrupt = aliasedRelease !== null && releaseForwardedKittyPress(
+        { ...aliasedRelease.event, type: "keyup" },
+        aliasedRelease.identity,
+      );
       const identity = kittyKeyIdentity(releaseEvent);
       const hasForwardedWin32KeyDown = win32InputModeForwardedKeys.delete(identity);
       if (broadcastLegacyDataPending === identity) clearBroadcastLegacyDataPending();
@@ -1792,7 +1931,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         };
         return true;
       }
-      if (releaseForwardedKittyPress(toKittyKeyboardEvent(releaseEvent))) {
+      if (releaseForwardedKittyPress(toKittyKeyboardEvent(releaseEvent)) || releasedInterrupt) {
         e.preventDefault();
         e.stopPropagation();
         return false;
@@ -1981,10 +2120,27 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       kittyKeyboardProtocolEnabled
         ? encodeKittyKeyEvent(kittyKeyboardMode, toKittyKeyboardEvent(e))
         : null;
-    if (
+    const urgentInterrupt =
       (!kittySequenceForKeyDown || kittySequenceForKeyDown === "\x03") &&
-      shouldUseUrgentTerminalInterrupt(e, { hasSelection: hasCopyableSelection })
-    ) {
+      shouldUseUrgentTerminalInterrupt(e, { hasSelection: hasCopyableSelection });
+    const currentScheme = ctx.hotkeySchemeRef.current;
+    // Use shared utility for platform detection when hotkey scheme is disabled
+    const isMac = currentScheme === "mac" || (currentScheme === "disabled" && isMacPlatform());
+    // macOS Terminal convention: Command+Period interrupts the running command like
+    // Ctrl+C (#3408), including while text is selected. A
+    // user-assigned snippet or configured shortcut on this chord keeps
+    // precedence: the editors accept Command+Period (their conflict check only covers
+    // configured bindings), so the hard-coded interrupt must not silently
+    // swallow a chord the user actually assigned (#3409).
+    const macCommandPeriodInterrupt =
+      isMacPlatform()
+      && isMacCommandPeriodInterruptChord(e)
+      && !(ctx.snippetsRef?.current ?? []).some((snippet) => (
+        snippet.shortkey && matchesKeyBinding(e, snippet.shortkey, isMac)
+      ))
+      && !(currentScheme !== "disabled"
+        && checkAppShortcut(e, ctx.keyBindingsRef.current, isMac) !== null);
+    if (urgentInterrupt || macCommandPeriodInterrupt) {
       const id = ctx.sessionRef.current;
       if (id && ctx.statusRef.current === "connected") {
         const rendererKeyAt = Date.now();
@@ -2019,10 +2175,13 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
           onAutocompleteInput: ctx.onAutocompleteInput,
         });
         lastInputWasPrintable = true;
+        invalidatePendingPasteDraft();
+        ctx.scriptRecorderRef?.current?.recordClearLine();
         if (ctx.passwordPromptActiveRef) {
           ctx.passwordPromptActiveRef.current = false;
         }
         if (isPluginHostProtocol(ctx.host.protocol) && ctx.terminalBackend.signalPluginConnection) {
+          ctx.terminalBackend.interruptSession?.(id, interruptTrace, { cancelPendingWritesOnly: true });
           void ctx.terminalBackend.signalPluginConnection(id, "interrupt").catch(() => {
             if (ctx.terminalBackend.interruptSession) {
               ctx.terminalBackend.interruptSession(id, interruptTrace);
@@ -2035,8 +2194,53 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         } else {
           ctx.terminalBackend.writeToSession(id, "\x03");
         }
-        const kittyEvent = toKittyKeyboardEvent(e);
-        const identity = kittyKeyIdentity(e);
+        // Report the interrupt to Kitty as Ctrl+C even when it came from the
+        // Command+Period chord: the broadcast legacy \x03 is keyed by this identity, so
+        // forwarding Super+Period would leave peers with an unmatched
+        // Super+Period press and suppress the interrupt instead (#3408).
+        const interruptEventForKitty: KeyboardEvent = macCommandPeriodInterrupt
+          ? {
+              type: e.type,
+              key: "c",
+              code: "KeyC",
+              location: e.location,
+              repeat: e.repeat,
+              isComposing: e.isComposing,
+              keyCode: 67,
+              shiftKey: false,
+              altKey: false,
+              ctrlKey: true,
+              metaKey: false,
+              getModifierState: (key: string) => key === "Control" && e.getModifierState("Control"),
+            } as unknown as KeyboardEvent
+          : e;
+        const kittyEvent = toKittyKeyboardEvent(interruptEventForKitty);
+        if (macCommandPeriodInterrupt) {
+          // The synthesized event's code ("KeyC") is the physical QWERTY
+          // position of the chord key, so toKittyKeyboardEvent()'s layout
+          // lookup returns that position's character on non-QWERTY layouts
+          // (e.g. "n" under Dvorak) and getUnicodeKeyCode() prioritizes it,
+          // encoding the interrupt as the wrong key instead of Ctrl+C's 99
+          // - a broadcast peer would then suppress the legacy \x03 fallback
+          // and never be interrupted. Force the layout-independent identity.
+          kittyEvent.unshiftedKey = "c";
+        }
+        const identity = kittyKeyIdentity(interruptEventForKitty);
+        // The normalized press shares the Ctrl+C event identity (KeyC) with a
+        // possibly outstanding physical KeyC press; record it under a dedicated
+        // map key even when the layout maps period to physical KeyC. Its keyup
+        // releases (and deletes) only the
+        // interrupt press instead of the held physical key's entry (#3409).
+        const pressIdentity =
+          macCommandPeriodInterrupt
+            ? kittyNormalizedPressIdentity(identity)
+            : identity;
+        if (pressIdentity !== identity) {
+          // The physical release arrives under its original layout key while
+          // the press was recorded as the normalized Ctrl+C event; pair them
+          // at keyup so the interrupt release is not lost (#3408).
+          kittyNormalizedPressAliases.set(kittyKeyIdentity(e), pressIdentity);
+        }
         if (
           !term.modes.win32InputMode &&
           kittyKeyboardProtocolEnabled &&
@@ -2044,23 +2248,31 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         ) {
           upsertKittyKeyboardForwardedPress(
             kittyForwardedKeys,
-            identity,
+            pressIdentity,
             kittyEvent,
             [],
           );
         }
-        const forwarded = broadcastKittyInput({ kind: "key", event: kittyEvent });
+        // The dedicated press identity must cross the broadcast boundary:
+        // peers key their pairing state from it, so broadcasting only the
+        // normalized event would collapse the interrupt with an outstanding
+        // physical KeyC press on every peer (#3409).
+        const forwarded = broadcastKittyInput({
+          kind: "key",
+          event: kittyEvent,
+          keyIdentity: pressIdentity,
+        });
         if (forwarded) {
           upsertKittyKeyboardForwardedPress(
             broadcastForwardedKeys,
-            identity,
+            pressIdentity,
             kittyEvent,
             forwarded.targetSessionIds,
           );
           broadcastKittyInput({
             kind: "legacy",
             data: "\x03",
-            keyIdentity: identity,
+            keyIdentity: pressIdentity,
             urgentInterrupt: true,
           });
         }
@@ -2068,10 +2280,6 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         return false;
       }
     }
-
-    const currentScheme = ctx.hotkeySchemeRef.current;
-    // Use shared utility for platform detection when hotkey scheme is disabled
-    const isMac = currentScheme === "mac" || (currentScheme === "disabled" && isMacPlatform());
 
     // Check snippet shortcuts first (even if hotkeys are disabled)
     const snippets = ctx.snippetsRef?.current;
@@ -2146,9 +2354,24 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
               const id = ctx.sessionRef.current;
               if (selection && id) {
                 hideHistoryPreview();
-                pasteTextIntoTerminal(term, selection, {
-                  scrollOnPaste: shouldScrollOnTerminalPaste(ctx.terminalSettingsRef.current),
+                // Route through the multi-line paste confirmation gate
+                // (#3398) so a selected multi-line region cannot be sent to
+                // the session (and broadcast peers) without review, just
+                // like the clipboard paste path.
+                void pasteTextWithMultilineConfirm(selection, {
+                  confirmMultilinePaste: {
+                    enabled: ctx.terminalSettingsRef.current?.confirmBeforeMultilinePaste === true,
+                    minLines: ctx.terminalSettingsRef.current?.multilinePasteConfirmMinLines,
+                    requestConfirm: requestMultilinePasteConfirm,
+                  },
+                  getCurrentSessionId: () => ctx.sessionRef.current,
+                  isSensitiveInput: () => ctx.passwordPromptActiveRef?.current === true,
                   onPasteData: broadcastUserPasteData,
+                  scrollOnPaste: shouldScrollOnTerminalPaste(ctx.terminalSettingsRef.current),
+                  scrollToBottomAfterProgrammaticInput: scrollToBottomAfterInput,
+                  sessionId: id,
+                  terminalBackend: ctx.terminalBackend,
+                  term,
                 });
               }
               break;
@@ -2479,6 +2702,16 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     win32InputModePendingEvent = null;
     win32InputModeForwardedKeys.clear();
     kittyForwardedKeys.clear();
+    // broadcastForwardedKeys is retained so pending peer releases still pair
+    // after a reconnect; keep the aliases whose normalized press is still
+    // owed a broadcast release, otherwise the physical keyup can no longer
+    // find the dedicated identity and peers keep the key logically pressed
+    // until blur (#3409).
+    for (const [physicalIdentity, normalizedIdentity] of kittyNormalizedPressAliases) {
+      if (!broadcastForwardedKeys.has(normalizedIdentity)) {
+        kittyNormalizedPressAliases.delete(physicalIdentity);
+      }
+    }
     clearKittyKeyboardBroadcastPairingState(
       broadcastEncodedKeys,
       broadcastLegacySuppressedKeys,
@@ -2553,6 +2786,93 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   // can synchronously emit standalone emoji, speech, or mobile insertText data.
   ctx.container.addEventListener("input", markKittyTextInput, true);
   textarea?.addEventListener("blur", clearKittyTransientInputState);
+
+  const pendingLinePastes = new Map<string, {
+    sessionId: string;
+    commands: string[];
+    firstPastedLine: string;
+    pendingInput: string;
+    serialPendingInput?: string;
+    sourceInput: ReturnType<typeof captureTerminalBroadcastInput>;
+    broadcast?: TerminalPacedBroadcast;
+    inputRevision: number;
+    sensitive: boolean;
+    recorded: Set<number>;
+    recordLine?: (line: string, options?: { sensitive?: boolean; includePendingInput?: boolean; consumePendingInput?: boolean }) => Promise<void>;
+  }>();
+  const disposePasteWriteReceipts = netcattyBridge.get()?.onTerminalPasteWrite?.((receipt) => {
+    const pending = pendingLinePastes.get(receipt.requestId);
+    if (!pending || pending.sessionId !== receipt.sessionId) return;
+    if (ctx.sessionRef.current !== pending.sessionId) {
+      pendingLinePastes.delete(receipt.requestId);
+      return;
+    }
+    const index = receipt.index;
+    if (index !== undefined && Number.isInteger(index) && index >= 0
+      && index < pending.commands.length && !pending.recorded.has(index)) {
+      if (index === 0 && pending.inputRevision === commandBufferRevision
+        && ctx.commandBufferRef.current.startsWith(pending.pendingInput)) {
+        ctx.commandBufferRef.current = ctx.commandBufferRef.current.slice(pending.pendingInput.length);
+        if (pending.serialPendingInput !== undefined && ctx.serialLineBufferRef?.current.startsWith(pending.serialPendingInput)) {
+          ctx.serialLineBufferRef.current = ctx.serialLineBufferRef.current.slice(pending.serialPendingInput.length);
+        }
+        commandBufferRevision += 1;
+      }
+      pending.recorded.add(index);
+      const command = pending.commands[index];
+      const sensitive = isSensitiveTerminalCommandInput(
+        term, pending.sensitive || ctx.passwordPromptActiveRef?.current === true,
+      );
+      // Receipts can arrive after the user starts typing another command.
+      // Never consume that live input buffer or reconcile with a newer screen.
+      recordTerminalCommandExecution(command, { ...ctx, commandBufferRef: { current: "" } }, term, {
+        sensitive,
+        allowHostStyleGreaterThanPrompt: ctx.allowHostStyleGreaterThanPrompt,
+        useProvidedCommand: true,
+        acknowledgedWrite: true,
+      });
+      if (pending.broadcast && isTerminalBroadcastInputCurrent(pending.sourceInput)
+        && ctx.isBroadcastEnabledRef.current && !sensitive) {
+        ctx.onBroadcastInputRef.current?.(`${index === 0 ? pending.firstPastedLine : command}\r`, ctx.sessionId, {
+          pacedBroadcast: pending.broadcast,
+        });
+      }
+      void pending.recordLine?.(index === 0 ? pending.firstPastedLine : command, {
+        sensitive, includePendingInput: index === 0, consumePendingInput: index === 0,
+      }).catch((error) => {
+        logger.warn("Failed to record confirmed paste write", error);
+      });
+    }
+    if (receipt.done) pendingLinePastes.delete(receipt.requestId);
+  });
+  const disposeLinePasteHandler = registerTerminalLinePasteHandler(term, (data, options) => {
+    const sessionId = ctx.sessionRef.current;
+    if (!sessionId) return;
+    markTerminalBroadcastUserInput(ctx.sessionId);
+    const sourceInput = captureTerminalBroadcastInput(ctx.sessionId);
+    const broadcast: TerminalPacedBroadcast | undefined = options.broadcast && !options.sensitive
+      && ctx.isBroadcastEnabledRef.current ? {} : undefined;
+    if (broadcast) ctx.onBroadcastInputRef.current?.("", ctx.sessionId, { pacedBroadcast: broadcast, preparePacedBroadcast: true });
+    const requestId = crypto.randomUUID();
+    const commands = data.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+    if (commands.at(-1) === "") commands.pop();
+    const firstPastedLine = commands[0] ?? "";
+    if (commands.length) {
+      commands[0] = `${ctx.commandBufferRef.current}${commands[0]}`;
+    }
+    const serialPendingInput = ctx.host.protocol === "serial" && ctx.serialLineMode
+      ? ctx.serialLineBufferRef?.current : undefined;
+    const recorded = new Set<number>();
+    pendingLinePastes.set(requestId, {
+      sessionId, sourceInput, broadcast, commands, firstPastedLine, sensitive: options.sensitive, recorded, serialPendingInput,
+      pendingInput: ctx.commandBufferRef.current, inputRevision: commandBufferRevision,
+      recordLine: ctx.scriptRecorderRef?.current?.captureSubmittedLineRecorder?.(),
+    });
+    handleTerminalInputData(data, { ...options, pasteRequestId: requestId, skipBroadcast: true });
+    if (recorded.size === 0 && serialPendingInput !== undefined && ctx.serialLineBufferRef) {
+      ctx.serialLineBufferRef.current = serialPendingInput;
+    }
+  });
 
   term.onData((data) => {
     const win32Input = win32InputModePendingEvent;
@@ -2997,8 +3317,13 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     getKittyKeyboardProtocolEnabled: () => kittyKeyboardProtocolEnabled,
     setKittyKeyboardProtocolEnabled,
     recordSerialSnippetInput,
+    invalidatePendingPasteDraft,
     dispose: () => {
       runtimeDisposed = true;
+      disposeLinePasteHandler?.();
+      disposePasteWriteReceipts?.();
+      pendingLinePastes.clear();
+      clearTerminalBroadcastUserInput(ctx.sessionId);
       resizeScheduler.dispose();
       webglController.dispose();
       term.element?.removeEventListener("copy", handleNativeCopy, true);

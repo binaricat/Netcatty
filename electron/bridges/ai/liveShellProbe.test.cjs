@@ -12,6 +12,8 @@ test('live shell response excludes echoed commands, stale markers and partial li
   assert.deepEqual(parseLiveShellProbe(`\r${marker}_P:/usr/bin/fish\r\n${marker}_Q`, marker), { kind: 'fish' });
   assert.deepEqual(parseLiveShellProbe(`${marker}_P:-zsh\n${marker}_Q`, marker), { kind: 'posix' });
   assert.deepEqual(parseLiveShellProbe(`${marker}_P:\n${marker}_Q`, marker), { kind: null });
+  assert.deepEqual(parseLiveShellProbe(`> ${marker}_P:bash\n> ${marker}_Q`, marker), { kind: 'posix' });
+  assert.deepEqual(parseLiveShellProbe(`> ${marker}_P:fish\n> ${marker}_Q`, marker), { kind: 'fish' });
 });
 
 test('probe waits for complete reply before choosing the first wrapper', async () => {

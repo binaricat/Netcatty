@@ -364,6 +364,8 @@ export const enCoreMessages: Messages = {
   'settings.appearance.tabBarPosition.bottom': 'Bottom',
   'settings.vault.showSftpTab': 'Show SFTP tab',
   'settings.vault.showSftpTabDesc': 'Display the standalone SFTP view in the top tab bar. When hidden, use the in-session SFTP side panel instead.',
+  'settings.vault.sftpInSidebar': 'Keep SFTP in the sidebar',
+  'settings.vault.sftpInSidebarDesc': 'Hide the top SFTP tab and show SFTP in the vault sidebar instead, so the sidebar stays visible while SFTP is open.',
   'settings.vault.showHostTreeSidebar': 'Show host list sidebar',
   'settings.vault.showHostTreeSidebarDesc': 'Display the host list sidebar and its top-bar toggle on terminal and editor tabs.',
   'settings.vault.autoImportSystemKnownHosts': 'Auto-import system known_hosts',
@@ -649,6 +651,12 @@ Highlight the focused split pane:
   'settings.terminal.sidePanel.pane.system': 'System',
   'settings.terminal.sidePanel.pane.notes': 'Notes',
   'settings.terminal.sidePanel.pane.ai': 'AI',
+  'settings.terminal.section.localShellSidePanel': 'Local Shell Side Panel',
+  'settings.terminal.localShellSidePanel.autoOpen': 'Open side panel with local shell',
+  'settings.terminal.localShellSidePanel.autoOpen.desc': 'Automatically open a side panel when opening a local shell.',
+  'settings.terminal.localShellSidePanel.autoOpenPane': 'Default side panel',
+  'settings.terminal.localShellSidePanel.autoOpenPane.desc': 'Choose which panel opens first.',
+  'settings.terminal.localShellSidePanel.pane.files': 'Files',
   'settings.terminal.accessibility.minimumContrastRatio.desc':
     'Adjust colors to meet contrast requirements (1 = disabled, 21 = max)',
   'settings.terminal.behavior.rightClick': 'Right-click behavior',
@@ -691,6 +699,12 @@ Highlight the focused split pane:
   'settings.terminal.behavior.autoUploadClipboardImage': 'Auto-upload clipboard images on paste',
   'settings.terminal.behavior.autoUploadClipboardImage.desc':
     'When the clipboard holds an image, pasting in a remote session uploads it via SFTP to .netcatty-paste-images/ under the remote working directory and inserts the remote path instead of pasting text.',
+  'settings.terminal.behavior.confirmMultilinePaste': 'Ask before pasting multiple lines',
+  'settings.terminal.behavior.confirmMultilinePaste.desc':
+    'Show a confirmation dialog before pasting multiple lines, with the line/character count, an editable preview, and Send / Send line by line / Cancel actions. Protects switch and firewall CLIs (Cisco IOS, Huawei VRP, H3C Comware) that do not support bracketed paste.',
+  'settings.terminal.behavior.confirmMultilinePasteMinLines': 'Confirmation threshold (lines)',
+  'settings.terminal.behavior.confirmMultilinePasteMinLines.desc':
+    'Ask for confirmation when a paste contains at least this many lines.',
   'settings.terminal.behavior.shiftEnterNewline': 'Shift+Enter text',
   'settings.terminal.behavior.shiftEnterNewline.desc':
     'Send configured text instead of normal Enter when pressing Shift+Enter in the terminal.',
@@ -1015,6 +1029,7 @@ Highlight the focused split pane:
   'vault.nav.snippets': 'Scripts',
   'vault.nav.notes': 'Notes',
   'vault.nav.knownHosts': 'Known Hosts',
+  'vault.nav.sftp': 'SFTP',
   'vault.nav.logs': 'Logs',
 
   'proxyProfiles.action.add': 'Add Proxy',
@@ -1048,6 +1063,10 @@ Highlight the focused split pane:
   'vault.groups.deleteDialogTitle': 'Delete Group',
   'vault.groups.deleteDialog.desc': 'This will permanently delete the group and move all hosts to the root level.',
   'vault.groups.deleteDialog.managedDesc': 'This is a managed SSH config group. Deleting it will also delete all hosts and unlink from the source file.',
+  'vault.groups.deleteDialog.mixedDesc': 'This group contains hosts imported from a linked SSH config file. Every host under its managed subgroup will be deleted, even hosts not managed by that file. All other hosts will move to the root level unless you also delete them below.',
+  'vault.groups.deleteDialog.managedWarning': 'Deleting this group will also clear its entries from the linked SSH config file. Entries that came from that file may be lost for other apps that use it. Back up the file before continuing.',
+  'vault.groups.deleteDialog.sourcesChanged': 'The managed files affected by this deletion have changed. Review the files and confirm again.',
+  'vault.groups.deleteDialog.managedFile': 'Linked file: {file}',
   'vault.groups.deleteDialog.deleteHosts': 'Also delete all hosts in this group',
   'vault.groups.deleteDialog.bulkTitle': 'Delete Selected Groups',
   'vault.groups.deleteDialog.bulkDesc': 'This will permanently delete the selected groups and move their hosts to the root level.',
@@ -1106,6 +1125,7 @@ Highlight the focused split pane:
   'vault.hosts.export.toast.success': 'Exported {count} hosts to CSV',
   'vault.hosts.export.toast.successWithSkipped': 'Exported {count} hosts to CSV ({skipped} unsupported hosts skipped)',
   'vault.hosts.export.toast.passphrasesSkipped': '{count} saved key passphrases could not be read and were left blank',
+  'vault.hosts.export.toast.proxyCredentialsSkipped': '{count} saved proxy passwords could not be read and were left blank',
   'vault.hosts.export.toast.noHosts': 'No hosts to export',
   'vault.hosts.allHosts': 'All hosts',
   'vault.hosts.pinned': 'Pinned',

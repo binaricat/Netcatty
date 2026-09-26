@@ -178,6 +178,27 @@ describe("externalMcpController", () => {
     assert.deepEqual(bridge._sessionIdleTimeouts, [45]);
   });
 
+  it("builds a universal setup prompt from live paths and bundled Skill content", async () => {
+    const { controller } = createController({
+      readSkillContent: async () => [
+        "---",
+        "name: netcatty-mcp",
+        "metadata:",
+        "  managed-by: netcatty",
+        "---",
+        "Call get_environment first.",
+      ].join("\n"),
+    });
+
+    const result = await controller.getUniversalSetupPrompt();
+
+    assert.equal(result.ok, true);
+    assert.match(result.prompt, /\/fake\/netcatty-external-mcp/);
+    assert.match(result.prompt, new RegExp(discoveryPath.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")));
+    assert.match(result.prompt, /managed-by: netcatty/);
+    assert.match(result.prompt, /get_environment/);
+  });
+
   it("serializes overlapping enable/disable so final enable recovers", async () => {
     let releaseStart = null;
     let startPasses = 0;

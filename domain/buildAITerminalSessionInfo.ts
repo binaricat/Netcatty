@@ -82,7 +82,10 @@ export const buildAITerminalSessionInfo = (
     sessionId: session?.id || '',
     hostId: session?.hostId || '',
     hostname: host?.hostname || session?.hostname || '',
-    label: host?.label || session?.hostLabel || '',
+    // A session rename is scoped to the individual terminal tab. Prefer it
+    // over the saved Host label so duplicate connections to the same host can
+    // still be distinguished by AI/MCP callers.
+    label: session?.customName || host?.label || session?.hostLabel || '',
     os: isLocalSession ? localOs : resolveHostOs(host),
     username: host?.username || session?.username,
     protocol,

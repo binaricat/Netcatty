@@ -181,6 +181,37 @@ export const TerminalBehaviorSettings: React.FC<TerminalBehaviorSettingsProps> =
         </SettingRow>
 
         <SettingRow
+          anchorId="terminal-confirm-multiline-paste"
+          label={t("settings.terminal.behavior.confirmMultilinePaste")}
+          description={t("settings.terminal.behavior.confirmMultilinePaste.desc")}
+        >
+          <Toggle
+            checked={terminalSettings.confirmBeforeMultilinePaste ?? false}
+            onChange={(v) => updateTerminalSetting("confirmBeforeMultilinePaste", v)}
+          />
+        </SettingRow>
+
+        <SettingRow
+          anchorId="terminal-confirm-multiline-paste-min-lines"
+          label={t("settings.terminal.behavior.confirmMultilinePasteMinLines")}
+          description={t("settings.terminal.behavior.confirmMultilinePasteMinLines.desc")}
+        >
+          <Input
+            type="number"
+            min={1}
+            max={1000}
+            value={terminalSettings.multilinePasteConfirmMinLines ?? 2}
+            onChange={(e) => {
+              const val = parseInt(e.target.value);
+              if (!isNaN(val) && val >= 1 && val <= 1000) {
+                updateTerminalSetting("multilinePasteConfirmMinLines", val);
+              }
+            }}
+            className="w-24"
+          />
+        </SettingRow>
+
+        <SettingRow
           anchorId="terminal-shift-enter-newline"
           label={t("settings.terminal.behavior.shiftEnterNewline")}
           description={t("settings.terminal.behavior.shiftEnterNewline.desc")}

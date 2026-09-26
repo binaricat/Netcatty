@@ -98,3 +98,32 @@ test('plugin semantic callbacks fail closed when terminal prompt state is unavai
   assert.deepEqual(submitted, []);
   assert.deepEqual(executed, ['echo ok']);
 });
+
+test('acknowledged pasted commands enter history over output without becoming trusted semantic input', () => {
+  for (const acknowledgedWrite of [false, true]) {
+    const history: string[] = [];
+    const trusted: string[] = [];
+    recordTerminalCommandExecution('cd /tmp', {
+      host: { id: 'h', label: 'h' }, sessionId: 's', commandBufferRef: { current: '' },
+      onCommandExecuted: command => history.push(command),
+      onTrustedCommandSubmitted: command => trusted.push(command),
+    }, createFakeTerm('working... still producing output') as never, { useProvidedCommand: true, acknowledgedWrite });
+    assert.deepEqual(history, acknowledgedWrite ? ['cd /tmp'] : []);
+    assert.deepEqual(trusted, []);
+  }
+});
+
+test('acknowledged writes retain both live challenge and explicit sensitive checks', () => {
+  for (const [line, sensitive] of [['Password: ', false], ['OTP> ', false], ['output', true]] as const) {
+    const history: string[] = [];
+    const submitted: string[] = [];
+    const result = recordTerminalCommandExecution('secret', {
+      host: { id: 'h', label: 'h' }, sessionId: 's', commandBufferRef: { current: '' },
+      onCommandExecuted: command => history.push(command),
+      onCommandSubmitted: command => submitted.push(command),
+    }, createFakeTerm(line) as never, { sensitive, useProvidedCommand: true, acknowledgedWrite: true });
+    assert.equal(result, null);
+    assert.deepEqual(history, []);
+    assert.deepEqual(submitted, []);
+  }
+});

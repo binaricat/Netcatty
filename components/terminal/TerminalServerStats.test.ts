@@ -17,3 +17,15 @@ test("server stats stay subscribed while the terminal is in the background", () 
   assert.doesNotMatch(source, /usePaneVisible/);
   assert.doesNotMatch(source, /isVisible,/);
 });
+
+test("GPU chip only renders when the remote reports GPU utilization", () => {
+  const source = readFileSync(new URL("./TerminalServerStats.tsx", import.meta.url), "utf8");
+
+  // Conditional render — hosts without nvidia-smi must not show an empty GPU chip.
+  assert.match(source, /\{serverStats\.gpu !== null && \(/);
+  // Sits directly after the CPU chip, before the memory chip.
+  assert.match(
+    source,
+    /terminal\.serverStats\.gpu[\s\S]{0,2000}terminal\.serverStats\.memory/,
+  );
+});

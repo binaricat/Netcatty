@@ -126,11 +126,15 @@ function buildStatCommand(remotePath, encoding = "utf-8") {
     'elif [ -d "$p" ]; then t=d',
     'else t=f; fi',
     'mode=$(ls -ld -- "$p" 2>/dev/null | awk \'{print $1}\')',
-    'size=$(stat -c %s -- "$p" 2>/dev/null || stat -f %z -- "$p" 2>/dev/null || echo 0)',
+    // A missing/unsupported stat binary must not masquerade as a real 0-byte
+    // file: post-upload size verification would then reject a successful
+    // upload with "expected N bytes, got 0" (#3399). Emit the same "?" unknown
+    // marker used for mode so the parser can report an unknown size instead.
+    'size=$(stat -c %s -- "$p" 2>/dev/null || stat -f %z -- "$p" 2>/dev/null || echo "?")',
     'mtime=$(date -r "$p" +%s 2>/dev/null || stat -c %Y -- "$p" 2>/dev/null || stat -f %m -- "$p" 2>/dev/null || echo 0)',
     'abs=$(cd "$(dirname -- "$p")" 2>/dev/null && printf "%s/%s\\n" "$(pwd -P 2>/dev/null || pwd)" "$(basename -- "$p")" || printf "%s\\n" "$p")',
     'ino=$(stat -c %i -- "$p" 2>/dev/null || stat -f %i -- "$p" 2>/dev/null || echo)',
-    'printf "%s|%s|%s|%s|%s|%s\\n" "$t" "${mode:-?}" "${size:-0}" "${mtime:-0}" "$abs" "${ino}"',
+    'printf "%s|%s|%s|%s|%s|%s\\n" "$t" "${mode:-?}" "${size:-?}" "${mtime:-0}" "$abs" "${ino}"',
   ].join("; ");
 }
 
@@ -383,11 +387,16 @@ function parseStatRecord(stdout, { stderr = "", exitCode = null } = {}) {
   const ino = inoStr && /^\d+$/.test(String(inoStr).trim())
     ? String(inoStr).trim()
     : undefined;
+  // "?" (or an empty field) means the remote could not measure the size —
+  // e.g. a device without a stat binary. Report undefined rather than a fake
+  // 0 so callers can skip size-sensitive checks instead of failing them.
+  const sizeStrTrim = String(sizeStr ?? "").trim();
+  const size = /^\d+$/.test(sizeStrTrim) ? Number(sizeStrTrim) : undefined;
   return {
     type: t === "d" ? "directory" : t === "l" ? "symlink" : "file",
     isDirectory: t === "d",
     isSymbolicLink: t === "l",
-    size: Number(sizeStr) || 0,
+    size,
     modifyTime: (Number(mtimeStr) || 0) * 1000,
     mode: lsModeToNumber(modeStr),
     permissions: parseLsModeToPermissions(modeStr),

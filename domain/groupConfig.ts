@@ -206,9 +206,16 @@ export function applyGroupDefaults(
     host.telnetPassword !== undefined ||
     primaryTelnetHasManualSharedCredentials
   );
+  // Serial hosts: username/password on a serial host are the auto-login
+  // credentials (#3417) sent to whatever device answers on the port. Group
+  // defaults are SSH credentials — never inherit them into a serial host, or
+  // connecting a serial editor with blank credential fields would transmit the
+  // group's SSH password to anything that prints a login prompt.
+  const isSerialHost = host.protocol === 'serial';
 
   for (const key of INHERITABLE_KEYS) {
     if (shouldSkipGroupSshCredentialBundle && SSH_CREDENTIAL_KEYS.has(key)) continue;
+    if (isSerialHost && SSH_CREDENTIAL_KEYS.has(key)) continue;
     if (key === 'password' && effective.savePassword === false) continue;
     if (key === 'telnetIdentityId' && hostHasManualTelnetCredentials) continue;
     if (key === 'proxyProfileId') {

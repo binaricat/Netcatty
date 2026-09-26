@@ -1,3 +1,4 @@
+import { clearTerminalBroadcastUserInput, markTerminalBroadcastUserInput } from "./terminal/runtime/terminalPacedBroadcast";
 import { publishTerminalCommandCompletion } from "../application/state/terminalCommandCompletion";
 import { createTerminalReflowReadingPosition } from "./terminal/terminalReflowReadingPosition";
 import { resolveHostOs } from '../domain/host';
@@ -52,6 +53,7 @@ import { CONNECTION_PROGRESS_START } from "./terminal/connectionProgress";
 import { supportsZmodemTerminalDragDrop } from "../lib/zmodemDragDrop";
 import { resolveHostAuth, resolveHostAutofillPassword } from "../domain/sshAuth";
 import { resolveEffectiveTerminalProtocol } from "../domain/terminalProtocol";
+import { MULTILINE_PASTE_CONFIRM_MIN_LINES_DEFAULT } from "../domain/terminalPasteConfirm";
 import { isPluginHostProtocol } from "../domain/pluginConnection";
 import { clearTerminalBootEpoch, setTerminalBootEpoch } from "../domain/terminalBootEpoch";
 import {
@@ -434,6 +436,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     sessionId,
     () => passwordPromptActiveRef.current,
   ), [sessionId]);
+  useEffect(() => () => clearTerminalBroadcastUserInput(sessionId), [sessionId]);
   const sensitivePromptOutputTailRef = useRef("");
   const [activeScriptRun, setActiveScriptRun] = useState<import('@/types/global/netcatty-bridge-script.d.ts').ScriptRun | undefined>(undefined);
   const dismissedScriptRunIdsRef = useRef(new Set<string>());
@@ -998,6 +1001,10 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   autocompleteAcceptTextRef.current = (text: string) => {
     const id = sessionRef.current;
     if (id && text) {
+      markTerminalBroadcastUserInput(sessionId);
+      if (["\r", "\n", "\b", "\x7f", "\x15"].some(control => text.includes(control))) {
+        xtermRuntimeRef.current?.invalidatePendingPasteDraft();
+      }
       const sensitive = passwordPromptActiveRef.current;
       let textToWrite = text;
       let handledSubmittedInput = false;
@@ -1953,7 +1960,12 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       sensitivePromptOutputTailRef.current,
       chunk,
     );
-    const promptSecurityOptions = { allowHostStyleGreaterThan: isNetworkDevice };
+    const promptSecurityOptions = {
+      allowHostStyleGreaterThan: isNetworkDevice,
+      alternateScreen: termRef.current
+        ? isTerminalAlternateScreenActive(termRef.current)
+        : false,
+    };
     if (typeof meta?.pluginPipelineSensitiveInput === "boolean") {
       passwordPromptActiveRef.current = meta.pluginPipelineSensitiveInput;
       if (meta.pluginPipelineSensitiveInput) {
@@ -3216,6 +3228,14 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   normalizeTextOnCopyRef.current = terminalSettings?.normalizeTextOnCopy ?? true;
   const autoUploadClipboardImageOnPasteRef = useRef(terminalSettings?.autoUploadClipboardImageOnPaste ?? false);
   autoUploadClipboardImageOnPasteRef.current = terminalSettings?.autoUploadClipboardImageOnPaste ?? false;
+  const multilinePasteConfirmRef = useRef({
+    enabled: terminalSettings?.confirmBeforeMultilinePaste ?? false,
+    minLines: terminalSettings?.multilinePasteConfirmMinLines ?? MULTILINE_PASTE_CONFIRM_MIN_LINES_DEFAULT,
+  });
+  multilinePasteConfirmRef.current = {
+    enabled: terminalSettings?.confirmBeforeMultilinePaste ?? false,
+    minLines: terminalSettings?.multilinePasteConfirmMinLines ?? MULTILINE_PASTE_CONFIRM_MIN_LINES_DEFAULT,
+  };
 
   const scrollToBottomAfterProgrammaticInput = useCallback((data: string) => {
     if (!termRef.current) return;
@@ -3240,14 +3260,17 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     termRef.current?.scrollToBottom();
   }, [activeScriptRun]);
 
-  const broadcastUserPasteData = useCallback((data: string) => {
+  const broadcastUserPasteData = useCallback((
+    data: string,
+    options?: { lineDelayMs?: number },
+  ) => {
     if (
       !passwordPromptActiveRef.current
       && sessionRef.current
       && isBroadcastEnabledRef.current
       && onBroadcastInputRef.current
     ) {
-      onBroadcastInputRef.current(data, sessionId);
+      onBroadcastInputRef.current(data, sessionId, options);
       return true;
     }
     return false;
@@ -3299,6 +3322,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       ? AUTO_RUN_SNIPPET_LINE_DELAY_MS
       : undefined;
     const isMultiLine = data.includes('\n');
+    if (lineDelayMs) markTerminalBroadcastUserInput(sessionId);
     // Wrap in bracketed paste BEFORE appending \r so the Enter is sent
     // outside the paste markers — otherwise shells treat it as pasted text
     // instead of a submit action.
@@ -3317,6 +3341,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     const sensitive = passwordPromptActiveRef.current;
     if (!sensitive && options?.broadcast !== false && isBroadcastEnabledRef.current && onBroadcastInputRef.current) {
       onBroadcastInputRef.current(data, sessionId, {
+        automated: true,
         noAutoRun,
         ...(lineDelayMs ? { lineDelayMs } : {}),
       });
@@ -3391,6 +3416,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     isLocalConnection,
     supportsRemoteImagePaste,
     autoUploadClipboardImageOnPasteRef,
+    multilinePasteConfirmRef,
     terminalBackend,
     getRemoteCwd: () => resolveSftpInitialPath({ preferFreshBackend: true }),
     scrollToBottomAfterProgrammaticInput,
@@ -3972,6 +3998,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     containerRef,
     autoUploadClipboardImage:
       supportsRemoteImagePaste && terminalSettings?.autoUploadClipboardImageOnPaste === true,
+    multilinePasteConfirmRef,
     getRemoteCwd: () => resolveSftpInitialPath({ preferFreshBackend: true }),
     onClipboardImageUploadResult: handleClipboardImageUploadResult,
   });

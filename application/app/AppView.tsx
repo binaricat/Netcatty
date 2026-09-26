@@ -292,6 +292,7 @@ function AppViewInner({ domains }: AppViewProps) {
     resolvedTheme,
     windowOpacity,
     showSftpTab,
+    sftpInSidebar,
     showHostTreeSidebar,
     showRecentHosts,
     hostClickBehavior,
@@ -301,6 +302,8 @@ function AppViewInner({ domains }: AppViewProps) {
     restoreTerminalCwd,
     terminalSidePanelAutoOpen,
     terminalSidePanelAutoOpenTab,
+    localShellSidePanelAutoOpen,
+    localShellSidePanelAutoOpenTab,
   } = useSettingsChromeStore();
   const { setTheme, setWindowOpacity } = useSettingsChromeActions();
 
@@ -556,7 +559,7 @@ function AppViewInner({ domains }: AppViewProps) {
         onReorderTabs={reorderWorkTabs}
         onRemoveSessionFromWorkspace={removeSessionFromWorkspace}
         onAppendHostToWorkspace={handleAppendHostToWorkspace}
-        showSftpTab={showSftpTab}
+        showSftpTab={showSftpTab && !sftpInSidebar}
         showHostTreeSidebar={showHostTreeSidebar}
         switchTabKeyBinding={keyBindings.find((binding) => binding.action === 'switchToTab') ?? null}
         dynamicTabTitleMode={dynamicTabTitleMode}
@@ -782,6 +785,8 @@ function AppViewInner({ domains }: AppViewProps) {
           sftpAutoOpenSidebar={sftpAutoOpenSidebar}
           terminalSidePanelAutoOpen={terminalSidePanelAutoOpen}
           terminalSidePanelAutoOpenTab={terminalSidePanelAutoOpenTab}
+          localShellSidePanelAutoOpen={localShellSidePanelAutoOpen}
+          localShellSidePanelAutoOpenTab={localShellSidePanelAutoOpenTab}
           sftpFollowTerminalCwd={sftpFollowTerminalCwd}
           setSftpFollowTerminalCwd={setSftpFollowTerminalCwd}
           editorWordWrap={editorWordWrap}
@@ -918,7 +923,7 @@ function AppViewInner({ domains }: AppViewProps) {
               results={quickResults}
               sessions={sessions}
               workspaces={workspaces}
-              showSftpTab={showSftpTab}
+              showSftpTab={showSftpTab || sftpInSidebar}
               onQueryChange={setQuickSearch}
               onSelect={handleHostConnectWithProtocolCheck}
               onEditHost={(host) => {

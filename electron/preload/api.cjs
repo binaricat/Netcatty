@@ -345,6 +345,7 @@ function createPreloadApi(ctx) {
       sessionId,
       data,
       automated: Boolean(options?.automated),
+      pasteRequestId: typeof options?.pasteRequestId === "string" ? options.pasteRequestId : undefined,
       sensitive: options?.sensitive === true,
       serialEraseChar: typeof options?.serialEraseChar === "string" ? options.serialEraseChar : undefined,
       lineDelayMs: Number.isFinite(lineDelayMs) && lineDelayMs > 0 ? lineDelayMs : undefined,
@@ -356,8 +357,20 @@ function createPreloadApi(ctx) {
         : undefined,
     });
   },
-  interruptSession: (sessionId, trace) => {
+  notifySessionUserInput: (sessionId) => {
+    ipcRenderer.send("netcatty:terminal:user-input", { sessionId });
+  },
+  onTerminalPasteWrite: (cb) => {
+    const listener = (_event, payload) => cb(payload);
+    ipcRenderer.on("netcatty:paste-write", listener);
+    return () => ipcRenderer.removeListener("netcatty:paste-write", listener);
+  },
+  interruptSession: (sessionId, trace, options) => {
     const sanitizedTrace = sanitizeInterruptTrace(trace);
+    if (options?.cancelPendingWritesOnly === true) {
+      ipcRenderer.send("netcatty:interrupt", { sessionId, trace: sanitizedTrace, cancelPendingWritesOnly: true });
+      return;
+    }
     if (ctx.terminalUrgentInputPorts?.postInterrupt?.(sessionId, sanitizedTrace)) {
       return;
     }
@@ -1705,6 +1718,8 @@ function createPreloadApi(ctx) {
   },
 
   // Get file path from File object (for drag-and-drop)
+  startLocalFileDrag: (payload) => ipcRenderer.invoke("netcatty:local:drag-start", payload),
+  cancelLocalFileDrag: (requestId) => ipcRenderer.send("netcatty:local:drag-cancel", { requestId }),
   getPathForFile: (file) => {
     try {
       return webUtils.getPathForFile(file);
@@ -1870,6 +1885,9 @@ function createPreloadApi(ctx) {
   },
   externalMcpSetConfig: async (config) => {
     return ipcRenderer.invoke("netcatty:external-mcp:set-config", config || {});
+  },
+  externalMcpGetUniversalSetupPrompt: async () => {
+    return ipcRenderer.invoke("netcatty:external-mcp:get-universal-setup-prompt");
   },
   externalMcpCodexGetStatus: async () => {
     return ipcRenderer.invoke("netcatty:external-mcp:codex:get-status");

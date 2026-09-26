@@ -453,6 +453,7 @@ export const TerminalComposeBar: React.FC<TerminalComposeBarProps> = ({
   return (
     <div
       className="flex-shrink-0 flex flex-col"
+      data-section="terminal-compose-bar"
       style={{
         height: barHeight,
         backgroundColor: theme.resolvedBg,

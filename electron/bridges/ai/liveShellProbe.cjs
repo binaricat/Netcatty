@@ -20,12 +20,20 @@ function buildLiveShellProbe(marker) {
 
 }
 
+// Interactive bash prints PS2 (`> ` by default) on backslash continuations.
+// Strip that prefix (and other common prompt leftovers) so `_Q` / `_P:`
+// sentinels still parse when the probe is not a single physical line.
+function normalizeLiveShellProbeLine(line) {
+  return String(line).replace(/^[>#$%\s]+/, "");
+}
+
 function parseLiveShellProbe(output, marker) {
   const lines = String(output).replace(/\r/g, "\n").split("\n");
-  if (!lines.some((line) => line.startsWith(`${marker}_Q`))) return null;
+  if (!lines.some((line) => normalizeLiveShellProbeLine(line).startsWith(`${marker}_Q`))) return null;
   for (const line of lines) {
-    if (!line.startsWith(`${marker}_P:`)) continue;
-    const name = line.slice(marker.length + 3).trim().split("/").pop().replace(/^-/, "");
+    const normalized = normalizeLiveShellProbeLine(line);
+    if (!normalized.startsWith(`${marker}_P:`)) continue;
+    const name = normalized.slice(marker.length + 3).trim().split("/").pop().replace(/^-/, "");
     return {
       kind: name === "fish" ? "fish"
         : /^(?:ba|da|z|k|a)?sh$/.test(name) ? "posix" : null,
@@ -34,4 +42,4 @@ function parseLiveShellProbe(output, marker) {
   return { kind: null };
 }
 
-module.exports = { buildLiveShellProbe, parseLiveShellProbe };
+module.exports = { buildLiveShellProbe, parseLiveShellProbe, normalizeLiveShellProbeLine };

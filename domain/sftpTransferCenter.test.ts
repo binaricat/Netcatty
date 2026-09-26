@@ -228,6 +228,42 @@ test("resume rejects changed or shortened source files", () => {
   );
 });
 
+test("resume skips size-based validation when the source size is unknown", () => {
+  // Stat-less SCP endpoints report size as a placeholder 0 (sizeKnown false).
+  // Saved progress must not be misread as a shrunk/changed source.
+  const resumable = {
+    ...task("scp", "interrupted", 1),
+    totalBytes: 100,
+    sourceLastModified: 50,
+    checkpointBytes: 60,
+  };
+  assert.equal(
+    validateTransferResumeSource(
+      resumable,
+      { size: 0, lastModified: 50, sizeKnown: false },
+      { allowSourceGrowth: true },
+    ),
+    null,
+  );
+  // mtime drift is still detectable without a size.
+  assert.match(
+    validateTransferResumeSource(
+      resumable,
+      { size: 0, lastModified: 51, sizeKnown: false },
+    ) ?? "",
+    /modified/,
+  );
+  // The mtime guard is skipped while growth is allowed (append-only updates).
+  assert.equal(
+    validateTransferResumeSource(
+      resumable,
+      { size: 0, lastModified: 51, sizeKnown: false },
+      { allowSourceGrowth: true },
+    ),
+    null,
+  );
+});
+
 test("prune upgrades legacy completed children into the parent checkpoint", () => {
   const now = Date.now();
   const parent: TransferTask = {

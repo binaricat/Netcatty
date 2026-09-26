@@ -193,6 +193,7 @@ const SftpViewInner: React.FC<SftpViewProps> = ({
     listLocalDir,
     listDrives,
     openPath,
+    statSftp,
   } = useSftpBackend();
 
   // Store sftp in a ref so callbacks can access the latest instance
@@ -425,6 +426,7 @@ const SftpViewInner: React.FC<SftpViewProps> = ({
     showSaveDialog,
     selectDirectory,
     getSftpIdForConnection: sftp.getSftpIdForConnection,
+    statSftp,
     listLocalFiles: listLocalDir,
     listDrives,
   });

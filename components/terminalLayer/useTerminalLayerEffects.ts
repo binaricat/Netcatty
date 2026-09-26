@@ -108,7 +108,7 @@ export function pruneTerminalTabMemoryState(
 
 export function useTerminalLayerEffects(ctx: TerminalLayerEffectsContext) {
   const { openPath } = useSftpBackend();
-  const { activeSidePanelTab, activeSidePanelLayout, activeTabId, activeTabIdRef, activeWorkspace, activityTrackedSessions, cancelAnimationFrame, ChunkedEscapeFilter, clearTopTabsPreviewVars, document, dropHint, effectiveHosts, filterTabsMap, focusedSessionId, getSessionActivityIdsToClear, handleToggleAiFromTopBar, handleToggleScriptsSidePanel, handleToggleSidePanel, hasNotifiableTerminalOutput, isComposeBarOpen, isFocusMode, isTerminalLayerVisible, lastSidePanelTabRef, Map, onConnectToHost, onSessionData, onSplitSessionRef, onToggleBroadcastRef, onToggleWorkspaceViewModeRef, prevFocusedSessionIdRef, refocusActiveTerminalSession, requestAnimationFrame, ResizeObserver, sessionActivityStore, sessions, Set, setAiMountedTabIds, setDropHint, setNotesMountedTabIds, setScriptsMountedTabIds, setSystemMountedTabIds, setSftpHostForTab, setSftpInitialLocationForTab, setSftpPendingUploadsForTab, setSidePanelOpenTabs, setSidePanelLayouts, setThemeMountedTabIds, setWorkspaceArea, shouldMeasureTerminalLayerLayout, sidePanelPosition, sidePanelWidth, sftpActiveHost, sftpHostForTab, sftpPaneClosedTabIdsRef, shouldMarkSessionActivity, sidePanelOpenTabs, splitHorizontalHandlersRef, splitVerticalHandlersRef, toggleScriptsSidePanelRef, toggleSidePanelRef, validAIScopeTargetIds, validSessionActivityIds, window, workspaceBroadcastHandlersRef, workspaceFocusHandlersRef, workspaceInnerRef, workspaces } = ctx;
+  const { activeSidePanelTab, activeSidePanelLayout, activeTabId, activeTabIdRef, activeWorkspace, activityTrackedSessions, cancelAnimationFrame, ChunkedEscapeFilter, clearTopTabsPreviewVars, document, dropHint, effectiveHosts, filterTabsMap, focusedSessionId, getSessionActivityIdsToClear, handleToggleAiFromTopBar, handleToggleScriptsSidePanel, handleToggleSidePanel, hasNotifiableTerminalOutput, isComposeBarOpen, isFocusMode, isTerminalLayerVisible, lastSidePanelTabRef, Map, onConnectToHost, onSessionData, onSplitSessionRef, onToggleBroadcastRef, onToggleWorkspaceViewModeRef, prevFocusedSessionIdRef, refocusActiveTerminalSession, requestAnimationFrame, ResizeObserver, sessionActivityStore, sessions, Set, setAiMountedTabIds, setDropHint, setNotesMountedTabIds, setScriptsMountedTabIds, setSystemMountedTabIds, setSftpHostForTab, setSftpInitialLocationForTab, setSftpPendingUploadsForTab, setSidePanelOpenTabs, setSidePanelLayouts, setThemeMountedTabIds, setWorkspaceArea, shouldMeasureTerminalLayerLayout, sidePanelPosition, sidePanelHeight, sidePanelWidth, sftpActiveHost, sftpHostForTab, sftpPaneClosedTabIdsRef, shouldMarkSessionActivity, sidePanelOpenTabs, splitHorizontalHandlersRef, splitVerticalHandlersRef, toggleScriptsSidePanelRef, toggleSidePanelRef, validAIScopeTargetIds, validSessionActivityIds, window, workspaceBroadcastHandlersRef, workspaceFocusHandlersRef, workspaceInnerRef, workspaces } = ctx;
 
   const activeWorkspaceId = activeWorkspace?.id;
   const activeWorkspaceViewMode = activeWorkspace?.viewMode;
@@ -282,6 +282,17 @@ export function useTerminalLayerEffects(ctx: TerminalLayerEffectsContext) {
     resizePreviewWidth: null,
     sidePanelWidth,
   });
+  // Bottom dock trades width for height; the same open/hidden gate applies.
+  const sidePanelShellHeight = sidePanelPosition === 'bottom'
+    ? getTerminalSidePanelShellWidth({
+      activeSidePanelTab,
+      forceHideAiShell: AI_PANEL_FORCE_HIDE_SHELL
+        && (!activeSidePanelLayout || collectSidePanelPanes(activeSidePanelLayout.root).length <= 1),
+      isSidePanelOpenForCurrentTab,
+      resizePreviewWidth: null,
+      sidePanelWidth: sidePanelHeight,
+    })
+    : 0;
 
   const activityEscapeFiltersRef = useRef<any>(new Map());
 
@@ -291,6 +302,7 @@ export function useTerminalLayerEffects(ctx: TerminalLayerEffectsContext) {
     viewMode: undefined as string | undefined,
     composeBarOpen: false,
     shellWidth: 0,
+    shellHeight: 0,
     width: 0,
     height: 0,
   });
@@ -441,7 +453,8 @@ export function useTerminalLayerEffects(ctx: TerminalLayerEffectsContext) {
       && height > 0
       && prev.width === width
       && prev.height === height
-      && prev.shellWidth === sidePanelShellWidth;
+      && prev.shellWidth === sidePanelShellWidth
+      && prev.shellHeight === sidePanelShellHeight;
     if (
       dimensionsUnchanged
       && prev.workspaceId === activeWorkspaceId
@@ -455,6 +468,7 @@ export function useTerminalLayerEffects(ctx: TerminalLayerEffectsContext) {
       viewMode: activeWorkspaceViewMode,
       composeBarOpen: isComposeBarOpen,
       shellWidth: sidePanelShellWidth,
+      shellHeight: sidePanelShellHeight,
       width,
       height,
     };
@@ -467,6 +481,7 @@ export function useTerminalLayerEffects(ctx: TerminalLayerEffectsContext) {
     shouldMeasureTerminalLayerLayout,
     sidePanelPosition,
     sidePanelShellWidth,
+    sidePanelShellHeight,
   ]);
   
   // Keep sftpHostForTab in sync with focus changes in workspace mode

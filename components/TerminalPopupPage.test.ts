@@ -145,11 +145,11 @@ test('popup terminals use their window-local vault readiness', () => {
   assert.match(source, /vaultInitializedOverride=\{vaultInitialized\}/);
 });
 
-test('popup provider tree mounts the plugin authentication host', () => {
+test('popup provider tree mounts authentication and paste confirmation hosts', () => {
   assert.match(source, /import \{ PluginAuthenticationHost \} from '\.\/plugins\/PluginAuthenticationHost';/);
   assert.match(
     source,
-    /<I18nProvider locale=\{settings\.uiLanguage\}>\s+<TerminalPopupPageInner\s+settings=\{settings\}\s+allowTerminalStart=\{allowTerminalStart\}\s+\/>\s+<PluginAuthenticationHost \/>\s+<\/I18nProvider>/,
+    /<I18nProvider locale=\{settings\.uiLanguage\}>\s+<TerminalPopupPageInner\s+settings=\{settings\}\s+allowTerminalStart=\{allowTerminalStart\}\s+\/>\s+<PluginAuthenticationHost \/>\s+<MultilinePasteConfirmHost \/>\s+<\/I18nProvider>/,
   );
 });
 

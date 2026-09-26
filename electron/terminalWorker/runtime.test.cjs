@@ -807,6 +807,13 @@ test("runtime clears host-sensitive input state before dispatching an interrupt"
   });
 
   assert.deepEqual(order, ["clear:s1", "write:s1"]);
+  parentPort.emitMessage({
+    kind: "send",
+    channel: "netcatty:interrupt",
+    payload: { sessionId: "s1", cancelPendingWritesOnly: true },
+    webContentsId: 7,
+  });
+  assert.deepEqual(order, ["clear:s1", "write:s1", "write:s1"]);
 });
 
 test("runtime routes terminal data over output messages", async () => {

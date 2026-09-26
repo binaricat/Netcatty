@@ -300,3 +300,28 @@ test("normalizeTerminalSettings preserves intentional custom autocompleteMaxSugg
     20,
   );
 });
+
+test("normalizeTerminalSettings keeps multi-line paste confirmation opt-in", () => {
+  assert.equal(normalizeTerminalSettings().confirmBeforeMultilinePaste, false);
+  assert.equal(
+    normalizeTerminalSettings({ confirmBeforeMultilinePaste: true }).confirmBeforeMultilinePaste,
+    true,
+  );
+});
+
+test("normalizeTerminalSettings clamps the multi-line paste threshold", () => {
+  assert.equal(normalizeTerminalSettings().multilinePasteConfirmMinLines, 2);
+  assert.equal(
+    normalizeTerminalSettings({ multilinePasteConfirmMinLines: 5 }).multilinePasteConfirmMinLines,
+    5,
+  );
+  assert.equal(
+    normalizeTerminalSettings({ multilinePasteConfirmMinLines: 0 }).multilinePasteConfirmMinLines,
+    1,
+  );
+  assert.equal(
+    normalizeTerminalSettings({ multilinePasteConfirmMinLines: 5000 })
+      .multilinePasteConfirmMinLines,
+    1000,
+  );
+});

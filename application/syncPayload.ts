@@ -78,6 +78,8 @@ import {
   STORAGE_KEY_TERM_SETTINGS,
   STORAGE_KEY_TERMINAL_SIDE_PANEL_AUTO_OPEN,
   STORAGE_KEY_TERMINAL_SIDE_PANEL_AUTO_OPEN_TAB,
+  STORAGE_KEY_LOCAL_SHELL_SIDE_PANEL_AUTO_OPEN,
+  STORAGE_KEY_LOCAL_SHELL_SIDE_PANEL_AUTO_OPEN_TAB,
   STORAGE_KEY_CUSTOM_KEY_BINDINGS,
   STORAGE_KEY_EDITOR_WORD_WRAP,
   STORAGE_KEY_SFTP_DOUBLE_CLICK_BEHAVIOR,
@@ -94,6 +96,7 @@ import {
   STORAGE_KEY_HOST_CLICK_BEHAVIOR,
   STORAGE_KEY_SHOW_ONLY_UNGROUPED_HOSTS_IN_ROOT,
   STORAGE_KEY_SHOW_SFTP_TAB,
+  STORAGE_KEY_SFTP_IN_SIDEBAR,
   STORAGE_KEY_TAB_BAR_POSITION,
   STORAGE_KEY_SHOW_HOST_TREE_SIDEBAR,
   STORAGE_KEY_SHELL_ONLY_TAB_NUMBER_SHORTCUTS,
@@ -266,6 +269,7 @@ const SYNCABLE_TERMINAL_KEYS = [
   'linkModifier', 'keywordHighlightEnabled', 'keywordHighlightRules',
   'keepaliveInterval', 'keepaliveCountMax', 'disableBracketedPaste', 'clearWipesScrollback',
   'autoUploadClipboardImageOnPaste',
+  'confirmBeforeMultilinePaste', 'multilinePasteConfirmMinLines',
   'preserveSelectionOnInput', 'forcePromptNewLine', 'osc52Clipboard', 'oscNotifications', 'dynamicTabTitleMode', 'tabDoubleClickBehavior',
   'autoCloseOnExit', 'disconnectedNoticeMode',
   'showHostInfoBar', 'hostInfoBarTitleMode', 'showServerStats',
@@ -302,6 +306,8 @@ export const SYNCABLE_SETTING_STORAGE_KEYS = [
   STORAGE_KEY_TERM_SETTINGS,
   STORAGE_KEY_TERMINAL_SIDE_PANEL_AUTO_OPEN,
   STORAGE_KEY_TERMINAL_SIDE_PANEL_AUTO_OPEN_TAB,
+  STORAGE_KEY_LOCAL_SHELL_SIDE_PANEL_AUTO_OPEN,
+  STORAGE_KEY_LOCAL_SHELL_SIDE_PANEL_AUTO_OPEN_TAB,
   STORAGE_KEY_CUSTOM_THEMES,
   STORAGE_KEY_CUSTOM_KEY_BINDINGS,
   STORAGE_KEY_EDITOR_WORD_WRAP,
@@ -318,6 +324,7 @@ export const SYNCABLE_SETTING_STORAGE_KEYS = [
   STORAGE_KEY_HOST_CLICK_BEHAVIOR,
   STORAGE_KEY_SHOW_ONLY_UNGROUPED_HOSTS_IN_ROOT,
   STORAGE_KEY_SHOW_SFTP_TAB,
+  STORAGE_KEY_SFTP_IN_SIDEBAR,
   STORAGE_KEY_TAB_BAR_POSITION,
   STORAGE_KEY_SHELL_ONLY_TAB_NUMBER_SHORTCUTS,
   STORAGE_KEY_SHOW_TAB_NUMBER_BADGES,
@@ -481,6 +488,12 @@ export function collectSyncableSettings(): SyncPayload['settings'] {
   if (isTerminalSidePanelAutoOpenTab(terminalSidePanelAutoOpenTab)) {
     settings.terminalSidePanelAutoOpenTab = terminalSidePanelAutoOpenTab;
   }
+  const localShellSidePanelAutoOpen = localStorageAdapter.readBoolean(STORAGE_KEY_LOCAL_SHELL_SIDE_PANEL_AUTO_OPEN);
+  if (localShellSidePanelAutoOpen != null) settings.localShellSidePanelAutoOpen = localShellSidePanelAutoOpen;
+  const localShellSidePanelAutoOpenTab = localStorageAdapter.readString(STORAGE_KEY_LOCAL_SHELL_SIDE_PANEL_AUTO_OPEN_TAB);
+  if (isTerminalSidePanelAutoOpenTab(localShellSidePanelAutoOpenTab)) {
+    settings.localShellSidePanelAutoOpenTab = localShellSidePanelAutoOpenTab;
+  }
 
   // Terminal settings (syncable subset only)
   const termSettingsRaw = localStorageAdapter.readString(STORAGE_KEY_TERM_SETTINGS);
@@ -550,6 +563,8 @@ export function collectSyncableSettings(): SyncPayload['settings'] {
   if (tabBarPosition != null) settings.tabBarPosition = normalizeTabBarPosition(tabBarPosition);
   const showSftpTab = localStorageAdapter.readBoolean(STORAGE_KEY_SHOW_SFTP_TAB);
   if (showSftpTab != null) settings.showSftpTab = showSftpTab;
+  const sftpInSidebar = localStorageAdapter.readBoolean(STORAGE_KEY_SFTP_IN_SIDEBAR);
+  if (sftpInSidebar != null) settings.sftpInSidebar = sftpInSidebar;
   const shellOnlyTabNumberShortcuts = localStorageAdapter.readBoolean(STORAGE_KEY_SHELL_ONLY_TAB_NUMBER_SHORTCUTS);
   if (shellOnlyTabNumberShortcuts != null) settings.shellOnlyTabNumberShortcuts = shellOnlyTabNumberShortcuts;
   const showTabNumberBadges = localStorageAdapter.readBoolean(STORAGE_KEY_SHOW_TAB_NUMBER_BADGES);
@@ -732,6 +747,12 @@ async function applySyncableSettings(
   if (isTerminalSidePanelAutoOpenTab(settings.terminalSidePanelAutoOpenTab)) {
     localStorageAdapter.writeString(STORAGE_KEY_TERMINAL_SIDE_PANEL_AUTO_OPEN_TAB, settings.terminalSidePanelAutoOpenTab);
   }
+  if (settings.localShellSidePanelAutoOpen != null) {
+    localStorageAdapter.writeBoolean(STORAGE_KEY_LOCAL_SHELL_SIDE_PANEL_AUTO_OPEN, settings.localShellSidePanelAutoOpen);
+  }
+  if (isTerminalSidePanelAutoOpenTab(settings.localShellSidePanelAutoOpenTab)) {
+    localStorageAdapter.writeString(STORAGE_KEY_LOCAL_SHELL_SIDE_PANEL_AUTO_OPEN_TAB, settings.localShellSidePanelAutoOpenTab);
+  }
 
   // Terminal settings - merge with existing to preserve platform-specific keys
   if (settings.terminalSettings) {
@@ -818,6 +839,9 @@ async function applySyncableSettings(
   }
   if (settings.showSftpTab != null) {
     localStorageAdapter.writeBoolean(STORAGE_KEY_SHOW_SFTP_TAB, settings.showSftpTab);
+  }
+  if (settings.sftpInSidebar != null) {
+    localStorageAdapter.writeBoolean(STORAGE_KEY_SFTP_IN_SIDEBAR, settings.sftpInSidebar);
   }
   if (settings.shellOnlyTabNumberShortcuts != null) {
     localStorageAdapter.writeBoolean(STORAGE_KEY_SHELL_ONLY_TAB_NUMBER_SHORTCUTS, settings.shellOnlyTabNumberShortcuts);

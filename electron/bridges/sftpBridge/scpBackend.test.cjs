@@ -173,6 +173,29 @@ describe("scpBackend browse/manage with fake exec", () => {
     assert.equal(st.isDirectory, false);
     const statCommand = commands.find((entry) => entry.command.includes("if [ ! -e"))?.command || "";
     assert.match(statCommand, /\[ ! -L "\$p" \]/, "broken symlinks must not be reported as missing");
+    assert.match(
+      statCommand,
+      /stat -f %z -- "\$p" 2>\/dev\/null \|\| echo "\?"/,
+      "a missing stat binary must yield the unknown-size marker, not a fake 0",
+    );
+  });
+
+  it("reports an unknown size when the remote has no stat binary", async () => {
+    // Devices without SFTP often also lack a usable stat binary; the stat
+    // command then falls back to the "?" marker. The upload size verification
+    // must skip instead of failing with "expected N bytes, got 0" (#3399).
+    const noStatBackend = createScpBackend({
+      exec: async () => ({
+        stdout: "f|-rw-r--r--|?|1700000000|/home/test/readme.txt\n",
+        stderr: "",
+        code: 0,
+      }),
+      execStream: async () => createMockStream(),
+    });
+    const st = await noStatBackend.stat("/home/test/readme.txt");
+    assert.equal(st.size, undefined);
+    assert.equal(st.isDirectory, false);
+    assert.equal(st.type, "file");
   });
 
   it("reports ENOENT when the stat command exits 2 with an ENOENT marker", async () => {

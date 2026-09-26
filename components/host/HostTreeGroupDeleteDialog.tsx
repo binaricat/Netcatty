@@ -5,6 +5,8 @@ import {
   hostTreeInlineGroupDeleteStore,
   useHostTreeInlineGroupDeleteTarget,
 } from '../../application/state/hostTreeInlineGroupDeleteStore';
+import { VaultGroupDeletionConfirmationChangedError } from '../../application/state/useVaultGroupDeletion';
+import { toast } from '../ui/toast';
 import { Button } from '../ui/button';
 import {
   Dialog,
@@ -17,11 +19,13 @@ import {
 
 type HostTreeGroupDeleteDialogProps = {
   managedGroupPaths?: Set<string>;
+  managedFilesByGroupPath?: Map<string, string[]>;
   onConfirmDelete: (groupPath: string, deleteHosts: boolean) => void | Promise<void>;
 };
 
 export const HostTreeGroupDeleteDialog: React.FC<HostTreeGroupDeleteDialogProps> = ({
   managedGroupPaths,
+  managedFilesByGroupPath,
   onConfirmDelete,
 }) => {
   const { t } = useI18n();
@@ -29,6 +33,23 @@ export const HostTreeGroupDeleteDialog: React.FC<HostTreeGroupDeleteDialogProps>
   const [deleteHosts, setDeleteHosts] = useState(false);
   const isOpen = Boolean(targetPath);
   const isManaged = Boolean(targetPath && managedGroupPaths?.has(targetPath));
+  const descendantManagedFiles: string[] = [];
+  if (targetPath && managedFilesByGroupPath) {
+    for (const [groupPath, files] of managedFilesByGroupPath) {
+      if (
+        (groupPath === targetPath || groupPath.startsWith(`${targetPath}/`))
+      ) {
+        for (const filePath of files) {
+          if (
+            filePath
+            && !descendantManagedFiles.includes(filePath)
+          ) {
+            descendantManagedFiles.push(filePath);
+          }
+        }
+      }
+    }
+  }
 
   useEffect(() => {
     if (!isOpen) {
@@ -49,7 +70,9 @@ export const HostTreeGroupDeleteDialog: React.FC<HostTreeGroupDeleteDialogProps>
           <DialogDescription className="break-words [overflow-wrap:anywhere]">
             {isManaged
               ? t('vault.groups.deleteDialog.managedDesc')
-              : t('vault.groups.deleteDialog.desc')}
+              : descendantManagedFiles.length > 0
+                ? t('vault.groups.deleteDialog.mixedDesc')
+                : t('vault.groups.deleteDialog.desc')}
           </DialogDescription>
         </DialogHeader>
         <div className="min-w-0 space-y-4 py-4">
@@ -59,6 +82,25 @@ export const HostTreeGroupDeleteDialog: React.FC<HostTreeGroupDeleteDialogProps>
                 {t('vault.groups.pathLabel')}:{' '}
                 <span className="font-mono">{targetPath}</span>
               </p>
+              {descendantManagedFiles.length > 0 && (
+                <div className="space-y-1 rounded-md border border-destructive/40 bg-destructive/10 p-3">
+                  <p className="text-sm text-destructive">
+                    {t('vault.groups.deleteDialog.managedWarning')}
+                  </p>
+                  {descendantManagedFiles.length > 0 && (
+                    <div className="max-h-40 space-y-1 overflow-y-auto">
+                      {descendantManagedFiles.map((filePath) => (
+                        <p
+                          key={filePath}
+                          className="break-all font-mono text-xs text-muted-foreground"
+                        >
+                          {t('vault.groups.deleteDialog.managedFile', { file: filePath })}
+                        </p>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
               {!isManaged && (
                 <label className="flex items-center gap-2 text-sm cursor-pointer">
                   <input
@@ -79,12 +121,18 @@ export const HostTreeGroupDeleteDialog: React.FC<HostTreeGroupDeleteDialogProps>
           </Button>
           <Button
             variant="destructive"
-            onClick={() => {
+            onClick={async () => {
               if (!targetPath) return;
-              void Promise.resolve(onConfirmDelete(targetPath, isManaged || deleteHosts)).finally(() => {
-                hostTreeInlineGroupDeleteStore.close();
-                setDeleteHosts(false);
-              });
+              try {
+                await onConfirmDelete(targetPath, isManaged || deleteHosts);
+              } catch (error) {
+                toast.error(error instanceof VaultGroupDeletionConfirmationChangedError
+                  ? t('vault.groups.deleteDialog.sourcesChanged')
+                  : error instanceof Error ? error.message : t('common.error'));
+                return;
+              }
+              hostTreeInlineGroupDeleteStore.close();
+              setDeleteHosts(false);
             }}
           >
             {t('common.delete')}

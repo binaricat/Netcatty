@@ -25,6 +25,7 @@ export type SettingsChromeSnapshot = {
   windowOpacity: number;
   tabBarPosition: 'top' | 'bottom';
   showSftpTab: boolean;
+  sftpInSidebar: boolean;
   showHostTreeSidebar: boolean;
   showRecentHosts: boolean;
   hostClickBehavior: HostClickBehavior;
@@ -37,6 +38,8 @@ export type SettingsChromeSnapshot = {
   restoreTerminalCwd: boolean;
   terminalSidePanelAutoOpen: boolean;
   terminalSidePanelAutoOpenTab: TerminalSidePanelAutoOpenTab;
+  localShellSidePanelAutoOpen: boolean;
+  localShellSidePanelAutoOpenTab: TerminalSidePanelAutoOpenTab;
 };
 
 /**
@@ -58,6 +61,7 @@ export const DEFAULT_SETTINGS_CHROME_SNAPSHOT: SettingsChromeSnapshot = Object.f
   windowOpacity: 1,
   tabBarPosition: 'top',
   showSftpTab: true,
+  sftpInSidebar: false,
   showHostTreeSidebar: true,
   showRecentHosts: true,
   hostClickBehavior: 'connect',
@@ -70,6 +74,8 @@ export const DEFAULT_SETTINGS_CHROME_SNAPSHOT: SettingsChromeSnapshot = Object.f
   restoreTerminalCwd: true,
   terminalSidePanelAutoOpen: false,
   terminalSidePanelAutoOpenTab: 'ai',
+  localShellSidePanelAutoOpen: false,
+  localShellSidePanelAutoOpenTab: 'scripts',
 } satisfies SettingsChromeSnapshot);
 
 export function settingsChromeSnapshotsEqual(
@@ -84,6 +90,7 @@ export function settingsChromeSnapshotsEqual(
     && a.windowOpacity === b.windowOpacity
     && a.tabBarPosition === b.tabBarPosition
     && a.showSftpTab === b.showSftpTab
+    && a.sftpInSidebar === b.sftpInSidebar
     && a.showHostTreeSidebar === b.showHostTreeSidebar
     && a.showRecentHosts === b.showRecentHosts
     && a.hostClickBehavior === b.hostClickBehavior
@@ -95,7 +102,9 @@ export function settingsChromeSnapshotsEqual(
     && a.showTabNumberBadges === b.showTabNumberBadges
     && a.restoreTerminalCwd === b.restoreTerminalCwd
     && a.terminalSidePanelAutoOpen === b.terminalSidePanelAutoOpen
-    && a.terminalSidePanelAutoOpenTab === b.terminalSidePanelAutoOpenTab;
+    && a.terminalSidePanelAutoOpenTab === b.terminalSidePanelAutoOpenTab
+    && a.localShellSidePanelAutoOpen === b.localShellSidePanelAutoOpen
+    && a.localShellSidePanelAutoOpenTab === b.localShellSidePanelAutoOpenTab;
 }
 
 class SettingsChromeStore {
