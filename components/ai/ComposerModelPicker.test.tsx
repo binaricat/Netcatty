@@ -87,6 +87,15 @@ test('custom model action can be suppressed when the host locks the model', () =
   assert.doesNotMatch(html, /ai\.chat\.useCustomModel/);
 });
 
+test('reselecting a saved custom model preserves its custom provenance', () => {
+  const source = readFileSync(new URL('./ComposerModelPicker.tsx', import.meta.url), 'utf8');
+  // A saved custom id is appended to the preset list, so picking it from
+  // Recent has showCustom === false. The callback must keep the custom flag
+  // anyway, or the host overwrites the pref entry without it and
+  // resolveComposerCustomModelIds drops the model from the presets.
+  assert.match(source, /customPrefIds\.has\(modelId\.toLowerCase\(\)\)/);
+});
+
 test('external agent picker keeps preset rows truncation-friendly with a full-name tooltip', () => {
   const html = renderToStaticMarkup(
     <ComposerModelPicker

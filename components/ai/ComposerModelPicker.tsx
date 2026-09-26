@@ -2,6 +2,7 @@ import { Check, ChevronLeft, ChevronRight, Loader2, Pin, Search, Star } from 'lu
 import React, { useEffect, useMemo, useState } from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import {
+  canonicalizeEffortEncodedModelId,
   filterComposerModels,
   resolveComposerEnterModelId,
   resolvePinnedAndRecentModels,
@@ -148,6 +149,20 @@ export const ComposerModelPicker: React.FC<ComposerModelPickerProps> = ({
     && !models.some((model) => model.id.toLowerCase() === trimmedQuery.toLowerCase()),
   );
 
+  // Ids the prefs already mark as custom. A saved custom model that was
+  // appended to the preset list is selectable from Recent/Pinned while
+  // showCustom is false (query empty, id present in the list); the callback
+  // must keep the custom provenance or the host overwrites the pref entry
+  // without it and resolveComposerCustomModelIds drops the model (#3534).
+  const customPrefIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const entry of [...prefs.pinned, ...prefs.recent]) {
+      if (entry.providerId || entry.custom !== true) continue;
+      ids.add(canonicalizeEffortEncodedModelId(entry.modelId).trim().toLowerCase());
+    }
+    return ids;
+  }, [prefs]);
+
   const selectModel = (modelId: string) => {
     const contextWindow = models.find((model) => model.id === modelId)?.contextWindow;
     if (hasProviders && previewProvider) {
@@ -156,7 +171,11 @@ export const ComposerModelPicker: React.FC<ComposerModelPickerProps> = ({
     }
     // showCustom is only true when no catalog id matches the query, so a
     // matching pick here came from the manual-entry action (row or Enter).
-    const custom = Boolean(showCustom && modelId.toLowerCase() === trimmedQuery.toLowerCase());
+    // Otherwise preserve provenance already recorded in the prefs.
+    const custom = Boolean(
+      (showCustom && modelId.toLowerCase() === trimmedQuery.toLowerCase())
+      || customPrefIds.has(modelId.toLowerCase()),
+    );
     onSelectModel?.(modelId, custom ? { custom: true } : undefined);
   };
 
