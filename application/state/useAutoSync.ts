@@ -174,6 +174,8 @@ interface SyncNowOptions {
 interface RemoteVersionCheckOptions {
   force?: boolean;
   notifyOnFailure?: boolean;
+  /** True when the invocation is a periodic runtime check, not startup reconciliation. */
+  periodic?: boolean;
 }
 
 export const useAutoSync = (config: AutoSyncConfig) => {
@@ -681,6 +683,83 @@ export const useAutoSync = (config: AutoSyncConfig) => {
     };
     try {
       if (currentConvergentConfig.initialized && currentConvergentConfig.enabled) {
+        // Periodic runtime checks (#3527): a converged provider must not run a
+        // full CRDT join cycle every timer tick when nothing changed on either
+        // side. Every join flips the UI into SYNCING, records a merge history
+        // entry, persists the replica, and can publish a fresh cloud revision
+        // whenever its verification pass misses — so an unchanged vault plus an
+        // unchanged remote must short-circuit, the same way the legacy branch
+        // short-circuits on `remoteChanged` below. Pulls still happen: if the
+        // remote moved since the last verified baseline, the gate falls
+        // through to the full join.
+        if (options?.periodic === true) {
+          // The convergent runtime joins every connected provider
+          // (`connectedProviders` in convergentSyncRuntimeMethods), so the
+          // short-circuit must establish that ALL connected providers are
+          // unchanged — not just the preferred one picked above. Checking a
+          // single provider would suppress the join while another provider's
+          // remote moved, never pulling those changes on periodic ticks.
+          const convergentProviders = (Object.keys(state.providers) as CloudProvider[])
+            .filter((id) => isProviderReadyForSync(state.providers[id]));
+          let convergentRemoteUnchanged = convergentProviders.length > 0;
+          try {
+            for (const provider of convergentProviders) {
+              const baseline = await manager.loadConvergentProviderBaseline(provider);
+              if (!baseline) {
+                convergentRemoteUnchanged = false;
+                break;
+              }
+              const inspection = await manager.inspectProviderRemote(provider);
+              const meta = inspection.remoteFile?.meta;
+              const providerUnchanged = Boolean(
+                meta
+                  && meta.version === baseline.remoteVersion
+                  && meta.updatedAt === baseline.remoteUpdatedAt
+                  && (meta.deviceId ?? null) === (baseline.remoteDeviceId ?? null),
+              );
+              if (!providerUnchanged) {
+                convergentRemoteUnchanged = false;
+                break;
+              }
+            }
+          } catch (error) {
+            // Inspection of an earlier provider may throw while later
+            // providers are still reachable; clearing the flag here matches
+            // the warning below and lets the full join cycle run so those
+            // providers are not silently skipped on this tick.
+            convergentRemoteUnchanged = false;
+            console.warn(
+              '[AutoSync] Convergent remote-unchanged pre-check failed; falling back to a full sync cycle:',
+              error,
+            );
+          }
+          if (convergentRemoteUnchanged) {
+            // A prior convergent cycle can leave one provider stale
+            // (`pendingLocalSync` stays set after a transient upload or
+            // verification failure) while every remote still matches its
+            // per-provider baseline. Skipping the join on that condition would
+            // never retry the stale provider, so only short-circuit when the
+            // runtime reports no pending convergence.
+            const pendingConvergence = manager.getState().pendingLocalSync === true;
+            if (!pendingConvergence) {
+              const currentHash = await getDataHashRef.current();
+              const hashDecision = resolveAutoSyncHashDecision({
+                currentHash,
+                lastSyncedHash: lastSyncedDataRef.current,
+                appliedSkipHash: skipNextSyncHashRef.current,
+              });
+              if (hashDecision !== 'sync') {
+                if (hashDecision === 'skip-applied' && skipNextSyncHashRef.current !== null) {
+                  // The applied-remote data is fully synced; absorb it into the
+                  // baseline so the next tick does not re-evaluate the same hash.
+                  skipNextSyncHashRef.current = null;
+                  lastSyncedDataRef.current = currentHash;
+                }
+                return;
+              }
+            }
+          }
+        }
         // A v2 remote check must join the provider replicas through the CRDT
         // runtime. Inspecting the materialized v1 snapshot here would discard
         // retained candidates and could turn the deterministic winner into a
@@ -1221,7 +1300,7 @@ export const useAutoSync = (config: AutoSyncConfig) => {
     }
 
     lastRuntimeRemoteCheckAtRef.current = now;
-    await checkRemoteVersion({ force: true, notifyOnFailure: false });
+    await checkRemoteVersion({ force: true, notifyOnFailure: false, periodic: true });
   }, [
     checkRemoteVersion,
     enabled,
