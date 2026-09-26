@@ -635,13 +635,56 @@ function createSessionOpsApi(ctx) {
       _rc_cwd=$(readlink "/proc/$1/cwd" 2>/dev/null)
       if [ -n "$_rc_cwd" ]; then printf '%s\\n' "$_rc_cwd"; return 0; fi
       if command -v lsof >/dev/null 2>&1; then
-        # An unknown-type record can put a readlink error in its name field.
-        # Only a confirmed directory name is usable as an upload destination.
+        # lsof can label an unreadable root shell's cwd as a directory while
+        # appending "(readlink: Permission denied)" to its name on AL2023
+        # (#3493). Check annotation-shaped names before using them: real
+        # directories can also end in text such as " (owner: alice)".
         _rc_cwd=$(LC_ALL=C lsof -a -p "$1" -d cwd -Fnt 2>/dev/null | awk '
           /^f/ { is_dir=0 }
           /^t/ { is_dir=($0 == "tDIR" || $0 == "tVDIR") }
-          /^n/ && is_dir { print substr($0, 2); exit }
+          /^n/ && is_dir {
+            name=substr($0, 2)
+            if (name ~ / \\([A-Za-z][A-Za-z0-9]*: .*\\)$/) print "?" name
+            else print name
+            exit
+          }
         ')
+        case "$_rc_cwd" in
+          \\?*)
+            _rc_cwd=\${_rc_cwd#?}
+            # lsof escapes non-ASCII bytes under LC_ALL=C. Decode only for
+            # the existence check; keep the original for the client decoder.
+            _rc_test_cwd=$(printf '%s' "$_rc_cwd" | LC_ALL=C awk '
+              function hex(c) { return index("0123456789abcdef", tolower(c)) - 1 }
+              {
+                for (i=1; i<=length($0); i++) {
+                  c=substr($0,i,1)
+                  if (c!="\\\\") { printf "%s", c; continue }
+                  e=substr($0,++i,1)
+                  if (e=="x") {
+                    hi=hex(substr($0,++i,1)); lo=hex(substr($0,++i,1))
+                    if (hi<0 || lo<0) exit 1
+                    printf "%c", hi*16+lo
+                  } else if (e=="\\\\") printf "\\\\"
+                  else if (e=="n") printf "\\n"
+                  else if (e=="r") printf "\\r"
+                  else if (e=="t") printf "\\t"
+                  else if (e=="b") printf "%c", 8
+                  else if (e=="f") printf "%c", 12
+                  else if (e=="v") printf "%c", 11
+                  else if (e ~ /^[0-7]$/) {
+                    n=e+0
+                    for (j=0; j<2 && substr($0,i+1,1) ~ /^[0-7]$/; j++) {
+                      n=n*8+substr($0,++i,1)
+                    }
+                    printf "%c", n
+                  } else exit 1
+                }
+              }
+            ') || return 1
+            [ -d "$_rc_test_cwd" ] || return 1
+            ;;
+        esac
         if [ -n "$_rc_cwd" ]; then printf 'NETCATTY_LSOF_CWD=%s\\n' "$_rc_cwd"; return 0; fi
       fi
       return 1
