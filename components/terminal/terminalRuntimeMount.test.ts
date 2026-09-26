@@ -237,3 +237,14 @@ test('normal boot and hibernate wake share terminal link error feedback', () => 
     /createXTermRuntime\(\{[\s\S]*?onOpenExternalError,/,
   );
 });
+
+test('normal boot and hibernate wake preserve the local shell type for dictation paste', () => {
+  assert.match(
+    effectsSource,
+    /createXTermRuntime\(\{\s*container: containerRef\.current,\s*host,\s*localShellType: ctx\.shellType,/,
+  );
+  assert.match(
+    terminalSource,
+    /xTermRuntimeContextRef\.current = \{\s*host,\s*localShellType: shellType,/,
+  );
+});

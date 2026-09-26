@@ -165,6 +165,7 @@ import {
   type TerminalOutputHistoryPreview,
 } from "./terminalOutputHistory";
 import { shouldPassThroughCopyShortcut } from "./terminalCopyShortcut";
+import { shouldPastePlainCtrlV } from "./terminalPasteChord";
 import {
   isMacCommandPeriodInterruptChord,
   shouldUseUrgentTerminalInterrupt,
@@ -302,6 +303,7 @@ export const resetKittyKeyboardModeStateForSession = (
 export type CreateXTermRuntimeContext = {
   container: HTMLDivElement;
   host: Host;
+  localShellType?: TerminalSession["shellType"];
   fontFamilyId: string;
   resolvedFontFamily: string;
   fontSize: number;
@@ -2416,6 +2418,37 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
             return false;
           }
         }
+      }
+    }
+
+    // Clipboard-based dictation tools can deliver a transcript by placing it
+    // on the clipboard and simulating plain Ctrl+V. The #3468 reporter
+    // confirmed this path for Wispr Flow by remapping Paste to Ctrl+V.
+    // In xterm's legacy key path, plain Ctrl+V can reach the remote as \x16
+    // (readline quoted-insert) instead of a paste (#3468). Route the chord
+    // through the shared paste pipeline like the Ctrl+Shift+V binding: text
+    // pastes, and a local image-only clipboard forwards raw Ctrl+V to nested
+    // TUIs. Kitty and native Windows shells in Win32 input mode retain their
+    // own encoding of the chord.
+    // Gate on the actual OS: on other platforms plain Ctrl+V is a live
+    // terminal key (readline quoted-insert, Vim visual-block), so it must
+    // keep forwarding as \x16 regardless of the configured hotkey scheme.
+    if (shouldPastePlainCtrlV(e, {
+      platform,
+      connected: Boolean(ctx.sessionRef.current) && ctx.statusRef.current === "connected",
+      kittySequenceForKeyDown,
+      win32InputMode: term.modes.win32InputMode,
+      localShellType: ctx.localShellType,
+    })) {
+      const id = ctx.sessionRef.current;
+      if (id) {
+        e.preventDefault();
+        e.stopPropagation();
+        // Always share the context-menu paste path so local image-only
+        // clipboard can forward Ctrl+V, and remote auto-upload stays
+        // gated inside handleTerminalClipboardPaste.
+        void ctx.terminalContextActionsRef?.current?.onPaste?.();
+        return false;
       }
     }
 

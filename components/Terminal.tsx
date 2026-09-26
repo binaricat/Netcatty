@@ -4219,6 +4219,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
   xTermRuntimeContextRef.current = {
     host,
+    localShellType: shellType,
     fontFamilyId,
     resolvedFontFamily,
     fontSize: effectiveFontSize,
