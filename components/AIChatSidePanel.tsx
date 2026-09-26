@@ -1785,6 +1785,9 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
           ? runtimeModelWarnings[currentAgentId].message
           : undefined}
         agentModelPresets={agentModelPresets}
+        // A managed Codex config's `model` field overrides every selection on
+        // send, so the manual-entry action would be a silent no-op.
+        allowCustomModelEntry={!hasCodexCustomConfig}
         selectedAgentModel={selectedAgentModel}
         handleAgentModelSelect={handleAgentModelSelect}
         cattyConfiguredProviders={cattyConfiguredProviders}

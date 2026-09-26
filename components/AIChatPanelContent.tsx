@@ -67,6 +67,8 @@ interface AIChatPanelContentProps {
   modelDisplayName?: string;
   modelCatalogWarning?: string;
   agentModelPresets: AgentModelPreset[];
+  /** Suppress the composer picker's "use custom model" action (locked model). */
+  allowCustomModelEntry?: boolean;
   selectedAgentModel: string;
   handleAgentModelSelect: (modelId: string) => void;
   cattyConfiguredProviders: ProviderConfig[];
@@ -138,6 +140,7 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
   modelDisplayName,
   modelCatalogWarning,
   agentModelPresets,
+  allowCustomModelEntry = true,
   selectedAgentModel,
   handleAgentModelSelect,
   cattyConfiguredProviders,
@@ -354,6 +357,7 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
                   modelName={modelDisplayName}
                   agentName={currentAgentId === 'catty' ? 'Catty Agent' : externalAgents.find(a => a.id === currentAgentId)?.name}
                   modelPresets={agentModelPresets}
+                  allowCustomModelEntry={allowCustomModelEntry}
                   selectedModelId={selectedAgentModel}
                   onModelSelect={handleAgentModelSelect}
                   providerSwitcher={providerSwitcher}

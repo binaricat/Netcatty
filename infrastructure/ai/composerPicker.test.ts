@@ -214,23 +214,34 @@ test('parseComposerModelPrefs drops empty and duplicate entries', () => {
   assert.deepEqual(parsed.pinned, [{ modelId: 'c' }]);
 });
 
-test('resolveComposerCustomModelIds collects manual ids outside the catalog', () => {
+test('resolveComposerCustomModelIds collects explicitly custom ids outside the catalog', () => {
   const presets = [
     { id: 'gpt-5.6-sol', name: 'GPT-5.6 Sol', thinkingLevels: ['high', 'medium'] },
     { id: 'gpt-5.5', name: 'GPT-5.5' },
   ];
   const prefs = parseComposerModelPrefs({
     recent: [
-      { modelId: 'gpt-6-astra' },
+      { modelId: 'gpt-6-astra', custom: true },
       { modelId: 'gpt-5.6-sol' },
       { modelId: 'gpt-5.5/high' },
-      { providerId: 'p1', modelId: 'provider-only' },
-      { modelId: 'gpt-6-astra' },
+      { providerId: 'p1', modelId: 'provider-only', custom: true },
+      { modelId: 'gpt-6-astra', custom: true },
     ],
-    pinned: [{ modelId: 'my-fork-model' }],
+    pinned: [{ modelId: 'my-fork-model', custom: true }],
   });
   const ids = resolveComposerCustomModelIds({ prefs, presets });
-  assert.deepEqual(ids, ['my-fork-model', 'gpt-6-astra', 'gpt-5.5/high']);
+  assert.deepEqual(ids, ['my-fork-model', 'gpt-6-astra']);
+});
+
+test('resolveComposerCustomModelIds ignores unmarked entries missing from the catalog', () => {
+  // Stale catalog entries (removed or version-gated models) must not be
+  // resurrected as custom presets after a CLI downgrade.
+  const prefs = parseComposerModelPrefs({
+    recent: [{ modelId: 'gpt-5.6-sol' }, { modelId: 'my-fork-model' }],
+    pinned: [{ modelId: 'gpt-5.6-sol/medium' }],
+  });
+  const ids = resolveComposerCustomModelIds({ prefs, presets: [{ id: 'gpt-5.5', name: 'GPT-5.5' }] });
+  assert.deepEqual(ids, []);
 });
 
 test('appendComposerCustomModelPresets appends unknown ids and stays idempotent', () => {

@@ -65,8 +65,26 @@ test('custom model action is offered in provider-switcher and preset modes', () 
   const source = readFileSync(new URL('./ComposerModelPicker.tsx', import.meta.url), 'utf8');
   // Custom ids are accepted regardless of mode (provider catalog or CLI
   // presets) — #3534 wants manual model entry for external agents too.
-  assert.match(source, /const showCustom = Boolean\(\s*trimmedQuery/s);
+  assert.match(source, /const showCustom = Boolean\(\s*allowCustomEntry\s*&&\s*trimmedQuery/s);
   assert.match(source, /resolveComposerEnterModelId/);
+});
+
+test('custom model action can be suppressed when the host locks the model', () => {
+  const source = readFileSync(new URL('./ComposerModelPicker.tsx', import.meta.url), 'utf8');
+  // Codex config-locked models override every selection on send; the host
+  // turns the action off so it never becomes a silent no-op.
+  assert.match(source, /allowCustomEntry = true/);
+  const html = renderToStaticMarkup(
+    <ComposerModelPicker
+      modelPresets={[{ id: 'gpt-5.5', name: 'GPT-5.5' }]}
+      selectedModelId="gpt-5.5"
+      prefs={{ recent: [], pinned: [] }}
+      allowCustomEntry={false}
+      onSelectModel={() => {}}
+      onTogglePinned={() => {}}
+    />,
+  );
+  assert.doesNotMatch(html, /ai\.chat\.useCustomModel/);
 });
 
 test('external agent picker keeps preset rows truncation-friendly with a full-name tooltip', () => {

@@ -22,8 +22,14 @@ export interface ComposerModelPickerProps {
   selectedModelId?: string;
   modelPresets?: AgentModelPreset[];
   prefs: ComposerModelPrefs;
+  /**
+   * Offer the "use custom model" action. Disable when the host locks the
+   * model (e.g. a managed Codex config's `model` field overrides every
+   * selection), so the action never becomes a silent no-op.
+   */
+  allowCustomEntry?: boolean;
   onSelectProviderModel?: (providerId: string, modelId: string, contextWindow?: number) => void;
-  onSelectModel?: (modelId: string) => void;
+  onSelectModel?: (modelId: string, options?: { custom?: boolean }) => void;
   onTogglePinned: (entry: ComposerModelPrefEntry) => void;
 }
 
@@ -83,6 +89,7 @@ export const ComposerModelPicker: React.FC<ComposerModelPickerProps> = ({
   selectedModelId,
   modelPresets = [],
   prefs,
+  allowCustomEntry = true,
   onSelectProviderModel,
   onSelectModel,
   onTogglePinned,
@@ -136,7 +143,8 @@ export const ComposerModelPicker: React.FC<ComposerModelPickerProps> = ({
   // Manual model ids are accepted in both modes: provider-bound catalogs and
   // preset lists from external CLI agents whose catalogs lag new models.
   const showCustom = Boolean(
-    trimmedQuery
+    allowCustomEntry
+    && trimmedQuery
     && !models.some((model) => model.id.toLowerCase() === trimmedQuery.toLowerCase()),
   );
 
@@ -146,7 +154,10 @@ export const ComposerModelPicker: React.FC<ComposerModelPickerProps> = ({
       onSelectProviderModel?.(previewProvider.id, modelId, contextWindow);
       return;
     }
-    onSelectModel?.(modelId);
+    // showCustom is only true when no catalog id matches the query, so a
+    // matching pick here came from the manual-entry action (row or Enter).
+    const custom = Boolean(showCustom && modelId.toLowerCase() === trimmedQuery.toLowerCase());
+    onSelectModel?.(modelId, custom ? { custom: true } : undefined);
   };
 
   const prefEntryFor = (modelId: string): ComposerModelPrefEntry => (

@@ -19,6 +19,12 @@ export interface ComposerPickerModel {
 export interface ComposerModelPrefEntry {
   providerId?: string;
   modelId: string;
+  /**
+   * True when the id was typed manually in the composer picker ("use custom
+   * model"). Explicit provenance keeps stale catalog entries (removed or
+   * version-gated models) from being resurrected as custom presets.
+   */
+  custom?: boolean;
 }
 
 export interface ComposerModelPrefs {
@@ -92,6 +98,7 @@ function parsePrefEntries(value: unknown): ComposerModelPrefEntry[] {
       ? (item as { providerId: string }).providerId.trim()
       : undefined;
     const entry: ComposerModelPrefEntry = providerId ? { providerId, modelId } : { modelId };
+    if ((item as { custom?: unknown }).custom === true) entry.custom = true;
     const key = composerModelPrefKey(entry);
     if (seen.has(key)) continue;
     seen.add(key);
@@ -245,9 +252,11 @@ export function modelPresetsContainId(presets: AgentModelPreset[], modelId: stri
 }
 
 /**
- * Model IDs the user typed manually in the composer picker. A scoped pref
- * entry counts as "custom" when it is provider-less and no catalog preset
- * matches its id, so manual picks survive CLI catalogs that lag new models.
+ * Model IDs the user typed manually in the composer picker. Only pref entries
+ * explicitly marked as custom (recorded when the user picked "use custom
+ * model") count, so entries that merely dropped out of the current catalog —
+ * removed or version-gated models, e.g. after a CLI downgrade — are never
+ * resurrected as custom presets.
  */
 export function resolveComposerCustomModelIds(input: {
   prefs: ComposerModelPrefs;
@@ -256,7 +265,7 @@ export function resolveComposerCustomModelIds(input: {
   const seen = new Set<string>();
   const ids: string[] = [];
   for (const entry of [...input.prefs.pinned, ...input.prefs.recent]) {
-    if (entry.providerId) continue;
+    if (entry.providerId || entry.custom !== true) continue;
     const id = canonicalizeEffortEncodedModelId(entry.modelId).trim();
     if (!id || seen.has(id)) continue;
     if (modelPresetsContainId(input.presets, id)) continue;
