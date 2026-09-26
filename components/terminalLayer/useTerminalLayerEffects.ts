@@ -13,6 +13,7 @@ import {
   resolveSftpTransferNavigationTarget,
 } from '../../domain/sftpTransferNavigation';
 import { collectSidePanelPanes, sidePanelLayoutHasTool } from '../../domain/sidePanelLayout';
+import { isSameSftpHostSelection } from '../../domain/sftpTerminalIdentity';
 import { collectSessionIds } from '../../domain/workspace';
 import {
   moveSidePanelTabMap,
@@ -108,7 +109,7 @@ export function pruneTerminalTabMemoryState(
 
 export function useTerminalLayerEffects(ctx: TerminalLayerEffectsContext) {
   const { openPath } = useSftpBackend();
-  const { activeSidePanelTab, activeSidePanelLayout, activeTabId, activeTabIdRef, activeWorkspace, activityTrackedSessions, cancelAnimationFrame, ChunkedEscapeFilter, clearTopTabsPreviewVars, document, dropHint, effectiveHosts, filterTabsMap, focusedSessionId, getSessionActivityIdsToClear, handleToggleAiFromTopBar, handleToggleScriptsSidePanel, handleToggleSidePanel, hasNotifiableTerminalOutput, isComposeBarOpen, isFocusMode, isTerminalLayerVisible, lastSidePanelTabRef, Map, onConnectToHost, onSessionData, onSplitSessionRef, onToggleBroadcastRef, onToggleWorkspaceViewModeRef, prevFocusedSessionIdRef, refocusActiveTerminalSession, requestAnimationFrame, ResizeObserver, sessionActivityStore, sessions, Set, setAiMountedTabIds, setDropHint, setNotesMountedTabIds, setScriptsMountedTabIds, setSystemMountedTabIds, setSftpHostForTab, setSftpInitialLocationForTab, setSftpPendingUploadsForTab, setSidePanelOpenTabs, setSidePanelLayouts, setThemeMountedTabIds, setWorkspaceArea, shouldMeasureTerminalLayerLayout, sidePanelPosition, sidePanelHeight, sidePanelWidth, sftpActiveHost, sftpHostForTab, sftpPaneClosedTabIdsRef, shouldMarkSessionActivity, sidePanelOpenTabs, splitHorizontalHandlersRef, splitVerticalHandlersRef, toggleScriptsSidePanelRef, toggleSidePanelRef, validAIScopeTargetIds, validSessionActivityIds, window, workspaceBroadcastHandlersRef, workspaceFocusHandlersRef, workspaceInnerRef, workspaces } = ctx;
+  const { activeSidePanelTab, activeSidePanelLayout, activeTabId, activeTabIdRef, activeWorkspace, activityTrackedSessions, cancelAnimationFrame, ChunkedEscapeFilter, clearTopTabsPreviewVars, document, dropHint, effectiveHosts, filterTabsMap, focusedSessionId, getSessionActivityIdsToClear, handleToggleAiFromTopBar, handleToggleScriptsSidePanel, handleToggleSidePanel, hasNotifiableTerminalOutput, isComposeBarOpen, isFocusMode, isTerminalLayerVisible, lastSidePanelTabRef, Map, onConnectToHost, onSessionData, onSplitSessionRef, onToggleBroadcastRef, onToggleWorkspaceViewModeRef, prevFocusedSessionIdRef, refocusActiveTerminalSession, requestAnimationFrame, ResizeObserver, sessionActivityStore, sessions, Set, setAiMountedTabIds, setDropHint, setNotesMountedTabIds, setScriptsMountedTabIds, setSystemMountedTabIds, setSftpHostForTab, setSftpHostSourceSessionForTab, setSftpInitialLocationForTab, setSftpPendingUploadsForTab, setSidePanelOpenTabs, setSidePanelLayouts, setThemeMountedTabIds, setWorkspaceArea, shouldMeasureTerminalLayerLayout, sidePanelPosition, sidePanelHeight, sidePanelWidth, sftpActiveHost, sftpHostForTab, sftpPaneClosedTabIdsRef, shouldMarkSessionActivity, sidePanelOpenTabs, splitHorizontalHandlersRef, splitVerticalHandlersRef, toggleScriptsSidePanelRef, toggleSidePanelRef, validAIScopeTargetIds, validSessionActivityIds, window, workspaceBroadcastHandlersRef, workspaceFocusHandlersRef, workspaceInnerRef, workspaces } = ctx;
 
   const activeWorkspaceId = activeWorkspace?.id;
   const activeWorkspaceViewMode = activeWorkspace?.viewMode;
@@ -199,6 +200,13 @@ export function useTerminalLayerEffects(ctx: TerminalLayerEffectsContext) {
       }
       return next;
     });
+    setSftpHostSourceSessionForTab((prev: Map<string, string>) => {
+      let next = prev;
+      for (const remap of remaps) {
+        next = moveSidePanelTabMap(next, remap);
+      }
+      return next;
+    });
     setSftpInitialLocationForTab((prev: Map<string, any>) => {
       let next = prev;
       for (const remap of remaps) {
@@ -263,6 +271,7 @@ export function useTerminalLayerEffects(ctx: TerminalLayerEffectsContext) {
     setNotesMountedTabIds,
     setScriptsMountedTabIds,
     setSftpHostForTab,
+    setSftpHostSourceSessionForTab,
     setSftpInitialLocationForTab,
     setSftpPendingUploadsForTab,
     setSidePanelLayouts,
@@ -406,6 +415,7 @@ export function useTerminalLayerEffects(ctx: TerminalLayerEffectsContext) {
   useEffect(() => {
       setSidePanelOpenTabs(prev => filterTabsMap(prev, validAIScopeTargetIds));
       setSftpHostForTab(prev => filterTabsMap(prev, validAIScopeTargetIds));
+      setSftpHostSourceSessionForTab(prev => filterTabsMap(prev, validAIScopeTargetIds));
       setSftpInitialLocationForTab(prev => filterTabsMap(prev, validAIScopeTargetIds));
       setSftpPendingUploadsForTab(prev => filterTabsMap(prev, validAIScopeTargetIds));
       setAiMountedTabIds((prev) => prev.filter((tabId) => validAIScopeTargetIds.has(tabId)));
@@ -490,10 +500,7 @@ export function useTerminalLayerEffects(ctx: TerminalLayerEffectsContext) {
       if (!activeTabId || !sftpActiveHost) return;
       if (!sidePanelLayoutHasTool(activeSidePanelLayout, 'sftp')) return;
       const stored = sftpHostForTab.get(activeTabId);
-      if (stored?.id === sftpActiveHost.id
-        && stored?.hostname === sftpActiveHost.hostname
-        && stored?.port === sftpActiveHost.port
-        && stored?.protocol === sftpActiveHost.protocol) return;
+      if (isSameSftpHostSelection(stored, sftpActiveHost)) return;
       setSftpHostForTab(prev => {
         const next = new Map(prev);
         next.set(activeTabId, sftpActiveHost);
@@ -531,6 +538,11 @@ export function useTerminalLayerEffects(ctx: TerminalLayerEffectsContext) {
       // Bump initialLocation even when the host is already selected so the
       // path-navigation effect re-runs after reopen.
       setSftpHostForTab((prev: Map<string, any>) => new Map(prev).set(tabId, host));
+      setSftpHostSourceSessionForTab((prev: Map<string, string>) => {
+        const next = new Map(prev);
+        next.delete(tabId);
+        return next;
+      });
       setSftpInitialLocationForTab((prev: Map<string, any>) => {
         const next = new Map(prev);
         next.delete(tabId);
@@ -657,7 +669,7 @@ export function useTerminalLayerEffects(ctx: TerminalLayerEffectsContext) {
     };
     window.addEventListener('netcatty:open-sftp-transfer-target', handler);
     return () => window.removeEventListener('netcatty:open-sftp-transfer-target', handler);
-  }, [activeTabIdRef, effectiveHosts, onConnectToHost, openPath, setSftpHostForTab, setSftpInitialLocationForTab, setSidePanelOpenTabs, sftpActiveHost, sftpHostForTab, window]);
+  }, [activeTabIdRef, effectiveHosts, onConnectToHost, openPath, setSftpHostForTab, setSftpHostSourceSessionForTab, setSftpInitialLocationForTab, setSidePanelOpenTabs, sftpActiveHost, sftpHostForTab, window]);
   
   useEffect(() => {
       const sessionIdsToClear = getSessionActivityIdsToClear(activeTabId, sessions);

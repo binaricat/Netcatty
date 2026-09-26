@@ -259,3 +259,55 @@ test("disconnected observer surfaces do not advertise a reconnect they cannot pe
   assert.equal(markup.includes("Start over"), false);
   assert.match(markup, /Close session/);
 });
+
+test("re-auth dialog offers saved password identities from the vault (#3475)", () => {
+  const baseAuthProps = {
+    authMethod: "password" as const,
+    setAuthMethod: () => {},
+    authUsername: "root",
+    setAuthUsername: () => {},
+    authPassword: "",
+    setAuthPassword: () => {},
+    authKeyId: null,
+    setAuthKeyId: () => {},
+    authPassphrase: "",
+    setAuthPassphrase: () => {},
+    showAuthPassphrase: false,
+    setShowAuthPassphrase: () => {},
+    showAuthPassword: false,
+    setShowAuthPassword: () => {},
+    authRetryMessage: "Authentication failed. Please try again.",
+    onSubmit: () => {},
+    onCancel: () => {},
+    isValid: true,
+  };
+
+  const withIdentities = renderDialog({
+    needsAuth: true,
+    authProps: {
+      ...baseAuthProps,
+      identities: [
+        {
+          id: "identity-1",
+          label: "Password B",
+          username: "deploy",
+          authMethod: "password",
+          password: "secret",
+          created: 0,
+        },
+      ],
+    },
+  });
+
+  assert.match(withIdentities, /Use saved identity/);
+  assert.match(withIdentities, /Authentication failed\. Please try again\./);
+  // Stored passwords are never rendered, only masked.
+  assert.equal(withIdentities.includes("secret"), false);
+
+  const withoutIdentities = renderDialog({
+    needsAuth: true,
+    authProps: { ...baseAuthProps },
+  });
+
+  assert.equal(withoutIdentities.includes("Use saved identity"), false);
+});

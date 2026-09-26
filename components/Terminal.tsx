@@ -82,6 +82,7 @@ import { usePluginTerminalProviders } from "../application/state/usePluginTermin
 import type { PluginTerminalDecorationRule } from "../domain/pluginTerminalProviders";
 import { terminalReconnectRegistry } from "../application/state/terminalReconnectRegistry";
 import { resolveSftpReuseSourceSessionId } from "../application/state/terminalConnectionReuse";
+import { resolvePasswordAuthSftpHost } from "../domain/authIdentityPicker";
 // SFTPModal removed - SFTP is now handled by SftpSidePanel in TerminalLayer
 import { Button } from "./ui/button";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "./ui/hover-card";
@@ -1438,8 +1439,11 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       hasEverConnectedRef.current = true;
       clearAutoReconnect();
     }
-    onStatusChange?.(sessionId, next);
-  }, [clearAutoReconnect, onStatusChange, sessionId]);
+    const sftpHost = next === "connected"
+      ? resolvePasswordAuthSftpHost(host, identities, pendingAuthRef.current)
+      : host;
+    onStatusChange?.(sessionId, next, sftpHost === host ? undefined : sftpHost);
+  }, [clearAutoReconnect, host, identities, onStatusChange, sessionId]);
   const updateStatusRef = useRef(updateStatus);
   updateStatusRef.current = updateStatus;
 
@@ -3467,8 +3471,11 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     if (onOpenSftp) {
       // Delegate to parent (TerminalLayer) for shared SFTP side panel
       const initialPath = await resolveSftpInitialPath();
+      const sftpHost = statusRef.current === 'connected'
+        ? resolvePasswordAuthSftpHost(host, identities, pendingAuthRef.current)
+        : host;
       onOpenSftp(
-        host,
+        sftpHost,
         initialPath,
         undefined,
         sessionId,
@@ -3483,7 +3490,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       return;
     }
     setShowSFTP(true);
-  }, [host, onOpenSftp, resolveSftpInitialPath, sessionId, showSFTP]);
+  }, [host, identities, onOpenSftp, resolveSftpInitialPath, sessionId, showSFTP]);
 
   const handleSendYmodem = useCallback(async () => {
     if (!isSerialConnection || statusRef.current !== "connected") return;
@@ -3961,6 +3968,13 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     requiresUserInput: auth.needsAuth || needsHostKeyVerification || isConnectionAwaitingUserInput,
   });
 
+  const dragDropSftpHost = status === 'connected'
+    ? resolvePasswordAuthSftpHost(host, identities, pendingAuthRef.current)
+    : host;
+  const dragDropSudoPassword = dragDropSftpHost === host
+    ? resolvedSudoAutofillPassword
+    : identities.find(identity => identity.id === dragDropSftpHost.identityId)?.password;
+
   const {
     handleDragEnter,
     handleDragLeave,
@@ -3968,9 +3982,9 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     handleDrop,
     isDraggingOver,
   } = useTerminalDragDrop({
-    host,
-    resolvedLoginUsername,
-    resolvedSudoPassword: resolvedSudoAutofillPassword,
+    host: dragDropSftpHost,
+    resolvedLoginUsername: dragDropSftpHost === host ? resolvedLoginUsername : dragDropSftpHost.username,
+    resolvedSudoPassword: dragDropSudoPassword,
     isLocalConnection,
     isNetworkDevice,
     onOpenSftp,
@@ -4545,7 +4559,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
   return (
     <>
-      <TerminalView ctx={{ Activity, ArrowDownToLine, ArrowUpFromLine, Button, Clock3, Copy, Cpu, HardDrive, HoverCard, HoverCardContent, HoverCardTrigger, Maximize2, MemoryStick, Radio, RefreshCcw, Sparkles, SquareArrowOutUpRight, Unplug, TerminalAutocomplete, TerminalComposeBar, TerminalConnectionDialog, TerminalContextMenu, TerminalSearchBar, Tooltip, TooltipContent, TooltipTrigger, ZmodemOverwriteDialog, ZmodemProgressIndicator, auth, autocompleteAcceptTextRef, autocompleteCloseRef, autocompleteHostOs, autocompleteInputRef, autocompleteKeyEventRef, autocompleteRepositionRef, autocompleteSettings, canUpdateHost: !!onUpdateHost, chainProgress, cn, compactToolbar, lineTimestampsAvailable, containerRef, effectiveFontSize, effectiveFontWeight, effectiveTheme, error, executeSnippet, executeSnippetCommand, handleAddSelectionToAI: onAddSelectionToAI ? handleAddSelectionToAI : undefined, handleCancelConnect, handleCloseDisconnectedSession, handleCloseSearch, handleDisconnect: (attachExistingSession || compactToolbar) ? undefined : handleDisconnect, handleDismissDisconnectedDialog, handleDragEnter, handleDragLeave, handleDragOver, handleDrop, handleFindNext, handleFindPrevious, handleHostKeyAddAndContinue, handleHostKeyClose, handleHostKeyContinue, handleOsc52ReadResponse, handleOsc7SetupConfirm, handleOsc7SetupOpenChange, handleReceiveYmodem, handleRetry, handleSearch, handleSendYmodem, handleTopOverlayMouseDownCapture, hasMouseTracking, host, hotkeyScheme, inWorkspace, isBroadcastEnabled, isCancelling, isComposeBarOpen: effectiveComposeBarOpen, isConnectionAwaitingUserInput, isDraggingOver, isFocusMode, isFocusedPane, isLocalConnection, remoteDragDropUsesZmodem, isPluginTerminalProviderAvailable, isReconnectActive, isSerialConnection, isSearchOpen, isSupportedOs, isSystemSidebarEligible, isVisible, keyBindings, keys, knownCwdRef, needsHostKeyVerification, onAddSelectionToAI, onBroadcastInput, onCloseSession, onDetach, onDetachDragEnd, onDetachDragStart, onDetachPointerDown, onEndSessionDrag, onExpandToFocus, onTogglePaneMagnification, onOpenSystem, onRename, onSplitHorizontal, onSplitVertical, onStartSessionDrag, onToggleBroadcast, onUpdateHost: handleUpdateHostFromTerminal, osc52ReadPromptVisible, osc7SetupOpen, osc7SetupRunning, passwordPromptActiveRef, pendingHostKeyInfo, progressLogs, progressValue, renderControls, resolvedFontFamily, restoreState, scrollToBottomAfterProgrammaticInput, searchMatchCount, searchFocusToken, scriptExecutionOverlay: activeScriptRun ? (
+      <TerminalView ctx={{ Activity, ArrowDownToLine, ArrowUpFromLine, Button, Clock3, Copy, Cpu, HardDrive, HoverCard, HoverCardContent, HoverCardTrigger, Maximize2, MemoryStick, Radio, RefreshCcw, Sparkles, SquareArrowOutUpRight, Unplug, TerminalAutocomplete, TerminalComposeBar, TerminalConnectionDialog, TerminalContextMenu, TerminalSearchBar, Tooltip, TooltipContent, TooltipTrigger, ZmodemOverwriteDialog, ZmodemProgressIndicator, auth, autocompleteAcceptTextRef, autocompleteCloseRef, autocompleteHostOs, autocompleteInputRef, autocompleteKeyEventRef, autocompleteRepositionRef, autocompleteSettings, canUpdateHost: !!onUpdateHost, chainProgress, cn, compactToolbar, lineTimestampsAvailable, containerRef, effectiveFontSize, effectiveFontWeight, effectiveTheme, error, executeSnippet, executeSnippetCommand, handleAddSelectionToAI: onAddSelectionToAI ? handleAddSelectionToAI : undefined, handleCancelConnect, handleCloseDisconnectedSession, handleCloseSearch, handleDisconnect: (attachExistingSession || compactToolbar) ? undefined : handleDisconnect, handleDismissDisconnectedDialog, handleDragEnter, handleDragLeave, handleDragOver, handleDrop, handleFindNext, handleFindPrevious, handleHostKeyAddAndContinue, handleHostKeyClose, handleHostKeyContinue, handleOsc52ReadResponse, handleOsc7SetupConfirm, handleOsc7SetupOpenChange, handleReceiveYmodem, handleRetry, handleSearch, handleSendYmodem, handleTopOverlayMouseDownCapture, hasMouseTracking, host, hotkeyScheme, inWorkspace, isBroadcastEnabled, isCancelling, isComposeBarOpen: effectiveComposeBarOpen, isConnectionAwaitingUserInput, isDraggingOver, isFocusMode, isFocusedPane, isLocalConnection, remoteDragDropUsesZmodem, isPluginTerminalProviderAvailable, isReconnectActive, isSerialConnection, isSearchOpen, isSupportedOs, isSystemSidebarEligible, isVisible, keyBindings, keys, identities, knownCwdRef, needsHostKeyVerification, onAddSelectionToAI, onBroadcastInput, onCloseSession, onDetach, onDetachDragEnd, onDetachDragStart, onDetachPointerDown, onEndSessionDrag, onExpandToFocus, onTogglePaneMagnification, onOpenSystem, onRename, onSplitHorizontal, onSplitVertical, onStartSessionDrag, onToggleBroadcast, onUpdateHost: handleUpdateHostFromTerminal, osc52ReadPromptVisible, osc7SetupOpen, osc7SetupRunning, passwordPromptActiveRef, pendingHostKeyInfo, progressLogs, progressValue, renderControls, resolvedFontFamily, restoreState, scrollToBottomAfterProgrammaticInput, searchMatchCount, searchFocusToken, scriptExecutionOverlay: activeScriptRun ? (
         <ScriptExecutionOverlay
           run={activeScriptRun}
           onPause={() => { void pauseScriptRun(activeScriptRun.runId); }}

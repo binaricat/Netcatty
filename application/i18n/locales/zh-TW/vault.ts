@@ -579,6 +579,7 @@ export const zhTWVaultMessages: Messages = {
   'terminal.auth.retryMessage': '驗證失敗。請檢查憑證後再試一次。',
   'terminal.auth.retryLog': '驗證失敗，請再試一次。',
   'terminal.auth.noKeysHint': '暫無金鑰，請先在鑰匙串中新增。',
+  'terminal.auth.selectIdentity': '使用已儲存的身分',
   'terminal.auth.continueSave': '繼續並儲存',
   'terminal.auth.credentialsUnavailable': '目前裝置無法解密已儲存憑證，請重新輸入並再次儲存。',
   'terminal.auth.jumpCredentialsUnavailable': '某個跳板機的已儲存憑證無法在目前裝置解密，請到主機設定中重新填寫。',
