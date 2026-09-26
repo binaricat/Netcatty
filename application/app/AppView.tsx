@@ -2,8 +2,9 @@
 import React, { Suspense, lazy, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, Download, Trash2 } from 'lucide-react';
 import { activeTabStore, toEditorTabId, useIsEditorTabActive } from '../state/activeTabStore';
-import { editorTabStore } from '../state/editorTabStore';
+import { editorTabStore, tabIsDirty } from '../state/editorTabStore';
 import { releaseEditorTabSaveCoordinator, saveEditorTab } from '../state/editorTabSave';
+import { focusEditorInWindow, popOutEditorTab } from '../state/editorWindowClient';
 import { useTerminalHostTreeLayoutWidth } from '../state/terminalHostTreeStore';
 import { TopTabs } from '../../components/TopTabs';
 import { VaultView } from '../../components/VaultView';
@@ -421,6 +422,23 @@ function AppViewInner({ domains }: AppViewProps) {
     const tab = editorTabStore.getTab(id);
     if (!tab) return false;
 
+    if (tab.placement === "window") {
+      const result = await netcattyBridge.get()?.closeEditorWindowTabs?.({ editorIds: [id] });
+      const ok = Boolean(result?.success) && result?.cancelled !== true;
+      if (ok) {
+        const closingTabId = toEditorTabId(id);
+        const list = orderedTabsWithEditorsRef.current;
+        const idx = list.indexOf(closingTabId);
+        releaseEditorTabSaveCoordinator(id);
+        editorTabStore.close(id);
+        if (activeTabStore.getActiveTabId() === closingTabId) {
+          const next = list[idx - 1] ?? list[idx + 1] ?? 'vault';
+          activeTabStore.setActiveTabId(next === closingTabId ? 'vault' : next);
+        }
+      }
+      return ok;
+    }
+
     const closeEditorAndActivateNeighbor = () => {
       const closingTabId = toEditorTabId(id);
       const list = orderedTabsWithEditorsRef.current;
@@ -432,7 +450,7 @@ function AppViewInner({ domains }: AppViewProps) {
       activeTabStore.setActiveTabId(next === closingTabId ? 'vault' : next);
     };
 
-    const dirty = tab.content !== tab.baselineContent;
+    const dirty = tabIsDirty(tab);
     if (!dirty) {
       closeEditorAndActivateNeighbor();
       return true;
@@ -462,6 +480,16 @@ function AppViewInner({ domains }: AppViewProps) {
   // Keep the hotkey ref current during render so Cmd/Ctrl+W never sees the
   // App.tsx stub `() => false` between commit and useEffect.
   handleRequestCloseEditorTabRef.current = handleRequestCloseEditorTab;
+
+  const handlePopOutEditorTab = useCallback(async (id: string) => {
+    const tab = editorTabStore.getTab(id);
+    if (!tab || tab.placement === "window") {
+      if (tab) void focusEditorInWindow(id);
+      return;
+    }
+    const host = hostById.get(tab.hostId);
+    await popOutEditorTab(id, host?.label);
+  }, [hostById]);
 
   const handleSaveSessionRename = useCallback((name: string) => {
     if (!sessionRenameTarget) return;
@@ -539,6 +567,8 @@ function AppViewInner({ domains }: AppViewProps) {
         pluginViewTabs={pluginViewTabs}
         onClosePluginViewTab={closePluginViewTab}
         onRequestCloseEditorTab={handleRequestCloseEditorTab}
+        onPopOutEditorTab={handlePopOutEditorTab}
+        onFocusEditorWindowTab={(id) => { void focusEditorInWindow(id); }}
         hostById={hostById}
       />
 
@@ -789,7 +819,7 @@ function AppViewInner({ domains }: AppViewProps) {
         ))}
 
         {/* Editor Tabs — kept mounted for Monaco instance persistence; visibility toggled via CSS */}
-        {editorTabs.map((tab) => (
+        {editorTabs.filter((tab) => tab.placement !== "window").map((tab) => (
           <LazyLoadBoundary key={tab.id} name="Editor" resetKey={tab.id}>
             <Suspense fallback={<TextEditorTabFallback tabId={tab.id} />}>
               <LazyTextEditorTabView
@@ -798,6 +828,7 @@ function AppViewInner({ domains }: AppViewProps) {
                 keyBindings={keyBindings}
                 hostById={hostById}
                 onRequestClose={(id) => handleRequestCloseEditorTabRef.current(id)}
+                onPopOut={(id) => { void handlePopOutEditorTab(id); }}
               />
             </Suspense>
           </LazyLoadBoundary>

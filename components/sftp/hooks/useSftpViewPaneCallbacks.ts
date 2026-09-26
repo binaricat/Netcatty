@@ -233,6 +233,7 @@ export const useSftpViewPaneCallbacks = ({
     setFileOpenerTarget: fileOps.setFileOpenerTarget,
     handleSaveTextFile: fileOps.handleSaveTextFile,
     onPromoteToTab: fileOps.onPromoteToTab,
+    onPopOut: fileOps.onPopOut,
     handleFileOpenerSelect: fileOps.handleFileOpenerSelect,
     handleSelectSystemApp: fileOps.handleSelectSystemApp,
   };

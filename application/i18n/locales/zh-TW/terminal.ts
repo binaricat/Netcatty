@@ -961,6 +961,13 @@ export const zhTWTerminalMessages: Messages = {
   // Text Editor
   'sftp.editor.wordWrap': '自動換行',
   'sftp.editor.maximize': '最大化',
+  'sftp.editor.popOut': '在編輯器視窗開啟',
+  'sftp.editor.dock': '停靠回主視窗',
+  'sftp.editor.focusWindow': '聚焦編輯器視窗',
+  'sftp.editor.close': '關閉',
+  'sftp.editor.windowTitle': '編輯器',
+  'sftp.editor.windowEmpty': '沒有開啟的檔案',
+  'sftp.editor.dockFailed': '無法把此檔案停靠回主視窗',
   'sftp.editor.unsavedTitle': '未儲存的修改',
   'sftp.editor.unsavedMessage': '{fileName} 有未儲存的修改，是否儲存後關閉？',
   'sftp.editor.discardChanges': '不儲存',

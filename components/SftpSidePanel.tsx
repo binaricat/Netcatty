@@ -37,6 +37,7 @@ import {
   editorTabStore,
   useEditorTabPresenceRevision,
 } from "../application/state/editorTabStore";
+import { forceCloseOwnedEditors } from "../application/state/editorWindowClient";
 import { releaseEditorTabSaveCoordinator } from "../application/state/editorTabSave";
 import { useSftpBackend } from "../application/state/useSftpBackend";
 import { useSftpFileAssociations } from "../application/state/useSftpFileAssociations";
@@ -532,7 +533,7 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
         if (id) ownedSessionIds.push(id);
       }
       if (ownedSessionIds.length === 0 && ownedSftpTabIds.length === 0) return;
-      const closed = editorTabStore.forceCloseByOwners({
+      const closed = forceCloseOwnedEditors({
         sessionIds: ownedSessionIds,
         sftpTabIds: ownedSftpTabIds,
       });
@@ -1529,6 +1530,7 @@ const SftpSidePanelInteractiveBody: React.FC<SftpSidePanelInteractiveBodyProps> 
     setFileOpenerTarget,
     handleSaveTextFile,
     onPromoteToTab,
+    onPopOut,
     handleFileOpenerSelect,
     handleSelectSystemApp,
   } = useSftpViewPaneCallbacks({
@@ -1999,6 +2001,7 @@ const SftpSidePanelInteractiveBody: React.FC<SftpSidePanelInteractiveBodyProps> 
           handleFileOpenerSelect={handleFileOpenerSelect}
           handleSelectSystemApp={handleSelectSystemApp}
           onPromoteToTab={onPromoteToTab}
+          onPopOut={onPopOut}
           onRequestTerminalFocus={onRequestTerminalFocus}
           t={t}
         />

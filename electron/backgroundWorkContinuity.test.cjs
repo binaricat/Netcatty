@@ -13,6 +13,7 @@ test('terminal windows do not throttle work while hidden or unfocused', () => {
   const windowSources = [
     'bridges/windowManager/mainWindow.cjs',
     'bridges/windowManager/terminalPopupWindow.cjs',
+    'bridges/windowManager/editorWindow.cjs',
   ];
 
   for (const relativePath of windowSources) {
