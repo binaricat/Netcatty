@@ -22,6 +22,14 @@ import {
   resolveAgentModelSelection,
 } from '../infrastructure/ai/types';
 import { getExternalAgentSdkBackend, getManualAgentCommand, matchesManagedAgentConfig } from '../infrastructure/ai/managedAgents';
+import {
+  appendComposerCustomModelPresets,
+  resolveComposerCustomModelIds,
+} from '../infrastructure/ai/composerPicker';
+import {
+  readComposerModelPrefs,
+  subscribeComposerModelPrefs,
+} from '../infrastructure/ai/composerModelPrefs';
 import { toast } from './ui/toast';
 import { useAgentDiscovery } from '../application/state/useAgentDiscovery';
 import {
@@ -843,12 +851,33 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     [currentAgentConfig],
   );
 
-  const { model: codexConfigModel, loadModel: loadCodexConfigModel } = useCodexConfigModel(
+  const {
+    model: codexConfigModel,
+    loadModel: loadCodexConfigModel,
+    isPending: isCodexConfigModelPending,
+  } = useCodexConfigModel(
     currentAgentConfig, isVisible,
   );
 
   const agentModelMapRef = useRef(agentModelMap);
   agentModelMapRef.current = agentModelMap;
+
+  // Manual model ids typed in the composer picker are recorded in composer
+  // prefs (per agent scope). Re-render when they change so custom picks stay
+  // visible and accepted as stored selections (#3534).
+  const [composerCustomModelsVersion, setComposerCustomModelsVersion] = useState(0);
+  useEffect(() => subscribeComposerModelPrefs(() => {
+    setComposerCustomModelsVersion((version) => version + 1);
+  }), []);
+  const collectCustomModelIds = useCallback((agentId: string, presets: AgentModelPreset[]) => {
+    // Touch the version so pref writes recreate this callback and invalidate
+    // memos that read custom ids.
+    void composerCustomModelsVersion;
+    return resolveComposerCustomModelIds({
+      prefs: readComposerModelPrefs(agentId),
+      presets,
+    });
+  }, [composerCustomModelsVersion]);
 
   const buildExternalAgentRuntimeModelTarget = useCallback((agent: ExternalAgentConfig | undefined): SdkRuntimeModelTarget | null => {
     if (!agent) return null;
@@ -881,9 +910,13 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     const agent = externalAgentsRef.current.find((item) => item.id === target.agentId);
     if (buildExternalAgentRuntimeModelTarget(agent)?.cacheKey !== target.cacheKey) return;
     const agentId = target.agentId;
-    const runtimePresets = mergeFallbackThinkingLevels(
+    const catalogPresets = mergeFallbackThinkingLevels(
       normalizeSdkRuntimeModelPresets(catalog.models, catalog.currentModelId),
       getAgentModelPresets(agent?.command, getExternalAgentSdkBackend(agent)),
+    );
+    const runtimePresets = appendComposerCustomModelPresets(
+      catalogPresets,
+      collectCustomModelIds(agentId, catalogPresets),
     );
     const storedModelId = agentModelMapRef.current[agentId];
     if (runtimePresets.length === 0) {
@@ -917,7 +950,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     ) {
       setAgentModel(agentId, catalog.currentModelId);
     }
-  }, [setAgentModel, buildExternalAgentRuntimeModelTarget]);
+  }, [setAgentModel, buildExternalAgentRuntimeModelTarget, collectCustomModelIds]);
 
   const loadSdkRuntimeModelCatalog = useCallback((
     target: SdkRuntimeModelTarget,
@@ -1020,6 +1053,12 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   const isCodexAppServer = isCodexManagedAgent && currentAgentConfig?.codexRuntime === 'app-server';
   const canSteerCurrentTurn = Boolean(activeSessionId && isStreaming && isCodexAppServer);
   const hasCodexCustomConfig = Boolean(codexConfigModel) && isCodexManagedAgent;
+  // `codexConfigModel` is null both while the config probe is pending and when
+  // the managed Codex config has no locked model. Keep the manual-entry action
+  // hidden until the probe resolves so a pick made in the interim can't be
+  // silently overridden by the config model on send (#3535).
+  const allowCustomModelEntry = !isCodexManagedAgent
+    || (!isCodexConfigModelPending && !hasCodexCustomConfig);
 
   const agentModelPresets = useMemo(() => {
     const target = buildExternalAgentRuntimeModelTarget(currentAgentConfig);
@@ -1030,14 +1069,25 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     if (hasCodexCustomConfig && codexConfigModel) {
       return [{ id: codexConfigModel, name: codexConfigModel }];
     }
-    if (runtimePresets) return runtimePresets;
+    if (runtimePresets) {
+      return appendComposerCustomModelPresets(
+        runtimePresets,
+        collectCustomModelIds(currentAgentId, runtimePresets),
+      );
+    }
     const presets = getAgentModelPresets(
       currentAgentConfig?.command,
       getExternalAgentSdkBackend(currentAgentConfig),
     );
     // BYO Codex CLI: hide GPT-5.6 when CLI < 0.144.0 (stored probe or discovery).
     const cliVersion = resolveAgentCliVersion(currentAgentConfig, discoveredAgents);
-    return filterAgentModelPresetsForCliVersion(presets, cliVersion);
+    const filteredPresets = filterAgentModelPresetsForCliVersion(presets, cliVersion);
+    // Manual model ids typed in the composer (#3534) stay selectable even when
+    // the CLI catalog does not list them yet.
+    return appendComposerCustomModelPresets(
+      filteredPresets,
+      collectCustomModelIds(currentAgentId, filteredPresets),
+    );
   }, [
     currentAgentConfig,
     currentAgentId,
@@ -1046,6 +1096,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     hasCodexCustomConfig,
     codexConfigModel,
     discoveredAgents,
+    collectCustomModelIds,
   ]);
 
   const selectedAgentModel = useMemo(() => {
@@ -1229,12 +1280,16 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
           const catalog = await loadSdkRuntimeModelCatalog(runtimeTarget);
           if (catalog) {
             applySdkRuntimeModelCatalog(runtimeTarget, catalog, { adoptCurrentModel: true });
-            const runtimePresets = mergeFallbackThinkingLevels(
+            const catalogPresets = mergeFallbackThinkingLevels(
               normalizeSdkRuntimeModelPresets(catalog.models, catalog.currentModelId),
               getAgentModelPresets(
                 currentAgentConfig.command,
                 getExternalAgentSdkBackend(currentAgentConfig),
               ),
+            );
+            const runtimePresets = appendComposerCustomModelPresets(
+              catalogPresets,
+              collectCustomModelIds(sendAgentId, catalogPresets),
             );
             const storedModelId = agentModelMapRef.current[sendAgentId];
             if (
@@ -1418,7 +1473,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     toolIntegrationMode,
     clearScopeDraft, showScopeSessionView, setActiveSessionId,
     flushDraftText, currentAgentConfig, buildExternalAgentRuntimeModelTarget,
-    loadSdkRuntimeModelCatalog, applySdkRuntimeModelCatalog,
+    loadSdkRuntimeModelCatalog, applySdkRuntimeModelCatalog, collectCustomModelIds,
   ]);
 
   const handleCompact = useCallback(async () => {
@@ -1740,6 +1795,9 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
           ? runtimeModelWarnings[currentAgentId].message
           : undefined}
         agentModelPresets={agentModelPresets}
+        // A managed Codex config's `model` field overrides every selection on
+        // send, so the manual-entry action would be a silent no-op.
+        allowCustomModelEntry={allowCustomModelEntry}
         selectedAgentModel={selectedAgentModel}
         handleAgentModelSelect={handleAgentModelSelect}
         cattyConfiguredProviders={cattyConfiguredProviders}

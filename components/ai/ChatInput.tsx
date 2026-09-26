@@ -206,6 +206,12 @@ interface ChatInputProps {
   placeholder?: string;
   /** Available model presets for the current agent */
   modelPresets?: AgentModelPreset[];
+  /**
+   * Offer the picker's "use custom model" action. Disable when the current
+   * agent locks the model (e.g. managed Codex `model` config overrides the
+   * selection on every send).
+   */
+  allowCustomModelEntry?: boolean;
   /** Currently selected model ID */
   selectedModelId?: string;
   /** Callback when user selects a model */
@@ -271,6 +277,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
   agentName,
   placeholder,
   modelPresets = [],
+  allowCustomModelEntry = true,
   selectedModelId,
   onModelSelect,
   files = [],
@@ -1526,7 +1533,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
               ) : (
                 <Cpu size={11} className="text-muted-foreground/64" />
               )}
-              <span className={`truncate min-w-0 ${modelChipMaxWidth}`}>{modelLabel}</span>
+              <span className={`truncate min-w-0 ${modelChipMaxWidth}`} title={modelLabel}>{modelLabel}</span>
               {hasModelPicker && <ChevronDown size={9} className="text-muted-foreground/50" />}
             </button>
             {contextUsage && (
@@ -1585,19 +1592,22 @@ const ChatInput: React.FC<ChatInputProps> = ({
                     selectedProviderId={providerSwitcher?.selectedProviderId}
                     selectedModelId={hasProviderSwitcher ? providerSwitcher?.selectedModelId : selectedBaseModelId}
                     modelPresets={hasProviderSwitcher ? undefined : modelPresets}
+                    allowCustomEntry={allowCustomModelEntry}
                     prefs={modelPrefs}
                     onSelectProviderModel={(providerId, modelId, contextWindow) => {
                       providerSwitcher?.onSelect(providerId, modelId, contextWindow);
                       setModelPrefs(rememberComposerRecentModel(pickerScope, { providerId, modelId }));
                       closeAllMenus();
                     }}
-                    onSelectModel={(modelId) => {
+                    onSelectModel={(modelId, options) => {
                       const preset = modelPresets.find((item) => item.id === modelId);
                       const nextId = preset
                         ? resolveModelSelectionWithThinking(preset, selectedPresetThinking)
                         : modelId;
                       onModelSelect?.(nextId);
-                      setModelPrefs(rememberComposerRecentModel(pickerScope, { modelId }));
+                      setModelPrefs(rememberComposerRecentModel(pickerScope, options?.custom
+                        ? { modelId, custom: true }
+                        : { modelId }));
                       closeAllMenus();
                     }}
                     onTogglePinned={(entry) => {
@@ -1795,6 +1805,7 @@ function chatInputPropsAreEqual(prev: ChatInputProps, next: ChatInputProps): boo
     && prev.agentName === next.agentName
     && prev.placeholder === next.placeholder
     && prev.modelPresets === next.modelPresets
+    && prev.allowCustomModelEntry === next.allowCustomModelEntry
     && prev.selectedModelId === next.selectedModelId
     && prev.onModelSelect === next.onModelSelect
     && prev.files === next.files

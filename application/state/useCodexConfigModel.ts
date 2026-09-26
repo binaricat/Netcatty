@@ -29,5 +29,11 @@ export function useCodexConfigModel(agent: ExternalAgentConfig | undefined, isVi
     });
     return () => { cancelled = true; };
   }, [isVisible, loadModel]);
-  return { model: result?.loadModel === loadModel ? result.model : null, loadModel };
+  return {
+    model: result?.loadModel === loadModel ? result.model : null,
+    loadModel,
+    // `model` is null both while the probe is pending and when no locked model
+    // exists; this flag lets consumers distinguish the unresolved state.
+    isPending: result?.loadModel !== loadModel,
+  };
 }

@@ -4,11 +4,19 @@ import {
   type ExternalAgentConfig,
 } from '../infrastructure/ai/types';
 import { getExternalAgentSdkBackend } from '../infrastructure/ai/managedAgents';
-import { canonicalizeEffortEncodedModelId } from '../infrastructure/ai/composerPicker';
+import {
+  canonicalizeEffortEncodedModelId,
+  modelPresetMatchesId,
+  modelPresetsContainId,
+} from '../infrastructure/ai/composerPicker';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
 
-export { canonicalizeEffortEncodedModelId };
+export {
+  canonicalizeEffortEncodedModelId,
+  modelPresetMatchesId,
+  modelPresetsContainId,
+};
 
 export type SdkRuntimeModelCatalog = {
   currentModelId: string | null;
@@ -232,19 +240,6 @@ export function agentModelPresetsShallowEqual(
       && (preset.thinkingLevels ?? []).join('\0') === (other.thinkingLevels ?? []).join('\0')
     );
   });
-}
-
-export function modelPresetMatchesId(preset: AgentModelPreset, modelId: string): boolean {
-  const canonical = canonicalizeEffortEncodedModelId(modelId);
-  if (preset.thinkingLevels?.length) {
-    return preset.id === canonical
-      || preset.thinkingLevels.some((level) => `${preset.id}/${level}` === canonical);
-  }
-  return preset.id === canonical;
-}
-
-export function modelPresetsContainId(presets: AgentModelPreset[], modelId: string): boolean {
-  return presets.some((preset) => modelPresetMatchesId(preset, modelId));
 }
 
 export function normalizeStoredAgentModelSelection(
