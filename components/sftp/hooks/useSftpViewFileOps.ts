@@ -27,6 +27,15 @@ const LOCAL_BLOB_DOWNLOAD_CONCURRENCY = 1;
  */
 const MULTI_SELECT_ROOT_DOWNLOAD_CONCURRENCY = DEFAULT_SFTP_FILE_TRANSFER_CONCURRENCY;
 
+const promoteModalSnapshot = (snapshot: Parameters<typeof editorTabStore.promoteFromModal>[0]) => {
+  try {
+    return editorTabStore.promoteFromModal(snapshot);
+  } catch (error) {
+    toast.error(error instanceof Error ? error.message : "Failed to transfer editor", "SFTP");
+    return null;
+  }
+};
+
 export const useSftpViewFileOps = ({
   sftpRef,
   behaviorRef,
@@ -230,7 +239,7 @@ export const useSftpViewFileOps = ({
     const connection = pane.connection;
     if (!connection || !target.hostId) return;
 
-    const editorId = editorTabStore.promoteFromModal({
+    const editorId = promoteModalSnapshot({
       sessionId: connection.id,
       sftpTabId: pane.id,
       hostId: target.hostId,
@@ -242,6 +251,11 @@ export const useSftpViewFileOps = ({
       wordWrap: snapshot.wordWrap,
       viewState: snapshot.viewState,
     });
+    if (!editorId) return;
+    if (editorTabStore.getTab(editorId)?.placement === "window") {
+      void popOutEditorTab(editorId);
+      return;
+    }
     activeTabStore.setActiveTabId(toEditorTabId(editorId));
     // Close the modal
     setShowTextEditor(false);
@@ -256,7 +270,7 @@ export const useSftpViewFileOps = ({
     const connection = pane.connection;
     if (!connection || !target.hostId) return;
 
-    const editorId = editorTabStore.promoteFromModal({
+    const editorId = promoteModalSnapshot({
       sessionId: connection.id,
       sftpTabId: pane.id,
       hostId: target.hostId,
@@ -268,6 +282,7 @@ export const useSftpViewFileOps = ({
       wordWrap: snapshot.wordWrap,
       viewState: snapshot.viewState,
     });
+    if (!editorId) return;
     void popOutEditorTab(editorId).then((ok) => {
       if (!ok) return;
       setShowTextEditor(false);

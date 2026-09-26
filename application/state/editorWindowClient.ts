@@ -138,7 +138,10 @@ export async function saveDetachedEditorTab(tabId: EditorTabId): Promise<{ ok: b
   });
   if (result?.ok) {
     editorTabStore.markSaved(tabId, current.content);
-    netcattyBridge.get()?.reportEditorWindowDirty?.({ editorId: tabId, dirty: false });
+    netcattyBridge.get()?.reportEditorWindowDirty?.({
+      editorId: tabId,
+      dirty: editorTabStore.isDirty(tabId),
+    });
     return { ok: true };
   }
   const error = result?.error || "Save failed";
@@ -221,9 +224,6 @@ export function installEditorWindowSourceListeners(): () => void {
           liveConnectionId: latest?.sessionId,
           error: ok ? undefined : (latest?.saveError || "Save failed"),
         });
-        if (ok) {
-          editorTabStore.setWindowDirty(payload.editorId, false);
-        }
       } catch (err) {
       bridge.reportEditorWindowSaveResult?.({
         requestId: payload.requestId,

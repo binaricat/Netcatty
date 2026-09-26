@@ -28,6 +28,20 @@ const makeTab = (overrides: Partial<EditorTab> = {}): EditorTab => ({
   ...overrides,
 });
 
+test("clean modal reuses a detached tab without changing its dirty state or content", () => {
+  const store = new EditorTabStore();
+  const tab = makeTab({ placement: "window", windowDirty: true, content: "", baselineContent: "" });
+  store._debugInsert(tab);
+  const id = store.promoteFromModal({
+    ...makeTab(),
+    remotePath: "/etc//nginx/./nginx.conf",
+  });
+  assert.equal(id, tab.id);
+  assert.equal(store.getTab(id), tab);
+  assert.equal(store.isDirty(id), true);
+  assert.equal(store.getTabs().length, 1);
+});
+
 test("updateContent stores content and viewState; dirty flag derives from baseline", () => {
   const store = new EditorTabStore();
   store._debugInsert(makeTab());

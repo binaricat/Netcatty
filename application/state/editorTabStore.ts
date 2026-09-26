@@ -177,7 +177,8 @@ export class EditorTabStore {
   markSaved = (id: EditorTabId, newBaseline: string) => {
     const tab = this.getTab(id);
     if (tab?.placement === "window") {
-      this.patch(id, { windowDirty: false, savingState: "idle", saveError: null });
+      // Only the detached renderer has the current content. Wait for its dirty report.
+      this.patch(id, { savingState: "idle", saveError: null });
       return;
     }
     this.patch(id, { baselineContent: newBaseline, savingState: "idle", saveError: null });
@@ -270,7 +271,12 @@ export class EditorTabStore {
       (t) => t.sessionId === snapshot.sessionId && normalizePath(t.remotePath) === normalized,
     );
     if (existing) {
-      if (existing.placement === "window") return existing.id;
+      if (existing.placement === "window") {
+        if (snapshot.content !== snapshot.baselineContent) {
+          throw new Error("This file is already open in the editor window. Your changes are still in this dialog. Dock or close the existing editor before transferring these changes.");
+        }
+        return existing.id;
+      }
       this.patch(existing.id, {
         content: snapshot.content,
         baselineContent: snapshot.baselineContent,
