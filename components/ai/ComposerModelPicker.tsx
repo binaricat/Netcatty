@@ -180,7 +180,12 @@ export const ComposerModelPicker: React.FC<ComposerModelPickerProps> = ({
   };
 
   const prefEntryFor = (modelId: string): ComposerModelPrefEntry => (
-    previewProvider ? { providerId: previewProvider.id, modelId } : { modelId }
+    previewProvider
+      ? { providerId: previewProvider.id, modelId }
+      // Preserve custom provenance on pin/unpin: a manual model pinned while
+      // other selections evict its unmarked recent twin would otherwise lose
+      // the custom marker and fall back to a catalog model (#3534).
+      : { modelId, ...(customPrefIds.has(modelId.toLowerCase()) ? { custom: true as const } : {}) }
   );
 
   if (hasProviders && view === 'providers') {
