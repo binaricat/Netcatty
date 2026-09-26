@@ -1526,7 +1526,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
               ) : (
                 <Cpu size={11} className="text-muted-foreground/64" />
               )}
-              <span className={`truncate min-w-0 ${modelChipMaxWidth}`}>{modelLabel}</span>
+              <span className={`truncate min-w-0 ${modelChipMaxWidth}`} title={modelLabel}>{modelLabel}</span>
               {hasModelPicker && <ChevronDown size={9} className="text-muted-foreground/50" />}
             </button>
             {contextUsage && (

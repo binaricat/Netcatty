@@ -61,8 +61,24 @@ test('external agent picker lists presets without a provider column', () => {
   assert.doesNotMatch(html, /ai\.chat\.providers/);
 });
 
-test('custom model action is only offered in Catty provider-switcher mode', () => {
+test('custom model action is offered in provider-switcher and preset modes', () => {
   const source = readFileSync(new URL('./ComposerModelPicker.tsx', import.meta.url), 'utf8');
-  assert.match(source, /const showCustom = Boolean\(\s*hasProviders/s);
+  // Custom ids are accepted regardless of mode (provider catalog or CLI
+  // presets) — #3534 wants manual model entry for external agents too.
+  assert.match(source, /const showCustom = Boolean\(\s*trimmedQuery/s);
   assert.match(source, /resolveComposerEnterModelId/);
+});
+
+test('external agent picker keeps preset rows truncation-friendly with a full-name tooltip', () => {
+  const html = renderToStaticMarkup(
+    <ComposerModelPicker
+      modelPresets={[{ id: 'gpt-5.6-sol-very-long-preview-id', name: 'GPT-5.6 Sol (preview)' }]}
+      selectedModelId="gpt-5.6-sol-very-long-preview-id"
+      prefs={{ recent: [], pinned: [] }}
+      onSelectModel={() => {}}
+      onTogglePinned={() => {}}
+    />,
+  );
+
+  assert.match(html, /title="GPT-5\.6 Sol \(preview\)"/);
 });

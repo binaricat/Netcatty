@@ -231,6 +231,58 @@ export function formatComposerThinkingLabel(level: string): string {
   return formatThinkingLabel(level);
 }
 
+export function modelPresetMatchesId(preset: AgentModelPreset, modelId: string): boolean {
+  const canonical = canonicalizeEffortEncodedModelId(modelId);
+  if (preset.thinkingLevels?.length) {
+    return preset.id === canonical
+      || preset.thinkingLevels.some((level) => `${preset.id}/${level}` === canonical);
+  }
+  return preset.id === canonical;
+}
+
+export function modelPresetsContainId(presets: AgentModelPreset[], modelId: string): boolean {
+  return presets.some((preset) => modelPresetMatchesId(preset, modelId));
+}
+
+/**
+ * Model IDs the user typed manually in the composer picker. A scoped pref
+ * entry counts as "custom" when it is provider-less and no catalog preset
+ * matches its id, so manual picks survive CLI catalogs that lag new models.
+ */
+export function resolveComposerCustomModelIds(input: {
+  prefs: ComposerModelPrefs;
+  presets: AgentModelPreset[];
+}): string[] {
+  const seen = new Set<string>();
+  const ids: string[] = [];
+  for (const entry of [...input.prefs.pinned, ...input.prefs.recent]) {
+    if (entry.providerId) continue;
+    const id = canonicalizeEffortEncodedModelId(entry.modelId).trim();
+    if (!id || seen.has(id)) continue;
+    if (modelPresetsContainId(input.presets, id)) continue;
+    seen.add(id);
+    ids.push(id);
+  }
+  return ids;
+}
+
+/**
+ * Append manual model ids as presets after the catalog so a custom pick stays
+ * visible, selectable, and accepted as a stored selection. Idempotent: ids the
+ * presets already cover are ignored.
+ */
+export function appendComposerCustomModelPresets(
+  presets: AgentModelPreset[],
+  customIds: readonly string[],
+): AgentModelPreset[] {
+  if (customIds.length === 0) return presets;
+  const known = new Set(presets.map((preset) => canonicalizeEffortEncodedModelId(preset.id)));
+  const extra = customIds
+    .filter((id) => id && !known.has(id))
+    .map((id) => ({ id, name: id }));
+  return extra.length > 0 ? [...presets, ...extra] : presets;
+}
+
 export function resolvePinnedAndRecentModels(input: {
   models: ComposerPickerModel[];
   prefs: ComposerModelPrefs;

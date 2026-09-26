@@ -56,7 +56,7 @@ const ModelRow: React.FC<{
       {selected
         ? <Check size={11} className="text-primary shrink-0" />
         : <span className="w-[11px] shrink-0" />}
-      <span className="min-w-0 flex-1 truncate text-foreground/88">{model.name}</span>
+      <span className="min-w-0 flex-1 truncate text-foreground/88" title={model.name}>{model.name}</span>
     </button>
     <button
       type="button"
@@ -133,9 +133,10 @@ export const ComposerModelPicker: React.FC<ComposerModelPickerProps> = ({
   );
 
   const trimmedQuery = query.trim();
+  // Manual model ids are accepted in both modes: provider-bound catalogs and
+  // preset lists from external CLI agents whose catalogs lag new models.
   const showCustom = Boolean(
-    hasProviders
-    && trimmedQuery
+    trimmedQuery
     && !models.some((model) => model.id.toLowerCase() === trimmedQuery.toLowerCase()),
   );
 
