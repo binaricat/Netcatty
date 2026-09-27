@@ -29,6 +29,9 @@ for (const codexRuntime of ['sdk', 'app-server'] as const) {
       const config = { ...agent, codexRuntime };
       await act(async () => { root = TestRenderer.create(React.createElement(Harness, { config })); });
       assert.equal(result.model, null);
+      // The unresolved probe must be distinguishable from "no locked model"
+      // so consumers can hide manual entry until it resolves (#3535).
+      assert.equal(result.isPending, true);
       let sent = false;
       const sending = result.loadModel().then(model => { sent = true; return model; });
       await Promise.resolve();
@@ -38,9 +41,11 @@ for (const codexRuntime of ['sdk', 'app-server'] as const) {
       await act(async () => { resolve({ customConfig: { model: 'glm-5' } }); await sending; });
       assert.equal(await sending, 'glm-5');
       assert.equal(result.model, 'glm-5');
+      assert.equal(result.isPending, false);
       // A different agent must not inherit the previous home/model or promise.
       await act(async () => { root.update(React.createElement(Harness, { config: { ...config, env: { CODEX_HOME: '/fixture/other' } } })); });
       assert.equal(result.model, null);
+      assert.equal(result.isPending, true);
       assert.equal(calls.length, 2);
       await act(async () => { resolve({ customConfig: null }); await result.loadModel(); });
       assert.equal(result.model, null);

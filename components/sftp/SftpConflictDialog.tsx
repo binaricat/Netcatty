@@ -107,6 +107,11 @@ const SftpConflictDialogInner: React.FC<SftpConflictDialogProps> = ({ conflicts,
     const conflict = conflicts[0]; // Handle first conflict
     const currentCanMerge = conflict?.isDirectory === true && conflict.existingType === 'directory';
     const currentCanReplace = conflict ? canReplaceConflict(conflict) : false;
+    const preferredActionRef = currentCanMerge
+        ? mergeButtonRef
+        : currentCanReplace && conflict?.existingType
+            ? replaceButtonRef
+            : duplicateButtonRef;
 
     useEffect(() => {
         const currentConflictId = conflict?.transferId;
@@ -114,11 +119,7 @@ const SftpConflictDialogInner: React.FC<SftpConflictDialogProps> = ({ conflicts,
         previousConflictIdRef.current = currentConflictId;
         if (!currentConflictId || !previousConflictId || currentConflictId === previousConflictId) return;
 
-        const nextAction = currentCanMerge
-            ? mergeButtonRef.current
-            : currentCanReplace
-                ? replaceButtonRef.current
-                : duplicateButtonRef.current;
+        const nextAction = preferredActionRef.current;
         if (!nextAction) return;
 
         // If the previously focused action disappears or becomes disabled,
@@ -130,7 +131,7 @@ const SftpConflictDialogInner: React.FC<SftpConflictDialogProps> = ({ conflicts,
         }
         const timer = globalThis.setTimeout(() => nextAction.focus(), 0);
         return () => globalThis.clearTimeout(timer);
-    }, [conflict?.transferId, currentCanMerge, currentCanReplace]);
+    }, [conflict?.transferId, preferredActionRef]);
 
     if (!conflict) return null;
 
@@ -160,6 +161,10 @@ const SftpConflictDialogInner: React.FC<SftpConflictDialogProps> = ({ conflicts,
             <DialogContent
                 className="gap-4 p-5 sm:max-w-[600px] sm:p-6"
                 aria-describedby={describedBy}
+                onOpenAutoFocus={(event) => {
+                    event.preventDefault();
+                    preferredActionRef.current?.focus();
+                }}
             >
                 <DialogHeader className="space-y-1.5 pr-8">
                     <DialogTitle
@@ -262,7 +267,6 @@ const SftpConflictDialogInner: React.FC<SftpConflictDialogProps> = ({ conflicts,
                                 size="sm"
                                 onClick={() => handleAction('merge')}
                                 disabled={!canMerge}
-                                autoFocus={presentation.showDirectoryReplaceWarning}
                                 className="min-w-24 border border-primary"
                             >
                                 {t('sftp.conflict.action.merge')}

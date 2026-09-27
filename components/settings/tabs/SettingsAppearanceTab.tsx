@@ -63,6 +63,8 @@ function SettingsAppearanceTab(props: {
   tabBarPosition: 'top' | 'bottom';
   setTabBarPosition: (position: 'top' | 'bottom') => void;
   showSftpTab: boolean;
+  sftpInSidebar: boolean;
+  setSftpInSidebar: (enabled: boolean) => void;
   setShowSftpTab: (enabled: boolean) => void;
   showHostTreeSidebar: boolean;
   setShowHostTreeSidebar: (enabled: boolean) => void;
@@ -134,6 +136,8 @@ function SettingsAppearanceTab(props: {
     tabBarPosition,
     setTabBarPosition,
     showSftpTab,
+    sftpInSidebar,
+    setSftpInSidebar,
     setShowSftpTab,
     showHostTreeSidebar,
     setShowHostTreeSidebar,
@@ -512,6 +516,13 @@ function SettingsAppearanceTab(props: {
           description={t('settings.vault.showSftpTabDesc')}
         >
           <Toggle checked={showSftpTab} onChange={setShowSftpTab} />
+        </SettingRow>
+        <SettingRow
+          anchorId="appearance-vault-sftp-in-sidebar"
+          label={t('settings.vault.sftpInSidebar')}
+          description={t('settings.vault.sftpInSidebarDesc')}
+        >
+          <Toggle checked={sftpInSidebar} onChange={setSftpInSidebar} />
         </SettingRow>
         <SettingRow
           anchorId="appearance-vault-host-tree"

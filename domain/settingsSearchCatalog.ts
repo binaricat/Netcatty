@@ -172,6 +172,13 @@ export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
     sectionKey: "settings.vault.title",
   },
   {
+    id: "appearance-vault-sftp-in-sidebar",
+    tab: "appearance",
+    labelKey: "settings.vault.sftpInSidebar",
+    descriptionKey: "settings.vault.sftpInSidebarDesc",
+    sectionKey: "settings.vault.title",
+  },
+  {
     id: "appearance-vault-host-tree",
     tab: "appearance",
     labelKey: "settings.vault.showHostTreeSidebar",

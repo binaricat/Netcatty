@@ -176,7 +176,7 @@ export interface TerminalProps {
   keyBindings?: KeyBinding[];
   onHotkeyAction?: (action: string, event: KeyboardEvent) => void;
   onTerminalFontSizeChange?: (fontSize: number) => void;
-  onStatusChange?: (sessionId: string, status: TerminalSession["status"]) => void;
+  onStatusChange?: (sessionId: string, status: TerminalSession["status"], sftpHost?: Host) => void;
   onSessionExit?: (sessionId: string, evt: TerminalSessionExitEvent) => void;
   onTerminalDataCapture?: (sessionId: string, data: string) => void;
   onOsDetected?: (hostId: string, distro: string) => void;

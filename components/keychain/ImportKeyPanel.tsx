@@ -10,7 +10,7 @@ import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import { Textarea } from '../ui/textarea';
-import { detectKeyType } from './utils';
+import { detectSshKeyType } from '../../domain/keyTypeDetect';
 
 interface ImportKeyPanelProps {
     draftKey: Partial<SSHKey>;
@@ -38,14 +38,15 @@ export const ImportKeyPanel: React.FC<ImportKeyPanelProps> = ({
         reader.onload = (e) => {
             const content = e.target?.result as string;
             if (content) {
-                const detectedType = detectKeyType(content);
+                const detected = detectSshKeyType(content);
                 const label = file.name.replace(/\.(pem|key|pub|ppk)$/i, '');
 
                 setDraftKey({
                     ...draftKey,
                     privateKey: content,
                     label: draftKey.label || label,
-                    type: detectedType,
+                    type: detected.type,
+                    keySize: detected.keySize,
                 });
             }
         };
@@ -64,14 +65,15 @@ export const ImportKeyPanel: React.FC<ImportKeyPanelProps> = ({
         reader.onload = (e) => {
             const content = e.target?.result as string;
             if (content) {
-                const detectedType = detectKeyType(content);
+                const detected = detectSshKeyType(content);
                 const label = file.name.replace(/\.(pem|key|pub|ppk)$/i, '');
 
                 setDraftKey({
                     ...draftKey,
                     privateKey: content,
                     label: draftKey.label || label,
-                    type: detectedType,
+                    type: detected.type,
+                    keySize: detected.keySize,
                 });
             }
         };

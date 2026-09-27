@@ -765,12 +765,13 @@ html[data-theme-transition] *::after {
   -webkit-user-select: auto;
 }
 
-/* Window controls: icons sit in the h-7 tab row; hover fills the full h-9 title bar */
+/* Window controls: buttons fill the full h-9 title bar so icons sit in the
+   geometric center of the hover highlight and the whole bar is clickable */
 [data-section="top-tabs"] .window-control-btn {
   position: relative;
   z-index: 0;
   display: flex;
-  height: 1.75rem;
+  height: 2.25rem;
   width: 2.5rem;
   align-items: center;
   justify-content: center;
@@ -782,10 +783,7 @@ html[data-theme-transition] *::after {
 [data-section="top-tabs"] .window-control-btn::before {
   content: "";
   position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  top: calc(1.75rem - 2.25rem);
+  inset: 0;
   z-index: -1;
   background: transparent;
   transition: background-color 150ms ease;

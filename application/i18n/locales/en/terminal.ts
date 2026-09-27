@@ -188,6 +188,7 @@ export const enTerminalMessages: Messages = {
   'terminal.auth.retryMessage': 'Authentication failed. Please check your credentials and try again.',
   'terminal.auth.retryLog': 'Authentication failed. Please try again.',
   'terminal.auth.noKeysHint': 'No keys available. Add keys in Keychain.',
+  'terminal.auth.selectIdentity': 'Use saved identity',
   'terminal.auth.continueSave': 'Continue & Save',
   'terminal.auth.credentialsUnavailable': 'Saved credentials cannot be decrypted on this device. Please re-enter and save them again.',
   'terminal.auth.jumpCredentialsUnavailable': 'A jump host has saved credentials that cannot be decrypted on this device. Open host settings and re-enter them.',

@@ -171,7 +171,10 @@ export function ChromeHost() {
       return null;
     }
     return {
-      showSftpTab: settingsChrome.showSftpTab,
+      // The SFTP-tab guard only redirects when the SFTP surface is truly
+      // unreachable; sidebar placement (sftpInSidebar) keeps it reachable
+      // even when the top tab flag is off.
+      showSftpTab: settingsChrome.showSftpTab || settingsChrome.sftpInSidebar,
       setActiveTabId,
       applyAppTheme,
       hostById,
@@ -194,6 +197,7 @@ export function ChromeHost() {
     sessionById,
     setActiveTabId,
     settingsChrome.showSftpTab,
+    settingsChrome.sftpInSidebar,
     t,
     terminalSettings.followAppTerminalTheme,
     themeById,

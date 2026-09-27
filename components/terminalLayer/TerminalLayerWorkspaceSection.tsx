@@ -146,7 +146,7 @@ function TerminalLayerWorkspaceSectionInner({ ctx }: { ctx: WorkspaceContext }) 
   }, [activeMagnifiedTerminal]);
 
   return (
-    <div className="flex-1 min-h-0 flex flex-col">
+    <div data-section="terminal-workspace-column" className="flex-1 min-h-0 flex flex-col">
     <div ref={workspaceInnerRef} className="flex-1 min-h-0 overflow-hidden relative">
         {draggingSessionId && !isFocusMode && (
           <div

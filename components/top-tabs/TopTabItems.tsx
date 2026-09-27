@@ -312,7 +312,7 @@ export const WindowControls: React.FC = memo(() => {
   const closeControlClassName = 'window-control-btn window-control-btn--close app-no-drag';
 
   return (
-    <div className="ml-2 flex items-center h-7 overflow-visible app-no-drag">
+    <div className="ml-2 flex h-9 items-center app-no-drag">
       <button type="button" className={controlClassName} onClick={handleMinimize}>
         <Minus size={16} />
       </button>

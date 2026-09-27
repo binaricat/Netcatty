@@ -19,6 +19,12 @@ export interface ComposerPickerModel {
 export interface ComposerModelPrefEntry {
   providerId?: string;
   modelId: string;
+  /**
+   * True when the id was typed manually in the composer picker ("use custom
+   * model"). Explicit provenance keeps stale catalog entries (removed or
+   * version-gated models) from being resurrected as custom presets.
+   */
+  custom?: boolean;
 }
 
 export interface ComposerModelPrefs {
@@ -92,6 +98,7 @@ function parsePrefEntries(value: unknown): ComposerModelPrefEntry[] {
       ? (item as { providerId: string }).providerId.trim()
       : undefined;
     const entry: ComposerModelPrefEntry = providerId ? { providerId, modelId } : { modelId };
+    if ((item as { custom?: unknown }).custom === true) entry.custom = true;
     const key = composerModelPrefKey(entry);
     if (seen.has(key)) continue;
     seen.add(key);
@@ -229,6 +236,60 @@ export function resolveModelSelectionWithThinking(
 export function formatComposerThinkingLabel(level: string): string {
   if (level === 'off') return 'Off';
   return formatThinkingLabel(level);
+}
+
+export function modelPresetMatchesId(preset: AgentModelPreset, modelId: string): boolean {
+  const canonical = canonicalizeEffortEncodedModelId(modelId);
+  if (preset.thinkingLevels?.length) {
+    return preset.id === canonical
+      || preset.thinkingLevels.some((level) => `${preset.id}/${level}` === canonical);
+  }
+  return preset.id === canonical;
+}
+
+export function modelPresetsContainId(presets: AgentModelPreset[], modelId: string): boolean {
+  return presets.some((preset) => modelPresetMatchesId(preset, modelId));
+}
+
+/**
+ * Model IDs the user typed manually in the composer picker. Only pref entries
+ * explicitly marked as custom (recorded when the user picked "use custom
+ * model") count, so entries that merely dropped out of the current catalog —
+ * removed or version-gated models, e.g. after a CLI downgrade — are never
+ * resurrected as custom presets.
+ */
+export function resolveComposerCustomModelIds(input: {
+  prefs: ComposerModelPrefs;
+  presets: AgentModelPreset[];
+}): string[] {
+  const seen = new Set<string>();
+  const ids: string[] = [];
+  for (const entry of [...input.prefs.pinned, ...input.prefs.recent]) {
+    if (entry.providerId || entry.custom !== true) continue;
+    const id = canonicalizeEffortEncodedModelId(entry.modelId).trim();
+    if (!id || seen.has(id)) continue;
+    if (modelPresetsContainId(input.presets, id)) continue;
+    seen.add(id);
+    ids.push(id);
+  }
+  return ids;
+}
+
+/**
+ * Append manual model ids as presets after the catalog so a custom pick stays
+ * visible, selectable, and accepted as a stored selection. Idempotent: ids the
+ * presets already cover are ignored.
+ */
+export function appendComposerCustomModelPresets(
+  presets: AgentModelPreset[],
+  customIds: readonly string[],
+): AgentModelPreset[] {
+  if (customIds.length === 0) return presets;
+  const known = new Set(presets.map((preset) => canonicalizeEffortEncodedModelId(preset.id)));
+  const extra = customIds
+    .filter((id) => id && !known.has(id))
+    .map((id) => ({ id, name: id }));
+  return extra.length > 0 ? [...presets, ...extra] : presets;
 }
 
 export function resolvePinnedAndRecentModels(input: {

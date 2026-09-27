@@ -849,8 +849,8 @@ test("an explicitly absent destination is never moved aside if another writer cr
   assert.equal(fs.readFileSync(target, "utf8"), "concurrent");
 });
 
-for (const failCopy of [false, true]) {
-  test(`exclusive copy fallback ${failCopy ? "retains recovery files after a write failure" : "publishes complete bytes without hardlinks"}`, async (t) => {
+for (const [failCopy, linkErrorCode] of [[false, "ENOTSUP"], [true, "ENOTSUP"], [false, "EISDIR"]]) {
+  test(`exclusive copy fallback on ${linkErrorCode} ${failCopy ? "retains recovery files after a write failure" : "publishes complete bytes without hardlinks"}`, async (t) => {
     const root = fs.mkdtempSync(`${temp.getTempFilePath("publish-fallback")}-`);
     t.after(() => fs.rmSync(root, { recursive: true, force: true }));
     const staged = path.join(root, "staged");
@@ -859,7 +859,7 @@ for (const failCopy of [false, true]) {
     fs.writeFileSync(staged, payload);
     fs.writeFileSync(target, "original");
     const link = fs.promises.link;
-    fs.promises.link = async () => { throw Object.assign(new Error("hardlinks unavailable"), { code: "ENOTSUP" }); };
+    fs.promises.link = async () => { throw Object.assign(new Error("hardlinks unavailable"), { code: linkErrorCode }); };
     t.after(() => { fs.promises.link = link; });
     if (failCopy) {
       const open = fs.promises.open;
