@@ -1367,7 +1367,12 @@ async function assertExpectedLocalDownloadTarget(requestedPath, expected, inspec
   ]);
   const parentIdentity = `${parentStat.dev}:${parentStat.ino}`;
   const targetIdentity = target.stableIdentity?.split(":").slice(0, 2).join(":");
-  if (!parentStat.isDirectory() || parentRealPath !== expected.parentRealPath
+  // Windows can return a different spelling for the same real directory
+  // between sync and async realpath calls. The volume/file ID plus creation
+  // time below identifies the actual parent, so a spelling mismatch alone
+  // must not reject an unchanged remembered target on Windows.
+  if (!parentStat.isDirectory()
+    || (process.platform !== "win32" && parentRealPath !== expected.parentRealPath)
     || parentIdentity !== expected.parentIdentity
     || String(parentStat.birthtimeNs) !== expected.parentBirthtimeNs
     || targetIdentity !== expected.targetIdentity
@@ -1387,6 +1392,12 @@ async function assertExpectedLocalDownloadTarget(requestedPath, expected, inspec
       }));
     }
     throw new Error("Remembered local download target changed before replacement");
+  }
+  if (process.env.NETCATTY_SFTP_LIVE === "1" && parentRealPath !== expected.parentRealPath) {
+    console.error("[quick-target-guard-parent-alias]", JSON.stringify({
+      expected: expected.parentRealPath,
+      actual: parentRealPath,
+    }));
   }
 }
 
