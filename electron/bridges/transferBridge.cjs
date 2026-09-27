@@ -1285,13 +1285,12 @@ async function publishLocalBackupExclusive(source, target) {
   } catch (error) {
     if (error?.code === "ENOENT") return;
     // Undo the link we created so the caller's state matches its backedUp
-    // flag; never touch a replacement that appeared at the pathname.
-    const placedStat = await fs.promises.lstat(target, { bigint: true }).catch(() => null);
-    if (placedStat
-      && `${placedStat.dev}:${placedStat.ino}` === `${sourceStat.dev}:${sourceStat.ino}`
-      && String(placedStat.birthtimeNs) === String(sourceStat.birthtimeNs)) {
-      await fs.promises.unlink(target).catch(() => {});
-    }
+    // flag. A stat followed by unlink can delete a late replacement at the
+    // fixed backup pathname; move it aside and compare the moved inode.
+    await removeLocalPathnameBoundToIdentity(target, [{
+      dev: String(sourceStat.dev), ino: String(sourceStat.ino),
+      birthtimeNs: String(sourceStat.birthtimeNs),
+    }]).catch(() => {});
     throw error;
   }
 }

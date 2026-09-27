@@ -192,6 +192,40 @@ test("remembered download fails closed when hard links are unavailable", async (
     "create no backup entry on the refused replacement");
 });
 
+test("failed backup publication preserves a late replacement at its pathname", async (t) => {
+  const root = fs.mkdtempSync(`${temp.getTempFilePath("remembered-backup-cleanup-race")}-`);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const staged = path.join(root, "staged");
+  const target = path.join(root, "target");
+  const backup = path.join(root, ".target.netcatty.backup");
+  fs.writeFileSync(staged, "download");
+  fs.writeFileSync(target, "original");
+  const rename = fs.promises.rename;
+  let injected = false;
+  fs.promises.rename = async (source, destination) => {
+    if (!injected && source === target && destination.endsWith(".retiring")) {
+      injected = true;
+      const replacement = path.join(root, "foreign-backup");
+      fs.writeFileSync(replacement, "foreign");
+      fs.renameSync(replacement, backup);
+      throw Object.assign(new Error("source retirement failed"), { code: "EACCES" });
+    }
+    return rename(source, destination);
+  };
+  t.after(() => { fs.promises.rename = rename; });
+
+  await assert.rejects(
+    bridge._promoteLocalTransferForTests(staged, target, {
+      requestedTargetPath: target,
+      expectedLocalTarget: rememberedExpectation(root, target),
+    }),
+    /source retirement failed/,
+  );
+  assert.equal(injected, true);
+  assert.equal(fs.readFileSync(target, "utf8"), "original");
+  assert.equal(fs.readFileSync(backup, "utf8"), "foreign");
+});
+
 test("a failed owner marker write removes its exclusively created marker", async (t) => {
   const root = fs.mkdtempSync(`${temp.getTempFilePath("remembered-marker-fail")}-`);
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
