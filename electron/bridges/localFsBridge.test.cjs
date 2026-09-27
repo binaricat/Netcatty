@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const managedTemp = require("./tempDirBridge.cjs");
 
 const {
   collectLocalTreeEntries,
@@ -16,6 +17,28 @@ const {
   lstatLocal,
   deleteLocalFile,
 } = require("./localFsBridge.cjs");
+
+test("Windows local stats distinguish a replaced file", { skip: process.platform !== "win32" }, async (t) => {
+  const root = fs.mkdtempSync(`${managedTemp.getTempFilePath("windows-file-identity")}-`);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const target = path.join(root, "selected.txt");
+  const replacement = path.join(root, "replacement.txt");
+  fs.writeFileSync(target, "original");
+  const first = await lstatLocal(null, { path: target });
+  const followed = await statLocal(null, { path: target });
+  const parent = await statLocal(null, { path: root });
+  for (const result of [first, followed, parent]) {
+    for (const key of ["dev", "ino", "birthtimeNs", "ctimeNs", "mtimeNs"]) {
+      assert.match(result[key] ?? "", /^[1-9]\d*$/, `${key} must identify the actual Windows file`);
+    }
+  }
+  assert.equal(`${first.dev}:${first.ino}`, `${followed.dev}:${followed.ino}`);
+  fs.writeFileSync(replacement, "different");
+  fs.renameSync(replacement, target);
+  const changed = await lstatLocal(null, { path: target });
+  assert.notEqual(`${changed.dev}:${changed.ino}:${changed.birthtimeNs}`,
+    `${first.dev}:${first.ino}:${first.birthtimeNs}`);
+});
 
 test("local tree traversal defaults match the remote traversal safety budget", () => {
   assert.equal(MAX_LOCAL_TREE_DIRECTORIES, 50_000);

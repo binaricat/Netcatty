@@ -251,6 +251,11 @@ jobs:
       - name: Install deps
         run: npm ci
 
+      - name: Test Windows repeat-download file identity
+        if: matrix.name == 'windows'
+        shell: pwsh
+        run: node --test --test-name-pattern 'Windows local stats distinguish a replaced file' electron/bridges/localFsBridge.test.cjs
+
       - name: Test macOS Option column selection
         if: matrix.name == 'macos'
         run: npm run test:xterm-macos-selection

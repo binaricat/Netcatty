@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 
 import {
   DEFAULT_SFTP_QUICK_DOWNLOAD,
-  isSftpQuickDownloadPlatformSupported,
   resolveSftpQuickDownloadEnabled,
 } from "./quickDownloadPreference";
 
@@ -16,8 +15,4 @@ test("defaults quick download to disabled", () => {
 test("keeps an explicit quick download preference", () => {
   assert.equal(resolveSftpQuickDownloadEnabled(true), true);
   assert.equal(resolveSftpQuickDownloadEnabled(false), false);
-});
-
-test("supports the quick download preference outside Windows", () => {
-  assert.equal(isSftpQuickDownloadPlatformSupported(), true);
 });

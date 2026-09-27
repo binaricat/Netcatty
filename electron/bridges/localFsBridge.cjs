@@ -329,20 +329,22 @@ async function mkdirLocal(event, payload) {
  */
 async function statLocal(event, payload) {
   const stat = await fs.promises.stat(payload.path, { bigint: true });
+  const hasStableIdentity = stat.dev > 0n && stat.ino > 0n
+    && stat.birthtimeNs > 0n && stat.ctimeNs > 0n && stat.mtimeNs > 0n;
   return {
     name: path.basename(payload.path),
     type: stat.isDirectory() ? "directory" : "file",
     size: Number(stat.size),
     lastModified: Math.round(Number(stat.mtimeNs) / 1e6),
-    // Filesystem identity for same-pane paste guards: realpath cannot see
-    // through bind mounts, but dev/ino name the same directory regardless of
-    // the mount path used. Windows dev/ino are unreliable, so omit them there.
-    ...(process.platform === "win32" ? {} : {
+    // Windows libuv reports the volume serial and file ID as dev/ino. Expose
+    // them only when the filesystem supplies nonzero identity and timestamps;
+    // unsupported volumes keep opening Save As for remembered downloads.
+    ...(hasStableIdentity ? {
       dev: String(stat.dev), ino: String(stat.ino),
-      birthtimeNs: stat.birthtimeNs > 0n ? String(stat.birthtimeNs) : undefined,
-      ctimeNs: stat.ctimeNs > 0n ? String(stat.ctimeNs) : undefined,
-      mtimeNs: stat.mtimeNs > 0n ? String(stat.mtimeNs) : undefined,
-    }),
+      birthtimeNs: String(stat.birthtimeNs),
+      ctimeNs: String(stat.ctimeNs),
+      mtimeNs: String(stat.mtimeNs),
+    } : {}),
   };
 }
 
@@ -353,18 +355,20 @@ async function statLocal(event, payload) {
  */
 async function lstatLocal(event, payload) {
   const stat = await fs.promises.lstat(payload.path, { bigint: true });
+  const hasStableIdentity = stat.dev > 0n && stat.ino > 0n
+    && stat.birthtimeNs > 0n && stat.ctimeNs > 0n && stat.mtimeNs > 0n;
   return {
     name: path.basename(payload.path),
     type: stat.isDirectory() ? "directory" : stat.isSymbolicLink() ? "symlink" : "file",
     size: Number(stat.size),
     lastModified: Math.round(Number(stat.mtimeNs) / 1e6),
     // Mirror statLocal so guards comparing identities work with either stat.
-    ...(process.platform === "win32" ? {} : {
+    ...(hasStableIdentity ? {
       dev: String(stat.dev), ino: String(stat.ino),
-      birthtimeNs: stat.birthtimeNs > 0n ? String(stat.birthtimeNs) : undefined,
-      ctimeNs: stat.ctimeNs > 0n ? String(stat.ctimeNs) : undefined,
-      mtimeNs: stat.mtimeNs > 0n ? String(stat.mtimeNs) : undefined,
-    }),
+      birthtimeNs: String(stat.birthtimeNs),
+      ctimeNs: String(stat.ctimeNs),
+      mtimeNs: String(stat.mtimeNs),
+    } : {}),
   };
 }
 
