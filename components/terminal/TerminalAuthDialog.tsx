@@ -35,6 +35,8 @@ export interface TerminalAuthDialogProps {
     keys: SSHKey[];
     /** Keychain password identities offered for reuse on re-authentication (#3475). */
     identities?: Identity[];
+    selectedIdentityId?: string | null;
+    onSelectIdentity?: (identityId: string) => void;
     onSubmit: () => void;
     onSubmitWithoutSave?: () => void;
     onCancel: () => void;
@@ -59,6 +61,8 @@ export const TerminalAuthDialog: React.FC<TerminalAuthDialogProps> = ({
     authRetryMessage,
     keys,
     identities,
+    selectedIdentityId,
+    onSelectIdentity,
     onSubmit,
     onSubmitWithoutSave,
     onCancel,
@@ -81,7 +85,6 @@ export const TerminalAuthDialog: React.FC<TerminalAuthDialogProps> = ({
     const [keyDropdownOpen, setKeyDropdownOpen] = React.useState(false);
     const [submitOptionsOpen, setSubmitOptionsOpen] = React.useState(false);
     const [identityDropdownOpen, setIdentityDropdownOpen] = React.useState(false);
-    const [selectedIdentityId, setSelectedIdentityId] = React.useState<string | null>(null);
 
     const selectedKey = authKeyId ? keys.find((k) => k.id === authKeyId) : null;
 
@@ -92,18 +95,11 @@ export const TerminalAuthDialog: React.FC<TerminalAuthDialogProps> = ({
         [identities],
     );
     const selectedIdentity = selectedIdentityId
-        ? passwordIdentities.find((identity) =>
-            identity.id === selectedIdentityId
-            && identity.password === authPassword
-            && (!identity.username || identity.username === authUsername)
-        )
+        ? passwordIdentities.find((identity) => identity.id === selectedIdentityId && identity.username === authUsername)
         : null;
 
     const handleSelectIdentity = (identity: Identity) => {
-        setAuthMethod('password');
-        setAuthUsername(identity.username);
-        setAuthPassword(identity.password || '');
-        setSelectedIdentityId(identity.id);
+        onSelectIdentity?.(identity.id);
         setIdentityDropdownOpen(false);
     };
 
@@ -167,9 +163,9 @@ export const TerminalAuthDialog: React.FC<TerminalAuthDialogProps> = ({
                             <Input
                                 id="auth-password"
                                 type={showAuthPassword ? 'text' : 'password'}
-                                value={authPassword}
+                                value={selectedIdentity ? '' : authPassword}
                                 onChange={(e) => setAuthPassword(e.target.value)}
-                                placeholder={t("terminal.auth.password.placeholder")}
+                                placeholder={selectedIdentity ? t("terminal.auth.selectIdentity") : t("terminal.auth.password.placeholder")}
                                 className={cn("pr-10", authRetryMessage && "border-destructive/50")}
                                 autoFocus={!!authRetryMessage}
                                 onKeyDown={handleKeyDown}
@@ -178,11 +174,12 @@ export const TerminalAuthDialog: React.FC<TerminalAuthDialogProps> = ({
                                 type="button"
                                 className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                                 onClick={() => setShowAuthPassword(!showAuthPassword)}
+                                disabled={Boolean(selectedIdentity)}
                             >
                                 {showAuthPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                             </button>
                         </div>
-                        {passwordIdentities.length > 0 && (
+                        {onSelectIdentity && passwordIdentities.length > 0 && (
                             <Popover open={identityDropdownOpen} onOpenChange={setIdentityDropdownOpen}>
                                 <PopoverTrigger asChild>
                                     <button

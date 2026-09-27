@@ -3,6 +3,8 @@ import test from 'node:test';
 import { JSDOM } from 'jsdom';
 
 import type { Identity } from '../../types';
+import type { Host } from '../../types';
+import type { PendingAuth } from './runtime/createTerminalSessionStarters';
 
 test('saved password identity retries with its username and supports both submit paths', async () => {
   const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', {
@@ -38,26 +40,46 @@ test('saved password identity retries with its username and supports both submit
   const { createRoot } = await import('react-dom/client');
   const { I18nProvider } = await import('../../application/i18n/I18nProvider.tsx');
   const { TerminalAuthDialog } = await import('./TerminalAuthDialog.tsx');
+  const { useTerminalAuthState } = await import('./hooks/useTerminalAuthState.ts');
   const identities: Identity[] = [
     { id: 'saved', label: 'Password B', username: 'deploy', authMethod: 'password', password: 'saved-secret', created: 0 },
     { id: 'unusable', label: 'Unreadable', username: 'root', authMethod: 'password', password: 'enc:v1:djEwdGVzdAAAAAAAAAAAAAAAAA==', created: 1 },
   ];
-  const submissions: Array<{ username: string; password: string; save: boolean }> = [];
+  const host: Host = {
+    id: 'host', label: 'Host', hostname: 'localhost', port: 22, username: 'root',
+    identityId: 'old', authMethod: 'password', password: 'wrong', tags: [], os: 'linux',
+  };
+  const submissions: Array<{ username?: string; password?: string; save?: boolean }> = [];
+  const savedHosts: Host[] = [];
+  const logs: string[][] = [];
   const Form = () => {
-    const [username, setUsername] = React.useState('root');
-    const [password, setPassword] = React.useState('');
-    const submit = (save: boolean) => submissions.push({ username, password, save });
+    const pendingAuthRef = React.useRef<PendingAuth>(null);
+    const termRef = React.useRef({ clear() {} } as never);
+    const auth = useTerminalAuthState({
+      host, identities, pendingAuthRef, termRef,
+      onUpdateHost: (updated) => savedHosts.push(updated),
+      onStartSession: () => submissions.push({
+        username: pendingAuthRef.current?.username,
+        password: pendingAuthRef.current?.password,
+        save: pendingAuthRef.current?.savedToHost,
+      }),
+      setStatus: () => {}, setProgressLogs: (next) => {
+        logs.push(typeof next === 'function' ? next([]) : next);
+      },
+    });
     return <TerminalAuthDialog
-      authMethod="password" setAuthMethod={() => {}}
-      authUsername={username} setAuthUsername={setUsername}
-      authPassword={password} setAuthPassword={setPassword}
-      authKeyId={null} setAuthKeyId={() => {}}
-      authPassphrase="" setAuthPassphrase={() => {}}
-      showAuthPassphrase={false} setShowAuthPassphrase={() => {}}
-      showAuthPassword={false} setShowAuthPassword={() => {}}
+      authMethod={auth.authMethod} setAuthMethod={auth.setAuthMethod}
+      authUsername={auth.authUsername} setAuthUsername={auth.setAuthUsername}
+      authPassword={auth.authPassword} setAuthPassword={auth.setAuthPassword}
+      selectedIdentityId={auth.selectedIdentityId} onSelectIdentity={auth.selectIdentity}
+      authKeyId={auth.authKeyId} setAuthKeyId={auth.setAuthKeyId}
+      authPassphrase={auth.authPassphrase} setAuthPassphrase={auth.setAuthPassphrase}
+      showAuthPassphrase={auth.showAuthPassphrase} setShowAuthPassphrase={auth.setShowAuthPassphrase}
+      showAuthPassword={auth.showAuthPassword} setShowAuthPassword={auth.setShowAuthPassword}
       authRetryMessage="Authentication failed" keys={[]} identities={identities}
-      onSubmit={() => submit(true)} onSubmitWithoutSave={() => submit(false)}
-      onCancel={() => {}} isValid={Boolean(username.trim() && password)}
+      onSubmit={() => auth.submit({ saveToHost: true })}
+      onSubmitWithoutSave={() => auth.submit({ saveToHost: false })}
+      onCancel={() => {}} isValid={auth.isValid}
     />;
   };
   const root = createRoot(window.document.getElementById('root')!);
@@ -71,12 +93,20 @@ test('saved password identity retries with its username and supports both submit
     assert.equal(button('Unreadable'), undefined);
     await act(async () => button('Password B')!.click());
     assert.equal((window.document.getElementById('auth-username') as HTMLInputElement).value, 'deploy');
-    assert.equal((window.document.getElementById('auth-password') as HTMLInputElement).value, 'saved-secret');
+    assert.equal((window.document.getElementById('auth-password') as HTMLInputElement).value, '');
+    assert.equal(window.document.body.textContent?.includes('saved-secret'), false);
+    assert.equal(window.document.querySelector<HTMLInputElement>('#auth-password')?.outerHTML.includes('saved-secret'), false);
+    assert.equal((window.document.querySelector('#auth-password + button') as HTMLButtonElement).disabled, true);
     await act(async () => button('Continue')!.click());
     assert.deepEqual(submissions.at(-1), { username: 'deploy', password: 'saved-secret', save: false });
+    assert.equal(savedHosts.length, 0);
     await act(async () => window.document.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]')!.click());
     await act(async () => button('Continue & Save')!.click());
     assert.deepEqual(submissions.at(-1), { username: 'deploy', password: 'saved-secret', save: true });
+    assert.equal(savedHosts.at(-1)?.identityId, 'saved');
+    assert.equal(savedHosts.at(-1)?.password, undefined);
+    assert.equal(savedHosts.at(-1)?.savePassword, true);
+    assert.equal(logs.flat().some((line) => line.includes('saved-secret')), false);
     const passwordInput = window.document.getElementById('auth-password') as HTMLInputElement;
     const setInputValue = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
     assert.ok(setInputValue);

@@ -1263,6 +1263,8 @@ function TerminalViewInner({ ctx, isPaneMagnified = false }: { ctx: TerminalView
                   setShowAuthPassword: auth.setShowAuthPassword,
                   authRetryMessage: auth.authRetryMessage,
                   identities,
+                  selectedIdentityId: auth.selectedIdentityId,
+                  onSelectIdentity: auth.selectIdentity,
                   onSubmit: () => auth.submit(),
                   onSubmitWithoutSave: () => auth.submit({ saveToHost: false }),
                   onCancel: handleCancelConnect,

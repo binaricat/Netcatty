@@ -268,6 +268,8 @@ test("re-auth dialog offers saved password identities from the vault (#3475)", (
     setAuthUsername: () => {},
     authPassword: "",
     setAuthPassword: () => {},
+    selectedIdentityId: null,
+    onSelectIdentity: () => {},
     authKeyId: null,
     setAuthKeyId: () => {},
     authPassphrase: "",

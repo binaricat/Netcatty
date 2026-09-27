@@ -1239,6 +1239,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   }
   const auth = useTerminalAuthState({
     host,
+    identities,
     pendingAuthRef,
     termRef,
     onUpdateHost: handleUpdateHostFromTerminal,
