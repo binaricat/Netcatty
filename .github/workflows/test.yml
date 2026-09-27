@@ -70,3 +70,26 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  windows-broadcast-ssh:
+    name: windows-broadcast-ssh
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Exercise two SSH password prompts in the desktop app
+        run: node scripts/terminal-broadcast-ssh.live.test.cjs
