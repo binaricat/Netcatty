@@ -92,4 +92,4 @@ jobs:
         run: npm run build
 
       - name: Exercise two SSH password prompts in the desktop app
-        run: node scripts/terminal-broadcast-ssh.live.test.cjs
+        run: node scripts/terminal-broadcast-ssh.live.cjs
