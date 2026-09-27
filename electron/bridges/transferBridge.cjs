@@ -1374,6 +1374,18 @@ async function assertExpectedLocalDownloadTarget(requestedPath, expected, inspec
     || target.birthtimeNs !== expected.targetBirthtimeNs
     || target.ctimeNs !== expected.targetCtimeNs
     || target.mtimeNs !== expected.targetMtimeNs) {
+    if (process.env.NETCATTY_SFTP_LIVE === "1") {
+      console.error("[quick-target-guard]", JSON.stringify({
+        parentDirectory: parentStat.isDirectory(),
+        parentPathMatches: parentRealPath === expected.parentRealPath,
+        parentIdentity: [expected.parentIdentity, parentIdentity],
+        parentBirthtimeNs: [expected.parentBirthtimeNs, String(parentStat.birthtimeNs)],
+        targetIdentity: [expected.targetIdentity, targetIdentity],
+        targetBirthtimeNs: [expected.targetBirthtimeNs, target.birthtimeNs],
+        targetCtimeNs: [expected.targetCtimeNs, target.ctimeNs],
+        targetMtimeNs: [expected.targetMtimeNs, target.mtimeNs],
+      }));
+    }
     throw new Error("Remembered local download target changed before replacement");
   }
 }
