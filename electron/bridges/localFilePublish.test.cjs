@@ -30,12 +30,15 @@ test("publishLocalFileExclusive falls back to copy when hardlink fails with EISD
     });
     try {
       const identity = await publishLocalFileExclusive(source, target);
-      const stat = fs.lstatSync(target);
+      const stat = fs.lstatSync(target, { bigint: true });
       assert.equal(fs.readFileSync(target, "utf8"), "hello hardlink fallback");
       assert.equal(stat.isFile(), true);
-      assert.equal(identity.dev, stat.dev);
-      assert.equal(identity.ino, stat.ino);
-      assert.equal(identity.size, stat.size);
+      assert.equal(identity.dev, String(stat.dev));
+      assert.equal(identity.ino, String(stat.ino));
+      assert.equal(identity.size, Number(stat.size));
+      assert.equal(identity.birthtimeNs, String(stat.birthtimeNs));
+      assert.equal(identity.ctimeNs, String(stat.ctimeNs));
+      assert.equal(identity.mtimeNs, String(stat.mtimeNs));
       // The prepared source still exists for the caller to unlink.
       assert.equal(fs.existsSync(source), true);
     } finally {
@@ -53,9 +56,15 @@ test("publishLocalFileExclusive still hardlinks on volumes that support it", asy
     const target = path.join(dir, "target");
     fs.writeFileSync(source, "hardlinked publish");
     const identity = await publishLocalFileExclusive(source, target);
-    const [sourceStat, targetStat] = [fs.lstatSync(source), fs.lstatSync(target)];
+    const [sourceStat, targetStat] = [
+      fs.lstatSync(source, { bigint: true }), fs.lstatSync(target, { bigint: true }),
+    ];
     assert.equal(sourceStat.ino, targetStat.ino);
-    assert.deepEqual(identity, { dev: targetStat.dev, ino: targetStat.ino, size: targetStat.size });
+    assert.deepEqual(identity, {
+      dev: String(targetStat.dev), ino: String(targetStat.ino), size: Number(targetStat.size),
+      birthtimeNs: String(targetStat.birthtimeNs),
+      ctimeNs: String(targetStat.ctimeNs), mtimeNs: String(targetStat.mtimeNs),
+    });
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
