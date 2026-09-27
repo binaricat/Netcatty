@@ -6734,7 +6734,11 @@ async function startTransferNow(event, payload, onProgress) {
         : encodePathForSession(sourceSftpId, sourcePath, sourceEncoding);
       // SCP cannot resume, but it must still stage locally so a failed/cancelled
       // overwrite never truncates or removes the existing destination.
-      const stageLocalDownload = transfer.resumable || isScpModeClient(client);
+      // A guarded repeat must always stage before publication. Otherwise a
+      // non-resumable caller would stream straight into the selected file and
+      // bypass the remembered-target check entirely.
+      const stageLocalDownload = transfer.resumable || isScpModeClient(client)
+        || Boolean(payload.expectedLocalTarget);
       let downloadTargetPath = stageLocalDownload
         ? tempDirBridge.getTransferTempFilePath(transferId, path.basename(targetPath))
         : targetPath;

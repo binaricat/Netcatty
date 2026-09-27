@@ -83,6 +83,21 @@ async function runFixture(root) {
     }));
   });
   const client = new SftpClient();
+  const rememberedExpectation = (targetPath) => {
+    const parent = path.dirname(targetPath);
+    const parentStat = fs.statSync(parent, { bigint: true });
+    const targetStat = fs.lstatSync(targetPath, { bigint: true });
+    return {
+      parentRealPath: fs.realpathSync(parent),
+      parentIdentity: `${parentStat.dev}:${parentStat.ino}`,
+      parentBirthtimeNs: String(parentStat.birthtimeNs),
+      targetIdentity: `${targetStat.dev}:${targetStat.ino}`,
+      targetBirthtimeNs: String(targetStat.birthtimeNs),
+      targetCtimeNs: String(targetStat.ctimeNs),
+      targetMtimeNs: String(targetStat.mtimeNs),
+      targetSha256: crypto.createHash("sha256").update(fs.readFileSync(targetPath)).digest("hex"),
+    };
+  };
   try {
     await new Promise((resolve, reject) => {
       server.once("error", reject);
@@ -131,6 +146,32 @@ async function runFixture(root) {
       const outputDigest = crypto.createHash("sha256");
       for await (const chunk of fs.createReadStream(targetPath)) outputDigest.update(chunk);
       assert.equal(outputDigest.digest("hex"), digest);
+      if (process.env.SFTP_LIVE_QUICK === "1") {
+        const expectedLocalTarget = rememberedExpectation(targetPath);
+        const repeat = await bridge.startTransfer({ sender: { send() {} } }, {
+          transferId: `live-repeat-${crypto.randomUUID()}`,
+          sourcePath: "/source.bin", targetPath,
+          sourceType: "sftp", targetType: "local", sourceSftpId: "source",
+          totalBytes: bytes, expectedLocalTarget, capturePublishedContentHash: true,
+        });
+        assert.equal(repeat.error, undefined, repeat.error);
+        assert.equal(crypto.createHash("sha256").update(fs.readFileSync(targetPath)).digest("hex"), digest);
+        const backupPath = path.join(root, `.${path.basename(targetPath)}.netcatty.backup`);
+        assert.equal(crypto.createHash("sha256").update(fs.readFileSync(backupPath)).digest("hex"), digest);
+
+        const staleExpectation = rememberedExpectation(targetPath);
+        const replacementPath = path.join(root, `replacement-${index}.bin`);
+        fs.writeFileSync(replacementPath, "new local file");
+        fs.renameSync(replacementPath, targetPath);
+        const refused = await bridge.startTransfer({ sender: { send() {} } }, {
+          transferId: `live-refuse-${crypto.randomUUID()}`,
+          sourcePath: "/source.bin", targetPath,
+          sourceType: "sftp", targetType: "local", sourceSftpId: "source",
+          totalBytes: bytes, expectedLocalTarget: staleExpectation,
+        });
+        assert.match(refused.error || "", /remembered local download target changed/i);
+        assert.equal(fs.readFileSync(targetPath, "utf8"), "new local file");
+      }
       fs.unlinkSync(targetPath);
       return { index, bytes, elapsedMs: Math.round(performance.now() - startedAt), verificationMs: Math.round(verificationMs), ...control };
     };
