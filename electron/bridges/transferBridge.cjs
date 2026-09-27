@@ -1096,6 +1096,7 @@ async function writeLocalBackupOwnerMarkerContent(markerPath, content) {
     }
   }
   if (failure) throw failure;
+  return ownedStat;
 }
 
 async function writeLocalBackupOwnerMarker(markerPath, stat) {
@@ -1104,11 +1105,11 @@ async function writeLocalBackupOwnerMarker(markerPath, stat) {
     birthtimeNs: String(stat.birthtimeNs),
   });
   try {
-    await writeLocalBackupOwnerMarkerContent(markerPath, payload);
+    return await writeLocalBackupOwnerMarkerContent(markerPath, payload);
   } catch (error) {
     if (error?.code !== "EEXIST" && error?.code !== "ELOOP") throw error;
     // An identical marker is already in place; leave it untouched.
-    if (await localBackupOwnerMarkerMatches(markerPath, stat)) return;
+    if (await localBackupOwnerMarkerMatches(markerPath, stat)) return null;
     throw new Error(
       `An unrecognized file already exists at the recovery backup marker location ${markerPath}; `
       + "refusing to overwrite it. Remove or rename that file if it was not created by Netcatty.",
@@ -1184,7 +1185,12 @@ async function removeOrphanedLocalBackupOwnerMarker(markerPath) {
     || String(currentStat.birthtimeNs) !== String(stat.birthtimeNs)
     || currentStat.ctimeNs !== stat.ctimeNs
     || currentStat.mtimeNs !== stat.mtimeNs) return;
-  await fs.promises.unlink(markerPath).catch(() => {});
+  // The pathname can still be replaced after this stat. Move it aside first,
+  // then remove only the inode whose marker payload was inspected above.
+  await removeLocalPathnameBoundToIdentity(markerPath, [{
+    dev: String(stat.dev), ino: String(stat.ino),
+    birthtimeNs: String(stat.birthtimeNs),
+  }]);
 }
 
 // Atomically remove a pathname only while it still names one of the given
@@ -1261,6 +1267,17 @@ async function removeLocalPathnameBoundToIdentity(pathname, expectedIdentities, 
   }
   await fs.promises.unlink(privatePath).catch(() => {});
   return { vacated: false, moved: movedIdentity };
+}
+
+async function retireLocalBackupOwnerMarker(markerPath, markerStat) {
+  if (!markerStat) throw new Error("Recovery backup owner marker could not be verified");
+  const result = await removeLocalPathnameBoundToIdentity(markerPath, [{
+    dev: String(markerStat.dev), ino: String(markerStat.ino),
+    birthtimeNs: String(markerStat.birthtimeNs),
+  }]);
+  if (!result.vacated) {
+    throw new Error(`Recovery backup owner marker changed during cleanup: ${markerPath}`);
+  }
 }
 
 // Move the original target to its recovery-backup name without ever
@@ -1387,6 +1404,7 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
   // predictable hidden pathname (Codex P2 on PR #3516).
   const backupOwnerMarkerPath = `${backupPath}.owner`;
   let wroteOwnerMarker = false;
+  let wroteOwnerMarkerStat = null;
   let preparedHandle;
   let originalHandle;
   let restoreProbeCreated = false;
@@ -1477,10 +1495,14 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
           if (error?.code !== "ENOENT") throw error;
         }
         if (existingBackupStat) {
+          const existingMarkerStat = await fs.promises.lstat(
+            backupOwnerMarkerPath, { bigint: true },
+          ).catch(() => null);
           const ownsExistingBackup = await localBackupOwnerMarkerMatches(
             backupOwnerMarkerPath, existingBackupStat,
           );
-          if (!existingBackupStat.isFile() || !ownsExistingBackup) {
+          if (!existingBackupStat.isFile() || !existingMarkerStat?.isFile()
+            || !ownsExistingBackup) {
             throw new Error(
               `An unrecognized file already exists at the recovery backup location ${backupPath}; `
               + "refusing to move or replace it. Remove or rename that file if it was not created by Netcatty.",
@@ -1520,7 +1542,7 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
             if (error?.code !== "ENOENT") throw error;
             // Our own backup was removed concurrently; nothing to supersede.
             supersededBackupPath = null;
-            await fs.promises.unlink(backupOwnerMarkerPath).catch(() => {});
+            await retireLocalBackupOwnerMarker(backupOwnerMarkerPath, existingMarkerStat);
           }
           if (supersededBackupPath) {
             // Revalidate the moved inode: a concurrent writer may have replaced
@@ -1547,7 +1569,7 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
             // is recreated if this replacement is rolled back before the
             // commit boundary (copy-based publication gives the restored file
             // a new inode, Codex P2 on PR #3516).
-            await fs.promises.unlink(backupOwnerMarkerPath).catch(() => {});
+            await retireLocalBackupOwnerMarker(backupOwnerMarkerPath, existingMarkerStat);
           }
         } else {
           // No backup at the fixed name, but the owner marker from an
@@ -1617,8 +1639,8 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
           // the next repeat download can prove the file at that pathname is
           // ours before rolling it aside. Written before the commit boundary,
           // so a failure here still rolls the original target back.
-          await writeLocalBackupOwnerMarker(backupOwnerMarkerPath, pathStat);
-          wroteOwnerMarker = true;
+          wroteOwnerMarkerStat = await writeLocalBackupOwnerMarker(backupOwnerMarkerPath, pathStat);
+          wroteOwnerMarker = !!wroteOwnerMarkerStat;
         } finally {
           if (backupHandle && backupHandle !== originalHandle) await backupHandle.close().catch(() => {});
         }
@@ -1794,9 +1816,7 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
             // exclusively instead of failing with EEXIST and leaving the
             // restored backup paired with the wrong identity (Codex P2 on
             // PR #3516).
-            await fs.promises.unlink(backupOwnerMarkerPath).catch((markerError) => {
-              if (markerError?.code !== "ENOENT") throw markerError;
-            });
+            await retireLocalBackupOwnerMarker(backupOwnerMarkerPath, wroteOwnerMarkerStat);
           }
           // Copy-based publication (filesystems without hard links) gives the
           // restored backup a fresh inode, so restoring the saved marker
@@ -1814,11 +1834,13 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
             // Fail closed: without a matching marker the next repeat download
             // refuses to touch the restored backup instead of replacing a
             // foreign file.
-            await fs.promises.unlink(backupOwnerMarkerPath).catch(() => {});
+            if (wroteOwnerMarker) {
+              await retireLocalBackupOwnerMarker(backupOwnerMarkerPath, wroteOwnerMarkerStat);
+            }
           }
         } else if (wroteOwnerMarker) {
           // The rollover marker no longer matches any retained backup.
-          await fs.promises.unlink(backupOwnerMarkerPath).catch(() => {});
+          await retireLocalBackupOwnerMarker(backupOwnerMarkerPath, wroteOwnerMarkerStat);
         }
       } catch (restoreError) {
         keepRecoveryFiles = true;
@@ -1851,7 +1873,9 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
         if (restoredBackupStat?.isFile()) {
           await writeLocalBackupOwnerMarker(backupOwnerMarkerPath, restoredBackupStat);
         } else {
-          await fs.promises.unlink(backupOwnerMarkerPath).catch(() => {});
+          if (wroteOwnerMarker) {
+            await retireLocalBackupOwnerMarker(backupOwnerMarkerPath, wroteOwnerMarkerStat);
+          }
         }
       } catch (restoreError) {
         keepRecoveryFiles = true;

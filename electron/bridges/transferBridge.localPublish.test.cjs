@@ -622,6 +622,109 @@ test("failed repeat restores the superseded backup and its owner marker", async 
   assert.equal(fs.readFileSync(target, "utf8"), "fourth");
 });
 
+test("rollback preserves a foreign owner marker swapped in before cleanup", async (t) => {
+  const root = fs.mkdtempSync(`${temp.getTempFilePath("remembered-marker-race")}-`);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const staged = path.join(root, "staged");
+  const target = path.join(root, "target");
+  const markerPath = path.join(root, ".target.netcatty.backup.owner");
+  fs.writeFileSync(staged, "second");
+  fs.writeFileSync(target, "first");
+  const link = fs.promises.link;
+  let injected = false;
+  t.mock.method(fs.promises, "link", async (from, to, ...rest) => {
+    if (to === target && !injected) {
+      injected = true;
+      fs.unlinkSync(markerPath);
+      fs.writeFileSync(markerPath, "foreign marker");
+      throw Object.assign(new Error("occupied"), { code: "EEXIST" });
+    }
+    return link(from, to, ...rest);
+  });
+  await assert.rejects(
+    bridge._promoteLocalTransferForTests(staged, target, {
+      requestedTargetPath: target,
+      expectedLocalTarget: rememberedExpectation(root, target),
+    }),
+    /changed during replacement/,
+  );
+  assert.equal(fs.readFileSync(target, "utf8"), "first");
+  assert.equal(fs.readFileSync(markerPath, "utf8"), "foreign marker");
+});
+
+test("repeat preserves a foreign owner marker swapped in during rollover", async (t) => {
+  const root = fs.mkdtempSync(`${temp.getTempFilePath("remembered-rollover-marker-race")}-`);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const staged = path.join(root, "staged");
+  const target = path.join(root, "target");
+  const backupPath = path.join(root, ".target.netcatty.backup");
+  const markerPath = `${backupPath}.owner`;
+  fs.writeFileSync(staged, "second");
+  fs.writeFileSync(target, "first");
+  await bridge._promoteLocalTransferForTests(staged, target, {
+    requestedTargetPath: target,
+    expectedLocalTarget: rememberedExpectation(root, target),
+  });
+  fs.writeFileSync(staged, "third");
+  const rename = fs.promises.rename;
+  let injected = false;
+  t.mock.method(fs.promises, "rename", async (from, to, ...rest) => {
+    if (from === backupPath && to.startsWith(`${backupPath}.`) && !injected) {
+      injected = true;
+      fs.unlinkSync(markerPath);
+      fs.writeFileSync(markerPath, "foreign marker");
+    }
+    return rename(from, to, ...rest);
+  });
+  await assert.rejects(
+    bridge._promoteLocalTransferForTests(staged, target, {
+      requestedTargetPath: target,
+      expectedLocalTarget: rememberedExpectation(root, target),
+    }),
+    /owner marker changed during cleanup/,
+  );
+  assert.equal(fs.readFileSync(target, "utf8"), "second");
+  assert.equal(fs.readFileSync(markerPath, "utf8"), "foreign marker");
+  assert.equal(fs.readFileSync(backupPath, "utf8"), "first");
+});
+
+test("orphan recovery preserves a marker replaced after it is read", async (t) => {
+  const root = fs.mkdtempSync(`${temp.getTempFilePath("remembered-orphan-marker-race")}-`);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const staged = path.join(root, "staged");
+  const target = path.join(root, "target");
+  const backupPath = path.join(root, ".target.netcatty.backup");
+  const markerPath = `${backupPath}.owner`;
+  fs.writeFileSync(staged, "second");
+  fs.writeFileSync(target, "first");
+  await bridge._promoteLocalTransferForTests(staged, target, {
+    requestedTargetPath: target,
+    expectedLocalTarget: rememberedExpectation(root, target),
+  });
+  fs.unlinkSync(backupPath);
+  fs.writeFileSync(staged, "third");
+  const readFile = fs.promises.readFile;
+  let injected = false;
+  t.mock.method(fs.promises, "readFile", async (file, ...rest) => {
+    const result = await readFile(file, ...rest);
+    if (file === markerPath && !injected) {
+      injected = true;
+      fs.unlinkSync(markerPath);
+      fs.writeFileSync(markerPath, "foreign marker");
+    }
+    return result;
+  });
+  await assert.rejects(
+    bridge._promoteLocalTransferForTests(staged, target, {
+      requestedTargetPath: target,
+      expectedLocalTarget: rememberedExpectation(root, target),
+    }),
+    /refusing to overwrite/,
+  );
+  assert.equal(fs.readFileSync(target, "utf8"), "second");
+  assert.equal(fs.readFileSync(markerPath, "utf8"), "foreign marker");
+});
+
 test("published file edited with restored mtime is never remembered", async (t) => {
   const root = fs.mkdtempSync(`${temp.getTempFilePath("published-restored-mtime")}-`);
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
