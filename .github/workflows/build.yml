@@ -256,6 +256,16 @@ jobs:
         shell: pwsh
         run: node --test --test-name-pattern 'Windows local stats distinguish a replaced file' electron/bridges/localFsBridge.test.cjs
 
+      - name: Test Windows repeat downloads over SFTP
+        if: matrix.name == 'windows'
+        shell: pwsh
+        env:
+          NETCATTY_SFTP_LIVE: '1'
+          SFTP_LIVE_QUICK: '1'
+          SFTP_LIVE_MIB: '2'
+          SFTP_LIVE_FILES: '1'
+        run: node scripts/sftp-transfer-resume.live.test.cjs
+
       - name: Test macOS Option column selection
         if: matrix.name == 'macos'
         run: npm run test:xterm-macos-selection

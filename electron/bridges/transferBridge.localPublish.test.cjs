@@ -226,6 +226,43 @@ test("failed backup publication preserves a late replacement at its pathname", a
   assert.equal(fs.readFileSync(backup, "utf8"), "foreign");
 });
 
+test("a displaced local file is recovered in managed storage when its name is occupied again", async (t) => {
+  const root = fs.mkdtempSync(`${temp.getTempFilePath("remembered-quarantine")}-`);
+  const tempDir = temp.getTempDir();
+  const before = new Set(fs.readdirSync(tempDir));
+  t.after(() => {
+    fs.rmSync(root, { recursive: true, force: true });
+    for (const name of fs.readdirSync(tempDir)) {
+      if (!before.has(name)) fs.rmSync(path.join(tempDir, name), { force: true });
+    }
+  });
+  const pathname = path.join(root, "backup");
+  fs.writeFileSync(pathname, "displaced edit");
+  const link = fs.promises.link;
+  let injected = false;
+  t.mock.method(fs.promises, "link", async (source, target, ...rest) => {
+    if (!injected && target === pathname && String(source).endsWith(".retiring")) {
+      injected = true;
+      fs.writeFileSync(pathname, "newer edit");
+      throw Object.assign(new Error("occupied"), { code: "EEXIST" });
+    }
+    return link(source, target, ...rest);
+  });
+  await assert.rejects(
+    bridge._removeLocalPathnameBoundToIdentityForTests(pathname, [{
+      dev: "0", ino: "0", birthtimeNs: "0",
+    }]),
+    (error) => {
+      assert.equal(injected, true);
+      assert.match(error.message, /Recovery file:/);
+      assert.equal(fs.readFileSync(error.recoveryPath, "utf8"), "displaced edit");
+      assert.equal(path.dirname(error.recoveryPath), tempDir);
+      return true;
+    },
+  );
+  assert.equal(fs.readFileSync(pathname, "utf8"), "newer edit");
+});
+
 test("a failed owner marker write removes its exclusively created marker", async (t) => {
   const root = fs.mkdtempSync(`${temp.getTempFilePath("remembered-marker-fail")}-`);
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -444,7 +481,7 @@ test("superseded recovery copy is retired into Netcatty temp storage, not destro
   assert.ok(retired, "superseded copy remains reachable in Netcatty temp storage");
 });
 
-test("superseded copy is copied into temp storage when the destination is on another filesystem", async (t) => {
+test("cross-filesystem backup retention refuses the repeat before changing the destination", async (t) => {
   const root = fs.mkdtempSync(`${temp.getTempFilePath("remembered-superseded-exdev")}-`);
   const tempDir = temp.getTempDir();
   const tempBefore = new Set(fs.readdirSync(tempDir));
@@ -456,6 +493,7 @@ test("superseded copy is copied into temp storage when the destination is on ano
   });
   const staged = path.join(root, "staged");
   const target = path.join(root, "target");
+  const backup = path.join(root, ".target.netcatty.backup");
   fs.writeFileSync(staged, "second");
   fs.writeFileSync(target, "first");
   await bridge._promoteLocalTransferForTests(staged, target, {
@@ -463,40 +501,30 @@ test("superseded copy is copied into temp storage when the destination is on ano
     expectedLocalTarget: rememberedExpectation(root, target),
   });
   fs.writeFileSync(staged, "third");
-  // A destination on a different filesystem (external or network mount)
-  // cannot be hardlinked into the managed temp store (EXDEV). The
-  // retirement must still copy the bytes there instead of leaving one
-  // versioned full-size copy per repeat beside the destination
-  // (Codex P1 on PR #3516).
   const link = fs.promises.link;
   t.mock.method(fs.promises, "link", async (from, to, ...rest) => {
-    if (path.basename(from).startsWith(".target.netcatty.backup.")) {
+    if (from === backup && String(to).includes("superseded-")) {
       throw Object.assign(new Error("cross-device"), { code: "EXDEV" });
     }
     return link(from, to, ...rest);
   });
-  await bridge._promoteLocalTransferForTests(staged, target, {
-    requestedTargetPath: target,
-    expectedLocalTarget: rememberedExpectation(root, target),
-  });
-  assert.equal(fs.readFileSync(target, "utf8"), "third");
-  assert.equal(
-    fs.readdirSync(root).filter((name) => name.startsWith(".target.netcatty.backup.")
-      && name !== ".target.netcatty.backup" && name !== ".target.netcatty.backup.owner").length,
-    0,
-    "leave no versioned copy beside the cross-device destination",
+  await assert.rejects(
+    bridge._promoteLocalTransferForTests(staged, target, {
+      requestedTargetPath: target,
+      expectedLocalTarget: rememberedExpectation(root, target),
+    }),
+    /Cannot safely retain the previous download/,
   );
-  const retired = fs.readdirSync(tempDir)
-    .filter((name) => !tempBefore.has(name) && name.includes("superseded-.target.netcatty.backup."))
-    .map((name) => path.join(tempDir, name))
-    .find((candidate) => {
-      try { return fs.readFileSync(candidate, "utf8") === "first"; } catch { return false; }
-    });
-  assert.ok(retired, "superseded copy remains reachable in Netcatty temp storage");
+  assert.equal(fs.readFileSync(target, "utf8"), "second");
+  assert.equal(fs.readFileSync(backup, "utf8"), "first");
+  assert.equal(fs.readdirSync(root).filter((name) => name.startsWith(".target.netcatty.backup.")
+    && name !== ".target.netcatty.backup.owner").length, 0);
+  assert.equal(fs.readdirSync(tempDir).filter((name) => !tempBefore.has(name)
+    && name.includes("superseded-")).length, 0);
 });
 
-test("actively written superseded copy is kept beside the destination", async (t) => {
-  const root = fs.mkdtempSync(`${temp.getTempFilePath("remembered-superseded-active")}-`);
+test("late writes to a superseded backup remain reachable through managed storage", async (t) => {
+  const root = fs.mkdtempSync(`${temp.getTempFilePath("remembered-superseded-late-write")}-`);
   const tempDir = temp.getTempDir();
   const tempBefore = new Set(fs.readdirSync(tempDir));
   t.after(() => {
@@ -507,47 +535,39 @@ test("actively written superseded copy is kept beside the destination", async (t
   });
   const staged = path.join(root, "staged");
   const target = path.join(root, "target");
+  const backup = path.join(root, ".target.netcatty.backup");
   fs.writeFileSync(staged, "second");
   fs.writeFileSync(target, "first");
   await bridge._promoteLocalTransferForTests(staged, target, {
     requestedTargetPath: target,
     expectedLocalTarget: rememberedExpectation(root, target),
   });
-  fs.writeFileSync(staged, "third");
-  // An editor keeps writing through a held descriptor while the copy runs,
-  // so the source never settles and its only remaining name must stay
-  // reachable instead of being dropped mid-edit. The destination is on a
-  // different filesystem, so the hardlink into the temp store fails too.
-  const link = fs.promises.link;
-  t.mock.method(fs.promises, "link", async (from, to, ...rest) => {
-    if (path.basename(from).startsWith(".target.netcatty.backup.")) {
-      throw Object.assign(new Error("cross-device"), { code: "EXDEV" });
+  const held = fs.openSync(backup, "r+");
+  t.after(() => fs.closeSync(held));
+  const unlink = fs.promises.unlink;
+  let lateWrite = false;
+  t.mock.method(fs.promises, "unlink", async (pathname) => {
+    if (!lateWrite && String(pathname).includes(".target.netcatty.backup.")
+      && String(pathname).endsWith(".retiring")) {
+      fs.writeSync(held, Buffer.from("LATE!"), 0, 5, 0);
+      fs.fsyncSync(held);
+      lateWrite = true;
     }
-    return link(from, to, ...rest);
+    return unlink(pathname);
   });
-  const copyFile = fs.promises.copyFile;
-  t.mock.method(fs.promises, "copyFile", async (from, to, ...rest) => {
-    fs.appendFileSync(from, "!");
-    return copyFile(from, to, ...rest);
-  });
+  fs.writeFileSync(staged, "third");
   await bridge._promoteLocalTransferForTests(staged, target, {
     requestedTargetPath: target,
     expectedLocalTarget: rememberedExpectation(root, target),
   });
+  assert.equal(lateWrite, true);
   assert.equal(fs.readFileSync(target, "utf8"), "third");
-  const retained = fs.readdirSync(root)
-    .filter((name) => name.startsWith(".target.netcatty.backup.")
-      && name !== ".target.netcatty.backup" && name !== ".target.netcatty.backup.owner")
-    .map((name) => path.join(root, name));
-  assert.equal(retained.length, 1, "keep the still-changing copy beside the destination");
-  assert.equal(fs.readFileSync(retained[0], "utf8"), "first!!!");
-  assert.equal(
-    fs.readdirSync(tempDir)
-      .filter((name) => !tempBefore.has(name) && name.includes("superseded-.target.netcatty.backup."))
-      .length,
-    0,
-    "remove the abandoned partial temp copy",
-  );
+  assert.equal(fs.fstatSync(held).nlink, 1, "the old inode keeps its managed link");
+  const retained = fs.readdirSync(tempDir)
+    .filter((name) => !tempBefore.has(name) && name.includes("superseded-.target.netcatty.backup."))
+    .map((name) => path.join(tempDir, name));
+  assert.equal(retained.length, 1);
+  assert.equal(fs.readFileSync(retained[0], "utf8"), "LATE!");
 });
 
 test("failed repeat restores the superseded backup and its owner marker", async (t) => {

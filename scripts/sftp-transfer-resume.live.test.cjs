@@ -147,17 +147,19 @@ async function runFixture(root) {
       for await (const chunk of fs.createReadStream(targetPath)) outputDigest.update(chunk);
       assert.equal(outputDigest.digest("hex"), digest);
       if (process.env.SFTP_LIVE_QUICK === "1") {
-        const expectedLocalTarget = rememberedExpectation(targetPath);
-        const repeat = await bridge.startTransfer({ sender: { send() {} } }, {
-          transferId: `live-repeat-${crypto.randomUUID()}`,
-          sourcePath: "/source.bin", targetPath,
-          sourceType: "sftp", targetType: "local", sourceSftpId: "source",
-          totalBytes: bytes, expectedLocalTarget, capturePublishedContentHash: true,
-        });
-        assert.equal(repeat.error, undefined, repeat.error);
-        assert.equal(crypto.createHash("sha256").update(fs.readFileSync(targetPath)).digest("hex"), digest);
         const backupPath = path.join(root, `.${path.basename(targetPath)}.netcatty.backup`);
-        assert.equal(crypto.createHash("sha256").update(fs.readFileSync(backupPath)).digest("hex"), digest);
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          const expectedLocalTarget = rememberedExpectation(targetPath);
+          const repeat = await bridge.startTransfer({ sender: { send() {} } }, {
+            transferId: `live-repeat-${crypto.randomUUID()}`,
+            sourcePath: "/source.bin", targetPath,
+            sourceType: "sftp", targetType: "local", sourceSftpId: "source",
+            totalBytes: bytes, expectedLocalTarget, capturePublishedContentHash: true,
+          });
+          assert.equal(repeat.error, undefined, repeat.error);
+          assert.equal(crypto.createHash("sha256").update(fs.readFileSync(targetPath)).digest("hex"), digest);
+          assert.equal(crypto.createHash("sha256").update(fs.readFileSync(backupPath)).digest("hex"), digest);
+        }
 
         const staleExpectation = rememberedExpectation(targetPath);
         const replacementPath = path.join(root, `replacement-${index}.bin`);

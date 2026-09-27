@@ -1086,10 +1086,14 @@ async function writeLocalBackupOwnerMarkerContent(markerPath, content) {
     failure ??= error;
   }
   if (failure && ownedStat) {
-    await removeLocalPathnameBoundToIdentity(markerPath, [{
-      dev: String(ownedStat.dev), ino: String(ownedStat.ino),
-      birthtimeNs: String(ownedStat.birthtimeNs),
-    }]).catch(() => {});
+    try {
+      await removeLocalPathnameBoundToIdentity(markerPath, [{
+        dev: String(ownedStat.dev), ino: String(ownedStat.ino),
+        birthtimeNs: String(ownedStat.birthtimeNs),
+      }]);
+    } catch (cleanupError) {
+      failure = new Error(`${failure.message}. ${cleanupError.message}`, { cause: failure });
+    }
   }
   if (failure) throw failure;
 }
@@ -1196,7 +1200,7 @@ async function removeOrphanedLocalBackupOwnerMarker(markerPath) {
 // destroy an entry this process did not pin. Resolves with the moved entry's
 // identity when the pathname was vacated, or null when a foreign replacement
 // was moved aside and given its name back.
-async function removeLocalPathnameBoundToIdentity(pathname, expectedIdentities) {
+async function removeLocalPathnameBoundToIdentity(pathname, expectedIdentities, rehomeOnCollision = true) {
   const privatePath = `${pathname}.${crypto.randomUUID().replace(/-/g, "")}.retiring`;
   try {
     await fs.promises.rename(pathname, privatePath);
@@ -1226,7 +1230,34 @@ async function removeLocalPathnameBoundToIdentity(pathname, expectedIdentities) 
   try {
     await fs.promises.link(privatePath, pathname);
   } catch {
-    return { vacated: false, moved: movedIdentity, quarantinedAt: privatePath };
+    if (!rehomeOnCollision) {
+      return { vacated: false, moved: movedIdentity, quarantinedAt: privatePath };
+    }
+    // The original name is occupied again. Preserve the displaced entry in
+    // Netcatty's managed temp directory when this volume allows a hard link.
+    // A cross-volume copy would lose edits arriving through an open handle,
+    // so leave the private name in place and report it instead.
+    let recoveryPath = privatePath;
+    const managedPath = tempDirBridge.getTempFilePath(
+      `quarantined-${path.basename(pathname)}-${crypto.randomUUID()}`,
+    );
+    try {
+      await fs.promises.link(privatePath, managedPath);
+      const managedStat = await fs.promises.lstat(managedPath, { bigint: true });
+      if (`${managedStat.dev}:${managedStat.ino}` !== `${movedIdentity.dev}:${movedIdentity.ino}`
+        || String(managedStat.birthtimeNs) !== movedIdentity.birthtimeNs) {
+        throw new Error("Quarantined file changed before retention");
+      }
+      recoveryPath = managedPath;
+      await removeLocalPathnameBoundToIdentity(privatePath, [movedIdentity], false);
+    } catch {
+      // The private name is still a reachable recovery location.
+    }
+    const recovery = new Error(
+      `A concurrent local file could not be returned to ${pathname}. Recovery file: ${recoveryPath}`,
+    );
+    recovery.recoveryPath = recoveryPath;
+    throw recovery;
   }
   await fs.promises.unlink(privatePath).catch(() => {});
   return { vacated: false, moved: movedIdentity };
@@ -1287,10 +1318,14 @@ async function publishLocalBackupExclusive(source, target) {
     // Undo the link we created so the caller's state matches its backedUp
     // flag. A stat followed by unlink can delete a late replacement at the
     // fixed backup pathname; move it aside and compare the moved inode.
-    await removeLocalPathnameBoundToIdentity(target, [{
-      dev: String(sourceStat.dev), ino: String(sourceStat.ino),
-      birthtimeNs: String(sourceStat.birthtimeNs),
-    }]).catch(() => {});
+    try {
+      await removeLocalPathnameBoundToIdentity(target, [{
+        dev: String(sourceStat.dev), ino: String(sourceStat.ino),
+        birthtimeNs: String(sourceStat.birthtimeNs),
+      }]);
+    } catch (cleanupError) {
+      throw new Error(`${error.message}. ${cleanupError.message}`, { cause: error });
+    }
     throw error;
   }
 }
@@ -1344,6 +1379,7 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
   let committed = false;
   let keepRecoveryFiles = false;
   let supersededBackupPath = null;
+  let supersededBackupIdentity = null;
   // The fixed recovery-backup name is only reused when the file already there
   // can be proven to be the backup this app wrote earlier. The marker file
   // records the backed-up inode's identity so a repeat download refuses to
@@ -1450,6 +1486,33 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
               + "refusing to move or replace it. Remove or rename that file if it was not created by Netcatty.",
             );
           }
+          // Retain the exact old inode in managed storage before changing
+          // either the backup or destination. A cross-volume copy is only a
+          // snapshot: an editor may write through its old handle after that
+          // snapshot and before cleanup. Refuse this repeat if a hard link
+          // into managed storage cannot be made.
+          const retiredPath = tempDirBridge.getTempFilePath(
+            `superseded-${path.basename(backupPath)}.${token}`,
+          );
+          try {
+            await fs.promises.link(backupPath, retiredPath);
+          } catch (error) {
+            throw new Error(
+              "Cannot safely retain the previous download on this filesystem; choose the destination again",
+              { cause: error },
+            );
+          }
+          const retiredStat = await fs.promises.lstat(retiredPath, { bigint: true });
+          if (`${retiredStat.dev}:${retiredStat.ino}`
+                !== `${existingBackupStat.dev}:${existingBackupStat.ino}`
+            || String(retiredStat.birthtimeNs) !== String(existingBackupStat.birthtimeNs)) {
+            throw new Error("The recovery backup changed before it could be retained");
+          }
+          supersededBackupIdentity = {
+            dev: String(existingBackupStat.dev),
+            ino: String(existingBackupStat.ino),
+            birthtimeNs: String(existingBackupStat.birthtimeNs),
+          };
           supersededBackupPath = `${backupPath}.${token}`;
           try {
             await fs.promises.rename(backupPath, supersededBackupPath);
@@ -1575,74 +1638,20 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
     // Publication is the commit boundary. A late cancel must not perform a
     // check-then-unlink rollback against a name another process may now own.
     committed = true;
-    // The superseded recovery copy only exists to roll this replacement back
-    // before the commit boundary, so retire it once the replacement is
-    // committed. Retaining one versioned copy per successful repeat beside
-    // the destination would leave unbounded full-size files there and
-    // eventually exhaust that volume (Codex P1 on PR #3516). But an editor
-    // may still hold the superseded inode open: unlinking its last name now
-    // would turn any late write through that descriptor into unreachable
-    // data. Hardlink the artifact into Netcatty's managed temporary storage
-    // first (zero copy; the inode keeps a reachable name there until the
-    // temp store is cleared), and only then drop the beside-destination
-    // name. If the link cannot be made (different volume, unsupported
-    // filesystem), copy the bytes into the managed temporary store and
-    // then drop the beside-destination name anyway, so repeats on such a
-    // destination stop leaving a versioned full-size copy per run behind
-    // (Codex P1 on PR #3516). Re-stat the source around the copy and retry
-    // while it keeps changing, so an edit still landing through a held
-    // descriptor never loses its only remaining name; if it is still
-    // changing after the retries, leave the copy beside the destination
-    // for the next repeat to supersede again.
+    // The previous inode already has a managed hard link created before the
+    // commit boundary. Retire its old pathname only when it still identifies
+    // that inode. There is no cross-volume copy-and-unlink window here.
     if (supersededBackupPath) {
-      const retiredPath = tempDirBridge.getTempFilePath(
-        `superseded-${path.basename(supersededBackupPath)}`,
+      const retired = await removeLocalPathnameBoundToIdentity(
+        supersededBackupPath, [supersededBackupIdentity],
       );
-      let sourceNameDropped = false;
-      try {
-        let hardLinked = false;
-        try {
-          await fs.promises.link(supersededBackupPath, retiredPath);
-          hardLinked = true;
-        } catch {
-          let stableCopy = false;
-          let after = null;
-          for (let attempt = 0; attempt < 3 && !stableCopy; attempt += 1) {
-            const before = await fs.promises.lstat(supersededBackupPath, { bigint: true })
-              .catch(() => null);
-            if (!before) {
-              // The copy was removed concurrently; nothing to preserve.
-              stableCopy = true;
-              break;
-            }
-            await fs.promises.copyFile(supersededBackupPath, retiredPath);
-            after = await fs.promises.lstat(supersededBackupPath, { bigint: true });
-            stableCopy = stableLocalFileIdentity(before) === stableLocalFileIdentity(after)
-              && before.ctimeNs === after.ctimeNs && before.mtimeNs === after.mtimeNs;
-          }
-          if (!stableCopy) throw new Error("Superseded recovery copy kept changing during retirement");
-          // The cross-filesystem retired copy cannot keep the source inode
-          // reachable, so dropping the beside-destination name makes any edit
-          // that lands through a still-held descriptor unreachable. The copy
-          // loop above cannot see such a late write, so re-stat one last time
-          // immediately before the unlink and only drop the name while the
-          // inode still matches the retired copy (Codex P1 on PR #3516). If
-          // it changed after the copy, keep the source beside the
-          // destination for the next repeat to supersede again.
-          const finalStat = await fs.promises.lstat(supersededBackupPath, { bigint: true })
-            .catch(() => null);
-          if (finalStat
-            && stableLocalFileIdentity(finalStat) === stableLocalFileIdentity(after)
-            && finalStat.ctimeNs === after.ctimeNs && finalStat.mtimeNs === after.mtimeNs) {
-            sourceNameDropped = true;
-          }
-        }
-        if (hardLinked || sourceNameDropped) {
-          await fs.promises.unlink(supersededBackupPath).catch(() => {});
-        }
-      } catch {
-        await fs.promises.unlink(retiredPath).catch(() => {});
-        // Keep the superseded copy reachable beside the destination.
+      if (!retired.vacated) {
+        const recovery = new Error(
+          `The previous recovery backup changed during retirement. Recovery file: ${supersededBackupPath}`,
+        );
+        recovery.recoveryFailed = true;
+        recovery.remoteBackupPath = supersededBackupPath;
+        throw recovery;
       }
       supersededBackupPath = null;
     }
@@ -8263,6 +8272,7 @@ module.exports = {
   releaseSftpTransferSession,
   listTransferSftpIds,
   _promoteLocalTransferForTests: promoteLocalTransfer,
+  _removeLocalPathnameBoundToIdentityForTests: removeLocalPathnameBoundToIdentity,
   _preserveTransferredDestinationMtimeForTests: preserveTransferredDestinationMtime,
   _restoreRemoteUploadModeBestEffortForTests: restoreRemoteUploadModeBestEffort,
   _waitForPendingWriteOpenPathGateForTests: waitForPendingWriteOpenPathGate,
