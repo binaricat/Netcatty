@@ -1,13 +1,13 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
-const os = require("node:os");
 const path = require("node:path");
+const tempDirBridge = require("./tempDirBridge.cjs");
 
 const { publishLocalFileExclusive } = require("./localFilePublish.cjs");
 
 function makeTempDir(prefix) {
-  return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  return fs.mkdtempSync(`${tempDirBridge.getTempFilePath(prefix)}-`);
 }
 
 function stubLink(impl) {
