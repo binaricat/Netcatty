@@ -4,6 +4,7 @@ export const zhCNAiMessages: Messages = {
   // AI Settings
   'ai.agentSettings': 'Agent 设置',
   'ai.chat.preparing': '准备中…',
+  'ai.chat.modelCatalogWarning': '暂时无法更新实时模型列表，当前显示上次可用或内置的模型。',
   'ai.chat.compactingContext': '正在压缩较早的上下文…',
   'ai.chat.compactingStep': '正在为下一步整理上下文…',
   'ai.chat.compactionRetry': '请求过大，正在压缩上下文并重试…',
@@ -600,6 +601,7 @@ export const zhCNAiMessages: Messages = {
   'terminal.layer.aiChat': 'AI 助手',
   'terminal.layer.movePanelLeft': '面板移至左侧',
   'terminal.layer.movePanelRight': '面板移至右侧',
+  'terminal.layer.movePanelBottom': '面板移至底部',
   'terminal.layer.closePanel': '关闭面板',
   'terminal.layer.closePane': '关闭分屏',
   'terminal.layer.saveLayoutAsDefault': '将布局保存为默认',

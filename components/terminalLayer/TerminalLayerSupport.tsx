@@ -1,4 +1,3 @@
-import { getTopTabsChromeRoots } from '../../application/app/topTabsChromeTheme';
 import React, { createContext, lazy, memo, Suspense, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 
 import { activeTabStore } from '../../application/state/activeTabStore';
@@ -228,22 +227,22 @@ export const clearHostTreePreviewVars = () => {
 
 export const clearTopTabsPreviewVars = () => {
   if (typeof document === 'undefined') return;
-  for (const tabsRoot of getTopTabsChromeRoots()) {
-    removeStylePropertyIfSet(tabsRoot, '--top-tabs-bg');
-    removeStylePropertyIfSet(tabsRoot, '--top-tabs-fg');
-    removeStylePropertyIfSet(tabsRoot, '--top-tabs-muted');
-    removeStylePropertyIfSet(tabsRoot, '--top-tabs-active-bg');
-    removeStylePropertyIfSet(tabsRoot, '--top-tabs-accent');
-    removeStylePropertyIfSet(tabsRoot, '--background');
-    removeStylePropertyIfSet(tabsRoot, '--foreground');
-    removeStylePropertyIfSet(tabsRoot, '--accent');
-    removeStylePropertyIfSet(tabsRoot, '--accent-foreground');
-    removeStylePropertyIfSet(tabsRoot, '--primary');
-    removeStylePropertyIfSet(tabsRoot, '--primary-foreground');
-    removeStylePropertyIfSet(tabsRoot, '--secondary');
-    removeStylePropertyIfSet(tabsRoot, '--border');
-    removeStylePropertyIfSet(tabsRoot, '--muted-foreground');
-  }
+  const tabsRoot = document.querySelector<HTMLElement>('[data-top-tabs-root]');
+  if (!tabsRoot) return;
+  removeStylePropertyIfSet(tabsRoot, '--top-tabs-bg');
+  removeStylePropertyIfSet(tabsRoot, '--top-tabs-fg');
+  removeStylePropertyIfSet(tabsRoot, '--top-tabs-muted');
+  removeStylePropertyIfSet(tabsRoot, '--top-tabs-active-bg');
+  removeStylePropertyIfSet(tabsRoot, '--top-tabs-accent');
+  removeStylePropertyIfSet(tabsRoot, '--background');
+  removeStylePropertyIfSet(tabsRoot, '--foreground');
+  removeStylePropertyIfSet(tabsRoot, '--accent');
+  removeStylePropertyIfSet(tabsRoot, '--accent-foreground');
+  removeStylePropertyIfSet(tabsRoot, '--primary');
+  removeStylePropertyIfSet(tabsRoot, '--primary-foreground');
+  removeStylePropertyIfSet(tabsRoot, '--secondary');
+  removeStylePropertyIfSet(tabsRoot, '--border');
+  removeStylePropertyIfSet(tabsRoot, '--muted-foreground');
 };
 
 export const filterTabsMap = <T,>(source: Map<string, T>, validIds: Set<string>): Map<string, T> => {
@@ -805,7 +804,7 @@ interface TerminalPaneProps {
   onOpenTheme: () => void;
   onOpenSystem?: () => void;
   onCloseSession: (sessionId: string) => void;
-  onStatusChange: (sessionId: string, status: TerminalSession['status']) => void;
+  onStatusChange: (sessionId: string, status: TerminalSession['status'], sftpHost?: Host) => void;
   onSessionExit: (sessionId: string, evt: TerminalSessionExitEvent) => void;
   onTerminalDataCapture?: (sessionId: string, data: string) => void;
   onOsDetected: (hostId: string, distro: string) => void;
@@ -1707,7 +1706,7 @@ interface TerminalPanesHostProps {
   onOpenTheme: () => void;
   onOpenSystem?: () => void;
   onCloseSession: (sessionId: string) => void;
-  onStatusChange: (sessionId: string, status: TerminalSession['status']) => void;
+  onStatusChange: (sessionId: string, status: TerminalSession['status'], sftpHost?: Host) => void;
   onSessionExit: (sessionId: string, evt: TerminalSessionExitEvent) => void;
   onTerminalDataCapture?: (sessionId: string, data: string) => void;
   onOsDetected: (hostId: string, distro: string) => void;

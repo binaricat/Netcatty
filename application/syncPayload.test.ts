@@ -2001,22 +2001,17 @@ test("missing local shell settings and invalid tabs preserve existing settings",
   assert.equal((await buildSyncPayload(vault())).settings?.localShellSidePanelAutoOpenTab, undefined);
 });
 
-test("tab bar position survives settings export and import, with a safe fallback", async () => {
+test("old bottom tab preference is ignored by settings export and import", async () => {
   localStorage.clear();
-  localStorage.setItem(storageKeys.STORAGE_KEY_TAB_BAR_POSITION, "bottom");
+  const legacyKey = "netcatty_tab_bar_position_v1";
+  localStorage.setItem(legacyKey, "bottom");
   const payload = buildSyncPayload(vault([]));
-  assert.equal(payload.settings?.tabBarPosition, "bottom");
-  localStorage.removeItem(storageKeys.STORAGE_KEY_TAB_BAR_POSITION);
-  await applySyncPayload(payload, { importVaultData: () => {} });
-  assert.equal(localStorage.getItem(storageKeys.STORAGE_KEY_TAB_BAR_POSITION), "bottom");
-
-  const invalid = { ...payload, settings: { tabBarPosition: "left" } } as unknown as SyncPayload;
-  await applySyncPayload(invalid, { importVaultData: () => {} });
-  assert.equal(localStorage.getItem(storageKeys.STORAGE_KEY_TAB_BAR_POSITION), "top");
-
-  localStorage.setItem(storageKeys.STORAGE_KEY_TAB_BAR_POSITION, "bottom");
-  await applySyncPayload({ ...payload, settings: {} }, { importVaultData: () => {} });
-  assert.equal(localStorage.getItem(storageKeys.STORAGE_KEY_TAB_BAR_POSITION), "bottom");
+  assert.equal(Object.hasOwn(payload.settings ?? {}, "tabBarPosition"), false);
+  await applySyncPayload({ ...payload, settings: { tabBarPosition: "bottom" } } as unknown as SyncPayload, { importVaultData: () => {} });
+  assert.equal(localStorage.getItem(legacyKey), "bottom");
+  localStorage.removeItem(legacyKey);
+  await applySyncPayload({ ...payload, settings: { tabBarPosition: "bottom" } } as unknown as SyncPayload, { importVaultData: () => {} });
+  assert.equal(localStorage.getItem(legacyKey), null);
 });
 for (const enabled of [true, false]) {
   test(`right-click long press preference survives sync (${enabled})`, async () => {

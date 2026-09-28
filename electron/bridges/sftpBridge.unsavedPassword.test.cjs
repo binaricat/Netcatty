@@ -11,7 +11,7 @@ const pool = require("./sshConnectionPool.cjs");
 
 const PASSWORD = "temporary-test-password";
 
-async function fixture(t) {
+async function fixture(t, acceptedUsername = "root") {
   pool.resetSshTransportRegistryForTests({ defaultIdleTtlMs: 0 });
   const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
   const sockets = new Set();
@@ -25,7 +25,7 @@ async function fixture(t) {
     client.on("authentication", (ctx) => {
       if (ctx.method === "password") {
         authRounds += 1;
-        if (ctx.username === "root" && ctx.password === PASSWORD) {
+        if (ctx.username === acceptedUsername && ctx.password === PASSWORD) {
           ctx.accept();
           return;
         }
@@ -97,9 +97,26 @@ async function fixture(t) {
     assert.equal(authRounds, 1);
     return options;
   };
-  return { original, event, login, sessions, sftpClients,
+  return { original, event, login, sessions, sftpClients, handlers,
     counts: () => ({ authRounds, connections }) };
 }
+
+test("selected deploy identity opens SFTP on the live deploy session, never root", { timeout: 60000 }, async (t) => {
+  const f = await fixture(t, "deploy");
+  const deploy = { ...f.original, username: "deploy", password: PASSWORD };
+  await f.handlers.get("netcatty:start")(f.event, {
+    ...deploy, sessionId: "terminal-3351", skipShellPidDiscovery: true,
+    sftpReuseOptions: f.original,
+  });
+  await assert.rejects(sftpBridge.openSftpForSession(f.event, {
+    sessionId: "terminal-3351", expectedEndpoint: f.original, fileProtocol: "sftp",
+  }), { code: "ERR_SFTP_SOURCE_ROUTE_MISMATCH" });
+  const result = await sftpBridge.openSftpForSession(f.event, {
+    sessionId: "terminal-3351", expectedEndpoint: deploy, fileProtocol: "sftp",
+  });
+  assert.equal(await f.sftpClients.get(result.sftpId).realPath("."), "/root");
+  assert.deepEqual(f.counts(), { authRounds: 1, connections: 1 });
+});
 
 test("unsaved terminal password supports pooled and explicit SFTP without another login (#3351)", { timeout: 60000 }, async (t) => {
   const f = await fixture(t);

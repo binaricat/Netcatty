@@ -75,7 +75,9 @@ const DRIVER_REGISTRY = {
         signal: ctx.signal,
       });
     },
-    // codex-sdk exposes no model catalog; the UI falls back to curated presets.
+    // codex-sdk exposes no model catalog. sdkStreamHandlers falls back to the
+    // App Server runtime's live `model/list` when this returns empty (#3496);
+    // curated presets remain the last resort in the renderer.
     async listModels() { return []; },
   },
   copilot: {

@@ -209,6 +209,7 @@ export const ruTerminalMessages: Messages = {
   'terminal.auth.retryMessage': 'Ошибка аутентификации. Проверьте учётные данные и повторите попытку.',
   'terminal.auth.retryLog': 'Ошибка аутентификации. Повторите попытку.',
   'terminal.auth.noKeysHint': 'Нет доступных ключей. Добавьте ключи в связке ключей.',
+  'terminal.auth.selectIdentity': 'Использовать сохранённый профиль',
   'terminal.auth.continueSave': 'Продолжить и сохранить',
   'terminal.auth.credentialsUnavailable': 'Сохранённые учётные данные не могут быть расшифрованы на этом устройстве. Пожалуйста, введите и сохраните их заново.',
   'terminal.auth.jumpCredentialsUnavailable': 'У jump-хоста сохранены учётные данные, которые нельзя расшифровать на этом устройстве. Откройте настройки хоста и введите их заново.',

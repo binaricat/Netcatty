@@ -55,26 +55,20 @@ export const useManagedSourceSync = ({
   );
 
   const readExistingFileContent = useCallback(
-    async (filePath: string): Promise<string | null> => {
+    async (filePath: string): Promise<string> => {
       const bridge = netcattyBridge.get();
       if (!bridge?.readLocalFile) {
-        return null;
+        throw new Error("readLocalFile not available");
       }
-      try {
-        const buffer = await bridge.readLocalFile(filePath);
-        const decoder = new TextDecoder();
-        return decoder.decode(buffer);
-      } catch {
-        // File might not exist yet
-        return null;
-      }
+      const buffer = await bridge.readLocalFile(filePath);
+      return new TextDecoder().decode(buffer);
     },
     [],
   );
 
   const mergeWithExistingContent = useCallback(
     (
-      existingContent: string | null,
+      existingContent: string,
       managedHosts: Host[],
       allHosts: Host[],
     ): string => {
@@ -82,7 +76,7 @@ export const useManagedSourceSync = ({
       const managedContent = serializeHostsToSshConfig(managedHosts, allHosts);
 
       if (!existingContent) {
-        // No existing file, just wrap the managed content
+        // The existing file is empty; wrap the managed content.
         return `${MANAGED_BLOCK_BEGIN}\n${managedContent}${MANAGED_BLOCK_END}\n`;
       }
 
