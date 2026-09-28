@@ -68,8 +68,12 @@ function shouldRetrySftpKeyboardInteractiveFirst(options, authConfig, err) {
   );
 }
 
+function allowsSharedSftpTransport(options) {
+  return options?.reuseTransport !== false && !options?.sudo && options?.singleChannelSsh !== true;
+}
+
 function shouldRegisterFreshSftpTransport(options) {
-  return options?.reuseTransport !== false && !options?.sudo;
+  return allowsSharedSftpTransport(options);
 }
 
 /** Sudo is part of the requested connection contract; never downgrade it. */
@@ -822,8 +826,7 @@ function createOpenConnectionApi(ctx) {
       // a transfer never silently attaches to a terminal/parked conn.
       if (
         !pendingDialCoordination
-        && options.reuseTransport !== false
-        && !options.sudo
+        && allowsSharedSftpTransport(options)
         && typeof findTransportByEndpoint === "function"
         && typeof createSessionBackedSftpClient === "function"
       ) {
@@ -842,8 +845,7 @@ function createOpenConnectionApi(ctx) {
 
       if (
         !pendingDialCoordination
-        && options.reuseTransport !== false
-        && !options.sudo
+        && allowsSharedSftpTransport(options)
         && typeof beginTransportDial === "function"
       ) {
         const coordination = beginTransportDial(reuseEndpoint, { kind: "channel" });
@@ -854,7 +856,12 @@ function createOpenConnectionApi(ctx) {
               : await waitForTransportDial(coordination);
             return await openOnSharedTransport(transport, "reused coordinated transport");
           } catch (coordinationErr) {
-            if (coordination.role === "join") throw coordinationErr;
+            if (
+              coordination.role === "join"
+              && coordinationErr?.code !== "ERR_SFTP_SINGLE_CHANNEL_BASTION"
+            ) {
+              throw coordinationErr;
+            }
             console.warn(
               `[SFTP] Coordinated transport reuse failed for ${connId}; connecting fresh:`,
               coordinationErr?.message || String(coordinationErr),
