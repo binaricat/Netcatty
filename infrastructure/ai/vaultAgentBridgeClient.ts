@@ -1070,9 +1070,11 @@ export async function handleVaultAgentOp(
       return {
         ok: true,
         importedCount: imported.importedCount,
+        // The caller already supplied the markdown. Echoing every body back
+        // would resend the whole batch over IPC; read a note with note.get.
         notes: imported.notes
           .filter((note) => !existingIds.has(note.id))
-          .map(serializeVaultNoteForAgent),
+          .map(summarizeVaultNoteForList),
       };
     }
     case 'identity.list': {

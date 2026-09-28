@@ -276,12 +276,32 @@ describe('handleVaultAgentOp vault notes', () => {
 
     assert.equal(result.ok, true);
     assert.equal((result as { importedCount?: number }).importedCount, 1);
-    const imported = (result as { notes?: Array<{ title: string; content: string; group?: string }> }).notes;
+    const imported = (result as { notes?: Array<{ title: string; group?: string; contentLength: number }> }).notes;
     assert.equal(imported?.[0]?.title, 'Deploy runbook');
-    assert.equal(imported?.[0]?.content, '# Heading\n\n1. Connect');
     assert.equal(imported?.[0]?.group, 'ops');
+    assert.equal(imported?.[0]?.contentLength, '# Heading\n\n1. Connect'.length);
+    assert.equal('content' in (imported?.[0] ?? {}), false);
     assert.equal(deps.getNotes().length, 2);
     assert.equal(deps.getNotes()[0]?.title, 'Existing');
+    assert.equal(deps.getNotes().find((note) => note.title === 'Deploy runbook')?.content, '# Heading\n\n1. Connect');
+  });
+
+  it('note.import summaries omit every imported document body', async () => {
+    const body = 'x'.repeat(40);
+    const result = await handleVaultAgentOp('note.import', {
+      documents: JSON.stringify([
+        { fileName: 'a.md', content: body, title: 'A' },
+        { fileName: 'b.md', content: body, title: 'B' },
+      ]),
+    }, createDeps({ notes: [] }));
+
+    assert.equal(result.ok, true);
+    const notes = (result as { notes?: Array<Record<string, unknown>> }).notes ?? [];
+    assert.equal(notes.length, 2);
+    for (const note of notes) {
+      assert.equal('content' in note, false);
+      assert.equal(note.contentLength, body.length);
+    }
   });
 
   it('note.import rejects a batch mixed with a single content body', async () => {

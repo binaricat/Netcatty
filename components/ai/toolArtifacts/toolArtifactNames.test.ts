@@ -56,4 +56,16 @@ test('inferArtifactToolNameFromCliArgs maps Netcatty CLI artifact commands', () 
     }),
     'vault_notes_import',
   );
+  assert.equal(
+    inferArtifactToolNameFromCliArgs({
+      command: `/bin/zsh -lc '"/Applications/Netcatty.app/netcatty-tool-cli" --json notes list'`,
+    }),
+    'vault_notes_list',
+  );
+  assert.equal(
+    inferArtifactToolNameFromCliArgs({
+      command: 'netcatty-tool-cli notes list --json',
+    }),
+    'vault_notes_list',
+  );
 });

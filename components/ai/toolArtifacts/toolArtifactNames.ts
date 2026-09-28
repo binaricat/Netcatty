@@ -32,6 +32,8 @@ const KNOWN_ARTIFACT_TOOL_NAMES = [
   'scripts_targets_set',
 ] as const;
 
+const CLI_FLAGS_WITHOUT_VALUES = new Set(['--json']);
+
 const CLI_ARTIFACT_TOOL_NAMES = new Map<string, string>([
   ['vault host get', 'host_get'],
   ['notes list', 'vault_notes_list'],
@@ -92,6 +94,27 @@ export function normalizeArtifactToolName(toolName: string | undefined): string 
   return trimmed;
 }
 
+function collectCliCommandWords(afterCli: string): string[] {
+  const commandWords: string[] = [];
+  const parts = afterCli.split(/\s+/);
+  for (let index = 0; index < parts.length; index += 1) {
+    const part = parts[index];
+    if (!part) continue;
+    if (part.startsWith('-')) {
+      // --json may precede the subcommand. A valued flag ends the command
+      // once words have started, so its value is not treated as a command word.
+      if (CLI_FLAGS_WITHOUT_VALUES.has(part)) continue;
+      if (commandWords.length > 0) break;
+      const next = parts[index + 1];
+      if (next && !next.startsWith('-')) index += 1;
+      continue;
+    }
+    commandWords.push(part);
+    if (commandWords.length === 3) break;
+  }
+  return commandWords;
+}
+
 export function inferArtifactToolNameFromCliArgs(
   args: Record<string, unknown> | undefined,
 ): string | undefined {
@@ -103,13 +126,7 @@ export function inferArtifactToolNameFromCliArgs(
   if (!cliMatch) return undefined;
 
   const afterCli = stripWrappingQuote(cliMatch[1] ?? '').replace(/^["']?\s*/, '');
-  const commandWords: string[] = [];
-  for (const part of afterCli.split(/\s+/)) {
-    if (!part || part.startsWith('-')) break;
-    commandWords.push(part);
-    if (commandWords.length === 3) break;
-  }
-  const commandKey = commandWords.join(' ');
+  const commandKey = collectCliCommandWords(afterCli).join(' ');
 
   return CLI_ARTIFACT_TOOL_NAMES.get(commandKey);
 }
