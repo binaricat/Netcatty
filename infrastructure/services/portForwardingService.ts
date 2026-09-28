@@ -1133,6 +1133,7 @@ export const startPortForward = async (
       algorithmOverrides: host.algorithms,
       keepaliveInterval: resolveHostKeepalive(host, globalTerminalSettings).interval,
       keepaliveCountMax: resolveHostKeepalive(host, globalTerminalSettings).countMax,
+      singleChannelSsh: host.singleChannelSsh === true,
       sshTcpConnectTimeoutMs: connectionTimeouts.tcpConnectTimeoutSeconds * 1000,
       sshAuthReadyTimeoutMs: connectionTimeouts.authReadyTimeoutSeconds * 1000,
     });

@@ -1171,6 +1171,9 @@ async function startPortForward(event, payload) {
     sshAuthReadyTimeoutMs,
     reuseTransport = true,
   } = payload;
+  // One-channel bastions drop the terminal if a forward opens another
+  // channel on that same TCP connection. Dial a private SSH session instead.
+  const allowTransportReuse = reuseTransport !== false && payload.singleChannelSsh !== true;
 
   // The rule is the durable identity; tunnelId is only one renderer's
   // attempt. Reuse an in-flight/live tunnel so two windows cannot create
@@ -1249,11 +1252,11 @@ async function startPortForward(event, payload) {
   // transport exists yet. Explicitly dedicated forwards remain isolated and
   // are not published into the shared pool.
   let pendingDialCoordination = null;
-  let existingTransport = reuseTransport !== false
+  let existingTransport = allowTransportReuse
     ? findTransportByEndpoint(reuseEndpoint)
     : null;
   try {
-    if (!existingTransport && reuseTransport !== false && typeof beginTransportDial === "function") {
+    if (!existingTransport && allowTransportReuse && typeof beginTransportDial === "function") {
       const coordination = beginTransportDial(reuseEndpoint, { kind: "channel" });
       if (coordination.role === "reuse") {
         existingTransport = coordination.transport;
@@ -1678,7 +1681,7 @@ async function startPortForward(event, payload) {
         sendStatus,
         releaseOnError: false,
         endpoint: reuseEndpoint,
-        registerTransport: reuseTransport !== false,
+        registerTransport: allowTransportReuse,
         dialCoordination: pendingDialCoordination,
       }).then((result) => {
         if (!result?.success && pendingDialCoordination) {

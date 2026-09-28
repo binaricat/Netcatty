@@ -19,6 +19,11 @@ class MockSshClient extends EventEmitter {
     });
   }
 
+  forwardIn(_bindAddress, _bindPort, callback) {
+    this.forwardInCalls = (this.forwardInCalls || 0) + 1;
+    setImmediate(() => callback(null));
+  }
+
   end() {
     if (this._sock.destroyed) return;
     this._sock.destroyed = true;
@@ -204,4 +209,46 @@ test("worker port forwarding with reuseTransport false stays physically independ
   )).success, true);
 
   assert.equal(physicalDialCount, 2);
+});
+
+test("single-channel local and remote forwards leave the terminal connection alone", async (t) => {
+  physicalDialCount = 0;
+  resetSshTransportRegistryForTests({ defaultIdleTtlMs: 0 });
+  const { parentPort, siblingHolders } = createHarness();
+  const terminalConn = new MockSshClient();
+  const terminalHolder = { id: "terminal-single" };
+  const transport = createTransport({
+    conn: terminalConn,
+    endpoint: { ...endpoint, singleChannelSsh: true },
+  });
+  borrowTransport(transport, {
+    kind: LEASE_KINDS.shell,
+    holder: terminalHolder,
+    leaseId: "shell:terminal-single",
+  });
+  siblingHolders.push(terminalHolder);
+  t.after(async () => {
+    await parentPort.request("netcatty:portforward:stop", { tunnelId: "pf-single-local" }).catch(() => {});
+    await parentPort.request("netcatty:portforward:stop", { tunnelId: "pf-single-remote" }).catch(() => {});
+    await cleanupHarness(parentPort, siblingHolders);
+  });
+
+  const local = await parentPort.request(
+    "netcatty:portforward:start",
+    portForwardPayload("pf-single-local", { type: "local", singleChannelSsh: true, localPort: 0 }),
+  );
+  assert.equal(local.success, true, local.error);
+  const remote = await parentPort.request(
+    "netcatty:portforward:start",
+    portForwardPayload("pf-single-remote", {
+      type: "remote",
+      singleChannelSsh: true,
+      localPort: 19022,
+      bindAddress: "127.0.0.1",
+    }),
+  );
+  assert.equal(remote.success, true, remote.error);
+  assert.equal(physicalDialCount, 2);
+  assert.equal(terminalConn.forwardInCalls || 0, 0);
+  assert.equal(terminalConn.listenerCount("tcp connection"), 0);
 });
