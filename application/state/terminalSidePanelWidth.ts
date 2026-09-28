@@ -2,7 +2,7 @@ export const TERMINAL_SIDE_PANEL_MIN_WIDTH = 280;
 export const TERMINAL_SIDE_PANEL_MAX_WIDTH = 1200;
 export const TERMINAL_SIDE_PANEL_MIN_TERMINAL_WIDTH = 320;
 export const TERMINAL_SIDE_PANEL_TOOL_BUTTON_WIDTH = 28;
-export const TERMINAL_SIDE_PANEL_TOOLBAR_RESERVED_WIDTH = 248;
+export const TERMINAL_SIDE_PANEL_TOOLBAR_RESERVED_WIDTH = 200;
 
 export function getTerminalSidePanelAvailableWidth(
   terminalLayerWidth: number,

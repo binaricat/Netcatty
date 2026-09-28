@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { Activity, FolderTree, History, Maximize2, MessageSquare, Minimize2, NotebookText, Palette, PanelBottom, PanelLeft, PanelRight, Play, Save, SplitSquareHorizontal, SplitSquareVertical, X } from 'lucide-react';
+import { Activity, FolderTree, History, Maximize2, MessageSquare, Minimize2, NotebookText, Palette, PanelsTopLeft, Play, Save, SplitSquareHorizontal, SplitSquareVertical, X } from 'lucide-react';
 import {
   buildSidePanelChromeThemeFromTerminalTheme,
   buildTerminalSidePanelCssVars,
@@ -7,6 +7,7 @@ import {
 import { injectTerminalLayerChromeSurfaceVars } from '../../infrastructure/theme/terminalAppearanceVars';
 import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
+import * as SelectPrimitive from '@radix-ui/react-select';
 
 import { useActiveTabId } from '../../application/state/activeTabStore';
 import {
@@ -41,6 +42,7 @@ import {
 } from '../ui/toolbar-item-layout';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import { Popover, PopoverClose, PopoverContent, PopoverTrigger } from '../ui/popover';
+import { Select, SelectContent, SelectItem } from '../ui/select';
 import type { SidePanelTab } from './TerminalLayerSupport';
 import {
   MAX_SIDE_PANEL_PANES,
@@ -491,59 +493,43 @@ function SidePanelSplitMenu({
   );
 }
 
-function SidePanelDockChoices({
+function SidePanelDockSelect({
   position,
   onSelect,
   t,
-  mutedColor,
-  activeColor,
-  accentColor,
+  buttonColor,
 }: {
   position: SidePanelDockPosition;
   onSelect: (position: SidePanelDockPosition) => void;
   t: (key: string) => string;
-  mutedColor: string;
-  activeColor: string;
-  accentColor: string;
+  buttonColor: string;
 }) {
-  const icons = { left: PanelLeft, right: PanelRight, bottom: PanelBottom };
   const labels = {
-    left: 'terminal.layer.movePanelLeft',
-    right: 'terminal.layer.movePanelRight',
-    bottom: 'terminal.layer.movePanelBottom',
+    left: 'terminal.layer.dockLeft',
+    right: 'terminal.layer.dockRight',
+    bottom: 'terminal.layer.dockBottom',
   };
 
   return (
-    <div className="flex shrink-0 items-center gap-0.5" role="group" aria-label={t('terminal.layer.choosePanelPosition')}>
-      {SIDE_PANEL_DOCK_POSITIONS.map((dock) => {
-        const Icon = icons[dock];
-        const label = t(labels[dock]);
-        const isActive = position === dock;
-        return (
-          <Tooltip key={dock}>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                className="h-7 w-6 rounded-md p-0 grid place-items-center hover:opacity-80"
-                style={{
-                  backgroundColor: isActive
-                    ? `color-mix(in srgb, ${accentColor} 24%, transparent)`
-                    : 'transparent',
-                  color: isActive ? activeColor : mutedColor,
-                }}
-                aria-label={label}
-                aria-pressed={isActive}
-                data-side-panel-dock-choice={dock}
-                onClick={() => onSelect(dock)}
-              >
-                <Icon size={15} />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">{label}</TooltipContent>
-          </Tooltip>
-        );
-      })}
-    </div>
+    <Select value={position} onValueChange={(value) => onSelect(value as SidePanelDockPosition)}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <SelectPrimitive.Trigger
+            className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-transparent p-0 hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            style={{ color: buttonColor }}
+            aria-label={t('terminal.layer.choosePanelPosition')}
+          >
+            <PanelsTopLeft size={15} />
+          </SelectPrimitive.Trigger>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">{t('terminal.layer.choosePanelPosition')}</TooltipContent>
+      </Tooltip>
+      <SelectContent align="end" side="bottom" className="min-w-[7rem]" hideScrollButtons>
+        {SIDE_PANEL_DOCK_POSITIONS.map((dock) => (
+          <SelectItem key={dock} value={dock}>{t(labels[dock])}</SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }
 
@@ -1449,13 +1435,11 @@ function TerminalLayerSidePanelInner({ ctx }: { ctx: SidePanelContext }) {
                   {t('terminal.layer.saveLayoutAsDefault')}
                 </TooltipContent>
               </Tooltip>
-              <SidePanelDockChoices
+              <SidePanelDockSelect
                 position={sidePanelPosition}
                 onSelect={setSidePanelPosition}
                 t={t}
-                mutedColor={sidePanelTheme.mutedFg}
-                activeColor={sidePanelTheme.termFg}
-                accentColor={sidePanelTheme.accent}
+                buttonColor={sidePanelTheme.mutedFg}
               />
               <Tooltip>
                 <TooltipTrigger asChild>

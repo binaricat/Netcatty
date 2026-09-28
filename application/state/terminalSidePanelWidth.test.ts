@@ -21,9 +21,9 @@ test('terminal side panel can expand to the wider maximum', () => {
 });
 
 test('terminal side panel collapses tool buttons before shared actions are clipped', () => {
-  assert.equal(getTerminalSidePanelMaxShownTools(280), 1);
-  assert.equal(getTerminalSidePanelMaxShownTools(320), 2);
-  assert.ok(getTerminalSidePanelMaxShownTools(420) >= 6);
+  assert.equal(getTerminalSidePanelMaxShownTools(280), 2);
+  assert.equal(getTerminalSidePanelMaxShownTools(320), 4);
+  assert.ok(getTerminalSidePanelMaxShownTools(420) >= 7);
 });
 
 test('terminal side panel uses the actual surface left after fixed sibling panels', () => {
