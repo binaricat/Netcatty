@@ -593,6 +593,7 @@ export const esAiMessages: Messages = {
   'terminal.layer.movePanelLeft': 'Mover panel a la izquierda',
   'terminal.layer.movePanelRight': 'Mover panel a la derecha',
   'terminal.layer.movePanelBottom': 'Mover panel a la parte inferior',
+  'terminal.layer.choosePanelPosition': 'Elegir posición del panel',
   'terminal.layer.closePanel': 'Cerrar panel',
   'terminal.layer.closePane': 'Cerrar división',
   'terminal.layer.resizeSplit': 'Redimensionar división',

@@ -46,11 +46,11 @@ import {
   MAX_SIDE_PANEL_PANES,
   canSplitSidePanelPaneAtSize,
   collectSidePanelPanes,
-  cycleSidePanelDockPosition,
   getFocusedSidePanelPane,
   getSidePanelNodeMinimumPixels,
   getSidePanelSplitResizeBounds,
   SIDE_PANEL_SPLIT_DIVIDER_PIXELS,
+  SIDE_PANEL_DOCK_POSITIONS,
   type SidePanelDockPosition,
   type SidePanelLayout,
   type SidePanelLayoutNode,
@@ -488,6 +488,62 @@ function SidePanelSplitMenu({
         ))}
       </PopoverContent>
     </Popover>
+  );
+}
+
+function SidePanelDockChoices({
+  position,
+  onSelect,
+  t,
+  mutedColor,
+  activeColor,
+  accentColor,
+}: {
+  position: SidePanelDockPosition;
+  onSelect: (position: SidePanelDockPosition) => void;
+  t: (key: string) => string;
+  mutedColor: string;
+  activeColor: string;
+  accentColor: string;
+}) {
+  const icons = { left: PanelLeft, right: PanelRight, bottom: PanelBottom };
+  const labels = {
+    left: 'terminal.layer.movePanelLeft',
+    right: 'terminal.layer.movePanelRight',
+    bottom: 'terminal.layer.movePanelBottom',
+  };
+
+  return (
+    <div className="flex shrink-0 items-center gap-0.5" role="group" aria-label={t('terminal.layer.choosePanelPosition')}>
+      {SIDE_PANEL_DOCK_POSITIONS.map((dock) => {
+        const Icon = icons[dock];
+        const label = t(labels[dock]);
+        const isActive = position === dock;
+        return (
+          <Tooltip key={dock}>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                className="h-7 w-6 rounded-md p-0 grid place-items-center hover:opacity-80"
+                style={{
+                  backgroundColor: isActive
+                    ? `color-mix(in srgb, ${accentColor} 24%, transparent)`
+                    : 'transparent',
+                  color: isActive ? activeColor : mutedColor,
+                }}
+                aria-label={label}
+                aria-pressed={isActive}
+                data-side-panel-dock-choice={dock}
+                onClick={() => onSelect(dock)}
+              >
+                <Icon size={15} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{label}</TooltipContent>
+          </Tooltip>
+        );
+      })}
+    </div>
   );
 }
 
@@ -1393,28 +1449,14 @@ function TerminalLayerSidePanelInner({ ctx }: { ctx: SidePanelContext }) {
                   {t('terminal.layer.saveLayoutAsDefault')}
                 </TooltipContent>
               </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Btn
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7 rounded-md p-0 hover:bg-transparent"
-                    style={{ color: sidePanelTheme.mutedFg }}
-                    onClick={() => setSidePanelPosition((p: SidePanelDockPosition) => cycleSidePanelDockPosition(p))}
-                  >
-                    {sidePanelPosition === 'left' && <PanelRight size={15} />}
-                    {sidePanelPosition === 'right' && <PanelBottom size={15} />}
-                    {sidePanelPosition === 'bottom' && <PanelLeft size={15} />}
-                  </Btn>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">
-                  {sidePanelPosition === 'left'
-                    ? t('terminal.layer.movePanelRight')
-                    : sidePanelPosition === 'right'
-                      ? t('terminal.layer.movePanelBottom')
-                      : t('terminal.layer.movePanelLeft')}
-                </TooltipContent>
-              </Tooltip>
+              <SidePanelDockChoices
+                position={sidePanelPosition}
+                onSelect={setSidePanelPosition}
+                t={t}
+                mutedColor={sidePanelTheme.mutedFg}
+                activeColor={sidePanelTheme.termFg}
+                accentColor={sidePanelTheme.accent}
+              />
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Btn

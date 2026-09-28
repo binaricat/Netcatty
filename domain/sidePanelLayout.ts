@@ -262,10 +262,3 @@ export function isSidePanelDockPosition(value: unknown): value is SidePanelDockP
   return typeof value === 'string'
     && (SIDE_PANEL_DOCK_POSITIONS as readonly string[]).includes(value);
 }
-
-export function cycleSidePanelDockPosition(
-  position: SidePanelDockPosition,
-): SidePanelDockPosition {
-  const index = SIDE_PANEL_DOCK_POSITIONS.indexOf(position);
-  return SIDE_PANEL_DOCK_POSITIONS[(index + 1) % SIDE_PANEL_DOCK_POSITIONS.length];
-}

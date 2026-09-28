@@ -7,7 +7,6 @@ import {
   closeSidePanelPane,
   collectSidePanelPanes,
   createSidePanelLayout,
-  cycleSidePanelDockPosition,
   focusSidePanelPane,
   getSidePanelNodeMinimumPixels,
   getSidePanelSplitResizeBounds,
@@ -167,12 +166,6 @@ test('the pane limit rejects additional splits without changing the layout', () 
   }, 400);
   assert.equal(collectSidePanelPanes(duplicateAttempt.root).length, 7);
   assert.equal(duplicateAttempt.focusedPaneId, 'pane-0');
-});
-
-test('dock position cycles through left, right and bottom', () => {
-  assert.equal(cycleSidePanelDockPosition('left'), 'right');
-  assert.equal(cycleSidePanelDockPosition('right'), 'bottom');
-  assert.equal(cycleSidePanelDockPosition('bottom'), 'left');
 });
 
 test('dock position validator accepts only known positions', () => {
