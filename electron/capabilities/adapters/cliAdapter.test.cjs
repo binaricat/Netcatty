@@ -102,6 +102,24 @@ test("buildCatalogCliParams maps vault note create and import flags", () => {
   assert.equal(imported.documents, "[{\"fileName\":\"a.md\",\"content\":\"# A\"}]");
 });
 
+test("buildCatalogCliParams keeps an explicit empty note create body", () => {
+  const created = buildCatalogCliParams("vault.note.create", {
+    title: "Empty",
+    content: "",
+  }, fakeCreateError);
+  assert.equal(created.title, "Empty");
+  assert.equal(created.content, "");
+
+  assert.throws(
+    () => buildCatalogCliParams("vault.note.create", { title: "Empty" }, fakeCreateError),
+    /Missing required --content for vault\.note\.create/,
+  );
+  assert.throws(
+    () => buildCatalogCliParams("vault.note.create", { title: "", content: "" }, fakeCreateError),
+    /Missing required --title for vault\.note\.create/,
+  );
+});
+
 test("buildCatalogCliParams keeps explicit empty note clears and empty imports", () => {
   const cleared = buildCatalogCliParams("vault.note.update", {
     noteId: "n1",

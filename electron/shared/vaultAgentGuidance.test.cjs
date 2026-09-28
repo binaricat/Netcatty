@@ -24,6 +24,7 @@ test("Skills + CLI notes guidance matches the MCP notes rules", () => {
   assert.match(VAULT_HOSTS_VS_NOTES_GUIDANCE, /vault_notes_import/i);
   assert.match(VAULT_NOTES_CLI_GUIDANCE, /if approval is denied, stop/i);
   assert.match(VAULT_NOTES_CLI_GUIDANCE, /empty --content clears the body/i);
+  assert.match(VAULT_NOTES_CLI_GUIDANCE, /notes create accepts an explicit empty --content/i);
   assert.match(VAULT_NOTES_CLI_GUIDANCE, /notes import accepts an empty --content/i);
 });
 

@@ -947,7 +947,7 @@
       "content": {
         "type": "string",
         "optional": false,
-        "description": "Markdown note body."
+        "description": "Markdown note body. An empty string creates an empty note."
       },
       "group": {
         "type": "string",

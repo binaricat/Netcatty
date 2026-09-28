@@ -19,7 +19,7 @@ Do not use them to add SSH hosts. Host Details metadata uses `vault host-notes g
   - `<netcatty-cli-prefix> notes list --json`
 - Read one note by the exact id from `notes list`. Each call returns at most 6000 characters. Pass `--offset` from `nextOffset` and the same `--expected-updated-at` until `nextOffset` is null before summarizing or replacing the whole note. `--query` returns a matching excerpt only. If the note changed, restart the read:
   - `<netcatty-cli-prefix> notes get --note-id <id> --json`
-- Create a note when the title is already known. `--title` and `--content` are required. Optional: `--group`, `--tags`, `--linked-host-ids` (JSON arrays):
+- Create a note when the title is already known. `--title` and `--content` are required. `--content ""` creates an empty note; omitting `--content` is rejected. Optional: `--group`, `--tags`, `--linked-host-ids` (JSON arrays):
   - `<netcatty-cli-prefix> notes create --title "<title>" --content "<markdown>" --json`
 - Update by exact id. Send only the fields that change. An explicit empty `--content` clears the body and an explicit empty `--group` clears the folder; omitting a flag keeps the current value:
   - `<netcatty-cli-prefix> notes update --note-id <id> --content "<markdown>" --json`

@@ -174,7 +174,7 @@ const TOOL_INPUT_FIELDS = Object.freeze({
   },
   "vault.note.create": {
     title: { type: "string", description: "Note title shown in Vault → Notes." },
-    content: { type: "string", description: "Markdown note body." },
+    content: { type: "string", allowEmpty: true, description: "Markdown note body. An empty string creates an empty note." },
     group: { type: "string", optional: true, description: "Optional folder path (e.g. infra/prod)." },
     linkedHostIds: { type: "string", optional: true, description: "Optional JSON array of vault host IDs to link." },
     tags: { type: "string", optional: true, description: "Optional JSON array of tag strings." },

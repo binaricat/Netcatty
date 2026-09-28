@@ -112,6 +112,40 @@ test("parseArgs consumes vault note import flags", () => {
   assert.equal(opts.json, true);
 });
 
+test("notes create CLI keeps an explicit empty content and still requires the flag", () => {
+  const created = parseArgs([
+    "node",
+    "netcatty-tool-cli",
+    "notes",
+    "create",
+    "--title",
+    "Empty",
+    "--content",
+    "",
+    "--json",
+  ]);
+  assert.equal(created.opts.title, "Empty");
+  assert.equal(created.opts.content, "");
+  const params = buildCatalogCliParams("vault.note.create", created.opts, fakeCreateError);
+  assert.equal(params.title, "Empty");
+  assert.equal(params.content, "");
+
+  const omitted = parseArgs([
+    "node",
+    "netcatty-tool-cli",
+    "notes",
+    "create",
+    "--title",
+    "Empty",
+    "--json",
+  ]);
+  assert.equal(omitted.opts.content, null);
+  assert.throws(
+    () => buildCatalogCliParams("vault.note.create", omitted.opts, fakeCreateError),
+    /Missing required --content for vault\.note\.create/,
+  );
+});
+
 test("notes CLI keeps explicit empty content and group through parse and catalog params", () => {
   const cleared = parseArgs([
     "node",
