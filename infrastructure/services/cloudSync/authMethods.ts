@@ -603,9 +603,12 @@ export async function saveSyncAnchorImpl(this: any,
   provider: CloudProvider,
   syncedFile: SyncedFile | null,
   resourceId?: string | null,
+  assertCanPersist?: () => void,
 ): Promise<void> {
+    const signature = await this.createSyncedFileSignature(syncedFile);
+    assertCanPersist?.();
     this.saveToStorage(this.syncAnchorKey(provider), {
-      signature: await this.createSyncedFileSignature(syncedFile),
+      signature,
       version: syncedFile?.meta.version ?? 0,
       updatedAt: syncedFile?.meta.updatedAt ?? 0,
       deviceId: syncedFile?.meta.deviceId,

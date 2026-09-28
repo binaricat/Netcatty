@@ -88,6 +88,7 @@
     "@netcatty/plugin-cli": "0.1.0-internal",
     "@netcatty/plugin-contract": "0.1.0-internal",
     "@netcatty/plugin-sdk": "0.1.0-internal",
+    "@noble/hashes": "^2.2.0",
     "@openai/codex-sdk": "0.144.3",
     "@radix-ui/react-collapsible": "1.1.12",
     "@radix-ui/react-context-menu": "2.2.16",

@@ -5,6 +5,7 @@ import {
   buildSftpHostCredentials,
 } from "./useSftpHostCredentials.ts";
 import type { Host, Identity, KnownHost, SSHKey } from "../../../domain/models.ts";
+import { resolvePasswordAuthSftpHost } from "../../../domain/authIdentityPicker.ts";
 
 const host = (overrides: Partial<Host> = {}): Host => ({
   id: "host-1",
@@ -14,6 +15,22 @@ const host = (overrides: Partial<Host> = {}): Host => ({
   tags: [],
   os: "linux",
   ...overrides,
+});
+
+test("SFTP credentials follow the temporary deploy identity on a root profile", () => {
+  const identities = [
+    { id: "root-id", label: "root", username: "root", authMethod: "password", password: "bad-root", created: 0 },
+    { id: "deploy-id", label: "deploy", username: "deploy", authMethod: "password", password: "good-deploy", created: 0 },
+  ] as Identity[];
+  const savedHost = host({ identityId: "root-id" });
+  const sftpHost = resolvePasswordAuthSftpHost(savedHost, identities, {
+    authMethod: "password", username: "deploy", password: "good-deploy", savedToHost: false,
+  });
+  const credentials = buildSftpHostCredentials({ host: sftpHost, hosts: [savedHost], keys: [], identities });
+  assert.equal(credentials.username, "deploy");
+  assert.equal(credentials.password, "good-deploy");
+  assert.equal(credentials.hostId, savedHost.id);
+  assert.equal(savedHost.identityId, "root-id");
 });
 
 test("buildSftpHostCredentials forwards system agent settings for target and jump hosts", () => {

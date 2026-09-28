@@ -188,6 +188,7 @@ export const esTerminalMessages: Messages = {
   'terminal.auth.retryMessage': 'Falló la autenticación. Verifica tus credenciales e inténtalo de nuevo.',
   'terminal.auth.retryLog': 'Falló la autenticación. Inténtalo de nuevo.',
   'terminal.auth.noKeysHint': 'No hay claves disponibles. Agrega claves en Keychain.',
+  'terminal.auth.selectIdentity': 'Usar identidad guardada',
   'terminal.auth.continueSave': 'Continuar y guardar',
   'terminal.auth.credentialsUnavailable': 'Las credenciales guardadas no se pueden descifrar en este dispositivo. Vuelve a ingresarlas y guárdalas de nuevo.',
   'terminal.auth.jumpCredentialsUnavailable': 'Un host de salto tiene credenciales guardadas que no se pueden descifrar en este dispositivo. Abre la configuración del host y vuelve a ingresarlas.',

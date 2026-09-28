@@ -201,3 +201,96 @@ test("managed sync writes the latest persisted hosts, not the pre-edit snapshot"
     });
   }
 });
+
+test("managed source deletion preserves the file when its contents cannot be read", async () => {
+  const dom = new JSDOM("<!doctype html><html><body></body></html>", {
+    url: "http://localhost",
+  });
+  const globalAny = globalThis as Record<string, unknown>;
+  const saved = {
+    window: globalAny.window,
+    document: globalAny.document,
+    localStorage: globalAny.localStorage,
+    navigator: Object.getOwnPropertyDescriptor(globalThis, "navigator"),
+    actEnv: (globalAny as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT,
+  };
+  Object.defineProperty(globalThis, "window", { configurable: true, value: dom.window });
+  Object.defineProperty(globalThis, "document", { configurable: true, value: dom.window.document });
+  Object.defineProperty(globalThis, "localStorage", { configurable: true, value: dom.window.localStorage });
+  Object.defineProperty(globalThis, "navigator", {
+    configurable: true,
+    value: { locks: createFakeLockManager() },
+  });
+  Object.defineProperty(globalAny, "IS_REACT_ACT_ENVIRONMENT", { configurable: true, value: true });
+
+  const container = dom.window.document.createElement("div");
+  dom.window.document.body.appendChild(container);
+  const original = "# Keep this comment\nHost outside\n    HostName outside.example.com\n"
+    + "# BEGIN NETCATTY MANAGED - DO NOT EDIT THIS BLOCK\n"
+    + "Host managed\n    HostName managed.example.com\n"
+    + "# END NETCATTY MANAGED\n";
+  let fileContent = original;
+  let writes = 0;
+  let failRead = true;
+  (dom.window as unknown as Record<string, unknown>).netcatty = {
+    readLocalFile: async () => {
+      if (failRead) throw new Error("EIO: simulated read failure");
+      return new TextEncoder().encode(fileContent).buffer;
+    },
+    writeLocalFile: async (_filePath: string, buffer: ArrayBuffer) => {
+      writes += 1;
+      fileContent = new TextDecoder().decode(buffer);
+    },
+  };
+
+  let clearAndRemoveSource!: ReturnType<typeof useManagedSourceSync>["clearAndRemoveSource"];
+  function Harness() {
+    ({ clearAndRemoveSource } = useManagedSourceSync({
+      hosts: [],
+      managedSources: [],
+      onUpdateManagedSources: () => {},
+      onReadPersistedHosts: async () => [],
+    }));
+    return null;
+  }
+
+  const root = createRoot(container);
+  try {
+    await act(async () => root.render(React.createElement(Harness)));
+
+    await assert.rejects(clearAndRemoveSource(managedSource), /Could not clear managed SSH config source/);
+    assert.equal(writes, 0);
+    assert.equal(fileContent, original);
+
+    failRead = false;
+    await clearAndRemoveSource(managedSource);
+    assert.equal(writes, 1);
+    assert.match(fileContent, /Host outside/);
+    assert.doesNotMatch(fileContent, /Host managed/);
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+    dom.window.close();
+    for (const key of ["window", "document", "localStorage"] as const) {
+      if (key in globalAny) {
+        Object.defineProperty(globalThis, key, {
+          configurable: true,
+          enumerable: true,
+          writable: true,
+          value: saved[key],
+        });
+      } else {
+        delete globalAny[key];
+      }
+    }
+    if (saved.navigator) {
+      Object.defineProperty(globalThis, "navigator", saved.navigator);
+    } else {
+      delete (globalThis as { navigator?: unknown }).navigator;
+    }
+    Object.defineProperty(globalAny, "IS_REACT_ACT_ENVIRONMENT", {
+      configurable: true,
+      value: saved.actEnv,
+    });
+  }
+});

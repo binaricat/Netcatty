@@ -186,6 +186,7 @@ const migrateKey = (key: Partial<SSHKey>): SSHKey => {
     id,
     label,
     type: key.type || "ED25519",
+    keySize: key.keySize,
     privateKey: key.privateKey || "",
     publicKey: key.publicKey,
     certificate: key.certificate,

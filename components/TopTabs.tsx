@@ -228,7 +228,6 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
   const { t } = useI18n();
   const { maximize, isFullscreen, onFullscreenChanged } = useWindowControls();
   const {
-    tabBarPosition,
     hotkeyScheme,
     showTabNumberBadges,
     shellOnlyTabNumberShortcuts,
@@ -270,8 +269,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
   const [hostTreeChromeReady, setHostTreeChromeReady] = useState(false);
   const [hostTreeGutterExiting, setHostTreeGutterExiting] = useState(false);
   const [rootTabsCompact, setRootTabsCompact] = useState(false);
-  const tabsAtBottom = tabBarPosition === 'bottom';
-  const showWindowControls = !isMacClient && !tabsAtBottom;
+  const showWindowControls = !isMacClient;
 
   // Tab reorder drag state
   const [dropIndicator, setDropIndicator] = useState<{ tabId: string; position: 'before' | 'after' } | null>(null);
@@ -999,24 +997,12 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
   }, [isMacClient, maximize]);
 
   return (
-    <>
-        <div
-          data-tab-window-titlebar
-          data-section="top-tabs"
-          className={cn("h-9 shrink-0 items-end justify-end bg-secondary app-drag", tabsAtBottom ? "flex" : "hidden")}
-          style={dragRegionNoSelect}
-          onDoubleClick={handleTitleBarDoubleClick}
-        >
-          {!isMacClient && <WindowControls />}
-        </div>
     <div
       data-top-tabs-root
-      data-position={tabBarPosition}
       data-section="top-tabs"
-      className="relative w-full shrink-0 bg-secondary app-drag"
+      className="relative w-full bg-secondary app-drag"
       style={{
         ...dragRegionNoSelect,
-        order: tabsAtBottom ? 2 : undefined,
         backgroundColor: 'var(--top-tabs-bg, hsl(var(--secondary)))',
         color: 'var(--top-tabs-fg, hsl(var(--foreground)))',
       }}
@@ -1027,12 +1013,12 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
         updateScrollState={updateScrollState}
       />
       {/* Always-on drag stripe so the window can be moved even when tabs fill the bar */}
-      <div className={cn("absolute inset-x-0 h-1 app-drag pointer-events-auto z-10", tabsAtBottom ? "bottom-0" : "top-0")} style={dragRegionStyle} aria-hidden />
+      <div className="absolute inset-x-0 top-0 h-1 app-drag pointer-events-auto z-10" style={dragRegionStyle} aria-hidden />
       <div
-        className={cn("h-9 flex gap-0 app-drag overflow-visible", tabsAtBottom ? "items-start" : "items-end")}
+        className="h-9 flex items-end gap-0 app-drag overflow-visible"
         style={{
           ...dragRegionStyle,
-          paddingLeft: isMacClient && !isWindowFullscreen && !tabsAtBottom ? 76 : 12,
+          paddingLeft: isMacClient && !isWindowFullscreen ? 76 : 12,
           paddingRight: showWindowControls ? 0 : 12,
         }}
       >
@@ -1080,7 +1066,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
           {hasHostTreeToggleSurface && (
             <div
               ref={hostTreeToggleSlotRef}
-              className={cn("top-tab-host-tree-toggle-slot mb-0 flex-shrink-0 app-no-drag", tabsAtBottom ? "self-start" : "self-end")}
+              className="top-tab-host-tree-toggle-slot mb-0 flex-shrink-0 self-end app-no-drag"
               data-section="top-tabs-host-tree-toggle"
               data-visible={effectiveShowHostTreeToggle ? 'true' : 'false'}
               style={noDragRegionStyle}
@@ -1190,7 +1176,7 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
                 <Button
                   variant="ghost"
                   size="icon"
-                  className={cn("h-7 w-7 flex-shrink-0 app-no-drag rounded-none", tabsAtBottom ? "self-start" : "self-end")}
+                  className="h-7 w-7 flex-shrink-0 app-no-drag self-end rounded-none"
                   style={{ color: 'var(--top-tabs-muted, hsl(var(--muted-foreground)))' }}
                   onClick={onOpenQuickSwitcher}
                 >
@@ -1202,9 +1188,9 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
           </div>
         )}
 
-        {/* Fixed right controls — utility icons + window controls share one h-7 row */}
+        {/* Right controls share the tab row. */}
         <div
-          className={cn("flex-shrink-0 flex items-center gap-0.5 app-drag h-7 overflow-visible", tabsAtBottom ? "self-start" : "self-end")}
+          className="flex-shrink-0 flex items-center gap-0.5 app-drag h-7 overflow-visible self-end"
           style={dragRegionStyle}
           data-section="top-tabs-toolbar-actions"
         >
@@ -1279,7 +1265,6 @@ const TopTabsInner: React.FC<TopTabsProps> = ({
         )}
       </div>
     </div>
-    </>
   );
 };
 

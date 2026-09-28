@@ -21,7 +21,11 @@ function loadDiscovery() {
   } catch (err) {
     throw createError(
       "APP_NOT_RUNNING",
-      `Netcatty is not running or discovery file is missing at ${discoveryPath}. Start Netcatty first.`,
+      `Netcatty discovery file is missing at ${discoveryPath}. `
+      + "Either Netcatty is not running, or the discovery file was removed while Netcatty is still up; "
+      + "Netcatty recreates it automatically within a few seconds — retry shortly, "
+      + "or toggle the AI permission mode / restart Netcatty to regenerate it immediately. "
+      + "Session data is not affected.",
     );
   }
 

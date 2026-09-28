@@ -50,6 +50,8 @@ let externalAuthToken = null;
 let pendingHostStart = null; // { promise, server, cancel }
 let electronModule = null;
 let cliDiscoveryFilePath = getCliDiscoveryFilePath();
+let discoverySelfHealTimer = null;
+const DISCOVERY_SELF_HEAL_INTERVAL_MS = 15000;
 
 // Track which sockets have completed authentication
 const authenticatedSockets = new WeakSet();
@@ -448,7 +450,55 @@ function removeCliDiscoveryFile() {
   }
 }
 
+function isCliDiscoveryFileCurrent() {
+  if (!cliDiscoveryFilePath) return true;
+  let raw;
+  try {
+    raw = fs.readFileSync(cliDiscoveryFilePath, "utf8");
+  } catch {
+    return false;
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed?.port === tcpPort
+      && parsed?.token === authToken
+      && parsed?.pid === process.pid;
+  } catch {
+    return false;
+  }
+}
+
+// Self-heal: the discovery file is a runtime pointer that can be deleted
+// out-of-band (cleanup tools, agent shells) while the TCP bridge is still
+// listening. Rewrite it from the in-memory port/token so tool CLI does not
+// report a misleading APP_NOT_RUNNING / "sessions gone" error.
+function ensureCliDiscoveryFile() {
+  if (!tcpPort || !authToken || !cliDiscoveryFilePath) return;
+  if (isCliDiscoveryFileCurrent()) return;
+  debugLog("self-healing CLI discovery file");
+  writeCliDiscoveryFile();
+}
+
+function startDiscoverySelfHeal() {
+  stopDiscoverySelfHeal();
+  discoverySelfHealTimer = setInterval(() => {
+    try {
+      ensureCliDiscoveryFile();
+    } catch {
+      // Self-heal is best-effort.
+    }
+  }, DISCOVERY_SELF_HEAL_INTERVAL_MS);
+  if (typeof discoverySelfHealTimer.unref === "function") discoverySelfHealTimer.unref();
+}
+
+function stopDiscoverySelfHeal() {
+  if (!discoverySelfHealTimer) return;
+  clearInterval(discoverySelfHealTimer);
+  discoverySelfHealTimer = null;
+}
+
 function shutdownHost({ preserveScopedMetadata = false } = {}) {
+  stopDiscoverySelfHeal();
   removeCliDiscoveryFile();
   authToken = null;
   if (pendingHostStart?.server && pendingHostStart.server !== tcpServer) {
@@ -1124,7 +1174,11 @@ function checkCommandSafetyCommonOnly(command) {
 // ── TCP Server ──
 
 function getOrCreateHost() {
-  if (tcpServer && tcpPort) return Promise.resolve(tcpPort);
+  if (tcpServer && tcpPort) {
+    // Host is alive; repair the discovery file if it was removed out-of-band.
+    ensureCliDiscoveryFile();
+    return Promise.resolve(tcpPort);
+  }
   if (pendingHostStart?.promise) return pendingHostStart.promise;
 
   // Generate a random auth token for this server instance
@@ -1183,6 +1237,7 @@ function getOrCreateHost() {
       tcpServer = server;
       debugLog("TCP server listening", { port: tcpPort });
       writeCliDiscoveryFile();
+      startDiscoverySelfHeal();
       try {
         externalMcpHostReadyHook?.({ port: tcpPort, token: authToken });
       } catch {
@@ -2125,6 +2180,9 @@ async function handleGetContext(params) {
 }
 
 function handleGetStatus() {
+  // Repair the discovery pointer before reporting on it, so a mid-session
+  // out-of-band deletion is visible to callers as already self-healed.
+  ensureCliDiscoveryFile();
   return {
     ok: true,
     environment: "netcatty-terminal",
@@ -2275,6 +2333,7 @@ module.exports = {
   handleReadAttachment,
   getScopedSessionIds,
   getOrCreateHost,
+  ensureCliDiscoveryFile,
   buildMcpServerConfig,
   activePtyExecs,
   cancelBackgroundJobsForSession,

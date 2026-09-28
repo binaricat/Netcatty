@@ -208,8 +208,8 @@ export const SftpPaneFileList: React.FC<SftpPaneFileListProps> = React.memo(({
     context: object;
   } | null>(null);
   useEffect(() => {
-    // Refreshes preserve selection identity; explicit sorting/filter/layout
-    // changes still reveal the selected row using the usual behavior.
+    // A listing update can retain the selection during reconnect. Only
+    // selection or view changes should reveal the selected row again.
     const last = lastScrolledSelectionRef.current;
     if (last?.selection === pane.selectedFiles && last.context === selectionScrollContext) return;
     lastScrolledSelectionRef.current = { selection: pane.selectedFiles, context: selectionScrollContext };

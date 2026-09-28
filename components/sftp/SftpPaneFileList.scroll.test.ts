@@ -12,13 +12,14 @@ const previous = environment.IS_REACT_ACT_ENVIRONMENT;
 environment.IS_REACT_ACT_ENVIRONMENT = true;
 after(() => { environment.IS_REACT_ACT_ENVIRONMENT = previous; });
 
-test('refresh keeps scroll, while explicit sorting and filters reveal the selection', async (t) => {
+test('reconnect listing update keeps scroll, while sorting and filters reveal the selection', async (t) => {
   const dom = installDomEnvironment();
   t.after(() => dom.cleanup());
   let scrolls = 0;
   const container = { querySelectorAll: () => [{ dataset: { entryName: 'selected' }, scrollIntoView: () => { scrolls += 1; } }] };
   const noop = () => {};
   const selected = { name: 'selected', type: 'file' as const, size: 1, sizeFormatted: '1 B', lastModified: 0, lastModifiedFormatted: '' };
+  const added = { ...selected, name: 'added' };
   let props: React.ComponentProps<typeof SftpPaneFileList> = {
     t: (key) => key, pane: { ...createEmptyPane('pane'), connection: { id: 'conn', hostId: 'host', hostLabel: 'Host', isLocal: false, status: 'connected', currentPath: '/browsed' }, selectedFiles: new Set(['selected']), files: [selected] },
     side: 'left', isPaneFocused: true,
@@ -39,9 +40,9 @@ test('refresh keeps scroll, while explicit sorting and filters reveal the select
   let renderer: ReactTestRenderer;
   await act(async () => { renderer = create(render(), { createNodeMock: (element) => element.props['data-section'] === 'terminal-sftp-list' ? container : null }); });
   assert.equal(scrolls, 1);
-  props = { ...props, pane: { ...props.pane, files: [...props.pane.files] }, sortedDisplayFiles: [...props.sortedDisplayFiles] };
+  props = { ...props, pane: { ...props.pane, files: [selected, added] }, sortedDisplayFiles: [added, selected] };
   await act(async () => { renderer.update(render()); });
-  assert.equal(scrolls, 1, 'refresh must not pull the viewport back to the selection');
+  assert.equal(scrolls, 1, 'a reconnect listing update must not pull the viewport back to the selection');
   props = { ...props, sorting: { ...props.sorting, sortOrder: 'desc' }, sortedDisplayFiles: [...props.sortedDisplayFiles] };
   await act(async () => { renderer.update(render()); });
   assert.equal(scrolls, 2, 'sorting retains the prior reveal-selection behavior');

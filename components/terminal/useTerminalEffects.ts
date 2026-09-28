@@ -1,4 +1,3 @@
-import { publishTerminalCommandCompletion } from "../../application/state/terminalCommandCompletion";
 /* eslint-disable @typescript-eslint/no-explicit-any, react-hooks/exhaustive-deps */
 import { useRef } from 'react';
 import { publishPluginTerminalRuntimeLifecycleEvent } from '../../application/state/pluginTerminalRuntimeLifecycle';
@@ -190,7 +189,6 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
     void xtermRuntimeRef.current?.pluginProviderHost?.commandSubmitted(args[0]);
   };
   const pluginAwareOnCommandCompleted = () => {
-    publishTerminalCommandCompletion(sessionId);
     publishPluginTerminalRuntimeLifecycleEvent(pluginTerminalLifecycle, 'commandCompleted');
     void xtermRuntimeRef.current?.pluginProviderHost?.commandCompleted();
   };

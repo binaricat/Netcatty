@@ -579,6 +579,7 @@ export const zhCNVaultMessages: Messages = {
   'terminal.auth.retryMessage': '身份验证失败。请检查凭据后重试。',
   'terminal.auth.retryLog': '身份验证失败，请重试。',
   'terminal.auth.noKeysHint': '暂无密钥，请先在钥匙串中添加。',
+  'terminal.auth.selectIdentity': '使用已保存的身份',
   'terminal.auth.continueSave': '继续并保存',
   'terminal.auth.credentialsUnavailable': '当前设备无法解密已保存凭据，请重新输入并再次保存。',
   'terminal.auth.jumpCredentialsUnavailable': '某个跳板机的已保存凭据无法在当前设备解密，请到主机设置中重新填写。',

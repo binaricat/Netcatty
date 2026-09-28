@@ -675,7 +675,9 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
           requiresMfa: !!ctx.host.requiresMfa,
           port: ctx.host.port || 22,
           password: attempt.password,
-          sftpReuseOptions: sftpReuseOptions?.password ? undefined : sftpReuseOptions,
+          sftpReuseOptions: sftpReuseOptions?.password || sftpReuseOptions?.username !== effectiveUsername
+            ? undefined
+            : sftpReuseOptions,
           privateKey: attempt.key?.source === 'reference' ? undefined : (sanitizeCredentialValue(attempt.key?.privateKey) || undefined),
           certificate: attempt.key?.certificate,
           publicKey: attempt.key?.publicKey,

@@ -4,9 +4,19 @@ import {
   type ExternalAgentConfig,
 } from '../infrastructure/ai/types';
 import { getExternalAgentSdkBackend } from '../infrastructure/ai/managedAgents';
-import { canonicalizeEffortEncodedModelId } from '../infrastructure/ai/composerPicker';
+import {
+  canonicalizeEffortEncodedModelId,
+  modelPresetMatchesId,
+  modelPresetsContainId,
+} from '../infrastructure/ai/composerPicker';
+import { sha256 } from '@noble/hashes/sha2.js';
+import { bytesToHex } from '@noble/hashes/utils.js';
 
-export { canonicalizeEffortEncodedModelId };
+export {
+  canonicalizeEffortEncodedModelId,
+  modelPresetMatchesId,
+  modelPresetsContainId,
+};
 
 export type SdkRuntimeModelCatalog = {
   currentModelId: string | null;
@@ -35,6 +45,11 @@ const MODEL_CACHE_ENV_HINTS = [
   'HOME',
   'USERPROFILE',
   'XDG_CONFIG_HOME',
+  'CODEX_HOME',
+  'CLAUDE_CONFIG_DIR',
+  'ANTHROPIC_API_KEY',
+  'ANTHROPIC_AUTH_TOKEN',
+  'CLAUDE_CODE_OAUTH_TOKEN',
   'OPENCODE_BIN',
   'OPENCODE_CONFIG',
   'OPENCODE_CONFIG_DIR',
@@ -103,7 +118,9 @@ export function buildSdkRuntimeModelCacheKey(agent: {
   const grokRuntime = sdkBackend === 'grok'
     ? (agent.grokRuntime === 'streaming-json' ? 'streaming-json' : 'acp')
     : '';
-  return [agent.id, sdkBackend, agent.command ?? '', agent.codexRuntime ?? 'sdk', grokRuntime, cursorAuth, ...envHints].join('\u0000');
+  // Keep authentication values out of the in-memory cache key itself.
+  const envHash = bytesToHex(sha256(new TextEncoder().encode(envHints.join('\u0000'))));
+  return [agent.id, sdkBackend, agent.command ?? '', agent.codexRuntime ?? 'sdk', grokRuntime, cursorAuth, envHash].join('\u0000');
 }
 
 export function createSdkRuntimeModelCache(options: SdkRuntimeModelCacheOptions = {}) {
@@ -190,7 +207,7 @@ export function mergeFallbackThinkingLevels(
   const byId = new Map(fallbacks.map((preset) => [preset.id, preset]));
   let changed = false;
   const next = runtime.map((preset) => {
-    if (preset.thinkingLevels?.length) return preset;
+    if (preset.thinkingLevels !== undefined) return preset;
     const fallback = byId.get(preset.id);
     if (!fallback?.thinkingLevels?.length) return preset;
     changed = true;
@@ -225,19 +242,6 @@ export function agentModelPresetsShallowEqual(
   });
 }
 
-export function modelPresetMatchesId(preset: AgentModelPreset, modelId: string): boolean {
-  const canonical = canonicalizeEffortEncodedModelId(modelId);
-  if (preset.thinkingLevels?.length) {
-    return preset.id === canonical
-      || preset.thinkingLevels.some((level) => `${preset.id}/${level}` === canonical);
-  }
-  return preset.id === canonical;
-}
-
-export function modelPresetsContainId(presets: AgentModelPreset[], modelId: string): boolean {
-  return presets.some((preset) => modelPresetMatchesId(preset, modelId));
-}
-
 export function normalizeStoredAgentModelSelection(
   storedModelId: string | null | undefined,
   presets: AgentModelPreset[],
@@ -253,7 +257,10 @@ export function normalizeStoredAgentModelSelection(
 
 export function shouldLoadSdkRuntimeModels(agent?: ExternalAgentConfig): boolean {
   const sdkBackend = getExternalAgentSdkBackend(agent);
-  return (sdkBackend === 'codex' && agent?.codexRuntime === 'app-server')
+  // Codex on the default `sdk` runtime also serves a live catalog: its driver
+  // falls back to the App Server runtime's model/list in main (#3496), so
+  // quick sends must await it instead of running with build-time presets.
+  return sdkBackend === 'codex'
     || sdkBackend === 'claude'
     || sdkBackend === 'copilot'
     || sdkBackend === 'cursor'

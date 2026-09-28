@@ -154,6 +154,14 @@ test("terminal layer side panel stable ctx ignores linked terminal cwd changes",
   );
 });
 
+test("terminal layer side panel remeasures when the compose bar opens", () => {
+  const closed = { isComposeBarOpen: false };
+  assert.equal(
+    terminalLayerSidePanelStableCtxEqual(closed, { isComposeBarOpen: true }),
+    false,
+  );
+});
+
 test("terminal layer side panel stable ctx re-renders when SFTP-relevant session fields change", () => {
   const baseCtx = {
     mountedSftpTabIds: ["workspace-1"],
