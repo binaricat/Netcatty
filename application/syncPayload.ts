@@ -51,6 +51,7 @@ import {
 } from './state/commandBlocklistSettings';
 import { rehydrateGlobalSftpBookmarks } from './state/sftp/globalSftpBookmarks';
 import {
+  clampTerminalFontSizeValue,
   nextTerminalFontSizeSyncVersion,
   parseTerminalFontSizeRecord,
   serializeTerminalFontSizeRecord,
@@ -59,6 +60,7 @@ import {
   parseCustomAccentRecord,
   serializeCustomAccentRecord,
 } from './state/customAccentSync';
+import { isValidHslToken } from './state/settingsStateDefaults';
 import {
   STORAGE_KEY_THEME,
   STORAGE_KEY_UI_THEME_LIGHT,
@@ -689,11 +691,16 @@ async function applySyncableSettings(
   if (settings.darkUiThemeId != null) localStorageAdapter.writeString(STORAGE_KEY_UI_THEME_DARK, settings.darkUiThemeId);
   if (settings.accentMode != null) localStorageAdapter.writeString(STORAGE_KEY_ACCENT_MODE, settings.accentMode);
   if (settings.customAccent != null) {
-    const existing = parseCustomAccentRecord(localStorageAdapter.readString(STORAGE_KEY_COLOR));
+    const storedColor = localStorageAdapter.readString(STORAGE_KEY_COLOR);
+    const existing = parseCustomAccentRecord(storedColor);
     const incomingColor = parseCustomAccentRecord(settings.customAccent).color;
-    // Only write if the color actually changed to avoid triggering a
-    // LOCAL_STORAGE_ADAPTER_CHANGED_EVENT that would start a redundant sync cycle.
-    if (incomingColor !== existing.color) {
+    // A missing or malformed record parses to the fallback color, but still
+    // needs to be replaced by an explicit incoming value.
+    const storedColorIsValid = storedColor !== null && (
+      isValidHslToken(storedColor.trim())
+      || storedColor === serializeCustomAccentRecord(existing)
+    );
+    if (!storedColorIsValid || incomingColor !== existing.color) {
       localStorageAdapter.writeString(
         STORAGE_KEY_COLOR,
         serializeCustomAccentRecord({
@@ -724,16 +731,20 @@ async function applySyncableSettings(
   if (settings.terminalThemeLight != null) localStorageAdapter.writeString(STORAGE_KEY_TERM_THEME_LIGHT, settings.terminalThemeLight);
   if (settings.terminalFontFamily != null) localStorageAdapter.writeString(STORAGE_KEY_TERM_FONT_FAMILY, settings.terminalFontFamily);
   if (settings.terminalFontSize != null) {
-    const existing = parseTerminalFontSizeRecord(
-      localStorageAdapter.readString(STORAGE_KEY_TERM_FONT_SIZE),
+    const storedFontSize = localStorageAdapter.readString(STORAGE_KEY_TERM_FONT_SIZE);
+    const existing = parseTerminalFontSizeRecord(storedFontSize);
+    const incomingFontSize = clampTerminalFontSizeValue(settings.terminalFontSize);
+    // A missing or malformed record parses to the default font size. A
+    // supported legacy number remains valid without forcing migration.
+    const storedFontSizeIsValid = storedFontSize !== null && (
+      storedFontSize.trim() === String(existing.fontSize)
+      || storedFontSize === serializeTerminalFontSizeRecord(existing)
     );
-    // Only write if the font size actually changed to avoid triggering a
-    // redundant sync cycle via LOCAL_STORAGE_ADAPTER_CHANGED_EVENT.
-    if (settings.terminalFontSize !== existing.fontSize) {
+    if (!storedFontSizeIsValid || incomingFontSize !== existing.fontSize) {
       localStorageAdapter.writeString(
         STORAGE_KEY_TERM_FONT_SIZE,
         serializeTerminalFontSizeRecord({
-          fontSize: settings.terminalFontSize,
+          fontSize: incomingFontSize,
           // Bump so peer windows' version gates accept the synced value.
           version: nextTerminalFontSizeSyncVersion(existing.version, existing.version),
           origin: 'sync-payload',
@@ -793,14 +804,12 @@ async function applySyncableSettings(
 
   // Keyboard
   if (settings.customKeyBindings != null) {
-    const previous = parseCustomKeyBindingsStorageRecord(
-      localStorageAdapter.readString(STORAGE_KEY_CUSTOM_KEY_BINDINGS),
-    );
-    // Only write if bindings actually changed to avoid triggering a
-    // redundant sync cycle via LOCAL_STORAGE_ADAPTER_CHANGED_EVENT.
+    const storedBindings = localStorageAdapter.readString(STORAGE_KEY_CUSTOM_KEY_BINDINGS);
+    const previous = parseCustomKeyBindingsStorageRecord(storedBindings);
+    // Keep an explicit empty binding set when this device has no record.
     const incomingBindings = JSON.stringify(settings.customKeyBindings);
     const existingBindings = JSON.stringify(previous?.bindings ?? []);
-    if (incomingBindings !== existingBindings) {
+    if (previous === null || incomingBindings !== existingBindings) {
       localStorageAdapter.writeString(
         STORAGE_KEY_CUSTOM_KEY_BINDINGS,
         serializeCustomKeyBindingsStorageRecord({

@@ -4,7 +4,8 @@ import assert from "node:assert/strict";
 import type { SyncPayload } from "../domain/sync.ts";
 import type { KnownHost } from "../domain/models.ts";
 import type { SyncableVaultData } from "./syncPayload.ts";
-import { parseTerminalFontSizeRecord } from "./state/terminalFontSizeSync.ts";
+import { clampTerminalFontSizeValue, parseTerminalFontSizeRecord } from "./state/terminalFontSizeSync.ts";
+import { parseCustomAccentRecord } from "./state/customAccentSync.ts";
 import commandBlocklistTable from "../lib/commandBlocklist.json";
 
 type LocalStorageMock = {
@@ -496,6 +497,134 @@ test("applySyncPayload writes a newer terminal font size that old versions can r
   assert.equal(record.fontSize, 19);
   assert.ok(record.version > 7);
   assert.equal(record.origin, "sync-payload");
+});
+
+test("applying identical versioned settings preserves their records, then propagates real changes", async () => {
+  const scenarios: Array<{
+    name: string;
+    storageKey: string;
+    field: keyof NonNullable<SyncPayload["settings"]>;
+    initialValue: string | number | Record<string, unknown>;
+    changedValue: string | number | Record<string, unknown>;
+  }> = [
+    {
+      name: "accent",
+      storageKey: storageKeys.STORAGE_KEY_COLOR,
+      field: "customAccent",
+      initialValue: parseCustomAccentRecord(null).color,
+      changedValue: "0 84% 60%",
+    },
+    {
+      name: "terminal font size",
+      storageKey: storageKeys.STORAGE_KEY_TERM_FONT_SIZE,
+      field: "terminalFontSize",
+      initialValue: parseTerminalFontSizeRecord(null).fontSize,
+      changedValue: 19,
+    },
+    {
+      name: "custom key bindings",
+      storageKey: storageKeys.STORAGE_KEY_CUSTOM_KEY_BINDINGS,
+      field: "customKeyBindings",
+      initialValue: {},
+      changedValue: { open: { mac: "Cmd+K" } },
+    },
+  ];
+
+  for (const scenario of scenarios) {
+    localStorage.clear();
+    const writes: string[] = [];
+    const originalSetItem = localStorage.setItem;
+    localStorage.setItem = (key, value) => {
+      writes.push(key);
+      originalSetItem(key, value);
+    };
+    const applySetting = (value: typeof scenario.initialValue) => applySyncPayload({
+      hosts: [], keys: [], identities: [], snippets: [], customGroups: [],
+      settings: { [scenario.field]: value },
+    } as SyncPayload, { importVaultData: () => {} });
+
+    try {
+      await applySetting(scenario.initialValue);
+      const firstRecord = localStorage.getItem(scenario.storageKey);
+      assert.ok(firstRecord, `${scenario.name}: an explicit first value must be saved`);
+      assert.equal(writes.filter((key) => key === scenario.storageKey).length, 1);
+
+      writes.length = 0;
+      await applySetting(scenario.initialValue);
+      assert.equal(localStorage.getItem(scenario.storageKey), firstRecord);
+      assert.equal(writes.filter((key) => key === scenario.storageKey).length, 0,
+        `${scenario.name}: unchanged value must not write or trigger a storage change`);
+
+      writes.length = 0;
+      await applySetting(scenario.changedValue);
+      assert.equal(writes.filter((key) => key === scenario.storageKey).length, 1,
+        `${scenario.name}: a real change must be saved`);
+      assert.notEqual(localStorage.getItem(scenario.storageKey), firstRecord);
+      assert.deepEqual(buildSyncPayload(vault([])).settings?.[scenario.field], scenario.changedValue);
+    } finally {
+      localStorage.setItem = originalSetItem;
+    }
+  }
+});
+
+test("sync replaces malformed setting records and does not repeat normalized writes", async () => {
+  const versionedKeys = [
+    storageKeys.STORAGE_KEY_COLOR,
+    storageKeys.STORAGE_KEY_TERM_FONT_SIZE,
+    storageKeys.STORAGE_KEY_CUSTOM_KEY_BINDINGS,
+  ];
+  for (const key of versionedKeys) localStorage.setItem(key, "bad");
+  const writes: string[] = [];
+  const originalSetItem = localStorage.setItem;
+  localStorage.setItem = (key, value) => {
+    writes.push(key);
+    originalSetItem(key, value);
+  };
+  const settings = {
+    customAccent: parseCustomAccentRecord(null).color,
+    terminalFontSize: parseTerminalFontSizeRecord(null).fontSize,
+    customKeyBindings: {},
+  };
+  const applySettings = (nextSettings: NonNullable<SyncPayload["settings"]>) => applySyncPayload({
+    hosts: [], keys: [], identities: [], snippets: [], customGroups: [],
+    settings: nextSettings,
+  }, { importVaultData: () => {} });
+
+  try {
+    await applySettings(settings);
+    for (const key of versionedKeys) {
+      assert.notEqual(localStorage.getItem(key), "bad", `${key}: malformed record must be repaired`);
+      assert.equal(writes.filter((written) => written === key).length, 1);
+    }
+
+    writes.length = 0;
+    await applySettings(settings);
+    for (const key of versionedKeys) {
+      assert.equal(writes.filter((written) => written === key).length, 0,
+        `${key}: repaired record must not be written again`);
+    }
+
+    const oversizedFontSize = 100;
+    writes.length = 0;
+    await applySettings({ terminalFontSize: oversizedFontSize });
+    assert.equal(parseTerminalFontSizeRecord(localStorage.getItem(storageKeys.STORAGE_KEY_TERM_FONT_SIZE)).fontSize,
+      clampTerminalFontSizeValue(oversizedFontSize));
+    assert.equal(writes.filter((key) => key === storageKeys.STORAGE_KEY_TERM_FONT_SIZE).length, 1);
+
+    writes.length = 0;
+    await applySettings({ terminalFontSize: oversizedFontSize });
+    assert.equal(writes.filter((key) => key === storageKeys.STORAGE_KEY_TERM_FONT_SIZE).length, 0,
+      "a repeated out-of-range incoming size must not bump the stored version again");
+
+    localStorage.setItem(storageKeys.STORAGE_KEY_TERM_FONT_SIZE, "999");
+    writes.length = 0;
+    await applySettings({ terminalFontSize: oversizedFontSize });
+    assert.equal(writes.filter((key) => key === storageKeys.STORAGE_KEY_TERM_FONT_SIZE).length, 1,
+      "an out-of-range legacy record must be replaced with the normalized value");
+    assert.notEqual(localStorage.getItem(storageKeys.STORAGE_KEY_TERM_FONT_SIZE), "999");
+  } finally {
+    localStorage.setItem = originalSetItem;
+  }
 });
 
 test("buildSyncPayload excludes externalAgents (device-local OS-bound config)", () => {
