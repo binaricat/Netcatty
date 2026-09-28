@@ -1,39 +1,24 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { applyPosixCwdFromCommand, normalizePosixCwd } from "./posixCwdFromCommand.ts";
+import { commandReportsDirectoryChange } from "./posixCwdFromCommand.ts";
 
-test("applyPosixCwdFromCommand tracks simple cd paths", () => {
-  assert.equal(applyPosixCwdFromCommand({ command: "cd /data/docker" }), "/data/docker");
-  assert.equal(applyPosixCwdFromCommand({ command: "cd -- /tmp" }), "/tmp");
-  assert.equal(applyPosixCwdFromCommand({
-    command: "cd docker",
-    currentCwd: "/data",
-  }), "/data/docker");
-  assert.equal(applyPosixCwdFromCommand({
-    command: "cd ..",
-    currentCwd: "/data/docker",
-  }), "/data");
-  assert.equal(applyPosixCwdFromCommand({
-    command: "cd",
-    homeDir: "/root",
-  }), "/root");
-  assert.equal(applyPosixCwdFromCommand({
-    command: "cd ~",
-    homeDir: "/root",
-  }), "/root");
-  assert.equal(applyPosixCwdFromCommand({ command: "ls" }), null);
-  assert.equal(applyPosixCwdFromCommand({ command: "cd /tmp && ls" }), null);
-});
-
-test("relative cd keeps following after an absolute cd", () => {
-  const afterAbsolute = applyPosixCwdFromCommand({ command: "cd /data" });
-  assert.equal(applyPosixCwdFromCommand({
-    command: "cd app",
-    currentCwd: afterAbsolute,
-  }), "/data/app");
-});
-
-test("normalizePosixCwd collapses dot segments", () => {
-  assert.equal(normalizePosixCwd("/data/docker/../bin"), "/data/bin");
-  assert.equal(normalizePosixCwd("/"), "/");
+test("commandReportsDirectoryChange selects cd pushd and popd only", () => {
+  assert.equal(commandReportsDirectoryChange("cd ~"), true);
+  assert.equal(commandReportsDirectoryChange("cd"), true);
+  assert.equal(commandReportsDirectoryChange("pushd /tmp"), true);
+  assert.equal(commandReportsDirectoryChange("popd"), true);
+  assert.equal(commandReportsDirectoryChange("ll"), false);
+  assert.equal(commandReportsDirectoryChange("cd /tmp && ls"), true);
+  assert.equal(commandReportsDirectoryChange("ls && cd ~"), true);
+  assert.equal(commandReportsDirectoryChange("cd /tmp; ls"), true);
+  assert.equal(commandReportsDirectoryChange("cd /tmp || ls"), true);
+  assert.equal(commandReportsDirectoryChange('cd "/tmp/a|b"'), true);
+  assert.equal(commandReportsDirectoryChange("cd /tmp # | cat"), true);
+  assert.equal(commandReportsDirectoryChange("cd /tmp && (ls | head)"), true);
+  assert.equal(commandReportsDirectoryChange("cd /tmp | ls"), false);
+  assert.equal(commandReportsDirectoryChange("cd /tmp &"), false);
+  assert.equal(commandReportsDirectoryChange("cd /tmp && ls &"), false);
+  assert.equal(commandReportsDirectoryChange("echo cd /tmp"), false);
+  assert.equal(commandReportsDirectoryChange("(cd /tmp)"), false);
+  assert.equal(commandReportsDirectoryChange('cd "/tmp'), false);
 });

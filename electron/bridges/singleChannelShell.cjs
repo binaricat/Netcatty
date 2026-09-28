@@ -68,7 +68,8 @@ async function waitForIdleInteractiveShell(client, timeoutMs, signal) {
 function runInteractiveShellCommand(session, command, timeoutMs, signal) {
   const marker = "NETCATTY_EXTRACT_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 10);
   // 只发普通按键和回车。单通道堡垒机会把 Ctrl-U / 额外 exec 当成踢线条件。
-  const line = command + "; printf '%s %s\\n' " + escapeShellArg(marker) + " \"$?\"\r";
+  const script = String(command || "").replace(/\s+$/, "");
+  const line = script + "\nprintf '%s %s\\n' " + escapeShellArg(marker) + " \"$?\"\r";
   return new Promise((resolve, reject) => {
     let buffer = "";
     let settled = false;
@@ -111,6 +112,76 @@ function runInteractiveShellCommand(session, command, timeoutMs, signal) {
   });
 }
 
+function isInteractivePwdLine(line) {
+  if (!line || line.charAt(0) !== "/" || line.length > 4096) return false;
+  // 提示符（/root #）以及和 pwd 回显混在同一行的内容都不是目录。
+  if (/[#$%>]\s*$/.test(line)) return false;
+  if (/\s/.test(line) && /\bpwd\b/.test(line)) return false;
+  return true;
+}
+
+function extractInteractivePwd(buffer) {
+  const text = stripAnsi(String(buffer || "")).replace(/\r/g, "\n");
+  const lines = text.split("\n");
+  // 最后一行可能还没收到换行，避免把半截路径当成目录。
+  const complete = text.endsWith("\n") ? lines : lines.slice(0, -1);
+  let found = null;
+  for (const raw of complete) {
+    const line = raw.trim();
+    if (isInteractivePwdLine(line)) found = line;
+  }
+  return found;
+}
+
+function runInteractivePwd(session, timeoutMs, signal) {
+  return new Promise((resolve, reject) => {
+    let buffer = "";
+    let settled = false;
+    const finish = (error, cwd) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (signal && signal.removeEventListener) signal.removeEventListener("abort", onAbort);
+      try { session.stream.removeListener("data", onData); } catch { /* ignore */ }
+      if (error) reject(error);
+      else resolve(cwd);
+    };
+    const onData = (chunk) => {
+      buffer += Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);
+      if (buffer.length > 65536) buffer = buffer.slice(-32768);
+      const cwd = extractInteractivePwd(buffer);
+      if (cwd) finish(null, cwd);
+    };
+    const onAbort = () => finish(signal && signal.reason instanceof Error ? signal.reason : new Error("pwd cancelled"));
+    const timer = setTimeout(() => finish(new Error("pwd timed out")), timeoutMs);
+    if (timer.unref) timer.unref();
+    if (signal && signal.aborted) {
+      onAbort();
+      return;
+    }
+    if (signal && signal.addEventListener) signal.addEventListener("abort", onAbort, { once: true });
+    session.stream.on("data", onData);
+    try {
+      session.stream.write("pwd\r");
+    } catch (error) {
+      finish(error);
+    }
+  });
+}
+
+async function readInteractivePwd(session, options = {}) {
+  if (!session || !session.stream || session.stream.writable === false) return null;
+  if (typeof session.stream.write !== "function") return null;
+  const waitMs = Number.isFinite(options.waitMs) ? options.waitMs : 0;
+  const timeoutMs = Number.isFinite(options.timeoutMs) ? options.timeoutMs : 5000;
+  const deadline = Date.now() + waitMs;
+  while (!isShellIdleForInjection(session)) {
+    if (Date.now() >= deadline) return null;
+    await delayForInteractiveShell(Math.min(200, Math.max(0, deadline - Date.now())), options.signal);
+  }
+  return runInteractivePwd(session, timeoutMs, options.signal);
+}
+
 function writeInteractiveShellCommand(session, command, timeoutMs, signal) {
   return runInteractiveShellCommand(session, command, timeoutMs, signal).then((result) => result.code);
 }
@@ -149,4 +220,6 @@ module.exports = {
   writeInteractiveShellCommand,
   runIdleShellCommand,
   runOnShellSession,
+  readInteractivePwd,
+  extractInteractivePwd,
 };

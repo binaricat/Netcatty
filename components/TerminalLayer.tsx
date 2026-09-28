@@ -110,15 +110,13 @@ import {
   DEFAULT_TERMINAL_SIDE_PANEL_AUTO_OPEN_TAB,
   resolveSessionSidePanelAutoOpen,
 } from '../domain/terminalSidePanelAutoOpen';
-import { shouldProbeCommandCwd } from './terminalLayer/commandCwdProbe';
+import { resolveCommandCwdProbeMode } from './terminalLayer/commandCwdProbe';
 import {
   resolvePreferredTerminalCwd,
   scheduleBackendCwdProbeAfterCommand,
   type RendererCwdSource,
   type TerminalCwdChangeMeta,
 } from './terminal/sftpCwd';
-import { applyPosixCwdFromCommand } from '../domain/posixCwdFromCommand';
-import { guessUnixHomeDirFromPath } from '../domain/sftpFollowTerminalCwd';
 import { classifyDistroId, hostRestrictsExtraSshChannels, shouldProbeSessionCwd } from '../domain/host';
 import {
   collectSidePanelPanes,
@@ -1310,22 +1308,8 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     return deliveredSessionIds;
   }, [terminalBackend, isGlobalBroadcastEnabled]);
 
-  const handleCommandSubmitted = useCallback((command: string, _hostId: string, _hostLabel: string, sessionId: string, previousCwd?: string) => {
+  const handleCommandSubmitted = useCallback((command: string, _hostId: string, _hostLabel: string, sessionId: string) => {
     codingCliSignalController.handleCommandSubmitted(sessionId, command);
-
-    const currentCwd = previousCwd
-      ?? terminalCwdStore.getCwd(sessionId)
-      ?? terminalRendererCwdBySessionRef.current.get(sessionId);
-    const inferredCwd = applyPosixCwdFromCommand({
-      command,
-      currentCwd,
-      homeDir: guessUnixHomeDirFromPath(currentCwd) ?? undefined,
-    });
-    if (inferredCwd && inferredCwd.startsWith('/')) {
-      handleTerminalCwdChange(sessionId, inferredCwd, { source: 'inferred' });
-    } else if (inferredCwd === '~') {
-      handleTerminalCwdChange(sessionId, inferredCwd, { source: 'inferred' });
-    }
 
     const tabId = activeTabIdRef.current;
     const session = sessionsRef.current.find((candidate) => candidate.id === sessionId);
@@ -1334,13 +1318,20 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     const visibleSftpHost = tabId && sidePanelLayoutHasTool(sidePanelLayoutsRef.current.get(tabId), 'sftp')
       ? sftpHostForTabRef.current.get(tabId) ?? null
       : null;
-    if (!shouldProbeCommandCwd({
+    const detectedDeviceClass = classifyDistroId(sessionHost?.distro);
+    const isNetworkDevice = sessionHost?.deviceType === 'network'
+      || detectedDeviceClass === 'network-device';
+    const probeMode = resolveCommandCwdProbeMode({
       restoreTerminalCwd,
       visibleSftpHost,
       sessionHost,
       globalSftpFollowTerminalCwd: sftpFollowTerminalCwdRef.current,
       restrictExtraSshChannels: hostRestrictsExtraSshChannels(sessionHost),
-    })) return;
+      singleChannelSsh: sessionHost?.singleChannelSsh === true,
+      isNetworkDevice,
+      command,
+    });
+    if (probeMode === 'none') return;
 
     const osc7SignalAtCommand = terminalOsc7SignalBySessionRef.current.get(sessionId) ?? 0;
     const probeGeneration = (cwdProbeGenerationRef.current.get(sessionId) ?? 0) + 1;
@@ -1351,16 +1342,18 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       osc7SignalAtCommand,
       getOsc7Signal: () => terminalOsc7SignalBySessionRef.current.get(sessionId) ?? 0,
       getSessionPwd: (id, options) => terminalBackend.getSessionPwd(id, options),
+      viaInteractiveShell: probeMode === 'interactive-pwd',
       canProbe: async () => {
         if (cwdProbeGenerationRef.current.get(sessionId) !== probeGeneration) return false;
+        if (probeMode === 'interactive-pwd') return true;
         const host = sessionHostsMapRef.current.get(sessionId);
         if (!host) return false;
-        const detectedDeviceClass = classifyDistroId(host.distro);
-        const isNetworkDevice =
-          host.deviceType === 'network' || detectedDeviceClass === 'network-device';
+        const hostDeviceClass = classifyDistroId(host.distro);
+        const hostIsNetworkDevice =
+          host.deviceType === 'network' || hostDeviceClass === 'network-device';
         const info = await terminalBackend.getSessionRemoteInfo?.(sessionId);
         return shouldProbeSessionCwd({
-          isNetworkDevice,
+          isNetworkDevice: hostIsNetworkDevice,
           remoteSshVersion: info?.remoteSshVersion,
           restrictExtraSshChannels: hostRestrictsExtraSshChannels(host),
         });

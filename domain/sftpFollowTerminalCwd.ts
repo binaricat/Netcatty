@@ -269,6 +269,25 @@ export const shouldFollowTerminalCwdNavigate = ({
   return true;
 };
 
+/**
+ * A split sibling with no cwd of its own is still at login. Do not leave the
+ * previous pane's directory on the shared SFTP panel.
+ */
+export const fallbackFollowPathForUntrackedSession = ({
+  originChanged,
+  homeDir,
+  currentPath,
+}: {
+  originChanged: boolean;
+  homeDir?: string | null;
+  currentPath?: string | null;
+}): string | null => {
+  if (!originChanged) return null;
+  if (!homeDir || !homeDir.startsWith("/")) return null;
+  if (currentPath === homeDir) return null;
+  return homeDir;
+};
+
 /** Best-effort home from an already-open SFTP path when echo ~ is unavailable. */
 export const isSftpFollowTargetPath = (path: string): boolean => (
   path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(path)

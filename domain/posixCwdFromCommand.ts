@@ -1,75 +1,107 @@
-/** Infer the next POSIX cwd from a simple interactive `cd`/`pushd` command. */
+/** 判断交互命令会不会改变当前 shell 的目录。最终路径以 pwd 为准，不再从命令文本猜测。 */
 
-const CD_COMMAND = /^(?:sudo\s+)?(?:builtin\s+)?(cd|pushd)(?:\s+--)?(?:\s+(.*))?$/;
+const DIRECTORY_COMMAND = /^(?:sudo\s+)?(?:builtin\s+)?(cd|pushd|popd)(?:\s|$)/;
 
-export const normalizePosixCwd = (path: string): string => {
-  const hasTrailingSlash = path.length > 1 && path.endsWith("/");
-  const isAbsolute = path.startsWith("/");
-  const parts: string[] = [];
-  for (const segment of path.split("/")) {
-    if (!segment || segment === ".") continue;
-    if (segment === "..") {
-      if (parts.length > 0) parts.pop();
+/**
+ * 把交互命令拆成 &&、;、|| 列表。
+ * 顶层管道 | 和后台 & 会让 cd 跑在子 shell 里，返回 null，调用方不要注入 pwd。
+ * 引号、注释、$() 和反引号里的符号不当成顶层操作符。引号或括号没闭合时也返回 null，避免打断续行。
+ */
+const splitInteractiveCommandList = (line: string): string[] | null => {
+  const segments: string[] = [];
+  let current = "";
+  let quote: "'" | '"' | null = null;
+  let backtick = false;
+  let depth = 0;
+
+  const push = () => {
+    segments.push(current);
+    current = "";
+  };
+
+  for (let index = 0; index < line.length; index += 1) {
+    const ch = line[index] ?? "";
+    const next = line[index + 1];
+
+    if (quote) {
+      current += ch;
+      if (quote === '"' && ch === "\\") {
+        if (next) {
+          current += next;
+          index += 1;
+        }
+      } else if (ch === quote) {
+        quote = null;
+      }
       continue;
     }
-    parts.push(segment);
+
+    if (backtick) {
+      current += ch;
+      if (ch === "`") backtick = false;
+      continue;
+    }
+
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      current += ch;
+      continue;
+    }
+    if (ch === "`") {
+      backtick = true;
+      current += ch;
+      continue;
+    }
+    if (ch === "\\") {
+      current += ch;
+      if (next) {
+        current += next;
+        index += 1;
+      }
+      continue;
+    }
+    if (ch === "#" && (current.length === 0 || /\s$/.test(current))) break;
+    if (ch === "(") {
+      depth += 1;
+      current += ch;
+      continue;
+    }
+    if (ch === ")") {
+      if (depth > 0) depth -= 1;
+      current += ch;
+      continue;
+    }
+    if (depth > 0) {
+      current += ch;
+      continue;
+    }
+    if (ch === "\n" || ch === ";") {
+      push();
+      continue;
+    }
+    if ((ch === "&" && next === "&") || (ch === "|" && next === "|")) {
+      push();
+      index += 1;
+      continue;
+    }
+    if (ch === "&" || ch === "|") return null;
+    current += ch;
   }
-  if (!isAbsolute) return parts.join("/");
-  const normalized = `/${parts.join("/")}`;
-  if (normalized === "/") return "/";
-  return hasTrailingSlash ? `${normalized}/` : normalized;
+
+  if (quote || backtick || depth !== 0) return null;
+  push();
+  return segments;
 };
 
-const joinPosixCwd = (base: string, relative: string): string => {
-  if (relative.startsWith("/")) return normalizePosixCwd(relative);
-  const prefix = base.endsWith("/") ? base : `${base}/`;
-  return normalizePosixCwd(`${prefix}${relative}`);
+const listCommands = (command: string): string[] | null => {
+  const segments = splitInteractiveCommandList(command.trim());
+  if (!segments) return null;
+  return segments.map((segment) => segment.trim()).filter((segment) => segment.length > 0);
 };
 
-const tokenizeSinglePathArg = (raw: string): string | null => {
-  const trimmed = raw.trim();
-  if (!trimmed) return "";
-  if (
-    (trimmed.startsWith("'") && trimmed.endsWith("'") && trimmed.length >= 2)
-    || (trimmed.startsWith('"') && trimmed.endsWith('"') && trimmed.length >= 2)
-  ) {
-    const inner = trimmed.slice(1, -1);
-    return trimmed.startsWith("'") ? inner : inner.replace(/\\(.)/g, "$1");
-  }
-  const token = trimmed.split(/\s+/, 1)[0] ?? "";
-  if (trimmed.slice(token.length).trim()) return null;
-  return token.replace(/\\(.)/g, "$1");
-};
-
-export const applyPosixCwdFromCommand = (input: {
-  command: string;
-  currentCwd?: string | null;
-  homeDir?: string | null;
-}): string | null => {
-  const line = input.command.trim();
-  if (!line || /[;&|]/.test(line)) return null;
-  const match = line.match(CD_COMMAND);
-  if (!match) return null;
-  const operand = tokenizeSinglePathArg(match[2] ?? "");
-  if (operand === null) return null;
-  if (operand === "-") return null;
-
-  const home = input.homeDir && input.homeDir.startsWith("/")
-    ? normalizePosixCwd(input.homeDir)
-    : null;
-  const current = input.currentCwd && (input.currentCwd === "~" || input.currentCwd.startsWith("/"))
-    ? input.currentCwd
-    : null;
-
-  if (!operand || operand === "~") return home ?? "~";
-  if (operand.startsWith("~/")) {
-    if (!home) return null;
-    return joinPosixCwd(home, operand.slice(2));
-  }
-  if (operand.startsWith("/")) return normalizePosixCwd(operand);
-  if (!current || current === "~") {
-    if (!home) return null;
-    return joinPosixCwd(home, operand);
-  }
-  return joinPosixCwd(current, operand);
+/** cd / pushd / popd 会改变当前 shell 目录。组合命令等整行结束后再 pwd。 */
+export const commandReportsDirectoryChange = (command: string): boolean => {
+  const commands = listCommands(command);
+  if (!commands) return false;
+  return commands.some((segment) => DIRECTORY_COMMAND.test(segment));
 };

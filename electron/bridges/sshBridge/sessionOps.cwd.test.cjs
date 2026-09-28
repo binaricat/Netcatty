@@ -838,6 +838,38 @@ test("getSessionPwd skips extra exec when singleChannelSsh is set", async () => 
   assert.equal(execCalls, 0);
 });
 
+test("getSessionPwd reads pwd from the interactive shell without extra exec", async () => {
+  let execCalls = 0;
+  const written = [];
+  const stream = new EventEmitter();
+  stream.writable = true;
+  stream.write = (chunk) => {
+    written.push(String(chunk));
+    stream.emit("data", Buffer.from("pwd\r\n/root\r\n[root@host root]# "));
+    return true;
+  };
+  const api = makeApi({
+    singleChannelSsh: true,
+    remoteSshVersion: "SSH-2.0-CLOUDBILITY-4.14",
+    _promptTrackTail: "[root@host ~]# ",
+    stream,
+    conn: {
+      exec() { execCalls += 1; },
+    },
+  });
+
+  const result = await api.getSessionPwd(null, {
+    sessionId: "session-1",
+    viaInteractiveShell: true,
+    allowHomeFallback: false,
+    allowLoginShellFallback: false,
+  });
+
+  assert.deepEqual(result, { success: true, cwd: "/root" });
+  assert.deepEqual(written, ["pwd\r"]);
+  assert.equal(execCalls, 0);
+});
+
 test("listSessionDir skips extra exec when singleChannelSsh is set", async () => {
   let execCalls = 0;
   const api = makeApi({

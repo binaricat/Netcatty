@@ -385,6 +385,7 @@ function createPreloadApi(ctx) {
       allowHomeFallback: options?.allowHomeFallback,
       allowLoginShellFallback: options?.allowLoginShellFallback,
       timeoutMs: options?.timeoutMs,
+      viaInteractiveShell: options?.viaInteractiveShell === true,
     });
   },
   getSessionRemoteInfo: async (sessionId) => {

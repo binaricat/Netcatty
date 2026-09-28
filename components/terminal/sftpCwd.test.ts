@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   createTerminalCwdTracker,
   invalidateTerminalCwdAfterCommand,
+  shouldPreserveTerminalCwdAcrossCommand,
   probeBackendSessionCwdAfterCommand,
   resolvePreferredTerminalCwd,
 } from "./sftpCwd";
@@ -303,4 +304,29 @@ test("active-shell cwd resolution trusts an inferred cwd without extra exec", as
 
   assert.equal(cwd, "/data/docker");
   assert.equal(backendCalls, 0);
+});
+
+test("single-channel command submission keeps the cwd SFTP follow already has", () => {
+  assert.equal(shouldPreserveTerminalCwdAcrossCommand(true), true);
+  assert.equal(shouldPreserveTerminalCwdAcrossCommand(false), false);
+});
+
+test("probeBackendSessionCwdAfterCommand asks the interactive shell when requested", async () => {
+  const cwd = await probeBackendSessionCwdAfterCommand({
+    sessionId: "session-1",
+    osc7SignalAtCommand: 1,
+    getOsc7Signal: () => 1,
+    viaInteractiveShell: true,
+    getSessionPwd: async (sessionId, options) => {
+      assert.equal(sessionId, "session-1");
+      assert.deepEqual(options, {
+        allowHomeFallback: false,
+        allowLoginShellFallback: false,
+        viaInteractiveShell: true,
+      });
+      return { success: true, cwd: "/root" };
+    },
+  });
+
+  assert.equal(cwd, "/root");
 });

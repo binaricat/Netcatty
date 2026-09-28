@@ -18,6 +18,7 @@ import {
   type SftpFollowTerminalCwdBlock,
   resolveTerminalCwdForSftp,
   isSftpFollowTargetPath,
+  fallbackFollowPathForUntrackedSession,
 } from "../../../domain/sftpFollowTerminalCwd";
 import type { Host } from "../../../types";
 import type { SftpNavigateOptions, SftpNavigateResult } from "./useSftpPaneActions";
@@ -186,6 +187,7 @@ export function useSftpFollowTerminalCwd({
   const ownerPanelOpenRef = useRef(ownerPanelOpen);
   const hasActiveWorkRef = useRef(hasActiveWork);
   const initialFollowReadyConnectionRef = useRef<string | null>(null);
+  const lastFollowOriginIdRef = useRef<string | null>(null);
 
   effectiveFollowTerminalCwdRef.current = effectiveFollowTerminalCwd;
   canFollowTerminalCwdRef.current = canFollowTerminalCwd;
@@ -293,9 +295,23 @@ export function useSftpFollowTerminalCwd({
     const syncGeneration = followSyncGenerationRef.current;
     const expectedSessionId = focusedSessionIdRef.current ?? activeSessionIdRef.current ?? null;
     const expectedConnectionIdAtStart = connectionIdRef.current ?? liveConnectionId;
+    const previousOriginId = lastFollowOriginIdRef.current;
+    const originChanged = Boolean(
+      previousOriginId
+      && expectedSessionId
+      && previousOriginId !== expectedSessionId,
+    );
+    if (expectedSessionId) lastFollowOriginIdRef.current = expectedSessionId;
     const usesLiveTerminalCwd = Boolean(activeTerminalCwd && activeTerminalCwdTrusted);
     let terminalCwd = usesLiveTerminalCwd ? activeTerminalCwd : null;
-    if (!terminalCwd) {
+    if (!terminalCwd && originChanged) {
+      // Do not reuse an in-flight probe from the pane we just left.
+      terminalCwd = fallbackFollowPathForUntrackedSession({
+        originChanged,
+        homeDir: sftpRef.current.leftPane.connection?.homeDir,
+        currentPath: sftpRef.current.leftPane.connection?.currentPath,
+      });
+    } else if (!terminalCwd) {
       terminalCwd = await onGetTerminalCwd({
         preferFreshBackend: true,
         allowRendererFallback: false,
@@ -377,10 +393,12 @@ export function useSftpFollowTerminalCwd({
       handledFollowRef.current = { connectionId: currentConnection.id, terminalCwd: targetPath };
     }
   }, [
+    activeSessionId,
     activeTerminalCwd,
     activeTerminalCwdTrusted,
     canFollowTerminalCwd,
     effectiveFollowTerminalCwd,
+    focusedSessionId,
     hasActiveWork,
     isVisible,
     onGetTerminalCwd,
@@ -406,6 +424,7 @@ export function useSftpFollowTerminalCwd({
     if (!effectiveFollowTerminalCwd || !canFollowTerminalCwd || !isVisible || hasActiveWork) return;
     void syncFollowToTerminalCwd();
   }, [
+    activeSessionId,
     activeTerminalCwd,
     activeTerminalCwdTrusted,
     canFollowTerminalCwd,
@@ -413,6 +432,7 @@ export function useSftpFollowTerminalCwd({
     connectionIsLocal,
     connectionStatus,
     effectiveFollowTerminalCwd,
+    focusedSessionId,
     hasActiveWork,
     isVisible,
     syncFollowToTerminalCwd,

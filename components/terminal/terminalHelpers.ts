@@ -196,7 +196,6 @@ export interface TerminalProps {
     hostId: string,
     hostLabel: string,
     sessionId: string,
-    previousCwd?: string,
   ) => void;
   onSplitHorizontal?: () => void;
   onSplitVertical?: () => void;

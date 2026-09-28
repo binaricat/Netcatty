@@ -16,6 +16,8 @@ import {
   shouldCancelSettledPendingSftpRebindWithoutTarget,
   shouldDeferPendingSftpUploadForOriginFocus,
   shouldDeferSftpSidePanelAutoConnectForSession,
+  isSplitFocusSftpStillConnected,
+  shouldKeepConnectedSftpOnSplitFocus,
   shouldRebindSftpSidePanelSourceSession,
   shouldResetSftpSidePanelSourceSession,
   shouldSkipSftpSidePanelAutoConnect,
@@ -768,5 +770,44 @@ test("session change still requires rebind even when the endpoint key matches", 
       () => true,
     ),
     tab,
+  );
+});
+
+test("split focus keeps an SFTP login that is already connected", () => {
+  assert.equal(shouldKeepConnectedSftpOnSplitFocus({
+    sessionChanged: true,
+    previousSessionId: "pane-a",
+    nextSessionId: "pane-b",
+    endpointAlreadyConnected: true,
+  }), true);
+  assert.equal(shouldKeepConnectedSftpOnSplitFocus({
+    sessionChanged: true,
+    previousSessionId: "pane-b",
+    nextSessionId: "pane-a",
+    endpointAlreadyConnected: true,
+  }), true);
+  assert.equal(shouldKeepConnectedSftpOnSplitFocus({
+    sessionChanged: true,
+    previousSessionId: "pane-a",
+    nextSessionId: "pane-a",
+    endpointAlreadyConnected: true,
+  }), false);
+  assert.equal(shouldKeepConnectedSftpOnSplitFocus({
+    sessionChanged: true,
+    previousSessionId: "pane-a",
+    nextSessionId: "pane-b",
+    endpointAlreadyConnected: false,
+  }), false);
+});
+
+test("split focus still counts a listing-in-progress SFTP session as connected", () => {
+  const tab = remoteConnectedTab({ loading: true });
+  assert.equal(
+    isSplitFocusSftpStillConnected("host-key", "host-key", tab, true, "host-key"),
+    true,
+  );
+  assert.equal(
+    shouldSkipSftpSidePanelAutoConnect("host-key", "host-key", tab, true, "host-key"),
+    false,
   );
 });

@@ -96,6 +96,8 @@ import {
   shouldCancelSettledPendingSftpRebindWithoutTarget,
   shouldDeferPendingSftpUploadForOriginFocus,
   shouldDeferSftpSidePanelAutoConnectForSession,
+  isSplitFocusSftpStillConnected,
+  shouldKeepConnectedSftpOnSplitFocus,
   shouldRebindSftpSidePanelSourceSession,
   shouldSkipSftpSidePanelAutoConnect,
   shouldStartPendingSftpUploadRebind,
@@ -709,16 +711,33 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
     // Rebind when the focused terminal SSH session changes: saved host keys can
     // lag live session endpoints (edited host / unsaved user). Still keep the
     // browsed path sticky via remembered initialPath below.
+    // Single-channel SFTP does not borrow that terminal, so A -> B -> A must
+    // keep the login that is already up for this endpoint.
+    const backendSessionUp = activeConnectionId ? hasBackendSession(activeConnectionId) : false;
+    const endpointAlreadyConnected = shouldSkipSftpSidePanelAutoConnect(
+      connectionKey,
+      connectedKeyRef.current,
+      activeTab,
+      backendSessionUp,
+      activeTabConnectionKey,
+    );
+    const splitEndpointStillUp = isSplitFocusSftpStillConnected(
+      connectionKey,
+      connectedKeyRef.current,
+      activeTab,
+      backendSessionUp,
+      activeTabConnectionKey,
+    );
+    const keepSplitSftp = shouldKeepConnectedSftpOnSplitFocus({
+      sessionChanged,
+      previousSessionId: lastSourceSessionIdRef.current,
+      nextSessionId: activeSessionId,
+      endpointAlreadyConnected: splitEndpointStillUp,
+    });
     if (
-      !sessionChanged
-      && !pendingRequiresForcedRebind
-      && shouldSkipSftpSidePanelAutoConnect(
-        connectionKey,
-        connectedKeyRef.current,
-        activeTab,
-        activeConnectionId ? hasBackendSession(activeConnectionId) : false,
-        activeTabConnectionKey,
-      )
+      !pendingRequiresForcedRebind
+      && (endpointAlreadyConnected || splitEndpointStillUp)
+      && (!sessionChanged || keepSplitSftp)
     ) {
       if (activeSessionId) {
         lastSourceSessionIdRef.current = activeSessionId;
