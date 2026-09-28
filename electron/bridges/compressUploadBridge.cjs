@@ -453,11 +453,19 @@ async function checkTarAvailable(signal) {
 }
 
 
-function buildInteractiveExtractCommand(archivePath, targetDir) {
-  return "tar -xzf " + escapeShellArg(archivePath)
-    + " -C " + escapeShellArg(targetDir)
-    + " --exclude='._*' --exclude='.DS_Store'"
-    + " && rm -f -- " + escapeShellArg(archivePath);
+function buildInteractiveExtractCommand(archivePath, targetDir, folderName) {
+  const script = buildAtomicRemoteExtractionCommand({
+    compressionId: "single-channel",
+    archivePath,
+    targetDir,
+    folderName,
+  });
+  const delimiter = "NETCATTY_COMPRESS_EOF";
+  if (script.includes(delimiter)) {
+    throw new Error("Compressed extraction script collided with its wrapper");
+  }
+  // Run in a child shell so set -e / exit cannot close the user's terminal.
+  return "sh -s <<'" + delimiter + "'\n" + script + "\n" + delimiter;
 }
 
 
@@ -610,7 +618,7 @@ async function extractRemoteArchive(
     }
     const code = await writeInteractiveShellCommand(
       session,
-      buildInteractiveExtractCommand(archivePath, targetDir),
+      buildInteractiveExtractCommand(archivePath, targetDir, folderName),
       extractionTimeout,
       signal,
     );
@@ -1191,6 +1199,7 @@ module.exports = {
   _checkCompressedUploadSupportForTests: checkCompressedUploadSupport,
   _runRemoteExecForTests: runRemoteExec,
   _buildAtomicRemoteExtractionCommandForTests: buildAtomicRemoteExtractionCommand,
+  _buildInteractiveExtractCommandForTests: buildInteractiveExtractCommand,
   _buildRemoteArchivePathForTests: buildRemoteArchivePath,
   _createBoundedUtf8CollectorForTests: createBoundedUtf8Collector,
   _getActiveCompressionCountForTests: () => activeCompressions.size,

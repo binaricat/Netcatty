@@ -692,7 +692,8 @@ test("single-channel compressed upload extracts through the terminal and does no
   assert.equal(result.success, true);
   assert.equal(execCalls, 0);
   assert.equal(writes.length, 1);
-  assert.match(writes[0], /tar -xzf /);
+  assert.match(writes[0], /sh -s <</);
+  assert.match(writes[0], /tar -xzf "\$archive" -C "\$stage"/);
   assert.match(writes[0], /rm -f -- /);
   assert.equal(writes[0].includes("\u0015"), false);
   assert.equal(writes[0].includes("\u000b"), false);
