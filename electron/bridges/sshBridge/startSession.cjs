@@ -1255,6 +1255,7 @@ function createStartSessionApi(ctx) {
       const canAttemptSourceReuse = Boolean(
         allowTransportReuse
         && options.sourceSessionId
+        && !options.singleChannelSsh
         && !options.x11Forwarding
         && (!sourceReuseState || sourceReuseState.attempted !== true),
       );

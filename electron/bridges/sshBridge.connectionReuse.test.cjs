@@ -782,10 +782,12 @@ function makeSourceSession(conn, endpoint) {
     zmodemSentry: { cancel() {} },
     hostname: endpoint.hostname,
     username: endpoint.username,
+    singleChannelSsh: endpoint.singleChannelSsh === true,
     _reuseEndpoint: {
       hostname: endpoint.hostname,
       port: endpoint.port || 22,
       username: endpoint.username,
+      ...(endpoint.singleChannelSsh ? { singleChannelSsh: true } : {}),
       ...(Array.isArray(endpoint.jumpHosts) ? { jumpHosts: endpoint.jumpHosts } : {}),
     },
   };
@@ -2182,4 +2184,50 @@ test("falls back to a fresh connection when the source is gone", async (t) => {
     getConnectionReuseFallbackEvents(sender).map((m) => m.payload),
     [{ sessionId: "copy", sourceSessionId: "missing-source" }],
   );
+});
+
+test("single-channel Copy Tab dials separately and keeps the original shell", async (t) => {
+  const { bridge, getClientConstructCount } = loadBridgeWithMockedSsh2(t, { connectReady: true });
+  const sessions = new Map();
+  const sourceConn = makeReusableConn();
+  const openShell = sourceConn.shell;
+  sourceConn.shell = (...args) => {
+    sourceConn._sock.destroyed = true;
+    sourceConn.emit("close");
+    return openShell.apply(sourceConn, args);
+  };
+  const source = makeSourceSession(sourceConn, {
+    hostname: "10.0.0.1",
+    username: "alice",
+    singleChannelSsh: true,
+  });
+  const originalStream = source.stream;
+  sessions.set("source", source);
+
+  const start = registerStartHandler(bridge, sessions);
+  const result = await start(
+    { sender: makeSender() },
+    {
+      sessionId: "copy",
+      hostname: "10.0.0.1",
+      username: "alice",
+      port: 22,
+      authMethod: "password",
+      password: "secret",
+      useSshAgent: false,
+      verifyHostKeys: false,
+      singleChannelSsh: true,
+      sourceSessionId: "source",
+    },
+  );
+
+  assert.equal(result.sessionId, "copy");
+  assert.equal(getClientConstructCount(), 1);
+  assert.equal(sourceConn.openedShells.length, 0);
+  assert.equal(sourceConn._sock.destroyed, false);
+  assert.equal(originalStream.closed, false);
+  assert.equal(source.connRef.endpoint.singleChannelSsh, true);
+  assert.equal(source.connRef.allowIdlePark, false);
+  assert.notEqual(sessions.get("copy").conn, sourceConn);
+  assert.equal(sessions.get("source").conn, sourceConn);
 });

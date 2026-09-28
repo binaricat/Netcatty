@@ -625,7 +625,10 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         useSshAgent?: boolean;
       }): Promise<string> => {
         // Reconnect supersedes a Copy/Split intent that was still waiting for credentials.
-        const sourceSessionId = ctx.requireFreshConnectionOnReconnectRef?.current
+        const sourceSessionId = (
+          ctx.requireFreshConnectionOnReconnectRef?.current
+          || hostRestrictsExtraSshChannels(ctx.host)
+        )
           ? undefined
           : ctx.reuseConnectionFromSessionIdRef?.current;
         if (ctx.reuseConnectionFromSessionIdRef) {

@@ -1422,3 +1422,39 @@ test("transferConnectionRef rebinds a lease without changing count", () => {
   fireIdleTimers(timers);
   assert.equal(conn.ended, 1);
 });
+
+test("findReusableSession refuses a single-channel source", () => {
+  const sessions = new Map();
+  const source = {
+    singleChannelSsh: true,
+    conn: { _sock: { destroyed: false } },
+    stream: {},
+    connRef: { count: 1, state: "live", endpoint: { singleChannelSsh: true } },
+    _reuseEndpoint: { hostname: "10.0.0.1", port: 22, username: "alice", singleChannelSsh: true },
+  };
+  sessions.set("src", source);
+  assert.equal(findReusableSession(sessions, "src"), null);
+  assert.equal(
+    findReusableSession(sessions, "src", { hostname: "10.0.0.1", port: 22, username: "alice", singleChannelSsh: true }),
+    null,
+  );
+});
+
+test("createConnectionRef keeps singleChannelSsh and does not idle-park the terminal", () => {
+  const conn = makeConn();
+  const owner = {
+    singleChannelSsh: true,
+    _reuseEndpoint: {
+      hostname: "bastion.example",
+      port: 22,
+      username: "root",
+      singleChannelSsh: true,
+    },
+  };
+  const transport = createConnectionRef(owner, conn, []);
+  assert.equal(transport.endpoint.singleChannelSsh, true);
+  assert.equal(transport.allowIdlePark, false);
+  assert.equal(releaseConnectionRef(owner), true);
+  assert.equal(conn.ended, 1);
+  assert.equal(transport.state, "dead");
+});
