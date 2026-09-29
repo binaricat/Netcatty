@@ -222,10 +222,6 @@ export const useSftpTransfers = ({
   const transfersRef = useRef(transfers);
   const conflictsRef = useRef(conflicts);
   conflictsRef.current = conflicts;
-  // Remote files past the preflight cap keep an unknown plan. Mark them so
-  // deferred discovery does not stat the whole tail at once.
-  const preflightSkippedTaskIdsRef = useRef(new Set<string>());
-
   // When the retained panel is re-opened, catch up React state from the ref that
   // kept receiving progress while the surface was hidden.
   useEffect(() => {
@@ -482,7 +478,6 @@ export const useSftpTransfers = ({
     targetSide: "left" | "right",
   ): Promise<TransferStatus> => {
     if (cancelledTasksRef.current.has(task.id)) {
-      preflightSkippedTaskIdsRef.current.delete(task.id);
       return "cancelled";
     }
     // Guard against concurrent processTransfer on the same id (resume used to
@@ -542,15 +537,6 @@ export const useSftpTransfers = ({
         walkStatus = await processTransferBody(task, sourcePane, targetPane, targetSide, updateTask);
       });
       return walkStatus;
-    }).then((status) => {
-      // Attention and paused tasks can re-enter this same attempt later.
-      if (status === "completed" || status === "failed" || status === "cancelled") {
-        preflightSkippedTaskIdsRef.current.delete(task.id);
-      }
-      return status;
-    }, (error) => {
-      preflightSkippedTaskIdsRef.current.delete(task.id);
-      throw error;
     });
   };
 
@@ -683,7 +669,7 @@ export const useSftpTransfers = ({
         }
 
         if (sourceSftpId) {
-          if (preflightSkippedTaskIdsRef.current.has(task.id)) {
+          if (task.preflightStatSkipped) {
             return cachedListingStatForDialog();
           }
           // This stat runs deferred (started before the conflict check) and
@@ -1364,9 +1350,6 @@ export const useSftpTransfers = ({
           continue;
         }
         const taskId = crypto.randomUUID();
-        if (preflightSkippedNames.has(file.name)) {
-          preflightSkippedTaskIdsRef.current.add(taskId);
-        }
         newTasks.push({
           id: taskId,
           batchId,
@@ -1389,6 +1372,7 @@ export const useSftpTransfers = ({
           isDirectory: file.isDirectory,
           progressMode: file.isDirectory ? "files" : "bytes",
           sourceLastModified,
+          preflightStatSkipped: preflightSkippedNames.has(file.name),
           origin: "manual",
           resumable: !usesLegacyScp,
           pauseUnavailableReason: usesLegacyScp ? "This server uses legacy SCP; cancel and retry from the beginning instead" : undefined,
@@ -1427,7 +1411,6 @@ export const useSftpTransfers = ({
   const cancelTransfer = useCallback(
     async (transferId: string) => {
       const taskToCancel = transfersRef.current.find((task) => task.id === transferId);
-      preflightSkippedTaskIdsRef.current.delete(transferId);
       // Add to cancelled set so async operations can check (local + process-global
       // so walks survive panel unmount and still honor center Cancel).
       cancelledTasksRef.current.add(transferId);
@@ -1457,7 +1440,6 @@ export const useSftpTransfers = ({
         }
       }
       for (const cid of childIdsToCancel) {
-        preflightSkippedTaskIdsRef.current.delete(cid);
         cancelledTasksRef.current.add(cid);
         markTransferCancelled(cid);
         globalSftpTransferScheduler.cancel(cid);
@@ -1640,21 +1622,12 @@ export const useSftpTransfers = ({
   const dismissTransfer = useCallback((transferId: string) => {
     const task = transfersRef.current.find((candidate) => candidate.id === transferId);
     if (task) void cleanupTaskArtifacts(task);
-    preflightSkippedTaskIdsRef.current.delete(transferId);
-    for (const child of transfersRef.current) {
-      if (child.parentTaskId === transferId) preflightSkippedTaskIdsRef.current.delete(child.id);
-    }
     setTransfers((prev) => prev.filter((t) => t.id !== transferId && t.parentTaskId !== transferId));
   }, [cleanupTaskArtifacts, setTransfers]);
 
   const dismissTransfers = useCallback((prunedTasks: readonly TransferTask[]) => {
     if (prunedTasks.length === 0) return;
     const removing = new Set(prunedTasks.map((task) => task.id));
-    for (const task of transfersRef.current) {
-      if (removing.has(task.id) || removing.has(task.parentTaskId ?? "")) {
-        preflightSkippedTaskIdsRef.current.delete(task.id);
-      }
-    }
     const artifactTasks = prunedTasks.filter((task) => task.status !== "completed");
     // This callback is used only for automatic history eviction. Completed
     // streams already cleaned their staging files; sending one cleanup IPC per
@@ -1737,18 +1710,11 @@ export const useSftpTransfers = ({
 
       if (action === "stop") {
         await markBatchStopped(task);
-        for (const candidate of transfersRef.current) {
-          if (affectedConflictIds.has(candidate.id) || candidate.id === task.id
-            || (task.batchId && candidate.batchId === task.batchId)) {
-            preflightSkippedTaskIdsRef.current.delete(candidate.id);
-          }
-        }
         return;
       }
 
       if (action === "skip") {
         for (const affectedTask of affectedTasks) {
-          preflightSkippedTaskIdsRef.current.delete(affectedTask.id);
           cancelledTasksRef.current.add(affectedTask.id);
         }
         // Drop conflict so remount / restart cannot rehydrate the dialog from a
@@ -1852,7 +1818,6 @@ export const useSftpTransfers = ({
 
       if (blockedReplaceTasks.length > 0) {
         const blockedTaskIds = new Set(blockedReplaceTasks.map(({ task }) => task.id));
-        for (const id of blockedTaskIds) preflightSkippedTaskIdsRef.current.delete(id);
         const blockedErrors = new Map(
           blockedReplaceTasks.map(({ task, conflict }) => [
             task.id,
@@ -1875,9 +1840,6 @@ export const useSftpTransfers = ({
       }
 
       if (failedReplaceTasks.length > 0) {
-        for (const { task: failedTask } of failedReplaceTasks) {
-          preflightSkippedTaskIdsRef.current.delete(failedTask.id);
-        }
         const failedErrors = new Map(
           failedReplaceTasks.map(({ task: failedTask, error }) => [failedTask.id, error]),
         );

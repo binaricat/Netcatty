@@ -545,6 +545,9 @@ test("files past the preflight bound stay un-statted after conflict resolution",
     assert.equal(statCalls, PREFLIGHT_STAT_MAX_FILES);
     assert.equal(started.length, names.length - extra);
     assert.equal(ops!.conflicts.length, extra);
+    await act(async () => { renderer?.unmount(); });
+    await act(async () => { renderer = create(React.createElement(Probe)); });
+    assert.equal(ops!.conflicts.length, extra, "conflicts must survive panel remount");
     await act(async () => {
       await ops!.resolveConflict(ops!.conflicts[0].transferId, "replace", true);
       await new Promise((resolve) => setTimeout(resolve, 300));
