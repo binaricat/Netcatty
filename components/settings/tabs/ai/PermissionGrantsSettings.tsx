@@ -38,6 +38,7 @@ const GrantCapabilitySelect: React.FC<{
   options: readonly string[];
   onChange: (value: string) => void;
 }> = ({ value, options, onChange }) => {
+  const { t } = useI18n();
   const selectOptions = useMemo(() => {
     if (options.includes(value)) return options;
     return [value, ...options];
@@ -52,7 +53,7 @@ const GrantCapabilitySelect: React.FC<{
     >
       {selectOptions.map((capabilityId) => (
         <option key={capabilityId} value={capabilityId}>
-          {capabilityId}
+          {capabilityId === '*' ? t('ai.externalMcp.allowHost') : capabilityId}
         </option>
       ))}
     </select>
@@ -204,6 +205,11 @@ export const PermissionGrantsSettings: React.FC<{
                             updateGrant(grant.id, updates);
                           }}
                         />
+                        {grant.sessionPattern.startsWith('host:') && (
+                          <div className="mt-1 truncate text-[10px] text-muted-foreground" title={grant.sessionPattern}>
+                            {t('ai.chat.targetLabel')}: {grant.note || grant.sessionPattern.slice(5)}
+                          </div>
+                        )}
                       </td>
                       <td className="px-2 py-2 align-middle max-w-0">
                         {supportsCommandPattern ? (

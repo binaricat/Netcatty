@@ -44,6 +44,7 @@ export interface ApprovalRequest {
   approvalType?: 'command' | 'file-change' | 'permissions';
   itemId?: string;
   allowSession?: boolean;
+  target?: { sessionId: string; hostId: string; label: string; hostname: string };
 }
 
 export interface ResolveApprovalOptions {
@@ -344,8 +345,8 @@ export function resolveApproval(
 
   // MCP tool call: also forward response to main process via IPC
   if (toolCallId.startsWith('mcp_approval_')) {
-    const bridge = (window as unknown as { netcatty?: { respondMcpApproval?: (id: string, approved: boolean) => Promise<unknown> } }).netcatty;
-    bridge?.respondMcpApproval?.(toolCallId, approved);
+    const bridge = (window as unknown as { netcatty?: { respondMcpApproval?: (id: string, approved: boolean, scope: 'once' | 'session') => Promise<unknown> } }).netcatty;
+    bridge?.respondMcpApproval?.(toolCallId, approved, resolution.scope);
   }
 }
 
@@ -470,6 +471,8 @@ export function setupMcpApprovalBridge(): () => void {
         toolName: string;
         args: Record<string, unknown>;
         chatSessionId?: string;
+        target?: ApprovalRequest['target'];
+        allowSession?: boolean;
       }) => void) => () => void;
       onMcpApprovalCleared?: (cb: (payload: {
         approvalIds: string[];
@@ -486,6 +489,8 @@ export function setupMcpApprovalBridge(): () => void {
       chatSessionId: payload.chatSessionId,
       capabilityId: resolveCapabilityId(payload.toolName),
       source: 'mcp',
+      target: payload.target,
+      allowSession: payload.allowSession,
     };
 
     // Store in pendingApprovals so it survives unmount/remount

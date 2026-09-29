@@ -96,6 +96,7 @@ function evaluatePermissionWithGrants(ctx, grants = []) {
     capabilityId: base.capability.id,
     chatSessionId: params.chatSessionId,
     sessionId: params.sessionId,
+    hostId: ctx?.context?.hostId,
     args: params,
   });
 

@@ -106,7 +106,7 @@ function createCapabilityRpcDispatcher(deps) {
     session: sessionService,
   };
 
-  return async function dispatchCapabilityRpc(rpcMethod, params = {}) {
+  return async function dispatchCapabilityRpc(rpcMethod, params = {}, approvalContext = {}) {
     if (typeof rpcMethod !== "string" || rpcMethod.startsWith("netcatty/")) {
       return UNROUTED;
     }
@@ -130,6 +130,7 @@ function createCapabilityRpcDispatcher(deps) {
       return UNROUTED;
     }
 
+    const approvalTarget = deps.getApprovalTarget?.(params) || null;
     const permission = evaluatePermissionWithGrants({
       rpcMethod,
       surface,
@@ -137,6 +138,7 @@ function createCapabilityRpcDispatcher(deps) {
       params,
       context: {
         chatSessionCancelled: isChatSessionCancelled(params?.chatSessionId),
+        hostId: approvalTarget?.hostId,
       },
     }, deps.permissionGrantsSnapshot);
 
@@ -144,12 +146,15 @@ function createCapabilityRpcDispatcher(deps) {
       return { ok: false, error: permission.error };
     }
 
-    if (permission.requiresApproval) {
+    if (permission.requiresApproval && !deps.hasSessionApproval?.(approvalContext.externalSocket)) {
       const { chatSessionId, ...toolArgs } = params || {};
       const toolName = getMcpToolNameForRpcMethod(rpcMethod, surface)
         || capability.surfaces?.[CAPABILITY_SURFACES.PUBLIC]?.mcpTool
         || capability.id;
-      const approved = await requestApprovalFromRenderer(toolName, toolArgs, chatSessionId);
+      const approved = await requestApprovalFromRenderer(toolName, toolArgs, chatSessionId, {
+        ...approvalContext,
+        target: approvalTarget,
+      });
       if (!approved) {
         return { ok: false, error: USER_DENIED_MESSAGE };
       }

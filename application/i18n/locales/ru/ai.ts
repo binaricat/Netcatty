@@ -283,6 +283,9 @@ export const ruAiMessages: Messages = {
   'ai.toolAccess.skills.unavailable': 'Путь к skill-файлу недоступен',
 
   'ai.externalMcp.title': 'Внешний MCP',
+  'ai.externalMcp.allowCommandOnHost': 'Всегда для этой команды на этом сервере',
+  'ai.externalMcp.allowSession': 'Разрешить всё для этого подключения',
+  'ai.externalMcp.allowHost': 'Всегда разрешать этот сервер',
   'ai.externalMcp.description': 'Откройте Netcatty как MCP-сервер для Codex, Claude Code, Cursor и Grok. Набор инструментов тот же, что у встроенных агентов. Держите Netcatty запущенным, пока клиенты подключены.',
   'ai.externalMcp.sessionsExposed': 'Сессий в области: {count}',
   'ai.externalMcp.mode': 'Режим доступности',

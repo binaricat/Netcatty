@@ -326,6 +326,9 @@ export const zhTWAiMessages: Messages = {
   'ai.toolAccess.skills.unavailable': '暫時無法取得 Skill 檔案路徑',
 
   'ai.externalMcp.title': '對外 MCP',
+  'ai.externalMcp.allowCommandOnHost': '此機同類操作',
+  'ai.externalMcp.allowSession': '此次連線全部允許',
+  'ai.externalMcp.allowHost': '始終允許操作此伺服器',
   'ai.externalMcp.description': '將 Netcatty 作為 MCP 伺服器暴露給 Codex、Claude Code、Cursor、Grok 等外部用戶端。工具面與應用內 Agent 相同。用戶端連線期間請保持 Netcatty 執行。',
   'ai.externalMcp.sessionsExposed': '作用域內工作階段：{count}',
   'ai.externalMcp.mode': '可用模式',

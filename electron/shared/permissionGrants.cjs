@@ -57,6 +57,19 @@ function argsPatternMatches(argsPattern, args) {
   return true;
 }
 
+function ruleMatchesTarget(rule, ctx) {
+  if (rule.sessionPattern?.startsWith("host:")) {
+    const hostId = rule.sessionPattern.slice("host:".length);
+    return Boolean(hostId && ctx?.sessionId && ctx?.hostId === hostId);
+  }
+  return rule.capabilityId !== "*" && rule.sessionPattern !== "host:";
+}
+
+function ruleMatchesCapability(rule, ctx) {
+  return (rule.capabilityId === ctx?.capabilityId || rule.capabilityId === "*")
+    && ruleMatchesTarget(rule, ctx);
+}
+
 const CWD_COMMANDS = new Set([
   "cd",
   "chdir",
@@ -518,7 +531,7 @@ function matchCommandPatternGrants(rules, ctx, command, args) {
 
   const eligibleRules = rules.filter((rule) => (
     rule
-    && rule.capabilityId === ctx?.capabilityId
+    && ruleMatchesCapability(rule, ctx)
     && rule.commandPattern
     && argsPatternMatches(rule.argsPattern, args)
   ));
@@ -545,7 +558,7 @@ function matchPermissionGrant(rules, ctx) {
   for (const rule of rules) {
     if (!rule || typeof rule.capabilityId !== "string") continue;
 
-    if (rule.capabilityId !== ctx?.capabilityId) continue;
+    if (!ruleMatchesCapability(rule, ctx)) continue;
     if (rule.commandPattern) continue;
 
     if (!argsPatternMatches(rule.argsPattern, args)) continue;

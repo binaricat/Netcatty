@@ -327,6 +327,9 @@ export const esAiMessages: Messages = {
 
   // External MCP (productized catalog MCP for Codex / Claude Code / Cursor)
   'ai.externalMcp.title': 'MCP externo',
+  'ai.externalMcp.allowCommandOnHost': 'Siempre este comando en este servidor',
+  'ai.externalMcp.allowSession': 'Permitir todo en esta conexión',
+  'ai.externalMcp.allowHost': 'Permitir siempre este servidor',
   'ai.externalMcp.description': 'Expón Netcatty como un servidor MCP para clientes externos como Codex, Claude Code, Cursor y Grok. Usa las mismas herramientas del catálogo que los agentes de la aplicación (terminal, SFTP, Vault, reenvío de puertos). Mantén Netcatty en ejecución mientras los clientes estén conectados.',
   'ai.externalMcp.sessionsExposed': 'Sesiones en alcance: {count}',
   'ai.externalMcp.mode': 'Modo de disponibilidad',

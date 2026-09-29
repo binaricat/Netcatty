@@ -1887,8 +1887,8 @@ function createPreloadApi(ctx) {
     ipcRenderer.on("netcatty:ai:mcp:approval-request", handler);
     return () => ipcRenderer.removeListener("netcatty:ai:mcp:approval-request", handler);
   },
-  respondMcpApproval: async (approvalId, approved) => {
-    return ipcRenderer.invoke("netcatty:ai:mcp:approval-response", { approvalId, approved });
+  respondMcpApproval: async (approvalId, approved, scope) => {
+    return ipcRenderer.invoke("netcatty:ai:mcp:approval-response", { approvalId, approved, scope });
   },
   cancelMcpApprovalTimeout: async (approvalId) => {
     return ipcRenderer.invoke("netcatty:ai:mcp:approval-cancel-timeout", { approvalId });

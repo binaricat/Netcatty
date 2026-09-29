@@ -135,10 +135,10 @@ function registerAgentProcessHandlers(ctx) {
   });
 
   // ── MCP Approval response (renderer → main) ──
-  ipcMain.handle("netcatty:ai:mcp:approval-response", async (event, { approvalId, approved }) => {
+  ipcMain.handle("netcatty:ai:mcp:approval-response", async (event, { approvalId, approved, scope }) => {
     // Settings window also hosts External MCP approval cards.
     if (!validateSenderOrSettings(event)) return { ok: false, error: "Unauthorized IPC sender" };
-    mcpServerBridge.resolveApprovalFromRenderer(approvalId, approved);
+    mcpServerBridge.resolveApprovalFromRenderer(approvalId, approved, scope);
     return { ok: true };
   });
 

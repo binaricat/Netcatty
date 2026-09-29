@@ -843,6 +843,7 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({
                   <ToolCall
                     name={req.toolName}
                     args={req.args}
+                    approvalTarget={req.target}
                     isLoading={false}
                     isInterrupted={false}
                     approvalStatus={'pending'}

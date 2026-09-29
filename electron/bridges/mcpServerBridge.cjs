@@ -63,6 +63,7 @@ const DISCOVERY_SELF_HEAL_INTERVAL_MS = 15000;
 const authenticatedSockets = new WeakSet();
 // Sockets authenticated with the External MCP token (or that used the reserved scope).
 const externalMcpSockets = new Set();
+const sessionApprovedExternalSockets = new WeakSet();
 
 function markExternalMcpSocket(socket) {
   if (!socket || socket.destroyed) return;
@@ -207,7 +208,7 @@ function broadcastApprovalEvent(channel, payload) {
   }
 }
 
-function requestApprovalFromRenderer(toolName, args, chatSessionId) {
+function requestApprovalFromRenderer(toolName, args, chatSessionId, approvalContext = {}) {
   return new Promise((resolve) => {
     debugLog("requestApprovalFromRenderer", { toolName, args, chatSessionId });
     const targets = listApprovalTargetWindows();
@@ -261,21 +262,30 @@ function requestApprovalFromRenderer(toolName, args, chatSessionId) {
       absoluteExpiresAt,
       idleCancelled: false,
       chatSessionId: chatSessionId || null,
+      externalSocket: approvalContext.externalSocket || null,
     });
     broadcastApprovalEvent('netcatty:ai:mcp:approval-request', {
       approvalId,
       toolName,
       args,
       chatSessionId: chatSessionId || undefined,
+      target: approvalContext.target || undefined,
+      allowSession: chatSessionId === EXTERNAL_MCP_CHAT_SESSION_ID
+        && externalMcpSockets.has(approvalContext.externalSocket),
     });
   });
 }
 
-function resolveApprovalFromRenderer(approvalId, approved) {
+function resolveApprovalFromRenderer(approvalId, approved, scope = 'once') {
   debugLog("resolveApprovalFromRenderer", { approvalId, approved });
   const entry = pendingApprovals.get(approvalId);
   if (entry) {
     pendingApprovals.delete(approvalId);
+    if (approved === true && scope === 'session'
+      && entry.chatSessionId === EXTERNAL_MCP_CHAT_SESSION_ID
+      && externalMcpSockets.has(entry.externalSocket)) {
+      sessionApprovedExternalSockets.add(entry.externalSocket);
+    }
     entry.resolve(approved);
     // Main + settings both receive approval requests; clear the sibling card.
     notifyRendererApprovalCleared([approvalId]);
@@ -1130,6 +1140,18 @@ function toPublicSessionMeta(meta) {
   return publicMeta;
 }
 
+function getApprovalTarget(params) {
+  if (typeof params?.sessionId !== 'string' || !params.sessionId) return null;
+  const meta = getSessionMeta(params.sessionId, params.chatSessionId);
+  if (!meta) return null;
+  return {
+    sessionId: params.sessionId,
+    hostId: meta.hostId || '',
+    label: meta.label || meta.hostname || params.sessionId,
+    hostname: meta.hostname || '',
+  };
+}
+
 function buildOpenedSessionMeta(result, sessionId) {
   const host = result?.host && typeof result.host === "object" ? result.host : {};
   return {
@@ -1410,7 +1432,9 @@ async function handleMessage(socket, line) {
       );
     }
     notifyExternalMcpActivity(method, callParams);
-    const result = await dispatch(method, callParams);
+    const result = await dispatch(method, callParams, {
+      externalSocket: externalMcpSockets.has(socket) ? socket : null,
+    });
     const response = JSON.stringify({ jsonrpc: "2.0", id, result }) + "\n";
     if (!socket.destroyed) socket.write(response);
   } catch (err) {
@@ -1537,6 +1561,8 @@ const dispatchCapabilityRpc = createCapabilityRpcDispatcher({
   },
   isChatSessionCancelled,
   requestApprovalFromRenderer,
+  getApprovalTarget,
+  hasSessionApproval: (socket) => Boolean(socket && sessionApprovedExternalSockets.has(socket)),
   USER_DENIED_MESSAGE,
   listPortForwards: () => listActivePortForwards(),
   sessionService,
@@ -1973,11 +1999,11 @@ function getBuiltinRpcHandlerRegistry() {
   return builtinRpcHandlerRegistry;
 }
 
-async function dispatch(method, params) {
+async function dispatch(method, params, approvalContext = {}) {
   debugLog("dispatch", { method, params, permissionMode });
 
   if (!method.startsWith("netcatty/")) {
-    const capabilityResult = await dispatchCapabilityRpc(method, params || {});
+    const capabilityResult = await dispatchCapabilityRpc(method, params || {}, approvalContext);
     if (capabilityResult !== UNROUTED) {
       return capabilityResult;
     }
@@ -1989,6 +2015,7 @@ async function dispatch(method, params) {
     : null;
   pruneCompletedBackgroundJobs();
 
+  const approvalTarget = getApprovalTarget(params);
   const permission = evaluatePermissionWithGrants({
     rpcMethod: method,
     surface: CAPABILITY_SURFACES.BUILTIN,
@@ -1996,6 +2023,7 @@ async function dispatch(method, params) {
     params,
     context: {
       chatSessionCancelled: isChatSessionCancelled(params?.chatSessionId),
+      hostId: approvalTarget?.hostId,
     },
   }, permissionGrantsSnapshot);
   if (!permission.allowed) {
@@ -2051,9 +2079,13 @@ async function dispatch(method, params) {
     // netcatty/jobStop bypasses approval — it's a stop/cancel action that
     // must remain available even if the renderer is unavailable; otherwise
     // a runaway terminal_start job could not be interrupted at all.
-    if (permission.requiresApproval) {
+    if (permission.requiresApproval
+      && !sessionApprovedExternalSockets.has(approvalContext.externalSocket)) {
       const { chatSessionId, ...toolArgs } = params || {};
-      const approved = await requestApprovalFromRenderer(method, toolArgs, chatSessionId);
+      const approved = await requestApprovalFromRenderer(method, toolArgs, chatSessionId, {
+        ...approvalContext,
+        target: approvalTarget,
+      });
       if (!approved) {
         return { ok: false, error: USER_DENIED_MESSAGE };
       }

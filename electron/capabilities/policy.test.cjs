@@ -236,6 +236,27 @@ test("evaluatePermissionWithGrants skips approval when a grant matches", () => {
   assert.equal(decision.requiresApproval, false);
 });
 
+test("a server grant approves only that server's terminal and SFTP writes", () => {
+  const grants = [{
+    id: "test-server",
+    capabilityId: "*",
+    sessionPattern: "host:host-test",
+    createdAt: Date.now(),
+  }];
+  const decide = (rpcMethod, hostId, sessionId = "ssh-1") => evaluatePermissionWithGrants({
+    rpcMethod,
+    permissionMode: PERMISSION_MODES.CONFIRM,
+    params: { chatSessionId: "chat-1", sessionId, command: "rm -rf /tmp/build", path: "/tmp/build" },
+    context: { hostId },
+  }, grants);
+
+  assert.equal(decide("netcatty/exec", "host-test").requiresApproval, false);
+  assert.equal(decide("netcatty/sftp/delete", "host-test").requiresApproval, false);
+  assert.equal(decide("netcatty/exec", "host-prod").requiresApproval, true);
+  assert.equal(decide("netcatty/exec", undefined).requiresApproval, true);
+  assert.equal(decide("netcatty/exec", "host-test", "").requiresApproval, true);
+});
+
 test("evaluatePermissionWithGrants does not let a comment grant approve a multiline command", () => {
   const decision = evaluatePermissionWithGrants({
     rpcMethod: "netcatty/exec",

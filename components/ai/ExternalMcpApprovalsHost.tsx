@@ -6,6 +6,7 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { ToolCall } from '../ai-elements/tool-call';
+import { Button } from '../ui/button';
 import {
   onApprovalCleared,
   onApprovalRequest,
@@ -15,6 +16,7 @@ import {
 } from '../../infrastructure/ai/shared/approvalGate';
 import {
   buildGrantsFromApproval,
+  createPermissionGrantId,
   resolveCapabilityId,
 } from '../../infrastructure/ai/harness/permissionGrants';
 import { useI18n } from '../../application/i18n/I18nProvider';
@@ -61,8 +63,40 @@ export const ExternalMcpApprovalsHost: React.FC = () => {
 
   const handleAlwaysAllow = useCallback((toolCallId: string, request: ApprovalRequest) => {
     const capabilityId = request.capabilityId ?? resolveCapabilityId(request.toolName);
-    const persistGrants = buildGrantsFromApproval(capabilityId, request.args, request.chatSessionId);
+    const persistGrants = buildGrantsFromApproval(capabilityId, request.args, request.chatSessionId)
+      .map((grant) => request.target?.hostId
+        ? { ...grant, sessionPattern: `host:${request.target.hostId}` }
+        : grant);
     resolveApproval(toolCallId, { approved: true, persistGrants });
+    setPendingApprovals((prev) => {
+      const next = new Map(prev);
+      next.delete(toolCallId);
+      return next;
+    });
+  }, []);
+
+  const handleAllowSession = useCallback((toolCallId: string) => {
+    resolveApproval(toolCallId, { approved: true, scope: 'session' });
+    setPendingApprovals((prev) => {
+      const next = new Map(prev);
+      next.delete(toolCallId);
+      return next;
+    });
+  }, []);
+
+  const handleAllowHost = useCallback((toolCallId: string, request: ApprovalRequest) => {
+    const hostId = request.target?.hostId;
+    if (!hostId) return;
+    resolveApproval(toolCallId, {
+      approved: true,
+      persistGrant: {
+        id: createPermissionGrantId(),
+        capabilityId: '*',
+        sessionPattern: `host:${hostId}`,
+        createdAt: Date.now(),
+        note: request.target?.label,
+      },
+    });
     setPendingApprovals((prev) => {
       const next = new Map(prev);
       next.delete(toolCallId);
@@ -93,18 +127,35 @@ export const ExternalMcpApprovalsHost: React.FC = () => {
         </div>
         <div className="space-y-2">
           {entries.map(([id, req]) => (
-            <ToolCall
-              key={id}
-              name={req.toolName}
-              args={req.args}
-              isLoading={false}
-              isInterrupted={false}
-              approvalStatus="pending"
-              approvalId={id}
-              onApproveOnce={() => handleApproveOnce(id)}
-              onAlwaysAllow={() => handleAlwaysAllow(id, req)}
-              onReject={() => handleReject(id)}
-            />
+            <div key={id} className="space-y-1.5">
+              <ToolCall
+                name={req.toolName}
+                args={req.args}
+                approvalTarget={req.target}
+                isLoading={false}
+                isInterrupted={false}
+                approvalStatus="pending"
+                approvalId={id}
+                onApproveOnce={() => handleApproveOnce(id)}
+                onAlwaysAllow={req.target && !req.target.hostId ? undefined : () => handleAlwaysAllow(id, req)}
+                onReject={() => handleReject(id)}
+                alwaysAllowLabel={req.target?.hostId ? t('ai.externalMcp.allowCommandOnHost') : undefined}
+              />
+              {(req.allowSession || req.target?.hostId) && (
+                <div className="flex flex-wrap gap-1.5">
+                  {req.allowSession && (
+                    <Button variant="outline" size="sm" onClick={() => handleAllowSession(id)}>
+                      {t('ai.externalMcp.allowSession')}
+                    </Button>
+                  )}
+                  {req.target?.hostId && (
+                    <Button variant="outline" size="sm" onClick={() => handleAllowHost(id, req)}>
+                      {t('ai.externalMcp.allowHost')}
+                    </Button>
+                  )}
+                </div>
+              )}
+            </div>
           ))}
         </div>
       </div>

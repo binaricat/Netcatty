@@ -38,6 +38,35 @@ describe('permissionGrants', () => {
     assert.ok(matched);
   });
 
+  it('matches host grants only for sessions on the selected saved host', () => {
+    const rules = [baseRule({ capabilityId: '*', sessionPattern: 'host:test-host' })];
+    assert.ok(matchPermissionGrant(rules, {
+      capabilityId: 'terminal.execute', sessionId: 'ssh-test', hostId: 'test-host', args: { command: 'date' },
+    }));
+    assert.equal(matchPermissionGrant(rules, {
+      capabilityId: 'terminal.execute', sessionId: 'ssh-prod', hostId: 'prod-host', args: { command: 'date' },
+    }), null);
+    assert.equal(matchPermissionGrant(rules, {
+      capabilityId: 'terminal.execute', sessionId: 'ssh-test', args: { command: 'date' },
+    }), null);
+  });
+
+  it('keeps a saved command allowance on the approved host', () => {
+    const rules = [baseRule({ sessionPattern: 'host:prod-host', commandPattern: 'systemctl status *' })];
+    assert.ok(matchPermissionGrant(rules, {
+      capabilityId: 'terminal.execute', sessionId: 'ssh-prod', hostId: 'prod-host',
+      args: { command: 'systemctl status nginx' },
+    }));
+    assert.equal(matchPermissionGrant(rules, {
+      capabilityId: 'terminal.execute', sessionId: 'ssh-test', hostId: 'test-host',
+      args: { command: 'systemctl status nginx' },
+    }), null);
+    assert.equal(matchPermissionGrant(rules, {
+      capabilityId: 'terminal.execute', sessionId: 'ssh-prod', hostId: 'prod-host',
+      args: { command: 'systemctl restart nginx' },
+    }), null);
+  });
+
   it('does not match a different capability', () => {
     const rules = [baseRule({ sessionPattern: '*' })];
     const matched = matchPermissionGrant(rules, {

@@ -272,6 +272,7 @@ function formatToolResult(result: unknown): string {
 
 export interface ToolCallProps extends HTMLAttributes<HTMLDivElement> {
   name: string;
+  approvalTarget?: { label: string; hostname: string };
   className?: string;
   args?: Record<string, unknown>;
   result?: unknown;
@@ -321,7 +322,7 @@ async function copyTextToClipboard(text: string): Promise<boolean> {
 }
 
 export const ToolCall = ({
-  name, args, result, isError, isLoading, isInterrupted,
+  name, args, result, isError, isLoading, isInterrupted, approvalTarget,
   approvalStatus, approvalId, onApprove, onReject, onApproveOnce, onAlwaysAllow, alwaysAllowLabel,
   className, ...props
 }: ToolCallProps) => {
@@ -519,6 +520,15 @@ export const ToolCall = ({
         )}
         {statusIcon}
       </button>
+
+      {isPendingApproval && approvalTarget && (
+        <div className="border-t border-border/20 px-3 py-1.5 text-xs font-medium">
+          {t('ai.chat.targetLabel')}: {approvalTarget.label}
+          {approvalTarget.hostname && approvalTarget.hostname !== approvalTarget.label && (
+            <span className="ml-1 text-muted-foreground">({approvalTarget.hostname})</span>
+          )}
+        </div>
+      )}
 
       {expanded && (
         <div className="border-t border-border/20">
