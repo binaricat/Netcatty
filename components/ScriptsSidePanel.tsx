@@ -547,13 +547,18 @@ const ScriptsSidePanelInner: React.FC<ScriptsSidePanelProps> = ({
   }, [rows, searchMatches, t, isVisible]);
 
   const stackedSentinelRef = useRef<HTMLDivElement | null>(null);
-  const hasMoreStackedItems = viewMode === 'stacked' && stackedRenderLimit < listItems.length;
 
   // Restart the lazy window whenever the underlying result set changes
   // (new search, package expand/collapse, snippet edits, view-mode switch).
-  useEffect(() => {
+  // Reset during render — not in an effect — so the first render of a new
+  // result set never slices with the previous, potentially very large window.
+  const [prevListItems, setPrevListItems] = useState(listItems);
+  if (prevListItems !== listItems) {
+    setPrevListItems(listItems);
     setStackedRenderLimit(STACKED_INITIAL_RENDER_COUNT);
-  }, [listItems]);
+  }
+
+  const hasMoreStackedItems = viewMode === 'stacked' && stackedRenderLimit < listItems.length;
 
   useEffect(() => {
     if (!hasMoreStackedItems) return;
