@@ -1094,6 +1094,38 @@ export const useSftpTransfers = ({
         ? new Map(sourcePane.files.map(f => [f.name, f]))
         : null;
 
+      // Pane listings can be stale when the file changed in a terminal or
+      // another session after the pane was listed (#3559). A stale undersized
+      // size becomes the transfer plan and silently truncates the download, so
+      // remote single files are always re-statted before the plan is built.
+      // When no live stat is possible the plan stays 0, which makes the bridge
+      // measure the live size instead of trusting the stale listing.
+      const freshRemoteMetadata = new Map<string, { size: number; lastModified: number }>();
+      const sourceSftpIdForPlan = sourcePane.connection.isLocal
+        ? null
+        : (sftpSessionsRef.current.get(sourceConnectionId) ?? null);
+      const remoteSingleFiles = sourcePane.connection.isLocal
+        ? []
+        : sourceFiles.filter((file) => !file.isDirectory);
+      if (remoteSingleFiles.length > 0 && sourceSftpIdForPlan) {
+        const sourceEncoding = sourcePane.filenameEncoding || "auto";
+        await Promise.allSettled(remoteSingleFiles.map(async (file) => {
+          try {
+            const stat = await netcattyBridge.get()?.statSftp?.(
+              sourceSftpIdForPlan,
+              joinPath(sourcePath, file.name),
+              sourceEncoding,
+            );
+            if (stat && stat.type !== "symlink" && stat.sizeKnown !== false && stat.size >= 0) {
+              freshRemoteMetadata.set(file.name, { size: stat.size, lastModified: stat.lastModified });
+            }
+          } catch (err) {
+            // Fall through to a 0 plan so the bridge measures the live size.
+            logger.debug?.("[SFTP] Transfer plan re-stat failed; falling back to live size", err);
+          }
+        }));
+      }
+
       for (const file of sourceFiles) {
         const direction: TransferDirection =
           sourcePane.connection!.isLocal && !targetPane.connection!.isLocal
@@ -1102,12 +1134,20 @@ export const useSftpTransfers = ({
               ? "download"
               : "remote-to-remote";
 
-        // Use cached metadata from the source pane's file list to avoid
-        // redundant stat calls over the network, but only when the transfer
-        // source matches the pane's currently listed directory.
+        // Prefer the fresh re-stat for remote files: a cached listing size can
+        // be stale and undersized, which would silently truncate downloads
+        // (#3559). Remote files without a live stat use plan 0 so the bridge
+        // measures the live size; local sources keep the pane metadata.
         const fileEntry = fileEntryMap?.get(file.name);
-        const fileSize = file.isDirectory ? 0 : (fileEntry?.size ?? 0);
-        const sourceLastModified = fileEntry?.lastModified ?? 0;
+        const freshMetadata = freshRemoteMetadata.get(file.name);
+        const fileSize = file.isDirectory
+          ? 0
+          : freshMetadata
+            ? freshMetadata.size
+            : sourcePane.connection!.isLocal
+              ? (fileEntry?.size ?? 0)
+              : 0;
+        const sourceLastModified = freshMetadata?.lastModified ?? fileEntry?.lastModified ?? 0;
 
         const nextSourcePath = joinPath(sourcePath, file.name);
         const nextTargetPath = joinPath(targetPath, file.name);
