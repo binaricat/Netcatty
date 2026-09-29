@@ -30,6 +30,7 @@ function loadBridgeWithMockedSsh2(t, {
   const authHelperPath = require.resolve("./sshAuthHelper.cjs");
   const originalLoad = Module._load;
   let clientConstructCount = 0;
+  const clients = [];
 
   class MockSSHClient extends EventEmitter {
     constructor() {
@@ -41,7 +42,9 @@ function loadBridgeWithMockedSsh2(t, {
       };
       this._remoteVer = remoteVer;
       this.openedShells = [];
+      this.lastShellOptions = null;
       this.ended = 0;
+      clients.push(this);
     }
     connect() {
       clientConstructCount += 1;
@@ -77,7 +80,8 @@ function loadBridgeWithMockedSsh2(t, {
       });
       callback(null, stream);
     }
-    shell(_pty, _options, callback) {
+    shell(_pty, options, callback) {
+      this.lastShellOptions = options;
       const stream = makeStream();
       this.openedShells.push(stream);
       setImmediate(() => callback(null, stream));
@@ -133,7 +137,11 @@ function loadBridgeWithMockedSsh2(t, {
     Module._load = originalLoad;
   });
 
-  return { bridge, getClientConstructCount: () => clientConstructCount };
+  return {
+    bridge,
+    getClientConstructCount: () => clientConstructCount,
+    getClients: () => clients,
+  };
 }
 
 test("simultaneous normal opens identify both shells before sharing one SSH connection", async (t) => {
@@ -2184,6 +2192,85 @@ test("falls back to a fresh connection when the source is gone", async (t) => {
     getConnectionReuseFallbackEvents(sender).map((m) => m.payload),
     [{ sessionId: "copy", sourceSessionId: "missing-source" }],
   );
+});
+
+test("one-channel bastion banners stamp the runtime flag and dial Copy Tab separately", async (t) => {
+  const banners = ["CLOUDBILITY-4.14", "SSH-2.0-BHostSSH_7.0", "TERM-SSHD"];
+  for (const remoteVer of banners) {
+    resetSshTransportRegistryForTests({ defaultIdleTtlMs: 0 });
+    const { bridge, getClientConstructCount, getClients } = loadBridgeWithMockedSsh2(t, {
+      connectReady: true,
+      remoteVer,
+    });
+    const sessions = new Map();
+    const start = registerStartHandler(bridge, sessions);
+    const options = {
+      hostname: "bastion.example",
+      username: "alice",
+      port: 22,
+      authMethod: "password",
+      password: "secret",
+      useSshAgent: false,
+      verifyHostKeys: false,
+    };
+
+    await start({ sender: makeSender() }, { ...options, sessionId: "first" });
+    const first = sessions.get("first");
+    const firstClient = getClients()[0];
+    assert.equal(first.singleChannelSsh, true, remoteVer);
+    assert.equal(first._reuseEndpoint.singleChannelSsh, true, remoteVer);
+    assert.equal(first.connRef.endpoint.singleChannelSsh, true, remoteVer);
+    assert.equal(first.connRef.allowIdlePark, false, remoteVer);
+    assert.equal(firstClient.lastShellOptions.env, undefined, remoteVer);
+    assert.equal(firstClient.openedShells.length, 1, remoteVer);
+
+    await start({ sender: makeSender() }, {
+      ...options,
+      sessionId: "copy",
+      sourceSessionId: "first",
+    });
+    assert.equal(getClientConstructCount(), 2, remoteVer);
+    assert.equal(firstClient.openedShells.length, 1, remoteVer);
+    assert.notEqual(sessions.get("copy").conn, first.conn, remoteVer);
+    assert.equal(sessions.get("copy").singleChannelSsh, true, remoteVer);
+  }
+});
+
+test("OpenSSH and JumpServer banners do not stamp single-channel mode", async (t) => {
+  for (const remoteVer of ["OpenSSH_9.6", "JumpServer"]) {
+    resetSshTransportRegistryForTests({ defaultIdleTtlMs: 0 });
+    const { bridge, getClientConstructCount, getClients } = loadBridgeWithMockedSsh2(t, {
+      connectReady: true,
+      remoteVer,
+    });
+    const sessions = new Map();
+    const start = registerStartHandler(bridge, sessions);
+    const options = {
+      hostname: "shell.example",
+      username: "alice",
+      port: 22,
+      authMethod: "password",
+      password: "secret",
+      useSshAgent: false,
+      verifyHostKeys: false,
+    };
+
+    await start({ sender: makeSender() }, { ...options, sessionId: "first" });
+    const first = sessions.get("first");
+    assert.equal(first.singleChannelSsh, false, remoteVer);
+    assert.equal(first.connRef.endpoint.singleChannelSsh, false, remoteVer);
+    assert.equal(getClients()[0].lastShellOptions.env.COLORTERM, "truecolor", remoteVer);
+
+    await start({ sender: makeSender() }, {
+      ...options,
+      sessionId: "copy",
+      sourceSessionId: "first",
+      skipShellPidDiscovery: true,
+    });
+    assert.equal(getClientConstructCount(), 1, remoteVer);
+    assert.equal(sessions.get("copy").conn, first.conn, remoteVer);
+    assert.equal(sessions.get("copy").singleChannelSsh, false, remoteVer);
+  }
 });
 
 test("single-channel Copy Tab dials separately and keeps the original shell", async (t) => {

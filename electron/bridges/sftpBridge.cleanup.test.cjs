@@ -295,6 +295,68 @@ test("openSftpForSession refuses extra channels when singleChannelSsh is set", a
   );
 });
 
+test("openSftpForSession refuses a one-channel bastion banner without the host flag", async () => {
+  for (const remoteSshVersion of ["CLOUDBILITY-4.14", "BHostSSH_7.0", "SSH-2.0-TERM-SSHD"]) {
+    const bridge = loadSftpBridgeWithProxySocket(null);
+    const sftpClients = new Map();
+    let sftpCalls = 0;
+    const conn = {
+      _remoteVer: remoteSshVersion,
+      sftp(cb) {
+        sftpCalls += 1;
+        cb(null, { end() {} });
+      },
+      end() {},
+    };
+    const session = {
+      conn,
+      stream: {},
+      remoteSshVersion,
+    };
+    const sessions = new Map([["session-banner", session]]);
+    bridge.init({ sftpClients, sessions, electronModule: {} });
+
+    await assert.rejects(
+      bridge.openSftpForSession(null, { sessionId: "session-banner" }),
+      (err) => err && err.code === "ERR_SFTP_SINGLE_CHANNEL_BASTION" && sftpCalls === 0,
+      remoteSshVersion,
+    );
+  }
+});
+
+test("openSftpForSession still shares the terminal transport for JumpServer", async () => {
+  const bridge = loadSftpBridgeWithProxySocket(null);
+  const sftpClients = new Map();
+  let sftpCalls = 0;
+  const fakeSftp = {
+    readdir() {},
+    stat() {},
+    mkdir() {},
+    unlink() {},
+    end() {},
+  };
+  const conn = {
+    _remoteVer: "JumpServer",
+    sftp(cb) {
+      sftpCalls += 1;
+      cb(null, fakeSftp);
+    },
+    end() {},
+  };
+  const session = {
+    conn,
+    stream: {},
+    remoteSshVersion: "SSH-2.0-JumpServer",
+  };
+  const sessions = new Map([["session-jumpserver", session]]);
+  bridge.init({ sftpClients, sessions, electronModule: {} });
+
+  const opened = await bridge.openSftpForSession(null, { sessionId: "session-jumpserver" });
+  assert.equal(opened.ok, true);
+  assert.equal(sftpCalls, 1);
+  await bridge.closeSftp(null, { sftpId: opened.sftpId });
+});
+
 test("openSftpForSession honors session.sftpFileProtocol when payload omits fileProtocol", async () => {
   const bridge = loadSftpBridgeWithProxySocket(null);
   const sftpClients = new Map();

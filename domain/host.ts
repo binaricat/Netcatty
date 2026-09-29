@@ -1,3 +1,4 @@
+import { remoteSoftwareRequiresSingleChannel } from './singleChannelSshBanner.shared.cjs';
 import { Host, Snippet, TerminalSettings } from './models';
 import type { HostOperatingSystem, HostOsSelection } from './models/connection';
 import { sanitizeHostIconFields } from './hostIcon';
@@ -284,8 +285,9 @@ export const hostRestrictsExtraSshChannels = (
  * discovers the session's working directory. The probe opens an extra exec
  * channel running a POSIX-shell script; strict network-device CLIs such as
  * Huawei VRP respond by closing the whole SSH session (#1043), so it must be
- * skipped for them. Hosts with `singleChannelSsh` (bastion / PAM) have the
- * same constraint.
+ * skipped for them. Hosts with `singleChannelSsh` (bastion / PAM), and
+ * software banners that allow only one session channel per TCP connection,
+ * have the same constraint.
  *
  * `isNetworkDevice` covers hosts we already classified (a reconnect, or an
  * explicit `deviceType: 'network'`). On a brand-new host that field is not
@@ -299,6 +301,7 @@ export const shouldProbeSessionCwd = (opts: {
 }): boolean =>
   !opts.isNetworkDevice
   && !opts.restrictExtraSshChannels
+  && !remoteSoftwareRequiresSingleChannel(opts.remoteSshVersion)
   && !detectVendorFromSshVersion(opts.remoteSshVersion);
 
 export const getEffectiveHostDistro = (

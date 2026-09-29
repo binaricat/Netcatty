@@ -16,6 +16,7 @@ const {
 const { runWhenProxyConnectionReady } = require("../proxyUtils.cjs");
 const { getAttachHomeWebContentsId } = require("../terminalAttachRestore.cjs");
 const { openBoundedSshShellCallback } = require("../boundedSshChannelOpen.cjs");
+const { optionsForPeerSingleChannel } = require("../../../domain/singleChannelSshBanner.shared.cjs");
 const { listInteractiveShellPids: listInteractiveShellPidsShared } = require("../sshInteractiveShells.cjs");
 const {
   shouldConfirmReusedShellLiveness,
@@ -316,6 +317,7 @@ function createStartSessionApi(ctx) {
       chainConnections,
       isReused,
     }) {
+      const sessionOptions = optionsForPeerSingleChannel(options, conn);
       const session = {
         conn,
         stream,
@@ -346,13 +348,13 @@ function createStartSessionApi(ctx) {
         // additional exec channels. See domain/host.ts
         // `detectVendorFromSshVersion`.
         remoteSshVersion: (conn && typeof conn._remoteVer === 'string') ? conn._remoteVer : '',
-        singleChannelSsh: !!options.singleChannelSsh,
+        singleChannelSsh: sessionOptions.singleChannelSsh === true,
         // The actual SSH target this connection authenticated to. Used to make
         // sure a "Copy Tab" reuse opens its channel on a connection going to the
         // *same* host — a saved host edited after the source connected must not
         // silently run commands on the old machine (issue #1204 review).
-        _reuseEndpoint: normalizeEndpoint(buildConnectionReuseEndpoint(options, {
-          agentForwarding: options._actualAgentForwarding ?? options.agentForwarding,
+        _reuseEndpoint: normalizeEndpoint(buildConnectionReuseEndpoint(sessionOptions, {
+          agentForwarding: sessionOptions._actualAgentForwarding ?? sessionOptions.agentForwarding,
         })),
         // Only live SFTP borrowers may use the original password-less profile.
         // Do not alias the pool: new terminals must still authenticate normally.
@@ -2253,8 +2255,9 @@ function createStartSessionApi(ctx) {
               });
             }
 
-            const shellOptions = buildInteractiveShellOptions(options);
-            if (options.singleChannelSsh) {
+            const shellSessionOptions = optionsForPeerSingleChannel(options, conn);
+            const shellOptions = buildInteractiveShellOptions(shellSessionOptions);
+            if (shellSessionOptions.singleChannelSsh) {
               log("skipping shell env for single-channel SSH", {
                 sessionId,
                 hostname: options.hostname,
@@ -2306,7 +2309,7 @@ function createStartSessionApi(ctx) {
                     conn,
                     stream,
                     options: {
-                      ...options,
+                      ...shellSessionOptions,
                       _actualAgentForwarding: Boolean(connectOpts.agentForward),
                     },
                     sessionId,

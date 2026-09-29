@@ -791,6 +791,8 @@ test("remoteDisallowsExecChannelProbe flags bastion banners that drop a second c
   assert.equal(remoteDisallowsExecChannelProbe("BHostSSH_7.0"), true);
   assert.equal(remoteDisallowsExecChannelProbe("TERM-SSHD"), true);
   assert.equal(remoteDisallowsExecChannelProbe("OpenSSH_9.6"), false);
+  assert.equal(remoteDisallowsExecChannelProbe("CLOUDBILITY-4.14"), false);
+  assert.equal(remoteDisallowsExecChannelProbe("SSH-2.0-CLOUDBILITY-4.14"), false);
   assert.equal(remoteDisallowsExecChannelProbe("dropbear_2022.83"), false);
   assert.equal(remoteDisallowsExecChannelProbe("OpenSSH_for_Windows_9.5"), false);
   assert.equal(remoteDisallowsExecChannelProbe(undefined), false);
@@ -909,6 +911,18 @@ test(
     assert.match(result.stdout, new RegExp(`${marker}_E:0`));
   },
 );
+
+test("CLOUDBILITY banner skips the exec probe without paced keystrokes", () => {
+  let execCalls = 0;
+  const session = {
+    remoteSshVersion: "SSH-2.0-CLOUDBILITY-4.14",
+    conn: { exec() { execCalls += 1; } },
+  };
+  assert.equal(remoteDisallowsExecChannelProbe(session.remoteSshVersion), false);
+  assert.equal(sessionDisallowsExtraSshChannel(session), true);
+  assert.equal(createSessionExecProbe(session), null);
+  assert.equal(execCalls, 0);
+});
 
 test("createSessionExecProbe skips the exec channel when singleChannelSsh is set", () => {
   let execCalls = 0;

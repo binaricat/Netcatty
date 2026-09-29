@@ -659,6 +659,22 @@ test("shouldProbeSessionCwd skips the probe when extra SSH channels are restrict
   );
   assert.equal(
     shouldProbeSessionCwd({ isNetworkDevice: false, remoteSshVersion: "CLOUDBILITY-4.14" }),
+    false,
+  );
+  assert.equal(
+    shouldProbeSessionCwd({ isNetworkDevice: false, remoteSshVersion: "BHostSSH_7.0" }),
+    false,
+  );
+  assert.equal(
+    shouldProbeSessionCwd({ isNetworkDevice: false, remoteSshVersion: "SSH-2.0-TERM-SSHD" }),
+    false,
+  );
+  assert.equal(
+    shouldProbeSessionCwd({ isNetworkDevice: false, remoteSshVersion: "JumpServer" }),
+    true,
+  );
+  assert.equal(
+    shouldProbeSessionCwd({ isNetworkDevice: false, remoteSshVersion: "superterm-sshd" }),
     true,
   );
 });

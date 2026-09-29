@@ -4,6 +4,7 @@ import {
   hostRestrictsExtraSshChannels,
   normalizeDistroId,
 } from "../../../domain/host";
+import { remoteSoftwareRequiresSingleChannel } from "../../../domain/singleChannelSshBanner.shared.cjs";
 import { logger } from "../../../lib/logger";
 import type { TerminalSessionStartersContext } from "./createTerminalSessionStarters.types";
 
@@ -73,7 +74,7 @@ export const runDistroDetection = async (
         ctx.onOsDetected?.(ctx.host.id, vendor);
         return;
       }
-      if (hostRestrictsExtraSshChannels(ctx.host)) {
+      if (hostRestrictsExtraSshChannels(ctx.host) || remoteSoftwareRequiresSingleChannel(info?.remoteSshVersion)) {
         return;
       }
     }

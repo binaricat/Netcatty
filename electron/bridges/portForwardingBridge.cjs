@@ -10,6 +10,7 @@ const { NetcattyAgent } = require("./netcattyAgent.cjs");
 const keyboardInteractiveHandler = require("./keyboardInteractiveHandler.cjs");
 const { connectThroughChain, buildAlgorithms } = require("./sshBridge.cjs");
 const { resolveSshConnectionTimeouts } = require("./sshBridge/startSession.cjs");
+const { remoteSoftwareRequiresSingleChannel } = require("../../domain/singleChannelSshBanner.shared.cjs");
 const hostKeyVerifier = require("./hostKeyVerifier.cjs");
 const { createProxySocket, runWhenProxyConnectionReady } = require("./proxyUtils.cjs");
 const {
@@ -1666,6 +1667,7 @@ async function startPortForward(event, payload) {
     conn.once('ready', () => {
       clearAuthReadyTimer();
       console.log(`[PortForward] SSH connection ready for tunnel ${tunnelId}`);
+      const peerSingleChannelSsh = remoteSoftwareRequiresSingleChannel(conn._remoteVer);
 
       bindPortForwardChannels({
         type,
@@ -1680,8 +1682,10 @@ async function startPortForward(event, payload) {
         chainConnections,
         sendStatus,
         releaseOnError: false,
-        endpoint: reuseEndpoint,
-        registerTransport: allowTransportReuse,
+        endpoint: peerSingleChannelSsh
+          ? { ...reuseEndpoint, singleChannelSsh: true }
+          : reuseEndpoint,
+        registerTransport: allowTransportReuse && !peerSingleChannelSsh,
         dialCoordination: pendingDialCoordination,
       }).then((result) => {
         if (!result?.success && pendingDialCoordination) {

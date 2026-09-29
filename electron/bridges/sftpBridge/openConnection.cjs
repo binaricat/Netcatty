@@ -10,6 +10,7 @@ const {
 } = require("../boundedSshExec.cjs");
 const { openBoundedSftpChannel } = require("../boundedSftpOpen.cjs");
 const { openBoundedForwardOutCallback } = require("../boundedSshChannelOpen.cjs");
+const { remoteSoftwareRequiresSingleChannel } = require("../../../domain/singleChannelSshBanner.shared.cjs");
 
 /** Bound shell/scp probes so a hung remote exec cannot leave the panel connecting forever. */
 const SCP_PROBE_TIMEOUT_MS = 15_000;
@@ -769,7 +770,11 @@ function createOpenConnectionApi(ctx) {
       let pendingDialCoordination = options._pendingDialCoordination || null;
 
       const openOnSharedTransport = async (transport, detail = "reusing shared SSH transport") => {
-        if (options.singleChannelSsh || transport.endpoint?.singleChannelSsh) {
+        if (
+          options.singleChannelSsh
+          || transport.endpoint?.singleChannelSsh
+          || remoteSoftwareRequiresSingleChannel(transport?.conn?._remoteVer)
+        ) {
           const err = new Error(
             "This host is configured for single-channel SSH. Opening SFTP on the terminal connection would disconnect it.",
           );
@@ -881,6 +886,7 @@ function createOpenConnectionApi(ctx) {
 
       async function openFreshSftp() {
       const client = new SftpClient();
+      let peerSingleChannelSsh = options.singleChannelSsh === true;
       client.__netcattyEndpointKey = buildEndpointKey(reuseEndpoint);
       let freshClientClosed = false;
       const closeFreshClient = () => {
@@ -1221,6 +1227,9 @@ function createOpenConnectionApi(ctx) {
           sshClient.once('ready', () => {
             clearAuthReadyTimer();
             cleanup();
+            if (remoteSoftwareRequiresSingleChannel(sshClient._remoteVer)) {
+              peerSingleChannelSsh = true;
+            }
             sendSftpProgress(event.sender, connId, options.hostname, 'connected');
 
             const fileProtocol = normalizeFileProtocol(options.fileProtocol);
@@ -1286,7 +1295,7 @@ function createOpenConnectionApi(ctx) {
                 finishSftp(sftp);
               }).catch((err) => {
                   if (fileProtocol === "auto") {
-                    if (options.singleChannelSsh) {
+                    if (peerSingleChannelSsh) {
                       reject(new Error(
                         `SFTP subsystem unavailable (${err.message}). This host is configured for single-channel SSH, so SCP fallback is disabled.`,
                       ));
@@ -1325,7 +1334,7 @@ function createOpenConnectionApi(ctx) {
         const sshConn = client.client;
         if (
           sshConn
-          && shouldRegisterFreshSftpTransport(options)
+          && shouldRegisterFreshSftpTransport({ ...options, singleChannelSsh: peerSingleChannelSsh })
           && typeof createTransport === "function"
           && typeof borrowTransport === "function"
         ) {
@@ -1364,9 +1373,9 @@ function createOpenConnectionApi(ctx) {
           }
         }
 
-        client.__netcattySingleChannelSsh = !!options.singleChannelSsh;
+        client.__netcattySingleChannelSsh = peerSingleChannelSsh;
         if (client.client) {
-          client.client.__netcattySingleChannelSsh = !!options.singleChannelSsh;
+          client.client.__netcattySingleChannelSsh = peerSingleChannelSsh;
         }
         sftpClients.set(connId, client);
     

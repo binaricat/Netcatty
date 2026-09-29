@@ -76,6 +76,7 @@ import {
   resolveLocateSftpPathSessionId,
 } from "../domain/sftpLocatePathInTerminal";
 import { classifyDistroId } from "../domain/host";
+import { remoteSoftwareRequiresSingleChannel } from "../domain/singleChannelSshBanner.shared.cjs";
 import { useTerminalBackend } from "../application/state/useTerminalBackend";
 import { isTerminalSensitiveInputActive } from "./terminal/runtime/terminalSensitiveInputRegistry";
 import { isTerminalReadyForCommandInjection } from "./terminal/runtime/terminalCommandInjectionReadyRegistry";
@@ -572,6 +573,41 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
   const lastBrowsedPathByConnectionKeyRef = useRef<Map<string, string>>(new Map());
   const [interactiveWorkActive, setInteractiveWorkActive] = useState(false);
   const [sftpUiReady, setSftpUiReady] = useState(false);
+  const terminalBackend = useTerminalBackend();
+  const [sftpBannerDecision, setSftpBannerDecision] = useState<{
+    sessionId: string;
+    singleChannel: boolean;
+  } | null>(null);
+  const activeSessionStatusForBanner = activeSessionId
+    ? sessions.find((session) => session.id === activeSessionId)?.status ?? null
+    : null;
+
+  useEffect(() => {
+    if (!activeSessionId || activeSessionStatusForBanner !== "connected") {
+      setSftpBannerDecision(null);
+      return;
+    }
+    const readRemoteInfo = terminalBackend.getSessionRemoteInfo;
+    if (!readRemoteInfo) {
+      setSftpBannerDecision({ sessionId: activeSessionId, singleChannel: false });
+      return;
+    }
+    let cancelled = false;
+    void readRemoteInfo(activeSessionId).then((info) => {
+      if (cancelled) return;
+      setSftpBannerDecision({
+        sessionId: activeSessionId,
+        singleChannel: remoteSoftwareRequiresSingleChannel(info?.remoteSshVersion),
+      });
+    }).catch(() => {
+      if (!cancelled) {
+        setSftpBannerDecision({ sessionId: activeSessionId, singleChannel: false });
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSessionId, activeSessionStatusForBanner, terminalBackend]);
 
   useEffect(() => {
     pruneSftpSidePanelState(
@@ -695,6 +731,16 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
       previousStatus: lastSourceSessionStatusRef.current,
       nextStatus: activeSessionStatus ?? (activeSessionId ? "connected" : null),
     });
+    // The peer banner is known only after the terminal handshake. Wait for it
+    // before choosing a shared terminal channel, so a one-channel bastion
+    // dials its file login directly.
+    if (
+      activeSessionId
+      && activeSessionStatus === "connected"
+      && sftpBannerDecision?.sessionId !== activeSessionId
+    ) {
+      return;
+    }
 
     const hasBackendSession = (connectionId: string) => !!s.getSftpIdForConnection(connectionId);
     const activeTab = s.leftTabs.tabs.find((tab) => tab.id === s.leftTabs.activeTabId) ?? null;
@@ -888,7 +934,11 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
 
     connectedKeyRef.current = connectionKey;
     connectedHostObjRef.current = activeHost;
-    const dedicatedSftpLogin = activeHost.singleChannelSsh === true;
+    const dedicatedSftpLogin = activeHost.singleChannelSsh === true
+      || (
+        sftpBannerDecision?.sessionId === activeSessionId
+        && sftpBannerDecision.singleChannel
+      );
     const reuseTerminalTransport = !dedicatedSftpLogin && (
       Boolean(pendingStrictSourceSessionId) || activeSessionStatus === "connected"
     );
@@ -932,6 +982,7 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
     pendingUploadRebindSettledRequestId,
     pendingUploadRebindStartedIdRef,
     sessions,
+    sftpBannerDecision,
     startPendingUploadRebind,
   ]);
 
@@ -1333,6 +1384,10 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
         sftpDefaultViewMode={sftpDefaultViewMode}
         activeHost={activeHost}
         activeSessionId={activeSessionId}
+        bannerRequiresSingleChannel={
+          sftpBannerDecision?.sessionId === activeSessionId
+          && sftpBannerDecision.singleChannel
+        }
         focusedSessionId={focusedSessionId}
         showWorkspaceHostHeader={showWorkspaceHostHeader}
         renderOverlays={renderOverlays}
@@ -1381,6 +1436,7 @@ type SftpSidePanelInteractiveBodyProps = {
   sftpDefaultViewMode: "list" | "tree";
   activeHost: Host | null;
   activeSessionId?: string | null;
+  bannerRequiresSingleChannel?: boolean;
   focusedSessionId?: string | null;
   showWorkspaceHostHeader: boolean;
   renderOverlays: boolean;
@@ -1431,6 +1487,7 @@ const SftpSidePanelInteractiveBody: React.FC<SftpSidePanelInteractiveBodyProps> 
   sftpDefaultViewMode,
   activeHost,
   activeSessionId = null,
+  bannerRequiresSingleChannel = false,
   focusedSessionId = null,
   showWorkspaceHostHeader,
   renderOverlays,
@@ -1638,12 +1695,12 @@ const SftpSidePanelInteractiveBody: React.FC<SftpSidePanelInteractiveBodyProps> 
 
   const canFollowTerminalCwd = useMemo(() => {
     if (!onGetTerminalCwd || !followTerminalCwdHost) return false;
-    if (followTerminalCwdHost.singleChannelSsh === true) return false;
+    if (followTerminalCwdHost.singleChannelSsh === true || bannerRequiresSingleChannel) return false;
     const proto = followTerminalCwdHost.protocol;
     if (proto === "local" || proto === "serial") return false;
     if (followTerminalCwdHost.id?.startsWith("local-") || followTerminalCwdHost.id?.startsWith("serial-")) return false;
     return true;
-  }, [followTerminalCwdHost, onGetTerminalCwd]);
+  }, [bannerRequiresSingleChannel, followTerminalCwdHost, onGetTerminalCwd]);
 
   const hasActiveWork = showTextEditor || !!permissionsState || showFileOpenerDialog
     || (sftp.activeFileWatchCountRef?.current ?? 0) > 0
