@@ -1198,12 +1198,12 @@ export const useSftpTransfers = ({
         ? []
         : sourceFiles.filter((file) => !file.isDirectory);
       const preflightFiles = remoteSingleFiles.slice(0, PREFLIGHT_STAT_MAX_FILES);
-      const preflightAttemptedNames = new Set<string>();
-      // Past the cap, and anything a timeout stops the pool from reaching.
-      // Those files keep an unknown plan and are not statted again up front.
-      const preflightSkippedNames = new Set(
-        remoteSingleFiles.slice(PREFLIGHT_STAT_MAX_FILES).map((file) => file.name),
-      );
+      // Remote files without a verified live stat are not statted again in
+      // discoverTransferSize. That covers the tail past the cap, a missing
+      // browse session, a timeout that stops the pool, and a stat that
+      // returns no usable size. The plan stays unknown so the bridge measures
+      // the live size; the overwrite dialog still uses the pane listing.
+      const preflightSkippedNames = new Set<string>();
       if (remoteSingleFiles.length > 0 && sourceSftpIdForPlan) {
         const sourceEncoding = sourcePane.filenameEncoding || "auto";
         // The bridge's statSftp awaits an unbounded SFTP callback, so a
@@ -1253,14 +1253,13 @@ export const useSftpTransfers = ({
           Array.from({ length: workers }, async () => {
             while (!preflightStopped && preflightCursor < preflightFiles.length) {
               const file = preflightFiles[preflightCursor++];
-              preflightAttemptedNames.add(file.name);
               await statOneRemoteFile(file);
             }
           }),
         );
-        for (const file of preflightFiles) {
-          if (!preflightAttemptedNames.has(file.name)) preflightSkippedNames.add(file.name);
-        }
+      }
+      for (const file of remoteSingleFiles) {
+        if (!freshRemoteMetadata.has(file.name)) preflightSkippedNames.add(file.name);
       }
 
       for (const file of sourceFiles) {

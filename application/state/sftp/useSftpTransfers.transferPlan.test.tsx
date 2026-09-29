@@ -392,9 +392,87 @@ test("a preflight timeout stops the rest of the batch", async () => {
         "right",
       );
     });
-    // One wave of preflight stats, then one deferred stat for each of those
-    // files. The rest of the selection is left on an unknown plan.
-    assert.equal(statCalls, PREFLIGHT_STAT_CONCURRENCY * 2);
+    // One preflight wave, then stop. Timed-out files are not statted again.
+    assert.equal(statCalls, PREFLIGHT_STAT_CONCURRENCY);
+  } finally {
+    renderer?.unmount();
+    restore();
+  }
+});
+
+test("stat-less preflight results are not statted again before transfer", async () => {
+  const names = Array.from(
+    { length: PREFLIGHT_STAT_CONCURRENCY + 2 },
+    (_, index) => `legacy-${index}.bin`,
+  );
+  let statCalls = 0;
+  let inflight = 0;
+  let maxInflight = 0;
+  const started: StartOptions[] = [];
+  const restore = installGlobals({
+    statSftp: async () => {
+      statCalls += 1;
+      inflight += 1;
+      maxInflight = Math.max(maxInflight, inflight);
+      await Promise.resolve();
+      inflight -= 1;
+      return {
+        name: "legacy",
+        type: "file" as const,
+        size: 0,
+        sizeKnown: false,
+        lastModified: 0,
+      };
+    },
+    statLocal: async () => null,
+    startStreamTransfer: async (options: StartOptions) => {
+      started.push(options);
+      sftpTransferCenterStore.ingestBackgroundEvent({
+        type: "completed",
+        transferId: options.transferId,
+        transferred: options.totalBytes ?? 0,
+        totalBytes: options.totalBytes ?? 0,
+        lifecycleEpoch: 0,
+      });
+      return {};
+    },
+    pauseTransfer: async () => ({ success: false, reason: "Transfer is no longer active" }),
+    resumeTransfer: async () => ({ success: false, reason: "Transfer is no longer active" }),
+  });
+
+  let ops: ReturnType<typeof useSftpTransfers> | undefined;
+  let renderer: ReactTestRenderer | undefined;
+  function Probe() {
+    ops = useSftpTransfers({
+      ownerId: "plan-owner-statless-batch",
+      getActivePane: (side) => (side === "left" ? makePane("left") : makePane("right")),
+      getPaneByConnectionId: () => null,
+      getTabByConnectionId: () => null,
+      updateTab: () => undefined,
+      refresh: async () => undefined,
+      clearCacheForConnection: () => undefined,
+      handleSessionError: () => undefined,
+      sftpSessionsRef: { current: new Map([["remote-conn", "sftp-remote"]]) },
+      connectionCacheKeyMapRef: { current: new Map() },
+      listLocalFiles: async () => [],
+      listRemoteFiles: async () => [],
+    });
+    return null;
+  }
+
+  try {
+    await act(async () => { renderer = create(React.createElement(Probe)); });
+    await act(async () => {
+      await ops!.startTransfer(
+        names.map((name) => ({ name, isDirectory: false })),
+        "left",
+        "right",
+      );
+    });
+    assert.equal(statCalls, names.length);
+    assert.ok(maxInflight <= PREFLIGHT_STAT_CONCURRENCY);
+    assert.equal(started.length, names.length);
+    assert.equal(started.filter((options) => options.totalBytes === undefined).length, names.length);
   } finally {
     renderer?.unmount();
     restore();
