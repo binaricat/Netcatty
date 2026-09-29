@@ -69,6 +69,15 @@ import {
 // stale metadata / a 0 plan instead of one hung stat blocking a batch.
 const STAT_SFTP_TIMEOUT_MS = 10_000;
 
+// Preflight re-stats share the browse SFTP session and the renderer IPC
+// queue. Launching one stat per file for a huge multi-file selection would
+// flood both before any transfer task reaches the UI, so cap the number of
+// in-flight preflight stats and skip the re-stat entirely once the selection
+// grows past a bound (files beyond the cap stay on the safe 0 plan, which
+// makes the bridge measure the live size anyway).
+const PREFLIGHT_STAT_CONCURRENCY = 8;
+const PREFLIGHT_STAT_MAX_FILES = 128;
+
 /** Keep the MutableRefObject mirror in sync with the process-global latch set. */
 function syncPausedTasksRef(ref: { current: Set<string> }, taskId: string, latched: boolean) {
   if (latched) ref.current.add(taskId);
@@ -623,6 +632,19 @@ export const useSftpTransfers = ({
     // overwrite conflict dialog) can await this instead of reading stale
     // metadata from the local task copy.
     const discoverTransferSize = async (): Promise<{ size: number; lastModified?: number } | null> => {
+      // When the endpoint cannot stat the source (legacy SCP returns the
+      // sizeKnown: false placeholder) or the stat fails, the transfer plan
+      // stays unknown (0 bytes, so the bridge measures the live size). The
+      // overwrite dialog still needs display metadata, so fall back to the
+      // retained cached listing entry instead of reporting 0 bytes — but only
+      // for the dialog; the plan itself must never take the listing's
+      // possibly stale size back.
+      const cachedListingStatForDialog = (): { size: number; lastModified?: number } | null => {
+        if (getParentPath(task.sourcePath) !== sourcePane.connection?.currentPath) return null;
+        const entry = sourcePane.files.find((entry) => entry.name === task.fileName);
+        if (!entry || !(entry.size > 0)) return null;
+        return { size: entry.size, lastModified: entry.lastModified };
+      };
       try {
         if (task.totalBytes > 0 || !!task.sourceLastModified) return null;
 
@@ -679,16 +701,16 @@ export const useSftpTransfers = ({
             }
             return { size: stat.size, lastModified: stat.lastModified };
           }
-          // Unknown size (e.g. legacy SCP stat) = no discovery, matching the
-          // preflight so a 0-byte incoming size never replaces fallback
-          // metadata in the conflict dialog.
-          return null;
+          // Unknown size (e.g. legacy SCP stat): keep the transfer plan
+          // unknown so a 0-byte placeholder never replaces trusted metadata,
+          // but give the conflict dialog the retained cached listing entry.
+          return cachedListingStatForDialog();
         }
       } catch (err) {
         if (!isTransferCancelledError(err)) {
           logger.debug?.("[SFTP] Deferred transfer size discovery failed", err);
         }
-        return null;
+        return cachedListingStatForDialog();
       }
     };
 
@@ -1163,7 +1185,12 @@ export const useSftpTransfers = ({
         // measures the live size during the transfer instead of one hung stat
         // blocking the entire selected batch.
         const PREFLIGHT_STAT_TIMEOUT_MS = STAT_SFTP_TIMEOUT_MS;
-        await Promise.allSettled(remoteSingleFiles.map(async (file) => {
+        // Also cap in-flight preflight stats: they all share the browse SFTP
+        // session (and the renderer IPC queue), and launching a stat per file
+        // for a huge selection would flood both before any task reaches the
+        // UI. A small worker pool keeps N stats in flight; very large
+        // selections skip the re-stat entirely and keep the safe 0 plan.
+        const statOneRemoteFile = async (file: { name: string; isDirectory: boolean }) => {
           let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
           try {
             const stat = await Promise.race([
@@ -1185,7 +1212,18 @@ export const useSftpTransfers = ({
           } finally {
             if (timeoutTimer) clearTimeout(timeoutTimer);
           }
-        }));
+        };
+        const preflightFiles = remoteSingleFiles.slice(0, PREFLIGHT_STAT_MAX_FILES);
+        const workers = Math.min(PREFLIGHT_STAT_CONCURRENCY, preflightFiles.length);
+        let preflightCursor = 0;
+        await Promise.allSettled(
+          Array.from({ length: workers }, async () => {
+            while (preflightCursor < preflightFiles.length) {
+              const file = preflightFiles[preflightCursor++];
+              await statOneRemoteFile(file);
+            }
+          }),
+        );
       }
 
       for (const file of sourceFiles) {
@@ -1211,10 +1249,12 @@ export const useSftpTransfers = ({
               : 0;
         // Only keep an mtime that is paired with trusted metadata (live re-stat,
         // local source size, or directory totals). A remote file whose re-stat
-        // failed must stay fully unknown (size 0 AND mtime 0): discoverTransferSize
-        // and the conflict check both treat a nonzero sourceLastModified as proof
-        // the size is already known, so a stale mtime would suppress the deferred
-        // source re-stat and show the file as 0 B in the overwrite dialog.
+        // failed must stay fully unknown (size 0 AND mtime 0 in the plan):
+        // discoverTransferSize and the conflict check both treat a nonzero
+        // sourceLastModified as proof the size is already known, so a stale
+        // mtime would suppress the deferred source re-stat. The overwrite
+        // dialog still gets the pane listing's cached entry via
+        // discoverTransferSize's cachedListingStatForDialog fallback.
         const sourceLastModified = !file.isDirectory && !sourcePane.connection!.isLocal && !freshMetadata
           ? 0
           : (freshMetadata?.lastModified ?? fileEntry?.lastModified ?? 0);
