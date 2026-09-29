@@ -2182,6 +2182,11 @@ async function acquireUploadSftpChannel(client, options = {}) {
     return { sftp, dispose: false };
   }
   const sshClient = client?.client;
+  // Same constraint as openIsolatedSftpChannel: a second subsystem drops the login.
+  if (client?.__netcattySingleChannelSsh || sshClient?.__netcattySingleChannelSsh) {
+    const shared = await requireSftpChannel(client, options);
+    return { sftp: shared, dispose: false };
+  }
   if (sshClient && typeof sshClient.sftp === "function") {
     // Prefer a disposable channel for cancel, but never fail the whole upload
     // when MaxSessions / server policy refuses another subsystem — fall back to

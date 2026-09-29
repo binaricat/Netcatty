@@ -1796,6 +1796,11 @@ function execSshCommandCancellable(sshClient, command, transfer) {
 }
 
 async function openIsolatedSftpChannel(client, signal = null) {
+  // The dedicated one-channel login already holds its only session channel.
+  // Opening another SFTP subsystem drops that login, so stay on the browse channel.
+  if (client?.__netcattySingleChannelSsh || client?.client?.__netcattySingleChannelSsh) {
+    return null;
+  }
   const sshClient = client?.client;
   return openBoundedSftpChannel(sshClient, { signal });
 }
