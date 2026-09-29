@@ -15,6 +15,8 @@ import {
   Expand,
   FolderPlus,
   Layers,
+  LayoutGrid,
+  List,
   Minimize2,
   Package,
   Play,
@@ -27,6 +29,7 @@ import {
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useI18n } from '../application/i18n/I18nProvider';
 import { getScriptRecordingSnapshot, subscribeScriptRecording } from '../application/state/scriptRecordingStore.ts';
+import { useScriptsViewMode } from '../application/state/useScriptsViewMode.ts';
 import { VaultDeleteConfirmDialog } from './vault/VaultDeleteConfirmDialog';
 import {
   collectSnippetPackageTreePaths,
@@ -281,6 +284,7 @@ const ScriptsSidePanelInner: React.FC<ScriptsSidePanelProps> = ({
   const [search, setSearch] = useState('');
   const [searchExpanded, setSearchExpanded] = useState(false);
   const [subView, setSubView] = useState<'library' | 'running'>('library');
+  const [viewMode, setViewMode] = useScriptsViewMode();
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
   const [isMultiSelectMode, setIsMultiSelectMode] = useState(false);
   const [selectedSnippetIds, setSelectedSnippetIds] = useState<Set<string>>(new Set());
@@ -977,6 +981,30 @@ const ScriptsSidePanelInner: React.FC<ScriptsSidePanelProps> = ({
             <TooltipTrigger asChild>
               <button
                 type="button"
+                className={cn(
+                  toolbarIconButtonClass,
+                  viewMode === 'stacked' && 'bg-muted/70 text-foreground',
+                )}
+                disabled={!hasAnyContent}
+                aria-label={viewMode === 'stacked'
+                  ? t('scripts.sidePanel.viewList')
+                  : t('scripts.sidePanel.viewStacked')}
+                aria-pressed={viewMode === 'stacked'}
+                onClick={() => setViewMode(viewMode === 'stacked' ? 'list' : 'stacked')}
+              >
+                {viewMode === 'stacked' ? <List size={14} /> : <LayoutGrid size={14} />}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              {viewMode === 'stacked'
+                ? t('scripts.sidePanel.viewList')
+                : t('scripts.sidePanel.viewStacked')}
+            </TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
                 className={toolbarIconButtonClass}
                 disabled={!canExpandCollapse}
                 aria-label={t('vault.tree.expandAll')}
@@ -1119,6 +1147,60 @@ const ScriptsSidePanelInner: React.FC<ScriptsSidePanelProps> = ({
         ) : hasAnyContent && searchMatches !== null && searchMatches.length === 0 ? (
           <div className="px-3 py-4 text-xs text-muted-foreground italic text-center">
             {t('common.noResultsFound')}
+          </div>
+        ) : viewMode === 'stacked' ? (
+          <div
+            className="h-full overflow-auto px-2 py-1.5"
+            data-scripts-view="stacked"
+          >
+            <div className="flex flex-wrap items-center content-start gap-1.5">
+              {listItems.map((item) => {
+                if (item.kind === 'package') {
+                  return (
+                    <div
+                      key={item.key}
+                      className="w-full basis-full flex items-center gap-1.5 pt-1.5 pb-0.5"
+                      style={{ paddingLeft: 8 + Math.min(item.row.depth, 4) * 10 }}
+                    >
+                      <Package size={11} className="shrink-0 text-primary/80" />
+                      <span className="min-w-0 truncate text-[10px] font-medium text-muted-foreground">
+                        {item.row.name}
+                      </span>
+                      <span className="shrink-0 text-[10px] text-muted-foreground tabular-nums">
+                        {item.countLabel}
+                      </span>
+                    </div>
+                  );
+                }
+                const snippet = item.kind === 'search' ? item.snippet : item.row.snippet;
+                const isScript = isScriptSnippet(snippet);
+                return (
+                  <SnippetChip
+                    key={item.key}
+                    snippet={snippet}
+                    selected={selectedSnippetIds.has(snippet.id)}
+                    multiSelect={isMultiSelectMode}
+                    onClick={() => handleSnippetClick(snippet)}
+                    onEdit={() => handleEditSnippet(snippet)}
+                    onDelete={() => handleDeleteSnippet(snippet.id)}
+                    onCopyCommand={() => handleCopySnippetCommand(snippet)}
+                    copyCommandLabel={t('scripts.actions.copyCommand')}
+                    onRunParallel={onRunScriptOnWorkspace
+                      ? () => onRunScriptOnWorkspace(snippet, 'parallel')
+                      : undefined}
+                    onRunSequential={isScript && onRunScriptOnWorkspace
+                      ? () => onRunScriptOnWorkspace(snippet, 'sequential')
+                      : undefined}
+                    runParallelLabel={isScript
+                      ? t('scripts.actions.runParallel')
+                      : t('scripts.actions.runOnAllTabs')}
+                    runSequentialLabel={t('scripts.actions.runSequential')}
+                    editLabel={t('action.edit')}
+                    deleteLabel={t('action.delete')}
+                  />
+                );
+              })}
+            </div>
           </div>
         ) : (
           <FixedSizeVirtualList
@@ -1643,6 +1725,102 @@ const SnippetRow = memo<SnippetRowProps>(({
   </ContextMenu>
 ));
 SnippetRow.displayName = 'SnippetRow';
+
+interface SnippetChipProps {
+  snippet: Snippet;
+  selected?: boolean;
+  multiSelect?: boolean;
+  onClick: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+  onRunParallel?: () => void;
+  onRunSequential?: () => void;
+  onCopyCommand?: () => void;
+  copyCommandLabel?: string;
+  runParallelLabel?: string;
+  runSequentialLabel?: string;
+  editLabel: string;
+  deleteLabel: string;
+}
+
+/**
+ * Compact chip for the stacked (wrap) view. Shares the same click → run /
+ * execute and right-click context menu as the list rows; only the layout is
+ * denser. Drag reordering stays list-view-only.
+ */
+const SnippetChip = memo<SnippetChipProps>(({
+  snippet,
+  selected = false,
+  multiSelect = false,
+  onClick,
+  onEdit,
+  onDelete,
+  onRunParallel,
+  onRunSequential,
+  onCopyCommand,
+  copyCommandLabel,
+  runParallelLabel,
+  runSequentialLabel,
+  editLabel,
+  deleteLabel,
+}) => (
+  <ContextMenu>
+    <ContextMenuTrigger asChild>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            onClick={onClick}
+            aria-pressed={multiSelect ? selected : undefined}
+            className={cn(
+              'h-6 max-w-full min-w-0 px-2 rounded-md border border-border/60 bg-muted/40 hover:bg-accent/60 text-[11px] flex items-center gap-1 transition-colors',
+              selected && 'bg-primary/10 border-primary/40 hover:bg-primary/15',
+            )}
+          >
+            {multiSelect ? (
+              <CheckSquare
+                size={11}
+                className={cn('shrink-0', selected ? 'text-primary' : 'text-muted-foreground/70')}
+              />
+            ) : isScriptSnippet(snippet) ? (
+              <Play size={11} className="shrink-0 text-primary" />
+            ) : (
+              <Zap size={11} className="shrink-0 text-muted-foreground" />
+            )}
+            <span className="min-w-0 truncate">{snippet.label}</span>
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="right" align="start">
+          <SnippetCommandTooltipContent label={snippet.label} command={snippet.command} />
+        </TooltipContent>
+      </Tooltip>
+    </ContextMenuTrigger>
+    <ContextMenuContent>
+      {onRunParallel ? (
+        <ContextMenuItem onClick={onRunParallel}>
+          <Layers className="mr-2 h-4 w-4" /> {runParallelLabel}
+        </ContextMenuItem>
+      ) : null}
+      {onRunSequential ? (
+        <ContextMenuItem onClick={onRunSequential}>
+          <Layers className="mr-2 h-4 w-4" /> {runSequentialLabel}
+        </ContextMenuItem>
+      ) : null}
+      {onCopyCommand ? (
+        <ContextMenuItem onClick={onCopyCommand}>
+          <Copy className="mr-2 h-4 w-4" /> {copyCommandLabel}
+        </ContextMenuItem>
+      ) : null}
+      <ContextMenuItem onClick={onEdit}>
+        <Edit2 className="mr-2 h-4 w-4" /> {editLabel}
+      </ContextMenuItem>
+      <ContextMenuItem className="text-destructive" onClick={onDelete}>
+        <Trash2 className="mr-2 h-4 w-4" /> {deleteLabel}
+      </ContextMenuItem>
+    </ContextMenuContent>
+  </ContextMenu>
+));
+SnippetChip.displayName = 'SnippetChip';
 
 export const ScriptsSidePanel = memo(ScriptsSidePanelInner);
 ScriptsSidePanel.displayName = 'ScriptsSidePanel';

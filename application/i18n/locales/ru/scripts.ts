@@ -36,6 +36,8 @@ export const ruScriptsMessages = {
   'scripts.sidePanel.library': 'Библиотека',
   'scripts.sidePanel.running': 'Выполняются',
   'scripts.sidePanel.newScript': 'Новый скрипт',
+  'scripts.sidePanel.viewList': 'Список',
+  'scripts.sidePanel.viewStacked': 'Плитка',
   'scripts.running.empty': 'В этой сессии не выполняются скрипты.',
   'scripts.running.unnamed': 'Скрипт без названия',
   'scripts.running.status.running': 'Выполняется',
