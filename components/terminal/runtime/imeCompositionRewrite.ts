@@ -66,12 +66,22 @@ export function rememberTextareaCommit(
   alreadySent: string,
   previous: string,
   sent: string,
+  next?: string,
 ): string {
   if (!sent) return alreadySent;
   let index = 0;
   while (sent.charCodeAt(index) === 0x7f) index += 1;
   const inserted = sent.slice(index);
-  if (index > 0) return inserted;
+  if (index > 0) {
+    // Backspaces edit the PTY in place. A later markerless compositionend
+    // only skips `_dataAlreadySent` when it is a prefix of the final text,
+    // so the whole revised value has to be remembered, not just the tail.
+    // A cleared textarea is xterm's line-submit reset, not that value.
+    if (typeof next === "string") return next;
+    const parts = graphemes(previous);
+    const kept = parts.slice(0, Math.max(0, parts.length - index)).join("");
+    return kept + inserted;
+  }
   if (previous.endsWith(alreadySent)) return alreadySent + sent;
   return sent;
 }
@@ -259,7 +269,7 @@ export function keepLiveImeTranscriptionSingle(term: {
       const next = helper._textarea.value;
       const data = commitTextareaChange(previous, next);
       if (!data) return;
-      helper._dataAlreadySent = rememberTextareaCommit(helper._dataAlreadySent, previous, data);
+      helper._dataAlreadySent = rememberTextareaCommit(helper._dataAlreadySent, previous, data, next);
       emitPtyData(helper, data);
     }, 0);
   };

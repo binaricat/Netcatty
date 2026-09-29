@@ -41,8 +41,17 @@ test("rememberTextareaCommit grows a hypothesis and replaces a rewrite", () => {
   assert.equal(rememberTextareaCommit("\u6211\u662f\u771f\u7684", "\u6211\u662f\u771f\u7684", "\u725b\u903c"), "\u6211\u662f\u771f\u7684\u725b\u903c");
   assert.equal(
     rememberTextareaCommit("abcd", "abcd", `${BACKSPACE}${BACKSPACE}XY`),
-    "XY",
+    "abXY",
   );
+  assert.equal(
+    rememberTextareaCommit("abcde", "abcde", `${BACKSPACE}${BACKSPACE}${BACKSPACE}Xde`, "abXde"),
+    "abXde",
+  );
+  assert.equal(
+    rememberTextareaCommit("a\u{1F600}", "a\u{1F600}", `${BACKSPACE}X`),
+    "aX",
+  );
+  assert.equal(rememberTextareaCommit("hello", "hello", BACKSPACE, ""), "");
 });
 
 test("continuedCompositionPrefix keeps a new composition after a finished line", () => {
@@ -291,6 +300,25 @@ test("keydown text already sent is not repeated on compositionend", async () => 
   await flushTimers();
 
   assert.equal(helper.sent.join(""), "abcd");
+});
+
+test("a rewritten hypothesis is not sent again on markerless compositionend", async () => {
+  const helper = createHarness();
+  install(helper);
+
+  helper.keydown({ keyCode: 229 });
+  helper._textarea.value = "abcde";
+  await flushTimers();
+
+  helper.keydown({ keyCode: 229 });
+  helper._textarea.value = "abXde";
+  await flushTimers();
+
+  helper._compositionPosition = { start: 0, end: "abXde".length };
+  helper.compositionend();
+  await flushTimers();
+
+  assert.deepEqual(helper.sent, ["abcde", BACKSPACE, BACKSPACE, BACKSPACE, "Xde"]);
 });
 
 test("an equal-length rewrite does not resend the shared prefix", async () => {
