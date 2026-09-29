@@ -1518,18 +1518,18 @@ test("startPortForward forwards target and jump-host timeouts", async () => {
   assert.equal(jumpHosts[0]?.sshAuthReadyTimeoutMs, 360_000);
 });
 
-test("startPortForward tells a single-channel host not to reuse the terminal", async () => {
+test("startPortForward does not send a saved single-channel host flag", async () => {
   const bridge = installBridgeStub();
   const result = await startPortForward(
     rule({ id: "rule-single-channel" }),
-    host({ singleChannelSsh: true }),
+    { ...host(), singleChannelSsh: true } as Host,
     [],
     [],
     [],
     () => {},
   );
   assert.equal(result.success, true);
-  assert.equal(bridge.getOptions()?.singleChannelSsh, true);
+  assert.equal(bridge.getOptions()?.singleChannelSsh, undefined);
 
   const plain = installBridgeStub();
   const plainResult = await startPortForward(
@@ -1541,7 +1541,7 @@ test("startPortForward tells a single-channel host not to reuse the terminal", a
     () => {},
   );
   assert.equal(plainResult.success, true);
-  assert.equal(plain.getOptions()?.singleChannelSsh, false);
+  assert.equal(plain.getOptions()?.singleChannelSsh, undefined);
 });
 
 test("startPortForward rejects missing proxy identities before starting", async () => {

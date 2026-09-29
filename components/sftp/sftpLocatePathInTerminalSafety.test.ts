@@ -47,7 +47,11 @@ test("locate-path uses focused session fallback when SFTP cannot reuse the termi
 });
 
 test("single-channel SFTP opens a dedicated connection instead of the terminal channel", () => {
-  assert.match(sidePanelSource, /activeHost\.singleChannelSsh === true/);
+  assert.match(
+    sidePanelSource,
+    /const dedicatedSftpLogin = sftpBannerDecision\?\.sessionId === activeSessionId\s*&& sftpBannerDecision\.singleChannel;/,
+  );
+  assert.doesNotMatch(sidePanelSource, /activeHost\.singleChannelSsh/);
   assert.match(sidePanelSource, /reuseTransport: false/);
   assert.match(
     sidePanelSource,

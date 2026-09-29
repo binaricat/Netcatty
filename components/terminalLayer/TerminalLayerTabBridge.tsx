@@ -219,9 +219,8 @@ export function TerminalLayerTabBridge({ stableRef }: { stableRef: StableRef }) 
     if (!activeTabId || !activeSidePanelTools.has('system')) return [];
     const session = activeTerminalSessionForSystem;
     if (!session || session.status !== 'connected') return [];
-    if (activeSystemSessionHost?.singleChannelSsh === true) return [];
     return [session.id];
-  }, [activeSidePanelTools, activeSystemSessionHost, activeTabId, activeTerminalSessionForSystem]);
+  }, [activeSidePanelTools, activeTabId, activeTerminalSessionForSystem]);
 
   useSystemCapabilitiesWarmup(
     systemWarmupSessionIds,

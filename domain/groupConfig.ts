@@ -15,9 +15,13 @@ export function sanitizeGroupConfig(config: GroupConfig): GroupConfig {
     && !migrated.identityFileId
     && !migrated.identityFilePaths?.length;
 
-  return hasLegacyPasswordOnlyCredentials
-    ? { ...migrated, authMethod: 'password' }
+  const next = hasLegacyPasswordOnlyCredentials
+    ? { ...migrated, authMethod: 'password' as const }
     : migrated;
+  if (!Object.prototype.hasOwnProperty.call(next, 'singleChannelSsh')) return next;
+  const cleaned = { ...next };
+  delete (cleaned as { singleChannelSsh?: unknown }).singleChannelSsh;
+  return cleaned;
 }
 
 export interface ApplyGroupDefaultsOptions {
@@ -145,7 +149,7 @@ export function resolveGroupDefaults(
 
 const INHERITABLE_KEYS: (keyof GroupConfig)[] = [
   'username', 'password', 'savePassword', 'authMethod', 'identityId', 'identityFileId', 'identityFilePaths',
-  'port', 'protocol', 'deviceType', 'singleChannelSsh', 'agentForwarding', 'proxyProfileId', 'proxyConfig', 'hostChain', 'startupCommand', 'startupCommandRunMode',
+  'port', 'protocol', 'deviceType', 'agentForwarding', 'proxyProfileId', 'proxyConfig', 'hostChain', 'startupCommand', 'startupCommandRunMode',
   'legacyAlgorithms', 'skipEcdsaHostKey', 'algorithms',
   'environmentVariables', 'charset', 'moshEnabled', 'moshServerPath',
   'etEnabled', 'etPort',

@@ -208,7 +208,6 @@ const normalizeHost = (value: JsonValue): Host | null => {
     etEnabled: optionalBooleanValue(object, 'etEnabled'),
     telnetEnabled: optionalBooleanValue(object, 'telnetEnabled'),
     sftpSudo: optionalBooleanValue(object, 'sftpSudo'),
-    singleChannelSsh: optionalBooleanValue(object, 'singleChannelSsh'),
     requiresMfa: optionalBooleanValue(object, 'requiresMfa'),
     useSshAgent: optionalBooleanValue(object, 'useSshAgent'),
     identitiesOnly: optionalBooleanValue(object, 'identitiesOnly'),

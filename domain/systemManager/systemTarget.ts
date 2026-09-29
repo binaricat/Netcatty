@@ -93,7 +93,6 @@ export function shouldCollectServerStats(
   _session: TerminalSession | null | undefined,
 ): boolean {
   const detectedDeviceClass = classifyDistroId(host?.distro);
-  if (host?.singleChannelSsh) return false;
   if (isNetworkDeviceTarget(host) || detectedDeviceClass === 'network-device') return false;
   if (capabilities?.targetOs && capabilities.targetOs !== 'unknown') {
     return capabilities.targetOs === 'linux' || capabilities.targetOs === 'darwin';

@@ -271,23 +271,22 @@ export const shouldSuggestNetworkDeviceMode = (opts: {
 };
 
 /**
- * True when an extra exec or SFTP channel on the terminal transport is unsafe.
- * Use this to skip probes. Do not store it as session.singleChannelSsh:
- * network devices already have their own restrictions, and that flag means
- * the user opted into a one-channel bastion.
+ * True when an extra exec channel on the terminal transport is unsafe because
+ * the host is a network device. Use this to skip probes. Do not store it as
+ * session.singleChannelSsh: that runtime flag is stamped only after a
+ * recognized one-channel bastion banner.
  */
 export const hostRestrictsExtraSshChannels = (
-  host?: Pick<Host, 'singleChannelSsh' | 'deviceType'> | null,
-): boolean => host?.singleChannelSsh === true || host?.deviceType === 'network';
+  host?: Pick<Host, 'deviceType'> | null,
+): boolean => host?.deviceType === 'network';
 
 /**
  * Decide whether it is safe to run the post-connect `pwd` probe that
  * discovers the session's working directory. The probe opens an extra exec
  * channel running a POSIX-shell script; strict network-device CLIs such as
  * Huawei VRP respond by closing the whole SSH session (#1043), so it must be
- * skipped for them. Hosts with `singleChannelSsh` (bastion / PAM), and
- * software banners that allow only one session channel per TCP connection,
- * have the same constraint.
+ * skipped for them. Software banners that allow only one session channel per
+ * TCP connection have the same constraint.
  *
  * `isNetworkDevice` covers hosts we already classified (a reconnect, or an
  * explicit `deviceType: 'network'`). On a brand-new host that field is not
@@ -532,5 +531,6 @@ export const sanitizeHost = (host: Host, snippets: Snippet[] = []): Host => {
     connectScriptIds: connectScriptIds && connectScriptIds.length > 0 ? connectScriptIds : undefined,
     pluginConnection,
   };
+  delete (sanitized as { singleChannelSsh?: unknown }).singleChannelSsh;
   return stripBuiltInConnectionFieldsForPluginHost(sanitized);
 };

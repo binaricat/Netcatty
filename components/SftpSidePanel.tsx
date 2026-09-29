@@ -934,11 +934,8 @@ const SftpSidePanelInner: React.FC<SftpSidePanelProps> = ({
 
     connectedKeyRef.current = connectionKey;
     connectedHostObjRef.current = activeHost;
-    const dedicatedSftpLogin = activeHost.singleChannelSsh === true
-      || (
-        sftpBannerDecision?.sessionId === activeSessionId
-        && sftpBannerDecision.singleChannel
-      );
+    const dedicatedSftpLogin = sftpBannerDecision?.sessionId === activeSessionId
+      && sftpBannerDecision.singleChannel;
     const reuseTerminalTransport = !dedicatedSftpLogin && (
       Boolean(pendingStrictSourceSessionId) || activeSessionStatus === "connected"
     );
@@ -1695,7 +1692,7 @@ const SftpSidePanelInteractiveBody: React.FC<SftpSidePanelInteractiveBodyProps> 
 
   const canFollowTerminalCwd = useMemo(() => {
     if (!onGetTerminalCwd || !followTerminalCwdHost) return false;
-    if (followTerminalCwdHost.singleChannelSsh === true || bannerRequiresSingleChannel) return false;
+    if (bannerRequiresSingleChannel) return false;
     const proto = followTerminalCwdHost.protocol;
     if (proto === "local" || proto === "serial") return false;
     if (followTerminalCwdHost.id?.startsWith("local-") || followTerminalCwdHost.id?.startsWith("serial-")) return false;

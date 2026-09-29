@@ -441,10 +441,10 @@ test("startSSH tells the bridge to skip shell discovery for network devices", as
 
   assert.equal(capturedOptions?.sourceSessionId, "source-session");
   assert.equal(capturedOptions?.skipShellPidDiscovery, true);
-  assert.equal(capturedOptions?.singleChannelSsh, false);
+  assert.equal(capturedOptions?.singleChannelSsh, undefined);
 });
 
-test("startSSH opens a fresh connection when copying a single-channel host", async () => {
+test("startSSH ignores a legacy single-channel host field when copying a tab", async () => {
   let capturedOptions: Record<string, unknown> | null = null;
   const terminalBackend = {
     backendAvailable: () => true,
@@ -472,9 +472,8 @@ test("startSSH opens a fresh connection when copying a single-channel host", asy
 
   await createTerminalSessionStarters(ctx as never).startSSH(createTermStub() as never);
 
-  assert.equal(capturedOptions?.sourceSessionId, undefined);
-  assert.equal(capturedOptions?.reuseTransport, false);
-  assert.equal(capturedOptions?.singleChannelSsh, true);
+  assert.equal(capturedOptions?.sourceSessionId, "source-session");
+  assert.equal(capturedOptions?.singleChannelSsh, undefined);
 });
 
 test("startSSH requests a fresh transport for ordinary opens with connection automation", async () => {

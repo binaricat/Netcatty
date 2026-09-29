@@ -107,7 +107,7 @@ test("network devices hide processes until OS probe confirms a real target", () 
 });
 
 
-test("system overview stats skip single-channel SSH hosts", () => {
+test("system overview stats ignore a legacy single-channel host field", () => {
   assert.equal(
     shouldCollectServerStats(
       {
@@ -117,12 +117,13 @@ test("system overview stats skip single-channel SSH hosts", () => {
         username: "user",
         tags: [],
         os: "linux",
+        distro: "ubuntu",
         singleChannelSsh: true,
-      },
+      } as never,
       undefined,
       null,
     ),
-    false,
+    true,
   );
 });
 

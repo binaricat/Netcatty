@@ -14,6 +14,16 @@ const host = (overrides: Partial<Host> = {}): Host => ({
   ...overrides,
 });
 
+test("applyGroupDefaults ignores a legacy single-channel group flag", () => {
+  const result = applyGroupDefaults(
+    host(),
+    { deviceType: "network", singleChannelSsh: true } as Partial<GroupConfig>,
+  );
+
+  assert.equal(result.deviceType, "network");
+  assert.equal("singleChannelSsh" in result, false);
+});
+
 test("applyGroupDefaults lets a host proxy profile override a group custom proxy", () => {
   const groupDefaults: Partial<GroupConfig> = {
     proxyConfig: { type: "http", host: "group-proxy.example.com", port: 3128 },
@@ -511,6 +521,19 @@ test("sanitizeGroupConfig keeps a still-valid fontFamily untouched", () => {
   const after = sanitizeGroupConfig(before);
   assert.equal(after.fontFamily, "jetbrains-mono");
   assert.equal(after.fontFamilyOverride, true);
+});
+
+test("sanitizeGroupConfig drops a legacy single-channel SSH flag", () => {
+  const source = {
+    path: "team",
+    username: "alice",
+    singleChannelSsh: true,
+  } as Parameters<typeof sanitizeGroupConfig>[0];
+  const after = sanitizeGroupConfig(source);
+
+  assert.equal("singleChannelSsh" in after, false);
+  assert.equal(after.username, "alice");
+  assert.equal("singleChannelSsh" in source, true);
 });
 
 test("sanitizeGroupConfig preserves legacy group passwords as password-only", () => {

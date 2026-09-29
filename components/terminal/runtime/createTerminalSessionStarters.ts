@@ -625,10 +625,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         useSshAgent?: boolean;
       }): Promise<string> => {
         // Reconnect supersedes a Copy/Split intent that was still waiting for credentials.
-        const sourceSessionId = (
-          ctx.requireFreshConnectionOnReconnectRef?.current
-          || ctx.host.singleChannelSsh === true
-        )
+        const sourceSessionId = ctx.requireFreshConnectionOnReconnectRef?.current
           ? undefined
           : ctx.reuseConnectionFromSessionIdRef?.current;
         if (ctx.reuseConnectionFromSessionIdRef) {
@@ -701,7 +698,6 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
           charset: ctx.host.charset,
           // Persist for session-backed SFTP opens (AI tools / clipboard paste).
           sftpFileProtocol: ctx.host.sftpFileProtocol || "auto",
-          singleChannelSsh: ctx.host.singleChannelSsh === true,
           env: termEnv,
           proxy: proxyConfig,
           jumpHosts: jumpHosts.length > 0 ? jumpHosts : undefined,

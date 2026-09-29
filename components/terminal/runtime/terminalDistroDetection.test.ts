@@ -6,10 +6,9 @@ import {
   runDistroDetection,
 } from "./terminalDistroDetection.ts";
 
-test("runDistroDetection skips POSIX probes when singleChannelSsh is enabled", async () => {
+test("runDistroDetection still probes when only a legacy host flag is set", async () => {
   let distroProbeCalls = 0;
-  const detected: string[] = [];
-  const token = registerConnectionToken("bastion-session");
+  const token = registerConnectionToken("legacy-flag-session");
 
   await runDistroDetection({
     host: {
@@ -22,20 +21,17 @@ test("runDistroDetection skips POSIX probes when singleChannelSsh is enabled", a
     terminalBackend: {
       getSessionRemoteInfo: async () => ({
         success: true,
-        remoteSshVersion: "CLOUDBILITY-4.14",
+        remoteSshVersion: "OpenSSH_9.6",
       }),
       getSessionDistroInfo: async () => {
         distroProbeCalls += 1;
-        return { success: false, error: "must not probe single-channel SSH" };
+        return { success: true, stdout: 'ID="ubuntu"\n' };
       },
     },
-    onOsDetected: (_hostId: string, distro: string) => {
-      detected.push(distro);
-    },
-  } as never, "bastion-session", token);
+    onOsDetected: () => undefined,
+  } as never, "legacy-flag-session", token);
 
-  assert.equal(distroProbeCalls, 0);
-  assert.deepEqual(detected, []);
+  assert.equal(distroProbeCalls, 1);
 });
 
 test("runDistroDetection skips POSIX probes when the SSH banner is a one-channel bastion", async () => {

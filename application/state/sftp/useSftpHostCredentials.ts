@@ -205,7 +205,6 @@ export const buildSftpHostCredentials = ({
     // the original negotiation failure when opening their SFTP pane,
     // even though the terminal session works.
     legacyAlgorithms: host.legacyAlgorithms,
-    singleChannelSsh: host.singleChannelSsh === true,
     skipEcdsaHostKey: host.skipEcdsaHostKey,
     algorithmOverrides: host.algorithms,
   };

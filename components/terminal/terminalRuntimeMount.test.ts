@@ -190,8 +190,9 @@ test('terminal view derives the network-device prompt policy before autocomplete
   );
   assert.match(
     terminalSource,
-    /resolveTerminalAutocompleteSettings\(\{[\s\S]*?isNetworkDevice: host\.deviceType === 'network'[\s\S]*?classifyDistroId\(host\.distro\) === 'network-device',[\s\S]*?restrictPtyRewrites: host\.singleChannelSsh === true,/,
+    /resolveTerminalAutocompleteSettings\(\{[\s\S]*?isNetworkDevice: host\.deviceType === 'network'[\s\S]*?classifyDistroId\(host\.distro\) === 'network-device',\s*\}\);/,
   );
+  assert.doesNotMatch(terminalSource, /singleChannelSsh/);
   const autocompleteSource = readFileSync(new URL('./TerminalAutocomplete.tsx', import.meta.url), 'utf8');
   assert.match(
     autocompleteSource,

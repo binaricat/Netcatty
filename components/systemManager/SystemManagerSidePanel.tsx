@@ -87,8 +87,8 @@ export const SystemManagerSidePanel = memo(function SystemManagerSidePanel({
   const [peerSingleChannel, setPeerSingleChannel] = useState<boolean | null>(null);
 
   useEffect(() => {
-    if (!sessionId || !isConnected || sessionHost?.singleChannelSsh === true) {
-      setPeerSingleChannel(sessionHost?.singleChannelSsh === true);
+    if (!sessionId || !isConnected) {
+      setPeerSingleChannel(false);
       return;
     }
     let cancelled = false;
@@ -102,9 +102,9 @@ export const SystemManagerSidePanel = memo(function SystemManagerSidePanel({
     return () => {
       cancelled = true;
     };
-  }, [isConnected, sessionHost?.singleChannelSsh, sessionId, terminalBackend]);
+  }, [isConnected, sessionId, terminalBackend]);
 
-  const systemManagerSupported = sessionHost?.singleChannelSsh !== true && peerSingleChannel !== true;
+  const systemManagerSupported = peerSingleChannel !== true;
   const capabilitiesEnabled = systemManagerSupported && peerSingleChannel !== null;
 
   const capabilitiesTtlMs = terminalSettings.systemManagerProcessRefreshInterval * 1000;
@@ -536,7 +536,7 @@ export const SystemManagerSidePanel = memo(function SystemManagerSidePanel({
           <SystemOverviewTab
             sessionId={sessionId}
             isVisible={isVisible && resolvedTab === 'overview'}
-            isSupportedOs={isStatsSupportedOs}
+            isSupportedOs={isStatsSupportedOs && peerSingleChannel !== true}
             refreshIntervalSec={terminalSettings.serverStatsRefreshInterval}
           />
         </div>

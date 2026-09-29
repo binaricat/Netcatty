@@ -1133,7 +1133,6 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     systemUnknown: resolvedAutocompleteOs === 'unknown',
     isNetworkDevice: host.deviceType === 'network'
       || classifyDistroId(host.distro) === 'network-device',
-    restrictPtyRewrites: host.singleChannelSsh === true,
   });
 
   const resolveSftpInitialPath = useCallback(async (options?: {

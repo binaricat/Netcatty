@@ -305,6 +305,16 @@ test("sanitizeHost removes hidden built-in credentials and transport state from 
   }
 });
 
+test("sanitizeHost drops a legacy single-channel SSH flag", () => {
+  const sanitized = sanitizeHost({
+    ...makeHost(),
+    singleChannelSsh: true,
+  } as Host);
+
+  assert.equal("singleChannelSsh" in sanitized, false);
+  assert.equal(sanitized.hostname, "127.0.0.1");
+});
+
 test("sanitizeHost keeps legacy empty-password hosts on automatic authentication", () => {
   const sanitized = sanitizeHost(makeHost({
     password: undefined,
@@ -645,10 +655,10 @@ test("shouldProbeSessionCwd skips the probe when the SSH banner reveals a networ
   );
 });
 
-test("hostRestrictsExtraSshChannels follows the host toggle and network-device mode", () => {
-  assert.equal(hostRestrictsExtraSshChannels({ singleChannelSsh: true }), true);
+test("hostRestrictsExtraSshChannels follows network-device mode only", () => {
   assert.equal(hostRestrictsExtraSshChannels({ deviceType: "network" }), true);
-  assert.equal(hostRestrictsExtraSshChannels({ singleChannelSsh: false, deviceType: "general" }), false);
+  assert.equal(hostRestrictsExtraSshChannels({ deviceType: "general" }), false);
+  assert.equal(hostRestrictsExtraSshChannels({ singleChannelSsh: true } as never), false);
   assert.equal(hostRestrictsExtraSshChannels(undefined), false);
 });
 
