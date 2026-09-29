@@ -240,9 +240,10 @@ test("createKeyboardInteractiveHandler falls back to the modal on the retry afte
   // Do not re-prefill the stale value, but still allow saving a corrected one.
   assert.equal(sent[0].payload.savedPassword, null);
   assert.equal(sent[0].payload.allowSavePassword, true);
-  // The corrected password is what the user wants stored — pre-check the
-  // save box so it lands on the host record on submit (#3556).
-  assert.equal(sent[0].payload.defaultSavePassword, true);
+  // The box stays unchecked by default (#3558): consecutive keyboard-
+  // interactive rounds carry no failed-auth retry signal, so an auto-tick
+  // here could pre-check saving a different secret over the host password.
+  assert.equal(sent[0].payload.defaultSavePassword, false);
 
   drainPendingRequests(sent);
 });
@@ -369,6 +370,9 @@ test("createKeyboardInteractiveHandler does not prefill after a prior auto-fill 
 
   assert.equal(sent.length, 1);
   assert.equal(sent[0].payload.savedPassword, null);
+  // Codex P1 on #3558: without a failed-auth retry signal this ambiguous
+  // round must also leave the save box unchecked by default.
+  assert.equal(sent[0].payload.defaultSavePassword, false);
 
   drainPendingRequests(sent);
 });

@@ -35,10 +35,11 @@ export interface KeyboardInteractiveRequest {
   /** When false, hide save-password UI (second-factor / EDR challenges). Default true. */
   allowSavePassword?: boolean;
   /**
-   * Pre-check the "Save password" checkbox when the challenge is a retry
-   * after a failed saved-password auto-fill (#3556) — the saved host
-   * password was already rejected, so the corrected value is what the user
-   * wants persisted. Only sent with a first-factor password prompt.
+   * Pre-check the "Save password" checkbox — sent only by emitters that can
+   * prove the challenge is a retry after a saved password was actually
+   * rejected (#3556). Consecutive keyboard-interactive rounds carry no such
+   * signal, so the SSH bridge never defaults this on for a later round of a
+   * multi-round exchange (#3558).
    */
   defaultSavePassword?: boolean;
 }

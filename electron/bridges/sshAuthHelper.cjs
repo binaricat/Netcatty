@@ -1972,15 +1972,26 @@ function createKeyboardInteractiveHandler(options) {
       );
     const allowSavePassword = !(skipAutoFill || singleSecondaryChallenge);
 
-    // Pre-check the "Save password" box only on a retry after a failed
-    // auto-fill (#3556): we already auto-submitted the stale host password and
-    // the server rejected it, so whatever the user types next is the password
-    // they want stored. Defaulting the checkbox on here means a corrected
-    // password lands on the host record on submit — SFTP/file browser and
-    // later sessions then connect without a manual host edit. Still an
-    // explicit user submit that the user can untick; nothing is stored unless
-    // the modal submits.
-    const defaultSavePassword = allowSavePassword && autoFilledOnce;
+    // Codex P1 on #3558: a later round of an in-flight keyboard-interactive
+    // exchange carries no signal telling us whether the server *rejected* the
+    // auto-filled password or is *chaining* to the next factor of a
+    // multi-round exchange — ssh2 re-delivers USERAUTH_INFO_REQUEST for every
+    // round directly to the keyboard-interactive listener without consulting
+    // the auth handler, and a keyboard-interactive method rejected via
+    // USERAUTH_FAILURE is never re-offered by the auth handlers (whenever a
+    // rejection is followed by a re-offer it goes through partialSuccess,
+    // which already forces allowSavePassword = false above). autoFilledOnce
+    // therefore only proves the saved password was *submitted* in an earlier
+    // round. A generic "Password:" round may be a different secret (#2150),
+    // so the save checkbox on such a round must stay available (unchecked) —
+    // exactly as reviewed on #2151 P2 — but must never be pre-checked from
+    // autoFilledOnce alone: a pre-checked second-factor response would
+    // overwrite the host login password on submit.
+    //
+    // The field stays part of the payload contract so emitters that surface a
+    // genuine failed-auth retry signal can default it on safely (#3556) —
+    // the renderer still gates it on allowSavePassword and a password slot.
+    const defaultSavePassword = false;
 
     console.log(`${logPrefix} Showing modal for ${promptsData.length} prompts`);
     try { onPromptShown?.(); } catch (err) { console.warn(`${logPrefix} onPromptShown callback threw`, err); }

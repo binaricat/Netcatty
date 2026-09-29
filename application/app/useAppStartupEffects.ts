@@ -553,6 +553,7 @@ export function useAppStartupEffects(ctx: StartupEffectsContext) {
         hostname: request.hostname,
         savedPassword: request.savedPassword,
         allowSavePassword: request.allowSavePassword !== false,
+        defaultSavePassword: request.defaultSavePassword === true,
       }]);
     });
     const unsubscribeCancelled = bridge.onKeyboardInteractiveCancelled?.((event) => {
