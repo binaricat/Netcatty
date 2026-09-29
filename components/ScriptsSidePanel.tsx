@@ -174,10 +174,14 @@ export function buildScriptsSidePanelRows({
   snippets,
   packages,
   expandedPaths,
+  snippetsBeforeChildren = false,
 }: {
   snippets: Snippet[];
   packages: string[];
   expandedPaths: Set<string>;
+  /** Emit each package's own snippets before its sub-packages so flat views
+   * (stacked chips) keep every package's chips attached to its section. */
+  snippetsBeforeChildren?: boolean;
 }): TreeRow[] {
   const normalizedPackages = new Set(collectScriptsSidePanelPackagePaths(packages, snippets));
 
@@ -230,6 +234,11 @@ export function buildScriptsSidePanelRows({
   const snippetsIn = (pkg: string | null): Snippet[] =>
     sortByVaultOrder(snippetsByPackage.get(pkg ?? '') ?? []);
 
+  const emitSnippets = (localSnippets: Snippet[], pkg: string, depth: number) =>
+    localSnippets.forEach((snippet) =>
+      rows.push({ type: 'snippet', id: snippet.id, depth: depth + 1, snippet, packagePath: pkg }),
+    );
+
   const rows: TreeRow[] = [];
   const walk = (pkg: string, depth: number) => {
     const children = childPackagesOf(pkg);
@@ -249,10 +258,15 @@ export function buildScriptsSidePanelRows({
     });
 
     if (!isExpanded) return;
+    if (snippetsBeforeChildren) {
+      // Flat stacked view: a package's chips must follow its own section
+      // header, not trail after its nested children's chips.
+      emitSnippets(localSnippets, pkg, depth);
+      children.forEach((child) => walk(child, depth + 1));
+      return;
+    }
     children.forEach((child) => walk(child, depth + 1));
-    localSnippets.forEach((snippet) =>
-      rows.push({ type: 'snippet', id: snippet.id, depth: depth + 1, snippet, packagePath: pkg }),
-    );
+    emitSnippets(localSnippets, pkg, depth);
   };
 
   snippetsIn(null).forEach((snippet) =>
@@ -485,8 +499,15 @@ const ScriptsSidePanelInner: React.FC<ScriptsSidePanelProps> = ({
     if (!isVisible) return [];
     if (searchMatches !== null) return [];
 
-    return buildScriptsSidePanelRows({ snippets, packages, expandedPaths });
-  }, [snippets, packages, expandedPaths, searchMatches, isVisible]);
+    return buildScriptsSidePanelRows({
+      snippets,
+      packages,
+      expandedPaths,
+      // Stacked chips wrap flat, so each package's chips must stay attached
+      // to its own section header.
+      snippetsBeforeChildren: viewMode === 'stacked',
+    });
+  }, [snippets, packages, expandedPaths, searchMatches, isVisible, viewMode]);
 
   type ScriptsListItem =
     | { key: string; kind: 'search'; snippet: Snippet }
@@ -1157,11 +1178,22 @@ const ScriptsSidePanelInner: React.FC<ScriptsSidePanelProps> = ({
               {listItems.map((item) => {
                 if (item.kind === 'package') {
                   return (
-                    <div
+                    <button
                       key={item.key}
-                      className="w-full basis-full flex items-center gap-1.5 pt-1.5 pb-0.5"
+                      type="button"
+                      onClick={() => togglePackage(item.row.path)}
+                      aria-expanded={item.row.isExpanded}
+                      className="w-full basis-full flex items-center gap-1.5 pt-1.5 pb-0.5 text-left rounded-sm hover:bg-accent/40 transition-colors"
                       style={{ paddingLeft: 8 + Math.min(item.row.depth, 4) * 10 }}
                     >
+                      <ChevronRight
+                        size={11}
+                        className={cn(
+                          'shrink-0 text-muted-foreground transition-transform',
+                          item.row.isExpanded && 'rotate-90',
+                          !item.row.hasChildren && 'opacity-0',
+                        )}
+                      />
                       <Package size={11} className="shrink-0 text-primary/80" />
                       <span className="min-w-0 truncate text-[10px] font-medium text-muted-foreground">
                         {item.row.name}
@@ -1169,7 +1201,7 @@ const ScriptsSidePanelInner: React.FC<ScriptsSidePanelProps> = ({
                       <span className="shrink-0 text-[10px] text-muted-foreground tabular-nums">
                         {item.countLabel}
                       </span>
-                    </div>
+                    </button>
                   );
                 }
                 const snippet = item.kind === 'search' ? item.snippet : item.row.snippet;
@@ -1765,35 +1797,39 @@ const SnippetChip = memo<SnippetChipProps>(({
   deleteLabel,
 }) => (
   <ContextMenu>
+    {/* Radix ContextMenuTrigger needs a real DOM element (Tooltip.Root renders
+        none), so mirror SnippetRow and wrap the tooltip in a plain div. */}
     <ContextMenuTrigger asChild>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            type="button"
-            onClick={onClick}
-            aria-pressed={multiSelect ? selected : undefined}
-            className={cn(
-              'h-6 max-w-full min-w-0 px-2 rounded-md border border-border/60 bg-muted/40 hover:bg-accent/60 text-[11px] flex items-center gap-1 transition-colors',
-              selected && 'bg-primary/10 border-primary/40 hover:bg-primary/15',
-            )}
-          >
-            {multiSelect ? (
-              <CheckSquare
-                size={11}
-                className={cn('shrink-0', selected ? 'text-primary' : 'text-muted-foreground/70')}
-              />
-            ) : isScriptSnippet(snippet) ? (
-              <Play size={11} className="shrink-0 text-primary" />
-            ) : (
-              <Zap size={11} className="shrink-0 text-muted-foreground" />
-            )}
-            <span className="min-w-0 truncate">{snippet.label}</span>
-          </button>
-        </TooltipTrigger>
-        <TooltipContent side="right" align="start">
-          <SnippetCommandTooltipContent label={snippet.label} command={snippet.command} />
-        </TooltipContent>
-      </Tooltip>
+      <div className="min-w-0 max-w-full">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={onClick}
+              aria-pressed={multiSelect ? selected : undefined}
+              className={cn(
+                'h-6 max-w-full min-w-0 px-2 rounded-md border border-border/60 bg-muted/40 hover:bg-accent/60 text-[11px] flex items-center gap-1 transition-colors',
+                selected && 'bg-primary/10 border-primary/40 hover:bg-primary/15',
+              )}
+            >
+              {multiSelect ? (
+                <CheckSquare
+                  size={11}
+                  className={cn('shrink-0', selected ? 'text-primary' : 'text-muted-foreground/70')}
+                />
+              ) : isScriptSnippet(snippet) ? (
+                <Play size={11} className="shrink-0 text-primary" />
+              ) : (
+                <Zap size={11} className="shrink-0 text-muted-foreground" />
+              )}
+              <span className="min-w-0 truncate">{snippet.label}</span>
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="right" align="start">
+            <SnippetCommandTooltipContent label={snippet.label} command={snippet.command} />
+          </TooltipContent>
+        </Tooltip>
+      </div>
     </ContextMenuTrigger>
     <ContextMenuContent>
       {onRunParallel ? (
