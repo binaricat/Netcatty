@@ -549,12 +549,25 @@ const ScriptsSidePanelInner: React.FC<ScriptsSidePanelProps> = ({
   const stackedSentinelRef = useRef<HTMLDivElement | null>(null);
 
   // Restart the lazy window whenever the underlying result set changes
-  // (new search, package expand/collapse, snippet edits, view-mode switch).
+  // (new search, package list changes, snippet edits, view-mode switch) — but
+  // NOT on package expand/collapse. Expanding/collapsing only reshapes the
+  // same result set; resetting there would drop the user's lazy-loaded window
+  // and remount the package they just toggled, forcing them to re-scroll.
+  // Keyed by data identity, not by listItems reference, for that reason.
   // Reset during render — not in an effect — so the first render of a new
   // result set never slices with the previous, potentially very large window.
-  const [prevListItems, setPrevListItems] = useState(listItems);
-  if (prevListItems !== listItems) {
-    setPrevListItems(listItems);
+  const stackedResultSetKey = useMemo(() => {
+    if (searchMatches !== null) {
+      return `search:${searchMatches.map((snippet) => snippet.id).join('\u0000')}`;
+    }
+    return `tree:${viewMode}:${packages.join('\u0000')}:${snippets
+      .map((snippet) => snippet.id)
+      .join('\u0000')}`;
+  }, [searchMatches, viewMode, packages, snippets]);
+
+  const [prevResultSetKey, setPrevResultSetKey] = useState(stackedResultSetKey);
+  if (prevResultSetKey !== stackedResultSetKey) {
+    setPrevResultSetKey(stackedResultSetKey);
     setStackedRenderLimit(STACKED_INITIAL_RENDER_COUNT);
   }
 
@@ -1212,7 +1225,10 @@ const ScriptsSidePanelInner: React.FC<ScriptsSidePanelProps> = ({
             <div className="flex flex-wrap items-center content-start gap-1.5">
               {listItems.slice(0, stackedRenderLimit).map((item) => {
                 if (item.kind === 'package') {
-                  return (
+                  // Mirror the list view's PackageRow context menu so stacked
+                  // mode keeps rename/delete reachable without switching views.
+                  const canMutatePackages = Boolean(onPackagesChange && onSnippetsChange);
+                  const header = (
                     <button
                       key={item.key}
                       type="button"
@@ -1237,6 +1253,29 @@ const ScriptsSidePanelInner: React.FC<ScriptsSidePanelProps> = ({
                         {item.countLabel}
                       </span>
                     </button>
+                  );
+                  if (!canMutatePackages) {
+                    return header;
+                  }
+                  return (
+                    <ContextMenu key={item.key}>
+                      <ContextMenuTrigger asChild>
+                        {header}
+                      </ContextMenuTrigger>
+                      <ContextMenuContent>
+                        <ContextMenuItem
+                          onClick={() => openRenamePackageDialog(item.row.path)}
+                        >
+                          <Edit2 className="mr-2 h-4 w-4" /> {t('common.rename')}
+                        </ContextMenuItem>
+                        <ContextMenuItem
+                          className="text-destructive"
+                          onClick={() => requestDeletePackage(item.row.path)}
+                        >
+                          <Trash2 className="mr-2 h-4 w-4" /> {t('action.delete')}
+                        </ContextMenuItem>
+                      </ContextMenuContent>
+                    </ContextMenu>
                   );
                 }
                 const snippet = item.kind === 'search' ? item.snippet : item.row.snippet;
