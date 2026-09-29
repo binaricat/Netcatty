@@ -65,6 +65,7 @@ const createContext = (term: ReturnType<typeof createTerm>, terminalSettings: Re
     keywordHighlighter: { setRules: noop },
     cursorLineHighlighter: { setBackgroundColor: noop, setEnabled: noop },
     clearTextureAtlas: noop,
+    syncFontLigatures: noop,
     ensureWebglRenderer: async () => undefined,
     dispose: noop,
   };
