@@ -65,6 +65,7 @@ declare global {
     // System Tray / Close to Tray
     setCloseToTray?(enabled: boolean): Promise<{ success: boolean; enabled: boolean }>;
     isCloseToTray?(): Promise<{ enabled: boolean }>;
+    setShowTrayIcon?(enabled: boolean): Promise<{ success: boolean; enabled: boolean }>;
 
     // Auto Launch at system login (hidden to tray)
     getAutoLaunch?(): Promise<{ success: boolean; enabled: boolean; supported: boolean }>;

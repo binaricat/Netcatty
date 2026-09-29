@@ -121,6 +121,8 @@ interface SettingsSystemTabProps {
   setToggleWindowHotkey: (hotkey: string) => void;
   closeToTray: boolean;
   setCloseToTray: (enabled: boolean) => void;
+  showTrayIcon: boolean;
+  setShowTrayIcon: (enabled: boolean) => void;
   autoLaunchEnabled: boolean;
   setAutoLaunchEnabled: (enabled: boolean) => void;
   autoLaunchSupported: boolean;
@@ -173,6 +175,8 @@ const SettingsSystemTab: React.FC<SettingsSystemTabProps> = ({
   setToggleWindowHotkey,
   closeToTray,
   setCloseToTray,
+  showTrayIcon,
+  setShowTrayIcon,
   autoLaunchEnabled,
   setAutoLaunchEnabled,
   autoLaunchSupported,
@@ -1301,6 +1305,18 @@ const SettingsSystemTab: React.FC<SettingsSystemTabProps> = ({
                   <p className="text-sm text-destructive mt-2">{hotkeyError || hotkeyRegistrationError}</p>
                 )}
               </div>
+
+              {/* Show Tray Icon */}
+              <SettingRow
+                anchorId="system-show-tray-icon"
+                label={t("settings.globalHotkey.showTrayIcon")}
+                description={t("settings.globalHotkey.showTrayIconDesc")}
+              >
+                <Toggle
+                  checked={showTrayIcon}
+                  onChange={setShowTrayIcon}
+                />
+              </SettingRow>
 
               {/* Close to Tray */}
               <SettingRow

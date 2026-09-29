@@ -229,6 +229,8 @@ export const esCoreMessages: Messages = {
   'settings.globalHotkey.reset': 'Restablecer al valor predeterminado',
   'settings.globalHotkey.closeToTray': 'Cerrar a la bandeja del sistema',
   'settings.globalHotkey.closeToTrayDesc': 'Cuando está activado, cerrar la ventana la minimiza a la bandeja del sistema en lugar de salir.',
+  'settings.globalHotkey.showTrayIcon': 'Mostrar el icono de la bandeja del sistema',
+  'settings.globalHotkey.showTrayIconDesc': 'Cuando está desactivado, el icono de la bandeja se oculta pero la aplicación sigue ejecutándose en segundo plano.',
   'settings.globalHotkey.enabled': 'Activar tecla de acceso global',
   'settings.globalHotkey.enabledDesc': 'Registra atajos de teclado a nivel de todo el sistema. Cuando está desactivado, todas las teclas de acceso global se desregistran.',
   'settings.globalHotkey.hint': 'La tecla de acceso global funciona en todo el sistema para mostrar u ocultar la ventana rápidamente (terminal estilo Quake).',

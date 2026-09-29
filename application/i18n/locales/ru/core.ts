@@ -298,6 +298,8 @@ export const ruCoreMessages: Messages = {
   'settings.globalHotkey.reset': 'Сбросить по умолчанию',
   'settings.globalHotkey.closeToTray': 'Сворачивать в системный трей',
   'settings.globalHotkey.closeToTrayDesc': 'Если включено, при закрытии окно будет сворачиваться в системный трей вместо выхода из приложения.',
+  'settings.globalHotkey.showTrayIcon': 'Показывать значок в системном трее',
+  'settings.globalHotkey.showTrayIconDesc': "Если отключено, значок в трее скрывается, но приложение продолжает работать в фоне.",
   'settings.globalHotkey.enabled': 'Включить глобальную горячую клавишу',
   'settings.globalHotkey.enabledDesc': 'Регистрировать системные сочетания клавиш. Когда отключено, все глобальные горячие клавиши снимаются с регистрации.',
   'settings.globalHotkey.hint': 'Глобальная горячая клавиша работает на уровне всей системы и позволяет быстро показывать или скрывать окно (терминал в стиле Quake).',

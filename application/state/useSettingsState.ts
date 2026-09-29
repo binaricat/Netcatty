@@ -67,6 +67,7 @@ import {
   STORAGE_KEY_EXPLORER_CONTEXT_MENU_ENABLED,
   STORAGE_KEY_TOGGLE_WINDOW_HOTKEY,
   STORAGE_KEY_CLOSE_TO_TRAY,
+  STORAGE_KEY_SHOW_TRAY_ICON,
   STORAGE_KEY_AUTO_LAUNCH_ENABLED,
   STORAGE_KEY_HTTP_NETWORK_PROXY,
   STORAGE_KEY_GLOBAL_HOTKEY_ENABLED,
@@ -547,6 +548,12 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
   const [closeToTray, setCloseToTray] = useState<boolean>(() => {
     const stored = readStoredString(STORAGE_KEY_CLOSE_TO_TRAY);
     // Default to true (enabled)
+    if (stored === null) return true;
+    return stored === 'true';
+  });
+  const [showTrayIcon, setShowTrayIcon] = useState<boolean>(() => {
+    const stored = readStoredString(STORAGE_KEY_SHOW_TRAY_ICON);
+    // Default to true so the tray icon keeps its current always-visible behavior
     if (stored === null) return true;
     return stored === 'true';
   });
@@ -1791,6 +1798,7 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
     toggleWindowHotkey,
     globalHotkeyEnabled,
     closeToTray,
+    showTrayIcon,
     autoLaunchEnabled,
     windowOpacityRecord,
     windowOpacityMutationSourceRef,
@@ -2156,6 +2164,8 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
     setToggleWindowHotkey,
     closeToTray,
     setCloseToTray,
+    showTrayIcon,
+    setShowTrayIcon,
     autoLaunchEnabled,
     setAutoLaunchEnabled,
     autoLaunchSupported,

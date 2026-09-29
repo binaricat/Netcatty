@@ -677,6 +677,8 @@ const SettingsPageContent: React.FC<{ settings: SettingsState; appLock?: AppLock
                                 setToggleWindowHotkey={settings.setToggleWindowHotkey}
                                 closeToTray={settings.closeToTray}
                                 setCloseToTray={settings.setCloseToTray}
+                                showTrayIcon={settings.showTrayIcon}
+                                setShowTrayIcon={settings.setShowTrayIcon}
                                 autoLaunchEnabled={settings.autoLaunchEnabled}
                                 setAutoLaunchEnabled={settings.setAutoLaunchEnabled}
                                 autoLaunchSupported={settings.autoLaunchSupported}

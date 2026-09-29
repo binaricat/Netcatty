@@ -19,6 +19,9 @@ let sendWhenRendererReady = null;
 let getSystemMenuMainWindow = null;
 let tray = null;
 let closeToTray = false;
+// Separate user preference: whether the tray icon itself is shown at all.
+// Defaults to true so existing behavior (a visible tray icon) is unchanged.
+let showTrayIcon = true;
 let currentHotkey = null;
 let hotkeyEnabled = false;
 // True while a hidden auto-launch cold start has no visible window yet.
@@ -1134,49 +1137,78 @@ function destroyTray() {
 }
 
 /**
+ * Reconcile the tray's existence with the current preferences:
+ * - showTrayIcon=false always wins: the user asked for no tray icon, so the
+ *   tray is destroyed even if close-to-tray or the hidden-launch pin is on.
+ * - Otherwise the tray exists when close-to-tray is enabled, or while a
+ *   hidden auto-launch cold start has pinned it.
+ */
+function syncTrayVisibility() {
+  if (!showTrayIcon) {
+    destroyTray();
+    return;
+  }
+  if (closeToTray) {
+    if (!tray) {
+      createTray();
+    }
+    return;
+  }
+  // A hidden auto-launch cold start pins the tray regardless of this
+  // preference until its window is actually shown once — otherwise a user
+  // with close-to-tray off would get a windowless, trayless zombie process.
+  if (!hiddenLaunchTrayPinned) {
+    destroyTray();
+  }
+}
+
+/**
  * Set close-to-tray behavior
  */
 function setCloseToTray(enabled) {
   closeToTray = !!enabled;
 
-  if (closeToTray) {
-    // Create tray if it doesn't exist
-    if (!tray) {
-      createTray();
-    }
-  } else {
+  if (!closeToTray) {
     clearPendingFullscreenHide(getMainWindow());
-    // A hidden auto-launch cold start pins the tray regardless of this
-    // preference until its window is actually shown once — otherwise a user
-    // with close-to-tray off would get a windowless, trayless zombie process.
-    if (!hiddenLaunchTrayPinned) {
-      destroyTray();
-    }
   }
+  syncTrayVisibility();
 
   return { success: true, enabled: closeToTray };
 }
 
 /**
+ * Set whether the system tray icon is shown at all. The app keeps running
+ * in the background either way; only the icon's visibility changes.
+ */
+function setShowTrayIcon(enabled) {
+  showTrayIcon = !!enabled;
+  syncTrayVisibility();
+  return { success: true, enabled: showTrayIcon };
+}
+
+/**
  * Force-create the tray for a hidden auto-launch cold start and keep it
  * alive even if close-to-tray is later disabled, until the pin is released.
+ * An explicit "hide tray icon" preference still wins — the pin only exists
+ * to avoid an unreachable zombie, not to override the user's choice.
  */
 function pinTrayForHiddenLaunch() {
   hiddenLaunchTrayPinned = true;
-  if (!tray) {
+  if (!tray && showTrayIcon) {
     createTray();
   }
 }
 
 /**
  * Release the hidden-launch tray pin once its window has been shown. If the
- * user's close-to-tray preference is off, the tray is destroyed now instead
- * of lingering until the next close-to-tray toggle.
+ * user's close-to-tray preference is off (or they opted out of the tray
+ * icon entirely), the tray is destroyed now instead of lingering until the
+ * next close-to-tray toggle.
  */
 function releaseHiddenLaunchTrayPin() {
   if (!hiddenLaunchTrayPinned) return;
   hiddenLaunchTrayPinned = false;
-  if (!closeToTray) {
+  if (!closeToTray || !showTrayIcon) {
     destroyTray();
   }
 }
@@ -1238,6 +1270,11 @@ function registerHandlers(ipcMain) {
   // Get close-to-tray status
   ipcMain.handle("netcatty:tray:isCloseToTray", async () => {
     return { enabled: closeToTray };
+  });
+
+  // Set whether the system tray icon is shown at all
+  ipcMain.handle("netcatty:tray:setShowTrayIcon", async (_event, { enabled }) => {
+    return setShowTrayIcon(enabled);
   });
 
   // Update tray menu data
@@ -1357,6 +1394,7 @@ module.exports = {
   pinTrayForHiddenLaunch,
   releaseHiddenLaunchTrayPin,
   getTray: () => tray,
+  setShowTrayIcon,
   getTrayPanelWindow: () => trayPanelWindow,
   // Test helpers
   __flushPendingPortForwardTogglesForTests: flushPendingPortForwardToggles,

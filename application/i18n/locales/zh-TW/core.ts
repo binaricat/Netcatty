@@ -320,6 +320,8 @@ export const zhTWCoreMessages: Messages = {
   'settings.globalHotkey.reset': '恢復預設',
   'settings.globalHotkey.closeToTray': '關閉時最小化到系統匣',
   'settings.globalHotkey.closeToTrayDesc': '啟用後，關閉視窗將最小化到系統匣而不是結束程式。',
+  'settings.globalHotkey.showTrayIcon': '顯示系統匣圖示',
+  'settings.globalHotkey.showTrayIconDesc': '停用後，將隱藏系統匣中的應用圖示，應用程式仍會在背景正常執行。',
   'settings.globalHotkey.enabled': '啟用全域快速鍵',
   'settings.globalHotkey.enabledDesc': '註冊系統級鍵盤快速鍵。停用後將取消所有全域快速鍵註冊。',
   'settings.globalHotkey.hint': '全域快速鍵在系統範圍內工作，可快速顯示或隱藏視窗（下拉式終端風格）。',

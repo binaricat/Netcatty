@@ -1771,6 +1771,55 @@ test("setCloseToTray(false) still destroys an unpinned tray as before", async ()
   }
 });
 
+test("setShowTrayIcon(false) hides the tray even with close-to-tray on", async () => {
+  const bridge = loadBridge();
+  const electronModule = createElectronStub();
+  const { ipcMain } = await enableCloseToTray(bridge, electronModule);
+
+  try {
+    assert.notEqual(bridge.getTray(), null);
+    const result = await ipcMain.handlers.get("netcatty:tray:setShowTrayIcon")(null, { enabled: false });
+    assert.deepEqual(result, { success: true, enabled: false });
+    assert.equal(bridge.getTray(), null, "the hide-tray-icon preference must win over close-to-tray");
+  } finally {
+    bridge.cleanup();
+  }
+});
+
+test("setShowTrayIcon(true) recreates the tray when close-to-tray is on", async () => {
+  const bridge = loadBridge();
+  const electronModule = createElectronStub();
+  const { ipcMain } = await enableCloseToTray(bridge, electronModule);
+
+  try {
+    await ipcMain.handlers.get("netcatty:tray:setShowTrayIcon")(null, { enabled: false });
+    assert.equal(bridge.getTray(), null);
+    await ipcMain.handlers.get("netcatty:tray:setShowTrayIcon")(null, { enabled: true });
+    assert.notEqual(bridge.getTray(), null, "re-enabling the icon must restore the tray");
+  } finally {
+    bridge.cleanup();
+  }
+});
+
+test("pinTrayForHiddenLaunch respects the hidden tray icon preference", () => {
+  const bridge = loadBridge();
+  const electronModule = createElectronStub();
+  bridge.init({ electronModule, getMainWindow: () => null });
+  const ipcMain = createIpcMainStub();
+  bridge.registerHandlers(ipcMain);
+
+  return ipcMain.handlers.get("netcatty:tray:setShowTrayIcon")(null, { enabled: false }).then(async () => {
+    try {
+      bridge.pinTrayForHiddenLaunch();
+      assert.equal(bridge.getTray(), null, "an explicit hide-tray-icon choice must not be overridden by the hidden-launch pin");
+      bridge.releaseHiddenLaunchTrayPin();
+      assert.equal(bridge.getTray(), null);
+    } finally {
+      bridge.cleanup();
+    }
+  });
+});
+
 test("tray panel forwarding start reaches the main renderer coordinator", async () => {
   await withPlatform("darwin", async () => {
     const bridge = loadBridge();
