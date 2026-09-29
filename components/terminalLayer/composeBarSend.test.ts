@@ -15,7 +15,7 @@ const code = ts.transpileModule(source.slice(start, end) + '\nglobalThis.send = 
 }).outputText;
 
 type Status = 'connected' | 'connecting' | 'disconnected';
-type Executor = () => boolean | Promise<boolean>;
+type Executor = (text: string, executeImmediately: boolean, options?: { broadcast?: boolean; sensitive?: boolean }) => boolean | Promise<boolean>;
 function setup(
   statuses: Status[],
   broadcast = false,
@@ -86,6 +86,19 @@ test('bypassed fan-out into a lagging sensitive peer keeps the whole send out of
       false,
     );
   }
+});
+
+test('bypassed fan-out preserves a sensitive peer snapshot across executor wake', async () => {
+  const sensitive = new Set(['1']);
+  let sensitiveAtWrite: boolean | undefined;
+  const executors = new Map<string, Executor>([['1', async (_text, _executeImmediately, options) => {
+    await Promise.resolve();
+    sensitive.delete('1');
+    sensitiveAtWrite = options?.sensitive;
+    return true;
+  }]]);
+  assert.equal(await setup(['connected', 'connected'], true, executors, sensitive, true).send('secret'), false);
+  assert.equal(sensitiveAtWrite, true);
 });
 
 test('without the password bypass sensitive input is excluded for executor and fallback paths', async () => {

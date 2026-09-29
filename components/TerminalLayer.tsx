@@ -2409,10 +2409,9 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
         if (executor) {
           pendingSends.push(Promise.resolve(executor(text, false, {
             broadcast: false,
-            // Bypassed password fan-out (#3488): the peer's executor derives
-            // sensitivity from its own prompt, so force the focused session's
-            // sensitive marker to keep input interceptors skipped on its write.
-            ...(focusedSensitive ? { sensitive: true } : {}),
+            // Preserve both prompt snapshots across an asynchronous wake: the
+            // peer may clear its prompt classification before the actual write.
+            ...(focusedSensitive || recipientSensitive ? { sensitive: true } : {}),
           })).then(
             (sent) => {
               // A lagging peer can reach its password prompt by delivery time;
