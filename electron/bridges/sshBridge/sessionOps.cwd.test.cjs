@@ -851,7 +851,9 @@ test("getSessionPwd reads pwd from the interactive shell without extra exec", as
   const api = makeApi({
     singleChannelSsh: true,
     remoteSshVersion: "SSH-2.0-CLOUDBILITY-4.14",
-    _promptTrackTail: "[root@host ~]# ",
+    _promptTrackTail: "[root@host /tmp]# ",
+    lastIdlePromptAt: 20,
+    interactiveCommandBaseline: { at: 10, tail: "[root@host ~]# " },
     stream,
     conn: {
       exec() { execCalls += 1; },

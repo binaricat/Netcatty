@@ -120,17 +120,65 @@ function isInteractivePwdLine(line) {
   return true;
 }
 
-function extractInteractivePwd(buffer) {
+function isPromptLikeLine(line) {
+  const trimmed = String(line || "").replace(/\s+$/, "");
+  return trimmed.length > 0 && trimmed.length <= 180 && /[#$%>]\s*$/.test(trimmed);
+}
+
+function lastOpenPromptLine(tail) {
+  const text = stripAnsi(String(tail || "")).replace(/\r/g, "\n");
+  if (!text || text.endsWith("\n")) return "";
+  const line = text.split("\n").pop() || "";
+  return line.length <= 180 ? line : "";
+}
+
+function markInteractiveCommandBaseline(session) {
+  if (!session || session.singleChannelSsh !== true) return;
+  session.interactiveCommandBaseline = {
+    at: Number(session.lastIdlePromptAt) || 0,
+    tail: String(session._promptTrackTail || ""),
+  };
+}
+
+function hasConfirmedIdlePromptAfterCommand(session, baseline) {
+  if (!session || !baseline) return false;
+  const at = Number(session.lastIdlePromptAt) || 0;
+  if (at > (Number(baseline.at) || 0) && getFreshIdlePrompt(session)) return true;
+  const tail = String(session._promptTrackTail || "");
+  if (tail === String(baseline.tail || "")) return false;
+  return isPromptLikeLine(lastOpenPromptLine(tail));
+}
+
+function classifyInteractivePwd(buffer) {
   const text = stripAnsi(String(buffer || "")).replace(/\r/g, "\n");
-  const lines = text.split("\n");
-  // 最后一行可能还没收到换行，避免把半截路径当成目录。
-  const complete = text.endsWith("\n") ? lines : lines.slice(0, -1);
-  let found = null;
-  for (const raw of complete) {
-    const line = raw.trim();
-    if (isInteractivePwdLine(line)) found = line;
+  const parts = text.split("\n");
+  const incomplete = text.endsWith("\n") ? "" : (parts.pop() || "");
+  let path = null;
+  const consume = (line) => {
+    if (!line) return "skip";
+    if (!path && line === "pwd") return "skip";
+    if (!path && isInteractivePwdLine(line)) {
+      path = line;
+      return "skip";
+    }
+    if (path && isPromptLikeLine(line)) return "done";
+    return "reject";
+  };
+  for (const raw of parts) {
+    const result = consume(raw.trim());
+    if (result === "done") return { status: "done", path: path };
+    if (result === "reject") return { status: "reject", path: null };
   }
-  return found;
+  const tailLine = incomplete.trim();
+  const tailResult = tailLine ? consume(tailLine) : "skip";
+  if (tailResult === "done") return { status: "done", path: path };
+  if (tailResult === "reject") return { status: "pending", path: null };
+  return { status: "pending", path: null };
+}
+
+function extractInteractivePwd(buffer) {
+  const parsed = classifyInteractivePwd(buffer);
+  return parsed.status === "done" ? parsed.path : null;
 }
 
 function runInteractivePwd(session, timeoutMs, signal) {
@@ -149,8 +197,9 @@ function runInteractivePwd(session, timeoutMs, signal) {
     const onData = (chunk) => {
       buffer += Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);
       if (buffer.length > 65536) buffer = buffer.slice(-32768);
-      const cwd = extractInteractivePwd(buffer);
-      if (cwd) finish(null, cwd);
+      const parsed = classifyInteractivePwd(buffer);
+      if (parsed.status === "done") finish(null, parsed.path);
+      else if (parsed.status === "reject") finish(null, null);
     };
     const onAbort = () => finish(signal && signal.reason instanceof Error ? signal.reason : new Error("pwd cancelled"));
     const timer = setTimeout(() => finish(new Error("pwd timed out")), timeoutMs);
@@ -172,10 +221,12 @@ function runInteractivePwd(session, timeoutMs, signal) {
 async function readInteractivePwd(session, options = {}) {
   if (!session || !session.stream || session.stream.writable === false) return null;
   if (typeof session.stream.write !== "function") return null;
+  const baseline = session.interactiveCommandBaseline;
+  if (!baseline) return null;
   const waitMs = Number.isFinite(options.waitMs) ? options.waitMs : 0;
   const timeoutMs = Number.isFinite(options.timeoutMs) ? options.timeoutMs : 5000;
   const deadline = Date.now() + waitMs;
-  while (!isShellIdleForInjection(session)) {
+  while (!hasConfirmedIdlePromptAfterCommand(session, baseline)) {
     if (Date.now() >= deadline) return null;
     await delayForInteractiveShell(Math.min(200, Math.max(0, deadline - Date.now())), options.signal);
   }
@@ -222,4 +273,5 @@ module.exports = {
   runOnShellSession,
   readInteractivePwd,
   extractInteractivePwd,
+  markInteractiveCommandBaseline,
 };
