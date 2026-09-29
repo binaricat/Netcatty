@@ -834,6 +834,9 @@ export const useSftpTransfers = ({
         // discovery (bounded per-task; the task is already visible/cancellable)
         // so the overwrite dialog shows the real source size, not 0 (#3559).
         const discovered = await sizeDiscoveryPromise;
+        // Cancel during this stat must win before an apply-to-all Replace
+        // deletes an existing symlink.
+        if (cancelledTasksRef.current.has(task.id)) return "cancelled";
         if (discovered && discovered.size >= 0) {
           conflict.newSize = discovered.size;
           if (discovered.lastModified) conflict.newModified = discovered.lastModified;
@@ -1194,6 +1197,10 @@ export const useSftpTransfers = ({
       const remoteSingleFiles = sourcePane.connection.isLocal
         ? []
         : sourceFiles.filter((file) => !file.isDirectory);
+      const preflightFiles = remoteSingleFiles.slice(0, PREFLIGHT_STAT_MAX_FILES);
+      const preflightAttemptedNames = new Set<string>();
+      // Past the cap, and anything a timeout stops the pool from reaching.
+      // Those files keep an unknown plan and are not statted again up front.
       const preflightSkippedNames = new Set(
         remoteSingleFiles.slice(PREFLIGHT_STAT_MAX_FILES).map((file) => file.name),
       );
@@ -1205,13 +1212,13 @@ export const useSftpTransfers = ({
         // measures the live size during the transfer instead of one hung stat
         // blocking the entire selected batch.
         const PREFLIGHT_STAT_TIMEOUT_MS = STAT_SFTP_TIMEOUT_MS;
-        // Also cap in-flight preflight stats: they all share the browse SFTP
-        // session (and the renderer IPC queue), and launching a stat per file
-        // for a huge selection would flood both before any task reaches the
-        // UI. A small worker pool keeps N stats in flight; very large
-        // selections skip the re-stat entirely and keep the safe 0 plan.
+        // These stats share the browse session. Keep a few in flight, and
+        // after the first timeout stop claiming more files so a half-open
+        // session cannot run the whole selection out to 10s each.
+        let preflightStopped = false;
         const statOneRemoteFile = async (file: { name: string; isDirectory: boolean }) => {
           let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
+          let timedOut = false;
           try {
             const stat = await Promise.race([
               Promise.resolve(netcattyBridge.get()?.statSftp?.(
@@ -1220,9 +1227,16 @@ export const useSftpTransfers = ({
                 sourceEncoding,
               )),
               new Promise<undefined>((resolve) => {
-                timeoutTimer = setTimeout(() => resolve(undefined), PREFLIGHT_STAT_TIMEOUT_MS);
+                timeoutTimer = setTimeout(() => {
+                  timedOut = true;
+                  resolve(undefined);
+                }, PREFLIGHT_STAT_TIMEOUT_MS);
               }),
             ]);
+            if (timedOut) {
+              preflightStopped = true;
+              return;
+            }
             if (stat && stat.type !== "symlink" && stat.sizeKnown !== false && stat.size >= 0) {
               freshRemoteMetadata.set(file.name, { size: stat.size, lastModified: stat.lastModified });
             }
@@ -1233,17 +1247,20 @@ export const useSftpTransfers = ({
             if (timeoutTimer) clearTimeout(timeoutTimer);
           }
         };
-        const preflightFiles = remoteSingleFiles.slice(0, PREFLIGHT_STAT_MAX_FILES);
         const workers = Math.min(PREFLIGHT_STAT_CONCURRENCY, preflightFiles.length);
         let preflightCursor = 0;
         await Promise.allSettled(
           Array.from({ length: workers }, async () => {
-            while (preflightCursor < preflightFiles.length) {
+            while (!preflightStopped && preflightCursor < preflightFiles.length) {
               const file = preflightFiles[preflightCursor++];
+              preflightAttemptedNames.add(file.name);
               await statOneRemoteFile(file);
             }
           }),
         );
+        for (const file of preflightFiles) {
+          if (!preflightAttemptedNames.has(file.name)) preflightSkippedNames.add(file.name);
+        }
       }
 
       for (const file of sourceFiles) {

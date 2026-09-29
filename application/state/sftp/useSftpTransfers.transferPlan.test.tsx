@@ -336,6 +336,71 @@ test("remote transfer preflight stats stay within the concurrency cap and file b
   }
 });
 
+test("a preflight timeout stops the rest of the batch", async () => {
+  const extra = 4;
+  const names = Array.from(
+    { length: PREFLIGHT_STAT_CONCURRENCY + extra },
+    (_, index) => `hung-${index}.bin`,
+  );
+  let statCalls = 0;
+  const restore = installGlobals({
+    statSftp: () => {
+      statCalls += 1;
+      return new Promise(() => {});
+    },
+    statLocal: async () => null,
+    startStreamTransfer: async (options: StartOptions) => {
+      sftpTransferCenterStore.ingestBackgroundEvent({
+        type: "completed",
+        transferId: options.transferId,
+        transferred: options.totalBytes ?? 0,
+        totalBytes: options.totalBytes ?? 0,
+        lifecycleEpoch: 0,
+      });
+      return {};
+    },
+    pauseTransfer: async () => ({ success: false, reason: "Transfer is no longer active" }),
+    resumeTransfer: async () => ({ success: false, reason: "Transfer is no longer active" }),
+  });
+
+  let ops: ReturnType<typeof useSftpTransfers> | undefined;
+  let renderer: ReactTestRenderer | undefined;
+  function Probe() {
+    ops = useSftpTransfers({
+      ownerId: "plan-owner-timeout",
+      getActivePane: (side) => (side === "left" ? makePane("left") : makePane("right")),
+      getPaneByConnectionId: () => null,
+      getTabByConnectionId: () => null,
+      updateTab: () => undefined,
+      refresh: async () => undefined,
+      clearCacheForConnection: () => undefined,
+      handleSessionError: () => undefined,
+      sftpSessionsRef: { current: new Map([["remote-conn", "sftp-remote"]]) },
+      connectionCacheKeyMapRef: { current: new Map() },
+      listLocalFiles: async () => [],
+      listRemoteFiles: async () => [],
+    });
+    return null;
+  }
+
+  try {
+    await act(async () => { renderer = create(React.createElement(Probe)); });
+    await act(async () => {
+      await ops!.startTransfer(
+        names.map((name) => ({ name, isDirectory: false })),
+        "left",
+        "right",
+      );
+    });
+    // One wave of preflight stats, then one deferred stat for each of those
+    // files. The rest of the selection is left on an unknown plan.
+    assert.equal(statCalls, PREFLIGHT_STAT_CONCURRENCY * 2);
+  } finally {
+    renderer?.unmount();
+    restore();
+  }
+});
+
 test("files past the preflight bound are not statted again and keep an unknown plan", async () => {
   const extra = 2;
   const names = Array.from({ length: PREFLIGHT_STAT_MAX_FILES + extra }, (_, index) => `bulk-${index}.bin`);
