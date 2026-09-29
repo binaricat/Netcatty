@@ -7,7 +7,9 @@ import {
   clearAllPendingApprovals,
   onApprovalCleared,
   requestApproval,
+  registerGrantPersister,
   resolveApproval,
+  setupMcpApprovalBridge,
 } from './approvalGate';
 import { resolveCattyApprovalDeadlines } from './approvalConstants';
 
@@ -297,6 +299,43 @@ test('resolveApproval skips MCP IPC when the pending entry is already gone', () 
     resolveApproval('mcp_approval_stale', true);
     assert.deepEqual(calls, []);
   } finally {
+    (globalThis as { window?: unknown }).window = previous;
+    clearAllPendingApprovals();
+  }
+});
+
+test('MCP grants persist only after main confirms an active approval', async () => {
+  clearAllPendingApprovals();
+  const previous = (globalThis as { window?: unknown }).window;
+  const saved: string[] = [];
+  let receiveRequest: ((payload: unknown) => void) | undefined;
+  let accepted = false;
+  (globalThis as { window?: unknown }).window = {
+    netcatty: {
+      onMcpApprovalRequest: (listener: (payload: unknown) => void) => {
+        receiveRequest = listener;
+        return () => {};
+      },
+      respondMcpApproval: async () => ({ ok: true, accepted }),
+    },
+  };
+  const removePersister = registerGrantPersister((grant) => saved.push(grant.id));
+  const stopBridge = setupMcpApprovalBridge();
+  try {
+    for (const shouldAccept of [false, true]) {
+      accepted = shouldAccept;
+      const id = `mcp_approval_ack_${shouldAccept}`;
+      receiveRequest?.({ approvalId: id, toolName: 'terminal_execute', args: {}, chatSessionId: '__external_mcp__' });
+      resolveApproval(id, {
+        approved: true,
+        persistGrant: { id, capabilityId: 'terminal.execute', sessionPattern: 'host:h1', createdAt: 1 },
+      });
+      await delay(0);
+      assert.equal(saved.includes(id), shouldAccept);
+    }
+  } finally {
+    stopBridge();
+    removePersister();
     (globalThis as { window?: unknown }).window = previous;
     clearAllPendingApprovals();
   }

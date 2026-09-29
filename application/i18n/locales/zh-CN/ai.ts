@@ -336,9 +336,13 @@ export const zhCNAiMessages: Messages = {
 
   // External MCP
   'ai.externalMcp.title': '对外 MCP',
-  'ai.externalMcp.allowCommandOnHost': '此机同类操作',
-  'ai.externalMcp.allowSession': '此次连接全部允许',
-  'ai.externalMcp.allowHost': '始终允许操作此服务器',
+  'ai.externalMcp.allowCommandOnHost': '始终',
+  'ai.externalMcp.allowCommandOnHostHint': '始终允许在此服务器执行同类操作。',
+  'ai.externalMcp.allowAll': '允许所有操作',
+  'ai.externalMcp.allowSession': '此次连接',
+  'ai.externalMcp.allowSessionHint': '在客户端断开前，允许此次连接的所有操作。',
+  'ai.externalMcp.allowHost': '此服务器',
+  'ai.externalMcp.allowHostHint': '始终允许操作此服务器。',
   'ai.externalMcp.description': '把 Netcatty 作为 MCP 服务器暴露给 Codex、Claude Code、Cursor、Grok 等外部客户端。工具面与应用内 Agent 相同（终端、SFTP、Vault、端口转发）。客户端连接期间请保持 Netcatty 运行。',
   'ai.externalMcp.sessionsExposed': '作用域内会话：{count}',
   'ai.externalMcp.mode': '可用模式',

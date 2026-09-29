@@ -1,4 +1,4 @@
-import { remoteSoftwareRequiresSingleChannel } from './singleChannelSshBanner.shared.cjs';
+import { remoteSoftwareRequiresSingleChannel } from './singleChannelSshBanner.shared.mjs';
 import { Host, Snippet, TerminalSettings } from './models';
 import type { HostOperatingSystem, HostOsSelection } from './models/connection';
 import { sanitizeHostIconFields } from './hostIcon';

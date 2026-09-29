@@ -336,9 +336,13 @@ export const enAiMessages: Messages = {
 
   // External MCP (productized catalog MCP for Codex / Claude Code / Cursor)
   'ai.externalMcp.title': 'External MCP',
-  'ai.externalMcp.allowCommandOnHost': 'This action on host',
-  'ai.externalMcp.allowSession': 'Allow all for this connection',
-  'ai.externalMcp.allowHost': 'Always allow this server',
+  'ai.externalMcp.allowCommandOnHost': 'Always',
+  'ai.externalMcp.allowCommandOnHostHint': 'Always allow this action on this server.',
+  'ai.externalMcp.allowAll': 'Allow all actions',
+  'ai.externalMcp.allowSession': 'This connection',
+  'ai.externalMcp.allowSessionHint': 'Allow all actions from this client until it disconnects.',
+  'ai.externalMcp.allowHost': 'This server',
+  'ai.externalMcp.allowHostHint': 'Always allow actions on this server.',
   'ai.externalMcp.description': 'Expose Netcatty as an MCP server for external clients such as Codex, Claude Code, Cursor, and Grok. Uses the same catalog tools as in-app agents (terminal, SFTP, Vault, port forwarding). Keep Netcatty running while clients are connected.',
   'ai.externalMcp.sessionsExposed': 'Sessions in scope: {count}',
   'ai.externalMcp.mode': 'Availability mode',

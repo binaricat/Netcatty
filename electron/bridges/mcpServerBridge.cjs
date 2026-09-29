@@ -72,6 +72,8 @@ function markExternalMcpSocket(socket) {
     socket.__netcattyExternalMcpCleanupBound = true;
     const cleanup = () => {
       externalMcpSockets.delete(socket);
+      sessionApprovedExternalSockets.delete(socket);
+      clearPendingApprovalsForSocket(socket);
     };
     socket.once("close", cleanup);
     socket.once("end", cleanup);
@@ -86,6 +88,9 @@ function issueExternalMcpAuthToken() {
 
 function revokeExternalMcpAuthToken() {
   externalAuthToken = null;
+  for (const socket of externalMcpSockets) {
+    sessionApprovedExternalSockets.delete(socket);
+  }
 }
 
 function getExternalMcpAuthToken() {
@@ -98,6 +103,7 @@ function disconnectExternalMcpClients() {
   // is reserved for process shutdown paths that call this intentionally.
   for (const socket of Array.from(externalMcpSockets)) {
     externalMcpSockets.delete(socket);
+    sessionApprovedExternalSockets.delete(socket);
     try {
       if (!socket.destroyed) socket.destroy();
     } catch {
@@ -279,17 +285,42 @@ function requestApprovalFromRenderer(toolName, args, chatSessionId, approvalCont
 function resolveApprovalFromRenderer(approvalId, approved, scope = 'once') {
   debugLog("resolveApprovalFromRenderer", { approvalId, approved });
   const entry = pendingApprovals.get(approvalId);
-  if (entry) {
-    pendingApprovals.delete(approvalId);
-    if (approved === true && scope === 'session'
-      && entry.chatSessionId === EXTERNAL_MCP_CHAT_SESSION_ID
-      && externalMcpSockets.has(entry.externalSocket)) {
-      sessionApprovedExternalSockets.add(entry.externalSocket);
+  if (!entry) return false;
+  pendingApprovals.delete(approvalId);
+  const externalSocket = entry.chatSessionId === EXTERNAL_MCP_CHAT_SESSION_ID
+    ? entry.externalSocket
+    : null;
+  const socketValid = entry.chatSessionId !== EXTERNAL_MCP_CHAT_SESSION_ID
+    || Boolean(externalSocket
+      && !externalSocket.destroyed
+      && externalMcpSockets.has(externalSocket)
+      && externalMcpActivityHook?.isEnabled?.());
+  const accepted = approved === true && socketValid;
+  const clearedIds = [approvalId];
+  if (accepted && scope === 'session' && externalSocket) {
+    sessionApprovedExternalSockets.add(externalSocket);
+    for (const [id, pending] of pendingApprovals) {
+      if (pending.externalSocket !== externalSocket) continue;
+      pendingApprovals.delete(id);
+      pending.resolve(true);
+      clearedIds.push(id);
     }
-    entry.resolve(approved);
-    // Main + settings both receive approval requests; clear the sibling card.
-    notifyRendererApprovalCleared([approvalId]);
   }
+  entry.resolve(accepted);
+  // Main + settings both receive approval requests; clear sibling cards.
+  notifyRendererApprovalCleared(clearedIds);
+  return socketValid;
+}
+
+function clearPendingApprovalsForSocket(socket) {
+  const clearedIds = [];
+  for (const [id, entry] of pendingApprovals) {
+    if (entry.externalSocket !== socket) continue;
+    pendingApprovals.delete(id);
+    entry.resolve(false);
+    clearedIds.push(id);
+  }
+  notifyRendererApprovalCleared(clearedIds);
 }
 
 /**
@@ -652,6 +683,7 @@ function syncLiveSessionsToExternalScope(chatSessionId = EXTERNAL_MCP_CHAT_SESSI
       sessionList.push({
         sessionId,
         hostId: session.hostId || previous.hostId || "",
+        savedHostId: session.savedHostId || previous.savedHostId || "",
         hostname: session.hostname || session.host || previous.hostname || "",
         label: session.label || session.hostname || previous.label || sessionId,
         os: session.os || previous.os || "",
@@ -736,6 +768,7 @@ function updateLiveSessionMetadata(sessionList) {
       deviceType: entry.deviceType || "",
       connected: entry.connected !== false,
       hostId: entry.hostId || "",
+      savedHostId: entry.savedHostId || "",
       hostChain: Array.isArray(entry.hostChain) ? entry.hostChain : [],
       activePortForwards: Array.isArray(entry.activePortForwards) ? entry.activePortForwards : [],
       _revision: updateRevision,
@@ -860,6 +893,7 @@ function updateSessionMetadata(sessionList, chatSessionId) {
       deviceType: s.deviceType || "",
       connected: s.connected !== false,
       hostId: s.hostId || "",
+      savedHostId: s.savedHostId || "",
       hostChain: Array.isArray(s.hostChain) ? s.hostChain : [],
       activePortForwards: Array.isArray(s.activePortForwards) ? s.activePortForwards : [],
       _revision: Number.isSafeInteger(s._revision) ? s._revision : updateRevision,
@@ -900,6 +934,9 @@ function mergeSessionMetadata(sessionList, chatSessionId) {
       deviceType: entry.deviceType || previous.deviceType || "",
       connected: entry.connected !== undefined ? entry.connected !== false : previous.connected !== false,
       hostId: entry.hostId || previous.hostId || "",
+      savedHostId: Object.prototype.hasOwnProperty.call(entry, "savedHostId")
+        ? entry.savedHostId || ""
+        : previous.savedHostId || "",
       hostChain: Array.isArray(entry.hostChain)
         ? entry.hostChain
         : (Array.isArray(previous.hostChain) ? previous.hostChain : []),
@@ -1146,7 +1183,7 @@ function getApprovalTarget(params) {
   if (!meta) return null;
   return {
     sessionId: params.sessionId,
-    hostId: meta.hostId || '',
+    hostId: meta.savedHostId || '',
     label: meta.label || meta.hostname || params.sessionId,
     hostname: meta.hostname || '',
   };
@@ -1165,6 +1202,7 @@ function buildOpenedSessionMeta(result, sessionId) {
     deviceType: host.deviceType || "",
     connected: result?.status === "connected",
     hostId: result?.hostId || host.id || "",
+    savedHostId: result?.hostId || host.id || "",
     hostChain: [],
     activePortForwards: [],
   };

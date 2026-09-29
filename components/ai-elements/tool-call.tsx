@@ -249,7 +249,7 @@ function formatToolResult(result: unknown): string {
       const obj = JSON.parse(parsed);
       if (obj && typeof obj === 'object') parsed = obj;
     } catch {
-      return parsed;
+      return result as string;
     }
   }
 
@@ -293,6 +293,7 @@ export interface ToolCallProps extends HTMLAttributes<HTMLDivElement> {
   onAlwaysAllow?: () => void;
   /** Optional source-specific label for the persistent/session approval action. */
   alwaysAllowLabel?: string;
+  alwaysAllowTitle?: string;
 }
 
 async function copyTextToClipboard(text: string): Promise<boolean> {
@@ -323,7 +324,7 @@ async function copyTextToClipboard(text: string): Promise<boolean> {
 
 export const ToolCall = ({
   name, args, result, isError, isLoading, isInterrupted, approvalTarget,
-  approvalStatus, approvalId, onApprove, onReject, onApproveOnce, onAlwaysAllow, alwaysAllowLabel,
+  approvalStatus, approvalId, onApprove, onReject, onApproveOnce, onAlwaysAllow, alwaysAllowLabel, alwaysAllowTitle,
   className, ...props
 }: ToolCallProps) => {
   const { t } = useI18n();
@@ -521,7 +522,7 @@ export const ToolCall = ({
         {statusIcon}
       </button>
 
-      {isPendingApproval && approvalTarget && (
+      {isPendingApproval && approvalTarget && !showApprovalCommand && (
         <div className="border-t border-border/20 px-3 py-1.5 text-xs font-medium">
           {t('ai.chat.targetLabel')}: {approvalTarget.label}
           {approvalTarget.hostname && approvalTarget.hostname !== approvalTarget.label && (
@@ -534,27 +535,34 @@ export const ToolCall = ({
         <div className="border-t border-border/20">
           {showApprovalCommand && reviewCommand && (
             <div className="px-3 py-2 space-y-1.5">
-              {executionContext && (
-                <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-muted-foreground/45">
-                  <span className="font-medium uppercase tracking-wider text-muted-foreground/30">
+              {(approvalTarget || executionContext) && (
+                <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground">
+                  <span className="font-medium uppercase tracking-wider text-muted-foreground/60">
                     {t('ai.chat.targetLabel')}
                   </span>
-                  {executionContext.sessionId && (
+                  {approvalTarget ? (
+                    <span className="min-w-0 break-all font-medium text-foreground/90">
+                      {approvalTarget.label}
+                      {approvalTarget.hostname && approvalTarget.hostname !== approvalTarget.label && (
+                        <span className="ml-1 font-normal text-muted-foreground">({approvalTarget.hostname})</span>
+                      )}
+                    </span>
+                  ) : executionContext?.sessionId && (
                     <span className="font-mono truncate" title={executionContext.sessionId}>
                       {t('ai.chat.approvalSession')}: {executionContext.sessionId}
                     </span>
                   )}
-                  {executionContext.shell && (
+                  {executionContext?.shell && (
                     <span className="font-mono">
                       {t('ai.chat.approvalShell')}: {executionContext.shell}
                     </span>
                   )}
-                  {executionContext.cwd && (
+                  {executionContext?.cwd && (
                     <span className="font-mono truncate" title={executionContext.cwd}>
                       {t('ai.chat.approvalCwd')}: {executionContext.cwd}
                     </span>
                   )}
-                  {executionContext.reason && (
+                  {executionContext?.reason && (
                     <span className="truncate" title={executionContext.reason}>
                       {t('ai.chat.approvalReason')}: {executionContext.reason}
                     </span>
@@ -666,6 +674,7 @@ export const ToolCall = ({
                     size="sm"
                     className="h-7 min-w-0 flex-1 gap-1 px-1.5 text-[11px] font-normal border-green-500/35 text-green-300/95 hover:bg-green-500/10 hover:text-green-300 hover:border-green-500/50"
                     onClick={handleAlwaysAllow}
+                    title={alwaysAllowTitle}
                   >
                     <Check size={12} className="shrink-0" />
                     <span className="truncate">{alwaysAllowLabel || t('ai.chat.alwaysAllow')}</span>

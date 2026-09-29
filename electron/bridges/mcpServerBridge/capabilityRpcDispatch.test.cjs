@@ -5,6 +5,7 @@ const assert = require("node:assert/strict");
 
 const { createCapabilityRpcDispatcher, UNROUTED } = require("./capabilityRpcDispatch.cjs");
 const { CAPABILITY_SURFACES, PERMISSION_MODES } = require("../../capabilities/constants.cjs");
+const { evaluatePermissionWithGrants } = require("../../capabilities/policy.cjs");
 
 function createTestDispatcher(overrides = {}) {
   const invokeVaultAgent = overrides.invokeVaultAgent || (async (op, params) => ({
@@ -82,6 +83,35 @@ test("dispatchCapabilityRpc routes public vault host notes set through approval"
   assert.equal(approvalCalls[0].toolName, "host_notes_set");
   assert.equal(result.ok, true);
   assert.equal(result.notes, "updated");
+});
+
+test("vault host deletion cannot borrow a different session's host grant", async () => {
+  let approvalTarget;
+  let deleted = false;
+  const dispatch = createTestDispatcher({
+    evaluatePermissionWithGrants,
+    permissionGrantsSnapshot: [{
+      id: "trusted-host", capabilityId: "*", sessionPattern: "host:trusted", createdAt: 1,
+    }],
+    getApprovalTarget: () => ({ sessionId: "trusted-session", hostId: "trusted", label: "Trusted" }),
+    requestApprovalFromRenderer: async (_name, _args, _chatSessionId, context) => {
+      approvalTarget = context.target;
+      return false;
+    },
+    invokeVaultAgent: async () => {
+      deleted = true;
+      return { ok: true };
+    },
+  });
+
+  const result = await dispatch("public/vault/hosts/delete", {
+    chatSessionId: "__external_mcp__",
+    sessionId: "trusted-session",
+    hostId: "other-host",
+  });
+  assert.equal(result.ok, false);
+  assert.equal(deleted, false);
+  assert.equal(approvalTarget, null);
 });
 
 test("dispatchCapabilityRpc asks for approval before importing vault notes from the CLI rpc", async () => {

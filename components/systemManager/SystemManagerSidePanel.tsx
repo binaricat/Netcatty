@@ -5,7 +5,7 @@ import { useI18n } from '../../application/i18n/I18nProvider';
 import { SYSTEM_MANAGER_TAB_LAYOUT_DEFAULTS } from '../../application/state/systemManagerTabLayout';
 import { useSystemManagerBackend } from '../../application/state/useSystemManagerBackend';
 import { useTerminalBackend } from '../../application/state/useTerminalBackend';
-import { remoteSoftwareRequiresSingleChannel } from '../../domain/singleChannelSshBanner.shared.cjs';
+import { remoteSoftwareRequiresSingleChannel } from '../../domain/singleChannelSshBanner.shared.mjs';
 import { useToolbarItemLayout } from '../../application/state/useToolbarItemLayout';
 import type { TerminalSettings } from '../../domain/models';
 import type { Host } from '../../domain/models/connection';

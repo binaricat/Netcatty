@@ -130,7 +130,12 @@ function createCapabilityRpcDispatcher(deps) {
       return UNROUTED;
     }
 
-    const approvalTarget = deps.getApprovalTarget?.(params) || null;
+    // Only session.close executes against params.sessionId. Vault, script, and
+    // port-forward operations use other identifiers; an unrelated sessionId
+    // must never select their approval target or match a host grant.
+    const approvalTarget = capability.id === "session.close"
+      ? (deps.getApprovalTarget?.(params) || null)
+      : null;
     const permission = evaluatePermissionWithGrants({
       rpcMethod,
       surface,

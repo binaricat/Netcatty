@@ -4,7 +4,7 @@ import {
   hostRestrictsExtraSshChannels,
   normalizeDistroId,
 } from "../../../domain/host";
-import { remoteSoftwareRequiresSingleChannel } from "../../../domain/singleChannelSshBanner.shared.cjs";
+import { remoteSoftwareRequiresSingleChannel } from "../../../domain/singleChannelSshBanner.shared.mjs";
 import { logger } from "../../../lib/logger";
 import type { TerminalSessionStartersContext } from "./createTerminalSessionStarters.types";
 

@@ -329,25 +329,40 @@ export function resolveApproval(
   pendingApprovals.delete(toolCallId);
   entry.resolve(resolution);
 
-  let persistedGrantId: string | undefined;
-  if (approved && request?.source !== 'codex-app-server' && persistGrants?.length) {
-    for (const grant of persistGrants) {
-      grantPersister?.(grant);
-      persistedGrantId = grant.id;
+  const finish = (accepted: boolean) => {
+    let persistedGrantId: string | undefined;
+    if (approved && accepted && request?.source !== 'codex-app-server' && persistGrants?.length) {
+      for (const grant of persistGrants) {
+        grantPersister?.(grant);
+        persistedGrantId = grant.id;
+      }
     }
-  }
-  if (request) {
-    emitApprovalEvent('approval_resolved', request, {
-      outcome: approved ? 'approved' : 'denied',
-      persistedGrantId,
-    });
-  }
+    if (request) {
+      emitApprovalEvent('approval_resolved', request, {
+        outcome: approved && accepted ? 'approved' : 'denied',
+        persistedGrantId,
+      });
+    }
+  };
 
-  // MCP tool call: also forward response to main process via IPC
+  // The main process owns the MCP timeout and socket lifecycle. Persist a
+  // grant only after it confirms that this approval was still active.
   if (toolCallId.startsWith('mcp_approval_')) {
-    const bridge = (window as unknown as { netcatty?: { respondMcpApproval?: (id: string, approved: boolean, scope: 'once' | 'session') => Promise<unknown> } }).netcatty;
-    bridge?.respondMcpApproval?.(toolCallId, approved, resolution.scope);
+    const bridge = (window as unknown as {
+      netcatty?: {
+        respondMcpApproval?: (id: string, approved: boolean, scope: 'once' | 'session') => Promise<{ ok?: boolean; accepted?: boolean }>;
+      };
+    }).netcatty;
+    if (!bridge?.respondMcpApproval) {
+      finish(false);
+      return;
+    }
+    void bridge.respondMcpApproval(toolCallId, approved, resolution.scope)
+      .then((result) => finish(result?.ok === true && result?.accepted === true))
+      .catch(() => finish(false));
+    return;
   }
+  finish(true);
 }
 
 /**

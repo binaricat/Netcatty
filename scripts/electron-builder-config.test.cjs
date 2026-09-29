@@ -45,6 +45,10 @@ test("build.files includes the single-channel SSH banner matcher", () => {
     config.files.includes("domain/singleChannelSshBanner.shared.cjs"),
     "packaged SSH and SFTP bridges require the shared banner matcher",
   );
+  assert.ok(
+    config.files.includes("domain/singleChannelSshBanner.shared.mjs"),
+    "the shared banner matcher requires its source module",
+  );
   const banner = require("../domain/singleChannelSshBanner.shared.cjs");
   assert.equal(banner.remoteSoftwareRequiresSingleChannel("BHostSSH_7.0"), true);
   assert.equal(banner.remoteSoftwareRequiresSingleChannel("JumpServer"), false);

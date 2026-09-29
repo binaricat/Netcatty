@@ -76,7 +76,7 @@ import {
   resolveLocateSftpPathSessionId,
 } from "../domain/sftpLocatePathInTerminal";
 import { classifyDistroId } from "../domain/host";
-import { remoteSoftwareRequiresSingleChannel } from "../domain/singleChannelSshBanner.shared.cjs";
+import { remoteSoftwareRequiresSingleChannel } from "../domain/singleChannelSshBanner.shared.mjs";
 import { useTerminalBackend } from "../application/state/useTerminalBackend";
 import { isTerminalSensitiveInputActive } from "./terminal/runtime/terminalSensitiveInputRegistry";
 import { isTerminalReadyForCommandInjection } from "./terminal/runtime/terminalCommandInjectionReadyRegistry";

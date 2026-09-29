@@ -35,6 +35,9 @@ function mergeRetentionMeta(previous, fallback) {
     shellType: newer.shellType || older.shellType,
     deviceType: newer.deviceType || older.deviceType,
     hostId: newer.hostId || older.hostId,
+    savedHostId: Object.prototype.hasOwnProperty.call(newer, "savedHostId")
+      ? newer.savedHostId || ""
+      : older.savedHostId,
     hostChain: Array.isArray(newer.hostChain) ? newer.hostChain : older.hostChain,
     // Explicit empty arrays in the newer snapshot clear stopped forwards.
     activePortForwards: Array.isArray(newer.activePortForwards)
@@ -105,6 +108,7 @@ function retainOwnedSessions({
       deviceType: meta.deviceType || "",
       connected: meta.connected !== false,
       hostId: meta.hostId || "",
+      savedHostId: meta.savedHostId || "",
       hostChain: Array.isArray(meta.hostChain) ? meta.hostChain : [],
       activePortForwards: Array.isArray(meta.activePortForwards) ? meta.activePortForwards : [],
       ...(Number.isSafeInteger(meta._revision) ? { _revision: meta._revision } : {}),

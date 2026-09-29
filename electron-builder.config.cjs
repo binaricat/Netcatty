@@ -71,6 +71,7 @@ module.exports = {
         // Main-process SSH, SFTP, and port-forward bridges share this matcher.
         // TypeScript under domain/ is excluded below, so the .cjs must be listed.
         'domain/singleChannelSshBanner.shared.cjs',
+        'domain/singleChannelSshBanner.shared.mjs',
         'lib/**/*.cjs',
         'lib/**/*.json',
         'skills/**/*',

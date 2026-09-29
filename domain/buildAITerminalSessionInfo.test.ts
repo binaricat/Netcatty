@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { buildAITerminalSessionInfo } from "./buildAITerminalSessionInfo.ts";
-import type { Host, TerminalSession } from "../../types";
+import type { Host, TerminalSession } from "../types";
 
 const baseHost = (overrides: Partial<Host> = {}): Host =>
   ({
@@ -92,4 +92,20 @@ test("prefers a session custom name over the shared host label", () => {
     "linux",
   );
   assert.equal(info.label, "Bastion - production");
+});
+
+test("only saved remote hosts can receive persistent server approvals", () => {
+  const saved = baseHost();
+  assert.equal(buildAITerminalSessionInfo(baseSession(), saved, "linux", {
+    allHosts: [saved],
+  }).savedHostId, "h1");
+  assert.equal(buildAITerminalSessionInfo(baseSession(), saved, "linux", {
+    allHosts: [],
+  }).savedHostId, undefined);
+  assert.equal(buildAITerminalSessionInfo(baseSession({ protocol: "local" }), saved, "linux", {
+    allHosts: [saved],
+  }).savedHostId, undefined);
+  assert.equal(buildAITerminalSessionInfo(baseSession({ protocol: "serial" }), saved, "linux", {
+    allHosts: [saved],
+  }).savedHostId, undefined);
 });

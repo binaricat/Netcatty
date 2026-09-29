@@ -118,7 +118,7 @@ export const ExternalMcpApprovalsHost: React.FC = () => {
 
   return (
     <div
-      className="pointer-events-auto fixed bottom-4 right-4 z-[80] flex w-[min(420px,calc(100vw-2rem))] flex-col gap-2"
+      className="pointer-events-auto fixed bottom-4 right-4 z-[80] flex max-h-[calc(100vh-2rem)] w-[min(420px,calc(100vw-2rem))] flex-col gap-2 overflow-y-auto overscroll-contain"
       data-testid="external-mcp-approvals-host"
     >
       <div className="rounded-lg border border-border/60 bg-background/95 p-3 shadow-lg backdrop-blur-sm">
@@ -140,19 +140,49 @@ export const ExternalMcpApprovalsHost: React.FC = () => {
                 onAlwaysAllow={req.target && !req.target.hostId ? undefined : () => handleAlwaysAllow(id, req)}
                 onReject={() => handleReject(id)}
                 alwaysAllowLabel={req.target?.hostId ? t('ai.externalMcp.allowCommandOnHost') : undefined}
+                alwaysAllowTitle={req.target?.hostId ? t('ai.externalMcp.allowCommandOnHostHint') : undefined}
               />
               {(req.allowSession || req.target?.hostId) && (
-                <div className="flex flex-wrap gap-1.5">
-                  {req.allowSession && (
-                    <Button variant="outline" size="sm" onClick={() => handleAllowSession(id)}>
-                      {t('ai.externalMcp.allowSession')}
-                    </Button>
-                  )}
-                  {req.target?.hostId && (
-                    <Button variant="outline" size="sm" onClick={() => handleAllowHost(id, req)}>
-                      {t('ai.externalMcp.allowHost')}
-                    </Button>
-                  )}
+                <div className="space-y-1.5">
+                  <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/60">
+                    {t('ai.externalMcp.allowAll')}
+                  </div>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {req.allowSession && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className={`h-7 min-w-0 px-2 text-[11px] ${req.target?.hostId ? '' : 'col-span-2'}`}
+                        title={t('ai.externalMcp.allowSessionHint')}
+                        onClick={() => handleAllowSession(id)}
+                        onKeyDown={(event) => {
+                          if (event.key !== 'Escape') return;
+                          event.preventDefault();
+                          event.stopPropagation();
+                          handleReject(id);
+                        }}
+                      >
+                        {t('ai.externalMcp.allowSession')}
+                      </Button>
+                    )}
+                    {req.target?.hostId && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className={`h-7 min-w-0 px-2 text-[11px] ${req.allowSession ? '' : 'col-span-2'}`}
+                        title={t('ai.externalMcp.allowHostHint')}
+                        onClick={() => handleAllowHost(id, req)}
+                        onKeyDown={(event) => {
+                          if (event.key !== 'Escape') return;
+                          event.preventDefault();
+                          event.stopPropagation();
+                          handleReject(id);
+                        }}
+                      >
+                        {t('ai.externalMcp.allowHost')}
+                      </Button>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
