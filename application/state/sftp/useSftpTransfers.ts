@@ -482,6 +482,7 @@ export const useSftpTransfers = ({
     targetSide: "left" | "right",
   ): Promise<TransferStatus> => {
     if (cancelledTasksRef.current.has(task.id)) {
+      preflightSkippedTaskIdsRef.current.delete(task.id);
       return "cancelled";
     }
     // Guard against concurrent processTransfer on the same id (resume used to
@@ -541,6 +542,8 @@ export const useSftpTransfers = ({
         walkStatus = await processTransferBody(task, sourcePane, targetPane, targetSide, updateTask);
       });
       return walkStatus;
+    }).finally(() => {
+      preflightSkippedTaskIdsRef.current.delete(task.id);
     });
   };
 
