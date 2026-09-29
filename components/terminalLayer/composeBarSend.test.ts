@@ -121,8 +121,8 @@ test('a bypassed sensitive peer with no write route does not hide another succes
   assert.deepEqual(writes, ['0']);
 });
 
-test('a disconnected sensitive fallback does not hide another successful send', async () => {
-  assert.equal(await setup(['connected', 'disconnected'], true, new Map(), new Set(['1']), true).send('command'), true);
+test('a connecting sensitive fallback keeps attempted input out of history', async () => {
+  assert.equal(await setup(['connected', 'connecting'], true, new Map(), new Set(['1']), true).send('secret'), false);
 });
 
 test('without the password bypass sensitive input is excluded for executor and fallback paths', async () => {

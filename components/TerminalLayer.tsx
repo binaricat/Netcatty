@@ -2431,7 +2431,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
           terminalBackend.writeToSession(sid, payload, {
             sensitive: focusedSensitive || recipientSensitive,
           });
-          if (session.status === 'connected' && recipientSensitive) anyRecipientSensitive = true;
+          if (recipientSensitive) anyRecipientSensitive = true;
           recordHistory = recordHistory || session.status === 'connected';
         }
       }
