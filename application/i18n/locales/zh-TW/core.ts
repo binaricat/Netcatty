@@ -544,7 +544,7 @@ export const zhTWCoreMessages: Messages = {
   'settings.appearance.windowOpacity': '視窗透明度',
   'settings.appearance.windowOpacity.desc': '調節整個應用程式視窗的透明度，方便疊在其他內容上方。較低時終端文字也會變淡；部分 Linux 桌面環境可能不支援。',
   'settings.appearance.appIcon': '應用程式圖示',
-  'settings.appearance.appIcon.desc': '選擇 Dock/工作列圖示風格，切換應用程式時更容易找到 Netcatty。執行時生效，安裝檔內的圖示不會改變。',
+  'settings.appearance.appIcon.desc': '選擇 Dock/工作列圖示風格，切換應用程式時更容易找到 Netcatty。Windows 通知區域圖示會使用同一套風格。執行時生效，安裝檔內的圖示不會改變。',
   'settings.appearance.appIcon.original': '原始',
   'settings.appearance.appIcon.bright': '明亮',
   'settings.appearance.appIcon.dark': '深色',

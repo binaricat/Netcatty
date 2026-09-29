@@ -453,7 +453,7 @@ Resalta el panel dividido enfocado:
   'settings.appearance.windowOpacity': 'Opacidad de la ventana',
   'settings.appearance.windowOpacity.desc': 'Ajusta la transparencia de toda la ventana de la aplicación. Los valores más bajos también atenúan el texto de la terminal. Algunos entornos de escritorio de Linux pueden no admitir esto.',
   'settings.appearance.appIcon': 'Ícono de la aplicación',
-  'settings.appearance.appIcon.desc': 'Elige un estilo de ícono para el dock o la barra de tareas que haga más fácil distinguir Netcatty al cambiar de aplicación. Se aplica en tiempo de ejecución; el ícono del paquete instalado no cambia.',
+  'settings.appearance.appIcon.desc': 'Elige un estilo de ícono para el dock o la barra de tareas que haga más fácil distinguir Netcatty al cambiar de aplicación. En Windows, el icono del área de notificación usa el mismo estilo. Se aplica en tiempo de ejecución; el ícono del paquete instalado no cambia.',
   'settings.appearance.appIcon.original': 'Original',
   'settings.appearance.appIcon.bright': 'Brillante',
   'settings.appearance.appIcon.dark': 'Oscuro',

@@ -1822,3 +1822,167 @@ test("tray panel forwarding waits for a newly created main renderer", async () =
     assert.equal(delivered, true);
   });
 });
+
+function createRecordingTrayElectron(scaleHolder) {
+  const electronModule = createElectronStub();
+  const resizes = [];
+  let scaleListener = null;
+  class RecordingTray {
+    constructor(image) {
+      this.image = image;
+      this.handlers = new Map();
+      this.setImageCalls = [];
+    }
+
+    setToolTip() {}
+    setContextMenu(menu) {
+      this.contextMenu = menu;
+    }
+    setImage(image) {
+      this.image = image;
+      this.setImageCalls.push(image);
+    }
+    destroy() {}
+    on(eventName, handler) {
+      this.handlers.set(eventName, handler);
+    }
+  }
+  electronModule.Tray = RecordingTray;
+  electronModule.screen = {
+    getPrimaryDisplay() {
+      return { scaleFactor: scaleHolder.scale };
+    },
+    on(eventName, handler) {
+      if (eventName === "display-metrics-changed") scaleListener = handler;
+    },
+    removeListener(eventName, handler) {
+      if (eventName === "display-metrics-changed" && scaleListener === handler) {
+        scaleListener = null;
+      }
+    },
+  };
+  electronModule.nativeImage = {
+    createFromPath(filePath) {
+      return {
+        kind: "path",
+        filePath,
+        resize(opts) {
+          resizes.push(opts);
+          return {
+            kind: "resized-path",
+            filePath,
+            ...opts,
+            setTemplateImage() {},
+            addRepresentation() {},
+            isEmpty() {
+              return false;
+            },
+          };
+        },
+        setTemplateImage() {},
+        addRepresentation() {},
+        isEmpty() {
+          return false;
+        },
+      };
+    },
+    createFromBuffer(buffer) {
+      return {
+        kind: "buffer",
+        bytes: buffer.length,
+        resize(opts) {
+          resizes.push(opts);
+          return {
+            kind: "resized-buffer",
+            bytes: buffer.length,
+            ...opts,
+            setTemplateImage() {},
+            isEmpty() {
+              return false;
+            },
+          };
+        },
+        isEmpty() {
+          return false;
+        },
+      };
+    },
+    createEmpty() {
+      return { kind: "empty" };
+    },
+  };
+  return {
+    electronModule,
+    resizes,
+    fireScaleChange() {
+      scaleListener?.();
+    },
+  };
+}
+
+function applyIconVariant(variant) {
+  const appIconManager = require("./appIconManager.cjs");
+  return appIconManager.applyAppIconVariant(variant, {
+    app: { isPackaged: false },
+    BrowserWindow: { getAllWindows: () => [] },
+    nativeImage: {
+      createFromBuffer: () => ({}),
+      createFromPath: () => ({}),
+    },
+    appPath: process.cwd(),
+    isMac: false,
+  });
+}
+
+test("windows tray follows the selected app icon and keeps the ico for original", async () => {
+  await withPlatform("win32", async () => {
+    const appIconManager = require("./appIconManager.cjs");
+    const bridge = loadBridge();
+    const scaleHolder = { scale: 1.5 };
+    const { electronModule, resizes, fireScaleChange } = createRecordingTrayElectron(scaleHolder);
+    try {
+      appIconManager.initializeAppIconManager(process.cwd(), { preferPublic: true, isMac: false });
+      await enableCloseToTray(bridge, electronModule);
+      const trayInstance = bridge.getTray();
+      assert.match(trayInstance.image.filePath, /tray-icon\.ico$/);
+      assert.equal(resizes.length, 0);
+
+      assert.equal(applyIconVariant("bright"), true);
+      assert.equal(bridge.updateTrayIcon(), true);
+      assert.equal(trayInstance.image.kind, "resized-buffer");
+      assert.deepEqual(resizes.at(-1), { width: 24, height: 24, quality: "best" });
+
+      scaleHolder.scale = 2;
+      fireScaleChange();
+      assert.deepEqual(resizes.at(-1), { width: 32, height: 32, quality: "best" });
+
+      assert.equal(applyIconVariant("original"), true);
+      assert.equal(bridge.updateTrayIcon(), true);
+      assert.match(trayInstance.image.filePath, /tray-icon\.ico$/);
+    } finally {
+      bridge.cleanup();
+      appIconManager.initializeAppIconManager(process.cwd(), { preferPublic: true, isMac: false });
+    }
+  });
+});
+
+test("non-windows trays ignore the app icon variant", async () => {
+  await withPlatform("darwin", async () => {
+    const appIconManager = require("./appIconManager.cjs");
+    const bridge = loadBridge();
+    const { electronModule } = createRecordingTrayElectron({ scale: 1 });
+    try {
+      appIconManager.initializeAppIconManager(process.cwd(), { preferPublic: true, isMac: false });
+      await enableCloseToTray(bridge, electronModule);
+      const trayInstance = bridge.getTray();
+      assert.match(trayInstance.image.filePath, /tray-iconTemplate\.png$/);
+      assert.equal(applyIconVariant("bright"), true);
+      assert.equal(bridge.updateTrayIcon(), false);
+      assert.equal(trayInstance.setImageCalls.length, 0);
+      assert.match(trayInstance.image.filePath, /tray-iconTemplate\.png$/);
+    } finally {
+      bridge.cleanup();
+      appIconManager.initializeAppIconManager(process.cwd(), { preferPublic: true, isMac: false });
+    }
+  });
+});

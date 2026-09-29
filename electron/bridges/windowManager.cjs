@@ -1171,13 +1171,21 @@ function registerWindowHandlers(ipcMain, nativeTheme) {
   ipcMain.handle("netcatty:setAppIconVariant", (_event, variant) => {
     const { app, BrowserWindow, nativeImage } = require("electron");
     const appIconManager = require("./appIconManager.cjs");
-    return appIconManager.applyAppIconVariant(variant, {
+    const applied = appIconManager.applyAppIconVariant(variant, {
       app,
       BrowserWindow,
       nativeImage,
       appPath: app.getAppPath(),
       isMac: process.platform === "darwin",
     });
+    if (applied && process.platform === "win32") {
+      try {
+        getGlobalShortcutBridge().updateTrayIcon?.();
+      } catch {
+        // The tray is optional; the taskbar icon still updated.
+      }
+    }
+    return applied;
   });
 
   ipcMain.handle("netcatty:setLanguage", (_event, language) => {
