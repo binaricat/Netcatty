@@ -5,7 +5,7 @@ const path = require("node:path");
 
 const projectRoot = path.join(__dirname, "..");
 
-// Brand sky blue sampled from public/icons/variants/bright.png — the same
+// Brand sky blue sampled from public/icons/variants/bright.png - the same
 // color the tray glyphs are recolored with by scripts/generate-tray-ico.py.
 const BRAND_RGB = [14, 165, 233];
 
@@ -50,7 +50,7 @@ function paethPredictor(left, up, upperLeft) {
 }
 
 // Inflate and unfilter full RGBA pixel rows so the color/alpha assertions can
-// work on real pixel values (Pillow writes filters 0–4).
+// work on real pixel values (Pillow writes filters 0-4).
 function readPngPixels(png, label) {
   const { width, height, idat } = readRgbaPng(png, label);
   const zlib = require("node:zlib");

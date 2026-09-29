@@ -8,7 +8,7 @@ The old assets were the rounded-square app icon (navy chip with a small cat
 inside), which rendered as a tiny, low-contrast blob in the notification area
 on dark taskbars. Tray apps are expected to ship a full-bleed single-color
 glyph instead, so we recolor the template mask with the brand sky blue
-(#0ea5e9 — the same color as the "bright" app-icon variant) which stays
+(#0ea5e9 - the same color as the "bright" app-icon variant) which stays
 readable on both dark and light taskbars.
 
 Outputs (all in public/):
