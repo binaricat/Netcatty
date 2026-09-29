@@ -570,10 +570,10 @@ declare global {
         savedPassword?: string | null;
         /** When false, UI must not offer saving the response as the host password. */
         allowSavePassword?: boolean;
-        /** When true, pre-check "Save password" — only for challenges whose
-         * sender has proven the previous auto-filled attempt was rejected
-         * (#3556). Never sent for the ambiguous later rounds of a
-         * multi-round exchange. */
+        /** When true, pre-check "Save password" — only for a single
+         * first-factor password prompt that re-asked after a saved-password
+         * auto-fill was submitted (#3556). Staged second-factor rounds never
+         * get it (#3558). */
         defaultSavePassword?: boolean;
         scope?: "terminal" | "external";
         bootEpoch?: number;

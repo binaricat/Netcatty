@@ -240,10 +240,10 @@ test("createKeyboardInteractiveHandler falls back to the modal on the retry afte
   // Do not re-prefill the stale value, but still allow saving a corrected one.
   assert.equal(sent[0].payload.savedPassword, null);
   assert.equal(sent[0].payload.allowSavePassword, true);
-  // The box stays unchecked by default (#3558): consecutive keyboard-
-  // interactive rounds carry no failed-auth retry signal, so an auto-tick
-  // here could pre-check saving a different secret over the host password.
-  assert.equal(sent[0].payload.defaultSavePassword, false);
+  // The corrected password is what the user wants stored — a same-shape
+  // password re-ask after the auto-fill was submitted is the #3556 failed
+  // retry, so pre-check the save box.
+  assert.equal(sent[0].payload.defaultSavePassword, true);
 
   drainPendingRequests(sent);
 });
@@ -289,6 +289,50 @@ test("createKeyboardInteractiveHandler keeps defaultSavePassword off for second-
   assert.deepEqual(autoFillEvents, ["auto-fill"]);
   assert.equal(sent.length, 1);
   assert.equal(sent[0].payload.allowSavePassword, false);
+  assert.equal(sent[0].payload.defaultSavePassword, false);
+
+  drainPendingRequests(sent);
+});
+
+test("createKeyboardInteractiveHandler keeps defaultSavePassword off for a chained multi-prompt round", () => {
+  // A staged chain that re-prompts with Password + OTP in one challenge must
+  // not get the save default — the OTP slot is a different secret.
+  const { sender, sent } = createSender();
+
+  const handler = createKeyboardInteractiveHandler({
+    sender,
+    sessionId: "session-1",
+    hostname: "corp-pam.example.com",
+    password: "wrong-password",
+  });
+
+  handler("", "", "", [passwordPrompt], () => {}); // auto-fill
+  handler("", "", "", [passwordPrompt, otpPrompt], () => {}); // chained round
+
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].payload.allowSavePassword, true);
+  assert.equal(sent[0].payload.defaultSavePassword, false);
+
+  drainPendingRequests(sent);
+});
+
+test("createKeyboardInteractiveHandler keeps defaultSavePassword off for password-change shapes", () => {
+  // Password-expiry / password-change re-asks ask for a different secret
+  // (old/new), so the save default stays off.
+  const { sender, sent } = createSender();
+
+  const handler = createKeyboardInteractiveHandler({
+    sender,
+    sessionId: "session-1",
+    hostname: "corp-pam.example.com",
+    password: "wrong-password",
+  });
+
+  handler("", "", "", [passwordPrompt], () => {}); // auto-fill
+  handler("", "", "", [newPasswordPrompt], () => {}); // chained change round
+
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].payload.allowSavePassword, true);
   assert.equal(sent[0].payload.defaultSavePassword, false);
 
   drainPendingRequests(sent);
@@ -370,9 +414,10 @@ test("createKeyboardInteractiveHandler does not prefill after a prior auto-fill 
 
   assert.equal(sent.length, 1);
   assert.equal(sent[0].payload.savedPassword, null);
-  // Codex P1 on #3558: without a failed-auth retry signal this ambiguous
-  // round must also leave the save box unchecked by default.
-  assert.equal(sent[0].payload.defaultSavePassword, false);
+  // Same-shape password re-ask can only be PAM rejecting the auto-filled
+  // value, so pre-checking save is safe here — but the prefill stays off
+  // (#2150): the stale value must never be re-submitted on Enter.
+  assert.equal(sent[0].payload.defaultSavePassword, true);
 
   drainPendingRequests(sent);
 });
