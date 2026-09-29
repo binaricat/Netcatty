@@ -125,15 +125,20 @@ function rewriteDivergingSpan(previous: string, next: string): string {
  * An extension of the snapshot sends only the new suffix. A revision sends
  * the same edit the cancelled textarea timer would have sent, so `abcde`
  * replaced by `abXde` does not get appended after the old hypothesis.
+ * A composition that starts at or after the snapshot is a new word. A
+ * finished character followed by a new word that begins with that same
+ * character must be sent whole.
  */
 export function continuedCompositionData(
   marker: ImeCompositionMarker | undefined,
   compositionText: string,
   textareaNow: string,
+  compositionStart: number,
 ): string | null {
   if (!marker?.continued || !compositionText) return null;
   const previous = marker.pendingPrevious;
   if (!previous) return null;
+  if (compositionStart >= previous.length) return null;
   if (compositionText.startsWith(previous)) return compositionText.slice(previous.length);
   if (
     marker.alreadySent.length > 0
@@ -188,8 +193,14 @@ function deliverComposition(
   helper: ImeCompositionCommitTarget,
   compositionText: string,
   marker: ImeCompositionMarker | undefined,
+  compositionStart: number,
 ): void {
-  const continued = continuedCompositionData(marker, compositionText, helper._textarea.value);
+  const continued = continuedCompositionData(
+    marker,
+    compositionText,
+    helper._textarea.value,
+    compositionStart,
+  );
   if (continued !== null) {
     if (continued.length > 0) emitPtyData(helper, continued);
     if (!helper._isComposing) helper._dataAlreadySent = "";
@@ -265,7 +276,7 @@ export function keepLiveImeTranscriptionSingle(term: {
         helper._compositionPosition.start,
         helper._compositionPosition.end,
       );
-      deliverComposition(helper, compositionText, marker);
+      deliverComposition(helper, compositionText, marker, helper._compositionPosition.start);
       return;
     }
 
@@ -286,7 +297,7 @@ export function keepLiveImeTranscriptionSingle(term: {
       // compositionstart may have cleared the live field. The no-composition
       // path (#3191) still has the keydown commit in this snapshot.
       if (!marker && alreadySent) helper._dataAlreadySent = alreadySent;
-      deliverComposition(helper, compositionText, marker);
+      deliverComposition(helper, compositionText, marker, rangeStart);
     }, 0);
   };
 }

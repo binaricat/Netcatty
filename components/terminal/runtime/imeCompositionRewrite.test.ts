@@ -84,17 +84,39 @@ test("continuedCompositionData rewrites a revised hypothesis instead of appendin
     textareaAtStart: "abXde",
   };
   assert.equal(
-    continuedCompositionData(marker, "abXde", "abXde"),
+    continuedCompositionData(marker, "abXde", "abXde", 0),
     `${BACKSPACE}${BACKSPACE}${BACKSPACE}Xde`,
   );
+  // The new character starts at the caret after "hello", so this is a new
+  // composition. The caller sends the slice unchanged.
   assert.equal(
     continuedCompositionData({
       continued: true,
       pendingPrevious: "hello",
       alreadySent: "",
       textareaAtStart: "hello",
-    }, "\u4f60", "hello\u4f60"),
-    "\u4f60",
+    }, "\u4f60", "hello\u4f60", 5),
+    null,
+  );
+  // In-place extension of a one-character hypothesis still strips the prefix.
+  assert.equal(
+    continuedCompositionData({
+      continued: true,
+      pendingPrevious: "\u6211",
+      alreadySent: "\u6211",
+      textareaAtStart: "\u6211\u771f",
+    }, "\u6211\u771f", "\u6211\u771f", 0),
+    "\u771f",
+  );
+  // A new word that merely starts with the finished character is not a prefix.
+  assert.equal(
+    continuedCompositionData({
+      continued: true,
+      pendingPrevious: "\u6211",
+      alreadySent: "\u6211",
+      textareaAtStart: "\u6211\u6211\u4eec",
+    }, "\u6211\u4eec", "\u6211\u6211\u4eec", 1),
+    null,
   );
 });
 
@@ -321,6 +343,25 @@ test("a one-character hypothesis is not repeated when composition extends it", a
   await flushTimers();
 
   assert.equal(helper.sent.join(""), "\u6211\u771f");
+});
+
+test("a new word that shares a prefix with a finished character is sent whole", async () => {
+  const helper = createHarness();
+  install(helper);
+
+  helper.keydown({ keyCode: 229 });
+  helper._textarea.value = "\u6211";
+  await flushTimers();
+
+  helper.keydown({ keyCode: 229 });
+  helper._textarea.value = "\u6211\u6211\u4eec";
+  helper.compositionstart();
+  helper._compositionPosition = { start: 1, end: "\u6211\u6211\u4eec".length };
+  helper.compositionend();
+  await flushTimers();
+  await flushTimers();
+
+  assert.equal(helper.sent.join(""), "\u6211\u6211\u4eec");
 });
 
 test("keepLiveImeTranscriptionSingle is a no-op without a composition helper", () => {
