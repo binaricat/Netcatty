@@ -240,6 +240,55 @@ test("createKeyboardInteractiveHandler falls back to the modal on the retry afte
   // Do not re-prefill the stale value, but still allow saving a corrected one.
   assert.equal(sent[0].payload.savedPassword, null);
   assert.equal(sent[0].payload.allowSavePassword, true);
+  // The corrected password is what the user wants stored — pre-check the
+  // save box so it lands on the host record on submit (#3556).
+  assert.equal(sent[0].payload.defaultSavePassword, true);
+
+  drainPendingRequests(sent);
+});
+
+test("createKeyboardInteractiveHandler does not pre-check save on the first modal", () => {
+  // No failed auto-fill yet → normal modal, unchecked save box.
+  const { sender, sent } = createSender();
+
+  const handler = createKeyboardInteractiveHandler({
+    sender,
+    sessionId: "session-1",
+    hostname: "vps-1.example.com",
+  });
+
+  handler("", "", "", [passwordPrompt], () => {});
+
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].payload.allowSavePassword, true);
+  assert.equal(sent[0].payload.defaultSavePassword, false);
+
+  drainPendingRequests(sent);
+});
+
+test("createKeyboardInteractiveHandler keeps defaultSavePassword off for second-factor challenges", () => {
+  // An EDR secondary / OTP prompt must never get the save default — even a
+  // retry after a failed auto-fill is a different secret, not the host
+  // login password (#2150). Round one auto-fills the login password into a
+  // normal Password: prompt; round two is the EDR secondary prompt.
+  const { sender, sent } = createSender();
+  const autoFillEvents = [];
+
+  const handler = createKeyboardInteractiveHandler({
+    sender,
+    sessionId: "session-1",
+    hostname: "corp-edr.example.com",
+    password: "wrong-password",
+    onAutoFill: () => autoFillEvents.push("auto-fill"),
+  });
+
+  handler("", "", "", [passwordPrompt], () => {});
+  handler("", "", "", [edrSecondaryAuthPasswordPrompt], () => {});
+
+  assert.deepEqual(autoFillEvents, ["auto-fill"]);
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].payload.allowSavePassword, false);
+  assert.equal(sent[0].payload.defaultSavePassword, false);
 
   drainPendingRequests(sent);
 });

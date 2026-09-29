@@ -1972,6 +1972,16 @@ function createKeyboardInteractiveHandler(options) {
       );
     const allowSavePassword = !(skipAutoFill || singleSecondaryChallenge);
 
+    // Pre-check the "Save password" box only on a retry after a failed
+    // auto-fill (#3556): we already auto-submitted the stale host password and
+    // the server rejected it, so whatever the user types next is the password
+    // they want stored. Defaulting the checkbox on here means a corrected
+    // password lands on the host record on submit — SFTP/file browser and
+    // later sessions then connect without a manual host edit. Still an
+    // explicit user submit that the user can untick; nothing is stored unless
+    // the modal submits.
+    const defaultSavePassword = allowSavePassword && autoFilledOnce;
+
     console.log(`${logPrefix} Showing modal for ${promptsData.length} prompts`);
     try { onPromptShown?.(); } catch (err) { console.warn(`${logPrefix} onPromptShown callback threw`, err); }
 
@@ -1985,6 +1995,7 @@ function createKeyboardInteractiveHandler(options) {
       hostname: hostname,
       savedPassword: savedPasswordForModal,
       allowSavePassword,
+      defaultSavePassword,
       scope,
       ...(Number.isFinite(bootEpoch) ? { bootEpoch: Number(bootEpoch) } : {}),
     });

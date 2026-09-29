@@ -34,6 +34,13 @@ export interface KeyboardInteractiveRequest {
   savedPassword?: string | null;
   /** When false, hide save-password UI (second-factor / EDR challenges). Default true. */
   allowSavePassword?: boolean;
+  /**
+   * Pre-check the "Save password" checkbox when the challenge is a retry
+   * after a failed saved-password auto-fill (#3556) — the saved host
+   * password was already rejected, so the corrected value is what the user
+   * wants persisted. Only sent with a first-factor password prompt.
+   */
+  defaultSavePassword?: boolean;
 }
 
 type KeyboardInteractiveServerPromptInput = Pick<
@@ -137,7 +144,9 @@ export const KeyboardInteractiveModal: React.FC<KeyboardInteractiveModalProps> =
       setResponses(initial);
       setShowPasswords(request.prompts.map(() => false));
       setIsSubmitting(false);
-      setSavePassword(false);
+      // Pre-check "Save password" on the post-failed-auto-fill retry (#3556):
+      // only meaningful when the challenge has a password slot to save.
+      setSavePassword(Boolean(request.defaultSavePassword) && passwordPromptIndex >= 0);
     }
   }, [request, passwordPromptIndex]);
 

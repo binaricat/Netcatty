@@ -53,3 +53,9 @@ test("keyboard-interactive modal cannot be dismissed by outside click or Escape"
   assert.match(modalSource, /onInteractOutside=\{\(e\) => e\.preventDefault\(\)\}/);
   assert.match(modalSource, /onEscapeKeyDown=\{\(e\) => e\.preventDefault\(\)\}/);
 });
+
+test("keyboard-interactive modal pre-checks save only on the post-failed-auto-fill retry (#3556)", () => {
+  // The default comes from the bridge (defaultSavePassword) and must still
+  // require a password slot to save into.
+  assert.match(modalSource, /setSavePassword\(Boolean\(request\.defaultSavePassword\) && passwordPromptIndex >= 0\)/);
+});
