@@ -424,6 +424,7 @@ async function executeSnippetOrScriptRun(
         snippet,
         sessionId,
         sessionMeta,
+        initiatedBy: 'ai',
       });
       if (!wait) {
         return { ok: true, sessionId, snippetId: snippet.id, runId, kind: 'script' };

@@ -30,7 +30,7 @@ await nct.dialog.alert('Netcatty script smoke test OK');
 
 /** Full integration test for onConnect / manual run; dialog API enabled by default. */
 export const SCRIPT_INTEGRATION_TEST = `// Netcatty Integration Test — onConnect / manual full API exercise
-// Trigger: onConnect or Run now | Permission: Auto or Confirm (dialogs need non-Observer)
+// Trigger: onConnect or Run now
 
 const CONFIG = {
   SAMPLE_COUNT: 8,
