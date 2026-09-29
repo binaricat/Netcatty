@@ -1147,7 +1147,15 @@ export const useSftpTransfers = ({
             : sourcePane.connection!.isLocal
               ? (fileEntry?.size ?? 0)
               : 0;
-        const sourceLastModified = freshMetadata?.lastModified ?? fileEntry?.lastModified ?? 0;
+        // Only keep an mtime that is paired with trusted metadata (live re-stat,
+        // local source size, or directory totals). A remote file whose re-stat
+        // failed must stay fully unknown (size 0 AND mtime 0): discoverTransferSize
+        // and the conflict check both treat a nonzero sourceLastModified as proof
+        // the size is already known, so a stale mtime would suppress the deferred
+        // source re-stat and show the file as 0 B in the overwrite dialog.
+        const sourceLastModified = !file.isDirectory && !sourcePane.connection!.isLocal && !freshMetadata
+          ? 0
+          : (freshMetadata?.lastModified ?? fileEntry?.lastModified ?? 0);
 
         const nextSourcePath = joinPath(sourcePath, file.name);
         const nextTargetPath = joinPath(targetPath, file.name);
