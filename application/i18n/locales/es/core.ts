@@ -529,6 +529,8 @@ Resalta el panel dividido enfocado:
   'settings.terminal.font.weightBold.desc': 'Peso del texto en negrita (100-900)',
   'settings.terminal.font.smoothing': 'Suavizado de fuente',
   'settings.terminal.font.smoothing.desc': 'Usar el anti-aliasing nativo de fuentes de macOS',
+  'settings.terminal.font.ligatures': 'Ligaduras de fuente',
+  'settings.terminal.font.ligatures.desc': 'Mostrar ligaduras como != cuando la fuente del terminal las incluye',
   'settings.terminal.font.linePadding': 'Espaciado de líneas',
   'settings.terminal.font.linePadding.desc': 'Espacio adicional entre líneas (0-10)',
   'settings.terminal.font.emulationType': 'Tipo de emulación de terminal',

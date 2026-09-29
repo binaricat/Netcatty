@@ -177,6 +177,14 @@ test("normalizeTerminalSettings enables font smoothing by default", () => {
   assert.equal(normalizeTerminalSettings().fontSmoothing, true);
 });
 
+test("normalizeTerminalSettings enables font ligatures by default", () => {
+  assert.equal(normalizeTerminalSettings().fontLigatures, true);
+});
+
+test("normalizeTerminalSettings preserves disabled font ligatures", () => {
+  assert.equal(normalizeTerminalSettings({ fontLigatures: false }).fontLigatures, false);
+});
+
 test("normalizeTerminalSettings enables terminal auto-close by default", () => {
   assert.equal(normalizeTerminalSettings().autoCloseOnExit, true);
 });

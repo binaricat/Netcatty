@@ -7,6 +7,7 @@ import { resolveFontWeightBold } from '../../lib/fontWeightAvailability';
 import { bundledFamiliesInStack } from '../../lib/fontAvailability';
 import { isMacPlatform } from '../../lib/utils';
 import { resolveXTermScrollback } from '../../infrastructure/config/xtermPerformance';
+import { terminalFontLigaturesEnabled } from './runtime/terminalFontLigatures';
 import {
   createMacOptionForcedSelectionMouseEvent,
   createRightClickMouseTrackingPressClaim,
@@ -1190,6 +1191,9 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
       termRef.current.options.altClickMovesCursor = altKeyOpts.altClickMovesCursor;
       termRef.current.options.wordSeparator = terminalSettings.wordSeparators;
       termRef.current.options.ignoreBracketedPasteMode = terminalSettings.disableBracketedPaste ?? false;
+      xtermRuntimeRef.current?.syncFontLigatures(
+        terminalFontLigaturesEnabled(terminalSettings),
+      );
     }
 
     // Changing the font can leave the WebGL renderer drawing stale glyphs from

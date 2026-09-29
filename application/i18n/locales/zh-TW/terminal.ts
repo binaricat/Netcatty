@@ -278,6 +278,8 @@ export const zhTWTerminalMessages: Messages = {
   'settings.terminal.font.weightBold.desc': '粗體文字字重 (100-900)',
   'settings.terminal.font.smoothing': '字型平滑',
   'settings.terminal.font.smoothing.desc': '使用 macOS 原生字型抗鋸齒',
+  'settings.terminal.font.ligatures': '字型連字',
+  'settings.terminal.font.ligatures.desc': '支援連字的字型把 != 這類字元顯示成一個符號',
   'settings.terminal.font.linePadding': '行間距',
   'settings.terminal.font.linePadding.desc': '行之間的額外間距 (0-10)',
   'settings.terminal.font.emulationType': '終端模擬型別',

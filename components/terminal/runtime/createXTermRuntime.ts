@@ -3,6 +3,7 @@ import { stringCellWidth } from "../autocomplete/terminalStringCellWidth";
 import type { TerminalBroadcastInputOptions } from "../terminalHelpers";
 import { FitAddon } from "@xterm/addon-fit";
 import { ImageAddon } from "@xterm/addon-image";
+import { LigaturesAddon } from "@xterm/addon-ligatures";
 import { SearchAddon } from "@xterm/addon-search";
 import { SerializeAddon } from "@xterm/addon-serialize";
 import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
@@ -99,6 +100,10 @@ import { optionYankLastArgSequence } from "./optionYankLastArg";
 import { watchDevicePixelRatio } from "./rendererDprWatch";
 import { dispatchWin32InputModeEvent } from "./win32InputMode";
 import { shouldDeferWebglUntilVisible } from "./webglRendererPolicy";
+import {
+  createTerminalLigatureController,
+  terminalFontLigaturesEnabled,
+} from "./terminalFontLigatures";
 import { createWebglRendererController } from "./webglRendererController";
 import {
   captureMiddleClickTerminalMouseEvent,
@@ -277,6 +282,11 @@ export type XTermRuntime = {
   ensureWebglRenderer: () => void;
   /** Drop the WebGL addon while keeping the terminal alive (soft-hide). */
   suspendWebglRenderer: () => void;
+  /**
+   * Turn programming ligatures on or off. An active WebGL renderer is rebuilt
+   * because its glyph atlas captures font-feature-settings only at creation.
+   */
+  syncFontLigatures: (enabled: boolean) => void;
   /**
    * True while this terminal holds decoded inline images (Kitty / SIXEL / IIP).
    * Hibernate snapshots are text-only, so a session that reports true must not
@@ -850,6 +860,26 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   });
   const loadWebglRenderer = webglController.ensure;
   const suspendWebglRenderer = webglController.suspend;
+  const reloadWebglRenderer = () => {
+    if (!webglLoaded) return;
+    suspendWebglRenderer();
+    loadWebglRenderer();
+  };
+  // The ligatures addon sets font-feature-settings on the terminal element.
+  // WebGL's glyph atlas inherits that only when the atlas is created, so this
+  // has to run before the first WebGL load. Later toggles rebuild WebGL.
+  const ligatures = createTerminalLigatureController({
+    createAddon: () => new LigaturesAddon(),
+    loadAddon: (addon) => term.loadAddon(addon),
+    isWebglActive: () => webglLoaded,
+    recreateWebgl: reloadWebglRenderer,
+    repaint: repaintTerminal,
+    warn: (message, error) => {
+      if (error === undefined) logger.warn(message);
+      else logger.warn(message, error);
+    },
+  });
+  ligatures.apply(terminalFontLigaturesEnabled(settings));
 
   if (!performanceConfig.useWebGLAddon) {
     logger.info(
@@ -3325,6 +3355,9 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     clearTextureAtlas: clearWebglTextureAtlas,
     ensureWebglRenderer: loadWebglRenderer,
     suspendWebglRenderer,
+    syncFontLigatures: (enabled: boolean) => {
+      ligatures.apply(enabled);
+    },
     hasInlineImages,
     resetKittyConnectionInputState: clearKittyConnectionInputState,
     flushKittyKeyboardReleases: clearKittyTransientInputState,
@@ -3344,6 +3377,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       pendingLinePastes.clear();
       clearTerminalBroadcastUserInput(ctx.sessionId);
       resizeScheduler.dispose();
+      ligatures.dispose();
       webglController.dispose();
       term.element?.removeEventListener("copy", handleNativeCopy, true);
       ctx.container.removeEventListener("copy", handleNativeCopy, true);

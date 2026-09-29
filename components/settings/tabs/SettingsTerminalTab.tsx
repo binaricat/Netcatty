@@ -603,6 +603,17 @@ function SettingsTerminalTab(props: {
         </SettingRow>
 
         <SettingRow
+          anchorId="terminal-font-ligatures"
+          label={t("settings.terminal.font.ligatures")}
+          description={t("settings.terminal.font.ligatures.desc")}
+        >
+          <Toggle
+            checked={terminalSettings.fontLigatures}
+            onChange={(v) => updateTerminalSetting("fontLigatures", v)}
+          />
+        </SettingRow>
+
+        <SettingRow
           anchorId="terminal-font-line-padding"
           label={t("settings.terminal.font.linePadding")}
           description={t("settings.terminal.font.linePadding.desc")}

@@ -614,6 +614,8 @@ Highlight the focused split pane:
   'settings.terminal.font.weightBold.desc': 'Weight for bold text (100-900)',
   'settings.terminal.font.smoothing': 'Font smoothing',
   'settings.terminal.font.smoothing.desc': 'Use native macOS font anti-aliasing',
+  'settings.terminal.font.ligatures': 'Font ligatures',
+  'settings.terminal.font.ligatures.desc': 'Render ligatures such as != when the terminal font includes them',
   'settings.terminal.font.linePadding': 'Line padding',
   'settings.terminal.font.linePadding.desc': 'Additional space between lines (0-10)',
   'settings.terminal.font.emulationType': 'Terminal emulation type',
