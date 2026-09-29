@@ -613,9 +613,12 @@ export const useSftpTransfers = ({
 
     const sameHost = sameHostEndpoints && !!sourceSftpId && !!targetSftpId;
 
-    const discoverTransferSize = async () => {
+    // Returns the discovered stat so callers that need the size (e.g. the
+    // overwrite conflict dialog) can await this instead of reading stale
+    // metadata from the local task copy.
+    const discoverTransferSize = async (): Promise<{ size: number; lastModified?: number } | null> => {
       try {
-        if (task.totalBytes > 0 || !!task.sourceLastModified) return;
+        if (task.totalBytes > 0 || !!task.sourceLastModified) return null;
 
         if (sourcePane.connection?.isLocal) {
           const stat = await netcattyBridge.get()?.statLocal?.(task.sourcePath);
@@ -628,8 +631,9 @@ export const useSftpTransfers = ({
                 totalBytes: stat.size,
               });
             }
+            return { size: stat.size, lastModified: stat.lastModified };
           }
-          return;
+          return null;
         }
 
         if (sourceSftpId) {
@@ -647,12 +651,15 @@ export const useSftpTransfers = ({
                 totalBytes: stat.size,
               });
             }
+            return { size: stat.size, lastModified: stat.lastModified };
           }
         }
+        return null;
       } catch (err) {
         if (!isTransferCancelledError(err)) {
           logger.debug?.("[SFTP] Deferred transfer size discovery failed", err);
         }
+        return null;
       }
     };
 
@@ -746,15 +753,27 @@ export const useSftpTransfers = ({
         return null;
       })();
 
-      // For single files: fire-and-forget size discovery
-      if (!task.isDirectory) {
-        void discoverTransferSize();
-      }
+      // For single files: start size discovery without blocking the conflict
+      // check, but keep the promise so an actual conflict can await fresh
+      // size metadata before the dialog is shown.
+      const sizeDiscoveryPromise = task.isDirectory ? null : discoverTransferSize();
 
       // Only await conflict check (fast single stat call)
       const conflict = await conflictCheckPromise;
       // Cancel/Stop may have won while conflict stats were in flight.
       if (cancelledTasksRef.current.has(task.id)) return "cancelled";
+
+      if (conflict && sizeDiscoveryPromise) {
+        // The task's totalBytes may still be 0 here because discovery ran
+        // deferred and updateTask never mutates the local task copy. Await
+        // discovery (bounded per-task; the task is already visible/cancellable)
+        // so the overwrite dialog shows the real source size, not 0 (#3559).
+        const discovered = await sizeDiscoveryPromise;
+        if (discovered && discovered.size >= 0) {
+          conflict.newSize = discovered.size;
+          if (discovered.lastModified) conflict.newModified = discovered.lastModified;
+        }
+      }
 
       if (conflict) {
         const defaultAction = conflictDefaultsRef.current
@@ -1109,19 +1128,33 @@ export const useSftpTransfers = ({
         : sourceFiles.filter((file) => !file.isDirectory);
       if (remoteSingleFiles.length > 0 && sourceSftpIdForPlan) {
         const sourceEncoding = sourcePane.filenameEncoding || "auto";
+        // The bridge's statSftp awaits an unbounded SFTP callback, so a
+        // half-open session can leave a stat pending forever. Bound each
+        // preflight stat: on timeout the file keeps its 0 plan and the bridge
+        // measures the live size during the transfer instead of one hung stat
+        // blocking the entire selected batch.
+        const PREFLIGHT_STAT_TIMEOUT_MS = 10_000;
         await Promise.allSettled(remoteSingleFiles.map(async (file) => {
+          let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
           try {
-            const stat = await netcattyBridge.get()?.statSftp?.(
-              sourceSftpIdForPlan,
-              joinPath(sourcePath, file.name),
-              sourceEncoding,
-            );
+            const stat = await Promise.race([
+              Promise.resolve(netcattyBridge.get()?.statSftp?.(
+                sourceSftpIdForPlan,
+                joinPath(sourcePath, file.name),
+                sourceEncoding,
+              )),
+              new Promise<undefined>((resolve) => {
+                timeoutTimer = setTimeout(() => resolve(undefined), PREFLIGHT_STAT_TIMEOUT_MS);
+              }),
+            ]);
             if (stat && stat.type !== "symlink" && stat.sizeKnown !== false && stat.size >= 0) {
               freshRemoteMetadata.set(file.name, { size: stat.size, lastModified: stat.lastModified });
             }
           } catch (err) {
             // Fall through to a 0 plan so the bridge measures the live size.
             logger.debug?.("[SFTP] Transfer plan re-stat failed; falling back to live size", err);
+          } finally {
+            if (timeoutTimer) clearTimeout(timeoutTimer);
           }
         }));
       }
