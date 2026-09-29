@@ -1,4 +1,5 @@
 import { classifyDistroId, resolveHostOs } from './host';
+import { isSavedVaultHost } from './ephemeralHosts';
 import type { PortForwardingRule } from './models';
 import type { Host, TerminalSession } from '../types';
 
@@ -52,7 +53,7 @@ export const buildAITerminalSessionInfo = (
   const isLocalSession = protocol === 'local' || session?.hostId?.startsWith('local-');
   const allHosts = options?.allHosts ?? (host ? [host] : []);
   const savedHostId = !isLocalSession && protocol !== 'serial'
-    ? allHosts.find((entry) => entry.id === session?.hostId)?.id
+    ? allHosts.find((entry) => entry.id === session?.hostId && isSavedVaultHost(entry))?.id
     : undefined;
   const hostChain = summarizeHostChain(host, allHosts);
   const activePortForwards = host?.id && options?.portForwardingRules

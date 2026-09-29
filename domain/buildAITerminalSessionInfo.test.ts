@@ -102,6 +102,10 @@ test("only saved remote hosts can receive persistent server approvals", () => {
   assert.equal(buildAITerminalSessionInfo(baseSession(), saved, "linux", {
     allHosts: [],
   }).savedHostId, undefined);
+  const temporary = baseHost({ ephemeral: true });
+  assert.equal(buildAITerminalSessionInfo(baseSession(), temporary, "linux", {
+    allHosts: [temporary],
+  }).savedHostId, undefined);
   assert.equal(buildAITerminalSessionInfo(baseSession({ protocol: "local" }), saved, "linux", {
     allHosts: [saved],
   }).savedHostId, undefined);
