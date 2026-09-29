@@ -53,6 +53,19 @@ test("scripts side panel offers run-on-all-tabs for every snippet, not only auto
   assert.match(source, /openPackageDialog/);
 });
 
+test("scripts side panel snippet context menu offers copy command without running", () => {
+  // Copy must sit between the run actions and Edit, write snippet.command to
+  // the clipboard, and confirm with a toast — it never executes the command.
+  assert.match(source, /onCopyCommand=\{\(\) => handleCopySnippetCommand\(item\.snippet\)\}/);
+  assert.match(source, /onCopyCommand=\{\(\) => handleCopySnippetCommand\(item\.row\.snippet\)\}/);
+  assert.match(source, /scripts\.actions\.copyCommand'/);
+  const menu = source.match(/\{onRunParallel \? \([\s\S]*?<\/ContextMenu>/);
+  assert.ok(menu, "snippet row context menu should exist");
+  assert.match(menu[0], /onCopyCommand[\s\S]*?onClick=\{onEdit\}/);
+  assert.match(menu[0], /<Copy className="[\s\S]*?\{copyCommandLabel\}/);
+  assert.match(source, /handleCopySnippetCommand[\s\S]*?snippet\.command[\s\S]*?toast\.success/);
+});
+
 test("scripts side panel exposes create actions as inline toolbar icons", () => {
   assert.match(source, /snippets\.action\.newSnippet/);
   assert.match(source, /snippets\.action\.newPackage/);
