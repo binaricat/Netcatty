@@ -35,11 +35,12 @@ export interface KeyboardInteractiveRequest {
   /** When false, hide save-password UI (second-factor / EDR challenges). Default true. */
   allowSavePassword?: boolean;
   /**
-   * Pre-check the "Save password" checkbox — sent only for a round that can
-   * prove the saved password was already submitted and re-asked, i.e. a
-   * failed auto-fill retry of a single first-factor password prompt (#3556).
-   * Staged second-factor rounds never get it, so a different secret is never
-   * pre-checked for saving over the host login password (#3558).
+   * Pre-check the "Save password" checkbox — sent only by emitters that have
+   * an actual failed-auth rejection signal for the round. Same-shape
+   * keyboard-interactive re-asks carry no rejection signal, so they never
+   * get it: pre-checking could persist a staged second-factor secret that
+   * merely reuses the "Password:" label over the host login password
+   * (#3556/#3558).
    */
   defaultSavePassword?: boolean;
 }

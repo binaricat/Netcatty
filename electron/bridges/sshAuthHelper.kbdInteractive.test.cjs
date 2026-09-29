@@ -240,10 +240,13 @@ test("createKeyboardInteractiveHandler falls back to the modal on the retry afte
   // Do not re-prefill the stale value, but still allow saving a corrected one.
   assert.equal(sent[0].payload.savedPassword, null);
   assert.equal(sent[0].payload.allowSavePassword, true);
-  // The corrected password is what the user wants stored — a same-shape
-  // password re-ask after the auto-fill was submitted is the #3556 failed
-  // retry, so pre-check the save box.
-  assert.equal(sent[0].payload.defaultSavePassword, true);
+  // A same-shape password re-ask is ambiguous — ssh2 sends no rejection
+  // signal between keyboard-interactive rounds, so it may equally be a
+  // staged second factor whose wording only appeared in the display-only
+  // banner (#2150). The save box stays available but unchecked; a
+  // pre-checked secondary response would overwrite the host login password
+  // (Codex P1 round 3 on #3558).
+  assert.equal(sent[0].payload.defaultSavePassword, false);
 
   drainPendingRequests(sent);
 });
@@ -414,10 +417,12 @@ test("createKeyboardInteractiveHandler does not prefill after a prior auto-fill 
 
   assert.equal(sent.length, 1);
   assert.equal(sent[0].payload.savedPassword, null);
-  // Same-shape password re-ask can only be PAM rejecting the auto-filled
-  // value, so pre-checking save is safe here — but the prefill stays off
-  // (#2150): the stale value must never be re-submitted on Enter.
-  assert.equal(sent[0].payload.defaultSavePassword, true);
+  // A same-shape password re-ask carries no rejection signal — it can be a
+  // staged second factor (wording in the display-only banner) just as much
+  // as a stale-password retry, so the box must not pre-check. The *prefill*
+  // also stays off (#2150): the stale value must never be re-submitted on
+  // Enter.
+  assert.equal(sent[0].payload.defaultSavePassword, false);
 
   drainPendingRequests(sent);
 });

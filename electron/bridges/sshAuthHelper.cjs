@@ -1972,38 +1972,26 @@ function createKeyboardInteractiveHandler(options) {
       );
     const allowSavePassword = !(skipAutoFill || singleSecondaryChallenge);
 
-    // Codex P1 on #3558 round 2: the previous round set defaultSavePassword
-    // unconditionally to false, which made the #3556 fix a no-op — the
-    // renderer only pre-checks the checkbox when this field is true, so a
-    // user correcting a stale auto-filled password could not have it saved
-    // without manually re-ticking the box. Set the default on *proven*
-    // failed-retry rounds instead:
+    // Codex P1 on #3558 round 3: a later round of an in-flight keyboard-
+    // interactive exchange carries NO signal telling us whether the server
+    // *rejected* the auto-filled password or is *chaining* to the next factor
+    // of a multi-round exchange — ssh2 re-delivers each USERAUTH_INFO_REQUEST
+    // round straight to this listener without USERAUTH_FAILURE or
+    // partialSuccess in between. A same-shaped single hidden "Password:"
+    // re-ask is therefore ambiguous: it can be a stale-password PAM re-ask
+    // (#3556), but just as well a staged second factor whose EDR/MFA wording
+    // only appears in the display-only banner while the field label is a bare
+    // "Password:" (#2150). A same-shape re-ask is not proof of failed
+    // authentication, so the save checkbox must never be pre-checked by this
+    // heuristic — the round-2 default would let the secondary secret
+    // overwrite the host login password on submit.
     //
-    // The auto-fill fired round one, and the server came back with another
-    // round of the *same challenge shape* (a single hidden prompt whose label
-    // is an ordinary reusable-password keyword). ssh2 delivers each round of
-    // an in-flight exchange straight to this listener, and a single-prompt
-    // "Password:" chain with no factor already completed is PAM re-asking
-    // because the submitted password was wrong (OpenSSH/PAM re-prompts inside
-    // the same exchange without USERAUTH_FAILURE or partialSuccess). That is
-    // the #3556 correction modal, and the only failed-retry signal the
-    // protocol surfaces.
-    //
-    // Everything else stays unchecked: allowSavePassword already hides the
-    // checkbox entirely for post-partialSuccess second factors and single
-    // OTP/secondary prompts (#2150), autoFilledOnce keeps the *prefill* off so
-    // a chained round never re-submits the stale secret on Enter (#2150), and
-    // the single-password-shape check keeps multi-prompt chains (Password +
-    // OTP), password-change shapes and anything OTP-worded from auto-ticking
-    // the box for a different secret.
-    const singlePasswordSlotReask =
-      prompts.length === 1 &&
-      prompts[0]?.echo === false &&
-      PASSWORD_PROMPT_PATTERN.test(singlePromptText) &&
-      !PASSWORD_CHANGE_PROMPT_PATTERN.test(
-        [contextText, singlePromptText].filter(Boolean).join("\n"),
-      );
-    const defaultSavePassword = allowSavePassword && autoFilledOnce && singlePasswordSlotReask;
+    // The checkbox stays available (allowSavePassword above) so a user
+    // correcting a stale auto-filled password can still tick it manually.
+    // The field remains part of the payload contract for emitters that
+    // surface a genuine failed-auth rejection signal (#3556); the renderer
+    // still gates it on allowSavePassword and a password slot.
+    const defaultSavePassword = false;
 
     console.log(`${logPrefix} Showing modal for ${promptsData.length} prompts`);
     try { onPromptShown?.(); } catch (err) { console.warn(`${logPrefix} onPromptShown callback threw`, err); }
