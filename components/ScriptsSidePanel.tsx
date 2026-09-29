@@ -64,6 +64,11 @@ const toolbarIconButtonClass =
   'h-7 w-7 shrink-0 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors disabled:opacity-40 disabled:pointer-events-none';
 
 const SCRIPT_ROW_HEIGHT = 34;
+// The stacked view renders wrapping chips that cannot use FixedSizeVirtualList,
+// so cap the initial render and grow lazily as the user scrolls to keep a huge
+// library (or a broad search) from mounting every chip at once.
+const STACKED_INITIAL_RENDER_COUNT = 120;
+const STACKED_RENDER_BATCH = 120;
 
 const isRootPackagePath = (path: string): boolean => {
   const body = path.startsWith('/') ? path.slice(1) : path;
@@ -309,6 +314,7 @@ const ScriptsSidePanelInner: React.FC<ScriptsSidePanelProps> = ({
   const [renamingPackagePath, setRenamingPackagePath] = useState('');
   const [newPackageName, setNewPackageName] = useState('');
   const [packageError, setPackageError] = useState('');
+  const [stackedRenderLimit, setStackedRenderLimit] = useState(STACKED_INITIAL_RENDER_COUNT);
   const packageDialogRef = useRef<HTMLDivElement>(null);
   const packageNameInputRef = useRef<HTMLInputElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -539,6 +545,30 @@ const ScriptsSidePanelInner: React.FC<ScriptsSidePanelProps> = ({
       }];
     });
   }, [rows, searchMatches, t, isVisible]);
+
+  const stackedSentinelRef = useRef<HTMLDivElement | null>(null);
+  const hasMoreStackedItems = viewMode === 'stacked' && stackedRenderLimit < listItems.length;
+
+  // Restart the lazy window whenever the underlying result set changes
+  // (new search, package expand/collapse, snippet edits, view-mode switch).
+  useEffect(() => {
+    setStackedRenderLimit(STACKED_INITIAL_RENDER_COUNT);
+  }, [listItems]);
+
+  useEffect(() => {
+    if (!hasMoreStackedItems) return;
+    const sentinel = stackedSentinelRef.current;
+    if (!sentinel) return;
+    // Re-created per batch: observing always emits an initial intersection
+    // callback, so short result sets that never scroll keep loading.
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        setStackedRenderLimit((limit) => limit + STACKED_RENDER_BATCH);
+      }
+    });
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [hasMoreStackedItems, stackedRenderLimit]);
 
   const handleSnippetClick = useCallback(
     (snippet: Snippet) => {
@@ -1175,7 +1205,7 @@ const ScriptsSidePanelInner: React.FC<ScriptsSidePanelProps> = ({
             data-scripts-view="stacked"
           >
             <div className="flex flex-wrap items-center content-start gap-1.5">
-              {listItems.map((item) => {
+              {listItems.slice(0, stackedRenderLimit).map((item) => {
                 if (item.kind === 'package') {
                   return (
                     <button
@@ -1206,10 +1236,17 @@ const ScriptsSidePanelInner: React.FC<ScriptsSidePanelProps> = ({
                 }
                 const snippet = item.kind === 'search' ? item.snippet : item.row.snippet;
                 const isScript = isScriptSnippet(snippet);
+                // Search results drop the package headers, so surface each
+                // snippet's package on the chip itself to keep results
+                // distinguishable (labels are not unique across packages).
+                const chipSubtitle = item.kind === 'search'
+                  ? (snippet.package || t('terminal.toolbar.library'))
+                  : undefined;
                 return (
                   <SnippetChip
                     key={item.key}
                     snippet={snippet}
+                    subtitle={chipSubtitle}
                     selected={selectedSnippetIds.has(snippet.id)}
                     multiSelect={isMultiSelectMode}
                     onClick={() => handleSnippetClick(snippet)}
@@ -1233,6 +1270,9 @@ const ScriptsSidePanelInner: React.FC<ScriptsSidePanelProps> = ({
                 );
               })}
             </div>
+            {hasMoreStackedItems ? (
+              <div ref={stackedSentinelRef} className="h-px w-full" aria-hidden="true" />
+            ) : null}
           </div>
         ) : (
           <FixedSizeVirtualList
@@ -1760,6 +1800,9 @@ SnippetRow.displayName = 'SnippetRow';
 
 interface SnippetChipProps {
   snippet: Snippet;
+  /** Optional package context shown on the chip (used by stacked search
+   * results, where the package headers are dropped). */
+  subtitle?: string;
   selected?: boolean;
   multiSelect?: boolean;
   onClick: () => void;
@@ -1782,6 +1825,7 @@ interface SnippetChipProps {
  */
 const SnippetChip = memo<SnippetChipProps>(({
   snippet,
+  subtitle,
   selected = false,
   multiSelect = false,
   onClick,
@@ -1823,6 +1867,14 @@ const SnippetChip = memo<SnippetChipProps>(({
                 <Zap size={11} className="shrink-0 text-muted-foreground" />
               )}
               <span className="min-w-0 truncate">{snippet.label}</span>
+              {subtitle ? (
+                <>
+                  <span aria-hidden="true" className="shrink-0 text-muted-foreground/50">·</span>
+                  <span className="min-w-0 truncate text-[10px] text-muted-foreground/80">
+                    {subtitle}
+                  </span>
+                </>
+              ) : null}
             </button>
           </TooltipTrigger>
           <TooltipContent side="right" align="start">
