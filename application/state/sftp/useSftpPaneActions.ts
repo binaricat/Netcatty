@@ -2,6 +2,7 @@ import React, { useCallback, useRef } from "react";
 import type { Host, SftpFileEntry, SftpFilenameEncoding } from "../../../domain/models";
 import { netcattyBridge } from "../../../infrastructure/services/netcattyBridge";
 import { logger } from "../../../lib/logger";
+import { unwrapSftpIpcError } from "./errors";
 import { SftpPane } from "./types";
 import {
   getFileName,
@@ -26,13 +27,6 @@ import {
 
 /** Shared empty set for navigation resets — never mutate this. */
 const EMPTY_SET = new Set<string>();
-
-/** Retain selection identity when no selected entry disappeared. */
-export function retainSftpSelection(selected: Set<string>, files: SftpFileEntry[]): Set<string> {
-  const names = new Set(files.map((file) => file.name));
-  const retained = new Set([...selected].filter((name) => names.has(name)));
-  return retained.size === selected.size ? selected : retained;
-}
 
 interface UseSftpPaneActionsParams {
   hosts: Host[];
@@ -60,14 +54,15 @@ interface UseSftpPaneActionsParams {
 export type SftpNavigateResult = "reached" | "failed" | "aborted" | "superseded";
 export type SftpNavigateOptions = {
   force?: boolean;
-  preserveSelection?: boolean;
   tabId?: string;
   shouldApply?: () => boolean;
+  /** Restore the previous listing without showing a pane error. */
+  quiet?: boolean;
 };
 
 interface UseSftpPaneActionsResult {
   navigateTo: (side: "left" | "right", path: string, options?: SftpNavigateOptions) => Promise<SftpNavigateResult>;
-  refresh: (side: "left" | "right", options?: { tabId?: string; preserveSelection?: boolean }) => Promise<void>;
+  refresh: (side: "left" | "right", options?: { tabId?: string }) => Promise<void>;
   navigateUp: (side: "left" | "right") => Promise<void>;
   openEntry: (side: "left" | "right", entry: SftpFileEntry) => Promise<void>;
   toggleSelection: (side: "left" | "right", fileName: string, multiSelect: boolean) => void;
@@ -187,7 +182,6 @@ export const useSftpPaneActions = ({
         pane.connection.homeDir,
       );
 
-      const preserveSelection = options?.preserveSelection && normalizedPath === pane.connection.currentPath;
       const connectionId = pane.connection.id;
       const requestId = ++navSeqRef.current[side];
       const cacheKey = makeCacheKey(connectionId, normalizedPath, pane.filenameEncoding);
@@ -290,7 +284,7 @@ export const useSftpPaneActions = ({
         connection: prev.connection
           ? { ...prev.connection, currentPath: normalizedPath }
           : null,
-        selectedFiles: preserveSelection ? prev.selectedFiles : EMPTY_SET,
+        selectedFiles: EMPTY_SET,
         filter: clearFilterForPathChange ? "" : prev.filter,
         loading: true,
         error: null,
@@ -378,7 +372,7 @@ export const useSftpPaneActions = ({
           connectionId,
           path: normalizedPath,
           files,
-          selectedFiles: preserveSelection ? retainSftpSelection(getTargetPane()?.selectedFiles ?? EMPTY_SET, files) : EMPTY_SET,
+          selectedFiles: EMPTY_SET,
           filter: nextConfirmedFilter,
         });
 
@@ -389,7 +383,7 @@ export const useSftpPaneActions = ({
             : null,
           files,
           loading: false,
-          selectedFiles: preserveSelection ? retainSftpSelection(prev.selectedFiles, files) : EMPTY_SET,
+          selectedFiles: EMPTY_SET,
           filter: clearFilterForPathChange ? "" : prev.filter,
         }));
         if (!pane.connection.isLocal) {
@@ -425,8 +419,9 @@ export const useSftpPaneActions = ({
             files: previousFiles,
             selectedFiles: previousSelection,
             filter: getSftpFilterAfterPathChangeError(clearFilterForPathChange, previousFilter, prev.filter),
-            error:
-              err instanceof Error ? err.message : "Failed to list directory",
+            error: options?.quiet
+              ? previousError
+              : unwrapSftpIpcError(err) || "Failed to list directory",
             loading: false,
           };
         });
@@ -454,7 +449,7 @@ export const useSftpPaneActions = ({
   );
 
   const refresh = useCallback(
-    async (side: "left" | "right", options?: { tabId?: string; preserveSelection?: boolean }) => {
+    async (side: "left" | "right", options?: { tabId?: string }) => {
       const sideTabs = side === "left" ? leftTabsRef.current : rightTabsRef.current;
       const pane = options?.tabId
         ? sideTabs.tabs.find((t) => t.id === options.tabId) ?? null
@@ -485,7 +480,7 @@ export const useSftpPaneActions = ({
           }
           return;
         }
-        await navigateTo(side, pane.connection.currentPath, { force: true, tabId: options?.tabId, preserveSelection: options?.preserveSelection });
+        await navigateTo(side, pane.connection.currentPath, { force: true, tabId: options?.tabId });
       } else if (!pane?.connection && pane?.error) {
         // For background tabs, don't trigger reconnection (it operates on
         // the active tab). Just leave the error state for the user to see
@@ -1039,6 +1034,30 @@ export const useSftpPaneActions = ({
     [getActivePane, refresh, handleSessionError, sftpSessionsRef, isSessionError],
   );
 
+  const removeListedNames = useCallback((
+    side: "left" | "right",
+    parentPath: string,
+    names: string[],
+  ) => {
+    if (names.length === 0) return;
+    const removeSet = new Set(names);
+    updateActiveTab(side, (prev) => {
+      if (!prev.connection || prev.connection.currentPath !== parentPath) return prev;
+      const nextSelection = new Set(prev.selectedFiles);
+      for (const name of names) nextSelection.delete(name);
+      return {
+        ...prev,
+        files: prev.files.filter((file) => !removeSet.has(file.name)),
+        selectedFiles: nextSelection,
+        error: null,
+      };
+    });
+    const pane = getActivePane(side);
+    if (pane?.connection && !pane.connection.isLocal) {
+      clearCacheForConnection(pane.connection.id);
+    }
+  }, [clearCacheForConnection, getActivePane, updateActiveTab]);
+
   return {
     navigateTo,
     refresh,
@@ -1056,6 +1075,7 @@ export const useSftpPaneActions = ({
     createFileAtPath,
     deleteFiles,
     deleteFilesAtPath,
+    removeListedNames,
     renameFile,
     renameFileAtPath,
     moveEntriesToPath,

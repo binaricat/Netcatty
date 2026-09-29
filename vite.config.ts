@@ -104,6 +104,7 @@ export default defineConfig(() => {
                 '@xterm/xterm',
                 '@xterm/addon-fit',
                 '@xterm/addon-image',
+                '@xterm/addon-ligatures',
                 '@xterm/addon-search',
                 '@xterm/addon-serialize',
                 '@xterm/addon-web-links',
@@ -136,6 +137,10 @@ export default defineConfig(() => {
       resolve: {
         alias: {
           '@': path.resolve(__dirname, '.'),
+          // The ligatures addon pulls lru-cache's node:diagnostics_channel import
+          // into the renderer bundle. Stub it; the cache never publishes metrics.
+          'node:diagnostics_channel': path.resolve(__dirname, 'infrastructure/shims/nodeDiagnosticsChannel.ts'),
+          'diagnostics_channel': path.resolve(__dirname, 'infrastructure/shims/nodeDiagnosticsChannel.ts'),
         }
       }
     };

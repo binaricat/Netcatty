@@ -235,6 +235,12 @@ export const AGENT_DEFAULTS: Record<string, Omit<ExternalAgentConfig, "id" | "co
     icon: "grok",
     sdkBackend: "grok",
   },
+  mimo: {
+    name: "MiMo Code",
+    args: [],
+    icon: "mimo",
+    sdkBackend: "mimo",
+  },
 };
 
 // ---------------------------------------------------------------------------

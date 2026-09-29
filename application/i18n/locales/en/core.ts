@@ -359,9 +359,6 @@ export const enCoreMessages: Messages = {
   'settings.vault.selectBeforeConnectDesc': 'Click once to select a host (accent highlight in grid view), click again to connect. Groups work the same way. Default remains single-click connect.',
   'settings.vault.showOnlyUngroupedHostsInRoot': 'Only show ungrouped hosts at root',
   'settings.vault.showOnlyUngroupedHostsInRootDesc': 'When enabled, the root host list only shows hosts without a group. Open a group from the sidebar to see grouped hosts.',
-  'settings.appearance.tabBarPosition': 'Tab bar position',
-  'settings.appearance.tabBarPosition.top': 'Top',
-  'settings.appearance.tabBarPosition.bottom': 'Bottom',
   'settings.vault.showSftpTab': 'Show SFTP tab',
   'settings.vault.showSftpTabDesc': 'Display the standalone SFTP view in the top tab bar. When hidden, use the in-session SFTP side panel instead.',
   'settings.vault.showHostTreeSidebar': 'Show host list sidebar',
@@ -541,7 +538,7 @@ Highlight the focused split pane:
   'settings.appearance.windowOpacity': 'Window Opacity',
   'settings.appearance.windowOpacity.desc': 'Adjust the transparency of the entire application window. Lower values also fade terminal text. Some Linux desktop environments may not support this.',
   'settings.appearance.appIcon': 'App Icon',
-  'settings.appearance.appIcon.desc': 'Choose a dock/taskbar icon style to make Netcatty easier to spot when switching apps. Applies at runtime; the installed app bundle icon is unchanged.',
+  'settings.appearance.appIcon.desc': 'Choose a dock/taskbar icon style to make Netcatty easier to spot when switching apps. On Windows, the notification area icon uses the same style. Applies at runtime; the installed app bundle icon is unchanged.',
   'settings.appearance.appIcon.original': 'Original',
   'settings.appearance.appIcon.bright': 'Bright',
   'settings.appearance.appIcon.dark': 'Dark',
@@ -617,6 +614,8 @@ Highlight the focused split pane:
   'settings.terminal.font.weightBold.desc': 'Weight for bold text (100-900)',
   'settings.terminal.font.smoothing': 'Font smoothing',
   'settings.terminal.font.smoothing.desc': 'Use native macOS font anti-aliasing',
+  'settings.terminal.font.ligatures': 'Font ligatures',
+  'settings.terminal.font.ligatures.desc': 'Render ligatures such as != when the terminal font includes them',
   'settings.terminal.font.linePadding': 'Line padding',
   'settings.terminal.font.linePadding.desc': 'Additional space between lines (0-10)',
   'settings.terminal.font.emulationType': 'Terminal emulation type',
@@ -624,6 +623,8 @@ Highlight the focused split pane:
   'settings.terminal.cursor.style.block': 'Block',
   'settings.terminal.cursor.style.bar': 'Bar',
   'settings.terminal.cursor.style.underline': 'Underline',
+  'settings.terminal.cursor.barWidth': 'Bar cursor width',
+  'settings.terminal.cursor.barWidth.desc': 'Width of bar cursors used by applications such as vi (1-4 px)',
   'settings.terminal.cursor.blink': 'Cursor blink',
   'settings.terminal.cursor.highlightLine': 'Highlight current line',
   'settings.terminal.cursor.highlightLine.desc':
@@ -708,7 +709,10 @@ Highlight the focused split pane:
     'Send configured text instead of normal Enter when pressing Shift+Enter in the terminal.',
   'settings.terminal.behavior.shiftEnterNewlineText': 'Text to send',
   'settings.terminal.behavior.shiftEnterNewlineText.desc':
-    'Use \\n for newline, \\t for tab, and \\\\ for backslash.',
+    'Use \\n for newline, \\t for tab, \\e for Escape, and \\\\ for backslash.',
+  'settings.terminal.behavior.shiftEnterForceText': 'Send text in Win32 input mode',
+  'settings.terminal.behavior.shiftEnterForceText.desc':
+    'Also send the text above when a local Windows ConPTY session negotiates Win32 input mode. Needed for Node/Bun CLIs (Claude Code, CodeBuddy) that cannot read modifier keys from console input records.',
   'settings.terminal.behavior.clearWipesScrollback': '`clear` wipes scrollback',
   'settings.terminal.behavior.clearWipesScrollback.desc':
     'Make `clear` also wipe the scrollback buffer (POSIX default). Disable to keep history visible after `clear`.',

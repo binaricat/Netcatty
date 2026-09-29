@@ -131,6 +131,7 @@ export function useTerminalFilePaste({
     };
   }, [
     autoUploadClipboardImage,
+    broadcastPasswordBypassRef,
     containerRef,
     multilinePasteConfirmRef,
     getRemoteCwd,

@@ -60,7 +60,7 @@ function toOpenCodeMcpConfig(injectedMcpServers) {
   return mcp;
 }
 
-function buildOpenCodeConfig({ model, injectedMcpServers, toolIntegrationMode, skillsPathAllowlist } = {}) {
+function buildOpenCodeConfig({ model, injectedMcpServers, toolIntegrationMode, skillsPathAllowlist, nativeSkillOptions } = {}) {
   const allowBash = toolIntegrationMode === "skills";
   const permission = {
     edit: "deny",
@@ -72,10 +72,10 @@ function buildOpenCodeConfig({ model, injectedMcpServers, toolIntegrationMode, s
     // Keep external access locked down, but let OpenCode's native skills
     // (e.g. ~/.opencode/skills, ~/.config/opencode/skills) read their own
     // reference files in every mode (issue #1939).
-    ...buildOpenCodeNativeSkillsPermissionRules(),
+    ...buildOpenCodeNativeSkillsPermissionRules(nativeSkillOptions),
   };
   if (allowBash && Array.isArray(skillsPathAllowlist) && skillsPathAllowlist.length > 0) {
-    Object.assign(permission, buildOpenCodeSkillsPermissionRules(skillsPathAllowlist));
+    Object.assign(permission, buildOpenCodeSkillsPermissionRules(skillsPathAllowlist, nativeSkillOptions));
   }
   const config = {
     share: "disabled",
@@ -920,6 +920,8 @@ module.exports = {
   classifyOpenCodeSpawnError,
   closeOpenCodeInstance,
   createOpenCodeProcessEnv,
+  getOpenCodeDefaultModelId,
+  getOpenCodeSessionIdFromEvent,
   withOpenCodeProcessEnv,
   listOpenCodeModels,
   mapOpenCodeModels,

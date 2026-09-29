@@ -49,7 +49,15 @@ let authToken = null;  // Random token generated when TCP server starts
 let externalAuthToken = null;
 let pendingHostStart = null; // { promise, server, cancel }
 let electronModule = null;
-let cliDiscoveryFilePath = getCliDiscoveryFilePath();
+// Resolved on demand rather than frozen at load time. The path used to be
+// captured here, so merely requiring this module (including from `node --test`)
+// inherited the INSTALLED app's live discovery file and `cleanup()` deleted it.
+let cliDiscoveryFilePathOverride = null;
+function getActiveCliDiscoveryFilePath() {
+  return cliDiscoveryFilePathOverride || getCliDiscoveryFilePath();
+}
+let discoverySelfHealTimer = null;
+const DISCOVERY_SELF_HEAL_INTERVAL_MS = 15000;
 
 // Track which sockets have completed authentication
 const authenticatedSockets = new WeakSet();
@@ -385,7 +393,7 @@ function init(deps) {
   terminalWorkerManager = deps.terminalWorkerManager || null;
   fileTransferBridge = deps.transferBridge || null;
   electronModule = deps.electronModule || null;
-  cliDiscoveryFilePath = deps.cliDiscoveryFilePath || getCliDiscoveryFilePath();
+  cliDiscoveryFilePathOverride = deps.cliDiscoveryFilePath || null;
   debugLog("init", { hasSessions: Boolean(sessions), hasElectron: Boolean(electronModule) });
   if (deps.commandBlocklist) {
     commandBlocklist = deps.commandBlocklist;
@@ -423,6 +431,7 @@ async function listActivePortForwards() {
 }
 
 function writeCliDiscoveryFile() {
+  const cliDiscoveryFilePath = getActiveCliDiscoveryFilePath();
   if (!tcpPort || !authToken || !cliDiscoveryFilePath) return;
   const payload = {
     port: tcpPort,
@@ -440,6 +449,7 @@ function writeCliDiscoveryFile() {
 }
 
 function removeCliDiscoveryFile() {
+  const cliDiscoveryFilePath = getActiveCliDiscoveryFilePath();
   if (!cliDiscoveryFilePath) return;
   try {
     fs.rmSync(cliDiscoveryFilePath, { force: true });
@@ -448,7 +458,57 @@ function removeCliDiscoveryFile() {
   }
 }
 
+function isCliDiscoveryFileCurrent() {
+  const cliDiscoveryFilePath = getActiveCliDiscoveryFilePath();
+  if (!cliDiscoveryFilePath) return true;
+  let raw;
+  try {
+    raw = fs.readFileSync(cliDiscoveryFilePath, "utf8");
+  } catch {
+    return false;
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed?.port === tcpPort
+      && parsed?.token === authToken
+      && parsed?.pid === process.pid;
+  } catch {
+    return false;
+  }
+}
+
+// Self-heal: the discovery file is a runtime pointer that can be deleted
+// out-of-band (cleanup tools, agent shells) while the TCP bridge is still
+// listening. Rewrite it from the in-memory port/token so tool CLI does not
+// report a misleading APP_NOT_RUNNING / "sessions gone" error.
+function ensureCliDiscoveryFile() {
+  const cliDiscoveryFilePath = getActiveCliDiscoveryFilePath();
+  if (!tcpPort || !authToken || !cliDiscoveryFilePath) return;
+  if (isCliDiscoveryFileCurrent()) return;
+  debugLog("self-healing CLI discovery file");
+  writeCliDiscoveryFile();
+}
+
+function startDiscoverySelfHeal() {
+  stopDiscoverySelfHeal();
+  discoverySelfHealTimer = setInterval(() => {
+    try {
+      ensureCliDiscoveryFile();
+    } catch {
+      // Self-heal is best-effort.
+    }
+  }, DISCOVERY_SELF_HEAL_INTERVAL_MS);
+  if (typeof discoverySelfHealTimer.unref === "function") discoverySelfHealTimer.unref();
+}
+
+function stopDiscoverySelfHeal() {
+  if (!discoverySelfHealTimer) return;
+  clearInterval(discoverySelfHealTimer);
+  discoverySelfHealTimer = null;
+}
+
 function shutdownHost({ preserveScopedMetadata = false } = {}) {
+  stopDiscoverySelfHeal();
   removeCliDiscoveryFile();
   authToken = null;
   if (pendingHostStart?.server && pendingHostStart.server !== tcpServer) {
@@ -946,16 +1006,44 @@ function handleReadAttachment(params) {
   const found = findRegisteredAttachment(params);
   if (found.error) return { ok: false, error: found.error };
   const attachment = found.attachment;
+  const maxBytes = Number.isSafeInteger(params?.maxBytes) && params.maxBytes >= 0
+    ? params.maxBytes
+    : null;
   let base64Data = attachment.base64Data;
+  if (maxBytes !== null && base64Data && Buffer.byteLength(base64Data, "base64") > maxBytes) {
+    return { ok: false, error: "Attachment exceeds the requested size limit." };
+  }
   if (!base64Data && attachment.filePath) {
     try {
-      base64Data = fs.readFileSync(attachment.filePath).toString("base64");
+      if (maxBytes === null) {
+        base64Data = fs.readFileSync(attachment.filePath).toString("base64");
+      } else {
+        const fd = fs.openSync(attachment.filePath, "r");
+        try {
+          const chunk = Buffer.alloc(Math.min(64 * 1024, maxBytes + 1));
+          const chunks = [];
+          let total = 0;
+          while (total <= maxBytes) {
+            const read = fs.readSync(fd, chunk, 0, Math.min(chunk.length, maxBytes + 1 - total), null);
+            if (read === 0) break;
+            chunks.push(Buffer.from(chunk.subarray(0, read)));
+            total += read;
+          }
+          if (total > maxBytes) return { ok: false, error: "Attachment exceeds the requested size limit." };
+          base64Data = Buffer.concat(chunks, total).toString("base64");
+        } finally {
+          fs.closeSync(fd);
+        }
+      }
     } catch (err) {
       return { ok: false, error: err?.message || "Failed to read attachment." };
     }
   }
-  if (!base64Data) return { ok: false, error: "Attachment content is unavailable." };
+  if (!base64Data && !attachment.filePath) return { ok: false, error: "Attachment content is unavailable." };
   const buffer = Buffer.from(base64Data, "base64");
+  if (maxBytes !== null && buffer.length > maxBytes) {
+    return { ok: false, error: "Attachment exceeds the requested size limit." };
+  }
   const result = {
     ok: true,
     filename: attachment.filename,
@@ -1124,7 +1212,11 @@ function checkCommandSafetyCommonOnly(command) {
 // ── TCP Server ──
 
 function getOrCreateHost() {
-  if (tcpServer && tcpPort) return Promise.resolve(tcpPort);
+  if (tcpServer && tcpPort) {
+    // Host is alive; repair the discovery file if it was removed out-of-band.
+    ensureCliDiscoveryFile();
+    return Promise.resolve(tcpPort);
+  }
   if (pendingHostStart?.promise) return pendingHostStart.promise;
 
   // Generate a random auth token for this server instance
@@ -1183,6 +1275,7 @@ function getOrCreateHost() {
       tcpServer = server;
       debugLog("TCP server listening", { port: tcpPort });
       writeCliDiscoveryFile();
+      startDiscoverySelfHeal();
       try {
         externalMcpHostReadyHook?.({ port: tcpPort, token: authToken });
       } catch {
@@ -2125,6 +2218,10 @@ async function handleGetContext(params) {
 }
 
 function handleGetStatus() {
+  const cliDiscoveryFilePath = getActiveCliDiscoveryFilePath();
+  // Repair the discovery pointer before reporting on it, so a mid-session
+  // out-of-band deletion is visible to callers as already self-healed.
+  ensureCliDiscoveryFile();
   return {
     ok: true,
     environment: "netcatty-terminal",
@@ -2275,6 +2372,7 @@ module.exports = {
   handleReadAttachment,
   getScopedSessionIds,
   getOrCreateHost,
+  ensureCliDiscoveryFile,
   buildMcpServerConfig,
   activePtyExecs,
   cancelBackgroundJobsForSession,

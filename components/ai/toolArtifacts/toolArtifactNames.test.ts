@@ -50,4 +50,34 @@ test('inferArtifactToolNameFromCliArgs maps Netcatty CLI artifact commands', () 
     }),
     'host_get',
   );
+  assert.equal(
+    inferArtifactToolNameFromCliArgs({
+      command: `/bin/zsh -lc '"/Applications/Netcatty.app/netcatty-tool-cli" notes import --file-name runbook.md --content-stdin --json'`,
+    }),
+    'vault_notes_import',
+  );
+  assert.equal(
+    inferArtifactToolNameFromCliArgs({
+      command: `/bin/zsh -lc '"/Applications/Netcatty.app/netcatty-tool-cli" --json notes list'`,
+    }),
+    'vault_notes_list',
+  );
+  assert.equal(
+    inferArtifactToolNameFromCliArgs({
+      command: 'netcatty-tool-cli notes list --json',
+    }),
+    'vault_notes_list',
+  );
+  assert.equal(
+    inferArtifactToolNameFromCliArgs({
+      command: 'netcatty-tool-cli notes --group "ops team" import --content-stdin --json',
+    }),
+    'vault_notes_import',
+  );
+  assert.equal(
+    inferArtifactToolNameFromCliArgs({
+      command: '& "C:\\Program Files\\Netcatty\\netcatty-tool-cli.cmd" notes import --attachment-index 0 --json',
+    }),
+    'vault_notes_import',
+  );
 });

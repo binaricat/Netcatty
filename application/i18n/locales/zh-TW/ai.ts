@@ -4,6 +4,7 @@ export const zhTWAiMessages: Messages = {
   // AI Settings
   'ai.agentSettings': 'Agent 設定',
   'ai.chat.preparing': '準備中…',
+  'ai.chat.modelCatalogWarning': '暫時無法更新即時模型清單，目前顯示上次可用或內建的模型。',
   'ai.chat.compactingContext': '正在壓縮較早的上下文…',
   'ai.chat.compactingStep': '正在為下一步整理上下文…',
   'ai.chat.compactionRetry': '請求過大，正在壓縮上下文並重試…',
@@ -277,6 +278,18 @@ export const zhTWAiMessages: Messages = {
   'ai.opencode.customPathPlaceholder': '例如 /usr/local/bin/opencode',
   'ai.opencode.check': '檢查',
   'ai.opencode.resetPath': '重設',
+
+  // AI MiMo Code（小米 MiMo Code CLI，OpenCode 分支）
+  'ai.mimo.title': 'MiMo Code',
+  'ai.mimo.description': '小米 MiMo Code CLI（OpenCode 分支）。安裝後在它自己的設定裡設定 provider 和金鑰，偵測到後即可作為外部程式設計 Agent 使用。',
+  'ai.mimo.detecting': '偵測中...',
+  'ai.mimo.detected': '已偵測到',
+  'ai.mimo.notFound': '未找到',
+  'ai.mimo.path': '路徑：',
+  'ai.mimo.notFoundHint': '在 PATH 中未找到 mimo。請安裝或在下方指定執行檔路徑。',
+  'ai.mimo.customPathPlaceholder': '例如 /usr/local/bin/mimo',
+  'ai.mimo.check': '檢查',
+  'ai.mimo.resetPath': '重設',
 
   // AI Grok Build（應用內託管 Agent，與 External MCP「新增到 Grok」不同）
   'ai.grok.title': 'Grok Build',
@@ -590,6 +603,11 @@ export const zhTWAiMessages: Messages = {
   'terminal.layer.aiChat': 'AI 助手',
   'terminal.layer.movePanelLeft': '面板移至左側',
   'terminal.layer.movePanelRight': '面板移至右側',
+  'terminal.layer.movePanelBottom': '面板移至底部',
+  'terminal.layer.choosePanelPosition': '變更位置',
+  'terminal.layer.dockLeft': '左側',
+  'terminal.layer.dockRight': '右側',
+  'terminal.layer.dockBottom': '底部',
   'terminal.layer.closePanel': '關閉面板',
   'terminal.layer.closePane': '關閉分割',
   'terminal.layer.saveLayoutAsDefault': '將佈局儲存為預設',

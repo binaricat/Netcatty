@@ -12,6 +12,9 @@ import {
   shouldLatchInitialFollowInterruption,
   shouldReleaseInitialFollowSyncAttempt,
   shouldResetInitialFollowTerminalCwdSync,
+  resolveTerminalCwdForSftp,
+  guessUnixHomeDirFromPath,
+  fallbackFollowPathForUntrackedSession,
 } from "./sftpFollowTerminalCwd";
 
 const base = {
@@ -548,4 +551,30 @@ test("first-open probe is latched as interrupted on a hide with the owner panel 
     shouldLatchInitialFollowInterruption({ isVisible: false, ownerPanelOpen: false }),
     false,
   );
+});
+
+test("resolveTerminalCwdForSftp expands a prompt home shortcut", () => {
+  assert.equal(resolveTerminalCwdForSftp("~", "/root"), "/root");
+  assert.equal(resolveTerminalCwdForSftp("~/codes", "/root/"), "/root/codes");
+  assert.equal(resolveTerminalCwdForSftp("/var/log", "/root"), "/var/log");
+  assert.equal(resolveTerminalCwdForSftp("~", null, "/root/projects"), "/root");
+  assert.equal(resolveTerminalCwdForSftp("~", null), "~");
+});
+
+test("split focus without a cwd returns to that pane home instead of the other pane", () => {
+  assert.equal(fallbackFollowPathForUntrackedSession({
+    originChanged: true,
+    homeDir: "/root",
+    currentPath: "/data/app/doris",
+  }), "/root");
+  assert.equal(fallbackFollowPathForUntrackedSession({
+    originChanged: false,
+    homeDir: "/root",
+    currentPath: "/data/app/doris",
+  }), null);
+  assert.equal(fallbackFollowPathForUntrackedSession({
+    originChanged: true,
+    homeDir: "/root",
+    currentPath: "/root",
+  }), null);
 });

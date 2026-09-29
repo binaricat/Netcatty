@@ -170,6 +170,7 @@ function parsePuttyCommandLine(argv) {
   let username;
   let password;
   let port;
+  let tabName;
   const positionals = [];
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -208,6 +209,9 @@ function parsePuttyCommandLine(argv) {
         if (value === "") return null;
         password = value;
         continue;
+      }
+      if (arg === "-newtab") {
+        tabName = value.trim();
       }
       if (!value.trim()) return null;
       continue;
@@ -253,6 +257,7 @@ function parsePuttyCommandLine(argv) {
     ...(resolvedUsername ? { username: resolvedUsername } : {}),
     ...(password !== undefined ? { password } : {}),
     ...(resolvedPort ? { port: resolvedPort } : {}),
+    ...(tabName ? { tabName } : {}),
   };
 }
 

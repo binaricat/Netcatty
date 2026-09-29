@@ -6,6 +6,64 @@ import {
   runDistroDetection,
 } from "./terminalDistroDetection.ts";
 
+test("runDistroDetection still probes when only a legacy host flag is set", async () => {
+  let distroProbeCalls = 0;
+  const token = registerConnectionToken("legacy-flag-session");
+
+  await runDistroDetection({
+    host: {
+      id: "bastion-1",
+      label: "Bastion",
+      hostname: "bastion.example.com",
+      username: "user",
+      singleChannelSsh: true,
+    },
+    terminalBackend: {
+      getSessionRemoteInfo: async () => ({
+        success: true,
+        remoteSshVersion: "OpenSSH_9.6",
+      }),
+      getSessionDistroInfo: async () => {
+        distroProbeCalls += 1;
+        return { success: true, stdout: 'ID="ubuntu"\n' };
+      },
+    },
+    onOsDetected: () => undefined,
+  } as never, "legacy-flag-session", token);
+
+  assert.equal(distroProbeCalls, 1);
+});
+
+test("runDistroDetection skips POSIX probes when the SSH banner is a one-channel bastion", async () => {
+  let distroProbeCalls = 0;
+  const token = registerConnectionToken("banner-session");
+
+  await runDistroDetection({
+    host: {
+      id: "bastion-banner",
+      label: "Bastion",
+      hostname: "bastion.example.com",
+      username: "user",
+    },
+    terminalBackend: {
+      getSessionRemoteInfo: async () => ({
+        success: true,
+        remoteSshVersion: "BHostSSH_7.0",
+      }),
+      getSessionDistroInfo: async () => {
+        distroProbeCalls += 1;
+        return { success: false, error: "must not probe bastion banner" };
+      },
+    },
+    onOsDetected: () => {
+      throw new Error("banner must not be classified as a distro");
+    },
+  } as never, "banner-session", token);
+
+  assert.equal(distroProbeCalls, 0);
+});
+
+
 test("runDistroDetection uses SSH banner but skips POSIX probes for manually marked network devices", async () => {
   let remoteInfoCalls = 0;
   let distroProbeCalls = 0;

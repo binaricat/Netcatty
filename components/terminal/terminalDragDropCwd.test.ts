@@ -11,6 +11,7 @@ import {
   resolveTerminalDropErrorMessage,
 } from "./hooks/useTerminalDragDrop";
 import { resolvePreferredTerminalCwd } from "./sftpCwd";
+import { resolvePasswordAuthSftpHost } from "../../domain/authIdentityPicker";
 
 const host = {
   id: "host-1",
@@ -608,6 +609,36 @@ test("remote SSH folder drop to /root uses a resolved identity password", async 
   assert.equal(openedHost?.sftpSudo, true);
   assert.equal(openedHost?.password, undefined);
   assert.equal(openedHost?.identityId, "id-1");
+});
+
+test("folder drop after choosing deploy identity keeps its saved sudo password", async () => {
+  const rootHost = { ...host, username: "root", identityId: "root-id" };
+  const identity = {
+    id: "deploy-id", label: "Deploy", username: "deploy", authMethod: "password" as const,
+    password: "deploy-secret", created: 0,
+  };
+  const sftpHost = resolvePasswordAuthSftpHost(rootHost, [identity], {
+    authMethod: "password", username: "deploy", password: "deploy-secret", savedToHost: false,
+  });
+  let openedHost: Host | undefined;
+  await handleTerminalDropEntries({
+    dropEntries: [{ file: null, relativePath: "docs", isDirectory: true }],
+    host: sftpHost,
+    resolvedLoginUsername: sftpHost.username,
+    resolvedSudoPassword: identity.password,
+    isLocalConnection: false,
+    onOpenSftp: (nextHost) => { openedHost = nextHost; },
+    resolveSftpInitialPath: async () => "/root",
+    scrollToBottomAfterProgrammaticInput: () => {},
+    sessionId: "session-1",
+    sessionRef: { current: "session-1" },
+    terminalBackend: { writeToSession: () => {} },
+    termRef: { current: null },
+  });
+  assert.equal(openedHost?.username, "deploy");
+  assert.equal(openedHost?.identityId, "deploy-id");
+  assert.equal(openedHost?.sftpSudo, true);
+  assert.equal(rootHost.identityId, "root-id");
 });
 
 test("remote SSH folder drop to /root fails closed without a saved sudo password", async () => {

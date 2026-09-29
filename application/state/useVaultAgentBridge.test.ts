@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
+  applyAgentNotesUpdate,
   haveSameVaultAgentSnapshot,
   resolveVaultAgentEffectiveHost,
   resolveVaultAgentNotes,
@@ -24,6 +25,33 @@ describe('haveSameVaultAgentSnapshot', () => {
         key,
       );
     }
+  });
+});
+
+describe('applyAgentNotesUpdate', () => {
+  it('rolls back an unsaved agent note before a later successful write', () => {
+    const oldNotes = [{ id: 'old', title: 'Old', content: 'old', createdAt: 1, updatedAt: 1 }];
+    const noteA = { id: 'a', title: 'A', content: 'a', createdAt: 2, updatedAt: 2 };
+    const noteB = { id: 'b', title: 'B', content: 'b', createdAt: 3, updatedAt: 3 };
+    let inMemory = oldNotes;
+    let persisted = oldNotes;
+    let failNext = true;
+    const updateNotes = (notes: typeof oldNotes) => {
+      inMemory = notes;
+      if (failNext) {
+        failNext = false;
+        return false;
+      }
+      persisted = notes;
+      return true;
+    };
+
+    assert.equal(applyAgentNotesUpdate([...oldNotes, noteA], oldNotes, updateNotes), false);
+    assert.deepEqual(inMemory, oldNotes);
+    assert.deepEqual(persisted, oldNotes);
+
+    assert.equal(applyAgentNotesUpdate([...inMemory, noteB], inMemory, updateNotes), true);
+    assert.deepEqual(persisted.map((note) => note.id), ['old', 'b']);
   });
 });
 

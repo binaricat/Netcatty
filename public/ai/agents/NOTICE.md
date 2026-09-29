@@ -3,6 +3,9 @@
 ## Originally authored for netcatty
 
 - `catty.svg`, `terminal.svg`, `plus.svg`, and other generic UI glyphs.
+- `mimo.svg` — placeholder mark for the MiMo Code CLI (Xiaomi). Original
+  geometry, not a vendor logo; replace with an official asset if Xiaomi
+  publishes one under a clear licence.
 
 ## From [lobehub/lobe-icons](https://github.com/lobehub/lobe-icons) (MIT)
 

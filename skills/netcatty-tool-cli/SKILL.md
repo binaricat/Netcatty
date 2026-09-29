@@ -17,6 +17,7 @@ For routine tasks, the host prompt is usually enough. Read only the reference th
 4. Classify the task before choosing a command path:
    - Remote command execution tasks go through the exec reference.
    - Remote file or directory tasks go through the sftp reference.
+   - Vault sidebar notes go through the notes reference, and only when the user explicitly wants Vault Notes markdown. Host Details metadata uses `vault host-notes`. Do not create a note instead of a host.
    - If the user explicitly says to avoid shell or `exec`, do not use `exec`.
    - Treat `exec` as the short-command path only. If the command may exceed about 60 seconds, or streams output for an extended period, use the long-running job commands instead of plain `exec`.
 5. If the host prompt already names a connected default target session, use that session directly for routine requests that do not mention another session or host, but still start with `session --session <id> --json` instead of jumping straight to `exec` or `sftp`.
@@ -42,6 +43,7 @@ Examples:
 
 - Exec and session workflow: `references/exec.md`
 - SFTP file workflow: `references/sftp.md`
+- Vault notes workflow: `references/notes.md`
 - Session and device-type handling: `references/session-types.md`
 - Cancel, resume, and runtime diagnostics: `references/control-commands.md`
 - Error handling and authoritative failures: `references/errors.md`

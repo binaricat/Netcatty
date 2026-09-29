@@ -269,6 +269,94 @@ test("openSftpForSession holds a shared SSH connection until the SFTP handle clo
   setDefaultTransportIdleTtlMs(60_000);
 });
 
+test("openSftpForSession refuses extra channels when singleChannelSsh is set", async () => {
+  const bridge = loadSftpBridgeWithProxySocket(null);
+  const sftpClients = new Map();
+  let sftpCalls = 0;
+  const conn = {
+    _remoteVer: "CLOUDBILITY-4.14",
+    sftp(cb) {
+      sftpCalls += 1;
+      cb(null, { end() {} });
+    },
+    end() {},
+  };
+  const session = {
+    conn,
+    singleChannelSsh: true, remoteSshVersion: "CLOUDBILITY-4.14",
+    stream: {},
+  };
+  const sessions = new Map([["session-bastion", session]]);
+  bridge.init({ sftpClients, sessions, electronModule: {} });
+
+  await assert.rejects(
+    bridge.openSftpForSession(null, { sessionId: "session-bastion" }),
+    (err) => err && err.code === "ERR_SFTP_SINGLE_CHANNEL_BASTION" && sftpCalls === 0,
+  );
+});
+
+test("openSftpForSession refuses a one-channel bastion banner without the host flag", async () => {
+  for (const remoteSshVersion of ["CLOUDBILITY-4.14", "BHostSSH_7.0", "SSH-2.0-TERM-SSHD"]) {
+    const bridge = loadSftpBridgeWithProxySocket(null);
+    const sftpClients = new Map();
+    let sftpCalls = 0;
+    const conn = {
+      _remoteVer: remoteSshVersion,
+      sftp(cb) {
+        sftpCalls += 1;
+        cb(null, { end() {} });
+      },
+      end() {},
+    };
+    const session = {
+      conn,
+      stream: {},
+      remoteSshVersion,
+    };
+    const sessions = new Map([["session-banner", session]]);
+    bridge.init({ sftpClients, sessions, electronModule: {} });
+
+    await assert.rejects(
+      bridge.openSftpForSession(null, { sessionId: "session-banner" }),
+      (err) => err && err.code === "ERR_SFTP_SINGLE_CHANNEL_BASTION" && sftpCalls === 0,
+      remoteSshVersion,
+    );
+  }
+});
+
+test("openSftpForSession still shares the terminal transport for JumpServer", async () => {
+  const bridge = loadSftpBridgeWithProxySocket(null);
+  const sftpClients = new Map();
+  let sftpCalls = 0;
+  const fakeSftp = {
+    readdir() {},
+    stat() {},
+    mkdir() {},
+    unlink() {},
+    end() {},
+  };
+  const conn = {
+    _remoteVer: "JumpServer",
+    sftp(cb) {
+      sftpCalls += 1;
+      cb(null, fakeSftp);
+    },
+    end() {},
+  };
+  const session = {
+    conn,
+    stream: {},
+    remoteSshVersion: "SSH-2.0-JumpServer",
+  };
+  const sessions = new Map([["session-jumpserver", session]]);
+  bridge.init({ sftpClients, sessions, electronModule: {} });
+
+  const opened = await bridge.openSftpForSession(null, { sessionId: "session-jumpserver" });
+  assert.equal(opened.ok, true);
+  assert.equal(sftpCalls, 1);
+  await bridge.closeSftp(null, { sftpId: opened.sftpId });
+});
+
 test("openSftpForSession honors session.sftpFileProtocol when payload omits fileProtocol", async () => {
   const bridge = loadSftpBridgeWithProxySocket(null);
   const sftpClients = new Map();
@@ -463,4 +551,20 @@ test("openSftpForSession keeps sudo mode when connectSudoSftp succeeds", async (
   assert.equal(client?.sftp, sudoWrapper);
   assert.equal(closeBound, true);
   await bridge.closeSftp(null, { sftpId: opened.sftpId });
+});
+
+test("single-channel directory delete does not open a shell exec", async () => {
+  const bridge = require("./sftpBridge.cjs");
+  let execCalls = 0;
+  const removed = await bridge._tryFastShellDirectoryDeleteForTests({
+    __netcattySingleChannelSsh: true,
+    client: {
+      exec() {
+        execCalls += 1;
+        throw new Error("must not exec on single-channel SSH");
+      },
+    },
+  }, "/home/app/static/folder");
+  assert.equal(removed, false);
+  assert.equal(execCalls, 0);
 });

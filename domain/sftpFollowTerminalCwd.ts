@@ -268,3 +268,48 @@ export const shouldFollowTerminalCwdNavigate = ({
   if (!currentPath || currentPath === terminalCwd) return false;
   return true;
 };
+
+/**
+ * A split sibling with no cwd of its own is still at login. Do not leave the
+ * previous pane's directory on the shared SFTP panel.
+ */
+export const fallbackFollowPathForUntrackedSession = ({
+  originChanged,
+  homeDir,
+  currentPath,
+}: {
+  originChanged: boolean;
+  homeDir?: string | null;
+  currentPath?: string | null;
+}): string | null => {
+  if (!originChanged) return null;
+  if (!homeDir || !homeDir.startsWith("/")) return null;
+  if (currentPath === homeDir) return null;
+  return homeDir;
+};
+
+/** Best-effort home from an already-open SFTP path when echo ~ is unavailable. */
+export const isSftpFollowTargetPath = (path: string): boolean => (
+  path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(path)
+);
+
+export const guessUnixHomeDirFromPath = (path?: string | null): string | null => {
+  if (!path || !path.startsWith("/")) return null;
+  if (path === "/root" || path.startsWith("/root/")) return "/root";
+  const match = path.match(/^(\/home\/[^/]+)/);
+  return match ? match[1] : null;
+};
+
+/** Expand a prompt `~` so SFTP navigate does not turn it into `/~`. */
+export const resolveTerminalCwdForSftp = (
+  cwd: string,
+  homeDir?: string | null,
+  currentPath?: string | null,
+): string => {
+  const home = (homeDir && homeDir.startsWith("/")) ? homeDir : guessUnixHomeDirFromPath(currentPath);
+  if (cwd === "~") return home ?? cwd;
+  if (cwd.startsWith("~/") && home) {
+    return `${home.replace(/\/+$/, "")}/${cwd.slice(2)}`;
+  }
+  return cwd;
+};

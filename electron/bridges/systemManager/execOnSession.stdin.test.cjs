@@ -120,3 +120,25 @@ test("execOnSession settles and releases listeners on SSH stream errors", async 
   assert.equal(stream.listenerCount("data"), 0);
   assert.equal(stream.stderr.listenerCount("data"), 0);
 });
+
+test("execOnSession refuses extra channels when singleChannelSsh is set", async () => {
+  let execCalls = 0;
+  const execApi = createExecOnSessionApi({
+    sessions: {
+      get: () => ({
+        conn: {
+          _remoteVer: "CLOUDBILITY-4.14",
+          exec() { execCalls += 1; },
+        },
+        type: "ssh",
+        singleChannelSsh: true, remoteSshVersion: "CLOUDBILITY-4.14",
+      }),
+    },
+  });
+
+  const result = await execApi.execOnSession(null, "s1", "ps", 1000);
+
+  assert.equal(result.success, false);
+  assert.equal(result.code, "ERR_SINGLE_CHANNEL_BASTION");
+  assert.equal(execCalls, 0);
+});

@@ -4,6 +4,7 @@ export const enAiMessages: Messages = {
   // AI Settings
   'ai.agentSettings': 'Agent Settings',
   'ai.chat.preparing': 'Preparing…',
+  'ai.chat.modelCatalogWarning': 'Could not refresh the live model list. Showing the last available or built-in models.',
   'ai.chat.compactingContext': 'Compacting earlier context…',
   'ai.chat.compactingStep': 'Trimming context for next step…',
   'ai.chat.compactionRetry': 'Request was too large. Compacting context and retrying…',
@@ -286,6 +287,18 @@ export const enAiMessages: Messages = {
   'ai.opencode.customPathPlaceholder': 'e.g. /usr/local/bin/opencode',
   'ai.opencode.check': 'Check',
   'ai.opencode.resetPath': 'Reset',
+
+  // AI MiMo Code (Xiaomi MiMo Code CLI — OpenCode fork)
+  'ai.mimo.title': 'MiMo Code',
+  'ai.mimo.description': "Xiaomi's MiMo Code CLI, an OpenCode fork. Install it and configure providers in its own config, then select it as an external coding agent.",
+  'ai.mimo.detecting': 'Detecting...',
+  'ai.mimo.detected': 'Detected',
+  'ai.mimo.notFound': 'Not found',
+  'ai.mimo.path': 'Path:',
+  'ai.mimo.notFoundHint': 'Could not find mimo in PATH. Install it or specify the executable path below.',
+  'ai.mimo.customPathPlaceholder': 'e.g. /usr/local/bin/mimo',
+  'ai.mimo.check': 'Check',
+  'ai.mimo.resetPath': 'Reset',
 
   // AI Grok Build (in-app managed agent — distinct from External MCP client install)
   'ai.grok.title': 'Grok Build',
@@ -600,6 +613,11 @@ export const enAiMessages: Messages = {
   'terminal.layer.aiChat': 'AI Chat',
   'terminal.layer.movePanelLeft': 'Move panel to left',
   'terminal.layer.movePanelRight': 'Move panel to right',
+  'terminal.layer.movePanelBottom': 'Move panel to bottom',
+  'terminal.layer.choosePanelPosition': 'Change position',
+  'terminal.layer.dockLeft': 'Left',
+  'terminal.layer.dockRight': 'Right',
+  'terminal.layer.dockBottom': 'Bottom',
   'terminal.layer.closePanel': 'Close panel',
   'terminal.layer.closePane': 'Close split',
   'terminal.layer.saveLayoutAsDefault': 'Save layout as default',

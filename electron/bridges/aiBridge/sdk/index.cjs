@@ -18,6 +18,7 @@ const codebuddy = require("./codebuddyDriver.cjs");
 const opencode = require("./opencodeDriver.cjs");
 const grok = require("./grokDriver.cjs");
 const grokAcp = require("./grokAcpDriver.cjs");
+const mimo = require("./mimoDriver.cjs");
 const { codebuddySessionManager } = require("./codebuddySessionManager.cjs");
 
 function hasCodebuddyQueryOnlyOptions(options) {
@@ -75,7 +76,9 @@ const DRIVER_REGISTRY = {
         signal: ctx.signal,
       });
     },
-    // codex-sdk exposes no model catalog; the UI falls back to curated presets.
+    // codex-sdk exposes no model catalog. sdkStreamHandlers falls back to the
+    // App Server runtime's live `model/list` when this returns empty (#3496);
+    // curated presets remain the last resort in the renderer.
     async listModels() { return []; },
   },
   copilot: {
@@ -387,6 +390,42 @@ const DRIVER_REGISTRY = {
         currentModelId: grok.resolveGrokCatalogCurrentModelId(models, currentModelId),
         models,
       };
+    },
+  },
+  // MiMo Code is an OpenCode fork, so this mirrors the opencode entry above.
+  // The driver runs `mimo serve` itself instead of `@mimo-ai/sdk`'s
+  // createOpencode(), which cannot parse MiMo's readiness banner; see
+  // mimoDriver.cjs for the details.
+  mimo: {
+    async runTurn(ctx) {
+      return mimo.runMimoTurn({
+        prompt: ctx.prompt,
+        systemPrompt: ctx.systemPrompt,
+        attachments: ctx.attachments,
+        cwd: ctx.cwd,
+        model: ctx.model,
+        env: ctx.env,
+        binPath: ctx.binPath,
+        injectedMcpServers: ctx.injectedMcpServers,
+        toolIntegrationMode: ctx.toolIntegrationMode,
+        skillsPathAllowlist: ctx.skillsPathAllowlist,
+        permissionMode: ctx.permissionMode,
+        chatSessionId: ctx.chatSessionId,
+        requestApprovalFromRenderer: ctx.requestApprovalFromRenderer,
+        clearPendingApprovals: ctx.clearPendingApprovals,
+        resumeSessionId: ctx.resumeSessionId,
+        emitter: ctx.emitter,
+        abortController: ctx.abortController,
+      });
+    },
+    async listModels(ctx) {
+      return mimo.listMimoModels({
+        env: ctx.env,
+        binPath: ctx.binPath,
+        cwd: ctx.cwd,
+        abortController: ctx.abortController,
+        signal: ctx.abortController?.signal || ctx.signal,
+      });
     },
   },
 };

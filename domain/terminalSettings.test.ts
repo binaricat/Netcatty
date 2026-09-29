@@ -7,6 +7,12 @@ test("normalizeTerminalSettings disables cursor line highlight by default", () =
   assert.equal(normalizeTerminalSettings().highlightCursorLine, false);
 });
 
+test("normalizeTerminalSettings defaults and clamps the bar cursor width", () => {
+  assert.equal(normalizeTerminalSettings().cursorBarWidth, 2);
+  assert.equal(normalizeTerminalSettings({ cursorBarWidth: 0 }).cursorBarWidth, 1);
+  assert.equal(normalizeTerminalSettings({ cursorBarWidth: 6 }).cursorBarWidth, 4);
+});
+
 test("normalizeTerminalSettings defaults disconnected sessions to a terminal notice", () => {
   assert.equal(normalizeTerminalSettings().disconnectedNoticeMode, "terminal");
 });
@@ -31,6 +37,11 @@ test("normalizeTerminalSettings rejects unsupported disconnected notice modes", 
 
 test("normalizeTerminalSettings preserves enabled cursor line highlight", () => {
   assert.equal(normalizeTerminalSettings({ highlightCursorLine: true }).highlightCursorLine, true);
+});
+
+test("normalizeTerminalSettings keeps Shift+Enter text opt-in for Win32 input mode", () => {
+  assert.equal(normalizeTerminalSettings().shiftEnterForceText, false);
+  assert.equal(normalizeTerminalSettings({ shiftEnterForceText: true }).shiftEnterForceText, true);
 });
 
 test("normalizeTerminalSettings disables prompt line breaks by default", () => {
@@ -164,6 +175,14 @@ test("normalizeTerminalSettings falls back for unsupported OSC notification mode
 
 test("normalizeTerminalSettings enables font smoothing by default", () => {
   assert.equal(normalizeTerminalSettings().fontSmoothing, true);
+});
+
+test("normalizeTerminalSettings enables font ligatures by default", () => {
+  assert.equal(normalizeTerminalSettings().fontLigatures, true);
+});
+
+test("normalizeTerminalSettings preserves disabled font ligatures", () => {
+  assert.equal(normalizeTerminalSettings({ fontLigatures: false }).fontLigatures, false);
 });
 
 test("normalizeTerminalSettings enables terminal auto-close by default", () => {

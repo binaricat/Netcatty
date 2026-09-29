@@ -8,7 +8,7 @@ export const readVaultImportFile = (
   file: File,
   encoding: VaultImportFileEncoding = "auto",
 ): Promise<string> => {
-  if (format !== "mobaxterm") return readTextFile(file);
+  if (format !== "mobaxterm" && format !== "csv") return readTextFile(file);
   if (encoding !== "auto") return readTextFile(file, { encoding });
   return readTextFile(file, { fallbackEncoding: "gb18030" });
 };

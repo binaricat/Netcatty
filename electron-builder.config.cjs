@@ -68,6 +68,9 @@ module.exports = {
         // Renderer and Mosh's main-process bootstrap share the same
         // fail-closed prompt classifier at runtime.
         'domain/terminalPromptSecurity.shared.cjs',
+        // Main-process SSH, SFTP, and port-forward bridges share this matcher.
+        // TypeScript under domain/ is excluded below, so the .cjs must be listed.
+        'domain/singleChannelSshBanner.shared.cjs',
         'lib/**/*.cjs',
         'lib/**/*.json',
         'skills/**/*',

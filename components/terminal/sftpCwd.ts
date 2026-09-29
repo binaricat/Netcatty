@@ -17,6 +17,9 @@ type SessionPwdOptions = {
 export type RendererCwdSource = TerminalCwdSource;
 export type TerminalCwdChangeMeta = { source?: RendererCwdSource };
 
+const isLiveTerminalCwdSource = (source?: RendererCwdSource | null): boolean =>
+  source === "osc7" || source === "inferred";
+
 type ResolvePreferredTerminalCwdOptions = {
   rendererCwd?: string | null;
   rendererCwdSource?: RendererCwdSource;
@@ -68,6 +71,15 @@ export const createTerminalCwdTracker = (): TerminalCwdTracker => {
   };
 };
 
+/**
+ * Single-channel shells cannot probe pwd and often have no OSC 7. Clearing the
+ * last inferred directory on an ordinary command makes the next relative cd in
+ * a split pane lose its base, so SFTP follow stays on the old path.
+ */
+export const shouldPreserveTerminalCwdAcrossCommand = (
+  restrictExtraSshChannels: boolean,
+): boolean => restrictExtraSshChannels;
+
 /** Invalidate both the terminal-local provenance and the shared SFTP-follow cwd. */
 export const invalidateTerminalCwdAfterCommand = (
   tracker: TerminalCwdTracker,
@@ -90,11 +102,11 @@ export const resolvePreferredTerminalCwd = async ({
   requireActiveShellCwd = false,
 }: ResolvePreferredTerminalCwdOptions): Promise<string | null> => {
   const knownCwd = normalizeCwd(rendererCwd);
-  if (requireActiveShellCwd && knownCwd && rendererCwdSource === "osc7") {
+  if (requireActiveShellCwd && knownCwd && isLiveTerminalCwdSource(rendererCwdSource)) {
     return knownCwd;
   }
   const canUseRendererFallback = allowRendererFallback && (
-    !requireActiveShellCwd || rendererCwdSource === "osc7"
+    !requireActiveShellCwd || isLiveTerminalCwdSource(rendererCwdSource)
   );
   if (!preferFreshBackend && knownCwd && canUseRendererFallback) return knownCwd;
   if (!sessionId) return canUseRendererFallback ? knownCwd : null;

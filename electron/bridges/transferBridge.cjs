@@ -834,6 +834,8 @@ async function hashRemotePrefixViaSshCommand(client, remotePath, bytes, options 
   // For a root-only source, head can fail while sha256sum/openssl still emit the
   // empty-input digest and exit 0 — skip the command path and use elevated SFTP.
   if (client?.__netcattySudoMode) return null;
+  // Prefix hashing through exec would be a second channel on this login.
+  if (client?.__netcattySingleChannelSsh || client?.client?.__netcattySingleChannelSsh) return null;
   const sshClient = client?.client;
   if (!sshClient || typeof sshClient.exec !== "function") return null;
 
@@ -895,7 +897,7 @@ async function hashRemoteFile(client, sftpId, filePath, encoding, options = {}) 
   // The server-side helper has no portable byte progress and its command stream
   // is not consistently abortable across SSH backends. Visible/cancellable
   // verification therefore uses the SFTP stream path below.
-  if (!options.signal && !options.onProgress && sshClient && typeof sshClient.exec === "function") {
+  if (!options.signal && !options.onProgress && sshClient && typeof sshClient.exec === "function" && !client.__netcattySingleChannelSsh && !sshClient.__netcattySingleChannelSsh) {
     const escapedPath = String(filePath).replace(/'/g, "'\\''");
     const digest = await executeBoundedSshCommand(
       sshClient,
@@ -1263,7 +1265,7 @@ async function preserveTransferredDestinationMtime(transfer, options = {}) {
     if (isScpModeClient(client)) {
       // SCP has no SETSTAT; best-effort touch via the SSH session.
       const sshClient = client.client;
-      if (!sshClient || typeof sshClient.exec !== "function") return;
+      if (!sshClient || typeof sshClient.exec !== "function" || client.__netcattySingleChannelSsh || sshClient.__netcattySingleChannelSsh) return;
       const escaped = String(transfer.targetPath).replace(/'/g, "'\\''");
       const command = `touch -d @${mtimeSec} -- '${escaped}' 2>/dev/null || `
         + `touch -t "$(date -u -r ${mtimeSec} +%Y%m%d%H%M.%S 2>/dev/null `
@@ -1794,6 +1796,11 @@ function execSshCommandCancellable(sshClient, command, transfer) {
 }
 
 async function openIsolatedSftpChannel(client, signal = null) {
+  // The dedicated one-channel login already holds its only session channel.
+  // Opening another SFTP subsystem drops that login, so stay on the browse channel.
+  if (client?.__netcattySingleChannelSsh || client?.client?.__netcattySingleChannelSsh) {
+    return null;
+  }
   const sshClient = client?.client;
   return openBoundedSftpChannel(sshClient, { signal });
 }
@@ -6261,7 +6268,8 @@ async function startTransferNow(event, payload, onProgress) {
         && srcClient
         && !cpUnavailableSet.has(srcClient)) {
         const sshClient = srcClient?.client;
-        if (sshClient && typeof sshClient.exec === 'function') {
+        const singleChannelCopy = srcClient.__netcattySingleChannelSsh || sshClient?.__netcattySingleChannelSsh;
+        if (sshClient && typeof sshClient.exec === 'function' && !singleChannelCopy) {
           try {
             const dir = path.dirname(targetPath).replace(/\\/g, '/');
             try {
@@ -7250,6 +7258,11 @@ async function sameHostCopyDirectory(event, payload) {
 
     const client = sftpClients.get(sftpId);
     if (!client) return { success: false };
+    // Remote cp needs an exec channel. That would drop a one-channel SFTP
+    // login, so the caller copies the directory one file at a time.
+    if (client.__netcattySingleChannelSsh || client.client?.__netcattySingleChannelSsh) {
+      return { success: false };
+    }
     if (cpUnavailableSet.has(client)) return { success: false };
 
     const sshClient = client.client;

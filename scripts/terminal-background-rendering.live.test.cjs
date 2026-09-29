@@ -20,18 +20,30 @@ if (!process.versions.electron) {
     fs.rmSync(userData, { recursive: true, force: true });
     app.exit(code);
   };
-  const bundle = esbuild.buildSync({
-    stdin: {
-      contents: [
-        'export {createXTermRuntime} from "./components/terminal/runtime/createXTermRuntime";',
-        'export {DEFAULT_TERMINAL_SETTINGS} from "./domain/models/terminal";',
-        'export {resolveInactiveTerminalPaneStyle} from "./components/terminalPaneVisibility";',
-      ].join("\n"),
-      loader: "ts", resolveDir: root,
-    },
-    bundle: true, format: "cjs", platform: "browser", target: "chrome148", write: false,
-    define: { "import.meta.env.DEV": "false", "import.meta.env.PROD": "true", "import.meta": "{}" },
-  }).outputFiles[0].text;
+  let bundle;
+  try {
+    bundle = esbuild.buildSync({
+      stdin: {
+        contents: [
+          'export {createXTermRuntime} from "./components/terminal/runtime/createXTermRuntime";',
+          'export {DEFAULT_TERMINAL_SETTINGS} from "./domain/models/terminal";',
+          'export {resolveInactiveTerminalPaneStyle} from "./components/terminalPaneVisibility";',
+        ].join("\n"),
+        loader: "ts", resolveDir: root,
+      },
+      bundle: true, format: "cjs", platform: "browser", target: "chrome148", write: false,
+      // addon-ligatures bundles lru-cache's node:diagnostics_channel import.
+      alias: {
+        "node:diagnostics_channel": path.join(root, "infrastructure/shims/nodeDiagnosticsChannel.ts"),
+        "diagnostics_channel": path.join(root, "infrastructure/shims/nodeDiagnosticsChannel.ts"),
+      },
+      define: { "import.meta.env.DEV": "false", "import.meta.env.PROD": "true", "import.meta": "{}" },
+    }).outputFiles[0].text;
+  } catch (error) {
+    console.error(error);
+    fs.rmSync(userData, { recursive: true, force: true });
+    process.exit(1);
+  }
   void app.whenReady().then(async () => {
     win = new BrowserWindow({
       show: true, width: 1100, height: 740,

@@ -98,6 +98,11 @@ type OpenSessionInNewWindowPayload = {
   localShellType?: TerminalSession['shellType'];
 };
 
+type DeepLinkPayload = {
+  url?: string;
+  tabName?: string;
+};
+
 const IS_DEV = import.meta.env.DEV;
 const HOTKEY_DEBUG =
   IS_DEV && localStorageAdapter.readString(STORAGE_KEY_DEBUG_HOTKEYS) === '1';
@@ -260,6 +265,7 @@ export function AppSideEffects() {
     copyWorkspace,
     createSessionFromCloneSource,
     getSessionRestoreCwd,
+    renameSessionInline,
   } = sessionState;
 
   // Presentation-field thrash stays off Host bags (Hosts use retainStable);
@@ -1398,6 +1404,14 @@ export function AppSideEffects() {
     }), host, hidden);
   }, [addConnectionLog, connectToHost, resolveEffectiveHost, identities, keys]);
 
+  const handleConnectToHostWithTabName = useCallback((host: Host, tabName?: string) => {
+    const sessionId = handleConnectToHost(host);
+    if (sessionId && tabName) {
+      renameSessionInline(sessionId, tabName);
+    }
+    return sessionId;
+  }, [handleConnectToHost, renameSessionInline]);
+
   const openHostForVaultAgent = useCallback((host: Host, isExternalMcpCall: boolean) => {
     // Silent sessions only apply to actual external MCP clients (chatSessionId
     // equals the reserved external-MCP scope). The in-app Catty AI chat's
@@ -1465,15 +1479,16 @@ export function AppSideEffects() {
   // deep links until unlock so saved-credential connects cannot start behind
   // the lock screen.
   const pendingDeepLinksWhileLockedRef = useRef<Array<
-    | { kind: 'ssh'; payload: { url?: string } }
-    | { kind: 'telnet'; payload: { url?: string } }
+    | { kind: 'ssh'; payload: DeepLinkPayload }
+    | { kind: 'telnet'; payload: DeepLinkPayload }
     | { kind: 'jms'; payload: { url?: string } }
     | { kind: 'open-terminal-path'; payload: { path?: string } }
   >>([]);
 
-  const _processSshDeepLink = useEffectEvent((payload: { url?: string }) => {
+  const _processSshDeepLink = useEffectEvent((payload: DeepLinkPayload) => {
     startupLaunchIntentReceivedRef.current = true;
     const rawUrl = payload?.url || '';
+    const tabName = payload?.tabName?.trim();
     const target = parseSshDeepLink(rawUrl);
     if (!target) {
       toast.warning(t('deepLink.ssh.invalid'));
@@ -1502,25 +1517,26 @@ export function AppSideEffects() {
         ? buildSshDeepLinkEphemeralHostFromSaved(matchedEffectiveHost, target, draftOptions)
         : buildSshDeepLinkEphemeralHost(target, draftOptions);
       setEphemeralHosts((prev) => [...prev, ephemeralHost]);
-      handleConnectToHost(ephemeralHost);
+      handleConnectToHostWithTabName(ephemeralHost, tabName);
       return;
     }
 
     if (matchedEffectiveHost) {
       const originalHost = hosts.find((host) => host.id === matchedEffectiveHost.id) ?? matchedEffectiveHost;
-      handleConnectToHost(buildSshDeepLinkConnectionHost(originalHost));
+      handleConnectToHostWithTabName(buildSshDeepLinkConnectionHost(originalHost), tabName);
       return;
     }
 
-    setDeepLinkHostDraft(buildSshDeepLinkHostDraft(target, {
+    const hostDraft = buildSshDeepLinkHostDraft(target, {
       id: crypto.randomUUID(),
       now: Date.now(),
-    }));
+    });
+    setDeepLinkHostDraft(tabName ? { ...hostDraft, label: tabName } : hostDraft);
     setNavigateToSection('hosts');
     setActiveTabId('vault');
   });
 
-  const _handleSshDeepLink = useEffectEvent((payload: { url?: string }) => {
+  const _handleSshDeepLink = useEffectEvent((payload: DeepLinkPayload) => {
     if (shouldDeferExternalActionWhileAppLocked({ locked: appLockLocked })) {
       pendingDeepLinksWhileLockedRef.current.push({ kind: 'ssh', payload: payload || {} });
       return;
@@ -1537,9 +1553,10 @@ export function AppSideEffects() {
     });
   }, [isPeerSessionWindow]);
 
-  const _processTelnetDeepLink = useEffectEvent((payload: { url?: string }) => {
+  const _processTelnetDeepLink = useEffectEvent((payload: DeepLinkPayload) => {
     startupLaunchIntentReceivedRef.current = true;
     const rawUrl = payload?.url || '';
+    const tabName = payload?.tabName?.trim();
     const target = parseTelnetDeepLink(rawUrl);
     if (!target) {
       toast.warning(t('deepLink.telnet.invalid'));
@@ -1560,10 +1577,10 @@ export function AppSideEffects() {
           now: Date.now(),
         });
         setEphemeralHosts((prev) => [...prev, ephemeralHost]);
-        handleConnectToHost(ephemeralHost);
+        handleConnectToHostWithTabName(ephemeralHost, tabName);
         return;
       }
-      handleConnectToHost(buildTelnetDeepLinkConnectionHost(matchedEffectiveHost));
+      handleConnectToHostWithTabName(buildTelnetDeepLinkConnectionHost(matchedEffectiveHost), tabName);
       return;
     }
 
@@ -1572,10 +1589,10 @@ export function AppSideEffects() {
       now: Date.now(),
     });
     setEphemeralHosts((prev) => [...prev, ephemeralHost]);
-    handleConnectToHost(ephemeralHost);
+    handleConnectToHostWithTabName(ephemeralHost, tabName);
   });
 
-  const _handleTelnetDeepLink = useEffectEvent((payload: { url?: string }) => {
+  const _handleTelnetDeepLink = useEffectEvent((payload: DeepLinkPayload) => {
     if (shouldDeferExternalActionWhileAppLocked({ locked: appLockLocked })) {
       pendingDeepLinksWhileLockedRef.current.push({ kind: 'telnet', payload: payload || {} });
       return;

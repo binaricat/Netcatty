@@ -271,6 +271,32 @@ test("withSyncReliabilityMeta carries old deletion records until the entity is r
   assert.deepEqual(recreated.syncMeta?.deletions, []);
 });
 
+test("withSyncReliabilityMeta inherits deletion records from the stored base", () => {
+  const deletedHost = {
+    id: "host-1",
+    label: "Old",
+    hostname: "old.example.com",
+    username: "root",
+    tags: [],
+    os: "linux" as const,
+  };
+  const base = withSyncReliabilityMeta(
+    payload(),
+    payload({ hosts: [deletedHost] }),
+    { deviceId: "device-a", now: 100 },
+  );
+
+  const next = withSyncReliabilityMeta(payload(), base, { deviceId: "device-b", now: 200 });
+  assert.deepEqual(next.syncMeta?.deletions, base.syncMeta?.deletions);
+
+  const recreated = withSyncReliabilityMeta(
+    payload({ hosts: [deletedHost] }),
+    base,
+    { deviceId: "device-b", now: 300 },
+  );
+  assert.deepEqual(recreated.syncMeta?.deletions, []);
+});
+
 test("withSyncReliabilityMeta attaches change summary and deletion records", () => {
   const base = payload({
     snippets: [{ id: "snippet-1", label: "Old", command: "ls" }],

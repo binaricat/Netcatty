@@ -6,6 +6,8 @@ const KNOWN_ARTIFACT_TOOL_NAMES = [
   'vault_notes_update',
   'vault_notes_get',
   'vault_notes_list',
+  'vault_notes_delete',
+  'vault_notes_import',
   'vault_hosts_create',
   'vault_hosts_import',
   'vault_hosts_list',
@@ -30,8 +32,16 @@ const KNOWN_ARTIFACT_TOOL_NAMES = [
   'scripts_targets_set',
 ] as const;
 
+const CLI_FLAGS_WITHOUT_VALUES = new Set(['--json', '--content-stdin', '--documents-stdin']);
+
 const CLI_ARTIFACT_TOOL_NAMES = new Map<string, string>([
   ['vault host get', 'host_get'],
+  ['notes list', 'vault_notes_list'],
+  ['notes get', 'vault_notes_get'],
+  ['notes create', 'vault_notes_create'],
+  ['notes update', 'vault_notes_update'],
+  ['notes delete', 'vault_notes_delete'],
+  ['notes import', 'vault_notes_import'],
 ]);
 
 function readCommandString(args: Record<string, unknown> | undefined): string | null {
@@ -84,6 +94,26 @@ export function normalizeArtifactToolName(toolName: string | undefined): string 
   return trimmed;
 }
 
+function collectCliCommandWords(afterCli: string): string[] {
+  const commandWords: string[] = [];
+  const parts = afterCli.match(/(?:[^\s"'\\]|\\.|"(?:\\.|[^"\\])*"|'[^']*')+/g) ?? [];
+  for (let index = 0; index < parts.length; index += 1) {
+    const part = parts[index];
+    if (!part) continue;
+    if (part.startsWith('-')) {
+      // Flags may appear before or between command words. Skip a valued flag's
+      // quoted or unquoted value so note content is never a command word.
+      if (CLI_FLAGS_WITHOUT_VALUES.has(part)) continue;
+      const next = parts[index + 1];
+      if (next && !next.startsWith('-')) index += 1;
+      continue;
+    }
+    commandWords.push(part);
+    if (CLI_ARTIFACT_TOOL_NAMES.has(commandWords.join(' ')) || commandWords.length === 3) break;
+  }
+  return commandWords;
+}
+
 export function inferArtifactToolNameFromCliArgs(
   args: Record<string, unknown> | undefined,
 ): string | undefined {
@@ -91,15 +121,11 @@ export function inferArtifactToolNameFromCliArgs(
   if (!command) return undefined;
 
   const unwrapped = unwrapShellCommand(command);
-  const cliMatch = unwrapped.match(/(?:^|\s|["'])(?:\S*\/)?netcatty-tool-cli(?:\.(?:cjs|cmd))?(?=["'\s]|$)([\s\S]*)$/);
+  const cliMatch = unwrapped.match(/(?:^|\s|["'])(?:\S*[\\/])?netcatty-tool-cli(?:\.(?:cjs|cmd))?(?=["'\s]|$)([\s\S]*)$/);
   if (!cliMatch) return undefined;
 
   const afterCli = stripWrappingQuote(cliMatch[1] ?? '').replace(/^["']?\s*/, '');
-  const commandKey = afterCli
-    .split(/\s+/)
-    .filter((part) => part && !part.startsWith('-'))
-    .slice(0, 3)
-    .join(' ');
+  const commandKey = collectCliCommandWords(afterCli).join(' ');
 
   return CLI_ARTIFACT_TOOL_NAMES.get(commandKey);
 }

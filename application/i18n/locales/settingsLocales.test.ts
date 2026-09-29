@@ -7,9 +7,11 @@ import { HOST_ICON_COLORS, HOST_ICON_IDS } from "../../../domain/hostIcon.ts";
 import zhCN from "./zh-CN.ts";
 import ru from "./ru.ts";
 import es from "./es.ts";
+import zhTW from "./zh-TW.ts";
 
 const LOCALIZED_SETTINGS_LOCALES = [
   { name: "zh-CN", messages: zhCN },
+  { name: "zh-TW", messages: zhTW },
   { name: "ru", messages: ru },
   { name: "es", messages: es },
 ];
@@ -80,6 +82,21 @@ test("localized settings include OSC desktop notification labels", () => {
   for (const locale of LOCALIZED_SETTINGS_LOCALES) {
     const missing = keys.filter((key) => !locale.messages[key]);
     assert.deepEqual(missing, [], `${locale.name} is missing OSC notification labels`);
+  }
+});
+
+test("localized settings include bar cursor width labels", () => {
+  const keys = [
+    "settings.terminal.cursor.barWidth",
+    "settings.terminal.cursor.barWidth.desc",
+  ];
+
+  for (const locale of [
+    { name: "en", messages: en },
+    ...LOCALIZED_SETTINGS_LOCALES,
+  ]) {
+    const missing = keys.filter((key) => !locale.messages[key]);
+    assert.deepEqual(missing, [], `${locale.name} is missing bar cursor width labels`);
   }
 });
 

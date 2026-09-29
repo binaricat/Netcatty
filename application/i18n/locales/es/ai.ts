@@ -4,6 +4,7 @@ export const esAiMessages: Messages = {
   // AI Settings
   'ai.agentSettings': 'Configuración del agente',
   'ai.chat.preparing': 'Preparando…',
+  'ai.chat.modelCatalogWarning': 'No se pudo actualizar la lista de modelos. Se muestran los últimos modelos disponibles o los integrados.',
   'ai.chat.compactingContext': 'Compactando el contexto anterior…',
   'ai.chat.compactingStep': 'Recortando el contexto para el siguiente paso…',
   'ai.chat.compactionRetry': 'La petición era demasiado grande. Compactando el contexto y reintentando…',
@@ -277,6 +278,18 @@ export const esAiMessages: Messages = {
   'ai.opencode.customPathPlaceholder': 'p. ej. /usr/local/bin/opencode',
   'ai.opencode.check': 'Verificar',
   'ai.opencode.resetPath': 'Restablecer',
+
+  // AI MiMo Code (CLI de Xiaomi MiMo Code — fork de OpenCode)
+  'ai.mimo.title': 'MiMo Code',
+  'ai.mimo.description': 'CLI de MiMo Code de Xiaomi, un fork de OpenCode. Instálalo y configura los proveedores en su propia configuración, luego selecciónalo como agente de codificación externo.',
+  'ai.mimo.detecting': 'Detectando...',
+  'ai.mimo.detected': 'Detectado',
+  'ai.mimo.notFound': 'No encontrado',
+  'ai.mimo.path': 'Ruta:',
+  'ai.mimo.notFoundHint': 'No se pudo encontrar mimo en el PATH. Instálalo o especifica la ruta del ejecutable a continuación.',
+  'ai.mimo.customPathPlaceholder': 'p. ej. /usr/local/bin/mimo',
+  'ai.mimo.check': 'Verificar',
+  'ai.mimo.resetPath': 'Restablecer',
 
   // AI Grok Build (in-app managed agent — distinct from External MCP client install)
   'ai.grok.title': 'Grok Build',
@@ -591,6 +604,11 @@ export const esAiMessages: Messages = {
   'terminal.layer.aiChat': 'Chat de IA',
   'terminal.layer.movePanelLeft': 'Mover panel a la izquierda',
   'terminal.layer.movePanelRight': 'Mover panel a la derecha',
+  'terminal.layer.movePanelBottom': 'Mover panel a la parte inferior',
+  'terminal.layer.choosePanelPosition': 'Cambiar posición',
+  'terminal.layer.dockLeft': 'Izquierda',
+  'terminal.layer.dockRight': 'Derecha',
+  'terminal.layer.dockBottom': 'Abajo',
   'terminal.layer.closePanel': 'Cerrar panel',
   'terminal.layer.closePane': 'Cerrar división',
   'terminal.layer.resizeSplit': 'Redimensionar división',

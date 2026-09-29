@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  runAutomationScript,
   runConnectScriptsSequential,
   selectScriptOverlayRun,
   setScriptRuns,
@@ -8,6 +9,7 @@ import {
 } from './scriptAutomationCoordinator.ts';
 import type { ScriptRun } from '@/types/global/netcatty-bridge-script.d.ts';
 import type { Snippet } from '@/domain/models';
+import { STORAGE_KEY_AI_PERMISSION_MODE } from '@/infrastructure/config/storageKeys.ts';
 import { netcattyBridge } from '@/infrastructure/services/netcattyBridge.ts';
 
 test('waitForScriptRun resolves when run is already completed on subscribe', async () => {
@@ -243,6 +245,106 @@ test('runConnectScriptsSequential does not treat a script error named Aborted as
   } finally {
     netcattyBridge.get = originalGet;
     setScriptRuns([]);
+    Reflect.deleteProperty(globalThis, 'localStorage');
+  }
+});
+
+function installPermissionMode(mode: string) {
+  const storage = new Map<string, string>([[STORAGE_KEY_AI_PERMISSION_MODE, mode]]);
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    value: {
+      getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => { storage.set(key, String(value)); },
+      removeItem: (key: string) => { storage.delete(key); },
+      clear: () => { storage.clear(); },
+    },
+  });
+}
+
+const writeScript: Snippet = {
+  id: 'write-script',
+  label: 'Write',
+  command: "await nct.screen.sendLine('echo hi');",
+  kind: 'script',
+};
+
+test('runAutomationScript executes a user write script while AI permission mode is observer', async () => {
+  const originalGet = netcattyBridge.get;
+  installPermissionMode('observer');
+  let seenMode: string | undefined;
+  netcattyBridge.get = () => ({
+    scriptRun: async (params) => {
+      seenMode = params.permissionMode;
+      return { runId: 'user-run', runIds: ['user-run'] };
+    },
+  }) as ReturnType<typeof netcattyBridge.get>;
+
+  try {
+    const result = await runAutomationScript({
+      snippet: writeScript,
+      sessionId: 'sess-user',
+    });
+    assert.equal(result.runId, 'user-run');
+    assert.equal(seenMode, 'auto');
+  } finally {
+    netcattyBridge.get = originalGet;
+    Reflect.deleteProperty(globalThis, 'localStorage');
+  }
+});
+
+test('runAutomationScript blocks an AI write script in observer mode', async () => {
+  const originalGet = netcattyBridge.get;
+  installPermissionMode('observer');
+  let called = false;
+  netcattyBridge.get = () => ({
+    scriptRun: async () => {
+      called = true;
+      return { runId: 'ai-run', runIds: ['ai-run'] };
+    },
+  }) as ReturnType<typeof netcattyBridge.get>;
+
+  try {
+    await assert.rejects(
+      () => runAutomationScript({
+        snippet: writeScript,
+        sessionId: 'sess-ai',
+        initiatedBy: 'ai',
+      }),
+      /Observer mode blocks scripts that write to the terminal/,
+    );
+    assert.equal(called, false);
+  } finally {
+    netcattyBridge.get = originalGet;
+    Reflect.deleteProperty(globalThis, 'localStorage');
+  }
+});
+
+test('runAutomationScript keeps observer on an AI read-only script so later writes stay blocked', async () => {
+  const originalGet = netcattyBridge.get;
+  installPermissionMode('observer');
+  let seenMode: string | undefined;
+  netcattyBridge.get = () => ({
+    scriptRun: async (params) => {
+      seenMode = params.permissionMode;
+      return { runId: 'ai-read', runIds: ['ai-read'] };
+    },
+  }) as ReturnType<typeof netcattyBridge.get>;
+
+  try {
+    await runAutomationScript({
+      snippet: {
+        id: 'read-script',
+        label: 'Read',
+        command: "await nct.screen.waitForPrompt(1000);",
+        kind: 'script',
+      },
+      sessionId: 'sess-ai-read',
+      initiatedBy: 'ai',
+    });
+    assert.equal(seenMode, 'observer');
+  } finally {
+    netcattyBridge.get = originalGet;
     Reflect.deleteProperty(globalThis, 'localStorage');
   }
 });

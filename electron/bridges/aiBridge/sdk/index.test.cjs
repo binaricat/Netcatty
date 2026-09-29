@@ -6,13 +6,14 @@ const {
   hasCodebuddyQueryOnlyOptions,
 } = require("./index.cjs");
 const { codebuddySessionManager } = require("./codebuddySessionManager.cjs");
+const mimoDriver = require("./mimoDriver.cjs");
 
 test("registry exposes SDK backends", () => {
-  assert.deepEqual(listBackends().sort(), ["claude", "codebuddy", "codex", "copilot", "cursor", "grok", "opencode"]);
+  assert.deepEqual(listBackends().sort(), ["claude", "codebuddy", "codex", "copilot", "cursor", "grok", "mimo", "opencode"]);
 });
 
 test("getDriver returns a driver with runTurn", () => {
-  for (const key of ["claude", "codebuddy", "codex", "copilot", "cursor", "grok", "opencode"]) {
+  for (const key of ["claude", "codebuddy", "codex", "copilot", "cursor", "grok", "mimo", "opencode"]) {
     const d = getDriver(key);
     assert.equal(typeof d.runTurn, "function", `${key} must expose runTurn`);
   }
@@ -23,10 +24,27 @@ test("getDriver throws on unknown backend", () => {
 });
 
 test("SDK drivers expose listModels; codex returns [] (no catalog)", async () => {
-  for (const key of ["claude", "codebuddy", "codex", "copilot", "cursor", "grok", "opencode"]) {
+  for (const key of ["claude", "codebuddy", "codex", "copilot", "cursor", "grok", "mimo", "opencode"]) {
     assert.equal(typeof getDriver(key).listModels, "function", `${key} must expose listModels`);
   }
   assert.deepEqual(await getDriver("codex").listModels({}), []);
+});
+
+test("MiMo driver receives Netcatty permission mode and approval bridge", async () => {
+  const original = mimoDriver.runMimoTurn;
+  let received;
+  const approve = async () => true;
+  const clear = () => {};
+  mimoDriver.runMimoTurn = async (options) => { received = options; return { sessionId: "sess-1" }; };
+  try {
+    await getDriver("mimo").runTurn({ permissionMode: "confirm", chatSessionId: "chat-1", requestApprovalFromRenderer: approve, clearPendingApprovals: clear });
+    assert.equal(received.permissionMode, "confirm");
+    assert.equal(received.chatSessionId, "chat-1");
+    assert.equal(received.requestApprovalFromRenderer, approve);
+    assert.equal(received.clearPendingApprovals, clear);
+  } finally {
+    mimoDriver.runMimoTurn = original;
+  }
 });
 
 test("CodeBuddy keeps V2 for SessionOptions fields and falls back for query-only fields", () => {

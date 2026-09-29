@@ -10,5 +10,11 @@ export const useClipboardBackend = () => {
     return typeof text === "string" ? text : "";
   }, []);
 
-  return { readClipboardText };
+  const writeClipboardText = useCallback(async (text: string): Promise<boolean> => {
+    const bridge = netcattyBridge.get();
+    if (!bridge?.writeClipboardText) return false;
+    return await bridge.writeClipboardText(text) === true;
+  }, []);
+
+  return { readClipboardText, writeClipboardText };
 };

@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   createTerminalCwdTracker,
   invalidateTerminalCwdAfterCommand,
+  shouldPreserveTerminalCwdAcrossCommand,
   probeBackendSessionCwdAfterCommand,
   resolvePreferredTerminalCwd,
 } from "./sftpCwd";
@@ -284,4 +285,28 @@ test("probeBackendSessionCwdAfterCommand still probes when cwd path is unchanged
   });
 
   assert.equal(cwd, "/srv/app");
+});
+
+test("active-shell cwd resolution trusts an inferred cwd without extra exec", async () => {
+  let backendCalls = 0;
+  const cwd = await resolvePreferredTerminalCwd({
+    rendererCwd: "/data/docker",
+    rendererCwdSource: "inferred",
+    sessionId: "session-1",
+    preferFreshBackend: true,
+    allowRendererFallback: false,
+    requireActiveShellCwd: true,
+    getSessionPwd: async () => {
+      backendCalls += 1;
+      return { success: false, error: "extra exec channels" };
+    },
+  });
+
+  assert.equal(cwd, "/data/docker");
+  assert.equal(backendCalls, 0);
+});
+
+test("single-channel command submission keeps the cwd SFTP follow already has", () => {
+  assert.equal(shouldPreserveTerminalCwdAcrossCommand(true), true);
+  assert.equal(shouldPreserveTerminalCwdAcrossCommand(false), false);
 });

@@ -1,3 +1,4 @@
+import { remoteSoftwareRequiresSingleChannel } from './singleChannelSshBanner.shared.cjs';
 import { Host, Snippet, TerminalSettings } from './models';
 import type { HostOperatingSystem, HostOsSelection } from './models/connection';
 import { sanitizeHostIconFields } from './hostIcon';
@@ -270,11 +271,22 @@ export const shouldSuggestNetworkDeviceMode = (opts: {
 };
 
 /**
+ * True when an extra exec channel on the terminal transport is unsafe because
+ * the host is a network device. Use this to skip probes. Do not store it as
+ * session.singleChannelSsh: that runtime flag is stamped only after a
+ * recognized one-channel bastion banner.
+ */
+export const hostRestrictsExtraSshChannels = (
+  host?: Pick<Host, 'deviceType'> | null,
+): boolean => host?.deviceType === 'network';
+
+/**
  * Decide whether it is safe to run the post-connect `pwd` probe that
  * discovers the session's working directory. The probe opens an extra exec
  * channel running a POSIX-shell script; strict network-device CLIs such as
  * Huawei VRP respond by closing the whole SSH session (#1043), so it must be
- * skipped for them.
+ * skipped for them. Software banners that allow only one session channel per
+ * TCP connection have the same constraint.
  *
  * `isNetworkDevice` covers hosts we already classified (a reconnect, or an
  * explicit `deviceType: 'network'`). On a brand-new host that field is not
@@ -284,8 +296,12 @@ export const shouldSuggestNetworkDeviceMode = (opts: {
 export const shouldProbeSessionCwd = (opts: {
   isNetworkDevice: boolean;
   remoteSshVersion?: string;
+  restrictExtraSshChannels?: boolean;
 }): boolean =>
-  !opts.isNetworkDevice && !detectVendorFromSshVersion(opts.remoteSshVersion);
+  !opts.isNetworkDevice
+  && !opts.restrictExtraSshChannels
+  && !remoteSoftwareRequiresSingleChannel(opts.remoteSshVersion)
+  && !detectVendorFromSshVersion(opts.remoteSshVersion);
 
 export const getEffectiveHostDistro = (
   host?: Pick<Host, 'distro' | 'manualDistro' | 'distroMode'> | null,
@@ -515,5 +531,6 @@ export const sanitizeHost = (host: Host, snippets: Snippet[] = []): Host => {
     connectScriptIds: connectScriptIds && connectScriptIds.length > 0 ? connectScriptIds : undefined,
     pluginConnection,
   };
+  delete (sanitized as { singleChannelSsh?: unknown }).singleChannelSsh;
   return stripBuiltInConnectionFieldsForPluginHost(sanitized);
 };

@@ -24,6 +24,7 @@ const SERVICE_BINDINGS = Object.freeze({
   "vault.note.create": { domain: "vault", method: "createNote" },
   "vault.note.update": { domain: "vault", method: "updateNote" },
   "vault.note.delete": { domain: "vault", method: "deleteNote" },
+  "vault.note.import": { domain: "vault", method: "importNotes" },
   "vault.identity.list": { domain: "vault", method: "listIdentities" },
   "vault.proxyProfile.list": { domain: "vault", method: "listProxyProfiles" },
   "vault.group.list": { domain: "vault", method: "listGroups" },
@@ -145,7 +146,9 @@ function createCapabilityRpcDispatcher(deps) {
 
     if (permission.requiresApproval) {
       const { chatSessionId, ...toolArgs } = params || {};
-      const toolName = getMcpToolNameForRpcMethod(rpcMethod, surface) || capability.id;
+      const toolName = getMcpToolNameForRpcMethod(rpcMethod, surface)
+        || capability.surfaces?.[CAPABILITY_SURFACES.PUBLIC]?.mcpTool
+        || capability.id;
       const approved = await requestApprovalFromRenderer(toolName, toolArgs, chatSessionId);
       if (!approved) {
         return { ok: false, error: USER_DENIED_MESSAGE };

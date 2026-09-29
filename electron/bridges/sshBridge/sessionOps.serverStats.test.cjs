@@ -1189,6 +1189,72 @@ test("getServerStats wraps probes in a remote watchdog matching the client timeo
   assert.ok(commands[1].includes('echo "DISKS:$disks"'));
 });
 
+test("getServerStats skips extra exec when singleChannelSsh is set", async () => {
+  let execCalls = 0;
+  const sessions = new Map();
+  sessions.set("sid", {
+    type: "ssh",
+    singleChannelSsh: true,
+    conn: {
+      exec() {
+        execCalls += 1;
+        throw new Error("must not exec on single-channel SSH");
+      },
+    },
+  });
+
+  const api = makeSessionOps(sessions);
+  const result = await api.getServerStats({ sender: {} }, { sessionId: "sid" });
+
+  assert.equal(result.success, false);
+  assert.match(result.error, /extra exec channels/);
+  assert.equal(execCalls, 0);
+});
+
+test("readRemoteHistory skips extra exec when singleChannelSsh is set", async () => {
+  let execCalls = 0;
+  const sessions = new Map();
+  sessions.set("sid", {
+    type: "ssh",
+    singleChannelSsh: true,
+    conn: {
+      exec() {
+        execCalls += 1;
+        throw new Error("must not exec on single-channel SSH");
+      },
+    },
+  });
+
+  const api = makeSessionOps(sessions);
+  const result = await api.readRemoteHistory({ sender: {} }, { sessionId: "sid" });
+
+  assert.equal(result.success, false);
+  assert.match(result.error, /extra exec channels/);
+  assert.equal(execCalls, 0);
+});
+
+test("getSessionDistroInfo skips extra exec when singleChannelSsh is set", async () => {
+  let execCalls = 0;
+  const sessions = new Map();
+  sessions.set("sid", {
+    type: "ssh",
+    singleChannelSsh: true, remoteSshVersion: "CLOUDBILITY-4.14",
+    conn: {
+      exec() {
+        execCalls += 1;
+        throw new Error("must not exec on Cloudbility");
+      },
+    },
+  });
+
+  const api = makeSessionOps(sessions);
+  const result = await api.getSessionDistroInfo({ sender: {} }, { sessionId: "sid" });
+
+  assert.equal(result.success, false);
+  assert.match(result.error, /extra exec channels/);
+  assert.equal(execCalls, 0);
+});
+
 test("getSessionDistroInfo wraps the os-release probe in a remote watchdog", async () => {
   const commands = [];
   const sessions = new Map();
@@ -1302,3 +1368,17 @@ for (const keepaliveInterval of [0, 10000]) {
     assert.equal(result.stats.latencyMs, keepaliveInterval === 0 ? null : 2);
   });
 }
+
+test("zmodem remote exec helpers do nothing on single-channel SSH", async () => {
+  let execCalls = 0;
+  const session = {
+    singleChannelSsh: true,
+    conn: { exec() { execCalls += 1; } },
+  };
+  const api = makeSessionOps(new Map([["s1", session]]));
+  assert.equal(await api.probeReceiveConflicts(session, ["file.txt"]), null);
+  await api.removeRemoteFiles(session, ["/tmp/file.txt"]);
+  await api.restoreRemoteModes(session, [{ path: "/tmp/file.txt", mode: "644" }]);
+  assert.equal(execCalls, 0);
+});
+

@@ -107,6 +107,7 @@ async function composeLine(cdp, mainCdp, value) {
   await clickElement(cdp, 'textarea[placeholder^="Type command here"]');
   await typeLine(mainCdp, value);
 }
+const visibleComposeTextarea = `[...document.querySelectorAll('textarea[placeholder^="Type command here"]')].find(e=>{const r=e.getBoundingClientRect();return r.width>0&&r.height>0&&r.x>=0})`;
 async function activeTab(cdp, index) {
   await clickElement(cdp, '[data-tab-type="session"]', index);
   await pause(250);
@@ -272,10 +273,10 @@ async function main() {
     await until('second prompt for opt-in', () => fixture.sessions[1].pending, 5000);
     await pause(350);
     await broadcast(cdp, true);
-    const separator = await cdp.eval(`(() => {const e=[...document.querySelectorAll('textarea[placeholder^="Type command here"]')].find(x=>x.getBoundingClientRect().x>=0);const s=e.parentElement.parentElement.parentElement.querySelector('[role="separator"]');const r=s.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()`);
-    await clickPoint(cdp, separator, 'right');
+    await clickElement(cdp, 'textarea[placeholder^="Type command here"]', 0, 'right');
     await until('password bypass menu', () => cdp.eval(`document.querySelector('[data-compose-broadcast-menu]')?.innerText.includes('Broadcast without password protection')`));
-    await clickElement(cdp, '[data-compose-broadcast-menu] button');
+    assert(await cdp.eval(`document.querySelector('[data-compose-broadcast-menu]')?.innerText.includes('Paste')`));
+    await clickElement(cdp, '[data-compose-broadcast-toggle]');
     await until('password bypass enabled', () => cdp.eval(`localStorage.getItem('netcatty_terminal_broadcast_password_bypass_v1') === 'true'`));
     await terminalLine(cdp, mainCdp, 'ONKEY');
     await until('both opt-in keyboard answers', () => fixture.sessions.every(x => x.answers.includes('ONKEY')), 5000);
@@ -295,8 +296,31 @@ async function main() {
     await key(mainCdp, 'Up');
     await key(mainCdp, 'Up', 'keyUp');
     await until('safe compose history', () => cdp.eval(`([...document.querySelectorAll('textarea[placeholder^="Type command here"]')].find(x=>x.getBoundingClientRect().x>=0)||{}).value === 'ask'`), 5000);
-    console.log('PASS: two real SSH sessions, four password-prompt cases, and safe compose history');
+    await clickElement(cdp, 'textarea[placeholder^="Type command here"]');
+    await cdp.eval(`(() => {const e=${visibleComposeTextarea};e.value='';e.dispatchEvent(new Event('input',{bubbles:true}));return e.value})()`);
+    await typeLine(mainCdp, 'AFTERCOMP');
+    await until('ordinary compose command reaches both sessions', () => fixture.sessions.every(x => x.commands.includes('AFTERCOMP')), 5000);
+    await terminalLine(cdp, mainCdp, 'AFTERKEY');
+    await until('ordinary keyboard command reaches both sessions', () => fixture.sessions.every(x => x.commands.includes('AFTERKEY')), 5000);
+    assert(fixture.sessions.every(x => x.commands.filter(command => command === 'AFTERCOMP').length === 1));
+    assert(fixture.sessions.every(x => x.commands.filter(command => command === 'AFTERKEY').length === 1));
+    await mainCdp.eval(`process.mainModule.require('electron').clipboard.writeText('CLIPCHECK')`);
+    await clickElement(cdp, 'textarea[placeholder^="Type command here"]', 0, 'right');
+    await until('compose text menu', () => cdp.eval(`Boolean(document.querySelector('[data-compose-broadcast-menu]'))`));
+    await clickText(cdp, 'Paste', '[data-compose-broadcast-menu] button');
+    await until('compose clipboard paste', () => cdp.eval(`(${visibleComposeTextarea})?.value === 'CLIPCHECK'`));
+    await cdp.eval(`(${visibleComposeTextarea}).select()`);
+    await clickElement(cdp, 'textarea[placeholder^="Type command here"]', 0, 'right');
+    await until('compose cut menu', () => cdp.eval(`Boolean(document.querySelector('[data-compose-broadcast-menu]'))`));
+    await clickText(cdp, 'Cut', '[data-compose-broadcast-menu] button');
+    await until('compose clipboard cut', () => cdp.eval(`(${visibleComposeTextarea})?.value === ''`));
+    assert.equal(await mainCdp.eval(`process.mainModule.require('electron').clipboard.readText()`), 'CLIPCHECK');
+    console.log('PASS: two real SSH sessions, password prompts, ordinary commands, safe history, and compose clipboard menu');
   } catch (error) {
+    console.error(`SSH fixture state before failure: ${JSON.stringify(fixture.sessions)}`);
+    if (cdp) {
+      console.error(`Compose input before failure: ${JSON.stringify(await cdp.eval(`(${visibleComposeTextarea})?.value`).catch(() => null))}`);
+    }
     console.error(`Electron output before failure:\n${output.join('').slice(-4000)}`);
     throw error;
   } finally {

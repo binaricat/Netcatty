@@ -22,6 +22,14 @@ import {
   resolveAgentModelSelection,
 } from '../infrastructure/ai/types';
 import { getExternalAgentSdkBackend, getManualAgentCommand, matchesManagedAgentConfig } from '../infrastructure/ai/managedAgents';
+import {
+  appendComposerCustomModelPresets,
+  resolveComposerCustomModelIds,
+} from '../infrastructure/ai/composerPicker';
+import {
+  readComposerModelPrefs,
+  subscribeComposerModelPrefs,
+} from '../infrastructure/ai/composerModelPrefs';
 import { toast } from './ui/toast';
 import { useAgentDiscovery } from '../application/state/useAgentDiscovery';
 import {
@@ -311,8 +319,8 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
 
   const [showHistory, setShowHistory] = useState(false);
   const [isSending, setIsSending] = useState(false);
-  const [runtimeAgentModelPresets, setRuntimeAgentModelPresets] = useState<Record<string, AgentModelPreset[]>>({});
-  const [runtimeModelWarnings, setRuntimeModelWarnings] = useState<Record<string, string>>({});
+  const [runtimeAgentModelPresets, setRuntimeAgentModelPresets] = useState<Record<string, { cacheKey: string; models: AgentModelPreset[] }>>({});
+  const [runtimeModelWarnings, setRuntimeModelWarnings] = useState<Record<string, { cacheKey: string; message: string }>>({});
   const [steerWarnings, setSteerWarnings] = useState<Record<string, SteerWarning>>({});
   const [steeringSessionId, setSteeringSessionId] = useState<string | null>(null);
   const [userSkillOptions, setUserSkillOptions] = useState<UserSkillOption[]>([]);
@@ -843,12 +851,33 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     [currentAgentConfig],
   );
 
-  const { model: codexConfigModel, loadModel: loadCodexConfigModel } = useCodexConfigModel(
+  const {
+    model: codexConfigModel,
+    loadModel: loadCodexConfigModel,
+    isPending: isCodexConfigModelPending,
+  } = useCodexConfigModel(
     currentAgentConfig, isVisible,
   );
 
   const agentModelMapRef = useRef(agentModelMap);
   agentModelMapRef.current = agentModelMap;
+
+  // Manual model ids typed in the composer picker are recorded in composer
+  // prefs (per agent scope). Re-render when they change so custom picks stay
+  // visible and accepted as stored selections (#3534).
+  const [composerCustomModelsVersion, setComposerCustomModelsVersion] = useState(0);
+  useEffect(() => subscribeComposerModelPrefs(() => {
+    setComposerCustomModelsVersion((version) => version + 1);
+  }), []);
+  const collectCustomModelIds = useCallback((agentId: string, presets: AgentModelPreset[]) => {
+    // Touch the version so pref writes recreate this callback and invalidate
+    // memos that read custom ids.
+    void composerCustomModelsVersion;
+    return resolveComposerCustomModelIds({
+      prefs: readComposerModelPrefs(agentId),
+      presets,
+    });
+  }, [composerCustomModelsVersion]);
 
   const buildExternalAgentRuntimeModelTarget = useCallback((agent: ExternalAgentConfig | undefined): SdkRuntimeModelTarget | null => {
     if (!agent) return null;
@@ -874,14 +903,20 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   externalAgentsRef.current = externalAgents;
 
   const applySdkRuntimeModelCatalog = useCallback((
-    agentId: string,
+    target: SdkRuntimeModelTarget,
     catalog: SdkRuntimeModelCatalog,
     options: { adoptCurrentModel?: boolean } = {},
   ) => {
-    const agent = externalAgentsRef.current.find((item) => item.id === agentId);
-    const runtimePresets = mergeFallbackThinkingLevels(
+    const agent = externalAgentsRef.current.find((item) => item.id === target.agentId);
+    if (buildExternalAgentRuntimeModelTarget(agent)?.cacheKey !== target.cacheKey) return;
+    const agentId = target.agentId;
+    const catalogPresets = mergeFallbackThinkingLevels(
       normalizeSdkRuntimeModelPresets(catalog.models, catalog.currentModelId),
       getAgentModelPresets(agent?.command, getExternalAgentSdkBackend(agent)),
+    );
+    const runtimePresets = appendComposerCustomModelPresets(
+      catalogPresets,
+      collectCustomModelIds(agentId, catalogPresets),
     );
     const storedModelId = agentModelMapRef.current[agentId];
     if (runtimePresets.length === 0) {
@@ -892,9 +927,10 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
       });
     } else {
       setRuntimeAgentModelPresets((prev) => (
-        agentModelPresetsShallowEqual(prev[agentId], runtimePresets)
+        prev[agentId]?.cacheKey === target.cacheKey
+          && agentModelPresetsShallowEqual(prev[agentId].models, runtimePresets)
           ? prev
-          : { ...prev, [agentId]: runtimePresets }
+          : { ...prev, [agentId]: { cacheKey: target.cacheKey, models: runtimePresets } }
       ));
     }
 
@@ -914,7 +950,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     ) {
       setAgentModel(agentId, catalog.currentModelId);
     }
-  }, [setAgentModel]);
+  }, [setAgentModel, buildExternalAgentRuntimeModelTarget, collectCustomModelIds]);
 
   const loadSdkRuntimeModelCatalog = useCallback((
     target: SdkRuntimeModelTarget,
@@ -939,10 +975,15 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
           throw new Error(result?.error || 'Failed to load SDK agent models');
         }
         setRuntimeModelWarnings((current) => {
+          const agent = externalAgentsRef.current.find((item) => item.id === target.agentId);
+          if (buildExternalAgentRuntimeModelTarget(agent)?.cacheKey !== target.cacheKey) return current;
           const next = { ...current };
-          if (result.warning && target.codexRuntime === 'app-server') {
-            next[target.agentId] = t('ai.codex.appServer.modelCatalogWarning');
-            console.warn('[AIChatSidePanel] Codex App Server model catalog unavailable:', result.warning);
+          if (result.warning) {
+            next[target.agentId] = {
+              cacheKey: target.cacheKey,
+              message: t('ai.chat.modelCatalogWarning'),
+            };
+            console.warn('[AIChatSidePanel] SDK model catalog unavailable:', result.warning);
           } else {
             delete next[target.agentId];
           }
@@ -955,18 +996,20 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
       },
       { force: options.force },
     ).catch((err) => {
-      if (target.codexRuntime === 'app-server') {
-        setRuntimeModelWarnings((current) => ({
+      setRuntimeModelWarnings((current) => {
+        const agent = externalAgentsRef.current.find((item) => item.id === target.agentId);
+        if (buildExternalAgentRuntimeModelTarget(agent)?.cacheKey !== target.cacheKey) return current;
+        return {
           ...current,
-          [target.agentId]: t('ai.codex.appServer.modelCatalogWarning'),
-        }));
-      }
+          [target.agentId]: { cacheKey: target.cacheKey, message: t('ai.chat.modelCatalogWarning') },
+        };
+      });
       if (options.logErrors !== false) {
         console.warn('[AIChatSidePanel] Failed to load SDK agent models:', err);
       }
       return null;
     });
-  }, [t]);
+  }, [t, buildExternalAgentRuntimeModelTarget]);
 
   useEffect(() => {
     if (!isVisible) return;
@@ -978,7 +1021,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
 
     const cached = sdkRuntimeModelCache.read(target.cacheKey);
     if (cached) {
-      applySdkRuntimeModelCatalog(target.agentId, cached);
+      applySdkRuntimeModelCatalog(target, cached);
     }
 
     // Respect renderer TTL / in-flight coalescing for all SDK agents including
@@ -990,7 +1033,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     const cancelIdle = scheduleWhenAiComposerIdle(() => {
       void loadSdkRuntimeModelCatalog(target).then((catalog) => {
         if (cancelled || !catalog) return;
-        applySdkRuntimeModelCatalog(target.agentId, catalog, { adoptCurrentModel: true });
+        applySdkRuntimeModelCatalog(target, catalog, { adoptCurrentModel: true });
       });
     });
 
@@ -1010,27 +1053,50 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   const isCodexAppServer = isCodexManagedAgent && currentAgentConfig?.codexRuntime === 'app-server';
   const canSteerCurrentTurn = Boolean(activeSessionId && isStreaming && isCodexAppServer);
   const hasCodexCustomConfig = Boolean(codexConfigModel) && isCodexManagedAgent;
+  // `codexConfigModel` is null both while the config probe is pending and when
+  // the managed Codex config has no locked model. Keep the manual-entry action
+  // hidden until the probe resolves so a pick made in the interim can't be
+  // silently overridden by the config model on send (#3535).
+  const allowCustomModelEntry = !isCodexManagedAgent
+    || (!isCodexConfigModelPending && !hasCodexCustomConfig);
 
   const agentModelPresets = useMemo(() => {
-    const runtimePresets = runtimeAgentModelPresets[currentAgentId];
+    const target = buildExternalAgentRuntimeModelTarget(currentAgentConfig);
+    const runtimeEntry = runtimeAgentModelPresets[currentAgentId];
+    const runtimePresets = runtimeEntry && target && runtimeEntry.cacheKey === target.cacheKey
+      ? runtimeEntry.models
+      : undefined;
     if (hasCodexCustomConfig && codexConfigModel) {
       return [{ id: codexConfigModel, name: codexConfigModel }];
     }
-    if (runtimePresets) return runtimePresets;
+    if (runtimePresets) {
+      return appendComposerCustomModelPresets(
+        runtimePresets,
+        collectCustomModelIds(currentAgentId, runtimePresets),
+      );
+    }
     const presets = getAgentModelPresets(
       currentAgentConfig?.command,
       getExternalAgentSdkBackend(currentAgentConfig),
     );
     // BYO Codex CLI: hide GPT-5.6 when CLI < 0.144.0 (stored probe or discovery).
     const cliVersion = resolveAgentCliVersion(currentAgentConfig, discoveredAgents);
-    return filterAgentModelPresetsForCliVersion(presets, cliVersion);
+    const filteredPresets = filterAgentModelPresetsForCliVersion(presets, cliVersion);
+    // Manual model ids typed in the composer (#3534) stay selectable even when
+    // the CLI catalog does not list them yet.
+    return appendComposerCustomModelPresets(
+      filteredPresets,
+      collectCustomModelIds(currentAgentId, filteredPresets),
+    );
   }, [
     currentAgentConfig,
     currentAgentId,
     runtimeAgentModelPresets,
+    buildExternalAgentRuntimeModelTarget,
     hasCodexCustomConfig,
     codexConfigModel,
     discoveredAgents,
+    collectCustomModelIds,
   ]);
 
   const selectedAgentModel = useMemo(() => {
@@ -1213,13 +1279,17 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         if (runtimeTarget) {
           const catalog = await loadSdkRuntimeModelCatalog(runtimeTarget);
           if (catalog) {
-            applySdkRuntimeModelCatalog(runtimeTarget.agentId, catalog, { adoptCurrentModel: true });
-            const runtimePresets = mergeFallbackThinkingLevels(
+            applySdkRuntimeModelCatalog(runtimeTarget, catalog, { adoptCurrentModel: true });
+            const catalogPresets = mergeFallbackThinkingLevels(
               normalizeSdkRuntimeModelPresets(catalog.models, catalog.currentModelId),
               getAgentModelPresets(
                 currentAgentConfig.command,
                 getExternalAgentSdkBackend(currentAgentConfig),
               ),
+            );
+            const runtimePresets = appendComposerCustomModelPresets(
+              catalogPresets,
+              collectCustomModelIds(sendAgentId, catalogPresets),
             );
             const storedModelId = agentModelMapRef.current[sendAgentId];
             if (
@@ -1403,7 +1473,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     toolIntegrationMode,
     clearScopeDraft, showScopeSessionView, setActiveSessionId,
     flushDraftText, currentAgentConfig, buildExternalAgentRuntimeModelTarget,
-    loadSdkRuntimeModelCatalog, applySdkRuntimeModelCatalog,
+    loadSdkRuntimeModelCatalog, applySdkRuntimeModelCatalog, collectCustomModelIds,
   ]);
 
   const handleCompact = useCallback(async () => {
@@ -1720,8 +1790,14 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         canSendCurrentAgent={canSendCurrentAgent}
         providerDisplayName={providerDisplayName}
         modelDisplayName={modelDisplayName}
-        modelCatalogWarning={runtimeModelWarnings[currentAgentId]}
+        modelCatalogWarning={runtimeModelWarnings[currentAgentId]
+          && runtimeModelWarnings[currentAgentId].cacheKey === buildExternalAgentRuntimeModelTarget(currentAgentConfig)?.cacheKey
+          ? runtimeModelWarnings[currentAgentId].message
+          : undefined}
         agentModelPresets={agentModelPresets}
+        // A managed Codex config's `model` field overrides every selection on
+        // send, so the manual-entry action would be a silent no-op.
+        allowCustomModelEntry={allowCustomModelEntry}
         selectedAgentModel={selectedAgentModel}
         handleAgentModelSelect={handleAgentModelSelect}
         cattyConfiguredProviders={cattyConfiguredProviders}

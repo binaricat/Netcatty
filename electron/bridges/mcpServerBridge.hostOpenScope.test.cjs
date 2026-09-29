@@ -3,6 +3,9 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
+const { isolateCliDiscoveryFile } = require("./cliDiscoveryTestIsolation.cjs");
+isolateCliDiscoveryFile();
+
 function loadFreshBridge() {
   const bridgePath = require.resolve("./mcpServerBridge.cjs");
   delete require.cache[bridgePath];

@@ -1,4 +1,3 @@
-import { normalizeTabBarPosition, type TabBarPosition } from '../../domain/tabBarPosition';
 import { useEffect, type Dispatch, type SetStateAction } from 'react';
 import type { CustomKeyBindings, HotkeyScheme, SessionLogFormat, TerminalSettings, UILanguage } from '../../domain/models';
 import { parseCustomKeyBindingsStorageRecord } from '../../domain/customKeyBindings';
@@ -45,7 +44,6 @@ import {
   STORAGE_KEY_UI_THEME_LIGHT,
   STORAGE_KEY_WORKSPACE_FOCUS_STYLE,
   STORAGE_KEY_SHOW_HOST_TREE_SIDEBAR,
-  STORAGE_KEY_TAB_BAR_POSITION,
   STORAGE_KEY_TERMINAL_SIDE_PANEL_AUTO_OPEN,
   STORAGE_KEY_TERMINAL_SIDE_PANEL_AUTO_OPEN_TAB,
   STORAGE_KEY_LOCAL_SHELL_SIDE_PANEL_AUTO_OPEN,
@@ -104,7 +102,6 @@ interface UseSettingsIpcSyncParams {
   setSftpFollowTerminalCwd: Dispatch<SetStateAction<boolean>>;
   setSftpDefaultViewMode: Dispatch<SetStateAction<'list' | 'tree'>>;
   setWorkspaceFocusStyleState: Dispatch<SetStateAction<'dim' | 'border'>>;
-  setTabBarPositionState: Dispatch<SetStateAction<TabBarPosition>>;
   setShowHostTreeSidebarState: Dispatch<SetStateAction<boolean>>;
   setTerminalSidePanelAutoOpenState: Dispatch<SetStateAction<boolean>>;
   setTerminalSidePanelAutoOpenTabState: Dispatch<SetStateAction<TerminalSidePanelAutoOpenTab>>;
@@ -153,7 +150,6 @@ export function useSettingsIpcSync({
   setSftpFollowTerminalCwd,
   setSftpDefaultViewMode,
   setWorkspaceFocusStyleState,
-  setTabBarPositionState,
   setShowHostTreeSidebarState,
   setTerminalSidePanelAutoOpenState,
   setTerminalSidePanelAutoOpenTabState,
@@ -310,9 +306,6 @@ export function useSettingsIpcSync({
       if (key === STORAGE_KEY_WORKSPACE_FOCUS_STYLE && (value === 'dim' || value === 'border')) {
         setWorkspaceFocusStyleState((prev) => (prev === value ? prev : value));
       }
-      if (key === STORAGE_KEY_TAB_BAR_POSITION) {
-        setTabBarPositionState(normalizeTabBarPosition(value));
-      }
       if (key === STORAGE_KEY_SHOW_HOST_TREE_SIDEBAR && typeof value === 'boolean') {
         setShowHostTreeSidebarState((prev) => (prev === value ? prev : value));
       }
@@ -379,7 +372,6 @@ export function useSettingsIpcSync({
     setSftpAutoOpenSidebar,
     setSftpFollowTerminalCwd,
     setSftpDefaultViewMode,
-    setTabBarPositionState,
     setShowHostTreeSidebarState,
     setTerminalSidePanelAutoOpenState,
     setTerminalSidePanelAutoOpenTabState,

@@ -78,6 +78,7 @@ declare global {
       // connection (issue #1198) negotiates the same KEX / cipher / host-key
       // set the interactive session would.
       legacyAlgorithms?: boolean;
+      singleChannelSsh?: boolean;
       skipEcdsaHostKey?: boolean;
       algorithmOverrides?: import("../../domain/models").HostAlgorithmOverrides;
       // Known hosts, used to verify the host key before the stats companion
@@ -112,6 +113,7 @@ declare global {
       port?: number;
       etPort?: number;
       legacyAlgorithms?: boolean;
+      singleChannelSsh?: boolean;
       skipEcdsaHostKey?: boolean;
       algorithmOverrides?: import("../../domain/models").HostAlgorithmOverrides;
       knownHosts?: import("../../domain/models").KnownHost[];
@@ -226,6 +228,7 @@ declare global {
       enableKeyboardInteractive?: boolean;
       sessionId?: string;
       legacyAlgorithms?: boolean;
+      singleChannelSsh?: boolean;
       skipEcdsaHostKey?: boolean;
       algorithmOverrides?: import("../../domain/models").HostAlgorithmOverrides;
     }): Promise<{ stdout: string; stderr: string; code: number | null }>;

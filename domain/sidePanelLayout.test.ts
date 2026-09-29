@@ -10,6 +10,7 @@ import {
   focusSidePanelPane,
   getSidePanelNodeMinimumPixels,
   getSidePanelSplitResizeBounds,
+  isSidePanelDockPosition,
   resizeSidePanelSplit,
   selectSidePanelTool,
   sidePanelLayoutHasTool,
@@ -165,4 +166,10 @@ test('the pane limit rejects additional splits without changing the layout', () 
   }, 400);
   assert.equal(collectSidePanelPanes(duplicateAttempt.root).length, 7);
   assert.equal(duplicateAttempt.focusedPaneId, 'pane-0');
+});
+
+test('dock position validator accepts only known positions', () => {
+  assert.equal(isSidePanelDockPosition('bottom'), true);
+  assert.equal(isSidePanelDockPosition('top'), false);
+  assert.equal(isSidePanelDockPosition(42), false);
 });

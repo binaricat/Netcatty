@@ -159,12 +159,6 @@ export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
     sectionKey: "settings.vault.title",
   },
   {
-    id: "appearance-tab-bar-position",
-    tab: "appearance",
-    labelKey: "settings.appearance.tabBarPosition",
-    sectionKey: "settings.vault.title",
-  },
-  {
     id: "appearance-vault-show-sftp-tab",
     tab: "appearance",
     labelKey: "settings.vault.showSftpTab",
@@ -257,11 +251,20 @@ export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
     labelKey: "settings.terminal.font.emulationType",
     sectionKey: "settings.terminal.section.font",
   },
+
   {
     id: "terminal-cursor-style",
     tab: "terminal",
     labelKey: "settings.terminal.cursor.style",
     sectionKey: "settings.terminal.section.cursor",
+  },
+  {
+    id: "terminal-cursor-bar-width",
+    tab: "terminal",
+    labelKey: "settings.terminal.cursor.barWidth",
+    descriptionKey: "settings.terminal.cursor.barWidth.desc",
+    sectionKey: "settings.terminal.section.cursor",
+    keywords: ["bar cursor", "cursor width", "vi", "vim", "竖线光标", "光标粗细"],
   },
   {
     id: "terminal-cursor-blink",
@@ -382,6 +385,13 @@ export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
     tab: "terminal",
     labelKey: "settings.terminal.behavior.shiftEnterNewline",
     descriptionKey: "settings.terminal.behavior.shiftEnterNewline.desc",
+    sectionKey: "settings.terminal.section.behavior",
+  },
+  {
+    id: "terminal-shift-enter-force-text",
+    tab: "terminal",
+    labelKey: "settings.terminal.behavior.shiftEnterForceText",
+    descriptionKey: "settings.terminal.behavior.shiftEnterForceText.desc",
     sectionKey: "settings.terminal.section.behavior",
   },
   {

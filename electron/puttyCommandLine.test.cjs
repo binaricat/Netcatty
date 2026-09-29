@@ -59,6 +59,7 @@ test("parsePuttyCommandLine prefers user@host over -newtab session names", () =>
   assert.equal(parsed?.hostname, "192.168.10.2");
   assert.equal(parsed?.username, "root");
   assert.equal(parsed?.url, "ssh://root:one-time@192.168.10.2:22");
+  assert.equal(parsed?.tabName, "Production");
 });
 
 test("parsePuttyCommandLine percent-encodes passwords for ssh:// round-trip", () => {

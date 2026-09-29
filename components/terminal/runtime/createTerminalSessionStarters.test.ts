@@ -426,6 +426,13 @@ test("startSSH tells the bridge to skip shell discovery for network devices", as
   };
   const ctx = createStarterContext({
     isNetworkDevice: true,
+    host: {
+      id: "host-1",
+      label: "Target",
+      hostname: "target.example.test",
+      username: "alice",
+      deviceType: "network",
+    },
     reuseConnectionFromSessionIdRef: { current: "source-session" },
     terminalBackend,
   });
@@ -434,6 +441,39 @@ test("startSSH tells the bridge to skip shell discovery for network devices", as
 
   assert.equal(capturedOptions?.sourceSessionId, "source-session");
   assert.equal(capturedOptions?.skipShellPidDiscovery, true);
+  assert.equal(capturedOptions?.singleChannelSsh, undefined);
+});
+
+test("startSSH ignores a legacy single-channel host field when copying a tab", async () => {
+  let capturedOptions: Record<string, unknown> | null = null;
+  const terminalBackend = {
+    backendAvailable: () => true,
+    startSSHSession: async (options: Record<string, unknown>) => {
+      capturedOptions = options;
+      return "ssh-session";
+    },
+    onSessionData: () => noop,
+    onSessionExit: () => noop,
+    onChainProgress: () => noop,
+    writeToSession: noop,
+    resizeSession: noop,
+  };
+  const ctx = createStarterContext({
+    host: {
+      id: "host-1",
+      label: "Target",
+      hostname: "target.example.test",
+      username: "alice",
+      singleChannelSsh: true,
+    },
+    reuseConnectionFromSessionIdRef: { current: "source-session" },
+    terminalBackend,
+  });
+
+  await createTerminalSessionStarters(ctx as never).startSSH(createTermStub() as never);
+
+  assert.equal(capturedOptions?.sourceSessionId, "source-session");
+  assert.equal(capturedOptions?.singleChannelSsh, undefined);
 });
 
 test("startSSH requests a fresh transport for ordinary opens with connection automation", async () => {
@@ -2868,6 +2908,14 @@ test("startSSH does not use unsaved retry passwords for sudo autofill", async ()
   captured = undefined;
   await createTerminalSessionStarters(ctx as never).startSSH(createTermStub() as never);
   assert.equal(captured?.password, "temporary-secret");
+  assert.equal(captured?.sftpReuseOptions, undefined);
+
+  // A different login user must never alias the original profile to SFTP.
+  Object.assign(ctx.host, { password: undefined });
+  ctx.pendingAuthRef.current.username = "deploy";
+  captured = undefined;
+  await createTerminalSessionStarters(ctx as never).startSSH(createTermStub() as never);
+  assert.equal(captured?.username, "deploy");
   assert.equal(captured?.sftpReuseOptions, undefined);
 });
 

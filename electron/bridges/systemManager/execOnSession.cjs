@@ -206,6 +206,13 @@ function createExecOnSessionApi(ctx) {
         execQueues.delete(sessionId);
         return { success: false, error: "Session not found" };
       }
+      if (session.singleChannelSsh) {
+        return {
+          success: false,
+          error: "Remote SSH server does not support extra exec channels",
+          code: "ERR_SINGLE_CHANNEL_BASTION",
+        };
+      }
 
       if (session.protocol === "local" || session.type === "local") {
         return execOnLocalMachine(command, timeoutMs, execOptions);

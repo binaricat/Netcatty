@@ -1,6 +1,14 @@
 /* eslint-disable no-undef */
 const { executeBoundedSshCommand } = require("../boundedSshExec.cjs");
 const { listInteractiveShellPids } = require("../sshInteractiveShells.cjs");
+function extraExecUnsupportedError(session) {
+  if (!session?.singleChannelSsh) return null;
+  console.log("[SSH] skipped extra exec on single-channel session", session.hostname || "");
+  return {
+    success: false,
+    error: "Remote SSH server does not support extra exec channels",
+  };
+}
 function decodeLsofFileName(value) {
   if (typeof value !== 'string') return null;
   // lsof's caret form is ambiguous: a BEL byte and the literal characters
@@ -149,6 +157,8 @@ function createSessionOpsApi(ctx) {
     async function getSessionDistroInfo(_event, payload) {
       const { sessionId } = payload || {};
       const session = sessions.get(sessionId);
+      const bastionBlock = extraExecUnsupportedError(session);
+      if (bastionBlock) return bastionBlock;
       if (session?.type === "et") {
         if (typeof execOnEtSession !== "function") {
           return { success: false, error: "ET command executor unavailable" };
@@ -191,6 +201,8 @@ function createSessionOpsApi(ctx) {
       if (!session) {
         return { success: false, error: 'Session not found' };
       }
+      const bastionHistoryBlock = extraExecUnsupportedError(session);
+      if (bastionHistoryBlock) return bastionHistoryBlock;
 
       const safeLimit =
         Number.isFinite(limit) && limit > 0 && limit <= 10000 ? Math.floor(limit) : 1000;
@@ -318,6 +330,12 @@ function createSessionOpsApi(ctx) {
       if (!session || !session.conn) {
         return { success: false, error: 'Session not found or not connected' };
       }
+      log('getSessionPwd invoked', {
+        sessionId,
+        singleChannelSsh: !!session.singleChannelSsh,
+      });
+      const bastionPwdBlock = extraExecUnsupportedError(session);
+      if (bastionPwdBlock) return bastionPwdBlock;
       if (
         session.blockUntargetedCwdProbe
         && session.cwdRecoveryPromise
@@ -635,13 +653,56 @@ function createSessionOpsApi(ctx) {
       _rc_cwd=$(readlink "/proc/$1/cwd" 2>/dev/null)
       if [ -n "$_rc_cwd" ]; then printf '%s\\n' "$_rc_cwd"; return 0; fi
       if command -v lsof >/dev/null 2>&1; then
-        # An unknown-type record can put a readlink error in its name field.
-        # Only a confirmed directory name is usable as an upload destination.
+        # lsof can label an unreadable root shell's cwd as a directory while
+        # appending "(readlink: Permission denied)" to its name on AL2023
+        # (#3493). Check annotation-shaped names before using them: real
+        # directories can also end in text such as " (owner: alice)".
         _rc_cwd=$(LC_ALL=C lsof -a -p "$1" -d cwd -Fnt 2>/dev/null | awk '
           /^f/ { is_dir=0 }
           /^t/ { is_dir=($0 == "tDIR" || $0 == "tVDIR") }
-          /^n/ && is_dir { print substr($0, 2); exit }
+          /^n/ && is_dir {
+            name=substr($0, 2)
+            if (name ~ / \\([A-Za-z][A-Za-z0-9]*: .*\\)$/) print "?" name
+            else print name
+            exit
+          }
         ')
+        case "$_rc_cwd" in
+          \\?*)
+            _rc_cwd=\${_rc_cwd#?}
+            # lsof escapes non-ASCII bytes under LC_ALL=C. Decode only for
+            # the existence check; keep the original for the client decoder.
+            _rc_test_cwd=$(printf '%s' "$_rc_cwd" | LC_ALL=C awk '
+              function hex(c) { return index("0123456789abcdef", tolower(c)) - 1 }
+              {
+                for (i=1; i<=length($0); i++) {
+                  c=substr($0,i,1)
+                  if (c!="\\\\") { printf "%s", c; continue }
+                  e=substr($0,++i,1)
+                  if (e=="x") {
+                    hi=hex(substr($0,++i,1)); lo=hex(substr($0,++i,1))
+                    if (hi<0 || lo<0) exit 1
+                    printf "%c", hi*16+lo
+                  } else if (e=="\\\\") printf "\\\\"
+                  else if (e=="n") printf "\\n"
+                  else if (e=="r") printf "\\r"
+                  else if (e=="t") printf "\\t"
+                  else if (e=="b") printf "%c", 8
+                  else if (e=="f") printf "%c", 12
+                  else if (e=="v") printf "%c", 11
+                  else if (e ~ /^[0-7]$/) {
+                    n=e+0
+                    for (j=0; j<2 && substr($0,i+1,1) ~ /^[0-7]$/; j++) {
+                      n=n*8+substr($0,++i,1)
+                    }
+                    printf "%c", n
+                  } else exit 1
+                }
+              }
+            ') || return 1
+            [ -d "$_rc_test_cwd" ] || return 1
+            ;;
+        esac
         if [ -n "$_rc_cwd" ]; then printf 'NETCATTY_LSOF_CWD=%s\\n' "$_rc_cwd"; return 0; fi
       fi
       return 1
@@ -748,6 +809,7 @@ function createSessionOpsApi(ctx) {
         if (!session || !session.conn || !Array.isArray(names) || names.length === 0) {
           return null;
         }
+        if (session.singleChannelSsh) return null;
         const script = `SELF=$$
     find_login_shell() {
       ps -e -o pid=,ppid=,tty=,comm= 2>/dev/null | awk -v pp="$1" -v self="$SELF" '
@@ -806,6 +868,7 @@ function createSessionOpsApi(ctx) {
     // rm -f the given absolute remote paths (quoted; injection-safe).
     async function removeRemoteFiles(session, paths, { signal } = {}) {
         if (!session || !session.conn || !Array.isArray(paths) || paths.length === 0) return;
+        if (session.singleChannelSsh) return;
         const argv = paths.map((p) => quoteShellArg(p)).join(" ");
         const commitToken = "NETCATTY_ZMODEM_COMMIT";
         const command = `exec sh -c ${quoteShellArg(
@@ -831,6 +894,7 @@ function createSessionOpsApi(ctx) {
     // (parameterized; injection-safe). Modes are validated octal before use.
     async function restoreRemoteModes(session, entries, { signal } = {}) {
         if (!session || !session.conn || !Array.isArray(entries) || entries.length === 0) return;
+        if (session.singleChannelSsh) return;
         const args = [];
         for (const e of entries) {
           if (!e || !e.path || !/^[0-7]{3,4}$/.test(String(e.mode))) continue;
@@ -876,6 +940,8 @@ function createSessionOpsApi(ctx) {
       if (!session || !session.conn) {
         return { success: false, entries: [], error: 'Session not found' };
       }
+      const bastionListBlock = extraExecUnsupportedError(session);
+      if (bastionListBlock) return { ...bastionListBlock, entries: [] };
     
       if (typeof dirPath !== "string" || dirPath.length === 0) {
         return { success: false, entries: [], error: 'Invalid directory path' };
@@ -998,6 +1064,8 @@ function createSessionOpsApi(ctx) {
       if (!session) {
         return { success: false, error: 'Session not found or not connected' };
       }
+      const bastionStatsBlock = extraExecUnsupportedError(session);
+      if (bastionStatsBlock) return bastionStatsBlock;
 
       const isEtSession = session.type === "et";
       const etUsesExecFallback = isEtSession && session.etStatsAuth?.hasJumpHost;

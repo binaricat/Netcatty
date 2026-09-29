@@ -444,6 +444,7 @@ async function checkTarAvailable(signal) {
   });
 }
 
+
 /**
  * Check if tar command is available on remote server
  */
@@ -451,7 +452,12 @@ async function checkRemoteTarAvailable(sftpId, signal) {
   try {
     const client = sftpClients.get(sftpId);
     if (!client) throw new Error("SFTP session not found");
-    
+    // Probing tar would open a second channel and drop this SFTP login.
+    // The renderer then uploads the folder file by file.
+    if (client.__netcattySingleChannelSsh || client.client?.__netcattySingleChannelSsh) {
+      return false;
+    }
+
     // Try to execute tar --version via SSH
     const sshClient = client.client; // Get underlying SSH2 client
     if (!sshClient) throw new Error("SSH client not available");
@@ -567,6 +573,11 @@ async function extractRemoteArchive(
 
   const sshClient = client.client;
   if (!sshClient) throw new Error("SSH client not available");
+  if (client.__netcattySingleChannelSsh === true || sshClient.__netcattySingleChannelSsh === true) {
+    throw new Error(
+      "This host is configured for single-channel SSH. Compressed extraction cannot open a shell on the file-transfer login.",
+    );
+  }
 
   // Calculate timeout based on archive size
   // Base: 60 seconds minimum
@@ -842,7 +853,7 @@ async function startCompressedUpload(event, payload) {
     // pre-existing files whose names happen to begin with "._".
     try {
       const client = sftpClients.get(sftpId);
-      if (client && client.client && client.client.writable !== false) {
+      if (client && !client.__netcattySingleChannelSsh && client.client && client.client.writable !== false) {
         await runRemoteExec(client.client, `rm -f ${escapeShellArg(remoteArchivePath)}`, {
           timeoutMs: REMOTE_CLEANUP_TIMEOUT_MS,
           signal: compression.remoteExecAbortController.signal,
@@ -1150,6 +1161,7 @@ module.exports = {
   registerHandlers,
   pauseCompression,
   resumeCompression,
+  _checkCompressedUploadSupportForTests: checkCompressedUploadSupport,
   _runRemoteExecForTests: runRemoteExec,
   _buildAtomicRemoteExtractionCommandForTests: buildAtomicRemoteExtractionCommand,
   _buildRemoteArchivePathForTests: buildRemoteArchivePath,

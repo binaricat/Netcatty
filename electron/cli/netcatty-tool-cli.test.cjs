@@ -2,9 +2,17 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const { Readable } = require("node:stream");
 
-const { parseArgs, bindHostChatSession, requireChatSession } = require("./netcatty-tool-cli.cjs");
+const { parseArgs, readNoteInputFromStdin, readNoteFromAttachment, validateNoteImportSize, bindHostChatSession, requireChatSession } = require("./netcatty-tool-cli.cjs");
+const { buildCatalogCliParams } = require("../capabilities/adapters/cliAdapter.cjs");
 const { TOOL_CLI_CHAT_SESSION_ENV_VAR } = require("./cliChatSession.cjs");
+
+function fakeCreateError(code, message) {
+  const err = new Error(message);
+  err.code = code;
+  return err;
+}
 
 test("parseArgs consumes attachment filename flag", () => {
   const { positionals, opts } = parseArgs([
@@ -78,6 +86,178 @@ test("parseArgs consumes dynamic script group targets", () => {
   assert.equal(opts.scriptId, "script-1");
   assert.equal(opts.targetGroups, '["Production","Staging/Web"]');
   assert.equal(opts.json, true);
+});
+
+test("parseArgs consumes vault note import flags", () => {
+  const { positionals, opts } = parseArgs([
+    "node",
+    "netcatty-tool-cli",
+    "notes",
+    "import",
+    "--file-name",
+    "runbook.md",
+    "--title",
+    "Runbook",
+    "--content",
+    "# Steps",
+    "--group",
+    "ops",
+    "--json",
+  ]);
+
+  assert.deepEqual(positionals, ["notes", "import"]);
+  assert.equal(opts.fileName, "runbook.md");
+  assert.equal(opts.title, "Runbook");
+  assert.equal(opts.content, "# Steps");
+  assert.equal(opts.group, "ops");
+  assert.equal(opts.json, true);
+});
+
+test("notes import reads literal markdown from stdin without shell expansion or argument limits", async () => {
+  const parsed = parseArgs(["node", "netcatty-tool-cli", "notes", "import", "--content-stdin", "--json"]);
+  const markdown = '# Runbook\n\n$(printf SHOULD_NOT_EXECUTE)\n`command`\n';
+  await readNoteInputFromStdin(parsed.positionals, parsed.opts, Readable.from([markdown]));
+  const params = buildCatalogCliParams("vault.note.import", parsed.opts, fakeCreateError);
+  assert.equal(params.content, markdown);
+});
+
+test("notes import reads a batch JSON document from stdin", async () => {
+  const parsed = parseArgs(["node", "netcatty-tool-cli", "notes", "import", "--documents-stdin"]);
+  const documents = '[{"fileName":"one.md","content":"# One\\n$(whoami)"}]';
+  await readNoteInputFromStdin(parsed.positionals, parsed.opts, Readable.from([documents]));
+  assert.equal(buildCatalogCliParams("vault.note.import", parsed.opts, fakeCreateError).documents, documents);
+});
+
+test("note stdin rejects conflicting flags and oversized content before connecting", async () => {
+  const conflicting = parseArgs(["node", "netcatty-tool-cli", "notes", "create", "--title", "A", "--content", "x", "--content-stdin"]);
+  await assert.rejects(
+    readNoteInputFromStdin(conflicting.positionals, conflicting.opts, Readable.from(["body"])),
+    /Do not combine stdin note input/,
+  );
+  const oversized = parseArgs(["node", "netcatty-tool-cli", "notes", "import", "--content-stdin"]);
+  await assert.rejects(
+    readNoteInputFromStdin(oversized.positionals, oversized.opts, Readable.from([Buffer.alloc(4 * 1024 * 1024 + 1)])),
+    /exceeds the 4 MiB CLI limit/,
+  );
+});
+
+test("notes import reads a registered attachment by index without a shell content argument", async () => {
+  const parsed = parseArgs(["node", "netcatty-tool-cli", "notes", "import", "--attachment-index", "0"]);
+  parsed.opts.chatSessionId = "chat-a";
+  const calls = [];
+  const client = { call: async (method, params) => {
+    calls.push({ method, params });
+    if (method === "netcatty/listAttachments") return {
+      ok: true,
+      attachments: [{ filename: "runbook.md", filePath: "/registered/runbook.md", sizeBytes: 25 }],
+    };
+    return { ok: true, filename: "runbook.md", text: "# Runbook\n$(whoami)" };
+  } };
+  await readNoteFromAttachment(client, parsed.opts);
+  assert.deepEqual(calls.map((call) => call.method), ["netcatty/listAttachments", "netcatty/readAttachment"]);
+  assert.equal(calls[1].params.chatSessionId, "chat-a");
+  assert.equal(calls[1].params.filePath, "/registered/runbook.md");
+  assert.equal(calls[1].params.maxBytes, 1024 * 1024);
+  const params = buildCatalogCliParams("vault.note.import", parsed.opts, fakeCreateError);
+  assert.equal(params.fileName, "runbook.md");
+  assert.equal(params.content, "# Runbook\n$(whoami)");
+});
+
+test("notes import rejects oversized attachment content even without listed size", async () => {
+  const parsed = parseArgs(["node", "netcatty-tool-cli", "notes", "import", "--attachment-index", "0"]);
+  parsed.opts.chatSessionId = "chat-a";
+  const client = { call: async (method) => method === "netcatty/listAttachments"
+    ? { ok: true, attachments: [{ filename: "runbook.md" }] }
+    : { ok: true, filename: "runbook.md", text: "x".repeat(1024 * 1024 + 1) } };
+  await assert.rejects(readNoteFromAttachment(client, parsed.opts), /1 MiB attachment limit/);
+});
+
+test("notes import checks per-document character limits before requesting approval", () => {
+  assert.doesNotThrow(() => validateNoteImportSize({ content: "x".repeat(512000) }));
+  assert.throws(() => validateNoteImportSize({ content: "x".repeat(512001) }), /512,000 character/);
+  assert.throws(() => validateNoteImportSize({ documents: JSON.stringify([
+    { fileName: "runbook.md", content: "x".repeat(512001) },
+  ]) }), /512,000 character/);
+});
+
+test("notes import refuses an attachment that is not Markdown", async () => {
+  const parsed = parseArgs(["node", "netcatty-tool-cli", "notes", "import", "--attachment-index", "0"]);
+  parsed.opts.chatSessionId = "chat-a";
+  const client = { call: async () => ({ ok: true, attachments: [{ filename: "hosts.csv", sizeBytes: 12 }] }) };
+  await assert.rejects(readNoteFromAttachment(client, parsed.opts), /registered Markdown file/);
+});
+
+test("notes create CLI keeps an explicit empty content and still requires the flag", () => {
+  const created = parseArgs([
+    "node",
+    "netcatty-tool-cli",
+    "notes",
+    "create",
+    "--title",
+    "Empty",
+    "--content",
+    "",
+    "--json",
+  ]);
+  assert.equal(created.opts.title, "Empty");
+  assert.equal(created.opts.content, "");
+  const params = buildCatalogCliParams("vault.note.create", created.opts, fakeCreateError);
+  assert.equal(params.title, "Empty");
+  assert.equal(params.content, "");
+
+  const omitted = parseArgs([
+    "node",
+    "netcatty-tool-cli",
+    "notes",
+    "create",
+    "--title",
+    "Empty",
+    "--json",
+  ]);
+  assert.equal(omitted.opts.content, null);
+  assert.throws(
+    () => buildCatalogCliParams("vault.note.create", omitted.opts, fakeCreateError),
+    /Missing required --content for vault\.note\.create/,
+  );
+});
+
+test("notes CLI keeps explicit empty content and group through parse and catalog params", () => {
+  const cleared = parseArgs([
+    "node",
+    "netcatty-tool-cli",
+    "notes",
+    "update",
+    "--note-id",
+    "n1",
+    "--content",
+    "",
+    "--group",
+    "",
+    "--json",
+  ]);
+  assert.equal(cleared.opts.content, "");
+  assert.equal(cleared.opts.group, "");
+  const updateParams = buildCatalogCliParams("vault.note.update", cleared.opts, fakeCreateError);
+  assert.equal(updateParams.noteId, "n1");
+  assert.equal(updateParams.content, "");
+  assert.equal(updateParams.group, "");
+  assert.equal("title" in updateParams, false);
+
+  const imported = parseArgs([
+    "node",
+    "netcatty-tool-cli",
+    "notes",
+    "import",
+    "--file-name",
+    "empty.md",
+    "--content",
+    "",
+    "--json",
+  ]);
+  assert.equal(imported.opts.content, "");
+  const importParams = buildCatalogCliParams("vault.note.import", imported.opts, fakeCreateError);
+  assert.equal(importParams.fileName, "empty.md");
+  assert.equal(importParams.content, "");
 });
 
 test("requireChatSession accepts a resolved id", () => {

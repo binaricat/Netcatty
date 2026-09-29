@@ -162,5 +162,6 @@ export function stripBuiltInConnectionFieldsForPluginHost(host: Host): Host {
     sshAuthReadyTimeoutSeconds: _sshAuthReadyTimeoutSeconds,
     ...pluginHost
   } = host;
+  delete (pluginHost as { singleChannelSsh?: unknown }).singleChannelSsh;
   return pluginHost;
 }

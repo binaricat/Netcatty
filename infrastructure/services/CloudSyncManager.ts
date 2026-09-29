@@ -234,6 +234,7 @@ export class CloudSyncManager {
   private providerWriteSeq: Record<CloudProvider, number> = {
     github: 0, google: 0, onedrive: 0, webdav: 0, s3: 0,
   };
+  private providerWritePending: Partial<Record<CloudProvider, Promise<void>>> = {};
   /** Optional abort signal for the in-flight syncNow / convergent upload path. */
   activeSyncAbortSignal: AbortSignal | undefined;
 
@@ -269,9 +270,13 @@ export class CloudSyncManager {
   private async saveProviderConnection(
     provider: CloudProvider,
     connection: ProviderConnection,
-    authAttemptId?: number
+    authAttemptId?: number,
+    assertCanPersist?: () => void,
+    preserveStoredSecrets = false,
   ): Promise<void> {
-    return saveProviderConnectionImpl.call(this, provider, connection, authAttemptId);
+    return saveProviderConnectionImpl.call(
+      this, provider, connection, authAttemptId, assertCanPersist, preserveStoredSecrets,
+    );
   }
 
   private loadFromStorage<T>(key: string): T | null {
@@ -607,8 +612,9 @@ export class CloudSyncManager {
     provider: CloudProvider,
     syncedFile: SyncedFile | null,
     resourceId?: string | null,
+    assertCanPersist?: () => void,
   ): Promise<void> {
-    return saveSyncAnchorImpl.call(this, provider, syncedFile, resourceId);
+    return saveSyncAnchorImpl.call(this, provider, syncedFile, resourceId, assertCanPersist);
   }
 
   private clearSyncAnchor(provider?: CloudProvider): void {
@@ -903,8 +909,12 @@ export class CloudSyncManager {
     return saveProviderAccountIdImpl.call(this, provider, id);
   }
 
-  async saveSyncBase(payload: SyncPayload, provider?: CloudProvider): Promise<void> {
-    return saveSyncBaseImpl.call(this, payload, provider);
+  async saveSyncBase(
+    payload: SyncPayload,
+    provider?: CloudProvider,
+    assertCanPersist?: () => void,
+  ): Promise<void> {
+    return saveSyncBaseImpl.call(this, payload, provider, assertCanPersist);
   }
 
   async loadSyncBase(provider?: CloudProvider): Promise<SyncPayload | null> {

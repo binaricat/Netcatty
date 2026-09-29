@@ -5,6 +5,7 @@ const assert = require("node:assert/strict");
 
 const {
   VAULT_HOSTS_VS_NOTES_GUIDANCE,
+  VAULT_NOTES_CLI_GUIDANCE,
   VAULT_SCRIPTS_GUIDANCE,
   appendVaultAgentGuidance,
 } = require("./vaultAgentGuidance.cjs");
@@ -13,6 +14,20 @@ test("VAULT_HOSTS_VS_NOTES_GUIDANCE forbids note fallback for host creation", ()
   assert.match(VAULT_HOSTS_VS_NOTES_GUIDANCE, /vault_hosts_create/i);
   assert.match(VAULT_HOSTS_VS_NOTES_GUIDANCE, /NOT vault_notes_create/i);
   assert.match(VAULT_HOSTS_VS_NOTES_GUIDANCE, /do not silently create a Vault note/i);
+});
+
+test("Skills + CLI notes guidance matches the MCP notes rules", () => {
+  assert.match(VAULT_NOTES_CLI_GUIDANCE, /notes create or notes update ONLY when the user explicitly wants/i);
+  assert.match(VAULT_NOTES_CLI_GUIDANCE, /notes import --attachment-index from attachment list for attached Markdown/i);
+  assert.match(VAULT_NOTES_CLI_GUIDANCE, /--content-stdin for generated Markdown/i);
+  assert.match(VAULT_NOTES_CLI_GUIDANCE, /Never interpolate note text into a shell command/i);
+  assert.match(VAULT_NOTES_CLI_GUIDANCE, /vault host-notes set/i);
+  assert.match(VAULT_NOTES_CLI_GUIDANCE, /do not silently create a Vault note/i);
+  assert.match(VAULT_HOSTS_VS_NOTES_GUIDANCE, /vault_notes_import/i);
+  assert.match(VAULT_NOTES_CLI_GUIDANCE, /if approval is denied, stop/i);
+  assert.match(VAULT_NOTES_CLI_GUIDANCE, /empty --content clears the body/i);
+  assert.match(VAULT_NOTES_CLI_GUIDANCE, /notes create requires a body through --content-stdin or an explicit --content/i);
+  assert.match(VAULT_NOTES_CLI_GUIDANCE, /notes import accepts an empty --content/i);
 });
 
 test("VAULT_HOSTS_VS_NOTES_GUIDANCE routes unknown attached host files through AI extraction", () => {

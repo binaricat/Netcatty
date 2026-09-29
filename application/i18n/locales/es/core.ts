@@ -274,9 +274,6 @@ export const esCoreMessages: Messages = {
   'settings.vault.selectBeforeConnectDesc': 'Haz clic una vez para seleccionar un host (resaltado con el color de acento en la vista de cuadrícula), haz clic de nuevo para conectarte. Los grupos funcionan igual. El valor predeterminado sigue siendo conectarse con un solo clic.',
   'settings.vault.showOnlyUngroupedHostsInRoot': 'Mostrar solo hosts sin grupo en la raíz',
   'settings.vault.showOnlyUngroupedHostsInRootDesc': 'Cuando está activado, la lista de hosts de la raíz solo muestra hosts sin grupo. Abre un grupo desde la barra lateral para ver los hosts agrupados.',
-  'settings.appearance.tabBarPosition': 'Posición de la barra de pestañas',
-  'settings.appearance.tabBarPosition.top': 'Arriba',
-  'settings.appearance.tabBarPosition.bottom': 'Abajo',
   'settings.vault.showSftpTab': 'Mostrar pestaña SFTP',
   'settings.vault.showSftpTabDesc': 'Muestra la vista SFTP independiente en la barra de pestañas superior. Cuando está oculta, usa el panel lateral SFTP dentro de la sesión.',
   'settings.vault.showHostTreeSidebar': 'Mostrar barra lateral de lista de hosts',
@@ -456,7 +453,7 @@ Resalta el panel dividido enfocado:
   'settings.appearance.windowOpacity': 'Opacidad de la ventana',
   'settings.appearance.windowOpacity.desc': 'Ajusta la transparencia de toda la ventana de la aplicación. Los valores más bajos también atenúan el texto de la terminal. Algunos entornos de escritorio de Linux pueden no admitir esto.',
   'settings.appearance.appIcon': 'Ícono de la aplicación',
-  'settings.appearance.appIcon.desc': 'Elige un estilo de ícono para el dock o la barra de tareas que haga más fácil distinguir Netcatty al cambiar de aplicación. Se aplica en tiempo de ejecución; el ícono del paquete instalado no cambia.',
+  'settings.appearance.appIcon.desc': 'Elige un estilo de ícono para el dock o la barra de tareas que haga más fácil distinguir Netcatty al cambiar de aplicación. En Windows, el icono del área de notificación usa el mismo estilo. Se aplica en tiempo de ejecución; el ícono del paquete instalado no cambia.',
   'settings.appearance.appIcon.original': 'Original',
   'settings.appearance.appIcon.bright': 'Brillante',
   'settings.appearance.appIcon.dark': 'Oscuro',
@@ -532,6 +529,8 @@ Resalta el panel dividido enfocado:
   'settings.terminal.font.weightBold.desc': 'Peso del texto en negrita (100-900)',
   'settings.terminal.font.smoothing': 'Suavizado de fuente',
   'settings.terminal.font.smoothing.desc': 'Usar el anti-aliasing nativo de fuentes de macOS',
+  'settings.terminal.font.ligatures': 'Ligaduras de fuente',
+  'settings.terminal.font.ligatures.desc': 'Mostrar ligaduras como != cuando la fuente del terminal las incluye',
   'settings.terminal.font.linePadding': 'Espaciado de líneas',
   'settings.terminal.font.linePadding.desc': 'Espacio adicional entre líneas (0-10)',
   'settings.terminal.font.emulationType': 'Tipo de emulación de terminal',
@@ -539,6 +538,8 @@ Resalta el panel dividido enfocado:
   'settings.terminal.cursor.style.block': 'Bloque',
   'settings.terminal.cursor.style.bar': 'Barra',
   'settings.terminal.cursor.style.underline': 'Subrayado',
+  'settings.terminal.cursor.barWidth': 'Ancho del cursor de barra',
+  'settings.terminal.cursor.barWidth.desc': 'Ancho de los cursores de barra utilizados por aplicaciones como vi (1-4 px)',
   'settings.terminal.cursor.blink': 'Parpadeo del cursor',
   'settings.terminal.cursor.highlightLine': 'Resaltar línea actual',
   'settings.terminal.cursor.highlightLine.desc':
@@ -623,7 +624,10 @@ Resalta el panel dividido enfocado:
     'Envía el texto configurado en lugar del Enter normal al presionar Shift+Enter en la terminal.',
   'settings.terminal.behavior.shiftEnterNewlineText': 'Texto a enviar',
   'settings.terminal.behavior.shiftEnterNewlineText.desc':
-    'Usa \\n para nueva línea, \\t para tabulación y \\\\ para barra invertida.',
+    'Usa \\n para nueva línea, \\t para tabulación, \\e para Escape y \\\\ para barra invertida.',
+  'settings.terminal.behavior.shiftEnterForceText': 'Enviar texto también en modo de entrada Win32',
+  'settings.terminal.behavior.shiftEnterForceText.desc':
+    'Envía también el texto anterior cuando una sesión ConPTY local de Windows negocia el modo de entrada Win32. Necesario para CLI escritas en Node/Bun (Claude Code, CodeBuddy) que no pueden leer modificadores desde los registros de entrada de la consola.',
   'settings.terminal.behavior.clearWipesScrollback': '`clear` borra el historial de desplazamiento',
   'settings.terminal.behavior.clearWipesScrollback.desc':
     'Haz que `clear` también borre el buffer del historial de desplazamiento (predeterminado de POSIX). Desactívalo para mantener visible el historial después de `clear`.',

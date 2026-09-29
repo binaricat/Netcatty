@@ -31,6 +31,7 @@ export const esSystemManagerMessages: Messages = {
   'systemManager.errors.loadPorts': 'No se pudieron cargar los puertos en escucha',
   'systemManager.errors.loadServices': 'No se pudieron cargar los servicios de systemd',
   'systemManager.errors.sshChannelUnavailable': 'El servidor se negó a abrir un nuevo canal de ejecución. Inténtalo de nuevo más tarde o vuelve a conectar este host.',
+  'systemManager.unsupportedRemote': 'Este host no permite canales SSH de ejecución adicionales, por lo que el administrador del sistema no está disponible. Abrir este panel ya no desconectará la terminal.',
 
   'systemManager.overview.empty': 'Aún no hay datos de resumen del sistema.',
   'systemManager.overview.loading': 'Cargando resumen del sistema…',

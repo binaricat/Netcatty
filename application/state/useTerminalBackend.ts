@@ -521,7 +521,7 @@ export const useTerminalBackend = () => {
 
   const getSessionPwd = useCallback(async (
     sessionId: string,
-    options?: { allowHomeFallback?: boolean; allowLoginShellFallback?: boolean },
+    options?: { allowHomeFallback?: boolean; allowLoginShellFallback?: boolean; timeoutMs?: number },
   ) => {
     const bridge = netcattyBridge.get();
     if (!bridge?.getSessionPwd) return { success: false, error: 'getSessionPwd unavailable' };

@@ -89,6 +89,11 @@ test('mergeFallbackThinkingLevels fills missing runtime effort catalogs', () => 
     [{ id: 'gpt-5.5', name: 'GPT-5.5', thinkingLevels: ['low', 'medium', 'high'], defaultThinkingLevel: 'medium' }],
   );
   assert.deepEqual(partial[0]?.thinkingLevels, ['low']);
+  const unsupported = mergeFallbackThinkingLevels(
+    [{ id: 'gpt-5.5', name: 'GPT-5.5', thinkingLevels: [] }],
+    [{ id: 'gpt-5.5', name: 'GPT-5.5', thinkingLevels: ['low', 'high'] }],
+  );
+  assert.deepEqual(unsupported[0]?.thinkingLevels, []);
   assert.deepEqual(mergeFallbackThinkingLevels([], [{ id: 'gpt-5.5', name: 'GPT-5.5' }]), []);
   const alreadyFilled = [{ id: 'gpt-5.5', name: 'GPT-5.5', thinkingLevels: ['low'] }];
   assert.equal(
@@ -137,7 +142,7 @@ test('shouldLoadSdkRuntimeModels includes SDK agents with model catalogs', () =>
   assert.equal(shouldLoadSdkRuntimeModels(agent('codebuddy')), true);
   assert.equal(shouldLoadSdkRuntimeModels(agent('opencode')), true);
   assert.equal(shouldLoadSdkRuntimeModels(agent('grok')), true);
-  assert.equal(shouldLoadSdkRuntimeModels(agent('codex')), false);
+  assert.equal(shouldLoadSdkRuntimeModels(agent('codex')), true);
   assert.equal(shouldLoadSdkRuntimeModels({ ...agent('codex'), codexRuntime: 'app-server' }), true);
   assert.equal(shouldLoadSdkRuntimeModels(undefined), false);
 });
@@ -156,6 +161,44 @@ test('Codex App Server model discovery uses a separate cache identity', () => {
     codexRuntime: 'app-server',
   });
   assert.notEqual(sdk, appServer);
+  assert.notEqual(
+    buildSdkRuntimeModelCacheKey({ id: 'discovered_codex', sdkBackend: 'codex', command: '/bin/codex', env: { HOME: '/shared', CODEX_HOME: '/profiles/a' } }),
+    buildSdkRuntimeModelCacheKey({ id: 'discovered_codex', sdkBackend: 'codex', command: '/bin/codex', env: { HOME: '/shared', CODEX_HOME: '/profiles/b' } }),
+  );
+});
+
+test('Claude model cache keys isolate configuration directories under one home', () => {
+  const agent = { id: 'discovered_claude', sdkBackend: 'claude', command: '/bin/claude' };
+  assert.notEqual(
+    buildSdkRuntimeModelCacheKey({ ...agent, env: { HOME: '/shared', CLAUDE_CONFIG_DIR: '/profiles/a' } }),
+    buildSdkRuntimeModelCacheKey({ ...agent, env: { HOME: '/shared', CLAUDE_CONFIG_DIR: '/profiles/b' } }),
+  );
+});
+
+test('MiMo model cache reloads after its config directory changes', async () => {
+  const agent = { id: 'discovered_mimo', sdkBackend: 'mimo', command: '/bin/mimo' };
+  const firstKey = buildSdkRuntimeModelCacheKey({ ...agent, env: { MIMOCODE_HOME: '/profiles/a' } });
+  const secondKey = buildSdkRuntimeModelCacheKey({ ...agent, env: { MIMOCODE_HOME: '/profiles/b' } });
+  const cache = createSdkRuntimeModelCache();
+  let loads = 0;
+  const load = async () => ({ currentModelId: String(++loads), models: [] });
+  assert.deepEqual(await cache.refresh(firstKey, load), { currentModelId: '1', models: [] });
+  assert.deepEqual(await cache.refresh(secondKey, load), { currentModelId: '2', models: [] });
+  assert.equal(loads, 2);
+  assert.notEqual(
+    buildSdkRuntimeModelCacheKey({ ...agent, env: { MIMOCODE_CONFIG: '/profiles/a/mimocode.json' } }),
+    buildSdkRuntimeModelCacheKey({ ...agent, env: { MIMOCODE_CONFIG: '/profiles/b/mimocode.json' } }),
+  );
+});
+
+test('Claude model cache keys isolate credentials without exposing them', () => {
+  const agent = { id: 'discovered_claude', sdkBackend: 'claude', command: '/bin/claude' };
+  for (const name of ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN']) {
+    const first = buildSdkRuntimeModelCacheKey({ ...agent, env: { [name]: 'secret-one' } });
+    const second = buildSdkRuntimeModelCacheKey({ ...agent, env: { [name]: 'secret-two' } });
+    assert.notEqual(first, second, `${name} must separate cache entries`);
+    assert.doesNotMatch(first, /secret-one/);
+  }
 });
 
 test('shouldAdoptSdkCurrentModel keeps SDK defaults when no runtime list is returned', () => {

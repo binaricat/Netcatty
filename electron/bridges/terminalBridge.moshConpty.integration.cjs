@@ -37,7 +37,8 @@ async function main() {
   const clientDir = path.join(tmp, "project", "resources", "mosh", "win32-x64");
   fs.mkdirSync(binDir, { recursive: true });
   fs.mkdirSync(clientDir, { recursive: true });
-  fs.copyFileSync(fakeSsh, path.join(binDir, "ssh.exe"));
+  const fakeSshPath = path.join(binDir, "ssh.exe");
+  fs.copyFileSync(fakeSsh, fakeSshPath);
   fs.copyFileSync(fakeClient, path.join(clientDir, "mosh-client.exe"));
 
   const oldPath = process.env.PATH;
@@ -92,6 +93,11 @@ async function main() {
           projectRoot: path.join(tmp, "project"),
           resourcesPath,
         },
+        // Resolve ssh to the compiled fixture without shelling out to
+        // where.exe. On loaded runners where.exe can time out, and the
+        // fallback then picks the in-box OpenSSH, which never prints the
+        // fixture's MOSH CONNECT line, so no ready event can ever arrive.
+        findExecutable: (name) => (name === "ssh" ? fakeSshPath : name),
       },
     );
 

@@ -11,6 +11,7 @@ const { pipeline } = require("node:stream/promises");
 const { TextDecoder } = require("node:util");
 const { StringDecoder } = require("node:string_decoder");
 const { executeBoundedSshCommand } = require("./boundedSshExec.cjs");
+const { remoteSoftwareRequiresSingleChannel } = require("../../domain/singleChannelSshBanner.shared.cjs");
 const { openBoundedSftpChannel } = require("./boundedSftpOpen.cjs");
 const { invalidateSshTransport } = require("./sshTransportInvalidation.cjs");
 require("./boringSslDhCompat.cjs").installBoringSslDhCompat();
@@ -227,6 +228,11 @@ const getSftpChannel = async (client, options = {}) => {
   // Reopening with sshClient.sftp() would silently downgrade permissions.
   if (client.__netcattySudoMode) {
     console.warn("[SFTP] Sudo SFTP channel is unavailable; automatic recovery is disabled for sudo sessions. Please reconnect.");
+    return null;
+  }
+
+  // A second SFTP channel on a single-channel bastion drops the whole login.
+  if (client.__netcattySingleChannelSsh || client.client?.__netcattySingleChannelSsh) {
     return null;
   }
 
@@ -637,6 +643,8 @@ async function execRemoteShellCommand(sshClient, command, optionsOrSignal = null
 async function tryFastShellDirectoryDelete(client, remotePath, encoding = "utf-8", signal = null) {
   const sshClient = client?.client;
   if (!sshClient || typeof sshClient.exec !== "function") return false;
+  // Extra exec drops a single-channel bastion login. Use the SFTP walk instead.
+  if (client.__netcattySingleChannelSsh || sshClient.__netcattySingleChannelSsh) return false;
   const enc = !encoding || encoding === "auto" ? "utf-8" : encoding;
   if (enc !== "utf-8") return false;
   if (typeof remotePath !== "string" || !remotePath || remotePath === "/" || remotePath === ".") {
@@ -1090,7 +1098,12 @@ async function hashReadableForDigest(readable, signal = null) {
   }
 }
 
-async function tryRemoteSha256Sum(sshClient, remotePath, signal = null) {
+async function tryRemoteSha256Sum(sshClient, remotePath, signal = null, owner = null) {
+  // The dedicated SFTP login already holds the only session channel.
+  // Hash the file through that SFTP stream instead of opening exec.
+  if (sshClient?.__netcattySingleChannelSsh || owner?.__netcattySingleChannelSsh) {
+    return null;
+  }
   if (!sshClient || typeof sshClient.exec !== "function") return null;
   const escapedPath = String(remotePath).replace(/'/g, "'\\''");
   try {
@@ -1121,7 +1134,7 @@ async function tryRemoteSha256Sum(sshClient, remotePath, signal = null) {
 async function computeRemoteContentDigest(client, encodedPath, remotePath, options = {}) {
   const signal = options.signal || null;
   throwIfAborted(signal);
-  const digest = await tryRemoteSha256Sum(client?.client, remotePath, signal);
+  const digest = await tryRemoteSha256Sum(client?.client, remotePath, signal, client);
   if (digest) {
     throwIfAborted(signal);
     return digest;
@@ -1801,6 +1814,7 @@ function createSessionBackedSftpClient(sessionId, sshClient, options = {}) {
     client: sshClient,
     sftp: null,
     __netcattySessionBacked: true,
+    __netcattySingleChannelSsh: !!options?.singleChannelSsh,
     __netcattySourceSessionId: options?.sourceSessionId,
     __netcattyRefHolder: refHolder,
     __netcattyDisposed: false,
@@ -1940,6 +1954,16 @@ async function openSftpForSession(_event, payload) {
     source = { sessionId, ...ensureRemoteSftpSupport(sessionId) };
   }
   const { session, sshClient } = source;
+  if (
+    session.singleChannelSsh
+    || remoteSoftwareRequiresSingleChannel(session.remoteSshVersion || sshClient?._remoteVer)
+  ) {
+    const err = new Error(
+      "This host is configured for single-channel SSH. Opening SFTP on the terminal connection would disconnect it.",
+    );
+    err.code = "ERR_SFTP_SINGLE_CHANNEL_BASTION";
+    throw err;
+  }
   const actualEndpoint = session._reuseEndpoint || session.connRef?.endpoint;
   const sftpId = `${sourceSessionId}-sftp-${randomUUID()}`;
   const refHolder = { id: sftpId, __sshLeaseKind: "sftp" };
@@ -1949,6 +1973,7 @@ async function openSftpForSession(_event, payload) {
   const client = createSessionBackedSftpClient(sourceSessionId, sshClient, {
     refHolder,
     sourceSessionId,
+    singleChannelSsh: !!session.singleChannelSsh,
   });
   client.__netcattyEndpointKey = session.connRef?.endpointKey || buildEndpointKey(actualEndpoint);
   const { normalizeFileProtocol } = require("./sftpBridge/scpShell.cjs");
@@ -2161,6 +2186,11 @@ async function acquireUploadSftpChannel(client, options = {}) {
     return { sftp, dispose: false };
   }
   const sshClient = client?.client;
+  // Same constraint as openIsolatedSftpChannel: a second subsystem drops the login.
+  if (client?.__netcattySingleChannelSsh || sshClient?.__netcattySingleChannelSsh) {
+    const shared = await requireSftpChannel(client, options);
+    return { sftp: shared, dispose: false };
+  }
   if (sshClient && typeof sshClient.sftp === "function") {
     // Prefer a disposable channel for cancel, but never fail the whole upload
     // when MaxSessions / server policy refuses another subsystem — fall back to
@@ -2702,6 +2732,7 @@ module.exports = {
   extractSftpArchive,
   getSftpHomeDir,
   resolveEncodingForRequest,
+  _tryFastShellDirectoryDeleteForTests: tryFastShellDirectoryDelete,
   _execRemoteShellCommandForTests: execRemoteShellCommand,
   _tryRemoteSha256SumForTests: tryRemoteSha256Sum,
 };

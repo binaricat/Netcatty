@@ -40,6 +40,16 @@ test("build.files includes the prompt classifier required by Mosh", () => {
   assert.equal(promptSecurity.isUntrustedTerminalInputPrompt("验证码："), true);
 });
 
+test("build.files includes the single-channel SSH banner matcher", () => {
+  assert.ok(
+    config.files.includes("domain/singleChannelSshBanner.shared.cjs"),
+    "packaged SSH and SFTP bridges require the shared banner matcher",
+  );
+  const banner = require("../domain/singleChannelSshBanner.shared.cjs");
+  assert.equal(banner.remoteSoftwareRequiresSingleChannel("BHostSSH_7.0"), true);
+  assert.equal(banner.remoteSoftwareRequiresSingleChannel("JumpServer"), false);
+});
+
 test("unpacked Tool CLI includes capability runtime dependencies", () => {
   assert.ok(
     config.asarUnpack.includes("electron/cli/**/*"),

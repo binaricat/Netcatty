@@ -3,6 +3,10 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const { listMcpTools } = require("../capabilities/codegen/toolSurfaces.cjs");
 
+// Keep bridge discovery writes/deletes off the installed app's live file.
+const { isolateCliDiscoveryFile } = require("./cliDiscoveryTestIsolation.cjs");
+isolateCliDiscoveryFile();
+
 function setup(t, mode = "confirm") {
   const path = require.resolve("./mcpServerBridge.cjs");
   delete require.cache[path];

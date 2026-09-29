@@ -5,7 +5,7 @@
 const { emitTerminalSessionData } = require("../emitTerminalSessionData.cjs");
 const { formatSyntheticEcho } = require("../ai/shellUtils.cjs");
 const { clearSessionFlowState } = require("../terminalFlowAck.cjs");
-const { remoteDisallowsExecChannelProbe, ensureSessionShellKindForExec } = require("../ai/sessionShellKind.cjs");
+const { remoteDisallowsExecChannelProbe, sessionDisallowsExtraSshChannel, ensureSessionShellKindForExec } = require("../ai/sessionShellKind.cjs");
 
 function getWorkerExecutionMeta(mcpServerBridge, sessionId, chatSessionId) {
   return mcpServerBridge.getSessionMeta?.(sessionId, chatSessionId) || {};
@@ -181,6 +181,7 @@ function registerCattyExecHandlers(ctx) {
             loginShellHint: session._loginShellKind,
             probeLiveShell: true,
             bastionKeystrokes: remoteDisallowsExecChannelProbe(session.remoteSshVersion),
+            skipPendingInputClear: session.singleChannelSsh === true,
             onProbeAborted: (marker) => {
               const contents = electronModule?.webContents?.fromId?.(session.webContentsId);
               emitTerminalSessionData(contents, sessionId, `${marker}_R\n`, { session });
@@ -216,7 +217,7 @@ function registerCattyExecHandlers(ctx) {
 
       // Fallback: SSH exec channel (invisible to terminal)
       const sshClient = session.sshClient || session.conn;
-      if (sshClient && typeof sshClient.exec === "function") {
+      if (!session.singleChannelSsh && sshClient && typeof sshClient.exec === "function") {
         const { execViaChannel } = require("./ai/ptyExec.cjs");
         const channelTimeoutMs = mcpServerBridge.getCommandTimeoutMs ? mcpServerBridge.getCommandTimeoutMs() : 60000;
         return withLockRelease(async () => {

@@ -23,6 +23,7 @@ import type {
   SyncResult,
 } from '../../../domain/sync';
 import { isConditionalWriteConflictError } from '../adapters/encryptedObjectStorageBridge';
+import { providerConnectionIdentity, tryAcceptIdenticalRemoteImpl } from './syncAllStorageMethods';
 
 function getSyncSecurityGeneration(manager: any): number | undefined {
   return typeof manager.getSyncSecurityGeneration === 'function'
@@ -179,11 +180,16 @@ export async function uploadToProviderImpl(this: any,
       assertSyncSecurityGeneration(this, syncSecurityGeneration);
       this.state.lastError = null;
 
-      // Update local state (safe to do multiple times if values are same)
-      this.state.localVersion = syncedFile.meta.version;
-      this.state.localUpdatedAt = syncedFile.meta.updatedAt;
-      this.state.remoteVersion = syncedFile.meta.version;
-      this.state.remoteUpdatedAt = syncedFile.meta.updatedAt;
+      // Update local state. Use a monotonic max: with multiple providers
+      // uploading in parallel from different bases, a later completion from a
+      // stale base must not lower the global version that a concurrent
+      // no-op/merge completion already advanced (e.g. v10) — otherwise the
+      // next edit mints a revision below an anchored remote and regresses
+      // the cloud file.
+      this.state.localVersion = Math.max(this.state.localVersion ?? 0, syncedFile.meta.version);
+      this.state.localUpdatedAt = Math.max(this.state.localUpdatedAt ?? 0, syncedFile.meta.updatedAt);
+      this.state.remoteVersion = Math.max(this.state.remoteVersion ?? 0, syncedFile.meta.version);
+      this.state.remoteUpdatedAt = Math.max(this.state.remoteUpdatedAt ?? 0, syncedFile.meta.updatedAt);
       // Invalidate any pending provider decrypt so it cannot overwrite
       // the lastSync/lastSyncVersion we are about to set.
       ++this.providerDecryptSeq[provider];
@@ -408,6 +414,7 @@ export async function syncToProviderImpl(this: any,
       };
     }
     assertSyncSecurityGeneration(this, syncSecurityGeneration);
+    const providerIdentity = providerConnectionIdentity(this.state.providers[provider]);
 
     this.updateProviderStatus(provider, 'syncing');
     this.state.lastError = null;
@@ -421,6 +428,16 @@ export async function syncToProviderImpl(this: any,
       // unknown remote state.
       const checkResult = await this.checkProviderConflict(provider, adapter);
       assertSyncSecurityGeneration(this, syncSecurityGeneration);
+      const unchanged = await tryAcceptIdenticalRemoteImpl.call(
+        this, provider, adapter, payload, checkResult.remoteFile,
+        syncSecurityGeneration, providerIdentity,
+      );
+      if (unchanged) {
+        this.exitBlockedState();
+        this.state.syncState = 'IDLE';
+        this.notifyStateChange();
+        return unchanged;
+      }
 
       if (checkResult.conflict && checkResult.remoteFile) {
         const conflictAction = resolveCloudSyncConflictAction(this.state.syncStrategy, {
@@ -452,6 +469,7 @@ export async function syncToProviderImpl(this: any,
 
         let remotePayloadForConflict: SyncPayload | null = null;
         let baseForConflict: SyncPayload | null = null;
+        let acceptingIdenticalRemote = false;
 
         // Remote is newer — attempt three-way merge instead of blocking
         try {
@@ -508,6 +526,19 @@ export async function syncToProviderImpl(this: any,
             this.emit({ type: 'SYNC_FORCED', provider, finding: mergedShrink });
           }
 
+          acceptingIdenticalRemote = true;
+          const unchangedMerge = await tryAcceptIdenticalRemoteImpl.call(
+            this, provider, adapter, mergedPayload, checkResult.remoteFile,
+            syncSecurityGeneration, providerIdentity,
+          );
+          acceptingIdenticalRemote = false;
+          if (unchangedMerge) {
+            this.exitBlockedState();
+            this.state.syncState = 'IDLE';
+            this.notifyStateChange();
+            return { ...unchangedMerge, action: 'merge', mergedPayload };
+          }
+
           // Encrypt and upload merged payload
           const mergedSyncedFile = await EncryptionService.encryptPayload(
             mergedPayload,
@@ -559,6 +590,7 @@ export async function syncToProviderImpl(this: any,
           }
           return uploadResult;
         } catch (mergeError) {
+          if (acceptingIdenticalRemote) throw mergeError;
           assertSyncSecurityGeneration(this, syncSecurityGeneration);
           // Merge failed — fall back to conflict UI
           console.error('[CloudSyncManager] Merge failed, falling back to conflict UI', mergeError);

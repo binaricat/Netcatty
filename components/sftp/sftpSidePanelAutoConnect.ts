@@ -314,6 +314,38 @@ export function findReusableSftpSidePanelTab(
   return candidate;
 }
 
+/**
+ * A directory listing in progress is still the same SSH login. Split focus
+ * must not treat that as "disconnected" and start another handshake.
+ */
+export function isSplitFocusSftpStillConnected(
+  connectionKey: string,
+  connectedKey: string | null,
+  activeTab: SftpSidePanelTabHealth | null | undefined,
+  hasBackendSession: boolean,
+  activeTabConnectionKey?: string | null,
+): boolean {
+  if (connectedKey !== connectionKey) return false;
+  if (!activeTab?.connection || activeTab.connection.isLocal) return false;
+  if (activeTabConnectionKey !== connectionKey) return false;
+  if (activeTab.connection.status !== "connected") return false;
+  return hasBackendSession;
+}
+
+/**
+ * Switching Split panes of the same host, including back to a pane that was
+ * already used, must keep the SFTP login that is already up.
+ */
+export function shouldKeepConnectedSftpOnSplitFocus(params: {
+  sessionChanged: boolean;
+  previousSessionId?: string | null;
+  nextSessionId?: string | null;
+  endpointAlreadyConnected: boolean;
+}): boolean {
+  if (!params.sessionChanged || !params.endpointAlreadyConnected) return false;
+  return shouldResetSftpSidePanelSourceSession(params.previousSessionId, params.nextSessionId);
+}
+
 /** True when the linked terminal SSH session id changed. */
 export function shouldResetSftpSidePanelSourceSession(
   previousSessionId: string | null | undefined,

@@ -16,11 +16,14 @@ type TerminalAutocompleteSettingFields = {
 export function resolveTerminalAutocompleteSettings(input: {
   protocol?: string;
   terminalSettings?: TerminalAutocompleteSettingFields;
-  /** Vendor CLI / network-device session: skip live-preview PTY rewrites (#1193). */
+  /** Vendor CLI / network device: skip live-preview PTY rewrites. */
   isNetworkDevice?: boolean;
+  /** One-channel bastion: Ctrl-U line replacement kills the session (#1193). */
+  restrictPtyRewrites?: boolean;
   systemUnknown?: boolean;
 }): Partial<AutocompleteSettings> | undefined {
-  const { protocol, terminalSettings, isNetworkDevice, systemUnknown } = input;
+  const { protocol, terminalSettings, isNetworkDevice, restrictPtyRewrites, systemUnknown } = input;
+  const blockLivePreview = isNetworkDevice === true || restrictPtyRewrites === true;
 
   if (protocol === "serial" || systemUnknown) {
     return {
@@ -38,15 +41,19 @@ export function resolveTerminalAutocompleteSettings(input: {
   }
 
   if (!terminalSettings) {
-    return isNetworkDevice ? { livePreview: false } : undefined;
+    if (!blockLivePreview && restrictPtyRewrites !== true) return undefined;
+    return {
+      ...(blockLivePreview ? { livePreview: false } : {}),
+      ...(restrictPtyRewrites ? { allowLineReplacement: false } : {}),
+    };
   }
 
   return {
     enabled: terminalSettings.autocompleteEnabled ?? true,
     showGhostText: terminalSettings.autocompleteGhostText ?? true,
     showPopupMenu: terminalSettings.autocompletePopupMenu ?? true,
-    livePreview: shouldWriteAutocompleteLivePreview(true, isNetworkDevice),
-    allowLineReplacement: true,
+    livePreview: shouldWriteAutocompleteLivePreview(true, blockLivePreview),
+    allowLineReplacement: restrictPtyRewrites !== true,
     debounceMs: terminalSettings.autocompleteDebounceMs ?? 100,
     minChars: terminalSettings.autocompleteMinChars ?? 1,
     maxSuggestions: terminalSettings.autocompleteMaxSuggestions ?? 50,

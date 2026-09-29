@@ -16,6 +16,7 @@ const {
 const { runWhenProxyConnectionReady } = require("../proxyUtils.cjs");
 const { getAttachHomeWebContentsId } = require("../terminalAttachRestore.cjs");
 const { openBoundedSshShellCallback } = require("../boundedSshChannelOpen.cjs");
+const { optionsForPeerSingleChannel } = require("../../../domain/singleChannelSshBanner.shared.cjs");
 const { listInteractiveShellPids: listInteractiveShellPidsShared } = require("../sshInteractiveShells.cjs");
 const {
   shouldConfirmReusedShellLiveness,
@@ -31,6 +32,20 @@ const SSH_TCP_CONNECT_TIMEOUT_MS = 20000;
 const SSH_AUTH_READY_TIMEOUT_MS = 120000;
 const MAX_SSH_CONNECTION_TIMEOUT_MS = 3600000;
 const COPY_TAB_RATE_LIMIT_RETRY_TIMEOUT_MS = 30000;
+
+function buildInteractiveShellOptions(options) {
+  const shellOptions = {};
+  // Hosts with singleChannelSsh (bastion/PAM) may drop the transport on
+  // CHANNEL_REQUEST env. Skip COLORTERM / caller env there.
+  if (!options.singleChannelSsh) {
+    shellOptions.env = {
+      COLORTERM: "truecolor",
+      ...(options.env || {}),
+    };
+  }
+  return shellOptions;
+}
+
 
 /**
  * Fan out netcatty:exit to the primary contents plus any attach-home owner
@@ -302,6 +317,7 @@ function createStartSessionApi(ctx) {
       chainConnections,
       isReused,
     }) {
+      const sessionOptions = optionsForPeerSingleChannel(options, conn);
       const session = {
         conn,
         stream,
@@ -332,12 +348,13 @@ function createStartSessionApi(ctx) {
         // additional exec channels. See domain/host.ts
         // `detectVendorFromSshVersion`.
         remoteSshVersion: (conn && typeof conn._remoteVer === 'string') ? conn._remoteVer : '',
+        singleChannelSsh: sessionOptions.singleChannelSsh === true,
         // The actual SSH target this connection authenticated to. Used to make
         // sure a "Copy Tab" reuse opens its channel on a connection going to the
         // *same* host — a saved host edited after the source connected must not
         // silently run commands on the old machine (issue #1204 review).
-        _reuseEndpoint: normalizeEndpoint(buildConnectionReuseEndpoint(options, {
-          agentForwarding: options._actualAgentForwarding ?? options.agentForwarding,
+        _reuseEndpoint: normalizeEndpoint(buildConnectionReuseEndpoint(sessionOptions, {
+          agentForwarding: sessionOptions._actualAgentForwarding ?? sessionOptions.agentForwarding,
         })),
         // Only live SFTP borrowers may use the original password-less profile.
         // Do not alias the pool: new terminals must still authenticate normally.
@@ -747,12 +764,7 @@ function createStartSessionApi(ctx) {
 
       sendProgress('shell');
 
-      const shellOptions = {
-        env: {
-          COLORTERM: "truecolor",
-          ...(options.env || {}),
-        },
-      };
+      const shellOptions = buildInteractiveShellOptions(options);
 
       // Pin the shared connection *before* issuing the async shell request.
       // Otherwise, if the source tab is closed while conn.shell() is pending,
@@ -1245,6 +1257,7 @@ function createStartSessionApi(ctx) {
       const canAttemptSourceReuse = Boolean(
         allowTransportReuse
         && options.sourceSessionId
+        && !options.singleChannelSsh
         && !options.x11Forwarding
         && (!sourceReuseState || sourceReuseState.attempted !== true),
       );
@@ -2242,12 +2255,14 @@ function createStartSessionApi(ctx) {
               });
             }
 
-            const shellOptions = {
-              env: {
-                COLORTERM: "truecolor",
-                ...(options.env || {}),
-              },
-            };
+            const shellSessionOptions = optionsForPeerSingleChannel(options, conn);
+            const shellOptions = buildInteractiveShellOptions(shellSessionOptions);
+            if (shellSessionOptions.singleChannelSsh) {
+              log("skipping shell env for single-channel SSH", {
+                sessionId,
+                hostname: options.hostname,
+              });
+            }
 
             if (options.x11Forwarding) {
               shellOptions.x11 = {
@@ -2294,7 +2309,7 @@ function createStartSessionApi(ctx) {
                     conn,
                     stream,
                     options: {
-                      ...options,
+                      ...shellSessionOptions,
                       _actualAgentForwarding: Boolean(connectOpts.agentForward),
                     },
                     sessionId,

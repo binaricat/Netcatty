@@ -7,6 +7,7 @@ const { EventEmitter } = require("node:events");
 const Module = require("node:module");
 const {
   beginTransportDial,
+  buildConnectionReuseEndpoint,
   failTransportDial,
   getTransportStats,
   resetSshTransportRegistryForTests,
@@ -16,6 +17,7 @@ const { shouldRegisterFreshSftpTransport } = require("./sftpBridge/openConnectio
 test("sudo SFTP connections are never parked in the shared transport registry", () => {
   assert.equal(shouldRegisterFreshSftpTransport({ sudo: true, reuseTransport: true }), false);
   assert.equal(shouldRegisterFreshSftpTransport({ sudo: false, reuseTransport: true }), true);
+  assert.equal(shouldRegisterFreshSftpTransport({ sudo: false, reuseTransport: true, singleChannelSsh: true }), false);
 });
 
 /** Build a minimal renderer sender for SFTP progress and auth prompt IPC. */
@@ -446,4 +448,38 @@ test("openSftp retries keyboard-interactive after dynamic auth password rejectio
     ["none", "publickey", "keyboard-interactive"],
   );
   assert.equal(sftpClients.has("sftp-edr-mfa-auto"), true);
+});
+
+test("single-channel SFTP does not join an in-flight terminal dial", async (t) => {
+  resetSshTransportRegistryForTests({ defaultIdleTtlMs: 0 });
+  t.after(() => resetSshTransportRegistryForTests({ defaultIdleTtlMs: 0 }));
+  const { bridge, MockSftpClient } = loadSftpBridgeWithAuthRetryMocks(t, { alwaysSucceed: true });
+  const sftpClients = new Map();
+  bridge.init({ sftpClients, sessions: new Map(), electronModule: {} });
+  const options = {
+    hostname: "bastion.example",
+    hostId: "host-bastion",
+    port: 22,
+    username: "root",
+    authMethod: "password",
+    password: "saved-login-password",
+    useSshAgent: false,
+    verifyHostKeys: false,
+    fileProtocol: "sftp",
+    singleChannelSsh: true,
+  };
+  const coordination = beginTransportDial(buildConnectionReuseEndpoint(options), { kind: "shell" });
+  assert.equal(coordination.role, "leader");
+
+  const opened = await bridge.openSftp(
+    { sender: makeSender() },
+    { ...options, sessionId: "sftp-during-terminal" },
+  );
+
+  assert.equal(opened.sftpId, "sftp-during-terminal");
+  assert.equal(MockSftpClient.instances.length, 1);
+  assert.equal(coordination._record.settled, false);
+  assert.equal(failTransportDial(coordination, new Error("terminal cancelled")), true);
+  assert.notEqual(MockSftpClient.instances[0].client.ended, true);
+  assert.equal(sftpClients.has("sftp-during-terminal"), true);
 });

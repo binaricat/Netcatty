@@ -4,16 +4,21 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 
+// Keep bridge discovery writes/deletes off the installed app's live file.
+const { isolateCliDiscoveryFile } = require("./cliDiscoveryTestIsolation.cjs");
+isolateCliDiscoveryFile();
+
 const bridge = require("./mcpServerBridge.cjs");
 
 test("registered chat attachments can be listed and read by path or filename", async (t) => {
   t.after(() => bridge.cleanup());
 
+  const notePath = path.resolve("/tmp/netcatty-note.txt");
   bridge.updateAttachmentMetadata([
     {
       filename: "note.txt",
       mediaType: "text/plain",
-      filePath: "/tmp/netcatty-note.txt",
+      filePath: notePath,
       base64Data: Buffer.from("hello attachment").toString("base64"),
     },
   ], "chat-a");
@@ -23,13 +28,13 @@ test("registered chat attachments can be listed and read by path or filename", a
   assert.deepEqual(listed.attachments, [{
     filename: "note.txt",
     mediaType: "text/plain",
-    filePath: "/tmp/netcatty-note.txt",
+    filePath: notePath,
     sizeBytes: 16,
   }]);
 
   const byPath = bridge.handleReadAttachment({
     chatSessionId: "chat-a",
-    filePath: "/tmp/netcatty-note.txt",
+    filePath: notePath,
   });
   assert.equal(byPath.ok, true);
   assert.equal(byPath.text, "hello attachment");
@@ -40,6 +45,31 @@ test("registered chat attachments can be listed and read by path or filename", a
   });
   assert.equal(byName.ok, true);
   assert.equal(byName.base64Data, Buffer.from("hello attachment").toString("base64"));
+});
+
+test("attachment reads enforce a size limit for disk-backed files", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-attachment-limit-"));
+  const filePath = path.join(dir, "large.md");
+  const emptyPath = path.join(dir, "empty.md");
+  fs.writeFileSync(filePath, "# Notes\n".repeat(200));
+  fs.writeFileSync(emptyPath, "");
+  t.after(() => {
+    bridge.cleanup();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  bridge.updateAttachmentMetadata([
+    { filename: "large.md", mediaType: "text/markdown", filePath },
+    { filename: "empty.md", mediaType: "text/markdown", filePath: emptyPath },
+  ], "chat-a");
+
+  assert.equal(bridge.handleListAttachments({ chatSessionId: "chat-a" }).attachments[0].sizeBytes, undefined);
+  assert.match(
+    bridge.handleReadAttachment({ chatSessionId: "chat-a", filename: "large.md", maxBytes: 100 }).error,
+    /size limit/,
+  );
+  const empty = bridge.handleReadAttachment({ chatSessionId: "chat-a", filename: "empty.md", maxBytes: 100 });
+  assert.equal(empty.ok, true);
+  assert.equal(empty.text, "");
 });
 
 test("attachment reads reject unregistered local paths", async (t) => {

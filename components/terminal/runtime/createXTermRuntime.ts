@@ -3,6 +3,7 @@ import { stringCellWidth } from "../autocomplete/terminalStringCellWidth";
 import type { TerminalBroadcastInputOptions } from "../terminalHelpers";
 import { FitAddon } from "@xterm/addon-fit";
 import { ImageAddon } from "@xterm/addon-image";
+import { LigaturesAddon } from "@xterm/addon-ligatures";
 import { SearchAddon } from "@xterm/addon-search";
 import { SerializeAddon } from "@xterm/addon-serialize";
 import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
@@ -20,6 +21,7 @@ import { KeywordHighlighter } from "../keywordHighlight";
 import { installSearchDecorationTracker } from "../hooks/useTerminalSearch";
 import { CursorLineHighlighter } from "./cursorLineHighlight";
 import { resolveCursorLineHighlightBackground } from "../../../domain/cursorLineHighlight";
+import { normalizeCursorBarWidth } from "../../../domain/models/terminal";
 import {
   registerPluginTerminalLinkProvider,
   type PluginTerminalLinkProviderHost,
@@ -98,6 +100,10 @@ import { optionYankLastArgSequence } from "./optionYankLastArg";
 import { watchDevicePixelRatio } from "./rendererDprWatch";
 import { dispatchWin32InputModeEvent } from "./win32InputMode";
 import { shouldDeferWebglUntilVisible } from "./webglRendererPolicy";
+import {
+  createTerminalLigatureController,
+  terminalFontLigaturesEnabled,
+} from "./terminalFontLigatures";
 import { createWebglRendererController } from "./webglRendererController";
 import {
   captureMiddleClickTerminalMouseEvent,
@@ -107,9 +113,9 @@ import {
 import { handleSerialLineModeInput } from "./serialLineInput";
 import { isTerminalReportSequence } from "./terminalReportSequence";
 import {
-  doesKittyEncodingPreserveShiftEnter,
   getShiftEnterSubmittedInput,
   resolveShiftEnterText,
+  shouldClaimShiftEnterForText,
   shouldSendShiftEnterText,
 } from "./shiftEnterText";
 import {
@@ -123,6 +129,7 @@ import {
   shouldFlushStaleDeferredImeTextInput,
 } from "./terminalImeTextInput";
 import { keepImeCommittedTextThroughModifierKeyDowns } from "./imeModifierKeyDownSeenGuard";
+import { keepLiveImeTranscriptionSingle } from "./imeCompositionRewrite";
 import { formatSerialLocalEcho } from "./serialLocalEcho";
 import { getLastChar, removeLastChar, isPrintableInput } from "../../../domain/serialCharMetrics";
 import { mapTerminalBackspaceInput } from "./terminalBackspaceInput";
@@ -276,6 +283,11 @@ export type XTermRuntime = {
   ensureWebglRenderer: () => void;
   /** Drop the WebGL addon while keeping the terminal alive (soft-hide). */
   suspendWebglRenderer: () => void;
+  /**
+   * Turn programming ligatures on or off. An active WebGL renderer is rebuilt
+   * because its glyph atlas captures font-feature-settings only at creation.
+   */
+  syncFontLigatures: (enabled: boolean) => void;
   /**
    * True while this terminal holds decoded inline images (Kitty / SIXEL / IIP).
    * Hibernate snapshots are text-only, so a session that reports true must not
@@ -513,6 +525,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
 
   const cursorStyle = settings?.cursorShape ?? "block";
   const cursorBlink = settings?.cursorBlink ?? true;
+  const cursorWidth = normalizeCursorBarWidth(settings?.cursorBarWidth);
   const rawScrollback = settings?.scrollback ?? DEFAULT_TERMINAL_SCROLLBACK;
   const scrollback = resolveXTermScrollback(rawScrollback);
   const drawBoldTextInBrightColors = settings?.drawBoldInBrightColors ?? true;
@@ -614,6 +627,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     lineHeight,
     cursorStyle,
     cursorBlink,
+    cursorWidth,
     scrollback,
     // Cursor-line rendering and Unicode width handling use proposed APIs.
     allowProposedApi: true,
@@ -697,6 +711,9 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   }
 
   term.open(ctx.container);
+  // CompositionHelper is created in open(). Live transcription rewrites the
+  // hypothesis instead of appending; commit that utterance once (#3421).
+  keepLiveImeTranscriptionSingle(term);
 
   // Inline raster images (Kitty graphics / SIXEL / iTerm IIP). Loaded right after
   // term.open so the addon can patch IRenderService.setRenderer before the WebGL
@@ -852,6 +869,26 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   });
   const loadWebglRenderer = webglController.ensure;
   const suspendWebglRenderer = webglController.suspend;
+  const reloadWebglRenderer = () => {
+    if (!webglLoaded) return;
+    suspendWebglRenderer();
+    loadWebglRenderer();
+  };
+  // The ligatures addon sets font-feature-settings on the terminal element.
+  // WebGL's glyph atlas inherits that only when the atlas is created, so this
+  // has to run before the first WebGL load. Later toggles rebuild WebGL.
+  const ligatures = createTerminalLigatureController({
+    createAddon: () => new LigaturesAddon(),
+    loadAddon: (addon) => term.loadAddon(addon),
+    isWebglActive: () => webglLoaded,
+    recreateWebgl: reloadWebglRenderer,
+    repaint: repaintTerminal,
+    warn: (message, error) => {
+      if (error === undefined) logger.warn(message);
+      else logger.warn(message, error);
+    },
+  });
+  ligatures.apply(terminalFontLigaturesEnabled(settings));
 
   if (!performanceConfig.useWebGLAddon) {
     logger.info(
@@ -1621,6 +1658,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     `${identity}\u0000mac-period-interrupt`;
   const broadcastEncodedKeys = new Set<string>();
   const broadcastLegacySuppressedKeys = new Set<string>();
+  const broadcastWin32ShiftEnterTextKeys = new Set<string>();
   const kittyKeyIdentity = (event: KeyboardEvent): string => event.code || event.key;
   let handlingKittyBroadcast = false;
   let suppressNextTerminalDataBroadcast = false;
@@ -2474,20 +2512,33 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     // associated-text alone), keep the configured send-text fallback. Only
     // negotiated preserving modes may emit CSI-u; alternate-screen activation
     // is not a capability signal.
+    //
+    // shiftEnterForceText opts out of the Win32 hand-off for runtimes that
+    // cannot consume INPUT_RECORD modifiers (Node/Bun via libuv, e.g. Claude
+    // Code and CodeBuddy): they collapse Shift+Enter to a bare CR anyway, so
+    // sending the configured sequence is the only distinguishable input. The
+    // opt-out is scoped to Win32 input mode: elsewhere a negotiated Kitty
+    // encoding that preserves Shift+Enter must still win.
     if (
-      shouldSendShiftEnterText(e, ctx.terminalSettingsRef.current) &&
-      !term.modes.win32InputMode &&
-      !doesKittyEncodingPreserveShiftEnter(kittySequenceForKeyDown)
+      shouldClaimShiftEnterForText(e, ctx.terminalSettingsRef.current, {
+        win32InputMode: term.modes.win32InputMode,
+        kittySequenceForKeyDown,
+      })
     ) {
       const id = ctx.sessionRef.current;
       if (id) {
-        e.preventDefault();
-        e.stopPropagation();
         const kittyEvent = toKittyKeyboardEvent(e);
         const shiftEnterText = resolveShiftEnterText(
           ctx.terminalSettingsRef.current,
         );
+        // Only claim the keydown when there is text to send. An empty resolved
+        // text (e.g. a persisted empty setting) must fall through to the Win32
+        // and Kitty paths below so a normal Enter is still produced; consuming
+        // the event there would silently swallow the press with no visible
+        // effect, indistinguishable from the feature being dead.
         if (shiftEnterText) {
+          e.preventDefault();
+          e.stopPropagation();
           // Snapshot source-prompt sensitivity before the local write (#3491):
           // the default bare-newline send-text reaches the PTY as a
           // submission that clears passwordPromptActiveRef, so the live
@@ -2514,8 +2565,8 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
               forwarded.targetSessionIds,
             );
           }
+          return false;
         }
-        return false;
       }
     }
 
@@ -2776,6 +2827,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     clearKittyKeyboardBroadcastPairingState(
       broadcastEncodedKeys,
       broadcastLegacySuppressedKeys,
+      broadcastWin32ShiftEnterTextKeys,
     );
     win32BroadcastForwardedKeys.clear();
     clearBroadcastLegacyDataPending();
@@ -3005,7 +3057,9 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     // must not classify the next physical key as a second composition commit.
     // Actual composition/input handlers clear the physical-key pairing first.
     if (broadcastLegacyDataPending) kittyCompositionPending = false;
-    if (kittyCompositionPending && !data.startsWith("\u001b")) {
+    // A rewritten IME hypothesis first emits standalone deletions. Route those
+    // as backspaces and keep the composition marker for the replacement text.
+    if (kittyCompositionPending && data !== "\x7f" && !data.startsWith("\u001b")) {
       kittyCompositionPending = false;
       if (kittyCompositionClearTimer !== undefined) {
         window.clearTimeout(kittyCompositionClearTimer);
@@ -3064,6 +3118,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       legacySuppressedKeys: broadcastLegacySuppressedKeys,
       win32InputMode: term.modes.win32InputMode,
       shiftEnterSettings: ctx.terminalSettingsRef.current,
+      win32ShiftEnterTextKeys: broadcastWin32ShiftEnterTextKeys,
     }),
     getSessionId: () => ctx.sessionRef.current,
     // Receiving side: the #3488 bypass lets Kitty broadcast land at password prompts too.
@@ -3396,6 +3451,9 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     clearTextureAtlas: clearWebglTextureAtlas,
     ensureWebglRenderer: loadWebglRenderer,
     suspendWebglRenderer,
+    syncFontLigatures: (enabled: boolean) => {
+      ligatures.apply(enabled);
+    },
     hasInlineImages,
     resetKittyConnectionInputState: clearKittyConnectionInputState,
     flushKittyKeyboardReleases: clearKittyTransientInputState,
@@ -3415,6 +3473,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       pendingLinePastes.clear();
       clearTerminalBroadcastUserInput(ctx.sessionId);
       resizeScheduler.dispose();
+      ligatures.dispose();
       webglController.dispose();
       term.element?.removeEventListener("copy", handleNativeCopy, true);
       ctx.container.removeEventListener("copy", handleNativeCopy, true);

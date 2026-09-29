@@ -13008,3 +13008,165 @@ test(`resumable local transfer retries a failed prepared-file timestamp: ${failu
 });
 
 }
+
+test("single-channel SFTP upload does not open a second subsystem", async (t) => {
+  const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-single-channel-upload-"));
+  t.after(async () => fs.promises.rm(tempDir, { recursive: true, force: true }));
+  const localPath = path.join(tempDir, "fresh.bin");
+  const payload = Buffer.from("single-channel");
+  await fs.promises.writeFile(localPath, payload);
+  const targetPath = "/tmp/fresh.bin";
+  const remoteFiles = new Map();
+  let secondChannelOpens = 0;
+
+  const shared = createFastSftp({
+    lstat(remotePath, callback) {
+      const key = String(remotePath);
+      if (!remoteFiles.has(key)) {
+        const error = new Error("ENOENT");
+        error.code = 2;
+        callback(error);
+        return;
+      }
+      callback(null, {
+        size: remoteFiles.get(key).length,
+        mode: 0o100644,
+        isDirectory: () => false,
+        isSymbolicLink: () => false,
+      });
+    },
+    open(remotePath, _flags, callback) {
+      const key = String(remotePath);
+      remoteFiles.set(key, Buffer.alloc(payload.length));
+      callback(null, Buffer.from(key));
+    },
+    write(handle, buffer, offset, length, position, callback) {
+      const key = handle.toString();
+      buffer.copy(remoteFiles.get(key), position, offset, offset + length);
+      setImmediate(() => callback(null));
+    },
+    close(_handle, callback) {
+      callback(null);
+    },
+  });
+  const client = {
+    __netcattySingleChannelSsh: true,
+    sftp: shared,
+    stat: async (remotePath) => {
+      const key = String(remotePath);
+      if (!remoteFiles.has(key)) {
+        const error = new Error("ENOENT");
+        error.code = 2;
+        throw error;
+      }
+      return { size: remoteFiles.get(key).length, isDirectory: false };
+    },
+    delete: async (remotePath) => { remoteFiles.delete(String(remotePath)); },
+    async rename(fromPath, toPath) {
+      remoteFiles.set(String(toPath), remoteFiles.get(String(fromPath)));
+      remoteFiles.delete(String(fromPath));
+    },
+    client: {
+      __netcattySingleChannelSsh: true,
+      sftp(callback) {
+        secondChannelOpens += 1;
+        callback(new Error("second SFTP channel must not open"));
+      },
+    },
+  };
+  transferBridge.init({ sftpClients: new Map([["target", client]]) });
+
+  const result = await transferBridge.startTransfer({ sender: createSender() }, {
+    transferId: "single-channel-upload",
+    sourcePath: localPath,
+    targetPath,
+    sourceType: "local",
+    targetType: "sftp",
+    targetSftpId: "target",
+    totalBytes: payload.length,
+    resumable: false,
+  });
+
+  assert.equal(result.error, undefined, result.error);
+  assert.equal(secondChannelOpens, 0);
+  assert.deepEqual(remoteFiles.get(targetPath), payload);
+});
+
+test("single-channel SFTP download does not open a second subsystem", async (t) => {
+  const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-single-channel-download-"));
+  t.after(async () => fs.promises.rm(tempDir, { recursive: true, force: true }));
+  const payload = Buffer.from("downloaded-on-one-channel");
+  const targetPath = path.join(tempDir, "download.bin");
+  let secondChannelOpens = 0;
+  const { sftp } = createPipelinedDownloadSftp(payload);
+  const client = {
+    __netcattySingleChannelSsh: true,
+    sftp,
+    stat: async () => ({
+      size: payload.length,
+      mtimeMs: 1_000,
+      ctimeMs: 1_000,
+      mtime: 1,
+      ctime: 1,
+    }),
+    client: {
+      __netcattySingleChannelSsh: true,
+      sftp(callback) {
+        secondChannelOpens += 1;
+        callback(new Error("second SFTP channel must not open"));
+      },
+    },
+  };
+  transferBridge.init({ sftpClients: new Map([["source", client]]) });
+
+  const result = await transferBridge.startTransfer({ sender: createSender() }, {
+    transferId: "single-channel-download",
+    sourcePath: "/home/user/download.bin",
+    targetPath,
+    sourceType: "sftp",
+    targetType: "local",
+    sourceSftpId: "source",
+    totalBytes: payload.length,
+    resumable: true,
+  });
+
+  assert.equal(result.error, undefined, result.error);
+  assert.equal(secondChannelOpens, 0);
+  assert.deepEqual(await fs.promises.readFile(targetPath), payload);
+});
+
+test("single-channel pipelined upload stays on the existing SFTP channel", async (t) => {
+  const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-single-channel-fastput-"));
+  t.after(async () => fs.promises.rm(tempDir, { recursive: true, force: true }));
+  const localPath = path.join(tempDir, "payload.bin");
+  await fs.promises.writeFile(localPath, Buffer.from("fast"));
+  let secondChannelOpens = 0;
+  let sharedPuts = 0;
+  const shared = createFastSftp({
+    fastPut(_localPath, _remotePath, _options, callback) {
+      sharedPuts += 1;
+      callback(null);
+    },
+  });
+  const client = {
+    __netcattySingleChannelSsh: true,
+    sftp: shared,
+    fastPut() {
+      throw new Error("wrapper fastPut must not bypass the channel guard");
+    },
+    client: {
+      __netcattySingleChannelSsh: true,
+      sftp(callback) {
+        secondChannelOpens += 1;
+        callback(new Error("second SFTP channel must not open"));
+      },
+    },
+  };
+
+  await sftpBridge.pipelinedUploadLocalFile(client, localPath, "/tmp/out.bin", {
+    signal: new AbortController().signal,
+  });
+
+  assert.equal(secondChannelOpens, 0);
+  assert.equal(sharedPuts, 1);
+});

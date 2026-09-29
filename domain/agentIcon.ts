@@ -22,6 +22,7 @@ export type AgentIconKey =
   | 'kimi'
   | 'codebuddy'
   | 'grok'
+  | 'mimo'
   | 'terminal'
   | 'plus';
 
@@ -120,6 +121,11 @@ export const AGENT_ICON_VISUALS: Record<AgentIconKey, AgentIconVisual> = {
   grok: {
     src: '/ai/providers/grok.svg',
     badgeClassName: 'border-zinc-500/22 bg-zinc-500/12',
+    imageClassName: 'object-contain dark:brightness-0 dark:invert opacity-90',
+  },
+  mimo: {
+    src: '/ai/agents/mimo.svg',
+    badgeClassName: 'border-orange-500/22 bg-orange-500/12',
     imageClassName: 'object-contain dark:brightness-0 dark:invert opacity-90',
   },
   terminal: {

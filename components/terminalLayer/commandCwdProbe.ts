@@ -9,6 +9,7 @@ type ShouldProbeCommandCwdOptions = {
   visibleSftpHost?: FollowTerminalCwdHost | null;
   sessionHost?: FollowTerminalCwdHost | null;
   globalSftpFollowTerminalCwd: boolean;
+  restrictExtraSshChannels?: boolean;
 };
 
 export const shouldProbeCommandCwd = ({
@@ -16,7 +17,9 @@ export const shouldProbeCommandCwd = ({
   visibleSftpHost,
   sessionHost,
   globalSftpFollowTerminalCwd,
+  restrictExtraSshChannels = false,
 }: ShouldProbeCommandCwdOptions): boolean => {
+  if (restrictExtraSshChannels) return false;
   if (restoreTerminalCwd) return true;
 
   if (!visibleSftpHost) return false;

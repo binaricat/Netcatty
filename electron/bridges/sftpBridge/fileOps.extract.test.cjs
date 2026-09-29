@@ -56,3 +56,27 @@ test("extractSftpArchive requires an open SFTP session", async () => {
     /SFTP session not found/,
   );
 });
+
+
+test("extractSftpArchive refuses a second channel on single-channel SSH", async () => {
+  let execCalls = 0;
+  const { api, commands } = createExtractApi({
+    clients: new Map([[
+      "sftp-1",
+      {
+        __netcattySingleChannelSsh: true,
+        __netcattyEndpointKey: "ep-extract",
+        client: { exec() { execCalls += 1; } },
+      },
+    ]]),
+  });
+  await assert.rejects(
+    () => api.extractSftpArchive(null, {
+      sftpId: "sftp-1",
+      path: "/home/app/backup.tar.gz",
+    }),
+    (err) => err && err.code === "ERR_SFTP_SINGLE_CHANNEL_EXEC",
+  );
+  assert.equal(commands.length, 0);
+  assert.equal(execCalls, 0);
+});

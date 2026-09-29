@@ -292,6 +292,7 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
     renameName,
     showDeleteConfirm,
     deleteTargets,
+    deleteError,
     isCreating,
     isCreatingFile,
     isRenaming,
@@ -736,6 +737,7 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
         showDeleteConfirm={showDeleteConfirm}
         setShowDeleteConfirm={setShowDeleteConfirm}
         deleteTargets={deleteTargets}
+        deleteError={deleteError}
         handleDelete={handleDelete}
         isDeleting={isDeleting}
         showHostPicker={showHostPicker}

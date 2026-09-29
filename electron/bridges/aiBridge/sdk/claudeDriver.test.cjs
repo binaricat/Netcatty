@@ -147,8 +147,84 @@ test("mapClaudeModels maps {value,displayName,description} -> {id,name,descripti
   assert.deepEqual(mapClaudeModels(null), []);
 });
 
+test("mapClaudeModels accepts the CLI's runtime {id,name} shape (Claude Code 2.x)", () => {
+  const out = mapClaudeModels([
+    { id: "claude-opus-5-5", name: "Opus 5.5" },
+    { modelId: "claude-sonnet-5", name: "Sonnet 5", description: "Everyday tasks" },
+    { id: "claude-haiku-4-5" },
+    { name: "no id -> dropped" },
+  ]);
+  assert.deepEqual(out, [
+    {
+      id: "claude-opus-5-5",
+      name: "Opus 5.5",
+      description: undefined,
+      thinkingLevels: ["low", "medium", "high", "max"],
+      defaultThinkingLevel: "medium",
+    },
+    {
+      id: "claude-sonnet-5",
+      name: "Sonnet 5",
+      description: "Everyday tasks",
+      thinkingLevels: ["low", "medium", "high", "max"],
+      defaultThinkingLevel: "medium",
+    },
+    {
+      id: "claude-haiku-4-5",
+      name: "claude-haiku-4-5",
+      description: undefined,
+      thinkingLevels: ["low", "medium", "high", "max"],
+      defaultThinkingLevel: "medium",
+    },
+  ]);
+});
+
+test("mapClaudeModels distinguishes Claude aliases that share a custom model name", () => {
+  const models = mapClaudeModels([
+    { id: "default", name: "Default (recommended)" },
+    { id: "opus", name: "deepseek-v4.1-flash:cloud" },
+    { id: "sonnet", name: "deepseek-v4.1-flash:cloud" },
+    { id: "haiku", name: "Claude Haiku" },
+  ]);
+  assert.deepEqual(models.map(({ id, name }) => ({ id, name })), [
+    { id: "default", name: "Default (recommended)" },
+    { id: "opus", name: "[opus] deepseek-v4.1-flash:cloud" },
+    { id: "sonnet", name: "[sonnet] deepseek-v4.1-flash:cloud" },
+    { id: "haiku", name: "Claude Haiku" },
+  ]);
+});
+
+test("mapClaudeModels keeps names unique when an existing name matches a generated alias", () => {
+  const models = mapClaudeModels([
+    { id: "opus", name: "Custom" },
+    { id: "sonnet", name: "Custom" },
+    { id: "other", name: "[opus] Custom" },
+    { id: "opus", name: "Custom" },
+  ]);
+  assert.deepEqual(models.map(({ name }) => name), [
+    "[opus #2] Custom",
+    "[sonnet] Custom",
+    "[opus] Custom",
+    "[opus #3] Custom",
+  ]);
+});
+
+test("mapClaudeModels preserves each live model's supported effort levels", () => {
+  const out = mapClaudeModels([
+    { value: "opus", displayName: "Opus", supportsEffort: true, supportedEffortLevels: ["low", "medium", "high", "xhigh", "max"] },
+    { id: "fable", name: "Fable", thinking: { effort_options: ["high", "xhigh"] } },
+    { value: "fast", displayName: "Fast", supportsEffort: false },
+  ]);
+  assert.deepEqual(out.map((model) => [model.id, model.thinkingLevels, model.defaultThinkingLevel]), [
+    ["opus", ["low", "medium", "high", "xhigh", "max"], "medium"],
+    ["fable", ["high", "xhigh"], "high"],
+    ["fast", [], undefined],
+  ]);
+});
+
 test("splitClaudeModelSelection only treats known trailing effort as thinking", () => {
   assert.deepEqual(splitClaudeModelSelection("sonnet/high"), { model: "sonnet", effort: "high" });
+  assert.deepEqual(splitClaudeModelSelection("opus/xhigh"), { model: "opus", effort: "xhigh" });
   assert.deepEqual(splitClaudeModelSelection("claude-opus-4-6"), {
     model: "claude-opus-4-6",
     effort: undefined,
@@ -169,6 +245,9 @@ test("buildClaudeQueryOptions splits model/effort into model + settings.effort",
   assert.equal(opts.model, "sonnet");
   assert.equal(opts.effort, "high");
   assert.deepEqual(opts.settings, { model: "sonnet", effort: "high" });
+  const xhigh = buildClaudeQueryOptions({ cwd: "/tmp", model: "opus/xhigh", env: {} });
+  assert.equal(xhigh.model, "opus");
+  assert.equal(xhigh.effort, "xhigh");
 });
 
 test("parseClaudeSettings: path string, inline JSON object, empty, and bad JSON", () => {

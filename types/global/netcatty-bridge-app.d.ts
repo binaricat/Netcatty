@@ -31,8 +31,8 @@ declare global {
     onUpdateError?(cb: (payload: { error: string }) => void): () => void;
     // Fired when an install was requested but blocked by unsaved editors (#1215).
     onUpdateNeedsSave?(cb: () => void): () => void;
-    onSshDeepLink?(cb: (payload: { url?: string }) => void): () => void;
-    onTelnetDeepLink?(cb: (payload: { url?: string }) => void): () => void;
+    onSshDeepLink?(cb: (payload: { url?: string; tabName?: string }) => void): () => void;
+    onTelnetDeepLink?(cb: (payload: { url?: string; tabName?: string }) => void): () => void;
     onOpenTerminalPath?(cb: (payload: { path?: string }) => void): () => void;
     /** Fired once after cold-start deep-link / open-terminal queues have been drained. */
     onColdStartIntentsSettled?(cb: () => void): () => void;

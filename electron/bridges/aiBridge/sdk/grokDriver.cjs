@@ -32,6 +32,18 @@ const GROK_REASONING_EFFORTS = new Set([
   "max",
 ]);
 const GROK_REASONING_FALLBACKS = Object.freeze({
+  // Live catalogs may omit reasoning metadata for newer models; reuse the
+  // 4.6 family's effort levels so grok-4.7 stays effort-selectable (#3496).
+  "grok-4.7": {
+    name: "Grok 4.7",
+    thinkingLevels: ["xhigh", "high", "medium", "low"],
+    defaultThinkingLevel: "high",
+  },
+  "grok-4.7-build-fast": {
+    name: "Grok 4.7 Build Fast",
+    thinkingLevels: ["xhigh", "high", "medium", "low"],
+    defaultThinkingLevel: "high",
+  },
   "grok-4.5": {
     name: "Grok 4.5",
     thinkingLevels: ["high", "medium", "low"],

@@ -97,6 +97,11 @@ function endpointAllowsIdlePark(endpointOrKey, remoteSshVersion) {
 
 function applyIdleParkPolicy(transport, remoteSshVersion) {
   if (!transport) return false;
+  if (transport.endpoint?.singleChannelSsh) {
+    transport.allowIdlePark = false;
+    if (transport.endpointKey) noIdleParkEndpointKeys.add(transport.endpointKey);
+    return false;
+  }
   const remoteVer = remoteSshVersion
     || (typeof transport.conn?._remoteVer === "string" ? transport.conn._remoteVer : "");
   const allowed = endpointAllowsIdlePark(transport.endpointKey || transport.endpoint, remoteVer);
@@ -552,6 +557,7 @@ function buildConnectionReuseEndpoint(options = {}, overrides = {}) {
     legacyAlgorithms: options.legacyAlgorithms,
     skipEcdsaHostKey: options.skipEcdsaHostKey,
     algorithmOverrides: options.algorithmOverrides,
+    singleChannelSsh: Boolean(options.singleChannelSsh),
   };
 }
 
@@ -578,6 +584,7 @@ function normalizeEndpoint(endpoint) {
     username: endpoint.username || "root",
     protocol: endpoint.protocol || "ssh",
     sftpSudo: Boolean(endpoint.sftpSudo),
+    singleChannelSsh: Boolean(endpoint.singleChannelSsh),
     jumpFingerprint: endpoint.jumpFingerprint
       ? String(endpoint.jumpFingerprint)
       : fingerprintJumpHosts(endpoint.jumpHosts),
@@ -679,6 +686,9 @@ function endpointAllowsReuse(requested, existing, kind = "channel") {
   const req = normalizeEndpoint(requested);
   const have = normalizeEndpoint(existing);
   if (!req || !have) return false;
+  // A bastion that allows one session channel must not lend that transport
+  // to another shell, SFTP, or port forward.
+  if (req.singleChannelSsh || have.singleChannelSsh) return false;
   if (kind === "shell") {
     return req.agentForwarding === have.agentForwarding
       && (!req.agentForwarding
@@ -1344,6 +1354,7 @@ function createConnectionRef(session, conn, chainConnections) {
       keepaliveIntervalMs: session._reuseEndpoint.keepaliveIntervalMs,
       keepaliveCountMax: session._reuseEndpoint.keepaliveCountMax,
       authFingerprint: session._reuseEndpoint.authFingerprint,
+      singleChannelSsh: session._reuseEndpoint.singleChannelSsh,
     }
     : null;
 
@@ -1455,6 +1466,13 @@ function findReusableSession(sessions, sourceSessionId, requestedTarget) {
   // transport live; refuse so start() dials fresh instead of opening a
   // channel that will exit 0 immediately.
   if (source.connRef.allowShellReuse === false) return null;
+  if (
+    source.singleChannelSsh === true
+    || source._reuseEndpoint?.singleChannelSsh === true
+    || source.connRef?.endpoint?.singleChannelSsh === true
+  ) {
+    return null;
+  }
   // ssh2 Client exposes no public "is connected" flag; rely on the descriptor
   // still being attached (it is nulled out on teardown) plus a non-destroyed
   // underlying socket when ssh2 exposes one.

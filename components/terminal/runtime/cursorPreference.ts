@@ -2,12 +2,19 @@ import type { IDisposable, Terminal as XTerm } from "@xterm/xterm";
 import type { RefObject } from "react";
 
 import type { TerminalSettings } from "../../../types";
+import { normalizeCursorBarWidth } from "../../../domain/models/terminal";
 
-type CursorPreferenceSettings = Pick<TerminalSettings, "cursorShape" | "cursorBlink">;
+type CursorPreferenceSettings = Pick<TerminalSettings, "cursorShape" | "cursorBlink" | "cursorBarWidth">;
+
+export type CursorPreferenceSnapshot = Pick<
+  Required<CursorPreferenceSettings>,
+  "cursorShape" | "cursorBlink"
+>;
 
 type MutableCursorOptions = {
   cursorStyle?: "block" | "bar" | "underline";
   cursorBlink?: boolean;
+  cursorWidth?: number;
 };
 
 type TerminalLike = {
@@ -50,7 +57,24 @@ export const resolveUserCursorPreference = (
 ): Required<CursorPreferenceSettings> => ({
   cursorShape: settings?.cursorShape ?? "block",
   cursorBlink: settings?.cursorBlink ?? true,
+  cursorBarWidth: normalizeCursorBarWidth(settings?.cursorBarWidth),
 });
+
+export const snapshotUserCursorPreference = (
+  settings: Partial<CursorPreferenceSettings> | undefined,
+): CursorPreferenceSnapshot => {
+  const { cursorShape, cursorBlink } = resolveUserCursorPreference(settings);
+  return { cursorShape, cursorBlink };
+};
+
+export const shouldApplyUserCursorPreference = (
+  previous: CursorPreferenceSnapshot | null,
+  current: CursorPreferenceSnapshot,
+): boolean => (
+  previous === null ||
+  previous.cursorShape !== current.cursorShape ||
+  previous.cursorBlink !== current.cursorBlink
+);
 
 export const applyUserCursorPreference = (
   term: TerminalLike,
@@ -64,6 +88,14 @@ export const applyUserCursorPreference = (
   }
   term.options.cursorStyle = preference.cursorShape;
   term.options.cursorBlink = preference.cursorBlink;
+  term.options.cursorWidth = preference.cursorBarWidth;
+};
+
+export const applyUserCursorWidthPreference = (
+  term: TerminalLike,
+  settings: Partial<CursorPreferenceSettings> | undefined,
+): void => {
+  term.options.cursorWidth = resolveUserCursorPreference(settings).cursorBarWidth;
 };
 
 export const applyUserCursorBlinkPreference = (

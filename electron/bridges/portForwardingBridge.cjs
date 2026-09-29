@@ -10,6 +10,7 @@ const { NetcattyAgent } = require("./netcattyAgent.cjs");
 const keyboardInteractiveHandler = require("./keyboardInteractiveHandler.cjs");
 const { connectThroughChain, buildAlgorithms } = require("./sshBridge.cjs");
 const { resolveSshConnectionTimeouts } = require("./sshBridge/startSession.cjs");
+const { remoteSoftwareRequiresSingleChannel } = require("../../domain/singleChannelSshBanner.shared.cjs");
 const hostKeyVerifier = require("./hostKeyVerifier.cjs");
 const { createProxySocket, runWhenProxyConnectionReady } = require("./proxyUtils.cjs");
 const {
@@ -1171,6 +1172,9 @@ async function startPortForward(event, payload) {
     sshAuthReadyTimeoutMs,
     reuseTransport = true,
   } = payload;
+  // One-channel bastions drop the terminal if a forward opens another
+  // channel on that same TCP connection. Dial a private SSH session instead.
+  const allowTransportReuse = reuseTransport !== false && payload.singleChannelSsh !== true;
 
   // The rule is the durable identity; tunnelId is only one renderer's
   // attempt. Reuse an in-flight/live tunnel so two windows cannot create
@@ -1249,11 +1253,11 @@ async function startPortForward(event, payload) {
   // transport exists yet. Explicitly dedicated forwards remain isolated and
   // are not published into the shared pool.
   let pendingDialCoordination = null;
-  let existingTransport = reuseTransport !== false
+  let existingTransport = allowTransportReuse
     ? findTransportByEndpoint(reuseEndpoint)
     : null;
   try {
-    if (!existingTransport && reuseTransport !== false && typeof beginTransportDial === "function") {
+    if (!existingTransport && allowTransportReuse && typeof beginTransportDial === "function") {
       const coordination = beginTransportDial(reuseEndpoint, { kind: "channel" });
       if (coordination.role === "reuse") {
         existingTransport = coordination.transport;
@@ -1663,6 +1667,7 @@ async function startPortForward(event, payload) {
     conn.once('ready', () => {
       clearAuthReadyTimer();
       console.log(`[PortForward] SSH connection ready for tunnel ${tunnelId}`);
+      const peerSingleChannelSsh = remoteSoftwareRequiresSingleChannel(conn._remoteVer);
 
       bindPortForwardChannels({
         type,
@@ -1677,8 +1682,10 @@ async function startPortForward(event, payload) {
         chainConnections,
         sendStatus,
         releaseOnError: false,
-        endpoint: reuseEndpoint,
-        registerTransport: reuseTransport !== false,
+        endpoint: peerSingleChannelSsh
+          ? { ...reuseEndpoint, singleChannelSsh: true }
+          : reuseEndpoint,
+        registerTransport: allowTransportReuse && !peerSingleChannelSsh,
         dialCoordination: pendingDialCoordination,
       }).then((result) => {
         if (!result?.success && pendingDialCoordination) {

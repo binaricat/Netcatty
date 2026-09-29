@@ -5,10 +5,15 @@ export const DEFAULT_SHIFT_ENTER_TEXT = "\\n";
 /** Kitty CSI-u encoding for Shift+Enter (keycode 13, modifier shift → 2). */
 export const SHIFT_ENTER_CSI_U_SEQUENCE = "\u001b[13;2u";
 
-type ShiftEnterEvent = Pick<
-  KeyboardEvent,
-  "altKey" | "ctrlKey" | "key" | "metaKey" | "shiftKey" | "type"
-> & {
+// Structural subset shared by DOM KeyboardEvent and KittyKeyboardEvent, whose
+// type and modifier fields are optional.
+type ShiftEnterEvent = {
+  type?: string;
+  key: string;
+  shiftKey?: boolean;
+  altKey?: boolean;
+  ctrlKey?: boolean;
+  metaKey?: boolean;
   isComposing?: boolean;
 };
 
@@ -36,6 +41,10 @@ export function decodeTerminalTextEscapes(text: string): string {
         decoded += "\t";
         index += 1;
         break;
+      case "e":
+        decoded += "\u001b";
+        index += 1;
+        break;
       case "\\":
         decoded += "\\";
         index += 1;
@@ -57,7 +66,7 @@ export function shouldSendShiftEnterText(
     settings?.shiftEnterNewlineEnabled !== false &&
     event.type === "keydown" &&
     event.key === "Enter" &&
-    event.shiftKey &&
+    event.shiftKey === true &&
     !event.altKey &&
     !event.ctrlKey &&
     !event.metaKey &&
@@ -110,4 +119,43 @@ export function getShiftEnterSubmittedInput(
     text: match[1],
     lineEnding: match[2] as ShiftEnterSubmittedInput["lineEnding"],
   };
+}
+
+/**
+ * Text to send instead of the native Win32 INPUT_RECORD for Shift+Enter, or
+ * null when the native record should be kept. Only the explicit
+ * shiftEnterForceText opt-out overrides the ConPTY Win32 hand-off, and an
+ * empty configured text never claims the key.
+ */
+export function resolveWin32ForcedShiftEnterText(
+  event: ShiftEnterEvent,
+  settings?: Pick<
+    TerminalSettings,
+    "shiftEnterNewlineEnabled" | "shiftEnterNewlineText" | "shiftEnterForceText"
+  >,
+): string | null {
+  if (settings?.shiftEnterForceText !== true) return null;
+  if (!shouldSendShiftEnterText(event, settings)) return null;
+  return resolveShiftEnterText(settings) || null;
+}
+
+/**
+ * Whether a local Shift+Enter keydown should be claimed for the configured
+ * text. Under ConPTY Win32 input mode the native record wins unless the user
+ * opted out with shiftEnterForceText; elsewhere the text is used only when the
+ * negotiated Kitty encoding would collapse the chord to a bare CR/LF, so the
+ * Win32 opt-out can never override a Kitty encoding that preserves it.
+ */
+export function shouldClaimShiftEnterForText(
+  event: ShiftEnterEvent,
+  settings: Pick<
+    TerminalSettings,
+    "shiftEnterNewlineEnabled" | "shiftEnterForceText"
+  > | undefined,
+  mode: { win32InputMode: boolean; kittySequenceForKeyDown: string | null },
+): boolean {
+  if (!shouldSendShiftEnterText(event, settings)) return false;
+  return mode.win32InputMode
+    ? settings?.shiftEnterForceText === true
+    : !doesKittyEncodingPreserveShiftEnter(mode.kittySequenceForKeyDown);
 }

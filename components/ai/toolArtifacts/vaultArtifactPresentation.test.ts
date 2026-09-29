@@ -13,6 +13,13 @@ test('resolveVaultArtifactVisualKind distinguishes note vs host tools', () => {
   );
   assert.equal(
     resolveVaultArtifactVisualKind(
+      { kind: 'vault.note', noteId: 'n1', title: 'Doc' },
+      'vault_notes_import',
+    ),
+    'noteImport',
+  );
+  assert.equal(
+    resolveVaultArtifactVisualKind(
       { kind: 'vault.host', hostId: 'h1', label: 'Web', hostname: '10.0.0.1' },
       'host_get',
     ),

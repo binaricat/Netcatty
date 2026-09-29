@@ -23,6 +23,10 @@
 "use strict";
 
 const { executeBoundedSshCommand } = require("../boundedSshExec.cjs");
+const {
+  remoteDisallowsChunkedChannelWrite,
+  remoteSoftwareRequiresSingleChannel,
+} = require("../../../domain/singleChannelSshBanner.shared.cjs");
 
 const crypto = require("node:crypto");
 const { classifyLocalShellType } = require("../../../lib/localShell.cjs");
@@ -60,19 +64,21 @@ function isWindowsOpenSshRemote(remoteSshVersion) {
   return /openssh_for_windows/i.test(String(remoteSshVersion || ""));
 }
 
+// The host flag and a recognized one-channel software token both mean a second
+// session channel can drop the interactive shell. Keystroke pacing is separate.
+function sessionDisallowsExtraSshChannel(session) {
+  return session?.singleChannelSsh === true
+    || remoteSoftwareRequiresSingleChannel(session?.remoteSshVersion);
+}
+
 /**
- * Whether this SSH banner identifies a bastion that binds the transport to the
- * first interactive session and tears it down when a second channel opens
- * (BHostSSH, QiZhi TERM-SSHD, and other menu-driven jump hosts). For these the
- * exec-channel login-shell probe must be skipped so approving an AI command
- * does not disconnect the session (#3146).
+ * Banners whose channel writes must be paced one chunk at a time (BHostSSH,
+ * TERM-SSHD, issue #3146). The exec-channel login-shell probe is skipped for
+ * these too. CLOUDBILITY is one-channel but has no paced-write evidence; that
+ * case is covered by sessionDisallowsExtraSshChannel, not by this helper.
  */
 function remoteDisallowsExecChannelProbe(remoteSshVersion) {
-  const software = String(remoteSshVersion || "").trim();
-  if (!software) return false;
-  if (/BHostSSH/i.test(software)) return true;
-  if (/TERM-SSHD/i.test(software)) return true;
-  return false;
+  return remoteDisallowsChunkedChannelWrite(remoteSshVersion);
 }
 
 /**
@@ -205,7 +211,7 @@ function createSessionExecProbe(session) {
   // down when a second SSH channel opens. Our exec-channel login-shell probe
   // would disconnect them before the command ever runs, so skip it and let the
   // PTY live shell probe (probeLiveShell) determine the wrapper (#3146).
-  if (remoteDisallowsExecChannelProbe(session.remoteSshVersion)) return null;
+  if (sessionDisallowsExtraSshChannel(session)) return null;
   return (
     createSshConnExecProbe(session.conn)
     || createSshConnExecProbe(session.sshClient)
@@ -470,6 +476,7 @@ module.exports = {
   isConfirmedShellKind,
   isWindowsOpenSshRemote,
   remoteDisallowsExecChannelProbe,
+  sessionDisallowsExtraSshChannel,
   classifyShellKindFromRemotePath,
   buildRemoteLoginShellProbeCommand,
   buildRemoteWindowsLoginShellProbeCommand,

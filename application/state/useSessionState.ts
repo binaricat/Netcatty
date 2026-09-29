@@ -66,6 +66,8 @@ import {
   getSessionConnectionLabel,
 } from '../../domain/sessionTabTitle';
 import { cleanupClosedTerminalSessions } from './aiStateSnapshots';
+import { syncSessionHostLabels } from '../../domain/syncSessionHostLabels';
+import { useVaultSnapshotField } from './vaultSnapshotStore';
 
 export function addWorkspaceIfMissing(
   workspaces: Workspace[],
@@ -266,6 +268,20 @@ export const useSessionState = ({
       activeTabStore.setActiveTabId(initialRestoreState.activeTabId);
     }
   }, [initialRestoreState.activeTabId]);
+
+  // Keep open sessions' connection label in sync with the vault. Sessions
+  // snapshot `hostLabel` at connect time, so renaming a host would otherwise
+  // leave its already-open tabs (and merged-workspace titles derived from
+  // those labels) showing the old name until the session is closed. The
+  // generated-title sync effect below re-runs on this session change and
+  // refreshes synthesized workspace titles too.
+  const vaultHosts = useVaultSnapshotField('hosts');
+  useEffect(() => {
+    if (vaultHosts.length === 0) return;
+    // The helper returns the same array reference when nothing changed, so
+    // React bails out of the state update.
+    setSessions(prev => syncSessionHostLabels(prev, vaultHosts));
+  }, [vaultHosts]);
 
   // Keep generated merged-workspace titles (e.g. "01/02" after dragging tab
   // "02" onto "01") synchronized with the workspace's current membership and
