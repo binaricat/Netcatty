@@ -39,10 +39,10 @@ const callbackCode = ts.transpileModule(`
   ${textInputMarker}
   ${keyboardCallback}
   ${dataCallback}
-  globalThis.controls = { mark: markBroadcastLegacyDataPending, clear: clearBroadcastLegacyDataPending, input: markKittyTextInput };
+  globalThis.controls = { mark: markBroadcastLegacyDataPending, clear: clearBroadcastLegacyDataPending, input: markKittyTextInput, composition: markKittyCompositionPending };
 `, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
 
-function setup(flags = 0) {
+function setup(flags = 0, sourceFlags = 0) {
   const writes: string[] = [];
   const timers = new Map<number, () => void>();
   let timerId = 0;
@@ -51,6 +51,8 @@ function setup(flags = 0) {
   const forwarded = new Map<string, { targetSessionIds: string[] }>();
   const mode = createKittyKeyboardModeState();
   setKittyKeyboardModeFlags(mode, flags);
+  const sourceMode = createKittyKeyboardModeState();
+  setKittyKeyboardModeFlags(sourceMode, sourceFlags);
   const options = {
     kittyProtocolEnabled: flags !== 0, kittyMode: mode, applicationCursorMode: false,
     encodedKeys: new Set<string>(), legacySuppressedKeys: new Set<string>(),
@@ -60,7 +62,7 @@ function setup(flags = 0) {
     if (result) writes.push(result.data);
   };
   const context = {
-    controls: undefined as unknown as { mark: (identity: string) => void; clear: () => void; input: (event: { data: string; inputType: string }) => void },
+    controls: undefined as unknown as { mark: (identity: string) => void; clear: () => void; input: (event: { data: string; inputType: string }) => void; composition: () => void },
     window: {
       setTimeout(fn: () => void) { const id = ++timerId; timers.set(id, fn); return id; },
       clearTimeout(id: number) { timers.delete(id); },
@@ -73,7 +75,7 @@ function setup(flags = 0) {
     ctx: { terminalSettingsRef: { current: {} }, isBroadcastEnabledRef: { current: true }, onBroadcastInputRef: { current: () => undefined } },
     imeTextInputDeferredKey: null, imeTextInputDeferredKittyEvent: null,
     shouldBlockKeyPressForImeTextInput, shouldCommitDeferredImeTextInput, shouldMarkKittyTextInputEvent, shouldEncodeKittyCompositionText, encodeKittyCompositionText,
-    kittyKeyboardMode: createKittyKeyboardModeState(), shouldSplitImeTextInputForWire: () => false,
+    kittyKeyboardMode: sourceMode, shouldSplitImeTextInputForWire: () => false,
     kittyKeyIdentity: (event: Partial<KeyboardEvent>) => event.code || event.key,
     broadcastForwardedKeys: forwarded,
     broadcastKittyInput: normalized,
@@ -98,6 +100,16 @@ function setup(flags = 0) {
     },
   };
 }
+
+test("IME rewrite backspaces leave Kitty composition routing for replacement text", () => {
+  const runtime = setup(0, 24);
+  runtime.controls.composition();
+  runtime.receive("\x7f");
+  runtime.receive("Xde");
+  assert.equal(runtime.writes[0], "\x7f");
+  assert.ok(runtime.writes.includes("\x1b[0;;88:100:101u"));
+  assert.ok(!runtime.writes.includes("\x1b[0;;127u"));
+});
 
 for (const flags of [0, 8]) {
   for (const [key, code] of [["A", "KeyA"], [" ", "Space"]]) {

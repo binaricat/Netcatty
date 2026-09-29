@@ -2981,7 +2981,9 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     // must not classify the next physical key as a second composition commit.
     // Actual composition/input handlers clear the physical-key pairing first.
     if (broadcastLegacyDataPending) kittyCompositionPending = false;
-    if (kittyCompositionPending && !data.startsWith("\u001b")) {
+    // A rewritten IME hypothesis first emits standalone deletions. Route those
+    // as backspaces and keep the composition marker for the replacement text.
+    if (kittyCompositionPending && data !== "\x7f" && !data.startsWith("\u001b")) {
       kittyCompositionPending = false;
       if (kittyCompositionClearTimer !== undefined) {
         window.clearTimeout(kittyCompositionClearTimer);

@@ -11,6 +11,8 @@
  * dropped so it cannot append that suffix a second time.
  */
 
+import { sanitizeTerminalInput } from "./terminalInputSanitize";
+
 const BACKSPACE = "\x7f";
 const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 
@@ -30,6 +32,8 @@ export type ImeCompositionCommitTarget = {
   __ncPendingPrevious?: string;
   _coreService: { triggerDataEvent(data: string, wasUserInput?: boolean): void };
   compositionstart: () => void;
+  _handleAnyTextareaChanges?: () => void;
+  _finalizeComposition?: (waitForPropagation: boolean) => void;
   __ncImeCommitInstalled?: boolean;
   __ncImeCommit?: ImeCompositionMarker;
 };
@@ -53,6 +57,8 @@ export type ImeCompositionMarker = {
  * or the whole new value.
  */
 export function commitTextareaChange(previous: string, next: string): string {
+  previous = sanitizeTerminalInput(previous);
+  next = sanitizeTerminalInput(next);
   if (previous === next) return "";
   if (next.startsWith(previous)) return next.slice(previous.length);
   if (previous.startsWith(next)) {
@@ -77,12 +83,12 @@ export function rememberTextareaCommit(
     // only skips `_dataAlreadySent` when it is a prefix of the final text,
     // so the whole revised value has to be remembered, not just the tail.
     // A cleared textarea is xterm's line-submit reset, not that value.
-    if (typeof next === "string") return next;
+    if (typeof next === "string") return sanitizeTerminalInput(next);
     const parts = graphemes(previous);
     const kept = parts.slice(0, Math.max(0, parts.length - index)).join("");
     return kept + inserted;
   }
-  if (previous.endsWith(alreadySent)) return alreadySent + sent;
+  if (sanitizeTerminalInput(previous).endsWith(alreadySent)) return alreadySent + inserted;
   return sent;
 }
 
@@ -144,21 +150,40 @@ export function continuedCompositionData(
   compositionText: string,
   textareaNow: string,
   compositionStart: number,
+  followingComposition = false,
 ): string | null {
-  if (!marker?.continued || !compositionText) return null;
-  const previous = marker.pendingPrevious;
+  if (!marker || !compositionText) return null;
+  // A live hypothesis can settle before the next composition starts. In that
+  // case the timer has fired, but its sent text is still the textarea suffix.
+  const previous = marker.continued ? marker.pendingPrevious : marker.textareaAtStart;
+  if (!marker.continued && (
+    !marker.alreadySent || !sanitizeTerminalInput(previous).endsWith(marker.alreadySent)
+  )) {
+    return null;
+  }
   if (!previous) return null;
   if (compositionStart >= previous.length) return null;
+  if (!marker.continued && compositionText === previous.slice(compositionStart)) return "";
   if (compositionText.startsWith(previous)) return compositionText.slice(previous.length);
   if (
     marker.alreadySent.length > 0
-    && compositionText.startsWith(marker.alreadySent)
-    && (textareaNow.endsWith(marker.alreadySent) || marker.textareaAtStart.endsWith(marker.alreadySent))
+    && sanitizeTerminalInput(compositionText).startsWith(marker.alreadySent)
+    && (
+      sanitizeTerminalInput(textareaNow).endsWith(marker.alreadySent)
+      || sanitizeTerminalInput(marker.textareaAtStart).endsWith(marker.alreadySent)
+    )
   ) {
-    return compositionText.slice(marker.alreadySent.length);
+    return sanitizeTerminalInput(compositionText).slice(marker.alreadySent.length);
   }
   if (textareaNow === compositionText || marker.textareaAtStart === compositionText) {
     return commitTextareaChange(previous, compositionText);
+  }
+  if (
+    followingComposition
+    && textareaNow.startsWith(compositionText, compositionStart)
+    && textareaNow.length > compositionStart + compositionText.length
+  ) {
+    return commitTextareaChange(previous.slice(compositionStart), compositionText);
   }
   if (textareaNow.endsWith(compositionText) && textareaNow.length > compositionText.length) {
     const headLength = textareaNow.length - compositionText.length;
@@ -204,22 +229,27 @@ function deliverComposition(
   compositionText: string,
   marker: ImeCompositionMarker | undefined,
   compositionStart: number,
+  followingComposition = false,
 ): void {
   const continued = continuedCompositionData(
     marker,
     compositionText,
     helper._textarea.value,
     compositionStart,
+    followingComposition,
   );
   if (continued !== null) {
     if (continued.length > 0) emitPtyData(helper, continued);
     if (!helper._isComposing) helper._dataAlreadySent = "";
     return;
   }
-  const live = helper._dataAlreadySent && compositionText.startsWith(helper._dataAlreadySent)
+  const cleanText = sanitizeTerminalInput(compositionText);
+  const live = helper._dataAlreadySent && cleanText.startsWith(helper._dataAlreadySent)
     ? helper._dataAlreadySent
     : "";
-  const data = live ? compositionText.slice(live.length) : compositionText;
+  const data = live
+    ? cleanText.slice(live.length)
+    : helper._dataAlreadySent.endsWith(cleanText) ? "" : cleanText;
   if (data.length > 0) emitPtyData(helper, data);
   if (!helper._isComposing) helper._dataAlreadySent = "";
 }
@@ -229,10 +259,9 @@ function deliverComposition(
  * `terminal.open()`, so this runs after open. Missing helpers (tests, log
  * view) are left untouched.
  */
-export function keepLiveImeTranscriptionSingle(term: {
-  _core?: { _compositionHelper?: ImeCompositionCommitTarget };
-}): void {
-  const helper = term._core?._compositionHelper;
+export function keepLiveImeTranscriptionSingle(term: object): void {
+  const helper = (term as { _core?: { _compositionHelper?: ImeCompositionCommitTarget } })
+    ._core?._compositionHelper;
   if (!helper || helper.__ncImeCommitInstalled || typeof helper.compositionstart !== "function") {
     return;
   }
@@ -307,7 +336,7 @@ export function keepLiveImeTranscriptionSingle(term: {
       // compositionstart may have cleared the live field. The no-composition
       // path (#3191) still has the keydown commit in this snapshot.
       if (!marker && alreadySent) helper._dataAlreadySent = alreadySent;
-      deliverComposition(helper, compositionText, marker, rangeStart);
+      deliverComposition(helper, compositionText, marker, rangeStart, helper._isComposing && !suffix);
     }, 0);
   };
 }

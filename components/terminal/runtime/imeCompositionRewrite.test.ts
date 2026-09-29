@@ -28,6 +28,10 @@ test("commitTextareaChange counts a supplementary-plane character as one graphem
   assert.equal(commitTextareaChange(`a${emoji}`, "a"), BACKSPACE);
 });
 
+test("commitTextareaChange counts only characters forwarded to the terminal", () => {
+  assert.equal(commitTextareaChange("ab\u200bcd", "abXcd"), `${BACKSPACE}${BACKSPACE}Xcd`);
+});
+
 test("commitTextareaChange deletes the whole tail and retypes the new one", () => {
   assert.equal(commitTextareaChange("abcd", "abXY"), `${BACKSPACE}${BACKSPACE}XY`);
   assert.equal(commitTextareaChange("abcde", "abXde"), `${BACKSPACE}${BACKSPACE}${BACKSPACE}Xde`);
@@ -390,6 +394,106 @@ test("a new word that shares a prefix with a finished character is sent whole", 
   await flushTimers();
 
   assert.equal(helper.sent.join(""), "\u6211\u6211\u4eec");
+});
+
+test("a paused live transcription still extends its previously sent hypothesis", async () => {
+  const helper = createHarness();
+  install(helper);
+  helper.keydown({ keyCode: 229 });
+  helper._textarea.value = "\u6211\u662f\u771f\u7684";
+  await flushTimers();
+  helper.compositionstart();
+  helper._textarea.value = "\u6211\u662f\u771f\u7684\u725b\u903c";
+  helper._compositionPosition = { start: 0, end: helper._textarea.value.length };
+  helper.compositionend();
+  await flushTimers();
+  assert.deepEqual(helper.sent, ["\u6211\u662f\u771f\u7684", "\u725b\u903c"]);
+});
+
+test("a later new word with the same prefix is sent whole", async () => {
+  const helper = createHarness();
+  install(helper);
+  helper.keydown({ keyCode: 229 });
+  helper._textarea.value = "\u6211";
+  await flushTimers();
+  helper.compositionstart();
+  helper._textarea.value = "\u6211\u6211\u4eec";
+  helper._compositionPosition = { start: 1, end: helper._textarea.value.length };
+  helper.compositionend();
+  await flushTimers();
+  assert.deepEqual(helper.sent, ["\u6211", "\u6211\u4eec"]);
+});
+
+test("a sent rewrite is not repeated when its composition later confirms", async () => {
+  const helper = createHarness();
+  install(helper);
+  helper.keydown({ keyCode: 229 });
+  helper._textarea.value = "ls abcde";
+  await flushTimers();
+  helper.keydown({ keyCode: 229 });
+  helper._textarea.value = "ls abXde";
+  await flushTimers();
+  helper.compositionstart();
+  helper._compositionPosition = { start: 3, end: helper._textarea.value.length };
+  helper.compositionend();
+  await flushTimers();
+  assert.deepEqual(helper.sent, ["ls abcde", BACKSPACE, BACKSPACE, BACKSPACE, "Xde"]);
+});
+
+test("an earlier rewrite is delivered when the next composition starts first", async () => {
+  const helper = createHarness();
+  install(helper);
+  helper.keydown({ keyCode: 229 });
+  helper._textarea.value = "abcde";
+  await flushTimers();
+
+  helper.compositionstart();
+  helper._compositionPosition = { start: 0, end: 5 };
+  helper._textarea.value = "abXde";
+  helper.compositionend();
+
+  helper.compositionstart();
+  helper._compositionPosition = { start: 5, end: 5 };
+  helper._textarea.value = "abXdeY";
+  helper._compositionPosition = { start: 5, end: 6 };
+
+  await flushTimers();
+  helper.compositionend();
+  await flushTimers();
+  assert.deepEqual(helper.sent, ["abcde", BACKSPACE, BACKSPACE, BACKSPACE, "Xde", "Y"]);
+});
+
+test("a punctuation commit does not make the next word repeat", async () => {
+  const helper = createHarness();
+  install(helper);
+  helper.keydown({ keyCode: 229 });
+  helper._textarea.value = "\uff0c";
+  await flushTimers();
+  helper.keydown({ keyCode: 229 });
+  helper._textarea.value = "\uff0c\u4f60";
+  await flushTimers();
+  helper._compositionPosition = { start: 1, end: 2 };
+  helper.compositionend();
+  await flushTimers();
+  assert.deepEqual(helper.sent, ["\uff0c", "\u4f60"]);
+});
+
+test("filtered formatting characters do not break final composition deduplication", async () => {
+  const helper = createHarness();
+  install(helper);
+  helper.keydown({ keyCode: 229 });
+  helper._textarea.value = "ab";
+  await flushTimers();
+  helper.keydown({ keyCode: 229 });
+  helper._textarea.value = "ab\u200b";
+  await flushTimers();
+  helper.keydown({ keyCode: 229 });
+  helper._textarea.value = "ab\u200bX";
+  await flushTimers();
+  helper._compositionPosition = { start: 0, end: helper._textarea.value.length };
+  helper.compositionend();
+  await flushTimers();
+  assert.deepEqual(helper.sent, ["ab", "X"]);
 });
 
 test("keepLiveImeTranscriptionSingle is a no-op without a composition helper", () => {
