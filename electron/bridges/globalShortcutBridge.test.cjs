@@ -1826,7 +1826,16 @@ test("tray panel forwarding waits for a newly created main renderer", async () =
 function createRecordingTrayElectron(scaleHolder) {
   const electronModule = createElectronStub();
   const resizes = [];
+  const crops = [];
   let scaleListener = null;
+  const variantWidth = 10;
+  const variantHeight = 10;
+  const variantBitmap = Buffer.alloc(variantWidth * variantHeight * 4);
+  for (let y = 2; y <= 7; y += 1) {
+    for (let x = 2; x <= 7; x += 1) {
+      variantBitmap[(y * variantWidth + x) * 4 + 3] = 255;
+    }
+  }
   class RecordingTray {
     constructor(image) {
       this.image = image;
@@ -1890,13 +1899,40 @@ function createRecordingTrayElectron(scaleHolder) {
       return {
         kind: "buffer",
         bytes: buffer.length,
+        getSize() {
+          return { width: variantWidth, height: variantHeight };
+        },
+        toBitmap() {
+          return variantBitmap;
+        },
+        crop(rect) {
+          crops.push(rect);
+          return {
+            kind: "cropped",
+            rect,
+            isEmpty() {
+              return false;
+            },
+            resize(opts) {
+              resizes.push(opts);
+              return {
+                kind: "resized-buffer",
+                bytes: buffer.length,
+                rect,
+                ...opts,
+                isEmpty() {
+                  return false;
+                },
+              };
+            },
+          };
+        },
         resize(opts) {
           resizes.push(opts);
           return {
             kind: "resized-buffer",
             bytes: buffer.length,
             ...opts,
-            setTemplateImage() {},
             isEmpty() {
               return false;
             },
@@ -1914,6 +1950,7 @@ function createRecordingTrayElectron(scaleHolder) {
   return {
     electronModule,
     resizes,
+    crops,
     fireScaleChange() {
       scaleListener?.();
     },
@@ -1939,7 +1976,7 @@ test("windows tray follows the selected app icon and keeps the ico for original"
     const appIconManager = require("./appIconManager.cjs");
     const bridge = loadBridge();
     const scaleHolder = { scale: 1.5 };
-    const { electronModule, resizes, fireScaleChange } = createRecordingTrayElectron(scaleHolder);
+    const { electronModule, resizes, crops, fireScaleChange } = createRecordingTrayElectron(scaleHolder);
     try {
       appIconManager.initializeAppIconManager(process.cwd(), { preferPublic: true, isMac: false });
       await enableCloseToTray(bridge, electronModule);
@@ -1950,6 +1987,7 @@ test("windows tray follows the selected app icon and keeps the ico for original"
       assert.equal(applyIconVariant("bright"), true);
       assert.equal(bridge.updateTrayIcon(), true);
       assert.equal(trayInstance.image.kind, "resized-buffer");
+      assert.deepEqual(crops[0], { x: 1, y: 1, width: 8, height: 8 });
       assert.deepEqual(resizes.at(-1), { width: 24, height: 24, quality: "best" });
 
       scaleHolder.scale = 2;
@@ -1985,4 +2023,50 @@ test("non-windows trays ignore the app icon variant", async () => {
       appIconManager.initializeAppIconManager(process.cwd(), { preferPublic: true, isMac: false });
     }
   });
+});
+
+function bitmapWithOpaqueRect(width, height, opaque) {
+  const bitmap = Buffer.alloc(width * height * 4);
+  for (let y = opaque.y; y < opaque.y + opaque.height; y += 1) {
+    for (let x = opaque.x; x < opaque.x + opaque.width; x += 1) {
+      bitmap[(y * width + x) * 4 + 3] = 255;
+    }
+  }
+  return bitmap;
+}
+
+test("tray icon crop drops the transparent margin and keeps a full-bleed image", () => {
+  const bridge = loadBridge();
+  const crops = [];
+  const marginImage = {
+    getSize() {
+      return { width: 10, height: 10 };
+    },
+    toBitmap() {
+      return bitmapWithOpaqueRect(10, 10, { x: 2, y: 2, width: 6, height: 6 });
+    },
+    crop(rect) {
+      crops.push(rect);
+      return { cropped: true, rect, isEmpty() { return false; } };
+    },
+  };
+  const cropped = bridge.__cropTransparentMarginForTests(marginImage);
+  assert.equal(cropped.cropped, true);
+  assert.deepEqual(crops, [{ x: 1, y: 1, width: 8, height: 8 }]);
+
+  let cropCalls = 0;
+  const fullBleed = {
+    getSize() {
+      return { width: 4, height: 4 };
+    },
+    toBitmap() {
+      return bitmapWithOpaqueRect(4, 4, { x: 0, y: 0, width: 4, height: 4 });
+    },
+    crop() {
+      cropCalls += 1;
+      return { isEmpty() { return false; } };
+    },
+  };
+  assert.equal(bridge.__cropTransparentMarginForTests(fullBleed), fullBleed);
+  assert.equal(cropCalls, 0);
 });

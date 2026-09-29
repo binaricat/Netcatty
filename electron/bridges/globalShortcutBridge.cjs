@@ -594,6 +594,62 @@ function loadPackagedTrayImage() {
   return nativeImage.createFromPath(iconPath);
 }
 
+// Variant PNGs keep the Apple-style transparent margin (about 6% per side).
+// The packaged tray ico is full-bleed, so leaving that margin in place makes
+// every other style look smaller in the same 16px slot. Crop to the opaque
+// artwork, then scale.
+function cropTransparentMargin(image) {
+  if (!image?.getSize || !image?.toBitmap || !image?.crop) return image;
+  let size;
+  let bitmap;
+  try {
+    size = image.getSize(1);
+    bitmap = image.toBitmap({ scaleFactor: 1 });
+  } catch {
+    return image;
+  }
+  const width = size?.width;
+  const height = size?.height;
+  if (!width || !height || bitmap?.length !== width * height * 4) return image;
+
+  let minX = width;
+  let minY = height;
+  let maxX = -1;
+  let maxY = -1;
+  for (let y = 0; y < height; y += 1) {
+    const row = y * width * 4;
+    for (let x = 0; x < width; x += 1) {
+      if (bitmap[row + x * 4 + 3] <= 16) continue;
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+    }
+  }
+  if (maxX < minX || maxY < minY) return image;
+
+  const pad = 1;
+  const boxLeft = Math.max(0, minX - pad);
+  const boxTop = Math.max(0, minY - pad);
+  const boxRight = Math.min(width - 1, maxX + pad);
+  const boxBottom = Math.min(height - 1, maxY + pad);
+  let side = Math.max(boxRight - boxLeft + 1, boxBottom - boxTop + 1);
+  side = Math.min(side, width, height);
+  let left = Math.round((boxLeft + boxRight) / 2 - (side - 1) / 2);
+  let top = Math.round((boxTop + boxBottom) / 2 - (side - 1) / 2);
+  left = Math.max(0, Math.min(left, width - side));
+  top = Math.max(0, Math.min(top, height - side));
+  if (left === 0 && top === 0 && side === width && side === height) return image;
+
+  try {
+    const cropped = image.crop({ x: left, y: top, width: side, height: side });
+    if (!cropped || cropped.isEmpty?.()) return image;
+    return cropped;
+  } catch {
+    return image;
+  }
+}
+
 // Windows Tray::SetImage asks NativeImage for an HICON at SM_CXSMICON.
 // An .ico path keeps that lookup. A variant PNG is one 1024px bitmap, and
 // GetHICON would pass the whole bitmap through, so scale it down first.
@@ -620,10 +676,11 @@ function loadWindowsTrayImage() {
       ? nativeImage.createFromBuffer(fs.readFileSync(variantPath))
       : nativeImage.createFromPath(variantPath);
     if (!source || source.isEmpty?.()) return loadPackagedTrayImage();
+    const artwork = cropTransparentMargin(source);
     const size = windowsSmallIconPx();
-    const sized = source.resize
-      ? source.resize({ width: size, height: size, quality: "best" })
-      : source;
+    const sized = artwork?.resize
+      ? artwork.resize({ width: size, height: size, quality: "best" })
+      : artwork;
     if (!sized || sized.isEmpty?.()) return loadPackagedTrayImage();
     return sized;
   } catch {
@@ -1451,6 +1508,7 @@ module.exports = {
   cleanup,
   createTray,
   updateTrayIcon: applyWindowsTrayImage,
+  __cropTransparentMarginForTests: cropTransparentMargin,
   pinTrayForHiddenLaunch,
   releaseHiddenLaunchTrayPin,
   getTray: () => tray,
