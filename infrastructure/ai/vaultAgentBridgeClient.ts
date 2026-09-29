@@ -1,6 +1,7 @@
 import { readScreenContext } from "../scripts/screenSnapshotRegistry";
 import { normalizeTerminalContextRange } from "../../domain/terminalContextRead";
 import { resolveHostOs } from '../../domain/host';
+import { isSavedVaultHost } from '../../domain/ephemeralHosts';
 import type { GroupConfig, Host, Identity, KnownHost, ManagedSource, PortForwardingRule, ProxyProfile, Snippet, SSHKey, TerminalSettings, VaultNote } from '../../domain/models';
 import type { RememberImportedKeyPassphraseResult } from '../../application/defaultKeyPassphrases';
 import {
@@ -601,6 +602,7 @@ async function registerOpenedSessionInMcpScope(
   const sessionInfo = {
     sessionId,
     hostId: host.id,
+    ...(isSavedVaultHost(host) ? { savedHostId: host.id } : {}),
     hostname: host.hostname || '',
     label: host.label || host.hostname || sessionId,
     os: resolveHostOs(host),

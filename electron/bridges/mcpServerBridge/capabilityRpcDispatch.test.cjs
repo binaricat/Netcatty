@@ -114,6 +114,43 @@ test("vault host deletion cannot borrow a different session's host grant", async
   assert.equal(approvalTarget, null);
 });
 
+test("host_open names its vault host and cannot borrow another host's grant", async () => {
+  const approvals = [];
+  const opened = [];
+  const hosts = {
+    test: { id: "test", label: "Test server", hostname: "test.example" },
+    prod: { id: "prod", label: "Production", hostname: "prod.example" },
+    temporary: { id: "temporary", label: "Temporary", hostname: "temp.example", ephemeral: true },
+  };
+  const dispatch = createTestDispatcher({
+    evaluatePermissionWithGrants,
+    permissionGrantsSnapshot: [{
+      id: "test-only", capabilityId: "vault.host.open", sessionPattern: "host:test", createdAt: 1,
+    }],
+    requestApprovalFromRenderer: async (_name, _args, _chat, context) => {
+      approvals.push(context.target);
+      return false;
+    },
+    invokeVaultAgent: async (op, params) => {
+      if (op === "host.get") return { ok: true, host: hosts[params.hostId] };
+      if (op === "host.open") {
+        opened.push(params.hostId);
+        return { ok: true, sessionId: `session-${params.hostId}` };
+      }
+      return { ok: false };
+    },
+  });
+
+  assert.equal((await dispatch("public/vault/hosts/open", { hostId: "test" })).ok, true);
+  assert.equal((await dispatch("public/vault/hosts/open", { hostId: "prod" })).ok, false);
+  assert.equal((await dispatch("public/vault/hosts/open", { hostId: "temporary" })).ok, false);
+  assert.deepEqual(opened, ["test"]);
+  assert.deepEqual(approvals, [
+    { sessionId: "", hostId: "prod", label: "Production", hostname: "prod.example" },
+    { sessionId: "", hostId: "", label: "Temporary", hostname: "temp.example" },
+  ]);
+});
+
 test("dispatchCapabilityRpc asks for approval before importing vault notes from the CLI rpc", async () => {
   const approvalCalls = [];
   let invokedOp = null;

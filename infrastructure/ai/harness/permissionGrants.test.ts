@@ -51,6 +51,19 @@ describe('permissionGrants', () => {
     }), null);
   });
 
+  it('matches host-open grants only for the verified requested host', () => {
+    const rules = [baseRule({ capabilityId: 'vault.host.open', sessionPattern: 'host:test-host' })];
+    assert.ok(matchPermissionGrant(rules, {
+      capabilityId: 'vault.host.open', hostId: 'test-host', args: { hostId: 'test-host' },
+    }));
+    assert.equal(matchPermissionGrant(rules, {
+      capabilityId: 'vault.host.open', hostId: 'prod-host', args: { hostId: 'prod-host' },
+    }), null);
+    assert.equal(matchPermissionGrant(rules, {
+      capabilityId: 'vault.host.open', args: { hostId: 'test-host' },
+    }), null);
+  });
+
   it('keeps a saved command allowance on the approved host', () => {
     const rules = [baseRule({ sessionPattern: 'host:prod-host', commandPattern: 'systemctl status *' })];
     assert.ok(matchPermissionGrant(rules, {

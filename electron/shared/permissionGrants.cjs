@@ -60,7 +60,8 @@ function argsPatternMatches(argsPattern, args) {
 function ruleMatchesTarget(rule, ctx) {
   if (rule.sessionPattern?.startsWith("host:")) {
     const hostId = rule.sessionPattern.slice("host:".length);
-    return Boolean(hostId && ctx?.sessionId && ctx?.hostId === hostId);
+    const opensThisHost = ctx?.capabilityId === "vault.host.open" && ctx?.args?.hostId === hostId;
+    return Boolean(hostId && ctx?.hostId === hostId && (ctx?.sessionId || opensThisHost));
   }
   return rule.capabilityId !== "*" && rule.sessionPattern !== "host:";
 }

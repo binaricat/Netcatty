@@ -26,7 +26,8 @@ export interface PermissionGrantMatchContext {
 function ruleMatchesTarget(rule: PermissionGrantRule, ctx: PermissionGrantMatchContext): boolean {
   if (rule.sessionPattern.startsWith('host:')) {
     const hostId = rule.sessionPattern.slice('host:'.length);
-    return Boolean(hostId && ctx.sessionId && ctx.hostId === hostId);
+    const opensThisHost = ctx.capabilityId === 'vault.host.open' && ctx.args?.hostId === hostId;
+    return Boolean(hostId && ctx.hostId === hostId && (ctx.sessionId || opensThisHost));
   }
   return rule.capabilityId !== '*' && rule.sessionPattern !== 'host:';
 }

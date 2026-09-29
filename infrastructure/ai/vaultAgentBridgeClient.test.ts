@@ -472,6 +472,27 @@ describe('handleVaultAgentOp vault hosts', () => {
     assert.equal(receivedIsExternalMcpCall, true);
   });
 
+  it('host.open registers saved-host identity immediately but not for a temporary host', async (t) => {
+    const { netcattyBridge } = await import('../services/netcattyBridge');
+    const merged: Array<{ sessions: Array<{ savedHostId?: string }>; scope: string }> = [];
+    t.mock.method(netcattyBridge, 'get', () => ({
+      aiMcpMergeSessions: async (sessions: Array<{ savedHostId?: string }>, scope: string) => {
+        merged.push({ sessions, scope });
+      },
+    } as unknown as NetcattyBridge));
+    const saved = { id: 'saved-host', label: 'Saved', hostname: 'saved.example', port: 22 } as Host;
+    const temporary = { id: 'temporary-host', label: 'Temporary', hostname: 'temp.example', port: 22, ephemeral: true } as Host;
+    const deps = createDeps({ hosts: [saved, temporary] });
+
+    await handleVaultAgentOp('host.open', { hostId: saved.id, chatSessionId: '__external_mcp__' }, deps);
+    await handleVaultAgentOp('host.open', { hostId: temporary.id, chatSessionId: '__external_mcp__' }, deps);
+
+    assert.deepEqual(merged.map(({ sessions, scope }) => ({ savedHostId: sessions[0]?.savedHostId, scope })), [
+      { savedHostId: saved.id, scope: '__external_mcp__' },
+      { savedHostId: undefined, scope: '__external_mcp__' },
+    ]);
+  });
+
   it('host.open does not treat a missing chatSessionId as an external MCP call', async () => {
     const host: Host = {
       id: 'host-open-4',
