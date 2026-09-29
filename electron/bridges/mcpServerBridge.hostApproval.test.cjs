@@ -3,14 +3,14 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
-const os = require("node:os");
 const path = require("node:path");
 const net = require("node:net");
 const { createNdjsonRpcClient } = require("../capabilities/rpcTransport.cjs");
+const tempDirBridge = require("./tempDirBridge.cjs");
 const bridge = require("./mcpServerBridge.cjs");
 
 test("external MCP approval names the host and isolates connection and host grants", async (t) => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-host-approval-"));
+  const dir = fs.mkdtempSync(`${tempDirBridge.getTempFilePath("host-approval")}-`);
   const clients = [];
   t.after(() => {
     for (const client of clients) client.close();
