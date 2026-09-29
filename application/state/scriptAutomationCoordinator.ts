@@ -95,10 +95,10 @@ export async function runAutomationScript(params: {
     hostname?: string;
     username?: string;
   };
-  /** AI-initiated runs honor Observer. User runs are an explicit action and always execute. */
+  /** Only a direct user action bypasses Observer; AI and automatic runs honor it. */
   initiatedBy?: 'user' | 'ai';
 }): Promise<{ runId: string; runIds: string[] }> {
-  const permissionMode = params.initiatedBy === 'ai' ? readPermissionMode() : 'auto';
+  const permissionMode = params.initiatedBy === 'user' ? 'auto' : readPermissionMode();
   if (permissionMode === 'observer' && scriptContainsWriteOperations(params.snippet.command)) {
     throw new Error('Observer mode blocks scripts that write to the terminal.');
   }

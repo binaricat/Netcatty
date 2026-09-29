@@ -2135,6 +2135,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
         await runAutomationScript({
           snippet,
           sessionId,
+          initiatedBy: 'user',
           sessionMeta: buildScriptSessionMeta(sessionId, sessionsRef.current, hosts),
         });
       } catch (err) {
@@ -2160,6 +2161,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       await runAutomationScript({
         snippet,
         sessionId,
+        initiatedBy: 'user',
         sessionMeta: buildScriptSessionMeta(sessionId, sessionsRef.current, hosts),
       });
     } catch (err) {
@@ -2245,6 +2247,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
         await runAutomationScript({
           snippet,
           sessionId,
+          initiatedBy: 'user',
           sessionMeta: buildScriptSessionMeta(sessionId, sessionsRef.current, hosts),
         });
       } catch (err) {
@@ -2314,6 +2317,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       const runOnSession = (sid: string) => runAutomationScript({
         snippet,
         sessionId: sid,
+        initiatedBy: 'user',
         sessionMeta: buildScriptSessionMeta(sid, sessionsRef.current, hosts),
       });
       if (mode === 'sequential') {

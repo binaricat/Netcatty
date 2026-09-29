@@ -3389,6 +3389,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
         await runAutomationScript({
           snippet,
           sessionId,
+          initiatedBy: 'user',
           sessionMeta: {
             connected: true,
             name: scriptSessionName,

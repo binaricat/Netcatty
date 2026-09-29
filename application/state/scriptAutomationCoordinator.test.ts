@@ -284,9 +284,33 @@ test('runAutomationScript executes a user write script while AI permission mode 
     const result = await runAutomationScript({
       snippet: writeScript,
       sessionId: 'sess-user',
+      initiatedBy: 'user',
     });
     assert.equal(result.runId, 'user-run');
     assert.equal(seenMode, 'auto');
+  } finally {
+    netcattyBridge.get = originalGet;
+    Reflect.deleteProperty(globalThis, 'localStorage');
+  }
+});
+
+test('runAutomationScript blocks automatic write scripts in observer mode', async () => {
+  const originalGet = netcattyBridge.get;
+  installPermissionMode('observer');
+  let called = false;
+  netcattyBridge.get = () => ({
+    scriptRun: async () => {
+      called = true;
+      return { runId: 'automatic-run', runIds: ['automatic-run'] };
+    },
+  }) as ReturnType<typeof netcattyBridge.get>;
+
+  try {
+    await assert.rejects(
+      () => runAutomationScript({ snippet: writeScript, sessionId: 'sess-automatic' }),
+      /Observer mode blocks scripts that write to the terminal/,
+    );
+    assert.equal(called, false);
   } finally {
     netcattyBridge.get = originalGet;
     Reflect.deleteProperty(globalThis, 'localStorage');
