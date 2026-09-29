@@ -523,10 +523,10 @@ export const ToolCall = ({
       </button>
 
       {isPendingApproval && approvalTarget && !showApprovalCommand && (
-        <div className="border-t border-border/20 px-3 py-1.5 text-xs font-medium">
-          {t('ai.chat.targetLabel')}: {approvalTarget.label}
+        <div className="min-w-0 break-words border-t border-border/20 px-3 py-1.5 text-xs font-medium">
+          {t('ai.chat.targetLabel')}: <span className="break-all">{approvalTarget.label}</span>
           {approvalTarget.hostname && approvalTarget.hostname !== approvalTarget.label && (
-            <span className="ml-1 text-muted-foreground">({approvalTarget.hostname})</span>
+            <span className="ml-1 break-all text-muted-foreground">({approvalTarget.hostname})</span>
           )}
         </div>
       )}

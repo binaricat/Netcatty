@@ -69,3 +69,18 @@ test("optionsForPeerSingleChannel stamps the runtime flag from the peer banner",
     true,
   );
 });
+
+test("CommonJS and renderer modules agree on SSH banner behavior", async () => {
+  const browserModule = await import("./singleChannelSshBanner.shared.mjs");
+  const nodeModule = require("./singleChannelSshBanner.shared.cjs");
+  for (const version of [
+    "BHostSSH_7.0", "TERM-SSHD", "CLOUDBILITY-4.14", "OpenSSH_9.6", "JumpServer", "",
+  ]) {
+    assert.equal(browserModule.remoteSoftwareRequiresSingleChannel(version), nodeModule.remoteSoftwareRequiresSingleChannel(version));
+    assert.equal(browserModule.remoteDisallowsChunkedChannelWrite(version), nodeModule.remoteDisallowsChunkedChannelWrite(version));
+    assert.deepEqual(
+      browserModule.optionsForPeerSingleChannel({ singleChannelSsh: false }, { _remoteVer: version }),
+      nodeModule.optionsForPeerSingleChannel({ singleChannelSsh: false }, { _remoteVer: version }),
+    );
+  }
+});
