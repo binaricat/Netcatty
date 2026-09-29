@@ -14,21 +14,22 @@ import {
 const BACKSPACE = "\x7f";
 
 test("commitTextareaChange appends the new suffix", () => {
-  assert.equal(commitTextareaChange("我是真的", "我是真的牛逼"), "牛逼");
-  assert.equal(commitTextareaChange("", "我是真的"), "我是真的");
-  assert.equal(commitTextareaChange("ls ", "ls ，"), "，");
+  assert.equal(commitTextareaChange("\u6211\u662f\u771f\u7684", "\u6211\u662f\u771f\u7684\u725b\u903c"), "\u725b\u903c");
+  assert.equal(commitTextareaChange("", "\u6211\u662f\u771f\u7684"), "\u6211\u662f\u771f\u7684");
+  assert.equal(commitTextareaChange("ls ", "ls \uff0c"), "\uff0c");
 });
 
-test("commitTextareaChange deletes only the diverging span", () => {
+test("commitTextareaChange deletes the whole tail and retypes the new one", () => {
   assert.equal(commitTextareaChange("abcd", "abXY"), `${BACKSPACE}${BACKSPACE}XY`);
+  assert.equal(commitTextareaChange("abcde", "abXde"), `${BACKSPACE}${BACKSPACE}${BACKSPACE}Xde`);
   assert.equal(commitTextareaChange("abcd", "ab"), `${BACKSPACE}${BACKSPACE}`);
   assert.equal(commitTextareaChange("hello", ""), BACKSPACE);
   assert.equal(commitTextareaChange("same", "same"), "");
 });
 
 test("rememberTextareaCommit grows a hypothesis and replaces a rewrite", () => {
-  assert.equal(rememberTextareaCommit("", "", "我是真的"), "我是真的");
-  assert.equal(rememberTextareaCommit("我是真的", "我是真的", "牛逼"), "我是真的牛逼");
+  assert.equal(rememberTextareaCommit("", "", "\u6211\u662f\u771f\u7684"), "\u6211\u662f\u771f\u7684");
+  assert.equal(rememberTextareaCommit("\u6211\u662f\u771f\u7684", "\u6211\u662f\u771f\u7684", "\u725b\u903c"), "\u6211\u662f\u771f\u7684\u725b\u903c");
   assert.equal(
     rememberTextareaCommit("abcd", "abcd", `${BACKSPACE}${BACKSPACE}XY`),
     "XY",
@@ -36,24 +37,33 @@ test("rememberTextareaCommit grows a hypothesis and replaces a rewrite", () => {
 });
 
 test("continuedCompositionPrefix keeps a new composition after a finished line", () => {
-  assert.equal(continuedCompositionPrefix(undefined, "你好"), "");
+  assert.equal(continuedCompositionPrefix(undefined, "\u4f60\u597d"), "");
   assert.equal(
     continuedCompositionPrefix({
       continued: true,
-      pendingPrevious: "hello，",
-      alreadySent: "，",
-      textareaAtStart: "hello，",
-    }, "你好"),
+      pendingPrevious: "hello\uff0c",
+      alreadySent: "\uff0c",
+      textareaAtStart: "hello\uff0c",
+    }, "\u4f60\u597d"),
     "",
   );
   assert.equal(
     continuedCompositionPrefix({
-      continued: true,
+      continued: false,
       pendingPrevious: "a",
       alreadySent: "a",
       textareaAtStart: "a",
     }, "apple"),
     "",
+  );
+  assert.equal(
+    continuedCompositionPrefix({
+      continued: true,
+      pendingPrevious: "\u6211",
+      alreadySent: "\u6211",
+      textareaAtStart: "\u6211\u771f",
+    }, "\u6211\u771f"),
+    "\u6211",
   );
 });
 
@@ -61,20 +71,20 @@ test("continuedCompositionPrefix returns the hypothesis already on the PTY", () 
   assert.equal(
     continuedCompositionPrefix({
       continued: true,
-      pendingPrevious: "我是真的",
-      alreadySent: "我是真的",
-      textareaAtStart: "我是真的牛逼",
-    }, "我是真的牛逼"),
-    "我是真的",
+      pendingPrevious: "\u6211\u662f\u771f\u7684",
+      alreadySent: "\u6211\u662f\u771f\u7684",
+      textareaAtStart: "\u6211\u662f\u771f\u7684\u725b\u903c",
+    }, "\u6211\u662f\u771f\u7684\u725b\u903c"),
+    "\u6211\u662f\u771f\u7684",
   );
   assert.equal(
     continuedCompositionPrefix({
       continued: true,
-      pendingPrevious: "ls 我是真的",
-      alreadySent: "我是真的",
-      textareaAtStart: "ls 我是真的牛逼",
-    }, "ls 我是真的牛逼"),
-    "ls 我是真的",
+      pendingPrevious: "ls \u6211\u662f\u771f\u7684",
+      alreadySent: "\u6211\u662f\u771f\u7684",
+      textareaAtStart: "ls \u6211\u662f\u771f\u7684\u725b\u903c",
+    }, "ls \u6211\u662f\u771f\u7684\u725b\u903c"),
+    "ls \u6211\u662f\u771f\u7684",
   );
 });
 
@@ -139,17 +149,17 @@ test("live transcription of one sentence is written once", async () => {
   install(helper);
 
   helper.keydown({ keyCode: 229 });
-  helper._textarea.value = "我是真的";
+  helper._textarea.value = "\u6211\u662f\u771f\u7684";
   await flushTimers();
 
   helper.keydown({ keyCode: 229 });
-  helper._textarea.value = "我是真的牛逼";
+  helper._textarea.value = "\u6211\u662f\u771f\u7684\u725b\u903c";
   helper.compositionstart();
   helper.compositionend();
   await flushTimers();
   await flushTimers();
 
-  assert.equal(helper.sent.join(""), "我是真的牛逼");
+  assert.equal(helper.sent.join(""), "\u6211\u662f\u771f\u7684\u725b\u903c");
 });
 
 test("a composition range that contains only the new tail is not prefixed again", async () => {
@@ -157,18 +167,18 @@ test("a composition range that contains only the new tail is not prefixed again"
   install(helper);
 
   helper.keydown({ keyCode: 229 });
-  helper._textarea.value = "ls 我是真的";
+  helper._textarea.value = "ls \u6211\u662f\u771f\u7684";
   await flushTimers();
 
   helper.keydown({ keyCode: 229 });
-  helper._textarea.value = "ls 我是真的牛逼";
+  helper._textarea.value = "ls \u6211\u662f\u771f\u7684\u725b\u903c";
   helper.compositionstart();
-  helper._compositionPosition = { start: "ls 我是真的".length, end: "ls 我是真的牛逼".length };
+  helper._compositionPosition = { start: "ls \u6211\u662f\u771f\u7684".length, end: "ls \u6211\u662f\u771f\u7684\u725b\u903c".length };
   helper.compositionend();
   await flushTimers();
   await flushTimers();
 
-  assert.equal(helper.sent.join(""), "ls 我是真的牛逼");
+  assert.equal(helper.sent.join(""), "ls \u6211\u662f\u771f\u7684\u725b\u903c");
 });
 
 test("a composition that only confirms the hypothesis does not append it again", async () => {
@@ -176,7 +186,7 @@ test("a composition that only confirms the hypothesis does not append it again",
   install(helper);
 
   helper.keydown({ keyCode: 229 });
-  helper._textarea.value = "我是真的牛逼";
+  helper._textarea.value = "\u6211\u662f\u771f\u7684\u725b\u903c";
   await flushTimers();
 
   helper.keydown({ keyCode: 229 });
@@ -185,7 +195,7 @@ test("a composition that only confirms the hypothesis does not append it again",
   await flushTimers();
   await flushTimers();
 
-  assert.equal(helper.sent.join(""), "我是真的牛逼");
+  assert.equal(helper.sent.join(""), "\u6211\u662f\u771f\u7684\u725b\u903c");
 });
 
 test("normal compositionend still sends the committed word once", async () => {
@@ -194,13 +204,13 @@ test("normal compositionend still sends the committed word once", async () => {
 
   helper._textarea.value = "hello";
   helper.keydown({ keyCode: 229 });
-  helper._textarea.value = "hello你";
+  helper._textarea.value = "hello\u4f60";
   helper.compositionstart();
   helper._compositionPosition = { start: 5, end: 6 };
   helper.compositionend();
   await flushTimers();
 
-  assert.deepEqual(helper.sent, ["你"]);
+  assert.deepEqual(helper.sent, ["\u4f60"]);
 });
 
 test("punctuation entered through keyCode 229 sends only the new character", async () => {
@@ -209,10 +219,10 @@ test("punctuation entered through keyCode 229 sends only the new character", asy
 
   helper._textarea.value = "ls ";
   helper.keydown({ keyCode: 229 });
-  helper._textarea.value = "ls ，";
+  helper._textarea.value = "ls \uff0c";
   await flushTimers();
 
-  assert.deepEqual(helper.sent, ["，"]);
+  assert.deepEqual(helper.sent, ["\uff0c"]);
 });
 
 test("keydown text already sent is not repeated on compositionend", async () => {
@@ -243,7 +253,25 @@ test("an equal-length rewrite does not resend the shared prefix", async () => {
   helper._textarea.value = "abXY";
   await flushTimers();
 
-  assert.deepEqual(helper.sent, [`${BACKSPACE}${BACKSPACE}XY`]);
+  assert.deepEqual(helper.sent, [BACKSPACE, BACKSPACE, "XY"]);
+});
+
+test("a one-character hypothesis is not repeated when composition extends it", async () => {
+  const helper = createHarness();
+  install(helper);
+
+  helper.keydown({ keyCode: 229 });
+  helper._textarea.value = "\u6211";
+  await flushTimers();
+
+  helper.keydown({ keyCode: 229 });
+  helper._textarea.value = "\u6211\u771f";
+  helper.compositionstart();
+  helper.compositionend();
+  await flushTimers();
+  await flushTimers();
+
+  assert.equal(helper.sent.join(""), "\u6211\u771f");
 });
 
 test("keepLiveImeTranscriptionSingle is a no-op without a composition helper", () => {

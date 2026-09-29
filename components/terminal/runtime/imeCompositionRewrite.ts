@@ -2,7 +2,7 @@
  * xterm.js commits an IME textarea change with `newValue.replace(oldValue, "")`
  * and, on compositionend, skips `_dataAlreadySent.length` characters. Both
  * steps assume the IME only appends. Live transcription rewrites the whole
- * hypothesis ("我是真的" -> "我是真的牛逼"), so the utterance is written as the
+ * hypothesis, so the utterance is written as the
  * interim, again as the full final string, and again as the tail (#3421).
  *
  * Append-only commits (punctuation, a normal compositionend) stay as they are.
@@ -32,7 +32,7 @@ export type ImeCompositionCommitTarget = {
 export type ImeCompositionMarker = {
   /** A keydown-229 textarea timer was still pending when composition started. */
   continued: boolean;
-  /** Textarea value that timer snapshotted — already reflected on the PTY. */
+  /** Textarea value that timer snapshotted, already reflected on the PTY. */
   pendingPrevious: string;
   alreadySent: string;
   textareaAtStart: string;
@@ -42,7 +42,7 @@ export type ImeCompositionMarker = {
  * PTY edit for one textarea rewrite.
  * A pure append sends the new suffix. A pure shrink sends one backspace per
  * deleted character, except a cleared textarea, which stays a single
- * backspace — xterm empties the textarea when a line is submitted, and that
+ * backspace. xterm empties the textarea when a line is submitted, and that
  * reset is not a dictation rewrite. Any other rewrite deletes only the
  * diverging span and inserts its replacement, instead of `String.replace`
  * or the whole new value.
@@ -74,12 +74,11 @@ export function rememberTextareaCommit(
 /**
  * Prefix of `compositionText` already on the PTY. Set only when composition
  * started while a 229 textarea timer was still pending, so this composition
- * finishes the update that timer snapshotted — not the next word.
+ * finishes the update that timer snapshotted, not the next word.
  *
- * The timer's snapshot is the text already written. A later composition that
- * does not begin with that snapshot (normal pinyin after a finished line)
- * keeps every character. A hypothesis of one character is not treated as a
- * sentence being rewritten.
+ * The timer's snapshot is the text already written, including a one-character
+ * hypothesis. A later composition that does not begin with that snapshot
+ * (normal pinyin after a finished line) keeps every character.
  */
 export function continuedCompositionPrefix(
   marker: ImeCompositionMarker | undefined,
@@ -87,13 +86,13 @@ export function continuedCompositionPrefix(
 ): string {
   if (!marker?.continued) return "";
   if (
-    marker.pendingPrevious.length >= 2
+    marker.pendingPrevious.length > 0
     && compositionText.startsWith(marker.pendingPrevious)
   ) {
     return marker.pendingPrevious;
   }
   if (
-    marker.alreadySent.length >= 2
+    marker.alreadySent.length > 0
     && compositionText.startsWith(marker.alreadySent)
     && marker.textareaAtStart.endsWith(marker.alreadySent)
   ) {
@@ -108,17 +107,21 @@ function rewriteDivergingSpan(previous: string, next: string): string {
   while (start < shared && previous.charCodeAt(start) === next.charCodeAt(start)) {
     start += 1;
   }
-  let previousEnd = previous.length;
-  let nextEnd = next.length;
-  while (
-    previousEnd > start
-    && nextEnd > start
-    && previous.charCodeAt(previousEnd - 1) === next.charCodeAt(nextEnd - 1)
-  ) {
-    previousEnd -= 1;
-    nextEnd -= 1;
+  // The cursor stays after the last cell. A shared suffix is still part of
+  // the tail that must be deleted and typed again.
+  return BACKSPACE.repeat(previous.length - start) + next.slice(start);
+}
+
+function emitPtyData(helper: ImeCompositionCommitTarget, data: string): void {
+  // One event per backspace so mapTerminalBackspaceInput and the command
+  // buffer see a standalone DEL or Ctrl-H, then the replacement text.
+  let index = 0;
+  while (data.charCodeAt(index) === 0x7f) {
+    helper._coreService.triggerDataEvent(BACKSPACE, true);
+    index += 1;
   }
-  return BACKSPACE.repeat(previousEnd - start) + next.slice(start, nextEnd);
+  const inserted = data.slice(index);
+  if (inserted.length > 0) helper._coreService.triggerDataEvent(inserted, true);
 }
 
 function compositionSlice(
@@ -147,7 +150,7 @@ function deliverComposition(
     : "";
   const strip = continued || live;
   const data = strip ? compositionText.slice(strip.length) : compositionText;
-  if (data.length > 0) helper._coreService.triggerDataEvent(data, true);
+  if (data.length > 0) emitPtyData(helper, data);
   if (!helper._isComposing) helper._dataAlreadySent = "";
 }
 
@@ -197,7 +200,7 @@ export function keepLiveImeTranscriptionSingle(term: {
       const data = commitTextareaChange(previous, next);
       if (!data) return;
       helper._dataAlreadySent = rememberTextareaCommit(helper._dataAlreadySent, previous, data);
-      helper._coreService.triggerDataEvent(data, true);
+      emitPtyData(helper, data);
     }, 0);
   };
 
