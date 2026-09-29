@@ -22,13 +22,17 @@ function setup(
   executors = new Map<string, Executor>(),
   sensitive = new Set<string>(),
   broadcastPasswordBypass = false,
+  restoredDisconnected = new Set<string>(),
 ) {
   const writes: string[] = [];
   const context = {
     send: undefined as unknown as (text: string) => Promise<boolean>,
     useCallback: (callback: unknown) => callback,
     activeWorkspaceRef: { current: { id: 'workspace', focusedSessionId: '0' } },
-    sessionsRef: { current: statuses.map((status, index) => ({ id: String(index), workspaceId: 'workspace', status })) },
+    sessionsRef: { current: statuses.map((status, index) => ({
+      id: String(index), workspaceId: 'workspace', status,
+      restoreState: restoredDisconnected.has(String(index)) ? 'restored-disconnected' : undefined,
+    })) },
     isBroadcastEnabled: () => broadcast,
     isTerminalSensitiveInputActive: (id: string) => sensitive.has(id),
     broadcastPasswordBypassRef: { current: broadcastPasswordBypass },
@@ -99,6 +103,26 @@ test('bypassed fan-out preserves a sensitive peer snapshot across executor wake'
   }]]);
   assert.equal(await setup(['connected', 'connected'], true, executors, sensitive, true).send('secret'), false);
   assert.equal(sensitiveAtWrite, true);
+});
+
+test('a bypassed sensitive peer that rejects delivery does not hide another successful send', async () => {
+  const executors = new Map<string, Executor>([
+    ['0', async () => true],
+    ['1', async () => false],
+  ]);
+  assert.equal(await setup(['connected', 'connected'], true, executors, new Set(['1']), true).send('command'), true);
+});
+
+test('a bypassed sensitive peer with no write route does not hide another successful send', async () => {
+  const { send, writes } = setup(
+    ['connected', 'disconnected'], true, new Map(), new Set(['1']), true, new Set(['1']),
+  );
+  assert.equal(await send('command'), true);
+  assert.deepEqual(writes, ['0']);
+});
+
+test('a disconnected sensitive fallback does not hide another successful send', async () => {
+  assert.equal(await setup(['connected', 'disconnected'], true, new Map(), new Set(['1']), true).send('command'), true);
 });
 
 test('without the password bypass sensitive input is excluded for executor and fallback paths', async () => {

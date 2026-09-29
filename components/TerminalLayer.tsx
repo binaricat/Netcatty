@@ -2404,7 +2404,6 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       for (const sid of allSessionIds) {
         const recipientSensitive = isTerminalSensitiveInputActive(sid);
         if (!broadcastPasswordBypass && recipientSensitive) continue;
-        if (recipientSensitive) anyRecipientSensitive = true;
         const executor = snippetExecutorsRef.current.get(sid);
         if (executor) {
           pendingSends.push(Promise.resolve(executor(text, false, {
@@ -2417,7 +2416,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
               // A lagging peer can reach its password prompt by delivery time;
               // anything it receives there is its secret input, so mark the
               // whole fan-out as history-ineligible.
-              if (sent && isTerminalSensitiveInputActive(sid)) anyRecipientSensitive = true;
+              if (sent && (recipientSensitive || isTerminalSensitiveInputActive(sid))) anyRecipientSensitive = true;
               return sent && (broadcastPasswordBypass || !isTerminalSensitiveInputActive(sid));
             },
           ));
@@ -2432,6 +2431,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
           terminalBackend.writeToSession(sid, payload, {
             sensitive: focusedSensitive || recipientSensitive,
           });
+          if (session.status === 'connected' && recipientSensitive) anyRecipientSensitive = true;
           recordHistory = recordHistory || session.status === 'connected';
         }
       }
