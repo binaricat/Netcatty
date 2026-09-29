@@ -156,6 +156,13 @@ test("restoring terminal tasks strips stale conflict payloads (skip-without-clea
   assert.equal(restored.tasks[1]?.conflict?.fileName, "css");
 });
 
+test("a preflight-skipped conflict keeps its stat limit after restart", () => {
+  const pending = { ...task("late-file", "attention", 1), preflightStatSkipped: true };
+  const restored = deserializeSftpTransferCenter(serializeSftpTransferCenter([pending]));
+  assert.equal(restored.tasks[0]?.status, "attention");
+  assert.equal(restored.tasks[0]?.preflightStatSkipped, true);
+});
+
 test("history keeps unfinished tasks and caps terminal tasks by age and count", () => {
   const now = Date.UTC(2026, 6, 23);
   const old = now - 31 * 24 * 60 * 60 * 1000;

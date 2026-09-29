@@ -34,7 +34,7 @@ const SAFE_TASK_KEYS: ReadonlySet<keyof TransferTask> = new Set([
   "sourceConnectionId", "targetConnectionId", "targetHostId", "targetConnectionKey",
   "direction", "status", "totalBytes", "transferredBytes", "speed", "error",
   "startTime", "endTime", "isDirectory", "progressMode", "childTasks", "parentTaskId",
-  "sourceLastModified", "skipConflictCheck", "replaceExistingTarget", "retryable",
+  "sourceLastModified", "preflightStatSkipped", "skipConflictCheck", "replaceExistingTarget", "retryable",
   "ownerId", "sourceHostId", "sourceHostLabel", "targetHostLabel", "origin", "background",
   "phase", "controlKind", "resumable", "checkpointBytes", "priority", "updatedAt", "pauseUnavailableReason",
   "resumeStage", "downloadCheckpointBytes", "uploadCheckpointBytes",
@@ -58,6 +58,7 @@ export function sanitizeSftpTransferTask(value: unknown): TransferTask | null {
     if (source[key] !== undefined) sanitized[key] = source[key];
   }
   const task = sanitized as unknown as TransferTask;
+  if (task.preflightStatSkipped !== true) task.preflightStatSkipped = undefined;
   if (!Number.isSafeInteger(task.directoryEntryIndex) || (task.directoryEntryIndex ?? -1) < 0) {
     task.directoryEntryIndex = undefined;
   }
