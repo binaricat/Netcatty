@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   commitTextareaChange,
+  continuedCompositionData,
   continuedCompositionPrefix,
   keepLiveImeTranscriptionSingle,
   rememberTextareaCommit,
@@ -17,6 +18,14 @@ test("commitTextareaChange appends the new suffix", () => {
   assert.equal(commitTextareaChange("\u6211\u662f\u771f\u7684", "\u6211\u662f\u771f\u7684\u725b\u903c"), "\u725b\u903c");
   assert.equal(commitTextareaChange("", "\u6211\u662f\u771f\u7684"), "\u6211\u662f\u771f\u7684");
   assert.equal(commitTextareaChange("ls ", "ls \uff0c"), "\uff0c");
+});
+
+test("commitTextareaChange counts a supplementary-plane character as one grapheme", () => {
+  const emoji = "\u{1F600}";
+  const other = "\u{1F601}";
+  assert.equal(commitTextareaChange(`a${emoji}`, "aX"), `${BACKSPACE}X`);
+  assert.equal(commitTextareaChange(emoji, other), `${BACKSPACE}${other}`);
+  assert.equal(commitTextareaChange(`a${emoji}`, "a"), BACKSPACE);
 });
 
 test("commitTextareaChange deletes the whole tail and retypes the new one", () => {
@@ -64,6 +73,28 @@ test("continuedCompositionPrefix keeps a new composition after a finished line",
       textareaAtStart: "\u6211\u771f",
     }, "\u6211\u771f"),
     "\u6211",
+  );
+});
+
+test("continuedCompositionData rewrites a revised hypothesis instead of appending it", () => {
+  const marker = {
+    continued: true,
+    pendingPrevious: "abcde",
+    alreadySent: "abcde",
+    textareaAtStart: "abXde",
+  };
+  assert.equal(
+    continuedCompositionData(marker, "abXde", "abXde"),
+    `${BACKSPACE}${BACKSPACE}${BACKSPACE}Xde`,
+  );
+  assert.equal(
+    continuedCompositionData({
+      continued: true,
+      pendingPrevious: "hello",
+      alreadySent: "",
+      textareaAtStart: "hello",
+    }, "\u4f60", "hello\u4f60"),
+    "\u4f60",
   );
 });
 
@@ -254,6 +285,24 @@ test("an equal-length rewrite does not resend the shared prefix", async () => {
   await flushTimers();
 
   assert.deepEqual(helper.sent, [BACKSPACE, BACKSPACE, "XY"]);
+});
+
+test("a revised composition replaces the hypothesis already on the PTY", async () => {
+  const helper = createHarness();
+  install(helper);
+
+  helper.keydown({ keyCode: 229 });
+  helper._textarea.value = "abcde";
+  await flushTimers();
+
+  helper.keydown({ keyCode: 229 });
+  helper._textarea.value = "abXde";
+  helper.compositionstart();
+  helper.compositionend();
+  await flushTimers();
+  await flushTimers();
+
+  assert.deepEqual(helper.sent, ["abcde", BACKSPACE, BACKSPACE, BACKSPACE, "Xde"]);
 });
 
 test("a one-character hypothesis is not repeated when composition extends it", async () => {

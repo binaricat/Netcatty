@@ -12,6 +12,11 @@
  */
 
 const BACKSPACE = "\x7f";
+const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+
+function graphemes(value: string): string[] {
+  return Array.from(graphemeSegmenter.segment(value), (part) => part.segment);
+}
 
 export type ImeCompositionCommitTarget = {
   _textarea: { value: string };
@@ -52,7 +57,7 @@ export function commitTextareaChange(previous: string, next: string): string {
   if (next.startsWith(previous)) return next.slice(previous.length);
   if (previous.startsWith(next)) {
     if (next.length === 0) return BACKSPACE;
-    return BACKSPACE.repeat(previous.length - next.length);
+    return BACKSPACE.repeat(graphemes(previous.slice(next.length)).length);
   }
   return rewriteDivergingSpan(previous, next);
 }
@@ -102,14 +107,54 @@ export function continuedCompositionPrefix(
 }
 
 function rewriteDivergingSpan(previous: string, next: string): string {
+  const previousParts = graphemes(previous);
+  const nextParts = graphemes(next);
   let start = 0;
-  const shared = Math.min(previous.length, next.length);
-  while (start < shared && previous.charCodeAt(start) === next.charCodeAt(start)) {
-    start += 1;
-  }
+  const shared = Math.min(previousParts.length, nextParts.length);
+  while (start < shared && previousParts[start] === nextParts[start]) start += 1;
   // The cursor stays after the last cell. A shared suffix is still part of
-  // the tail that must be deleted and typed again.
-  return BACKSPACE.repeat(previous.length - start) + next.slice(start);
+  // the tail that must be deleted and typed again. Count graphemes so an
+  // emoji is one deletion, not the two UTF-16 units of a surrogate pair.
+  return BACKSPACE.repeat(previousParts.length - start) + nextParts.slice(start).join("");
+}
+
+/**
+ * What a continued composition should write. Null means this composition is a
+ * new word and the caller sends the slice unchanged.
+ *
+ * An extension of the snapshot sends only the new suffix. A revision sends
+ * the same edit the cancelled textarea timer would have sent, so `abcde`
+ * replaced by `abXde` does not get appended after the old hypothesis.
+ */
+export function continuedCompositionData(
+  marker: ImeCompositionMarker | undefined,
+  compositionText: string,
+  textareaNow: string,
+): string | null {
+  if (!marker?.continued || !compositionText) return null;
+  const previous = marker.pendingPrevious;
+  if (!previous) return null;
+  if (compositionText.startsWith(previous)) return compositionText.slice(previous.length);
+  if (
+    marker.alreadySent.length > 0
+    && compositionText.startsWith(marker.alreadySent)
+    && (textareaNow.endsWith(marker.alreadySent) || marker.textareaAtStart.endsWith(marker.alreadySent))
+  ) {
+    return compositionText.slice(marker.alreadySent.length);
+  }
+  if (textareaNow === compositionText || marker.textareaAtStart === compositionText) {
+    return commitTextareaChange(previous, compositionText);
+  }
+  if (textareaNow.endsWith(compositionText) && textareaNow.length > compositionText.length) {
+    const headLength = textareaNow.length - compositionText.length;
+    if (
+      previous.length >= headLength
+      && textareaNow.startsWith(previous.slice(0, headLength))
+    ) {
+      return commitTextareaChange(previous.slice(headLength), compositionText);
+    }
+  }
+  return null;
 }
 
 function emitPtyData(helper: ImeCompositionCommitTarget, data: string): void {
@@ -144,12 +189,16 @@ function deliverComposition(
   compositionText: string,
   marker: ImeCompositionMarker | undefined,
 ): void {
-  const continued = continuedCompositionPrefix(marker, compositionText);
-  const live = !continued && helper._dataAlreadySent && compositionText.startsWith(helper._dataAlreadySent)
+  const continued = continuedCompositionData(marker, compositionText, helper._textarea.value);
+  if (continued !== null) {
+    if (continued.length > 0) emitPtyData(helper, continued);
+    if (!helper._isComposing) helper._dataAlreadySent = "";
+    return;
+  }
+  const live = helper._dataAlreadySent && compositionText.startsWith(helper._dataAlreadySent)
     ? helper._dataAlreadySent
     : "";
-  const strip = continued || live;
-  const data = strip ? compositionText.slice(strip.length) : compositionText;
+  const data = live ? compositionText.slice(live.length) : compositionText;
   if (data.length > 0) emitPtyData(helper, data);
   if (!helper._isComposing) helper._dataAlreadySent = "";
 }
