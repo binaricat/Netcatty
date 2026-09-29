@@ -77,12 +77,29 @@ export function formatKeyboardInteractiveServerPrompt(request: KeyboardInteracti
 const isAPasswordPrompt = (prompt: KeyboardInteractivePrompt) => {
   if (prompt.echo) return false;
   const lower = prompt.prompt.toLowerCase();
-  if (!lower.includes("password") && !lower.includes("passwd")) return false;
+  // Recognize the same password keywords as sshAuthHelper.cjs
+  // PASSWORD_PROMPT_PATTERN, including CJK "密码" / "口令" so Chinese-localized
+  // PAM prompts (e.g. "密码：") count as password slots and the
+  // defaultSavePassword flow works for them (#3558).
+  if (!/passw(or)?d|密\s*码|口\s*令/i.test(prompt.prompt)) return false;
   // Keep aligned with electron/bridges/sshAuthHelper.cjs OTP_PROMPT_PATTERN so
   // the modal never prefills the host login password into a second-factor field
   // (#2150). Backend also omits savedPassword for those challenges; this is
-  // defense in depth if a caller still passes it.
+  // defense in depth if a caller still passes it. CJK entries mirror that
+  // pattern's CJK blocklist (动态密码 / 一次性密码 / 二次密码 ...).
   if (
+    lower.includes("动态") ||
+    lower.includes("一次性") ||
+    lower.includes("验证码") ||
+    lower.includes("验证信息") ||
+    lower.includes("令牌") ||
+    lower.includes("双因素") ||
+    lower.includes("多因素") ||
+    lower.includes("短信验证") ||
+    lower.includes("手机验证") ||
+    lower.includes("二次") ||
+    lower.includes("安全密码") ||
+    lower.includes("挑战码") ||
     lower.includes("one-time") ||
     lower.includes("otp") ||
     lower.includes("verification") ||

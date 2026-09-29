@@ -59,3 +59,14 @@ test("keyboard-interactive modal pre-checks save only on the post-failed-auto-fi
   // require a password slot to save into.
   assert.match(modalSource, /setSavePassword\(Boolean\(request\.defaultSavePassword\) && passwordPromptIndex >= 0\)/);
 });
+
+test("isAPasswordPrompt recognizes CJK password slots like sshAuthHelper PASSWORD_PROMPT_PATTERN (#3558)", () => {
+  // The modal must count "密码：" / "口令：" prompts as password slots so
+  // defaultSavePassword is honored for Chinese-localized PAM challenges.
+  assert.match(modalSource, /passw\(or\)\?d\|密\\s\*码\|口\\s\*令/);
+  // CJK second-factor wording must still be excluded (aligned with
+  // OTP_PROMPT_PATTERN in sshAuthHelper.cjs).
+  for (const blocked of ["动态", "一次性", "验证码", "令牌", "双因素", "二次", "安全密码", "挑战码"]) {
+    assert.match(modalSource, new RegExp(`lower\\.includes\\("${blocked}"\\)`));
+  }
+});
