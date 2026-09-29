@@ -542,7 +542,7 @@ export const zhCNCoreMessages: Messages = {
   'settings.appearance.windowOpacity': '窗口透明度',
   'settings.appearance.windowOpacity.desc': '调节整个应用窗口的透明度，方便叠在其他内容上方。较低时终端文字也会变淡；部分 Linux 桌面环境可能不支持。',
   'settings.appearance.appIcon': '应用图标',
-  'settings.appearance.appIcon.desc': '选择 Dock/任务栏图标风格，切换应用时更容易找到 Netcatty。运行时生效，安装包内的图标不会改变。',
+  'settings.appearance.appIcon.desc': '选择 Dock/任务栏图标风格，切换应用时更容易找到 Netcatty。Windows 通知区域图标会使用同一套风格。运行时生效，安装包内的图标不会改变。',
   'settings.appearance.appIcon.original': '原始',
   'settings.appearance.appIcon.bright': '明亮',
   'settings.appearance.appIcon.dark': '深色',
