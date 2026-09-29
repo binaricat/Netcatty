@@ -426,6 +426,13 @@ test("startSSH tells the bridge to skip shell discovery for network devices", as
   };
   const ctx = createStarterContext({
     isNetworkDevice: true,
+    host: {
+      id: "host-1",
+      label: "Target",
+      hostname: "target.example.test",
+      username: "alice",
+      deviceType: "network",
+    },
     reuseConnectionFromSessionIdRef: { current: "source-session" },
     terminalBackend,
   });
@@ -434,6 +441,7 @@ test("startSSH tells the bridge to skip shell discovery for network devices", as
 
   assert.equal(capturedOptions?.sourceSessionId, "source-session");
   assert.equal(capturedOptions?.skipShellPidDiscovery, true);
+  assert.equal(capturedOptions?.singleChannelSsh, false);
 });
 
 test("startSSH opens a fresh connection when copying a single-channel host", async () => {

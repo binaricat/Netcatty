@@ -1073,20 +1073,12 @@ function createFileOpsApi(ctx) {
         archiveSize = 0;
       }
 
-if (client.__netcattySingleChannelSsh || client.client?.__netcattySingleChannelSsh) {
-        const { runIdleShellCommand } = require("../singleChannelShell.cjs");
-        const shellResult = await runIdleShellCommand(client, command, {
-          waitMs: 15000,
-          timeoutMs: computeExtractTimeoutMs(archiveSize),
-          signal,
-        });
-        if (!shellResult) {
-          throw new Error("No idle terminal is available to extract the archive over SSH");
-        }
-        if (shellResult.code !== 0) {
-          throw new Error("Remote extraction failed: exit code " + shellResult.code);
-        }
-        return { success: true };
+      if (client.__netcattySingleChannelSsh || client.client?.__netcattySingleChannelSsh) {
+        const err = new Error(
+          "This host is configured for single-channel SSH. Remote archive extraction needs a shell channel, which this file-transfer login cannot open.",
+        );
+        err.code = "ERR_SFTP_SINGLE_CHANNEL_EXEC";
+        throw err;
       }
       const sshClient = client.client;
       if (!sshClient || typeof sshClient.exec !== "function") {

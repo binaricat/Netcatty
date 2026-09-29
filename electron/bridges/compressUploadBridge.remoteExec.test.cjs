@@ -10,7 +10,6 @@ const test = require("node:test");
 const {
   _createBoundedUtf8CollectorForTests: createBoundedUtf8Collector,
   _buildAtomicRemoteExtractionCommandForTests: buildAtomicRemoteExtractionCommand,
-  _buildInteractiveExtractCommandForTests: buildInteractiveExtractCommand,
   _runRemoteExecForTests: runRemoteExec,
 } = require("./compressUploadBridge.cjs");
 
@@ -356,7 +355,7 @@ test("compressed promotion can clean a read-only old directory instead of leakin
   );
 });
 
-test("failed single-channel compressed extraction leaves the existing folder untouched", (t) => {
+test("failed compressed extraction leaves the existing folder untouched", (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-compress-interactive-fail-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const target = path.join(root, "target");
@@ -366,13 +365,18 @@ test("failed single-channel compressed extraction leaves the existing folder unt
   const archive = path.join(target, "truncated.tar.gz");
   fs.writeFileSync(archive, Buffer.from([0x1f, 0x8b, 0x08, 0x00, 0x00]));
 
-  const command = buildInteractiveExtractCommand(archive, target, "folder");
+  const command = buildAtomicRemoteExtractionCommand({
+    compressionId: "truncated-archive",
+    archivePath: archive,
+    targetDir: target,
+    folderName: "folder",
+  });
   assert.throws(() => execFileSync("/bin/sh", ["-c", command], { stdio: "pipe" }));
   assert.equal(fs.readFileSync(path.join(finalDir, "old.txt"), "utf8"), "old");
   assert.equal(fs.readdirSync(target).some((name) => name.includes(".netcatty-compress-")), false);
 });
 
-test("cancelled single-channel compressed extraction leaves the existing folder untouched", async (t) => {
+test("cancelled compressed extraction leaves the existing folder untouched", async (t) => {
   if (process.platform === "win32") return t.skip("POSIX fifo test");
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-compress-interactive-cancel-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -383,7 +387,12 @@ test("cancelled single-channel compressed extraction leaves the existing folder 
   const archive = path.join(target, "blocked.tar.gz");
   assert.equal(spawnSync("mkfifo", [archive]).status, 0);
 
-  const command = buildInteractiveExtractCommand(archive, target, "folder");
+  const command = buildAtomicRemoteExtractionCommand({
+    compressionId: "blocked-archive",
+    archivePath: archive,
+    targetDir: target,
+    folderName: "folder",
+  });
   const child = spawn("/bin/sh", ["-c", command], { detached: true, stdio: "ignore" });
   t.after(() => {
     try { process.kill(-child.pid, "SIGKILL"); } catch { /* already gone */ }

@@ -11,12 +11,6 @@ const { spawn } = require("node:child_process");
 const { StringDecoder } = require("node:string_decoder");
 const { getTempFilePath } = require("./tempDirBridge.cjs");
 const { invalidateSshTransport } = require("./sshTransportInvalidation.cjs");
-const {
-  findIdleInteractiveShellSession,
-  waitForIdleInteractiveShell,
-  writeInteractiveShellCommand,
-  init: initSingleChannelShell,
-} = require("./singleChannelShell.cjs");
 
 /**
  * Escape shell arguments to prevent injection attacks
@@ -114,7 +108,6 @@ const COMPRESSION_SUPPORT_CACHE_TTL_MS = 10_000;
 const MAX_COMPRESSION_SUPPORT_CACHE_ENTRIES = 64;
 const REMOTE_TAR_PROBE_TIMEOUT_MS = 15_000;
 const REMOTE_CLEANUP_TIMEOUT_MS = 15_000;
-const INTERACTIVE_SHELL_WAIT_MS = 15_000;
 const LOCAL_TAR_PROBE_TIMEOUT_MS = 10_000;
 const LOCAL_TAR_KILL_GRACE_MS = 750;
 const MAX_REMOTE_EXEC_STDERR_BYTES = 64 * 1024;
@@ -400,7 +393,6 @@ function terminateCompressionProcess(compression) {
 function init(deps) {
   sftpClients = deps.sftpClients;
   transferBridge = deps.transferBridge;
-  initSingleChannelShell(deps.sessions || null);
 }
 
 /**
@@ -453,22 +445,6 @@ async function checkTarAvailable(signal) {
 }
 
 
-function buildInteractiveExtractCommand(archivePath, targetDir, folderName) {
-  const script = buildAtomicRemoteExtractionCommand({
-    compressionId: "single-channel",
-    archivePath,
-    targetDir,
-    folderName,
-  });
-  const delimiter = "NETCATTY_COMPRESS_EOF";
-  if (script.includes(delimiter)) {
-    throw new Error("Compressed extraction script collided with its wrapper");
-  }
-  // Run in a child shell so set -e / exit cannot close the user's terminal.
-  return "sh -s <<'" + delimiter + "'\n" + script + "\n" + delimiter;
-}
-
-
 /**
  * Check if tar command is available on remote server
  */
@@ -476,10 +452,10 @@ async function checkRemoteTarAvailable(sftpId, signal) {
   try {
     const client = sftpClients.get(sftpId);
     if (!client) throw new Error("SFTP session not found");
-    // Extra exec on a single-channel bastion drops the whole SFTP login.
-    // Folder uploads then fall back to per-file SFTP.
-    if (client.__netcattySingleChannelSsh) {
-      return Boolean(findIdleInteractiveShellSession(client));
+    // Probing tar would open a second channel and drop this SFTP login.
+    // The renderer then uploads the folder file by file.
+    if (client.__netcattySingleChannelSsh || client.client?.__netcattySingleChannelSsh) {
+      return false;
     }
 
     // Try to execute tar --version via SSH
@@ -597,7 +573,11 @@ async function extractRemoteArchive(
 
   const sshClient = client.client;
   if (!sshClient) throw new Error("SSH client not available");
-  const singleChannel = client.__netcattySingleChannelSsh === true;
+  if (client.__netcattySingleChannelSsh === true || sshClient.__netcattySingleChannelSsh === true) {
+    throw new Error(
+      "This host is configured for single-channel SSH. Compressed extraction cannot open a shell on the file-transfer login.",
+    );
+  }
 
   // Calculate timeout based on archive size
   // Base: 60 seconds minimum
@@ -611,21 +591,6 @@ async function extractRemoteArchive(
   // Extract into a sibling staging directory, then atomically swap the complete
   // folder into place. Existing directory contents are copied into the stage so
   // compressed upload keeps its historical merge semantics.
-  if (singleChannel) {
-    const session = await waitForIdleInteractiveShell(client, Math.min(INTERACTIVE_SHELL_WAIT_MS, extractionTimeout), signal);
-    if (!session) {
-      throw new Error("No idle terminal is available to extract the archive over SSH");
-    }
-    const code = await writeInteractiveShellCommand(
-      session,
-      buildInteractiveExtractCommand(archivePath, targetDir, folderName),
-      extractionTimeout,
-      signal,
-    );
-    if (code === 0) return;
-    throw new Error("Remote extraction failed: exit code " + code);
-  }
-
   const command = buildAtomicRemoteExtractionCommand({
     compressionId,
     archivePath,
@@ -1199,7 +1164,6 @@ module.exports = {
   _checkCompressedUploadSupportForTests: checkCompressedUploadSupport,
   _runRemoteExecForTests: runRemoteExec,
   _buildAtomicRemoteExtractionCommandForTests: buildAtomicRemoteExtractionCommand,
-  _buildInteractiveExtractCommandForTests: buildInteractiveExtractCommand,
   _buildRemoteArchivePathForTests: buildRemoteArchivePath,
   _createBoundedUtf8CollectorForTests: createBoundedUtf8Collector,
   _getActiveCompressionCountForTests: () => activeCompressions.size,

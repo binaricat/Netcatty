@@ -14,7 +14,7 @@ import {
   buildSystemManagerTabs,
   shouldCollectServerStats,
 } from '../../domain/systemManager/systemTarget';
-import { hostRestrictsExtraSshChannels } from '../../domain/host';
+
 import { partitionToolbarItems } from '../../domain/toolbarItemLayout';
 import { STORAGE_KEY_SYSTEM_MANAGER_TAB_LAYOUT } from '../../infrastructure/config/storageKeys';
 import type { Snippet, TerminalSession } from '../../types';
@@ -81,7 +81,7 @@ export const SystemManagerSidePanel = memo(function SystemManagerSidePanel({
   const backend = useSystemManagerBackend();
   const sessionId = session?.id ?? null;
   const isConnected = session?.status === 'connected';
-  const systemManagerSupported = !hostRestrictsExtraSshChannels(sessionHost);
+  const systemManagerSupported = sessionHost?.singleChannelSsh !== true;
 
   const capabilitiesTtlMs = terminalSettings.systemManagerProcessRefreshInterval * 1000;
 

@@ -2,7 +2,7 @@ import { useCallback } from "react";
 import type { Host, Identity, KnownHost, SSHKey, TerminalSettings } from "../../../domain/models";
 import { isEncryptedCredentialPlaceholder, sanitizeCredentialValue } from "../../../domain/credentials";
 import { resolveBridgeKeyAuth, resolveBridgeSshAgentAuth, resolveHostAuth } from "../../../domain/sshAuth";
-import { hostRestrictsExtraSshChannels, resolveHostKeepalive } from "../../../domain/host";
+import { resolveHostKeepalive } from "../../../domain/host";
 import { resolveHostSshConnectionTimeouts } from "../../../domain/sshConnectionTimeouts";
 import {
   findIncompleteProxyIdentityId,
@@ -205,7 +205,7 @@ export const buildSftpHostCredentials = ({
     // the original negotiation failure when opening their SFTP pane,
     // even though the terminal session works.
     legacyAlgorithms: host.legacyAlgorithms,
-    singleChannelSsh: hostRestrictsExtraSshChannels(host),
+    singleChannelSsh: host.singleChannelSsh === true,
     skipEcdsaHostKey: host.skipEcdsaHostKey,
     algorithmOverrides: host.algorithms,
   };

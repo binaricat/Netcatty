@@ -558,7 +558,7 @@ test("compressed upload skips remote tar exec on single-channel SSH", async () =
   assert.equal(execCalls, 0);
 });
 
-test("single-channel compressed upload stays on an idle terminal shell", async () => {
+test("single-channel compressed upload stays on per-file SFTP even when the terminal is idle", async () => {
   let execCalls = 0;
   const prompt = "[dev@host ~]$ ";
   compressUploadBridge._resetCompressionSupportCacheForTests();
@@ -590,8 +590,8 @@ test("single-channel compressed upload stays on an idle terminal shell", async (
     sftpId: "sftp-shell",
   });
 
-  assert.equal(result.supported, true);
-  assert.equal(result.remoteTar, true);
+  assert.equal(result.supported, false);
+  assert.equal(result.remoteTar, false);
   assert.equal(execCalls, 0);
 });
 
@@ -625,7 +625,7 @@ test("single-channel compressed upload falls back while the terminal line is bus
   assert.equal(execCalls, 0);
 });
 
-test("single-channel compressed upload extracts through the terminal and does not exec", async (t) => {
+test("single-channel compressed upload does not extract through the terminal", async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-compress-shell-"));
   const folderPath = path.join(root, "folder");
   fs.mkdirSync(folderPath);
@@ -689,12 +689,8 @@ test("single-channel compressed upload extracts through the terminal and does no
     totalBytes: 7,
   });
 
-  assert.equal(result.success, true);
+  assert.equal(result.success, undefined);
+  assert.match(result.error, /tar command not available on remote server/);
   assert.equal(execCalls, 0);
-  assert.equal(writes.length, 1);
-  assert.match(writes[0], /sh -s <</);
-  assert.match(writes[0], /tar -xzf "\$archive" -C "\$stage"/);
-  assert.match(writes[0], /rm -f -- /);
-  assert.equal(writes[0].includes("\u0015"), false);
-  assert.equal(writes[0].includes("\u000b"), false);
+  assert.equal(writes.length, 0);
 });

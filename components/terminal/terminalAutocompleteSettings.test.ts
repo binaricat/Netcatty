@@ -52,7 +52,7 @@ test("keeps network-device autocomplete popup but disables live preview (#1193)"
       showGhostText: false,
       showPopupMenu: true,
       livePreview: false,
-      allowLineReplacement: false,
+      allowLineReplacement: true,
       debounceMs: 100,
       minChars: 1,
       maxSuggestions: 8,
@@ -64,6 +64,25 @@ test("keeps network-device autocomplete popup but disables live preview (#1193)"
     resolveTerminalAutocompleteSettings({
       protocol: "ssh",
       isNetworkDevice: true,
+    }),
+    { livePreview: false },
+  );
+});
+
+test("single-channel bastions disable live preview and line replacement", () => {
+  const settings = resolveTerminalAutocompleteSettings({
+    protocol: "ssh",
+    restrictPtyRewrites: true,
+    terminalSettings: {
+      autocompleteEnabled: true,
+    },
+  });
+  assert.equal(settings?.livePreview, false);
+  assert.equal(settings?.allowLineReplacement, false);
+  assert.deepEqual(
+    resolveTerminalAutocompleteSettings({
+      protocol: "ssh",
+      restrictPtyRewrites: true,
     }),
     { livePreview: false, allowLineReplacement: false },
   );

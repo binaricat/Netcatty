@@ -81,7 +81,6 @@ interface SftpPaneViewProps {
   onToggleShowHiddenFiles?: () => void;
   onGoToTerminalCwd?: () => void;
   onLocatePathInTerminal?: () => void;
-  onDeleteViaTerminal?: (paths: string[]) => "sent" | "busy" | "unavailable" | "fallback";
   followTerminalCwd?: boolean;
   onToggleFollowTerminalCwd?: () => void;
   /** When true, treat this pane as always active (used by SftpSidePanel which manages visibility itself) */
@@ -99,7 +98,6 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
   onToggleShowHiddenFiles,
   onGoToTerminalCwd,
   onLocatePathInTerminal,
-  onDeleteViaTerminal,
   followTerminalCwd,
   onToggleFollowTerminalCwd,
   forceActive,
@@ -330,7 +328,6 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
     onRenameFileAtPath: callbacks.onRenameFileAtPath,
     onDeleteFilesAtPath: callbacks.onDeleteFilesAtPath,
     onClearSelection: callbacks.onClearSelection,
-    onDeleteViaTerminal,
     onMutateSuccess: (paths?: string[]) => requestNestedTreeReload(paths),
   });
   const handleUploadExternalFiles = useCallback(async (dataTransfer: DataTransfer, targetPath?: string) => {
@@ -782,7 +779,6 @@ const sftpPaneViewAreEqual = (
   if (prev.onToggleFollowTerminalCwd !== next.onToggleFollowTerminalCwd) return false;
   if (prev.onGoToTerminalCwd !== next.onGoToTerminalCwd) return false;
   if (prev.onLocatePathInTerminal !== next.onLocatePathInTerminal) return false;
-  if (prev.onDeleteViaTerminal !== next.onDeleteViaTerminal) return false;
   if (prev.onToggleShowHiddenFiles !== next.onToggleShowHiddenFiles) return false;
 
   return true;

@@ -41,7 +41,6 @@ interface UseSftpPaneDialogsParams {
   onRenameFileAtPath: SftpPaneCallbacks["onRenameFileAtPath"];
   onDeleteFilesAtPath: SftpPaneCallbacks["onDeleteFilesAtPath"];
   onClearSelection: SftpPaneCallbacks["onClearSelection"];
-  onDeleteViaTerminal?: (paths: string[]) => "sent" | "busy" | "unavailable" | "fallback";
   onMutateSuccess?: (paths?: string[]) => void;
 }
 
@@ -98,7 +97,6 @@ export const useSftpPaneDialogs = ({
   onRenameFileAtPath,
   onDeleteFilesAtPath,
   onClearSelection,
-  onDeleteViaTerminal,
   onMutateSuccess,
 }: UseSftpPaneDialogsParams): UseSftpPaneDialogsResult => {
   const [showHostPicker, setShowHostPicker] = useState(false);
@@ -273,26 +271,6 @@ export const useSftpPaneDialogs = ({
     setIsDeleting(true);
     setDeleteError(null);
     try {
-      if (onDeleteViaTerminal) {
-        const result = onDeleteViaTerminal(deleteTargetsRef.current);
-        if (result === "sent") {
-          const parents = new Set<string>();
-          for (const fullPath of deleteTargetsRef.current) parents.add(getParentPath(fullPath));
-          onMutateSuccess?.(Array.from(parents));
-          setDeleteTargets([]);
-          onClearSelection();
-          setShowDeleteConfirm(false);
-          return;
-        }
-        if (result === "busy") {
-          setDeleteError(t("sftp.deleteConfirm.terminalBusy"));
-          return;
-        }
-        if (result !== "fallback") {
-          setDeleteError(t("sftp.deleteConfirm.terminalUnavailable"));
-          return;
-        }
-      }
       const byDir = new Map<string, string[]>();
       for (const fullPath of deleteTargetsRef.current) {
         const dir = getParentPath(fullPath);
@@ -324,7 +302,7 @@ export const useSftpPaneDialogs = ({
     } finally {
       setIsDeleting(false);
     }
-  }, [isDeleting, onClearSelection, onDeleteFilesAtPath, onDeleteViaTerminal, onMutateSuccess, t]);
+  }, [isDeleting, onClearSelection, onDeleteFilesAtPath, onMutateSuccess, t]);
 
   // entryPath is the full path; renameName is initialized to the basename
   const openRenameDialog = useCallback((entryPath: string) => {

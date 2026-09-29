@@ -269,7 +269,12 @@ export const shouldSuggestNetworkDeviceMode = (opts: {
   return classifyDistroId(opts.detectedDistro) === 'network-device';
 };
 
-/** True when extra SSH exec/SFTP channels on the terminal transport are unsafe. */
+/**
+ * True when an extra exec or SFTP channel on the terminal transport is unsafe.
+ * Use this to skip probes. Do not store it as session.singleChannelSsh:
+ * network devices already have their own restrictions, and that flag means
+ * the user opted into a one-channel bastion.
+ */
 export const hostRestrictsExtraSshChannels = (
   host?: Pick<Host, 'singleChannelSsh' | 'deviceType'> | null,
 ): boolean => host?.singleChannelSsh === true || host?.deviceType === 'network';

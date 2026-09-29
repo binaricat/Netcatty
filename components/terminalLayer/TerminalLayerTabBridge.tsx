@@ -6,7 +6,7 @@ import { sessionCapabilitiesStore } from '../../application/state/sessionCapabil
 import { useSystemManagerBackend } from '../../application/state/useSystemManagerBackend';
 import { isTerminalSessionEligibleForSftpReuse } from '../../application/state/terminalConnectionReuse';
 import { resolveSystemSidebarSession } from '../../domain/systemManager/resolveSystemSession';
-import { hostRestrictsExtraSshChannels } from '../../domain/host';
+
 import type { TerminalContextReader } from '../../domain/terminalContextRead';
 import { useSystemCapabilitiesWarmup } from '../../application/state/useSystemManager';
 import { cn } from '../../lib/utils';
@@ -219,7 +219,7 @@ export function TerminalLayerTabBridge({ stableRef }: { stableRef: StableRef }) 
     if (!activeTabId || !activeSidePanelTools.has('system')) return [];
     const session = activeTerminalSessionForSystem;
     if (!session || session.status !== 'connected') return [];
-    if (hostRestrictsExtraSshChannels(activeSystemSessionHost)) return [];
+    if (activeSystemSessionHost?.singleChannelSsh === true) return [];
     return [session.id];
   }, [activeSidePanelTools, activeSystemSessionHost, activeTabId, activeTerminalSessionForSystem]);
 
