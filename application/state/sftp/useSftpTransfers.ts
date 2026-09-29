@@ -63,6 +63,12 @@ import {
   retryExternalDragDropFileUpload,
 } from "./externalDragDropRetry";
 
+// The bridge's statSftp awaits an unbounded SFTP callback, so a half-open
+// session can leave a stat pending forever. Every stat issued outside the
+// bridge is bounded with this timeout; on timeout the caller falls back to
+// stale metadata / a 0 plan instead of one hung stat blocking a batch.
+const STAT_SFTP_TIMEOUT_MS = 10_000;
+
 /** Keep the MutableRefObject mirror in sync with the process-global latch set. */
 function syncPausedTasksRef(ref: { current: Set<string> }, taskId: string, latched: boolean) {
   if (latched) ref.current.add(taskId);
@@ -637,12 +643,32 @@ export const useSftpTransfers = ({
         }
 
         if (sourceSftpId) {
-          const stat = await netcattyBridge.get()?.statSftp?.(
-            sourceSftpId,
-            task.sourcePath,
-            sourceEncoding,
-          );
-          if (stat) {
+          // This stat runs deferred (started before the conflict check) and
+          // can be awaited by the conflict path, so it must not hang on a
+          // half-open session. Bound it like the preflight stat and settle
+          // early once the task is cancelled, since a marked task cannot
+          // settle an in-flight SFTP callback itself.
+          let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
+          let cancelTimer: ReturnType<typeof setInterval> | undefined;
+          const stat = await Promise.race([
+            Promise.resolve(netcattyBridge.get()?.statSftp?.(
+              sourceSftpId,
+              task.sourcePath,
+              sourceEncoding,
+            )),
+            new Promise<undefined>((resolve) => {
+              timeoutTimer = setTimeout(() => resolve(undefined), STAT_SFTP_TIMEOUT_MS);
+            }),
+            new Promise<undefined>((resolve) => {
+              cancelTimer = setInterval(() => {
+                if (cancelledTasksRef.current.has(task.id)) resolve(undefined);
+              }, 250);
+            }),
+          ]).finally(() => {
+            if (timeoutTimer) clearTimeout(timeoutTimer);
+            if (cancelTimer) clearInterval(cancelTimer);
+          });
+          if (stat && stat.sizeKnown !== false) {
             if (!task.sourceLastModified && stat.lastModified) {
               task.sourceLastModified = stat.lastModified;
             }
@@ -653,8 +679,11 @@ export const useSftpTransfers = ({
             }
             return { size: stat.size, lastModified: stat.lastModified };
           }
+          // Unknown size (e.g. legacy SCP stat) = no discovery, matching the
+          // preflight so a 0-byte incoming size never replaces fallback
+          // metadata in the conflict dialog.
+          return null;
         }
-        return null;
       } catch (err) {
         if (!isTransferCancelledError(err)) {
           logger.debug?.("[SFTP] Deferred transfer size discovery failed", err);
@@ -1133,7 +1162,7 @@ export const useSftpTransfers = ({
         // preflight stat: on timeout the file keeps its 0 plan and the bridge
         // measures the live size during the transfer instead of one hung stat
         // blocking the entire selected batch.
-        const PREFLIGHT_STAT_TIMEOUT_MS = 10_000;
+        const PREFLIGHT_STAT_TIMEOUT_MS = STAT_SFTP_TIMEOUT_MS;
         await Promise.allSettled(remoteSingleFiles.map(async (file) => {
           let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
           try {
