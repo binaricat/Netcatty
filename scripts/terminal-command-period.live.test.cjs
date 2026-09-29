@@ -18,14 +18,27 @@ if (!process.versions.electron || process.platform !== "darwin") {
     fs.rmSync(userData, { recursive: true, force: true });
     app.exit(code);
   };
-  const bundle = require("esbuild").buildSync({
-    stdin: {
-      contents: 'export {createXTermRuntime} from "./components/terminal/runtime/createXTermRuntime"; export {DEFAULT_TERMINAL_SETTINGS} from "./domain/models/terminal"; export {dispatchKittyKeyboardBroadcastInput} from "./components/terminal/runtime/kittyKeyboardBroadcast";',
-      loader: "ts", resolveDir: path.resolve(__dirname, ".."),
-    },
-    bundle: true, format: "cjs", platform: "browser", write: false,
-    define: { "import.meta.env.DEV": "false", "import.meta.env.PROD": "true", "import.meta": "{}" },
-  }).outputFiles[0].text;
+  const root = path.resolve(__dirname, "..");
+  let bundle;
+  try {
+    bundle = require("esbuild").buildSync({
+      stdin: {
+        contents: 'export {createXTermRuntime} from "./components/terminal/runtime/createXTermRuntime"; export {DEFAULT_TERMINAL_SETTINGS} from "./domain/models/terminal"; export {dispatchKittyKeyboardBroadcastInput} from "./components/terminal/runtime/kittyKeyboardBroadcast";',
+        loader: "ts", resolveDir: root,
+      },
+      bundle: true, format: "cjs", platform: "browser", write: false,
+      // addon-ligatures bundles lru-cache's node:diagnostics_channel import.
+      alias: {
+        "node:diagnostics_channel": path.join(root, "infrastructure/shims/nodeDiagnosticsChannel.ts"),
+        "diagnostics_channel": path.join(root, "infrastructure/shims/nodeDiagnosticsChannel.ts"),
+      },
+      define: { "import.meta.env.DEV": "false", "import.meta.env.PROD": "true", "import.meta": "{}" },
+    }).outputFiles[0].text;
+  } catch (error) {
+    console.error(error);
+    fs.rmSync(userData, { recursive: true, force: true });
+    process.exit(1);
+  }
   void app.whenReady().then(async () => {
     win = new BrowserWindow({
       show: true, width: 1000, height: 600,
