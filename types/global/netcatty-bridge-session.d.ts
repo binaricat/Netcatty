@@ -239,7 +239,6 @@ declare global {
         allowHomeFallback?: boolean;
         allowLoginShellFallback?: boolean;
         timeoutMs?: number;
-        viaInteractiveShell?: boolean;
       },
     ): Promise<{ success: boolean; cwd?: string; error?: string }>;
     /**

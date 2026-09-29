@@ -335,19 +335,6 @@ function createSessionOpsApi(ctx) {
         singleChannelSsh: !!session.singleChannelSsh,
       });
       const bastionPwdBlock = extraExecUnsupportedError(session);
-      // 单通道不能再开 exec。只在当前交互 shell 里执行 pwd，避免把终端踢掉。
-      if (session.singleChannelSsh && payload && payload.viaInteractiveShell === true) {
-        try {
-          const { readInteractivePwd } = require("../singleChannelShell.cjs");
-          const cwd = await readInteractivePwd(session, { waitMs: timeoutMs, timeoutMs });
-          if (!cwd || cwd.charAt(0) !== "/") {
-            return { success: false, error: "Could not read the interactive shell directory" };
-          }
-          return { success: true, cwd };
-        } catch (err) {
-          return { success: false, error: (err && err.message) || String(err) };
-        }
-      }
       if (bastionPwdBlock) return bastionPwdBlock;
       if (
         session.blockUntargetedCwdProbe

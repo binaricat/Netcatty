@@ -12,8 +12,6 @@ type SessionPwdOptions = {
    * When omitted, follows allowHomeFallback (backend default).
    */
   allowLoginShellFallback?: boolean;
-  /** 单通道：在当前交互 shell 执行 pwd，不要再开 exec channel。 */
-  viaInteractiveShell?: boolean;
 };
 
 export type RendererCwdSource = TerminalCwdSource;
@@ -141,7 +139,6 @@ export type ProbeBackendSessionCwdAfterCommandOptions = {
   getOsc7Signal: () => number;
   getSessionPwd: (sessionId: string, options?: SessionPwdOptions) => Promise<SessionPwdResult>;
   canProbe?: () => boolean | Promise<boolean>;
-  viaInteractiveShell?: boolean;
 };
 
 /** Probe backend pwd when OSC 7 did not report after a command. */
@@ -151,7 +148,6 @@ export const probeBackendSessionCwdAfterCommand = async ({
   getOsc7Signal,
   getSessionPwd,
   canProbe = () => true,
-  viaInteractiveShell = false,
 }: ProbeBackendSessionCwdAfterCommandOptions): Promise<string | null> => {
   if (getOsc7Signal() !== osc7SignalAtCommand) return null;
   const allowed = await canProbe();
@@ -164,7 +160,6 @@ export const probeBackendSessionCwdAfterCommand = async ({
     const result = await getSessionPwd(sessionId, {
       allowHomeFallback: false,
       allowLoginShellFallback: false,
-      ...(viaInteractiveShell ? { viaInteractiveShell: true } : {}),
     });
     if (getOsc7Signal() !== osc7SignalAtCommand) return null;
     return result.success ? normalizeCwd(result.cwd) : null;

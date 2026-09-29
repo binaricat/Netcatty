@@ -1682,16 +1682,6 @@ function writeToSessionNow(payload, data, logRewrite = payload.logRewrite) {
         // superseded async input never reach this point.
         session.pendingCwdRecoveryAfterUserCommand = true;
       }
-      if (
-        session.singleChannelSsh === true
-        && !payload.automated
-        && payload.sensitive !== true
-        && !isTerminalReportSequence(data)
-        && /[\r\n]/.test(String(data || ""))
-      ) {
-        // 记下回车前的提示符。后面的 pwd 必须看到新的空闲提示符，不能把旧提示符当成命令已结束。
-        require("./singleChannelShell.cjs").markInteractiveCommandBaseline(session);
-      }
       if (shouldLogInterruptWrite) {
         logTerminalInterruptDebug("ssh-stream-write-done", {
           writeResult,

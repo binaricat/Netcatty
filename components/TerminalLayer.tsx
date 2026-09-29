@@ -110,7 +110,7 @@ import {
   DEFAULT_TERMINAL_SIDE_PANEL_AUTO_OPEN_TAB,
   resolveSessionSidePanelAutoOpen,
 } from '../domain/terminalSidePanelAutoOpen';
-import { resolveCommandCwdProbeMode } from './terminalLayer/commandCwdProbe';
+import { shouldProbeCommandCwd } from './terminalLayer/commandCwdProbe';
 import {
   resolvePreferredTerminalCwd,
   scheduleBackendCwdProbeAfterCommand,
@@ -1318,20 +1318,13 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     const visibleSftpHost = tabId && sidePanelLayoutHasTool(sidePanelLayoutsRef.current.get(tabId), 'sftp')
       ? sftpHostForTabRef.current.get(tabId) ?? null
       : null;
-    const detectedDeviceClass = classifyDistroId(sessionHost?.distro);
-    const isNetworkDevice = sessionHost?.deviceType === 'network'
-      || detectedDeviceClass === 'network-device';
-    const probeMode = resolveCommandCwdProbeMode({
+    if (!shouldProbeCommandCwd({
       restoreTerminalCwd,
       visibleSftpHost,
       sessionHost,
       globalSftpFollowTerminalCwd: sftpFollowTerminalCwdRef.current,
       restrictExtraSshChannels: hostRestrictsExtraSshChannels(sessionHost),
-      singleChannelSsh: sessionHost?.singleChannelSsh === true,
-      isNetworkDevice,
-      command,
-    });
-    if (probeMode === 'none') return;
+    })) return;
 
     const osc7SignalAtCommand = terminalOsc7SignalBySessionRef.current.get(sessionId) ?? 0;
     const probeGeneration = (cwdProbeGenerationRef.current.get(sessionId) ?? 0) + 1;
@@ -1342,10 +1335,8 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       osc7SignalAtCommand,
       getOsc7Signal: () => terminalOsc7SignalBySessionRef.current.get(sessionId) ?? 0,
       getSessionPwd: (id, options) => terminalBackend.getSessionPwd(id, options),
-      viaInteractiveShell: probeMode === 'interactive-pwd',
       canProbe: async () => {
         if (cwdProbeGenerationRef.current.get(sessionId) !== probeGeneration) return false;
-        if (probeMode === 'interactive-pwd') return true;
         const host = sessionHostsMapRef.current.get(sessionId);
         if (!host) return false;
         const hostDeviceClass = classifyDistroId(host.distro);
