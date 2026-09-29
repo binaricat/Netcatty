@@ -482,13 +482,16 @@ describe('handleVaultAgentOp vault hosts', () => {
     } as unknown as NetcattyBridge));
     const saved = { id: 'saved-host', label: 'Saved', hostname: 'saved.example', port: 22 } as Host;
     const temporary = { id: 'temporary-host', label: 'Temporary', hostname: 'temp.example', port: 22, ephemeral: true } as Host;
-    const deps = createDeps({ hosts: [saved, temporary] });
+    const serial = { id: 'serial-host', label: 'Serial', hostname: 'ttyUSB0', protocol: 'serial' } as Host;
+    const deps = createDeps({ hosts: [saved, temporary, serial] });
 
     await handleVaultAgentOp('host.open', { hostId: saved.id, chatSessionId: '__external_mcp__' }, deps);
     await handleVaultAgentOp('host.open', { hostId: temporary.id, chatSessionId: '__external_mcp__' }, deps);
+    await handleVaultAgentOp('host.open', { hostId: serial.id, chatSessionId: '__external_mcp__' }, deps);
 
     assert.deepEqual(merged.map(({ sessions, scope }) => ({ savedHostId: sessions[0]?.savedHostId, scope })), [
       { savedHostId: saved.id, scope: '__external_mcp__' },
+      { savedHostId: undefined, scope: '__external_mcp__' },
       { savedHostId: undefined, scope: '__external_mcp__' },
     ]);
   });

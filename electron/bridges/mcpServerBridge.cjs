@@ -1202,7 +1202,9 @@ function buildOpenedSessionMeta(result, sessionId) {
     deviceType: host.deviceType || "",
     connected: result?.status === "connected",
     hostId: result?.hostId || host.id || "",
-    savedHostId: result?.hostId || host.id || "",
+    savedHostId: result?.savedHostId && result.savedHostId === (result?.hostId || host.id)
+      ? result.savedHostId
+      : "",
     hostChain: [],
     activePortForwards: [],
   };

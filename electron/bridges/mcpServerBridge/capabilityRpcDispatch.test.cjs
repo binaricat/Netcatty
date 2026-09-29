@@ -121,6 +121,7 @@ test("host_open names its vault host and cannot borrow another host's grant", as
     test: { id: "test", label: "Test server", hostname: "test.example" },
     prod: { id: "prod", label: "Production", hostname: "prod.example" },
     temporary: { id: "temporary", label: "Temporary", hostname: "temp.example", ephemeral: true },
+    serial: { id: "serial", label: "Serial device", hostname: "ttyUSB0", protocol: "serial" },
   };
   const dispatch = createTestDispatcher({
     evaluatePermissionWithGrants,
@@ -144,10 +145,12 @@ test("host_open names its vault host and cannot borrow another host's grant", as
   assert.equal((await dispatch("public/vault/hosts/open", { hostId: "test" })).ok, true);
   assert.equal((await dispatch("public/vault/hosts/open", { hostId: "prod" })).ok, false);
   assert.equal((await dispatch("public/vault/hosts/open", { hostId: "temporary" })).ok, false);
+  assert.equal((await dispatch("public/vault/hosts/open", { hostId: "serial" })).ok, false);
   assert.deepEqual(opened, ["test"]);
   assert.deepEqual(approvals, [
     { sessionId: "", hostId: "prod", label: "Production", hostname: "prod.example" },
     { sessionId: "", hostId: "", label: "Temporary", hostname: "temp.example" },
+    { sessionId: "", hostId: "", label: "Serial device", hostname: "ttyUSB0" },
   ]);
 });
 

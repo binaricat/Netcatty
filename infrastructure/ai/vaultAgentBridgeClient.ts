@@ -599,10 +599,13 @@ async function registerOpenedSessionInMcpScope(
     : host.moshEnabled
       ? 'mosh'
       : (host.protocol || 'ssh');
+  const savedHostId = isSavedVaultHost(host) && protocol !== 'serial' && protocol !== 'local'
+    ? host.id
+    : undefined;
   const sessionInfo = {
     sessionId,
     hostId: host.id,
-    ...(isSavedVaultHost(host) ? { savedHostId: host.id } : {}),
+    ...(savedHostId ? { savedHostId } : {}),
     hostname: host.hostname || '',
     label: host.label || host.hostname || sessionId,
     os: resolveHostOs(host),
@@ -697,6 +700,9 @@ export async function handleVaultAgentOp(
         ok: true,
         sessionId: opened.sessionId,
         hostId: effectiveHost.id,
+        ...(isSavedVaultHost(effectiveHost) && protocol !== 'serial' && protocol !== 'local'
+          ? { savedHostId: effectiveHost.id }
+          : {}),
         status: 'connecting',
         protocol,
         host: summarizeHostForList(effectiveHost),

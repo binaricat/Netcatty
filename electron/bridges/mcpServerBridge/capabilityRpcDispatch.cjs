@@ -150,7 +150,9 @@ function createCapabilityRpcDispatcher(deps) {
       const host = lookup?.host?.id === requestedHostId ? lookup.host : null;
       approvalTarget = {
         sessionId: "",
-        hostId: host && host.ephemeral !== true ? requestedHostId : "",
+        hostId: host && host.ephemeral !== true && host.protocol !== "serial" && host.protocol !== "local"
+          ? requestedHostId
+          : "",
         label: host?.label || host?.hostname || requestedHostId,
         hostname: host?.hostname || "",
       };
