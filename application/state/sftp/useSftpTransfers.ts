@@ -75,8 +75,8 @@ const STAT_SFTP_TIMEOUT_MS = 10_000;
 // in-flight preflight stats and skip the re-stat entirely once the selection
 // grows past a bound (files beyond the cap stay on the safe 0 plan, which
 // makes the bridge measure the live size anyway).
-const PREFLIGHT_STAT_CONCURRENCY = 8;
-const PREFLIGHT_STAT_MAX_FILES = 128;
+export const PREFLIGHT_STAT_CONCURRENCY = 8;
+export const PREFLIGHT_STAT_MAX_FILES = 128;
 
 /** Keep the MutableRefObject mirror in sync with the process-global latch set. */
 function syncPausedTasksRef(ref: { current: Set<string> }, taskId: string, latched: boolean) {
@@ -222,6 +222,9 @@ export const useSftpTransfers = ({
   const transfersRef = useRef(transfers);
   const conflictsRef = useRef(conflicts);
   conflictsRef.current = conflicts;
+  // Remote files past the preflight cap keep an unknown plan. Mark them so
+  // deferred discovery does not stat the whole tail at once.
+  const preflightSkippedTaskIdsRef = useRef(new Set<string>());
 
   // When the retained panel is re-opened, catch up React state from the ref that
   // kept receiving progress while the surface was hidden.
@@ -631,7 +634,12 @@ export const useSftpTransfers = ({
     // Returns the discovered stat so callers that need the size (e.g. the
     // overwrite conflict dialog) can await this instead of reading stale
     // metadata from the local task copy.
-    const discoverTransferSize = async (): Promise<{ size: number; lastModified?: number } | null> => {
+    const discoverTransferSize = async (): Promise<{
+      size: number;
+      lastModified?: number;
+      /** False for pane-listing display data. That size must not become the plan. */
+      plan: boolean;
+    } | null> => {
       // When the endpoint cannot stat the source (legacy SCP returns the
       // sizeKnown: false placeholder) or the stat fails, the transfer plan
       // stays unknown (0 bytes, so the bridge measures the live size). The
@@ -639,11 +647,11 @@ export const useSftpTransfers = ({
       // retained cached listing entry instead of reporting 0 bytes — but only
       // for the dialog; the plan itself must never take the listing's
       // possibly stale size back.
-      const cachedListingStatForDialog = (): { size: number; lastModified?: number } | null => {
+      const cachedListingStatForDialog = (): { size: number; lastModified?: number; plan: false } | null => {
         if (getParentPath(task.sourcePath) !== sourcePane.connection?.currentPath) return null;
-        const entry = sourcePane.files.find((entry) => entry.name === task.fileName);
+        const entry = sourcePane.files.find((candidate) => candidate.name === task.fileName);
         if (!entry || !(entry.size > 0)) return null;
-        return { size: entry.size, lastModified: entry.lastModified };
+        return { size: entry.size, lastModified: entry.lastModified, plan: false };
       };
       try {
         if (task.totalBytes > 0 || !!task.sourceLastModified) return null;
@@ -659,12 +667,15 @@ export const useSftpTransfers = ({
                 totalBytes: stat.size,
               });
             }
-            return { size: stat.size, lastModified: stat.lastModified };
+            return { size: stat.size, lastModified: stat.lastModified, plan: true };
           }
           return null;
         }
 
         if (sourceSftpId) {
+          if (preflightSkippedTaskIdsRef.current.has(task.id)) {
+            return cachedListingStatForDialog();
+          }
           // This stat runs deferred (started before the conflict check) and
           // can be awaited by the conflict path, so it must not hang on a
           // half-open session. Bound it like the preflight stat and settle
@@ -699,7 +710,7 @@ export const useSftpTransfers = ({
                 totalBytes: stat.size,
               });
             }
-            return { size: stat.size, lastModified: stat.lastModified };
+            return { size: stat.size, lastModified: stat.lastModified, plan: true };
           }
           // Unknown size (e.g. legacy SCP stat): keep the transfer plan
           // unknown so a 0-byte placeholder never replaces trusted metadata,
@@ -814,6 +825,9 @@ export const useSftpTransfers = ({
       // Cancel/Stop may have won while conflict stats were in flight.
       if (cancelledTasksRef.current.has(task.id)) return "cancelled";
 
+      // null means the plan size is still unknown. A verified 0-byte stat is 0,
+      // not null, so an empty file does not pick up a stale listing size.
+      let verifiedPlanBytes: number | null = task.totalBytes > 0 ? task.totalBytes : null;
       if (conflict && sizeDiscoveryPromise) {
         // The task's totalBytes may still be 0 here because discovery ran
         // deferred and updateTask never mutates the local task copy. Await
@@ -823,6 +837,7 @@ export const useSftpTransfers = ({
         if (discovered && discovered.size >= 0) {
           conflict.newSize = discovered.size;
           if (discovered.lastModified) conflict.newModified = discovered.lastModified;
+          if (discovered.plan) verifiedPlanBytes = discovered.size;
         }
       }
 
@@ -889,7 +904,9 @@ export const useSftpTransfers = ({
         setConflicts((prev) => [...prev, conflict]);
         updateTask({
           status: "attention",
-          totalBytes: conflict.newSize || task.totalBytes || 0,
+          // Dialog newSize may be the listing fallback (plan: false). Only a
+          // verified stat may become the plan; 0 stays omitted at startStreamTransfer.
+          totalBytes: verifiedPlanBytes ?? 0,
           conflict,
         });
         return "attention";
@@ -1177,6 +1194,9 @@ export const useSftpTransfers = ({
       const remoteSingleFiles = sourcePane.connection.isLocal
         ? []
         : sourceFiles.filter((file) => !file.isDirectory);
+      const preflightSkippedNames = new Set(
+        remoteSingleFiles.slice(PREFLIGHT_STAT_MAX_FILES).map((file) => file.name),
+      );
       if (remoteSingleFiles.length > 0 && sourceSftpIdForPlan) {
         const sourceEncoding = sourcePane.filenameEncoding || "auto";
         // The bridge's statSftp awaits an unbounded SFTP callback, so a
@@ -1317,8 +1337,12 @@ export const useSftpTransfers = ({
           }
           continue;
         }
+        const taskId = crypto.randomUUID();
+        if (preflightSkippedNames.has(file.name)) {
+          preflightSkippedTaskIdsRef.current.add(taskId);
+        }
         newTasks.push({
-          id: crypto.randomUUID(),
+          id: taskId,
           batchId,
           fileName: file.name,
           originalFileName: file.name,

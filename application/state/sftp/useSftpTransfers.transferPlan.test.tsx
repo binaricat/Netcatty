@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import React from "react";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
-import { useSftpTransfers } from "./useSftpTransfers";
+import { PREFLIGHT_STAT_CONCURRENCY, PREFLIGHT_STAT_MAX_FILES, useSftpTransfers } from "./useSftpTransfers";
 import { sftpTransferCenterStore } from "../sftpTransferCenterStore";
 import type { SftpPane } from "./types";
 
@@ -178,3 +178,231 @@ for (const liveStatAvailable of [true, false]) {
     },
   );
 }
+
+test("stat-less remote source keeps the listing size in the overwrite dialog and leaves the plan unknown", async () => {
+  const started: StartOptions[] = [];
+  const restore = installGlobals({
+    statSftp: async () => ({
+      name: "aops_dns_view_demo.sh",
+      type: "file" as const,
+      size: 0,
+      sizeKnown: false,
+      lastModified: 0,
+    }),
+    statLocal: async () => ({
+      name: "aops_dns_view_demo.sh",
+      type: "file" as const,
+      size: 100,
+      lastModified: 1,
+    }),
+    startStreamTransfer: async (options: StartOptions) => {
+      started.push(options);
+      return {};
+    },
+    pauseTransfer: async () => ({ success: false, reason: "Transfer is no longer active" }),
+    resumeTransfer: async () => ({ success: false, reason: "Transfer is no longer active" }),
+  });
+
+  let ops: ReturnType<typeof useSftpTransfers> | undefined;
+  let renderer: ReactTestRenderer | undefined;
+  function Probe() {
+    ops = useSftpTransfers({
+      ownerId: "plan-owner-statless",
+      getActivePane: (side) => (side === "left" ? makePane("left") : makePane("right")),
+      getPaneByConnectionId: () => null,
+      getTabByConnectionId: () => null,
+      updateTab: () => undefined,
+      refresh: async () => undefined,
+      clearCacheForConnection: () => undefined,
+      handleSessionError: () => undefined,
+      sftpSessionsRef: { current: new Map([["remote-conn", "sftp-remote"]]) },
+      connectionCacheKeyMapRef: { current: new Map() },
+      listLocalFiles: async () => [],
+      listRemoteFiles: async () => [],
+    });
+    return null;
+  }
+
+  try {
+    await act(async () => { renderer = create(React.createElement(Probe)); });
+    await act(async () => {
+      await ops!.startTransfer(
+        [{ name: "aops_dns_view_demo.sh", isDirectory: false }],
+        "left",
+        "right",
+      );
+    });
+
+    assert.equal(started.length, 0, "an unresolved conflict must not start the transfer");
+    assert.equal(ops!.conflicts.length, 1);
+    assert.equal(ops!.conflicts[0].newSize, 3622);
+    assert.equal(ops!.conflicts[0].newModified, 1758000000000);
+    const task = ops!.transfers.find((row) => row.fileName === "aops_dns_view_demo.sh");
+    assert.equal(task?.totalBytes, 0, "listing size must not become the transfer plan");
+    assert.equal(task?.status, "attention");
+  } finally {
+    renderer?.unmount();
+    restore();
+  }
+});
+
+test("remote transfer preflight stats stay within the concurrency cap and file bound", async () => {
+  const limit = PREFLIGHT_STAT_CONCURRENCY;
+  const fileCount = limit + 4;
+  let inflight = 0;
+  let maxInflight = 0;
+  let releaseAll = () => {};
+  const gate = new Promise<void>((resolve) => { releaseAll = resolve; });
+  let reachedCap = () => {};
+  const hitCap = new Promise<void>((resolve) => { reachedCap = resolve; });
+  const names = Array.from({ length: fileCount }, (_, index) => `file-${index}.bin`);
+
+  const restore = installGlobals({
+    statSftp: async () => {
+      inflight += 1;
+      maxInflight = Math.max(maxInflight, inflight);
+      if (inflight >= limit) reachedCap();
+      try {
+        await gate;
+      } finally {
+        inflight -= 1;
+      }
+      return {
+        name: "file",
+        type: "file" as const,
+        size: 10,
+        sizeKnown: true,
+        lastModified: 1,
+      };
+    },
+    statLocal: async () => null,
+    startStreamTransfer: async (options: StartOptions) => {
+      sftpTransferCenterStore.ingestBackgroundEvent({
+        type: "completed",
+        transferId: options.transferId,
+        transferred: options.totalBytes ?? 0,
+        totalBytes: options.totalBytes ?? 0,
+        lifecycleEpoch: 0,
+      });
+      return {};
+    },
+    pauseTransfer: async () => ({ success: false, reason: "Transfer is no longer active" }),
+    resumeTransfer: async () => ({ success: false, reason: "Transfer is no longer active" }),
+  });
+
+  let ops: ReturnType<typeof useSftpTransfers> | undefined;
+  let renderer: ReactTestRenderer | undefined;
+  function Probe() {
+    ops = useSftpTransfers({
+      ownerId: "plan-owner-concurrency",
+      getActivePane: (side) => (side === "left" ? makePane("left") : makePane("right")),
+      getPaneByConnectionId: () => null,
+      getTabByConnectionId: () => null,
+      updateTab: () => undefined,
+      refresh: async () => undefined,
+      clearCacheForConnection: () => undefined,
+      handleSessionError: () => undefined,
+      sftpSessionsRef: { current: new Map([["remote-conn", "sftp-remote"]]) },
+      connectionCacheKeyMapRef: { current: new Map() },
+      listLocalFiles: async () => [],
+      listRemoteFiles: async () => [],
+    });
+    return null;
+  }
+
+  try {
+    await act(async () => { renderer = create(React.createElement(Probe)); });
+    let running: Promise<unknown> = Promise.resolve();
+    await act(async () => {
+      running = ops!.startTransfer(
+        names.map((name) => ({ name, isDirectory: false })),
+        "left",
+        "right",
+      );
+      const capTimeout = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error("preflight did not reach the concurrency cap")), 2000);
+      });
+      await Promise.race([hitCap, capTimeout]);
+    });
+    assert.equal(maxInflight, limit);
+    assert.ok(inflight <= limit);
+    releaseAll();
+    await act(async () => { await running; });
+    assert.equal(maxInflight, limit);
+  } finally {
+    releaseAll();
+    renderer?.unmount();
+    restore();
+  }
+});
+
+test("files past the preflight bound are not statted again and keep an unknown plan", async () => {
+  const extra = 2;
+  const names = Array.from({ length: PREFLIGHT_STAT_MAX_FILES + extra }, (_, index) => `bulk-${index}.bin`);
+  let statCalls = 0;
+  const started: StartOptions[] = [];
+  const restore = installGlobals({
+    statSftp: async () => {
+      statCalls += 1;
+      return {
+        name: "bulk",
+        type: "file" as const,
+        size: 20,
+        sizeKnown: true,
+        lastModified: 5,
+      };
+    },
+    statLocal: async () => null,
+    startStreamTransfer: async (options: StartOptions) => {
+      started.push(options);
+      sftpTransferCenterStore.ingestBackgroundEvent({
+        type: "completed",
+        transferId: options.transferId,
+        transferred: options.totalBytes ?? 0,
+        totalBytes: options.totalBytes ?? 0,
+        lifecycleEpoch: 0,
+      });
+      return {};
+    },
+    pauseTransfer: async () => ({ success: false, reason: "Transfer is no longer active" }),
+    resumeTransfer: async () => ({ success: false, reason: "Transfer is no longer active" }),
+  });
+
+  let ops: ReturnType<typeof useSftpTransfers> | undefined;
+  let renderer: ReactTestRenderer | undefined;
+  function Probe() {
+    ops = useSftpTransfers({
+      ownerId: "plan-owner-bound",
+      getActivePane: (side) => (side === "left" ? makePane("left") : makePane("right")),
+      getPaneByConnectionId: () => null,
+      getTabByConnectionId: () => null,
+      updateTab: () => undefined,
+      refresh: async () => undefined,
+      clearCacheForConnection: () => undefined,
+      handleSessionError: () => undefined,
+      sftpSessionsRef: { current: new Map([["remote-conn", "sftp-remote"]]) },
+      connectionCacheKeyMapRef: { current: new Map() },
+      listLocalFiles: async () => [],
+      listRemoteFiles: async () => [],
+    });
+    return null;
+  }
+
+  try {
+    await act(async () => { renderer = create(React.createElement(Probe)); });
+    await act(async () => {
+      await ops!.startTransfer(
+        names.map((name) => ({ name, isDirectory: false })),
+        "left",
+        "right",
+      );
+    });
+    assert.equal(statCalls, PREFLIGHT_STAT_MAX_FILES);
+    assert.equal(started.length, names.length);
+    const omitted = started.filter((options) => options.totalBytes === undefined);
+    assert.equal(omitted.length, extra);
+  } finally {
+    renderer?.unmount();
+    restore();
+  }
+});
