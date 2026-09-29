@@ -89,6 +89,20 @@ export function resolveVaultAgentNotes(
     : (getNotesSnapshot().notes as VaultNote[]);
 }
 
+export function applyAgentNotesUpdate(
+  notes: VaultNote[],
+  previousNotes: VaultNote[],
+  updateNotes: (notes: VaultNote[]) => boolean | void,
+): boolean | void {
+  const saved = updateNotes(notes);
+  if (saved === false) {
+    // Editor autosave keeps failed writes in memory so a draft is not lost.
+    // Agent writes must roll that draft back before another approved write.
+    updateNotes(previousNotes);
+  }
+  return saved;
+}
+
 export const haveSameVaultAgentSnapshot = (
   left: VaultAgentSnapshot,
   right: VaultAgentSnapshot,
@@ -145,6 +159,7 @@ export function useVaultAgentBridge(input: UseVaultAgentBridgeInput): void {
         ?? ((notes: VaultNote[]) => {
           console.warn('[useVaultAgentBridge] updateNotes unavailable');
           void notes;
+          return false;
         });
       return handleVaultAgentOp(op, params, {
         getHosts: () => vaultSnapshotRef.current.hosts,
@@ -239,8 +254,10 @@ export function useVaultAgentBridge(input: UseVaultAgentBridgeInput): void {
           updateKeys: current.updateKeys,
         }),
         updateNotes: (notes) => {
-          vaultSnapshotRef.current.notes = notes;
-          applyUpdateNotes(notes);
+          const previousNotes = vaultSnapshotRef.current.notes;
+          const saved = applyAgentNotesUpdate(notes, previousNotes, applyUpdateNotes);
+          vaultSnapshotRef.current.notes = saved === false ? previousNotes : notes;
+          return saved;
         },
         updateSnippets: (snippetUpdate) => {
           vaultSnapshotRef.current.snippets = typeof snippetUpdate === 'function'

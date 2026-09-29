@@ -205,7 +205,7 @@ const TOOL_INPUT_FIELDS = Object.freeze({
     title: {
       type: "string",
       optional: true,
-      description: "Optional title override for a single document. Otherwise the first heading or file name is used.",
+      description: "Optional title override for a single document. Otherwise the first level-one heading or file name is used.",
     },
     documents: {
       type: "string",

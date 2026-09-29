@@ -24,14 +24,14 @@ const VAULT_HOSTS_VS_NOTES_GUIDANCE =
  */
 const VAULT_NOTES_CLI_GUIDANCE =
   "Vault sidebar Notes vs host metadata: use notes create or notes update ONLY when the user explicitly wants "
-  + "markdown documentation in Vault → Notes. Use notes import to import generated or attached markdown as one or more sidebar notes "
-  + "(--content plus --file-name for one document, or --documents for a batch). "
+  + "markdown documentation in Vault → Notes. Use notes import --attachment-index from attachment list for attached Markdown; "
+  + "use --content-stdin for generated Markdown or --documents-stdin for a batch. Never interpolate note text into a shell command. "
   + "Read a note with notes get --note-id using the exact id from notes list; follow nextOffset with --expected-updated-at until null "
   + "before summarizing or replacing the whole note. "
   + "Host Details metadata uses vault host-notes set, not notes create. "
   + "Do not create or import a Vault note when the user asked to add a host. "
   + "If a host operation fails, report the error — do not silently create a Vault note instead. "
-  + "notes create accepts an explicit empty --content and still requires the flag. On notes update, an explicit empty --content clears the body and an explicit empty --group clears the folder; omit those flags to keep the current values. notes import accepts an empty --content. "
+  + "notes create requires a body through --content-stdin or an explicit --content (which may be empty). On notes update, an explicit empty --content clears the body and an explicit empty --group clears the folder; omit those flags to keep the current values. notes import accepts an empty --content. "
   + "notes create, notes update, notes delete, and notes import require user approval; if approval is denied, stop.";
 
 const VAULT_SCRIPTS_GUIDANCE =

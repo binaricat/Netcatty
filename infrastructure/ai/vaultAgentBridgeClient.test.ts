@@ -113,7 +113,7 @@ function createDeps(
     },
     updateNotes: (nextNotes) => {
       base.updateNotes(nextNotes);
-      overrides.updateNotes?.(nextNotes);
+      return overrides.updateNotes?.(nextNotes);
     },
     updateSnippets: (snippetUpdate) => {
       base.updateSnippets(snippetUpdate);
@@ -284,6 +284,23 @@ describe('handleVaultAgentOp vault notes', () => {
     assert.equal(deps.getNotes().length, 2);
     assert.equal(deps.getNotes()[0]?.title, 'Existing');
     assert.equal(deps.getNotes().find((note) => note.title === 'Deploy runbook')?.content, '# Heading\n\n1. Connect');
+  });
+
+  it('note writes report a storage failure instead of claiming success', async () => {
+    const note = { id: 'note-1', title: 'Existing', content: 'old', createdAt: 1, updatedAt: 1 };
+    for (const [op, params] of [
+      ['note.create', { title: 'New', content: 'body' }],
+      ['note.update', { noteId: 'note-1', content: 'new' }],
+      ['note.delete', { noteId: 'note-1' }],
+      ['note.import', { fileName: 'runbook.md', content: '# Runbook' }],
+    ] as const) {
+      const result = await handleVaultAgentOp(op, params, createDeps({
+        notes: [note],
+        updateNotes: () => false,
+      }));
+      assert.equal(result.ok, false, `${op} must not claim the write was saved`);
+      assert.match(String(result.error), /could not be saved/i);
+    }
   });
 
   it('note.import summaries omit every imported document body', async () => {

@@ -279,7 +279,7 @@ const VAULT_CAPABILITIES = [
     id: "vault.note.import",
     domain: "vault",
     status: CAPABILITY_STATUS.IMPLEMENTED,
-    description: "Import one or more markdown documents into Vault → Notes. Titles come from an explicit title, the first heading, or the file name. NOT for adding SSH hosts.",
+    description: "Import one or more markdown documents into Vault → Notes. Titles come from an explicit title, the first level-one heading, or the file name. NOT for adding SSH hosts.",
     policy: {
       write: true,
       sensitiveRead: false,

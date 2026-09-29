@@ -1051,7 +1051,7 @@
     "toolName": "vault_notes_import",
     "rpcMethod": "vault/notes/import",
     "localExecution": false,
-    "description": "Import one or more markdown documents into Vault → Notes. Titles come from an explicit title, the first heading, or the file name. NOT for adding SSH hosts. Import generated or attached markdown into Vault → Notes. Use content plus fileName for one document, or documents for a batch. This creates notes; it does not add SSH hosts. Confirm mode asks the user to approve the import.",
+    "description": "Import one or more markdown documents into Vault → Notes. Titles come from an explicit title, the first level-one heading, or the file name. NOT for adding SSH hosts. Import generated or attached markdown into Vault → Notes. Use content plus fileName for one document, or documents for a batch. This creates notes; it does not add SSH hosts. Confirm mode asks the user to approve the import.",
     "inputShape": {
       "content": {
         "type": "string",
@@ -1066,7 +1066,7 @@
       "title": {
         "type": "string",
         "optional": true,
-        "description": "Optional title override for a single document. Otherwise the first heading or file name is used."
+        "description": "Optional title override for a single document. Otherwise the first level-one heading or file name is used."
       },
       "documents": {
         "type": "string",

@@ -32,7 +32,7 @@ const KNOWN_ARTIFACT_TOOL_NAMES = [
   'scripts_targets_set',
 ] as const;
 
-const CLI_FLAGS_WITHOUT_VALUES = new Set(['--json']);
+const CLI_FLAGS_WITHOUT_VALUES = new Set(['--json', '--content-stdin', '--documents-stdin']);
 
 const CLI_ARTIFACT_TOOL_NAMES = new Map<string, string>([
   ['vault host get', 'host_get'],
@@ -96,21 +96,20 @@ export function normalizeArtifactToolName(toolName: string | undefined): string 
 
 function collectCliCommandWords(afterCli: string): string[] {
   const commandWords: string[] = [];
-  const parts = afterCli.split(/\s+/);
+  const parts = afterCli.match(/(?:[^\s"'\\]|\\.|"(?:\\.|[^"\\])*"|'[^']*')+/g) ?? [];
   for (let index = 0; index < parts.length; index += 1) {
     const part = parts[index];
     if (!part) continue;
     if (part.startsWith('-')) {
-      // --json may precede the subcommand. A valued flag ends the command
-      // once words have started, so its value is not treated as a command word.
+      // Flags may appear before or between command words. Skip a valued flag's
+      // quoted or unquoted value so note content is never a command word.
       if (CLI_FLAGS_WITHOUT_VALUES.has(part)) continue;
-      if (commandWords.length > 0) break;
       const next = parts[index + 1];
       if (next && !next.startsWith('-')) index += 1;
       continue;
     }
     commandWords.push(part);
-    if (commandWords.length === 3) break;
+    if (CLI_ARTIFACT_TOOL_NAMES.has(commandWords.join(' ')) || commandWords.length === 3) break;
   }
   return commandWords;
 }
@@ -122,7 +121,7 @@ export function inferArtifactToolNameFromCliArgs(
   if (!command) return undefined;
 
   const unwrapped = unwrapShellCommand(command);
-  const cliMatch = unwrapped.match(/(?:^|\s|["'])(?:\S*\/)?netcatty-tool-cli(?:\.(?:cjs|cmd))?(?=["'\s]|$)([\s\S]*)$/);
+  const cliMatch = unwrapped.match(/(?:^|\s|["'])(?:\S*[\\/])?netcatty-tool-cli(?:\.(?:cjs|cmd))?(?=["'\s]|$)([\s\S]*)$/);
   if (!cliMatch) return undefined;
 
   const afterCli = stripWrappingQuote(cliMatch[1] ?? '').replace(/^["']?\s*/, '');

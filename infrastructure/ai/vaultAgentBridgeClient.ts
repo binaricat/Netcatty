@@ -1023,7 +1023,7 @@ export async function handleVaultAgentOp(
         order: getNextVaultOrder(deps.getNotes()),
       });
       const nextNotes = normalizeVaultNotes([...deps.getNotes(), note]);
-      deps.updateNotes(nextNotes);
+      if (deps.updateNotes(nextNotes) === false) return { ok: false, error: 'Vault note could not be saved.' };
       return { ok: true, note: serializeVaultNoteForAgent(note) };
     }
     case 'note.update': {
@@ -1049,7 +1049,7 @@ export async function handleVaultAgentOp(
       const nextNotes = normalizeVaultNotes(
         deps.getNotes().map((entry) => (entry.id === noteId ? note : entry)),
       );
-      deps.updateNotes(nextNotes);
+      if (deps.updateNotes(nextNotes) === false) return { ok: false, error: 'Vault note could not be saved.' };
       return { ok: true, note: serializeVaultNoteForAgent(note) };
     }
     case 'note.delete': {
@@ -1057,7 +1057,9 @@ export async function handleVaultAgentOp(
       if (!deps.getNotes().some((note) => note.id === noteId)) {
         return { ok: false, error: `Vault note "${noteId}" was not found.` };
       }
-      deps.updateNotes(normalizeVaultNotes(deps.getNotes().filter((note) => note.id !== noteId)));
+      if (deps.updateNotes(normalizeVaultNotes(deps.getNotes().filter((note) => note.id !== noteId))) === false) {
+        return { ok: false, error: 'Vault note deletion could not be saved.' };
+      }
       return { ok: true, noteId };
     }
     case 'note.import': {
@@ -1066,7 +1068,7 @@ export async function handleVaultAgentOp(
       const group = typeof params.group === 'string' && params.group.trim() ? params.group.trim() : null;
       const existingIds = new Set(deps.getNotes().map((note) => note.id));
       const imported = importMarkdownPayloadsToVaultNotes(payloads, deps.getNotes(), group);
-      deps.updateNotes(imported.notes);
+      if (deps.updateNotes(imported.notes) === false) return { ok: false, error: 'Imported notes could not be saved.' };
       return {
         ok: true,
         importedCount: imported.importedCount,

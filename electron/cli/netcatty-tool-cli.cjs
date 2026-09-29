@@ -19,6 +19,13 @@ const {
 const { getCapabilityByCliCommand } = require("../capabilities/registry.cjs");
 const { CAPABILITY_STATUS } = require("../capabilities/constants.cjs");
 
+// Keep piped note data below the TCP bridge's 10 MiB receive limit, allowing
+// room for JSON escaping and the RPC envelope.
+const MAX_NOTE_STDIN_BYTES = 4 * 1024 * 1024;
+const MAX_NOTE_ATTACHMENT_BYTES = 1024 * 1024;
+const MAX_NOTE_RPC_BYTES = 8 * 1024 * 1024;
+const MAX_NOTE_IMPORT_CHARS = 512_000;
+
 function printHelp() {
   const catalogLines = formatCliHelpLines().join("\n");
   process.stdout.write(
@@ -35,7 +42,7 @@ function printHelp() {
     "  netcatty-tool-cli vault host get --host-id host_123 --json\n" +
     "  netcatty-tool-cli vault host open --host-id host_123 --json\n" +
     "  netcatty-tool-cli snippets run --snippet-id snip_1 --session sess_123 --json\n" +
-    "  netcatty-tool-cli notes import --file-name runbook.md --title \"Runbook\" --content \"# Runbook\" --json\n" +
+    "  netcatty-tool-cli notes import --attachment-index 0 --json\n" +
     "  netcatty-tool-cli portforward rules list --json\n\n" +
     "Notes:\n" +
     "  - Start the Netcatty desktop app before using this CLI.\n" +
@@ -48,7 +55,8 @@ function printHelp() {
     "  - Every `sftp <op>` always requires --session <id>, plus NETCATTY_CLI_CHAT_SESSION_ID, and only works on connected SSH-backed sessions.\n" +
     "  - Vault/portforward/snippet/notes commands use catalog-driven dispatch; see `capabilities --json` for the full list.\n" +
     "  - notes create, update, delete, and import change Vault notes and require user approval in confirm mode.\n" +
-    "  - notes create accepts --content \"\" and still requires the flag. notes update --content \"\" clears the body and --group \"\" clears the folder; omitting those flags keeps the current values. notes import accepts --content \"\".\n" +
+    "  - Use --attachment-index from attachment list for attached Markdown. Pipe generated note text through --content-stdin (or --documents-stdin for a batch). Never interpolate note text into a shell command.\n" +
+    "  - notes create requires a body via --content-stdin or an explicit --content (including an empty string). notes update --content \"\" clears the body and --group \"\" clears the folder; omitting those flags keeps the current values. notes import accepts --content \"\".\n" +
     "  - After `--`, pass exactly one shell-ready command string. Preserve quoting inside that one argument.\n" +
     "  - `cancel` stops in-flight execs, session-backed SFTP transfers, and running jobs for that chat session, then blocks further execs until `resume`.\n",
   );
@@ -82,6 +90,9 @@ function parseArgs(argv) {
     oldRemotePath: null,
     newRemotePath: null,
     content: null,
+    contentStdin: false,
+    documentsStdin: false,
+    attachmentIndex: null,
     mode: null,
     encoding: null,
     hostId: null,
@@ -164,6 +175,19 @@ function parseArgs(argv) {
     }
     if (arg === "--content") {
       opts.content = readFlagValue(args, i + 1);
+      i += 1;
+      continue;
+    }
+    if (arg === "--content-stdin") {
+      opts.contentStdin = true;
+      continue;
+    }
+    if (arg === "--documents-stdin") {
+      opts.documentsStdin = true;
+      continue;
+    }
+    if (arg === "--attachment-index") {
+      opts.attachmentIndex = readFlagValue(args, i + 1);
       i += 1;
       continue;
     }
@@ -278,6 +302,102 @@ function parseArgs(argv) {
   }
 
   return { positionals, opts };
+}
+
+async function readNoteInputFromStdin(positionals, opts, input = process.stdin) {
+  if (!opts.contentStdin && !opts.documentsStdin) return;
+  const command = positionals.join(" ");
+  if (opts.contentStdin && opts.documentsStdin) {
+    throw createError("INVALID_ARGUMENT", "Choose only one of --content-stdin and --documents-stdin.");
+  }
+  if (opts.contentStdin && !["notes create", "notes update", "notes import"].includes(command)) {
+    throw createError("INVALID_ARGUMENT", "--content-stdin is only supported for notes create, update, and import.");
+  }
+  if (opts.documentsStdin && command !== "notes import") {
+    throw createError("INVALID_ARGUMENT", "--documents-stdin is only supported for notes import.");
+  }
+  if (opts.content != null || opts.documents != null) {
+    throw createError("INVALID_ARGUMENT", "Do not combine stdin note input with --content or --documents.");
+  }
+  if (opts.attachmentIndex != null) {
+    throw createError("INVALID_ARGUMENT", "Do not combine stdin note input with --attachment-index.");
+  }
+  if (input.isTTY) {
+    throw createError("INVALID_ARGUMENT", "Pipe note data to standard input when using a stdin flag.");
+  }
+
+  const chunks = [];
+  let byteCount = 0;
+  for await (const chunk of input) {
+    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    byteCount += bytes.length;
+    if (byteCount > MAX_NOTE_STDIN_BYTES) {
+      throw createError("INVALID_ARGUMENT", "Piped note data exceeds the 4 MiB CLI limit.");
+    }
+    chunks.push(bytes);
+  }
+  try {
+    const value = new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks));
+    if (opts.contentStdin) opts.content = value;
+    else opts.documents = value;
+  } catch {
+    throw createError("INVALID_ARGUMENT", "Piped note data must be valid UTF-8.");
+  }
+}
+
+async function readNoteFromAttachment(client, opts) {
+  if (opts.attachmentIndex == null) return;
+  if (opts.content != null || opts.documents != null || opts.contentStdin || opts.documentsStdin) {
+    throw createError("INVALID_ARGUMENT", "Do not combine --attachment-index with other note content flags.");
+  }
+  if (!/^\d+$/.test(opts.attachmentIndex)) {
+    throw createError("INVALID_ARGUMENT", "--attachment-index must be a non-negative integer from attachment list.");
+  }
+  requireChatSession(opts, "notes import --attachment-index");
+  const listed = await client.call("netcatty/listAttachments", { chatSessionId: opts.chatSessionId });
+  if (!listed?.ok) {
+    throw createError("ATTACHMENT_READ_FAILED", listed?.error || "Could not list chat attachments.");
+  }
+  const attachment = listed?.attachments?.[Number(opts.attachmentIndex)];
+  if (!attachment || !/\.(md|markdown)$/i.test(attachment.filename || "")) {
+    throw createError("INVALID_ARGUMENT", "The selected attachment must be a registered Markdown file.");
+  }
+  if (attachment.sizeBytes > MAX_NOTE_ATTACHMENT_BYTES) {
+    throw createError("INVALID_ARGUMENT", "The selected Markdown file exceeds the 1 MiB attachment limit.");
+  }
+  const read = await client.call("netcatty/readAttachment", {
+    chatSessionId: opts.chatSessionId,
+    maxBytes: MAX_NOTE_ATTACHMENT_BYTES,
+    ...(attachment.filePath ? { filePath: attachment.filePath } : { filename: attachment.filename }),
+  });
+  if (!read?.ok || typeof read.text !== "string") {
+    throw createError("ATTACHMENT_READ_FAILED", read?.error || "The selected Markdown attachment could not be read.");
+  }
+  if (Buffer.byteLength(read.text, "utf8") > MAX_NOTE_ATTACHMENT_BYTES) {
+    throw createError("INVALID_ARGUMENT", "The selected Markdown file exceeds the 1 MiB attachment limit.");
+  }
+  opts.fileName = read.filename;
+  opts.content = read.text;
+}
+
+function validateNoteImportSize(params) {
+  if (typeof params.content === "string" && params.content.length > MAX_NOTE_IMPORT_CHARS) {
+    throw createError("INVALID_ARGUMENT", "A Markdown document exceeds the 512,000 character import limit.");
+  }
+  if (params.documents != null) {
+    let documents;
+    try {
+      documents = JSON.parse(params.documents);
+    } catch {
+      throw createError("INVALID_ARGUMENT", "--documents must be valid JSON.");
+    }
+    if (!Array.isArray(documents)) {
+      throw createError("INVALID_ARGUMENT", "--documents must be a JSON array.");
+    }
+    if (documents.some((entry) => typeof entry?.content === "string" && entry.content.length > MAX_NOTE_IMPORT_CHARS)) {
+      throw createError("INVALID_ARGUMENT", "A Markdown document exceeds the 512,000 character import limit.");
+    }
+  }
 }
 
 function formatEnvText(ctx) {
@@ -498,6 +618,7 @@ async function run() {
       return;
     }
 
+    await readNoteInputFromStdin(positionals, opts);
     bindHostChatSession(opts);
     client = await connectClient();
 
@@ -811,7 +932,17 @@ async function run() {
       if (catalogCapability.policy?.requiresChatSession) {
         requireChatSession(opts, positionals.join(" "));
       }
+      if (opts.attachmentIndex != null) {
+        if (catalogCapability.id !== "vault.note.import") {
+          throw createError("INVALID_ARGUMENT", "--attachment-index is only supported for notes import.");
+        }
+        await readNoteFromAttachment(client, opts);
+      }
       const params = buildCatalogCliParams(catalogCapability.id, opts, createError);
+      if (catalogCapability.id === "vault.note.import") validateNoteImportSize(params);
+      if (catalogCapability.id.startsWith("vault.note.") && Buffer.byteLength(JSON.stringify(params), "utf8") > MAX_NOTE_RPC_BYTES) {
+        throw createError("INVALID_ARGUMENT", "Note input exceeds the 8 MiB CLI request limit.");
+      }
       const result = ensureBridgeCallOk(
         await client.call(rpcMethod, { ...params, ...buildScopeParams(opts) }),
         "CAPABILITY_RPC_FAILED",
@@ -846,6 +977,9 @@ if (require.main === module) {
 
 module.exports = {
   parseArgs,
+  readNoteInputFromStdin,
+  readNoteFromAttachment,
+  validateNoteImportSize,
   bindHostChatSession,
   requireChatSession,
 };

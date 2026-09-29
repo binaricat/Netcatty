@@ -946,16 +946,44 @@ function handleReadAttachment(params) {
   const found = findRegisteredAttachment(params);
   if (found.error) return { ok: false, error: found.error };
   const attachment = found.attachment;
+  const maxBytes = Number.isSafeInteger(params?.maxBytes) && params.maxBytes >= 0
+    ? params.maxBytes
+    : null;
   let base64Data = attachment.base64Data;
+  if (maxBytes !== null && base64Data && Buffer.byteLength(base64Data, "base64") > maxBytes) {
+    return { ok: false, error: "Attachment exceeds the requested size limit." };
+  }
   if (!base64Data && attachment.filePath) {
     try {
-      base64Data = fs.readFileSync(attachment.filePath).toString("base64");
+      if (maxBytes === null) {
+        base64Data = fs.readFileSync(attachment.filePath).toString("base64");
+      } else {
+        const fd = fs.openSync(attachment.filePath, "r");
+        try {
+          const chunk = Buffer.alloc(Math.min(64 * 1024, maxBytes + 1));
+          const chunks = [];
+          let total = 0;
+          while (total <= maxBytes) {
+            const read = fs.readSync(fd, chunk, 0, Math.min(chunk.length, maxBytes + 1 - total), null);
+            if (read === 0) break;
+            chunks.push(Buffer.from(chunk.subarray(0, read)));
+            total += read;
+          }
+          if (total > maxBytes) return { ok: false, error: "Attachment exceeds the requested size limit." };
+          base64Data = Buffer.concat(chunks, total).toString("base64");
+        } finally {
+          fs.closeSync(fd);
+        }
+      }
     } catch (err) {
       return { ok: false, error: err?.message || "Failed to read attachment." };
     }
   }
-  if (!base64Data) return { ok: false, error: "Attachment content is unavailable." };
+  if (!base64Data && !attachment.filePath) return { ok: false, error: "Attachment content is unavailable." };
   const buffer = Buffer.from(base64Data, "base64");
+  if (maxBytes !== null && buffer.length > maxBytes) {
+    return { ok: false, error: "Attachment exceeds the requested size limit." };
+  }
   const result = {
     ok: true,
     filename: attachment.filename,

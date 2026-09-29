@@ -42,6 +42,31 @@ test("registered chat attachments can be listed and read by path or filename", a
   assert.equal(byName.base64Data, Buffer.from("hello attachment").toString("base64"));
 });
 
+test("attachment reads enforce a size limit for disk-backed files", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-attachment-limit-"));
+  const filePath = path.join(dir, "large.md");
+  const emptyPath = path.join(dir, "empty.md");
+  fs.writeFileSync(filePath, "# Notes\n".repeat(200));
+  fs.writeFileSync(emptyPath, "");
+  t.after(() => {
+    bridge.cleanup();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  bridge.updateAttachmentMetadata([
+    { filename: "large.md", mediaType: "text/markdown", filePath },
+    { filename: "empty.md", mediaType: "text/markdown", filePath: emptyPath },
+  ], "chat-a");
+
+  assert.equal(bridge.handleListAttachments({ chatSessionId: "chat-a" }).attachments[0].sizeBytes, undefined);
+  assert.match(
+    bridge.handleReadAttachment({ chatSessionId: "chat-a", filename: "large.md", maxBytes: 100 }).error,
+    /size limit/,
+  );
+  const empty = bridge.handleReadAttachment({ chatSessionId: "chat-a", filename: "empty.md", maxBytes: 100 });
+  assert.equal(empty.ok, true);
+  assert.equal(empty.text, "");
+});
+
 test("attachment reads reject unregistered local paths", async (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-attachment-test-"));
   const secretPath = path.join(dir, "secret.txt");
