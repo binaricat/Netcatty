@@ -479,7 +479,7 @@ test("stat-less preflight results are not statted again before transfer", async 
   }
 });
 
-test("files past the preflight bound are not statted again and keep an unknown plan", async () => {
+test("files past the preflight bound stay un-statted after conflict resolution", async () => {
   const extra = 2;
   const names = Array.from({ length: PREFLIGHT_STAT_MAX_FILES + extra }, (_, index) => `bulk-${index}.bin`);
   let statCalls = 0;
@@ -495,7 +495,9 @@ test("files past the preflight bound are not statted again and keep an unknown p
         lastModified: 5,
       };
     },
-    statLocal: async () => null,
+    statLocal: async (target: string) => names.slice(-extra).some((name) => target.endsWith(`/${name}`))
+      ? { name: target.split("/").pop() || "", type: "file" as const, size: 1, lastModified: 1 }
+      : null,
     startStreamTransfer: async (options: StartOptions) => {
       started.push(options);
       sftpTransferCenterStore.ingestBackgroundEvent({
@@ -541,7 +543,14 @@ test("files past the preflight bound are not statted again and keep an unknown p
       );
     });
     assert.equal(statCalls, PREFLIGHT_STAT_MAX_FILES);
+    assert.equal(started.length, names.length - extra);
+    assert.equal(ops!.conflicts.length, extra);
+    await act(async () => {
+      await ops!.resolveConflict(ops!.conflicts[0].transferId, "replace", true);
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    });
     assert.equal(started.length, names.length);
+    assert.equal(statCalls, PREFLIGHT_STAT_MAX_FILES, "conflict resolution must keep the preflight cap");
     const omitted = started.filter((options) => options.totalBytes === undefined);
     assert.equal(omitted.length, extra);
   } finally {
