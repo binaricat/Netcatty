@@ -20,6 +20,7 @@ const {
   resolveEffectiveShellKind,
   buildPendingInputClearPrefix,
   buildWrappedCommand,
+  posixFlavorFromShellPath,
   findEndMarker,
   normalizePtyOutput,
   appendBoundedOutput,
@@ -33,6 +34,12 @@ const { buildLiveShellProbe, parseLiveShellProbe } = require("./liveShellProbe.c
 const DEFAULT_FOREGROUND_PTY_CAPTURE_CHARS = 1024 * 1024;
 const END_MARKER_PROMPT_WAIT_MS = 30000;
 const promptRecoveryPendingPtys = new WeakSet();
+// Last refined zsh wrapper flavor per PTY stream. Sessions without a
+// configured shell executable (remote/mosh/et) reset their flavor at job
+// start; the refined value keeps the initially typed probe (and wrapper)
+// safe for the shell actually running in that stream. Weak so closed PTYs
+// are not retained.
+const refinedProbeFlavors = new WeakMap();
 
 function stripJobMarkerLines(text, marker) {
   return text.replace(
@@ -57,6 +64,7 @@ function startPtyJob(ptyStream, command, options) {
     shellKind,
     loginShellHint,
     probeLiveShell = false,
+    posixFlavor = "",
     bastionKeystrokes = false,
     skipPendingInputClear = false,
     onProbeAborted,
@@ -100,6 +108,23 @@ function startPtyJob(ptyStream, command, options) {
   let probingShell = usesLiveShellProbe;
   let deliveringInput = false;
   let probeOutput = "";
+
+  // zsh single-line wrapper flavor (#3575). The session-provided flavor (from
+  // the local executable path, or the probed remote login-shell path) is known
+  // before the probe is typed; the live shell probe's comm name refines it
+  // afterwards (to "zsh" or "bash") so a zsh session where the user switched
+  // to another shell falls back to the generic wrapper. Only a refined "zsh"
+  // result is remembered per PTY stream (the cached state stays zsh-safe or
+  // unknown) so remote/executable-less sessions do not re-type the wedge-prone
+  // multiline probe on every subsequent command. A reported bash is never
+  // cached: the stream's shell can change between jobs (the user may type
+  // zsh), and a remembered bash flavor would re-type the multiline Bash
+  // cleanup probe before the next job's live detection observes the switch.
+  // An unknown flavor also starts on the zsh-safe single-line probe because
+  // the live shell is not known yet.
+  let shellFlavor = posixFlavor || (
+    ptyStream && typeof ptyStream === "object" ? (refinedProbeFlavors.get(ptyStream) || "") : ""
+  );
 
   let output = "";
   let foundStart = false;
@@ -558,6 +583,28 @@ function startPtyJob(ptyStream, command, options) {
       probingShell = false;
       probeOutput = "";
       if (probe.kind) resolvedShellKind = probe.kind;
+      // shellName is a basename (e.g. "zsh", "zsh-5.9", "-zsh" with the dash
+      // already stripped) so the same versioned-zsh detection used for the
+      // configured shell path keeps the flavor here too. A reported bash shell
+      // keeps this job's multiline wrapper with the Bash history cleanup, but
+      // is never persisted for later jobs: the user can switch shells inside
+      // the same stream, and a remembered "bash" would re-type the multiline
+      // Bash cleanup probe ahead of the next live detection, wedging a busy
+      // zsh line editor again (unknown flavors start on the zsh-safe
+      // single-line probe, which omits the cleanup because it cannot rule zsh
+      // out yet).
+      if (probe.shellName) {
+        shellFlavor = posixFlavorFromShellPath(probe.shellName)
+          || (probe.shellName === "bash" ? "bash" : "");
+      }
+      // Remember the refined flavor for later jobs on this stream; an
+      // unreported comm name keeps the current best knowledge. Only
+      // zsh-safe/unknown state is cached — a "bash" result is downgraded to
+      // unknown so the next job restarts on the live probe instead of
+      // treating the previous bash report as authoritative.
+      if (ptyStream && typeof ptyStream === "object") {
+        refinedProbeFlavors.set(ptyStream, shellFlavor === "bash" ? "" : shellFlavor);
+      }
       if (finished || cancelRequested) return;
       writeWrappedCommand();
       return;
@@ -822,7 +869,9 @@ function startPtyJob(ptyStream, command, options) {
   }
 
   function writeWrappedCommand() {
-    const wrapped = buildWrappedCommand(command, resolvedShellKind, marker, probeLiveShell);
+    const wrapped = buildWrappedCommand(command, resolvedShellKind, marker, probeLiveShell, {
+      posixFlavor: shellFlavor,
+    });
     writeInput(`${(skipPendingInputClear ? "" : buildPendingInputClearPrefix(resolvedShellKind))}${wrapped}`);
   }
 
@@ -842,7 +891,7 @@ function startPtyJob(ptyStream, command, options) {
     }
   }
   if (probingShell) {
-    writeInput(`${(skipPendingInputClear ? "" : buildPendingInputClearPrefix(resolvedShellKind))}${buildLiveShellProbe(marker)}`);
+    writeInput(`${(skipPendingInputClear ? "" : buildPendingInputClearPrefix(resolvedShellKind))}${buildLiveShellProbe(marker, shellFlavor)}`);
   } else {
     writeWrappedCommand();
   }
