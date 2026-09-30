@@ -1346,15 +1346,21 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
           }
         }));
       }
-      try {
-        await netcattyBridge.get()?.cleanupTransferArtifacts?.({
-          transferId: taskId,
-          sourcePath: task.sourcePath,
-          targetPath: task.targetPath,
-          stagedTargetPath: task.stagedTargetPath,
-        });
-      } catch {
-        // best-effort temp/.part cleanup
+      // Failed cancellations keep their artifacts (and possibly a live writer
+      // running) — matching the registered-owner cancel path, skip temp/.part
+      // cleanup so it cannot race a surviving backend operation or discard the
+      // staged progress the Resume action below would reuse.
+      if (failedIds.size === 0) {
+        try {
+          await netcattyBridge.get()?.cleanupTransferArtifacts?.({
+            transferId: taskId,
+            sourcePath: task.sourcePath,
+            targetPath: task.targetPath,
+            stagedTargetPath: task.stagedTargetPath,
+          });
+        } catch {
+          // best-effort
+        }
       }
       const cancelIdSet = new Set(cancelIds);
       // A partial cancellation failure keeps the folder recoverable (the parent
