@@ -9,11 +9,18 @@ test('live shell response excludes echoed commands, stale markers and partial li
   assert.equal(parseLiveShellProbe(buildLiveShellProbe(marker), marker), null);
   assert.equal(parseLiveShellProbe(`${marker}_P:fi`, marker), null);
   assert.equal(parseLiveShellProbe('__NCMCP_old___P:fish\n', marker), null);
-  assert.deepEqual(parseLiveShellProbe(`\r${marker}_P:/usr/bin/fish\r\n${marker}_Q`, marker), { kind: 'fish' });
-  assert.deepEqual(parseLiveShellProbe(`${marker}_P:-zsh\n${marker}_Q`, marker), { kind: 'posix' });
-  assert.deepEqual(parseLiveShellProbe(`${marker}_P:\n${marker}_Q`, marker), { kind: null });
-  assert.deepEqual(parseLiveShellProbe(`> ${marker}_P:bash\n> ${marker}_Q`, marker), { kind: 'posix' });
-  assert.deepEqual(parseLiveShellProbe(`> ${marker}_P:fish\n> ${marker}_Q`, marker), { kind: 'fish' });
+  const cases = [
+    [`\r${marker}_P:/usr/bin/fish\r\n${marker}_Q`, { kind: 'fish', shellName: 'fish' }],
+    [`${marker}_P:-zsh\n${marker}_Q`, { kind: 'posix', shellName: 'zsh' }],
+    [`${marker}_P:/bin/zsh\n${marker}_Q`, { kind: 'posix', shellName: 'zsh' }],
+    [`${marker}_P:\n${marker}_Q`, { kind: null, shellName: '' }],
+    [`> ${marker}_P:bash\n> ${marker}_Q`, { kind: 'posix', shellName: 'bash' }],
+    [`> ${marker}_P:fish\n> ${marker}_Q`, { kind: 'fish', shellName: 'fish' }],
+    [`> ${marker}_P:sshd\n> ${marker}_Q`, { kind: null, shellName: 'sshd' }],
+  ];
+  for (const [output, expected] of cases) {
+    assert.deepEqual(parseLiveShellProbe(output, marker), expected);
+  }
 });
 
 test('probe waits for complete reply before choosing the first wrapper', async () => {

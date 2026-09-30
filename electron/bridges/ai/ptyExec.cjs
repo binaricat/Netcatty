@@ -57,6 +57,7 @@ function startPtyJob(ptyStream, command, options) {
     shellKind,
     loginShellHint,
     probeLiveShell = false,
+    posixFlavor = "",
     bastionKeystrokes = false,
     skipPendingInputClear = false,
     onProbeAborted,
@@ -100,6 +101,12 @@ function startPtyJob(ptyStream, command, options) {
   let probingShell = usesLiveShellProbe;
   let deliveringInput = false;
   let probeOutput = "";
+
+  // zsh single-line wrapper flavor (#3575). The session-provided flavor (from
+  // the local executable path) is known before the probe is typed; the live
+  // shell probe's comm name refines it afterwards so a zsh session where the
+  // user switched to another shell falls back to the generic wrapper.
+  let shellFlavor = posixFlavor === "zsh" ? "zsh" : "";
 
   let output = "";
   let foundStart = false;
@@ -558,6 +565,7 @@ function startPtyJob(ptyStream, command, options) {
       probingShell = false;
       probeOutput = "";
       if (probe.kind) resolvedShellKind = probe.kind;
+      if (probe.shellName) shellFlavor = probe.shellName === "zsh" ? "zsh" : "";
       if (finished || cancelRequested) return;
       writeWrappedCommand();
       return;
@@ -822,7 +830,9 @@ function startPtyJob(ptyStream, command, options) {
   }
 
   function writeWrappedCommand() {
-    const wrapped = buildWrappedCommand(command, resolvedShellKind, marker, probeLiveShell);
+    const wrapped = buildWrappedCommand(command, resolvedShellKind, marker, probeLiveShell, {
+      posixFlavor: shellFlavor,
+    });
     writeInput(`${(skipPendingInputClear ? "" : buildPendingInputClearPrefix(resolvedShellKind))}${wrapped}`);
   }
 
@@ -842,7 +852,7 @@ function startPtyJob(ptyStream, command, options) {
     }
   }
   if (probingShell) {
-    writeInput(`${(skipPendingInputClear ? "" : buildPendingInputClearPrefix(resolvedShellKind))}${buildLiveShellProbe(marker)}`);
+    writeInput(`${(skipPendingInputClear ? "" : buildPendingInputClearPrefix(resolvedShellKind))}${buildLiveShellProbe(marker, shellFlavor)}`);
   } else {
     writeWrappedCommand();
   }
