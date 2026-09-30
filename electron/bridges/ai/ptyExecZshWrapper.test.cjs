@@ -219,7 +219,7 @@ test('a refined remote zsh flavor keeps the single-line probe for later jobs', a
   assert.equal(result.exitCode, 0);
 });
 
-test('a refined remote bash flavor keeps the generic probe for later jobs', async () => {
+test('a refined remote bash flavor is not reused; later jobs stay on the zsh-safe single-line probe', async () => {
   const pty = new EventEmitter();
   const writes = [];
   pty.write = (data) => writes.push(data);
@@ -239,10 +239,14 @@ test('a refined remote bash flavor keeps the generic probe for later jobs', asyn
     shellKind: 'posix', probeLiveShell: true, timeoutMs: 1000,
   });
   await sleep(600);
-  // Bash keeps the multiline probe with its history cleanup.
+  // A remembered bash flavor must not treat the previous bash report as
+  // authoritative for the next command: the user could switch this stream to
+  // zsh, and the multiline Bash cleanup probe would wedge a busy zsh line
+  // editor before live detection observes the switch. The next job restarts
+  // on the zsh-safe single-line probe.
   const typedProbe = writes.join('');
-  assert.ok(typedProbe.includes('\\\n'), typedProbe);
-  assert.ok(typedProbe.includes('__nc_h_'), typedProbe);
+  assert.ok(!typedProbe.includes('\\\n'), typedProbe);
+  assert.ok(!typedProbe.includes('__nc_h_'), typedProbe);
   pty.emit('data', `${second.marker}_P:bash\n${second.marker}_Q`);
   const secondDeadline = Date.now() + 3000;
   while (Date.now() < secondDeadline && !writes.join('').includes(`${second.marker}_E:`)) {

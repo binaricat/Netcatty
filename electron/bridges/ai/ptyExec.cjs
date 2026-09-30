@@ -113,11 +113,15 @@ function startPtyJob(ptyStream, command, options) {
   // the local executable path, or the probed remote login-shell path) is known
   // before the probe is typed; the live shell probe's comm name refines it
   // afterwards (to "zsh" or "bash") so a zsh session where the user switched
-  // to another shell falls back to the generic wrapper. The refined flavor is
-  // remembered per PTY stream so remote/executable-less sessions do not
-  // re-type the multiline Bash cleanup probe (which can wedge a busy zsh line
-  // editor) on every subsequent command; an unknown flavor also starts on the
-  // zsh-safe single-line probe because the live shell is not known yet.
+  // to another shell falls back to the generic wrapper. Only a refined "zsh"
+  // result is remembered per PTY stream (the cached state stays zsh-safe or
+  // unknown) so remote/executable-less sessions do not re-type the wedge-prone
+  // multiline probe on every subsequent command. A reported bash is never
+  // cached: the stream's shell can change between jobs (the user may type
+  // zsh), and a remembered bash flavor would re-type the multiline Bash
+  // cleanup probe before the next job's live detection observes the switch.
+  // An unknown flavor also starts on the zsh-safe single-line probe because
+  // the live shell is not known yet.
   let shellFlavor = posixFlavor || (
     ptyStream && typeof ptyStream === "object" ? (refinedProbeFlavors.get(ptyStream) || "") : ""
   );
@@ -582,18 +586,24 @@ function startPtyJob(ptyStream, command, options) {
       // shellName is a basename (e.g. "zsh", "zsh-5.9", "-zsh" with the dash
       // already stripped) so the same versioned-zsh detection used for the
       // configured shell path keeps the flavor here too. A reported bash shell
-      // is remembered as the "bash" flavor so later jobs on this stream go
-      // back to the multiline probe/wrapper with the Bash history cleanup
-      // (unknown flavors start on the zsh-safe single-line probe, which omits
-      // the cleanup because it cannot rule zsh out yet).
+      // keeps this job's multiline wrapper with the Bash history cleanup, but
+      // is never persisted for later jobs: the user can switch shells inside
+      // the same stream, and a remembered "bash" would re-type the multiline
+      // Bash cleanup probe ahead of the next live detection, wedging a busy
+      // zsh line editor again (unknown flavors start on the zsh-safe
+      // single-line probe, which omits the cleanup because it cannot rule zsh
+      // out yet).
       if (probe.shellName) {
         shellFlavor = posixFlavorFromShellPath(probe.shellName)
           || (probe.shellName === "bash" ? "bash" : "");
       }
       // Remember the refined flavor for later jobs on this stream; an
-      // unreported comm name keeps the current best knowledge.
+      // unreported comm name keeps the current best knowledge. Only
+      // zsh-safe/unknown state is cached — a "bash" result is downgraded to
+      // unknown so the next job restarts on the live probe instead of
+      // treating the previous bash report as authoritative.
       if (ptyStream && typeof ptyStream === "object") {
-        refinedProbeFlavors.set(ptyStream, shellFlavor);
+        refinedProbeFlavors.set(ptyStream, shellFlavor === "bash" ? "" : shellFlavor);
       }
       if (finished || cancelRequested) return;
       writeWrappedCommand();
