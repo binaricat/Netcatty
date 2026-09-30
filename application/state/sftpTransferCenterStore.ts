@@ -1368,7 +1368,11 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
       // from their existing byte checkpoints. Failed rows (and the parent) keep
       // their attention error so the user can retry cancelling them.
       const folderResumeRecoverable = failedIds.size > 0;
-      tasks = tasks.map((candidate) => cancelIdSet.has(candidate.id) ? {
+      // A completion event for the root (or a child) may land while the
+      // cancelTransfer IPC batches above are still pending. Do not rewrite a
+      // row that already reached its terminal completed status (same guard as
+      // the compressed/dedicated path).
+      tasks = tasks.map((candidate) => cancelIdSet.has(candidate.id) && candidate.status !== "completed" ? {
         ...candidate,
         status: failedIds.has(candidate.id) || (candidate.id === taskId && failedIds.size > 0)
           ? "attention"
