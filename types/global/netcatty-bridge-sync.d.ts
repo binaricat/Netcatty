@@ -58,6 +58,37 @@ declare global {
       sourceSession: import("../../domain/models").TerminalSession;
       localShellType?: import("../../domain/models").TerminalSession['shellType'];
     }): Promise<{ success: boolean; error?: string }>;
+    openEditorWindow?(payload: import("../../application/state/editorWindowTypes").EditorWindowTabSnapshot): Promise<{ success: boolean; reused?: boolean; error?: string }>;
+    focusEditorWindow?(editorId: string): Promise<{ success: boolean; error?: string }>;
+    closeEditorWindowTabs?(payload: { editorIds: string[]; force?: boolean }): Promise<{
+      success: boolean;
+      cancelled?: boolean;
+      closedIds?: string[];
+      error?: string;
+    }>;
+    saveEditorWindowTab?(payload: {
+      editorId: string;
+      sessionId: string;
+      sftpTabId: string;
+      hostId: string;
+      remotePath: string;
+      content: string;
+    }): Promise<{ ok: boolean; liveConnectionId?: string; error?: string }>;
+    dockEditorWindowTab?(payload: import("../../application/state/editorWindowTypes").EditorWindowTabSnapshot): Promise<{ success: boolean; error?: string }>;
+    reportEditorWindowDirty?(payload: { editorId: string; dirty: boolean }): void;
+    reportEditorWindowTabsClosed?(payload: { editorIds?: string[]; editorId?: string }): void;
+    remapEditorWindowSession?(payload: { fromSessionId: string; toSessionId: string }): void;
+    onEditorWindowOpenTab?(cb: (payload: import("../../application/state/editorWindowTypes").EditorWindowTabSnapshot) => void): () => void;
+    onEditorWindowActivateTab?(cb: (payload: { editorId: string }) => void): () => void;
+    onEditorWindowCloseTabs?(cb: (payload: import("../../application/state/editorWindowTypes").EditorWindowCloseTabsRequest) => void): () => void;
+    reportEditorWindowCloseTabsResult?(payload: import("../../application/state/editorWindowTypes").EditorWindowCloseTabsResult): void;
+    onEditorWindowRemapSession?(cb: (payload: { fromSessionId: string; toSessionId: string }) => void): () => void;
+    onEditorWindowSaveRequest?(cb: (payload: import("../../application/state/editorWindowTypes").EditorWindowSaveRequest) => void): () => void;
+    reportEditorWindowSaveResult?(payload: import("../../application/state/editorWindowTypes").EditorWindowSaveResult): void;
+    onEditorWindowDockRequest?(cb: (payload: import("../../application/state/editorWindowTypes").EditorWindowTabSnapshot & { requestId: string }) => void): () => void;
+    reportEditorWindowDockResult?(payload: { requestId: string; ok: boolean; error?: string }): void;
+    onEditorWindowDirtyChanged?(cb: (payload: { editorId: string; dirty: boolean }) => void): () => void;
+    onEditorWindowTabsClosed?(cb: (payload: { editorIds: string[] }) => void): () => void;
     onOpenSessionInNewWindow?(cb: (payload: {
       title: string;
       sourceSession: import("../../domain/models").TerminalSession;

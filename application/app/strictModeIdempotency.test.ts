@@ -29,7 +29,7 @@ test('every renderer root mounts under StrictMode', () => {
   assert.match(indexSource, /import \{ StrictMode, Suspense, lazy \} from 'react'/);
 
   const renderCalls = indexSource.match(/root\.render\(/g) ?? [];
-  assert.equal(renderCalls.length, 4, 'main, settings, tray and terminal-popup roots');
+  assert.equal(renderCalls.length, 5, 'main, settings, tray, terminal-popup and editor-window roots');
 
   let cursor = 0;
   for (let index = 0; index < renderCalls.length; index += 1) {

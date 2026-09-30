@@ -14,6 +14,7 @@ import { isNavigableDirectory } from "../utils";
 import { resolveDownloadSourceSnapshot } from "../../../application/state/sftp/downloadSourceSnapshot";
 import { reportSftpUploadResults } from "../reportSftpUploadResults";
 import { editorTabStore } from "../../../application/state/editorTabStore";
+import { popOutEditorTab } from "../../../application/state/editorWindowClient";
 import { toEditorTabId, activeTabStore } from "../../../application/state/activeTabStore";
 import type { TextEditorModalSnapshot } from "../../TextEditorModal";
 import type { UseSftpViewFileOpsParams, UseSftpViewFileOpsResult } from "./useSftpViewFileOps.types";
@@ -26,6 +27,15 @@ const LOCAL_BLOB_DOWNLOAD_CONCURRENCY = 1;
  * work. Bound them so many selected directories cannot stampede the scheduler.
  */
 const MULTI_SELECT_ROOT_DOWNLOAD_CONCURRENCY = DEFAULT_SFTP_FILE_TRANSFER_CONCURRENCY;
+
+const promoteModalSnapshot = (snapshot: Parameters<typeof editorTabStore.promoteFromModal>[0]) => {
+  try {
+    return editorTabStore.promoteFromModal(snapshot);
+  } catch (error) {
+    toast.error(error instanceof Error ? error.message : "Failed to transfer editor", "SFTP");
+    return null;
+  }
+};
 
 export const useSftpViewFileOps = ({
   sftpRef,
@@ -232,7 +242,7 @@ export const useSftpViewFileOps = ({
     const connection = pane.connection;
     if (!connection || !target.hostId) return;
 
-    const editorId = editorTabStore.promoteFromModal({
+    const editorId = promoteModalSnapshot({
       sessionId: connection.id,
       sftpTabId: pane.id,
       hostId: target.hostId,
@@ -244,11 +254,44 @@ export const useSftpViewFileOps = ({
       wordWrap: snapshot.wordWrap,
       viewState: snapshot.viewState,
     });
+    if (!editorId) return;
+    if (editorTabStore.getTab(editorId)?.placement === "window") {
+      void popOutEditorTab(editorId);
+      return;
+    }
     activeTabStore.setActiveTabId(toEditorTabId(editorId));
     // Close the modal
     setShowTextEditor(false);
     setTextEditorTarget(null);
     setTextEditorContent("");
+  }, [sftpRef]);
+
+  const handlePopOut = useCallback((snapshot: TextEditorModalSnapshot) => {
+    const target = textEditorTargetRef.current;
+    if (!target) return;
+    const pane = target.side === "left" ? sftpRef.current.leftPane : sftpRef.current.rightPane;
+    const connection = pane.connection;
+    if (!connection || !target.hostId) return;
+
+    const editorId = promoteModalSnapshot({
+      sessionId: connection.id,
+      sftpTabId: pane.id,
+      hostId: target.hostId,
+      remotePath: target.fullPath,
+      fileName: target.file.name,
+      languageId: snapshot.languageId || getLanguageId(target.file.name),
+      content: snapshot.content,
+      baselineContent: snapshot.baselineContent,
+      wordWrap: snapshot.wordWrap,
+      viewState: snapshot.viewState,
+    });
+    if (!editorId) return;
+    void popOutEditorTab(editorId).then((ok) => {
+      if (!ok) return;
+      setShowTextEditor(false);
+      setTextEditorTarget(null);
+      setTextEditorContent("");
+    });
   }, [sftpRef]);
 
   const onEditFileLeft = useCallback(
@@ -808,6 +851,7 @@ export const useSftpViewFileOps = ({
     setFileOpenerTarget,
     handleSaveTextFile,
     onPromoteToTab: handlePromoteToTab,
+    onPopOut: handlePopOut,
     handleFileOpenerSelect,
     handleSelectSystemApp,
     onEditPermissionsLeft,

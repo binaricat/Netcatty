@@ -63,6 +63,10 @@ const terminalPopupConfigState = {
   lastPayload: null,
   listeners: new Set(),
 };
+const editorOpenTabState = {
+  pending: [],
+  listeners: new Set(),
+};
 
 function dispatchGlobalSftpTransferEvent(payload) {
   for (const cb of globalSftpTransferListeners) {
@@ -408,6 +412,19 @@ ipcRenderer.on("netcatty:window:terminalPopupConfig", (_event, payload) => {
       cb(payload);
     } catch (err) {
       console.error("Terminal popup config callback failed", err);
+    }
+  });
+});
+ipcRenderer.on("netcatty:window:editorOpenTab", (_event, payload) => {
+  if (editorOpenTabState.listeners.size === 0) {
+    editorOpenTabState.pending.push(payload);
+    return;
+  }
+  editorOpenTabState.listeners.forEach((cb) => {
+    try {
+      cb(payload);
+    } catch (err) {
+      console.error("Editor window open-tab callback failed", err);
     }
   });
 });
@@ -879,6 +896,7 @@ const api = createPreloadApi({
   updateErrorListeners,
   updateNeedsSaveListeners,
   terminalPopupConfigState,
+  editorOpenTabState,
   portForwardStatusListeners,
   portForwardRuntimeListeners,
   fileWatchSyncedListeners,

@@ -5,6 +5,7 @@ import type { SftpStateApi } from "../../../application/state/useSftpState";
 import { editorTabStore } from "../../../application/state/editorTabStore";
 import type { EditorTab, EditorTabId } from "../../../application/state/editorTabStore";
 import { releaseEditorTabSaveCoordinator, saveEditorTab } from "../../../application/state/editorTabSave";
+import { confirmCloseOwnedEditors } from "../../../application/state/editorWindowClient";
 import { promptUnsavedChanges } from "../../editor/UnsavedChangesDialog";
 import {
   getSftpTabDuplicateRequest,
@@ -84,7 +85,7 @@ export const useSftpViewTabs = ({ sftp, sftpRef, hosts = [] }: UseSftpViewTabsPa
         throw new Error(tab?.saveError ?? "Save failed");
       }
     };
-    return editorTabStore.confirmCloseByOwner(
+    return confirmCloseOwnedEditors(
       owner,
       choice,
       saveTab,

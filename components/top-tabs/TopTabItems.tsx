@@ -1,4 +1,4 @@
-import { Copy, FileCode, FileText, LayoutGrid, Minus, Server, Square, Terminal, TerminalSquare, Usb, X } from 'lucide-react';
+import { Copy, FileCode, FileText, LayoutGrid, Minus, Server, Square, SquareArrowOutUpRight, Terminal, TerminalSquare, Usb, X } from 'lucide-react';
 import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { activeTabStore, useActiveTabId, useIsTabActive } from '../../application/state/activeTabStore';
 import {
@@ -578,6 +578,8 @@ interface EditorTopTabProps {
   host: Host | undefined;
   suffix: string;
   onRequestCloseEditorTab: (editorTabId: string) => void;
+  onPopOutEditorTab?: (editorTabId: string) => void;
+  onFocusEditorWindowTab?: (editorTabId: string) => void;
   isBeingDragged: boolean;
   isDraggingForReorder: boolean;
   shiftStyle: React.CSSProperties;
@@ -598,6 +600,8 @@ export const EditorTopTab: React.FC<EditorTopTabProps> = memo(({
   host,
   suffix,
   onRequestCloseEditorTab,
+  onPopOutEditorTab,
+  onFocusEditorWindowTab,
   isBeingDragged,
   isDraggingForReorder,
   shiftStyle,
@@ -611,22 +615,30 @@ export const EditorTopTab: React.FC<EditorTopTabProps> = memo(({
   tabAnimationClass,
   shortcutNumber,
 }) => {
+  const { t } = useI18n();
   const isActive = useIsTabActive(tabId);
   // Dirty is store-driven so App/TopTabs structure can stay presence-only.
   const dirty = useEditorTabDirty(editorTab.id);
+  const isDetached = editorTab.placement === "window";
   const tooltip = `${host?.label ?? editorTab.hostId}@${host?.hostname ?? ''}:${editorTab.remotePath}`;
   const FileIcon = CODE_EXTENSIONS_RE.test(editorTab.fileName) ? FileCode : FileText;
   const handleClick = useCallback(() => {
+    if (isDetached) {
+      onFocusEditorWindowTab?.(editorTab.id);
+      return;
+    }
     activeTabStore.setActiveTabId(tabId);
-  }, [tabId]);
+  }, [editorTab.id, isDetached, onFocusEditorWindowTab, tabId]);
   const handleClose = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     onRequestCloseEditorTab(editorTab.id);
   }, [editorTab.id, onRequestCloseEditorTab]);
 
   return (
+    <ContextMenu>
     <Tooltip>
       <TooltipTrigger asChild>
+        <ContextMenuTrigger asChild>
         <div
           data-tab-id={tabId}
           data-tab-type="editor"
@@ -695,6 +707,7 @@ export const EditorTopTab: React.FC<EditorTopTabProps> = memo(({
               {editorTab.fileName}
               {suffix && <span className="ml-1 text-muted-foreground">{suffix}</span>}
             </span>
+            {isDetached && <SquareArrowOutUpRight size={11} className="shrink-0 opacity-70" />}
           </div>
           <button
             onClick={handleClose}
@@ -704,9 +717,29 @@ export const EditorTopTab: React.FC<EditorTopTabProps> = memo(({
             <X size={12} />
           </button>
         </div>
+        </ContextMenuTrigger>
       </TooltipTrigger>
       <TooltipContent>{tooltip}</TooltipContent>
     </Tooltip>
+    <ContextMenuContent className="w-48">
+      {!isDetached && onPopOutEditorTab && (
+        <ContextMenuItem onClick={() => onPopOutEditorTab(editorTab.id)}>
+          <SquareArrowOutUpRight size={14} className="mr-2" />
+          {t('sftp.editor.popOut')}
+        </ContextMenuItem>
+      )}
+      {isDetached && onFocusEditorWindowTab && (
+        <ContextMenuItem onClick={() => onFocusEditorWindowTab(editorTab.id)}>
+          <SquareArrowOutUpRight size={14} className="mr-2" />
+          {t('sftp.editor.focusWindow')}
+        </ContextMenuItem>
+      )}
+      <ContextMenuItem onClick={() => onRequestCloseEditorTab(editorTab.id)}>
+        <X size={14} className="mr-2" />
+        {t('sftp.editor.close')}
+      </ContextMenuItem>
+    </ContextMenuContent>
+    </ContextMenu>
   );
 });
 EditorTopTab.displayName = 'EditorTopTab';

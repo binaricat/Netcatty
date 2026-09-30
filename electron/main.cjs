@@ -260,9 +260,13 @@ const devServerUrl = process.env.VITE_DEV_SERVER_URL;
 // Never treat a packaged app as "dev" even if the user has VITE_DEV_SERVER_URL set globally.
 const isDev = !app.isPackaged && !!devServerUrl;
 const effectiveDevServerUrl = isDev ? devServerUrl : undefined;
-if (isDev) {
+const useProdUserData = process.env.NETCATTY_USE_PROD_USER_DATA === "1";
+if (isDev && !useProdUserData) {
   app.setName("Netcatty Dev");
   app.setPath("userData", path.join(app.getPath("userData"), "dev"));
+}
+if (isDev && useProdUserData) {
+  console.info("[Main] Using installed Netcatty userData:", app.getPath("userData"));
 }
 const { applyPortableDataDirectory } = require("./portableData.cjs");
 const portableData = applyPortableDataDirectory({ app });

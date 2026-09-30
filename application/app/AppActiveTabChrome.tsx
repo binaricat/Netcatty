@@ -8,6 +8,7 @@ import {
 import { updateActiveChromeThemeDeps } from '../state/activeChromeThemeSync';
 import { useActiveChromeTheme } from '../state/useActiveChromeTheme';
 import { useAppearanceChromeStore } from '../state/appearanceChromeStore';
+import { focusEditorInWindow } from '../state/editorWindowClient';
 import { netcattyBridge } from '../../infrastructure/services/netcattyBridge';
 import { resolveActiveChromeTheme } from './activeChromeTheme';
 import type { TerminalAppearanceHostScope, ResolvedAppearance } from '../../domain/terminalAppearanceRuntime';
@@ -70,6 +71,16 @@ export function AppActiveTabChrome({
       setActiveTabId('vault');
     }
   }, [showSftpTab, activeTabId, setActiveTabId]);
+
+  useEffect(() => {
+    if (!isEditorTabId(activeTabId)) return;
+    const editorId = fromEditorTabId(activeTabId);
+    if (!editorId) return;
+    const tab = editorTabs.find((entry) => entry.id === editorId);
+    if (tab?.placement !== 'window') return;
+    void focusEditorInWindow(editorId);
+    setActiveTabId('vault');
+  }, [activeTabId, editorTabs, setActiveTabId]);
 
   const chromeThemeDeps = useMemo(() => ({
     accentMode,

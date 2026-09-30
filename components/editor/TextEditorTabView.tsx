@@ -26,6 +26,7 @@ export interface TextEditorTabViewProps {
   /** Routed into Monaco's Cmd/Ctrl+W command so closing the editor tab works
    * even when focus is inside the editor (Monaco otherwise swallows the event). */
   onRequestClose: (tabId: EditorTabId) => void;
+  onPopOut?: (tabId: EditorTabId) => void;
 }
 
 export function getTextEditorTabShellStyle(isVisible: boolean, hostTreeLayoutWidth: number): React.CSSProperties {
@@ -42,6 +43,7 @@ export const TextEditorTabView: React.FC<TextEditorTabViewProps> = ({
   keyBindings,
   hostById,
   onRequestClose,
+  onPopOut,
 }) => {
   const { t } = useI18n();
   const tab = useEditorTab(tabId);
@@ -124,6 +126,7 @@ export const TextEditorTabView: React.FC<TextEditorTabViewProps> = ({
         onToggleWordWrap={handleToggleWordWrap}
         onSave={handleSave}
         initialViewState={tab.viewState}
+        onPopOut={onPopOut ? () => onPopOut(tabId) : undefined}
       />
     </div>
   );

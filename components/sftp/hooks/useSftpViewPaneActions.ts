@@ -6,6 +6,7 @@ import { keepOnlyActivePaneSelections } from "./selectionScope";
 import { editorTabStore } from "../../../application/state/editorTabStore";
 import type { EditorTab, EditorTabId } from "../../../application/state/editorTabStore";
 import { releaseEditorTabSaveCoordinator, saveEditorTab } from "../../../application/state/editorTabSave";
+import { confirmCloseOwnedEditors } from "../../../application/state/editorWindowClient";
 import { promptUnsavedChanges } from "../../editor/UnsavedChangesDialog";
 import { toast } from "../../ui/toast";
 import { requireCopyToOtherPaneTarget } from "../copyToOtherPane";
@@ -182,7 +183,7 @@ export const useSftpViewPaneActions = ({
         throw new Error(tab?.saveError ?? "Save failed");
       }
     };
-    return editorTabStore.confirmCloseByOwner(
+    return confirmCloseOwnedEditors(
       { sessionId: pane.connection?.id, sftpTabId: pane.id },
       choice,
       saveTab,
