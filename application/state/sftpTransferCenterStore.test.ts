@@ -1622,6 +1622,46 @@ test("orphan compressed upload resume and cancel keep using the compression job"
   assert.equal(store.getSnapshot().tasks[0]?.status, "cancelled");
 });
 
+test("compressed upload completing during cancel IPC keeps its completed paint", async (t) => {
+  const calls: string[] = [];
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+  t.after(() => {
+    if (previousWindow) Object.defineProperty(globalThis, "window", previousWindow);
+    else Reflect.deleteProperty(globalThis, "window");
+  });
+
+  let storeRef: ReturnType<typeof createSftpTransferCenterStore> | undefined;
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: {
+      netcatty: {
+        // Inactive-compression responses report success even after the upload
+        // already finished; the completion repaint must survive the cancel.
+        cancelCompressedUpload: async (id: string) => {
+          calls.push(`cancel:${id}`);
+          storeRef?.ingestBackgroundEvent({ type: "completed", transferId: id });
+          return { success: true };
+        },
+      },
+    },
+  });
+
+  const store = createSftpTransferCenterStore();
+  storeRef = store;
+  store.publishOwner("closed-panel", [{
+    ...makeTask("compressed-race", "transferring"),
+    fileName: "done (compressed)",
+    isDirectory: true,
+    phase: "compressing",
+    controlKind: "compressed-upload",
+  } as TransferTask]);
+
+  await store.cancel("compressed-race");
+
+  assert.deepEqual(calls, ["cancel:compressed-race"]);
+  assert.equal(store.getSnapshot().tasks[0]?.status, "completed");
+});
+
 test("orphan cancel marks process-global cancel so surviving walks stop", async (t) => {
   const {
     isTransferCancelledFlag,

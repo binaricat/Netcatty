@@ -882,6 +882,15 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
       }
       const result = await (bridge?.cancelCompressedUpload?.(taskId)
         ?? { success: false });
+      // The upload may finish while this cancel is still awaiting IPC: its
+      // completion event has already repainted the row terminal. The new
+      // inactive-compression response still reports success, so recheck the
+      // latest row before applying the cancellation result — otherwise Cancel
+      // all misreports a successfully completed upload as cancelled.
+      const latestAfterCancelIpc = tasks.find((candidate) => candidate.id === taskId);
+      if (latestAfterCancelIpc && ["completed", "failed", "cancelled"].includes(latestAfterCancelIpc.status)) {
+        return;
+      }
       if (!result.success) {
         const reason = "Could not cancel the compressed upload.";
         tasks = tasks.map((candidate) => candidate.id === taskId ? {
