@@ -17,7 +17,9 @@ function buildLiveShellProbe(marker, posixFlavor = "") {
   if (posixFlavor === "zsh") {
     // Start display suppression in the PTY before the single long line is
     // read, independently of PS2 and echo mode.
-    return ` true ${marker}; printf '\\n%s\\n' '${marker}_I'\n: '${marker}'; command sh -c '${script}' 2>/dev/null; printf '%s' '${marker}_Q'\n`;
+    // Space-prefix every physical line (zsh only records unprefixed lines
+    // when the user enables HIST_IGNORE_SPACE), matching the Bash branch.
+    return ` true ${marker}; printf '\\n%s\\n' '${marker}_I'\n : '${marker}'; command sh -c '${script}' 2>/dev/null; printf '%s' '${marker}_Q'\n`;
   }
   // command eval bypasses an eval customization; plain eval is the fallback
   // when command itself is shadowed. Never invoke a shadowed builtin after the
