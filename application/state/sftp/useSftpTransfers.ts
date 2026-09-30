@@ -1486,9 +1486,14 @@ export const useSftpTransfers = ({
           error: "Could not cancel transfer. Please try again.",
         } : task));
       }
-      if (taskToCancel) await cleanupTaskArtifacts(taskToCancel);
+      // Failed cancellations keep their artifacts (and possibly a live writer
+      // running) — the row stays in attention for Resume, so cleanup must not
+      // race the surviving backend operation or drop staged progress.
+      const failedIdSet = new Set(failedIds);
+      if (taskToCancel && !failedIdSet.has(transferId)) await cleanupTaskArtifacts(taskToCancel);
       // Child stages are keyed by per-file transferId — clean each known child.
       for (const child of childrenToCleanup) {
+        if (failedIdSet.has(child.id)) continue;
         try {
           await cleanupTaskArtifacts(child);
         } catch {
