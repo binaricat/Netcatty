@@ -972,9 +972,16 @@ export function useSftpDirectoryTransferOps({
             if (isTransferCancelledError(err)) {
               // Keep cancelled status; do not rethrow — other workers must finish
               // and the parent should not become a clean completed tree.
+              // Skip rows already recovered by a partial-cancel-failure handler
+              // ("interrupted" + reconnectRequired): this worker's backend cancel
+              // succeeded while a sibling failed, and the cancel flow repainted
+              // this row for the recovery re-walk. Demoting it back to terminal
+              // "cancelled" here races that recovery paint and admitTaskRun
+              // would reject the row on the later dedicated Resume, leaving the
+              // directory incomplete.
               setTransfers((prev) =>
                 prev.map((t) =>
-                  t.id === fileId
+                  t.id === fileId && !(t.status === "interrupted" && t.reconnectRequired)
                     ? { ...t, status: "cancelled" as TransferStatus, error: undefined, endTime: Date.now() }
                     : t,
                 ),
