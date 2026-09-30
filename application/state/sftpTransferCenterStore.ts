@@ -890,6 +890,13 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
           error: reason,
           speed: 0,
         } : candidate);
+        if (isTransferOrRootCancelled(taskId)) {
+          // The row is kept in attention for recovery instead of settling as
+          // cancelled. Drop the pre-installed cancellation latch now, or a
+          // later Resume is rejected outright by admitTaskRun's cancelled-root
+          // check (compressed uploads have no runWalk settlement to clear it).
+          clearTransferCancelledTree(taskId);
+        }
         emit();
         notify.warning(reason, "SFTP");
         return;

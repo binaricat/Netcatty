@@ -9,7 +9,7 @@ import {
 } from "../../domain/sftpTransferActions";
 import { sftpTransferCenterStore } from "./sftpTransferCenterStore";
 import { globalSftpTransferScheduler } from "./sftp/globalTransferScheduler";
-import { markTransferCancelledTree } from "./sftp/transferCancelLatch";
+import { clearTransferCancelledTree, markTransferCancelledTree } from "./sftp/transferCancelLatch";
 import { transferRuntime } from "./sftp/transferRuntime";
 
 export function useGlobalSftpTransferActions(tasks: readonly TransferTask[]) {
@@ -61,6 +61,10 @@ export function useGlobalSftpTransferActions(tasks: readonly TransferTask[]) {
           try {
             await transferRuntime.cancel(taskId);
           } catch {
+            // The row is kept in attention for recovery, so the pre-installed
+            // cancellation latch must be dropped or a later Resume is rejected
+            // outright by admitTaskRun's cancelled-root check.
+            clearTransferCancelledTree(taskId, children.get(taskId));
             sftpTransferCenterStore.patchTask(taskId, {
               status: "attention",
               error: "Could not cancel transfer. Please try again.",
