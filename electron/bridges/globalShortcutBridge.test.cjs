@@ -1771,6 +1771,91 @@ test("setCloseToTray(false) still destroys an unpinned tray as before", async ()
   }
 });
 
+test("setShowTrayIcon(false) destroys the tray even when close-to-tray stays on", async () => {
+  const bridge = loadBridge();
+  const electronModule = createElectronStub();
+  const { ipcMain } = await enableCloseToTray(bridge, electronModule);
+
+  try {
+    assert.notEqual(bridge.getTray(), null);
+    const result = await ipcMain.handlers.get("netcatty:tray:setShowTrayIcon")(null, { enabled: false });
+    assert.deepEqual(result, { success: true, enabled: false });
+    assert.equal(bridge.getTray(), null);
+  } finally {
+    bridge.cleanup();
+  }
+});
+
+test("handleWindowClose still hides to tray after the icon was hidden by preference", async () => {
+  await withPlatform("darwin", async () => {
+    const bridge = loadBridge();
+    const electronModule = createElectronStub();
+    const { ipcMain } = await enableCloseToTray(bridge, electronModule);
+
+    try {
+      await ipcMain.handlers.get("netcatty:tray:setShowTrayIcon")(null, { enabled: false });
+      assert.equal(bridge.getTray(), null);
+
+      const win = new FakeWindow({ fullscreen: false });
+      let prevented = false;
+      const result = bridge.handleWindowClose({ preventDefault() { prevented = true; } }, win);
+
+      assert.equal(result, true);
+      assert.equal(prevented, true);
+      assert.equal(win.hideCalls, 1);
+    } finally {
+      bridge.cleanup();
+    }
+  });
+});
+
+test("setShowTrayIcon(true) restores the tray when close-to-tray is on", async () => {
+  const bridge = loadBridge();
+  const electronModule = createElectronStub();
+  const { ipcMain } = await enableCloseToTray(bridge, electronModule);
+
+  try {
+    await ipcMain.handlers.get("netcatty:tray:setShowTrayIcon")(null, { enabled: false });
+    assert.equal(bridge.getTray(), null);
+    await ipcMain.handlers.get("netcatty:tray:setShowTrayIcon")(null, { enabled: true });
+    assert.notEqual(bridge.getTray(), null);
+  } finally {
+    bridge.cleanup();
+  }
+});
+
+test("setShowTrayIcon(true) does not create a tray when close-to-tray is off", async () => {
+  const bridge = loadBridge();
+  const electronModule = createElectronStub();
+  bridge.init({ electronModule, getMainWindow: () => null });
+  const ipcMain = createIpcMainStub();
+  bridge.registerHandlers(ipcMain);
+
+  try {
+    await ipcMain.handlers.get("netcatty:tray:setCloseToTray")(null, { enabled: false });
+    await ipcMain.handlers.get("netcatty:tray:setShowTrayIcon")(null, { enabled: true });
+    assert.equal(bridge.getTray(), null);
+  } finally {
+    bridge.cleanup();
+  }
+});
+
+test("setCloseToTray(true) does not recreate the tray while the icon is hidden by preference", async () => {
+  const bridge = loadBridge();
+  const electronModule = createElectronStub();
+  bridge.init({ electronModule, getMainWindow: () => null });
+  const ipcMain = createIpcMainStub();
+  bridge.registerHandlers(ipcMain);
+
+  try {
+    await ipcMain.handlers.get("netcatty:tray:setShowTrayIcon")(null, { enabled: false });
+    await ipcMain.handlers.get("netcatty:tray:setCloseToTray")(null, { enabled: true });
+    assert.equal(bridge.getTray(), null);
+  } finally {
+    bridge.cleanup();
+  }
+});
+
 test("tray panel forwarding start reaches the main renderer coordinator", async () => {
   await withPlatform("darwin", async () => {
     const bridge = loadBridge();

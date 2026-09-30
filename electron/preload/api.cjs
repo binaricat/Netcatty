@@ -1557,6 +1557,10 @@ function createPreloadApi(ctx) {
     ipcRenderer.invoke("netcatty:tray:setCloseToTray", { enabled }),
   isCloseToTray: () =>
     ipcRenderer.invoke("netcatty:tray:isCloseToTray"),
+  setShowTrayIcon: (enabled) =>
+    ipcRenderer.invoke("netcatty:tray:setShowTrayIcon", { enabled }),
+  isShowTrayIcon: () =>
+    ipcRenderer.invoke("netcatty:tray:isShowTrayIcon"),
 
   // Auto Launch at system login (hidden to tray)
   getAutoLaunch: () =>

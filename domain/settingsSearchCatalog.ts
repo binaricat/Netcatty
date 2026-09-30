@@ -961,6 +961,13 @@ export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
     descriptionKey: "settings.globalHotkey.closeToTrayDesc",
     sectionKey: "settings.globalHotkey.title",
   },
+  {
+    id: "system-show-tray-icon",
+    tab: "system",
+    labelKey: "settings.globalHotkey.showTrayIcon",
+    descriptionKey: "settings.globalHotkey.showTrayIconDesc",
+    sectionKey: "settings.globalHotkey.title",
+  },
 
   // Plugins
   {
