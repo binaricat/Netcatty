@@ -20,6 +20,7 @@ const {
   resolveEffectiveShellKind,
   buildPendingInputClearPrefix,
   buildWrappedCommand,
+  posixFlavorFromShellPath,
   findEndMarker,
   normalizePtyOutput,
   appendBoundedOutput,
@@ -565,7 +566,10 @@ function startPtyJob(ptyStream, command, options) {
       probingShell = false;
       probeOutput = "";
       if (probe.kind) resolvedShellKind = probe.kind;
-      if (probe.shellName) shellFlavor = probe.shellName === "zsh" ? "zsh" : "";
+      // shellName is a basename (e.g. "zsh", "zsh-5.9", "-zsh" with the dash
+      // already stripped) so the same versioned-zsh detection used for the
+      // configured shell path keeps the flavor here too.
+      if (probe.shellName) shellFlavor = posixFlavorFromShellPath(probe.shellName);
       if (finished || cancelRequested) return;
       writeWrappedCommand();
       return;

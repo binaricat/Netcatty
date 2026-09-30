@@ -96,6 +96,23 @@ test('zsh flavor selects the single-line wrapper after a live shell probe', asyn
   assert.equal(result.exitCode, 0);
 });
 
+test('versioned zsh basename from the live probe keeps the zsh flavor', async () => {
+  const pty = new EventEmitter();
+  const writes = [];
+  pty.write = (data) => writes.push(data);
+  const job = startPtyJob(pty, 'printf success', {
+    shellKind: 'posix', probeLiveShell: true, posixFlavor: 'zsh', timeoutMs: 1000,
+  });
+  pty.emit('data', `${job.marker}_P:zsh-5.9\n${job.marker}_Q`);
+  await sleep(400);
+  const typedWrapper = writes.join('');
+  assert.ok(!typedWrapper.includes('\\\n'), typedWrapper);
+  assert.ok(!typedWrapper.includes('__nc_h_'));
+  pty.emit('data', `${job.marker}_S\r\nsuccess\r\n${job.marker}_E:0\r\n`);
+  const result = await job.resultPromise;
+  assert.equal(result.exitCode, 0);
+});
+
 test('a zsh-configured session that switched to bash falls back to the multiline wrapper', async () => {
   const pty = new EventEmitter();
   const writes = [];
@@ -117,22 +134,24 @@ test('a zsh-configured session that switched to bash falls back to the multiline
   assert.equal(result.exitCode, 0);
 });
 
-test('live probe refines the flavor to zsh for remote sessions without a path hint', async () => {
-  const pty = new EventEmitter();
-  const writes = [];
-  pty.write = (data) => writes.push(data);
-  const job = startPtyJob(pty, 'printf success', {
-    shellKind: 'posix', probeLiveShell: true, timeoutMs: 1000,
+for (const probeName of ['-zsh', 'zsh-5.9']) {
+  test(`live probe refines the flavor to zsh for remote sessions without a path hint (${probeName})`, async () => {
+    const pty = new EventEmitter();
+    const writes = [];
+    pty.write = (data) => writes.push(data);
+    const job = startPtyJob(pty, 'printf success', {
+      shellKind: 'posix', probeLiveShell: true, timeoutMs: 1000,
+    });
+    pty.emit('data', `${job.marker}_P:${probeName}\n${job.marker}_Q`);
+    await sleep(400);
+    const typedWrapper = writes.join('');
+    assert.ok(!typedWrapper.includes('\\\n'), typedWrapper);
+    assert.ok(!typedWrapper.includes('__nc_h_'));
+    pty.emit('data', `${job.marker}_S\r\nsuccess\r\n${job.marker}_E:0\r\n`);
+    const result = await job.resultPromise;
+    assert.equal(result.exitCode, 0);
   });
-  pty.emit('data', `${job.marker}_P:-zsh\n${job.marker}_Q`);
-  await sleep(400);
-  const typedWrapper = writes.join('');
-  assert.ok(!typedWrapper.includes('\\\n'), typedWrapper);
-  assert.ok(!typedWrapper.includes('__nc_h_'));
-  pty.emit('data', `${job.marker}_S\r\nsuccess\r\n${job.marker}_E:0\r\n`);
-  const result = await job.resultPromise;
-  assert.equal(result.exitCode, 0);
-});
+}
 
 const marker = '__NCMCP_zshline_ccbc892e865a115a80c88afdc77b96a6__';
 
