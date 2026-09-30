@@ -1495,6 +1495,29 @@ export const useSftpTransfers = ({
           status: "attention" as const,
           error: "Could not cancel transfer. Please try again.",
         } : task));
+        // Restore completed rows for every recoverable cancellation, not just
+        // when a walk is in flight: a restored/interrupted directory whose
+        // previous walk already settled has no walk to do the restore later,
+        // so the rows removed above would be lost and a Resume that starts a
+        // fresh walk would only skip the checkpoint's contiguous prefix,
+        // re-transferring those files. Skip one whose file was already
+        // re-completed by a walk worker between the row removal and here, to
+        // avoid double-counting per completed file.
+        setTransfers((current) => {
+          const next = [...current];
+          const completedTargets = new Set(
+            next
+              .filter((row) => row.parentTaskId === transferId && row.status === "completed")
+              .map((row) => `${row.sourcePath}\u0000${row.targetPath}`),
+          );
+          for (const child of completedChildrenToPreserve) {
+            const key = `${child.sourcePath}\u0000${child.targetPath}`;
+            if (completedTargets.has(key)) continue;
+            completedTargets.add(key);
+            next.push(child);
+          }
+          return next;
+        });
         if (walkInFlight) {
           // Registered-owner recovery: the walk is still registered and a later
           // Resume takes the soft-resume path, which never starts a fresh
@@ -1523,22 +1546,6 @@ export const useSftpTransfers = ({
               const index = next.findIndex((row) => row.id === child.id);
               if (index >= 0) next[index] = child;
               else next.push(child);
-            }
-            // Restore completed rows unchanged so the in-flight walk's
-            // persisted-completed skip and the dedicated-resume
-            // retained-completed path keep skipping those files. Skip one whose
-            // file was already re-completed by a walk worker between the row
-            // removal and here, to avoid double-counting per completed file.
-            const completedTargets = new Set(
-              next
-                .filter((row) => row.parentTaskId === transferId && row.status === "completed")
-                .map((row) => `${row.sourcePath}\u0000${row.targetPath}`),
-            );
-            for (const child of completedChildrenToPreserve) {
-              const key = `${child.sourcePath}\u0000${child.targetPath}`;
-              if (completedTargets.has(key)) continue;
-              completedTargets.add(key);
-              next.push(child);
             }
             return next;
           });
