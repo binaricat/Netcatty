@@ -34,6 +34,12 @@ const { buildLiveShellProbe, parseLiveShellProbe } = require("./liveShellProbe.c
 const DEFAULT_FOREGROUND_PTY_CAPTURE_CHARS = 1024 * 1024;
 const END_MARKER_PROMPT_WAIT_MS = 30000;
 const promptRecoveryPendingPtys = new WeakSet();
+// Last refined zsh wrapper flavor per PTY stream. Sessions without a
+// configured shell executable (remote/mosh/et) reset their flavor at job
+// start; the refined value keeps the initially typed probe (and wrapper)
+// safe for the shell actually running in that stream. Weak so closed PTYs
+// are not retained.
+const refinedProbeFlavors = new WeakMap();
 
 function stripJobMarkerLines(text, marker) {
   return text.replace(
@@ -104,10 +110,16 @@ function startPtyJob(ptyStream, command, options) {
   let probeOutput = "";
 
   // zsh single-line wrapper flavor (#3575). The session-provided flavor (from
-  // the local executable path) is known before the probe is typed; the live
-  // shell probe's comm name refines it afterwards so a zsh session where the
-  // user switched to another shell falls back to the generic wrapper.
-  let shellFlavor = posixFlavor === "zsh" ? "zsh" : "";
+  // the local executable path, or the probed remote login-shell path) is known
+  // before the probe is typed; the live shell probe's comm name refines it
+  // afterwards so a zsh session where the user switched to another shell falls
+  // back to the generic wrapper. The refined flavor is remembered per PTY
+  // stream so remote/executable-less sessions do not re-type the multiline
+  // Bash cleanup probe (which can wedge a busy zsh line editor) on every
+  // subsequent command.
+  let shellFlavor = posixFlavor === "zsh" ? "zsh" : (
+    ptyStream && typeof ptyStream === "object" ? (refinedProbeFlavors.get(ptyStream) || "") : ""
+  );
 
   let output = "";
   let foundStart = false;
@@ -570,6 +582,11 @@ function startPtyJob(ptyStream, command, options) {
       // already stripped) so the same versioned-zsh detection used for the
       // configured shell path keeps the flavor here too.
       if (probe.shellName) shellFlavor = posixFlavorFromShellPath(probe.shellName);
+      // Remember the refined flavor for later jobs on this stream; an
+      // unreported comm name keeps the current best knowledge.
+      if (ptyStream && typeof ptyStream === "object") {
+        refinedProbeFlavors.set(ptyStream, shellFlavor);
+      }
       if (finished || cancelRequested) return;
       writeWrappedCommand();
       return;

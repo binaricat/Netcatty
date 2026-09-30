@@ -4,7 +4,7 @@ const { spawnSync } = require('node:child_process');
 const { EventEmitter } = require('node:events');
 const {
   buildWrappedCommand,
-  posixFlavorFromShellPath,
+  posixFlavorForSession,
 } = require('./ptyExecHelpers.cjs');
 const { buildLiveShellProbe, parseLiveShellProbe } = require('./liveShellProbe.cjs');
 const { startPtyJob } = require('./ptyExec.cjs');
@@ -63,6 +63,7 @@ test('zsh-flavored live probe is a single physical line and keeps Bash cleanup f
 });
 
 test('posixFlavorFromShellPath detects zsh executables only', () => {
+  const { posixFlavorFromShellPath } = require('./ptyExecHelpers.cjs');
   assert.equal(posixFlavorFromShellPath('/bin/zsh'), 'zsh');
   assert.equal(posixFlavorFromShellPath('/opt/homebrew/bin/zsh'), 'zsh');
   assert.equal(posixFlavorFromShellPath('/usr/local/bin/zsh-5.9'), 'zsh');
@@ -71,6 +72,21 @@ test('posixFlavorFromShellPath detects zsh executables only', () => {
   assert.equal(posixFlavorFromShellPath('remote-shell'), '');
   assert.equal(posixFlavorFromShellPath(''), '');
   assert.equal(posixFlavorFromShellPath(undefined), '');
+});
+
+test('posixFlavorForSession uses the configured path, then the probed login-shell path', () => {
+  assert.equal(posixFlavorForSession({ shellExecutable: '/usr/local/bin/zsh-5.9' }), 'zsh');
+  // Remote sessions: no configured executable path, the probed login shell
+  // makes the initially typed live probe zsh-safe before refinement.
+  assert.equal(posixFlavorForSession({ shellExecutable: 'remote-shell', _loginShellPath: '/usr/bin/zsh' }), 'zsh');
+  assert.equal(posixFlavorForSession({ shellExecutable: 'remote-shell', _loginShellPath: '/bin/zsh-5.9' }), 'zsh');
+  // A zsh login must stay a probe-form hint only: unknown/non-zsh paths and
+  // missing hints keep the generic multiline form.
+  assert.equal(posixFlavorForSession({ shellExecutable: 'remote-shell', _loginShellPath: '/bin/bash' }), '');
+  assert.equal(posixFlavorForSession({ shellExecutable: 'remote-shell', _loginShellPath: '/usr/bin/fish' }), '');
+  assert.equal(posixFlavorForSession({ shellExecutable: 'remote-shell' }), '');
+  assert.equal(posixFlavorForSession({ shellExecutable: '/bin/bash', _loginShellPath: '/bin/bash' }), '');
+  assert.equal(posixFlavorForSession(undefined), '');
 });
 
 // writeInput paces payloads over 1024 chars in 128-char/30ms chunks; drain
@@ -154,6 +170,72 @@ for (const probeName of ['-zsh', 'zsh-5.9']) {
 }
 
 const marker = '__NCMCP_zshline_ccbc892e865a115a80c88afdc77b96a6__';
+
+test('a refined remote zsh flavor keeps the single-line probe for later jobs', async () => {
+  const pty = new EventEmitter();
+  const writes = [];
+  pty.write = (data) => writes.push(data);
+  const first = startPtyJob(pty, 'printf success', {
+    shellKind: 'posix', probeLiveShell: true, timeoutMs: 1000,
+  });
+  await sleep(400);
+  // First job must still use the generic probe: the flavor is unknown.
+  assert.ok(writes.join('').includes('\\\n'), writes.join(''));
+  pty.emit('data', `${first.marker}_P:zsh-5.9\n${first.marker}_Q`);
+  await sleep(400);
+  pty.emit('data', `${first.marker}_S\r\nsuccess\r\n${first.marker}_E:0\r\n`);
+  await first.resultPromise;
+  writes.length = 0;
+
+  const second = startPtyJob(pty, 'printf success', {
+    shellKind: 'posix', probeLiveShell: true, timeoutMs: 1000,
+  });
+  await sleep(600);
+  // The remembered flavor already avoids the wedge-prone multiline probe.
+  const typedProbe = writes.join('');
+  assert.ok(!typedProbe.includes('\\\n'), typedProbe);
+  pty.emit('data', `${second.marker}_P:zsh-5.9\n${second.marker}_Q`);
+  await sleep(400);
+  const typedWrapper = writes.join('');
+  assert.ok(!typedWrapper.includes('\\\n'), typedWrapper);
+  assert.ok(!typedWrapper.includes('__nc_h_'));
+  pty.emit('data', `${second.marker}_S\r\nsuccess\r\n${second.marker}_E:0\r\n`);
+  const result = await second.resultPromise;
+  assert.equal(result.exitCode, 0);
+});
+
+test('a refined remote bash flavor keeps the generic probe for later jobs', async () => {
+  const pty = new EventEmitter();
+  const writes = [];
+  pty.write = (data) => writes.push(data);
+  const first = startPtyJob(pty, 'printf success', {
+    shellKind: 'posix', probeLiveShell: true, timeoutMs: 1000,
+  });
+  pty.emit('data', `${first.marker}_P:bash\n${first.marker}_Q`);
+  const deadline = Date.now() + 3000;
+  while (Date.now() < deadline && !writes.join('').includes(`${first.marker}_E:`)) {
+    await sleep(100);
+  }
+  pty.emit('data', `${first.marker}_S\r\nsuccess\r\n${first.marker}_E:0\r\n`);
+  await first.resultPromise;
+  writes.length = 0;
+
+  const second = startPtyJob(pty, 'printf success', {
+    shellKind: 'posix', probeLiveShell: true, timeoutMs: 1000,
+  });
+  await sleep(600);
+  // Bash keeps the multiline probe with its history cleanup.
+  const typedProbe = writes.join('');
+  assert.ok(typedProbe.includes('\\\n'), typedProbe);
+  assert.ok(typedProbe.includes('__nc_h_'), typedProbe);
+  pty.emit('data', `${second.marker}_P:bash\n${second.marker}_Q`);
+  const secondDeadline = Date.now() + 3000;
+  while (Date.now() < secondDeadline && !writes.join('').includes(`${second.marker}_E:`)) {
+    await sleep(100);
+  }
+  pty.emit('data', `${second.marker}_S\r\nsuccess\r\n${second.marker}_E:0\r\n`);
+  await second.resultPromise;
+});
 
 for (const extraRc of ['', 'HISTFILE=/dev/null; HISTSIZE=100; setopt HIST_IGNORE_SPACE\n']) {
   test(`interactive zsh executes the single-line probe + wrapper (rc="${extraRc ? 'history' : 'plain'}")`, (t) => {

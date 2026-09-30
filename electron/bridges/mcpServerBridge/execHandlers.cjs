@@ -6,7 +6,7 @@ const {
   ensureSessionShellKind,
   remoteDisallowsExecChannelProbe, sessionDisallowsExtraSshChannel, ensureSessionShellKindForExec,
 } = require("../ai/sessionShellKind.cjs");
-const { posixFlavorFromShellPath } = require("../ai/ptyExecHelpers.cjs");
+const { posixFlavorForSession } = require("../ai/ptyExecHelpers.cjs");
 
 function createExecHandlerApi(ctx) {
   with (ctx) {
@@ -149,7 +149,7 @@ function createExecHandlerApi(ctx) {
             timeoutMs: commandTimeoutMs,
             shellKind: session.shellKind,
             loginShellHint: session._loginShellKind,
-            posixFlavor: posixFlavorFromShellPath(session.shellExecutable),
+            posixFlavor: posixFlavorForSession(session),
             probeLiveShell: true,
             bastionKeystrokes: remoteDisallowsExecChannelProbe(session.remoteSshVersion),
             skipPendingInputClear: session.singleChannelSsh === true,
@@ -323,7 +323,7 @@ function createExecHandlerApi(ctx) {
             timeoutMs,
             shellKind: session.shellKind,
             loginShellHint: session._loginShellKind,
-            posixFlavor: posixFlavorFromShellPath(session.shellExecutable),
+            posixFlavor: posixFlavorForSession(session),
             probeLiveShell: true,
             bastionKeystrokes: remoteDisallowsExecChannelProbe(session.remoteSshVersion),
             skipPendingInputClear: session.singleChannelSsh === true,

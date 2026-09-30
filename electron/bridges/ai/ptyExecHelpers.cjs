@@ -190,6 +190,17 @@ function posixFlavorFromShellPath(shellPath) {
   return /^zsh([-.][0-9][^/]*)?$/i.test(base) ? "zsh" : "";
 }
 
+// Best-known zsh flavor for a session, evaluated before the live shell probe
+// is typed. The configured executable path covers local terminals; remote
+// sessions have no executable path, so fall back to the probed login-shell
+// path (from issue #1854's remote probe). The live shell probe runs before
+// any wrapper is typed and still refines the flavor from the actually running
+// shell, so a zsh login session running bash falls back to the generic form.
+function posixFlavorForSession(session) {
+  return posixFlavorFromShellPath(session?.shellExecutable)
+    || posixFlavorFromShellPath(session?._loginShellPath);
+}
+
 // Discard unfinished prompt-line input before the agent wrapper so typed-but-
 // not-entered text is not concatenated onto the injected command (#2962).
 // Raw/serial devices have no portable line-kill binding; leave them alone.
@@ -566,6 +577,7 @@ module.exports = {
   resolveEffectiveShellKind,
   buildPendingInputClearPrefix,
   posixFlavorFromShellPath,
+  posixFlavorForSession,
   buildWrappedCommand,
   buildBashHistoryCleanup,
   bashHistoryScratchNames,

@@ -109,6 +109,26 @@ function buildRemoteLoginShellProbeCommand() {
   return `exec sh -c ${quoteShellArg(script)}`;
 }
 
+/**
+ * Raw login-shell path from a successful Unix probe output. The kind is a
+ * coarse posix/fish hint; the path additionally feeds the zsh single-line
+ * wrapper flavor (#3575 / #3576), so the initially typed PTY probe can be
+ * zsh-safe for zsh login shells before the live shell probe runs.
+ */
+function extractRemoteLoginShellPath(stdout) {
+  const lines = String(stdout || "")
+    .replace(/\r/g, "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  for (const line of lines) {
+    if (!line.startsWith(PROBE_OUTPUT_MARKER)) continue;
+    const path = line.slice(PROBE_OUTPUT_MARKER.length).trim();
+    if (path) return path;
+  }
+  return "";
+}
+
 function parseRemoteLoginShellProbeOutput(stdout) {
   const lines = String(stdout || "")
     .replace(/\r/g, "")
@@ -252,10 +272,14 @@ function withProbeTimeout(promise, timeoutMs) {
  *
  * Always mark the probe settled so we do not re-probe every AI exec.
  */
-function applyProbedShellKind(session, kind) {
+function applyProbedShellKind(session, kind, shellPath = "") {
   if (!kind) return session.shellKind;
   session._shellKindProbeSettled = true;
   session._loginShellKind = kind;
+  // The probed login-shell path (e.g. /usr/bin/zsh) refines the initially
+  // typed live-shell probe — it must never pin the active shell as the kind
+  // hint itself does not.
+  if (shellPath) session._loginShellPath = shellPath;
   // Soft hint only; never pin session.shellKind from a remote login probe.
   return session.shellKind;
 }
@@ -278,7 +302,7 @@ function isShellKindProbeSettled(session) {
  * marker probe, then fall back to the Windows reg probe for hosts whose banner
  * was not recorded on the session.
  *
- * @returns {Promise<{ kind: string|null, settleWithoutKind?: boolean }>}
+ * @returns {Promise<{ kind: string|null, shellPath?: string, settleWithoutKind?: boolean }>}
  */
 async function probeRemoteLoginShellKind(execProbe, timeoutMs, session) {
   const preferWindows = isWindowsOpenSshRemote(session?.remoteSshVersion);
@@ -307,7 +331,7 @@ async function probeRemoteLoginShellKind(execProbe, timeoutMs, session) {
     timeoutMs,
   );
   const kind = parseRemoteLoginShellProbeOutput(stdout);
-  if (kind) return { kind };
+  if (kind) return { kind, shellPath: extractRemoteLoginShellPath(stdout) };
 
   // Timed out / probe returned null — leave unsettled for a later retry.
   // Do not stack a second full-timeout Windows probe in the same attempt.
@@ -390,7 +414,7 @@ async function ensureSessionShellKind(session, options = {}) {
     try {
       const probed = await probeRemoteLoginShellKind(execProbe, timeoutMs, session);
       if (probed.kind) {
-        return applyProbedShellKind(session, probed.kind);
+        return applyProbedShellKind(session, probed.kind, probed.shellPath);
       }
       if (probed.settleWithoutKind) {
         markShellKindProbeSettled(session);
@@ -481,6 +505,7 @@ module.exports = {
   buildRemoteLoginShellProbeCommand,
   buildRemoteWindowsLoginShellProbeCommand,
   parseRemoteLoginShellProbeOutput,
+  extractRemoteLoginShellPath,
   parseRemoteWindowsLoginShellProbeOutput,
   createSshConnExecProbe,
   createSessionExecProbe,
