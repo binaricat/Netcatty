@@ -551,11 +551,11 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
     if (stored === null) return true;
     return stored === 'true';
   });
-  // Whether the tray / menu bar icon is shown at all; independent of
-  // close-to-tray. Default to true (shown) to keep existing behavior.
+  // Preserve the old tray visibility for existing users until they set this
+  // independently. Fresh installs still default to showing the icon.
   const [showTrayIcon, setShowTrayIcon] = useState<boolean>(() => {
     const stored = readStoredString(STORAGE_KEY_SHOW_TRAY_ICON);
-    if (stored === null) return true;
+    if (stored === null) return closeToTray;
     return stored === 'true';
   });
   // Optimistic cache for first paint; useSystemSettingsEffects hydrates this
