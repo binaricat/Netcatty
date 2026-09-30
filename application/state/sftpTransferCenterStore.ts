@@ -1400,6 +1400,21 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
         // the old walk settles.
         clearTransferCancelledTree(taskId);
       }
+      if (folderResumeRecoverable) {
+        // The main-process cancelTransfer keeps a sticky pendingCancel latch
+        // for any id that was neither queued nor in its active registry — a
+        // successfully-cancelled inactive sibling reports success but retains
+        // the latch. That row was recovered to "interrupted" and its persisted
+        // transferId is reused by dedicated resume / re-walk, so a stale latch
+        // would make startStreamTransfer cancel it immediately at
+        // startTransferNow. Clear pending cancellation for every recoverable
+        // sibling before that id is reused.
+        const bridge = netcattyBridge.get();
+        for (const id of cancelIds) {
+          if (failedIds.has(id)) continue;
+          try { await bridge?.clearPendingTransferCancel?.(id); } catch { /* best-effort */ }
+        }
+      }
       emit();
       return;
     }

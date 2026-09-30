@@ -1458,17 +1458,24 @@ export const useSftpTransfers = ({
       setConflicts(conflictsRef.current);
 
       const failedIds = await cancelBackendTransfers([transferId, ...childIdsToCancel]);
-      if (failedIds.length > 0 && !transferRuntime.isWalkInFlight(transferId)) {
-        // Backend cancellation failed but the row is kept in attention for
-        // recovery. With no in-flight runWalk to settle the cancel latches,
-        // drop them now or a later Resume is rejected outright by
-        // admitTaskRun's cancelled-root check. While a walk is still in
-        // flight, retain the latch so the surviving walk keeps honoring
-        // Cancel all — its runWalk settlement clears the process-global tree.
-        for (const id of [transferId, ...childIdsToCancel]) {
-          clearCancelledTask(id);
+      if (failedIds.length > 0) {
+        const walkInFlight = transferRuntime.isWalkInFlight(transferId);
+        if (!walkInFlight) {
+          // Backend cancellation failed but the row is kept in attention for
+          // recovery. With no in-flight runWalk to settle the cancel latches,
+          // drop them now or a later Resume is rejected outright by
+          // admitTaskRun's cancelled-root check.
+          for (const id of [transferId, ...childIdsToCancel]) {
+            clearCancelledTask(id);
+          }
+          clearTransferCancelledTree(transferId, [...childIdsToCancel]);
         }
-        clearTransferCancelledTree(transferId, [...childIdsToCancel]);
+        // Recover the status to attention in both cases: the root was already
+        // re-painted "cancelled" above, which would report Cancel all as
+        // successful and drop the Resume action even though a backend
+        // cancellation failed. With a walk still in flight the latches are
+        // retained until its settlement clears the process-global tree, but
+        // the status recovery is independent of that latch lifetime.
         sftpTransferCenterStore.patchTask(transferId, {
           status: "attention",
           error: "Could not cancel transfer. Please try again.",
