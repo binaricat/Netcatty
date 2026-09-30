@@ -40,7 +40,7 @@ test('generic POSIX wrappers keep the multiline Bash cleanup', () => {
   assert.ok(wrapped.includes('done'));
 });
 
-test('zsh-flavored live probe is a single physical line and keeps Bash cleanup for other shells', () => {
+test('zsh and unknown flavors type a single-line live probe; bash keeps the Bash cleanup', () => {
   const marker = '__NCMCP_probe__';
   const zshProbe = buildLiveShellProbe(marker, 'zsh');
   const zshLines = zshProbe.split('\n');
@@ -57,9 +57,23 @@ test('zsh-flavored live probe is a single physical line and keeps Bash cleanup f
     parseLiveShellProbe(`${marker}_P:-zsh\n${marker}_Q`, marker),
     { kind: 'posix', shellName: 'zsh' },
   );
-  const genericProbe = buildLiveShellProbe(marker);
-  assert.ok(genericProbe.includes('\\\n'));
-  assert.ok(genericProbe.includes('__nc_h_'));
+  // Versioned zsh basenames stay POSIX-kind, mirroring
+  // posixFlavorFromShellPath(): a fish login-shell hint must not survive
+  // refinement or fish syntax would be typed into versioned zsh.
+  assert.deepEqual(
+    parseLiveShellProbe(`${marker}_P:zsh-5.9\n${marker}_Q`, marker),
+    { kind: 'posix', shellName: 'zsh-5.9' },
+  );
+  // Unknown flavors are zsh-safe too: the first unknown-flavor job must not
+  // type the multiline Bash cleanup probe into a possibly-zsh line editor.
+  const unknownProbe = buildLiveShellProbe(marker);
+  assert.ok(!unknownProbe.includes('\\\n'), unknownProbe);
+  assert.ok(!unknownProbe.includes('__nc_h_'));
+  assert.ok(unknownProbe.endsWith(`${marker}_Q'\n`), unknownProbe.slice(-80));
+  // A live-probe-reported bash restores the multiline form with its cleanup.
+  const bashProbe = buildLiveShellProbe(marker, 'bash');
+  assert.ok(bashProbe.includes('\\\n'));
+  assert.ok(bashProbe.includes('__nc_h_'));
 });
 
 test('posixFlavorFromShellPath detects zsh executables only', () => {
@@ -179,8 +193,9 @@ test('a refined remote zsh flavor keeps the single-line probe for later jobs', a
     shellKind: 'posix', probeLiveShell: true, timeoutMs: 1000,
   });
   await sleep(400);
-  // First job must still use the generic probe: the flavor is unknown.
-  assert.ok(writes.join('').includes('\\\n'), writes.join(''));
+  // First job types the zsh-safe single-line probe: the flavor is unknown and
+  // the multiline Bash cleanup probe could wedge a zsh line editor.
+  assert.ok(!writes.join('').includes('\\\n'), writes.join(''));
   pty.emit('data', `${first.marker}_P:zsh-5.9\n${first.marker}_Q`);
   await sleep(400);
   pty.emit('data', `${first.marker}_S\r\nsuccess\r\n${first.marker}_E:0\r\n`);

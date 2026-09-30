@@ -112,12 +112,13 @@ function startPtyJob(ptyStream, command, options) {
   // zsh single-line wrapper flavor (#3575). The session-provided flavor (from
   // the local executable path, or the probed remote login-shell path) is known
   // before the probe is typed; the live shell probe's comm name refines it
-  // afterwards so a zsh session where the user switched to another shell falls
-  // back to the generic wrapper. The refined flavor is remembered per PTY
-  // stream so remote/executable-less sessions do not re-type the multiline
-  // Bash cleanup probe (which can wedge a busy zsh line editor) on every
-  // subsequent command.
-  let shellFlavor = posixFlavor === "zsh" ? "zsh" : (
+  // afterwards (to "zsh" or "bash") so a zsh session where the user switched
+  // to another shell falls back to the generic wrapper. The refined flavor is
+  // remembered per PTY stream so remote/executable-less sessions do not
+  // re-type the multiline Bash cleanup probe (which can wedge a busy zsh line
+  // editor) on every subsequent command; an unknown flavor also starts on the
+  // zsh-safe single-line probe because the live shell is not known yet.
+  let shellFlavor = posixFlavor || (
     ptyStream && typeof ptyStream === "object" ? (refinedProbeFlavors.get(ptyStream) || "") : ""
   );
 
@@ -580,8 +581,15 @@ function startPtyJob(ptyStream, command, options) {
       if (probe.kind) resolvedShellKind = probe.kind;
       // shellName is a basename (e.g. "zsh", "zsh-5.9", "-zsh" with the dash
       // already stripped) so the same versioned-zsh detection used for the
-      // configured shell path keeps the flavor here too.
-      if (probe.shellName) shellFlavor = posixFlavorFromShellPath(probe.shellName);
+      // configured shell path keeps the flavor here too. A reported bash shell
+      // is remembered as the "bash" flavor so later jobs on this stream go
+      // back to the multiline probe/wrapper with the Bash history cleanup
+      // (unknown flavors start on the zsh-safe single-line probe, which omits
+      // the cleanup because it cannot rule zsh out yet).
+      if (probe.shellName) {
+        shellFlavor = posixFlavorFromShellPath(probe.shellName)
+          || (probe.shellName === "bash" ? "bash" : "");
+      }
       // Remember the refined flavor for later jobs on this stream; an
       // unreported comm name keeps the current best knowledge.
       if (ptyStream && typeof ptyStream === "object") {

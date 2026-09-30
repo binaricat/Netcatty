@@ -11,10 +11,17 @@ function buildLiveShellProbe(marker, posixFlavor = "") {
   // in zsh (BASH_VERSION guard), so a zsh session only pays for its multiline
   // `\<newline>` continuations being parsed and redisplayed by the busy line
   // editor. Type the entire probe as a single physical line instead: no PS2
-  // continuations and no mid-construct split points. The probe still detects
-  // the live shell, so a zsh-configured session where the user switched to
-  // bash keeps working (the wrapper then falls back to the Bash form).
-  if (posixFlavor === "zsh") {
+  // continuations and no mid-construct split points. Unknown flavors use the
+  // same zsh-safe single-line form: when no zsh path hint exists yet (e.g. a
+  // single-channel SSH session where the session shell probe is unavailable,
+  // or a bash-configured session that entered zsh), the first probe would
+  // otherwise still type the multiline cleanup probe before live detection
+  // can rule zsh out, wedging the busy zsh line editor. The single-line form
+  // is a valid probe in every other candidate shell (bash only loses the
+  // probe-line history cleanup for that one job), and once the live probe
+  // reports a bash shell the remembered flavor restores the multiline form
+  // with its cleanup.
+  if (posixFlavor !== "bash") {
     // Start display suppression in the PTY before the single long line is
     // read, independently of PS2 and echo mode.
     // Space-prefix every physical line (zsh only records unprefixed lines
@@ -54,7 +61,12 @@ function parseLiveShellProbe(output, marker) {
     const name = normalized.slice(marker.length + 3).trim().split("/").pop().replace(/^-/, "");
     return {
       kind: name === "fish" ? "fish"
-        : /^(?:ba|da|z|k|a)?sh$/.test(name) ? "posix" : null,
+        // Versioned zsh basenames (e.g. Homebrew "zsh-5.9") share the plain
+        // "zsh" basename's POSIX classification, mirroring
+        // posixFlavorFromShellPath(). Otherwise a fish login-shell hint would
+        // survive refinement and later type fish syntax into zsh.
+        : /^(?:ba|da|z|k|a)?sh$/.test(name) || /^zsh([-.][0-9][^/]*)?$/i.test(name)
+          ? "posix" : null,
       shellName: name,
     };
   }
