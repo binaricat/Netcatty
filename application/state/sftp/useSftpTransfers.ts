@@ -1458,6 +1458,7 @@ export const useSftpTransfers = ({
       setConflicts(conflictsRef.current);
 
       const failedIds = await cancelBackendTransfers([transferId, ...childIdsToCancel]);
+      const failedIdSet = new Set(failedIds);
       if (failedIds.length > 0) {
         const walkInFlight = transferRuntime.isWalkInFlight(transferId);
         if (!walkInFlight) {
@@ -1485,11 +1486,53 @@ export const useSftpTransfers = ({
           status: "attention" as const,
           error: "Could not cancel transfer. Please try again.",
         } : task));
+        if (walkInFlight) {
+          // Registered-owner recovery: the walk is still registered and a later
+          // Resume takes the soft-resume path, which never starts a fresh
+          // re-walk. The removal above discarded every child row, so those
+          // siblings are never re-enqueued and the folder settles failed or
+          // incomplete. Reset the removed children to resumable rows instead
+          // (matching the orphan cancel path's recovering-sibling convention):
+          // recovering siblings repaint as "interrupted" for the re-walk to
+          // re-admit, failed cancellations keep their attention error until
+          // the user retries cancelling them.
+          const recoveringChildren = childrenToCleanup.map((child) => {
+            const failed = failedIdSet.has(child.id);
+            return {
+              ...child,
+              status: failed ? ("attention" as const) : ("interrupted" as const),
+              error: failed ? "Could not cancel transfer. Please try again." : undefined,
+              reconnectRequired: failed ? child.reconnectRequired : true,
+              endTime: undefined,
+              speed: 0,
+              conflict: undefined,
+            };
+          });
+          setTransfers((current) => {
+            const next = [...current];
+            for (const child of recoveringChildren) {
+              const index = next.findIndex((row) => row.id === child.id);
+              if (index >= 0) next[index] = child;
+              else next.push(child);
+            }
+            return next;
+          });
+          const bridge = netcattyBridge.get();
+          for (const id of [transferId, ...childIdsToCancel]) {
+            // The main-process cancelTransfer keeps a sticky pendingCancel
+            // latch for ids that were neither queued nor in its active
+            // registry — a successfully-cancelled sibling may retain it. That
+            // persisted transferId is reused by the recovery re-walk, so a
+            // stale latch would cancel the reused id immediately at
+            // startTransferNow. Clear the pending cancellation first.
+            if (failedIdSet.has(id)) continue;
+            try { await bridge?.clearPendingTransferCancel?.(id); } catch { /* best-effort */ }
+          }
+        }
       }
       // Failed cancellations keep their artifacts (and possibly a live writer
       // running) — the row stays in attention for Resume, so cleanup must not
       // race the surviving backend operation or drop staged progress.
-      const failedIdSet = new Set(failedIds);
       if (taskToCancel && !failedIdSet.has(transferId)) await cleanupTaskArtifacts(taskToCancel);
       // Child stages are keyed by per-file transferId — clean each known child.
       for (const child of childrenToCleanup) {

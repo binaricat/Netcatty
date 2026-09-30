@@ -877,7 +877,7 @@ export function GlobalSftpTransferCenter() {
           <div className="min-w-0 pr-2 text-sm font-semibold">
             {t("sftp.transferCenter.title")}
           </div>
-          <div className="flex items-center gap-1">
+          <div className="flex flex-wrap items-center justify-end gap-1">
             <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={pauseAll} disabled={batchEligibility.pausableCount === 0}>
               <Pause size={12} className="mr-1" />{t("sftp.transferCenter.pauseAll")}
             </Button>
