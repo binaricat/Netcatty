@@ -1457,7 +1457,18 @@ export const useSftpTransfers = ({
       conflictsRef.current = conflictsRef.current.filter((c) => c.transferId !== transferId && !childIdsToCancel.has(c.transferId));
       setConflicts(conflictsRef.current);
 
-      await cancelBackendTransfers([transferId, ...childIdsToCancel]);
+      const failedIds = await cancelBackendTransfers([transferId, ...childIdsToCancel]);
+      if (failedIds.length > 0) {
+        sftpTransferCenterStore.patchTask(transferId, {
+          status: "attention",
+          error: "Could not cancel transfer. Please try again.",
+        });
+        setTransfers((current) => current.map((task) => task.id === transferId ? {
+          ...task,
+          status: "attention" as const,
+          error: "Could not cancel transfer. Please try again.",
+        } : task));
+      }
       if (taskToCancel) await cleanupTaskArtifacts(taskToCancel);
       // Child stages are keyed by per-file transferId — clean each known child.
       for (const child of childrenToCleanup) {

@@ -407,6 +407,7 @@ export const enVaultMessages: Messages = {
   'sftp.transferCenter.prioritize': 'Transfer next',
   'sftp.transferCenter.pauseAll': 'Pause all',
   'sftp.transferCenter.resumeAll': 'Resume all',
+  'sftp.transferCenter.cancelAll': 'Cancel all',
   'sftp.transferCenter.empty': 'No transfers in this category',
   'sftp.transferCenter.showBackground': 'Show {count} background transfers',
   'sftp.transferCenter.hideBackground': 'Hide background transfers',

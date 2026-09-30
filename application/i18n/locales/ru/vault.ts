@@ -445,6 +445,7 @@ export const ruVaultMessages: Messages = {
   'sftp.transferCenter.prioritize': 'Передать следующей',
   'sftp.transferCenter.pauseAll': 'Приостановить все',
   'sftp.transferCenter.resumeAll': 'Продолжить все',
+  'sftp.transferCenter.cancelAll': 'Отменить все',
   'sftp.transferCenter.empty': 'В этой категории нет передач',
   'sftp.transferCenter.showBackground': 'Показать фоновые: {count}',
   'sftp.transferCenter.hideBackground': 'Скрыть фоновые',

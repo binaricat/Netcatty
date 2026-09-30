@@ -2706,6 +2706,39 @@ test("an interrupted task without its old controller can still be cancelled", as
   assert.equal(store.getSnapshot().tasks[0]?.status, "cancelled");
 });
 
+test("orphan cancel keeps failed work visible and leaves completed children alone", async (t) => {
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+  t.after(() => {
+    if (previousWindow) Object.defineProperty(globalThis, "window", previousWindow);
+    else Reflect.deleteProperty(globalThis, "window");
+  });
+  const cancelledIds: string[] = [];
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { netcatty: {
+      cancelTransfer: async (id: string) => {
+        cancelledIds.push(id);
+        return { success: id !== "unfinished" };
+      },
+    } },
+  });
+  const store = createSftpTransferCenterStore();
+  store.publishOwner("closed-panel", [
+    { ...makeTask("directory", "paused"), isDirectory: true },
+    { ...makeTask("finished", "completed"), parentTaskId: "directory" },
+    { ...makeTask("unfinished", "queued"), parentTaskId: "directory" },
+  ]);
+  const finishedBeforeCancel = store.getTask("finished");
+
+  await store.cancel("directory");
+
+  assert.deepEqual(cancelledIds, ["directory", "unfinished"]);
+  assert.equal(store.getTask("finished")?.status, finishedBeforeCancel?.status);
+  assert.equal(store.getTask("unfinished")?.status, "attention");
+  assert.equal(store.getTask("directory")?.status, "attention");
+  assert.match(store.getTask("directory")?.error ?? "", /Could not cancel/);
+});
+
 test("concurrent resume clicks adopt a task only once", async () => {
   let adoptCount = 0;
   const store = createSftpTransferCenterStore();

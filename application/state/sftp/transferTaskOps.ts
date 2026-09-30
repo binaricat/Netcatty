@@ -71,9 +71,9 @@ export function useSftpTransferTaskOps({
     const bridge = netcattyBridge.get();
     const cancelTransferAtBackend = bridge?.cancelTransfer;
     const cancelCompressedUpload = bridge?.cancelCompressedUpload;
-    if (!cancelTransferAtBackend && !cancelCompressedUpload) return;
+    if (!cancelTransferAtBackend && !cancelCompressedUpload) return [];
 
-    await Promise.all(
+    const failed = await Promise.all(
       Array.from(idsToCancel).map(async (id) => {
         const candidate = currentTransfers.find((task) => task.id === id);
         const compressed = candidate?.controlKind === "compressed-upload";
@@ -81,11 +81,14 @@ export function useSftpTransferTaskOps({
           ? cancelCompressedUpload?.(id)
           : cancelTransferAtBackend?.(id);
         const results = operation ? await Promise.allSettled([operation]) : [];
-        if (results.some((result) => result.status === "rejected")) {
+        if (results.some((result) => result.status === "rejected" || result.value?.success === false)) {
           logger.warn("Failed to cancel one or more transfer backends");
+          return id;
         }
+        return null;
       }),
     );
+    return failed.filter((id): id is string => id !== null);
   }, [activeChildIdsRef, cancelledTasksRef, transfersRef]);
 
   const markBatchStopped = useCallback(

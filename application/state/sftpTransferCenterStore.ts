@@ -1301,9 +1301,9 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
         emit();
       }
     }
-    if (!controller && action === "cancel" && task && ["paused", "interrupted", "attention", "pending", "queued", "transferring", "pausing"].includes(task.status)) {
+    if (!controller && action === "cancel" && task && !["completed", "cancelled"].includes(task.status)) {
       const childIds = tasks
-        .filter((candidate) => candidate.parentTaskId === taskId)
+        .filter((candidate) => candidate.parentTaskId === taskId && !["completed", "cancelled", "failed"].includes(candidate.status))
         .map((candidate) => candidate.id);
       // Stop surviving processTransfer walks immediately (panel-local
       // cancelledTasksRef is gone after unmount).
@@ -1315,13 +1315,19 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
       } catch {
         // best-effort
       }
-      try {
-        await netcattyBridge.get()?.cancelTransfer?.(taskId);
-        for (const childId of childIds) {
-          try { await netcattyBridge.get()?.cancelTransfer?.(childId); } catch { /* best-effort */ }
-        }
-      } catch {
-        // Best-effort backend cancel when the owning panel is gone / no window.
+      const failedIds = new Set<string>();
+      const cancelIds = [taskId, ...childIds];
+      for (let offset = 0; offset < cancelIds.length; offset += 32) {
+        await Promise.all(cancelIds.slice(offset, offset + 32).map(async (id) => {
+          try {
+            const result: unknown = await netcattyBridge.get()?.cancelTransfer?.(id);
+            if (result && typeof result === "object" && "success" in result && result.success === false) {
+              failedIds.add(id);
+            }
+          } catch {
+            failedIds.add(id);
+          }
+        }));
       }
       try {
         await netcattyBridge.get()?.cleanupTransferArtifacts?.({
@@ -1333,12 +1339,15 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
       } catch {
         // best-effort temp/.part cleanup
       }
-      const cancelIds = new Set([taskId, ...childIds]);
-      tasks = tasks.map((candidate) => cancelIds.has(candidate.id) ? {
+      const cancelIdSet = new Set(cancelIds);
+      tasks = tasks.map((candidate) => cancelIdSet.has(candidate.id) ? {
         ...candidate,
-        status: "cancelled",
-        error: undefined,
-        endTime: Date.now(),
+        status: failedIds.has(candidate.id) || (candidate.id === taskId && failedIds.size > 0) ? "attention" : "cancelled",
+        error: failedIds.has(candidate.id) || (candidate.id === taskId && failedIds.size > 0)
+          ? "Could not cancel transfer. Please try again."
+          : undefined,
+        endTime: failedIds.has(candidate.id) || (candidate.id === taskId && failedIds.size > 0)
+          ? candidate.endTime : Date.now(),
         speed: 0,
         conflict: undefined,
       } : candidate);

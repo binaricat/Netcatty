@@ -1,14 +1,20 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 
 import type { TransferTask } from "../../domain/models";
 import {
   getGlobalTransferBatchEligibility,
+  listGloballyCancellableTransferIds,
   listGloballyPausableTransferIds,
   listGloballyResumableTransferIds,
 } from "../../domain/sftpTransferActions";
 import { sftpTransferCenterStore } from "./sftpTransferCenterStore";
+import { globalSftpTransferScheduler } from "./sftp/globalTransferScheduler";
+import { markTransferCancelledTree } from "./sftp/transferCancelLatch";
+import { transferRuntime } from "./sftp/transferRuntime";
 
 export function useGlobalSftpTransferActions(tasks: readonly TransferTask[]) {
+  const cancellingRef = useRef(false);
+  const [isCancelling, setIsCancelling] = useState(false);
   const batchEligibility = useMemo(
     () => getGlobalTransferBatchEligibility(tasks),
     [tasks],
@@ -24,5 +30,49 @@ export function useGlobalSftpTransferActions(tasks: readonly TransferTask[]) {
     }
   }, [tasks]);
 
-  return { batchEligibility, pauseAll, resumeAll };
+  const cancelAll = useCallback(async () => {
+    if (cancellingRef.current) return;
+    cancellingRef.current = true;
+    setIsCancelling(true);
+    const currentTasks = transferRuntime.getSnapshot().tasks;
+    const ids = listGloballyCancellableTransferIds(currentTasks);
+    try {
+      // Stop queued work before yielding to IPC, including children of folder
+      // transfers. Otherwise later batches could start while earlier ones stop.
+      const selected = new Set(ids);
+      const children = new Map<string, string[]>();
+      for (const task of currentTasks) {
+        if (!task.parentTaskId || !selected.has(task.parentTaskId)
+          || ["completed", "failed", "cancelled"].includes(task.status)) continue;
+        const idsForParent = children.get(task.parentTaskId) ?? [];
+        idsForParent.push(task.id);
+        children.set(task.parentTaskId, idsForParent);
+        globalSftpTransferScheduler.cancel(task.id);
+      }
+      for (const id of ids) {
+        markTransferCancelledTree(id, children.get(id));
+        globalSftpTransferScheduler.cancel(id);
+      }
+      // Bound IPC work for large queues while active transfers stop promptly.
+      for (let offset = 0; offset < ids.length; offset += 32) {
+        await Promise.all(ids.slice(offset, offset + 32).map(async (taskId) => {
+          const current = transferRuntime.getTask(taskId);
+          if (!current || current.status === "completed" || current.status === "cancelled") return;
+          try {
+            await transferRuntime.cancel(taskId);
+          } catch {
+            sftpTransferCenterStore.patchTask(taskId, {
+              status: "attention",
+              error: "Could not cancel transfer. Please try again.",
+            });
+          }
+        }));
+      }
+    } finally {
+      cancellingRef.current = false;
+      setIsCancelling(false);
+    }
+  }, []);
+
+  return { batchEligibility, pauseAll, resumeAll, cancelAll, isCancelling };
 }

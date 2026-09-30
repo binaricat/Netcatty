@@ -3,6 +3,7 @@ import type { TransferTask } from "./models";
 export function getGlobalTransferBatchEligibility(tasks: readonly TransferTask[]) {
   const topLevel = tasks.filter((task) => !task.parentTaskId);
   return {
+    cancellableCount: listGloballyCancellableTransferIds(tasks).length,
     pausableCount: topLevel.filter((task) => (
       ["pending", "queued", "transferring"].includes(task.status)
       && task.resumable !== false
@@ -17,6 +18,13 @@ export function getGlobalTransferBatchEligibility(tasks: readonly TransferTask[]
       )
     )).length,
   };
+}
+
+export function listGloballyCancellableTransferIds(tasks: readonly TransferTask[]): string[] {
+  return tasks.filter((task) => (
+    !task.parentTaskId
+    && ["pending", "queued", "transferring", "pausing", "paused", "interrupted", "attention"].includes(task.status)
+  )).map((task) => task.id);
 }
 
 export function listGloballyPausableTransferIds(tasks: readonly TransferTask[]): string[] {
