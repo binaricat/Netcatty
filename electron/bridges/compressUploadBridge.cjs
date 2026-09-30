@@ -942,9 +942,12 @@ async function cancelCompression(event, payload) {
     }
   }
 
+  // A missing registry entry means the compression already settled and was
+  // cleaned up: cancelling it is an idempotent no-op, not a failure. Report
+  // success so UI cancel paths do not revert settled rows back to attention.
   return compression
     ? { success: true }
-    : { success: false, reason: 'Compression is not active' };
+    : { success: true, inactive: true };
 }
 
 async function pauseCompression(event, payload) {
