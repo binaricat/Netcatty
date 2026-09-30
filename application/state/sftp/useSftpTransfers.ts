@@ -1458,7 +1458,17 @@ export const useSftpTransfers = ({
       setConflicts(conflictsRef.current);
 
       const failedIds = await cancelBackendTransfers([transferId, ...childIdsToCancel]);
-      if (failedIds.length > 0) {
+      if (failedIds.length > 0 && !transferRuntime.isWalkInFlight(transferId)) {
+        // Backend cancellation failed but the row is kept in attention for
+        // recovery. With no in-flight runWalk to settle the cancel latches,
+        // drop them now or a later Resume is rejected outright by
+        // admitTaskRun's cancelled-root check. While a walk is still in
+        // flight, retain the latch so the surviving walk keeps honoring
+        // Cancel all — its runWalk settlement clears the process-global tree.
+        for (const id of [transferId, ...childIdsToCancel]) {
+          clearCancelledTask(id);
+        }
+        clearTransferCancelledTree(transferId, [...childIdsToCancel]);
         sftpTransferCenterStore.patchTask(transferId, {
           status: "attention",
           error: "Could not cancel transfer. Please try again.",
@@ -1480,7 +1490,7 @@ export const useSftpTransfers = ({
       }
 
     },
-    [cancelBackendTransfers, cleanupTaskArtifacts, releasePausedTransfer, setTransfers],
+    [cancelBackendTransfers, clearCancelledTask, cleanupTaskArtifacts, releasePausedTransfer, setTransfers],
   );
 
   // Soft pause/resume: single TransferRuntime entry (store soft-control +

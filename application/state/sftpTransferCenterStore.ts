@@ -1359,12 +1359,15 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
         speed: 0,
         conflict: undefined,
       } : candidate);
-      if (failedIds.size > 0) {
+      if (failedIds.size > 0 && !isTransferWalkInFlight(taskId)) {
         // Cancellation failed for at least one task, so the parent is kept in
         // attention for recovery instead of settling as cancelled. Drop the
         // cancellation latches now, or a later Resume is rejected outright by
         // admitTaskRun's cancelled-root check (dedicated directory resume
-        // admits each child through that latch).
+        // admits each child through that latch). While an orphaned walk is
+        // still in flight, retain the latch so the surviving walk keeps
+        // honoring Cancel all — its runWalk settlement clears the tree once
+        // the old walk settles.
         clearTransferCancelledTree(taskId);
       }
       emit();
