@@ -174,3 +174,31 @@ test("scripts side panel does not start a drag from a non-primary pointer", () =
   assert.match(source, /isNonPrimaryPointer/);
   assert.match(source, /primaryOnlyDragHandlers/);
 });
+
+test("scripts side panel offers a stacked view toggle that persists the choice", () => {
+  assert.match(source, /useScriptsViewMode/);
+  const toggle = source.match(/viewStacked[\s\S]*?\{viewMode === 'stacked' \? <List size=\{14\} \/> : <LayoutGrid size=\{14\} \/>\}/);
+  assert.ok(toggle, "view toggle button should swap list / stacked icons");
+  assert.match(source, /aria-pressed=\{viewMode === 'stacked'\}/);
+  // The chosen mode persists via the shared hook so it survives app restarts.
+  assert.match(source, /useScriptsViewMode\(\)/);
+  assert.match(source, /setViewMode\(viewMode === 'stacked' \? 'list' : 'stacked'\)/);
+});
+
+test("scripts side panel stacked view renders wrap-around chips and keeps run behavior", () => {
+  const stacked = source.match(/viewMode === 'stacked' \? \([\s\S]*?\) : \(/);
+  assert.ok(stacked, "stacked branch should exist in the content area");
+  assert.match(stacked[0], /flex flex-wrap/);
+  // Chips reuse the same click handler (multi-select / run / execute) as rows.
+  assert.match(stacked[0], /onClick=\{\(\) => handleSnippetClick\(snippet\)\}/);
+  // Packages stay visible as section headers with their counts.
+  assert.match(stacked[0], /item\.row\.name/);
+  assert.match(stacked[0], /item\.countLabel/);
+  assert.match(source, /const SnippetChip = memo/);
+  // The stacked chip keeps the same context menu contract (edit / delete / run).
+  const chip = source.match(/const SnippetChip = memo[\s\S]*?SnippetChip\.displayName/);
+  assert.ok(chip, "SnippetChip component should exist");
+  assert.match(chip[0], /ContextMenuContent/);
+  assert.match(chip[0], /onRunParallel/);
+  assert.match(chip[0], /onEdit/);
+});

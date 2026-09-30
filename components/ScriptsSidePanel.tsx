@@ -15,6 +15,8 @@ import {
   Expand,
   FolderPlus,
   Layers,
+  LayoutGrid,
+  List,
   Minimize2,
   Package,
   Play,
@@ -27,6 +29,7 @@ import {
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useI18n } from '../application/i18n/I18nProvider';
 import { getScriptRecordingSnapshot, subscribeScriptRecording } from '../application/state/scriptRecordingStore.ts';
+import { useScriptsViewMode } from '../application/state/useScriptsViewMode.ts';
 import { VaultDeleteConfirmDialog } from './vault/VaultDeleteConfirmDialog';
 import {
   collectSnippetPackageTreePaths,
@@ -61,6 +64,11 @@ const toolbarIconButtonClass =
   'h-7 w-7 shrink-0 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors disabled:opacity-40 disabled:pointer-events-none';
 
 const SCRIPT_ROW_HEIGHT = 34;
+// The stacked view renders wrapping chips that cannot use FixedSizeVirtualList,
+// so cap the initial render and grow lazily as the user scrolls to keep a huge
+// library (or a broad search) from mounting every chip at once.
+const STACKED_INITIAL_RENDER_COUNT = 120;
+const STACKED_RENDER_BATCH = 120;
 
 const isRootPackagePath = (path: string): boolean => {
   const body = path.startsWith('/') ? path.slice(1) : path;
@@ -171,10 +179,14 @@ export function buildScriptsSidePanelRows({
   snippets,
   packages,
   expandedPaths,
+  snippetsBeforeChildren = false,
 }: {
   snippets: Snippet[];
   packages: string[];
   expandedPaths: Set<string>;
+  /** Emit each package's own snippets before its sub-packages so flat views
+   * (stacked chips) keep every package's chips attached to its section. */
+  snippetsBeforeChildren?: boolean;
 }): TreeRow[] {
   const normalizedPackages = new Set(collectScriptsSidePanelPackagePaths(packages, snippets));
 
@@ -227,6 +239,11 @@ export function buildScriptsSidePanelRows({
   const snippetsIn = (pkg: string | null): Snippet[] =>
     sortByVaultOrder(snippetsByPackage.get(pkg ?? '') ?? []);
 
+  const emitSnippets = (localSnippets: Snippet[], pkg: string, depth: number) =>
+    localSnippets.forEach((snippet) =>
+      rows.push({ type: 'snippet', id: snippet.id, depth: depth + 1, snippet, packagePath: pkg }),
+    );
+
   const rows: TreeRow[] = [];
   const walk = (pkg: string, depth: number) => {
     const children = childPackagesOf(pkg);
@@ -246,10 +263,15 @@ export function buildScriptsSidePanelRows({
     });
 
     if (!isExpanded) return;
+    if (snippetsBeforeChildren) {
+      // Flat stacked view: a package's chips must follow its own section
+      // header, not trail after its nested children's chips.
+      emitSnippets(localSnippets, pkg, depth);
+      children.forEach((child) => walk(child, depth + 1));
+      return;
+    }
     children.forEach((child) => walk(child, depth + 1));
-    localSnippets.forEach((snippet) =>
-      rows.push({ type: 'snippet', id: snippet.id, depth: depth + 1, snippet, packagePath: pkg }),
-    );
+    emitSnippets(localSnippets, pkg, depth);
   };
 
   snippetsIn(null).forEach((snippet) =>
@@ -281,6 +303,7 @@ const ScriptsSidePanelInner: React.FC<ScriptsSidePanelProps> = ({
   const [search, setSearch] = useState('');
   const [searchExpanded, setSearchExpanded] = useState(false);
   const [subView, setSubView] = useState<'library' | 'running'>('library');
+  const [viewMode, setViewMode] = useScriptsViewMode();
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
   const [isMultiSelectMode, setIsMultiSelectMode] = useState(false);
   const [selectedSnippetIds, setSelectedSnippetIds] = useState<Set<string>>(new Set());
@@ -291,6 +314,7 @@ const ScriptsSidePanelInner: React.FC<ScriptsSidePanelProps> = ({
   const [renamingPackagePath, setRenamingPackagePath] = useState('');
   const [newPackageName, setNewPackageName] = useState('');
   const [packageError, setPackageError] = useState('');
+  const [stackedRenderLimit, setStackedRenderLimit] = useState(STACKED_INITIAL_RENDER_COUNT);
   const packageDialogRef = useRef<HTMLDivElement>(null);
   const packageNameInputRef = useRef<HTMLInputElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -481,8 +505,15 @@ const ScriptsSidePanelInner: React.FC<ScriptsSidePanelProps> = ({
     if (!isVisible) return [];
     if (searchMatches !== null) return [];
 
-    return buildScriptsSidePanelRows({ snippets, packages, expandedPaths });
-  }, [snippets, packages, expandedPaths, searchMatches, isVisible]);
+    return buildScriptsSidePanelRows({
+      snippets,
+      packages,
+      expandedPaths,
+      // Stacked chips wrap flat, so each package's chips must stay attached
+      // to its own section header.
+      snippetsBeforeChildren: viewMode === 'stacked',
+    });
+  }, [snippets, packages, expandedPaths, searchMatches, isVisible, viewMode]);
 
   type ScriptsListItem =
     | { key: string; kind: 'search'; snippet: Snippet }
@@ -514,6 +545,48 @@ const ScriptsSidePanelInner: React.FC<ScriptsSidePanelProps> = ({
       }];
     });
   }, [rows, searchMatches, t, isVisible]);
+
+  const stackedSentinelRef = useRef<HTMLDivElement | null>(null);
+
+  // Restart the lazy window whenever the underlying result set changes
+  // (new search, package list changes, snippet edits, view-mode switch) — but
+  // NOT on package expand/collapse. Expanding/collapsing only reshapes the
+  // same result set; resetting there would drop the user's lazy-loaded window
+  // and remount the package they just toggled, forcing them to re-scroll.
+  // Keyed by data identity, not by listItems reference, for that reason.
+  // Reset during render — not in an effect — so the first render of a new
+  // result set never slices with the previous, potentially very large window.
+  const stackedResultSetKey = useMemo(() => {
+    if (searchMatches !== null) {
+      return `search:${searchMatches.map((snippet) => snippet.id).join('\u0000')}`;
+    }
+    return `tree:${viewMode}:${packages.join('\u0000')}:${snippets
+      .map((snippet) => snippet.id)
+      .join('\u0000')}`;
+  }, [searchMatches, viewMode, packages, snippets]);
+
+  const [prevResultSetKey, setPrevResultSetKey] = useState(stackedResultSetKey);
+  if (prevResultSetKey !== stackedResultSetKey) {
+    setPrevResultSetKey(stackedResultSetKey);
+    setStackedRenderLimit(STACKED_INITIAL_RENDER_COUNT);
+  }
+
+  const hasMoreStackedItems = viewMode === 'stacked' && stackedRenderLimit < listItems.length;
+
+  useEffect(() => {
+    if (!hasMoreStackedItems) return;
+    const sentinel = stackedSentinelRef.current;
+    if (!sentinel) return;
+    // Re-created per batch: observing always emits an initial intersection
+    // callback, so short result sets that never scroll keep loading.
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        setStackedRenderLimit((limit) => limit + STACKED_RENDER_BATCH);
+      }
+    });
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [hasMoreStackedItems, stackedRenderLimit]);
 
   const handleSnippetClick = useCallback(
     (snippet: Snippet) => {
@@ -977,6 +1050,30 @@ const ScriptsSidePanelInner: React.FC<ScriptsSidePanelProps> = ({
             <TooltipTrigger asChild>
               <button
                 type="button"
+                className={cn(
+                  toolbarIconButtonClass,
+                  viewMode === 'stacked' && 'bg-muted/70 text-foreground',
+                )}
+                disabled={!hasAnyContent}
+                aria-label={viewMode === 'stacked'
+                  ? t('scripts.sidePanel.viewList')
+                  : t('scripts.sidePanel.viewStacked')}
+                aria-pressed={viewMode === 'stacked'}
+                onClick={() => setViewMode(viewMode === 'stacked' ? 'list' : 'stacked')}
+              >
+                {viewMode === 'stacked' ? <List size={14} /> : <LayoutGrid size={14} />}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              {viewMode === 'stacked'
+                ? t('scripts.sidePanel.viewList')
+                : t('scripts.sidePanel.viewStacked')}
+            </TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
                 className={toolbarIconButtonClass}
                 disabled={!canExpandCollapse}
                 aria-label={t('vault.tree.expandAll')}
@@ -1119,6 +1216,107 @@ const ScriptsSidePanelInner: React.FC<ScriptsSidePanelProps> = ({
         ) : hasAnyContent && searchMatches !== null && searchMatches.length === 0 ? (
           <div className="px-3 py-4 text-xs text-muted-foreground italic text-center">
             {t('common.noResultsFound')}
+          </div>
+        ) : viewMode === 'stacked' ? (
+          <div
+            className="h-full overflow-auto px-2 py-1.5"
+            data-scripts-view="stacked"
+          >
+            <div className="flex flex-wrap items-center content-start gap-1.5">
+              {listItems.slice(0, stackedRenderLimit).map((item) => {
+                if (item.kind === 'package') {
+                  // Mirror the list view's PackageRow context menu so stacked
+                  // mode keeps rename/delete reachable without switching views.
+                  const canMutatePackages = Boolean(onPackagesChange && onSnippetsChange);
+                  const header = (
+                    <button
+                      key={item.key}
+                      type="button"
+                      onClick={() => togglePackage(item.row.path)}
+                      aria-expanded={item.row.isExpanded}
+                      className="w-full basis-full flex items-center gap-1.5 pt-1.5 pb-0.5 text-left rounded-sm hover:bg-accent/40 transition-colors"
+                      style={{ paddingLeft: 8 + Math.min(item.row.depth, 4) * 10 }}
+                    >
+                      <ChevronRight
+                        size={11}
+                        className={cn(
+                          'shrink-0 text-muted-foreground transition-transform',
+                          item.row.isExpanded && 'rotate-90',
+                          !item.row.hasChildren && 'opacity-0',
+                        )}
+                      />
+                      <Package size={11} className="shrink-0 text-primary/80" />
+                      <span className="min-w-0 truncate text-[10px] font-medium text-muted-foreground">
+                        {item.row.name}
+                      </span>
+                      <span className="shrink-0 text-[10px] text-muted-foreground tabular-nums">
+                        {item.countLabel}
+                      </span>
+                    </button>
+                  );
+                  if (!canMutatePackages) {
+                    return header;
+                  }
+                  return (
+                    <ContextMenu key={item.key}>
+                      <ContextMenuTrigger asChild>
+                        {header}
+                      </ContextMenuTrigger>
+                      <ContextMenuContent>
+                        <ContextMenuItem
+                          onClick={() => openRenamePackageDialog(item.row.path)}
+                        >
+                          <Edit2 className="mr-2 h-4 w-4" /> {t('common.rename')}
+                        </ContextMenuItem>
+                        <ContextMenuItem
+                          className="text-destructive"
+                          onClick={() => requestDeletePackage(item.row.path)}
+                        >
+                          <Trash2 className="mr-2 h-4 w-4" /> {t('action.delete')}
+                        </ContextMenuItem>
+                      </ContextMenuContent>
+                    </ContextMenu>
+                  );
+                }
+                const snippet = item.kind === 'search' ? item.snippet : item.row.snippet;
+                const isScript = isScriptSnippet(snippet);
+                // Search results drop the package headers, so surface each
+                // snippet's package on the chip itself to keep results
+                // distinguishable (labels are not unique across packages).
+                const chipSubtitle = item.kind === 'search'
+                  ? (snippet.package || t('terminal.toolbar.library'))
+                  : undefined;
+                return (
+                  <SnippetChip
+                    key={item.key}
+                    snippet={snippet}
+                    subtitle={chipSubtitle}
+                    selected={selectedSnippetIds.has(snippet.id)}
+                    multiSelect={isMultiSelectMode}
+                    onClick={() => handleSnippetClick(snippet)}
+                    onEdit={() => handleEditSnippet(snippet)}
+                    onDelete={() => handleDeleteSnippet(snippet.id)}
+                    onCopyCommand={() => handleCopySnippetCommand(snippet)}
+                    copyCommandLabel={t('scripts.actions.copyCommand')}
+                    onRunParallel={onRunScriptOnWorkspace
+                      ? () => onRunScriptOnWorkspace(snippet, 'parallel')
+                      : undefined}
+                    onRunSequential={isScript && onRunScriptOnWorkspace
+                      ? () => onRunScriptOnWorkspace(snippet, 'sequential')
+                      : undefined}
+                    runParallelLabel={isScript
+                      ? t('scripts.actions.runParallel')
+                      : t('scripts.actions.runOnAllTabs')}
+                    runSequentialLabel={t('scripts.actions.runSequential')}
+                    editLabel={t('action.edit')}
+                    deleteLabel={t('action.delete')}
+                  />
+                );
+              })}
+            </div>
+            {hasMoreStackedItems ? (
+              <div ref={stackedSentinelRef} className="h-px w-full" aria-hidden="true" />
+            ) : null}
           </div>
         ) : (
           <FixedSizeVirtualList
@@ -1643,6 +1841,118 @@ const SnippetRow = memo<SnippetRowProps>(({
   </ContextMenu>
 ));
 SnippetRow.displayName = 'SnippetRow';
+
+interface SnippetChipProps {
+  snippet: Snippet;
+  /** Optional package context shown on the chip (used by stacked search
+   * results, where the package headers are dropped). */
+  subtitle?: string;
+  selected?: boolean;
+  multiSelect?: boolean;
+  onClick: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+  onRunParallel?: () => void;
+  onRunSequential?: () => void;
+  onCopyCommand?: () => void;
+  copyCommandLabel?: string;
+  runParallelLabel?: string;
+  runSequentialLabel?: string;
+  editLabel: string;
+  deleteLabel: string;
+}
+
+/**
+ * Compact chip for the stacked (wrap) view. Shares the same click → run /
+ * execute and right-click context menu as the list rows; only the layout is
+ * denser. Drag reordering stays list-view-only.
+ */
+const SnippetChip = memo<SnippetChipProps>(({
+  snippet,
+  subtitle,
+  selected = false,
+  multiSelect = false,
+  onClick,
+  onEdit,
+  onDelete,
+  onRunParallel,
+  onRunSequential,
+  onCopyCommand,
+  copyCommandLabel,
+  runParallelLabel,
+  runSequentialLabel,
+  editLabel,
+  deleteLabel,
+}) => (
+  <ContextMenu>
+    {/* Radix ContextMenuTrigger needs a real DOM element (Tooltip.Root renders
+        none), so mirror SnippetRow and wrap the tooltip in a plain div. */}
+    <ContextMenuTrigger asChild>
+      <div className="min-w-0 max-w-full">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={onClick}
+              aria-pressed={multiSelect ? selected : undefined}
+              className={cn(
+                'h-6 max-w-full min-w-0 px-2 rounded-md border border-border/60 bg-muted/40 hover:bg-accent/60 text-[11px] flex items-center gap-1 transition-colors',
+                selected && 'bg-primary/10 border-primary/40 hover:bg-primary/15',
+              )}
+            >
+              {multiSelect ? (
+                <CheckSquare
+                  size={11}
+                  className={cn('shrink-0', selected ? 'text-primary' : 'text-muted-foreground/70')}
+                />
+              ) : isScriptSnippet(snippet) ? (
+                <Play size={11} className="shrink-0 text-primary" />
+              ) : (
+                <Zap size={11} className="shrink-0 text-muted-foreground" />
+              )}
+              <span className="min-w-0 truncate">{snippet.label}</span>
+              {subtitle ? (
+                <>
+                  <span aria-hidden="true" className="shrink-0 text-muted-foreground/50">·</span>
+                  <span className="min-w-0 truncate text-[10px] text-muted-foreground/80">
+                    {subtitle}
+                  </span>
+                </>
+              ) : null}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="right" align="start">
+            <SnippetCommandTooltipContent label={snippet.label} command={snippet.command} />
+          </TooltipContent>
+        </Tooltip>
+      </div>
+    </ContextMenuTrigger>
+    <ContextMenuContent>
+      {onRunParallel ? (
+        <ContextMenuItem onClick={onRunParallel}>
+          <Layers className="mr-2 h-4 w-4" /> {runParallelLabel}
+        </ContextMenuItem>
+      ) : null}
+      {onRunSequential ? (
+        <ContextMenuItem onClick={onRunSequential}>
+          <Layers className="mr-2 h-4 w-4" /> {runSequentialLabel}
+        </ContextMenuItem>
+      ) : null}
+      {onCopyCommand ? (
+        <ContextMenuItem onClick={onCopyCommand}>
+          <Copy className="mr-2 h-4 w-4" /> {copyCommandLabel}
+        </ContextMenuItem>
+      ) : null}
+      <ContextMenuItem onClick={onEdit}>
+        <Edit2 className="mr-2 h-4 w-4" /> {editLabel}
+      </ContextMenuItem>
+      <ContextMenuItem className="text-destructive" onClick={onDelete}>
+        <Trash2 className="mr-2 h-4 w-4" /> {deleteLabel}
+      </ContextMenuItem>
+    </ContextMenuContent>
+  </ContextMenu>
+));
+SnippetChip.displayName = 'SnippetChip';
 
 export const ScriptsSidePanel = memo(ScriptsSidePanelInner);
 ScriptsSidePanel.displayName = 'ScriptsSidePanel';

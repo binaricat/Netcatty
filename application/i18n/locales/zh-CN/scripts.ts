@@ -36,6 +36,8 @@ export const zhCNScriptsMessages = {
   'scripts.sidePanel.library': '脚本库',
   'scripts.sidePanel.running': '运行中',
   'scripts.sidePanel.newScript': '新建脚本',
+  'scripts.sidePanel.viewList': '列表视图',
+  'scripts.sidePanel.viewStacked': '堆叠视图',
   'scripts.running.empty': '当前会话没有正在运行的脚本。',
   'scripts.running.unnamed': '未命名脚本',
   'scripts.running.status.running': '运行中',

@@ -36,6 +36,8 @@ export const zhTWScriptsMessages = {
   'scripts.sidePanel.library': '指令碼庫',
   'scripts.sidePanel.running': '執行中',
   'scripts.sidePanel.newScript': '新增指令碼',
+  'scripts.sidePanel.viewList': '列表檢視',
+  'scripts.sidePanel.viewStacked': '堆疊檢視',
   'scripts.running.empty': '目前工作階段沒有正在執行的指令碼。',
   'scripts.running.unnamed': '未命名指令碼',
   'scripts.running.status.running': '執行中',
