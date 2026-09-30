@@ -28,6 +28,7 @@ import {
 } from "./sftp/transferControlEpoch";
 import { isTransferWalkInFlight } from "./sftp/transferWalkRegistry";
 import {
+  clearTransferCancelledTree,
   isTransferOrRootCancelled,
   markTransferCancelledTree,
   settleTransferCancelTree,
@@ -1351,6 +1352,14 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
         speed: 0,
         conflict: undefined,
       } : candidate);
+      if (failedIds.size > 0) {
+        // Cancellation failed for at least one task, so the parent is kept in
+        // attention for recovery instead of settling as cancelled. Drop the
+        // cancellation latches now, or a later Resume is rejected outright by
+        // admitTaskRun's cancelled-root check (dedicated directory resume
+        // admits each child through that latch).
+        clearTransferCancelledTree(taskId);
+      }
       emit();
       return;
     }
