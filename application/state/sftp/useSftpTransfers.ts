@@ -1421,11 +1421,20 @@ export const useSftpTransfers = ({
       // Cancel parent + remove child tasks
       const childIdsToCancel = new Set<string>();
       const childrenToCleanup: TransferTask[] = [];
+      // Completed children are captured separately: the row removal below drops
+      // every child row, but the compact directory checkpoint only covers a
+      // contiguous prefix of the plan — a child completed beyond a gap has no
+      // checkpoint entry yet, so dropping its row makes the later Resume re-walk
+      // (and re-transfer) that file and regresses the folder's progress.
+      const completedChildrenToPreserve: TransferTask[] = [];
       for (const t of transfersRef.current) {
-        if (t.parentTaskId === transferId && !["completed", "cancelled", "failed"].includes(t.status)) {
-          childIdsToCancel.add(t.id);
-          childrenToCleanup.push(t);
+        if (t.parentTaskId !== transferId) continue;
+        if (["completed", "cancelled", "failed"].includes(t.status)) {
+          if (t.status === "completed") completedChildrenToPreserve.push(t);
+          continue;
         }
+        childIdsToCancel.add(t.id);
+        childrenToCleanup.push(t);
       }
       for (const cid of activeChildIdsRef.current.get(transferId) ?? []) {
         if (!childIdsToCancel.has(cid)) {
@@ -1514,6 +1523,22 @@ export const useSftpTransfers = ({
               const index = next.findIndex((row) => row.id === child.id);
               if (index >= 0) next[index] = child;
               else next.push(child);
+            }
+            // Restore completed rows unchanged so the in-flight walk's
+            // persisted-completed skip and the dedicated-resume
+            // retained-completed path keep skipping those files. Skip one whose
+            // file was already re-completed by a walk worker between the row
+            // removal and here, to avoid double-counting per completed file.
+            const completedTargets = new Set(
+              next
+                .filter((row) => row.parentTaskId === transferId && row.status === "completed")
+                .map((row) => `${row.sourcePath}\u0000${row.targetPath}`),
+            );
+            for (const child of completedChildrenToPreserve) {
+              const key = `${child.sourcePath}\u0000${child.targetPath}`;
+              if (completedTargets.has(key)) continue;
+              completedTargets.add(key);
+              next.push(child);
             }
             return next;
           });
