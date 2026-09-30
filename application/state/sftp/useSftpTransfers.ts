@@ -1593,7 +1593,10 @@ export const useSftpTransfers = ({
 
   // Soft pause/resume: single TransferRuntime entry (store soft-control +
   // dedicated hard reconnect). No panel-local soft-control dual path.
-  const resumeTransfer = useCallback(async (transferId: string) => {
+  // Also registered as the store's clearCancelledLatches control: the unified
+  // resume path drops a retained failed-cancel latch (panel-local set +
+  // process-global tree) before softResumeTransfer paints the walk.
+  const clearRetainedCancellation = useCallback((transferId: string) => {
     // Clear sticky child cancel latches so re-walk can retry same child ids.
     clearCancelledTask(transferId);
     for (const child of transfersRef.current) {
@@ -1606,8 +1609,12 @@ export const useSftpTransfers = ({
       transferId,
       [...(activeChildIdsRef.current.get(transferId) ?? [])],
     );
-    await transferRuntime.resume(transferId);
   }, [clearCancelledTask]);
+
+  const resumeTransfer = useCallback(async (transferId: string) => {
+    clearRetainedCancellation(transferId);
+    await transferRuntime.resume(transferId);
+  }, [clearRetainedCancellation]);
 
   const prioritizeTransfer = useCallback((transferId: string) => {
     globalSftpTransferScheduler.prioritize(transferId);
@@ -2388,6 +2395,11 @@ export const useSftpTransfers = ({
       await resumeTransfer(taskId);
     },
     cancel: cancelTransfer,
+    // Called by the store's unified resume when a retained cancellation is
+    // still latched (failed Cancel while a walk stayed in flight). Drops the
+    // panel-local set + process-global tree so the surviving walk stops
+    // observing cancellation and can recover on explicit Resume.
+    clearCancelledLatches: clearRetainedCancellation,
     retry: retryTransfer,
     prioritize: prioritizeTransfer,
     dismiss: dismissTransfer,
@@ -2401,7 +2413,7 @@ export const useSftpTransfers = ({
     canAdopt: (task) => resolveAdoptionPanes(task) !== null,
     canPrepareAdoption,
     adopt: adoptInterruptedTransfer,
-  }), [adoptInterruptedTransfer, canPrepareAdoption, cancelTransfer, dismissTransfer, dismissTransfers, ownerId, prioritizeTransfer, resolveAdoptionPanes, resolveConflict, resumeTransfer, retryTransfer, syncOwnedTasksFromStore]);
+  }), [adoptInterruptedTransfer, canPrepareAdoption, cancelTransfer, clearRetainedCancellation, dismissTransfer, dismissTransfers, ownerId, prioritizeTransfer, resolveAdoptionPanes, resolveConflict, resumeTransfer, retryTransfer, syncOwnedTasksFromStore]);
 
   return {
     transfers,

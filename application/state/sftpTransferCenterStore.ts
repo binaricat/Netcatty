@@ -63,6 +63,16 @@ export interface SftpTransferOwnerControls {
   cancel: (taskId: string) => void | Promise<void>;
   retry: (taskId: string) => void | Promise<void>;
   prioritize: (taskId: string) => void | Promise<void>;
+  /**
+   * Drop a retained cancellation latch before the unified resume runs a live
+   * walk again: the owner clears its panel-local cancelled set and the
+   * process-global cancel tree. Needed because a failed Cancel that kept a
+   * walk in flight repaints the parent as attention for Resume while both
+   * layers stay latched — soft resume alone would paint it "transferring"
+   * while the walk still observes cancellation and terminates instead of
+   * recovering.
+   */
+  clearCancelledLatches?: (taskId: string) => void;
   dismiss: (taskId: string, task?: TransferTask) => void;
   /** Remove a pruned group in one owner update to avoid publish/dismiss feedback loops. */
   dismissMany?: (tasks: readonly TransferTask[]) => void;
@@ -934,6 +944,19 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
       || (task.status === "attention" && !task.conflict)
       || task.ownerId === "background-agent"
     );
+    if (action === "resume" && isTransferOrRootCancelled(taskId)) {
+      // A failed Cancel that left a walk in flight latches both cancellation
+      // layers (owner panel set + process-global tree) but repaints the parent
+      // as attention for recovery, so this explicit Resume must clear them.
+      // The unified soft resume below treats any live directory walk as
+      // handled and paints it "transferring" — without clearing here the
+      // surviving walk keeps observing cancellation and terminates instead of
+      // recovering. Orphaned walks (no controller) never latch the panel-local
+      // set, so the store-level tree clear alone covers them; a live owner
+      // clears both layers via its control hook.
+      controller?.clearCancelledLatches?.(taskId);
+      clearTransferCancelledTree(taskId);
+    }
     if (needsDedicatedReconnect && controller && !controller.canAdopt?.(task)) {
       controller = undefined;
     }
