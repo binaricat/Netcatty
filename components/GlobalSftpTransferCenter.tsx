@@ -878,10 +878,10 @@ export function GlobalSftpTransferCenter() {
             {t("sftp.transferCenter.title")}
           </div>
           <div className="flex flex-wrap items-center justify-end gap-1">
-            <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={pauseAll} disabled={batchEligibility.pausableCount === 0}>
+            <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={pauseAll} disabled={isCancelling || batchEligibility.pausableCount === 0}>
               <Pause size={12} className="mr-1" />{t("sftp.transferCenter.pauseAll")}
             </Button>
-            <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={resumeAll} disabled={batchEligibility.resumableCount === 0}>
+            <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={resumeAll} disabled={isCancelling || batchEligibility.resumableCount === 0}>
               <Play size={12} className="mr-1" />{t("sftp.transferCenter.resumeAll")}
             </Button>
             <Button variant="ghost" size="sm" className="h-7 text-xs text-destructive" onClick={() => { void cancelAll(); }} disabled={isCancelling || batchEligibility.cancellableCount === 0}>

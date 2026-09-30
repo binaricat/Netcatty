@@ -20,11 +20,15 @@ export function useGlobalSftpTransferActions(tasks: readonly TransferTask[]) {
     [tasks],
   );
   const pauseAll = useCallback(() => {
+    // Ignore clicks racing a cancelAll batch: re-enabling these tasks would
+    // restart work cancelAll has already pre-cancelled at the scheduler.
+    if (cancellingRef.current) return;
     for (const taskId of listGloballyPausableTransferIds(tasks)) {
       void sftpTransferCenterStore.pause(taskId);
     }
   }, [tasks]);
   const resumeAll = useCallback(() => {
+    if (cancellingRef.current) return;
     for (const taskId of listGloballyResumableTransferIds(tasks)) {
       void sftpTransferCenterStore.resume(taskId);
     }
