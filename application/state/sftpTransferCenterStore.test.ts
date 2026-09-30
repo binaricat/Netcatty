@@ -3900,3 +3900,66 @@ for (const outcome of ["rejected", "stream-gone"] as const) {
     assert.equal(resumeCalls, 1, "obsolete resume must not issue another resume after the held run ends");
   });
 }
+
+test("partial cancel failure resets recovered folder children so the re-walk can re-admit them", async (t) => {
+  const { netcattyBridge } = await import("../../infrastructure/services/netcattyBridge");
+  const { resetTransferCancelLatchesForTests, isTransferOrRootCancelled } =
+    await import("./sftp/transferCancelLatch");
+  const { resetTransferWalkRegistryForTests } = await import("./sftp/transferWalkRegistry");
+  const originalGet = netcattyBridge.get;
+  resetTransferCancelLatchesForTests();
+  resetTransferWalkRegistryForTests();
+  t.after(() => {
+    netcattyBridge.get = originalGet;
+    resetTransferCancelLatchesForTests();
+    resetTransferWalkRegistryForTests();
+  });
+  // Only child2 fails to cancel; the folder must stay recoverable via Resume.
+  let failChild2 = true;
+  netcattyBridge.get = () => ({
+    cancelTransfer: async (id: string) => ({ success: id !== "dir-child-2" || !failChild2 }),
+    cleanupTransferArtifacts: async () => ({}),
+  } as unknown as ReturnType<typeof netcattyBridge.get>);
+  const store = createSftpTransferCenterStore();
+  const child = (id: string): TransferTask => ({
+    ...makeTask(id),
+    parentTaskId: "dir-root",
+    isDirectory: false,
+    transferredBytes: 4,
+    directoryEntryIndex: 0,
+    directoryEntryIdentity: "a".repeat(64),
+  });
+  store.publishOwner("gone-panel", [
+    { ...makeTask("dir-root"), isDirectory: true, transferredBytes: 10, totalBytes: 20, directoryEntryIndex: 0 },
+    child("dir-child-1"),
+    child("dir-child-2"),
+  ]);
+  await store.cancel("dir-root");
+
+  const rows = store.getSnapshot().tasks;
+  const parent = rows.find((row) => row.id === "dir-root");
+  const child1 = rows.find((row) => row.id === "dir-child-1");
+  const child2 = rows.find((row) => row.id === "dir-child-2");
+  assert.equal(parent?.status, "attention");
+  assert.equal(parent?.error, "Could not cancel transfer. Please try again.");
+  // A failed backend cancellation keeps the folder recoverable: successfully
+  // cancelled siblings must not settle as terminal "cancelled", or admitTaskRun
+  // would reject the recovery re-walk and leave the destination incomplete.
+  assert.equal(child1?.status, "interrupted");
+  assert.equal(child1?.error, undefined);
+  assert.equal(child2?.status, "attention");
+  assert.equal(isTransferOrRootCancelled("dir-root"), false, "recovery latch must be cleared");
+
+  // The directory re-walk (Resume) can re-admit the reset sibling.
+  const incoming = { ...child("dir-child-1"), directoryEntryIndex: 0, directoryEntryIdentity: "a".repeat(64) };
+  assert.equal(store.admitTaskRun(incoming), "ready");
+  assert.equal(store.getTask("dir-child-1")?.status, "transferring");
+
+  // Without any cancellation failure the tree still settles fully cancelled.
+  failChild2 = false;
+  await store.cancel("dir-root");
+  const afterFullCancel = store.getSnapshot().tasks;
+  for (const id of ["dir-root", "dir-child-1", "dir-child-2"]) {
+    assert.equal(afterFullCancel.find((row) => row.id === id)?.status, "cancelled");
+  }
+});

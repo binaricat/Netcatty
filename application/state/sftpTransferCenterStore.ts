@@ -1348,14 +1348,31 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
         // best-effort temp/.part cleanup
       }
       const cancelIdSet = new Set(cancelIds);
+      // A partial cancellation failure keeps the folder recoverable (the parent
+      // row below stays in attention for Resume). Successfully cancelled
+      // siblings must not settle as terminal "cancelled" then: admitTaskRun
+      // rejects re-admission for any existing cancelled child row, so a later
+      // directory re-walk would skip or abort those unfinished files and leave
+      // the destination incomplete even though the parent offers Resume. Reset
+      // the recovering siblings to resumable "interrupted" instead (matching
+      // the dedicated-resume rehome convention); the re-walk re-dispatches them
+      // from their existing byte checkpoints. Failed rows (and the parent) keep
+      // their attention error so the user can retry cancelling them.
+      const folderResumeRecoverable = failedIds.size > 0;
       tasks = tasks.map((candidate) => cancelIdSet.has(candidate.id) ? {
         ...candidate,
-        status: failedIds.has(candidate.id) || (candidate.id === taskId && failedIds.size > 0) ? "attention" : "cancelled",
+        status: failedIds.has(candidate.id) || (candidate.id === taskId && failedIds.size > 0)
+          ? "attention"
+          : folderResumeRecoverable ? "interrupted" : "cancelled",
+        reconnectRequired: !failedIds.has(candidate.id) && candidate.id !== taskId && folderResumeRecoverable
+          ? true
+          : candidate.reconnectRequired,
         error: failedIds.has(candidate.id) || (candidate.id === taskId && failedIds.size > 0)
           ? "Could not cancel transfer. Please try again."
           : undefined,
         endTime: failedIds.has(candidate.id) || (candidate.id === taskId && failedIds.size > 0)
-          ? candidate.endTime : Date.now(),
+          ? candidate.endTime
+          : folderResumeRecoverable ? undefined : Date.now(),
         speed: 0,
         conflict: undefined,
       } : candidate);
