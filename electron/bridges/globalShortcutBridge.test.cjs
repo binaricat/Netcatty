@@ -1705,7 +1705,7 @@ test("a hidden-launch tray pin survives close-to-tray being turned off", async (
   }
 });
 
-test("releasing the hidden-launch tray pin destroys the tray if close-to-tray is off", async () => {
+test("releasing the hidden-launch tray pin keeps the visible tray when close-to-tray is off", async () => {
   const bridge = loadBridge();
   const electronModule = createElectronStub();
   bridge.init({ electronModule, getMainWindow: () => null });
@@ -1719,7 +1719,27 @@ test("releasing the hidden-launch tray pin destroys the tray if close-to-tray is
 
     bridge.releaseHiddenLaunchTrayPin();
 
-    assert.equal(bridge.getTray(), null, "once the window is shown, close-to-tray=off should win");
+    assert.notEqual(bridge.getTray(), null, "show-tray-icon=on keeps the tray visible");
+  } finally {
+    bridge.cleanup();
+  }
+});
+
+test("releasing the hidden-launch tray pin hides the icon when requested", async () => {
+  const bridge = loadBridge();
+  const electronModule = createElectronStub();
+  bridge.init({ electronModule, getMainWindow: () => null });
+  const ipcMain = createIpcMainStub();
+  bridge.registerHandlers(ipcMain);
+
+  try {
+    bridge.pinTrayForHiddenLaunch();
+    await ipcMain.handlers.get("netcatty:tray:setShowTrayIcon")(null, { enabled: false });
+    assert.notEqual(bridge.getTray(), null, "the hidden launch keeps its recovery icon");
+
+    bridge.releaseHiddenLaunchTrayPin();
+
+    assert.equal(bridge.getTray(), null);
   } finally {
     bridge.cleanup();
   }
@@ -1757,7 +1777,7 @@ test("releaseHiddenLaunchTrayPin is a no-op when the pin was never set", () => {
   }
 });
 
-test("setCloseToTray(false) still destroys an unpinned tray as before", async () => {
+test("setCloseToTray(false) keeps a visible tray without hiding the window on close", async () => {
   const bridge = loadBridge();
   const electronModule = createElectronStub();
   const { ipcMain } = await enableCloseToTray(bridge, electronModule);
@@ -1765,7 +1785,8 @@ test("setCloseToTray(false) still destroys an unpinned tray as before", async ()
   try {
     assert.notEqual(bridge.getTray(), null);
     await ipcMain.handlers.get("netcatty:tray:setCloseToTray")(null, { enabled: false });
-    assert.equal(bridge.getTray(), null);
+    assert.notEqual(bridge.getTray(), null);
+    assert.equal(bridge.handleWindowClose({ preventDefault() { assert.fail("close was prevented"); } }, new FakeWindow()), false);
   } finally {
     bridge.cleanup();
   }
@@ -1824,7 +1845,7 @@ test("setShowTrayIcon(true) restores the tray when close-to-tray is on", async (
   }
 });
 
-test("setShowTrayIcon(true) does not create a tray when close-to-tray is off", async () => {
+test("setShowTrayIcon(true) creates a tray when close-to-tray is off", async () => {
   const bridge = loadBridge();
   const electronModule = createElectronStub();
   bridge.init({ electronModule, getMainWindow: () => null });
@@ -1834,7 +1855,7 @@ test("setShowTrayIcon(true) does not create a tray when close-to-tray is off", a
   try {
     await ipcMain.handlers.get("netcatty:tray:setCloseToTray")(null, { enabled: false });
     await ipcMain.handlers.get("netcatty:tray:setShowTrayIcon")(null, { enabled: true });
-    assert.equal(bridge.getTray(), null);
+    assert.notEqual(bridge.getTray(), null);
   } finally {
     bridge.cleanup();
   }

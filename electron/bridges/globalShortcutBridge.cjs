@@ -1297,18 +1297,12 @@ function setCloseToTray(enabled) {
   closeToTray = !!enabled;
 
   if (closeToTray) {
-    // Create tray if it doesn't exist and the user hasn't hidden the icon
+    // Tray visibility is controlled separately by showTrayIcon.
     if (!tray && showTrayIcon) {
       createTray();
     }
   } else {
     clearPendingFullscreenHide(getMainWindow());
-    // A hidden auto-launch cold start pins the tray regardless of this
-    // preference until its window is actually shown once — otherwise a user
-    // with close-to-tray off would get a windowless, trayless zombie process.
-    if (!hiddenLaunchTrayPinned) {
-      destroyTray();
-    }
   }
 
   return { success: true, enabled: closeToTray };
@@ -1326,14 +1320,13 @@ function pinTrayForHiddenLaunch() {
 }
 
 /**
- * Release the hidden-launch tray pin once its window has been shown. If the
- * user's close-to-tray preference is off, the tray is destroyed now instead
- * of lingering until the next close-to-tray toggle.
+ * Release the hidden-launch tray pin once its window has been shown. The
+ * hidden icon preference can now take effect safely.
  */
 function releaseHiddenLaunchTrayPin() {
   if (!hiddenLaunchTrayPinned) return;
   hiddenLaunchTrayPinned = false;
-  if (!closeToTray || !showTrayIcon) {
+  if (!showTrayIcon) {
     destroyTray();
   }
 }
@@ -1347,14 +1340,11 @@ function setShowTrayIcon(enabled) {
   showTrayIcon = !!enabled;
 
   if (showTrayIcon) {
-    // Restore the icon only if something still needs it (close-to-tray or an
-    // active hidden-launch pin).
-    if (!tray && (closeToTray || hiddenLaunchTrayPinned)) {
+    if (!tray) {
       createTray();
     }
   } else if (!hiddenLaunchTrayPinned) {
-    // Respect the user's preference and drop the icon. Like setCloseToTray,
-    // a hidden auto-launch cold start keeps its safety pin until its window
+    // A hidden auto-launch cold start keeps its safety pin until its window
     // is shown once, so a trayless zombie never appears without consent.
     destroyTray();
   }
