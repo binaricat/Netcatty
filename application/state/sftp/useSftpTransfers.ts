@@ -1533,10 +1533,21 @@ export const useSftpTransfers = ({
       // Failed cancellations keep their artifacts (and possibly a live writer
       // running) — the row stays in attention for Resume, so cleanup must not
       // race the surviving backend operation or drop staged progress.
-      if (taskToCancel && !failedIdSet.has(transferId)) await cleanupTaskArtifacts(taskToCancel);
+      // A staged directory replacement that stays recoverable (any cancellation
+      // failed while a child cancel succeeded) must also keep its staged tree:
+      // the recovery re-walk re-admits only non-completed children, so deleting
+      // the staged directory — or a recovered sibling's staged partial inside
+      // it — could later promote an incomplete stage over the original
+      // destination.
+      const stagedRecoveryKept = failedIds.length > 0
+        && taskToCancel?.isDirectory
+        && !!taskToCancel?.stagedTargetPath;
+      if (taskToCancel && !failedIdSet.has(transferId) && !stagedRecoveryKept) {
+        await cleanupTaskArtifacts(taskToCancel);
+      }
       // Child stages are keyed by per-file transferId — clean each known child.
       for (const child of childrenToCleanup) {
-        if (failedIdSet.has(child.id)) continue;
+        if (failedIdSet.has(child.id) || stagedRecoveryKept) continue;
         try {
           await cleanupTaskArtifacts(child);
         } catch {

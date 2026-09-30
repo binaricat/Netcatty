@@ -57,7 +57,11 @@ export function useGlobalSftpTransferActions(tasks: readonly TransferTask[]) {
       for (let offset = 0; offset < ids.length; offset += 32) {
         await Promise.all(ids.slice(offset, offset + 32).map(async (taskId) => {
           const current = transferRuntime.getTask(taskId);
-          if (!current || current.status === "completed" || current.status === "cancelled") return;
+          // "failed" is terminal here just like the initial eligibility filter:
+          // a queued task can fail naturally while its cancel batch awaits IPC,
+          // and cancel's owner/orphan recovery paths would repaint the row as
+          // cancelled, hiding the real failure and its diagnostic.
+          if (!current || ["completed", "failed", "cancelled"].includes(current.status)) return;
           try {
             await transferRuntime.cancel(taskId);
           } catch {
