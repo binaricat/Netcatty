@@ -39,6 +39,8 @@ declare global {
   interface NetcattyBridge {
     getWindowsPtyInfo?(): NetcattyWindowsPtyInfo | null;
     startSSHSession(options: NetcattySSHOptions): Promise<string>;
+    testConnection?(options: NetcattySSHOptions): Promise<string>;
+    cancelTestConnection?(sessionId: string): Promise<{ success: boolean; error?: string }>;
     startTelnetSession?(options: {
       sessionId?: string;
       hostname: string;
