@@ -13,6 +13,12 @@ const {
 
 const OPENCODE_IMAGE_MEDIA_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
 const DEFAULT_OPENCODE_PORT = 4096;
+// The bundled @opencode-ai/sdk defaults `createOpencodeServer` to a 5000ms
+// startup deadline, which is too tight for opencode server cold starts on
+// Windows (antivirus scans / first-run autoupdate can push it past 8s, and
+// community reports show 30s still missed there). Always pass an explicit,
+// generous timeout so the SDK default never applies (#3579).
+const OPENCODE_SERVER_START_TIMEOUT_MS = process.platform === "win32" ? 60000 : 30000;
 
 function resolveUsableOpenCodeBinPath(binPath, env) {
   const candidates = [];
@@ -461,8 +467,10 @@ function getAvailablePort(host = "127.0.0.1") {
 }
 
 async function withOpenCodeServerPort(options = {}) {
-  if (options.port != null) return options;
-  return { ...options, port: await getAvailablePort(options.hostname || "127.0.0.1") };
+  // Never let the SDK's hardcoded 5000ms startup deadline apply (#3579).
+  const timeout = options.timeout ?? OPENCODE_SERVER_START_TIMEOUT_MS;
+  if (options.port != null) return { ...options, timeout };
+  return { ...options, timeout, port: await getAvailablePort(options.hostname || "127.0.0.1") };
 }
 
 function closeOpenCodeInstance(opencode) {
@@ -837,7 +845,8 @@ async function acquireOpenCodeListServer({ env, binPath, openCodeFactory, signal
     entry.ready = (async () => {
       const options = await withOpenCodeServerPort({
         config: { autoupdate: false },
-        timeout: 10000,
+        // Startup deadline comes from withOpenCodeServerPort; the SDK's 5000ms
+        // default is too tight for Windows cold starts (#3579).
         signal: createAbort.signal,
       });
       const opencode = await factory(options);
@@ -923,6 +932,7 @@ module.exports = {
   getOpenCodeDefaultModelId,
   getOpenCodeSessionIdFromEvent,
   withOpenCodeProcessEnv,
+  withOpenCodeServerPort,
   listOpenCodeModels,
   mapOpenCodeModels,
   parseOpenCodeModel,
@@ -932,4 +942,5 @@ module.exports = {
   toOpenCodeMcpConfig,
   translateOpenCodeEvent,
   OPENCODE_LIST_SERVER_IDLE_MS,
+  OPENCODE_SERVER_START_TIMEOUT_MS,
 };

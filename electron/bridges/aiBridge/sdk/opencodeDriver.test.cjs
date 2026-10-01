@@ -11,12 +11,14 @@ const {
   listOpenCodeModels,
   mapOpenCodeModels,
   OPENCODE_LIST_SERVER_IDLE_MS,
+  OPENCODE_SERVER_START_TIMEOUT_MS,
   parseOpenCodeModel,
   resetOpenCodeListServerPool,
   resolveUsableOpenCodeBinPath,
   runOpenCodeTurn,
   translateOpenCodeEvent,
   withOpenCodeProcessEnv,
+  withOpenCodeServerPort,
 } = require("./opencodeDriver.cjs");
 
 function collector() {
@@ -766,6 +768,52 @@ test("runOpenCodeTurn passes an explicit non-default port to the OpenCode SDK fa
 
   assert.equal(typeof capturedPort, "number");
   assert.notEqual(capturedPort, 4096);
+});
+
+test("runOpenCodeTurn passes an explicit startup timeout to the OpenCode SDK factory (#3579)", async () => {
+  const { emitter } = collector();
+  const abortController = new AbortController();
+  let capturedTimeout;
+  const stream = {
+    async *[Symbol.asyncIterator]() {
+      yield { type: "message.part.updated", properties: { part: { type: "text", sessionID: "sess-1", id: "p1", text: "ok" } } };
+      yield { type: "session.idle", properties: { sessionID: "sess-1" } };
+    },
+  };
+  const client = {
+    global: { event: async () => ({ stream }) },
+    session: {
+      create: async () => ({ data: { id: "sess-1" } }),
+      promptAsync: async () => ({ data: true }),
+    },
+  };
+
+  await runOpenCodeTurn({
+    prompt: "hello",
+    emitter,
+    abortController,
+    openCodeFactory: async (options) => {
+      capturedTimeout = options.timeout;
+      return { client, server: { close() {} } };
+    },
+  });
+
+  assert.equal(capturedTimeout, OPENCODE_SERVER_START_TIMEOUT_MS);
+  assert.ok(capturedTimeout > 5000, "startup deadline must exceed the SDK's 5000ms default");
+});
+
+test("withOpenCodeServerPort injects a generous startup timeout and preserves explicit values", async () => {
+  const defaulted = await withOpenCodeServerPort({});
+  assert.equal(defaulted.timeout, OPENCODE_SERVER_START_TIMEOUT_MS);
+  assert.ok(defaulted.timeout > 5000, "startup deadline must exceed the SDK's 5000ms default");
+  assert.equal(typeof defaulted.port, "number");
+
+  const withPort = await withOpenCodeServerPort({ port: 5555 });
+  assert.equal(withPort.port, 5555);
+  assert.equal(withPort.timeout, OPENCODE_SERVER_START_TIMEOUT_MS);
+
+  const withExplicitTimeout = await withOpenCodeServerPort({ port: 5555, timeout: 120000 });
+  assert.equal(withExplicitTimeout.timeout, 120000);
 });
 
 test("runOpenCodeTurn waits for the OpenCode event stream before prompting", async () => {
