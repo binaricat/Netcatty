@@ -15,6 +15,8 @@ export const WRITE_QUEUE_TURN_BUDGET_MS = 10;
 export type TerminalWriteQueueOptions = {
   onDropped?: (bytes: number) => void;
   dropBytes?: number;
+  /** Replace older pending writes with the same key before enqueueing. */
+  replacePendingKey?: string;
   deferStart?: boolean;
   yieldAfter?: boolean;
   maxDrainBytes?: number;
@@ -33,6 +35,7 @@ type QueuedWrite = {
 type QueuedWriteStep = {
   bytes: number;
   dropBytes: number;
+  replacePendingKey?: string;
   write: (done: () => void) => void;
   yieldAfter: boolean;
 };
@@ -332,6 +335,41 @@ const updateFloodMode = (
   }
 };
 
+const replacePendingWrites = (
+  queue: TerminalWriteQueue,
+  replacePendingKey: string,
+): void => {
+  let removedBytes = 0;
+  let droppedBytes = 0;
+  const retained: QueuedWrite[] = [];
+
+  for (const item of queue.pending) {
+    const steps = item.steps.filter((step) => {
+      if (step.replacePendingKey !== replacePendingKey) return true;
+      removedBytes += step.bytes;
+      droppedBytes += step.dropBytes;
+      return false;
+    });
+    if (steps.length === 0) continue;
+
+    retained.push({
+      ...item,
+      bytes: steps.reduce((sum, step) => sum + step.bytes, 0),
+      dropBytes: steps.reduce((sum, step) => sum + step.dropBytes, 0),
+      steps,
+      nextIndex: 0,
+      yieldAfter: steps.some((step) => step.yieldAfter),
+    });
+  }
+
+  if (removedBytes === 0) return;
+  queue.pending = retained;
+  queue.pendingBytes = Math.max(0, queue.pendingBytes - removedBytes);
+  if (droppedBytes > 0) {
+    queue.onDropped?.(droppedBytes);
+  }
+};
+
 export const setTerminalWriteQueueDropHandler = (
   term: XTerm,
   onDropped?: (bytes: number) => void,
@@ -406,12 +444,22 @@ export const enqueueTerminalWrite = (
     queue.onDropped = terminalWriteQueueDropHandlers.get(term);
   }
 
+  if (options.replacePendingKey) {
+    replacePendingWrites(queue, options.replacePendingKey);
+  }
+
   updateFloodMode(queue, bytes);
 
   queue.pending.push({
     bytes,
     dropBytes,
-    steps: [{ bytes, dropBytes, write, yieldAfter: Boolean(options.yieldAfter) }],
+    steps: [{
+      bytes,
+      dropBytes,
+      replacePendingKey: options.replacePendingKey,
+      write,
+      yieldAfter: Boolean(options.yieldAfter),
+    }],
     nextIndex: 0,
     cancelled: false,
     yieldAfter: Boolean(options.yieldAfter),
