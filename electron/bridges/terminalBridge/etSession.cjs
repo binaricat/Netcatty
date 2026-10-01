@@ -1116,11 +1116,24 @@ main();
         if (Number.isFinite(maxBuffer) && maxBuffer > 0) {
           execFileOptions.maxBuffer = Math.floor(maxBuffer);
         }
+        // Node does not expose a `timedOut` flag on execFile callback errors
+        // (only `killed`/`signal`), so track the deadline ourselves. The
+        // deadline here matches `execFileOptions.timeout`, which is what makes
+        // Node terminate the ssh child.
+        let timedOut = false;
+        const timeoutTimer = setTimeout(() => {
+          timedOut = true;
+        }, timeoutMs);
         const child = execFile(sshCmd, args, execFileOptions, (err, stdout, stderr) => {
+          clearTimeout(timeoutTimer);
           if (err) {
             resolve({
               success: false,
               error: err.message,
+              // Expose whether the ssh process was terminated because
+              // options.timeout elapsed so callers (e.g. dockerOps) can
+              // recognize subprocess timeouts without parsing messages.
+              timedOut,
               stdout: stdout || "",
               stderr: stderr || "",
               code: typeof err.code === "number" && err.code !== 0 ? err.code : 1,
