@@ -207,7 +207,10 @@ export const useTerminalContextActions = ({
         readClipboardText: async () => {
           try {
             const bridged = await bridge?.readClipboardText?.();
-            if (typeof bridged === "string" && bridged.length > 0) return bridged;
+            // Treat any successful bridge read as authoritative — including an
+            // empty string, which means the live clipboard is genuinely empty
+            // and must not fall back to possibly-stale renderer clipboard text.
+            if (typeof bridged === "string") return bridged;
           } catch (err) {
             logger.warn("Bridge clipboard read failed; falling back to navigator", err);
           }
