@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { TransferTask } from "../domain/models";
+import { listGloballyCancellableTransferIds } from "../domain/sftpTransferActions";
 import {
   buildGlobalTransferProgressDisplay,
   getGlobalConflictActionPresentation,
@@ -65,14 +66,28 @@ test("batch actions are disabled when no task can accept them", () => {
   assert.deepEqual(getGlobalTransferBatchEligibility([
     task("done", "completed"),
     task("cancelled", "cancelled"),
-  ]), { pausableCount: 0, resumableCount: 0 });
+  ]), { cancellableCount: 0, pausableCount: 0, resumableCount: 0 });
 
   assert.deepEqual(getGlobalTransferBatchEligibility([
     task("running", "transferring"),
     task("waiting", "queued"),
     task("paused", "paused"),
     { ...task("failed", "failed"), checkpointBytes: 4 },
-  ]), { pausableCount: 2, resumableCount: 2 });
+  ]), { cancellableCount: 3, pausableCount: 2, resumableCount: 2 });
+});
+
+test("cancel all selects unfinished top-level tasks without touching completed files", () => {
+  const statuses: TransferTask["status"][] = [
+    "pending", "queued", "transferring", "pausing", "paused", "interrupted", "attention",
+  ];
+  const tasks = [
+    ...statuses.map((status) => task(status, status)),
+    task("completed", "completed"),
+    task("failed", "failed"),
+    task("cancelled", "cancelled"),
+    { ...task("child", "queued"), parentTaskId: "pending" },
+  ];
+  assert.deepEqual(listGloballyCancellableTransferIds(tasks), statuses);
 });
 
 test("paused transfer errors remain visible instead of looking safely paused", () => {

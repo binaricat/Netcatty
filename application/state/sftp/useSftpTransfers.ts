@@ -1421,11 +1421,20 @@ export const useSftpTransfers = ({
       // Cancel parent + remove child tasks
       const childIdsToCancel = new Set<string>();
       const childrenToCleanup: TransferTask[] = [];
+      // Completed children are captured separately: the row removal below drops
+      // every child row, but the compact directory checkpoint only covers a
+      // contiguous prefix of the plan — a child completed beyond a gap has no
+      // checkpoint entry yet, so dropping its row makes the later Resume re-walk
+      // (and re-transfer) that file and regresses the folder's progress.
+      const completedChildrenToPreserve: TransferTask[] = [];
       for (const t of transfersRef.current) {
-        if (t.parentTaskId === transferId && !["completed", "cancelled", "failed"].includes(t.status)) {
-          childIdsToCancel.add(t.id);
-          childrenToCleanup.push(t);
+        if (t.parentTaskId !== transferId) continue;
+        if (["completed", "cancelled", "failed"].includes(t.status)) {
+          if (t.status === "completed") completedChildrenToPreserve.push(t);
+          continue;
         }
+        childIdsToCancel.add(t.id);
+        childrenToCleanup.push(t);
       }
       for (const cid of activeChildIdsRef.current.get(transferId) ?? []) {
         if (!childIdsToCancel.has(cid)) {
@@ -1457,10 +1466,120 @@ export const useSftpTransfers = ({
       conflictsRef.current = conflictsRef.current.filter((c) => c.transferId !== transferId && !childIdsToCancel.has(c.transferId));
       setConflicts(conflictsRef.current);
 
-      await cancelBackendTransfers([transferId, ...childIdsToCancel]);
-      if (taskToCancel) await cleanupTaskArtifacts(taskToCancel);
+      const failedIds = await cancelBackendTransfers([transferId, ...childIdsToCancel]);
+      const failedIdSet = new Set(failedIds);
+      if (failedIds.length > 0) {
+        const walkInFlight = transferRuntime.isWalkInFlight(transferId);
+        if (!walkInFlight) {
+          // Backend cancellation failed but the row is kept in attention for
+          // recovery. With no in-flight runWalk to settle the cancel latches,
+          // drop them now or a later Resume is rejected outright by
+          // admitTaskRun's cancelled-root check.
+          for (const id of [transferId, ...childIdsToCancel]) {
+            clearCancelledTask(id);
+          }
+          clearTransferCancelledTree(transferId, [...childIdsToCancel]);
+        }
+        // Recover the status to attention in both cases: the root was already
+        // re-painted "cancelled" above, which would report Cancel all as
+        // successful and drop the Resume action even though a backend
+        // cancellation failed. With a walk still in flight the latches are
+        // retained until its settlement clears the process-global tree, but
+        // the status recovery is independent of that latch lifetime.
+        sftpTransferCenterStore.patchTask(transferId, {
+          status: "attention",
+          error: "Could not cancel transfer. Please try again.",
+        });
+        setTransfers((current) => current.map((task) => task.id === transferId ? {
+          ...task,
+          status: "attention" as const,
+          error: "Could not cancel transfer. Please try again.",
+        } : task));
+        // Restore completed rows for every recoverable cancellation, not just
+        // when a walk is in flight: a restored/interrupted directory whose
+        // previous walk already settled has no walk to do the restore later,
+        // so the rows removed above would be lost and a Resume that starts a
+        // fresh walk would only skip the checkpoint's contiguous prefix,
+        // re-transferring those files. Skip one whose file was already
+        // re-completed by a walk worker between the row removal and here, to
+        // avoid double-counting per completed file.
+        setTransfers((current) => {
+          const next = [...current];
+          const completedTargets = new Set(
+            next
+              .filter((row) => row.parentTaskId === transferId && row.status === "completed")
+              .map((row) => `${row.sourcePath}\u0000${row.targetPath}`),
+          );
+          for (const child of completedChildrenToPreserve) {
+            const key = `${child.sourcePath}\u0000${child.targetPath}`;
+            if (completedTargets.has(key)) continue;
+            completedTargets.add(key);
+            next.push(child);
+          }
+          return next;
+        });
+        if (walkInFlight) {
+          // Registered-owner recovery: the walk is still registered and a later
+          // Resume takes the soft-resume path, which never starts a fresh
+          // re-walk. The removal above discarded every child row, so those
+          // siblings are never re-enqueued and the folder settles failed or
+          // incomplete. Reset the removed children to resumable rows instead
+          // (matching the orphan cancel path's recovering-sibling convention):
+          // recovering siblings repaint as "interrupted" for the re-walk to
+          // re-admit, failed cancellations keep their attention error until
+          // the user retries cancelling them.
+          const recoveringChildren = childrenToCleanup.map((child) => {
+            const failed = failedIdSet.has(child.id);
+            return {
+              ...child,
+              status: failed ? ("attention" as const) : ("interrupted" as const),
+              error: failed ? "Could not cancel transfer. Please try again." : undefined,
+              reconnectRequired: failed ? child.reconnectRequired : true,
+              endTime: undefined,
+              speed: 0,
+              conflict: undefined,
+            };
+          });
+          setTransfers((current) => {
+            const next = [...current];
+            for (const child of recoveringChildren) {
+              const index = next.findIndex((row) => row.id === child.id);
+              if (index >= 0) next[index] = child;
+              else next.push(child);
+            }
+            return next;
+          });
+          const bridge = netcattyBridge.get();
+          for (const id of [transferId, ...childIdsToCancel]) {
+            // The main-process cancelTransfer keeps a sticky pendingCancel
+            // latch for ids that were neither queued nor in its active
+            // registry — a successfully-cancelled sibling may retain it. That
+            // persisted transferId is reused by the recovery re-walk, so a
+            // stale latch would cancel the reused id immediately at
+            // startTransferNow. Clear the pending cancellation first.
+            if (failedIdSet.has(id)) continue;
+            try { await bridge?.clearPendingTransferCancel?.(id); } catch { /* best-effort */ }
+          }
+        }
+      }
+      // Failed cancellations keep their artifacts (and possibly a live writer
+      // running) — the row stays in attention for Resume, so cleanup must not
+      // race the surviving backend operation or drop staged progress.
+      // A staged directory replacement that stays recoverable (any cancellation
+      // failed while a child cancel succeeded) must also keep its staged tree:
+      // the recovery re-walk re-admits only non-completed children, so deleting
+      // the staged directory — or a recovered sibling's staged partial inside
+      // it — could later promote an incomplete stage over the original
+      // destination.
+      const stagedRecoveryKept = failedIds.length > 0
+        && taskToCancel?.isDirectory
+        && !!taskToCancel?.stagedTargetPath;
+      if (taskToCancel && !failedIdSet.has(transferId) && !stagedRecoveryKept) {
+        await cleanupTaskArtifacts(taskToCancel);
+      }
       // Child stages are keyed by per-file transferId — clean each known child.
       for (const child of childrenToCleanup) {
+        if (failedIdSet.has(child.id) || stagedRecoveryKept) continue;
         try {
           await cleanupTaskArtifacts(child);
         } catch {
@@ -1469,12 +1588,15 @@ export const useSftpTransfers = ({
       }
 
     },
-    [cancelBackendTransfers, cleanupTaskArtifacts, releasePausedTransfer, setTransfers],
+    [cancelBackendTransfers, clearCancelledTask, cleanupTaskArtifacts, releasePausedTransfer, setTransfers],
   );
 
   // Soft pause/resume: single TransferRuntime entry (store soft-control +
   // dedicated hard reconnect). No panel-local soft-control dual path.
-  const resumeTransfer = useCallback(async (transferId: string) => {
+  // Also registered as the store's clearCancelledLatches control: the unified
+  // resume path drops a retained failed-cancel latch (panel-local set +
+  // process-global tree) before softResumeTransfer paints the walk.
+  const clearRetainedCancellation = useCallback((transferId: string) => {
     // Clear sticky child cancel latches so re-walk can retry same child ids.
     clearCancelledTask(transferId);
     for (const child of transfersRef.current) {
@@ -1487,8 +1609,12 @@ export const useSftpTransfers = ({
       transferId,
       [...(activeChildIdsRef.current.get(transferId) ?? [])],
     );
-    await transferRuntime.resume(transferId);
   }, [clearCancelledTask]);
+
+  const resumeTransfer = useCallback(async (transferId: string) => {
+    clearRetainedCancellation(transferId);
+    await transferRuntime.resume(transferId);
+  }, [clearRetainedCancellation]);
 
   const prioritizeTransfer = useCallback((transferId: string) => {
     globalSftpTransferScheduler.prioritize(transferId);
@@ -2269,6 +2395,11 @@ export const useSftpTransfers = ({
       await resumeTransfer(taskId);
     },
     cancel: cancelTransfer,
+    // Called by the store's unified resume when a retained cancellation is
+    // still latched (failed Cancel while a walk stayed in flight). Drops the
+    // panel-local set + process-global tree so the surviving walk stops
+    // observing cancellation and can recover on explicit Resume.
+    clearCancelledLatches: clearRetainedCancellation,
     retry: retryTransfer,
     prioritize: prioritizeTransfer,
     dismiss: dismissTransfer,
@@ -2282,7 +2413,7 @@ export const useSftpTransfers = ({
     canAdopt: (task) => resolveAdoptionPanes(task) !== null,
     canPrepareAdoption,
     adopt: adoptInterruptedTransfer,
-  }), [adoptInterruptedTransfer, canPrepareAdoption, cancelTransfer, dismissTransfer, dismissTransfers, ownerId, prioritizeTransfer, resolveAdoptionPanes, resolveConflict, resumeTransfer, retryTransfer, syncOwnedTasksFromStore]);
+  }), [adoptInterruptedTransfer, canPrepareAdoption, cancelTransfer, clearRetainedCancellation, dismissTransfer, dismissTransfers, ownerId, prioritizeTransfer, resolveAdoptionPanes, resolveConflict, resumeTransfer, retryTransfer, syncOwnedTasksFromStore]);
 
   return {
     transfers,

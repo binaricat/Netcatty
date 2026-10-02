@@ -28,6 +28,7 @@ import {
 } from "./sftp/transferControlEpoch";
 import { isTransferWalkInFlight } from "./sftp/transferWalkRegistry";
 import {
+  clearTransferCancelledTree,
   isTransferOrRootCancelled,
   markTransferCancelledTree,
   settleTransferCancelTree,
@@ -62,6 +63,16 @@ export interface SftpTransferOwnerControls {
   cancel: (taskId: string) => void | Promise<void>;
   retry: (taskId: string) => void | Promise<void>;
   prioritize: (taskId: string) => void | Promise<void>;
+  /**
+   * Drop a retained cancellation latch before the unified resume runs a live
+   * walk again: the owner clears its panel-local cancelled set and the
+   * process-global cancel tree. Needed because a failed Cancel that kept a
+   * walk in flight repaints the parent as attention for Resume while both
+   * layers stay latched — soft resume alone would paint it "transferring"
+   * while the walk still observes cancellation and terminates instead of
+   * recovering.
+   */
+  clearCancelledLatches?: (taskId: string) => void;
   dismiss: (taskId: string, task?: TransferTask) => void;
   /** Remove a pruned group in one owner update to avoid publish/dismiss feedback loops. */
   dismissMany?: (tasks: readonly TransferTask[]) => void;
@@ -881,6 +892,15 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
       }
       const result = await (bridge?.cancelCompressedUpload?.(taskId)
         ?? { success: false });
+      // The upload may finish while this cancel is still awaiting IPC: its
+      // completion event has already repainted the row terminal. The new
+      // inactive-compression response still reports success, so recheck the
+      // latest row before applying the cancellation result — otherwise Cancel
+      // all misreports a successfully completed upload as cancelled.
+      const latestAfterCancelIpc = tasks.find((candidate) => candidate.id === taskId);
+      if (latestAfterCancelIpc && ["completed", "failed", "cancelled"].includes(latestAfterCancelIpc.status)) {
+        return;
+      }
       if (!result.success) {
         const reason = "Could not cancel the compressed upload.";
         tasks = tasks.map((candidate) => candidate.id === taskId ? {
@@ -889,6 +909,13 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
           error: reason,
           speed: 0,
         } : candidate);
+        if (isTransferOrRootCancelled(taskId)) {
+          // The row is kept in attention for recovery instead of settling as
+          // cancelled. Drop the pre-installed cancellation latch now, or a
+          // later Resume is rejected outright by admitTaskRun's cancelled-root
+          // check (compressed uploads have no runWalk settlement to clear it).
+          clearTransferCancelledTree(taskId);
+        }
         emit();
         notify.warning(reason, "SFTP");
         return;
@@ -917,6 +944,19 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
       || (task.status === "attention" && !task.conflict)
       || task.ownerId === "background-agent"
     );
+    if (action === "resume" && isTransferOrRootCancelled(taskId)) {
+      // A failed Cancel that left a walk in flight latches both cancellation
+      // layers (owner panel set + process-global tree) but repaints the parent
+      // as attention for recovery, so this explicit Resume must clear them.
+      // The unified soft resume below treats any live directory walk as
+      // handled and paints it "transferring" — without clearing here the
+      // surviving walk keeps observing cancellation and terminates instead of
+      // recovering. Orphaned walks (no controller) never latch the panel-local
+      // set, so the store-level tree clear alone covers them; a live owner
+      // clears both layers via its control hook.
+      controller?.clearCancelledLatches?.(taskId);
+      clearTransferCancelledTree(taskId);
+    }
     if (needsDedicatedReconnect && controller && !controller.canAdopt?.(task)) {
       controller = undefined;
     }
@@ -1301,9 +1341,9 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
         emit();
       }
     }
-    if (!controller && action === "cancel" && task && ["paused", "interrupted", "attention", "pending", "queued", "transferring", "pausing"].includes(task.status)) {
+    if (!controller && action === "cancel" && task && !["completed", "cancelled"].includes(task.status)) {
       const childIds = tasks
-        .filter((candidate) => candidate.parentTaskId === taskId)
+        .filter((candidate) => candidate.parentTaskId === taskId && !["completed", "cancelled", "failed"].includes(candidate.status))
         .map((candidate) => candidate.id);
       // Stop surviving processTransfer walks immediately (panel-local
       // cancelledTasksRef is gone after unmount).
@@ -1315,33 +1355,100 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
       } catch {
         // best-effort
       }
-      try {
-        await netcattyBridge.get()?.cancelTransfer?.(taskId);
-        for (const childId of childIds) {
-          try { await netcattyBridge.get()?.cancelTransfer?.(childId); } catch { /* best-effort */ }
+      const failedIds = new Set<string>();
+      const cancelIds = [taskId, ...childIds];
+      for (let offset = 0; offset < cancelIds.length; offset += 32) {
+        await Promise.all(cancelIds.slice(offset, offset + 32).map(async (id) => {
+          try {
+            const result: unknown = await netcattyBridge.get()?.cancelTransfer?.(id);
+            if (result && typeof result === "object" && "success" in result && result.success === false) {
+              failedIds.add(id);
+            }
+          } catch {
+            failedIds.add(id);
+          }
+        }));
+      }
+      // Failed cancellations keep their artifacts (and possibly a live writer
+      // running) — matching the registered-owner cancel path, skip temp/.part
+      // cleanup so it cannot race a surviving backend operation or discard the
+      // staged progress the Resume action below would reuse.
+      if (failedIds.size === 0) {
+        try {
+          await netcattyBridge.get()?.cleanupTransferArtifacts?.({
+            transferId: taskId,
+            sourcePath: task.sourcePath,
+            targetPath: task.targetPath,
+            stagedTargetPath: task.stagedTargetPath,
+          });
+        } catch {
+          // best-effort
         }
-      } catch {
-        // Best-effort backend cancel when the owning panel is gone / no window.
       }
-      try {
-        await netcattyBridge.get()?.cleanupTransferArtifacts?.({
-          transferId: taskId,
-          sourcePath: task.sourcePath,
-          targetPath: task.targetPath,
-          stagedTargetPath: task.stagedTargetPath,
-        });
-      } catch {
-        // best-effort temp/.part cleanup
+      const cancelIdSet = new Set(cancelIds);
+      // A partial cancellation failure keeps the folder recoverable (the parent
+      // row below stays in attention for Resume). Successfully cancelled
+      // siblings must not settle as terminal "cancelled" then: admitTaskRun
+      // rejects re-admission for any existing cancelled child row, so a later
+      // directory re-walk would skip or abort those unfinished files and leave
+      // the destination incomplete even though the parent offers Resume. Reset
+      // the recovering siblings to resumable "interrupted" instead (matching
+      // the dedicated-resume rehome convention); the re-walk re-dispatches them
+      // from their existing byte checkpoints. Failed rows (and the parent) keep
+      // their attention error so the user can retry cancelling them.
+      const folderResumeRecoverable = failedIds.size > 0;
+      // A completion or failure event for the root (or a child) may land while
+      // the cancelTransfer IPC batches above are still pending. Do not rewrite
+      // a row that already reached a terminal status (completed/failed/
+      // cancelled): a child that failed independently while the batches were
+      // pending must keep its real transfer error instead of being repainted
+      // "cancelled" / "interrupted" (same terminal-authority treatment as the
+      // compressed path).
+      tasks = tasks.map((candidate) =>
+        cancelIdSet.has(candidate.id)
+        && !["completed", "failed", "cancelled"].includes(candidate.status) ? {
+          ...candidate,
+          status: failedIds.has(candidate.id) || (candidate.id === taskId && failedIds.size > 0)
+            ? "attention"
+            : folderResumeRecoverable ? "interrupted" : "cancelled",
+          reconnectRequired: !failedIds.has(candidate.id) && candidate.id !== taskId && folderResumeRecoverable
+            ? true
+            : candidate.reconnectRequired,
+          error: failedIds.has(candidate.id) || (candidate.id === taskId && failedIds.size > 0)
+            ? "Could not cancel transfer. Please try again."
+            : undefined,
+          endTime: failedIds.has(candidate.id) || (candidate.id === taskId && failedIds.size > 0)
+            ? candidate.endTime
+            : folderResumeRecoverable ? undefined : Date.now(),
+          speed: 0,
+          conflict: undefined,
+        } : candidate);
+      if (failedIds.size > 0 && !isTransferWalkInFlight(taskId)) {
+        // Cancellation failed for at least one task, so the parent is kept in
+        // attention for recovery instead of settling as cancelled. Drop the
+        // cancellation latches now, or a later Resume is rejected outright by
+        // admitTaskRun's cancelled-root check (dedicated directory resume
+        // admits each child through that latch). While an orphaned walk is
+        // still in flight, retain the latch so the surviving walk keeps
+        // honoring Cancel all — its runWalk settlement clears the tree once
+        // the old walk settles.
+        clearTransferCancelledTree(taskId);
       }
-      const cancelIds = new Set([taskId, ...childIds]);
-      tasks = tasks.map((candidate) => cancelIds.has(candidate.id) ? {
-        ...candidate,
-        status: "cancelled",
-        error: undefined,
-        endTime: Date.now(),
-        speed: 0,
-        conflict: undefined,
-      } : candidate);
+      if (folderResumeRecoverable) {
+        // The main-process cancelTransfer keeps a sticky pendingCancel latch
+        // for any id that was neither queued nor in its active registry — a
+        // successfully-cancelled inactive sibling reports success but retains
+        // the latch. That row was recovered to "interrupted" and its persisted
+        // transferId is reused by dedicated resume / re-walk, so a stale latch
+        // would make startStreamTransfer cancel it immediately at
+        // startTransferNow. Clear pending cancellation for every recoverable
+        // sibling before that id is reused.
+        const bridge = netcattyBridge.get();
+        for (const id of cancelIds) {
+          if (failedIds.has(id)) continue;
+          try { await bridge?.clearPendingTransferCancel?.(id); } catch { /* best-effort */ }
+        }
+      }
       emit();
       return;
     }

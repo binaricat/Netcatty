@@ -1051,6 +1051,7 @@ export const zhCNCoreMessages: Messages = {
   'sftp.transferCenter.prioritize': '优先传输',
   'sftp.transferCenter.pauseAll': '全部暂停',
   'sftp.transferCenter.resumeAll': '全部继续',
+  'sftp.transferCenter.cancelAll': '全部取消',
   'sftp.transferCenter.empty': '当前分类没有传输任务',
   'sftp.transferCenter.showBackground': '显示 {count} 个后台任务',
   'sftp.transferCenter.hideBackground': '隐藏后台任务',

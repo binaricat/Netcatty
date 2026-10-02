@@ -407,6 +407,7 @@ export const esVaultMessages: Messages = {
   'sftp.transferCenter.prioritize': 'Transferir a continuación',
   'sftp.transferCenter.pauseAll': 'Pausar todas',
   'sftp.transferCenter.resumeAll': 'Reanudar todas',
+  'sftp.transferCenter.cancelAll': 'Cancelar todas',
   'sftp.transferCenter.empty': 'No hay transferencias en esta categoría',
   'sftp.transferCenter.showBackground': 'Mostrar {count} transferencias en segundo plano',
   'sftp.transferCenter.hideBackground': 'Ocultar transferencias en segundo plano',

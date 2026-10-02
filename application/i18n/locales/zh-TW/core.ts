@@ -1053,6 +1053,7 @@ export const zhTWCoreMessages: Messages = {
   'sftp.transferCenter.prioritize': '優先傳輸',
   'sftp.transferCenter.pauseAll': '全部暫停',
   'sftp.transferCenter.resumeAll': '全部繼續',
+  'sftp.transferCenter.cancelAll': '全部取消',
   'sftp.transferCenter.empty': '目前分類沒有傳輸工作',
   'sftp.transferCenter.showBackground': '顯示 {count} 個背景工作',
   'sftp.transferCenter.hideBackground': '隱藏背景工作',

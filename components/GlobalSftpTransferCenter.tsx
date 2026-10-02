@@ -837,7 +837,7 @@ export function GlobalSftpTransferCenter() {
     .sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0) || b.startTime - a.startTime), [bucket, snapshot.tasks]);
   const { visible, collapsed } = splitBackgroundTransfers(bucketTasks);
   const displayed = showBackground ? [...visible, ...collapsed] : visible;
-  const { batchEligibility, pauseAll, resumeAll } = useGlobalSftpTransferActions(snapshot.tasks);
+  const { batchEligibility, pauseAll, resumeAll, cancelAll, isCancelling } = useGlobalSftpTransferActions(snapshot.tasks);
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -877,12 +877,15 @@ export function GlobalSftpTransferCenter() {
           <div className="min-w-0 pr-2 text-sm font-semibold">
             {t("sftp.transferCenter.title")}
           </div>
-          <div className="flex items-center gap-1">
-            <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={pauseAll} disabled={batchEligibility.pausableCount === 0}>
+          <div className="flex flex-wrap items-center justify-end gap-1">
+            <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={pauseAll} disabled={isCancelling || batchEligibility.pausableCount === 0}>
               <Pause size={12} className="mr-1" />{t("sftp.transferCenter.pauseAll")}
             </Button>
-            <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={resumeAll} disabled={batchEligibility.resumableCount === 0}>
+            <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={resumeAll} disabled={isCancelling || batchEligibility.resumableCount === 0}>
               <Play size={12} className="mr-1" />{t("sftp.transferCenter.resumeAll")}
+            </Button>
+            <Button variant="ghost" size="sm" className="h-7 text-xs text-destructive" onClick={() => { void cancelAll(); }} disabled={isCancelling || batchEligibility.cancellableCount === 0}>
+              <X size={12} className="mr-1" />{t("sftp.transferCenter.cancelAll")}
             </Button>
           </div>
         </div>

@@ -531,6 +531,30 @@ test("a late cancel after completion cannot overwrite the completed terminal eve
   assert.deepEqual(terminalAfter.map((event) => event.type), ["completed"]);
 });
 
+test("cancelling a settled compression that left the registry reports success", async (t) => {
+  const harness = createSuccessfulCompressionHarness(t);
+  await harness.handlers.get("netcatty:compress:start")({ sender: harness.sender }, {
+    compressionId: "settled-before-cancel",
+    folderPath: harness.folderPath,
+    targetPath: "/tmp",
+    sftpId: "sftp-harness",
+    folderName: "folder",
+    totalBytes: 7,
+  });
+
+  const result = await harness.handlers.get("netcatty:compress:cancel")({ sender: harness.sender }, {
+    compressionId: "settled-before-cancel",
+  });
+  assert.equal(result.success, true);
+  assert.equal(result.inactive, true);
+
+  const resultUnknownId = await harness.handlers.get("netcatty:compress:cancel")({ sender: harness.sender }, {
+    compressionId: "never-started",
+  });
+  assert.equal(resultUnknownId.success, true);
+  assert.equal(resultUnknownId.inactive, true);
+});
+
 test("compressed upload skips remote tar exec on single-channel SSH", async () => {
   let execCalls = 0;
   compressUploadBridge._resetCompressionSupportCacheForTests();

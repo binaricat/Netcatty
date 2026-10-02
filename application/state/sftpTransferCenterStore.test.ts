@@ -1622,6 +1622,46 @@ test("orphan compressed upload resume and cancel keep using the compression job"
   assert.equal(store.getSnapshot().tasks[0]?.status, "cancelled");
 });
 
+test("compressed upload completing during cancel IPC keeps its completed paint", async (t) => {
+  const calls: string[] = [];
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+  t.after(() => {
+    if (previousWindow) Object.defineProperty(globalThis, "window", previousWindow);
+    else Reflect.deleteProperty(globalThis, "window");
+  });
+
+  let storeRef: ReturnType<typeof createSftpTransferCenterStore> | undefined;
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: {
+      netcatty: {
+        // Inactive-compression responses report success even after the upload
+        // already finished; the completion repaint must survive the cancel.
+        cancelCompressedUpload: async (id: string) => {
+          calls.push(`cancel:${id}`);
+          storeRef?.ingestBackgroundEvent({ type: "completed", transferId: id });
+          return { success: true };
+        },
+      },
+    },
+  });
+
+  const store = createSftpTransferCenterStore();
+  storeRef = store;
+  store.publishOwner("closed-panel", [{
+    ...makeTask("compressed-race", "transferring"),
+    fileName: "done (compressed)",
+    isDirectory: true,
+    phase: "compressing",
+    controlKind: "compressed-upload",
+  } as TransferTask]);
+
+  await store.cancel("compressed-race");
+
+  assert.deepEqual(calls, ["cancel:compressed-race"]);
+  assert.equal(store.getSnapshot().tasks[0]?.status, "completed");
+});
+
 test("orphan cancel marks process-global cancel so surviving walks stop", async (t) => {
   const {
     isTransferCancelledFlag,
@@ -2704,6 +2744,39 @@ test("an interrupted task without its old controller can still be cancelled", as
   await store.cancel("interrupted");
 
   assert.equal(store.getSnapshot().tasks[0]?.status, "cancelled");
+});
+
+test("orphan cancel keeps failed work visible and leaves completed children alone", async (t) => {
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+  t.after(() => {
+    if (previousWindow) Object.defineProperty(globalThis, "window", previousWindow);
+    else Reflect.deleteProperty(globalThis, "window");
+  });
+  const cancelledIds: string[] = [];
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { netcatty: {
+      cancelTransfer: async (id: string) => {
+        cancelledIds.push(id);
+        return { success: id !== "unfinished" };
+      },
+    } },
+  });
+  const store = createSftpTransferCenterStore();
+  store.publishOwner("closed-panel", [
+    { ...makeTask("directory", "paused"), isDirectory: true },
+    { ...makeTask("finished", "completed"), parentTaskId: "directory" },
+    { ...makeTask("unfinished", "queued"), parentTaskId: "directory" },
+  ]);
+  const finishedBeforeCancel = store.getTask("finished");
+
+  await store.cancel("directory");
+
+  assert.deepEqual(cancelledIds, ["directory", "unfinished"]);
+  assert.equal(store.getTask("finished")?.status, finishedBeforeCancel?.status);
+  assert.equal(store.getTask("unfinished")?.status, "attention");
+  assert.equal(store.getTask("directory")?.status, "attention");
+  assert.match(store.getTask("directory")?.error ?? "", /Could not cancel/);
 });
 
 test("concurrent resume clicks adopt a task only once", async () => {
@@ -3867,3 +3940,66 @@ for (const outcome of ["rejected", "stream-gone"] as const) {
     assert.equal(resumeCalls, 1, "obsolete resume must not issue another resume after the held run ends");
   });
 }
+
+test("partial cancel failure resets recovered folder children so the re-walk can re-admit them", async (t) => {
+  const { netcattyBridge } = await import("../../infrastructure/services/netcattyBridge");
+  const { resetTransferCancelLatchesForTests, isTransferOrRootCancelled } =
+    await import("./sftp/transferCancelLatch");
+  const { resetTransferWalkRegistryForTests } = await import("./sftp/transferWalkRegistry");
+  const originalGet = netcattyBridge.get;
+  resetTransferCancelLatchesForTests();
+  resetTransferWalkRegistryForTests();
+  t.after(() => {
+    netcattyBridge.get = originalGet;
+    resetTransferCancelLatchesForTests();
+    resetTransferWalkRegistryForTests();
+  });
+  // Only child2 fails to cancel; the folder must stay recoverable via Resume.
+  let failChild2 = true;
+  netcattyBridge.get = () => ({
+    cancelTransfer: async (id: string) => ({ success: id !== "dir-child-2" || !failChild2 }),
+    cleanupTransferArtifacts: async () => ({}),
+  } as unknown as ReturnType<typeof netcattyBridge.get>);
+  const store = createSftpTransferCenterStore();
+  const child = (id: string): TransferTask => ({
+    ...makeTask(id),
+    parentTaskId: "dir-root",
+    isDirectory: false,
+    transferredBytes: 4,
+    directoryEntryIndex: 0,
+    directoryEntryIdentity: "a".repeat(64),
+  });
+  store.publishOwner("gone-panel", [
+    { ...makeTask("dir-root"), isDirectory: true, transferredBytes: 10, totalBytes: 20, directoryEntryIndex: 0 },
+    child("dir-child-1"),
+    child("dir-child-2"),
+  ]);
+  await store.cancel("dir-root");
+
+  const rows = store.getSnapshot().tasks;
+  const parent = rows.find((row) => row.id === "dir-root");
+  const child1 = rows.find((row) => row.id === "dir-child-1");
+  const child2 = rows.find((row) => row.id === "dir-child-2");
+  assert.equal(parent?.status, "attention");
+  assert.equal(parent?.error, "Could not cancel transfer. Please try again.");
+  // A failed backend cancellation keeps the folder recoverable: successfully
+  // cancelled siblings must not settle as terminal "cancelled", or admitTaskRun
+  // would reject the recovery re-walk and leave the destination incomplete.
+  assert.equal(child1?.status, "interrupted");
+  assert.equal(child1?.error, undefined);
+  assert.equal(child2?.status, "attention");
+  assert.equal(isTransferOrRootCancelled("dir-root"), false, "recovery latch must be cleared");
+
+  // The directory re-walk (Resume) can re-admit the reset sibling.
+  const incoming = { ...child("dir-child-1"), directoryEntryIndex: 0, directoryEntryIdentity: "a".repeat(64) };
+  assert.equal(store.admitTaskRun(incoming), "ready");
+  assert.equal(store.getTask("dir-child-1")?.status, "transferring");
+
+  // Without any cancellation failure the tree still settles fully cancelled.
+  failChild2 = false;
+  await store.cancel("dir-root");
+  const afterFullCancel = store.getSnapshot().tasks;
+  for (const id of ["dir-root", "dir-child-1", "dir-child-2"]) {
+    assert.equal(afterFullCancel.find((row) => row.id === id)?.status, "cancelled");
+  }
+});

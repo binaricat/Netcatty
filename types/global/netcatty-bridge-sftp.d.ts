@@ -47,7 +47,7 @@ declare global {
         totalBytes: number;
       }
     ): Promise<{ compressionId: string; success?: boolean; error?: string }>;
-    cancelCompressedUpload?(compressionId: string): Promise<{ success: boolean }>;
+    cancelCompressedUpload?(compressionId: string): Promise<{ success: boolean; inactive?: boolean }>;
     pauseCompressedUpload?(compressionId: string): Promise<{ success: boolean; deferred?: boolean; lifecycleEpoch?: number; reason?: string }>;
     resumeCompressedUpload?(compressionId: string): Promise<{ success: boolean; lifecycleEpoch?: number; reason?: string }>;
     checkCompressedUploadSupport?(sftpId: string): Promise<{
