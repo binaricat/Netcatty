@@ -897,11 +897,13 @@ function createBridgeRegistrar(context) {
 
     // Clipboard helpers for renderer fallback paths (e.g. Monaco paste in Electron)
     ipcMain.handle("netcatty:clipboard:readText", async () => {
-      try {
-        return clipboard?.readText?.() || "";
-      } catch {
-        return "";
+      // Reject on failure so renderer callers can fall back to their own
+      // clipboard paths; only a successful read returns a string (possibly ""
+      // for a genuinely empty clipboard).
+      if (!clipboard || typeof clipboard.readText !== "function") {
+        throw new Error("Clipboard API unavailable");
       }
+      return clipboard.readText();
     });
 
     ipcMain.handle("netcatty:clipboard:writeText", async (_event, text) => {
