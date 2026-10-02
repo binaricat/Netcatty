@@ -937,6 +937,14 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
           : { ...prev, [agentId]: { cacheKey: target.cacheKey, models: runtimePresets } }
       ));
     }
+    // Another path (e.g. send preflight) applied the catalog before the
+    // deferred idle callback scheduled in the visibility effect: clear its
+    // stale pending flag so the composer stops claiming models are loading.
+    setRuntimeModelLoading((prev) => {
+      if (!prev[agentId] || prev[agentId].cacheKey !== target.cacheKey) return prev;
+      const { [agentId]: _removed, ...rest } = prev;
+      return rest;
+    });
 
     const normalizedStoredModelId = normalizeStoredAgentModelSelection(
       storedModelId,
@@ -954,7 +962,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     ) {
       setAgentModel(agentId, catalog.currentModelId);
     }
-  }, [setAgentModel, buildExternalAgentRuntimeModelTarget, collectCustomModelIds]);
+  }, [setAgentModel, setRuntimeModelLoading, buildExternalAgentRuntimeModelTarget, collectCustomModelIds]);
 
   const loadSdkRuntimeModelCatalog = useCallback((
     target: SdkRuntimeModelTarget,
@@ -1045,11 +1053,15 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     // Mark the catalog pending as soon as the refresh is scheduled: otherwise
     // `runtimeModelLoading` stays false for the whole idle delay (and longer
     // while the composer stays focused), so the built-in OPENCODE_MODEL_PRESETS
-    // remain selectable the entire time (#3584). A cached catalog is unaffected:
-    // `agentModelPresets` prefers a matching runtime entry over the pending flag.
-    setRuntimeModelLoading((prev) => (
-      prev[target.agentId]?.cacheKey === target.cacheKey ? prev : { ...prev, [target.agentId]: { cacheKey: target.cacheKey } }
-    ));
+    // remain selectable the entire time (#3584). Only do this on a cache miss:
+    // when a cached catalog was already applied above, the runtime presets are
+    // available, so a pending flag would keep the composer banner/picker in the
+    // "loading" state indefinitely while the idle callback is deferred.
+    if (!cached) {
+      setRuntimeModelLoading((prev) => (
+        prev[target.agentId]?.cacheKey === target.cacheKey ? prev : { ...prev, [target.agentId]: { cacheKey: target.cacheKey } }
+      ));
+    }
     const cancelIdle = scheduleWhenAiComposerIdle(() => {
       idleFired = true;
       void loadSdkRuntimeModelCatalog(target).then((catalog) => {
