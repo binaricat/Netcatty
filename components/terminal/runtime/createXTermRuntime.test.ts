@@ -1113,3 +1113,24 @@ test("Shift+Enter send-text fallback snapshots prompt sensitivity before the loc
     /broadcastKittyInput\(\s*\{\s*kind: "key",\s*event: kittyEvent,\s*fallbackToLegacy: true,\s*\},\s*false,\s*undefined,\s*sourceSensitivePrompt \? \{ sourceSensitive: true \} : undefined\)/,
   );
 });
+
+test("plain Ctrl+V keydowns that escape the menu accelerator route through the shared paste path (#3582)", async () => {
+  const { readFileSync } = await import("node:fs");
+  const source = readFileSync(new URL("./createXTermRuntime.ts", import.meta.url), "utf8");
+
+  // Windows clipboard history (Win+V) injects a plain Ctrl+V keydown that the
+  // Edit > Paste menu accelerator does not consume. Unclaimed, xterm encodes
+  // it as bare \x16 and the shell shows ^V instead of pasting. The claim must
+  // share the context-menu paste path so local image-only clipboards keep
+  // their Ctrl+V forward and remote auto-upload stays gated.
+  const claimIdx = source.indexOf("!isMacPlatform() && isPlainCtrlVPasteChord(e)");
+  assert.ok(claimIdx >= 0, "plain Ctrl+V claim must exist in the keydown handler");
+  const claim = source.slice(claimIdx, claimIdx + 400);
+  assert.match(claim, /!isMacPlatform\(\) && isPlainCtrlVPasteChord\(e\)/);
+  assert.match(claim, /ctx\.terminalContextActionsRef\?\.current\?\.onPaste\?\.()/u);
+  assert.match(claim, /return false;/);
+  // The claim sits after the configured shortcut bindings so a re-mapped
+  // paste chord keeps precedence.
+  const bindingsIdx = source.indexOf("const currentBindings = ctx.keyBindingsRef.current;");
+  assert.ok(bindingsIdx >= 0 && bindingsIdx < claimIdx);
+});

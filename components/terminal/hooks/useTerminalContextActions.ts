@@ -200,7 +200,19 @@ export const useTerminalContextActions = ({
         isSensitiveInput: () => passwordPromptActiveRef?.current === true,
         broadcastPasswordBypass: () => broadcastPasswordBypassRef?.current === true,
         onClipboardImageUploadResult,
-        readClipboardText: () => navigator.clipboard.readText(),
+        // Prefer the main-process clipboard read: the renderer's clipboard
+        // view can still be empty right after Windows clipboard history
+        // (Win+V) writes the picked item while the window was unfocused
+        // (#3582), while the bridge always reads the live system clipboard.
+        readClipboardText: async () => {
+          try {
+            const bridged = await bridge?.readClipboardText?.();
+            if (typeof bridged === "string" && bridged.length > 0) return bridged;
+          } catch (err) {
+            logger.warn("Bridge clipboard read failed; falling back to navigator", err);
+          }
+          return navigator.clipboard.readText();
+        },
         scrollOnPaste: scrollOnPasteRef?.current ?? false,
         onPasteData: broadcastUserPasteData,
         sessionId: sessionRef.current,
