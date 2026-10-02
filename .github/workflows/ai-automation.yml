@@ -1202,8 +1202,7 @@ jobs:
           persist-credentials: false
 
       - name: Freeze trusted helper
-        run: cp scripts/ai-automation.cjs "$RUNNER_TEMP/ai-automation.cjs"
-          chmod 0444 "$RUNNER_TEMP/ai-automation.cjs"
+        run: *freeze_ai_helper
 
       - name: Install Claude Code CLI
         run: |
