@@ -1397,27 +1397,32 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
       // from their existing byte checkpoints. Failed rows (and the parent) keep
       // their attention error so the user can retry cancelling them.
       const folderResumeRecoverable = failedIds.size > 0;
-      // A completion event for the root (or a child) may land while the
-      // cancelTransfer IPC batches above are still pending. Do not rewrite a
-      // row that already reached its terminal completed status (same guard as
-      // the compressed/dedicated path).
-      tasks = tasks.map((candidate) => cancelIdSet.has(candidate.id) && candidate.status !== "completed" ? {
-        ...candidate,
-        status: failedIds.has(candidate.id) || (candidate.id === taskId && failedIds.size > 0)
-          ? "attention"
-          : folderResumeRecoverable ? "interrupted" : "cancelled",
-        reconnectRequired: !failedIds.has(candidate.id) && candidate.id !== taskId && folderResumeRecoverable
-          ? true
-          : candidate.reconnectRequired,
-        error: failedIds.has(candidate.id) || (candidate.id === taskId && failedIds.size > 0)
-          ? "Could not cancel transfer. Please try again."
-          : undefined,
-        endTime: failedIds.has(candidate.id) || (candidate.id === taskId && failedIds.size > 0)
-          ? candidate.endTime
-          : folderResumeRecoverable ? undefined : Date.now(),
-        speed: 0,
-        conflict: undefined,
-      } : candidate);
+      // A completion or failure event for the root (or a child) may land while
+      // the cancelTransfer IPC batches above are still pending. Do not rewrite
+      // a row that already reached a terminal status (completed/failed/
+      // cancelled): a child that failed independently while the batches were
+      // pending must keep its real transfer error instead of being repainted
+      // "cancelled" / "interrupted" (same terminal-authority treatment as the
+      // compressed path).
+      tasks = tasks.map((candidate) =>
+        cancelIdSet.has(candidate.id)
+        && !["completed", "failed", "cancelled"].includes(candidate.status) ? {
+          ...candidate,
+          status: failedIds.has(candidate.id) || (candidate.id === taskId && failedIds.size > 0)
+            ? "attention"
+            : folderResumeRecoverable ? "interrupted" : "cancelled",
+          reconnectRequired: !failedIds.has(candidate.id) && candidate.id !== taskId && folderResumeRecoverable
+            ? true
+            : candidate.reconnectRequired,
+          error: failedIds.has(candidate.id) || (candidate.id === taskId && failedIds.size > 0)
+            ? "Could not cancel transfer. Please try again."
+            : undefined,
+          endTime: failedIds.has(candidate.id) || (candidate.id === taskId && failedIds.size > 0)
+            ? candidate.endTime
+            : folderResumeRecoverable ? undefined : Date.now(),
+          speed: 0,
+          conflict: undefined,
+        } : candidate);
       if (failedIds.size > 0 && !isTransferWalkInFlight(taskId)) {
         // Cancellation failed for at least one task, so the parent is kept in
         // attention for recovery instead of settling as cancelled. Drop the
