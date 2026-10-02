@@ -1041,10 +1041,17 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
       });
     };
     let cancelled = false;
+    let idleFired = false;
+    // Mark the catalog pending as soon as the refresh is scheduled: otherwise
+    // `runtimeModelLoading` stays false for the whole idle delay (and longer
+    // while the composer stays focused), so the built-in OPENCODE_MODEL_PRESETS
+    // remain selectable the entire time (#3584). A cached catalog is unaffected:
+    // `agentModelPresets` prefers a matching runtime entry over the pending flag.
+    setRuntimeModelLoading((prev) => (
+      prev[target.agentId]?.cacheKey === target.cacheKey ? prev : { ...prev, [target.agentId]: { cacheKey: target.cacheKey } }
+    ));
     const cancelIdle = scheduleWhenAiComposerIdle(() => {
-      setRuntimeModelLoading((prev) => (
-        prev[target.agentId]?.cacheKey === target.cacheKey ? prev : { ...prev, [target.agentId]: { cacheKey: target.cacheKey } }
-      ));
+      idleFired = true;
       void loadSdkRuntimeModelCatalog(target).then((catalog) => {
         if (cancelled || !catalog) return;
         applySdkRuntimeModelCatalog(target, catalog, { adoptCurrentModel: true });
@@ -1058,6 +1065,10 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     return () => {
       cancelled = true;
       cancelIdle();
+      // If the idle callback never fired, the load never started and nothing
+      // would clear the pending flag — do it here. In-flight loads clear their
+      // own flag in `.finally`, so leave them alone.
+      if (!idleFired) clearRuntimeModelLoading();
     };
   }, [
     isVisible,
