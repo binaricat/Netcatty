@@ -111,3 +111,22 @@ test("bypassed context paste at a password prompt is marked sourceSensitive (#34
     { options: { lineDelayMs: 250, sourceSensitive: true } },
   ]);
 });
+
+test("context paste prefers the main-process clipboard read (#3582)", async () => {
+  const { readFileSync } = await import("node:fs");
+  const source = readFileSync(new URL("./hooks/useTerminalContextActions.ts", import.meta.url), "utf8");
+
+  // Windows clipboard history (Win+V) writes the picked item while the window
+  // is unfocused, so the renderer's clipboard view can still be empty when
+  // the synthetic paste arrives. The shared onPaste path must read the live
+  // system clipboard through the main-process bridge first.
+  const onPasteIdx = source.indexOf("const onPaste = useCallback");
+  assert.ok(onPasteIdx >= 0);
+  const onPaste = source.slice(onPasteIdx, onPasteIdx + 5000);
+  assert.match(onPaste, /bridge\?\.readClipboardText\?\.\(\)/u);
+  assert.match(onPaste, /navigator\.clipboard\.readText\(\)/u);
+  assert.ok(
+    onPaste.indexOf("bridge?.readClipboardText?.()")
+      < onPaste.indexOf("navigator.clipboard.readText()"),
+  );
+});

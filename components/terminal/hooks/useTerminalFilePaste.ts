@@ -67,10 +67,20 @@ export function useTerminalFilePaste({
       // remote keyboard pastes; otherwise xterm's default handler would send
       // the lines without the safety dialog when neither image upload nor
       // local file handling applies.
+      //
+      // Windows clipboard history (Win+V) can deliver the picked item with an
+      // empty paste event: the picker writes the system clipboard while the
+      // window is unfocused and Chromium still serves its stale (empty)
+      // clipboard view on the synthetic paste (#3582). Intercept these events
+      // and re-read through the main-process bridge, which sees the live
+      // system clipboard.
+      const eventText = event.clipboardData?.getData("text/plain") ?? "";
+      const emptyPasteEventRecovery = !eventText && !!bridge?.readClipboardText;
       const shouldInterceptPaste =
         wantsImageUpload
         || canHandleLocalPaste
-        || !!multilinePasteConfirmRef?.current?.enabled;
+        || !!multilinePasteConfirmRef?.current?.enabled
+        || emptyPasteEventRecovery;
       if (!shouldInterceptPaste) return;
 
       // ⚡ Must call preventDefault SYNCHRONOUSLY — the event lifecycle
@@ -78,12 +88,6 @@ export function useTerminalFilePaste({
       // browser will have already performed the default paste action.
       event.preventDefault();
       event.stopPropagation();
-
-      // Capture the pasted text synchronously: navigator.clipboard.readText()
-      // can be rejected (permissions / platform quirks) even though the event
-      // already carries the text, so prefer it and only fall back to the
-      // async clipboard API when the event has no text data.
-      const eventText = event.clipboardData?.getData("text/plain") ?? "";
 
       void (async () => {
         try {
@@ -110,6 +114,17 @@ export function useTerminalFilePaste({
             onClipboardImageUploadResult,
             readClipboardText: async () => {
               if (eventText) return eventText;
+              // Prefer the main-process bridge: the renderer's clipboard view
+              // can lag behind a Windows clipboard history write (#3582).
+              // Any successful string result is authoritative — including ""
+              // (e.g. the clipboard was genuinely cleared) — so treat only a
+              // missing bridge or thrown read as a fallback condition.
+              try {
+                const bridged = await bridge?.readClipboardText?.();
+                if (typeof bridged === "string") return bridged;
+              } catch (err) {
+                logger.warn("Bridge clipboard read failed; falling back to navigator", err);
+              }
               return navigator.clipboard.readText();
             },
             scrollOnPaste: scrollOnPasteRef?.current ?? false,

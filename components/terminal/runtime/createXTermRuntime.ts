@@ -172,6 +172,7 @@ import {
   type TerminalOutputHistoryPreview,
 } from "./terminalOutputHistory";
 import { shouldPassThroughCopyShortcut } from "./terminalCopyShortcut";
+import { matchesPlainCtrlVChord } from "./win32ClipboardHistoryPaste";
 import {
   isMacCommandPeriodInterruptChord,
   shouldUseUrgentTerminalInterrupt,
@@ -2495,6 +2496,24 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
           }
         }
       }
+    }
+
+    // Windows clipboard history (Win+V) delivers the picked item as a plain
+    // Ctrl+V keydown that escapes the Edit > Paste menu accelerator (#3582).
+    // Left to xterm's default handling it is encoded as bare \x16, so the
+    // shell shows ^V instead of pasting. Claim the chord on Windows only —
+    // on Linux plain Ctrl+V is terminal input (e.g. Readline's quoted-insert);
+    // the PC paste binding there is Ctrl+Shift+V. Route the claimed chord
+    // through the shared clipboard paste path, which reads the live system
+    // clipboard via the main-process bridge.
+    if (platform === "win32" && matchesPlainCtrlVChord(e)) {
+      e.preventDefault();
+      e.stopPropagation();
+      // Auto-repeat keydowns of a held Ctrl+V must be consumed too: left
+      // unclaimed, each repeat reaches xterm and is encoded as bare \x16
+      // (^V in the shell). Paste only on the initial keydown.
+      if (!e.repeat) void ctx.terminalContextActionsRef?.current?.onPaste?.();
+      return false;
     }
 
     // Sogou/macOS CJK punctuation: keydown still reports ASCII "," while the
