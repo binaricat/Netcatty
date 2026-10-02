@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { isPlainCtrlVPasteChord } from "./win32ClipboardHistoryPaste";
+import {
+  isPlainCtrlVPasteChord,
+  matchesPlainCtrlVChord,
+} from "./win32ClipboardHistoryPaste";
 
 const keyboardEvent = (
   overrides: Partial<KeyboardEvent> = {},
@@ -36,6 +39,11 @@ test("chords with extra modifiers are not clipboard history pastes", () => {
 
 test("auto-repeat keydowns are not claimed to avoid paste spam", () => {
   assert.equal(isPlainCtrlVPasteChord(keyboardEvent({ repeat: true })), false);
+});
+
+test("auto-repeat keydowns still match the chord so the keydown claim can consume them", () => {
+  assert.equal(matchesPlainCtrlVChord(keyboardEvent({ repeat: true })), true);
+  assert.equal(matchesPlainCtrlVChord(keyboardEvent({ shiftKey: true, repeat: true })), false);
 });
 
 test("other Ctrl chords are untouched", () => {

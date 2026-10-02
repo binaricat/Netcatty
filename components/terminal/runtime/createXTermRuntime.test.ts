@@ -1123,11 +1123,13 @@ test("plain Ctrl+V keydowns that escape the menu accelerator route through the s
   // it as bare \x16 and the shell shows ^V instead of pasting. The claim must
   // share the context-menu paste path so local image-only clipboards keep
   // their Ctrl+V forward and remote auto-upload stays gated.
-  const claimIdx = source.indexOf("platform === \"win32\" && isPlainCtrlVPasteChord(e)");
+  const claimIdx = source.indexOf("platform === \"win32\" && matchesPlainCtrlVChord(e)");
   assert.ok(claimIdx >= 0, "plain Ctrl+V claim must exist in the keydown handler");
-  const claim = source.slice(claimIdx, claimIdx + 400);
-  assert.match(claim, /platform === "win32" && isPlainCtrlVPasteChord\(e\)/);
-  assert.match(claim, /ctx\.terminalContextActionsRef\?\.current\?\.onPaste\?\.()/u);
+  const claim = source.slice(claimIdx, claimIdx + 600);
+  assert.match(claim, /platform === "win32" && matchesPlainCtrlVChord\(e\)/);
+  // Auto-repeat Ctrl+V (held key) must be consumed without re-pasting, or
+  // each repeat reaches xterm and is encoded as bare \x16.
+  assert.match(claim, /if \(!e\.repeat\) void ctx\.terminalContextActionsRef\?\.current\?\.onPaste\?\.()/u);
   assert.match(claim, /return false;/);
   // The claim sits after the configured shortcut bindings so a re-mapped
   // paste chord keeps precedence.

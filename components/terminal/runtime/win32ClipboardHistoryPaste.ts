@@ -17,11 +17,19 @@ function isPhysicalVKey(e: PasteChordKeyEvent): boolean {
  * and routes it through the shared clipboard paste path (which reads the live
  * system clipboard via the main-process bridge) instead.
  */
-export function isPlainCtrlVPasteChord(e: PasteChordKeyEvent): boolean {
+/**
+ * Physical plain Ctrl+V chord, ignoring auto-repeat. Used by the keydown
+ * claim so held-key repeats of a clipboard-history paste are consumed instead
+ * of escaping to xterm (which would encode each repeat as bare \x16).
+ */
+export function matchesPlainCtrlVChord(e: PasteChordKeyEvent): boolean {
   return Boolean(e.ctrlKey)
     && !e.shiftKey
     && !e.altKey
     && !e.metaKey
-    && !e.repeat
     && isPhysicalVKey(e);
+}
+
+export function isPlainCtrlVPasteChord(e: PasteChordKeyEvent): boolean {
+  return !e.repeat && matchesPlainCtrlVChord(e);
 }

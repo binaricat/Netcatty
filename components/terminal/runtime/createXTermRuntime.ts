@@ -172,7 +172,7 @@ import {
   type TerminalOutputHistoryPreview,
 } from "./terminalOutputHistory";
 import { shouldPassThroughCopyShortcut } from "./terminalCopyShortcut";
-import { isPlainCtrlVPasteChord } from "./win32ClipboardHistoryPaste";
+import { matchesPlainCtrlVChord } from "./win32ClipboardHistoryPaste";
 import {
   isMacCommandPeriodInterruptChord,
   shouldUseUrgentTerminalInterrupt,
@@ -2506,10 +2506,13 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     // the PC paste binding there is Ctrl+Shift+V. Route the claimed chord
     // through the shared clipboard paste path, which reads the live system
     // clipboard via the main-process bridge.
-    if (platform === "win32" && isPlainCtrlVPasteChord(e)) {
+    if (platform === "win32" && matchesPlainCtrlVChord(e)) {
       e.preventDefault();
       e.stopPropagation();
-      void ctx.terminalContextActionsRef?.current?.onPaste?.();
+      // Auto-repeat keydowns of a held Ctrl+V must be consumed too: left
+      // unclaimed, each repeat reaches xterm and is encoded as bare \x16
+      // (^V in the shell). Paste only on the initial keydown.
+      if (!e.repeat) void ctx.terminalContextActionsRef?.current?.onPaste?.();
       return false;
     }
 
