@@ -116,9 +116,12 @@ export function useTerminalFilePaste({
               if (eventText) return eventText;
               // Prefer the main-process bridge: the renderer's clipboard view
               // can lag behind a Windows clipboard history write (#3582).
+              // Any successful string result is authoritative — including ""
+              // (e.g. the clipboard was genuinely cleared) — so treat only a
+              // missing bridge or thrown read as a fallback condition.
               try {
                 const bridged = await bridge?.readClipboardText?.();
-                if (typeof bridged === "string" && bridged.length > 0) return bridged;
+                if (typeof bridged === "string") return bridged;
               } catch (err) {
                 logger.warn("Bridge clipboard read failed; falling back to navigator", err);
               }
