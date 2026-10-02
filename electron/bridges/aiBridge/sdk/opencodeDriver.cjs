@@ -772,9 +772,12 @@ function buildOpenCodeListServerKey(binPath, env) {
 }
 
 // Shared list-models servers: coalesce concurrent catalog loads for the same
-// binary, then tear down after a short idle so idle Netcatty does not keep
-// opencode processes around (issue #2184).
-const OPENCODE_LIST_SERVER_IDLE_MS = 1500;
+// binary, then tear down after an idle window so idle Netcatty does not keep
+// opencode processes around (issue #2184). The idle window stays generous
+// (30s, unref'd) because Windows opencode server cold starts take 4.6–8.9s
+// (#3584): killing the server 1.5s after a load makes every agent switch pay
+// the full spawn cost again and re-show the placeholder catalog.
+const OPENCODE_LIST_SERVER_IDLE_MS = 30000;
 const openCodeListServers = new Map();
 
 function clearOpenCodeListServerIdle(entry) {
@@ -907,8 +910,15 @@ async function listOpenCodeModels({ env, binPath, openCodeFactory, abortControll
       currentModelId: getOpenCodeDefaultModelId(data),
       models: mapOpenCodeModels(data),
     };
-  } catch {
-    return emptyOpenCodeModelCatalog();
+  } catch (error) {
+    // Surface catalog load failures to the caller so the UI can tell "still
+    // loading" apart from "failed" (#3584). Silently swallowing spawn /
+    // providers() errors meant a bad OPENCODE_BIN or a Windows cold-start
+    // timeout degraded to an empty catalog with no error and no retry path.
+    // An aborted load keeps the silent empty result: the caller cancelled on
+    // purpose, so there is nothing to retry.
+    if (effectiveSignal?.aborted) return emptyOpenCodeModelCatalog();
+    throw error;
   } finally {
     if (acquired) releaseOpenCodeListServer(acquired.key);
   }

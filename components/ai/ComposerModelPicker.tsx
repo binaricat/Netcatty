@@ -22,6 +22,11 @@ export interface ComposerModelPickerProps {
   selectedProviderId?: string;
   selectedModelId?: string;
   modelPresets?: AgentModelPreset[];
+  /**
+   * The host's live model catalog (external SDK agents like OpenCode) is still
+   * loading. Show the loading row instead of an empty/placeholder list.
+   */
+  loading?: boolean;
   prefs: ComposerModelPrefs;
   /**
    * Offer the "use custom model" action. Disable when the host locks the
@@ -89,6 +94,7 @@ export const ComposerModelPicker: React.FC<ComposerModelPickerProps> = ({
   selectedProviderId,
   selectedModelId,
   modelPresets = [],
+  loading = false,
   prefs,
   allowCustomEntry = true,
   onSelectProviderModel,
@@ -271,7 +277,7 @@ export const ComposerModelPicker: React.FC<ComposerModelPickerProps> = ({
       </div>
 
       <div className="max-h-[280px] overflow-y-auto">
-        {catalog.loading && (
+        {(catalog.loading || (loading && !hasProviders)) && (
           <div className="flex h-8 items-center gap-1.5 px-2.5 text-[11px] text-muted-foreground/55">
             <Loader2 size={11} className="animate-spin" />
             {t('ai.chat.loadingModels')}
@@ -344,7 +350,7 @@ export const ComposerModelPicker: React.FC<ComposerModelPickerProps> = ({
           />
         ))}
 
-        {!catalog.loading && filtered.length === 0 && !showCustom && (
+        {!catalog.loading && !loading && filtered.length === 0 && !showCustom && (
           <div className="px-2.5 py-2 text-[11px] text-muted-foreground/50">
             {catalog.error || t('ai.chat.noMatchingModels')}
           </div>
