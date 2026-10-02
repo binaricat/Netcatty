@@ -321,6 +321,10 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   const [isSending, setIsSending] = useState(false);
   const [runtimeAgentModelPresets, setRuntimeAgentModelPresets] = useState<Record<string, { cacheKey: string; models: AgentModelPreset[] }>>({});
   const [runtimeModelWarnings, setRuntimeModelWarnings] = useState<Record<string, { cacheKey: string; message: string }>>({});
+  // Tracks SDK runtime model catalogs currently loading (per agent scope):
+  // while an OpenCode catalog is pending we must not flash the built-in
+  // OPENCODE_MODEL_PRESETS for providers the user never configured (#3584).
+  const [runtimeModelLoading, setRuntimeModelLoading] = useState<Record<string, { cacheKey: string }>>({});
   const [steerWarnings, setSteerWarnings] = useState<Record<string, SteerWarning>>({});
   const [steeringSessionId, setSteeringSessionId] = useState<string | null>(null);
   const [userSkillOptions, setUserSkillOptions] = useState<UserSkillOption[]>([]);
@@ -1029,11 +1033,25 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     // even when the user never selected OpenCode (#2184). Manual refresh still
     // passes force via the model selector path. Defer the network refresh so
     // expand → first type does not wait on CLI model listing.
+    const clearRuntimeModelLoading = () => {
+      setRuntimeModelLoading((prev) => {
+        if (!prev[target.agentId] || prev[target.agentId].cacheKey !== target.cacheKey) return prev;
+        const { [target.agentId]: _removed, ...rest } = prev;
+        return rest;
+      });
+    };
     let cancelled = false;
     const cancelIdle = scheduleWhenAiComposerIdle(() => {
+      setRuntimeModelLoading((prev) => (
+        prev[target.agentId]?.cacheKey === target.cacheKey ? prev : { ...prev, [target.agentId]: { cacheKey: target.cacheKey } }
+      ));
       void loadSdkRuntimeModelCatalog(target).then((catalog) => {
         if (cancelled || !catalog) return;
         applySdkRuntimeModelCatalog(target, catalog, { adoptCurrentModel: true });
+      }).finally(() => {
+        // Always clear, even after cancellation: a stale flag would keep the
+        // composer in the loading state forever.
+        clearRuntimeModelLoading();
       });
     });
 
@@ -1075,6 +1093,22 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         collectCustomModelIds(currentAgentId, runtimePresets),
       );
     }
+    // While an OpenCode catalog load is pending, do not flash the built-in
+    // OPENCODE_MODEL_PRESETS: they enumerate well-known gateway providers the
+    // user may never have configured, so for a few seconds every switch looks
+    // like a broken default model (#3584). Show only the user's own custom
+    // model ids until the live catalog resolves (or a retryable warning
+    // appears in the composer banner).
+    if (
+      target
+      && getExternalAgentSdkBackend(currentAgentConfig) === 'opencode'
+      && runtimeModelLoading[currentAgentId]?.cacheKey === target.cacheKey
+    ) {
+      return appendComposerCustomModelPresets(
+        [],
+        collectCustomModelIds(currentAgentId, []),
+      );
+    }
     const presets = getAgentModelPresets(
       currentAgentConfig?.command,
       getExternalAgentSdkBackend(currentAgentConfig),
@@ -1092,6 +1126,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     currentAgentConfig,
     currentAgentId,
     runtimeAgentModelPresets,
+    runtimeModelLoading,
     buildExternalAgentRuntimeModelTarget,
     hasCodexCustomConfig,
     codexConfigModel,
@@ -1126,6 +1161,31 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   const handleAgentModelSelect = useCallback((modelId: string) => {
     setAgentModel(currentAgentId, modelId);
   }, [currentAgentId, setAgentModel]);
+
+  // Retry a failed SDK runtime model catalog load (composer warning banner).
+  // Failures are never cached, so a forced refresh re-queries the CLI/daemon.
+  const handleRetrySdkModelCatalog = useCallback(() => {
+    const target = buildExternalAgentRuntimeModelTarget(currentAgentConfig);
+    if (!target) return;
+    setRuntimeModelLoading((prev) => (
+      prev[target.agentId]?.cacheKey === target.cacheKey ? prev : { ...prev, [target.agentId]: { cacheKey: target.cacheKey } }
+    ));
+    void loadSdkRuntimeModelCatalog(target, { force: true }).then((catalog) => {
+      if (!catalog) return;
+      applySdkRuntimeModelCatalog(target, catalog, { adoptCurrentModel: true });
+    }).finally(() => {
+      setRuntimeModelLoading((prev) => {
+        if (!prev[target.agentId] || prev[target.agentId].cacheKey !== target.cacheKey) return prev;
+        const { [target.agentId]: _removed, ...rest } = prev;
+        return rest;
+      });
+    });
+  }, [
+    currentAgentConfig,
+    buildExternalAgentRuntimeModelTarget,
+    loadSdkRuntimeModelCatalog,
+    applySdkRuntimeModelCatalog,
+  ]);
 
   const selectedCattyThinking = agentThinkingMap.catty;
   const handleCattyThinkingSelect = useCallback((level: string) => {
@@ -1794,6 +1854,11 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
           && runtimeModelWarnings[currentAgentId].cacheKey === buildExternalAgentRuntimeModelTarget(currentAgentConfig)?.cacheKey
           ? runtimeModelWarnings[currentAgentId].message
           : undefined}
+        modelCatalogLoading={
+          getExternalAgentSdkBackend(currentAgentConfig) === 'opencode'
+          && runtimeModelLoading[currentAgentId]?.cacheKey === buildExternalAgentRuntimeModelTarget(currentAgentConfig)?.cacheKey
+        }
+        handleModelCatalogRetry={handleRetrySdkModelCatalog}
         agentModelPresets={agentModelPresets}
         // A managed Codex config's `model` field overrides every selection on
         // send, so the manual-entry action would be a silent no-op.

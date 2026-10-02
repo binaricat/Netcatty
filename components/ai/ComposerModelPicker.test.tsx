@@ -109,3 +109,20 @@ test('external agent picker keeps preset rows truncation-friendly with a full-na
 
   assert.match(html, /title="GPT-5\.6 Sol \(preview\)"/);
 });
+
+test('external agent picker shows the loading row while the live catalog is pending', () => {
+  const html = renderToStaticMarkup(
+    <ComposerModelPicker
+      modelPresets={[]}
+      loading
+      selectedModelId={undefined}
+      prefs={{ recent: [], pinned: [] }}
+      onSelectModel={() => {}}
+      onTogglePinned={() => {}}
+    />,
+  );
+
+  assert.match(html, /ai\.chat\.loadingModels/);
+  // The host no longer renders built-in presets while loading (#3584).
+  assert.doesNotMatch(html, /gpt-5\.1/);
+});

@@ -66,6 +66,10 @@ interface AIChatPanelContentProps {
   providerDisplayName?: string;
   modelDisplayName?: string;
   modelCatalogWarning?: string;
+  /** Live SDK model catalog is loading (no built-in presets to show yet). */
+  modelCatalogLoading?: boolean;
+  /** Retry a failed SDK model catalog load from the warning banner. */
+  handleModelCatalogRetry?: () => void;
   agentModelPresets: AgentModelPreset[];
   /** Suppress the composer picker's "use custom model" action (locked model). */
   allowCustomModelEntry?: boolean;
@@ -131,6 +135,7 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
   canCompact = false,
   handleSteer,
   handleStop,
+  handleModelCatalogRetry,
   canSteer,
   isSteering,
   steerWarning,
@@ -139,6 +144,7 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
   providerDisplayName,
   modelDisplayName,
   modelCatalogWarning,
+  modelCatalogLoading = false,
   agentModelPresets,
   allowCustomModelEntry = true,
   selectedAgentModel,
@@ -335,8 +341,20 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
                     {steerWarning}
                   </div>
                 ) : modelCatalogWarning ? (
-                  <div role="status" className="mx-3 mb-1.5 rounded-md border border-amber-500/25 bg-amber-500/10 px-2.5 py-1.5 text-[11px] leading-4 text-amber-600 dark:text-amber-400">
-                    {modelCatalogWarning}
+                  <div role="status" className="mx-3 mb-1.5 flex items-center gap-2 rounded-md border border-amber-500/25 bg-amber-500/10 px-2.5 py-1.5 text-[11px] leading-4 text-amber-600 dark:text-amber-400">
+                    <span className="min-w-0 flex-1">{modelCatalogWarning}</span>
+                    {handleModelCatalogRetry && (
+                      <button
+                        onClick={handleModelCatalogRetry}
+                        className="shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium text-amber-600 underline-offset-2 transition-colors hover:bg-amber-500/10 hover:text-amber-500 hover:underline cursor-pointer dark:text-amber-400 dark:hover:text-amber-300"
+                      >
+                        {t('ai.chat.modelCatalogRetry')}
+                      </button>
+                    )}
+                  </div>
+                ) : modelCatalogLoading ? (
+                  <div role="status" className="mx-3 mb-1.5 rounded-md bg-muted/40 px-2.5 py-1.5 text-[11px] leading-4 text-muted-foreground/70">
+                    {t('ai.chat.loadingModels')}
                   </div>
                 ) : null}
                 <ChatInput
@@ -357,6 +375,7 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
                   modelName={modelDisplayName}
                   agentName={currentAgentId === 'catty' ? 'Catty Agent' : externalAgents.find(a => a.id === currentAgentId)?.name}
                   modelPresets={agentModelPresets}
+                  modelCatalogLoading={modelCatalogLoading}
                   allowCustomModelEntry={allowCustomModelEntry}
                   selectedModelId={selectedAgentModel}
                   onModelSelect={handleAgentModelSelect}

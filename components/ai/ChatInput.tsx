@@ -206,6 +206,8 @@ interface ChatInputProps {
   placeholder?: string;
   /** Available model presets for the current agent */
   modelPresets?: AgentModelPreset[];
+  /** Live agent model catalog (OpenCode) is still loading. */
+  modelCatalogLoading?: boolean;
   /**
    * Offer the picker's "use custom model" action. Disable when the current
    * agent locks the model (e.g. managed Codex `model` config overrides the
@@ -277,6 +279,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
   agentName,
   placeholder,
   modelPresets = [],
+  modelCatalogLoading = false,
   allowCustomModelEntry = true,
   selectedModelId,
   onModelSelect,
@@ -997,7 +1000,10 @@ const ChatInput: React.FC<ChatInputProps> = ({
     ? providerSwitcherChipLabel
     : (selectedPreset?.name || modelName || providerName || t('ai.chat.noModel'));
   const modelChipMaxWidth = hasProviderSwitcher ? 'max-w-[168px]' : 'max-w-[96px]';
-  const hasModelPicker = hasProviderSwitcher || (modelPresets.length > 0 && !!onModelSelect);
+  // Keep the picker open-able while an OpenCode catalog load is pending so
+  // the user sees the loading row instead of stale built-in presets (#3584).
+  const hasModelPicker = hasProviderSwitcher
+    || ((modelPresets.length > 0 || modelCatalogLoading) && !!onModelSelect);
   const thinkingLevels = useMemo(
     () => (
       hasProviderSwitcher && onThinkingLevelChange
@@ -1592,6 +1598,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
                     selectedProviderId={providerSwitcher?.selectedProviderId}
                     selectedModelId={hasProviderSwitcher ? providerSwitcher?.selectedModelId : selectedBaseModelId}
                     modelPresets={hasProviderSwitcher ? undefined : modelPresets}
+                    loading={!hasProviderSwitcher ? modelCatalogLoading : undefined}
                     allowCustomEntry={allowCustomModelEntry}
                     prefs={modelPrefs}
                     onSelectProviderModel={(providerId, modelId, contextWindow) => {
@@ -1805,6 +1812,7 @@ function chatInputPropsAreEqual(prev: ChatInputProps, next: ChatInputProps): boo
     && prev.agentName === next.agentName
     && prev.placeholder === next.placeholder
     && prev.modelPresets === next.modelPresets
+    && prev.modelCatalogLoading === next.modelCatalogLoading
     && prev.allowCustomModelEntry === next.allowCustomModelEntry
     && prev.selectedModelId === next.selectedModelId
     && prev.onModelSelect === next.onModelSelect

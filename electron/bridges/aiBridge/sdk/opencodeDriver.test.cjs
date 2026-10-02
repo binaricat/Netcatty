@@ -1012,3 +1012,22 @@ test("classifyOpenCodeSpawnError recognizes missing opencode CLI", () => {
   assert.equal(classifyOpenCodeSpawnError(Object.assign(new Error("spawn opencode ENOENT"), { code: "ENOENT" })).isSpawnEnoent, true);
   assert.equal(classifyOpenCodeSpawnError(new Error("other")).isSpawnEnoent, false);
 });
+
+test("listOpenCodeModels rethrows catalog failures instead of silently returning empty", async () => {
+  resetOpenCodeListServerPool();
+  await assert.rejects(
+    listOpenCodeModels({
+      binPath: "/tmp/opencode-error-test",
+      openCodeFactory: async () => ({
+        client: {
+          config: {
+            providers: async () => ({ error: { message: "provider fetch failed" } }),
+          },
+        },
+        server: { close() {} },
+      }),
+    }),
+    /provider fetch failed/,
+  );
+  resetOpenCodeListServerPool();
+});

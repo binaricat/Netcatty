@@ -5,6 +5,7 @@ export const esAiMessages: Messages = {
   'ai.agentSettings': 'Configuración del agente',
   'ai.chat.preparing': 'Preparando…',
   'ai.chat.modelCatalogWarning': 'No se pudo actualizar la lista de modelos. Se muestran los últimos modelos disponibles o los integrados.',
+  'ai.chat.modelCatalogRetry': 'Reintentar',
   'ai.chat.compactingContext': 'Compactando el contexto anterior…',
   'ai.chat.compactingStep': 'Recortando el contexto para el siguiente paso…',
   'ai.chat.compactionRetry': 'La petición era demasiado grande. Compactando el contexto y reintentando…',
