@@ -193,8 +193,13 @@ const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
  * later attempt. That stability check keeps an earlier queued `cd` (still in
  * flight over a slower link) from being published as the result of the latest
  * submission; a probe that never settles publishes its last differing read.
- * A failed probe still resolves to null without retrying, matching the legacy
- * single-read behavior.
+ * If every read within the retry window still equals the baseline, the
+ * submitted command may still be in flight (e.g. `sleep 2 && cd /tmp`), so
+ * the baseline is unconfirmed and the probe publishes null — leaving the cwd
+ * invalid rather than republishing the stale pre-command directory (#3589);
+ * the next command's probe or an OSC 7 report settles it. A failed probe
+ * still resolves to null without retrying, matching the legacy single-read
+ * behavior.
  */
 export const probeBackendSessionCwdAfterCommand = async ({
   sessionId,
@@ -232,7 +237,10 @@ export const probeBackendSessionCwdAfterCommand = async ({
     if (candidate !== null && lastResult === candidate) return lastResult;
     candidate = lastResult;
   }
-  return candidate ?? lastResult;
+  // Reaching here with an unset candidate means every read still matched the
+  // baseline: the executed command has not been observed yet, so publishing
+  // `lastResult` would republish the stale baseline. Leave the cwd invalid.
+  return candidate;
 };
 
 export const scheduleBackendCwdProbeAfterCommand = (
