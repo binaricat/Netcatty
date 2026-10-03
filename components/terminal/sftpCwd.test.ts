@@ -287,6 +287,82 @@ test("probeBackendSessionCwdAfterCommand still probes when cwd path is unchanged
   assert.equal(cwd, "/srv/app");
 });
 
+test("probeBackendSessionCwdAfterCommand retries a stale pre-command read until the pwd changes", async () => {
+  let backendCalls = 0;
+  const cwds = ["/home/user", "/home/user", "/tmp"];
+  const cwd = await probeBackendSessionCwdAfterCommand({
+    sessionId: "session-1",
+    osc7SignalAtCommand: 1,
+    getOsc7Signal: () => 1,
+    getSessionPwd: async () => {
+      backendCalls += 1;
+      return { success: true, cwd: cwds[backendCalls - 1] ?? "/tmp" };
+    },
+    baselineCwd: "/home/user",
+    retryDelayMs: 1,
+  });
+
+  assert.equal(cwd, "/tmp");
+  assert.equal(backendCalls, 3);
+});
+
+test("probeBackendSessionCwdAfterCommand publishes the unchanged baseline after retries are exhausted", async () => {
+  let backendCalls = 0;
+  const cwd = await probeBackendSessionCwdAfterCommand({
+    sessionId: "session-1",
+    osc7SignalAtCommand: 1,
+    getOsc7Signal: () => 1,
+    getSessionPwd: async () => {
+      backendCalls += 1;
+      return { success: true, cwd: "/home/user" };
+    },
+    baselineCwd: "/home/user",
+    retryDelayMs: 1,
+  });
+
+  assert.equal(cwd, "/home/user");
+  assert.equal(backendCalls, 3);
+});
+
+test("probeBackendSessionCwdAfterCommand stops retrying once cancelled", async () => {
+  let backendCalls = 0;
+  const cwd = await probeBackendSessionCwdAfterCommand({
+    sessionId: "session-1",
+    osc7SignalAtCommand: 1,
+    getOsc7Signal: () => 1,
+    getSessionPwd: async () => {
+      backendCalls += 1;
+      return { success: true, cwd: "/home/user" };
+    },
+    baselineCwd: "/home/user",
+    retryDelayMs: 1,
+    isCancelled: () => true,
+  });
+
+  assert.equal(cwd, null);
+  assert.equal(backendCalls, 1);
+});
+
+test("probeBackendSessionCwdAfterCommand stops retrying once OSC 7 reports after command", async () => {
+  let backendCalls = 0;
+  let osc7Signal = 1;
+  const cwd = await probeBackendSessionCwdAfterCommand({
+    sessionId: "session-1",
+    osc7SignalAtCommand: 1,
+    getOsc7Signal: () => osc7Signal,
+    getSessionPwd: async () => {
+      backendCalls += 1;
+      osc7Signal += 1;
+      return { success: true, cwd: "/home/user" };
+    },
+    baselineCwd: "/home/user",
+    retryDelayMs: 1,
+  });
+
+  assert.equal(cwd, null);
+  assert.equal(backendCalls, 1);
+});
+
 test("active-shell cwd resolution trusts an inferred cwd without extra exec", async () => {
   let backendCalls = 0;
   const cwd = await resolvePreferredTerminalCwd({

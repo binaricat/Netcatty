@@ -39,6 +39,8 @@ export type TerminalSessionRuntimeState = {
   terminalOsc7SignalBySessionRef: RuntimeStateRef<number>;
   cwdProbeGenerationRef: RuntimeStateRef<number>;
   cwdProbeCancelersRef: RuntimeStateRef<() => void>;
+  /** Cwd last seen at a command boundary (stashed when invalidated on submit). */
+  cwdBaselineBySessionRef?: RuntimeStateRef<string>;
 };
 
 export function clearTerminalSessionRuntimeState(
@@ -52,6 +54,7 @@ export function clearTerminalSessionRuntimeState(
   state.terminalOsc7SignalBySessionRef.current.delete(sessionId);
   state.terminalRendererCwdBySessionRef.current.delete(sessionId);
   state.terminalRendererCwdSourceBySessionRef?.current.delete(sessionId);
+  state.cwdBaselineBySessionRef?.current.delete(sessionId);
 
   // Keep terminalCwdStore in sync so SFTP follow does not reuse a closed session path.
   terminalCwdStore.setCwd(sessionId, null);
@@ -75,6 +78,7 @@ export function pruneTerminalSessionRuntimeState(
     ...state.terminalOsc7SignalBySessionRef.current.keys(),
     ...state.cwdProbeGenerationRef.current.keys(),
     ...state.cwdProbeCancelersRef.current.keys(),
+    ...(state.cwdBaselineBySessionRef?.current.keys() ?? []),
   ]);
 
   for (const sessionId of trackedSessionIds) {

@@ -132,6 +132,8 @@ export const resolvePreferredTerminalCwd = async ({
 };
 
 export const PROBE_SESSION_CWD_AFTER_COMMAND_MS = 150;
+export const PROBE_SESSION_CWD_RETRY_MS = 250;
+export const PROBE_SESSION_CWD_MAX_ATTEMPTS = 3;
 
 export type ProbeBackendSessionCwdAfterCommandOptions = {
   sessionId: string;
@@ -139,16 +141,27 @@ export type ProbeBackendSessionCwdAfterCommandOptions = {
   getOsc7Signal: () => number;
   getSessionPwd: (sessionId: string, options?: SessionPwdOptions) => Promise<SessionPwdResult>;
   canProbe?: () => boolean | Promise<boolean>;
+  /**
+   * Cwd last observed when the command was submitted. A probe result equal to
+   * it may be a stale read that raced the remote command execution (e.g. `cd`
+   * still in flight over a slower link), so the read is retried briefly before
+   * publishing instead of reporting the pre-command directory (#3588).
+   */
+  baselineCwd?: string | null;
+  maxAttempts?: number;
+  retryDelayMs?: number;
+  /** Abort pending retries, e.g. when the scheduler cancelled the probe. */
+  isCancelled?: () => boolean;
 };
 
-/** Probe backend pwd when OSC 7 did not report after a command. */
-export const probeBackendSessionCwdAfterCommand = async ({
+/** One guarded backend pwd read, without retry logic. */
+const probeBackendSessionPwdOnce = async ({
   sessionId,
   osc7SignalAtCommand,
   getOsc7Signal,
   getSessionPwd,
-  canProbe = () => true,
-}: ProbeBackendSessionCwdAfterCommandOptions): Promise<string | null> => {
+  canProbe,
+}: Pick<ProbeBackendSessionCwdAfterCommandOptions, "sessionId" | "osc7SignalAtCommand" | "getOsc7Signal" | "getSessionPwd" | "canProbe">): Promise<string | null> => {
   if (getOsc7Signal() !== osc7SignalAtCommand) return null;
   const allowed = await canProbe();
   if (!allowed || getOsc7Signal() !== osc7SignalAtCommand) return null;
@@ -168,6 +181,49 @@ export const probeBackendSessionCwdAfterCommand = async ({
   }
 };
 
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Probe backend pwd when OSC 7 did not report after a command.
+ *
+ * Without a `baselineCwd` this performs a single read. With one, it retries a
+ * bounded number of times while the reported pwd still equals the pre-command
+ * baseline — the shell may not have executed the submitted command yet — and
+ * publishes the first result that differs. A failed probe still resolves to
+ * null without retrying, matching the legacy single-read behavior.
+ */
+export const probeBackendSessionCwdAfterCommand = async ({
+  sessionId,
+  osc7SignalAtCommand,
+  getOsc7Signal,
+  getSessionPwd,
+  canProbe = () => true,
+  baselineCwd,
+  maxAttempts = baselineCwd ? PROBE_SESSION_CWD_MAX_ATTEMPTS : 1,
+  retryDelayMs = PROBE_SESSION_CWD_RETRY_MS,
+  isCancelled = () => false,
+}: ProbeBackendSessionCwdAfterCommandOptions): Promise<string | null> => {
+  let lastResult: string | null = null;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    if (attempt > 0) {
+      if (isCancelled() || getOsc7Signal() !== osc7SignalAtCommand) return null;
+      await sleep(retryDelayMs);
+      if (isCancelled() || getOsc7Signal() !== osc7SignalAtCommand) return null;
+    }
+    lastResult = await probeBackendSessionPwdOnce({
+      sessionId,
+      osc7SignalAtCommand,
+      getOsc7Signal,
+      getSessionPwd,
+      canProbe,
+    });
+    if (isCancelled()) return null;
+    if (lastResult === null) return lastResult;
+    if (!baselineCwd || lastResult !== baselineCwd) return lastResult;
+  }
+  return lastResult;
+};
+
 export const scheduleBackendCwdProbeAfterCommand = (
   options: ProbeBackendSessionCwdAfterCommandOptions & {
     onProbedCwd: (cwd: string) => void;
@@ -175,10 +231,18 @@ export const scheduleBackendCwdProbeAfterCommand = (
   },
 ): (() => void) => {
   const delayMs = options.delayMs ?? PROBE_SESSION_CWD_AFTER_COMMAND_MS;
+  let cancelled = false;
   const timeoutId = setTimeout(() => {
-    void probeBackendSessionCwdAfterCommand(options).then((cwd) => {
+    void probeBackendSessionCwdAfterCommand({
+      ...options,
+      isCancelled: () => cancelled,
+    }).then((cwd) => {
+      if (cancelled) return;
       if (cwd) options.onProbedCwd(cwd);
     });
   }, delayMs);
-  return () => clearTimeout(timeoutId);
+  return () => {
+    cancelled = true;
+    clearTimeout(timeoutId);
+  };
 };

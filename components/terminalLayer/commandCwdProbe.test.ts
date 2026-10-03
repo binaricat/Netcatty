@@ -1,7 +1,28 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { shouldProbeCommandCwd } from "./commandCwdProbe";
+import { commandMayChangeCwd, shouldProbeCommandCwd } from "./commandCwdProbe";
+
+test("commandMayChangeCwd detects cd-style commands across segments", () => {
+  assert.equal(commandMayChangeCwd("cd /tmp"), true);
+  assert.equal(commandMayChangeCwd("cd"), true);
+  assert.equal(commandMayChangeCwd("cd -"), true);
+  assert.equal(commandMayChangeCwd("pushd /var/log"), true);
+  assert.equal(commandMayChangeCwd("popd"), true);
+  assert.equal(commandMayChangeCwd("ls && cd /tmp"), true);
+  assert.equal(commandMayChangeCwd("pwd; cd /tmp; ls"), true);
+  assert.equal(commandMayChangeCwd("  cd /tmp  "), true);
+});
+
+test("commandMayChangeCwd rejects non-cd commands and cd lookalikes", () => {
+  assert.equal(commandMayChangeCwd("ls -la"), false);
+  assert.equal(commandMayChangeCwd("ls | grep build"), false);
+  assert.equal(commandMayChangeCwd("echo cd /tmp"), false);
+  assert.equal(commandMayChangeCwd("cdrepo update"), false);
+  assert.equal(commandMayChangeCwd("rm -rf /tmp/build"), false);
+  assert.equal(commandMayChangeCwd(""), false);
+  assert.equal(commandMayChangeCwd(null), false);
+});
 
 test("probes command cwd for session restore even when the SFTP panel is not visible", () => {
   assert.equal(

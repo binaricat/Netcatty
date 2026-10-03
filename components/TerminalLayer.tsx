@@ -111,7 +111,7 @@ import {
   DEFAULT_TERMINAL_SIDE_PANEL_AUTO_OPEN_TAB,
   resolveSessionSidePanelAutoOpen,
 } from '../domain/terminalSidePanelAutoOpen';
-import { shouldProbeCommandCwd } from './terminalLayer/commandCwdProbe';
+import { commandMayChangeCwd, shouldProbeCommandCwd } from './terminalLayer/commandCwdProbe';
 import {
   resolvePreferredTerminalCwd,
   scheduleBackendCwdProbeAfterCommand,
@@ -342,6 +342,8 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   const terminalOsc7SignalBySessionRef = useRef<Map<string, number>>(new Map());
   const cwdProbeCancelersRef = useRef<Map<string, () => void>>(new Map());
   const cwdProbeGenerationRef = useRef<Map<string, number>>(new Map());
+  // Cwd last seen at a command boundary (invalidated to null on submit).
+  const cwdBaselineBySessionRef = useRef<Map<string, string>>(new Map());
 
   useEffect(() => {
     const liveSessionIds = new Set(sessions.map((session) => session.id));
@@ -351,6 +353,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       terminalOsc7SignalBySessionRef,
       cwdProbeGenerationRef,
       cwdProbeCancelersRef,
+      cwdBaselineBySessionRef,
     }, liveSessionIds);
     terminalCwdStore.prune(liveSessionIds);
   }, [sessions]);
@@ -394,7 +397,15 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     if (nextCwd) {
       terminalRendererCwdBySessionRef.current.set(sessionId, nextCwd);
       terminalRendererCwdSourceBySessionRef.current.set(sessionId, nextCwdSource);
+      // A freshly published cwd supersedes any command-boundary baseline.
+      cwdBaselineBySessionRef.current.delete(sessionId);
     } else {
+      if (currentCwd) {
+        // The cwd was just invalidated for a submitted command; remember it as
+        // the pre-command baseline so the post-command pwd probe can tell a
+        // stale pre-command read apart from the executed result (#3588).
+        cwdBaselineBySessionRef.current.set(sessionId, currentCwd);
+      }
       terminalRendererCwdBySessionRef.current.delete(sessionId);
       terminalRendererCwdSourceBySessionRef.current.delete(sessionId);
     }
@@ -444,6 +455,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       terminalOsc7SignalBySessionRef,
       cwdProbeGenerationRef,
       cwdProbeCancelersRef,
+      cwdBaselineBySessionRef,
     }, sessionId);
     codingCliSignalController.forgetSession(sessionId);
     sessionCapabilitiesStore.delete(sessionId);
@@ -1354,6 +1366,11 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       sessionId,
       osc7SignalAtCommand,
       getOsc7Signal: () => terminalOsc7SignalBySessionRef.current.get(sessionId) ?? 0,
+      // Only cd-style commands move the shell pwd, so only those guard against
+      // a stale pre-command read; other commands publish immediately.
+      baselineCwd: commandMayChangeCwd(command)
+        ? cwdBaselineBySessionRef.current.get(sessionId) ?? null
+        : null,
       getSessionPwd: (id, options) => terminalBackend.getSessionPwd(id, options),
       canProbe: async () => {
         if (cwdProbeGenerationRef.current.get(sessionId) !== probeGeneration) return false;
@@ -1390,6 +1407,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       terminalOsc7SignalBySessionRef,
       cwdProbeGenerationRef,
       cwdProbeCancelersRef,
+      cwdBaselineBySessionRef,
     }, new Set());
   }, []);
   const sessionSudoAutofillPasswordsMap = useMemo(() => {
