@@ -287,6 +287,65 @@ test("probeBackendSessionCwdAfterCommand still probes when cwd path is unchanged
   assert.equal(cwd, "/srv/app");
 });
 
+test("probeBackendSessionCwdAfterCommand keeps retrying past an intermediate queued cwd until it stabilizes", async () => {
+  // Queued submissions without OSC 7: the second `cd` still holds the original
+  // baseline, so observing the intermediate `/one` must not be published right
+  // away — only a read that repeats is treated as the settled result.
+  let backendCalls = 0;
+  const cwds = ["/one", "/two", "/two"];
+  const cwd = await probeBackendSessionCwdAfterCommand({
+    sessionId: "session-1",
+    osc7SignalAtCommand: 1,
+    getOsc7Signal: () => 1,
+    getSessionPwd: async () => {
+      backendCalls += 1;
+      return { success: true, cwd: cwds[backendCalls - 1] ?? "/two" };
+    },
+    baselineCwd: "/start",
+    retryDelayMs: 1,
+  });
+
+  assert.equal(cwd, "/two");
+  assert.equal(backendCalls, 3);
+});
+
+test("probeBackendSessionCwdAfterCommand publishes its last differing read when retries are exhausted mid-transition", async () => {
+  let backendCalls = 0;
+  const cwds = ["/one", "/two", "/three", "/three"];
+  const cwd = await probeBackendSessionCwdAfterCommand({
+    sessionId: "session-1",
+    osc7SignalAtCommand: 1,
+    getOsc7Signal: () => 1,
+    getSessionPwd: async () => {
+      backendCalls += 1;
+      return { success: true, cwd: cwds[backendCalls - 1] ?? "/three" };
+    },
+    baselineCwd: "/start",
+    maxAttempts: 3,
+    retryDelayMs: 1,
+  });
+
+  assert.equal(cwd, "/three");
+  assert.equal(backendCalls, 3);
+});
+
+test("probeBackendSessionCwdAfterCommand publishes a differing read without a baseline", async () => {
+  let backendCalls = 0;
+  const cwd = await probeBackendSessionCwdAfterCommand({
+    sessionId: "session-1",
+    osc7SignalAtCommand: 1,
+    getOsc7Signal: () => 1,
+    getSessionPwd: async () => {
+      backendCalls += 1;
+      return { success: true, cwd: "/tmp" };
+    },
+    retryDelayMs: 1,
+  });
+
+  assert.equal(cwd, "/tmp");
+  assert.equal(backendCalls, 1);
+});
+
 test("probeBackendSessionCwdAfterCommand retries a stale pre-command read until the pwd changes", async () => {
   let backendCalls = 0;
   const cwds = ["/home/user", "/home/user", "/tmp"];

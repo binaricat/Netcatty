@@ -189,8 +189,12 @@ const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
  * Without a `baselineCwd` this performs a single read. With one, it retries a
  * bounded number of times while the reported pwd still equals the pre-command
  * baseline — the shell may not have executed the submitted command yet — and
- * publishes the first result that differs. A failed probe still resolves to
- * null without retrying, matching the legacy single-read behavior.
+ * publishes the first read that differs from the baseline *and* repeats on a
+ * later attempt. That stability check keeps an earlier queued `cd` (still in
+ * flight over a slower link) from being published as the result of the latest
+ * submission; a probe that never settles publishes its last differing read.
+ * A failed probe still resolves to null without retrying, matching the legacy
+ * single-read behavior.
  */
 export const probeBackendSessionCwdAfterCommand = async ({
   sessionId,
@@ -204,6 +208,10 @@ export const probeBackendSessionCwdAfterCommand = async ({
   isCancelled = () => false,
 }: ProbeBackendSessionCwdAfterCommandOptions): Promise<string | null> => {
   let lastResult: string | null = null;
+  // Most recent read that differed from the baseline. It is only trustworthy
+  // as the executed result once a later read repeats it — the first differing
+  // read may belong to an earlier queued cwd command that is still in flight.
+  let candidate: string | null = null;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     if (attempt > 0) {
       if (isCancelled() || getOsc7Signal() !== osc7SignalAtCommand) return null;
@@ -219,9 +227,12 @@ export const probeBackendSessionCwdAfterCommand = async ({
     });
     if (isCancelled()) return null;
     if (lastResult === null) return lastResult;
-    if (!baselineCwd || lastResult !== baselineCwd) return lastResult;
+    if (!baselineCwd) return lastResult;
+    if (lastResult === baselineCwd) continue;
+    if (candidate !== null && lastResult === candidate) return lastResult;
+    candidate = lastResult;
   }
-  return lastResult;
+  return candidate ?? lastResult;
 };
 
 export const scheduleBackendCwdProbeAfterCommand = (
