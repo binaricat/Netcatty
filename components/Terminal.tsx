@@ -40,6 +40,7 @@ import {
   type TerminalEncodingAttachConnection,
 } from "../domain/terminalEncodingPreference";
 import { resolveRestoreCwdIntent, resolveInheritedCwdIntent } from "../domain/sessionRestore";
+import { formatSessionClosedExitMessage } from "../application/state/resolveTerminalSessionExitIntent";
 import {
   buildTerminalContextReadResult,
   buildTerminalContextSnapshotText,
@@ -2066,7 +2067,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       if (evt.error) {
         setError(evt.error);
       }
-      const exitMessage = `\r\n[session closed${evt?.exitCode !== undefined ? ` (code ${evt.exitCode})` : ""}]`;
+      const exitMessage = formatSessionClosedExitMessage(evt);
       hibernatePendingBufferRef.current = hibernatePendingCapDisabledRef.current
         ? hibernatePendingBufferRef.current + exitMessage
         : appendHibernatePendingBuffer(

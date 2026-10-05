@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  formatSessionClosedExitMessage,
   resolveTerminalSessionExitIntent,
   shouldCloseTerminalPopupOnExit,
   shouldRevealTerminalPopupOnExit,
@@ -119,4 +120,33 @@ test("attached terminal popups keep their existing auto-close behavior by defaul
     ),
     true,
   );
+});
+
+test("exit messages show the reported code for a real remote exit", () => {
+  assert.equal(
+    formatSessionClosedExitMessage({ reason: "exited", exitCode: 0 }),
+    "\r\n[session closed (code 0)]",
+  );
+  assert.equal(
+    formatSessionClosedExitMessage({ reason: "exited", exitCode: 127 }),
+    "\r\n[session closed (code 127)]",
+  );
+});
+
+test("a channel closed without exit-status or exit-signal must not render as code 0", () => {
+  assert.equal(
+    formatSessionClosedExitMessage({
+      reason: "closed",
+      remoteClosedWithoutExitStatus: true,
+    }),
+    "\r\n[session closed by remote (no exit status)]",
+  );
+});
+
+test("exit messages without a reported code stay plain instead of showing a sentinel", () => {
+  assert.equal(
+    formatSessionClosedExitMessage({ reason: "closed" }),
+    "\r\n[session closed]",
+  );
+  assert.equal(formatSessionClosedExitMessage({}), "\r\n[session closed]");
 });

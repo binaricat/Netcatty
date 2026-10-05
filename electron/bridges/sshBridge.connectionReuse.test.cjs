@@ -2318,3 +2318,104 @@ test("single-channel Copy Tab dials separately and keeps the original shell", as
   assert.notEqual(sessions.get("copy").conn, sourceConn);
   assert.equal(sessions.get("source").conn, sourceConn);
 });
+
+function waitForExitDeliveries() {
+  // finalizeClose runs after the paced output buffer flushes on the next
+  // event-loop turns; give both queue turns and timers a chance to run.
+  return new Promise((resolve) => setTimeout(resolve, 50));
+}
+
+function getExitPayloads(sender) {
+  return sender.sent
+    .filter((m) => m.channel === "netcatty:exit")
+    .map((m) => m.payload);
+}
+
+test("a channel closed without exit-status or exit-signal reports no exit code (#3591)", async (t) => {
+  const { bridge } = loadBridgeWithMockedSsh2(t, { connectReady: true });
+  const sessions = new Map();
+  const start = registerStartHandler(bridge, sessions);
+  const sender = makeSender();
+  const options = {
+    hostname: "bastion.example",
+    username: "alice",
+    port: 22,
+    authMethod: "password",
+    password: "secret",
+    useSshAgent: false,
+    verifyHostKeys: false,
+  };
+
+  await start({ sender }, { ...options, sessionId: "no-status-close" });
+  const stream = sessions.get("no-status-close").stream;
+
+  // Bastions/gateways built on stacks like golang.org/x/crypto/ssh close the
+  // session channel without ever sending exit-status or exit-signal, so ssh2
+  // never emits stream "exit".
+  stream.emit("close");
+  await waitForExitDeliveries();
+
+  const exits = getExitPayloads(sender);
+  assert.equal(exits.length, 1);
+  assert.equal(exits[0].reason, "closed");
+  assert.equal(exits[0].exitCode, undefined, "the sentinel 0 must not be reported as a real exit code");
+  assert.equal(exits[0].remoteClosedWithoutExitStatus, true);
+});
+
+test("a real exit-status still reports its numeric exit code", async (t) => {
+  const { bridge } = loadBridgeWithMockedSsh2(t, { connectReady: true });
+  const sessions = new Map();
+  const start = registerStartHandler(bridge, sessions);
+  const sender = makeSender();
+  const options = {
+    hostname: "10.0.0.50",
+    username: "alice",
+    port: 22,
+    authMethod: "password",
+    password: "secret",
+    useSshAgent: false,
+    verifyHostKeys: false,
+  };
+
+  await start({ sender }, { ...options, sessionId: "clean-exit" });
+  const stream = sessions.get("clean-exit").stream;
+
+  stream.emit("exit", 0);
+  stream.emit("close");
+  await waitForExitDeliveries();
+
+  const exits = getExitPayloads(sender);
+  assert.equal(exits.length, 1);
+  assert.equal(exits[0].reason, "exited");
+  assert.equal(exits[0].exitCode, 0);
+  assert.equal(exits[0].remoteClosedWithoutExitStatus, undefined);
+});
+
+test("an exit-signal with no code does not fabricate an exit code 0", async (t) => {
+  const { bridge } = loadBridgeWithMockedSsh2(t, { connectReady: true });
+  const sessions = new Map();
+  const start = registerStartHandler(bridge, sessions);
+  const sender = makeSender();
+  const options = {
+    hostname: "10.0.0.50",
+    username: "alice",
+    port: 22,
+    authMethod: "password",
+    password: "secret",
+    useSshAgent: false,
+    verifyHostKeys: false,
+  };
+
+  await start({ sender }, { ...options, sessionId: "signal-exit" });
+  const stream = sessions.get("signal-exit").stream;
+
+  stream.emit("exit", undefined, "SIGUSR2");
+  stream.emit("close");
+  await waitForExitDeliveries();
+
+  const exits = getExitPayloads(sender);
+  assert.equal(exits.length, 1);
+  assert.equal(exits[0].reason, "closed");
+  assert.equal(exits[0].exitCode, undefined);
+  assert.equal(exits[0].remoteClosedWithoutExitStatus, undefined, "the remote did report a signal");
+});

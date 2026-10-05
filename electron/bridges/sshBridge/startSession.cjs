@@ -611,12 +611,18 @@ function createStartSessionApi(ctx) {
       // Only treat it as user-initiated exit if "exit" fired with a numeric
       // code and no signal. Signal terminations (e.g. server kill, idle
       // timeout) have code=null and signal set — those are not user exits.
-      let streamExitCode = 0;
+      // A third case exists: a remote that closes the channel without sending
+      // exit-status or exit-signal never fires "exit" at all (#3591). The
+      // initial values below stay null in that case and must not be reported
+      // as a real "code 0" — that reads like a clean, user-typed `exit`.
+      let streamExitCode = null;
+      let streamExitSignal = null;
       let streamExited = false;
       stream.on("exit", (code, signal) => {
         log("shell exit", { sessionId, hostname: options.hostname, code, signal, reused: !!isReused });
-        streamExitCode = typeof code === "number" ? code : 0;
-        streamExited = typeof code === "number" && !signal;
+        streamExitCode = typeof code === "number" ? code : null;
+        streamExitSignal = typeof signal === "string" && signal ? signal : null;
+        streamExited = typeof code === "number" && !streamExitSignal;
       });
 
       let closeFinalized = false;
@@ -663,12 +669,21 @@ function createStartSessionApi(ctx) {
               // for reconnect instead of auto-closing it (#1062 / #977).
               const idleTimedOut = streamExited && looksLikeIdleAutoLogout(liveSession?._promptTrackTail);
               const reason = idleTimedOut ? "timeout" : (streamExited ? "exited" : "closed");
-              safeSendSessionExit({ safeSend, electronModule, sessions }, contents, sessionId, {
+              const exitPayload = {
                 sessionId,
-                exitCode: streamExitCode,
                 reason,
                 _terminalSessionGeneration: liveSession?._terminalSessionGeneration,
-              });
+              };
+              // Report only exit facts the remote actually sent (#3591). When
+              // the peer closed the channel without exit-status/exit-signal,
+              // there is no code to show — flag it instead so the renderer can
+              // distinguish an abnormal teardown from a user-typed `exit 0`.
+              if (typeof streamExitCode === "number") {
+                exitPayload.exitCode = streamExitCode;
+              } else if (streamExitSignal === null) {
+                exitPayload.remoteClosedWithoutExitStatus = true;
+              }
+              safeSendSessionExit({ safeSend, electronModule, sessions }, contents, sessionId, exitPayload);
             }
             liveSession?.zmodemSentry?.cancel();
             // Release this channel's hold on the shared connection. The transport

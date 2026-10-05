@@ -2,7 +2,7 @@ import type { Terminal as XTerm } from "@xterm/xterm";
 import type { ProviderValidationIssue } from "@netcatty/plugin-contract";
 import { logger } from "../../../lib/logger";
 import type { Host, Identity, SSHKey } from "../../../types";
-import type { TerminalSessionExitEvent } from "../../../application/state/resolveTerminalSessionExitIntent";
+import { type TerminalSessionExitEvent, formatSessionClosedExitMessage } from "../../../application/state/resolveTerminalSessionExitIntent";
 import { setTerminalBootEpoch } from "../../../domain/terminalBootEpoch";
 import type { TerminalSessionStartersContext } from "./createTerminalSessionStarters.types";
 export type {
@@ -820,8 +820,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
         isCurrentAttempt,
         bootEpoch,
         onConnected: () => ctx.setChainProgress(null),
-        onExitMessage: (evt) =>
-          `\r\n[session closed${evt?.exitCode !== undefined ? ` (code ${evt.exitCode})` : ""}]`,
+        onExitMessage: formatSessionClosedExitMessage,
         sudoAutofillPassword: resolveSavedSudoAutofillPassword(),
         sudoAutofillCandidates: resolveSudoAutofillCandidates(),
       })) {
