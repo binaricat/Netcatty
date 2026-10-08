@@ -690,7 +690,7 @@ test("copyFileExclusiveWithFallback flags a stream-open EEXIST so callers skip i
   );
 });
 
-test("copyFileExclusiveWithFallback cleans its own copyFile leftover and streams when the accelerated self-cleanup fails", async (t) => {
+test("copyFileExclusiveWithFallback leaves a possible copyFile partial in place and fails closed", async (t) => {
   const dir = makeTempDir("copy-fallback-leftover-");
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const source = path.join(dir, "staged");
@@ -700,20 +700,32 @@ test("copyFileExclusiveWithFallback cleans its own copyFile leftover and streams
   const copyRestore = stubPromises("copyFile", async () => {
     // libuv creates the destination before the accelerated copy syscall and
     // unlinks it again when the copy refuses to run; that removal is
-    // best-effort, and a failing unlink leaves this helper's own
-    // source-prefix partial behind the pathname. The fallback must clean
-    // that verified leftover (it is not a concurrent writer's file) and
-    // still stream, instead of failing relinquished and leaking the partial.
+    // best-effort, and a failing unlink leaves a source-prefix partial
+    // behind the pathname. An entry observed only after the failed syscall
+    // could equally be a concurrent writer's file created in the window
+    // between libuv's removal and the observation, and no content
+    // comparison can prove ownership, so the fallback must not unlink it:
+    // it fails closed with a relinquished EEXIST (leaking the rare partial)
+    // instead of destroying a concurrent writer's file.
     fs.writeFileSync(target, payload.subarray(0, 1024));
     throw Object.assign(new Error("ENOTSUP: operation not supported on socket, copyfile"), { code: "ENOTSUP" });
   });
   t.after(copyRestore);
-  await copyFileExclusiveWithFallback(source, target, 0o640);
-  assert.ok(
-    fs.readFileSync(target).equals(payload),
-    "the stream fallback completes after the verified leftover partial is cleaned",
+  let error = null;
+  try {
+    await copyFileExclusiveWithFallback(source, target, 0o640);
+  } catch (thrown) {
+    error = thrown;
+  }
+  assert.equal(
+    error?.code === "EEXIST" && error.targetOwnershipRelinquished === true,
+    true,
+    "an unverifiable entry behind the exclusive open fails closed like a foreign file",
   );
-  assert.equal(fs.statSync(target).mode & 0o7777, 0o640, "the retried stream open still carries the creation mode");
+  assert.ok(
+    fs.readFileSync(target).equals(payload.subarray(0, 1024)),
+    "the entry behind the pathname is never removed by this module",
+  );
 });
 
 test("copyFileExclusiveWithFallback marks a relinquished target when a failing copy loop raced a replacement", async (t) => {
