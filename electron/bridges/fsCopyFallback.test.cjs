@@ -691,7 +691,7 @@ test("copyFileExclusiveWithFallback marks a relinquished target when a failing c
   );
 });
 
-test("copyFileExclusiveWithFallback keeps failure cleanup available when a failing copy loop still owns the target", async (t) => {
+test("copyFileExclusiveWithFallback cleans a still-owned partial via a verified side name when its copy loop fails", async (t) => {
   const dir = makeTempDir("copy-fallback-loop-owned-");
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const source = path.join(dir, "staged");
@@ -700,8 +700,11 @@ test("copyFileExclusiveWithFallback keeps failure cleanup available when a faili
   const copyRestore = stubPromises("copyFile", enotsupCopyFile());
   t.after(copyRestore);
   // The copy fails but the pathname was never replaced: the partial copy is
-  // still this module's inode, so the error must NOT carry the handover mark
-  // and the caller's cleanup may unlink its own partial destination.
+  // still this module's inode, so the failure cleanup relabels the pathname
+  // to a private side name and unlinks it only after the side name is
+  // verified to be the pinned inode. The handover mark stays set so the
+  // caller's cleanup never re-unlinks the pathname, which a concurrent
+  // writer could have re-created between this module's cleanup and theirs.
   const openOriginal = fs.promises.open;
   const openRestore = stubPromises("open", async (...args) => {
     const handle = await openOriginal.apply(fs.promises, args);
@@ -722,7 +725,13 @@ test("copyFileExclusiveWithFallback keeps failure cleanup available when a faili
     error = thrown;
   }
   assert.equal(error?.code, "EIO", "the underlying copy failure code is preserved");
-  assert.equal(error.targetOwnershipRelinquished, undefined, "a still-owned partial copy stays caller-cleanable");
+  assert.equal(error.targetOwnershipRelinquished, true, "the caller's cleanup never unlinks the pathname after the relabel");
+  assert.equal(fs.existsSync(target), false, "the module's own verified partial copy is removed via the private side name");
+  assert.equal(
+    fs.readdirSync(dir).filter((name) => name.includes(".stale-")).length,
+    0,
+    "no relabelled side name is left behind for a still-owned partial",
+  );
 });
 
 test("promoteLocalTransfer preserves a ready pathname whose ownership the fallback relinquished", async (t) => {

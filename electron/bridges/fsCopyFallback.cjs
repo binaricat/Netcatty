@@ -58,7 +58,7 @@ function identityChangedError(target) {
 // after the change the pathname is re-verified (a replacement could have won
 // the name while the metadata change was in flight). A copy too restrictive
 // to open for reading must still regain its intended mode, so that case
-// chmods through the pathname — but because a pathname chmod cannot be pinned
+// chmods through the pathname, but because a pathname chmod cannot be pinned
 // to the copied inode, the name is re-verified once more *before* the mode
 // change, so a pathname that already changed hands fails closed without
 // mutating the replacement's permissions (the post-change revalidation below
@@ -76,7 +76,7 @@ async function chmodOnCopiedFile(target, mode, copiedIdentity) {
     // through the pathname. Since a pathname chmod cannot be pinned to the
     // copied inode, first confirm the name still resolves to the copy the
     // mode was meant for and fail closed without touching the file if it does
-    // not — a pathname chmod on a concurrent replacement would mutate that
+    // not: a pathname chmod on a concurrent replacement would mutate that
     // replacement's permissions, which nothing could undo afterwards.
     let preChmodIdentity = null;
     try {
@@ -303,26 +303,80 @@ async function copyFileExclusiveWithFallback(source, target, mode = null, option
         copied = await copyLoop(readHandle, writeHandle);
       } catch (copyError) {
         // A rejected copy loop bypasses the post-copy revalidation entirely,
-        // so revalidate the pathname here: if the name changed hands while
-        // the copy was being streamed (a concurrent writer's replacement won
-        // the pathname while the partial write was still open), the caller's
-        // error cleanup would otherwise unlink it and destroy that writer's
-        // only visible file — mark the handover so the cleanup leaves it in
-        // place. When the pathname still resolves to the inode this module
-        // created, the partial data is ours and the caller may clean it up
-        // like fs.copyFile's own partial destination.
-        let replacedIdentity = null;
+        // so the partial destination's ownership cannot simply be decided by
+        // a check-then-throw: the caller's error cleanup unlinks the pathname,
+        // and a concurrent replacement can win the name between this check
+        // and that unlink, so a verified check does not tie the cleanup to
+        // the inode. Cleanup is relabel-then-verify instead (the same pattern
+        // as the mode-fallback path above): rename moves whatever currently
+        // owns the pathname to a private side name without deleting anything,
+        // and only an inode verifiably equal to the one this module created is
+        // unlinked from that side name (a name no concurrent writer can race
+        // it on). Anything else is relinked back (or left aside untouched,
+        // never destroyed) and the handover is marked so the caller's cleanup
+        // leaves the pathname alone.
+        const stalePath = `${target}.stale-${crypto.randomUUID().replace(/-/g, "")}`;
+        let moved = false;
+        let relabelError = null;
         try {
-          const replacedStat = await fs.promises.lstat(target);
-          replacedIdentity = `${replacedStat.dev}:${replacedStat.ino}`;
-        } catch { replacedIdentity = null; }
-        if (replacedIdentity !== heldIdentity) {
+          await fs.promises.rename(target, stalePath);
+          moved = true;
+        } catch (relabelFailure) {
+          // ENOENT: the partial destination is already gone, so there is
+          // nothing left to clean. Any other failure leaves ownership
+          // unverified; fail closed by marking the handover so the caller
+          // never unlinks a name this module could not verify (any leftover
+          // partial is disclosed by the caller's recovery reporting).
+          if (relabelFailure?.code !== "ENOENT") relabelError = relabelFailure;
+        }
+        let staleIdentity = null;
+        if (moved) {
+          try {
+            const staleStat = await fs.promises.lstat(stalePath);
+            staleIdentity = `${staleStat.dev}:${staleStat.ino}`;
+          } catch { staleIdentity = null; }
+        }
+        if (moved && heldIdentity !== null && staleIdentity === heldIdentity) {
+          // The side name verifiably holds this module's partial inode still
+          // referenced through the pinned write handle; unlink it from the
+          // private side name, which a concurrent writer cannot race because
+          // only this relabel knows the name.
+          await fs.promises.unlink(stalePath).catch(() => {});
+          // The pathname itself has already been cleaned through the verified
+          // side name, but a replacement could re-create it before the
+          // caller's cleanup runs: still mark the handover so that unlink
+          // never destroys a re-created foreign file.
+          throw Object.assign(copyError, { targetOwnershipRelinquished: true });
+        }
+        if (moved) {
+          // The relabelled side name holds a foreign replacement: put it back
+          // without clobbering whoever re-created the pathname (a failed
+          // restore leaves the verified data aside, never deleted).
+          let restoreError = null;
+          try {
+            await fs.promises.link(stalePath, target);
+          } catch (linkError) {
+            // EEXIST means the pathname was already re-created by a newer
+            // writer and their name wins; keep the verified data aside.
+            if (linkError?.code !== "EEXIST") restoreError = linkError;
+          }
           throw Object.assign(
             new Error(`EEXIST: file exists, ${target} changed hands while the fallback stream was copying`),
-            { code: copyError?.code, cause: copyError, targetOwnershipRelinquished: true },
+            {
+              code: copyError?.code,
+              cause: restoreError ?? copyError,
+              stalePath,
+              targetOwnershipRelinquished: true,
+            },
           );
         }
-        throw copyError;
+        // Nothing was relabelled (renamed away) or the relabel could not be
+        // verified: in both cases the caller must not unlink the pathname, so
+        // the handover is marked either way.
+        throw Object.assign(copyError, {
+          targetOwnershipRelinquished: true,
+          ...(relabelError ? { cause: relabelError } : {}),
+        });
       }
     } finally {
       await writeHandle?.close().catch(() => {});
