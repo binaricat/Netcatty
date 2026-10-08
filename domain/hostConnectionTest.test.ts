@@ -1,7 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { buildHostConnectionTestPlan, formatConnectionTestProgressLog } from "./hostConnectionTest";
+import {
+  buildHostConnectionTestPlan,
+  formatConnectionTestProgressLog,
+  resolveHostConnectionTestDeadlineMs,
+} from "./hostConnectionTest";
 import type { Host, SSHKey } from "./models";
 
 const host = (overrides: Partial<Host> = {}): Host => ({
@@ -189,4 +193,29 @@ test("formats jump-host progress log lines with a hop prefix", () => {
     formatConnectionTestProgressLog({ hop: 2, total: 2, label: "target.example.test", phase: "error", error: "boom" }),
     "[2/2] target.example.test - Error: boom",
   );
+});
+
+test("test deadline follows the probe timeouts, not the host's terminal timeouts", () => {
+  const plan = buildHostConnectionTestPlan({
+    ...base,
+    host: host({ password: "secret", sshTcpConnectTimeoutSeconds: 3, sshAuthReadyTimeoutSeconds: 5 }),
+  });
+  assert.equal(plan.ok, true);
+  if (!plan.ok) return;
+
+  // 8s TCP + 15s auth sent to the bridge, plus grace — never the host's 5s.
+  assert.equal(resolveHostConnectionTestDeadlineMs(plan.options), 8000 + 15000 + 2000);
+});
+
+test("test deadline adds every jump hop's dial and auth timeouts", () => {
+  const deadline = resolveHostConnectionTestDeadlineMs({
+    sshTcpConnectTimeoutMs: 8000,
+    sshAuthReadyTimeoutMs: 15000,
+    jumpHosts: [
+      { sshTcpConnectTimeoutMs: 20000, sshAuthReadyTimeoutMs: 120000 },
+      { sshTcpConnectTimeoutMs: 1000, sshAuthReadyTimeoutMs: 2000 },
+    ],
+  });
+
+  assert.equal(deadline, 8000 + 15000 + 20000 + 120000 + 1000 + 2000 + 2000);
 });

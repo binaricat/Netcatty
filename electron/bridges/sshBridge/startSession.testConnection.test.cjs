@@ -13,7 +13,7 @@ const MUTED_CONSOLE = {
   info() {},
 };
 
-function createHarness({ onConnect, chainDial } = {}) {
+function createHarness({ onConnect, chainDial, ctxOverrides } = {}) {
   const sent = [];
   const calls = {
     connectOptions: null,
@@ -90,6 +90,7 @@ function createHarness({ onConnect, chainDial } = {}) {
     closeTerminalOutputSession: () => {},
     sessionEncodings: new Map(),
     sessionDecoders: new Map(),
+    ...(ctxOverrides || {}),
   };
 
   const api = createStartSessionApi(ctx);
@@ -277,4 +278,95 @@ test("test mode pins authHandler to a minimal method list", async () => {
   await api.startSSHSession({ sender }, baseOptions());
 
   assert.deepEqual(calls.connectOptions.authHandler, ["password", "keyboard-interactive"]);
+});
+
+function keyOnlyHarness() {
+  return createHarness({
+    onConnect: (conn) => {
+      queueMicrotask(() => conn.emit("ready"));
+    },
+    ctxOverrides: {
+      isPasswordProvided: (value) => typeof value === "string" && value.length > 0,
+      preparePrivateKeyForAuth: async ({ privateKey }) => ({ privateKey }),
+    },
+  });
+}
+
+function keyOnlyOptions(extra = {}) {
+  const { password: _password, ...rest } = baseOptions();
+  return { ...rest, authMethod: "key", privateKey: "PRIVATE KEY", ...extra };
+}
+
+test("test mode includes keyboard-interactive for key-only MFA hosts", async () => {
+  const { api, calls, sender } = keyOnlyHarness();
+
+  await api.startSSHSession({ sender }, keyOnlyOptions({ requiresMfa: true }));
+
+  assert.deepEqual(calls.connectOptions.authHandler, ["publickey", "keyboard-interactive"]);
+});
+
+test("test mode keeps key-only non-MFA hosts on the single key credential", async () => {
+  const { api, calls, sender } = keyOnlyHarness();
+
+  await api.startSSHSession({ sender }, keyOnlyOptions());
+
+  assert.deepEqual(calls.connectOptions.authHandler, ["publickey"]);
+});
+
+test("test mode skips the raw password method for password MFA hosts", async () => {
+  const { api, calls, sender } = createHarness({
+    onConnect: (conn) => {
+      queueMicrotask(() => conn.emit("ready"));
+    },
+  });
+
+  await api.startSSHSession({ sender }, { ...baseOptions(), requiresMfa: true });
+
+  assert.deepEqual(calls.connectOptions.authHandler, ["keyboard-interactive"]);
+});
+
+function jumpOptions(extra = {}) {
+  return {
+    ...baseOptions(),
+    jumpHosts: [
+      { hostname: "jump.example.test", port: 22, username: "root", authMethod: "password" },
+    ],
+    ...extra,
+  };
+}
+
+function capturingChainDial(captured) {
+  return async (_event, options) => {
+    captured.scope = options._keyboardInteractiveScope;
+    return { socket: new EventEmitter(), connections: [] };
+  };
+}
+
+test("test mode routes jump-host keyboard-interactive prompts through the external scope", async () => {
+  const captured = {};
+  const { api, sender } = createHarness({
+    chainDial: capturingChainDial(captured),
+    onConnect: (conn) => {
+      queueMicrotask(() => conn.emit("ready"));
+    },
+  });
+
+  await api.startSSHSession({ sender }, jumpOptions());
+
+  assert.equal(captured.scope, "external");
+});
+
+test("terminal starts keep the default terminal scope for jump-host prompts", async () => {
+  const captured = {};
+  const { api, sender } = createHarness({
+    chainDial: capturingChainDial(captured),
+    onConnect: () => {
+      // Terminal path would open a shell next; the chain options are all we need.
+    },
+  });
+
+  void api.startSSHSession({ sender }, jumpOptions({ testMode: false, sessionId: "terminal-session" }));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(captured.scope, undefined);
 });

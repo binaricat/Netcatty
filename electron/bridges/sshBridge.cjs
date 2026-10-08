@@ -1374,8 +1374,12 @@ async function startSSHSessionWrapper(event, options) {
 async function testConnection(event, options) {
   const payload = options && typeof options === "object" ? options : {};
   const sessionId = payload.sessionId || require("node:crypto").randomUUID();
+  // Same macOS Local Network preflight as terminal starts (#2663 / #2673):
+  // trigger the TCC prompt from the main process and carry the resolved
+  // first-hop address so private-LAN / split-DNS failures get annotated.
+  const probeResult = await ensureMacLocalNetworkAccess(payload);
   return startSSHSession(event, {
-    ...payload,
+    ...attachMacLocalNetworkProbeResult(payload, probeResult),
     sessionId,
     testMode: true,
     reuseTransport: false,

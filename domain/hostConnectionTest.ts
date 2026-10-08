@@ -14,6 +14,34 @@ import { resolveEffectiveTerminalHost, resolveTerminalChainHosts } from "./termi
  * terminal's full keep-alive/auth window. */
 const TEST_TCP_CONNECT_TIMEOUT_MS = 8000;
 const TEST_AUTH_READY_TIMEOUT_MS = 15000;
+/** Slack added on top of the bridge timeouts so the main process reports its
+ * own (more specific) timeout error before the renderer safety net fires. */
+const TEST_DEADLINE_GRACE_MS = 2000;
+
+type TimeoutCarrier = {
+  sshTcpConnectTimeoutMs?: number;
+  sshAuthReadyTimeoutMs?: number;
+};
+
+const positiveMs = (value: unknown, fallback: number): number => (
+  typeof value === "number" && Number.isFinite(value) && value > 0 ? value : fallback
+);
+
+/**
+ * Renderer-side deadline for a connection test, derived from the exact
+ * timeouts sent to the bridge (not the edited host's terminal timeouts).
+ * Each hop dials TCP and then waits for auth sequentially, so the worst case
+ * is the sum over every jump host plus the target, plus a small grace.
+ */
+export const resolveHostConnectionTestDeadlineMs = (
+  options: TimeoutCarrier & { jumpHosts?: TimeoutCarrier[] },
+): number => {
+  const hopMs = (hop: TimeoutCarrier) =>
+    positiveMs(hop.sshTcpConnectTimeoutMs, TEST_TCP_CONNECT_TIMEOUT_MS)
+    + positiveMs(hop.sshAuthReadyTimeoutMs, TEST_AUTH_READY_TIMEOUT_MS);
+  const chainMs = (options.jumpHosts ?? []).reduce((sum, hop) => sum + hopMs(hop), 0);
+  return chainMs + hopMs(options) + TEST_DEADLINE_GRACE_MS;
+};
 
 /** Build the human-readable progress log line for one chain-progress event,
  * mirroring the terminal's per-hop "Connecting to … / TCP connected / Key

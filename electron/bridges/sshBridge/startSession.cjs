@@ -2076,6 +2076,13 @@ function createStartSessionApi(ctx) {
             options._tunnelRef = testTransport;
             options._connectionsRef = testTransport.chainConnections;
           }
+          if (testMode) {
+            // A test has no terminal session in the renderer's session list, so
+            // jump-host keyboard-interactive/MFA prompts must use the external
+            // scope (same as the target host below); the terminal scope default
+            // in connectThroughChain would be rejected by the renderer queue.
+            options._keyboardInteractiveScope = "external";
+          }
 
           const chainResult = await connectThroughChain(
             event,
@@ -2637,22 +2644,23 @@ function createStartSessionApi(ctx) {
             // skipping the full agent / ~/.ssh key / method fallback chain.
             // Password credentials still allow keyboard-interactive after
             // "password" so PAM/2FA hosts (which reject the raw "password"
-            // method) are covered without re-prompting the user.
+            // method) are covered without re-prompting the user. Hosts marked
+            // `requiresMfa` always get keyboard-interactive, including key /
+            // certificate-only credentials where the server accepts the key as
+            // the first factor and then asks for an OTP (matching the terminal
+            // auth handler, which always appends keyboard-interactive).
             const order = [];
             if (connectOpts.privateKey) {
               order.push("publickey");
             } else if (connectOpts.agent) {
               order.push("agent");
             }
-            if (connectOpts.password) {
-              if (options.requiresMfa) {
-                order.push("keyboard-interactive");
-              } else {
-                order.push("password");
-                order.push("keyboard-interactive");
-              }
+            if (connectOpts.password && !options.requiresMfa) {
+              order.push("password");
             }
-            if (order.length === 0) order.push("keyboard-interactive");
+            if (connectOpts.password || options.requiresMfa || order.length === 0) {
+              order.push("keyboard-interactive");
+            }
             connectOpts.authHandler = order;
           }
 

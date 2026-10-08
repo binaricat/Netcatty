@@ -3,10 +3,10 @@ import type { GroupConfig, Host, Identity, KnownHost, ProxyProfile, SSHKey, Term
 import type { HostKeyInfo } from "../../domain/hostKey";
 import { toHostKeyInfo } from "../../domain/hostKey";
 import { createKnownHostFromHostKeyInfo } from "../../domain/knownHosts";
-import { resolveHostSshConnectionTimeouts } from "../../domain/sshConnectionTimeouts";
 import {
   buildHostConnectionTestPlan,
   formatConnectionTestProgressLog,
+  resolveHostConnectionTestDeadlineMs,
   type HostConnectionTestAuthOverride,
 } from "../../domain/hostConnectionTest";
 import { useTerminalBackend } from "./useTerminalBackend";
@@ -50,8 +50,6 @@ export type HostConnectionTestInput = {
   onAddKnownHost?: (knownHost: KnownHost) => void;
 };
 
-const CONNECTION_TIMEOUT_MS = 120000;
-
 const messageOf = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
 export function useHostConnectionTest(input: HostConnectionTestInput) {
@@ -83,6 +81,9 @@ export function useHostConnectionTest(input: HostConnectionTestInput) {
   const bootEpochRef = useRef(0);
   const pendingHostKeyRequestIdRef = useRef<string | null>(null);
   const disposedRef = useRef(false);
+  // Deadline of the active attempt, derived from the options actually sent to
+  // the bridge so the countdown matches the probe's real timeouts.
+  const deadlineMsRef = useRef(0);
 
   const resetState = useCallback(() => {
     setError(null);
@@ -218,6 +219,7 @@ export function useHostConnectionTest(input: HostConnectionTestInput) {
         return;
       }
 
+      deadlineMsRef.current = resolveHostConnectionTestDeadlineMs(plan.options);
       setStatus("connecting");
       setIsAwaitingUserInput(false);
 
@@ -276,16 +278,19 @@ export function useHostConnectionTest(input: HostConnectionTestInput) {
     if (status !== "connecting" || needsAuth || hostKeyVerification || isAwaitingUserInput) {
       return;
     }
-    const timeouts = resolveHostSshConnectionTimeouts(host);
-    const authReadyTimeoutMs = timeouts.authReadyTimeoutSeconds * 1000 || CONNECTION_TIMEOUT_MS;
-    setTimeLeft(authReadyTimeoutMs / 1000);
+    const deadlineMs = deadlineMsRef.current;
+    if (deadlineMs <= 0) return;
+    setTimeLeft(Math.ceil(deadlineMs / 1000));
     const countdown = setInterval(() => {
       setTimeLeft((prev) => (prev > 0 ? prev - 1 : 0));
     }, 1000);
     const timeout = setTimeout(() => {
+      // Cancel the probe and invalidate this attempt so a late success or
+      // failure from the bridge cannot overwrite the timeout outcome.
+      clearSession();
       setError("Connection timed out. Please try again.");
       setStatus("disconnected");
-    }, authReadyTimeoutMs);
+    }, deadlineMs);
     const prog = setInterval(() => {
       setProgressValue((prev) => {
         if (prev >= 95) return prev;
@@ -298,7 +303,7 @@ export function useHostConnectionTest(input: HostConnectionTestInput) {
       clearTimeout(timeout);
       clearInterval(prog);
     };
-  }, [status, needsAuth, hostKeyVerification, isAwaitingUserInput, host]);
+  }, [status, needsAuth, hostKeyVerification, isAwaitingUserInput, clearSession]);
 
   return {
     state: {
