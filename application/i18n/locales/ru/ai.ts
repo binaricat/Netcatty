@@ -468,6 +468,8 @@ export const ruAiMessages: Messages = {
   'ai.chat.hoursAgo': '{n}ч назад',
   'ai.chat.daysAgo': '{n}д назад',
   'ai.chat.newChat': 'Новый чат',
+  'ai.chat.undoLastTurn': 'Отменить последний ход',
+  'ai.chat.undoLastTurnNotice': "Последний ход отменён в новой ветке чата. Уже выполненные действия инструментов (команды, изменения файлов) не откатываются.",
   'ai.chat.allSessions': 'Все сессии',
   'ai.chat.loadEarlierMessages': 'Загрузить более ранние сообщения (ещё {n})',
   'ai.chat.jumpNav': 'Перейти к сообщению',

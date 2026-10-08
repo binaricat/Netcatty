@@ -521,6 +521,8 @@ export const enAiMessages: Messages = {
   'ai.chat.hoursAgo': '{n}h ago',
   'ai.chat.daysAgo': '{n}d ago',
   'ai.chat.newChat': 'New Chat',
+  'ai.chat.undoLastTurn': 'Undo last turn',
+  'ai.chat.undoLastTurnNotice': "Last turn undone in a branched chat. Tool side effects that already ran (commands, file changes) are not rolled back.",
   'ai.chat.allSessions': 'All Sessions',
   'ai.chat.loadEarlierMessages': 'Load earlier messages ({n} more)',
   'ai.chat.jumpNav': 'Jump to message',

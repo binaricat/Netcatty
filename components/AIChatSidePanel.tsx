@@ -65,6 +65,7 @@ import {
 } from '../application/state/useAIChatStreaming';
 import { getScopedHistorySessions } from './ai/scopedHistorySessions';
 import { resolveInheritedAIActiveSessionId } from '../domain/aiWorkspaceScopeInherit';
+import { resolveUndoLastTurnBoundary } from '../domain/aiUndoLastTurn';
 import { aiSessionIdSetEqual, exactScopeAISessionsEqual } from '../domain/aiSessionsForScope';
 import { buildExternalAgentHistoryMessagesForBridge } from './ai/externalAgentHistory';
 import { canSendWithAgent, findEnabledExternalAgent } from './ai/agentSendEligibility';
@@ -269,6 +270,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   addDraftFiles,
   removeDraftFile,
   createSession,
+  undoLastTurnInSession,
   deleteSession,
   updateSessionTitle,
   updateSessionExternalSessionId,
@@ -816,6 +818,46 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     && !isStreaming
     && Boolean(effectiveActiveProvider)
     && Boolean(effectiveActiveModelId.trim());
+
+  // Undo last turn: offered only at a safe boundary (never inside a compacted
+  // prefix, never between an assistant tool call and its result).
+  const canUndoLastTurn = useMemo(() => Boolean(
+    activeSession
+    && !isStreaming
+    && resolveUndoLastTurnBoundary(
+      activeSession.messages,
+      activeSession.contextCompaction?.compactedMessageCount ?? 0,
+    ) != null,
+  ), [activeSession, isStreaming]);
+
+  const handleUndoLastTurn = useCallback(() => {
+    const sessionId = activeSessionRef.current?.id;
+    if (!sessionId || !undoLastTurnInSession) return;
+    if (isStreaming || isAIChatSessionStreaming(sessionId)) return;
+    const result = undoLastTurnInSession(sessionId);
+    if (!result) return;
+
+    ensureScopeDraft(currentAgentId);
+    updateScopeDraft(currentAgentId, (draft) => ({
+      ...draft,
+      // Keep anything the user is still typing; the undone prompt goes first.
+      text: draft.text.trim()
+        ? `${result.restored.text}\n\n${draft.text}`
+        : result.restored.text,
+      attachments: [...result.restored.attachments, ...draft.attachments],
+    }));
+    showScopeSessionView(result.sessionId);
+    // Tool side effects live outside the conversation and cannot be rolled back.
+    toast.info(t('ai.chat.undoLastTurnNotice'));
+  }, [
+    ensureScopeDraft,
+    isStreaming,
+    showScopeSessionView,
+    t,
+    undoLastTurnInSession,
+    updateScopeDraft,
+    currentAgentId,
+  ]);
 
   const providersRef = useRef(providers);
   providersRef.current = providers;
@@ -1781,6 +1823,8 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         setInputValue={setInputValue}
         handleSend={handleSend}
         handleCompact={handleCompact}
+        canUndoLastTurn={canUndoLastTurn}
+        handleUndoLastTurn={undoLastTurnInSession ? handleUndoLastTurn : undefined}
         handleSteer={handleSteer}
         handleStop={handleStop}
         canSteer={canSteerCurrentTurn}
