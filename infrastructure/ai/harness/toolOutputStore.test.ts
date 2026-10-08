@@ -848,6 +848,69 @@ test('ToolOutputStore gives branched chats their own durable copies so reads sur
   assert.ok(persistence.entries.has(`chat-source:${handle.id}`));
 });
 
+test('ToolOutputStore keeps referenced branch aliases resolvable beyond the per-session cache cap', async () => {
+  // The source's in-memory cache only ever holds at most `maxHandlesPerSession`
+  // handles, so a branch whose retained prefix references more of them (the
+  // older one still restorable from its durable record after TTL pruning)
+  // accumulates aliases beyond the cap. Those aliases must keep resolving in
+  // the branch even after the session limit drops them from memory.
+  let now = 10_000;
+  const persistence = createFakeToolOutputPersistence();
+  const store = new ToolOutputStore({
+    persistence,
+    maxHandlesPerSession: 2,
+    ttlMs: 1_000,
+    now: () => now,
+  });
+
+  const expired = store.store({
+    chatSessionId: 'chat-source',
+    capabilityId: 'terminal.execute',
+    content: 'expired-first-',
+  });
+  await store.flush('chat-source');
+
+  // Expire the first handle out of memory; a later read (the alias pass)
+  // prunes it, keeping its durable record restorable under the source id.
+  now = 12_000;
+  assert.equal(store.get(expired.id, 'chat-source'), undefined);
+  const fresh1 = store.store({
+    chatSessionId: 'chat-source',
+    capabilityId: 'terminal.execute',
+    content: 'fresh-second-output',
+  });
+  now = 12_001;
+  const fresh2 = store.store({
+    chatSessionId: 'chat-source',
+    capabilityId: 'terminal.execute',
+    content: 'fresh-third-output',
+  });
+
+  // Restore the expired handle last so the freshly aliased handles overflow
+  // the branch's per-session cap.
+  now = 12_002;
+  await store.aliasSessionHandles('chat-source', 'chat-branch', {
+    retainedHandleIds: new Set([fresh1.id, fresh2.id, expired.id]),
+  });
+
+  // Every retained reference materialized its own durable record under the
+  // branch namespace — including the alias the session cap evicted from
+  // memory, which otherwise would permanently return missing in the branch.
+  assert.ok(persistence.entries.has(`chat-branch:${fresh1.id}`));
+  assert.ok(persistence.entries.has(`chat-branch:${fresh2.id}`));
+  assert.ok(persistence.entries.has(`chat-branch:${expired.id}`));
+
+  // The cap still bounds the in-memory cache: only one of the three handles
+  // may be evicted, and eviction must keep its branch-owned durable record.
+  assert.ok(!store.listPendingHandles('chat-branch').some(handle => handle.id === fresh1.id));
+  const restored = await store.readChunkAsync({ handleId: fresh1.id }, 'chat-branch');
+  assert.equal(restored?.content, 'fresh-second-output');
+  const kept = await store.readChunkAsync({ handleId: fresh2.id }, 'chat-branch');
+  assert.equal(kept?.content, 'fresh-third-output');
+  const expiredRestored = await store.readChunkAsync({ handleId: expired.id }, 'chat-branch');
+  assert.equal(expiredRestored?.content, 'expired-first-');
+});
+
 test('ToolOutputStore reclaims chat generations after deletion churn settles', () => {
   const store = new ToolOutputStore();
   for (let index = 0; index < 2_000; index += 1) {

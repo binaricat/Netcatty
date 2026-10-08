@@ -572,13 +572,19 @@ export class ToolOutputStore {
     }
     if (aliased.length === 0) return;
     this.bySession.set(targetChatSessionId, targetMap);
+    // Materialize every branch-owned durable copy BEFORE applying the
+    // in-memory cache limits: `enforceSessionLimits`/`enforceGlobalLimits` can
+    // evict freshly aliased handles when the retained prefix references more
+    // handles (or characters) than the caps admit, and an evicted alias without
+    // a manifest under the branch id can never be restored there, so its
+    // retained `tool_output_read` references would permanently return missing —
+    // ordinary source handles can still be restored from their existing
+    // manifests, these never got a branch-owned one. Once a durable copy has
+    // landed, eviction only drops the alias from memory and keeps the manifest
+    // (see `evictHandle`), so the branch can restore it from durable storage.
+    await this.materializeDurableAliases(sourceChatSessionId, targetChatSessionId, aliased);
     this.enforceSessionLimits(targetChatSessionId, targetMap);
     this.enforceGlobalLimits();
-    await this.materializeDurableAliases(
-      sourceChatSessionId,
-      targetChatSessionId,
-      aliased.filter(alias => !alias.evicted),
-    );
   }
 
   private enforcePendingAliasRestoresLimit(): void {
@@ -1322,6 +1328,18 @@ export class ToolOutputStore {
 
   private evictHandle(handle: ToolOutputHandle): void {
     handle.evicted = true;
+    // A materialized branch alias has its own durable copy under the branch
+    // namespace, and the branched conversation still references the handle.
+    // Cache-limit eviction must drop it from memory like any other handle but
+    // must not destroy that branch-owned record, or handles referenced by the
+    // retained prefix beyond the caps (more than maxHandlesPerSession of them,
+    // or more than maxCharsPerSession) could never resolve again — handles
+    // dropped by TTL pruning keep their manifests and stay restorable, and
+    // these materialized aliases must stay restorable the same way.
+    if (this.materializedAliasHandles.has(handle)) {
+      this.materializedAliasHandles.delete(handle);
+      return;
+    }
     if (!handle.filePath || !this.persistence) return;
     if (this.isPathReferencedByOtherHandles(handle.filePath, handle)) {
       // Another session (a branch alias) still reads from this durable file;

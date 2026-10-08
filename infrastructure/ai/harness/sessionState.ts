@@ -140,11 +140,12 @@ export class SessionStateStore {
 
   /**
    * Chat session id that owns `jobId` in the main process, when `jobId` was
-   * inherited by `chatSessionId` from a branched source chat. Background-job
-   * control calls (`terminal.poll` / `terminal.stop`) must present the owner's
-   * chat session id to the main process, which rejects calls carrying the
-   * branch's own id with "Background job not found". Returns undefined when
-   * the job is not tracked under `chatSessionId` or is not inherited.
+   * inherited by `chatSessionId` from a branched source chat. Used only as a
+   * fallback for `terminal.stop`: polls must keep the branch's own chat id so
+   * the main process validates the branch's current terminal scope, and after
+   * the undo flow registers the branch as an inheritor the branch's own id is
+   * accepted for stop too. Returns undefined when the job is not tracked under
+   * `chatSessionId` or is not inherited.
    */
   getInheritedJobOwnerChatSessionId(chatSessionId: string, jobId: string): string | undefined {
     const job = this.get(chatSessionId).activeJobs[jobId];

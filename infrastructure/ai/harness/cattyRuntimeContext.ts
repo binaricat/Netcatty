@@ -35,9 +35,11 @@ export const cattyToolContextSchema = z.object({
   getExecutorContext: z.custom<() => ExecutorContext>(),
   toolOutputStore: z.custom<ToolOutputStore>().optional(),
   toolResultDedup: z.custom<ToolResultDedup>().optional(),
-  // Tracks jobs inherited from a branched source chat, so background-job
-  // control calls can be dispatched with the owner chat session id the main
-  // process still accepts (see SessionStateStore.getInheritedJobOwnerChatSessionId).
+  // Tracks jobs inherited from a branched source chat, so a background job's
+  // stop call can be dispatched with the owner chat session id as a fallback
+  // when the branch's inheritor registration is missing (see
+  // SessionStateStore.getInheritedJobOwnerChatSessionId). Polls must keep the
+  // branch's own id so the main process validates the branch's current scope.
   sessionStateStore: z.custom<SessionStateStore>().optional(),
 });
 

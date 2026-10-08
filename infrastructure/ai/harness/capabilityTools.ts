@@ -500,11 +500,17 @@ function createCatalogTool(spec: CattyToolSpec) {
         }
 
         // Background jobs inherited from a branched source chat are still owned
-        // by that source chat id in the main process, which rejects poll/stop
-        // calls carrying the branch's own chat id ("Background job not found").
-        // Present the owner's chat session id for those jobs so the branch can
-        // monitor and stop the side effects undo explicitly preserved.
-        const terminalJobControlIds = new Set(['terminal.poll', 'terminal.stop']);
+        // by that source chat id in the main process register, but undo also
+        // registers the branch as an inheritor, so poll/stop calls carrying the
+        // branch's own chat id are accepted there. `terminal.poll` must keep
+        // the branch's own id: the main process re-checks the job's terminal
+        // session scope against the chat id it receives, so presenting the
+        // source's id would validate the source's (stale) scope and could keep
+        // exposing job output to a branch that lost access to the terminal.
+        // `terminal.stop` keeps the owner-id fallback: stop is not scope
+        // re-checked anyway, and releasing the session lock must stay possible
+        // even when the branch's inheritor registration is missing.
+        const terminalJobControlIds = new Set(['terminal.stop']);
         const jobIdArg = typeof (args as { jobId?: unknown }).jobId === 'string'
           ? (args as { jobId?: string }).jobId
           : undefined;
