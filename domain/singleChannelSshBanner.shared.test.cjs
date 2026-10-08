@@ -8,7 +8,7 @@ const {
   optionsForPeerSingleChannel,
 } = require("./singleChannelSshBanner.shared.cjs");
 
-test("single-channel banners match only the observed software tokens", () => {
+test("single-channel banners match only the supported software tokens", () => {
   for (const version of [
     "BHostSSH_7.0",
     "SSH-2.0-BHostSSH_7.0",
@@ -17,6 +17,9 @@ test("single-channel banners match only the observed software tokens", () => {
     "term-sshd",
     "CLOUDBILITY-4.14",
     "SSH-2.0-CLOUDBILITY-4.14",
+    "CloudLinker",
+    "SSH-2.0-CloudLinker",
+    "cloudlinker-1.0",
   ]) {
     assert.equal(remoteSoftwareRequiresSingleChannel(version), true, version);
   }
@@ -42,6 +45,10 @@ test("single-channel banner match ignores OpenSSH, JumpServer, and lookalike tok
     "CmdbHostSSH",
     "BHost",
     "notcloudbility",
+    "Go",
+    "SSH-2.0-Go",
+    "notcloudlinker",
+    "CloudLinkerProxy",
   ]) {
     assert.equal(remoteSoftwareRequiresSingleChannel(version), false, String(version));
   }
@@ -51,6 +58,7 @@ test("chunked-write limit stays on BHostSSH and TERM-SSHD", () => {
   assert.equal(remoteDisallowsChunkedChannelWrite("BHostSSH_7.0"), true);
   assert.equal(remoteDisallowsChunkedChannelWrite("SSH-2.0-TERM-SSHD"), true);
   assert.equal(remoteDisallowsChunkedChannelWrite("CLOUDBILITY-4.14"), false);
+  assert.equal(remoteDisallowsChunkedChannelWrite("SSH-2.0-CloudLinker"), false);
   assert.equal(remoteDisallowsChunkedChannelWrite("OpenSSH_9.6"), false);
   assert.equal(remoteDisallowsChunkedChannelWrite("superterm-sshd"), false);
 });
@@ -74,7 +82,7 @@ test("CommonJS and renderer modules agree on SSH banner behavior", async () => {
   const browserModule = await import("./singleChannelSshBanner.shared.mjs");
   const nodeModule = require("./singleChannelSshBanner.shared.cjs");
   for (const version of [
-    "BHostSSH_7.0", "TERM-SSHD", "CLOUDBILITY-4.14", "OpenSSH_9.6", "JumpServer", "",
+    "BHostSSH_7.0", "TERM-SSHD", "CLOUDBILITY-4.14", "CloudLinker", "SSH-2.0-Go", "OpenSSH_9.6", "JumpServer", "",
   ]) {
     assert.equal(browserModule.remoteSoftwareRequiresSingleChannel(version), nodeModule.remoteSoftwareRequiresSingleChannel(version));
     assert.equal(browserModule.remoteDisallowsChunkedChannelWrite(version), nodeModule.remoteDisallowsChunkedChannelWrite(version));

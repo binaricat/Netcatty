@@ -13,16 +13,20 @@
 // CLOUDBILITY-4.14 — PR #3458 reproduction note: SSH-2.0-CLOUDBILITY-4.14
 // drops the interactive shell when another session channel opens. No other
 // public packet was found; do not add aliases.
+// CloudLinker — issue #3592: the vendor identifies a single-channel gateway
+// and proposes this distinctive banner. Older "Go" banners cannot identify it
+// safely; this compatibility entry requires the vendor banner change.
 // JumpServer KoKo advertises Version "JumpServer" and multiplexes. Omit it.
 
 const SINGLE_CHANNEL_SOFTWARE_TOKENS = Object.freeze([
   "BHostSSH",
   "TERM-SSHD",
   "CLOUDBILITY",
+  "CLOUDLINKER",
 ]);
 
 // #3146 also drops multi-character writes. That evidence is only for these
-// two tokens, not for CLOUDBILITY.
+// two tokens, not for CLOUDBILITY or CLOUDLINKER.
 const CHUNKED_WRITE_SOFTWARE_TOKENS = Object.freeze([
   "BHostSSH",
   "TERM-SSHD",
