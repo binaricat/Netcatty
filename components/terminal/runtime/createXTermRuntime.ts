@@ -64,6 +64,7 @@ import {
 } from "../clearTerminalViewport";
 import { pulseCopyOnSelectUserCommand } from "../copyOnSelect";
 import { getTerminalSelectionForClipboard } from "../normalizeTerminalSelection";
+import { installDec2026SyncBlockTracker } from "./dec2026SyncBlock";
 import {
   createKittyKeyboardSessionStateStore,
   encodeKittyCompositionText,
@@ -3172,26 +3173,15 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
 
   // Track DEC 2026 synchronized-output blocks so CSI 2 J can erase in place for
   // Codex/Claude Code TUIs instead of pushing visible rows into scrollback.
-  let inDec2026SyncBlock = false;
-
-  const dec2026SyncStartDisposable = term.parser.registerCsiHandler(
-    { prefix: "?", final: "h", params: [2026] },
-    () => {
-      inDec2026SyncBlock = true;
-      return false;
-    },
-  );
-  const dec2026SyncEndDisposable = term.parser.registerCsiHandler(
-    { prefix: "?", final: "l", params: [2026] },
-    () => {
-      inDec2026SyncBlock = false;
-      return false;
-    },
-  );
+  // The tracker filters on the sequence parameters itself: xterm keys CSI
+  // handlers by prefix/intermediates/final only, so a `params` field on the
+  // registration is ignored and would match every private mode (?2004h/?2004l
+  // bracketed paste, ?25h/?25l cursor, ?1049h/?1049l alternate screen, ...).
+  const dec2026SyncBlockTracker = installDec2026SyncBlockTracker(term.parser);
 
   const eraseScrollbackDisposable = installEraseInDisplayHandlers(term, {
     getClearWipesScrollback: () => ctx.terminalSettingsRef.current?.clearWipesScrollback ?? true,
-    isInDec2026SyncBlock: () => inDec2026SyncBlock,
+    isInDec2026SyncBlock: () => dec2026SyncBlockTracker.isInSyncBlock(),
   });
 
   const markCursorPositionReportRequest = (params: readonly (number | number[])[]): boolean => {
@@ -3500,8 +3490,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       pluginLinkProviderHost?.dispose();
       pluginProviderHost?.dispose();
       eraseScrollbackDisposable.dispose();
-      dec2026SyncStartDisposable.dispose();
-      dec2026SyncEndDisposable.dispose();
+      dec2026SyncBlockTracker.dispose();
       for (const disposable of cursorPositionReportRequestDisposables) {
         disposable.dispose();
       }
