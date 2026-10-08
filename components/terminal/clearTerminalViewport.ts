@@ -182,9 +182,14 @@ export const isEraseScrollbackSequence = (params: CsiParam[]): boolean =>
  * (synchronized output). Handlers for `ESC[?…h/l` must be registered without a
  * `params` field — xterm's IFunctionIdentifier ignores it — and filter on the
  * params passed to the callback instead.
+ *
+ * DECSET/DECRST can carry multiple semicolon-separated modes
+ * (`ESC[?2026;25h`), so match 2026 anywhere in the parameter list.
  */
 export const isDec2026SyncModeParams = (params: CsiParam[]): boolean =>
-  params.length === 1 && params[0] === 2026;
+  params.some(
+    (param) => param === 2026 || (Array.isArray(param) && param.includes(2026)),
+  );
 
 export const isEraseViewportSequence = (params: CsiParam[]): boolean =>
   params.length > 0 && params[0] === 2;

@@ -526,13 +526,15 @@ test("appendEraseScrollback still wipes when delayed clear is outside a sync blo
   );
 });
 
-test("isDec2026SyncModeParams matches only the 2026 mode param", () => {
+test("isDec2026SyncModeParams matches the 2026 mode param anywhere in the list", () => {
   assert.equal(isDec2026SyncModeParams([2026]), true);
+  assert.equal(isDec2026SyncModeParams([2026, 1]), true);
+  assert.equal(isDec2026SyncModeParams([25, 2026]), true);
+  assert.equal(isDec2026SyncModeParams([2026, 2004]), true);
   assert.equal(isDec2026SyncModeParams([2004]), false);
   assert.equal(isDec2026SyncModeParams([25]), false);
   assert.equal(isDec2026SyncModeParams([1049]), false);
   assert.equal(isDec2026SyncModeParams([]), false);
-  assert.equal(isDec2026SyncModeParams([2026, 1]), false);
 });
 
 /**
