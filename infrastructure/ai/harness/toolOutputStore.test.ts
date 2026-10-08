@@ -222,8 +222,12 @@ test('ToolOutputStore global quotas keep the borrowed fork alias when every reco
   // The global handle quota is already full when the fork is created. Every
   // registry entry is protected by the rehome — the fork's retained messages
   // advertise the cloned handle (the alias), and the source record backs the
-  // original conversation — so nothing can absorb the overflow: the registry
-  // is left over quota and nothing is evicted.
+  // original conversation — so the protected pass cannot make room. The
+  // overshoot is resolved during the rehome itself (not deferred to the next
+  // plain `store()`, whose oldest-first sweep would kill both copies): the
+  // borrowed alias owns no durable content, so it is the copy sacrificed,
+  // and the source-owned record keeps the handle readable with the registry
+  // back within quota.
   const original = new ToolOutputStore({ spillThresholdChars: 0, maxHandlesGlobal: 1, persistence });
   const handle = original.store({
     chatSessionId: 'chat-source',
@@ -239,9 +243,11 @@ test('ToolOutputStore global quotas keep the borrowed fork alias when every reco
   const sourceCopy = original.get(handle.id, 'chat-source');
   assert.ok(sourceCopy);
   assert.ok(files.has(`/netcatty/${handle.id}-chat-source.log`));
+  // Evicting the alias never deletes the shared file.
   assert.equal(deletedPaths.length, 0);
-  // The alias survives because the fork advertises its handle id.
-  assert.ok(original.get(handle.id, 'chat-fork'));
+  // The alias (which owns nothing) is the copy sacrificed; the fork's read
+  // of this handle id now misses, but the original conversation keeps it.
+  assert.equal(original.get(handle.id, 'chat-fork'), undefined);
 });
 
 test('ToolOutputStore session quotas evict a borrowed owner instead of the fresh store', async () => {
@@ -348,7 +354,7 @@ test('ToolOutputStore retires the borrowed fork alias before its owner is evicte
   assert.equal(await original.readChunkAsync({ handleId: handle.id, mode: 'head', maxChars: 10 }, 'chat-fork'), null);
 });
 
-test('ToolOutputStore global quotas keep the fresh clone and its source handle over quota', async () => {
+test('ToolOutputStore global quotas resolve an over-quota protected set during rehoming', async () => {
   const files = new Map<string, { record: PersistedToolOutputRecord; content: string }>();
   const deletedPaths: string[] = [];
   const persistence: ToolOutputPersistence = {
@@ -385,8 +391,13 @@ test('ToolOutputStore global quotas keep the fresh clone and its source handle o
   // the only unprotected entry is nothing — the freshly cloned handle and
   // its source are both protected, because the clone must survive quota
   // enforcement (the fork advertises its handle id) and the source record
-  // backs the original conversation. Nothing is evicted; the registry is
-  // left over quota and the clone re-spills a durable target-owned record.
+  // backs the original conversation. The overshoot is resolved during the
+  // rehome itself (not deferred to the next plain `store()`, whose
+  // oldest-first sweep would kill both copies before the newly stored
+  // handle): the follow-up unprotected pass sacrifices the older source
+  // copy so only one copy of the handle id dies, and the clone — which
+  // re-read the source's durable content — re-spills a durable
+  // target-owned record the fork keeps reading.
   const original = new ToolOutputStore({ spillThresholdChars: 0, maxHandlesGlobal: 1, persistence });
   const handle = original.store({
     chatSessionId: 'chat-source',
@@ -397,13 +408,11 @@ test('ToolOutputStore global quotas keep the fresh clone and its source handle o
 
   await original.rehomeChatSession('chat-source', 'chat-fork');
 
-  const sourceCopy = original.get(handle.id, 'chat-source');
-  assert.ok(sourceCopy);
-  assert.ok(files.has(`/netcatty/${handle.id}-chat-source.log`));
-  assert.deepEqual(deletedPaths, []);
-  assert.equal((
-    await original.readChunkAsync({ handleId: handle.id, mode: 'head', maxChars: 100 }, 'chat-source')
-  )?.content?.length, 100);
+  // The source copy is what got sacrificed to bring the registry within
+  // quota; its source-owned spill file is gone with it.
+  assert.equal(original.get(handle.id, 'chat-source'), undefined);
+  assert.deepEqual(deletedPaths, [`/netcatty/${handle.id}-chat-source.log`]);
+  assert.equal(files.has(`/netcatty/${handle.id}-chat-source.log`), false);
   // The clone survives and owns its own durable record.
   assert.ok(original.get(handle.id, 'chat-fork'));
   assert.ok(files.has(`/netcatty/${handle.id}-chat-fork.log`));

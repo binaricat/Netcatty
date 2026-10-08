@@ -442,13 +442,25 @@ export class ToolOutputStore {
     // handles behind them (whose durable files the original conversation
     // still reads): when the quota is already full, the oldest unprotected
     // pre-existing handle (mirroring the plain `store()` eviction policy)
-    // absorbs the overflow instead. When every remaining entry is protected,
-    // the loop leaves the registry as-is — the next `store()` call, which
-    // runs without protection, rebalances it.
+    // absorbs the overflow instead. When the protected set itself exceeds
+    // the quota (e.g. a very small `maxHandlesGlobal`), the pass above
+    // cannot finish the job; deferring the rebalance to the next plain
+    // `store()` would let its oldest-first sweep — run without protection
+    // and with the source and its clone sharing the same older `accessedAt`
+    // — evict *both* copies before the newly stored handle, killing the
+    // handle in the fork and the original conversation at once. So a
+    // follow-up unprotected pass resolves the overshoot right here: the two
+    // copies still coexist, the borrow protection keeps the durable owner
+    // alive when a clone aliases its path, and at most one copy per handle
+    // id is sacrificed (the pass breaks as soon as the quota is met, so the
+    // twin the other session reads survives).
     this.enforceGlobalLimits(new Set([
       ...selected.map(([, handle]) => handle),
       ...freshClones,
     ]));
+    // A no-op when the protected pass already brought the registry within
+    // quota; otherwise trims it immediately as described above.
+    this.enforceGlobalLimits();
     // Copies still holding in-memory content (fresh or read-back) become
     // target-owned through the normal spill path, which re-writes a durable
     // record carrying the target's chat session id. Await the writes so the
