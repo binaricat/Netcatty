@@ -128,12 +128,24 @@ function serializeToolCallArguments(args: Record<string, unknown>): string {
           if (typeof value === 'object') {
             if (!emit('{')) return false;
             let first = true;
-            for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+            // Iterate own properties lazily instead of materializing the full
+            // `Object.entries` array first: an argument object with thousands
+            // of keys (or one very large key) must not allocate for every
+            // keystroke just to have most of it sliced away again.
+            for (const key in value as Record<string, unknown>) {
+              if (!Object.prototype.hasOwnProperty.call(value, key)) continue;
               if (!first && !emit(',')) return false;
               first = false;
-              if (!emit(JSON.stringify(key) ?? 'null')) return false;
+              // Cap the key before escaping it: escaping a multi-megabyte
+              // property name whole would defeat the per-field budget.
+              const serializedKey = JSON.stringify(
+                key.length > MAX_TOOL_ARGUMENTS_FIELD_LENGTH
+                  ? key.slice(0, MAX_TOOL_ARGUMENTS_FIELD_LENGTH)
+                  : key,
+              ) ?? 'null';
+              if (!emit(serializedKey)) return false;
               if (!emit(':')) return false;
-              if (!writeValue(item, depth - 1)) return false;
+              if (!writeValue(value[key as keyof typeof value], depth - 1)) return false;
             }
             return emit('}');
           }
@@ -227,6 +239,12 @@ export function collectSessionSearchFields(session: SessionHistorySearchTarget):
     // (potentially expensive) serialization for this message too.
     if (collector.isFull) continue;
     collector.push(message.thinking);
+    if (collector.isFull) continue;
+    // Persisted status text: when an external SDK turn stops after an
+    // `onStatus` update, the final status remains in `message.statusText`,
+    // is persisted, and is the only distinctive visible text rendered in the
+    // reopened conversation. Status strings stay short, hence the tight cap.
+    collector.push(message.statusText, MAX_TOOL_ARGUMENTS_FIELD_LENGTH);
     if (collector.isFull) continue;
     // Persisted failure diagnostics: when a Catty turn fails with empty
     // content the error message is the only visible text in the reopened

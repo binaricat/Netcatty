@@ -336,3 +336,50 @@ test("huge tool call arguments are serialized within the field cap without full 
     collectSessionSearchFields(searchable).some((field) => field.includes('"command":"systemctl restart nginx"')),
   );
 });
+
+test("wide tool call argument objects and long property names stay within the cap", () => {
+  // A wide object: thousands of own properties must be iterated lazily
+  // instead of materializing the full entries array on every keystroke.
+  const wide: Record<string, unknown> = {};
+  for (let i = 0; i < 5_000; i++) wide[`key-${i}`] = `value-${i}`;
+  // An unusually large property name must be capped before it is escaped.
+  const longKey = "k".repeat(50_000);
+  const sessions = [
+    createSession("a", "Ops", [
+      {
+        role: "assistant",
+        toolCalls: [{
+          name: "shell",
+          id: "t1",
+          arguments: { command: "systemctl restart nginx", [longKey]: "ignored", ...wide },
+        }],
+      },
+    ]),
+  ];
+
+  const fields = collectSessionSearchFields(sessions[0]);
+  const serialized = fields.find((field) => field.includes("systemctl restart nginx"));
+  assert.ok(serialized);
+  assert.ok(serialized!.length <= 2_000);
+  // The oversized key (and the wide object past the cap) never materialize:
+  // the long key is truncated before escaping.
+  assert.ok(!fields.some((field) => field.length > 2_000));
+});
+
+test("filterSessionHistory matches persisted status text", () => {
+  const sessions = [
+    createSession("a", "Untitled", [
+      { role: "assistant", content: "", statusText: "generating diff for src/main.ts" },
+    ]),
+    createSession("b", "Deploy", [
+      { role: "user", content: "ship it" },
+    ]),
+  ];
+
+  assert.deepEqual(filterSessionHistory(sessions, "generating diff"), [sessions[0]]);
+  assert.deepEqual(filterSessionHistory(sessions, "src/main.ts"), [sessions[0]]);
+  assert.deepEqual(filterSessionHistory(sessions, "nothing here"), []);
+
+  const fields = collectSessionSearchFields(sessions[0]);
+  assert.ok(fields.some((field) => field.includes("generating diff for src/main.ts")));
+});
