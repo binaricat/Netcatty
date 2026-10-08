@@ -163,6 +163,46 @@ test('ToolOutputStore rehomed spilled handles become durably owned by the target
   assert.equal(stillReadable?.content, 'B'.repeat(50));
 });
 
+test('ToolOutputStore rehome falls back to a non-owning alias of the source spill path', async () => {
+  const files = new Map<string, { record: PersistedToolOutputRecord; content: string }>();
+  const deletedPaths: string[] = [];
+  const persistence: ToolOutputPersistence = {
+    write: async (record, content) => {
+      const path = `/netcatty/${record.handleId}-${record.chatSessionId}.log`;
+      files.set(path, { record, content });
+      return path;
+    },
+    read: async () => null,
+    delete: async path => {
+      deletedPaths.push(path);
+      files.delete(path);
+    },
+  };
+
+  const original = new ToolOutputStore({ spillThresholdChars: 0, persistence });
+  const handle = original.store({
+    chatSessionId: 'chat-source',
+    capabilityId: 'terminal.execute',
+    content: 'C'.repeat(30_000),
+  });
+  await handle.spillPromise;
+
+  // `read` cannot serve the durable content, so the clone cannot take
+  // ownership: it aliases the source path as a non-owning borrow instead.
+  await original.rehomeChatSession('chat-source', 'chat-fork');
+  const forkCopy = original.get(handle.id, 'chat-fork');
+  assert.ok(forkCopy);
+  assert.equal(forkCopy.filePath, `/netcatty/${handle.id}-chat-source.log`);
+  assert.equal(forkCopy.borrowedFilePath, true);
+  assert.equal(forkCopy.fullContent, undefined);
+
+  // Pruning the fork must not delete the source-owned spill file.
+  original.prune('chat-fork');
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(deletedPaths.length, 0);
+  assert.ok(files.has(`/netcatty/${handle.id}-chat-source.log`));
+});
+
 test('ToolOutputStore restores retained source handles when rehoming after a restart', async () => {
   const files = new Map<string, { record: PersistedToolOutputRecord; content: string }>();
   const persistence: ToolOutputPersistence = {

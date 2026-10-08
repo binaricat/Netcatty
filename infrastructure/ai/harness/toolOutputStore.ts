@@ -11,6 +11,8 @@ export interface ToolOutputHandle {
   accessedAt: number;
   fullContent?: string;
   filePath?: string;
+  /** True when `filePath` is borrowed from another session and must not be deleted on eviction. */
+  borrowedFilePath?: boolean;
   spillPromise?: Promise<void>;
   evicted?: boolean;
 }
@@ -344,8 +346,10 @@ export class ToolOutputStore {
    * session cannot delete the other's spill file. Handles that never spilled
    * are copied in memory and pick up their own durable record through the
    * normal spill path. If the persisted content cannot be read back, the
-   * target falls back to sharing the source-owned spill path so live reads
-   * still resolve while both namespaces exist. `retainHandleIds` may pass the
+   * target falls back to aliasing the source-owned spill path as a
+   * non-owning borrow, so live reads still resolve while both namespaces
+   * exist and deleting the fork never removes the source-backed file.
+   * `retainHandleIds` may pass the
    * handle ids referenced by the retained fork prefix: handles missing from
    * the live cache (e.g. after an app restart or cache expiry) are restored
    * from persistence under the source session before cloning, so forking a
@@ -409,10 +413,14 @@ export class ToolOutputStore {
           copy.fullContent = content;
         } else {
           // Persisted content is unreadable (e.g. the spill file vanished).
-          // Fall back to sharing the source-owned path so the live fork can
-          // still read while both sessions survive; the forked handle will
-          // not survive a restart or a source-session delete in this case.
+          // Fall back to aliasing the source-owned path so the live fork can
+          // still read while both sessions survive, but mark the alias as
+          // non-owning: evicting or pruning the fork must never delete the
+          // source-backed file, which the source session still references.
+          // The forked handle will not survive a restart or a source-session
+          // delete in this case.
           copy.filePath = handle.filePath;
+          copy.borrowedFilePath = true;
         }
       }
       targetMap.set(handleId, copy);
@@ -663,7 +671,7 @@ export class ToolOutputStore {
 
   private evictHandle(handle: ToolOutputHandle): void {
     handle.evicted = true;
-    if (handle.filePath && this.persistence) {
+    if (handle.filePath && !handle.borrowedFilePath && this.persistence) {
       void this.persistence.delete(handle.filePath).catch(() => {});
     }
   }
