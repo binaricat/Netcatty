@@ -559,6 +559,17 @@ export class ToolOutputStore {
     const wantedHandleIds = retained ? [...retained] : [...(sourceMap?.keys() ?? [])];
     if (wantedHandleIds.length === 0) return;
     const targetMap = this.bySession.get(targetChatSessionId) ?? new Map<string, ToolOutputHandle>();
+    // Register a newly created branch map BEFORE restoring source handles:
+    // each post-restart restore re-enforces handle/character cache limits on
+    // the source session (see `restoreHandleImpl`), and an alias that exists
+    // only in this local map is invisible to the shared-path reference check
+    // in `evictHandle` — a restore-triggered eviction could then delete the
+    // source manifest the alias still reads, its durable copy could never
+    // materialize, Undo would abort and the original session's saved output
+    // would be permanently lost. Registering the map makes every eviction
+    // during the restore pass defer the shared file's delete instead.
+    const targetMapWasRegistered = this.bySession.get(targetChatSessionId) === targetMap;
+    if (!targetMapWasRegistered) this.bySession.set(targetChatSessionId, targetMap);
     const aliased: ToolOutputHandle[] = [];
     const missingRestoreHandleIds: string[] = [];
     for (const handleId of wantedHandleIds) {
@@ -595,7 +606,14 @@ export class ToolOutputStore {
         missingRestoreHandleIds,
       );
     }
-    if (aliased.length === 0) return;
+    if (aliased.length === 0) {
+      // An empty branch namespace registered only for this pass must not
+      // outlive it (another pass may have registered its own map since).
+      if (!targetMapWasRegistered && this.bySession.get(targetChatSessionId) === targetMap) {
+        this.bySession.delete(targetChatSessionId);
+      }
+      return;
+    }
     this.bySession.set(targetChatSessionId, targetMap);
     // Materialize every branch-owned durable copy BEFORE applying the
     // in-memory cache limits: `enforceSessionLimits`/`enforceGlobalLimits` can

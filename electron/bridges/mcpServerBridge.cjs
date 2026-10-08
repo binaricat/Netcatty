@@ -1901,16 +1901,42 @@ function forgetInheritedJobInheritors(jobId) {
 function cancelOrphanedInheritedJob(jobId) {
   const workerJob = workerBackgroundJobs.get(jobId);
   if (workerJob) {
-    workerBackgroundJobs.delete(jobId);
+    // Keep the registry entry until the stop is confirmed: dropping it first
+    // leaves a still-running command (and its held execution lock) with no
+    // main-process entry any poll, stop, or cleanup path can resolve if the
+    // stop request rejects or reports failure. Only a confirmed stop (or an
+    // authoritative "job not found") may drop the entry and its inheritor
+    // bookkeeping.
     try {
       const request = terminalWorkerManager?.request?.("netcatty:ai:jobStop", {
         jobId,
         sessionId: workerJob.sessionId,
         chatSessionId: workerJob.chatSessionId || null,
       }, {});
-      if (request && typeof request.catch === "function") request.catch(() => {});
+      if (!request || typeof request.catch !== "function") {
+        workerBackgroundJobs.delete(jobId);
+        forgetInheritedJobInheritors(jobId);
+        return;
+      }
+      void request.then((result) => {
+        if (!result?.completed
+          && !(result?.ok === false && /not found/i.test(result?.error || ""))) {
+          // Stop not confirmed (job still running or the request failed):
+          // retain the entry so the terminal session's later poll, stop, and
+          // idle-close cleanup paths can finish the cancellation.
+          return;
+        }
+        if (workerBackgroundJobs.get(jobId) === workerJob) {
+          workerBackgroundJobs.delete(jobId);
+          forgetInheritedJobInheritors(jobId);
+        }
+      }).catch(() => {
+        // Transient worker failure while stopping: retain the entry for a
+        // cleanup retry instead of orphaning the running command.
+      });
     } catch {
-      // The worker may already be gone while cancelling the orphaned job.
+      // The worker may already be gone while cancelling the orphaned job;
+      // keep the entry so a later cleanup pass can retry the stop.
     }
     return;
   }
