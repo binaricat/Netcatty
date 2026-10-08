@@ -136,7 +136,8 @@ test('ToolOutputStore rehomed spilled handles become durably owned by the target
   });
   await handle.spillPromise;
 
-  await original.rehomeChatSession('chat-source', 'chat-fork');
+  // A rehome that fits the quota reports success.
+  assert.equal(await original.rehomeChatSession('chat-source', 'chat-fork'), true);
   const forkCopy = original.get(handle.id, 'chat-fork');
   assert.ok(forkCopy);
   // The copy owns its own durable record under the target's chat session id.
@@ -404,7 +405,9 @@ test('ToolOutputStore global quotas refuse a fork whose copies cannot fit', asyn
   });
   await handle.spillPromise;
 
-  await original.rehomeChatSession('chat-source', 'chat-fork');
+  // The refusal is reported to the caller so it can abort publishing the
+  // fork instead of leaving it with unresolvable retained handle ids.
+  assert.equal(await original.rehomeChatSession('chat-source', 'chat-fork'), false);
 
   // The source copy survives untouched with its durable spill file.
   const sourceCopy = original.get(handle.id, 'chat-source');

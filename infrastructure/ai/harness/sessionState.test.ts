@@ -133,3 +133,58 @@ test('SessionStateStore reinjects edited files and unfinished plan items', () =>
   assert.match(text, /\[done\] inspect failure/);
   assert.match(text, /\[todo\] run regression tests/);
 });
+
+test('SessionStateStore rebuilds fork state from the retained prefix only', () => {
+  const store = new SessionStateStore();
+  // Pre-populate state derived from turns discarded by the branch: rebuild
+  // must clear it instead of copying the source's latest state.
+  store.mergeFromUserGoal('chat-fork', 'Older goal from a discarded turn');
+  store.updateFromToolResult(
+    'chat-fork',
+    'terminal_start',
+    { sessionId: 'sess-9', command: 'npm run build' },
+    JSON.stringify({ jobId: 'discarded-job', status: 'running', nextOffset: 99 }),
+  );
+
+  store.rebuildFromMessages('chat-fork', [
+    {
+      role: 'user',
+      content: 'Run the dev server and watch nginx for errors',
+    },
+    {
+      role: 'assistant',
+      content: 'I decided to tail the nginx error log on the edge host.',
+      toolCalls: [
+        { id: 'call-1', name: 'terminal_execute', arguments: { sessionId: 'sess-1', command: 'tail -f /var/log/nginx/error.log' } },
+        { id: 'call-2', name: 'terminal_start', arguments: { sessionId: 'sess-1', command: 'npm run dev' } },
+      ],
+    },
+    {
+      role: 'tool',
+      content: 'upstream timed out',
+      toolResults: [{ toolCallId: 'call-1', content: 'upstream timed out', isError: true }],
+    },
+    {
+      role: 'tool',
+      content: JSON.stringify({ jobId: 'job-1', status: 'running', nextOffset: 0 }),
+      toolResults: [{ toolCallId: 'call-2', content: JSON.stringify({ jobId: 'job-1', status: 'running', nextOffset: 0 }) }],
+    },
+    {
+      role: 'tool',
+      content: JSON.stringify({ jobId: 'job-1', status: 'running', nextOffset: 420 }),
+      toolResults: [{ toolCallId: 'call-3', content: JSON.stringify({ jobId: 'job-1', status: 'running', nextOffset: 420 }), toolName: 'terminal_poll' }],
+    },
+  ]);
+
+  const text = store.toReinjectionText('chat-fork') ?? '';
+  assert.ok(text.includes('Run the dev server'));
+  assert.ok(!text.includes('Older goal from a discarded turn'));
+  assert.ok(!text.includes('discarded-job'));
+  assert.ok(text.includes('edge host'));
+  // The background job survives with the replayed poll offset and the
+  // reinjected "keep polling" instruction.
+  assert.equal(store.get('chat-fork').activeJobs['job-1'].nextOffset, 420);
+  assert.match(text, /offset=420/);
+  // The failed tail surfaces as an open blocker, as it does live.
+  assert.match(text, /Open blockers/);
+});

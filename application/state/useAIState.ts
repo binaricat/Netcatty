@@ -726,7 +726,8 @@ export function useAIState() {
     // active until those records exist under its own session id, or the very
     // first turn could see handles as missing.
     try {
-      const store = getAgentRuntime().getToolOutputStore(sessionId);
+      const runtime = getAgentRuntime();
+      const store = runtime.getToolOutputStore(sessionId);
       // The persistence adapter is normally configured when a turn starts;
       // forking can be the very first action after an app restart, so
       // configure it here too or retained handles cannot be restored from
@@ -735,15 +736,31 @@ export function useAIState() {
       // A carried-over compaction summary can reference archive handles not
       // present in any retained message; collect those too so the summary
       // stays readable via tool_output_read in the fork.
-      await store.rehomeChatSession(
+      const rehomed = await store.rehomeChatSession(
         sessionId,
         fork.id,
         collectForkHandleIds(plan.messages, plan.contextCompaction?.summary),
       );
+      if (!rehomed) {
+        // The tool-output store refused the fork because its global quota
+        // cannot hold both the source and the fork's fresh clones without
+        // evicting output a live conversation still resolves. Publishing the
+        // fork would advertise retained handle ids that miss on
+        // `tool_output_read`, so abort instead; the boundary stays forkable
+        // if the user retries later.
+        return null;
+      }
     } catch {
       // Rehoming is best-effort; the fork is still usable (reads fall back
       // to the live cache or restore path under the target namespace).
     }
+    // Structured runtime state (active background jobs and their poll
+    // offsets, read cursors, decisions, plan, blockers) is keyed by chat
+    // session id; rebuild it for the fork from the retained prefix so a
+    // later compaction re-injects the state the branch actually kept, not
+    // the source's latest state (which may describe turns discarded by the
+    // branch).
+    getAgentRuntime().getSessionStateStore().rebuildFromMessages(fork.id, plan.messages);
     setSessionsRaw(prev => {
       const next = [fork, ...prev];
       setLatestAISessionsSnapshot(next);

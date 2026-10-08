@@ -357,12 +357,17 @@ export class ToolOutputStore {
    * no-op. When `retainHandleIds` is provided, only those handles are
    * cloned; outputs saved by turns after the fork boundary stay in the
    * source session.
+   * Returns `true` when the target namespace resolves every advertised handle
+   * id, and `false` when the global quota cannot hold both the source and the
+   * fresh clones (the clones are rolled back): the caller must then abort
+   * publishing the fork, because its retained messages would reference handle
+   * ids that resolve to "not found".
    */
   async rehomeChatSession(
     sourceChatSessionId: string,
     targetChatSessionId: string,
     retainHandleIds?: readonly string[],
-  ): Promise<void> {
+  ): Promise<boolean> {
     this.pruneExpired();
     const missingIds = (retainHandleIds ?? [])
       .filter(handleId => !this.bySession.get(sourceChatSessionId)?.has(handleId));
@@ -376,7 +381,7 @@ export class ToolOutputStore {
       ));
     }
     const sourceMap = this.bySession.get(sourceChatSessionId);
-    if (!sourceMap || sourceMap.size === 0) return;
+    if (!sourceMap || sourceMap.size === 0) return true;
     // When the caller names the handles the retained prefix references, clone
     // only those: copying the whole source session would pull in outputs the
     // fork never reads and could evict still-valid handles (source or other
@@ -450,9 +455,9 @@ export class ToolOutputStore {
     // alias — leave the fork publishing a handle id that immediately
     // misses. Refuse the fork instead: roll back the fresh clones so the
     // registry returns to its pre-fork (compliant) state, keeping the
-    // source record intact. The fork's retained messages then miss on
-    // `tool_output_read`, but no existing conversation's output is
-    // invalidated.
+    // source record intact, and report the refusal (`false`) so the caller
+    // aborts publishing the fork: no existing conversation's output is
+    // invalidated and no fork advertises unresolvable handle ids.
     const withinQuota = this.enforceGlobalLimits(new Set([
       ...selected.map(([, handle]) => handle),
       ...freshClones,
@@ -471,6 +476,9 @@ export class ToolOutputStore {
       // The registry the clones were added to was within quota, so rolling
       // them back is guaranteed to restore compliance; no further eviction
       // pass runs here.
+      // Communicate the refusal so the caller aborts the fork instead of
+      // publishing a conversation whose retained handles miss.
+      return false;
     }
     // Copies still holding in-memory content (fresh or read-back) become
     // target-owned through the normal spill path, which re-writes a durable
@@ -483,6 +491,7 @@ export class ToolOutputStore {
       if (handle.spillPromise) spillWrites.push(handle.spillPromise);
     }
     await Promise.allSettled(spillWrites);
+    return true;
   }
 
   /**

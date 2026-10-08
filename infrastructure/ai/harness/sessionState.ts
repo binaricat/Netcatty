@@ -10,6 +10,26 @@ export interface ActiveTerminalJobState {
   nextOffset: number;
 }
 
+/**
+ * Structural message subset used to rebuild a session's runtime state from a
+ * retained conversation prefix (e.g. when forking a session at a message).
+ */
+export interface SessionStateReplayMessage {
+  role: 'user' | 'assistant' | 'system' | 'tool';
+  content: string;
+  toolCalls?: ReadonlyArray<{
+    id: string;
+    name?: string;
+    arguments?: Record<string, unknown>;
+  }>;
+  toolResults?: ReadonlyArray<{
+    toolCallId: string;
+    toolName?: string;
+    content?: string;
+    isError?: boolean;
+  }>;
+}
+
 export interface TerminalReadCursorState {
   range: string;
   startLine?: number;
@@ -288,6 +308,46 @@ export class SessionStateStore {
     }
     if (lines.length === 0) return undefined;
     return lines.join('\n');
+  }
+
+  /**
+   * Rebuild `chatSessionId`'s state from a retained conversation prefix
+   * (e.g. when a session is forked at a message): the fork replays only the
+   * messages kept by the boundary, so runtime state derived from turns
+   * discarded by the branch (active jobs, poll offsets, cursors, blockers)
+   * is not copied from the source's latest state.
+   */
+  rebuildFromMessages(
+    chatSessionId: string,
+    messages: readonly SessionStateReplayMessage[],
+  ): void {
+    this.clear(chatSessionId);
+    // Pair each result with the nearest preceding unresolved call carrying
+    // the same id (same rule as the historical replay maps) so tool names and
+    // arguments survive the walk across messages.
+    const pendingCalls = new Map<string, { name: string; arguments?: Record<string, unknown> }>();
+    for (const message of messages) {
+      for (const call of message.toolCalls ?? []) {
+        if (!call?.id || typeof call.name !== 'string' || !call.name) continue;
+        pendingCalls.set(call.id, { name: call.name, arguments: call.arguments });
+      }
+      if (message.role === 'user') this.mergeFromUserGoal(chatSessionId, message.content);
+      if (message.role === 'assistant') this.mergeFromAssistantContent(chatSessionId, message.content);
+      for (const result of message.toolResults ?? []) {
+        const callId = result?.toolCallId;
+        if (!callId) continue;
+        const call = pendingCalls.get(callId)
+          ?? (result.toolName ? { name: result.toolName } : undefined);
+        pendingCalls.delete(callId);
+        this.updateFromToolResult(
+          chatSessionId,
+          call?.name ?? 'unknown',
+          call?.arguments,
+          result.content ?? '',
+          result.isError,
+        );
+      }
+    }
   }
 }
 
