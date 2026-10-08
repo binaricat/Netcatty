@@ -530,6 +530,106 @@ test("copyFileExclusiveWithFallback does not chmod a concurrent replacement on t
   );
 });
 
+test("copyFileExclusiveWithFallback flags a relabelled target so callers skip its cleanup", async (t) => {
+  const dir = makeTempDir("copy-fallback-relabel-flag-");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const source = path.join(dir, "staged");
+  const target = path.join(dir, "target");
+  fs.writeFileSync(source, "our copy bytes");
+  // The accelerated copy must succeed so the relabel-then-verify replacement
+  // branch runs; the mount then refuses chmod at both the pathname and the
+  // owned-handle level, like gvfsd-fuse-style destinations.
+  const chmodRestore = stubPromises("chmod", async () => {
+    throw Object.assign(new Error("ENOTSUP: operation not supported"), { code: "ENOTSUP" });
+  });
+  t.after(chmodRestore);
+  const handleChmodRestore = makeHandleStub(
+    "chmod",
+    Object.assign(new Error("ENOTSUP: operation not supported"), { code: "ENOTSUP" }),
+  );
+  t.after(handleChmodRestore);
+  // Simulate another writer swapping the pathname after the produced copy's
+  // identity was pinned but before the relabel: whatever moves to the side
+  // name must not verify as the copy this module produced. The fallback then
+  // relabels it back onto the pathname (link) and reports the handover.
+  const lstatOriginal = fs.promises.lstat;
+  const lstatRestore = stubPromises("lstat", async (...args) => {
+    if (!String(args[0]).includes(".stale-")) {
+      return lstatOriginal.apply(fs.promises, args);
+    }
+    return { dev: 999999, ino: 999999, size: 123456 };
+  });
+  t.after(lstatRestore);
+  let error = null;
+  try {
+    await copyFileExclusiveWithFallback(source, target, 0o600);
+  } catch (thrown) {
+    error = thrown;
+  }
+  assert.equal(error?.code, "EEXIST", "the relabelled target fails closed like COPYFILE_EXCL");
+  assert.equal(error.targetOwnershipRelinquished, true);
+  assert.equal(typeof error.stalePath, "string");
+  assert.ok(error.stalePath.startsWith(`${target}.stale-`));
+  assert.equal(
+    fs.readFileSync(target, "utf8"),
+    "our copy bytes",
+    "the restored pathname is never removed by this module",
+  );
+});
+
+test("promoteLocalTransfer preserves a ready pathname whose ownership the fallback relinquished", async (t) => {
+  const dir = makeTempDir("promote-relinquished-ready-");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const staged = path.join(dir, "staged");
+  const target = path.join(dir, "target");
+  fs.writeFileSync(staged, "our copy bytes");
+  fs.writeFileSync(target, "original");
+  // Force the EXDEV staging rename so the fallback copy creates the private
+  // ready pathname, then refuse chmod so the relabel-then-verify branch runs.
+  const renameOriginal = fs.promises.rename;
+  const renameRestore = stubPromises("rename", async (...args) => {
+    if (args[0] === staged) {
+      throw Object.assign(new Error("EXDEV: cross-device link not permitted"), { code: "EXDEV" });
+    }
+    return renameOriginal.apply(fs.promises, args);
+  });
+  t.after(renameRestore);
+  const chmodRestore = stubPromises("chmod", async () => {
+    throw Object.assign(new Error("ENOTSUP: operation not supported"), { code: "ENOTSUP" });
+  });
+  t.after(chmodRestore);
+  const handleChmodRestore = makeHandleStub(
+    "chmod",
+    Object.assign(new Error("ENOTSUP: operation not supported"), { code: "ENOTSUP" }),
+  );
+  t.after(handleChmodRestore);
+  // The relabel moves a pathname that no longer holds the produced copy: the
+  // fallback reports the handover instead of blessing a replacement, and the
+  // promotion's pre-commit cleanup must then leave the ready pathname in
+  // place rather than unlinking whoever now owns it.
+  const lstatOriginal = fs.promises.lstat;
+  const lstatRestore = stubPromises("lstat", async (...args) => {
+    if (!String(args[0]).includes(".stale-")) {
+      return lstatOriginal.apply(fs.promises, args);
+    }
+    return { dev: 999999, ino: 999999, size: 123456 };
+  });
+  t.after(lstatRestore);
+  let error = null;
+  try {
+    await transferBridge._promoteLocalTransferForTests(staged, target, {});
+  } catch (thrown) {
+    error = thrown;
+  }
+  assert.equal(error?.code, "EEXIST", "the relabelled ready pathname fails closed");
+  assert.equal(error.targetOwnershipRelinquished, true);
+  assert.equal(
+    fs.readdirSync(dir).filter((name) => name.endsWith(".ready")).length,
+    1,
+    "the ready pathname changed hands, so the caller must not unlink it",
+  );
+});
+
 test("local promotion without existingMode keeps the staged mode for cross-device resumable copies", async (t) => {
   const dir = makeTempDir("promote-staged-mode-");
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));

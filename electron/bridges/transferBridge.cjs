@@ -1275,7 +1275,16 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
       if (backedUp) failure.remoteBackupPath = backupPath;
       throw failure;
     }
-    await fs.promises.unlink(readyPath).catch(() => {});
+    // The copy fallback reports `targetOwnershipRelinquished` when the ready
+    // pathname changed hands before its identity was verified: the name then
+    // either was relabelled back to another writer's file or was already
+    // re-created by a newer writer, so unlinking it here would destroy that
+    // writer's only visible name (its data must not be discarded). Leave the
+    // pathname untouched; the fallback discloses any side name it moved data
+    // to via `error.stalePath`.
+    if (!error?.targetOwnershipRelinquished) {
+      await fs.promises.unlink(readyPath).catch(() => {});
+    }
     throw error;
   } finally {
     await preparedHandle?.close().catch(() => {});

@@ -38,10 +38,15 @@ function fileIdentity(statLike) {
   return [statLike?.dev, statLike?.ino, statLike?.size].join(":");
 }
 
+// An EEXIST carrying `targetOwnershipRelinquished` tells callers that the
+// destination name has changed hands: whoever (or whatever) now holds the
+// pathname did not create it through this module, so a caller's pre-commit
+// cleanup must not unlink the pathname (its bytes may have no other visible
+// name; a relabelled copy is disclosed via `stalePath` instead).
 function identityChangedError(target) {
   return Object.assign(
     new Error(`EEXIST: file exists, ${target} changed hands while its mode was being applied`),
-    { code: "EEXIST" },
+    { code: "EEXIST", targetOwnershipRelinquished: true },
   );
 }
 
@@ -191,7 +196,11 @@ async function copyFileExclusiveWithFallback(source, target, mode = null, option
               `EEXIST: file exists, ${target} changed while its mode could not be applied;`
               + ` the verified copy was left aside at ${stalePath}`,
             ),
-            { code: "EEXIST", stalePath, cause: restoreLinkFailure },
+            // `targetOwnershipRelinquished` tells the caller that the name
+            // was just relabelled back to its foreign owner (restored with
+            // `link`) or was already re-created by a newer writer, so the
+            // caller's pre-commit cleanup must not unlink the pathname.
+            { code: "EEXIST", stalePath, targetOwnershipRelinquished: true, cause: restoreLinkFailure },
           );
         }
         await fs.promises.unlink(stalePath);
