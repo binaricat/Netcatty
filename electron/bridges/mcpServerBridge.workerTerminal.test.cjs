@@ -1168,3 +1168,96 @@ test("deleting the last inheritor of a job owned by a live chat does not cancel 
     options: {},
   }]);
 });
+
+test("a failed orphan stop retries via the idle path until the job stops", async () => {
+  const requests = [];
+  const bridge = loadFreshBridge();
+  let stopAttempts = 0;
+  bridge.init({
+    sessions: new Map(),
+    electronModule: null,
+    terminalWorkerManager: {
+      request(channel, payload, options) {
+        requests.push({ channel, payload, options });
+        if (channel === "netcatty:ai:jobStart") {
+          return Promise.resolve({
+            ok: true,
+            jobId: "worker-job-orphan-retry",
+            sessionId: payload.sessionId,
+            status: "running",
+          });
+        }
+        if (channel === "netcatty:ai:jobStop") {
+          stopAttempts += 1;
+          // The first orphan cancellation fails transiently (worker busy);
+          // the retry on the idle path's poll must succeed.
+          if (stopAttempts === 1) return Promise.reject(new Error("worker busy"));
+          return Promise.resolve({ ok: true, jobId: payload.jobId, completed: true });
+        }
+        if (channel === "netcatty:ai:jobPoll") {
+          return Promise.resolve({ ok: true, jobId: payload.jobId, completed: false });
+        }
+        return Promise.reject(new Error(`unexpected worker request: ${channel}`));
+      },
+      send(channel, payload, options) {
+        requests.push({ channel, payload, options });
+      },
+    },
+  });
+  bridge.setPermissionMode("auto");
+  bridge.setCommandBlocklist([]);
+  bridge.updateSessionMetadata([
+    {
+      sessionId: "ssh-orphan-retry",
+      hostname: "host.example",
+      protocol: "ssh",
+      connected: true,
+    },
+  ], "chat-src");
+  bridge.updateSessionMetadata([{
+    sessionId: "ssh-orphan-retry",
+    hostname: "host.example",
+    protocol: "ssh",
+    connected: true,
+  }], "chat-branch");
+
+  const started = await bridge.dispatchBuiltinRpc("netcatty/jobStart", {
+    sessionId: "ssh-orphan-retry",
+    command: "sleep 30",
+    chatSessionId: "chat-src",
+  });
+  assert.equal(started.ok, true);
+
+  bridge.registerInheritedBackgroundJobs("chat-branch", "chat-src", ["worker-job-orphan-retry"]);
+  // Deleting the source chat preserves the job for the live branch; deleting
+  // the last branch then triggers the orphan cancellation, whose worker stop
+  // rejects. No live chat can poll or stop the job any more.
+  await bridge.cleanupScopedMetadata("chat-src");
+  await bridge.cleanupScopedMetadata("chat-branch");
+  assert.deepEqual(requests.find((entry) => entry.channel === "netcatty:ai:jobStop"), {
+    channel: "netcatty:ai:jobStop",
+    payload: { jobId: "worker-job-orphan-retry", sessionId: "ssh-orphan-retry", chatSessionId: "chat-src" },
+    options: {},
+  });
+
+  const stillActive = await bridge.hasActiveWorkerJobForTerminalSession("ssh-orphan-retry");
+  assert.equal(stillActive, true);
+  // The rejection must be retried, not merely retained: the idle path's next
+  // poll sends the stop again with the job's owner chat id.
+  const retryStop = requests.filter((entry) => entry.channel === "netcatty:ai:jobStop")[1];
+  assert.deepEqual(retryStop, {
+    channel: "netcatty:ai:jobStop",
+    payload: { jobId: "worker-job-orphan-retry", sessionId: "ssh-orphan-retry", chatSessionId: "chat-src" },
+    options: {},
+  });
+  // The confirmed retry deletes the registry entry (and its inheritor
+  // bookkeeping): nothing keeps polling the stopped job afterwards.
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(stopAttempts, 2);
+  assert.equal(await bridge.hasActiveWorkerJobForTerminalSession("ssh-orphan-retry"), false);
+  const afterStop = await bridge.dispatchBuiltinRpc("netcatty/jobPoll", {
+    jobId: "worker-job-orphan-retry",
+    chatSessionId: "chat-branch",
+  });
+  assert.deepEqual(afterStop, { ok: false, error: "Background job not found" });
+});

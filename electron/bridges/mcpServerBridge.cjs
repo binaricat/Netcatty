@@ -151,6 +151,15 @@ const cancelledChatSessions = new Set();
 const activeExecChatSessions = new Map(); // chatSessionId -> { sessionId, command, startedAt }
 const backgroundJobs = new Map(); // jobId -> job metadata
 const workerBackgroundJobs = new Map(); // jobId -> { chatSessionId, sessionId }
+// Orphaned inherited jobs whose cancellation stop was sent but never confirmed
+// (the worker rejected or the request failed). Once the owner chat and every
+// inheriting branch are gone there is no live chat left to poll/stop the job,
+// so nothing would ever finish the cancellation and the worker-side command —
+// with its held terminal execution lock — would run until the terminal is
+// explicitly closed. The idle path's periodic job poll retries the stop for
+// these ids until the worker confirms the stop or reports the job was never
+// running.
+const orphanJobStopRetryPending = new Set();
 const pendingWorkerJobStarts = new Map(); // sessionId -> Set<{ chatSessionId, cancelled }>
 const activeSessionExecutions = new Map(); // sessionId -> { kind, startedAt, token }
 const activeSessionSftpOps = new Map(); // opId -> { chatSessionId, sessionId, cancel }
@@ -1893,6 +1902,9 @@ function isInheritedJobInheritor(jobId, chatSessionId) {
 function forgetInheritedJobInheritors(jobId) {
   inheritedJobInheritors.delete(jobId);
   ownerTornDownInheritedJobs.delete(jobId);
+  // The job's registry lifecycle ended; a pending orphan-stop retry marker
+  // would otherwise survive it and never become actionable again.
+  orphanJobStopRetryPending.delete(jobId);
 }
 
 // Best-effort stop of an orphaned inherited job: its owner chat is already
@@ -1922,8 +1934,11 @@ function cancelOrphanedInheritedJob(jobId) {
         if (!result?.completed
           && !(result?.ok === false && /not found/i.test(result?.error || ""))) {
           // Stop not confirmed (job still running or the request failed):
-          // retain the entry so the terminal session's later poll, stop, and
-          // idle-close cleanup paths can finish the cancellation.
+          // retain the entry and remember the job so the terminal session's
+          // periodic idle-close poll (the only recurring path left for an
+          // orphaned job with no live chat to poll/stop it) retries the
+          // cancellation instead of just rescheduling itself forever.
+          orphanJobStopRetryPending.add(jobId);
           return;
         }
         if (workerBackgroundJobs.get(jobId) === workerJob) {
@@ -1931,12 +1946,16 @@ function cancelOrphanedInheritedJob(jobId) {
           forgetInheritedJobInheritors(jobId);
         }
       }).catch(() => {
-        // Transient worker failure while stopping: retain the entry for a
-        // cleanup retry instead of orphaning the running command.
+        // Transient worker failure while stopping: retain the entry (and the
+        // retry marker) so the idle path's next poll retries the stop instead
+        // of orphaning the running command.
+        orphanJobStopRetryPending.add(jobId);
       });
     } catch {
       // The worker may already be gone while cancelling the orphaned job;
-      // keep the entry so a later cleanup pass can retry the stop.
+      // keep the entry (and the retry marker) so a later cleanup pass can
+      // retry the stop.
+      orphanJobStopRetryPending.add(jobId);
     }
     return;
   }
@@ -1989,6 +2008,9 @@ function registerInheritedBackgroundJobs(chatSessionId, ownerChatSessionId, jobI
       const inheritors = inheritedJobInheritors.get(jobId) ?? new Set();
       inheritors.add(chatSessionId);
       inheritedJobInheritors.set(jobId, inheritors);
+      // A live branch owns the inherited job again; the pending orphan-stop
+      // retry would otherwise stop a job this chat still polls.
+      orphanJobStopRetryPending.delete(jobId);
       registered += 1;
       continue;
     }
@@ -1997,6 +2019,7 @@ function registerInheritedBackgroundJobs(chatSessionId, ownerChatSessionId, jobI
       const inheritors = inheritedJobInheritors.get(jobId) ?? new Set();
       inheritors.add(chatSessionId);
       inheritedJobInheritors.set(jobId, inheritors);
+      orphanJobStopRetryPending.delete(jobId);
       registered += 1;
     }
   }
@@ -2105,6 +2128,15 @@ async function hasActiveWorkerJobForTerminalSession(sessionId) {
         workerBackgroundJobs.delete(jobId);
         forgetInheritedJobInheritors(jobId);
         continue;
+      }
+      if (orphanJobStopRetryPending.has(jobId)
+        && (inheritedJobInheritors.get(jobId)?.size ?? 0) === 0) {
+        // An earlier orphan stop never confirmed (the request rejected or the
+        // job is still running) and no live chat inherits or owns the job any
+        // more: nothing else can ever finish the cancellation, so retry it on
+        // this periodic idle poll rather than leaving the worker-side command
+        // (and its held execution lock) running until the terminal closes.
+        cancelOrphanedInheritedJob(jobId);
       }
       return true;
     } catch {
