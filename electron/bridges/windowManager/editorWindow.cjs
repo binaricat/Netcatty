@@ -275,6 +275,10 @@ function createEditorWindowApi(ctx) {
           .finally(() => { nativeClosePending = false; });
       });
       win.on("closed", releaseLifecycle);
+      win.webContents.on("render-process-gone", () => {
+        // Destroying reuses closed cleanup for ownership and pending requests.
+        if (isLiveWindow(win)) win.destroy();
+      });
       win.on("page-title-updated", (e) => { e.preventDefault(); });
 
       try {

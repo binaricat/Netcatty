@@ -469,16 +469,16 @@ function normalizeDevServerUrl(urlString) {
   try {
     const u = new URL(urlString);
     const host = u.hostname;
-    // Vite often binds to 0.0.0.0; Chromium can't navigate to it.
-    // Keep 127.0.0.1 as-is so Windows Electron does not bounce IPv4 onto IPv6-only localhost.
+    // Vite often binds to 0.0.0.0; Chromium can't navigate to it. Prefer localhost.
     if (
       host === "0.0.0.0" ||
+      host === "127.0.0.1" ||
       host === "::1" ||
       host === "[::1]" ||
       host === "[::]" ||
       host === "::"
     ) {
-      u.hostname = "127.0.0.1";
+      u.hostname = "localhost";
       return u.toString();
     }
     return urlString;

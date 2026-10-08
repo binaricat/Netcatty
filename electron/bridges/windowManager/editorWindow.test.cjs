@@ -197,3 +197,37 @@ test("editor close reads the live quitting context instead of a captured value",
   assert.equal(win.isDestroyed(), true);
   assert.equal(win.sent.some((request) => request.channel === "netcatty:window:editorCloseTabs"), false);
 });
+
+test("renderer loss destroys the dead window, releases ownership, and allows a fresh open", async (t) => {
+  const h = harness();
+  t.after(() => h.windows.forEach((win) => { if (!win.destroyed) win.destroy(); }));
+  const opening = h.open("first");
+  const win = h.windows[0];
+  win.loaded(); h.ready(win); await tick();
+  h.accept(win, win.sent[0]); await opening;
+  const closing = h.api.closeEditorTabs(h.electron, { editorIds: ["first"] });
+  await tick();
+  win.webContents.emit("render-process-gone", {}, { reason: "crashed" });
+  assert.equal(win.isDestroyed(), true);
+  assert.equal(h.api.getEditorWindow(), null);
+  assert.equal(h.api.hasEditorTabsForSource(h.source), false);
+  assert.equal((await closing).cancelled, true, "pending requests settle without the prompt timeout");
+  assert.deepEqual(h.source.sent.at(-1), { channel: "netcatty:window:editorTabsClosed", payload: { editorIds: ["first"] } });
+  const nextOpening = h.open("second");
+  const replacement = h.windows[1];
+  assert.ok(replacement);
+  replacement.loaded(); h.ready(replacement); await tick();
+  h.accept(replacement, replacement.sent[0]);
+  assert.equal((await nextOpening).success, true);
+});
+
+test("renderer loss during a pending handoff leaves its source contents owned by the source", async (t) => {
+  const h = harness();
+  t.after(() => h.windows.forEach((win) => { if (!win.destroyed) win.destroy(); }));
+  const opening = h.open("first");
+  const win = h.windows[0];
+  win.webContents.emit("render-process-gone", {}, { reason: "oom" });
+  assert.equal(win.isDestroyed(), true);
+  assert.equal((await opening).success, false);
+  assert.deepEqual(h.source.sent, [], "unaccepted source copies must not receive a tab-closed notification");
+});

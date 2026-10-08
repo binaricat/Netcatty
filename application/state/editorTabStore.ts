@@ -40,8 +40,7 @@ export interface EditorTab {
 
 type Listener = () => void;
 
-let idCounter = 0;
-const genId = (): EditorTabId => `edt_${Date.now().toString(36)}_${(++idCounter).toString(36)}`;
+const genId = (): EditorTabId => `edt_${crypto.randomUUID()}`;
 
 export const tabIsDirty = (tab: EditorTab): boolean =>
   tab.placement === "window" ? tab.windowDirty === true : tab.content !== tab.baselineContent;
