@@ -183,6 +183,7 @@ import {
 } from "./terminalInterruptDiagnostics";
 import { clearTerminalInputStateForInterrupt } from "./terminalInterruptInputState";
 import { getFlowControllerForTerm } from "./terminalSessionAttachment";
+import { SYNC_BLOCK_TIMEOUT_MS } from "./terminalSyncBlockFilter";
 import { createTerminalResizeScheduler } from "./terminalResizeScheduler";
 import { createTerminalLinkHandler } from "./terminalLinkHandler";
 import { writeLocalTerminalDataInOrder } from "./terminalUnfocusedRepaint";
@@ -3174,6 +3175,13 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   // Track DEC 2026 synchronized-output blocks so CSI 2 J can erase in place for
   // Codex/Claude Code TUIs instead of pushing visible rows into scrollback.
   let inDec2026SyncBlock = false;
+  let dec2026SyncBlockTimeout: ReturnType<typeof setTimeout> | undefined = undefined;
+  const clearDec2026SyncBlockTimeout = (): void => {
+    if (dec2026SyncBlockTimeout !== undefined) {
+      clearTimeout(dec2026SyncBlockTimeout);
+      dec2026SyncBlockTimeout = undefined;
+    }
+  };
 
   // xterm's IFunctionIdentifier has no `params` field, so the handler must be
   // registered for all `ESC[?…h/l` sequences and filter on the params it
@@ -3185,6 +3193,16 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     (params) => {
       if (isDec2026SyncModeParams(params)) {
         inDec2026SyncBlock = true;
+        clearDec2026SyncBlockTimeout();
+        // xterm's RenderService expires synchronizedOutputMode after its safety
+        // timeout when a TUI crashes without emitting the matching reset, and
+        // the parallel tracker in terminalSyncBlockFilter.ts does the same.
+        // Expire this flag on the identical schedule so a stale block cannot
+        // keep making CSI 2 J preserve the viewport or skip scrollback wiping.
+        dec2026SyncBlockTimeout = setTimeout(() => {
+          dec2026SyncBlockTimeout = undefined;
+          inDec2026SyncBlock = false;
+        }, SYNC_BLOCK_TIMEOUT_MS);
       }
       return false;
     },
@@ -3194,6 +3212,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     (params) => {
       if (isDec2026SyncModeParams(params)) {
         inDec2026SyncBlock = false;
+        clearDec2026SyncBlockTimeout();
       }
       return false;
     },
@@ -3512,6 +3531,7 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       eraseScrollbackDisposable.dispose();
       dec2026SyncStartDisposable.dispose();
       dec2026SyncEndDisposable.dispose();
+      clearDec2026SyncBlockTimeout();
       for (const disposable of cursorPositionReportRequestDisposables) {
         disposable.dispose();
       }
