@@ -140,6 +140,13 @@ export interface AliasSessionHandlesOptions {
   retainedHandleIds?: ReadonlySet<string>;
 }
 
+interface PendingAliasMaterialization {
+  targetChatSessionId: string;
+  sourceChatSessionIds: Set<string>;
+  handles: ToolOutputHandle[];
+  attempts: number;
+}
+
 export interface ToolOutputStoreOptions {
   maxHandleChars?: number;
   maxHandlesPerSession?: number;
@@ -223,13 +230,23 @@ export class ToolOutputStore {
   // The failed aliases still read their content from the source chat session's
   // durable records, so the source is tracked here too: `prune` must not
   // delete it until every retry for it has drained.
-  private readonly pendingAliasMaterializations = new Map<string, {
-    targetChatSessionId: string;
-    sourceChatSessionIds: Set<string>;
-    handles: ToolOutputHandle[];
-    attempts: number;
-  }>();
+  private readonly pendingAliasMaterializations = new Map<string, PendingAliasMaterialization>();
+  // Retry items whose durable-copy attempt is currently running. The pending
+  // map does not contain them while their retry re-reads the source-owned
+  // file, so source-deletion waits (`prune`) must also observe this set —
+  // otherwise the deletion could fire underneath the in-flight read.
+  private readonly inFlightAliasMaterializations = new Set<PendingAliasMaterialization>();
   private aliasMaterializationRetryTimer?: ReturnType<typeof setTimeout>;
+  // Notified whenever the pending alias restore queue changes; lets `prune`
+  // wait until every queued alias restore retry that still needs its source
+  // durable records has finished before deleting them.
+  private readonly aliasRestoreDrainListeners = new Set<() => void>();
+  // Source chats whose `prune` flushed queued alias restore retries. The
+  // flush bypasses the post-prune restore rejection for that chat (the deny
+  // filter and session generation would otherwise make every retry fail even
+  // though its durable records still exist), keyed by chat id with a count so
+  // concurrent prunes release independently.
+  private readonly restoreRetryExemptions = new Map<string, number>();
   // Notified whenever the pending alias materialization queue changes; lets
   // `prune` wait until every retry that still needs its source durable
   // records has finished before deleting them.
@@ -270,6 +287,9 @@ export class ToolOutputStore {
         retainedHandleIds: new Set(request.handleIds),
       }).catch(() => {});
     }
+    // Restore-drain waiters must not observe a queue that was emptied while
+    // its replayed alias passes are still running against the source records.
+    this.notifyAliasRestoreWaiters();
     // Restores that still fail are re-queued by the alias pass; keep retrying
     // them later so a transient rejection does not permanently drop them.
     this.schedulePendingAliasRestoreReplay();
@@ -293,6 +313,14 @@ export class ToolOutputStore {
     }
     this.enforcePendingAliasRestoresLimit();
     this.schedulePendingAliasRestoreReplay();
+    this.notifyAliasRestoreWaiters();
+  }
+
+  private notifyAliasRestoreWaiters(): void {
+    for (const notify of [...this.aliasRestoreDrainListeners]) {
+      this.aliasRestoreDrainListeners.delete(notify);
+      notify();
+    }
   }
 
   private schedulePendingAliasRestoreReplay(): void {
@@ -319,8 +347,12 @@ export class ToolOutputStore {
           this.pendingAliasRestoreReplayAttempts = this.pendingAliasRestores.size > 0
             ? this.pendingAliasRestoreReplayAttempts + 1
             : 0;
+          this.notifyAliasRestoreWaiters();
           this.schedulePendingAliasRestoreReplay();
         });
+      // The queue was emptied into running alias passes; wake restore-drain
+      // waiters so they track those passes instead of the (now empty) queue.
+      this.notifyAliasRestoreWaiters();
     }, delay);
   }
 
@@ -646,7 +678,11 @@ export class ToolOutputStore {
     }) => boolean,
   ): Promise<void> {
     for (;;) {
-      if (![...this.pendingAliasMaterializations.values()].some(predicate)) return;
+      const items = [
+        ...this.pendingAliasMaterializations.values(),
+        ...this.inFlightAliasMaterializations,
+      ];
+      if (!items.some(predicate)) return;
       await new Promise<void>(resolve => {
         this.materializationDrainListeners.add(resolve);
       });
@@ -680,33 +716,134 @@ export class ToolOutputStore {
       // `setPersistence` provides it again instead of burning attempts.
       return;
     }
-    const pending = [...this.pendingAliasMaterializations.values()];
-    this.pendingAliasMaterializations.clear();
-    for (const item of pending) {
-      const attempts = item.attempts + 1;
-      if (this.lifecycleDenyFilter.has(`chat:${item.targetChatSessionId}`)) continue;
-      const targetMap = this.bySession.get(item.targetChatSessionId);
-      const handles = item.handles.filter(
-        handle => !handle.evicted && targetMap?.get(handle.id) === handle,
-      );
-      if (handles.length === 0) continue;
-      const failed = await this.materializeDurableHandles(item.targetChatSessionId, handles);
-      // Keep failed aliases pending indefinitely (the retry timer backs off
-      // with attempts): a later turn can install working persistence, and
-      // dropping the request here would permanently lose the branch copy.
-      if (failed.length > 0) {
-        this.pendingAliasMaterializations.set(item.targetChatSessionId, {
-          targetChatSessionId: item.targetChatSessionId,
-          sourceChatSessionIds: item.sourceChatSessionIds,
-          handles: failed,
-          attempts,
-        });
+    for (const item of [...this.pendingAliasMaterializations.values()]) {
+      // A concurrent retry run may already be processing this item.
+      if (this.inFlightAliasMaterializations.has(item)) continue;
+      // Take the item out of the pending map while its retry runs so a
+      // concurrent failure for the same target merges into a separate entry
+      // instead of being clobbered, and track it as in flight so
+      // source-deletion waits still observe the retry that is currently
+      // re-reading the source-owned durable file.
+      this.pendingAliasMaterializations.delete(item.targetChatSessionId);
+      this.inFlightAliasMaterializations.add(item);
+      try {
+        const attempts = item.attempts + 1;
+        if (this.lifecycleDenyFilter.has(`chat:${item.targetChatSessionId}`)) continue;
+        const targetMap = this.bySession.get(item.targetChatSessionId);
+        const handles = item.handles.filter(
+          handle => !handle.evicted && targetMap?.get(handle.id) === handle,
+        );
+        if (handles.length === 0) continue;
+        const failed = await this.materializeDurableHandles(item.targetChatSessionId, handles);
+        // Keep failed aliases pending indefinitely (the retry timer backs off
+        // with attempts): a later turn can install working persistence, and
+        // dropping the request here would permanently lose the branch copy.
+        if (failed.length > 0) {
+          this.requeueAliasMaterializationRetry(item, failed, attempts);
+        }
+      } finally {
+        this.inFlightAliasMaterializations.delete(item);
       }
     }
     // Source sessions scheduled for deletion may now be drainable (retries
     // succeeded or their entries were dropped above).
     this.notifyMaterializationWaiters();
     if (this.pendingAliasMaterializations.size > 0) this.scheduleAliasMaterializationRetry();
+  }
+
+  private requeueAliasMaterializationRetry(
+    item: PendingAliasMaterialization,
+    failed: ToolOutputHandle[],
+    attempts: number,
+  ): void {
+    // Merge into any entry a concurrent alias pass queued while this retry
+    // was in flight instead of clobbering it, preserving the higher attempt
+    // count for backoff.
+    const existing = this.pendingAliasMaterializations.get(item.targetChatSessionId);
+    if (existing) {
+      existing.sourceChatSessionIds = new Set([
+        ...existing.sourceChatSessionIds,
+        ...item.sourceChatSessionIds,
+      ]);
+      existing.handles.push(...failed.filter(handle => !existing.handles.includes(handle)));
+      existing.attempts = Math.max(existing.attempts, attempts);
+    } else {
+      this.pendingAliasMaterializations.set(item.targetChatSessionId, {
+        targetChatSessionId: item.targetChatSessionId,
+        sourceChatSessionIds: item.sourceChatSessionIds,
+        handles: failed,
+        attempts,
+      });
+    }
+    this.scheduleAliasMaterializationRetry();
+  }
+
+  /**
+   * Flush queued alias-restore retries for a source chat session that `prune`
+   * is deleting. Each request is replayed immediately (instead of waiting for
+   * its scheduled retry timer) and exempted from the post-prune restore
+   * rejection, so the restored handles can still be published and durably
+   * copied into the branch namespace while the source's durable records still
+   * exist. Returns the launched alias passes so the prune deletion wait can
+   * observe them; `exempted` tells the caller it must release the exemption
+   * once the restore retries have drained.
+   */
+  private flushPendingAliasRestoresForSource(chatSessionId: string): {
+    flights: Promise<void>[];
+    exempted: boolean;
+  } {
+    const flights: Promise<void>[] = [];
+    for (const [key, request] of [...this.pendingAliasRestores]) {
+      if (request.sourceChatSessionId !== chatSessionId) continue;
+      this.pendingAliasRestores.delete(key);
+      flights.push(this.aliasSessionHandles(request.sourceChatSessionId, request.targetChatSessionId, {
+        retainedHandleIds: new Set(request.handleIds),
+      }).catch(() => {}));
+    }
+    if (flights.length === 0) return { flights, exempted: false };
+    this.restoreRetryExemptions.set(
+      chatSessionId,
+      (this.restoreRetryExemptions.get(chatSessionId) ?? 0) + 1,
+    );
+    this.notifyAliasRestoreWaiters();
+    return { flights, exempted: true };
+  }
+
+  /**
+   * Resolves once no queued alias restore retry for the given source chat
+   * session remains and every alias pass it flushed has settled. Retries that
+   * reject transiently are re-queued and retried with backoff while the
+   * source's durable records still exist, so the wait follows the queue (and
+   * the alias passes it launches) until it drains. Queued requests can never
+   * run without a `restore` capability, so they are treated as drained rather
+   * than blocking the deletion forever.
+   */
+  private async waitForPendingAliasRestoreRetriesDrain(chatSessionId: string): Promise<void> {
+    for (;;) {
+      const hasPendingRetries = [...this.pendingAliasRestores.values()]
+        .some(request => request.sourceChatSessionId === chatSessionId);
+      const flights = [...(this.aliasMaterializationPromises.get(chatSessionId) ?? [])];
+      if (!hasPendingRetries && flights.length === 0) return;
+      if (!this.persistence?.restore) return;
+      if (flights.length > 0) {
+        await Promise.allSettled(flights);
+        continue;
+      }
+      // No pass is running: wait for the queue to flush (its scheduled replay
+      // timer fires this listener) before re-checking.
+      await new Promise<void>(resolve => {
+        this.aliasRestoreDrainListeners.add(resolve);
+      });
+    }
+  }
+
+  private releaseRestoreRetryExemption(chatSessionId: string): void {
+    const count = (this.restoreRetryExemptions.get(chatSessionId) ?? 0) - 1;
+    if (count > 0) {
+      this.restoreRetryExemptions.set(chatSessionId, count);
+    } else {
+      this.restoreRetryExemptions.delete(chatSessionId);
+    }
   }
 
   private isPathReferencedByOtherHandles(path: string, except: ToolOutputHandle): boolean {
@@ -804,8 +941,8 @@ export class ToolOutputStore {
    * it is still in flight. Callers that would otherwise delete the session's
    * durable tool-output records through a direct (unprotected) path must
    * await this promise instead: it only fires after in-flight alias passes
-   * and queued alias materialization retries finish reading the source
-   * records.
+   * and queued alias restore retries / alias materialization retries finish
+   * reading the source records.
    */
   getSessionDeletionPromise(chatSessionId: string): Promise<void> | undefined {
     return this.sessionDeletionPromises.get(chatSessionId);
@@ -835,18 +972,31 @@ export class ToolOutputStore {
     if (persistence && deleteSessionImpl) {
       // Deleting the session must not break work that still reads its durable
       // records: concurrently running alias passes may be reading its files,
-      // and failed alias copies are queued for retries that re-read the
-      // source-owned file on every attempt. Wait for the alias passes and for
-      // the queued retries targeting this session to drain before deleting.
+      // failed alias copies are queued for retries that re-read the
+      // source-owned file on every attempt, and queued alias restore retries
+      // for this source still need its records (after a deletion every retry
+      // would fail permanently, leaving the retained branch handle
+      // unreadable). Flush those restore retries immediately — exempted from
+      // the post-prune restore rejection so they can still restore and
+      // durably copy handles into the branch — and wait for the alias passes,
+      // the queued materialization retries, and the restore retries to drain
+      // before deleting.
+      const flushed = this.flushPendingAliasRestoresForSource(chatSessionId);
       const pendingFlights = [...(this.aliasMaterializationPromises.get(chatSessionId) ?? [])];
       const waitForSourceReads = Promise.all([
         Promise.allSettled(pendingFlights),
         this.waitForPendingAliasMaterializationsDrain(item => (
           item.sourceChatSessionIds.has(chatSessionId)
         )),
+        this.waitForPendingAliasRestoreRetriesDrain(chatSessionId),
       ]);
+      const releaseExemption = flushed.exempted
+        ? (): void => this.releaseRestoreRetryExemption(chatSessionId)
+        : undefined;
       const deleteSession = (): Promise<void> => deleteSessionImpl.call(persistence, chatSessionId);
-      deletion = waitForSourceReads
+      deletion = (releaseExemption
+        ? waitForSourceReads.finally(releaseExemption)
+        : waitForSourceReads)
         .then(deleteSession)
         .then(
           () => { deletionSucceeded = true; },
@@ -1062,8 +1212,14 @@ export class ToolOutputStore {
 
   private async restoreHandle(handleId: string, chatSessionId: string): Promise<ToolOutputHandle | undefined> {
     if (!this.persistence?.restore) return undefined;
-    const pendingDeletion = this.sessionDeletionPromises.get(chatSessionId);
-    if (pendingDeletion) await pendingDeletion;
+    // Flushed prune restore retries must not wait for the deletion promise
+    // (which itself waits for these retries to drain) or that dependency
+    // would deadlock.
+    const restoreExempted = (this.restoreRetryExemptions.get(chatSessionId) ?? 0) > 0;
+    if (!restoreExempted) {
+      const pendingDeletion = this.sessionDeletionPromises.get(chatSessionId);
+      if (pendingDeletion) await pendingDeletion;
+    }
     const key = `${chatSessionId}:${handleId}`;
     const pending = this.restorePromises.get(key);
     if (pending) return pending;
@@ -1096,11 +1252,24 @@ export class ToolOutputStore {
     const restoredTerminalKey = restored.record.terminalSessionId
       ? `${chatSessionId}:${restored.record.terminalSessionId}`
       : undefined;
+    // Flushed prune restore retries run under an exemption: the source's
+    // durable records still exist while its deletion is deferred, and the
+    // post-prune deny filter / generation bump would otherwise reject (and
+    // delete) the very records the branches still need.
+    const restoreExempted = (this.restoreRetryExemptions.get(chatSessionId) ?? 0) > 0;
     if (
-      this.failedSessionDeletions.has(chatSessionId)
-      || this.lifecycleDenyFilter.has(`chat:${chatSessionId}`)
-      || (this.sessionGenerations.get(chatSessionId) ?? 0) !== generation
-      || (
+      !restoreExempted
+      && (
+        this.failedSessionDeletions.has(chatSessionId)
+        || this.lifecycleDenyFilter.has(`chat:${chatSessionId}`)
+        || (this.sessionGenerations.get(chatSessionId) ?? 0) !== generation
+      )
+    ) {
+      void this.persistence?.delete(restored.path).catch(() => {});
+      return undefined;
+    }
+    if (
+      (
         restoredTerminalKey
         && (this.terminalMutationGenerations.get(restoredTerminalKey) ?? 0)
           !== (terminalMutationGenerations.get(restoredTerminalKey) ?? 0)

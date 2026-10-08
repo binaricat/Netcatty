@@ -1375,6 +1375,132 @@ test('a rejected restore is queued and retried instead of dropping the alias', a
   assert.equal(read?.content, 'persisted content');
 });
 
+test('prune flushes queued alias restore retries and defers deletion until they drain', async () => {
+  const base = createFakeToolOutputPersistence();
+  storeDurableRecord(base, 'chat-source', 'h1', 'persisted content', 16);
+  const deletedSessionIds: string[] = [];
+  let failingRestores = 1;
+  const persistence: ToolOutputPersistence & { entries: typeof base.entries } = {
+    ...base,
+    restore: async (handleId, chatSessionId) => {
+      if (failingRestores > 0) {
+        failingRestores -= 1;
+        throw new Error('secure store temporarily locked');
+      }
+      return base.restore(handleId, chatSessionId);
+    },
+    deleteSession: async chatSessionId => {
+      deletedSessionIds.push(chatSessionId);
+      for (const key of [...base.entries.keys()]) {
+        if (key.startsWith(`${chatSessionId}:`)) base.entries.delete(key);
+      }
+    },
+  };
+  const store = new ToolOutputStore({ persistence });
+
+  // The first restore rejects transiently, so the request is queued instead
+  // of dropping the branch alias.
+  await store.aliasSessionHandles('chat-source', 'chat-branch', {
+    retainedHandleIds: new Set(['h1']),
+  });
+  assert.equal(store.get('h1', 'chat-branch'), undefined);
+
+  // Deleting the source session flushes the queued restore immediately,
+  // keeps it exempt from the post-prune restore rejection, and defers the
+  // durable deletion until the retry (which still reads the source's durable
+  // record) has drained.
+  store.prune('chat-source');
+  assert.deepEqual(deletedSessionIds, []);
+  assert.equal(persistence.entries.has('chat-source:h1'), true);
+
+  await new Promise(resolve => setTimeout(
+    resolve,
+    TOOL_OUTPUT_ALIAS_MATERIALIZATION_RETRY_DELAY_MS * 3 + 50,
+  ));
+  // The flushed restore succeeded, the branch owns a durable copy, and the
+  // deferred deletion of the source session finally ran.
+  assert.equal(persistence.entries.has('chat-branch:h1'), true);
+  assert.deepEqual(deletedSessionIds, ['chat-source']);
+  assert.equal(persistence.entries.has('chat-source:h1'), false);
+
+  const read = await store.readChunkAsync({ handleId: 'h1' }, 'chat-branch');
+  assert.equal(read?.content, 'persisted content');
+});
+
+test('an in-flight materialization retry still defers deletion of its source records', async () => {
+  const base = createFakeToolOutputPersistence();
+  const deletedSessionIds: string[] = [];
+  let failingBranchWrites = 1;
+  let attemptOneWriteFailed = false;
+  let retryReadStarted!: () => void;
+  const retryReadStartedPromise = new Promise<void>(resolve => {
+    retryReadStarted = resolve;
+  });
+  let releaseRetryRead!: () => void;
+  const releaseRetryReadPromise = new Promise<void>(resolve => {
+    releaseRetryRead = resolve;
+  });
+  const persistence: ToolOutputPersistence & { entries: typeof base.entries } = {
+    ...base,
+    write: async (record, content) => {
+      if (record.chatSessionId === 'chat-branch' && failingBranchWrites > 0) {
+        failingBranchWrites -= 1;
+        attemptOneWriteFailed = true;
+        throw new Error('temporarily busy');
+      }
+      return base.write(record, content);
+    },
+    read: async (path, request) => {
+      // Only the queued retry (whose branch write attempt already failed) is
+      // gated while it re-reads the source-owned file.
+      if (attemptOneWriteFailed) {
+        retryReadStarted();
+        await releaseRetryReadPromise;
+      }
+      return base.read(path, request);
+    },
+    deleteSession: async chatSessionId => {
+      deletedSessionIds.push(chatSessionId);
+      for (const key of [...base.entries.keys()]) {
+        if (key.startsWith(`${chatSessionId}:`)) base.entries.delete(key);
+      }
+    },
+  };
+  const store = new ToolOutputStore({ persistence });
+  const handle = store.store({
+    chatSessionId: 'chat-source',
+    capabilityId: 'terminal.execute',
+    content: 'A'.repeat(50_000),
+  });
+  await store.flush('chat-source');
+
+  // The first branch-owned materialization write fails, so the retry queue
+  // now depends on the source-owned durable record.
+  await store.aliasSessionHandles('chat-source', 'chat-branch', {
+    retainedHandleIds: new Set([handle.id]),
+  });
+  assert.equal(persistence.entries.has(`chat-branch:${handle.id}`), false);
+
+  // Wait until the queued retry is in flight and re-reading the source-owned
+  // file, then delete the source session. The retry is not in the pending
+  // queue while it runs, so deletion must still be deferred until its read
+  // completes instead of firing underneath it.
+  await retryReadStartedPromise;
+  store.prune('chat-source');
+  assert.deepEqual(deletedSessionIds, []);
+  assert.equal(persistence.entries.has(`chat-source:${handle.id}`), true);
+
+  releaseRetryRead();
+  await new Promise(resolve => setTimeout(resolve, 100));
+  // The retry materialized the branch-owned copy, so the deferred deletion
+  // of the source session finally ran.
+  assert.equal(persistence.entries.has(`chat-branch:${handle.id}`), true);
+  assert.deepEqual(deletedSessionIds, ['chat-source']);
+
+  const read = await store.readChunkAsync({ handleId: handle.id }, 'chat-branch');
+  assert.equal(read?.totalChars, 50_000);
+});
+
 function storeDurableRecord(
   persistence: ReturnType<typeof createFakeToolOutputPersistence>,
   chatSessionId: string,
