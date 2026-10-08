@@ -615,6 +615,37 @@ test("copyFileExclusiveWithFallback flags a relabelled target so callers skip it
   );
 });
 
+test("copyFileExclusiveWithFallback flags a stream-open EEXIST so callers skip its cleanup", async (t) => {
+  const dir = makeTempDir("copy-fallback-stream-race-");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const source = path.join(dir, "staged");
+  const target = path.join(dir, "target");
+  fs.writeFileSync(source, "our copy bytes");
+  // Another writer creates `target` after the accelerated-copy path decides to
+  // stream (copyFile fails with a fallback errno) but before the exclusive
+  // ("wx") stream open, so the open rejects with a bare EEXIST. The fallback
+  // must mark the handover so the caller's pre-commit cleanup leaves that
+  // writer's file in place instead of unlinking it.
+  const copyRestore = stubPromises("copyFile", async () => {
+    fs.writeFileSync(target, "written by another process");
+    throw Object.assign(new Error("ENOTSUP: operation not supported on socket, copyfile"), { code: "ENOTSUP" });
+  });
+  t.after(copyRestore);
+  let error = null;
+  try {
+    await copyFileExclusiveWithFallback(source, target, 0o664);
+  } catch (thrown) {
+    error = thrown;
+  }
+  assert.equal(error?.code, "EEXIST", "the won-by-another-writer pathname fails closed like COPYFILE_EXCL");
+  assert.equal(error.targetOwnershipRelinquished, true);
+  assert.equal(
+    fs.readFileSync(target, "utf8"),
+    "written by another process",
+    "the concurrent writer's file is never removed by this module",
+  );
+});
+
 test("promoteLocalTransfer preserves a ready pathname whose ownership the fallback relinquished", async (t) => {
   const dir = makeTempDir("promote-relinquished-ready-");
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));

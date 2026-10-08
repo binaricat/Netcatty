@@ -253,6 +253,22 @@ async function copyFileExclusiveWithFallback(source, target, mode = null, option
       fs.createWriteStream(target, writeOptions),
       { signal: controller.signal },
     );
+  } catch (error) {
+    // With "wx" the only EEXIST the stream can produce is from its exclusive
+    // open, which fails before a single byte is written. A concurrent writer
+    // must have created or replaced `target` after the accelerated-copy path
+    // decided to stream but before this open (libuv's fs.copyFile unlinks its
+    // own partial destination on failure, and the relabel block above moved
+    // ours away, so this name cannot be ours). Fail closed with
+    // `targetOwnershipRelinquished` so the caller's pre-commit cleanup does
+    // not unlink the pathname and destroy that writer's only visible file.
+    if (error?.code === "EEXIST") {
+      throw Object.assign(
+        new Error(`EEXIST: file exists, ${target} changed hands before the fallback stream could open it`),
+        { code: "EEXIST", targetOwnershipRelinquished: true },
+      );
+    }
+    throw error;
   } finally {
     signal?.removeEventListener?.("abort", abortFromExternalSignal);
   }
