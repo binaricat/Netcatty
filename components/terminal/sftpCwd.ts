@@ -131,7 +131,9 @@ export const resolvePreferredTerminalCwd = async ({
   }
 };
 
-export const PROBE_SESSION_CWD_AFTER_COMMAND_MS = 150;
+// Schedule after xterm finishes the completion/prompt chunk so an OSC 7 in
+// that same chunk can supersede the fallback without an extra SSH request.
+export const PROBE_SESSION_CWD_AFTER_COMMAND_MS = 0;
 
 export type ProbeBackendSessionCwdAfterCommandOptions = {
   sessionId: string;
@@ -141,7 +143,7 @@ export type ProbeBackendSessionCwdAfterCommandOptions = {
   canProbe?: () => boolean | Promise<boolean>;
 };
 
-/** Probe backend pwd when OSC 7 did not report after a command. */
+/** One guarded backend read after command completion when OSC 7 did not report. */
 export const probeBackendSessionCwdAfterCommand = async ({
   sessionId,
   osc7SignalAtCommand,
@@ -175,10 +177,11 @@ export const scheduleBackendCwdProbeAfterCommand = (
   },
 ): (() => void) => {
   const delayMs = options.delayMs ?? PROBE_SESSION_CWD_AFTER_COMMAND_MS;
+  let cancelled = false;
   const timeoutId = setTimeout(() => {
     void probeBackendSessionCwdAfterCommand(options).then((cwd) => {
-      if (cwd) options.onProbedCwd(cwd);
+      if (!cancelled && cwd) options.onProbedCwd(cwd);
     });
   }, delayMs);
-  return () => clearTimeout(timeoutId);
+  return () => { cancelled = true; clearTimeout(timeoutId); };
 };

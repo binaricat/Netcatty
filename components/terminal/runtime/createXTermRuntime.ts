@@ -200,6 +200,8 @@ import { pasteTextWithMultilineConfirm } from "../terminalClipboardPaste";
 import { requestMultilinePasteConfirm } from "../../../application/state/multilinePasteConfirmStore";
 import {
   consumeOsc133CommandCompletion,
+  consumeOsc133CwdCompletion,
+  markOsc133CompletionProtocol,
   type PromptLineBreakState,
 } from "./promptLineBreak";
 import { isSensitiveTerminalCommandInput, recordTerminalCommandExecution } from "./terminalCommandExecution";
@@ -366,7 +368,10 @@ export type CreateXTermRuntimeContext = {
     hostLabel: string,
     sessionId: string,
   ) => void;
-  onCommandCompleted?: () => void;
+  /** True only when this completion confirms the last outstanding cwd-invalidating command.
+   *  `commandCompleted` defaults to true; the runtime passes false only for a
+   *  cwd-only publication that did not consume a command completion marker. */
+  onCommandCompleted?: (cwdCompletionConfirmed?: boolean, commandCompleted?: boolean) => void;
   requestPluginTerminalProviders?: RequestPluginTerminalProviders;
   pluginProviderVisible?: boolean;
   isPluginTerminalProviderAvailable?: (kind: NetcattyTerminalProviderKind) => boolean;
@@ -3239,8 +3244,34 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   });
 
   const osc133Disposable = term.parser.registerOscHandler(133, (data) => {
-    if (consumeOsc133CommandCompletion(data, ctx.promptLineBreakStateRef?.current)) {
-      ctx.onCommandCompleted?.();
+    // An observed OSC 133;D completion marker proves the shell has completion
+    // integration, so the plain prompt fallback must stop publishing cwd once
+    // D is seen (non-D payloads can be forged by prompt-shaped command output
+    // on a non-integrated shell).
+    const commandCompleted = consumeOsc133CommandCompletion(data, ctx.promptLineBreakStateRef?.current);
+    const cwdCompleted = consumeOsc133CwdCompletion(data, ctx.promptLineBreakStateRef?.current);
+    markOsc133CompletionProtocol(data, ctx.promptLineBreakStateRef?.current);
+    // The D marker itself also flows through ordinary command output — a child
+    // can print it verbatim (`printf '\033]133;D\a'; sleep 2; cd /tmp`), which
+    // must not publish the pre-command cwd as trusted and retire the pending
+    // correction before the shell's genuine D arrives. So the D-confirmed
+    // backend read publishes untrusted, and its next prompt-shaped event
+    // re-probes to correct a stale value (the SFTP follow re-verifies
+    // untrusted values with fresh backend reads anyway).
+    if (cwdCompleted) {
+      // Re-arm a fresh re-probe chain so the shell's genuine prompt redraw
+      // re-verifies the published value.
+      const promptLineBreakState = ctx.promptLineBreakStateRef?.current;
+      if (promptLineBreakState) {
+        promptLineBreakState.cwdRepublishDepth = 1;
+        promptLineBreakState.cwdRepublishPending = true;
+      }
+      // A pending cwd completion without a pending command (an unconfirmed
+      // prompt submission) is a cwd-only publication: plugins never saw a
+      // commandSubmitted, so they must not receive a commandCompleted here.
+      ctx.onCommandCompleted?.(true, commandCompleted);
+    } else if (commandCompleted) {
+      ctx.onCommandCompleted?.(false, true);
     }
     return true;
   });

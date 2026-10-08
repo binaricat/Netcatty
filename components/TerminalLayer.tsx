@@ -342,6 +342,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   const terminalOsc7SignalBySessionRef = useRef<Map<string, number>>(new Map());
   const cwdProbeCancelersRef = useRef<Map<string, () => void>>(new Map());
   const cwdProbeGenerationRef = useRef<Map<string, number>>(new Map());
+  const cwdProbeCommandSignalRef = useRef<Map<string, number>>(new Map());
 
   useEffect(() => {
     const liveSessionIds = new Set(sessions.map((session) => session.id));
@@ -351,6 +352,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       terminalOsc7SignalBySessionRef,
       cwdProbeGenerationRef,
       cwdProbeCancelersRef,
+      cwdProbeCommandSignalRef,
     }, liveSessionIds);
     terminalCwdStore.prune(liveSessionIds);
   }, [sessions]);
@@ -398,7 +400,9 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       terminalRendererCwdBySessionRef.current.delete(sessionId);
       terminalRendererCwdSourceBySessionRef.current.delete(sessionId);
     }
-    onUpdateSessionRestoreCwd?.(sessionId, nextCwd);
+    // Command submission invalidates live trust, not the last known restore
+    // location. Keep it until the shell confirms a cwd after completion.
+    if (nextCwd) onUpdateSessionRestoreCwd?.(sessionId, nextCwd);
     // External store: side-panel live snapshot subscribers update without
     // re-rendering TerminalLayerInner.
     terminalCwdStore.setCwd(sessionId, nextCwd, nextCwd ? nextCwdSource : undefined);
@@ -444,6 +448,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       terminalOsc7SignalBySessionRef,
       cwdProbeGenerationRef,
       cwdProbeCancelersRef,
+      cwdProbeCommandSignalRef,
     }, sessionId);
     codingCliSignalController.forgetSession(sessionId);
     sessionCapabilitiesStore.delete(sessionId);
@@ -1330,6 +1335,10 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
 
   const handleCommandSubmitted = useCallback((command: string, _hostId: string, _hostLabel: string, sessionId: string) => {
     codingCliSignalController.handleCommandSubmitted(sessionId, command);
+    const generation = (cwdProbeGenerationRef.current.get(sessionId) ?? 0) + 1;
+    cwdProbeGenerationRef.current.set(sessionId, generation);
+    cwdProbeCancelersRef.current.get(sessionId)?.();
+    cwdProbeCommandSignalRef.current.delete(sessionId);
 
     const tabId = activeTabIdRef.current;
     const session = sessionsRef.current.find((candidate) => candidate.id === sessionId);
@@ -1346,10 +1355,22 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       restrictExtraSshChannels: hostRestrictsExtraSshChannels(sessionHost),
     })) return;
 
-    const osc7SignalAtCommand = terminalOsc7SignalBySessionRef.current.get(sessionId) ?? 0;
-    const probeGeneration = (cwdProbeGenerationRef.current.get(sessionId) ?? 0) + 1;
-    cwdProbeGenerationRef.current.set(sessionId, probeGeneration);
+    cwdProbeCommandSignalRef.current.set(
+      sessionId, terminalOsc7SignalBySessionRef.current.get(sessionId) ?? 0,
+    );
+  }, [codingCliSignalController, restoreTerminalCwd, sidePanelLayoutsRef]);
+
+  const handleCommandCompleted = useCallback((sessionId: string) => {
+    const osc7SignalAtCommand = cwdProbeCommandSignalRef.current.get(sessionId);
+    if (osc7SignalAtCommand === undefined) return;
+    // Keep the baseline signal: a confirmed fallback publication also arms a
+    // one-shot re-probe so a real prompt after prompt-shaped command output
+    // can correct the published cwd. The next submission resets the baseline.
+    // A replaced re-probe must not stay eligible under the same generation:
+    // cancel it before storing the replacement so only the newest backend
+    // read can publish under this command's generation.
     cwdProbeCancelersRef.current.get(sessionId)?.();
+    const probeGeneration = cwdProbeGenerationRef.current.get(sessionId);
     const cancelProbe = scheduleBackendCwdProbeAfterCommand({
       sessionId,
       osc7SignalAtCommand,
@@ -1371,13 +1392,19 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       },
       onProbedCwd: (cwd) => {
         if (cwdProbeGenerationRef.current.get(sessionId) !== probeGeneration) return;
-        const existing = terminalRendererCwdBySessionRef.current.get(sessionId);
-        if (existing === cwd) return;
-        handleTerminalCwdChange(sessionId, cwd, { source: 'backend-strict' });
+        // Prompt-completion evidence (plain prompt, re-probe trigger, even an
+        // observed OSC 133;D marker — a child process can print all of them)
+        // can be forged by command output, so the probe result publishes
+        // untrusted. The SFTP follow re-verifies an untrusted stored cwd with
+        // its own fresh backend read, so a correct value reaches SFTP without
+        // an extra prompt.
+        handleTerminalCwdChange(sessionId, cwd, {
+          source: 'backend',
+        });
       },
     });
     cwdProbeCancelersRef.current.set(sessionId, cancelProbe);
-  }, [codingCliSignalController, handleTerminalCwdChange, restoreTerminalCwd, sidePanelLayoutsRef, terminalBackend]);
+  }, [handleTerminalCwdChange, terminalBackend]);
 
   const handleCommandExecuted = useCallback((command: string, hostId: string, hostLabel: string, sessionId: string) => {
     onCommandExecuted?.(command, hostId, hostLabel, sessionId);
@@ -1390,6 +1417,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       terminalOsc7SignalBySessionRef,
       cwdProbeGenerationRef,
       cwdProbeCancelersRef,
+      cwdProbeCommandSignalRef,
     }, new Set());
   }, []);
   const sessionSudoAutofillPasswordsMap = useMemo(() => {
@@ -2528,6 +2556,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     handleCommandExecuted,
     handleHistoryDelete: onDeleteShellHistoryEntry,
     handleCommandSubmitted,
+    handleCommandCompleted,
     handleComposeSend,
     handleHistoryPaste,
     handleHistoryRun,

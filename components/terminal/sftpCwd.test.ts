@@ -7,6 +7,7 @@ import {
   shouldPreserveTerminalCwdAcrossCommand,
   probeBackendSessionCwdAfterCommand,
   resolvePreferredTerminalCwd,
+  scheduleBackendCwdProbeAfterCommand,
 } from "./sftpCwd";
 
 test("resolvePreferredTerminalCwd prefers fresh backend pwd when requested", async () => {
@@ -309,4 +310,37 @@ test("active-shell cwd resolution trusts an inferred cwd without extra exec", as
 test("single-channel command submission keeps the cwd SFTP follow already has", () => {
   assert.equal(shouldPreserveTerminalCwdAcrossCommand(true), true);
   assert.equal(shouldPreserveTerminalCwdAcrossCommand(false), false);
+});
+
+
+test("a cancelled completion probe cannot publish its late backend result", async () => {
+  let finish!: (value: { success: boolean; cwd: string }) => void;
+  let started!: () => void;
+  const began = new Promise<void>((resolve) => { started = resolve; });
+  const result = new Promise<{ success: boolean; cwd: string }>((resolve) => { finish = resolve; });
+  const published: string[] = [];
+  const cancel = scheduleBackendCwdProbeAfterCommand({
+    sessionId: "session", osc7SignalAtCommand: 0, getOsc7Signal: () => 0,
+    getSessionPwd: async () => { started(); return result; },
+    onProbedCwd: (cwd) => published.push(cwd),
+  });
+  await began;
+  cancel();
+  finish({ success: true, cwd: "/old-command" });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(published, []);
+});
+
+test("an OSC 7 arriving in the prompt chunk supersedes the scheduled completion probe", async () => {
+  let signal = 0;
+  let reads = 0;
+  const cancel = scheduleBackendCwdProbeAfterCommand({
+    sessionId: "session", osc7SignalAtCommand: 0, getOsc7Signal: () => signal,
+    getSessionPwd: async () => { reads += 1; return { success: true, cwd: "/obsolete" }; },
+    onProbedCwd: () => assert.fail("the OSC 7 report owns cwd"),
+  });
+  signal += 1;
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  cancel();
+  assert.equal(reads, 0);
 });

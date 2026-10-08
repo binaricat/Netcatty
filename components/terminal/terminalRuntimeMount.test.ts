@@ -238,3 +238,31 @@ test('normal boot and hibernate wake share terminal link error feedback', () => 
     /createXTermRuntime\(\{[\s\S]*?onOpenExternalError,/,
   );
 });
+
+
+test('normal and reactivated terminals forward completion only when it confirms outstanding cwd commands', () => {
+  for (const source of [terminalSource, effectsSource]) {
+    assert.match(source, /if \(cwdCompletionConfirmed\) \{\s*onCommandCompleted\?\.\(sessionId\)/);
+  }
+  // Cwd-only publications (armed re-probe, single-prompt fallback) never
+  // consume a command marker, so plugins must not receive commandCompleted.
+  for (const source of [terminalSource, effectsSource]) {
+    assert.match(
+      source,
+      /if \(commandCompleted !== false\) \{\s*(?:publishPluginTerminalRuntimeLifecycleEvent|pluginTerminalLifecycle\.onCommandCompleted)/,
+    );
+  }
+  // Every cwd-invalidating submission arms completion tracking, independent of
+  // the plugin trust callback, so unconfirmed prompts (sftp> etc.) also publish.
+  assert.match(terminalSource, /markTerminalCwdCompletionPending\(promptLineBreakStateRef\);/);
+  const layer = readFileSync(new URL('../TerminalLayer.tsx', import.meta.url), 'utf8');
+  const submitted = layer.slice(layer.indexOf('const handleCommandSubmitted ='), layer.indexOf('const handleCommandCompleted ='));
+  const completed = layer.slice(layer.indexOf('const handleCommandCompleted ='), layer.indexOf('const handleCommandExecuted ='));
+  assert.doesNotMatch(submitted, /scheduleBackendCwdProbeAfterCommand/);
+  assert.match(completed, /scheduleBackendCwdProbeAfterCommand/);
+  assert.match(layer, /if \(nextCwd\) onUpdateSessionRestoreCwd\?\.\(sessionId, nextCwd\)/);
+  const panes = readFileSync(new URL('../terminalLayer/TerminalLayerSupport.tsx', import.meta.url), 'utf8');
+  const workspaces = readFileSync(new URL('../terminalLayer/TerminalLayerWorkspaceSection.tsx', import.meta.url), 'utf8');
+  assert.match(panes, /onCommandCompleted=\{onCommandCompleted\}/);
+  assert.match(workspaces, /onCommandCompleted=\{handleCommandCompleted\}/);
+});

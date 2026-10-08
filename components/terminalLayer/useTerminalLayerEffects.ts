@@ -38,6 +38,7 @@ export type TerminalSessionRuntimeState = {
   terminalRendererCwdSourceBySessionRef?: RuntimeStateRef<RendererCwdSource>;
   terminalOsc7SignalBySessionRef: RuntimeStateRef<number>;
   cwdProbeGenerationRef: RuntimeStateRef<number>;
+  cwdProbeCommandSignalRef?: RuntimeStateRef<number>;
   cwdProbeCancelersRef: RuntimeStateRef<() => void>;
 };
 
@@ -49,6 +50,7 @@ export function clearTerminalSessionRuntimeState(
 
   state.cwdProbeCancelersRef.current.delete(sessionId);
   state.cwdProbeGenerationRef.current.delete(sessionId);
+  state.cwdProbeCommandSignalRef?.current.delete(sessionId);
   state.terminalOsc7SignalBySessionRef.current.delete(sessionId);
   state.terminalRendererCwdBySessionRef.current.delete(sessionId);
   state.terminalRendererCwdSourceBySessionRef?.current.delete(sessionId);
@@ -74,6 +76,7 @@ export function pruneTerminalSessionRuntimeState(
     ...(state.terminalRendererCwdSourceBySessionRef?.current.keys() ?? []),
     ...state.terminalOsc7SignalBySessionRef.current.keys(),
     ...state.cwdProbeGenerationRef.current.keys(),
+    ...(state.cwdProbeCommandSignalRef?.current.keys() ?? []),
     ...state.cwdProbeCancelersRef.current.keys(),
   ]);
 
