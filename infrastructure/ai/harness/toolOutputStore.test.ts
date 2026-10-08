@@ -290,9 +290,62 @@ test('ToolOutputStore session quotas evict a borrowed owner instead of the fresh
   await freshCopy.spillPromise;
   assert.ok(files.has(`/netcatty/${fresh.id}-chat-source.log`));
   // The old owner is gone, and evicting it deletes the spill path the fork
-  // alias used to borrow (the alias never owned that file).
+  // alias used to borrow (the alias never owned that file). The alias is
+  // retired alongside so the fork never keeps a handle registered against a
+  // deleted file.
   assert.equal(original.get(handle.id, 'chat-source'), undefined);
+  assert.equal(original.get(handle.id, 'chat-fork'), undefined);
   assert.deepEqual(deletedPaths, [`/netcatty/${handle.id}-chat-source.log`]);
+});
+
+test('ToolOutputStore retires the borrowed fork alias before its owner is evicted', async () => {
+  const files = new Map<string, { record: PersistedToolOutputRecord; content: string }>();
+  const deletedPaths: string[] = [];
+  const persistence: ToolOutputPersistence = {
+    write: async (record, content) => {
+      const path = `/netcatty/${record.handleId}-${record.chatSessionId}.log`;
+      files.set(path, { record, content });
+      return path;
+    },
+    read: async () => null,
+    delete: async path => {
+      deletedPaths.push(path);
+      files.delete(path);
+    },
+  };
+
+  // A fork holds a non-owning alias of the source session's only spill path.
+  // Filling the source session's quota must retire the alias when its owner
+  // is evicted, so the fork never serves a dangling handle: the read fails
+  // (content is gone) and the alias is gone from the registry, instead of
+  // lingering until a later read trips over the deleted file.
+  const original = new ToolOutputStore({ spillThresholdChars: 0, maxHandlesPerSession: 1, persistence });
+  const handle = original.store({
+    chatSessionId: 'chat-source',
+    capabilityId: 'terminal.execute',
+    content: 'C'.repeat(30_000),
+  });
+  await handle.spillPromise;
+
+  // `read` cannot serve the durable content, so the clone aliases the
+  // source-owned spill path as a non-owning borrow.
+  await original.rehomeChatSession('chat-source', 'chat-fork');
+  const alias = original.get(handle.id, 'chat-fork');
+  assert.ok(alias);
+  assert.equal(alias.borrowedFilePath, true);
+
+  const fresh = original.store({
+    chatSessionId: 'chat-source',
+    capabilityId: 'terminal.execute',
+    content: 'D'.repeat(30_000),
+  });
+  await fresh.spillPromise;
+  assert.ok(files.has(`/netcatty/${fresh.id}-chat-source.log`));
+  // The alias is retired before the owner's file is deleted.
+  assert.equal(original.get(handle.id, 'chat-fork'), undefined);
+  assert.deepEqual(deletedPaths, [`/netcatty/${handle.id}-chat-source.log`]);
+  // The fork's read no longer resolves the retired alias.
+  assert.equal(await original.readChunkAsync({ handleId: handle.id, mode: 'head', maxChars: 10 }, 'chat-fork'), null);
 });
 
 test('ToolOutputStore global quotas keep the fresh clone and its source handle over quota', async () => {

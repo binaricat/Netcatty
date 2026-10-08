@@ -707,6 +707,9 @@ export class ToolOutputStore {
    * quota — otherwise a source session whose quota is filled by borrowed
    * owners would leave a freshly stored handle as the only eviction
    * candidate, and `store()` would return an immediately dead handle id.
+   * When such an owner *is* evicted by a per-session pass, `evictHandle`
+   * first retires the cross-session aliases of its path so the fork never
+   * keeps a handle registered against a deleted file.
    * `protect` marks handles that must not be chosen for eviction (e.g. the
    * records a fresh fork advertises, its clones and their source handles):
    * they are skipped while any unprotected candidate remains, so making room
@@ -744,7 +747,35 @@ export class ToolOutputStore {
   private evictHandle(handle: ToolOutputHandle): void {
     handle.evicted = true;
     if (handle.filePath && !handle.borrowedFilePath && this.persistence) {
+      this.retireBorrowAliases(handle);
       void this.persistence.delete(handle.filePath).catch(() => {});
+    }
+  }
+
+  /**
+   * Remove handles in *other* chat sessions that alias `owner.filePath` as a
+   * non-owning borrow, before the owner's durable file is deleted. Eviction
+   * runs per session (`enforceSessionLimits`, `pruneTerminalSession`,
+   * `removeHandle`), so `pickEvictionEntry`'s borrow protection — which only
+   * sees the handles of the eviction set — cannot shield an owner whose path
+   * is aliased by a fork in another session. Deleting the owner's file would
+   * otherwise leave the fork's alias registered against a path that no longer
+   * exists, so a later `tool_output_read` in the fork fails and then drops the
+   * alias. Retiring the alias (removing it from its session map; evicting an
+   * alias never deletes a file) surfaces the loss immediately as a "not found"
+   * read instead of a dangling handle, and frees the fork's quota slot.
+   */
+  private retireBorrowAliases(owner: ToolOutputHandle): void {
+    if (!owner.filePath || owner.borrowedFilePath) return;
+    for (const [chatSessionId, sessionMap] of this.bySession) {
+      if (chatSessionId === owner.chatSessionId) continue;
+      for (const [handleId, alias] of sessionMap) {
+        if (!alias.borrowedFilePath || alias.filePath !== owner.filePath) continue;
+        sessionMap.delete(handleId);
+        // An alias never owns the shared file, so this recursion stops here.
+        this.evictHandle(alias);
+      }
+      if (sessionMap.size === 0) this.bySession.delete(chatSessionId);
     }
   }
 
