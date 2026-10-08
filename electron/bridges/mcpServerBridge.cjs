@@ -1871,6 +1871,19 @@ async function handleWorkerJobStart(params = {}) {
 // control RPCs — including calls arriving through the external-agent MCP
 // transport, which always presents the conversation id of the branch.
 const inheritedJobInheritors = new Map(); // jobId -> Set<inheriting chat session ids>
+// Jobs whose owner chat was torn down while a live branch still inherited
+// them (its cancellation deferred the teardown instead of stopping them).
+// Once the last inheritor disappears, no live chat can poll or stop such a
+// job any more, so it must be cancelled then instead of leaving the remote
+// command and its terminal execution lock running forever.
+const ownerTornDownInheritedJobs = new Set();
+
+function markOwnerTornDownInheritedJobs(ownerChatSessionId) {
+  if (!ownerChatSessionId) return;
+  for (const jobId of getLiveInheritedJobIdsForOwner(ownerChatSessionId)) {
+    ownerTornDownInheritedJobs.add(jobId);
+  }
+}
 
 function isInheritedJobInheritor(jobId, chatSessionId) {
   if (!jobId || !chatSessionId) return false;
@@ -1879,6 +1892,41 @@ function isInheritedJobInheritor(jobId, chatSessionId) {
 
 function forgetInheritedJobInheritors(jobId) {
   inheritedJobInheritors.delete(jobId);
+  ownerTornDownInheritedJobs.delete(jobId);
+}
+
+// Best-effort stop of an orphaned inherited job: its owner chat is already
+// gone, so present the owner chat id the running job was started with (the
+// worker authorizes cancellation on that id, like every other stop path).
+function cancelOrphanedInheritedJob(jobId) {
+  const workerJob = workerBackgroundJobs.get(jobId);
+  if (workerJob) {
+    workerBackgroundJobs.delete(jobId);
+    try {
+      const request = terminalWorkerManager?.request?.("netcatty:ai:jobStop", {
+        jobId,
+        sessionId: workerJob.sessionId,
+        chatSessionId: workerJob.chatSessionId || null,
+      }, {});
+      if (request && typeof request.catch === "function") request.catch(() => {});
+    } catch {
+      // The worker may already be gone while cancelling the orphaned job.
+    }
+    return;
+  }
+  const job = backgroundJobs.get(jobId);
+  if (!job) return;
+  if (job.status === "running" || job.status === "stopping") {
+    try {
+      job.handle?.cancel?.();
+    } catch {
+      // Ignore cancellation failures
+    }
+    job.status = "stopping";
+    job.error = "Cancellation requested";
+    job.updatedAt = Date.now();
+  }
+  backgroundJobs.delete(jobId);
 }
 
 function forgetInheritedJobsForChatSession(chatSessionId) {
@@ -1886,6 +1934,12 @@ function forgetInheritedJobsForChatSession(chatSessionId) {
   for (const [jobId, inheritors] of inheritedJobInheritors) {
     if (!inheritors.delete(chatSessionId)) continue;
     if (inheritors.size === 0) inheritedJobInheritors.delete(jobId);
+    // The source chat was torn down earlier while this branch (and possibly
+    // sibling branches) kept its job alive. With the last inheritor gone,
+    // nothing can poll or stop the job any more: cancel it now.
+    if (ownerTornDownInheritedJobs.delete(jobId)) {
+      cancelOrphanedInheritedJob(jobId);
+    }
   }
 }
 
@@ -2530,6 +2584,7 @@ const configAndCleanupApi = createConfigAndCleanupApi({
   clearPendingApprovals, cancelSftpOpsForSession, sftpBridge,
   preserveIdleSessionCleanup: sessionIdleManager.scopeCleared,
   clearOpenedSessionScope: openedSessionOwnership.clearScope,
+  markOwnerTornDownInheritedJobs,
   forgetInheritedJobsForChatSession,
 });
 const { resolveMcpServerRuntimeCommand, buildMcpServerConfig, cleanupScopedMetadata } = configAndCleanupApi;

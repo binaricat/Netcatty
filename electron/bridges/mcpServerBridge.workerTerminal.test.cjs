@@ -997,6 +997,86 @@ test("after the source chat is deleted a live branch keeps polling the inherited
   assert.equal(polledAsBranch.ok, true);
 
   // Deleting the branch later drops its registration: the source-owned job's
-  // teardown is no longer deferred once no live branch inherits it.
+  // teardown is no longer deferred once no live branch inherits it, and with
+  // the source chat gone the orphaned job is finally cancelled in the worker.
   await bridge.cleanupScopedMetadata("chat-branch");
+  const orphanStop = requests.find((entry) => entry.channel === "netcatty:ai:jobStop");
+  assert.deepEqual(orphanStop, {
+    channel: "netcatty:ai:jobStop",
+    payload: { jobId: "worker-job-del", sessionId: "ssh-del", chatSessionId: "chat-src" },
+    options: {},
+  });
+  const orphanedPoll = await bridge.dispatchBuiltinRpc("netcatty/jobPoll", {
+    jobId: "worker-job-del",
+    chatSessionId: "chat-branch",
+  });
+  assert.deepEqual(orphanedPoll, { ok: false, error: "Background job not found" });
+});
+
+test("deleting the last inheritor of a job owned by a live chat does not cancel the job", async () => {
+  const requests = [];
+  const sends = [];
+  const bridge = loadFreshBridge();
+  bridge.init({
+    sessions: new Map(),
+    electronModule: null,
+    terminalWorkerManager: {
+      request(channel, payload, options) {
+        requests.push({ channel, payload, options });
+        if (channel === "netcatty:ai:jobStart") {
+          return Promise.resolve({
+            ok: true,
+            jobId: "worker-job-live",
+            sessionId: payload.sessionId,
+            status: "running",
+          });
+        }
+        return Promise.resolve({ ok: true, jobId: payload.jobId, completed: false });
+      },
+      send(channel, payload, options) {
+        sends.push({ channel, payload, options });
+      },
+    },
+  });
+  bridge.setPermissionMode("auto");
+  bridge.setCommandBlocklist([]);
+  bridge.updateSessionMetadata([
+    {
+      sessionId: "ssh-live",
+      hostname: "host.example",
+      protocol: "ssh",
+      connected: true,
+    },
+  ], "chat-owner");
+  bridge.updateSessionMetadata([{
+    sessionId: "ssh-live",
+    hostname: "host.example",
+    protocol: "ssh",
+    connected: true,
+  }], "chat-branch");
+
+  const started = await bridge.dispatchBuiltinRpc("netcatty/jobStart", {
+    sessionId: "ssh-live",
+    command: "sleep 30",
+    chatSessionId: "chat-owner",
+  });
+  assert.equal(started.ok, true);
+  bridge.registerInheritedBackgroundJobs("chat-branch", "chat-owner", ["worker-job-live"]);
+
+  // Deleting the branch drops its registration, but the owner chat is still
+  // live: the owner keeps polling the job that it still owns.
+  await bridge.cleanupScopedMetadata("chat-branch");
+  assert.equal(requests.some((entry) => entry.channel === "netcatty:ai:jobStop"), false);
+  const polledByOwner = await bridge.dispatchBuiltinRpc("netcatty/jobPoll", {
+    jobId: "worker-job-live",
+    chatSessionId: "chat-owner",
+  });
+  assert.equal(polledByOwner.ok, true);
+  // Only the branch's own catty-cancel teardown fired, without any
+  // preserved-job ids and without stopping the owner's still-live job.
+  assert.deepEqual(sends, [{
+    channel: "netcatty:ai:catty:cancel",
+    payload: { chatSessionId: "chat-branch" },
+    options: {},
+  }]);
 });

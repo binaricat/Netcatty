@@ -74,6 +74,11 @@ function createConfigAndCleanupApi(ctx) {
         cancelledChatSessions.delete(chatSessionId);
         cancelBackgroundJobsForSession(chatSessionId);
         cancelWorkerBackgroundJobsForSession(chatSessionId);
+        // Cancel-and-cleanup leave the owner's jobs running only when a live
+        // branch still inherited them. Record which jobs were deferred like
+        // that: once the last inheritor chat is deleted, the deferred job
+        // has no live chat left to poll or stop it and must be cancelled.
+        markOwnerTornDownInheritedJobs?.(chatSessionId);
         // Resolve any in-flight approval requests so dispatch()'s finally block
         // releases its pendingSessionWriteApprovals entry. Without this, a chat
         // deleted while an approval was pending would leave the per-session
