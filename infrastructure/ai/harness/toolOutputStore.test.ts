@@ -54,6 +54,40 @@ test('ToolOutputStore rehomes handles into a forked chat session namespace', asy
   assert.equal(store.read({ handleId: 'tool-output-none' }, 'chat-fork'), null);
 });
 
+test('ToolOutputStore clones only the handles referenced by the retained prefix', async () => {
+  const store = new ToolOutputStore({
+    maxHandlesGlobal: 4,
+    maxCharsGlobal: 200,
+  });
+  const retained = store.store({
+    chatSessionId: 'chat-1',
+    capabilityId: 'terminal.execute',
+    content: 'A'.repeat(30),
+  });
+  const discarded = store.store({
+    chatSessionId: 'chat-1',
+    capabilityId: 'terminal.execute',
+    content: 'B'.repeat(30),
+  });
+  const unrelated = store.store({
+    chatSessionId: 'chat-other',
+    capabilityId: 'terminal.execute',
+    content: 'C'.repeat(30),
+  });
+
+  await store.rehomeChatSession('chat-1', 'chat-fork', [retained.id]);
+
+  // Only the retained handle reaches the fork; the clone must not consume the
+  // shared quota for outputs the fork never references.
+  assert.ok(store.get(retained.id, 'chat-fork'));
+  assert.equal(store.get(discarded.id, 'chat-fork'), undefined);
+  // The source session keeps both of its handles, and unrelated sessions are
+  // not evicted to make room for duplicated output.
+  assert.ok(store.get(retained.id, 'chat-1'));
+  assert.ok(store.get(discarded.id, 'chat-1'));
+  assert.ok(store.get(unrelated.id, 'chat-other'));
+});
+
 test('ToolOutputStore rehomed spilled handles become durably owned by the target', async () => {
   const files = new Map<string, { record: PersistedToolOutputRecord; content: string }>();
   const deletedPaths: string[] = [];

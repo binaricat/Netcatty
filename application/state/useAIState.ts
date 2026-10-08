@@ -57,6 +57,7 @@ import { removeProviderReferences } from './aiProviderCleanup';
 import { publishAISessionsSnapshot } from './aiSessionsStore';
 import { collectForkHandleIds, planSessionFork } from '../../domain/aiSessionFork';
 import { getAgentRuntime } from '../../infrastructure/ai/harness/globalAgentRuntime';
+import { installToolOutputPersistence } from '../../infrastructure/ai/harness/toolOutputPersistenceSetup';
 import {
   AI_STATE_CHANGED_DRAFTS_BY_SCOPE,
   AI_STATE_CHANGED_PANEL_VIEW_BY_SCOPE,
@@ -725,7 +726,13 @@ export function useAIState() {
     // active until those records exist under its own session id, or the very
     // first turn could see handles as missing.
     try {
-      await getAgentRuntime().getToolOutputStore(sessionId).rehomeChatSession(
+      const store = getAgentRuntime().getToolOutputStore(sessionId);
+      // The persistence adapter is normally configured when a turn starts;
+      // forking can be the very first action after an app restart, so
+      // configure it here too or retained handles cannot be restored from
+      // durable storage before rehoming.
+      await installToolOutputPersistence(store);
+      await store.rehomeChatSession(
         sessionId,
         fork.id,
         collectForkHandleIds(plan.messages),

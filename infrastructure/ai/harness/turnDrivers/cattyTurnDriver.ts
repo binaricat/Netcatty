@@ -44,6 +44,7 @@ import { hadToolProgressBeforeRequestTooLarge, processCattyStream } from './catt
 import type { CattyTurnInput, TurnDriver, TurnDriverContext } from './types';
 import { fitLargeUserInputForModel } from '../largeUserInput';
 import { buildPromptContextSnapshot } from '../promptContextSnapshot';
+import { installToolOutputPersistence } from '../toolOutputPersistenceSetup';
 
 export class CattyTurnDriver implements TurnDriver {
   readonly backend = 'catty' as const;
@@ -75,71 +76,7 @@ async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Prom
   } = input;
 
   const netcattyBridge = (bridge ?? getNetcattyBridge()) as NonNullable<ReturnType<typeof getNetcattyBridge>>;
-  const toolOutputTempBridge = netcattyBridge as typeof netcattyBridge & {
-    getToolOutputPersistenceStatus?: () => Promise<{ durable: boolean; reason?: string }>;
-    writeToolOutputTemp?: (
-      record: import('../toolOutputStore').PersistedToolOutputRecord,
-      content: string,
-    ) => Promise<{ ok: boolean; path?: string; error?: string }>;
-    restoreToolOutputTemp?: (
-      handleId: string,
-      chatSessionId: string,
-    ) => Promise<{ path: string; record: import('../toolOutputStore').PersistedToolOutputRecord } | null>;
-    readToolOutputTemp?: (
-      path: string,
-      request: import('../toolOutputStore').ReadToolOutputInput,
-    ) => Promise<Omit<import('../toolOutputStore').ToolOutputReadResult, 'handleId' | 'storedChars' | 'sourceTruncated'> | null>;
-    deleteToolOutputTemp?: (path: string) => Promise<{ ok: boolean }>;
-    deleteChatToolOutputsTemp?: (chatSessionId: string) => Promise<{ deletedCount: number }>;
-    deleteTerminalToolOutputsTemp?: (
-      chatSessionId: string,
-      terminalSessionId: string,
-    ) => Promise<{ deletedCount: number }>;
-  };
-  const persistenceStatus = await toolOutputTempBridge.getToolOutputPersistenceStatus?.()
-    .catch(() => ({ durable: false }));
-  if (
-    toolOutputTempBridge.writeToolOutputTemp
-    && toolOutputTempBridge.readToolOutputTemp
-    && toolOutputTempBridge.deleteToolOutputTemp
-  ) {
-    ctx.toolOutputStore.setPersistence?.({
-      write: async (record, content) => {
-        if (!persistenceStatus?.durable) {
-          throw new Error(persistenceStatus?.reason || 'Secure local storage is unavailable.');
-        }
-        const result = await toolOutputTempBridge.writeToolOutputTemp!(record, content);
-        if (!result.ok || !result.path) {
-          throw new Error(result.error || 'Unable to persist tool output.');
-        }
-        return result.path;
-      },
-      restore: persistenceStatus?.durable && toolOutputTempBridge.restoreToolOutputTemp
-        ? (handleId, chatSessionId) => toolOutputTempBridge.restoreToolOutputTemp!(handleId, chatSessionId)
-        : undefined,
-      read: (path, request) => toolOutputTempBridge.readToolOutputTemp!(path, request),
-      delete: async path => {
-        await toolOutputTempBridge.deleteToolOutputTemp!(path);
-      },
-      deleteSession: toolOutputTempBridge.deleteChatToolOutputsTemp
-        ? async chatSessionId => {
-          await toolOutputTempBridge.deleteChatToolOutputsTemp!(chatSessionId);
-        }
-        : undefined,
-      deleteTerminalSession: toolOutputTempBridge.deleteTerminalToolOutputsTemp
-        ? async (chatSessionId, terminalSessionId) => {
-          await toolOutputTempBridge.deleteTerminalToolOutputsTemp!(chatSessionId, terminalSessionId);
-        }
-        : undefined,
-      deleteTerminalEverywhere: toolOutputTempBridge.deleteTerminalToolOutputsEverywhereTemp
-        ? async terminalSessionId => {
-          await toolOutputTempBridge.deleteTerminalToolOutputsEverywhereTemp!(terminalSessionId);
-        }
-        : undefined,
-    });
-  } else {
-    ctx.toolOutputStore.setPersistence?.(undefined);
-  }
+  await installToolOutputPersistence(ctx.toolOutputStore, netcattyBridge);
   await clearChatSessionCancelled(sessionId, netcattyBridge);
   if (netcattyBridge.aiMcpUpdateSessions) {
     await netcattyBridge.aiMcpUpdateSessions(context.terminalSessions, sessionId);

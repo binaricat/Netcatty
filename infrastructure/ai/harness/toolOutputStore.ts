@@ -350,7 +350,9 @@ export class ToolOutputStore {
    * the live cache (e.g. after an app restart or cache expiry) are restored
    * from persistence under the source session before cloning, so forking a
    * historical session still produces target-owned records instead of a
-   * no-op.
+   * no-op. When `retainHandleIds` is provided, only those handles are
+   * cloned; outputs saved by turns after the fork boundary stay in the
+   * source session.
    */
   async rehomeChatSession(
     sourceChatSessionId: string,
@@ -371,12 +373,28 @@ export class ToolOutputStore {
     }
     const sourceMap = this.bySession.get(sourceChatSessionId);
     if (!sourceMap || sourceMap.size === 0) return;
+    // When the caller names the handles the retained prefix references, clone
+    // only those: copying the whole source session would pull in outputs the
+    // fork never reads and could evict still-valid handles (source or other
+    // sessions) purely to make room for them.
+    const selected: [string, ToolOutputHandle][] = [];
+    if (retainHandleIds) {
+      const seen = new Set<string>();
+      for (const handleId of retainHandleIds) {
+        if (seen.has(handleId)) continue;
+        seen.add(handleId);
+        const handle = sourceMap.get(handleId);
+        if (handle) selected.push([handleId, handle]);
+      }
+    } else {
+      selected.push(...sourceMap.entries());
+    }
     // Let pending spills settle so each source handle's durable ownership is
     // decided: either the content is still in memory (write pending/failed) or
     // the handle owns a durable file path.
-    await Promise.allSettled([...sourceMap.values()].map(handle => handle.spillPromise));
+    await Promise.allSettled(selected.map(([, handle]) => handle.spillPromise));
     const targetMap = this.bySession.get(targetChatSessionId) ?? new Map<string, ToolOutputHandle>();
-    for (const [handleId, handle] of sourceMap) {
+    for (const [handleId, handle] of selected) {
       if (targetMap.has(handleId)) continue;
       const copy: ToolOutputHandle = {
         ...handle,
