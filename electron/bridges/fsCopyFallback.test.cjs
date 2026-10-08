@@ -690,6 +690,32 @@ test("copyFileExclusiveWithFallback flags a stream-open EEXIST so callers skip i
   );
 });
 
+test("copyFileExclusiveWithFallback cleans its own copyFile leftover and streams when the accelerated self-cleanup fails", async (t) => {
+  const dir = makeTempDir("copy-fallback-leftover-");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const source = path.join(dir, "staged");
+  const target = path.join(dir, "target");
+  const payload = Buffer.alloc(4096, 9);
+  fs.writeFileSync(source, payload);
+  const copyRestore = stubPromises("copyFile", async () => {
+    // libuv creates the destination before the accelerated copy syscall and
+    // unlinks it again when the copy refuses to run; that removal is
+    // best-effort, and a failing unlink leaves this helper's own
+    // source-prefix partial behind the pathname. The fallback must clean
+    // that verified leftover (it is not a concurrent writer's file) and
+    // still stream, instead of failing relinquished and leaking the partial.
+    fs.writeFileSync(target, payload.subarray(0, 1024));
+    throw Object.assign(new Error("ENOTSUP: operation not supported on socket, copyfile"), { code: "ENOTSUP" });
+  });
+  t.after(copyRestore);
+  await copyFileExclusiveWithFallback(source, target, 0o640);
+  assert.ok(
+    fs.readFileSync(target).equals(payload),
+    "the stream fallback completes after the verified leftover partial is cleaned",
+  );
+  assert.equal(fs.statSync(target).mode & 0o7777, 0o640, "the retried stream open still carries the creation mode");
+});
+
 test("copyFileExclusiveWithFallback marks a relinquished target when a failing copy loop raced a replacement", async (t) => {
   const dir = makeTempDir("copy-fallback-loop-race-");
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));

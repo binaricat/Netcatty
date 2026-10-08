@@ -36,6 +36,62 @@ function fileIdentity(statLike) {
   return [statLike?.dev, statLike?.ino, statLike?.size].join(":");
 }
 
+// Best-effort check that `candidate` holds only a prefix of `source`'s bytes:
+// a partial destination left behind by a copyFile failure can never contain
+// data beyond the source's size, and its leading bytes must equal the
+// source's leading bytes. The comparison is capped so a multi-gigabyte source
+// is never streamed in full for verification; combined with the caller's
+// pinned inode identity it disambiguates a copyFile leftover from a
+// concurrent writer's file.
+async function isSourceContentPrefix(source, candidate, limit = 1024 * 1024) {
+  let sourceSize = null;
+  let candidateSize = null;
+  try {
+    const [sourceStat, candidateStat] = await Promise.all([
+      fs.promises.stat(source),
+      fs.promises.stat(candidate),
+    ]);
+    sourceSize = sourceStat.size;
+    candidateSize = candidateStat.size;
+  } catch {
+    return false;
+  }
+  if (candidateSize > sourceSize) return false;
+  const length = Math.min(candidateSize, limit);
+  // An empty prefix matches any source the candidate is not larger than.
+  if (length === 0) return true;
+  const sourceHandle = await fs.promises.open(source, "r").catch(() => null);
+  if (!sourceHandle) return false;
+  try {
+    const candidateHandle = await fs.promises.open(candidate, "r").catch(() => null);
+    if (!candidateHandle) return false;
+    try {
+      const sourceBytes = Buffer.allocUnsafe(length);
+      const candidateBytes = Buffer.allocUnsafe(length);
+      let sourceRead = 0;
+      let candidateRead = 0;
+      while (sourceRead < length) {
+        const { bytesRead } = await sourceHandle.read(sourceBytes, sourceRead, length - sourceRead);
+        if (!bytesRead) break;
+        sourceRead += bytesRead;
+      }
+      while (candidateRead < length) {
+        const { bytesRead } = await candidateHandle.read(candidateBytes, candidateRead, length - candidateRead);
+        if (!bytesRead) break;
+        candidateRead += bytesRead;
+      }
+      // A candidate that shrank (or a source that shrank below it) since it
+      // was stat'ed cannot be verified as a stable prefix of the source.
+      if (candidateRead < length || sourceRead < length) return false;
+      return candidateBytes.equals(sourceBytes.subarray(0, length));
+    } finally {
+      await candidateHandle.close().catch(() => {});
+    }
+  } finally {
+    await sourceHandle.close().catch(() => {});
+  }
+}
+
 // An EEXIST carrying `targetOwnershipRelinquished` tells callers that the
 // destination name has changed hands: whoever (or whatever) now holds the
 // pathname did not create it through this module, so a caller's pre-commit
@@ -155,6 +211,12 @@ async function copyFileExclusiveWithFallback(source, target, mode = null, option
   // be mistaken for a failed one and streamed over the still-existing target,
   // which fails closed with EEXIST below and discloses a relinquished target.
   let copySyscallInFlight = false;
+  // Identity of whatever held `target` when a copy-fallback errno surfaced,
+  // pinned so a later EEXIST on the stream's exclusive open can be checked
+  // against it: only an entry that is verifiably this helper's own leftover
+  // partial (the copy's best-effort self-cleanup can fail) must be cleaned by
+  // this module; anything else is a concurrent writer's file.
+  let copyLeftoverIdentity = null;
   try {
     copySyscallInFlight = true;
     await fs.promises.copyFile(source, target, fs.constants.COPYFILE_EXCL);
@@ -253,9 +315,22 @@ async function copyFileExclusiveWithFallback(source, target, mode = null, option
     }
   } catch (error) {
     if (!(copySyscallInFlight && isCopyFallbackError(error))) throw error;
-    // The accelerated copy refused to run (libuv unlinks its partial
-    // destination on copyFile failure); fall through to the stream fallback.
+    // The accelerated copy refused to run; fall through to the stream
+    // fallback (libuv's best-effort removal of its partial destination may
+    // have failed, so the pathname may still hold this helper's own partial).
   }
+  // Pin the identity of whatever currently holds `target` before the
+  // exclusive open below: when the accelerated copy's failed best-effort
+  // self-cleanup leaves its own partial behind the pathname, the EEXIST the
+  // open reports must not be mistaken for a concurrent writer's file (see
+  // the open's EEXIST handler). The relabel path above reaches this point
+  // only with the name absent (its verified partial was unlinked, or was
+  // never left where this copy call could have written it), so the pin is
+  // null there and cannot mislabel a foreign entry as ours.
+  copyLeftoverIdentity = null;
+  try {
+    copyLeftoverIdentity = fileIdentity(await fs.promises.lstat(target));
+  } catch { copyLeftoverIdentity = null; }
   assertNotCancelled();
   if (signal?.aborted) throw cancelledError();
   // The copy is driven through owned handles instead of fs streams: only a
@@ -301,21 +376,54 @@ async function copyFileExclusiveWithFallback(source, target, mode = null, option
         writeHandle = await fs.promises.open(target, "wx", creationMode === null ? 0o666 : creationMode);
       } catch (openError) {
         // The exclusive open fails with EEXIST before a single byte is
-        // written. A concurrent writer must have created or replaced
-        // `target` after the accelerated-copy path decided to stream but
-        // before this open (libuv's fs.copyFile unlinks its own partial
-        // destination on failure, and the relabel block above moved ours
-        // away, so this name cannot be ours). Fail closed with
-        // `targetOwnershipRelinquished` so the caller's pre-commit cleanup
-        // does not unlink the pathname and destroy that writer's only
-        // visible file.
+        // written. Normally a concurrent writer created or replaced `target`
+        // after the accelerated-copy path decided to stream but before this
+        // open (the relabel block above only ran on the chmod-refusal path,
+        // so it did not move the entry away here), and the failure must be
+        // marked with `targetOwnershipRelinquished` so the caller's
+        // pre-commit cleanup does not unlink the pathname and destroy that
+        // writer's only visible file. The accelerated copyFile path is the
+        // exception: libuv unlinks its own partial destination when the copy
+        // falls back, but that removal is best-effort and can itself fail,
+        // so the entry behind the EEXIST may be this helper's own leftover
+        // partial. Verify the entry (identity pinned right after the copy
+        // failure, plus a source-prefix bytes check) before treating the
+        // name as changed hands: a verified leftover is unlinked and the
+        // exclusive open retried, so the stream fallback actually runs and
+        // the caller's cleanup is not skipped for this module's own file.
         if (openError?.code === "EEXIST") {
-          throw Object.assign(
-            new Error(`EEXIST: file exists, ${target} changed hands before the fallback stream could open it`),
-            { code: "EEXIST", targetOwnershipRelinquished: true },
-          );
+          let clearedVerifiedLeftover = false;
+          let verificationFailure = null;
+          try {
+            const existingIdentity = fileIdentity(await fs.promises.lstat(target));
+            if (
+              copyLeftoverIdentity !== null
+              && existingIdentity === copyLeftoverIdentity
+              && await isSourceContentPrefix(source, target)
+            ) {
+              await fs.promises.unlink(target);
+              writeHandle = await fs.promises.open(
+                target, "wx", creationMode === null ? 0o666 : creationMode,
+              );
+              clearedVerifiedLeftover = true;
+            }
+          } catch (clearingError) {
+            verificationFailure = clearingError;
+            clearedVerifiedLeftover = false;
+          }
+          if (!clearedVerifiedLeftover) {
+            throw Object.assign(
+              new Error(`EEXIST: file exists, ${target} changed hands before the fallback stream could open it`),
+              {
+                code: "EEXIST",
+                targetOwnershipRelinquished: true,
+                ...(verificationFailure ? { cause: verificationFailure } : {}),
+              },
+            );
+          }
+        } else {
+          throw openError;
         }
-        throw openError;
       }
       // Pin the created inode's identity immediately: the copy loop below can
       // also fail (cancellation, a read/write error on the mount), and a
