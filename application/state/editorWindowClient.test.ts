@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { netcattyBridge } from "../../infrastructure/services/netcattyBridge.ts";
 import { editorTabStore } from "./editorTabStore.ts";
-import { installEditorWindowSourceListeners, saveDetachedEditorTab } from "./editorWindowClient.ts";
+import { installEditorWindowSourceListeners, popOutEditorTab, saveDetachedEditorTab } from "./editorWindowClient.ts";
 import { registerEditorSftpWriterScoped } from "./editorSftpBridge.ts";
 import { releaseEditorTabSaveCoordinator } from "./editorTabSave.ts";
 import type { EditorWindowSaveRequest, EditorWindowSaveResult } from "./editorWindowTypes.ts";
@@ -64,3 +64,26 @@ test("source save receipt preserves dirty until the detached renderer reports it
   onDirty({ editorId: snapshot.editorId, dirty: false });
   assert.equal(editorTabStore.isDirty(snapshot.editorId), false);
 });
+
+for (const outcome of ["accepted", "rejected", "failed"] as const) {
+  test(`popout retains source contents until the receiver ${outcome}`, async (t) => {
+    editorTabStore.upsertFromSnapshot(snapshot);
+    t.after(() => editorTabStore.close(snapshot.editorId));
+    let resolve!: (result: { success: boolean }) => void;
+    let reject!: (error: Error) => void;
+    const receipt = new Promise<{ success: boolean }>((yes, no) => { resolve = yes; reject = no; });
+    t.mock.method(netcattyBridge, "get", () => ({ openEditorWindow: () => receipt }));
+    const opening = popOutEditorTab(snapshot.editorId);
+    assert.equal(editorTabStore.getTab(snapshot.editorId)?.placement, "window");
+    assert.equal(editorTabStore.getTab(snapshot.editorId)?.content, "v2");
+    assert.equal(editorTabStore.getTab(snapshot.editorId)?.baselineContent, "v1");
+    if (outcome === "failed") reject(new Error("IPC disconnected"));
+    else resolve({ success: outcome === "accepted" });
+    assert.equal(await opening, outcome === "accepted");
+    const tab = editorTabStore.getTab(snapshot.editorId)!;
+    assert.equal(tab.placement, outcome === "accepted" ? "window" : "tab");
+    assert.equal(tab.content, outcome === "accepted" ? "" : "v2");
+    assert.equal(tab.baselineContent, outcome === "accepted" ? "" : "v1");
+    assert.equal(editorTabStore.isDirty(tab.id), true);
+  });
+}

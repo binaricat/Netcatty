@@ -1126,20 +1126,24 @@ function createPreloadApi(ctx) {
   remapEditorWindowSession: (payload) => ipcRenderer.send("netcatty:editorWindow:remapSession", payload),
   onEditorWindowOpenTab: (cb) => {
     const editorOpenTabState = ctx.editorOpenTabState || { pending: [], listeners: new Set() };
-    editorOpenTabState.listeners.add(cb);
-    const queued = editorOpenTabState.pending.splice(0, editorOpenTabState.pending.length);
-    if (queued.length > 0) {
-      queueMicrotask(() => {
-        for (const payload of queued) {
-          try {
-            cb(payload);
-          } catch (err) {
-            console.error("Editor window open-tab callback failed", err);
-          }
-        }
-      });
-    }
-    return () => editorOpenTabState.listeners.delete(cb);
+    const receive = (payload) => {
+      try {
+        cb(payload);
+        ipcRenderer.send("netcatty:window:editorOpenTabResult", { requestId: payload.requestId, ok: true });
+      } catch (err) {
+        ipcRenderer.send("netcatty:window:editorOpenTabResult", {
+          requestId: payload.requestId,
+          ok: false,
+          error: err?.message || "Failed to open editor tab",
+        });
+      }
+    };
+    editorOpenTabState.listeners.add(receive);
+    // Drain only to the currently mounted receiver. Deferring this would let
+    // StrictMode cleanup leave a stale callback holding the transfer.
+    for (const payload of editorOpenTabState.pending.splice(0)) receive(payload);
+    ipcRenderer.send("netcatty:window:editorReady");
+    return () => editorOpenTabState.listeners.delete(receive);
   },
   onEditorWindowActivateTab: (cb) => {
     const handler = (_event, payload) => cb(payload);

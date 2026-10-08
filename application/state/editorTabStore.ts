@@ -92,13 +92,11 @@ export class EditorTabStore {
   listByOwner = (owner: { sessionId?: string; sftpTabId?: string }): EditorTab[] =>
     this.tabs.filter((t) => this.tabMatchesOwner(t, owner));
 
-  markDetached = (id: EditorTabId, dirty: boolean): void => {
+  markDetached = (id: EditorTabId, dirty: boolean, releaseContent = true): void => {
     this.patch(id, {
       placement: "window",
       windowDirty: dirty,
-      content: "",
-      baselineContent: "",
-      viewState: null,
+      ...(releaseContent ? { content: "", baselineContent: "", viewState: null } : {}),
     });
     this.notifyStructural();
   };

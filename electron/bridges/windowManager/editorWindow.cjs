@@ -12,6 +12,7 @@ const CLOSE_TABS_PROMPT_TIMEOUT_MS = 120000;
 const CLOSE_TABS_FORCE_TIMEOUT_MS = 8000;
 const SAVE_TIMEOUT_MS = 30000;
 const DOCK_TIMEOUT_MS = 8000;
+const OPEN_TAB_TIMEOUT_MS = 30000;
 const MAX_EDITOR_CONTENT_BYTES = 10 * 1024 * 1024;
 
 function isLiveWindow(win) {
@@ -58,6 +59,7 @@ function sanitizeEditorSnapshot(payload) {
 function createEditorWindowApi(ctx) {
   with (ctx) {
     let editorWindow = null;
+    let editorWindowLoaded = null;
     let editorWindowCloseConfirmed = false;
     const tabSources = new Map();
 
@@ -101,6 +103,7 @@ function createEditorWindowApi(ctx) {
           settled = true;
           if (timeoutId !== null) clearTimeout(timeoutId);
           ipcMain.removeListener(replyChannel, onResult);
+          webContents.removeListener("destroyed", onDestroyed);
           resolve(result);
         };
         function onResult(evt, result) {
@@ -108,7 +111,11 @@ function createEditorWindowApi(ctx) {
           if (!result || result.requestId !== requestId) return;
           settle({ success: true, ...result });
         }
+        function onDestroyed() {
+          settle({ success: false, error: "Target window is gone" });
+        }
         ipcMain.on(replyChannel, onResult);
+        webContents.once("destroyed", onDestroyed);
         timeoutId = setTimeout(() => {
           settle({ success: false, error: "Timed out waiting for editor window" });
         }, timeoutMs);
@@ -141,13 +148,29 @@ function createEditorWindowApi(ctx) {
       }
     }
 
-    function sendOpenTab(win, snapshot) {
-      if (!isLiveWindow(win)) return false;
+    async function sendOpenTab(electronModule, win, snapshot, source, reused) {
       try {
-        win.webContents.send("netcatty:window:editorOpenTab", snapshot);
-        return true;
-      } catch {
-        return false;
+        // All opens, including reuse during cold start, share the same load.
+        await editorWindowLoaded;
+        if (!isLiveWindow(win)) return { success: false, error: "Editor window is gone" };
+        const result = await invokeWebContents(
+          electronModule,
+          win.webContents,
+          "netcatty:window:editorOpenTab",
+          "netcatty:window:editorOpenTabResult",
+          snapshot,
+          OPEN_TAB_TIMEOUT_MS,
+        );
+        if (!result.success || result.ok !== true || !isLiveWindow(win)) {
+          return { success: false, error: result.error || "Editor did not accept the file" };
+        }
+        // Only accepted tabs belong to this window. A failed load/transfer must
+        // not close the source's retained copy during window cleanup.
+        rememberTabSource(snapshot.editorId, source);
+        showAndFocusWindow(win);
+        return { success: true, reused };
+      } catch (error) {
+        return { success: false, error: error?.message || "Failed to open editor tab" };
       }
     }
 
@@ -157,17 +180,11 @@ function createEditorWindowApi(ctx) {
 
       const { BrowserWindow, shell } = electronModule;
       const { preload, devServerUrl, isDev, appIcon, isMac, electronDir, sourceWindow, sourceWebContents } = options;
-      rememberTabSource(snapshot.editorId, sourceWebContents || sourceWindow?.webContents);
+      const source = sourceWebContents || sourceWindow?.webContents;
 
       const existing = getEditorWindow();
       if (existing) {
-        sendOpenTab(existing, snapshot);
-        try {
-          showAndFocusWindow(existing);
-        } catch {
-          // ignore
-        }
-        return { success: true, reused: true };
+        return sendOpenTab(electronModule, existing, snapshot, source, true);
       }
 
       const osTheme = electronModule?.nativeTheme?.shouldUseDarkColors ? "dark" : "light";
@@ -208,7 +225,10 @@ function createEditorWindowApi(ctx) {
       editorWindow = win;
 
       const releaseLifecycle = () => {
-        if (editorWindow === win) editorWindow = null;
+        if (editorWindow === win) {
+          editorWindow = null;
+          editorWindowLoaded = null;
+        }
         const leftoverIds = Array.from(tabSources.keys());
         notifySourcesTabsClosed(electronModule, leftoverIds);
         tabSources.clear();
@@ -272,34 +292,54 @@ function createEditorWindowApi(ctx) {
         }
       }
 
+      // loadURL only guarantees document load, not that React installed the
+      // receiver. Subscribe before navigation so a fast renderer cannot race us.
+      const rendererReady = new Promise((resolve, reject) => {
+        const cleanup = () => {
+          clearTimeout(timeout);
+          electronModule.ipcMain.removeListener("netcatty:window:editorReady", onReady);
+          win.removeListener("closed", onClosed);
+        };
+        const onReady = (event) => {
+          if (event.sender !== win.webContents) return;
+          cleanup();
+          resolve();
+        };
+        const onClosed = () => {
+          cleanup();
+          reject(new Error("Editor window closed before it was ready"));
+        };
+        const timeout = setTimeout(() => {
+          cleanup();
+          reject(new Error("Timed out waiting for editor receiver"));
+        }, OPEN_TAB_TIMEOUT_MS);
+        electronModule.ipcMain.on("netcatty:window:editorReady", onReady);
+        win.once("closed", onClosed);
+      });
       const editorPath = "#/editor-window";
-      try {
-        if (isDev) {
-          try {
-            const baseUrl = getDevRendererBaseUrl(devServerUrl);
-            await win.loadURL(`${baseUrl}${editorPath}`);
-          } catch (e) {
-            console.warn("[EditorWindow] Dev server not reachable", e);
+      const loadRenderer = async () => {
+        try {
+          if (isDev) {
+            try {
+              const baseUrl = getDevRendererBaseUrl(devServerUrl);
+              await win.loadURL(`${baseUrl}${editorPath}`);
+            } catch (e) {
+              console.warn("[EditorWindow] Dev server not reachable", e);
+              await win.loadURL(`app://netcatty/index.html${editorPath}`);
+            }
+          } else {
             await win.loadURL(`app://netcatty/index.html${editorPath}`);
           }
-        } else {
-          await win.loadURL(`app://netcatty/index.html${editorPath}`);
+        } catch (error) {
+          if (isLiveWindow(win)) win.destroy();
+          throw error;
         }
-        sendOpenTab(win, snapshot);
-        showAndFocusWindow(win);
-        return { success: true, reused: false };
-      } catch (error) {
-        try {
-          if (isLiveWindow(win)) {
-            if (typeof win.destroy === "function") win.destroy();
-            else win.close();
-          }
-        } catch {
-          // ignore
-        }
-        releaseLifecycle();
-        return { success: false, error: error?.message || "Failed to open editor window" };
-      }
+      };
+      editorWindowLoaded = Promise.all([loadRenderer(), rendererReady]).catch((error) => {
+        if (isLiveWindow(win)) win.destroy();
+        throw error;
+      });
+      return sendOpenTab(electronModule, win, snapshot, source, false);
     }
 
     function focusEditorTab(electronModule, editorId) {

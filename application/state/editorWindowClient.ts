@@ -52,12 +52,15 @@ export async function popOutEditorTab(
   }
   const dirty = tabIsDirty(tab);
   const snapshot = toEditorWindowSnapshot(tab, hostLabel || tab.hostLabel);
-  editorTabStore.markDetached(tabId, dirty);
-  const ok = await openEditorInWindow(snapshot);
+  // Hide the source editor during transfer, but retain its only owned copy
+  // until the destination has acknowledged installing the tab.
+  editorTabStore.markDetached(tabId, dirty, false);
+  const ok = await openEditorInWindow(snapshot).catch(() => false);
   if (!ok) {
-    editorTabStore.upsertFromSnapshot(snapshot, "tab");
+    if (editorTabStore.getTab(tabId)) editorTabStore.upsertFromSnapshot(snapshot, "tab");
     return false;
   }
+  editorTabStore.markDetached(tabId, dirty);
   const activeId = activeTabStore.getActiveTabId();
   if (activeId === toEditorTabId(tabId)) {
     activeTabStore.setActiveTabId("vault");
