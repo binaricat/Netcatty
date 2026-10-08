@@ -1061,7 +1061,14 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
       await fs.promises.rename(stagedPath, readyPath);
     } catch (error) {
       if (error?.code !== "EXDEV") throw error;
-      await copyFileExclusiveWithFallback(stagedPath, readyPath);
+      // The fallback creates the replacement with a default 0666 mode. On
+      // mounts that reject chmod below, the later mode loop cannot correct it,
+      // so seed the intended permissions now: the destination's existing mode
+      // when known, else a private one, never a broader published file.
+      const intendedMode = Number.isInteger(options.existingMode)
+        ? options.existingMode & 0o7777
+        : 0o600;
+      await copyFileExclusiveWithFallback(stagedPath, readyPath, intendedMode);
     }
     // Stamp the private prepared file before applying possibly unreadable
     // destination permissions. Publication carries these times to the target.

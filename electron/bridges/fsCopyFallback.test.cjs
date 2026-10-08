@@ -137,8 +137,31 @@ test("local promotion completes when the destination refuses copyFile and chmod"
   assert.equal(copyFileCalls.length, 1, "accelerated copy is attempted exactly once before falling back");
   assert.equal(chmodCalls.length, 1, "unsupported chmod is attempted instead of skipped");
   assert.ok(fs.readFileSync(target).equals(payload));
+  assert.equal(
+    fs.statSync(target).mode & 0o777,
+    0o600,
+    "a chmod-refusing destination keeps its restrictive permissions after replacement",
+  );
   assert.equal(fs.existsSync(staged), false);
   assert.equal(fs.readdirSync(dir).filter((name) => name.endsWith(".backup")).length, 0);
+});
+
+test("copyFileExclusiveWithFallback applies restrictive creation mode to the streamed fallback", async (t) => {
+  const dir = makeTempDir("copy-fallback-mode-");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const source = path.join(dir, "staged");
+  const target = path.join(dir, "target");
+  const payload = Buffer.alloc(64 * 1024, 9);
+  fs.writeFileSync(source, payload);
+  const restore = stubPromises("copyFile", enotsupCopyFile());
+  t.after(restore);
+  await copyFileExclusiveWithFallback(source, target, 0o600);
+  assert.ok(fs.readFileSync(target).equals(payload));
+  assert.equal(
+    fs.statSync(target).mode & 0o777,
+    0o600,
+    "fallback creation mode is honored instead of the 0666 default",
+  );
 });
 
 test("publishLocalFileExclusive tolerates chmod/utimes rejection without hardlinks", async (t) => {

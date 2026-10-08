@@ -26,16 +26,21 @@ function isMetadataUnsupportedError(error) {
 // stream when the destination filesystem refuses the accelerated copy syscall.
 // A partially written target name is left in place on failure for the caller
 // to clean up, matching fs.copyFile's failure behavior.
-async function copyFileExclusiveWithFallback(source, target) {
+// `mode` (optional) is applied to the fallback stream so mounts that reject
+// chmod still receive restrictive creation-mode bits instead of the broader
+// default 0666; the accelerated copyFile path keeps the source's mode.
+async function copyFileExclusiveWithFallback(source, target, mode = null) {
   try {
     await fs.promises.copyFile(source, target, fs.constants.COPYFILE_EXCL);
     return;
   } catch (error) {
     if (!isCopyFallbackError(error)) throw error;
   }
+  const writeOptions = { flags: "wx" };
+  if (Number.isInteger(mode) && mode >= 0) writeOptions.mode = mode & 0o7777;
   await pipeline(
     fs.createReadStream(source),
-    fs.createWriteStream(target, { flags: "wx" }),
+    fs.createWriteStream(target, writeOptions),
   );
 }
 
