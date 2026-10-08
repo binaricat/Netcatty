@@ -356,10 +356,15 @@ export class ToolOutputStore {
    * historical session still produces target-owned records instead of a
    * no-op. When `retainHandleIds` is provided, only those handles are
    * cloned; outputs saved by turns after the fork boundary stay in the
-   * source session.
-   * Returns `true` when the target namespace resolves every advertised handle
-   * id, and `false` when the global quota cannot hold both the source and the
-   * fresh clones (the clones are rolled back): the caller must then abort
+   * source session. The fork is refused (`false`) unless every requested
+   * id resolves in the source namespace — including through the restore
+   * attempts above — because a retained message advertising an
+   * unresolvable handle would break `tool_output_read` permanently.
+   * Returns `true` only when the target namespace resolves every
+   * advertised handle id, and `false` when a requested handle id cannot
+   * be resolved or when the global quota cannot hold both the source and
+   * the fresh clones (checked before any eviction, so the refusal leaves
+   * the registry untouched): the caller must then abort
    * publishing the fork, because its retained messages would reference handle
    * ids that resolve to "not found".
    */
@@ -381,7 +386,15 @@ export class ToolOutputStore {
       ));
     }
     const sourceMap = this.bySession.get(sourceChatSessionId);
-    if (!sourceMap || sourceMap.size === 0) return true;
+    if (!sourceMap || sourceMap.size === 0) {
+      // A retained prefix that references handle ids must not fork "into
+      // nothing": a restore after a restart can come back null (e.g. the
+      // durable record is gone or was rejected by the generation checks),
+      // and reporting success here would publish a fork whose
+      // `tool_output_read` calls fail permanently.
+      if (retainHandleIds && retainHandleIds.length > 0) return false;
+      return true;
+    }
     // When the caller names the handles the retained prefix references, clone
     // only those: copying the whole source session would pull in outputs the
     // fork never reads and could evict still-valid handles (source or other
@@ -393,7 +406,12 @@ export class ToolOutputStore {
         if (seen.has(handleId)) continue;
         seen.add(handleId);
         const handle = sourceMap.get(handleId);
-        if (handle) selected.push([handleId, handle]);
+        // A requested id still missing after the restore attempts above must
+        // not be silently skipped: `Promise.allSettled` swallowed the restore
+        // failure, and cloning the survivors would advertise a handle nothing
+        // can ever resolve — refuse instead of publishing a broken fork.
+        if (!handle) return false;
+        selected.push([handleId, handle]);
       }
     } else {
       selected.push(...sourceMap.entries());
@@ -403,6 +421,22 @@ export class ToolOutputStore {
     // the handle owns a durable file path.
     await Promise.allSettled(selected.map(([, handle]) => handle.spillPromise));
     const targetMap = this.bySession.get(targetChatSessionId) ?? new Map<string, ToolOutputHandle>();
+    const protect = new Set(selected.map(([, handle]) => handle));
+    // Determine feasibility *before* touching the registry: if the global
+    // quota cannot admit the fresh clones without evicting handles other
+    // conversations still resolve, refuse the fork now — a refusal after
+    // eviction would already have deleted collateral, unrelated output
+    // (rolling back only the clones cannot bring it back).
+    let cloneCount = 0;
+    let cloneChars = 0;
+    for (const [handleId, handle] of selected) {
+      if (targetMap.has(handleId)) continue;
+      cloneCount += 1;
+      cloneChars += handle.storedChars;
+    }
+    if (!this.canAdmitWithinGlobalQuota(cloneCount, cloneChars, protect)) {
+      return false;
+    }
     const freshClones: ToolOutputHandle[] = [];
     for (const [handleId, handle] of selected) {
       if (targetMap.has(handleId)) continue;
@@ -458,8 +492,15 @@ export class ToolOutputStore {
     // source record intact, and report the refusal (`false`) so the caller
     // aborts publishing the fork: no existing conversation's output is
     // invalidated and no fork advertises unresolvable handle ids.
+    // Capacity was reserved above via `canAdmitWithinGlobalQuota`, which
+    // simulates the same eviction policy (`pickEvictionEntry` with the same
+    // protect set) without mutating anything, so this enforcement re-check
+    // can only reach the same "within quota" outcome and never evicts a
+    // collateral victim on a fork that was already deemed infeasible. The
+    // protect set and rollback below remain as a safety net for concurrent
+    // registry changes that slipped in across the awaited persistence reads.
     const withinQuota = this.enforceGlobalLimits(new Set([
-      ...selected.map(([, handle]) => handle),
+      ...protect,
       ...freshClones,
     ]));
     if (!withinQuota) {
@@ -492,6 +533,40 @@ export class ToolOutputStore {
     }
     await Promise.allSettled(spillWrites);
     return true;
+  }
+
+  /**
+   * Check — without mutating any registry state — whether adding
+   * `extraHandles` handles totalling `extraChars` chars could be admitted
+   * into the global quota by evicting unprotected existing handles,
+   * simulating exactly the eviction `enforceGlobalLimits` would perform
+   * (same `pickEvictionEntry` rules, same `protect` set). Returns false when
+   * the quota is still exceeded after every remaining entry is protected (or
+   * shielded by the borrow-alias rule), which is the condition under which
+   * a fork must be refused *before* any real eviction runs, so unrelated
+   * handles are never deleted by a fork attempt that then fails.
+   */
+  private canAdmitWithinGlobalQuota(
+    extraHandles: number,
+    extraChars: number,
+    protect: ReadonlySet<ToolOutputHandle>,
+  ): boolean {
+    const evicted = new Set<ToolOutputHandle>();
+    while (true) {
+      const entries = [...this.bySession.values()]
+        .flatMap(sessionMap => [...sessionMap.values()])
+        .filter(handle => !evicted.has(handle))
+        .map(handle => ({ handle }));
+      const totalChars = entries.reduce((sum, entry) => sum + entry.handle.storedChars, 0)
+        + extraChars;
+      if (
+        entries.length + extraHandles <= this.maxHandlesGlobal
+        && totalChars <= this.maxCharsGlobal
+      ) return true;
+      const oldest = this.pickEvictionEntry(entries, protect);
+      if (!oldest) return false;
+      evicted.add(oldest.handle);
+    }
   }
 
   /**

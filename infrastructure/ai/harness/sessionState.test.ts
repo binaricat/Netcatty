@@ -188,3 +188,35 @@ test('SessionStateStore rebuilds fork state from the retained prefix only', () =
   // The failed tail surfaces as an open blocker, as it does live.
   assert.match(text, /Open blockers/);
 });
+
+test('SessionStateStore rebuild pairs repeated pending calls sharing an id in order', () => {
+  const store = new SessionStateStore();
+  // A provider can emit several unresolved calls carrying the same id before
+  // their results arrive; the rebuild must not collapse them onto one entry.
+  store.rebuildFromMessages('chat-fork', [
+    {
+      role: 'assistant',
+      content: '',
+      toolCalls: [
+        { id: 'call-dup', name: 'terminal_start', arguments: { sessionId: 'sess-1', command: 'npm run dev' } },
+        { id: 'call-dup', name: 'terminal_poll', arguments: { jobId: 'job-1' } },
+      ],
+    },
+    {
+      role: 'tool',
+      content: JSON.stringify({ jobId: 'job-1', status: 'running', nextOffset: 0 }),
+      toolResults: [{ toolCallId: 'call-dup', content: JSON.stringify({ jobId: 'job-1', status: 'running', nextOffset: 0 }) }],
+    },
+    {
+      role: 'tool',
+      content: JSON.stringify({ jobId: 'job-1', status: 'running', nextOffset: 420 }),
+      toolResults: [{ toolCallId: 'call-dup', content: JSON.stringify({ jobId: 'job-1', status: 'running', nextOffset: 420 }) }],
+    },
+  ]);
+
+  // The first result pairs with terminal_start, the second with terminal_poll
+  // (whose args carry the poll offset); collapsing the calls used to leave
+  // the last result as "unknown" and lose the offset.
+  assert.equal(store.get('chat-fork').activeJobs['job-1'].nextOffset, 420);
+  assert.match(store.toReinjectionText('chat-fork') ?? '', /offset=420/);
+});

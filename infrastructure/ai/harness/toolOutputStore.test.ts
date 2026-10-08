@@ -1572,3 +1572,111 @@ test('saved-output read budgets reset at the start of each turn', () => {
   dedup.beginTurn();
   assert.equal(dedup.takeBudget('read', 24_000, 24_000), 24_000);
 });
+
+test('ToolOutputStore refuses a kept-prefix fork when a retained handle cannot be restored', async () => {
+  const files = new Map<string, { record: PersistedToolOutputRecord; content: string }>();
+  const persistence: ToolOutputPersistence = {
+    write: async (record, content) => {
+      const path = `/netcatty/${record.handleId}-${record.chatSessionId}.log`;
+      files.set(path, { record, content });
+      return path;
+    },
+    restore: async (handleId, chatSessionId) => {
+      for (const [path, entry] of files) {
+        if (entry.record.handleId !== handleId || entry.record.chatSessionId !== chatSessionId) continue;
+        return { path, record: entry.record };
+      }
+      return null;
+    },
+    read: async (path, input) => {
+      const content = files.get(path)?.content;
+      if (content == null) return null;
+      const startOffset = Math.max(0, input.offset ?? 0);
+      const selected = content.slice(startOffset, startOffset + (input.maxChars ?? 12_000));
+      return {
+        mode: input.mode ?? 'head',
+        content: selected,
+        totalChars: content.length,
+        startOffset,
+        endOffset: startOffset + selected.length,
+        nextOffset: startOffset + selected.length,
+        hasMore: startOffset + selected.length < content.length,
+      };
+    },
+    delete: async path => {
+      files.delete(path);
+    },
+  };
+
+  const firstRun = new ToolOutputStore({ spillThresholdChars: 0, persistence });
+  const kept = firstRun.store({
+    chatSessionId: 'chat-source',
+    capabilityId: 'terminal.execute',
+    content: 'K'.repeat(5_000),
+  });
+  const lost = firstRun.store({
+    chatSessionId: 'chat-source',
+    capabilityId: 'terminal.execute',
+    content: 'L'.repeat(5_000),
+  });
+  await kept.spillPromise;
+  await lost.spillPromise;
+  // The durable record behind `lost` is gone (e.g. expired or deleted while
+  // the app was stopped): restore comes back null for it after a restart.
+  for (const [path, entry] of [...files]) {
+    if (entry.record.handleId === lost.id) files.delete(path);
+  }
+
+  const afterRestart = new ToolOutputStore({ spillThresholdChars: 0, persistence });
+  // Both ids are referenced by the retained prefix; one cannot be restored,
+  // so the fork must be refused instead of published with a permanently
+  // unresolvable `tool_output_read`.
+  assert.equal(
+    await afterRestart.rehomeChatSession('chat-source', 'chat-fork', [kept.id, lost.id]),
+    false,
+  );
+  // Nothing was cloned into the fork's namespace: none of the advertised ids
+  // can resolve there.
+  assert.equal(afterRestart.get(kept.id, 'chat-fork'), undefined);
+  assert.equal(afterRestart.listPendingHandles('chat-fork').length, 0);
+  assert.equal(
+    await afterRestart.readChunkAsync({ handleId: kept.id, mode: 'head', maxChars: 10 }, 'chat-fork'),
+    null,
+  );
+});
+
+test('ToolOutputStore refuses a kept-prefix fork when the source namespace is empty', async () => {
+  const store = new ToolOutputStore();
+  // A retained prefix references a handle the store cannot resolve (even in
+  // the source namespace), so the fork is refused instead of no-op success.
+  assert.equal(await store.rehomeChatSession('chat-source', 'chat-fork', ['tool-output-missing']), false);
+  assert.equal(store.listPendingHandles('chat-fork').length, 0);
+  // Without retained ids an empty source session stays a legitimate no-op.
+  assert.equal(await store.rehomeChatSession('chat-source', 'chat-fork-2'), true);
+  assert.equal(store.listPendingHandles('chat-fork-2').length, 0);
+});
+
+test('ToolOutputStore refuses an infeasible fork without evicting collateral handles', async () => {
+  const store = new ToolOutputStore({ maxCharsGlobal: 100 });
+  const source = store.store({
+    chatSessionId: 'chat-source',
+    capabilityId: 'terminal.execute',
+    content: 'S'.repeat(60),
+  });
+  const collateral = store.store({
+    chatSessionId: 'chat-unrelated',
+    capabilityId: 'terminal.execute',
+    content: 'U'.repeat(40),
+  });
+
+  // The global char quota (100) cannot admit the 60-char clone even after
+  // evicting every unprotected handle (the 40-char unrelated one leaves the
+  // registry at 120 chars), so the fork is refused — and the refusal must
+  // leave the collateral handle of the other conversation untouched.
+  assert.equal(await store.rehomeChatSession('chat-source', 'chat-fork'), false);
+  assert.ok(store.get(source.id, 'chat-source'));
+  assert.ok(store.get(collateral.id, 'chat-unrelated'));
+  assert.equal(store.read({ handleId: collateral.id, mode: 'head', maxChars: 10 }, 'chat-unrelated'), 'U'.repeat(10));
+  assert.equal(store.get(source.id, 'chat-fork'), undefined);
+  assert.equal(store.listPendingHandles('chat-fork').length, 0);
+});

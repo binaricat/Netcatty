@@ -324,21 +324,28 @@ export class SessionStateStore {
     this.clear(chatSessionId);
     // Pair each result with the nearest preceding unresolved call carrying
     // the same id (same rule as the historical replay maps) so tool names and
-    // arguments survive the walk across messages.
-    const pendingCalls = new Map<string, { name: string; arguments?: Record<string, unknown> }>();
+    // arguments survive the walk across messages. A provider may emit several
+    // unresolved calls sharing one id before their results arrive; keep a
+    // FIFO queue per id so the first result pairs with the first call's
+    // metadata instead of the map overwriting the earlier call and leaving
+    // later results attributed to "unknown".
+    const pendingCalls = new Map<string, Array<{ name: string; arguments?: Record<string, unknown> }>>();
     for (const message of messages) {
       for (const call of message.toolCalls ?? []) {
         if (!call?.id || typeof call.name !== 'string' || !call.name) continue;
-        pendingCalls.set(call.id, { name: call.name, arguments: call.arguments });
+        const queue = pendingCalls.get(call.id) ?? [];
+        queue.push({ name: call.name, arguments: call.arguments });
+        pendingCalls.set(call.id, queue);
       }
       if (message.role === 'user') this.mergeFromUserGoal(chatSessionId, message.content);
       if (message.role === 'assistant') this.mergeFromAssistantContent(chatSessionId, message.content);
       for (const result of message.toolResults ?? []) {
         const callId = result?.toolCallId;
         if (!callId) continue;
-        const call = pendingCalls.get(callId)
+        const queue = pendingCalls.get(callId);
+        const call = queue?.shift()
           ?? (result.toolName ? { name: result.toolName } : undefined);
-        pendingCalls.delete(callId);
+        if (queue && queue.length === 0) pendingCalls.delete(callId);
         this.updateFromToolResult(
           chatSessionId,
           call?.name ?? 'unknown',
