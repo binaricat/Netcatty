@@ -926,6 +926,74 @@ test("promoteLocalTransfer preserves a ready pathname whose ownership the fallba
   );
 });
 
+test("promoteLocalTransfer discloses the retained ready partial when the fallback cannot relabel it", async (t) => {
+  const dir = makeTempDir("promote-unrelabelled-ready-");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const staged = path.join(dir, "staged");
+  const target = path.join(dir, "target");
+  fs.writeFileSync(staged, "our copy bytes");
+  fs.writeFileSync(target, "original");
+  // Force the EXDEV staging rename so the fallback copy creates the private
+  // ready pathname, refuse the accelerated copy so the stream fallback runs,
+  // and fail its first read to break the copy loop midway. The failure-time
+  // relabel rename is then refused too (a mount that rejects renames), so the
+  // unverified partial stays behind the ready pathname itself.
+  const renameOriginal = fs.promises.rename;
+  const renameRestore = stubPromises("rename", async (...args) => {
+    if (args[0] === staged) {
+      throw Object.assign(new Error("EXDEV: cross-device link not permitted"), { code: "EXDEV" });
+    }
+    if (String(args[1]).includes(".stale-")) {
+      throw Object.assign(new Error("EPERM: operation not permitted, rename"), { code: "EPERM" });
+    }
+    return renameOriginal.apply(fs.promises, args);
+  });
+  t.after(renameRestore);
+  const copyRestore = stubPromises("copyFile", enotsupCopyFile());
+  t.after(copyRestore);
+  const openOriginal = fs.promises.open;
+  const openRestore = stubPromises("open", async (...args) => {
+    const handle = await openOriginal.apply(fs.promises, args);
+    const originalRead = handle.read.bind(handle);
+    handle.read = async (buffer, offset, length, position) => {
+      if (position === 0) {
+        throw Object.assign(new Error("EIO: i/o error, read"), { code: "EIO" });
+      }
+      return originalRead(buffer, offset, length, position);
+    };
+    return handle;
+  });
+  t.after(openRestore);
+  let error = null;
+  try {
+    await transferBridge._promoteLocalTransferForTests(staged, target, { existingMode: 0o600 });
+  } catch (thrown) {
+    error = thrown;
+  }
+  assert.equal(error?.recoveryFailed, true, "the retained partial is disclosed via recovery reporting");
+  assert.equal(
+    typeof error?.cause?.retainedTarget,
+    "string",
+    "the fallback attaches the retained partial's path to its error",
+  );
+  assert.ok(
+    error.cause.retainedTarget.startsWith(`${dir}/.`) && error.cause.retainedTarget.endsWith(".ready"),
+    "the retained path is the randomized ready pathname",
+  );
+  assert.equal(error.cause?.code, "EIO", "the underlying copy failure code is preserved");
+  assert.equal(
+    fs.readdirSync(dir).filter((name) => name.endsWith(".ready")).length,
+    1,
+    "the unrelabelled partial is retained behind the ready pathname",
+  );
+  assert.equal(fs.readFileSync(target, "utf8"), "original", "the intact destination is untouched");
+  assert.equal(
+    fs.readdirSync(dir).filter((name) => name.includes(".stale-")).length,
+    0,
+    "the refused relabel leaves no side name behind",
+  );
+});
+
 test("local promotion without existingMode keeps the staged mode for cross-device resumable copies", async (t) => {
   const dir = makeTempDir("promote-staged-mode-");
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));

@@ -1246,6 +1246,14 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
     await fs.promises.unlink(stagedPath).catch(() => {});
   } catch (error) {
     if (committed) throw error;
+    // A copy fallback that could not relabel the ready pathname still holds
+    // its unverified partial copy behind it (`retainedTarget`): the
+    // relinquished handover keeps the pre-commit cleanup from unlinking the
+    // pathname, so the retained partial must be routed through recovery
+    // reporting instead of silently accumulating hidden `.ready` fragments.
+    if (error?.targetOwnershipRelinquished && error?.retainedTarget === readyPath) {
+      keepRecoveryFiles = true;
+    }
     if (backedUp && !keepRecoveryFiles) {
       try {
         // The pathname may have changed between open and rename. Never copy

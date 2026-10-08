@@ -427,10 +427,17 @@ async function copyFileExclusiveWithFallback(source, target, mode = null, option
         }
         // Nothing was relabelled (renamed away) or the relabel could not be
         // verified: in both cases the caller must not unlink the pathname, so
-        // the handover is marked either way.
+        // the handover is marked either way. When the relabel rename was
+        // refused for a reason other than a vanished pathname, the unverified
+        // partial still sits behind the pathname itself: attach the retained
+        // path to the error so the caller's recovery reporting discloses it
+        // instead of leaving hidden partial files to accumulate on the
+        // destination across repeated failures.
         throw Object.assign(copyError, {
           targetOwnershipRelinquished: true,
-          ...(relabelError ? { cause: relabelError } : {}),
+          ...(relabelError
+            ? { cause: relabelError, retainedTarget: target }
+            : {}),
         });
       }
     } finally {
