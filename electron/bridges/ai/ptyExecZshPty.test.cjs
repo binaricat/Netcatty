@@ -31,6 +31,7 @@ SAVEHIST=100
 setopt HIST_IGNORE_SPACE
 typeset -g NETCATTY_RC_LOADED=yes
 typeset -gi NETCATTY_REDRAWS=0
+zmodload zsh/zle
 autoload -Uz add-zle-hook-widget
 netcatty_redraw() {
   (( ++NETCATTY_REDRAWS ))
@@ -44,8 +45,9 @@ add-zle-hook-widget line-init netcatty_line_init
 `);
 
   // script supplies a real controlling PTY without depending on node-pty's
-  // Node/Electron ABI. Do not use -f: the regression involves startup hooks.
-  const child = spawn('script', ['-qefc', 'exec zsh -i', '/dev/null'], {
+  // Node/Electron ABI. -d excludes machine-wide rc files (CI's compinit can
+  // prompt before our fixture loads); unlike -f, it still reads our .zshrc.
+  const child = spawn('script', ['-qefc', 'exec zsh -d -i', '/dev/null'], {
     env: { ...process.env, ZDOTDIR: zdotdir, TERM: 'xterm-256color' },
   });
   const stream = new EventEmitter();
