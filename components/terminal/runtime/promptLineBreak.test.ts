@@ -1273,7 +1273,9 @@ test("OSC 133 cwd completion publishes only when the last outstanding command fi
   assert.equal(consumeOsc133CwdCompletion("D;1", state), true);
   assert.equal(state.pendingCwdCompletions, 0);
   assert.equal(consumeOsc133CwdCompletion("D;0", state), false);
-  assert.equal(markOsc133CompletionProtocol(state), undefined);
+  assert.equal(markOsc133CompletionProtocol("A", state), undefined);
+  assert.equal(state.shellCompletionProtocolSeen, false, "a stray OSC 133;A does not count as the completion protocol");
+  assert.equal(markOsc133CompletionProtocol("D;0", state), undefined);
   assert.equal(state.shellCompletionProtocolSeen, true);
 });
 

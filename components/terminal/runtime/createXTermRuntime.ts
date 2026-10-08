@@ -3242,12 +3242,13 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   });
 
   const osc133Disposable = term.parser.registerOscHandler(133, (data) => {
-    // Any OSC 133 sequence proves the shell has completion integration, so the
-    // plain prompt fallback must stop publishing cwd (prompt-shaped command
-    // output cannot forge an OSC 133;D).
-    markOsc133CompletionProtocol(ctx.promptLineBreakStateRef?.current);
+    // An observed OSC 133;D completion marker proves the shell has completion
+    // integration, so the plain prompt fallback must stop publishing cwd once
+    // D is seen (non-D payloads can be forged by prompt-shaped command output
+    // on a non-integrated shell).
     const commandCompleted = consumeOsc133CommandCompletion(data, ctx.promptLineBreakStateRef?.current);
     const cwdCompleted = consumeOsc133CwdCompletion(data, ctx.promptLineBreakStateRef?.current);
+    markOsc133CompletionProtocol(data, ctx.promptLineBreakStateRef?.current);
     if (commandCompleted || cwdCompleted) {
       ctx.onCommandCompleted?.(cwdCompleted);
     }

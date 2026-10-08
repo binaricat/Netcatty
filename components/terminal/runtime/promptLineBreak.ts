@@ -25,9 +25,10 @@ export type PromptLineBreakState = {
    */
   cwdRepublishPending: boolean;
   /**
-   * Set once the shell sends any OSC 133 sequence. From then on the plain
-   * prompt fallback never publishes cwd — OSC 133 completions are the only
-   * signal prompt-shaped command output cannot forge.
+   * Set once the shell sends an OSC 133;D completion marker. From then on the
+   * plain prompt fallback never publishes cwd — OSC 133 completions are the
+   * only signal prompt-shaped command output cannot forge (other OSC 133
+   * payloads can be forged by arbitrary command output).
    */
   shellCompletionProtocolSeen: boolean;
 };
@@ -512,8 +513,15 @@ export function consumeOsc133CommandCompletion(
 }
 
 export function markOsc133CompletionProtocol(
+  data: string,
   state: PromptLineBreakState | undefined,
 ): void {
+  // Only the D (command completed) marker proves the shell's completion
+  // protocol. Other OSC 133 payloads (A/B/C) can be forged by arbitrary
+  // command output on a non-integrated shell, and a stray A that never gets
+  // its D would permanently disable the plain-prompt fallback while cwd
+  // completions stay pending.
+  if (data.split(";", 1)[0] !== "D") return;
   if (state) state.shellCompletionProtocolSeen = true;
 }
 

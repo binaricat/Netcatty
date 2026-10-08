@@ -136,9 +136,9 @@ for (const mode of ["osc133", "osc7", "prompt"]) {
         if (sequence.endsWith("\x1b]133;D")) {
           ready = true;
           completions += 1;
-          // Mirror the runtime: OSC 133 proves shell completion integration
-          // and its D confirms the last outstanding cwd-invalidating command.
-          markOsc133CompletionProtocol(pending.current);
+          // Mirror the runtime: the OSC 133;D marker proves shell completion
+          // integration and confirms the last outstanding cwd-invalidating command.
+          markOsc133CompletionProtocol("D", pending.current);
           const cwdDone = consumeOsc133CwdCompletion("D", pending.current);
           consumeOsc133CommandCompletion("D", pending.current);
           if (cwdDone) completed("session");
