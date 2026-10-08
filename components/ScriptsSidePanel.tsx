@@ -574,7 +574,7 @@ const ScriptsSidePanelInner: React.FC<ScriptsSidePanelProps> = ({
   const hasMoreStackedItems = viewMode === 'stacked' && stackedRenderLimit < listItems.length;
 
   useEffect(() => {
-    if (!hasMoreStackedItems) return;
+    if (subView !== 'library' || !hasMoreStackedItems) return;
     const sentinel = stackedSentinelRef.current;
     if (!sentinel) return;
     // Re-created per batch: observing always emits an initial intersection
@@ -586,7 +586,7 @@ const ScriptsSidePanelInner: React.FC<ScriptsSidePanelProps> = ({
     });
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [hasMoreStackedItems, stackedRenderLimit]);
+  }, [hasMoreStackedItems, stackedRenderLimit, subView]);
 
   const handleSnippetClick = useCallback(
     (snippet: Snippet) => {
