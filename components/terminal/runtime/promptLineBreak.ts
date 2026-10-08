@@ -19,17 +19,27 @@ export type PromptLineBreakState = {
    */
   pendingCwdCompletions: number;
   /**
-   * One-shot re-probe armed after a plain-prompt fallback publication: the
-   * fallback can be forged by prompt-shaped command output, so the next
-   * prompt-shaped event re-probes to correct the published cwd.
+   * One-shot re-probe armed after a prompt-shaped publication: the
+   * publication (plain-prompt fallback, armed re-probe, or OSC 133;D
+   * confirmation) can be forged by command output, so the next empty prompt
+   * re-probes to correct a stale published value.
    */
   cwdRepublishPending: boolean;
   /**
+   * How many re-probe generations the current chain consumed. A fresh
+   * fallback or OSC 133;D publication restarts the chain; consuming an armed
+   * re-probe advances it. The cap keeps a command that endlessly prints
+   * prompt-shaped chunks from requesting an unlimited number of backend reads.
+   */
+  cwdRepublishDepth: number;
+  /**
    * Set while the shell keeps sending OSC 133;D completion markers. While it
-   * holds, the plain prompt fallback never publishes cwd — OSC 133 completions
-   * are the only signal prompt-shaped command output cannot forge (other OSC
-   * 133 payloads can be forged by arbitrary command output). The flag degrades
-   * back to heuristic fallback when a bare prompt arrives for an outstanding
+   * holds, the plain prompt fallback never publishes cwd — the per-command D
+   * marker is the only event that can correlate the finishes of queued
+   * commands one by one (a prompt cannot, and other OSC 133 payloads can be
+   * forged by arbitrary command output — so can a D printed by a child, which
+   * is why its confirmed publication stays untrusted). The flag degrades back
+   * to heuristic fallback when a bare prompt arrives for an outstanding
    * command without its D marker (e.g. after stepping into a nested
    * non-integrated shell), and re-arms on the next D marker.
    */
@@ -486,6 +496,7 @@ export function createPromptLineBreakState(): PromptLineBreakState {
     pendingCommandCompletions: 0,
     pendingCwdCompletions: 0,
     cwdRepublishPending: false,
+    cwdRepublishDepth: 0,
     shellCompletionProtocolSeen: false,
   };
 }
@@ -557,10 +568,10 @@ export function consumeOsc133CwdCompletion(
 /**
  * Plain-prompt fallback for cwd completion. Publishes only for a single
  * outstanding command and only while the shell shows no OSC 133 completion
- * protocol (whose D sequence is authoritative). Prompt-shaped command output
- * cannot be told apart from a real prompt here, so the confirmation stays
- * heuristic without OSC 133 and callers keep a re-probe armed to
- * self-correct.
+ * protocol (where the per-command D marker correlates queued completions one
+ * by one, which a prompt cannot). Prompt-shaped command output cannot be told
+ * apart from a real prompt here, so the confirmation stays
+ * heuristic and callers keep a re-probe armed to self-correct.
  *
  * The protocol flag also degrades when a bare prompt arrives for a single
  * outstanding command without its D marker: the shell may have stopped

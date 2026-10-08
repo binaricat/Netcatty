@@ -369,7 +369,7 @@ export type CreateXTermRuntimeContext = {
     sessionId: string,
   ) => void;
   /** True only when this completion confirms the last outstanding cwd-invalidating command. */
-  onCommandCompleted?: (cwdCompletionConfirmed?: boolean, cwdConfirmedTrusted?: boolean) => void;
+  onCommandCompleted?: (cwdCompletionConfirmed?: boolean) => void;
   requestPluginTerminalProviders?: RequestPluginTerminalProviders;
   pluginProviderVisible?: boolean;
   isPluginTerminalProviderAvailable?: (kind: NetcattyTerminalProviderKind) => boolean;
@@ -3249,10 +3249,24 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     const commandCompleted = consumeOsc133CommandCompletion(data, ctx.promptLineBreakStateRef?.current);
     const cwdCompleted = consumeOsc133CwdCompletion(data, ctx.promptLineBreakStateRef?.current);
     markOsc133CompletionProtocol(data, ctx.promptLineBreakStateRef?.current);
-    if (commandCompleted || cwdCompleted) {
-      // An OSC 133;D-confirmed completion cannot be forged by prompt-shaped
-      // command output, so its backend read publishes with full trust.
-      ctx.onCommandCompleted?.(cwdCompleted, cwdCompleted ? true : undefined);
+    // The D marker itself also flows through ordinary command output — a child
+    // can print it verbatim (`printf '\033]133;D\a'; sleep 2; cd /tmp`), which
+    // must not publish the pre-command cwd as trusted and retire the pending
+    // correction before the shell's genuine D arrives. So the D-confirmed
+    // backend read publishes untrusted, and its next prompt-shaped event
+    // re-probes to correct a stale value (the SFTP follow re-verifies
+    // untrusted values with fresh backend reads anyway).
+    if (cwdCompleted) {
+      // Re-arm a fresh re-probe chain so the shell's genuine prompt redraw
+      // re-verifies the published value.
+      const promptLineBreakState = ctx.promptLineBreakStateRef?.current;
+      if (promptLineBreakState) {
+        promptLineBreakState.cwdRepublishDepth = 1;
+        promptLineBreakState.cwdRepublishPending = true;
+      }
+      ctx.onCommandCompleted?.(true);
+    } else if (commandCompleted) {
+      ctx.onCommandCompleted?.(false);
     }
     return true;
   });

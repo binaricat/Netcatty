@@ -162,6 +162,14 @@ type TerminalSessionWriteOptions = CoalescedTerminalWriteOptions & {
 };
 
 const BACKGROUND_OUTPUT_FLUSH_MAX_PASSES = 64;
+
+/**
+ * Bounds the re-probe chain armed after a cwd publication: a fresh publication
+ * restarts the chain at depth 1, and each consumed re-probe advances it until
+ * the cap, so prompt-shaped command output cannot request endless backend
+ * reads while a stale value still stays correctable by the next prompts.
+ */
+const MAX_CWD_REPUBLISH_DEPTH = 2;
 // With microtask coalescing, idle drain is only a safety net for rAF TUI path
 // and any leftover queue work. Keep xterm on its public async write path here:
 // its private flushSync removes a chunk before parsing and can strand the
@@ -649,24 +657,33 @@ const writeSessionDataImmediate = (
       // batch, and prompt-shaped command output can forge it).
       const cwdConfirmed = drainTerminalCwdCompletions(term, promptLineBreakState) && completed <= 1;
       const cwdRepublish = consumeTerminalCwdRepublish(term, promptLineBreakState);
+      // Every prompt-shaped completion event (the plain-prompt fallback, the
+      // armed one-shot re-probe) can be forged by command output, e.g.
+      // `printf '$ '; sleep 1; printf '$ '; sleep 1; cd /tmp`: its first fake
+      // prompt confirms the fallback, and a second one must never publish the
+      // pre-command cwd as trusted while the real completion is still owed.
+      // So all prompt-shaped publications stay untrusted (the SFTP follow
+      // re-verifies the value with a fresh backend read) and each publication
+      // re-arms the re-probe, keeping the shell's next genuine prompt able to
+      // correct a stale value without needing a new submission.
       const publishCwd = (cwdConfirmed || cwdRepublish) && completed <= 1;
-      // A plain-prompt fallback confirmation can be forged by prompt-shaped
-      // command output (e.g. `printf '$ '; sleep 2; cd /tmp`) before the
-      // command finishes, so the backend read it arms must publish as
-      // untrusted; the armed one-shot re-probe (and OSC 133;D confirmations)
-      // still publish trusted after the real prompt arrives.
-      const cwdTrusted = publishCwd ? Boolean(!cwdConfirmed || cwdRepublish) : undefined;
       for (let index = 0; index < completed; index += 1) {
-        ctx.onCommandCompleted?.(index === 0 && publishCwd, index === 0 && publishCwd ? cwdTrusted : undefined);
+        ctx.onCommandCompleted?.(index === 0 && publishCwd);
       }
       if (completed === 0 && publishCwd) {
-        ctx.onCommandCompleted?.(true, cwdTrusted);
+        ctx.onCommandCompleted?.(true);
       }
-      if (cwdConfirmed && promptLineBreakState) {
-        // The plain-prompt fallback is heuristic: command output can forge a
-        // prompt-shaped completion. Arm a one-shot re-probe so the real
-        // prompt can still correct the published cwd.
-        promptLineBreakState.cwdRepublishPending = true;
+      if ((cwdConfirmed || cwdRepublish) && promptLineBreakState) {
+        // The published backend read is heuristic: keep the one-shot re-probe
+        // armed so a later prompt-shaped event can still correct a forged or
+        // stale value, with the chain depth capped.
+        const depth = cwdRepublish ? promptLineBreakState.cwdRepublishDepth : 0;
+        if (cwdRepublish && depth >= MAX_CWD_REPUBLISH_DEPTH) {
+          promptLineBreakState.cwdRepublishDepth = 0;
+        } else {
+          promptLineBreakState.cwdRepublishDepth = depth + 1;
+          promptLineBreakState.cwdRepublishPending = true;
+        }
       }
     };
     const finishQueueItem = () => {

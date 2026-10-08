@@ -229,15 +229,14 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
     publishPluginTerminalRuntimeLifecycleEvent(pluginTerminalLifecycle, 'commandSubmitted');
     void xtermRuntimeRef.current?.pluginProviderHost?.commandSubmitted(args[0]);
   };
-  const pluginAwareOnCommandCompleted = (cwdCompletionConfirmed?: boolean, cwdConfirmedTrusted?: boolean) => {
+  const pluginAwareOnCommandCompleted = (cwdCompletionConfirmed?: boolean) => {
     publishPluginTerminalRuntimeLifecycleEvent(pluginTerminalLifecycle, 'commandCompleted');
     void xtermRuntimeRef.current?.pluginProviderHost?.commandCompleted();
     // The runtime only marks a completion confirmed when it finished the last
     // outstanding cwd-invalidating command (OSC 133 D, the armed one-shot
-    // re-probe, or a single-prompt fallback). cwdConfirmedTrusted distinguishes
-    // authoritative confirmations from the forgeable plain-prompt fallback.
+    // re-probe, or a single-prompt fallback).
     if (cwdCompletionConfirmed) {
-      onCommandCompleted?.(sessionId, cwdConfirmedTrusted);
+      onCommandCompleted?.(sessionId);
     }
   };
   const isRendererActive = isVisible || !hibernateHiddenTabs;

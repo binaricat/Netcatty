@@ -115,16 +115,27 @@ for (const mode of ["osc133", "osc7", "prompt"]) {
         } } };
         // Mirror the runtime fallback publication rules: only a single
         // outstanding command (or the armed re-check) confirms a cwd, and a
-        // fallback confirmation arms a one-shot re-check afterward.
+        // publication arms a one-shot re-check afterward. Prompt-shaped
+        // evidence can be forged by command output, so every publication
+        // stays untrusted.
         const count = detectTerminalCommandCompletions(prompt as never, pending.current);
         const cwdConfirmed = drainTerminalCwdCompletions(prompt as never, pending.current) && count <= 1;
         const republish = consumeTerminalCwdRepublish(prompt as never, pending.current);
         const publishCwd = (cwdConfirmed || republish) && count <= 1;
         if (publishCwd) {
-          // Mirror the trust channels: a forgeable plain-prompt fallback
-          // publishes untrusted, the armed re-check publishes trusted.
-          completed("session", !cwdConfirmed || republish);
-          if (cwdConfirmed) pending.current.cwdRepublishPending = true;
+          completed("session");
+          if (cwdConfirmed || republish) {
+            // Mirror the runtime arming rules: a fresh publication restarts
+            // the re-check chain, a consumed re-check advances it, and the
+            // chain is capped.
+            const depth = republish ? pending.current.cwdRepublishDepth : 0;
+            if (republish && depth >= 2) {
+              pending.current.cwdRepublishDepth = 0;
+            } else {
+              pending.current.cwdRepublishDepth = depth + 1;
+              pending.current.cwdRepublishPending = true;
+            }
+          }
         }
       }
     });
@@ -144,11 +155,17 @@ for (const mode of ["osc133", "osc7", "prompt"]) {
           ready = true;
           completions += 1;
           // Mirror the runtime: the OSC 133;D marker proves shell completion
-          // integration and confirms the last outstanding cwd-invalidating command.
+          // integration and confirms the last outstanding cwd-invalidating
+          // command. A child can print the marker verbatim, so the confirmed
+          // publication stays untrusted and re-arms the re-check.
           markOsc133CompletionProtocol("D", pending.current);
           const cwdDone = consumeOsc133CwdCompletion("D", pending.current);
           consumeOsc133CommandCompletion("D", pending.current);
-          if (cwdDone) completed("session", true);
+          if (cwdDone) {
+            pending.current.cwdRepublishDepth = 1;
+            pending.current.cwdRepublishPending = true;
+            completed("session");
+          }
         }
       }
     });
@@ -169,9 +186,9 @@ for (const mode of ["osc133", "osc7", "prompt"]) {
       writeFileSync(firstGate, "release");
       await waitUntil(() => cwd === first);
       if (mode === "osc133") {
-        assert.equal(cwdSource, "backend-strict", "OSC 133;D confirmations publish trusted");
+        assert.equal(cwdSource, "backend", "OSC 133;D-confirmed publications stay untrusted: a child can print the marker verbatim");
       } else if (mode === "prompt") {
-        assert.equal(cwdSource, "backend", "prompt-shaped fallback publications stay untrusted until the re-probe");
+        assert.equal(cwdSource, "backend", "prompt-shaped fallback publications stay untrusted");
       }
       for (const command of ["cd .", `cd '${home}/does-not-exist'`]) {
         submit(command);

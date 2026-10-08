@@ -263,7 +263,7 @@ export type TerminalSessionStartersContext = {
     sessionId: string,
   ) => void;
   /** True only when this completion confirms the last outstanding cwd-invalidating command. */
-  onCommandCompleted?: (cwdCompletionConfirmed?: boolean, cwdConfirmedTrusted?: boolean) => void;
+  onCommandCompleted?: (cwdCompletionConfirmed?: boolean) => void;
 };
 
 export type TerminalSessionDataMeta = {

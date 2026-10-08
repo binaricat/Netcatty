@@ -1360,7 +1360,7 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     );
   }, [codingCliSignalController, restoreTerminalCwd, sidePanelLayoutsRef]);
 
-  const handleCommandCompleted = useCallback((sessionId: string, cwdConfirmedTrusted?: boolean) => {
+  const handleCommandCompleted = useCallback((sessionId: string) => {
     const osc7SignalAtCommand = cwdProbeCommandSignalRef.current.get(sessionId);
     if (osc7SignalAtCommand === undefined) return;
     // Keep the baseline signal: a confirmed fallback publication also arms a
@@ -1392,11 +1392,14 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       },
       onProbedCwd: (cwd) => {
         if (cwdProbeGenerationRef.current.get(sessionId) !== probeGeneration) return;
-        // Only authoritative confirmations (OSC 133;D, the armed one-shot
-        // re-probe) publish trusted; a forgeable plain-prompt fallback
-        // publication stays untrusted until the re-probe corrects it.
+        // Prompt-completion evidence (plain prompt, re-probe trigger, even an
+        // observed OSC 133;D marker — a child process can print all of them)
+        // can be forged by command output, so the probe result publishes
+        // untrusted. The SFTP follow re-verifies an untrusted stored cwd with
+        // its own fresh backend read, so a correct value reaches SFTP without
+        // an extra prompt.
         handleTerminalCwdChange(sessionId, cwd, {
-          source: cwdConfirmedTrusted === true ? 'backend-strict' : 'backend',
+          source: 'backend',
         });
       },
     });
