@@ -1363,7 +1363,9 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
   const handleCommandCompleted = useCallback((sessionId: string) => {
     const osc7SignalAtCommand = cwdProbeCommandSignalRef.current.get(sessionId);
     if (osc7SignalAtCommand === undefined) return;
-    cwdProbeCommandSignalRef.current.delete(sessionId);
+    // Keep the baseline signal: a confirmed fallback publication also arms a
+    // one-shot re-probe so a real prompt after prompt-shaped command output
+    // can correct the published cwd. The next submission resets the baseline.
     const probeGeneration = cwdProbeGenerationRef.current.get(sessionId);
     const cancelProbe = scheduleBackendCwdProbeAfterCommand({
       sessionId,

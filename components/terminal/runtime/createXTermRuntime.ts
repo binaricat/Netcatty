@@ -200,6 +200,8 @@ import { pasteTextWithMultilineConfirm } from "../terminalClipboardPaste";
 import { requestMultilinePasteConfirm } from "../../../application/state/multilinePasteConfirmStore";
 import {
   consumeOsc133CommandCompletion,
+  consumeOsc133CwdCompletion,
+  markOsc133CompletionProtocol,
   type PromptLineBreakState,
 } from "./promptLineBreak";
 import { isSensitiveTerminalCommandInput, recordTerminalCommandExecution } from "./terminalCommandExecution";
@@ -366,8 +368,8 @@ export type CreateXTermRuntimeContext = {
     hostLabel: string,
     sessionId: string,
   ) => void;
-  /** False when a plain prompt cannot correlate multiple queued submissions. */
-  onCommandCompleted?: (completionConfirmed?: boolean) => void;
+  /** True only when this completion confirms the last outstanding cwd-invalidating command. */
+  onCommandCompleted?: (cwdCompletionConfirmed?: boolean) => void;
   requestPluginTerminalProviders?: RequestPluginTerminalProviders;
   pluginProviderVisible?: boolean;
   isPluginTerminalProviderAvailable?: (kind: NetcattyTerminalProviderKind) => boolean;
@@ -3240,8 +3242,14 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   });
 
   const osc133Disposable = term.parser.registerOscHandler(133, (data) => {
-    if (consumeOsc133CommandCompletion(data, ctx.promptLineBreakStateRef?.current)) {
-      ctx.onCommandCompleted?.();
+    // Any OSC 133 sequence proves the shell has completion integration, so the
+    // plain prompt fallback must stop publishing cwd (prompt-shaped command
+    // output cannot forge an OSC 133;D).
+    markOsc133CompletionProtocol(ctx.promptLineBreakStateRef?.current);
+    const commandCompleted = consumeOsc133CommandCompletion(data, ctx.promptLineBreakStateRef?.current);
+    const cwdCompleted = consumeOsc133CwdCompletion(data, ctx.promptLineBreakStateRef?.current);
+    if (commandCompleted || cwdCompleted) {
+      ctx.onCommandCompleted?.(cwdCompleted);
     }
     return true;
   });

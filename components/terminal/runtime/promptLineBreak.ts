@@ -12,6 +12,24 @@ export type PromptLineBreakState = {
   pendingCommand: boolean;
   suppressNextPromptCache: boolean;
   pendingCommandCompletions: number;
+  /**
+   * Submissions that invalidated the live cwd and still owe a confirmed shell
+   * completion. Armed on every cwd-invalidating submission (not only trusted
+   * shell prompts), so unconfirmed prompts such as `sftp>` also publish cwd.
+   */
+  pendingCwdCompletions: number;
+  /**
+   * One-shot re-probe armed after a plain-prompt fallback publication: the
+   * fallback can be forged by prompt-shaped command output, so the next
+   * prompt-shaped event re-probes to correct the published cwd.
+   */
+  cwdRepublishPending: boolean;
+  /**
+   * Set once the shell sends any OSC 133 sequence. From then on the plain
+   * prompt fallback never publishes cwd — OSC 133 completions are the only
+   * signal prompt-shaped command output cannot forge.
+   */
+  shellCompletionProtocolSeen: boolean;
 };
 
 type VisibleTextMap = {
@@ -462,6 +480,9 @@ export function createPromptLineBreakState(): PromptLineBreakState {
     pendingCommand: false,
     suppressNextPromptCache: false,
     pendingCommandCompletions: 0,
+    pendingCwdCompletions: 0,
+    cwdRepublishPending: false,
+    shellCompletionProtocolSeen: false,
   };
 }
 
@@ -488,6 +509,74 @@ export function consumeOsc133CommandCompletion(
   state: PromptLineBreakState | undefined,
 ): boolean {
   return data.split(";", 1)[0] === "D" && consumeTerminalCommandCompletion(state);
+}
+
+export function markOsc133CompletionProtocol(
+  state: PromptLineBreakState | undefined,
+): void {
+  if (state) state.shellCompletionProtocolSeen = true;
+}
+
+/** Arm cwd publication after a submission invalidated the live cwd. */
+export function markTerminalCwdCompletionPending(
+  stateRef?: RefObject<PromptLineBreakState>,
+): void {
+  if (!stateRef?.current) return;
+  stateRef.current.pendingCwdCompletions = Math.min(
+    64,
+    stateRef.current.pendingCwdCompletions + 1,
+  );
+}
+
+/**
+ * Consume one cwd completion for an OSC 133;D. Returns true only when this
+ * completion finished the last outstanding cwd-invalidating command, i.e. the
+ * moment a cwd publication is safe.
+ */
+export function consumeOsc133CwdCompletion(
+  data: string,
+  state: PromptLineBreakState | undefined,
+): boolean {
+  if (data.split(";", 1)[0] !== "D") return false;
+  if (!state || state.pendingCwdCompletions < 1) return false;
+  state.pendingCwdCompletions -= 1;
+  return state.pendingCwdCompletions === 0;
+}
+
+/**
+ * Plain-prompt fallback for cwd completion. Publishes only for a single
+ * outstanding command and only while the shell has shown no OSC 133
+ * completion protocol (whose D sequence is authoritative). Prompt-shaped
+ * command output cannot be told apart from a real prompt here, so the
+ * confirmation stays heuristic without OSC 133 and callers keep a re-probe
+ * armed to self-correct.
+ */
+export function drainTerminalCwdCompletions(
+  term: XTerm,
+  state: PromptLineBreakState | undefined,
+): boolean {
+  if (!state || state.pendingCwdCompletions < 1) return false;
+  if (state.shellCompletionProtocolSeen) return false;
+  if (!isAtEmptyPromptForCompletion(term)) return false;
+  const outstanding = state.pendingCwdCompletions;
+  state.pendingCwdCompletions = 0;
+  return outstanding === 1;
+}
+
+const isAtEmptyPromptForCompletion = (term: XTerm): boolean => {
+  const prompt = detectPrompt(term);
+  return prompt.isAtPrompt && prompt.userInput.length === 0;
+};
+
+/** Consume the one-shot re-probe armed after a fallback cwd publication. */
+export function consumeTerminalCwdRepublish(
+  term: XTerm,
+  state: PromptLineBreakState | undefined,
+): boolean {
+  if (!state || !state.cwdRepublishPending) return false;
+  if (!isAtEmptyPromptForCompletion(term)) return false;
+  state.cwdRepublishPending = false;
+  return true;
 }
 
 export function detectTerminalCommandCompletions(

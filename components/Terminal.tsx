@@ -174,6 +174,7 @@ import { terminalAltKeyOptions } from "./terminal/runtime/altKeyOptions";
 import {
   createPromptLineBreakState,
   markTerminalCommandCompletionPending,
+  markTerminalCwdCompletionPending,
   type PromptLineBreakState,
 } from "./terminal/runtime/promptLineBreak";
 import {
@@ -2407,6 +2408,12 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     ...args: Parameters<NonNullable<typeof onCommandSubmitted>>
   ) => {
     if (!shouldPreserveTerminalCwdAcrossCommand(hostRestrictsExtraSshChannels(host))) {
+      // Arm completion tracking independently of the plugin trust callback:
+      // submissions from unconfirmed prompts (sftp> etc.) still invalidate the
+      // live cwd and still owe a completion publication. A new submission also
+      // closes any outstanding fallback re-probe window.
+      markTerminalCwdCompletionPending(promptLineBreakStateRef);
+      promptLineBreakStateRef.current.cwdRepublishPending = false;
       invalidateTerminalCwdAfterCommand(
         terminalCwdTracker,
         sessionId,
@@ -2417,10 +2424,13 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     const [command, hostId, hostLabel, submittedSessionId] = args;
     onCommandSubmitted?.(command, hostId, hostLabel, submittedSessionId);
   }, [host, onCommandSubmitted, onTerminalCwdChange, sessionId, terminalCwdTracker]);
-  const pluginAwareOnCommandCompleted = useCallback((completionConfirmed = true) => {
+  const pluginAwareOnCommandCompleted = useCallback((cwdCompletionConfirmed?: boolean) => {
     pluginTerminalLifecycle.onCommandCompleted();
     void xtermRuntimeRef.current?.pluginProviderHost?.commandCompleted();
-    if (completionConfirmed && promptLineBreakStateRef.current.pendingCommandCompletions === 0) {
+    // The runtime only marks a completion confirmed when it finished the last
+    // outstanding cwd-invalidating command (OSC 133 D, or a single-prompt
+    // fallback that prompt-shaped output cannot forge).
+    if (cwdCompletionConfirmed) {
       onCommandCompleted?.(sessionId);
     }
   }, [onCommandCompleted, pluginTerminalLifecycle, sessionId]);

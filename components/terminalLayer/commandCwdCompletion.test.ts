@@ -8,7 +8,17 @@ import { transformSync } from "esbuild";
 import { shouldProbeCommandCwd } from "./commandCwdProbe";
 import { scheduleBackendCwdProbeAfterCommand } from "../terminal/sftpCwd";
 import { buildOsc7SetupCommand } from "../terminal/osc7Setup";
-import { consumeOsc133CommandCompletion, createPromptLineBreakState, detectTerminalCommandCompletions, markTerminalCommandCompletionPending } from "../terminal/runtime/promptLineBreak";
+import {
+  consumeOsc133CommandCompletion,
+  consumeOsc133CwdCompletion,
+  consumeTerminalCwdRepublish,
+  createPromptLineBreakState,
+  detectTerminalCommandCompletions,
+  drainTerminalCwdCompletions,
+  markOsc133CompletionProtocol,
+  markTerminalCommandCompletionPending,
+  markTerminalCwdCompletionPending,
+} from "../terminal/runtime/promptLineBreak";
 
 // Execute the actual parent callbacks, without mounting the rest of the app.
 const source = readFileSync(new URL("../TerminalLayer.tsx", import.meta.url), "utf8");
@@ -99,8 +109,16 @@ for (const mode of ["osc133", "osc7", "prompt"]) {
           cursorX: 2, cursorY: 0, baseY: 0,
           getLine: (line: number) => line === 0 ? { isWrapped: false, translateToString: () => "$ " } : undefined,
         } } };
+        // Mirror the runtime fallback publication rules: only a single
+        // outstanding command (or the armed re-check) confirms a cwd, and a
+        // fallback confirmation arms a one-shot re-check afterward.
         const count = detectTerminalCommandCompletions(prompt as never, pending.current);
-        if (count === 1 && pending.current.pendingCommandCompletions === 0) completed("session");
+        const cwdConfirmed = drainTerminalCwdCompletions(prompt as never, pending.current) && count <= 1;
+        const publishCwd = (cwdConfirmed || consumeTerminalCwdRepublish(prompt as never, pending.current)) && count <= 1;
+        if (publishCwd) {
+          completed("session");
+          if (cwdConfirmed) pending.current.cwdRepublishPending = true;
+        }
       }
     });
     shell.stdout.on("data", (chunk: Buffer) => {
@@ -118,13 +136,20 @@ for (const mode of ["osc133", "osc7", "prompt"]) {
         if (sequence.endsWith("\x1b]133;D")) {
           ready = true;
           completions += 1;
-          if (consumeOsc133CommandCompletion("D", pending.current) && pending.current.pendingCommandCompletions === 0) completed("session");
+          // Mirror the runtime: OSC 133 proves shell completion integration
+          // and its D confirms the last outstanding cwd-invalidating command.
+          markOsc133CompletionProtocol(pending.current);
+          const cwdDone = consumeOsc133CwdCompletion("D", pending.current);
+          consumeOsc133CommandCompletion("D", pending.current);
+          if (cwdDone) completed("session");
         }
       }
     });
     const submit = (command: string) => {
       cwd = null; // The shared live cwd is invalidated at submission.
       markTerminalCommandCompletionPending(pending);
+      markTerminalCwdCompletionPending(pending);
+      pending.current.cwdRepublishPending = false;
       submitted(command, "host", "fixture", "session");
       shell.stdin.write(`${command}\n`);
     };
@@ -156,6 +181,16 @@ for (const mode of ["osc133", "osc7", "prompt"]) {
         assert.equal(probes - before, integration ? 0 : 1);
         assert.equal(probes, integration ? 0 : 4);
       }
+      // A submission from an unconfirmed prompt (sftp> etc.) never reaches the
+      // trusted plugin callback, yet its cwd invalidation must still publish
+      // once the shell reports completion (Codex: arm cwd completion for every
+      // invalidated submission).
+      cwd = null;
+      markTerminalCwdCompletionPending(pending);
+      pending.current.cwdRepublishPending = false;
+      submitted(`cd '${home}'`, "host", "fixture", "session");
+      shell.stdin.write(`cd '${home}'\n`);
+      await waitUntil(() => cwd === home);
     } finally {
       writeFileSync(firstGate, "release");
       writeFileSync(finalGate, "release");

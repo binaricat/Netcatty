@@ -229,10 +229,13 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
     publishPluginTerminalRuntimeLifecycleEvent(pluginTerminalLifecycle, 'commandSubmitted');
     void xtermRuntimeRef.current?.pluginProviderHost?.commandSubmitted(args[0]);
   };
-  const pluginAwareOnCommandCompleted = (completionConfirmed = true) => {
+  const pluginAwareOnCommandCompleted = (cwdCompletionConfirmed?: boolean) => {
     publishPluginTerminalRuntimeLifecycleEvent(pluginTerminalLifecycle, 'commandCompleted');
     void xtermRuntimeRef.current?.pluginProviderHost?.commandCompleted();
-    if (completionConfirmed && promptLineBreakStateRef.current.pendingCommandCompletions === 0) {
+    // The runtime only marks a completion confirmed when it finished the last
+    // outstanding cwd-invalidating command (OSC 133 D, or a single-prompt
+    // fallback that prompt-shaped output cannot forge).
+    if (cwdCompletionConfirmed) {
       onCommandCompleted?.(sessionId);
     }
   };

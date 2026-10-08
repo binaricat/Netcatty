@@ -262,8 +262,8 @@ export type TerminalSessionStartersContext = {
     hostLabel: string,
     sessionId: string,
   ) => void;
-  /** False when a plain prompt cannot correlate multiple queued submissions. */
-  onCommandCompleted?: (completionConfirmed?: boolean) => void;
+  /** True only when this completion confirms the last outstanding cwd-invalidating command. */
+  onCommandCompleted?: (cwdCompletionConfirmed?: boolean) => void;
 };
 
 export type TerminalSessionDataMeta = {

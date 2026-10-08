@@ -11,7 +11,9 @@ import {
   prepareTerminalDataForUserPasteDisplay,
 } from "./terminalUserPaste";
 import {
+  consumeTerminalCwdRepublish,
   detectTerminalCommandCompletions,
+  drainTerminalCwdCompletions,
   findTerminalPromptSourceChunkVisibleStarts,
   prepareTerminalDataForPromptLineBreak,
   syncPromptLineBreakState,
@@ -636,14 +638,29 @@ const writeSessionDataImmediate = (
       }
     };
     const publishCommandCompletion = () => {
+      const promptLineBreakState = ctx.promptLineBreakStateRef?.current;
       const completed = detectTerminalCommandCompletions(
         term,
-        ctx.promptLineBreakStateRef?.current,
+        promptLineBreakState,
       );
+      // A single prompt does not confirm all queued commands completed. Keep
+      // plugin accounting per command, but only a single outstanding command
+      // may confirm a cwd publication (a plain prompt cannot correlate a
+      // batch, and prompt-shaped command output can forge it).
+      const cwdConfirmed = drainTerminalCwdCompletions(term, promptLineBreakState) && completed <= 1;
+      const cwdRepublish = consumeTerminalCwdRepublish(term, promptLineBreakState);
+      const publishCwd = (cwdConfirmed || cwdRepublish) && completed <= 1;
       for (let index = 0; index < completed; index += 1) {
-        // A single prompt does not confirm all queued commands completed.
-        // Keep plugin accounting, but do not publish an unconfirmed cwd.
-        ctx.onCommandCompleted?.(completed === 1);
+        ctx.onCommandCompleted?.(index === 0 && publishCwd);
+      }
+      if (completed === 0 && publishCwd) {
+        ctx.onCommandCompleted?.(true);
+      }
+      if (cwdConfirmed && promptLineBreakState) {
+        // The plain-prompt fallback is heuristic: command output can forge a
+        // prompt-shaped completion. Arm a one-shot re-probe so the real
+        // prompt can still correct the published cwd.
+        promptLineBreakState.cwdRepublishPending = true;
       }
     };
     const finishQueueItem = () => {

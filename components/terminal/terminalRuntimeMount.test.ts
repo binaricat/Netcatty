@@ -240,10 +240,13 @@ test('normal boot and hibernate wake share terminal link error feedback', () => 
 });
 
 
-test('normal and reactivated terminals forward completion only after queued commands drain', () => {
+test('normal and reactivated terminals forward completion only when it confirms outstanding cwd commands', () => {
   for (const source of [terminalSource, effectsSource]) {
-    assert.match(source, /completionConfirmed && promptLineBreakStateRef\.current\.pendingCommandCompletions === 0\) \{\s*onCommandCompleted\?\.\(sessionId\)/);
+    assert.match(source, /if \(cwdCompletionConfirmed\) \{\s*onCommandCompleted\?\.\(sessionId\)/);
   }
+  // Every cwd-invalidating submission arms completion tracking, independent of
+  // the plugin trust callback, so unconfirmed prompts (sftp> etc.) also publish.
+  assert.match(terminalSource, /markTerminalCwdCompletionPending\(promptLineBreakStateRef\);/);
   const layer = readFileSync(new URL('../TerminalLayer.tsx', import.meta.url), 'utf8');
   const submitted = layer.slice(layer.indexOf('const handleCommandSubmitted ='), layer.indexOf('const handleCommandCompleted ='));
   const completed = layer.slice(layer.indexOf('const handleCommandCompleted ='), layer.indexOf('const handleCommandExecuted ='));
