@@ -1439,9 +1439,11 @@ export const useSftpTransfers = ({
       setConflicts(conflictsRef.current);
 
       const ids = new Set([transferId, ...childIds]);
+      const retainedTasks = (taskToCancel ? [taskToCancel, ...children] : children)
+        .map((task) => ({ task, ...sftpTransferCenterStore.observeTaskSettlement(task) }));
       const failedIds = new Set(await cancelBackendTransfers([...ids]));
       await sftpTransferCenterStore.settleCancellation(
-        transferId, ids, failedIds, taskToCancel ? [taskToCancel, ...children] : children,
+        transferId, ids, failedIds, retainedTasks,
         async () => {
           setTransfers(sftpTransferCenterStore.getOwnerTasks(ownerId));
           for (const id of ids) clearCancelledTask(id);

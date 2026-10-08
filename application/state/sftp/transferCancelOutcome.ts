@@ -1,4 +1,5 @@
 import type { TransferTask } from "../../../domain/models";
+import { isValidDirectoryResumeCheckpoint } from "../../../domain/sftpDirectoryCheckpoint";
 
 /** Apply only after backend cancellation AND the old walk have settled. */
 export function settleCancelledTransferTree(
@@ -8,11 +9,22 @@ export function settleCancelledTransferTree(
   failedIds: ReadonlySet<string>,
   retainedTasks: readonly TransferTask[] = [],
 ): TransferTask[] {
-  const existingIds = new Set(tasks.map((task) => task.id));
-  // Cancellation callbacks may compact terminal child rows before settlement.
-  // Recover their checkpoints too, so a large tree does not lose partial work.
+  const existingTasks = new Map(tasks.map((task) => [task.id, task]));
+  // Use observed terminal outcomes rather than stale pre-cancel snapshots.
+  // Missing completed children already covered by the parent stay compacted;
+  // cancelled/failed exceptions still need their rows for the recovery walk.
   const settledTasks = failedIds.size > 0
-    ? [...tasks, ...retainedTasks.filter((task) => !existingIds.has(task.id))]
+    ? [...tasks, ...retainedTasks.filter((task) => {
+      if (existingTasks.has(task.id)) return false;
+      const checkpoint = task.parentTaskId
+        ? existingTasks.get(task.parentTaskId)?.directoryResumeCheckpoint
+        : undefined;
+      return !(task.status === "completed"
+        && isValidDirectoryResumeCheckpoint(checkpoint)
+        && Number.isSafeInteger(task.directoryEntryIndex)
+        && (task.directoryEntryIndex ?? -1) >= 0
+        && task.directoryEntryIndex! < checkpoint.coveredEntries);
+    })]
     : tasks;
   return settledTasks.map((task) => {
     // Natural completion/failure wins a race with Cancel. Rows cancelled by

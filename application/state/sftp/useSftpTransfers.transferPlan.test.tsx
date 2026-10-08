@@ -634,7 +634,10 @@ test("owned cancelled directory settles recoverable children without dropping co
       await held;
       // Old scheduler callbacks settle as cancelled before the outcome is applied.
       sftpTransferCenterStore.publishOwner(ownerId, sftpTransferCenterStore.getOwnerTasks(ownerId).map((task) =>
-        task.status === "completed" ? task : { ...task, status: "cancelled" }));
+        task.status === "completed" ? task : {
+          ...task, status: "cancelled",
+          checkpointBytes: task.id === "cancel-child-1" ? 6 : task.checkpointBytes,
+        }));
     });
     await act(async () => {
       const cancellation = ops!.cancelTransfer(rootId);
@@ -649,7 +652,8 @@ test("owned cancelled directory settles recoverable children without dropping co
     assert.equal(sftpTransferCenterStore.getTask(rootId)?.status, "attention");
     assert.equal(sftpTransferCenterStore.getTask("cancel-child-0")?.status, "attention");
     const remaining = sftpTransferCenterStore.getTask("cancel-child-1");
-    if (remaining) assert.equal(remaining.status, "interrupted");
+    assert.equal(remaining?.status, "interrupted", "evicted cancelled children remain recoverable");
+    assert.equal(remaining?.checkpointBytes, 6, "retain the terminal checkpoint, not the pre-cancel snapshot");
     assert.deepEqual(cleaned, [], "no stage cleanup during partial cancellation recovery");
     assert.equal(await readFile(completedPath, "utf8"), "completed bytes must remain");
   } finally {

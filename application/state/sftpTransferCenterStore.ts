@@ -95,6 +95,12 @@ export type DedicatedTransferResumeHandler = (task: TransferTask) => Promise<{
   resetCheckpoint?: boolean;
 }>;
 
+interface RetainedCancellationTask {
+  task: TransferTask;
+  read(): TransferTask | undefined;
+  dispose(): void;
+}
+
 export interface SftpTransferCenterStore {
   subscribe(listener: Listener): () => void;
   /**
@@ -125,7 +131,7 @@ export interface SftpTransferCenterStore {
   resume(taskId: string): Promise<void>;
   cancel(taskId: string): Promise<void>;
   /** Publish one cancellation outcome after the old execution has settled. */
-  settleCancellation(taskId: string, taskIds: ReadonlySet<string>, failedIds: ReadonlySet<string>, retainedTasks: readonly TransferTask[], onSettled: () => Promise<void>): Promise<void>;
+  settleCancellation(taskId: string, taskIds: ReadonlySet<string>, failedIds: ReadonlySet<string>, retainedTasks: readonly RetainedCancellationTask[], onSettled: () => Promise<void>): Promise<void>;
   retry(taskId: string): Promise<void>;
   prioritize(taskId: string): Promise<void>;
   dismiss(taskId: string): void;
@@ -1340,7 +1346,8 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
       const failedIds = new Set<string>();
       const cancelIds = [taskId, ...childIds];
       const cancelledIdSet = new Set(cancelIds);
-      const retainedTasks = tasks.filter((candidate) => cancelledIdSet.has(candidate.id));
+      const retainedTasks = tasks.filter((candidate) => cancelledIdSet.has(candidate.id))
+        .map((task) => ({ task, ...store.observeTaskSettlement(task) }));
       for (let offset = 0; offset < cancelIds.length; offset += 32) {
         await Promise.all(cancelIds.slice(offset, offset + 32).map(async (id) => {
           try {
@@ -1969,10 +1976,14 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
         // A later cancel attempt owns the outcome, even if this older attempt
         // failed. Never repaint a successful retry as a failed cancellation.
         if (cancelSettlements.get(taskId) !== settlement) return;
-        tasks = settleCancelledTransferTree(tasks, taskId, taskIds, failedIds, retainedTasks);
+        tasks = settleCancelledTransferTree(
+          tasks, taskId, taskIds, failedIds,
+          retainedTasks.map((retained) => retained.read() ?? retained.task),
+        );
         await onSettled();
         emit();
       })().finally(() => {
+        for (const retained of retainedTasks) retained.dispose();
         if (cancelSettlements.get(taskId) === settlement) cancelSettlements.delete(taskId);
       });
       cancelSettlements.set(taskId, settlement);

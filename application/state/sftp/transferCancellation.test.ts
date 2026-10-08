@@ -200,3 +200,113 @@ test("large orphan recovery clears pending cancellations in bounded concurrent b
   assert.ok(peak > 1, "recovery must not serialize one IPC per row");
   assert.ok(peak <= 32, "recovery uses the cancellation batch bound");
 });
+
+for (const completeDuring of ["backend-cancel", "walk-settlement"] as const) {
+  test(`failed cancellation preserves compacted completion during ${completeDuring} on dedicated resume`, async (t) => {
+    const { sftpTransferCenterStore: store } = await import("../sftpTransferCenterStore");
+    const { createDirectoryEntryIdentity } = await import("../../../domain/sftpDirectoryCheckpoint");
+    const { resumeTransferWithDedicatedSession, resetDedicatedSessionOpenGateForTests } =
+      await import("./dedicatedTransferResume");
+    const originalGet = netcattyBridge.get;
+    const previousStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+    Object.defineProperty(globalThis, "localStorage", {
+      configurable: true,
+      value: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
+    });
+    const parent = task(`compacted-cancel-${completeDuring}`, {
+      sourcePath: "/source/folder", targetPath: "/target/folder", targetHostId: "fixture-host",
+      isDirectory: true, progressMode: "files", totalBytes: 3,
+    });
+    const children = ["completed", "cancelled", "cancel-failed"].map((name, index) => {
+      const child = task(`${parent.id}-${name}`, {
+        parentTaskId: parent.id, fileName: name,
+        sourcePath: `${parent.sourcePath}/${name}`, targetPath: `${parent.targetPath}/${name}`,
+        sourceLastModified: 1, directoryEntryIndex: index,
+      });
+      return { ...child, directoryEntryIdentity: createDirectoryEntryIdentity({
+        sourcePath: child.sourcePath, targetPath: child.targetPath, size: child.totalBytes, lastModified: 1,
+      }) };
+    });
+    // Match the sorted traversal order so dedicated resume validates the actual checkpoint.
+    children.sort((a, b) => a.sourcePath.localeCompare(b.sourcePath));
+    children.forEach((child, index) => { child.directoryEntryIndex = index; });
+    const completed = children.find((child) => child.fileName === "completed")!;
+    const cancelled = children.find((child) => child.fileName === "cancelled")!;
+    const failed = children.find((child) => child.fileName === "cancel-failed")!;
+    const runtime = createTransferRuntime(store);
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    let walking: Promise<unknown> | undefined;
+    t.after(async () => {
+      release();
+      await walking;
+      store.setDedicatedResumeHandler(null);
+      store.patchTask(parent.id, { status: "completed" });
+      store.dismiss(parent.id);
+      netcattyBridge.get = originalGet;
+      resetTransferCancelLatchesForTests();
+      resetTransferWalkRegistryForTests();
+      resetTransferRuntimeRunsForTests();
+      resetDedicatedSessionOpenGateForTests();
+      if (previousStorage) Object.defineProperty(globalThis, "localStorage", previousStorage);
+      else Reflect.deleteProperty(globalThis, "localStorage");
+    });
+    const uploads: string[] = [];
+    const progress: number[] = [];
+    netcattyBridge.get = () => ({
+      cancelTransfer: async (id: string) => {
+        if (completeDuring === "backend-cancel" && id === completed.id) {
+          store.ingestBackgroundEvent({ type: "completed", transferId: id, transferred: 8, totalBytes: 8 });
+        }
+        return { success: id !== failed.id };
+      },
+      clearPendingTransferCancel: async () => undefined,
+      openSftp: async () => "reconnected-sftp", closeSftp: async () => {},
+      listLocalTree: async () => children.map((child) => ({
+        localPath: child.sourcePath, relativePath: child.fileName,
+        type: "file", size: 8, lastModified: 1,
+      })),
+      mkdirSftp: async () => {},
+      statLocal: async () => ({ size: 8, lastModified: 1 }),
+      startStreamTransfer: async (options: { sourcePath: string; checkpointBytes: number }) => {
+        if (options.sourcePath === cancelled.sourcePath) assert.equal(options.checkpointBytes, 4);
+        uploads.push(options.sourcePath);
+        return {};
+      },
+    } as unknown as ReturnType<typeof netcattyBridge.get>);
+    store.publishOwner("closed-panel", [parent, ...children]);
+    walking = runtime.runWalk(parent.id, async () => {
+      await held;
+      if (completeDuring === "walk-settlement") {
+        store.ingestBackgroundEvent({ type: "completed", transferId: completed.id, transferred: 8, totalBytes: 8 });
+      }
+      store.patchTask(cancelled.id, { status: "cancelled", checkpointBytes: 4 });
+      store.patchTask(parent.id, { status: "cancelled" });
+    });
+    await store.cancel(parent.id);
+    assert.equal(runtime.isWalkInFlight(parent.id), true);
+    store.setDedicatedResumeHandler(async (root) => {
+      assert.equal(root.directoryResumeCheckpoint?.completedEntries, 1);
+      assert.equal(store.getTask(completed.id), undefined, "the finished child stays compacted");
+      assert.equal(store.getTask(cancelled.id)?.status, "interrupted");
+      assert.equal(store.getTask(failed.id)?.status, "attention");
+      return resumeTransferWithDedicatedSession(root, {
+        hosts: [{ id: "fixture-host", label: "fixture", hostname: "fixture", port: 22,
+          username: "test", authMethod: "password", protocol: "ssh" }],
+        keys: [], identities: [],
+      }, (value) => { progress.push(value.transferred); }, {
+        children: store.getSnapshot().tasks.filter((child) => child.parentTaskId === parent.id),
+        onChildUpdate: (child) => { store.upsertTasks([child]); },
+        onDirectoryCheckpointUpdate: (checkpoint) => store.patchTask(parent.id, { directoryResumeCheckpoint: checkpoint }),
+      });
+    });
+    const resuming = store.resume(parent.id);
+    release();
+    await Promise.all([walking, resuming]);
+    assert.deepEqual(uploads.sort(), [cancelled.sourcePath, failed.sourcePath].sort(),
+      "only cancelled and failed-to-cancel children should upload again");
+    assert.equal(store.getTask(parent.id)?.status, "completed");
+    assert.ok(progress.every((count) => count <= 3), "compacted completion must count exactly once");
+    assert.equal(progress.at(-1), 3);
+  });
+}
