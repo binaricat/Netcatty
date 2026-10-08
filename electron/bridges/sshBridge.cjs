@@ -66,6 +66,7 @@ const PREFERRED_KEY_NAMES = ["id_ed25519", "id_ecdsa", "id_rsa"];
 const SSH_KEY_PATTERN = /^id_[\w-]+$/;
 const {
   createStartSessionApi,
+  cancelTestConnection,
   resolveSshConnectionTimeouts,
 } = require("./sshBridge/startSession.cjs");
 const { ensureMacLocalNetworkAccess, attachMacLocalNetworkProbeResult } = require("./macLocalNetworkAccess.cjs");
@@ -991,7 +992,7 @@ const startSessionApi = createStartSessionApi({
   get removeRemoteFiles() { return removeRemoteFiles; },
   get restoreRemoteModes() { return restoreRemoteModes; },
 });
-const { startSSHSession, cancelTestConnection } = startSessionApi;
+const { startSSHSession } = startSessionApi;
 const { createExecCommandApi } = require("./sshBridge/execCommand.cjs");
 const execCommandApi = createExecCommandApi({
   SSHClient, NetcattyAgent, randomUUID, console, setTimeout, clearTimeout, Error,
