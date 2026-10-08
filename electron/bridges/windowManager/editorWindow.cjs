@@ -71,13 +71,17 @@ function createEditorWindowApi(ctx) {
       return editorWindow;
     }
 
-    function rememberTabSource(editorId, webContents) {
-      if (!editorId || !webContents || webContents.isDestroyed?.()) return;
-      tabSources.set(editorId, webContents.id);
+    function hasEditorTabsForSource(webContents) {
+      return Array.from(tabSources.values()).some((owner) => owner.webContentsId === webContents?.id);
+    }
+
+    async function closeEditorTabsForSource(electronModule, webContents) {
+      const editorIds = Array.from(tabSources).filter(([, owner]) => owner.webContentsId === webContents?.id).map(([id]) => id);
+      return closeEditorTabs(electronModule, { editorIds });
     }
 
     function resolveSourceWebContents(electronModule, editorId) {
-      const id = tabSources.get(editorId);
+      const id = tabSources.get(editorId)?.webContentsId;
       if (!Number.isFinite(id)) return null;
       try {
         const wc = electronModule.webContents.fromId(id);
@@ -132,9 +136,10 @@ function createEditorWindowApi(ctx) {
       const bySource = new Map();
       for (const editorId of editorIds) {
         if (typeof editorId !== "string" || !editorId) continue;
+        const owner = tabSources.get(editorId);
         const wc = resolveSourceWebContents(electronModule, editorId);
         tabSources.delete(editorId);
-        if (!wc) continue;
+        if (!owner?.accepted || !wc) continue;
         const list = bySource.get(wc) || [];
         list.push(editorId);
         bySource.set(wc, list);
@@ -148,30 +153,38 @@ function createEditorWindowApi(ctx) {
       }
     }
 
-    async function sendOpenTab(electronModule, win, snapshot, source, reused) {
-      try {
-        // All opens, including reuse during cold start, share the same load.
-        await editorWindowLoaded;
-        if (!isLiveWindow(win)) return { success: false, error: "Editor window is gone" };
-        const result = await invokeWebContents(
-          electronModule,
-          win.webContents,
-          "netcatty:window:editorOpenTab",
-          "netcatty:window:editorOpenTabResult",
-          snapshot,
-          OPEN_TAB_TIMEOUT_MS,
-        );
-        if (!result.success || result.ok !== true || !isLiveWindow(win)) {
-          return { success: false, error: result.error || "Editor did not accept the file" };
+    function sendOpenTab(electronModule, win, snapshot, source, reused) {
+      if (!source || source.isDestroyed?.()) return Promise.resolve({ success: false, error: "Source window is gone" });
+      const owner = { webContentsId: source.id, accepted: false, opening: null };
+      tabSources.set(snapshot.editorId, owner);
+      owner.opening = (async () => {
+        try {
+          // All opens, including reuse during cold start, share the same load.
+          await editorWindowLoaded;
+          if (!isLiveWindow(win)) return { success: false, error: "Editor window is gone" };
+          const result = await invokeWebContents(
+            electronModule,
+            win.webContents,
+            "netcatty:window:editorOpenTab",
+            "netcatty:window:editorOpenTabResult",
+            snapshot,
+            OPEN_TAB_TIMEOUT_MS,
+          );
+          if (!result.success || result.ok !== true || !isLiveWindow(win)) {
+            return { success: false, error: result.error || "Editor did not accept the file" };
+          }
+          // Pending ownership keeps the source alive while opening, but only
+          // accepted tabs may close the source copy during window cleanup.
+          owner.accepted = true;
+          showAndFocusWindow(win);
+          return { success: true, reused };
+        } catch (error) {
+          return { success: false, error: error?.message || "Failed to open editor tab" };
+        } finally {
+          if (!owner.accepted && tabSources.get(snapshot.editorId) === owner) tabSources.delete(snapshot.editorId);
         }
-        // Only accepted tabs belong to this window. A failed load/transfer must
-        // not close the source's retained copy during window cleanup.
-        rememberTabSource(snapshot.editorId, source);
-        showAndFocusWindow(win);
-        return { success: true, reused };
-      } catch (error) {
-        return { success: false, error: error?.message || "Failed to open editor tab" };
-      }
+      })();
+      return owner.opening;
     }
 
     async function openEditorWindow(electronModule, options, payload) {
@@ -361,12 +374,25 @@ function createEditorWindowApi(ctx) {
         ? payload.editorIds.filter((id) => typeof id === "string" && id)
         : [];
       if (editorIds.length === 0) return { success: true, cancelled: false, closedIds: [] };
+      // Closing an owner or a placeholder during cold start must not overtake
+      // its open receipt. Reuse the same readiness/ownership boundary.
+      const opening = editorIds.map((id) => tabSources.get(id)?.opening).filter(Boolean);
+      const opened = await Promise.all(opening);
+      if (opened.some((result) => !result.success)) {
+        return { success: false, cancelled: true, closedIds: [], error: "Editor transfer did not complete" };
+      }
+      try {
+        await editorWindowLoaded;
+      } catch (error) {
+        return { success: false, cancelled: true, closedIds: [], error: error?.message || "Editor is not ready" };
+      }
       const win = getEditorWindow();
       if (!win) {
         notifySourcesTabsClosed(electronModule, editorIds);
         return { success: true, cancelled: false, closedIds: editorIds };
       }
       const force = payload?.force === true;
+      if (!force) showAndFocusWindow(win);
       const result = await invokeWebContents(
         electronModule,
         win.webContents,
@@ -392,6 +418,7 @@ function createEditorWindowApi(ctx) {
         return { success: false, cancelled: true, closedIds: [], error: result.error };
       }
       const closedIds = Array.isArray(result.closedIds) ? result.closedIds : [];
+      notifySourcesTabsClosed(electronModule, closedIds);
       if (result.cancelled === true) {
         return { success: true, cancelled: true, closedIds };
       }
@@ -502,6 +529,8 @@ function createEditorWindowApi(ctx) {
 
     return {
       openEditorWindow,
+      hasEditorTabsForSource,
+      closeEditorTabsForSource,
       focusEditorTab,
       closeEditorTabs,
       saveEditorTab,

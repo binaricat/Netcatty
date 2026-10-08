@@ -23,17 +23,18 @@ function harness() {
     setBackgroundColor() {}
     destroy() { this.destroyed = true; this.webContents.emit("destroyed"); this.emit("closed"); }
   }
-  const source = { id: 99, isDestroyed: () => false, sent: [], send(channel, payload) { this.sent.push({ channel, payload }); } };
-  const electron = { BrowserWindow, ipcMain, webContents: { fromId: () => source } };
+  const source = Object.assign(new EventEmitter(), { id: 99, isDestroyed: () => false, sent: [], send(channel, payload) { this.sent.push({ channel, payload }); } });
+  const sources = new Map([[source.id, source]]);
+  const electron = { BrowserWindow, ipcMain, webContents: { fromId: (id) => sources.get(id) } };
   const api = createEditorWindowApi({ currentTheme: "dark", mainWindow: null, isQuitting: false,
     V8_CACHE_OPTIONS: "code", resolveFrontendBackgroundColor: () => "#000", resolveSettingsWindowBounds: () => ({}),
     registerAppContentWindow() {}, unregisterAppContentWindow() {}, notifyAppContentWindowClosed() {},
     createExternalOnlyWindowOpenHandler() {}, applyWindowOpacityToWindow() {}, showAndFocusWindow(win) { win.shown = true; },
   });
-  const open = (id) => api.openEditorWindow(electron, { sourceWebContents: source }, snapshot(id));
+  const open = (id, owner = source) => { sources.set(owner.id, owner); return api.openEditorWindow(electron, { sourceWebContents: owner }, snapshot(id)); };
   const ready = (win) => ipcMain.emit("netcatty:window:editorReady", { sender: win.webContents });
   const accept = (win, request, ok = true) => ipcMain.emit("netcatty:window:editorOpenTabResult", { sender: win.webContents }, { requestId: request.payload.requestId, ok });
-  return { windows, source, ipcMain, open, ready, accept };
+  return { windows, source, ipcMain, open, ready, accept, api, electron };
 }
 
 test("concurrent cold opens wait for load and the mounted receiver, then for each receipt", async (t) => {
@@ -88,4 +89,66 @@ test("receiver rejection and window loss do not report successful delivery", asy
   assert.equal((await next).success, false);
   assert.deepEqual(h.source.sent, []);
   assert.equal(h.ipcMain.listenerCount("netcatty:window:editorOpenTabResult"), 0);
+});
+
+
+test("close during cold start waits for the receiver and the open receipt", async () => {
+  const h = harness();
+  const opening = h.open("first");
+  const closing = h.api.closeEditorTabs(h.electron, { editorIds: ["first"] });
+  const win = h.windows[0];
+  assert.equal(h.api.hasEditorTabsForSource(h.source), true, "pending transfers retain source ownership");
+  assert.equal(win.sent.length, 0);
+  win.loaded(); h.ready(win); await tick();
+  assert.deepEqual(win.sent.map((request) => request.channel), ["netcatty:window:editorOpenTab"]);
+  h.accept(win, win.sent[0]); await opening; await tick();
+  const closeRequest = win.sent[1];
+  assert.equal(closeRequest.channel, "netcatty:window:editorCloseTabs");
+  h.ipcMain.emit("netcatty:window:editorCloseTabsResult", { sender: win.webContents }, { requestId: closeRequest.payload.requestId, cancelled: false, closedIds: ["first"] });
+  assert.deepEqual(await closing, { success: true, cancelled: false, closedIds: ["first"] });
+  assert.equal(h.api.hasEditorTabsForSource(h.source), false);
+  assert.deepEqual(h.source.sent.at(-1), { channel: "netcatty:window:editorTabsClosed", payload: { editorIds: ["first"] } });
+  win.destroy();
+});
+
+test("cancelling source-window close preserves its save and dock route and does not close other owners", async () => {
+  const h = harness();
+  const other = Object.assign(new EventEmitter(), { id: 100, isDestroyed: () => false, send() {} });
+  const first = h.open("first");
+  const second = h.open("second", other);
+  const win = h.windows[0];
+  win.loaded(); h.ready(win); await tick();
+  for (const request of win.sent) h.accept(win, request);
+  await Promise.all([first, second]);
+  const closing = h.api.closeEditorTabsForSource(h.electron, h.source);
+  await tick();
+  const request = win.sent.at(-1);
+  assert.deepEqual(request.payload.editorIds, ["first"]);
+  h.ipcMain.emit("netcatty:window:editorCloseTabsResult", { sender: win.webContents }, { requestId: request.payload.requestId, cancelled: true, closedIds: [] });
+  assert.equal((await closing).cancelled, true);
+  assert.equal(h.api.hasEditorTabsForSource(h.source), true);
+  assert.equal(h.api.hasEditorTabsForSource(other), true);
+  const saving = h.api.saveEditorTab(h.electron, snapshot("first"));
+  const saveRequest = h.source.sent.at(-1);
+  assert.equal(saveRequest.channel, "netcatty:window:editorSaveRequest");
+  h.ipcMain.emit("netcatty:window:editorSaveResult", { sender: h.source }, { requestId: saveRequest.payload.requestId, ok: true });
+  assert.equal((await saving).ok, true);
+  const docking = h.api.dockEditorTab(h.electron, snapshot("first"));
+  const dockRequest = h.source.sent.at(-1);
+  assert.equal(dockRequest.channel, "netcatty:window:editorDockRequest");
+  h.ipcMain.emit("netcatty:window:editorDockResult", { sender: h.source }, { requestId: dockRequest.payload.requestId, ok: true });
+  assert.equal((await docking).success, true);
+  assert.equal(h.api.hasEditorTabsForSource(h.source), false);
+  assert.equal(h.api.hasEditorTabsForSource(other), true);
+  win.destroy();
+});
+
+test("a failed transfer vetoes a simultaneous source close without deleting its retained copy", async () => {
+  const h = harness();
+  const opening = h.open("first");
+  const closing = h.api.closeEditorTabsForSource(h.electron, h.source);
+  h.windows[0].failed(new Error("load failed"));
+  assert.equal((await opening).success, false);
+  assert.equal((await closing).cancelled, true);
+  assert.deepEqual(h.source.sent, []);
 });

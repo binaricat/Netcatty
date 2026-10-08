@@ -347,6 +347,7 @@ function createMainWindowApi(ctx) {
       let saveStateTimer = null;
       let thisWindowCloseRequested = false;
       let dirtyEditorCloseConfirmed = false;
+      let editorCloseCheckPending = false;
     
       const updateNormalBounds = () => {
         if (!win.isDestroyed() && !win.isMaximized() && !win.isFullScreen()) {
@@ -382,12 +383,22 @@ function createMainWindowApi(ctx) {
     
       const queryDirtyEditorsBeforeClose = (event, { markCloseRequested = false } = {}) => {
         event.preventDefault();
+        if (editorCloseCheckPending) return;
+        editorCloseCheckPending = true;
         if (markCloseRequested) {
           thisWindowCloseRequested = true;
         }
-        const dirtyEditorQuery = typeof queryDirtyEditors === "function"
-          ? queryDirtyEditors(win.webContents, 5000, { ipcMain: electronModule.ipcMain })
-          : false;
+        const dirtyEditorQuery = (async () => {
+          // A detached editor still uses this renderer's SFTP save/dock route.
+          // Run its existing Save/Discard/Cancel flow before destroying the owner.
+          if (typeof closeEditorTabsForSource === "function") {
+            const result = await closeEditorTabsForSource(electronModule, win.webContents);
+            if (!result.success || result.cancelled) return true;
+          }
+          return typeof queryDirtyEditors === "function"
+            ? queryDirtyEditors(win.webContents, 5000, { ipcMain: electronModule.ipcMain })
+            : false;
+        })();
         Promise.resolve(dirtyEditorQuery)
           .then((hasDirty) => {
             if (hasDirty) {
@@ -402,17 +413,18 @@ function createMainWindowApi(ctx) {
             }
           })
           .catch(() => {
-            dirtyEditorCloseConfirmed = true;
-            try {
-              win.close();
-            } catch {
-              // ignore
-            }
-          });
+            // A failed ownership check must keep the source save route alive.
+            thisWindowCloseRequested = false;
+          })
+          .finally(() => { editorCloseCheckPending = false; });
       };
 
       // Save state when window is about to close
       win.on("close", (event) => {
+        // Recheck if another editor was opened while the local dirty query ran.
+        if (typeof hasEditorTabsForSource === "function" && hasEditorTabsForSource(win.webContents)) {
+          dirtyEditorCloseConfirmed = false;
+        }
         if (!registerAsMainWindow && registerAsAppContentWindow && !isQuitting && !dirtyEditorCloseConfirmed) {
           queryDirtyEditorsBeforeClose(event, { markCloseRequested: true });
           return;
