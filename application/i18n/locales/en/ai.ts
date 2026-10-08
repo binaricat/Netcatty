@@ -528,6 +528,8 @@ export const enAiMessages: Messages = {
   'ai.chat.usedTools': 'Tools used: {n}',
   'ai.chat.loadMoreSessions': 'Load more sessions ({n} more)',
   'ai.chat.noSessions': 'No previous sessions',
+  'ai.chat.forkFromHere': 'Fork from here',
+  'ai.chat.forkCreated': 'Branched into a new chat — the original stays in history.',
   'ai.chat.retryHint': 'You can retry by sending your message again.',
   'ai.chat.approvalTimeout': 'Tool approval timed out after 5 minutes. You can retry by sending your message again.',
   'ai.chat.menuHosts': 'Hosts',

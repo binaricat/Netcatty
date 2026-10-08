@@ -591,6 +591,7 @@ const AIChatPanelsHostInner: React.FC<AIChatPanelsHostProps> = ({
                     updateLastMessage={aiConfig.updateLastMessage}
                     updateMessageById={aiConfig.updateMessageById}
                     persistContextCompaction={aiConfig.persistContextCompaction}
+                    forkSessionFromMessage={aiConfig.forkSessionFromMessage}
                     providers={aiConfig.providers}
                     activeProviderId={aiConfig.activeProviderId}
                     activeModelId={aiConfig.activeModelId}

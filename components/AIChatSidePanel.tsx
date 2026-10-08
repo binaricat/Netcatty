@@ -276,6 +276,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   updateLastMessage,
   updateMessageById,
   persistContextCompaction,
+  forkSessionFromMessage,
   providers,
   activeProviderId,
   activeModelId,
@@ -1684,6 +1685,23 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     [setActiveSessionId, showScopeSessionView],
   );
 
+  // "Fork from here": copy the viewed conversation up to a completed assistant
+  // response into a new session, switch to it, and confirm via toast. The
+  // original stays in history. Boundary validation is re-run by the state
+  // hook; a null result means the fork was refused (already hidden in the UI).
+  const handleForkFromMessage = useCallback((messageId: string) => {
+    const sourceSessionId = activeSessionRef.current?.id ?? activeSessionId;
+    if (!sourceSessionId) return;
+    const fork = forkSessionFromMessage?.(sourceSessionId, messageId);
+    if (!fork) return;
+    applyHistorySessionSelection(fork.id, {
+      showSessionView: showScopeSessionView,
+      setActiveSessionId,
+      closeHistory: () => setShowHistory(false),
+    });
+    toast.success(t('ai.chat.forkCreated'));
+  }, [activeSessionId, forkSessionFromMessage, setActiveSessionId, showScopeSessionView, t]);
+
   const handleDeleteSession = useCallback(
     async (e: React.MouseEvent, sessionId: string) => {
       e.stopPropagation();
@@ -1770,6 +1788,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         activeSessionId={activeSessionId}
         handleSelectSession={handleSelectSession}
         handleDeleteSession={handleDeleteSession}
+        onForkFromMessage={handleForkFromMessage}
         messages={messages}
         isStreaming={isStreaming}
         activeCompaction={
@@ -1853,6 +1872,7 @@ const AI_CHAT_SIDE_PANEL_AI_STATE_KEYS = [
   'updateLastMessage',
   'updateMessageById',
   'persistContextCompaction',
+  'forkSessionFromMessage',
   'providers',
   'activeProviderId',
   'activeModelId',

@@ -519,6 +519,8 @@ export const esAiMessages: Messages = {
   'ai.chat.usedTools': 'Herramientas usadas: {n}',
   'ai.chat.loadMoreSessions': 'Cargar más sesiones ({n} más)',
   'ai.chat.noSessions': 'No hay sesiones anteriores',
+  'ai.chat.forkFromHere': 'Bifurcar desde aquí',
+  'ai.chat.forkCreated': 'Conversación bifurcada en un chat nuevo; el original permanece en el historial.',
   'ai.chat.retryHint': 'Puedes reintentar enviando tu mensaje de nuevo.',
   'ai.chat.approvalTimeout': 'La aprobación de la herramienta expiró después de 5 minutos. Puedes reintentar enviando tu mensaje de nuevo.',
   'ai.chat.menuHosts': 'Hosts',

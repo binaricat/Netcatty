@@ -54,6 +54,10 @@ export interface AIChatSidePanelProps {
     sessionId: string,
     compaction: import('../infrastructure/ai/types').AISessionContextCompaction,
   ) => void;
+  forkSessionFromMessage?: (
+    sessionId: string,
+    messageId: string,
+  ) => AISession | null;
   // Provider config
   providers: ProviderConfig[];
   activeProviderId: string;

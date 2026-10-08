@@ -55,6 +55,7 @@ import {
 import { convertFilesToUploads } from './useFileUpload';
 import { removeProviderReferences } from './aiProviderCleanup';
 import { publishAISessionsSnapshot } from './aiSessionsStore';
+import { planSessionFork } from '../../domain/aiSessionFork';
 import {
   AI_STATE_CHANGED_DRAFTS_BY_SCOPE,
   AI_STATE_CHANGED_PANEL_VIEW_BY_SCOPE,
@@ -675,6 +676,44 @@ export function useAIState() {
     };
   }, [persistSessions]);
 
+  // "Fork from here": copy the conversation up to a completed assistant
+  // response into a new session and make it the scope's active chat. The
+  // original session stays untouched in history. Pure boundary validation and
+  // plan building live in domain/aiSessionFork; nothing session-scoped (fresh
+  // external session id, no provider continuation, no tool-output handles)
+  // carries over, and null is returned when the boundary is not forkable.
+  const forkSessionFromMessage = useCallback((sessionId: string, messageId: string): AISession | null => {
+    const source = sessionsRef.current.find(s => s.id === sessionId);
+    if (!source) return null;
+    const plan = planSessionFork(source, messageId);
+    if (!plan.ok) return null;
+    const now = Date.now();
+    const fork: AISession = {
+      id: `ai_${now}_${Math.random().toString(36).slice(2, 8)}`,
+      title: plan.title,
+      agentId: source.agentId,
+      scope: {
+        ...source.scope,
+        hostIds: source.scope.hostIds ? [...source.scope.hostIds] : undefined,
+      },
+      messages: plan.messages,
+      createdAt: now,
+      updatedAt: now,
+    };
+    if (plan.contextCompaction) {
+      fork.contextCompaction = plan.contextCompaction;
+    }
+    setSessionsRaw(prev => {
+      const next = [fork, ...prev];
+      setLatestAISessionsSnapshot(next);
+      persistSessions(next);
+      return next;
+    });
+    const scopeKey = `${fork.scope.type}:${fork.scope.targetId ?? ''}`;
+    setActiveSessionId(scopeKey, fork.id);
+    return fork;
+  }, [persistSessions, setActiveSessionId]);
+
   const createSession = useCallback((scope: AISessionScope, agentId?: string): AISession => {
     const now = Date.now();
     const session: AISession = {
@@ -1287,6 +1326,7 @@ export function useAIState() {
     seedWorkspaceActiveSessionFromMembers,
     handoffDissolvedWorkspaceScope,
     retargetWorkspaceActiveChatForMemberLoss,
+    forkSessionFromMessage,
   }), [
     providers,
     setProviders,
@@ -1347,5 +1387,6 @@ export function useAIState() {
     seedWorkspaceActiveSessionFromMembers,
     handoffDissolvedWorkspaceScope,
     retargetWorkspaceActiveChatForMemberLoss,
+    forkSessionFromMessage,
   ]);
 }
