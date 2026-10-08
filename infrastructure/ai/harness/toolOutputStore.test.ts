@@ -301,6 +301,68 @@ test('ToolOutputStore global quotas evict the fresh clone, not its source handle
   assert.equal(original.get(handle.id, 'chat-fork'), undefined);
 });
 
+test('ToolOutputStore global quotas evict the fresh clone, not an unrelated session\'s older handle', async () => {
+  const deletedPaths: string[] = [];
+  const persistence: ToolOutputPersistence = {
+    write: async (record, content) => {
+      const path = `/netcatty/${record.handleId}-${record.chatSessionId}.log`;
+      return path;
+    },
+    read: async (path, input) => {
+      return {
+        mode: input.mode ?? 'head',
+        content: 'r'.repeat(input.maxChars ?? 12_000),
+        totalChars: 30_000,
+        startOffset: input.offset ?? 0,
+        endOffset: (input.offset ?? 0) + (input.maxChars ?? 12_000),
+        nextOffset: (input.offset ?? 0) + (input.maxChars ?? 12_000),
+        hasMore: false,
+      };
+    },
+    delete: async path => {
+      deletedPaths.push(path);
+    },
+  };
+
+  // The global handle quota is full with two handles when the fork is
+  // created. The unrelated one is the oldest record in the registry, so with
+  // only the source protected the eviction scan would pick it (deleting its
+  // durable file) and break `tool_output_read` in that other conversation.
+  let tick = 0;
+  const original = new ToolOutputStore({
+    spillThresholdChars: 0,
+    maxHandlesGlobal: 2,
+    persistence,
+    now: () => tick += 1,
+  });
+  const unrelated = original.store({
+    chatSessionId: 'chat-other',
+    capabilityId: 'terminal.execute',
+    content: 'A'.repeat(30_000),
+  });
+  const handle = original.store({
+    chatSessionId: 'chat-source',
+    capabilityId: 'terminal.execute',
+    content: 'B'.repeat(30_000),
+  });
+  await unrelated.spillPromise;
+  await handle.spillPromise;
+
+  await original.rehomeChatSession('chat-source', 'chat-fork');
+
+  // The unrelated session's handle is untouched.
+  assert.ok(original.get(unrelated.id, 'chat-other'));
+  assert.deepEqual(deletedPaths, []);
+  assert.equal((
+    await original.readChunkAsync({ handleId: unrelated.id, mode: 'head', maxChars: 100 }, 'chat-other')
+  )?.content?.length, 100);
+  assert.equal((
+    await original.readChunkAsync({ handleId: handle.id, mode: 'head', maxChars: 100 }, 'chat-source')
+  )?.content?.length, 100);
+  // The clone was evicted to satisfy the quota instead.
+  assert.equal(original.get(handle.id, 'chat-fork'), undefined);
+});
+
 test('ToolOutputStore respilled forked copies clear the borrowed flag so eviction frees their file', async () => {
   const files = new Map<string, { record: PersistedToolOutputRecord; content: string }>();
   const deletedPaths: string[] = [];

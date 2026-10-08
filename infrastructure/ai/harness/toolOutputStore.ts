@@ -397,6 +397,15 @@ export class ToolOutputStore {
     // decided: either the content is still in memory (write pending/failed) or
     // the handle owns a durable file path.
     await Promise.allSettled(selected.map(([, handle]) => handle.spillPromise));
+    // Snapshot every handle registered before cloning so the global eviction
+    // scan below only ever sacrifices the fresh clones: protecting just the
+    // selected source handles would still let the scan pick an unrelated
+    // session's older handle (deleting its durable file) and break
+    // `tool_output_read` there merely because another conversation was forked.
+    const preExistingHandles = new Set<ToolOutputHandle>();
+    for (const sessionMap of this.bySession.values()) {
+      for (const handle of sessionMap.values()) preExistingHandles.add(handle);
+    }
     const targetMap = this.bySession.get(targetChatSessionId) ?? new Map<string, ToolOutputHandle>();
     for (const [handleId, handle] of selected) {
       if (targetMap.has(handleId)) continue;
@@ -433,12 +442,14 @@ export class ToolOutputStore {
     this.enforceSessionLimits(targetChatSessionId, targetMap);
     // Cloning adds whole sessions' worth of handles with each fork; keep the
     // registry within the global handle/char bounds (matching `store` and
-    // `restoreHandleImpl`). Protect the source handles so overflow is
+    // `restoreHandleImpl`). Protect every pre-existing handle so overflow is
     // absorbed by the fresh clones: clones share the source's `accessedAt`,
-    // and without protection the eviction scan could remove the source record
-    // (deleting its durable file) and break `tool_output_read` in the
-    // original conversation merely because it was forked.
-    this.enforceGlobalLimits(new Set(selected.map(([, handle]) => handle)));
+    // and without protection the eviction scan could remove a source record
+    // (deleting its durable file) or an unrelated session's older handle and
+    // break `tool_output_read` in that conversation merely because it was
+    // forked. When the quota was already met before cloning, the loop leaves
+    // the pre-clone registry as-is and the clones are what get evicted.
+    this.enforceGlobalLimits(preExistingHandles);
     // Copies still holding in-memory content (fresh or read-back) become
     // target-owned through the normal spill path, which re-writes a durable
     // record carrying the target's chat session id. Await the writes so the
@@ -689,9 +700,10 @@ export class ToolOutputStore {
    * points at, leaving that alias unreadable. Prefer the oldest borrowed
    * alias instead (evicting an alias never deletes a file) before falling
    * back to the oldest handle overall. `protect` marks handles that must not
-   * be chosen for eviction (e.g. the source records behind a fresh fork):
-   * they are skipped while any unprotected candidate remains, so satisfying a
-   * clone quota never sacrifices existing source ownership.
+   * be chosen for eviction (e.g. every handle registered before a fresh
+   * fork): they are skipped while any unprotected candidate remains, so
+   * satisfying a clone quota never sacrifices source ownership or evicts an
+   * unrelated session's older handle.
    */
   private pickEvictionEntry<T extends { handle: ToolOutputHandle }>(
     entries: ReadonlyArray<T>,
