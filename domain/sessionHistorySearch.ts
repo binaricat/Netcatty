@@ -58,8 +58,16 @@ function serializeToolCallArguments(args: Record<string, unknown>): string {
 
 export function collectSessionSearchFields(session: SessionHistorySearchTarget): string[] {
   const collector = createSearchFieldCollector();
+  // The title is indexed first so it always survives the total-length cap.
   collector.push(session.title);
-  for (const message of session.messages) {
+  // Fields pushed before the message loop (0 or 1 entries; the title may be
+  // blank and therefore skipped).
+  const headCount = collector.fields.length;
+  // Allocate the remaining budget newest-first: when a long session exceeds
+  // the cap, recent messages stay searchable instead of being silently
+  // dropped in favor of the oldest content.
+  for (let i = session.messages.length - 1; i >= 0; i--) {
+    const message = session.messages[i];
     collector.push(message.content);
     collector.push(message.thinking);
     for (const toolCall of message.toolCalls ?? []) {
@@ -71,7 +79,13 @@ export function collectSessionSearchFields(session: SessionHistorySearchTarget):
       collector.push(toolResult.content);
     }
   }
-  return collector.fields;
+  const fields = collector.fields;
+  // Restore chronological output order: the head (title) stays first, while
+  // the message fields — collected newest-to-oldest — are reversed back.
+  const head = fields.slice(0, headCount);
+  const tail = fields.slice(headCount);
+  tail.reverse();
+  return [...head, ...tail];
 }
 
 export function filterSessionHistory<T extends SessionHistorySearchTarget>(

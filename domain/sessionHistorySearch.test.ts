@@ -147,3 +147,22 @@ test("collectSessionSearchFields bounds the total searchable text per session", 
   // Title is indexed first so it always lands in the bounded window.
   assert.equal(fields[0], "big session");
 });
+
+test("collectSessionSearchFields keeps recent messages searchable under the cap", () => {
+  // Four 20,000-char messages exceed the 64 KB cap; the budget must be
+  // allocated newest-first so the most recent message remains searchable.
+  const session = createSession("a", "big session", [0, 1, 2, 3].map((i) => ({
+    role: "user" as const,
+    content: `${"x".repeat(19_900)} marker-${i}`,
+  })));
+
+  const fields = collectSessionSearchFields(session);
+  assert.equal(fields[0], "big session");
+  // Oldest messages are dropped, the newest is retained.
+  assert.ok(!fields.some((field) => field.includes("marker-0")));
+  assert.ok(fields.some((field) => field.includes("marker-3")));
+  // Output order stays chronological (marker-1 before marker-2).
+  const marker1 = fields.findIndex((field) => field.includes("marker-1"));
+  const marker2 = fields.findIndex((field) => field.includes("marker-2"));
+  assert.ok(marker1 !== -1 && marker2 !== -1 && marker1 < marker2);
+});
