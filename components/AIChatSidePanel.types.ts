@@ -10,6 +10,7 @@ import type {
   ProviderConfig,
   WebSearchConfig,
 } from '../infrastructure/ai/types';
+import type { AISessionBranchTarget } from '../domain/aiSessionBranch';
 import type { AIQuickMessage } from '../infrastructure/ai/quickMessages';
 import type { ExecutorContext } from '../infrastructure/ai/cattyAgent/executor';
 import type { Host, Snippet, VaultNote } from '../types';
@@ -37,6 +38,10 @@ export interface AIChatSidePanelProps {
   addDraftFiles: (scopeKey: string, fallbackAgentId: string, inputFiles: File[]) => Promise<void>;
   removeDraftFile: (scopeKey: string, fallbackAgentId: string, fileId: string) => void;
   createSession: (scope: AISessionScope, agentId?: string) => AISession;
+  branchSession: (sourceSessionId: string, target: AISessionBranchTarget, scopeKey: string) => {
+    session: AISession;
+    userDraft?: Pick<ChatMessage, 'content' | 'attachments' | 'images'>;
+  } | null;
   deleteSession: (sessionId: string, scopeKey?: string) => void;
   updateSessionTitle: (sessionId: string, title: string) => void;
   updateSessionExternalSessionId: (sessionId: string, externalSessionId: string | undefined) => void;

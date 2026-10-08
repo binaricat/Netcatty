@@ -6,7 +6,7 @@
  * No avatars. Thinking blocks are collapsible.
  */
 
-import { AlertCircle, BookOpen, FileText, RotateCcw, SquareTerminal, X, ZoomIn, ZoomOut } from 'lucide-react';
+import { AlertCircle, BookOpen, FileText, GitFork, RotateCcw, SquareTerminal, Undo2, X, ZoomIn, ZoomOut } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import type { ChatMessage, ToolCall as AgentToolCall } from '../../infrastructure/ai/types';
@@ -99,6 +99,9 @@ interface ChatMessageListProps {
   onOpenVaultHost?: (hostId: string) => void;
   onOpenVaultSnippet?: (snippetId: string) => void;
   onOpenVaultSection?: (section: VaultArtifactNavSection) => void;
+  onForkAfterTurn?: (assistantMessageId: string) => void;
+  onUndoLastTurn?: () => void;
+  canUndoLastTurn?: boolean;
 }
 
 interface VaultArtifactNavigationCallbackOptions {
@@ -160,6 +163,28 @@ export function buildCodexApprovalRenderPlan(
 const MESSAGE_RENDER_BATCH = 50;
 const MESSAGE_RENDER_STEP = 50;
 
+export function isSafeCompletedAssistantResponse(
+  messages: readonly ChatMessage[],
+  messageIndex: number,
+  isStreaming: boolean,
+): boolean {
+  if (isStreaming) return false;
+  const message = messages[messageIndex];
+  if (
+    message?.role !== 'assistant'
+    || (message.executionStatus !== undefined && message.executionStatus !== 'completed')
+    || !message.content.trim()
+    || message.errorInfo
+    || message.statusText
+    || (message.toolCalls?.length ?? 0) > 0
+  ) {
+    return false;
+  }
+
+  const nextMessage = messages.slice(messageIndex + 1).find((candidate) => candidate.role !== 'system');
+  return !nextMessage || nextMessage.role === 'user';
+}
+
 export function pruneResolvedApprovals(
   previous: ReadonlyMap<string, boolean>,
   messages: readonly ChatMessage[],
@@ -187,6 +212,9 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({
   onOpenVaultHost,
   onOpenVaultSnippet,
   onOpenVaultSection,
+  onForkAfterTurn,
+  onUndoLastTurn,
+  canUndoLastTurn = false,
 }) => {
   // Track pending approvals from the approval gate
   const [pendingApprovals, setPendingApprovals] = useState<Map<string, ApprovalRequest>>(new Map());
@@ -484,6 +512,9 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({
   }
 
   const lastAssistantMessage = displayedMessages.findLast(m => m.role === 'assistant');
+  const finalVisibleMessageIndex = visibleMessages.length - 1;
+  const hasSafeFinalAssistantResponse = finalVisibleMessageIndex >= 0
+    && isSafeCompletedAssistantResponse(visibleMessages, finalVisibleMessageIndex, !!isStreaming);
   const showCompactionStatus = Boolean(
     activeCompaction
     && activeSessionId
@@ -663,6 +694,10 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({
           const isUser = message.role === 'user';
           const isLastAssistant = message === lastAssistantMessage;
           const isThisStreaming = isStreaming && isLastAssistant;
+          const showForkAction = Boolean(
+            onForkAfterTurn
+            && isSafeCompletedAssistantResponse(visibleMessages, visibleMessages.indexOf(message), !!isStreaming),
+          );
 
           return (
             <Message
@@ -798,6 +833,20 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({
                     </div>
                   </div>
                 )}
+
+                {showForkAction && (
+                  <div className="flex justify-end pt-0.5">
+                    <button
+                      type="button"
+                      onClick={() => onForkAfterTurn?.(message.id)}
+                      className="inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-[11px] text-muted-foreground/55 transition-colors hover:bg-muted/45 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                      aria-label={t('ai.chat.forkAfterTurn')}
+                    >
+                      <GitFork size={12} aria-hidden="true" />
+                      <span>{t('ai.chat.forkAfterTurn')}</span>
+                    </button>
+                  </div>
+                )}
               </MessageContent>
             </Message>
           );
@@ -908,6 +957,21 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({
             <span className="thinking-shimmer text-xs text-muted-foreground">
               {compactionStatusText(activeCompaction.trigger, t)}
             </span>
+          </div>
+        )}
+
+        {onUndoLastTurn && canUndoLastTurn && hasSafeFinalAssistantResponse && (
+          <div className="flex justify-center py-1.5">
+            <button
+              type="button"
+              onClick={onUndoLastTurn}
+              className="group/undo inline-flex items-center gap-1.5 rounded-md border border-border/45 bg-background/70 px-2.5 py-1.5 text-[11px] text-muted-foreground/65 shadow-sm transition-colors hover:border-border/70 hover:bg-muted/40 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              aria-label={`${t('ai.chat.undoLastTurn')}. ${t('ai.chat.undoSideEffectsNotice')}`}
+              title={t('ai.chat.undoSideEffectsNotice')}
+            >
+              <Undo2 size={12} aria-hidden="true" />
+              <span>{t('ai.chat.undoLastTurn')}</span>
+            </button>
           </div>
         )}
 
@@ -1042,6 +1106,9 @@ function areMessagesEqual(prev: ChatMessageListProps, next: ChatMessageListProps
   if (prev.onOpenVaultHost !== next.onOpenVaultHost) return false;
   if (prev.onOpenVaultSnippet !== next.onOpenVaultSnippet) return false;
   if (prev.onOpenVaultSection !== next.onOpenVaultSection) return false;
+  if (prev.onForkAfterTurn !== next.onForkAfterTurn) return false;
+  if (prev.onUndoLastTurn !== next.onUndoLastTurn) return false;
+  if (prev.canUndoLastTurn !== next.canUndoLastTurn) return false;
   if (prev.messages.length !== next.messages.length) return false;
   if (prev.messages === next.messages) return true;
 

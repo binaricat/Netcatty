@@ -81,6 +81,7 @@ import {
   persistCommandBlocklistSetting,
   readCommandBlocklistSetting,
 } from './commandBlocklistSettings';
+import { createBranchedSession, getBranchBoundary, type AISessionBranchTarget } from '../../domain/aiSessionBranch';
 import {
   handoffDissolvedWorkspaceAIScope,
   retargetWorkspaceActiveChatAfterMemberLoss,
@@ -697,6 +698,27 @@ export function useAIState() {
     return session;
   }, [defaultAgentId, persistSessions, setActiveSessionId]);
 
+  const branchSession = useCallback((
+    sourceSessionId: string,
+    target: AISessionBranchTarget,
+    scopeKey: string,
+  ): { session: AISession; userDraft?: Pick<ChatMessage, 'content' | 'attachments' | 'images'> } | null => {
+    const source = sessionsRef.current.find(session => session.id === sourceSessionId);
+    if (!source) return null;
+    const boundary = getBranchBoundary(source, target);
+    if (!boundary) return null;
+
+    const branch = createBranchedSession(source, boundary, Date.now());
+    const next = [branch, ...sessionsRef.current];
+    sessionsRef.current = next;
+    setSessionsRaw(next);
+    setLatestAISessionsSnapshot(next);
+    persistSessions(next);
+    setActiveSessionId(scopeKey, branch.id);
+    setPanelViewByScope(prev => setSessionView(prev, scopeKey, branch.id));
+    return { session: branch, userDraft: boundary.userDraft };
+  }, [persistSessions, setActiveSessionId, setPanelViewByScope]);
+
   const deleteSession = useCallback((sessionId: string, scopeKey?: string) => {
     cleanupDeletedAIChatSessions([sessionId]);
     if (persistTimerRef.current) {
@@ -1275,6 +1297,7 @@ export function useAIState() {
     addDraftFiles,
     removeDraftFile,
     createSession,
+    branchSession,
     deleteSession,
     deleteSessionsByTarget,
     updateSessionTitle,
@@ -1335,6 +1358,7 @@ export function useAIState() {
     addDraftFiles,
     removeDraftFile,
     createSession,
+    branchSession,
     deleteSession,
     deleteSessionsByTarget,
     updateSessionTitle,

@@ -222,6 +222,13 @@ export type ChatStreamEvent =
   | { type: 'done'; usage?: { promptTokens: number; completionTokens: number } };
 
 // AI Session types
+export interface AISessionLineage {
+  /** Immediate source session for a locally branched conversation. */
+  parentSessionId: string;
+  /** Last source message retained by the branch; absent for a zero-message branch. */
+  branchedFromMessageId?: string;
+}
+
 export interface AISession {
   id: string;
   title: string;
@@ -230,6 +237,7 @@ export interface AISession {
   messages: ChatMessage[];
   contextCompaction?: AISessionContextCompaction;
   externalSessionId?: string;
+  lineage?: AISessionLineage;
   createdAt: number;
   updatedAt: number;
 }

@@ -1,8 +1,10 @@
-import React, { useEffect, useState } from 'react';
-import { Trash2, X } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Search, Trash2, X } from 'lucide-react';
 import type { AISession } from '../infrastructure/ai/types';
 import { useI18n } from '../application/i18n/I18nProvider';
+import { matchesSearchQuery } from '../lib/searchMatcher';
 import { cn } from '../lib/utils';
+import { Input } from './ui/input';
 import { ScrollArea } from './ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 import { SESSION_HISTORY_ROW_CLASSNAMES } from './ai/sessionHistoryLayout';
@@ -22,6 +24,16 @@ interface SessionHistoryDrawerProps {
 const SESSION_RENDER_BATCH = 80;
 const SESSION_RENDER_STEP = 60;
 
+export function filterAIChatSessions(sessions: AISession[], query: string): AISession[] {
+  if (!query.trim()) return sessions;
+
+  return sessions.filter((session) => matchesSearchQuery(
+    query,
+    session.title,
+    session.messages.map((message) => message.content).join(' '),
+  ));
+}
+
 export const SessionHistoryDrawer: React.FC<SessionHistoryDrawerProps> = ({
   sessions,
   activeSessionId,
@@ -30,14 +42,19 @@ export const SessionHistoryDrawer: React.FC<SessionHistoryDrawerProps> = ({
   onClose,
 }) => {
   const { t } = useI18n();
+  const [searchQuery, setSearchQuery] = useState('');
   const [renderCount, setRenderCount] = useState(SESSION_RENDER_BATCH);
 
   useEffect(() => {
     setRenderCount(SESSION_RENDER_BATCH);
-  }, [sessions]);
+  }, [sessions, searchQuery]);
 
-  const displayedSessions = sessions.slice(0, renderCount);
-  const hiddenSessionCount = Math.max(0, sessions.length - renderCount);
+  const filteredSessions = useMemo(
+    () => filterAIChatSessions(sessions, searchQuery),
+    [sessions, searchQuery],
+  );
+  const displayedSessions = filteredSessions.slice(0, renderCount);
+  const hiddenSessionCount = Math.max(0, filteredSessions.length - renderCount);
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
@@ -50,12 +67,30 @@ export const SessionHistoryDrawer: React.FC<SessionHistoryDrawerProps> = ({
           <X size={14} />
         </button>
       </div>
+      <div className="px-3 py-2 shrink-0 border-b border-border/30">
+        <div className="relative">
+          <Search
+            size={12}
+            className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground/50 pointer-events-none"
+          />
+          <Input
+            type="search"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder={t('ai.chat.searchSessions')}
+            aria-label={t('ai.chat.searchSessions')}
+            className="h-7 pl-7 text-xs bg-muted/30 border-none"
+          />
+        </div>
+      </div>
       <ScrollArea className="flex-1">
         <div className="px-3">
-          {sessions.length === 0 ? (
+          {filteredSessions.length === 0 ? (
             <div className="py-12 text-center">
               <p className="text-[13px] text-muted-foreground/40">
-                {t('ai.chat.noSessions')}
+                {sessions.length === 0
+                  ? t('ai.chat.noSessions')
+                  : t('ai.chat.noSearchResults')}
               </p>
             </div>
           ) : (

@@ -40,3 +40,12 @@ test('terminal side panel tools share one primary toolbar height', () => {
     assert.match(source, /TERMINAL_SIDE_PANEL_INNER_HEADER_CLASS/);
   }
 });
+
+test('AI chat panel wires coordinated turn history actions into the message list', () => {
+  assert.match(panelSource, /onForkAfterTurn\?: \(assistantMessageId: string\) => void/);
+  assert.match(panelSource, /onUndoLastTurn\?: \(\) => void/);
+  assert.match(panelSource, /canUndoLastTurn\?: boolean/);
+  assert.match(panelSource, /onForkAfterTurn=\{onForkAfterTurn\}/);
+  assert.match(panelSource, /onUndoLastTurn=\{onUndoLastTurn\}/);
+  assert.match(panelSource, /canUndoLastTurn=\{canUndoLastTurn\}/);
+});
