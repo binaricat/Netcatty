@@ -461,3 +461,62 @@ test("a window closed while preparing the local environment does not spawn a PTY
   await assert.rejects(pending, /window closed before startup/);
   assert.equal(spawns.length, 0);
 });
+
+async function withPendingLocalPath(run) {
+  const shellUtils = require("./ai/shellUtils.cjs");
+  const originalResolve = shellUtils.resolveWindowsLivePath;
+  const platformDescriptor = Object.getOwnPropertyDescriptor(process, "platform");
+  const resolvers = [];
+  const spawns = [];
+  const sessions = new Map();
+  const bridge = loadBridgeWithFakes(spawns, []);
+  bridge.init({ sessions, electron: { webContents: { fromId: () => null } } });
+  try {
+    Object.defineProperty(process, "platform", { configurable: true, value: "win32" });
+    shellUtils.resolveWindowsLivePath = () => new Promise((resolve) => resolvers.push(resolve));
+    await run({ bridge, resolvers, spawns, sessions });
+  } finally {
+    shellUtils.resolveWindowsLivePath = originalResolve;
+    Object.defineProperty(process, "platform", platformDescriptor);
+  }
+}
+
+test("closing a local tab during PATH refresh prevents the pending PTY spawn", async () => {
+  await withPendingLocalPath(async ({ bridge, resolvers, spawns, sessions }) => {
+    const event = { sender: { id: 7, isDestroyed: () => false } };
+    const payload = { sessionId: "closed-pending-path", bootEpoch: 1, shell: "C:\\Windows\\cmd.exe" };
+    const pending = bridge.startLocalSession(event, payload);
+    const rejected = assert.rejects(pending, { code: "NETCATTY_BOOT_SUPERSEDED" });
+    assert.equal(resolvers.length, 1);
+    bridge.closeSession(event, payload);
+    resolvers[0]("C:\\Windows\\System32");
+    await rejected;
+    assert.equal(spawns.length, 0);
+    assert.equal(sessions.has(payload.sessionId), false);
+  });
+});
+
+test("a stale close and old PATH completion cannot cancel a newer local boot", async () => {
+  await withPendingLocalPath(async ({ bridge, resolvers, spawns, sessions }) => {
+    const event = { sender: { id: 7, isDestroyed: () => false } };
+    const payload = { sessionId: "restarted-pending-path", shell: "C:\\Windows\\cmd.exe" };
+    const older = bridge.startLocalSession(event, { ...payload, bootEpoch: 1 });
+    const rejected = assert.rejects(older, { code: "NETCATTY_BOOT_SUPERSEDED" });
+    const newer = bridge.startLocalSession(event, { ...payload, bootEpoch: 2 });
+    assert.equal(resolvers.length, 2);
+    assert.deepEqual(bridge.closeSession(event, { ...payload, bootEpoch: 1 }), {
+      skipped: true, reason: "boot-epoch-mismatch",
+    });
+    resolvers[0]("C:\\old");
+    await rejected;
+    const { hasPendingBootAfter } = require("./sessionBootEpoch.cjs");
+    assert.equal(hasPendingBootAfter(payload.sessionId, 1), true);
+    resolvers[1]("C:\\new");
+    await newer;
+    assert.equal(spawns.length, 1);
+    assert.equal(sessions.get(payload.sessionId)?.bootEpoch, 2);
+    bridge.closeSession(event, { ...payload, bootEpoch: 1 });
+    assert.equal(sessions.get(payload.sessionId)?.bootEpoch, 2);
+    bridge.closeSession(event, { ...payload, bootEpoch: 2 });
+  });
+});

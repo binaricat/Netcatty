@@ -995,8 +995,21 @@ async function startLocalSession(event, payload) {
     requestedCwd,
   );
   const shellKind = detectShellKind(shell);
+  const { registerPendingBootAbort, clearPendingBootAbort } = require("./sessionBootEpoch.cjs");
+  const pendingBootAbort = registerPendingBootAbort(sessionId, payload?.bootEpoch);
+  let sessionEnv;
+  try {
+    sessionEnv = await buildLocalSessionEnv(payload);
+  } finally {
+    clearPendingBootAbort(sessionId, pendingBootAbort);
+  }
+  if (pendingBootAbort.signal.aborted) {
+    const supersededError = new Error("Local session closed or superseded before startup");
+    supersededError.code = "NETCATTY_BOOT_SUPERSEDED";
+    throw supersededError;
+  }
   const env = applyLocaleDefaults({
-    ...(await buildLocalSessionEnv(payload)),
+    ...sessionEnv,
     TERM: "xterm-256color",
     COLORTERM: "truecolor",
   });
