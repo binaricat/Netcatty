@@ -1152,8 +1152,29 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
           await fs.promises.chmod(readyPath, mode);
         } catch (error) {
           if (!isMetadataUnsupportedError(error)) throw error;
-          // gvfsd-fuse-style mounts reject chmod while accepting bytes; keep
-          // publishing without exact mode fidelity instead of failing.
+          // gvfsd-fuse-style mounts reject chmod while accepting bytes.
+          // Publishing without exact mode fidelity is only safe when the
+          // ready file already carries the intended mode: the cross-device
+          // seed creates it with the intended mode, but a same-device rename
+          // preserves the staged file's mode, which may differ from the
+          // destination being replaced (e.g. a 0644 stage over a 0600
+          // destination). Verify the ready file's actual mode and fail
+          // closed rather than silently publishing a different mode.
+          let readyMode;
+          try {
+            readyMode = (await fs.promises.lstat(readyPath)).mode & 0o7777;
+          } catch (statError) {
+            throw new Error(
+              `Cannot publish local destination mode ${mode.toString(8)}: the mount refused chmod and the prepared file's mode could not be verified`,
+              { cause: statError },
+            );
+          }
+          if (readyMode !== mode) {
+            throw new Error(
+              `Cannot publish local destination mode ${mode.toString(8)}: the mount refused chmod and the prepared file has mode ${readyMode.toString(8)}`,
+              { cause: error },
+            );
+          }
         }
         appliedMode = mode;
         continue;

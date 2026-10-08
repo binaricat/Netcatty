@@ -182,6 +182,53 @@ test("local promotion keeps restrictive mode when EXDEV staging copy succeeds bu
   assert.equal(fs.readdirSync(dir).filter((name) => name !== "target").length, 0);
 });
 
+test("promotion fails closed when a same-device rename stage matches neither the destination mode nor chmod is refused", async (t) => {
+  const dir = makeTempDir("promote-same-device-refused-");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const staged = path.join(dir, "staged");
+  const target = path.join(dir, "target");
+  fs.writeFileSync(staged, Buffer.alloc(64 * 1024, 21), { mode: 0o644 });
+  fs.writeFileSync(target, "original");
+  fs.chmodSync(target, 0o600);
+  // Same-device staging: the rename actually succeeds, so the ready file
+  // keeps the staged 0644 mode. A chmod-refusing destination mount must not
+  // publish that broader mode in place of the 0600 destination: promotion
+  // fails closed instead.
+  const chmodRestore = stubPromises("chmod", async () => {
+    throw Object.assign(new Error("ENOTSUP: operation not supported"), { code: "ENOTSUP" });
+  });
+  t.after(chmodRestore);
+  await assert.rejects(
+    () => transferBridge._promoteLocalTransferForTests(staged, target, { existingMode: 0o600 }),
+    /mount refused chmod/,
+  );
+  assert.equal(fs.readFileSync(target, "utf8"), "original");
+  assert.equal(fs.statSync(target).mode & 0o777, 0o600);
+  assert.equal(fs.readdirSync(dir).filter((name) => name !== "staged" && name !== "target").length, 0);
+});
+
+test("promotion publishes without chmod when a same-device rename stage already carries the destination mode", async (t) => {
+  const dir = makeTempDir("promote-same-device-matching-");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const staged = path.join(dir, "staged");
+  const target = path.join(dir, "target");
+  const payload = Buffer.alloc(64 * 1024, 15);
+  fs.writeFileSync(staged, payload, { mode: 0o600 });
+  fs.writeFileSync(target, "original");
+  fs.chmodSync(target, 0o600);
+  // Same-device staging where the stage was already written with the
+  // destination's mode: the chmod refusal is acceptable because verification
+  // confirms the ready file already carries the intended 0600 mode.
+  const chmodRestore = stubPromises("chmod", async () => {
+    throw Object.assign(new Error("ENOTSUP: operation not supported"), { code: "ENOTSUP" });
+  });
+  t.after(chmodRestore);
+  await transferBridge._promoteLocalTransferForTests(staged, target, { existingMode: 0o600 });
+  assert.ok(fs.readFileSync(target).equals(payload));
+  assert.equal(fs.statSync(target).mode & 0o777, 0o600);
+  assert.equal(fs.readdirSync(dir).filter((name) => name !== "target").length, 0);
+});
+
 for (const restrictiveMode of [0o200, 0o000]) {
   test(`local promotion replaces a mode-${restrictiveMode.toString(8)} destination through the EXDEV fallback`, async (t) => {
     const dir = makeTempDir(`promote-mode-${restrictiveMode.toString(8)}-`);
