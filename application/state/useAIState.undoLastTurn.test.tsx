@@ -552,6 +552,69 @@ test('undoLastTurnInSession retries a persistently failing inheritance rollback 
   dom.window.close();
 });
 
+test('undoLastTurnInSession treats a partial registration count as a failure and aborts', async () => {
+  // The main process answers ok:true with a per-job `registered` count: a job
+  // deleted between the inherited-jobs snapshot and the registration call
+  // (e.g. the history drawer's delete action while Undo awaits persistence)
+  // is skipped, not rejected. Publishing the branch would leave it polling
+  // "Background job not found" for the missing id forever, and the deleted
+  // source then cancels the job undo meant to preserve — so a partial count
+  // must retry and then abort the undo like any other registration failure.
+  const { dom, container, root, capture } = await setupAiState([SOURCE_SESSION]);
+  assert.ok(capture.ai);
+
+  const sessionStateStore = getAgentRuntime().getSessionStateStore();
+  sessionStateStore.updateFromToolResult(
+    'chat-source',
+    'terminal_start',
+    { sessionId: 'sess-1', command: 'npm run dev' },
+    JSON.stringify({ jobId: 'job-1', status: 'running', nextOffset: 0 }),
+    false,
+  );
+
+  const registrationCalls: string[][] = [];
+  const forgetCalls: string[] = [];
+  dom.window.netcatty = {
+    aiRegisterInheritedBackgroundJobs: async (
+      _chatSessionId: string,
+      _ownerChatSessionId: string,
+      jobIds: string[],
+    ) => {
+      registrationCalls.push(jobIds);
+      // Reports success while registering fewer jobs than requested.
+      return { ok: true, registered: Math.max(jobIds.length - 1, 0) };
+    },
+    aiForgetInheritedBackgroundJobs: async (chatSessionId: string) => {
+      forgetCalls.push(chatSessionId);
+      return { ok: true };
+    },
+  } as never;
+
+  let result: Awaited<ReturnType<typeof runUndo>> | null = null;
+  async function runUndo() {
+    return capture.ai!.undoLastTurnInSession('chat-source');
+  }
+  await act(async () => {
+    result = await runUndo();
+  });
+
+  // The partial-count response is retried for every attempt before the undo
+  // aborts and rolls back the (empty) registrations.
+  assert.equal(result, null);
+  assert.equal(registrationCalls.length, 3);
+  assert.deepEqual(registrationCalls[0], ['job-1']);
+  const branchedId = forgetCalls[0];
+  assert.ok(branchedId);
+  assert.ok(!capture.sessions.some((session) => session.id === branchedId));
+
+  sessionStateStore.clear('chat-source');
+  sessionStateStore.clear(branchedId);
+  delete dom.window.netcatty;
+  await act(async () => root.unmount());
+  container.remove();
+  dom.window.close();
+});
+
 test('undoLastTurnInSession publishes the branch once inheritance registration succeeds', async () => {
   const { dom, container, root, capture } = await setupAiState([SOURCE_SESSION]);
   assert.ok(capture.ai);

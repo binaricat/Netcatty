@@ -865,7 +865,16 @@ export function useAIState() {
         for (let attempt = 0; ; attempt++) {
           try {
             const result = await register(branched.id, ownerChatSessionId, jobIds);
-            if (result?.ok === true) {
+            // The main process reports how many of `jobIds` it actually
+            // registered and still answers ok:true for a partial count: a job
+            // deleted between the inherited-jobs snapshot read and this call
+            // (e.g. the history drawer's delete action while Undo awaits
+            // persistence) is simply skipped. Treating that as success would
+            // publish a branch polling "Background job not found" for the
+            // missing id forever, so require the count to cover every job;
+            // a partial response retries and then aborts the undo like any
+            // other registration failure.
+            if (result?.ok === true && result.registered === jobIds.length) {
               registered = true;
               break;
             }
