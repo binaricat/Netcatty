@@ -904,6 +904,20 @@ export class ToolOutputStore {
         retainedHandleIds: new Set(request.handleIds),
       }).catch(() => {}));
     }
+    // Requests stalled by the pending-restore cap keep their source→branch
+    // relationship but never run on their own, so a pruned source would
+    // delete the only durable records they (and their branch's retained
+    // references) depend on — after such a deletion `requeueStalledAliasRestores`
+    // discards the request via the deny filter and the branch stays unreadable
+    // forever. Materialize them the same way as the queued retries above while
+    // the source's records are still alive.
+    for (const [key, request] of [...this.stalledAliasRestores]) {
+      if (request.sourceChatSessionId !== chatSessionId) continue;
+      this.stalledAliasRestores.delete(key);
+      flights.push(this.aliasSessionHandles(request.sourceChatSessionId, request.targetChatSessionId, {
+        retainedHandleIds: new Set(request.handleIds),
+      }).catch(() => {}));
+    }
     if (flights.length === 0) return { flights, exempted: false };
     this.restoreRetryExemptions.set(
       chatSessionId,

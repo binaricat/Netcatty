@@ -1682,3 +1682,45 @@ test('alias restore requests stalled past the cap are not requeued for a pruned 
   assert.equal(store.get('h1', 'chat-branch-1'), undefined);
   assert.equal(await store.readChunkAsync({ handleId: 'h1' }, 'chat-branch-1'), null);
 });
+
+test('pruning a source materializes its stalled alias restore requests before deleting', async () => {
+  const base = createFakeToolOutputPersistence();
+  const deletedSessionIds: string[] = [];
+  let restoreHealthy = false;
+  const persistence: ToolOutputPersistence & { entries: typeof base.entries } = {
+    ...base,
+    restore: async (handleId, chatSessionId) => {
+      if (!restoreHealthy) throw new Error('temporarily unavailable');
+      return base.restore(handleId, chatSessionId);
+    },
+    deleteSession: async chatSessionId => {
+      deletedSessionIds.push(chatSessionId);
+    },
+  };
+  storeDurableRecord(persistence, 'chat-source-1', 'h1', 'persisted content', 16);
+
+  const store = new ToolOutputStore({ persistence });
+  // While restore rejects transiently, every alias pass defers its restore
+  // request into the pending queue; the 51st pair evicts the oldest request
+  // (chat-source-1 → chat-branch-1) into the stalled queue while keeping its
+  // source→branch relationship recoverable.
+  for (let index = 1; index <= TOOL_OUTPUT_MAX_PENDING_ALIAS_RESTORES + 1; index += 1) {
+    await store.aliasSessionHandles(`chat-source-${index}`, `chat-branch-${index}`, {
+      retainedHandleIds: new Set([`h${index}`]),
+    });
+  }
+
+  // Restore turns healthy and the stalled request's source is pruned: its
+  // branch-owned durable copy must be materialized while the source's durable
+  // records are still alive — deleting first, then discarding the stall via
+  // the deny filter, would leave the branch's retained reference unreadable
+  // forever.
+  restoreHealthy = true;
+  store.prune('chat-source-1');
+  await store.getSessionDeletionPromise('chat-source-1');
+  assert.deepEqual(deletedSessionIds, ['chat-source-1']);
+
+  const read = await store.readChunkAsync({ handleId: 'h1' }, 'chat-branch-1');
+  assert.equal(read?.content, 'persisted content');
+  assert.ok(persistence.entries.has('chat-branch-1:h1'));
+});
