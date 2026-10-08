@@ -61,7 +61,6 @@ import { netcattyBridge } from "../../../infrastructure/services/netcattyBridge"
 import {
   clearTerminalViewportAndSyncPty,
   installEraseInDisplayHandlers,
-  isDec2026SyncModeParams,
 } from "../clearTerminalViewport";
 import { pulseCopyOnSelectUserCommand } from "../copyOnSelect";
 import { getTerminalSelectionForClipboard } from "../normalizeTerminalSelection";
@@ -183,7 +182,6 @@ import {
 } from "./terminalInterruptDiagnostics";
 import { clearTerminalInputStateForInterrupt } from "./terminalInterruptInputState";
 import { getFlowControllerForTerm } from "./terminalSessionAttachment";
-import { SYNC_BLOCK_TIMEOUT_MS } from "./terminalSyncBlockFilter";
 import { createTerminalResizeScheduler } from "./terminalResizeScheduler";
 import { createTerminalLinkHandler } from "./terminalLinkHandler";
 import { writeLocalTerminalDataInOrder } from "./terminalUnfocusedRepaint";
@@ -3172,63 +3170,26 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   // OSC 7 format: \x1b]7;file://hostname/path\x07 or \x1b]7;file://hostname/path\x1b\\
   let currentCwd: string | undefined = undefined;
 
-  // Track DEC 2026 synchronized-output blocks so CSI 2 J can erase in place for
+  // DEC 2026 synchronized-output blocks make CSI 2 J erase in place for
   // Codex/Claude Code TUIs instead of pushing visible rows into scrollback.
-  let inDec2026SyncBlock = false;
-  let dec2026SyncBlockTimeout: ReturnType<typeof setTimeout> | undefined = undefined;
-  const clearDec2026SyncBlockTimeout = (): void => {
-    if (dec2026SyncBlockTimeout !== undefined) {
-      clearTimeout(dec2026SyncBlockTimeout);
-      dec2026SyncBlockTimeout = undefined;
-    }
-  };
-
-  // xterm's IFunctionIdentifier has no `params` field, so the handler must be
-  // registered for all `ESC[?…h/l` sequences and filter on the params it
-  // receives. Registering with `params: [2026]` silently fires for every
-  // private mode (e.g. bash's `ESC[?2004h` bracketed paste) and would flip the
-  // sync-block flag incorrectly, breaking scrollback preservation on Ctrl+L.
-  const dec2026SyncStartDisposable = term.parser.registerCsiHandler(
-    { prefix: "?", final: "h" },
-    (params) => {
-      if (isDec2026SyncModeParams(params)) {
-        // A repeated open while already tracking must not restart the safety
-        // timeout: xterm's RenderService arms its own deadline with
-        // `_timeout ??=`, so it expires on the original schedule while a
-        // producer that re-opens and then crashes would otherwise let this
-        // stale flag stay true far longer and misclassify CSI 2 J in between.
-        if (inDec2026SyncBlock) {
-          return false;
-        }
-        inDec2026SyncBlock = true;
-        clearDec2026SyncBlockTimeout();
-        // xterm's RenderService expires synchronizedOutputMode after its safety
-        // timeout when a TUI crashes without emitting the matching reset, and
-        // the parallel tracker in terminalSyncBlockFilter.ts does the same.
-        // Expire this flag on the identical schedule so a stale block cannot
-        // keep making CSI 2 J preserve the viewport or skip scrollback wiping.
-        dec2026SyncBlockTimeout = setTimeout(() => {
-          dec2026SyncBlockTimeout = undefined;
-          inDec2026SyncBlock = false;
-        }, SYNC_BLOCK_TIMEOUT_MS);
-      }
-      return false;
-    },
-  );
-  const dec2026SyncEndDisposable = term.parser.registerCsiHandler(
-    { prefix: "?", final: "l" },
-    (params) => {
-      if (isDec2026SyncModeParams(params)) {
-        inDec2026SyncBlock = false;
-        clearDec2026SyncBlockTimeout();
-      }
-      return false;
-    },
-  );
+  //
+  // Read xterm's own `modes.synchronizedOutputMode` instead of tracking
+  // DECSET/DECRST ourselves: xterm arms its synchronized-output safety timeout
+  // at the first buffered render (`SynchronizedOutputHandler.bufferRows`), not
+  // when processing `\x1b[?2026h`, and its timeout callback clears the same
+  // internal mode flag. Deriving from `term.modes` therefore tracks xterm's
+  // actual deadline exactly — a tracker armed at DECSET time would expire early
+  // if the first screen-changing output arrives more than one second later,
+  // misclassifying the subsequent CSI 2 J as an ordinary clear.
+  //
+  // Note the flag lives on the same parser pass: xterm's internal DEC private
+  // mode handler (registered before any of our custom handlers) flips the mode
+  // while `\x1b[?2026h` / `\x1b[?2026l` are parsed, so by the time a `CSI 2 J`
+  // handler runs the flag reflects the producer's current sync state.
 
   const eraseScrollbackDisposable = installEraseInDisplayHandlers(term, {
     getClearWipesScrollback: () => ctx.terminalSettingsRef.current?.clearWipesScrollback ?? true,
-    isInDec2026SyncBlock: () => inDec2026SyncBlock,
+    isInDec2026SyncBlock: () => term.modes.synchronizedOutputMode,
   });
 
   const markCursorPositionReportRequest = (params: readonly (number | number[])[]): boolean => {
@@ -3537,9 +3498,6 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
       pluginLinkProviderHost?.dispose();
       pluginProviderHost?.dispose();
       eraseScrollbackDisposable.dispose();
-      dec2026SyncStartDisposable.dispose();
-      dec2026SyncEndDisposable.dispose();
-      clearDec2026SyncBlockTimeout();
       for (const disposable of cursorPositionReportRequestDisposables) {
         disposable.dispose();
       }
