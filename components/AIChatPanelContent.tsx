@@ -95,6 +95,12 @@ interface AIChatPanelContentProps {
   onOpenVaultNote?: (noteId: string) => void;
   onOpenVaultHost?: (hostId: string) => void;
   onOpenVaultSection?: (section: 'notes' | 'hosts') => void;
+  /** Fork the current chat after a completed assistant turn. */
+  onForkAfterTurn?: (assistantMessageId: string) => void;
+  /** Remove the current session's most recent user/assistant turn. */
+  onUndoLastTurn?: () => void;
+  /** Whether the current session has a completed turn that can be undone. */
+  canUndoLastTurn?: boolean;
   /** Hidden retained panels keep the composer warm without the message tree. */
   parked?: boolean;
   /** Disable header transitions while send preflight is in flight. */
@@ -166,6 +172,9 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
   onOpenVaultNote,
   onOpenVaultHost,
   onOpenVaultSection,
+  onForkAfterTurn,
+  onUndoLastTurn,
+  canUndoLastTurn = false,
   parked = false,
   sending = false,
 }) => {
@@ -290,6 +299,9 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
                 onOpenVaultNote={onOpenVaultNote}
                 onOpenVaultHost={onOpenVaultHost}
                 onOpenVaultSection={onOpenVaultSection}
+                onForkAfterTurn={onForkAfterTurn}
+                onUndoLastTurn={onUndoLastTurn}
+                canUndoLastTurn={canUndoLastTurn}
               />
             </React.Profiler>
           )}

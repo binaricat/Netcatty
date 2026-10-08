@@ -9,6 +9,7 @@ import type { ChatMessage } from "../../infrastructure/ai/types.ts";
 import type { ApprovalRequest } from "../../infrastructure/ai/shared/approvalGate.ts";
 import ChatMessageList, {
   buildCodexApprovalRenderPlan,
+  isSafeCompletedAssistantResponse,
   pruneResolvedApprovals,
   shouldProvideVaultArtifactNavigation,
   shouldRenderAssistantAsPlainText,
@@ -45,6 +46,94 @@ test("assistant content stays plain only when markdown is hidden", () => {
   assert.equal(shouldRenderAssistantAsPlainText({
     hideMarkdown: true,
   }), true);
+});
+
+test("fork action only considers safe completed assistant response boundaries", () => {
+  const messages: ChatMessage[] = [
+    { id: "user-1", role: "user", content: "question", timestamp: 1 },
+    { id: "assistant-1", role: "assistant", content: "answer", timestamp: 2, executionStatus: "completed" },
+    { id: "user-2", role: "user", content: "follow-up", timestamp: 3 },
+    { id: "assistant-2", role: "assistant", content: "working", timestamp: 4, executionStatus: "running" },
+  ];
+
+  assert.equal(isSafeCompletedAssistantResponse(messages, 1, false), true);
+  assert.equal(isSafeCompletedAssistantResponse(messages, 1, true), false);
+  assert.equal(isSafeCompletedAssistantResponse(messages, 3, false), false);
+  assert.equal(isSafeCompletedAssistantResponse([
+    { ...messages[1], executionStatus: undefined },
+  ], 0, false), true);
+  assert.equal(isSafeCompletedAssistantResponse([
+    { ...messages[1], toolCalls: [{ id: "call-1", name: "terminal_execute", arguments: {} }] },
+  ], 0, false), false);
+});
+
+test("ChatMessageList shows fork and undo actions only when safe", () => {
+  const messages: ChatMessage[] = [
+    { id: "user-1", role: "user", content: "question", timestamp: 1 },
+    { id: "assistant-1", role: "assistant", content: "answer", timestamp: 2, executionStatus: "completed" },
+  ];
+
+  const settledMarkup = renderToStaticMarkup(
+    React.createElement(
+      I18nProvider,
+      { locale: "en" },
+      React.createElement(
+        TooltipProvider,
+        null,
+        React.createElement(ChatMessageList, {
+          messages,
+          isStreaming: false,
+          onForkAfterTurn: () => {},
+          onUndoLastTurn: () => {},
+          canUndoLastTurn: true,
+        }),
+      ),
+    ),
+  );
+  assert.match(settledMarkup, /aria-label="Fork from here"/);
+  assert.match(settledMarkup, /aria-label="Undo last turn\.[^"]+"/);
+
+  const streamingMarkup = renderToStaticMarkup(
+    React.createElement(
+      I18nProvider,
+      { locale: "en" },
+      React.createElement(
+        TooltipProvider,
+        null,
+        React.createElement(ChatMessageList, {
+          messages,
+          isStreaming: true,
+          onForkAfterTurn: () => {},
+          onUndoLastTurn: () => {},
+          canUndoLastTurn: true,
+        }),
+      ),
+    ),
+  );
+  assert.doesNotMatch(streamingMarkup, /Fork from here/);
+  assert.doesNotMatch(streamingMarkup, /Undo last turn/);
+
+  const unsafeMarkup = renderToStaticMarkup(
+    React.createElement(
+      I18nProvider,
+      { locale: "en" },
+      React.createElement(
+        TooltipProvider,
+        null,
+        React.createElement(ChatMessageList, {
+          messages: [
+            messages[0],
+            { ...messages[1], executionStatus: "failed" },
+          ],
+          onForkAfterTurn: () => {},
+          onUndoLastTurn: () => {},
+          canUndoLastTurn: true,
+        }),
+      ),
+    ),
+  );
+  assert.doesNotMatch(unsafeMarkup, /Fork from here/);
+  assert.doesNotMatch(unsafeMarkup, /Undo last turn/);
 });
 
 test("ChatMessageList renders Streamdown for the streaming assistant message", () => {

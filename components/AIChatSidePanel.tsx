@@ -63,6 +63,7 @@ import {
   isAIChatSessionStreaming,
   type DefaultTargetSessionHint,
 } from '../application/state/useAIChatStreaming';
+import { getBranchBoundary } from '../domain/aiSessionBranch';
 import { getScopedHistorySessions } from './ai/scopedHistorySessions';
 import { resolveInheritedAIActiveSessionId } from '../domain/aiWorkspaceScopeInherit';
 import { aiSessionIdSetEqual, exactScopeAISessionsEqual } from '../domain/aiSessionsForScope';
@@ -269,6 +270,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   addDraftFiles,
   removeDraftFile,
   createSession,
+  branchSession,
   deleteSession,
   updateSessionTitle,
   updateSessionExternalSessionId,
@@ -1726,6 +1728,41 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     ],
   );
 
+  const handleForkAfterTurn = useCallback((assistantMessageId: string) => {
+    const source = activeSessionRef.current;
+    if (!source || isSending || streamingSessionIds.has(source.id)) return;
+    const result = branchSession(source.id, { kind: 'after-turn', assistantMessageId }, scopeKey);
+    if (!result) return;
+    setShowHistory(false);
+    toast.success(t('ai.chat.forkCreated'));
+  }, [branchSession, isSending, scopeKey, streamingSessionIds, t]);
+
+  const handleUndoLastTurn = useCallback(() => {
+    const source = activeSessionRef.current;
+    if (!source || isSending || streamingSessionIds.has(source.id)) return;
+    const result = branchSession(source.id, { kind: 'before-latest-turn' }, scopeKey);
+    if (!result) return;
+    if (result.userDraft) {
+      updateScopeDraft(result.session.agentId, (draft) => ({
+        ...draft,
+        text: result.userDraft?.content ?? '',
+        attachments: (result.userDraft?.attachments ?? result.userDraft?.images ?? []).map((attachment) => ({
+          ...attachment,
+          id: generateId(),
+          filename: attachment.filename ?? 'attachment',
+          dataUrl: `data:${attachment.mediaType};base64,${attachment.base64Data}`,
+        })),
+      }));
+    }
+    setShowHistory(false);
+    toast.info(t('ai.chat.undoSideEffectsNotice'));
+  }, [branchSession, isSending, scopeKey, streamingSessionIds, t, updateScopeDraft]);
+
+  const canUndoLastTurn = Boolean(
+    activeSession && !isSending && !isStreaming
+    && getBranchBoundary(activeSession, { kind: 'before-latest-turn' }),
+  );
+
   const handleAgentChange = useCallback((agentId: string) => {
     showScopeDraftView();
     ensureScopeDraft(agentId);
@@ -1770,6 +1807,9 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         activeSessionId={activeSessionId}
         handleSelectSession={handleSelectSession}
         handleDeleteSession={handleDeleteSession}
+        onForkAfterTurn={handleForkAfterTurn}
+        onUndoLastTurn={handleUndoLastTurn}
+        canUndoLastTurn={canUndoLastTurn}
         messages={messages}
         isStreaming={isStreaming}
         activeCompaction={
@@ -1846,6 +1886,7 @@ const AI_CHAT_SIDE_PANEL_AI_STATE_KEYS = [
   'addDraftFiles',
   'removeDraftFile',
   'createSession',
+  'branchSession',
   'deleteSession',
   'updateSessionTitle',
   'updateSessionExternalSessionId',

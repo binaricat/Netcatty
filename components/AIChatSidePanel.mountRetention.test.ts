@@ -85,6 +85,7 @@ const baseProps = (overrides: Partial<AIChatSidePanelProps> = {}): AIChatSidePan
   addDraftFiles: async () => undefined,
   removeDraftFile: () => undefined,
   createSession: () => session(),
+  branchSession: () => null,
   deleteSession: () => undefined,
   updateSessionTitle: () => undefined,
   updateSessionExternalSessionId: () => undefined,
@@ -109,6 +110,15 @@ const baseProps = (overrides: Partial<AIChatSidePanelProps> = {}): AIChatSidePan
   scopeTargetId: 'terminal-1',
   isVisible: false,
   ...overrides,
+});
+
+test('fork success feedback only follows creation of a branch', () => {
+  const source = readFileSync(new URL('./AIChatSidePanel.tsx', import.meta.url), 'utf8');
+  const handler = source.slice(
+    source.indexOf('const handleForkAfterTurn = useCallback'),
+    source.indexOf('const handleUndoLastTurn = useCallback'),
+  );
+  assert.match(handler, /if \(!result\) return;[\s\S]*toast\.success\(t\('ai\.chat\.forkCreated'\)\)/);
 });
 
 test('send preflight aborts after the panel unmounts or the scope changes', () => {
