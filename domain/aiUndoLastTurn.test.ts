@@ -4,6 +4,7 @@ import test from 'node:test';
 import type { AISession, ChatMessage } from '../infrastructure/ai/types.ts';
 import {
   buildUndoLastTurnBranch,
+  collectRetainedToolOutputHandleIds,
   hasUnresolvedToolCalls,
   resolveUndoLastTurnBoundary,
 } from './aiUndoLastTurn.ts';
@@ -130,6 +131,63 @@ test('buildUndoLastTurnBranch restores message attachments into composer uploads
       lineCount: 3,
     },
   ]);
+});
+
+test('collectRetainedToolOutputHandleIds scans structured tool-call arguments and compaction', () => {
+  const messages: ChatMessage[] = [
+    { id: 'u1', role: 'user', content: 'read the tail please', timestamp: 1 },
+    {
+      id: 'a1',
+      role: 'assistant',
+      content: '',
+      timestamp: 2,
+      // A failed read whose error result does not echo the requested id:
+      // the call arguments are the only surviving reference to the handle.
+      toolCalls: [
+        {
+          id: 'call-1',
+          name: 'tool_output_read',
+          arguments: { handleId: 'tool-output-arg-1', options: { head: 1 } },
+        },
+      ],
+      toolResults: [{ toolCallId: 'call-1', content: 'error: handle not found' }],
+    },
+    { id: 'a2', role: 'assistant', content: 'archived handleId=tool-output-inline-1', timestamp: 3 },
+  ];
+  const ids = collectRetainedToolOutputHandleIds(
+    messages,
+    { summary: 'summary with handleId=tool-output-compaction-1', compactedMessageCount: 1 },
+  );
+  assert.ok(ids.has('tool-output-arg-1'));
+  assert.ok(ids.has('tool-output-inline-1'));
+  assert.ok(ids.has('tool-output-compaction-1'));
+
+  // No tool calls and no embedded references: nothing collected.
+  assert.deepEqual(
+    collectRetainedToolOutputHandleIds([{ id: 'u', role: 'user', content: 'plain', timestamp: 4 }]),
+    new Set(),
+  );
+});
+
+test('buildUndoLastTurnBranch restores the undone turn selected user skills', () => {
+  const source = session([
+    user('first'),
+    assistant('answer'),
+    { ...user('undo me'), selectedUserSkillSlugs: ['web-search', 'notes-writer'] },
+    assistant('bad answer'),
+  ]);
+  const result = buildUndoLastTurnBranch(source, { newId: 'chat-2', now: 42 });
+  assert.ok(result);
+  assert.deepEqual(result.restored.selectedUserSkillSlugs, ['web-search', 'notes-writer']);
+  // Original session untouched (non-destructive).
+  assert.deepEqual(source.messages[2]?.selectedUserSkillSlugs, ['web-search', 'notes-writer']);
+});
+
+test('buildUndoLastTurnBranch restores no skill slugs for a plain turn', () => {
+  const source = session([user('first'), assistant('answer'), user('undo me'), assistant('ok')]);
+  const result = buildUndoLastTurnBranch(source, { newId: 'chat-2', now: 42 });
+  assert.ok(result);
+  assert.deepEqual(result.restored.selectedUserSkillSlugs, []);
 });
 
 test('buildUndoLastTurnBranch returns null when no undo boundary exists', () => {

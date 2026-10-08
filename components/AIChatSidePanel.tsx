@@ -859,6 +859,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
       const liveDraft = currentDraftRef.current;
       updateScopeDraft(currentAgentId, (draft) => {
         const liveText = liveDraft?.text ?? draft.text;
+        const liveSkillSlugs = liveDraft?.selectedUserSkillSlugs ?? draft.selectedUserSkillSlugs;
         return {
           ...draft,
           // Keep anything the user is still typing; the undone prompt goes first.
@@ -868,6 +869,12 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
           attachments: [
             ...result.restored.attachments,
             ...(liveDraft?.attachments ?? draft.attachments),
+          ],
+          // The undone turn was selected with these pills; keep any pills the
+          // user picked since the send on top of them.
+          selectedUserSkillSlugs: [
+            ...result.restored.selectedUserSkillSlugs,
+            ...liveSkillSlugs.filter((slug) => !result.restored.selectedUserSkillSlugs.includes(slug)),
           ],
         };
       });
@@ -1433,6 +1440,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         addMessageToSession(sessionId, {
           id: generateId(), role: 'user', content: trimmed,
           ...(attachments.length > 0 ? { attachments } : {}),
+          ...(selectedSkillSlugs.length > 0 ? { selectedUserSkillSlugs: selectedSkillSlugs } : {}),
           timestamp: Date.now(),
         });
         addMessageToSession(sessionId, { id: generateId(), role: 'assistant', content: t('ai.chat.noProvider'), timestamp: Date.now() });
@@ -1447,6 +1455,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         addMessageToSession(sessionId, {
           id: generateId(), role: 'user', content: trimmed,
           ...(attachments.length > 0 ? { attachments } : {}),
+          ...(selectedSkillSlugs.length > 0 ? { selectedUserSkillSlugs: selectedSkillSlugs } : {}),
           timestamp: Date.now(),
         });
         addMessageToSession(sessionId, { id: generateId(), role: 'assistant', content: t('ai.chat.noProviderModel'), timestamp: Date.now() });
@@ -1460,6 +1469,8 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
       addMessageToSession(sessionId, {
         id: generateId(), role: 'user', content: trimmed,
         ...(attachments.length > 0 ? { attachments } : {}),
+        // Kept on the user message so undo last turn can restore the pills.
+        ...(selectedSkillSlugs.length > 0 ? { selectedUserSkillSlugs: selectedSkillSlugs } : {}),
         timestamp: Date.now(),
       });
       clearScopeDraft({ keepPendingText: keepPendingAfterSend() });

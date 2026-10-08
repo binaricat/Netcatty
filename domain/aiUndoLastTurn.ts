@@ -8,6 +8,8 @@ import type {
 
 /** Matches the `handleId=tool-output-…` references embedded in stored output. */
 const TOOL_OUTPUT_HANDLE_ID_PATTERN = /\bhandleId=(tool-output-[A-Za-z0-9-]+)/g;
+/** Matches the handle ids inside JSON-serialized tool-call arguments. */
+const TOOL_OUTPUT_HANDLE_ID_JSON_PATTERN = /"handleId"\s*:\s*"(tool-output-[A-Za-z0-9-]+)"/g;
 
 /**
  * Collect the tool output handle ids referenced anywhere in the retained
@@ -25,9 +27,18 @@ export function collectRetainedToolOutputHandleIds(
     for (const match of text.matchAll(TOOL_OUTPUT_HANDLE_ID_PATTERN)) {
       ids.add(match[1]);
     }
+    for (const match of text.matchAll(TOOL_OUTPUT_HANDLE_ID_JSON_PATTERN)) {
+      ids.add(match[1]);
+    }
   };
   for (const message of messages) {
     scan(message.content);
+    // A tool call's arguments can be the only surviving reference to a saved
+    // output: for example a failed `tool_output_read` whose error result does
+    // not echo the requested handle id.
+    for (const call of message.toolCalls ?? []) {
+      scan(JSON.stringify(call.arguments));
+    }
     for (const result of message.toolResults ?? []) scan(result.content);
     for (const attachment of message.attachments ?? []) scan(attachment.previewText);
     for (const attachment of message.images ?? []) scan(attachment.previewText);
@@ -50,6 +61,7 @@ export function collectRetainedToolOutputHandleIds(
 export interface UndoLastTurnRestoredDraft {
   text: string;
   attachments: UploadedFile[];
+  selectedUserSkillSlugs: string[];
 }
 
 export interface UndoLastTurnResult {
@@ -157,6 +169,9 @@ export function buildUndoLastTurnBranch(
     restored: {
       text: removedUserMessage.content,
       attachments: buildRestoredAttachments(removedUserMessage, options.now),
+      // The undone turn was selected with these skill pills: they shaped the
+      // model context, so resending the turn must not silently omit them.
+      selectedUserSkillSlugs: [...(removedUserMessage.selectedUserSkillSlugs ?? [])],
     },
   };
 }

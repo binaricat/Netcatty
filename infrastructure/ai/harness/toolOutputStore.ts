@@ -71,13 +71,22 @@ export const TOOL_OUTPUT_TTL_MS = 30 * 60 * 1_000;
 export const TOOL_OUTPUT_SPILL_THRESHOLD_CHARS = 0;
 const TOOL_OUTPUT_SEARCH_CONTEXT_CHARS = 320;
 const TOOL_OUTPUT_SEARCH_MAX_MATCHES = 20;
-const TOOL_OUTPUT_MAX_PENDING_ALIAS_RESTORES = 50;
+export const TOOL_OUTPUT_MAX_PENDING_ALIAS_RESTORES = 50;
 export const TOOL_OUTPUT_ALIAS_MATERIALIZATION_RETRY_DELAY_MS = 200;
 // Failed alias materializations are retried indefinitely (with capped
 // exponential backoff) because a later turn may install working persistence;
 // dropping them would permanently lose the branch-owned durable copy.
 const TOOL_OUTPUT_ALIAS_MATERIALIZATION_MAX_RETRY_DELAY_MS = 30_000;
 export const TOOL_OUTPUT_MAX_PENDING_ALIAS_MATERIALIZATIONS = 50;
+/**
+ * Alias restore requests evicted from the pending-restore cap that are kept
+ * staged (not retried) instead of being silently dropped: `setPersistence`
+ * requeues them when a healthy `restore` is (re)installed, so the affected
+ * branch can still be repaired. Sources pruned while a request is stalled are
+ * discarded rather than requeued — their durable records are gone and every
+ * retry would fail permanently.
+ */
+export const TOOL_OUTPUT_MAX_STALLED_ALIAS_RESTORES = 50;
 const TOOL_OUTPUT_LIFECYCLE_BLOOM_BITS = 1 << 22;
 const TOOL_OUTPUT_LIFECYCLE_BLOOM_HASHES = 4;
 
@@ -147,6 +156,12 @@ interface PendingAliasMaterialization {
   attempts: number;
 }
 
+export interface AliasRestoreRequest {
+  sourceChatSessionId: string;
+  targetChatSessionId: string;
+  handleIds: string[];
+}
+
 export interface ToolOutputStoreOptions {
   maxHandleChars?: number;
   maxHandlesPerSession?: number;
@@ -209,11 +224,13 @@ export class ToolOutputStore {
   // cannot run yet: persistence installs on the first turn (for example undo
   // immediately after an app restart), or `restore` just rejected transiently.
   // Retried with capped backoff (and replayed once persistence appears).
-  private readonly pendingAliasRestores = new Map<string, {
-    sourceChatSessionId: string;
-    targetChatSessionId: string;
-    handleIds: string[];
-  }>();
+  private readonly pendingAliasRestores = new Map<string, AliasRestoreRequest>();
+  // Requests evicted from the pending-restore cap above. They keep their
+  // recoverable source→branch relationship (instead of being dropped, which
+  // would leave a branch that can never resolve a retained output even after
+  // the store becomes healthy again) and are requeued the next time a working
+  // persistence is installed.
+  private readonly stalledAliasRestores = new Map<string, AliasRestoreRequest>();
   private pendingAliasRestoreReplayTimer?: ReturnType<typeof setTimeout>;
   private pendingAliasRestoreReplayAttempts = 0;
   // Alias passes still running for a source chat session; `prune` waits for
@@ -275,6 +292,7 @@ export class ToolOutputStore {
       // A fresh (possibly repaired) persistence closure was installed; failed
       // restore attempts before it do not reflect its health.
       this.pendingAliasRestoreReplayAttempts = 0;
+      this.requeueStalledAliasRestores();
       this.replayPendingAliasRestores();
     }
     if (persistence?.write && this.pendingAliasMaterializations.size > 0) {
@@ -351,6 +369,11 @@ export class ToolOutputStore {
           this.pendingAliasRestoreReplayAttempts = this.pendingAliasRestores.size > 0
             ? this.pendingAliasRestoreReplayAttempts + 1
             : 0;
+          // Once the queue fully drains (all restores that had a chance to
+          // run either landed or were dropped as missing), bring back
+          // requests that the pending-restore cap had stalled, so a branch
+          // evicted earlier is still repaired after the store turns healthy.
+          if (this.pendingAliasRestores.size === 0) this.requeueStalledAliasRestores();
           this.notifyAliasRestoreWaiters();
           this.schedulePendingAliasRestoreReplay();
         });
@@ -562,8 +585,49 @@ export class ToolOutputStore {
     while (this.pendingAliasRestores.size > TOOL_OUTPUT_MAX_PENDING_ALIAS_RESTORES) {
       const oldest = this.pendingAliasRestores.keys().next().value;
       if (oldest === undefined) break;
+      const request = this.pendingAliasRestores.get(oldest);
       this.pendingAliasRestores.delete(oldest);
+      if (!request) continue;
+      // Keep the source→branch relationship recoverable instead of silently
+      // abandoning it: the branch has no in-memory alias and no branch-owned
+      // durable manifest, so dropping the request outright would leave its
+      // retained references unresolvable forever, even after the store turns
+      // healthy again. A pruned source (or an overflowing stall queue) is past
+      // repair, so those are dropped.
+      this.stalledAliasRestores.set(oldest, request);
+      while (this.stalledAliasRestores.size > TOOL_OUTPUT_MAX_STALLED_ALIAS_RESTORES) {
+        const stalledOldest = this.stalledAliasRestores.keys().next().value;
+        if (stalledOldest === undefined) break;
+        this.stalledAliasRestores.delete(stalledOldest);
+      }
     }
+  }
+
+  /**
+   * Requeue alias restore requests that the pending-restore cap had evicted.
+   * Runs when a working `restore` is (re)installed; requests whose source chat
+   * was pruned meanwhile stay dropped because their durable records are gone.
+   */
+  private requeueStalledAliasRestores(): void {
+    if (this.stalledAliasRestores.size === 0) return;
+    for (const [key, request] of [...this.stalledAliasRestores]) {
+      this.stalledAliasRestores.delete(key);
+      if (this.lifecycleDenyFilter.has(`chat:${request.sourceChatSessionId}`)) continue;
+      const existing = this.pendingAliasRestores.get(key);
+      if (existing) {
+        existing.handleIds.push(
+          ...request.handleIds.filter(id => !existing.handleIds.includes(id)),
+        );
+        continue;
+      }
+      // Re-queued requests go behind the entries that are still queued: the
+      // cap evicts from the front (the oldest), so a re-queued request placed
+      // in front would immediately evict itself back out again.
+      this.pendingAliasRestores.set(key, request);
+    }
+    this.enforcePendingAliasRestoresLimit();
+    this.schedulePendingAliasRestoreReplay();
+    this.notifyAliasRestoreWaiters();
   }
 
   /**

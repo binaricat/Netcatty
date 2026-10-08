@@ -5,6 +5,7 @@ import {
   TOOL_OUTPUT_MAX_CLOSED_TERMINAL_SESSIONS,
   TOOL_OUTPUT_MAX_FAILED_SESSION_DELETIONS,
   TOOL_OUTPUT_MAX_PENDING_ALIAS_MATERIALIZATIONS,
+  TOOL_OUTPUT_MAX_PENDING_ALIAS_RESTORES,
   TOOL_OUTPUT_READ_MAX_CHARS,
   type PersistedToolOutputRecord,
   type ToolOutputPersistence,
@@ -1619,3 +1620,65 @@ function storeDurableRecord(
     accessedAt: 0,
   }, content);
 }
+
+test('alias restore requests evicted at the pending cap are requeued once persistence installs', async () => {
+  const base = createFakeToolOutputPersistence();
+  const persistence: ToolOutputPersistence & { entries: typeof base.entries } = {
+    ...base,
+    restore: async (handleId, chatSessionId) => {
+      // Only the pair stalls with a durable record; every other request finds
+      // nothing (dropped, not re-queued) once it gets to run.
+      if (chatSessionId === 'chat-source-1') return base.restore(handleId, chatSessionId);
+      return null;
+    },
+  };
+  storeDurableRecord(persistence, 'chat-source-1', 'h1', 'persisted content', 16);
+
+  const store = new ToolOutputStore();
+  // No persistence is installed yet, so every alias pass defers its restore
+  // request; adding one pair beyond the cap stalls the oldest request while
+  // keeping its source→branch relationship instead of dropping it silently.
+  for (let index = 1; index <= TOOL_OUTPUT_MAX_PENDING_ALIAS_RESTORES + 1; index += 1) {
+    await store.aliasSessionHandles(`chat-source-${index}`, `chat-branch-${index}`, {
+      retainedHandleIds: new Set([`h${index}`]),
+    });
+  }
+  assert.equal(await store.readChunkAsync({ handleId: 'h1' }, 'chat-branch-1'), null);
+
+  // Installing working persistence repairs even the stalled request: the
+  // branch can read the retained output again.
+  store.setPersistence(persistence);
+  await new Promise(resolve => setTimeout(
+    resolve,
+    TOOL_OUTPUT_ALIAS_MATERIALIZATION_RETRY_DELAY_MS * 6 + 100,
+  ));
+  const restored = await store.readChunkAsync({ handleId: 'h1' }, 'chat-branch-1');
+  assert.equal(restored?.content, 'persisted content');
+  assert.ok(persistence.entries.has('chat-branch-1:h1'));
+  // The branch never had a durable record for the other pairs' handles.
+  assert.equal(await store.readChunkAsync({ handleId: 'h2' }, 'chat-branch-2'), null);
+});
+
+test('alias restore requests stalled past the cap are not requeued for a pruned source', async () => {
+  const persistence = createFakeToolOutputPersistence();
+  storeDurableRecord(persistence, 'chat-source-1', 'h1', 'persisted content', 16);
+
+  const store = new ToolOutputStore();
+  for (let index = 1; index <= TOOL_OUTPUT_MAX_PENDING_ALIAS_RESTORES + 1; index += 1) {
+    await store.aliasSessionHandles(`chat-source-${index}`, `chat-branch-${index}`, {
+      retainedHandleIds: new Set([`h${index}`]),
+    });
+  }
+  // Pruning the stalled request's source deletes the durable records it would
+  // have to restore from, so the request is not requeued: restore would fail
+  // permanently for that chat.
+  store.prune('chat-source-1');
+
+  store.setPersistence(persistence);
+  await new Promise(resolve => setTimeout(
+    resolve,
+    TOOL_OUTPUT_ALIAS_MATERIALIZATION_RETRY_DELAY_MS * 4 + 100,
+  ));
+  assert.equal(store.get('h1', 'chat-branch-1'), undefined);
+  assert.equal(await store.readChunkAsync({ handleId: 'h1' }, 'chat-branch-1'), null);
+});
