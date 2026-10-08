@@ -367,6 +367,50 @@ test("promotion fails closed for a restrictive destination on a chmod- and hardl
   assert.equal(fs.existsSync(staged), true);
 });
 
+test("copyFileExclusiveWithFallback keeps an accelerated copy that already has the requested mode on a chmod-refusing mount", async (t) => {
+  const dir = makeTempDir("copy-fallback-matching-mode-");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const source = path.join(dir, "staged");
+  const target = path.join(dir, "target");
+  const payload = Buffer.alloc(64 * 1024, 15);
+  fs.writeFileSync(source, payload, { mode: 0o664 });
+  fs.chmodSync(source, 0o664);
+  const originalCopyFile = fs.promises.copyFile;
+  const restore = stubPromises("copyFile", async () => {
+    // Simulate the accelerated path: copyFile succeeds and preserves the
+    // source's 0644 mode.
+    return originalCopyFile.call(fs.promises, source, target, fs.constants.COPYFILE_EXCL);
+  });
+  const chmodRestore = stubPromises("chmod", async () => {
+    throw Object.assign(new Error("ENOTSUP: operation not supported"), { code: "ENOTSUP" });
+  });
+  // Refuse chmod through the owned handle as well, like gvfsd-fuse mounts.
+  const handleChmodRestore = makeHandleStub(
+    "chmod",
+    Object.assign(new Error("ENOTSUP: operation not supported"), { code: "ENOTSUP" }),
+  );
+  // A restrictive umask must not matter: the accelerated copy already carries
+  // the requested mode, so no stream re-creation (whose open() would be
+  // umask-narrowed to 0600) may happen.
+  const previousUmask = process.umask(0o077);
+  t.after(() => process.umask(previousUmask));
+  t.after(restore);
+  t.after(chmodRestore);
+  t.after(handleChmodRestore);
+  await copyFileExclusiveWithFallback(source, target, 0o664);
+  assert.ok(fs.readFileSync(target).equals(payload));
+  assert.equal(
+    fs.statSync(target).mode & 0o777,
+    0o664,
+    "the accelerated copy that already matches the requested mode is kept",
+  );
+  assert.equal(
+    fs.readdirSync(dir).filter((name) => name.startsWith(path.basename(target) + ".stale-")).length,
+    0,
+    "the kept copy is never relabelled aside",
+  );
+});
+
 test("copyFileExclusiveWithFallback applies restrictive creation mode to the streamed fallback", async (t) => {
   const dir = makeTempDir("copy-fallback-mode-");
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -740,6 +784,11 @@ test("promoteLocalTransfer preserves a ready pathname whose ownership the fallba
   const staged = path.join(dir, "staged");
   const target = path.join(dir, "target");
   fs.writeFileSync(staged, "our copy bytes");
+  // The staged mode must differ from the destination's existing mode: an
+  // accelerated copy that already carries the requested mode is kept on a
+  // chmod-refusing mount (see the matching-mode test above), so only a
+  // mode-mismatched accelerated copy reaches the relabel-then-verify branch.
+  fs.chmodSync(staged, 0o644);
   fs.writeFileSync(target, "original");
   // Force the EXDEV staging rename so the fallback copy creates the private
   // ready pathname, then refuse chmod so the relabel-then-verify branch runs.
@@ -774,7 +823,7 @@ test("promoteLocalTransfer preserves a ready pathname whose ownership the fallba
   t.after(lstatRestore);
   let error = null;
   try {
-    await transferBridge._promoteLocalTransferForTests(staged, target, {});
+    await transferBridge._promoteLocalTransferForTests(staged, target, { existingMode: 0o600 });
   } catch (thrown) {
     error = thrown;
   }

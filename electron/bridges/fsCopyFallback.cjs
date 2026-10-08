@@ -163,9 +163,29 @@ async function copyFileExclusiveWithFallback(source, target, mode = null, option
       return;
     } catch (error) {
       if (!isMetadataUnsupportedError(error)) throw error;
+      // The accelerated copy preserves the source's mode. When it already
+      // carries the requested mode, discarding it to recreate the data
+      // through `open(..., creationMode)` would only expose the copy to the
+      // process umask (a 0664 requested mode can become 0600, and the second
+      // chmod refusal then turns a transfer that already succeeded into a
+      // hard EPERM failure). Stat the accelerated result instead and keep it
+      // when its identity is still the one pinned before the refused chmod
+      // and its mode already equals the requested one.
+      let keptStat = null;
+      try {
+        keptStat = await fs.promises.lstat(target);
+      } catch { keptStat = null; }
+      if (
+        copiedIdentity !== null
+        && keptStat !== null
+        && fileIdentity(keptStat) === copiedIdentity
+        && (keptStat.mode & 0o7777) === creationMode
+      ) {
+        return;
+      }
     }
-    // The accelerated copy preserved the source's mode and this mount refuses
-    // chmod, so the intended mode can never be applied to it afterwards.
+    // Otherwise the accelerated copy does not carry the requested mode and
+    // this mount refuses chmod, so the intended mode can never be applied to
     // Replace it with a streamed copy whose creation mode carries the
     // intended (no broader than requested) bits.
     // Relabel-then-verify instead of check-then-unlink: `rename` moves
