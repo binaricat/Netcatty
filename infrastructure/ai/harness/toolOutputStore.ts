@@ -443,24 +443,35 @@ export class ToolOutputStore {
     // still reads): when the quota is already full, the oldest unprotected
     // pre-existing handle (mirroring the plain `store()` eviction policy)
     // absorbs the overflow instead. When the protected set itself exceeds
-    // the quota (e.g. a very small `maxHandlesGlobal`), the pass above
-    // cannot finish the job; deferring the rebalance to the next plain
-    // `store()` would let its oldest-first sweep — run without protection
-    // and with the source and its clone sharing the same older `accessedAt`
-    // — evict *both* copies before the newly stored handle, killing the
-    // handle in the fork and the original conversation at once. So a
-    // follow-up unprotected pass resolves the overshoot right here: the two
-    // copies still coexist, the borrow protection keeps the durable owner
-    // alive when a clone aliases its path, and at most one copy per handle
-    // id is sacrificed (the pass breaks as soon as the quota is met, so the
-    // twin the other session reads survives).
-    this.enforceGlobalLimits(new Set([
+    // the quota (e.g. a very small `maxHandlesGlobal`), no eviction can
+    // admit the clones without destroying output a live conversation still
+    // resolves: dropping one copy would either delete the source-owned file
+    // the original conversation reads, or — when the clone is a borrowed
+    // alias — leave the fork publishing a handle id that immediately
+    // misses. Refuse the fork instead: roll back the fresh clones so the
+    // registry returns to its pre-fork (compliant) state, keeping the
+    // source record intact. The fork's retained messages then miss on
+    // `tool_output_read`, but no existing conversation's output is
+    // invalidated.
+    const withinQuota = this.enforceGlobalLimits(new Set([
       ...selected.map(([, handle]) => handle),
       ...freshClones,
     ]));
-    // A no-op when the protected pass already brought the registry within
-    // quota; otherwise trims it immediately as described above.
-    this.enforceGlobalLimits();
+    if (!withinQuota) {
+      // The fresh clones own no durable files yet (their spills happen below),
+      // so removing them deletes nothing and retires no borrow aliases.
+      for (const clone of freshClones) {
+        if (targetMap.get(clone.id) === clone) targetMap.delete(clone.id);
+      }
+      if (targetMap.size === 0) {
+        this.bySession.delete(targetChatSessionId);
+      } else {
+        this.bySession.set(targetChatSessionId, targetMap);
+      }
+      // The registry the clones were added to was within quota, so rolling
+      // them back is guaranteed to restore compliance; no further eviction
+      // pass runs here.
+    }
     // Copies still holding in-memory content (fresh or read-back) become
     // target-owned through the normal spill path, which re-writes a durable
     // record carrying the target's chat session id. Await the writes so the
@@ -688,16 +699,19 @@ export class ToolOutputStore {
     }
   }
 
-  private enforceGlobalLimits(protect?: ReadonlySet<ToolOutputHandle>): void {
+  private enforceGlobalLimits(protect?: ReadonlySet<ToolOutputHandle>): boolean {
+    // Returns true when the loop ends with the registry within quota, and
+    // false when every remaining entry is protected and the registry is still
+    // over quota (the caller decides what to sacrifice, if anything).
     const allHandles = () => [...this.bySession.entries()].flatMap(([chatSessionId, sessionMap]) => (
       [...sessionMap.values()].map(handle => ({ chatSessionId, sessionMap, handle }))
     ));
     while (true) {
       const entries = allHandles();
       const totalChars = entries.reduce((sum, entry) => sum + entry.handle.storedChars, 0);
-      if (entries.length <= this.maxHandlesGlobal && totalChars <= this.maxCharsGlobal) break;
+      if (entries.length <= this.maxHandlesGlobal && totalChars <= this.maxCharsGlobal) return true;
       const oldest = this.pickEvictionEntry(entries, protect);
-      if (!oldest) break;
+      if (!oldest) return false;
       oldest.sessionMap.delete(oldest.handle.id);
       this.evictHandle(oldest.handle);
       if (oldest.sessionMap.size === 0) this.bySession.delete(oldest.chatSessionId);
