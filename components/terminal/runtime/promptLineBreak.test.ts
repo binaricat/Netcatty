@@ -1250,11 +1250,26 @@ test("cwd completion arms on every invalidated submission and publishes only for
   // ...and it never consumes markers that belong to OSC 133 confirmation.
   markTerminalCwdCompletionPending(stateRef);
   state.shellCompletionProtocolSeen = true;
-  assert.equal(drainTerminalCwdCompletions(createFakeTerm("$ ") as never, state), false);
+  assert.equal(drainTerminalCwdCompletions(createFakeTerm("$ echo pending") as never, state), false, "a prompt with user input is not evidence the protocol fell silent");
   assert.equal(state.pendingCwdCompletions, 1, "OSC 133 shells keep the marker for the authoritative D");
+  // A bare prompt for a single outstanding command without its D marker means
+  // the shell stopped reporting completions (nested non-integrated shell), so
+  // the heuristic fallback degrades the protocol flag and confirms.
+  assert.equal(drainTerminalCwdCompletions(createFakeTerm("$ ") as never, state), true);
+  assert.equal(state.pendingCwdCompletions, 0);
+  assert.equal(state.shellCompletionProtocolSeen, false, "a bare prompt with an outstanding completion degrades the protocol flag");
+
+  // ...but the protocol stays intact while no bare prompt arrives.
+  markTerminalCwdCompletionPending(stateRef);
+  state.shellCompletionProtocolSeen = true;
+  assert.equal(drainTerminalCwdCompletions(createFakeTerm("$ echo pending") as never, state), false);
+  assert.equal(state.pendingCwdCompletions, 1);
+  assert.equal(state.shellCompletionProtocolSeen, true, "non-prompt output must not degrade the protocol flag");
   state.shellCompletionProtocolSeen = false;
+  assert.equal(drainTerminalCwdCompletions(createFakeTerm("$ ") as never, state), true);
 
   // A single outstanding command still confirms at an empty prompt.
+  markTerminalCwdCompletionPending(stateRef);
   assert.equal(drainTerminalCwdCompletions(createFakeTerm("$ echo pending") as never, state), false);
   assert.equal(state.pendingCwdCompletions, 1);
   assert.equal(drainTerminalCwdCompletions(createFakeTerm("$ ") as never, state), true);

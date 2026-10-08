@@ -650,11 +650,17 @@ const writeSessionDataImmediate = (
       const cwdConfirmed = drainTerminalCwdCompletions(term, promptLineBreakState) && completed <= 1;
       const cwdRepublish = consumeTerminalCwdRepublish(term, promptLineBreakState);
       const publishCwd = (cwdConfirmed || cwdRepublish) && completed <= 1;
+      // A plain-prompt fallback confirmation can be forged by prompt-shaped
+      // command output (e.g. `printf '$ '; sleep 2; cd /tmp`) before the
+      // command finishes, so the backend read it arms must publish as
+      // untrusted; the armed one-shot re-probe (and OSC 133;D confirmations)
+      // still publish trusted after the real prompt arrives.
+      const cwdTrusted = publishCwd ? Boolean(!cwdConfirmed || cwdRepublish) : undefined;
       for (let index = 0; index < completed; index += 1) {
-        ctx.onCommandCompleted?.(index === 0 && publishCwd);
+        ctx.onCommandCompleted?.(index === 0 && publishCwd, index === 0 && publishCwd ? cwdTrusted : undefined);
       }
       if (completed === 0 && publishCwd) {
-        ctx.onCommandCompleted?.(true);
+        ctx.onCommandCompleted?.(true, cwdTrusted);
       }
       if (cwdConfirmed && promptLineBreakState) {
         // The plain-prompt fallback is heuristic: command output can forge a

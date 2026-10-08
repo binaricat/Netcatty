@@ -66,6 +66,7 @@ for (const mode of ["osc133", "osc7", "prompt"]) {
     let received = "";
     let prompts = "";
     let cwd: string | null = null;
+    let cwdSource: string | undefined;
     let probes = 0;
     let completions = 0;
     const signals = { current: new Map<string, number>() };
@@ -92,7 +93,10 @@ for (const mode of ["osc133", "osc7", "prompt"]) {
         },
       },
       classifyDistroId: () => "linux", shouldProbeSessionCwd: () => true,
-      handleTerminalCwdChange: (_session: string, path: string) => { cwd = path; },
+      handleTerminalCwdChange: (_session: string, path: string, meta?: { source?: string }) => {
+        cwd = path;
+        cwdSource = meta?.source;
+      },
     });
     shell.stderr.on("data", (chunk: Buffer) => {
       if (mode !== "prompt") return;
@@ -114,9 +118,12 @@ for (const mode of ["osc133", "osc7", "prompt"]) {
         // fallback confirmation arms a one-shot re-check afterward.
         const count = detectTerminalCommandCompletions(prompt as never, pending.current);
         const cwdConfirmed = drainTerminalCwdCompletions(prompt as never, pending.current) && count <= 1;
-        const publishCwd = (cwdConfirmed || consumeTerminalCwdRepublish(prompt as never, pending.current)) && count <= 1;
+        const republish = consumeTerminalCwdRepublish(prompt as never, pending.current);
+        const publishCwd = (cwdConfirmed || republish) && count <= 1;
         if (publishCwd) {
-          completed("session");
+          // Mirror the trust channels: a forgeable plain-prompt fallback
+          // publishes untrusted, the armed re-check publishes trusted.
+          completed("session", !cwdConfirmed || republish);
           if (cwdConfirmed) pending.current.cwdRepublishPending = true;
         }
       }
@@ -141,7 +148,7 @@ for (const mode of ["osc133", "osc7", "prompt"]) {
           markOsc133CompletionProtocol("D", pending.current);
           const cwdDone = consumeOsc133CwdCompletion("D", pending.current);
           consumeOsc133CommandCompletion("D", pending.current);
-          if (cwdDone) completed("session");
+          if (cwdDone) completed("session", true);
         }
       }
     });
@@ -161,6 +168,11 @@ for (const mode of ["osc133", "osc7", "prompt"]) {
       assert.equal(cwd, null);
       writeFileSync(firstGate, "release");
       await waitUntil(() => cwd === first);
+      if (mode === "osc133") {
+        assert.equal(cwdSource, "backend-strict", "OSC 133;D confirmations publish trusted");
+      } else if (mode === "prompt") {
+        assert.equal(cwdSource, "backend", "prompt-shaped fallback publications stay untrusted until the re-probe");
+      }
       for (const command of ["cd .", `cd '${home}/does-not-exist'`]) {
         submit(command);
         await waitUntil(() => cwd === first);
@@ -201,3 +213,46 @@ for (const mode of ["osc133", "osc7", "prompt"]) {
     }
   });
 }
+
+test("completion re-probe replacement cancels the previous pending probe", () => {
+  const scheduled: unknown[] = [];
+  const cancelled = new Set<number>();
+  const { submitted, completed } = makeCallbacks({
+    useCallback: (callback: unknown) => callback,
+    codingCliSignalController: { handleCommandSubmitted() {} },
+    cwdProbeGenerationRef: { current: new Map<string, number>() },
+    cwdProbeCancelersRef: { current: new Map<string, () => void>() },
+    cwdProbeCommandSignalRef: { current: new Map<string, number>() },
+    activeTabIdRef: { current: "session" },
+    sessionsRef: { current: [{ id: "session" }] } as never,
+    canReuseTerminalConnection: () => true,
+    sessionHostsMapRef: { current: new Map([["session", { sftpFollowTerminalCwd: true }]]) } as never,
+    sidePanelLayoutHasTool: () => true,
+    sidePanelLayoutsRef: { current: new Map() } as never,
+    sftpHostForTabRef: { current: new Map([["session", { sftpFollowTerminalCwd: true }]]) } as never,
+    shouldProbeCommandCwd, restoreTerminalCwd: true, sftpFollowTerminalCwdRef: { current: true },
+    hostRestrictsExtraSshChannels: () => false,
+    terminalOsc7SignalBySessionRef: { current: new Map<string, number>() },
+    scheduleBackendCwdProbeAfterCommand: (options: unknown) => {
+      scheduled.push(options);
+      return () => { cancelled.add(scheduled.indexOf(options)); };
+    },
+    terminalBackend: {
+      getSessionRemoteInfo: async () => ({ remoteSshVersion: "OpenSSH_fixture" }),
+      getSessionPwd: async () => ({ success: true, cwd: null }),
+    },
+    classifyDistroId: () => "linux", shouldProbeSessionCwd: () => true,
+    handleTerminalCwdChange: () => {},
+  });
+
+  submitted("cd /tmp", "host", "fixture", "session");
+  // A forged prompt confirms a fallback publication; the later real prompt
+  // arms the re-probe. The replacement must cancel the still-pending probe so
+  // only the newest backend read stays eligible under the same generation.
+  completed("session");
+  completed("session");
+  completed("session");
+  assert.equal(scheduled.length, 3, "each confirmed completion schedules a probe");
+  assert.ok(cancelled.has(scheduled.indexOf(scheduled[0])) && cancelled.has(scheduled.indexOf(scheduled[1])), "every replaced probe is cancelled");
+  assert.ok(!cancelled.has(scheduled.indexOf(scheduled[2])), "the newest probe stays eligible");
+});

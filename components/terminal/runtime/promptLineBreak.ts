@@ -25,10 +25,13 @@ export type PromptLineBreakState = {
    */
   cwdRepublishPending: boolean;
   /**
-   * Set once the shell sends an OSC 133;D completion marker. From then on the
-   * plain prompt fallback never publishes cwd — OSC 133 completions are the
-   * only signal prompt-shaped command output cannot forge (other OSC 133
-   * payloads can be forged by arbitrary command output).
+   * Set while the shell keeps sending OSC 133;D completion markers. While it
+   * holds, the plain prompt fallback never publishes cwd — OSC 133 completions
+   * are the only signal prompt-shaped command output cannot forge (other OSC
+   * 133 payloads can be forged by arbitrary command output). The flag degrades
+   * back to heuristic fallback when a bare prompt arrives for an outstanding
+   * command without its D marker (e.g. after stepping into a nested
+   * non-integrated shell), and re-arms on the next D marker.
    */
   shellCompletionProtocolSeen: boolean;
 };
@@ -553,19 +556,31 @@ export function consumeOsc133CwdCompletion(
 
 /**
  * Plain-prompt fallback for cwd completion. Publishes only for a single
- * outstanding command and only while the shell has shown no OSC 133
- * completion protocol (whose D sequence is authoritative). Prompt-shaped
- * command output cannot be told apart from a real prompt here, so the
- * confirmation stays heuristic without OSC 133 and callers keep a re-probe
- * armed to self-correct.
+ * outstanding command and only while the shell shows no OSC 133 completion
+ * protocol (whose D sequence is authoritative). Prompt-shaped command output
+ * cannot be told apart from a real prompt here, so the confirmation stays
+ * heuristic without OSC 133 and callers keep a re-probe armed to
+ * self-correct.
+ *
+ * The protocol flag also degrades when a bare prompt arrives for a single
+ * outstanding command without its D marker: the shell may have stopped
+ * reporting completions after the operator stepped into a nested
+ * non-integrated shell (sh, su, sudo -s), where the pending completion would
+ * otherwise never drain. A later D marker re-arms the protocol.
  */
 export function drainTerminalCwdCompletions(
   term: XTerm,
   state: PromptLineBreakState | undefined,
 ): boolean {
   if (!state || state.pendingCwdCompletions < 1) return false;
-  if (state.shellCompletionProtocolSeen) return false;
-  if (!isAtEmptyPromptForCompletion(term)) return false;
+  if (state.shellCompletionProtocolSeen) {
+    if (state.pendingCwdCompletions !== 1 || !isAtEmptyPromptForCompletion(term)) {
+      return false;
+    }
+    state.shellCompletionProtocolSeen = false;
+  } else if (!isAtEmptyPromptForCompletion(term)) {
+    return false;
+  }
   const outstanding = state.pendingCwdCompletions;
   state.pendingCwdCompletions = 0;
   return outstanding === 1;

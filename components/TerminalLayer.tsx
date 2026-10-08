@@ -1360,12 +1360,16 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
     );
   }, [codingCliSignalController, restoreTerminalCwd, sidePanelLayoutsRef]);
 
-  const handleCommandCompleted = useCallback((sessionId: string) => {
+  const handleCommandCompleted = useCallback((sessionId: string, cwdConfirmedTrusted?: boolean) => {
     const osc7SignalAtCommand = cwdProbeCommandSignalRef.current.get(sessionId);
     if (osc7SignalAtCommand === undefined) return;
     // Keep the baseline signal: a confirmed fallback publication also arms a
     // one-shot re-probe so a real prompt after prompt-shaped command output
     // can correct the published cwd. The next submission resets the baseline.
+    // A replaced re-probe must not stay eligible under the same generation:
+    // cancel it before storing the replacement so only the newest backend
+    // read can publish under this command's generation.
+    cwdProbeCancelersRef.current.get(sessionId)?.();
     const probeGeneration = cwdProbeGenerationRef.current.get(sessionId);
     const cancelProbe = scheduleBackendCwdProbeAfterCommand({
       sessionId,
@@ -1388,7 +1392,12 @@ const TerminalLayerInner: React.FC<TerminalLayerProps> = ({
       },
       onProbedCwd: (cwd) => {
         if (cwdProbeGenerationRef.current.get(sessionId) !== probeGeneration) return;
-        handleTerminalCwdChange(sessionId, cwd, { source: 'backend-strict' });
+        // Only authoritative confirmations (OSC 133;D, the armed one-shot
+        // re-probe) publish trusted; a forgeable plain-prompt fallback
+        // publication stays untrusted until the re-probe corrects it.
+        handleTerminalCwdChange(sessionId, cwd, {
+          source: cwdConfirmedTrusted === true ? 'backend-strict' : 'backend',
+        });
       },
     });
     cwdProbeCancelersRef.current.set(sessionId, cancelProbe);

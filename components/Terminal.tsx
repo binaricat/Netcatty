@@ -2424,14 +2424,15 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     const [command, hostId, hostLabel, submittedSessionId] = args;
     onCommandSubmitted?.(command, hostId, hostLabel, submittedSessionId);
   }, [host, onCommandSubmitted, onTerminalCwdChange, sessionId, terminalCwdTracker]);
-  const pluginAwareOnCommandCompleted = useCallback((cwdCompletionConfirmed?: boolean) => {
+  const pluginAwareOnCommandCompleted = useCallback((cwdCompletionConfirmed?: boolean, cwdConfirmedTrusted?: boolean) => {
     pluginTerminalLifecycle.onCommandCompleted();
     void xtermRuntimeRef.current?.pluginProviderHost?.commandCompleted();
     // The runtime only marks a completion confirmed when it finished the last
-    // outstanding cwd-invalidating command (OSC 133 D, or a single-prompt
-    // fallback that prompt-shaped output cannot forge).
+    // outstanding cwd-invalidating command (OSC 133 D, the armed one-shot
+    // re-probe, or a single-prompt fallback). cwdConfirmedTrusted distinguishes
+    // authoritative confirmations from the forgeable plain-prompt fallback.
     if (cwdCompletionConfirmed) {
-      onCommandCompleted?.(sessionId);
+      onCommandCompleted?.(sessionId, cwdConfirmedTrusted);
     }
   }, [onCommandCompleted, pluginTerminalLifecycle, sessionId]);
   const pluginAwareOnTerminalCwdChange = useCallback((

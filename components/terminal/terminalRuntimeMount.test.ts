@@ -242,7 +242,7 @@ test('normal boot and hibernate wake share terminal link error feedback', () => 
 
 test('normal and reactivated terminals forward completion only when it confirms outstanding cwd commands', () => {
   for (const source of [terminalSource, effectsSource]) {
-    assert.match(source, /if \(cwdCompletionConfirmed\) \{\s*onCommandCompleted\?\.\(sessionId\)/);
+    assert.match(source, /if \(cwdCompletionConfirmed\) \{\s*onCommandCompleted\?\.\(sessionId(?:, cwdConfirmedTrusted)?\)/);
   }
   // Every cwd-invalidating submission arms completion tracking, independent of
   // the plugin trust callback, so unconfirmed prompts (sftp> etc.) also publish.

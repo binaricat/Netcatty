@@ -369,7 +369,7 @@ export type CreateXTermRuntimeContext = {
     sessionId: string,
   ) => void;
   /** True only when this completion confirms the last outstanding cwd-invalidating command. */
-  onCommandCompleted?: (cwdCompletionConfirmed?: boolean) => void;
+  onCommandCompleted?: (cwdCompletionConfirmed?: boolean, cwdConfirmedTrusted?: boolean) => void;
   requestPluginTerminalProviders?: RequestPluginTerminalProviders;
   pluginProviderVisible?: boolean;
   isPluginTerminalProviderAvailable?: (kind: NetcattyTerminalProviderKind) => boolean;
@@ -3250,7 +3250,9 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
     const cwdCompleted = consumeOsc133CwdCompletion(data, ctx.promptLineBreakStateRef?.current);
     markOsc133CompletionProtocol(data, ctx.promptLineBreakStateRef?.current);
     if (commandCompleted || cwdCompleted) {
-      ctx.onCommandCompleted?.(cwdCompleted);
+      // An OSC 133;D-confirmed completion cannot be forged by prompt-shaped
+      // command output, so its backend read publishes with full trust.
+      ctx.onCommandCompleted?.(cwdCompleted, cwdCompleted ? true : undefined);
     }
     return true;
   });

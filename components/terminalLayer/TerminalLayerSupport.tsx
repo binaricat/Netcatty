@@ -818,7 +818,7 @@ interface TerminalPaneProps {
   onAddKnownHost?: (knownHost: KnownHost) => void;
   onCommandExecuted?: (command: string, hostId: string, hostLabel: string, sessionId: string) => void;
   onCommandSubmitted?: (command: string, hostId: string, hostLabel: string, sessionId: string) => void;
-  onCommandCompleted?: (sessionId: string) => void;
+  onCommandCompleted?: (sessionId: string, cwdConfirmedTrusted?: boolean) => void;
   onSetWorkspaceFocusedSession?: (workspaceId: string, sessionId: string) => void;
   onSplitSession?: (sessionId: string, direction: SplitDirection) => void;
   isBroadcastEnabled?: (workspaceId: string) => boolean;
@@ -1724,7 +1724,7 @@ interface TerminalPanesHostProps {
   onAddKnownHost?: (knownHost: KnownHost) => void;
   onCommandExecuted?: (command: string, hostId: string, hostLabel: string, sessionId: string) => void;
   onCommandSubmitted?: (command: string, hostId: string, hostLabel: string, sessionId: string) => void;
-  onCommandCompleted?: (sessionId: string) => void;
+  onCommandCompleted?: (sessionId: string, cwdConfirmedTrusted?: boolean) => void;
   onSetWorkspaceFocusedSession?: (workspaceId: string, sessionId: string) => void;
   onSplitSession?: (sessionId: string, direction: SplitDirection) => void;
   isBroadcastEnabled?: (workspaceId: string) => boolean;
