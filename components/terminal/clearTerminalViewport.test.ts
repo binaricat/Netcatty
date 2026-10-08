@@ -7,7 +7,6 @@ import {
   clearTerminalViewport,
   clearTerminalViewportAndSyncPty,
   installEraseInDisplayHandlers,
-  isDec2026SyncModeParams,
   isEraseBelowSequence,
   preserveTerminalViewportInScrollback,
   shouldPreserveViewportBeforeEraseBelow,
@@ -67,6 +66,7 @@ const createEraseHandlerHarness = (
   };
   const observedScrollRegions: Array<[number, number]> = [];
   const term = {
+    modes: { synchronizedOutputMode: options.inDec2026SyncBlock ?? false },
     rows: 5,
     options: {
       scrollOnEraseInDisplay: false,
@@ -119,7 +119,6 @@ const createEraseHandlerHarness = (
   };
   const disposable = installEraseInDisplayHandlers(term as never, {
     getClearWipesScrollback: () => options.clearWipesScrollback ?? false,
-    isInDec2026SyncBlock: () => options.inDec2026SyncBlock ?? false,
     scheduleMicrotask: (callback) => {
       microtasks.push(callback);
     },
@@ -322,7 +321,6 @@ test("erase-below wipe preserves later output from the same write batch", async 
   const term = new Terminal({ cols: 20, rows: 5, scrollback: 100 });
   const disposable = installEraseInDisplayHandlers(term as never, {
     getClearWipesScrollback: () => true,
-    isInDec2026SyncBlock: () => false,
   });
 
   await writeTerminal(term, "old1\r\nold2\r\nold3\r\nold4\r\nold5\r\nold6\r\nold7\r\nold8");
@@ -526,79 +524,39 @@ test("appendEraseScrollback still wipes when delayed clear is outside a sync blo
   );
 });
 
-test("isDec2026SyncModeParams matches the 2026 mode param anywhere in the list", () => {
-  assert.equal(isDec2026SyncModeParams([2026]), true);
-  assert.equal(isDec2026SyncModeParams([2026, 1]), true);
-  assert.equal(isDec2026SyncModeParams([25, 2026]), true);
-  assert.equal(isDec2026SyncModeParams([2026, 2004]), true);
-  assert.equal(isDec2026SyncModeParams([2004]), false);
-  assert.equal(isDec2026SyncModeParams([25]), false);
-  assert.equal(isDec2026SyncModeParams([1049]), false);
-  // Subparameter 2026 (`ESC[?25:2026h` -> [25, [2026]]) must be ignored:
-  // xterm's private-mode handlers act only on the primary param 25.
-  assert.equal(isDec2026SyncModeParams([25, [2026]]), false);
-  assert.equal(isDec2026SyncModeParams([[2026]]), false);
-  assert.equal(isDec2026SyncModeParams([]), false);
-});
-
-/**
- * Mirror of the `ESC[?…h/l` registration in createXTermRuntime: handlers must
- * be registered without a `params` field (xterm ignores it) and filter on the
- * callback params. This guards against re-introducing the bug that made bash's
- * `ESC[?2004h` set the DEC 2026 sync flag and drop scrollback on Ctrl+L.
- */
-const installDec2026SyncTracking = (
-  term: InstanceType<typeof Terminal>,
-): { isInDec2026SyncBlock: () => boolean } => {
-  let inDec2026SyncBlock = false;
-  term.parser.registerCsiHandler({ prefix: "?", final: "h" }, (params) => {
-    if (isDec2026SyncModeParams(params)) {
-      inDec2026SyncBlock = true;
-    }
-    return false;
-  });
-  term.parser.registerCsiHandler({ prefix: "?", final: "l" }, (params) => {
-    if (isDec2026SyncModeParams(params)) {
-      inDec2026SyncBlock = false;
-    }
-    return false;
-  });
-  return { isInDec2026SyncBlock: () => inDec2026SyncBlock };
-};
-
 const getScrollbackLines = (term: InstanceType<typeof Terminal>): string[] =>
   Array.from({ length: term.buffer.active.baseY }, (_, row) =>
     term.buffer.active.getLine(row)?.translateToString(true) ?? ""
   );
 
-test("private-mode handlers set the 2026 flag only for 2026", async () => {
+test("native synchronized-output mode ignores unrelated private modes", async () => {
   const term = new Terminal({ cols: 20, rows: 5, scrollback: 100 });
-  const sync = installDec2026SyncTracking(term);
 
   await writeTerminal(term, "\x1b[?2004h");
-  assert.equal(sync.isInDec2026SyncBlock(), false, "bracketed paste 2004 must not open a sync block");
+  assert.equal(term.modes.synchronizedOutputMode, false, "bracketed paste 2004 must not open a sync block");
 
   await writeTerminal(term, "\x1b[?25h\x1b[?1049h");
-  assert.equal(sync.isInDec2026SyncBlock(), false, "cursor/alt-screen modes must not open a sync block");
+  assert.equal(term.modes.synchronizedOutputMode, false, "cursor/alt-screen modes must not open a sync block");
 
-  await writeTerminal(term, "\x1b[?2026h");
-  assert.equal(sync.isInDec2026SyncBlock(), true);
+  await writeTerminal(term, "\x1b[?25:2026h");
+  assert.equal(term.modes.synchronizedOutputMode, false, "subparameters do not enable sync mode");
+
+  await writeTerminal(term, "\x1b[?25;2026h");
+  assert.equal(term.modes.synchronizedOutputMode, true, "combined primary modes enable sync mode");
 
   await writeTerminal(term, "\x1b[?2004l");
-  assert.equal(sync.isInDec2026SyncBlock(), true, "closing 2004 must not close the 2026 block");
+  assert.equal(term.modes.synchronizedOutputMode, true, "closing 2004 must not close the 2026 block");
 
   await writeTerminal(term, "\x1b[?2026l");
-  assert.equal(sync.isInDec2026SyncBlock(), false);
+  assert.equal(term.modes.synchronizedOutputMode, false);
 
   term.dispose();
 });
 
 test("Ctrl+L clear survives a bash prompt (2004 open, 2026 closed)", async () => {
   const term = new Terminal({ cols: 20, rows: 5, scrollback: 100 });
-  const sync = installDec2026SyncTracking(term);
   const erase = installEraseInDisplayHandlers(term as never, {
     getClearWipesScrollback: () => false,
-    isInDec2026SyncBlock: sync.isInDec2026SyncBlock,
   });
 
   // Exactly two rows already in scrollback, then a full screen of visible rows.
@@ -619,10 +577,8 @@ test("Ctrl+L clear survives a bash prompt (2004 open, 2026 closed)", async () =>
 
 test("clears inside a DEC 2026 sync block still erase in place", async () => {
   const term = new Terminal({ cols: 20, rows: 5, scrollback: 100 });
-  const sync = installDec2026SyncTracking(term);
   const erase = installEraseInDisplayHandlers(term as never, {
     getClearWipesScrollback: () => false,
-    isInDec2026SyncBlock: sync.isInDec2026SyncBlock,
   });
 
   await writeTerminal(term, "old1\r\nold2\r\nvis1\r\nvis2\r\nvis3\r\nvis4\r\nvis5");
@@ -636,3 +592,27 @@ test("clears inside a DEC 2026 sync block still erase in place", async () => {
   erase.dispose();
   term.dispose();
 });
+
+for (const [label, sequence, preservesViewport] of [
+  ["combined primary modes", "\x1b[?25;2026h", false],
+  ["subparameter only", "\x1b[?25:2026h", true],
+  ["explicit reset", "\x1b[?2026h\x1b[?2026l", true],
+] as const) {
+  test(`full erase uses native synchronized-output state for ${label}`, async () => {
+    const term = new Terminal({ cols: 20, rows: 5, scrollback: 100 });
+    const erase = installEraseInDisplayHandlers(term, {
+      getClearWipesScrollback: () => false,
+    });
+    try {
+      await writeTerminal(term, "old1\r\nold2\r\nvis1\r\nvis2\r\nvis3\r\nvis4\r\nvis5");
+      // The mode and erase arrive in separate PTY chunks, as with TUI redraws.
+      await writeTerminal(term, sequence);
+      await writeTerminal(term, "\x1b[H\x1b[2Jnew1");
+      assert.equal(getScrollbackLines(term).some((line) => line.startsWith("vis")), preservesViewport);
+      assert.equal(getScrollbackLines(term).some((line) => line.startsWith("old")), true);
+    } finally {
+      erase.dispose();
+      term.dispose();
+    }
+  });
+}

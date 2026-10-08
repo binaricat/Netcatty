@@ -3170,26 +3170,8 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   // OSC 7 format: \x1b]7;file://hostname/path\x07 or \x1b]7;file://hostname/path\x1b\\
   let currentCwd: string | undefined = undefined;
 
-  // DEC 2026 synchronized-output blocks make CSI 2 J erase in place for
-  // Codex/Claude Code TUIs instead of pushing visible rows into scrollback.
-  //
-  // Read xterm's own `modes.synchronizedOutputMode` instead of tracking
-  // DECSET/DECRST ourselves: xterm arms its synchronized-output safety timeout
-  // at the first buffered render (`SynchronizedOutputHandler.bufferRows`), not
-  // when processing `\x1b[?2026h`, and its timeout callback clears the same
-  // internal mode flag. Deriving from `term.modes` therefore tracks xterm's
-  // actual deadline exactly — a tracker armed at DECSET time would expire early
-  // if the first screen-changing output arrives more than one second later,
-  // misclassifying the subsequent CSI 2 J as an ordinary clear.
-  //
-  // Note the flag lives on the same parser pass: xterm's internal DEC private
-  // mode handler (registered before any of our custom handlers) flips the mode
-  // while `\x1b[?2026h` / `\x1b[?2026l` are parsed, so by the time a `CSI 2 J`
-  // handler runs the flag reflects the producer's current sync state.
-
   const eraseScrollbackDisposable = installEraseInDisplayHandlers(term, {
     getClearWipesScrollback: () => ctx.terminalSettingsRef.current?.clearWipesScrollback ?? true,
-    isInDec2026SyncBlock: () => term.modes.synchronizedOutputMode,
   });
 
   const markCursorPositionReportRequest = (params: readonly (number | number[])[]): boolean => {

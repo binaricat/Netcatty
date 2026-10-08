@@ -47,7 +47,6 @@ type AppendEraseScrollbackOptions = {
 
 type EraseInDisplayHandlerOptions = {
   getClearWipesScrollback: () => boolean;
-  isInDec2026SyncBlock: () => boolean;
   scheduleMicrotask?: (callback: () => void) => void;
 };
 
@@ -177,24 +176,6 @@ export const clearTerminalViewportAndSyncPty = (
 export const isEraseScrollbackSequence = (params: CsiParam[]): boolean =>
   params.length > 0 && params[0] === 3;
 
-/**
- * True when a CSI handler's params identify DEC private mode 2026
- * (synchronized output). Handlers for `ESC[?…h/l` must be registered without a
- * `params` field — xterm's IFunctionIdentifier ignores it — and filter on the
- * params passed to the callback instead.
- *
- * DECSET/DECRST can carry multiple semicolon-separated modes
- * (`ESC[?2026;25h`), so match 2026 among the top-level parameters.
- *
- * Ignore subparameters: an array in `toArray()` output is always the list of
- * subparameters of the preceding top-level param (e.g. `ESC[?25:2026h` yields
- * `[25, [2026]]`), and xterm's private-mode handlers iterate only over the
- * top-level params — a nested 2026 never enters synchronized-output mode, so
- * it must not flip this flag either.
- */
-export const isDec2026SyncModeParams = (params: CsiParam[]): boolean =>
-  params.some((param) => param === 2026);
-
 export const isEraseViewportSequence = (params: CsiParam[]): boolean =>
   params.length > 0 && params[0] === 2;
 
@@ -282,7 +263,6 @@ export const installEraseInDisplayHandlers = (
   term: EraseInDisplayTerminal,
   {
     getClearWipesScrollback,
-    isInDec2026SyncBlock,
     scheduleMicrotask = queueMicrotask,
   }: EraseInDisplayHandlerOptions,
 ): IDisposable => {
@@ -297,7 +277,8 @@ export const installEraseInDisplayHandlers = (
 
   const eraseDisposable = term.parser.registerCsiHandler({ final: "J" }, (params) => {
     const wipeAllowed = getClearWipesScrollback();
-    const inDec2026SyncBlock = isInDec2026SyncBlock();
+    // Use xterm's parsed mode, including its native safety timeout.
+    const inDec2026SyncBlock = term.modes.synchronizedOutputMode;
     // Scope xterm's native preservation to shell clears, not TUI redraws.
     if (isEraseViewportSequence(params)) {
       const useNativeScrollPreservation = shouldScrollOnEraseInDisplay(
