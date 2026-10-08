@@ -556,6 +556,15 @@ export interface VaultAgentApiDeps {
     ok: false;
     error: string;
   };
+  /**
+   * Find an existing terminal session for a vault host so `host.open` can
+   * reuse it instead of always opening a new tab. Reconnecting SSH tabs keep
+   * the same sessionId, so disconnected sessions must be matched too.
+   */
+  findExistingSessionForHost?: (hostId: string) => {
+    sessionId: string;
+    connected: boolean;
+  } | undefined;
   closeSession?: (sessionId: string) => {
     ok: true;
   } | {
@@ -584,6 +593,7 @@ async function registerOpenedSessionInMcpScope(
   sessionId: string,
   host: Host,
   chatSessionId?: string,
+  connected = false,
 ): Promise<void> {
   let bridge: ReturnType<typeof netcattyBridge.get> | undefined;
   try {
@@ -612,7 +622,7 @@ async function registerOpenedSessionInMcpScope(
     username: host.username || '',
     protocol,
     deviceType: host.deviceType || '',
-    connected: false,
+    connected,
     hostChain: [],
     activePortForwards: [],
   };
@@ -671,9 +681,6 @@ export async function handleVaultAgentOp(
       if (!hostId) return { ok: false, error: 'hostId is required.' };
       const host = deps.getHosts().find((entry) => entry.id === hostId);
       if (!host) return { ok: false, error: `Host "${hostId}" was not found.` };
-      if (typeof deps.openHost !== 'function') {
-        return { ok: false, error: 'Host open is not available in this window.' };
-      }
 
       const chatSessionId = typeof params.chatSessionId === 'string'
         ? params.chatSessionId
@@ -683,18 +690,55 @@ export async function handleVaultAgentOp(
       // not a reliable signal — compare against the constant instead.
       const isExternalMcpCall = chatSessionId === EXTERNAL_MCP_CHAT_SESSION_ID;
       const effectiveHost = deps.resolveEffectiveHost(host);
-      const opened = deps.openHost(effectiveHost, isExternalMcpCall);
-      if (!opened.ok) {
-        return { ok: false, error: opened.error };
-      }
-
-      await registerOpenedSessionInMcpScope(opened.sessionId, effectiveHost, chatSessionId);
 
       const protocol = effectiveHost.etEnabled
         ? 'et'
         : effectiveHost.moshEnabled
           ? 'mosh'
           : (effectiveHost.protocol || 'ssh');
+
+      // Reuse-first: a terminal tab keeps its sessionId across SSH
+      // auto-reconnect, so blindly opening a new tab stacks duplicate tabs
+      // (and steals focus) after every network blip. Reuse the live or
+      // reconnecting session for this host unless the caller forces a new tab.
+      const wantsNewTab = parseOptionalBoolean(params.newTab) ?? false;
+      const existing = !wantsNewTab
+        ? deps.findExistingSessionForHost?.(effectiveHost.id)
+        : undefined;
+      if (existing) {
+        await registerOpenedSessionInMcpScope(
+          existing.sessionId,
+          effectiveHost,
+          chatSessionId,
+          existing.connected,
+        );
+        return {
+          ok: true,
+          sessionId: existing.sessionId,
+          hostId: effectiveHost.id,
+          ...(isSavedVaultHost(effectiveHost) && protocol !== 'serial' && protocol !== 'local'
+            ? { savedHostId: effectiveHost.id }
+            : {}),
+          reused: true,
+          connected: existing.connected,
+          status: existing.connected ? 'connected' : 'reconnecting',
+          protocol,
+          host: summarizeHostForList(effectiveHost),
+          message:
+            'Reused the existing session for this host (same sessionId). If it is not connected yet, the tab is auto-reconnecting — wait briefly and use get_environment or terminal_execute against this sessionId. Do not call session_close on it unless the user asks; pass newTab true to force a separate tab instead.',
+        };
+      }
+
+      if (typeof deps.openHost !== 'function') {
+        return { ok: false, error: 'Host open is not available in this window.' };
+      }
+
+      const opened = deps.openHost(effectiveHost, isExternalMcpCall);
+      if (!opened.ok) {
+        return { ok: false, error: opened.error };
+      }
+
+      await registerOpenedSessionInMcpScope(opened.sessionId, effectiveHost, chatSessionId);
 
       return {
         ok: true,

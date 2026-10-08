@@ -496,6 +496,110 @@ describe('handleVaultAgentOp vault hosts', () => {
     ]);
   });
 
+  it('host.open reuses an existing session for the same host instead of opening a new tab', async (t) => {
+    const { netcattyBridge } = await import('../services/netcattyBridge');
+    const merged: Array<{ sessions: Array<{ sessionId: string; connected?: boolean }>; scope: string }> = [];
+    t.mock.method(netcattyBridge, 'get', () => ({
+      aiMcpMergeSessions: async (
+        sessions: Array<{ sessionId: string; connected?: boolean }>,
+        scope: string,
+      ) => {
+        merged.push({ sessions, scope });
+      },
+    } as unknown as NetcattyBridge));
+    const host: Host = {
+      id: 'host-reuse-1',
+      label: 'edge',
+      hostname: 'edge.example.com',
+      username: 'ops',
+      port: 22,
+    };
+    let openHostCalls = 0;
+    const deps = createDeps({
+      hosts: [host],
+      openHost: (hostToOpen: Host) => {
+        openHostCalls += 1;
+        return { ok: true, sessionId: `session-${hostToOpen.id}`, host: hostToOpen };
+      },
+      findExistingSessionForHost: (hostId: string) => hostId === host.id
+        ? { sessionId: 'session-existing-1', connected: false }
+        : undefined,
+    });
+
+    const result = await handleVaultAgentOp(
+      'host.open',
+      { hostId: host.id, chatSessionId: '__external_mcp__' },
+      deps,
+    );
+
+    assert.equal(result.ok, true);
+    assert.equal((result as { sessionId?: string }).sessionId, 'session-existing-1');
+    assert.equal((result as { reused?: boolean }).reused, true);
+    assert.equal((result as { status?: string }).status, 'reconnecting');
+    assert.equal(openHostCalls, 0, 'must not open a duplicate tab');
+    // The reused session is re-registered in the MCP scope with its live
+    // reconnecting state so terminal_execute can target it immediately.
+    assert.deepEqual(merged.map(({ sessions, scope }) => ({ scope, connected: sessions[0]?.connected })), [
+      { scope: '__external_mcp__', connected: false },
+    ]);
+  });
+
+  it('host.open reuse reports a connected session as connected', async () => {
+    const host: Host = { id: 'host-reuse-2', label: 'edge', hostname: 'edge.example.com' };
+    let openHostCalls = 0;
+    const deps = createDeps({
+      hosts: [host],
+      openHost: (hostToOpen: Host) => {
+        openHostCalls += 1;
+        return { ok: true, sessionId: `session-${hostToOpen.id}`, host: hostToOpen };
+      },
+      findExistingSessionForHost: (hostId: string) => hostId === host.id
+        ? { sessionId: 'session-existing-2', connected: true }
+        : undefined,
+    });
+
+    const result = await handleVaultAgentOp('host.open', { hostId: host.id }, deps);
+
+    assert.equal(result.ok, true);
+    assert.equal((result as { sessionId?: string }).sessionId, 'session-existing-2');
+    assert.equal((result as { status?: string }).status, 'connected');
+    assert.equal((result as { connected?: boolean }).connected, true);
+    assert.equal(openHostCalls, 0);
+  });
+
+  it('host.open newTab forces a fresh session even when one exists', async () => {
+    const host: Host = { id: 'host-reuse-3', label: 'edge', hostname: 'edge.example.com' };
+    const deps = createDeps({
+      hosts: [host],
+      findExistingSessionForHost: () => ({ sessionId: 'session-existing-3', connected: true }),
+    });
+
+    const result = await handleVaultAgentOp(
+      'host.open',
+      { hostId: host.id, newTab: 'true' },
+      deps,
+    );
+
+    assert.equal(result.ok, true);
+    assert.equal((result as { sessionId?: string }).sessionId, 'session-host-reuse-3');
+    assert.equal((result as { status?: string }).status, 'connecting');
+  });
+
+  it('host.open still opens a new tab when no session exists for the host', async () => {
+    const host: Host = { id: 'host-reuse-4', label: 'edge', hostname: 'edge.example.com' };
+    const deps = createDeps({
+      hosts: [host],
+      findExistingSessionForHost: () => undefined,
+    });
+
+    const result = await handleVaultAgentOp('host.open', { hostId: host.id }, deps);
+
+    assert.equal(result.ok, true);
+    assert.equal((result as { sessionId?: string }).sessionId, 'session-host-reuse-4');
+    assert.equal((result as { reused?: boolean }).reused, undefined);
+    assert.equal((result as { status?: string }).status, 'connecting');
+  });
+
   it('host.open does not treat a missing chatSessionId as an external MCP call', async () => {
     const host: Host = {
       id: 'host-open-4',

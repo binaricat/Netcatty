@@ -1627,6 +1627,9 @@ const dispatchCapabilityRpc = createCapabilityRpcDispatcher({
       // host_open mints a fresh tab/session id. A reconnect with that id is the
       // same logical tab and must also be reclaimed after its initiating chat
       // was deleted; unrelated sessions do not reuse the minted id.
+      // A reused sessionId (#3612) is an existing tab — possibly another scope's
+      // or the user's own — and must never be reclaimed by a deleted chat.
+      if (result?.reused === true) return;
       sessionIdleManager.track(chatSessionId, sessionId);
       await sessionService.closeTracked({ chatSessionId, sessionId });
       // A failed close stays idle-tracked so the normal bounded retry can try
@@ -1640,7 +1643,10 @@ const dispatchCapabilityRpc = createCapabilityRpcDispatcher({
     // host_open merge but before this async operation completes. Once the open
     // succeeds, restore the returned session atomically with its ownership.
     ensureOpenedSessionMetadata(chatSessionId, sessionId, result);
-    sessionIdleManager.track(chatSessionId, sessionId);
+    // A reused session keeps whatever idle lifecycle it already had — a fresh
+    // idle timer must not reclaim an existing tab (possibly the user's) just
+    // because an agent referenced it.
+    if (result?.reused !== true) sessionIdleManager.track(chatSessionId, sessionId);
   },
 });
 
@@ -2232,10 +2238,16 @@ async function handleGetContext(params) {
     const hasCommandablePty = ptyStream && typeof ptyStream.write === "function";
     const hasSshExec = sshClient && typeof sshClient.exec === "function";
     const hasSerialPort = session.serialPort && typeof session.serialPort.write === "function";
-    if (!hasCommandablePty && !hasSshExec && !hasSerialPort) continue;
-
-    // Look up metadata scoped to this chat session
-    const meta = getSessionMeta(sessionId, chatSessionId) || {};
+    const hasTransport = hasCommandablePty || hasSshExec || hasSerialPort;
+    // Look up metadata scoped to this chat session.
+    const scopeMeta = getSessionMeta(sessionId, chatSessionId);
+    // Disconnected/reconnecting tabs keep their session entry (SSH
+    // auto-reconnect reuses the sessionId), so keep them visible with
+    // connected:false instead of hiding them — otherwise the agent cannot
+    // see or wait for a tab it opened and reopens it as a duplicate.
+    // Without scoped metadata the session is not in this agent's scope.
+    if (!hasTransport && !scopeMeta) continue;
+    const meta = scopeMeta || {};
     hosts.push({
       sessionId,
       hostname: meta.hostname || session.hostname || "",
@@ -2245,7 +2257,7 @@ async function handleGetContext(params) {
       protocol: meta.protocol || session.protocol || session.type || "",
       shellType: meta.shellType || session.shellKind || "",
       deviceType: meta.deviceType || "",
-      connected: meta.connected !== undefined ? meta.connected : !!(session.sshClient || session.conn || ptyStream || session.serialPort),
+      connected: meta.connected !== undefined ? meta.connected : hasTransport,
       hostId: meta.hostId || "",
       hostChain: meta.hostChain || [],
       activePortForwards: meta.activePortForwards || [],
@@ -2257,7 +2269,10 @@ async function handleGetContext(params) {
     for (const sessionId of resolvedScopedIds) {
       if (addedHostIds.has(sessionId)) continue;
       const meta = getSessionMeta(sessionId, chatSessionId);
-      if (!meta || meta.connected === false) continue;
+      if (!meta) continue;
+      // Keep disconnected/reconnecting sessions listed with connected:false so
+      // the agent can wait on the existing sessionId instead of reopening the
+      // host as a duplicate tab (SSH auto-reconnect preserves the sessionId).
       hosts.push(buildHostFromMetadata(sessionId, meta));
       addedHostIds.add(sessionId);
     }
@@ -2278,6 +2293,7 @@ async function handleGetContext(params) {
       "Use the provided tools to execute commands through the sessions exposed by Netcatty. " +
       buildTerminalToolGuidance(toolHints) +
       "Serial sessions (protocol: serial, shellType: raw) do not run a standard shell — commands are sent as-is. " +
+      "A session listed with connected false is still in the scope: its tab is alive and, for SSH, auto-reconnects with the same sessionId — wait and retry the same sessionId instead of calling host_open again (host_open reuses an existing session for the same host by default). " +
       "Network device sessions (deviceType: network) use vendor CLIs (Huawei VRP, Cisco IOS, etc.) — commands are sent as-is without shell wrapping, and exit codes are unavailable. " +
       "Vault snippets, port forwarding rules/tunnels, and SFTP read/write tools are available when exposed in the tool list. " +
       "Always prefer these tools over suggesting the user to do things manually.",

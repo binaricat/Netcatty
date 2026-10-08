@@ -53,6 +53,7 @@ export interface UseVaultAgentBridgeInput {
   stopTunnel: VaultAgentApiDeps['stopTunnel'];
   stopRuleTunnels: VaultAgentApiDeps['stopRuleTunnels'];
   openHost?: VaultAgentApiDeps['openHost'];
+  findExistingSessionForHost?: VaultAgentApiDeps['findExistingSessionForHost'];
   closeSession?: VaultAgentApiDeps['closeSession'];
   getScriptSessionMeta?: (sessionId: string) => Pick<TerminalSession, 'status' | 'customName' | 'hostLabel' | 'hostname' | 'username'> | undefined;
 }
@@ -271,6 +272,7 @@ export function useVaultAgentBridge(input: UseVaultAgentBridgeInput): void {
         openHost: current.openHost
           ? (host, isExternalMcpCall) => current.openHost!(host, isExternalMcpCall)
           : undefined,
+        findExistingSessionForHost: current.findExistingSessionForHost,
         closeSession: current.closeSession
           ? (sessionId) => current.closeSession!(sessionId)
           : undefined,

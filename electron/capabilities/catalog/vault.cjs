@@ -48,7 +48,7 @@ const VAULT_CAPABILITIES = [
     domain: "vault",
     status: CAPABILITY_STATUS.IMPLEMENTED,
     description:
-      "Open a vault host by creating a new terminal tab and starting the connection. Returns the new sessionId so you can run terminal/SFTP tools against it. Use vault_hosts_list first when you only know the label or hostname.",
+      "Open a vault host by reusing its existing session when one exists (connected or auto-reconnecting — same sessionId, no duplicate tab). Only opens a new terminal tab when no session for this host is open, or when newTab is true. Returns the sessionId so you can run terminal/SFTP tools against it. Use vault_hosts_list first when you only know the label or hostname.",
     // Sidebar Catty is scoped to already-open terminals/workspaces and must not
     // expand that scope mid-turn. Keep host_open for MCP / CLI / global agent.
     agentKinds: [AGENT_KINDS.GLOBAL],
