@@ -332,6 +332,29 @@ export class ToolOutputStore {
     };
   }
 
+  /**
+   * Copy the live tool-output handles stored under `sourceChatSessionId` into
+   * the namespace of `targetChatSessionId` (same chat session, e.g. a forked
+   * session that replays history referencing the source's handles), preserving
+   * handle ids so retained "handleId=tool-output-…" notices stay valid. The
+   * source session keeps its own copies. Handles spilled to disk share the
+   * same persisted file between both namespaces; deleting one namespace does
+   * not touch the other's in-memory handles while reads fall back to the
+   * shared spill path.
+   */
+  rehomeChatSession(sourceChatSessionId: string, targetChatSessionId: string): void {
+    this.pruneExpired();
+    const sourceMap = this.bySession.get(sourceChatSessionId);
+    if (!sourceMap || sourceMap.size === 0) return;
+    const targetMap = this.bySession.get(targetChatSessionId) ?? new Map<string, ToolOutputHandle>();
+    for (const [handleId, handle] of sourceMap) {
+      if (targetMap.has(handleId)) continue;
+      targetMap.set(handleId, { ...handle, chatSessionId: targetChatSessionId });
+    }
+    this.bySession.set(targetChatSessionId, targetMap);
+    this.enforceSessionLimits(targetChatSessionId, targetMap);
+  }
+
   prune(chatSessionId: string): void {
     this.lifecycleDenyFilter.add(`chat:${chatSessionId}`);
     this.failedSessionDeletions.delete(chatSessionId);

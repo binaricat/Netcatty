@@ -10,8 +10,9 @@
  *   vice versa (no dangling calls or results on the branch),
  * - a stored compaction summary that would cover messages discarded by the
  *   branch is refused (the summary must stay accurate for the fork),
- * - provider continuation state is stripped so the fork starts a fresh
- *   provider thread that replays retained history.
+ * - incomplete-turn state (status text, pending approvals) is stripped while
+ *   the per-message provider replay metadata is preserved, so the fresh
+ *   provider thread replays the retained history.
  */
 
 export type ForkRefusalReason =
@@ -62,40 +63,52 @@ const INCOMPLETE_EXECUTION_STATUSES = new Set([
   'cancelled',
 ]);
 
-function collectToolCallIds(messages: readonly ForkMessageLike[]): Set<string> {
-  const ids = new Set<string>();
+/**
+ * Validate that every tool call in the retained prefix is paired with a
+ * result and vice versa. Providers may reuse a tool-call id across turns, so
+ * each result is consumed by the nearest preceding unresolved call with the
+ * same id (same pairing rule as buildHistoricalToolReplayMaps): a result with
+ * no pending call before it is dangling, and so is a call still pending after
+ * the walk.
+ */
+function validateToolCallResultPairing(
+  messages: readonly ForkMessageLike[],
+): 'dangling-tool-call' | 'dangling-tool-result' | null {
+  const pendingCallCounts = new Map<string, number>();
   for (const message of messages) {
     for (const toolCall of message.toolCalls ?? []) {
-      if (toolCall?.id) ids.add(toolCall.id);
+      if (!toolCall?.id) continue;
+      pendingCallCounts.set(toolCall.id, (pendingCallCounts.get(toolCall.id) ?? 0) + 1);
     }
-  }
-  return ids;
-}
-
-function collectToolResultIds(messages: readonly ForkMessageLike[]): Set<string> {
-  const ids = new Set<string>();
-  for (const message of messages) {
     for (const toolResult of message.toolResults ?? []) {
-      if (toolResult?.toolCallId) ids.add(toolResult.toolCallId);
+      const id = toolResult?.toolCallId;
+      if (!id) continue;
+      const pendingCount = pendingCallCounts.get(id) ?? 0;
+      if (pendingCount === 0) return 'dangling-tool-result';
+      pendingCallCounts.set(id, pendingCount - 1);
     }
   }
-  return ids;
+  for (const pendingCount of pendingCallCounts.values()) {
+    if (pendingCount > 0) return 'dangling-tool-call';
+  }
+  return null;
 }
 
 /**
- * Strip per-message provider continuation state; the branch replays retained
- * history in a fresh provider thread instead of resuming the source session.
+ * Strip incomplete-turn state so the branch starts clean; per-message provider
+ * continuation metadata (Responses reasoning items, OpenAI Chat assistant
+ * fields, tool-call wire options) is preserved because the fork's fresh
+ * provider thread replays the retained history through it and safely discards
+ * exchanges whose metadata no longer matches the active provider.
  */
 export function stripMessageContinuationState<M extends ForkMessageLike>(message: M): M {
   if (
-    message.providerContinuation == null
-    && message.statusText == null
+    message.statusText == null
     && message.pendingApproval == null
   ) {
     return message;
   }
   const next = { ...message };
-  delete (next as Record<string, unknown>).providerContinuation;
   delete (next as Record<string, unknown>).statusText;
   delete (next as Record<string, unknown>).pendingApproval;
   return next;
@@ -115,8 +128,9 @@ export type ForkSourceSession<M extends ForkMessageLike = ForkMessage> = {
 
 /**
  * Plan a fork at `messageId`. Returns a refusal reason when the boundary is
- * not a safe completed turn, or the retained message list (deep-trimmed of
- * continuation state) plus the carried-over compaction (when still accurate).
+ * not a safe completed turn, or the retained message list (trimmed of
+ * incomplete-turn state, keeping provider replay metadata) plus the
+ * carried-over compaction (when still accurate).
  */
 export function planSessionFork<M extends ForkMessageLike>(
   source: ForkSourceSession<M>,
@@ -140,14 +154,8 @@ export function planSessionFork<M extends ForkMessageLike>(
 
   const retained = source.messages.slice(0, boundaryIndex + 1);
 
-  const toolCallIds = collectToolCallIds(retained);
-  const toolResultIds = collectToolResultIds(retained);
-  for (const id of toolCallIds) {
-    if (!toolResultIds.has(id)) return { ok: false, reason: 'dangling-tool-call' };
-  }
-  for (const id of toolResultIds) {
-    if (!toolCallIds.has(id)) return { ok: false, reason: 'dangling-tool-result' };
-  }
+  const pairingRefusal = validateToolCallResultPairing(retained);
+  if (pairingRefusal) return { ok: false, reason: pairingRefusal };
 
   // A stored compaction summary covers the earliest `compactedMessageCount`
   // persisted messages. The summary must never cover messages discarded by

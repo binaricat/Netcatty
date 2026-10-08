@@ -33,6 +33,27 @@ test('ToolOutputStore stores and reads truncated output by handle', () => {
   assert.equal(store.read({ handleId: handle.id }, 'chat-1'), null);
 });
 
+test('ToolOutputStore rehomes handles into a forked chat session namespace', () => {
+  const store = new ToolOutputStore();
+  const handle = store.store({
+    chatSessionId: 'chat-1',
+    capabilityId: 'terminal.execute',
+    content: 'A'.repeat(50_000),
+  });
+
+  store.rehomeChatSession('chat-1', 'chat-fork');
+  // Same handle id stays valid in the fork's namespace.
+  const head = store.read({ handleId: handle.id, mode: 'head', maxChars: 100 }, 'chat-fork');
+  assert.equal(head?.length, 100);
+
+  // The source session keeps its own copy.
+  assert.equal(store.read({ handleId: handle.id, mode: 'tail', maxChars: 50 }, 'chat-1'), 'A'.repeat(50));
+
+  // Sessions with no handles rehome to nothing.
+  store.rehomeChatSession('chat-missing', 'chat-fork');
+  assert.equal(store.read({ handleId: 'tool-output-none' }, 'chat-fork'), null);
+});
+
 test('ToolOutputStore pages large output with a hard per-read cap', () => {
   const store = new ToolOutputStore();
   const content = `${'0123456789'.repeat(3_000)}END`;

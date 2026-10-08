@@ -56,6 +56,7 @@ import { convertFilesToUploads } from './useFileUpload';
 import { removeProviderReferences } from './aiProviderCleanup';
 import { publishAISessionsSnapshot } from './aiSessionsStore';
 import { planSessionFork } from '../../domain/aiSessionFork';
+import { getAgentRuntime } from '../../infrastructure/ai/harness/globalAgentRuntime';
 import {
   AI_STATE_CHANGED_DRAFTS_BY_SCOPE,
   AI_STATE_CHANGED_PANEL_VIEW_BY_SCOPE,
@@ -679,9 +680,11 @@ export function useAIState() {
   // "Fork from here": copy the conversation up to a completed assistant
   // response into a new session and make it the scope's active chat. The
   // original session stays untouched in history. Pure boundary validation and
-  // plan building live in domain/aiSessionFork; nothing session-scoped (fresh
-  // external session id, no provider continuation, no tool-output handles)
-  // carries over, and null is returned when the boundary is not forkable.
+  // plan building live in domain/aiSessionFork; the fork gets a fresh
+  // external session id, no pending-turn state, and the saved-output handles
+  // referenced by the retained prefix are rehomed into the fork's namespace
+  // (per-message provider replay metadata is preserved for history replay).
+  // Null is returned when the boundary is not forkable.
   const forkSessionFromMessage = useCallback((sessionId: string, messageId: string): AISession | null => {
     const source = sessionsRef.current.find(s => s.id === sessionId);
     if (!source) return null;
@@ -703,6 +706,10 @@ export function useAIState() {
     if (plan.contextCompaction) {
       fork.contextCompaction = plan.contextCompaction;
     }
+    // Saved-output handles are scoped per chat session; rehome the ones the
+    // retained prefix references so tool_output_read still resolves in the
+    // fork (with the original handle ids, keeping the notices valid).
+    getAgentRuntime().getToolOutputStore(sessionId).rehomeChatSession(sessionId, fork.id);
     setSessionsRaw(prev => {
       const next = [fork, ...prev];
       setLatestAISessionsSnapshot(next);

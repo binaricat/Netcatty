@@ -145,27 +145,66 @@ test('planSessionFork refuses when the compaction summary would cover discarded 
   });
 });
 
-test('planSessionFork strips provider continuation state from retained messages', () => {
-  const continuation = { provider: 'claude', threadId: 'provider-thread-1' };
-  const user = msg({ role: 'user', content: 'hi', providerContinuation: continuation });
-  const assistant = msg({ content: 'answer', providerContinuation: continuation, statusText: undefined });
+test('planSessionFork preserves provider replay metadata but strips turn state', () => {
+  const continuation = { reasoningParts: [{ text: 'chain of thought' }] };
+  const user = msg({ role: 'user', content: 'hi', providerContinuation: continuation, statusText: 'streaming…' });
+  const assistant = msg({ content: 'answer', providerContinuation: continuation });
   const source = session([user, assistant]);
   const plan = planSessionFork(source, assistant.id);
   assert.equal(plan.ok, true);
   if (plan.ok) {
     for (const message of plan.messages) {
-      assert.equal(message.providerContinuation, undefined);
+      assert.equal(message.providerContinuation, continuation);
+      assert.equal(message.statusText, undefined);
     }
   }
-  // untouched source keeps the original objects with their continuation state
-  assert.equal(source.messages[1].providerContinuation, continuation);
+  // untouched source keeps its original message objects and turn state
+  assert.equal(source.messages[0].providerContinuation, continuation);
+  assert.equal(source.messages[0].statusText, 'streaming…');
+});
+
+test('planSessionFork pairs repeated tool-call ids by occurrence', () => {
+  const source = session([
+    msg({ role: 'user', content: 'hi' }),
+    msg({ role: 'assistant', content: '', toolCalls: [{ id: 'call-1' }] }),
+    msg({ role: 'tool', content: 'first', toolResults: [{ toolCallId: 'call-1', content: 'out 1' }] }),
+    msg({ role: 'assistant', content: '', toolCalls: [{ id: 'call-1' }] }),
+    msg({ role: 'assistant', content: 'answer' }),
+  ]);
+  // The provider reused call-1; the second occurrence never got a result.
+  assert.deepEqual(planSessionFork(source, source.messages[4].id), {
+    ok: false,
+    reason: 'dangling-tool-call',
+  });
+  const resolved = session([
+    msg({ role: 'assistant', content: '', toolCalls: [{ id: 'call-1' }] }),
+    msg({ role: 'tool', content: 'first', toolResults: [{ toolCallId: 'call-1', content: 'out 1' }] }),
+    msg({ role: 'assistant', content: '', toolCalls: [{ id: 'call-1' }] }),
+    msg({ role: 'tool', content: 'second', toolResults: [{ toolCallId: 'call-1', content: 'out 2' }] }),
+    msg({ role: 'assistant', content: 'answer' }),
+  ]);
+  assert.equal(planSessionFork(resolved, resolved.messages[4].id).ok, true);
+  // One result cannot satisfy two pending calls with the same id.
+  const underResolved = session([
+    msg({ role: 'assistant', content: '', toolCalls: [{ id: 'call-1' }, { id: 'call-1' }] }),
+    msg({ role: 'tool', content: 'single', toolResults: [{ toolCallId: 'call-1', content: 'out' }] }),
+    msg({ role: 'assistant', content: 'answer' }),
+  ]);
+  assert.deepEqual(planSessionFork(underResolved, underResolved.messages[2].id), {
+    ok: false,
+    reason: 'dangling-tool-call',
+  });
 });
 
 test('stripMessageContinuationState keeps untouched references stable', () => {
   const plain = msg({ content: 'x' });
   assert.equal(stripMessageContinuationState(plain), plain);
-  const withContinuation = msg({ content: 'x', providerContinuation: {} });
-  assert.notEqual(stripMessageContinuationState(withContinuation), withContinuation);
+  const withStatusText = msg({ content: 'x', statusText: 'streaming…' });
+  assert.notEqual(stripMessageContinuationState(withStatusText), withStatusText);
+  const withPendingApproval = msg({ content: 'x', pendingApproval: {} });
+  assert.notEqual(stripMessageContinuationState(withPendingApproval), withPendingApproval);
+  const continuationOnly = msg({ content: 'x', providerContinuation: {} });
+  assert.equal(stripMessageContinuationState(continuationOnly), continuationOnly);
 });
 
 test('buildForkTitle appends a fork marker without double-suffixing', () => {
