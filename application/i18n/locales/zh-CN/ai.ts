@@ -527,6 +527,8 @@ export const zhCNAiMessages: Messages = {
   'ai.chat.jumpUntitled': '（空消息）',
   'ai.chat.usedTools': '已使用 {n} 个工具',
   'ai.chat.loadMoreSessions': '加载更多会话（还有 {n} 条）',
+  'ai.chat.searchSessions': '搜索对话…',
+  'ai.chat.noMatchingSessions': '没有匹配的会话',
   'ai.chat.noSessions': '没有历史会话',
   'ai.chat.retryHint': '你可以重新发送消息来重试。',
   'ai.chat.approvalTimeout': '工具审批已超时（5 分钟）。你可以重新发送消息来重试。',

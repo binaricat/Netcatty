@@ -517,6 +517,8 @@ export const zhTWAiMessages: Messages = {
   'ai.chat.jumpUntitled': '（空訊息）',
   'ai.chat.usedTools': '已使用 {n} 個工具',
   'ai.chat.loadMoreSessions': '載入更多工作階段（還有 {n} 條）',
+  'ai.chat.searchSessions': '搜尋對話…',
+  'ai.chat.noMatchingSessions': '沒有符合的工作階段',
   'ai.chat.noSessions': '沒有歷史工作階段',
   'ai.chat.retryHint': '你可以重新發送訊息來重試。',
   'ai.chat.approvalTimeout': '工具核准已超時（5 分鐘）。你可以重新發送訊息來重試。',

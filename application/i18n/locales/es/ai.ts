@@ -518,6 +518,8 @@ export const esAiMessages: Messages = {
   'ai.chat.jumpUntitled': '(mensaje vacío)',
   'ai.chat.usedTools': 'Herramientas usadas: {n}',
   'ai.chat.loadMoreSessions': 'Cargar más sesiones ({n} más)',
+  'ai.chat.searchSessions': 'Buscar conversaciones…',
+  'ai.chat.noMatchingSessions': 'No hay sesiones coincidentes',
   'ai.chat.noSessions': 'No hay sesiones anteriores',
   'ai.chat.retryHint': 'Puedes reintentar enviando tu mensaje de nuevo.',
   'ai.chat.approvalTimeout': 'La aprobación de la herramienta expiró después de 5 minutos. Puedes reintentar enviando tu mensaje de nuevo.',

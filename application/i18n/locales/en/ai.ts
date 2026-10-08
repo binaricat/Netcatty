@@ -527,6 +527,8 @@ export const enAiMessages: Messages = {
   'ai.chat.jumpUntitled': '(empty message)',
   'ai.chat.usedTools': 'Tools used: {n}',
   'ai.chat.loadMoreSessions': 'Load more sessions ({n} more)',
+  'ai.chat.searchSessions': 'Search conversations…',
+  'ai.chat.noMatchingSessions': 'No matching sessions',
   'ai.chat.noSessions': 'No previous sessions',
   'ai.chat.retryHint': 'You can retry by sending your message again.',
   'ai.chat.approvalTimeout': 'Tool approval timed out after 5 minutes. You can retry by sending your message again.',

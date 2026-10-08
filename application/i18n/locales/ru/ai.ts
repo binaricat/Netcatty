@@ -474,6 +474,8 @@ export const ruAiMessages: Messages = {
   'ai.chat.jumpUntitled': '(пустое сообщение)',
   'ai.chat.usedTools': 'Использовано инструментов: {n}',
   'ai.chat.loadMoreSessions': 'Загрузить больше сессий (ещё {n})',
+  'ai.chat.searchSessions': 'Поиск по диалогам…',
+  'ai.chat.noMatchingSessions': 'Нет подходящих сессий',
   'ai.chat.noSessions': 'Предыдущих сессий нет',
   'ai.chat.retryHint': 'Вы можете повторить попытку, отправив сообщение ещё раз.',
   'ai.chat.approvalTimeout': 'Время ожидания одобрения инструмента истекло через 5 минут. Вы можете повторить попытку, отправив сообщение ещё раз.',
