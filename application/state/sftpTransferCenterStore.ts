@@ -831,8 +831,7 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
     // Compressed soft-control is process-global: do not gate on a live panel owner.
     const liveCompressedJob = task?.controlKind === "compressed-upload"
       && task.reconnectRequired !== true
-      && task.status !== "interrupted"
-      && (action === "cancel" || task.status !== "attention");
+      && task.status !== "interrupted";
     if (liveCompressedJob && (action === "pause" || action === "resume" || action === "cancel")) {
       const bridge = netcattyBridge.get();
       if (action === "pause") {

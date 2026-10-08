@@ -310,3 +310,66 @@ for (const completeDuring of ["backend-cancel", "walk-settlement"] as const) {
     assert.equal(progress.at(-1), 3);
   });
 }
+
+for (const rejects of [false, true]) {
+  test(`failed live compression cancellation resumes the same compression job: rejects=${rejects}`, async (t) => {
+    const originalGet = netcattyBridge.get;
+    t.after(() => { netcattyBridge.get = originalGet; resetTransferCancelLatchesForTests(); });
+    const store = createSftpTransferCenterStore();
+    const calls: string[] = [];
+    netcattyBridge.get = () => ({
+      cancelCompressedUpload: async () => {
+        if (rejects) throw new Error("Cancel IPC failed");
+        return { success: false };
+      },
+      resumeCompressedUpload: async () => { calls.push("compressed"); return { success: true }; },
+      resumeTransfer: async () => { calls.push("generic"); return { success: false, reason: "not active" }; },
+      clearPendingTransferCancel: async () => {},
+    } as unknown as ReturnType<typeof netcattyBridge.get>);
+    store.setDedicatedResumeHandler(async () => { calls.push("dedicated"); return { success: true }; });
+    store.publishOwner("closed-panel", [task("live-compressed", {
+      isDirectory: true, controlKind: "compressed-upload", reconnectRequired: false,
+    })]);
+    await store.cancel("live-compressed");
+    assert.equal(store.getTask("live-compressed")?.status, "attention");
+    await store.resume("live-compressed");
+    assert.deepEqual(calls, ["compressed"], "failed cancellation must not start a second destination writer");
+    assert.equal(store.getTask("live-compressed")?.status, "transferring");
+  });
+}
+
+for (const hasConflict of [false, true]) {
+  test(`restored compressed attention uses reconnect and preserves conflict gating: conflict=${hasConflict}`, async (t) => {
+    const { serializeSftpTransferCenter } = await import("../../../domain/sftpTransferCenter");
+    const { listGloballyResumableTransferIds } = await import("../../../domain/sftpTransferActions");
+    const { restoreSftpTransferHistoryCooperatively } = await import("./transferHistoryRestoreMigration");
+    const originalGet = netcattyBridge.get;
+    t.after(() => { netcattyBridge.get = originalGet; });
+    const saved = task("restored-compressed", {
+      status: "attention", isDirectory: true, controlKind: "compressed-upload", reconnectRequired: false,
+      error: "Could not cancel the compressed upload.",
+      ...(hasConflict ? { conflict: {
+        transferId: "restored-compressed", fileName: "folder", sourcePath: "/source/folder", targetPath: "/target/folder",
+        isDirectory: true, existingSize: 8, newSize: 8, existingModified: 1, newModified: 1,
+      } } : {}),
+    });
+    const raw = serializeSftpTransferCenter([saved]);
+    const restored = createSftpTransferCenterStore({ read: () => raw, write: () => {} });
+    const cooperative = await restoreSftpTransferHistoryCooperatively(JSON.stringify({ version: 1, tasks: [saved] }));
+    assert.equal(restored.getTask(saved.id)?.reconnectRequired, true);
+    assert.equal(cooperative.tasks[0]?.reconnectRequired, true);
+    assert.equal(restored.getTask(saved.id)?.status, "attention");
+    assert.deepEqual(restored.getTask(saved.id)?.conflict, saved.conflict);
+    assert.equal(saved.reconnectRequired, false, "saving must not reclassify the current live row");
+    const calls: string[] = [];
+    netcattyBridge.get = () => ({
+      resumeCompressedUpload: async () => { calls.push("compressed"); return { success: true }; },
+      clearPendingTransferCancel: async () => {},
+    } as unknown as ReturnType<typeof netcattyBridge.get>);
+    restored.setDedicatedResumeHandler(async () => { calls.push("dedicated"); return { success: true }; });
+    const resumeIds = listGloballyResumableTransferIds(restored.getSnapshot().tasks);
+    assert.deepEqual(resumeIds, hasConflict ? [] : [saved.id]);
+    for (const id of resumeIds) await restored.resume(id);
+    assert.deepEqual(calls, hasConflict ? [] : ["dedicated"]);
+  });
+}

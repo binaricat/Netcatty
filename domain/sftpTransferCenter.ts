@@ -93,6 +93,12 @@ export function sanitizeSftpTransferTask(value: unknown): TransferTask | null {
     // progress after dedicated reconnect.
     task.lifecycleEpoch = undefined;
   }
+  // An attention row can still control a live compression job after Cancel
+  // fails. A persisted copy cannot: keep its attention/conflict details, but
+  // require reconnect rather than routing Resume to the old compression job.
+  if (task.controlKind === "compressed-upload" && task.status === "attention") {
+    task.reconnectRequired = true;
+  }
   // Terminal rows must not keep conflict payloads. Older Skip paths cancelled the
   // task without clearing conflict, so SFTP remount reopened the conflict dialog
   // while the transfer center looked empty (no attention bucket row).
