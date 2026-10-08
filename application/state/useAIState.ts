@@ -721,6 +721,54 @@ export function useAIState() {
     if (!result) return null;
 
     const branched = result.session;
+    // Aborts an undo whose branch is not going to be published. The rollback
+    // of any background-job inheritance registered so far is awaited,
+    // validated, and retried: this cleanup runs exactly once (the branch is
+    // never published, so no later session cleanup would retry it) and a
+    // fire-and-forget or unchecked call would leave the owners' registrations
+    // as phantom inheritors — preserving owners' jobs and terminal locks
+    // indefinitely once those owners are deleted. When the rollback still
+    // fails after the retries the bridge is persistently unhealthy, so it is
+    // surfaced instead of silently swallowed. Undo is non-destructive, so
+    // dropping the not-yet-published branch (and the state copied for it) is
+    // safe and the user can retry once the bridge is healthy again.
+    const abortUnpublishedBranch = async (toolOutputStore?: {
+      prune: (chatSessionId: string) => void;
+    }): Promise<null> => {
+      const forget = getAIBridge()?.aiForgetInheritedBackgroundJobs;
+      if (forget) {
+        let forgotten = false;
+        for (let attempt = 0; ; attempt++) {
+          try {
+            const result = await forget(branched.id);
+            if (result?.ok === true) {
+              forgotten = true;
+              break;
+            }
+          } catch {
+            // Transient IPC/persistence failure — retry below.
+          }
+          if (attempt >= 4) break;
+          await new Promise(resolve => setTimeout(resolve, 150 * (attempt + 1)));
+        }
+        if (!forgotten) {
+          console.warn(
+            `[useAIState] Undo: failed to roll back inherited background-job registrations for unpublished branch ${branched.id}`,
+          );
+        }
+      }
+      // Drop any tool-output alias work started for the never-published branch
+      // id (the durability/alias gate runs after registration): the pending
+      // in-memory retries die with the app, and prune removes the branch's
+      // in-memory aliases plus any branch-owned durable copy already written.
+      toolOutputStore?.prune(branched.id);
+      // The branch was never published, so drop the operational state
+      // copyState made for it — nothing else references this fresh id.
+      getAgentRuntime()
+        .getSessionStateStore()
+        .clear(branched.id);
+      return null;
+    };
     // Tool side effects are not rolled back, so the retained conversation may
     // still reference Catty runtime state (active background jobs, poll
     // offsets, edited files) tracked under the source chat id. Copy that
@@ -841,13 +889,7 @@ export function useAIState() {
         // indefinitely. The main process drops every registration for a chat
         // id in one call, which is exactly bookkeeping-neutral for an owner
         // whose registration is still live.
-        void getAIBridge()?.aiForgetInheritedBackgroundJobs?.(branched.id).catch(() => {});
-        // The branch was never published, so drop the operational state
-        // copyState made for it — nothing else references this fresh id.
-        getAgentRuntime()
-          .getSessionStateStore()
-          .clear(branched.id);
-        return null;
+        return abortUnpublishedBranch();
       }
     }
     // The retained prefix may reference tool outputs stored under the source
@@ -858,11 +900,36 @@ export function useAIState() {
     // the undo), so the pass below materializes durable branch-owned copies
     // before the branch session is published: exiting the app during this
     // window must not leave the branch pointing at handles that only resolve
-    // in memory.
-    const toolOutputStore = getAgentRuntime().getToolOutputStore(source.id);
-    await toolOutputStore
-      .aliasSessionHandles(source.id, branched.id, { retainedHandleIds })
-      .catch(() => {});
+    // in memory. A transient per-alias failure is only queued for an in-memory
+    // retry by the store, so `aliasSessionHandles` resolving is NOT confirmation
+    // that the copies landed — requiring confirmation here before publishing
+    // closes the window where an app exit before the retry would leave the
+    // branch's retained references permanently unresolvable.
+    if (retainedHandleIds.size > 0) {
+      const toolOutputStore = getAgentRuntime().getToolOutputStore(source.id);
+      try {
+        const confirmation = await toolOutputStore.aliasSessionHandles(
+          source.id,
+          branched.id,
+          { retainedHandleIds },
+        ).then(() => toolOutputStore.confirmRetainedAliasesMaterialized(
+          source.id,
+          branched.id,
+          retainedHandleIds,
+        ));
+        if (!confirmation.ok) {
+          throw new Error(
+            `Retained tool outputs were not durably materialized: ${confirmation.unconfirmed.join(', ')}`,
+          );
+        }
+      } catch (err) {
+        console.warn(
+          `[useAIState] Undo: branch ${branched.id} retained tool outputs could not be backed durably — aborting the undo`,
+          err,
+        );
+        return abortUnpublishedBranch(toolOutputStore);
+      }
+    }
     setSessionsRaw(prev => {
       const next = [branched, ...prev];
       setLatestAISessionsSnapshot(next);

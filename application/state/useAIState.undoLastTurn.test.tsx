@@ -272,12 +272,40 @@ test('undoLastTurnInSession publishes a branch with retained tool outputs once s
   const { dom, container, root, capture } = await setupAiState([sessionWithToolOutput]);
   assert.ok(capture.ai);
 
+  // The retained handle must be restorable from durable storage (and its
+  // content readable) so the alias pass can materialize the branch-owned
+  // durable copy that publishing a branch now requires: unlike before, undo
+  // confirms every retained alias was materialized instead of publishing
+  // while the copy is merely queued for an in-memory retry.
   dom.window.netcatty = {
     getToolOutputPersistenceStatus: async () => ({ durable: true }),
-    writeToolOutputTemp: async () => ({ ok: true, path: '/tmp/tool-output.log' }),
-    restoreToolOutputTemp: async () => null,
-    readToolOutputTemp: async () => null,
+    writeToolOutputTemp: async () => ({ ok: true, path: '/tmp/tool-output-branch.log' }),
+    restoreToolOutputTemp: async () => ({
+      path: '/tmp/tool-output.log',
+      record: {
+        schemaVersion: 1 as const,
+        handleId: 'tool-output-kept-1',
+        chatSessionId: 'chat-with-handle',
+        capabilityId: 'terminal_observability',
+        totalChars: 4,
+        storedChars: 4,
+        sourceTruncated: false,
+        preview: 'test',
+        storedAt: 1,
+        accessedAt: 1,
+      },
+    }),
+    readToolOutputTemp: async () => ({
+      mode: 'range' as const,
+      content: 'test',
+      totalChars: 4,
+      startOffset: 0,
+      endOffset: 4,
+      nextOffset: 4,
+      hasMore: false,
+    }),
     deleteToolOutputTemp: async () => ({ ok: true }),
+    deleteChatToolOutputsTemp: async () => ({ deletedCount: 0 }),
   } as never;
 
   let result: Awaited<ReturnType<typeof undo>> | null = null;
@@ -295,6 +323,233 @@ test('undoLastTurnInSession publishes a branch with retained tool outputs once s
   container.remove();
   dom.window.close();
   setLatestAISessionsSnapshot(null as unknown as AISession[]);
+});
+
+test('undoLastTurnInSession aborts when a retained tool output cannot be restored', async () => {
+  // Persistence reports durable, but the record behind the retained handle is
+  // missing (for example it was written while storage was unavailable).
+  // Publishing the branch would leave its retained reference permanently
+  // unresolvable, so the undo must abort instead of confirming the alias.
+  const sessionWithToolOutput: AISession = {
+    ...SOURCE_SESSION,
+    id: 'chat-with-handle',
+    messages: [
+      { id: 'user-1', role: 'user', content: 'first prompt', timestamp: 1 },
+      { id: 'assistant-1', role: 'assistant', content: 'saved handleId=tool-output-kept-1', timestamp: 2 },
+      { id: 'user-2', role: 'user', content: 'bad last prompt', timestamp: 3 },
+      { id: 'assistant-2', role: 'assistant', content: 'bad answer', timestamp: 4 },
+    ],
+  };
+  setLatestAISessionsSnapshot([sessionWithToolOutput]);
+  const { dom, container, root, capture } = await setupAiState([sessionWithToolOutput]);
+  assert.ok(capture.ai);
+
+  const deleteChatCalls: string[] = [];
+  dom.window.netcatty = {
+    getToolOutputPersistenceStatus: async () => ({ durable: true }),
+    writeToolOutputTemp: async () => ({ ok: true, path: '/tmp/tool-output-branch.log' }),
+    restoreToolOutputTemp: async () => null,
+    readToolOutputTemp: async () => null,
+    deleteToolOutputTemp: async () => ({ ok: true }),
+    deleteChatToolOutputsTemp: async (chatSessionId: string) => {
+      deleteChatCalls.push(chatSessionId);
+      return { deletedCount: 0 };
+    },
+  } as never;
+
+  let result: Awaited<ReturnType<typeof undo>> | null = null;
+  async function undo() {
+    return capture.ai!.undoLastTurnInSession('chat-with-handle');
+  }
+  const sessionIdsBefore = capture.sessions.map((session) => session.id);
+  await act(async () => {
+    result = await undo();
+  });
+
+  // The confirm gate exhausted its budget driving the restore retries without
+  // materializing every retained alias, so the branch was not published. The
+  // aborted branch's (partial, source-shared) tool-output work was pruned.
+  assert.equal(result, null);
+  assert.deepEqual(capture.sessions.map((session) => session.id), sessionIdsBefore);
+  // The prune of the aborted branch id ran during the rollback.
+  assert.equal(deleteChatCalls.length, 1);
+  assert.ok(!sessionIdsBefore.includes(deleteChatCalls[0]));
+
+  await act(async () => root.unmount());
+  container.remove();
+  dom.window.close();
+  setLatestAISessionsSnapshot(null as unknown as AISession[]);
+});
+
+test('undoLastTurnInSession aborts when a retained tool output cannot be durably copied', async () => {
+  // The alias is created in memory but its durable write keeps failing, so its
+  // branch-owned copy is only queued for an in-memory retry. Confirming that
+  // the copy actually landed must fail and abort the undo, otherwise an app
+  // exit before the retry would leave the retained reference unresolvable
+  // after a restart.
+  const sessionWithToolOutput: AISession = {
+    ...SOURCE_SESSION,
+    id: 'chat-with-handle',
+    messages: [
+      { id: 'user-1', role: 'user', content: 'first prompt', timestamp: 1 },
+      { id: 'assistant-1', role: 'assistant', content: 'saved handleId=tool-output-kept-1', timestamp: 2 },
+      { id: 'user-2', role: 'user', content: 'bad last prompt', timestamp: 3 },
+      { id: 'assistant-2', role: 'assistant', content: 'bad answer', timestamp: 4 },
+    ],
+  };
+  setLatestAISessionsSnapshot([sessionWithToolOutput]);
+  const { dom, container, root, capture } = await setupAiState([sessionWithToolOutput]);
+  assert.ok(capture.ai);
+
+  const deleteChatCalls: string[] = [];
+  dom.window.netcatty = {
+    getToolOutputPersistenceStatus: async () => ({ durable: true }),
+    writeToolOutputTemp: async () => ({ ok: false, error: 'disk full' }),
+    restoreToolOutputTemp: async () => ({
+      path: '/tmp/tool-output.log',
+      record: {
+        schemaVersion: 1 as const,
+        handleId: 'tool-output-kept-1',
+        chatSessionId: 'chat-with-handle',
+        capabilityId: 'terminal_observability',
+        totalChars: 4,
+        storedChars: 4,
+        sourceTruncated: false,
+        preview: 'test',
+        storedAt: 1,
+        accessedAt: 1,
+      },
+    }),
+    readToolOutputTemp: async () => ({
+      mode: 'range' as const,
+      content: 'test',
+      totalChars: 4,
+      startOffset: 0,
+      endOffset: 4,
+      nextOffset: 4,
+      hasMore: false,
+    }),
+    deleteToolOutputTemp: async () => ({ ok: true }),
+    deleteChatToolOutputsTemp: async (chatSessionId: string) => {
+      deleteChatCalls.push(chatSessionId);
+      return { deletedCount: 0 };
+    },
+  } as never;
+
+  let result: Awaited<ReturnType<typeof undo>> | null = null;
+  async function undo() {
+    return capture.ai!.undoLastTurnInSession('chat-with-handle');
+  }
+  const sessionIdsBefore = capture.sessions.map((session) => session.id);
+  await act(async () => {
+    result = await undo();
+  });
+
+  assert.equal(result, null);
+  assert.deepEqual(capture.sessions.map((session) => session.id), sessionIdsBefore);
+  // The durable session delete for the aborted branch id still ran during the
+  // rollback (no branch-owned copy was ever written).
+  assert.equal(deleteChatCalls.length, 1);
+  assert.ok(!sessionIdsBefore.includes(deleteChatCalls[0]));
+
+  await act(async () => root.unmount());
+  container.remove();
+  dom.window.close();
+  setLatestAISessionsSnapshot(null as unknown as AISession[]);
+});
+
+test('undoLastTurnInSession retries the inheritance rollback before abandoning the branch', async () => {
+  const { dom, container, root, capture } = await setupAiState([SOURCE_SESSION]);
+  assert.ok(capture.ai);
+
+  const sessionStateStore = getAgentRuntime().getSessionStateStore();
+  sessionStateStore.updateFromToolResult(
+    'chat-source',
+    'terminal_start',
+    { sessionId: 'sess-1', command: 'npm run dev' },
+    JSON.stringify({ jobId: 'job-1', status: 'running', nextOffset: 0 }),
+    false,
+  );
+
+  const forgetCalls: string[] = [];
+  dom.window.netcatty = {
+    aiRegisterInheritedBackgroundJobs: async () => ({ ok: false, error: 'main process unreachable' }),
+    aiForgetInheritedBackgroundJobs: async (chatSessionId: string) => {
+      forgetCalls.push(chatSessionId);
+      // First call fails transiently; the second confirms the rollback.
+      return forgetCalls.length === 1
+        ? { ok: false, error: 'ipc hiccup' }
+        : { ok: true };
+    },
+  } as never;
+
+  let result: Awaited<ReturnType<typeof runUndo>> | null = null;
+  async function runUndo() {
+    return capture.ai!.undoLastTurnInSession('chat-source');
+  }
+  await act(async () => {
+    result = await runUndo();
+  });
+
+  // The rollback is awaited, validated, and retried — not fire-and-forget.
+  const branchedId = forgetCalls[0];
+  assert.equal(result, null);
+  assert.deepEqual(forgetCalls, [branchedId, branchedId]);
+  assert.ok(!capture.sessions.some((session) => session.id === branchedId));
+  assert.equal(Object.keys(sessionStateStore.get(branchedId).activeJobs).length, 0);
+
+  sessionStateStore.clear('chat-source');
+  sessionStateStore.clear(branchedId);
+  delete dom.window.netcatty;
+  await act(async () => root.unmount());
+  container.remove();
+  dom.window.close();
+});
+
+test('undoLastTurnInSession retries a persistently failing inheritance rollback to exhaustion', async () => {
+  const { dom, container, root, capture } = await setupAiState([SOURCE_SESSION]);
+  assert.ok(capture.ai);
+
+  const sessionStateStore = getAgentRuntime().getSessionStateStore();
+  sessionStateStore.updateFromToolResult(
+    'chat-source',
+    'terminal_start',
+    { sessionId: 'sess-1', command: 'npm run dev' },
+    JSON.stringify({ jobId: 'job-1', status: 'running', nextOffset: 0 }),
+    false,
+  );
+
+  const forgetCalls: string[] = [];
+  dom.window.netcatty = {
+    aiRegisterInheritedBackgroundJobs: async () => ({ ok: false, error: 'main process unreachable' }),
+    aiForgetInheritedBackgroundJobs: async (chatSessionId: string) => {
+      forgetCalls.push(chatSessionId);
+      return { ok: false, error: 'ipc gone' };
+    },
+  } as never;
+
+  let result: Awaited<ReturnType<typeof runUndo>> | null = null;
+  async function runUndo() {
+    return capture.ai!.undoLastTurnInSession('chat-source');
+  }
+  await act(async () => {
+    result = await runUndo();
+  });
+
+  // Even a rollback that always fails is attempted for every retry slot
+  // (never swallowed silently) before the undo abandons the branch.
+  const branchedId = forgetCalls[0];
+  assert.equal(result, null);
+  assert.equal(forgetCalls.length, 5);
+  assert.ok(forgetCalls.every((id) => id === branchedId));
+  assert.ok(!capture.sessions.some((session) => session.id === branchedId));
+
+  sessionStateStore.clear('chat-source');
+  sessionStateStore.clear(branchedId);
+  delete dom.window.netcatty;
+  await act(async () => root.unmount());
+  container.remove();
+  dom.window.close();
 });
 
 test('undoLastTurnInSession publishes the branch once inheritance registration succeeds', async () => {

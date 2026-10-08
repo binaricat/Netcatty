@@ -87,6 +87,13 @@ export const TOOL_OUTPUT_ALIAS_MATERIALIZATION_RETRY_DELAY_MS = 200;
 // dropping them would permanently lose the branch-owned durable copy.
 const TOOL_OUTPUT_ALIAS_MATERIALIZATION_MAX_RETRY_DELAY_MS = 30_000;
 export const TOOL_OUTPUT_MAX_PENDING_ALIAS_MATERIALIZATIONS = 50;
+// How long an alias-publish gate (undo) keeps driving the restore and
+// durable-copy retry passes directly for confirmation before giving up and
+// reporting the still-unmaterialized ids (bounded so a persistently unhealthy
+// store aborts the undo instead of delaying it forever).
+const TOOL_OUTPUT_ALIAS_CONFIRM_BUDGET_MS = 4_000;
+const TOOL_OUTPUT_ALIAS_CONFIRM_POLL_MS = 100;
+const TOOL_OUTPUT_ALIAS_CONFIRM_MAX_POLL_MS = 800;
 const TOOL_OUTPUT_LIFECYCLE_BLOOM_BITS = 1 << 22;
 const TOOL_OUTPUT_LIFECYCLE_BLOOM_HASHES = 4;
 
@@ -603,6 +610,97 @@ export class ToolOutputStore {
     await this.materializeDurableAliases(sourceChatSessionId, targetChatSessionId, aliased);
     this.enforceSessionLimits(targetChatSessionId, targetMap);
     this.enforceGlobalLimits();
+  }
+
+  /**
+   * Confirms that every retained handle id has a durable branch-owned record
+   * under `targetChatSessionId` before the caller publishes a branch session.
+   * An alias pass resolves as soon as its in-memory work is done, but a restore
+   * or durable write that failed transiently is only queued for an in-memory
+   * retry whose queue dies with the app — a caller that cannot republish the
+   * branch later (undo) must not treat "queued" as "done" or the branch's
+   * retained `tool_output_read` references are left without a branch-owned
+   * manifest after a restart. Drives the restore and durable-copy retry passes
+   * directly (their scheduled timers back off behind other chats) for a
+   * bounded budget, then reports the ids that remain unconfirmed so the caller
+   * can abort instead of publishing an unbacked branch.
+   */
+  async confirmRetainedAliasesMaterialized(
+    sourceChatSessionId: string,
+    targetChatSessionId: string,
+    retainedHandleIds: ReadonlySet<string>,
+    options?: { budgetMs?: number },
+  ): Promise<{ ok: boolean; unconfirmed: string[] }> {
+    const budgetMs = options?.budgetMs ?? TOOL_OUTPUT_ALIAS_CONFIRM_BUDGET_MS;
+    const start = this.now();
+    let pollMs = TOOL_OUTPUT_ALIAS_CONFIRM_POLL_MS;
+    let lastUnconfirmedCount = Number.POSITIVE_INFINITY;
+    for (;;) {
+      const unconfirmed = this.unconfirmedRetainedAliasIds(
+        targetChatSessionId,
+        retainedHandleIds,
+      );
+      if (unconfirmed.length === 0) return { ok: true, unconfirmed };
+      if (this.now() - start >= budgetMs) {
+        return { ok: false, unconfirmed };
+      }
+      if (unconfirmed.length < lastUnconfirmedCount) {
+        // Progress: back to fast polling.
+        pollMs = TOOL_OUTPUT_ALIAS_CONFIRM_POLL_MS;
+      } else {
+        // No progress since the last attempt: slow down so a persistently
+        // failing restore/write does not hammer secure storage until the
+        // budget expires.
+        pollMs = Math.min(pollMs * 2, TOOL_OUTPUT_ALIAS_CONFIRM_MAX_POLL_MS);
+      }
+      lastUnconfirmedCount = unconfirmed.length;
+      const hasPendingRestoreRetry = [...this.pendingAliasRestores.values()]
+        .some(request => request.sourceChatSessionId === sourceChatSessionId
+          && request.targetChatSessionId === targetChatSessionId);
+      // Redrive with exactly the ids that are still unconfirmed so a retried
+      // pass both restores them and, on success, materializes their durable
+      // branch-owned copies.
+      if (hasPendingRestoreRetry) {
+        await this.aliasSessionHandles(sourceChatSessionId, targetChatSessionId, {
+          retainedHandleIds: new Set(unconfirmed),
+        }).catch(() => {});
+      } else if (
+        [...this.pendingAliasMaterializations.values()]
+          .some(item => item.targetChatSessionId === targetChatSessionId)
+      ) {
+        // Drive the durable-copy retries now instead of waiting for the
+        // shared backoff timer.
+        await this.runAliasMaterializationRetries();
+      } else if (
+        (this.aliasMaterializationPromises.get(sourceChatSessionId)?.size ?? 0) > 0
+      ) {
+        // An in-flight alias pass may still materialize the ids; give it a
+        // moment before re-checking.
+      } else {
+        // Nothing queued or in flight can materialize the remaining ids —
+        // their requests were dropped or their aliases evicted past repair.
+        return { ok: false, unconfirmed };
+      }
+      await new Promise<void>(resolve => setTimeout(resolve, pollMs));
+    }
+  }
+
+  /**
+   * The retained handle ids that do not yet have a durable branch-owned record
+   * under `targetChatSessionId`. The in-memory alias alone is not confirmation:
+   * until its durable copy lands it reads the source-owned file, which a
+   * restart can no longer resolve under the branch namespace.
+   */
+  private unconfirmedRetainedAliasIds(
+    targetChatSessionId: string,
+    retainedHandleIds: ReadonlySet<string>,
+  ): string[] {
+    const unconfirmed: string[] = [];
+    for (const handleId of retainedHandleIds) {
+      if (this.materializedAliasKeys.has(`${targetChatSessionId}:${handleId}`)) continue;
+      unconfirmed.push(handleId);
+    }
+    return unconfirmed;
   }
 
   private enforcePendingAliasRestoresLimit(): void {
