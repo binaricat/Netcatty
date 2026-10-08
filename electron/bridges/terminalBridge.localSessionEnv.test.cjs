@@ -37,8 +37,8 @@ const STALE_PATH =
 const LIVE_PATH =
   "C:\\Users\\me\\.herdr\\packages\\standalone\\releases\\0.9.1-x86_64-pc-windows-msvc;C:\\Windows\\System32";
 
-test("buildLocalSessionEnv keeps the captured PATH untouched off Windows", () => {
-  const env = bridge.buildLocalSessionEnv(
+test("buildLocalSessionEnv keeps the captured PATH untouched off Windows", async () => {
+  const env = await bridge.buildLocalSessionEnv(
     { env: { NETCATTY_MARKER: "1" } },
     {
       baseEnv: { PATH: "/usr/bin:/bin", HOME: "/home/me" },
@@ -51,14 +51,14 @@ test("buildLocalSessionEnv keeps the captured PATH untouched off Windows", () =>
   assert.equal(env.NETCATTY_MARKER, "1");
 });
 
-test("buildLocalSessionEnv refreshes PATH from the registry on Windows", () => {
+test("buildLocalSessionEnv refreshes PATH from the registry on Windows", async () => {
   const calls = [];
-  const env = bridge.buildLocalSessionEnv(
+  const env = await bridge.buildLocalSessionEnv(
     {},
     {
       baseEnv: { Path: STALE_PATH, SystemRoot: "C:\\Windows" },
       platform: "win32",
-      refreshWindowsPath: (options) => {
+      refreshWindowsPath: async (options) => {
         calls.push(options);
         return LIVE_PATH;
       },
@@ -73,8 +73,8 @@ test("buildLocalSessionEnv refreshes PATH from the registry on Windows", () => {
   assert.equal(env.SystemRoot, "C:\\Windows");
 });
 
-test("buildLocalSessionEnv collapses a duplicate PATH sitting next to Path", () => {
-  const env = bridge.buildLocalSessionEnv(
+test("buildLocalSessionEnv collapses a duplicate PATH sitting next to Path", async () => {
+  const env = await bridge.buildLocalSessionEnv(
     {},
     {
       baseEnv: { Path: STALE_PATH, PATH: STALE_PATH },
@@ -91,9 +91,9 @@ test("buildLocalSessionEnv collapses a duplicate PATH sitting next to Path", () 
   );
 });
 
-test("buildLocalSessionEnv never widens an explicit PATH override", () => {
+test("buildLocalSessionEnv never widens an explicit PATH override", async () => {
   let refreshed = false;
-  const env = bridge.buildLocalSessionEnv(
+  const env = await bridge.buildLocalSessionEnv(
     { env: { PATH: "C:\\pinned\\bin" } },
     {
       baseEnv: { Path: STALE_PATH },
@@ -109,3 +109,18 @@ test("buildLocalSessionEnv never widens an explicit PATH override", () => {
   assert.equal(env.PATH, "C:\\pinned\\bin");
   assert.equal(env.Path, undefined);
 });
+
+for (const pathKey of ["Path", "PATH", "path"]) {
+  test(`an explicit empty ${pathKey} override stays empty without a registry query`, async () => {
+    const env = await bridge.buildLocalSessionEnv(
+      { env: { [pathKey]: "" } },
+      {
+        baseEnv: { Path: STALE_PATH, PATH: STALE_PATH },
+        platform: "win32",
+        refreshWindowsPath: () => { throw new Error("must not refresh an explicit override"); },
+      },
+    );
+    assert.equal(env[pathKey], "");
+    assert.deepEqual(Object.keys(env).filter((key) => key.toLowerCase() === "path"), [pathKey]);
+  });
+}

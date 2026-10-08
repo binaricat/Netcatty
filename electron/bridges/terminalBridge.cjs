@@ -936,7 +936,7 @@ const applyLocaleDefaults = (env) => {
  * Host-level `environmentVariables` overrides are applied on top, and an
  * explicit PATH among them always wins — widening it would defeat the override.
  */
-function buildLocalSessionEnv(
+async function buildLocalSessionEnv(
   payload,
   { baseEnv = process.env, platform = process.platform, refreshWindowsPath } = {},
 ) {
@@ -953,7 +953,7 @@ function buildLocalSessionEnv(
   const pathKey = overridePathKey || getPathEnvKey(env, platform);
 
   if (!overridePathKey) {
-    const livePath = (refreshWindowsPath || resolveWindowsLivePath)({
+    const livePath = await (refreshWindowsPath || resolveWindowsLivePath)({
       basePath: env[pathKey],
       env,
       platform,
@@ -972,7 +972,7 @@ function buildLocalSessionEnv(
 /**
  * Start a local terminal session
  */
-function startLocalSession(event, payload) {
+async function startLocalSession(event, payload) {
   const sessionId = payload?.sessionId || randomUUID();
   const defaultShell = getDefaultLocalShell();
   // payload.shell may be a discovered shell ID (e.g., "wsl-ubuntu") — resolve it
@@ -996,11 +996,15 @@ function startLocalSession(event, payload) {
   );
   const shellKind = detectShellKind(shell);
   const env = applyLocaleDefaults({
-    ...buildLocalSessionEnv(payload),
+    ...(await buildLocalSessionEnv(payload)),
     TERM: "xterm-256color",
     COLORTERM: "truecolor",
   });
   
+  if (event.sender.isDestroyed?.()) {
+    throw new Error("Local terminal window closed before startup");
+  }
+
   // Determine the starting directory
   // Default to home directory if not specified or if specified path is invalid
   const defaultCwd = os.homedir();

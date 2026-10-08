@@ -160,7 +160,7 @@ test("WSL default directory stays outside the Linux command and option values", 
   }
 });
 
-test("WSL local sessions pass the home directory option to the spawned process", () => {
+test("WSL local sessions pass the home directory option to the spawned process", async () => {
   const spawns = [];
   const bridge = loadBridgeWithFakes(spawns, []);
   const platformDescriptor = Object.getOwnPropertyDescriptor(process, "platform");
@@ -172,10 +172,10 @@ test("WSL local sessions pass the home directory option to the spawned process",
     });
     const shellArgs = ["-d", "Ubuntu", "--", "zsh", "-l"];
     const payload = { shell: "C:\\Windows\\System32\\wsl.exe", shellArgs };
-    bridge.startLocalSession({ sender: { id: 7 } }, { ...payload, sessionId: "wsl-home" });
+    await bridge.startLocalSession({ sender: { id: 7 } }, { ...payload, sessionId: "wsl-home" });
     assert.deepEqual(spawns[0].spawnArgs[1], ["-d", "Ubuntu", "--cd", "~", "--", "zsh", "-l"]);
     assert.deepEqual(shellArgs, ["-d", "Ubuntu", "--", "zsh", "-l"]);
-    bridge.startLocalSession(
+    await bridge.startLocalSession(
       { sender: { id: 7 } },
       { ...payload, sessionId: "wsl-explicit-cwd", cwd: process.cwd() },
     );
@@ -186,7 +186,7 @@ test("WSL local sessions pass the home directory option to the spawned process",
   }
 });
 
-test("Windows local terminals enable the bundled ConPTY implementation required for clear", () => {
+test("Windows local terminals enable the bundled ConPTY implementation required for clear", async () => {
   const spawns = [];
   const sentries = [];
   const sessions = new Map();
@@ -203,7 +203,7 @@ test("Windows local terminals enable the bundled ConPTY implementation required 
         },
       },
     });
-    bridge.startLocalSession(
+    await bridge.startLocalSession(
       { sender: { id: 7 } },
       { sessionId: "windows-clear", shell: "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" },
     );
@@ -215,7 +215,7 @@ test("Windows local terminals enable the bundled ConPTY implementation required 
   }
 });
 
-test("local terminal buffers incoming flood while renderer flow is paused", () => {
+test("local terminal buffers incoming flood while renderer flow is paused", async () => {
   const spawns = [];
   const sentries = [];
   const sent = [];
@@ -233,7 +233,7 @@ test("local terminal buffers incoming flood while renderer flow is paused", () =
     },
   });
 
-  bridge.startLocalSession(
+  await bridge.startLocalSession(
     { sender: { id: 7 } },
     { sessionId: "local-flood", shell: "/bin/sh", cols: 80, rows: 24 },
   );
@@ -258,7 +258,7 @@ test("local terminal buffers incoming flood while renderer flow is paused", () =
   assert.equal(sentries[0].consumeCalls.length, 2);
 });
 
-test("local terminal keeps source paused while paced backlog absorbs fresh flood", () => {
+test("local terminal keeps source paused while paced backlog absorbs fresh flood", async () => {
   const spawns = [];
   const sentries = [];
   const sent = [];
@@ -276,7 +276,7 @@ test("local terminal keeps source paused while paced backlog absorbs fresh flood
     },
   });
 
-  bridge.startLocalSession(
+  await bridge.startLocalSession(
     { sender: { id: 7 } },
     { sessionId: "local-flood-paced-fresh", shell: "/bin/sh", cols: 80, rows: 24 },
   );
@@ -307,7 +307,7 @@ test("local terminal keeps source paused while paced backlog absorbs fresh flood
   assert.ok(session.flowState.bufferedBytes >= FLOW_HIGH_WATER_MARK);
 });
 
-test("closing a local terminal discards buffered output instead of flushing it", () => {
+test("closing a local terminal discards buffered output instead of flushing it", async () => {
   const spawns = [];
   const sentries = [];
   const sent = [];
@@ -325,7 +325,7 @@ test("closing a local terminal discards buffered output instead of flushing it",
     },
   });
 
-  bridge.startLocalSession(
+  await bridge.startLocalSession(
     { sender: { id: 7 } },
     { sessionId: "local-flood-close", shell: "/bin/sh", cols: 80, rows: 24 },
   );
@@ -339,7 +339,7 @@ test("closing a local terminal discards buffered output instead of flushing it",
   }]);
 });
 
-test("app cleanup discards buffered output instead of flushing it", () => {
+test("app cleanup discards buffered output instead of flushing it", async () => {
   const spawns = [];
   const sentries = [];
   const sent = [];
@@ -357,7 +357,7 @@ test("app cleanup discards buffered output instead of flushing it", () => {
     },
   });
 
-  bridge.startLocalSession(
+  await bridge.startLocalSession(
     { sender: { id: 7 } },
     { sessionId: "local-flood-cleanup", shell: "/bin/sh", cols: 80, rows: 24 },
   );
@@ -387,7 +387,7 @@ test("local terminal exit waits for paced buffered output drain", async () => {
     },
   });
 
-  bridge.startLocalSession(
+  await bridge.startLocalSession(
     { sender: { id: 7 } },
     { sessionId: "local-flood-exit", shell: "/bin/sh", cols: 80, rows: 24 },
   );
@@ -414,7 +414,7 @@ test("local terminal exit waits for paced buffered output drain", async () => {
   assert.equal(sessions.has("local-flood-exit"), false);
 });
 
-test("local terminal exit completes while renderer flow is paused", () => {
+test("local terminal exit completes while renderer flow is paused", async () => {
   const spawns = [];
   const sentries = [];
   const sent = [];
@@ -432,7 +432,7 @@ test("local terminal exit completes while renderer flow is paused", () => {
     },
   });
 
-  bridge.startLocalSession(
+  await bridge.startLocalSession(
     { sender: { id: 7 } },
     { sessionId: "local-paused-exit", shell: "/bin/sh", cols: 80, rows: 24 },
   );
@@ -447,4 +447,17 @@ test("local terminal exit completes while renderer flow is paused", () => {
   assert.equal(sent.some((item) => item.channel === "netcatty:data"), false);
   assert.equal(sent.some((item) => item.channel === "netcatty:exit"), true);
   assert.equal(sessions.has("local-paused-exit"), false);
+});
+
+test("a window closed while preparing the local environment does not spawn a PTY", async () => {
+  const spawns = [];
+  const bridge = loadBridgeWithFakes(spawns, []);
+  let destroyed = false;
+  const pending = bridge.startLocalSession(
+    { sender: { id: 7, isDestroyed: () => destroyed } },
+    { sessionId: "closed-before-spawn", shell: "/bin/sh" },
+  );
+  destroyed = true;
+  await assert.rejects(pending, /window closed before startup/);
+  assert.equal(spawns.length, 0);
 });
