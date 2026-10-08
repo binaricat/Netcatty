@@ -33,7 +33,7 @@ test('ToolOutputStore stores and reads truncated output by handle', () => {
   assert.equal(store.read({ handleId: handle.id }, 'chat-1'), null);
 });
 
-test('ToolOutputStore rehomes handles into a forked chat session namespace', () => {
+test('ToolOutputStore rehomes handles into a forked chat session namespace', async () => {
   const store = new ToolOutputStore();
   const handle = store.store({
     chatSessionId: 'chat-1',
@@ -41,7 +41,7 @@ test('ToolOutputStore rehomes handles into a forked chat session namespace', () 
     content: 'A'.repeat(50_000),
   });
 
-  store.rehomeChatSession('chat-1', 'chat-fork');
+  await store.rehomeChatSession('chat-1', 'chat-fork');
   // Same handle id stays valid in the fork's namespace.
   const head = store.read({ handleId: handle.id, mode: 'head', maxChars: 100 }, 'chat-fork');
   assert.equal(head?.length, 100);
@@ -50,8 +50,83 @@ test('ToolOutputStore rehomes handles into a forked chat session namespace', () 
   assert.equal(store.read({ handleId: handle.id, mode: 'tail', maxChars: 50 }, 'chat-1'), 'A'.repeat(50));
 
   // Sessions with no handles rehome to nothing.
-  store.rehomeChatSession('chat-missing', 'chat-fork');
+  await store.rehomeChatSession('chat-missing', 'chat-fork');
   assert.equal(store.read({ handleId: 'tool-output-none' }, 'chat-fork'), null);
+});
+
+test('ToolOutputStore rehomed spilled handles become durably owned by the target', async () => {
+  const files = new Map<string, { record: PersistedToolOutputRecord; content: string }>();
+  const deletedPaths: string[] = [];
+  const persistence: ToolOutputPersistence = {
+    write: async (record, content) => {
+      const path = `/netcatty/${record.handleId}-${record.chatSessionId}.log`;
+      files.set(path, { record, content });
+      return path;
+    },
+    restore: async (handleId, chatSessionId) => {
+      for (const [path, entry] of files) {
+        if (entry.record.handleId !== handleId || entry.record.chatSessionId !== chatSessionId) continue;
+        return { path, record: entry.record };
+      }
+      return null;
+    },
+    read: async (path, input) => {
+      const content = files.get(path)?.content;
+      if (content == null) return null;
+      const startOffset = input.mode === 'tail'
+        ? Math.max(0, content.length - (input.maxChars ?? 12_000))
+        : Math.max(0, input.offset ?? 0);
+      const selected = content.slice(startOffset, startOffset + (input.maxChars ?? 12_000));
+      const endOffset = startOffset + selected.length;
+      return {
+        mode: input.mode ?? 'head',
+        content: selected,
+        totalChars: content.length,
+        startOffset,
+        endOffset,
+        nextOffset: endOffset,
+        hasMore: endOffset < content.length,
+      };
+    },
+    delete: async path => {
+      deletedPaths.push(path);
+      files.delete(path);
+    },
+  };
+
+  const original = new ToolOutputStore({ spillThresholdChars: 0, persistence });
+  const handle = original.store({
+    chatSessionId: 'chat-source',
+    capabilityId: 'terminal.execute',
+    content: 'B'.repeat(30_000),
+  });
+  await handle.spillPromise;
+
+  await original.rehomeChatSession('chat-source', 'chat-fork');
+  const forkCopy = original.get(handle.id, 'chat-fork');
+  assert.ok(forkCopy);
+  // The copy owns its own durable record under the target's chat session id.
+  assert.notEqual(forkCopy.filePath, undefined);
+  const forkRecord = files.get(forkCopy.filePath!)?.record;
+  assert.ok(forkRecord);
+  assert.equal(forkRecord.chatSessionId, 'chat-fork');
+  assert.equal(forkRecord.handleId, handle.id);
+
+  // A restart can restore the fork's handle from its own record.
+  const afterRestart = new ToolOutputStore({ spillThresholdChars: 0, persistence });
+  const restored = await afterRestart.readChunkAsync({ handleId: handle.id, mode: 'head', maxChars: 100 }, 'chat-fork');
+  assert.equal(restored?.content, 'B'.repeat(100));
+
+  // Deleting the source session removes only the source-owned file; the
+  // fork's copy stays readable.
+  original.prune('chat-source');
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.ok(deletedPaths.includes(`/netcatty/${handle.id}-chat-source.log`));
+  const forkRecordAfterPrune = files.get(forkCopy.filePath!);
+  assert.ok(forkRecordAfterPrune);
+  assert.equal(forkRecordAfterPrune.record.chatSessionId, 'chat-fork');
+  const stillReadable = await original.readChunkAsync({ handleId: handle.id, mode: 'tail', maxChars: 50 }, 'chat-fork');
+  assert.equal(stillReadable?.content, 'B'.repeat(50));
 });
 
 test('ToolOutputStore pages large output with a hard per-read cap', () => {

@@ -57,6 +57,7 @@ export interface AIChatSidePanelProps {
   forkSessionFromMessage?: (
     sessionId: string,
     messageId: string,
+    viewingScope?: Pick<AISessionScope, 'type' | 'targetId'>,
   ) => AISession | null;
   // Provider config
   providers: ProviderConfig[];

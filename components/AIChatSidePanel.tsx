@@ -1689,10 +1689,16 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   // response into a new session, switch to it, and confirm via toast. The
   // original stays in history. Boundary validation is re-run by the state
   // hook; a null result means the fork was refused (already hidden in the UI).
+  // This panel's scope is passed so the branch is created in the scope viewing
+  // it, even when the source session's own scope went stale (e.g. a terminal
+  // chat resumed after reconnecting under a new terminal id).
   const handleForkFromMessage = useCallback((messageId: string) => {
     const sourceSessionId = activeSessionRef.current?.id ?? activeSessionId;
     if (!sourceSessionId) return;
-    const fork = forkSessionFromMessage?.(sourceSessionId, messageId);
+    const fork = forkSessionFromMessage?.(sourceSessionId, messageId, {
+      type: scopeType,
+      targetId: scopeTargetId,
+    });
     if (!fork) return;
     applyHistorySessionSelection(fork.id, {
       showSessionView: showScopeSessionView,
@@ -1700,7 +1706,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
       closeHistory: () => setShowHistory(false),
     });
     toast.success(t('ai.chat.forkCreated'));
-  }, [activeSessionId, forkSessionFromMessage, setActiveSessionId, showScopeSessionView, t]);
+  }, [activeSessionId, forkSessionFromMessage, scopeTargetId, scopeType, setActiveSessionId, showScopeSessionView, t]);
 
   const handleDeleteSession = useCallback(
     async (e: React.MouseEvent, sessionId: string) => {

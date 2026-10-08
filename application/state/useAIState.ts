@@ -685,7 +685,15 @@ export function useAIState() {
   // referenced by the retained prefix are rehomed into the fork's namespace
   // (per-message provider replay metadata is preserved for history replay).
   // Null is returned when the boundary is not forkable.
-  const forkSessionFromMessage = useCallback((sessionId: string, messageId: string): AISession | null => {
+  // `viewingScope` is the panel scope the fork was requested from; the branch
+  // is created there so the fork is active and visible in the very scope that
+  // is viewing it, even when the source session carries a stale scope (e.g. a
+  // terminal chat resumed in a reconnected terminal or a merged workspace).
+  const forkSessionFromMessage = useCallback((
+    sessionId: string,
+    messageId: string,
+    viewingScope?: Pick<AISessionScope, 'type' | 'targetId'>,
+  ): AISession | null => {
     const source = sessionsRef.current.find(s => s.id === sessionId);
     if (!source) return null;
     const plan = planSessionFork(source, messageId);
@@ -697,6 +705,9 @@ export function useAIState() {
       agentId: source.agentId,
       scope: {
         ...source.scope,
+        // Host membership stays with the source (the messages were produced
+        // there); the scope the fork belongs to is the viewing scope.
+        ...(viewingScope ? { type: viewingScope.type, targetId: viewingScope.targetId } : {}),
         hostIds: source.scope.hostIds ? [...source.scope.hostIds] : undefined,
       },
       messages: plan.messages,
@@ -709,7 +720,9 @@ export function useAIState() {
     // Saved-output handles are scoped per chat session; rehome the ones the
     // retained prefix references so tool_output_read still resolves in the
     // fork (with the original handle ids, keeping the notices valid).
-    getAgentRuntime().getToolOutputStore(sessionId).rehomeChatSession(sessionId, fork.id);
+    // Rehoming spilled handles re-writes target-owned durable records
+    // asynchronously; the fork's reads fall back gracefully until it lands.
+    void getAgentRuntime().getToolOutputStore(sessionId).rehomeChatSession(sessionId, fork.id);
     setSessionsRaw(prev => {
       const next = [fork, ...prev];
       setLatestAISessionsSnapshot(next);

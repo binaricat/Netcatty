@@ -337,22 +337,93 @@ export class ToolOutputStore {
    * the namespace of `targetChatSessionId` (same chat session, e.g. a forked
    * session that replays history referencing the source's handles), preserving
    * handle ids so retained "handleId=tool-output-…" notices stay valid. The
-   * source session keeps its own copies. Handles spilled to disk share the
-   * same persisted file between both namespaces; deleting one namespace does
-   * not touch the other's in-memory handles while reads fall back to the
-   * shared spill path.
+   * source session keeps its own copies. Handles spilled to disk are
+   * re-owned by the target: their content is read back from the source's
+   * durable record and re-written under the target's chat session id, so a
+   * restart can restore the fork's handle independently and deleting either
+   * session cannot delete the other's spill file. Handles that never spilled
+   * are copied in memory and pick up their own durable record through the
+   * normal spill path. If the persisted content cannot be read back, the
+   * target falls back to sharing the source-owned spill path so live reads
+   * still resolve while both namespaces exist.
    */
-  rehomeChatSession(sourceChatSessionId: string, targetChatSessionId: string): void {
+  async rehomeChatSession(sourceChatSessionId: string, targetChatSessionId: string): Promise<void> {
     this.pruneExpired();
     const sourceMap = this.bySession.get(sourceChatSessionId);
     if (!sourceMap || sourceMap.size === 0) return;
+    // Let pending spills settle so each source handle's durable ownership is
+    // decided: either the content is still in memory (write pending/failed) or
+    // the handle owns a durable file path.
+    await Promise.allSettled([...sourceMap.values()].map(handle => handle.spillPromise));
     const targetMap = this.bySession.get(targetChatSessionId) ?? new Map<string, ToolOutputHandle>();
     for (const [handleId, handle] of sourceMap) {
       if (targetMap.has(handleId)) continue;
-      targetMap.set(handleId, { ...handle, chatSessionId: targetChatSessionId });
+      const copy: ToolOutputHandle = {
+        ...handle,
+        chatSessionId: targetChatSessionId,
+        filePath: undefined,
+        spillPromise: undefined,
+        evicted: undefined,
+      };
+      if (copy.fullContent == null && handle.filePath) {
+        const content = await this.tryReadPersistedContent(handle);
+        if (content != null) {
+          copy.fullContent = content;
+        } else {
+          // Persisted content is unreadable (e.g. the spill file vanished).
+          // Fall back to sharing the source-owned path so the live fork can
+          // still read while both sessions survive; the forked handle will
+          // not survive a restart or a source-session delete in this case.
+          copy.filePath = handle.filePath;
+        }
+      }
+      targetMap.set(handleId, copy);
     }
     this.bySession.set(targetChatSessionId, targetMap);
     this.enforceSessionLimits(targetChatSessionId, targetMap);
+    // Copies still holding in-memory content (fresh or read-back) become
+    // target-owned through the normal spill path, which re-writes a durable
+    // record carrying the target's chat session id. Await the writes so the
+    // target's durable ownership is settled when this promise resolves.
+    const spillWrites: Promise<void>[] = [];
+    for (const handle of targetMap.values()) {
+      if (handle.fullContent == null) continue;
+      this.startSpill(handle);
+      if (handle.spillPromise) spillWrites.push(handle.spillPromise);
+    }
+    await Promise.allSettled(spillWrites);
+  }
+
+  /**
+   * Read a handle's full persisted content back through the persistence
+   * adapter, paging `read` (which caps each response) until the durable file
+   * is exhausted. Returns null when the adapter cannot serve the content.
+   */
+  private async tryReadPersistedContent(handle: ToolOutputHandle): Promise<string | null> {
+    const persistence = this.persistence;
+    const path = handle.filePath;
+    if (!persistence || !path) return null;
+    const maxPages = Math.ceil(TOOL_OUTPUT_MAX_HANDLE_CHARS / TOOL_OUTPUT_READ_MAX_CHARS) + 1;
+    const parts: string[] = [];
+    try {
+      let offset = 0;
+      for (let page = 0; page < maxPages; page += 1) {
+        const chunk = await persistence.read(path, {
+          handleId: handle.id,
+          mode: 'range',
+          offset,
+          maxChars: TOOL_OUTPUT_READ_MAX_CHARS,
+        });
+        if (!chunk) return null;
+        parts.push(chunk.content);
+        if (!chunk.hasMore) return parts.join('');
+        if (chunk.content.length === 0) return null; // No forward progress.
+        offset = chunk.nextOffset;
+      }
+    } catch {
+      // Treat read failures (e.g. adapter offline) as unreadable content.
+    }
+    return null;
   }
 
   prune(chatSessionId: string): void {
