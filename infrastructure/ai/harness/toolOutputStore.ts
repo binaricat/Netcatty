@@ -799,6 +799,18 @@ export class ToolOutputStore {
     };
   }
 
+  /**
+   * The protected durable deletion `prune` scheduled for a chat session, when
+   * it is still in flight. Callers that would otherwise delete the session's
+   * durable tool-output records through a direct (unprotected) path must
+   * await this promise instead: it only fires after in-flight alias passes
+   * and queued alias materialization retries finish reading the source
+   * records.
+   */
+  getSessionDeletionPromise(chatSessionId: string): Promise<void> | undefined {
+    return this.sessionDeletionPromises.get(chatSessionId);
+  }
+
   prune(chatSessionId: string): void {
     this.lifecycleDenyFilter.add(`chat:${chatSessionId}`);
     this.failedSessionDeletions.delete(chatSessionId);

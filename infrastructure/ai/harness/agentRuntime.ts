@@ -77,6 +77,22 @@ export class AgentRuntime {
     globalTerminalMonitorGuard.clearPrefix(`${chatSessionId}:`);
   }
 
+  /**
+   * Waits for the protected durable tool-output deletion that
+   * `clearChatSession` scheduled via `prune` (it fires only after in-flight
+   * undo alias passes and queued alias materialization retries have finished
+   * reading the source's durable records). Returns false when the store has
+   * no such deletion in flight — persistence is not installed on the runtime
+   * store, in which case an alias pass cannot be reading this source's
+   * durable files (undo installs persistence before it starts aliasing).
+   */
+  async waitForChatSessionToolOutputDeletion(chatSessionId: string): Promise<boolean> {
+    const deletion = this.toolOutputStore.getSessionDeletionPromise(chatSessionId);
+    if (!deletion) return false;
+    await deletion.catch(() => {});
+    return true;
+  }
+
   clearTerminalSession(terminalSessionId: string): void {
     this.toolOutputStore.pruneTerminalSessionEverywhere(terminalSessionId);
   }

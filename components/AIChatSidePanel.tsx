@@ -321,6 +321,11 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
 
   const [showHistory, setShowHistory] = useState(false);
   const [isSending, setIsSending] = useState(false);
+  // Undo-last-turn (including its durable alias materialization) is still
+  // running. Unlike the send flow this is not reflected in `isSending`, so it
+  // is tracked separately to block sends until the branch settles: a turn
+  // submitted meanwhile would run against the (soon hidden) source session.
+  const [isUndoingLastTurn, setIsUndoingLastTurn] = useState(false);
   const [runtimeAgentModelPresets, setRuntimeAgentModelPresets] = useState<Record<string, { cacheKey: string; models: AgentModelPreset[] }>>({});
   const [runtimeModelWarnings, setRuntimeModelWarnings] = useState<Record<string, { cacheKey: string; message: string }>>({});
   const [steerWarnings, setSteerWarnings] = useState<Record<string, SteerWarning>>({});
@@ -841,6 +846,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     // publish duplicate branches and restore the same prompt twice.
     if (undoInFlightRef.current) return;
     undoInFlightRef.current = true;
+    setIsUndoingLastTurn(true);
     try {
       const result = await undoLastTurnInSession(sessionId);
       if (!result) return;
@@ -871,6 +877,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
       toast.info(t('ai.chat.undoLastTurnNotice'));
     } finally {
       undoInFlightRef.current = false;
+      setIsUndoingLastTurn(false);
     }
   }, [
     discardPendingComposerText,
@@ -1185,8 +1192,8 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
 
   const inputAgentId = activeSession?.agentId ?? currentDraft?.agentId ?? currentAgentId;
   const canSendCurrentAgent = useMemo(
-    () => !isSending && canSendWithAgent(inputAgentId, externalAgents),
-    [inputAgentId, externalAgents, isSending],
+    () => !isSending && !isUndoingLastTurn && canSendWithAgent(inputAgentId, externalAgents),
+    [inputAgentId, externalAgents, isSending, isUndoingLastTurn],
   );
 
   const handleAgentModelSelect = useCallback((modelId: string) => {
@@ -1297,6 +1304,11 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     }));
     const hasInlineTextAttachments = attachments.some(isInlineTextAttachment);
     if ((!trimmed && !hasInlineTextAttachments) || isStreaming) return;
+    // While undo-last-turn is creating the branch (including its durable
+    // alias materialization) the target session is still the source one; a
+    // turn submitted now would run in the soon-hidden source session, so
+    // block it until the branch settles.
+    if (isUndoingLastTurn) return;
     // Note-only sends (empty text + a mentioned note) still need a usable
     // session title: fall back to the first mentioned note's title so these
     // conversations don't all show up as "Untitled" in history.
@@ -1529,7 +1541,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     }
   }, [
     validateNoteMentions, loadCodexConfigModel,
-    isStreaming, activeProvider, effectiveActiveProvider, effectiveActiveModelId, selectedCattyThinking, scopeKey, currentAgentId,
+    isStreaming, isUndoingLastTurn, activeProvider, effectiveActiveProvider, effectiveActiveModelId, selectedCattyThinking, scopeKey, currentAgentId,
     activeModelId, externalAgents,
     createSession, addMessageToSession, updateMessageById, updateLastMessage,
     setStreamingForScope,
@@ -1817,7 +1829,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
       >
       <AIChatPanelContent
         parked={!isVisible}
-        sending={isSending}
+        sending={isSending || isUndoingLastTurn}
         t={t}
         currentAgentId={currentAgentId}
         externalAgents={externalAgents}
