@@ -177,6 +177,64 @@ export class SessionStateStore {
   }
 
   /**
+   * Rebuild the copied poll offsets of `chatSessionId`'s background jobs from
+   * the poll output the branch's retained prefix still contains. `copyState`
+   * carries the source's latest `nextOffset` over, but the undone turn's poll
+   * results are gone from the branch: reinjecting that offset would make the
+   * next `terminal.poll` resume past output the branched conversation has
+   * never seen. Each job's offset is reset to the last offset a retained
+   * `terminal.start` / `terminal.poll` result observed, or 0 when the retained
+   * prefix never observed the job — the branch then re-reads instead of
+   * skipping unseen output.
+   */
+  rebuildBackgroundJobOffsetsFromMessages(
+    chatSessionId: string,
+    messages: readonly ChatMessage[],
+  ): void {
+    const state = { ...this.get(chatSessionId) };
+    if (Object.keys(state.activeJobs).length === 0) return;
+
+    const toolNames = new Map<string, string>();
+    for (const message of messages) {
+      for (const call of message.toolCalls ?? []) {
+        if (call.name) toolNames.set(call.id, call.name);
+      }
+    }
+
+    const observedOffsets = new Map<string, number>();
+    for (const message of messages) {
+      for (const result of message.toolResults ?? []) {
+        if (result.isError) continue;
+        const name = (result.toolName ?? toolNames.get(result.toolCallId) ?? '').toLowerCase();
+        if (
+          name !== 'terminal_poll' && name !== 'terminal.poll'
+          && name !== 'terminal_start' && name !== 'terminal.start'
+        ) continue;
+        const parsed = parseResultObject(result.content);
+        const jobId = typeof parsed?.jobId === 'string' ? parsed.jobId : undefined;
+        const nextOffset = typeof parsed?.nextOffset === 'number' ? parsed.nextOffset : undefined;
+        if (!jobId || nextOffset === undefined) continue;
+        observedOffsets.set(jobId, nextOffset);
+      }
+    }
+
+    let changed = false;
+    for (const [jobId, job] of Object.entries(state.activeJobs)) {
+      const offset = observedOffsets.get(jobId) ?? 0;
+      if (offset === job.nextOffset) continue;
+      state.activeJobs = {
+        ...state.activeJobs,
+        [jobId]: { ...job, nextOffset: offset },
+      };
+      changed = true;
+    }
+    if (changed) {
+      state.updatedAt = Date.now();
+      this.bySession.set(chatSessionId, state);
+    }
+  }
+
+  /**
    * Rebuild the conversational state (user goal, decisions, blockers, plan) of
    * a branched chat by replaying its retained conversation prefix. The removed
    * turn's messages are gone, so conversational state captured while it ran

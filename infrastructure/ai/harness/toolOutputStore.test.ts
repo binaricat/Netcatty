@@ -1787,3 +1787,72 @@ test('pruning a source materializes its stalled alias restore requests before de
   assert.equal(read?.content, 'persisted content');
   assert.ok(persistence.entries.has('chat-branch-1:h1'));
 });
+
+test('a restored branch alias stays restorable after another cache-limit eviction', async () => {
+  // A materialized alias evicted by the session cap keeps its branch-owned
+  // durable record (see `evictHandle`). Restoring it builds a fresh handle
+  // object, so a further cache-limit eviction must not mistake that object for
+  // an ordinary one and delete the record — the branch's retained prefix still
+  // references the handle, and a second delete would make it permanently
+  // unreadable with no way to rebuild the manifest.
+  let now = 10_000;
+  const base = createFakeToolOutputPersistence();
+  // Unlike the default fake, deletes actually destroy the record so the
+  // assertions below observe eviction-driven deletions.
+  const persistence: ToolOutputPersistence & { entries: typeof base.entries } = {
+    ...base,
+    delete: async path => {
+      for (const [key, entry] of base.entries) {
+        if (entry.path === path) base.entries.delete(key);
+      }
+    },
+  };
+  const store = new ToolOutputStore({
+    persistence,
+    maxHandlesPerSession: 2,
+    ttlMs: 1_000,
+    now: () => now,
+  });
+
+  const expired = store.store({
+    chatSessionId: 'chat-source',
+    capabilityId: 'terminal.execute',
+    content: 'expired-first-',
+  });
+  await store.flush('chat-source');
+  now = 12_000;
+  assert.equal(store.get(expired.id, 'chat-source'), undefined);
+  const fresh1 = store.store({
+    chatSessionId: 'chat-source',
+    capabilityId: 'terminal.execute',
+    content: 'fresh-second-output',
+  });
+  now = 12_001;
+  const fresh2 = store.store({
+    chatSessionId: 'chat-source',
+    capabilityId: 'terminal.execute',
+    content: 'fresh-third-output',
+  });
+
+  now = 12_002;
+  await store.aliasSessionHandles('chat-source', 'chat-branch', {
+    retainedHandleIds: new Set([fresh1.id, fresh2.id, expired.id]),
+  });
+  // The branch's per-session cap evicts the freshly materialized fresh1 alias;
+  // its branch-owned durable record must survive (previous behavior).
+  assert.ok(persistence.entries.has(`chat-branch:${fresh1.id}`));
+
+  // Reading the evicted alias restores it as a new handle object.
+  const restored = await store.readChunkAsync({ handleId: fresh1.id }, 'chat-branch');
+  assert.equal(restored?.content, 'fresh-second-output');
+  assert.ok([store.get(fresh1.id, 'chat-branch')].every(Boolean));
+
+  // More cache pressure evicts the restored alias object again: the record
+  // must survive, and the branch must still be able to restore it afterwards.
+  now = 13_000;
+  store.store({ chatSessionId: 'chat-branch', capabilityId: 'terminal.execute', content: 'branch-a' });
+  store.store({ chatSessionId: 'chat-branch', capabilityId: 'terminal.execute', content: 'branch-b' });
+  assert.ok(persistence.entries.has(`chat-branch:${fresh1.id}`));
+  const reread = await store.readChunkAsync({ handleId: fresh1.id }, 'chat-branch');
+  assert.equal(reread?.content, 'fresh-second-output');
+});

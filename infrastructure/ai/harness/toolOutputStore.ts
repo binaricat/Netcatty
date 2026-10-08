@@ -257,6 +257,16 @@ export class ToolOutputStore {
   // must not invalidate these: their handle no longer depends on the
   // source-owned file.
   private readonly materializedAliasHandles = new WeakSet<ToolOutputHandle>();
+  // The same durable-alias tracking keyed by "chatSessionId:handleId" instead
+  // of handle-object identity. Restoring an evicted alias builds a brand-new
+  // handle object the WeakSet above cannot track, so a later cache-limit
+  // eviction of that restored object would otherwise fall through to
+  // `persistence.delete` and destroy the branch-owned record the retained
+  // prefix still references — permanently making the alias unreadable even
+  // though its durable copy exists. Eviction for these keys always keeps the
+  // durable record (as TTL pruning does); it is reclaimed with the branch
+  // session's other records.
+  private readonly materializedAliasKeys = new Set<string>();
   private aliasMaterializationRetryTimer?: ReturnType<typeof setTimeout>;
   // Notified whenever the pending alias restore queue changes; lets `prune`
   // wait until every queued alias restore retry that still needs its source
@@ -694,6 +704,7 @@ export class ToolOutputStore {
         alias.filePath = path;
         alias.fullContent = undefined;
         this.materializedAliasHandles.add(alias);
+        this.materializedAliasKeys.add(`${alias.chatSessionId}:${alias.id}`);
       } catch {
         // Transient persistence failure while the alias still shares the
         // source-owned view; queue the alias for retry rather than leaving it
@@ -759,7 +770,10 @@ export class ToolOutputStore {
       // exists, so only the aliases still reading the source-owned file are
       // dropped. Evicting a source-shared alias does not delete the shared
       // file itself — the source session's own handle still references it.
-      if (this.materializedAliasHandles.has(handle)) continue;
+      if (
+        this.materializedAliasHandles.has(handle)
+        || this.materializedAliasKeys.has(`${handle.chatSessionId}:${handle.id}`)
+      ) continue;
       targetMap.delete(handle.id);
       this.evictHandle(handle);
     }
@@ -1335,8 +1349,14 @@ export class ToolOutputStore {
     // retained prefix beyond the caps (more than maxHandlesPerSession of them,
     // or more than maxCharsPerSession) could never resolve again — handles
     // dropped by TTL pruning keep their manifests and stay restorable, and
-    // these materialized aliases must stay restorable the same way.
-    if (this.materializedAliasHandles.has(handle)) {
+    // these materialized aliases must stay restorable the same way. The key
+    // set below also covers restored alias handles (new objects the WeakSet
+    // cannot track) so repeated cache-limit eviction can never delete their
+    // branch-owned record.
+    if (
+      this.materializedAliasHandles.has(handle)
+      || this.materializedAliasKeys.has(`${handle.chatSessionId}:${handle.id}`)
+    ) {
       this.materializedAliasHandles.delete(handle);
       return;
     }

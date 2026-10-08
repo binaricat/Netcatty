@@ -726,6 +726,13 @@ export function useAIState() {
     getAgentRuntime()
       .getSessionStateStore()
       .copyState(source.id, branched.id);
+    // copyState carries the source's latest poll offsets over, but the undone
+    // turn's poll results are gone from the branch: rebuild each job's offset
+    // from the retained prefix so the branch polls from the last offset its
+    // history actually observed (or from 0) instead of skipping unseen output.
+    getAgentRuntime()
+      .getSessionStateStore()
+      .rebuildBackgroundJobOffsetsFromMessages(branched.id, branched.messages);
     // Conversational state (user goal, decisions, plan, blockers) is derived
     // from messages, so copyState excludes it: plan updates or tool errors the
     // undone turn produced must not be reinjected into the branch. Rebuild it
@@ -750,12 +757,27 @@ export function useAIState() {
         jobIdsByOwner.set(inherited.ownerChatSessionId, jobIds);
       }
       for (const [ownerChatSessionId, jobIds] of jobIdsByOwner) {
-        const registration = getAIBridge()?.aiRegisterInheritedBackgroundJobs?.(
-          branched.id,
-          ownerChatSessionId,
-          jobIds,
-        );
-        if (registration) void registration.catch(() => {});
+        // Await and validate every registration before the branch is
+        // published: a fire-and-forget call would let Undo hand out a branch
+        // id the main process does not yet recognize for these jobs, so a
+        // following `terminal.poll` would fail with "Background job not found"
+        // indefinitely — and a source deletion in that window could also cancel
+        // the job because no branch depends on it yet. Retry briefly on
+        // transient failures; if the bridge (or the call) stays unavailable the
+        // undo proceeds as before rather than blocking the whole flow.
+        const register = getAIBridge()?.aiRegisterInheritedBackgroundJobs;
+        if (!register) continue;
+        for (let attempt = 0; ; attempt++) {
+          let ok = false;
+          try {
+            const result = await register(branched.id, ownerChatSessionId, jobIds);
+            ok = result?.ok === true;
+          } catch {
+            // Transient IPC/persistence failure — retry below.
+          }
+          if (ok || attempt >= 2) break;
+          await new Promise(resolve => setTimeout(resolve, 150 * (attempt + 1)));
+        }
       }
     }
     // The retained prefix may reference tool outputs stored under the source

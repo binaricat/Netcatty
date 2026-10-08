@@ -287,3 +287,65 @@ test('SessionStateStore enumerates inherited background jobs for undo registrati
   ]);
   assert.deepEqual(store.getInheritedBackgroundJobs('chat-stranger'), []);
 });
+
+test('SessionStateStore rebuilds inherited job offsets from the retained prefix', () => {
+  const store = new SessionStateStore();
+  // A retained turn starts a job and polls it; its results stay in the branch.
+  store.updateFromToolResult(
+    'chat-source', 'terminal_start', { sessionId: 'sess-1', command: 'npm run dev' },
+    JSON.stringify({ jobId: 'job-1', status: 'running', nextOffset: 100 }), false,
+  );
+  store.updateFromToolResult(
+    'chat-source', 'terminal_poll', { jobId: 'job-1', offset: 0 },
+    JSON.stringify({ jobId: 'job-1', status: 'running', nextOffset: 300 }), false,
+  );
+  // The undone turn polls again; its result is removed from the branch but its
+  // advanced offset is what `copyState` would carry over.
+  store.updateFromToolResult(
+    'chat-source', 'terminal_poll', { jobId: 'job-1', offset: 300 },
+    JSON.stringify({ jobId: 'job-1', status: 'running', nextOffset: 420 }), false,
+  );
+  // A job started by the undone turn only: the branch retains nothing for it.
+  store.updateFromToolResult(
+    'chat-source', 'terminal_start', { sessionId: 'sess-2', command: 'sleep 60' },
+    JSON.stringify({ jobId: 'job-2', status: 'running', nextOffset: 250 }), false,
+  );
+
+  store.copyState('chat-source', 'chat-branch');
+  assert.equal(store.get('chat-branch').activeJobs['job-1'].nextOffset, 420);
+  assert.equal(store.get('chat-branch').activeJobs['job-2'].nextOffset, 250);
+
+  store.rebuildBackgroundJobOffsetsFromMessages('chat-branch', [
+    { id: 'user-1', role: 'user', content: 'run the job', timestamp: 1 },
+    {
+      id: 'assistant-1',
+      role: 'assistant',
+      content: '',
+      timestamp: 2,
+      toolCalls: [
+        { id: 'call-start', name: 'terminal_start', arguments: { sessionId: 'sess-1' } },
+        { id: 'call-poll', name: 'terminal_poll', arguments: { jobId: 'job-1' } },
+      ],
+      toolResults: [
+        {
+          toolCallId: 'call-start', toolName: 'terminal_start',
+          content: JSON.stringify({ jobId: 'job-1', status: 'running', nextOffset: 100 }),
+          isError: false,
+        },
+        {
+          toolCallId: 'call-poll', toolName: 'terminal_poll',
+          content: JSON.stringify({ jobId: 'job-1', status: 'running', nextOffset: 300 }),
+          isError: false,
+        },
+      ],
+    },
+  ]);
+
+  // The branch polls from the last offset its retained history observed, and a
+  // job the retained prefix never observed re-reads from the start.
+  assert.equal(store.get('chat-branch').activeJobs['job-1'].nextOffset, 300);
+  assert.equal(store.get('chat-branch').activeJobs['job-2'].nextOffset, 0);
+  // The source state (undone turn included) is untouched.
+  assert.equal(store.get('chat-source').activeJobs['job-1'].nextOffset, 420);
+  assert.equal(store.get('chat-source').activeJobs['job-2'].nextOffset, 250);
+});
