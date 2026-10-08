@@ -1,13 +1,14 @@
 import type { AgentActivity } from './agentActivity';
-import type { AISession } from '../infrastructure/ai/types';
+import type { AISession, ChatMessageAttachment } from '../infrastructure/ai/types';
 import { matchesSearchQuery } from '../lib/searchMatcher';
 
 /**
  * Searchable shape for session history search. Pure domain logic consumed by
  * the session history drawer; matches on title plus user/assistant message
- * text, including thinking, tool call names/arguments, tool result content and
+ * text, including thinking, tool call names/arguments, tool result content,
  * persisted agent activities (web-search queries, file paths, plan items,
- * warnings) already stored on messages.
+ * warnings) already stored on messages, visible attachment labels (file names
+ * and Vault note titles) and persisted error messages.
  */
 export type SessionHistorySearchTarget = Pick<AISession, 'title' | 'messages'>;
 
@@ -90,6 +91,24 @@ function serializeAgentActivities(activities: AgentActivity[]): string {
   return parts.join('\n');
 }
 
+/**
+ * Serialize the human-visible labels of a message's attachments: file names
+ * and Vault note titles. Rendered from `message.attachments` when the
+ * conversation is reopened (with the legacy `images` field as fallback), so
+ * a session whose only mention of a term sits in an attachment label must
+ * stay findable. Only the short labels are indexed — never the base64
+ * payloads — so attaching files cannot blow up the search haystack.
+ */
+function serializeAttachmentLabels(attachments: ChatMessageAttachment[] | undefined): string {
+  if (!attachments?.length) return '';
+  const parts: string[] = [];
+  for (const attachment of attachments) {
+    if (attachment.vaultNoteTitle) parts.push(attachment.vaultNoteTitle);
+    if (attachment.filename) parts.push(attachment.filename);
+  }
+  return parts.join('\n');
+}
+
 export function collectSessionSearchFields(session: SessionHistorySearchTarget): string[] {
   const collector = createSearchFieldCollector();
   // The title is indexed first so it always survives the total-length cap.
@@ -104,6 +123,12 @@ export function collectSessionSearchFields(session: SessionHistorySearchTarget):
     const message = session.messages[i];
     collector.push(message.content);
     collector.push(message.thinking);
+    // Persisted failure diagnostics: when a Catty turn fails with empty
+    // content the error message is the only visible text in the reopened
+    // conversation, so it must be indexed. Error strings are short, hence the
+    // tight cap.
+    collector.push(message.errorInfo?.message, MAX_TOOL_ARGUMENTS_FIELD_LENGTH);
+    collector.push(serializeAttachmentLabels(message.attachments ?? message.images), MAX_TOOL_ARGUMENTS_FIELD_LENGTH);
     for (const toolCall of message.toolCalls ?? []) {
       collector.push(toolCall.name);
       collector.push(serializeToolCallArguments(toolCall.arguments), MAX_TOOL_ARGUMENTS_FIELD_LENGTH);

@@ -157,6 +157,59 @@ test("filterSessionHistory matches persisted agent activities", () => {
   assert.ok(fields.some((field) => field.includes("rate limit hit")));
 });
 
+test("filterSessionHistory matches persisted error messages and attachment labels", () => {
+  const sessions = [
+    createSession("a", "Untitled", [
+      {
+        role: "assistant",
+        content: "",
+        errorInfo: { type: "provider", message: "upstream rate limit exceeded", retryable: true },
+      },
+    ]),
+    createSession("b", "Deploy", [
+      {
+        role: "user",
+        content: "please summarize",
+        attachments: [
+          { base64Data: "", mediaType: "text/plain", filename: "k8s-manifest.yaml" },
+          { base64Data: "", mediaType: "text/markdown", vaultNoteTitle: "Postgres runbook" },
+        ],
+      },
+    ]),
+    createSession("c", "Legacy", [
+      {
+        role: "user",
+        content: "see attached",
+        images: [
+          { base64Data: "", mediaType: "image/png", filename: "screenshot.png" },
+        ],
+      },
+    ]),
+    createSession("d", "Payloads", [
+      {
+        role: "user",
+        content: "",
+        attachments: [
+          { base64Data: "AAAA", mediaType: "image/png", terminalSelection: true },
+        ],
+      },
+    ]),
+  ];
+
+  assert.deepEqual(filterSessionHistory(sessions, "rate limit exceeded"), [sessions[0]]);
+  assert.deepEqual(filterSessionHistory(sessions, "k8s-manifest"), [sessions[1]]);
+  assert.deepEqual(filterSessionHistory(sessions, "postgres runbook"), [sessions[1]]);
+  assert.deepEqual(filterSessionHistory(sessions, "screenshot.png"), [sessions[2]]);
+  // Attachment base64 payloads and unlabeled attachments are not indexed.
+  assert.deepEqual(filterSessionHistory(sessions, "AAAA"), []);
+  assert.deepEqual(filterSessionHistory(sessions, "nothing here"), []);
+
+  const fields = collectSessionSearchFields(sessions[1]);
+  assert.ok(fields.some((field) => field.includes("k8s-manifest.yaml")));
+  assert.ok(fields.some((field) => field.includes("Postgres runbook")));
+  assert.ok(!fields.some((field) => field === "AAAA"));
+});
+
 test("collectSessionSearchFields skips empty content and caps very long fields", () => {
   const session = createSession("a", "  ", [
     { role: "user", content: "   " },
