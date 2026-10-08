@@ -6,6 +6,7 @@
  */
 
 const inFlightRootIds = new Set<string>();
+const settlementWaiters = new Map<string, Set<() => void>>();
 
 export function registerTransferWalk(rootTaskId: string): void {
   inFlightRootIds.add(rootTaskId);
@@ -13,15 +14,28 @@ export function registerTransferWalk(rootTaskId: string): void {
 
 export function unregisterTransferWalk(rootTaskId: string): void {
   inFlightRootIds.delete(rootTaskId);
+  const waiters = settlementWaiters.get(rootTaskId);
+  settlementWaiters.delete(rootTaskId);
+  for (const resolve of waiters ?? []) resolve();
 }
 
 export function isTransferWalkInFlight(rootTaskId: string): boolean {
   return inFlightRootIds.has(rootTaskId);
 }
 
+/** Wait for the current walk to finish; cancellation must not resume a dying walk. */
+export function waitForTransferWalkSettled(rootTaskId: string): Promise<void> {
+  if (!inFlightRootIds.has(rootTaskId)) return Promise.resolve();
+  return new Promise((resolve) => {
+    const waiters = settlementWaiters.get(rootTaskId) ?? new Set();
+    waiters.add(resolve);
+    settlementWaiters.set(rootTaskId, waiters);
+  });
+}
+
 /** Test helper. */
 export function resetTransferWalkRegistryForTests(): void {
-  inFlightRootIds.clear();
+  for (const id of inFlightRootIds) unregisterTransferWalk(id);
 }
 
 export function listTransferWalksForTests(): string[] {

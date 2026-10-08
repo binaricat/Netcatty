@@ -24,6 +24,7 @@ import {
   latchTransferPauseTree,
   releaseTransferPauseTree,
 } from "./transferPauseLatch";
+import { isTransferOrRootCancelled } from "./transferCancelLatch";
 import { isTransferWalkInFlight } from "./transferWalkRegistry";
 
 export type TransferControlBridge = {
@@ -72,7 +73,7 @@ export function reconcileSupersededControls(
   requestedAction: "pause" | "resume",
   controlTaskId = taskId,
 ): void {
-  if (!isTransferControlEpochCurrent(controlTaskId, epoch)) return;
+  if (!isTransferControlEpochCurrent(controlTaskId, epoch) || isTransferOrRootCancelled(taskId)) return;
   const task = host.getTasks().find((candidate) => candidate.id === taskId);
   if (!task || ["completed", "cancelled", "failed"].includes(task.status)) return;
   const apply = (id: string, descendants: string[], action: "pause" | "resume" | "cancel") => {
@@ -234,7 +235,7 @@ export async function softPauseTransfer(
   const undoObsoletePause = async (id: string) => {
     const live = host.getTasks().find((candidate) => candidate.id === taskId);
     if (!live || ["completed", "cancelled", "failed", "interrupted"].includes(live.status)) return;
-    if (isTransferOrRootPauseLatched(taskId, id)) return;
+    if (isTransferOrRootPauseLatched(taskId, id) || isTransferOrRootCancelled(taskId, id)) return;
     try { await bridge!.resumeTransfer?.(id); } catch { /* best-effort */ }
   };
   const pauseOne = async (id: string) => {

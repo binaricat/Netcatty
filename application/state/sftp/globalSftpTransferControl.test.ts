@@ -520,3 +520,24 @@ test("folder resume releases a completed child compacted while pause was drainin
   assert.equal(resumed.handled, true);
   assert.equal(isTransferPauseLatched(child.id), false, "the worker still waits on this child even though its history row is gone");
 });
+
+
+test("late pause acknowledgement cannot restart a cancelling stream before settlement", async (t) => {
+  const { markTransferCancelledTree, resetTransferCancelLatchesForTests } = await import("./transferCancelLatch");
+  const { bumpTransferControlEpoch } = await import("./transferControlEpoch");
+  const { releaseTransferPauseTree } = await import("./transferPauseLatch");
+  t.after(() => { resetTransferCancelLatchesForTests(); resetTransferPauseLatchesForTests(); });
+  let finishPause!: (value: { success: boolean }) => void;
+  let resumes = 0;
+  const { host } = createHost([makeTask("cancel-during-pause")], () => ({
+    pauseTransfer: () => new Promise((resolve) => { finishPause = resolve; }),
+    resumeTransfer: async () => { resumes += 1; return { success: true }; },
+  }));
+  const pause = softPauseTransfer(host, "cancel-during-pause");
+  markTransferCancelledTree("cancel-during-pause");
+  bumpTransferControlEpoch("cancel-during-pause");
+  releaseTransferPauseTree("cancel-during-pause");
+  finishPause({ success: true });
+  await pause;
+  assert.equal(resumes, 0);
+});

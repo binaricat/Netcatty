@@ -561,3 +561,90 @@ test("files past the preflight bound stay un-statted after conflict resolution",
     restore();
   }
 });
+
+test("owned cancelled directory settles recoverable children without dropping completed bytes", async () => {
+  const { writeFile, readFile, mkdtemp, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { transferRuntime } = await import("./transferRuntime");
+  const root = await mkdtemp(join(tmpdir(), "netcatty-owner-cancel-"));
+  const completedPath = join(root, "completed.txt");
+  await writeFile(completedPath, "completed bytes must remain");
+  const ownerId = "cancel-owner-large";
+  const rootId = "cancel-root-large";
+  const base = {
+    id: rootId, fileName: "folder", sourcePath: "/opt/folder", targetPath: root,
+    sourceConnectionId: "remote-conn", targetConnectionId: "local-conn",
+    sourceHostId: "host-1", direction: "download" as const, status: "transferring" as const,
+    totalBytes: 2201, transferredBytes: 1, speed: 0, startTime: 1, isDirectory: true,
+  };
+  const children = Array.from({ length: 2200 }, (_, index) => ({
+    ...base, id: `cancel-child-${index}`, parentTaskId: rootId, isDirectory: false,
+    sourcePath: `/opt/folder/${index}`, targetPath: join(root, String(index)),
+    totalBytes: 10, transferredBytes: 4, status: "queued" as const,
+  }));
+  sftpTransferCenterStore.publishOwner(ownerId, [base, ...children, {
+    ...base, id: "cancel-completed", parentTaskId: rootId, isDirectory: false,
+    sourcePath: "/opt/folder/completed.txt", targetPath: completedPath, status: "completed",
+  }]);
+  let active = 0;
+  let peak = 0;
+  const cleaned: string[] = [];
+  const restore = installGlobals({
+    cancelTransfer: async (id: string) => {
+      assert.notEqual(id, "cancel-completed");
+      active += 1;
+      peak = Math.max(peak, active);
+      await new Promise((resolve) => setImmediate(resolve));
+      active -= 1;
+      return { success: id !== "cancel-child-0" };
+    },
+    clearPendingTransferCancel: async () => undefined,
+    cleanupTransferArtifacts: async ({ transferId }: { transferId: string }) => { cleaned.push(transferId); },
+  });
+  let ops: ReturnType<typeof useSftpTransfers> | undefined;
+  let renderer: ReactTestRenderer | undefined;
+  function Probe() {
+    ops = useSftpTransfers({
+      ownerId,
+      getActivePane: (side) => makePane(side),
+      getPaneByConnectionId: () => null, getTabByConnectionId: () => null,
+      updateTab: () => undefined, refresh: async () => undefined,
+      clearCacheForConnection: () => undefined, handleSessionError: () => undefined,
+      sftpSessionsRef: { current: new Map([["remote-conn", "sftp-remote"]]) },
+      connectionCacheKeyMapRef: { current: new Map() },
+      listLocalFiles: async () => [], listRemoteFiles: async () => [],
+    });
+    return null;
+  }
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  try {
+    await act(async () => { renderer = create(React.createElement(Probe)); });
+    const walking = transferRuntime.runWalk(rootId, async () => {
+      await held;
+      // Old scheduler callbacks settle as cancelled before the outcome is applied.
+      sftpTransferCenterStore.publishOwner(ownerId, sftpTransferCenterStore.getOwnerTasks(ownerId).map((task) =>
+        task.status === "completed" ? task : { ...task, status: "cancelled" }));
+    });
+    await act(async () => {
+      const cancellation = ops!.cancelTransfer(rootId);
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(transferRuntime.isWalkInFlight(rootId), true);
+      release();
+      await Promise.all([walking, cancellation]);
+    });
+    assert.ok(peak <= 32, `bounded cancellation IPC, got ${peak}`);
+    assert.equal(sftpTransferCenterStore.getTask(rootId)?.status, "attention");
+    assert.equal(sftpTransferCenterStore.getTask("cancel-child-0")?.status, "attention");
+    const remaining = sftpTransferCenterStore.getTask("cancel-child-1");
+    if (remaining) assert.equal(remaining.status, "interrupted");
+    assert.deepEqual(cleaned, [], "no stage cleanup during partial cancellation recovery");
+    assert.equal(await readFile(completedPath, "utf8"), "completed bytes must remain");
+  } finally {
+    release();
+    await act(async () => { renderer?.unmount(); });
+    restore();
+    await rm(root, { recursive: true, force: true });
+  }
+});
