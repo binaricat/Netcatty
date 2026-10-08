@@ -29,6 +29,8 @@ function isMetadataUnsupportedError(error) {
 // `mode` (optional) is applied to the fallback stream so mounts that reject
 // chmod still receive restrictive creation-mode bits instead of the broader
 // default 0666; the accelerated copyFile path keeps the source's mode.
+// Callers that need to open `target` for reading before they can chmod must
+// keep an owner-read bit in `mode`.
 async function copyFileExclusiveWithFallback(source, target, mode = null) {
   try {
     await fs.promises.copyFile(source, target, fs.constants.COPYFILE_EXCL);

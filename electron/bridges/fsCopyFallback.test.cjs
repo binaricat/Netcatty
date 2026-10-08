@@ -146,6 +146,37 @@ test("local promotion completes when the destination refuses copyFile and chmod"
   assert.equal(fs.readdirSync(dir).filter((name) => name.endsWith(".backup")).length, 0);
 });
 
+for (const restrictiveMode of [0o200, 0o000]) {
+  test(`local promotion replaces a mode-${restrictiveMode.toString(8)} destination through the EXDEV fallback`, async (t) => {
+    const dir = makeTempDir(`promote-mode-${restrictiveMode.toString(8)}-`);
+    t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+    const staged = path.join(dir, "staged");
+    const target = path.join(dir, "target");
+    const payload = Buffer.alloc(2 * 1024 * 1024 + 11, 5);
+    fs.writeFileSync(staged, payload);
+    fs.writeFileSync(target, "original");
+    fs.chmodSync(target, restrictiveMode);
+    // Force the EXDEV stream fallback like a FUSE staging volume would, and
+    // make the accelerated copy syscall refuse so the streamed path runs.
+    const renameOriginal = fs.promises.rename;
+    const renameRestore = stubPromises("rename", async (...args) => {
+      if (String(args[1]).endsWith(".ready")) {
+        throw Object.assign(new Error("EXDEV: cross-device link not permitted"), { code: "EXDEV" });
+      }
+      return renameOriginal.apply(fs.promises, args);
+    });
+    const copyFileRestore = stubPromises("copyFile", enotsupCopyFile());
+    t.after(renameRestore);
+    t.after(copyFileRestore);
+    await transferBridge._promoteLocalTransferForTests(staged, target, { existingMode: restrictiveMode });
+    // Restore owner access so the payload can be verified and cleaned up.
+    fs.chmodSync(target, 0o600);
+    assert.ok(fs.readFileSync(target).equals(payload));
+    assert.equal(fs.statSync(target).mode & 0o777, 0o600);
+    assert.deepEqual(fs.readdirSync(dir), ["target"], "promotion leaves no recovery files behind");
+  });
+}
+
 test("copyFileExclusiveWithFallback applies restrictive creation mode to the streamed fallback", async (t) => {
   const dir = makeTempDir("copy-fallback-mode-");
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
