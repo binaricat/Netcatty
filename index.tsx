@@ -173,9 +173,10 @@ const renderApp = () => {
   // Peer session windows must not drive the main window's settings IPC sync
   // and must not re-apply OS-level system settings effects (tray, global
   // shortcuts, …) — they follow the main window through the chrome stores.
-  const settingsOptions = isPeerSessionWindow || isEditorWindow
+  // Editors consume their own settings instance, so keep IPC/storage sync on.
+  const settingsOptions = isPeerSessionWindow
     ? { enableSettingsSync: false, enableSystemEffects: false }
-    : undefined;
+    : isEditorWindow ? { enableSystemEffects: false } : undefined;
 
   syncTrayWindowClass(route);
   if (route === 'settings') {

@@ -78,7 +78,7 @@ test("main/settings/tray call sites wire Windows chrome helpers", () => {
     const requireIndex = source.indexOf('require("./windowsWindowChrome.cjs")');
     const withIndex = source.indexOf("with (ctx)");
     assert.ok(
-      requireIndex !== -1 && withIndex !== -1 && requireIndex < withIndex,
+      requireIndex !== -1 && (withIndex === -1 || requireIndex < withIndex),
       `${label}: require chrome helpers before with(ctx) so injected require cannot remount the path`,
     );
   }

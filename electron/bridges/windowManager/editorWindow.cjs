@@ -57,7 +57,6 @@ function sanitizeEditorSnapshot(payload) {
 }
 
 function createEditorWindowApi(ctx) {
-  with (ctx) {
     let editorWindow = null;
     let editorWindowLoaded = null;
     const tabSources = new Map();
@@ -175,7 +174,7 @@ function createEditorWindowApi(ctx) {
           // Pending ownership keeps the source alive while opening, but only
           // accepted tabs may close the source copy during window cleanup.
           owner.accepted = true;
-          showAndFocusWindow(win);
+          ctx.showAndFocusWindow(win);
           return { success: true, reused };
         } catch (error) {
           return { success: false, error: error?.message || "Failed to open editor tab" };
@@ -200,11 +199,11 @@ function createEditorWindowApi(ctx) {
       }
 
       const osTheme = electronModule?.nativeTheme?.shouldUseDarkColors ? "dark" : "light";
-      const effectiveTheme = currentTheme === "dark" || currentTheme === "light" ? currentTheme : osTheme;
-      const frontendBackground = resolveFrontendBackgroundColor(electronDir || __dirname, effectiveTheme);
+      const effectiveTheme = ctx.currentTheme === "dark" || ctx.currentTheme === "light" ? ctx.currentTheme : osTheme;
+      const frontendBackground = ctx.resolveFrontendBackgroundColor(electronDir || ctx.__dirname || __dirname, effectiveTheme);
       const backgroundColor = frontendBackground || "#1a1a1a";
-      const { x: editorX, y: editorY } = resolveSettingsWindowBounds(electronModule, {
-        sourceWindow: sourceWindow || mainWindow,
+      const { x: editorX, y: editorY } = ctx.resolveSettingsWindowBounds(electronModule, {
+        sourceWindow: sourceWindow || ctx.mainWindow,
         settingsWidth: EDITOR_WIDTH,
         settingsHeight: EDITOR_HEIGHT,
       });
@@ -232,7 +231,7 @@ function createEditorWindowApi(ctx) {
           sandbox: false,
           spellcheck: false,
           backgroundThrottling: false,
-          v8CacheOptions: V8_CACHE_OPTIONS,
+          v8CacheOptions: ctx.V8_CACHE_OPTIONS,
         },
       });
       editorWindow = win;
@@ -245,20 +244,20 @@ function createEditorWindowApi(ctx) {
         const leftoverIds = Array.from(tabSources.keys());
         notifySourcesTabsClosed(electronModule, leftoverIds);
         tabSources.clear();
-        unregisterAppContentWindow(win);
-        notifyAppContentWindowClosed(win);
+        ctx.unregisterAppContentWindow(win);
+        ctx.notifyAppContentWindowClosed(win);
       };
 
-      registerAppContentWindow(win, { queryDirtyEditors: true });
+      ctx.registerAppContentWindow(win, { queryDirtyEditors: true });
 
       try {
-        win.webContents?.setWindowOpenHandler?.(createExternalOnlyWindowOpenHandler(shell));
+        win.webContents?.setWindowOpenHandler?.(ctx.createExternalOnlyWindowOpenHandler(shell));
       } catch {
         // ignore
       }
 
       win.on("close", (event) => {
-        if (isQuitting || editorWindowCloseConfirmed) return;
+        if (ctx.isQuitting || editorWindowCloseConfirmed) return;
         event.preventDefault();
         if (nativeClosePending) return;
         nativeClosePending = true;
@@ -283,7 +282,7 @@ function createEditorWindowApi(ctx) {
       } catch {
         // ignore
       }
-      applyWindowOpacityToWindow(win);
+      ctx.applyWindowOpacityToWindow(win);
 
       if (isMac) {
         try {
@@ -327,7 +326,7 @@ function createEditorWindowApi(ctx) {
         try {
           if (isDev) {
             try {
-              const baseUrl = getDevRendererBaseUrl(devServerUrl);
+              const baseUrl = ctx.getDevRendererBaseUrl(devServerUrl);
               await win.loadURL(`${baseUrl}${editorPath}`);
             } catch (e) {
               console.warn("[EditorWindow] Dev server not reachable", e);
@@ -355,7 +354,7 @@ function createEditorWindowApi(ctx) {
         if (typeof editorId === "string" && editorId) {
           win.webContents.send("netcatty:window:editorActivateTab", { editorId });
         }
-        showAndFocusWindow(win);
+        ctx.showAndFocusWindow(win);
         return { success: true };
       } catch (err) {
         return { success: false, error: err?.message || "Failed to focus editor window" };
@@ -385,7 +384,7 @@ function createEditorWindowApi(ctx) {
         return { success: true, cancelled: false, closedIds: editorIds };
       }
       const force = payload?.force === true;
-      if (!force) showAndFocusWindow(win);
+      if (!force) ctx.showAndFocusWindow(win);
       const result = await invokeWebContents(
         electronModule,
         win.webContents,
@@ -533,7 +532,6 @@ function createEditorWindowApi(ctx) {
       remapEditorSession,
       getEditorWindow,
     };
-  }
 }
 
 module.exports = { createEditorWindowApi };

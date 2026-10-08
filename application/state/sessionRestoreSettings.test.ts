@@ -124,7 +124,7 @@ test("session peer windows do not run main-window startup effects", () => {
   assert.match(appLockGateSource, /settingsOptions\?: Parameters<typeof useSettingsState>\[0\]/);
   assert.match(appLockGateSource, /deps\.useSettingsState\(settingsOptions\)/);
   assert.match(indexSource, /const isPeerSessionWindow = window\.location\.hash\.startsWith\('#\/session-window'\)/);
-  assert.match(indexSource, /const settingsOptions = isPeerSessionWindow \|\| isEditorWindow\s*\?\s*\{ enableSettingsSync: false, enableSystemEffects: false \}/);
+  assert.match(indexSource, /const settingsOptions = isPeerSessionWindow\s*\?\s*\{ enableSettingsSync: false, enableSystemEffects: false \}/);
   assert.match(indexSource, /<AppLockGate settingsOptions=\{settingsOptions\}>/);
   // AppLockGate owns useSettingsState; App forwards the gate's instance into
   // SettingsPublisher so the runtime slot/context still publish it.
@@ -208,4 +208,14 @@ test("restore terminal cwd setting participates in cross-window settings sync", 
   assert.match(ipcSyncSource, /STORAGE_KEY_RESTORE_TERMINAL_CWD/);
   assert.match(ipcSyncSource, /setRestoreTerminalCwdState/);
   assert.match(ipcSyncSource, /key === STORAGE_KEY_RESTORE_TERMINAL_CWD/);
+});
+
+test("editor route keeps IPC/storage synchronization while disabling system effects", () => {
+  const source = readFileSync(new URL("../../index.tsx", import.meta.url), "utf8");
+  const expression = source.match(/const settingsOptions =\s*([^;]+);/s)?.[1];
+  assert.ok(expression, "renderer settings options must be explicit");
+  const resolveOptions = new Function("isPeerSessionWindow", "isEditorWindow", `return (${expression});`);
+  assert.deepEqual(resolveOptions(false, true), { enableSystemEffects: false });
+  assert.deepEqual(resolveOptions(true, false), { enableSettingsSync: false, enableSystemEffects: false });
+  assert.equal(resolveOptions(false, false), undefined);
 });

@@ -27,15 +27,16 @@ function harness() {
   const source = Object.assign(new EventEmitter(), { id: 99, isDestroyed: () => false, sent: [], send(channel, payload) { this.sent.push({ channel, payload }); } });
   const sources = new Map([[source.id, source]]);
   const electron = { BrowserWindow, ipcMain, webContents: { fromId: (id) => sources.get(id) } };
-  const api = createEditorWindowApi({ currentTheme: "dark", mainWindow: null, isQuitting: false,
+  const context = { currentTheme: "dark", mainWindow: null, isQuitting: false,
     V8_CACHE_OPTIONS: "code", resolveFrontendBackgroundColor: () => "#000", resolveSettingsWindowBounds: () => ({}),
     registerAppContentWindow() {}, unregisterAppContentWindow() {}, notifyAppContentWindowClosed() {},
     createExternalOnlyWindowOpenHandler() {}, applyWindowOpacityToWindow() {}, showAndFocusWindow(win) { win.shown = true; },
-  });
+  };
+  const api = createEditorWindowApi(context);
   const open = (id, owner = source) => { sources.set(owner.id, owner); return api.openEditorWindow(electron, { sourceWebContents: owner }, snapshot(id)); };
   const ready = (win) => ipcMain.emit("netcatty:window:editorReady", { sender: win.webContents });
   const accept = (win, request, ok = true) => ipcMain.emit("netcatty:window:editorOpenTabResult", { sender: win.webContents }, { requestId: request.payload.requestId, ok });
-  return { windows, source, ipcMain, open, ready, accept, api, electron };
+  return { windows, source, ipcMain, open, ready, accept, api, electron, context };
 }
 
 test("concurrent cold opens wait for load and the mounted receiver, then for each receipt", async (t) => {
@@ -177,4 +178,22 @@ test("native editor close uses renderer confirmation, preserves Cancel, and coal
   await tick();
   assert.equal(win.isDestroyed(), true, "Save/Discard completion permits native destruction");
   assert.equal(h.api.hasEditorTabsForSource(h.source), false);
+});
+
+
+test("editor module parses in strict mode without a with scope", () => {
+  const source = require("node:fs").readFileSync(require.resolve("./editorWindow.cjs"), "utf8");
+  assert.doesNotThrow(() => new Function("require", "module", "exports", '"use strict";\n' + source));
+});
+
+test("editor close reads the live quitting context instead of a captured value", async () => {
+  const h = harness();
+  const opening = h.open("first");
+  const win = h.windows[0];
+  win.loaded(); h.ready(win); await tick();
+  h.accept(win, win.sent[0]); await opening;
+  Object.defineProperty(h.context, "isQuitting", { get: () => true });
+  win.close();
+  assert.equal(win.isDestroyed(), true);
+  assert.equal(win.sent.some((request) => request.channel === "netcatty:window:editorCloseTabs"), false);
 });
