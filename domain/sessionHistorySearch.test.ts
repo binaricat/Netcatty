@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { AISession, ChatMessage } from "../../infrastructure/ai/types.ts";
+import type { AISession, ChatMessage } from "../infrastructure/ai/types.ts";
 import {
   collectSessionSearchFields,
   filterSessionHistory,
@@ -73,6 +73,34 @@ test("filterSessionHistory searches thinking and tool call/result content", () =
   assert.deepEqual(filterSessionHistory(sessions, "bind port"), [sessions[1]]);
 });
 
+test("filterSessionHistory matches text stored only in tool call arguments", () => {
+  const sessions = [
+    createSession("a", "Ops", [
+      {
+        role: "assistant",
+        toolCalls: [{
+          name: "shell",
+          id: "t1",
+          arguments: { command: "systemctl restart nginx" },
+        }],
+      },
+    ]),
+    createSession("b", "Deploy", [
+      {
+        role: "assistant",
+        toolCalls: [{ name: "file", id: "t2", arguments: {} }],
+      },
+    ]),
+  ];
+
+  assert.deepEqual(filterSessionHistory(sessions, "nginx"), [sessions[0]]);
+  assert.deepEqual(filterSessionHistory(sessions, "restart nginx"), [sessions[0]]);
+  assert.deepEqual(filterSessionHistory(sessions, "nothing here"), []);
+
+  const fields = collectSessionSearchFields(sessions[0]);
+  assert.ok(fields.some((field) => field.includes("systemctl restart nginx")));
+});
+
 test("collectSessionSearchFields skips empty content and caps very long fields", () => {
   const session = createSession("a", "  ", [
     { role: "user", content: "   " },
@@ -92,4 +120,30 @@ test("filterSessionHistory matches CJK titles via the shared pinyin matcher", ()
 
   assert.deepEqual(filterSessionHistory(sessions, "chongqi"), [sessions[0]]);
   assert.deepEqual(filterSessionHistory(sessions, "重启"), [sessions[0]]);
+});
+
+test("filterSessionHistory keeps the pinyin fallback on titles only", () => {
+  const sessions = [
+    createSession("a", "Ops", [
+      { role: "user", content: "重启生产服务器" },
+    ]),
+  ];
+
+  // Pinyin transliteration of long message content is skipped; literal CJK
+  // queries still match message text.
+  assert.deepEqual(filterSessionHistory(sessions, "重启"), [sessions[0]]);
+  assert.deepEqual(filterSessionHistory(sessions, "chongqi"), []);
+});
+
+test("collectSessionSearchFields bounds the total searchable text per session", () => {
+  const session = createSession("a", "big session", Array.from({ length: 40 }, (_, i) => ({
+    role: "user" as const,
+    content: `chunk-${i}-${"y".repeat(19_000)}`,
+  })));
+
+  const fields = collectSessionSearchFields(session);
+  const total = fields.reduce((sum, field) => sum + field.length, 0);
+  assert.ok(total <= 64_000, `total ${total} exceeds session cap`);
+  // Title is indexed first so it always lands in the bounded window.
+  assert.equal(fields[0], "big session");
 });

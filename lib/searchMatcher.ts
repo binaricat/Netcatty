@@ -86,10 +86,30 @@ export function tokenizeSearchQuery(query: string): string[] {
   return normalized.split(SEARCH_SPLIT_REGEX).filter(Boolean);
 }
 
+/**
+ * Optional matching tweaks. Callers with large unbounded haystacks (e.g.
+ * full conversation histories) should set `allowPinyin: false`: the pinyin
+ * fallback transliterates the joined fields, which is expensive for long text.
+ */
+export type SearchMatchOptions = {
+  allowPinyin?: boolean;
+};
+
+const DEFAULT_SEARCH_MATCH_OPTIONS: Required<SearchMatchOptions> = {
+  allowPinyin: true,
+};
+
 export function matchesSearchQuery(
   query: string,
-  ...fields: Array<string | null | undefined>
+  ...rest: Array<string | null | undefined | SearchMatchOptions>
 ): boolean {
+  const args = [...rest];
+  const options: Required<SearchMatchOptions> = args.length > 0
+    && typeof args[args.length - 1] === "object"
+    && args[args.length - 1] !== null
+    ? { ...DEFAULT_SEARCH_MATCH_OPTIONS, ...(args.pop() as SearchMatchOptions) }
+    : DEFAULT_SEARCH_MATCH_OPTIONS;
+  const fields = args as Array<string | null | undefined>;
   const normalizedQuery = normalizeText(query);
   if (!normalizedQuery) return true;
 
@@ -123,7 +143,7 @@ export function matchesSearchQuery(
   }
 
   const hasLatinToken = tokens.some((token) => /[a-z]/i.test(token));
-  if (!hasLatinToken) return false;
+  if (!hasLatinToken || !options.allowPinyin) return false;
 
   const { full, initials } = getPinyinVariants(sourceText);
   if (!full && !initials) return false;

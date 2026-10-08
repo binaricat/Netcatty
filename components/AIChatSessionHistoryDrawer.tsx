@@ -7,7 +7,7 @@ import { Input } from './ui/input';
 import { ScrollArea } from './ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 import { SESSION_HISTORY_ROW_CLASSNAMES } from './ai/sessionHistoryLayout';
-import { filterSessionHistory } from './ai/sessionHistorySearch';
+import { filterSessionHistory } from '../domain/sessionHistorySearch';
 
 // -------------------------------------------------------------------
 // Session History Drawer
