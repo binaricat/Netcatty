@@ -189,16 +189,19 @@ test('SessionStateStore rebuilds fork state from the retained prefix only', () =
   assert.match(text, /Open blockers/);
 });
 
-test('SessionStateStore rebuild pairs repeated pending calls sharing an id in order', () => {
+test('SessionStateStore rebuild pairs repeated pending calls with the nearest preceding call', () => {
   const store = new SessionStateStore();
   // A provider can emit several unresolved calls carrying the same id before
-  // their results arrive; the rebuild must not collapse them onto one entry.
+  // their results arrive; the rebuild keeps them distinct and pairs each
+  // result with the nearest preceding call, as the historical replay maps do.
+  // terminal_execute records activeHosts while terminal_poll drives the job
+  // offset, so the pairing order is observable end-state.
   store.rebuildFromMessages('chat-fork', [
     {
       role: 'assistant',
       content: '',
       toolCalls: [
-        { id: 'call-dup', name: 'terminal_start', arguments: { sessionId: 'sess-1', command: 'npm run dev' } },
+        { id: 'call-dup', name: 'terminal_execute', arguments: { sessionId: 'sess-1', command: 'tail -f /var/log/nginx/error.log' } },
         { id: 'call-dup', name: 'terminal_poll', arguments: { jobId: 'job-1' } },
       ],
     },
@@ -214,9 +217,52 @@ test('SessionStateStore rebuild pairs repeated pending calls sharing an id in or
     },
   ]);
 
-  // The first result pairs with terminal_start, the second with terminal_poll
-  // (whose args carry the poll offset); collapsing the calls used to leave
-  // the last result as "unknown" and lose the offset.
-  assert.equal(store.get('chat-fork').activeJobs['job-1'].nextOffset, 420);
-  assert.match(store.toReinjectionText('chat-fork') ?? '', /offset=420/);
+  // The first result pairs with the nearest call (terminal_poll, whose args
+  // carry the poll offset) and the second with terminal_execute, which only
+  // records the active host; collapsing either way would lose one side.
+  assert.equal(store.get('chat-fork').activeJobs['job-1'].nextOffset, 0);
+  assert.equal(store.get('chat-fork').activeHosts['sess-1'].lastCommand, 'tail -f /var/log/nginx/error.log');
+});
+
+test('SessionStateStore rebuild replays plan and completed file-change activities', () => {
+  const store = new SessionStateStore();
+  store.rebuildFromMessages('chat-fork', [
+    {
+      role: 'assistant',
+      content: '',
+      agentActivities: [
+        {
+          id: 'act-1',
+          type: 'plan_update',
+          status: 'completed',
+          items: [
+            { text: 'inspect failure', completed: true },
+            { text: 'run regression tests', completed: false },
+          ],
+        },
+      ],
+    },
+    {
+      role: 'assistant',
+      content: '',
+      agentActivities: [
+        {
+          id: 'act-2',
+          type: 'file_change',
+          status: 'completed',
+          changes: [{ path: '/repo/src/a.ts', kind: 'update' }, { path: '/repo/src/b.ts', kind: 'add' }],
+        },
+      ],
+    },
+    {
+      role: 'user',
+      content: 'Continue fixing the failing test',
+    },
+  ]);
+
+  const text = store.toReinjectionText('chat-fork') ?? '';
+  assert.match(text, /\[done\] inspect failure/);
+  assert.match(text, /\[todo\] run regression tests/);
+  assert.match(text, /\/repo\/src\/a\.ts/);
+  assert.match(text, /\/repo\/src\/b\.ts/);
 });
