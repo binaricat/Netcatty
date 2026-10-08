@@ -39,7 +39,6 @@ import {
 } from "./transferPauseLatch";
 import { bumpTransferControlEpoch } from "./transferControlEpoch";
 import { transferRuntime } from "./transferRuntime";
-import { waitForTransferWalkSettled } from "./transferWalkRegistry";
 import {
   clearTransferCancelled,
   clearTransferCancelledTree,
@@ -1441,29 +1440,29 @@ export const useSftpTransfers = ({
 
       const ids = new Set([transferId, ...childIds]);
       const failedIds = new Set(await cancelBackendTransfers([...ids]));
-      await waitForTransferWalkSettled(transferId);
-      sftpTransferCenterStore.settleCancellation(
+      await sftpTransferCenterStore.settleCancellation(
         transferId, ids, failedIds, taskToCancel ? [taskToCancel, ...children] : children,
+        async () => {
+          setTransfers(sftpTransferCenterStore.getOwnerTasks(ownerId));
+          for (const id of ids) clearCancelledTask(id);
+          clearTransferCancelledTree(transferId, [...childIds]);
+          if (failedIds.size > 0) {
+            // Preserve stages while any writer could not be cancelled. The
+            // fresh recovery walk reuses ids only after this settlement.
+            for (const id of ids) {
+              try { await netcattyBridge.get()?.clearPendingTransferCancel?.(id); } catch { /* best-effort */ }
+            }
+            return;
+          }
+          if (taskToCancel && sftpTransferCenterStore.getTask(transferId)?.status === "cancelled") {
+            try { await cleanupTaskArtifacts(taskToCancel); } catch { /* best-effort */ }
+          }
+          for (const child of children) {
+            if (sftpTransferCenterStore.getTask(child.id)?.status === "completed") continue;
+            try { await cleanupTaskArtifacts(child); } catch { /* best-effort */ }
+          }
+        },
       );
-      setTransfers(sftpTransferCenterStore.getOwnerTasks(ownerId));
-      for (const id of ids) clearCancelledTask(id);
-      clearTransferCancelledTree(transferId, [...childIds]);
-
-      if (failedIds.size > 0) {
-        // Preserve all stages/checkpoints while any writer could not be
-        // cancelled. A resumed tree reuses these ids after settlement.
-        for (const id of ids) {
-          try { await netcattyBridge.get()?.clearPendingTransferCancel?.(id); } catch { /* best-effort */ }
-        }
-        return;
-      }
-      if (taskToCancel && sftpTransferCenterStore.getTask(transferId)?.status === "cancelled") {
-        await cleanupTaskArtifacts(taskToCancel);
-      }
-      for (const child of children) {
-        if (sftpTransferCenterStore.getTask(child.id)?.status === "completed") continue;
-        try { await cleanupTaskArtifacts(child); } catch { /* best-effort */ }
-      }
 
     },
     [cancelBackendTransfers, clearCancelledTask, cleanupTaskArtifacts, ownerId, releasePausedTransfer, setTransfers],

@@ -125,7 +125,7 @@ export interface SftpTransferCenterStore {
   resume(taskId: string): Promise<void>;
   cancel(taskId: string): Promise<void>;
   /** Publish one cancellation outcome after the old execution has settled. */
-  settleCancellation(taskId: string, taskIds: ReadonlySet<string>, failedIds: ReadonlySet<string>, retainedTasks: readonly TransferTask[]): void;
+  settleCancellation(taskId: string, taskIds: ReadonlySet<string>, failedIds: ReadonlySet<string>, retainedTasks: readonly TransferTask[], onSettled: () => Promise<void>): Promise<void>;
   retry(taskId: string): Promise<void>;
   prioritize(taskId: string): Promise<void>;
   dismiss(taskId: string): void;
@@ -469,6 +469,7 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
   let persistenceTimer: ReturnType<typeof setTimeout> | null = null;
   const resumeInvocations = new Map<string, Promise<void>>();
   const cancelInvocations = new Map<string, Promise<void>>();
+  const cancelSettlements = new Map<string, Promise<void>>();
   // Ephemeral control intent: never serialize this or change bridge lifecycle epochs.
   const resumeRequests = new Map<string, symbol>();
   const resumeListeners = new Set<Listener>();
@@ -1352,25 +1353,23 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
           }
         }));
       }
-      // IPC cancellation can return before queued callbacks and directory
-      // workers settle. Do not publish a resumable tree until they are gone.
-      await waitForTransferWalkSettled(taskId);
-      store.settleCancellation(taskId, cancelledIdSet, failedIds, retainedTasks);
-      clearTransferCancelledTree(taskId, childIds);
-      if (failedIds.size > 0) {
-        for (const id of cancelIds) {
-          try { await netcattyBridge.get()?.clearPendingTransferCancel?.(id); } catch { /* best-effort */ }
+      await store.settleCancellation(taskId, cancelledIdSet, failedIds, retainedTasks, async () => {
+        clearTransferCancelledTree(taskId, childIds);
+        if (failedIds.size > 0) {
+          for (const id of cancelIds) {
+            try { await netcattyBridge.get()?.clearPendingTransferCancel?.(id); } catch { /* best-effort */ }
+          }
+        } else if (tasks.find((candidate) => candidate.id === taskId)?.status === "cancelled") {
+          try {
+            await netcattyBridge.get()?.cleanupTransferArtifacts?.({
+              transferId: taskId,
+              sourcePath: task.sourcePath,
+              targetPath: task.targetPath,
+              stagedTargetPath: task.stagedTargetPath,
+            });
+          } catch { /* best-effort */ }
         }
-      } else if (tasks.find((candidate) => candidate.id === taskId)?.status === "cancelled") {
-        try {
-          await netcattyBridge.get()?.cleanupTransferArtifacts?.({
-            transferId: taskId,
-            sourcePath: task.sourcePath,
-            targetPath: task.targetPath,
-            stagedTargetPath: task.stagedTargetPath,
-          });
-        } catch { /* best-effort */ }
-      }
+      });
       emit();
       return;
     }
@@ -1836,6 +1835,12 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
         const task = tasks.find((candidate) => candidate.id === taskId);
         if (!task || ["completed", "cancelled", "failed"].includes(task.status)) return;
       }
+      // Failed cancellation reports immediately, but its old walk must still
+      // settle before Resume can start a fresh scan. A retried Cancel may have
+      // replaced the awaited outcome, so drain the latest settlement as well.
+      while (cancelSettlements.has(taskId)) await cancelSettlements.get(taskId);
+      const afterCancellation = tasks.find((candidate) => candidate.id === taskId);
+      if (!afterCancellation || ["completed", "cancelled"].includes(afterCancellation.status)) return;
       // Cancel all latches every selected tree before its bounded IPC batches.
       // A row-level Resume must not revive a tree whose batch has not run yet.
       if (isTransferOrRootCancelled(taskId)) return;
@@ -1954,9 +1959,32 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
         if (resumeRequests.get(taskId) === request) clearResumeRequest(taskId);
       }
     },
-    settleCancellation(taskId, taskIds, failedIds, retainedTasks) {
-      tasks = settleCancelledTransferTree(tasks, taskId, taskIds, failedIds, retainedTasks);
-      emit();
+    async settleCancellation(taskId, taskIds, failedIds, retainedTasks, onSettled) {
+      const walkStillRunning = isTransferWalkInFlight(taskId);
+      const settlement = (async () => {
+        await waitForTransferWalkSettled(taskId);
+        // A later cancel attempt owns the outcome, even if this older attempt
+        // failed. Never repaint a successful retry as a failed cancellation.
+        if (cancelSettlements.get(taskId) !== settlement) return;
+        tasks = settleCancelledTransferTree(tasks, taskId, taskIds, failedIds, retainedTasks);
+        await onSettled();
+        emit();
+      })().finally(() => {
+        if (cancelSettlements.get(taskId) === settlement) cancelSettlements.delete(taskId);
+      });
+      cancelSettlements.set(taskId, settlement);
+      if (failedIds.size > 0 && walkStillRunning) {
+        tasks = tasks.map((task) => task.id === taskId
+          && !["completed", "failed"].includes(task.status)
+          ? { ...task, status: "attention", error: "Could not cancel transfer. Please try again.", speed: 0 }
+          : task);
+        emit();
+        // Return the failed attempt now so Cancel can be retried. Resume is
+        // fenced separately on settlement; no timeout or early unlatch.
+        void settlement.catch(() => {});
+        return;
+      }
+      await settlement;
     },
     cancel(taskId) {
       clearResumeRequest(taskId);

@@ -64,7 +64,8 @@ test("failed cancellation waits for the old walk, then Resume restores scheduler
   const cancelling = store.cancel("folder").then(() => { cancelSettled = true; });
   const resuming = store.resume("folder");
   await tick();
-  assert.equal(cancelSettled, false, "cancel must wait for the surviving writer");
+  assert.equal(cancelSettled, true, "failed cancel must return promptly so the user can retry");
+  assert.equal(store.getTask("folder")?.status, "attention");
   assert.equal(isTransferOrRootCancelled("folder"), true);
   assert.equal(softResumeCalls, 0, "must not unlatch the old walk");
   await store.pause("folder");
@@ -141,4 +142,35 @@ test("Resume cannot revive a tree pre-latched by an upcoming Cancel all batch", 
   await store.resume("waiting-cancel-batch");
   assert.equal(store.getTask("waiting-cancel-batch")?.status, "paused");
   assert.equal(isTransferOrRootCancelled("waiting-cancel-batch"), true);
+});
+
+
+test("failed cancel can be retried while its old walk is still running", async (t) => {
+  const originalGet = netcattyBridge.get;
+  t.after(() => { netcattyBridge.get = originalGet; resetTransferCancelLatchesForTests(); });
+  const store = createSftpTransferCenterStore();
+  const runtime = createTransferRuntime(store);
+  store.publishOwner("gone", [task("retry-live-cancel", { isDirectory: true })]);
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  t.after(() => release());
+  const walking = runtime.runWalk("retry-live-cancel", async () => { await held; });
+  let attempts = 0;
+  netcattyBridge.get = () => ({
+    cancelTransfer: async () => {
+      attempts += 1;
+      if (attempts === 1) return { success: false };
+      release();
+      return { success: true };
+    },
+    cleanupTransferArtifacts: async () => undefined,
+  } as unknown as ReturnType<typeof netcattyBridge.get>);
+  await store.cancel("retry-live-cancel");
+  assert.equal(runtime.isWalkInFlight("retry-live-cancel"), true);
+  assert.equal(store.getTask("retry-live-cancel")?.status, "attention");
+  const resume = store.resume("retry-live-cancel");
+  await store.cancel("retry-live-cancel");
+  await Promise.all([walking, resume]);
+  assert.equal(attempts, 2, "second cancel must reach the backend before natural completion");
+  assert.equal(store.getTask("retry-live-cancel")?.status, "cancelled", "new successful cancel owns final outcome");
 });
