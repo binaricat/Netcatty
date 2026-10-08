@@ -732,10 +732,13 @@ export function useAIState() {
       // configure it here too or retained handles cannot be restored from
       // durable storage before rehoming.
       await installToolOutputPersistence(store);
+      // A carried-over compaction summary can reference archive handles not
+      // present in any retained message; collect those too so the summary
+      // stays readable via tool_output_read in the fork.
       await store.rehomeChatSession(
         sessionId,
         fork.id,
-        collectForkHandleIds(plan.messages),
+        collectForkHandleIds(plan.messages, plan.contextCompaction?.summary),
       );
     } catch {
       // Rehoming is best-effort; the fork is still usable (reads fall back

@@ -642,10 +642,10 @@ export class ToolOutputStore {
       sessionMap.size > this.maxHandlesPerSession
       || totalChars() > this.maxCharsPerSession
     ) {
-      const oldest = [...sessionMap.values()].sort((a, b) => a.accessedAt - b.accessedAt)[0];
+      const oldest = this.pickEvictionEntry([...sessionMap.values()].map(handle => ({ handle })));
       if (!oldest) break;
-      sessionMap.delete(oldest.id);
-      this.evictHandle(oldest);
+      sessionMap.delete(oldest.handle.id);
+      this.evictHandle(oldest.handle);
     }
     if (sessionMap.size === 0) this.bySession.delete(chatSessionId);
   }
@@ -670,12 +670,41 @@ export class ToolOutputStore {
       const entries = allHandles();
       const totalChars = entries.reduce((sum, entry) => sum + entry.handle.storedChars, 0);
       if (entries.length <= this.maxHandlesGlobal && totalChars <= this.maxCharsGlobal) break;
-      const oldest = entries.sort((a, b) => a.handle.accessedAt - b.handle.accessedAt)[0];
+      const oldest = this.pickEvictionEntry(entries);
       if (!oldest) break;
       oldest.sessionMap.delete(oldest.handle.id);
       this.evictHandle(oldest.handle);
       if (oldest.sessionMap.size === 0) this.bySession.delete(oldest.chatSessionId);
     }
+  }
+
+  /**
+   * Pick the next handle to evict: a handle owning a durable spill path that
+   * other handles borrow as a non-owning alias must stay in memory while the
+   * borrower does — evicting the owner would delete the very file the alias
+   * points at, leaving that alias unreadable. Prefer the oldest borrowed
+   * alias instead (evicting an alias never deletes a file) before falling
+   * back to the oldest handle overall.
+   */
+  private pickEvictionEntry<T extends { handle: ToolOutputHandle }>(entries: ReadonlyArray<T>): T | undefined {
+    const borrowedPaths = new Set<string>();
+    for (const sessionMap of this.bySession.values()) {
+      for (const handle of sessionMap.values()) {
+        if (handle.borrowedFilePath && handle.filePath) borrowedPaths.add(handle.filePath);
+      }
+    }
+    const candidates = borrowedPaths.size
+      ? entries.filter(entry => !(
+        entry.handle.filePath
+        && !entry.handle.borrowedFilePath
+        && borrowedPaths.has(entry.handle.filePath)
+      ))
+      : entries;
+    let oldest: T | undefined;
+    for (const entry of candidates) {
+      if (!oldest || entry.handle.accessedAt < oldest.handle.accessedAt) oldest = entry;
+    }
+    return oldest;
   }
 
   private evictHandle(handle: ToolOutputHandle): void {

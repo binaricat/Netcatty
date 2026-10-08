@@ -186,8 +186,15 @@ export function planSessionFork<M extends ForkMessageLike>(
  * `handleId=tool-output-…`. Collect the ids the retained prefix references so
  * the fork's handles can be rehomed/restored into the new session's namespace
  * (keeps the notices valid for `tool_output_read` after the fork).
+ *
+ * A carried-over compaction summary can also reference archive handles that
+ * no longer appear in any retained message (compaction replaces all earlier
+ * messages with the summary), so scan the optional summary text too.
  */
-export function collectForkHandleIds(messages: readonly ForkMessageLike[]): string[] {
+export function collectForkHandleIds(
+  messages: readonly ForkMessageLike[],
+  summary?: string,
+): string[] {
   const ids: string[] = [];
   const seen = new Set<string>();
   const scan = (value: string | undefined) => {
@@ -203,6 +210,7 @@ export function collectForkHandleIds(messages: readonly ForkMessageLike[]): stri
     scan(message.thinking);
     for (const result of message.toolResults ?? []) scan(result.content);
   }
+  scan(summary);
   return ids;
 }
 

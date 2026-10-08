@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   buildForkTitle,
   canForkFromMessage,
+  collectForkHandleIds,
   planSessionFork,
   stripMessageContinuationState,
 } from './aiSessionFork.ts';
@@ -218,4 +219,19 @@ test('canForkFromMessage mirrors planSessionFork success', () => {
   assert.equal(canForkFromMessage(source, source.messages[1].id), true);
   assert.equal(canForkFromMessage(source, source.messages[0].id), false);
   assert.equal(canForkFromMessage(source, 'nope'), false);
+});
+
+test('collectForkHandleIds also scans a carried-over compaction summary', () => {
+  const messages: ForkMessage[] = [
+    msg({ role: 'user', content: 'continue from the summary' }),
+    msg({ content: 'noted, handleId=tool-output-abc123 is the live one' }),
+  ];
+  const summary = 'Earlier turn archived locally: handleId=tool-output-xyz789. '
+    + 'Uses handleId=tool-output-abc123 again.';
+  assert.deepEqual(
+    collectForkHandleIds(messages, summary),
+    ['tool-output-abc123', 'tool-output-xyz789'],
+  );
+  // No summary: unchanged behavior.
+  assert.deepEqual(collectForkHandleIds(messages), ['tool-output-abc123']);
 });

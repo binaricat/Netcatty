@@ -203,6 +203,45 @@ test('ToolOutputStore rehome falls back to a non-owning alias of the source spil
   assert.ok(files.has(`/netcatty/${handle.id}-chat-source.log`));
 });
 
+test('ToolOutputStore global quotas evict the borrowed alias, not the owner of its spill path', async () => {
+  const files = new Map<string, { record: PersistedToolOutputRecord; content: string }>();
+  const deletedPaths: string[] = [];
+  const persistence: ToolOutputPersistence = {
+    write: async (record, content) => {
+      const path = `/netcatty/${record.handleId}-${record.chatSessionId}.log`;
+      files.set(path, { record, content });
+      return path;
+    },
+    read: async () => null,
+    delete: async path => {
+      deletedPaths.push(path);
+      files.delete(path);
+    },
+  };
+
+  // The global handle quota is already full when the fork is created, so the
+  // alias pushed the registry over the limit: the owner of the borrowed path
+  // must survive, the alias itself is the right thing to evict.
+  const original = new ToolOutputStore({ spillThresholdChars: 0, maxHandlesGlobal: 1, persistence });
+  const handle = original.store({
+    chatSessionId: 'chat-source',
+    capabilityId: 'terminal.execute',
+    content: 'C'.repeat(30_000),
+  });
+  await handle.spillPromise;
+
+  // `read` cannot serve the durable content, so the clone aliases the
+  // source-owned spill path as a non-owning borrow.
+  await original.rehomeChatSession('chat-source', 'chat-fork');
+
+  const sourceCopy = original.get(handle.id, 'chat-source');
+  assert.ok(sourceCopy);
+  assert.ok(files.has(`/netcatty/${handle.id}-chat-source.log`));
+  assert.equal(deletedPaths.length, 0);
+  // The alias was evicted to satisfy the quota.
+  assert.equal(original.get(handle.id, 'chat-fork'), undefined);
+});
+
 test('ToolOutputStore respilled forked copies clear the borrowed flag so eviction frees their file', async () => {
   const files = new Map<string, { record: PersistedToolOutputRecord; content: string }>();
   const deletedPaths: string[] = [];
