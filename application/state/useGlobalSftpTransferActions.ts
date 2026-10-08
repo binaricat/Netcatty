@@ -65,7 +65,12 @@ export function useGlobalSftpTransferActions(tasks: readonly TransferTask[]) {
           // a queued task can fail naturally while its cancel batch awaits IPC,
           // and cancel's owner/orphan recovery paths would repaint the row as
           // cancelled, hiding the real failure and its diagnostic.
-          if (!current || ["completed", "failed", "cancelled"].includes(current.status)) return;
+          if (!current || ["completed", "failed", "cancelled"].includes(current.status)) {
+            // No cancel invocation will own this pre-latch. Release it here so
+            // Retry is not discarded while the finished walk is unwinding.
+            clearTransferCancelledTree(taskId, children.get(taskId));
+            return;
+          }
           try {
             await transferRuntime.cancel(taskId);
           } catch {
