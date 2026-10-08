@@ -243,8 +243,9 @@ function startPtyJob(ptyStream, command, options) {
     // Cancellation replies use the same readable stream as terminal output.
     // Recover session-owned flow control after sending ETX, otherwise a paused
     // renderer can hide the returned prompt/end marker and trigger retries.
+    // Recovery belongs to the session and must still run when a timeout
+    // finishes this job before the queued callback executes.
     queueMicrotask(() => {
-      if (finished) return;
       try {
         onInterrupt?.();
       } catch {
