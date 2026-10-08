@@ -146,6 +146,42 @@ test("local promotion completes when the destination refuses copyFile and chmod"
   assert.equal(fs.readdirSync(dir).filter((name) => name.endsWith(".backup")).length, 0);
 });
 
+test("local promotion keeps restrictive mode when EXDEV staging copy succeeds but chmod is refused", async (t) => {
+  const dir = makeTempDir("promote-refused-mode-");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const staged = path.join(dir, "staged");
+  const target = path.join(dir, "target");
+  const payload = Buffer.alloc(1024 * 1024 + 3, 11);
+  fs.writeFileSync(staged, payload, { mode: 0o644 });
+  fs.writeFileSync(target, "original");
+  fs.chmodSync(target, 0o600);
+  // Force the EXDEV staging rename like a FUSE staging volume, but let the
+  // accelerated copyFile succeed (Node falls back internally), so the ready
+  // file inherits the broader staged mode.
+  const renameOriginal = fs.promises.rename;
+  const renameRestore = stubPromises("rename", async (...args) => {
+    if (String(args[1]).endsWith(".ready")) {
+      throw Object.assign(new Error("EXDEV: cross-device link not permitted"), { code: "EXDEV" });
+    }
+    return renameOriginal.apply(fs.promises, args);
+  });
+  const chmodRestore = stubPromises("chmod", async () => {
+    throw Object.assign(new Error("EOPNOTSUPP: Operation not supported"), { code: "EOPNOTSUPP" });
+  });
+  t.after(renameRestore);
+  t.after(chmodRestore);
+  await transferBridge._promoteLocalTransferForTests(staged, target, { existingMode: 0o600 });
+  // Restore owner access so the payload can be verified and cleaned up.
+  fs.chmodSync(target, 0o600);
+  assert.ok(fs.readFileSync(target).equals(payload));
+  assert.equal(
+    fs.statSync(target).mode & 0o777,
+    0o600,
+    "the broader staged 0644 mode never replaces the 0600 destination",
+  );
+  assert.equal(fs.readdirSync(dir).filter((name) => name !== "target").length, 0);
+});
+
 for (const restrictiveMode of [0o200, 0o000]) {
   test(`local promotion replaces a mode-${restrictiveMode.toString(8)} destination through the EXDEV fallback`, async (t) => {
     const dir = makeTempDir(`promote-mode-${restrictiveMode.toString(8)}-`);
@@ -192,6 +228,25 @@ test("copyFileExclusiveWithFallback applies restrictive creation mode to the str
     fs.statSync(target).mode & 0o777,
     0o600,
     "fallback creation mode is honored instead of the 0666 default",
+  );
+});
+
+test("copyFileExclusiveWithFallback applies the intended mode when the accelerated copy succeeds but chmod is refused", async (t) => {
+  const dir = makeTempDir("copy-fallback-accel-mode-");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const source = path.join(dir, "staged");
+  const target = path.join(dir, "target");
+  fs.writeFileSync(source, "accelerated bytes");
+  const chmodRestore = stubPromises("chmod", async () => {
+    throw Object.assign(new Error("ENOTSUP: operation not supported"), { code: "ENOTSUP" });
+  });
+  t.after(chmodRestore);
+  await copyFileExclusiveWithFallback(source, target, 0o600);
+  assert.equal(fs.readFileSync(target, "utf8"), "accelerated bytes");
+  assert.equal(
+    fs.statSync(target).mode & 0o777,
+    0o600,
+    "a metadata-refusing mount never publishes the broader staged source mode",
   );
 });
 

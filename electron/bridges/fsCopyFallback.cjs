@@ -28,18 +28,33 @@ function isMetadataUnsupportedError(error) {
 // to clean up, matching fs.copyFile's failure behavior.
 // `mode` (optional) is applied to the fallback stream so mounts that reject
 // chmod still receive restrictive creation-mode bits instead of the broader
-// default 0666; the accelerated copyFile path keeps the source's mode.
-// Callers that need to open `target` for reading before they can chmod must
-// keep an owner-read bit in `mode`.
+// default 0666. On the accelerated copyFile path the source's mode is carried
+// over, so `mode` is re-applied with chmod; when that chmod is refused the
+// gvfsd-fuse-style way (ENOTSUP/EOPNOTSUPP/ENOSYS) the copy is redone as a
+// stream so the target is still created with `mode` instead of leaking the
+// potentially broader staged source mode. Callers that need to open `target`
+// for reading before they can chmod must keep an owner-read bit in `mode`.
 async function copyFileExclusiveWithFallback(source, target, mode = null) {
+  const creationMode = Number.isInteger(mode) && mode >= 0 ? mode & 0o7777 : null;
   try {
     await fs.promises.copyFile(source, target, fs.constants.COPYFILE_EXCL);
-    return;
+    if (creationMode === null) return;
+    try {
+      await fs.promises.chmod(target, creationMode);
+      return;
+    } catch (error) {
+      if (!isMetadataUnsupportedError(error)) throw error;
+    }
+    // The accelerated copy preserved the source's mode and this mount refuses
+    // chmod, so the intended mode can never be applied to it afterwards.
+    // Replace it with a streamed copy whose creation mode carries the
+    // intended (no broader than requested) bits.
+    await fs.promises.unlink(target);
   } catch (error) {
     if (!isCopyFallbackError(error)) throw error;
   }
   const writeOptions = { flags: "wx" };
-  if (Number.isInteger(mode) && mode >= 0) writeOptions.mode = mode & 0o7777;
+  if (creationMode !== null) writeOptions.mode = creationMode;
   await pipeline(
     fs.createReadStream(source),
     fs.createWriteStream(target, writeOptions),
