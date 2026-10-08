@@ -96,7 +96,13 @@ export class SessionStateStore {
    * branch rebuilds it from its retained prefix via
    * `rebuildConversationalStateFromMessages` instead: a full-state copy would
    * reinject plan updates, blockers, or decisions that the removed turn
-   * produced even though the messages describing them are gone.
+   * produced even though the messages describing them are gone. Terminal read
+   * cursors are likewise conversational bookkeeping (they record which
+   * `terminal.read_context` tool results are still present in history), so they
+   * are omitted from the copy: a cursor left behind by the undone turn would
+   * make the branch believe it has read terminal output whose tool result was
+   * removed. Omitting it is safe — the agent rereads instead of skipping
+   * unseen output.
    */
   copyState(fromChatSessionId: string, toChatSessionId: string): void {
     if (fromChatSessionId === toChatSessionId) return;
@@ -109,9 +115,6 @@ export class SessionStateStore {
       ),
       activeJobs: Object.fromEntries(
         Object.entries(state.activeJobs).map(([id, job]) => [id, { ...job }]),
-      ),
-      terminalReadCursors: Object.fromEntries(
-        Object.entries(state.terminalReadCursors).map(([id, cursor]) => [id, { ...cursor }]),
       ),
       editedFiles: [...state.editedFiles],
       updatedAt: Date.now(),

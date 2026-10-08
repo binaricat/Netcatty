@@ -152,6 +152,13 @@ test('SessionStateStore copies operational state for a branched chat and keeps c
     'boom',
     true,
   );
+  store.updateFromToolResult(
+    'chat-source',
+    'terminal_read_context',
+    { sessionId: 'sess-1', range: 'viewport' },
+    JSON.stringify({ startLine: 10, endLine: 40 }),
+    false,
+  );
 
   store.copyState('chat-source', 'chat-branch');
 
@@ -160,9 +167,13 @@ test('SessionStateStore copies operational state for a branched chat and keeps c
   assert.match(branchReinjection ?? '', /offset=300/);
   assert.match(branchReinjection ?? '', /src\/a\.ts/);
   // Conversational state (plan, blockers) must not ride along with the
-  // operational copy: it can only come from the retained prefix.
+  // operational copy: it can only come from the retained prefix. Terminal
+  // read cursors are conversational too (they point at tool results that the
+  // removed turn produced), so they must not be copied either.
   assert.doesNotMatch(branchReinjection ?? '', /step one/);
   assert.doesNotMatch(branchReinjection ?? '', /terminal_execute/);
+  assert.doesNotMatch(branchReinjection ?? '', /Terminal read cursors/);
+  assert.deepEqual(store.get('chat-branch').terminalReadCursors, {});
   assert.ok(store.toReinjectionText('chat-source'));
 
   // Updates under the branch id must not leak back into the source state.
