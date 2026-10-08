@@ -21,6 +21,7 @@ function harness() {
     isDestroyed() { return this.destroyed; }
     loadURL() { return new Promise((resolve, reject) => { this.loaded = resolve; this.failed = reject; }); }
     setBackgroundColor() {}
+    close() { const event = { prevented: false, preventDefault() { this.prevented = true; } }; this.emit("close", event); if (!event.prevented) this.destroy(); }
     destroy() { this.destroyed = true; this.webContents.emit("destroyed"); this.emit("closed"); }
   }
   const source = Object.assign(new EventEmitter(), { id: 99, isDestroyed: () => false, sent: [], send(channel, payload) { this.sent.push({ channel, payload }); } });
@@ -151,4 +152,29 @@ test("a failed transfer vetoes a simultaneous source close without deleting its 
   assert.equal((await opening).success, false);
   assert.equal((await closing).cancelled, true);
   assert.deepEqual(h.source.sent, []);
+});
+
+
+test("native editor close uses renderer confirmation, preserves Cancel, and coalesces repeated close events", async () => {
+  const h = harness();
+  const opening = h.open("first");
+  const win = h.windows[0];
+  win.loaded(); h.ready(win); await tick();
+  h.accept(win, win.sent[0]); await opening;
+  win.close(); win.close(); await tick();
+  assert.equal(win.isDestroyed(), false);
+  const requests = () => win.sent.filter((request) => request.channel === "netcatty:window:editorCloseTabs");
+  assert.equal(requests().length, 1);
+  assert.deepEqual(requests()[0].payload.editorIds, ["first"]);
+  assert.equal(requests()[0].payload.force, false);
+  h.ipcMain.emit("netcatty:window:editorCloseTabsResult", { sender: win.webContents }, { requestId: requests()[0].payload.requestId, cancelled: true, closedIds: [] });
+  await tick();
+  assert.equal(win.isDestroyed(), false, "Cancel keeps the native window and its contents open");
+  assert.equal(h.api.hasEditorTabsForSource(h.source), true);
+  win.close(); await tick();
+  assert.equal(requests().length, 2, "native close can be retried after Cancel");
+  h.ipcMain.emit("netcatty:window:editorCloseTabsResult", { sender: win.webContents }, { requestId: requests()[1].payload.requestId, cancelled: false, closedIds: ["first"] });
+  await tick();
+  assert.equal(win.isDestroyed(), true, "Save/Discard completion permits native destruction");
+  assert.equal(h.api.hasEditorTabsForSource(h.source), false);
 });

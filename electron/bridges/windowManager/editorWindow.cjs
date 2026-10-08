@@ -60,7 +60,6 @@ function createEditorWindowApi(ctx) {
   with (ctx) {
     let editorWindow = null;
     let editorWindowLoaded = null;
-    let editorWindowCloseConfirmed = false;
     const tabSources = new Map();
 
     function getEditorWindow() {
@@ -211,7 +210,8 @@ function createEditorWindowApi(ctx) {
       });
 
       const windowsChrome = windowsFramelessContentChromeOptions();
-      editorWindowCloseConfirmed = false;
+      let editorWindowCloseConfirmed = false;
+      let nativeClosePending = false;
       const win = new BrowserWindow({
         title: snapshot.fileName,
         width: EDITOR_WIDTH,
@@ -260,27 +260,20 @@ function createEditorWindowApi(ctx) {
       win.on("close", (event) => {
         if (isQuitting || editorWindowCloseConfirmed) return;
         event.preventDefault();
-        const dirtyEditorQuery = typeof queryDirtyEditors === "function"
-          ? queryDirtyEditors(win.webContents, 5000, { ipcMain: electronModule.ipcMain })
-          : false;
-        Promise.resolve(dirtyEditorQuery)
-          .then((hasDirty) => {
-            if (hasDirty) return;
+        if (nativeClosePending) return;
+        nativeClosePending = true;
+        // OS close (Alt+F4/titlebar) uses the same renderer Save/Discard/Cancel
+        // flow as closing an owner or a tab, rather than a dirty-only veto.
+        closeEditorTabs(electronModule, { editorIds: Array.from(tabSources.keys()) })
+          .then((result) => {
+            if (!result.success || result.cancelled) return;
             editorWindowCloseConfirmed = true;
-            try {
-              if (isLiveWindow(win)) win.close();
-            } catch {
-              // ignore
-            }
+            if (isLiveWindow(win)) win.close();
           })
-          .catch(() => {
-            editorWindowCloseConfirmed = true;
-            try {
-              if (isLiveWindow(win)) win.close();
-            } catch {
-              // ignore
-            }
-          });
+          .catch((error) => {
+            console.warn("[EditorWindow] Close confirmation failed", error);
+          })
+          .finally(() => { nativeClosePending = false; });
       });
       win.on("closed", releaseLifecycle);
       win.on("page-title-updated", (e) => { e.preventDefault(); });
