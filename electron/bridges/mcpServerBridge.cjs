@@ -1935,9 +1935,10 @@ function forgetInheritedJobsForChatSession(chatSessionId) {
     if (!inheritors.delete(chatSessionId)) continue;
     if (inheritors.size === 0) inheritedJobInheritors.delete(jobId);
     // The source chat was torn down earlier while this branch (and possibly
-    // sibling branches) kept its job alive. With the last inheritor gone,
-    // nothing can poll or stop the job any more: cancel it now.
-    if (ownerTornDownInheritedJobs.delete(jobId)) {
+    // sibling branches) kept its job alive. Only once the last inheritor is
+    // gone can nothing poll or stop the job any more: cancel it then, and
+    // keep the "torn down owner" marker while sibling branches still live.
+    if (inheritors.size === 0 && ownerTornDownInheritedJobs.delete(jobId)) {
       cancelOrphanedInheritedJob(jobId);
     }
   }
