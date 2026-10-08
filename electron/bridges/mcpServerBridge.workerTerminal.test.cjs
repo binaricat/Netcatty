@@ -1333,9 +1333,35 @@ test("an in-flight orphan stop rejects inheritance registration for its job", as
   });
   assert.deepEqual(pollDuringFlight, { ok: false, error: "Background job not found" });
 
+  // The worker stop handler resolves as soon as cancellation is requested
+  // (status "stopping"), not when the job is finished: settling the promise
+  // clears the in-flight guard but leaves the stop unconfirmed, so the entry
+  // (with the orphan-stop retry marker) is retained.
+  resolveStop({
+    ok: true,
+    jobId: "worker-job-stopflight",
+    sessionId: "ssh-stopflight",
+    status: "stopping",
+    error: "Cancellation requested",
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  // Registration must stay rejected after the promise settled: the job is
+  // irreversibly stopping and will soon poll as completed or missing.
+  flight = bridge.registerInheritedBackgroundJobs("chat-new-branch", "chat-src", ["worker-job-stopflight"]);
+  assert.equal(flight.ok, true);
+  assert.equal(flight.registered, 0);
+  assert.deepEqual(flight.unownedJobIds, ["worker-job-stopflight"]);
+
   // Confirming the stop deletes the registry entry; afterwards the job stays
   // unregistered (the undo's short count aborts/retries, never publishes a
   // branch polling "Background job not found").
+  await bridge.hasActiveWorkerJobForTerminalSession("ssh-stopflight");
+  const confirmStop = requests.filter((entry) => entry.channel === "netcatty:ai:jobStop").pop();
+  assert.deepEqual(confirmStop, {
+    channel: "netcatty:ai:jobStop",
+    payload: { jobId: "worker-job-stopflight", sessionId: "ssh-stopflight", chatSessionId: "chat-src" },
+    options: {},
+  });
   resolveStop({ ok: true, jobId: "worker-job-stopflight", completed: true });
   await new Promise((resolve) => setImmediate(resolve));
   flight = bridge.registerInheritedBackgroundJobs("chat-new-branch", "chat-src", ["worker-job-stopflight"]);

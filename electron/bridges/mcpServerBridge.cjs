@@ -2040,13 +2040,23 @@ function registerInheritedBackgroundJobs(chatSessionId, ownerChatSessionId, jobI
       unownedJobIds.push(jobId);
       continue;
     }
+    if (orphanJobStopRetryPending.has(jobId)) {
+      // An earlier orphan stop settled without confirming (the worker handler
+      // resolves as soon as cancellation is requested, not when the job is
+      // done, and a transient failure keeps the job running): cancellation is
+      // already underway or will be retried, so registering the retained
+      // entry here would publish a branch over a job that is irreversibly
+      // stopping (or about to be stopped again) and soon polls as completed
+      // or missing. Stay non-registerable until the confirmed stop (or the
+      // idle poll's completion check) removes the entry; then this job is
+      // unknown and the undo reconciles it out instead.
+      unownedJobIds.push(jobId);
+      continue;
+    }
     if (job && job.chatSessionId === ownerChatSessionId) {
       const inheritors = inheritedJobInheritors.get(jobId) ?? new Set();
       inheritors.add(chatSessionId);
       inheritedJobInheritors.set(jobId, inheritors);
-      // A live branch owns the inherited job again; the pending orphan-stop
-      // retry would otherwise stop a job this chat still polls.
-      orphanJobStopRetryPending.delete(jobId);
       registered += 1;
       continue;
     }
@@ -2055,7 +2065,6 @@ function registerInheritedBackgroundJobs(chatSessionId, ownerChatSessionId, jobI
       const inheritors = inheritedJobInheritors.get(jobId) ?? new Set();
       inheritors.add(chatSessionId);
       inheritedJobInheritors.set(jobId, inheritors);
-      orphanJobStopRetryPending.delete(jobId);
       registered += 1;
       continue;
     }
