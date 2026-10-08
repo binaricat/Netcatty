@@ -24,6 +24,7 @@ import {
 } from './terminalMonitorGuard';
 import type { ToolOutputStore } from './toolOutputStore';
 import { TOOL_OUTPUT_READ_MAX_CHARS } from './toolOutputStore';
+import type { SessionStateStore } from './sessionState';
 import {
   buildTerminalWriteFingerprint,
   hashScopeKey,
@@ -498,6 +499,22 @@ function createCatalogTool(spec: CattyToolSpec) {
           return { error: `Capability "${spec.capabilityId}" has no RPC binding.` };
         }
 
+        // Background jobs inherited from a branched source chat are still owned
+        // by that source chat id in the main process, which rejects poll/stop
+        // calls carrying the branch's own chat id ("Background job not found").
+        // Present the owner's chat session id for those jobs so the branch can
+        // monitor and stop the side effects undo explicitly preserved.
+        const terminalJobControlIds = new Set(['terminal.poll', 'terminal.stop']);
+        const jobIdArg = typeof (args as { jobId?: unknown }).jobId === 'string'
+          ? (args as { jobId?: string }).jobId
+          : undefined;
+        const rpcChatSessionId = terminalJobControlIds.has(spec.capabilityId) && jobIdArg
+          ? toolContext.sessionStateStore?.getInheritedJobOwnerChatSessionId(
+              deps.chatSessionId ?? '',
+              jobIdArg,
+            ) ?? deps.chatSessionId
+          : deps.chatSessionId;
+
         const terminalStartFingerprint = spec.capabilityId === 'terminal.start'
           ? buildTerminalWriteFingerprint(
               'terminal_start',
@@ -522,7 +539,7 @@ function createCatalogTool(spec: CattyToolSpec) {
           deps.bridge,
           spec.rpcMethod,
           args as Record<string, unknown>,
-          deps.chatSessionId,
+          rpcChatSessionId,
         );
         if (
           spec.capabilityId === 'terminal.start'
@@ -551,11 +568,18 @@ function createCatalogTool(spec: CattyToolSpec) {
           ) {
             const guarded = globalTerminalMonitorGuard.process(monitorKey, poll.output);
             if (guarded.action === 'stop') {
+              const stopJobId = String(poll.jobId ?? args.jobId ?? '');
+              const stopChatSessionId = stopJobId
+                ? toolContext.sessionStateStore?.getInheritedJobOwnerChatSessionId(
+                    deps.chatSessionId ?? '',
+                    stopJobId,
+                  ) ?? deps.chatSessionId
+                : deps.chatSessionId;
               const stopResult = await invokeCapabilityRpc(
                 deps.bridge,
                 'netcatty/jobStop',
                 { jobId: poll.jobId ?? args.jobId },
-                deps.chatSessionId,
+                stopChatSessionId,
               );
               poll = applyMonitorStopResult(poll, stopResult, guarded.suppressedCount);
             } else if (guarded.action === 'suppress') {
@@ -711,6 +735,7 @@ export function buildCattyToolContext(input: {
   chatSessionId?: string;
   toolOutputStore?: ToolOutputStore;
   toolResultDedup?: ToolResultDedup;
+  sessionStateStore?: SessionStateStore;
 }): CattyToolContext {
   return {
     bridge: input.bridge,
@@ -723,6 +748,7 @@ export function buildCattyToolContext(input: {
       : () => input.context as ExecutorContext,
     toolOutputStore: input.toolOutputStore,
     toolResultDedup: input.toolResultDedup,
+    sessionStateStore: input.sessionStateStore,
   };
 }
 
@@ -735,6 +761,7 @@ export function createCattyToolsFromCatalog(
   chatSessionId?: string,
   toolOutputStore?: ToolOutputStore,
   toolResultDedup?: ToolResultDedup,
+  sessionStateStore?: SessionStateStore,
 ): CattyToolsBundle {
   const sharedContext = buildCattyToolContext({
     bridge,
@@ -745,6 +772,7 @@ export function createCattyToolsFromCatalog(
     chatSessionId,
     toolOutputStore,
     toolResultDedup,
+    sessionStateStore,
   });
 
   const catalogTools: Record<string, ReturnType<typeof tool>> = {};

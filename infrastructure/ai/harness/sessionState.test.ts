@@ -180,7 +180,25 @@ test('SessionStateStore copies operational state for a branched chat and keeps c
   store.mergeFromUserGoal('chat-branch', 'new goal');
   assert.equal(store.get('chat-source').userGoal, undefined);
   assert.equal(store.get('chat-branch').userGoal, 'new goal');
-  assert.deepEqual(store.get('chat-source').activeJobs['job-1'], store.get('chat-branch').activeJobs['job-1']);
+  // The copied job record must carry the owner chat id so background-job
+  // control calls dispatched by the branch can be authorized under the
+  // source chat's identity; the owner's own copy must not (it already
+  // presents its own id). Chained branches keep the original owner.
+  assert.equal(store.get('chat-source').activeJobs['job-1'].ownerChatSessionId, undefined);
+  assert.equal(store.get('chat-branch').activeJobs['job-1'].ownerChatSessionId, 'chat-source');
+  assert.equal(
+    store.getInheritedJobOwnerChatSessionId('chat-branch', 'job-1'),
+    'chat-source',
+  );
+  assert.equal(
+    store.getInheritedJobOwnerChatSessionId('chat-source', 'job-1'),
+    undefined,
+  );
+  store.copyState('chat-branch', 'chat-grandbranch');
+  assert.equal(
+    store.get('chat-grandbranch').activeJobs['job-1'].ownerChatSessionId,
+    'chat-source',
+  );
   assert.notEqual(
     store.get('chat-source').activeJobs['job-1'],
     store.get('chat-branch').activeJobs['job-1'],

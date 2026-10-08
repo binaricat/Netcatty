@@ -107,6 +107,7 @@ async function runCattyTurn(input: CattyTurnInput, ctx: TurnDriverContext): Prom
     sessionId,
     ctx.toolOutputStore,
     ctx.toolResultDedup,
+    ctx.sessionStateStore,
   );
   const { tools } = toolsBundle;
 

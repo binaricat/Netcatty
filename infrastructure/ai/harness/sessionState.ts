@@ -15,6 +15,14 @@ export interface ActiveTerminalJobState {
   command?: string;
   status: string;
   nextOffset: number;
+  /**
+   * Chat session id that owns this job in the main process. The main process
+   * gates background-job control (`terminal.poll` / `terminal.stop`) on the
+   * chat session id that started the job, so a branched chat that inherited
+   * this job must dispatch its control calls under the owner's identity.
+   * Set (and preserved through chained branches) by `copyState`.
+   */
+  ownerChatSessionId?: string;
 }
 
 export interface TerminalReadCursorState {
@@ -114,11 +122,35 @@ export class SessionStateStore {
         Object.entries(state.activeHosts).map(([id, host]) => [id, { ...host }]),
       ),
       activeJobs: Object.fromEntries(
-        Object.entries(state.activeJobs).map(([id, job]) => [id, { ...job }]),
+        Object.entries(state.activeJobs).map(([id, job]) => [
+          id,
+          {
+            ...job,
+            // Keep the original owner when copying an already-inherited job:
+            // the main process still owns it under the chain's starting chat id,
+            // so branch-of-branch copies must resolve to that same identity.
+            ownerChatSessionId: job.ownerChatSessionId ?? fromChatSessionId,
+          },
+        ]),
       ),
       editedFiles: [...state.editedFiles],
       updatedAt: Date.now(),
     });
+  }
+
+  /**
+   * Chat session id that owns `jobId` in the main process, when `jobId` was
+   * inherited by `chatSessionId` from a branched source chat. Background-job
+   * control calls (`terminal.poll` / `terminal.stop`) must present the owner's
+   * chat session id to the main process, which rejects calls carrying the
+   * branch's own id with "Background job not found". Returns undefined when
+   * the job is not tracked under `chatSessionId` or is not inherited.
+   */
+  getInheritedJobOwnerChatSessionId(chatSessionId: string, jobId: string): string | undefined {
+    const job = this.get(chatSessionId).activeJobs[jobId];
+    return job?.ownerChatSessionId && job.ownerChatSessionId !== chatSessionId
+      ? job.ownerChatSessionId
+      : undefined;
   }
 
   /**
