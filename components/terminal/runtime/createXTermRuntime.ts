@@ -368,8 +368,10 @@ export type CreateXTermRuntimeContext = {
     hostLabel: string,
     sessionId: string,
   ) => void;
-  /** True only when this completion confirms the last outstanding cwd-invalidating command. */
-  onCommandCompleted?: (cwdCompletionConfirmed?: boolean) => void;
+  /** True only when this completion confirms the last outstanding cwd-invalidating command.
+   *  `commandCompleted` defaults to true; the runtime passes false only for a
+   *  cwd-only publication that did not consume a command completion marker. */
+  onCommandCompleted?: (cwdCompletionConfirmed?: boolean, commandCompleted?: boolean) => void;
   requestPluginTerminalProviders?: RequestPluginTerminalProviders;
   pluginProviderVisible?: boolean;
   isPluginTerminalProviderAvailable?: (kind: NetcattyTerminalProviderKind) => boolean;
@@ -3264,9 +3266,12 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
         promptLineBreakState.cwdRepublishDepth = 1;
         promptLineBreakState.cwdRepublishPending = true;
       }
-      ctx.onCommandCompleted?.(true);
+      // A pending cwd completion without a pending command (an unconfirmed
+      // prompt submission) is a cwd-only publication: plugins never saw a
+      // commandSubmitted, so they must not receive a commandCompleted here.
+      ctx.onCommandCompleted?.(true, commandCompleted);
     } else if (commandCompleted) {
-      ctx.onCommandCompleted?.(false);
+      ctx.onCommandCompleted?.(false, true);
     }
     return true;
   });

@@ -244,6 +244,14 @@ test('normal and reactivated terminals forward completion only when it confirms 
   for (const source of [terminalSource, effectsSource]) {
     assert.match(source, /if \(cwdCompletionConfirmed\) \{\s*onCommandCompleted\?\.\(sessionId\)/);
   }
+  // Cwd-only publications (armed re-probe, single-prompt fallback) never
+  // consume a command marker, so plugins must not receive commandCompleted.
+  for (const source of [terminalSource, effectsSource]) {
+    assert.match(
+      source,
+      /if \(commandCompleted !== false\) \{\s*(?:publishPluginTerminalRuntimeLifecycleEvent|pluginTerminalLifecycle\.onCommandCompleted)/,
+    );
+  }
   // Every cwd-invalidating submission arms completion tracking, independent of
   // the plugin trust callback, so unconfirmed prompts (sftp> etc.) also publish.
   assert.match(terminalSource, /markTerminalCwdCompletionPending\(promptLineBreakStateRef\);/);

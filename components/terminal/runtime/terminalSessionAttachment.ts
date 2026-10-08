@@ -668,10 +668,13 @@ const writeSessionDataImmediate = (
       // correct a stale value without needing a new submission.
       const publishCwd = (cwdConfirmed || cwdRepublish) && completed <= 1;
       for (let index = 0; index < completed; index += 1) {
-        ctx.onCommandCompleted?.(index === 0 && publishCwd);
+        // Each looped completion consumed a pending command marker.
+        ctx.onCommandCompleted?.(index === 0 && publishCwd, true);
       }
       if (completed === 0 && publishCwd) {
-        ctx.onCommandCompleted?.(true);
+        // A cwd-only re-probe/fallback publication: no command marker was
+        // consumed, so plugins must not see a commandCompleted here.
+        ctx.onCommandCompleted?.(true, false);
       }
       if ((cwdConfirmed || cwdRepublish) && promptLineBreakState) {
         // The published backend read is heuristic: keep the one-shot re-probe

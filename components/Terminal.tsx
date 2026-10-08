@@ -2424,9 +2424,16 @@ const TerminalComponent: React.FC<TerminalProps> = ({
     const [command, hostId, hostLabel, submittedSessionId] = args;
     onCommandSubmitted?.(command, hostId, hostLabel, submittedSessionId);
   }, [host, onCommandSubmitted, onTerminalCwdChange, sessionId, terminalCwdTracker]);
-  const pluginAwareOnCommandCompleted = useCallback((cwdCompletionConfirmed?: boolean) => {
-    pluginTerminalLifecycle.onCommandCompleted();
-    void xtermRuntimeRef.current?.pluginProviderHost?.commandCompleted();
+  const pluginAwareOnCommandCompleted = useCallback((
+    cwdCompletionConfirmed?: boolean,
+    commandCompleted?: boolean,
+  ) => {
+    // Only a consumed command completion marker mirrors a plugin commandSubmitted;
+    // cwd-only re-probe publications must not rerun completion-driven plugin work.
+    if (commandCompleted !== false) {
+      pluginTerminalLifecycle.onCommandCompleted();
+      void xtermRuntimeRef.current?.pluginProviderHost?.commandCompleted();
+    }
     // The runtime only marks a completion confirmed when it finished the last
     // outstanding cwd-invalidating command (OSC 133 D, the armed one-shot
     // re-probe, or a single-prompt fallback).

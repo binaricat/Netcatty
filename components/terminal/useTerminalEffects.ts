@@ -229,9 +229,13 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
     publishPluginTerminalRuntimeLifecycleEvent(pluginTerminalLifecycle, 'commandSubmitted');
     void xtermRuntimeRef.current?.pluginProviderHost?.commandSubmitted(args[0]);
   };
-  const pluginAwareOnCommandCompleted = (cwdCompletionConfirmed?: boolean) => {
-    publishPluginTerminalRuntimeLifecycleEvent(pluginTerminalLifecycle, 'commandCompleted');
-    void xtermRuntimeRef.current?.pluginProviderHost?.commandCompleted();
+  const pluginAwareOnCommandCompleted = (cwdCompletionConfirmed?: boolean, commandCompleted?: boolean) => {
+    // Only a consumed command completion marker mirrors a plugin commandSubmitted;
+    // cwd-only re-probe publications must not rerun completion-driven plugin work.
+    if (commandCompleted !== false) {
+      publishPluginTerminalRuntimeLifecycleEvent(pluginTerminalLifecycle, 'commandCompleted');
+      void xtermRuntimeRef.current?.pluginProviderHost?.commandCompleted();
+    }
     // The runtime only marks a completion confirmed when it finished the last
     // outstanding cwd-invalidating command (OSC 133 D, the armed one-shot
     // re-probe, or a single-prompt fallback).
