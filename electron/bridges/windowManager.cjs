@@ -1319,6 +1319,16 @@ function buildAppMenu(Menu, app, isMac, language = currentLanguage, options = {}
       // ignore
     }
     // 只有主窗口/设置窗口会接收 command-close；其他 BrowserWindow 直接关闭。
+    // 编辑窗口例外：Cmd+W 加速器应走渲染层（关闭活动标签页），而不是原生关闭
+    // 整个窗口并确认所有标签页。
+    if (browserWindow && browserWindow === getEditorWindow()) {
+      if (event?.triggeredByAccelerator === false) {
+        closeBrowserWindow(browserWindow);
+        return;
+      }
+      requestWindowCommandClose(browserWindow);
+      return;
+    }
     if (browserWindow && !isMainWindow(browserWindow) && browserWindow !== settingsWindow) {
       closeBrowserWindow(browserWindow);
       return;

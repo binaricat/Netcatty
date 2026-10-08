@@ -127,6 +127,11 @@ function EditorWindowPaneHost({
       toast.success(t("sftp.editor.saved"), "SFTP");
     } else {
       toast.error(result.error ?? t("sftp.editor.saveFailed"), "SFTP");
+      // The pre-save debounce clear removed the pending dirty report, so a
+      // failed save must re-report the tab's current dirty state or the
+      // source placeholder/top-tab indicator will stay marked clean.
+      const latest = editorTabStore.getTab(tabId);
+      if (latest) reportDetachedEditorDirty(tabId, tabIsDirty(latest));
     }
   }, [tabId, t]);
 
