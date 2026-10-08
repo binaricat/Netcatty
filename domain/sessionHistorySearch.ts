@@ -38,10 +38,15 @@ function createSearchFieldCollector(): SearchFieldCollector {
       const trimmed = text.trim();
       if (!trimmed) return;
       const effectiveMaxLength = Math.min(maxLength, MAX_SEARCHABLE_FIELD_LENGTH);
-      const capped = trimmed.length > effectiveMaxLength
+      let capped = trimmed.length > effectiveMaxLength
         ? trimmed.slice(0, effectiveMaxLength)
         : trimmed;
-      if (totalLength + capped.length > MAX_SESSION_SEARCHABLE_TOTAL_LENGTH) return;
+      // Fill the remaining per-session budget with the freshest evidence:
+      // truncate an oversized field instead of discarding it wholesale (whole-
+      // field rejection would let older, smaller fields win the leftover space).
+      const remaining = MAX_SESSION_SEARCHABLE_TOTAL_LENGTH - totalLength;
+      if (remaining <= 0) return;
+      if (capped.length > remaining) capped = capped.slice(0, remaining);
       totalLength += capped.length;
       fields.push(capped);
     },

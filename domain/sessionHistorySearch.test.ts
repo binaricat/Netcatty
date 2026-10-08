@@ -166,3 +166,22 @@ test("collectSessionSearchFields keeps recent messages searchable under the cap"
   const marker2 = fields.findIndex((field) => field.includes("marker-2"));
   assert.ok(marker1 !== -1 && marker2 !== -1 && marker1 < marker2);
 });
+
+test("collectSessionSearchFields truncates a field to the remaining session budget", () => {
+  // Four 19,000-char messages plus the title overflow the 64 KB cap; the last
+  // collected (oldest) message must be truncated to exactly the remaining
+  // budget instead of being discarded wholesale.
+  const session = createSession("a", "big session", [0, 1, 2, 3].map(() => ({
+    role: "user" as const,
+    content: "a".repeat(19_000),
+  })));
+
+  const fields = collectSessionSearchFields(session);
+  const total = fields.reduce((sum, field) => sum + field.length, 0);
+  assert.ok(total <= 64_000, `total ${total} exceeds session cap`);
+  assert.equal(total, 64_000);
+  // The oldest message fills the leftover budget with its freshest-available
+  // head instead of being dropped entirely.
+  assert.ok(fields.some((field) => field.length === 64_000 - (11 + 3 * 19_000)));
+  assert.ok(fields.some((field) => field.startsWith("aaa")));
+});
