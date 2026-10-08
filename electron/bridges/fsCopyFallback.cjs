@@ -60,7 +60,12 @@ function identityChangedError(target) {
 // after the change the pathname is re-verified (a replacement could have won
 // the name while the metadata change was in flight). A copy too restrictive
 // to open for reading must still regain its intended mode, so that case
-// chmods through the pathname and re-verifies the inode afterwards.
+// chmods through the pathname — but because a pathname chmod cannot be pinned
+// to the copied inode, the name is re-verified once more *before* the mode
+// change, so a pathname that already changed hands fails closed without
+// mutating the replacement's permissions (the post-change revalidation below
+// could refuse to bless that replacement, but nothing could undo the mutated
+// mode).
 // Identity mismatches fail closed like COPYFILE_EXCL; the replacement is
 // left in place and the caller never publishes it.
 async function chmodOnCopiedFile(target, mode, copiedIdentity) {
@@ -69,9 +74,19 @@ async function chmodOnCopiedFile(target, mode, copiedIdentity) {
     handle = await fs.promises.open(target, fs.constants.O_RDONLY);
   } catch (openError) {
     if (openError?.code !== "EACCES" && openError?.code !== "EPERM") throw openError;
-    // Cannot hold a handle on the unreadable copy: change the mode through
-    // the pathname, then confirm that pathname still resolves to the copy
-    // the mode was meant for.
+    // Cannot hold a handle on the unreadable copy: the mode change must go
+    // through the pathname. Since a pathname chmod cannot be pinned to the
+    // copied inode, first confirm the name still resolves to the copy the
+    // mode was meant for and fail closed without touching the file if it does
+    // not — a pathname chmod on a concurrent replacement would mutate that
+    // replacement's permissions, which nothing could undo afterwards.
+    let preChmodIdentity = null;
+    try {
+      preChmodIdentity = fileIdentity(await fs.promises.lstat(target));
+    } catch { preChmodIdentity = null; }
+    if (copiedIdentity === null || preChmodIdentity !== copiedIdentity) {
+      throw identityChangedError(target);
+    }
     await fs.promises.chmod(target, mode);
     let chmodgedIdentity = null;
     try {

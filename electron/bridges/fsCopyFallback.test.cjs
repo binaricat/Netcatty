@@ -499,6 +499,44 @@ test("copyFileExclusiveWithFallback fails closed when the pathname changes while
   );
 });
 
+test("copyFileExclusiveWithFallback does not chmod a concurrent replacement on the unreadable-copy path", async (t) => {
+  const dir = makeTempDir("copy-fallback-race-unreadable-");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const source = path.join(dir, "staged");
+  const target = path.join(dir, "target");
+  fs.writeFileSync(source, "our copy bytes");
+  // The accelerated copy produced the copy, but by the time the
+  // metadata-changing open runs, another process has already replaced the
+  // pathname with its own unreadable file: the pathname-level chmod fallback
+  // must fail closed before mutating that replacement's permissions.
+  const openOriginal = fs.promises.open;
+  const openRestore = stubPromises("open", async (...args) => {
+    if (args[0] === target) {
+      fs.unlinkSync(target);
+      fs.writeFileSync(target, "written by another process");
+      fs.chmodSync(target, 0o000);
+      throw Object.assign(new Error(`EACCES: permission denied, open ${target}`), { code: "EACCES" });
+    }
+    return openOriginal.apply(fs.promises, args);
+  });
+  t.after(openRestore);
+  const chmodRestore = stubPromises("chmod", async () => {
+    throw new Error("the pathname chmod must not run on a replaced target");
+  });
+  t.after(chmodRestore);
+  await assert.rejects(
+    () => copyFileExclusiveWithFallback(source, target, 0o664),
+    (error) => error?.code === "EEXIST" && error.targetOwnershipRelinquished === true,
+  );
+  // The replacement was created mode-0000; it must still carry that mode
+  // (and its own bytes) because the fallback never touched the pathname.
+  const replacementStat = fs.statSync(target);
+  assert.equal(replacementStat.mode & 0o7777, 0o000,
+    "the concurrent replacement's permissions were never mutated");
+  assert.equal(replacementStat.size, Buffer.byteLength("written by another process"),
+    "the concurrent replacement's bytes were never touched");
+});
+
 test("copyFileExclusiveWithFallback does not chmod a concurrent replacement on the streamed path", async (t) => {
   const dir = makeTempDir("copy-fallback-race-stream-");
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
