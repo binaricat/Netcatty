@@ -654,7 +654,7 @@ test('ToolOutputStore aliases session handles so a branched chat keeps reading t
   });
   await store.flush('chat-source');
 
-  store.aliasSessionHandles('chat-source', 'chat-branch');
+  await store.aliasSessionHandles('chat-source', 'chat-branch');
 
   const aliasSpilled = await store.readChunkAsync({ handleId: spilled.id }, 'chat-branch');
   assert.equal(aliasSpilled?.content.length, TOOL_OUTPUT_READ_MAX_CHARS);
@@ -678,7 +678,7 @@ test('ToolOutputStore aliases session handles so a branched chat keeps reading t
   );
 });
 
-test('ToolOutputStore aliasing is idempotent and blocked for pruned chats', () => {
+test('ToolOutputStore aliasing is idempotent and blocked for pruned chats', async () => {
   const store = new ToolOutputStore();
   const handle = store.store({
     chatSessionId: 'chat-source',
@@ -686,15 +686,110 @@ test('ToolOutputStore aliasing is idempotent and blocked for pruned chats', () =
     content: 'kept',
   });
 
-  store.aliasSessionHandles('chat-source', 'chat-branch');
-  store.aliasSessionHandles('chat-source', 'chat-branch');
+  await store.aliasSessionHandles('chat-source', 'chat-branch');
+  await store.aliasSessionHandles('chat-source', 'chat-branch');
   assert.equal(store.read({ handleId: handle.id }, 'chat-branch'), 'kept');
   assert.equal(store.listPendingHandles('chat-branch').length, 1);
 
   // A deleted chat must not be resurrected by later aliasing.
   store.prune('chat-branch');
-  store.aliasSessionHandles('chat-source', 'chat-branch');
+  await store.aliasSessionHandles('chat-source', 'chat-branch');
   assert.equal(store.read({ handleId: handle.id }, 'chat-branch'), null);
+});
+
+test('ToolOutputStore aliases only the retained prefix of a branched chat', async () => {
+  const store = new ToolOutputStore();
+  const kept = store.store({
+    chatSessionId: 'chat-source',
+    capabilityId: 'terminal.execute',
+    content: 'kept by retained prefix',
+  });
+  const removed = store.store({
+    chatSessionId: 'chat-source',
+    capabilityId: 'terminal.execute',
+    content: 'created by the undone turn',
+  });
+
+  await store.aliasSessionHandles('chat-source', 'chat-branch', {
+    retainedHandleIds: new Set([kept.id]),
+  });
+
+  assert.equal(store.read({ handleId: kept.id }, 'chat-branch'), 'kept by retained prefix');
+  assert.equal(store.listPendingHandles('chat-branch').some(handle => handle.id === kept.id), true);
+  // Handles created by the removed turn must not be advertised to the branch.
+  assert.equal(store.listPendingHandles('chat-branch').some(handle => handle.id === removed.id), false);
+  assert.equal(store.get(removed.id, 'chat-branch'), undefined);
+  assert.equal(store.read({ handleId: removed.id }, 'chat-branch'), null);
+});
+
+function createFakeToolOutputPersistence(): ToolOutputPersistence & {
+  entries: Map<string, { record: PersistedToolOutputRecord; content: string; path: string }>;
+} {
+  const entries = new Map<string, { record: PersistedToolOutputRecord; content: string; path: string }>();
+  let fileCounter = 0;
+  return {
+    entries,
+    write: async (record, content) => {
+      const path = `/tmp/fake-tool-output-${++fileCounter}.log`;
+      entries.set(`${record.chatSessionId}:${record.handleId}`, { record, content, path });
+      return path;
+    },
+    restore: async (handleId, chatSessionId) => {
+      const entry = entries.get(`${chatSessionId}:${handleId}`);
+      return entry ? { path: entry.path, record: entry.record } : null;
+    },
+    read: async (path, request) => {
+      const entry = [...entries.values()].find(candidate => candidate.path === path);
+      if (!entry) return null;
+      const mode = request.mode ?? 'head';
+      const maxChars = Math.min(
+        TOOL_OUTPUT_READ_MAX_CHARS,
+        Math.max(1, Math.floor(request.maxChars ?? TOOL_OUTPUT_READ_MAX_CHARS)),
+      );
+      let start = 0;
+      if (mode === 'tail') start = Math.max(0, entry.content.length - maxChars);
+      else if (mode === 'range') start = Math.min(entry.content.length, Math.max(0, Math.floor(request.offset ?? 0)));
+      const content = entry.content.slice(start, start + maxChars);
+      const endOffset = start + content.length;
+      return {
+        mode,
+        content,
+        totalChars: entry.content.length,
+        startOffset: start,
+        endOffset,
+        nextOffset: endOffset,
+        hasMore: endOffset < entry.content.length,
+      };
+    },
+    delete: async () => {},
+  };
+}
+
+test('ToolOutputStore gives branched chats their own durable copies so reads survive a restart', async () => {
+  const persistence = createFakeToolOutputPersistence();
+  const sourceStore = new ToolOutputStore({ persistence });
+  const handle = sourceStore.store({
+    chatSessionId: 'chat-source',
+    capabilityId: 'terminal.execute',
+    content: 'A'.repeat(50_000),
+  });
+  await sourceStore.flush('chat-source');
+
+  await sourceStore.aliasSessionHandles('chat-source', 'chat-branch', {
+    retainedHandleIds: new Set([handle.id]),
+  });
+
+  // Simulate an app restart: a fresh store over the same durable storage must
+  // restore the branch-owned record, not only the source-owned manifest.
+  const restartedStore = new ToolOutputStore({ persistence });
+  const restored = await restartedStore.readChunkAsync({ handleId: handle.id }, 'chat-branch');
+  assert.ok(restored);
+  assert.equal(restored.totalChars, 50_000);
+  assert.ok(restored.content.length > 0);
+
+  // The branch owns a separate durable record under its own chat namespace.
+  assert.ok(persistence.entries.has(`chat-branch:${handle.id}`));
+  assert.ok(persistence.entries.has(`chat-source:${handle.id}`));
 });
 
 test('ToolOutputStore reclaims chat generations after deletion churn settles', () => {

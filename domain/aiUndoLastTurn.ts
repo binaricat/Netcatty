@@ -1,9 +1,41 @@
 import type {
   AISession,
+  AISessionContextCompaction,
   ChatMessage,
   ChatMessageAttachment,
   UploadedFile,
 } from '../infrastructure/ai/types';
+
+/** Matches the `handleId=tool-output-…` references embedded in stored output. */
+const TOOL_OUTPUT_HANDLE_ID_PATTERN = /\bhandleId=(tool-output-[A-Za-z0-9-]+)/g;
+
+/**
+ * Collect the tool output handle ids referenced anywhere in the retained
+ * conversation prefix plus its compaction artifacts. Used to restrict tool
+ * output aliasing when a session is branched so handles belonging to the
+ * removed turn are not advertised to the branch.
+ */
+export function collectRetainedToolOutputHandleIds(
+  messages: readonly ChatMessage[],
+  contextCompaction?: AISessionContextCompaction,
+): Set<string> {
+  const ids = new Set<string>();
+  const scan = (text: string | undefined): void => {
+    if (!text) return;
+    for (const match of text.matchAll(TOOL_OUTPUT_HANDLE_ID_PATTERN)) {
+      ids.add(match[1]);
+    }
+  };
+  for (const message of messages) {
+    scan(message.content);
+    for (const result of message.toolResults ?? []) scan(result.content);
+    for (const attachment of message.attachments ?? []) scan(attachment.previewText);
+    for (const attachment of message.images ?? []) scan(attachment.previewText);
+  }
+  // The compaction summary embeds the archived conversation snapshot handle.
+  scan(contextCompaction?.summary);
+  return ids;
+}
 
 /**
  * Non-destructive "undo last turn" for AI chat sessions.

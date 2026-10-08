@@ -88,6 +88,7 @@ import {
 } from '../../domain/workspaceAiScopeHandoff';
 import {
   buildUndoLastTurnBranch,
+  collectRetainedToolOutputHandleIds,
   type UndoLastTurnRestoredDraft,
 } from '../../domain/aiUndoLastTurn';
 import { getAgentRuntime } from '../../infrastructure/ai/harness/globalAgentRuntime';
@@ -718,10 +719,17 @@ export function useAIState() {
     const branched = result.session;
     // The retained prefix may reference tool outputs stored under the source
     // session id (spilled tool results, compaction archive handles). Alias
-    // them under the branch id so tool_output_read still resolves there.
-    getAgentRuntime()
+    // only those under the branch id so tool_output_read still resolves there
+    // while outputs created by the removed turn stay out of the branch.
+    void getAgentRuntime()
       .getToolOutputStore(source.id)
-      .aliasSessionHandles(source.id, branched.id);
+      .aliasSessionHandles(source.id, branched.id, {
+        retainedHandleIds: collectRetainedToolOutputHandleIds(
+          branched.messages,
+          branched.contextCompaction,
+        ),
+      })
+      .catch(() => {});
     setSessionsRaw(prev => {
       const next = [branched, ...prev];
       setLatestAISessionsSnapshot(next);

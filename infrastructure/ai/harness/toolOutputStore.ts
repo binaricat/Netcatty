@@ -124,6 +124,15 @@ export interface ToolOutputPersistence {
   deleteTerminalEverywhere?(terminalSessionId: string): Promise<void>;
 }
 
+export interface AliasSessionHandlesOptions {
+  /**
+   * Restrict aliasing to the handles referenced by the retained conversation
+   * prefix (messages kept after an undo plus compaction artifacts). When
+   * omitted, every pending handle under the source session is aliased.
+   */
+  retainedHandleIds?: ReadonlySet<string>;
+}
+
 export interface ToolOutputStoreOptions {
   maxHandleChars?: number;
   maxHandlesPerSession?: number;
@@ -294,32 +303,121 @@ export class ToolOutputStore {
   }
 
   /**
-   * Alias every handle stored under `sourceChatSessionId` into
+   * Alias handles stored under `sourceChatSessionId` into
    * `targetChatSessionId`'s namespace, keeping the same handle ids so
-   * references retained in a branched conversation still resolve. Aliases
-   * share the source content/spill path; deleting the source session also
-   * evicts them (the spill file is single-owner).
+   * references retained in a branched conversation still resolve.
+   *
+   * When `options.retainedHandleIds` is provided, only handles referenced by
+   * the retained conversation prefix are aliased; handles created by the
+   * removed turn keep working under the source session but are not advertised
+   * to the branch. Handles missing from the in-memory cache (for example after
+   * an app restart) are restored from durable storage under the source
+   * namespace when possible.
+   *
+   * Each alias is also backed by its own durable copy under the branch chat's
+   * namespace so reads keep working after the app restarts, when restore looks
+   * up manifests by the branch session id.
    */
-  aliasSessionHandles(sourceChatSessionId: string, targetChatSessionId: string): void {
+  async aliasSessionHandles(
+    sourceChatSessionId: string,
+    targetChatSessionId: string,
+    options?: AliasSessionHandlesOptions,
+  ): Promise<void> {
     if (sourceChatSessionId === targetChatSessionId) return;
     if (this.lifecycleDenyFilter.has(`chat:${targetChatSessionId}`)) return;
+    const retained = options?.retainedHandleIds;
     const sourceMap = this.bySession.get(sourceChatSessionId);
-    if (!sourceMap || sourceMap.size === 0) return;
+    const wantedHandleIds = retained ? [...retained] : [...(sourceMap?.keys() ?? [])];
+    if (wantedHandleIds.length === 0) return;
     const targetMap = this.bySession.get(targetChatSessionId) ?? new Map<string, ToolOutputHandle>();
-    let changed = false;
-    for (const sourceHandle of sourceMap.values()) {
-      if (sourceHandle.evicted || targetMap.has(sourceHandle.id)) continue;
-      targetMap.set(sourceHandle.id, {
+    const aliased: ToolOutputHandle[] = [];
+    for (const handleId of wantedHandleIds) {
+      let sourceHandle = sourceMap?.get(handleId);
+      if (!sourceHandle) {
+        sourceHandle = await this.restoreHandle(handleId, sourceChatSessionId).catch(() => undefined);
+      }
+      if (!sourceHandle || sourceHandle.evicted || targetMap.has(handleId)) continue;
+      const alias: ToolOutputHandle = {
         ...sourceHandle,
         chatSessionId: targetChatSessionId,
         accessedAt: this.now(),
-      });
-      changed = true;
+      };
+      targetMap.set(handleId, alias);
+      aliased.push(alias);
     }
-    if (!changed) return;
+    if (aliased.length === 0) return;
     this.bySession.set(targetChatSessionId, targetMap);
     this.enforceSessionLimits(targetChatSessionId, targetMap);
     this.enforceGlobalLimits();
+    await this.materializeDurableAliases(
+      targetChatSessionId,
+      aliased.filter(alias => !alias.evicted),
+    );
+  }
+
+  /**
+   * Give each alias its own durable record under the branch chat's namespace.
+   * Aliases initially share the source handle's content/spill path so reads
+   * work immediately; once the copy lands the alias points at it, so removing
+   * the source session no longer breaks branch reads and restore finds the
+   * branch-owned record after a restart.
+   */
+  private async materializeDurableAliases(
+    targetChatSessionId: string,
+    aliases: ToolOutputHandle[],
+  ): Promise<void> {
+    const persistence = this.persistence;
+    if (!persistence?.write) return;
+    for (const alias of aliases) {
+      try {
+        await alias.spillPromise;
+        if (alias.evicted) continue;
+        if (alias.fullContent == null && !alias.filePath) continue;
+        const content = alias.fullContent ?? await this.readPersistedContent(alias, persistence);
+        if (content == null) continue;
+        const path = await persistence.write(
+          {
+            ...toPersistedRecord(alias),
+            chatSessionId: targetChatSessionId,
+            accessedAt: this.now(),
+          },
+          content,
+        );
+        if (alias.evicted) {
+          void persistence.delete(path).catch(() => {});
+          continue;
+        }
+        alias.filePath = path;
+        alias.fullContent = undefined;
+      } catch {
+        // Keep the shared-source view; the alias still works while the source
+        // handle is reachable, exactly as before.
+      }
+    }
+  }
+
+  private async readPersistedContent(
+    handle: ToolOutputHandle,
+    persistence: ToolOutputPersistence,
+  ): Promise<string | null> {
+    if (!handle.filePath) return null;
+    const chunks: string[] = [];
+    let offset = 0;
+    while (offset < handle.storedChars) {
+      const chunk = await persistence.read(handle.filePath, {
+        handleId: handle.id,
+        mode: 'range',
+        offset,
+        maxChars: TOOL_OUTPUT_READ_MAX_CHARS,
+      });
+      if (!chunk || chunk.content.length === 0) break;
+      chunks.push(chunk.content);
+      const nextOffset = Math.max(offset + chunk.content.length, chunk.nextOffset);
+      if (nextOffset <= offset) break;
+      offset = nextOffset;
+    }
+    const content = chunks.join('');
+    return content.length === handle.storedChars ? content : null;
   }
 
   async flush(chatSessionId: string): Promise<void> {
