@@ -38,6 +38,54 @@ function fileIdentity(statLike) {
   return [statLike?.dev, statLike?.ino, statLike?.size].join(":");
 }
 
+function identityChangedError(target) {
+  return Object.assign(
+    new Error(`EEXIST: file exists, ${target} changed hands while its mode was being applied`),
+    { code: "EEXIST" },
+  );
+}
+
+// Apply `mode` to `target` while proving the metadata change cannot land on a
+// concurrent replacement of the pathname: chmod through the pathname is only
+// safe once the pathname is again verified (before and after the change) to
+// resolve to the inode `copiedIdentity` describes, so a successful return can
+// never bless a replacement for the caller's later publication. The preferred
+// path performs the change through an owned handle, which pins the inode: the
+// opened inode must still be the copied one before it is touched. A copy too
+// restrictive to open for reading must still regain its intended mode, so that
+// case chmods through the pathname and re-verifies the inode afterwards.
+// Identity mismatches fail closed like COPYFILE_EXCL; the replacement is
+// left in place and the caller never publishes it.
+async function chmodOnCopiedFile(target, mode, copiedIdentity) {
+  let handle;
+  try {
+    handle = await fs.promises.open(target, fs.constants.O_RDONLY);
+  } catch (openError) {
+    if (openError?.code !== "EACCES" && openError?.code !== "EPERM") throw openError;
+    // Cannot hold a handle on the unreadable copy: change the mode through
+    // the pathname, then confirm that pathname still resolves to the copy
+    // the mode was meant for.
+    await fs.promises.chmod(target, mode);
+    let chmodgedIdentity = null;
+    try {
+      chmodgedIdentity = fileIdentity(await fs.promises.lstat(target));
+    } catch { chmodgedIdentity = null; }
+    if (copiedIdentity === null || chmodgedIdentity !== copiedIdentity) {
+      throw identityChangedError(target);
+    }
+    return;
+  }
+  try {
+    const heldIdentity = fileIdentity(await handle.stat());
+    if (copiedIdentity === null || heldIdentity !== copiedIdentity) {
+      throw identityChangedError(target);
+    }
+    await handle.chmod(mode);
+  } finally {
+    await handle.close().catch(() => {});
+  }
+}
+
 // Exclusive copy with COPYFILE_EXCL semantics that falls back to a read/write
 // stream when the destination filesystem refuses the accelerated copy syscall.
 // A partially written target name is left in place on failure for the caller
@@ -77,7 +125,7 @@ async function copyFileExclusiveWithFallback(source, target, mode = null, option
       copiedIdentity = fileIdentity(await fs.promises.lstat(target));
     } catch { copiedIdentity = null; }
     try {
-      await fs.promises.chmod(target, creationMode);
+      await chmodOnCopiedFile(target, creationMode, copiedIdentity);
       return;
     } catch (error) {
       if (!isMetadataUnsupportedError(error)) throw error;
@@ -183,16 +231,19 @@ async function copyFileExclusiveWithFallback(source, target, mode = null, option
     // The destination applies the process umask to the stream's creation
     // mode (e.g. an intended 0664 becomes 0600 under umask 0077), so the
     // created file can be narrower than the mode promised to the caller.
-    // Restore any masked bit; a mount that refuses chmod can never carry the
-    // exact mode, so fail closed instead of leaving a narrower mode for the
-    // later promotion to publish.
+    // Restore any masked bit through the pinned copied inode; a mount that
+    // refuses chmod can never carry the exact mode, so fail closed instead
+    // of leaving a narrower mode for the later promotion to publish.
+    let createdIdentity = null;
     let createdMode = null;
     try {
-      createdMode = (await fs.promises.lstat(target)).mode & 0o7777;
+      const createdStat = await fs.promises.lstat(target);
+      createdIdentity = fileIdentity(createdStat);
+      createdMode = createdStat.mode & 0o7777;
     } catch { createdMode = null; }
     if (createdMode !== creationMode) {
       try {
-        await fs.promises.chmod(target, creationMode);
+        await chmodOnCopiedFile(target, creationMode, createdIdentity);
       } catch (chmodError) {
         if (!isMetadataUnsupportedError(chmodError)) throw chmodError;
         throw Object.assign(

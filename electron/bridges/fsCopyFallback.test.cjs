@@ -168,8 +168,16 @@ test("local promotion keeps restrictive mode when EXDEV staging copy succeeds bu
   const chmodRestore = stubPromises("chmod", async () => {
     throw Object.assign(new Error("EOPNOTSUPP: Operation not supported"), { code: "EOPNOTSUPP" });
   });
+  // Metadata refusal is simulated at the owned-handle level too (and at the
+  // pathname level above), like gvfsd-fuse-style mounts that reject chmod
+  // entirely.
+  const handleChmodRestore = makeHandleStub(
+    "chmod",
+    Object.assign(new Error("EOPNOTSUPP: Operation not supported"), { code: "EOPNOTSUPP" }),
+  );
   t.after(renameRestore);
   t.after(chmodRestore);
+  t.after(handleChmodRestore);
   await transferBridge._promoteLocalTransferForTests(staged, target, { existingMode: 0o600 });
   // Restore owner access so the payload can be verified and cleaned up.
   fs.chmodSync(target, 0o600);
@@ -406,10 +414,17 @@ test("copyFileExclusiveWithFallback fails closed when the umask narrows the crea
   fs.writeFileSync(source, payload);
   const copyRestore = stubPromises("copyFile", enotsupCopyFile());
   t.after(copyRestore);
+  // Metadata refusal is simulated at both the pathname and the owned-handle
+  // level, like gvfsd-fuse-style mounts that reject chmod entirely.
   const chmodRestore = stubPromises("chmod", async () => {
     throw Object.assign(new Error("ENOTSUP: operation not supported"), { code: "ENOTSUP" });
   });
   t.after(chmodRestore);
+  const handleChmodRestore = makeHandleStub(
+    "chmod",
+    Object.assign(new Error("ENOTSUP: operation not supported"), { code: "ENOTSUP" }),
+  );
+  t.after(handleChmodRestore);
   const previousUmask = process.umask(0o077);
   t.after(() => process.umask(previousUmask));
   await assert.rejects(
@@ -425,13 +440,19 @@ test("copyFileExclusiveWithFallback does not unlink a concurrent replacement at 
   const source = path.join(dir, "staged");
   const target = path.join(dir, "target");
   fs.writeFileSync(source, "our copy bytes");
-  // Simulate another process writing the same pathname while our (stalled)
-  // chmod is still in flight: the stub replaces the copy and then refuses.
-  const chmodRestore = stubPromises("chmod", async (pathName) => {
-    fs.writeFileSync(pathName, "written by another process");
-    throw Object.assign(new Error("ENOTSUP: operation not supported"), { code: "ENOTSUP" });
+  // Simulate another process winning the pathname while the produced copy's
+  // identity is pinned but before the metadata-changing open: the stub
+  // replaces the file with a new inode, so the opened handle must no longer
+  // match the copied identity.
+  const openOriginal = fs.promises.open;
+  const openRestore = stubPromises("open", async (...args) => {
+    if (args[0] === target) {
+      fs.unlinkSync(target);
+      fs.writeFileSync(target, "written by another process");
+    }
+    return openOriginal.apply(fs.promises, args);
   });
-  t.after(chmodRestore);
+  t.after(openRestore);
   await assert.rejects(
     () => copyFileExclusiveWithFallback(source, target, 0o600),
     (error) => error?.code === "EEXIST",
@@ -440,6 +461,37 @@ test("copyFileExclusiveWithFallback does not unlink a concurrent replacement at 
     fs.readFileSync(target, "utf8"),
     "written by another process",
     "the concurrent replacement is never removed by the cleanup",
+  );
+});
+
+test("copyFileExclusiveWithFallback does not chmod a concurrent replacement on the streamed path", async (t) => {
+  const dir = makeTempDir("copy-fallback-race-stream-");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const source = path.join(dir, "staged");
+  const target = path.join(dir, "target");
+  fs.writeFileSync(source, "our copy bytes");
+  // Force the streamed path and a umask-narrowed mode so the post-stream
+  // chmod runs, then let another process win the pathname between the
+  // created inode being pinned and the chmod's owned open.
+  const copyRestore = stubPromises("copyFile", enotsupCopyFile());
+  t.after(copyRestore);
+  const openOriginal = fs.promises.open;
+  const openRestore = stubPromises("open", async (...args) => {
+    if (args[0] === target && args[1] !== "wx") {
+      fs.unlinkSync(target);
+      fs.writeFileSync(target, "written by another process");
+    }
+    return openOriginal.apply(fs.promises, args);
+  });
+  t.after(openRestore);
+  await assert.rejects(
+    () => copyFileExclusiveWithFallback(source, target, 0o664),
+    (error) => error?.code === "EEXIST",
+  );
+  assert.equal(
+    fs.readFileSync(target, "utf8"),
+    "written by another process",
+    "the concurrent replacement is neither chmoded nor removed",
   );
 });
 
@@ -478,10 +530,17 @@ test("copyFileExclusiveWithFallback applies the intended mode when the accelerat
   const source = path.join(dir, "staged");
   const target = path.join(dir, "target");
   fs.writeFileSync(source, "accelerated bytes");
+  // Metadata refusal is simulated at both the pathname and the owned-handle
+  // level, like gvfsd-fuse-style mounts that reject chmod entirely.
   const chmodRestore = stubPromises("chmod", async () => {
     throw Object.assign(new Error("ENOTSUP: operation not supported"), { code: "ENOTSUP" });
   });
   t.after(chmodRestore);
+  const handleChmodRestore = makeHandleStub(
+    "chmod",
+    Object.assign(new Error("ENOTSUP: operation not supported"), { code: "ENOTSUP" }),
+  );
+  t.after(handleChmodRestore);
   await copyFileExclusiveWithFallback(source, target, 0o600);
   assert.equal(fs.readFileSync(target, "utf8"), "accelerated bytes");
   assert.equal(
