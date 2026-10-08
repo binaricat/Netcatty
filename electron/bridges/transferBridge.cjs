@@ -1053,6 +1053,7 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
   let keepRecoveryFiles = false;
   let preparedHandle;
   let originalHandle;
+  let intendedMode = null;
   let restoreProbeCreated = false;
   let localMtimePrepared = false;
   try {
@@ -1063,24 +1064,24 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
       if (error?.code !== "EXDEV") throw error;
       // The fallback creates the replacement with a default 0666 mode. On
       // mounts that reject chmod below, the later mode loop cannot correct it,
-      // so seed the intended permissions now: the destination's existing mode
-      // when known, else the staged file's own mode (what the accelerated
+      // so seed the exact intended permissions now: the destination's existing
+      // mode when known, else the staged file's own mode (what the accelerated
       // copyFile path would have preserved, so cross-device copies keep the
-      // permissions a same-device rename produces). Owner read is forced
-      // until the handle below is acquired — write-only or mode-0000 seeds
-      // would make our own fs.promises.open(readyPath, "r") fail with EACCES.
-      // The mode loop (and publication) applies the exact destination mode
-      // afterwards; on mounts that refuse chmod the worst case keeps an
-      // owner-readable file with the staged/destination permissions.
-      let intendedMode = Number.isInteger(options.existingMode)
-        ? (options.existingMode & 0o7777) | 0o400
+      // permissions a same-device rename produces). Seeding never adds
+      // permissions the destination did not have: if the exact mode is
+      // unreadable by us (mode-0000 or write-only seeds), owner read is
+      // granted only for the instant the prepared handle below is acquired
+      // and then removed again, so a chmod-refusing mount never ends up
+      // publishing a broader mode than the destination had.
+      intendedMode = Number.isInteger(options.existingMode)
+        ? (options.existingMode & 0o7777)
         : null;
       if (intendedMode === null) {
         let stagedMode = null;
         try {
           stagedMode = (await fs.promises.stat(stagedPath)).mode & 0o7777;
         } catch { stagedMode = null; }
-        intendedMode = stagedMode === null ? 0o600 : stagedMode | 0o400;
+        intendedMode = stagedMode === null ? 0o600 : stagedMode;
       }
       await copyFileExclusiveWithFallback(stagedPath, readyPath, intendedMode);
     }
@@ -1095,7 +1096,43 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
     }
     // Keep read access to our private bytes before destination permissions
     // can remove it; the no-hardlink fallback copies through this handle.
-    preparedHandle = await fs.promises.open(readyPath, "r");
+    try {
+      preparedHandle = await fs.promises.open(readyPath, "r");
+    } catch (openError) {
+      // A restrictive seed is unreadable by us. Grant owner read only to
+      // acquire the temporary handle and remove the extra bit again right
+      // away: publication must not preserve permissions the destination never
+      // had, even when the destination mount refuses the removal.
+      preparedHandle = null;
+      if (openError?.code !== "EACCES" && openError?.code !== "EPERM") throw openError;
+      if (intendedMode === null) throw openError;
+      let grantedRead = false;
+      try {
+        await fs.promises.chmod(readyPath, intendedMode | 0o400);
+        grantedRead = true;
+      } catch (grantError) {
+        if (!isMetadataUnsupportedError(grantError)) throw grantError;
+        // A chmod-refusing mount keeps the exact restrictive creation mode.
+        // Publication below either hardlinks (no read access needed) or fails
+        // closed rather than publishing a broadened mode.
+      }
+      if (grantedRead) {
+        preparedHandle = await fs.promises.open(readyPath, "r");
+        try {
+          await fs.promises.chmod(readyPath, intendedMode);
+        } catch (restoreError) {
+          if (!isMetadataUnsupportedError(restoreError)) throw restoreError;
+          // Owner read was granted but this mount refuses to remove it again,
+          // so publishing would preserve a mode the destination never had:
+          // fail closed instead of leaking the extra permission bit.
+          preparedHandle = null;
+          throw new Error(
+            `Cannot publish local destination mode ${intendedMode.toString(8)}: the mount refused to re-remove owner read`,
+            { cause: restoreError },
+          );
+        }
+      }
+    }
     let appliedMode = null;
     let validatedTarget;
     let stable = false;

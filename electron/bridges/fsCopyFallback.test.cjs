@@ -205,13 +205,100 @@ for (const restrictiveMode of [0o200, 0o000]) {
     t.after(renameRestore);
     t.after(copyFileRestore);
     await transferBridge._promoteLocalTransferForTests(staged, target, { existingMode: restrictiveMode });
+    // Promotion must publish the exact restrictive destination mode: it may
+    // grant owner read only while acquiring its own read handle, never as
+    // part of the published file. statSync needs no read permission.
+    assert.equal(
+      fs.statSync(target).mode & 0o777,
+      restrictiveMode,
+      `the mode-${restrictiveMode.toString(8)} destination is published without added owner read`,
+    );
     // Restore owner access so the payload can be verified and cleaned up.
     fs.chmodSync(target, 0o600);
     assert.ok(fs.readFileSync(target).equals(payload));
-    assert.equal(fs.statSync(target).mode & 0o777, 0o600);
     assert.deepEqual(fs.readdirSync(dir), ["target"], "promotion leaves no recovery files behind");
   });
 }
+
+test("local promotion never publishes owner read for a mode-0000 destination on a chmod-refusing mount", async (t) => {
+  const dir = makeTempDir("promote-refusing-mode-0000-");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const staged = path.join(dir, "staged");
+  const target = path.join(dir, "target");
+  const payload = Buffer.alloc(1024 * 1024 + 17, 13);
+  fs.writeFileSync(staged, payload);
+  fs.writeFileSync(target, "original");
+  fs.chmodSync(target, 0o000);
+  // Force the EXDEV stream fallback and refuse chmod like gvfsd-fuse would;
+  // the published destination must keep the restrictive 0000 mode instead of
+  // leaking the temporary owner-read grant used to hold the ready handle.
+  const renameOriginal = fs.promises.rename;
+  const renameRestore = stubPromises("rename", async (...args) => {
+    if (String(args[1]).endsWith(".ready")) {
+      throw Object.assign(new Error("EXDEV: cross-device link not permitted"), { code: "EXDEV" });
+    }
+    return renameOriginal.apply(fs.promises, args);
+  });
+  const copyFileRestore = stubPromises("copyFile", enotsupCopyFile());
+  const chmodRestore = stubPromises("chmod", async () => {
+    throw Object.assign(new Error("ENOTSUP: operation not supported"), { code: "ENOTSUP" });
+  });
+  t.after(renameRestore);
+  t.after(copyFileRestore);
+  t.after(chmodRestore);
+  await transferBridge._promoteLocalTransferForTests(staged, target, { existingMode: 0o000 });
+  assert.equal(
+    fs.statSync(target).mode & 0o777,
+    0o000,
+    "the chmod-refusing destination keeps its mode without an added owner-read bit",
+  );
+  // Restore owner access so the payload can be verified and cleaned up.
+  fs.chmodSync(target, 0o600);
+  assert.ok(fs.readFileSync(target).equals(payload));
+  assert.equal(fs.existsSync(staged), false);
+  assert.equal(fs.readdirSync(dir).filter((name) => name !== "target").length, 0);
+});
+
+test("promotion fails closed for a restrictive destination on a chmod- and hardlink-refusing mount", async (t) => {
+  const dir = makeTempDir("promote-fail-closed-");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const staged = path.join(dir, "staged");
+  const target = path.join(dir, "target");
+  fs.writeFileSync(staged, Buffer.alloc(1024 * 1024 + 7, 3));
+  fs.writeFileSync(target, "original");
+  fs.chmodSync(target, 0o000);
+  // gvfs-style mount: no chmod, no hardlinks, and the pre-replacement rename
+  // across devices forces the streamed fallback. The restrictive destination
+  // cannot be read to republish, so promotion must fail instead of silently
+  // publishing a broadened owner-readable mode.
+  const renameOriginal = fs.promises.rename;
+  const renameRestore = stubPromises("rename", async (...args) => {
+    if (String(args[1]).endsWith(".ready")) {
+      throw Object.assign(new Error("EXDEV: cross-device link not permitted"), { code: "EXDEV" });
+    }
+    return renameOriginal.apply(fs.promises, args);
+  });
+  const copyFileRestore = stubPromises("copyFile", enotsupCopyFile());
+  const chmodRestore = stubPromises("chmod", async () => {
+    throw Object.assign(new Error("ENOTSUP: operation not supported"), { code: "ENOTSUP" });
+  });
+  const linkRestore = stubPromises("link", async () => {
+    throw Object.assign(new Error("ENOTSUP: operation not supported, link"), { code: "ENOTSUP" });
+  });
+  t.after(renameRestore);
+  t.after(copyFileRestore);
+  t.after(chmodRestore);
+  t.after(linkRestore);
+  await assert.rejects(
+    () => transferBridge._promoteLocalTransferForTests(staged, target, { existingMode: 0o000 }),
+    /unreadable local destination/,
+  );
+  // The original destination is restored untouched and nothing was broadened.
+  fs.chmodSync(target, 0o600);
+  assert.equal(fs.readFileSync(target, "utf8"), "original");
+  assert.equal(fs.statSync(target).mode & 0o777, 0o600);
+  assert.equal(fs.existsSync(staged), true);
+});
 
 test("copyFileExclusiveWithFallback applies restrictive creation mode to the streamed fallback", async (t) => {
   const dir = makeTempDir("copy-fallback-mode-");

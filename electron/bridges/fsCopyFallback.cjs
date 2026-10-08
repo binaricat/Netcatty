@@ -1,6 +1,7 @@
 "use strict";
 
 const fs = require("node:fs");
+const crypto = require("node:crypto");
 const { pipeline } = require("node:stream/promises");
 
 // Node's fs.copyFile accelerates the data copy with Linux copy_file_range().
@@ -38,8 +39,10 @@ function fileIdentity(statLike) {
 // over, so `mode` is re-applied with chmod; when that chmod is refused the
 // gvfsd-fuse-style way (ENOTSUP/EOPNOTSUPP/ENOSYS) the copy is redone as a
 // stream so the target is still created with `mode` instead of leaking the
-// potentially broader staged source mode. Callers that need to open `target`
-// for reading before they can chmod must keep an owner-read bit in `mode`.
+// potentially broader staged source mode. The removal of the replaced copy is
+// relabel-then-verify: rename moves whatever currently owns the name to a
+// private side name without deleting anything, and only an inode verifiably
+// equal to the copy this module produced is unlinked from that side name.
 async function copyFileExclusiveWithFallback(source, target, mode = null) {
   const creationMode = Number.isInteger(mode) && mode >= 0 ? mode & 0o7777 : null;
   try {
@@ -62,26 +65,43 @@ async function copyFileExclusiveWithFallback(source, target, mode = null) {
     // chmod, so the intended mode can never be applied to it afterwards.
     // Replace it with a streamed copy whose creation mode carries the
     // intended (no broader than requested) bits.
-    if (copiedIdentity !== null) {
-      // Only unlink while the name still resolves to the copy we produced: a
-      // concurrent replacement at the same path must not be removed. If the
-      // identity moved (or the name vanished), fail closed like COPYFILE_EXCL
-      // rather than clobbering someone else's file.
-      let currentIdentity;
+    // Relabel-then-verify instead of check-then-unlink: `rename` moves
+    // whatever the name currently holds to a side name without deleting
+    // anything, so a concurrent replacement that lands between verification
+    // and removal cannot be destroyed. Only a name whose inode was verified
+    // to be the copy this module produced is unlinked, from a private side
+    // name; anything else is relinked back (or left aside untouched) and the
+    // operation fails closed like COPYFILE_EXCL.
+    {
+      const stalePath = `${target}.stale-${crypto.randomUUID().replace(/-/g, "")}`;
+      let moved = false;
       try {
-        currentIdentity = fileIdentity(await fs.promises.lstat(target));
+        await fs.promises.rename(target, stalePath);
+        moved = true;
       } catch (error) {
         if (error?.code !== "ENOENT") throw error;
-        currentIdentity = null;
       }
-      if (currentIdentity !== copiedIdentity) {
-        throw Object.assign(
-          new Error(`EEXIST: file exists, ${target} changed while its mode could not be applied`),
-          { code: "EEXIST" },
-        );
+      if (moved) {
+        let staleIdentity = null;
+        try {
+          staleIdentity = fileIdentity(await fs.promises.lstat(stalePath));
+        } catch { staleIdentity = null; }
+        if (copiedIdentity === null || staleIdentity !== copiedIdentity) {
+          // The name changed hands before (or while) it was relabeled. It is
+          // no longer ours: put it back without clobbering whoever re-created
+          // the name (a failed relink leaves the verified data aside, never
+          // deleted) and fail closed like COPYFILE_EXCL.
+          try {
+            await fs.promises.link(stalePath, target);
+          } catch { /* target already re-occupied by someone else */ }
+          throw Object.assign(
+            new Error(`EEXIST: file exists, ${target} changed while its mode could not be applied`),
+            { code: "EEXIST" },
+          );
+        }
+        await fs.promises.unlink(stalePath);
       }
     }
-    await fs.promises.unlink(target);
   } catch (error) {
     if (!isCopyFallbackError(error)) throw error;
   }
