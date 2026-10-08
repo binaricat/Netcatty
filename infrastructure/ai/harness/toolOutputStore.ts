@@ -411,6 +411,10 @@ export class ToolOutputStore {
         const content = await this.tryReadPersistedContent(handle);
         if (content != null) {
           copy.fullContent = content;
+          // The copy now holds its own content and will respill the borrowed
+          // path if it came in through the spread: drop the inherited
+          // non-owning marker so eviction deletes the target-owned spill file.
+          copy.borrowedFilePath = undefined;
         } else {
           // Persisted content is unreadable (e.g. the spill file vanished).
           // Fall back to aliasing the source-owned path so the live fork can
@@ -589,6 +593,11 @@ export class ToolOutputStore {
         return;
       }
       handle.filePath = path;
+      // The freshly written path is owned by this handle; a previously
+      // borrowed spill path (fell back to durably, in place of the source's
+      // own file) must not keep the eviction-protection flag now that the
+      // handle owns durable content again.
+      handle.borrowedFilePath = false;
       handle.fullContent = undefined;
     }).catch(() => {
       // Keep the in-memory copy if persistence is temporarily unavailable.
