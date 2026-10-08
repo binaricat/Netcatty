@@ -1688,11 +1688,11 @@ test("orphan cancel marks process-global cancel so surviving walks stop", async 
     totalBytes: 100,
     startTime: started,
   }]);
-  const cancellation = store.cancel("walk-1");
-  await new Promise((resolve) => setImmediate(resolve));
+  await store.cancel("walk-1");
   assert.equal(isTransferCancelledFlag("walk-1"), true);
+  const resuming = store.resume("walk-1");
   unregisterTransferWalk("walk-1");
-  await cancellation;
+  await resuming;
   assert.equal(isTransferCancelledFlag("walk-1"), false);
   assert.equal(store.getSnapshot().tasks.find((row) => row.id === "walk-1")?.status, "cancelled");
 });

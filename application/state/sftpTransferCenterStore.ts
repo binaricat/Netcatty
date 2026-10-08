@@ -129,6 +129,7 @@ export interface SftpTransferCenterStore {
   isResuming(taskId: string): boolean;
   pause(taskId: string): Promise<void>;
   resume(taskId: string): Promise<void>;
+  /** Wait for backend cancellation requests; live walks settle separately. */
   cancel(taskId: string): Promise<void>;
   /** Publish one cancellation outcome after the old execution has settled. */
   settleCancellation(taskId: string, taskIds: ReadonlySet<string>, failedIds: ReadonlySet<string>, retainedTasks: readonly RetainedCancellationTask[], onSettled: () => Promise<void>): Promise<void>;
@@ -1987,14 +1988,16 @@ export function createSftpTransferCenterStore(persistence?: StorePersistence): S
         if (cancelSettlements.get(taskId) === settlement) cancelSettlements.delete(taskId);
       });
       cancelSettlements.set(taskId, settlement);
-      if (failedIds.size > 0 && walkStillRunning) {
-        tasks = tasks.map((task) => task.id === taskId
-          && !["completed", "failed"].includes(task.status)
-          ? { ...task, status: "attention", error: "Could not cancel transfer. Please try again.", speed: 0 }
-          : task);
-        emit();
-        // Return the failed attempt now so Cancel can be retried. Resume is
-        // fenced separately on settlement; no timeout or early unlatch.
+      if (walkStillRunning) {
+        if (failedIds.size > 0) {
+          tasks = tasks.map((task) => task.id === taskId
+            && !["completed", "failed"].includes(task.status)
+            ? { ...task, status: "attention", error: "Could not cancel transfer. Please try again.", speed: 0 }
+            : task);
+          emit();
+        }
+        // Backend requests are done: let Cancel all dispatch its next batch.
+        // Resume, final status, and cleanup still wait on this settlement.
         void settlement.catch(() => {});
         return;
       }

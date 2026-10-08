@@ -51,6 +51,7 @@ export interface TransferRuntime {
    * walk is dead / reconnectRequired. Single external operation.
    */
   resume(taskId: string): Promise<void>;
+  /** Wait for backend cancellation requests; Resume remains fenced on walk settlement. */
   cancel(taskId: string): Promise<void>;
 
   /**

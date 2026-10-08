@@ -70,3 +70,78 @@ test("Cancel all releases a skipped late failure so one Retry executes while the
   assert.equal(store.getTask(later.id)?.status, "completed");
   assert.equal(isTransferOrRootCancelled(later.id), false);
 });
+
+for (const firstCancelSucceeds of [true, false]) {
+  test(`Cancel all dispatches later batches before walk settlement: success=${firstCancelSucceeds}`, async (t) => {
+    const previousAct = (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
+    Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+    const originalGet = netcattyBridge.get;
+    const tasks: TransferTask[] = Array.from({ length: 33 }, (_, index) => ({
+      id: `dispatch-${firstCancelSucceeds}-${index}`, fileName: `${index}.bin`,
+      sourcePath: `/source/${index}`, targetPath: `/target/${index}`,
+      sourceConnectionId: "local", targetConnectionId: "remote", targetHostId: "host",
+      direction: "upload", status: "transferring", totalBytes: 8, transferredBytes: 0,
+      speed: 0, startTime: Date.now() + index, isDirectory: false, resumable: true,
+    }));
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    let renderer: ReactTestRenderer | undefined;
+    let actions: ReturnType<typeof useGlobalSftpTransferActions> | undefined;
+    let cancelling: Promise<void> | undefined;
+    function Probe() {
+      actions = useGlobalSftpTransferActions(store.getSnapshot().tasks);
+      return null;
+    }
+    store.publishOwner("closed-panel", tasks);
+    const first = tasks[0].id;
+    const walking = transferRuntime.runWalk(first, async () => { await held; });
+    t.after(async () => {
+      release();
+      await walking;
+      await act(async () => { await cancelling; renderer?.unmount(); });
+      store.setDedicatedResumeHandler(null);
+      for (const task of tasks) store.dismiss(task.id);
+      netcattyBridge.get = originalGet;
+      resetTransferCancelLatchesForTests();
+      resetTransferWalkRegistryForTests();
+      resetTransferRuntimeRunsForTests();
+      Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: previousAct });
+    });
+    const calls: string[] = [];
+    const cleaned: string[] = [];
+    let active = 0;
+    let peak = 0;
+    let recoveryCalls = 0;
+    netcattyBridge.get = () => ({
+      cancelTransfer: async (id: string) => {
+        calls.push(id);
+        peak = Math.max(peak, ++active);
+        await new Promise((resolve) => setImmediate(resolve));
+        active -= 1;
+        return { success: id !== first || firstCancelSucceeds };
+      },
+      clearPendingTransferCancel: async () => {},
+      cleanupTransferArtifacts: async ({ transferId }: { transferId: string }) => { cleaned.push(transferId); },
+    } as unknown as ReturnType<typeof netcattyBridge.get>);
+    store.setDedicatedResumeHandler(async () => { recoveryCalls += 1; return { success: true }; });
+    await act(async () => { renderer = create(React.createElement(Probe)); });
+    await act(async () => {
+      cancelling = actions!.cancelAll();
+      for (let tick = 0; tick < 5; tick += 1) await new Promise((resolve) => setImmediate(resolve));
+    });
+    assert.equal(calls.length, 33, "the later active stream must receive cancellation before the first walk finishes");
+    assert.ok(peak > 1 && peak <= 32, "backend cancellation remains bounded");
+    assert.equal(transferRuntime.isWalkInFlight(first), true);
+    assert.equal(isTransferOrRootCancelled(first), true, "dispatch completion must not clear the old walk latch");
+    assert.equal(cleaned.includes(first), false, "artifact cleanup still waits for settlement");
+    let resumeFinished = false;
+    const resuming = store.resume(first).then(() => { resumeFinished = true; });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(resumeFinished, false, "Resume must still wait for the cancelling walk");
+    assert.equal(recoveryCalls, 0);
+    release();
+    await Promise.all([walking, cancelling, resuming]);
+    assert.equal(recoveryCalls, firstCancelSucceeds ? 0 : 1);
+    assert.equal(store.getTask(first)?.status, firstCancelSucceeds ? "cancelled" : "completed");
+  });
+}
