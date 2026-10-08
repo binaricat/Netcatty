@@ -33,7 +33,7 @@ jobs:
       - name: Install shell test dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y fish xvfb
+          sudo apt-get install -y fish zsh xvfb
 
       - name: Install deps
         run: npm ci
