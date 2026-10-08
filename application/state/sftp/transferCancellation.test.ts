@@ -292,7 +292,7 @@ for (const completeDuring of ["backend-cancel", "walk-settlement"] as const) {
       assert.equal(store.getTask(failed.id)?.status, "attention");
       return resumeTransferWithDedicatedSession(root, {
         hosts: [{ id: "fixture-host", label: "fixture", hostname: "fixture", port: 22,
-          username: "test", authMethod: "password", protocol: "ssh" }],
+          username: "test", authMethod: "password", protocol: "ssh", tags: [], os: "linux" }],
         keys: [], identities: [],
       }, (value) => { progress.push(value.transferred); }, {
         children: store.getSnapshot().tasks.filter((child) => child.parentTaskId === parent.id),

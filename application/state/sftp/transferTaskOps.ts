@@ -81,7 +81,7 @@ export function useSftpTransferTaskOps({
         const compressed = candidate?.controlKind === "compressed-upload";
         try {
           const result = await (compressed ? cancelCompressedUpload?.(id) : cancelTransferAtBackend?.(id));
-          if (result?.success === false) failed.push(id);
+          if (result && result.success === false) failed.push(id);
         } catch {
           failed.push(id);
         }
