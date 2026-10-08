@@ -694,25 +694,32 @@ export class ToolOutputStore {
 
   /**
    * Pick the next handle to evict: a handle owning a durable spill path that
-   * other handles borrow as a non-owning alias must stay in memory while the
-   * borrower does — evicting the owner would delete the very file the alias
-   * points at, leaving that alias unreadable. Prefer the oldest borrowed
-   * alias instead (evicting an alias never deletes a file) before falling
-   * back to the oldest handle overall. `protect` marks handles that must not
-   * be chosen for eviction (e.g. the records a fresh fork advertises, its
-   * clones and their source handles): they are skipped while any unprotected
-   * candidate remains, so making room for a fork never removes a handle the
-   * fork or the conversation it was forked from still resolves.
+   * other handles in the same eviction set borrow as a non-owning alias must
+   * stay in memory while the borrower does — evicting the owner would delete
+   * the very file the alias points at, leaving that alias unreadable. Prefer
+   * the oldest borrowed alias instead (evicting an alias never deletes a
+   * file) before falling back to the oldest handle overall. The borrow
+   * protection is scoped to `entries`: only the global pass sees every
+   * session's handles, so only there can the borrower take the owner's
+   * place as the victim. A per-session pass (`enforceSessionLimits`) never
+   * contains an alias of another session's owner, and scoping the filter to
+   * `entries` keeps it from pinning owners against their own session's
+   * quota — otherwise a source session whose quota is filled by borrowed
+   * owners would leave a freshly stored handle as the only eviction
+   * candidate, and `store()` would return an immediately dead handle id.
+   * `protect` marks handles that must not be chosen for eviction (e.g. the
+   * records a fresh fork advertises, its clones and their source handles):
+   * they are skipped while any unprotected candidate remains, so making room
+   * for a fork never removes a handle the fork or the conversation it was
+   * forked from still resolves.
    */
   private pickEvictionEntry<T extends { handle: ToolOutputHandle }>(
     entries: ReadonlyArray<T>,
     protect?: ReadonlySet<ToolOutputHandle>,
   ): T | undefined {
     const borrowedPaths = new Set<string>();
-    for (const sessionMap of this.bySession.values()) {
-      for (const handle of sessionMap.values()) {
-        if (handle.borrowedFilePath && handle.filePath) borrowedPaths.add(handle.filePath);
-      }
+    for (const entry of entries) {
+      if (entry.handle.borrowedFilePath && entry.handle.filePath) borrowedPaths.add(entry.handle.filePath);
     }
     let candidates = borrowedPaths.size
       ? entries.filter(entry => !(
