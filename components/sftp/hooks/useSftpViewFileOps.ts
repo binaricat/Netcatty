@@ -256,7 +256,12 @@ export const useSftpViewFileOps = ({
     });
     if (!editorId) return;
     if (editorTabStore.getTab(editorId)?.placement === "window") {
-      void popOutEditorTab(editorId);
+      void popOutEditorTab(editorId).then((ok) => {
+        if (!ok) return;
+        setShowTextEditor(false);
+        setTextEditorTarget(null);
+        setTextEditorContent("");
+      });
       return;
     }
     activeTabStore.setActiveTabId(toEditorTabId(editorId));

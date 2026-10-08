@@ -57,3 +57,53 @@ for (const action of ["onPopOut", "onPromoteToTab"] as const) {
     assert.equal(errors.mock.callCount(), 1);
   });
 }
+
+for (const focusSucceeds of [true, false]) {
+  test(`Maximize dismisses a clean duplicate modal only after detached focus succeeds: ${focusSucceeds}`, async (t) => {
+    const environment = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
+    const previous = environment.IS_REACT_ACT_ENVIRONMENT;
+    environment.IS_REACT_ACT_ENVIRONMENT = true;
+    let ops!: UseSftpViewFileOpsResult;
+    const params = {
+      sftpRef: { current: {
+        leftPane: { id: "pane", connection: { id: "conn", hostId: "host" } },
+        readTextFile: async () => "original",
+      } },
+      behaviorRef: { current: "" }, autoSyncRef: { current: false },
+      getOpenerForFileRef: { current: () => null }, setOpenerForExtension: () => {},
+      t: (key: string) => key,
+    } as unknown as UseSftpViewFileOpsParams;
+    const detached = {
+      editorId: "clean-duplicate", sessionId: "conn", sftpTabId: "pane", hostId: "host",
+      remotePath: "/file.txt", fileName: "file.txt", languageId: "plaintext",
+      content: "detached edits", baselineContent: "original", wordWrap: false, viewState: null,
+    };
+    editorTabStore.upsertFromSnapshot(detached, "window");
+    const before = editorTabStore.getTab(detached.editorId);
+    t.after(() => editorTabStore.close(detached.editorId));
+    let finishFocus!: (result: { success: boolean }) => void;
+    const focusing = new Promise<{ success: boolean }>((resolve) => { finishFocus = resolve; });
+    let focusCount = 0;
+    t.mock.method(netcattyBridge, "get", () => ({
+      focusEditorWindow: () => { focusCount++; return focusing; },
+    }));
+    function Harness() { ops = useSftpViewFileOps(params); return null; }
+    let renderer!: ReactTestRenderer;
+    await act(async () => { renderer = create(React.createElement(Harness)); });
+    t.after(async () => {
+      await act(async () => renderer.unmount());
+      environment.IS_REACT_ACT_ENVIRONMENT = previous;
+    });
+    await act(async () => {
+      await ops.onEditFileLeft({ name: "file.txt", size: 8 } as Parameters<typeof ops.onEditFileLeft>[0], "/file.txt");
+    });
+    await act(async () => { ops.onPromoteToTab({ ...detached, content: "original" }); });
+    assert.equal(focusCount, 1);
+    assert.equal(ops.showTextEditor, true, "keep the modal until focus is acknowledged");
+    await act(async () => { finishFocus({ success: focusSucceeds }); });
+    assert.equal(ops.showTextEditor, !focusSucceeds);
+    assert.equal(ops.textEditorTarget?.fullPath ?? null, focusSucceeds ? null : "/file.txt");
+    assert.equal(ops.textEditorContent, focusSucceeds ? "" : "original");
+    assert.equal(editorTabStore.getTab(detached.editorId), before, "focusing must preserve existing detached edits");
+  });
+}
