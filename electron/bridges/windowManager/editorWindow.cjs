@@ -59,6 +59,7 @@ function sanitizeEditorSnapshot(payload) {
 function createEditorWindowApi(ctx) {
     let editorWindow = null;
     let editorWindowLoaded = null;
+    let nativeClosePendingWindow = null;
     const tabSources = new Map();
 
     function getEditorWindow() {
@@ -195,6 +196,7 @@ function createEditorWindowApi(ctx) {
 
       const existing = getEditorWindow();
       if (existing) {
+        if (nativeClosePendingWindow === existing) return { success: false, error: "Editor window is closing" };
         return sendOpenTab(electronModule, existing, snapshot, source, true);
       }
 
@@ -210,7 +212,6 @@ function createEditorWindowApi(ctx) {
 
       const windowsChrome = windowsFramelessContentChromeOptions();
       let editorWindowCloseConfirmed = false;
-      let nativeClosePending = false;
       const win = new BrowserWindow({
         title: snapshot.fileName,
         width: EDITOR_WIDTH,
@@ -259,8 +260,8 @@ function createEditorWindowApi(ctx) {
       win.on("close", (event) => {
         if (ctx.isQuitting || editorWindowCloseConfirmed) return;
         event.preventDefault();
-        if (nativeClosePending) return;
-        nativeClosePending = true;
+        if (nativeClosePendingWindow === win) return;
+        nativeClosePendingWindow = win;
         // OS close (Alt+F4/titlebar) uses the same renderer Save/Discard/Cancel
         // flow as closing an owner or a tab, rather than a dirty-only veto.
         closeEditorTabs(electronModule, { editorIds: Array.from(tabSources.keys()) })
@@ -272,7 +273,7 @@ function createEditorWindowApi(ctx) {
           .catch((error) => {
             console.warn("[EditorWindow] Close confirmation failed", error);
           })
-          .finally(() => { nativeClosePending = false; });
+          .finally(() => { if (nativeClosePendingWindow === win) nativeClosePendingWindow = null; });
       });
       win.on("closed", releaseLifecycle);
       win.webContents.on("render-process-gone", () => {

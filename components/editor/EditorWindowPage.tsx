@@ -250,20 +250,9 @@ function EditorWindowPageInner({ settings }: { settings: SettingsState }) {
   }, [activeTabId, closeWindow, setActiveTabId, t]);
 
   const handleWindowClose = useCallback(async () => {
-    const dirtyTabs = editorTabStore.getTabs().filter((tab) => tabIsDirty(tab));
-    for (const tab of dirtyTabs) {
-      const choice = await promptUnsavedChanges(tab.fileName);
-      if (choice === "cancel") return;
-      if (choice === "save") {
-        const ok = await saveTab(tab.id);
-        if (!ok) return;
-      }
-    }
-    const ids = editorTabStore.getTabs().map((tab) => tab.id);
-    for (const id of ids) editorTabStore.close(id);
-    reportDetachedEditorTabsClosed(ids);
+    // Native close owns confirmation and blocks new transfers until it settles.
     await closeWindow();
-  }, [closeWindow, saveTab]);
+  }, [closeWindow]);
 
   useEffect(() => {
     return onWindowCommandCloseRequested(() => {

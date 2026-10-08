@@ -231,3 +231,33 @@ test("renderer loss during a pending handoff leaves its source contents owned by
   assert.equal((await opening).success, false);
   assert.deepEqual(h.source.sent, [], "unaccepted source copies must not receive a tab-closed notification");
 });
+
+
+test("native close rejects new transfers before ownership registration and Cancel restores acceptance", async (t) => {
+  const h = harness();
+  t.after(() => h.windows.forEach((win) => { if (!win.destroyed) win.destroy(); }));
+  const opening = h.open("first");
+  const win = h.windows[0];
+  win.loaded(); h.ready(win); await tick();
+  h.accept(win, win.sent[0]); await opening;
+  win.close(); await tick();
+  const closeRequest = win.sent.at(-1);
+  assert.equal(closeRequest.channel, "netcatty:window:editorCloseTabs");
+  const other = Object.assign(new EventEmitter(), { id: 100, isDestroyed: () => false, sent: [], send(channel, payload) { this.sent.push({ channel, payload }); } });
+  let incomingResult;
+  const incoming = h.open("incoming", other).then((result) => { incomingResult = result; return result; });
+  await tick();
+  // Assert before awaiting the result so the old, erroneously pending open fails promptly.
+  assert.deepEqual(incomingResult, { success: false, error: "Editor window is closing" });
+  await incoming;
+  assert.equal(h.api.hasEditorTabsForSource(other), false);
+  assert.equal(win.sent.some((request) => request.channel === "netcatty:window:editorOpenTab" && request.payload.editorId === "incoming"), false);
+  h.ipcMain.emit("netcatty:window:editorCloseTabsResult", { sender: win.webContents }, { requestId: closeRequest.payload.requestId, cancelled: true, closedIds: [] });
+  await tick();
+  const retry = h.open("incoming", other);
+  await tick();
+  h.accept(win, win.sent.at(-1));
+  assert.equal((await retry).success, true);
+  assert.equal(h.api.hasEditorTabsForSource(other), true);
+  assert.equal(win.isDestroyed(), false);
+});

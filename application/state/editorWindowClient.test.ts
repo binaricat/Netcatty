@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { netcattyBridge } from "../../infrastructure/services/netcattyBridge.ts";
 import { editorTabStore } from "./editorTabStore.ts";
-import { installEditorWindowSourceListeners, popOutEditorTab, saveDetachedEditorTab } from "./editorWindowClient.ts";
+import { dockDetachedEditorTab, installEditorWindowSourceListeners, popOutEditorTab, saveDetachedEditorTab } from "./editorWindowClient.ts";
 import { registerEditorSftpWriterScoped } from "./editorSftpBridge.ts";
 import { releaseEditorTabSaveCoordinator } from "./editorTabSave.ts";
 import type { EditorWindowSaveRequest, EditorWindowSaveResult } from "./editorWindowTypes.ts";
@@ -87,3 +87,61 @@ for (const outcome of ["accepted", "rejected", "failed"] as const) {
     assert.equal(editorTabStore.isDirty(tab.id), true);
   });
 }
+
+for (const outcome of ["accepted", "rejected", "failed"] as const) {
+  test(`dock freezes the current copy until ${outcome} and refuses a second transfer`, async (t) => {
+    editorTabStore.upsertFromSnapshot(snapshot);
+    editorTabStore.setSavingState(snapshot.editorId, "error", "previous save failed");
+    t.after(() => editorTabStore.close(snapshot.editorId));
+    let resolve!: (result: { success: boolean; error?: string }) => void;
+    let reject!: (error: Error) => void;
+    const receipt = new Promise<{ success: boolean; error?: string }>((yes, no) => { resolve = yes; reject = no; });
+    let calls = 0;
+    t.mock.method(netcattyBridge, "get", () => ({
+      dockEditorWindowTab: (sent: typeof snapshot) => {
+        calls++;
+        assert.equal(sent.content, "v2");
+        return receipt;
+      },
+    }));
+    const docking = dockDetachedEditorTab(snapshot.editorId);
+    assert.equal(editorTabStore.getTab(snapshot.editorId)?.savingState, "saving", "existing pane busy state makes Monaco read-only during transfer");
+    assert.equal((await dockDetachedEditorTab(snapshot.editorId)).success, false);
+    assert.equal(calls, 1);
+    if (outcome === "failed") reject(new Error("IPC disconnected"));
+    else resolve({ success: outcome === "accepted", error: "Source unavailable" });
+    assert.equal((await docking).success, outcome === "accepted");
+    const tab = editorTabStore.getTab(snapshot.editorId)!;
+    assert.equal(tab.content, "v2");
+    assert.equal(tab.baselineContent, "v1");
+    assert.equal(tab.savingState, outcome === "accepted" ? "saving" : "error", "success stays frozen until the caller closes; failure restores interaction");
+    if (outcome !== "accepted") {
+      assert.equal(tab.saveError, "previous save failed");
+      editorTabStore.updateContent(snapshot.editorId, "v3", null);
+      assert.equal(editorTabStore.getTab(snapshot.editorId)?.content, "v3");
+    }
+  });
+}
+
+test("dock does not take over an in-progress save", async (t) => {
+  editorTabStore.upsertFromSnapshot(snapshot);
+  editorTabStore.setSavingState(snapshot.editorId, "saving");
+  t.after(() => editorTabStore.close(snapshot.editorId));
+  let calls = 0;
+  t.mock.method(netcattyBridge, "get", () => ({ dockEditorWindowTab: async () => { calls++; return { success: true }; } }));
+  assert.equal((await dockDetachedEditorTab(snapshot.editorId)).success, false);
+  assert.equal(calls, 0);
+  assert.equal(editorTabStore.getTab(snapshot.editorId)?.savingState, "saving");
+});
+
+test("a closing destination rejects a popout without releasing source content", async (t) => {
+  editorTabStore.upsertFromSnapshot(snapshot);
+  t.after(() => editorTabStore.close(snapshot.editorId));
+  t.mock.method(netcattyBridge, "get", () => ({ openEditorWindow: async () => ({ success: false, error: "Editor window is closing" }) }));
+  assert.equal(await popOutEditorTab(snapshot.editorId), false);
+  const tab = editorTabStore.getTab(snapshot.editorId)!;
+  assert.equal(tab.placement, "tab");
+  assert.equal(tab.content, "v2");
+  assert.equal(tab.baselineContent, "v1");
+  assert.equal(editorTabStore.isDirty(tab.id), true);
+});

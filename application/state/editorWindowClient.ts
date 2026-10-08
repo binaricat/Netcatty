@@ -155,11 +155,25 @@ export async function saveDetachedEditorTab(tabId: EditorTabId): Promise<{ ok: b
 export async function dockDetachedEditorTab(tabId: EditorTabId): Promise<{ success: boolean; error?: string }> {
   const tab = editorTabStore.getTab(tabId);
   if (!tab) return { success: false, error: "Editor tab closed" };
-  const result = await netcattyBridge.get()?.dockEditorWindowTab?.(
-    toEditorWindowSnapshot(tab, tab.hostLabel),
-  );
-  if (result?.success) return { success: true };
-  return { success: false, error: result?.error || "Failed to dock editor tab" };
+  if (tab.savingState === "saving") return { success: false, error: "Editor tab is busy" };
+  // Keep the snapshot's owner read-only until receipt. Success stays busy
+  // until the caller removes this copy; failure restores its previous state.
+  editorTabStore.setSavingState(tabId, "saving");
+  let accepted = false;
+  try {
+    const result = await netcattyBridge.get()?.dockEditorWindowTab?.(
+      toEditorWindowSnapshot(tab, tab.hostLabel),
+    );
+    if (result?.success) {
+      accepted = true;
+      return { success: true };
+    }
+    return { success: false, error: result?.error || "Failed to dock editor tab" };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : "Failed to dock editor tab" };
+  } finally {
+    if (!accepted) editorTabStore.setSavingState(tabId, tab.savingState, tab.saveError);
+  }
 }
 
 export function reportDetachedEditorDirty(tabId: EditorTabId, dirty: boolean): void {
