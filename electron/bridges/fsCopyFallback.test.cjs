@@ -318,6 +318,48 @@ test("copyFileExclusiveWithFallback applies restrictive creation mode to the str
   );
 });
 
+test("copyFileExclusiveWithFallback restores creation-mode bits masked by the umask", async (t) => {
+  const dir = makeTempDir("copy-fallback-umask-");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const source = path.join(dir, "staged");
+  const target = path.join(dir, "target");
+  const payload = Buffer.alloc(64 * 1024, 9);
+  fs.writeFileSync(source, payload);
+  const restore = stubPromises("copyFile", enotsupCopyFile());
+  t.after(restore);
+  const previousUmask = process.umask(0o077);
+  t.after(() => process.umask(previousUmask));
+  await copyFileExclusiveWithFallback(source, target, 0o664);
+  assert.ok(fs.readFileSync(target).equals(payload));
+  assert.equal(
+    fs.statSync(target).mode & 0o777,
+    0o664,
+    "umask-masked creation bits are restored after the streamed copy",
+  );
+});
+
+test("copyFileExclusiveWithFallback fails closed when the umask narrows the created mode and chmod is refused", async (t) => {
+  const dir = makeTempDir("copy-fallback-umask-refused-");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const source = path.join(dir, "staged");
+  const target = path.join(dir, "target");
+  const payload = Buffer.alloc(64 * 1024, 9);
+  fs.writeFileSync(source, payload);
+  const copyRestore = stubPromises("copyFile", enotsupCopyFile());
+  t.after(copyRestore);
+  const chmodRestore = stubPromises("chmod", async () => {
+    throw Object.assign(new Error("ENOTSUP: operation not supported"), { code: "ENOTSUP" });
+  });
+  t.after(chmodRestore);
+  const previousUmask = process.umask(0o077);
+  t.after(() => process.umask(previousUmask));
+  await assert.rejects(
+    () => copyFileExclusiveWithFallback(source, target, 0o664),
+    (error) => error?.code === "EPERM",
+    "a chmod-refusing mount never promises the umask-narrowed mode",
+  );
+});
+
 test("copyFileExclusiveWithFallback does not unlink a concurrent replacement at the same path", async (t) => {
   const dir = makeTempDir("copy-fallback-race-");
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));

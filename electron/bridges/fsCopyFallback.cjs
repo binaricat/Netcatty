@@ -35,7 +35,11 @@ function fileIdentity(statLike) {
 // to clean up, matching fs.copyFile's failure behavior.
 // `mode` (optional) is applied to the fallback stream so mounts that reject
 // chmod still receive restrictive creation-mode bits instead of the broader
-// default 0666. On the accelerated copyFile path the source's mode is carried
+// default 0666. The destination's umask can narrow the stream's creation
+// mode below `mode`, so the created file's mode is verified afterwards and
+// any masked bit restored; a chmod-refusing mount cannot promise `mode`, so
+// the copy fails closed rather than producing a narrower file. On the
+// accelerated copyFile path the source's mode is carried
 // over, so `mode` is re-applied with chmod; when that chmod is refused the
 // gvfsd-fuse-style way (ENOTSUP/EOPNOTSUPP/ENOSYS) the copy is redone as a
 // stream so the target is still created with `mode` instead of leaking the
@@ -111,6 +115,29 @@ async function copyFileExclusiveWithFallback(source, target, mode = null) {
     fs.createReadStream(source),
     fs.createWriteStream(target, writeOptions),
   );
+  if (creationMode !== null) {
+    // The destination applies the process umask to the stream's creation
+    // mode (e.g. an intended 0664 becomes 0600 under umask 0077), so the
+    // created file can be narrower than the mode promised to the caller.
+    // Restore any masked bit; a mount that refuses chmod can never carry the
+    // exact mode, so fail closed instead of leaving a narrower mode for the
+    // later promotion to publish.
+    let createdMode = null;
+    try {
+      createdMode = (await fs.promises.lstat(target)).mode & 0o7777;
+    } catch { createdMode = null; }
+    if (createdMode !== creationMode) {
+      try {
+        await fs.promises.chmod(target, creationMode);
+      } catch (chmodError) {
+        if (!isMetadataUnsupportedError(chmodError)) throw chmodError;
+        throw Object.assign(
+          new Error(`EPERM: operation not permitted, umask narrowed the creation mode of ${target} and the mount refuses chmod`),
+          { code: "EPERM" },
+        );
+      }
+    }
+  }
 }
 
 module.exports = {
