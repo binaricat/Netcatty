@@ -336,6 +336,18 @@ test("promotion fails closed for a restrictive destination on a chmod- and hardl
   t.after(copyFileRestore);
   t.after(chmodRestore);
   t.after(linkRestore);
+  // Mode 0000 does not make the destination unreadable when the tests run as
+  // root (or on platforms where permission bits are advisory), so assert the
+  // rejection's precondition deterministically: opening the restrictive
+  // destination fails with EACCES regardless of the effective uid.
+  const openOriginal = fs.promises.open;
+  const openRestore = stubPromises("open", async (...args) => {
+    if (String(args[0]) === target) {
+      throw Object.assign(new Error(`EACCES: permission denied, open ${target}`), { code: "EACCES" });
+    }
+    return openOriginal.apply(fs.promises, args);
+  });
+  t.after(openRestore);
   await assert.rejects(
     () => transferBridge._promoteLocalTransferForTests(staged, target, { existingMode: 0o000 }),
     /unreadable local destination/,

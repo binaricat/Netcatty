@@ -110,11 +110,32 @@ async function copyFileExclusiveWithFallback(source, target, mode = null, option
         if (copiedIdentity === null || staleIdentity !== copiedIdentity) {
           // The name changed hands before (or while) it was relabeled. It is
           // no longer ours: put it back without clobbering whoever re-created
-          // the name (a failed relink leaves the verified data aside, never
+          // the name (a failed restore leaves the verified data aside, never
           // deleted) and fail closed like COPYFILE_EXCL.
           try {
             await fs.promises.link(stalePath, target);
-          } catch { /* target already re-occupied by someone else */ }
+          } catch (linkError) {
+            // Hardlink-less destinations (the GVFS/FUSE mounts this fallback
+            // exists for) cannot restore through `link`. Fall back to
+            // `rename` only while the pathname is still unclaimed, so a raced
+            // replacement is not left stranded under an undisclosed side
+            // name with its original pathname missing. If someone else
+            // already holds the name, leave the file aside rather than
+            // clobbering it.
+            if (linkError?.code !== "EEXIST") {
+              let targetMissing = false;
+              try {
+                await fs.promises.lstat(target);
+              } catch (statError) {
+                targetMissing = statError?.code === "ENOENT";
+              }
+              if (targetMissing) {
+                try {
+                  await fs.promises.rename(stalePath, target);
+                } catch { /* keep the unrestorable data aside */ }
+              }
+            }
+          }
           throw Object.assign(
             new Error(`EEXIST: file exists, ${target} changed while its mode could not be applied`),
             { code: "EEXIST" },
