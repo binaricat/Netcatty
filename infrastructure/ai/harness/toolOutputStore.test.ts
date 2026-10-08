@@ -4,6 +4,7 @@ import {
   TOOL_OUTPUT_ALIAS_MATERIALIZATION_RETRY_DELAY_MS,
   TOOL_OUTPUT_MAX_CLOSED_TERMINAL_SESSIONS,
   TOOL_OUTPUT_MAX_FAILED_SESSION_DELETIONS,
+  TOOL_OUTPUT_MAX_PENDING_ALIAS_MATERIALIZATIONS,
   TOOL_OUTPUT_READ_MAX_CHARS,
   type PersistedToolOutputRecord,
   type ToolOutputPersistence,
@@ -1341,6 +1342,103 @@ test('alias materialization retries keep the source durable records until they d
   const restored = await store.readChunkAsync({ handleId: handle.id }, 'chat-branch');
   assert.ok(restored);
   assert.equal(restored.totalChars, 50_000);
+});
+
+test('the protected chat deletion promise rejects when the durable delete fails', async () => {
+  const persistence: ToolOutputPersistence = {
+    write: async () => { throw new Error('disk busy'); },
+    read: async () => null,
+    delete: async () => {},
+    deleteSession: async () => { throw new Error('disk busy'); },
+  };
+  const store = new ToolOutputStore({ persistence });
+  store.store({
+    chatSessionId: 'chat-failed-delete',
+    capabilityId: 'terminal.execute',
+    content: 'A'.repeat(50_000),
+  });
+  await store.flush('chat-failed-delete');
+
+  store.prune('chat-failed-delete');
+  const deletion = store.getSessionDeletionPromise('chat-failed-delete');
+  assert.ok(deletion);
+  // The failure must be observable so callers can retry through the direct
+  // cleanup path instead of silently leaving the durable records on disk.
+  await assert.rejects(deletion, /disk busy/);
+});
+
+test('evicting a materialization retry at the queue cap invalidates its branch aliases', async () => {
+  const base = createFakeToolOutputPersistence();
+  const persistence: ToolOutputPersistence & { entries: typeof base.entries } = {
+    ...base,
+    // Every branch-owned durable copy fails, so each alias stays queued as a
+    // materialization retry that still reads its source-owned durable file.
+    write: async (record, content) => {
+      if (record.chatSessionId.startsWith('chat-branch-')) {
+        throw new Error('secure store unavailable');
+      }
+      return base.write(record, content);
+    },
+    deleteSession: async chatSessionId => {
+      for (const key of [...base.entries.keys()]) {
+        if (key.startsWith(`${chatSessionId}:`)) base.entries.delete(key);
+      }
+    },
+  };
+  const store = new ToolOutputStore({ persistence });
+
+  const aliasesByIndex = new Map<number, { handleId: string; sourceId: string }>();
+  for (let index = 1; index <= TOOL_OUTPUT_MAX_PENDING_ALIAS_MATERIALIZATIONS + 1; index += 1) {
+    const sourceChatSessionId = `chat-source-${index}`;
+    const handle = store.store({
+      chatSessionId: sourceChatSessionId,
+      capabilityId: 'terminal.execute',
+      content: 'A'.repeat(50_000),
+    });
+    await store.flush(sourceChatSessionId);
+    await store.aliasSessionHandles(sourceChatSessionId, `chat-branch-${index}`, {
+      retainedHandleIds: new Set([handle.id]),
+    });
+    aliasesByIndex.set(index, { handleId: handle.id, sourceId: sourceChatSessionId });
+  }
+
+  // Adding one target beyond the cap evicts the oldest queued retry instead
+  // of abandoning it silently: the branch alias that still points at the
+  // source-owned durable file must be invalidated explicitly, so no handle
+  // advertises a copy that dies with the source session.
+  const oldest = aliasesByIndex.get(1)!;
+  assert.equal(store.get(oldest.handleId, 'chat-branch-1'), undefined);
+  assert.equal(store.listPendingHandles('chat-branch-1').length, 0);
+
+  // Surviving targets keep their aliases (still queued for retry).
+  const second = aliasesByIndex.get(2)!;
+  assert.ok(store.get(second.handleId, 'chat-branch-2'));
+
+  // The shared source file must not have been deleted by the eviction: the
+  // source's own handle still references it until the source is pruned.
+  const sourceEntry = [...persistence.entries.entries()]
+    .find(([key]) => key.startsWith(`${oldest.sourceId}:`));
+  assert.ok(sourceEntry);
+
+  // And pruning the source no longer has a queue dependency to wait for, so
+  // its durable records are deleted without stalling.
+  store.prune(oldest.sourceId);
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(
+    [...persistence.entries.keys()].some(key => key.startsWith(`${oldest.sourceId}:`)),
+    false,
+  );
+
+  // Drain the surviving queued retries with working persistence so the test
+  // does not leave repeating retry timers behind; the branch-owned copies
+  // land for every target that kept its alias.
+  persistence.write = base.write;
+  await new Promise(resolve => setTimeout(
+    resolve,
+    TOOL_OUTPUT_ALIAS_MATERIALIZATION_RETRY_DELAY_MS * 4 + 100,
+  ));
+  assert.ok(persistence.entries.has(`chat-branch-2:${second.handleId}`));
+  assert.equal(store.listPendingHandles('chat-branch-2').length, 1);
 });
 
 test('a rejected restore is queued and retried instead of dropping the alias', async () => {

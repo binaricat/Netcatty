@@ -77,7 +77,7 @@ export const TOOL_OUTPUT_ALIAS_MATERIALIZATION_RETRY_DELAY_MS = 200;
 // exponential backoff) because a later turn may install working persistence;
 // dropping them would permanently lose the branch-owned durable copy.
 const TOOL_OUTPUT_ALIAS_MATERIALIZATION_MAX_RETRY_DELAY_MS = 30_000;
-const TOOL_OUTPUT_MAX_PENDING_ALIAS_MATERIALIZATIONS = 50;
+export const TOOL_OUTPUT_MAX_PENDING_ALIAS_MATERIALIZATIONS = 50;
 const TOOL_OUTPUT_LIFECYCLE_BLOOM_BITS = 1 << 22;
 const TOOL_OUTPUT_LIFECYCLE_BLOOM_HASHES = 4;
 
@@ -236,6 +236,10 @@ export class ToolOutputStore {
   // file, so source-deletion waits (`prune`) must also observe this set —
   // otherwise the deletion could fire underneath the in-flight read.
   private readonly inFlightAliasMaterializations = new Set<PendingAliasMaterialization>();
+  // Aliases whose branch-owned durable copy has landed. Dropped retry items
+  // must not invalidate these: their handle no longer depends on the
+  // source-owned file.
+  private readonly materializedAliasHandles = new WeakSet<ToolOutputHandle>();
   private aliasMaterializationRetryTimer?: ReturnType<typeof setTimeout>;
   // Notified whenever the pending alias restore queue changes; lets `prune`
   // wait until every queued alias restore retry that still needs its source
@@ -619,6 +623,7 @@ export class ToolOutputStore {
         }
         alias.filePath = path;
         alias.fullContent = undefined;
+        this.materializedAliasHandles.add(alias);
       } catch {
         // Transient persistence failure while the alias still shares the
         // source-owned view; queue the alias for retry rather than leaving it
@@ -635,10 +640,19 @@ export class ToolOutputStore {
     handles: ToolOutputHandle[],
   ): void {
     while (this.pendingAliasMaterializations.size >= TOOL_OUTPUT_MAX_PENDING_ALIAS_MATERIALIZATIONS) {
-      const oldest = this.pendingAliasMaterializations.keys().next().value;
-      if (oldest === undefined) break;
-      this.pendingAliasMaterializations.delete(oldest);
+      const oldestKey = this.pendingAliasMaterializations.keys().next().value;
+      if (oldestKey === undefined) break;
+      const oldest = this.pendingAliasMaterializations.get(oldestKey);
+      this.pendingAliasMaterializations.delete(oldestKey);
       this.notifyMaterializationWaiters();
+      // Dropping the oldest retry silently would strand its branch aliases:
+      // their durable copies never materialize, yet they still read the
+      // source-owned durable file — `prune` could no longer see that source
+      // dependency, so deleting the source would destroy the only readable
+      // copy and a restart would lose the branch content outright. Invalidate
+      // those branch aliases explicitly instead so the target session no
+      // longer advertises handles it cannot back with its own durable copy.
+      if (oldest) this.invalidateDroppedMaterializationAliases(oldest);
     }
     const existing = this.pendingAliasMaterializations.get(targetChatSessionId);
     if (existing) {
@@ -654,6 +668,32 @@ export class ToolOutputStore {
       attempts: 0,
     });
     this.scheduleAliasMaterializationRetry();
+  }
+
+  /**
+   * Invalidates the branch aliases of a materialization retry that the queue
+   * cap forced to drop: they still read the source-owned durable file, so
+   * removing them from the target session makes the source dependency
+   * explicit — nothing advertises a handle whose only copy dies with the
+   * source session, and the shared file's reference count drops so a source
+   * prune's deferred delete can actually complete.
+   */
+  private invalidateDroppedMaterializationAliases(item: PendingAliasMaterialization): void {
+    const targetMap = this.bySession.get(item.targetChatSessionId);
+    if (!targetMap) return;
+    for (const handle of item.handles) {
+      if (handle.evicted) continue;
+      if (targetMap.get(handle.id) !== handle) continue;
+      // A concurrently running retry may already have materialized this
+      // alias into the branch namespace; its branch-owned durable copy
+      // exists, so only the aliases still reading the source-owned file are
+      // dropped. Evicting a source-shared alias does not delete the shared
+      // file itself — the source session's own handle still references it.
+      if (this.materializedAliasHandles.has(handle)) continue;
+      targetMap.delete(handle.id);
+      this.evictHandle(handle);
+    }
+    if (targetMap.size === 0) this.bySession.delete(item.targetChatSessionId);
   }
 
   private notifyMaterializationWaiters(): void {
@@ -942,7 +982,10 @@ export class ToolOutputStore {
    * durable tool-output records through a direct (unprotected) path must
    * await this promise instead: it only fires after in-flight alias passes
    * and queued alias restore retries / alias materialization retries finish
-   * reading the source records.
+   * reading the source records. The promise rejects when the protected
+   * deletion fails (for example a transient IPC or filesystem error) so
+   * callers can fall back to the direct cleanup path instead of silently
+   * leaving the session's durable records on disk.
    */
   getSessionDeletionPromise(chatSessionId: string): Promise<void> | undefined {
     return this.sessionDeletionPromises.get(chatSessionId);
@@ -994,18 +1037,21 @@ export class ToolOutputStore {
         ? (): void => this.releaseRestoreRetryExemption(chatSessionId)
         : undefined;
       const deleteSession = (): Promise<void> => deleteSessionImpl.call(persistence, chatSessionId);
+      // A failed protected deletion must reject (not silently resolve): the
+      // deletion promise is exposed through `getSessionDeletionPromise`, and
+      // rejecting lets waiters report the failure so the durable records are
+      // retried through the direct cleanup path instead of lingering on disk.
       deletion = (releaseExemption
         ? waitForSourceReads.finally(releaseExemption)
         : waitForSourceReads)
         .then(deleteSession)
-        .then(
-          () => { deletionSucceeded = true; },
-          () => {},
-        );
+        .then(() => { deletionSucceeded = true; });
     }
     if (deletion) {
       this.sessionDeletionPromises.set(chatSessionId, deletion);
-      void deletion.finally(() => {
+      // The deletion promise rejects when the protected deletion fails, so
+      // consume that rejection here before attaching the bookkeeping.
+      void deletion.catch(() => {}).finally(() => {
         if (this.sessionDeletionPromises.get(chatSessionId) !== deletion) {
           return;
         }
@@ -1218,7 +1264,9 @@ export class ToolOutputStore {
     const restoreExempted = (this.restoreRetryExemptions.get(chatSessionId) ?? 0) > 0;
     if (!restoreExempted) {
       const pendingDeletion = this.sessionDeletionPromises.get(chatSessionId);
-      if (pendingDeletion) await pendingDeletion;
+      // The deletion promise rejects when the protected deletion failed;
+      // restoring must only wait for it to settle, not inherit the failure.
+      if (pendingDeletion) await pendingDeletion.catch(() => {});
     }
     const key = `${chatSessionId}:${handleId}`;
     const pending = this.restorePromises.get(key);

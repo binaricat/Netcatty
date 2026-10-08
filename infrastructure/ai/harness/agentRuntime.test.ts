@@ -38,6 +38,33 @@ test('AgentRuntime clearChatSession releases its trace history', () => {
   assert.equal(traceStore.getCompactions('chat-clear').length, 0);
 });
 
+test('waitForChatSessionToolOutputDeletion reports protected deletion failures', async () => {
+  const runtime = new AgentRuntime({ drivers: [new MockTurnDriver()] });
+  const store = runtime.getToolOutputStore('chat-delete');
+
+  // A failed protected deletion must report `false` so the caller retries
+  // through the direct cleanup path instead of leaving the durable records
+  // on disk.
+  store.setPersistence({
+    write: async () => '/unused',
+    read: async () => null,
+    delete: async () => {},
+    deleteSession: async () => { throw new Error('disk busy'); },
+  });
+  runtime.clearChatSession('chat-delete-failed');
+  assert.equal(await runtime.waitForChatSessionToolOutputDeletion('chat-delete-failed'), false);
+
+  // A successful protected deletion reports `true`.
+  store.setPersistence({
+    write: async () => '/unused',
+    read: async () => null,
+    delete: async () => {},
+    deleteSession: async () => {},
+  });
+  runtime.clearChatSession('chat-delete-ok');
+  assert.equal(await runtime.waitForChatSessionToolOutputDeletion('chat-delete-ok'), true);
+});
+
 test('AgentRuntime runTurn emits turn lifecycle and records trace', async () => {
   const traceStore = new TraceStore();
   const driver = new MockTurnDriver();

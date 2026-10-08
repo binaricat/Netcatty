@@ -69,7 +69,10 @@ export function cleanupDeletedAIChatSessions(sessionIds: string[]) {
     // before firing the same IPC. Only fall back to a direct IPC call when
     // the store has no protected deletion in flight (persistence is not
     // installed, so no alias pass can be reading this source's files — undo
-    // installs persistence before it starts aliasing handles).
+    // installs persistence before it starts aliasing handles) or when the
+    // protected deletion failed (a transient IPC / filesystem error), so the
+    // durable tool-output records are actually retried instead of being left
+    // on disk.
     void runtime.waitForChatSessionToolOutputDeletion(sessionId).then((handled) => {
       if (!handled) {
         void bridge?.deleteChatToolOutputsTemp?.(sessionId).catch(() => {});
