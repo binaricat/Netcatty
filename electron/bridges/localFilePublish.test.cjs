@@ -104,7 +104,7 @@ test("publishLocalFileExclusive rethrows unexpected link errors", async () => {
   }
 });
 
-test("publishLocalFileExclusive stamps timestamps through the pathname when futimens is refused", async () => {
+test("publishLocalFileExclusive reports unstamped timestamps when futimens is refused and never mutates the pathname", async () => {
   const dir = makeTempDir("netcatty-publish-path-utimes-");
   try {
     const source = path.join(dir, "staged");
@@ -116,19 +116,29 @@ test("publishLocalFileExclusive stamps timestamps through the pathname when futi
       throw Object.assign(new Error("ENOTSUP: operation not supported, link 'src' -> 'dest'"), { code: "ENOTSUP" });
     });
     // Refuse the owned-handle futimens like a backend that implements
-    // utimensat but not futimens; the pathname-based retry must still stamp
-    // the published inode.
+    // utimensat but not futimens; the publication must fail closed and leave
+    // the timestamp work to the caller's descriptor-pinned best-effort stamp
+    // instead of racing a pathname-based stamp onto a replacement.
     const handleRestore = handleStub("utimes", async () => {
       throw Object.assign(new Error("ENOTSUP: operation not supported"), { code: "ENOTSUP" });
+    });
+    let pathnameUtimesCalls = 0;
+    const utimesRestore = stubPromises("utimes", async () => {
+      pathnameUtimesCalls += 1;
     });
     try {
       const identity = await publishLocalFileExclusive(source, target);
       assert.equal(fs.readFileSync(target, "utf8"), "pathname-stamped bytes");
-      assert.equal(fs.statSync(target).mtimeMs, when.getTime());
-      assert.equal(identity.timestampsPreserved, true);
+      // The pathname was never used for stamping, and the caller must not
+      // treat the prepared timestamps as applied.
+      assert.equal(pathnameUtimesCalls, 0);
+      assert.equal(identity.timestampsPreserved, false);
+      assert.equal(fs.existsSync(target), true);
+      assert.notEqual(fs.statSync(target).mtimeMs, when.getTime());
     } finally {
       linkRestore();
       handleRestore();
+      utimesRestore();
     }
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });

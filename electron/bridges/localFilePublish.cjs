@@ -11,9 +11,10 @@ const { isMetadataUnsupportedError } = require("./fsCopyFallback.cjs");
 // verify an open destination handle before later metadata stamping, plus
 // `timestampsPreserved`: whether the published inode actually carries the
 // prepared file's timestamps. Hardlinked publication shares the inode; the copy
-// path re-applies the times and falls back to a pathname-based stamp when the
-// handle-based one is refused, reporting `false` when neither could stamp (so
-// callers must not treat the metadata as prepared).
+// path re-applies the times through the owned handle only (a pathname-based
+// stamp cannot stay pinned to the validated inode and could land on a
+// concurrent replacement), reporting `false` when the handle stamp is refused
+// so callers must not treat the metadata as prepared.
 async function publishLocalFileExclusive(source, target, assertNotCancelled = () => {}, preparedHandle) {
   assertNotCancelled();
   try {
@@ -75,30 +76,17 @@ async function publishLocalFileExclusive(source, target, assertNotCancelled = ()
       timestampsPreserved = true;
     } catch (utimesError) {
       if (!isMetadataUnsupportedError(utimesError)) throw utimesError;
-      // The handle-based futimens was refused, but the prepared timestamps can
-      // still be applied through the pathname: some backends implement
-      // utimensat while rejecting futimens. Retry through the pathname only
-      // after the identity check below confirms the name still holds the
-      // published inode, so the stamp cannot land on a replacement; if the
-      // pathname refuses too, the caller reports the stamp as not prepared so
-      // its final best-effort stamp still runs.
+      // Even if this backend implements utimensat while rejecting futimens,
+      // the prepared timestamps must not be re-applied through the pathname:
+      // `lstat`-verified names can be replaced before the pathname-based
+      // stamp lands on the replacement's inode. Report the stamp as not
+      // preserved instead, so the caller's descriptor-pinned best-effort
+      // stamp still runs (or correctly reports the metadata as unprepared).
     }
     const ownedStat = await output.stat();
     const targetStat = await fs.promises.lstat(target);
     if (!targetStat.isFile() || targetStat.dev !== ownedStat.dev || targetStat.ino !== ownedStat.ino) {
       throw new Error("Local download target changed during replacement");
-    }
-    if (!timestampsPreserved) {
-      try {
-        await fs.promises.utimes(target, stat.atime, stat.mtime);
-        const stampedStat = await fs.promises.lstat(target);
-        if (!stampedStat.isFile() || stampedStat.dev !== ownedStat.dev || stampedStat.ino !== ownedStat.ino) {
-          throw new Error("Local download target changed during replacement");
-        }
-        timestampsPreserved = true;
-      } catch (stampingError) {
-        if (!isMetadataUnsupportedError(stampingError)) throw stampingError;
-      }
     }
     publishedIdentity = {
       dev: ownedStat.dev, ino: ownedStat.ino, size: ownedStat.size, timestampsPreserved,

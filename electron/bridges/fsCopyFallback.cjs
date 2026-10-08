@@ -157,6 +157,7 @@ async function copyFileExclusiveWithFallback(source, target, mode = null, option
     {
       const stalePath = `${target}.stale-${crypto.randomUUID().replace(/-/g, "")}`;
       let moved = false;
+      let restoreLinkFailure = null;
       try {
         await fs.promises.rename(target, stalePath);
         moved = true;
@@ -177,29 +178,20 @@ async function copyFileExclusiveWithFallback(source, target, mode = null, option
             await fs.promises.link(stalePath, target);
           } catch (linkError) {
             // Hardlink-less destinations (the GVFS/FUSE mounts this fallback
-            // exists for) cannot restore through `link`. Fall back to
-            // `rename` only while the pathname is still unclaimed, so a raced
-            // replacement is not left stranded under an undisclosed side
-            // name with its original pathname missing. If someone else
-            // already holds the name, leave the file aside rather than
-            // clobbering it.
-            if (linkError?.code !== "EEXIST") {
-              let targetMissing = false;
-              try {
-                await fs.promises.lstat(target);
-              } catch (statError) {
-                targetMissing = statError?.code === "ENOENT";
-              }
-              if (targetMissing) {
-                try {
-                  await fs.promises.rename(stalePath, target);
-                } catch { /* keep the unrestorable data aside */ }
-              }
-            }
+            // exists for) cannot restore through `link`. POSIX offers no
+            // non-overwriting rename, so a check-then-rename fallback would
+            // replace a concurrent writer's freshly created `target`: the
+            // separate absence check races with its creation. Fail closed
+            // instead, leaving the verified data aside at the disclosed side
+            // name rather than clobbering whoever re-created the pathname.
+            if (linkError?.code !== "EEXIST") restoreLinkFailure = linkError;
           }
           throw Object.assign(
-            new Error(`EEXIST: file exists, ${target} changed while its mode could not be applied`),
-            { code: "EEXIST" },
+            new Error(
+              `EEXIST: file exists, ${target} changed while its mode could not be applied;`
+              + ` the verified copy was left aside at ${stalePath}`,
+            ),
+            { code: "EEXIST", stalePath, cause: restoreLinkFailure },
           );
         }
         await fs.promises.unlink(stalePath);

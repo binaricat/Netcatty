@@ -603,17 +603,26 @@ test("publishLocalFileExclusive tolerates chmod/utimes rejection without hardlin
     "utimes",
     Object.assign(new Error("ENOTSUP: operation not supported"), { code: "ENOTSUP" }),
   );
+  // A pathname-based retry must never run: a lstat-verified name can be
+  // replaced before the stamp lands on the replacement's inode.
+  let pathnameUtimesCalls = 0;
+  const pathnameUtimesRestore = stubPromises("utimes", async () => {
+    pathnameUtimesCalls += 1;
+  });
   t.after(linkRestore);
   t.after(chmodRestore);
   t.after(utimesRestore);
+  t.after(pathnameUtimesRestore);
   const identity = await localFilePublish.publishLocalFileExclusive(source, target);
   assert.equal(fs.readFileSync(target, "utf8"), "gvfs bytes");
   assert.equal(identity.size, fs.lstatSync(target).size);
   assert.equal(fs.lstatSync(target).isFile(), true);
-  // The owned-handle futimens was refused, so the pathname-based retry must
-  // still stamp the prepared timestamps onto the published inode.
-  assert.equal(fs.statSync(target).mtimeMs, 1_700_000_000_000);
-  assert.equal(identity.timestampsPreserved, true);
+  // The owned-handle futimens was refused, so the publication must fail
+  // closed: the pathname is never stamped, and the caller gets
+  // `timestampsPreserved: false` to run its own descriptor-pinned stamp.
+  assert.equal(pathnameUtimesCalls, 0);
+  assert.notEqual(fs.statSync(target).mtimeMs, 1_700_000_000_000);
+  assert.equal(identity.timestampsPreserved, false);
 });
 
 test("local promotion reports the prepared stamp as unapplied when publication cannot carry the timestamps", async (t) => {
