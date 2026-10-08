@@ -265,3 +265,47 @@ test("MCP exec probes an unclassified PowerShell session before the authoritativ
   assert.equal(result.ok, true);
   assert.equal(session._loginShellKind, "powershell");
 });
+
+test("registered inheritor chat can poll and stop a main-registry background job", async () => {
+  const job = {
+    id: "job-1",
+    sessionId: "session-1",
+    chatSessionId: "chat-source",
+    command: "sleep 30",
+    status: "running",
+    startedAt: 1,
+    updatedAt: 1,
+    exitCode: null,
+    error: null,
+    stdout: "output",
+    outputBaseOffset: 0,
+    totalOutputChars: 6,
+    outputTruncated: false,
+    handle: {},
+  };
+  const backgroundJobs = new Map([["job-1", job]]);
+  const ctx = createExecHandlerTestContext({ sessions: new Map(), backgroundJobs });
+  ctx.isInheritedJobControl = (jobId, chatSessionId) => chatSessionId === "chat-branch";
+  const api = createExecHandlerApi(ctx);
+
+  // Unregistered foreign chat id: rejected as before.
+  const foreign = api.handleJobPoll({ jobId: "job-1", chatSessionId: "chat-stranger" });
+  assert.deepEqual(foreign, { ok: false, error: "Background job not found" });
+
+  // Registered inheritor: accepted.
+  const polled = api.handleJobPoll({ jobId: "job-1", chatSessionId: "chat-branch", offset: 0 });
+  assert.equal(polled.ok !== false, true);
+  assert.equal(polled.jobId, "job-1");
+
+  // Owner id still accepted.
+  const ownerPolled = api.handleJobPoll({ jobId: "job-1", chatSessionId: "chat-source" });
+  assert.equal(ownerPolled.ok !== false, true);
+
+  // Unregistered foreign chat id: stop also rejected.
+  const foreignStop = api.handleJobStop({ jobId: "job-1", chatSessionId: "chat-stranger" });
+  assert.deepEqual(foreignStop, { ok: false, error: "Background job not found" });
+
+  const stopped = api.handleJobStop({ jobId: "job-1", chatSessionId: "chat-branch" });
+  assert.equal(stopped.ok !== false, true);
+  assert.equal(backgroundJobs.get("job-1").status, "stopping");
+});

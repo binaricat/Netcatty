@@ -21,8 +21,14 @@ function createBackgroundJobApi(ctx) {
     
     function cancelBackgroundJobsForSession(chatSessionId) {
       if (!chatSessionId) return;
-      for (const [, job] of backgroundJobs) {
+      // Jobs a live branched chat still inherited survive this chat's
+      // teardown; only un-inherited jobs are cancelled with it.
+      const preserve = typeof getLiveInheritedJobIdsForOwner === "function"
+        ? new Set(getLiveInheritedJobIdsForOwner(chatSessionId))
+        : new Set();
+      for (const [jobId, job] of backgroundJobs) {
         if (job.chatSessionId !== chatSessionId) continue;
+        if (preserve.has(jobId)) continue;
         if (job.status !== "running") continue;
         try {
           job.handle?.cancel?.();

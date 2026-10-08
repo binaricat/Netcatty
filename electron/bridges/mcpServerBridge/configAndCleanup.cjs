@@ -81,6 +81,11 @@ function createConfigAndCleanupApi(ctx) {
         clearPendingApprovals(chatSessionId);
         await cancelSftpOpsForSession(chatSessionId);
         sftpBridge.clearSftpEncodingStateByPrefix?.(`chat:${chatSessionId}:session:`);
+        // The chat is gone: drop any background-job inheritance it registered
+        // (it can no longer poll or stop those jobs). Owner-owned jobs that a
+        // different live branch still inherited keep their remaining
+        // inheritors, so they stay under the still-live branch's control.
+        forgetInheritedJobsForChatSession?.(chatSessionId);
       }
     }
 

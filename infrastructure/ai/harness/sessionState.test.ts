@@ -268,3 +268,22 @@ test('SessionStateStore rebuild keeps plan and blockers from the removed turn ou
   assert.doesNotMatch(store.toReinjectionText('chat-branch') ?? '', /ship the release/);
   assert.doesNotMatch(store.toReinjectionText('chat-branch') ?? '', /deploy failed/);
 });
+
+test('SessionStateStore enumerates inherited background jobs for undo registration', () => {
+  const store = new SessionStateStore();
+  store.updateFromToolResult(
+    'chat-source', 'terminal_start', { sessionId: 'sess-1', command: 'sleep 30' },
+    JSON.stringify({ jobId: 'job-1', status: 'running' }), false,
+  );
+  store.copyState('chat-source', 'chat-branch');
+  store.updateFromToolResult(
+    'chat-branch', 'terminal_start', { sessionId: 'sess-1', command: 'sleep 5' },
+    JSON.stringify({ jobId: 'job-own', status: 'running' }), false,
+  );
+
+  assert.deepEqual(store.getInheritedBackgroundJobs('chat-branch'), [
+    // The inherited job keeps its chain root as the owner.
+    { jobId: 'job-1', ownerChatSessionId: 'chat-source' },
+  ]);
+  assert.deepEqual(store.getInheritedBackgroundJobs('chat-stranger'), []);
+});

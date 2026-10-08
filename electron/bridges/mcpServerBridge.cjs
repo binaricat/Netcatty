@@ -402,6 +402,9 @@ const backgroundJobApi = createBackgroundJobApi({
   BACKGROUND_JOB_RETENTION_MS, DEFAULT_BACKGROUND_JOB_POLL_INTERVAL_MS, MAX_BACKGROUND_JOB_OUTPUT_CHARS,
   SESSION_CLOSE_CLEANUP_TIMEOUT_MS,
   debugLog, sftpBridge,
+  // Jobs owned by a chat being cancelled/deleted may still be inherited by a
+  // live branched chat; they must not be cancelled here.
+  getLiveInheritedJobIdsForOwner,
 });
 const {
   createBackgroundJobId,
@@ -1860,11 +1863,90 @@ async function handleWorkerJobStart(params = {}) {
   }
 }
 
+// Chat-session inheritance for background jobs. When a chat is branched
+// ("undo last turn"), renderer-side state copies keep the branch reinjecting
+// the source's still-running jobs, but the jobs remain owned by the source
+// chat id in this process. Undo registers each inherited (jobId, owner)
+// pair here so the branch's OWN chat id is also accepted for those jobs'
+// control RPCs — including calls arriving through the external-agent MCP
+// transport, which always presents the conversation id of the branch.
+const inheritedJobInheritors = new Map(); // jobId -> Set<inheriting chat session ids>
+
+function isInheritedJobInheritor(jobId, chatSessionId) {
+  if (!jobId || !chatSessionId) return false;
+  return inheritedJobInheritors.get(jobId)?.has(chatSessionId) === true;
+}
+
+function forgetInheritedJobInheritors(jobId) {
+  inheritedJobInheritors.delete(jobId);
+}
+
+function forgetInheritedJobsForChatSession(chatSessionId) {
+  if (!chatSessionId) return;
+  for (const [jobId, inheritors] of inheritedJobInheritors) {
+    if (!inheritors.delete(chatSessionId)) continue;
+    if (inheritors.size === 0) inheritedJobInheritors.delete(jobId);
+  }
+}
+
+function registerInheritedBackgroundJobs(chatSessionId, ownerChatSessionId, jobIds) {
+  if (!chatSessionId || typeof chatSessionId !== "string") {
+    throw new Error("chatSessionId is required");
+  }
+  if (!ownerChatSessionId || typeof ownerChatSessionId !== "string") {
+    throw new Error("ownerChatSessionId is required");
+  }
+  if (ownerChatSessionId === chatSessionId) return { ok: true };
+  if (!Array.isArray(jobIds) || jobIds.length === 0) return { ok: true };
+  let registered = 0;
+  for (const jobId of jobIds) {
+    if (typeof jobId !== "string" || !jobId) continue;
+    // Only accept jobs this chat actually owns, so a branch cannot claim
+    // control over a job started by an unrelated chat session.
+    const job = workerBackgroundJobs.get(jobId);
+    if (job && job.chatSessionId === ownerChatSessionId) {
+      const inheritors = inheritedJobInheritors.get(jobId) ?? new Set();
+      inheritors.add(chatSessionId);
+      inheritedJobInheritors.set(jobId, inheritors);
+      registered += 1;
+      continue;
+    }
+    const ownerChatSessionIdOfJob = execHandlerApi?.getBackgroundJobOwnerChatSessionId?.(jobId);
+    if (ownerChatSessionIdOfJob === ownerChatSessionId) {
+      const inheritors = inheritedJobInheritors.get(jobId) ?? new Set();
+      inheritors.add(chatSessionId);
+      inheritedJobInheritors.set(jobId, inheritors);
+      registered += 1;
+    }
+  }
+  return { ok: true, registered };
+}
+
+// Job ids owned by `chatSessionId` that live chat sessions still inherited:
+// deleting or cancelling the owner chat must stop them only once no live
+// branch depends on them (`forgetInheritedJobsForChatSession` drops a branch's
+// registrations when that branch is itself removed).
+function getLiveInheritedJobIdsForOwner(ownerChatSessionId) {
+  if (!ownerChatSessionId) return [];
+  const inherited = [];
+  for (const [jobId, inheritors] of inheritedJobInheritors) {
+    if (inheritors.size === 0) continue;
+    if (workerBackgroundJobs.get(jobId)?.chatSessionId === ownerChatSessionId) {
+      inherited.push(jobId);
+      continue;
+    }
+    if (execHandlerApi?.getBackgroundJobOwnerChatSessionId?.(jobId) === ownerChatSessionId) {
+      inherited.push(jobId);
+    }
+  }
+  return inherited;
+}
+
 function getWorkerJob(jobId, chatSessionId) {
   const job = workerBackgroundJobs.get(jobId);
   if (!job) return null;
   if (job.chatSessionId && (!chatSessionId || chatSessionId !== job.chatSessionId)) {
-    return null;
+    if (!isInheritedJobInheritor(jobId, chatSessionId)) return null;
   }
   return job;
 }
@@ -1876,13 +1958,30 @@ async function handleWorkerJobPoll(params = {}) {
   if (!job || !terminalWorkerManager?.request) {
     return { ok: false, error: "Background job not found" };
   }
+  // Session scope stays validated with the caller's own chat id (a live
+  // branch keeps the inherited terminal in its scope), but the worker-side
+  // ownership check must present the owner chat id: the worker — like
+  // getWorkerJob — only knows the chat id that started the job.
+  const workerChatSessionId = job.chatSessionId || chatSessionId || null;
   if (job.sessionId) {
     const scopeErr = validateSessionScope(job.sessionId, chatSessionId || null, scopedSessionIds);
-    if (scopeErr) return { ok: false, error: scopeErr };
+    // An inheritor-registered job stays pollable by its owner chat even after
+    // that chat's scope snapshot is gone (owner deleted, a live branch still
+    // inherited the job): ownership plus the registered inheritance is the
+    // authorization then — the scope snapshot for the deleted chat resolves
+    // to an empty list forever, so it can no longer say "in scope".
+    const ownerScopeSnapshotGone = chatSessionId === job.chatSessionId
+      && getScopedSessionIds(chatSessionId || null).length === 0
+      && inheritedJobInheritors.has(jobId);
+    if (scopeErr && !ownerScopeSnapshotGone) return { ok: false, error: scopeErr };
   }
-  const result = await terminalWorkerManager.request("netcatty:ai:jobPoll", params, {});
+  const result = await terminalWorkerManager.request("netcatty:ai:jobPoll", {
+    ...params,
+    chatSessionId: workerChatSessionId,
+  }, {});
   if (result?.completed) {
     workerBackgroundJobs.delete(jobId);
+    forgetInheritedJobInheritors(jobId);
   }
   return result;
 }
@@ -1894,12 +1993,17 @@ async function handleWorkerJobStop(params = {}) {
   if (!job || !terminalWorkerManager?.request) {
     return { ok: false, error: "Background job not found" };
   }
+  const effectiveChatSessionId = job.chatSessionId || chatSessionId || null;
   if (Array.isArray(scopedSessionIds) && job.sessionId && !scopedSessionIds.includes(job.sessionId)) {
     return { ok: false, error: `Session "${job.sessionId}" is not in the current scope.` };
   }
-  const result = await terminalWorkerManager.request("netcatty:ai:jobStop", params, {});
+  const result = await terminalWorkerManager.request("netcatty:ai:jobStop", {
+    ...params,
+    chatSessionId: job.chatSessionId || chatSessionId || null,
+  }, {});
   if (result?.completed) {
     workerBackgroundJobs.delete(jobId);
+    forgetInheritedJobInheritors(jobId);
   }
   return result;
 }
@@ -1918,6 +2022,7 @@ async function hasActiveWorkerJobForTerminalSession(sessionId) {
       }, {});
       if (result?.completed || (result?.ok === false && /not found/i.test(result?.error || ""))) {
         workerBackgroundJobs.delete(jobId);
+        forgetInheritedJobInheritors(jobId);
         continue;
       }
       return true;
@@ -1936,13 +2041,26 @@ function cancelWorkerBackgroundJobsForSession(chatSessionId) {
       if (pendingStart.chatSessionId === chatSessionId) pendingStart.cancelled = true;
     }
   }
+  // Jobs that a live branched chat still inherited must survive their owner's
+  // teardown: the branch keeps reinjecting them and cannot be re-granted
+  // ownership, so cancelling them here would strand the branch with an
+  // unpollable, unstoppable running command.
+  const preserveJobIds = getLiveInheritedJobIdsForOwner(chatSessionId);
+  const preserve = new Set(preserveJobIds);
   for (const [jobId, job] of workerBackgroundJobs) {
     if (job.chatSessionId === chatSessionId) {
+      if (preserve.has(jobId)) continue;
       workerBackgroundJobs.delete(jobId);
+      forgetInheritedJobInheritors(jobId);
     }
   }
   try {
-    terminalWorkerManager?.send?.("netcatty:ai:catty:cancel", { chatSessionId }, {});
+    terminalWorkerManager?.send?.("netcatty:ai:catty:cancel", {
+      chatSessionId,
+      // Only sent when live branches inherited jobs owned by this chat; the
+      // worker cancels everything else owned by the chat session.
+      ...(preserveJobIds.length > 0 ? { preserveJobIds } : {}),
+    }, {});
   } catch {
     // Worker may already be gone while cancelling a torn-down chat/session.
   }
@@ -2387,6 +2505,11 @@ const execHandlerApi = createExecHandlerApi({
   beginChatExecution, execViaRawPty, execViaPty, execViaChannel, startPtyJob,
   getFreshIdlePrompt, echoCommandToSession, createBackgroundJobId, storeCompletedJobOutput,
   serializeBackgroundJob, validateSessionScope, Date, Error,
+  // Scoped background-job control also accepts registered inheritors
+  // (branched chats that inherited the job from their undo source).
+  isInheritedJobControl: isInheritedJobInheritor,
+  jobHasInheritors: (jobId) => inheritedJobInheritors.has(jobId),
+  getScopedSessionIds,
 });
 const {
   resolveExecContext,
@@ -2407,6 +2530,7 @@ const configAndCleanupApi = createConfigAndCleanupApi({
   clearPendingApprovals, cancelSftpOpsForSession, sftpBridge,
   preserveIdleSessionCleanup: sessionIdleManager.scopeCleared,
   clearOpenedSessionScope: openedSessionOwnership.clearScope,
+  forgetInheritedJobsForChatSession,
 });
 const { resolveMcpServerRuntimeCommand, buildMcpServerConfig, cleanupScopedMetadata } = configAndCleanupApi;
 
@@ -2452,6 +2576,7 @@ module.exports = {
   cancelPtyExecsForSession,
   cancelWorkerBackgroundJobsForSession,
   cancelWorkerBackgroundJobsForTerminalSession,
+  registerInheritedBackgroundJobs,
   hasActiveWorkerJobForTerminalSession,
   cancelSftpOpsForSession,
   getSessionMeta,

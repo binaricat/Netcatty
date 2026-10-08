@@ -34,6 +34,11 @@ export interface AIBridge {
   aiMcpSetCommandBlocklist?: (blocklist: string[]) => Promise<unknown> | unknown;
   aiMcpSetCommandTimeout?: (timeout: number) => Promise<unknown> | unknown;
   aiMcpSetMaxIterations?: (maxIterations: number) => Promise<unknown> | unknown;
+  aiRegisterInheritedBackgroundJobs?: (
+    chatSessionId: string,
+    ownerChatSessionId: string,
+    jobIds: string[],
+  ) => Promise<{ ok: boolean; registered?: number; error?: string }>;
 }
 
 export function getAIBridge() {

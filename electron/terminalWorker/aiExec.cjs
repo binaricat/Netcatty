@@ -37,10 +37,15 @@ function cancelPtyExecsForSession(activePtyExecs, chatSessionId) {
   }
 }
 
-function cancelWorkerBackgroundJobsForSession(backgroundJobs, chatSessionId) {
+function cancelWorkerBackgroundJobsForSession(backgroundJobs, chatSessionId, preserveJobIds) {
   if (!chatSessionId) return;
-  for (const [, job] of backgroundJobs) {
+  // preserveJobIds: inherited jobs a live branched chat still controls. They
+  // are skipped so tearing down the starting chat leaves them running for
+  // the branch to monitor and stop via its registered inheritor identity.
+  const preserve = new Set(Array.isArray(preserveJobIds) ? preserveJobIds : []);
+  for (const [jobId, job] of backgroundJobs) {
     if (job.chatSessionId !== chatSessionId) continue;
+    if (preserve.has(jobId)) continue;
     if (job.status !== "running") continue;
     try {
       job.handle?.cancel?.();
@@ -642,7 +647,11 @@ function registerWorkerAiExecHandlers(ipcMain, { sessions }) {
   }));
   ipcMain.on("netcatty:ai:catty:cancel", (_event, payload = {}) => {
     cancelPtyExecsForSession(activePtyExecs, payload.chatSessionId);
-    cancelWorkerBackgroundJobsForSession(backgroundJobs, payload.chatSessionId);
+    cancelWorkerBackgroundJobsForSession(
+      backgroundJobs,
+      payload.chatSessionId,
+      payload.preserveJobIds,
+    );
   });
 }
 

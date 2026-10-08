@@ -156,10 +156,20 @@ export function buildUndoLastTurnBranch(
   if (boundary == null) return null;
 
   const removedUserMessage = source.messages[boundary];
+  const retainedPrefix = source.messages.slice(0, boundary);
+  // When undo removes the first turn, the branch has no user message left and
+  // still carries the source title, which was auto-titled from the removed
+  // prompt. Reset it to the untitled placeholder so `autoTitleSession` can
+  // retitle the branch from the prompt the user sends next; otherwise the
+  // branch is permanently labeled with text that is no longer its prompt.
+  const hasRetainedUserMessage = retainedPrefix.some(
+    message => message.role === 'user' && message.content.trim(),
+  );
   const branchedSession: AISession = {
     ...source,
     id: options.newId,
-    messages: source.messages.slice(0, boundary),
+    messages: retainedPrefix,
+    ...(hasRetainedUserMessage ? {} : { title: 'New Chat' }),
     externalSessionId: undefined,
     createdAt: options.now,
     updatedAt: options.now,

@@ -196,3 +196,29 @@ test('buildUndoLastTurnBranch returns null when no undo boundary exists', () => 
     null,
   );
 });
+
+test('buildUndoLastTurnBranch resets the title when undo removes the first turn', () => {
+  // Undoing the first turn leaves the branch with no user message at all, so
+  // the inherited title was derived from the removed prompt and would stay
+  // stale forever (auto-titling only runs for untitled/New Chat sessions).
+  const source = session([user('first prompt'), assistant('reply')], { title: 'first prompt' });
+  const result = buildUndoLastTurnBranch(source, { newId: 'chat-branch', now: 100 });
+  assert.ok(result);
+  assert.equal(result?.session.messages.length, 0);
+  assert.equal(result?.restored.text, 'first prompt');
+  assert.equal(result?.session.title, 'New Chat');
+});
+
+test('buildUndoLastTurnBranch keeps the title when a user message is retained', () => {
+  const source = session(
+    [user('first prompt'), assistant('reply'), user('second prompt'), assistant('reply2')],
+    { title: 'renamed by user' },
+  );
+  const result = buildUndoLastTurnBranch(source, { newId: 'chat-branch', now: 100 });
+  assert.ok(result);
+  assert.equal(result?.session.messages.length, 2);
+  assert.equal(result?.restored.text, 'second prompt');
+  // The retained prefix still contains a user message, so the source title
+  // keeps describing the branch's conversation.
+  assert.equal(result?.session.title, 'renamed by user');
+});

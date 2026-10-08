@@ -154,6 +154,28 @@ export class SessionStateStore {
   }
 
   /**
+   * Every background job `chatSessionId` inherited from a branched source chat,
+   * paired with its main-process owner chat id. Used by the undo flow to
+   * register the inheritance with the main process at branch time so the
+   * branch's own chat id stays accepted for these jobs' control calls —
+   * including when the calls reach the shared RPC/MCP boundary from an
+   * external-agent SDK turn that can only present the branch's own id.
+   */
+  getInheritedBackgroundJobs(chatSessionId: string): Array<{
+    jobId: string;
+    ownerChatSessionId: string;
+  }> {
+    const jobs = this.get(chatSessionId).activeJobs;
+    const inherited: Array<{ jobId: string; ownerChatSessionId: string }> = [];
+    for (const [jobId, job] of Object.entries(jobs)) {
+      if (job?.ownerChatSessionId && job.ownerChatSessionId !== chatSessionId) {
+        inherited.push({ jobId, ownerChatSessionId: job.ownerChatSessionId });
+      }
+    }
+    return inherited;
+  }
+
+  /**
    * Rebuild the conversational state (user goal, decisions, blockers, plan) of
    * a branched chat by replaying its retained conversation prefix. The removed
    * turn's messages are gone, so conversational state captured while it ran

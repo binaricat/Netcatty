@@ -733,6 +733,31 @@ export function useAIState() {
     getAgentRuntime()
       .getSessionStateStore()
       .rebuildConversationalStateFromMessages(branched.id, branched.messages);
+    // Inherited background jobs stay owned by the source chat id in the main
+    // process, which gates their poll/stop RPCs on that id. Register the
+    // inheritance so the branch's OWN chat id is accepted too — without this,
+    // external-agent branches reach MCP with only the branch id and get
+    // "Background job not found" when polling or stopping the side effects
+    // undo explicitly preserved.
+    const inheritedJobs = getAgentRuntime()
+      .getSessionStateStore()
+      .getInheritedBackgroundJobs(branched.id);
+    if (inheritedJobs.length > 0) {
+      const jobIdsByOwner = new Map<string, string[]>();
+      for (const inherited of inheritedJobs) {
+        const jobIds = jobIdsByOwner.get(inherited.ownerChatSessionId) ?? [];
+        if (!jobIds.includes(inherited.jobId)) jobIds.push(inherited.jobId);
+        jobIdsByOwner.set(inherited.ownerChatSessionId, jobIds);
+      }
+      for (const [ownerChatSessionId, jobIds] of jobIdsByOwner) {
+        const registration = getAIBridge()?.aiRegisterInheritedBackgroundJobs?.(
+          branched.id,
+          ownerChatSessionId,
+          jobIds,
+        );
+        if (registration) void registration.catch(() => {});
+      }
+    }
     // The retained prefix may reference tool outputs stored under the source
     // session id (spilled tool results, compaction archive handles). Alias
     // only those under the branch id so tool_output_read still resolves there

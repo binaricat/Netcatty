@@ -690,3 +690,313 @@ test("terminal close cancels a worker job start that finishes late", async () =>
     "netcatty:ai:jobStop",
   ]);
 });
+
+test("chat inheritor accepted for worker job control only after undo registers the jobs", async () => {
+  const requests = [];
+  const bridge = loadFreshBridge();
+  bridge.init({
+    sessions: new Map(),
+    electronModule: null,
+    terminalWorkerManager: {
+      request(channel, payload, options) {
+        requests.push({ channel, payload, options });
+        if (channel === "netcatty:ai:jobStart") {
+          return Promise.resolve({
+            ok: true,
+            jobId: "worker-job-inh",
+            sessionId: payload.sessionId,
+            status: "running",
+          });
+        }
+        return Promise.resolve({ ok: true, jobId: payload.jobId, completed: false });
+      },
+    },
+  });
+  bridge.setPermissionMode("auto");
+  bridge.setCommandBlocklist([]);
+  bridge.updateSessionMetadata([
+    {
+      sessionId: "ssh-inh",
+      hostname: "host.example",
+      protocol: "ssh",
+      connected: true,
+    },
+  ], "chat-source");
+  // A live branch keeps the inherited terminal in its own per-turn scope sync.
+  bridge.updateSessionMetadata([
+    {
+      sessionId: "ssh-inh",
+      hostname: "host.example",
+      protocol: "ssh",
+      connected: true,
+    },
+  ], "chat-branch");
+
+  const started = await bridge.dispatchBuiltinRpc("netcatty/jobStart", {
+    sessionId: "ssh-inh",
+    command: "sleep 30",
+    chatSessionId: "chat-source",
+  });
+  assert.equal(started.ok, true);
+
+  // Before registration: the branch's own chat id is rejected like any other.
+  const rejected = await bridge.dispatchBuiltinRpc("netcatty/jobPoll", {
+    jobId: "worker-job-inh",
+    chatSessionId: "chat-branch",
+  });
+  assert.deepEqual(rejected, { ok: false, error: "Background job not found" });
+
+  assert.equal(
+    bridge.registerInheritedBackgroundJobs("chat-branch", "chat-source", ["worker-job-inh"]).registered,
+    1,
+  );
+
+  const pollRequests = requests.filter((entry) => entry.channel === "netcatty:ai:jobPoll");
+  assert.equal(pollRequests.length, 0);
+  const polled = await bridge.dispatchBuiltinRpc("netcatty/jobPoll", {
+    jobId: "worker-job-inh",
+    chatSessionId: "chat-branch",
+  });
+  assert.equal(polled.ok, true);
+  const forwarded = requests.findLast?.((entry) => entry.channel === "netcatty:ai:jobPoll")
+    ?? requests.filter((entry) => entry.channel === "netcatty:ai:jobPoll").at(-1);
+  assert.equal(forwarded.payload.chatSessionId, "chat-source");
+
+  // Foreign chat sessions still cannot reach the job.
+  const foreign = await bridge.dispatchBuiltinRpc("netcatty/jobPoll", {
+    jobId: "worker-job-inh",
+    chatSessionId: "chat-stranger",
+  });
+  assert.deepEqual(foreign, { ok: false, error: "Background job not found" });
+});
+
+test("cancelling the source chat keeps worker jobs inherited by a live branch", async () => {
+  const requests = [];
+  const sends = [];
+  const bridge = loadFreshBridge();
+  bridge.init({
+    sessions: new Map(),
+    electronModule: null,
+    terminalWorkerManager: {
+      request(channel, payload, options) {
+        requests.push({ channel, payload, options });
+        if (channel === "netcatty:ai:jobStart") {
+          return Promise.resolve({
+            ok: true,
+            jobId: "worker-job-src",
+            sessionId: payload.sessionId,
+            status: "running",
+          });
+        }
+        return Promise.resolve({ ok: true, jobId: payload.jobId, completed: false });
+      },
+      send(channel, payload, options) {
+        sends.push({ channel, payload, options });
+      },
+    },
+  });
+  bridge.setPermissionMode("auto");
+  bridge.setCommandBlocklist([]);
+  bridge.updateSessionMetadata([
+    {
+      sessionId: "ssh-src",
+      hostname: "host.example",
+      protocol: "ssh",
+      connected: true,
+    },
+  ], "chat-source");
+  // A live branch keeps the inherited terminal in its own per-turn scope sync.
+  bridge.updateSessionMetadata([{
+    sessionId: "ssh-src",
+    hostname: "host.example",
+    protocol: "ssh",
+    connected: true,
+  }], "chat-branch");
+
+  const started = await bridge.dispatchBuiltinRpc("netcatty/jobStart", {
+    sessionId: "ssh-src",
+    command: "sleep 30",
+    chatSessionId: "chat-source",
+  });
+  assert.equal(started.ok, true);
+
+  bridge.registerInheritedBackgroundJobs("chat-branch", "chat-source", ["worker-job-src"]);
+
+  const cancelled = await bridge.applyChatSessionCancelled("chat-source", true);
+  assert.equal(cancelled.ok, true);
+  assert.deepEqual(sends, [
+    {
+      channel: "netcatty:ai:catty:cancel",
+      payload: {
+        chatSessionId: "chat-source",
+        preserveJobIds: ["worker-job-src"],
+      },
+      options: {},
+    },
+  ]);
+
+  // The branch can still poll (and stop) the inherited job after the source
+  // chat was torn down.
+  const polled = await bridge.dispatchBuiltinRpc("netcatty/jobPoll", {
+    jobId: "worker-job-src",
+    chatSessionId: "chat-branch",
+  });
+  assert.equal(polled.ok, true);
+});
+
+test("cancelling an inherit chat drops its registration; un-inherited jobs cancel normally", async () => {
+  const requests = [];
+  const sends = [];
+  const bridge = loadFreshBridge();
+  bridge.init({
+    sessions: new Map(),
+    electronModule: null,
+    terminalWorkerManager: {
+      request(channel, payload, options) {
+        requests.push({ channel, payload, options });
+        if (channel === "netcatty:ai:jobStart") {
+          const jobIndex = requests.filter((entry) => entry.channel === "netcatty:ai:jobStart").length;
+          return Promise.resolve({
+            ok: true,
+            jobId: jobIndex === 2 ? "worker-job-drop" : "worker-job-keep",
+            sessionId: payload.sessionId,
+            status: "running",
+          });
+        }
+        return Promise.resolve({ ok: true, jobId: payload.jobId, completed: false });
+      },
+      send(channel, payload, options) {
+        sends.push({ channel, payload, options });
+      },
+    },
+  });
+  bridge.setPermissionMode("auto");
+  bridge.setCommandBlocklist([]);
+  bridge.updateSessionMetadata([
+    {
+      sessionId: "ssh-drop",
+      hostname: "host.example",
+      protocol: "ssh",
+      connected: true,
+    },
+  ], "chat-keep");
+
+  for (const jobId of ["worker-job-keep", "worker-job-drop"]) {
+    const started = await bridge.dispatchBuiltinRpc("netcatty/jobStart", {
+      sessionId: "ssh-drop",
+      command: "sleep 30",
+      chatSessionId: "chat-keep",
+    });
+    assert.equal(started.ok, true);
+    assert.equal(started.jobId, jobId);
+  }
+
+  bridge.registerInheritedBackgroundJobs("chat-child", "chat-keep", ["worker-job-drop"]);
+
+  // Inherited job (owned by chat-keep, inherited by chat-child) is preserved
+  // even when chat-child itself is torn down; the remaining branch (none)
+  // means the job is no longer preserved afterwards.
+  await bridge.applyChatSessionCancelled("chat-child", true);
+  const pollAfterChildCancel = await bridge.dispatchBuiltinRpc("netcatty/jobPoll", {
+    jobId: "worker-job-drop",
+    chatSessionId: "chat-keep",
+  });
+  assert.equal(pollAfterChildCancel.ok, true);
+
+  assert.equal(
+    bridge.registerInheritedBackgroundJobs("chat-child-2", "chat-keep", ["worker-job-drop"]).registered,
+    1,
+  );
+  await bridge.applyChatSessionCancelled("chat-keep", true);
+  assert.deepEqual(sends, [
+    {
+      channel: "netcatty:ai:catty:cancel",
+      payload: {
+        chatSessionId: "chat-child",
+      },
+      options: {},
+    },
+    {
+      channel: "netcatty:ai:catty:cancel",
+      payload: {
+        chatSessionId: "chat-keep",
+        preserveJobIds: ["worker-job-drop"],
+      },
+      options: {},
+    },
+  ]);
+});
+
+test("after the source chat is deleted a live branch keeps polling the inherited job", async () => {
+  const requests = [];
+  const sends = [];
+  const bridge = loadFreshBridge();
+  bridge.init({
+    sessions: new Map(),
+    electronModule: null,
+    terminalWorkerManager: {
+      request(channel, payload, options) {
+        requests.push({ channel, payload, options });
+        if (channel === "netcatty:ai:jobStart") {
+          return Promise.resolve({
+            ok: true,
+            jobId: "worker-job-del",
+            sessionId: payload.sessionId,
+            status: "running",
+          });
+        }
+        return Promise.resolve({ ok: true, jobId: payload.jobId, completed: false });
+      },
+      send(channel, payload, options) {
+        sends.push({ channel, payload, options });
+      },
+    },
+  });
+  bridge.setPermissionMode("auto");
+  bridge.setCommandBlocklist([]);
+  bridge.updateSessionMetadata([
+    {
+      sessionId: "ssh-del",
+      hostname: "host.example",
+      protocol: "ssh",
+      connected: true,
+    },
+  ], "chat-src");
+  // A live branch keeps the inherited terminal in its own per-turn scope sync.
+  bridge.updateSessionMetadata([{
+    sessionId: "ssh-del",
+    hostname: "host.example",
+    protocol: "ssh",
+    connected: true,
+  }], "chat-branch");
+
+  const started = await bridge.dispatchBuiltinRpc("netcatty/jobStart", {
+    sessionId: "ssh-del",
+    command: "sleep 30",
+    chatSessionId: "chat-src",
+  });
+  assert.equal(started.ok, true);
+
+  bridge.registerInheritedBackgroundJobs("chat-branch", "chat-src", ["worker-job-del"]);
+
+  // Deleting the source chat (renderer SDK cleanup path).
+  await bridge.cleanupScopedMetadata("chat-src");
+
+  // Catty-branch poll presenting the owner id (renderer-side remap).
+  const polled = await bridge.dispatchBuiltinRpc("netcatty/jobPoll", {
+    jobId: "worker-job-del",
+    chatSessionId: "chat-src",
+  });
+  assert.equal(polled.ok, true);
+
+  // External-branch poll presenting its own chat id.
+  const polledAsBranch = await bridge.dispatchBuiltinRpc("netcatty/jobPoll", {
+    jobId: "worker-job-del",
+    chatSessionId: "chat-branch",
+  });
+  assert.equal(polledAsBranch.ok, true);
+
+  // Deleting the branch later drops its registration: the source-owned job's
+  // teardown is no longer deferred once no live branch inherits it.
+  await bridge.cleanupScopedMetadata("chat-branch");
+});

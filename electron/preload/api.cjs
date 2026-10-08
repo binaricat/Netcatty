@@ -1787,6 +1787,13 @@ function createPreloadApi(ctx) {
   aiCapability: async (rpcMethod, params, chatSessionId) => {
     return ipcRenderer.invoke("netcatty:ai:capability", { rpcMethod, params, chatSessionId });
   },
+  aiRegisterInheritedBackgroundJobs: async (chatSessionId, ownerChatSessionId, jobIds) => {
+    return ipcRenderer.invoke("netcatty:ai:chat-session:register-inherited-jobs", {
+      chatSessionId,
+      ownerChatSessionId,
+      jobIds,
+    });
+  },
   aiDiscoverAgents: async (options) => {
     return ipcRenderer.invoke("netcatty:ai:agents:discover", options);
   },

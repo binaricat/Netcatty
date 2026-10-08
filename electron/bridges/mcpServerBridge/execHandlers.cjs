@@ -414,14 +414,23 @@ function createExecHandlerApi(ctx) {
       // Per-chat isolation: a job started under a chat session can only be
       // accessed by callers presenting the same chatSessionId. Unscoped or
       // statically-scoped callers cannot reach into another chat's jobs.
+      // Registered inheritors (branched chats that undid their source turn
+      // while the job was still running) are accepted too, so the branch can
+      // keep monitoring and stopping the job it inherited.
       if (job.chatSessionId) {
         if (!chatSessionId || job.chatSessionId !== chatSessionId) {
-          return null;
+          if (typeof isInheritedJobControl !== "function"
+            || !isInheritedJobControl(jobId, chatSessionId)) return null;
         }
       }
       return job;
     }
-    
+
+    function getBackgroundJobOwnerChatSessionId(jobId) {
+      const job = backgroundJobs.get(jobId);
+      return job?.chatSessionId ?? null;
+    }
+
     function handleJobPoll(params) {
       const { jobId, offset = 0, chatSessionId, scopedSessionIds } = params || {};
       if (!jobId) throw new Error("jobId is required");
@@ -430,9 +439,20 @@ function createExecHandlerApi(ctx) {
       // Re-check session scope so a caller that lost access to the host
       // cannot continue reading output from jobs on that session.
       // Covers dynamic (chatSessionId) and static (scopedSessionIds) modes.
+      // Job-scoped validation uses the owner chat id when the caller is an
+      // accepting inheritor, matching the caller-agnostic ownership check.
       if (job.sessionId) {
         const scopeErr = validateSessionScope(job.sessionId, chatSessionId || null, scopedSessionIds);
-        if (scopeErr) return { ok: false, error: scopeErr };
+        // An inheritor-registered job stays pollable by its owner chat even
+        // after that chat's scope snapshot is gone (owner deleted, a live
+        // branch still inherited the job): ownership plus the registered
+        // inheritance is the authorization then.
+        const ownerScopeSnapshotGone = typeof jobHasInheritors === "function"
+          && typeof getScopedSessionIds === "function"
+          && chatSessionId === job.chatSessionId
+          && jobHasInheritors(jobId)
+          && getScopedSessionIds(chatSessionId).length === 0;
+        if (scopeErr && !ownerScopeSnapshotGone) return { ok: false, error: scopeErr };
       }
       return serializeBackgroundJob(job, offset);
     }
@@ -472,6 +492,7 @@ function createExecHandlerApi(ctx) {
       handleExec,
       handleJobStart,
       getScopedJob,
+      getBackgroundJobOwnerChatSessionId,
       handleJobPoll,
       handleJobStop,
     };
