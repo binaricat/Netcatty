@@ -17,11 +17,11 @@ test("scripts view mode parser only accepts 'stacked'", () => {
 
 test("scripts view mode hook persists the chosen mode", () => {
   const source = readFileSync(new URL("./useScriptsViewMode.ts", import.meta.url), "utf8");
-  assert.match(source, /useCallback/);
-  // The setter writes the chosen mode so it survives an app restart.
+  assert.match(source, /useStoredString/);
+  // The shared hook owns persistence and same-/cross-window subscriptions.
   assert.match(
     source,
-    /localStorageAdapter\.writeString\(SCRIPTS_VIEW_MODE_STORAGE_KEY, mode\)/,
+    /useStoredString\(SCRIPTS_VIEW_MODE_STORAGE_KEY, "list", isScriptsViewMode\)/,
   );
   assert.equal(SCRIPTS_VIEW_MODE_STORAGE_KEY.startsWith("netcatty:"), true);
 });
