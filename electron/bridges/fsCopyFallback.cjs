@@ -286,7 +286,44 @@ async function copyFileExclusiveWithFallback(source, target, mode = null, option
         }
         throw openError;
       }
-      copied = await copyLoop(readHandle, writeHandle);
+      // Pin the created inode's identity immediately: the copy loop below can
+      // also fail (cancellation, a read/write error on the mount), and a
+      // failing copy never reaches the final pathname revalidation, so the
+      // created inode's held identity is what a failure-time revalidation
+      // compares against.
+      let heldIdentity = null;
+      try {
+        const heldStat = await writeHandle.stat();
+        // The copy loop may fail midway with partial data written, so the
+        // failure-time revaluation cannot compare sizes (they grow while the
+        // copy runs); ownership is pinned by the writable inode's dev/ino.
+        heldIdentity = `${heldStat.dev}:${heldStat.ino}`;
+      } catch { heldIdentity = null; }
+      try {
+        copied = await copyLoop(readHandle, writeHandle);
+      } catch (copyError) {
+        // A rejected copy loop bypasses the post-copy revalidation entirely,
+        // so revalidate the pathname here: if the name changed hands while
+        // the copy was being streamed (a concurrent writer's replacement won
+        // the pathname while the partial write was still open), the caller's
+        // error cleanup would otherwise unlink it and destroy that writer's
+        // only visible file — mark the handover so the cleanup leaves it in
+        // place. When the pathname still resolves to the inode this module
+        // created, the partial data is ours and the caller may clean it up
+        // like fs.copyFile's own partial destination.
+        let replacedIdentity = null;
+        try {
+          const replacedStat = await fs.promises.lstat(target);
+          replacedIdentity = `${replacedStat.dev}:${replacedStat.ino}`;
+        } catch { replacedIdentity = null; }
+        if (replacedIdentity !== heldIdentity) {
+          throw Object.assign(
+            new Error(`EEXIST: file exists, ${target} changed hands while the fallback stream was copying`),
+            { code: copyError?.code, cause: copyError, targetOwnershipRelinquished: true },
+          );
+        }
+        throw copyError;
+      }
     } finally {
       await writeHandle?.close().catch(() => {});
       await readHandle?.close().catch(() => {});

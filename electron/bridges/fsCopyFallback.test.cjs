@@ -646,6 +646,85 @@ test("copyFileExclusiveWithFallback flags a stream-open EEXIST so callers skip i
   );
 });
 
+test("copyFileExclusiveWithFallback marks a relinquished target when a failing copy loop raced a replacement", async (t) => {
+  const dir = makeTempDir("copy-fallback-loop-race-");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const source = path.join(dir, "staged");
+  const target = path.join(dir, "target");
+  fs.writeFileSync(source, "our copy bytes");
+  const copyRestore = stubPromises("copyFile", enotsupCopyFile());
+  t.after(copyRestore);
+  // Another writer wins the pathname while the streamed copy is still writing,
+  // and the copy then fails: a rejected copy loop never reaches the final
+  // pathname revalidation, so the failure must be revalidated here and marked
+  // with `targetOwnershipRelinquished` or the caller's error cleanup would
+  // unlink the concurrent writer's only visible file.
+  const openOriginal = fs.promises.open;
+  const openRestore = stubPromises("open", async (...args) => {
+    const handle = await openOriginal.apply(fs.promises, args);
+    const originalRead = handle.read.bind(handle);
+    handle.read = async (buffer, offset, length, position) => {
+      if (position === 0) {
+        // A real concurrent replacement creates a new inode at the pathname;
+        // truncating the existing one would keep this module's inode.
+        fs.unlinkSync(target);
+        fs.writeFileSync(target, "written by another process");
+        throw Object.assign(new Error("EIO: i/o error, read"), { code: "EIO" });
+      }
+      return originalRead(buffer, offset, length, position);
+    };
+    return handle;
+  });
+  t.after(openRestore);
+  let error = null;
+  try {
+    await copyFileExclusiveWithFallback(source, target, 0o664);
+  } catch (thrown) {
+    error = thrown;
+  }
+  assert.equal(error?.code, "EIO", "the underlying copy failure code is preserved");
+  assert.equal(error.targetOwnershipRelinquished, true, "the handover is marked for the caller's cleanup");
+  assert.equal(
+    fs.readFileSync(target, "utf8"),
+    "written by another process",
+    "the concurrent writer's replacement is never removed by this module",
+  );
+});
+
+test("copyFileExclusiveWithFallback keeps failure cleanup available when a failing copy loop still owns the target", async (t) => {
+  const dir = makeTempDir("copy-fallback-loop-owned-");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const source = path.join(dir, "staged");
+  const target = path.join(dir, "target");
+  fs.writeFileSync(source, "our copy bytes");
+  const copyRestore = stubPromises("copyFile", enotsupCopyFile());
+  t.after(copyRestore);
+  // The copy fails but the pathname was never replaced: the partial copy is
+  // still this module's inode, so the error must NOT carry the handover mark
+  // and the caller's cleanup may unlink its own partial destination.
+  const openOriginal = fs.promises.open;
+  const openRestore = stubPromises("open", async (...args) => {
+    const handle = await openOriginal.apply(fs.promises, args);
+    const originalRead = handle.read.bind(handle);
+    handle.read = async (buffer, offset, length, position) => {
+      if (position === 0) {
+        throw Object.assign(new Error("EIO: i/o error, read"), { code: "EIO" });
+      }
+      return originalRead(buffer, offset, length, position);
+    };
+    return handle;
+  });
+  t.after(openRestore);
+  let error = null;
+  try {
+    await copyFileExclusiveWithFallback(source, target, 0o664);
+  } catch (thrown) {
+    error = thrown;
+  }
+  assert.equal(error?.code, "EIO", "the underlying copy failure code is preserved");
+  assert.equal(error.targetOwnershipRelinquished, undefined, "a still-owned partial copy stays caller-cleanable");
+});
+
 test("promoteLocalTransfer preserves a ready pathname whose ownership the fallback relinquished", async (t) => {
   const dir = makeTempDir("promote-relinquished-ready-");
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
