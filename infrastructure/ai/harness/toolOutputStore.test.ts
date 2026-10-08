@@ -1138,3 +1138,87 @@ test('saved-output read budgets reset at the start of each turn', () => {
   dedup.beginTurn();
   assert.equal(dedup.takeBudget('read', 24_000, 24_000), 24_000);
 });
+
+test('ToolOutputStore retries aliasing once persistence installs after a restart', async () => {
+  // Simulate an app restart: the fresh store starts with empty in-memory
+  // state and no persistence, because `setPersistence` only runs on the
+  // first turn. Undo aliasing runs before that first turn.
+  const persistence = createFakeToolOutputPersistence();
+  const sourceStore = new ToolOutputStore({ persistence });
+  const handle = sourceStore.store({
+    chatSessionId: 'chat-source',
+    capabilityId: 'terminal.execute',
+    content: 'kept across restart',
+  });
+  await sourceStore.flush('chat-source');
+
+  const restartedStore = new ToolOutputStore();
+  await restartedStore.aliasSessionHandles('chat-source', 'chat-branch', {
+    retainedHandleIds: new Set([handle.id]),
+  });
+  assert.equal(await restartedStore.readChunkAsync({ handleId: handle.id }, 'chat-branch'), null);
+
+  // The first branch turn installs persistence; the deferred alias request
+  // must be replayed so the branch can read the retained output again.
+  restartedStore.setPersistence(persistence);
+  await new Promise(resolve => setTimeout(resolve, 0));
+  const restored = await restartedStore.readChunkAsync({ handleId: handle.id }, 'chat-branch');
+  assert.equal(restored?.content, 'kept across restart');
+  assert.ok(persistence.entries.has(`chat-branch:${handle.id}`));
+});
+
+test('ToolOutputStore keeps the branch-owned copy readable while the source file is shared', async () => {
+  const deletedPaths: string[] = [];
+  const base = createFakeToolOutputPersistence();
+  const readGates = new Map<string, Promise<void>>();
+  const persistence: ToolOutputPersistence = {
+    ...base,
+    read: async (path, request) => {
+      const gate = readGates.get(path);
+      if (gate) await gate;
+      return base.read(path, request);
+    },
+    delete: async path => {
+      deletedPaths.push(path);
+    },
+    deleteSession: async () => {},
+    deleteTerminalSession: async () => {},
+  };
+  const store = new ToolOutputStore({ persistence });
+  const handle = store.store({
+    chatSessionId: 'chat-source',
+    capabilityId: 'terminal.execute',
+    content: 'A'.repeat(50_000),
+  });
+  await store.flush('chat-source');
+  assert.ok(handle.filePath);
+
+  // Block the alias materialization midway, then delete the source session:
+  // the alias still shares the source file path, so the store must not drop
+  // the file until the branch-owned copy has landed.
+  let releaseRead!: () => void;
+  readGates.set(handle.filePath!, new Promise<void>(resolve => {
+    releaseRead = resolve;
+  }));
+  const aliasing = store.aliasSessionHandles('chat-source', 'chat-branch', {
+    retainedHandleIds: new Set([handle.id]),
+  });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  store.prune('chat-source');
+  assert.equal(deletedPaths.includes(handle.filePath!), false);
+
+  releaseRead();
+  await aliasing;
+  await new Promise(resolve => setTimeout(resolve, 0));
+  const restored = await store.readChunkAsync({ handleId: handle.id }, 'chat-branch');
+  assert.ok(restored);
+  assert.equal(restored.totalChars, 50_000);
+  assert.ok(restored.content.length > 0);
+  assert.notEqual(restored.content.length, 0);
+
+  // The source file path is no longer referenced once the branch owns its
+  // durable copy, so the deferred delete eventually runs.
+  assert.ok(!store.listPendingHandles('chat-branch').some(h => h.filePath === handle.filePath));
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.notDeepEqual(deletedPaths, []);
+});

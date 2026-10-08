@@ -133,3 +133,35 @@ test('SessionStateStore reinjects edited files and unfinished plan items', () =>
   assert.match(text, /\[done\] inspect failure/);
   assert.match(text, /\[todo\] run regression tests/);
 });
+
+test('SessionStateStore copies runtime state for a branched chat and keeps copies independent', () => {
+  const store = new SessionStateStore();
+  store.updateFromToolResult(
+    'chat-source',
+    'terminal_start',
+    { sessionId: 'sess-1', command: 'npm run dev' },
+    JSON.stringify({ jobId: 'job-1', status: 'running', nextOffset: 300 }),
+    false,
+  );
+  store.mergeFileChanges('chat-source', ['src/a.ts']);
+  store.mergePlan('chat-source', [{ text: 'step one', completed: false }]);
+
+  store.copyState('chat-source', 'chat-branch');
+
+  const branchReinjection = store.toReinjectionText('chat-branch');
+  assert.match(branchReinjection ?? '', /job-1/);
+  assert.match(branchReinjection ?? '', /offset=300/);
+  assert.match(branchReinjection ?? '', /src\/a\.ts/);
+  assert.match(branchReinjection ?? '', /step one/);
+  assert.ok(store.toReinjectionText('chat-source'));
+
+  // Updates under the branch id must not leak back into the source state.
+  store.mergeFromUserGoal('chat-branch', 'new goal');
+  assert.equal(store.get('chat-source').userGoal, undefined);
+  assert.equal(store.get('chat-branch').userGoal, 'new goal');
+  assert.deepEqual(store.get('chat-source').activeJobs['job-1'], store.get('chat-branch').activeJobs['job-1']);
+  assert.notEqual(
+    store.get('chat-source').activeJobs['job-1'],
+    store.get('chat-branch').activeJobs['job-1'],
+  );
+});

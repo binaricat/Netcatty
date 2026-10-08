@@ -77,6 +77,35 @@ export class SessionStateStore {
     this.bySession.delete(chatSessionId);
   }
 
+  /**
+   * Deep-copy the runtime session state tracked under `fromChatSessionId` into
+   * `toChatSessionId`. Used when a chat is branched (undo last turn): tool side
+   * effects are not rolled back, so the branch must keep reinjecting the same
+   * state (active background jobs, poll offsets, edited files, plan, ...) that
+   * the retained history refers to. The two copies stay independent.
+   */
+  copyState(fromChatSessionId: string, toChatSessionId: string): void {
+    if (fromChatSessionId === toChatSessionId) return;
+    const state = this.bySession.get(fromChatSessionId);
+    if (!state) return;
+    this.bySession.set(toChatSessionId, {
+      ...state,
+      decisions: [...state.decisions],
+      activeHosts: Object.fromEntries(
+        Object.entries(state.activeHosts).map(([id, host]) => [id, { ...host }]),
+      ),
+      activeJobs: Object.fromEntries(
+        Object.entries(state.activeJobs).map(([id, job]) => [id, { ...job }]),
+      ),
+      terminalReadCursors: Object.fromEntries(
+        Object.entries(state.terminalReadCursors).map(([id, cursor]) => [id, { ...cursor }]),
+      ),
+      editedFiles: [...state.editedFiles],
+      planItems: state.planItems.map(item => ({ ...item })),
+      blockers: [...state.blockers],
+    });
+  }
+
   mergeFromUserGoal(chatSessionId: string, goal: string | undefined): void {
     if (!goal?.trim()) return;
     const state = { ...this.get(chatSessionId) };

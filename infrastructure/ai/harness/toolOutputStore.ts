@@ -71,6 +71,7 @@ export const TOOL_OUTPUT_TTL_MS = 30 * 60 * 1_000;
 export const TOOL_OUTPUT_SPILL_THRESHOLD_CHARS = 0;
 const TOOL_OUTPUT_SEARCH_CONTEXT_CHARS = 320;
 const TOOL_OUTPUT_SEARCH_MAX_MATCHES = 20;
+const TOOL_OUTPUT_MAX_PENDING_ALIAS_RESTORES = 50;
 const TOOL_OUTPUT_LIFECYCLE_BLOOM_BITS = 1 << 22;
 const TOOL_OUTPUT_LIFECYCLE_BLOOM_HASHES = 4;
 
@@ -191,6 +192,20 @@ export class ToolOutputStore {
   private readonly deletedTerminalSessions = new Map<string, string>();
   private readonly closedTerminalSessions = new Set<string>();
   private readonly lifecycleDenyFilter = new FixedStringBloomFilter();
+  // Alias requests whose in-memory handles are gone and whose durable restore
+  // cannot run yet because persistence installs on the first turn (for example
+  // undo immediately after an app restart). Replayed once persistence appears.
+  private readonly pendingAliasRestores = new Map<string, {
+    sourceChatSessionId: string;
+    targetChatSessionId: string;
+    handleIds: string[];
+  }>();
+  // Alias passes still running for a source chat session; `prune` waits for
+  // them before deleting the source session's durable records.
+  private readonly aliasMaterializationPromises = new Map<string, Promise<void>>();
+  // Shared durable files whose delete was deferred until the last alias stops
+  // referencing them.
+  private readonly deferredPathDeletes = new Set<string>();
   private persistence?: ToolOutputPersistence;
 
   constructor(options: ToolOutputStoreOptions = {}) {
@@ -207,6 +222,18 @@ export class ToolOutputStore {
 
   setPersistence(persistence: ToolOutputPersistence | undefined): void {
     this.persistence = persistence;
+    if (persistence?.restore) this.replayPendingAliasRestores();
+  }
+
+  private replayPendingAliasRestores(): void {
+    if (this.pendingAliasRestores.size === 0) return;
+    const pending = [...this.pendingAliasRestores.values()];
+    this.pendingAliasRestores.clear();
+    for (const request of pending) {
+      void this.aliasSessionHandles(request.sourceChatSessionId, request.targetChatSessionId, {
+        retainedHandleIds: new Set(request.handleIds),
+      }).catch(() => {});
+    }
   }
 
   resolveRestartPersistenceNotices<T>(value: T, chatSessionId: string): T {
@@ -318,7 +345,28 @@ export class ToolOutputStore {
    * namespace so reads keep working after the app restarts, when restore looks
    * up manifests by the branch session id.
    */
-  async aliasSessionHandles(
+  aliasSessionHandles(
+    sourceChatSessionId: string,
+    targetChatSessionId: string,
+    options?: AliasSessionHandlesOptions,
+  ): Promise<void> {
+    // Track the whole alias pass as an in-flight materialization for the source
+    // session: deleting the source chat must not drop its durable records (or
+    // shared files) while branch aliases still read from them.
+    const flight = this.runAliasSessionHandles(
+      sourceChatSessionId,
+      targetChatSessionId,
+      options,
+    ).finally(() => {
+      if (this.aliasMaterializationPromises.get(sourceChatSessionId) === flight) {
+        this.aliasMaterializationPromises.delete(sourceChatSessionId);
+      }
+    });
+    this.aliasMaterializationPromises.set(sourceChatSessionId, flight);
+    return flight;
+  }
+
+  private async runAliasSessionHandles(
     sourceChatSessionId: string,
     targetChatSessionId: string,
     options?: AliasSessionHandlesOptions,
@@ -331,10 +379,17 @@ export class ToolOutputStore {
     if (wantedHandleIds.length === 0) return;
     const targetMap = this.bySession.get(targetChatSessionId) ?? new Map<string, ToolOutputHandle>();
     const aliased: ToolOutputHandle[] = [];
+    const missingRestoreHandleIds: string[] = [];
     for (const handleId of wantedHandleIds) {
       let sourceHandle = sourceMap?.get(handleId);
       if (!sourceHandle) {
         sourceHandle = await this.restoreHandle(handleId, sourceChatSessionId).catch(() => undefined);
+        if (!sourceHandle && !this.persistence?.restore) {
+          // Persistence (which installs on the first turn) is not available
+          // yet, so the handle may exist durably but cannot be restored right
+          // now. Remember the request and retry once persistence appears.
+          missingRestoreHandleIds.push(handleId);
+        }
       }
       if (!sourceHandle || sourceHandle.evicted || targetMap.has(handleId)) continue;
       const alias: ToolOutputHandle = {
@@ -345,6 +400,13 @@ export class ToolOutputStore {
       targetMap.set(handleId, alias);
       aliased.push(alias);
     }
+    if (missingRestoreHandleIds.length > 0) {
+      this.pendingAliasRestores.set(
+        `${sourceChatSessionId}\n${targetChatSessionId}`,
+        { sourceChatSessionId, targetChatSessionId, handleIds: missingRestoreHandleIds },
+      );
+      this.enforcePendingAliasRestoresLimit();
+    }
     if (aliased.length === 0) return;
     this.bySession.set(targetChatSessionId, targetMap);
     this.enforceSessionLimits(targetChatSessionId, targetMap);
@@ -353,6 +415,14 @@ export class ToolOutputStore {
       targetChatSessionId,
       aliased.filter(alias => !alias.evicted),
     );
+  }
+
+  private enforcePendingAliasRestoresLimit(): void {
+    while (this.pendingAliasRestores.size > TOOL_OUTPUT_MAX_PENDING_ALIAS_RESTORES) {
+      const oldest = this.pendingAliasRestores.keys().next().value;
+      if (oldest === undefined) break;
+      this.pendingAliasRestores.delete(oldest);
+    }
   }
 
   /**
@@ -394,6 +464,36 @@ export class ToolOutputStore {
         // handle is reachable, exactly as before.
       }
     }
+    // The materialized aliases no longer read from the shared source files;
+    // now is a good moment to finish any deferred deletes for them.
+    this.processDeferredPathDeletes();
+  }
+
+  private isPathReferencedByOtherHandles(path: string, except: ToolOutputHandle): boolean {
+    for (const sessionMap of this.bySession.values()) {
+      for (const existing of sessionMap.values()) {
+        if (existing !== except && existing.filePath === path) return true;
+      }
+    }
+    return false;
+  }
+
+  private processDeferredPathDeletes(): void {
+    if (this.deferredPathDeletes.size === 0) return;
+    for (const path of [...this.deferredPathDeletes]) {
+      if (this.isPathReferencedByHandle(path)) continue;
+      this.deferredPathDeletes.delete(path);
+      void this.persistence?.delete(path).catch(() => {});
+    }
+  }
+
+  private isPathReferencedByHandle(path: string): boolean {
+    for (const sessionMap of this.bySession.values()) {
+      for (const existing of sessionMap.values()) {
+        if (existing.filePath === path) return true;
+      }
+    }
+    return false;
   }
 
   private async readPersistedContent(
@@ -475,12 +575,26 @@ export class ToolOutputStore {
       for (const handle of sessionMap.values()) this.evictHandle(handle);
     }
     this.bySession.delete(chatSessionId);
+    this.processDeferredPathDeletes();
     let deletionSucceeded = false;
-    const deletion = this.persistence?.deleteSession?.(chatSessionId)
-      .then(
-        () => { deletionSucceeded = true; },
-        () => {},
-      );
+    let deletion: Promise<void> | undefined;
+    const persistence = this.persistence;
+    const deleteSessionImpl = persistence?.deleteSession;
+    if (persistence && deleteSessionImpl) {
+      // A concurrently running alias pass for this source session may still be
+      // reading its durable files; wait for it before deleting the records.
+      const pendingFlight = this.aliasMaterializationPromises.get(chatSessionId);
+      const deleteSession = (): Promise<void> => deleteSessionImpl.call(persistence, chatSessionId);
+      deletion = pendingFlight
+        ? pendingFlight.catch(() => {}).then(deleteSession).then(
+          () => { deletionSucceeded = true; },
+          () => {},
+        )
+        : deleteSession().then(
+          () => { deletionSucceeded = true; },
+          () => {},
+        );
+    }
     if (deletion) {
       this.sessionDeletionPromises.set(chatSessionId, deletion);
       void deletion.finally(() => {
@@ -522,11 +636,28 @@ export class ToolOutputStore {
       if (sessionMap.size === 0) this.bySession.delete(chatSessionId);
     }
     let deletionSucceeded = false;
-    const deletion = this.persistence?.deleteTerminalSession?.(chatSessionId, terminalSessionId)
-      .then(
-        () => { deletionSucceeded = true; },
-        () => {},
+    let deletion: Promise<void> | undefined;
+    const persistence = this.persistence;
+    const deleteTerminalSessionImpl = persistence?.deleteTerminalSession;
+    if (persistence && deleteTerminalSessionImpl) {
+      // Same as `prune`: wait for a running alias pass before deleting the
+      // durable records the aliases still read from.
+      const pendingFlight = this.aliasMaterializationPromises.get(chatSessionId);
+      const deleteTerminalSession = (): Promise<void> => deleteTerminalSessionImpl.call(
+        persistence,
+        chatSessionId,
+        terminalSessionId,
       );
+      deletion = pendingFlight
+        ? pendingFlight.catch(() => {}).then(deleteTerminalSession).then(
+          () => { deletionSucceeded = true; },
+          () => {},
+        )
+        : deleteTerminalSession().then(
+          () => { deletionSucceeded = true; },
+          () => {},
+        );
+    }
     if (deletion) {
       this.terminalDeletionPromises.set(terminalKey, deletion);
       void deletion.finally(() => {
@@ -654,9 +785,16 @@ export class ToolOutputStore {
 
   private evictHandle(handle: ToolOutputHandle): void {
     handle.evicted = true;
-    if (handle.filePath && this.persistence) {
-      void this.persistence.delete(handle.filePath).catch(() => {});
+    if (!handle.filePath || !this.persistence) return;
+    if (this.isPathReferencedByOtherHandles(handle.filePath, handle)) {
+      // Another session (a branch alias) still reads from this durable file;
+      // defer the delete until the last reference drops and then sweep it.
+      this.deferredPathDeletes.add(handle.filePath);
+      void this.processDeferredPathDeletes();
+      return;
     }
+    void this.persistence.delete(handle.filePath).catch(() => {});
+    void this.processDeferredPathDeletes();
   }
 
   private async restoreHandle(handleId: string, chatSessionId: string): Promise<ToolOutputHandle | undefined> {

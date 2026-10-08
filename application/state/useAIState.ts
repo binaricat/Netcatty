@@ -717,6 +717,14 @@ export function useAIState() {
     if (!result) return null;
 
     const branched = result.session;
+    // Tool side effects are not rolled back, so the retained conversation may
+    // still reference Catty runtime state (active background jobs, poll
+    // offsets, edited files, plan, blockers) tracked under the source chat id.
+    // Copy it under the branch id so the next branch turn reinjects the same
+    // state instead of an empty one; the two copies stay independent.
+    getAgentRuntime()
+      .getSessionStateStore()
+      .copyState(source.id, branched.id);
     // The retained prefix may reference tool outputs stored under the source
     // session id (spilled tool results, compaction archive handles). Alias
     // only those under the branch id so tool_output_read still resolves there
