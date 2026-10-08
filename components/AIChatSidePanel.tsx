@@ -1692,10 +1692,12 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   // This panel's scope is passed so the branch is created in the scope viewing
   // it, even when the source session's own scope went stale (e.g. a terminal
   // chat resumed after reconnecting under a new terminal id).
-  const handleForkFromMessage = useCallback((messageId: string) => {
+  const handleForkFromMessage = useCallback(async (messageId: string) => {
     const sourceSessionId = activeSessionRef.current?.id ?? activeSessionId;
     if (!sourceSessionId) return;
-    const fork = forkSessionFromMessage?.(sourceSessionId, messageId, {
+    // Fork completion awaits handle rehoming (target-owned durable records),
+    // so the new session is fully readable the moment it is exposed.
+    const fork = await forkSessionFromMessage?.(sourceSessionId, messageId, {
       type: scopeType,
       targetId: scopeTargetId,
     });

@@ -181,6 +181,31 @@ export function planSessionFork<M extends ForkMessageLike>(
   } as ForkPlan<M>;
 }
 
+/**
+ * Saved-output handle ids are advertised in tool-result notices as
+ * `handleId=tool-output-…`. Collect the ids the retained prefix references so
+ * the fork's handles can be rehomed/restored into the new session's namespace
+ * (keeps the notices valid for `tool_output_read` after the fork).
+ */
+export function collectForkHandleIds(messages: readonly ForkMessageLike[]): string[] {
+  const ids: string[] = [];
+  const seen = new Set<string>();
+  const scan = (value: string | undefined) => {
+    if (!value) return;
+    for (const match of value.matchAll(/\bhandleId=(tool-output-[A-Za-z0-9-]+)/g)) {
+      if (seen.has(match[1])) continue;
+      seen.add(match[1]);
+      ids.push(match[1]);
+    }
+  };
+  for (const message of messages) {
+    scan(message.content);
+    scan(message.thinking);
+    for (const result of message.toolResults ?? []) scan(result.content);
+  }
+  return ids;
+}
+
 export function canForkFromMessage(
   source: {
     messages: readonly ForkMessageLike[];

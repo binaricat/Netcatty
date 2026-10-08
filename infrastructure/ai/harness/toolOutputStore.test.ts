@@ -129,6 +129,71 @@ test('ToolOutputStore rehomed spilled handles become durably owned by the target
   assert.equal(stillReadable?.content, 'B'.repeat(50));
 });
 
+test('ToolOutputStore restores retained source handles when rehoming after a restart', async () => {
+  const files = new Map<string, { record: PersistedToolOutputRecord; content: string }>();
+  const persistence: ToolOutputPersistence = {
+    write: async (record, content) => {
+      const path = `/netcatty/${record.handleId}-${record.chatSessionId}.log`;
+      files.set(path, { record, content });
+      return path;
+    },
+    restore: async (handleId, chatSessionId) => {
+      for (const [path, entry] of files) {
+        if (entry.record.handleId !== handleId || entry.record.chatSessionId !== chatSessionId) continue;
+        return { path, record: entry.record };
+      }
+      return null;
+    },
+    read: async (path, input) => {
+      const content = files.get(path)?.content;
+      if (content == null) return null;
+      const startOffset = input.mode === 'tail'
+        ? Math.max(0, content.length - (input.maxChars ?? 12_000))
+        : Math.max(0, input.offset ?? 0);
+      const selected = content.slice(startOffset, startOffset + (input.maxChars ?? 12_000));
+      const endOffset = startOffset + selected.length;
+      return {
+        mode: input.mode ?? 'head',
+        content: selected,
+        totalChars: content.length,
+        startOffset,
+        endOffset,
+        nextOffset: endOffset,
+        hasMore: endOffset < content.length,
+      };
+    },
+    delete: async path => {
+      files.delete(path);
+    },
+  };
+
+  const firstRun = new ToolOutputStore({ spillThresholdChars: 0, persistence });
+  const handle = firstRun.store({
+    chatSessionId: 'chat-source',
+    capabilityId: 'terminal.execute',
+    content: 'C'.repeat(20_000),
+  });
+  await handle.spillPromise;
+
+  // Simulate an app restart: a fresh store with no live-cache entry for the
+  // source session, forking with the retained handle ids.
+  const afterRestart = new ToolOutputStore({ spillThresholdChars: 0, persistence });
+  await afterRestart.rehomeChatSession('chat-source', 'chat-fork', [handle.id]);
+  const restored = await afterRestart.readChunkAsync({ handleId: handle.id, mode: 'head', maxChars: 100 }, 'chat-fork');
+  assert.equal(restored?.content, 'C'.repeat(100));
+  // The fork owns its own durable record under the target chat session id.
+  const forkCopy = afterRestart.get(handle.id, 'chat-fork');
+  assert.ok(forkCopy);
+  const forkRecord = files.get(forkCopy.filePath!)?.record;
+  assert.ok(forkRecord);
+  assert.equal(forkRecord.chatSessionId, 'chat-fork');
+
+  // Without the retained ids (and with no live cache), rehome stays a no-op.
+  const freshForkTarget = new ToolOutputStore({ spillThresholdChars: 0, persistence });
+  await freshForkTarget.rehomeChatSession('chat-source', 'chat-fork-2');
+  assert.equal(await freshForkTarget.readChunkAsync({ handleId: handle.id }, 'chat-fork-2'), null);
+});
+
 test('ToolOutputStore pages large output with a hard per-read cap', () => {
   const store = new ToolOutputStore();
   const content = `${'0123456789'.repeat(3_000)}END`;

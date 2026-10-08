@@ -345,10 +345,30 @@ export class ToolOutputStore {
    * are copied in memory and pick up their own durable record through the
    * normal spill path. If the persisted content cannot be read back, the
    * target falls back to sharing the source-owned spill path so live reads
-   * still resolve while both namespaces exist.
+   * still resolve while both namespaces exist. `retainHandleIds` may pass the
+   * handle ids referenced by the retained fork prefix: handles missing from
+   * the live cache (e.g. after an app restart or cache expiry) are restored
+   * from persistence under the source session before cloning, so forking a
+   * historical session still produces target-owned records instead of a
+   * no-op.
    */
-  async rehomeChatSession(sourceChatSessionId: string, targetChatSessionId: string): Promise<void> {
+  async rehomeChatSession(
+    sourceChatSessionId: string,
+    targetChatSessionId: string,
+    retainHandleIds?: readonly string[],
+  ): Promise<void> {
     this.pruneExpired();
+    const missingIds = (retainHandleIds ?? [])
+      .filter(handleId => !this.bySession.get(sourceChatSessionId)?.has(handleId));
+    if (missingIds.length > 0 && this.persistence?.restore) {
+      // After an app restart (or once the live-cache entry expires), the
+      // retained handles exist only behind `persistence.restore`. Restore
+      // them under the source session before cloning so the fork gets real
+      // records instead of a silent no-op that breaks `tool_output_read`.
+      await Promise.allSettled(missingIds.map(
+        handleId => this.restoreHandle(handleId, sourceChatSessionId).catch(() => undefined),
+      ));
+    }
     const sourceMap = this.bySession.get(sourceChatSessionId);
     if (!sourceMap || sourceMap.size === 0) return;
     // Let pending spills settle so each source handle's durable ownership is
@@ -381,6 +401,10 @@ export class ToolOutputStore {
     }
     this.bySession.set(targetChatSessionId, targetMap);
     this.enforceSessionLimits(targetChatSessionId, targetMap);
+    // Cloning adds whole sessions' worth of handles with each fork; keep the
+    // registry within the global handle/char bounds (matching `store` and
+    // `restoreHandleImpl`).
+    this.enforceGlobalLimits();
     // Copies still holding in-memory content (fresh or read-back) become
     // target-owned through the normal spill path, which re-writes a durable
     // record carrying the target's chat session id. Await the writes so the

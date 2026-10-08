@@ -55,7 +55,7 @@ import {
 import { convertFilesToUploads } from './useFileUpload';
 import { removeProviderReferences } from './aiProviderCleanup';
 import { publishAISessionsSnapshot } from './aiSessionsStore';
-import { planSessionFork } from '../../domain/aiSessionFork';
+import { collectForkHandleIds, planSessionFork } from '../../domain/aiSessionFork';
 import { getAgentRuntime } from '../../infrastructure/ai/harness/globalAgentRuntime';
 import {
   AI_STATE_CHANGED_DRAFTS_BY_SCOPE,
@@ -689,11 +689,11 @@ export function useAIState() {
   // is created there so the fork is active and visible in the very scope that
   // is viewing it, even when the source session carries a stale scope (e.g. a
   // terminal chat resumed in a reconnected terminal or a merged workspace).
-  const forkSessionFromMessage = useCallback((
+  const forkSessionFromMessage = useCallback(async (
     sessionId: string,
     messageId: string,
     viewingScope?: Pick<AISessionScope, 'type' | 'targetId'>,
-  ): AISession | null => {
+  ): Promise<AISession | null> => {
     const source = sessionsRef.current.find(s => s.id === sessionId);
     if (!source) return null;
     const plan = planSessionFork(source, messageId);
@@ -720,9 +720,20 @@ export function useAIState() {
     // Saved-output handles are scoped per chat session; rehome the ones the
     // retained prefix references so tool_output_read still resolves in the
     // fork (with the original handle ids, keeping the notices valid).
-    // Rehoming spilled handles re-writes target-owned durable records
-    // asynchronously; the fork's reads fall back gracefully until it lands.
-    void getAgentRuntime().getToolOutputStore(sessionId).rehomeChatSession(sessionId, fork.id);
+    // Rehome before the fork is exposed: rehoming spilled handles re-writes
+    // target-owned durable records, and the fork must not become readable or
+    // active until those records exist under its own session id, or the very
+    // first turn could see handles as missing.
+    try {
+      await getAgentRuntime().getToolOutputStore(sessionId).rehomeChatSession(
+        sessionId,
+        fork.id,
+        collectForkHandleIds(plan.messages),
+      );
+    } catch {
+      // Rehoming is best-effort; the fork is still usable (reads fall back
+      // to the live cache or restore path under the target namespace).
+    }
     setSessionsRaw(prev => {
       const next = [fork, ...prev];
       setLatestAISessionsSnapshot(next);

@@ -58,7 +58,7 @@ export interface AIChatSidePanelProps {
     sessionId: string,
     messageId: string,
     viewingScope?: Pick<AISessionScope, 'type' | 'targetId'>,
-  ) => AISession | null;
+  ) => Promise<AISession | null>;
   // Provider config
   providers: ProviderConfig[];
   activeProviderId: string;
