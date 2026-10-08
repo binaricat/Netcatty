@@ -78,15 +78,6 @@ export const TOOL_OUTPUT_ALIAS_MATERIALIZATION_RETRY_DELAY_MS = 200;
 // dropping them would permanently lose the branch-owned durable copy.
 const TOOL_OUTPUT_ALIAS_MATERIALIZATION_MAX_RETRY_DELAY_MS = 30_000;
 export const TOOL_OUTPUT_MAX_PENDING_ALIAS_MATERIALIZATIONS = 50;
-/**
- * Alias restore requests evicted from the pending-restore cap that are kept
- * staged (not retried) instead of being silently dropped: `setPersistence`
- * requeues them when a healthy `restore` is (re)installed, so the affected
- * branch can still be repaired. Sources pruned while a request is stalled are
- * discarded rather than requeued — their durable records are gone and every
- * retry would fail permanently.
- */
-export const TOOL_OUTPUT_MAX_STALLED_ALIAS_RESTORES = 50;
 const TOOL_OUTPUT_LIFECYCLE_BLOOM_BITS = 1 << 22;
 const TOOL_OUTPUT_LIFECYCLE_BLOOM_HASHES = 4;
 
@@ -229,7 +220,13 @@ export class ToolOutputStore {
   // recoverable source→branch relationship (instead of being dropped, which
   // would leave a branch that can never resolve a retained output even after
   // the store becomes healthy again) and are requeued the next time a working
-  // persistence is installed.
+  // persistence is installed. Staging is intentionally uncapped: dropped
+  // requests cannot be repaired later (a branch with neither an in-memory
+  // alias nor a branch-owned manifest would keep its retained references
+  // unresolvable forever), each entry is small and bounded by the distinct
+  // source→branch pairs that hit the restore path, and the map drains when
+  // persistence is repaired (`setPersistence`) or a staged source is pruned
+  // (`flushPendingAliasRestoresForSource`).
   private readonly stalledAliasRestores = new Map<string, AliasRestoreRequest>();
   private pendingAliasRestoreReplayTimer?: ReturnType<typeof setTimeout>;
   private pendingAliasRestoreReplayAttempts = 0;
@@ -404,6 +401,7 @@ export class ToolOutputStore {
     failedTerminalDeletions: number;
     deletedTerminalSessions: number;
     closedTerminalSessions: number;
+    materializedAliasKeys: number;
   } {
     return {
       sessionGenerations: this.sessionGenerations.size,
@@ -412,6 +410,7 @@ export class ToolOutputStore {
       failedTerminalDeletions: this.failedTerminalDeletions.size,
       deletedTerminalSessions: this.deletedTerminalSessions.size,
       closedTerminalSessions: this.closedTerminalSessions.size,
+      materializedAliasKeys: this.materializedAliasKeys.size,
     };
   }
 
@@ -608,14 +607,12 @@ export class ToolOutputStore {
       // abandoning it: the branch has no in-memory alias and no branch-owned
       // durable manifest, so dropping the request outright would leave its
       // retained references unresolvable forever, even after the store turns
-      // healthy again. A pruned source (or an overflowing stall queue) is past
-      // repair, so those are dropped.
+      // healthy again. Staged requests are therefore never dropped for
+      // exceeding a size limit — only a pruned source (whose durable records
+      // are gone) is past repair, and that request is discarded where it is
+      // drained (the deny-filter check in `requeueStalledAliasRestores` and
+      // the flush in `flushPendingAliasRestoresForSource`).
       this.stalledAliasRestores.set(oldest, request);
-      while (this.stalledAliasRestores.size > TOOL_OUTPUT_MAX_STALLED_ALIAS_RESTORES) {
-        const stalledOldest = this.stalledAliasRestores.keys().next().value;
-        if (stalledOldest === undefined) break;
-        this.stalledAliasRestores.delete(stalledOldest);
-      }
     }
   }
 
@@ -1105,6 +1102,14 @@ export class ToolOutputStore {
       for (const handle of sessionMap.values()) this.evictHandle(handle);
     }
     this.bySession.delete(chatSessionId);
+    // The chat's durable-alias keys are its branch-owned records' protection
+    // against cache-limit eviction; with the chat deleted nothing can restore
+    // into it again (the deny filter and generation bump reject every later
+    // access), so keeping the keys would only grow this runtime set for the
+    // app's lifetime. Ordinary (cache-limit) eviction still keeps them.
+    for (const key of this.materializedAliasKeys) {
+      if (key.startsWith(`${chatSessionId}:`)) this.materializedAliasKeys.delete(key);
+    }
     this.processDeferredPathDeletes();
     let deletionSucceeded = false;
     let deletion: Promise<void> | undefined;

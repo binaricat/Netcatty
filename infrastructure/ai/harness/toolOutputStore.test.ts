@@ -1788,6 +1788,69 @@ test('pruning a source materializes its stalled alias restore requests before de
   assert.ok(persistence.entries.has('chat-branch-1:h1'));
 });
 
+test('alias restore requests staged past every queue are never dropped outright', async () => {
+  const base = createFakeToolOutputPersistence();
+  const persistence: ToolOutputPersistence & { entries: typeof base.entries } = {
+    ...base,
+    restore: async (handleId, chatSessionId) => {
+      // Only the deeply staged pair stalls with a durable record; every other
+      // request finds nothing (dropped, not re-queued) once it gets to run.
+      if (chatSessionId === 'chat-source-1') return base.restore(handleId, chatSessionId);
+      return null;
+    },
+  };
+  storeDurableRecord(persistence, 'chat-source-1', 'h1', 'persisted content', 16);
+
+  const store = new ToolOutputStore();
+  // More source/branch pairs than the pending cap and the staging queue could
+  // ever hold at once: the oldest request (chat-source-1 → chat-branch-1) ends
+  // up staged behind both. Dropping staged overflow would silently discard the
+  // pair, leaving a branch whose retained reference can never resolve again —
+  // so the staging queue must retain it until persistence is repaired.
+  for (let index = 1; index <= TOOL_OUTPUT_MAX_PENDING_ALIAS_RESTORES * 2 + 1; index += 1) {
+    await store.aliasSessionHandles(`chat-source-${index}`, `chat-branch-${index}`, {
+      retainedHandleIds: new Set([`h${index}`]),
+    });
+  }
+
+  // Installing working persistence repairs even the deeply staged request.
+  store.setPersistence(persistence);
+  await new Promise(resolve => setTimeout(
+    resolve,
+    TOOL_OUTPUT_ALIAS_MATERIALIZATION_RETRY_DELAY_MS * 8 + 100,
+  ));
+  const restored = await store.readChunkAsync({ handleId: 'h1' }, 'chat-branch-1');
+  assert.equal(restored?.content, 'persisted content');
+  assert.ok(persistence.entries.has('chat-branch-1:h1'));
+});
+
+test('pruning a branch chat clears its durable-alias keys', async () => {
+  const persistence = createFakeToolOutputPersistence();
+  const store = new ToolOutputStore({ persistence });
+  const handle = store.store({
+    chatSessionId: 'chat-source',
+    capabilityId: 'terminal.execute',
+    content: 'A'.repeat(50_000),
+  });
+  await store.flush('chat-source');
+
+  await store.aliasSessionHandles('chat-source', 'chat-branch', {
+    retainedHandleIds: new Set([handle.id]),
+  });
+  assert.ok(persistence.entries.has(`chat-branch:${handle.id}`));
+  assert.ok(store.getLifecycleMetadataStatsForTests().materializedAliasKeys > 0);
+
+  // Deleting the branch chat must reclaim its durable-alias keys; leaving
+  // them behind would grow the runtime set for the app's lifetime with every
+  // create-and-delete undo branch. Ordinary cache-limit eviction keeps them
+  // (they guard the branch-owned durable copy), but a chat-session cleanup
+  // never needs them again.
+  store.prune('chat-branch');
+  assert.equal(store.getLifecycleMetadataStatsForTests().materializedAliasKeys, 0);
+  // The source chat's durable record is untouched by the branch's prune.
+  assert.ok(persistence.entries.has(`chat-source:${handle.id}`));
+});
+
 test('a restored branch alias stays restorable after another cache-limit eviction', async () => {
   // A materialized alias evicted by the session cap keeps its branch-owned
   // durable record (see `evictHandle`). Restoring it builds a fresh handle

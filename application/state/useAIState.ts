@@ -756,6 +756,7 @@ export function useAIState() {
         if (!jobIds.includes(inherited.jobId)) jobIds.push(inherited.jobId);
         jobIdsByOwner.set(inherited.ownerChatSessionId, jobIds);
       }
+      let registrationFailed = false;
       for (const [ownerChatSessionId, jobIds] of jobIdsByOwner) {
         // Await and validate every registration before the branch is
         // published: a fire-and-forget call would let Undo hand out a branch
@@ -763,21 +764,42 @@ export function useAIState() {
         // following `terminal.poll` would fail with "Background job not found"
         // indefinitely — and a source deletion in that window could also cancel
         // the job because no branch depends on it yet. Retry briefly on
-        // transient failures; if the bridge (or the call) stays unavailable the
-        // undo proceeds as before rather than blocking the whole flow.
+        // transient failures; a registration that still fails after the
+        // retries aborts the undo instead of publishing the branch anyway —
+        // a published branch whose inheritance is unregistered keeps polling
+        // "Background job not found" and lets a source deletion cancel the
+        // very side effects undo is meant to preserve. Undo is
+        // non-destructive, so dropping the not-yet-published branch (and the
+        // runtime state copied for it) is safe and the user can retry once
+        // the bridge is healthy again.
         const register = getAIBridge()?.aiRegisterInheritedBackgroundJobs;
         if (!register) continue;
+        let registered = false;
         for (let attempt = 0; ; attempt++) {
-          let ok = false;
           try {
             const result = await register(branched.id, ownerChatSessionId, jobIds);
-            ok = result?.ok === true;
+            if (result?.ok === true) {
+              registered = true;
+              break;
+            }
           } catch {
             // Transient IPC/persistence failure — retry below.
           }
-          if (ok || attempt >= 2) break;
+          if (attempt >= 2) break;
           await new Promise(resolve => setTimeout(resolve, 150 * (attempt + 1)));
         }
+        if (!registered) {
+          registrationFailed = true;
+          break;
+        }
+      }
+      if (registrationFailed) {
+        // The branch was never published, so drop the operational state
+        // copyState made for it — nothing else references this fresh id.
+        getAgentRuntime()
+          .getSessionStateStore()
+          .clear(branched.id);
+        return null;
       }
     }
     // The retained prefix may reference tool outputs stored under the source
