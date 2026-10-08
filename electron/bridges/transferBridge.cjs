@@ -1041,6 +1041,7 @@ function stableLocalFileIdentity(statLike) {
 
 async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
   const { publishLocalFileExclusive } = require("./localFilePublish.cjs");
+  const { copyFileExclusiveWithFallback, isMetadataUnsupportedError } = require("./fsCopyFallback.cjs");
   const assertNotCancelled = options.assertNotCancelled || (() => {});
   const token = crypto.randomUUID().replace(/-/g, "");
   const base = path.join(path.dirname(targetPath), `.${path.basename(targetPath)}.netcatty-${token}`);
@@ -1060,7 +1061,7 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
       await fs.promises.rename(stagedPath, readyPath);
     } catch (error) {
       if (error?.code !== "EXDEV") throw error;
-      await fs.promises.copyFile(stagedPath, readyPath, fs.constants.COPYFILE_EXCL);
+      await copyFileExclusiveWithFallback(stagedPath, readyPath);
     }
     // Stamp the private prepared file before applying possibly unreadable
     // destination permissions. Publication carries these times to the target.
@@ -1085,7 +1086,13 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
         ? validatedTarget.existingMode & 0o7777
         : Number.isInteger(options.existingMode) ? options.existingMode & 0o7777 : null;
       if (mode !== null && mode !== appliedMode) {
-        await fs.promises.chmod(readyPath, mode);
+        try {
+          await fs.promises.chmod(readyPath, mode);
+        } catch (error) {
+          if (!isMetadataUnsupportedError(error)) throw error;
+          // gvfsd-fuse-style mounts reject chmod while accepting bytes; keep
+          // publishing without exact mode fidelity instead of failing.
+        }
         appliedMode = mode;
         continue;
       }

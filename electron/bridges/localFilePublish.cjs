@@ -1,6 +1,7 @@
 "use strict";
 
 const fs = require("node:fs");
+const { isMetadataUnsupportedError } = require("./fsCopyFallback.cjs");
 
 // Publish a prepared regular file without replacing any destination entry.
 // Hardlinks make complete bytes visible atomically. FAT-like filesystems use an
@@ -49,8 +50,18 @@ async function publishLocalFileExclusive(source, target, assertNotCancelled = ()
     assertNotCancelled();
     // Restore metadata after writes (which may clear special permission bits),
     // through the owned handle rather than a potentially replaced pathname.
-    await output.chmod(stat.mode & 0o7777);
-    await output.utimes(stat.atime, stat.mtime);
+    // gvfsd-fuse-style mounts reject chmod/utimes with ENOTSUP even though the
+    // bytes are fully published; keep the copy instead of failing the transfer.
+    try {
+      await output.chmod(stat.mode & 0o7777);
+    } catch (chmodError) {
+      if (!isMetadataUnsupportedError(chmodError)) throw chmodError;
+    }
+    try {
+      await output.utimes(stat.atime, stat.mtime);
+    } catch (utimesError) {
+      if (!isMetadataUnsupportedError(utimesError)) throw utimesError;
+    }
     const ownedStat = await output.stat();
     const targetStat = await fs.promises.lstat(target);
     if (!targetStat.isFile() || targetStat.dev !== ownedStat.dev || targetStat.ino !== ownedStat.ino) {
