@@ -56,6 +56,12 @@ async function publishLocalFileExclusive(source, target, assertNotCancelled = ()
       await output.chmod(stat.mode & 0o7777);
     } catch (chmodError) {
       if (!isMetadataUnsupportedError(chmodError)) throw chmodError;
+      // The target was created through the process umask, which may have
+      // narrowed the requested mode. Only accept the chmod failure when the
+      // published bytes already carry the intended mode; otherwise fail closed
+      // rather than silently publishing a narrower one.
+      const createdMode = (await output.stat()).mode & 0o7777;
+      if (createdMode !== (stat.mode & 0o7777)) throw chmodError;
     }
     try {
       await output.utimes(stat.atime, stat.mtime);

@@ -1125,6 +1125,10 @@ async function promoteLocalTransfer(stagedPath, targetPath, options = {}) {
           // Owner read was granted but this mount refuses to remove it again,
           // so publishing would preserve a mode the destination never had:
           // fail closed instead of leaking the extra permission bit.
+          // Close the live handle here: dropping the reference alone would
+          // keep the descriptor open until GC and the finally block would
+          // no longer see it.
+          await preparedHandle?.close().catch(() => {});
           preparedHandle = null;
           throw new Error(
             `Cannot publish local destination mode ${intendedMode.toString(8)}: the mount refused to re-remove owner read`,
