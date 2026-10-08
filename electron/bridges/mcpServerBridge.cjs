@@ -160,6 +160,13 @@ const workerBackgroundJobs = new Map(); // jobId -> { chatSessionId, sessionId }
 // these ids until the worker confirms the stop or reports the job was never
 // running.
 const orphanJobStopRetryPending = new Set();
+// Orphan stops whose worker "jobStop" request is still in flight: the registry
+// entry is deliberately retained until the stop is confirmed, but the stop is
+// already irreversible — once it completes, the job and every inheritor are
+// deleted. Inheritance registrations in this window must be rejected (not
+// treated as a live registration), or an undo publishing a branch against the
+// entry would see the job deleted underneath it right after registering.
+const orphanJobStopInFlight = new Set();
 const pendingWorkerJobStarts = new Map(); // sessionId -> Set<{ chatSessionId, cancelled }>
 const activeSessionExecutions = new Map(); // sessionId -> { kind, startedAt, token }
 const activeSessionSftpOps = new Map(); // opId -> { chatSessionId, sessionId, cancel }
@@ -1930,7 +1937,12 @@ function cancelOrphanedInheritedJob(jobId) {
         forgetInheritedJobInheritors(jobId);
         return;
       }
+      // The stop is in flight and irreversible: mark the entry so a concurrent
+      // inheritance registration is rejected instead of treating this retained
+      // registry entry as a live, pollable job.
+      orphanJobStopInFlight.add(jobId);
       void request.then((result) => {
+        orphanJobStopInFlight.delete(jobId);
         if (!result?.completed
           && !(result?.ok === false && /not found/i.test(result?.error || ""))) {
           // Stop not confirmed (job still running or the request failed):
@@ -1946,6 +1958,7 @@ function cancelOrphanedInheritedJob(jobId) {
           forgetInheritedJobInheritors(jobId);
         }
       }).catch(() => {
+        orphanJobStopInFlight.delete(jobId);
         // Transient worker failure while stopping: retain the entry (and the
         // retry marker) so the idle path's next poll retries the stop instead
         // of orphaning the running command.
@@ -2004,6 +2017,14 @@ function registerInheritedBackgroundJobs(chatSessionId, ownerChatSessionId, jobI
     // Only accept jobs this chat actually owns, so a branch cannot claim
     // control over a job started by an unrelated chat session.
     const job = workerBackgroundJobs.get(jobId);
+    if (orphanJobStopInFlight.has(jobId)) {
+      // An orphan stop for this job is already in flight; its completion will
+      // delete the entry (and every inheritor) no matter what registers here.
+      // Skip it — the reported count falls short and the undo retries/aborts
+      // instead of publishing a branch that would immediately poll
+      // "Background job not found".
+      continue;
+    }
     if (job && job.chatSessionId === ownerChatSessionId) {
       const inheritors = inheritedJobInheritors.get(jobId) ?? new Set();
       inheritors.add(chatSessionId);

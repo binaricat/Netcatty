@@ -1261,3 +1261,83 @@ test("a failed orphan stop retries via the idle path until the job stops", async
   });
   assert.deepEqual(afterStop, { ok: false, error: "Background job not found" });
 });
+
+test("an in-flight orphan stop rejects inheritance registration for its job", async () => {
+  const requests = [];
+  const bridge = loadFreshBridge();
+  let resolveStop;
+  bridge.init({
+    sessions: new Map(),
+    electronModule: null,
+    terminalWorkerManager: {
+      request(channel, payload, options) {
+        requests.push({ channel, payload, options });
+        if (channel === "netcatty:ai:jobStart") {
+          return Promise.resolve({
+            ok: true,
+            jobId: "worker-job-stopflight",
+            sessionId: payload.sessionId,
+            status: "running",
+          });
+        }
+        if (channel === "netcatty:ai:jobStop") {
+          // Keep the orphan stop in flight: the main process retains the
+          // registry entry until the stop is confirmed.
+          return new Promise((resolve) => { resolveStop = resolve; });
+        }
+        return Promise.resolve({ ok: true, jobId: payload.jobId, completed: false });
+      },
+      send() {},
+    },
+  });
+  bridge.setPermissionMode("auto");
+  bridge.setCommandBlocklist([]);
+  bridge.updateSessionMetadata([
+    {
+      sessionId: "ssh-stopflight",
+      hostname: "host.example",
+      protocol: "ssh",
+      connected: true,
+    },
+  ], "chat-src");
+  bridge.updateSessionMetadata([{
+    sessionId: "ssh-stopflight",
+    hostname: "host.example",
+    protocol: "ssh",
+    connected: true,
+  }], "chat-branch");
+
+  const started = await bridge.dispatchBuiltinRpc("netcatty/jobStart", {
+    sessionId: "ssh-stopflight",
+    command: "sleep 30",
+    chatSessionId: "chat-src",
+  });
+  assert.equal(started.ok, true);
+
+  bridge.registerInheritedBackgroundJobs("chat-branch", "chat-src", ["worker-job-stopflight"]);
+  // Removing the source preserves the job for the live branch; removing the
+  // last branch then starts the orphan stop, which stays in flight below.
+  await bridge.cleanupScopedMetadata("chat-src");
+  await bridge.cleanupScopedMetadata("chat-branch");
+
+  // While the stop is in flight, a new branch's undo must not register the
+  // job as inherited: the stop's completion deletes the entry regardless.
+  let flight = bridge.registerInheritedBackgroundJobs("chat-new-branch", "chat-src", ["worker-job-stopflight"]);
+  assert.equal(flight.ok, true);
+  assert.equal(flight.registered, 0);
+  // No inheritor may have been granted while stop is in flight: the new
+  // branch cannot poll the job.
+  const pollDuringFlight = await bridge.dispatchBuiltinRpc("netcatty/jobPoll", {
+    jobId: "worker-job-stopflight",
+    chatSessionId: "chat-new-branch",
+  });
+  assert.deepEqual(pollDuringFlight, { ok: false, error: "Background job not found" });
+
+  // Confirming the stop deletes the registry entry; afterwards the job stays
+  // unregistered (the undo's short count aborts/retries, never publishes a
+  // branch polling "Background job not found").
+  resolveStop({ ok: true, jobId: "worker-job-stopflight", completed: true });
+  await new Promise((resolve) => setImmediate(resolve));
+  flight = bridge.registerInheritedBackgroundJobs("chat-new-branch", "chat-src", ["worker-job-stopflight"]);
+  assert.equal(flight.registered, 0);
+});
