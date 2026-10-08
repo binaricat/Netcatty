@@ -916,3 +916,40 @@ test("promoteLocalTransfer observes cancellation during the cross-device fallbac
   const leftovers = fs.readdirSync(dir).filter((name) => name.startsWith(".target."));
   assert.equal(leftovers.length, 0, "cancelled promotion cleans up its private ready file");
 });
+
+test("copyFileExclusiveWithFallback fails closed when the pathname changes after the streamed copy", async (t) => {
+  const dir = makeTempDir("copy-fallback-race-after-stream-");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const source = path.join(dir, "staged");
+  const target = path.join(dir, "target");
+  fs.writeFileSync(source, "our copy bytes");
+  const copyRestore = stubPromises("copyFile", enotsupCopyFile());
+  t.after(copyRestore);
+  const previousUmask = process.umask(0o077);
+  t.after(() => process.umask(previousUmask));
+  // Force the streamed path and keep the created mode exactly matching the
+  // requested one (no chmod needed), then let another process replace the
+  // pathname after the stream's exclusive open but before any pipeline byte:
+  // a successful return must still verify the name names the streamed inode.
+  const openOriginal = fs.promises.open;
+  const openRestore = stubPromises("open", async (...args) => {
+    if (args[0] === target && args[1] === "wx") {
+      const handle = await openOriginal.apply(fs.promises, args);
+      fs.unlinkSync(target);
+      fs.writeFileSync(target, "written by another process");
+      return handle;
+    }
+    return openOriginal.apply(fs.promises, args);
+  });
+  t.after(openRestore);
+  await assert.rejects(
+    () => copyFileExclusiveWithFallback(source, target, 0o600),
+    (error) => error?.code === "EEXIST" && error.targetOwnershipRelinquished === true,
+  );
+  assert.equal(
+    fs.readFileSync(target, "utf8"),
+    "written by another process",
+    "the replacement is never removed by the cleanup",
+  );
+});
+

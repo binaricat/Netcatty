@@ -2,8 +2,6 @@
 
 const fs = require("node:fs");
 const crypto = require("node:crypto");
-const { Transform } = require("node:stream");
-const { pipeline } = require("node:stream/promises");
 
 // Node's fs.copyFile accelerates the data copy with Linux copy_file_range().
 // FUSE/network filesystems such as GVFS SMB mounts, NFS and CIFS can reject
@@ -121,6 +119,9 @@ async function chmodOnCopiedFile(target, mode, copiedIdentity) {
 
 // Exclusive copy with COPYFILE_EXCL semantics that falls back to a read/write
 // stream when the destination filesystem refuses the accelerated copy syscall.
+// Note: the fallback stream is written through an owned handle, not a
+// createWriteStream(target) stream, so the streamed inode's identity can be
+// pinned and revalidated against the pathname below.
 // A partially written target name is left in place on failure for the caller
 // to clean up, matching fs.copyFile's failure behavior.
 // `mode` (optional) is applied to the fallback stream so mounts that reject
@@ -224,79 +225,104 @@ async function copyFileExclusiveWithFallback(source, target, mode = null, option
   } catch (error) {
     if (!isCopyFallbackError(error)) throw error;
   }
-  const writeOptions = { flags: "wx" };
-  if (creationMode !== null) writeOptions.mode = creationMode;
   assertNotCancelled();
   if (signal?.aborted) throw cancelledError();
-  const controller = new AbortController();
-  const abortFromExternalSignal = () => controller.abort(cancelledError());
-  signal?.addEventListener?.("abort", abortFromExternalSignal, { once: true });
-  // Re-check cancellation between chunks: a multi-gigabyte staged file being
-  // streamed onto a slow GVFS/FUSE mount must stop writing as soon as the
-  // caller cancels, instead of finishing the whole temporary copy (and
-  // lingering on the network mount) before the result is discarded.
-  const cancellationGate = new Transform({
-    transform(chunk, _encoding, callback) {
-      try {
+  // The copy is driven through owned handles instead of fs streams: only a
+  // handle pins the inode the copy actually wrote (a stream's fd is closed
+  // by the time the copy ends), which the pathname revalidation below needs.
+  // The exclusive open here also keeps COPYFILE_EXCL semantics for EEXIST.
+  const copyLoop = async (readHandle, writeHandle) => {
+    // Re-check cancellation between chunks: a multi-gigabyte staged file
+    // being streamed onto a slow GVFS/FUSE mount must stop writing as soon
+    // as the caller cancels, instead of finishing the whole temporary copy
+    // (and lingering on the network mount) before the result is discarded.
+    const buffer = Buffer.allocUnsafe(64 * 1024);
+    let position = 0;
+    for (;;) {
+      assertNotCancelled();
+      if (signal?.aborted) throw cancelledError();
+      const { bytesRead } = await readHandle.read(buffer, 0, buffer.length, position);
+      if (!bytesRead) break;
+      let written = 0;
+      while (written < bytesRead) {
         assertNotCancelled();
-      } catch (error) {
-        callback(error);
-        return;
+        const { bytesWritten } = await writeHandle.write(
+          buffer, written, bytesRead - written, position + written,
+        );
+        if (!bytesWritten) throw new Error("Local transfer made no write progress");
+        written += bytesWritten;
       }
-      callback(null, chunk);
-    },
-  });
-  try {
-    await pipeline(
-      fs.createReadStream(source),
-      cancellationGate,
-      fs.createWriteStream(target, writeOptions),
-      { signal: controller.signal },
-    );
-  } catch (error) {
-    // With "wx" the only EEXIST the stream can produce is from its exclusive
-    // open, which fails before a single byte is written. A concurrent writer
-    // must have created or replaced `target` after the accelerated-copy path
-    // decided to stream but before this open (libuv's fs.copyFile unlinks its
-    // own partial destination on failure, and the relabel block above moved
-    // ours away, so this name cannot be ours). Fail closed with
-    // `targetOwnershipRelinquished` so the caller's pre-commit cleanup does
-    // not unlink the pathname and destroy that writer's only visible file.
-    if (error?.code === "EEXIST") {
-      throw Object.assign(
-        new Error(`EEXIST: file exists, ${target} changed hands before the fallback stream could open it`),
-        { code: "EEXIST", targetOwnershipRelinquished: true },
-      );
+      position += bytesRead;
     }
-    throw error;
-  } finally {
-    signal?.removeEventListener?.("abort", abortFromExternalSignal);
+    const writtenStat = await writeHandle.stat();
+    return {
+      writtenIdentity: fileIdentity(writtenStat),
+      writtenMode: writtenStat.mode & 0o7777,
+    };
+  };
+  let copied = null;
+  {
+    let readHandle = null;
+    let writeHandle = null;
+    try {
+      readHandle = await fs.promises.open(source, "r");
+      try {
+        writeHandle = await fs.promises.open(target, "wx", creationMode === null ? 0o666 : creationMode);
+      } catch (openError) {
+        // The exclusive open fails with EEXIST before a single byte is
+        // written. A concurrent writer must have created or replaced
+        // `target` after the accelerated-copy path decided to stream but
+        // before this open (libuv's fs.copyFile unlinks its own partial
+        // destination on failure, and the relabel block above moved ours
+        // away, so this name cannot be ours). Fail closed with
+        // `targetOwnershipRelinquished` so the caller's pre-commit cleanup
+        // does not unlink the pathname and destroy that writer's only
+        // visible file.
+        if (openError?.code === "EEXIST") {
+          throw Object.assign(
+            new Error(`EEXIST: file exists, ${target} changed hands before the fallback stream could open it`),
+            { code: "EEXIST", targetOwnershipRelinquished: true },
+          );
+        }
+        throw openError;
+      }
+      copied = await copyLoop(readHandle, writeHandle);
+    } finally {
+      await writeHandle?.close().catch(() => {});
+      await readHandle?.close().catch(() => {});
+    }
   }
-  if (creationMode !== null) {
+  const writtenIdentity = copied?.writtenIdentity ?? null;
+  const writtenMode = copied?.writtenMode ?? null;
+  if (creationMode !== null && writtenMode !== creationMode) {
     // The destination applies the process umask to the stream's creation
     // mode (e.g. an intended 0664 becomes 0600 under umask 0077), so the
     // created file can be narrower than the mode promised to the caller.
     // Restore any masked bit through the pinned copied inode; a mount that
     // refuses chmod can never carry the exact mode, so fail closed instead
     // of leaving a narrower mode for the later promotion to publish.
-    let createdIdentity = null;
-    let createdMode = null;
     try {
-      const createdStat = await fs.promises.lstat(target);
-      createdIdentity = fileIdentity(createdStat);
-      createdMode = createdStat.mode & 0o7777;
-    } catch { createdMode = null; }
-    if (createdMode !== creationMode) {
-      try {
-        await chmodOnCopiedFile(target, creationMode, createdIdentity);
-      } catch (chmodError) {
-        if (!isMetadataUnsupportedError(chmodError)) throw chmodError;
-        throw Object.assign(
-          new Error(`EPERM: operation not permitted, umask narrowed the creation mode of ${target} and the mount refuses chmod`),
-          { code: "EPERM" },
-        );
-      }
+      await chmodOnCopiedFile(target, creationMode, writtenIdentity);
+    } catch (chmodError) {
+      if (!isMetadataUnsupportedError(chmodError)) throw chmodError;
+      throw Object.assign(
+        new Error(`EPERM: operation not permitted, umask narrowed the creation mode of ${target} and the mount refuses chmod`),
+        { code: "EPERM" },
+      );
     }
+  }
+  // Revalidate the pathname against the pinned copied inode before
+  // returning, even when no chmod ran (the common case where the created
+  // mode already matched): a replacement that won the name while the copy
+  // ran must never be blessed for the caller's later publication.
+  // chmodOnCopiedFile already performed this revalidation on the chmod
+  // path, so the check is simply repeated unconditionally here.
+  let finalIdentity = null;
+  try {
+    finalIdentity = fileIdentity(await fs.promises.lstat(target));
+  } catch { finalIdentity = null; }
+  if (finalIdentity !== writtenIdentity) {
+    throw identityChangedError(target);
   }
 }
 
