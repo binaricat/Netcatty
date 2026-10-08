@@ -778,6 +778,58 @@ test("copyFileExclusiveWithFallback cleans a still-owned partial via a verified 
   );
 });
 
+test("copyFileExclusiveWithFallback discloses the side name when a verified partial cannot be unlinked", async (t) => {
+  const dir = makeTempDir("copy-fallback-loop-unlink-");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const source = path.join(dir, "staged");
+  const target = path.join(dir, "target");
+  fs.writeFileSync(source, "our copy bytes");
+  const copyRestore = stubPromises("copyFile", enotsupCopyFile());
+  t.after(copyRestore);
+  // The copy fails, the partial is relabelled to a private side name and
+  // verified to be this module's inode, but the destination mount refuses
+  // the removal: the verified partial data persists at the side name, so
+  // the error must surface the unlink failure and disclose `stalePath`
+  // instead of silently accumulating hidden `.stale-*` files.
+  const openOriginal = fs.promises.open;
+  const openRestore = stubPromises("open", async (...args) => {
+    const handle = await openOriginal.apply(fs.promises, args);
+    const originalRead = handle.read.bind(handle);
+    handle.read = async (buffer, offset, length, position) => {
+      if (position === 0) {
+        throw Object.assign(new Error("EIO: i/o error, read"), { code: "EIO" });
+      }
+      return originalRead(buffer, offset, length, position);
+    };
+    return handle;
+  });
+  t.after(openRestore);
+  const unlinkOriginal = fs.promises.unlink;
+  const unlinkRestore = stubPromises("unlink", async (...args) => {
+    if (typeof args[0] === "string" && args[0].includes(".stale-")) {
+      throw Object.assign(new Error("EPERM: operation not permitted, unlink"), { code: "EPERM" });
+    }
+    return unlinkOriginal.apply(fs.promises, args);
+  });
+  t.after(unlinkRestore);
+  let error = null;
+  try {
+    await copyFileExclusiveWithFallback(source, target, 0o664);
+  } catch (thrown) {
+    error = thrown;
+  }
+  assert.equal(error?.code, "EIO", "the underlying copy failure code is preserved");
+  assert.equal(error.targetOwnershipRelinquished, true, "the handover is still marked for the caller's cleanup");
+  const staleName = fs.readdirSync(dir).find((name) => name.includes(".stale-"));
+  assert.ok(staleName, "the refused unlink leaves the verified partial at the side name");
+  assert.equal(error.stalePath, path.join(dir, staleName), "the artifact is disclosed via `stalePath`");
+  assert.equal(
+    error.cause?.code,
+    "EPERM",
+    "the unlink failure is preserved as the error's cause",
+  );
+});
+
 test("promoteLocalTransfer preserves a ready pathname whose ownership the fallback relinquished", async (t) => {
   const dir = makeTempDir("promote-relinquished-ready-");
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));

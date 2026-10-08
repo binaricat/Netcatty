@@ -360,13 +360,25 @@ async function copyFileExclusiveWithFallback(source, target, mode = null, option
           // The side name verifiably holds this module's partial inode still
           // referenced through the pinned write handle; unlink it from the
           // private side name, which a concurrent writer cannot race because
-          // only this relabel knows the name.
-          await fs.promises.unlink(stalePath).catch(() => {});
+          // only this relabel knows the name. If the mount refuses the
+          // removal, the verified partial data persists at the side name, so
+          // the unlink failure is preserved and the artifact is disclosed to
+          // the caller (via `stalePath`) instead of silently leaving hidden
+          // partial files to accumulate on the destination.
+          let unlinkFailure = null;
+          try {
+            await fs.promises.unlink(stalePath);
+          } catch (failure) {
+            unlinkFailure = failure;
+          }
           // The pathname itself has already been cleaned through the verified
           // side name, but a replacement could re-create it before the
           // caller's cleanup runs: still mark the handover so that unlink
           // never destroys a re-created foreign file.
-          throw Object.assign(copyError, { targetOwnershipRelinquished: true });
+          throw Object.assign(copyError, {
+            targetOwnershipRelinquished: true,
+            ...(unlinkFailure ? { cause: unlinkFailure, stalePath } : {}),
+          });
         }
         if (moved) {
           // The relabelled side name holds a foreign replacement: put it back
