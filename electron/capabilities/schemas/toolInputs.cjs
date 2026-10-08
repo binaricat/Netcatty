@@ -83,6 +83,7 @@ const TOOL_INPUT_FIELDS = Object.freeze({
   "vault.host.list": {},
   "vault.host.open": {
     hostId: { type: "string", description: "Vault host ID to open. Use vault_hosts_list / host_get to resolve id from label or hostname." },
+    newTab: { type: "string", optional: true, description: "true or false. Force a brand-new tab even when a session for this host already exists. Default false — reuse the existing session." },
   },
   "vault.hosts.create": {
     hosts: {
@@ -420,7 +421,7 @@ const MODEL_DESCRIPTION_HINTS = Object.freeze({
   "vault.host.notes.set":
     "Host metadata notes on a saved host — not Vault → Notes sidebar entries. Prefer vault_notes_create/update when the user wants vault notes they can open in the Notes sidebar.",
   "vault.host.open":
-    "Opens a terminal tab for a saved vault host (same as clicking the host in Netcatty). Connection may still be establishing when the tool returns — use get_environment or wait briefly before terminal_execute if needed. Call session_close with the returned sessionId when the task is finished. Auth prompts (passphrase / keyboard-interactive) still require the user in the Netcatty UI.",
+    "Reuse-first: if this hostId already has a session (including one auto-reconnecting after a drop, which keeps the same sessionId), that sessionId is returned and no new tab is opened — retry terminal_execute against it rather than reopening the host. Open a new tab only when get_environment shows no session for the host, when the task truly needs a parallel connection, or with newTab true. Call session_close with the returned sessionId when the task is finished. Connection may still be establishing when the tool returns — use get_environment or wait briefly before terminal_execute if needed. Auth prompts (passphrase / keyboard-interactive) still require the user in the Netcatty UI.",
   "vault.host.list":
     "Use when the user names a saved Netcatty host but get_environment has no matching live session. Resolve the hostId here, call host_open, then call get_environment to obtain the new sessionId.",
   "vault.host.import":

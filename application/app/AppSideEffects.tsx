@@ -1432,6 +1432,16 @@ export function AppSideEffects() {
     return { ok: true as const, sessionId, host };
   }, [handleConnectToHost]);
 
+  const findExistingSessionForHostForVaultAgent = useCallback((hostId: string) => {
+    if (!hostId) return undefined;
+    const matches = sessions.filter((session) => session.hostId === hostId);
+    // Prefer a connected tab; otherwise reuse the first match so an already
+    // reconnecting tab is not duplicated by a second host_open.
+    const picked = matches.find((session) => session.status === 'connected') ?? matches[0];
+    if (!picked) return undefined;
+    return { sessionId: picked.id, connected: picked.status === 'connected' };
+  }, [sessions]);
+
   const closeSessionForVaultAgent = useCallback((sessionId: string) => {
     if (!sessions.some((session) => session.id === sessionId)) {
       return { ok: false as const, error: `Session "${sessionId}" was not found.` };
@@ -1474,6 +1484,7 @@ export function AppSideEffects() {
     stopTunnel,
     stopRuleTunnels,
     openHost: openHostForVaultAgent,
+    findExistingSessionForHost: findExistingSessionForHostForVaultAgent,
     closeSession: closeSessionForVaultAgent,
     getScriptSessionMeta: (sessionId) => sessions.find((session) => session.id === sessionId),
   });
