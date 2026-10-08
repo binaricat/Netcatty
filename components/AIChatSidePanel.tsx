@@ -830,37 +830,48 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     ) != null,
   ), [activeSession, isStreaming]);
 
+  const undoInFlightRef = useRef(false);
   const handleUndoLastTurn = useCallback(async () => {
     const sessionId = activeSessionRef.current?.id;
     if (!sessionId || !undoLastTurnInSession) return;
     if (isStreaming || isAIChatSessionStreaming(sessionId)) return;
-    const result = await undoLastTurnInSession(sessionId);
-    if (!result) return;
+    // Serialize: while a branch (including its durable alias materialization)
+    // is still being created, `canUndoLastTurn` stays stale, so a quick second
+    // click must not start a parallel undo of the same session — that would
+    // publish duplicate branches and restore the same prompt twice.
+    if (undoInFlightRef.current) return;
+    undoInFlightRef.current = true;
+    try {
+      const result = await undoLastTurnInSession(sessionId);
+      if (!result) return;
 
-    ensureScopeDraft(currentAgentId);
-    // Text typed since the last flush lives only in the live composer buffer
-    // (pendingComposerTextRef/currentDraftRef), not in the persisted draft;
-    // merge from the live buffer so it is not lost, then drop the pending
-    // buffer so the later flushDraftText() cannot overwrite the merged text.
-    const liveDraft = currentDraftRef.current;
-    updateScopeDraft(currentAgentId, (draft) => {
-      const liveText = liveDraft?.text ?? draft.text;
-      return {
-        ...draft,
-        // Keep anything the user is still typing; the undone prompt goes first.
-        text: liveText.trim()
-          ? `${result.restored.text}\n\n${liveText}`
-          : result.restored.text,
-        attachments: [
-          ...result.restored.attachments,
-          ...(liveDraft?.attachments ?? draft.attachments),
-        ],
-      };
-    });
-    discardPendingComposerText();
-    showScopeSessionView(result.sessionId);
-    // Tool side effects live outside the conversation and cannot be rolled back.
-    toast.info(t('ai.chat.undoLastTurnNotice'));
+      ensureScopeDraft(currentAgentId);
+      // Text typed since the last flush lives only in the live composer buffer
+      // (pendingComposerTextRef/currentDraftRef), not in the persisted draft;
+      // merge from the live buffer so it is not lost, then drop the pending
+      // buffer so the later flushDraftText() cannot overwrite the merged text.
+      const liveDraft = currentDraftRef.current;
+      updateScopeDraft(currentAgentId, (draft) => {
+        const liveText = liveDraft?.text ?? draft.text;
+        return {
+          ...draft,
+          // Keep anything the user is still typing; the undone prompt goes first.
+          text: liveText.trim()
+            ? `${result.restored.text}\n\n${liveText}`
+            : result.restored.text,
+          attachments: [
+            ...result.restored.attachments,
+            ...(liveDraft?.attachments ?? draft.attachments),
+          ],
+        };
+      });
+      discardPendingComposerText();
+      showScopeSessionView(result.sessionId);
+      // Tool side effects live outside the conversation and cannot be rolled back.
+      toast.info(t('ai.chat.undoLastTurnNotice'));
+    } finally {
+      undoInFlightRef.current = false;
+    }
   }, [
     discardPendingComposerText,
     ensureScopeDraft,

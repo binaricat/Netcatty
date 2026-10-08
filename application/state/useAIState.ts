@@ -92,6 +92,7 @@ import {
   type UndoLastTurnRestoredDraft,
 } from '../../domain/aiUndoLastTurn';
 import { getAgentRuntime } from '../../infrastructure/ai/harness/globalAgentRuntime';
+import { installToolOutputPersistence } from '../../infrastructure/ai/harness/installToolOutputPersistence';
 
 function providerPatchIsNoop(
   current: ProviderConfig,
@@ -732,8 +733,14 @@ export function useAIState() {
     // Finish the pass (including the durable branch-owned copies) before the
     // branch session is published: exiting the app during this window must
     // not leave the branch pointing at handles that only resolve in memory.
-    await getAgentRuntime()
-      .getToolOutputStore(source.id)
+    // Persistence installs on the first turn, so undoing as the first action
+    // after an app restart must install it here: otherwise `restore` is
+    // unavailable, the alias pass can only defer the restores in memory, and
+    // closing the app before the next turn would silently lose the deferred
+    // requests (leaving the branch with handles that no longer resolve).
+    const toolOutputStore = getAgentRuntime().getToolOutputStore(source.id);
+    await installToolOutputPersistence(toolOutputStore).catch(() => {});
+    await toolOutputStore
       .aliasSessionHandles(source.id, branched.id, {
         retainedHandleIds: collectRetainedToolOutputHandleIds(
           branched.messages,
