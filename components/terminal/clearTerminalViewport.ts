@@ -177,6 +177,15 @@ export const clearTerminalViewportAndSyncPty = (
 export const isEraseScrollbackSequence = (params: CsiParam[]): boolean =>
   params.length > 0 && params[0] === 3;
 
+/**
+ * True when a CSI handler's params identify DEC private mode 2026
+ * (synchronized output). Handlers for `ESC[?…h/l` must be registered without a
+ * `params` field — xterm's IFunctionIdentifier ignores it — and filter on the
+ * params passed to the callback instead.
+ */
+export const isDec2026SyncModeParams = (params: CsiParam[]): boolean =>
+  params.length === 1 && params[0] === 2026;
+
 export const isEraseViewportSequence = (params: CsiParam[]): boolean =>
   params.length > 0 && params[0] === 2;
 

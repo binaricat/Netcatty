@@ -7,6 +7,7 @@ import {
   clearTerminalViewport,
   clearTerminalViewportAndSyncPty,
   installEraseInDisplayHandlers,
+  isDec2026SyncModeParams,
   isEraseBelowSequence,
   preserveTerminalViewportInScrollback,
   shouldPreserveViewportBeforeEraseBelow,
@@ -523,4 +524,109 @@ test("appendEraseScrollback still wipes when delayed clear is outside a sync blo
     }),
     "\x1b[H\x1b[2J\x1b[3Jframe",
   );
+});
+
+test("isDec2026SyncModeParams matches only the 2026 mode param", () => {
+  assert.equal(isDec2026SyncModeParams([2026]), true);
+  assert.equal(isDec2026SyncModeParams([2004]), false);
+  assert.equal(isDec2026SyncModeParams([25]), false);
+  assert.equal(isDec2026SyncModeParams([1049]), false);
+  assert.equal(isDec2026SyncModeParams([]), false);
+  assert.equal(isDec2026SyncModeParams([2026, 1]), false);
+});
+
+/**
+ * Mirror of the `ESC[?…h/l` registration in createXTermRuntime: handlers must
+ * be registered without a `params` field (xterm ignores it) and filter on the
+ * callback params. This guards against re-introducing the bug that made bash's
+ * `ESC[?2004h` set the DEC 2026 sync flag and drop scrollback on Ctrl+L.
+ */
+const installDec2026SyncTracking = (
+  term: InstanceType<typeof Terminal>,
+): { isInDec2026SyncBlock: () => boolean } => {
+  let inDec2026SyncBlock = false;
+  term.parser.registerCsiHandler({ prefix: "?", final: "h" }, (params) => {
+    if (isDec2026SyncModeParams(params)) {
+      inDec2026SyncBlock = true;
+    }
+    return false;
+  });
+  term.parser.registerCsiHandler({ prefix: "?", final: "l" }, (params) => {
+    if (isDec2026SyncModeParams(params)) {
+      inDec2026SyncBlock = false;
+    }
+    return false;
+  });
+  return { isInDec2026SyncBlock: () => inDec2026SyncBlock };
+};
+
+const getScrollbackLines = (term: InstanceType<typeof Terminal>): string[] =>
+  Array.from({ length: term.buffer.active.baseY }, (_, row) =>
+    term.buffer.active.getLine(row)?.translateToString(true) ?? ""
+  );
+
+test("private-mode handlers set the 2026 flag only for 2026", async () => {
+  const term = new Terminal({ cols: 20, rows: 5, scrollback: 100 });
+  const sync = installDec2026SyncTracking(term);
+
+  await writeTerminal(term, "\x1b[?2004h");
+  assert.equal(sync.isInDec2026SyncBlock(), false, "bracketed paste 2004 must not open a sync block");
+
+  await writeTerminal(term, "\x1b[?25h\x1b[?1049h");
+  assert.equal(sync.isInDec2026SyncBlock(), false, "cursor/alt-screen modes must not open a sync block");
+
+  await writeTerminal(term, "\x1b[?2026h");
+  assert.equal(sync.isInDec2026SyncBlock(), true);
+
+  await writeTerminal(term, "\x1b[?2004l");
+  assert.equal(sync.isInDec2026SyncBlock(), true, "closing 2004 must not close the 2026 block");
+
+  await writeTerminal(term, "\x1b[?2026l");
+  assert.equal(sync.isInDec2026SyncBlock(), false);
+
+  term.dispose();
+});
+
+test("Ctrl+L clear survives a bash prompt (2004 open, 2026 closed)", async () => {
+  const term = new Terminal({ cols: 20, rows: 5, scrollback: 100 });
+  const sync = installDec2026SyncTracking(term);
+  const erase = installEraseInDisplayHandlers(term as never, {
+    getClearWipesScrollback: () => false,
+    isInDec2026SyncBlock: sync.isInDec2026SyncBlock,
+  });
+
+  // Exactly two rows already in scrollback, then a full screen of visible rows.
+  await writeTerminal(term, "old1\r\nold2\r\nvis1\r\nvis2\r\nvis3\r\nvis4\r\nvis5");
+  assert.equal(term.buffer.active.baseY, 2);
+
+  // bash 5.1 at a prompt holds bracketed paste open; Ctrl+L only sends CSI 2 J.
+  await writeTerminal(term, "\x1b[?2004h");
+  await writeTerminal(term, "\x1b[H\x1b[2Jnew1");
+
+  const scrollback = getScrollbackLines(term);
+  assert.equal(scrollback.some((line) => line.startsWith("vis")), true, "visible rows preserved in scrollback");
+  assert.equal(scrollback.some((line) => line.startsWith("old")), true, "earlier history not trimmed");
+
+  erase.dispose();
+  term.dispose();
+});
+
+test("clears inside a DEC 2026 sync block still erase in place", async () => {
+  const term = new Terminal({ cols: 20, rows: 5, scrollback: 100 });
+  const sync = installDec2026SyncTracking(term);
+  const erase = installEraseInDisplayHandlers(term as never, {
+    getClearWipesScrollback: () => false,
+    isInDec2026SyncBlock: sync.isInDec2026SyncBlock,
+  });
+
+  await writeTerminal(term, "old1\r\nold2\r\nvis1\r\nvis2\r\nvis3\r\nvis4\r\nvis5");
+  assert.equal(term.buffer.active.baseY, 2);
+  await writeTerminal(term, "\x1b[?2026h\x1b[H\x1b[2Jnew1\x1b[?2026l");
+
+  const scrollback = getScrollbackLines(term);
+  assert.equal(scrollback.some((line) => line.startsWith("vis")), false, "sync-block erase stays in place");
+  assert.equal(scrollback.some((line) => line.startsWith("old")), true, "only pre-existing scrollback remains");
+
+  erase.dispose();
+  term.dispose();
 });

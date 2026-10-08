@@ -61,6 +61,7 @@ import { netcattyBridge } from "../../../infrastructure/services/netcattyBridge"
 import {
   clearTerminalViewportAndSyncPty,
   installEraseInDisplayHandlers,
+  isDec2026SyncModeParams,
 } from "../clearTerminalViewport";
 import { pulseCopyOnSelectUserCommand } from "../copyOnSelect";
 import { getTerminalSelectionForClipboard } from "../normalizeTerminalSelection";
@@ -3174,17 +3175,26 @@ export const createXTermRuntime = (ctx: CreateXTermRuntimeContext): XTermRuntime
   // Codex/Claude Code TUIs instead of pushing visible rows into scrollback.
   let inDec2026SyncBlock = false;
 
+  // xterm's IFunctionIdentifier has no `params` field, so the handler must be
+  // registered for all `ESC[?…h/l` sequences and filter on the params it
+  // receives. Registering with `params: [2026]` silently fires for every
+  // private mode (e.g. bash's `ESC[?2004h` bracketed paste) and would flip the
+  // sync-block flag incorrectly, breaking scrollback preservation on Ctrl+L.
   const dec2026SyncStartDisposable = term.parser.registerCsiHandler(
-    { prefix: "?", final: "h", params: [2026] },
-    () => {
-      inDec2026SyncBlock = true;
+    { prefix: "?", final: "h" },
+    (params) => {
+      if (isDec2026SyncModeParams(params)) {
+        inDec2026SyncBlock = true;
+      }
       return false;
     },
   );
   const dec2026SyncEndDisposable = term.parser.registerCsiHandler(
-    { prefix: "?", final: "l", params: [2026] },
-    () => {
-      inDec2026SyncBlock = false;
+    { prefix: "?", final: "l" },
+    (params) => {
+      if (isDec2026SyncModeParams(params)) {
+        inDec2026SyncBlock = false;
+      }
       return false;
     },
   );
